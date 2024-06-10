@@ -4,82 +4,9 @@ from io import BytesIO
 from pathlib import Path
 from urllib.error import HTTPError
 from urllib.request import urlopen
+import atom
 
 import numpy as np
-
-
-def get_atom_symbols():
-    """
-    Return list of atom symbols.
-
-    Returns
-    -------
-    names : ndarray
-        Atom symbols in the periodic table.
-    """
-    elem = np.loadtxt(
-        os.path.join(os.path.dirname(__file__), "./atom-data", "atom_mass.txt"),
-        delimiter=" ",
-        dtype="str",
-        usecols=0,
-    )
-    return np.array([e.upper() for e in elem])
-
-
-def get_atom_masses():
-    """
-    Return list of atom masses.
-
-    Returns
-    -------
-    masses : ndarray
-        Atom masses
-    """
-    masses = np.loadtxt(
-        os.path.join(os.path.dirname(__file__), "./atom-data", "atom_mass.txt"),
-        delimiter=" ",
-        dtype="float",
-        usecols=1,
-    )
-    return masses
-
-
-def atom_symbol(atomic_number):
-    """
-    Return atomic symbol.
-
-    Parameters
-    ----------
-    atomic_number : ndarray
-        List of atomic numbers. Hydrogen is 1.
-
-    Returns
-    -------
-    atom_symbols : str
-        Atomic symbol
-    """
-    atom_symbols = get_atom_symbols()
-    return atom_symbols[atomic_number - 1]
-
-
-def atom_number(symbol):
-    """
-    Return atomic number.
-
-    Parameters
-    ----------
-    symbol : str
-        Atom symbol, e.g. H,C,N,...
-
-    Returns
-    -------
-    atom_numbers : int
-        Atomic numbers, Hydrogen has number 1.
-    """
-
-    atom_symbols = get_atom_symbols()
-    return np.where(atom_symbols == symbol.upper())[0][0] + 1
-
 
 def center_of_particle(coords):
     """
@@ -171,7 +98,7 @@ def get_atoms_and_coordinates_from_pdb(
         Return count of residual atoms if residual=True
     """
 
-    legal_atoms = get_atom_symbols()
+    legal_atoms = atom.get_atom_symbols()
     elements, coords = [], []
     rescount = 0
     with open(filename) as f:

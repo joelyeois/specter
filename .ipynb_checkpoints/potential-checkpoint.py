@@ -3,7 +3,7 @@ import atom
 from scipy.special import kn
 
 
-def atomic_potential_2d(atomic_number, r_xy, dx):
+def atomic_potential_2d(atomic_number, r_xy):
     """Returns the 2D projected atomic potential for a specific element given a 
     2D grid of radial distances from the atom core. Kirkland C.20.
 
@@ -36,10 +36,10 @@ def atomic_potential_2d(atomic_number, r_xy, dx):
 
     s1 = c1 * torch.sum( P[0] * kn(0.,2 * torch.pi * r_xy * torch.sqrt( P[1] )), 0)
     s2 = c2 * torch.sum( P[2] / P[3] * torch.exp( -(torch.pi**2) * (r_xy**2) / P[3]), 0)
-    return (s1 + s2) * dx**2
+    return s1 + s2
     
 
-def atomic_potential_3d(atomic_number, r_xyz, dx):
+def atomic_potential_3d(atomic_number, r_xyz):
     """Returns the 3D atomic potential for a specific element and given a 3D grid 
     of radial distances from the atom core. Kirkland C.19.
 
@@ -75,4 +75,4 @@ def atomic_potential_3d(atomic_number, r_xyz, dx):
 
     s1 = c1 * torch.sum( P[0] / r_xyz * torch.exp(-2 * torch.pi * r_xyz * torch.sqrt( P[1] )), 0)
     s2 = c2 * torch.sum( P[2] * P[3]**(-3/2) * torch.exp( -(torch.pi**2) * (r_xyz**2) / P[3]), 0)
-    return (s1 + s2) * dx**3
+    return s1 + s2

@@ -4,6 +4,7 @@ from io import BytesIO
 from pathlib import Path
 from urllib.error import HTTPError
 from urllib.request import urlopen
+import atom
 
 import numpy as np
 
@@ -97,7 +98,7 @@ def get_atoms_and_coordinates_from_pdb(
         Return count of residual atoms if residual=True
     """
 
-    legal_atoms = get_atom_symbols()
+    legal_atoms = atom.get_atom_symbols()
     elements, coords = [], []
     rescount = 0
     with open(filename) as f:

@@ -250,7 +250,7 @@ def build_potential_volume(
     nx, ny, nz = n_xyz
     dx, dy, dz = d_xyz
     x, y, z, X, Y, Z = coordinate_grid_3d(
-        (nx, ny, nz), (dx, dy, dz), convention="relion"
+        (nx, ny, nz), (dx, dy, dz), convention=convention
     )
 
     # create super-sampled (ss) coordinate system

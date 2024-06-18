@@ -6,6 +6,8 @@ from urllib.error import HTTPError
 from urllib.request import urlopen
 import atom
 
+import biotite.structure.io as strucio
+import biotite.database.rcsb as rcsb
 import numpy as np
 
 def center_of_particle(coords):
@@ -191,3 +193,139 @@ def get_biological_assembly(elements, coords, symmetry, translation):
         v = s.dot(coords.T).T + t
         coords_assembled.append(v)
     return np.hstack(elements_assembled), np.vstack(coords_assembled)
+
+def fetch_pdbx_file(pdb_id, output="./"):
+    """
+    Download a PDB file and save it in a given location.
+
+    Parameters
+    ----------
+    pdbcode : str
+        A valid PDB ID
+    output : str, optional
+        The destination for the PDB file to be saved
+
+    Returns
+    -------
+    str
+        Path to the saved PDB file
+    """
+
+    # Fetch the PDB file and save it locally
+    file_path = rcsb.fetch(pdb_id, "pdbx", output)
+    print(f"PDB file saved to: {file_path}")
+
+    return file_path
+
+def get_atomic_number(symbol):
+    """
+    Retrieves the atomic number for a given element symbol.
+
+    Parameters
+    ----------
+    symbol : str
+        The chemical symbol of the element (e.g., 'H', 'O', 'AU').
+
+    Returns
+    -------
+    str
+        The atomic number of the element, or None if the symbol is not found.
+    """
+    periodic_table_caps = {
+        'H': 1, 'HE': 2, 'LI': 3, 'BE': 4, 'B': 5, 'C': 6, 'N': 7, 'O': 8, 'F': 9, 'NE': 10,
+        'NA': 11, 'MG': 12, 'AL': 13, 'SI': 14, 'P': 15, 'S': 16, 'CL': 17, 'AR': 18,
+        'K': 19, 'CA': 20, 'SC': 21, 'TI': 22, 'V': 23, 'CR': 24, 'MN': 25, 'FE': 26, 'CO': 27,
+        'NI': 28, 'CU': 29, 'ZN': 30, 'GA': 31, 'GE': 32, 'AS': 33, 'SE': 34, 'BR': 35, 'KR': 36,
+        'RB': 37, 'SR': 38, 'Y': 39, 'ZR': 40, 'NB': 41, 'MO': 42, 'TC': 43, 'RU': 44, 'RH': 45,
+        'PD': 46, 'AG': 47, 'CD': 48, 'IN': 49, 'SN': 50, 'SB': 51, 'TE': 52, 'I': 53, 'XE': 54,
+        'CS': 55, 'BA': 56, 'LA': 57, 'CE': 58, 'PR': 59, 'ND': 60, 'PM': 61, 'SM': 62, 'EU': 63,
+        'GD': 64, 'TB': 65, 'DY': 66, 'HO': 67, 'ER': 68, 'TM': 69, 'YB': 70, 'LU': 71, 'HF': 72,
+        'TA': 73, 'W': 74, 'RE': 75, 'OS': 76, 'IR': 77, 'PT': 78, 'AU': 79, 'HG': 80, 'TL': 81,
+        'PB': 82, 'BI': 83, 'PO': 84, 'AT': 85, 'RN': 86, 'FR': 87, 'RA': 88, 'AC': 89, 'TH': 90,
+        'PA': 91, 'U': 92, 'NP': 93, 'PU': 94, 'AM': 95, 'CM': 96, 'BK': 97, 'CF': 98, 'ES': 99,
+        'FM': 100, 'MD': 101, 'NO': 102, 'LR': 103, 'RF': 104, 'DB': 105, 'SG': 106, 'BH': 107,
+        'HS': 108, 'MT': 109, 'DS': 110, 'RG': 111, 'CN': 112, 'NH': 113, 'FL': 114, 'MC': 115,
+        'LV': 116, 'TS': 117, 'OG': 118 }
+
+    return periodic_table_caps.get(symbol)
+
+def write_kirkland_xyz_file(input_filename, output_filename, fov = (100,100,100), debye_factor = 0.08, comment = ''):
+    """
+    Writes an XYZ file formatted for Kirkland's multi-slice simulation program.
+
+    software. 
+
+    Parameters
+    ----------
+    input_filename : str 
+        The name of the input file containing the atomic structure.
+    output_filename : str 
+        The name of the output file to write the XYZ data.
+    fov : tuple
+        Field of view dimensions (default is (100, 100, 100)).
+    debye_factor : float
+        Debye-Waller factor (default is 0.08).
+    comment : str
+        A comment to include in the header of the output file.
+
+    Returns
+    ----------
+    None
+    """
+
+    pdb_array = strucio.load_structure(input_filename)
+
+    xyz = np.zeros([len(pdb_array), 4]) # [Z, x, y, z]
+    for ii in range(len(pdb_array)):
+        
+        # Read the Atomic Number
+        xyz[ii,0] = get_atomic_number(pdb_array[ii].element)
+
+        # Pull the Coordinates
+        xyz[ii,1:] = pdb_array[ii].coord
+
+    with open(output_filename, 'w') as file:
+        # Write the header
+        file.write(comment+'\n')
+        file.write(f"{fov[0]:.2f}\t{fov[1]:.2f}\t{fov[2]:.2f}\n")
+        
+        # Write the coordinates and other details
+        for atom in xyz:
+            file.write(f"{int(atom[0])}\t{atom[1]:<8.4f}\t{atom[2]:<8.4f}\t{atom[3]:<8.4f}\t 1.0\t{debye_factor}\n")
+        
+        # Write the comment or end line
+        file.write('-1')        
+
+def write_xyz_file(input_filename, output_filename, comment = ''):
+    """
+    Writes a standard XYZ file.
+
+    Parameters
+    ----------    
+    input_filename : str 
+        The name of the input file containing the atomic structure.
+    output_filename : str 
+        The name of the output file to write the XYZ data.
+    comment : str
+        A comment to include in the header of the output file.
+
+
+    Returns
+    ----------    
+    None    
+    """
+
+    inXYZ = strucio.load_structure(input_filename)
+    
+    with open(output_filename, 'w') as file:
+        
+        # Write the header
+        nAtoms = inXYZ.shape[0]
+        file.write(f'{int(nAtoms)}\n')
+        file.write(comment+'\n')
+        
+        # Write the coordinates and other details
+        for ii in range(nAtoms):
+            if ii < nAtoms - 1: suffix = '\n'
+            else:               suffix = ''
+            file.write(f"{inXYZ[ii].element}\t{inXYZ[ii].coord[0]:<8.4f}\t{inXYZ[ii].coord[1]:<8.4f}\t{inXYZ[ii].coord[2]:<8.4f}{suffix}")

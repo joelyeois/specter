@@ -73,9 +73,9 @@ def volume_of_ice(n_xyz, d_xyz):
     x_ice = (torch.rand(n_ice_molecules) - 0.5) * dx * nx
     y_ice = (torch.rand(n_ice_molecules) - 0.5) * dy * ny
     z_ice = (torch.rand(n_ice_molecules) - 0.5) * dz * nz
-    ice_centers = torch.stack((x_ice, y_ice, z_ice), dim=1)
 
-    # repeat for easy coordinate translation later
+    # repeat for easy coordinate translation later. Each set of H,O,O atoms have the
+    # same ice center, hence the 3x repeat_interleaves.
     ice_centers = torch.repeat_interleave(ice_centers, 3, dim=0)
 
     # create ice molecules

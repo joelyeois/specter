@@ -70,9 +70,11 @@ def volume_of_ice(n_xyz, d_xyz):
     print(n_ice_molecules)
 
     # sample ice positions
+    # this may cause overlapping ice molecules.
     x_ice = (torch.rand(n_ice_molecules) - 0.5) * dx * nx
     y_ice = (torch.rand(n_ice_molecules) - 0.5) * dy * ny
     z_ice = (torch.rand(n_ice_molecules) - 0.5) * dz * nz
+    ice_centers = torch.stack((x_ice, y_ice, z_ice), dim=1)
 
     # repeat for easy coordinate translation later. Each set of H,O,O atoms have the
     # same ice center, hence the 3x repeat_interleaves.

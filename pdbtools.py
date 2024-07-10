@@ -8,6 +8,7 @@ import atom
 
 import biotite.structure.io as strucio
 import biotite.database.rcsb as rcsb
+import biotite.structure.io.pdbx as pdbx
 import numpy as np
 
 def center_of_particle(coords):
@@ -31,170 +32,7 @@ def center_of_particle(coords):
     return center
 
 
-def fetch_pdb_file(pdbcode, output="./", force=False, assembly=False):
-    """
-    Download a PDB file and save it in a given location.
-
-    Parameters
-    ----------
-    pdbcode : str
-        A valid PDB code
-    output : str, optional
-        The destination for the PDB file to be saved
-    force : bool, optional
-        Download PDB file even if it already exists
-    assembly : bool, optional
-        Download biological assembly
-
-    Returns
-    -------
-    str
-        Path to the saved PDB file
-    """
-    pdbcode = pdbcode.upper()
-    url = "https://files.rcsb.org/download/{code}.pdb{assembly}.gz".format(
-        code=pdbcode, assembly="1" if assembly else ""
-    )
-    filename = Path(output) / "{}.pdb".format(
-        pdbcode
-    )  # "".join([output,'/',pdbcode, '.pdb'])
-    if (os.path.isfile(filename)) and not force:
-        return str(filename)
-    try:
-        response = urlopen(url)
-    except HTTPError:
-        raise IOError("Error 404: {url} not found".format(url=url))
-    compressed = BytesIO()
-    compressed.write(response.read())
-    compressed.seek(0)
-    decompressed = GzipFile(fileobj=compressed, mode="rb")
-    with open(filename, "wb") as f:
-        f.write(decompressed.read())
-    return str(filename)
-
-
-def get_atoms_and_coordinates_from_pdb(
-    filename, residual=False, multimodel=False, assemble=True
-):
-    """
-    Parse a PDB file and return atom labes and coordinates.
-
-    Parameters
-    ----------
-    filename : str
-        Path to PDB file
-    residual : bool, optional
-        Counts residual atoms, default is False
-    multimodel : bool, optional
-        Parse multiple models (sometimes biological assemblies are saved as models), default is False
-    assemble : bool, optional
-        Apply symmetry operations and return biological assembly, default is True
-
-    Returns
-    -------
-    elements : ndarray
-        Atom elements listed in the PDB file
-    coords : ndarray
-        Atom coordinates listed in the PDB file
-    rescount : int
-        Return count of residual atoms if residual=True
-    """
-
-    legal_atoms = atom.get_atom_symbols()
-    elements, coords = [], []
-    rescount = 0
-    with open(filename) as f:
-        for line in f:
-            if (line[:6] == "ENDMDL") and not multimodel:
-                break
-            if line.startswith("ATOM") or line.startswith("HETATM"):
-                atom_label = line[76:78].lstrip().upper()
-                (occ, tag) = (float(line[56:60]), line[16])
-                use_atom = (occ > 0.5) | ((occ == 0.5) & (tag.upper() == "A"))
-                if use_atom and (atom_label in legal_atoms):
-                    x = float(line[30:38].strip())
-                    y = float(line[38:46].strip())
-                    z = float(line[46:54].strip())
-                    elements.append(np.where(legal_atoms == atom_label)[0][0] + 1)
-                    coords.append([x, y, z])
-                else:
-                    rescount += 1
-    elements = np.array(elements)
-    coords = np.array(coords)
-    if assemble:
-        symmetry, trans = get_symmetry_from_pdb(filename)
-        elements, coords = get_biological_assembly(elements, coords, symmetry, trans)
-    out = (elements, coords)
-    if residual:
-        out += (rescount,)
-    return out
-
-
-def get_symmetry_from_pdb(filename):
-    """
-    Parse symmetry operators from a PDB file.
-
-    Parameters
-    ----------
-    filename : str
-        Path to PDB file
-
-    Returns
-    -------
-    symmetry : array_like
-        Symmetry matrix
-    trans : array_like
-        Translation vector
-    """
-    symmetry, trans = [], []
-    with open(filename) as f:
-        for line in f:
-            line = line.strip()
-            if line[13:18] == "BIOMT":
-                symmetry.append(
-                    [float(line[24:33]), float(line[34:43]), float(line[44:53])]
-                )
-                trans.append(float(line[58:68]))
-    if not len(symmetry):
-        symmetry.append(np.diag([1.0, 1.0, 1.0]))
-        trans.append([0.0, 0.0, 0.0])
-    symmetry = np.asarray(symmetry).reshape(-1, 3, 3)
-    trans = np.asarray(trans).reshape(-1, 3)
-    return symmetry, trans
-
-
-def get_biological_assembly(elements, coords, symmetry, translation):
-    """
-    Apply symmetry/translation operations and return assembled protein.
-
-    Parameters
-    ----------
-    elements : ndarray
-         Atom elements of assymetric unit
-    coords : ndarray
-         Atom coordinates of assymetric unit
-    symmetry : ndarray
-         Symmtery matrices
-    translation : ndarray
-         Translation vectors
-
-    Returns
-    -------
-    elements : ndarray
-        Atom elements of biological assembly
-    coords : ndarray
-        Atom coordinates of biological assembly
-    """
-    elements_assembled, coords_assembled = [], []
-    for i in range(symmetry.shape[0]):
-        elements_assembled.append(elements)
-        s = symmetry[i]
-        t = translation[i]
-        v = s.dot(coords.T).T + t
-        coords_assembled.append(v)
-    return np.hstack(elements_assembled), np.vstack(coords_assembled)
-
-def fetch_pdbx_file(pdb_id, output="./"):
+def fetch_pdb_file(pdb_id, format='cif', output="./"):
     """
     Download a PDB file and save it in a given location.
 
@@ -202,6 +40,9 @@ def fetch_pdbx_file(pdb_id, output="./"):
     ----------
     pdbcode : str
         A valid PDB ID
+    format : str
+        The format of the files to be downloaded. 'pdbx', 'cif' and 'mmcif' are 
+        synonyms for the same format.
     output : str, optional
         The destination for the PDB file to be saved
 
@@ -212,7 +53,7 @@ def fetch_pdbx_file(pdb_id, output="./"):
     """
 
     # Fetch the PDB file and save it locally
-    file_path = rcsb.fetch(pdb_id, "pdbx", output)
+    file_path = rcsb.fetch(pdb_id, format, output)
     print(f"PDB file saved to: {file_path}")
 
     return file_path
@@ -249,83 +90,279 @@ def get_atomic_number(symbol):
 
     return periodic_table_caps.get(symbol)
 
-def write_kirkland_xyz_file(input_filename, output_filename, fov = (100,100,100), debye_factor = 0.08, comment = ''):
+
+def get_atoms_and_coordinates_from_pdb(
+    input_filename,
+    fov=(100, 100, 100),
+    debye_factor=0.08,
+    comment="",
+    return_array=True,
+    write_file=False,
+    output_filename=None,
+    assemble=True,
+    **kwargs,
+):
     """
     Writes an XYZ file formatted for Kirkland's multi-slice simulation program.
 
-    software. 
+    software.
 
     Parameters
     ----------
-    input_filename : str 
+    input_filename : str
         The name of the input file containing the atomic structure.
-    output_filename : str 
-        The name of the output file to write the XYZ data.
     fov : tuple
         Field of view dimensions (default is (100, 100, 100)).
     debye_factor : float
         Debye-Waller factor (default is 0.08).
     comment : str
         A comment to include in the header of the output file.
+    return_array : boolean
+        If True, returns array for elements and coordinates.
+    write_file : boolean
+        If True, writes .txt file.
+    output_filename : str
+        The name of the output file to write the XYZ data.
+    assemble : boolean
+        If True, assembles biological unit using symmetries in pdb file. Else,
+        returns assymetric subunit.
 
     Returns
     ----------
-    None
+    elements : (N,)-shape array
+    coords : (N,3)-shape array
+        x,y,z coordinates of each atom
     """
 
-    pdb_array = strucio.load_structure(input_filename)
-
-    xyz = np.zeros([len(pdb_array), 4]) # [Z, x, y, z]
-    for ii in range(len(pdb_array)):
-        
+    pdbx_file = pdbx.CIFFile.read(input_filename)
+    if assemble:
+        biological_unit = pdbx.get_assembly(pdbx_file, **kwargs)
+    else:
+        biological_unit = pdbx.get_structure(pdbx_file, **kwargs)
+    n_atoms = len(biological_unit.element)
+    coords = np.squeeze(biological_unit.coord)  # [x, y, z]
+    elements = np.zeros(n_atoms, dtype=int)
+    for i in range(n_atoms):
         # Read the Atomic Number
-        xyz[ii,0] = get_atomic_number(pdb_array[ii].element)
+        elements[i] = get_atomic_number(biological_unit.element[i])
 
-        # Pull the Coordinates
-        xyz[ii,1:] = pdb_array[ii].coord
+    if write_file:
+        if output_filename is None:
+            output_filename = input_filename + ".txt"
+        with open(output_filename, "w") as file:
+            # Write the header
+            file.write(comment + "\n")
+            file.write(f"{fov[0]:.2f}\t{fov[1]:.2f}\t{fov[2]:.2f}\n")
 
-    with open(output_filename, 'w') as file:
-        # Write the header
-        file.write(comment+'\n')
-        file.write(f"{fov[0]:.2f}\t{fov[1]:.2f}\t{fov[2]:.2f}\n")
-        
-        # Write the coordinates and other details
-        for atom in xyz:
-            file.write(f"{int(atom[0])}\t{atom[1]:<8.4f}\t{atom[2]:<8.4f}\t{atom[3]:<8.4f}\t 1.0\t{debye_factor}\n")
-        
-        # Write the comment or end line
-        file.write('-1')        
+            # Write the coordinates and other details
+            for elem, coord in zip(elements, coords):
+                file.write(
+                    f"{int(elem)}\t{coord[0]:<8.4f}\t{coord[1]:<8.4f}\t{coord[2]:<8.4f}\t 1.0\t{debye_factor}\n"
+                )
 
-def write_xyz_file(input_filename, output_filename, comment = ''):
+            # Write the comment or end line
+            file.write("-1")
+    if return_array:
+        return elements, coords
+
+
+def write_xyz_file(input_filename, output_filename, comment=""):
     """
     Writes a standard XYZ file.
 
     Parameters
-    ----------    
-    input_filename : str 
+    ----------
+    input_filename : str
         The name of the input file containing the atomic structure.
-    output_filename : str 
+    output_filename : str
         The name of the output file to write the XYZ data.
     comment : str
         A comment to include in the header of the output file.
 
 
     Returns
-    ----------    
-    None    
+    ----------
+    None
     """
 
     inXYZ = strucio.load_structure(input_filename)
-    
-    with open(output_filename, 'w') as file:
-        
+
+    with open(output_filename, "w") as file:
         # Write the header
         nAtoms = inXYZ.shape[0]
-        file.write(f'{int(nAtoms)}\n')
-        file.write(comment+'\n')
-        
+        file.write(f"{int(nAtoms)}\n")
+        file.write(comment + "\n")
+
         # Write the coordinates and other details
         for ii in range(nAtoms):
-            if ii < nAtoms - 1: suffix = '\n'
-            else:               suffix = ''
-            file.write(f"{inXYZ[ii].element}\t{inXYZ[ii].coord[0]:<8.4f}\t{inXYZ[ii].coord[1]:<8.4f}\t{inXYZ[ii].coord[2]:<8.4f}{suffix}")
+            if ii < nAtoms - 1:
+                suffix = "\n"
+            else:
+                suffix = ""
+            file.write(
+                f"{inXYZ[ii].element}\t{inXYZ[ii].coord[0]:<8.4f}\t{inXYZ[ii].coord[1]:<8.4f}\t{inXYZ[ii].coord[2]:<8.4f}{suffix}"
+            )
+
+##------------- old code ------------- ##
+# def fetch_pdb_file(pdbcode, output="./", force=False, assembly=False):
+#     """
+#     Download a PDB file and save it in a given location.
+
+#     Parameters
+#     ----------
+#     pdbcode : str
+#         A valid PDB code
+#     output : str, optional
+#         The destination for the PDB file to be saved
+#     force : bool, optional
+#         Download PDB file even if it already exists
+#     assembly : bool, optional
+#         Download biological assembly
+
+#     Returns
+#     -------
+#     str
+#         Path to the saved PDB file
+#     """
+#     pdbcode = pdbcode.upper()
+#     url = "https://files.rcsb.org/download/{code}.pdb{assembly}.gz".format(
+#         code=pdbcode, assembly="1" if assembly else ""
+#     )
+#     filename = Path(output) / "{}.pdb".format(
+#         pdbcode
+#     )  # "".join([output,'/',pdbcode, '.pdb'])
+#     if (os.path.isfile(filename)) and not force:
+#         return str(filename)
+#     try:
+#         response = urlopen(url)
+#     except HTTPError:
+#         raise IOError("Error 404: {url} not found".format(url=url))
+#     compressed = BytesIO()
+#     compressed.write(response.read())
+#     compressed.seek(0)
+#     decompressed = GzipFile(fileobj=compressed, mode="rb")
+#     with open(filename, "wb") as f:
+#         f.write(decompressed.read())
+#     return str(filename)
+
+
+# def get_atoms_and_coordinates_from_pdb(
+#     filename, residual=False, multimodel=False, assemble=True
+# ):
+#     """
+#     Parse a PDB file and return atom labes and coordinates.
+
+#     Parameters
+#     ----------
+#     filename : str
+#         Path to PDB file
+#     residual : bool, optional
+#         Counts residual atoms, default is False
+#     multimodel : bool, optional
+#         Parse multiple models (sometimes biological assemblies are saved as models), default is False
+#     assemble : bool, optional
+#         Apply symmetry operations and return biological assembly, default is True
+
+#     Returns
+#     -------
+#     elements : ndarray
+#         Atom elements listed in the PDB file
+#     coords : ndarray
+#         Atom coordinates listed in the PDB file
+#     rescount : int
+#         Return count of residual atoms if residual=True
+#     """
+
+#     legal_atoms = atom.get_atom_symbols()
+#     elements, coords = [], []
+#     rescount = 0
+#     with open(filename) as f:
+#         for line in f:
+#             if (line[:6] == "ENDMDL") and not multimodel:
+#                 break
+#             if line.startswith("ATOM") or line.startswith("HETATM"):
+#                 atom_label = line[76:78].lstrip().upper()
+#                 (occ, tag) = (float(line[56:60]), line[16])
+#                 use_atom = (occ > 0.5) | ((occ == 0.5) & (tag.upper() == "A"))
+#                 if use_atom and (atom_label in legal_atoms):
+#                     x = float(line[30:38].strip())
+#                     y = float(line[38:46].strip())
+#                     z = float(line[46:54].strip())
+#                     elements.append(np.where(legal_atoms == atom_label)[0][0] + 1)
+#                     coords.append([x, y, z])
+#                 else:
+#                     rescount += 1
+#     elements = np.array(elements)
+#     coords = np.array(coords)
+#     if assemble:
+#         symmetry, trans = get_symmetry_from_pdb(filename)
+#         elements, coords = get_biological_assembly(elements, coords, symmetry, trans)
+#     out = (elements, coords)
+#     if residual:
+#         out += (rescount,)
+#     return out
+
+
+# def get_symmetry_from_pdb(filename):
+#     """
+#     Parse symmetry operators from a PDB file.
+
+#     Parameters
+#     ----------
+#     filename : str
+#         Path to PDB file
+
+#     Returns
+#     -------
+#     symmetry : array_like
+#         Symmetry matrix
+#     trans : array_like
+#         Translation vector
+#     """
+#     symmetry, trans = [], []
+#     with open(filename) as f:
+#         for line in f:
+#             line = line.strip()
+#             if line[13:18] == "BIOMT":
+#                 symmetry.append(
+#                     [float(line[24:33]), float(line[34:43]), float(line[44:53])]
+#                 )
+#                 trans.append(float(line[58:68]))
+#     if not len(symmetry):
+#         symmetry.append(np.diag([1.0, 1.0, 1.0]))
+#         trans.append([0.0, 0.0, 0.0])
+#     symmetry = np.asarray(symmetry).reshape(-1, 3, 3)
+#     trans = np.asarray(trans).reshape(-1, 3)
+#     return symmetry, trans
+
+
+# def get_biological_assembly(elements, coords, symmetry, translation):
+#     """
+#     Apply symmetry/translation operations and return assembled protein.
+
+#     Parameters
+#     ----------
+#     elements : ndarray
+#          Atom elements of assymetric unit
+#     coords : ndarray
+#          Atom coordinates of assymetric unit
+#     symmetry : ndarray
+#          Symmtery matrices
+#     translation : ndarray
+#          Translation vectors
+
+#     Returns
+#     -------
+#     elements : ndarray
+#         Atom elements of biological assembly
+#     coords : ndarray
+#         Atom coordinates of biological assembly
+#     """
+#     elements_assembled, coords_assembled = [], []
+#     for i in range(symmetry.shape[0]):
+#         elements_assembled.append(elements)
+#         s = symmetry[i]
+#         t = translation[i]
+#         v = s.dot(coords.T).T + t
+#         coords_assembled.append(v)
+#     return np.hstack(elements_assembled), np.vstack(coords_assembled)

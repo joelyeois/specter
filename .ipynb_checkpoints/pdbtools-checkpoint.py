@@ -163,7 +163,7 @@ def get_atoms_and_coordinates_from_pdb(
             # Write the comment or end line
             file.write("-1")
     if return_array:
-        return elements, coords
+        return torch.from_numpy(elements), torch.from_numpy(coords)
 
 
 def write_xyz_file(input_filename, output_filename, comment=""):

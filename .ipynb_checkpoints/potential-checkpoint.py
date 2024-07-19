@@ -348,3 +348,168 @@ def build_potential_volume(
                     xi - atom_size_px // 2 : xi - atom_size_px // 2 + atom_size_px,
                 ] += sampled_2dpot_dict[an]
     return potential_volume
+
+def build_potential_volume_fftconvolve(
+    atomic_numbers,
+    centered_coords,
+    n_xyz,
+    d_xyz,
+    atom_size_px=None,
+    super_sampling_factor=4,
+    convention="relion",
+    method="3d-snapped",
+):
+    """Constructs volumetric potential from list of atomic elements and their
+    respective coordinates. Only for snapped methods as we treat atoms as delta
+    functions before convolving with the respective elemental kernels.
+
+    General strategy is:
+    1. Compute potentials for each unique element on a super-sampled grid (higher 
+    resolution than main volume but lesser pixels since the potential decays fast).
+    2. Calculate the potential contributions for each elemental species and sum.
+    2. Bin the potential down to main volume grid size.
+
+    Note: 
+    For 2D versions, assumes dx = dy, nx = ny. nz and dz are free to be different.
+    For 3D version, assumes dx = dy = dz, nx = ny = nz.
+
+    Parameters
+    ----------
+    atomic_numbers : 1d tensor
+        Atomic numbers. Hydrogen is 1.
+    centered_coords : 2d tensor
+        xyz coordinates corresponding to each entry in atomic_numbers. Shape of
+        (len(atomic_numbers), 3).
+    n_xyz : array-like
+        Number of pixels along x,y,z: (nx, ny, nz) of main volume.
+    d_xyz : array-like
+        Pixel length along x,y,z: (dx,dy,dz) of main volume.
+    atom_size_px : int
+        Number of main volume pixels to sufficiently represent an atom. If None,
+        will assume 3A diameter per atom, and computed required number of pixels
+        accordingly.
+    super_sampling_factor : int
+        The supersampling factor to compute the potentials. For example, if main
+        volume has pixel size of 1A, then potentials will be first computed on a
+        grid of 1A/super_sampling_factor before binning back to 1A pixels. Must be
+        even to avoid singularity at 0, and larger than 4 (Kirkland's rule of thumb,
+        Chapter 5, after Fig 5.15.).
+    convention : str
+        The origin convention for main volume only. The super-sampled grid for
+        atomic potentials will always be even-valued and symmetric to avoid the
+        singularity at 0.
+    method : str
+        'snapped-3d' - Assumes each atom snaps to the nearest voxel defined on a
+        rectangular grid. Each 3D potential is first super-sampled on a finer grid
+        before averaging the pixels to insert into the main volume.
+
+        'snapped-2d' - Assumes each atom snaps to the nearest voxel defined on a
+        rectangular grid. Further assumes each atom can be represented by its
+        projected 2D potential. This 2D potential is first super-sampled on a finer
+        grid before averaging the pixels to insert into the main volume.
+
+    Returns
+    -------
+    potential_volume : 3d tensor
+        The sampled potential volume.
+    """
+    # create main volume coordinate system
+    nx, ny, nz = n_xyz
+    dx, dy, dz = d_xyz
+    x, y, z, X, Y, Z = coordinate_grid_3d(
+        (nx, ny, nz), (dx, dy, dz), convention=convention
+    )
+
+    # create super-sampled (ss) coordinate system
+    if atom_size_px is None:
+        # forces odd number to ensure central pixel exists.
+        atom_size_px = int(torch.ceil(torch.tensor(3 / dx)) // 2 * 2 + 1)
+    ssn = atom_size_px * super_sampling_factor
+    ssdx = dx / super_sampling_factor
+
+    if method == "snapped-3d":
+        sx, sy, sz, sX, sY, sZ = coordinate_grid_3d(
+            (ssn, ssn, ssn), (ssdx, ssdx, ssdx), convention="torch"
+        )
+        sR = torch.sqrt(sX**2 + sY**2 + sZ**2)
+    elif method == "snapped-2d":
+        sx, sy, sX, sY = coordinate_grid_2d(
+            (ssn, ssn), (ssdx, ssdx), convention="torch"
+        )
+        sR = torch.sqrt(sX**2 + sY**2)
+
+    # for binning super-sampled grids to main volume grid.
+    avgpool2d = torch.nn.AvgPool2d(super_sampling_factor, stride=super_sampling_factor)
+    avgpool3d = torch.nn.AvgPool3d(super_sampling_factor, stride=super_sampling_factor)
+
+    # For snapped methods, compute unique element potentials on ss-grid and average
+    # onto main volume grid
+    if method == "snapped-2d":
+        sampled_2dpot_dict = {}
+        for an in set(atomic_numbers):
+            pot = atomic_potential_2d(an, sR)
+            sampled_2dpot_dict[an] = avgpool2d(pot[None, None]).squeeze()
+    elif method == "snapped-3d":
+        sampled_3dpot_dict = {}
+        for an in set(atomic_numbers):
+            pot = atomic_potential_3d(an, sR)
+            # note the multiplicative factor of dx to properly scale for
+            # projection/multislice to match 2d version above.
+            sampled_3dpot_dict[an] = avgpool3d(pot[None, None]).squeeze() * dx
+
+    # insert atomic potentials into main volume.
+    potential_volume = torch.zeros(nz, ny, nx)
+    for an, cc in tqdm(zip(atomic_numbers, centered_coords)):
+        xi, yi, zi = nearest_index(x, y, z, cc[0], cc[1], cc[2])
+
+        # don't insert if bounding box of atom falls outside of main volume grid.
+        if (
+            (zi - atom_size_px // 2) < 0
+            or zi - atom_size_px // 2 + atom_size_px > nz
+            or (yi - atom_size_px // 2) < 0
+            or yi - atom_size_px // 2 + atom_size_px > ny
+            or (xi - atom_size_px // 2) < 0
+            or xi - atom_size_px // 2 + atom_size_px > nx
+        ):
+            pass
+        else:
+            if method == "3d":
+                # relative 3D origin of the atom w.r.t. neighbouring voxels.
+                x_ro = cc[0] - x[xi]
+                y_ro = cc[1] - y[yi]
+                z_ro = cc[2] - z[zi]
+                sR = torch.sqrt((sX - x_ro) ** 2 + (sY - y_ro) ** 2 + (sZ - z_ro) ** 2)
+                sspot = atomic_potential_3d(an, sR)
+                pot = avgpool3d(sspot[None, None]).squeeze() * dx
+
+                potential_volume[
+                    zi - atom_size_px // 2 : zi - atom_size_px // 2 + atom_size_px,
+                    yi - atom_size_px // 2 : yi - atom_size_px // 2 + atom_size_px,
+                    xi - atom_size_px // 2 : xi - atom_size_px // 2 + atom_size_px,
+                ] += pot
+            elif method == "snapped-3d":
+                potential_volume[
+                    zi - atom_size_px // 2 : zi - atom_size_px // 2 + atom_size_px,
+                    yi - atom_size_px // 2 : yi - atom_size_px // 2 + atom_size_px,
+                    xi - atom_size_px // 2 : xi - atom_size_px // 2 + atom_size_px,
+                ] += sampled_3dpot_dict[an]
+            elif method == "2d":
+                # relative 2D origin of the atom w.r.t. neighbouring voxels.
+                x_ro = cc[0] - x[xi]
+                y_ro = cc[1] - y[yi]
+                sR = torch.sqrt((sX - x_ro) ** 2 + (sY - y_ro) ** 2)
+                sspot = atomic_potential_2d(an, sR)
+                pot = avgpool2d(sspot[None, None]).squeeze()
+
+                potential_volume[
+                    zi,
+                    yi - atom_size_px // 2 : yi - atom_size_px // 2 + atom_size_px,
+                    xi - atom_size_px // 2 : xi - atom_size_px // 2 + atom_size_px,
+                ] += pot
+            elif method == "snapped-2d":
+                potential_volume[
+                    zi,
+                    yi - atom_size_px // 2 : yi - atom_size_px // 2 + atom_size_px,
+                    xi - atom_size_px // 2 : xi - atom_size_px // 2 + atom_size_px,
+                ] += sampled_2dpot_dict[an]
+    return potential_volume

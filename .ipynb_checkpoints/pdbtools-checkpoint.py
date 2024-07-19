@@ -5,6 +5,7 @@ from pathlib import Path
 from urllib.error import HTTPError
 from urllib.request import urlopen
 import atom
+import torch
 
 import biotite.structure.io as strucio
 import biotite.database.rcsb as rcsb

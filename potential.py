@@ -2,7 +2,7 @@ import atom
 import torch
 from scipy.special import kn
 from tqdm import tqdm
-
+from fft_tools import fftconvolve
 
 def atomic_potential_2d(atomic_number, r_xy):
     """Returns the 2D projected atomic potential for a specific element given a
@@ -281,16 +281,16 @@ def build_potential_volume(
     # onto main volume grid
     if method == "snapped-2d":
         sampled_2dpot_dict = {}
-        for an in set(atomic_numbers):
-            pot = atomic_potential_2d(an, sR)
-            sampled_2dpot_dict[an] = avgpool2d(pot[None, None]).squeeze()
+        for an in torch.unique(atomic_numbers):
+            pot = atomic_potential_2d(int(an), sR)
+            sampled_2dpot_dict[int(an)] = avgpool2d(pot[None, None]).squeeze()
     elif method == "snapped-3d":
         sampled_3dpot_dict = {}
-        for an in set(atomic_numbers):
-            pot = atomic_potential_3d(an, sR)
+        for an in torch.unique(atomic_numbers):
+            pot = atomic_potential_3d(int(an), sR)
             # note the multiplicative factor of dx to properly scale for
             # projection/multislice to match 2d version above.
-            sampled_3dpot_dict[an] = avgpool3d(pot[None, None]).squeeze() * dx
+            sampled_3dpot_dict[int(an)] = avgpool3d(pot[None, None]).squeeze() * dx
 
     # insert atomic potentials into main volume.
     potential_volume = torch.zeros(nz, ny, nx)
@@ -314,7 +314,7 @@ def build_potential_volume(
                 y_ro = cc[1] - y[yi]
                 z_ro = cc[2] - z[zi]
                 sR = torch.sqrt((sX - x_ro) ** 2 + (sY - y_ro) ** 2 + (sZ - z_ro) ** 2)
-                sspot = atomic_potential_3d(an, sR)
+                sspot = atomic_potential_3d(int(an), sR)
                 pot = avgpool3d(sspot[None, None]).squeeze() * dx
 
                 potential_volume[
@@ -327,13 +327,13 @@ def build_potential_volume(
                     zi - atom_size_px // 2 : zi - atom_size_px // 2 + atom_size_px,
                     yi - atom_size_px // 2 : yi - atom_size_px // 2 + atom_size_px,
                     xi - atom_size_px // 2 : xi - atom_size_px // 2 + atom_size_px,
-                ] += sampled_3dpot_dict[an]
+                ] += sampled_3dpot_dict[int(an)]
             elif method == "2d":
                 # relative 2D origin of the atom w.r.t. neighbouring voxels.
                 x_ro = cc[0] - x[xi]
                 y_ro = cc[1] - y[yi]
                 sR = torch.sqrt((sX - x_ro) ** 2 + (sY - y_ro) ** 2)
-                sspot = atomic_potential_2d(an, sR)
+                sspot = atomic_potential_2d(int(an), sR)
                 pot = avgpool2d(sspot[None, None]).squeeze()
 
                 potential_volume[
@@ -346,7 +346,7 @@ def build_potential_volume(
                     zi,
                     yi - atom_size_px // 2 : yi - atom_size_px // 2 + atom_size_px,
                     xi - atom_size_px // 2 : xi - atom_size_px // 2 + atom_size_px,
-                ] += sampled_2dpot_dict[an]
+                ] += sampled_2dpot_dict[int(an)]
     return potential_volume
 
 def build_potential_volume_fftconvolve(
@@ -358,6 +358,7 @@ def build_potential_volume_fftconvolve(
     super_sampling_factor=4,
     convention="relion",
     method="3d-snapped",
+    compute_high_res=False,
 ):
     """Constructs volumetric potential from list of atomic elements and their
     respective coordinates. Only for snapped methods as we treat atoms as delta
@@ -416,9 +417,21 @@ def build_potential_volume_fftconvolve(
     # create main volume coordinate system
     nx, ny, nz = n_xyz
     dx, dy, dz = d_xyz
-    x, y, z, X, Y, Z = coordinate_grid_3d(
-        (nx, ny, nz), (dx, dy, dz), convention=convention
-    )
+
+    if compute_high_res:
+        snx = nx * super_sampling_factor
+        sny = ny * super_sampling_factor
+        snz = nz * super_sampling_factor
+        sdx = dx / super_sampling_factor
+        sdy = dy / super_sampling_factor
+        sdz = dz / super_sampling_factor
+        x, y, z, X, Y, Z = coordinate_grid_3d(
+            (snx, sny, snz), (sdx, sdy, sdz), convention=convention
+        )
+    else:
+        x, y, z, X, Y, Z = coordinate_grid_3d(
+            (nx, ny, nz), (dx, dy, dz), convention=convention
+        )
 
     # create super-sampled (ss) coordinate system
     if atom_size_px is None:
@@ -446,70 +459,92 @@ def build_potential_volume_fftconvolve(
     # onto main volume grid
     if method == "snapped-2d":
         sampled_2dpot_dict = {}
-        for an in set(atomic_numbers):
-            pot = atomic_potential_2d(an, sR)
-            sampled_2dpot_dict[an] = avgpool2d(pot[None, None]).squeeze()
+        for an in torch.unique(atomic_numbers):
+            pot = atomic_potential_2d(int(an), sR)
+            sampled_2dpot_dict[int(an)] = avgpool2d(pot[None, None]).squeeze()
     elif method == "snapped-3d":
         sampled_3dpot_dict = {}
-        for an in set(atomic_numbers):
-            pot = atomic_potential_3d(an, sR)
+        for an in torch.unique(atomic_numbers):
+            pot = atomic_potential_3d(int(an), sR)
             # note the multiplicative factor of dx to properly scale for
             # projection/multislice to match 2d version above.
-            sampled_3dpot_dict[an] = avgpool3d(pot[None, None]).squeeze() * dx
+            sampled_3dpot_dict[int(an)] = avgpool3d(pot[None, None]).squeeze() * dx
 
     # insert atomic potentials into main volume.
     potential_volume = torch.zeros(nz, ny, nx)
-    for an, cc in tqdm(zip(atomic_numbers, centered_coords)):
-        xi, yi, zi = nearest_index(x, y, z, cc[0], cc[1], cc[2])
+    for elem in tqdm(torch.unique(atomic_numbers)):
+        atomic_indices = torch.squeeze(torch.argwhere(atomic_numbers == elem))
+    
+        # populate elemental volume with delta function atoms
+        temp_vol = torch.zeros_like(Z)
+        for cc in centered_coords[atomic_indices]:
+            xi, yi, zi = nearest_index(x, y, z, cc[0], cc[1], cc[2])
+            temp_vol[zi, yi, xi] = 1
+    
+        # get potential kernel for this element
+        pot = atomic_potential_3d(int(elem), sR)
 
-        # don't insert if bounding box of atom falls outside of main volume grid.
-        if (
-            (zi - atom_size_px // 2) < 0
-            or zi - atom_size_px // 2 + atom_size_px > nz
-            or (yi - atom_size_px // 2) < 0
-            or yi - atom_size_px // 2 + atom_size_px > ny
-            or (xi - atom_size_px // 2) < 0
-            or xi - atom_size_px // 2 + atom_size_px > nx
-        ):
-            pass
+        # convolve
+        if compute_high_res:
+            temp_vol = fftconvolve(temp_vol, pot, mode='same')
+            potential_volume += avgpool3d(temp_vol[None, None]).squeeze() * dx
         else:
-            if method == "3d":
-                # relative 3D origin of the atom w.r.t. neighbouring voxels.
-                x_ro = cc[0] - x[xi]
-                y_ro = cc[1] - y[yi]
-                z_ro = cc[2] - z[zi]
-                sR = torch.sqrt((sX - x_ro) ** 2 + (sY - y_ro) ** 2 + (sZ - z_ro) ** 2)
-                sspot = atomic_potential_3d(an, sR)
-                pot = avgpool3d(sspot[None, None]).squeeze() * dx
-
-                potential_volume[
-                    zi - atom_size_px // 2 : zi - atom_size_px // 2 + atom_size_px,
-                    yi - atom_size_px // 2 : yi - atom_size_px // 2 + atom_size_px,
-                    xi - atom_size_px // 2 : xi - atom_size_px // 2 + atom_size_px,
-                ] += pot
-            elif method == "snapped-3d":
-                potential_volume[
-                    zi - atom_size_px // 2 : zi - atom_size_px // 2 + atom_size_px,
-                    yi - atom_size_px // 2 : yi - atom_size_px // 2 + atom_size_px,
-                    xi - atom_size_px // 2 : xi - atom_size_px // 2 + atom_size_px,
-                ] += sampled_3dpot_dict[an]
-            elif method == "2d":
-                # relative 2D origin of the atom w.r.t. neighbouring voxels.
-                x_ro = cc[0] - x[xi]
-                y_ro = cc[1] - y[yi]
-                sR = torch.sqrt((sX - x_ro) ** 2 + (sY - y_ro) ** 2)
-                sspot = atomic_potential_2d(an, sR)
-                pot = avgpool2d(sspot[None, None]).squeeze()
-
-                potential_volume[
-                    zi,
-                    yi - atom_size_px // 2 : yi - atom_size_px // 2 + atom_size_px,
-                    xi - atom_size_px // 2 : xi - atom_size_px // 2 + atom_size_px,
-                ] += pot
-            elif method == "snapped-2d":
-                potential_volume[
-                    zi,
-                    yi - atom_size_px // 2 : yi - atom_size_px // 2 + atom_size_px,
-                    xi - atom_size_px // 2 : xi - atom_size_px // 2 + atom_size_px,
-                ] += sampled_2dpot_dict[an]
+            pot = avgpool3d(pot[None, None]).squeeze() * dx
+            potential_volume += fftconvolve(temp_vol, pot, mode='same')
+            
     return potential_volume
+    
+    # for an, cc in tqdm(zip(atomic_numbers, centered_coords)):
+    #     xi, yi, zi = nearest_index(x, y, z, cc[0], cc[1], cc[2])
+
+    #     # don't insert if bounding box of atom falls outside of main volume grid.
+    #     if (
+    #         (zi - atom_size_px // 2) < 0
+    #         or zi - atom_size_px // 2 + atom_size_px > nz
+    #         or (yi - atom_size_px // 2) < 0
+    #         or yi - atom_size_px // 2 + atom_size_px > ny
+    #         or (xi - atom_size_px // 2) < 0
+    #         or xi - atom_size_px // 2 + atom_size_px > nx
+    #     ):
+    #         pass
+    #     else:
+    #         if method == "3d":
+    #             # relative 3D origin of the atom w.r.t. neighbouring voxels.
+    #             x_ro = cc[0] - x[xi]
+    #             y_ro = cc[1] - y[yi]
+    #             z_ro = cc[2] - z[zi]
+    #             sR = torch.sqrt((sX - x_ro) ** 2 + (sY - y_ro) ** 2 + (sZ - z_ro) ** 2)
+    #             sspot = atomic_potential_3d(an, sR)
+    #             pot = avgpool3d(sspot[None, None]).squeeze() * dx
+
+    #             potential_volume[
+    #                 zi - atom_size_px // 2 : zi - atom_size_px // 2 + atom_size_px,
+    #                 yi - atom_size_px // 2 : yi - atom_size_px // 2 + atom_size_px,
+    #                 xi - atom_size_px // 2 : xi - atom_size_px // 2 + atom_size_px,
+    #             ] += pot
+    #         elif method == "snapped-3d":
+    #             potential_volume[
+    #                 zi - atom_size_px // 2 : zi - atom_size_px // 2 + atom_size_px,
+    #                 yi - atom_size_px // 2 : yi - atom_size_px // 2 + atom_size_px,
+    #                 xi - atom_size_px // 2 : xi - atom_size_px // 2 + atom_size_px,
+    #             ] += sampled_3dpot_dict[an]
+    #         elif method == "2d":
+    #             # relative 2D origin of the atom w.r.t. neighbouring voxels.
+    #             x_ro = cc[0] - x[xi]
+    #             y_ro = cc[1] - y[yi]
+    #             sR = torch.sqrt((sX - x_ro) ** 2 + (sY - y_ro) ** 2)
+    #             sspot = atomic_potential_2d(an, sR)
+    #             pot = avgpool2d(sspot[None, None]).squeeze()
+
+    #             potential_volume[
+    #                 zi,
+    #                 yi - atom_size_px // 2 : yi - atom_size_px // 2 + atom_size_px,
+    #                 xi - atom_size_px // 2 : xi - atom_size_px // 2 + atom_size_px,
+    #             ] += pot
+    #         elif method == "snapped-2d":
+    #             potential_volume[
+    #                 zi,
+    #                 yi - atom_size_px // 2 : yi - atom_size_px // 2 + atom_size_px,
+    #                 xi - atom_size_px // 2 : xi - atom_size_px // 2 + atom_size_px,
+    #             ] += sampled_2dpot_dict[an]
+    # return potential_volume

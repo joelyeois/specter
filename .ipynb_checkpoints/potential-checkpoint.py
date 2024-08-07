@@ -359,6 +359,7 @@ def build_potential_volume_fftconvolve(
     convention="relion",
     method="3d-snapped",
     compute_high_res=False,
+    disable_tqdm=False,
 ):
     """Constructs volumetric potential from list of atomic elements and their
     respective coordinates. Only for snapped methods as we treat atoms as delta
@@ -472,7 +473,7 @@ def build_potential_volume_fftconvolve(
 
     # insert atomic potentials into main volume.
     potential_volume = torch.zeros(nz, ny, nx)
-    for elem in tqdm(torch.unique(atomic_numbers)):
+    for elem in tqdm(torch.unique(atomic_numbers), disable=disable_tqdm):
         atomic_indices = torch.squeeze(torch.argwhere(atomic_numbers == elem))
     
         # populate elemental volume with delta function atoms

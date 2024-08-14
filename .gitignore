@@ -1,2 +1,4 @@
 pdb-data/
 ice-data/
+/.ipynb_checkpoints
+.DS_Store

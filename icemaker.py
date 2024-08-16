@@ -25,8 +25,8 @@ class Icemaker:
         self.mdsim_n = n
         self.mdsim_dk = 1 / self.mdsim_n / self.mdsim_dx
 
-    def get_mdsim(self, trim_size=100):
-        self.get_mdsim_file()
+    def get_mdsim(self, filepath, trim_size=100):
+        self.get_mdsim_file(filepath)
         mdsim_ice_deltas = []
 
         x, y, z, X, Y, Z = potential.coordinate_grid_3d(
@@ -54,8 +54,8 @@ class Icemaker:
 
         self.mdsim_ice_deltas = torch.stack(mdsim_ice_deltas)
 
-    def get_mdsim_file(self):
-        with open("ice-data/stackingDisordered_20x20x20.MW_temp400.dump") as f:
+    def get_mdsim_file(self, filepath):
+        with open(filepath) as f:
             self.lines = f.readlines()
 
         self.mdsim_frame_indexes = [
@@ -88,12 +88,17 @@ class Icemaker:
         trimmed_coords = torch.stack(trimmed_coords)
         return trimmed_coords
 
-    def get_mdsim_averaged_f_kernel(self):
-        self.mdsim_ice_deltas_f = []
-        for mdsim_ice_delta in tqdm(self.mdsim_ice_deltas):
-            self.mdsim_ice_deltas_f.append(fftn(mdsim_ice_delta))
-        self.mdsim_ice_deltas_f = torch.stack(self.mdsim_ice_deltas_f)
-        self.mdsim_ice_deltas_f = torch.mean(torch.abs(self.mdsim_ice_deltas_f), dim=0)
+    def get_mdsim_averaged_f_kernel(self, filepath, source='torch'):
+        if source == 'dump':
+            self.get_mdsim(filepath, trim_size=100)
+            self.mdsim_ice_deltas_f = []
+            for mdsim_ice_delta in tqdm(self.mdsim_ice_deltas):
+                self.mdsim_ice_deltas_f.append(fftn(mdsim_ice_delta))
+            self.mdsim_ice_deltas_f = torch.stack(self.mdsim_ice_deltas_f)
+            self.mdsim_ice_deltas_f = torch.mean(torch.abs(self.mdsim_ice_deltas_f), dim=0)
+        
+        elif source == 'torch':
+            self.mdsim_ice_deltas_f = torch.load(filepath)
 
     def create_initial_ice_volume(self, n, dx):
         self.n = n

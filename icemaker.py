@@ -101,17 +101,16 @@ class Icemaker:
             self.mdsim_ice_deltas_f = torch.load(filepath)
 
     def create_initial_ice_volume(self, n, dx):
-        self.n = n
-        self.dx = dx
         dv = dx**3
         nv = n**3
         total_vol = nv * dv  # A^3
         self.n_ice_molecules = int(ndensity_of_amorphous_ice * total_vol)
 
         ice_idx = np.random.choice(n**3, self.n_ice_molecules, replace=False)
-        self.ice_vol_init = torch.zeros(n**3)
-        self.ice_vol_init[ice_idx] = 1
-        self.ice_vol_init = self.ice_vol_init.reshape(n, n, n)
+        ice_vol_init = torch.zeros(n**3)
+        ice_vol_init[ice_idx] = 1
+        ice_vol_init = ice_vol_init.reshape(n, n, n)
+        return ice_vol_init
 
     def interpolate_mdsim_f_kernel(self, n, dx):
         self.interp_n = n
@@ -145,7 +144,13 @@ class Icemaker:
             torch.arange(len(self.interp_f_radial_avg)) * self.interp_dk
         )
 
-    def generate_ice(self, n, dx, niter=5, min_distance=3):
+    def generate_ice(self, n=None, dx=None, niter=5, min_distance=3):
+        if n is None:
+            n = self.interp_n
+        if dx is None:
+            dx = self.interp_dx
+
+        self.ice_vol_init = self.create_initial_ice_volume(n=n, dx=dx)
         self.current_ice_vol = self.ice_vol_init.clone()
         self.niter = niter
         self.min_distance = min_distance

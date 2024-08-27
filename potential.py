@@ -294,6 +294,7 @@ def build_potential_volume(
 
     # insert atomic potentials into main volume.
     potential_volume = torch.zeros(nz, ny, nx)
+    occupancy = torch.zeros(nz, ny, nx, dtype=torch.bool)
     for an, cc in tqdm(zip(atomic_numbers, centered_coords)):
         xi, yi, zi = nearest_index(x, y, z, cc[0], cc[1], cc[2])
 
@@ -308,6 +309,10 @@ def build_potential_volume(
         ):
             pass
         else:
+            # update occupancy
+            occupancy[zi, yi, xi] = True
+
+            # insert atoms
             if method == "3d":
                 # relative 3D origin of the atom w.r.t. neighbouring voxels.
                 x_ro = cc[0] - x[xi]
@@ -347,7 +352,7 @@ def build_potential_volume(
                     yi - atom_size_px // 2 : yi - atom_size_px // 2 + atom_size_px,
                     xi - atom_size_px // 2 : xi - atom_size_px // 2 + atom_size_px,
                 ] += sampled_2dpot_dict[int(an)]
-    return potential_volume
+    return potential_volume, occupancy
 
 def build_potential_volume_fftconvolve(
     atomic_numbers,
@@ -473,6 +478,8 @@ def build_potential_volume_fftconvolve(
 
     # insert atomic potentials into main volume.
     potential_volume = torch.zeros(nz, ny, nx)
+    occupancy = torch.zeros(nz, ny, nx, dtype=torch.bool)
+    
     for elem in tqdm(torch.unique(atomic_numbers), disable=disable_tqdm):
         atomic_indices = torch.squeeze(torch.argwhere(atomic_numbers == elem))
     
@@ -481,6 +488,9 @@ def build_potential_volume_fftconvolve(
         for cc in centered_coords[atomic_indices]:
             xi, yi, zi = nearest_index(x, y, z, cc[0], cc[1], cc[2])
             temp_vol[zi, yi, xi] = 1
+            
+            # update occupancy
+            occupancy[zi, yi, xi] = True
     
         # get potential kernel for this element
         pot = atomic_potential_3d(int(elem), sR)
@@ -493,7 +503,7 @@ def build_potential_volume_fftconvolve(
             pot = avgpool3d(pot[None, None]).squeeze() * dx
             potential_volume += fftconvolve(temp_vol, pot, mode='same')
             
-    return potential_volume
+    return potential_volume, occupancy
     
     # for an, cc in tqdm(zip(atomic_numbers, centered_coords)):
     #     xi, yi, zi = nearest_index(x, y, z, cc[0], cc[1], cc[2])

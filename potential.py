@@ -479,7 +479,7 @@ def build_potential_volume_fftconvolve(
     # insert atomic potentials into main volume.
     potential_volume = torch.zeros(nz, ny, nx)
     occupancy = torch.zeros(nz, ny, nx, dtype=torch.bool)
-    
+    atomic_potentials = {}
     for elem in tqdm(torch.unique(atomic_numbers), disable=disable_tqdm):
         atomic_indices = torch.squeeze(torch.argwhere(atomic_numbers == elem))
     
@@ -494,7 +494,8 @@ def build_potential_volume_fftconvolve(
     
         # get potential kernel for this element
         pot = atomic_potential_3d(int(elem), sR)
-
+        atomic_potentials[atom.atom_symbol(int(elem))] = pot
+        atomic_potentials['ssdx'] = ssdx
         # convolve
         if compute_high_res:
             temp_vol = fftconvolve(temp_vol, pot, mode='same')
@@ -503,7 +504,7 @@ def build_potential_volume_fftconvolve(
             pot = avgpool3d(pot[None, None]).squeeze() * dx
             potential_volume += fftconvolve(temp_vol, pot, mode='same')
             
-    return potential_volume, occupancy
+    return potential_volume, occupancy, atomic_potentials
     
     # for an, cc in tqdm(zip(atomic_numbers, centered_coords)):
     #     xi, yi, zi = nearest_index(x, y, z, cc[0], cc[1], cc[2])

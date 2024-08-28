@@ -3,8 +3,9 @@ import potential
 import atom
 import pdbtools
 from icemaker import Icemaker
+from fft_tools import fftconvolve
 
-class PDBtoMRC:
+class PDB2MRC:
     """Ice-making machine"""
     
     def __init__(self, pdb_code):
@@ -47,7 +48,7 @@ class PDBtoMRC:
                 method="snapped-3d",
             )
         elif method == 'fftconvolve':
-            self.particle, self.occupancy = potential.build_potential_volume_fftconvolve(
+            self.particle, self.occupancy, self.atomic_potentials = potential.build_potential_volume_fftconvolve(
                 self.atomic_numbers,
                 self.centered_coords,
                 (n, n, n),
@@ -70,5 +71,27 @@ class PDBtoMRC:
         self.icemaker.generate_ice(min_distance=int(min_distance_A//self.dx), niter=niter)
 
         # add ice to particle
-        self.icecube = self.icemaker.current_ice_vol.clone()
-        self.particle[~self.occupancy] = self.icecube[~self.occupancy]
+        self.icecube_deltas = self.icemaker.current_ice_vol.clone()
+        self.icy_particle = self.particle.clone()
+
+        # remove ice from particle regions
+        self.icecube_deltas[self.occupancy] = 0
+
+        # check if atomic potential for O has already been calcuated
+        if 'O' not in self.atomic_potentials:
+            sx, sy, sz, sX, sY, sZ = coordinate_grid_3d(
+                (self.atom_size_px, self.atom_size_px, self.atom_size_px), (self.dx, self.dx, self.dx), convention="torch"
+            )
+            sR = torch.sqrt(sX**2 + sY**2 + sZ**2)
+            O_pot = potential.atomic_potential_3d(8, sR)
+        else:
+            # make sure to bin to correct pixel size
+            super_sampling_factor = int(self.dx / self.atomic_potentials['ssdx'])
+            avgpool3d = torch.nn.AvgPool3d(super_sampling_factor, stride=super_sampling_factor)
+            O_pot = avgpool3d(self.atomic_potentials['O'][None, None]).squeeze() * self.dx
+
+        # convolve
+        self.icecube = fftconvolve(self.icecube_deltas, O_pot, mode='same')
+
+        # make icy particle
+        self.icy_particle += self.icecube

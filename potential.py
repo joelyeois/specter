@@ -485,7 +485,7 @@ def build_potential_volume_fftconvolve(
     
         # populate elemental volume with delta function atoms
         temp_vol = torch.zeros_like(Z)
-        for cc in centered_coords[atomic_indices]:
+        for cc in centered_coords[atomic_indices].reshape(-1,3):
             xi, yi, zi = nearest_index(x, y, z, cc[0], cc[1], cc[2])
             temp_vol[zi, yi, xi] = 1
             

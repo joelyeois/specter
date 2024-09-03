@@ -57,6 +57,7 @@ class PDB2MRC:
                 super_sampling_factor=super_sampling_factor,
                 convention="relion",
                 method="snapped-3d",
+                compute_high_res=compute_high_res,
             )
 
     def solvate(self,

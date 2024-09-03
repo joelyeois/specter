@@ -1,11 +1,14 @@
 import matplotlib.pyplot as plt
+import torch
 
-def plot3d(vol):
-    fig, axes = plt.subplots(1, 3, dpi=200, constrained_layout=True)
+def plot3d(vol, title=None):
+    fig, axes = plt.subplots(1, 3, dpi=200, constrained_layout=True, figsize=(8,3.6))
     for i, ax in enumerate(axes.ravel()):
         im = ax.imshow(vol.sum(i))
         ax.set(xticks=[], yticks=[], title=f"projection along axis {i}")
         fig.colorbar(im, ax=ax, location="bottom")
+    if title is not None:
+        plt.suptitle(title, fontsize=15)
     plt.show()
 
 

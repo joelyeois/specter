@@ -362,7 +362,7 @@ def build_potential_volume_fftconvolve(
     atom_size_px=None,
     super_sampling_factor=4,
     convention="relion",
-    method="3d-snapped",
+    method="snapped-3d",
     compute_high_res=False,
     disable_tqdm=False,
 ):

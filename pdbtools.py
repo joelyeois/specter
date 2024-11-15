@@ -54,9 +54,12 @@ def fetch_pdb_file(pdb_id, format='cif', output="./"):
     """
 
     # Fetch the PDB file and save it locally
-    file_path = rcsb.fetch(pdb_id, format, output)
-    print(f"PDB file saved to: {file_path}")
-
+    if os.path.exists(output + pdb_id):
+        file_path = output + pdb_id
+        print(f"PDB file exists at: {file_path}")
+    else:
+        file_path = rcsb.fetch(pdb_id, format, output)
+        print(f"PDB file saved to: {file_path}")
     return file_path
 
 def get_atomic_number(symbol):

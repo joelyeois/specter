@@ -65,6 +65,7 @@ def atomic_potential_3d(atomic_number, r_xyz):
     potential : tensor
         Atomic potential in units of V-Ångstrom, same shape as r_xyz.
     """
+    device = r_xyz.device
     a0 = 0.529  # Bohr radius, [Angstrom]
     e = 14.4  # electron charge, [V-Angstrom]
     c1 = 2 * (torch.pi**2) * a0 * e
@@ -73,6 +74,7 @@ def atomic_potential_3d(atomic_number, r_xyz):
     # get scattering factors
     atom_params_dict = atom.get_atom_params_dict()
     P = torch.from_numpy(atom_params_dict[atomic_number]["params"])
+    P = P.to(device)
     # tile scattering factors to match r_xy grid
     P = P[:, :, None, None, None].expand((4, 3) + r_xyz.shape)
 
@@ -179,6 +181,7 @@ def build_potential_volume(
     super_sampling_factor=4,
     convention="relion",
     method="3d",
+    disable_tqdm=False,
 ):
     """Constructs volumetric potential from list of atomic elements and their
     respective coordinates.
@@ -295,7 +298,7 @@ def build_potential_volume(
     # insert atomic potentials into main volume.
     potential_volume = torch.zeros(nz, ny, nx)
     occupancy = torch.zeros(nz, ny, nx, dtype=torch.bool)
-    for an, cc in tqdm(zip(atomic_numbers, centered_coords)):
+    for an, cc in tqdm(zip(atomic_numbers, centered_coords), disable=disable_tqdm):
         xi, yi, zi = nearest_index(x, y, z, cc[0], cc[1], cc[2])
 
         # don't insert if bounding box of atom falls outside of main volume grid.

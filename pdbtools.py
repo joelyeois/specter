@@ -54,6 +54,7 @@ def fetch_pdb_file(pdb_id, format='cif', output="./"):
     """
 
     # Fetch the PDB file and save it locally
+    print(output + pdb_id)
     if os.path.exists(output + pdb_id):
         file_path = output + pdb_id
         print(f"PDB file exists at: {file_path}")

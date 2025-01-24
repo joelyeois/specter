@@ -61,7 +61,7 @@ class PDB2MRC:
 
     def solvate(self,
                 source='torch',
-                filepath='ice-data/mdsim_f_kernel_averaged_200x200x200_0.5A.pt',
+                filepath='../ice-data/mdsim_f_kernel_averaged_200x200x200_0.5A.pt',
                 min_distance_A=1.5,
                 niter=5
                ):

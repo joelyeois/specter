@@ -17,6 +17,31 @@ ifftn = lambda array: torch.fft.fftshift(
     torch.fft.ifftn(torch.fft.ifftshift(array))
 )
 
+rest_mass_energy = torch.tensor(511.0e3)  # [eV]
+hc = torch.tensor(12.398e3)  # [eV * Å]
+
+def energy_to_wavelength(energy):
+    """Converts electron energy [keV] to wavelength [Å]"""
+    ev = energy * 1e3
+    return hc / torch.sqrt(ev * (ev + 2.0 * rest_mass_energy))
+
+
+def interaction_parameter(energy):
+    """Calculates the interaction parameter [1/ÅV]: Kirkland Eq.(5.6)."""
+    w = energy_to_wavelength(energy)
+    ev = energy * 1e3
+    return (
+        2.0
+        * torch.pi
+        / (w * ev)
+        * ((ev + rest_mass_energy) / (ev + 2.0 * rest_mass_energy))
+    )
+
+
+def complex_potential(v, alpha=torch.tensor(0.1)):
+    """Applies amplitude ratio, \alpha, to create complex potential"""
+    return torch.sqrt(1 - alpha**2) * v + 1j * (alpha * v)
+
 class Scattering(L.LightningModule):
     def __init__(
         self,

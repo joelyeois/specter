@@ -11,7 +11,7 @@ def get_atom_symbols():
         Atom symbols in the periodic table.
     """
     elem = np.loadtxt(
-        os.path.join(os.path.dirname(__file__), "./atom-data", "atom_mass.txt"),
+        os.path.join(os.path.dirname(__file__), "../atom-data", "atom_mass.txt"),
         delimiter=" ",
         dtype="str",
         usecols=0,
@@ -29,7 +29,7 @@ def get_atom_masses():
         Atom masses
     """
     masses = np.loadtxt(
-        os.path.join(os.path.dirname(__file__), "./atom-data", "atom_mass.txt"),
+        os.path.join(os.path.dirname(__file__), "../atom-data", "atom_mass.txt"),
         delimiter=" ",
         dtype="float",
         usecols=1,
@@ -93,7 +93,7 @@ def get_atom_params_dict():
         Each entry contains 'params' (4x3 ndarray) and 'chisquared' (float).
     """
     params = {}
-    with open(os.path.join(os.path.dirname(__file__),'./atom-data', "atom_params.txt"), 'r') as f:
+    with open(os.path.join(os.path.dirname(__file__),'../atom-data', "atom_params.txt"), 'r') as f:
         lines = f.read().split('Z= ')
         for line in lines:
             if(len(line)):

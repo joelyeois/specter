@@ -1,29 +1,27 @@
+import filters
+import lightning as L
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import lightning as L
 
 fft2 = lambda array: torch.fft.fftshift(
-    torch.fft.fft2(torch.fft.ifftshift(array))
+    torch.fft.fft2(torch.fft.ifftshift(array, dim=(-1, -2))), dim=(-1, -2)
 )
 ifft2 = lambda array: torch.fft.fftshift(
-    torch.fft.ifft2(torch.fft.ifftshift(array))
+    torch.fft.ifft2(torch.fft.ifftshift(array, dim=(-1, -2))), dim=(-1, -2)
 )
-fftn = lambda array: torch.fft.fftshift(
-    torch.fft.fftn(torch.fft.ifftshift(array))
-)
-ifftn = lambda array: torch.fft.fftshift(
-    torch.fft.ifftn(torch.fft.ifftshift(array))
-)
+fftn = lambda array: torch.fft.fftshift(torch.fft.fftn(torch.fft.ifftshift(array)))
+ifftn = lambda array: torch.fft.fftshift(torch.fft.ifftn(torch.fft.ifftshift(array)))
 
-rest_mass_energy = torch.tensor(511.0e3)  # [eV]
-hc = torch.tensor(12.398e3)  # [eV * Å]
+rest_mass_energy = 511.0e3  # [eV]
+hc = 12.398e3  # [eV * Å]
+
 
 def energy_to_wavelength(energy):
     """Converts electron energy [keV] to wavelength [Å]"""
     ev = energy * 1e3
-    return hc / torch.sqrt(ev * (ev + 2.0 * rest_mass_energy))
+    return hc / np.sqrt(ev * (ev + 2.0 * rest_mass_energy))
 
 
 def interaction_parameter(energy):
@@ -38,64 +36,100 @@ def interaction_parameter(energy):
     )
 
 
-def complex_potential(v, alpha=torch.tensor(0.1)):
+def complex_potential(v, alpha=0.1):
     """Applies amplitude ratio, \alpha, to create complex potential"""
-    return torch.sqrt(1 - alpha**2) * v + 1j * (alpha * v)
+    return np.sqrt(1 - alpha**2) * v + 1j * (alpha * v)
+
 
 class Scattering(L.LightningModule):
     def __init__(
         self,
         size,
         voxel_size,
-        energy=200,
-        dose_per_area=20,
-        projectmode="multislice",
+        energy,
+        dose_per_pixel,
+        scattering_model="multislice",
         klim=None,
-        flipcurvature=False,
+        flip_curvature=False,
     ):
+        """
+        A scattering module to compute the 2D exitwave from a 3D scattering
+        potential. Various scattering modes are available.
+
+        Parameters
+        ----------
+        size : tuple
+            Shape of the 3D volume in (nz, ny, nx).
+        voxel_size: float
+            Voxel size in angstroms.
+        energy: float
+            Energy of the electron beam in keV. Typical values are 100/120/200/300 keV.
+        dose_per_pixel: float
+            Dose per area of the electron beam in e-/A^2.
+        scattering_mode: str
+            Specifies scattering model to use. Options include 'multislice',
+            'firstborn', 'projection' and 'ctf', in order of increasing approximations.
+        klim: float
+            Kirkland [1] explains that setting klim = 0.66 is necessary to avoid
+            aliasing for FFT methods (multislice and first Born). But this numerically
+            lowers the spatial frequency information in the resultant exitwaves, so
+            default is set to None.
+        flip_curvature: bool
+            This corresponds to positive/negative Ewald sphere curvature
+            ambiguity. Set to False for positive, and True for negative (CryoSPARC).
+            Only affects multislice and first Born models.
+
+        Notes
+        -----
+        .. [1] E. J. Kirkland, Advanced Computing in Electron Microscopy (Springer
+           US, Boston, MA, 2010).
+
+        """
         super().__init__()
         nz, ny, nx = size
         self.voxel_size = voxel_size
 
         self.energy = energy
-        self.dose_per_area = dose_per_area
+        self.dose_per_pixel = dose_per_pixel
         self.wavelength = energy_to_wavelength(energy)
         self.sigma = interaction_parameter(energy)
-        self.projectmode = projectmode
-        self.flipcurvature = flipcurvature
+        self.scattering_model = scattering_model
+        self.flip_curvature = flip_curvature
 
         # frequency coordinates
-        kx = torch.fft.fftfreq(nx, voxel_size)
-        ky = torch.fft.fftfreq(ny, voxel_size)
+        kx = torch.fft.fftshift(torch.fft.fftfreq(nx, voxel_size))
+        ky = torch.fft.fftshift(torch.fft.fftfreq(ny, voxel_size))
         kxx, kyy = torch.meshgrid(kx, ky, indexing="ij")
-        kxx = torch.fft.fftshift(kxx)
-        kyy = torch.fft.fftshift(kyy)
-
-        kx = torch.stack([kyy, kxx], dim=-1)
-        self.register_buffer("kx", kx)
-
         k = torch.sqrt(kxx**2 + kyy**2)
-        self.register_buffer("k", k)
 
-        # Fresnel transfer function
-        H = torch.exp(1j * torch.pi * self.wavelength * voxel_size * self.k**2)
-        self.register_buffer("H", H)
+        # Fresnel transfer function for multislice
+        if scattering_model == "multislice":
+            F = torch.exp(1j * torch.pi * self.wavelength * voxel_size * k**2)
+            self.register_buffer("F", F)
 
-        # kirkland bandlimit
+        # Fresnel transfer function for first Born
+        if scattering_model == "firstborn":
+            F = []
+            for i in range(nz):
+                f = torch.exp(1j * torch.pi * self.wavelength * voxel_size * (nz - i) * k**2)
+                F.append(f)
+            F = torch.stack(F)
+            self.register_buffer("F", F)
+
+        # Kirkland bandlimit
+        self.klim = klim
         if klim is not None:
-            self.klim = klim
-            kmask = torch.from_numpy(shapes.circle2d(nx, int(nx * klim)))[None, ...]
+            kmask = filters.circle2d(nx, int(nx * klim))[None, ...]
+            self.register_buffer("kmask", kmask)
         else:
-            kmask = torch.tensor(1)
-        self.register_buffer("kmask", kmask)
+            self.kmask = 1
 
     def multislice(self, V):
-        # V is already rotated and is shape (B x Z x X x Y)
-        if self.flipcurvature:
+        if self.flip_curvature:
             V = torch.flip(V, dims=(1,))
-        exitwave = torch.sqrt(
-            torch.tensor(self.dose_per_area)
-        )  # this should actually be expected dose per pixel
+        exitwave = np.sqrt(self.dose_per_pixel)
+
+        # iterate across z-planes of 3D potentials.
         for i in range(V.size(1)):
             # transmission function
             t = torch.exp(1j * self.sigma * V[:, i])
@@ -104,84 +138,54 @@ class Scattering(L.LightningModule):
             wv = t * exitwave
 
             # propagate wave to next slice, also applies Kirkland's 0.66 bandlimit
-            exitwave = ifft2(fft2(wv) * self.H * self.kmask)
-        return exitwave  # (B x X x Y)
+            exitwave = ifft2(fft2(wv) * self.F * self.kmask)
+        return exitwave
 
     def firstborn(self, V):
-        # V is already rotated and is shape (B x Z x X x Y)
-        if self.flipcurvature:
+        if self.flip_curvature:
             V = torch.flip(V, dims=(1,))
-        exitwave = 1
-        n = V.size(1)
-        for i in range(n):
-            # Fresnel transfer function
-            F = torch.exp(
-                    1j
-                    * torch.pi
-                    * self.wavelength
-                    * self.voxel_size
-                    * (n - i)
-                    * self.k**2
-                )
-            # propagate wave to next slice, also applies Kirkland's 0.66 bandlimit
-            exitwave += 1j * ifft2(fft2(self.sigma * V[:, i]) * F[None, ...])
+
+        V_f = fft2(V)
+        exitwave_f = self.sigma * V_f * self.F[None, ...]
+        exitwave = ifft2(exitwave_f)
+        exitwave = torch.sum(exitwave, 1)  # sum along Z
+        exitwave = 1 + 1j * exitwave
 
         # multiply with dose
-        exitwave *= torch.sqrt(torch.tensor(self.dose_per_area))
-        return exitwave  # (B x X x Y)
-
-    def fastfirstborn(self, V):
-        # V is already rotated and is shape (B x Z x X x Y)
-        if self.flipcurvature:
-            V = torch.flip(V, dims=(1,))
-        exitwave = 1
-        n = V.size(1)
-        exitwave_f = 0
-        for i in range(n):
-            # Fresnel transfer function
-            F = torch.exp(
-                    1j
-                    * torch.pi
-                    * self.wavelength
-                    * self.voxel_size
-                    * (n - i)
-                    * self.k**2
-                )
-            # propagate wave to next slice, also applies Kirkland's 0.66 bandlimit
-            exitwave_f += fft2(self.sigma * V[:, i]) * F[None, ...]
-        exitwave += 1j * ifft2(exitwave_f)
-
-        # multiply with dose
-        exitwave *= torch.sqrt(torch.tensor(self.dose_per_area))
-        return exitwave  # (B x X x Y)
+        exitwave *= np.sqrt(self.dose_per_pixel)
+        return exitwave
 
     def projection(self, V):
-        # V is already rotated and is shape (B x Z x X x Y)
-        exitwave = torch.sqrt(torch.tensor(self.dose_per_area)) * torch.exp(
+        exitwave = np.sqrt(self.dose_per_pixel) * torch.exp(
             1j * self.sigma * torch.sum(V, 1)
         )
-        return exitwave  # (B x X x Y)
-
-    # def ctf(self, V):
-    #     # V is already rotated and is shape (B x Z x X x Y)
-    #     projection = (
-    #         torch.sqrt(torch.tensor(self.dose_per_area)) * self.sigma * torch.sum(V, 1)
-    #     )
-    #     return projection  # (B x X x Y)
+        return exitwave
 
     def ctf(self, V):
-        # V is already rotated and is shape (B x Z x X x Y)
         projection = 2 * self.sigma * torch.sum(V, 1)
-        return projection  # (B x X x Y)
+        return projection
 
     def forward(self, V):
-        if self.projectmode == "multislice":
+        """
+        V is batch of 3D potentials with shape (B x Z x X x Y), outputs a batch
+        of 2D exitwaves with shape (B x Y x X). The CTF scattering model outputs
+        projected potential instead of exitwave.
+
+        Parameters
+        ----------
+        V : tensor
+            Batch of 3D potentials.
+
+        Returns
+        -------
+        psi : tensor
+            Batch of 2D exitwaves / projected potentials.
+        """
+        if self.scattering_model == "multislice":
             return self.multislice(V)
-        elif self.projectmode == "projection":
+        elif self.scattering_model == "projection":
             return self.projection(V)
-        elif self.projectmode == "firstborn":
+        elif self.scattering_model == "firstborn":
             return self.firstborn(V)
-        elif self.projectmode == "fastfirstborn":
-            return self.fastfirstborn(V)
-        elif self.projectmode == "ctf":
+        elif self.scattering_model == "ctf":
             return self.ctf(V)

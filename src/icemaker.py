@@ -5,6 +5,7 @@ import torch
 from scipy.interpolate import CubicSpline
 from skimage.feature import peak_local_max
 from tqdm import tqdm
+from fft_tools import fftconvolve
 
 avogadro = 6.02214076e23
 density_of_amorphous_ice = 0.94  # [g/cm3]
@@ -18,7 +19,7 @@ ifftn = lambda array: torch.fft.fftshift(torch.fft.ifftn(torch.fft.ifftshift(arr
 
 
 class Icemaker:
-    """Ice-making machine"""
+    """Creates ice with water rings. Slow."""
 
     def __init__(self, dx=0.5, n=200):
         self.mdsim_dx = dx
@@ -194,6 +195,70 @@ class Icemaker:
         self.frob_norm = torch.tensor(self.frob_norm)
         self.n_extra_atoms = torch.tensor(self.n_extra_atoms)
 
+class NaiveIcemaker:
+    """Creates ice through random choice. Fast."""
+
+    def __init__(self, dx, n):
+        self.dx = dx
+        self.n = n
+        self.dv = dx**3
+        self.nv = n**3
+        self.total_vol = self.nv * self.dv  # A^3
+        self.n_ice_molecules = int(ndensity_of_amorphous_ice * self.total_vol)
+        self.ice_kernel = self.create_ice_kernel()
+
+    def create_initial_ice_volume(self):
+        #slowest, without duplicates
+        # ice_idx = np.random.choice(self.n**3, self.n_ice_molecules, replace=False)
+
+        #second fastest, without duplicates
+        # ice_idx = torch.randperm(self.n**3)
+        # ice_idx = ice_idx[:self.n_ice_molecules]
+        
+        #fastest, with duplicates
+        ice_idx = torch.randint(0, self.n**3, (self.n_ice_molecules,))
+        
+        ice_vol_init = torch.zeros(self.n**3)
+        ice_vol_init[ice_idx] = 1
+        ice_vol_init = ice_vol_init.reshape(self.n, self.n, self.n)
+        return ice_vol_init
+
+    def create_ice_kernel(self, sn=28):
+        #sample a 28x28 grid to represent kernel first.
+        #4xbin down to 7x7, centerd on atom origin
+        sx = (torch.arange(sn) - (sn - 1) / 2) * self.dx/4
+        sZ, sY, sX = torch.meshgrid(sx, sx, sx, indexing="ij")
+        sR = torch.sqrt(sX**2 + sY**2 + sZ**2)
+
+        #see cryosim for details.
+        a0 = 0.529  # Bohr radius, [Angstrom]
+        e = 14.4  # electron charge, [V-Angstrom]
+        c1 = 2 * (torch.pi**2) * a0 * e
+        c2 = 2 * (torch.pi ** (5 / 2)) * a0 * e
+
+        #P params for Oxygen. See Kirkland Appendix C.
+        P = torch.tensor([[3.39969204e-001, 3.81570280e-001, 3.07570172e-001, 3.81571436e-001],
+                          [1.30369072e-001, 1.91919745e+001, 8.83326058e-002, 7.60635525e-001],
+                          [1.96586700e-001, 2.07401094e+000, 9.96220028e-004, 3.03266869e-002]])
+        P = P.T
+        # tile scattering factors to match r_xy grid
+        P = P[:, :, None, None, None].expand((4, 3) + sR.shape)
+
+        s1 = c1 * torch.sum(
+            P[0] / sR * torch.exp(-2 * torch.pi * sR * torch.sqrt(P[1])), 0
+        )
+        s2 = c2 * torch.sum(
+            P[2] * P[3] ** (-3 / 2) * torch.exp(-(torch.pi**2) * (sR**2) / P[3]), 0
+        )
+        pot = s1 + s2
+
+        avgpool3d = torch.nn.AvgPool3d(4, stride=4)
+        return avgpool3d(pot[None, None]).squeeze() * self.dx
+
+    def generate_random_icecube(self):
+        self.icedeltas = self.create_initial_ice_volume()
+        self.icecube = fftconvolve(self.icedeltas, self.ice_kernel, mode='same')
+        return self.icecube
 
 def radial_profile_3d(data, center=None, return_r=False):
     m, n, o = np.shape(data)

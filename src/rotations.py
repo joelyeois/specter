@@ -80,7 +80,9 @@ def rotate_volume(V, theta, origin="relion"):
     theta : (B,3,4) torch.Tensor
         B is the batch size. Concatenates a 3x3 rotation matrix and a 3x1 translation vector.
     origin : str
-        Convention for the index of the origin of rotation
+        Convention for the index of the origin of rotation. "relion" defines the
+        origin to be at [nz//2, ny//2, nx//2], whereas "center" sets it to
+        [(nz + 1) / 2, (ny + 1) / 2, (nx + 1) / 2]
 
     Returns
     -------
@@ -101,9 +103,9 @@ def rotate_volume(V, theta, origin="relion"):
         grid = F.affine_grid(null_rot, (B, 1, nz, ny, nx), align_corners=align_corners)
 
         # rotate the grid around the center defined by RELION
-        cz = int(nz / 2)
-        cy = int(ny / 2)
-        cx = int(nx / 2)
+        cz = nz // 2
+        cy = ny // 2
+        cx = nx // 2
         center = grid[:, cz, cy, cx]  # (B, 3)
         center = center.unsqueeze(1)
         grid = grid.view(B, nz * ny * nx, 3)
@@ -122,3 +124,111 @@ def rotate_volume(V, theta, origin="relion"):
     V_ = F.grid_sample(V, grid, align_corners=align_corners, padding_mode="border")
 
     return V_.squeeze(1)  # B x Z x X x Y
+
+def quaternion_to_rotation_matrix(q):
+    """
+    Converts quaternions (x,y,z,w) to rotation matrices. 
+    Matches with scipy.rotation.from_quat(q).as_matrix().
+
+    Written by Tristan Bepler.
+
+    Parameters
+    ----------
+    q : 2D tensor
+        Batch of quaternions with shape (N, 4).
+
+    Returns
+    -------
+    R : 3D tensor
+        Batch of rotation matrices with shape (N, 3, 3).
+    """
+    s = 1 / torch.sum(q**2, axis=-1)
+    qr = q[..., 3]
+    qi = q[..., 0]
+    qj = q[..., 1]
+    qk = q[..., 2]
+    shape = q.shape[:-1] + (3, 3)
+    R = torch.stack(
+        [
+            1 - 2 * s * (qj**2 + qk**2),
+            2 * s * (qi * qj - qk * qr),
+            2 * s * (qi * qk + qj * qr),
+            2 * s * (qi * qj + qk * qr),
+            1 - 2 * s * (qi**2 + qk**2),
+            2 * s * (qj * qk - qi * qr),
+            2 * s * (qi * qk - qj * qr),
+            2 * s * (qj * qk + qi * qr),
+            1 - 2 * s * (qi**2 + qj**2),
+        ],
+        axis=-1,
+    ).reshape(*shape)
+    return R
+
+def translations_angstrom_to_torch(Txy, n, voxel_size):
+    """
+    Builds a batch of normalized translation vectors from rlnOriginXAngst and
+    rlnOriginYAngst in starfiles.
+
+    Torch affine matrix uses a normalized coordinate system, where the coordinates
+    of each axis ranges from [-1, 1]. Therefore, we need to do a coordinate
+    transformation to match this Torch coordinate system for translations.
+
+    Parameters
+    ----------
+    Txy : 2D tensor
+        Translation vector of shape (N,2), built from [rlnOriginXAngst, rlnOriginYAngst]. 
+        In angstroms.
+    n : int
+        Number of pixels in x/y direction.
+    voxel_size : float
+        Voxel size in angstroms.
+
+    Returns
+    -------
+    T : 2D tensor
+        Batch of Torch normalized translation vectors with shape (N, 3).
+    """
+    num = len(Txy)
+    tz = torch.zeros(num)
+    T = torch.concat([Txy, tz[..., None]], dim=-1)
+    T *= 2 / n / voxel_size
+    return T
+
+def build_affine_matrix(R, T):
+    """
+    Builds a batch of Torch's affine matrices (N, 3, 4) from a batch of rotation
+    matrices (N, 3, 3) and Torch normalized translation vectors (N, 3).
+
+    CryoSPARC performs shifts before rotations. However, the affine matrix by 
+    definition performs rotations before shifts. As such, we need to modify the
+    translation vector, T, by
+    T_1' = R_11T_1 + R_12T_2 + R_13T_3
+    T_2' = R_21T_1 + R_22T_2 + R_23T_3
+    T_3' = R_31T_1 + R_32T_2 + R_33T_3
+
+    Parameters
+    ----------
+    R : 3D tensor
+        Batch of rotation matrices with shape (N, 3, 3).
+    T : 2D tensor
+        Batch of Torch normalized translation vectors with shape (N, 3). Note that
+        this is not the same as the shifts directly from CryoSPARC/RELION starfiles.
+        Those shifts must be normalized using translations_angstrom_to_torch.
+
+    Returns
+    -------
+    R : 3D tensor
+        Batch of rotation matrices with shape (N, 3, 3).
+    """
+    if T is None:
+        T = torch.zeros_like(R[..., 0])
+    #old
+    # theta = torch.concat([R, T.unsqueeze(2)], dim=-1)
+    
+    #new
+    Tprime = torch.zeros_like(T)
+    Tprime[:,0] = R[:,0,0] * T[:,0] + R[:,0,1] * T[:,1] + R[:,0,2] * T[:,2]
+    Tprime[:,1] = R[:,1,0] * T[:,0] + R[:,1,1] * T[:,1] + R[:,1,2] * T[:,2]
+    Tprime[:,2] = R[:,2,0] * T[:,0] + R[:,2,1] * T[:,1] + R[:,2,2] * T[:,2]
+    theta = torch.concat([R, Tprime.unsqueeze(2)], dim=-1)
+    return theta

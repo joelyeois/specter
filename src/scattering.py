@@ -4,15 +4,8 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from fft_tools import fft2, ifft2, fftn, ifftn
 
-fft2 = lambda array: torch.fft.fftshift(
-    torch.fft.fft2(torch.fft.ifftshift(array, dim=(-1, -2))), dim=(-1, -2)
-)
-ifft2 = lambda array: torch.fft.fftshift(
-    torch.fft.ifft2(torch.fft.ifftshift(array, dim=(-1, -2))), dim=(-1, -2)
-)
-fftn = lambda array: torch.fft.fftshift(torch.fft.fftn(torch.fft.ifftshift(array)))
-ifftn = lambda array: torch.fft.fftshift(torch.fft.ifftn(torch.fft.ifftshift(array)))
 
 rest_mass_energy = 511.0e3  # [eV]
 hc = 12.398e3  # [eV * Å]
@@ -44,10 +37,10 @@ def complex_potential(v, alpha=0.1):
 class Scattering(L.LightningModule):
     def __init__(
         self,
-        size,
-        voxel_size,
+        n_pixels,
+        pixel_size,
         energy,
-        dose_per_pixel,
+        dose_per_angstrom,
         scattering_model="multislice",
         klim=None,
         flip_curvature=False,
@@ -58,14 +51,15 @@ class Scattering(L.LightningModule):
 
         Parameters
         ----------
-        size : tuple
-            Shape of the 3D volume in (nz, ny, nx).
-        voxel_size: float
-            Voxel size in angstroms.
+        n_pixels : int
+            Number of pixels in volume, (n_pixels, n_pixels, n_pixels). Assumes same
+            number of pixels in all three axes for now.
+        pixel_size: float
+            Pixel size in angstroms. Assumes dz is also pixel_size for now.
         energy: float
             Energy of the electron beam in keV. Typical values are 100/120/200/300 keV.
-        dose_per_pixel: float
-            Dose per area of the electron beam in e-/A^2.
+        dose_per_angstrom: float
+            Dose of the electron beam in e-/A^2.
         scattering_mode: str
             Specifies scattering model to use. Options include 'multislice',
             'firstborn', 'projection' and 'ctf', in order of increasing approximations.
@@ -86,32 +80,34 @@ class Scattering(L.LightningModule):
 
         """
         super().__init__()
-        nz, ny, nx = size
-        self.voxel_size = voxel_size
+        self.n_pixels = n_pixels
+        self.pixel_size = pixel_size
 
+        # model params
         self.energy = energy
-        self.dose_per_pixel = dose_per_pixel
+        self.dose_per_angstrom = dose_per_angstrom
+        self.dose_per_pixel = dose_per_angstrom * pixel_size**2
         self.wavelength = energy_to_wavelength(energy)
         self.sigma = interaction_parameter(energy)
         self.scattering_model = scattering_model
         self.flip_curvature = flip_curvature
 
         # frequency coordinates
-        kx = torch.fft.fftshift(torch.fft.fftfreq(nx, voxel_size))
-        ky = torch.fft.fftshift(torch.fft.fftfreq(ny, voxel_size))
-        kxx, kyy = torch.meshgrid(kx, ky, indexing="ij")
+        kx = torch.fft.fftshift(torch.fft.fftfreq(n_pixels, pixel_size))
+        kxx, kyy = torch.meshgrid(kx, kx, indexing="ij")
         k = torch.sqrt(kxx**2 + kyy**2)
 
         # Fresnel transfer function for multislice
         if scattering_model == "multislice":
-            F = torch.exp(1j * torch.pi * self.wavelength * voxel_size * k**2)
+            F = torch.exp(1j * torch.pi * self.wavelength * pixel_size * k**2)
             self.register_buffer("F", F)
 
         # Fresnel transfer function for first Born
         if scattering_model == "firstborn":
             F = []
-            for i in range(nz):
-                f = torch.exp(1j * torch.pi * self.wavelength * voxel_size * (nz - i) * k**2)
+            for i in range(n_pixels):
+                f = torch.exp(1j * torch.pi * self.wavelength * pixel_size * 
+                              (n_pixels - i) * k**2)
                 F.append(f)
             F = torch.stack(F)
             self.register_buffer("F", F)
@@ -119,7 +115,7 @@ class Scattering(L.LightningModule):
         # Kirkland bandlimit
         self.klim = klim
         if klim is not None:
-            kmask = filters.circle2d(nx, int(nx * klim))[None, ...]
+            kmask = filters.circle2d(n_pixels, int(n_pixels * klim))[None, ...]
             self.register_buffer("kmask", kmask)
         else:
             self.kmask = 1
@@ -167,9 +163,12 @@ class Scattering(L.LightningModule):
 
     def forward(self, V):
         """
-        V is batch of 3D potentials with shape (B x Z x X x Y), outputs a batch
-        of 2D exitwaves with shape (B x Y x X). The CTF scattering model outputs
-        projected potential instead of exitwave.
+        V is batch of 3D real-valued potentials with shape (B x Z x X x Y), outputs 
+        a batch of 2D exitwaves with shape (B x Y x X). The CTF scattering model 
+        outputs projected potential instead of exitwave.
+
+        Note that the CTF model does not require computing the complex-valued
+        potentials since it is built into the aberration function.
 
         Parameters
         ----------
@@ -182,10 +181,13 @@ class Scattering(L.LightningModule):
             Batch of 2D exitwaves / projected potentials.
         """
         if self.scattering_model == "multislice":
+            V = complex_potential(V)
             return self.multislice(V)
         elif self.scattering_model == "projection":
+            V = complex_potential(V)
             return self.projection(V)
         elif self.scattering_model == "firstborn":
+            V = complex_potential(V)
             return self.firstborn(V)
         elif self.scattering_model == "ctf":
             return self.ctf(V)

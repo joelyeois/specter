@@ -1,6 +1,15 @@
 import torch
 from scipy.fft import next_fast_len
 
+fft2 = lambda array: torch.fft.fftshift(
+    torch.fft.fft2(torch.fft.ifftshift(array, dim=(-1, -2))), dim=(-1, -2)
+)
+ifft2 = lambda array: torch.fft.fftshift(
+    torch.fft.ifft2(torch.fft.ifftshift(array, dim=(-1, -2))), dim=(-1, -2)
+)
+fftn = lambda array: torch.fft.fftshift(torch.fft.fftn(torch.fft.ifftshift(array)))
+ifftn = lambda array: torch.fft.fftshift(torch.fft.ifftn(torch.fft.ifftshift(array)))
+
 def fftconvolve(in1, in2, mode="full"):
     """ From scipy fftconvolve.
     

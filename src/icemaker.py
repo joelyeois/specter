@@ -255,10 +255,18 @@ class NaiveIcemaker:
         avgpool3d = torch.nn.AvgPool3d(4, stride=4)
         return avgpool3d(pot[None, None]).squeeze() * self.dx
 
-    def generate_random_icecube(self):
-        self.icedeltas = self.create_initial_ice_volume()
-        self.icecube = fftconvolve(self.icedeltas, self.ice_kernel, mode='same')
-        return self.icecube
+    def generate_random_icecube(self, batchsize=1):
+        if batchsize == 1:
+            self.icedeltas = self.create_initial_ice_volume()
+            self.icecube = fftconvolve(self.icedeltas, self.ice_kernel, mode='same')
+            return self.icecube
+        else:
+            icecubes = torch.zeros(batchsize, self.n, self.n, self.n)
+            for i in range(batchsize):
+                self.icedeltas = self.create_initial_ice_volume()
+                self.icecube = fftconvolve(self.icedeltas, self.ice_kernel, mode='same')
+                icecubes[i] = self.icecube
+            return icecubes
 
 def radial_profile_3d(data, center=None, return_r=False):
     m, n, o = np.shape(data)

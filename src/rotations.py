@@ -189,7 +189,7 @@ def translations_angstrom_to_torch(Txy, n, voxel_size):
         Batch of Torch normalized translation vectors with shape (N, 3).
     """
     num = len(Txy)
-    tz = torch.zeros(num)
+    tz = torch.zeros(num, device=Txy.device)
     T = torch.concat([Txy, tz[..., None]], dim=-1)
     T *= 2 / n / voxel_size
     return T

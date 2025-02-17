@@ -97,8 +97,6 @@ class ImageGenerator(L.LightningModule):
         self.energy = energy
         self.dose_per_angstrom = dose_per_angstrom
         self.dose_per_pixel = dose_per_angstrom * pixel_size**2
-        self.wavelength = energy_to_wavelength(energy)
-        self.sigma = interaction_parameter(energy)
         self.scattering_model = scattering_model
         self.aberration_model = aberration_model
         self.noise_model = noise_model
@@ -140,13 +138,37 @@ class ImageGenerator(L.LightningModule):
         R = rotations.quaternion_to_rotation_matrix(Q)
         T = rotations.translations_angstrom_to_torch(T, self.n, self.pixel_size)
         theta = rotations.build_affine_matrix(R, T)
-        V = rotations.rotate_volume(V, theta, origin='relion')
-
-    def forward(self, idx):
-        Q = self.rotations[idx]
-        T = self.translations[idx]
+        V = rotations.rotate_volume(self.V, theta, origin='relion')
+        return V
         
-        #rotate V
+    def solvate(self, V):
+        if len(V.shape) == 4:
+            batchsize = len(V)
+        elif len(V.shape) == 3:
+            batchsize = 1
+        # generates ice with size (B x Z x Y x X)
+        ice = self.icemaker.generate_random_icecube(batchsize=batchsize)
+        icemask = V.detach().clone()
+        icemask[icemask<10] = 1
+        icemask[icemask>=10] = 0
+        V = V + ice.to(self.device) * icemask
+        self.icemask = icemask #save as attribute just to check
+        return V
+        
+    def forward(self, idx):
+        #rotate V, returns (B x Z x Y x X)
+        V = self.rotate(self.quaternions[idx], self.translations[idx])
+
+        #add ice
+        if self.ice_model == 'randomchoice':
+            V = self.solvate(V)
+                
         #scatter V
-        #aberrate psis
+        exitwaves = self.scattering(V)
+        
+        #aberrate exitwaves
+        exitwaves = self.aberration(exitwaves, self.cs[idx], self.dfu[idx], self.dfv[idx], self.dfang[idx])
+        
         #image/noise
+        images = self.detector(exitwaves)
+        return images

@@ -8,16 +8,19 @@ from fft_tools import fftconvolve
 class PDB2MRC:
     """Ice-making machine"""
     
-    def __init__(self, pdb_code):
+    def __init__(self, pdb_code=None, pdb_path=None):
         self.pdb_code = pdb_code
+        self.pdb_path = pdb_path
 
-    def fetch_pdb(self, pdb_folder='./pdb-data/'):
-        # saves PDB file
-        self.pdb_folder = pdb_folder
-        self.pdb_path = pdbtools.fetch_pdb_file(self.pdb_code, output=pdb_folder)
+    def fetch_pdb(self, pdb_folder='./pdb-data/', assemble=True):
+        self.assemble = assemble
+        if self.pdb_code is not None:
+            # saves PDB file
+            self.pdb_folder = pdb_folder
+            self.pdb_path = pdbtools.fetch_pdb_file(self.pdb_code, output=pdb_folder)
 
         # extract atomic coordinates and symbols
-        self.atomic_numbers, self.coords = pdbtools.get_atoms_and_coordinates_from_pdb(self.pdb_path)
+        self.atomic_numbers, self.coords = pdbtools.get_atoms_and_coordinates_from_pdb(self.pdb_path, assemble=assemble)
         self.n_atoms = len(self.coords)
         self.unique_elements = atom.atom_symbol(torch.unique(self.atomic_numbers))
 

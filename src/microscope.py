@@ -69,8 +69,8 @@ class Aberration(L.LightningModule):
         dfv = dfv.unsqueeze(1).unsqueeze(2)
         dfang = dfang.unsqueeze(1).unsqueeze(2)
         cs = cs.unsqueeze(1).unsqueeze(2)
-        df = 0.5 * (dfu + dfv + (dfu - dfv) * torch.cos(2 * (ang - dfang)))
-        gamma = torch.pi * w * k2 * (0.5 * cs * w**2 * k2 - df)
+        df = 0.5 * (dfu + dfv + (dfv - dfu) * torch.cos(2 * (ang + dfang)))
+        gamma = -torch.pi * w * k2 * (0.5 * cs * w**2 * k2 - df)
         return gamma
 
     def transfer(self, cs, dfu, dfv, dfang):

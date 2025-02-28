@@ -6,6 +6,7 @@ from microscope import Aberration, Detector
 from scattering import Scattering
 from icemaker import NaiveIcemaker
 import rotations
+import torch.nn.functional as F
 
 class ImageGenerator(L.LightningModule):
     def __init__(
@@ -18,6 +19,7 @@ class ImageGenerator(L.LightningModule):
         energy,
         dose_per_angstrom,
         ice_model=None,
+        ice_thickness=None,
         scattering_model="multislice",
         aberration_model="holography",
         noise_model="poisson",
@@ -52,6 +54,9 @@ class ImageGenerator(L.LightningModule):
         ice_model: str or None
             Specifices ice algorithm. Set to None for no ice. Options includes only
             'randomchoice' (fast) for now.
+        ice_thickness: float
+            Specifices the thickness of ice in Angstroms. Typically 100–1000 A. Must
+            be same or larger than FOV of the particle.
         scattering_mode: str
             Specifies scattering model to use. Options include 'multislice',
             'firstborn', 'projection' and 'ctf', in order of increasing approximations.
@@ -81,18 +86,8 @@ class ImageGenerator(L.LightningModule):
         """
         super().__init__()
 
-        # register buffers
-        self.register_buffer("V", scattering_potential)
-        self.register_buffer("quaternions", quaternions)
-        self.register_buffer("translations", translations)
-        cs, dfu, dfv, dfang = torch.unbind(ctf_params, dim=-1)
-        self.register_buffer("cs", cs)
-        self.register_buffer("dfu", dfu)
-        self.register_buffer("dfv", dfv)
-        self.register_buffer("dfang", dfang)
-
         # model params
-        self.n = scattering_potential.shape[0]
+        self.nxy = scattering_potential.shape[-1]
         self.pixel_size = pixel_size
         self.energy = energy
         self.dose_per_angstrom = dose_per_angstrom
@@ -101,23 +96,54 @@ class ImageGenerator(L.LightningModule):
         self.aberration_model = aberration_model
         self.noise_model = noise_model
         self.ice_model = ice_model
+        self.ice_thickness = ice_thickness
         self.flip_curvature = flip_curvature
         self.alpha = alpha
         self.klim = klim
 
+        # compute number of z-axis pixels due to ice thickness
+        if ice_thickness is None:
+            self.nz = self.nxy
+        else:
+            # thickness of ice must be at least the size of particle FOV.
+            if ice_thickness < self.nxy * pixel_size:
+                self.nz = self.nxy
+                print('Ice thickness is smaller than particle size. Reseting ice thickness to particle size.')
+            else:
+                self.nz = ice_thickness // pixel_size
+
+        # register buffers
+        self.register_buffer("V", scattering_potential)
+        self.register_buffer("quaternions", quaternions)
+        self.register_buffer("translations", translations)
+        cs, dfu, dfv, dfang, tiltx, tilty = torch.unbind(ctf_params, dim=-1)
+        self.register_buffer("cs", cs)
+        self.register_buffer("dfang", dfang)
+        self.register_buffer("tiltx", tiltx)
+        self.register_buffer("tilty", tilty)
+        
+        # for dynamic/kinematic scattering, we need to account for the defocus
+        # implicit in the scattering module
+        if self.scattering_model not in ['projection', 'ctf']:
+            dfu -= (self.nz * pixel_size) / 2
+            dfv -= (self.nz * pixel_size) / 2
+        self.register_buffer("dfu", dfu)
+        self.register_buffer("dfv", dfv)
+
         # initialize modules
         self.scattering = Scattering(
-            self.n,
+            self.nxy,
             pixel_size,
             energy,
             dose_per_angstrom,
             scattering_model=scattering_model,
             klim=klim,
             flip_curvature=flip_curvature,
+            nz=self.nz
         )
 
         self.aberration = Aberration(
-            self.n,
+            self.nxy,
             pixel_size,
             energy,
             aberration_model=aberration_model,
@@ -132,22 +158,30 @@ class ImageGenerator(L.LightningModule):
         )
 
         if ice_model == 'randomchoice':
-            self.icemaker = NaiveIcemaker(n=V.shape[-1], dx=pixel_size)
+            self.icemaker = NaiveIcemaker(n=self.nxy,
+                                          dx=pixel_size,
+                                          ice_thickness=ice_thickness)
 
     def rotate(self, Q, T):
         R = rotations.quaternion_to_rotation_matrix(Q)
-        T = rotations.translations_angstrom_to_torch(T, self.n, self.pixel_size)
+        T = rotations.translations_angstrom_to_torch(T, self.nxy, self.pixel_size)
         theta = rotations.build_affine_matrix(R, T)
         V = rotations.rotate_volume(self.V, theta, origin='relion')
         return V
         
     def solvate(self, V):
-        if len(V.shape) == 4:
-            batchsize = len(V)
-        elif len(V.shape) == 3:
-            batchsize = 1
         # generates ice with size (B x Z x Y x X)
-        ice = self.icemaker.generate_random_icecube(batchsize=batchsize)
+        ice = self.icemaker.generate_random_icecube(batchsize=len(V))
+
+        # pad V in z-axis if ice_thickness is not None
+        if self.ice_thickness is not None:
+            pad_px = ice.shape[1] - V.shape[1]
+            V = F.pad(V,
+                      (0,0,# x-axis
+                       0,0,# y-axis
+                       pad_px//2, ice.shape[1] - pad_px//2 - V.shape[1],  # z-axis
+                      ))
+            
         icemask = V.detach().clone()
         icemask[icemask<10] = 1
         icemask[icemask>=10] = 0
@@ -162,12 +196,19 @@ class ImageGenerator(L.LightningModule):
         #add ice
         if self.ice_model == 'randomchoice':
             V = self.solvate(V)
-                
         #scatter V
         exitwaves = self.scattering(V)
         
         #aberrate exitwaves
-        exitwaves = self.aberration(exitwaves, self.cs[idx], self.dfu[idx], self.dfv[idx], self.dfang[idx])
+        exitwaves = self.aberration(
+            exitwaves,
+            self.cs[idx],
+            self.dfu[idx],
+            self.dfv[idx],
+            self.dfang[idx],
+            self.tiltx[idx],
+            self.tilty[idx]
+        )
         
         #image/noise
         images = self.detector(exitwaves)

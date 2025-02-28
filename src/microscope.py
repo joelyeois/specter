@@ -1,8 +1,9 @@
 import lightning as L
-import torch
 import numpy as np
+import torch
+from fft_tools import fft2, fftn, ifft2, ifftn
 from scattering import energy_to_wavelength
-from fft_tools import fft2, ifft2, fftn, ifftn
+
 
 class Aberration(L.LightningModule):
     def __init__(
@@ -10,7 +11,7 @@ class Aberration(L.LightningModule):
         n_pixels,
         pixel_size,
         energy,
-        aberration_model='holography',
+        aberration_model="holography",
         alpha=None,
     ):
         """
@@ -34,7 +35,7 @@ class Aberration(L.LightningModule):
         -----
         .. [1] E. J. Kirkland, Advanced Computing in Electron Microscopy (Springer
            US, Boston, MA, 2010).
-           [2] P. A. Penczek, “Image Restoration in Cryo-Electron Microscopy” in 
+           [2] P. A. Penczek, “Image Restoration in Cryo-Electron Microscopy” in
            Methods in Enzymology (Academic Press Inc., 2010)vol. 482, pp. 35–72.
 
         """
@@ -54,14 +55,16 @@ class Aberration(L.LightningModule):
         radian = torch.arctan2(kyy, kxx)
         self.register_buffer("radian", radian)
         self.register_buffer("k2", k2)
+        self.register_buffer("kxx", kxx)
+        self.register_buffer("kyy", kyy)
 
-        if aberration_model == 'ctf':
+        if aberration_model == "ctf":
             if alpha is None:
                 raise Exception("Specify alpha for CTF model.")
             else:
                 self.alpha = alpha
 
-    def aberration(self, cs, dfu, dfv, dfang):
+    def aberration(self, cs, dfu, dfv, dfang, tiltx, tilty):
         w = self.wavelength
         ang = self.radian.unsqueeze(0)
         k2 = self.k2.unsqueeze(0)
@@ -70,32 +73,46 @@ class Aberration(L.LightningModule):
         dfang = dfang.unsqueeze(1).unsqueeze(2)
         cs = cs.unsqueeze(1).unsqueeze(2)
         df = 0.5 * (dfu + dfv + (dfv - dfu) * torch.cos(2 * (ang + dfang)))
-        gamma = -torch.pi * w * k2 * (0.5 * cs * w**2 * k2 - df)
-        return gamma
+        gamma = torch.pi * w * k2 * (0.5 * cs * w**2 * k2 - df)
 
-    def transfer(self, cs, dfu, dfv, dfang):
-        gamma = self.aberration(cs, dfu, dfv, dfang)
-        if self.aberration_model == 'ctf':
-            transfer = np.sqrt(1 - self.alpha**2) * torch.sin(gamma) - self.alpha * torch.cos(gamma)
-            return transfer
-        elif self.aberration_model == 'holography':
+        # beamtilt
+        tiltx = tiltx.unsqueeze(1).unsqueeze(2)
+        tilty = tilty.unsqueeze(1).unsqueeze(2)
+        phi = (
+            -2
+            * torch.pi
+            * w**2
+            * cs
+            * k2
+            * (torch.sin(tilty) * self.kxx + torch.sin(tiltx) * self.kyy)
+        )
+        return gamma, phi
+
+    def transfer(self, cs, dfu, dfv, dfang, tiltx, tilty):
+        gamma, phi = self.aberration(cs, dfu, dfv, dfang, tiltx, tilty)
+        if self.aberration_model == "ctf":
+            transfer = np.sqrt(1 - self.alpha**2) * torch.sin(
+                gamma
+            ) - self.alpha * torch.cos(gamma)
+        elif self.aberration_model == "holography":
             transfer = torch.exp(-1j * gamma)
-            return transfer
+        return transfer * torch.exp(-1j * phi)
 
-    def forward(self, exitwave, cs, dfu, dfv, dfang):
-        f = self.transfer(cs, dfu, dfv, dfang)
+    def forward(self, exitwave, cs, dfu, dfv, dfang, tiltx, tilty):
+        f = self.transfer(cs, dfu, dfv, dfang, tiltx, tilty)
         aberrated_exitwaves = ifft2(fft2(exitwave) * f)
-        if self.aberration_model == 'ctf':
+        if self.aberration_model == "ctf":
             return torch.real(aberrated_exitwaves)
-        elif self.aberration_model == 'holography':
+        elif self.aberration_model == "holography":
             return aberrated_exitwaves
+
 
 class Detector(L.LightningModule):
     def __init__(
         self,
         pixel_size,
         dose_per_angstrom,
-        aberration_model='holography',
+        aberration_model="holography",
         noise_model=None,
         magnification=None,
         dqe=None,
@@ -128,15 +145,17 @@ class Detector(L.LightningModule):
         self.noise_model = noise_model
 
     def image(self, aberrated_exitwave):
-        if self.aberration_model == 'holography':
+        if self.aberration_model == "holography":
             images = torch.abs(aberrated_exitwave) ** 2
-        elif self.aberration_model == 'ctf':
-            images = aberrated_exitwave * np.sqrt(self.dose_per_pixel) + self.dose_per_pixel
+        elif self.aberration_model == "ctf":
+            images = (
+                aberrated_exitwave * np.sqrt(self.dose_per_pixel) + self.dose_per_pixel
+            )
         return images
 
     def forward(self, aberrated_exitwave):
         images = self.image(aberrated_exitwave)
         if self.noise_model is None:
             return images
-        elif self.noise_model == 'poisson':
+        elif self.noise_model == "poisson":
             return torch.poisson(images)

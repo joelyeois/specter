@@ -196,16 +196,42 @@ class Icemaker:
         self.n_extra_atoms = torch.tensor(self.n_extra_atoms)
 
 class NaiveIcemaker:
-    """Creates ice through random choice. Fast."""
+    def __init__(self, dx, n, ice_thickness=None):
+        """
+        Creates ice through random choice. Given a volume, we calculate the number
+        of ice molecules that should populate the volume based on the density of
+        amorphous ice. Random choice is then used to determine the position of
+        ice molecules, which are then dressed with the scattering kernel of ice. 
 
-    def __init__(self, dx, n):
+        Parameters
+        ----------
+        dx : float
+            Pixel size in angstroms.
+        n: int
+            Number of pixels in xy-axis. Assumes a square field-of-view.
+        ice_thickness: float
+            Specifices the thickness of ice in Angstroms. Typically 100–1000 A. Must
+            be same or larger than FOV of the particle.
+        """
         self.dx = dx
         self.n = n
-        self.dv = dx**3
-        self.nv = n**3
-        self.total_vol = self.nv * self.dv  # A^3
+
+        if ice_thickness is None:
+                ice_thickness_px = n
+        else:
+            # thickness of ice must be at least the size of particle FOV.
+            if ice_thickness < n * dx:
+                self.nz = n
+                print('Ice thickness is smaller than particle size. Reseting ice thickness to particle size.')
+            else:
+                self.nz = ice_thickness // dx
+        
+        self.dv = dx**3 # voxel volume
+        self.nv = n**2 * self.nz # number of voxels
+        self.total_vol = self.nv * self.dv  # total volume
         self.n_ice_molecules = int(ndensity_of_amorphous_ice * self.total_vol)
         self.ice_kernel = self.create_ice_kernel()
+        self.ice_thickness = ice_thickness
 
     def create_initial_ice_volume(self):
         #slowest, without duplicates
@@ -216,11 +242,11 @@ class NaiveIcemaker:
         # ice_idx = ice_idx[:self.n_ice_molecules]
         
         #fastest, with duplicates
-        ice_idx = torch.randint(0, self.n**3, (self.n_ice_molecules,))
+        ice_idx = torch.randint(0, self.nv, (self.n_ice_molecules,))
         
-        ice_vol_init = torch.zeros(self.n**3)
+        ice_vol_init = torch.zeros(self.nv)
         ice_vol_init[ice_idx] = 1
-        ice_vol_init = ice_vol_init.reshape(self.n, self.n, self.n)
+        ice_vol_init = ice_vol_init.reshape(self.nz, self.n, self.n) # z, y, x
         return ice_vol_init
 
     def create_ice_kernel(self, sn=28):
@@ -256,17 +282,12 @@ class NaiveIcemaker:
         return avgpool3d(pot[None, None]).squeeze() * self.dx
 
     def generate_random_icecube(self, batchsize=1):
-        if batchsize == 1:
+        icecubes = torch.zeros(batchsize, self.nz, self.n, self.n)
+        for i in range(batchsize):
             self.icedeltas = self.create_initial_ice_volume()
             self.icecube = fftconvolve(self.icedeltas, self.ice_kernel, mode='same')
-            return self.icecube
-        else:
-            icecubes = torch.zeros(batchsize, self.n, self.n, self.n)
-            for i in range(batchsize):
-                self.icedeltas = self.create_initial_ice_volume()
-                self.icecube = fftconvolve(self.icedeltas, self.ice_kernel, mode='same')
-                icecubes[i] = self.icecube
-            return icecubes
+            icecubes[i] = self.icecube
+        return icecubes
 
 def radial_profile_3d(data, center=None, return_r=False):
     m, n, o = np.shape(data)

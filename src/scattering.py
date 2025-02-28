@@ -37,13 +37,14 @@ def complex_potential(v, alpha=0.1):
 class Scattering(L.LightningModule):
     def __init__(
         self,
-        n_pixels,
+        nxy,
         pixel_size,
         energy,
         dose_per_angstrom,
         scattering_model="multislice",
         klim=None,
         flip_curvature=False,
+        nz=None,
     ):
         """
         A scattering module to compute the 2D exitwave from a 3D scattering
@@ -51,9 +52,8 @@ class Scattering(L.LightningModule):
 
         Parameters
         ----------
-        n_pixels : int
-            Number of pixels in volume, (n_pixels, n_pixels, n_pixels). Assumes same
-            number of pixels in all three axes for now.
+        nxy : int
+            Number of pixels in volume, (nz, nxy, nxy).
         pixel_size: float
             Pixel size in angstroms. Assumes dz is also pixel_size for now.
         energy: float
@@ -80,7 +80,8 @@ class Scattering(L.LightningModule):
 
         """
         super().__init__()
-        self.n_pixels = n_pixels
+        self.nxy = nxy
+        self.nz = nz
         self.pixel_size = pixel_size
 
         # model params
@@ -93,7 +94,7 @@ class Scattering(L.LightningModule):
         self.flip_curvature = flip_curvature
 
         # frequency coordinates
-        kx = torch.fft.fftshift(torch.fft.fftfreq(n_pixels, pixel_size))
+        kx = torch.fft.fftshift(torch.fft.fftfreq(nxy, pixel_size))
         kxx, kyy = torch.meshgrid(kx, kx, indexing="ij")
         k = torch.sqrt(kxx**2 + kyy**2)
 
@@ -105,9 +106,9 @@ class Scattering(L.LightningModule):
         # Fresnel transfer function for first Born
         if scattering_model == "firstborn":
             F = []
-            for i in range(n_pixels):
+            for i in range(nz):
                 f = torch.exp(-1j * torch.pi * self.wavelength * pixel_size * 
-                              (n_pixels - i) * k**2)
+                              (nz - i) * k**2)
                 F.append(f)
             F = torch.stack(F)
             self.register_buffer("F", F)
@@ -115,7 +116,7 @@ class Scattering(L.LightningModule):
         # Kirkland bandlimit
         self.klim = klim
         if klim is not None:
-            kmask = filters.circle2d(n_pixels, int(n_pixels * klim))[None, ...]
+            kmask = filters.circle2d(nxy, int(nxy * klim))[None, ...]
             self.register_buffer("kmask", kmask)
         else:
             self.kmask = 1

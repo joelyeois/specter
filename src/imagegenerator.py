@@ -102,15 +102,17 @@ class ImageGenerator(L.LightningModule):
         self.klim = klim
 
         # compute number of z-axis pixels due to ice thickness
-        if ice_thickness is None:
+        if ice_model != 'randomchoice':
             self.nz = self.nxy
         else:
-            # thickness of ice must be at least the size of particle FOV.
-            if ice_thickness < self.nxy * pixel_size:
+            if ice_thickness is None:
                 self.nz = self.nxy
-                print('Ice thickness is smaller than particle size. Reseting ice thickness to particle size.')
             else:
-                self.nz = ice_thickness // pixel_size
+                # thickness of ice must be at least the size of particle FOV.
+                if ice_thickness < self.nxy * pixel_size:
+                    self.nz = self.nxy
+                else:
+                    self.nz = ice_thickness // pixel_size
 
         # register buffers
         self.register_buffer("V", scattering_potential)
@@ -125,8 +127,8 @@ class ImageGenerator(L.LightningModule):
         # for dynamic/kinematic scattering, we need to account for the defocus
         # implicit in the scattering module
         if self.scattering_model not in ['projection', 'ctf']:
-            dfu -= (self.nz * pixel_size) / 2
-            dfv -= (self.nz * pixel_size) / 2
+            dfu = dfu.clone() - (self.nz * pixel_size) / 2
+            dfv = dfv.clone() - (self.nz * pixel_size) / 2
         self.register_buffer("dfu", dfu)
         self.register_buffer("dfv", dfv)
 
@@ -174,13 +176,14 @@ class ImageGenerator(L.LightningModule):
         ice = self.icemaker.generate_random_icecube(batchsize=len(V))
 
         # pad V in z-axis if ice_thickness is not None
-        if self.ice_thickness is not None:
-            pad_px = ice.shape[1] - V.shape[1]
-            V = F.pad(V,
-                      (0,0,# x-axis
-                       0,0,# y-axis
-                       pad_px//2, ice.shape[1] - pad_px//2 - V.shape[1],  # z-axis
-                      ))
+        if self.ice_model == 'randomchoice':
+            if self.ice_thickness is not None:
+                pad_px = ice.shape[1] - V.shape[1]
+                V = F.pad(V,
+                          (0,0,# x-axis
+                           0,0,# y-axis
+                           pad_px//2, ice.shape[1] - pad_px//2 - V.shape[1],  # z-axis
+                          ))
             
         icemask = V.detach().clone()
         icemask[icemask<10] = 1

@@ -212,7 +212,6 @@ class ImageGenerator(L.LightningModule):
             self.tiltx[idx],
             self.tilty[idx]
         )
-        
         #image/noise
         images = self.detector(exitwaves)
         return images

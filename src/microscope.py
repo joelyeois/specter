@@ -91,7 +91,7 @@ class Aberration(L.LightningModule):
         
         # phase shift
         phaseshift = phaseshift.unsqueeze(1).unsqueeze(2)
-        if not self.usectf:
+        if self.aberration_model == "holography":
             # phaseshift must be zero at DC for Fourier optics
             phaseshift = phaseshift * torch.ones_like(gamma)
             phaseshift[:, 0, 0] = 0

@@ -45,6 +45,7 @@ class Scattering(L.LightningModule):
         klim=None,
         flip_curvature=False,
         nz=None,
+        alpha=0.
     ):
         """
         A scattering module to compute the 2D exitwave from a 3D scattering
@@ -92,6 +93,7 @@ class Scattering(L.LightningModule):
         self.sigma = interaction_parameter(energy)
         self.scattering_model = scattering_model
         self.flip_curvature = flip_curvature
+        self.alpha = alpha
 
         # frequency coordinates
         kx = torch.fft.fftshift(torch.fft.fftfreq(nxy, pixel_size))
@@ -182,13 +184,13 @@ class Scattering(L.LightningModule):
             Batch of 2D exitwaves / projected potentials.
         """
         if self.scattering_model == "multislice":
-            V = complex_potential(V)
+            V = complex_potential(V, alpha=self.alpha)
             return self.multislice(V)
         elif self.scattering_model == "projection":
-            V = complex_potential(V)
+            V = complex_potential(V, alpha=self.alpha)
             return self.projection(V)
         elif self.scattering_model == "firstborn":
-            V = complex_potential(V)
+            V = complex_potential(V, alpha=self.alpha)
             return self.firstborn(V)
         elif self.scattering_model == "ctf":
             return self.ctf(V)

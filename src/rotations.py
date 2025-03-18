@@ -39,6 +39,26 @@ def random_quaternion(convention="xyzw"):
     return quat
 
 
+def random_rotvec():
+    """
+    Generates a random rotation vector.
+
+    Returns
+    -------
+    rotvec : tensor
+        A random rotation vector.
+    """
+    U, V, theta = torch.rand(3)
+    theta = theta * torch.pi
+    psi = 2 * torch.pi * U
+    phi = torch.arccos(2 * V - 1)
+    x = torch.sin(phi) * torch.cos(psi)
+    y = torch.sin(phi) * torch.sin(psi)
+    z = torch.cos(phi)
+    rotvec = torch.tensor([x,y,z]) * theta
+    return rotvec
+
+
 def rotate_coordinates(coordinates, quats, inverse=False):
     """
     Rotates a set of xyz coordinates based on input quaternions.

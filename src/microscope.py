@@ -64,10 +64,12 @@ class Aberration(L.LightningModule):
             else:
                 self.alpha = alpha
 
-    def aberration(self, cs, dfu, dfv, dfang, tiltx, tilty):
+    def aberration(self, cs, dfu, dfv, dfang, tiltx, tilty, phaseshift):
         w = self.wavelength
         ang = self.radian.unsqueeze(0)
         k2 = self.k2.unsqueeze(0)
+        
+        # defocus
         dfu = dfu.unsqueeze(1).unsqueeze(2)
         dfv = dfv.unsqueeze(1).unsqueeze(2)
         dfang = dfang.unsqueeze(1).unsqueeze(2)
@@ -86,20 +88,27 @@ class Aberration(L.LightningModule):
             * k2
             * (torch.sin(tilty) * self.kxx + torch.sin(tiltx) * self.kyy)
         )
-        return gamma, phi
+        
+        # phase shift
+        phaseshift = phaseshift.unsqueeze(1).unsqueeze(2)
+        if not self.usectf:
+            # phaseshift must be zero at DC for Fourier optics
+            phaseshift = phaseshift * torch.ones_like(gamma)
+            phaseshift[:, 0, 0] = 0
+        return gamma - phaseshift, phi
 
-    def transfer(self, cs, dfu, dfv, dfang, tiltx, tilty):
-        gamma, phi = self.aberration(cs, dfu, dfv, dfang, tiltx, tilty)
+    def transfer(self, cs, dfu, dfv, dfang, tiltx, tilty, phaseshift):
+        gamma, phi = self.aberration(cs, dfu, dfv, dfang, tiltx, tilty, phaseshift)
         if self.aberration_model == "ctf":
-            transfer = np.sqrt(1 - self.alpha**2) * torch.sin(
+            trans = np.sqrt(1 - self.alpha**2) * torch.sin(
                 gamma
             ) - self.alpha * torch.cos(gamma)
         elif self.aberration_model == "holography":
-            transfer = torch.exp(-1j * gamma)
-        return transfer * torch.exp(-1j * phi)
+            trans = torch.exp(-1j * gamma)
+        return trans * torch.exp(-1j * phi)
 
-    def forward(self, exitwave, cs, dfu, dfv, dfang, tiltx, tilty):
-        f = self.transfer(cs, dfu, dfv, dfang, tiltx, tilty)
+    def forward(self, exitwave, cs, dfu, dfv, dfang, tiltx, tilty, phaseshift):
+        f = self.transfer(cs, dfu, dfv, dfang, tiltx, tilty, phaseshift)
         aberrated_exitwaves = ifft2(fft2(exitwave) * f)
         if self.aberration_model == "ctf":
             return torch.real(aberrated_exitwaves)

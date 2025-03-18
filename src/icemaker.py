@@ -218,6 +218,7 @@ class NaiveIcemaker:
 
         if ice_thickness is None:
                 ice_thickness_px = n
+                self.nz = n
         else:
             # thickness of ice must be at least the size of particle FOV.
             if ice_thickness < n * dx:

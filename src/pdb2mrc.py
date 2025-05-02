@@ -12,7 +12,7 @@ class PDB2MRC:
         self.pdb_code = pdb_code
         self.pdb_path = pdb_path
 
-    def fetch_pdb(self, pdb_folder='./pdb-data/', assemble=True):
+    def fetch_pdb(self, pdb_folder='./pdb-data/', assemble=True, center=True):
         self.assemble = assemble
         if self.pdb_code is not None:
             # saves PDB file
@@ -24,9 +24,12 @@ class PDB2MRC:
         self.n_atoms = len(self.coords)
         self.unique_elements = atom.atom_symbol(torch.unique(self.atomic_numbers))
 
-        # center coordinates onto origin (0,0,0)
-        center = pdbtools.center_of_particle(self.coords)
-        self.centered_coords = self.coords - center.reshape(1, -1)
+        # center coordinates onto origin (0,0,0
+        if center:
+            center = pdbtools.center_of_particle(self.coords)
+            self.centered_coords = self.coords - center.reshape(1, -1)
+        else:
+            self.centered_coords = self.coords
 
     def build_particle(self, 
                        n=256, 

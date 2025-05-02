@@ -102,14 +102,19 @@ class Scattering(L.LightningModule):
 
         # Fresnel transfer function for multislice
         if scattering_model == "multislice":
-            F = torch.exp(-1j * torch.pi * self.wavelength * pixel_size * k**2)
+            # original
+            # F = torch.exp(-1j * torch.pi * self.wavelength * pixel_size * k**2)
+            F = torch.exp(1j * torch.pi * self.wavelength * pixel_size * k**2)
             self.register_buffer("F", F)
 
         # Fresnel transfer function for first Born
         if scattering_model == "firstborn":
             F = []
             for i in range(nz):
-                f = torch.exp(-1j * torch.pi * self.wavelength * pixel_size * 
+                # original
+                # f = torch.exp(-1j * torch.pi * self.wavelength * pixel_size * 
+                #               (nz - i) * k**2)
+                f = torch.exp(1j * torch.pi * self.wavelength * pixel_size * 
                               (nz - i) * k**2)
                 F.append(f)
             F = torch.stack(F)

@@ -1,6 +1,7 @@
 import torch
 import torch.nn.functional as F
 from scipy.spatial.transform import Rotation as R
+import numpy as np
 
 def random_quaternion(convention="xyzw"):
     """
@@ -184,6 +185,40 @@ def quaternion_to_rotation_matrix(q):
     ).reshape(*shape)
     return R
 
+def rotvec_to_rotation_matrix(rv):
+    """
+    Converts rotation vectors (x,y,z) to rotation matrices. 
+    Matches with scipy.rotation.from_rotvec(rv).as_matrix().
+
+    Parameters
+    ----------
+    q : 2D tensor
+        Batch of rotation vectors with shape (N, 3).
+
+    Returns
+    -------
+    R : 3D tensor
+        Batch of rotation matrices with shape (N, 3, 3).
+    """
+    device = rv.device
+    angles = torch.linalg.norm(rv, dim=1)
+    axes = rv / angles[..., None]
+    angles = angles[..., None, None]
+    ux = axes[..., 0]
+    uy = axes[..., 1]
+    uz = axes[..., 2]
+    shape = rv.shape[:-1] + (3, 3)
+    K = torch.stack(
+        [
+            torch.zeros_like(ux), -uz, uy,
+            uz, torch.zeros_like(ux), -ux,
+            -uy, ux, torch.zeros_like(ux)],
+        axis=-1,
+    ).reshape(*shape)
+    K2 = torch.bmm(K, K)
+    R = torch.eye(3, device=device).unsqueeze(0) + torch.sin(angles) * K + (1 - torch.cos(angles)) * K2
+    return R
+
 def translations_angstrom_to_torch(Txy, n, voxel_size):
     """
     Builds a batch of normalized translation vectors from rlnOriginXAngst and
@@ -252,3 +287,47 @@ def build_affine_matrix(R, T):
     Tprime[:,2] = R[:,2,0] * T[:,0] + R[:,2,1] * T[:,1] + R[:,2,2] * T[:,2]
     theta = torch.concat([R, Tprime.unsqueeze(2)], dim=-1)
     return theta
+
+def rotations_angular_difference(r1, r2, rotation_representation='rotvec'):
+    """
+    Calculates the smallest angles of rotation needed to a batch of 3D rotations (r1)
+    to match another (r2).
+
+    Parameters
+    ----------
+    r1, r2 : 2D tensors
+        Batch of rotation representations (N, ...) each.
+    rotation_representation : str
+        The rotation representation of the input. Supports only 'quaternion' and
+        'rotvec' for now.
+
+    Returns
+    -------
+    angles : 1D tensor
+        The smallest angular difference.
+
+    Notes
+    -----
+    .. [1] https://math.stackexchange.com/a/4001635
+    
+    """
+    # use scipy Rotation module
+    if rotation_representation == 'rotvec':
+        r1 = R.from_rotvec(r1)
+        r2 = R.from_rotvec(r2)
+    elif rotation_representation == 'quaternion':
+        r1 = R.from_quat(r1)
+        r2 = R.from_quat(r2)
+
+    # invert one of them
+    r1_inv = r1.inv()
+
+    # convert to rotation matrices
+    r1_inv_m = r1_inv.as_matrix()
+    r2_m = r2.as_matrix()
+
+    # compute relative angle
+    re_m = np.matmul(r1_inv_m, r2_m)
+    angles_rad = np.arccos((np.trace(re_m, axis1=-1, axis2=-2) - 1)/2)
+    angles = angles_rad / np.pi * 180
+    return angles

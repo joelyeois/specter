@@ -12,6 +12,11 @@ import biotite.database.rcsb as rcsb
 import biotite.structure.io.pdbx as pdbx
 import numpy as np
 
+from tqdm import tqdm
+
+from Bio.PDB.MMCIFParser import MMCIFParser
+from Bio.PDB import PDBParser
+
 def center_of_particle(coords):
     """
     Return a particle's geometric center.
@@ -95,16 +100,84 @@ def get_atomic_number(symbol):
 
     return periodic_table_caps.get(symbol)
 
+# def get_atoms_and_coordinates_from_pdb(
+#     input_filename,
+#     fov=(100, 100, 100),
+#     debye_factor=0.08,
+#     comment="",
+#     return_array=True,
+#     write_file=False,
+#     output_filename=None,
+#     assemble=True,
+#     **kwargs,
+# ):
+#     """
+#     Writes an XYZ file formatted for Kirkland's multi-slice simulation program.
+
+#     software.
+
+#     Parameters
+#     ----------
+#     input_filename : str
+#         The name of the input file containing the atomic structure.
+#     fov : tuple
+#         Field of view dimensions (default is (100, 100, 100)).
+#     debye_factor : float
+#         Debye-Waller factor (default is 0.08).
+#     comment : str
+#         A comment to include in the header of the output file.
+#     return_array : boolean
+#         If True, returns array for elements and coordinates.
+#     write_file : boolean
+#         If True, writes .txt file.
+#     output_filename : str
+#         The name of the output file to write the XYZ data.
+#     assemble : boolean
+#         If True, assembles biological unit using symmetries in pdb file. Else,
+#         returns assymetric subunit.
+
+#     Returns
+#     ----------
+#     elements : (N,)-shape array
+#     coords : (N,3)-shape array
+#         x,y,z coordinates of each atom
+#     """
+
+#     pdbx_file = pdbx.CIFFile.read(input_filename)
+#     if assemble:
+#         biological_unit = pdbx.get_assembly(pdbx_file, **kwargs)
+#     else:
+#         biological_unit = pdbx.get_structure(pdbx_file, **kwargs)
+#     n_atoms = len(biological_unit.element)
+#     coords = np.squeeze(biological_unit.coord)  # [x, y, z]
+#     elements = np.zeros(n_atoms, dtype=int)
+#     for i in range(n_atoms):
+#         # Read the Atomic Number
+#         elements[i] = get_atomic_number(biological_unit.element[i])
+
+#     if write_file:
+#         if output_filename is None:
+#             output_filename = input_filename + ".txt"
+#         with open(output_filename, "w") as file:
+#             # Write the header
+#             file.write(comment + "\n")
+#             file.write(f"{fov[0]:.2f}\t{fov[1]:.2f}\t{fov[2]:.2f}\n")
+
+#             # Write the coordinates and other details
+#             for elem, coord in zip(elements, coords):
+#                 file.write(
+#                     f"{int(elem)}\t{coord[0]:<8.4f}\t{coord[1]:<8.4f}\t{coord[2]:<8.4f}\t 1.0\t{debye_factor}\n"
+#                 )
+
+#             # Write the comment or end line
+#             file.write("-1")
+#     if return_array:
+#         return torch.from_numpy(elements), torch.from_numpy(coords)
+
 
 def get_atoms_and_coordinates_from_pdb(
     input_filename,
-    fov=(100, 100, 100),
-    debye_factor=0.08,
-    comment="",
     return_array=True,
-    write_file=False,
-    output_filename=None,
-    assemble=True,
     **kwargs,
 ):
     """
@@ -116,21 +189,8 @@ def get_atoms_and_coordinates_from_pdb(
     ----------
     input_filename : str
         The name of the input file containing the atomic structure.
-    fov : tuple
-        Field of view dimensions (default is (100, 100, 100)).
-    debye_factor : float
-        Debye-Waller factor (default is 0.08).
-    comment : str
-        A comment to include in the header of the output file.
     return_array : boolean
         If True, returns array for elements and coordinates.
-    write_file : boolean
-        If True, writes .txt file.
-    output_filename : str
-        The name of the output file to write the XYZ data.
-    assemble : boolean
-        If True, assembles biological unit using symmetries in pdb file. Else,
-        returns assymetric subunit.
 
     Returns
     ----------
@@ -139,34 +199,27 @@ def get_atoms_and_coordinates_from_pdb(
         x,y,z coordinates of each atom
     """
 
-    pdbx_file = pdbx.CIFFile.read(input_filename)
-    if assemble:
-        biological_unit = pdbx.get_assembly(pdbx_file, **kwargs)
-    else:
-        biological_unit = pdbx.get_structure(pdbx_file, **kwargs)
-    n_atoms = len(biological_unit.element)
-    coords = np.squeeze(biological_unit.coord)  # [x, y, z]
-    elements = np.zeros(n_atoms, dtype=int)
-    for i in range(n_atoms):
-        # Read the Atomic Number
-        elements[i] = get_atomic_number(biological_unit.element[i])
+    if input_filename[-3:] == 'pdb':
+        parser = PDBParser()
+    elif input_filename[-3:] == 'cif':
+        parser = MMCIFParser()
+    structure = parser.get_structure('structure', input_filename)
 
-    if write_file:
-        if output_filename is None:
-            output_filename = input_filename + ".txt"
-        with open(output_filename, "w") as file:
-            # Write the header
-            file.write(comment + "\n")
-            file.write(f"{fov[0]:.2f}\t{fov[1]:.2f}\t{fov[2]:.2f}\n")
+    # Extract atomic data
+    coords = []
+    elements = []
+    for atom in tqdm(structure.get_atoms()):
+        element_symbol = atom.element.strip().upper()
+        atomic_number = get_atomic_number(element_symbol)
+        elements.append(atomic_number)
+        
+        if atomic_number is not None:
+            coord = atom.get_coord()
+            coords.append(coord)
+    n_atoms = len(coords)
+    coords = np.array(coords)
+    elements = np.array(elements)
 
-            # Write the coordinates and other details
-            for elem, coord in zip(elements, coords):
-                file.write(
-                    f"{int(elem)}\t{coord[0]:<8.4f}\t{coord[1]:<8.4f}\t{coord[2]:<8.4f}\t 1.0\t{debye_factor}\n"
-                )
-
-            # Write the comment or end line
-            file.write("-1")
     if return_array:
         return torch.from_numpy(elements), torch.from_numpy(coords)
 

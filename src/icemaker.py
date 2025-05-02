@@ -225,7 +225,7 @@ class NaiveIcemaker:
                 self.nz = n
                 print('Ice thickness is smaller than particle size. Reseting ice thickness to particle size.')
             else:
-                self.nz = ice_thickness // dx
+                self.nz = int(ice_thickness // dx)
         
         self.dv = dx**3 # voxel volume
         self.nv = n**2 * self.nz # number of voxels

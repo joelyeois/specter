@@ -112,7 +112,7 @@ class ImageGenerator(L.LightningModule):
                 if ice_thickness < self.nxy * pixel_size:
                     self.nz = self.nxy
                 else:
-                    self.nz = ice_thickness // pixel_size
+                    self.nz = int(ice_thickness // pixel_size)
 
         # register buffers
         self.register_buffer("V", scattering_potential)
@@ -142,7 +142,8 @@ class ImageGenerator(L.LightningModule):
             scattering_model=scattering_model,
             klim=klim,
             flip_curvature=flip_curvature,
-            nz=self.nz
+            nz=self.nz,
+            alpha=alpha
         )
 
         self.aberration = Aberration(
@@ -201,11 +202,11 @@ class ImageGenerator(L.LightningModule):
         if self.ice_model == 'randomchoice':
             V = self.solvate(V)
         #scatter V
-        exitwaves = self.scattering(V)
+        self.exitwaves = self.scattering(V)
         
         #aberrate exitwaves
-        exitwaves = self.aberration(
-            exitwaves,
+        self.detector_waves = self.aberration(
+            self.exitwaves,
             self.cs[idx],
             self.dfu[idx],
             self.dfv[idx],
@@ -215,5 +216,5 @@ class ImageGenerator(L.LightningModule):
             self.phaseshift[idx]
         )
         #image/noise
-        images = self.detector(exitwaves)
+        images = self.detector(self.detector_waves)
         return images

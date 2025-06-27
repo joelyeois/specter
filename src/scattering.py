@@ -192,7 +192,6 @@ class Scattering(L.LightningModule):
             V = complex_potential(V, alpha=self.alpha)
             return self.multislice(V)
         elif self.scattering_model == "projection":
-            print('hi')
             V = complex_potential(V, alpha=self.alpha)
             return self.projection(V)
         elif self.scattering_model == "firstborn":

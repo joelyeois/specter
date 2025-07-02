@@ -3,6 +3,7 @@ import numpy as np
 import torch
 from fft_tools import fft2, fftn, ifft2, ifftn
 from scattering import energy_to_wavelength
+import torch.nn.functional as F
 
 
 class Aberration(L.LightningModule):
@@ -125,6 +126,7 @@ class Detector(L.LightningModule):
         noise_model=None,
         magnification=None,
         dqe=None,
+        anisomag=None
     ):
         """
         A detector module to apply detector noise to images. Future work to include
@@ -162,8 +164,35 @@ class Detector(L.LightningModule):
             )
         return images
 
-    def forward(self, aberrated_exitwave):
+    def anisomagnify(self, images, anisomag):
+        images = images.unsqueeze(1)
+        B = len(images)
+
+        # Identity matrix (Bx3x3)
+        M_affine = torch.eye(3).unsqueeze(0).repeat(B, 1, 1)
+        M_affine = M_affine.to(images.device)
+        M_affine[:, :2, :2] = anisomag
+
+        # Convert to (B, 2, 3) format by repeating for all batch elements
+        M_affine = M_affine[:, :2, :]  # Shape: (B, 2, 3)
+
+        # Generate affine grid for the batch
+        grid = F.affine_grid(M_affine, images.shape, align_corners=False)
+        
+        # Apply transformation using grid sampling
+        images = F.grid_sample(
+            images, grid, align_corners=False, padding_mode="border"
+        )
+        images = torch.squeeze(images)
+        return images
+
+    def forward(self, aberrated_exitwave, anisomag=None):
         images = self.image(aberrated_exitwave)
+
+        # Apply anisomagnification
+        if anisomag is not None:
+            images = self.anisomagnify(images, anisomag)
+        
         if self.noise_model is None:
             return images
         elif self.noise_model == "poisson":

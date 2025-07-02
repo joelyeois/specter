@@ -18,6 +18,7 @@ class ImageGenerator(L.LightningModule):
         ctf_params,
         energy,
         dose_per_angstrom,
+        anisomag=None,
         ice_model=None,
         ice_thickness=None,
         scattering_model="multislice",
@@ -51,11 +52,13 @@ class ImageGenerator(L.LightningModule):
             Energy of the electron beam in keV. Typical values are 100/120/200/300 keV.
         dose_per_angstrom: float
             Dose of the electron beam in e-/A^2.
+        anisomag: None or 3D tensor
+            Specifies 2x2 anisotropic matrix for each image.
         ice_model: str or None
-            Specifices ice algorithm. Set to None for no ice. Options includes only
+            Specifies ice algorithm. Set to None for no ice. Options includes only
             'randomchoice' (fast) for now.
         ice_thickness: float
-            Specifices the thickness of ice in Angstroms. Typically 100–1000 A. Must
+            Specifies the thickness of ice in Angstroms. Typically 100–1000 A. Must
             be same or larger than FOV of the particle.
         scattering_mode: str
             Specifies scattering model to use. Options include 'multislice',
@@ -124,6 +127,10 @@ class ImageGenerator(L.LightningModule):
         self.register_buffer("tiltx", tiltx)
         self.register_buffer("tilty", tilty)
         self.register_buffer("phaseshift", phaseshift)
+        if anisomag is None:
+            self.anisomag = anisomag
+        else:
+            self.register_buffer("anisomag", anisomag)
         
         # for dynamic/kinematic scattering, we need to account for the defocus
         # implicit in the scattering module
@@ -158,7 +165,7 @@ class ImageGenerator(L.LightningModule):
             pixel_size,
             dose_per_angstrom,
             aberration_model=aberration_model,
-            noise_model=noise_model,
+            noise_model=noise_model
         )
 
         if ice_model == 'randomchoice':
@@ -216,5 +223,8 @@ class ImageGenerator(L.LightningModule):
             self.phaseshift[idx]
         )
         #image/noise
-        images = self.detector(self.detector_waves)
+        if self.anisomag is None:
+            images = self.detector(self.detector_waves)
+        else:
+            images = self.detector(self.detector_waves, anisomag=self.anisomag[idx])
         return images

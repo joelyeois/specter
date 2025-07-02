@@ -2,6 +2,21 @@ import torch
 from skimage.filters import butterworth
 from fft_tools import fftn, ifftn
 
+def normalize_particles(particles, mask_diameter_pixels=None):
+    if mask_diameter_pixels is None:
+        mask_diameter_pixels = particles.shape[-1]
+    mask = 1 - circle2d(particles.shape[-1], mask_diameter_pixels)
+    masked_particles = particles * mask[None, ...]  # Element-wise multiplication
+    means = masked_particles.sum(dim=(-1,-2)) / mask.sum()
+
+    vars = (mask * (particles - means[:, None, None]) ** 2).sum(dim=(-1, -2)) / (
+                mask.sum()
+            )
+    stds = torch.sqrt(vars)
+
+    normalized_particles = (particles - means[:, None, None]) / stds[:, None, None]
+    return means, stds, normalized_particles
+
 def circle2d(N, d):
     """
     Generates 2D array for a filled-in circle.

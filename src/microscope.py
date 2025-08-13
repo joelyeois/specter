@@ -65,11 +65,12 @@ class Aberration(L.LightningModule):
             else:
                 self.alpha = alpha
 
-    def aberration(self, cs, dfu, dfv, dfang, tiltx, tilty, phaseshift):
+    def aberration(self, cs, dfu, dfv, dfang, tiltx, tilty, phaseshift, tref1, tref2):
         w = self.wavelength
         ang = self.radian.unsqueeze(0)
         k2 = self.k2.unsqueeze(0)
-        
+        k = torch.sqrt(k2)
+
         # defocus
         dfu = dfu.unsqueeze(1).unsqueeze(2)
         dfv = dfv.unsqueeze(1).unsqueeze(2)
@@ -81,7 +82,7 @@ class Aberration(L.LightningModule):
         # beamtilt
         tiltx = tiltx.unsqueeze(1).unsqueeze(2)
         tilty = tilty.unsqueeze(1).unsqueeze(2)
-        phi = (
+        tilt = (
             -2
             * torch.pi
             * w**2
@@ -89,6 +90,13 @@ class Aberration(L.LightningModule):
             * k2
             * (torch.sin(tilty) * self.kxx + torch.sin(tiltx) * self.kyy)
         )
+
+        #trefoil
+        tref1 = tref1.unsqueeze(1).unsqueeze(2)
+        tref2 = tref2.unsqueeze(1).unsqueeze(2)
+        trefoil = tref1 * k**3 * torch.sin(3*ang) + tref2 * k**3 * torch.cos(3*ang)
+
+        phi = tilt + trefoil
         
         # phase shift
         phaseshift = phaseshift.unsqueeze(1).unsqueeze(2)
@@ -98,8 +106,8 @@ class Aberration(L.LightningModule):
             phaseshift[:, 0, 0] = 0
         return gamma - phaseshift, phi
 
-    def transfer(self, cs, dfu, dfv, dfang, tiltx, tilty, phaseshift):
-        gamma, phi = self.aberration(cs, dfu, dfv, dfang, tiltx, tilty, phaseshift)
+    def transfer(self, cs, dfu, dfv, dfang, tiltx, tilty, phaseshift, tref1, tref2):
+        gamma, phi = self.aberration(cs, dfu, dfv, dfang, tiltx, tilty, phaseshift, tref1, tref2)
         if self.aberration_model == "ctf":
             trans = np.sqrt(1 - self.alpha**2) * torch.sin(
                 gamma
@@ -108,8 +116,8 @@ class Aberration(L.LightningModule):
             trans = torch.exp(-1j * gamma)
         return trans * torch.exp(-1j * phi)
 
-    def forward(self, exitwave, cs, dfu, dfv, dfang, tiltx, tilty, phaseshift):
-        f = self.transfer(cs, dfu, dfv, dfang, tiltx, tilty, phaseshift)
+    def forward(self, exitwave, cs, dfu, dfv, dfang, tiltx, tilty, phaseshift, tref1, tref2):
+        f = self.transfer(cs, dfu, dfv, dfang, tiltx, tilty, phaseshift, tref1, tref2)
         aberrated_exitwaves = ifft2(fft2(exitwave) * f)
         if self.aberration_model == "ctf":
             return torch.real(aberrated_exitwaves)

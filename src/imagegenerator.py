@@ -121,12 +121,14 @@ class ImageGenerator(L.LightningModule):
         self.register_buffer("V", scattering_potential)
         self.register_buffer("quaternions", quaternions)
         self.register_buffer("translations", translations)
-        cs, dfu, dfv, dfang, tiltx, tilty, phaseshift = torch.unbind(ctf_params, dim=-1)
+        cs, dfu, dfv, dfang, tiltx, tilty, phaseshift, tref1, tref2 = torch.unbind(ctf_params, dim=-1)
         self.register_buffer("cs", cs)
         self.register_buffer("dfang", dfang)
         self.register_buffer("tiltx", tiltx)
         self.register_buffer("tilty", tilty)
         self.register_buffer("phaseshift", phaseshift)
+        self.register_buffer("tref1", tref1)
+        self.register_buffer("tref2", tref2)
         if anisomag is None:
             self.anisomag = anisomag
         else:
@@ -220,7 +222,9 @@ class ImageGenerator(L.LightningModule):
             self.dfang[idx],
             self.tiltx[idx],
             self.tilty[idx],
-            self.phaseshift[idx]
+            self.phaseshift[idx],
+            self.tref1[idx],
+            self.tref2[idx],
         )
         #image/noise
         if self.anisomag is None:

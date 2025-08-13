@@ -97,9 +97,13 @@ def extract_parameters_from_csfile(csfile_path,
     # extract ctf shift, and add to translations
     beamshift_A = torch.as_tensor(dataset["ctf/shift_A"])
     translations_A -= beamshift_A
+
+    # extract trefoil
+    tref1 = torch.as_tensor(dataset["ctf/trefoil_A"][:, 0] / 1000)
+    tref2 = torch.as_tensor(dataset["ctf/trefoil_A"][:, 1] / 1000)
     
     # build ctf_params
-    ctf_params = torch.stack([cs_A, dfu_A, dfv_A, dfang_deg, beamtiltx_rad, beamtilty_rad, phaseshift_rad], dim=-1)
+    ctf_params = torch.stack([cs_A, dfu_A, dfv_A, dfang_deg, beamtiltx_rad, beamtilty_rad, phaseshift_rad, tref1, tref2], dim=-1)
 
     # extract per-particle scale factors
     scale = torch.as_tensor(dataset['alignments3D/alpha'])

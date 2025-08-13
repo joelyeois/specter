@@ -8,9 +8,6 @@ def atomic_potential_2d(atomic_number, r_xy):
     """Returns the 2D projected atomic potential for a specific element given a
     2D grid of radial distances from the atom core. Kirkland C.20.
 
-    Note: There is a singularity at r = 0 because the atomic nucleaus is essentially
-    a point charge on this scale (~1e-5 Angstroms).
-
     Parameters
     ----------
     atomic_number : int

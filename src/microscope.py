@@ -167,9 +167,7 @@ class Detector(L.LightningModule):
         if self.aberration_model == "holography":
             images = torch.abs(aberrated_exitwave) ** 2
         elif self.aberration_model == "ctf":
-            images = (
-                aberrated_exitwave * np.sqrt(self.dose_per_pixel) + self.dose_per_pixel
-            )
+            images = self.dose_per_pixel * (aberrated_exitwave + 1)
         return images
 
     def anisomagnify(self, images, anisomag):
@@ -204,4 +202,4 @@ class Detector(L.LightningModule):
         if self.noise_model is None:
             return images
         elif self.noise_model == "poisson":
-            return torch.poisson(images)
+            return torch.poisson(torch.clamp(images, min=0.))

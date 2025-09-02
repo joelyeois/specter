@@ -2,6 +2,7 @@ import numpy as np
 import pdbtools
 import potential
 import torch
+import torch.nn.functional as F
 from scipy.interpolate import CubicSpline
 from skimage.feature import peak_local_max
 from tqdm import tqdm
@@ -17,16 +18,36 @@ ndensity_of_amorphous_ice = (
 fftn = lambda array: torch.fft.fftshift(torch.fft.fftn(torch.fft.ifftshift(array)))
 ifftn = lambda array: torch.fft.fftshift(torch.fft.ifftn(torch.fft.ifftshift(array)))
 
+def torch_peak_local_max(image, min_distance=1, num_peaks=None):
+    # Add batch + channel dims
+    x = image[None, None, ...]
+    pool = F.max_pool3d if image.ndim == 3 else F.max_pool2d
+    
+    # Apply max pooling
+    pooled = pool(x, kernel_size=2*min_distance+1, stride=1, padding=min_distance)
+    mask = (x == pooled).squeeze()
+
+    coords = torch.nonzero(mask, as_tuple=False)
+
+    # Sort by intensity
+    intensities = image[tuple(coords.T)]
+    order = torch.argsort(intensities, descending=True)
+
+    if num_peaks is not None:
+        order = order[:num_peaks]
+
+    return coords[order]
 
 class Icemaker:
     """Creates ice with water rings. Slow."""
 
-    def __init__(self, dx=0.5, n=200):
+    def __init__(self, dx=0.5, n=200, device='cuda'):
         self.mdsim_dx = dx
         self.mdsim_n = n
         self.mdsim_dk = 1 / self.mdsim_n / self.mdsim_dx
+        self.device = device
 
-    def get_mdsim(self, filepath, trim_size=100):
+    def get_mdsim(self, filepath, trim_size=100, startframe=10, endframe=101):
         self.get_mdsim_file(filepath)
         mdsim_ice_deltas = []
 
@@ -35,7 +56,8 @@ class Icemaker:
             (self.mdsim_dx, self.mdsim_dx, self.mdsim_dx),
         )
 
-        for frame in tqdm(self.mdsim_frame_indexes[10:]):
+        self.mdsim_ice_coordinates = []
+        for frame in tqdm(self.mdsim_frame_indexes[startframe:endframe]):
             coordstart = frame + 9
             coords = self.get_coordinates_from_frame(coordstart)
 
@@ -52,7 +74,7 @@ class Icemaker:
                 mdsim_ice_delta[zi, yi, xi] = 1
 
             mdsim_ice_deltas.append(mdsim_ice_delta)
-
+            self.mdsim_ice_coordinates.append(centered_coords)
         self.mdsim_ice_deltas = torch.stack(mdsim_ice_deltas)
 
     def get_mdsim_file(self, filepath):
@@ -104,8 +126,8 @@ class Icemaker:
     def create_initial_ice_volume(self, n, dx):
         dv = dx**3
         nv = n**3
-        total_vol = nv * dv  # A^3
-        self.n_ice_molecules = int(ndensity_of_amorphous_ice * total_vol)
+        self.v = nv * dv  # A^3
+        self.n_ice_molecules = int(ndensity_of_amorphous_ice * self.v)
 
         ice_idx = np.random.choice(n**3, self.n_ice_molecules, replace=False)
         ice_vol_init = torch.zeros(n**3)
@@ -152,7 +174,8 @@ class Icemaker:
             dx = self.interp_dx
 
         self.ice_vol_init = self.create_initial_ice_volume(n=n, dx=dx)
-        self.current_ice_vol = self.ice_vol_init.clone()
+        self.current_ice_vol = self.ice_vol_init.clone().to(self.device)
+        self.interp_f_kernel = self.interp_f_kernel.to(self.device)
         self.niter = niter
         self.min_distance = min_distance
 
@@ -160,7 +183,7 @@ class Icemaker:
         self.n_extra_atoms = []
 
         for _ in tqdm(range(niter)):
-            prev_ice_vol = self.current_ice_vol.clone()
+            prev_ice_vol = self.current_ice_vol
             ice_vol_f = fftn(self.current_ice_vol)
 
             # amplitude multiplication
@@ -170,14 +193,19 @@ class Icemaker:
             # ice_vol_f = self.interp_f_kernel * torch.exp(1j * torch.angle(ice_vol_f))
 
             new_ice = torch.abs(ifftn(ice_vol_f))
-            peaks = peak_local_max(
-                new_ice.numpy(),
+            # peaks = peak_local_max(
+            #     new_ice.numpy(),
+            #     num_peaks=self.n_ice_molecules,
+            #     min_distance=min_distance,
+            #     exclude_border=False,
+            # )
+            peaks = torch_peak_local_max(
+                new_ice,
                 num_peaks=self.n_ice_molecules,
-                min_distance=min_distance,
-                exclude_border=False,
+                min_distance=int(min_distance/dx),
             )
 
-            ice_vol = torch.zeros(n, n, n)
+            ice_vol = torch.zeros(n, n, n, device=self.device)
             for peak in peaks:
                 ice_vol[*peak] = 1
 
@@ -190,8 +218,10 @@ class Icemaker:
                 for i in idx:
                     ice_vol[*zero_idx[i]] = 1
 
-            self.frob_norm.append(torch.mean(torch.abs(self.current_ice_vol - ice_vol) ** 2))
+            self.frob_norm.append(torch.mean(torch.abs(self.current_ice_vol.cpu() - ice_vol.cpu()) ** 2))
             self.current_ice_vol = ice_vol
+        # self.ice_coordinates = torch.from_numpy(peaks)
+        self.ice_coordinates = peaks.cpu()
         self.frob_norm = torch.tensor(self.frob_norm)
         self.n_extra_atoms = torch.tensor(self.n_extra_atoms)
 

@@ -41,3 +41,52 @@ def plot_slices(
         axes[0].set_ylabel(ylabel)
     plt.suptitle(f"Slices along axis {axis}")
     plt.show()
+
+def radial_distribution_function(coords, volume, dr=0.5, r_max=None,
+                                 number_density=0.03142228327508648, plot=True):
+    """
+        Computes radial distribution function from the list of coordinates.
+
+        Parameters
+        ----------
+        coordinates: tensor
+            Shape of (N, 3).
+        volume: float
+            Volume in A^3.
+        dr: float
+            Width of radial shell or bin in A
+        r_max: float
+            Maximum radius to plot
+        number_density: float
+            N/V in [num / A^3]. Default assumes amorphous ice.
+        """
+
+    N = coords.shape[0]
+    if r_max is None:
+        r_max = volume**(1/3) # length of cube.
+    bins = torch.arange(0, r_max + dr, dr)
+    
+    # Compute pairwise distances using cdist
+    distances = torch.cdist(coords, coords)  # (N, N)
+    
+    # Keep upper triangle only
+    mask = torch.triu(torch.ones(N, N), diagonal=1).bool()
+    distances = distances[mask]
+    
+    # Histogram
+    hist = torch.histc(distances, bins=len(bins)-1, min=0, max=r_max)
+    
+    # RDF normalization
+    r = bins[:-1] + dr/2
+    shell_volume = 4 * torch.pi * r**2 * dr
+    g_r = hist / (number_density * N * shell_volume)
+    
+    # Plot
+    if plot:
+        plt.plot(r.numpy(), g_r.numpy())
+        plt.xlabel('r')
+        plt.ylabel('g(r)')
+        plt.title('Radial Distribution Function')
+        plt.xlim([0, r_max])
+        plt.show()
+    return r.numpy(), g_r.numpy()

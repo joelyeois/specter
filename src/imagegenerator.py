@@ -4,7 +4,7 @@ import torch
 from fft_tools import fft2, fftn, ifft2, ifftn
 from microscope import Aberration, Detector
 from scattering import Scattering
-from icemaker import NaiveIcemaker
+from icemaker import NaiveIcemaker, Icemaker
 import rotations
 import torch.nn.functional as F
 
@@ -105,7 +105,7 @@ class ImageGenerator(L.LightningModule):
         self.klim = klim
 
         # compute number of z-axis pixels due to ice thickness
-        if ice_model != 'randomchoice':
+        if ice_model is None:
             self.nz = self.nxy
         else:
             if ice_thickness is None:
@@ -170,10 +170,16 @@ class ImageGenerator(L.LightningModule):
             noise_model=noise_model
         )
 
-        if ice_model == 'randomchoice':
-            self.icemaker = NaiveIcemaker(n=self.nxy,
-                                          dx=pixel_size,
-                                          ice_thickness=ice_thickness)
+        if ice_model is not None:
+            if ice_model == 'randomchoice':
+                self.icemaker = NaiveIcemaker(n=self.nxy,
+                                              dx=pixel_size,
+                                              ice_thickness=ice_thickness)
+            elif ice_model == 'iterative':
+                self.icemaker = Icemaker(n=self.nxy,
+                                        dx=pixel_size,
+                                        ice_thickness=ice_thickness,
+                                        verbose=False)
 
     def rotate(self, Q, T):
         R = rotations.quaternion_to_rotation_matrix(Q)
@@ -184,22 +190,21 @@ class ImageGenerator(L.LightningModule):
         
     def solvate(self, V):
         # generates ice with size (B x Z x Y x X)
-        ice = self.icemaker.generate_random_icecube(batchsize=len(V))
+        ice = self.icemaker.generate_ice(batchsize=len(V))
 
         # pad V in z-axis if ice_thickness is not None
-        if self.ice_model == 'randomchoice':
-            if self.ice_thickness is not None:
-                pad_px = ice.shape[1] - V.shape[1]
-                V = F.pad(V,
-                          (0,0,# x-axis
-                           0,0,# y-axis
-                           pad_px//2, ice.shape[1] - pad_px//2 - V.shape[1],  # z-axis
-                          ))
+        if self.ice_thickness is not None:
+            pad_px = ice.shape[1] - V.shape[1]
+            V = F.pad(V,
+                      (0,0,# x-axis
+                       0,0,# y-axis
+                       pad_px//2, ice.shape[1] - pad_px//2 - V.shape[1],  # z-axis
+                      ))
             
         icemask = V.detach().clone()
         icemask[icemask<10] = 1
         icemask[icemask>=10] = 0
-        V = V + ice.to(self.device) * icemask
+        V = V + ice * icemask
         self.icemask = icemask #save as attribute just to check
         return V
         
@@ -208,7 +213,7 @@ class ImageGenerator(L.LightningModule):
         V = self.rotate(self.quaternions[idx], self.translations[idx])
 
         #add ice
-        if self.ice_model == 'randomchoice':
+        if self.ice_model is not None:
             V = self.solvate(V)
         #scatter V
         self.exitwaves = self.scattering(V)

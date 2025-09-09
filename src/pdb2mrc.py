@@ -4,6 +4,8 @@ import atom
 import pdbtools
 from icemaker import Icemaker
 from fft_tools import fftconvolve
+from scipy.spatial import ConvexHull
+from scipy.spatial.distance import pdist
 
 class PDB2MRC:
     """Ice-making machine"""
@@ -30,6 +32,16 @@ class PDB2MRC:
             self.centered_coords = self.coords - center.reshape(1, -1)
         else:
             self.centered_coords = self.coords
+
+        self.estimate_max_diameter()
+
+    def estimate_max_diameter(self, coords=None):
+        if coords is None:
+            coords = self.centered_coords
+        hull = ConvexHull(coords)
+        hull_points = coords[hull.vertices]
+        self.max_diameter = pdist(hull_points).max()
+        
 
     def build_particle(self, 
                        n=256, 

@@ -1,5 +1,6 @@
 import torch
 import rotations
+import numpy as np
 
 def poisson_disk_neighbors(min_distance, n_points=torch.inf,
                            max_distance=5.0, k=30):
@@ -69,7 +70,8 @@ def poisson_disk_neighbors(min_distance, n_points=torch.inf,
         return torch.stack(pts[1:n_points])
 
 
-def crowd_with_duplicates(V, min_distance, pixel_size, max_distance=None):
+def crowd_with_duplicates(V, min_distance, pixel_size, max_distance=None, 
+                          return_coordinates=False):
     """
     Generates a crowded volume by placing multiple rotated duplicates of a given 3D volume.
 
@@ -104,7 +106,7 @@ def crowd_with_duplicates(V, min_distance, pixel_size, max_distance=None):
     translations = poisson_disk_neighbors(
         min_distance, max_distance=max_distance
     )
-
+    
     num_neighbours = len(translations)
 
     # Generate random rotations for each duplicate
@@ -121,4 +123,7 @@ def crowd_with_duplicates(V, min_distance, pixel_size, max_distance=None):
     vols = rotations.rotate_volume(V.to(device), theta.to(device), padding_mode="zeros")
 
     # Sum all duplicates into a single crowded volume
-    return vols.sum(0)
+    if return_coordinates:
+        return vols.sum(0), translations
+    else:
+        return vols.sum(0)

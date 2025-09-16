@@ -246,7 +246,7 @@ def create_particle_starfile(
         'rlnVoltage' : energy,
         'rlnSphericalAberration' : ctf_params[:,0] / 1e7,
         'rlnAmplitudeContrast' : alpha,
-        'rlnDetectorPixelSize' : dx,
+        'rlnImagePixelSize' : dx,
         'rlnAngleRot' : euler[:,0],
         'rlnAngleTilt' : euler[:,1],
         'rlnAnglePsi' : euler[:,2],

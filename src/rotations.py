@@ -3,41 +3,56 @@ import torch.nn.functional as F
 from scipy.spatial.transform import Rotation as R
 import numpy as np
 
-def random_quaternion(convention="xyzw"):
+def random_quaternion(batchsize=1, convention="xyzw"):
     """
-    Generates a random quaternion. 
+    Generate uniformly random quaternions using Shoemake's method.
 
     Parameters
     ----------
+    n : int
+        Number of quaternions to generate (default: 1).
     convention : str
-        Quaternion convention. Scipy Rotation uses 'xyzw' convention, whereas the 
-        numpy-quaternion library uses 'wxyz'.
+        Quaternion component order: 
+        - 'xyzw' (default, matches SciPy's Rotation)
+        - 'wxyz' (matches numpy-quaternion)
+    device : str or torch.device
+        Device for the output tensor.
+    dtype : torch.dtype
+        Data type for the output tensor.
 
     Returns
     -------
-    quat : tensor
-        A random quaternion.
+    quats : torch.Tensor
+        Tensor of shape (n, 4) with random unit quaternions.
     """
-    U, V, W = torch.rand(3)
+    # Random variables
+    U, V, W = torch.rand(3, batchsize)
+
+    sqrtU = torch.sqrt(U)
+    sqrt1U = torch.sqrt(1 - U)
+    two_pi_V = 2 * torch.pi * V
+    two_pi_W = 2 * torch.pi * W
+
     if convention == "wxyz":
-        quat = torch.tensor(
-            [
-                torch.sqrt(1 - U) * torch.sin(2 * torch.pi * V),
-                torch.sqrt(1 - U) * torch.cos(2 * torch.pi * V),
-                torch.sqrt(U) * torch.sin(2 * torch.pi * W),
-                torch.sqrt(U) * torch.cos(2 * torch.pi * W),
-            ]
-        )
-    if convention == "xyzw":
-        quat = torch.tensor(
-            [
-                torch.sqrt(1 - U) * torch.cos(2 * torch.pi * V),
-                torch.sqrt(U) * torch.sin(2 * torch.pi * W),
-                torch.sqrt(U) * torch.cos(2 * torch.pi * W),
-                torch.sqrt(1 - U) * torch.sin(2 * torch.pi * V),
-            ]
-        )
-    return quat
+        quats = torch.stack([
+            sqrt1U * torch.sin(two_pi_V),  # x
+            sqrt1U * torch.cos(two_pi_V),  # y
+            sqrtU * torch.sin(two_pi_W),   # z
+            sqrtU * torch.cos(two_pi_W),   # w
+        ], dim=-1)
+    elif convention == "xyzw":
+        quats = torch.stack([
+            sqrt1U * torch.cos(two_pi_V),  # x
+            sqrtU * torch.sin(two_pi_W),   # y
+            sqrtU * torch.cos(two_pi_W),   # z
+            sqrt1U * torch.sin(two_pi_V),  # w
+        ], dim=-1)
+    else:
+        raise ValueError("convention must be 'xyzw' or 'wxyz'")
+
+    if batchsize == 1:
+        return quats.squeeze(0)  # return (4,) for single quaternion
+    return quats  # shape (n, 4)
 
 
 def random_rotvec():
@@ -88,7 +103,7 @@ def rotate_coordinates(coordinates, quats, inverse=False):
     return r.apply(coordinates, inverse=inverse)
 
 
-def rotate_volume(V, theta, origin="relion"):
+def rotate_volume(V, theta, origin="relion", padding_mode='border'):
     """
     Rotates a single 3D volume based on the batch of 3x4 affine transform matrices
 
@@ -142,7 +157,7 @@ def rotate_volume(V, theta, origin="relion"):
     # transform the volume
     V = V.unsqueeze(0).unsqueeze(1)  # (1 x 1 x Z x Y x X)
     V = V.expand(B, 1, nz, ny, nx)
-    V_ = F.grid_sample(V, grid, align_corners=align_corners, padding_mode="border")
+    V_ = F.grid_sample(V, grid, align_corners=align_corners, padding_mode=padding_mode)
 
     return V_.squeeze(1)  # B x Z x X x Y
 
@@ -249,7 +264,7 @@ def translations_angstrom_to_torch(Txy, n, voxel_size):
     T *= 2 / n / voxel_size
     return T
 
-def build_affine_matrix(R, T):
+def build_affine_matrix(R, T=None):
     """
     Builds a batch of Torch's affine matrices (N, 3, 4) from a batch of rotation
     matrices (N, 3, 3) and Torch normalized translation vectors (N, 3).

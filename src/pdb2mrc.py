@@ -14,15 +14,17 @@ class PDB2MRC:
         self.pdb_code = pdb_code
         self.pdb_path = pdb_path
 
-    def fetch_pdb(self, pdb_folder='./pdb-data/', assemble=True, center=True):
-        self.assemble = assemble
+    def fetch_pdb(self, pdb_folder='./pdb-data/', assembly=True, center=True):
+        self.assembly = assembly
         if self.pdb_code is not None:
             # saves PDB file
             self.pdb_folder = pdb_folder
-            self.pdb_path = pdbtools.fetch_pdb_file(self.pdb_code, output=pdb_folder)
+            self.pdb_path = pdbtools.fetch_pdb_file(self.pdb_code,
+                                                    output=pdb_folder,
+                                                    assembly=assembly)
 
         # extract atomic coordinates and symbols
-        self.atomic_numbers, self.coords = pdbtools.get_atoms_and_coordinates_from_pdb(self.pdb_path, assemble=assemble)
+        self.atomic_numbers, self.coords = pdbtools.get_atoms_and_coordinates_from_pdb(self.pdb_path)
         self.n_atoms = len(self.coords)
         self.unique_elements = atom.atom_symbol(torch.unique(self.atomic_numbers))
 

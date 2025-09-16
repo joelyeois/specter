@@ -6,9 +6,11 @@ from urllib.error import HTTPError
 from urllib.request import urlopen
 import atom
 import torch
+import requests
+import gzip
+import io
 
 import biotite.structure.io as strucio
-import biotite.database.rcsb as rcsb
 import biotite.structure.io.pdbx as pdbx
 import numpy as np
 
@@ -16,6 +18,19 @@ from tqdm import tqdm
 
 from Bio.PDB.MMCIFParser import MMCIFParser
 from Bio.PDB import PDBParser
+
+def get_available_assemblies(pdb_id):
+    """Return a list of available biological assembly IDs for a PDB entry."""
+    url = f"https://data.rcsb.org/rest/v1/core/entry/{pdb_id.lower()}"
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
+        data = response.json()
+        assemblies = data.get("rcsb_entry_container_identifiers", {}).get("assembly_ids", [])
+        print("Assemblies available: " + ", ".join(assemblies))
+    except Exception as e:
+        print(f"Error fetching assemblies for {pdb_id}: {e}")
+        return []
 
 def center_of_particle(coords):
     """
@@ -38,35 +53,68 @@ def center_of_particle(coords):
     return center
 
 
-def fetch_pdb_file(pdb_id, format='cif', output="./"):
+def fetch_pdb_file(pdb_id, format='cif', output="./", assembly=True):
     """
     Download a PDB file and save it in a given location.
 
     Parameters
     ----------
-    pdbcode : str
-        A valid PDB ID
+    pdb_id : str
+        A valid PDB ID.
     format : str
-        The format of the files to be downloaded. 'pdbx', 'cif' and 'mmcif' are 
-        synonyms for the same format.
-    output : str, optional
-        The destination for the PDB file to be saved
+        File format ('cif' or 'pdb').
+    output : str
+        Destination folder.
+    assembly : bool or int
+        - True  → fetch default biological assembly (assembly 1 if available).
+        - False → fetch asymmetric unit.
+        - int   → fetch that specific assembly if available, fallback to default 
+           PDBx/mmCIF file.
 
     Returns
     -------
     str
         Path to the saved PDB file
     """
+    get_available_assemblies(pdb_id)
 
-    # Fetch the PDB file and save it locally
-    print(output + pdb_id)
-    if os.path.exists(output + pdb_id):
-        file_path = output + pdb_id
-        print(f"PDB file exists at: {file_path}")
+    # Decide what to fetch
+    if assembly is True:
+        print(f"{pdb_id}: Fetching default Biological Assembly 1")
+        filename = f"{pdb_id}-assembly{1}.{format}"
+    elif assembly is False:
+        print(f"{pdb_id}: Fetching default PDBx/mmCIF file.")
+        filename = f"{pdb_id}.{format}"
+    elif isinstance(assembly, int):
+        print(f"{pdb_id}: Fetching Biological Assembly {assembly}")
+        filename = f"{pdb_id}-assembly{assembly}.{format}"
     else:
-        file_path = rcsb.fetch(pdb_id, format, output)
-        print(f"PDB file saved to: {file_path}")
+        raise ValueError("assembly must be True, False, or int")
+
+    # Build filepath
+    file_path = os.path.join(output, filename)
+
+    # Return existing file if available
+    if os.path.exists(file_path):
+        print(f"File already exists: {file_path}")
+        return file_path
+    else:
+        # Fetch
+        url = "https://files.rcsb.org/download/" + filename + ".gz"
+        r = requests.get(url)
+        r.raise_for_status()
+
+        # Decompress in memory
+        with gzip.open(io.BytesIO(r.content), "rt") as f:
+            cif_content = f.read()
+
+        # Save to file
+        with open(file_path, "w") as f:
+            f.write(cif_content)
+
+    print(f"Downloaded to: {file_path}")
     return file_path
+
 
 def get_atomic_number(symbol):
     """
@@ -175,15 +223,9 @@ def get_atomic_number(symbol):
 #         return torch.from_numpy(elements), torch.from_numpy(coords)
 
 
-def get_atoms_and_coordinates_from_pdb(
-    input_filename,
-    return_array=True,
-    **kwargs,
-):
+def get_atoms_and_coordinates_from_pdb(input_filename, return_array=True):
     """
     Writes an XYZ file formatted for Kirkland's multi-slice simulation program.
-
-    software.
 
     Parameters
     ----------

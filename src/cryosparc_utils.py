@@ -2,7 +2,10 @@ import numpy as np
 import torch
 from cryosparc.dataset import Dataset
 from scipy.spatial.transform import Rotation
-
+import starfile
+import mrcfile
+import os
+import pandas as pd
 
 def extract_parameters_from_csfile(csfile_path, 
                                    return_class="0", 
@@ -161,3 +164,105 @@ def extract_parameters_from_csfile(csfile_path,
             anisomag,
             indices,
         )
+
+def create_particle_starfile(
+    particles,
+    rotations=None,
+    translations=None,
+    alpha=0.1,
+    folderpath='',
+    energy=None,
+    dx=None,
+    starfilename='particles',
+    mrcfilename=None,
+    ctf_params=None
+):
+    """
+    Saves a particle stack as MRCS and creates a RELION .star file for tomographic reconstruction.
+
+    Parameters
+    ----------
+    particles : np.ndarray, shape (N, H, W)
+        Stack of 2D particle images.
+    rotations : np.ndarray, optional
+        Rotation information per particle. Can be quaternions (N,4), rotation matrices (N,3,3), 
+        or rotation vectors (N,3). Default None.
+    translations : np.ndarray, optional
+        Optional translations per particle. Not currently applied to STAR.
+    alpha : float, optional
+        Amplitude contrast ratio. Default 0.1.
+    folderpath : str, optional
+        Directory to save MRCS and STAR files. Default '' (current folder).
+    energy : float, optional
+        Electron beam voltage in kV or eV. Required for STAR file.
+    Cs_mm : float, optional
+        Spherical aberration in mm. Default 2.0.
+    dx : float, optional
+        Pixel size in Å. Default 1.0.
+    starfilename : str, optional
+        Name of the STAR file. Default 'particles'.
+    mrcfilename : str, optional
+        Name of the MRCS file. Defaults to same as starfilename.
+    defocusU, defocusV, defocusAngle : list or np.ndarray, optional
+        CTF parameters for each particle.
+    originXAngst, originYAngst : list or np.ndarray, optional
+        Origin shifts for each particle. Default zeros.
+    randomsubset : int, optional
+        If specified, randomly sample this many particles.
+
+    Returns
+    -------
+    star_path : str
+        Path to the saved STAR file.
+    """
+    
+    #create directory if specified
+    if folderpath != '':
+        if not os.path.exists(folderpath):
+            os.makedirs(folderpath)
+
+    #create projections mrcs file
+    if mrcfilename is None:
+        mrcfilename = starfilename
+    mrcs_path = os.path.join(folderpath, mrcfilename + ".mrcs")
+    with mrcfile.new(mrcs_path, overwrite=True) as mrc:
+        mrc.set_data(particles.numpy().astype(np.float32))
+    
+    #convert rotations to Relion euler
+    if len(rotations.shape) == 3:
+        # N x 3 x 3 -> rotation matrices
+        R = Rotation.from_matrix(rotations)
+    elif rotations.shape[-1] == 4:
+        # N x 4 -> quaternions
+        R = Rotation.from_quat(rotations)
+    elif rotations.shape[-1] == 3:
+        # N x 3 -> rotvec
+        R = Rotation.from_rotvec(rotations)
+    euler = R.as_euler('ZYZ', degrees=True)
+
+    #create associated starfile
+    n = len(particles)
+    d = {
+        'rlnVoltage' : energy,
+        'rlnSphericalAberration' : ctf_params[:,0] / 1e7,
+        'rlnAmplitudeContrast' : alpha,
+        'rlnDetectorPixelSize' : dx,
+        'rlnAngleRot' : euler[:,0],
+        'rlnAngleTilt' : euler[:,1],
+        'rlnAnglePsi' : euler[:,2],
+        'rlnImageName' : [str(i) + '@' + mrcfilename + '.mrcs' for i in range(1, n+1)]
+        }
+    
+    d['rlnDefocusU'] = ctf_params[:,1]
+    d['rlnDefocusV'] = ctf_params[:,2]
+    d['rlnDefocusAngle'] = ctf_params[:,3]
+    d['rlnPhaseShift'] = ctf_params[:,5]
+
+    d['rlnOriginXAngst'] = translations[:,0]
+    d['rlnOriginYAngst'] = translations[:,1]
+
+    particles_df = pd.DataFrame(data=d)
+
+    star_path = os.path.join(folderpath, starfilename + ".star")
+    starfile.write(particles_df, star_path, overwrite=True)
+    print('Saved at: ' + star_path)

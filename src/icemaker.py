@@ -30,25 +30,6 @@ ifftn = lambda array: torch.fft.fftshift(
 )
 
 
-# def torch_peak_local_max(image, min_distance=1, num_peaks=None):
-#     # Add batch + channel dims
-#     x = image[None, None, ...]
-#     pool = F.max_pool3d if image.ndim == 3 else F.max_pool2d
-
-#     # Apply max pooling
-#     pooled = pool(x, kernel_size=2 * min_distance + 1, stride=1, padding=min_distance)
-#     mask = (x == pooled).squeeze()
-
-#     coords = torch.nonzero(mask, as_tuple=False)
-
-#     if num_peaks is not None and (num_peaks < coords.shape[0]):
-#         # Sort by intensity
-#         intensities = image[tuple(coords.T)]
-#         vals, order = torch.topk(intensities, num_peaks)
-#         return coords[order]
-#     else:
-#         return coords
-
 def torch_peak_local_max(image, min_distance=1, num_peaks=None):
     """
     Find local maxima in batched 3D images and return fixed number of peaks per batch.
@@ -104,7 +85,7 @@ class Icemaker(L.LightningModule):
     a target Fourier amplitude kernel.
     """
 
-    def __init__(self, dx=0.5, n=200, ice_thickness=None, verbose=True):
+    def __init__(self, dx=0.5, n=200, nz=None, verbose=True):
         """
         Initialize the Icemaker.
 
@@ -114,7 +95,7 @@ class Icemaker(L.LightningModule):
             Voxel size in Angstroms.
         n : int
             Number of voxels in x and y dimensions.
-        ice_thickness : float
+        nz : float
             Ice thickness in angstroms.
         device : str or torch.device
             Device for tensor operations (default: 'cuda').
@@ -130,16 +111,20 @@ class Icemaker(L.LightningModule):
         
         self.verbose = verbose
 
-        self.ice_thickness = ice_thickness
-        if ice_thickness is None or ice_thickness < n * dx:
+        # self.ice_thickness = ice_thickness
+        # if ice_thickness is None or ice_thickness < n * dx:
+        #     self.nz = n
+        #     if ice_thickness is not None and ice_thickness < n * dx:
+        #         print(
+        #             "Ice thickness smaller than particle size. Using minimum thickness."
+        #         )
+        #     self.ice_thickness = n * dx
+        # else:
+        #     self.nz = int(ice_thickness // dx)
+        if nz is None:
             self.nz = n
-            if ice_thickness is not None and ice_thickness < n * dx:
-                print(
-                    "Ice thickness smaller than particle size. Using minimum thickness."
-                )
-            self.ice_thickness = n * dx
         else:
-            self.nz = int(ice_thickness // dx)
+            self.nz = nz
         self.dx = dx
         self.dk = 1 / n / dx
         self.n = n
@@ -523,7 +508,7 @@ class Icemaker(L.LightningModule):
 
 
 class NaiveIcemaker(L.LightningModule):
-    def __init__(self, dx, n, ice_thickness=None, verbose=True):
+    def __init__(self, dx, n, nz=None, verbose=True):
         """
         Creates ice through random choice. Given a volume, we calculate the number
         of ice molecules that should populate the volume based on the density of
@@ -536,7 +521,7 @@ class NaiveIcemaker(L.LightningModule):
             Pixel size in angstroms.
         n: int
             Number of pixels in xy-axis. Assumes a square field-of-view.
-        ice_thickness: float
+        nz: float
             Specifices the thickness of ice in Angstroms. Typically 100–1000 A. Must
             be same or larger than FOV of the particle.
         """
@@ -545,18 +530,20 @@ class NaiveIcemaker(L.LightningModule):
         self.dx = dx
         self.n = n
 
-        if ice_thickness is None:
-            ice_thickness_px = n
+        # self.ice_thickness = ice_thickness
+        # if ice_thickness is None or ice_thickness < n * dx:
+        #     self.nz = n
+        #     if ice_thickness is not None and ice_thickness < n * dx:
+        #         print(
+        #             "Ice thickness smaller than particle size. Using minimum thickness."
+        #         )
+        #     self.ice_thickness = n * dx
+        # else:
+        #     self.nz = int(ice_thickness // dx)
+        if nz is None:
             self.nz = n
         else:
-            # thickness of ice must be at least the size of particle FOV.
-            if ice_thickness < n * dx:
-                self.nz = n
-                print(
-                    "Ice thickness is smaller than particle size. Reseting ice thickness to particle size."
-                )
-            else:
-                self.nz = int(ice_thickness // dx)
+            self.nz = nz
 
         self.dv = dx**3  # voxel volume
         self.nv = n**2 * self.nz  # number of voxels

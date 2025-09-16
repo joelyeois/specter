@@ -7,6 +7,7 @@ from scattering import Scattering
 from icemaker import NaiveIcemaker, Icemaker
 import rotations
 import torch.nn.functional as F
+from crowding import crowd_with_duplicates
 
 class ImageGenerator(L.LightningModule):
     def __init__(
@@ -27,6 +28,8 @@ class ImageGenerator(L.LightningModule):
         klim=None,
         flip_curvature=False,
         alpha=0.0,
+        crowd_min_distance=None,
+        pad_fft=False,
     ):
         """
         A scattering module to compute the 2D exitwave from a 3D scattering
@@ -79,6 +82,9 @@ class ImageGenerator(L.LightningModule):
         alpha: float
             The amplitude contrast ratio to use for the CTF model. Common values
             are 0.07 and 0.1.
+        crowd_min_distance: float, optional
+            If not None, adds duplicate particles to simulate crowding at this
+            distance in Angstroms around the particle.
 
         Notes
         -----
@@ -103,6 +109,12 @@ class ImageGenerator(L.LightningModule):
         self.flip_curvature = flip_curvature
         self.alpha = alpha
         self.klim = klim
+        self.crowd_min_distance = crowd_min_distance
+        self.pad_fft = pad_fft
+        if self.pad_fft:
+            self.pad_nxy = self.nxy + (self.nxy // 2) * 2 #
+        else:
+            self.pad_nxy = self.nxy
 
         # compute number of z-axis pixels due to ice thickness
         if ice_model is None:
@@ -144,7 +156,7 @@ class ImageGenerator(L.LightningModule):
 
         # initialize modules
         self.scattering = Scattering(
-            self.nxy,
+            self.pad_nxy,
             pixel_size,
             energy,
             dose_per_angstrom,
@@ -156,7 +168,7 @@ class ImageGenerator(L.LightningModule):
         )
 
         self.aberration = Aberration(
-            self.nxy,
+            self.pad_nxy,
             pixel_size,
             energy,
             aberration_model=aberration_model,
@@ -172,13 +184,13 @@ class ImageGenerator(L.LightningModule):
 
         if ice_model is not None:
             if ice_model == 'randomchoice':
-                self.icemaker = NaiveIcemaker(n=self.nxy,
+                self.icemaker = NaiveIcemaker(n=self.pad_nxy,
                                               dx=pixel_size,
-                                              ice_thickness=ice_thickness)
+                                              nz=self.nz)
             elif ice_model == 'iterative':
-                self.icemaker = Icemaker(n=self.nxy,
+                self.icemaker = Icemaker(n=self.pad_nxy,
                                         dx=pixel_size,
-                                        ice_thickness=ice_thickness,
+                                        nz=self.nz,
                                         verbose=False)
 
     def rotate(self, Q, T):
@@ -212,6 +224,30 @@ class ImageGenerator(L.LightningModule):
         #rotate V, returns (B x Z x Y x X)
         V = self.rotate(self.quaternions[idx], self.translations[idx])
 
+        #pad xy before crowding. more accurate, more vram.
+        # if self.pad_fft:
+        #     V = F.pad(V,
+        #               (self.nxy // 2, self.nxy // 2,# x-axis
+        #                self.nxy // 2, self.nxy // 2,# y-axis
+        #                0, 0,  # z-axis
+        #               ))
+
+        #adds crowd
+        if self.crowd_min_distance is not None:
+            with torch.no_grad():
+                for i, v in enumerate(V):
+                    vols = crowd_with_duplicates(v, self.crowd_min_distance, self.pixel_size)
+                    V[i] += vols
+
+        #pad xy after crowding. less accurate, less vram.
+        if self.pad_fft:
+            V = F.pad(V,
+                      (self.nxy // 2, self.nxy // 2,# x-axis
+                       self.nxy // 2, self.nxy // 2,# y-axis
+                       0, 0,  # z-axis
+                      ),
+                     mode='reflect')
+        
         #add ice
         if self.ice_model is not None:
             V = self.solvate(V)
@@ -236,4 +272,8 @@ class ImageGenerator(L.LightningModule):
             images = self.detector(self.detector_waves)
         else:
             images = self.detector(self.detector_waves, anisomag=self.anisomag[idx])
-        return images
+
+        if self.pad_fft:
+            return images[:, self.nxy // 2: -self.nxy // 2, self.nxy // 2: -self.nxy // 2]
+        else:
+            return images

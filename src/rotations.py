@@ -161,6 +161,7 @@ def rotate_volume(V, theta, origin="relion", padding_mode='border'):
 
     return V_.squeeze(1)  # B x Z x X x Y
 
+
 def quaternion_to_rotation_matrix(q):
     """
     Converts quaternions (x,y,z,w) to rotation matrices. 
@@ -200,6 +201,7 @@ def quaternion_to_rotation_matrix(q):
     ).reshape(*shape)
     return R
 
+
 def rotvec_to_rotation_matrix(rv):
     """
     Converts rotation vectors (x,y,z) to rotation matrices. 
@@ -234,6 +236,7 @@ def rotvec_to_rotation_matrix(rv):
     R = torch.eye(3, device=device).unsqueeze(0) + torch.sin(angles) * K + (1 - torch.cos(angles)) * K2
     return R
 
+
 def translations_angstrom_to_torch(Txy, n, voxel_size):
     """
     Builds a batch of normalized translation vectors from rlnOriginXAngst and
@@ -263,6 +266,7 @@ def translations_angstrom_to_torch(Txy, n, voxel_size):
     T = torch.concat([Txy, tz[..., None]], dim=-1)
     T *= 2 / n / voxel_size
     return T
+
 
 def build_affine_matrix(R, T=None):
     """
@@ -294,7 +298,7 @@ def build_affine_matrix(R, T=None):
         T = torch.zeros_like(R[..., 0])
     #old
     # theta = torch.concat([R, T.unsqueeze(2)], dim=-1)
-    
+
     #new
     Tprime = torch.zeros_like(T)
     Tprime[:,0] = R[:,0,0] * T[:,0] + R[:,0,1] * T[:,1] + R[:,0,2] * T[:,2]
@@ -302,6 +306,7 @@ def build_affine_matrix(R, T=None):
     Tprime[:,2] = R[:,2,0] * T[:,0] + R[:,2,1] * T[:,1] + R[:,2,2] * T[:,2]
     theta = torch.concat([R, Tprime.unsqueeze(2)], dim=-1)
     return theta
+
 
 def rotations_angular_difference(r1, r2, rotation_representation='rotvec'):
     """

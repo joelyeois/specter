@@ -484,8 +484,7 @@ def build_potential_volume_fftconvolve(
     disable_tqdm=False,
 ):
     """Constructs volumetric potential from list of atomic elements and their
-    respective coordinates. Only for snapped methods as we treat atoms as delta
-    functions before convolving with the respective elemental kernels.
+    respective coordinates. 
 
     General strategy is:
     1. Compute potentials for each unique element on a super-sampled grid (higher 
@@ -597,7 +596,10 @@ def build_potential_volume_fftconvolve(
     potential_volume = torch.zeros(nz, ny, nx)
     occupancy = torch.zeros(nz, ny, nx, dtype=torch.bool)
     atomic_potentials = {}
-    for elem in tqdm(torch.unique(atomic_numbers), disable=disable_tqdm):
+
+    pbar = tqdm(torch.unique(atomic_numbers), disable=disable_tqdm)
+    for elem in pbar:
+        pbar.set_description(f"Building element {atom.atom_symbol(int(elem))}")
         atomic_indices = torch.squeeze(torch.argwhere(atomic_numbers == elem))
 
         # populate elemental volume with delta function atoms

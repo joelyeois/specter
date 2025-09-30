@@ -277,3 +277,32 @@ class ImageGenerator(L.LightningModule):
             return images[:, self.nxy // 2: -self.nxy // 2, self.nxy // 2: -self.nxy // 2]
         else:
             return images
+
+    # def predict_step(self, batch, batch_idx, dataloader_idx=0):
+    #     preds = self(batch)
+    #     # Gather preds from all ranks (processes/GPUs)
+    #     gathered_preds = self.all_gather(preds)
+    #     # Optionally: only return on global rank 0
+    #     if self.global_rank == 0:
+    #         return gathered_preds
+
+    def predict_step(self, batch, batch_idx):
+        return self(batch)
+
+    # def on_predict_epoch_end(self, results):
+    #   # gather all results onto each device
+    #   # find created world_size from pl.trainer
+    #   results = self.all_gather(results[0], WORLD_SIZE, self._device)
+    #   # concatenate on the cpu
+    #   results = torch.concat([x.cpu() for x in results], dim=1)
+
+    def predict_epoch_end(self, outputs):
+        # outputs is a list of batch predictions from THIS GPU
+        preds = torch.cat(outputs, dim=0)
+
+        # gather across all GPUs
+        preds_all = self.trainer.strategy.all_gather(preds)
+
+        # return only once on rank 0
+        if self.trainer.is_global_zero:
+            return preds_all.cpu()

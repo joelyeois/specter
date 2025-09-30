@@ -106,7 +106,7 @@ def crowd_with_duplicates(V, min_distance, pixel_size, max_distance=None,
     translations = poisson_disk_neighbors(
         min_distance, max_distance=max_distance
     )
-    
+
     num_neighbours = len(translations)
 
     # Generate random rotations for each duplicate

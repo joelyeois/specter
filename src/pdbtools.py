@@ -18,6 +18,11 @@ from tqdm import tqdm
 
 from Bio.PDB.MMCIFParser import MMCIFParser
 from Bio.PDB import PDBParser
+from Bio.PDB.PDBExceptions import PDBConstructionWarning  # correct import
+import warnings
+
+# Suppress only PDBConstructionWarnings
+warnings.simplefilter('ignore', PDBConstructionWarning)
 
 def get_available_assemblies(pdb_id):
     """Return a list of available biological assembly IDs for a PDB entry."""
@@ -111,7 +116,7 @@ def fetch_pdb_file(pdb_id, format='cif', output="./", assembly=True):
 
     # Return existing file if available
     if os.path.exists(file_path):
-        print(f"File already exists: {file_path}")
+        print(f"File already exists: {file_path}, skip fetching.")
         return file_path
     else:
         # Fetch
@@ -260,12 +265,13 @@ def get_atoms_and_coordinates_from_pdb(input_filename, return_array=True):
         parser = PDBParser()
     elif input_filename[-3:] == 'cif':
         parser = MMCIFParser()
+    print(f'Parsing {input_filename}.')
     structure = parser.get_structure('structure', input_filename)
 
     # Extract atomic data
     coords = []
     elements = []
-    for atom in tqdm(structure.get_atoms()):
+    for atom in tqdm(structure.get_atoms(), desc="Extracting atom coordinates and element"):
         element_symbol = atom.element.strip().upper()
         atomic_number = get_atomic_number(element_symbol)
         elements.append(atomic_number)

@@ -3,6 +3,7 @@ import torch
 from scipy.special import kn
 from tqdm import tqdm
 from fft_tools import fftconvolve
+import torch.nn.functional as F
 
 def atomic_potential_2d(atomic_number, r_xy):
     """Returns the 2D projected atomic potential for a specific element given a
@@ -135,6 +136,77 @@ def voxelize_atoms(coords, grid_shape, voxel_size, device=None):
     )
 
     return grid
+
+def soft_voxelize_atoms(coords, grid_shape, voxel_size, device=None):
+    """
+    Differentiable 3D soft voxelization using trilinear splatting.
+
+    Args:
+        coords: (N,3) tensor of atomic coordinates in physical units (x, y, z)
+        grid_shape: tuple of ints (nz, ny, nx)
+        voxel_size: tuple of floats (dx, dy, dz)
+        device: optional, torch device
+
+    Returns
+    -------
+    volume : (nz, ny, nx) tensor
+        Differentiable soft voxelized volume
+    """
+    if device is None:
+        device = coords.device
+    coords = coords.to(device)
+    nz, ny, nx = grid_shape
+    N = coords.shape[0]
+
+    values = torch.ones(N, device=device)
+
+    # Convert physical coordinates to voxel units
+    if isinstance(voxel_size, (int,float)):
+        voxel_size = torch.tensor([voxel_size]*3, device=device)
+    else:
+        voxel_size = torch.tensor(voxel_size, device=device)
+    coords_voxel = coords / voxel_size  # (N,3)
+
+    # Shift coordinates so origin (0,0,0) is at floor division center
+    origin = torch.tensor([nx//2, ny//2, nz//2], device=device, dtype=coords_voxel.dtype)
+    coords_voxel_centered = coords_voxel + origin[None,:]  # (N,3)
+
+    # Reorder coords to z, y, x for indexing
+    coords_voxel_centered = coords_voxel_centered[:, [2,1,0]]  # (N,3)
+
+    # Floor and fractional part for trilinear weights
+    coords_floor = torch.floor(coords_voxel_centered).long()  # (N,3)
+    frac = coords_voxel_centered - coords_floor.float()       # (N,3)
+    dz, dy, dx = frac[:,0], frac[:,1], frac[:,2]
+    z0, y0, x0 = coords_floor[:,0], coords_floor[:,1], coords_floor[:,2]
+
+    # 8 neighbor offsets
+    offsets = torch.tensor([[0,0,0],[0,0,1],[0,1,0],[0,1,1],
+                            [1,0,0],[1,0,1],[1,1,0],[1,1,1]], device=device)
+
+    # Compute neighbor indices (N,8)
+    z_idx = z0[:,None] + offsets[None,:,0]
+    y_idx = y0[:,None] + offsets[None,:,1]
+    x_idx = x0[:,None] + offsets[None,:,2]
+
+    # Trilinear weights (N,8)
+    w = ((1-dz)[:,None]*(1-offsets[None,:,0]) + dz[:,None]*offsets[None,:,0]) * \
+        ((1-dy)[:,None]*(1-offsets[None,:,1]) + dy[:,None]*offsets[None,:,1]) * \
+        ((1-dx)[:,None]*(1-offsets[None,:,2]) + dx[:,None]*offsets[None,:,2])
+    w = w * values[:,None]
+
+    # Mask out-of-bounds
+    mask = (z_idx>=0)&(z_idx<nz) & (y_idx>=0)&(y_idx<ny) & (x_idx>=0)&(x_idx<nx)
+    z_idx = z_idx[mask]
+    y_idx = y_idx[mask]
+    x_idx = x_idx[mask]
+    w = w[mask]
+
+    # Scatter-add into volume
+    volume = torch.zeros(nz, ny, nx, device=device)
+    volume.index_put_((z_idx, y_idx, x_idx), w, accumulate=True)
+
+    return volume
 
 def coordinate_grid_3d(n_xyz, d_xyz, convention="relion"):
     """Constructs the xyz coordinate arrays and meshgrids. Meshgrid indexing yields
@@ -529,16 +601,18 @@ def build_potential_volume_fftconvolve(
         atomic_indices = torch.squeeze(torch.argwhere(atomic_numbers == elem))
 
         # populate elemental volume with delta function atoms
-        temp_vol = voxelize_atoms(centered_coords[atomic_indices].reshape(-1,3),
+        # soft_voxelize_atoms is differentiable w.r.t. coordinates.
+        temp_vol = soft_voxelize_atoms(centered_coords[atomic_indices].reshape(-1,3),
                                  grid_shape=(nz, ny, nx),
-                                 avoxel_size=(dz, dy, dx))
+                                 voxel_size=(dz, dy, dx))
         occupancy = occupancy | (temp_vol > 0)
 
         # get potential kernel for this element
         pot = atomic_potential_3d(int(elem), sR)
+    
         atomic_potentials[atom.atom_symbol(int(elem))] = pot
         atomic_potentials['ssdx'] = ssdx
-        # convolve
+        #convolve
         if compute_high_res:
             temp_vol = fftconvolve(temp_vol, pot, mode='same')
             potential_volume += avgpool3d(temp_vol[None, None]).squeeze() * dx

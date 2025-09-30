@@ -46,11 +46,26 @@ def center_of_particle(coords):
     center : ndarray
         Atom coordinates of the molecule's geometric, shape (1,3)
     """
-    xmin, xmax = coords[:, 0].min(), coords[:, 0].max()
-    ymin, ymax = coords[:, 1].min(), coords[:, 1].max()
-    zmin, zmax = coords[:, 2].min(), coords[:, 2].max()
-    center = np.array([(xmin + xmax) / 2.0, (ymin + ymax) / 2.0, (zmin + zmax) / 2.0])
+    center = coords.mean(dim=0)
     return center
+
+def center_coordinates(coords):
+    """
+    Centers coordinates on its geometric center.
+
+    Parameters
+    ----------
+    coords : tensor
+        Atom coordinates of molecule with N atoms, shape (N,3)
+
+    Returns
+    -------
+    centered_coordinates : tensor
+        Centered coordinates, shape (N,3)
+    """
+    center = center_of_particle(coords)
+    centered_coordinates = coords - center.reshape(1, -1)
+    return centered_coordinates
 
 
 def fetch_pdb_file(pdb_id, format='cif', output="./", assembly=True):

@@ -90,6 +90,51 @@ def nearest_index(x_arr, y_arr, z_arr, x_coord, y_coord, z_coord):
     zi = torch.argmin(torch.abs(z_arr - z_coord))
     return xi, yi, zi
 
+def voxelize_atoms(coords, grid_shape, voxel_size, device=None):
+    """
+    Convert atomic coordinates to a 3D binary grid (1s at nearest voxel, zeros elsewhere),
+    assuming the center of the grid is at (nz//2, ny//2, nx//2).
+
+    Args:
+        coords: (N,3) tensor of atomic coordinates in physical units (x, y, z)
+        grid_shape: tuple of ints (nx, ny, nz)
+        voxel_size: tuple of floats (dx, dy, dz)
+        device: optional, torch device
+
+    Returns:
+        grid: (nz, ny, nx) tensor with 1s at voxel positions of atoms
+    """
+    device = device or coords.device
+    coords = coords.to(device)
+    nx, ny, nz = grid_shape  # number of voxels along x, y, z
+
+    # Compute the center of the grid in voxel units
+    center_voxel = torch.tensor([nx//2, ny//2, nz//2], device=device)
+
+    # Convert physical coordinates to voxel indices, shifting center
+    indices = coords / torch.tensor(voxel_size, device=device)  # voxel units
+    indices = indices + center_voxel  # shift so center is at middle voxel
+    indices = torch.round(indices).long()
+
+    # Mask atoms inside the grid
+    mask = (
+        (indices[:,0] >= 0) & (indices[:,0] < nx) &
+        (indices[:,1] >= 0) & (indices[:,1] < ny) &
+        (indices[:,2] >= 0) & (indices[:,2] < nz)
+    )
+    indices = indices[mask]
+
+    # Create empty grid (z, y, x)
+    grid = torch.zeros((nz, ny, nx), device=device, dtype=torch.float32)
+
+    # Insert ones at valid voxel indices
+    grid.index_put_(
+        (indices[:,2], indices[:,1], indices[:,0]),
+        torch.ones(indices.shape[0], device=device),
+        accumulate=True
+    )
+
+    return grid
 
 def coordinate_grid_3d(n_xyz, d_xyz, convention="relion"):
     """Constructs the xyz coordinate arrays and meshgrids. Meshgrid indexing yields
@@ -482,16 +527,13 @@ def build_potential_volume_fftconvolve(
     atomic_potentials = {}
     for elem in tqdm(torch.unique(atomic_numbers), disable=disable_tqdm):
         atomic_indices = torch.squeeze(torch.argwhere(atomic_numbers == elem))
-    
+
         # populate elemental volume with delta function atoms
-        temp_vol = torch.zeros_like(Z)
-        for cc in centered_coords[atomic_indices].reshape(-1,3):
-            xi, yi, zi = nearest_index(x, y, z, cc[0], cc[1], cc[2])
-            temp_vol[zi, yi, xi] = 1
-            
-            # update occupancy
-            occupancy[zi, yi, xi] = True
-    
+        temp_vol = voxelize_atoms(centered_coords[atomic_indices].reshape(-1,3),
+                                 grid_shape=(nz, ny, nx),
+                                 avoxel_size=(dz, dy, dx))
+        occupancy = occupancy | (temp_vol > 0)
+
         # get potential kernel for this element
         pot = atomic_potential_3d(int(elem), sR)
         atomic_potentials[atom.atom_symbol(int(elem))] = pot
@@ -503,60 +545,5 @@ def build_potential_volume_fftconvolve(
         else:
             pot = avgpool3d(pot[None, None]).squeeze() * dx
             potential_volume += fftconvolve(temp_vol, pot, mode='same')
-            
+
     return potential_volume, occupancy, atomic_potentials
-    
-    # for an, cc in tqdm(zip(atomic_numbers, centered_coords)):
-    #     xi, yi, zi = nearest_index(x, y, z, cc[0], cc[1], cc[2])
-
-    #     # don't insert if bounding box of atom falls outside of main volume grid.
-    #     if (
-    #         (zi - atom_size_px // 2) < 0
-    #         or zi - atom_size_px // 2 + atom_size_px > nz
-    #         or (yi - atom_size_px // 2) < 0
-    #         or yi - atom_size_px // 2 + atom_size_px > ny
-    #         or (xi - atom_size_px // 2) < 0
-    #         or xi - atom_size_px // 2 + atom_size_px > nx
-    #     ):
-    #         pass
-    #     else:
-    #         if method == "3d":
-    #             # relative 3D origin of the atom w.r.t. neighbouring voxels.
-    #             x_ro = cc[0] - x[xi]
-    #             y_ro = cc[1] - y[yi]
-    #             z_ro = cc[2] - z[zi]
-    #             sR = torch.sqrt((sX - x_ro) ** 2 + (sY - y_ro) ** 2 + (sZ - z_ro) ** 2)
-    #             sspot = atomic_potential_3d(an, sR)
-    #             pot = avgpool3d(sspot[None, None]).squeeze() * dx
-
-    #             potential_volume[
-    #                 zi - atom_size_px // 2 : zi - atom_size_px // 2 + atom_size_px,
-    #                 yi - atom_size_px // 2 : yi - atom_size_px // 2 + atom_size_px,
-    #                 xi - atom_size_px // 2 : xi - atom_size_px // 2 + atom_size_px,
-    #             ] += pot
-    #         elif method == "snapped-3d":
-    #             potential_volume[
-    #                 zi - atom_size_px // 2 : zi - atom_size_px // 2 + atom_size_px,
-    #                 yi - atom_size_px // 2 : yi - atom_size_px // 2 + atom_size_px,
-    #                 xi - atom_size_px // 2 : xi - atom_size_px // 2 + atom_size_px,
-    #             ] += sampled_3dpot_dict[an]
-    #         elif method == "2d":
-    #             # relative 2D origin of the atom w.r.t. neighbouring voxels.
-    #             x_ro = cc[0] - x[xi]
-    #             y_ro = cc[1] - y[yi]
-    #             sR = torch.sqrt((sX - x_ro) ** 2 + (sY - y_ro) ** 2)
-    #             sspot = atomic_potential_2d(an, sR)
-    #             pot = avgpool2d(sspot[None, None]).squeeze()
-
-    #             potential_volume[
-    #                 zi,
-    #                 yi - atom_size_px // 2 : yi - atom_size_px // 2 + atom_size_px,
-    #                 xi - atom_size_px // 2 : xi - atom_size_px // 2 + atom_size_px,
-    #             ] += pot
-    #         elif method == "snapped-2d":
-    #             potential_volume[
-    #                 zi,
-    #                 yi - atom_size_px // 2 : yi - atom_size_px // 2 + atom_size_px,
-    #                 xi - atom_size_px // 2 : xi - atom_size_px // 2 + atom_size_px,
-    #             ] += sampled_2dpot_dict[an]
-    # return potential_volume

@@ -3,7 +3,7 @@ import argparse
 import torch
 from torch.utils.data import DataLoader, TensorDataset
 import lightning as L
-from imagegenerator import ImageGenerator
+from cryosim.imagegenerator import ImageGenerator
 from lightning.pytorch.callbacks import BasePredictionWriter
 import os
 

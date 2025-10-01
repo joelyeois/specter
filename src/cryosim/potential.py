@@ -1,8 +1,8 @@
-import atom
+from . import atom
 import torch
 from scipy.special import kn
 from tqdm import tqdm
-from fft_tools import fftconvolve
+from .fft_tools import fftconvolve
 import torch.nn.functional as F
 
 def atomic_potential_2d(atomic_number, r_xy):

@@ -1,8 +1,8 @@
 import lightning as L
 import numpy as np
 import torch
-from fft_tools import fft2, fftn, ifft2, ifftn
-from scattering import energy_to_wavelength
+from .fft_tools import fft2, fftn, ifft2, ifftn
+from .scattering import energy_to_wavelength
 import torch.nn.functional as F
 
 

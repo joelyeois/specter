@@ -4,7 +4,7 @@ from io import BytesIO
 from pathlib import Path
 from urllib.error import HTTPError
 from urllib.request import urlopen
-import atom
+from . import atom
 import torch
 import requests
 import gzip

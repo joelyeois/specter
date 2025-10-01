@@ -1,6 +1,6 @@
 import torch
-import rotations
-import potential
+from . import rotations
+from . import potential
 import numpy as np
 
 avogadro = 6.02214076e23

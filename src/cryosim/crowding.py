@@ -1,5 +1,5 @@
 import torch
-import rotations
+from . import rotations
 import numpy as np
 
 def poisson_disk_neighbors(min_distance, n_points=torch.inf,

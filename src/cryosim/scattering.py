@@ -1,10 +1,10 @@
-import filters
+from . import filters
 import lightning as L
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from fft_tools import fft2, ifft2, fftn, ifftn
+from .fft_tools import fft2, ifft2, fftn, ifftn
 
 
 rest_mass_energy = 511.0e3  # [eV]

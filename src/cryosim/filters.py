@@ -1,6 +1,6 @@
 import torch
 from skimage.filters import butterworth
-from fft_tools import fftn, ifftn
+from .fft_tools import fftn, ifftn
 
 def normalize_particles(particles, mask_diameter_pixels=None):
     if mask_diameter_pixels is None:

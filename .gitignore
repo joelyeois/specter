@@ -1,4 +1,28 @@
 pdb-data/
-.ipynb_checkpoints
-.DS_Store
 cache/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pdb
+
+# Editable/install artifacts
+*.egg-info/
+*.egg
+build/
+dist/
+
+# Virtual environments
+.env/
+.venv/
+*.conda/
+*.mamba/
+uv.lock
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Other system files
+.DS_Store

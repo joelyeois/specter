@@ -1,11 +1,11 @@
 import time
 
 import numpy as np
-import pdbtools
-import potential
+from . import pdbtools
+from . import potential
 import torch
 import torch.nn.functional as F
-from fft_tools import fftconvolve
+from .fft_tools import fftconvolve
 from scipy.interpolate import CubicSpline
 from skimage.feature import peak_local_max
 from tqdm import tqdm

@@ -1,9 +1,9 @@
 import torch
-import potential
-import atom
-import pdbtools
-from icemaker import Icemaker
-from fft_tools import fftconvolve
+from . import potential
+from . import atom
+from . import pdbtools
+from .icemaker import Icemaker
+from .fft_tools import fftconvolve
 from scipy.spatial import ConvexHull
 from scipy.spatial.distance import pdist
 

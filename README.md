@@ -42,7 +42,8 @@ Install `cryosim`:
 ```bash
 pip install -e .
 ```
-Run the notebooks:
+Run the notebooks (you must install jupyter yourself):
 ```bash
 jupyter lab
 ```
+

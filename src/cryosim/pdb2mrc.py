@@ -14,7 +14,7 @@ class PDB2MRC:
         self.pdb_code = pdb_code
         self.pdb_path = pdb_path
 
-    def fetch_pdb(self, pdb_folder='./pdb-data/', assembly=True, center=True):
+    def fetch_pdb(self, pdb_folder='../pdb-data/', assembly=True, center=True):
         self.assembly = assembly
         if self.pdb_code is not None:
             # saves PDB file

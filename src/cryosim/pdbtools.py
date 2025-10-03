@@ -73,7 +73,7 @@ def center_coordinates(coords):
     return centered_coordinates
 
 
-def fetch_pdb_file(pdb_id, format='cif', output="./", assembly=True):
+def fetch_pdb_file(pdb_id, format='cif', output="../pdb-data/", assembly=True):
     """
     Download a PDB file and save it in a given location.
 

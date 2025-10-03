@@ -550,7 +550,6 @@ class NaiveIcemaker(L.LightningModule):
         self.total_vol = self.nv * self.dv  # total volume
         self.n_ice_molecules = int(ndensity_of_amorphous_ice * self.total_vol)
         self.register_buffer('ice_kernel', self.create_ice_kernel())
-        self.ice_thickness = ice_thickness
 
         self.verbose = verbose
 

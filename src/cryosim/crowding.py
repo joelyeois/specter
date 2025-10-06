@@ -123,11 +123,11 @@ def crowd_with_duplicates(V, min_distance, pixel_size, max_distance=None,
     device = V.device
     n = V.shape[-1]  # assume cubic volume
     if max_distance is None:
-        max_distance = (n * pixel_size + min_distance) / 2
+        max_distance = n * pixel_size + min_distance
 
     # Generate 2D positions for duplicates using Poisson-disk sampling
     translations = poisson_disk_neighbors(
-        min_distance, box=V.shape[1:] + min_distance/2
+        min_distance, box=(max_distance, max_distance)
     )
 
     num_neighbours = len(translations)

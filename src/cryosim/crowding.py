@@ -2,61 +2,82 @@ import torch
 from . import rotations
 import numpy as np
 
-def poisson_disk_neighbors(min_distance, n_points=torch.inf,
-                           max_distance=5.0, k=30):
+import torch
+
+def poisson_disk_neighbors(
+    min_distance,
+    n_points=torch.inf,
+    box=(256, 256),   # (height, width)
+    k=30,
+    seed='origin'
+):
     """
-    Fast 2D Poisson-disk sampling with Bridson's algorithm.
-    Guarantees origin is the first point.
+    2D Poisson-disk sampling in a rectangular box centered at the origin.
 
     Parameters
     ----------
     min_distance : float
-        Minimum center-to-center spacing.
+        Minimum spacing between points.
     n_points : int
-        Total points to generate (including origin).
-    max_distance : float, optional
-        Max distance from origin.
-    k : int, optional
+        Total number of points to generate (including seed).
+    box : tuple of int
+        (height, width) of the bounding box in pixels. Origin is at (0,0).
+        Valid coordinates are y in [-H/2, H/2), x in [-W/2, W/2).
+    k : int
         Number of candidate points to try per active point.
+    seed : {"origin", "random"}
+        If "origin", first point is at the center (0,0).
+        If "random", first point is chosen uniformly inside the box.
 
     Returns
     -------
     pts : (m,2) torch.Tensor
-        Sampled 2D coordinates. First row is [0,0].
+        Sampled 2D coordinates, including the seed point.
     """
+    H, W = box
+    y_min, y_max = -H//2, H//2
+    x_min, x_max = -W//2, W//2
 
-    pts = [torch.zeros(2)] # first point at origin
+    # initialize first point
+    if seed == 'origin':
+        first_point = torch.tensor([0.0, 0.0])
+        n_points += 1 #don't count origin.
+    elif seed == 'random':
+        y = (y_max - y_min) * torch.rand(1) + y_min
+        x = (x_max - x_min) * torch.rand(1) + x_min
+        first_point = torch.tensor([y.item(), x.item()])
+    else:
+        raise ValueError("seed must be 'origin' or 'random'")
+
+    pts = [first_point]
     active = [0]
 
-    # we exclude the origin in our counter
-    n_points += 1
-    
     while active and len(pts) < n_points:
         idx = torch.randint(len(active), (1,)).item()
-        center = pts[active[idx]]
+        center_point = pts[active[idx]]
 
-        # generate k candidates in parallel
+        # generate k candidates in annulus [min_distance, 2*min_distance]
         theta = torch.rand(k) * 2 * torch.pi
         radius = min_distance + min_distance * torch.rand(k)
-        candidates = center.unsqueeze(0) + torch.stack(
+        candidates = center_point.unsqueeze(0) + torch.stack(
             (radius * torch.cos(theta), radius * torch.sin(theta)), dim=1
         )
 
-        # reject candidates outside the circle
-        mask = candidates.pow(2).sum(dim=1) <= max_distance**2
+        # reject candidates outside the centered box
+        mask = (candidates[:, 0] >= y_min) & (candidates[:, 0] < y_max) & \
+               (candidates[:, 1] >= x_min) & (candidates[:, 1] < x_max)
         candidates = candidates[mask]
 
         if candidates.shape[0] == 0:
             active.pop(idx)
             continue
 
-        # vectorized distance check against all existing points
-        if pts:
-            pts_tensor = torch.stack(pts)
-            diff = candidates[:, None, :] - pts_tensor[None, :, :]
-            dist2 = (diff ** 2).sum(dim=2)   # shape (num_candidates, num_pts)
-            min_dist2, _ = dist2.min(dim=1)
-            candidates = candidates[min_dist2 >= min_distance**2]
+        # distance check against all existing points
+        pts_tensor = torch.stack(pts)
+        diff = candidates[:, None, :] - pts_tensor[None, :, :]
+        dist2 = (diff ** 2).sum(dim=2)
+        min_dist2, _ = dist2.min(dim=1)
+        candidates = candidates[min_dist2 >= min_distance**2]
 
         if candidates.shape[0] > 0:
             pts.append(candidates[0])
@@ -65,9 +86,11 @@ def poisson_disk_neighbors(min_distance, n_points=torch.inf,
             active.pop(idx)
 
     if n_points == torch.inf:
-        return torch.stack(pts[1:])
+        return torch.stack(pts)
     else:
-        return torch.stack(pts[1:n_points])
+        return torch.stack(pts[:n_points])
+
+
 
 
 def crowd_with_duplicates(V, min_distance, pixel_size, max_distance=None, 
@@ -104,7 +127,7 @@ def crowd_with_duplicates(V, min_distance, pixel_size, max_distance=None,
 
     # Generate 2D positions for duplicates using Poisson-disk sampling
     translations = poisson_disk_neighbors(
-        min_distance, max_distance=max_distance
+        min_distance, box=V.shape[1:] + min_distance/2
     )
 
     num_neighbours = len(translations)
@@ -112,6 +135,8 @@ def crowd_with_duplicates(V, min_distance, pixel_size, max_distance=None,
     # Generate random rotations for each duplicate
     quats = rotations.random_quaternion(num_neighbours)
     R = rotations.quaternion_to_rotation_matrix(quats)
+    if len(R.shape) == 2:
+        R = R.unsqueeze(0)
 
     # Convert translations from Angstroms to normalized Torch coordinates
     T = rotations.translations_angstrom_to_torch(translations, n, pixel_size)

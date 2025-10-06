@@ -28,7 +28,10 @@ ifftn = lambda array: torch.fft.fftshift(
     torch.fft.ifftn(torch.fft.ifftshift(array, dim=(-3, -2, -1)), dim=(-3, -2, -1)),
     dim=(-3, -2, -1)
 )
-
+rfftn = lambda array: torch.fft.fftshift(
+    torch.fft.rfftn(torch.fft.ifftshift(array, dim=(-3, -2, -1)), dim=(-3, -2, -1)),
+    dim=(-3, -2)
+)
 
 def torch_peak_local_max(image, min_distance=1, num_peaks=None):
     """
@@ -279,8 +282,7 @@ class Icemaker(L.LightningModule):
             self.get_mdsim(filepath, trim_size=100)
             self.mdsim_ice_deltas_f = []
             for mdsim_ice_delta in tqdm(self.mdsim_ice_deltas):
-                # self.mdsim_ice_deltas_f.append(fftn(mdsim_ice_delta))
-                self.mdsim_ice_deltas_f.append(rfftn(mdsim_ice_delta))
+                self.mdsim_ice_deltas_f.append(fftn(mdsim_ice_delta))
             self.mdsim_ice_deltas_f = torch.stack(self.mdsim_ice_deltas_f)
             self.mdsim_ice_deltas_f = torch.mean(
                 torch.abs(self.mdsim_ice_deltas_f), dim=0
@@ -357,11 +359,15 @@ class Icemaker(L.LightningModule):
         
 
         # replace DC value
-        self.register_buffer('interp_f_kernel', interp.reshape(self.nz, self.n, self.n))
-        self.interp_f_kernel[self.nz // 2, self.n // 2, self.n // 2] = self.n_ice_molecules
+        interp_f_kernel = interp.reshape(self.nz, self.n, self.n)
+        interp_f_kernel[self.nz // 2, self.n // 2, self.n // 2] = self.n_ice_molecules
+        self.register_buffer('interp_f_kernel', interp_f_kernel)
+
+        # register half kernel for rfftn
+        self.register_buffer('interp_f_halfkernel', torch.flip(interp_f_kernel[:,:,:self.n//2+1], dims=[2]))
 
         # compute 3D radial average of interp data
-        self.register_buffer('interp_f_radial_avg', radial_profile_3d(self.interp_f_kernel))
+        self.register_buffer('interp_f_radial_avg', radial_profile_3d(interp_f_kernel))
         self.register_buffer('interp_radial_k' , torch.arange(len(self.interp_f_radial_avg)) * self.dk)
 
     def generate_ice_deltas(
@@ -397,12 +403,15 @@ class Icemaker(L.LightningModule):
 
         for i in tqdm(range(niter), disable= not self.verbose):
             prev_ice_vol = self.current_icedeltas
-            ice_vol_f = fftn(self.current_icedeltas)
+            # ice_vol_f = fftn(self.current_icedeltas)
+            ice_vol_f = rfftn(self.current_icedeltas)
 
             # amplitude multiplication
-            ice_vol_f *= self.interp_f_kernel.unsqueeze(0)
+            # ice_vol_f *= self.interp_f_kernel.unsqueeze(0)
+            ice_vol_f *= self.interp_f_halfkernel.unsqueeze(0)
 
-            new_ice = torch.abs(ifftn(ice_vol_f))
+            new_ice = torch.abs(self.irfftn(ice_vol_f))
+            # new_ice = torch.abs(ifftn(ice_vol_f))
 
             peaks = torch_peak_local_max(
                 new_ice,
@@ -505,6 +514,12 @@ class Icemaker(L.LightningModule):
             self.icecube = fftconvolve(self.current_icedeltas[i], self.ice_kernel, mode="same")
             self.icecubes[i] = self.icecube
         return self.icecubes
+
+    def irfftn(self, array):
+        return torch.fft.fftshift(
+            torch.fft.irfftn(torch.fft.ifftshift(array, dim=(-3, -2)), s=(self.nz,self.n,self.n), dim=(-3, -2, -1)),
+            dim=(-3, -2, -1)
+        )
 
 
 class NaiveIcemaker(L.LightningModule):

@@ -6,7 +6,7 @@ from .scattering import Scattering
 from .icemaker import NaiveIcemaker, Icemaker
 from . import rotations
 import torch.nn.functional as F
-from .crowding import crowd_with_duplicates
+from .crowding import CrowdWithDuplicates
 
 class ImageGenerator(L.LightningModule):
     def __init__(
@@ -131,11 +131,9 @@ class ImageGenerator(L.LightningModule):
                     self.nz = self.nxy
                 else:
                     self.nz = int(ice_thickness // pixel_size)
-        
         if crowd_max_distance_z is None:
-            self.crowd_max_distance_z = self.nz
-        else:
-            self.crowd_max_distance_z = crowd_max_distance_z
+            crowd_max_distance_z = self.nz
+        self.crowd_max_distance_z = crowd_max_distance_z
             
         # register buffers
         self.register_buffer("V", scattering_potential)
@@ -188,6 +186,18 @@ class ImageGenerator(L.LightningModule):
             dose_per_angstrom,
             aberration_model=aberration_model,
             noise_model=noise_model
+        )
+
+        self.crowd = CrowdWithDuplicates(
+            self.V,
+            pixel_size,
+            self.crowd_min_distance,
+            nxy_out=self.pad_nxy if pad_fft else self.nxy,
+            nz_out=self.nz,
+            max_distance_z=self.crowd_max_distance_z,
+            max_distance_xy=None,
+            method='3d',
+            n_points=torch.inf, seed='origin'
         )
 
         if ice_model is not None:
@@ -255,32 +265,22 @@ class ImageGenerator(L.LightningModule):
                        self.nxy // 2, self.nxy // 2,# y-axis, second last dim
                        0, 0,  # z-axis
                       ),
-                     mode='reflect')
+                     mode='constant')
 
         #adds crowd
         if self.crowd_min_distance is not None:
             with torch.no_grad():
                 for i, v in enumerate(V):
-                    if self.pad_fft:
-                        # only need non-padded V to create duplicates, save memory.
-                        # returns (self.nz, self.pad_nxy, self.pad_nxy)
-                        vols = crowd_with_duplicates(self.V,
-                                                     self.crowd_min_distance,
-                                                     self.pixel_size,
-                                                     max_distance_z=self.crowd_max_distance_z,
-                                                     nxy=self.pad_nxy,
-                                                     nz=self.nz)
-                    else:
-                        vols = crowd_with_duplicates(self.V,
-                                                     self.crowd_min_distance,
-                                                     self.pixel_size,
-                                                     max_distance_z=self.crowd_max_distance_z,)
-                    self.vols = vols.detach().cpu()
+                    vols = self.crowd()
+                    if not isinstance(vols, float):
+                        self.vols = vols.detach().cpu()
                     V[i] += vols
 
         #add ice
         if self.ice_model is not None:
-            V = self.solvate(V)
+            with torch.no_grad():
+                V = self.solvate(V)
+            
         #scatter V
         self.exitwaves = self.scattering(V)
         
@@ -308,23 +308,8 @@ class ImageGenerator(L.LightningModule):
         else:
             return images
 
-    # def predict_step(self, batch, batch_idx, dataloader_idx=0):
-    #     preds = self(batch)
-    #     # Gather preds from all ranks (processes/GPUs)
-    #     gathered_preds = self.all_gather(preds)
-    #     # Optionally: only return on global rank 0
-    #     if self.global_rank == 0:
-    #         return gathered_preds
-
     def predict_step(self, batch, batch_idx):
         return self(batch)
-
-    # def on_predict_epoch_end(self, results):
-    #   # gather all results onto each device
-    #   # find created world_size from pl.trainer
-    #   results = self.all_gather(results[0], WORLD_SIZE, self._device)
-    #   # concatenate on the cpu
-    #   results = torch.concat([x.cpu() for x in results], dim=1)
 
     def predict_epoch_end(self, outputs):
         # outputs is a list of batch predictions from THIS GPU

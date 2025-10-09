@@ -1,6 +1,7 @@
 import torch
 from . import rotations
 import numpy as np
+import lightning as L
 
 def poisson_disk_neighbors(
     min_distance,
@@ -71,6 +72,7 @@ def poisson_disk_neighbors(
             continue
 
         # distance check against all existing points
+        print('hi')
         pts_tensor = torch.stack(pts)
         diff = candidates[:, None, :] - pts_tensor[None, :, :]
         dist2 = (diff ** 2).sum(dim=2)
@@ -95,7 +97,6 @@ def poisson_disk_neighbors_3d(
     box=(256, 256, 256),  # (D,H,W) for tensor shape
     k=30,
     seed='origin',
-    device='cpu'
 ):
     """
     Fast 3D Poisson-disk sampling in a 3D tensor of shape (D,H,W),
@@ -109,7 +110,7 @@ def poisson_disk_neighbors_3d(
     # Grid acceleration
     cell_size = min_distance / np.sqrt(3)
     grid_shape = tuple(torch.ceil(torch.tensor([D, H, W]) / cell_size).int().tolist())
-    grid = -torch.ones(grid_shape, dtype=torch.long, device=device)
+    grid = -torch.ones(grid_shape, dtype=torch.long)
 
     def point_to_grid(p):
         # p = (x, y, z)
@@ -120,13 +121,13 @@ def poisson_disk_neighbors_3d(
 
     # initialize first point
     if seed == 'origin':
-        first_point = torch.tensor([0.,0.,0.], device=device)  # x,y,z
+        first_point = torch.tensor([0.,0.,0.])  # x,y,z
         n_points += 1
     elif seed == 'random':
-        x = (x_max - x_min) * torch.rand(1, device=device) + x_min
-        y = (y_max - y_min) * torch.rand(1, device=device) + y_min
-        z = (z_max - z_min) * torch.rand(1, device=device) + z_min
-        first_point = torch.tensor([x.item(), y.item(), z.item()], device=device)
+        x = (x_max - x_min) * torch.rand(1) + x_min
+        y = (y_max - y_min) * torch.rand(1) + y_min
+        z = (z_max - z_min) * torch.rand(1) + z_min
+        first_point = torch.tensor([x.item(), y.item(), z.item()])
     else:
         raise ValueError("seed must be 'origin' or 'random'")
 
@@ -137,13 +138,13 @@ def poisson_disk_neighbors_3d(
     grid[zi, yi, xi] = 0
 
     while active and len(pts) < n_points:
-        idx = torch.randint(len(active), (1,), device=device).item()
+        idx = torch.randint(len(active), (1,)).item()
         center_point = pts[active[idx]]
 
         # generate k candidates in spherical shell
-        phi = torch.acos(2*torch.rand(k, device=device)-1)
-        theta = 2*torch.pi*torch.rand(k, device=device)
-        r = min_distance * (1 + torch.rand(k, device=device))
+        phi = torch.acos(2*torch.rand(k)-1)
+        theta = 2*torch.pi*torch.rand(k)
+        r = min_distance * (1 + torch.rand(k))
 
         dx = r * torch.sin(phi) * torch.cos(theta)
         dy = r * torch.sin(phi) * torch.sin(theta)
@@ -191,9 +192,13 @@ def poisson_disk_neighbors_3d(
             active.pop(idx)
 
     if seed == 'origin':
-        # don't include origin
-        pts = pts[1:]
-        return torch.stack(pts[:n_points] if n_points!=torch.inf else pts)
+        # no candidates were found
+        if len (pts) == 1:
+            return torch.empty((0,3))
+        else:
+            # don't include origin
+            pts = pts[1:]
+            return torch.stack(pts[:n_points] if n_points!=torch.inf else pts)
     elif seed == 'random':
         return torch.stack(pts[:n_points] if n_points!=torch.inf else pts)
 
@@ -364,3 +369,82 @@ def insert_particles_into_micrograph(
 
     return micrograph
 
+class CrowdWithDuplicates(L.LightningModule):
+    def __init__(self, V, dx, min_distance, nxy_out=None, nz_out=None, 
+                 max_distance_z=None, max_distance_xy=None, method='3d', 
+                 n_points=torch.inf, seed='origin'):
+        """
+        Parameters
+        ----------
+        """
+        super().__init__()
+
+        self.register_buffer("V", V)
+        self.dx = dx
+        self.n = V.shape[0]
+        self.min_distance = min_distance
+        self.poisson_disc_method = method
+        self.n_points = n_points
+        self.seed = seed
+
+        if nz_out is None:
+            nz_out = self.n
+        self.nz_out = nz_out
+        if nxy_out is None:
+            nxy_out = self.n
+        self.nxy_out = nxy_out
+
+        if max_distance_xy is None:
+            max_distance_xy = self.n * dx + min_distance
+        self.max_distance_xy = max_distance_xy
+        if max_distance_z is None:
+            max_distance_z = self.n * dx + min_distance
+        self.max_distance_z = max_distance_z
+
+    def generate_coordinates(self):
+        # use Poisson disk sampling to obtain coordinates of duplicates.
+        if self.poisson_disc_method == '2d':
+            coords = poisson_disk_neighbors(self.min_distance,
+                                            n_points=self.n_points,
+                                            box=(self.nxy_out, self.nxy_out),
+                                            seed=self.seed)
+            # add z-coordinates
+            zeros = torch.zeros((coords.shape[0], 1))
+            coords = torch.cat([coords, zeros], dim=1)
+        elif self.poisson_disc_method == '3d':
+            coords = poisson_disk_neighbors_3d(self.min_distance,
+                                               n_points=self.n_points,
+                                               box=(self.nz_out, self.nxy_out, self.nxy_out),
+                                               seed=self.seed)
+        self.coords = coords
+
+    def generate_affine_matrices(self):
+        N = len(self.coords)
+        quats = rotations.random_quaternion(N)
+        R = rotations.quaternion_to_rotation_matrix(quats)
+        # in case only one position was found, ensures R is (1,3,3)
+        if len(R.shape) == 2:
+            R = R.unsqueeze(0)
+        self.theta = rotations.build_affine_matrix(R)
+
+    def rotate_volumes(self):
+        self.vols = rotations.rotate_volume(self.V, self.theta.to(self.V.device), padding_mode="zeros")
+
+    def insert_volumes(self):
+        micro = insert_particles_into_micrograph(
+            (self.nz_out, self.nxy_out, self.nxy_out),
+            self.vols,
+            self.coords,
+            pixel_size=self.dx)
+        return micro
+
+    def forward(self):
+        self.generate_coordinates()
+        # if no candidates, return 0
+        if len(self.coords) == 0:
+            return 0.
+        else:
+            self.generate_affine_matrices()
+            self.rotate_volumes()
+            micrograph = self.insert_volumes()
+            return micrograph

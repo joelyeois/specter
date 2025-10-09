@@ -28,6 +28,7 @@ class ImageGenerator(L.LightningModule):
         flip_curvature=False,
         alpha=0.0,
         crowd_min_distance=None,
+        crowd_max_distance_z=None,
         pad_fft=False,
     ):
         """
@@ -84,6 +85,9 @@ class ImageGenerator(L.LightningModule):
         crowd_min_distance: float, optional
             If not None, adds duplicate particles to simulate crowding at this
             distance in Angstroms around the particle.
+        crowd_max_distance_z: float, optional
+            Maximum distance in z to crowd. If None, defaults to ice_thickness which
+            may overcrowd.
 
         Notes
         -----
@@ -127,7 +131,12 @@ class ImageGenerator(L.LightningModule):
                     self.nz = self.nxy
                 else:
                     self.nz = int(ice_thickness // pixel_size)
-
+        
+        if crowd_max_distance_z is None:
+            self.crowd_max_distance_z = self.nz
+        else:
+            self.crowd_max_distance_z = crowd_max_distance_z
+            
         # register buffers
         self.register_buffer("V", scattering_potential)
         self.register_buffer("quaternions", quaternions)
@@ -183,11 +192,11 @@ class ImageGenerator(L.LightningModule):
 
         if ice_model is not None:
             if ice_model == 'randomchoice':
-                self.icemaker = NaiveIcemaker(n=self.pad_nxy,
+                self.icemaker = NaiveIcemaker(n=self.nxy,
                                               dx=pixel_size,
                                               nz=self.nz)
             elif ice_model == 'iterative':
-                self.icemaker = Icemaker(n=self.pad_nxy,
+                self.icemaker = Icemaker(n=self.nxy,
                                         dx=pixel_size,
                                         nz=self.nz,
                                         verbose=False)
@@ -203,50 +212,72 @@ class ImageGenerator(L.LightningModule):
         # generates ice with size (B x Z x Y x X)
         ice = self.icemaker.generate_ice(batchsize=len(V))
 
+        if self.pad_fft:
+            ice = F.pad(ice,
+                      (self.nxy // 2, self.nxy // 2,# x-axis, last dim
+                       self.nxy // 2, self.nxy // 2,# y-axis, second last dim
+                       0, 0,  # z-axis
+                      ),
+                     mode='reflect')
+
         # pad V in z-axis if ice_thickness is not None
         if self.ice_thickness is not None:
-            pad_px = ice.shape[1] - V.shape[1]
+            zpad_px = self.nz - self.nxy
             V = F.pad(V,
                       (0,0,# x-axis
                        0,0,# y-axis
-                       pad_px//2, ice.shape[1] - pad_px//2 - V.shape[1],  # z-axis
+                       zpad_px//2, self.nz - zpad_px//2 - V.shape[1],  # z-axis
                       ))
-            
         icemask = V.detach().clone()
         icemask[icemask<10] = 1
         icemask[icemask>=10] = 0
         V = V + ice * icemask
-        self.icemask = icemask #save as attribute just to check
+        self.icemask = icemask.detach().cpu() #save as attribute just to check
         return V
-        
+
     def forward(self, idx):
         #rotate V, returns (B x Z x Y x X)
         V = self.rotate(self.quaternions[idx], self.translations[idx])
 
-        #pad xy before crowding. more accurate, more vram.
-        # if self.pad_fft:
-        #     V = F.pad(V,
-        #               (self.nxy // 2, self.nxy // 2,# x-axis
-        #                self.nxy // 2, self.nxy // 2,# y-axis
-        #                0, 0,  # z-axis
-        #               ))
+        #pad z
+        if self.ice_thickness is not None:
+            zpad_px = self.nz - self.nxy
+            V = F.pad(V,
+                      (0, 0,# x-axis, last dim
+                       0, 0,# y-axis, second last dim
+                       zpad_px//2, self.nz - zpad_px//2 - V.shape[1],  # z-axis
+                      ),
+                      mode='constant')
+        #pad xy
+        if self.pad_fft:
+            V = F.pad(V,
+                      (self.nxy // 2, self.nxy // 2,# x-axis, last dim
+                       self.nxy // 2, self.nxy // 2,# y-axis, second last dim
+                       0, 0,  # z-axis
+                      ),
+                     mode='reflect')
 
         #adds crowd
         if self.crowd_min_distance is not None:
             with torch.no_grad():
                 for i, v in enumerate(V):
-                    vols = crowd_with_duplicates(v, self.crowd_min_distance, self.pixel_size)
+                    if self.pad_fft:
+                        # only need non-padded V to create duplicates, save memory.
+                        # returns (self.nz, self.pad_nxy, self.pad_nxy)
+                        vols = crowd_with_duplicates(self.V,
+                                                     self.crowd_min_distance,
+                                                     self.pixel_size,
+                                                     max_distance_z=self.crowd_max_distance_z,
+                                                     nxy=self.pad_nxy,
+                                                     nz=self.nz)
+                    else:
+                        vols = crowd_with_duplicates(self.V,
+                                                     self.crowd_min_distance,
+                                                     self.pixel_size,
+                                                     max_distance_z=self.crowd_max_distance_z,)
+                    self.vols = vols.detach().cpu()
                     V[i] += vols
 
-        #pad xy after crowding. less accurate, less vram.
-        if self.pad_fft:
-            V = F.pad(V,
-                      (self.nxy // 2, self.nxy // 2,# x-axis
-                       self.nxy // 2, self.nxy // 2,# y-axis
-                       0, 0,  # z-axis
-                      ),
-                     mode='reflect')
-        
         #add ice
         if self.ice_model is not None:
             V = self.solvate(V)

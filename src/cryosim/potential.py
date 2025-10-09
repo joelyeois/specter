@@ -84,6 +84,38 @@ def atomic_potential_3d(atomic_number, r_xyz):
     )
     return s1 + s2
 
+def atomic_potential_3d_fourier(atomic_number, k_xyz):
+    """Returns the Fourier transformed 3D atomic potential for a specific element and 
+    given a 3D grid of radial distances from the atom core. Kirkland C.15.
+
+    Parameters
+    ----------
+    atomic_number : int
+        Atomic number, Hyrdogen has number 1.
+    k_xyz : 3D tensor
+        Distances from the atomic core in units of Ångstrom. k^2 = kx^2 + ky^2 + kz^2.
+        Assume equally spaced grid along kx and ky, i.e. dkx = dky.
+
+    Returns
+    -------
+    potential : tensor
+        Atomic potential in Fourier space in units of 1/V-Ångstrom, same shape as r_xyz.
+    """
+    device = k_xyz.device
+    a0 = 0.529  # Bohr radius, [Angstrom]
+    e = 14.4  # electron charge, [V-Angstrom]
+
+    # get scattering factors
+    atom_params_dict = atom.get_atom_params_dict()
+    P = torch.from_numpy(atom_params_dict[atomic_number]["params"])
+    P = P.to(device)
+    # tile scattering factors to match r_xy grid
+    P = P[:, :, None, None, None].expand((4, 3) + k_xyz.shape)
+
+    s1 = torch.sum(P[0] / (k_xyz**2 + P[1]), 0)
+    s2 = torch.sum(P[2] * torch.exp(-P[3] * k_xyz**2), 0)
+    return (s1 + s2)
+
 
 def nearest_index(x_arr, y_arr, z_arr, x_coord, y_coord, z_coord):
     xi = torch.argmin(torch.abs(x_arr - x_coord))

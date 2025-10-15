@@ -14,7 +14,7 @@ import biotite.structure.io as strucio
 import biotite.structure.io.pdbx as pdbx
 import numpy as np
 
-from tqdm import tqdm
+from tqdm.auto import tqdm
 
 from Bio.PDB.MMCIFParser import MMCIFParser
 from Bio.PDB import PDBParser

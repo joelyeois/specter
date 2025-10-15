@@ -321,3 +321,272 @@ class ImageGenerator(L.LightningModule):
         # return only once on rank 0
         if self.trainer.is_global_zero:
             return preds_all.cpu()
+
+
+class MicrographGenerator(L.LightningModule):
+    def __init__(
+        self,
+        scattering_potential,
+        micrograph_size,
+        pixel_size,
+        ctf_params,
+        energy,
+        dose_per_angstrom,
+        anisomag=None,
+        ice_model=None,
+        ice_thickness=None,
+        scattering_model="multislice",
+        aberration_model="holography",
+        noise_model="poisson",
+        klim=None,
+        alpha=0.0,
+        crowd_min_distance=None,
+        crowd_max_distance_z=None,
+        pad_fft=False,
+        chunk_size=None,
+    ):
+        """
+        A scattering module to compute the 2D exitwave from a 3D scattering
+        potential. Various scattering modes are available.
+
+        Parameters
+        ----------
+        scattering_potential : 3D tensor
+            The 3D scattering potential of the particle.
+        pixel_size: float
+            Pixel size in angstroms. Assumes dz is also pixel_size for now.
+        ctf_params: 2D tensor
+            Batch of CTF parameters with shape (N, 4), where the 4 columns are
+            [Cs, defocusU, defocusV, defocusAngle], in angstroms and degrees.
+        energy: float
+            Energy of the electron beam in keV. Typical values are 100/120/200/300 keV.
+        dose_per_angstrom: float
+            Dose of the electron beam in e-/A^2.
+        anisomag: None or 3D tensor
+            Specifies 2x2 anisotropic matrix for each image.
+        ice_model: str or None
+            Specifies ice algorithm. Set to None for no ice. Options includes only
+            'randomchoice' (fast) for now.
+        ice_thickness: float
+            Specifies the thickness of ice in Angstroms. Typically 100–1000 A. Must
+            be same or larger than FOV of the particle.
+        scattering_mode: str
+            Specifies scattering model to use. Options include 'multislice',
+            'firstborn', 'projection' and 'ctf', in order of increasing approximations.
+        aberration_model: str
+            Specifies aberration model to use. Options include 'holography' and 'ctf'.
+        noise_model : str
+            Specifies noise model. Currently only 'poisson' available.
+        klim: float
+            Kirkland [1] explains that setting klim = 0.66 is necessary to avoid
+            aliasing for FFT methods (multislice and first Born). But this numerically
+            lowers the spatial frequency information in the resultant exitwaves, so
+            default is set to None.
+        alpha: float
+            The amplitude contrast ratio to use for the CTF model. Common values
+            are 0.07 and 0.1.
+        crowd_min_distance: float, optional
+            If not None, adds duplicate particles to simulate crowding at this
+            distance in Angstroms around the particle.
+        crowd_max_distance_z: float, optional
+            Maximum distance in z to crowd. If None, defaults to ice_thickness which
+            may overcrowd.
+
+        Notes
+        -----
+        .. [1] E. J. Kirkland, Advanced Computing in Electron Microscopy (Springer
+           US, Boston, MA, 2010).
+           [2] P. A. Penczek, “Image Restoration in Cryo-Electron Microscopy” in
+           Methods in Enzymology (Academic Press Inc., 2010)vol. 482, pp. 35–72.
+        """
+        super().__init__()
+
+        # model params
+        self.pixel_size = pixel_size
+        if isinstance(micrograph_size, int):
+            self.nxy = micrograph_size
+        elif isinstance(micrograph_size, (tuple, list)) and micrograph_size[0] == micrograph_size[1]:
+            self.nxy, _ = micrograph_size
+        else:
+            raise ValueError("micrograph_size must have same dimensions in x and y.")
+        self.energy = energy
+        self.dose_per_angstrom = dose_per_angstrom
+        self.dose_per_pixel = dose_per_angstrom * pixel_size**2
+        self.scattering_model = scattering_model
+        self.aberration_model = aberration_model
+        self.noise_model = noise_model
+        self.ice_model = ice_model
+        self.ice_thickness = ice_thickness
+        self.alpha = alpha
+        self.klim = klim
+        self.crowd_min_distance = crowd_min_distance
+        self.chunk_size = chunk_size
+        self.pad_fft = pad_fft
+        if self.pad_fft:
+            self.pad_nxy = self.nxy + (self.nxy // 2) * 2 #
+        else:
+            self.pad_nxy = self.nxy
+
+        # compute number of z-axis pixels due to ice thickness
+        if ice_model is None:
+            self.nz = scattering_potential.shape[0]
+        else:
+            if ice_thickness is None or ice_thickness == 0:
+                self.nz = scattering_potential.shape[0]
+            else:
+                self.nz = int(ice_thickness // pixel_size)
+        if crowd_max_distance_z is None:
+            crowd_max_distance_z = self.nz
+        self.crowd_max_distance_z = crowd_max_distance_z
+            
+        # register buffers
+        self.register_buffer("V", scattering_potential)
+        cs, dfu, dfv, dfang, tiltx, tilty, phaseshift, tref1, tref2 = torch.unbind(ctf_params, dim=-1)
+        self.register_buffer("cs", cs)
+        self.register_buffer("dfang", dfang)
+        self.register_buffer("tiltx", tiltx)
+        self.register_buffer("tilty", tilty)
+        self.register_buffer("phaseshift", phaseshift)
+        self.register_buffer("tref1", tref1)
+        self.register_buffer("tref2", tref2)
+        if anisomag is None:
+            self.anisomag = anisomag
+        else:
+            self.register_buffer("anisomag", anisomag)
+        
+        # for dynamic/kinematic scattering, we need to account for the defocus
+        # implicit in the scattering module
+        if self.scattering_model not in ['projection', 'ctf']:
+            dfu = dfu.clone() - (self.nz * pixel_size) / 2
+            dfv = dfv.clone() - (self.nz * pixel_size) / 2
+        self.register_buffer("dfu", dfu)
+        self.register_buffer("dfv", dfv)
+
+        # initialize modules
+        self.scattering = Scattering(
+            self.pad_nxy,
+            pixel_size,
+            energy,
+            dose_per_angstrom,
+            scattering_model=scattering_model,
+            klim=klim,
+            nz=self.nz,
+            alpha=alpha
+        )
+
+        self.aberration = Aberration(
+            self.pad_nxy,
+            pixel_size,
+            energy,
+            aberration_model=aberration_model,
+            alpha=alpha,
+        )
+
+        self.detector = Detector(
+            pixel_size,
+            dose_per_angstrom,
+            aberration_model=aberration_model,
+            noise_model=noise_model
+        )
+
+        self.crowd = CrowdWithDuplicates(
+            scattering_potential,
+            pixel_size,
+            self.crowd_min_distance,
+            nxy_out=self.pad_nxy if pad_fft else self.nxy,
+            nz_out=self.nz,
+            max_distance_z=self.crowd_max_distance_z,
+            max_distance_xy=None,
+            method='3d',
+            n_points=torch.inf,
+            seed='random',
+            chunk_size=chunk_size,
+        )
+
+        if ice_model is not None:
+            if ice_model == 'randomchoice':
+                self.icemaker = NaiveIcemaker(n=self.nxy,
+                                              dx=pixel_size,
+                                              nz=self.nz)
+            elif ice_model == 'iterative':
+                self.icemaker = Icemaker(n=256,
+                                         dx=pixel_size,
+                                         nz=256,
+                                         chunk_size=self.chunk_size,
+                                         verbose=False)
+
+    def solvate(self, V):
+        # generates ice with size (B x Z x Y x X)
+        self.ice = self.icemaker.generate_big_ice(V.shape)
+
+        if self.pad_fft:
+            self.ice = F.pad(self.ice,
+                      (self.nxy // 2, self.nxy // 2,# x-axis, last dim
+                       self.nxy // 2, self.nxy // 2,# y-axis, second last dim
+                       0, 0,  # z-axis
+                      ),
+                     mode='reflect')
+
+        icemask = V.detach().clone()
+        icemask[icemask<10] = 1
+        icemask[icemask>=10] = 0
+        V = V + self.ice * icemask
+        self.icemask = icemask.detach().cpu() #save as attribute just to check
+        return V
+
+
+    def forward(self, idx):
+        V = torch.empty(len(idx), self.nz, self.nxy, self.nxy)
+
+        #adds crowd
+        if self.crowd_min_distance is not None:
+            with torch.no_grad():
+                for i, v in enumerate(V):
+                    self.vols = self.crowd()
+                    V[i] += self.vols
+
+        #add ice
+        if self.ice_model is not None:
+            with torch.no_grad():
+                V = self.solvate(V)
+
+        #scatter V
+        self.exitwaves = self.scattering(V)
+
+        #aberrate exitwaves
+        self.detector_waves = self.aberration(
+            self.exitwaves,
+            self.cs[idx],
+            self.dfu[idx],
+            self.dfv[idx],
+            self.dfang[idx],
+            self.tiltx[idx],
+            self.tilty[idx],
+            self.phaseshift[idx],
+            self.tref1[idx],
+            self.tref2[idx],
+        )
+        #image/noise
+        if self.anisomag is None:
+            images = self.detector(self.detector_waves)
+        else:
+            images = self.detector(self.detector_waves, anisomag=self.anisomag[idx])
+
+        if self.pad_fft:
+            return images[:, self.nxy // 2: -self.nxy // 2, self.nxy // 2: -self.nxy // 2]
+        else:
+            return images
+
+    def predict_step(self, batch, batch_idx):
+        return self(batch)
+
+    def predict_epoch_end(self, outputs):
+        # outputs is a list of batch predictions from THIS GPU
+        preds = torch.cat(outputs, dim=0)
+
+        # gather across all GPUs
+        preds_all = self.trainer.strategy.all_gather(preds)
+
+        # return only once on rank 0
+        if self.trainer.is_global_zero:
+            return preds_all.cpu()

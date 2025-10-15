@@ -5,7 +5,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from .fft_tools import fft2, ifft2
-
+from tqdm.auto import tqdm
 
 rest_mass_energy = 511.0e3  # [eV]
 hc = 12.398e3  # [eV * Å]
@@ -45,7 +45,7 @@ class Scattering(L.LightningModule):
         klim=None,
         flip_curvature=False,
         nz=None,
-        alpha=0.
+        alpha=0.,
     ):
         """
         A scattering module to compute the 2D exitwave from a 3D scattering
@@ -113,7 +113,7 @@ class Scattering(L.LightningModule):
         # Fresnel transfer function for first Born
         if scattering_model == "firstborn":
             F = []
-            for i in range(nz):
+            for i in tqdm(range(nz), desc='Create first Born propagators', leave=False):
                 # original
                 # f = torch.exp(-1j * torch.pi * self.wavelength * pixel_size * 
                 #               (nz - i) * k**2)
@@ -140,9 +140,9 @@ class Scattering(L.LightningModule):
         exitwave = np.sqrt(self.dose_per_pixel)
 
         # iterate across z-planes of 3D potentials.
-        for i in range(V.size(1)):
+        for i in tqdm(range(V.size(1)), desc='Multislicing', leave=False):
             # transmission function
-            t = torch.exp(1j * self.sigma * V[:, i])
+            t = torch.exp(1j * self.sigma * V[:, i].to(self.device))
 
             # multiply with incident wave
             wv = t * exitwave

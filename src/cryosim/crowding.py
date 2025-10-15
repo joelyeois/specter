@@ -2,6 +2,7 @@ import torch
 from . import rotations
 import numpy as np
 import lightning as L
+from tqdm.auto import tqdm
 
 def poisson_disk_neighbors(
     min_distance,
@@ -72,7 +73,6 @@ def poisson_disk_neighbors(
             continue
 
         # distance check against all existing points
-        print('hi')
         pts_tensor = torch.stack(pts)
         diff = candidates[:, None, :] - pts_tensor[None, :, :]
         dist2 = (diff ** 2).sum(dim=2)
@@ -372,7 +372,7 @@ def insert_particles_into_micrograph(
 class CrowdWithDuplicates(L.LightningModule):
     def __init__(self, V, dx, min_distance, nxy_out=None, nz_out=None, 
                  max_distance_z=None, max_distance_xy=None, method='3d', 
-                 n_points=torch.inf, seed='origin'):
+                 n_points=torch.inf, seed='origin', chunk_size=None, move_to_cpu=False):
         """
         Parameters
         ----------
@@ -386,6 +386,8 @@ class CrowdWithDuplicates(L.LightningModule):
         self.poisson_disc_method = method
         self.n_points = n_points
         self.seed = seed
+        self.chunk_size = chunk_size
+        self.move_to_cpu = True
 
         if nz_out is None:
             nz_out = self.n
@@ -414,13 +416,13 @@ class CrowdWithDuplicates(L.LightningModule):
         elif self.poisson_disc_method == '3d':
             coords = poisson_disk_neighbors_3d(self.min_distance,
                                                n_points=self.n_points,
-                                               box=(self.nz_out, self.nxy_out, self.nxy_out),
+                                               box=(self.max_distance_z, self.nxy_out, self.nxy_out),
                                                seed=self.seed)
         self.coords = coords
 
     def generate_affine_matrices(self):
-        N = len(self.coords)
-        quats = rotations.random_quaternion(N)
+        self.N = len(self.coords)
+        quats = rotations.random_quaternion(self.N)
         R = rotations.quaternion_to_rotation_matrix(quats)
         # in case only one position was found, ensures R is (1,3,3)
         if len(R.shape) == 2:
@@ -428,7 +430,20 @@ class CrowdWithDuplicates(L.LightningModule):
         self.theta = rotations.build_affine_matrix(R)
 
     def rotate_volumes(self):
-        self.vols = rotations.rotate_volume(self.V, self.theta.to(self.V.device), padding_mode="zeros")
+        if self.chunk_size is not None:
+            if self.move_to_cpu:
+                self.vols = torch.empty((self.N,) + self.V.shape)
+            else:
+                self.vols = torch.empty((self.N,) + self.V.shape, device=self.device)
+
+            for start in tqdm(range(0, self.N, self.chunk_size), desc='Rotating duplicates', leave=False):
+                end = min(start + self.chunk_size, self.N)
+                if self.move_to_cpu:
+                    self.vols[start:end] = rotations.rotate_volume(self.V, self.theta[start:end].to(self.V.device), padding_mode="zeros")
+                else:
+                    self.vols[start:end] = rotations.rotate_volume(self.V, self.theta[start:end].to(self.V.device), padding_mode="zeros").cpu()
+        else:
+            self.vols = rotations.rotate_volume(self.V, self.theta.to(self.V.device), padding_mode="zeros")
 
     def insert_volumes(self):
         micro = insert_particles_into_micrograph(

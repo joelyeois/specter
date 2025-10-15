@@ -1,6 +1,6 @@
 import matplotlib.pyplot as plt
 import torch
-from tqdm import tqdm
+from tqdm.auto import tqdm
 
 def plot3d(vol, title=None):
     fig, axes = plt.subplots(1, 3, dpi=200, constrained_layout=True, figsize=(8,3.6))

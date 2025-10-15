@@ -1,7 +1,7 @@
 from . import atom
 import torch
 from scipy.special import kn
-from tqdm import tqdm
+from tqdm.auto import tqdm
 from .fft_tools import fftconvolve
 import torch.nn.functional as F
 

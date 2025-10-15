@@ -106,6 +106,19 @@ class Aberration(L.LightningModule):
             phaseshift[:, 0, 0] = 0
         return gamma - phaseshift, phi
 
+    def temporal_envelope(self, cc=0, dE=1, dI=0, dV=0):
+        '''
+        Eq. 2.25 of Erni, R. (2010). Aberration-corrected imaging in transmission electron microscopy: An introduction
+        Eq. 3.41 of Kirkland
+        '''
+        if cc == 0:
+            return 1
+        else:
+            # E [eV], I [A], and V [V] are the electron energy, lens currents, and acceleration voltage
+            dC1 = cc * torch.sqrt((dE/self.energy)**2 + 4*(dI/I)**2 +(dV/self.energy)**2)
+            Et = torch.exp(-0.5 * torch.pi**2 * self.wavelength**2 * dC1**2 * self.k2**2)
+            return Et
+
     def transfer(self, cs, dfu, dfv, dfang, tiltx, tilty, phaseshift, tref1, tref2):
         gamma, phi = self.aberration(cs, dfu, dfv, dfang, tiltx, tilty, phaseshift, tref1, tref2)
         if self.aberration_model == "ctf":

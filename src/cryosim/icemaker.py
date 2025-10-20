@@ -526,6 +526,7 @@ class Icemaker(L.LightningModule):
         num_y = int(torch.ceil(torch.as_tensor(ny) / self.n))
         num_x = int(torch.ceil(torch.as_tensor(nx) / self.n))
         N =  B * num_z * num_y * num_x
+        num_blocks_per_B = num_z * num_y * num_x
 
         # generate N ice cubes
         if self.chunk_size is None:
@@ -548,42 +549,48 @@ class Icemaker(L.LightningModule):
             return big_ice[:B, :nz, :ny, :nx]
         else:
             # generate batch of ice positions
-            icedeltas = torch.empty(N, self.nz, self.n, self.n)
+            big_ice = torch.empty(B, num_z * self.nz, num_y * self.n, num_x * self.n)
+            
+            idx = 0
             for start in tqdm(range(0, N, self.chunk_size), desc='Generate ice positions', leave=False):
                 end = min(start + self.chunk_size, N)
                 batchsize = end - start
-                
-                # initialize
+            
+                # initialize & generate
                 ice_vol_init = self.create_initial_ice_volume(batchsize=batchsize)
                 self.register_buffer('ice_vol_init', ice_vol_init)
-
-                # icemaker algorithm
                 self.generate_ice_deltas(batchsize=batchsize)
-                icedeltas[start:end] = self.current_icedeltas.cpu()
-
-            # assemble icedeltas
-            bigicedeltas = torch.empty(B, num_z * self.nz, num_y * self.n, num_x * self.n)
-            idx = 0
-            for ib in range(B):
-                for iz in range(num_z):
-                    for iy in range(num_y):
-                        for ix in range(num_x):
-                            bigicedeltas[ib,
-                                iz*self.nz:(iz+1)*self.nz,
-                                iy*self.n:(iy+1)*self.n,
-                                ix*self.n:(ix+1)*self.n
-                            ] = icedeltas[idx]
-                            idx += 1
+            
+                # get current batch (move to CPU if needed)
+                batch_icedeltas = self.current_icedeltas.cpu()  # shape (batchsize, self.nz, self.n, self.n)
+            
+                # directly insert into big_ice
+                for b in range(batchsize):
+                    global_idx = start + b
+            
+                    ib = global_idx // num_blocks_per_B
+                    local_idx = global_idx % num_blocks_per_B
+            
+                    iz = local_idx // (num_y * num_x)
+                    iy = (local_idx % (num_y * num_x)) // num_x
+                    ix = local_idx % num_x
+            
+                    big_ice[ib,
+                        iz*self.nz:(iz+1)*self.nz,
+                        iy*self.n:(iy+1)*self.n,
+                        ix*self.n:(ix+1)*self.n
+                    ] = batch_icedeltas[b]
+            
+                    idx += 1
 
             # resolve boundary conflicts where ice are too near
             min_distance_px = int(self.min_distance / self.dx)
             for ib in range(B):
-                bigicedeltas[ib] = clean_block_boundaries(bigicedeltas[ib],
-                                                          (self.nz, self.n, self.n),
-                                                          min_distance_px)
+                big_ice[ib] = clean_block_boundaries(big_ice[ib],
+                                                     (self.nz, self.n, self.n),
+                                                     min_distance_px)
 
             # perform batchwise fft
-            big_ice = torch.empty_like(bigicedeltas)
             for ib in tqdm(range(B), desc='Batch convolution for ice',leave=False):
                 for iz in range(num_z):
                     for iy in range(num_y):
@@ -592,7 +599,7 @@ class Icemaker(L.LightningModule):
                                 iz*self.nz:(iz+1)*self.nz,
                                 iy*self.n:(iy+1)*self.n,
                                 ix*self.n:(ix+1)*self.n
-                            ] = fftconvolve(bigicedeltas[ib,
+                            ] = fftconvolve(big_ice[ib,
                                 iz*self.nz:(iz+1)*self.nz,
                                 iy*self.n:(iy+1)*self.n,
                                 ix*self.n:(ix+1)*self.n

@@ -344,6 +344,7 @@ class MicrographGenerator(L.LightningModule):
         crowd_max_distance_z=None,
         pad_fft=False,
         chunk_size=None,
+        move_to_cpu=True,
     ):
         """
         A scattering module to compute the 2D exitwave from a 3D scattering
@@ -421,6 +422,7 @@ class MicrographGenerator(L.LightningModule):
         self.klim = klim
         self.crowd_min_distance = crowd_min_distance
         self.chunk_size = chunk_size
+        self.move_to_cpu = move_to_cpu
         self.pad_fft = pad_fft
         if self.pad_fft:
             self.pad_nxy = self.nxy + (self.nxy // 2) * 2 #
@@ -457,8 +459,8 @@ class MicrographGenerator(L.LightningModule):
         # for dynamic/kinematic scattering, we need to account for the defocus
         # implicit in the scattering module
         if self.scattering_model not in ['projection', 'ctf']:
-            dfu = dfu.clone() - (self.nz * pixel_size) / 2
-            dfv = dfv.clone() - (self.nz * pixel_size) / 2
+            dfu = dfu - (self.nz * pixel_size) / 2
+            dfv = dfv - (self.nz * pixel_size) / 2
         self.register_buffer("dfu", dfu)
         self.register_buffer("dfv", dfv)
 
@@ -501,6 +503,7 @@ class MicrographGenerator(L.LightningModule):
             n_points=torch.inf,
             seed='random',
             chunk_size=chunk_size,
+            move_to_cpu=self.move_to_cpu
         )
 
         if ice_model is not None:
@@ -527,11 +530,9 @@ class MicrographGenerator(L.LightningModule):
                       ),
                      mode='reflect')
 
-        icemask = V.detach().clone()
-        icemask[icemask<10] = 1
-        icemask[icemask>=10] = 0
-        V = V + self.ice * icemask
-        self.icemask = icemask.detach().cpu() #save as attribute just to check
+        icemask = V < 10  # boolean mask, same shape, no copy of V
+        V += self.ice * icemask
+        # self.icemask = icemask #save as attribute just to check
         return V
 
 
@@ -542,8 +543,9 @@ class MicrographGenerator(L.LightningModule):
         if self.crowd_min_distance is not None:
             with torch.no_grad():
                 for i, v in enumerate(V):
-                    self.vols = self.crowd()
-                    V[i] += self.vols
+                    # self.vols = self.crowd()
+                    # V[i] += self.vols
+                    V[i] += self.crowd()
 
         #add ice
         if self.ice_model is not None:

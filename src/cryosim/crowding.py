@@ -274,7 +274,12 @@ def crowd_with_duplicates(V, min_distance, pixel_size, return_coordinates=False,
     vols = rotations.rotate_volume(V.to(device), theta.to(device), padding_mode="zeros")
 
     # insert volumes at correct coordinates
-    micro = insert_particles_into_micrograph((nz, nxy, nxy), vols, translations, pixel_size=pixel_size)
+    micro = insert_particles_into_micrograph(
+        vols,
+        translations,
+        pixel_size=pixel_size,
+        micro_shape=(nz, nxy, nxy)
+    )
 
     # Sum all duplicates into a single crowded volume
     if return_coordinates:
@@ -284,7 +289,7 @@ def crowd_with_duplicates(V, min_distance, pixel_size, return_coordinates=False,
 
 
 def insert_particles_into_micrograph(
-    micro_shape, volumes, positions, pixel_size=1.0
+    volumes, positions, pixel_size=1.0, micro_shape=None, micrograph=None,
 ):
     """
     Insert rotated 3D volumes into a 3D micrograph centered at the origin.
@@ -307,13 +312,20 @@ def insert_particles_into_micrograph(
     micrograph : torch.Tensor
         Micrograph with volumes inserted
     """
-    Z, Y, X = micro_shape
     N, Zp, Yp, Xp = volumes.shape
     hz, hy, hx = Zp // 2, Yp // 2, Xp // 2
     device = volumes.device
 
     # Allocate micrograph
-    micrograph = torch.zeros(micro_shape, device=device)
+    if micrograph is not None:
+        micrograph = micrograph.to(device)
+        Z, Y, X = micrograph.shape
+    elif micro_shape is not None:
+        Z, Y, X = micro_shape
+        micrograph = torch.zeros(micro_shape, device=device)
+    else:
+        raise ValueError("Must provide either `micro_shape` or an existing `micrograph`.")
+
     volumes = volumes.to(device)
     positions = positions.to(device)
     if positions.shape[1] == 2:
@@ -387,7 +399,7 @@ class CrowdWithDuplicates(L.LightningModule):
         self.n_points = n_points
         self.seed = seed
         self.chunk_size = chunk_size
-        self.move_to_cpu = True
+        self.move_to_cpu = move_to_cpu
 
         if nz_out is None:
             nz_out = self.n
@@ -439,27 +451,49 @@ class CrowdWithDuplicates(L.LightningModule):
             for start in tqdm(range(0, self.N, self.chunk_size), desc='Rotating duplicates', leave=False):
                 end = min(start + self.chunk_size, self.N)
                 if self.move_to_cpu:
-                    self.vols[start:end] = rotations.rotate_volume(self.V, self.theta[start:end].to(self.V.device), padding_mode="zeros")
-                else:
                     self.vols[start:end] = rotations.rotate_volume(self.V, self.theta[start:end].to(self.V.device), padding_mode="zeros").cpu()
+                else:
+                    self.vols[start:end] = rotations.rotate_volume(self.V, self.theta[start:end].to(self.V.device), padding_mode="zeros")
         else:
             self.vols = rotations.rotate_volume(self.V, self.theta.to(self.V.device), padding_mode="zeros")
 
     def insert_volumes(self):
         micro = insert_particles_into_micrograph(
-            (self.nz_out, self.nxy_out, self.nxy_out),
             self.vols,
             self.coords,
-            pixel_size=self.dx)
+            pixel_size=self.dx,
+            micro_shape=(self.nz_out, self.nxy_out, self.nxy_out)
+        )
         return micro
 
     def forward(self):
         self.generate_coordinates()
+        self.generate_affine_matrices()
         # if no candidates, return 0
         if len(self.coords) == 0:
             return 0.
         else:
-            self.generate_affine_matrices()
-            self.rotate_volumes()
-            micrograph = self.insert_volumes()
+            if self.chunk_size is None:
+                self.rotate_volumes()
+                micrograph = self.insert_volumes()
+                if self.move_to_cpu:
+                    micrograph = micrograph.cpu()
+            else:
+                # create micrograph
+                micrograph = torch.zeros(self.nz_out, self.nxy_out, self.nxy_out)
+                # rotate and insert in batches
+                for start in tqdm(range(0, self.N, self.chunk_size), desc='Rotating duplicates and insert into micrograph', leave=False):
+                    # get batch indicies
+                    end = min(start + self.chunk_size, self.N)
+                    # rotate
+                    vols = rotations.rotate_volume(self.V, self.theta[start:end].to(self.V.device), padding_mode="zeros")
+                    if self.move_to_cpu:
+                        vols = vols.cpu()
+                    # insert
+                    micrograph = insert_particles_into_micrograph(
+                        vols,
+                        self.coords[start:end],
+                        pixel_size=self.dx,
+                        micrograph=micrograph
+                    )
             return micrograph

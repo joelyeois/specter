@@ -49,32 +49,25 @@ class PDB2MRC:
                        n=256, 
                        dx=1, 
                        super_sampling_factor=4, 
-                       method='fftconvolve',
+                       method='3d',
                        atom_size_px=11,
                       ):
         self.n = n
         self.dx = dx
         self.super_sampling_factor = 4
         self.atom_size_px = atom_size_px
-        if method == 'per_atom':
-            self.particle, self.occupancy = potential.build_potential_volume(
+
+        if method == '2d':
+            self.particle, self.occupancy, self.atomic_potentials = potential.build_potential_volume_fftconvolve_2d(
                 self.atomic_numbers,
                 self.centered_coords,
                 (n, n, n),
                 (dx, dx, dx),
-                # atom_size_px=11,
-                super_sampling_factor=super_sampling_factor,
-                convention="relion",
-                method="snapped-3d",
             )
-        elif method == 'fftconvolve':
-            self.particle, self.occupancy, self.atomic_potentials = potential.build_potential_volume_fftconvolve(
+        elif method == '3d':
+            self.particle, self.occupancy, self.atomic_potentials = potential.build_potential_volume_fftconvolve_3d(
                 self.atomic_numbers,
                 self.centered_coords,
                 (n, n, n),
                 (dx, dx, dx),
-                # atom_size_px=11,
-                super_sampling_factor=super_sampling_factor,
-                convention="relion",
-                method="snapped-3d",
             )

@@ -1,6 +1,7 @@
 import torch
 
-def grid_1d(n, dx, convention='relion', device='cpu'):
+
+def grid_1d(n, dx, convention="relion", device="cpu"):
     """
     Constructs a 1D grid. The coordinate grid convention only matters if the number of
     pixels is even.
@@ -22,14 +23,14 @@ def grid_1d(n, dx, convention='relion', device='cpu'):
     -------
     x : 1d tensor
     """
-    if convention == 'relion':
+    if convention == "relion":
         x = (torch.arange(n, device=device) - n // 2) * dx
     elif convention == "torch":
         x = (torch.arange(n, device=device) - (n - 1) / 2) * dx
     return x
 
 
-def grid_2d(n_xy, d_xy, convention="relion", device='cpu'):
+def grid_2d(n_xy, d_xy, convention="relion", device="cpu"):
     """Constructs the xy coordinate arrays and meshgrids. Meshgrid indexing yields
     area[y_i, x_i] convention which matches cryo-EM software.
 
@@ -63,15 +64,14 @@ def grid_2d(n_xy, d_xy, convention="relion", device='cpu'):
     if isinstance(d_xy, (int, float)):
         dx = dy = float(d_xy)
     else:
-        dx, dy, dz = d_xyz
-    dx, dy = d_xy
-    nx, ny = n_xy
+        dx, dy = d_xy
     x = grid_1d(nx, dx, convention=convention, device=device)
     y = grid_1d(ny, dy, convention=convention, device=device)
     Y, X = torch.meshgrid(y, x, indexing="ij")
     return x, y, X, Y
-    
-def grid_3d(n_xyz, d_xyz, convention="relion", device='cpu'):
+
+
+def grid_3d(n_xyz, d_xyz, convention="relion", device="cpu"):
     """Constructs the xyz coordinate arrays and meshgrids. Meshgrid indexing yields
     vol[z_i, y_i, x_i] convention which matches cryo-EM software.
 
@@ -106,11 +106,21 @@ def grid_3d(n_xyz, d_xyz, convention="relion", device='cpu'):
         dx = dy = dz = float(d_xyz)
     else:
         dx, dy, dz = d_xyz
-    x = grid_1d(nx, dx, convention=convention, device=device)
-    y = grid_1d(ny, dy, convention=convention, device=device)
-    z = grid_1d(nz, dz, convention=convention, device=device)
+    x = grid_1d(nx, dx, convention, device)
+    y = grid_1d(ny, dy, convention, device)
+    z = grid_1d(nz, dz, convention, device)
     Z, Y, X = torch.meshgrid(z, y, x, indexing="ij")
     return x, y, z, X, Y, Z
+
+
+def radial_grid_2d(n_xy, d_xy, convention="relion", device='cpu'):
+    _, _, X, Y = grid_2d(n_xy, d_xy, convention, device)
+    return torch.sqrt(X**2 + Y**2)
+
+
+def radial_grid_3d(n_xyz, d_xyz, convention="relion", device='cpu'):
+    _, _, _, X, Y, Z = grid_3d(n_xyz, d_xyz, convention, device)
+    return torch.sqrt(X**2 + Y**2 + Z**2)
 
 
 def voxelize_coordinates(coords, grid_shape, voxel_size, device=None):
@@ -132,7 +142,7 @@ def voxelize_coordinates(coords, grid_shape, voxel_size, device=None):
     nx, ny, nz = grid_shape  # number of voxels along x, y, z
 
     # Compute the center of the grid in voxel units
-    center_voxel = torch.tensor([nx//2, ny//2, nz//2], device=device)
+    center_voxel = torch.tensor([nx // 2, ny // 2, nz // 2], device=device)
 
     # Convert physical coordinates to voxel indices, shifting center
     indices = coords / torch.tensor(voxel_size, device=device)  # voxel units
@@ -141,9 +151,12 @@ def voxelize_coordinates(coords, grid_shape, voxel_size, device=None):
 
     # Mask atoms inside the grid
     mask = (
-        (indices[:,0] >= 0) & (indices[:,0] < nx) &
-        (indices[:,1] >= 0) & (indices[:,1] < ny) &
-        (indices[:,2] >= 0) & (indices[:,2] < nz)
+        (indices[:, 0] >= 0)
+        & (indices[:, 0] < nx)
+        & (indices[:, 1] >= 0)
+        & (indices[:, 1] < ny)
+        & (indices[:, 2] >= 0)
+        & (indices[:, 2] < nz)
     )
     indices = indices[mask]
 
@@ -152,13 +165,12 @@ def voxelize_coordinates(coords, grid_shape, voxel_size, device=None):
 
     # Insert ones at valid voxel indices
     grid.index_put_(
-        (indices[:,2], indices[:,1], indices[:,0]),
+        (indices[:, 2], indices[:, 1], indices[:, 0]),
         torch.ones(indices.shape[0], device=device),
-        accumulate=True
+        accumulate=True,
     )
 
     return grid
-
 
 
 def soft_voxelize_coordinates(coords, grid_shape, voxel_size, device=None):
@@ -185,42 +197,67 @@ def soft_voxelize_coordinates(coords, grid_shape, voxel_size, device=None):
     values = torch.ones(N, device=device)
 
     # Convert physical coordinates to voxel units
-    if isinstance(voxel_size, (int,float)):
-        voxel_size = torch.tensor([voxel_size]*3, device=device)
+    if isinstance(voxel_size, (int, float)):
+        voxel_size = torch.tensor([voxel_size] * 3, device=device)
     else:
         voxel_size = torch.tensor(voxel_size, device=device)
     coords_voxel = coords / voxel_size  # (N,3)
 
     # Shift coordinates so origin (0,0,0) is at floor division center
-    origin = torch.tensor([nx//2, ny//2, nz//2], device=device, dtype=coords_voxel.dtype)
-    coords_voxel_centered = coords_voxel + origin[None,:]  # (N,3)
+    origin = torch.tensor(
+        [nx // 2, ny // 2, nz // 2], device=device, dtype=coords_voxel.dtype
+    )
+    coords_voxel_centered = coords_voxel + origin[None, :]  # (N,3)
 
     # Reorder coords to z, y, x for indexing
-    coords_voxel_centered = coords_voxel_centered[:, [2,1,0]]  # (N,3)
+    coords_voxel_centered = coords_voxel_centered[:, [2, 1, 0]]  # (N,3)
 
     # Floor and fractional part for trilinear weights
     coords_floor = torch.floor(coords_voxel_centered).long()  # (N,3)
-    frac = coords_voxel_centered - coords_floor.float()       # (N,3)
-    dz, dy, dx = frac[:,0], frac[:,1], frac[:,2]
-    z0, y0, x0 = coords_floor[:,0], coords_floor[:,1], coords_floor[:,2]
+    frac = coords_voxel_centered - coords_floor.float()  # (N,3)
+    dz, dy, dx = frac[:, 0], frac[:, 1], frac[:, 2]
+    z0, y0, x0 = coords_floor[:, 0], coords_floor[:, 1], coords_floor[:, 2]
 
     # 8 neighbor offsets
-    offsets = torch.tensor([[0,0,0],[0,0,1],[0,1,0],[0,1,1],
-                            [1,0,0],[1,0,1],[1,1,0],[1,1,1]], device=device)
+    offsets = torch.tensor(
+        [
+            [0, 0, 0],
+            [0, 0, 1],
+            [0, 1, 0],
+            [0, 1, 1],
+            [1, 0, 0],
+            [1, 0, 1],
+            [1, 1, 0],
+            [1, 1, 1],
+        ],
+        device=device,
+    )
 
     # Compute neighbor indices (N,8)
-    z_idx = z0[:,None] + offsets[None,:,0]
-    y_idx = y0[:,None] + offsets[None,:,1]
-    x_idx = x0[:,None] + offsets[None,:,2]
+    z_idx = z0[:, None] + offsets[None, :, 0]
+    y_idx = y0[:, None] + offsets[None, :, 1]
+    x_idx = x0[:, None] + offsets[None, :, 2]
 
     # Trilinear weights (N,8)
-    w = ((1-dz)[:,None]*(1-offsets[None,:,0]) + dz[:,None]*offsets[None,:,0]) * \
-        ((1-dy)[:,None]*(1-offsets[None,:,1]) + dy[:,None]*offsets[None,:,1]) * \
-        ((1-dx)[:,None]*(1-offsets[None,:,2]) + dx[:,None]*offsets[None,:,2])
-    w = w * values[:,None]
+    w = (
+        ((1 - dz)[:, None] * (1 - offsets[None, :, 0])
+            + dz[:, None] * offsets[None, :, 0])
+        * ((1 - dy)[:, None] * (1 - offsets[None, :, 1])
+            + dy[:, None] * offsets[None, :, 1])
+        * ((1 - dx)[:, None] * (1 - offsets[None, :, 2])
+            + dx[:, None] * offsets[None, :, 2])
+    )
+    w = w * values[:, None]
 
     # Mask out-of-bounds
-    mask = (z_idx>=0)&(z_idx<nz) & (y_idx>=0)&(y_idx<ny) & (x_idx>=0)&(x_idx<nx)
+    mask = (
+        (z_idx >= 0)
+        & (z_idx < nz)
+        & (y_idx >= 0)
+        & (y_idx < ny)
+        & (x_idx >= 0)
+        & (x_idx < nx)
+    )
     z_idx = z_idx[mask]
     y_idx = y_idx[mask]
     x_idx = x_idx[mask]
@@ -229,6 +266,82 @@ def soft_voxelize_coordinates(coords, grid_shape, voxel_size, device=None):
     # Scatter-add into volume
     volume = torch.zeros(nz, ny, nx, device=device)
     volume.index_put_((z_idx, y_idx, x_idx), w, accumulate=True)
+
+    return volume
+
+
+def soft_voxelize_xy_coordinates(coords, grid_shape, voxel_size, device=None):
+    """
+    Semi-soft 3D voxelization:
+    - hard assignment along z (nearest slice)
+    - bilinear interpolation in x and y.
+
+    Out-of-bounds neighbors are excluded.
+
+    Args:
+        coords: (N,3) tensor of atomic coordinates (x, y, z)
+        grid_shape: tuple of ints (nz, ny, nx)
+        voxel_size: float or tuple of floats (dx, dy, dz)
+        device: optional torch.device
+
+    Returns
+    -------
+    volume : (nz, ny, nx) tensor
+        Semi-soft voxelized volume
+    """
+    if device is None:
+        device = coords.device
+    coords = coords.to(device)
+    nz, ny, nx = grid_shape
+    N = coords.shape[0]
+
+    values = torch.ones(N, device=device)
+
+    # Convert to voxel units
+    if isinstance(voxel_size, (int, float)):
+        voxel_size = torch.tensor([voxel_size]*3, device=device)
+    else:
+        voxel_size = torch.tensor(voxel_size, device=device)
+    coords_voxel = coords / voxel_size
+
+    # Shift origin to center
+    origin = torch.tensor([nx//2, ny//2, nz//2], device=device, dtype=coords_voxel.dtype)
+    coords_voxel_centered = coords_voxel + origin[None, :]
+
+    # Separate coordinates
+    x, y, z = coords_voxel_centered.T
+
+    # Hard assign Z
+    z_idx = torch.round(z).long()
+
+    # XY floor + fractional part for bilinear weights
+    x0 = torch.floor(x).long()
+    y0 = torch.floor(y).long()
+    dx = x - x0.float()
+    dy = y - y0.float()
+
+    # 4 neighbor offsets for XY bilinear
+    offsets = torch.tensor([[0,0],[0,1],[1,0],[1,1]], device=device)
+
+    x_idx = x0[:, None] + offsets[None,:,1]
+    y_idx = y0[:, None] + offsets[None,:,0]
+    z_idx_full = z_idx[:, None].repeat(1,4)
+
+    # Bilinear weights
+    w = ((1-dx)[:, None]*(1-offsets[None,:,1]) + dx[:, None]*offsets[None,:,1]) \
+        * ((1-dy)[:, None]*(1-offsets[None,:,0]) + dy[:, None]*offsets[None,:,0])
+    w = w * values[:, None]
+
+    # Mask out-of-bounds
+    mask = (z_idx_full>=0)&(z_idx_full<nz) & (y_idx>=0)&(y_idx<ny) & (x_idx>=0)&(x_idx<nx)
+    z_idx_full = z_idx_full[mask]
+    y_idx = y_idx[mask]
+    x_idx = x_idx[mask]
+    w = w[mask]
+
+    # Scatter
+    volume = torch.zeros(nz, ny, nx, device=device)
+    volume.index_put_((z_idx_full, y_idx, x_idx), w, accumulate=True)
 
     return volume
 

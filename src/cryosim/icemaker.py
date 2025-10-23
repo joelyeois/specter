@@ -3,6 +3,7 @@ import time
 import numpy as np
 from . import pdbtools
 from . import potential
+from .array import grid_3d
 import torch
 import torch.nn.functional as F
 from .fft_tools import fftconvolve
@@ -166,10 +167,7 @@ class Icemaker(L.LightningModule):
         self.get_mdsim_file(filepath)
         mdsim_ice_deltas = []
 
-        x, y, z, X, Y, Z = potential.coordinate_grid_3d(
-            (self.mdsim_n, self.mdsim_n, self.mdsim_n),
-            (self.mdsim_dx, self.mdsim_dx, self.mdsim_dx),
-        )
+        x, y, z, X, Y, Z = grid_3d(self.mdsim_n, self.mdsim_dx)
 
         self.mdsim_ice_coordinates = []
         for frame in tqdm(self.mdsim_frame_indexes[startframe:endframe]):

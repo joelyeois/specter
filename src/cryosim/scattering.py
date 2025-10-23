@@ -135,10 +135,8 @@ class Scattering(L.LightningModule):
             self.kmask = 1
 
     def multislice(self, V):
-        print('Complex propagator')
         F = self.F_real + 1j * self.F_imag
         if self.flip_curvature:
-            print('Flip V')
             V = torch.flip(V, dims=(1,))
         exitwave = np.sqrt(self.dose_per_pixel)
 

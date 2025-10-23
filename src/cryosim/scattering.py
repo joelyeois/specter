@@ -30,8 +30,9 @@ def interaction_parameter(energy):
 
 
 def complex_potential(v, alpha=0.1):
-    """Applies amplitude ratio, \alpha, to create complex potential"""
-    return np.sqrt(1 - alpha**2) * v + 1j * (alpha * v)
+    """Applies amplitude ratio, α, to create complex potential (PyTorch version)"""
+    scale_real = (1 - alpha**2)**0.5
+    return torch.complex(scale_real * v, alpha * v)
 
 
 class Scattering(L.LightningModule):
@@ -134,14 +135,17 @@ class Scattering(L.LightningModule):
             self.kmask = 1
 
     def multislice(self, V):
+        print('Complex propagator')
         F = self.F_real + 1j * self.F_imag
         if self.flip_curvature:
+            print('Flip V')
             V = torch.flip(V, dims=(1,))
         exitwave = np.sqrt(self.dose_per_pixel)
 
         # iterate across z-planes of 3D potentials.
         for i in tqdm(range(V.size(1)), desc='Multislicing', leave=False):
             # transmission function
+            # t = torch.exp(1j * self.sigma * complex_potential(V[:, i], alpha=self.alpha).to(self.device))
             t = torch.exp(1j * self.sigma * V[:, i].to(self.device))
 
             # multiply with incident wave

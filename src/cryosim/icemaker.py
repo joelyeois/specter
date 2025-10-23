@@ -591,8 +591,8 @@ class Icemaker(L.LightningModule):
                                                      min_distance_px)
 
             # perform batchwise fft
-            for ib in tqdm(range(B), desc='Batch convolution for ice',leave=False):
-                for iz in range(num_z):
+            for ib in range(B):
+                for iz in tqdm(range(num_z), desc='Ice convolution',leave=False):
                     for iy in range(num_y):
                         for ix in range(num_x):
                             big_ice[ib,

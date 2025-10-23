@@ -543,9 +543,9 @@ class MicrographGenerator(L.LightningModule):
         if self.crowd_min_distance is not None:
             with torch.no_grad():
                 for i, v in enumerate(V):
-                    # self.vols = self.crowd()
-                    # V[i] += self.vols
-                    V[i] += self.crowd()
+                    self.vols = self.crowd()
+                    V[i] += self.vols
+                    # V[i] += self.crowd()
 
         #add ice
         if self.ice_model is not None:
@@ -553,9 +553,11 @@ class MicrographGenerator(L.LightningModule):
                 V = self.solvate(V)
 
         #scatter V
+        print('Scattering')
         self.exitwaves = self.scattering(V)
 
         #aberrate exitwaves
+        print('Aberrating')
         self.detector_waves = self.aberration(
             self.exitwaves,
             self.cs[idx],
@@ -569,6 +571,7 @@ class MicrographGenerator(L.LightningModule):
             self.tref2[idx],
         )
         #image/noise
+        print('Imaging')
         if self.anisomag is None:
             images = self.detector(self.detector_waves)
         else:

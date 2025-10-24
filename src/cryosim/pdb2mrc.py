@@ -62,12 +62,12 @@ class PDB2MRC:
                 self.atomic_numbers,
                 self.centered_coords,
                 (n, n, n),
-                (dx, dx, dx),
+                dx,
             )
         elif method == '3d':
             self.particle, self.occupancy, self.atomic_potentials = potential.build_potential_volume_fftconvolve_3d(
                 self.atomic_numbers,
                 self.centered_coords,
                 (n, n, n),
-                (dx, dx, dx),
+                dx,
             )

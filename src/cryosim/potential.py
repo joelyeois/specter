@@ -1,6 +1,8 @@
 import torch
 import torch.nn.functional as F
 from tqdm.auto import tqdm
+import torch.nn as nn
+import lightning as L
 
 from .array import (
     grid_2d,
@@ -73,7 +75,7 @@ def build_potential_volume_fftconvolve_3d(
     atomic_numbers,
     centered_coords,
     n_xyz,
-    d_xyz,
+    dx,
     disable_tqdm=False,
 ):
     """Constructs volumetric potential from list of atomic elements and their
@@ -98,8 +100,8 @@ def build_potential_volume_fftconvolve_3d(
         (len(atomic_numbers), 3).
     n_xyz : array-like
         Number of pixels along x,y,z: (nx, ny, nz) of main volume.
-    d_xyz : array-like
-        Pixel length along x,y,z: (dx,dy,dz) of main volume.
+    dx : float
+        Voxel size of main volume.
 
     Returns
     -------
@@ -111,13 +113,6 @@ def build_potential_volume_fftconvolve_3d(
         nx = ny = nz = n_xyz
     else:
         nx, ny, nz = n_xyz
-
-    if isinstance(d_xyz, (int, float)):
-        dx = dy = dz = float(d_xyz)
-    else:
-        dx, dy, dz = d_xyz
-    if not (dx == dy == dz):
-        raise ValueError(f"Voxel sizes must be equal, got dx={dx}, dy={dy}, dz={dz}")
 
     # create super-sampled (ss) coordinate system
     ssn, ssdx, ssf = compute_supersampling_parameters(dx)
@@ -141,7 +136,7 @@ def build_potential_volume_fftconvolve_3d(
         # soft_voxelize_atoms is differentiable w.r.t. coordinates.
         temp_vol = soft_voxelize_coordinates(centered_coords[atomic_indices].reshape(-1,3),
                                  grid_shape=(nz, ny, nx),
-                                 voxel_size=(dz, dy, dx))
+                                 voxel_size=dx)
         occupancy = occupancy | (temp_vol > 0)
 
         # get potential kernel for this element
@@ -159,7 +154,7 @@ def build_potential_volume_fftconvolve_2d(
     atomic_numbers,
     centered_coords,
     n_xyz,
-    d_xyz,
+    dx,
     disable_tqdm=False,
 ):
     """Constructs volumetric potential from list of atomic elements and their
@@ -184,8 +179,8 @@ def build_potential_volume_fftconvolve_2d(
         (len(atomic_numbers), 3).
     n_xyz : array-like
         Number of pixels along x,y,z: (nx, ny, nz) of main volume.
-    d_xyz : array-like
-        Pixel length along x,y,z: (dx,dy,dz) of main volume.
+    dx : float
+        Pixel size of main volume.
 
     Returns
     -------
@@ -197,13 +192,6 @@ def build_potential_volume_fftconvolve_2d(
         nx = ny = nz = n_xyz
     else:
         nx, ny, nz = n_xyz
-
-    if isinstance(d_xyz, (int, float)):
-        dx = dy = dz = float(d_xyz)
-    else:
-        dx, dy, dz = d_xyz
-    if not (dx == dy):
-        raise ValueError(f"Voxel sizes must be equal, got dx={dx}, dy={dy}")
 
     # create super-sampled (ss) coordinate system
     ssn, ssdx, ssf = compute_supersampling_parameters(dx)
@@ -227,7 +215,7 @@ def build_potential_volume_fftconvolve_2d(
         temp_vol = soft_voxelize_xy_coordinates(
             centered_coords[atomic_indices].reshape(-1,3),
             grid_shape=(nz, ny, nx),
-            voxel_size=(dz, dy, dx)
+            voxel_size=dx
         )
         occupancy = occupancy | (temp_vol > 0)
 
@@ -247,12 +235,155 @@ def build_potential_volume_fftconvolve_2d(
     return potential_volume, sR, atomic_potentials
 
 
+class PotentialBuilder(L.LightningModule):
+    def __init__(self,
+                 n_xyz,
+                 dx,
+                 atomic_numbers,
+                 coordinates,
+                 verbose=True,
+                 parameterization='kirkland'):
+        super().__init__()
+
+        self.coordinates = nn.Parameter(coordinates)
+
+        if isinstance(n_xyz, int):
+            self.nx = self.ny = self.nz = n_xyz
+        else:
+            self.nx, self.ny, self.nz = n_xyz
+        self.dx = dx
+        self.verbose = verbose
+
+        # create super-sampled (ss) coordinate system
+        self.ssn, self.ssdx, self.ssf = compute_supersampling_parameters(dx)
+        sR_2d = radial_grid_2d(self.ssn, self.ssdx, convention="torch")
+        sR_3d = radial_grid_3d(self.ssn, self.ssdx, convention="torch")
+        self.register_buffer('sR_2d', sR_2d)
+        self.register_buffer('sR_3d', sR_3d)
+
+        # create atomic potentials
+        self.atomic_numbers = atomic_numbers
+        self.unique_elements = torch.unique(atomic_numbers)
+        atomic_potentials_2d = torch.empty(
+            len(self.unique_elements),
+            self.ssn//self.ssf,
+            self.ssn//self.ssf
+        )
+        atomic_potentials_3d = torch.empty(
+            len(self.unique_elements),
+            self.ssn//self.ssf,
+            self.ssn//self.ssf,
+            self.ssn//self.ssf
+        )
+        self.register_buffer('atomic_potentials_2d', atomic_potentials_2d)
+        self.register_buffer('atomic_potentials_3d', atomic_potentials_3d)
+
+        self.parameterization = parameterization
+        self.avgpool2d = torch.nn.AvgPool2d(self.ssf, stride=self.ssf)
+        self.avgpool3d = torch.nn.AvgPool3d(self.ssf, stride=self.ssf)
+        if parameterization == 'kirkland':
+            self.get_2d_atomic_potentials()
+            self.get_3d_atomic_potentials()
+        elif parameterization == 'lobato':
+            self.get_3d_atomic_potentials()
+
+
+    def get_2d_atomic_potentials(self, unique_elements=None):
+        if unique_elements is None:
+            unique_elements = self.unique_elements
+        else:
+            # update unique elements
+            self.unique_elements = unique_elements
+            self.atomic_potentials = torch.empty(
+                len(unique_elements),
+                self.ssn//self.ssf,
+                self.ssn//self.ssf
+            )
+
+        # fetch potential kernels
+        for i, elem in enumerate(self.unique_elements):
+            pot = kirkland_atomic_potential_2d(int(elem), self.sR_2d)
+
+            if self.ssf != 1:
+                pot = self.avgpool2d(pot[None, None]) * self.dx
+                pot = pot.squeeze(0).squeeze(0)
+
+            self.atomic_potentials_2d[i] = pot
+
+    def get_3d_atomic_potentials(self, unique_elements=None):
+        if unique_elements is None:
+            unique_elements = self.unique_elements
+        else:
+            # update unique elements
+            self.unique_elements = unique_elements
+            self.atomic_potentials = torch.empty(
+                len(unique_elements),
+                self.ssn//self.ssf,
+                self.ssn//self.ssf,
+                self.ssn//self.ssf
+            )
+
+        # fetch potential kernels
+        for i, elem in enumerate(self.unique_elements):
+            if self.parameterization == 'kirkland':
+                pot = kirkland_atomic_potential_3d(int(elem), self.sR_3d)
+            elif self.parameterization == 'lobato':
+                pot = lobato_atomic_potential_3d(int(elem), self.sR_3d)
+
+            if self.ssf != 1:
+                pot = self.avgpool3d(pot[None, None]) * self.dx
+                pot = pot.squeeze(0).squeeze(0)
+
+            self.atomic_potentials_3d[i] = pot
+
+
+    def forward(self, coordinates=None, method='3d'):
+        if coordinates is None:
+            coordinates = self.coordinates
+        self.method = method
+        
+        # insert atomic potentials into main volume.
+        potential_volume = 0
+        self.occupancy = torch.zeros(self.nz, self.ny, self.nx, dtype=torch.bool)
+        
+        for i, elem in enumerate(self.unique_elements):
+            atomic_indices = torch.squeeze(torch.argwhere(self.atomic_numbers == elem))
+    
+            if method == '2d':
+                temp_vol = soft_voxelize_xy_coordinates(
+                    coordinates[atomic_indices].reshape(-1,3),
+                    grid_shape=(self.nz, self.ny, self.nx),
+                    voxel_size=self.dx
+                )
+                
+                #batch 2D convolve
+                temp_vol_b = temp_vol.unsqueeze(1)   # (nz, 1, ny, nx)
+                pot_b = self.atomic_potentials_2d[i].unsqueeze(0).unsqueeze(0)  # (1, 1, ky, kx)
+                convolved = F.conv2d(temp_vol_b, pot_b, padding='same')
+                potential_volume += convolved.squeeze(1)    # (nz, ny, nx)
+            if method == '3d':
+                temp_vol = soft_voxelize_coordinates(
+                    coordinates[atomic_indices].reshape(-1,3),
+                    grid_shape=(self.nz, self.ny, self.nx),
+                    voxel_size=self.dx
+                )
+
+                #convolve
+                potential_volume += fftconvolve(
+                    temp_vol,
+                    self.atomic_potentials_3d[i],
+                    mode='same'
+                )
+
+            self.occupancy = self.occupancy | (temp_vol.detach().cpu() > 0)
+        return potential_volume
+
 ################ OLD & SLOW ################
 # def build_potential_volume(
 #     atomic_numbers,
 #     centered_coords,
 #     n_xyz,
-#     d_xyz,
+#     dx,
 #     atom_size_px=None,
 #     super_sampling_factor=4,
 #     convention="relion",
@@ -287,7 +418,7 @@ def build_potential_volume_fftconvolve_2d(
 #         (len(atomic_numbers), 3).
 #     n_xyz : array-like
 #         Number of pixels along x,y,z: (nx, ny, nz) of main volume.
-#     d_xyz : array-like
+#     dx : array-like
 #         Pixel length along x,y,z: (dx,dy,dz) of main volume.
 #     atom_size_px : int
 #         Number of main volume pixels to sufficiently represent an atom. If None,
@@ -327,9 +458,8 @@ def build_potential_volume_fftconvolve_2d(
 #     """
 #     # create main volume coordinate system
 #     nx, ny, nz = n_xyz
-#     dx, dy, dz = d_xyz
 #     x, y, z, X, Y, Z = grid_3d(
-#         (nx, ny, nz), (dx, dy, dz), convention=convention
+#         (nx, ny, nz), dx, convention=convention
 #     )
 
 #     # create super-sampled (ss) coordinate system

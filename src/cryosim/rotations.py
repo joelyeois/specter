@@ -74,33 +74,67 @@ def random_rotvec():
     rotvec = torch.tensor([x,y,z]) * theta
     return rotvec
 
-
-def rotate_coordinates(coordinates, quats, inverse=False):
+def rotate_coordinates(coordinates, rotation, inverse=False):
     """
-    Rotates a set of xyz coordinates based on input quaternions.
+    Rotate a set of 3D coordinates using quaternion, rotation vector, or rotation matrix.
 
-    Parameters
-    ----------
-    coordinates : array_like, shape (3,) or (N,3)
-        Each vectors[i] represents a vector in 3D space. A single vector can either 
-        be specified with shape (3, ) or (1, 3). The number of rotations and number 
-        of vectors given must follow standard numpy broadcasting rules: either one 
-        of them equals unity or they both equal each other.
-    quat : array_like, shape (N, 4) or (4,)
-        Each row is a (possibly non-unit norm) quaternion representing an active 
-        rotation, in scalar-last (x, y, z, w) format. Each quaternion will be 
-        normalized to unit norm.
-    inverse : boolean, optional
-        If True then the inverse of the rotation(s) is applied to the input vectors. 
-        Default is False.
+    Args:
+        coords: tensor of shape (N,3)
+        rotation: tensor specifying rotation:
+            - quaternion (4,) in [x,y,z,w] format
+            - rotation vector (3,) axis * angle (rad)
+            - rotation matrix (3,3)
+        inverse: bool, if True apply the inverse rotation
 
-    Returns
-    -------
-    rotate_coordinates : array_like, shape (3,) or (N,3)
-        The rotated coordinates.
+    Returns:
+        rotated_coords: tensor of shape (N,3)
     """
-    r = R.from_quat(quats)
-    return r.apply(coordinates, inverse=inverse)
+    dtype = coordinates.dtype
+    device = coordinates.device
+
+    # Detect type
+    if rotation.shape == (4,):  # quaternion
+        x, y, z, w = rotation
+        if inverse:
+            x, y, z = -x, -y, -z  # conjugate
+        xx, yy, zz = x*x, y*y, z*z
+        xy, xz, yz = x*y, x*z, y*z
+        wx, wy, wz = w*x, w*y, w*z
+        R = torch.tensor([
+            [1 - 2*(yy + zz), 2*(xy - wz), 2*(xz + wy)],
+            [2*(xy + wz), 1 - 2*(xx + zz), 2*(yz - wx)],
+            [2*(xz - wy), 2*(yz + wx), 1 - 2*(xx + yy)]
+        ], dtype=dtype, device=device)
+
+    elif rotation.shape == (3,):  # rotation vector
+        angle = torch.norm(rotation)
+        if angle < 1e-8:
+            R = torch.eye(3, dtype=dtype, device=device)
+        else:
+            axis = rotation / angle
+            if inverse:
+                axis = -axis
+            x, y, z = axis
+            c = torch.cos(angle)
+            s = torch.sin(angle)
+            C = 1 - c
+            R = torch.tensor([
+                [c + x*x*C, x*y*C - z*s, x*z*C + y*s],
+                [y*x*C + z*s, c + y*y*C, y*z*C - x*s],
+                [z*x*C - y*s, z*y*C + x*s, c + z*z*C]
+            ], dtype=dtype, device=device)
+
+    elif rotation.shape == (3,3):  # rotation matrix
+        R = rotation
+        if inverse:
+            R = R.T  # transpose for inverse rotation
+
+    else:
+        raise ValueError("Rotation must be quaternion (4,), rot_vec (3,), or rot_matrix (3,3)")
+
+    # Apply rotation
+    rotated_coords = coordinates @ R.T
+    return rotated_coords
 
 
 def rotate_volume(V, theta, origin="relion", padding_mode='border'):

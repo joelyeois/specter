@@ -341,21 +341,21 @@ class PotentialBuilder(L.LightningModule):
         if coordinates is None:
             coordinates = self.coordinates
         self.method = method
-        
+
         # insert atomic potentials into main volume.
         potential_volume = 0
         self.occupancy = torch.zeros(self.nz, self.ny, self.nx, dtype=torch.bool)
-        
+
         for i, elem in enumerate(self.unique_elements):
             atomic_indices = torch.squeeze(torch.argwhere(self.atomic_numbers == elem))
-    
+
             if method == '2d':
                 temp_vol = soft_voxelize_xy_coordinates(
                     coordinates[atomic_indices].reshape(-1,3),
                     grid_shape=(self.nz, self.ny, self.nx),
                     voxel_size=self.dx
                 )
-                
+
                 #batch 2D convolve
                 temp_vol_b = temp_vol.unsqueeze(1)   # (nz, 1, ny, nx)
                 pot_b = self.atomic_potentials_2d[i].unsqueeze(0).unsqueeze(0)  # (1, 1, ky, kx)

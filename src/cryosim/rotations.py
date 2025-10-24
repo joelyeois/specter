@@ -3,138 +3,248 @@ import torch.nn.functional as F
 from scipy.spatial.transform import Rotation as R
 import numpy as np
 
-def random_quaternion(batchsize=1, convention="xyzw"):
+class Rotation:
     """
-    Generate uniformly random quaternions using Shoemake's method.
-
-    Parameters
-    ----------
-    n : int
-        Number of quaternions to generate (default: 1).
-    convention : str
-        Quaternion component order: 
-        - 'xyzw' (default, matches SciPy's Rotation)
-        - 'wxyz' (matches numpy-quaternion)
-    device : str or torch.device
-        Device for the output tensor.
-    dtype : torch.dtype
-        Data type for the output tensor.
-
-    Returns
-    -------
-    quats : torch.Tensor
-        Tensor of shape (n, 4) with random unit quaternions.
+    3D rotation class with support for quaternions, rotation vectors, and rotation matrices.
+    Internally stores rotation as a unit quaternion in xyzw format.
     """
-    # Random variables
-    U, V, W = torch.rand(3, batchsize)
 
-    sqrtU = torch.sqrt(U)
-    sqrt1U = torch.sqrt(1 - U)
-    two_pi_V = 2 * torch.pi * V
-    two_pi_W = 2 * torch.pi * W
+    def __init__(self, quat: torch.Tensor, eps: float = 1e-6):
+        """
+        Internal constructor. Stores a unit quaternion (xyzw).
+        """
+        norm = quat.norm(dim=-1, keepdim=True)
+        if torch.any(torch.abs(norm - 1.0) > eps):
+            # Auto-normalize if not unit
+            quat = quat / norm
+        self._quat = quat
 
-    if convention == "wxyz":
-        quats = torch.stack([
-            sqrt1U * torch.sin(two_pi_V),  # x
-            sqrt1U * torch.cos(two_pi_V),  # y
-            sqrtU * torch.sin(two_pi_W),   # z
-            sqrtU * torch.cos(two_pi_W),   # w
-        ], dim=-1)
-    elif convention == "xyzw":
-        quats = torch.stack([
-            sqrt1U * torch.cos(two_pi_V),  # x
-            sqrtU * torch.sin(two_pi_W),   # y
-            sqrtU * torch.cos(two_pi_W),   # z
-            sqrt1U * torch.sin(two_pi_V),  # w
-        ], dim=-1)
+    # ----------------- Constructors -----------------
+    @classmethod
+    def from_quat(cls, quat: torch.Tensor):
+        """
+        Create from quaternion [x, y, z, w].
+        """
+        return cls(quat)
+
+    @classmethod
+    def from_rotvec(cls, rotvec: torch.Tensor):
+        """
+        Create from rotation vector (axis * angle)
+        """
+        theta = rotvec.norm(dim=-1, keepdim=True)
+        axis = rotvec / theta.clamp(min=1e-8)
+        xyz = axis * torch.sin(theta / 2)
+        w = torch.cos(theta / 2)
+        quat = torch.cat([xyz, w], dim=-1)
+        return cls(quat)
+
+    @classmethod
+    def from_matrix(cls, R: torch.Tensor):
+        """
+        Create from rotation matrix (3x3)
+        """
+        # Source: https://www.euclideanspace.com/maths/geometry/rotations/conversions/matrixToQuaternion/
+        m = R
+        batch_mode = len(R.shape) == 3
+        if not batch_mode:
+            m = R.unsqueeze(0)
+
+        tr = m[:,0,0] + m[:,1,1] + m[:,2,2]
+        quat = torch.zeros((m.shape[0],4), device=R.device, dtype=R.dtype)
+
+        # Compute quaternion
+        mask = tr > 0
+        t = tr[mask] + 1
+        S = torch.sqrt(t) * 2
+        quat[mask, 3] = 0.25 * S
+        quat[mask, 0] = (m[mask,2,1] - m[mask,1,2]) / S
+        quat[mask, 1] = (m[mask,0,2] - m[mask,2,0]) / S
+        quat[mask, 2] = (m[mask,1,0] - m[mask,0,1]) / S
+
+        mask = ~mask
+        # Pick largest diagonal element
+        cond1 = (m[:,0,0] >= m[:,1,1]) & (m[:,0,0] >= m[:,2,2]) & mask
+        t1 = 1 + m[cond1,0,0] - m[cond1,1,1] - m[cond1,2,2]
+        S1 = torch.sqrt(t1) * 2
+        quat[cond1, 0] = 0.25 * S1
+        quat[cond1, 1] = (m[cond1,0,1] + m[cond1,1,0]) / S1
+        quat[cond1, 2] = (m[cond1,0,2] + m[cond1,2,0]) / S1
+        quat[cond1, 3] = (m[cond1,2,1] - m[cond1,1,2]) / S1
+
+        cond2 = (m[:,1,1] >= m[:,2,2]) & mask & ~cond1
+        t2 = 1 + m[cond2,1,1] - m[cond2,0,0] - m[cond2,2,2]
+        S2 = torch.sqrt(t2) * 2
+        quat[cond2, 0] = (m[cond2,0,1] + m[cond2,1,0]) / S2
+        quat[cond2, 1] = 0.25 * S2
+        quat[cond2, 2] = (m[cond2,1,2] + m[cond2,2,1]) / S2
+        quat[cond2, 3] = (m[cond2,0,2] - m[cond2,2,0]) / S2
+
+        cond3 = mask & ~cond1 & ~cond2
+        t3 = 1 + m[cond3,2,2] - m[cond3,0,0] - m[cond3,1,1]
+        S3 = torch.sqrt(t3) * 2
+        quat[cond3, 0] = (m[cond3,0,2] + m[cond3,2,0]) / S3
+        quat[cond3, 1] = (m[cond3,1,2] + m[cond3,2,1]) / S3
+        quat[cond3, 2] = 0.25 * S3
+        quat[cond3, 3] = (m[cond3,1,0] - m[cond3,0,1]) / S3
+
+        if not batch_mode:
+            quat = quat.squeeze(0)
+        return cls(quat)
+
+    # ----------------- Conversion Methods -----------------
+    def as_quat(self):
+        """Return quaternion [x, y, z, w]"""
+        return self._quat
+
+    def as_rotvec(self):
+        """Return rotation vector (axis * angle)"""
+        xyz, w = self._quat[..., :3], self._quat[..., 3:]
+        norm_xyz = xyz.norm(dim=-1, keepdim=True)
+        angle = 2 * torch.atan2(norm_xyz, w)
+        scale = torch.where(norm_xyz > 1e-8, angle / norm_xyz, torch.zeros_like(norm_xyz))
+        return xyz * scale
+
+    def as_matrix(self):
+        """Return 3x3 rotation matrix"""
+        x, y, z, w = self._quat.unbind(-1)
+        xx, yy, zz = x*x, y*y, z*z
+        xy, xz, yz = x*y, x*z, y*z
+        xw, yw, zw = x*w, y*w, z*w
+        R = torch.stack([
+            1-2*(yy+zz), 2*(xy-zw), 2*(xz+yw),
+            2*(xy+zw), 1-2*(xx+zz), 2*(yz-xw),
+            2*(xz-yw), 2*(yz+xw), 1-2*(xx+yy)
+        ], dim=-1).reshape(-1, 3, 3)
+        if R.shape[0] == 1:
+            return R.squeeze(0)
+        return R
+
+    # ----------------- Operations -----------------
+    def inv(self):
+        """Return inverse rotation"""
+        q = self._quat.clone()
+        q[..., :3] *= -1
+        return Rotation(q)
+
+    def apply(self, vectors, inverse=False):
+        """
+        Apply rotation(s) to a set of vectors, optionally using the inverse.
+    
+        Parameters
+        ----------
+        vectors : torch.Tensor
+            Tensor of shape (N,3) representing points.
+        inverse : bool
+            If True, apply the inverse rotation.
+    
+        Returns
+        -------
+        rotated : torch.Tensor
+            If single rotation: shape (N,3)
+            If batched rotations: shape (B,N,3)
+        """
+        R = self.as_matrix()  # (3,3) or (B,3,3)
+        if inverse:
+            R = R.transpose(-2, -1)  # invert the rotation
+    
+        N = vectors.shape[0]
+    
+        if R.ndim == 2:  # single rotation
+            return vectors @ R.T  # (N,3) @ (3,3) -> (N,3)
+        else:  # batch of rotations
+            B = R.shape[0]
+            vectors_exp = vectors.unsqueeze(0).expand(B, N, 3)
+            rotated = torch.einsum('bij,bkj->bki', R, vectors_exp)
+            return rotated
+
+
+    def __mul__(self, other):
+        """Compose rotations (quaternion multiplication)"""
+        x1, y1, z1, w1 = self._quat.unbind(-1)
+        x2, y2, z2, w2 = other._quat.unbind(-1)
+        x = w1*x2 + x1*w2 + y1*z2 - z1*y2
+        y = w1*y2 - x1*z2 + y1*w2 + z1*x2
+        z = w1*z2 + x1*y2 - y1*x2 + z1*w2
+        w = w1*w2 - x1*x2 - y1*y2 - z1*z2
+        quat = torch.stack([x, y, z, w], dim=-1)
+        return Rotation(quat)
+
+def random_quaternion(batchsize=1, convention="xyzw", device='cpu'):
+    """
+    Generate uniformly random unit quaternions using Shoemake's method.
+    """
+
+    u1, u2, u3 = torch.rand(3, batchsize, device=device)
+
+    sqrt_u1 = torch.sqrt(u1)
+    sqrt_1u1 = torch.sqrt(1 - u1)
+
+    q_w = sqrt_1u1 * torch.sin(2 * torch.pi * u2)
+    q_x = sqrt_1u1 * torch.cos(2 * torch.pi * u2)
+    q_y = sqrt_u1 * torch.sin(2 * torch.pi * u3)
+    q_z = sqrt_u1 * torch.cos(2 * torch.pi * u3)
+
+    if convention == "xyzw":
+        quats = torch.stack([q_x, q_y, q_z, q_w], dim=-1)
+    elif convention == "wxyz":
+        quats = torch.stack([q_w, q_x, q_y, q_z], dim=-1)
     else:
         raise ValueError("convention must be 'xyzw' or 'wxyz'")
 
     if batchsize == 1:
-        return quats.squeeze(0)  # return (4,) for single quaternion
-    return quats  # shape (n, 4)
+        return quats.squeeze(0)
+    return quats
 
 
-def random_rotvec():
+def random_rotvec(batchsize=1, device='cpu'):
     """
-    Generates a random rotation vector.
+    Generate uniformly random rotation vectors using the Rotation3D class.
+
+    Parameters
+    ----------
+    batchsize : int
+        Number of rotation vectors to generate.
+    device : str or torch.device
+        Device for the output tensor.
 
     Returns
     -------
-    rotvec : tensor
-        A random rotation vector.
+    rotvecs : torch.Tensor
+        Tensor of shape (batchsize, 3) with rotation vectors (axis * angle).
     """
-    U, V, theta = torch.rand(3)
-    theta = theta * torch.pi
-    psi = 2 * torch.pi * U
-    phi = torch.arccos(2 * V - 1)
-    x = torch.sin(phi) * torch.cos(psi)
-    y = torch.sin(phi) * torch.sin(psi)
-    z = torch.cos(phi)
-    rotvec = torch.tensor([x,y,z]) * theta
-    return rotvec
+    quats = random_quaternion(batchsize=batchsize, convention="xyzw", device=device)
+    R = Rotation.from_quat(quats)
+    rotvecs = R.as_rotvec()
+    
+    if batchsize == 1:
+        return rotvecs.squeeze(0)
+    return rotvecs
 
-def rotate_coordinates(coordinates, rotation, inverse=False):
+
+def random_rotation_matrix(batchsize=1, device='cpu'):
     """
-    Rotate a set of 3D coordinates using quaternion, rotation vector, or rotation matrix.
+    Generate uniformly random 3x3 rotation matrices using the Rotation3D class.
 
-    Args:
-        coords: tensor of shape (N,3)
-        rotation: tensor specifying rotation:
-            - quaternion (4,) in [x,y,z,w] format
-            - rotation vector (3,) axis * angle (rad)
-            - rotation matrix (3,3)
-        inverse: bool, if True apply the inverse rotation
+    Parameters
+    ----------
+    batchsize : int
+        Number of rotation matrices to generate.
+    device : str or torch.device
+        Device for the output tensor.
 
-    Returns:
-        rotated_coords: tensor of shape (N,3)
+    Returns
+    -------
+    rotmats : torch.Tensor
+        Tensor of shape (batchsize, 3, 3) containing rotation matrices.
     """
-    dtype = coordinates.dtype
-    device = coordinates.device
-
-    # Detect type
-    if rotation.shape == (4,):  # quaternion
-        x, y, z, w = rotation
-        if inverse:
-            x, y, z = -x, -y, -z  # conjugate
-        xx, yy, zz = x*x, y*y, z*z
-        xy, xz, yz = x*y, x*z, y*z
-        wx, wy, wz = w*x, w*y, w*z
-        R = torch.tensor([
-            [1 - 2*(yy + zz), 2*(xy - wz), 2*(xz + wy)],
-            [2*(xy + wz), 1 - 2*(xx + zz), 2*(yz - wx)],
-            [2*(xz - wy), 2*(yz + wx), 1 - 2*(xx + yy)]
-        ], dtype=dtype, device=device)
-
-    elif rotation.shape == (3,):  # rotation vector
-        angle = torch.norm(rotation)
-        if angle < 1e-8:
-            R = torch.eye(3, dtype=dtype, device=device)
-        else:
-            axis = rotation / angle
-            if inverse:
-                axis = -axis
-            x, y, z = axis
-            c = torch.cos(angle)
-            s = torch.sin(angle)
-            C = 1 - c
-            R = torch.tensor([
-                [c + x*x*C, x*y*C - z*s, x*z*C + y*s],
-                [y*x*C + z*s, c + y*y*C, y*z*C - x*s],
-                [z*x*C - y*s, z*y*C + x*s, c + z*z*C]
-            ], dtype=dtype, device=device)
-
-    elif rotation.shape == (3,3):  # rotation matrix
-        R = rotation
-        if inverse:
-            R = R.T  # transpose for inverse rotation
-
-    else:
-        raise ValueError("Rotation must be quaternion (4,), rot_vec (3,), or rot_matrix (3,3)")
-
-    # Apply rotation
-    rotated_coords = coordinates @ R.T
-    return rotated_coords
+    quats = random_quaternion(batchsize=batchsize, convention="xyzw", device=device)
+    R = Rotation.from_quat(quats)
+    rotmats = R.as_matrix()
+    
+    if batchsize == 1:
+        return rotmats.squeeze(0)
+    return rotmats
 
 
 def rotate_volume(V, theta, origin="relion", padding_mode='border'):
@@ -194,81 +304,6 @@ def rotate_volume(V, theta, origin="relion", padding_mode='border'):
     V_ = F.grid_sample(V, grid, align_corners=align_corners, padding_mode=padding_mode)
 
     return V_.squeeze(1)  # B x Z x X x Y
-
-
-def quaternion_to_rotation_matrix(q):
-    """
-    Converts quaternions (x,y,z,w) to rotation matrices. 
-    Matches with scipy.rotation.from_quat(q).as_matrix().
-
-    Written by Tristan Bepler.
-
-    Parameters
-    ----------
-    q : 2D tensor
-        Batch of quaternions with shape (N, 4).
-
-    Returns
-    -------
-    R : 3D tensor
-        Batch of rotation matrices with shape (N, 3, 3).
-    """
-    s = 1 / torch.sum(q**2, axis=-1)
-    qr = q[..., 3]
-    qi = q[..., 0]
-    qj = q[..., 1]
-    qk = q[..., 2]
-    shape = q.shape[:-1] + (3, 3)
-    R = torch.stack(
-        [
-            1 - 2 * s * (qj**2 + qk**2),
-            2 * s * (qi * qj - qk * qr),
-            2 * s * (qi * qk + qj * qr),
-            2 * s * (qi * qj + qk * qr),
-            1 - 2 * s * (qi**2 + qk**2),
-            2 * s * (qj * qk - qi * qr),
-            2 * s * (qi * qk - qj * qr),
-            2 * s * (qj * qk + qi * qr),
-            1 - 2 * s * (qi**2 + qj**2),
-        ],
-        axis=-1,
-    ).reshape(*shape)
-    return R
-
-
-def rotvec_to_rotation_matrix(rv):
-    """
-    Converts rotation vectors (x,y,z) to rotation matrices. 
-    Matches with scipy.rotation.from_rotvec(rv).as_matrix().
-
-    Parameters
-    ----------
-    q : 2D tensor
-        Batch of rotation vectors with shape (N, 3).
-
-    Returns
-    -------
-    R : 3D tensor
-        Batch of rotation matrices with shape (N, 3, 3).
-    """
-    device = rv.device
-    angles = torch.linalg.norm(rv, dim=1)
-    axes = rv / angles[..., None]
-    angles = angles[..., None, None]
-    ux = axes[..., 0]
-    uy = axes[..., 1]
-    uz = axes[..., 2]
-    shape = rv.shape[:-1] + (3, 3)
-    K = torch.stack(
-        [
-            torch.zeros_like(ux), -uz, uy,
-            uz, torch.zeros_like(ux), -ux,
-            -uy, ux, torch.zeros_like(ux)],
-        axis=-1,
-    ).reshape(*shape)
-    K2 = torch.bmm(K, K)
-    R = torch.eye(3, device=device).unsqueeze(0) + torch.sin(angles) * K + (1 - torch.cos(angles)) * K2
-    return R
 
 
 def translations_angstrom_to_torch(Txy, n, voxel_size):

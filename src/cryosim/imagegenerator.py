@@ -5,6 +5,7 @@ from .microscope import Aberration, Detector
 from .scattering import Scattering
 from .icemaker import NaiveIcemaker, Icemaker
 from . import rotations
+from .rotations import Rotation
 import torch.nn.functional as F
 from .crowding import CrowdWithDuplicates
 
@@ -212,9 +213,9 @@ class ImageGenerator(L.LightningModule):
                                         verbose=False)
 
     def rotate(self, Q, T):
-        R = rotations.quaternion_to_rotation_matrix(Q)
+        R = Rotation.from_quat(Q)
         T = rotations.translations_angstrom_to_torch(T, self.nxy, self.pixel_size)
-        theta = rotations.build_affine_matrix(R, T)
+        theta = rotations.build_affine_matrix(R.as_matrix(), T)
         V = rotations.rotate_volume(self.V, theta, origin='relion')
         return V
         
@@ -553,11 +554,9 @@ class MicrographGenerator(L.LightningModule):
                 V = self.solvate(V)
 
         #scatter V
-        print('Scattering')
         self.exitwaves = self.scattering(V)
 
         #aberrate exitwaves
-        print('Aberrating')
         self.detector_waves = self.aberration(
             self.exitwaves,
             self.cs[idx],
@@ -571,7 +570,6 @@ class MicrographGenerator(L.LightningModule):
             self.tref2[idx],
         )
         #image/noise
-        print('Imaging')
         if self.anisomag is None:
             images = self.detector(self.detector_waves)
         else:

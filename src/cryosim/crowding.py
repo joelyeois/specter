@@ -2,7 +2,7 @@ import torch
 from . import rotations
 import numpy as np
 import lightning as L
-from tqdm.auto import tqdm
+from rich.progress import track
 
 def poisson_disk_neighbors(
     min_distance,
@@ -262,8 +262,7 @@ def crowd_with_duplicates(V, min_distance, pixel_size, return_coordinates=False,
     num_neighbours = len(translations)
 
     # Generate random rotations for each duplicate
-    quats = rotations.random_quaternion(num_neighbours)
-    R = rotations.quaternion_to_rotation_matrix(quats)
+    R = rotations.random_rotation_matrix(num_neighbours)
     # in case only one position was found, ensures R is (1,3,3)
     if len(R.shape) == 2:
         R = R.unsqueeze(0)
@@ -434,8 +433,7 @@ class CrowdWithDuplicates(L.LightningModule):
 
     def generate_affine_matrices(self):
         self.N = len(self.coords)
-        quats = rotations.random_quaternion(self.N)
-        R = rotations.quaternion_to_rotation_matrix(quats)
+        R = rotations.random_rotation_matrix(self.N)
         # in case only one position was found, ensures R is (1,3,3)
         if len(R.shape) == 2:
             R = R.unsqueeze(0)
@@ -448,7 +446,7 @@ class CrowdWithDuplicates(L.LightningModule):
             else:
                 self.vols = torch.empty((self.N,) + self.V.shape, device=self.device)
 
-            for start in tqdm(range(0, self.N, self.chunk_size), desc='Rotating duplicates', leave=False):
+            for start in track(range(0, self.N, self.chunk_size), description='Rotating duplicates', transient=True):
                 end = min(start + self.chunk_size, self.N)
                 if self.move_to_cpu:
                     self.vols[start:end] = rotations.rotate_volume(self.V, self.theta[start:end].to(self.V.device), padding_mode="zeros").cpu()
@@ -482,7 +480,7 @@ class CrowdWithDuplicates(L.LightningModule):
                 # create micrograph
                 micrograph = torch.zeros(self.nz_out, self.nxy_out, self.nxy_out)
                 # rotate and insert in batches
-                for start in tqdm(range(0, self.N, self.chunk_size), desc='Rotating duplicates and insert into micrograph', leave=False):
+                for start in track(range(0, self.N, self.chunk_size), description='Rotating duplicates and insert into micrograph', transient=True):
                     # get batch indicies
                     end = min(start + self.chunk_size, self.N)
                     # rotate

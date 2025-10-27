@@ -1,6 +1,6 @@
 import torch
 import torch.nn.functional as F
-from tqdm.auto import tqdm
+from rich.progress import track, Progress
 import torch.nn as nn
 import lightning as L
 
@@ -127,9 +127,13 @@ def build_potential_volume_fftconvolve_3d(
     occupancy = torch.zeros(nz, ny, nx, dtype=torch.bool)
     atomic_potentials = {}
 
-    pbar = tqdm(torch.unique(atomic_numbers), disable=disable_tqdm)
-    for elem in pbar:
-        pbar.set_description(f"Building element {atom_symbol(int(elem))}")
+    for elem in track(
+        torch.unique(atomic_numbers),
+        description="Building elements",
+        disable=disable_tqdm
+    ):
+        # Update the description dynamically per element
+        track.description = f"Building element {atom_symbol(int(elem))}"
         atomic_indices = torch.squeeze(torch.argwhere(atomic_numbers == elem))
 
         # populate elemental volume with delta function atoms
@@ -205,9 +209,12 @@ def build_potential_volume_fftconvolve_2d(
     occupancy = torch.zeros(nz, ny, nx, dtype=torch.bool)
     atomic_potentials = {}
 
-    pbar = tqdm(torch.unique(atomic_numbers), disable=disable_tqdm)
-    for elem in pbar:
-        pbar.set_description(f"Building element {atom_symbol(int(elem))}")
+    for elem in track(
+        torch.unique(atomic_numbers),
+        description="Building elements",
+    ):
+        # Update the description dynamically per element
+        track.description = f"Building element {atom_symbol(int(elem))}"
         atomic_indices = torch.squeeze(torch.argwhere(atomic_numbers == elem))
 
         # populate elemental volume with delta function atoms
@@ -340,42 +347,47 @@ class PotentialBuilder(L.LightningModule):
     def forward(self, coordinates=None, method='3d'):
         if coordinates is None:
             coordinates = self.coordinates
+        coordinates = coordinates.to(self.device)
         self.method = method
 
         # insert atomic potentials into main volume.
         potential_volume = 0
         self.occupancy = torch.zeros(self.nz, self.ny, self.nx, dtype=torch.bool)
-
-        for i, elem in enumerate(self.unique_elements):
-            atomic_indices = torch.squeeze(torch.argwhere(self.atomic_numbers == elem))
-
-            if method == '2d':
-                temp_vol = soft_voxelize_xy_coordinates(
-                    coordinates[atomic_indices].reshape(-1,3),
-                    grid_shape=(self.nz, self.ny, self.nx),
-                    voxel_size=self.dx
-                )
-
-                #batch 2D convolve
-                temp_vol_b = temp_vol.unsqueeze(1)   # (nz, 1, ny, nx)
-                pot_b = self.atomic_potentials_2d[i].unsqueeze(0).unsqueeze(0)  # (1, 1, ky, kx)
-                convolved = F.conv2d(temp_vol_b, pot_b, padding='same')
-                potential_volume += convolved.squeeze(1)    # (nz, ny, nx)
-            if method == '3d':
-                temp_vol = soft_voxelize_coordinates(
-                    coordinates[atomic_indices].reshape(-1,3),
-                    grid_shape=(self.nz, self.ny, self.nx),
-                    voxel_size=self.dx
-                )
-
-                #convolve
-                potential_volume += fftconvolve(
-                    temp_vol,
-                    self.atomic_potentials_3d[i],
-                    mode='same'
-                )
-
-            self.occupancy = self.occupancy | (temp_vol.detach().cpu() > 0)
+        
+        with Progress() as progress:
+            # Create a single task for the outer loop
+            task = progress.add_task("Building element ...", total=len(self.unique_elements))
+            for i, elem in enumerate(self.unique_elements):
+                progress.update(task, description=f"Building element {atom_symbol(int(elem))}", advance=1)
+                atomic_indices = torch.squeeze(torch.argwhere(self.atomic_numbers == elem))
+    
+                if method == '2d':
+                    temp_vol = soft_voxelize_xy_coordinates(
+                        coordinates[atomic_indices].reshape(-1,3),
+                        grid_shape=(self.nz, self.ny, self.nx),
+                        voxel_size=self.dx
+                    )
+    
+                    #batch 2D convolve
+                    temp_vol_b = temp_vol.unsqueeze(1)   # (nz, 1, ny, nx)
+                    pot_b = self.atomic_potentials_2d[i].unsqueeze(0).unsqueeze(0)  # (1, 1, ky, kx)
+                    convolved = F.conv2d(temp_vol_b, pot_b, padding='same')
+                    potential_volume += convolved.squeeze(1)    # (nz, ny, nx)
+                if method == '3d':
+                    temp_vol = soft_voxelize_coordinates(
+                        coordinates[atomic_indices].reshape(-1,3),
+                        grid_shape=(self.nz, self.ny, self.nx),
+                        voxel_size=self.dx
+                    )
+    
+                    #convolve
+                    potential_volume += fftconvolve(
+                        temp_vol,
+                        self.atomic_potentials_3d[i],
+                        mode='same'
+                    )
+    
+                self.occupancy = self.occupancy | (temp_vol.detach().cpu() > 0)
         return potential_volume
 
 ################ OLD & SLOW ################

@@ -1,6 +1,5 @@
 import torch
 import torch.nn.functional as F
-from scipy.spatial.transform import Rotation as R
 import numpy as np
 
 class Rotation:
@@ -21,10 +20,21 @@ class Rotation:
 
     # ----------------- Constructors -----------------
     @classmethod
-    def from_quat(cls, quat: torch.Tensor):
+    def from_quat(cls, quat: torch.Tensor, scalar_first: bool = False):
         """
-        Create from quaternion [x, y, z, w].
+        Create from quaternion.
+
+        Parameters
+        ----------
+        quat : torch.Tensor
+            Quaternion tensor [..., 4].
+        scalar_first : bool
+            If True, interpret as [w, x, y, z].
+            If False, interpret as [x, y, z, w] (default, same as internal format).
         """
+        if scalar_first:
+            # Convert [w, x, y, z] → [x, y, z, w]
+            quat = torch.cat([quat[..., 1:], quat[..., :1]], dim=-1)
         return cls(quat)
 
     @classmethod
@@ -93,8 +103,18 @@ class Rotation:
         return cls(quat)
 
     # ----------------- Conversion Methods -----------------
-    def as_quat(self):
-        """Return quaternion [x, y, z, w]"""
+    def as_quat(self, scalar_first: bool = False):
+        """
+        Return quaternion.
+
+        Parameters
+        ----------
+        scalar_first : bool
+            If True, return [w, x, y, z].
+            If False, return [x, y, z, w] (default, internal format).
+        """
+        if scalar_first:
+            return torch.cat([self._quat[..., 3:], self._quat[..., :3]], dim=-1)
         return self._quat
 
     def as_rotvec(self):
@@ -127,36 +147,43 @@ class Rotation:
         q[..., :3] *= -1
         return Rotation(q)
 
-    def apply(self, vectors, inverse=False):
+    def apply(self, vectors, inverse=True, T=None):
         """
-        Apply rotation(s) to a set of vectors, optionally using the inverse.
+        Apply rotation(s) to a set of vectors, optionally using the inverse and translation.
     
         Parameters
         ----------
         vectors : torch.Tensor
-            Tensor of shape (N,3) representing points.
+            Shape (N,3)
         inverse : bool
             If True, apply the inverse rotation.
+        T : torch.Tensor or None
+            Translation per rotation batch. Shape (B,3).
+            If last dimension is 2, z-translation is assumed zero.
     
         Returns
         -------
         rotated : torch.Tensor
-            If single rotation: shape (N,3)
-            If batched rotations: shape (B,N,3)
+            Shape: (N,3) for single rotation, (B,N,3) for batch rotations
         """
         R = self.as_matrix()  # (3,3) or (B,3,3)
         if inverse:
-            R = R.transpose(-2, -1)  # invert the rotation
+            R = R.transpose(-2, -1)
     
         N = vectors.shape[0]
     
+        # Apply rotation
         if R.ndim == 2:  # single rotation
-            return vectors @ R.T  # (N,3) @ (3,3) -> (N,3)
+            rotated = vectors @ R.T  # (N,3)
         else:  # batch of rotations
             B = R.shape[0]
-            vectors_exp = vectors.unsqueeze(0).expand(B, N, 3)
-            rotated = torch.einsum('bij,bkj->bki', R, vectors_exp)
+            vectors_exp = vectors.unsqueeze(0).expand(B, N, 3)  # (B,N,3)
+            rotated = torch.einsum('bij,bkj->bki', R, vectors_exp)  # (B,N,3)
+    
+        if T is None:
             return rotated
+        else:
+            return translate_coordinates(rotated, T, inverse=inverse)
 
 
     def __mul__(self, other):
@@ -170,6 +197,50 @@ class Rotation:
         quat = torch.stack([x, y, z, w], dim=-1)
         return Rotation(quat)
 
+def translate_coordinates(vectors, T, inverse=False):
+    """
+    Apply translation to points, with broadcasting.
+
+    Parameters
+    ----------
+    vectors : torch.Tensor
+        Shape: (N,3) or (B,N,3)
+    T : torch.Tensor
+        Shape: (3,), (1,3), or (B,3). Last dim can be 2 or 3.
+    inverse : bool
+        If True, subtract translation instead of adding.
+
+    Returns
+    -------
+    translated : torch.Tensor
+        Same shape as vectors
+    """
+    # Pad z=0 if last dim is 2
+    if T.shape[-1] == 2:
+        T_full = F.pad(T, (0, 1))  # pad last dim with 1 zero
+    elif T.shape[-1] == 3:
+        T_full = T
+    else:
+        raise ValueError("T must have last dimension 2 or 3")
+
+    sign = -1 if inverse else 1
+
+    if vectors.ndim == 2:  # single rotation
+        if T_full.ndim == 1:
+            T_full = T_full.unsqueeze(0)  # (1,3)
+        return vectors + sign * T_full
+    else:  # batch rotation
+        B, N, _ = vectors.shape
+        if T_full.ndim == 2:
+            if T_full.shape[0] == B:
+                T_full = T_full[:, None, :]
+            elif T_full.shape[0] == 1:
+                T_full = T_full
+            else:
+                raise ValueError("T shape not compatible with batch size")
+        return vectors + sign * T_full
+
+        
 def random_quaternion(batchsize=1, convention="xyzw", device='cpu'):
     """
     Generate uniformly random unit quaternions using Shoemake's method.
@@ -306,7 +377,7 @@ def rotate_volume(V, theta, origin="relion", padding_mode='border'):
     return V_.squeeze(1)  # B x Z x X x Y
 
 
-def translations_angstrom_to_torch(Txy, n, voxel_size):
+def translations_angstrom_to_torch(T, n, voxel_size):
     """
     Builds a batch of normalized translation vectors from rlnOriginXAngst and
     rlnOriginYAngst in starfiles.
@@ -317,7 +388,7 @@ def translations_angstrom_to_torch(Txy, n, voxel_size):
 
     Parameters
     ----------
-    Txy : 2D tensor
+    T : 2D tensor
         Translation vector of shape (N,2), built from [rlnOriginXAngst, rlnOriginYAngst]. 
         In angstroms.
     n : int
@@ -330,9 +401,10 @@ def translations_angstrom_to_torch(Txy, n, voxel_size):
     T : 2D tensor
         Batch of Torch normalized translation vectors with shape (N, 3).
     """
-    num = len(Txy)
-    tz = torch.zeros(num, device=Txy.device)
-    T = torch.concat([Txy, tz[..., None]], dim=-1)
+    num = len(T)
+    if T.shape[-1] == 2:
+        tz = torch.zeros(num, device=T.device)
+        T = torch.concat([T, tz[..., None]], dim=-1)
     T *= 2 / n / voxel_size
     return T
 

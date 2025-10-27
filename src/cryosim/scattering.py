@@ -6,6 +6,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from .fft_tools import fft2, ifft2
 from tqdm.auto import tqdm
+from rich.progress import track
 
 rest_mass_energy = 511.0e3  # [eV]
 hc = 12.398e3  # [eV * Å]
@@ -114,7 +115,8 @@ class Scattering(L.LightningModule):
         # Fresnel transfer function for first Born
         if scattering_model == "firstborn":
             F = []
-            for i in tqdm(range(nz), desc='Create first Born propagators', leave=False):
+            # for i in tqdm(range(nz), desc='Create first Born propagators', leave=False):
+            for i in track(range(nz), description='Create first Born propagators', transient=True):
                 # original
                 # f = torch.exp(-1j * torch.pi * self.wavelength * pixel_size * 
                 #               (nz - i) * k**2)
@@ -141,7 +143,8 @@ class Scattering(L.LightningModule):
         exitwave = np.sqrt(self.dose_per_pixel)
 
         # iterate across z-planes of 3D potentials.
-        for i in tqdm(range(V.size(1)), desc='Multislicing', leave=False):
+        # for i in tqdm(range(V.size(1)), desc='Multislicing', leave=False):
+        for i in track(range(V.size(1)), description='Multislicing', transient=True):
             # transmission function
             # t = torch.exp(1j * self.sigma * complex_potential(V[:, i], alpha=self.alpha).to(self.device))
             t = torch.exp(1j * self.sigma * V[:, i].to(self.device))

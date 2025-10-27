@@ -10,6 +10,7 @@ from .fft_tools import fftconvolve
 from scipy.interpolate import CubicSpline
 from skimage.feature import peak_local_max
 from tqdm.auto import tqdm
+from rich.progress import track
 import lightning as L
 
 from torchinterp1d import interp1d
@@ -170,7 +171,7 @@ class Icemaker(L.LightningModule):
         x, y, z, X, Y, Z = grid_3d(self.mdsim_n, self.mdsim_dx)
 
         self.mdsim_ice_coordinates = []
-        for frame in tqdm(self.mdsim_frame_indexes[startframe:endframe]):
+        for frame in track(self.mdsim_frame_indexes[startframe:endframe]):
             coordstart = frame + 9
             coords = self.get_coordinates_from_frame(coordstart)
 
@@ -203,7 +204,7 @@ class Icemaker(L.LightningModule):
             self.lines = f.readlines()
 
         self.mdsim_frame_indexes = [
-            i for i, x in tqdm(enumerate(self.lines)) if x == "ITEM: TIMESTEP\n"
+            i for i, x in track(enumerate(self.lines)) if x == "ITEM: TIMESTEP\n"
         ]
 
     def get_coordinates_from_frame(
@@ -279,7 +280,7 @@ class Icemaker(L.LightningModule):
         if source == "dump":
             self.get_mdsim(filepath, trim_size=100)
             self.mdsim_ice_deltas_f = []
-            for mdsim_ice_delta in tqdm(self.mdsim_ice_deltas):
+            for mdsim_ice_delta in track(self.mdsim_ice_deltas):
                 self.mdsim_ice_deltas_f.append(fftn(mdsim_ice_delta))
             self.mdsim_ice_deltas_f = torch.stack(self.mdsim_ice_deltas_f)
             self.mdsim_ice_deltas_f = torch.mean(
@@ -399,7 +400,8 @@ class Icemaker(L.LightningModule):
         self.frob_norm = []
         self.n_extra_atoms = []
 
-        for i in tqdm(range(niter), disable= not self.verbose, desc="Running ice algorithm"):
+        # for i in tqdm(range(niter), disable= not self.verbose, desc="Running ice algorithm", leave=False):
+        for i in track(range(niter), description="Running ice algorithm", transient=True):
             prev_ice_vol = self.current_icedeltas
             # ice_vol_f = fftn(self.current_icedeltas)
             ice_vol_f = rfftn(self.current_icedeltas)
@@ -507,7 +509,8 @@ class Icemaker(L.LightningModule):
 
         # convolve with ice kernel
         self.register_buffer('icecubes', torch.zeros_like(self.current_icedeltas))
-        for i in tqdm(range(batchsize), desc='Computing batches of icecubes', leave=False):
+        # for i in tqdm(range(batchsize), desc='Computing batches of icecubes', leave=False):
+        for i in track(range(batchsize), description='Computing batches of icecubes', transient=True):
             self.icecube = fftconvolve(self.current_icedeltas[i], self.ice_kernel, mode="same")
             self.icecubes[i] = self.icecube
         return self.icecubes
@@ -550,7 +553,8 @@ class Icemaker(L.LightningModule):
             big_ice = torch.empty(B, num_z * self.nz, num_y * self.n, num_x * self.n)
             
             idx = 0
-            for start in tqdm(range(0, N, self.chunk_size), desc='Generate ice positions', leave=False):
+            # for start in tqdm(range(0, N, self.chunk_size), desc='Generate ice positions', leave=False):
+            for start in track(range(0, N, self.chunk_size), description='Generate ice positions', transient=True):
                 end = min(start + self.chunk_size, N)
                 batchsize = end - start
             
@@ -590,7 +594,8 @@ class Icemaker(L.LightningModule):
 
             # perform batchwise fft
             for ib in range(B):
-                for iz in tqdm(range(num_z), desc='Ice convolution',leave=False):
+                # for iz in tqdm(range(num_z), desc='Ice convolution', leave=False):
+                for iz in track(range(num_z), description='Ice convolution', transient=True):
                     for iy in range(num_y):
                         for ix in range(num_x):
                             big_ice[ib,
@@ -788,7 +793,8 @@ def remove_close_ones_3d(xold: torch.Tensor, min_dist: int = 1) -> torch.Tensor:
     # Initialize forbidden mask
     forbidden = torch.zeros_like(x, dtype=torch.bool)
 
-    for d, i, j in tqdm(ones_coords, desc='Removing adjacent 1s', leave=False):
+    # for d, i, j in tqdm(ones_coords, desc='Removing adjacent 1s', leave=False):
+    for d, i, j in track(ones_coords, description='Removing adjacent 1s', transient=True):
         if not forbidden[d, i, j]:
             # Keep this 1
             x[d, i, j] = 1

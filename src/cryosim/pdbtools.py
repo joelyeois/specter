@@ -158,6 +158,10 @@ class PDB:
         coords : (N,3)-shape array
             x,y,z coordinates of each atom
         """
+
+        # if filepath, load the structure.
+        if isinstance(structure, str):
+            structure = PDB.get_pdb_structure(structure)
         
         # Extract atomic data
         coords = []

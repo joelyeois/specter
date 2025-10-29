@@ -1,9 +1,10 @@
 import torch
 from functools import lru_cache
 from torch.special import modified_bessel_k0
+from importlib import resources
 
 @lru_cache(maxsize=1)
-def load_kirkland_parameters(file_path="../atom-data/kirkland_scattering_parameters.txt"):
+def load_kirkland_parameters():
     """
     Load Kirkland's atom scattering parameters from a text file.
 
@@ -36,15 +37,21 @@ def load_kirkland_parameters(file_path="../atom-data/kirkland_scattering_paramet
     Appendix C.4.
     """
     params_list = []
-
-    with open(file_path, 'r') as f:
-        for line in f:
-            line = line.strip()
-            # Skip comments and empty lines
-            if not line or line.startswith("Z=") or line.startswith("chisq="):
-                continue
-            numbers = [float(x) for x in line.split()]
-            params_list.append(numbers)
+    
+     # Use importlib.resources to get the file path safely
+    data_file = resources.files("cryosim.atom_data").joinpath(
+        "kirkland_scattering_parameters.txt"
+    )
+    
+    with resources.as_file(data_file) as fpath:
+        with open(fpath, 'r', encoding='utf-8') as f:
+            for line in f:
+                line = line.strip()
+                # Skip comments and empty lines
+                if not line or line.startswith("Z=") or line.startswith("chisq="):
+                    continue
+                numbers = [float(x) for x in line.split()]
+                params_list.append(numbers)
 
     params  = torch.as_tensor(params_list, dtype=torch.float32)
     params  = params .view(103, 3, 4)
@@ -62,7 +69,7 @@ def load_kirkland_parameters(file_path="../atom-data/kirkland_scattering_paramet
 
 
 @lru_cache(maxsize=1)
-def load_lobato_parameters(file_path="../atom-data/lobato_scattering_parameters.txt"):
+def load_lobato_parameters():
     """
     Load Lobato electron scattering parameters from a text file.
 
@@ -93,8 +100,13 @@ def load_lobato_parameters(file_path="../atom-data/lobato_scattering_parameters.
     """
     params_list = []
 
-    with open(file_path, 'r') as f:
-        lines = f.readlines()
+    # Use importlib.resources to get the file path safely
+    data_file = resources.files("cryosim.atom_data").joinpath(
+        "lobato_scattering_parameters.txt"
+    )
+    with resources.as_file(data_file) as fpath:
+        with open(fpath, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
     
     i = 0
     while i < len(lines):

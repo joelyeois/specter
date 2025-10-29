@@ -29,3 +29,10 @@ dependencies = [
 dev = [
     "rich>=14.2.0",
 ]
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.package-data]
+cryosim = ["atom_data/*.txt"]
+

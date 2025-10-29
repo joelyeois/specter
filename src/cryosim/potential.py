@@ -21,6 +21,8 @@ from .atom import (
 )
 from .fft_tools import fftconvolve
 
+import time
+
 def compute_supersampling_parameters(dx, width_atom=5.0, dx_atom=0.1):
     """
     Compute grid size, pixel spacing and supersampling factor for atomic potentials.
@@ -243,16 +245,17 @@ def build_potential_volume_fftconvolve_2d(
 
 
 class PotentialBuilder(L.LightningModule):
-    def __init__(self,
-                 n_xyz,
-                 dx,
-                 atomic_numbers,
-                 coordinates,
-                 verbose=True,
-                 parameterization='kirkland'):
+    def __init__(
+        self,
+        n_xyz,
+        dx,
+        atomic_numbers,
+        verbose=True,
+        parameterization='kirkland',
+        conv_backend='fftconvolve',
+        trainable=False
+    ):
         super().__init__()
-
-        self.coordinates = nn.Parameter(coordinates)
 
         if isinstance(n_xyz, int):
             self.nx = self.ny = self.nz = n_xyz
@@ -260,6 +263,7 @@ class PotentialBuilder(L.LightningModule):
             self.nx, self.ny, self.nz = n_xyz
         self.dx = dx
         self.verbose = verbose
+        self.conv_backend = conv_backend
 
         # create super-sampled (ss) coordinate system
         self.ssn, self.ssdx, self.ssf = compute_supersampling_parameters(dx)
@@ -344,23 +348,34 @@ class PotentialBuilder(L.LightningModule):
             self.atomic_potentials_3d[i] = pot
 
 
-    def forward(self, coordinates=None, method='3d'):
-        if coordinates is None:
-            coordinates = self.coordinates
+    def forward(self, coordinates, method='3d', conv_backend=None):
+        if conv_backend is None:
+            conv_backend = self.conv_backend
         coordinates = coordinates.to(self.device)
         self.method = method
 
-        # insert atomic potentials into main volume.
-        potential_volume = 0
-        self.occupancy = torch.zeros(self.nz, self.ny, self.nx, dtype=torch.bool)
+        # Detect batch
+        batched_input = True
+        if coordinates.ndim == 2:  # (N,3) -> add batch dimension
+            coordinates = coordinates.unsqueeze(0)
+            batched_input = False
+    
+        B, N, _ = coordinates.shape
         
-        with Progress() as progress:
+        # insert atomic potentials into main volume.
+        potential_volume = torch.zeros((B, self.nz, self.ny, self.nx), device=self.device)
+        self.occupancy = torch.zeros((B, self.nz, self.ny, self.nx), dtype=torch.bool)
+        
+        with Progress(transient=True) as progress:
             # Create a single task for the outer loop
             task = progress.add_task("Building element ...", total=len(self.unique_elements))
             for i, elem in enumerate(self.unique_elements):
                 progress.update(task, description=f"Building element {atom_symbol(int(elem))}", advance=1)
                 atomic_indices = torch.squeeze(torch.argwhere(self.atomic_numbers == elem))
-    
+
+                # Select atomic coordinates for this element
+                coords_elem = coordinates[:, atomic_indices, :]  # (B, Nelem, 3)
+                
                 if method == '2d':
                     temp_vol = soft_voxelize_xy_coordinates(
                         coordinates[atomic_indices].reshape(-1,3),
@@ -373,21 +388,43 @@ class PotentialBuilder(L.LightningModule):
                     pot_b = self.atomic_potentials_2d[i].unsqueeze(0).unsqueeze(0)  # (1, 1, ky, kx)
                     convolved = F.conv2d(temp_vol_b, pot_b, padding='same')
                     potential_volume += convolved.squeeze(1)    # (nz, ny, nx)
-                if method == '3d':
+                    
+                elif method == '3d':
                     temp_vol = soft_voxelize_coordinates(
-                        coordinates[atomic_indices].reshape(-1,3),
+                        coords_elem,
                         grid_shape=(self.nz, self.ny, self.nx),
                         voxel_size=self.dx
                     )
     
                     #convolve
-                    potential_volume += fftconvolve(
-                        temp_vol,
-                        self.atomic_potentials_3d[i],
-                        mode='same'
-                    )
+                    # Convolve 3D potentials per batch
+                    if conv_backend == 'fftconvolve':
+                        # for b in track(range(B), description='Convolving atoms', transient=True):
+                        for b in range(B):
+                            potential_volume[b] += fftconvolve(
+                                temp_vol[b],
+                                self.atomic_potentials_3d[i],
+                                mode='same'
+                            )
+
+                    # using conv3d instead
+                    elif conv_backend == 'conv3d':
+                        vol_b = temp_vol.unsqueeze(1)  # (B,1,nz,ny,nx)
+                        kernel = self.atomic_potentials_3d[i].unsqueeze(0).unsqueeze(0)  # (1,1,kz,ky,kx)
+                        # Use conv3d with groups=1
+                        convolved = F.conv3d(vol_b, kernel, padding='same')  # (B,1,nz,ny,nx)
+                        potential_volume += convolved.squeeze(1)  # (B,nz,ny,nx)
+                        
+                    # potential_volume += fftconvolve(
+                    #     temp_vol,
+                    #     self.atomic_potentials_3d[i],
+                    #     mode='same'
+                    # )
     
-                self.occupancy = self.occupancy | (temp_vol.detach().cpu() > 0)
+                # Update occupancy, very slow.
+                # self.occupancy |= (temp_vol.detach().cpu() > 0)
+        if B == 1:
+            potential_volume = potential_volume.squeeze(0)
         return potential_volume
 
 ################ OLD & SLOW ################

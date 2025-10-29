@@ -240,7 +240,7 @@ def translate_coordinates(vectors, T, inverse=False):
                 raise ValueError("T shape not compatible with batch size")
         return vectors + sign * T_full
 
-        
+
 def random_quaternion(batchsize=1, convention="xyzw", device='cpu'):
     """
     Generate uniformly random unit quaternions using Shoemake's method.

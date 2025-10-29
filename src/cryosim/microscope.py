@@ -5,7 +5,6 @@ from .fft_tools import fft2, fftn, ifft2, ifftn
 from .scattering import energy_to_wavelength
 import torch.nn.functional as F
 
-
 class Aberration(L.LightningModule):
     def __init__(
         self,
@@ -54,10 +53,14 @@ class Aberration(L.LightningModule):
         kxx, kyy = torch.meshgrid(kx, kx, indexing="ij")
         k2 = kxx**2 + kyy**2
         radian = torch.arctan2(kyy, kxx)
-        self.register_buffer("radian", radian)
-        self.register_buffer("k2", k2)
+        self.register_buffer('k', torch.sqrt(k2).unsqueeze(0))
+        self.register_buffer("radian", radian.unsqueeze(0))
+        self.register_buffer("k2", k2.unsqueeze(0))
         self.register_buffer("kxx", kxx)
         self.register_buffer("kyy", kyy)
+
+        # dummy tensor for non-existent aberration terms
+        self.register_buffer('zero', torch.tensor(0.0))
 
         if aberration_model == "ctf":
             if alpha is None:
@@ -65,11 +68,47 @@ class Aberration(L.LightningModule):
             else:
                 self.alpha = alpha
 
+    def _cs(self, cs):
+        cs = cs
+        return torch.pi / 2 * self.wavelength**3 * self.k**4 * cs
+
+    def _defocus(self, dfu, dfv, dfang):
+        dfu = dfu
+        dfv = dfv
+        dfang = dfang
+        df = 0.5 * (dfu + dfv + (dfv - dfu) * torch.cos(2 * (self.radian + dfang)))
+        return -torch.pi * self.wavelength * self.k2 * df
+
+    def _beamtilt(self, cs, tiltx, tilty):
+        cs = cs
+        tiltx = tiltx
+        tilty = tilty
+        tilts = torch.sin(tilty) * self.kxx + torch.sin(tiltx) * self.kyy
+        return -2 * torch.pi * self.wavelength**2 * cs * self.k2 * tilts
+
+    def _trefoil(self, trefoil1, trefoil2):
+        trefoil1 = trefoil1
+        trefoil2 = trefoil2
+        tf1 = trefoil1 * self.k**3 * torch.sin(3 * self.radian)
+        tf2 = trefoil2 * self.k**3 * torch.cos(3 * self.radian)
+        return tf1 + tf2
+
+    def _tetrafoil(self, tetrafoil1, tetrafoil2, tetrafoil3, tetrafoil4):
+        pass
+
+    def _phaseshift(self, phaseshift):
+        phaseshift = phaseshift.unsqueeze(1).unsqueeze(2)
+        if self.aberration_model == "holography":
+            phaseshift = phaseshift * torch.ones_like(k)
+            # phaseshift must be zero at DC for Fourier optics
+            phaseshift[:, self.n_pixels//2, self.n_pixels//2] = 0
+        return -phaseshift
+
     def aberration(self, cs, dfu, dfv, dfang, tiltx, tilty, phaseshift, tref1, tref2):
         w = self.wavelength
-        ang = self.radian.unsqueeze(0)
-        k2 = self.k2.unsqueeze(0)
-        k = torch.sqrt(k2)
+        ang = self.radian
+        k2 = self.k2
+        k = self.k
 
         # defocus
         dfu = dfu.unsqueeze(1).unsqueeze(2)
@@ -129,14 +168,68 @@ class Aberration(L.LightningModule):
             trans = torch.exp(-1j * gamma)
         return trans * torch.exp(-1j * phi)
 
-    def forward(self, exitwave, cs, dfu, dfv, dfang, tiltx, tilty, phaseshift, tref1, tref2):
-        f = self.transfer(cs, dfu, dfv, dfang, tiltx, tilty, phaseshift, tref1, tref2)
+    # def forward(self, exitwave, cs, dfu, dfv, dfang, tiltx, tilty, phaseshift, tref1, tref2):
+    #     f = self.transfer(cs, dfu, dfv, dfang, tiltx, tilty, phaseshift, tref1, tref2)
+    #     aberrated_exitwaves = ifft2(fft2(exitwave) * f)
+    #     if self.aberration_model == "ctf":
+    #         return torch.real(aberrated_exitwaves)
+    #     elif self.aberration_model == "holography":
+    #         return aberrated_exitwaves
+
+    def transfer_function(self, ctf_params):
+        # total aberration phase
+        chi = 0
+
+        # --- Defocus ---
+        if any(k in ctf_params for k in ["dfu", "dfv", "dfang"]):
+            dfu = ctf_params.get("dfu", self.zero).view(-1, 1, 1)
+    
+            # if dfv is not provided, use dfu
+            dfv = ctf_params.get("dfv", dfu).view(-1, 1, 1)
+    
+            dfang = ctf_params.get("dfang", self.zero).view(-1, 1, 1)
+            chi += self._defocus(dfu, dfv, dfang)
+            
+        # --- Cs ---
+        if "cs" in ctf_params:
+            cs = ctf_params.get("cs", self.zero).view(-1, 1, 1)
+            chi += self._cs(cs)
+
+        # --- Phaseshift ---
+        if "phaseshift" in ctf_params:
+            phaseshift = ctf_params.get("phaseshift", self.zero).view(-1, 1, 1)
+            chi += self._phaseshift(phaseshift)
+            
+        # --- Beam tilt ---
+        if any(k in ctf_params for k in ["tiltx", "tilty"]):
+            cs = ctf_params.get("cs", self.zero).view(-1, 1, 1)
+            tiltx = ctf_params.get("tiltx", self.zero).view(-1, 1, 1)
+            tilty = ctf_params.get("tilty", self.zero).view(-1, 1, 1)
+            chi += self._beamtilt(cs, tiltx, tilty)
+    
+        # --- Trefoil ---
+        if any(k in ctf_params for k in ["trefoil1", "trefoil2"]):
+            trefoil1 = ctf_params.get("trefoil1", self.zero).view(-1, 1, 1)
+            trefoil2 = ctf_params.get("trefoil2", self.zero).view(-1, 1, 1)
+            chi += self._trefoil(trefoil1, trefoil2)
+    
+        # --- Tetrafoil ---
+        if any(k in ctf_params for k in ["tetrafoil1", "tetrafoil2", "tetrafoil3", "tetrafoil4"]):
+            tetrafoil1 = ctf_params.get("tetrafoil1", self.zero).view(-1, 1, 1)
+            tetrafoil2 = ctf_params.get("tetrafoil2", self.zero).view(-1, 1, 1)
+            tetrafoil3 = ctf_params.get("tetrafoil3", self.zero).view(-1, 1, 1)
+            tetrafoil4 = ctf_params.get("tetrafoil4", self.zero).view(-1, 1, 1)
+            chi += self._tetrafoil(trefoil1, trefoil2, tetrafoil3, tetrafoil4)
+        
+        return torch.exp(-1j * chi)
+    
+    def forward(self, exitwave, ctf_params):
+        f = self.transfer_function(ctf_params)
         aberrated_exitwaves = ifft2(fft2(exitwave) * f)
         if self.aberration_model == "ctf":
             return torch.real(aberrated_exitwaves)
         elif self.aberration_model == "holography":
             return aberrated_exitwaves
-
 
 class Detector(L.LightningModule):
     def __init__(

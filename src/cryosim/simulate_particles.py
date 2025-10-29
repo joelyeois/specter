@@ -87,6 +87,7 @@ def main():
         alpha=args.alpha,
         crowd_min_distance=args.crowd_min_distance,
         pad_fft=args.pad_fft,
+        progressbars=False
     )
     output_path = args.output_path
     output_dir = os.path.dirname(output_path)
@@ -94,8 +95,7 @@ def main():
 
     # Create DataLoader over particle indices
     idx = torch.arange(args.n_particles)
-    dataset = TensorDataset(idx)
-    dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False)
+    dataloader = DataLoader(idx, batch_size=args.batch_size, shuffle=False)
 
     pred_writer = CustomWriter(output_dir="../cache/", write_interval="epoch")
 

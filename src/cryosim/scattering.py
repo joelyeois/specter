@@ -48,6 +48,7 @@ class Scattering(L.LightningModule):
         flip_curvature=False,
         nz=None,
         alpha=0.,
+        progressbars=True
     ):
         """
         A scattering module to compute the 2D exitwave from a 3D scattering
@@ -96,6 +97,7 @@ class Scattering(L.LightningModule):
         self.scattering_model = scattering_model
         self.flip_curvature = flip_curvature
         self.alpha = alpha
+        self.progressbars = progressbars
 
         # frequency coordinates
         kx = torch.fft.fftshift(torch.fft.fftfreq(nxy, pixel_size))
@@ -116,7 +118,12 @@ class Scattering(L.LightningModule):
         if scattering_model == "firstborn":
             F = []
             # for i in tqdm(range(nz), desc='Create first Born propagators', leave=False):
-            for i in track(range(nz), description='Create first Born propagators', transient=True):
+            for i in track(
+                range(nz),
+                description='Create first Born propagators',
+                transient=True,
+                disable=not(self.progressbars)
+            ):
                 # original
                 # f = torch.exp(-1j * torch.pi * self.wavelength * pixel_size * 
                 #               (nz - i) * k**2)
@@ -144,7 +151,12 @@ class Scattering(L.LightningModule):
 
         # iterate across z-planes of 3D potentials.
         # for i in tqdm(range(V.size(1)), desc='Multislicing', leave=False):
-        for i in track(range(V.size(1)), description='Multislicing', transient=True):
+        for i in track(
+            range(V.size(1)),
+            description='Multislicing',
+            transient=True,
+            disable=not(self.progressbars)
+        ):
             # transmission function
             # t = torch.exp(1j * self.sigma * complex_potential(V[:, i], alpha=self.alpha).to(self.device))
             t = torch.exp(1j * self.sigma * V[:, i].to(self.device))

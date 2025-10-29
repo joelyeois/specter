@@ -1,6 +1,92 @@
 import torch
 
+def kgrid_1d(n, dx, device="cpu"):
+    """
+    Constructs a 1D k-grid.
 
+    Parameters
+    ----------
+    n : int
+        Number of pixels.
+    dx : float
+        Pixel size.
+
+    Returns
+    -------
+    k : 1d tensor
+    """
+    kx = torch.fft.fftshift(torch.fft.fftfreq(n, dx, device=device))
+    return kx
+
+def kgrid_2d(n_xy, d_xy, device="cpu"):
+    """Constructs the kx, ky meshgrids.
+
+    Parameters
+    ----------
+    n_xy : int or array-like
+        Number of pixels along x,y. If int, assumes nx=ny=n_xy.
+    d_xy : float or array-like
+        Pixel length along x,y. If float, assumes dx=dy=d_xy.
+
+    Returns
+    -------
+    KX,KY : 2d tensors
+        kx,ky meshgrids.
+    """
+    if isinstance(n_xy, int):
+        nx = ny = n_xy
+    else:
+        nx, ny = n_xy
+
+    if isinstance(d_xy, (int, float)):
+        dx = dy = float(d_xy)
+    else:
+        dx, dy = d_xy
+    kx = kgrid_1d(nx, dx, device=device)
+    ky = kgrid_1d(ny, dy, device=device)
+    KX, KY = torch.meshgrid(kx, ky, indexing="ij")
+    return kx, ky, KX, KY
+
+def kgrid_3d(n_xyz, d_xyz, device="cpu"):
+    """Constructs the kx, ky, kz meshgrids.
+
+    Parameters
+    ----------
+    n_xyz : int or array-like
+        Number of pixels along x,y,z. If int, assumes nx=ny=nz=n_xyz.
+    d_xyz : float or array-like
+        Pixel length along x,y,z. If float, assumes dx=dy=dz=d_xyz.
+
+    Returns
+    -------
+    KX, KY, KZ : 2d tensors
+        kx,ky, kz meshgrids.
+    """
+    if isinstance(n_xyz, int):
+        nx = ny = nz = n_xyz
+    else:
+        nx, ny, nz = n_xyz
+
+    if isinstance(d_xyz, (int, float)):
+        dx = dy = dz = float(d_xyz)
+    else:
+        dx, dy, dz = d_xyz
+    kx = kgrid_1d(nx, dx, device=device)
+    ky = kgrid_1d(ny, dy, device=device)
+    kz = kgrid_1d(nz, dz, device=device)
+    KX, KY, KZ = torch.meshgrid(kx, ky, kz, indexing="ij")
+    return kx, ky, kz, KX, KY, KZ
+
+
+def radial_kgrid_2d(n_xy, d_xy, device='cpu'):
+    _, _, KX, KY = kgrid_2d(n_xy, d_xy, device)
+    return torch.sqrt(KX**2 + KY**2)
+
+
+def radial_kgrid_3d(n_xyz, d_xyz, device='cpu'):
+    _, _, _, KX, KY, KZ = kgrid_3d(n_xyz, d_xyz, convention, device)
+    return torch.sqrt(KX**2 + KY**2 + KZ**2)
+    
 def grid_1d(n, dx, convention="relion", device="cpu"):
     """
     Constructs a 1D grid. The coordinate grid convention only matters if the number of

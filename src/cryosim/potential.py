@@ -4,7 +4,7 @@ from rich.progress import track, Progress
 import torch.nn as nn
 import lightning as L
 
-from .array import (
+from .array_utils import (
     grid_2d,
     grid_3d,
     nearest_index,

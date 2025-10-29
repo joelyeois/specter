@@ -1,19 +1,19 @@
 import time
 
+import lightning as L
 import numpy as np
-from . import pdbtools
-from . import potential
-from .array import grid_3d
 import torch
 import torch.nn.functional as F
-from .fft_tools import fftconvolve
+from rich.progress import track
 from scipy.interpolate import CubicSpline
 from skimage.feature import peak_local_max
 from tqdm.auto import tqdm
-from rich.progress import track
-import lightning as L
 
 from torchinterp1d import interp1d
+
+from . import pdbtools, potential
+from .array_utils import grid_3d
+from .fft_tools import fftconvolve
 
 avogadro = 6.02214076e23
 density_of_amorphous_ice = 0.94  # [g/cm3]
@@ -24,16 +24,17 @@ ndensity_of_amorphous_ice = (
 
 fftn = lambda array: torch.fft.fftshift(
     torch.fft.fftn(torch.fft.ifftshift(array, dim=(-3, -2, -1)), dim=(-3, -2, -1)),
-    dim=(-3, -2, -1)
+    dim=(-3, -2, -1),
 )
 ifftn = lambda array: torch.fft.fftshift(
     torch.fft.ifftn(torch.fft.ifftshift(array, dim=(-3, -2, -1)), dim=(-3, -2, -1)),
-    dim=(-3, -2, -1)
+    dim=(-3, -2, -1),
 )
 rfftn = lambda array: torch.fft.fftshift(
     torch.fft.rfftn(torch.fft.ifftshift(array, dim=(-3, -2, -1)), dim=(-3, -2, -1)),
-    dim=(-3, -2)
+    dim=(-3, -2),
 )
+
 
 def torch_peak_local_max(image, min_distance=1, num_peaks=None):
     """
@@ -65,7 +66,7 @@ def torch_peak_local_max(image, min_distance=1, num_peaks=None):
 
     # Mask non-maxima
     flat_image_masked = flat_image.clone()
-    flat_image_masked[~flat_mask] = -float('inf')
+    flat_image_masked[~flat_mask] = -float("inf")
 
     if num_peaks is None:
         num_peaks = flat_mask.sum(dim=1).min().item()  # take min available peaks
@@ -90,7 +91,9 @@ class Icemaker(L.LightningModule):
     a target Fourier amplitude kernel.
     """
 
-    def __init__(self, dx=0.5, n=200, nz=None, verbose=True, chunk_size=None):
+    def __init__(
+        self, dx=0.5, n=200, nz=None, chunk_size=None, progressbars=True
+    ):
         """
         Initialize the Icemaker.
 
@@ -114,7 +117,7 @@ class Icemaker(L.LightningModule):
         self.mdsim_dk = 1 / self.mdsim_n / self.mdsim_dx
         self.get_mdsim_f_radial_avg(self.saved_data_path)
         self.chunk_size = chunk_size
-        self.verbose = verbose
+        self.progressbars = progressbars
 
         # self.ice_thickness = ice_thickness
         # if ice_thickness is None or ice_thickness < n * dx:
@@ -143,12 +146,12 @@ class Icemaker(L.LightningModule):
         ky = kx
         kz = torch.fft.fftshift(torch.fft.fftfreq(self.nz, dx))
         KZ, KY, KX = torch.meshgrid(kz, ky, kx, indexing="ij")
-        self.register_buffer('K', torch.sqrt(KX**2 + KY**2 + KZ**2))
+        self.register_buffer("K", torch.sqrt(KX**2 + KY**2 + KZ**2))
 
         # pre-compute ice kernel for algorithm
         self.interpolate_mdsim_f_kernel()
 
-        self.register_buffer('ice_kernel', self.create_ice_kernel())
+        self.register_buffer("ice_kernel", self.create_ice_kernel())
 
     def get_mdsim(self, filepath, trim_size=100, startframe=10, endframe=101):
         """
@@ -171,7 +174,10 @@ class Icemaker(L.LightningModule):
         x, y, z, X, Y, Z = grid_3d(self.mdsim_n, self.mdsim_dx)
 
         self.mdsim_ice_coordinates = []
-        for frame in track(self.mdsim_frame_indexes[startframe:endframe]):
+        for frame in track(
+            self.mdsim_frame_indexes[startframe:endframe],
+            disable=not(self.progressbars)
+        ):
             coordstart = frame + 9
             coords = self.get_coordinates_from_frame(coordstart)
 
@@ -280,7 +286,7 @@ class Icemaker(L.LightningModule):
         if source == "dump":
             self.get_mdsim(filepath, trim_size=100)
             self.mdsim_ice_deltas_f = []
-            for mdsim_ice_delta in track(self.mdsim_ice_deltas):
+            for mdsim_ice_delta in track(self.mdsim_ice_deltas, disable=not(self.progressbars)):
                 self.mdsim_ice_deltas_f.append(fftn(mdsim_ice_delta))
             self.mdsim_ice_deltas_f = torch.stack(self.mdsim_ice_deltas_f)
             self.mdsim_ice_deltas_f = torch.mean(
@@ -302,12 +308,12 @@ class Icemaker(L.LightningModule):
         """
         if saved_data_path is not None:
             mdsim_f_radial_avg = torch.load(saved_data_path)
-            self.register_buffer('mdsim_f_radial_avg', mdsim_f_radial_avg)
+            self.register_buffer("mdsim_f_radial_avg", mdsim_f_radial_avg)
         else:
             # compute 3D radial average of mdsim data
             self.mdsim_f_radial_avg = radial_profile_3d(self.mdsim_ice_deltas_f)
         mdsim_radial_k = torch.arange(len(self.mdsim_f_radial_avg)) * self.mdsim_dk
-        self.register_buffer('mdsim_radial_k', mdsim_radial_k)
+        self.register_buffer("mdsim_radial_k", mdsim_radial_k)
 
     def create_initial_ice_volume(self, batchsize=1):
         """
@@ -327,15 +333,21 @@ class Icemaker(L.LightningModule):
         """
 
         # Preallocate batch tensor
-        ice_vol_init = torch.zeros(batchsize, self.nz * self.n * self.n, device=self.device)
-    
+        ice_vol_init = torch.zeros(
+            batchsize, self.nz * self.n * self.n, device=self.device
+        )
+
         # Randomly select indices for each batch volume
-        idx = torch.randint(0, self.nz * self.n * self.n, (batchsize, self.n_ice_molecules))
-        
+        idx = torch.randint(
+            0, self.nz * self.n * self.n, (batchsize, self.n_ice_molecules)
+        )
+
         # Scatter 1s at chosen indices
-        batch_indices = torch.arange(batchsize).unsqueeze(1).expand(-1, self.n_ice_molecules)
+        batch_indices = (
+            torch.arange(batchsize).unsqueeze(1).expand(-1, self.n_ice_molecules)
+        )
         ice_vol_init[batch_indices, idx] = 1.0
-    
+
         # Reshape to (B, nz, n, n)
         ice_vol_init = ice_vol_init.view(batchsize, self.nz, self.n, self.n)
         return ice_vol_init
@@ -344,7 +356,7 @@ class Icemaker(L.LightningModule):
         """
         Generate a 3D Fourier amplitude kernel for ice generation by
         interpolating MD simulation radial averages.
-        
+
         Returns
         -------
         None
@@ -355,19 +367,23 @@ class Icemaker(L.LightningModule):
         interp = interp1d(
             self.mdsim_radial_k[1:], self.mdsim_f_radial_avg[1:], self.K.ravel()
         )
-        
 
         # replace DC value
         interp_f_kernel = interp.reshape(self.nz, self.n, self.n)
         interp_f_kernel[self.nz // 2, self.n // 2, self.n // 2] = self.n_ice_molecules
-        self.register_buffer('interp_f_kernel', interp_f_kernel)
+        self.register_buffer("interp_f_kernel", interp_f_kernel)
 
         # register half kernel for rfftn
-        self.register_buffer('interp_f_halfkernel', torch.flip(interp_f_kernel[:,:,:self.n//2+1], dims=[2]))
+        self.register_buffer(
+            "interp_f_halfkernel",
+            torch.flip(interp_f_kernel[:, :, : self.n // 2 + 1], dims=[2]),
+        )
 
         # compute 3D radial average of interp data
-        self.register_buffer('interp_f_radial_avg', radial_profile_3d(interp_f_kernel))
-        self.register_buffer('interp_radial_k' , torch.arange(len(self.interp_f_radial_avg)) * self.dk)
+        self.register_buffer("interp_f_radial_avg", radial_profile_3d(interp_f_kernel))
+        self.register_buffer(
+            "interp_radial_k", torch.arange(len(self.interp_f_radial_avg)) * self.dk
+        )
 
     def generate_ice_deltas(
         self, niter=5, min_distance=1.9, add_extra_molecules=True, batchsize=1
@@ -393,15 +409,19 @@ class Icemaker(L.LightningModule):
         """
 
         self.batchsize = batchsize
-        self.register_buffer('current_icedeltas', self.ice_vol_init.clone())
+        self.register_buffer("current_icedeltas", self.ice_vol_init.clone())
         self.niter = niter
         self.min_distance = min_distance
 
         self.frob_norm = []
         self.n_extra_atoms = []
 
-        # for i in tqdm(range(niter), disable= not self.verbose, desc="Running ice algorithm", leave=False):
-        for i in track(range(niter), description="Running ice algorithm", transient=True):
+        for i in track(
+            range(niter),
+            description="Running ice algorithm",
+            transient=True,
+            disable=not(self.progressbars)
+        ):
             prev_ice_vol = self.current_icedeltas
             # ice_vol_f = fftn(self.current_icedeltas)
             ice_vol_f = rfftn(self.current_icedeltas)
@@ -419,19 +439,29 @@ class Icemaker(L.LightningModule):
             )
 
             # ice_vol shape: (B, nz, n, n)
-            self.register_buffer('ice_vol', torch.zeros(batchsize, self.nz, self.n, self.n, device=self.device))
+            self.register_buffer(
+                "ice_vol",
+                torch.zeros(batchsize, self.nz, self.n, self.n, device=self.device),
+            )
             num_peaks = peaks.shape[1]  # must be fixed per batch
 
             # batch indices
-            self.register_buffer('batch_idx', torch.arange(batchsize).view(-1, 1).expand(-1, num_peaks))
-            
+            self.register_buffer(
+                "batch_idx", torch.arange(batchsize).view(-1, 1).expand(-1, num_peaks)
+            )
+
             # unpack coordinates
             z_idx = peaks[:, :, 0]
             y_idx = peaks[:, :, 1]
             x_idx = peaks[:, :, 2]
-            
+
             # set ice voxels
-            self.ice_vol[self.batch_idx.flatten(), z_idx.flatten(), y_idx.flatten(), x_idx.flatten()] = 1
+            self.ice_vol[
+                self.batch_idx.flatten(),
+                z_idx.flatten(),
+                y_idx.flatten(),
+                x_idx.flatten(),
+            ] = 1
 
             # ice_vol[peaks[:, 0], peaks[:, 1], peaks[:, 2]] = 1
 
@@ -455,8 +485,6 @@ class Icemaker(L.LightningModule):
             self.frob_norm.append(mse)
             self.current_icedeltas = self.ice_vol
             if i > 1 and torch.isclose(self.frob_norm[-1], self.frob_norm[-2]):
-                if self.verbose:
-                    print(f"Stopping. Converged at iteration {i}.")
                 break
         self.n_peaks = peaks.shape[1]
         self.ice_coordinates = peaks.cpu()
@@ -502,23 +530,34 @@ class Icemaker(L.LightningModule):
     def generate_ice(self, batchsize=1):
         # initialize
         ice_vol_init = self.create_initial_ice_volume(batchsize=batchsize)
-        self.register_buffer('ice_vol_init', ice_vol_init)
+        self.register_buffer("ice_vol_init", ice_vol_init)
 
         # run algorithms
         self.generate_ice_deltas(batchsize=batchsize)
 
         # convolve with ice kernel
-        self.register_buffer('icecubes', torch.zeros_like(self.current_icedeltas))
+        self.register_buffer("icecubes", torch.zeros_like(self.current_icedeltas))
         # for i in tqdm(range(batchsize), desc='Computing batches of icecubes', leave=False):
-        for i in track(range(batchsize), description='Computing batches of icecubes', transient=True):
-            self.icecube = fftconvolve(self.current_icedeltas[i], self.ice_kernel, mode="same")
+        for i in track(
+            range(batchsize),
+            description="Computing batches of icecubes",
+            transient=True,
+            disable=not(self.progressbars)
+        ):
+            self.icecube = fftconvolve(
+                self.current_icedeltas[i], self.ice_kernel, mode="same"
+            )
             self.icecubes[i] = self.icecube
         return self.icecubes
 
     def irfftn(self, array):
         return torch.fft.fftshift(
-            torch.fft.irfftn(torch.fft.ifftshift(array, dim=(-3, -2)), s=(self.nz,self.n,self.n), dim=(-3, -2, -1)),
-            dim=(-3, -2, -1)
+            torch.fft.irfftn(
+                torch.fft.ifftshift(array, dim=(-3, -2)),
+                s=(self.nz, self.n, self.n),
+                dim=(-3, -2, -1),
+            ),
+            dim=(-3, -2, -1),
         )
 
     def generate_big_ice(self, shape):
@@ -526,13 +565,13 @@ class Icemaker(L.LightningModule):
         num_z = int(torch.ceil(torch.as_tensor(nz) / self.nz))
         num_y = int(torch.ceil(torch.as_tensor(ny) / self.n))
         num_x = int(torch.ceil(torch.as_tensor(nx) / self.n))
-        N =  B * num_z * num_y * num_x
+        N = B * num_z * num_y * num_x
         num_blocks_per_B = num_z * num_y * num_x
 
         # generate N ice cubes
         if self.chunk_size is None:
             ices = self.generate_ice(N)
-            
+
             # assemble ice
             big_ice = torch.empty(B, num_z * self.nz, num_y * self.n, num_x * self.n)
             idx = 0
@@ -540,80 +579,98 @@ class Icemaker(L.LightningModule):
                 for iz in range(num_z):
                     for iy in range(num_y):
                         for ix in range(num_x):
-                            big_ice[ib,
-                                iz*self.nz:(iz+1)*self.nz,
-                                iy*self.n:(iy+1)*self.n,
-                                ix*self.n:(ix+1)*self.n
+                            big_ice[
+                                ib,
+                                iz * self.nz : (iz + 1) * self.nz,
+                                iy * self.n : (iy + 1) * self.n,
+                                ix * self.n : (ix + 1) * self.n,
                             ] = ices[idx]
                             idx += 1
-            #trim
+            # trim
             return big_ice[:B, :nz, :ny, :nx]
         else:
             # generate batch of ice positions
             big_ice = torch.empty(B, num_z * self.nz, num_y * self.n, num_x * self.n)
-            
+
             idx = 0
             # for start in tqdm(range(0, N, self.chunk_size), desc='Generate ice positions', leave=False):
-            for start in track(range(0, N, self.chunk_size), description='Generate ice positions', transient=True):
+            for start in track(
+                range(0, N, self.chunk_size),
+                description="Generate ice positions",
+                transient=True,
+                disable=not(self.progressbars)
+            ):
                 end = min(start + self.chunk_size, N)
                 batchsize = end - start
-            
+
                 # initialize & generate
                 ice_vol_init = self.create_initial_ice_volume(batchsize=batchsize)
-                self.register_buffer('ice_vol_init', ice_vol_init)
+                self.register_buffer("ice_vol_init", ice_vol_init)
                 self.generate_ice_deltas(batchsize=batchsize)
-            
+
                 # get current batch (move to CPU if needed)
-                batch_icedeltas = self.current_icedeltas.cpu()  # shape (batchsize, self.nz, self.n, self.n)
-            
+                batch_icedeltas = (
+                    self.current_icedeltas.cpu()
+                )  # shape (batchsize, self.nz, self.n, self.n)
+
                 # directly insert into big_ice
                 for b in range(batchsize):
                     global_idx = start + b
-            
+
                     ib = global_idx // num_blocks_per_B
                     local_idx = global_idx % num_blocks_per_B
-            
+
                     iz = local_idx // (num_y * num_x)
                     iy = (local_idx % (num_y * num_x)) // num_x
                     ix = local_idx % num_x
-            
-                    big_ice[ib,
-                        iz*self.nz:(iz+1)*self.nz,
-                        iy*self.n:(iy+1)*self.n,
-                        ix*self.n:(ix+1)*self.n
+
+                    big_ice[
+                        ib,
+                        iz * self.nz : (iz + 1) * self.nz,
+                        iy * self.n : (iy + 1) * self.n,
+                        ix * self.n : (ix + 1) * self.n,
                     ] = batch_icedeltas[b]
-            
+
                     idx += 1
 
             # resolve boundary conflicts where ice are too near
             min_distance_px = int(self.min_distance / self.dx)
             for ib in range(B):
-                big_ice[ib] = clean_block_boundaries(big_ice[ib],
-                                                     (self.nz, self.n, self.n),
-                                                     min_distance_px)
+                big_ice[ib] = clean_block_boundaries(
+                    big_ice[ib], (self.nz, self.n, self.n), min_distance_px
+                )
 
             # perform batchwise fft
             for ib in range(B):
                 # for iz in tqdm(range(num_z), desc='Ice convolution', leave=False):
-                for iz in track(range(num_z), description='Ice convolution', transient=True):
+                for iz in track(
+                    range(num_z),
+                    description="Ice convolution",
+                    transient=True,
+                    disable=not(self.progressbars)
+                ):
                     for iy in range(num_y):
                         for ix in range(num_x):
-                            big_ice[ib,
-                                iz*self.nz:(iz+1)*self.nz,
-                                iy*self.n:(iy+1)*self.n,
-                                ix*self.n:(ix+1)*self.n
-                            ] = fftconvolve(big_ice[ib,
-                                iz*self.nz:(iz+1)*self.nz,
-                                iy*self.n:(iy+1)*self.n,
-                                ix*self.n:(ix+1)*self.n
-                            ].to(self.ice_kernel.device), self.ice_kernel, mode="same").cpu()
+                            big_ice[
+                                ib,
+                                iz * self.nz : (iz + 1) * self.nz,
+                                iy * self.n : (iy + 1) * self.n,
+                                ix * self.n : (ix + 1) * self.n,
+                            ] = fftconvolve(
+                                big_ice[
+                                    ib,
+                                    iz * self.nz : (iz + 1) * self.nz,
+                                    iy * self.n : (iy + 1) * self.n,
+                                    ix * self.n : (ix + 1) * self.n,
+                                ].to(self.ice_kernel.device),
+                                self.ice_kernel,
+                                mode="same",
+                            ).cpu()
             return big_ice[:B, :nz, :ny, :nx]
-
-        
 
 
 class NaiveIcemaker(L.LightningModule):
-    def __init__(self, dx, n, nz=None, verbose=True):
+    def __init__(self, dx, n, nz=None, progressbars=True):
         """
         Creates ice through random choice. Given a volume, we calculate the number
         of ice molecules that should populate the volume based on the density of
@@ -631,7 +688,7 @@ class NaiveIcemaker(L.LightningModule):
             be same or larger than FOV of the particle.
         """
         super().__init__()
-        
+
         self.dx = dx
         self.n = n
 
@@ -654,9 +711,9 @@ class NaiveIcemaker(L.LightningModule):
         self.nv = n**2 * self.nz  # number of voxels
         self.total_vol = self.nv * self.dv  # total volume
         self.n_ice_molecules = int(ndensity_of_amorphous_ice * self.total_vol)
-        self.register_buffer('ice_kernel', self.create_ice_kernel())
+        self.register_buffer("ice_kernel", self.create_ice_kernel())
 
-        self.verbose = verbose
+        self.progressbars = progressbars
 
     def create_initial_ice_volume(self):
         # slowest, without duplicates
@@ -772,6 +829,7 @@ def radial_profile_3d(data, center=None, return_r=False):
     else:
         return radialprofile
 
+
 def remove_close_ones_3d(xold: torch.Tensor, min_dist: int = 1) -> torch.Tensor:
     """
     Faster greedy spacing of 1s in a 3D binary tensor.
@@ -794,7 +852,12 @@ def remove_close_ones_3d(xold: torch.Tensor, min_dist: int = 1) -> torch.Tensor:
     forbidden = torch.zeros_like(x, dtype=torch.bool)
 
     # for d, i, j in tqdm(ones_coords, desc='Removing adjacent 1s', leave=False):
-    for d, i, j in track(ones_coords, description='Removing adjacent 1s', transient=True):
+    for d, i, j in track(
+        ones_coords,
+        description="Removing adjacent 1s",
+        transient=True,
+        disable=not(self.progressbars)
+    ):
         if not forbidden[d, i, j]:
             # Keep this 1
             x[d, i, j] = 1
@@ -829,12 +892,15 @@ def remove_deltas_based_on_density(slab, expected_number=None, dx=None):
         selected_idx = ones_indices[torch.randperm(len(ones_indices))[:N]]
 
         # Step 3: Set selected positions to 0
-        slab[selected_idx[:,0], selected_idx[:,1], selected_idx[:,2]] = 0
+        slab[selected_idx[:, 0], selected_idx[:, 1], selected_idx[:, 2]] = 0
         return slab
     else:
         return slab
 
-def clean_block_boundaries(bigblock: torch.Tensor, shape: tuple, min_dist: int) -> torch.Tensor:
+
+def clean_block_boundaries(
+    bigblock: torch.Tensor, shape: tuple, min_dist: int
+) -> torch.Tensor:
     D, H, W = bigblock.shape
     d, h, w = shape  # block sizes
 
@@ -843,38 +909,41 @@ def clean_block_boundaries(bigblock: torch.Tensor, shape: tuple, min_dist: int) 
     nW = W // w
 
     n_density_bigblock = bigblock.sum() / bigblock.numel()
-    
+
     # Depth boundaries
     for bd in range(1, nD):
-        start = bd*d - min_dist*2
-        end = bd*d + min_dist*2
+        start = bd * d - min_dist * 2
+        end = bd * d + min_dist * 2
         start = max(start, 0)
         end = min(end, D)
         slab = bigblock[start:end, :, :]
         # bigblock[start:end, :, :] = remove_close_ones_3d(slab, min_dist=min_dist)
-        bigblock[start:end, :, :] = remove_deltas_based_on_density(slab,
-                                                                  expected_number=int(n_density_bigblock*slab.numel()))
+        bigblock[start:end, :, :] = remove_deltas_based_on_density(
+            slab, expected_number=int(n_density_bigblock * slab.numel())
+        )
 
     # Height boundaries
     for bh in range(1, nH):
-        start = bh*h - min_dist*2
-        end = bh*h + min_dist*2
+        start = bh * h - min_dist * 2
+        end = bh * h + min_dist * 2
         start = max(start, 0)
         end = min(end, H)
         slab = bigblock[:, start:end, :]
         # bigblock[:, start:end, :] = remove_close_ones_3d(slab, min_dist=min_dist)
-        bigblock[:, start:end, :] = remove_deltas_based_on_density(slab,
-                                                                  expected_number=int(n_density_bigblock*slab.numel()))
+        bigblock[:, start:end, :] = remove_deltas_based_on_density(
+            slab, expected_number=int(n_density_bigblock * slab.numel())
+        )
 
     # Width boundaries
     for bw in range(1, nW):
-        start = bw*w - min_dist*2
-        end = bw*w + min_dist*2
+        start = bw * w - min_dist * 2
+        end = bw * w + min_dist * 2
         start = max(start, 0)
         end = min(end, W)
         slab = bigblock[:, :, start:end]
         # bigblock[:, :, start:end] = remove_close_ones_3d(slab, min_dist=min_dist)
-        bigblock[:, :, start:end] = remove_deltas_based_on_density(slab,
-                                                                  expected_number=int(n_density_bigblock*slab.numel()))
+        bigblock[:, :, start:end] = remove_deltas_based_on_density(
+            slab, expected_number=int(n_density_bigblock * slab.numel())
+        )
 
     return bigblock

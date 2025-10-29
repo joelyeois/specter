@@ -1,15 +1,17 @@
-import torch
-from . import rotations
-import numpy as np
 import lightning as L
+import numpy as np
+import torch
 from rich.progress import track
+
+from . import rotations
+
 
 def poisson_disk_neighbors(
     min_distance,
     n_points=torch.inf,
-    box=(256, 256),   # (height, width)
+    box=(256, 256),  # (height, width)
     k=30,
-    seed='origin'
+    seed="origin",
 ):
     """
     2D Poisson-disk sampling in a rectangular box centered at the origin.
@@ -35,14 +37,14 @@ def poisson_disk_neighbors(
         Sampled 2D coordinates, including the seed point.
     """
     H, W = box
-    y_min, y_max = -H//2, H//2
-    x_min, x_max = -W//2, W//2
+    y_min, y_max = -H // 2, H // 2
+    x_min, x_max = -W // 2, W // 2
 
     # initialize first point
-    if seed == 'origin':
+    if seed == "origin":
         first_point = torch.tensor([0.0, 0.0])
-        n_points += 1 #don't count origin.
-    elif seed == 'random':
+        n_points += 1  # don't count origin.
+    elif seed == "random":
         y = (y_max - y_min) * torch.rand(1) + y_min
         x = (x_max - x_min) * torch.rand(1) + x_min
         first_point = torch.tensor([y.item(), x.item()])
@@ -64,8 +66,12 @@ def poisson_disk_neighbors(
         )
 
         # reject candidates outside the centered box
-        mask = (candidates[:, 0] >= y_min) & (candidates[:, 0] < y_max) & \
-               (candidates[:, 1] >= x_min) & (candidates[:, 1] < x_max)
+        mask = (
+            (candidates[:, 0] >= y_min)
+            & (candidates[:, 0] < y_max)
+            & (candidates[:, 1] >= x_min)
+            & (candidates[:, 1] < x_max)
+        )
         candidates = candidates[mask]
 
         if candidates.shape[0] == 0:
@@ -75,7 +81,7 @@ def poisson_disk_neighbors(
         # distance check against all existing points
         pts_tensor = torch.stack(pts)
         diff = candidates[:, None, :] - pts_tensor[None, :, :]
-        dist2 = (diff ** 2).sum(dim=2)
+        dist2 = (diff**2).sum(dim=2)
         min_dist2, _ = dist2.min(dim=1)
         candidates = candidates[min_dist2 >= min_distance**2]
 
@@ -96,16 +102,16 @@ def poisson_disk_neighbors_3d(
     n_points=torch.inf,
     box=(256, 256, 256),  # (D,H,W) for tensor shape
     k=30,
-    seed='origin',
+    seed="origin",
 ):
     """
     Fast 3D Poisson-disk sampling in a 3D tensor of shape (D,H,W),
     returning coordinates in (x, y, z) order.
     """
     D, H, W = box
-    z_min, z_max = -D//2, D//2
-    y_min, y_max = -H//2, H//2
-    x_min, x_max = -W//2, W//2
+    z_min, z_max = -D // 2, D // 2
+    y_min, y_max = -H // 2, H // 2
+    x_min, x_max = -W // 2, W // 2
 
     # Grid acceleration
     cell_size = min_distance / np.sqrt(3)
@@ -114,16 +120,16 @@ def poisson_disk_neighbors_3d(
 
     def point_to_grid(p):
         # p = (x, y, z)
-        zi = ((p[2] - z_min) / cell_size).long().clamp(0, grid_shape[0]-1)
-        yi = ((p[1] - y_min) / cell_size).long().clamp(0, grid_shape[1]-1)
-        xi = ((p[0] - x_min) / cell_size).long().clamp(0, grid_shape[2]-1)
+        zi = ((p[2] - z_min) / cell_size).long().clamp(0, grid_shape[0] - 1)
+        yi = ((p[1] - y_min) / cell_size).long().clamp(0, grid_shape[1] - 1)
+        xi = ((p[0] - x_min) / cell_size).long().clamp(0, grid_shape[2] - 1)
         return zi, yi, xi
 
     # initialize first point
-    if seed == 'origin':
-        first_point = torch.tensor([0.,0.,0.])  # x,y,z
+    if seed == "origin":
+        first_point = torch.tensor([0.0, 0.0, 0.0])  # x,y,z
         n_points += 1
-    elif seed == 'random':
+    elif seed == "random":
         x = (x_max - x_min) * torch.rand(1) + x_min
         y = (y_max - y_min) * torch.rand(1) + y_min
         z = (z_max - z_min) * torch.rand(1) + z_min
@@ -142,8 +148,8 @@ def poisson_disk_neighbors_3d(
         center_point = pts[active[idx]]
 
         # generate k candidates in spherical shell
-        phi = torch.acos(2*torch.rand(k)-1)
-        theta = 2*torch.pi*torch.rand(k)
+        phi = torch.acos(2 * torch.rand(k) - 1)
+        theta = 2 * torch.pi * torch.rand(k)
         r = min_distance * (1 + torch.rand(k))
 
         dx = r * torch.sin(phi) * torch.cos(theta)
@@ -152,9 +158,14 @@ def poisson_disk_neighbors_3d(
         candidates = center_point.unsqueeze(0) + torch.stack([dx, dy, dz], dim=1)
 
         # filter candidates in tensor bounds (z,y,x)
-        mask = (candidates[:,0]>=x_min) & (candidates[:,0]<x_max) & \
-               (candidates[:,1]>=y_min) & (candidates[:,1]<y_max) & \
-               (candidates[:,2]>=z_min) & (candidates[:,2]<z_max)
+        mask = (
+            (candidates[:, 0] >= x_min)
+            & (candidates[:, 0] < x_max)
+            & (candidates[:, 1] >= y_min)
+            & (candidates[:, 1] < y_max)
+            & (candidates[:, 2] >= z_min)
+            & (candidates[:, 2] < z_max)
+        )
         candidates = candidates[mask]
 
         if candidates.shape[0] == 0:
@@ -166,45 +177,59 @@ def poisson_disk_neighbors_3d(
         for c in candidates:
             zi, yi, xi = point_to_grid(c)
             neighbor_found = False
-            for dz_i in [-1,0,1]:
-                for dy_i in [-1,0,1]:
-                    for dx_i in [-1,0,1]:
-                        nz, ny, nx = zi+dz_i, yi+dy_i, xi+dx_i
-                        if 0<=nz<grid_shape[0] and 0<=ny<grid_shape[1] and 0<=nx<grid_shape[2]:
+            for dz_i in [-1, 0, 1]:
+                for dy_i in [-1, 0, 1]:
+                    for dx_i in [-1, 0, 1]:
+                        nz, ny, nx = zi + dz_i, yi + dy_i, xi + dx_i
+                        if (
+                            0 <= nz < grid_shape[0]
+                            and 0 <= ny < grid_shape[1]
+                            and 0 <= nx < grid_shape[2]
+                        ):
                             pid = grid[nz, ny, nx].item()
                             if pid != -1:
                                 dist = torch.norm(c - pts[pid])
                                 if dist < min_distance:
                                     neighbor_found = True
                                     break
-                    if neighbor_found: break
-                if neighbor_found: break
+                    if neighbor_found:
+                        break
+                if neighbor_found:
+                    break
             if not neighbor_found:
                 accepted.append(c)
 
         if accepted:
             new_pt = accepted[0]
             pts.append(new_pt)
-            active.append(len(pts)-1)
+            active.append(len(pts) - 1)
             zi, yi, xi = point_to_grid(new_pt)
-            grid[zi, yi, xi] = len(pts)-1
+            grid[zi, yi, xi] = len(pts) - 1
         else:
             active.pop(idx)
 
-    if seed == 'origin':
+    if seed == "origin":
         # no candidates were found
-        if len (pts) == 1:
-            return torch.empty((0,3))
+        if len(pts) == 1:
+            return torch.empty((0, 3))
         else:
             # don't include origin
             pts = pts[1:]
-            return torch.stack(pts[:n_points] if n_points!=torch.inf else pts)
-    elif seed == 'random':
-        return torch.stack(pts[:n_points] if n_points!=torch.inf else pts)
+            return torch.stack(pts[:n_points] if n_points != torch.inf else pts)
+    elif seed == "random":
+        return torch.stack(pts[:n_points] if n_points != torch.inf else pts)
 
 
-def crowd_with_duplicates(V, min_distance, pixel_size, return_coordinates=False,
-                          max_distance_xy=None, max_distance_z=None, nxy=None, nz=None):
+def crowd_with_duplicates(
+    V,
+    min_distance,
+    pixel_size,
+    return_coordinates=False,
+    max_distance_xy=None,
+    max_distance_z=None,
+    nxy=None,
+    nz=None,
+):
     """
     Generates a crowded volume by placing multiple rotated duplicates of a given 3D volume.
 
@@ -248,7 +273,7 @@ def crowd_with_duplicates(V, min_distance, pixel_size, return_coordinates=False,
         max_distance_xy = V_nxy * pixel_size + min_distance
     if max_distance_z is None:
         max_distance_z = V_nz * pixel_size + min_distance
-    
+
     if nxy is None:
         nxy = V_nxy
     if nz is None:
@@ -274,10 +299,7 @@ def crowd_with_duplicates(V, min_distance, pixel_size, return_coordinates=False,
 
     # insert volumes at correct coordinates
     micro = insert_particles_into_micrograph(
-        vols,
-        translations,
-        pixel_size=pixel_size,
-        micro_shape=(nz, nxy, nxy)
+        vols, translations, pixel_size=pixel_size, micro_shape=(nz, nxy, nxy)
     )
 
     # Sum all duplicates into a single crowded volume
@@ -288,7 +310,11 @@ def crowd_with_duplicates(V, min_distance, pixel_size, return_coordinates=False,
 
 
 def insert_particles_into_micrograph(
-    volumes, positions, pixel_size=1.0, micro_shape=None, micrograph=None,
+    volumes,
+    positions,
+    pixel_size=1.0,
+    micro_shape=None,
+    micrograph=None,
 ):
     """
     Insert rotated 3D volumes into a 3D micrograph centered at the origin.
@@ -323,12 +349,16 @@ def insert_particles_into_micrograph(
         Z, Y, X = micro_shape
         micrograph = torch.zeros(micro_shape, device=device)
     else:
-        raise ValueError("Must provide either `micro_shape` or an existing `micrograph`.")
+        raise ValueError(
+            "Must provide either `micro_shape` or an existing `micrograph`."
+        )
 
     volumes = volumes.to(device)
     positions = positions.to(device)
     if positions.shape[1] == 2:
-        zeros = torch.zeros((positions.shape[0], 1), device=positions.device, dtype=positions.dtype)
+        zeros = torch.zeros(
+            (positions.shape[0], 1), device=positions.device, dtype=positions.dtype
+        )
         positions = torch.cat([positions, zeros], dim=1)
 
     # Convert from physical units to pixel indices
@@ -375,15 +405,30 @@ def insert_particles_into_micrograph(
             continue
 
         # Add the volume to the micrograph
-        micrograph[z0_clip:z1_clip, y0_clip:y1_clip, x0_clip:x1_clip] += \
-            volumes[i, pz0:pz1, py0:py1, px0:px1]
+        micrograph[z0_clip:z1_clip, y0_clip:y1_clip, x0_clip:x1_clip] += volumes[
+            i, pz0:pz1, py0:py1, px0:px1
+        ]
 
     return micrograph
 
+
 class CrowdWithDuplicates(L.LightningModule):
-    def __init__(self, V, dx, min_distance, nxy_out=None, nz_out=None, 
-                 max_distance_z=None, max_distance_xy=None, method='3d', 
-                 n_points=torch.inf, seed='origin', chunk_size=None, move_to_cpu=False):
+    def __init__(
+        self,
+        V,
+        dx,
+        min_distance,
+        nxy_out=None,
+        nz_out=None,
+        max_distance_z=None,
+        max_distance_xy=None,
+        method="3d",
+        n_points=torch.inf,
+        seed="origin",
+        chunk_size=None,
+        move_to_cpu=False,
+        progressbars=True
+    ):
         """
         Parameters
         ----------
@@ -399,6 +444,7 @@ class CrowdWithDuplicates(L.LightningModule):
         self.seed = seed
         self.chunk_size = chunk_size
         self.move_to_cpu = move_to_cpu
+        self.progressbars = progressbars
 
         if nz_out is None:
             nz_out = self.n
@@ -416,19 +462,23 @@ class CrowdWithDuplicates(L.LightningModule):
 
     def generate_coordinates(self):
         # use Poisson disk sampling to obtain coordinates of duplicates.
-        if self.poisson_disc_method == '2d':
-            coords = poisson_disk_neighbors(self.min_distance,
-                                            n_points=self.n_points,
-                                            box=(self.nxy_out, self.nxy_out),
-                                            seed=self.seed)
+        if self.poisson_disc_method == "2d":
+            coords = poisson_disk_neighbors(
+                self.min_distance,
+                n_points=self.n_points,
+                box=(self.nxy_out, self.nxy_out),
+                seed=self.seed,
+            )
             # add z-coordinates
             zeros = torch.zeros((coords.shape[0], 1))
             coords = torch.cat([coords, zeros], dim=1)
-        elif self.poisson_disc_method == '3d':
-            coords = poisson_disk_neighbors_3d(self.min_distance,
-                                               n_points=self.n_points,
-                                               box=(self.max_distance_z, self.nxy_out, self.nxy_out),
-                                               seed=self.seed)
+        elif self.poisson_disc_method == "3d":
+            coords = poisson_disk_neighbors_3d(
+                self.min_distance,
+                n_points=self.n_points,
+                box=(self.max_distance_z, self.nxy_out, self.nxy_out),
+                seed=self.seed,
+            )
         self.coords = coords
 
     def generate_affine_matrices(self):
@@ -446,21 +496,36 @@ class CrowdWithDuplicates(L.LightningModule):
             else:
                 self.vols = torch.empty((self.N,) + self.V.shape, device=self.device)
 
-            for start in track(range(0, self.N, self.chunk_size), description='Rotating duplicates', transient=True):
+            for start in track(
+                range(0, self.N, self.chunk_size),
+                description="Rotating duplicates",
+                transient=True,
+                disable=not(self.progressbars)
+            ):
                 end = min(start + self.chunk_size, self.N)
                 if self.move_to_cpu:
-                    self.vols[start:end] = rotations.rotate_volume(self.V, self.theta[start:end].to(self.V.device), padding_mode="zeros").cpu()
+                    self.vols[start:end] = rotations.rotate_volume(
+                        self.V,
+                        self.theta[start:end].to(self.V.device),
+                        padding_mode="zeros",
+                    ).cpu()
                 else:
-                    self.vols[start:end] = rotations.rotate_volume(self.V, self.theta[start:end].to(self.V.device), padding_mode="zeros")
+                    self.vols[start:end] = rotations.rotate_volume(
+                        self.V,
+                        self.theta[start:end].to(self.V.device),
+                        padding_mode="zeros",
+                    )
         else:
-            self.vols = rotations.rotate_volume(self.V, self.theta.to(self.V.device), padding_mode="zeros")
+            self.vols = rotations.rotate_volume(
+                self.V, self.theta.to(self.V.device), padding_mode="zeros"
+            )
 
     def insert_volumes(self):
         micro = insert_particles_into_micrograph(
             self.vols,
             self.coords,
             pixel_size=self.dx,
-            micro_shape=(self.nz_out, self.nxy_out, self.nxy_out)
+            micro_shape=(self.nz_out, self.nxy_out, self.nxy_out),
         )
         return micro
 
@@ -469,7 +534,7 @@ class CrowdWithDuplicates(L.LightningModule):
         self.generate_affine_matrices()
         # if no candidates, return 0
         if len(self.coords) == 0:
-            return 0.
+            return 0.0
         else:
             if self.chunk_size is None:
                 self.rotate_volumes()
@@ -480,11 +545,20 @@ class CrowdWithDuplicates(L.LightningModule):
                 # create micrograph
                 micrograph = torch.zeros(self.nz_out, self.nxy_out, self.nxy_out)
                 # rotate and insert in batches
-                for start in track(range(0, self.N, self.chunk_size), description='Rotating duplicates and insert into micrograph', transient=True):
+                for start in track(
+                    range(0, self.N, self.chunk_size),
+                    description="Rotating duplicates and insert into micrograph",
+                    transient=True,
+                    disable=not(self.progressbars)
+                ):
                     # get batch indicies
                     end = min(start + self.chunk_size, self.N)
                     # rotate
-                    vols = rotations.rotate_volume(self.V, self.theta[start:end].to(self.V.device), padding_mode="zeros")
+                    vols = rotations.rotate_volume(
+                        self.V,
+                        self.theta[start:end].to(self.V.device),
+                        padding_mode="zeros",
+                    )
                     if self.move_to_cpu:
                         vols = vols.cpu()
                     # insert
@@ -492,6 +566,6 @@ class CrowdWithDuplicates(L.LightningModule):
                         vols,
                         self.coords[start:end],
                         pixel_size=self.dx,
-                        micrograph=micrograph
+                        micrograph=micrograph,
                     )
             return micrograph

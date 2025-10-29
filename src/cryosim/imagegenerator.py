@@ -155,14 +155,7 @@ class ImageGeneratorFromCoordinates(L.LightningModule):
         self.coordinates = nn.Parameter(coordinates)
         self.register_buffer("quaternions", quaternions)
         self.register_buffer("translations", translations)
-        cs, dfu, dfv, dfang, tiltx, tilty, phaseshift, tref1, tref2 = torch.unbind(ctf_params, dim=-1)
-        self.register_buffer("cs", cs)
-        self.register_buffer("dfang", dfang)
-        self.register_buffer("tiltx", tiltx)
-        self.register_buffer("tilty", tilty)
-        self.register_buffer("phaseshift", phaseshift)
-        self.register_buffer("tref1", tref1)
-        self.register_buffer("tref2", tref2)
+        
         if anisomag is None:
             self.anisomag = anisomag
         else:
@@ -170,11 +163,16 @@ class ImageGeneratorFromCoordinates(L.LightningModule):
         
         # for dynamic/kinematic scattering, we need to account for the defocus
         # implicit in the scattering module
+        self.ctf_params = nn.ParameterDict({
+            k: nn.Parameter(v) for k, v in ctf_params.items()
+        })
         if self.scattering_model not in ['projection', 'ctf']:
-            dfu = dfu.clone() - (self.nz * pixel_size) / 2
-            dfv = dfv.clone() - (self.nz * pixel_size) / 2
-        self.register_buffer("dfu", dfu)
-        self.register_buffer("dfv", dfv)
+            if "dfu" in self.ctf_params:
+                shifted = self.ctf_params["dfu"].detach() - (self.nz * pixel_size) / 2
+                self.ctf_params["dfu"] = nn.Parameter(shifted)
+            if "dfv" in self.ctf_params:
+                shifted = self.ctf_params["dfv"].detach() - (self.nz * pixel_size) / 2
+                self.ctf_params["dfv"] = nn.Parameter(shifted)
 
         # initialize modules
         self.potentialbuilder = PotentialBuilder(
@@ -234,8 +232,7 @@ class ImageGeneratorFromCoordinates(L.LightningModule):
             elif ice_model == 'iterative':
                 self.icemaker = Icemaker(n=self.nxy,
                                         dx=pixel_size,
-                                        nz=self.nz,
-                                        verbose=False)
+                                        nz=self.nz,)
 
     def rotate(self, Q, T):
         R = Rotation.from_quat(Q)
@@ -313,18 +310,9 @@ class ImageGeneratorFromCoordinates(L.LightningModule):
         self.exitwaves = self.scattering(V)
         
         #aberrate exitwaves
-        self.detector_waves = self.aberration(
-            self.exitwaves,
-            self.cs[idx],
-            self.dfu[idx],
-            self.dfv[idx],
-            self.dfang[idx],
-            self.tiltx[idx],
-            self.tilty[idx],
-            self.phaseshift[idx],
-            self.tref1[idx],
-            self.tref2[idx],
-        )
+        ctf_batch = {k: v[idx] for k, v in self.ctf_params.items()}
+        self.detector_waves = self.aberration(self.exitwaves, ctf_batch)
+        
         #image/noise
         if self.anisomag is None:
             images = self.detector(self.detector_waves)
@@ -372,6 +360,7 @@ class ImageGenerator(L.LightningModule):
         crowd_min_distance=None,
         crowd_max_distance_z=None,
         pad_fft=False,
+        progressbars=True,
     ):
         """
         A particle image generator module to simulate 2D particles from the input
@@ -458,6 +447,7 @@ class ImageGenerator(L.LightningModule):
         self.klim = klim
         self.crowd_min_distance = crowd_min_distance
         self.pad_fft = pad_fft
+        self.progressbars = progressbars
         if self.pad_fft:
             self.pad_nxy = self.nxy + (self.nxy // 2) * 2 #
         else:
@@ -483,14 +473,7 @@ class ImageGenerator(L.LightningModule):
         self.register_buffer("V", scattering_potential)
         self.register_buffer("quaternions", quaternions)
         self.register_buffer("translations", translations)
-        cs, dfu, dfv, dfang, tiltx, tilty, phaseshift, tref1, tref2 = torch.unbind(ctf_params, dim=-1)
-        self.register_buffer("cs", cs)
-        self.register_buffer("dfang", dfang)
-        self.register_buffer("tiltx", tiltx)
-        self.register_buffer("tilty", tilty)
-        self.register_buffer("phaseshift", phaseshift)
-        self.register_buffer("tref1", tref1)
-        self.register_buffer("tref2", tref2)
+       
         if anisomag is None:
             self.anisomag = anisomag
         else:
@@ -498,11 +481,17 @@ class ImageGenerator(L.LightningModule):
         
         # for dynamic/kinematic scattering, we need to account for the defocus
         # implicit in the scattering module
+        self.ctf_params = nn.ParameterDict({
+            k: nn.Parameter(v) for k, v in ctf_params.items()
+        })
         if self.scattering_model not in ['projection', 'ctf']:
-            dfu = dfu.clone() - (self.nz * pixel_size) / 2
-            dfv = dfv.clone() - (self.nz * pixel_size) / 2
-        self.register_buffer("dfu", dfu)
-        self.register_buffer("dfv", dfv)
+            if "dfu" in self.ctf_params:
+                shifted = self.ctf_params["dfu"].detach() - (self.nz * pixel_size) / 2
+                self.ctf_params["dfu"] = nn.Parameter(shifted)
+            if "dfv" in self.ctf_params:
+                shifted = self.ctf_params["dfv"].detach() - (self.nz * pixel_size) / 2
+                self.ctf_params["dfv"] = nn.Parameter(shifted)
+                
 
         # initialize modules
         self.scattering = Scattering(
@@ -514,7 +503,8 @@ class ImageGenerator(L.LightningModule):
             klim=klim,
             flip_curvature=flip_curvature,
             nz=self.nz,
-            alpha=alpha
+            alpha=alpha,
+            progressbars=self.progressbars
         )
 
         self.aberration = Aberration(
@@ -529,7 +519,7 @@ class ImageGenerator(L.LightningModule):
             pixel_size,
             dose_per_angstrom,
             aberration_model=aberration_model,
-            noise_model=noise_model
+            noise_model=noise_model,
         )
 
         if self.crowd_min_distance is not None:
@@ -542,19 +532,23 @@ class ImageGenerator(L.LightningModule):
                 max_distance_z=self.crowd_max_distance_z,
                 max_distance_xy=None,
                 method='3d',
-                n_points=torch.inf, seed='origin'
+                n_points=torch.inf, seed='origin',
+                progressbars=self.progressbars
             )
 
         if ice_model is not None:
             if ice_model == 'randomchoice':
-                self.icemaker = NaiveIcemaker(n=self.nxy,
-                                              dx=pixel_size,
-                                              nz=self.nz)
+                self.icemaker = NaiveIcemaker(
+                    n=self.nxy,
+                    dx=pixel_size,nz=self.nz,
+                    progressbars=self.progressbars
+                )
             elif ice_model == 'iterative':
-                self.icemaker = Icemaker(n=self.nxy,
-                                        dx=pixel_size,
-                                        nz=self.nz,
-                                        verbose=False)
+                self.icemaker = Icemaker(
+                    n=self.nxy,
+                    dx=pixel_size,
+                    nz=self.nz,
+                    progressbars=self.progressbars)
 
     def rotate(self, Q, T):
         R = Rotation.from_quat(Q)
@@ -625,23 +619,14 @@ class ImageGenerator(L.LightningModule):
         if self.ice_model is not None:
             with torch.no_grad():
                 V = self.solvate(V)
-            
+
         #scatter V
         self.exitwaves = self.scattering(V)
-        
+
         #aberrate exitwaves
-        self.detector_waves = self.aberration(
-            self.exitwaves,
-            self.cs[idx],
-            self.dfu[idx],
-            self.dfv[idx],
-            self.dfang[idx],
-            self.tiltx[idx],
-            self.tilty[idx],
-            self.phaseshift[idx],
-            self.tref1[idx],
-            self.tref2[idx],
-        )
+        ctf_batch = {k: v[idx] for k, v in self.ctf_params.items()}
+        self.detector_waves = self.aberration(self.exitwaves, ctf_batch)
+
         #image/noise
         if self.anisomag is None:
             images = self.detector(self.detector_waves)
@@ -792,14 +777,7 @@ class MicrographGenerator(L.LightningModule):
             
         # register buffers
         self.register_buffer("V", scattering_potential)
-        cs, dfu, dfv, dfang, tiltx, tilty, phaseshift, tref1, tref2 = torch.unbind(ctf_params, dim=-1)
-        self.register_buffer("cs", cs)
-        self.register_buffer("dfang", dfang)
-        self.register_buffer("tiltx", tiltx)
-        self.register_buffer("tilty", tilty)
-        self.register_buffer("phaseshift", phaseshift)
-        self.register_buffer("tref1", tref1)
-        self.register_buffer("tref2", tref2)
+        
         if anisomag is None:
             self.anisomag = anisomag
         else:
@@ -807,11 +785,16 @@ class MicrographGenerator(L.LightningModule):
         
         # for dynamic/kinematic scattering, we need to account for the defocus
         # implicit in the scattering module
+        self.ctf_params = nn.ParameterDict({
+            k: nn.Parameter(v) for k, v in ctf_params.items()
+        })
         if self.scattering_model not in ['projection', 'ctf']:
-            dfu = dfu - (self.nz * pixel_size) / 2
-            dfv = dfv - (self.nz * pixel_size) / 2
-        self.register_buffer("dfu", dfu)
-        self.register_buffer("dfv", dfv)
+            if "dfu" in self.ctf_params:
+                shifted = self.ctf_params["dfu"].detach() - (self.nz * pixel_size) / 2
+                self.ctf_params["dfu"] = nn.Parameter(shifted)
+            if "dfv" in self.ctf_params:
+                shifted = self.ctf_params["dfv"].detach() - (self.nz * pixel_size) / 2
+                self.ctf_params["dfv"] = nn.Parameter(shifted)
 
         # initialize modules
         self.scattering = Scattering(
@@ -864,8 +847,7 @@ class MicrographGenerator(L.LightningModule):
                 self.icemaker = Icemaker(n=256,
                                          dx=pixel_size,
                                          nz=256,
-                                         chunk_size=self.chunk_size,
-                                         verbose=False)
+                                         chunk_size=self.chunk_size,)
 
     def solvate(self, V):
         # generates ice with size (B x Z x Y x X)
@@ -905,18 +887,9 @@ class MicrographGenerator(L.LightningModule):
         self.exitwaves = self.scattering(V)
 
         #aberrate exitwaves
-        self.detector_waves = self.aberration(
-            self.exitwaves,
-            self.cs[idx],
-            self.dfu[idx],
-            self.dfv[idx],
-            self.dfang[idx],
-            self.tiltx[idx],
-            self.tilty[idx],
-            self.phaseshift[idx],
-            self.tref1[idx],
-            self.tref2[idx],
-        )
+        ctf_batch = {k: v[idx] for k, v in self.ctf_params.items()}
+        self.detector_waves = self.aberration(self.exitwaves, ctf_batch)
+        
         #image/noise
         if self.anisomag is None:
             images = self.detector(self.detector_waves)

@@ -69,7 +69,6 @@ class Aberration(L.LightningModule):
                 self.alpha = alpha
 
     def _cs(self, cs):
-        cs = cs
         return torch.pi / 2 * self.wavelength**3 * self.k**4 * cs
 
     def _defocus(self, dfu, dfv, dfang):

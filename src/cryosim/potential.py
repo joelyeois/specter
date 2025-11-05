@@ -18,10 +18,10 @@ from .atom import (
     kirkland_atomic_potential_2d,
     kirkland_atomic_potential_3d,
     lobato_atomic_potential_3d,
+    shryov_atomic_potential_3d
 )
 from .fft_tools import fftconvolve
 
-import time
 
 def compute_supersampling_parameters(dx, width_atom=5.0, dx_atom=0.1):
     """
@@ -253,7 +253,8 @@ class PotentialBuilder(L.LightningModule):
         verbose=True,
         parameterization='kirkland',
         conv_backend='fftconvolve',
-        trainable=False
+        trainable=False,
+        mmcif_filepath=None,
     ):
         super().__init__()
 
@@ -264,6 +265,7 @@ class PotentialBuilder(L.LightningModule):
         self.dx = dx
         self.verbose = verbose
         self.conv_backend = conv_backend
+        self.mmcif_filepath = mmcif_filepath
 
         # create super-sampled (ss) coordinate system
         self.ssn, self.ssdx, self.ssf = compute_supersampling_parameters(dx)
@@ -294,9 +296,7 @@ class PotentialBuilder(L.LightningModule):
         self.avgpool3d = torch.nn.AvgPool3d(self.ssf, stride=self.ssf)
         if parameterization == 'kirkland':
             self.get_2d_atomic_potentials()
-            self.get_3d_atomic_potentials()
-        elif parameterization == 'lobato':
-            self.get_3d_atomic_potentials()
+        self.get_3d_atomic_potentials()
 
 
     def get_2d_atomic_potentials(self, unique_elements=None):
@@ -340,6 +340,11 @@ class PotentialBuilder(L.LightningModule):
                 pot = kirkland_atomic_potential_3d(int(elem), self.sR_3d)
             elif self.parameterization == 'lobato':
                 pot = lobato_atomic_potential_3d(int(elem), self.sR_3d)
+            elif self.parameterization == 'shryov':
+                if self.mmcif_filepath is None:
+                    raise ValueError(f"mmcif_filepath must be specified.")
+                else:
+                    pot = shryov_atomic_potential_3d(int(elem), self.sR_3d, self.mmcif_filepath)
 
             if self.ssf != 1:
                 pot = self.avgpool3d(pot[None, None]) * self.dx

@@ -2,10 +2,10 @@ import matplotlib.pyplot as plt
 import torch
 from tqdm.auto import tqdm
 
-def plot3d(vol, title=None):
+def plot3d(vol, title=None, vmin=None):
     fig, axes = plt.subplots(1, 3, dpi=200, constrained_layout=True, figsize=(8,3.6))
     for i, ax in enumerate(axes.ravel()):
-        im = ax.imshow(vol.sum(i))
+        im = ax.imshow(vol.sum(i), vmin=vmin)
         ax.set(xticks=[], yticks=[], title=f"projection along axis {i}")
         fig.colorbar(im, ax=ax, location="bottom")
     if title is not None:

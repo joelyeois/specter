@@ -12,8 +12,9 @@ from tqdm.auto import tqdm
 from torchinterp1d import interp1d
 
 from . import pdbtools, potential
-from .array_utils import grid_3d
+from .array_utils import grid_3d, radial_grid_3d, real_to_kgrid_3d
 from .fft_tools import fftconvolve
+from .atom import kirkland_atomic_potential_3d, lobato_atomic_potential_3d, shryov_atomic_potential_3d
 
 avogadro = 6.02214076e23
 density_of_amorphous_ice = 0.94  # [g/cm3]
@@ -92,7 +93,8 @@ class Icemaker(L.LightningModule):
     """
 
     def __init__(
-        self, dx=0.5, n=200, nz=None, chunk_size=None, progressbars=True
+        self, dx=0.5, n=200, nz=None, chunk_size=None, progressbars=True,
+        parameterization='kirkland'
     ):
         """
         Initialize the Icemaker.
@@ -118,6 +120,7 @@ class Icemaker(L.LightningModule):
         self.get_mdsim_f_radial_avg(self.saved_data_path)
         self.chunk_size = chunk_size
         self.progressbars = progressbars
+        self.parameterization = parameterization
 
         # self.ice_thickness = ice_thickness
         # if ice_thickness is None or ice_thickness < n * dx:
@@ -491,40 +494,44 @@ class Icemaker(L.LightningModule):
         self.frob_norm = torch.tensor(self.frob_norm)
         self.n_extra_atoms = torch.tensor(self.n_extra_atoms)
 
-    def create_ice_kernel(self, sn=28):
-        # sample a 28x28 grid to represent kernel first.
-        # 4xbin down to 7x7, centerd on atom origin
-        sx = (torch.arange(sn) - (sn - 1) / 2) * self.dx / 4
-        sZ, sY, sX = torch.meshgrid(sx, sx, sx, indexing="ij")
-        sR = torch.sqrt(sX**2 + sY**2 + sZ**2)
+    def create_ice_kernel(self):
+        # create super-sampled (ss) coordinate system
+        ssn, ssdx, ssf = potential.compute_supersampling_parameters(self.dx)
+        # set original convention to torch to avoid singularity at origin.
+        sR = radial_grid_3d(ssn, ssdx, convention="torch")
 
-        # see cryosim for details.
-        a0 = 0.529  # Bohr radius, [Angstrom]
-        e = 14.4  # electron charge, [V-Angstrom]
-        c1 = 2 * (torch.pi**2) * a0 * e
-        c2 = 2 * (torch.pi ** (5 / 2)) * a0 * e
+        # for binning super-sampled grids to main volume grid.
+        avgpool3d = torch.nn.AvgPool3d(ssf, stride=ssf)
 
-        # P params for Oxygen. See Kirkland Appendix C.
-        P = torch.tensor(
-            [
-                [3.39969204e-001, 3.81570280e-001, 3.07570172e-001, 3.81571436e-001],
-                [1.30369072e-001, 1.91919745e001, 8.83326058e-002, 7.60635525e-001],
-                [1.96586700e-001, 2.07401094e000, 9.96220028e-004, 3.03266869e-002],
-            ]
-        )
-        P = P.T
-        # tile scattering factors to match r_xy grid
-        P = P[:, :, None, None, None].expand((4, 3) + sR.shape)
+        if self.parameterization == 'kirkland':
+            pot = kirkland_atomic_potential_3d(8, sR)
+        elif self.parameterization == 'lobato':
+            pot = lobato_atomic_potential_3d(8, sR)
+        elif self.parameterization == 'shryov':
+            # from params_cat.json, 'O(HH)'
+            params = torch.tensor(
+                    [
+                    [0.3131, 0.8722],
+                    [0.8102, 4.9669],
+                    [0.9812, 14.1666],
+                    [-0.5997, 64.1638],
+                    [-0.1519, 121.3711]
+                ]
+            )
+            # Separate columns: a_i, b_i
+            a = params[:, 0].unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)  # shape (3,1,1,1)
+            b = params[:, 1].unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
+        
+            k_xyz = real_to_kgrid_3d(sR)
+            k2 = k_xyz**2
+            k2 = k2.unsqueeze(0)  # shape (1, Nx, Ny, Nz)
+        
+            s1_f = torch.sum(a * torch.exp(-b * k2 / 4), 0)
+            dkx = k_xyz[1,0,0] - k_xyz[0,0,0]
+            dky = k_xyz[0,1,0] - k_xyz[0,0,0]
+            dkz = k_xyz[0,0,1] - k_xyz[0,0,0]
+            pot = -torch.abs(fftn(s1_f)) * dkx * dky * dkz # need to negate
 
-        s1 = c1 * torch.sum(
-            P[0] / sR * torch.exp(-2 * torch.pi * sR * torch.sqrt(P[1])), 0
-        )
-        s2 = c2 * torch.sum(
-            P[2] * P[3] ** (-3 / 2) * torch.exp(-(torch.pi**2) * (sR**2) / P[3]), 0
-        )
-        pot = s1 + s2
-
-        avgpool3d = torch.nn.AvgPool3d(4, stride=4)
         return avgpool3d(pot[None, None]).squeeze() * self.dx
 
     def generate_ice(self, batchsize=1):

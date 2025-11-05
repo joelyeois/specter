@@ -209,6 +209,41 @@ def radial_grid_3d(n_xyz, d_xyz, convention="relion", device='cpu'):
     return torch.sqrt(X**2 + Y**2 + Z**2)
 
 
+def real_to_kgrid_3d(R):
+    """
+    Given a 3D real-space meshgrid magnitude R, return the corresponding
+    frequency-space radial grid KR for FFTs.
+
+    Supports non-cubic grids with different spacings along each axis.
+
+    Args:
+        R (torch.Tensor): 3D tensor of shape (nx, ny, nz), the radial distances in real space.
+
+    Returns:
+        KR (torch.Tensor): 3D tensor of shape (nx, ny, nz), the radial distances in Fourier space
+    """
+    device = R.device
+    
+    # number of points along each axis
+    nx, ny, nz = R.shape
+
+    # compute spacing along each axis (assumes uniform spacing)
+    dx = R[1,0,0] - R[0,0,0]
+    dy = R[0,1,0] - R[0,0,0]
+    dz = R[0,0,1] - R[0,0,0]
+
+    # frequency axes
+    kx = torch.fft.fftshift(torch.fft.fftfreq(nx, dx, device=device))
+    ky = torch.fft.fftshift(torch.fft.fftfreq(ny, dy, device=device))
+    kz = torch.fft.fftshift(torch.fft.fftfreq(nz, dz, device=device))
+
+    # 3D frequency grids
+    KX, KY, KZ = torch.meshgrid(kx, ky, kz, indexing='ij')
+    KR = torch.sqrt(KX**2 + KY**2 + KZ**2)
+
+    return KR
+
+
 def voxelize_coordinates(coords, grid_shape, voxel_size, device=None):
     """
     Convert 3D coordinates to a 3D binary grid (1s at nearest voxel, zeros elsewhere),

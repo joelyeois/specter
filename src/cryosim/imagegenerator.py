@@ -261,8 +261,8 @@ class ImageGeneratorFromCoordinates(L.LightningModule):
                        zpad_px//2, self.nz - zpad_px//2 - V.shape[1],  # z-axis
                       ))
         icemask = V.detach().clone()
-        icemask[icemask<10] = 1
-        icemask[icemask>=10] = 0
+        icemask[icemask<0.01] = 1
+        icemask[icemask>=0.01] = 0
         V = V + ice * icemask
         self.icemask = icemask.detach().cpu() #save as attribute just to check
         return V
@@ -361,6 +361,7 @@ class ImageGenerator(L.LightningModule):
         crowd_max_distance_z=None,
         pad_fft=False,
         progressbars=True,
+        parameterization='kirkland'
     ):
         """
         A particle image generator module to simulate 2D particles from the input
@@ -447,11 +448,12 @@ class ImageGenerator(L.LightningModule):
         self.klim = klim
         self.crowd_min_distance = crowd_min_distance
         self.pad_fft = pad_fft
-        self.progressbars = progressbars
         if self.pad_fft:
             self.pad_nxy = self.nxy + (self.nxy // 2) * 2 #
         else:
             self.pad_nxy = self.nxy
+        self.progressbars = progressbars
+        self.parameterization = parameterization
 
         # compute number of z-axis pixels due to ice thickness
         if ice_model is None:
@@ -548,9 +550,15 @@ class ImageGenerator(L.LightningModule):
                     n=self.nxy,
                     dx=pixel_size,
                     nz=self.nz,
-                    progressbars=self.progressbars)
+                    progressbars=self.progressbars,
+                    parameterization=parameterization
+                )
 
     def rotate(self, Q, T):
+        if len(Q.shape) < 2:
+            Q = Q.unsqueeze(0)
+        if len(T.shape) < 2:
+            T = T.unsqueeze(0)
         R = Rotation.from_quat(Q)
         T = rotations.translations_angstrom_to_torch(T, self.nxy, self.pixel_size)
         theta = rotations.build_affine_matrix(R.as_matrix(), T)
@@ -578,8 +586,8 @@ class ImageGenerator(L.LightningModule):
                        zpad_px//2, self.nz - zpad_px//2 - V.shape[1],  # z-axis
                       ))
         icemask = V.detach().clone()
-        icemask[icemask<10] = 1
-        icemask[icemask>=10] = 0
+        icemask[icemask<0.01] = 1
+        icemask[icemask>=0.01] = 0
         V = V + ice * icemask
         self.icemask = icemask.detach().cpu() #save as attribute just to check
         return V
@@ -861,7 +869,7 @@ class MicrographGenerator(L.LightningModule):
                       ),
                      mode='reflect')
 
-        icemask = V < 10  # boolean mask, same shape, no copy of V
+        icemask = V < 0.01  # boolean mask, same shape, no copy of V
         V += self.ice * icemask
         # self.icemask = icemask #save as attribute just to check
         return V

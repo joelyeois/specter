@@ -3,7 +3,7 @@ from importlib import resources
 
 import torch
 from Bio.PDB.MMCIF2Dict import MMCIF2Dict
-from torch.special import modified_bessel_k0
+from torch.special import modified_bessel_k0, modified_bessel_k1
 from ..array_utils import real_to_kgrid_3d
 from ..fft_tools import fftn
 from ..scattering import energy_to_wavelength
@@ -345,10 +345,49 @@ def kirkland_atomic_potential_3d_fourier(atomic_number, k_xyz):
     s2 = torch.sum(c * torch.exp(-d * k2), 0)
     return s1 + s2
 
+def lobato_atomic_potential_2d(atomic_number, r_xy):
+    """Returns the 3D atomic potential for a specific element and given a 3D grid
+    of radial distances from the atom core. Lobato Eq.16.
+
+    Parameters
+    ----------
+    atomic_number : int
+        Atomic number, Hyrdogen has number 1.
+    r_xy : 2D tensor
+        Distances from the atomic core in units of Ångstrom. r^2 = x^2 + y^2.
+        Assume equally spaced grid along x and y, i.e. dx = dy.
+
+    Returns
+    -------
+    potential : tensor
+        Atomic potential in units of V-Ångstrom, same shape as r_xy.
+    """
+    device = r_xy.device
+    vac_perm = 1 / 4 / torch.pi
+    a0 = 0.529  # Bohr radius, [Angstrom]
+    e = 14.4  # electron charge, [V-Angstrom]
+    kappa = 2 * vac_perm / a0 / e
+    c1 = torch.pi**2 / kappa
+
+    # get scattering factors
+    lobato_params = load_lobato_parameters()  # shape (104, 5, 2)
+    P = lobato_params[atomic_number]  # shape (5, 2)
+    P = P.to(device)
+
+    # Separate columns: a_i, b_i
+    a = P[:, 0].unsqueeze(-1).unsqueeze(-1)  # shape (3,1,1)
+    b = P[:, 1].unsqueeze(-1).unsqueeze(-1)
+
+    r = r_xy.unsqueeze(0)  # shape (1, Nx, Ny)
+    s1 = modified_bessel_k0(2 * torch.pi * r / b**0.5)
+    s2 = r * modified_bessel_k1(2 * torch.pi * r / b**0.5)
+    s = 1 / kappa * torch.sum(2 * torch.pi**2 * a / b**1.5 * (s1 + s2), 0)
+
+    return s
 
 def lobato_atomic_potential_3d(atomic_number, r_xyz):
     """Returns the 3D atomic potential for a specific element and given a 3D grid
-    of radial distances from the atom core. Lobato Eq.59.
+    of radial distances from the atom core. Lobato Eq.15.
 
     Note: There is a singularity at r = 0 because the atomic nucleaus is essentially
     a point charge on this scale (~1e-5 Angstroms).
@@ -397,7 +436,7 @@ def lobato_atomic_potential_3d(atomic_number, r_xyz):
 
 def lobato_atomic_potential_3d_fourier(atomic_number, k_xyz):
     """Returns the Fourier transformed 3D atomic potential for a specific element and
-    given a 3D grid of radial distances from the atom core. Kirkland C.15.
+    given a 3D grid of radial distances from the atom core. Lobato Eq. 56.
 
     Parameters
     ----------

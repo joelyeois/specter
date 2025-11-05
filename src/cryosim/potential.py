@@ -17,6 +17,7 @@ from .atom import (
     atom_symbol,
     kirkland_atomic_potential_2d,
     kirkland_atomic_potential_3d,
+    lobato_atomic_potential_2d,
     lobato_atomic_potential_3d,
     shryov_atomic_potential_3d
 )
@@ -294,7 +295,7 @@ class PotentialBuilder(L.LightningModule):
         self.parameterization = parameterization
         self.avgpool2d = torch.nn.AvgPool2d(self.ssf, stride=self.ssf)
         self.avgpool3d = torch.nn.AvgPool3d(self.ssf, stride=self.ssf)
-        if parameterization == 'kirkland':
+        if parameterization in ('kirkland', 'lobato'):
             self.get_2d_atomic_potentials()
         self.get_3d_atomic_potentials()
 
@@ -313,7 +314,10 @@ class PotentialBuilder(L.LightningModule):
 
         # fetch potential kernels
         for i, elem in enumerate(self.unique_elements):
-            pot = kirkland_atomic_potential_2d(int(elem), self.sR_2d)
+            if self.parameterization == 'kirkland':
+                pot = kirkland_atomic_potential_2d(int(elem), self.sR_2d)
+            elif self.parameterization == 'lobato':
+                pot = lobato_atomic_potential_2d(int(elem), self.sR_2d)
 
             if self.ssf != 1:
                 pot = self.avgpool2d(pot[None, None]) * self.dx
@@ -383,16 +387,25 @@ class PotentialBuilder(L.LightningModule):
                 
                 if method == '2d':
                     temp_vol = soft_voxelize_xy_coordinates(
-                        coordinates[atomic_indices].reshape(-1,3),
+                        coords_elem,
                         grid_shape=(self.nz, self.ny, self.nx),
                         voxel_size=self.dx
                     )
-    
-                    #batch 2D convolve
-                    temp_vol_b = temp_vol.unsqueeze(1)   # (nz, 1, ny, nx)
-                    pot_b = self.atomic_potentials_2d[i].unsqueeze(0).unsqueeze(0)  # (1, 1, ky, kx)
-                    convolved = F.conv2d(temp_vol_b, pot_b, padding='same')
-                    potential_volume += convolved.squeeze(1)    # (nz, ny, nx)
+                    
+                    # Flatten B and Z for conv2d
+                    temp_vol_flat = temp_vol.reshape(-1, 1, self.ny, self.nx)  # (B*Z, 1, Y, X)
+                    
+                    # Kernel: (1, 1, ky, kx)
+                    pot_b = self.atomic_potentials_2d[i].unsqueeze(0).unsqueeze(0)  # (1,1,ky,kx)
+                    
+                    # Perform conv2d
+                    convolved_flat = F.conv2d(temp_vol_flat, pot_b, padding='same')  # (B*Z, 1, Y, X)
+                    
+                    # Reshape back to (B, Z, Y, X)
+                    convolved = convolved_flat.reshape(B, self.nz, self.ny, self.nx)
+                    
+                    # Add to potential volume
+                    potential_volume += convolved
                     
                 elif method == '3d':
                     temp_vol = soft_voxelize_coordinates(

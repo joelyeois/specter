@@ -486,77 +486,166 @@ def soft_voxelize_coordinates(coords, grid_shape, voxel_size, device=None):
 def soft_voxelize_xy_coordinates(coords, grid_shape, voxel_size, device=None):
     """
     Semi-soft 3D voxelization:
-    - hard assignment along z (nearest slice)
-    - bilinear interpolation in x and y.
-
-    Out-of-bounds neighbors are excluded.
+    - Hard assignment along Z (nearest slice)
+    - Bilinear interpolation in X and Y
+    - Supports single (N,3) or batched (B,N,3) coordinates
 
     Args:
-        coords: (N,3) tensor of atomic coordinates (x, y, z)
+        coords: (N,3) or (B,N,3) tensor of coordinates
         grid_shape: tuple of ints (nz, ny, nx)
         voxel_size: float or tuple of floats (dx, dy, dz)
         device: optional torch.device
 
     Returns
     -------
-    volume : (nz, ny, nx) tensor
-        Semi-soft voxelized volume
+    volume : (nz, ny, nx) if input is (N,3)
+             (B, nz, ny, nx) if input is (B,N,3)
     """
     if device is None:
         device = coords.device
     coords = coords.to(device)
+
+    # Ensure batch dimension
+    if coords.ndim == 2:  # (N,3)
+        coords = coords.unsqueeze(0)
+        squeeze_output = True
+    else:
+        squeeze_output = False
+
+    B, N, _ = coords.shape
     nz, ny, nx = grid_shape
-    N = coords.shape[0]
 
-    values = torch.ones(N, device=device)
-
-    # Convert to voxel units
+    # Convert voxel size
     if isinstance(voxel_size, (int, float)):
         voxel_size = torch.tensor([voxel_size]*3, device=device)
     else:
         voxel_size = torch.tensor(voxel_size, device=device)
-    coords_voxel = coords / voxel_size
 
     # Shift origin to center
-    origin = torch.tensor([nx//2, ny//2, nz//2], device=device, dtype=coords_voxel.dtype)
-    coords_voxel_centered = coords_voxel + origin[None, :]
+    origin = torch.tensor([nx//2, ny//2, nz//2], device=device, dtype=coords.dtype)
 
-    # Separate coordinates
-    x, y, z = coords_voxel_centered.T
-
-    # Hard assign Z
-    z_idx = torch.round(z).long()
-
-    # XY floor + fractional part for bilinear weights
-    x0 = torch.floor(x).long()
-    y0 = torch.floor(y).long()
-    dx = x - x0.float()
-    dy = y - y0.float()
-
-    # 4 neighbor offsets for XY bilinear
+    volumes = torch.zeros(B, nz, ny, nx, device=device)
     offsets = torch.tensor([[0,0],[0,1],[1,0],[1,1]], device=device)
 
-    x_idx = x0[:, None] + offsets[None,:,1]
-    y_idx = y0[:, None] + offsets[None,:,0]
-    z_idx_full = z_idx[:, None].repeat(1,4)
+    for b in range(B):
+        batch_coords = coords[b]
+        values = torch.ones(N, device=device)
 
-    # Bilinear weights
-    w = ((1-dx)[:, None]*(1-offsets[None,:,1]) + dx[:, None]*offsets[None,:,1]) \
-        * ((1-dy)[:, None]*(1-offsets[None,:,0]) + dy[:, None]*offsets[None,:,0])
-    w = w * values[:, None]
+        coords_voxel = batch_coords / voxel_size
+        coords_voxel_centered = coords_voxel + origin[None, :]
 
-    # Mask out-of-bounds
-    mask = (z_idx_full>=0)&(z_idx_full<nz) & (y_idx>=0)&(y_idx<ny) & (x_idx>=0)&(x_idx<nx)
-    z_idx_full = z_idx_full[mask]
-    y_idx = y_idx[mask]
-    x_idx = x_idx[mask]
-    w = w[mask]
+        # Extract x, y, z safely without .T
+        x = coords_voxel_centered[:, 0]
+        y = coords_voxel_centered[:, 1]
+        z = coords_voxel_centered[:, 2]
 
-    # Scatter
-    volume = torch.zeros(nz, ny, nx, device=device)
-    volume.index_put_((z_idx_full, y_idx, x_idx), w, accumulate=True)
+        # Hard Z assignment
+        z_idx = torch.round(z).long()
 
-    return volume
+        # XY floor + fractional for bilinear
+        x0 = torch.floor(x).long()
+        y0 = torch.floor(y).long()
+        dx = x - x0.float()
+        dy = y - y0.float()
+
+        # Neighbor indices for bilinear
+        x_idx = x0[:, None] + offsets[None,:,1]
+        y_idx = y0[:, None] + offsets[None,:,0]
+        z_idx_full = z_idx[:, None].repeat(1,4)
+
+        # Bilinear weights
+        w = ((1-dx)[:, None]*(1-offsets[None,:,1]) + dx[:, None]*offsets[None,:,1]) \
+            * ((1-dy)[:, None]*(1-offsets[None,:,0]) + dy[:, None]*offsets[None,:,0])
+        w = w * values[:, None]
+
+        # Mask out-of-bounds
+        mask = (z_idx_full>=0)&(z_idx_full<nz) & (y_idx>=0)&(y_idx<ny) & (x_idx>=0)&(x_idx<nx)
+        z_idx_full = z_idx_full[mask]
+        y_idx = y_idx[mask]
+        x_idx = x_idx[mask]
+        w = w[mask]
+
+        # Scatter values into volume
+        volumes[b].index_put_((z_idx_full, y_idx, x_idx), w, accumulate=True)
+
+    if squeeze_output:
+        return volumes[0]
+    return volumes
+
+# def soft_voxelize_xy_coordinates(coords, grid_shape, voxel_size, device=None):
+#     """
+#     Semi-soft 3D voxelization:
+#     - hard assignment along z (nearest slice)
+#     - bilinear interpolation in x and y.
+
+#     Out-of-bounds neighbors are excluded.
+
+#     Args:
+#         coords: (N,3) tensor of atomic coordinates (x, y, z)
+#         grid_shape: tuple of ints (nz, ny, nx)
+#         voxel_size: float or tuple of floats (dx, dy, dz)
+#         device: optional torch.device
+
+#     Returns
+#     -------
+#     volume : (nz, ny, nx) tensor
+#         Semi-soft voxelized volume
+#     """
+#     if device is None:
+#         device = coords.device
+#     coords = coords.to(device)
+#     nz, ny, nx = grid_shape
+#     N = coords.shape[0]
+
+#     values = torch.ones(N, device=device)
+
+#     # Convert to voxel units
+#     if isinstance(voxel_size, (int, float)):
+#         voxel_size = torch.tensor([voxel_size]*3, device=device)
+#     else:
+#         voxel_size = torch.tensor(voxel_size, device=device)
+#     coords_voxel = coords / voxel_size
+
+#     # Shift origin to center
+#     origin = torch.tensor([nx//2, ny//2, nz//2], device=device, dtype=coords_voxel.dtype)
+#     coords_voxel_centered = coords_voxel + origin[None, :]
+
+#     # Separate coordinates
+#     x, y, z = coords_voxel_centered.T
+
+#     # Hard assign Z
+#     z_idx = torch.round(z).long()
+
+#     # XY floor + fractional part for bilinear weights
+#     x0 = torch.floor(x).long()
+#     y0 = torch.floor(y).long()
+#     dx = x - x0.float()
+#     dy = y - y0.float()
+
+#     # 4 neighbor offsets for XY bilinear
+#     offsets = torch.tensor([[0,0],[0,1],[1,0],[1,1]], device=device)
+
+#     x_idx = x0[:, None] + offsets[None,:,1]
+#     y_idx = y0[:, None] + offsets[None,:,0]
+#     z_idx_full = z_idx[:, None].repeat(1,4)
+
+#     # Bilinear weights
+#     w = ((1-dx)[:, None]*(1-offsets[None,:,1]) + dx[:, None]*offsets[None,:,1]) \
+#         * ((1-dy)[:, None]*(1-offsets[None,:,0]) + dy[:, None]*offsets[None,:,0])
+#     w = w * values[:, None]
+
+#     # Mask out-of-bounds
+#     mask = (z_idx_full>=0)&(z_idx_full<nz) & (y_idx>=0)&(y_idx<ny) & (x_idx>=0)&(x_idx<nx)
+#     z_idx_full = z_idx_full[mask]
+#     y_idx = y_idx[mask]
+#     x_idx = x_idx[mask]
+#     w = w[mask]
+
+#     # Scatter
+#     volume = torch.zeros(nz, ny, nx, device=device)
+#     volume.index_put_((z_idx_full, y_idx, x_idx), w, accumulate=True)
+
+#     return volume
 
 
 def nearest_index(x_arr, y_arr, z_arr, x_coord, y_coord, z_coord):

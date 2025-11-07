@@ -1,9 +1,4 @@
 import os
-from gzip import GzipFile
-from io import BytesIO
-from pathlib import Path
-from urllib.error import HTTPError
-from urllib.request import urlopen
 from .atom import atom_number
 import torch
 import requests
@@ -13,7 +8,6 @@ from scipy.spatial import ConvexHull
 from scipy.spatial.distance import pdist
 
 import biotite.structure.io as strucio
-import biotite.structure.io.pdbx as pdbx
 import numpy as np
 
 from rich.progress import track
@@ -24,7 +18,8 @@ from Bio.PDB.PDBExceptions import PDBConstructionWarning  # correct import
 import warnings
 
 # Suppress only PDBConstructionWarnings
-warnings.simplefilter('ignore', PDBConstructionWarning)
+warnings.simplefilter("ignore", PDBConstructionWarning)
+
 
 class PDB:
     def __init__(self, pdb_id, assembly=True, savefolder="../pdb-data/"):
@@ -33,13 +28,17 @@ class PDB:
         self.savefolder = savefolder
 
         # fetch pdb file
-        self.filepath = PDB.fetch_pdb_file(pdb_id, savefolder=savefolder, assembly=assembly)
+        self.filepath = PDB.fetch_pdb_file(
+            pdb_id, savefolder=savefolder, assembly=assembly
+        )
 
         # get pdb structure
         self.structure = PDB.get_pdb_structure(self.filepath)
 
         # get atomic elements and coordinates
-        self.atomic_numbers, self.coordinates = PDB.get_atoms_and_coordinates(self.structure)
+        self.atomic_numbers, self.coordinates = PDB.get_atoms_and_coordinates(
+            self.structure
+        )
 
         # center coordinates
         self.coordinates = PDB.center_coordinates(self.coordinates)
@@ -48,10 +47,10 @@ class PDB:
         self.max_diameter = PDB.estimate_max_diameter(self.coordinates)
 
     @staticmethod
-    def fetch_pdb_file(pdb_id, ext='cif', savefolder="../pdb-data/", assembly=True):
+    def fetch_pdb_file(pdb_id, ext="cif", savefolder="../pdb-data/", assembly=True):
         """
         Download a PDB file and save it in a given location.
-    
+
         Parameters
         ----------
         pdb_id : str
@@ -63,19 +62,16 @@ class PDB:
         assembly : bool or int
             - True  → fetch default biological assembly (assembly 1 if available).
             - False → fetch asymmetric unit.
-            - int   → fetch that specific assembly if available, fallback to default 
+            - int   → fetch that specific assembly if available, fallback to default
                PDBx/mmCIF file.
-    
+
         Returns
         -------
         str
             Path to the saved PDB file
         """
-        if pdb_id is None:
-            pdb_id = self.pdb_id
-
         PDB.get_available_assemblies(pdb_id)
-    
+
         # Decide what to fetch
         if assembly is True:
             print(f"{pdb_id}: Fetching default Biological Assembly 1")
@@ -88,29 +84,29 @@ class PDB:
             filename = f"{pdb_id}-assembly{assembly}.{ext}"
         else:
             raise ValueError("assembly must be True, False, or int")
-    
+
         # Build filepath
         file_path = os.path.join(savefolder, filename)
-    
+
         # Return existing file if available
         if os.path.exists(file_path):
             print(f"File already exists: {file_path}, skip fetching.")
             return file_path
         else:
             # Fetch
-            print(f"File does not exists, fetching.")
+            print("File does not exists, fetching.")
             url = "https://files.rcsb.org/download/" + filename + ".gz"
             r = requests.get(url)
             r.raise_for_status()
-    
+
             # Decompress in memory
             with gzip.open(io.BytesIO(r.content), "rt") as f:
                 cif_content = f.read()
-    
+
             # Save to file
             with open(file_path, "w") as f:
                 f.write(cif_content)
-    
+
         print(f"Downloaded to: {file_path}")
         return file_path
 
@@ -122,7 +118,9 @@ class PDB:
             response = requests.get(url)
             response.raise_for_status()
             data = response.json()
-            assemblies = data.get("rcsb_entry_container_identifiers", {}).get("assembly_ids", [])
+            assemblies = data.get("rcsb_entry_container_identifiers", {}).get(
+                "assembly_ids", []
+            )
             print("Assemblies available: " + ", ".join(assemblies))
         except Exception as e:
             print(f"Error fetching assemblies for {pdb_id}: {e}")
@@ -131,27 +129,27 @@ class PDB:
     @staticmethod
     def get_pdb_structure(filepath):
         ext = filepath[-3:]
-        if ext == 'pdb':
+        if ext == "pdb":
             parser = PDBParser()
-        elif ext == 'cif':
+        elif ext == "cif":
             parser = MMCIFParser()
         else:
             raise ValueError(f"Invalid file format '{ext}'. Must be 'cif' or 'pdb'.")
-        structure = parser.get_structure('structure', filepath)
+        structure = parser.get_structure("structure", filepath)
         return structure
 
     @staticmethod
     def get_atoms_and_coordinates(structure):
         """
         Extracts atomic elements and coordinates from PDB structure.
-    
+
         Parameters
         ----------
         input_filename : str
             The name of the input file containing the atomic structure.
         return_array : boolean
             If True, returns array for elements and coordinates.
-    
+
         Returns
         ----------
         elements : (N,)-shape array
@@ -162,17 +160,18 @@ class PDB:
         # if filepath, load the structure.
         if isinstance(structure, str):
             structure = PDB.get_pdb_structure(structure)
-        
+
         # Extract atomic data
         coords = []
         elements = []
-        for atom in track(structure.get_atoms(), description="Extracting atom coordinates and element"):
+        for atom in track(
+            structure.get_atoms(), description="Extracting atom coordinates and element"
+        ):
             element_symbol = atom.element.strip().upper()
             elements.append(element_symbol)
-            
+
             coord = atom.get_coord()
             coords.append(coord)
-        n_atoms = len(coords)
         coords = torch.as_tensor(np.array(coords))
         elements = atom_number(elements)
 
@@ -182,12 +181,12 @@ class PDB:
     def center_of_particle(coords):
         """
         Return a particle's geometric center.
-    
+
         Parameters
         ----------
         coords : ndarray
             Atom coordinates of molecule with N atoms, shape (N,3)
-    
+
         Returns
         -------
         center : ndarray
@@ -200,12 +199,12 @@ class PDB:
     def center_coordinates(coords):
         """
         Centers coordinates on its geometric center.
-    
+
         Parameters
         ----------
         coords : tensor
             Atom coordinates of molecule with N atoms, shape (N,3)
-    
+
         Returns
         -------
         centered_coordinates : tensor
@@ -296,7 +295,6 @@ class PDB:
 #             file.write("-1")
 #     if return_array:
 #         return torch.from_numpy(elements), torch.from_numpy(coords)
-
 
 
 def write_xyz_file(input_filename, output_filename, comment=""):

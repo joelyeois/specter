@@ -1,18 +1,46 @@
 import torch
 from scipy.fft import next_fast_len
 
-fft2 = lambda array: torch.fft.fftshift(
-    torch.fft.fft2(torch.fft.ifftshift(array, dim=(-1, -2))), dim=(-1, -2)
-)
-ifft2 = lambda array: torch.fft.fftshift(
-    torch.fft.ifft2(torch.fft.ifftshift(array, dim=(-1, -2))), dim=(-1, -2)
-)
-fftn = lambda array: torch.fft.fftshift(torch.fft.fftn(torch.fft.ifftshift(array)))
-ifftn = lambda array: torch.fft.fftshift(torch.fft.ifftn(torch.fft.ifftshift(array)))
+
+def fft2(array, dim=(-1, -2)):
+    return torch.fft.fftshift(
+        torch.fft.fft2(torch.fft.ifftshift(array, dim=dim)), dim=dim
+    )
+
+
+def ifft2(array, dim=(-1, -2)):
+    return torch.fft.fftshift(
+        torch.fft.ifft2(torch.fft.ifftshift(array, dim=dim)), dim=dim
+    )
+
+
+def fft3(array, dim=(-1, -2, -3)):
+    return torch.fft.fftshift(
+        torch.fft.fftn(torch.fft.ifftshift(array, dim=dim), dim=dim), dim=dim
+    )
+
+
+def ifft3(array, dim=(-1, -2, -3)):
+    return torch.fft.fftshift(
+        torch.fft.ifftn(torch.fft.ifftshift(array, dim=dim), dim=dim), dim=dim
+    )
+
+
+def fftn(array, dim=None):
+    return torch.fft.fftshift(
+        torch.fft.fftn(torch.fft.ifftshift(array, dim=dim), dim=dim), dim=dim
+    )
+
+
+def ifftn(array, dim=None):
+    return torch.fft.fftshift(
+        torch.fft.ifftn(torch.fft.ifftshift(array, dim=dim), dim=dim), dim=dim
+    )
+
 
 def fftconvolve(in1, in2, mode="full"):
-    """ From scipy fftconvolve.
-    
+    """From scipy fftconvolve.
+
     Convolve two N-dimensional arrays using FFT.
 
     Convolve `in1` and `in2` using the fast Fourier transform method, with
@@ -65,18 +93,21 @@ def fftconvolve(in1, in2, mode="full"):
 
     s1 = in1.shape
     s2 = in2.shape
-    axes = [i for i in range(len(in1.shape))] #assume ndim convolution.
+    axes = [i for i in range(len(in1.shape))]  # assume ndim convolution.
 
-    shape = [max((s1[i], s2[i])) if i not in axes else s1[i] + s2[i] - 1
-             for i in range(in1.ndim)]
+    shape = [
+        max((s1[i], s2[i])) if i not in axes else s1[i] + s2[i] - 1
+        for i in range(in1.ndim)
+    ]
 
     ret = _freq_domain_conv(in1, in2, axes, shape, calc_fast_len=True)
 
     return _apply_conv_mode(ret, s1, s2, mode, axes)
 
+
 def _freq_domain_conv(in1, in2, axes, shape, calc_fast_len=False):
-    """ From scipy.signal._signaltools
-    
+    """From scipy.signal._signaltools
+
     Convolve two arrays in the frequency domain.
 
     This function implements only base the FFT-related operations.
@@ -110,7 +141,7 @@ def _freq_domain_conv(in1, in2, axes, shape, calc_fast_len=False):
     if not len(axes):
         return in1 * in2
 
-    complex_result = (torch.is_complex(in1) or torch.is_complex(in2))
+    complex_result = torch.is_complex(in1) or torch.is_complex(in2)
 
     if calc_fast_len:
         # Speed up FFT by padding to optimal size.
@@ -134,6 +165,7 @@ def _freq_domain_conv(in1, in2, axes, shape, calc_fast_len=False):
 
     return ret
 
+
 def _centered(arr, newshape):
     """From scipy.signal._signaltools"""
     # Return the center newshape portion of the array.
@@ -144,9 +176,10 @@ def _centered(arr, newshape):
     myslice = [slice(startind[k], endind[k]) for k in range(len(endind))]
     return arr[tuple(myslice)]
 
+
 def _apply_conv_mode(ret, s1, s2, mode, axes):
-    """ From scipy.signal._signaltools
-    
+    """From scipy.signal._signaltools
+
     Calculate the convolution result shape based on the `mode` argument.
 
     Returns the result sliced to the correct size for the given mode.
@@ -176,9 +209,10 @@ def _apply_conv_mode(ret, s1, s2, mode, axes):
     elif mode == "same":
         return _centered(ret, s1).clone()
     elif mode == "valid":
-        shape_valid = [ret.shape[a] if a not in axes else s1[a] - s2[a] + 1
-                       for a in range(ret.ndim)]
+        shape_valid = [
+            ret.shape[a] if a not in axes else s1[a] - s2[a] + 1
+            for a in range(ret.ndim)
+        ]
         return _centered(ret, shape_valid).clone()
     else:
-        raise ValueError("acceptable mode flags are 'valid',"
-                         " 'same', or 'full'")
+        raise ValueError("acceptable mode flags are 'valid'," " 'same', or 'full'")

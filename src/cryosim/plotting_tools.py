@@ -1,9 +1,9 @@
 import matplotlib.pyplot as plt
 import torch
-from tqdm.auto import tqdm
+
 
 def plot3d(vol, title=None, vmin=None):
-    fig, axes = plt.subplots(1, 3, dpi=200, constrained_layout=True, figsize=(8,3.6))
+    fig, axes = plt.subplots(1, 3, dpi=200, constrained_layout=True, figsize=(8, 3.6))
     for i, ax in enumerate(axes.ravel()):
         im = ax.imshow(vol.sum(i), vmin=vmin)
         ax.set(xticks=[], yticks=[], title=f"projection along axis {i}")
@@ -23,7 +23,6 @@ def plot_slices(
         end_idx = start_idx + idx_length
     else:
         idx_length = end_idx - start_idx
-    idx_interval = idx_length // nslices
     indices = torch.linspace(start_idx, end_idx, nslices).type(torch.int)
 
     fig, axes = plt.subplots(1, 5, dpi=200, figsize=(8, 2.5), constrained_layout=True)
@@ -124,6 +123,7 @@ def plot_slices(
 
 #     return r, g_r
 
+
 def radial_distribution_function(
     coords,
     volume,
@@ -186,7 +186,7 @@ def radial_distribution_function(
     device = coords.device
     N = coords.shape[0]
     if r_max is None:
-        r_max = volume ** (1/3)  # cubic box length
+        r_max = volume ** (1 / 3)  # cubic box length
 
     # bins and histogram container
     bins = torch.arange(0, r_max + dr, dr, device=device)
@@ -199,25 +199,25 @@ def radial_distribution_function(
         device = coords.device
         N = coords.shape[0]
         total_unordered = N * (N - 1) // 2
-    
+
         # draw n_samples ordered pairs but guaranteed i != j
         # efficient trick: draw j from [0..N-2] and bump up where j >= i
         i = torch.randint(0, N, (n_samples,), device=device)
         j = torch.randint(0, N - 1, (n_samples,), device=device)
         j = j + (j >= i).to(dtype=j.dtype)  # now j != i for all entries
-    
+
         # distances for sampled ordered pairs
         dists = torch.norm(coords[i] - coords[j], dim=1)
-    
+
         # bin sampled distances
         idx = torch.bucketize(dists, bins) - 1
         idx = idx[(idx >= 0) & (idx < hist.numel())]
         hist.index_add_(0, idx, torch.ones_like(idx, dtype=hist.dtype))
-    
+
         # scale histogram to estimate counts over all unordered pairs
         S_eff = dists.numel()  # actual sampled ordered pairs
         if S_eff > 0:
-            hist *= (total_unordered / S_eff)
+            hist *= total_unordered / S_eff
 
     # ------------------------
     # 2. Exact mode: pdist
@@ -234,7 +234,7 @@ def radial_distribution_function(
     else:
         for i in range(0, N, chunk_size):
             ci = coords[i : i + chunk_size]  # (m, 3)
-            cj = coords[i:]                  # (N-i, 3)
+            cj = coords[i:]  # (N-i, 3)
             m = ci.shape[0]
             if m == 0:
                 continue
@@ -243,11 +243,13 @@ def radial_distribution_function(
 
             # split into in-block vs tail
             D_block = D[:, :m]
-            D_tail  = D[:, m:]
+            D_tail = D[:, m:]
 
             # strictly upper-triangle of block
             if m > 1:
-                tri = torch.triu(torch.ones((m, m), dtype=torch.bool, device=device), diagonal=1)
+                tri = torch.triu(
+                    torch.ones((m, m), dtype=torch.bool, device=device), diagonal=1
+                )
                 d_block = D_block[tri]
                 dists = torch.cat([d_block, D_tail.reshape(-1)])
             else:

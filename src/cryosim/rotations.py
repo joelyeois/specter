@@ -2,6 +2,7 @@ import torch
 import torch.nn.functional as F
 import numpy as np
 
+
 class Rotation:
     """
     3D rotation class with support for quaternions, rotation vectors, and rotation matrices.
@@ -60,43 +61,43 @@ class Rotation:
         if not batch_mode:
             m = R.unsqueeze(0)
 
-        tr = m[:,0,0] + m[:,1,1] + m[:,2,2]
-        quat = torch.zeros((m.shape[0],4), device=R.device, dtype=R.dtype)
+        tr = m[:, 0, 0] + m[:, 1, 1] + m[:, 2, 2]
+        quat = torch.zeros((m.shape[0], 4), device=R.device, dtype=R.dtype)
 
         # Compute quaternion
         mask = tr > 0
         t = tr[mask] + 1
         S = torch.sqrt(t) * 2
         quat[mask, 3] = 0.25 * S
-        quat[mask, 0] = (m[mask,2,1] - m[mask,1,2]) / S
-        quat[mask, 1] = (m[mask,0,2] - m[mask,2,0]) / S
-        quat[mask, 2] = (m[mask,1,0] - m[mask,0,1]) / S
+        quat[mask, 0] = (m[mask, 2, 1] - m[mask, 1, 2]) / S
+        quat[mask, 1] = (m[mask, 0, 2] - m[mask, 2, 0]) / S
+        quat[mask, 2] = (m[mask, 1, 0] - m[mask, 0, 1]) / S
 
         mask = ~mask
         # Pick largest diagonal element
-        cond1 = (m[:,0,0] >= m[:,1,1]) & (m[:,0,0] >= m[:,2,2]) & mask
-        t1 = 1 + m[cond1,0,0] - m[cond1,1,1] - m[cond1,2,2]
+        cond1 = (m[:, 0, 0] >= m[:, 1, 1]) & (m[:, 0, 0] >= m[:, 2, 2]) & mask
+        t1 = 1 + m[cond1, 0, 0] - m[cond1, 1, 1] - m[cond1, 2, 2]
         S1 = torch.sqrt(t1) * 2
         quat[cond1, 0] = 0.25 * S1
-        quat[cond1, 1] = (m[cond1,0,1] + m[cond1,1,0]) / S1
-        quat[cond1, 2] = (m[cond1,0,2] + m[cond1,2,0]) / S1
-        quat[cond1, 3] = (m[cond1,2,1] - m[cond1,1,2]) / S1
+        quat[cond1, 1] = (m[cond1, 0, 1] + m[cond1, 1, 0]) / S1
+        quat[cond1, 2] = (m[cond1, 0, 2] + m[cond1, 2, 0]) / S1
+        quat[cond1, 3] = (m[cond1, 2, 1] - m[cond1, 1, 2]) / S1
 
-        cond2 = (m[:,1,1] >= m[:,2,2]) & mask & ~cond1
-        t2 = 1 + m[cond2,1,1] - m[cond2,0,0] - m[cond2,2,2]
+        cond2 = (m[:, 1, 1] >= m[:, 2, 2]) & mask & ~cond1
+        t2 = 1 + m[cond2, 1, 1] - m[cond2, 0, 0] - m[cond2, 2, 2]
         S2 = torch.sqrt(t2) * 2
-        quat[cond2, 0] = (m[cond2,0,1] + m[cond2,1,0]) / S2
+        quat[cond2, 0] = (m[cond2, 0, 1] + m[cond2, 1, 0]) / S2
         quat[cond2, 1] = 0.25 * S2
-        quat[cond2, 2] = (m[cond2,1,2] + m[cond2,2,1]) / S2
-        quat[cond2, 3] = (m[cond2,0,2] - m[cond2,2,0]) / S2
+        quat[cond2, 2] = (m[cond2, 1, 2] + m[cond2, 2, 1]) / S2
+        quat[cond2, 3] = (m[cond2, 0, 2] - m[cond2, 2, 0]) / S2
 
         cond3 = mask & ~cond1 & ~cond2
-        t3 = 1 + m[cond3,2,2] - m[cond3,0,0] - m[cond3,1,1]
+        t3 = 1 + m[cond3, 2, 2] - m[cond3, 0, 0] - m[cond3, 1, 1]
         S3 = torch.sqrt(t3) * 2
-        quat[cond3, 0] = (m[cond3,0,2] + m[cond3,2,0]) / S3
-        quat[cond3, 1] = (m[cond3,1,2] + m[cond3,2,1]) / S3
+        quat[cond3, 0] = (m[cond3, 0, 2] + m[cond3, 2, 0]) / S3
+        quat[cond3, 1] = (m[cond3, 1, 2] + m[cond3, 2, 1]) / S3
         quat[cond3, 2] = 0.25 * S3
-        quat[cond3, 3] = (m[cond3,1,0] - m[cond3,0,1]) / S3
+        quat[cond3, 3] = (m[cond3, 1, 0] - m[cond3, 0, 1]) / S3
 
         if not batch_mode:
             quat = quat.squeeze(0)
@@ -122,20 +123,31 @@ class Rotation:
         xyz, w = self._quat[..., :3], self._quat[..., 3:]
         norm_xyz = xyz.norm(dim=-1, keepdim=True)
         angle = 2 * torch.atan2(norm_xyz, w)
-        scale = torch.where(norm_xyz > 1e-8, angle / norm_xyz, torch.zeros_like(norm_xyz))
+        scale = torch.where(
+            norm_xyz > 1e-8, angle / norm_xyz, torch.zeros_like(norm_xyz)
+        )
         return xyz * scale
 
     def as_matrix(self):
         """Return 3x3 rotation matrix"""
         x, y, z, w = self._quat.unbind(-1)
-        xx, yy, zz = x*x, y*y, z*z
-        xy, xz, yz = x*y, x*z, y*z
-        xw, yw, zw = x*w, y*w, z*w
-        R = torch.stack([
-            1-2*(yy+zz), 2*(xy-zw), 2*(xz+yw),
-            2*(xy+zw), 1-2*(xx+zz), 2*(yz-xw),
-            2*(xz-yw), 2*(yz+xw), 1-2*(xx+yy)
-        ], dim=-1).reshape(-1, 3, 3)
+        xx, yy, zz = x * x, y * y, z * z
+        xy, xz, yz = x * y, x * z, y * z
+        xw, yw, zw = x * w, y * w, z * w
+        R = torch.stack(
+            [
+                1 - 2 * (yy + zz),
+                2 * (xy - zw),
+                2 * (xz + yw),
+                2 * (xy + zw),
+                1 - 2 * (xx + zz),
+                2 * (yz - xw),
+                2 * (xz - yw),
+                2 * (yz + xw),
+                1 - 2 * (xx + yy),
+            ],
+            dim=-1,
+        ).reshape(-1, 3, 3)
         if R.shape[0] == 1:
             return R.squeeze(0)
         return R
@@ -150,7 +162,7 @@ class Rotation:
     def apply(self, vectors, inverse=True, T=None):
         """
         Apply rotation(s) to a set of vectors, optionally using the inverse and translation.
-    
+
         Parameters
         ----------
         vectors : torch.Tensor
@@ -160,7 +172,7 @@ class Rotation:
         T : torch.Tensor or None
             Translation per rotation batch. Shape (B,3).
             If last dimension is 2, z-translation is assumed zero.
-    
+
         Returns
         -------
         rotated : torch.Tensor
@@ -169,33 +181,33 @@ class Rotation:
         R = self.as_matrix()  # (3,3) or (B,3,3)
         if inverse:
             R = R.transpose(-2, -1)
-    
+
         N = vectors.shape[0]
-    
+
         # Apply rotation
         if R.ndim == 2:  # single rotation
             rotated = vectors @ R.T  # (N,3)
         else:  # batch of rotations
             B = R.shape[0]
             vectors_exp = vectors.unsqueeze(0).expand(B, N, 3)  # (B,N,3)
-            rotated = torch.einsum('bij,bkj->bki', R, vectors_exp)  # (B,N,3)
-    
+            rotated = torch.einsum("bij,bkj->bki", R, vectors_exp)  # (B,N,3)
+
         if T is None:
             return rotated
         else:
             return translate_coordinates(rotated, T, inverse=inverse)
 
-
     def __mul__(self, other):
         """Compose rotations (quaternion multiplication)"""
         x1, y1, z1, w1 = self._quat.unbind(-1)
         x2, y2, z2, w2 = other._quat.unbind(-1)
-        x = w1*x2 + x1*w2 + y1*z2 - z1*y2
-        y = w1*y2 - x1*z2 + y1*w2 + z1*x2
-        z = w1*z2 + x1*y2 - y1*x2 + z1*w2
-        w = w1*w2 - x1*x2 - y1*y2 - z1*z2
+        x = w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2
+        y = w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2
+        z = w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2
+        w = w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2
         quat = torch.stack([x, y, z, w], dim=-1)
         return Rotation(quat)
+
 
 def translate_coordinates(vectors, T, inverse=False):
     """
@@ -241,7 +253,7 @@ def translate_coordinates(vectors, T, inverse=False):
         return vectors + sign * T_full
 
 
-def random_quaternion(batchsize=1, convention="xyzw", device='cpu'):
+def random_quaternion(batchsize=1, convention="xyzw", device="cpu"):
     """
     Generate uniformly random unit quaternions using Shoemake's method.
     """
@@ -268,7 +280,7 @@ def random_quaternion(batchsize=1, convention="xyzw", device='cpu'):
     return quats
 
 
-def random_rotvec(batchsize=1, device='cpu'):
+def random_rotvec(batchsize=1, device="cpu"):
     """
     Generate uniformly random rotation vectors using the Rotation3D class.
 
@@ -287,13 +299,13 @@ def random_rotvec(batchsize=1, device='cpu'):
     quats = random_quaternion(batchsize=batchsize, convention="xyzw", device=device)
     R = Rotation.from_quat(quats)
     rotvecs = R.as_rotvec()
-    
+
     if batchsize == 1:
         return rotvecs.squeeze(0)
     return rotvecs
 
 
-def random_rotation_matrix(batchsize=1, device='cpu'):
+def random_rotation_matrix(batchsize=1, device="cpu"):
     """
     Generate uniformly random 3x3 rotation matrices using the Rotation3D class.
 
@@ -312,13 +324,13 @@ def random_rotation_matrix(batchsize=1, device='cpu'):
     quats = random_quaternion(batchsize=batchsize, convention="xyzw", device=device)
     R = Rotation.from_quat(quats)
     rotmats = R.as_matrix()
-    
+
     if batchsize == 1:
         return rotmats.squeeze(0)
     return rotmats
 
 
-def rotate_volume(V, theta, origin="relion", padding_mode='border'):
+def rotate_volume(V, theta, origin="relion", padding_mode="border"):
     """
     Rotates a single 3D volume based on the batch of 3x4 affine transform matrices
 
@@ -389,7 +401,7 @@ def translations_angstrom_to_torch(T, n, voxel_size):
     Parameters
     ----------
     T : 2D tensor
-        Translation vector of shape (N,2), built from [rlnOriginXAngst, rlnOriginYAngst]. 
+        Translation vector of shape (N,2), built from [rlnOriginXAngst, rlnOriginYAngst].
         In angstroms.
     n : int
         Number of pixels in x/y direction.
@@ -414,7 +426,7 @@ def build_affine_matrix(R, T=None):
     Builds a batch of Torch's affine matrices (N, 3, 4) from a batch of rotation
     matrices (N, 3, 3) and Torch normalized translation vectors (N, 3).
 
-    CryoSPARC performs shifts before rotations. However, the affine matrix by 
+    CryoSPARC performs shifts before rotations. However, the affine matrix by
     definition performs rotations before shifts. As such, we need to modify the
     translation vector, T, by
     T_1' = R_11T_1 + R_12T_2 + R_13T_3
@@ -437,19 +449,19 @@ def build_affine_matrix(R, T=None):
     """
     if T is None:
         T = torch.zeros_like(R[..., 0])
-    #old
+    # old
     # theta = torch.concat([R, T.unsqueeze(2)], dim=-1)
 
-    #new
+    # new
     Tprime = torch.zeros_like(T)
-    Tprime[:,0] = R[:,0,0] * T[:,0] + R[:,0,1] * T[:,1] + R[:,0,2] * T[:,2]
-    Tprime[:,1] = R[:,1,0] * T[:,0] + R[:,1,1] * T[:,1] + R[:,1,2] * T[:,2]
-    Tprime[:,2] = R[:,2,0] * T[:,0] + R[:,2,1] * T[:,1] + R[:,2,2] * T[:,2]
+    Tprime[:, 0] = R[:, 0, 0] * T[:, 0] + R[:, 0, 1] * T[:, 1] + R[:, 0, 2] * T[:, 2]
+    Tprime[:, 1] = R[:, 1, 0] * T[:, 0] + R[:, 1, 1] * T[:, 1] + R[:, 1, 2] * T[:, 2]
+    Tprime[:, 2] = R[:, 2, 0] * T[:, 0] + R[:, 2, 1] * T[:, 1] + R[:, 2, 2] * T[:, 2]
     theta = torch.concat([R, Tprime.unsqueeze(2)], dim=-1)
     return theta
 
 
-def rotations_angular_difference(r1, r2, rotation_representation='rotvec'):
+def rotations_angular_difference(r1, r2, rotation_representation="rotvec"):
     """
     Calculates the smallest angles of rotation needed to a batch of 3D rotations (r1)
     to match another (r2).
@@ -470,15 +482,15 @@ def rotations_angular_difference(r1, r2, rotation_representation='rotvec'):
     Notes
     -----
     .. [1] https://math.stackexchange.com/a/4001635
-    
+
     """
     # use scipy Rotation module
-    if rotation_representation == 'rotvec':
-        r1 = R.from_rotvec(r1)
-        r2 = R.from_rotvec(r2)
-    elif rotation_representation == 'quaternion':
-        r1 = R.from_quat(r1)
-        r2 = R.from_quat(r2)
+    if rotation_representation == "rotvec":
+        r1 = Rotation.from_rotvec(r1)
+        r2 = Rotation.from_rotvec(r2)
+    elif rotation_representation == "quaternion":
+        r1 = Rotation.from_quat(r1)
+        r2 = Rotation.from_quat(r2)
 
     # invert one of them
     r1_inv = r1.inv()
@@ -489,6 +501,6 @@ def rotations_angular_difference(r1, r2, rotation_representation='rotvec'):
 
     # compute relative angle
     re_m = np.matmul(r1_inv_m, r2_m)
-    angles_rad = np.arccos((np.trace(re_m, axis1=-1, axis2=-2) - 1)/2)
+    angles_rad = np.arccos((np.trace(re_m, axis1=-1, axis2=-2) - 1) / 2)
     angles = angles_rad / np.pi * 180
     return angles

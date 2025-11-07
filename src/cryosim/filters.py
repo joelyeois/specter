@@ -2,20 +2,22 @@ import torch
 from skimage.filters import butterworth
 from .fft_tools import fftn, ifftn
 
+
 def normalize_particles(particles, mask_diameter_pixels=None):
     if mask_diameter_pixels is None:
         mask_diameter_pixels = particles.shape[-1]
     mask = 1 - circle2d(particles.shape[-1], mask_diameter_pixels)
     masked_particles = particles * mask[None, ...]  # Element-wise multiplication
-    means = masked_particles.sum(dim=(-1,-2)) / mask.sum()
+    means = masked_particles.sum(dim=(-1, -2)) / mask.sum()
 
     vars = (mask * (particles - means[:, None, None]) ** 2).sum(dim=(-1, -2)) / (
-                mask.sum()
-            )
+        mask.sum()
+    )
     stds = torch.sqrt(vars)
 
     normalized_particles = (particles - means[:, None, None]) / stds[:, None, None]
     return means, stds, normalized_particles
+
 
 def circle2d(N, d):
     """
@@ -38,11 +40,12 @@ def circle2d(N, d):
     x = torch.linspace(-1, 1, N)
     y = x
     [X, Y] = torch.meshgrid(x, y, indexing="ij")
-    circle[X**2 + Y**2 <= (d / N)**2] = 1
+    circle[X**2 + Y**2 <= (d / N) ** 2] = 1
     return circle
 
+
 def butter(images):
-    '''
+    """
     Applies butterworth filter to 2D images.
 
     Ref: 'https://discuss.cryosparc.com/t/inspect-raw-images-of-particles-of-certain-2-3d-classes/12261/8'
@@ -57,7 +60,7 @@ def butter(images):
     filtered : 2D or 3D tensor or ndarray
         Butterworth filtered images.
 
-    '''
+    """
 
     istensor = False
     n = images.shape[-1]
@@ -71,7 +74,11 @@ def butter(images):
         channel_axis = None
 
     filtered = butterworth(
-        images, cutoff_frequency_ratio=6 / n, high_pass=False, order=1, channel_axis=channel_axis
+        images,
+        cutoff_frequency_ratio=6 / n,
+        high_pass=False,
+        order=1,
+        channel_axis=channel_axis,
     )
 
     if istensor:
@@ -79,8 +86,9 @@ def butter(images):
     else:
         return filtered
 
+
 def apply_bfactor(volume, pixel_size, bfactor):
-    '''
+    """
     Applies bfactor to a 3D scattering potential volume. I.e., blurs the volume.
 
     Parameters
@@ -97,8 +105,8 @@ def apply_bfactor(volume, pixel_size, bfactor):
     newvolume : 3D tensor
         The b-factor blurred volume.
 
-    '''
-    if bfactor == 0.:
+    """
+    if bfactor == 0.0:
         return volume
     else:
         kx = torch.fft.fftshift(torch.fft.fftfreq(volume.shape[-1], pixel_size))
@@ -111,9 +119,10 @@ def apply_bfactor(volume, pixel_size, bfactor):
     else:
         return torch.real(newvolume)
 
+
 def chimera_gaussian_sigma_to_bfactor(sigma):
-    '''
+    """
     Converts ChimeraX's Gaussian width (sigma) to B-factor.
-    '''
+    """
     bfactor = 8 * torch.pi**2 * sigma**2
     return bfactor

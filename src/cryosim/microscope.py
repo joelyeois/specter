@@ -1,9 +1,10 @@
 import lightning as L
 import numpy as np
 import torch
-from .fft_tools import fft2, fftn, ifft2, ifftn
+from .fft_tools import fft2, ifft2
 from .scattering import energy_to_wavelength
 import torch.nn.functional as F
+
 
 class Aberration(L.LightningModule):
     def __init__(
@@ -53,14 +54,14 @@ class Aberration(L.LightningModule):
         kxx, kyy = torch.meshgrid(kx, kx, indexing="ij")
         k2 = kxx**2 + kyy**2
         radian = torch.arctan2(kyy, kxx)
-        self.register_buffer('k', torch.sqrt(k2).unsqueeze(0))
+        self.register_buffer("k", torch.sqrt(k2).unsqueeze(0))
         self.register_buffer("radian", radian.unsqueeze(0))
         self.register_buffer("k2", k2.unsqueeze(0))
         self.register_buffer("kxx", kxx)
         self.register_buffer("kyy", kyy)
 
         # dummy tensor for non-existent aberration terms
-        self.register_buffer('zero', torch.tensor(0.0))
+        self.register_buffer("zero", torch.tensor(0.0))
 
         if aberration_model == "ctf":
             if alpha is None:
@@ -98,9 +99,9 @@ class Aberration(L.LightningModule):
     def _phaseshift(self, phaseshift):
         phaseshift = phaseshift.unsqueeze(1).unsqueeze(2)
         if self.aberration_model == "holography":
-            phaseshift = phaseshift * torch.ones_like(k)
+            phaseshift = phaseshift * torch.ones_like(self.k)
             # phaseshift must be zero at DC for Fourier optics
-            phaseshift[:, self.n_pixels//2, self.n_pixels//2] = 0
+            phaseshift[:, self.n_pixels // 2, self.n_pixels // 2] = 0
         return -phaseshift
 
     def aberration(self, cs, dfu, dfv, dfang, tiltx, tilty, phaseshift, tref1, tref2):
@@ -129,13 +130,13 @@ class Aberration(L.LightningModule):
             * (torch.sin(tilty) * self.kxx + torch.sin(tiltx) * self.kyy)
         )
 
-        #trefoil
+        # trefoil
         tref1 = tref1.unsqueeze(1).unsqueeze(2)
         tref2 = tref2.unsqueeze(1).unsqueeze(2)
-        trefoil = tref1 * k**3 * torch.sin(3*ang) + tref2 * k**3 * torch.cos(3*ang)
+        trefoil = tref1 * k**3 * torch.sin(3 * ang) + tref2 * k**3 * torch.cos(3 * ang)
 
         phi = tilt + trefoil
-        
+
         # phase shift
         phaseshift = phaseshift.unsqueeze(1).unsqueeze(2)
         if self.aberration_model == "holography":
@@ -144,21 +145,27 @@ class Aberration(L.LightningModule):
             phaseshift[:, 0, 0] = 0
         return gamma - phaseshift, phi
 
-    def temporal_envelope(self, cc=0, dE=1, dI=0, dV=0):
-        '''
-        Eq. 2.25 of Erni, R. (2010). Aberration-corrected imaging in transmission electron microscopy: An introduction
-        Eq. 3.41 of Kirkland
-        '''
-        if cc == 0:
-            return 1
-        else:
-            # E [eV], I [A], and V [V] are the electron energy, lens currents, and acceleration voltage
-            dC1 = cc * torch.sqrt((dE/self.energy)**2 + 4*(dI/I)**2 +(dV/self.energy)**2)
-            Et = torch.exp(-0.5 * torch.pi**2 * self.wavelength**2 * dC1**2 * self.k2**2)
-            return Et
+    # def temporal_envelope(self, cc=0, I=1, dE=1, dI=0, dV=0):
+    #     """
+    #     Eq. 2.25 of Erni, R. (2010). Aberration-corrected imaging in transmission electron microscopy: An introduction
+    #     Eq. 3.41 of Kirkland
+    #     """
+    #     if cc == 0:
+    #         return 1
+    #     else:
+    #         # E [eV], I [A], and V [V] are the electron energy, lens currents, and acceleration voltage
+    #         dC1 = cc * torch.sqrt(
+    #             (dE / self.energy) ** 2 + 4 * (dI / I) ** 2 + (dV / self.energy) ** 2
+    #         )
+    #         Et = torch.exp(
+    #             -0.5 * torch.pi**2 * self.wavelength**2 * dC1**2 * self.k2**2
+    #         )
+    #         return Et
 
     def transfer(self, cs, dfu, dfv, dfang, tiltx, tilty, phaseshift, tref1, tref2):
-        gamma, phi = self.aberration(cs, dfu, dfv, dfang, tiltx, tilty, phaseshift, tref1, tref2)
+        gamma, phi = self.aberration(
+            cs, dfu, dfv, dfang, tiltx, tilty, phaseshift, tref1, tref2
+        )
         if self.aberration_model == "ctf":
             trans = np.sqrt(1 - self.alpha**2) * torch.sin(
                 gamma
@@ -182,13 +189,13 @@ class Aberration(L.LightningModule):
         # --- Defocus ---
         if any(k in ctf_params for k in ["dfu", "dfv", "dfang"]):
             dfu = ctf_params.get("dfu", self.zero).view(-1, 1, 1)
-    
+
             # if dfv is not provided, use dfu
             dfv = ctf_params.get("dfv", dfu).view(-1, 1, 1)
-    
+
             dfang = ctf_params.get("dfang", self.zero).view(-1, 1, 1)
             chi += self._defocus(dfu, dfv, dfang)
-            
+
         # --- Cs ---
         if "cs" in ctf_params:
             cs = ctf_params.get("cs", self.zero).view(-1, 1, 1)
@@ -198,30 +205,33 @@ class Aberration(L.LightningModule):
         if "phaseshift" in ctf_params:
             phaseshift = ctf_params.get("phaseshift", self.zero).view(-1, 1, 1)
             chi += self._phaseshift(phaseshift)
-            
+
         # --- Beam tilt ---
         if any(k in ctf_params for k in ["tiltx", "tilty"]):
             cs = ctf_params.get("cs", self.zero).view(-1, 1, 1)
             tiltx = ctf_params.get("tiltx", self.zero).view(-1, 1, 1)
             tilty = ctf_params.get("tilty", self.zero).view(-1, 1, 1)
             chi += self._beamtilt(cs, tiltx, tilty)
-    
+
         # --- Trefoil ---
         if any(k in ctf_params for k in ["trefoil1", "trefoil2"]):
             trefoil1 = ctf_params.get("trefoil1", self.zero).view(-1, 1, 1)
             trefoil2 = ctf_params.get("trefoil2", self.zero).view(-1, 1, 1)
             chi += self._trefoil(trefoil1, trefoil2)
-    
+
         # --- Tetrafoil ---
-        if any(k in ctf_params for k in ["tetrafoil1", "tetrafoil2", "tetrafoil3", "tetrafoil4"]):
+        if any(
+            k in ctf_params
+            for k in ["tetrafoil1", "tetrafoil2", "tetrafoil3", "tetrafoil4"]
+        ):
             tetrafoil1 = ctf_params.get("tetrafoil1", self.zero).view(-1, 1, 1)
             tetrafoil2 = ctf_params.get("tetrafoil2", self.zero).view(-1, 1, 1)
             tetrafoil3 = ctf_params.get("tetrafoil3", self.zero).view(-1, 1, 1)
             tetrafoil4 = ctf_params.get("tetrafoil4", self.zero).view(-1, 1, 1)
-            chi += self._tetrafoil(trefoil1, trefoil2, tetrafoil3, tetrafoil4)
-        
+            chi += self._tetrafoil(tetrafoil1, tetrafoil2, tetrafoil3, tetrafoil4)
+
         return torch.exp(-1j * chi)
-    
+
     def forward(self, exitwave, ctf_params):
         f = self.transfer_function(ctf_params)
         aberrated_exitwaves = ifft2(fft2(exitwave) * f)
@@ -229,6 +239,7 @@ class Aberration(L.LightningModule):
             return torch.real(aberrated_exitwaves)
         elif self.aberration_model == "holography":
             return aberrated_exitwaves
+
 
 class Detector(L.LightningModule):
     def __init__(
@@ -239,7 +250,7 @@ class Detector(L.LightningModule):
         noise_model=None,
         magnification=None,
         dqe=None,
-        anisomag=None
+        anisomag=None,
     ):
         """
         A detector module to apply detector noise to images. Future work to include
@@ -289,11 +300,9 @@ class Detector(L.LightningModule):
 
         # Generate affine grid for the batch
         grid = F.affine_grid(M_affine, images.shape, align_corners=False)
-        
+
         # Apply transformation using grid sampling
-        images = F.grid_sample(
-            images, grid, align_corners=False, padding_mode="border"
-        )
+        images = F.grid_sample(images, grid, align_corners=False, padding_mode="border")
         images = torch.squeeze(images)
         return images
 
@@ -303,8 +312,8 @@ class Detector(L.LightningModule):
         # Apply anisomagnification
         if anisomag is not None:
             images = self.anisomagnify(images, anisomag)
-        
+
         if self.noise_model is None:
             return images
         elif self.noise_model == "poisson":
-            return torch.poisson(torch.clamp(images, min=0.))
+            return torch.poisson(torch.clamp(images, min=0.0))

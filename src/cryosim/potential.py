@@ -1,13 +1,10 @@
 import torch
 import torch.nn.functional as F
 from rich.progress import track, Progress
-import torch.nn as nn
 import lightning as L
+import gemmi
 
 from .array_utils import (
-    grid_2d,
-    grid_3d,
-    nearest_index,
     radial_grid_2d,
     radial_grid_3d,
     soft_voxelize_coordinates,
@@ -19,9 +16,10 @@ from .atom import (
     kirkland_atomic_potential_3d,
     lobato_atomic_potential_2d,
     lobato_atomic_potential_3d,
-    shryov_atomic_potential_3d
+    shryov_atomic_potential_3d,
 )
 from .fft_tools import fftconvolve
+from multiprocessing import Pool
 
 
 def compute_supersampling_parameters(dx, width_atom=5.0, dx_atom=0.1):
@@ -82,15 +80,15 @@ def build_potential_volume_fftconvolve_3d(
     disable_tqdm=False,
 ):
     """Constructs volumetric potential from list of atomic elements and their
-    respective coordinates. 
+    respective coordinates.
 
     General strategy is:
-    1. Compute potentials for each unique element on a super-sampled grid (higher 
+    1. Compute potentials for each unique element on a super-sampled grid (higher
     resolution than main volume but lesser pixels since the potential decays fast).
     2. Calculate the potential contributions for each elemental species and sum.
     2. Bin the potential down to main volume grid size.
 
-    Note: 
+    Note:
     For 2D versions, assumes dx = dy, nx = ny. nz and dz are free to be different.
     For 3D version, assumes dx = dy = dz, nx = ny = nz.
 
@@ -133,7 +131,7 @@ def build_potential_volume_fftconvolve_3d(
     for elem in track(
         torch.unique(atomic_numbers),
         description="Building elements",
-        disable=disable_tqdm
+        disable=disable_tqdm,
     ):
         # Update the description dynamically per element
         track.description = f"Building element {atom_symbol(int(elem))}"
@@ -141,19 +139,21 @@ def build_potential_volume_fftconvolve_3d(
 
         # populate elemental volume with delta function atoms
         # soft_voxelize_atoms is differentiable w.r.t. coordinates.
-        temp_vol = soft_voxelize_coordinates(centered_coords[atomic_indices].reshape(-1,3),
-                                 grid_shape=(nz, ny, nx),
-                                 voxel_size=dx)
+        temp_vol = soft_voxelize_coordinates(
+            centered_coords[atomic_indices].reshape(-1, 3),
+            grid_shape=(nz, ny, nx),
+            voxel_size=dx,
+        )
         occupancy = occupancy | (temp_vol > 0)
 
         # get potential kernel for this element
         pot = kirkland_atomic_potential_3d(int(elem), sR)
 
-        #convolve
+        # convolve
         if ssf != 1:
             pot = avgpool3d(pot[None, None]) * dx
             pot = pot.squeeze(0).squeeze(0)
-        potential_volume += fftconvolve(temp_vol, pot, mode='same')
+        potential_volume += fftconvolve(temp_vol, pot, mode="same")
     return potential_volume, sR, atomic_potentials
 
 
@@ -165,15 +165,15 @@ def build_potential_volume_fftconvolve_2d(
     disable_tqdm=False,
 ):
     """Constructs volumetric potential from list of atomic elements and their
-    respective coordinates. 
+    respective coordinates.
 
     General strategy is:
-    1. Compute potentials for each unique element on a super-sampled grid (higher 
+    1. Compute potentials for each unique element on a super-sampled grid (higher
     resolution than main volume but lesser pixels since the potential decays fast).
     2. Calculate the potential contributions for each elemental species and sum.
     2. Bin the potential down to main volume grid size.
 
-    Note: 
+    Note:
     For 2D versions, assumes dx = dy, nx = ny. nz and dz are free to be different.
     For 3D version, assumes dx = dy = dz, nx = ny = nz.
 
@@ -223,25 +223,25 @@ def build_potential_volume_fftconvolve_2d(
         # populate elemental volume with delta function atoms
         # soft_voxelize_atoms is differentiable w.r.t. coordinates.
         temp_vol = soft_voxelize_xy_coordinates(
-            centered_coords[atomic_indices].reshape(-1,3),
+            centered_coords[atomic_indices].reshape(-1, 3),
             grid_shape=(nz, ny, nx),
-            voxel_size=dx
+            voxel_size=dx,
         )
         occupancy = occupancy | (temp_vol > 0)
 
         # get potential kernel for this element
         pot = kirkland_atomic_potential_2d(int(elem), sR)
 
-        #convolve
+        # convolve
         if ssf != 1:
             pot = avgpool2d(pot[None, None]) * dx
             pot = pot.squeeze(0).squeeze(0)
 
-        #batch 2D convolve
-        temp_vol_b = temp_vol.unsqueeze(1)   # (nz, 1, ny, nx)
+        # batch 2D convolve
+        temp_vol_b = temp_vol.unsqueeze(1)  # (nz, 1, ny, nx)
         pot_b = pot.unsqueeze(0).unsqueeze(0)  # (1, 1, ky, kx)
-        convolved = F.conv2d(temp_vol_b, pot_b, padding='same')
-        potential_volume += convolved.squeeze(1)    # (nz, ny, nx)
+        convolved = F.conv2d(temp_vol_b, pot_b, padding="same")
+        potential_volume += convolved.squeeze(1)  # (nz, ny, nx)
     return potential_volume, sR, atomic_potentials
 
 
@@ -252,8 +252,8 @@ class PotentialBuilder(L.LightningModule):
         dx,
         atomic_numbers,
         verbose=True,
-        parameterization='kirkland',
-        conv_backend='fftconvolve',
+        parameterization="kirkland",
+        conv_backend="fftconvolve",
         trainable=False,
         mmcif_filepath=None,
     ):
@@ -272,33 +272,30 @@ class PotentialBuilder(L.LightningModule):
         self.ssn, self.ssdx, self.ssf = compute_supersampling_parameters(dx)
         sR_2d = radial_grid_2d(self.ssn, self.ssdx, convention="torch")
         sR_3d = radial_grid_3d(self.ssn, self.ssdx, convention="torch")
-        self.register_buffer('sR_2d', sR_2d)
-        self.register_buffer('sR_3d', sR_3d)
+        self.register_buffer("sR_2d", sR_2d)
+        self.register_buffer("sR_3d", sR_3d)
 
         # create atomic potentials
         self.atomic_numbers = atomic_numbers
         self.unique_elements = torch.unique(atomic_numbers)
         atomic_potentials_2d = torch.empty(
-            len(self.unique_elements),
-            self.ssn//self.ssf,
-            self.ssn//self.ssf
+            len(self.unique_elements), self.ssn // self.ssf, self.ssn // self.ssf
         )
         atomic_potentials_3d = torch.empty(
             len(self.unique_elements),
-            self.ssn//self.ssf,
-            self.ssn//self.ssf,
-            self.ssn//self.ssf
+            self.ssn // self.ssf,
+            self.ssn // self.ssf,
+            self.ssn // self.ssf,
         )
-        self.register_buffer('atomic_potentials_2d', atomic_potentials_2d)
-        self.register_buffer('atomic_potentials_3d', atomic_potentials_3d)
+        self.register_buffer("atomic_potentials_2d", atomic_potentials_2d)
+        self.register_buffer("atomic_potentials_3d", atomic_potentials_3d)
 
         self.parameterization = parameterization
         self.avgpool2d = torch.nn.AvgPool2d(self.ssf, stride=self.ssf)
         self.avgpool3d = torch.nn.AvgPool3d(self.ssf, stride=self.ssf)
-        if parameterization in ('kirkland', 'lobato'):
+        if parameterization in ("kirkland", "lobato"):
             self.get_2d_atomic_potentials()
         self.get_3d_atomic_potentials()
-
 
     def get_2d_atomic_potentials(self, unique_elements=None):
         if unique_elements is None:
@@ -307,16 +304,14 @@ class PotentialBuilder(L.LightningModule):
             # update unique elements
             self.unique_elements = unique_elements
             self.atomic_potentials = torch.empty(
-                len(unique_elements),
-                self.ssn//self.ssf,
-                self.ssn//self.ssf
+                len(unique_elements), self.ssn // self.ssf, self.ssn // self.ssf
             )
 
         # fetch potential kernels
         for i, elem in enumerate(self.unique_elements):
-            if self.parameterization == 'kirkland':
+            if self.parameterization == "kirkland":
                 pot = kirkland_atomic_potential_2d(int(elem), self.sR_2d)
-            elif self.parameterization == 'lobato':
+            elif self.parameterization == "lobato":
                 pot = lobato_atomic_potential_2d(int(elem), self.sR_2d)
 
             if self.ssf != 1:
@@ -333,22 +328,24 @@ class PotentialBuilder(L.LightningModule):
             self.unique_elements = unique_elements
             self.atomic_potentials = torch.empty(
                 len(unique_elements),
-                self.ssn//self.ssf,
-                self.ssn//self.ssf,
-                self.ssn//self.ssf
+                self.ssn // self.ssf,
+                self.ssn // self.ssf,
+                self.ssn // self.ssf,
             )
 
         # fetch potential kernels
         for i, elem in enumerate(self.unique_elements):
-            if self.parameterization == 'kirkland':
+            if self.parameterization == "kirkland":
                 pot = kirkland_atomic_potential_3d(int(elem), self.sR_3d)
-            elif self.parameterization == 'lobato':
+            elif self.parameterization == "lobato":
                 pot = lobato_atomic_potential_3d(int(elem), self.sR_3d)
-            elif self.parameterization == 'shryov':
+            elif self.parameterization == "shryov":
                 if self.mmcif_filepath is None:
-                    raise ValueError(f"mmcif_filepath must be specified.")
+                    raise ValueError("mmcif_filepath must be specified.")
                 else:
-                    pot = shryov_atomic_potential_3d(int(elem), self.sR_3d, self.mmcif_filepath)
+                    pot = shryov_atomic_potential_3d(
+                        int(elem), self.sR_3d, self.mmcif_filepath
+                    )
 
             if self.ssf != 1:
                 pot = self.avgpool3d(pot[None, None]) * self.dx
@@ -356,276 +353,271 @@ class PotentialBuilder(L.LightningModule):
 
             self.atomic_potentials_3d[i] = pot
 
-
-    def forward(self, coordinates, method='3d', conv_backend=None):
+    def forward(self, coordinates, method="3d", conv_backend=None):
         if conv_backend is None:
             conv_backend = self.conv_backend
         coordinates = coordinates.to(self.device)
         self.method = method
 
         # Detect batch
-        batched_input = True
         if coordinates.ndim == 2:  # (N,3) -> add batch dimension
             coordinates = coordinates.unsqueeze(0)
-            batched_input = False
-    
+
         B, N, _ = coordinates.shape
-        
+
         # insert atomic potentials into main volume.
-        potential_volume = torch.zeros((B, self.nz, self.ny, self.nx), device=self.device)
+        potential_volume = torch.zeros(
+            (B, self.nz, self.ny, self.nx), device=self.device
+        )
         self.occupancy = torch.zeros((B, self.nz, self.ny, self.nx), dtype=torch.bool)
-        
+
         with Progress(transient=True) as progress:
             # Create a single task for the outer loop
-            task = progress.add_task("Building element ...", total=len(self.unique_elements))
+            task = progress.add_task(
+                "Building element ...", total=len(self.unique_elements)
+            )
             for i, elem in enumerate(self.unique_elements):
-                progress.update(task, description=f"Building element {atom_symbol(int(elem))}", advance=1)
-                atomic_indices = torch.squeeze(torch.argwhere(self.atomic_numbers == elem))
+                progress.update(
+                    task,
+                    description=f"Building element {atom_symbol(int(elem))}",
+                    advance=1,
+                )
+                atomic_indices = torch.squeeze(
+                    torch.argwhere(self.atomic_numbers == elem)
+                )
 
                 # Select atomic coordinates for this element
                 coords_elem = coordinates[:, atomic_indices, :]  # (B, Nelem, 3)
-                
-                if method == '2d':
+
+                if method == "2d":
                     temp_vol = soft_voxelize_xy_coordinates(
                         coords_elem,
                         grid_shape=(self.nz, self.ny, self.nx),
-                        voxel_size=self.dx
+                        voxel_size=self.dx,
                     )
-                    
+
                     # Flatten B and Z for conv2d
-                    temp_vol_flat = temp_vol.reshape(-1, 1, self.ny, self.nx)  # (B*Z, 1, Y, X)
-                    
+                    temp_vol_flat = temp_vol.reshape(
+                        -1, 1, self.ny, self.nx
+                    )  # (B*Z, 1, Y, X)
+
                     # Kernel: (1, 1, ky, kx)
-                    pot_b = self.atomic_potentials_2d[i].unsqueeze(0).unsqueeze(0)  # (1,1,ky,kx)
-                    
+                    pot_b = (
+                        self.atomic_potentials_2d[i].unsqueeze(0).unsqueeze(0)
+                    )  # (1,1,ky,kx)
+
                     # Perform conv2d
-                    convolved_flat = F.conv2d(temp_vol_flat, pot_b, padding='same')  # (B*Z, 1, Y, X)
-                    
+                    convolved_flat = F.conv2d(
+                        temp_vol_flat, pot_b, padding="same"
+                    )  # (B*Z, 1, Y, X)
+
                     # Reshape back to (B, Z, Y, X)
                     convolved = convolved_flat.reshape(B, self.nz, self.ny, self.nx)
-                    
+
                     # Add to potential volume
                     potential_volume += convolved
-                    
-                elif method == '3d':
+
+                elif method == "3d":
                     temp_vol = soft_voxelize_coordinates(
                         coords_elem,
                         grid_shape=(self.nz, self.ny, self.nx),
-                        voxel_size=self.dx
+                        voxel_size=self.dx,
                     )
-    
-                    #convolve
+
+                    # convolve
                     # Convolve 3D potentials per batch
-                    if conv_backend == 'fftconvolve':
+                    if conv_backend == "fftconvolve":
                         # for b in track(range(B), description='Convolving atoms', transient=True):
                         for b in range(B):
                             potential_volume[b] += fftconvolve(
-                                temp_vol[b],
-                                self.atomic_potentials_3d[i],
-                                mode='same'
+                                temp_vol[b], self.atomic_potentials_3d[i], mode="same"
                             )
 
                     # using conv3d instead
-                    elif conv_backend == 'conv3d':
+                    elif conv_backend == "conv3d":
                         vol_b = temp_vol.unsqueeze(1)  # (B,1,nz,ny,nx)
-                        kernel = self.atomic_potentials_3d[i].unsqueeze(0).unsqueeze(0)  # (1,1,kz,ky,kx)
+                        kernel = (
+                            self.atomic_potentials_3d[i].unsqueeze(0).unsqueeze(0)
+                        )  # (1,1,kz,ky,kx)
                         # Use conv3d with groups=1
-                        convolved = F.conv3d(vol_b, kernel, padding='same')  # (B,1,nz,ny,nx)
+                        convolved = F.conv3d(
+                            vol_b, kernel, padding="same"
+                        )  # (B,1,nz,ny,nx)
                         potential_volume += convolved.squeeze(1)  # (B,nz,ny,nx)
-                        
+
                     # potential_volume += fftconvolve(
                     #     temp_vol,
                     #     self.atomic_potentials_3d[i],
                     #     mode='same'
                     # )
-    
+
                 # Update occupancy, very slow.
                 # self.occupancy |= (temp_vol.detach().cpu() > 0)
         if B == 1:
             potential_volume = potential_volume.squeeze(0)
         return potential_volume
 
-################ OLD & SLOW ################
-# def build_potential_volume(
-#     atomic_numbers,
-#     centered_coords,
-#     n_xyz,
-#     dx,
-#     atom_size_px=None,
-#     super_sampling_factor=4,
-#     convention="relion",
-#     method="3d",
-#     disable_tqdm=False,
-# ):
-#     """Constructs volumetric potential from list of atomic elements and their
-#     respective coordinates.
 
-#     General strategy is:
-#     1. Compute potential of a single atom on a super-sampled grid (higher resolution
-#     than main volume but lesser pixels since the potential decays fast).
-#     2. Bin the potential down to main volume grid size and insert additively.
+class GemmiPotentialBuilder:
+    def __init__(self, n_xyz, dx, b_factor=20.0):
+        if isinstance(n_xyz, (int, float)):
+            self.nx = self.ny = self.nz = n_xyz
+        else:
+            self.nx, self.ny, self.nz = n_xyz
+        self.dx = dx
+        self.b_factor = b_factor
+        self.translate_to_center = torch.tensor(
+            [[self.nx // 2 * dx, self.ny // 2 * dx, self.nz // 2 * dx]]
+        )
 
-#     Differences in methods:
-#     - 2D/3D uses either the 3D potential or projected 2D potential equation.
-#     - snapped-methods precomputes the potentials assuming the atom-core falls 
-#     exactly on a voxel (i.e. snaps all atoms to the nearest voxel). This yields 
-#     significantly faster computation as potentials only need to be calculated for
-#     individual element once.
+        # prepare density calculator
+        self.dencalc = gemmi.DensityCalculatorE()
 
-#     Note: 
-#     For 2D versions, assumes dx = dy, nx = ny. nz and dz are free to be different.
-#     For 3D version, assumes dx = dy = dz, nx = ny = nz.
+        # setup box size
+        unit_cell = gemmi.UnitCell(
+            self.nx * self.dx,
+            self.ny * self.dx,
+            self.nz * self.dx,
+            90.0,
+            90.0,
+            90.0,  # for a cubic cell
+        )
+        self.dencalc.grid.unit_cell = unit_cell
+        self.dencalc.grid.spacegroup = gemmi.SpaceGroup("P1")
+        self.dencalc.grid.set_size(self.nx, self.ny, self.nz)
 
-#     Parameters
-#     ----------
-#     atomic_numbers : 1d tensor
-#         Atomic numbers. Hydrogen is 1.
-#     centered_coords : 2d tensor
-#         xyz coordinates corresponding to each entry in atomic_numbers. Shape of
-#         (len(atomic_numbers), 3).
-#     n_xyz : array-like
-#         Number of pixels along x,y,z: (nx, ny, nz) of main volume.
-#     dx : array-like
-#         Pixel length along x,y,z: (dx,dy,dz) of main volume.
-#     atom_size_px : int
-#         Number of main volume pixels to sufficiently represent an atom. If None,
-#         will assume 3A diameter per atom, and computed required number of pixels
-#         accordingly.
-#     super_sampling_factor : int
-#         The supersampling factor to compute the potentials. For example, if main
-#         volume has pixel size of 1A, then potentials will be first computed on a
-#         grid of 1A/super_sampling_factor before binning back to 1A pixels. Must be
-#         even to avoid singularity at 0, and larger than 4 (Kirkland's rule of thumb,
-#         Chapter 5, after Fig 5.15.).
-#     convention : str
-#         The origin convention for main volume only. The super-sampled grid for
-#         atomic potentials will always be even-valued and symmetric to avoid the
-#         singularity at 0.
-#     method : str
-#         '3d' - Does not snap atom to nearest voxel. Computes each atom's 3D
-#         potential individually based on the local super-sampled coordinate grid.
+    def build_model(self, atom_coordinates, atom_elements):
+        # Create placeholder structure
+        st = gemmi.Structure()
+        model = st.add_model(gemmi.Model(1))
+        chain = model.add_chain("A")  # add chain A
+        res = chain.add_residue(gemmi.Residue())
 
-#         'snapped-3d' - Assumes each atom snaps to the nearest voxel defined on a
-#         rectangular grid. Each 3D potential is first super-sampled on a finer grid
-#         before averaging the pixels to insert into the main volume.
+        # Boolean mask for atoms inside the box
+        mask = (
+            (atom_coordinates[:, 0] >= 0.0)
+            & (atom_coordinates[:, 0] <= self.nx * self.dx)
+            & (atom_coordinates[:, 1] >= 0.0)
+            & (atom_coordinates[:, 1] <= self.ny * self.dx)
+            & (atom_coordinates[:, 2] >= 0.0)
+            & (atom_coordinates[:, 2] <= self.nz * self.dx)
+        )
 
-#         '2d' - Snaps atom only to nearest z-plane, but maintains it's x,y
-#         coordinates. Computes each atom's 2D potential individually based on the
-#         local super-sampled coordinate grid.
+        # Apply mask to coordinates and elements
+        filtered_coords = atom_coordinates[mask]
+        filtered_elements = atom_elements[mask]
 
-#         'snapped-2d' - Assumes each atom snaps to the nearest voxel defined on a
-#         rectangular grid. Further assumes each atom can be represented by its
-#         projected 2D potential. This 2D potential is first super-sampled on a finer
-#         grid before averaging the pixels to insert into the main volume.
+        for i, (pos, z) in enumerate(zip(filtered_coords, filtered_elements), start=1):
+            # if not (0. <= pos[0] <= self.nx * self.dx and 0. <= pos[1] <= self.ny * self.dx and 0. <= pos[2] <= self.nz * self.dx):
+            #     continue
+            atom = gemmi.Atom()
+            atom.pos = gemmi.Position(float(pos[0]), float(pos[1]), float(pos[2]))
+            atom.element = gemmi.Element(
+                int(z)
+            )  # Element constructed from atomic number
+            atom.occ = 1.0
+            atom.b_iso = self.b_factor
+            atom.serial = i
+            # Add atom to residue (Python API returns reference to added atom)
+            res.add_atom(atom)
+        return model
 
-#     Returns
-#     -------
-#     potential_volume : 3d tensor
-#         The sampled potential volume.
-#     """
-#     # create main volume coordinate system
-#     nx, ny, nz = n_xyz
-#     x, y, z, X, Y, Z = grid_3d(
-#         (nx, ny, nz), dx, convention=convention
-#     )
+    def build_dencalc(self):
+        # prepare density calculator
+        dencalc = gemmi.DensityCalculatorE()
 
-#     # create super-sampled (ss) coordinate system
-#     if atom_size_px is None:
-#         # forces odd number to ensure central pixel exists.
-#         atom_size_px = int(torch.ceil(torch.tensor(3 / dx)) // 2 * 2 + 1)
-#     ssn = atom_size_px * super_sampling_factor
-#     ssdx = dx / super_sampling_factor
+        # setup box size
+        unit_cell = gemmi.UnitCell(
+            self.nx * self.dx,
+            self.ny * self.dx,
+            self.nz * self.dx,
+            90.0,
+            90.0,
+            90.0,  # for a cubic cell
+        )
+        dencalc.grid.unit_cell = unit_cell
+        dencalc.grid.spacegroup = gemmi.SpaceGroup("P1")
+        dencalc.grid.set_size(self.nx, self.ny, self.nz)
+        return dencalc
 
-#     if method == "3d" or method == "snapped-3d":
-#         sx, sy, sz, sX, sY, sZ = grid_3d(
-#             (ssn, ssn, ssn), (ssdx, ssdx, ssdx), convention="torch"
-#         )
-#         if method == "snapped-3d":
-#             sR = torch.sqrt(sX**2 + sY**2 + sZ**2)
-#     elif method == "2d" or method == "snapped-2d":
-#         sx, sy, sX, sY = grid_2d(
-#             (ssn, ssn), (ssdx, ssdx), convention="torch"
-#         )
-#         if method == "snapped-2d":
-#             sR = torch.sqrt(sX**2 + sY**2)
+    def _build_single_potential(self, coords_elements_tuple):
+        coords, elements = coords_elements_tuple
+        model = self.build_model(coords, elements)
+        dencalc = self.build_dencalc()
+        dencalc.put_model_density_on_grid(model)
+        return torch.as_tensor(dencalc.grid.array).transpose(0, 2)
 
-#     # for binning super-sampled grids to main volume grid.
-#     avgpool2d = torch.nn.AvgPool2d(super_sampling_factor, stride=super_sampling_factor)
-#     avgpool3d = torch.nn.AvgPool3d(super_sampling_factor, stride=super_sampling_factor)
+    @staticmethod
+    def _build_parallelizable_single_potential(
+        coords, elements, nx, ny, nz, dx, b_factor
+    ):
+        # Create placeholder structure
+        st = gemmi.Structure()
+        model = st.add_model(gemmi.Model(1))
+        chain = model.add_chain("A")  # add chain A
+        res = chain.add_residue(gemmi.Residue())
 
-#     # For snapped methods, compute unique element potentials on ss-grid and average
-#     # onto main volume grid
-#     if method == "snapped-2d":
-#         sampled_2dpot_dict = {}
-#         for an in torch.unique(atomic_numbers):
-#             pot = kirkland_atomic_potential_2d(int(an), sR)
-#             sampled_2dpot_dict[int(an)] = avgpool2d(pot[None, None]).squeeze()
-#     elif method == "snapped-3d":
-#         sampled_3dpot_dict = {}
-#         for an in torch.unique(atomic_numbers):
-#             pot = kirkland_atomic_potential_3d(int(an), sR)
-#             # note the multiplicative factor of dx to properly scale for
-#             # projection/multislice to match 2d version above.
-#             sampled_3dpot_dict[int(an)] = avgpool3d(pot[None, None]).squeeze() * dx
+        # Boolean mask for atoms inside the box
+        mask = (
+            (coords[:, 0] >= 0.0)
+            & (coords[:, 0] <= nx * dx)
+            & (coords[:, 1] >= 0.0)
+            & (coords[:, 1] <= ny * dx)
+            & (coords[:, 2] >= 0.0)
+            & (coords[:, 2] <= nz * dx)
+        )
 
-#     # insert atomic potentials into main volume.
-#     potential_volume = torch.zeros(nz, ny, nx)
-#     occupancy = torch.zeros(nz, ny, nx, dtype=torch.bool)
-#     for an, cc in tqdm(zip(atomic_numbers, centered_coords), disable=disable_tqdm):
-#         xi, yi, zi = nearest_index(x, y, z, cc[0], cc[1], cc[2])
+        # Apply mask to coordinates and elements
+        filtered_coords = coords[mask]
+        filtered_elements = elements[mask]
 
-#         # don't insert if bounding box of atom falls outside of main volume grid.
-#         if (
-#             (zi - atom_size_px // 2) < 0
-#             or zi - atom_size_px // 2 + atom_size_px > nz
-#             or (yi - atom_size_px // 2) < 0
-#             or yi - atom_size_px // 2 + atom_size_px > ny
-#             or (xi - atom_size_px // 2) < 0
-#             or xi - atom_size_px // 2 + atom_size_px > nx
-#         ):
-#             pass
-#         else:
-#             # update occupancy
-#             occupancy[zi, yi, xi] = True
+        for i, (pos, z) in enumerate(zip(filtered_coords, filtered_elements), start=1):
+            atom = gemmi.Atom()
+            atom.pos = gemmi.Position(float(pos[0]), float(pos[1]), float(pos[2]))
+            atom.element = gemmi.Element(
+                int(z)
+            )  # Element constructed from atomic number
+            atom.occ = 1.0
+            atom.b_iso = b_factor
+            atom.serial = i
+            # Add atom to residue (Python API returns reference to added atom)
+            res.add_atom(atom)
 
-#             # insert atoms
-#             if method == "3d":
-#                 # relative 3D origin of the atom w.r.t. neighbouring voxels.
-#                 x_ro = cc[0] - x[xi]
-#                 y_ro = cc[1] - y[yi]
-#                 z_ro = cc[2] - z[zi]
-#                 sR = torch.sqrt((sX - x_ro) ** 2 + (sY - y_ro) ** 2 + (sZ - z_ro) ** 2)
-#                 sspot = kirkland_atomic_potential_3d(int(an), sR)
-#                 pot = avgpool3d(sspot[None, None]).squeeze() * dx
+        # prepare density calculator
+        dencalc = gemmi.DensityCalculatorE()
 
-#                 potential_volume[
-#                     zi - atom_size_px // 2 : zi - atom_size_px // 2 + atom_size_px,
-#                     yi - atom_size_px // 2 : yi - atom_size_px // 2 + atom_size_px,
-#                     xi - atom_size_px // 2 : xi - atom_size_px // 2 + atom_size_px,
-#                 ] += pot
-#             elif method == "snapped-3d":
-#                 potential_volume[
-#                     zi - atom_size_px // 2 : zi - atom_size_px // 2 + atom_size_px,
-#                     yi - atom_size_px // 2 : yi - atom_size_px // 2 + atom_size_px,
-#                     xi - atom_size_px // 2 : xi - atom_size_px // 2 + atom_size_px,
-#                 ] += sampled_3dpot_dict[int(an)]
-#             elif method == "2d":
-#                 # relative 2D origin of the atom w.r.t. neighbouring voxels.
-#                 x_ro = cc[0] - x[xi]
-#                 y_ro = cc[1] - y[yi]
-#                 sR = torch.sqrt((sX - x_ro) ** 2 + (sY - y_ro) ** 2)
-#                 sspot = kirkland_atomic_potential_2d(int(an), sR)
-#                 pot = avgpool2d(sspot[None, None]).squeeze()
+        # setup box size
+        unit_cell = gemmi.UnitCell(
+            nx * dx,
+            ny * dx,
+            nz * dx,
+            90.0,
+            90.0,
+            90.0,  # for a cubic cell
+        )
+        dencalc.grid.unit_cell = unit_cell
+        dencalc.grid.spacegroup = gemmi.SpaceGroup("P1")
+        dencalc.grid.set_size(nx, ny, nz)
+        dencalc.put_model_density_on_grid(model)
+        return torch.as_tensor(dencalc.grid.array).transpose(0, 2)
 
-#                 potential_volume[
-#                     zi,
-#                     yi - atom_size_px // 2 : yi - atom_size_px // 2 + atom_size_px,
-#                     xi - atom_size_px // 2 : xi - atom_size_px // 2 + atom_size_px,
-#                 ] += pot
-#             elif method == "snapped-2d":
-#                 potential_volume[
-#                     zi,
-#                     yi - atom_size_px // 2 : yi - atom_size_px // 2 + atom_size_px,
-#                     xi - atom_size_px // 2 : xi - atom_size_px // 2 + atom_size_px,
-#                 ] += sampled_2dpot_dict[int(an)]
-#     return potential_volume, occupancy
+    def build_potential(self, atom_coordinates, atom_elements, n_processes=None):
+        # translate coordinates
+        translated_coordinates = atom_coordinates + self.translate_to_center
+
+        if n_processes is None:
+            vol = self._build_single_potential((translated_coordinates, atom_elements))
+            return vol
+
+        else:
+            # split atoms into roughly equal chunks
+            chunks_coords = torch.split(translated_coordinates, n_processes)
+            chunks_elements = torch.split(atom_elements, n_processes)
+            inputs = list(zip(chunks_coords, chunks_elements))
+
+            with Pool(processes=n_processes) as pool:
+                results = pool.map(self._build_single_potential, inputs)
+
+            # sum volumes from all processes
+            total_volume = results.sum(0)
+            return total_volume

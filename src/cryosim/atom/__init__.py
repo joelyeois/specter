@@ -10,7 +10,7 @@ from .atomic_potentials import (
     lobato_atomic_potential_3d,
     lobato_atomic_potential_3d_fourier,
     shryov_atomic_potential_3d,
-    shryov_atomic_potential_3d_fourier
+    shryov_atomic_potential_3d_fourier,
 )
 
 __all__ = [
@@ -27,5 +27,5 @@ __all__ = [
     "lobato_atomic_potential_3d",
     "lobato_atomic_potential_3d_fourier",
     "shryov_atomic_potential_3d",
-    "shryov_atomic_potential_3d_fourier"
+    "shryov_atomic_potential_3d_fourier",
 ]

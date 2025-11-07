@@ -2,10 +2,7 @@ from . import filters
 import lightning as L
 import numpy as np
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
 from .fft_tools import fft2, ifft2
-from tqdm.auto import tqdm
 from rich.progress import track
 
 rest_mass_energy = 511.0e3  # [eV]
@@ -32,7 +29,7 @@ def interaction_parameter(energy):
 
 def complex_potential(v, alpha=0.1):
     """Applies amplitude ratio, α, to create complex potential (PyTorch version)"""
-    scale_real = (1 - alpha**2)**0.5
+    scale_real = (1 - alpha**2) ** 0.5
     return torch.complex(scale_real * v, alpha * v)
 
 
@@ -47,8 +44,8 @@ class Scattering(L.LightningModule):
         klim=None,
         flip_curvature=False,
         nz=None,
-        alpha=0.,
-        progressbars=True
+        alpha=0.0,
+        progressbars=True,
     ):
         """
         A scattering module to compute the 2D exitwave from a 3D scattering
@@ -109,7 +106,7 @@ class Scattering(L.LightningModule):
             # original
             # F = torch.exp(-1j * torch.pi * self.wavelength * pixel_size * k**2)
             F = torch.exp(1j * torch.pi * self.wavelength * pixel_size * k**2)
-            
+
             # self.register_buffer("F", F)
             self.register_buffer("F_real", F.real)
             self.register_buffer("F_imag", F.imag)
@@ -120,15 +117,16 @@ class Scattering(L.LightningModule):
             # for i in tqdm(range(nz), desc='Create first Born propagators', leave=False):
             for i in track(
                 range(nz),
-                description='Create first Born propagators',
+                description="Create first Born propagators",
                 transient=True,
-                disable=not(self.progressbars)
+                disable=not (self.progressbars),
             ):
                 # original
-                # f = torch.exp(-1j * torch.pi * self.wavelength * pixel_size * 
+                # f = torch.exp(-1j * torch.pi * self.wavelength * pixel_size *
                 #               (nz - i) * k**2)
-                f = torch.exp(1j * torch.pi * self.wavelength * pixel_size * 
-                              (nz - i) * k**2)
+                f = torch.exp(
+                    1j * torch.pi * self.wavelength * pixel_size * (nz - i) * k**2
+                )
                 F.append(f)
             F = torch.stack(F)
             # self.register_buffer("F", F)
@@ -153,9 +151,9 @@ class Scattering(L.LightningModule):
         # for i in tqdm(range(V.size(1)), desc='Multislicing', leave=False):
         for i in track(
             range(V.size(1)),
-            description='Multislicing',
+            description="Multislicing",
             transient=True,
-            disable=not(self.progressbars)
+            disable=not (self.progressbars),
         ):
             # transmission function
             # t = torch.exp(1j * self.sigma * complex_potential(V[:, i], alpha=self.alpha).to(self.device))
@@ -195,8 +193,8 @@ class Scattering(L.LightningModule):
 
     def forward(self, V):
         """
-        V is batch of 3D real-valued potentials with shape (B x Z x X x Y), outputs 
-        a batch of 2D exitwaves with shape (B x Y x X). The CTF scattering model 
+        V is batch of 3D real-valued potentials with shape (B x Z x X x Y), outputs
+        a batch of 2D exitwaves with shape (B x Y x X). The CTF scattering model
         outputs projected potential instead of exitwave.
 
         Note that the CTF model does not require computing the complex-valued

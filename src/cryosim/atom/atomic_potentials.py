@@ -6,7 +6,7 @@ from Bio.PDB.MMCIF2Dict import MMCIF2Dict
 from torch.special import modified_bessel_k0, modified_bessel_k1
 from ..array_utils import real_to_kgrid_3d
 from ..fft_tools import fftn
-from ..scattering import energy_to_wavelength
+
 
 @lru_cache(maxsize=1)
 def load_kirkland_parameters():
@@ -127,7 +127,6 @@ def load_lobato_parameters():
             continue
 
         # Element symbol
-        element = line
         i += 1
 
         block = []
@@ -241,6 +240,7 @@ def kirkland_atomic_potential_2d(atomic_number, r_xy):
     # Load Kirkland scattering parameters
     kirkland_params = load_kirkland_parameters()  # shape (104, 3, 4)
     P = kirkland_params[atomic_number]  # shape (3, 4)
+    P = P.to(device)
 
     # Separate columns: a_i, b_i, c_i, d_i
     a = P[:, 0].unsqueeze(-1).unsqueeze(-1)  # shape (3,1,1)
@@ -300,9 +300,7 @@ def kirkland_atomic_potential_3d(atomic_number, r_xyz):
     r = r_xyz.unsqueeze(0)  # shape (1, Nx, Ny, Nz)
 
     s1 = c1 * torch.sum(a / r * torch.exp(-2 * torch.pi * r * torch.sqrt(b)), 0)
-    s2 = c2 * torch.sum(
-        c * d ** (-3 / 2) * torch.exp(-(torch.pi**2) * (r**2) / d), 0
-    )
+    s2 = c2 * torch.sum(c * d ** (-3 / 2) * torch.exp(-(torch.pi**2) * (r**2) / d), 0)
     return s1 + s2
 
 
@@ -324,8 +322,6 @@ def kirkland_atomic_potential_3d_fourier(atomic_number, k_xyz):
         Atomic potential in Fourier space in units of 1/V-Ångstrom, same shape as r_xyz.
     """
     device = k_xyz.device
-    a0 = 0.529  # Bohr radius, [Angstrom]
-    e = 14.4  # electron charge, [V-Angstrom]
 
     # get scattering factors
     kirkland_params = load_kirkland_parameters()  # shape (104, 3, 4)
@@ -344,6 +340,7 @@ def kirkland_atomic_potential_3d_fourier(atomic_number, k_xyz):
     s1 = torch.sum(a / (k2 + b), 0)
     s2 = torch.sum(c * torch.exp(-d * k2), 0)
     return s1 + s2
+
 
 def lobato_atomic_potential_2d(atomic_number, r_xy):
     """Returns the 3D atomic potential for a specific element and given a 3D grid
@@ -367,7 +364,6 @@ def lobato_atomic_potential_2d(atomic_number, r_xy):
     a0 = 0.529  # Bohr radius, [Angstrom]
     e = 14.4  # electron charge, [V-Angstrom]
     kappa = 2 * vac_perm / a0 / e
-    c1 = torch.pi**2 / kappa
 
     # get scattering factors
     lobato_params = load_lobato_parameters()  # shape (104, 5, 2)
@@ -384,6 +380,7 @@ def lobato_atomic_potential_2d(atomic_number, r_xy):
     s = 1 / kappa * torch.sum(2 * torch.pi**2 * a / b**1.5 * (s1 + s2), 0)
 
     return s
+
 
 def lobato_atomic_potential_3d(atomic_number, r_xyz):
     """Returns the 3D atomic potential for a specific element and given a 3D grid
@@ -452,11 +449,6 @@ def lobato_atomic_potential_3d_fourier(atomic_number, k_xyz):
         Atomic potential in Fourier space in units of 1/V-Ångstrom, same shape as r_xyz.
     """
     device = k_xyz.device
-    vac_perm = 1 / 4 / torch.pi
-    a0 = 0.529  # Bohr radius, [Angstrom]
-    e = 14.4  # electron charge, [V-Angstrom]
-    kappa = 2 * vac_perm / a0 / e
-    c1 = torch.pi**2 / kappa
 
     # get scattering factors
     lobato_params = load_lobato_parameters()  # shape (104, 3, 4)
@@ -532,14 +524,14 @@ def shryov_atomic_potential_3d(atomic_number, r_xyz, filepath, energy=300):
     potential : tensor
         Atomic potential in units of V-Ångstrom, same shape as r_xyz.
     """
-    device = r_xyz.device
+    # device = r_xyz.device
     # r2 = r_xyz**2
     # r2 = r2.unsqueeze(0)  # shape (1, Nx, Ny, Nz)
     k_xyz = real_to_kgrid_3d(r_xyz)
-    dkx = k_xyz[1,0,0] - k_xyz[0,0,0]
-    dky = k_xyz[0,1,0] - k_xyz[0,0,0]
-    dkz = k_xyz[0,0,1] - k_xyz[0,0,0]
-    
+    dkx = k_xyz[1, 0, 0] - k_xyz[0, 0, 0]
+    dky = k_xyz[0, 1, 0] - k_xyz[0, 0, 0]
+    dkz = k_xyz[0, 0, 1] - k_xyz[0, 0, 0]
+
     a0 = 0.529  # Bohr radius, [Angstrom]
     e = 14.4  # electron charge, [V-Angstrom]
     c1 = 2 * torch.pi * e * a0
@@ -555,10 +547,10 @@ def shryov_atomic_potential_3d(atomic_number, r_xyz, filepath, energy=300):
 
     # use analytical fourier transform (if b_i=0 will cause nans)
     # s1 = c1 * torch.sum(a * (torch.pi * 4 / b)**1.5 * torch.exp(-torch.pi**2 * r2 / b * 4), 0)
-    
+
     # get scattering factors
     shryov_f = shryov_atomic_potential_3d_fourier(atomic_number, k_xyz, filepath)
 
     # fourier transform
-    s1 = -c1 * torch.abs(fftn(shryov_f)) * dkx * dky * dkz # need to negate
+    s1 = -c1 * torch.abs(fftn(shryov_f)) * dkx * dky * dkz  # need to negate
     return s1

@@ -427,7 +427,7 @@ class CrowdWithDuplicates(L.LightningModule):
         seed="origin",
         chunk_size=None,
         move_to_cpu=False,
-        progressbars=True
+        progressbars=True,
     ):
         """
         Parameters
@@ -500,7 +500,7 @@ class CrowdWithDuplicates(L.LightningModule):
                 range(0, self.N, self.chunk_size),
                 description="Rotating duplicates",
                 transient=True,
-                disable=not(self.progressbars)
+                disable=not (self.progressbars),
             ):
                 end = min(start + self.chunk_size, self.N)
                 if self.move_to_cpu:
@@ -549,7 +549,7 @@ class CrowdWithDuplicates(L.LightningModule):
                     range(0, self.N, self.chunk_size),
                     description="Rotating duplicates and insert into micrograph",
                     transient=True,
-                    disable=not(self.progressbars)
+                    disable=not (self.progressbars),
                 ):
                     # get batch indicies
                     end = min(start + self.chunk_size, self.N)

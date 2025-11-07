@@ -1,6 +1,7 @@
 import torch
 
-def normalize_particles(particles, mask_diameter=None, mode='mean', eps=1e-8):
+
+def normalize_particles(particles, mask_diameter=None, mode="mean", eps=1e-8):
     """
     Vectorized per-particle normalization of a 2D particle stack.
 
@@ -34,21 +35,19 @@ def normalize_particles(particles, mask_diameter=None, mode='mean', eps=1e-8):
     else:
         radius = mask_diameter / 2
     y, x = torch.meshgrid(
-        torch.arange(H, device=device),
-        torch.arange(W, device=device),
-        indexing='ij'
+        torch.arange(H, device=device), torch.arange(W, device=device), indexing="ij"
     )
     cy, cx = H // 2, W // 2
-    mask = ((x - cx)**2 + (y - cy)**2) >= radius**2  # True for pixels to include
+    mask = ((x - cx) ** 2 + (y - cy) ** 2) >= radius**2  # True for pixels to include
 
     # Flatten masked pixels
     mask_flat = mask.view(-1)
     particles_flat = particles.view(N, -1)[:, mask_flat]  # (N, masked_pixels)
 
     # Compute mean / median per particle
-    if mode == 'mean':
+    if mode == "mean":
         means = particles_flat.mean(dim=1)
-    elif mode == 'median':
+    elif mode == "median":
         means = particles_flat.median(dim=1).values
     else:
         raise ValueError("mode must be 'mean' or 'median'")

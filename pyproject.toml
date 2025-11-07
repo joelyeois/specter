@@ -8,6 +8,7 @@ dependencies = [
     "biopython>=1.85",
     "biotite>=1.4.0",
     "cryosparc-tools>=4.7.1",
+    "gemmi>=0.7.3",
     "h5py>=3.14.0",
     "lightning>=2.5.5",
     "matplotlib>=3.10.6",
@@ -28,7 +29,9 @@ dependencies = [
 [dependency-groups]
 dev = [
     "gemmi>=0.7.3",
+    "pre-commit>=4.3.0",
     "rich>=14.2.0",
+    "ruff>=0.14.4",
 ]
 
 [tool.setuptools]

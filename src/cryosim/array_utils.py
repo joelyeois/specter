@@ -1,5 +1,6 @@
 import torch
 
+
 def kgrid_1d(n, dx, device="cpu"):
     """
     Constructs a 1D k-grid.
@@ -17,6 +18,7 @@ def kgrid_1d(n, dx, device="cpu"):
     """
     kx = torch.fft.fftshift(torch.fft.fftfreq(n, dx, device=device))
     return kx
+
 
 def kgrid_2d(n_xy, d_xy, device="cpu"):
     """Constructs the kx, ky meshgrids.
@@ -46,6 +48,7 @@ def kgrid_2d(n_xy, d_xy, device="cpu"):
     ky = kgrid_1d(ny, dy, device=device)
     KX, KY = torch.meshgrid(kx, ky, indexing="ij")
     return kx, ky, KX, KY
+
 
 def kgrid_3d(n_xyz, d_xyz, device="cpu"):
     """Constructs the kx, ky, kz meshgrids.
@@ -78,15 +81,16 @@ def kgrid_3d(n_xyz, d_xyz, device="cpu"):
     return kx, ky, kz, KX, KY, KZ
 
 
-def radial_kgrid_2d(n_xy, d_xy, device='cpu'):
+def radial_kgrid_2d(n_xy, d_xy, device="cpu"):
     _, _, KX, KY = kgrid_2d(n_xy, d_xy, device)
     return torch.sqrt(KX**2 + KY**2)
 
 
-def radial_kgrid_3d(n_xyz, d_xyz, device='cpu'):
-    _, _, _, KX, KY, KZ = kgrid_3d(n_xyz, d_xyz, convention, device)
+def radial_kgrid_3d(n_xyz, d_xyz, device="cpu"):
+    _, _, _, KX, KY, KZ = kgrid_3d(n_xyz, d_xyz, device)
     return torch.sqrt(KX**2 + KY**2 + KZ**2)
-    
+
+
 def grid_1d(n, dx, convention="relion", device="cpu"):
     """
     Constructs a 1D grid. The coordinate grid convention only matters if the number of
@@ -199,12 +203,12 @@ def grid_3d(n_xyz, d_xyz, convention="relion", device="cpu"):
     return x, y, z, X, Y, Z
 
 
-def radial_grid_2d(n_xy, d_xy, convention="relion", device='cpu'):
+def radial_grid_2d(n_xy, d_xy, convention="relion", device="cpu"):
     _, _, X, Y = grid_2d(n_xy, d_xy, convention, device)
     return torch.sqrt(X**2 + Y**2)
 
 
-def radial_grid_3d(n_xyz, d_xyz, convention="relion", device='cpu'):
+def radial_grid_3d(n_xyz, d_xyz, convention="relion", device="cpu"):
     _, _, _, X, Y, Z = grid_3d(n_xyz, d_xyz, convention, device)
     return torch.sqrt(X**2 + Y**2 + Z**2)
 
@@ -223,14 +227,14 @@ def real_to_kgrid_3d(R):
         KR (torch.Tensor): 3D tensor of shape (nx, ny, nz), the radial distances in Fourier space
     """
     device = R.device
-    
+
     # number of points along each axis
     nx, ny, nz = R.shape
 
     # compute spacing along each axis (assumes uniform spacing)
-    dx = R[1,0,0] - R[0,0,0]
-    dy = R[0,1,0] - R[0,0,0]
-    dz = R[0,0,1] - R[0,0,0]
+    dx = R[1, 0, 0] - R[0, 0, 0]
+    dy = R[0, 1, 0] - R[0, 0, 0]
+    dz = R[0, 0, 1] - R[0, 0, 0]
 
     # frequency axes
     kx = torch.fft.fftshift(torch.fft.fftfreq(nx, dx, device=device))
@@ -238,7 +242,7 @@ def real_to_kgrid_3d(R):
     kz = torch.fft.fftshift(torch.fft.fftfreq(nz, dz, device=device))
 
     # 3D frequency grids
-    KX, KY, KZ = torch.meshgrid(kx, ky, kz, indexing='ij')
+    KX, KY, KZ = torch.meshgrid(kx, ky, kz, indexing="ij")
     KR = torch.sqrt(KX**2 + KY**2 + KZ**2)
 
     return KR
@@ -390,6 +394,7 @@ def voxelize_coordinates(coords, grid_shape, voxel_size, device=None):
 
 #     return volume
 
+
 def soft_voxelize_coordinates(coords, grid_shape, voxel_size, device=None):
     """
     Differentiable 3D soft voxelization using trilinear splatting.
@@ -412,7 +417,7 @@ def soft_voxelize_coordinates(coords, grid_shape, voxel_size, device=None):
     if device is None:
         device = coords.device
     coords = coords.to(device)
-    
+
     # Handle non-batch input
     batched_input = True
     if coords.ndim == 2:  # (N,3) -> add batch dimension
@@ -431,7 +436,9 @@ def soft_voxelize_coordinates(coords, grid_shape, voxel_size, device=None):
     coords_voxel = coords / voxel_size  # (B,N,3)
 
     # Shift coordinates so origin is at center
-    origin = torch.tensor([nx // 2, ny // 2, nz // 2], device=device, dtype=coords_voxel.dtype)
+    origin = torch.tensor(
+        [nx // 2, ny // 2, nz // 2], device=device, dtype=coords_voxel.dtype
+    )
     coords_voxel_centered = coords_voxel + origin[None, None, :]  # (B,N,3)
 
     # Reorder to z,y,x
@@ -444,10 +451,19 @@ def soft_voxelize_coordinates(coords, grid_shape, voxel_size, device=None):
     z0, y0, x0 = coords_floor[..., 0], coords_floor[..., 1], coords_floor[..., 2]
 
     # 8 neighbor offsets
-    offsets = torch.tensor([
-        [0,0,0],[0,0,1],[0,1,0],[0,1,1],
-        [1,0,0],[1,0,1],[1,1,0],[1,1,1]
-    ], device=device)
+    offsets = torch.tensor(
+        [
+            [0, 0, 0],
+            [0, 0, 1],
+            [0, 1, 0],
+            [0, 1, 1],
+            [1, 0, 0],
+            [1, 0, 1],
+            [1, 1, 0],
+            [1, 1, 1],
+        ],
+        device=device,
+    )
 
     z_idx = z0[..., None] + offsets[None, None, :, 0]
     y_idx = y0[..., None] + offsets[None, None, :, 1]
@@ -455,9 +471,18 @@ def soft_voxelize_coordinates(coords, grid_shape, voxel_size, device=None):
 
     # Trilinear weights
     w = (
-        ((1-dz)[...,None]*(1-offsets[None,None,:,0]) + dz[...,None]*offsets[None,None,:,0])
-        * ((1-dy)[...,None]*(1-offsets[None,None,:,1]) + dy[...,None]*offsets[None,None,:,1])
-        * ((1-dx)[...,None]*(1-offsets[None,None,:,2]) + dx[...,None]*offsets[None,None,:,2])
+        (
+            (1 - dz)[..., None] * (1 - offsets[None, None, :, 0])
+            + dz[..., None] * offsets[None, None, :, 0]
+        )
+        * (
+            (1 - dy)[..., None] * (1 - offsets[None, None, :, 1])
+            + dy[..., None] * offsets[None, None, :, 1]
+        )
+        * (
+            (1 - dx)[..., None] * (1 - offsets[None, None, :, 2])
+            + dx[..., None] * offsets[None, None, :, 2]
+        )
     )
     w = w * values[..., None]
 
@@ -467,14 +492,17 @@ def soft_voxelize_coordinates(coords, grid_shape, voxel_size, device=None):
     # Scatter-add per batch
     for b in range(B):
         mask = (
-            (z_idx[b] >= 0) & (z_idx[b] < nz) &
-            (y_idx[b] >= 0) & (y_idx[b] < ny) &
-            (x_idx[b] >= 0) & (x_idx[b] < nx)
+            (z_idx[b] >= 0)
+            & (z_idx[b] < nz)
+            & (y_idx[b] >= 0)
+            & (y_idx[b] < ny)
+            & (x_idx[b] >= 0)
+            & (x_idx[b] < nx)
         )
         volume[b].index_put_(
             (z_idx[b][mask], y_idx[b][mask], x_idx[b][mask]),
             w[b][mask],
-            accumulate=True
+            accumulate=True,
         )
 
     # Remove batch dimension if input was non-batch
@@ -482,6 +510,7 @@ def soft_voxelize_coordinates(coords, grid_shape, voxel_size, device=None):
         volume = volume.squeeze(0)
 
     return volume
+
 
 def soft_voxelize_xy_coordinates(coords, grid_shape, voxel_size, device=None):
     """
@@ -517,15 +546,17 @@ def soft_voxelize_xy_coordinates(coords, grid_shape, voxel_size, device=None):
 
     # Convert voxel size
     if isinstance(voxel_size, (int, float)):
-        voxel_size = torch.tensor([voxel_size]*3, device=device)
+        voxel_size = torch.tensor([voxel_size] * 3, device=device)
     else:
         voxel_size = torch.tensor(voxel_size, device=device)
 
     # Shift origin to center
-    origin = torch.tensor([nx//2, ny//2, nz//2], device=device, dtype=coords.dtype)
+    origin = torch.tensor(
+        [nx // 2, ny // 2, nz // 2], device=device, dtype=coords.dtype
+    )
 
     volumes = torch.zeros(B, nz, ny, nx, device=device)
-    offsets = torch.tensor([[0,0],[0,1],[1,0],[1,1]], device=device)
+    offsets = torch.tensor([[0, 0], [0, 1], [1, 0], [1, 1]], device=device)
 
     for b in range(B):
         batch_coords = coords[b]
@@ -549,17 +580,29 @@ def soft_voxelize_xy_coordinates(coords, grid_shape, voxel_size, device=None):
         dy = y - y0.float()
 
         # Neighbor indices for bilinear
-        x_idx = x0[:, None] + offsets[None,:,1]
-        y_idx = y0[:, None] + offsets[None,:,0]
-        z_idx_full = z_idx[:, None].repeat(1,4)
+        x_idx = x0[:, None] + offsets[None, :, 1]
+        y_idx = y0[:, None] + offsets[None, :, 0]
+        z_idx_full = z_idx[:, None].repeat(1, 4)
 
         # Bilinear weights
-        w = ((1-dx)[:, None]*(1-offsets[None,:,1]) + dx[:, None]*offsets[None,:,1]) \
-            * ((1-dy)[:, None]*(1-offsets[None,:,0]) + dy[:, None]*offsets[None,:,0])
+        w = (
+            (1 - dx)[:, None] * (1 - offsets[None, :, 1])
+            + dx[:, None] * offsets[None, :, 1]
+        ) * (
+            (1 - dy)[:, None] * (1 - offsets[None, :, 0])
+            + dy[:, None] * offsets[None, :, 0]
+        )
         w = w * values[:, None]
 
         # Mask out-of-bounds
-        mask = (z_idx_full>=0)&(z_idx_full<nz) & (y_idx>=0)&(y_idx<ny) & (x_idx>=0)&(x_idx<nx)
+        mask = (
+            (z_idx_full >= 0)
+            & (z_idx_full < nz)
+            & (y_idx >= 0)
+            & (y_idx < ny)
+            & (x_idx >= 0)
+            & (x_idx < nx)
+        )
         z_idx_full = z_idx_full[mask]
         y_idx = y_idx[mask]
         x_idx = x_idx[mask]
@@ -571,6 +614,7 @@ def soft_voxelize_xy_coordinates(coords, grid_shape, voxel_size, device=None):
     if squeeze_output:
         return volumes[0]
     return volumes
+
 
 # def soft_voxelize_xy_coordinates(coords, grid_shape, voxel_size, device=None):
 #     """

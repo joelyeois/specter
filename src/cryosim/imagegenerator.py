@@ -1,5 +1,4 @@
 import lightning as L
-import numpy as np
 import torch
 from .microscope import Aberration, Detector
 from .scattering import Scattering
@@ -10,6 +9,7 @@ import torch.nn.functional as F
 from .crowding import CrowdWithDuplicates
 from .potential import PotentialBuilder
 import torch.nn as nn
+
 
 class ImageGeneratorFromCoordinates(L.LightningModule):
     def __init__(
@@ -35,7 +35,7 @@ class ImageGeneratorFromCoordinates(L.LightningModule):
         crowd_min_distance=None,
         crowd_max_distance_z=None,
         pad_fft=False,
-        conv_backend='fftconvolve'
+        conv_backend="fftconvolve",
     ):
         """
         A particle image generator module to simulate 2D particles from the input
@@ -131,7 +131,7 @@ class ImageGeneratorFromCoordinates(L.LightningModule):
         self.crowd_min_distance = crowd_min_distance
         self.pad_fft = pad_fft
         if self.pad_fft:
-            self.pad_nxy = self.nxy + (self.nxy // 2) * 2 #
+            self.pad_nxy = self.nxy + (self.nxy // 2) * 2  #
         else:
             self.pad_nxy = self.nxy
 
@@ -150,23 +150,23 @@ class ImageGeneratorFromCoordinates(L.LightningModule):
         if crowd_max_distance_z is None:
             crowd_max_distance_z = self.nz
         self.crowd_max_distance_z = crowd_max_distance_z
-            
+
         # register buffers
         self.coordinates = nn.Parameter(coordinates)
         self.register_buffer("quaternions", quaternions)
         self.register_buffer("translations", translations)
-        
+
         if anisomag is None:
             self.anisomag = anisomag
         else:
             self.register_buffer("anisomag", anisomag)
-        
+
         # for dynamic/kinematic scattering, we need to account for the defocus
         # implicit in the scattering module
-        self.ctf_params = nn.ParameterDict({
-            k: nn.Parameter(v) for k, v in ctf_params.items()
-        })
-        if self.scattering_model not in ['projection', 'ctf']:
+        self.ctf_params = nn.ParameterDict(
+            {k: nn.Parameter(v) for k, v in ctf_params.items()}
+        )
+        if self.scattering_model not in ["projection", "ctf"]:
             if "dfu" in self.ctf_params:
                 shifted = self.ctf_params["dfu"].detach() - (self.nz * pixel_size) / 2
                 self.ctf_params["dfu"] = nn.Parameter(shifted)
@@ -180,10 +180,10 @@ class ImageGeneratorFromCoordinates(L.LightningModule):
             self.pixel_size,
             self.atomic_numbers,
             trainable=True,
-            conv_backend='fftconvolve',
+            conv_backend="fftconvolve",
         )
         self.V = self.potentialbuilder(self.coordinates.detach())
-        
+
         self.scattering = Scattering(
             self.pad_nxy,
             pixel_size,
@@ -193,7 +193,7 @@ class ImageGeneratorFromCoordinates(L.LightningModule):
             klim=klim,
             flip_curvature=flip_curvature,
             nz=self.nz,
-            alpha=alpha
+            alpha=alpha,
         )
 
         self.aberration = Aberration(
@@ -208,7 +208,7 @@ class ImageGeneratorFromCoordinates(L.LightningModule):
             pixel_size,
             dose_per_angstrom,
             aberration_model=aberration_model,
-            noise_model=noise_model
+            noise_model=noise_model,
         )
 
         if self.crowd_min_distance is not None:
@@ -220,19 +220,20 @@ class ImageGeneratorFromCoordinates(L.LightningModule):
                 nz_out=self.nz,
                 max_distance_z=self.crowd_max_distance_z,
                 max_distance_xy=None,
-                method='3d',
-                n_points=torch.inf, seed='origin'
+                method="3d",
+                n_points=torch.inf,
+                seed="origin",
             )
 
         if ice_model is not None:
-            if ice_model == 'randomchoice':
-                self.icemaker = NaiveIcemaker(n=self.nxy,
-                                              dx=pixel_size,
-                                              nz=self.nz)
-            elif ice_model == 'iterative':
-                self.icemaker = Icemaker(n=self.nxy,
-                                        dx=pixel_size,
-                                        nz=self.nz,)
+            if ice_model == "randomchoice":
+                self.icemaker = NaiveIcemaker(n=self.nxy, dx=pixel_size, nz=self.nz)
+            elif ice_model == "iterative":
+                self.icemaker = Icemaker(
+                    n=self.nxy,
+                    dx=pixel_size,
+                    nz=self.nz,
+                )
 
     def rotate(self, Q, T):
         R = Rotation.from_quat(Q)
@@ -245,54 +246,78 @@ class ImageGeneratorFromCoordinates(L.LightningModule):
         ice = self.icemaker.generate_ice(batchsize=len(V))
 
         if self.pad_fft:
-            ice = F.pad(ice,
-                      (self.nxy // 2, self.nxy // 2,# x-axis, last dim
-                       self.nxy // 2, self.nxy // 2,# y-axis, second last dim
-                       0, 0,  # z-axis
-                      ),
-                     mode='reflect')
+            ice = F.pad(
+                ice,
+                (
+                    self.nxy // 2,
+                    self.nxy // 2,  # x-axis, last dim
+                    self.nxy // 2,
+                    self.nxy // 2,  # y-axis, second last dim
+                    0,
+                    0,  # z-axis
+                ),
+                mode="reflect",
+            )
 
         # pad V in z-axis if ice_thickness is not None
         if self.ice_thickness is not None:
             zpad_px = self.nz - self.nxy
-            V = F.pad(V,
-                      (0,0,# x-axis
-                       0,0,# y-axis
-                       zpad_px//2, self.nz - zpad_px//2 - V.shape[1],  # z-axis
-                      ))
+            V = F.pad(
+                V,
+                (
+                    0,
+                    0,  # x-axis
+                    0,
+                    0,  # y-axis
+                    zpad_px // 2,
+                    self.nz - zpad_px // 2 - V.shape[1],  # z-axis
+                ),
+            )
         icemask = V.detach().clone()
-        icemask[icemask<0.01] = 1
-        icemask[icemask>=0.01] = 0
+        icemask[icemask < 0.01] = 1
+        icemask[icemask >= 0.01] = 0
         V = V + ice * icemask
-        self.icemask = icemask.detach().cpu() #save as attribute just to check
+        self.icemask = icemask.detach().cpu()  # save as attribute just to check
         return V
 
     def forward(self, idx):
-        #rotate coordinates, returns (B x N x 3)
+        # rotate coordinates, returns (B x N x 3)
         coordinates = self.rotate(self.quaternions[idx], self.translations[idx])
 
-        #sample coordinates to volume
+        # sample coordinates to volume
         V = self.potentialbuilder(coordinates)
 
-        #pad z
+        # pad z
         if self.ice_thickness is not None:
             zpad_px = self.nz - self.nxy
-            V = F.pad(V,
-                      (0, 0,# x-axis, last dim
-                       0, 0,# y-axis, second last dim
-                       zpad_px//2, self.nz - zpad_px//2 - V.shape[1],  # z-axis
-                      ),
-                      mode='constant')
-        #pad xy
+            V = F.pad(
+                V,
+                (
+                    0,
+                    0,  # x-axis, last dim
+                    0,
+                    0,  # y-axis, second last dim
+                    zpad_px // 2,
+                    self.nz - zpad_px // 2 - V.shape[1],  # z-axis
+                ),
+                mode="constant",
+            )
+        # pad xy
         if self.pad_fft:
-            V = F.pad(V,
-                      (self.nxy // 2, self.nxy // 2,# x-axis, last dim
-                       self.nxy // 2, self.nxy // 2,# y-axis, second last dim
-                       0, 0,  # z-axis
-                      ),
-                     mode='constant')
+            V = F.pad(
+                V,
+                (
+                    self.nxy // 2,
+                    self.nxy // 2,  # x-axis, last dim
+                    self.nxy // 2,
+                    self.nxy // 2,  # y-axis, second last dim
+                    0,
+                    0,  # z-axis
+                ),
+                mode="constant",
+            )
 
-        #adds crowd
+        # adds crowd
         if self.crowd_min_distance is not None:
             with torch.no_grad():
                 for i, v in enumerate(V):
@@ -301,26 +326,28 @@ class ImageGeneratorFromCoordinates(L.LightningModule):
                         self.vols = vols.detach().cpu()
                     V[i] += vols
 
-        #add ice
+        # add ice
         if self.ice_model is not None:
             with torch.no_grad():
                 V = self.solvate(V)
-            
-        #scatter V
+
+        # scatter V
         self.exitwaves = self.scattering(V)
-        
-        #aberrate exitwaves
+
+        # aberrate exitwaves
         ctf_batch = {k: v[idx] for k, v in self.ctf_params.items()}
         self.detector_waves = self.aberration(self.exitwaves, ctf_batch)
-        
-        #image/noise
+
+        # image/noise
         if self.anisomag is None:
             images = self.detector(self.detector_waves)
         else:
             images = self.detector(self.detector_waves, anisomag=self.anisomag[idx])
 
         if self.pad_fft:
-            return images[:, self.nxy // 2: -self.nxy // 2, self.nxy // 2: -self.nxy // 2]
+            return images[
+                :, self.nxy // 2 : -self.nxy // 2, self.nxy // 2 : -self.nxy // 2
+            ]
         else:
             return images
 
@@ -337,6 +364,7 @@ class ImageGeneratorFromCoordinates(L.LightningModule):
         # return only once on rank 0
         if self.trainer.is_global_zero:
             return preds_all.cpu()
+
 
 class ImageGenerator(L.LightningModule):
     def __init__(
@@ -361,7 +389,7 @@ class ImageGenerator(L.LightningModule):
         crowd_max_distance_z=None,
         pad_fft=False,
         progressbars=True,
-        parameterization='kirkland'
+        parameterization="kirkland",
     ):
         """
         A particle image generator module to simulate 2D particles from the input
@@ -449,7 +477,7 @@ class ImageGenerator(L.LightningModule):
         self.crowd_min_distance = crowd_min_distance
         self.pad_fft = pad_fft
         if self.pad_fft:
-            self.pad_nxy = self.nxy + (self.nxy // 2) * 2 #
+            self.pad_nxy = self.nxy + (self.nxy // 2) * 2  #
         else:
             self.pad_nxy = self.nxy
         self.progressbars = progressbars
@@ -470,30 +498,29 @@ class ImageGenerator(L.LightningModule):
         if crowd_max_distance_z is None:
             crowd_max_distance_z = self.nz
         self.crowd_max_distance_z = crowd_max_distance_z
-            
+
         # register buffers
         self.register_buffer("V", scattering_potential)
         self.register_buffer("quaternions", quaternions)
         self.register_buffer("translations", translations)
-       
+
         if anisomag is None:
             self.anisomag = anisomag
         else:
             self.register_buffer("anisomag", anisomag)
-        
+
         # for dynamic/kinematic scattering, we need to account for the defocus
         # implicit in the scattering module
-        self.ctf_params = nn.ParameterDict({
-            k: nn.Parameter(v) for k, v in ctf_params.items()
-        })
-        if self.scattering_model not in ['projection', 'ctf']:
+        self.ctf_params = nn.ParameterDict(
+            {k: nn.Parameter(v) for k, v in ctf_params.items()}
+        )
+        if self.scattering_model not in ["projection", "ctf"]:
             if "dfu" in self.ctf_params:
                 shifted = self.ctf_params["dfu"].detach() - (self.nz * pixel_size) / 2
                 self.ctf_params["dfu"] = nn.Parameter(shifted)
             if "dfv" in self.ctf_params:
                 shifted = self.ctf_params["dfv"].detach() - (self.nz * pixel_size) / 2
                 self.ctf_params["dfv"] = nn.Parameter(shifted)
-                
 
         # initialize modules
         self.scattering = Scattering(
@@ -506,7 +533,7 @@ class ImageGenerator(L.LightningModule):
             flip_curvature=flip_curvature,
             nz=self.nz,
             alpha=alpha,
-            progressbars=self.progressbars
+            progressbars=self.progressbars,
         )
 
         self.aberration = Aberration(
@@ -533,25 +560,27 @@ class ImageGenerator(L.LightningModule):
                 nz_out=self.nz,
                 max_distance_z=self.crowd_max_distance_z,
                 max_distance_xy=None,
-                method='3d',
-                n_points=torch.inf, seed='origin',
-                progressbars=self.progressbars
+                method="3d",
+                n_points=torch.inf,
+                seed="origin",
+                progressbars=self.progressbars,
             )
 
         if ice_model is not None:
-            if ice_model == 'randomchoice':
+            if ice_model == "randomchoice":
                 self.icemaker = NaiveIcemaker(
                     n=self.nxy,
-                    dx=pixel_size,nz=self.nz,
-                    progressbars=self.progressbars
+                    dx=pixel_size,
+                    nz=self.nz,
+                    progressbars=self.progressbars,
                 )
-            elif ice_model == 'iterative':
+            elif ice_model == "iterative":
                 self.icemaker = Icemaker(
                     n=self.nxy,
                     dx=pixel_size,
                     nz=self.nz,
                     progressbars=self.progressbars,
-                    parameterization=parameterization
+                    parameterization=parameterization,
                 )
 
     def rotate(self, Q, T):
@@ -562,59 +591,83 @@ class ImageGenerator(L.LightningModule):
         R = Rotation.from_quat(Q)
         T = rotations.translations_angstrom_to_torch(T, self.nxy, self.pixel_size)
         theta = rotations.build_affine_matrix(R.as_matrix(), T)
-        V = rotations.rotate_volume(self.V, theta, origin='relion')
+        V = rotations.rotate_volume(self.V, theta, origin="relion")
         return V
-        
+
     def solvate(self, V):
         # generates ice with size (B x Z x Y x X)
         ice = self.icemaker.generate_ice(batchsize=len(V))
 
         if self.pad_fft:
-            ice = F.pad(ice,
-                      (self.nxy // 2, self.nxy // 2,# x-axis, last dim
-                       self.nxy // 2, self.nxy // 2,# y-axis, second last dim
-                       0, 0,  # z-axis
-                      ),
-                     mode='reflect')
+            ice = F.pad(
+                ice,
+                (
+                    self.nxy // 2,
+                    self.nxy // 2,  # x-axis, last dim
+                    self.nxy // 2,
+                    self.nxy // 2,  # y-axis, second last dim
+                    0,
+                    0,  # z-axis
+                ),
+                mode="reflect",
+            )
 
         # pad V in z-axis if ice_thickness is not None
         if self.ice_thickness is not None:
             zpad_px = self.nz - self.nxy
-            V = F.pad(V,
-                      (0,0,# x-axis
-                       0,0,# y-axis
-                       zpad_px//2, self.nz - zpad_px//2 - V.shape[1],  # z-axis
-                      ))
+            V = F.pad(
+                V,
+                (
+                    0,
+                    0,  # x-axis
+                    0,
+                    0,  # y-axis
+                    zpad_px // 2,
+                    self.nz - zpad_px // 2 - V.shape[1],  # z-axis
+                ),
+            )
         icemask = V.detach().clone()
-        icemask[icemask<0.01] = 1
-        icemask[icemask>=0.01] = 0
+        icemask[icemask < 0.01] = 1
+        icemask[icemask >= 0.01] = 0
         V = V + ice * icemask
-        self.icemask = icemask.detach().cpu() #save as attribute just to check
+        self.icemask = icemask.detach().cpu()  # save as attribute just to check
         return V
 
     def forward(self, idx):
-        #rotate V, returns (B x Z x Y x X)
+        # rotate V, returns (B x Z x Y x X)
         V = self.rotate(self.quaternions[idx], self.translations[idx])
 
-        #pad z
+        # pad z
         if self.ice_thickness is not None:
             zpad_px = self.nz - self.nxy
-            V = F.pad(V,
-                      (0, 0,# x-axis, last dim
-                       0, 0,# y-axis, second last dim
-                       zpad_px//2, self.nz - zpad_px//2 - V.shape[1],  # z-axis
-                      ),
-                      mode='constant')
-        #pad xy
+            V = F.pad(
+                V,
+                (
+                    0,
+                    0,  # x-axis, last dim
+                    0,
+                    0,  # y-axis, second last dim
+                    zpad_px // 2,
+                    self.nz - zpad_px // 2 - V.shape[1],  # z-axis
+                ),
+                mode="constant",
+            )
+        # pad xy
         if self.pad_fft:
-            V = F.pad(V,
-                      (self.nxy // 2, self.nxy // 2,# x-axis, last dim
-                       self.nxy // 2, self.nxy // 2,# y-axis, second last dim
-                       0, 0,  # z-axis
-                      ),
-                     mode='constant')
+            V = F.pad(
+                V,
+                (
+                    self.nxy // 2,
+                    self.nxy // 2,  # x-axis, last dim
+                    self.nxy // 2,
+                    self.nxy // 2,  # y-axis, second last dim
+                    0,
+                    0,  # z-axis
+                ),
+                mode="constant",
+            )
 
-        #adds crowd
+        # adds crowd
         if self.crowd_min_distance is not None:
             with torch.no_grad():
                 for i, v in enumerate(V):
@@ -623,26 +676,28 @@ class ImageGenerator(L.LightningModule):
                         self.vols = vols.detach().cpu()
                     V[i] += vols
 
-        #add ice
+        # add ice
         if self.ice_model is not None:
             with torch.no_grad():
                 V = self.solvate(V)
 
-        #scatter V
+        # scatter V
         self.exitwaves = self.scattering(V)
 
-        #aberrate exitwaves
+        # aberrate exitwaves
         ctf_batch = {k: v[idx] for k, v in self.ctf_params.items()}
         self.detector_waves = self.aberration(self.exitwaves, ctf_batch)
 
-        #image/noise
+        # image/noise
         if self.anisomag is None:
             images = self.detector(self.detector_waves)
         else:
             images = self.detector(self.detector_waves, anisomag=self.anisomag[idx])
 
         if self.pad_fft:
-            return images[:, self.nxy // 2: -self.nxy // 2, self.nxy // 2: -self.nxy // 2]
+            return images[
+                :, self.nxy // 2 : -self.nxy // 2, self.nxy // 2 : -self.nxy // 2
+            ]
         else:
             return images
 
@@ -748,7 +803,10 @@ class MicrographGenerator(L.LightningModule):
         self.pixel_size = pixel_size
         if isinstance(micrograph_size, int):
             self.nxy = micrograph_size
-        elif isinstance(micrograph_size, (tuple, list)) and micrograph_size[0] == micrograph_size[1]:
+        elif (
+            isinstance(micrograph_size, (tuple, list))
+            and micrograph_size[0] == micrograph_size[1]
+        ):
             self.nxy, _ = micrograph_size
         else:
             raise ValueError("micrograph_size must have same dimensions in x and y.")
@@ -767,7 +825,7 @@ class MicrographGenerator(L.LightningModule):
         self.move_to_cpu = move_to_cpu
         self.pad_fft = pad_fft
         if self.pad_fft:
-            self.pad_nxy = self.nxy + (self.nxy // 2) * 2 #
+            self.pad_nxy = self.nxy + (self.nxy // 2) * 2  #
         else:
             self.pad_nxy = self.nxy
 
@@ -782,21 +840,21 @@ class MicrographGenerator(L.LightningModule):
         if crowd_max_distance_z is None:
             crowd_max_distance_z = self.nz
         self.crowd_max_distance_z = crowd_max_distance_z
-            
+
         # register buffers
         self.register_buffer("V", scattering_potential)
-        
+
         if anisomag is None:
             self.anisomag = anisomag
         else:
             self.register_buffer("anisomag", anisomag)
-        
+
         # for dynamic/kinematic scattering, we need to account for the defocus
         # implicit in the scattering module
-        self.ctf_params = nn.ParameterDict({
-            k: nn.Parameter(v) for k, v in ctf_params.items()
-        })
-        if self.scattering_model not in ['projection', 'ctf']:
+        self.ctf_params = nn.ParameterDict(
+            {k: nn.Parameter(v) for k, v in ctf_params.items()}
+        )
+        if self.scattering_model not in ["projection", "ctf"]:
             if "dfu" in self.ctf_params:
                 shifted = self.ctf_params["dfu"].detach() - (self.nz * pixel_size) / 2
                 self.ctf_params["dfu"] = nn.Parameter(shifted)
@@ -813,7 +871,7 @@ class MicrographGenerator(L.LightningModule):
             scattering_model=scattering_model,
             klim=klim,
             nz=self.nz,
-            alpha=alpha
+            alpha=alpha,
         )
 
         self.aberration = Aberration(
@@ -828,7 +886,7 @@ class MicrographGenerator(L.LightningModule):
             pixel_size,
             dose_per_angstrom,
             aberration_model=aberration_model,
-            noise_model=noise_model
+            noise_model=noise_model,
         )
 
         self.crowd = CrowdWithDuplicates(
@@ -839,46 +897,51 @@ class MicrographGenerator(L.LightningModule):
             nz_out=self.nz,
             max_distance_z=self.crowd_max_distance_z,
             max_distance_xy=None,
-            method='3d',
+            method="3d",
             n_points=torch.inf,
-            seed='random',
+            seed="random",
             chunk_size=chunk_size,
-            move_to_cpu=self.move_to_cpu
+            move_to_cpu=self.move_to_cpu,
         )
 
         if ice_model is not None:
-            if ice_model == 'randomchoice':
-                self.icemaker = NaiveIcemaker(n=self.nxy,
-                                              dx=pixel_size,
-                                              nz=self.nz)
-            elif ice_model == 'iterative':
-                self.icemaker = Icemaker(n=256,
-                                         dx=pixel_size,
-                                         nz=256,
-                                         chunk_size=self.chunk_size,)
+            if ice_model == "randomchoice":
+                self.icemaker = NaiveIcemaker(n=self.nxy, dx=pixel_size, nz=self.nz)
+            elif ice_model == "iterative":
+                self.icemaker = Icemaker(
+                    n=256,
+                    dx=pixel_size,
+                    nz=256,
+                    chunk_size=self.chunk_size,
+                )
 
     def solvate(self, V):
         # generates ice with size (B x Z x Y x X)
         self.ice = self.icemaker.generate_big_ice(V.shape)
 
         if self.pad_fft:
-            self.ice = F.pad(self.ice,
-                      (self.nxy // 2, self.nxy // 2,# x-axis, last dim
-                       self.nxy // 2, self.nxy // 2,# y-axis, second last dim
-                       0, 0,  # z-axis
-                      ),
-                     mode='reflect')
+            self.ice = F.pad(
+                self.ice,
+                (
+                    self.nxy // 2,
+                    self.nxy // 2,  # x-axis, last dim
+                    self.nxy // 2,
+                    self.nxy // 2,  # y-axis, second last dim
+                    0,
+                    0,  # z-axis
+                ),
+                mode="reflect",
+            )
 
         icemask = V < 0.01  # boolean mask, same shape, no copy of V
         V += self.ice * icemask
         # self.icemask = icemask #save as attribute just to check
         return V
 
-
     def forward(self, idx):
         V = torch.empty(len(idx), self.nz, self.nxy, self.nxy)
 
-        #adds crowd
+        # adds crowd
         if self.crowd_min_distance is not None:
             with torch.no_grad():
                 for i, v in enumerate(V):
@@ -886,26 +949,28 @@ class MicrographGenerator(L.LightningModule):
                     V[i] += self.vols
                     # V[i] += self.crowd()
 
-        #add ice
+        # add ice
         if self.ice_model is not None:
             with torch.no_grad():
                 V = self.solvate(V)
 
-        #scatter V
+        # scatter V
         self.exitwaves = self.scattering(V)
 
-        #aberrate exitwaves
+        # aberrate exitwaves
         ctf_batch = {k: v[idx] for k, v in self.ctf_params.items()}
         self.detector_waves = self.aberration(self.exitwaves, ctf_batch)
-        
-        #image/noise
+
+        # image/noise
         if self.anisomag is None:
             images = self.detector(self.detector_waves)
         else:
             images = self.detector(self.detector_waves, anisomag=self.anisomag[idx])
 
         if self.pad_fft:
-            return images[:, self.nxy // 2: -self.nxy // 2, self.nxy // 2: -self.nxy // 2]
+            return images[
+                :, self.nxy // 2 : -self.nxy // 2, self.nxy // 2 : -self.nxy // 2
+            ]
         else:
             return images
 

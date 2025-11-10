@@ -100,18 +100,49 @@ def poisson_disk_neighbors(
 def poisson_disk_neighbors_3d(
     min_distance,
     n_points=torch.inf,
-    box=(256, 256, 256),  # (D,H,W) for tensor shape
+    box=(256.0, 256.0, 256.0),  # (D,H,W) for tensor shape
     k=30,
     seed="origin",
 ):
     """
-    Fast 3D Poisson-disk sampling in a 3D tensor of shape (D,H,W),
-    returning coordinates in (x, y, z) order.
+    Generate 3D points using Poisson-disk sampling within a 3D tensor volume.
+
+    This function produces points in a (D, H, W) volume such that no two points
+    are closer than `min_distance` pixels, creating a uniform but spatially
+    separated distribution.
+
+    Parameters
+    ----------
+    min_distance : float
+        Minimum allowed distance between points, in Angstroms.
+    n_points : int or torch.inf, optional
+        Maximum number of points to generate. Default is infinite (fill the volume).
+    box : tuple of float, optional
+        Dimensions of the 3D volume in Angstroms, as (D, H, W). Default is (256, 256, 256).
+    k : int, optional
+        Number of candidate points to generate around each active point. Higher
+        values produce denser sampling. Default is 30.
+    seed : {'origin', 'random'}, optional
+        Determines the initial seed point:
+        - 'origin': starts at (0, 0, 0)
+        - 'random': starts at a random location within the box
+
+    Returns
+    -------
+    torch.Tensor
+        Tensor of shape (N, 3), where each row is a point coordinate (x, y, z) in Angstroms.
+
+    Notes
+    -----
+    - The coordinate system is centered at (0,0,0), with ranges:
+      x ∈ [-W/2, W/2], y ∈ [-H/2, H/2], z ∈ [-D/2, D/2].
+    - The function uses a grid-accelerated version of Bridson's Poisson-disk sampling
+      algorithm for efficient neighbor checking.
     """
     D, H, W = box
-    z_min, z_max = -D // 2, D // 2
-    y_min, y_max = -H // 2, H // 2
-    x_min, x_max = -W // 2, W // 2
+    z_min, z_max = -D / 2, D / 2
+    y_min, y_max = -H / 2, H / 2
+    x_min, x_max = -W / 2, W / 2
 
     # Grid acceleration
     cell_size = min_distance / np.sqrt(3)
@@ -413,6 +444,16 @@ def insert_particles_into_micrograph(
 
 
 class CrowdWithDuplicates(L.LightningModule):
+    """
+    Generates multiple duplicates of a 3D volume within a micrograph using
+    Poisson-disk sampling for spatial placement and random rotations for orientation.
+    Useful for simulating crowded particle distributions in cryo-EM datasets.
+
+    The class supports 2D or 3D Poisson-disk sampling, optional chunked rotation
+    for memory efficiency, and allows returning a complete micrograph with inserted
+    particle duplicates.
+    """
+
     def __init__(
         self,
         V,
@@ -432,6 +473,47 @@ class CrowdWithDuplicates(L.LightningModule):
         """
         Parameters
         ----------
+        V : torch.Tensor
+            The 3D volume to be duplicated, shape (D, H, W).
+        dx : float
+            Pixel size of the volume in the same units as `min_distance` (pixels).
+        min_distance : float
+            Minimum separation between particle duplicates in pixels for Poisson-disk sampling.
+        nxy_out : int, optional
+            Output micrograph size in xy dimensions (pixels). Defaults to V.shape[1].
+        nz_out : int, optional
+            Output micrograph size in z dimension (pixels). Defaults to V.shape[0].
+        max_distance_z : float, optional
+            Maximum extent in z for placing duplicates (pixels). Defaults to nz_out * dx + min_distance.
+        max_distance_xy : float, optional
+            Maximum extent in xy for placing duplicates (pixels). Defaults to nxy_out * dx + min_distance.
+        method : {'2d', '3d'}, optional
+            Poisson-disk sampling method. '2d' samples in xy plane only (z=0),
+            '3d' samples in full 3D volume. Default is '3d'.
+        n_points : int or torch.inf, optional
+            Maximum number of duplicates to generate. Default is infinity (fill volume).
+        seed : {'origin', 'random'}, optional
+            Initial placement seed:
+                - 'origin': start at center (0,0,0)
+                - 'random': start at a random location within the box
+        chunk_size : int, optional
+            Number of volumes to rotate per batch for memory-efficient computation.
+            If None, all volumes are rotated at once.
+        move_to_cpu : bool, optional
+            If True, intermediate rotated volumes are moved to CPU to save GPU memory.
+        progressbars : bool, optional
+            If True, display progress bars for chunked operations.
+
+        Attributes
+        ----------
+        coords : torch.Tensor
+            Coordinates of generated duplicates after Poisson-disk sampling.
+        theta : torch.Tensor
+            Affine rotation matrices for each duplicate.
+        vols : torch.Tensor
+            Rotated duplicates ready for insertion into a micrograph.
+        N : int
+            Number of duplicates generated.
         """
         super().__init__()
 
@@ -461,7 +543,13 @@ class CrowdWithDuplicates(L.LightningModule):
         self.max_distance_z = max_distance_z
 
     def generate_coordinates(self):
-        # use Poisson disk sampling to obtain coordinates of duplicates.
+        """
+        Generate coordinates of duplicates using Poisson-disk sampling.
+
+        For '2d' sampling, points are sampled in xy plane and z is set to 0.
+        For '3d' sampling, points are sampled in full 3D volume.
+        Coordinates are stored in `self.coords`.
+        """
         if self.poisson_disc_method == "2d":
             coords = poisson_disk_neighbors(
                 self.min_distance,
@@ -482,6 +570,12 @@ class CrowdWithDuplicates(L.LightningModule):
         self.coords = coords
 
     def generate_affine_matrices(self):
+        """
+        Generate random rotation matrices and corresponding affine matrices
+        for each duplicate volume.
+
+        Rotations are stored in `self.theta`.
+        """
         self.N = len(self.coords)
         R = rotations.random_rotation_matrix(self.N)
         # in case only one position was found, ensures R is (1,3,3)
@@ -490,6 +584,12 @@ class CrowdWithDuplicates(L.LightningModule):
         self.theta = rotations.build_affine_matrix(R)
 
     def rotate_volumes(self):
+        """
+        Rotate the original volume according to the affine matrices `self.theta`.
+
+        If `chunk_size` is specified, volumes are rotated in batches for memory efficiency.
+        The rotated volumes are stored in `self.vols`.
+        """
         if self.chunk_size is not None:
             if self.move_to_cpu:
                 self.vols = torch.empty((self.N,) + self.V.shape)
@@ -521,6 +621,14 @@ class CrowdWithDuplicates(L.LightningModule):
             )
 
     def insert_volumes(self):
+        """
+        Insert the rotated volumes (`self.vols`) into a 3D micrograph according to `self.coords`.
+
+        Returns
+        -------
+        torch.Tensor
+            Micrograph of shape (nz_out, nxy_out, nxy_out) containing all duplicates.
+        """
         micro = insert_particles_into_micrograph(
             self.vols,
             self.coords,
@@ -530,6 +638,16 @@ class CrowdWithDuplicates(L.LightningModule):
         return micro
 
     def forward(self):
+        """
+        Full pipeline: generate coordinates, random rotations, rotate volumes,
+        and insert them into a micrograph.
+
+        Returns
+        -------
+        torch.Tensor or float
+            The final micrograph containing all duplicates. Returns 0.0 if no candidates
+            were generated.
+        """
         self.generate_coordinates()
         self.generate_affine_matrices()
         # if no candidates, return 0

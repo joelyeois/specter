@@ -22,15 +22,36 @@ warnings.simplefilter("ignore", PDBConstructionWarning)
 
 
 class PDB:
-    def __init__(self, pdb_id, assembly=True, savefolder="../pdb-data/"):
-        self.pdb_id = pdb_id
-        self.assembly = assembly
-        self.savefolder = savefolder
+    def __init__(self, pdb_source, assembly=True, savefolder="../pdb-data/"):
+        """
+        Create a PDB object from either a PDB ID or a local file path.
 
-        # fetch pdb file
-        self.filepath = PDB.fetch_pdb_file(
-            pdb_id, savefolder=savefolder, assembly=assembly
-        )
+        Args:
+            pdb_source (str): Either a 4-character PDB ID (e.g., "1abc")
+                              or a local file path to a PDB/mmCIF structure.
+            assembly (bool): Whether to fetch the biological assembly when using a PDB ID.
+            savefolder (str): Folder to store downloaded PDB/mmCIF files.
+        """
+
+        # Determine whether pdb_source is a PDB ID or file path
+        if (
+            isinstance(pdb_source, str)
+            and len(pdb_source) == 4
+            and pdb_source.isalnum()
+        ):
+            # Treat as PDB ID
+            self.pdb_id = pdb_source
+            self.filepath = PDB.fetch_pdb_file(
+                pdb_source, savefolder=savefolder, assembly=assembly
+            )
+            self.assembly = assembly
+            self.savefolder = savefolder
+        elif os.path.isfile(pdb_source):
+            self.filepath = pdb_source
+        else:
+            raise ValueError(
+                f"Invalid pdb_source: '{pdb_source}'. Must be a 4-character PDB ID or a valid file path."
+            )
 
         # get pdb structure
         self.structure = PDB.get_pdb_structure(self.filepath)

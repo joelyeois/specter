@@ -19,7 +19,7 @@ from .atom import (
     shryov_atomic_potential_3d,
 )
 from .fft_tools import fftconvolve
-from multiprocessing import Pool
+import numpy as np
 
 
 def compute_supersampling_parameters(dx, width_atom=5.0, dx_atom=0.1):
@@ -459,7 +459,7 @@ class PotentialBuilder(L.LightningModule):
 
 
 class GemmiPotentialBuilder:
-    def __init__(self, n_xyz, dx, b_factor=20.0):
+    def __init__(self, n_xyz, dx, atomic_numbers=None, b_factor=20.0):
         if isinstance(n_xyz, (int, float)):
             self.nx = self.ny = self.nz = n_xyz
         else:
@@ -469,6 +469,7 @@ class GemmiPotentialBuilder:
         self.translate_to_center = torch.tensor(
             [[self.nx // 2 * dx, self.ny // 2 * dx, self.nz // 2 * dx]]
         )
+        self.atomic_numbers = atomic_numbers
 
         # prepare density calculator
         self.dencalc = gemmi.DensityCalculatorE()
@@ -485,6 +486,11 @@ class GemmiPotentialBuilder:
         self.dencalc.grid.unit_cell = unit_cell
         self.dencalc.grid.spacegroup = gemmi.SpaceGroup("P1")
         self.dencalc.grid.set_size(self.nx, self.ny, self.nz)
+
+        # scaling prefactor
+        a0 = 0.529  # Bohr radius, [Angstrom]
+        e = 14.4  # electron charge, [V-Angstrom]
+        self.c1 = 2 * torch.pi * e * a0
 
     def build_model(self, atom_coordinates, atom_elements):
         # Create placeholder structure
@@ -540,6 +546,71 @@ class GemmiPotentialBuilder:
         dencalc.grid.set_size(self.nx, self.ny, self.nz)
         return dencalc
 
+    def build_potential_from_custom_mmcif(self, mmcif_filepath):
+        # Read the CIF structure file
+        st = gemmi.read_structure(mmcif_filepath)
+
+        # Extract scattering factors from table
+        block = gemmi.cif.read_file(mmcif_filepath).sole_block()
+        ctable = block.find(
+            "_lmb_scat_coef.",
+            [
+                "coef_a1",
+                "coef_a2",
+                "coef_a3",
+                "coef_a4",
+                "coef_a5",
+                "coef_b1",
+                "coef_b2",
+                "coef_b3",
+                "coef_b4",
+                "coef_b5",
+            ],
+        )
+
+        # restructure scattering factors
+        coefs = np.empty((len(ctable), 10))
+        for ind, row in enumerate(ctable):
+            coefs[ind] = [float(field) for field in row]
+        max_serial = max(cra.atom.serial for cra in st[0].all())
+        custom_form_factors = np.zeros((max_serial + 1, 10))
+        itable = block.find("_atom_site.", ["id", "scat_id"])
+        for row in itable:
+            serial, scat_id = row
+            custom_form_factors[int(serial)] = coefs[int(scat_id)]
+
+        gemmi.set_custom_form_factors(custom_form_factors)
+        dencalc = gemmi.DensityCalculatorC()
+
+        # Recenter atoms
+        coords = np.array([cra.atom.pos for cra in st[0].all()])  # (N, 3)
+        center_geom = coords.mean(axis=0)
+        # Apply shift to all atoms
+        for cra in st[0].all():
+            translate = -np.asarray(
+                center_geom.tolist()
+            ) + self.translate_to_center.numpy().squeeze(0)
+            cra.atom.pos += gemmi.Position(
+                float(translate[0]), float(translate[1]), float(translate[2])
+            )
+            # if self.b_factor is not None:
+            #     cra.atom.b_iso = self.b_factor
+
+        # setup box size
+        unit_cell = gemmi.UnitCell(
+            self.nx * self.dx,
+            self.ny * self.dx,
+            self.nz * self.dx,
+            90.0,
+            90.0,
+            90.0,  # for a cubic cell
+        )
+        dencalc.grid.unit_cell = unit_cell
+        dencalc.grid.spacegroup = gemmi.SpaceGroup("P1")
+        dencalc.grid.set_size(self.nx, self.ny, self.nz)
+        dencalc.put_model_density_on_grid(st[0])
+        return self.c1 * torch.as_tensor(dencalc.grid.array).transpose(0, 2)
+
     def _build_single_potential(self, coords_elements_tuple):
         coords, elements = coords_elements_tuple
         model = self.build_model(coords, elements)
@@ -548,9 +619,8 @@ class GemmiPotentialBuilder:
         return torch.as_tensor(dencalc.grid.array).transpose(0, 2)
 
     @staticmethod
-    def _build_parallelizable_single_potential(
-        coords, elements, nx, ny, nz, dx, b_factor
-    ):
+    def _build_parallelizable_single_potential(args):
+        coords, elements, nx, ny, nz, dx, b_factor = args
         # Create placeholder structure
         st = gemmi.Structure()
         model = st.add_model(gemmi.Model(1))
@@ -601,23 +671,43 @@ class GemmiPotentialBuilder:
         dencalc.put_model_density_on_grid(model)
         return torch.as_tensor(dencalc.grid.array).transpose(0, 2)
 
-    def build_potential(self, atom_coordinates, atom_elements, n_processes=None):
+    def build_potential(self, atom_coordinates, atomic_numbers=None, n_processes=None):
+        if atomic_numbers is None:
+            atomic_numbers = self.atomic_numbers
+        else:
+            self.atomic_numbers = atomic_numbers
         # translate coordinates
         translated_coordinates = atom_coordinates + self.translate_to_center
 
         if n_processes is None:
-            vol = self._build_single_potential((translated_coordinates, atom_elements))
-            return vol
+            vol = self._build_single_potential((translated_coordinates, atomic_numbers))
+            return self.c1 * vol
 
         else:
             # split atoms into roughly equal chunks
             chunks_coords = torch.split(translated_coordinates, n_processes)
-            chunks_elements = torch.split(atom_elements, n_processes)
-            inputs = list(zip(chunks_coords, chunks_elements))
+            chunks_elements = torch.split(atomic_numbers, n_processes)
+            # pack arguments into single tuples
+            args_list = [
+                (
+                    chunks_coords[i],
+                    chunks_elements[i],
+                    self.nx,
+                    self.ny,
+                    self.nz,
+                    self.dx,
+                    self.b_factor,
+                )
+                for i in range(n_processes)
+            ]
 
-            with Pool(processes=n_processes) as pool:
-                results = pool.map(self._build_single_potential, inputs)
+            import multiprocessing as mp
+
+            with mp.get_context("spawn").Pool(processes=n_processes) as pool:
+                results = pool.map(
+                    self._build_parallelizable_single_potential, args_list
+                )
 
             # sum volumes from all processes
-            total_volume = results.sum(0)
-            return total_volume
+            total_volume = torch.stack(results).sum(0)
+            return self.c1 * total_volume

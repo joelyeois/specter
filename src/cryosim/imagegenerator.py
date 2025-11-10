@@ -274,8 +274,8 @@ class ImageGeneratorFromCoordinates(L.LightningModule):
                 ),
             )
         icemask = V.detach().clone()
-        icemask[icemask < 0.01] = 1
-        icemask[icemask >= 0.01] = 0
+        icemask[icemask < 10] = 1
+        icemask[icemask >= 10] = 0
         V = V + ice * icemask
         self.icemask = icemask.detach().cpu()  # save as attribute just to check
         return V
@@ -627,8 +627,8 @@ class ImageGenerator(L.LightningModule):
                 ),
             )
         icemask = V.detach().clone()
-        icemask[icemask < 0.01] = 1
-        icemask[icemask >= 0.01] = 0
+        icemask[icemask < 10] = 1
+        icemask[icemask >= 10] = 0
         V = V + ice * icemask
         self.icemask = icemask.detach().cpu()  # save as attribute just to check
         return V
@@ -933,7 +933,7 @@ class MicrographGenerator(L.LightningModule):
                 mode="reflect",
             )
 
-        icemask = V < 0.01  # boolean mask, same shape, no copy of V
+        icemask = V < 10  # boolean mask, same shape, no copy of V
         V += self.ice * icemask
         # self.icemask = icemask #save as attribute just to check
         return V

@@ -738,6 +738,7 @@ class MicrographGenerator(L.LightningModule):
         pad_fft=False,
         chunk_size=None,
         move_to_cpu=True,
+        water_air_interface=True,
     ):
         """
         A micrograph generator module to simulate 2D micrographs from the input
@@ -828,15 +829,13 @@ class MicrographGenerator(L.LightningModule):
             self.pad_nxy = self.nxy + (self.nxy // 2) * 2  #
         else:
             self.pad_nxy = self.nxy
+        self.water_air_interface = water_air_interface
 
         # compute number of z-axis pixels due to ice thickness
-        if ice_model is None:
+        if ice_thickness is None or ice_thickness == 0:
             self.nz = scattering_potential.shape[0]
         else:
-            if ice_thickness is None or ice_thickness == 0:
-                self.nz = scattering_potential.shape[0]
-            else:
-                self.nz = int(ice_thickness // pixel_size)
+            self.nz = int(ice_thickness // pixel_size)
         if crowd_max_distance_z is None:
             crowd_max_distance_z = self.nz
         self.crowd_max_distance_z = crowd_max_distance_z
@@ -902,6 +901,7 @@ class MicrographGenerator(L.LightningModule):
             seed="random",
             chunk_size=chunk_size,
             move_to_cpu=self.move_to_cpu,
+            water_air_interface=water_air_interface,
         )
 
         if ice_model is not None:

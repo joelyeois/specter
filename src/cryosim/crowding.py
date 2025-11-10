@@ -443,6 +443,59 @@ def insert_particles_into_micrograph(
     return micrograph
 
 
+def filter_by_z_density(
+    pts: torch.Tensor,
+    z_length: float,
+    sigma_frac: float = 0.05,
+    peak_amplitude: float = 1.0,
+    baseline: float = 0.1,
+    curve_points: int = 200,
+):
+    """
+    Filter points based on a two-Gaussian z-density profile with peaks at the
+    top and bottom of the z-range.
+
+    Args:
+        pts: (N,3) tensor of (x,y,z) coordinates.
+        z_length: thickness of the ice - diamter of particle.
+        sigma_frac: Gaussian width as fraction of z_length.
+        peak_amplitude: amplitude of Gaussian peaks.
+        baseline: minimum probability in the bulk.
+        curve_points: number of points for returning the probability curve along z.
+
+    Returns:
+        pts_filtered: (M,3) tensor of points that were kept.
+        z_distribution: (curve_points,) tensor of probability values for the curve.
+    """
+    z_min, z_max = -z_length / 2, z_length / 2
+    sigma = sigma_frac * z_length
+
+    # compute z for each point
+    z_pts = pts[:, 2]
+
+    # Gaussian peaks at top and bottom
+    g1 = torch.exp(-0.5 * ((z_pts - z_min) / sigma) ** 2)
+    g2 = torch.exp(-0.5 * ((z_pts - z_max) / sigma) ** 2)
+
+    # acceptance probability for each point
+    probs_filtered = baseline + peak_amplitude * (g1 + g2)
+    probs_filtered = (probs_filtered / probs_filtered.max()).clamp(0.0, 1.0)
+
+    # filter points randomly
+    mask = torch.rand(len(z_pts)) < probs_filtered
+    pts_filtered = pts[mask]
+    probs_filtered = probs_filtered[mask]
+
+    # create probability curve along z
+    z_curve = torch.linspace(z_min, z_max, curve_points)
+    g1_curve = torch.exp(-0.5 * ((z_curve - z_min) / sigma) ** 2)
+    g2_curve = torch.exp(-0.5 * ((z_curve - z_max) / sigma) ** 2)
+    p_curve = baseline + peak_amplitude * (g1_curve + g2_curve)
+    z_distribution = (p_curve / p_curve.max()).clamp(0.0, 1.0)
+
+    return pts_filtered, z_distribution
+
+
 class CrowdWithDuplicates(L.LightningModule):
     """
     Generates multiple duplicates of a 3D volume within a micrograph using
@@ -469,6 +522,7 @@ class CrowdWithDuplicates(L.LightningModule):
         chunk_size=None,
         move_to_cpu=False,
         progressbars=True,
+        water_air_interface=False,
     ):
         """
         Parameters
@@ -503,6 +557,9 @@ class CrowdWithDuplicates(L.LightningModule):
             If True, intermediate rotated volumes are moved to CPU to save GPU memory.
         progressbars : bool, optional
             If True, display progress bars for chunked operations.
+        water_air_interface : bool, optional
+            If True, applies a bimodal distribution along z-coordinates. Mimics the
+            particle adsorption in cryo-EM ice-water interface.
 
         Attributes
         ----------
@@ -527,6 +584,7 @@ class CrowdWithDuplicates(L.LightningModule):
         self.chunk_size = chunk_size
         self.move_to_cpu = move_to_cpu
         self.progressbars = progressbars
+        self.water_air_interface = water_air_interface
 
         if nz_out is None:
             nz_out = self.n
@@ -567,6 +625,10 @@ class CrowdWithDuplicates(L.LightningModule):
                 box=(self.max_distance_z, self.nxy_out, self.nxy_out),
                 seed=self.seed,
             )
+            if self.water_air_interface:
+                coords, self.z_distribution = filter_by_z_density(
+                    coords, self.max_distance_z
+                )
         self.coords = coords
 
     def generate_affine_matrices(self):

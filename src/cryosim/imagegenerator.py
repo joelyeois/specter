@@ -9,6 +9,7 @@ import torch.nn.functional as F
 from .crowding import CrowdWithDuplicates
 from .potential import PotentialBuilder
 import torch.nn as nn
+from cryosim.detectors import k3_300kv, k3_200kv, perfect_detector
 
 
 class ImageGeneratorFromCoordinates(L.LightningModule):
@@ -36,6 +37,7 @@ class ImageGeneratorFromCoordinates(L.LightningModule):
         crowd_max_distance_z=None,
         pad_fft=False,
         conv_backend="fftconvolve",
+        detector_model=None,
     ):
         """
         A particle image generator module to simulate 2D particles from the input
@@ -134,6 +136,22 @@ class ImageGeneratorFromCoordinates(L.LightningModule):
             self.pad_nxy = self.nxy + (self.nxy // 2) * 2  #
         else:
             self.pad_nxy = self.nxy
+        self.detector_model = detector_model
+        if detector_model is None:
+            self.detector_mtf = None
+        else:
+            if detector_model == "k3_300kv":
+                self.register_buffer(
+                    "detector_mtf", k3_300kv(self.nxy, self.pixel_size)
+                )
+            elif detector_model == "k3_200kv":
+                self.register_buffer(
+                    "detector_mtf", k3_200kv(self.nxy, self.pixel_size)
+                )
+            elif detector_model == "perfect":
+                self.register_buffer(
+                    "detector_mtf", perfect_detector(self.nxy, self.pixel_size)
+                )
 
         # compute number of z-axis pixels due to ice thickness
         if ice_model is None:
@@ -209,6 +227,7 @@ class ImageGeneratorFromCoordinates(L.LightningModule):
             dose_per_angstrom,
             aberration_model=aberration_model,
             noise_model=noise_model,
+            mtf=self.detector_mtf,
         )
 
         if self.crowd_min_distance is not None:
@@ -340,16 +359,10 @@ class ImageGeneratorFromCoordinates(L.LightningModule):
 
         # image/noise
         if self.anisomag is None:
-            images = self.detector(self.detector_waves)
+            images = self.detector(self.detector_waves, nxy=self.nxy)
         else:
-            images = self.detector(self.detector_waves, anisomag=self.anisomag[idx])
-
-        if self.pad_fft:
-            return images[
-                :, self.nxy // 2 : -self.nxy // 2, self.nxy // 2 : -self.nxy // 2
-            ]
-        else:
-            return images
+            images = self.detector(self.detector_waves, self.anisomag[idx], self.nxy)
+        return images
 
     def predict_step(self, batch, batch_idx):
         return self(batch)
@@ -390,6 +403,7 @@ class ImageGenerator(L.LightningModule):
         pad_fft=False,
         progressbars=True,
         parameterization="kirkland",
+        detector_model=None,
     ):
         """
         A particle image generator module to simulate 2D particles from the input
@@ -482,6 +496,22 @@ class ImageGenerator(L.LightningModule):
             self.pad_nxy = self.nxy
         self.progressbars = progressbars
         self.parameterization = parameterization
+        self.detector_model = detector_model
+        if detector_model is None:
+            self.detector_mtf = None
+        else:
+            if detector_model == "k3_300kv":
+                self.register_buffer(
+                    "detector_mtf", k3_300kv(self.nxy, self.pixel_size)
+                )
+            elif detector_model == "k3_200kv":
+                self.register_buffer(
+                    "detector_mtf", k3_200kv(self.nxy, self.pixel_size)
+                )
+            elif detector_model == "perfect":
+                self.register_buffer(
+                    "detector_mtf", perfect_detector(self.nxy, self.pixel_size)
+                )
 
         # compute number of z-axis pixels due to ice thickness
         if ice_model is None:
@@ -549,6 +579,7 @@ class ImageGenerator(L.LightningModule):
             dose_per_angstrom,
             aberration_model=aberration_model,
             noise_model=noise_model,
+            mtf=self.detector_mtf,
         )
 
         if self.crowd_min_distance is not None:
@@ -690,16 +721,10 @@ class ImageGenerator(L.LightningModule):
 
         # image/noise
         if self.anisomag is None:
-            images = self.detector(self.detector_waves)
+            images = self.detector(self.detector_waves, nxy=self.nxy)
         else:
-            images = self.detector(self.detector_waves, anisomag=self.anisomag[idx])
-
-        if self.pad_fft:
-            return images[
-                :, self.nxy // 2 : -self.nxy // 2, self.nxy // 2 : -self.nxy // 2
-            ]
-        else:
-            return images
+            images = self.detector(self.detector_waves, self.anisomag[idx], self.nxy)
+        return images
 
     def predict_step(self, batch, batch_idx):
         return self(batch)
@@ -739,6 +764,7 @@ class MicrographGenerator(L.LightningModule):
         chunk_size=None,
         move_to_cpu=True,
         water_air_interface=True,
+        detector_model=None,
     ):
         """
         A micrograph generator module to simulate 2D micrographs from the input
@@ -829,13 +855,36 @@ class MicrographGenerator(L.LightningModule):
             self.pad_nxy = self.nxy + (self.nxy // 2) * 2  #
         else:
             self.pad_nxy = self.nxy
+        self.detector_model = detector_model
+        if detector_model is None:
+            self.detector_mtf = None
+        else:
+            if detector_model == "k3_300kv":
+                self.register_buffer(
+                    "detector_mtf", k3_300kv(self.nxy, self.pixel_size)
+                )
+            elif detector_model == "k3_200kv":
+                self.register_buffer(
+                    "detector_mtf", k3_200kv(self.nxy, self.pixel_size)
+                )
+            elif detector_model == "perfect":
+                self.register_buffer(
+                    "detector_mtf", perfect_detector(self.nxy, self.pixel_size)
+                )
         self.water_air_interface = water_air_interface
 
         # compute number of z-axis pixels due to ice thickness
-        if ice_thickness is None or ice_thickness == 0:
-            self.nz = scattering_potential.shape[0]
+        if ice_model is None:
+            self.nz = self.nxy
         else:
-            self.nz = int(ice_thickness // pixel_size)
+            if ice_thickness is None:
+                self.nz = scattering_potential.shape[0]
+            else:
+                # thickness of ice must be at least the size of particle FOV.
+                if ice_thickness < self.nxy * pixel_size:
+                    self.nz = scattering_potential.shape[0]
+                else:
+                    self.nz = int(ice_thickness // pixel_size)
         if crowd_max_distance_z is None:
             crowd_max_distance_z = self.nz
         self.crowd_max_distance_z = crowd_max_distance_z
@@ -886,6 +935,7 @@ class MicrographGenerator(L.LightningModule):
             dose_per_angstrom,
             aberration_model=aberration_model,
             noise_model=noise_model,
+            mtf=self.detector_mtf,
         )
 
         self.crowd = CrowdWithDuplicates(
@@ -963,16 +1013,10 @@ class MicrographGenerator(L.LightningModule):
 
         # image/noise
         if self.anisomag is None:
-            images = self.detector(self.detector_waves)
+            images = self.detector(self.detector_waves, nxy=None)
         else:
-            images = self.detector(self.detector_waves, anisomag=self.anisomag[idx])
-
-        if self.pad_fft:
-            return images[
-                :, self.nxy // 2 : -self.nxy // 2, self.nxy // 2 : -self.nxy // 2
-            ]
-        else:
-            return images
+            images = self.detector(self.detector_waves, self.anisomag[idx], nxy=None)
+        return images
 
     def predict_step(self, batch, batch_idx):
         return self(batch)

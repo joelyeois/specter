@@ -6,7 +6,7 @@ from rich.progress import track
 from torchinterp1d import interp1d
 
 from . import pdbtools, potential
-from .array_utils import grid_3d, radial_grid_3d, real_to_kgrid_3d
+from .array_utils import grid_3d, radial_grid_3d, real_to_kgrid_3d, radial_profile_3d
 from .fft_tools import fftconvolve, fft3
 from .atom import kirkland_atomic_potential_3d, lobato_atomic_potential_3d
 
@@ -774,60 +774,6 @@ class NaiveIcemaker(L.LightningModule):
             self.icecube = fftconvolve(self.icedeltas, self.ice_kernel, mode="same")
             icecubes[i] = self.icecube
         return icecubes
-
-
-def radial_profile_3d(data, center=None, return_r=False):
-    """
-    Compute the radial average of a 3D tensor.
-
-    Parameters
-    ----------
-    data : torch.Tensor
-        3D tensor of shape (m, n, o)
-    center : tuple of floats, optional
-        Center of the radial profile. Defaults to geometric center.
-    return_r : bool
-        If True, also return the radius indices.
-
-    Returns
-    -------
-    radialprofile : torch.Tensor
-        Radial average.
-    r : torch.Tensor, optional
-        Radius indices if return_r=True
-    """
-
-    m, n, o = data.shape
-    device = data.device
-
-    if center is None:
-        center = (0, 0, 0)
-
-    # create coordinate grids
-    x = torch.arange(n, device=device) - n // 2 + center[0]
-    y = torch.arange(m, device=device) - m // 2 + center[1]
-    z = torch.arange(o, device=device) - o // 2 + center[2]
-    xx, yy, zz = torch.meshgrid(x, y, z, indexing="ij")
-
-    # compute distances
-    r = torch.sqrt(xx**2 + yy**2 + zz**2)
-    r = r.round().long()  # integer bins
-
-    # flatten
-    r_flat = r.flatten()
-    data_flat = data.flatten()
-
-    # sum per bin
-    max_r = r_flat.max().item() + 1
-    tbin = torch.bincount(r_flat, weights=data_flat, minlength=max_r)
-    nr = torch.bincount(r_flat, minlength=max_r)
-
-    radialprofile = tbin / nr
-
-    if return_r:
-        return torch.arange(max_r, device=device), radialprofile
-    else:
-        return radialprofile
 
 
 def remove_deltas_based_on_density(slab, expected_number=None, dx=None):

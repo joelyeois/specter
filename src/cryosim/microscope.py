@@ -250,7 +250,7 @@ class Detector(L.LightningModule):
         noise_model=None,
         magnification=None,
         dqe=None,
-        anisomag=None,
+        mtf=None,
     ):
         """
         A detector module to apply detector noise to images. Future work to include
@@ -278,6 +278,7 @@ class Detector(L.LightningModule):
         self.dose_per_pixel = dose_per_angstrom * pixel_size**2
         self.aberration_model = aberration_model
         self.noise_model = noise_model
+        self.register_buffer("mtf", mtf)
 
     def image(self, aberrated_exitwave):
         if self.aberration_model == "holography":
@@ -306,12 +307,23 @@ class Detector(L.LightningModule):
         images = torch.squeeze(images)
         return images
 
-    def forward(self, aberrated_exitwave, anisomag=None):
+    def add_mtf(self, images, mtf):
+        return torch.real(ifft2(fft2(images) * mtf))
+
+    def forward(self, aberrated_exitwave, anisomag=None, nxy=None):
         images = self.image(aberrated_exitwave)
+
+        if nxy is not None:
+            # crop away any padded areas first.
+            images = images[:, nxy // 2 : -nxy // 2, nxy // 2 : -nxy // 2]
 
         # Apply anisomagnification
         if anisomag is not None:
             images = self.anisomagnify(images, anisomag)
+
+        # Apply detector MTF
+        if self.mtf is not None:
+            images = self.add_mtf(images, self.mtf)
 
         if self.noise_model is None:
             return images

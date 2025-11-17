@@ -550,6 +550,17 @@ class GemmiPotentialBuilder:
         # Read the CIF structure file
         st = gemmi.read_structure(mmcif_filepath)
 
+        # --- keep only the first atom ---
+        first_atom = st[0][0][0][0]
+        new_st = gemmi.Structure()
+        model = new_st.add_model(gemmi.Model(1))
+        chain = model.add_chain("A")
+        residue = chain.add_residue(gemmi.Residue())
+        residue.add_atom(first_atom.clone())
+        # residue.add_atom(first_atom.clone())
+        st = new_st
+        # --------------------------------
+
         # Extract scattering factors from table
         block = gemmi.cif.read_file(mmcif_filepath).sole_block()
         ctable = block.find(
@@ -573,12 +584,13 @@ class GemmiPotentialBuilder:
         for ind, row in enumerate(ctable):
             coefs[ind] = [float(field) for field in row]
         max_serial = max(cra.atom.serial for cra in st[0].all())
+        print(max_serial)
         custom_form_factors = np.zeros((max_serial + 1, 10))
         itable = block.find("_atom_site.", ["id", "scat_id"])
         for row in itable:
             serial, scat_id = row
             custom_form_factors[int(serial)] = coefs[int(scat_id)]
-
+            break
         gemmi.set_custom_form_factors(custom_form_factors)
         dencalc = gemmi.DensityCalculatorC()
 

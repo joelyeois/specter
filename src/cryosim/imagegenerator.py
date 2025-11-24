@@ -571,11 +571,16 @@ class MicrographGenerator(BaseImageGenerator):
         self.water_air_interface = water_air_interface
 
         if ice_model is not None:
-            if ice_thickness is None or (ice_thickness < self.nxy * pixel_size):
+            if ice_thickness is None or (
+                ice_thickness < scattering_potential.shape[0] * pixel_size
+            ):
                 self.nz = scattering_potential.shape[0]
+            else:
+                self.nz = ice_thickness // pixel_size
+                self.ice_thickness = self.nz * pixel_size
                 # Re-shift CTF params if nz changed
-                if self.scattering_model not in ["projection", "ctf"]:
-                    self._shift_ctf_params()
+            if self.scattering_model not in ["projection", "ctf"]:
+                self._shift_ctf_params()
 
         # Re-init crowd_max_distance_z if it was None (it defaults to self.nz in base)
         if crowd_max_distance_z is None:
@@ -671,3 +676,216 @@ class MicrographGenerator(BaseImageGenerator):
         else:
             images = self.detector(self.detector_waves, self.anisomag[idx], nxy=None)
         return images
+
+
+class TiltSeriesGenerator(MicrographGenerator):
+    def __init__(
+        self,
+        scattering_potential,
+        micrograph_size,
+        pixel_size,
+        ctf_params,
+        energy,
+        dose_per_angstrom,
+        sample_size=None,
+        anisomag=None,
+        ice_model=None,
+        ice_thickness=None,
+        scattering_model="multislice",
+        aberration_model="holography",
+        noise_model="poisson",
+        klim=None,
+        alpha=0.0,
+        crowd_min_distance=None,
+        crowd_max_distance_z=None,
+        pad_fft=False,
+        chunk_size=None,
+        move_to_cpu=True,
+        water_air_interface=True,
+        detector_model=None,
+    ):
+        super().__init__(
+            scattering_potential=scattering_potential,
+            micrograph_size=micrograph_size,
+            pixel_size=pixel_size,
+            ctf_params=ctf_params,
+            energy=energy,
+            dose_per_angstrom=dose_per_angstrom,
+            anisomag=anisomag,
+            ice_model=ice_model,
+            ice_thickness=ice_thickness,
+            scattering_model=scattering_model,
+            aberration_model=aberration_model,
+            noise_model=noise_model,
+            klim=klim,
+            alpha=alpha,
+            crowd_min_distance=crowd_min_distance,
+            crowd_max_distance_z=crowd_max_distance_z,
+            pad_fft=pad_fft,
+            chunk_size=chunk_size,
+            move_to_cpu=move_to_cpu,
+            water_air_interface=water_air_interface,
+            detector_model=detector_model,
+        )
+
+        # Store user preference
+        self.user_sample_size = sample_size
+
+        # We don't determine self.sample_nxy here anymore because it depends on angles
+        # unless user provided it explicitly.
+        if sample_size is not None:
+            if isinstance(sample_size, int):
+                self.sample_nxy = sample_size
+            elif (
+                isinstance(sample_size, (tuple, list))
+                and sample_size[0] == sample_size[1]
+            ):
+                self.sample_nxy = sample_size[0]
+            else:
+                raise ValueError("sample_size must have same dimensions in x and y.")
+
+            if self.sample_nxy < self.nxy:
+                raise ValueError("sample_size cannot be smaller than micrograph_size.")
+        else:
+            self.sample_nxy = None  # Will be calculated later
+
+    def generate_tilt_series(self, angles, idx):
+        """
+        Generate a tilt series for the given batch indices.
+
+        Args:
+            angles: list or tensor of tilt angles in degrees.
+            idx: tensor of batch indices (to select CTF/Anisomag parameters).
+
+        Returns:
+            tilt_series: (B, N_angles, Y, X) tensor of images.
+        """
+        # Determine sample_nxy
+        if self.user_sample_size is not None:
+            sample_nxy = self.sample_nxy
+        else:
+            # Calculate required size based on max angle
+            # S >= (W + T * sin(theta)) / cos(theta)
+            # We assume rotation around X axis, so Y dimension is affected.
+            # W = self.nxy * self.pixel_size
+            # T = self.nz * self.pixel_size
+
+            # Convert to tensor for calculation
+            angles_tensor = torch.as_tensor(angles, dtype=torch.float32)
+            max_angle_deg = torch.max(torch.abs(angles_tensor))
+            theta = max_angle_deg / 180 * torch.pi
+
+            W = self.nxy
+            T = self.nz
+
+            # Calculate required size in pixels
+            # Note: The formula assumes we want to cover the full projected width.
+            # S * cos(theta) >= W + T * sin(theta)
+            # S >= (W + T * sin(theta)) / cos(theta)
+
+            # Safety margin?
+            required_size = (W + T * torch.sin(theta)) / torch.cos(theta)
+            sample_nxy = int(torch.ceil(required_size))
+
+            # Ensure even number for FFT efficiency (optional but good practice)
+            if sample_nxy % 2 != 0:
+                sample_nxy += 1
+
+            print(
+                f"Auto-calculated sample size: {sample_nxy} (Max angle: {max_angle_deg:.1f} deg)"
+            )
+
+        # 1. Generate the base volume V once (Frozen for the series)
+        # Initialize V with sample_nxy
+        V = torch.zeros(len(idx), self.nz, sample_nxy, sample_nxy)
+
+        # Add crowd
+        if self.crowd_min_distance is not None:
+            # We need to temporarily update self.nxy to sample_nxy for crowd generation?
+            # CrowdWithDuplicates uses self.nxy_out which is set in init.
+            # We should probably re-init crowd if sample_size is different?
+            # Or just create a temporary crowd object?
+            # The current crowd object is initialized with self.nxy (micrograph size).
+            # If we want crowd in the larger volume, we need a crowd generator for that size.
+
+            # Re-initialize crowd for the larger volume
+            # This is a bit inefficient to do every time if it's heavy, but it's cleaner.
+            # Actually, let's just create it here.
+            crowd_gen = CrowdWithDuplicates(
+                self.V,  # This is the scattering potential (protein), usually small
+                self.pixel_size,
+                self.crowd_min_distance,
+                nxy_out=sample_nxy,  # Use sample size
+                nz_out=self.nz,
+                max_distance_z=self.crowd_max_distance_z,
+                max_distance_xy=None,
+                method="3d",
+                n_points=torch.inf,
+                seed="random",
+                chunk_size=self.chunk_size,
+                move_to_cpu=self.move_to_cpu,
+                water_air_interface=self.water_air_interface,
+            )
+
+            with torch.no_grad():
+                for i, v in enumerate(V):
+                    vols = crowd_gen()
+                    V[i] += vols
+
+        # Add ice
+        if self.ice_model is not None:
+            if self.ice_model == "randomchoice":
+                self.icemaker = NaiveIcemaker(
+                    n=self.nxy, dx=self.pixel_size, nz=self.nz
+                )
+            elif self.ice_model == "iterative":
+                self.icemaker = Icemaker(
+                    n=256,  # Original hardcoded 256?
+                    dx=self.pixel_size,
+                    nz=256,  # Original hardcoded 256?
+                    chunk_size=self.chunk_size,
+                )
+
+            with torch.no_grad():
+                # solvate logic adapted for local icemaker
+                # MicrographGenerator.solvate uses self.icemaker.generate_big_ice(V.shape)
+                ice = self.icemaker.generate_big_ice(V.shape)
+
+                # Pad if needed (but we are generating full size now, so maybe not?)
+                # If pad_fft is True, we might want to pad even the sample volume?
+                # But sample_size is supposed to cover the FOV.
+                # Let's assume sample_size is the final size we want to simulate.
+
+                icemask = V < 10
+                V += ice * icemask
+
+        # V is now our frozen volume (B, Z, sample_nxy, sample_nxy)
+
+        tilt_series = []
+        # Iterate over angles
+        for angle in angles:
+            # 2. Multislice with tilt
+            # multislice_and_tilt uses self.nxy to determine output size.
+            # It samples from V.
+            # V is larger than self.nxy, which is perfect.
+            # multislice_and_tilt logic:
+            # norm_x = x_S / (pixel_size * (X - 1) / 2)
+            # X is V.shape[-1] (sample_nxy).
+            # x_S is based on self.nxy (detector size).
+            # So it will correctly sample the center of the larger volume.
+
+            exitwaves = self.scattering.multislice_and_tilt(V, angle)
+
+            # 3. Aberration
+            ctf_batch = {k: v[idx] for k, v in self.ctf_params.items()}
+            detector_waves = self.aberration(exitwaves, ctf_batch)
+
+            # 4. Detection
+            if self.anisomag is None:
+                image = self.detector(detector_waves, nxy=None)
+            else:
+                image = self.detector(detector_waves, self.anisomag[idx], nxy=None)
+
+            tilt_series.append(image)
+
+        return torch.stack(tilt_series, dim=1)  # (B, N_angles, Y, X)

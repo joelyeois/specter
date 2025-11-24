@@ -38,7 +38,7 @@ def ifftn(array, dim=None):
     )
 
 
-def fftconvolve(in1, in2, mode="full"):
+def fftconvolve(in1, in2, mode="full", axes=None):
     """From scipy fftconvolve.
 
     Convolve two N-dimensional arrays using FFT.
@@ -93,7 +93,14 @@ def fftconvolve(in1, in2, mode="full"):
 
     s1 = in1.shape
     s2 = in2.shape
-    axes = [i for i in range(len(in1.shape))]  # assume ndim convolution.
+
+    if axes is None:
+        axes = [i for i in range(len(in1.shape))]  # assume ndim convolution.
+    elif isinstance(axes, int):
+        axes = [axes]
+
+    # Handle negative axes
+    axes = [a + in1.ndim if a < 0 else a for a in axes]
 
     shape = [
         max((s1[i], s2[i])) if i not in axes else s1[i] + s2[i] - 1

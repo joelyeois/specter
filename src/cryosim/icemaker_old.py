@@ -106,16 +106,7 @@ class Icemaker(L.LightningModule):
         super().__init__()
 
         # load 3D radial average of mdsim data
-        import os
-
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        # Assuming the repo structure is src/cryosim/icemaker.py and ice-data/ is at root
-        # root is up 2 levels from current_dir
-        root_dir = os.path.dirname(os.path.dirname(current_dir))
-        self.saved_data_path = os.path.join(
-            root_dir, "ice-data", "mdsim_f_radial_avg_400x400x400_0.25A.pt"
-        )
-
+        self.saved_data_path = "../ice-data/mdsim_f_radial_avg_400x400x400_0.25A.pt"
         self.mdsim_dx = 0.25
         self.mdsim_n = 400
         self.mdsim_dk = 1 / self.mdsim_n / self.mdsim_dx
@@ -545,17 +536,18 @@ class Icemaker(L.LightningModule):
         self.generate_ice_deltas(batchsize=batchsize)
 
         # convolve with ice kernel
-        # convolve with ice kernel
         self.register_buffer("icecubes", torch.zeros_like(self.current_icedeltas))
-
-        # Batched convolution
-        # ice_kernel shape: (nz, n, n) -> (1, nz, n, n) to match (B, nz, n, n)
-        self.icecubes = fftconvolve(
-            self.current_icedeltas,
-            self.ice_kernel.unsqueeze(0),
-            mode="same",
-            axes=(-3, -2, -1),
-        )
+        # for i in tqdm(range(batchsize), desc='Computing batches of icecubes', leave=False):
+        for i in track(
+            range(batchsize),
+            description="Computing batches of icecubes",
+            transient=True,
+            disable=not (self.progressbars),
+        ):
+            self.icecube = fftconvolve(
+                self.current_icedeltas[i], self.ice_kernel, mode="same"
+            )
+            self.icecubes[i] = self.icecube
         return self.icecubes
 
     def irfftn(self, array):
@@ -581,22 +573,26 @@ class Icemaker(L.LightningModule):
             ices = self.generate_ice(N)
 
             # assemble ice
-            # ices shape: (N, nz, n, n)
-            # Reshape to (B, num_z, num_y, num_x, nz, n, n)
-            ices = ices.view(B, num_z, num_y, num_x, self.nz, self.n, self.n)
-
-            # Permute to (B, num_z, nz, num_y, n, num_x, n)
-            ices = ices.permute(0, 1, 4, 2, 5, 3, 6)
-
-            # Reshape to (B, num_z*nz, num_y*n, num_x*n)
-            big_ice = ices.reshape(B, num_z * self.nz, num_y * self.n, num_x * self.n)
-
+            big_ice = torch.empty(B, num_z * self.nz, num_y * self.n, num_x * self.n)
+            idx = 0
+            for ib in range(B):
+                for iz in range(num_z):
+                    for iy in range(num_y):
+                        for ix in range(num_x):
+                            big_ice[
+                                ib,
+                                iz * self.nz : (iz + 1) * self.nz,
+                                iy * self.n : (iy + 1) * self.n,
+                                ix * self.n : (ix + 1) * self.n,
+                            ] = ices[idx]
+                            idx += 1
             # trim
-            big_ice = big_ice[:B, :nz, :ny, :nx]
+            return big_ice[:B, :nz, :ny, :nx]
         else:
             # generate batch of ice positions
             big_ice = torch.empty(B, num_z * self.nz, num_y * self.n, num_x * self.n)
 
+            idx = 0
             # for start in tqdm(range(0, N, self.chunk_size), desc='Generate ice positions', leave=False):
             for start in track(
                 range(0, N, self.chunk_size),
@@ -618,108 +614,59 @@ class Icemaker(L.LightningModule):
                 )  # shape (batchsize, self.nz, self.n, self.n)
 
                 # directly insert into big_ice
-                # We can vectorize this insertion too if we are careful, but chunking makes it tricky.
-                # However, the inner loop over batchsize is slow.
-
-                # Calculate indices for the whole batch
-                global_indices = torch.arange(start, end)
-                ib = global_indices // num_blocks_per_B
-                local_idx = global_indices % num_blocks_per_B
-
-                iz = local_idx // (num_y * num_x)
-                iy = (local_idx % (num_y * num_x)) // num_x
-                ix = local_idx % num_x
-
-                # This part is hard to fully vectorize without advanced indexing which might be slow on CPU for large tensors
-                # But we can at least remove the python loop
                 for b in range(batchsize):
+                    global_idx = start + b
+
+                    ib = global_idx // num_blocks_per_B
+                    local_idx = global_idx % num_blocks_per_B
+
+                    iz = local_idx // (num_y * num_x)
+                    iy = (local_idx % (num_y * num_x)) // num_x
+                    ix = local_idx % num_x
+
                     big_ice[
-                        ib[b],
-                        iz[b] * self.nz : (iz[b] + 1) * self.nz,
-                        iy[b] * self.n : (iy[b] + 1) * self.n,
-                        ix[b] * self.n : (ix[b] + 1) * self.n,
+                        ib,
+                        iz * self.nz : (iz + 1) * self.nz,
+                        iy * self.n : (iy + 1) * self.n,
+                        ix * self.n : (ix + 1) * self.n,
                     ] = batch_icedeltas[b]
 
-        # resolve boundary conflicts where ice are too near
-        min_distance_px = int(self.min_distance / self.dx)
-        for ib in range(B):
-            big_ice[ib] = clean_block_boundaries(
-                big_ice[ib], (self.nz, self.n, self.n), min_distance_px
-            )
+                    idx += 1
 
-        # perform batchwise fft
-        # We process the volume in batches of blocks to avoid high memory usage.
-        # big_ice is (B, num_z*nz, num_y*n, num_x*n)
+            # resolve boundary conflicts where ice are too near
+            min_distance_px = int(self.min_distance / self.dx)
+            for ib in range(B):
+                big_ice[ib] = clean_block_boundaries(
+                    big_ice[ib], (self.nz, self.n, self.n), min_distance_px
+                )
 
-        # Total number of blocks
-        N_blocks = B * num_z * num_y * num_x
-
-        # We can iterate over blocks, extract them, convolve, and put them back.
-        # To vectorize, we can process 'chunk_size' blocks at a time.
-        chunk_size = 32  # Adjust based on GPU memory
-
-        for i in track(
-            range(0, N_blocks, chunk_size),
-            description="Ice convolution",
-            transient=True,
-            disable=not (self.progressbars),
-        ):
-            # Identify which blocks belong to this chunk
-            current_chunk_size = min(chunk_size, N_blocks - i)
-            indices = torch.arange(i, i + current_chunk_size)
-
-            # Map linear index to (ib, iz, iy, ix)
-            # Note: The order depends on how we want to traverse.
-            # Previously we filled big_ice with:
-            # ib = global_idx // num_blocks_per_B
-            # local_idx = global_idx % num_blocks_per_B
-            # iz = local_idx // (num_y * num_x) ...
-            # Let's stick to that mapping to be consistent, although for convolution it doesn't matter
-            # as long as we cover everything.
-
-            ib = indices // num_blocks_per_B
-            local_idx = indices % num_blocks_per_B
-            iz = local_idx // (num_y * num_x)
-            iy = (local_idx % (num_y * num_x)) // num_x
-            ix = local_idx % num_x
-
-            # Extract blocks
-            # We have to loop to extract because they are not contiguous in memory
-            # But this loop is over a small 'chunk_size' (e.g. 32), so it's fast.
-            blocks = []
-            for j in range(current_chunk_size):
-                b, z, y, x = ib[j], iz[j], iy[j], ix[j]
-                block = big_ice[
-                    b,
-                    z * self.nz : (z + 1) * self.nz,
-                    y * self.n : (y + 1) * self.n,
-                    x * self.n : (x + 1) * self.n,
-                ]
-                blocks.append(block)
-
-            # Stack into a batch: (chunk_size, nz, n, n)
-            batch = torch.stack(blocks).to(self.ice_kernel.device)
-
-            # Convolve
-            # ice_kernel shape: (nz, n, n) -> (1, nz, n, n)
-            convolved_batch = fftconvolve(
-                batch, self.ice_kernel.unsqueeze(0), mode="same", axes=(-3, -2, -1)
-            )
-
-            # Put back
-            convolved_batch = (
-                convolved_batch.cpu()
-            )  # Move back to CPU if big_ice is on CPU
-            for j in range(current_chunk_size):
-                b, z, y, x = ib[j], iz[j], iy[j], ix[j]
-                big_ice[
-                    b,
-                    z * self.nz : (z + 1) * self.nz,
-                    y * self.n : (y + 1) * self.n,
-                    x * self.n : (x + 1) * self.n,
-                ] = convolved_batch[j]
-
-        return big_ice[:B, :nz, :ny, :nx]
+            # perform batchwise fft
+            for ib in range(B):
+                # for iz in tqdm(range(num_z), desc='Ice convolution', leave=False):
+                for iz in track(
+                    range(num_z),
+                    description="Ice convolution",
+                    transient=True,
+                    disable=not (self.progressbars),
+                ):
+                    for iy in range(num_y):
+                        for ix in range(num_x):
+                            big_ice[
+                                ib,
+                                iz * self.nz : (iz + 1) * self.nz,
+                                iy * self.n : (iy + 1) * self.n,
+                                ix * self.n : (ix + 1) * self.n,
+                            ] = fftconvolve(
+                                big_ice[
+                                    ib,
+                                    iz * self.nz : (iz + 1) * self.nz,
+                                    iy * self.n : (iy + 1) * self.n,
+                                    ix * self.n : (ix + 1) * self.n,
+                                ].to(self.ice_kernel.device),
+                                self.ice_kernel,
+                                mode="same",
+                            ).cpu()
+            return big_ice[:B, :nz, :ny, :nx]
 
 
 class NaiveIcemaker(L.LightningModule):

@@ -576,7 +576,7 @@ class MicrographGenerator(BaseImageGenerator):
             ):
                 self.nz = scattering_potential.shape[0]
             else:
-                self.nz = ice_thickness // pixel_size
+                self.nz = int(ice_thickness // pixel_size)
                 self.ice_thickness = self.nz * pixel_size
                 # Re-shift CTF params if nz changed
             if self.scattering_model not in ["projection", "ctf"]:

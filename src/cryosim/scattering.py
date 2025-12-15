@@ -179,7 +179,7 @@ class Scattering(L.LightningModule):
         device = self.device
 
         # Convert angle to radians
-        theta = torch.deg2rad(torch.tensor(angle_deg, dtype=torch.float32))
+        theta = torch.deg2rad(angle_deg)
         c, s = torch.cos(theta), torch.sin(theta)
 
         # Determine new Z range (projected extent along new Z axis)

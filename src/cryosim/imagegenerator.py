@@ -796,7 +796,7 @@ class TiltSeriesGenerator(MicrographGenerator):
             # We need to temporarily update self.nxy to sample_nxy for crowd generation?
 
             # Re-initialize crowd for the larger volume
-            crowd_gen = CrowdWithDuplicates(
+            self.crowd = CrowdWithDuplicates(
                 self.V,
                 self.pixel_size,
                 self.crowd_min_distance,
@@ -814,7 +814,7 @@ class TiltSeriesGenerator(MicrographGenerator):
 
             with torch.no_grad():
                 for i, v in enumerate(V):
-                    vols = crowd_gen()
+                    vols = self.crowd()
                     V[i] += vols
 
         # Add ice

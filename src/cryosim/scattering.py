@@ -300,7 +300,7 @@ class Scattering(L.LightningModule):
                 V.unsqueeze(1),
                 grid,
                 mode="bilinear",
-                padding_mode="reflection",
+                padding_mode="zeros",
                 align_corners=True,
             )
             # slice_sample shape: (B, 1, 1, ny, nx) -> squeeze to (B, ny, nx)

@@ -570,17 +570,16 @@ class MicrographGenerator(BaseImageGenerator):
         self.move_to_cpu = move_to_cpu
         self.water_air_interface = water_air_interface
 
-        if ice_model is not None:
-            if ice_thickness is None or (
-                ice_thickness < scattering_potential.shape[0] * pixel_size
-            ):
-                self.nz = scattering_potential.shape[0]
-            else:
-                self.nz = int(ice_thickness // pixel_size)
-                self.ice_thickness = self.nz * pixel_size
-                # Re-shift CTF params if nz changed
-            if self.scattering_model not in ["projection", "ctf"]:
-                self._shift_ctf_params()
+        if ice_thickness is None or (
+            ice_thickness < scattering_potential.shape[0] * pixel_size
+        ):
+            self.nz = scattering_potential.shape[0]
+        else:
+            self.nz = int(ice_thickness // pixel_size)
+            self.ice_thickness = self.nz * pixel_size
+            # Re-shift CTF params if nz changed
+        if self.scattering_model not in ["projection", "ctf"]:
+            self._shift_ctf_params()
 
         # Re-init crowd_max_distance_z if it was None (it defaults to self.nz in base)
         if crowd_max_distance_z is None:
@@ -687,6 +686,7 @@ class TiltSeriesGenerator(MicrographGenerator):
         ctf_params,
         energy,
         dose_per_angstrom,
+        angles,
         sample_size=None,
         anisomag=None,
         ice_model=None,
@@ -730,6 +730,7 @@ class TiltSeriesGenerator(MicrographGenerator):
 
         # Store user preference
         self.user_sample_size = sample_size
+        self.angles = angles
 
         # We don't determine self.sample_nxy here anymore because it depends on angles
         # unless user provided it explicitly.
@@ -749,17 +750,9 @@ class TiltSeriesGenerator(MicrographGenerator):
         else:
             self.sample_nxy = None  # Will be calculated later
 
-    def generate_tilt_series(self, angles, idx):
-        """
-        Generate a tilt series for the given batch indices.
+        self.generate_volume()
 
-        Args:
-            angles: list or tensor of tilt angles in degrees.
-            idx: tensor of batch indices (to select CTF/Anisomag parameters).
-
-        Returns:
-            tilt_series: (B, N_angles, Y, X) tensor of images.
-        """
+    def generate_volume(self):
         # Determine sample_nxy
         if self.user_sample_size is not None:
             sample_nxy = self.sample_nxy
@@ -771,12 +764,8 @@ class TiltSeriesGenerator(MicrographGenerator):
             # T = self.nz * self.pixel_size
 
             # Convert to tensor for calculation
-            angles_tensor = torch.as_tensor(angles, dtype=torch.float32)
-            max_angle_deg = torch.max(torch.abs(angles_tensor))
+            max_angle_deg = torch.max(torch.abs(self.angles))
             theta = max_angle_deg / 180 * torch.pi
-
-            W = self.nxy
-            T = self.nz
 
             # Calculate required size in pixels
             # Note: The formula assumes we want to cover the full projected width.
@@ -784,7 +773,10 @@ class TiltSeriesGenerator(MicrographGenerator):
             # S >= (W + T * sin(theta)) / cos(theta)
 
             # Safety margin?
-            required_size = (W + T * torch.sin(theta)) / torch.cos(theta)
+            # required_size = (W + T * torch.sin(theta)) / torch.cos(theta)
+
+            # mine
+            required_size = self.nxy / torch.cos(theta) + self.nz * torch.tan(theta)
             sample_nxy = int(torch.ceil(required_size))
 
             # Ensure even number for FFT efficiency (optional but good practice)
@@ -797,22 +789,15 @@ class TiltSeriesGenerator(MicrographGenerator):
 
         # 1. Generate the base volume V once (Frozen for the series)
         # Initialize V with sample_nxy
-        V = torch.zeros(len(idx), self.nz, sample_nxy, sample_nxy)
+        V = torch.zeros(1, self.nz, sample_nxy, sample_nxy)
 
         # Add crowd
         if self.crowd_min_distance is not None:
             # We need to temporarily update self.nxy to sample_nxy for crowd generation?
-            # CrowdWithDuplicates uses self.nxy_out which is set in init.
-            # We should probably re-init crowd if sample_size is different?
-            # Or just create a temporary crowd object?
-            # The current crowd object is initialized with self.nxy (micrograph size).
-            # If we want crowd in the larger volume, we need a crowd generator for that size.
 
             # Re-initialize crowd for the larger volume
-            # This is a bit inefficient to do every time if it's heavy, but it's cleaner.
-            # Actually, let's just create it here.
             crowd_gen = CrowdWithDuplicates(
-                self.V,  # This is the scattering potential (protein), usually small
+                self.V,
                 self.pixel_size,
                 self.crowd_min_distance,
                 nxy_out=sample_nxy,  # Use sample size
@@ -847,34 +832,28 @@ class TiltSeriesGenerator(MicrographGenerator):
                 )
 
             with torch.no_grad():
-                # solvate logic adapted for local icemaker
-                # MicrographGenerator.solvate uses self.icemaker.generate_big_ice(V.shape)
                 ice = self.icemaker.generate_big_ice(V.shape)
-
-                # Pad if needed (but we are generating full size now, so maybe not?)
-                # If pad_fft is True, we might want to pad even the sample volume?
-                # But sample_size is supposed to cover the FOV.
-                # Let's assume sample_size is the final size we want to simulate.
-
                 icemask = V < 10
                 V += ice * icemask
 
         # V is now our frozen volume (B, Z, sample_nxy, sample_nxy)
+        self.vol = V.detach().cpu()
+
+    def generate_tilt_series(self, idx):
+        """
+        Generate a tilt series for the given batch indices.
+
+        Args:
+            angles: list or tensor of tilt angles in degrees.
+            idx: tensor of batch indices (to select CTF/Anisomag parameters).
+
+        Returns:
+            tilt_series: (B, N_angles, Y, X) tensor of images.
+        """
 
         tilt_series = []
-        # Iterate over angles
-        for angle in angles:
-            # 2. Multislice with tilt
-            # multislice_and_tilt uses self.nxy to determine output size.
-            # It samples from V.
-            # V is larger than self.nxy, which is perfect.
-            # multislice_and_tilt logic:
-            # norm_x = x_S / (pixel_size * (X - 1) / 2)
-            # X is V.shape[-1] (sample_nxy).
-            # x_S is based on self.nxy (detector size).
-            # So it will correctly sample the center of the larger volume.
-
-            exitwaves = self.scattering.multislice_and_tilt(V, angle)
+        for angle in self.angles:
+            exitwaves = self.scattering.multislice_and_tilt(self.vol, angle)
 
             # 3. Aberration
             ctf_batch = {k: v[idx] for k, v in self.ctf_params.items()}

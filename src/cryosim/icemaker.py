@@ -148,6 +148,7 @@ class Icemaker(L.LightningModule):
         min_distance_vox = int(min_distance / dx)
         min_distance_actual = min_distance_vox * dx
         self.correction_factor = (min_distance / min_distance_actual) ** 3
+        self.n_ice_molecules_theory = int(ndensity_of_amorphous_ice * self.v)
         self.n_ice_molecules = int(
             ndensity_of_amorphous_ice * self.v / self.correction_factor
         )

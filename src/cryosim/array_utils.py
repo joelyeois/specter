@@ -82,11 +82,47 @@ def kgrid_3d(n_xyz, d_xyz, device="cpu"):
 
 
 def radial_kgrid_2d(n_xy, d_xy, device="cpu"):
+    """
+    Construct 2D radial frequency grid.
+
+    Parameters
+    ----------
+    n_xy : int or array-like
+        Number of pixels along x,y. If int, assumes nx=ny=n_xy.
+    d_xy : float or array-like
+        Pixel length along x,y. If float, assumes dx=dy=d_xy.
+    device : str, optional
+        Device for tensor ('cpu' or 'cuda'). Default is 'cpu'.
+
+    Returns
+    -------
+    K_radial : torch.Tensor
+        2D radial frequencies, shape (ny, nx). Values represent the
+        distance from the origin in frequency space.
+    """
     _, _, KX, KY = kgrid_2d(n_xy, d_xy, device)
     return torch.sqrt(KX**2 + KY**2)
 
 
 def radial_kgrid_3d(n_xyz, d_xyz, device="cpu"):
+    """
+    Construct 3D radial frequency grid.
+
+    Parameters
+    ----------
+    n_xyz : int or array-like
+        Number of pixels along x,y,z. If int, assumes nx=ny=nz=n_xyz.
+    d_xyz : float or array-like
+        Pixel length along x,y,z. If float, assumes dx=dy=dz=d_xyz.
+    device : str, optional
+        Device for tensor ('cpu' or 'cuda'). Default is 'cpu'.
+
+    Returns
+    -------
+    K_radial : torch.Tensor
+        3D radial frequencies, shape (nz, ny, nx). Values represent the
+        distance from the origin in 3D frequency space.
+    """
     _, _, _, KX, KY, KZ = kgrid_3d(n_xyz, d_xyz, device)
     return torch.sqrt(KX**2 + KY**2 + KZ**2)
 
@@ -204,27 +240,74 @@ def grid_3d(n_xyz, d_xyz, convention="relion", device="cpu"):
 
 
 def radial_grid_2d(n_xy, d_xy, convention="relion", device="cpu"):
+    """
+    Construct 2D radial coordinate grid.
+
+    Parameters
+    ----------
+    n_xy : int or array-like
+        Number of pixels along x,y. If int, assumes nx=ny=n_xy.
+    d_xy : float or array-like
+        Pixel length along x,y. If float, assumes dx=dy=d_xy.
+    convention : str, optional
+        Grid origin convention ('relion' or 'torch'). Default is 'relion'.
+    device : str, optional
+        Device for tensor ('cpu' or 'cuda'). Default is 'cpu'.
+
+    Returns
+    -------
+    R : torch.Tensor
+        2D radial distances from origin, shape (ny, nx).
+    """
     _, _, X, Y = grid_2d(n_xy, d_xy, convention, device)
     return torch.sqrt(X**2 + Y**2)
 
 
 def radial_grid_3d(n_xyz, d_xyz, convention="relion", device="cpu"):
+    """
+    Construct 3D radial coordinate grid.
+
+    Parameters
+    ----------
+    n_xyz : int or array-like
+        Number of pixels along x,y,z. If int, assumes nx=ny=nz=n_xyz.
+    d_xyz : float or array-like
+        Pixel length along x,y,z. If float, assumes dx=dy=dz=d_xyz.
+    convention : str, optional
+        Grid origin convention ('relion' or 'torch'). Default is 'relion'.
+    device : str, optional
+        Device for tensor ('cpu' or 'cuda'). Default is 'cpu'.
+
+    Returns
+    -------
+    R : torch.Tensor
+        3D radial distances from origin, shape (nz, ny, nx).
+    """
     _, _, _, X, Y, Z = grid_3d(n_xyz, d_xyz, convention, device)
     return torch.sqrt(X**2 + Y**2 + Z**2)
 
 
 def real_to_kgrid_3d(R):
     """
-    Given a 3D real-space meshgrid magnitude R, return the corresponding
+    Convert real-space radial grid to frequency-space radial grid.
+
+    Given a 3D real-space meshgrid magnitude R, returns the corresponding
     frequency-space radial grid KR for FFTs.
 
+    Parameters
+    ----------
+    R : torch.Tensor
+        3D tensor of radial distances in real space, shape (nx, ny, nz).
+
+    Returns
+    -------
+    KR : torch.Tensor
+        3D tensor of radial distances in Fourier space, shape (nx, ny, nz).
+
+    Notes
+    -----
     Supports non-cubic grids with different spacings along each axis.
-
-    Args:
-        R (torch.Tensor): 3D tensor of shape (nx, ny, nz), the radial distances in real space.
-
-    Returns:
-        KR (torch.Tensor): 3D tensor of shape (nx, ny, nz), the radial distances in Fourier space
+    Assumes uniform spacing along each individual axis.
     """
     device = R.device
 
@@ -250,17 +333,32 @@ def real_to_kgrid_3d(R):
 
 def voxelize_coordinates(coords, grid_shape, voxel_size, device=None):
     """
-    Convert 3D coordinates to a 3D binary grid (1s at nearest voxel, zeros elsewhere),
-    assuming the center of the grid is at (nz//2, ny//2, nx//2).
+    Convert 3D coordinates to a 3D binary occupancy grid.
 
-    Args:
-        coords: (N,3) tensor of atomic coordinates in physical units (x, y, z)
-        grid_shape: tuple of ints (nx, ny, nz)
-        voxel_size: tuple of floats (dx, dy, dz)
-        device: optional, torch device
+    Creates a binary grid with 1s at the nearest voxel positions corresponding
+    to the input coordinates, and 0s elsewhere.
 
-    Returns:
-        grid: (nz, ny, nx) tensor with 1s at voxel positions of atoms
+    Parameters
+    ----------
+    coords : torch.Tensor
+        Atomic coordinates in physical units (x, y, z), shape (N, 3).
+    grid_shape : tuple of int
+        Shape of output grid (nx, ny, nz).
+    voxel_size : tuple of float
+        Voxel size (dx, dy, dz).
+    device : torch.device, optional
+        Device for tensors. Default is None (uses coords device).
+
+    Returns
+    -------
+    grid : torch.Tensor
+        Binary occupancy grid with shape (nz, ny, nx). 1s at voxel positions
+        of atoms, 0s elsewhere.
+
+    Notes
+    -----
+    Grid center is assumed to be at (nz//2, ny//2, nx//2).
+    Uses nearest-neighbor assignment (hard voxelization).
     """
     device = device or coords.device
     coords = coords.to(device)
@@ -399,20 +497,31 @@ def soft_voxelize_coordinates(coords, grid_shape, voxel_size, device=None):
     """
     Differentiable 3D soft voxelization using trilinear splatting.
 
-    Works for either:
-      - coords: (N, 3)  --> returns (nz, ny, nx)
-      - coords: (B, N, 3) --> returns (B, nz, ny, nx)
+    Distributes each coordinate's contribution to surrounding voxels using
+    trilinear interpolation for smooth, differentiable voxelization.
 
-    Args:
-        coords: torch.Tensor of atomic coordinates
-        grid_shape: tuple of ints (nz, ny, nx)
-        voxel_size: float or tuple of floats (dx, dy, dz)
-        device: optional, torch device
+    Parameters
+    ----------
+    coords : torch.Tensor
+        Atomic coordinates. Either (N, 3) for single volume or (B, N, 3)
+        for batched volumes.
+    grid_shape : tuple of int
+        Shape of output grid (nz, ny, nx).
+    voxel_size : float or tuple of float
+        Voxel size. If float, assumes isotropic. If tuple, (dz, dy, dx).
+    device : torch.device, optional
+        Device for tensors. Default is None (uses coords device).
 
     Returns
     -------
-    volume: torch.Tensor
-        Soft voxelized volume
+    volume : torch.Tensor
+        Soft voxelized volume. Shape (nz, ny, nx) if coords is (N, 3),
+        or (B, nz, ny, nx) if coords is (B, N, 3).
+
+    Notes
+    -----
+    Uses trilinear interpolation to distribute each atom's contribution
+    among its 8 neighboring voxels, weighted by distance.
     """
     if device is None:
         device = coords.device
@@ -514,21 +623,34 @@ def soft_voxelize_coordinates(coords, grid_shape, voxel_size, device=None):
 
 def soft_voxelize_xy_coordinates(coords, grid_shape, voxel_size, device=None):
     """
-    Semi-soft 3D voxelization:
-    - Hard assignment along Z (nearest slice)
-    - Bilinear interpolation in X and Y
-    - Supports single (N,3) or batched (B,N,3) coordinates
+    Semi-soft 3D voxelization with hard Z assignment and soft XY interpolation.
 
-    Args:
-        coords: (N,3) or (B,N,3) tensor of coordinates
-        grid_shape: tuple of ints (nz, ny, nx)
-        voxel_size: float or tuple of floats (dx, dy, dz)
-        device: optional torch.device
+    Uses nearest-neighbor assignment along Z axis (hard) and bilinear
+    interpolation in XY plane (soft) for faster computation than full
+    trilinear interpolation.
+
+    Parameters
+    ----------
+    coords : torch.Tensor
+        Atomic coordinates. Either (N, 3) for single volume or (B, N, 3)
+        for batched volumes.
+    grid_shape : tuple of int
+        Shape of output grid (nz, ny, nx).
+    voxel_size : float or tuple of float
+        Voxel size. If float, assumes isotropic. If tuple, (dz, dy, dx).
+    device : torch.device, optional
+        Device for tensors. Default is None (uses coords device).
 
     Returns
     -------
-    volume : (nz, ny, nx) if input is (N,3)
-             (B, nz, ny, nx) if input is (B,N,3)
+    volume : torch.Tensor
+        Semi-soft voxelized volume. Shape (nz, ny, nx) if coords is (N, 3),
+        or (B, nz, ny, nx) if coords is (B, N, 3).
+
+    Notes
+    -----
+    Faster than full trilinear but less smooth along Z. Good compromise
+    for oriented structures like membranes.
     """
     if device is None:
         device = coords.device
@@ -747,6 +869,33 @@ def radial_profile_3d(data, center=None, return_r=False):
 
 
 def nearest_index(x_arr, y_arr, z_arr, x_coord, y_coord, z_coord):
+    """
+    Find the nearest grid indices to specified coordinates.
+
+    Parameters
+    ----------
+    x_arr : torch.Tensor
+        1D array of x-coordinates defining the grid.
+    y_arr : torch.Tensor
+        1D array of y-coordinates defining the grid.
+    z_arr : torch.Tensor
+        1D array of z-coordinates defining the grid.
+    x_coord : float
+        Target x-coordinate.
+    y_coord : float
+        Target y-coordinate.
+    z_coord : float
+        Target z-coordinate.
+
+    Returns
+    -------
+    xi : int
+        Index in x_arr closest to x_coord.
+    yi : int
+        Index in y_arr closest to y_coord.
+    zi : int
+        Index in z_arr closest to z_coord.
+    """
     xi = torch.argmin(torch.abs(x_arr - x_coord))
     yi = torch.argmin(torch.abs(y_arr - y_coord))
     zi = torch.argmin(torch.abs(z_arr - z_coord))

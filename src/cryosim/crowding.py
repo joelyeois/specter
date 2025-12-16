@@ -114,11 +114,11 @@ def poisson_disk_neighbors_3d(
     Parameters
     ----------
     min_distance : float
-        Minimum allowed distance between points, in Angstroms.
+        Minimum allowed distance between points, in Å.
     n_points : int or torch.inf, optional
         Maximum number of points to generate. Default is infinite (fill the volume).
     box : tuple of float, optional
-        Dimensions of the 3D volume in Angstroms, as (D, H, W). Default is (256, 256, 256).
+        Dimensions of the 3D volume in Å, as (D, H, W). Default is (256, 256, 256).
     k : int, optional
         Number of candidate points to generate around each active point. Higher
         values produce denser sampling. Default is 30.
@@ -130,7 +130,7 @@ def poisson_disk_neighbors_3d(
     Returns
     -------
     torch.Tensor
-        Tensor of shape (N, 3), where each row is a point coordinate (x, y, z) in Angstroms.
+        Tensor of shape (N, 3), where each row is a point coordinate (x, y, z) in Å.
 
     Notes
     -----
@@ -273,17 +273,17 @@ def crowd_with_duplicates(
     V : torch.Tensor, shape (Z, Y, X)
         The input 3D volume representing a single particle. Must be real-valued.
     min_distance : float
-        Minimum center-to-center distance between duplicates (in Angstroms), i.e. diameter
+        Minimum center-to-center distance between duplicates (in Å), i.e. diameter
         of particle.
     pixel_size : float
-        Size of a voxel in Angstroms.
+        Size of a voxel in Å.
     return_coordinates : bool, optional
         If True, also returns coordinates of the duplicated particles.
     max_distance_xy : float, optional
-        Maximum radial distance from the origin in xy-plane to place duplicates (in Angstroms).
+        Maximum radial distance from the origin in xy-plane to place duplicates (in Å).
         If None, defaults to width of the volume plus diameter of particle.
     max_distance_z : float, optional
-        Maximum radial distance from the origin in z to place duplicates (in Angstroms).
+        Maximum radial distance from the origin in z to place duplicates (in Å).
         If None, defaults to height of the volume plus diameter of particle.
     nxy : int, optional
         Width of volume to return. Used for micrographs or padded volumes.
@@ -352,21 +352,35 @@ def insert_particles_into_micrograph(
 
     Parameters
     ----------
-    micro_shape : tuple of int
-        Shape of micrograph (Z, Y, X)
     volumes : torch.Tensor
-        Rotated volumes, shape (N, Zp, Yp, Xp)
+        Rotated volumes with shape (N, Zp, Yp, Xp) where N is the number
+        of particles to insert.
     positions : torch.Tensor
-        (N, 3) coordinates in physical units (x, y, z), origin at center
-    pixel_size : float
-        Physical size of one pixel (same units as positions)
-    device : str
-        'cuda' or 'cpu'
+        Particle center coordinates in physical units (x, y, z) with shape
+        (N, 3) or (N, 2). Origin is at the center of the micrograph. If
+        shape is (N, 2), z-coordinates are assumed to be zero.
+    pixel_size : float, optional
+        Physical size of one pixel in same units as positions. Default is 1.0.
+    micro_shape : tuple of int, optional
+        Shape of micrograph (Z, Y, X). Required if micrograph is None.
+    micrograph : torch.Tensor, optional
+        Existing micrograph to insert volumes into. If None, a new micrograph
+        is created with shape micro_shape.
 
     Returns
     -------
     micrograph : torch.Tensor
-        Micrograph with volumes inserted
+        Micrograph with volumes inserted, shape (Z, Y, X).
+
+    Raises
+    ------
+    ValueError
+        If neither micro_shape nor micrograph is provided.
+
+    Notes
+    -----
+    If a particle extends beyond the micrograph boundaries, only the portion
+    within bounds is inserted (clipping at edges).
     """
     N, Zp, Yp, Xp = volumes.shape
     hz, hy, hx = Zp // 2, Yp // 2, Xp // 2
@@ -455,17 +469,36 @@ def filter_by_z_density(
     Filter points based on a two-Gaussian z-density profile with peaks at the
     top and bottom of the z-range.
 
-    Args:
-        pts: (N,3) tensor of (x,y,z) coordinates.
-        z_length: thickness of the ice - diamter of particle.
-        sigma_frac: Gaussian width as fraction of z_length.
-        peak_amplitude: amplitude of Gaussian peaks.
-        baseline: minimum probability in the bulk.
-        curve_points: number of points for returning the probability curve along z.
+    Simulates particle distribution at ice-water interface where particles
+    preferentially accumulate at top and bottom surfaces.
 
-    Returns:
-        pts_filtered: (M,3) tensor of points that were kept.
-        z_distribution: (curve_points,) tensor of probability values for the curve.
+    Parameters
+    ----------
+    pts : torch.Tensor
+        Particle coordinates with shape (N, 3) containing (x, y, z) positions.
+    z_length : float
+        Thickness of the ice minus particle diameter.
+    sigma_frac : float, optional
+        Gaussian width as fraction of z_length. Default is 0.05.
+    peak_amplitude : float, optional
+        Amplitude of Gaussian peaks at surfaces. Default is 1.0.
+    baseline : float, optional
+        Minimum probability in the bulk region. Default is 0.1.
+    curve_points : int, optional
+        Number of points for returning the probability curve along z.
+        Default is 200.
+
+    Returns
+    -------
+    pts_filtered : torch.Tensor
+        Filtered points with shape (M, 3) where M <= N.
+    z_distribution : torch.Tensor
+        Probability density curve along z-axis with shape (curve_points,).
+
+    Notes
+    -----
+    The probability distribution is: P(z) = baseline + amplitude * (G1 + G2)
+    where G1 and G2 are Gaussians centered at z_min and z_max respectively.
     """
     z_min, z_max = -z_length / 2, z_length / 2
     sigma = sigma_frac * z_length

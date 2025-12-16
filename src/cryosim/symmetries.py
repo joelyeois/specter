@@ -3,6 +3,54 @@ from .rotations import Rotation
 
 
 def get_rotation_matrices(sym, return_affine=True):
+    """
+    Get rotation matrices for crystallographic and icosahedral symmetry groups.
+    Returns rotation matrices for applying point group symmetry operations
+    commonly used in cryo-EM for symmetric particle reconstructions.
+
+    Parameters
+    ----------
+    sym : str
+        Symmetry group designation. Supported symmetries:
+        - 'Cn': Cyclic symmetry with n-fold rotational axis (e.g., 'C2', 'C3')
+        - 'Dn': Dihedral symmetry with n-fold axis + perpendicular 2-fold axes
+        - 'T': Tetrahedral symmetry (12 operations)
+        - 'I', 'I1', 'I2': Icosahedral symmetry (60 operations, different conventions)
+        - 'O': Octahedral symmetry
+
+        Case-insensitive.
+    return_affine : bool, optional
+        If True, returns 4x4 affine transformation matrices.
+        If False, returns 3x3 rotation matrices. Default is True.
+
+    Returns
+    -------
+    matrices : torch.Tensor
+        Rotation matrices with shape (N, 3, 3) or (N, 4, 4) where N is the
+        number of symmetry operations in the group.
+
+    Notes
+    -----
+    Rotation matrices are constructed following standard crystallographic
+    conventions. For cyclic groups, rotations are around the Z-axis.
+    For dihedral groups, additional 180° rotations are around the Y-axis.
+
+    The icosahedral symmetry groups (I, I1, I2) follow different centering
+    conventions used by various cryo-EM software packages.
+
+    Examples
+    --------
+    >>> import torch
+    >>> from cryosim.symmetries import get_rotation_matrices
+    >>> # Get C3 symmetry (3-fold cyclic)
+    >>> matrices_c3 = get_rotation_matrices('C3', return_affine=False)
+    >>> matrices_c3.shape
+    torch.Size([3, 3, 3])
+    >>> # Get D2 symmetry (2-fold dihedral)  
+    >>> matrices_d2 = get_rotation_matrices('D2', return_affine=False)
+    >>> matrices_d2.shape
+    torch.Size([4, 3, 3])
+    """
     sym = sym.upper()
 
     if sym[0] == "D":

@@ -41,7 +41,17 @@ class Rotation:
     @classmethod
     def from_rotvec(cls, rotvec: torch.Tensor):
         """
-        Create from rotation vector (axis * angle)
+        Create from rotation vector (axis * angle).
+
+        Parameters
+        ----------
+        rotvec : torch.Tensor
+            Rotation vector of shape (..., 3).
+
+        Returns
+        -------
+        Rotation
+            New Rotation instance.
         """
         theta = rotvec.norm(dim=-1, keepdim=True)
         axis = rotvec / theta.clamp(min=1e-8)
@@ -53,7 +63,17 @@ class Rotation:
     @classmethod
     def from_matrix(cls, R: torch.Tensor):
         """
-        Create from rotation matrix (3x3)
+        Create from rotation matrix (3x3).
+
+        Parameters
+        ----------
+        R : torch.Tensor
+            Rotation matrix of shape (..., 3, 3).
+
+        Returns
+        -------
+        Rotation
+            New Rotation instance.
         """
         # Source: https://www.euclideanspace.com/maths/geometry/rotations/conversions/matrixToQuaternion/
         m = R
@@ -119,7 +139,14 @@ class Rotation:
         return self._quat
 
     def as_rotvec(self):
-        """Return rotation vector (axis * angle)"""
+        """
+        Return rotation vector (axis * angle).
+
+        Returns
+        -------
+        rotvec : torch.Tensor
+            Rotation vector of shape (..., 3).
+        """
         xyz, w = self._quat[..., :3], self._quat[..., 3:]
         norm_xyz = xyz.norm(dim=-1, keepdim=True)
         angle = 2 * torch.atan2(norm_xyz, w)
@@ -129,7 +156,14 @@ class Rotation:
         return xyz * scale
 
     def as_matrix(self):
-        """Return 3x3 rotation matrix"""
+        """
+        Return 3x3 rotation matrix.
+
+        Returns
+        -------
+        R : torch.Tensor
+            Rotation matrix of shape (..., 3, 3).
+        """
         x, y, z, w = self._quat.unbind(-1)
         xx, yy, zz = x * x, y * y, z * z
         xy, xz, yz = x * y, x * z, y * z
@@ -154,7 +188,14 @@ class Rotation:
 
     # ----------------- Operations -----------------
     def inv(self):
-        """Return inverse rotation"""
+        """
+        Return inverse rotation.
+
+        Returns
+        -------
+        Rotation
+            Inverse rotation.
+        """
         q = self._quat.clone()
         q[..., :3] *= -1
         return Rotation(q)
@@ -198,7 +239,19 @@ class Rotation:
             return translate_coordinates(rotated, T, inverse=inverse)
 
     def __mul__(self, other):
-        """Compose rotations (quaternion multiplication)"""
+        """
+        Compose rotations (quaternion multiplication).
+
+        Parameters
+        ----------
+        other : Rotation
+            Other rotation to apply.
+
+        Returns
+        -------
+        Rotation
+            Composed rotation (self * other).
+        """
         x1, y1, z1, w1 = self._quat.unbind(-1)
         x2, y2, z2, w2 = other._quat.unbind(-1)
         x = w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2
@@ -256,6 +309,20 @@ def translate_coordinates(vectors, T, inverse=False):
 def random_quaternion(batchsize=1, convention="xyzw", device="cpu"):
     """
     Generate uniformly random unit quaternions using Shoemake's method.
+
+    Parameters
+    ----------
+    batchsize : int, optional
+        Number of quaternions to generate. Default 1.
+    convention : str, optional
+        Quaternion convention ('xyzw' or 'wxyz'). Default 'xyzw'.
+    device : str or torch.device, optional
+        Device for output tensor. Default 'cpu'.
+
+    Returns
+    -------
+    quats : torch.Tensor
+        Random unit quaternions. Shape (batchsize, 4) or (4,) if batchsize=1.
     """
 
     u1, u2, u3 = torch.rand(3, batchsize, device=device)
@@ -332,25 +399,28 @@ def random_rotation_matrix(batchsize=1, device="cpu"):
 
 def rotate_volume(V, theta, origin="relion", padding_mode="border"):
     """
-    Rotates a single 3D volume based on the batch of 3x4 affine transform matrices
+    Rotates a single 3D volume based on the batch of 3x4 affine transform matrices.
 
     Written by Tristan Bepler.
 
     Parameters
     ----------
-    V : Z x Y x X torch.Tensor
-        The volume to be rotated, must be real-valued.
-    theta : (B,3,4) torch.Tensor
-        B is the batch size. Concatenates a 3x3 rotation matrix and a 3x1 translation vector.
-    origin : str
+    V : torch.Tensor
+        The volume to be rotated, must be real-valued. Shape (Z, Y, X).
+    theta : torch.Tensor
+        Batch of affine matrices, Bx3x4.
+        Concatenates a 3x3 rotation matrix and a 3x1 translation vector.
+    origin : str, optional
         Convention for the index of the origin of rotation. "relion" defines the
         origin to be at [nz//2, ny//2, nx//2], whereas "center" sets it to
-        [(nz + 1) / 2, (ny + 1) / 2, (nx + 1) / 2]
+        [(nz + 1) / 2, (ny + 1) / 2, (nx + 1) / 2]. Default "relion".
+    padding_mode : str, optional
+        Padding mode for grid_sample. Default "border".
 
     Returns
     -------
-    V : B x Z x Y x X
-        The rotated volumes.
+    V_rotated : torch.Tensor
+         The rotated volumes. Shape (B, Z, Y, X).
     """
     align_corners = False
 
@@ -391,8 +461,7 @@ def rotate_volume(V, theta, origin="relion", padding_mode="border"):
 
 def translations_angstrom_to_torch(T, n, voxel_size):
     """
-    Builds a batch of normalized translation vectors from rlnOriginXAngst and
-    rlnOriginYAngst in starfiles.
+    Builds a batch of normalized translation vectors from rlnOriginXAngst and rlnOriginYAngst.
 
     Torch affine matrix uses a normalized coordinate system, where the coordinates
     of each axis ranges from [-1, 1]. Therefore, we need to do a coordinate
@@ -400,25 +469,24 @@ def translations_angstrom_to_torch(T, n, voxel_size):
 
     Parameters
     ----------
-    T : 2D tensor
-        Translation vector of shape (N,2), built from [rlnOriginXAngst, rlnOriginYAngst].
-        In angstroms.
+    T : torch.Tensor
+        Translation vector of shape (N, 2), built from [rlnOriginXAngst, rlnOriginYAngst]. In Å.
     n : int
         Number of pixels in x/y direction.
     voxel_size : float
-        Voxel size in angstroms.
+        Voxel size in Å.
 
     Returns
     -------
-    T : 2D tensor
+    T_norm : torch.Tensor
         Batch of Torch normalized translation vectors with shape (N, 3).
     """
     num = len(T)
     if T.shape[-1] == 2:
         tz = torch.zeros(num, device=T.device)
         T = torch.concat([T, tz[..., None]], dim=-1)
-    T *= 2 / n / voxel_size
-    return T
+    T_norm = T * 2 / n / voxel_size
+    return T_norm
 
 
 def build_affine_matrix(R, T=None):
@@ -435,17 +503,15 @@ def build_affine_matrix(R, T=None):
 
     Parameters
     ----------
-    R : 3D tensor
+    R : torch.Tensor
         Batch of rotation matrices with shape (N, 3, 3).
     T : 2D tensor
-        Batch of Torch normalized translation vectors with shape (N, 3). Note that
-        this is not the same as the shifts directly from CryoSPARC/RELION starfiles.
-        Those shifts must be normalized using translations_angstrom_to_torch.
+        Batch of Torch normalized translation vectors with shape (N, 3). Note that this is not the same as the shifts directly from CryoSPARC/RELION starfiles. Those shifts must be normalized using translations_angstrom_to_torch.
 
     Returns
     -------
-    R : 3D tensor
-        Batch of rotation matrices with shape (N, 3, 3).
+    theta : torch.Tensor
+        Batch of affine matrices with shape (N, 3, 4).
     """
     if T is None:
         T = torch.zeros_like(R[..., 0])
@@ -463,26 +529,26 @@ def build_affine_matrix(R, T=None):
 
 def rotations_angular_difference(r1, r2, rotation_representation="rotvec"):
     """
-    Calculates the smallest angles of rotation needed to a batch of 3D rotations (r1)
-    to match another (r2).
+    Calculates the smallest angles of rotation needed for a batch of 3D rotations (r1) to match another (r2).
 
     Parameters
     ----------
-    r1, r2 : 2D tensors
-        Batch of rotation representations (N, ...) each.
-    rotation_representation : str
+    r1 : torch.Tensor
+        Batch of rotation representations (N, ...).
+    r2 : torch.Tensor
+        Batch of rotation representations (N, ...).
+    rotation_representation : str, optional
         The rotation representation of the input. Supports only 'quaternion' and
-        'rotvec' for now.
+        'rotvec'. Default 'rotvec'.
 
     Returns
     -------
-    angles : 1D tensor
-        The smallest angular difference.
+    angles : torch.Tensor
+        The smallest angular difference in degrees.
 
     Notes
     -----
     .. [1] https://math.stackexchange.com/a/4001635
-
     """
     # use scipy Rotation module
     if rotation_representation == "rotvec":

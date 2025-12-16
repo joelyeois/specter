@@ -10,13 +10,53 @@ hc = 12.398e3  # [eV * Å]
 
 
 def energy_to_wavelength(energy):
-    """Converts electron energy [keV] to wavelength [Å]"""
+    """
+    Convert electron energy to de Broglie wavelength.
+
+    Uses the relativistic formula for electron wavelength calculation.
+
+    Parameters
+    ----------
+    energy : float
+        Electron beam energy in keV.
+
+    Returns
+    -------
+    wavelength : float
+        De Broglie wavelength in Å.
+
+    Notes
+    -----
+    Uses the relativistic formula:
+    λ = hc / sqrt(E * (E + 2*m_e*c²))
+    where m_e*c² = 511 keV (rest mass energy of electron).
+    """
     ev = energy * 1e3
     return hc / np.sqrt(ev * (ev + 2.0 * rest_mass_energy))
 
 
 def interaction_parameter(energy):
-    """Calculates the interaction parameter [1/ÅV]: Kirkland Eq.(5.6)."""
+    """
+    Calculate the electron-specimen interaction parameter.
+
+    Computes the interaction constant σ for electron scattering, following
+    Kirkland Eq. (5.6).
+
+    Parameters
+    ----------
+    energy : float
+        Electron beam energy in keV.
+
+    Returns
+    -------
+    sigma : torch.Tensor
+        Interaction parameter in units of 1/(Å·V).
+
+    References
+    ----------
+    .. [1] E. J. Kirkland, Advanced Computing in Electron Microscopy,
+       Eq. (5.6), Springer US, Boston, MA, 2010.
+    """
     w = energy_to_wavelength(energy)
     ev = energy * 1e3
     return (
@@ -28,7 +68,32 @@ def interaction_parameter(energy):
 
 
 def complex_potential(v, alpha=0.1):
-    """Applies amplitude ratio, α, to create complex potential (PyTorch version)"""
+    """
+    Apply amplitude ratio to create complex potential.
+
+    Converts real-valued potential to complex potential using amplitude
+    contrast ratio α, following weak phase object approximation with
+    absorption.
+
+    Parameters
+    ----------
+    v : torch.Tensor
+        Real-valued scattering potential.
+    alpha : float, optional
+        Amplitude contrast ratio. Typical values are 0.07-0.1.
+        Default is 0.1.
+
+    Returns
+    -------
+    complex_v : torch.Tensor
+        Complex-valued potential with real part scaled by sqrt(1-α²)
+        and imaginary part scaled by α.
+
+    Notes
+    -----
+    The complex potential is given by:
+    V = sqrt(1-α²)*v + i*α*v
+    """
     scale_real = (1 - alpha**2) ** 0.5
     return torch.complex(scale_real * v, alpha * v)
 
@@ -54,30 +119,37 @@ class Scattering(L.LightningModule):
         Parameters
         ----------
         nxy : int
-            Number of pixels in volume, (nz, nxy, nxy).
-        pixel_size: float
-            Pixel size in angstroms. Assumes dz is also pixel_size for now.
-        energy: float
-            Energy of the electron beam in keV. Typical values are 100/120/200/300 keV.
-        dose_per_angstrom: float
-            Dose of the electron beam in e-/A^2.
-        scattering_mode: str
-            Specifies scattering model to use. Options include 'multislice',
-            'firstborn', 'projection' and 'ctf', in order of increasing approximations.
-        klim: float
-            Kirkland [1] explains that setting klim = 0.66 is necessary to avoid
-            aliasing for FFT methods (multislice and first Born). But this numerically
-            lowers the spatial frequency information in the resultant exitwaves, so
-            default is set to None.
-        flip_curvature: bool
-            This corresponds to positive/negative Ewald sphere curvature
-            ambiguity. Set to False for positive, and True for negative (CryoSPARC).
-            Only affects multislice and first Born models.
+            Number of pixels in x and y dimensions, (nz, nxy, nxy).
+        pixel_size : float
+            Pixel size in Ångströms. Assumes dz equals pixel_size.
+        energy : float
+            Electron beam energy in keV. Typical values are 100, 120, 200, or 300 keV.
+        dose_per_angstrom : float
+            Electron dose in e-/Å^2.
+        scattering_model : str, optional
+            Scattering model to use. Options: 'multislice', 'firstborn',
+            'projection', 'ctf' (in order of increasing approximations).
+            Default is 'multislice'.
+        klim : float, optional
+            Bandlimit parameter for Kirkland's FFT aliasing prevention.
+            Setting klim=0.66 prevents aliasing but reduces spatial frequency
+            content. Default is None (no bandlimiting).
+        flip_curvature : bool, optional
+            Ewald sphere curvature sign. False for positive curvature,
+            True for negative (CryoSPARC convention). Only affects multislice
+            and first Born models. Default is False.
+        nz : int, optional
+            Number of slices in z dimension. Required for firstborn model.
+            Default is None.
+        alpha : float, optional
+            Amplitude contrast ratio. Default is 0.0.
+        progressbars : bool, optional
+            Whether to display progress bars during computation. Default is True.
 
         Notes
         -----
-        .. [1] E. J. Kirkland, Advanced Computing in Electron Microscopy (Springer
-           US, Boston, MA, 2010).
+        .. [1] E. J. Kirkland, Advanced Computing in Electron Microscopy,
+           Springer US, Boston, MA, 2010.
 
         """
         super().__init__()
@@ -142,6 +214,31 @@ class Scattering(L.LightningModule):
             self.kmask = 1
 
     def multislice(self, V):
+        """
+        Compute exit wave using multislice algorithm.
+
+        Iteratively propagates an electron wave through slices of the 3D
+        potential, accounting for both transmission through each slice and
+        Fresnel propagation between slices.
+
+        Parameters
+        ----------
+        V : torch.Tensor
+            Complex-valued 3D potential volume with shape (B, Z, Y, X) where
+            B is batch size, Z is number of slices.
+
+        Returns
+        -------
+        exitwave : torch.Tensor
+            Complex-valued 2D exit wave with shape (B, Y, X).
+
+        Notes
+        -----
+        The multislice algorithm alternates between:
+        1. Transmission: ψ * exp(iσV)
+        2. Propagation: FFT[ψ] * F * FFT⁻¹
+        where F is the Fresnel propagator and σ is the interaction parameter.
+        """
         F = self.F_real + 1j * self.F_imag
         if self.flip_curvature:
             V = torch.flip(V, dims=(1,))
@@ -168,12 +265,27 @@ class Scattering(L.LightningModule):
 
     def multislice_and_tilt(self, V, angle_deg):
         """
-        Perform multislice on a volume tilted by angle_deg around the X-axis.
-        Instead of rotating the volume (expensive), we sample slices on the fly.
+        Perform multislice on a tilted volume for tomography.
 
-        Args:
-            V: (B, Z, Y, X) potential volume
-            angle_deg: float, tilt angle in degrees
+        Instead of rotating the entire volume (computationally expensive),
+        samples slices on-the-fly from the tilted coordinate system.
+
+        Parameters
+        ----------
+        V : torch.Tensor
+            Potential volume with shape (B, Z, Y, X).
+        angle_deg : float
+            Tilt angle in degrees around the X-axis.
+
+        Returns
+        -------
+        exitwave : torch.Tensor
+            Complex-valued 2D exit wave from tilted projection, shape (B, Y, X).
+
+        Notes
+        -----
+        Uses trilinear interpolation (grid_sample) to extract tilted slices.
+        The tilt is performed around the X-axis following tomography conventions.
         """
         B, Z, Y, X = V.shape
         device = self.device
@@ -314,6 +426,28 @@ class Scattering(L.LightningModule):
         return exitwave
 
     def firstborn(self, V):
+        """
+        Compute exit wave using first Born approximation.
+
+        Weak phase object approximation that treats scattering as a single
+        event. Faster than multislice but less accurate for thick specimens.
+
+        Parameters
+        ----------
+        V : torch.Tensor
+            Complex-valued 3D potential volume with shape (B, Z, Y, X).
+
+        Returns
+        -------
+        exitwave : torch.Tensor
+            Complex-valued 2D exit wave with shape (B, Y, X).
+
+        Notes
+        -----
+        The first Born approximation computes the exit wave as:
+        ψ = 1 + i Σ_z [F(z) * V(z)]
+        where F(z) accounts for Fresnel propagation from slice z to the exit plane.
+        """
         F = self.F_real + 1j * self.F_imag
         if self.flip_curvature:
             V = torch.flip(V, dims=(1,))
@@ -329,12 +463,56 @@ class Scattering(L.LightningModule):
         return exitwave
 
     def projection(self, V):
+        """
+        Compute exit wave using projection approximation.
+
+        Phase object approximation that projects the 3D potential onto a 2D
+        plane, ignoring Fresnel propagation effects.
+
+        Parameters
+        ----------
+        V : torch.Tensor
+            Complex-valued 3D potential volume with shape (B, Z, Y, X).
+
+        Returns
+        -------
+        exitwave : torch.Tensor
+            Complex-valued 2D exit wave with shape (B, Y, X).
+
+        Notes
+        -----
+        The exit wave is computed as:
+        ψ = exp(i σ Σ_z V(z))
+        This is valid only for thin specimens where propagation effects are negligible.
+        """
         exitwave = np.sqrt(self.dose_per_pixel) * torch.exp(
             1j * self.sigma * torch.sum(V, 1)
         )
         return exitwave
 
     def ctf(self, V):
+        """
+        Compute projected potential for CTF-based imaging.
+
+        Returns the projected potential (not exit wave) for use with
+        contrast transfer function (CTF) imaging model.
+
+        Parameters
+        ----------
+        V : torch.Tensor
+            Real-valued 3D potential volume with shape (B, Z, Y, X).
+
+        Returns
+        -------
+        projection : torch.Tensor
+            Real-valued 2D projected potential with shape (B, Y, X).
+
+        Notes
+        -----
+        Computes: 2σ Σ_z V(z)
+        The factor of 2 accounts for the phase-contrast imaging relationship.
+        CTF is applied separately in the aberration module.
+        """
         projection = 2 * self.sigma * torch.sum(V, 1)
         return projection
 

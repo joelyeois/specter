@@ -4,6 +4,32 @@ from .fft_tools import fftn, ifftn
 
 
 def normalize_particles(particles, mask_diameter_pixels=None):
+    """
+    Normalize particle images using masked mean and standard deviation.
+
+    Computes normalization statistics (mean and standard deviation) using a
+    circular mask to exclude background regions, then normalizes the particle
+    images to have zero mean and unit variance.
+
+    Parameters
+    ----------
+    particles : torch.Tensor
+        Particle images with shape (N, size, size) where N is the number of
+        particles.
+    mask_diameter_pixels : int, optional
+        Diameter of the circular mask in pixels. Regions outside this diameter
+        are excluded from normalization statistics. Default is None, which uses
+        the full image size.
+
+    Returns
+    -------
+    means : torch.Tensor
+        Mean value for each particle, shape (N,).
+    stds : torch.Tensor
+        Standard deviation for each particle, shape (N,).
+    normalized_particles : torch.Tensor
+        Normalized particle images with shape (N, size, size).
+    """
     if mask_diameter_pixels is None:
         mask_diameter_pixels = particles.shape[-1]
     mask = 1 - circle2d(particles.shape[-1], mask_diameter_pixels)
@@ -21,20 +47,23 @@ def normalize_particles(particles, mask_diameter_pixels=None):
 
 def circle2d(N, d):
     """
-    Generates 2D array for a filled-in circle.
+    Generate a 2D binary mask of a filled circle.
+
+    Creates an NxN tensor with 1s inside a centered circle of diameter d
+    and 0s outside the circle.
 
     Parameters
     ----------
     N : int
-        Length of grid in pixels
+        Size of the output grid in pixels (N x N).
     d : int
-        Diameter in pixels
+        Diameter of the circle in pixels.
 
     Returns
     -------
-    circle : tensor, 2D
-        2D array with centered circle
-    ....
+    circle : torch.Tensor
+        Binary mask with shape (N, N). Values are 1.0 inside the circle
+        and 0.0 outside.
     """
     circle = torch.zeros((N, N))
     x = torch.linspace(-1, 1, N)
@@ -89,22 +118,34 @@ def butter(images):
 
 def apply_bfactor(volume, pixel_size, bfactor):
     """
-    Applies bfactor to a 3D scattering potential volume. I.e., blurs the volume.
+    Apply B-factor blurring to a 3D scattering potential volume.
+
+    Applies temperature factor (B-factor) blurring in Fourier space using
+    the formula exp(-B/4 * k²), which simulates thermal motion effects
+    on atomic scattering amplitudes.
 
     Parameters
     ----------
-    volume : 3D
-        3D scattering potential, assume cubic with shape (n, n, n).
+    volume : torch.Tensor
+        3D scattering potential volume with shape (n, n, n). Assumed to be
+        cubic and real-valued.
     pixel_size : float
-        The pixel size in angstroms.
+        The pixel size in Å.
     bfactor : float
-        The B-factor defined as exp(-B/4 k^2).
+        B-factor (temperature factor). Higher values increase blurring.
+        If bfactor=0.0, returns the original volume unchanged.
 
     Returns
     -------
-    newvolume : 3D tensor
-        The b-factor blurred volume.
+    newvolume : torch.Tensor
+        B-factor blurred volume with same shape as input. Returns real-valued
+        tensor if input is real, complex tensor if input is complex.
 
+    Notes
+    -----
+    The B-factor is applied in Fourier space as:
+    F_blurred(k) = F(k) * exp(-B/4 * k²)
+    where k is the spatial frequency magnitude.
     """
     if bfactor == 0.0:
         return volume
@@ -122,7 +163,28 @@ def apply_bfactor(volume, pixel_size, bfactor):
 
 def chimera_gaussian_sigma_to_bfactor(sigma):
     """
-    Converts ChimeraX's Gaussian width (sigma) to B-factor.
+    Convert ChimeraX Gaussian width to B-factor.
+
+    Converts the Gaussian standard deviation (sigma) used in ChimeraX
+    into the equivalent crystallographic B-factor.
+
+    Parameters
+    ----------
+    sigma : float or torch.Tensor
+        Gaussian width (standard deviation) in Å.
+
+    Returns
+    -------
+    bfactor : float or torch.Tensor
+        B-factor, calculated as 8π²σ².
+
+    Notes
+    -----
+    The relationship between Gaussian width and B-factor is:
+    B = 8π²σ²
+
+    This conversion is useful when matching blurring parameters between
+    ChimeraX visualization and cryo-EM simulation tools.
     """
     bfactor = 8 * torch.pi**2 * sigma**2
     return bfactor

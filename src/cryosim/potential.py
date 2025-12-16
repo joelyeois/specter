@@ -246,6 +246,39 @@ def build_potential_volume_fftconvolve_2d(
 
 
 class PotentialBuilder(L.LightningModule):
+    """
+    Lightning module for building 3D electrostatic potential volumes from atomic coordinates.
+
+    Computes potentials using supersampled atomic potential kernels and
+    convolution, supporting multiple parameterizations (Kirkland, Lobato, Shryov).
+
+    Parameters
+    ----------
+    n_xyz : int or tuple of int
+        Grid size (nx, ny, nz). If int, assumes cubic grid.
+    dx : float
+        Pixel/voxel size in Å.
+    atomic_numbers : torch.Tensor
+        Atomic numbers of all atoms in structure.
+    verbose : bool, optional
+        Enable progress bars during computation. Default is True.
+    parameterization : str, optional
+        Atomic potential parameterization: 'kirkland', 'lobato', or 'shryov'.
+        Default is 'kirkland'.
+    conv_backend : str, optional
+        Convolution backend: 'fftconvolve' or 'conv3d'. Default is 'fftconvolve'.
+    trainable : bool, optional
+        Whether parameters are trainable. Default is False.
+    mmcif_filepath : str, optional
+        Path to mmCIF file for Shryov parameterization. Default is None.
+
+    Attributes
+    ----------
+    atomic_potentials_2d : torch.Tensor
+        Precomputed 2D atomic potentials for each unique element.
+    atomic_potentials_3d : torch.Tensor
+        Precomputed 3D atomic potentials for each unique element.
+    """
     def __init__(
         self,
         n_xyz,
@@ -298,6 +331,20 @@ class PotentialBuilder(L.LightningModule):
         self.get_3d_atomic_potentials()
 
     def get_2d_atomic_potentials(self, unique_elements=None):
+        """
+        Compute and cache 2D atomic potential kernels for unique elements.
+
+        Parameters
+        ----------
+        unique_elements : torch.Tensor, optional
+            Elements to compute potentials for. If None, uses all unique
+            elements from initialization. Default is None.
+
+        Notes
+        -----
+        Potentials are supersampled and downsampled to main grid resolution.
+        Results are stored in `self.atomic_potentials_2d`.
+        """
         if unique_elements is None:
             unique_elements = self.unique_elements
         else:
@@ -321,6 +368,21 @@ class PotentialBuilder(L.LightningModule):
             self.atomic_potentials_2d[i] = pot
 
     def get_3d_atomic_potentials(self, unique_elements=None):
+        """
+        Compute and cache 3D atomic potential kernels for unique elements.
+
+        Parameters
+        ----------
+        unique_elements : torch.Tensor, optional
+            Elements to compute potentials for. If None, uses all unique
+            elements from initialization. Default is None.
+
+        Notes
+        -----
+        Potentials are supersampled and downsampled to main grid resolution.
+        Results are stored in `self.atomic_potentials_3d`.
+        Supports Kirkland, Lobato, and Shryov parameterizations.
+        """
         if unique_elements is None:
             unique_elements = self.unique_elements
         else:
@@ -354,6 +416,31 @@ class PotentialBuilder(L.LightningModule):
             self.atomic_potentials_3d[i] = pot
 
     def forward(self, coordinates, method="3d", conv_backend=None):
+        """
+        Build potential volume(s) from atomic coordinates.
+
+        Parameters
+        ----------
+        coordinates : torch.Tensor
+            Atomic coordinates. Shape (N, 3) for single volume or (B, N, 3)
+            for batch of volumes.
+        method : str, optional
+            Voxelization method: '2d' (soft XY, hard Z) or '3d' (trilinear).
+            Default is '3d'.
+        conv_backend : str, optional
+            Convolution backend override. Default is None (uses self.conv_backend).
+
+        Returns
+        -------
+        potential_volume : torch.Tensor
+            Electrostatic potential volume(s). Shape (nz, ny, nx) for single
+            input or (B, nz, ny, nx) for batched input.
+
+        Notes
+        -----
+        Uses soft voxelization followed by convolution with precomputed
+        atomic potential kernels. The 2d method is faster but less accurate.
+        """
         if conv_backend is None:
             conv_backend = self.conv_backend
         coordinates = coordinates.to(self.device)
@@ -459,6 +546,32 @@ class PotentialBuilder(L.LightningModule):
 
 
 class GemmiPotentialBuilder:
+    """
+    Build electrostatic potential volumes using Gemmi library.
+
+    Uses Gemmi's density calculator with Gaussian atomic form factors.
+    Supports custom scattering factors from mmCIF files.
+
+    Parameters
+    ----------
+    n_xyz : int or tuple of int
+        Grid size (nx, ny, nz). If int, assumes cubic grid.
+    dx : float
+        Pixel/voxel size in Å.
+    atomic_numbers : torch.Tensor, optional
+        Atomic numbers of all atoms. Default is None.
+    b_factor : float, optional
+        Isotropic B-factor. Default is 20.0.
+
+    Attributes
+    ----------
+    dencalc : gemmi.DensityCalculatorE
+        Gemmi density calculator instance.
+    translate_to_center : torch.Tensor
+        Translation vector to center atoms in grid.
+    c1 : float
+        Scaling factor for electrostatic potential (2π*e*a₀).
+    """
     def __init__(self, n_xyz, dx, atomic_numbers=None, b_factor=20.0):
         if isinstance(n_xyz, (int, float)):
             self.nx = self.ny = self.nz = n_xyz
@@ -488,11 +601,31 @@ class GemmiPotentialBuilder:
         self.dencalc.grid.set_size(self.nx, self.ny, self.nz)
 
         # scaling prefactor
-        a0 = 0.529  # Bohr radius, [Angstrom]
-        e = 14.4  # electron charge, [V-Angstrom]
+        a0 = 0.529  # Bohr radius, [Å]
+        e = 14.4  # electron charge, [V·Å]
         self.c1 = 2 * torch.pi * e * a0
 
     def build_model(self, atom_coordinates, atom_elements):
+        """
+        Build Gemmi structure model from atomic coordinates and elements.
+
+        Parameters
+        ----------
+        atom_coordinates : torch.Tensor or np.ndarray
+            Atomic coordinates in Å, shape (N, 3).
+        atom_elements : torch.Tensor or np.ndarray
+            Atomic numbers, shape (N,).
+
+        Returns
+        -------
+        model : gemmi.Model
+            Gemmi model containing atoms within grid bounds.
+
+        Notes
+        -----
+        Filters out atoms outside the grid boundaries.
+        All atoms are assigned to chain A, residue 1.
+        """
         # Create placeholder structure
         st = gemmi.Structure()
         model = st.add_model(gemmi.Model(1))
@@ -529,6 +662,19 @@ class GemmiPotentialBuilder:
         return model
 
     def build_dencalc(self):
+        """
+        Build a fresh Gemmi density calculator with current grid settings.
+
+        Returns
+        -------
+        dencalc : gemmi.DensityCalculatorE
+            Configured density calculator.
+
+        Notes
+        -----
+        Creates a new calculator to avoid state contamination between
+        multiple potential calculations.
+        """
         # prepare density calculator
         dencalc = gemmi.DensityCalculatorE()
 
@@ -547,6 +693,27 @@ class GemmiPotentialBuilder:
         return dencalc
 
     def build_potential_from_custom_mmcif(self, mmcif_filepath):
+        """
+        Build potential using custom scattering factors from mmCIF file.
+
+        Reads scattering factor coefficients from '_lmb_scat_coef' table
+        in mmCIF file for high-accuracy potential calculations.
+
+        Parameters
+        ----------
+        mmcif_filepath : str
+            Path to mmCIF file containing structure and scattering factors.
+
+        Returns
+        -------
+        potential : torch.Tensor
+            Electrostatic potential volume, shape (nz, ny, nx).
+
+        Notes
+        -----
+        Uses only the first atom from the structure and applies custom
+        form factors from the mmCIF file. Atoms are recentered to grid center.
+        """
         # Read the CIF structure file
         st = gemmi.read_structure(mmcif_filepath)
 
@@ -623,6 +790,20 @@ class GemmiPotentialBuilder:
         return self.c1 * torch.as_tensor(dencalc.grid.array).transpose(0, 2)
 
     def _build_single_potential(self, coords_elements_tuple):
+        """
+        Build potential for a single set of coordinates (non-parallel).
+
+        Parameters
+        ----------
+        coords_elements_tuple : tuple
+            (coordinates, elements) where coordinates is (N, 3) and
+            elements is (N,).
+
+        Returns
+        -------
+        potential : torch.Tensor
+            Potential volume with shape (nz, ny, nx).
+        """
         coords, elements = coords_elements_tuple
         model = self.build_model(coords, elements)
         dencalc = self.build_dencalc()
@@ -631,6 +812,25 @@ class GemmiPotentialBuilder:
 
     @staticmethod
     def _build_parallelizable_single_potential(args):
+        """
+        Build potential for parallel processing (static method).
+
+        Parameters
+        ----------
+        args : tuple
+            (coords, elements, nx, ny, nz, dx, b_factor) containing all
+            necessary parameters for building potential.
+
+        Returns
+        -------
+        potential : torch.Tensor
+            Potential volume with shape (nz, ny, nx).
+
+        Notes
+        -----
+        Static method to enable multiprocessing with spawn context.
+        Creates fresh Gemmi objects to avoid pickling issues.
+        """
         coords, elements, nx, ny, nz, dx, b_factor = args
         # Create placeholder structure
         st = gemmi.Structure()
@@ -683,6 +883,31 @@ class GemmiPotentialBuilder:
         return torch.as_tensor(dencalc.grid.array).transpose(0, 2)
 
     def build_potential(self, atom_coordinates, atomic_numbers=None, n_processes=None):
+        """
+        Build electrostatic potential volume from atomic coordinates.
+
+        Parameters
+        ----------
+        atom_coordinates : torch.Tensor
+            Atomic coordinates in Ų, shape (N, 3). Centered at origin.
+        atomic_numbers : torch.Tensor, optional
+            Atomic numbers, shape (N,). If None, uses self.atomic_numbers.
+            Default is None.
+        n_processes : int, optional
+            Number of parallel processes. If None, runs serially.
+            Default is None.
+
+        Returns
+        -------
+        potential : torch.Tensor
+            Electrostatic potential volume in Volt-Ångströms, shape (nz, ny, nx).
+
+        Notes
+        -----
+        Coordinates are automatically translated to place origin at grid center.
+        Parallel processing splits atoms across processes and sums results.
+        Scaling factor c1 = 2π*e*a₀ is applied to match physical units.
+        """
         if atomic_numbers is None:
             atomic_numbers = self.atomic_numbers
         else:

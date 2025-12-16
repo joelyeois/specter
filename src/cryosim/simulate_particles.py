@@ -9,11 +9,49 @@ import os
 
 
 class CustomWriter(BasePredictionWriter):
+    """
+    Custom prediction writer for saving particle simulation results.
+
+    Saves predictions and batch indices to disk at the end of each epoch,
+    with separate files for each process rank in distributed training.
+
+    Parameters
+    ----------
+    output_dir : str
+        Directory where prediction files will be saved.
+    write_interval : str
+        When to write predictions. Typically 'epoch' or 'batch'.
+
+    Attributes
+    ----------
+    output_dir : str
+        Directory for saving output files.
+    """
     def __init__(self, output_dir, write_interval):
         super().__init__(write_interval)
         self.output_dir = output_dir
 
     def write_on_epoch_end(self, trainer, pl_module, predictions, batch_indices):
+        """
+        Write predictions and batch indices to disk at epoch end.
+
+        Parameters
+        ----------
+        trainer : lightning.Trainer
+            PyTorch Lightning trainer instance.
+        pl_module : lightning.LightningModule
+            The LightningModule being trained.
+        predictions : list of torch.Tensor
+            List of prediction batches from all processes.
+        batch_indices : list
+            List of batch indices corresponding to predictions.
+
+        Notes
+        -----
+        Creates two files per process rank:
+        - predictions_{rank}.pt: Concatenated predictions
+        - batch_indices_{rank}.pt: Corresponding data indices
+        """
         # this will create N (num processes) files in `output_dir` each containing
         # the predictions of it's respective rank
         images = torch.concat(predictions, dim=0)
@@ -33,6 +71,33 @@ class CustomWriter(BasePredictionWriter):
 
 
 def str2bool(v):
+    """
+    Convert string representation to boolean value.
+
+    Accepts various string formats representing True or False values.
+
+    Parameters
+    ----------
+    v : str or bool
+        Value to convert. Can be boolean or string.
+
+    Returns
+    -------
+    bool
+        Boolean interpretation of input value.
+
+    Raises
+    ------
+    argparse.ArgumentTypeError
+        If string value is not a recognized boolean representation.
+
+    Examples
+    --------
+    >>> str2bool('yes')
+    True
+    >>> str2bool('false')
+    False
+    """
     if isinstance(v, bool):
         return v
     if v.lower() in ("yes", "true", "t", "y", "1"):
@@ -44,6 +109,64 @@ def str2bool(v):
 
 
 def main():
+    """
+    Simulate particle images using multi-GPU Lightning framework.
+
+    Command-line entry point for generating simulated cryo-EM particle images.
+    Loads pre-computed potential, quaternions, translations, and CTF parameters,
+    then uses PyTorch Lightning with distributed data parallel (DDP) to generate
+    images across multiple GPUs.
+
+    Command-line Arguments
+    ----------------------
+    Required:
+        --V_path : str
+            Path to saved 3D potential volume tensor (.pt file).
+        --dx : float
+            Pixel size in Å.
+        --quaternions_path : str
+            Path to rotation quaternions tensor (.pt file).
+        --translations_path : str
+            Path to 2D translations tensor (.pt file).
+        --ctf_params_path : str
+            Path to CTF parameters tensor (.pt file).
+        --energy : float
+            Electron beam energy in keV.
+        --dose_per_angstrom : float
+            Electron dose in electrons per Å².
+        --n_particles : int
+            Total number of particle images to generate.
+
+    Optional:
+        --batch_size : int
+            Batch size for image generation. Default is 5.
+        --scattering_model : str
+            Scattering model ('multislice', 'projection', etc.). Default is 'multislice'.
+        --aberration_model : str
+            Aberration model ('holography' or 'ctf'). Default is 'holography'.
+        --noise_model : str
+            Noise model ('poisson' or None). Default is None.
+        --ice_model : str
+            Ice model to use. Default is None.
+        --ice_thickness : float
+            Ice thickness in Å. Default is 0.
+        --alpha : float
+            Amplitude contrast ratio. Default is 0.0.
+        --crowd_min_distance : float
+            Minimum distance between crowded particles. Default is None.
+        --pad_fft : bool
+            Whether to pad for FFT operations. Default is False.
+        --output_path : str
+            Path to save final image stack. Default is '../cache/images.pt'.
+        --devices : str
+            Comma-separated GPU device IDs (e.g., '0,1'). Default is '0'.
+
+    Notes
+    -----
+    Output files are saved per GPU rank:
+    - predictions_{rank}.pt: Generated images
+    - batch_indices_{rank}.pt: Corresponding particle indices
+    """
     parser = argparse.ArgumentParser(
         description="Simulate particle images with multi-GPU Lightning."
     )

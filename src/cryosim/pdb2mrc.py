@@ -7,13 +7,34 @@ from scipy.spatial.distance import pdist
 
 
 class PDB2MRC:
-    """Ice-making machine"""
+    """
+    Converts PDB structure to MRC potential volume.
+
+    Parameters
+    ----------
+    pdb_code : str, optional
+        PDB code to fetch.
+    pdb_path : str, optional
+        Path to local PDB file.
+    """
 
     def __init__(self, pdb_code=None, pdb_path=None):
         self.pdb_code = pdb_code
         self.pdb_path = pdb_path
 
     def fetch_pdb(self, pdb_folder="../pdb-data/", assembly=True, center=True):
+        """
+        Fetch PDB file or load local file, and extract coordinates.
+
+        Parameters
+        ----------
+        pdb_folder : str, optional
+            Folder to save fetched PDB file. Default "../pdb-data/".
+        assembly : bool, optional
+            Whether to fetch biological assembly. Default True.
+        center : bool, optional
+            Whether to center the coordinates. Default True.
+        """
         self.assembly = assembly
         if self.pdb_code is not None:
             # saves PDB file
@@ -39,6 +60,14 @@ class PDB2MRC:
         self.estimate_max_diameter()
 
     def estimate_max_diameter(self, coords=None):
+        """
+        Estimate maximum diameter of the particle using Convex Hull.
+
+        Parameters
+        ----------
+        coords : torch.Tensor or np.ndarray, optional
+            Coordinates. If None, uses `self.centered_coords`.
+        """
         if coords is None:
             coords = self.centered_coords
         hull = ConvexHull(coords)
@@ -53,6 +82,22 @@ class PDB2MRC:
         method="3d",
         atom_size_px=11,
     ):
+        """
+        Build potential volume from atomic coordinates.
+
+        Parameters
+        ----------
+        n : int, optional
+            Volume size (n, n, n). Default 256.
+        dx : float, optional
+            Pixel size in Å. Default 1.
+        super_sampling_factor : int, optional
+            Super sampling factor (unused in current implementation?). Default 4.
+        method : str, optional
+            '2d' or '3d'. Default '3d'.
+        atom_size_px : int, optional
+            Atom box size in pixels for kernel. Default 11.
+        """
         self.n = n
         self.dx = dx
         self.super_sampling_factor = 4

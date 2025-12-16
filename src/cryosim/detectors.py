@@ -7,19 +7,28 @@ def k3_200kv(n, dx, device="cpu", return1d=False):
     """
     Return the MTF of a Gatan K3 detector at 200 kV.
 
-    Uses measured MTF values from the datasheet:
+    Uses measured MTF values from the datasheet.
+
+    Parameters
+    ----------
+    n : int
+        Number of pixels along each axis of the output MTF.
+    dx : float
+        Pixel size of the simulated image (same units as spatial frequency).
+    device : str or torch.device, optional
+        Device to create tensors on ('cpu' or 'cuda'). Default is 'cpu'.
+    return1d : bool, optional
+        If True, return 1D MTF sampled at radial frequencies. Default is False.
+
+    Returns
+    -------
+    mtf : torch.Tensor
+        - If return1d=False: 2D NxN MTF array (radially symmetric).
+        - If return1d=True: Tuple (k_data, mtf_values) for 1D MTF.
+    
+    References
+    ----------
     https://www.gatan.com/sites/default/files/images/mtf_k3_standard_200kV_FL2.star
-
-    Args:
-        n (int): number of pixels along each axis of the output MTF
-        dx (float): pixel size of the simulated image (same units as spatial frequency)
-        device (str or torch.device): 'cpu' or 'cuda'
-        return1d (bool): if True, return 1D MTF sampled at radial frequencies
-
-    Returns:
-        torch.Tensor:
-            - if return1d=False: 2D NxN MTF array (radially symmetric)
-            - if return1d=True: tuple (k_data, mtf_values) for 1D MTF
     """
     _rlnResolutionInversePixel = torch.tensor(
         [
@@ -120,19 +129,28 @@ def k3_300kv(n, dx, device="cpu", return1d=False):
     """
     Return the MTF of a Gatan K3 detector at 300 kV.
 
-    Uses measured MTF values from the datasheet:
+    Uses measured MTF values from the datasheet.
+
+    Parameters
+    ----------
+    n : int
+        Number of pixels along each axis of the output MTF.
+    dx : float
+        Pixel size of the simulated image.
+    device : str or torch.device, optional
+        Device to create tensors on ('cpu' or 'cuda'). Default is 'cpu'.
+    return1d : bool, optional
+        If True, return 1D MTF sampled at radial frequencies. Default is False.
+
+    Returns
+    -------
+    mtf : torch.Tensor
+        - If return1d=False: 2D NxN MTF array.
+        - If return1d=True: Tuple (k_data, mtf_values) for 1D MTF.
+
+    References
+    ----------
     https://www.gatan.com/sites/default/files/images/mtf_k3_standard_300kV_FL2.star
-
-    Args:
-        n (int): number of pixels along each axis of the output MTF
-        dx (float): pixel size of the simulated image
-        device (str or torch.device): 'cpu' or 'cuda'
-        return1d (bool): if True, return 1D MTF sampled at radial frequencies
-
-    Returns:
-        torch.Tensor:
-            - if return1d=False: 2D NxN MTF array
-            - if return1d=True: tuple (k_data, mtf_values) for 1D MTF
     """
     _rlnResolutionInversePixel = torch.tensor(
         [
@@ -235,16 +253,22 @@ def perfect_detector(n, dx, device="cpu", return1d=False):
 
     The ideal MTF is given by sinc(pi * f / f_Nyquist), where f_Nyquist = 1/(2*dx).
 
-    Args:
-        n (int): number of pixels along each axis
-        dx (float): pixel size of the simulated image
-        device (str or torch.device): 'cpu' or 'cuda'
-        return1d (bool): if True, return 1D radial MTF instead of 2D
+    Parameters
+    ----------
+    n : int
+        Number of pixels along each axis.
+    dx : float
+        Pixel size of the simulated image.
+    device : str or torch.device, optional
+        Device to create tensors on ('cpu' or 'cuda'). Default is 'cpu'.
+    return1d : bool, optional
+        If True, return 1D radial MTF instead of 2D. Default is False.
 
-    Returns:
-        torch.Tensor:
-            - if return1d=False: 2D NxN MTF array (radially symmetric)
-            - if return1d=True: tuple (k_data, mtf_1d) for 1D MTF along a radial line
+    Returns
+    -------
+    mtf : torch.Tensor
+        - If return1d=False: 2D NxN MTF array (radially symmetric).
+        - If return1d=True: Tuple (k_data, mtf_1d) for 1D MTF along a radial line.
     """
     # Frequency grid in cycles per dx
     k = torch.fft.fftshift(torch.fft.fftfreq(n, d=dx, device=device))
@@ -271,19 +295,27 @@ def falcon4i_300kv(n, dx, device="cpu", return1d=False):
 
     Approximates the MTF using measured DQE at 0, 0.5, and 1 Nyquist and assumes
     MTF ≈ sqrt(DQE). Quadratic interpolation is used.
-    Datasheet:
+
+    Parameters
+    ----------
+    n : int
+        Number of pixels along each axis.
+    dx : float
+        Pixel size of the simulated image.
+    device : str or torch.device, optional
+        Device to create tensors on ('cpu' or 'cuda'). Default is 'cpu'.
+    return1d : bool, optional
+        If True, return 1D MTF along a radial line. Default is False.
+
+    Returns
+    -------
+    mtf : torch.Tensor
+        - If return1d=False: 2D NxN MTF array.
+        - If return1d=True: Tuple (k_data, mtf_1d) for 1D radial MTF.
+
+    References
+    ----------
     https://www.thermofisher.com/sg/en/home/electron-microscopy/products/accessories-em/falcon-detector.html
-
-    Args:
-        n (int): number of pixels along each axis
-        dx (float): pixel size of the simulated image
-        device (str or torch.device): 'cpu' or 'cuda'
-        return1d (bool): if True, return 1D MTF along a radial line
-
-    Returns:
-        torch.Tensor:
-            - if return1d=False: 2D NxN MTF array
-            - if return1d=True: tuple (k_data, mtf_1d) for 1D radial MTF
     """
     k_nyquist = 1 / 2 / dx
     nyquist_fraction = torch.tensor([0.0, 0.5, 1.0], dtype=torch.float32, device=device)
@@ -317,19 +349,27 @@ def falcon4i_200kv(n, dx, device="cpu", return1d=False):
 
     Approximates the MTF using measured DQE at 0, 0.5, and 1 Nyquist and assumes
     MTF ≈ sqrt(DQE). Quadratic interpolation is used.
-    Datasheet:
+
+    Parameters
+    ----------
+    n : int
+        Number of pixels along each axis.
+    dx : float
+        Pixel size of the simulated image.
+    device : str or torch.device, optional
+        Device to create tensors on ('cpu' or 'cuda'). Default is 'cpu'.
+    return1d : bool, optional
+        If True, return 1D MTF along a radial line. Default is False.
+
+    Returns
+    -------
+    mtf : torch.Tensor
+        - If return1d=False: 2D NxN MTF array.
+        - If return1d=True: Tuple (k_data, mtf_1d) for 1D radial MTF.
+
+    References
+    ----------
     https://www.thermofisher.com/sg/en/home/electron-microscopy/products/accessories-em/falcon-detector.html
-
-    Args:
-        n (int): number of pixels along each axis
-        dx (float): pixel size of the simulated image
-        device (str or torch.device): 'cpu' or 'cuda'
-        return1d (bool): if True, return 1D MTF along a radial line
-
-    Returns:
-        torch.Tensor:
-            - if return1d=False: 2D NxN MTF array
-            - if return1d=True: tuple (k_data, mtf_1d) for 1D radial MTF
     """
     k_nyquist = 1 / 2 / dx
     nyquist_fraction = torch.tensor([0.0, 0.5, 1.0], dtype=torch.float32, device=device)

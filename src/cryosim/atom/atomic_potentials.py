@@ -216,6 +216,7 @@ def load_shryov_parameters(filepath):
 def kirkland_atomic_potential_2d(atomic_number, r_xy):
     """
     Compute 2D projected electrostatic potential for an atom using Kirkland parameters.
+
     Vectorized over the 3 scattering terms to avoid explicit Python loops.
 
     Parameters
@@ -223,16 +224,16 @@ def kirkland_atomic_potential_2d(atomic_number, r_xy):
     atomic_number : int
         Atomic number of the element.
     r_xy : torch.Tensor
-        2D grid of radial distances, shape (Nx, Ny)
+        2D grid of radial distances, shape (Nx, Ny).
 
     Returns
     -------
-    torch.Tensor
-        2D potential, same shape as r_xy
+    potential : torch.Tensor
+        2D potential, same shape as r_xy.
     """
     device = r_xy.device
-    a0 = 0.529  # Bohr radius, Angstrom
-    e = 14.4  # electron charge, V-Angstrom
+    a0 = 0.529  # Bohr radius, [Å]
+    e = 14.4  # electron charge, [V·Å]
 
     c1 = 4 * (torch.pi**2) * a0 * e
     c2 = 2 * (torch.pi**2) * a0 * e
@@ -258,31 +259,32 @@ def kirkland_atomic_potential_2d(atomic_number, r_xy):
 
 
 def kirkland_atomic_potential_3d(atomic_number, r_xyz):
-    """Returns the 3D atomic potential for a specific element and given a 3D grid
-    of radial distances from the atom core. Kirkland C.19.
+    """
+    Compute the 3D atomic potential for a specific element.
 
+    Based on Kirkland C.19.
     Summing along the z-axes (or any other axes due to symmetry) should yield
     approximately the same results as atomic_potential_2d.
 
-    Note: There is a singularity at r = 0 because the atomic nucleaus is essentially
-    a point charge on this scale (~1e-5 Angstroms).
+    Note: There is a singularity at r = 0 because the atomic nucleus is essentially
+    a point charge on this scale (~1e-5 Å).
 
     Parameters
     ----------
     atomic_number : int
-        Atomic number, Hyrdogen has number 1.
-    r_xyz : 3D tensor
-        Distances from the atomic core in units of Ångstrom. r^2 = x^2 + y^2 + z^2.
+        Atomic number, Hydrogen has number 1.
+    r_xyz : torch.Tensor
+        Distances from the atomic core in units of Å. r^2 = x^2 + y^2 + z^2.
         Assume equally spaced grid along x and y, i.e. dx = dy.
 
     Returns
     -------
-    potential : tensor
-        Atomic potential in units of V-Ångstrom, same shape as r_xyz.
+    potential : torch.Tensor
+        Atomic potential in units of V·Å, same shape as r_xyz.
     """
     device = r_xyz.device
-    a0 = 0.529  # Bohr radius, [Angstrom]
-    e = 14.4  # electron charge, [V-Angstrom]
+    a0 = 0.529  # Bohr radius, [Å]
+    e = 14.4  # electron charge, [V·Å]
     c1 = 2 * (torch.pi**2) * a0 * e
     c2 = 2 * (torch.pi ** (5 / 2)) * a0 * e
 
@@ -305,21 +307,23 @@ def kirkland_atomic_potential_3d(atomic_number, r_xyz):
 
 
 def kirkland_atomic_potential_3d_fourier(atomic_number, k_xyz):
-    """Returns the Fourier transformed 3D atomic potential for a specific element and
-    given a 3D grid of radial distances from the atom core. Kirkland C.15.
+    """
+    Compute the Fourier transformed 3D atomic potential for a specific element.
+
+    Based on Kirkland C.15.
 
     Parameters
     ----------
     atomic_number : int
-        Atomic number, Hyrdogen has number 1.
-    k_xyz : 3D tensor
-        Distances from the atomic core in units of Ångstrom. k^2 = kx^2 + ky^2 + kz^2.
+        Atomic number, Hydrogen has number 1.
+    k_xyz : torch.Tensor
+        Distances from the atomic core in units of Å. k^2 = kx^2 + ky^2 + kz^2.
         Assume equally spaced grid along kx and ky, i.e. dkx = dky.
 
     Returns
     -------
-    potential : tensor
-        Atomic potential in Fourier space in units of 1/V-Ångstrom, same shape as r_xyz.
+    potential : torch.Tensor
+        Atomic potential in Fourier space in units of 1/V·Å, same shape as r_xyz.
     """
     device = k_xyz.device
 
@@ -343,26 +347,28 @@ def kirkland_atomic_potential_3d_fourier(atomic_number, k_xyz):
 
 
 def lobato_atomic_potential_2d(atomic_number, r_xy):
-    """Returns the 3D atomic potential for a specific element and given a 3D grid
-    of radial distances from the atom core. Lobato Eq.16.
+    """
+    Compute the 3D atomic potential for a specific element using Lobato parameterization.
+
+    Based on Lobato Eq.16.
 
     Parameters
     ----------
     atomic_number : int
-        Atomic number, Hyrdogen has number 1.
-    r_xy : 2D tensor
-        Distances from the atomic core in units of Ångstrom. r^2 = x^2 + y^2.
+        Atomic number, Hydrogen has number 1.
+    r_xy : torch.Tensor
+        Distances from the atomic core in units of Å. r^2 = x^2 + y^2.
         Assume equally spaced grid along x and y, i.e. dx = dy.
 
     Returns
     -------
-    potential : tensor
-        Atomic potential in units of V-Ångstrom, same shape as r_xy.
+    potential : torch.Tensor
+        Atomic potential in units of V·Å, same shape as r_xy.
     """
     device = r_xy.device
     vac_perm = 1 / 4 / torch.pi
-    a0 = 0.529  # Bohr radius, [Angstrom]
-    e = 14.4  # electron charge, [V-Angstrom]
+    a0 = 0.529  # Bohr radius, [Å]
+    e = 14.4  # electron charge, [V·Å]
     kappa = 2 * vac_perm / a0 / e
 
     # get scattering factors
@@ -383,29 +389,31 @@ def lobato_atomic_potential_2d(atomic_number, r_xy):
 
 
 def lobato_atomic_potential_3d(atomic_number, r_xyz):
-    """Returns the 3D atomic potential for a specific element and given a 3D grid
-    of radial distances from the atom core. Lobato Eq.15.
+    """
+    Compute the 3D atomic potential for a specific element using Lobato parameterization.
 
-    Note: There is a singularity at r = 0 because the atomic nucleaus is essentially
-    a point charge on this scale (~1e-5 Angstroms).
+    Based on Lobato Eq.15.
+
+    Note: There is a singularity at r = 0 because the atomic nucleus is essentially
+    a point charge on this scale (~1e-5 Å).
 
     Parameters
     ----------
     atomic_number : int
-        Atomic number, Hyrdogen has number 1.
-    r_xyz : 3D tensor
-        Distances from the atomic core in units of Ångstrom. r^2 = x^2 + y^2 + z^2.
+        Atomic number, Hydrogen has number 1.
+    r_xyz : torch.Tensor
+        Distances from the atomic core in units of Å. r^2 = x^2 + y^2 + z^2.
         Assume equally spaced grid along x and y, i.e. dx = dy.
 
     Returns
     -------
-    potential : tensor
-        Atomic potential in units of V-Ångstrom, same shape as r_xyz.
+    potential : torch.Tensor
+        Atomic potential in units of V·Å, same shape as r_xyz.
     """
     device = r_xyz.device
     vac_perm = 1 / 4 / torch.pi
-    a0 = 0.529  # Bohr radius, [Angstrom]
-    e = 14.4  # electron charge, [V-Angstrom]
+    a0 = 0.529  # Bohr radius, [Å]
+    e = 14.4  # electron charge, [V·Å]
     kappa = 2 * vac_perm / a0 / e
     c1 = torch.pi**2 / kappa
 
@@ -432,21 +440,23 @@ def lobato_atomic_potential_3d(atomic_number, r_xyz):
 
 
 def lobato_atomic_potential_3d_fourier(atomic_number, k_xyz):
-    """Returns the Fourier transformed 3D atomic potential for a specific element and
-    given a 3D grid of radial distances from the atom core. Lobato Eq. 56.
+    """
+    Compute the Fourier transformed 3D atomic potential for a specific element using Lobato parameterization.
+
+    Based on Lobato Eq. 56.
 
     Parameters
     ----------
     atomic_number : int
-        Atomic number, Hyrdogen has number 1.
-    k_xyz : 3D tensor
-        Distances from the atomic core in units of Ångstrom. k^2 = kx^2 + ky^2 + kz^2.
+        Atomic number, Hydrogen has number 1.
+    k_xyz : torch.Tensor
+        Distances from the atomic core in units of Å. k^2 = kx^2 + ky^2 + kz^2.
         Assume equally spaced grid along kx and ky, i.e. dkx = dky.
 
     Returns
     -------
-    potential : tensor
-        Atomic potential in Fourier space in units of 1/V-Ångstrom, same shape as r_xyz.
+    potential : torch.Tensor
+        Atomic potential in Fourier space in units of 1/V·Å, same shape as r_xyz.
     """
     device = k_xyz.device
 
@@ -467,24 +477,28 @@ def lobato_atomic_potential_3d_fourier(atomic_number, k_xyz):
 
 
 def shryov_atomic_potential_3d_fourier(atomic_number, k_xyz, filepath):
-    """Returns the 3D atomic potential for a specific element and given a 3D grid
-    of radial distances from the atom core. Shryov 2025 Eq.18.
+    """
+    Compute the 3D atomic potential for a specific element using Shryov parameterization.
 
-    Note: There is a singularity at r = 0 because the atomic nucleaus is essentially
-    a point charge on this scale (~1e-5 Angstroms).
+    Based on Shryov 2025 Eq.18.
+
+    Note: There is a singularity at r = 0 because the atomic nucleus is essentially
+    a point charge on this scale (~1e-5 Å).
 
     Parameters
     ----------
     atomic_number : int
-        Atomic number, Hyrdogen has number 1.
-    r_xyz : 3D tensor
-        Distances from the atomic core in units of Ångstrom. r^2 = x^2 + y^2 + z^2.
+        Atomic number, Hydrogen has number 1.
+    k_xyz : torch.Tensor
+        Distances from the atomic core in units of Å. r^2 = x^2 + y^2 + z^2.
         Assume equally spaced grid along x and y, i.e. dx = dy.
+    filepath : str
+        Path to the Shryov parameter file (MMCIF).
 
     Returns
     -------
-    potential : tensor
-        Atomic potential in units of V-Ångstrom, same shape as r_xyz.
+    potential : torch.Tensor
+        Atomic potential in units of V·Å, same shape as r_xyz.
     """
     device = k_xyz.device
 
@@ -505,24 +519,29 @@ def shryov_atomic_potential_3d_fourier(atomic_number, k_xyz, filepath):
 
 
 def shryov_atomic_potential_3d(atomic_number, r_xyz, filepath, energy=300):
-    """Returns the 3D atomic potential for a specific element and given a 3D grid
-    of radial distances from the atom core. Shryov 2025 Eq.18.
+    """
+    Compute the 3D atomic potential for a specific element using Shryov parameterization.
 
-    Note: There is a singularity at r = 0 because the atomic nucleaus is essentially
-    a point charge on this scale (~1e-5 Angstroms).
+    Based on Shryov 2025 Eq.18.
+
+    Note: There is a singularity at r = 0 because the atomic nucleus is essentially
+    a point charge on this scale (~1e-5 Å).
 
     Parameters
     ----------
     atomic_number : int
-        Atomic number, Hyrdogen has number 1.
-    r_xyz : 3D tensor
-        Distances from the atomic core in units of Ångstrom. r^2 = x^2 + y^2 + z^2.
-        Assume equally spaced grid along x and y, i.e. dx = dy.
+        Atomic number, Hydrogen has number 1.
+    r_xyz : torch.Tensor
+        3D grid of radial distances.
+    filepath : str
+        Path to the Shryov parameter file.
+    energy : float, optional
+        Beam energy in kV. Default 300.
 
     Returns
     -------
-    potential : tensor
-        Atomic potential in units of V-Ångstrom, same shape as r_xyz.
+    potential : torch.Tensor
+        Atomic potential in units of V·Å, same shape as r_xyz.
     """
     # device = r_xyz.device
     # r2 = r_xyz**2
@@ -532,8 +551,8 @@ def shryov_atomic_potential_3d(atomic_number, r_xyz, filepath, energy=300):
     dky = k_xyz[0, 1, 0] - k_xyz[0, 0, 0]
     dkz = k_xyz[0, 0, 1] - k_xyz[0, 0, 0]
 
-    a0 = 0.529  # Bohr radius, [Angstrom]
-    e = 14.4  # electron charge, [V-Angstrom]
+    a0 = 0.529  # Bohr radius, [Å]
+    e = 14.4  # electron charge, [V·Å]
     c1 = 2 * torch.pi * e * a0
 
     # get scattering factors

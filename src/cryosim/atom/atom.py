@@ -227,11 +227,15 @@ def atom_symbol(z):
     Supports scalar, list, or PyTorch tensor input of any shape.
     Returns a NumPy array of strings with the same shape as the input.
 
-    Args:
-        z (int, list, or torch.Tensor): Atomic number(s).
+    Parameters
+    ----------
+    z : int, list, or torch.Tensor
+        Atomic number(s).
 
-    Returns:
-        np.ndarray: Element symbol(s) as strings.
+    Returns
+    -------
+    symbols : np.ndarray
+        Element symbol(s) as strings.
     """
     # Convert torch tensor to numpy if needed
     if isinstance(z, torch.Tensor):
@@ -244,13 +248,18 @@ def atom_symbol(z):
 def atom_number(symbols):
     """
     Convert element symbols to atomic numbers using ELEMENT_SYMBOLS array.
+
     Case-insensitive.
 
-    Args:
-        symbols (str, list of str, or np.ndarray of str): Element symbol(s)
+    Parameters
+    ----------
+    symbols : str, list of str, or np.ndarray of str
+        Element symbol(s).
 
-    Returns:
-        torch.Tensor: Atomic number(s) as a tensor of dtype long.
+    Returns
+    -------
+    numbers : torch.Tensor
+        Atomic number(s) as a tensor of dtype long.
     """
     arr = np.atleast_1d(symbols).astype(str)
 
@@ -267,13 +276,16 @@ def atom_mass(x):
     """
     Return atomic mass of atoms.
 
-    Args:
-        x (str, int, list, np.ndarray, or torch.Tensor):
-            - Atom symbol(s) as string, list of strings, or np.ndarray of strings
-            - Atomic number(s) as int, list, np.ndarray of integers, or torch.Tensor
+    Parameters
+    ----------
+    x : str, int, list, np.ndarray, or torch.Tensor
+        - Atom symbol(s) as string, list of strings, or np.ndarray of strings
+        - Atomic number(s) as int, list, np.ndarray of integers, or torch.Tensor
 
-    Returns:
-        torch.Tensor: Atomic masses corresponding to input
+    Returns
+    -------
+    masses : torch.Tensor
+        Atomic masses corresponding to input.
     """
     # If input is string or list of strings, convert to atomic numbers
     if isinstance(x, str) or (

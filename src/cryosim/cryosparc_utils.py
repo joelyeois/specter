@@ -12,38 +12,38 @@ def extract_parameters_from_csfile(
     csfile_path, return_class="0", rotation_representation="quaternion"
 ):
     """
-    Extracts pose and ctf parameters from CryoSPARC .cs files and converts them to
-    Ghostbuster parameters
+    Extract poses and CTF parameters from CryoSPARC .cs file.
 
     Parameters
     ----------
     csfile_path : str
         Path of the .cs file.
-    return_class: str
-        Specifies which particle class to return. Options are '0', '1', ... , 'all'.
+    return_class : str, optional
+        Specifies which particle class to return. Options are '0', '1', or 'all'.
+        Default is '0'.
+    rotation_representation : str, optional
+        Representation of rotations. 'quaternion' or 'rotvec'. Default is 'quaternion'.
 
-    Return
-    ------
-    energy_kev : 1D tensor
+    Returns
+    -------
+    energy_kev : torch.Tensor
         Energy in keV.
-    pixel_size : 1D tensor
-        Pixel sizes in Angstrom.
-    alpha : 1D tensor
+    pixel_size : torch.Tensor
+        Pixel sizes in Ångstrom.
+    alpha : torch.Tensor
         Amplitude contrast ratio.
-    rotations : 2D tensor
-        Quaternions with shape (N, 4).
-    translations_A : 2D tensor
-        xy-translations with shape (N, 2).
-    ctf_params : 2D tensor
-        CTF parameters with shape (N, 7). Parameters are Cs, dfu, dfv, dfang, tiltx,
-        tilty, phaseshift.
-    indices : 1D tensor
-        Contains the indices of the specific particles.
-
-    Notes
-    -----
-    .. To-do
-
+    rotations : torch.Tensor
+        Quaternions with shape (N, 4) or rotation vectors.
+    translations_A : torch.Tensor
+        xy-translations in Ångstrom with shape (N, 2).
+    ctf_params : torch.Tensor
+        CTF parameters with shape (N, 7). Parameters are (Cs, dfu, dfv, dfang, tiltx, tilty, phaseshift).
+    scale : torch.Tensor
+        Per-particle scale factors.
+    anisomag : torch.Tensor or None
+        Anisotropic magnification matrices (N, 2, 2) or None if identity.
+    indices : torch.Tensor
+        Indices of the extracted particles from the dataset.
     """
     dataset = Dataset.load(csfile_path)
 
@@ -193,37 +193,32 @@ def create_particle_starfile(
     ctf_params=None,
 ):
     """
-    Saves a particle stack as MRCS and creates a RELION .star file for tomographic reconstruction.
+    Save particle stack as MRCS and create RELION .star file.
 
     Parameters
     ----------
-    particles : np.ndarray, shape (N, H, W)
-        Stack of 2D particle images.
-    rotations : np.ndarray, optional
-        Rotation information per particle. Can be quaternions (N,4), rotation matrices (N,3,3),
-        or rotation vectors (N,3). Default None.
-    translations : np.ndarray, optional
-        Optional translations per particle. Not currently applied to STAR.
+    particles : torch.Tensor or np.ndarray
+        Stack of 2D particle images, shape (N, H, W).
+    rotations : torch.Tensor or np.ndarray, optional
+        Pose information per particle. Can be quaternions (N,4), matrices (N,3,3),
+        or rotation vectors (N,3). Default is None.
+    translations : torch.Tensor or np.ndarray, optional
+        Translations per particle (x, y) in Ångstrom. Default is None.
     alpha : float, optional
-        Amplitude contrast ratio. Default 0.1.
+        Amplitude contrast ratio. Default is 0.1.
     folderpath : str, optional
-        Directory to save MRCS and STAR files. Default '' (current folder).
+        Directory to save MRCS and STAR files. Default is "" (current directory).
     energy : float, optional
-        Electron beam voltage in kV or eV. Required for STAR file.
-    Cs_mm : float, optional
-        Spherical aberration in mm. Default 2.0.
+        Electron beam energy in kV. Required.
     dx : float, optional
-        Pixel size in Å. Default 1.0.
+        Pixel size in Ångstrom. Required.
     starfilename : str, optional
-        Name of the STAR file. Default 'particles'.
+        Name of the output STAR file (without extension). Default is "particles".
     mrcfilename : str, optional
-        Name of the MRCS file. Defaults to same as starfilename.
-    defocusU, defocusV, defocusAngle : list or np.ndarray, optional
-        CTF parameters for each particle.
-    originXAngst, originYAngst : list or np.ndarray, optional
-        Origin shifts for each particle. Default zeros.
-    randomsubset : int, optional
-        If specified, randomly sample this many particles.
+        Name of the output MRCS file (without extension). Defaults to `starfilename`.
+    ctf_params : torch.Tensor, optional
+        CTF parameters for each particle, shape (N, K).
+        Expected columns: [Cs (Å), dfu (Å), dfv (Å), dfang (rad), ..., phaseshift (rad)].
 
     Returns
     -------

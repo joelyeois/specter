@@ -26,11 +26,31 @@ class PDB:
         """
         Create a PDB object from either a PDB ID or a local file path.
 
-        Args:
-            pdb_source (str): Either a 4-character PDB ID (e.g., "1abc")
-                              or a local file path to a PDB/mmCIF structure.
-            assembly (bool): Whether to fetch the biological assembly when using a PDB ID.
-            savefolder (str): Folder to store downloaded PDB/mmCIF files.
+        Parameters
+        ----------
+        pdb_source : str
+            Either a 4-character PDB ID (e.g., '1abc') or a local file path
+            to a PDB/mmCIF structure file.
+        assembly : bool, optional
+            Whether to fetch the biological assembly when using a PDB ID.
+            Default is True.
+        savefolder : str, optional
+            Folder to store downloaded PDB/mmCIF files. Default is '../pdb-data/'.
+        
+        Attributes
+        ----------
+        pdb_id : str
+            The PDB ID if pdb_source is a PDB ID.
+        filepath : str
+            Path to the PDB/mmCIF file.
+        structure : Bio.PDB.Structure.Structure
+            Parsed PDB structure object.
+        atomic_numbers : torch.Tensor
+            Atomic numbers of all atoms in the structure, shape (N,).
+        coordinates : torch.Tensor
+            Centered atomic coordinates, shape (N, 3).
+        max_diameter : float
+            Maximum diameter of the structure based on convex hull.
         """
 
         # Determine whether pdb_source is a PDB ID or file path
@@ -133,7 +153,24 @@ class PDB:
 
     @staticmethod
     def get_available_assemblies(pdb_id):
-        """Return a list of available biological assembly IDs for a PDB entry."""
+        """
+        Return a list of available biological assembly IDs for a PDB entry.
+
+        Parameters
+        ----------
+        pdb_id : str
+            4-character PDB ID.
+
+        Returns
+        -------
+        assemblies : list of str
+            List of available assembly IDs. Returns empty list if an error occurs.
+
+        Notes
+        -----
+        Prints the available assemblies to console. If the PDB entry cannot be
+        accessed or does not have assembly information, prints an error message.
+        """
         url = f"https://data.rcsb.org/rest/v1/core/entry/{pdb_id.lower()}"
         try:
             response = requests.get(url)
@@ -149,6 +186,24 @@ class PDB:
 
     @staticmethod
     def get_pdb_structure(filepath):
+        """
+        Parse a PDB or mmCIF file and return the structure object.
+
+        Parameters
+        ----------
+        filepath : str
+            Path to PDB (.pdb) or mmCIF (.cif) file.
+
+        Returns
+        -------
+        structure : Bio.PDB.Structure.Structure
+            Parsed structure object from Biopython.
+
+        Raises
+        ------
+        ValueError
+            If the file format is not 'pdb' or 'cif'.
+        """
         ext = filepath[-3:]
         if ext == "pdb":
             parser = PDBParser()
@@ -162,20 +217,25 @@ class PDB:
     @staticmethod
     def get_atoms_and_coordinates(structure):
         """
-        Extracts atomic elements and coordinates from PDB structure.
+        Extract atomic elements and coordinates from PDB structure.
 
         Parameters
         ----------
-        input_filename : str
-            The name of the input file containing the atomic structure.
-        return_array : boolean
-            If True, returns array for elements and coordinates.
+        structure : Bio.PDB.Structure.Structure or str
+            Either a parsed Biopython structure object or a filepath to a
+            PDB/mmCIF file. If a filepath is provided, the structure will be
+            loaded automatically.
 
         Returns
-        ----------
-        elements : (N,)-shape array
-        coords : (N,3)-shape array
-            x,y,z coordinates of each atom
+        -------
+        elements : torch.Tensor
+            Atomic numbers for each atom, shape (N,).
+        coords : torch.Tensor
+            Atomic coordinates (x, y, z) for each atom, shape (N, 3).
+
+        Notes
+        -----
+        Uses Rich progress bar to display extraction progress for large structures.
         """
 
         # if filepath, load the structure.
@@ -237,6 +297,24 @@ class PDB:
 
     @staticmethod
     def estimate_max_diameter(coordinates):
+        """
+        Estimate the maximum diameter of a structure using convex hull.
+
+        Parameters
+        ----------
+        coordinates : np.ndarray or torch.Tensor
+            Atomic coordinates with shape (N, 3).
+
+        Returns
+        -------
+        max_diameter : float
+            Maximum pairwise distance between convex hull vertices.
+
+        Notes
+        -----
+        Computes the convex hull of the coordinates and returns the maximum
+        distance between any two hull vertices.
+        """
         hull = ConvexHull(coordinates)
         hull_points = coordinates[hull.vertices]
         max_diameter = pdist(hull_points).max()
@@ -320,21 +398,27 @@ class PDB:
 
 def write_xyz_file(input_filename, output_filename, comment=""):
     """
-    Writes a standard XYZ file.
+    Write atomic structure to standard XYZ file format.
 
     Parameters
     ----------
     input_filename : str
-        The name of the input file containing the atomic structure.
+        Path to input structure file (PDB, mmCIF, etc.).
     output_filename : str
-        The name of the output file to write the XYZ data.
-    comment : str
-        A comment to include in the header of the output file.
-
+        Path for output XYZ file.
+    comment : str, optional
+        Comment line to include in XYZ file header. Default is empty string.
 
     Returns
-    ----------
+    -------
     None
+        Writes XYZ file to disk.
+
+    Notes
+    -----
+    XYZ format:= Header commented line 1: number of atoms
+    Line 2: comment
+    Lines 3+: element x y z
     """
 
     inXYZ = strucio.load_structure(input_filename)

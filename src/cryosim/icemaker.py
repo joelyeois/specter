@@ -16,10 +16,27 @@ density_of_amorphous_ice = 0.94  # [g/cm3]
 molar_mass_of_water = 18.01528  # [g/mol]
 ndensity_of_amorphous_ice = (
     density_of_amorphous_ice * avogadro / molar_mass_of_water * 1e-24
-)  # [particles / A3]
+)  # [particles / Å³]
 
 
 def rfftn(array):
+    """
+    Compute N-dimensional real-input Fourier transform with centering.
+
+    Wraps torch.fft.rfftn with FFT shifting to ensure the zero-frequency component
+    is centered, handling the last dimension which is complex-valued differently.
+
+    Parameters
+    ----------
+    array : torch.Tensor
+        Input real-valued tensor.
+
+    Returns
+    -------
+    fft : torch.Tensor
+        Complex-valued tensor containing the Fourier coefficients.
+        Zero frequency is centered.
+    """
     return torch.fft.fftshift(
         torch.fft.rfftn(torch.fft.ifftshift(array, dim=(-3, -2, -1)), dim=(-3, -2, -1)),
         dim=(-3, -2),
@@ -33,16 +50,17 @@ def torch_peak_local_max(image, min_distance=1, num_peaks=None):
     Parameters
     ----------
     image : torch.Tensor
-        Input tensor of shape (B, D, H, W)
-    min_distance : int
-        Minimum separation between peaks (voxels)
-    num_peaks : int
-        Number of peaks to return per batch (must be <= total peaks in each batch)
+        Input tensor of shape (B, D, H, W).
+    min_distance : int, optional
+        Minimum separation between peaks (voxels). Default is 1.
+    num_peaks : int, optional
+        Number of peaks to return per batch (must be <= total peaks in each batch).
+        If None, uses the minimum number of peaks found in any batch item. Default is None.
 
     Returns
     -------
-    peaks : torch.LongTensor, shape (B, num_peaks, 3)
-        Peak coordinates (z, y, x) for each batch.
+    peaks : torch.LongTensor
+        Peak coordinates (z, y, x) for each batch. Shape (B, num_peaks, 3).
     """
     B, D, H, W = image.shape
     x = image.unsqueeze(1)  # (B, 1, D, H, W)
@@ -75,10 +93,31 @@ def torch_peak_local_max(image, min_distance=1, num_peaks=None):
 
 class Icemaker(L.LightningModule):
     """
-    Generates 3D ice volumes with water-like molecular structure based on
-    molecular dynamics simulations. Provides methods to load simulation data,
-    compute radial averages, and iteratively generate ice volumes that match
-    a target Fourier amplitude kernel.
+    Generates 3D ice volumes with water-like molecular structure.
+
+    Based on molecular dynamics simulations. Provides methods to load simulation data, compute radial averages, and iteratively generate ice volumes that match a target Fourier amplitude kernel.
+
+    Parameters
+    ----------
+    dx : float, optional
+        Voxel size in Angstroms. Default is 0.5.
+    n : int, optional
+        Number of voxels in x and y dimensions. Default is 200.
+    nz : float, optional
+        Ice thickness in angstroms. If None, defaults to `n * dx`. Default is None.
+    chunk_size : int, optional
+        Size of chunks for processing large volumes. Default is None.
+    progressbars : bool, optional
+        Whether to show progress bars. Default is True.
+    parameterization : str, optional
+        Atomic potential parameterization ('kirkland', 'lobato', 'shryov'). Default is 'kirkland'.
+    min_distance : float, optional
+        Minimum distance between water molecules in Angstroms. Default is 1.9.
+
+    Attributes
+    ----------
+    ice_thickness : float
+        Thickness of the ice slab in Angstroms.
     """
 
     def __init__(
@@ -91,20 +130,6 @@ class Icemaker(L.LightningModule):
         parameterization="kirkland",
         min_distance=1.9,
     ):
-        """
-        Initialize the Icemaker.
-
-        Parameters
-        ----------
-        dx : float
-            Voxel size in Angstroms.
-        n : int
-            Number of voxels in x and y dimensions.
-        nz : float
-            Ice thickness in angstroms.
-        device : str or torch.device
-            Device for tensor operations (default: 'cuda').
-        """
         super().__init__()
 
         # load 3D radial average of mdsim data
@@ -173,12 +198,12 @@ class Icemaker(L.LightningModule):
         ----------
         filepath : str
             Path to the MD simulation dump file.
-        trim_size : int
-            Maximum half-size of the cube to retain around particle center.
-        startframe : int
-            Frame index to start processing.
-        endframe : int
-            Frame index to stop processing.
+        trim_size : int, optional
+            Maximum half-size of the cube to retain around particle center. Default is 100.
+        startframe : int, optional
+            Frame index to start processing. Default is 10.
+        endframe : int, optional
+            Frame index to stop processing. Default is 101.
         """
         self.get_mdsim_file(filepath)
         mdsim_ice_deltas = []
@@ -211,7 +236,7 @@ class Icemaker(L.LightningModule):
 
     def get_mdsim_file(self, filepath):
         """
-        Reads MD simulation dump file into memory and finds timestep indices.
+        Read MD simulation dump file into memory and find timestep indices.
 
         Parameters
         ----------
@@ -235,15 +260,15 @@ class Icemaker(L.LightningModule):
         ----------
         start_line_number : int
             Line number where atom coordinates start.
-        lines : list[str] or None
-            Pre-loaded file lines. If None, uses `self.lines`.
-        no_atoms : int
-            Number of atoms to read.
+        lines : list of str, optional
+            Pre-loaded file lines. If None, uses `self.lines`. Default is None.
+        no_atoms : int, optional
+            Number of atoms to read. Default is 128000.
 
         Returns
         -------
-        coords : torch.Tensor, shape (no_atoms, 3)
-            Atomic coordinates (x, y, z) for the frame.
+        coords : torch.Tensor
+            Atomic coordinates (x, y, z) for the frame. Shape (no_atoms, 3).
         """
         if lines is None:
             lines = self.lines
@@ -262,15 +287,15 @@ class Icemaker(L.LightningModule):
 
         Parameters
         ----------
-        coords : torch.Tensor, shape (N, 3)
-            Coordinates to trim.
-        trim_size : float
-            Side length of the cube to retain (Angstroms).
+        coords : torch.Tensor
+            Coordinates to trim. Shape (N, 3).
+        trim_size : float, optional
+            Side length of the cube to retain in Å. Default is 100.
 
         Returns
         -------
-        trimmed_coords : torch.Tensor, shape (M, 3)
-            Coordinates within the cube.
+        trimmed_coords : torch.Tensor
+            Coordinates within the cube. Shape (M, 3).
         """
         trimmed_coords = []
         for co in coords:
@@ -290,10 +315,11 @@ class Icemaker(L.LightningModule):
         Parameters
         ----------
         filepath : str
-            Path to load precomputed Fourier amplitude tensor.
-        source : str, {'dump', 'torch'}
-            If 'dump', compute FFT from MD simulation dump.
-            If 'torch', load from file.
+            Path to load precomputed Fourier amplitude tensor from, or MD dump path.
+        source : str, optional
+            - 'dump': Compute FFT from MD simulation dump.
+            - 'torch': Load precomputed tensor from file.
+            Default is 'torch'.
         """
         if source == "dump":
             self.get_mdsim(filepath, trim_size=100)
@@ -316,9 +342,9 @@ class Icemaker(L.LightningModule):
 
         Parameters
         ----------
-        saved_data_path : str or None
-            Optional path to precomputed radial average. If None, compute from
-            `self.mdsim_ice_deltas_f`.
+        saved_data_path : str, optional
+            Path to precomputed radial average. If None, compute from
+            `self.mdsim_ice_deltas_f`. Default is None.
         """
         if saved_data_path is not None:
             mdsim_f_radial_avg = torch.load(saved_data_path)
@@ -335,15 +361,14 @@ class Icemaker(L.LightningModule):
 
         Parameters
         ----------
-        batchsize : int
-            Number of ice volumes to generate.
-        device : str
-            Default to 'cpu' since this is a fast function. Saves GPU memory.
+        batchsize : int, optional
+            Number of ice volumes to generate. Default is 1.
 
         Returns
         -------
-        ice_vol_init : torch.Tensor, shape (batchsize, nz, n, n) or (nz, n, n)
+        ice_vol_init : torch.Tensor
             Binary tensor with 1 where ice molecules are placed.
+            Shape (batchsize, nz, n, n).
         """
 
         # Preallocate batch tensor
@@ -368,13 +393,11 @@ class Icemaker(L.LightningModule):
 
     def interpolate_mdsim_f_kernel(self):
         """
-        Generate a 3D Fourier amplitude kernel for ice generation by
-        interpolating MD simulation radial averages.
+        Generate a 3D Fourier amplitude kernel for ice generation.
 
-        Returns
-        -------
-        None
-            Updates `self.interp_radial_k` and `self.interp_f_radial_avg`.
+        Interpolates MD simulation radial averages to the current grid.
+        Updates `self.interp_radial_k`, `self.interp_f_radial_avg`, `self.interp_f_kernel`,
+        and `self.interp_f_halfkernel`.
         """
 
         # interpolate, exclude DC
@@ -413,19 +436,22 @@ class Icemaker(L.LightningModule):
 
         Parameters
         ----------
-        niter : int
-            Maximum number of iterations.
-        min_distance : float
-            Minimum separation between molecules (Angstroms).
-        add_extra_molecules : bool
-            If True, randomly add extra molecules to satisfy density.
-        batchsize : int
-            Number of ice volumes to generate.
+        niter : int, optional
+            Maximum number of iterations. Default is 5.
+        min_distance : float, optional
+            Minimum separation between molecules in Angstroms. If None, uses `self.min_distance`.
+            Default is None.
+        add_extra_molecules : bool, optional
+            If True, randomly add extra molecules to satisfy density. Default is True.
+        batchsize : int, optional
+            Number of ice volumes to generate. Default is 1.
+        reduce_fraction : float, optional
+            Fraction of target number of molecules to initially target with peak finding.
+            Default is 1.0.
 
-        Returns
-        -------
-        None
-            Updates `self.current_ice_vol` and `self.ice_coordinates`.
+        Notes
+        -----
+        Updates `self.current_ice_vol`, `self.ice_coordinates`, `self.frob_norm`.
         """
 
         self.batchsize = batchsize
@@ -507,6 +533,17 @@ class Icemaker(L.LightningModule):
         self.n_extra_atoms = torch.tensor(self.n_extra_atoms)
 
     def create_ice_kernel(self):
+        """
+        Create the atomic potential kernel for ice atoms.
+
+        Uses the specified parameterization (Kirkland, Lobato, or Shryov) to generate
+        the potential volume of a single water molecule (approximated as Oxygen).
+
+        Returns
+        -------
+        pot : torch.Tensor
+            Potential kernel volume, downsampled to simulation grid.
+        """
         # create super-sampled (ss) coordinate system
         ssn, ssdx, ssf = potential.compute_supersampling_parameters(self.dx)
         # set original convention to torch to avoid singularity at origin.
@@ -549,6 +586,21 @@ class Icemaker(L.LightningModule):
         return avgpool3d(pot[None, None]).squeeze() * self.dx
 
     def generate_ice(self, batchsize=1, reduce_fraction=1.0):
+        """
+        Generate ice volumes by running the iterative algorithm and convolving.
+
+        Parameters
+        ----------
+        batchsize : int, optional
+            Number of ice volumes to generate. Default is 1.
+        reduce_fraction : float, optional
+            Fraction of target molecules for peak finding. Default is 1.0.
+
+        Returns
+        -------
+        icecubes : torch.Tensor
+            Generated ice potential volumes. Shape (batchsize, nz, n, n).
+        """
         # initialize
         ice_vol_init = self.create_initial_ice_volume(batchsize=batchsize)
         self.register_buffer("ice_vol_init", ice_vol_init)
@@ -574,6 +626,21 @@ class Icemaker(L.LightningModule):
         return self.icecubes
 
     def irfftn(self, array):
+        """
+        Compute inverse N-dimensional real Fourier transform with centering.
+
+        Inverse of `rfftn`.
+
+        Parameters
+        ----------
+        array : torch.Tensor
+            Input complex-valued tensor (half-Hermitian).
+
+        Returns
+        -------
+        real_array : torch.Tensor
+            Real-valued output tensor.
+        """
         return torch.fft.fftshift(
             torch.fft.irfftn(
                 torch.fft.ifftshift(array, dim=(-3, -2)),
@@ -584,6 +651,21 @@ class Icemaker(L.LightningModule):
         )
 
     def generate_big_ice(self, shape):
+        """
+        Generate a large ice volume by stitching smaller generated blocks.
+
+        Handles boundary conditions and overlaps to ensure continuity.
+
+        Parameters
+        ----------
+        shape : tuple of int
+            Target shape (B, nz, ny, nx).
+
+        Returns
+        -------
+        big_ice : torch.Tensor
+            Large ice volume.
+        """
         B, nz, ny, nx = shape
         num_z = int(torch.ceil(torch.as_tensor(nz) / self.nz))
         num_y = int(torch.ceil(torch.as_tensor(ny) / self.n))
@@ -738,23 +820,25 @@ class Icemaker(L.LightningModule):
 
 
 class NaiveIcemaker(L.LightningModule):
-    def __init__(self, dx, n, nz=None, progressbars=True):
-        """
-        Creates ice through random choice. Given a volume, we calculate the number
-        of ice molecules that should populate the volume based on the density of
-        amorphous ice. Random choice is then used to determine the position of
-        ice molecules, which are then dressed with the scattering kernel of ice.
+    """
+    Creates ice through random molecule placement.
 
-        Parameters
-        ----------
-        dx : float
-            Pixel size in angstroms.
-        n: int
-            Number of pixels in xy-axis. Assumes a square field-of-view.
-        nz: float
-            Specifices the thickness of ice in Angstroms. Typically 100–1000 A. Must
-            be same or larger than FOV of the particle.
-        """
+    Calculates the number of ice molecules based on amorphous ice density,
+    randomly places them, and convolves with a scattering kernel.
+
+    Parameters
+    ----------
+    dx : float
+        Pixel size in angstroms.
+    n : int
+        Number of pixels in xy-axis. Assumes a square field-of-view.
+    nz : float, optional
+        Thickness of ice in Angstroms. If None, defaults to `n * dx`. Default is None.
+    progressbars : bool, optional
+        Whether to show progress bars. Default is True.
+    """
+
+    def __init__(self, dx, n, nz=None, progressbars=True):
         super().__init__()
 
         self.dx = dx
@@ -784,6 +868,14 @@ class NaiveIcemaker(L.LightningModule):
         self.progressbars = progressbars
 
     def create_initial_ice_volume(self):
+        """
+        Create initial ice volume with randomly placed molecules.
+
+        Returns
+        -------
+        ice_vol_init : torch.Tensor
+            Binary tensor with 1s at molecule locations. Shape (nz, n, n).
+        """
         # slowest, without duplicates
         # ice_idx = np.random.choice(self.n**3, self.n_ice_molecules, replace=False)
 
@@ -800,6 +892,19 @@ class NaiveIcemaker(L.LightningModule):
         return ice_vol_init
 
     def create_ice_kernel(self, sn=28):
+        """
+        Create atomic potential kernel for Oxygen using Kirkland parameterization.
+
+        Parameters
+        ----------
+        sn : int, optional
+            Size of the supersampled grid kernel. Default is 28.
+
+        Returns
+        -------
+        pot : torch.Tensor
+            Potential kernel volume.
+        """
         # sample a 28x28 grid to represent kernel first.
         # 4xbin down to 7x7, centerd on atom origin
         sx = (torch.arange(sn) - (sn - 1) / 2) * self.dx / 4
@@ -836,6 +941,19 @@ class NaiveIcemaker(L.LightningModule):
         return avgpool3d(pot[None, None]).squeeze() * self.dx
 
     def generate_ice(self, batchsize=1):
+        """
+        Generate ice volumes.
+
+        Parameters
+        ----------
+        batchsize : int, optional
+            Number of ice volumes to generate. Default is 1.
+
+        Returns
+        -------
+        icecubes : torch.Tensor
+            Generated ice potential volumes. Shape (batchsize, nz, n, n).
+        """
         icecubes = torch.zeros(batchsize, self.nz, self.n, self.n, device=self.device)
         for i in range(batchsize):
             self.icedeltas = self.create_initial_ice_volume()
@@ -845,6 +963,23 @@ class NaiveIcemaker(L.LightningModule):
 
 
 def remove_deltas_based_on_density(slab, expected_number=None, dx=None):
+    """
+    Randomly remove delta functions from a slab to match expected density.
+
+    Parameters
+    ----------
+    slab : torch.Tensor
+        Input slab (binary tensor).
+    expected_number : int, optional
+        Expected number of particles. If None, calculated from `dx` and density.
+    dx : float, optional
+        Voxel size in Angstroms. Required if `expected_number` is None.
+
+    Returns
+    -------
+    slab : torch.Tensor
+        Processed slab with entries removed.
+    """
     if expected_number is None:
         if dx is None:
             raise ValueError("dx must be specified.")
@@ -872,6 +1007,25 @@ def clean_block_boundaries(
     min_dist: int,
     dx: float,
 ) -> torch.Tensor:
+    """
+    Remove excess ice density at block boundaries after stitching.
+
+    Parameters
+    ----------
+    bigblock : torch.Tensor
+        Large stitched ice volume.
+    shape : tuple
+        Shape of individual blocks (d, h, w).
+    min_dist : int
+        Minimum distance in pixels to check around boundaries.
+    dx : float
+        Voxel size in Angstroms.
+
+    Returns
+    -------
+    bigblock : torch.Tensor
+        Cleaned ice volume.
+    """
     D, H, W = bigblock.shape
     d, h, w = shape  # block sizes
 

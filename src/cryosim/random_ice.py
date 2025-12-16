@@ -7,25 +7,25 @@ density_of_amorphous_ice = 0.94  # [g/cm3]
 molar_mass_of_water = 18.01528  # [g/mol]
 ndensity_of_amorphous_ice = (
     density_of_amorphous_ice * avogadro / molar_mass_of_water * 1e-24
-)  # [particles / A3]
+)  # [particles / Å³]
 
 
 def water_molecule_coordinates(bond_angle=105, bond_length=0.9572):
-    """Returns coordinates of a single H2O molecule, where oxygen is defined as the
-    origin (0,0,0).
+    """
+    Returns coordinates of a single H2O molecule, where oxygen is defined as the origin (0,0,0).
 
     Parameters
     ----------
-    band_angle : float
-        Bond angle between the O-H bonds in degrees.
-    bond_length : float
-        Bond length of O-H bond in angstrom.
+    bond_angle : float, optional
+        Bond angle between the O-H bonds in degrees. Default 105.
+    bond_length : float, optional
+        Bond length of O-H bond in Å. Default 0.9572.
 
     Returns
     -------
-    atomic_numbers : tensor
-        Atomic numbers of the atoms in H2O
-    coordinates : tensor
+    atomic_numbers : np.ndarray
+        Atomic numbers of the atoms in H2O.
+    coordinates : torch.Tensor
         xyz coordinates of the atoms in H2O.
     """
     # set oxygen as origin
@@ -44,6 +44,23 @@ def water_molecule_coordinates(bond_angle=105, bond_length=0.9572):
 
 
 def create_n_randomly_rotated_water_molecules(n, **kwargs):
+    """
+    Create n randomly rotated water molecules.
+
+    Parameters
+    ----------
+    n : int
+        Number of molecules to create.
+    **kwargs
+        Arguments passed to `water_molecule_coordinates` (bond_angle, bond_length).
+
+    Returns
+    -------
+    atomic_numbers : np.ndarray
+        Atomic numbers.
+    coordinates : torch.Tensor
+        Atomic coordinates.
+    """
     quats = torch.stack([rotations.random_quaternion() for _ in range(n)])
     atomic_numbers, coordinates = water_molecule_coordinates(**kwargs)
 
@@ -63,11 +80,28 @@ def create_n_randomly_rotated_water_molecules(n, **kwargs):
 
 
 def volume_of_ice(n_xyz, d_xyz):
+    """
+    Generate coordinates for a volume of amorphous ice.
+
+    Parameters
+    ----------
+    n_xyz : tuple or list
+        Number of voxels (nx, ny, nz).
+    d_xyz : tuple or list
+        Voxel size (dx, dy, dz).
+
+    Returns
+    -------
+    ice_atomic_numbers : np.ndarray
+        Atomic numbers of ice atoms.
+    ice_coordinates : torch.Tensor
+        Coordinates of ice atoms.
+    """
     nx, ny, nz = n_xyz
     dx, dy, dz = d_xyz
     dv = dx * dy * dz
     nv = nx * ny * nz
-    total_vol = nv * dv  # A^3
+    total_vol = nv * dv  # Å³
     n_ice_molecules = int(ndensity_of_amorphous_ice * total_vol)
     print(n_ice_molecules)
 

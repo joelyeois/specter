@@ -13,6 +13,54 @@ from cryosim.detectors import k3_300kv, k3_200kv, perfect_detector
 
 
 class BaseImageGenerator(L.LightningModule):
+    """
+    Base class for image generation with common functionality.
+
+    Handles initialization of common parameters, detector MTF, CTF parameters,
+    and references to processing modules.
+
+    Parameters
+    ----------
+    pixel_size : float
+        Pixel size in Å.
+    energy : float
+        Electron beam energy in kV.
+    dose_per_angstrom : float
+        Electron dose per Å².
+    nxy : int, optional
+        Image size in pixels.
+    scattering_model : str, optional
+        Model for electron scattering ('multislice', 'projection', 'ctf'). Default 'multislice'.
+    aberration_model : str, optional
+        Model for microscope aberrations ('holography', 'phase_plate'). Default 'holography'.
+    noise_model : str, optional
+        Noise model for detection ('poisson', 'gaussian', None). Default 'poisson'.
+    ice_model : str, optional
+        Model for ice generation ('randomchoice', 'iterative', None). Default None.
+    ice_thickness : float, optional
+        Thickness of ice in Å.
+    klim : float, optional
+        Reciprocal space limit.
+    flip_curvature : bool, optional
+        Whether to flip the curvature of the Ewald sphere. Default False.
+    alpha : float, optional
+        Amplitude contrast ratio. Default 0.0.
+    crowd_min_distance : float, optional
+        Minimum distance for crowding molecules.
+    crowd_max_distance_z : float, optional
+        Maximum Z distance for crowding.
+    pad_fft : bool, optional
+        Whether to pad images for FFT operations. Default False.
+    detector_model : str, optional
+        Detector model for MTF ('k3_300kv', 'k3_200kv', 'perfect', None).
+    anisomag : torch.Tensor, optional
+        Anisotropic magnification matrices.
+    ctf_params : dict, optional
+        Dictionary of CTF parameters.
+    progressbars : bool, optional
+        Whether to show progress bars. Default True.
+    """
+
     def __init__(
         self,
         pixel_size,
@@ -98,6 +146,7 @@ class BaseImageGenerator(L.LightningModule):
             self.ctf_params = None
 
     def _init_detector_mtf(self):
+        """Initialize the detector MTF based on the model name."""
         if self.detector_model == "k3_300kv":
             self.register_buffer("detector_mtf", k3_300kv(self.nxy, self.pixel_size))
         elif self.detector_model == "k3_200kv":
@@ -108,6 +157,7 @@ class BaseImageGenerator(L.LightningModule):
             )
 
     def _shift_ctf_params(self):
+        """Shift defocus parameters to account for volume thickness (center of volume)."""
         if "dfu" in self.ctf_params:
             shifted = self.ctf_params["dfu"].detach() - (self.nz * self.pixel_size) / 2
             self.ctf_params["dfu"] = nn.Parameter(shifted)
@@ -116,6 +166,7 @@ class BaseImageGenerator(L.LightningModule):
             self.ctf_params["dfv"] = nn.Parameter(shifted)
 
     def _init_modules(self):
+        """Initialize Scattering, Aberration, and Detector modules."""
         # Should be called after pad_nxy and nz are finalized
         self.scattering = Scattering(
             self.pad_nxy,
@@ -147,6 +198,19 @@ class BaseImageGenerator(L.LightningModule):
         )
 
     def solvate(self, V):
+        """
+        Embed the volume in ice.
+
+        Parameters
+        ----------
+        V : torch.Tensor
+            Input volume potential.
+
+        Returns
+        -------
+        V_solvated : torch.Tensor
+            Volume with ice added.
+        """
         # generates ice with size (B x Z x Y x X)
         ice = self.icemaker.generate_ice(batchsize=len(V))
 
@@ -187,6 +251,21 @@ class BaseImageGenerator(L.LightningModule):
         return V
 
     def process_volume(self, V, idx):
+        """
+        Process the volume: add crowding, ice, scatter, aberrate, and detect.
+
+        Parameters
+        ----------
+        V : torch.Tensor
+            Input volume potential.
+        idx : torch.Tensor or int
+            Batch indices for parameter selection.
+
+        Returns
+        -------
+        images : torch.Tensor
+            Simulated images.
+        """
         # adds crowd
         if self.crowd_min_distance is not None:
             with torch.no_grad():
@@ -216,9 +295,23 @@ class BaseImageGenerator(L.LightningModule):
         return images
 
     def predict_step(self, batch, batch_idx):
+        """Standard Lightning predict step."""
         return self(batch)
 
     def predict_epoch_end(self, outputs):
+        """
+        Gather predictions from all GPUs at epoch end.
+
+        Parameters
+        ----------
+        outputs : list
+            List of outputs from `predict_step`.
+
+        Returns
+        -------
+        preds : torch.Tensor
+            Concatenated predictions from all ranks.
+        """
         # outputs is a list of batch predictions from THIS GPU
         preds = torch.cat(outputs, dim=0)
 
@@ -230,7 +323,61 @@ class BaseImageGenerator(L.LightningModule):
             return preds_all.cpu()
 
 
-class ImageGeneratorFromCoordinates(BaseImageGenerator):
+    """
+    Generates images from atomic coordinates.
+
+    Particles are defined by atomic coordinates, rotated, and then voxelized into potential volumes.
+
+    Parameters
+    ----------
+    coordinates : torch.Tensor
+        Atomic coordinates. Shape (n_atoms, 3).
+    atomic_numbers : torch.Tensor
+        Atomic numbers for each atom. Shape (n_atoms,).
+    nxy : int
+        Image size in pixels.
+    pixel_size : float
+        Pixel size in Å.
+    quaternions : torch.Tensor
+        Rotation quaternions for each batch item. Shape (B, 4).
+    translations : torch.Tensor
+        Translations (x, y) in Å for each batch item. Shape (B, 2).
+    ctf_params : dict
+        CTF parameters.
+    energy : float
+        Electron beam energy in kV.
+    dose_per_angstrom : float
+        Electron dose per Å².
+    anisomag : torch.Tensor, optional
+        Anisotropic magnification matrices.
+    ice_model : str, optional
+        Model for ice generation.
+    ice_thickness : float, optional
+        Thickness of ice in Å.
+    scattering_model : str, optional
+        Scattering model ('multislice', 'projection', 'ctf'). Default 'multislice'.
+    aberration_model : str, optional
+        Aberration model. Default 'holography'.
+    noise_model : str, optional
+        Noise model. Default 'poisson'.
+    klim : float, optional
+        Reciprocal space limit.
+    flip_curvature : bool, optional
+        Whether to flip curvature.
+    alpha : float, optional
+        Amplitude contrast ratio.
+    crowd_min_distance : float, optional
+        Crowding minimum distance.
+    crowd_max_distance_z : float, optional
+        Crowding maximum Z distance.
+    pad_fft : bool, optional
+        Whether to pad for FFT.
+    conv_backend : str, optional
+        Backend for convolution in potential building. Default 'fftconvolve'.
+    detector_model : str, optional
+        Detector model name.
+    """
+
     def __init__(
         self,
         coordinates,
@@ -327,12 +474,42 @@ class ImageGeneratorFromCoordinates(BaseImageGenerator):
                 )
 
     def rotate(self, Q, T):
+        """
+        Rotate and translate atomic coordinates.
+
+        Parameters
+        ----------
+        Q : torch.Tensor
+            Rotation quaternions.
+        T : torch.Tensor
+            Translations (x, y) in Å.
+
+        Returns
+        -------
+        r_coordinates : torch.Tensor
+            Rotated and translated coordinates.
+        """
         R = Rotation.from_quat(Q)
         T = rotations.translations_angstrom_to_torch(T, self.nxy, self.pixel_size)
         r_coordinates = R.apply(self.coordinates, T=T)
         return r_coordinates
 
     def forward(self, idx):
+        """
+        Generate images for the given batch indices.
+
+        Rotating coordinates, voxelizing, and processing volume.
+
+        Parameters
+        ----------
+        idx : int or torch.Tensor
+            Batch indices.
+
+        Returns
+        -------
+        images : torch.Tensor
+            Simulated images.
+        """
         # rotate coordinates, returns (B x N x 3)
         coordinates = self.rotate(self.quaternions[idx], self.translations[idx])
 
@@ -372,7 +549,59 @@ class ImageGeneratorFromCoordinates(BaseImageGenerator):
         return self.process_volume(V, idx)
 
 
-class ImageGenerator(BaseImageGenerator):
+    """
+    Generates images from a pre-computed scattering potential volume.
+
+    The volume is rotated and translated for each simulation instance.
+
+    Parameters
+    ----------
+    scattering_potential : torch.Tensor
+        Scattering potential volume. Shape (Z, Y, X).
+    pixel_size : float
+        Pixel size in Å.
+    quaternions : torch.Tensor
+        Rotation quaternions. Shape (B, 4).
+    translations : torch.Tensor
+        Translations (x, y) in Å. Shape (B, 2).
+    ctf_params : dict
+        CTF parameters.
+    energy : float
+        Electron beam energy in kV.
+    dose_per_angstrom : float
+        Electron dose per Å².
+    anisomag : torch.Tensor, optional
+        Anisotropic magnification matrices.
+    ice_model : str, optional
+        Ice model.
+    ice_thickness : float, optional
+        Ice thickness in Å.
+    scattering_model : str, optional
+        Scattering model. Default 'multislice'.
+    aberration_model : str, optional
+        Aberration model. Default 'holography'.
+    noise_model : str, optional
+        Noise model. Default 'poisson'.
+    klim : float, optional
+        Reciprocal space limit.
+    flip_curvature : bool, optional
+        Whether to flip curvature.
+    alpha : float, optional
+        Amplitude contrast ratio.
+    crowd_min_distance : float, optional
+        Crowding minimum distance.
+    crowd_max_distance_z : float, optional
+        Crowding maximum Z distance.
+    pad_fft : bool, optional
+        Whether to pad for FFT.
+    progressbars : bool, optional
+        Whether to show progress bars. Default True.
+    parameterization : str, optional
+        Parameterization for ice potential. Default 'kirkland'.
+    detector_model : str, optional
+        Detector model name.
+    """
+
     def __init__(
         self,
         scattering_potential,
@@ -463,6 +692,21 @@ class ImageGenerator(BaseImageGenerator):
                 )
 
     def rotate(self, Q, T):
+        """
+        Rotate volume using affine transformation.
+
+        Parameters
+        ----------
+        Q : torch.Tensor
+            Rotation quaternions.
+        T : torch.Tensor
+            Translations.
+
+        Returns
+        -------
+        V : torch.Tensor
+            Rotated volume.
+        """
         if len(Q.shape) < 2:
             Q = Q.unsqueeze(0)
         if len(T.shape) < 2:
@@ -474,6 +718,19 @@ class ImageGenerator(BaseImageGenerator):
         return V
 
     def forward(self, idx):
+        """
+        Generate images for the given batch indices.
+
+        Parameters
+        ----------
+        idx : int or torch.Tensor
+            Batch indices.
+
+        Returns
+        -------
+        images : torch.Tensor
+            Simulated images.
+        """
         # rotate V, returns (B x Z x Y x X)
         V = self.rotate(self.quaternions[idx], self.translations[idx])
 
@@ -511,6 +768,57 @@ class ImageGenerator(BaseImageGenerator):
 
 
 class MicrographGenerator(BaseImageGenerator):
+    """
+    Generates large micrographs by stitching or processing large volumes.
+
+    Handles large detectors and potentially chunked processing.
+
+    Parameters
+    ----------
+    scattering_potential : torch.Tensor
+        Scattering potential volume.
+    micrograph_size : int or tuple
+        Size of the micrograph in pixels.
+    pixel_size : float
+        Pixel size in Å.
+    ctf_params : dict
+        CTF parameters.
+    energy : float
+        Electron beam energy in kV.
+    dose_per_angstrom : float
+        Electron dose per Å².
+    anisomag : torch.Tensor, optional
+        Anisotropic magnification matrices.
+    ice_model : str, optional
+        Ice model.
+    ice_thickness : float, optional
+        Ice thickness in Å.
+    scattering_model : str, optional
+        Scattering model. Default 'multislice'.
+    aberration_model : str, optional
+        Aberration model. Default 'holography'.
+    noise_model : str, optional
+        Noise model. Default 'poisson'.
+    klim : float, optional
+        Reciprocal space limit.
+    alpha : float, optional
+        Amplitude contrast ratio.
+    crowd_min_distance : float, optional
+        Crowding minimum distance.
+    crowd_max_distance_z : float, optional
+        Crowding maximum Z distance.
+    pad_fft : bool, optional
+        Whether to pad for FFT.
+    chunk_size : int, optional
+        Chunk size for processing.
+    move_to_cpu : bool, optional
+        Whether to move intermediate results to CPU to save GPU memory. Default True.
+    water_air_interface : bool, optional
+        Whether to simulate water-air interface. Default True.
+    detector_model : str, optional
+        Detector model name.
+    """
+
     def __init__(
         self,
         scattering_potential,
@@ -618,6 +926,21 @@ class MicrographGenerator(BaseImageGenerator):
                 )
 
     def solvate(self, V):
+        """
+        Solvate the micrograph volume (adds ice).
+
+        Overrides base method to use `generate_big_ice`.
+
+        Parameters
+        ----------
+        V : torch.Tensor
+            Input volume potential.
+
+        Returns
+        -------
+        V_solvated : torch.Tensor
+            Volume with ice added.
+        """
         # generates ice with size (B x Z x Y x X)
         # MicrographGenerator has specific solvate logic (generate_big_ice)
         self.ice = self.icemaker.generate_big_ice(V.shape)
@@ -642,6 +965,19 @@ class MicrographGenerator(BaseImageGenerator):
         return V
 
     def forward(self, idx):
+        """
+        Generate micrograph images.
+
+        Parameters
+        ----------
+        idx : int or torch.Tensor
+            Batch indices.
+
+        Returns
+        -------
+        images : torch.Tensor
+            Simulated micrographs.
+        """
         # MicrographGenerator forward is different: starts with empty V
         V = torch.zeros(
             len(idx), self.nz, self.nxy, self.nxy
@@ -678,6 +1014,59 @@ class MicrographGenerator(BaseImageGenerator):
 
 
 class TiltSeriesGenerator(MicrographGenerator):
+    """
+    Generates tilt series images by tilting the specimen.
+
+    Parameters
+    ----------
+    scattering_potential : torch.Tensor
+        Scattering potential volume.
+    micrograph_size : int or tuple
+        Micrograph size.
+    pixel_size : float
+        Pixel size in Angstroms.
+    ctf_params : dict
+        CTF parameters.
+    energy : float
+        Beam energy in kV.
+    dose_per_angstrom : float
+        Beam dose per square Angstrom.
+    angles : list or torch.Tensor
+        List of tilt angles in degrees.
+    sample_size : int, optional
+        Size of the sample volume. If None, calculated from angles.
+    anisomag : torch.Tensor, optional
+        Anisotropic magnification matrices.
+    ice_model : str, optional
+        Ice model.
+    ice_thickness : float, optional
+        Ice thickness in Angstroms.
+    scattering_model : str, optional
+        Scattering model. Default 'multislice'.
+    aberration_model : str, optional
+        Aberration model. Default 'holography'.
+    noise_model : str, optional
+        Noise model. Default 'poisson'.
+    klim : float, optional
+        Reciprocal space limit.
+    alpha : float, optional
+        Amplitude contrast ratio.
+    crowd_min_distance : float, optional
+        Crowding minimum distance.
+    crowd_max_distance_z : float, optional
+        Crowding maximum Z distance.
+    pad_fft : bool, optional
+        Whether to pad for FFT.
+    chunk_size : int, optional
+        Chunk size for processing.
+    move_to_cpu : bool, optional
+        Move to CPU. Default True.
+    water_air_interface : bool, optional
+        Simulate water-air interface. Default True.
+    detector_model : str, optional
+        Detector model.
+    """
+
     def __init__(
         self,
         scattering_potential,
@@ -753,6 +1142,11 @@ class TiltSeriesGenerator(MicrographGenerator):
         self.generate_volume()
 
     def generate_volume(self):
+        """
+        Generate the frozen sample volume.
+
+        Allocates the volume, adds crowding molecules and ice, and stores it in `self.vol`.
+        """
         # Determine sample_nxy
         if self.user_sample_size is not None:
             sample_nxy = self.sample_nxy
@@ -843,12 +1237,15 @@ class TiltSeriesGenerator(MicrographGenerator):
         """
         Generate a tilt series for the given batch indices.
 
-        Args:
-            angles: list or tensor of tilt angles in degrees.
-            idx: tensor of batch indices (to select CTF/Anisomag parameters).
+        Parameters
+        ----------
+        idx : int or torch.Tensor
+            Batch indices (to select CTF/Anisomag parameters).
 
-        Returns:
-            tilt_series: (B, N_angles, Y, X) tensor of images.
+        Returns
+        -------
+        tilt_series : torch.Tensor
+            Tensor of images. Shape (B, N_angles, Y, X).
         """
 
         tilt_series = []

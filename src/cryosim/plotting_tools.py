@@ -3,6 +3,18 @@ import torch
 
 
 def plot3d(vol, title=None, vmin=None):
+    """
+    Plot 3 orthogonal projections of a 3D volume.
+
+    Parameters
+    ----------
+    vol : torch.Tensor
+        3D volume tensor.
+    title : str or None, optional
+        Super title for the plot.
+    vmin : float or None, optional
+        Minimum value for colormap scaling.
+    """
     fig, axes = plt.subplots(1, 3, dpi=200, constrained_layout=True, figsize=(8, 3.6))
     for i, ax in enumerate(axes.ravel()):
         im = ax.imshow(vol.sum(i), vmin=vmin)
@@ -16,6 +28,26 @@ def plot3d(vol, title=None, vmin=None):
 def plot_slices(
     vol, start_idx=0, end_idx=None, axis=0, ylabel=None, vmin=None, vmax=None
 ):
+    """
+    Plot slices of a 3D volume along a specified axis.
+
+    Parameters
+    ----------
+    vol : torch.Tensor
+        3D volume tensor.
+    start_idx : int, optional
+        Starting slice index. Default 0.
+    end_idx : int or None, optional
+        Ending slice index. If None, computed from nslices.
+    axis : int, optional
+        Axis along which to slice (0, 1, or 2). Default 0.
+    ylabel : str or None, optional
+        Label for the y-axis of the first subplot.
+    vmin : float or None, optional
+        Minimum value for colormap.
+    vmax : float or None, optional
+        Maximum value for colormap.
+    """
     nslices = 5
     sh = vol.shape
     if end_idx is None:
@@ -41,87 +73,6 @@ def plot_slices(
         axes[0].set_ylabel(ylabel)
     plt.suptitle(f"Slices along axis {axis}")
     plt.show()
-
-
-# def radial_distribution_function(
-#     coords, volume, dr=0.5, r_max=None,
-#     number_density=0.03142228327508648,
-#     plot=True, device=None, chunk_size=None
-# ):
-#     """
-#     Computes radial distribution function (RDF) from 3D coordinates.
-
-#     Parameters
-#     ----------
-#     coords : torch.Tensor, shape (N, 3)
-#         Atom coordinates.
-#     volume : float
-#         Volume in A^3.
-#     dr : float
-#         Width of radial shell/bin in A.
-#     r_max : float, optional
-#         Maximum radius cutoff. Default: box length.
-#     number_density : float
-#         N/V in [num / A^3]. Default is for amorphous ice.
-#     plot : bool
-#         Whether to plot the RDF.
-#     device : torch.device or str, optional
-#         Device for computation (CPU or CUDA).
-#     chunk_size : int or None
-#         If None, compute all pairwise distances at once (exact RDF).
-#         If int, compute RDF in chunks to save memory.
-#     """
-
-#     if device is None:
-#         device = coords.device
-#     coords = coords.to(device)
-
-#     N = coords.shape[0]
-#     if r_max is None:
-#         r_max = volume ** (1/3)  # length of cubic box
-#     bins = torch.arange(0, r_max + dr, dr, device=device)
-
-#     hist = torch.zeros(len(bins)-1, device=device)
-
-#     if chunk_size is None:
-#         # --- Full RDF (all pairs at once) ---
-#         dists = torch.cdist(coords, coords)  # (N, N)
-#         mask = torch.triu(torch.ones(N, N, device=device, dtype=torch.bool), diagonal=1)
-#         dists = dists[mask]
-#         hist = torch.histc(dists, bins=len(bins)-1, min=0, max=r_max)
-
-#     else:
-#         # --- Chunked RDF (exact but memory-efficient) ---
-#         for i in tqdm(range(0, N, chunk_size)):
-#             ci = coords[i:i+chunk_size]  # (≤chunk_size, 3)
-#             dists = torch.cdist(ci, coords)  # (len(ci), N)
-
-#             # Mask out self-distances only for the overlapping diagonal part
-#             mask = torch.ones_like(dists, dtype=torch.bool)
-#             rows = torch.arange(len(ci), device=device)
-#             cols = torch.arange(i, i+len(ci), device=device)
-#             mask[rows, cols] = 0
-
-#             dists = dists[mask]
-#             hist += torch.histc(dists, bins=len(bins)-1, min=0, max=r_max)
-
-#     # RDF normalization
-#     r = bins[:-1] + dr/2
-#     shell_volume = 4 * torch.pi * r**2 * dr
-#     g_r = hist / (number_density * N * shell_volume)
-
-#     # Move to CPU for plotting/output
-#     r, g_r = r.cpu().numpy(), g_r.cpu().numpy()
-
-#     if plot:
-#         plt.plot(r, g_r)
-#         plt.xlabel('r (Å)')
-#         plt.ylabel('g(r)')
-#         plt.title('Radial Distribution Function')
-#         plt.xlim([0, r_max])
-#         plt.show()
-
-#     return r, g_r
 
 
 def radial_distribution_function(
@@ -158,13 +109,13 @@ def radial_distribution_function(
     coords : torch.Tensor
         Shape (N, 3) coordinates in Å.
     volume : float
-        Simulation box volume in Å^3.
+        Simulation box volume in Å³.
     dr : float, optional
         Bin width in Å. Default = 0.5.
     r_max : float, optional
         Maximum radius to compute. Default = cubic box length.
     number_density : float, optional
-        Number density in [num / Å^3].
+        Number density in [num / Å³].
     chunk_size : int or None
         If None, use torch.pdist (fast, exact).
         If int, compute in chunks (exact, lower memory).
@@ -177,9 +128,9 @@ def radial_distribution_function(
 
     Returns
     -------
-    r : torch.tensor
+    r : torch.Tensor
         Bin centers.
-    g_r : torch.tensor
+    g_r : torch.Tensor
         Radial distribution function values.
     """
 

@@ -16,7 +16,7 @@ from .atom import (
     kirkland_atomic_potential_3d,
     lobato_atomic_potential_2d,
     lobato_atomic_potential_3d,
-    shryov_atomic_potential_3d,
+    shtyrov_atomic_potential_3d,
 )
 from .fft_tools import fftconvolve
 import numpy as np
@@ -250,7 +250,7 @@ class PotentialBuilder(L.LightningModule):
     Lightning module for building 3D electrostatic potential volumes from atomic coordinates.
 
     Computes potentials using supersampled atomic potential kernels and
-    convolution, supporting multiple parameterizations (Kirkland, Lobato, Shryov).
+    convolution, supporting multiple parameterizations (Kirkland, Lobato, Shtyrov).
 
     Parameters
     ----------
@@ -263,14 +263,14 @@ class PotentialBuilder(L.LightningModule):
     verbose : bool, optional
         Enable progress bars during computation. Default is True.
     parameterization : str, optional
-        Atomic potential parameterization: 'kirkland', 'lobato', or 'shryov'.
+        Atomic potential parameterization: 'kirkland', 'lobato', or 'shtyrov'.
         Default is 'kirkland'.
     conv_backend : str, optional
         Convolution backend: 'fftconvolve' or 'conv3d'. Default is 'fftconvolve'.
     trainable : bool, optional
         Whether parameters are trainable. Default is False.
     mmcif_filepath : str, optional
-        Path to mmCIF file for Shryov parameterization. Default is None.
+        Path to mmCIF file for Shtyrov parameterization. Default is None.
 
     Attributes
     ----------
@@ -279,6 +279,7 @@ class PotentialBuilder(L.LightningModule):
     atomic_potentials_3d : torch.Tensor
         Precomputed 3D atomic potentials for each unique element.
     """
+
     def __init__(
         self,
         n_xyz,
@@ -381,7 +382,7 @@ class PotentialBuilder(L.LightningModule):
         -----
         Potentials are supersampled and downsampled to main grid resolution.
         Results are stored in `self.atomic_potentials_3d`.
-        Supports Kirkland, Lobato, and Shryov parameterizations.
+        Supports Kirkland, Lobato, and Shtyrov parameterizations.
         """
         if unique_elements is None:
             unique_elements = self.unique_elements
@@ -401,11 +402,11 @@ class PotentialBuilder(L.LightningModule):
                 pot = kirkland_atomic_potential_3d(int(elem), self.sR_3d)
             elif self.parameterization == "lobato":
                 pot = lobato_atomic_potential_3d(int(elem), self.sR_3d)
-            elif self.parameterization == "shryov":
+            elif self.parameterization == "shtyrov":
                 if self.mmcif_filepath is None:
                     raise ValueError("mmcif_filepath must be specified.")
                 else:
-                    pot = shryov_atomic_potential_3d(
+                    pot = shtyrov_atomic_potential_3d(
                         int(elem), self.sR_3d, self.mmcif_filepath
                     )
 
@@ -572,7 +573,8 @@ class GemmiPotentialBuilder:
     c1 : float
         Scaling factor for electrostatic potential (2π*e*a₀).
     """
-    def __init__(self, n_xyz, dx, atomic_numbers=None, b_factor=20.0):
+
+    def __init__(self, n_xyz, dx, atomic_numbers=None, b_factor=None):
         if isinstance(n_xyz, (int, float)):
             self.nx = self.ny = self.nz = n_xyz
         else:
@@ -756,6 +758,7 @@ class GemmiPotentialBuilder:
         for row in itable:
             serial, scat_id = row
             custom_form_factors[int(serial)] = coefs[int(scat_id)]
+            print(scat_id)
             break
         gemmi.set_custom_form_factors(custom_form_factors)
         dencalc = gemmi.DensityCalculatorC()
@@ -771,8 +774,13 @@ class GemmiPotentialBuilder:
             cra.atom.pos += gemmi.Position(
                 float(translate[0]), float(translate[1]), float(translate[2])
             )
-            # if self.b_factor is not None:
-            #     cra.atom.b_iso = self.b_factor
+            if self.b_factor is not None:
+                cra.atom.b_iso = self.b_factor
+
+        if self.b_factor is None:
+            print(
+                "Using default B-factor in mmcif file. Set b_factor to 0 if not intended."
+            )
 
         # setup box size
         unit_cell = gemmi.UnitCell(

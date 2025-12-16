@@ -146,9 +146,9 @@ def load_lobato_parameters():
 
 
 @lru_cache(maxsize=1)
-def load_shryov_parameters(filepath):
+def load_shtyrov_parameters(filepath):
     """
-    Load Shryov electron scattering parameters from a MMCIF file.
+    Load Shtyrov electron scattering parameters from a MMCIF file.
 
     Returns
     -------
@@ -158,7 +158,7 @@ def load_shryov_parameters(filepath):
 
     Notes
     -----
-    Shryov uses a parameterization of 10 parameters to model the scattering potential.
+    Shtyrov uses a parameterization of 10 parameters to model the scattering potential.
     For a single element, params[i] is a 5x2 array:
     params_tensor[i] = [
         [a1, b1],
@@ -476,11 +476,11 @@ def lobato_atomic_potential_3d_fourier(atomic_number, k_xyz):
     return s1
 
 
-def shryov_atomic_potential_3d_fourier(atomic_number, k_xyz, filepath):
+def shtyrov_atomic_potential_3d_fourier(atomic_number, k_xyz, filepath):
     """
-    Compute the 3D atomic potential for a specific element using Shryov parameterization.
+    Compute the 3D atomic potential for a specific element using Shtyrov parameterization.
 
-    Based on Shryov 2025 Eq.18.
+    Based on Shtyrov 2025 Eq.18.
 
     Note: There is a singularity at r = 0 because the atomic nucleus is essentially
     a point charge on this scale (~1e-5 Å).
@@ -493,7 +493,7 @@ def shryov_atomic_potential_3d_fourier(atomic_number, k_xyz, filepath):
         Distances from the atomic core in units of Å. r^2 = x^2 + y^2 + z^2.
         Assume equally spaced grid along x and y, i.e. dx = dy.
     filepath : str
-        Path to the Shryov parameter file (MMCIF).
+        Path to the Shtyrov parameter file (MMCIF).
 
     Returns
     -------
@@ -503,8 +503,8 @@ def shryov_atomic_potential_3d_fourier(atomic_number, k_xyz, filepath):
     device = k_xyz.device
 
     # get scattering factors
-    shryov_params = load_shryov_parameters(filepath)  # shape (N, 5, 2)
-    P = shryov_params[atomic_number]  # shape (5, 2)
+    shtyrov_params = load_shtyrov_parameters(filepath)  # shape (N, 5, 2)
+    P = shtyrov_params[atomic_number]  # shape (5, 2)
     P = P.to(device)
 
     # Separate columns: a_i, b_i
@@ -518,11 +518,11 @@ def shryov_atomic_potential_3d_fourier(atomic_number, k_xyz, filepath):
     return s1
 
 
-def shryov_atomic_potential_3d(atomic_number, r_xyz, filepath, energy=300):
+def shtyrov_atomic_potential_3d(atomic_number, r_xyz, filepath, energy=300):
     """
-    Compute the 3D atomic potential for a specific element using Shryov parameterization.
+    Compute the 3D atomic potential for a specific element using Shtyrov parameterization.
 
-    Based on Shryov 2025 Eq.18.
+    Based on Shtyrov 2025 Eq.18.
 
     Note: There is a singularity at r = 0 because the atomic nucleus is essentially
     a point charge on this scale (~1e-5 Å).
@@ -534,7 +534,7 @@ def shryov_atomic_potential_3d(atomic_number, r_xyz, filepath, energy=300):
     r_xyz : torch.Tensor
         3D grid of radial distances.
     filepath : str
-        Path to the Shryov parameter file.
+        Path to the Shtyrov parameter file.
     energy : float, optional
         Beam energy in kV. Default 300.
 
@@ -556,8 +556,8 @@ def shryov_atomic_potential_3d(atomic_number, r_xyz, filepath, energy=300):
     c1 = 2 * torch.pi * e * a0
 
     # get scattering factors
-    # shryov_params = load_shryov_parameters(filepath)  # shape (N, 5, 2)
-    # P = shryov_params[atomic_number]  # shape (5, 2)
+    # shtyrov_params = load_shtyrov_parameters(filepath)  # shape (N, 5, 2)
+    # P = shtyrov_params[atomic_number]  # shape (5, 2)
     # P = P.to(device)
 
     # Separate columns: a_i, b_i
@@ -568,8 +568,8 @@ def shryov_atomic_potential_3d(atomic_number, r_xyz, filepath, energy=300):
     # s1 = c1 * torch.sum(a * (torch.pi * 4 / b)**1.5 * torch.exp(-torch.pi**2 * r2 / b * 4), 0)
 
     # get scattering factors
-    shryov_f = shryov_atomic_potential_3d_fourier(atomic_number, k_xyz, filepath)
+    shtyrov_f = shtyrov_atomic_potential_3d_fourier(atomic_number, k_xyz, filepath)
 
     # fourier transform
-    s1 = -c1 * torch.abs(fftn(shryov_f)) * dkx * dky * dkz  # need to negate
+    s1 = -c1 * torch.abs(fftn(shtyrov_f)) * dkx * dky * dkz  # need to negate
     return s1

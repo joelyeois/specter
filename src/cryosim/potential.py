@@ -584,7 +584,6 @@ class GemmiPotentialBuilder:
         for ind, row in enumerate(ctable):
             coefs[ind] = [float(field) for field in row]
         max_serial = max(cra.atom.serial for cra in st[0].all())
-        print(max_serial)
         custom_form_factors = np.zeros((max_serial + 1, 10))
         itable = block.find("_atom_site.", ["id", "scat_id"])
         for row in itable:

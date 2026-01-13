@@ -720,14 +720,13 @@ class GemmiPotentialBuilder:
         st = gemmi.read_structure(mmcif_filepath)
 
         # --- keep only the first atom ---
-        first_atom = st[0][0][0][0]
-        new_st = gemmi.Structure()
-        model = new_st.add_model(gemmi.Model(1))
-        chain = model.add_chain("A")
-        residue = chain.add_residue(gemmi.Residue())
-        residue.add_atom(first_atom.clone())
+        # first_atom = st[0][0][0][0]
+        # new_st = gemmi.Structure()
+        # model = new_st.add_model(gemmi.Model(1))
+        # chain = model.add_chain("A")
+        # residue = chain.add_residue(gemmi.Residue())
         # residue.add_atom(first_atom.clone())
-        st = new_st
+        # st = new_st
         # --------------------------------
 
         # Extract scattering factors from table
@@ -758,8 +757,8 @@ class GemmiPotentialBuilder:
         for row in itable:
             serial, scat_id = row
             custom_form_factors[int(serial)] = coefs[int(scat_id)]
-            print(scat_id)
-            break
+            # print(scat_id)
+            # break
         gemmi.set_custom_form_factors(custom_form_factors)
         dencalc = gemmi.DensityCalculatorC()
 

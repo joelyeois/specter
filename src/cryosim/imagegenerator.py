@@ -323,6 +323,7 @@ class BaseImageGenerator(L.LightningModule):
             return preds_all.cpu()
 
 
+class ImageGeneratorFromCoordinates(BaseImageGenerator):
     """
     Generates images from atomic coordinates.
 
@@ -549,6 +550,7 @@ class BaseImageGenerator(L.LightningModule):
         return self.process_volume(V, idx)
 
 
+class ImageGenerator(BaseImageGenerator):
     """
     Generates images from a pre-computed scattering potential volume.
 

@@ -879,6 +879,7 @@ class MicrographGenerator(BaseImageGenerator):
         self.chunk_size = chunk_size
         self.move_to_cpu = move_to_cpu
         self.water_air_interface = water_air_interface
+        self.ice_model = ice_model
 
         if ice_thickness is None or (
             ice_thickness < scattering_potential.shape[0] * pixel_size
@@ -945,7 +946,10 @@ class MicrographGenerator(BaseImageGenerator):
         """
         # generates ice with size (B x Z x Y x X)
         # MicrographGenerator has specific solvate logic (generate_big_ice)
-        self.ice = self.icemaker.generate_big_ice(V.shape)
+        if self.ice_model == "randomchoice":
+            self.ice = self.icemaker.generate_ice(device="cpu")
+        elif self.ice_model == "iterative":
+            self.ice = self.icemaker.generate_big_ice(V.shape)
 
         if self.pad_fft:
             self.ice = F.pad(
@@ -1214,21 +1218,21 @@ class TiltSeriesGenerator(MicrographGenerator):
                     V[i] += vols
 
         # Add ice
-        if self.ice_model is not None:
-            if self.ice_model == "randomchoice":
-                self.icemaker = NaiveIcemaker(
-                    n=self.nxy, dx=self.pixel_size, nz=self.nz
-                )
-            elif self.ice_model == "iterative":
-                self.icemaker = Icemaker(
-                    n=256,  # Original hardcoded 256?
-                    dx=self.pixel_size,
-                    nz=256,  # Original hardcoded 256?
-                    chunk_size=self.chunk_size,
-                )
-
-            with torch.no_grad():
-                ice = self.icemaker.generate_big_ice(V.shape)
+        with torch.no_grad():
+            if self.ice_model is not None:
+                if self.ice_model == "randomchoice":
+                    self.icemaker = NaiveIcemaker(
+                        n=sample_nxy, dx=self.pixel_size, nz=self.nz
+                    )
+                    ice = self.icemaker.generate_ice(device="cpu")
+                elif self.ice_model == "iterative":
+                    self.icemaker = Icemaker(
+                        n=256,  # Original hardcoded 256?
+                        dx=self.pixel_size,
+                        nz=256,  # Original hardcoded 256?
+                        chunk_size=self.chunk_size,
+                    )
+                    ice = self.icemaker.generate_big_ice(V.shape)
                 icemask = V < 10
                 V += ice * icemask
 

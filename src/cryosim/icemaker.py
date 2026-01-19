@@ -455,6 +455,11 @@ class Icemaker(L.LightningModule):
         """
 
         self.batchsize = batchsize
+
+        # initialize
+        ice_vol_init = self.create_initial_ice_volume(batchsize=batchsize)
+        self.register_buffer("ice_vol_init", ice_vol_init)
+
         self.register_buffer("current_icedeltas", self.ice_vol_init.clone())
         self.niter = niter
         if min_distance is None:
@@ -601,10 +606,6 @@ class Icemaker(L.LightningModule):
         icecubes : torch.Tensor
             Generated ice potential volumes. Shape (batchsize, nz, n, n).
         """
-        # initialize
-        ice_vol_init = self.create_initial_ice_volume(batchsize=batchsize)
-        self.register_buffer("ice_vol_init", ice_vol_init)
-
         # run algorithms
         self.generate_ice_deltas(
             batchsize=batchsize,
@@ -650,7 +651,100 @@ class Icemaker(L.LightningModule):
             dim=(-3, -2, -1),
         )
 
-    def generate_big_ice(self, shape):
+    def generate_big_ice(self, shape, num_unique=8):
+        """
+        Generate a large ice volume by stitching smaller generated blocks.
+
+        Handles boundary conditions and overlaps to ensure continuity.
+
+        Parameters
+        ----------
+        shape : tuple of int
+            Target shape (B, nz, ny, nx).
+
+        Returns
+        -------
+        big_ice : torch.Tensor
+            Large ice volume.
+        """
+        B, nz, ny, nx = shape
+        num_z = int(torch.ceil(torch.as_tensor(nz) / self.nz))
+        num_y = int(torch.ceil(torch.as_tensor(ny) / self.n))
+        num_x = int(torch.ceil(torch.as_tensor(nx) / self.n))
+        N_blocks = B * num_z * num_y * num_x
+        num_blocks_per_B = num_z * num_y * num_x
+
+        # generate unique blocks
+        if num_unique > N_blocks:
+            num_unique = N_blocks
+
+        self.generate_ice_deltas(batchsize=8)
+        icedeltas = self.current_icedeltas.cpu()
+
+        # clean up faces of the ice blocks
+        icedeltas = replace_outer_faces(icedeltas)
+
+        # assemble into big ice
+        big_ice = assemble_volume_randomized(icedeltas, shape)
+
+        # We can iterate over blocks, extract them, convolve, and put them back.
+        # To vectorize, we can process 'chunk_size' blocks at a time.
+        chunk_size = 32  # Adjust based on GPU memory
+
+        for i in track(
+            range(0, N_blocks, chunk_size),
+            description="Ice convolution",
+            transient=True,
+            disable=not (self.progressbars),
+        ):
+            # Identify which blocks belong to this chunk
+            current_chunk_size = min(chunk_size, N_blocks - i)
+            indices = torch.arange(i, i + current_chunk_size)
+
+            ib = indices // num_blocks_per_B
+            local_idx = indices % num_blocks_per_B
+            iz = local_idx // (num_y * num_x)
+            iy = (local_idx % (num_y * num_x)) // num_x
+            ix = local_idx % num_x
+
+            # Extract blocks
+            # We have to loop to extract because they are not contiguous in memory
+            # But this loop is over a small 'chunk_size' (e.g. 32), so it's fast.
+            blocks = []
+            for j in range(current_chunk_size):
+                b, z, y, x = ib[j], iz[j], iy[j], ix[j]
+                block = big_ice[
+                    b,
+                    z * self.nz : (z + 1) * self.nz,
+                    y * self.n : (y + 1) * self.n,
+                    x * self.n : (x + 1) * self.n,
+                ]
+                blocks.append(block)
+
+            # Stack into a batch: (chunk_size, nz, n, n)
+            batch = torch.stack(blocks).to(self.ice_kernel.device)
+
+            # Convolve
+            # ice_kernel shape: (nz, n, n) -> (1, nz, n, n)
+            convolved_batch = fftconvolve(
+                batch, self.ice_kernel.unsqueeze(0), mode="same", axes=(-3, -2, -1)
+            )
+
+            # Put back
+            convolved_batch = (
+                convolved_batch.cpu()
+            )  # Move back to CPU if big_ice is on CPU
+            for j in range(current_chunk_size):
+                b, z, y, x = ib[j], iz[j], iy[j], ix[j]
+                big_ice[
+                    b,
+                    z * self.nz : (z + 1) * self.nz,
+                    y * self.n : (y + 1) * self.n,
+                    x * self.n : (x + 1) * self.n,
+                ] = convolved_batch[j]
+        return big_ice[:B, :nz, :ny, :nx]
+
+    def generate_big_ice_old(self, shape):
         """
         Generate a large ice volume by stitching smaller generated blocks.
 
@@ -705,8 +799,6 @@ class Icemaker(L.LightningModule):
                 batchsize = end - start
 
                 # initialize & generate
-                ice_vol_init = self.create_initial_ice_volume(batchsize=batchsize)
-                self.register_buffer("ice_vol_init", ice_vol_init)
                 self.generate_ice_deltas(batchsize=batchsize)
 
                 # get current batch (move to CPU if needed)
@@ -940,7 +1032,7 @@ class NaiveIcemaker(L.LightningModule):
         avgpool3d = torch.nn.AvgPool3d(4, stride=4)
         return avgpool3d(pot[None, None]).squeeze() * self.dx
 
-    def generate_ice(self, batchsize=1):
+    def generate_ice(self, batchsize=1, device=None):
         """
         Generate ice volumes.
 
@@ -954,7 +1046,9 @@ class NaiveIcemaker(L.LightningModule):
         icecubes : torch.Tensor
             Generated ice potential volumes. Shape (batchsize, nz, n, n).
         """
-        icecubes = torch.zeros(batchsize, self.nz, self.n, self.n, device=self.device)
+        if device is None:
+            device = self.device
+        icecubes = torch.zeros(batchsize, self.nz, self.n, self.n, device=device)
         for i in range(batchsize):
             self.icedeltas = self.create_initial_ice_volume()
             self.icecube = fftconvolve(self.icedeltas, self.ice_kernel, mode="same")
@@ -1061,3 +1155,110 @@ def clean_block_boundaries(
         bigblock[:, :, start:end] = remove_deltas_based_on_density(slab, dx=dx)
 
     return bigblock
+
+
+def assemble_volume_randomized(blocks: torch.Tensor, target_shape):
+    """
+    Assemble a batch of 3D volumes from small blocks randomly, with random roll, flip, and rotation.
+
+    Args:
+        blocks: torch.Tensor of shape (N_blocks, 256, 256, 256)
+        target_shape: tuple (N_batch, A, B, C) specifying output batch size and volume shape
+
+    Returns:
+        batch_volume: torch.Tensor of shape (N_batch, A, B, C)
+    """
+    N_blocks, block_size, _, _ = blocks.shape
+    N_batch, A, B, C = target_shape
+
+    batch_volumes = []
+
+    for b_idx in range(N_batch):
+        # Compute number of blocks along each axis
+        n_x = (A + block_size - 1) // block_size
+        n_y = (B + block_size - 1) // block_size
+        n_z = (C + block_size - 1) // block_size
+
+        # Random indices for selecting blocks
+        idx = torch.randint(0, N_blocks, (n_x, n_y, n_z))
+
+        x_slices = []
+        for i in range(n_x):
+            y_slices = []
+            for j in range(n_y):
+                z_slices = []
+                for k in range(n_z):
+                    b = blocks[idx[i, j, k]]
+
+                    # Random roll along all axes
+                    shift_x = torch.randint(0, block_size, (1,)).item()
+                    shift_y = torch.randint(0, block_size, (1,)).item()
+                    shift_z = torch.randint(0, block_size, (1,)).item()
+                    b = torch.roll(
+                        b, shifts=(shift_x, shift_y, shift_z), dims=(0, 1, 2)
+                    )
+
+                    # Random flip along any axis
+                    if torch.rand(1) < 0.5:
+                        b = torch.flip(b, dims=(0,))
+                    if torch.rand(1) < 0.5:
+                        b = torch.flip(b, dims=(1,))
+                    if torch.rand(1) < 0.5:
+                        b = torch.flip(b, dims=(2,))
+
+                    # Random rotation along any plane
+                    k_rot_xy = torch.randint(0, 4, (1,)).item()
+                    b = torch.rot90(b, k=k_rot_xy, dims=(0, 1))
+                    k_rot_xz = torch.randint(0, 4, (1,)).item()
+                    b = torch.rot90(b, k=k_rot_xz, dims=(0, 2))
+                    k_rot_yz = torch.randint(0, 4, (1,)).item()
+                    b = torch.rot90(b, k=k_rot_yz, dims=(1, 2))
+
+                    z_slices.append(b)
+                y_slices.append(torch.cat(z_slices, dim=2))
+            x_slices.append(torch.cat(y_slices, dim=1))
+        full_volume = torch.cat(x_slices, dim=0)
+
+        # Crop to target shape
+        batch_volumes.append(full_volume)
+
+    # Stack all volumes along batch dimension
+    return torch.stack(batch_volumes, dim=0)
+
+
+def replace_outer_faces(tensors):
+    """
+    Replace the 6 outer faces of a batch of 3D tensors with random inner slices.
+    Fully vectorized across batch (N < 20 is small, so fine).
+
+    Args:
+        tensors: torch.Tensor of shape (N, D, H, W)
+
+    Returns:
+        tensors: modified in-place
+    """
+    N, D, H, W = tensors.shape
+
+    if D <= 2 or H <= 2 or W <= 2:
+        raise ValueError("Tensor too small to have inner slices")
+
+    # Random inner indices for each tensor in the batch
+    z_idx = torch.randint(1, D - 1, (N,))
+    y_idx = torch.randint(1, H - 1, (N,))
+    x_idx = torch.randint(1, W - 1, (N,))
+
+    batch_idx = torch.arange(N)
+
+    # Front/back faces
+    tensors[batch_idx, 0, :, :] = tensors[batch_idx, z_idx, :, :]
+    tensors[batch_idx, -1, :, :] = tensors[batch_idx, z_idx, :, :]
+
+    # Top/bottom faces
+    tensors[batch_idx, :, 0, :] = tensors[batch_idx, :, y_idx, :]
+    tensors[batch_idx, :, -1, :] = tensors[batch_idx, :, y_idx, :]
+
+    # Left/right faces
+    tensors[batch_idx, :, :, 0] = tensors[batch_idx, :, :, x_idx]
+    tensors[batch_idx, :, :, -1] = tensors[batch_idx, :, :, x_idx]
+
+    return tensors

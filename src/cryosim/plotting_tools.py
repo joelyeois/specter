@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 import torch
 
 
-def plot3d(vol, title=None, vmin=None):
+def plot3d(vol, title=None, vmin=None, vmax=None, cmap=None):
     """
     Plot 3 orthogonal projections of a 3D volume.
 
@@ -17,7 +17,7 @@ def plot3d(vol, title=None, vmin=None):
     """
     fig, axes = plt.subplots(1, 3, dpi=200, constrained_layout=True, figsize=(8, 3.6))
     for i, ax in enumerate(axes.ravel()):
-        im = ax.imshow(vol.sum(i), vmin=vmin)
+        im = ax.imshow(vol.sum(i), vmin=vmin, vmax=vmax, cmap=cmap)
         ax.set(xticks=[], yticks=[], title=f"projection along axis {i}")
         fig.colorbar(im, ax=ax, location="bottom")
     if title is not None:

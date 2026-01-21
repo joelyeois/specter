@@ -184,7 +184,7 @@ class Scattering(L.LightningModule):
             self.register_buffer("F_imag", F.imag)
 
         # Fresnel transfer function for first Born
-        if scattering_model == "firstborn":
+        if scattering_model == "firstborn" or scattering_model == "rytov":
             F = []
             # for i in tqdm(range(nz), desc='Create first Born propagators', leave=False):
             for i in track(
@@ -412,18 +412,55 @@ class Scattering(L.LightningModule):
                 V.unsqueeze(1),
                 grid,
                 mode="bilinear",
-                padding_mode="zeros",
+                padding_mode="reflection",
                 align_corners=True,
             )
             # slice_sample shape: (B, 1, 1, ny, nx) -> squeeze to (B, ny, nx)
             slice_sample = slice_sample.squeeze(1).squeeze(1).to(device)
 
             # Multislice propagation
-            t = torch.exp(1j * self.sigma * slice_sample)
+            t = torch.exp(
+                1j * self.sigma * complex_potential(slice_sample, alpha=self.alpha)
+            )
             wv = t * exitwave
             exitwave = ifft2(fft2(wv) * F * self.kmask)
 
         return exitwave
+
+    def rytov(self, V):
+        """
+        Compute exit wave using Rytov approximation.
+
+        Treats scattering as a single
+        event. Faster than multislice but less accurate for thick specimens.
+
+        Parameters
+        ----------
+        V : torch.Tensor
+            Complex-valued 3D potential volume with shape (B, Z, Y, X).
+
+        Returns
+        -------
+        exitwave : torch.Tensor
+            Complex-valued 2D exit wave with shape (B, Y, X).
+
+        Notes
+        -----
+        The first Born approximation computes the exit wave as:
+        ψ = exp(i Σ_z [F(z) * V(z)])
+        where F(z) accounts for Fresnel propagation from slice z to the exit plane.
+        """
+        F = self.F_real + 1j * self.F_imag
+        if self.flip_curvature:
+            V = torch.flip(V, dims=(1,))
+
+        t = torch.exp(1j * self.sigma * V)  # (B x Z x X x Y)
+        exitwaves = ifft2(fft2(t) * F[None, ...])  # propagate each slice
+        exitwave = torch.prod(exitwaves, 1)  # product along Z
+
+        # multiply with dose
+        exitwave = exitwave * self.dose_per_pixel**0.5
+        return exitwave  # (B x X x Y)
 
     def firstborn(self, V):
         """
@@ -538,6 +575,9 @@ class Scattering(L.LightningModule):
         if self.scattering_model == "multislice":
             V = complex_potential(V, alpha=self.alpha)
             return self.multislice(V)
+        elif self.scattering_model == "rytov":
+            V = complex_potential(V, alpha=self.alpha)
+            return self.rytov(V)
         elif self.scattering_model == "projection":
             V = complex_potential(V, alpha=self.alpha)
             return self.projection(V)

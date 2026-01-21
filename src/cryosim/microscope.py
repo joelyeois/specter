@@ -192,7 +192,7 @@ class Aberration(L.LightningModule):
             Phase shift contribution. For holography model, DC component is
             set to zero to maintain Fourier optics validity.
         """
-        phaseshift = phaseshift.unsqueeze(1).unsqueeze(2)
+        # phaseshift = phaseshift.unsqueeze(1).unsqueeze(2)
         if self.aberration_model == "holography":
             phaseshift = phaseshift * torch.ones_like(self.k)
             # phaseshift must be zero at DC for Fourier optics
@@ -201,37 +201,37 @@ class Aberration(L.LightningModule):
 
     def aberration(self, cs, dfu, dfv, dfang, tiltx, tilty, phaseshift, tref1, tref2):
         """
-        Calculate combined aberration phase terms.
+         Calculate combined aberration phase terms.
 
-        Computes gamma and phi for the transfer function.
+         Computes gamma and phi for the transfer function.
 
-        Parameters
-        ----------
-        cs : torch.Tensor
-            Spherical aberration coefficient.
-        dfu : torch.Tensor
-            Defocus along first axis.
-        dfv : torch.Tensor
-            Defocus along second axis.
-        dfang : torch.Tensor
-            Astigmatism angle.
-        tiltx : torch.Tensor
-            Beam tilt in x direction.
-        tilty : torch.Tensor
-            Beam tilt in y direction.
-        phaseshift : torch.Tensor
-            Phase shift (e.g., from phase plate).
-        tref1 : torch.Tensor
-            First trefoil component.
-        tref2 : torch.Tensor
-            Second trefoil component.
+         Parameters
+         ----------
+         cs : torch.Tensor
+             Spherical aberration coefficient.
+         dfu : torch.Tensor
+             Defocus along first axis.
+         dfv : torch.Tensor
+             Defocus along second axis.
+         dfang : torch.Tensor
+             Astigmatism angle.
+         tiltx : torch.Tensor
+             Beam tilt in x direction.
+         tilty : torch.Tensor
+             Beam tilt in y direction.
+         phaseshift : torch.Tensor
+             Phase shift (e.g., from phase plate).
+         tref1 : torch.Tensor
+             First trefoil component.
+         tref2 : torch.Tensor
+             Second trefoil component.
 
-       Returns
-        -------
-        gamma : torch.Tensor
-            Axial aberration phase (defocus + Cs - phaseshift).
-        phi : torch.Tensor
-            Non-axial aberration phase (beam tilt + trefoil).
+        Returns
+         -------
+         gamma : torch.Tensor
+             Axial aberration phase (defocus + Cs - phaseshift).
+         phi : torch.Tensor
+             Non-axial aberration phase (beam tilt + trefoil).
         """
         w = self.wavelength
         ang = self.radian
@@ -293,9 +293,9 @@ class Aberration(L.LightningModule):
     def transfer(self, cs, dfu, dfv, dfang, tiltx, tilty, phaseshift, tref1, tref2):
         """
         Compute transfer function with all aberration parameters.
-        
+
         Legacy method combining aberration calculation with transfer function.
-        
+
         Parameters
         ----------
         cs : torch.Tensor
@@ -321,7 +321,7 @@ class Aberration(L.LightningModule):
         -------
         transfer : torch.Tensor
             Complex-valued transfer function.
-        
+
         Notes
         -----
         This method is deprecated in favor of transfer_function(ctf_params).
@@ -576,9 +576,21 @@ class Detector(L.LightningModule):
     def forward(self, aberrated_exitwave, anisomag=None, nxy=None):
         images = self.image(aberrated_exitwave)
 
-        if nxy is not None:
-            # crop away any padded areas first.
-            images = images[:, nxy // 2 : -nxy // 2, nxy // 2 : -nxy // 2]
+        # Set default crop size
+        if nxy is None:
+            nxy = images.shape[2]
+
+        # Crop if needed
+        if nxy != images.shape[2]:
+            H, W = images.shape[1], images.shape[2]
+            cy, cx = H // 2, W // 2
+
+            half = nxy // 2
+            images = images[
+                :,
+                cy - half : cy + half + (nxy % 2),
+                cx - half : cx + half + (nxy % 2),
+            ]
 
         # Apply anisomagnification
         if anisomag is not None:

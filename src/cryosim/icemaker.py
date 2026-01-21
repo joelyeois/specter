@@ -129,6 +129,7 @@ class Icemaker(L.LightningModule):
         progressbars=True,
         parameterization="kirkland",
         min_distance=1.9,
+        correction_factor=None,
     ):
         super().__init__()
 
@@ -172,7 +173,9 @@ class Icemaker(L.LightningModule):
         self.v = self.dv * self.nv
         min_distance_vox = int(min_distance / dx)
         min_distance_actual = min_distance_vox * dx
-        self.correction_factor = (min_distance / min_distance_actual) ** 3
+        self.correction_factor = correction_factor
+        if correction_factor is None:
+            self.correction_factor = (min_distance / min_distance_actual) ** 3
         self.n_ice_molecules_theory = int(ndensity_of_amorphous_ice * self.v)
         self.n_ice_molecules = int(
             ndensity_of_amorphous_ice * self.v / self.correction_factor

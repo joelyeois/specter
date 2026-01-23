@@ -105,7 +105,7 @@ class Aberration(L.LightningModule):
         """
         dfu = dfu
         dfv = dfv
-        dfang = dfang
+        dfang = dfang / 180 * torch.pi
         df = 0.5 * (dfu + dfv + (dfv - dfu) * torch.cos(2 * (self.radian + dfang)))
         return -torch.pi * self.wavelength * self.k2 * df
 
@@ -151,9 +151,14 @@ class Aberration(L.LightningModule):
         """
         trefoil1 = trefoil1
         trefoil2 = trefoil2
-        tf1 = trefoil1 * self.k**3 * torch.sin(3 * self.radian)
-        tf2 = trefoil2 * self.k**3 * torch.cos(3 * self.radian)
-        return tf1 + tf2
+        # tf1 = trefoil1 * self.k**3 * torch.sin(3 * self.radian)
+        # tf2 = trefoil2 * self.k**3 * torch.cos(3 * self.radian)
+        # return tf1 + tf2
+        # tf1 = trefoil1 * self.k**3 * torch.sin(3 * self.radian)
+        # tf2 = trefoil2 * self.k**3 * torch.cos(3 * self.radian)
+        return trefoil1 * self.k**3 * torch.sin(
+            3 * self.radian
+        ) + trefoil2 * self.k**3 * torch.cos(3 * self.radian)
 
     def _tetrafoil(self, tetrafoil1, tetrafoil2, tetrafoil3, tetrafoil4):
         """

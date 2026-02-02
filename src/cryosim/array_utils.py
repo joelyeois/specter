@@ -1,4 +1,5 @@
 import torch
+from .fft_tools import fft2, ifft2
 
 
 def kgrid_1d(n, dx, device="cpu"):
@@ -900,3 +901,38 @@ def nearest_index(x_arr, y_arr, z_arr, x_coord, y_coord, z_coord):
     yi = torch.argmin(torch.abs(y_arr - y_coord))
     zi = torch.argmin(torch.abs(z_arr - z_coord))
     return xi, yi, zi
+
+
+def ball3d(N, d):
+    """
+    Generates a 3D tensor with a filled-in ball,
+    centered at the DC index corresponding to fftshift.
+    """
+    x = torch.arange(N)
+    y = torch.arange(N)
+    z = torch.arange(N)
+    X, Y, Z = torch.meshgrid(x, y, z, indexing="ij")
+
+    center = N // 2  # aligns with DC after fftshift
+    r2 = (X - center) ** 2 + (Y - center) ** 2 + (Z - center) ** 2
+
+    radius = d / 2
+    ball = (r2 <= radius**2).float()
+    return ball
+
+
+def downsample(images, bin_factor=2, method="fft"):
+    if method == "fft":
+        N = images.shape[-1]
+        n = N // bin_factor
+        images_bin = ifft2(
+            fft2(images)[
+                :,
+                N // 2 - n // 2 : N // 2 - n // 2 + n,
+                N // 2 - n // 2 : N // 2 - n // 2 + n,
+            ]
+        ).real
+    elif method == "avgpool":
+        avgpool = torch.nn.AvgPool2d(bin_factor, stride=bin_factor)
+        images_bin = avgpool(images) * bin_factor**2
+    return images_bin

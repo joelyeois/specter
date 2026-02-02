@@ -4,7 +4,7 @@ from .microscope import Aberration, Detector
 from .scattering import Scattering
 from .icemaker import NaiveIcemaker, Icemaker
 from . import rotations
-from .rotations import Rotation
+from .rotations import Rotation, VolumeRotator
 import torch.nn.functional as F
 from .crowding import CrowdWithDuplicates
 from .potential import PotentialBuilder
@@ -693,6 +693,12 @@ class ImageGenerator(BaseImageGenerator):
                     parameterization=parameterization,
                 )
 
+        # self.V has shape (Z, Y, X)
+        nz, ny, nx = self.V.shape
+
+        # Create VolumeRotator instance
+        self.rotator = VolumeRotator(nz, ny, nx, origin="relion", mode="real")
+
     def rotate(self, Q, T):
         """
         Rotate volume using affine transformation.
@@ -716,7 +722,7 @@ class ImageGenerator(BaseImageGenerator):
         R = Rotation.from_quat(Q)
         T = rotations.translations_angstrom_to_torch(T, self.nxy, self.pixel_size)
         theta = rotations.build_affine_matrix(R.as_matrix(), T)
-        V = rotations.rotate_volume(self.V, theta, origin="relion")
+        V = self.rotator(self.V, theta)
         return V
 
     def forward(self, idx):
@@ -1147,6 +1153,16 @@ class TiltSeriesGenerator(MicrographGenerator):
 
         self.generate_volume()
 
+    def get_nz_tilt(self, V, angle_deg):
+        """
+        Calculate the number of slices needed to cover a tilted volume.
+        """
+        B, Z, Y, X = V.shape
+        theta_rad = torch.deg2rad(torch.tensor(angle_deg, device=V.device))
+        c, s = torch.cos(theta_rad), torch.sin(theta_rad)
+        new_z_extent = Y * abs(s) + Z * abs(c)
+        return int(torch.ceil(new_z_extent).item())
+
     def generate_volume(self):
         """
         Generate the frozen sample volume.
@@ -1259,7 +1275,17 @@ class TiltSeriesGenerator(MicrographGenerator):
             exitwaves = self.scattering.multislice_and_tilt(self.vol, angle)
 
             # 3. Aberration
-            ctf_batch = {k: v[idx] for k, v in self.ctf_params.items()}
+            # Adjust defocus to maintain consistent reference plane at volume center
+            # nz_new is the number of slices in the tilted geometry
+            nz_new = self.get_nz_tilt(self.vol, angle)
+            z_offset = (nz_new - self.nz) * self.pixel_size / 2.0
+
+            ctf_batch = {k: v[idx].clone() for k, v in self.ctf_params.items()}
+            if "dfu" in ctf_batch:
+                ctf_batch["dfu"] = ctf_batch["dfu"] - z_offset
+            if "dfv" in ctf_batch:
+                ctf_batch["dfv"] = ctf_batch["dfv"] - z_offset
+
             detector_waves = self.aberration(exitwaves, ctf_batch)
 
             # 4. Detection

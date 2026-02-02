@@ -1,5 +1,5 @@
 import torch
-from .rotations import Rotation
+from .rotations import Rotation, rotate_volume, rotate_volume_fourier
 
 
 def get_rotation_matrices(sym, return_affine=True):
@@ -46,7 +46,7 @@ def get_rotation_matrices(sym, return_affine=True):
     >>> matrices_c3 = get_rotation_matrices('C3', return_affine=False)
     >>> matrices_c3.shape
     torch.Size([3, 3, 3])
-    >>> # Get D2 symmetry (2-fold dihedral)  
+    >>> # Get D2 symmetry (2-fold dihedral)
     >>> matrices_d2 = get_rotation_matrices('D2', return_affine=False)
     >>> matrices_d2.shape
     torch.Size([4, 3, 3])
@@ -1127,3 +1127,41 @@ def get_rotation_matrices(sym, return_affine=True):
         return rms
     else:
         return matrices
+
+
+def apply_symmetry(vol, sym_ops, batchsize=None, method="fourier"):
+    """
+    Apply rotational symmetry to a volume.
+
+    Args:
+        vol: torch.Tensor, volume of shape (Z, X, Y)
+        sym_ops: torch.Tensor of shape (n_sym, 3, 3) OR string symmetry label (e.g. 'I', 'O', 'T')
+        batchsize: int, optional batch size for Fourier rotation
+        method: 'fourier' or 'real'
+
+    Returns:
+        torch.Tensor: symmetrized volume
+    """
+
+    # If sym_ops is a string, fetch rotation matrices
+    if isinstance(sym_ops, str):
+        sym_ops = get_rotation_matrices(
+            sym_ops, return_affine=True
+        )  # returns tensor n_sym x 3 x 3
+
+    sym_ops = sym_ops.to(vol.device, dtype=vol.dtype)
+    n_sym = len(sym_ops)
+
+    rotate_fn = rotate_volume_fourier if method == "fourier" else rotate_volume
+
+    if batchsize is None:
+        vols = rotate_fn(vol, sym_ops)
+        return vols.mean(dim=0)
+
+    # Batched summation
+    vols_sum = 0
+    for i in range(0, n_sym, batchsize):
+        batch_ops = sym_ops[i : i + batchsize]
+        vols_sum += rotate_fn(vol, batch_ops).sum(dim=0)
+
+    return vols_sum / n_sym

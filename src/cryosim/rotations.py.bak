@@ -4,7 +4,6 @@ import numpy as np
 from .fft_tools import fft3, ifft3
 import lightning as L
 
-
 class Rotation:
     """
     3D rotation class with support for quaternions, rotation vectors, and rotation matrices.
@@ -438,13 +437,6 @@ def rotate_volume(
         null_rot[:, 2, 2] = 1.0
         grid = F.affine_grid(null_rot, (B, 1, nz, ny, nx), align_corners=align_corners)
 
-        # scale coordinates by (nx-1)/2, (ny-1)/2, (nz-1)/2 to make them isotropic
-        scale = torch.tensor(
-            [(nx - 1) / 2, (ny - 1) / 2, (nz - 1) / 2],
-            device=theta.device,
-            dtype=theta.dtype,
-        ).view(1, 1, 3)
-
         # rotate the grid around the center defined by RELION
         cz = nz // 2
         cy = ny // 2
@@ -452,11 +444,7 @@ def rotate_volume(
         center = grid[:, cz, cy, cx]  # (B, 3)
         center = center.unsqueeze(1)
         grid = grid.view(B, nz * ny * nx, 3)
-
-        # Apply isotropic rotation
-        grid = (grid - center) * scale
-        grid = grid.bmm(theta[..., :-1].transpose(1, 2))
-        grid = (grid / scale) + center
+        grid = (grid - center).bmm(theta[..., :-1].transpose(1, 2)) + center
 
         # translate the grid
         dx = theta[..., -1].unsqueeze(1)  # (B, 1, 3)
@@ -609,22 +597,20 @@ class VolumeRotator(L.LightningModule):
     3D volume rotator with cached base grid and RELION / PyTorch center conventions.
     """
 
-    def __init__(
-        self,
-        nz: int,
-        ny: int,
-        nx: int,
-        origin: str = "relion",
-        align_corners: bool = False,
-        padding_mode: str = "border",
-        mode: str = "real",
-    ):
+    def __init__(self,
+                 nz: int,
+                 ny: int,
+                 nx: int,
+                 origin: str = "relion",
+                 align_corners: bool = False,
+                 padding_mode: str = "border",
+                 mode: str = "real"):
         """
         Initialize a 3D VolumeRotator with cached base grid and rotation center.
-
+    
         This class supports rotating 3D volumes in either real space or Fourier space.
         The base grid and rotation center are cached as buffers for efficiency.
-
+    
         Parameters
         ----------
         nz, ny, nx : int
@@ -646,12 +632,12 @@ class VolumeRotator(L.LightningModule):
             - "real": rotate in real space.
             - "fourier": rotate in Fourier space.
             Default is "real".
-
+    
         Raises
         ------
         ValueError
             If `origin` is not one of ("relion", "center") or `mode` is not one of ("real", "fourier").
-
+    
         Attributes
         ----------
         base_grid : torch.Tensor (buffer)
@@ -678,8 +664,8 @@ class VolumeRotator(L.LightningModule):
         # -------------------------------
         # Base identity grid
         # -------------------------------
-        eye = torch.eye(3, 4).unsqueeze(0)  # (1, 3, 4)
-        base_grid = F.affine_grid(eye, (1, 1, nz, ny, nx), align_corners=align_corners)
+        I = torch.eye(3, 4).unsqueeze(0)  # (1, 3, 4)
+        base_grid = F.affine_grid(I, (1, 1, nz, ny, nx), align_corners=align_corners)
         self.register_buffer("base_grid", base_grid)
 
         # -------------------------------
@@ -714,29 +700,19 @@ class VolumeRotator(L.LightningModule):
         """
         B = theta.shape[0]
         R = theta[..., :3]  # (B, 3, 3)
-        t = theta[..., 3]  # (B, 3)
+        t = theta[..., 3]   # (B, 3)
 
         grid = self.base_grid.expand(B, -1, -1, -1, -1)
         grid = grid.view(B, -1, 3)
 
-        # scale factors to make grid isotropic
-        scale = torch.tensor(
-            [(self.nx - 1) / 2, (self.ny - 1) / 2, (self.nz - 1) / 2],
-            device=theta.device,
-            dtype=theta.dtype,
-        ).view(1, 1, 3)
-
         if self.origin == "relion":
-            # Recenter to RELION origin and apply isotropic rotation
-            grid = (grid - self.center) * scale
-            grid = grid @ R.transpose(1, 2)
-            grid = (grid / scale) + self.center
+            # Recenter to RELION origin
+            grid = (grid - self.center) @ R.transpose(1, 2)
+            grid = grid + self.center
             grid = grid + t.unsqueeze(1)
         else:
-            # PyTorch center convention with isotropic rotation
-            grid = grid * scale
-            grid = grid @ R.transpose(1, 2)
-            grid = (grid / scale) + t.unsqueeze(1)
+            # PyTorch center convention
+            grid = grid @ R.transpose(1, 2) + t.unsqueeze(1)
 
         grid = grid.view(B, self.nz, self.ny, self.nx, 3)
         return grid
@@ -754,7 +730,7 @@ class VolumeRotator(L.LightningModule):
         B = theta.shape[0]
         grid = self._build_grid(theta)
 
-        V = V.unsqueeze(0).unsqueeze(1)  # (1, 1, Z, Y, X)
+        V = V.unsqueeze(0).unsqueeze(1)        # (1, 1, Z, Y, X)
         V = V.expand(B, 1, self.nz, self.ny, self.nx)
 
         V_rot = F.grid_sample(
@@ -786,9 +762,7 @@ class VolumeRotator(L.LightningModule):
     # ------------------------------------------------------------------
     # Forward with optional per-call mode override
     # ------------------------------------------------------------------
-    def forward(
-        self, V: torch.Tensor, theta: torch.Tensor, mode: str = None
-    ) -> torch.Tensor:
+    def forward(self, V: torch.Tensor, theta: torch.Tensor, mode: str = None) -> torch.Tensor:
         """
         Forward pass with optional mode override.
         mode: "real" or "fourier"; defaults to self.mode
@@ -804,58 +778,50 @@ class VolumeRotator(L.LightningModule):
         else:
             return self.rotate_fourier(V, theta)
 
+
     # ------------------------------------------------------------------
     # Sample a single tilted slice
     # ------------------------------------------------------------------
-    def sample_rotated_slices(
+    def sample_rotated_slice(
         self,
         V: torch.Tensor,
         theta: torch.Tensor,
-        slice_indices: torch.Tensor,
+        slice_index: int,
         roi_center: tuple = None,
         roi_size: tuple = None,
-        padding_mode: str = None,
+        padding_mode: str = None
     ):
         """
-        Sample multiple Z-slices from a rotated volume, restricted to a ROI in XY.
-        The slice_index=0 corresponds to the center of the volume.
-
+        Sample a single Z-slice from a rotated volume, restricted to a ROI in XY.
+    
         Parameters
         ----------
         V : (Z,Y,X) torch.Tensor
             Input 3D volume.
-        theta : (B,3,4) torch.Tensor
+        theta : (1,3,4) torch.Tensor
             Affine rotation matrix.
-        slice_indices : (K,) or list or int
-            One or more slice indices along Z of the rotated volume, relative to the center.
+        slice_index : int
+            Slice index along Z of the rotated volume.
         roi_center : tuple (cy, cx)
-            Center pixel of the region of interest in Y,X coordinates of the original volume.
+            Center pixel of the region of interest in Y,X coordinates.
             Defaults to full volume center.
         roi_size : tuple (ny_roi, nx_roi)
             Size of the region to sample.
             Defaults to full volume size.
         padding_mode : str
             Passed to grid_sample. Defaults to self.padding_mode.
-
+    
         Returns
         -------
-        slices_roi : (B, K, ny_roi, nx_roi) torch.Tensor
-            Interpolated 2D slices of the rotated volume, cropped to ROI.
+        slice2d_roi : (ny_roi, nx_roi) torch.Tensor
+            Interpolated 2D slice of the rotated volume, cropped to ROI.
         """
         if padding_mode is None:
             padding_mode = self.padding_mode
-
+    
         nz, ny, nx = self.nz, self.ny, self.nx
-        B = theta.shape[0]
-
-        if not isinstance(slice_indices, torch.Tensor):
-            slice_indices = torch.as_tensor(slice_indices, device=V.device)
-
-        if slice_indices.ndim == 0:
-            slice_indices = slice_indices.unsqueeze(0)
-
-        K = slice_indices.shape[0]
-
+        B = 1
+    
         # -------------------------------
         # Determine ROI
         # -------------------------------
@@ -863,81 +829,32 @@ class VolumeRotator(L.LightningModule):
             roi_size = (ny, nx)
         if roi_center is None:
             roi_center = (ny // 2, nx // 2)
-
+    
         ny_roi, nx_roi = roi_size
         cy, cx = roi_center
-
+    
+        # Compute ROI pixel indices
+        y_start = max(cy - ny_roi // 2, 0)
+        x_start = max(cx - nx_roi // 2, 0)
+        y_end = min(y_start + ny_roi, ny)
+        x_end = min(x_start + nx_roi, nx)
+    
         # -------------------------------
-        # Isotropic scale factors (normalized to physical units)
+        # Extract the subset of the full grid
         # -------------------------------
-        dtype = self.base_grid.dtype
-        device = V.device
-
-        # Scale factor to convert normalized [-1, 1] to pixel units [-half, half]
-        scale = torch.tensor(
-            [(nx - 1) / 2, (ny - 1) / 2, (nz - 1) / 2], device=device, dtype=dtype
-        ).view(1, 1, 3)
-
+        grid_full = self._build_grid(theta)  # (1, Z, Y, X, 3)
+        grid_slice = grid_full[:, slice_index:slice_index+1, y_start:y_end, x_start:x_end, :]  # (1,1,ny_roi,nx_roi,3)
+    
         # -------------------------------
-        # Calculate pixel-unit coordinates (relative to center)
+        # Prepare volume for grid_sample
         # -------------------------------
-        z_rel = slice_indices.to(dtype=dtype, device=device)  # (K,)
-        y_rel_center = float(cy - ny // 2)
-        x_rel_center = float(cx - nx // 2)
-
-        y_rel_grid = torch.arange(ny_roi, device=device, dtype=dtype) - (ny_roi // 2)
-        x_rel_grid = torch.arange(nx_roi, device=device, dtype=dtype) - (nx_roi // 2)
-        yy_rel, xx_rel = torch.meshgrid(y_rel_grid, x_rel_grid, indexing="ij")
-
-        # Global pixel-unit relative coordinates for the K slices
-        # last dim is (x, y, z)
-        x_pix = (x_rel_center + xx_rel).unsqueeze(0).expand(K, -1, -1)
-        y_pix = (y_rel_center + yy_rel).unsqueeze(0).expand(K, -1, -1)
-        z_pix = z_rel.view(K, 1, 1).expand(-1, ny_roi, nx_roi)
-
-        points_pix = torch.stack([x_pix, y_pix, z_pix], dim=-1).unsqueeze(
-            0
-        )  # (1, K, ny_roi, nx_roi, 3)
-
-        # -------------------------------
-        # Apply rotation in pixel space
-        # -------------------------------
-        R = theta[..., :3]  # (B, 3, 3)
-        t = theta[..., 3]  # (B, 3) normalized
-
-        points_pix = points_pix.expand(B, -1, -1, -1, -1)
-        points_pix_flat = points_pix.reshape(B, -1, 3)
-
-        if self.origin == "relion":
-            # 1. Normalize points to [-1, 1] relative to V center
-            points_norm = points_pix_flat / scale + self.center
-            # 2. Isotropic rotation (Scale -> Rotate -> Unscale)
-            grid = (points_norm - self.center) * scale
-            grid = grid @ R.transpose(1, 2)
-            grid = (grid / scale) + self.center
-            # 3. Translate
-            grid = grid + t.unsqueeze(1)
-        else:
-            # PyTorch center convention
-            points_norm = points_pix_flat / scale
-            grid = points_norm * scale
-            grid = grid @ R.transpose(1, 2)
-            grid = (grid / scale) + t.unsqueeze(1)
-
-        grid = grid.view(B, K, ny_roi, nx_roi, 3)
-
-        # -------------------------------
-        # Sample volume
-        # -------------------------------
-        if V.ndim == 3:
-            V_in = V.unsqueeze(0).unsqueeze(0).expand(B, -1, -1, -1, -1)
-        elif V.ndim == 4:  # Assume (B, Z, Y, X)
-            V_in = V.unsqueeze(1)
-        else:  # (B, 1, Z, Y, X)
-            V_in = V
-
-        slices_roi = F.grid_sample(
-            V_in, grid, align_corners=self.align_corners, padding_mode=padding_mode
+        V_in = V.unsqueeze(0).unsqueeze(0)  # (1,1,Z,Y,X)
+    
+        slice_roi = F.grid_sample(
+            V_in,
+            grid_slice,
+            align_corners=self.align_corners,
+            padding_mode=padding_mode
         )
-
-        return slices_roi[:, 0]  # (B, K, ny_roi, nx_roi)
+    
+        return slice_roi[0,0,0]  # (ny_roi, nx_roi)

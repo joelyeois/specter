@@ -1,4 +1,5 @@
 from . import filters
+from .rotations import VolumeRotator, build_affine_matrix
 import lightning as L
 import numpy as np
 import torch
@@ -119,7 +120,7 @@ class Scattering(L.LightningModule):
         Parameters
         ----------
         nxy : int
-            Number of pixels in x and y dimensions, (nz, nxy, nxy).
+            Number of pixels in x and y dimensions, (nxy, nxy).
         pixel_size : float
             Pixel size in Ångströms. Assumes dz equals pixel_size.
         energy : float
@@ -263,7 +264,9 @@ class Scattering(L.LightningModule):
             exitwave = ifft2(fft2(wv) * F * self.kmask)
         return exitwave
 
-    def multislice_and_tilt(self, V, angle_deg):
+    def multislice_and_tilt(
+        self, V, angle_deg, slice_batch_size: int = 1, return_slices: bool = False
+    ):
         """
         Perform multislice on a tilted volume for tomography.
 
@@ -276,147 +279,106 @@ class Scattering(L.LightningModule):
             Potential volume with shape (B, Z, Y, X).
         angle_deg : float
             Tilt angle in degrees around the X-axis.
+        slice_batch_size : int, optional
+            Number of slices to sample and move to GPU at once.
+            Higher values improve PCIe efficiency but use more VRAM.
+            Default is 1.
+        return_slices : bool, optional
+            If True, returns the stack of sampled slices along with the exit wave.
+            This is useful for debugging and verification. Default is False.
 
         Returns
         -------
         exitwave : torch.Tensor
             Complex-valued 2D exit wave from tilted projection, shape (B, Y, X).
+        slices : torch.Tensor (optional)
+            If return_slices is True, returns (B, nz_new, Y, X) tensor of sampled slices.
 
         Notes
         -----
-        Uses trilinear interpolation (grid_sample) to extract tilted slices.
+        Uses the VolumeRotator to extract tilted slices in blocks.
         The tilt is performed around the X-axis following tomography conventions.
         """
         B, Z, Y, X = V.shape
         device = self.device
 
-        # Convert angle to radians
-        theta = torch.deg2rad(angle_deg)
-        c, s = torch.cos(theta), torch.sin(theta)
+        # Convert angle to radians for internal use if needed,
+        # but build_affine_matrix/Rotation handles it.
+        theta_rad = torch.deg2rad(torch.tensor(angle_deg, device=device))
+        c, s = torch.cos(theta_rad), torch.sin(theta_rad)
 
         # Determine new Z range (projected extent along new Z axis)
-        # Original corners (relative to center)
-        # We assume pixel_size is isotropic for simplicity in extent calculation
-        # If not, we should multiply by self.pixel_size
-        # But grid_sample works in normalized coords [-1, 1], so we can work in pixel units
-        # if we handle aspect ratio correctly.
-        # Let's work in pixel units for the grid, but physical units for Z-steps.
-
-        # Dimensions
-        # z_dim = Z * self.pixel_size
-        # y_dim = Y * self.pixel_size
-
-        # New Z extent (bounding box height after rotation)
-        # z_new = |z * cos - y * sin| is wrong.
-        # p_L = R p_S. z_L = y_S * sin + z_S * cos
-        # Max extent is sum of projections of half-widths
         new_z_extent = (Y * abs(s) + Z * abs(c)) * self.pixel_size
 
-        # Number of slices in new Z direction
-        # We keep step size = pixel_size
+        # Number of slices in new Z direction, keeping step size = pixel_size
         nz_new = int(np.ceil(new_z_extent.item() / self.pixel_size))
 
-        # Start z_L (centered at 0)
-        z_L_start = -(nz_new - 1) * self.pixel_size / 2
+        # Setup VolumeRotator
+        # Rotator should be on V.device for grid_sample efficiency (usually CPU for large V)
+        rotator = VolumeRotator(
+            nz=Z, ny=Y, nx=X, origin="relion", padding_mode="reflection"
+        ).to(V.device)
 
-        # Pre-calculate coordinate grid for a single slice (x_L, y_L)
-        # x_L corresponds to X axis (unchanged by X-rotation)
-        # y_L corresponds to Y axis (rotated)
-        # We want the output image to be (Y, X) size (or (nxy, nxy))
-        # The detector is usually fixed size.
-        # If we want to capture the whole projected volume, we might need larger Y.
-        # But usually in tomography, the field of view is fixed (the detector).
-        # So we iterate over the detector grid (self.nxy, self.nxy).
-
-        ny_out, nx_out = self.nxy, self.nxy
-
-        # Grid in L frame (detector plane)
-        # shape (ny, nx)
-        y_L_grid, x_L_grid = torch.meshgrid(
-            (torch.arange(ny_out) - ny_out // 2) * self.pixel_size,
-            (torch.arange(nx_out) - nx_out // 2) * self.pixel_size,
-            indexing="ij",
+        # Rotation matrix around X-axis
+        # R_x(theta) = [[1, 0, 0], [0, c, -s], [0, s, c]]
+        # Matrix must be on V.device for rotator
+        R = (
+            torch.tensor(
+                [[1.0, 0.0, 0.0], [0.0, c, -s], [0.0, s, c]],
+                device=V.device,
+                dtype=V.dtype,
+            )
+            .unsqueeze(0)
+            .expand(B, -1, -1)
         )
 
-        # Flatten for batch processing if needed, or keep as (ny, nx)
-        # We need (B, ny, nx, 3) for grid_sample
+        # Build affine matrix
+        theta_matrix = build_affine_matrix(R)
 
-        # Prepare multislice variables
+        # Prepare multislice variables on GPU
         F = self.F_real + 1j * self.F_imag
-        exitwave = np.sqrt(self.dose_per_pixel)  # Scalar or broadcastable
+        exitwave = torch.full(
+            (B, self.nxy, self.nxy),
+            np.sqrt(self.dose_per_pixel),
+            device=device,
+            dtype=torch.complex64,
+        )
+
+        # Optional: collect slices
+        all_slices = [] if return_slices else None
 
         # Iterate over new Z slices
-        for i in track(
+        indices = torch.arange(nz_new, device=V.device)
+        pbar = track(
             range(nz_new),
             description=f"Multislicing (Tilt {angle_deg:.1f})",
             transient=True,
             disable=not (self.progressbars),
-        ):
-            z_L = z_L_start + i * self.pixel_size
+        )
 
-            # Coordinates in L frame: (x_L, y_L, z_L)
-            # We need to map these to S frame (x_S, y_S, z_S)
-            # Inverse rotation: p_S = R^T p_L
-            # R_x(theta) = [[1, 0, 0], [0, c, -s], [0, s, c]]
-            # R^T = [[1, 0, 0], [0, c, s], [0, -s, c]]
-            # x_S = x_L
-            # y_S = c * y_L + s * z_L
-            # z_S = -s * y_L + c * z_L
+        slices_block = None
+        for i in pbar:
+            # Sample a new block if needed
+            if i % slice_batch_size == 0:
+                batch_end = min(i + slice_batch_size, nz_new)
+                batch_indices = indices[i:batch_end]
+                slice_indices = batch_indices - (nz_new - 1) / 2
 
-            x_S = x_L_grid  # (ny, nx)
-            y_S = c * y_L_grid + s * z_L
-            z_S = -s * y_L_grid + c * z_L
+                slices_block = rotator.sample_rotated_slices(
+                    V,
+                    theta_matrix,
+                    slice_indices=slice_indices,
+                    roi_size=(self.nxy, self.nxy),
+                    padding_mode="zeros",
+                )
 
-            # Normalize to [-1, 1] for grid_sample
-            # Note: grid_sample expects (x, y, z) order in the last dimension
-            # And it expects normalized coordinates in range [-1, 1].
-            # 1.0 corresponds to index (size-1). -1.0 corresponds to index 0.
-            # Actually, align_corners=True (default) means -1 is left edge center, 1 is right edge center.
-            # align_corners=False means -1 is left boundary, 1 is right boundary.
-            # Let's use align_corners=True to match standard pixel coordinates if we mapped correctly.
-            # The spatial extent of the volume V is defined by its shape (Z, Y, X).
-            # Center is at (0,0,0).
-            # Extent is [-X*ps/2, X*ps/2] roughly.
-            # Normalized coord = 2 * coord / (size * ps) ?
-            # More precisely: index = (coord / ps) + size/2
-            # norm = (index / (size-1)) * 2 - 1
+                if return_slices:
+                    all_slices.append(slices_block.cpu())
 
-            # Let's do it via indices for clarity
-            # index_x = x_S / self.pixel_size + (X - 1) / 2
-            # norm_x = (index_x / (X - 1)) * 2 - 1
-            # Simplify: norm_x = x_S / (self.pixel_size * (X - 1) / 2)
+                slices_block = slices_block.to(device)  # (B, K, nxy, nxy)
 
-            norm_x = x_S / (self.pixel_size * (X - 1) / 2)
-            norm_y = y_S / (self.pixel_size * (Y - 1) / 2)
-            norm_z = z_S / (self.pixel_size * (Z - 1) / 2)
-
-            # Stack to (1, ny, nx, 3) -> (B, ny, nx, 3)
-            # grid_sample expects (x, y, z) in last dim
-            grid = (
-                torch.stack([norm_x, norm_y, norm_z], dim=-1)
-                .unsqueeze(0)
-                .expand(B, -1, -1, -1)
-            )
-
-            # Sample V
-            # V is (B, Z, Y, X). grid_sample expects (B, C, D_in, H_in, W_in)
-            # We treat V as (B, 1, Z, Y, X)
-            # grid is (B, D_out, H_out, W_out, 3)
-            # Here output is 2D slice (1, ny, nx). So D_out=1.
-            # We can reshape grid to (B, 1, ny, nx, 3)
-            grid = grid.unsqueeze(1)
-
-            # Sample
-            # padding_mode='reflection' handles the "infinite ice" assumption
-            slice_sample = torch.nn.functional.grid_sample(
-                V.unsqueeze(1),
-                grid,
-                mode="bilinear",
-                padding_mode="reflection",
-                align_corners=True,
-            )
-            # slice_sample shape: (B, 1, 1, ny, nx) -> squeeze to (B, ny, nx)
-            slice_sample = slice_sample.squeeze(1).squeeze(1).to(device)
+            # Extract single slice from the block
+            slice_sample = slices_block[:, i % slice_batch_size]
 
             # Multislice propagation
             t = torch.exp(
@@ -425,6 +387,8 @@ class Scattering(L.LightningModule):
             wv = t * exitwave
             exitwave = ifft2(fft2(wv) * F * self.kmask)
 
+        if return_slices:
+            return exitwave, torch.cat(all_slices, dim=1)
         return exitwave
 
     def rytov(self, V):

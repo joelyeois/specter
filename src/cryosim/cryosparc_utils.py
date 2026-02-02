@@ -62,6 +62,7 @@ def extract_parameters_from_csfile(
 
     # extract defocus
     dfang_rad = torch.as_tensor(dataset["ctf/df_angle_rad"])
+    dfang_deg = dfang_rad / torch.pi * 180
     dfu_A = torch.as_tensor(dataset["ctf/df1_A"])
     dfv_A = torch.as_tensor(dataset["ctf/df2_A"])
 
@@ -105,22 +106,6 @@ def extract_parameters_from_csfile(
     tref1 = torch.as_tensor(dataset["ctf/trefoil_A"][:, 0] / 1000)
     tref2 = torch.as_tensor(dataset["ctf/trefoil_A"][:, 1] / 1000)
 
-    # build ctf_params
-    ctf_params = torch.stack(
-        [
-            cs_A,
-            dfu_A,
-            dfv_A,
-            dfang_rad,
-            beamtiltx_rad,
-            beamtilty_rad,
-            phaseshift_rad,
-            tref1,
-            tref2,
-        ],
-        dim=-1,
-    )
-
     # extract per-particle scale factors
     scale = torch.as_tensor(dataset["alignments3D/alpha"])
 
@@ -134,13 +119,34 @@ def extract_parameters_from_csfile(
         anisomag = anisomag + torch.eye(2).unsqueeze(0)
         # Compute the real-space equivalent matrix
         anisomag = torch.inverse(anisomag.mT)
-        if return_class == "0":
-            anisomag = anisomag[split == 0]
-        elif return_class == "1":
-            anisomag = anisomag[split == 1]
+
+        # correct for anisotropic shift
+        corrected_shifts = translations_A.unsqueeze(
+            -1
+        )  # Add a dimension to make it (B, 2, 1)
+
+        # Perform batch matrix multiplication
+        corrected_shifts = torch.bmm(anisomag, corrected_shifts)
+
+        # Remove the last dimension to get (B, 2)
+        corrected_shifts = corrected_shifts.squeeze(-1)
+        translations_A = corrected_shifts
 
     if return_class == "all":
         indices = torch.arange(len(split))
+
+        # build ctf_params
+        ctf_params = {
+            "cs": cs_A,
+            "dfu": dfu_A,
+            "dfv": dfv_A,
+            "dfang": dfang_deg,
+            "tiltx": beamtiltx_rad,
+            "tilty": beamtilty_rad,
+            "phaseshift": phaseshift_rad,
+            "tref1": tref1,
+            "tref2": tref2,
+        }
         return (
             energy_kev,
             pixel_size,
@@ -154,28 +160,54 @@ def extract_parameters_from_csfile(
         )
     elif return_class == "0":
         indices = torch.squeeze(torch.nonzero(split == 0))
+
+        # build ctf_params
+        ctf_params = {
+            "cs": cs_A[split == 0],
+            "dfu": dfu_A[split == 0],
+            "dfv": dfv_A[split == 0],
+            "dfang": dfang_deg[split == 0],
+            "tiltx": beamtiltx_rad[split == 0],
+            "tilty": beamtilty_rad[split == 0],
+            "phaseshift": phaseshift_rad[split == 0],
+            "tref1": tref1[split == 0],
+            "tref2": tref2[split == 0],
+        }
         return (
             energy_kev,
             pixel_size,
             alpha,
             rotations[split == 0],
             translations_A[split == 0],
-            ctf_params[split == 0],
+            ctf_params,
             scale[split == 0],
-            anisomag,
+            anisomag[split == 0],
             indices,
         )
     elif return_class == "1":
         indices = torch.squeeze(torch.nonzero(split == 1))
+
+        # build ctf_params
+        ctf_params = {
+            "cs": cs_A[split == 1],
+            "dfu": dfu_A[split == 1],
+            "dfv": dfv_A[split == 1],
+            "dfang": dfang_deg[split == 1],
+            "tiltx": beamtiltx_rad[split == 1],
+            "tilty": beamtilty_rad[split == 1],
+            "phaseshift": phaseshift_rad[split == 1],
+            "tref1": tref1[split == 1],
+            "tref2": tref2[split == 1],
+        }
         return (
             energy_kev,
             pixel_size,
             alpha,
             rotations[split == 1],
             translations_A[split == 1],
-            ctf_params[split == 1],
+            ctf_params,
             scale[split == 1],
-            anisomag,
+            anisomag[split == 0],
             indices,
         )
 

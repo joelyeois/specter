@@ -1,7 +1,6 @@
 from . import filters
 from .rotations import VolumeRotator, build_affine_matrix
 import lightning as L
-import numpy as np
 import torch
 from .fft_tools import fft2, ifft2
 from rich.progress import track
@@ -32,8 +31,8 @@ def energy_to_wavelength(energy):
     λ = hc / sqrt(E * (E + 2*m_e*c²))
     where m_e*c² = 511 keV (rest mass energy of electron).
     """
-    ev = energy * 1e3
-    return hc / np.sqrt(ev * (ev + 2.0 * rest_mass_energy))
+    ev = energy * 1.0e3  # [eV]
+    return hc / (ev * (ev + 2.0 * rest_mass_energy)) ** 0.5
 
 
 def interaction_parameter(energy):
@@ -243,7 +242,7 @@ class Scattering(L.LightningModule):
         F = self.F_real + 1j * self.F_imag
         if self.flip_curvature:
             V = torch.flip(V, dims=(1,))
-        exitwave = np.sqrt(self.dose_per_pixel)
+        exitwave = self.dose_per_pixel**0.5
 
         # iterate across z-planes of 3D potentials.
         # for i in tqdm(range(V.size(1)), desc='Multislicing', leave=False):
@@ -262,133 +261,6 @@ class Scattering(L.LightningModule):
 
             # propagate wave to next slice, also applies Kirkland's 0.66 bandlimit
             exitwave = ifft2(fft2(wv) * F * self.kmask)
-        return exitwave
-
-    def multislice_and_tilt(
-        self, V, angle_deg, slice_batch_size: int = 1, return_slices: bool = False
-    ):
-        """
-        Perform multislice on a tilted volume for tomography.
-
-        Instead of rotating the entire volume (computationally expensive),
-        samples slices on-the-fly from the tilted coordinate system.
-
-        Parameters
-        ----------
-        V : torch.Tensor
-            Potential volume with shape (B, Z, Y, X).
-        angle_deg : float
-            Tilt angle in degrees around the X-axis.
-        slice_batch_size : int, optional
-            Number of slices to sample and move to GPU at once.
-            Higher values improve PCIe efficiency but use more VRAM.
-            Default is 1.
-        return_slices : bool, optional
-            If True, returns the stack of sampled slices along with the exit wave.
-            This is useful for debugging and verification. Default is False.
-
-        Returns
-        -------
-        exitwave : torch.Tensor
-            Complex-valued 2D exit wave from tilted projection, shape (B, Y, X).
-        slices : torch.Tensor (optional)
-            If return_slices is True, returns (B, nz_new, Y, X) tensor of sampled slices.
-
-        Notes
-        -----
-        Uses the VolumeRotator to extract tilted slices in blocks.
-        The tilt is performed around the X-axis following tomography conventions.
-        """
-        B, Z, Y, X = V.shape
-        device = self.device
-
-        # Convert angle to radians for internal use if needed,
-        # but build_affine_matrix/Rotation handles it.
-        theta_rad = torch.deg2rad(torch.tensor(angle_deg, device=device))
-        c, s = torch.cos(theta_rad), torch.sin(theta_rad)
-
-        # Determine new Z range (projected extent along new Z axis)
-        new_z_extent = (Y * abs(s) + Z * abs(c)) * self.pixel_size
-
-        # Number of slices in new Z direction, keeping step size = pixel_size
-        nz_new = int(np.ceil(new_z_extent.item() / self.pixel_size))
-
-        # Setup VolumeRotator
-        # Rotator should be on V.device for grid_sample efficiency (usually CPU for large V)
-        rotator = VolumeRotator(
-            nz=Z, ny=Y, nx=X, origin="relion", padding_mode="reflection"
-        ).to(V.device)
-
-        # Rotation matrix around X-axis
-        # R_x(theta) = [[1, 0, 0], [0, c, -s], [0, s, c]]
-        # Matrix must be on V.device for rotator
-        R = (
-            torch.tensor(
-                [[1.0, 0.0, 0.0], [0.0, c, -s], [0.0, s, c]],
-                device=V.device,
-                dtype=V.dtype,
-            )
-            .unsqueeze(0)
-            .expand(B, -1, -1)
-        )
-
-        # Build affine matrix
-        theta_matrix = build_affine_matrix(R)
-
-        # Prepare multislice variables on GPU
-        F = self.F_real + 1j * self.F_imag
-        exitwave = torch.full(
-            (B, self.nxy, self.nxy),
-            np.sqrt(self.dose_per_pixel),
-            device=device,
-            dtype=torch.complex64,
-        )
-
-        # Optional: collect slices
-        all_slices = [] if return_slices else None
-
-        # Iterate over new Z slices
-        indices = torch.arange(nz_new, device=V.device)
-        pbar = track(
-            range(nz_new),
-            description=f"Multislicing (Tilt {angle_deg:.1f})",
-            transient=True,
-            disable=not (self.progressbars),
-        )
-
-        slices_block = None
-        for i in pbar:
-            # Sample a new block if needed
-            if i % slice_batch_size == 0:
-                batch_end = min(i + slice_batch_size, nz_new)
-                batch_indices = indices[i:batch_end]
-                slice_indices = batch_indices - (nz_new - 1) / 2
-
-                slices_block = rotator.sample_rotated_slices(
-                    V,
-                    theta_matrix,
-                    slice_indices=slice_indices,
-                    roi_size=(self.nxy, self.nxy),
-                    padding_mode="zeros",
-                )
-
-                if return_slices:
-                    all_slices.append(slices_block.cpu())
-
-                slices_block = slices_block.to(device)  # (B, K, nxy, nxy)
-
-            # Extract single slice from the block
-            slice_sample = slices_block[:, i % slice_batch_size]
-
-            # Multislice propagation
-            t = torch.exp(
-                1j * self.sigma * complex_potential(slice_sample, alpha=self.alpha)
-            )
-            wv = t * exitwave
-            exitwave = ifft2(fft2(wv) * F * self.kmask)
-
-        if return_slices:
-            return exitwave, torch.cat(all_slices, dim=1)
         return exitwave
 
     def rytov(self, V):
@@ -460,7 +332,7 @@ class Scattering(L.LightningModule):
         exitwave = 1 + 1j * exitwave
 
         # multiply with dose
-        exitwave *= np.sqrt(self.dose_per_pixel)
+        exitwave *= self.dose_per_pixel**0.5
         return exitwave
 
     def projection(self, V):
@@ -486,8 +358,9 @@ class Scattering(L.LightningModule):
         ψ = exp(i σ Σ_z V(z))
         This is valid only for thin specimens where propagation effects are negligible.
         """
-        exitwave = np.sqrt(self.dose_per_pixel) * torch.exp(
-            1j * self.sigma * torch.sum(V, 1)
+        V_sum = torch.sum(V, 1)
+        exitwave = (self.dose_per_pixel**0.5) * torch.exp(
+            1j * self.sigma * complex_potential(V_sum, alpha=self.alpha)
         )
         return exitwave
 
@@ -550,3 +423,394 @@ class Scattering(L.LightningModule):
             return self.firstborn(V)
         elif self.scattering_model == "ctf":
             return self.ctf(V)
+
+
+class IterativeScattering(L.LightningModule):
+    """
+    Scattering module that computes the 2D exitwave from a 3D scattering
+    potential using on-the-fly slice sampling. This is highly memory efficient
+    as it avoids rotating the entire 3D volume.
+    """
+
+    def __init__(
+        self,
+        nxy,
+        pixel_size,
+        energy,
+        dose_per_angstrom,
+        scattering_model="multislice",
+        klim=None,
+        flip_curvature=False,
+        alpha=0.0,
+        progressbars=True,
+    ):
+        """
+        Parameters
+        ----------
+        nxy : int
+            Number of pixels in x and y dimensions.
+        pixel_size : float
+            Pixel size in Å.
+        energy : float
+            Electron beam energy in keV.
+        dose_per_angstrom : float
+            Electron dose in e-/Å^2.
+        scattering_model : str
+            Scattering model to use ('multislice', 'firstborn', 'rytov', 'projection', 'ctf').
+        klim : float, optional
+            Bandlimit parameter.
+        flip_curvature : bool
+            Whether to flip the curvature of the Ewald sphere.
+        alpha : float
+            Amplitude contrast ratio.
+        progressbars : bool
+            Whether to show progress bars.
+        """
+        super().__init__()
+        self.nxy = nxy
+        self.pixel_size = pixel_size
+        self.energy = energy
+        self.dose_per_angstrom = dose_per_angstrom
+        self.dose_per_pixel = dose_per_angstrom * pixel_size**2
+        self.wavelength = energy_to_wavelength(energy)
+        self.sigma = interaction_parameter(energy)
+        self.scattering_model = scattering_model
+        self.flip_curvature = flip_curvature
+        self.alpha = alpha
+        self.progressbars = progressbars
+
+        # frequency coordinates
+        kx = torch.fft.fftshift(torch.fft.fftfreq(nxy, pixel_size))
+        kxx, kyy = torch.meshgrid(kx, kx, indexing="ij")
+        k = torch.sqrt(kxx**2 + kyy**2)
+        self.register_buffer("k2", k**2)
+
+        # Kirkland bandlimit
+        self.klim = klim
+        if klim is not None:
+            kmask = filters.circle2d(nxy, int(nxy * klim))[None, ...]
+            self.register_buffer("kmask", kmask)
+        else:
+            self.kmask = 1
+
+        # Precompute single-step Fresnel propagator if using multislice
+        F_step = torch.exp(1j * torch.pi * self.wavelength * pixel_size * k**2)
+        self.register_buffer("F_step_real", F_step.real)
+        self.register_buffer("F_step_imag", F_step.imag)
+
+    def _setup_tilt(self, V, theta_matrix):
+        """Helper to calculate rotation parameters and setup VolumeRotator."""
+        B, Z, Y, X = V.shape
+
+        # Determine nz_new for arbitrary rotation
+        # R is the rotation matrix (B, 3, 3) from output to input coordinates.
+        R = theta_matrix[:, :3, :3]
+
+        # Corners of the volume in pixel units relative to center.
+        # VolumeRotator expects (z, y, x) or (x, y, z)?
+        # Grid sample uses (x, y, z).
+        corners = torch.tensor(
+            [
+                [-X / 2, -Y / 2, -Z / 2],
+                [X / 2, -Y / 2, -Z / 2],
+                [-X / 2, Y / 2, -Z / 2],
+                [X / 2, Y / 2, -Z / 2],
+                [-X / 2, -Y / 2, Z / 2],
+                [X / 2, -Y / 2, Z / 2],
+                [-X / 2, Y / 2, Z / 2],
+                [X / 2, Y / 2, Z / 2],
+            ],
+            device=V.device,
+            dtype=V.dtype,
+        ).t()  # (3, 8)
+
+        # Output Z-axis in input frame is R[:, 2].
+        # P_out = R.T @ (P_in - T)
+        # z_out = R.T[2, :] @ (P_in - T)
+        # We ignore T for nz_new as it just shifts the center of sampling.
+        rotated_corners = torch.bmm(
+            R.transpose(1, 2), corners.unsqueeze(0).expand(B, -1, -1)
+        )
+        z_min = rotated_corners[:, 2, :].min(dim=1).values
+        z_max = rotated_corners[:, 2, :].max(dim=1).values
+
+        # Max extent across the batch
+        nz_new = int(torch.ceil((z_max - z_min).max()).item())
+        nz_new = max(1, nz_new)
+
+        rotator = VolumeRotator(
+            nz=Z, ny=Y, nx=X, origin="relion", padding_mode="reflection"
+        ).to(V.device)
+
+        return nz_new, rotator
+
+    def _get_propagator(self, distance_slices):
+        """Compute the Fresnel propagator for a given distance in slices."""
+        F = torch.exp(
+            1j
+            * torch.pi
+            * self.wavelength
+            * self.pixel_size
+            * distance_slices
+            * self.k2
+        )
+        return F
+
+    def multislice(self, V, theta_matrix, slice_batch_size: int = 1):
+        """
+        Compute exit wave using iterative multislice on a transformed volume.
+        """
+        nz_new, rotator = self._setup_tilt(V, theta_matrix)
+        B = V.shape[0]
+        device = self.device
+
+        F = self.F_step_real + 1j * self.F_step_imag
+        exitwave = torch.full(
+            (B, self.nxy, self.nxy),
+            self.dose_per_pixel**0.5,
+            device=device,
+            dtype=torch.complex64,
+        )
+
+        indices = torch.arange(nz_new, device=V.device)
+        if self.flip_curvature:
+            indices = torch.flip(indices, dims=(0,))
+
+        pbar = track(
+            range(nz_new),
+            description="Multislice (Iterative)",
+            transient=True,
+            disable=not (self.progressbars),
+        )
+
+        slices_block = None
+        for i in pbar:
+            if i % slice_batch_size == 0:
+                batch_end = min(i + slice_batch_size, nz_new)
+                batch_indices = indices[i:batch_end]
+                slice_indices = batch_indices - (nz_new - 1) / 2
+                slices_block = rotator.sample_rotated_slices(
+                    V,
+                    theta_matrix,
+                    slice_indices=slice_indices,
+                    roi_size=(self.nxy, self.nxy),
+                    padding_mode="zeros",
+                ).to(device)
+
+            slice_sample = slices_block[:, i % slice_batch_size]
+            slice_complex = complex_potential(slice_sample, alpha=self.alpha)
+            t = torch.exp(1j * self.sigma * slice_complex)
+            exitwave = ifft2(fft2(t * exitwave) * F * self.kmask)
+
+        return exitwave
+
+    def projection(self, V, theta_matrix, slice_batch_size: int = 1):
+        """
+        Compute exit wave using iterative projection approximation on a transformed volume.
+        """
+        nz_new, rotator = self._setup_tilt(V, theta_matrix)
+        B = V.shape[0]
+        device = self.device
+
+        total_potential = torch.zeros((B, self.nxy, self.nxy), device=device)
+        indices = torch.arange(nz_new, device=V.device)
+
+        pbar = track(
+            range(nz_new),
+            description="Projection (Iterative)",
+            transient=True,
+            disable=not (self.progressbars),
+        )
+
+        for i in pbar:
+            if i % slice_batch_size == 0:
+                batch_end = min(i + slice_batch_size, nz_new)
+                batch_indices = indices[i:batch_end]
+                slice_indices = batch_indices - (nz_new - 1) / 2
+                slices_block = rotator.sample_rotated_slices(
+                    V,
+                    theta_matrix,
+                    slice_indices=slice_indices,
+                    roi_size=(self.nxy, self.nxy),
+                    padding_mode="zeros",
+                ).to(device)
+
+            total_potential += slices_block[:, i % slice_batch_size]
+
+        total_complex = complex_potential(total_potential, alpha=self.alpha)
+        exitwave = (self.dose_per_pixel**0.5) * torch.exp(
+            1j * self.sigma * total_complex
+        )
+        return exitwave
+
+    def rytov(self, V, theta_matrix, slice_batch_size: int = 1):
+        """
+        Compute exit wave using iterative Rytov approximation on a transformed volume.
+        """
+        nz_new, rotator = self._setup_tilt(V, theta_matrix)
+        B = V.shape[0]
+        device = self.device
+
+        exitwave = torch.ones(
+            (B, self.nxy, self.nxy), device=device, dtype=torch.complex64
+        )
+        indices = torch.arange(nz_new, device=V.device)
+        if self.flip_curvature:
+            indices = torch.flip(indices, dims=(0,))
+
+        pbar = track(
+            range(nz_new),
+            description="Rytov (Iterative)",
+            transient=True,
+            disable=not (self.progressbars),
+        )
+
+        for i in pbar:
+            if i % slice_batch_size == 0:
+                batch_end = min(i + slice_batch_size, nz_new)
+                batch_indices = indices[i:batch_end]
+                slice_indices = batch_indices - (nz_new - 1) / 2
+                slices_block = rotator.sample_rotated_slices(
+                    V,
+                    theta_matrix,
+                    slice_indices=slice_indices,
+                    roi_size=(self.nxy, self.nxy),
+                    padding_mode="zeros",
+                ).to(device)
+
+            slice_sample = slices_block[:, i % slice_batch_size]
+            slice_complex = complex_potential(slice_sample, alpha=self.alpha)
+            # Propagate transmission of slice i to exit plane
+            # Distance is nz_new - i
+            F_i = self._get_propagator(float(nz_new - i))
+            t = torch.exp(1j * self.sigma * slice_complex)
+            exitwave *= ifft2(fft2(t) * F_i)
+
+        exitwave *= self.dose_per_pixel**0.5
+        return exitwave
+
+    def firstborn(self, V, theta_matrix, slice_batch_size: int = 1):
+        """
+        Compute exit wave using iterative first Born approximation on a transformed volume.
+        """
+        nz_new, rotator = self._setup_tilt(V, theta_matrix)
+        B = V.shape[0]
+        device = self.device
+
+        total_scattered = torch.zeros(
+            (B, self.nxy, self.nxy), device=device, dtype=torch.complex64
+        )
+        indices = torch.arange(nz_new, device=V.device)
+        if self.flip_curvature:
+            indices = torch.flip(indices, dims=(0,))
+
+        pbar = track(
+            range(nz_new),
+            description="First Born (Iterative)",
+            transient=True,
+            disable=not (self.progressbars),
+        )
+
+        for i in pbar:
+            if i % slice_batch_size == 0:
+                batch_end = min(i + slice_batch_size, nz_new)
+                batch_indices = indices[i:batch_end]
+                slice_indices = batch_indices - (nz_new - 1) / 2
+                slices_block = rotator.sample_rotated_slices(
+                    V,
+                    theta_matrix,
+                    slice_indices=slice_indices,
+                    roi_size=(self.nxy, self.nxy),
+                    padding_mode="zeros",
+                ).to(device)
+
+            slice_sample = slices_block[:, i % slice_batch_size]
+            slice_complex = complex_potential(slice_sample, alpha=self.alpha)
+            F_i = self._get_propagator(float(nz_new - i))
+            total_scattered += ifft2(fft2(slice_complex) * F_i)
+
+        exitwave = (1 + 1j * self.sigma * total_scattered) * (self.dose_per_pixel**0.5)
+        return exitwave
+
+    def ctf(self, V, theta_matrix, slice_batch_size: int = 1):
+        """
+        Compute iterative projected potential (for CTF) with transformed sampling.
+        """
+        nz_new, rotator = self._setup_tilt(V, theta_matrix)
+        B = V.shape[0]
+        device = self.device
+
+        total_potential = torch.zeros((B, self.nxy, self.nxy), device=device)
+        indices = torch.arange(nz_new, device=V.device)
+
+        pbar = track(
+            range(nz_new),
+            description="CTF Projection (Iterative)",
+            transient=True,
+            disable=not (self.progressbars),
+        )
+
+        for i in pbar:
+            if i % slice_batch_size == 0:
+                batch_end = min(i + slice_batch_size, nz_new)
+                batch_indices = indices[i:batch_end]
+                slice_indices = batch_indices - (nz_new - 1) / 2
+                slices_block = rotator.sample_rotated_slices(
+                    V,
+                    theta_matrix,
+                    slice_indices=slice_indices,
+                    roi_size=(self.nxy, self.nxy),
+                    padding_mode="zeros",
+                ).to(device)
+
+            total_potential += slices_block[:, i % slice_batch_size]
+
+        return 2 * self.sigma * total_potential
+
+    def forward(self, V, pose, slice_batch_size: int = 1):
+        """
+        Parameters
+        ----------
+        V : torch.Tensor
+            Input 3D potential volume.
+        pose : float or torch.Tensor
+            If float, interpreted as tilt angle in degrees around X.
+            If torch.Tensor, interpreted as affine matrix (B, 3, 4).
+        slice_batch_size : int
+            Number of slices to batch for sampling.
+        """
+        if isinstance(pose, (int, float)) or (
+            isinstance(pose, torch.Tensor) and pose.ndim == 0
+        ):
+            # Backward compatibility for tilt angle
+            angle_deg = pose
+            B = V.shape[0]
+            device = V.device
+            theta_rad = torch.deg2rad(torch.as_tensor(angle_deg, device=device))
+            c, s = torch.cos(theta_rad), torch.sin(theta_rad)
+            R = (
+                torch.tensor(
+                    [[1.0, 0.0, 0.0], [0.0, c, -s], [0.0, s, c]],
+                    device=device,
+                    dtype=V.dtype,
+                )
+                .unsqueeze(0)
+                .expand(B, -1, -1)
+            )
+            theta_matrix = build_affine_matrix(R)
+        else:
+            theta_matrix = pose.to(V.device)
+
+        if self.scattering_model == "ctf":
+            return self.ctf(V, theta_matrix, slice_batch_size)
+
+        if self.scattering_model == "multislice":
+            return self.multislice(V, theta_matrix, slice_batch_size)
+        elif self.scattering_model == "rytov":
+            return self.rytov(V, theta_matrix, slice_batch_size)
+        elif self.scattering_model == "projection":
+            return self.projection(V, theta_matrix, slice_batch_size)
+        elif self.scattering_model == "firstborn":
+            return self.firstborn(V, theta_matrix, slice_batch_size)
+        else:
+            raise ValueError(f"Unknown scattering model: {self.scattering_model}")

@@ -1,13 +1,14 @@
 import lightning as L
 import torch
 from .microscope import Aberration, Detector
-from .scattering import Scattering
+from .scattering import Scattering, IterativeScattering
 from .icemaker import NaiveIcemaker, Icemaker
 from . import rotations
 from .rotations import Rotation, VolumeRotator
 import torch.nn.functional as F
 from .crowding import CrowdWithDuplicates
 from .potential import PotentialBuilder
+from .specimen import TomogramGenerator
 import torch.nn as nn
 from cryosim.detectors import k3_300kv, k3_200kv, perfect_detector
 
@@ -82,6 +83,9 @@ class BaseImageGenerator(L.LightningModule):
         anisomag=None,
         ctf_params=None,
         progressbars=True,
+        vol=None,
+        scattering_potential=None,
+        **kwargs,
     ):
         super().__init__()
         self.pixel_size = pixel_size
@@ -97,9 +101,24 @@ class BaseImageGenerator(L.LightningModule):
         self.flip_curvature = flip_curvature
         self.alpha = alpha
         self.crowd_min_distance = crowd_min_distance
+        self.crowd_max_distance_z = crowd_max_distance_z
         self.pad_fft = pad_fft
-        self.nxy = nxy
         self.progressbars = progressbars
+
+        if scattering_potential is not None:
+            self.register_buffer("V", scattering_potential)
+        elif vol is not None:
+            self.register_buffer("V", vol)
+        else:
+            self.V = None
+
+        if nxy is None:
+            if self.V is not None:
+                self.nxy = self.V.shape[-1]
+            else:
+                self.nxy = 256  # Default
+        else:
+            self.nxy = nxy
 
         if self.pad_fft and self.nxy is not None:
             self.pad_nxy = self.nxy + (self.nxy // 2) * 2
@@ -113,6 +132,23 @@ class BaseImageGenerator(L.LightningModule):
             self.detector_mtf = None
         elif self.nxy is not None:
             self._init_detector_mtf()
+
+        if anisomag is not None:
+            self.register_buffer("anisomag", torch.as_tensor(anisomag))
+        else:
+            self.anisomag = None
+
+        if ctf_params is not None:
+            # Register CTF parameters as buffers.
+            # Ensure they are at least 1D so they can be indexed by [idx]
+            for k, v in ctf_params.items():
+                v_tensor = torch.as_tensor(v)
+                if v_tensor.ndim == 0:
+                    v_tensor = v_tensor.unsqueeze(0)
+                self.register_buffer(k, v_tensor)
+            self.ctf_params = ctf_params  # Keep it for dict-like access
+        else:
+            self.ctf_params = None
 
         # Ice thickness logic
         if ice_model is None:
@@ -132,14 +168,14 @@ class BaseImageGenerator(L.LightningModule):
 
         if anisomag is None:
             self.anisomag = anisomag
-        else:
-            self.register_buffer("anisomag", anisomag)
+        # anisomag is already registered if not None in lines 136-139
 
-        # CTF Params
+        # ctf_params is already handled in lines 141-151.
+        # We need to ensure self.ctf_params values refer to the registered buffers for easy access in forward
         if ctf_params is not None:
-            self.ctf_params = nn.ParameterDict(
-                {k: nn.Parameter(v) for k, v in ctf_params.items()}
-            )
+            # Re-map self.ctf_params to point to the buffers
+            self.ctf_params = {k: getattr(self, k) for k in ctf_params.keys()}
+
             if self.scattering_model not in ["projection", "ctf"]:
                 self._shift_ctf_params()
         else:
@@ -158,12 +194,14 @@ class BaseImageGenerator(L.LightningModule):
 
     def _shift_ctf_params(self):
         """Shift defocus parameters to account for volume thickness (center of volume)."""
+        shift = (self.nz * self.pixel_size) / 2
+        # Modify the buffers directly
+        # Since buffers are tensors, we can modify them in-place or assign new values.
+        # But to be safe with gradients (though these are params), we should just subtract.
         if "dfu" in self.ctf_params:
-            shifted = self.ctf_params["dfu"].detach() - (self.nz * self.pixel_size) / 2
-            self.ctf_params["dfu"] = nn.Parameter(shifted)
+            self.dfu -= shift
         if "dfv" in self.ctf_params:
-            shifted = self.ctf_params["dfv"].detach() - (self.nz * self.pixel_size) / 2
-            self.ctf_params["dfv"] = nn.Parameter(shifted)
+            self.dfv -= shift
 
     def _init_modules(self):
         """Initialize Scattering, Aberration, and Detector modules."""
@@ -177,6 +215,18 @@ class BaseImageGenerator(L.LightningModule):
             klim=self.klim,
             flip_curvature=self.flip_curvature,
             nz=self.nz,
+            alpha=self.alpha,
+            progressbars=self.progressbars if hasattr(self, "progressbars") else False,
+        )
+
+        self.iterative_scattering = IterativeScattering(
+            self.pad_nxy,
+            self.pixel_size,
+            self.energy,
+            self.dose_per_angstrom,
+            scattering_model=self.scattering_model,
+            klim=self.klim,
+            flip_curvature=self.flip_curvature,
             alpha=self.alpha,
             progressbars=self.progressbars if hasattr(self, "progressbars") else False,
         )
@@ -829,27 +879,30 @@ class MicrographGenerator(BaseImageGenerator):
 
     def __init__(
         self,
-        scattering_potential,
         micrograph_size,
         pixel_size,
         ctf_params,
         energy,
         dose_per_angstrom,
+        vol=None,
+        scattering_potential=None,
         anisomag=None,
         ice_model=None,
         ice_thickness=None,
+        crowd_min_distance=None,
+        crowd_max_distance_z=None,
+        water_air_interface=True,
         scattering_model="multislice",
         aberration_model="holography",
         noise_model="poisson",
         klim=None,
         alpha=0.0,
-        crowd_min_distance=None,
-        crowd_max_distance_z=None,
         pad_fft=False,
         chunk_size=None,
         move_to_cpu=True,
-        water_air_interface=True,
         detector_model=None,
+        progressbars=True,
+        **kwargs,
     ):
         # Determine nxy
         if isinstance(micrograph_size, int):
@@ -863,6 +916,8 @@ class MicrographGenerator(BaseImageGenerator):
             raise ValueError("micrograph_size must have same dimensions in x and y.")
 
         super().__init__(
+            vol=vol,
+            scattering_potential=scattering_potential,
             pixel_size=pixel_size,
             energy=energy,
             dose_per_angstrom=dose_per_angstrom,
@@ -880,6 +935,7 @@ class MicrographGenerator(BaseImageGenerator):
             detector_model=detector_model,
             anisomag=anisomag,
             ctf_params=ctf_params,
+            progressbars=progressbars,
         )
 
         self.chunk_size = chunk_size
@@ -887,13 +943,25 @@ class MicrographGenerator(BaseImageGenerator):
         self.water_air_interface = water_air_interface
         self.ice_model = ice_model
 
-        if ice_thickness is None or (
-            ice_thickness < scattering_potential.shape[0] * pixel_size
-        ):
-            self.nz = scattering_potential.shape[0]
-        else:
+        # Determine nz based on scattering_potential, ice_thickness, or pre-computed vol
+        if vol is not None:
+            self.nz = vol.shape[1]
+        elif scattering_potential is not None:
+            if ice_thickness is None or (
+                ice_thickness < scattering_potential.shape[0] * pixel_size
+            ):
+                self.nz = scattering_potential.shape[0]
+            else:
+                self.nz = int(ice_thickness // pixel_size)
+        elif ice_thickness is not None:
             self.nz = int(ice_thickness // pixel_size)
+        else:
+            self.nz = 256  # Default fallback
+
+        if ice_thickness is not None:
             self.ice_thickness = self.nz * pixel_size
+        else:
+            self.ice_thickness = None
             # Re-shift CTF params if nz changed
         if self.scattering_model not in ["projection", "ctf"]:
             self._shift_ctf_params()
@@ -902,37 +970,30 @@ class MicrographGenerator(BaseImageGenerator):
         if crowd_max_distance_z is None:
             self.crowd_max_distance_z = self.nz
 
-        self.register_buffer("V", scattering_potential)
-
         # Re-init modules with correct nz
         self._init_modules()
 
-        self.crowd = CrowdWithDuplicates(
-            scattering_potential,
-            pixel_size,
-            self.crowd_min_distance,
-            nxy_out=self.pad_nxy if pad_fft else self.nxy,
-            nz_out=self.nz,
-            max_distance_z=self.crowd_max_distance_z,
-            max_distance_xy=None,
-            method="3d",
-            n_points=torch.inf,
-            seed="random",
-            chunk_size=chunk_size,
-            move_to_cpu=self.move_to_cpu,
-            water_air_interface=water_air_interface,
-        )
+        if vol is not None:
+            self.vol = vol
+        else:
+            # Use TomogramGenerator for internal volume generation
+            self.specimen_gen = TomogramGenerator(
+                pixel_size=pixel_size,
+                nz=self.nz,
+                nxy=self.nxy,
+                scattering_potential=scattering_potential,
+                crowd_min_distance=crowd_min_distance,
+                crowd_max_distance_z=crowd_max_distance_z,
+                ice_model=ice_model,
+                ice_thickness=ice_thickness,
+                water_air_interface=water_air_interface,
+                progressbars=progressbars,
+                chunk_size=chunk_size,
+            )
+            self.vol = self.specimen_gen.generate()
 
-        if ice_model is not None:
-            if ice_model == "randomchoice":
-                self.icemaker = NaiveIcemaker(n=self.nxy, dx=pixel_size, nz=self.nz)
-            elif ice_model == "iterative":
-                self.icemaker = Icemaker(
-                    n=256,  # Original hardcoded 256?
-                    dx=pixel_size,
-                    nz=256,  # Original hardcoded 256?
-                    chunk_size=self.chunk_size,
-                )
+        if self.move_to_cpu:
+            self.vol = self.vol.cpu()
 
     def solvate(self, V):
         """
@@ -950,30 +1011,26 @@ class MicrographGenerator(BaseImageGenerator):
         V_solvated : torch.Tensor
             Volume with ice added.
         """
-        # generates ice with size (B x Z x Y x X)
-        # MicrographGenerator has specific solvate logic (generate_big_ice)
-        if self.ice_model == "randomchoice":
-            self.ice = self.icemaker.generate_ice(device="cpu")
-        elif self.ice_model == "iterative":
-            self.ice = self.icemaker.generate_big_ice(V.shape)
-
-        if self.pad_fft:
-            self.ice = F.pad(
-                self.ice,
-                (
-                    self.nxy // 2,
-                    self.nxy // 2,  # x-axis, last dim
-                    self.nxy // 2,
-                    self.nxy // 2,  # y-axis, second last dim
-                    0,
-                    0,  # z-axis
-                ),
-                mode="reflect",
-            )
-
-        icemask = V < 10  # boolean mask, same shape, no copy of V
-        V += self.ice * icemask
-        # self.icemask = icemask #save as attribute just to check
+        # This method is now effectively deprecated for MicrographGenerator
+        # as the volume is generated once by TomogramGenerator.
+        # However, if it's called, we'll use the specimen_gen's ice.
+        if hasattr(self, "specimen_gen") and self.specimen_gen.ice_model is not None:
+            ice = self.specimen_gen.ice_volume
+            if self.pad_fft:
+                ice = F.pad(
+                    ice,
+                    (
+                        self.nxy // 2,
+                        self.nxy // 2,  # x-axis, last dim
+                        self.nxy // 2,
+                        self.nxy // 2,  # y-axis, second last dim
+                        0,
+                        0,  # z-axis
+                    ),
+                    mode="reflect",
+                )
+            icemask = V < 10
+            V += ice * icemask
         return V
 
     def forward(self, idx):
@@ -991,22 +1048,12 @@ class MicrographGenerator(BaseImageGenerator):
             Simulated micrographs.
         """
         # MicrographGenerator forward is different: starts with empty V
-        V = torch.zeros(
-            len(idx), self.nz, self.nxy, self.nxy
-        )  # Changed from empty to zeros for safety
+        # The volume is now pre-generated and stored in self.vol
+        V = self.vol.to(self.device).expand(
+            len(idx), -1, -1, -1
+        )  # Expand to batch size
 
-        # adds crowd
-        if self.crowd_min_distance is not None:
-            with torch.no_grad():
-                for i, v in enumerate(V):
-                    self.vols = self.crowd()
-                    V[i] += self.vols
-                    # V[i] += self.crowd()
-
-        # add ice
-        if self.ice_model is not None:
-            with torch.no_grad():
-                V = self.solvate(V)
+        # No need to add crowd or ice here, it's done during self.vol generation
 
         # scatter V
         self.exitwaves = self.scattering(V)
@@ -1077,183 +1124,117 @@ class TiltSeriesGenerator(MicrographGenerator):
         Simulate water-air interface. Default True.
     detector_model : str, optional
         Detector model.
+    vol : torch.Tensor, optional
+        Pre-computed volume. If provided, `scattering_potential`, `crowd_min_distance`,
+        `crowd_max_distance_z`, `ice_model`, `ice_thickness`, `water_air_interface`
+        are ignored for volume generation.
     """
 
     def __init__(
         self,
-        scattering_potential,
+        vol,
         micrograph_size,
         pixel_size,
         ctf_params,
         energy,
         dose_per_angstrom,
-        angles,
-        sample_size=None,
+        quaternions=None,
+        translations=None,
+        angles=None,
         anisomag=None,
-        ice_model=None,
-        ice_thickness=None,
         scattering_model="multislice",
         aberration_model="holography",
         noise_model="poisson",
         klim=None,
         alpha=0.0,
-        crowd_min_distance=None,
-        crowd_max_distance_z=None,
         pad_fft=False,
         chunk_size=None,
         move_to_cpu=True,
-        water_air_interface=True,
         detector_model=None,
+        progressbars=True,
+        **kwargs,
     ):
         super().__init__(
-            scattering_potential=scattering_potential,
+            vol=vol,
             micrograph_size=micrograph_size,
             pixel_size=pixel_size,
             ctf_params=ctf_params,
             energy=energy,
             dose_per_angstrom=dose_per_angstrom,
             anisomag=anisomag,
-            ice_model=ice_model,
-            ice_thickness=ice_thickness,
             scattering_model=scattering_model,
             aberration_model=aberration_model,
             noise_model=noise_model,
             klim=klim,
             alpha=alpha,
-            crowd_min_distance=crowd_min_distance,
-            crowd_max_distance_z=crowd_max_distance_z,
             pad_fft=pad_fft,
             chunk_size=chunk_size,
             move_to_cpu=move_to_cpu,
-            water_air_interface=water_air_interface,
             detector_model=detector_model,
+            progressbars=progressbars,
+            **kwargs,
         )
 
-        # Store user preference
-        self.user_sample_size = sample_size
-        self.angles = angles
-
-        # We don't determine self.sample_nxy here anymore because it depends on angles
-        # unless user provided it explicitly.
-        if sample_size is not None:
-            if isinstance(sample_size, int):
-                self.sample_nxy = sample_size
-            elif (
-                isinstance(sample_size, (tuple, list))
-                and sample_size[0] == sample_size[1]
-            ):
-                self.sample_nxy = sample_size[0]
+        if quaternions is not None:
+            self.register_buffer("quaternions", torch.as_tensor(quaternions))
+            if translations is not None:
+                self.register_buffer("translations", torch.as_tensor(translations))
             else:
-                raise ValueError("sample_size must have same dimensions in x and y.")
-
-            if self.sample_nxy < self.nxy:
-                raise ValueError("sample_size cannot be smaller than micrograph_size.")
+                self.register_buffer("translations", torch.zeros(len(quaternions), 2))
+            self.angles = None
+        elif angles is not None:
+            self.angles = torch.as_tensor(angles)
+            # Default to X-axis rotation
+            B = len(self.angles)
+            theta_rad = torch.deg2rad(self.angles)
+            c, s = torch.cos(theta_rad), torch.sin(theta_rad)
+            quats = []
+            for i in range(B):
+                R = torch.tensor(
+                    [[1.0, 0.0, 0.0], [0.0, c[i], -s[i]], [0.0, s[i], c[i]]]
+                )
+                q = Rotation.from_matrix(R).as_quat()
+                quats.append(torch.as_tensor(q))
+            self.register_buffer("quaternions", torch.stack(quats))
+            self.register_buffer("translations", torch.zeros(B, 2))
         else:
-            self.sample_nxy = None  # Will be calculated later
+            raise ValueError("Either 'angles' or 'quaternions' must be provided.")
 
-        self.generate_volume()
-
-    def get_nz_tilt(self, V, angle_deg):
+    def get_nz_tilt(self, V, theta_matrix):
         """
-        Calculate the number of slices needed to cover a tilted volume.
+        Calculate the number of slices needed to cover a transformed volume.
         """
         B, Z, Y, X = V.shape
-        theta_rad = torch.deg2rad(torch.tensor(angle_deg, device=V.device))
-        c, s = torch.cos(theta_rad), torch.sin(theta_rad)
-        new_z_extent = Y * abs(s) + Z * abs(c)
-        return int(torch.ceil(new_z_extent).item())
+        device = V.device
+        theta_matrix = theta_matrix.to(V.device)
+        R = theta_matrix[:, :3, :3]
 
-    def generate_volume(self):
-        """
-        Generate the frozen sample volume.
+        # Corners in pixel units
+        corners = torch.tensor(
+            [
+                [-X / 2, -Y / 2, -Z / 2],
+                [X / 2, -Y / 2, -Z / 2],
+                [-X / 2, Y / 2, -Z / 2],
+                [X / 2, Y / 2, -Z / 2],
+                [-X / 2, -Y / 2, Z / 2],
+                [X / 2, -Y / 2, Z / 2],
+                [-X / 2, Y / 2, Z / 2],
+                [X / 2, Y / 2, Z / 2],
+            ],
+            device=device,
+            dtype=V.dtype,
+        ).t()  # (3, 8)
 
-        Allocates the volume, adds crowding molecules and ice, and stores it in `self.vol`.
-        """
-        # Determine sample_nxy
-        if self.user_sample_size is not None:
-            sample_nxy = self.sample_nxy
-        else:
-            # Calculate required size based on max angle
-            # S >= (W + T * sin(theta)) / cos(theta)
-            # We assume rotation around X axis, so Y dimension is affected.
-            # W = self.nxy * self.pixel_size
-            # T = self.nz * self.pixel_size
+        # rotated_corners = R_inv @ corners
+        rotated_corners = torch.bmm(
+            R.transpose(1, 2), corners.unsqueeze(0).expand(B, -1, -1)
+        )
+        z_min = rotated_corners[:, 2, :].min(dim=1).values
+        z_max = rotated_corners[:, 2, :].max(dim=1).values
 
-            # Convert to tensor for calculation
-            max_angle_deg = torch.max(torch.abs(self.angles))
-            theta = max_angle_deg / 180 * torch.pi
-
-            # Calculate required size in pixels
-            # Note: The formula assumes we want to cover the full projected width.
-            # S * cos(theta) >= W + T * sin(theta)
-            # S >= (W + T * sin(theta)) / cos(theta)
-
-            # Safety margin?
-            # required_size = (W + T * torch.sin(theta)) / torch.cos(theta)
-
-            # mine
-            required_size = self.nxy / torch.cos(theta) + self.nz * torch.tan(theta)
-            sample_nxy = int(torch.ceil(required_size))
-
-            # Ensure even number for FFT efficiency (optional but good practice)
-            if sample_nxy % 2 != 0:
-                sample_nxy += 1
-
-            print(
-                f"Auto-calculated sample size: {sample_nxy} (Max angle: {max_angle_deg:.1f} deg)"
-            )
-
-        # 1. Generate the base volume V once (Frozen for the series)
-        # Initialize V with sample_nxy
-        V = torch.zeros(1, self.nz, sample_nxy, sample_nxy)
-
-        # Add crowd
-        if self.crowd_min_distance is not None:
-            # We need to temporarily update self.nxy to sample_nxy for crowd generation?
-
-            # Re-initialize crowd for the larger volume
-            self.crowd = CrowdWithDuplicates(
-                self.V,
-                self.pixel_size,
-                self.crowd_min_distance,
-                nxy_out=sample_nxy,  # Use sample size
-                nz_out=self.nz,
-                max_distance_z=self.crowd_max_distance_z,
-                max_distance_xy=None,
-                method="3d",
-                n_points=torch.inf,
-                seed="random",
-                chunk_size=self.chunk_size,
-                move_to_cpu=self.move_to_cpu,
-                water_air_interface=self.water_air_interface,
-            )
-
-            with torch.no_grad():
-                for i, v in enumerate(V):
-                    vols = self.crowd()
-                    V[i] += vols
-
-        # Add ice
-        with torch.no_grad():
-            if self.ice_model is not None:
-                if self.ice_model == "randomchoice":
-                    self.icemaker = NaiveIcemaker(
-                        n=sample_nxy, dx=self.pixel_size, nz=self.nz
-                    )
-                    ice = self.icemaker.generate_ice(device="cpu")
-                elif self.ice_model == "iterative":
-                    self.icemaker = Icemaker(
-                        n=256,  # Original hardcoded 256?
-                        dx=self.pixel_size,
-                        nz=256,  # Original hardcoded 256?
-                        chunk_size=self.chunk_size,
-                    )
-                    ice = self.icemaker.generate_big_ice(V.shape)
-                icemask = V < 10
-                V += ice * icemask
-
-        # V is now our frozen volume (B, Z, sample_nxy, sample_nxy)
-        self.vol = V.detach().cpu()
+        # Max extent across the batch
+        nz_new = int(torch.ceil((z_max - z_min).max()).item())
+        return max(1, nz_new)
 
     def generate_tilt_series(self, idx):
         """
@@ -1271,13 +1252,28 @@ class TiltSeriesGenerator(MicrographGenerator):
         """
 
         tilt_series = []
-        for angle in self.angles:
-            exitwaves = self.scattering.multislice_and_tilt(self.vol, angle)
+        B = len(idx)
+        n_frames = len(self.quaternions)
+
+        for i in range(n_frames):
+            Q = self.quaternions[i].unsqueeze(0).expand(B, -1)
+            T = self.translations[i].unsqueeze(0).expand(B, -1)
+
+            # Construct theta_matrix
+            R_mat = Rotation.from_quat(Q).as_matrix()
+            if R_mat.ndim == 2:
+                R_mat = R_mat.unsqueeze(0)
+            # translations in angstrom to torch normalized
+            T_torch = rotations.translations_angstrom_to_torch(
+                T, self.vol.shape[-1], self.pixel_size
+            )
+            theta_matrix = rotations.build_affine_matrix(R_mat, T_torch)
+
+            exitwaves = self.iterative_scattering(self.vol, theta_matrix)
 
             # 3. Aberration
             # Adjust defocus to maintain consistent reference plane at volume center
-            # nz_new is the number of slices in the tilted geometry
-            nz_new = self.get_nz_tilt(self.vol, angle)
+            nz_new = self.get_nz_tilt(self.vol, theta_matrix)
             z_offset = (nz_new - self.nz) * self.pixel_size / 2.0
 
             ctf_batch = {k: v[idx].clone() for k, v in self.ctf_params.items()}

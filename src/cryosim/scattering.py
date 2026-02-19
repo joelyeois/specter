@@ -92,10 +92,12 @@ def complex_potential(v, alpha=0.1):
     Notes
     -----
     The complex potential is given by:
-    V = sqrt(1-α²)*v + i*α*v
+    V = v * (sqrt(1-α²) + i*α)
     """
-    scale_real = (1 - alpha**2) ** 0.5
-    return torch.complex(scale_real * v, alpha * v)
+    if alpha == 0.0:
+        return v
+    c = (1 - alpha**2) ** 0.5 + 1j * alpha
+    return v * c
 
 
 class Scattering(L.LightningModule):
@@ -169,7 +171,7 @@ class Scattering(L.LightningModule):
         self.progressbars = progressbars
 
         # frequency coordinates
-        kx = torch.fft.fftshift(torch.fft.fftfreq(nxy, pixel_size))
+        kx = torch.fft.fftfreq(nxy, pixel_size)
         kxx, kyy = torch.meshgrid(kx, kx, indexing="ij")
         k = torch.sqrt(kxx**2 + kyy**2)
 
@@ -359,9 +361,7 @@ class Scattering(L.LightningModule):
         This is valid only for thin specimens where propagation effects are negligible.
         """
         V_sum = torch.sum(V, 1)
-        exitwave = (self.dose_per_pixel**0.5) * torch.exp(
-            1j * self.sigma * complex_potential(V_sum, alpha=self.alpha)
-        )
+        exitwave = (self.dose_per_pixel**0.5) * torch.exp(1j * self.sigma * V_sum)
         return exitwave
 
     def ctf(self, V):
@@ -480,7 +480,7 @@ class IterativeScattering(L.LightningModule):
         self.progressbars = progressbars
 
         # frequency coordinates
-        kx = torch.fft.fftshift(torch.fft.fftfreq(nxy, pixel_size))
+        kx = torch.fft.fftfreq(nxy, pixel_size)
         kxx, kyy = torch.meshgrid(kx, kx, indexing="ij")
         k = torch.sqrt(kxx**2 + kyy**2)
         self.register_buffer("k2", k**2)
@@ -497,6 +497,16 @@ class IterativeScattering(L.LightningModule):
         F_step = torch.exp(1j * torch.pi * self.wavelength * pixel_size * k**2)
         self.register_buffer("F_step_real", F_step.real)
         self.register_buffer("F_step_imag", F_step.imag)
+
+    def _is_identity(self, theta_matrix):
+        """Check if the affine matrix is identity (no rotation or translation)."""
+        B = theta_matrix.shape[0]
+        identity = (
+            torch.eye(3, 4, device=theta_matrix.device, dtype=theta_matrix.dtype)
+            .unsqueeze(0)
+            .expand(B, -1, -1)
+        )
+        return torch.allclose(theta_matrix, identity, atol=1e-6)
 
     def _setup_tilt(self, V, theta_matrix):
         """Helper to calculate rotation parameters and setup VolumeRotator."""
@@ -560,7 +570,13 @@ class IterativeScattering(L.LightningModule):
         """
         Compute exit wave using iterative multislice on a transformed volume.
         """
-        nz_new, rotator = self._setup_tilt(V, theta_matrix)
+        is_identity = self._is_identity(theta_matrix)
+        if is_identity:
+            nz_new = V.shape[1]
+            rotator = None
+        else:
+            nz_new, rotator = self._setup_tilt(V, theta_matrix)
+
         B = V.shape[0]
         device = self.device
 
@@ -584,31 +600,47 @@ class IterativeScattering(L.LightningModule):
         )
 
         slices_block = None
-        for i in pbar:
-            if i % slice_batch_size == 0:
-                batch_end = min(i + slice_batch_size, nz_new)
-                batch_indices = indices[i:batch_end]
-                slice_indices = batch_indices - (nz_new - 1) / 2
-                slices_block = rotator.sample_rotated_slices(
-                    V,
-                    theta_matrix,
-                    slice_indices=slice_indices,
-                    roi_size=(self.nxy, self.nxy),
-                    padding_mode="zeros",
-                ).to(device)
+        y_start = (V.shape[-2] - self.nxy) // 2
+        x_start = (V.shape[-1] - self.nxy) // 2
 
-            slice_sample = slices_block[:, i % slice_batch_size]
+        for i in pbar:
+            if is_identity:
+                slice_sample = V[
+                    :,
+                    indices[i],
+                    y_start : y_start + self.nxy,
+                    x_start : x_start + self.nxy,
+                ].to(device)
+            else:
+                if i % slice_batch_size == 0:
+                    batch_end = min(i + slice_batch_size, nz_new)
+                    batch_indices = indices[i:batch_end]
+                    slice_indices = batch_indices - (nz_new - 1) / 2
+                    slices_block = rotator.sample_rotated_slices(
+                        V,
+                        theta_matrix,
+                        slice_indices=slice_indices,
+                        roi_size=(self.nxy, self.nxy),
+                        padding_mode="zeros",
+                    ).to(device)
+                slice_sample = slices_block[:, i % slice_batch_size]
+
             slice_complex = complex_potential(slice_sample, alpha=self.alpha)
             t = torch.exp(1j * self.sigma * slice_complex)
             exitwave = ifft2(fft2(t * exitwave) * F * self.kmask)
-
         return exitwave
 
     def projection(self, V, theta_matrix, slice_batch_size: int = 1):
         """
         Compute exit wave using iterative projection approximation on a transformed volume.
         """
-        nz_new, rotator = self._setup_tilt(V, theta_matrix)
+        is_identity = self._is_identity(theta_matrix)
+        if is_identity:
+            nz_new = V.shape[1]
+            rotator = None
+        else:
+            nz_new, rotator = self._setup_tilt(V, theta_matrix)
+
         B = V.shape[0]
         device = self.device
 
@@ -622,20 +654,30 @@ class IterativeScattering(L.LightningModule):
             disable=not (self.progressbars),
         )
 
-        for i in pbar:
-            if i % slice_batch_size == 0:
-                batch_end = min(i + slice_batch_size, nz_new)
-                batch_indices = indices[i:batch_end]
-                slice_indices = batch_indices - (nz_new - 1) / 2
-                slices_block = rotator.sample_rotated_slices(
-                    V,
-                    theta_matrix,
-                    slice_indices=slice_indices,
-                    roi_size=(self.nxy, self.nxy),
-                    padding_mode="zeros",
-                ).to(device)
+        y_start = (V.shape[-2] - self.nxy) // 2
+        x_start = (V.shape[-1] - self.nxy) // 2
 
-            total_potential += slices_block[:, i % slice_batch_size]
+        for i in pbar:
+            if is_identity:
+                total_potential += V[
+                    :,
+                    indices[i],
+                    y_start : y_start + self.nxy,
+                    x_start : x_start + self.nxy,
+                ].to(device)
+            else:
+                if i % slice_batch_size == 0:
+                    batch_end = min(i + slice_batch_size, nz_new)
+                    batch_indices = indices[i:batch_end]
+                    slice_indices = batch_indices - (nz_new - 1) / 2
+                    slices_block = rotator.sample_rotated_slices(
+                        V,
+                        theta_matrix,
+                        slice_indices=slice_indices,
+                        roi_size=(self.nxy, self.nxy),
+                        padding_mode="zeros",
+                    ).to(device)
+                total_potential += slices_block[:, i % slice_batch_size]
 
         total_complex = complex_potential(total_potential, alpha=self.alpha)
         exitwave = (self.dose_per_pixel**0.5) * torch.exp(
@@ -647,7 +689,13 @@ class IterativeScattering(L.LightningModule):
         """
         Compute exit wave using iterative Rytov approximation on a transformed volume.
         """
-        nz_new, rotator = self._setup_tilt(V, theta_matrix)
+        is_identity = self._is_identity(theta_matrix)
+        if is_identity:
+            nz_new = V.shape[1]
+            rotator = None
+        else:
+            nz_new, rotator = self._setup_tilt(V, theta_matrix)
+
         B = V.shape[0]
         device = self.device
 
@@ -665,26 +713,39 @@ class IterativeScattering(L.LightningModule):
             disable=not (self.progressbars),
         )
 
-        for i in pbar:
-            if i % slice_batch_size == 0:
-                batch_end = min(i + slice_batch_size, nz_new)
-                batch_indices = indices[i:batch_end]
-                slice_indices = batch_indices - (nz_new - 1) / 2
-                slices_block = rotator.sample_rotated_slices(
-                    V,
-                    theta_matrix,
-                    slice_indices=slice_indices,
-                    roi_size=(self.nxy, self.nxy),
-                    padding_mode="zeros",
-                ).to(device)
+        slices_block = None
+        y_start = (V.shape[-2] - self.nxy) // 2
+        x_start = (V.shape[-1] - self.nxy) // 2
 
-            slice_sample = slices_block[:, i % slice_batch_size]
+        for i in pbar:
+            if is_identity:
+                slice_sample = V[
+                    :,
+                    indices[i],
+                    y_start : y_start + self.nxy,
+                    x_start : x_start + self.nxy,
+                ].to(device)
+            else:
+                if i % slice_batch_size == 0:
+                    batch_end = min(i + slice_batch_size, nz_new)
+                    batch_indices = indices[i:batch_end]
+                    slice_indices = batch_indices - (nz_new - 1) / 2
+                    slices_block = rotator.sample_rotated_slices(
+                        V,
+                        theta_matrix,
+                        slice_indices=slice_indices,
+                        roi_size=(self.nxy, self.nxy),
+                        padding_mode="zeros",
+                    ).to(device)
+                slice_sample = slices_block[:, i % slice_batch_size]
+
             slice_complex = complex_potential(slice_sample, alpha=self.alpha)
             # Propagate transmission of slice i to exit plane
             # Distance is nz_new - i
             F_i = self._get_propagator(float(nz_new - i))
-            t = torch.exp(1j * self.sigma * slice_complex)
-            exitwave *= ifft2(fft2(t) * F_i)
+            exitwave = exitwave * torch.exp(
+                ifft2(fft2(1j * self.sigma * slice_complex) * F_i)
+            )
 
         exitwave *= self.dose_per_pixel**0.5
         return exitwave
@@ -693,7 +754,13 @@ class IterativeScattering(L.LightningModule):
         """
         Compute exit wave using iterative first Born approximation on a transformed volume.
         """
-        nz_new, rotator = self._setup_tilt(V, theta_matrix)
+        is_identity = self._is_identity(theta_matrix)
+        if is_identity:
+            nz_new = V.shape[1]
+            rotator = None
+        else:
+            nz_new, rotator = self._setup_tilt(V, theta_matrix)
+
         B = V.shape[0]
         device = self.device
 
@@ -711,20 +778,32 @@ class IterativeScattering(L.LightningModule):
             disable=not (self.progressbars),
         )
 
-        for i in pbar:
-            if i % slice_batch_size == 0:
-                batch_end = min(i + slice_batch_size, nz_new)
-                batch_indices = indices[i:batch_end]
-                slice_indices = batch_indices - (nz_new - 1) / 2
-                slices_block = rotator.sample_rotated_slices(
-                    V,
-                    theta_matrix,
-                    slice_indices=slice_indices,
-                    roi_size=(self.nxy, self.nxy),
-                    padding_mode="zeros",
-                ).to(device)
+        slices_block = None
+        y_start = (V.shape[-2] - self.nxy) // 2
+        x_start = (V.shape[-1] - self.nxy) // 2
 
-            slice_sample = slices_block[:, i % slice_batch_size]
+        for i in pbar:
+            if is_identity:
+                slice_sample = V[
+                    :,
+                    indices[i],
+                    y_start : y_start + self.nxy,
+                    x_start : x_start + self.nxy,
+                ].to(device)
+            else:
+                if i % slice_batch_size == 0:
+                    batch_end = min(i + slice_batch_size, nz_new)
+                    batch_indices = indices[i:batch_end]
+                    slice_indices = batch_indices - (nz_new - 1) / 2
+                    slices_block = rotator.sample_rotated_slices(
+                        V,
+                        theta_matrix,
+                        slice_indices=slice_indices,
+                        roi_size=(self.nxy, self.nxy),
+                        padding_mode="zeros",
+                    ).to(device)
+                slice_sample = slices_block[:, i % slice_batch_size]
+
             slice_complex = complex_potential(slice_sample, alpha=self.alpha)
             F_i = self._get_propagator(float(nz_new - i))
             total_scattered += ifft2(fft2(slice_complex) * F_i)
@@ -736,7 +815,13 @@ class IterativeScattering(L.LightningModule):
         """
         Compute iterative projected potential (for CTF) with transformed sampling.
         """
-        nz_new, rotator = self._setup_tilt(V, theta_matrix)
+        is_identity = self._is_identity(theta_matrix)
+        if is_identity:
+            nz_new = V.shape[1]
+            rotator = None
+        else:
+            nz_new, rotator = self._setup_tilt(V, theta_matrix)
+
         B = V.shape[0]
         device = self.device
 
@@ -750,20 +835,30 @@ class IterativeScattering(L.LightningModule):
             disable=not (self.progressbars),
         )
 
-        for i in pbar:
-            if i % slice_batch_size == 0:
-                batch_end = min(i + slice_batch_size, nz_new)
-                batch_indices = indices[i:batch_end]
-                slice_indices = batch_indices - (nz_new - 1) / 2
-                slices_block = rotator.sample_rotated_slices(
-                    V,
-                    theta_matrix,
-                    slice_indices=slice_indices,
-                    roi_size=(self.nxy, self.nxy),
-                    padding_mode="zeros",
-                ).to(device)
+        y_start = (V.shape[-2] - self.nxy) // 2
+        x_start = (V.shape[-1] - self.nxy) // 2
 
-            total_potential += slices_block[:, i % slice_batch_size]
+        for i in pbar:
+            if is_identity:
+                total_potential += V[
+                    :,
+                    indices[i],
+                    y_start : y_start + self.nxy,
+                    x_start : x_start + self.nxy,
+                ].to(device)
+            else:
+                if i % slice_batch_size == 0:
+                    batch_end = min(i + slice_batch_size, nz_new)
+                    batch_indices = indices[i:batch_end]
+                    slice_indices = batch_indices - (nz_new - 1) / 2
+                    slices_block = rotator.sample_rotated_slices(
+                        V,
+                        theta_matrix,
+                        slice_indices=slice_indices,
+                        roi_size=(self.nxy, self.nxy),
+                        padding_mode="zeros",
+                    ).to(device)
+                total_potential += slices_block[:, i % slice_batch_size]
 
         return 2 * self.sigma * total_potential
 

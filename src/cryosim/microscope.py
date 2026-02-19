@@ -50,7 +50,7 @@ class Aberration(L.LightningModule):
         self.aberration_model = aberration_model
 
         # frequency coordinates
-        kx = torch.fft.fftshift(torch.fft.fftfreq(n_pixels, pixel_size))
+        kx = torch.fft.fftfreq(n_pixels, pixel_size)
         kxx, kyy = torch.meshgrid(kx, kx, indexing="ij")
         k2 = kxx**2 + kyy**2
         radian = torch.arctan2(kyy, kxx)
@@ -103,8 +103,6 @@ class Aberration(L.LightningModule):
         chi_defocus : torch.Tensor
             Phase contribution from defocus and astigmatism.
         """
-        dfu = dfu
-        dfv = dfv
         dfang = dfang / 180 * torch.pi
         df = 0.5 * (dfu + dfv + (dfv - dfu) * torch.cos(2 * (self.radian + dfang)))
         return -torch.pi * self.wavelength * self.k2 * df

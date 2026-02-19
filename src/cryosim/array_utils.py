@@ -17,7 +17,7 @@ def kgrid_1d(n, dx, device="cpu"):
     -------
     k : 1d tensor
     """
-    kx = torch.fft.fftshift(torch.fft.fftfreq(n, dx, device=device))
+    kx = torch.fft.fftfreq(n, dx, device=device)
     return kx
 
 
@@ -321,9 +321,9 @@ def real_to_kgrid_3d(R):
     dz = R[0, 0, 1] - R[0, 0, 0]
 
     # frequency axes
-    kx = torch.fft.fftshift(torch.fft.fftfreq(nx, dx, device=device))
-    ky = torch.fft.fftshift(torch.fft.fftfreq(ny, dy, device=device))
-    kz = torch.fft.fftshift(torch.fft.fftfreq(nz, dz, device=device))
+    kx = torch.fft.fftfreq(nx, dx, device=device)
+    ky = torch.fft.fftfreq(ny, dy, device=device)
+    kz = torch.fft.fftfreq(nz, dz, device=device)
 
     # 3D frequency grids
     KX, KY, KZ = torch.meshgrid(kx, ky, kz, indexing="ij")
@@ -739,17 +739,17 @@ def soft_voxelize_xy_coordinates(coords, grid_shape, voxel_size, device=None):
     return volumes
 
 
-def radial_profile_3d(data, center=None, return_r=False):
+def radial_profile_3d(data: torch.Tensor, center=None, return_r=False):
     """
-    Compute the radial average of a 3D tensor.
+    Compute the radial average (spherical average) of a 3D volume.
 
     Parameters
     ----------
     data : torch.Tensor
         3D tensor of shape (m, n, o)
     center : tuple of floats, optional
-        Center of the radial profile. Defaults to geometric center.
-    return_r : bool
+        Center of the radial profile. Defaults to the integer center of the volume (m//2, n//2, o//2).
+    return_r : bool, default False
         If True, also return the radius indices.
 
     Returns
@@ -759,33 +759,88 @@ def radial_profile_3d(data, center=None, return_r=False):
     r : torch.Tensor, optional
         Radius indices if return_r=True
     """
+    if data.ndim != 3:
+        raise ValueError("Input data must be a 3D tensor.")
 
     m, n, o = data.shape
     device = data.device
 
+    # Default integer center
     if center is None:
-        center = (0, 0, 0)
+        center = (m // 2, n // 2, o // 2)
 
-    # create coordinate grids
-    x = torch.arange(n, device=device) - n // 2 + center[0]
-    y = torch.arange(m, device=device) - m // 2 + center[1]
-    z = torch.arange(o, device=device) - o // 2 + center[2]
-    xx, yy, zz = torch.meshgrid(x, y, z, indexing="ij")
+    # Create coordinate grids relative to center
+    z = torch.arange(m, device=device) - center[0]
+    y = torch.arange(n, device=device) - center[1]
+    x = torch.arange(o, device=device) - center[2]
+    zz, yy, xx = torch.meshgrid(z, y, x, indexing="ij")
 
-    # compute distances
+    # Compute radial distances and integer bins
     r = torch.sqrt(xx**2 + yy**2 + zz**2)
-    r = r.round().long()  # integer bins
-
-    # flatten
-    r_flat = r.flatten()
+    r_bin = r.round().long().flatten()
     data_flat = data.flatten()
 
-    # sum per bin
-    max_r = r_flat.max().item() + 1
-    tbin = torch.bincount(r_flat, weights=data_flat, minlength=max_r)
-    nr = torch.bincount(r_flat, minlength=max_r)
+    # Sum values per bin and count voxels per bin
+    max_r = r_bin.max().item() + 1
+    sum_bin = torch.bincount(r_bin, weights=data_flat, minlength=max_r)
+    count_bin = torch.bincount(r_bin, minlength=max_r)
 
-    radialprofile = tbin / nr
+    # Avoid division by zero
+    radialprofile = sum_bin / count_bin.clamp(min=1)
+
+    if return_r:
+        return torch.arange(max_r, device=device), radialprofile
+    else:
+        return radialprofile
+
+
+def radial_profile_2d(data: torch.Tensor, center=None, return_r=False):
+    """
+    Compute the radial average (circular average) of a 2D image.
+
+    Parameters
+    ----------
+    data : torch.Tensor
+        2D tensor of shape (m, n)
+    center : tuple of floats, optional
+        Center of the radial profile. Defaults to the integer center of the image (m//2, n//2).
+    return_r : bool, default False
+        If True, also return the radius indices.
+
+    Returns
+    -------
+    radialprofile : torch.Tensor
+        Radial average.
+    r : torch.Tensor, optional
+        Radius indices if return_r=True
+    """
+    if data.ndim != 2:
+        raise ValueError("Input data must be a 2D tensor.")
+
+    m, n = data.shape
+    device = data.device
+
+    # Default integer center
+    if center is None:
+        center = (m // 2, n // 2)
+
+    # Create coordinate grids relative to center
+    y = torch.arange(m, device=device) - center[0]
+    x = torch.arange(n, device=device) - center[1]
+    yy, xx = torch.meshgrid(y, x, indexing="ij")
+
+    # Compute radial distances and integer bins
+    r = torch.sqrt(xx**2 + yy**2)
+    r_bin = r.round().long().flatten()
+    data_flat = data.flatten()
+
+    # Sum values per bin and count pixels per bin
+    max_r = r_bin.max().item() + 1
+    sum_bin = torch.bincount(r_bin, weights=data_flat, minlength=max_r)
+    count_bin = torch.bincount(r_bin, minlength=max_r)
+
+    # Avoid division by zero
+    radialprofile = sum_bin / count_bin.clamp(min=1)
 
     if return_r:
         return torch.arange(max_r, device=device), radialprofile
@@ -921,16 +976,46 @@ def ball3d(N, d):
     return ball
 
 
+def disk2d(N, d):
+    """
+    Generates a 2D tensor with a filled-in disk,
+    centered at the DC index corresponding to fftshift.
+
+    Parameters
+    ----------
+    N : int
+        Size of the 2D tensor (N x N)
+    d : float
+        Diameter of the disk
+
+    Returns
+    -------
+    disk : torch.Tensor
+        2D tensor of shape (N, N) with ones inside the disk, zeros outside
+    """
+    x = torch.arange(N)
+    y = torch.arange(N)
+    X, Y = torch.meshgrid(x, y, indexing="ij")
+
+    center = N // 2  # aligns with DC after fftshift
+    r2 = (X - center) ** 2 + (Y - center) ** 2
+
+    radius = d / 2
+    disk = (r2 <= radius**2).float()
+    return disk
+
+
 def downsample(images, bin_factor=2, method="fft"):
     if method == "fft":
         N = images.shape[-1]
         n = N // bin_factor
         images_bin = ifft2(
-            fft2(images)[
+            fft2(images, shift=True)[
                 :,
                 N // 2 - n // 2 : N // 2 - n // 2 + n,
                 N // 2 - n // 2 : N // 2 - n // 2 + n,
-            ]
+            ],
+            shift=True,
         ).real
     elif method == "avgpool":
         avgpool = torch.nn.AvgPool2d(bin_factor, stride=bin_factor)

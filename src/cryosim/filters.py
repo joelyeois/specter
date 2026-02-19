@@ -150,7 +150,7 @@ def apply_bfactor(volume, pixel_size, bfactor):
     if bfactor == 0.0:
         return volume
     else:
-        kx = torch.fft.fftshift(torch.fft.fftfreq(volume.shape[-1], pixel_size))
+        kx = torch.fft.fftfreq(volume.shape[-1], pixel_size, device=volume.device)
         KZ, KY, KX = torch.meshgrid(kx, kx, kx, indexing="ij")
         k2 = KZ**2 + KY**2 + KX**2
         newvolume = ifftn(fftn(volume) * torch.exp(-bfactor / 4 * k2))

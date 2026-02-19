@@ -11,6 +11,8 @@ from .potential import PotentialBuilder
 from .specimen import TomogramGenerator
 import torch.nn as nn
 from cryosim.detectors import k3_300kv, k3_200kv, perfect_detector
+from cryosim import logger
+from rich.progress import track
 
 
 class BaseImageGenerator(L.LightningModule):
@@ -60,6 +62,8 @@ class BaseImageGenerator(L.LightningModule):
         Dictionary of CTF parameters.
     progressbars : bool, optional
         Whether to show progress bars. Default True.
+    verbose : bool, optional
+        Whether to enable verbose logging for this instance. Default True.
     """
 
     def __init__(
@@ -82,7 +86,9 @@ class BaseImageGenerator(L.LightningModule):
         detector_model=None,
         anisomag=None,
         ctf_params=None,
+        slice_batch_size=1,
         progressbars=True,
+        verbose=True,
         vol=None,
         scattering_potential=None,
         **kwargs,
@@ -103,7 +109,9 @@ class BaseImageGenerator(L.LightningModule):
         self.crowd_min_distance = crowd_min_distance
         self.crowd_max_distance_z = crowd_max_distance_z
         self.pad_fft = pad_fft
+        self.slice_batch_size = slice_batch_size
         self.progressbars = progressbars
+        self.verbose = verbose
 
         if scattering_potential is not None:
             self.register_buffer("V", scattering_potential)
@@ -146,16 +154,22 @@ class BaseImageGenerator(L.LightningModule):
                 if v_tensor.ndim == 0:
                     v_tensor = v_tensor.unsqueeze(0)
                 self.register_buffer(k, v_tensor)
-            self.ctf_params = ctf_params  # Keep it for dict-like access
+            self._ctf_param_names = list(ctf_params.keys())
         else:
-            self.ctf_params = None
+            self._ctf_param_names = []
 
         # Ice thickness logic
         if ice_model is None:
-            self.nz = self.nxy if self.nxy else 0
+            if self.V is not None:
+                self.nz = self.V.shape[0]
+            else:
+                self.nz = self.nxy if self.nxy else 0
         else:
             if ice_thickness is None:
-                self.nz = self.nxy if self.nxy else 0
+                if self.V is not None:
+                    self.nz = self.V.shape[0]
+                else:
+                    self.nz = self.nxy if self.nxy else 0
             else:
                 if self.nxy and ice_thickness < self.nxy * pixel_size:
                     self.nz = self.nxy
@@ -168,18 +182,6 @@ class BaseImageGenerator(L.LightningModule):
 
         if anisomag is None:
             self.anisomag = anisomag
-        # anisomag is already registered if not None in lines 136-139
-
-        # ctf_params is already handled in lines 141-151.
-        # We need to ensure self.ctf_params values refer to the registered buffers for easy access in forward
-        if ctf_params is not None:
-            # Re-map self.ctf_params to point to the buffers
-            self.ctf_params = {k: getattr(self, k) for k in ctf_params.keys()}
-
-            if self.scattering_model not in ["projection", "ctf"]:
-                self._shift_ctf_params()
-        else:
-            self.ctf_params = None
 
     def _init_detector_mtf(self):
         """Initialize the detector MTF based on the model name."""
@@ -192,16 +194,14 @@ class BaseImageGenerator(L.LightningModule):
                 "detector_mtf", perfect_detector(self.nxy, self.pixel_size)
             )
 
-    def _shift_ctf_params(self):
-        """Shift defocus parameters to account for volume thickness (center of volume)."""
-        shift = (self.nz * self.pixel_size) / 2
-        # Modify the buffers directly
-        # Since buffers are tensors, we can modify them in-place or assign new values.
-        # But to be safe with gradients (though these are params), we should just subtract.
-        if "dfu" in self.ctf_params:
-            self.dfu -= shift
-        if "dfv" in self.ctf_params:
-            self.dfv -= shift
+    def _apply_defocus_shift(self):
+        """Apply defocus shift to account for volume thickness."""
+        if self.scattering_model not in ["projection", "ctf"]:
+            shift = (self.nz * self.pixel_size) / 2
+            if hasattr(self, "dfu"):
+                self.dfu = self.dfu - shift
+            if hasattr(self, "dfv"):
+                self.dfv = self.dfv - shift
 
     def _init_modules(self):
         """Initialize Scattering, Aberration, and Detector modules."""
@@ -316,8 +316,10 @@ class BaseImageGenerator(L.LightningModule):
         images : torch.Tensor
             Simulated images.
         """
-        # adds crowd
+        # add crowding
         if self.crowd_min_distance is not None:
+            if self.verbose:
+                logger.info("Adding crowding molecules to volume")
             with torch.no_grad():
                 for i, v in enumerate(V):
                     vols = self.crowd()
@@ -327,17 +329,25 @@ class BaseImageGenerator(L.LightningModule):
 
         # add ice
         if self.ice_model is not None:
+            if self.verbose:
+                logger.info(f"Adding ice to volume using {self.ice_model} model")
             with torch.no_grad():
                 V = self.solvate(V)
 
         # scatter V
+        if self.verbose:
+            logger.info(f"Applying scattering using {self.scattering_model} model")
         self.exitwaves = self.scattering(V)
 
         # aberrate exitwaves
-        ctf_batch = {k: v[idx] for k, v in self.ctf_params.items()}
+        if self.verbose:
+            logger.info(f"Applying aberrations using {self.aberration_model} model")
+        ctf_batch = {k: getattr(self, k)[idx] for k in self._ctf_param_names}
         self.detector_waves = self.aberration(self.exitwaves, ctf_batch)
 
         # image/noise
+        if self.verbose:
+            logger.info(f"Applying detector and noise using {self.noise_model} model")
         if self.anisomag is None:
             images = self.detector(self.detector_waves, nxy=self.nxy)
         else:
@@ -454,6 +464,7 @@ class ImageGeneratorFromCoordinates(BaseImageGenerator):
         pad_fft=False,
         conv_backend="fftconvolve",
         detector_model=None,
+        verbose=True,
     ):
         super().__init__(
             pixel_size=pixel_size,
@@ -475,6 +486,7 @@ class ImageGeneratorFromCoordinates(BaseImageGenerator):
             anisomag=anisomag,
             ctf_params=ctf_params,
             progressbars=False,  # Default in original was implicit/not set, but used in others
+            verbose=verbose,
         )
 
         # register buffers
@@ -498,7 +510,11 @@ class ImageGeneratorFromCoordinates(BaseImageGenerator):
         # Pre-calculate V for crowd initialization if needed
         self.V = self.potentialbuilder(self.coordinates.detach())
 
+        # Initialize Scattering, Aberration, and Detector modules.
         self._init_modules()
+
+        # Apply defocus shift
+        self._apply_defocus_shift()
 
         if self.crowd_min_distance is not None:
             self.crowd = CrowdWithDuplicates(
@@ -676,11 +692,14 @@ class ImageGenerator(BaseImageGenerator):
         crowd_max_distance_z=None,
         pad_fft=False,
         progressbars=True,
+        verbose=True,
         parameterization="kirkland",
         detector_model=None,
+        slice_batch_size=1,
     ):
         nxy = scattering_potential.shape[-1]
         super().__init__(
+            scattering_potential=scattering_potential,
             pixel_size=pixel_size,
             energy=energy,
             dose_per_angstrom=dose_per_angstrom,
@@ -699,16 +718,19 @@ class ImageGenerator(BaseImageGenerator):
             detector_model=detector_model,
             anisomag=anisomag,
             ctf_params=ctf_params,
+            slice_batch_size=slice_batch_size,
             progressbars=progressbars,
+            verbose=verbose,
         )
 
         self.parameterization = parameterization
 
         # register buffers
-        self.register_buffer("V", scattering_potential)
+        # self.register_buffer("V", scattering_potential)
         self.register_buffer("quaternions", quaternions)
         self.register_buffer("translations", translations)
-
+        if self.verbose:
+            logger.info("Initializing ImageGenerator modules")
         self._init_modules()
 
         if self.crowd_min_distance is not None:
@@ -742,6 +764,9 @@ class ImageGenerator(BaseImageGenerator):
                     progressbars=self.progressbars,
                     parameterization=parameterization,
                 )
+
+        # Apply defocus shift
+        self._apply_defocus_shift()
 
         # self.V has shape (Z, Y, X)
         nz, ny, nx = self.V.shape
@@ -790,6 +815,8 @@ class ImageGenerator(BaseImageGenerator):
             Simulated images.
         """
         # rotate V, returns (B x Z x Y x X)
+        if self.verbose:
+            logger.info("Rotating volume")
         V = self.rotate(self.quaternions[idx], self.translations[idx])
 
         # pad z
@@ -879,13 +906,13 @@ class MicrographGenerator(BaseImageGenerator):
 
     def __init__(
         self,
+        scattering_potential,
         micrograph_size,
         pixel_size,
         ctf_params,
         energy,
         dose_per_angstrom,
         vol=None,
-        scattering_potential=None,
         anisomag=None,
         ice_model=None,
         ice_thickness=None,
@@ -901,7 +928,9 @@ class MicrographGenerator(BaseImageGenerator):
         chunk_size=None,
         move_to_cpu=True,
         detector_model=None,
+        slice_batch_size=1,
         progressbars=True,
+        verbose=True,
         **kwargs,
     ):
         # Determine nxy
@@ -935,7 +964,9 @@ class MicrographGenerator(BaseImageGenerator):
             detector_model=detector_model,
             anisomag=anisomag,
             ctf_params=ctf_params,
+            slice_batch_size=slice_batch_size,
             progressbars=progressbars,
+            verbose=verbose,
         )
 
         self.chunk_size = chunk_size
@@ -943,28 +974,25 @@ class MicrographGenerator(BaseImageGenerator):
         self.water_air_interface = water_air_interface
         self.ice_model = ice_model
 
-        # Determine nz based on scattering_potential, ice_thickness, or pre-computed vol
+        # Determine nz and ice_thickness
         if vol is not None:
-            self.nz = vol.shape[1]
-        elif scattering_potential is not None:
-            if ice_thickness is None or (
-                ice_thickness < scattering_potential.shape[0] * pixel_size
-            ):
-                self.nz = scattering_potential.shape[0]
+            self.nz = vol.shape[0]
+            self.ice_thickness = self.nz * self.pixel_size
+        else:
+            if scattering_potential is not None:
+                p_nz = scattering_potential.shape[0]
+                if ice_thickness is None or ice_thickness < p_nz * self.pixel_size:
+                    self.nz = p_nz
+                else:
+                    self.nz = int(ice_thickness // self.pixel_size)
+                self.ice_thickness = self.nz * self.pixel_size
             else:
-                self.nz = int(ice_thickness // pixel_size)
-        elif ice_thickness is not None:
-            self.nz = int(ice_thickness // pixel_size)
-        else:
-            self.nz = 256  # Default fallback
+                raise ValueError(
+                    "Either 'vol' or 'scattering_potential' must be provided."
+                )
 
-        if ice_thickness is not None:
-            self.ice_thickness = self.nz * pixel_size
-        else:
-            self.ice_thickness = None
-            # Re-shift CTF params if nz changed
-        if self.scattering_model not in ["projection", "ctf"]:
-            self._shift_ctf_params()
+        # Apply defocus shift
+        self._apply_defocus_shift()
 
         # Re-init crowd_max_distance_z if it was None (it defaults to self.nz in base)
         if crowd_max_distance_z is None:
@@ -990,6 +1018,10 @@ class MicrographGenerator(BaseImageGenerator):
                 progressbars=progressbars,
                 chunk_size=chunk_size,
             )
+            if self.verbose:
+                logger.info(
+                    "Generating specimen volume (this may take a while for large micrographs)"
+                )
             self.vol = self.specimen_gen.generate()
 
         if self.move_to_cpu:
@@ -1059,7 +1091,7 @@ class MicrographGenerator(BaseImageGenerator):
         self.exitwaves = self.scattering(V)
 
         # aberrate exitwaves
-        ctf_batch = {k: v[idx] for k, v in self.ctf_params.items()}
+        ctf_batch = {k: getattr(self, k)[idx] for k in self._ctf_param_names}
         self.detector_waves = self.aberration(self.exitwaves, ctf_batch)
 
         # image/noise
@@ -1152,6 +1184,8 @@ class TiltSeriesGenerator(MicrographGenerator):
         move_to_cpu=True,
         detector_model=None,
         progressbars=True,
+        verbose=True,
+        slice_batch_size=1,
         **kwargs,
     ):
         super().__init__(
@@ -1171,7 +1205,9 @@ class TiltSeriesGenerator(MicrographGenerator):
             chunk_size=chunk_size,
             move_to_cpu=move_to_cpu,
             detector_model=detector_model,
+            slice_batch_size=slice_batch_size,
             progressbars=progressbars,
+            verbose=verbose,
             **kwargs,
         )
 
@@ -1252,10 +1288,16 @@ class TiltSeriesGenerator(MicrographGenerator):
         """
 
         tilt_series = []
+        exitwaves = []
+        clean_images = []
         B = len(idx)
         n_frames = len(self.quaternions)
 
-        for i in range(n_frames):
+        for i in track(
+            range(n_frames),
+            description="Generating tilt series.",
+            disable=not (self.progressbars),
+        ):
             Q = self.quaternions[i].unsqueeze(0).expand(B, -1)
             T = self.translations[i].unsqueeze(0).expand(B, -1)
 
@@ -1269,20 +1311,24 @@ class TiltSeriesGenerator(MicrographGenerator):
             )
             theta_matrix = rotations.build_affine_matrix(R_mat, T_torch)
 
-            exitwaves = self.iterative_scattering(self.vol, theta_matrix)
+            exitwave = self.iterative_scattering(
+                self.vol, theta_matrix, slice_batch_size=self.slice_batch_size
+            )
 
             # 3. Aberration
             # Adjust defocus to maintain consistent reference plane at volume center
             nz_new = self.get_nz_tilt(self.vol, theta_matrix)
             z_offset = (nz_new - self.nz) * self.pixel_size / 2.0
 
-            ctf_batch = {k: v[idx].clone() for k, v in self.ctf_params.items()}
+            ctf_batch = {
+                k: getattr(self, k)[idx].clone() for k in self._ctf_param_names
+            }
             if "dfu" in ctf_batch:
                 ctf_batch["dfu"] = ctf_batch["dfu"] - z_offset
             if "dfv" in ctf_batch:
                 ctf_batch["dfv"] = ctf_batch["dfv"] - z_offset
 
-            detector_waves = self.aberration(exitwaves, ctf_batch)
+            detector_waves = self.aberration(exitwave, ctf_batch)
 
             # 4. Detection
             if self.anisomag is None:
@@ -1290,6 +1336,12 @@ class TiltSeriesGenerator(MicrographGenerator):
             else:
                 image = self.detector(detector_waves, self.anisomag[idx], nxy=None)
 
-            tilt_series.append(image)
+            tilt_series.append(image.detach().cpu())
+            exitwaves.append(exitwave.detach().cpu())
+            clean_images.append(torch.abs(detector_waves.detach().cpu()) ** 2)
 
-        return torch.stack(tilt_series, dim=1)  # (B, N_angles, Y, X)
+        return (
+            torch.stack(tilt_series, dim=1),
+            torch.stack(exitwaves, dim=1),
+            torch.stack(clean_images, dim=1),
+        )  # (B, N_angles, Y, X)

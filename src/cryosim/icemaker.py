@@ -589,7 +589,7 @@ class Icemaker(L.LightningModule):
             dkx = k_xyz[1, 0, 0] - k_xyz[0, 0, 0]
             dky = k_xyz[0, 1, 0] - k_xyz[0, 0, 0]
             dkz = k_xyz[0, 0, 1] - k_xyz[0, 0, 0]
-            pot = -torch.abs(fft3(s1_f)) * dkx * dky * dkz  # need to negate
+            pot = -torch.abs(fft3(s1_f, shift=True)) * dkx * dky * dkz  # need to negate
 
         return avgpool3d(pot[None, None]).squeeze() * self.dx
 

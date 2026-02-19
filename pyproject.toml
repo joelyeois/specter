@@ -8,6 +8,7 @@ dependencies = [
     "biopython>=1.85",
     "biotite>=1.4.0",
     "cryosparc-tools>=4.7.1",
+    "eerfile>=0.0.4",
     "gemmi>=0.7.3",
     "h5py>=3.14.0",
     "lightning>=2.5.5",
@@ -32,6 +33,8 @@ dev = [
     "ipykernel>=7.1.0",
     "ipywidgets>=8.1.8",
     "pre-commit>=4.3.0",
+    "pytest>=9.0.2",
+    "pytest-cov>=7.0.0",
     "rich>=14.2.0",
     "ruff>=0.14.4",
 ]

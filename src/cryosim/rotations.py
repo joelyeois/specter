@@ -522,6 +522,10 @@ def translations_angstrom_to_torch(T, n, voxel_size):
 
 
 def build_affine_matrix(R, T=None):
+    if R.ndim == 2:
+        R = R.unsqueeze(0)
+    if T is not None and T.ndim == 1:
+        T = T.unsqueeze(0)
     """
     Builds a batch of Torch's affine matrices (N, 3, 4) from a batch of rotation
     matrices (N, 3, 3) and Torch normalized translation vectors (N, 3).
@@ -546,11 +550,8 @@ def build_affine_matrix(R, T=None):
         Batch of affine matrices with shape (N, 3, 4).
     """
     if T is None:
-        T = torch.zeros_like(R[..., 0])
-    # old
-    # theta = torch.concat([R, T.unsqueeze(2)], dim=-1)
+        T = R.new_zeros(R.shape[0], 3)
 
-    # new
     Tprime = torch.zeros_like(T)
     Tprime[:, 0] = R[:, 0, 0] * T[:, 0] + R[:, 0, 1] * T[:, 1] + R[:, 0, 2] * T[:, 2]
     Tprime[:, 1] = R[:, 1, 0] * T[:, 0] + R[:, 1, 1] * T[:, 1] + R[:, 1, 2] * T[:, 2]
@@ -618,6 +619,7 @@ class VolumeRotator(L.LightningModule):
         align_corners: bool = False,
         padding_mode: str = "border",
         mode: str = "real",
+        init_base_grid=True,
     ):
         """
         Initialize a 3D VolumeRotator with cached base grid and rotation center.
@@ -676,22 +678,34 @@ class VolumeRotator(L.LightningModule):
         self.mode = mode  # default rotation mode
 
         # -------------------------------
-        # Base identity grid
-        # -------------------------------
-        eye = torch.eye(3, 4).unsqueeze(0)  # (1, 3, 4)
-        base_grid = F.affine_grid(eye, (1, 1, nz, ny, nx), align_corners=align_corners)
-        self.register_buffer("base_grid", base_grid)
-
-        # -------------------------------
         # Rotation center
         # -------------------------------
+        # Calculate center based on dimensions and conventions
         if origin == "relion":
             cz, cy, cx = nz // 2, ny // 2, nx // 2
-            center = base_grid[0, cz, cy, cx]
-        else:  # "center"
-            center = torch.zeros(3, device=base_grid.device)
+        else:
+            cz, cy, cx = (nz - 1) / 2, (ny - 1) / 2, (nx - 1) / 2
 
+        if self.align_corners:
+            center = torch.tensor(
+                [
+                    2 * cx / (nx - 1) - 1,
+                    2 * cy / (ny - 1) - 1,
+                    2 * cz / (nz - 1) - 1,
+                ]
+            )
+        else:
+            center = torch.tensor(
+                [
+                    2 * (cx + 0.5) / nx - 1,
+                    2 * (cy + 0.5) / ny - 1,
+                    2 * (cz + 0.5) / nz - 1,
+                ]
+            )
         self.register_buffer("center", center.view(1, 1, 3))
+
+        if init_base_grid:
+            self._build_base_grid()
 
         # -------------------------------
         # Precompute XY grid for slice sampling
@@ -705,6 +719,16 @@ class VolumeRotator(L.LightningModule):
     # ------------------------------------------------------------------
     # Core grid construction
     # ------------------------------------------------------------------
+    def _build_base_grid(self) -> torch.Tensor:
+        """
+        Build base grid.
+        """
+        eye = torch.eye(3, 4).unsqueeze(0)  # (1, 3, 4)
+        base_grid = F.affine_grid(
+            eye, (1, 1, self.nz, self.ny, self.nx), align_corners=self.align_corners
+        )
+        self.register_buffer("base_grid", base_grid)
+
     def _build_grid(self, theta: torch.Tensor) -> torch.Tensor:
         """
         Build a sampling grid from cached base grid and affine parameters.
@@ -716,6 +740,8 @@ class VolumeRotator(L.LightningModule):
         R = theta[..., :3]  # (B, 3, 3)
         t = theta[..., 3]  # (B, 3)
 
+        if not hasattr(self, "base_grid"):
+            self._build_base_grid()
         grid = self.base_grid.expand(B, -1, -1, -1, -1)
         grid = grid.view(B, -1, 3)
 
@@ -870,7 +896,7 @@ class VolumeRotator(L.LightningModule):
         # -------------------------------
         # Isotropic scale factors (normalized to physical units)
         # -------------------------------
-        dtype = self.base_grid.dtype
+        dtype = V.dtype
         device = V.device
 
         # Scale factor to convert normalized [-1, 1] to pixel units [-half, half]

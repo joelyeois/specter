@@ -2,11 +2,9 @@ import torch
 from scipy.fft import next_fast_len
 
 
-def fft2(array, dim=(-1, -2)):
+def fft2(array, dim=(-1, -2), shift=False):
     """
-    Compute centered 2D fast Fourier transform.
-
-    Applies fftshift before and after the FFT to center zero-frequency component.
+    Compute 2D fast Fourier transform.
 
     Parameters
     ----------
@@ -14,22 +12,25 @@ def fft2(array, dim=(-1, -2)):
         Input array.
     dim : tuple of int, optional
         Dimensions along which to compute the FFT. Default is (-1, -2).
+    shift : bool, optional
+        If True, applies fftshift before and after the FFT to center
+        zero-frequency component. Default is False.
 
     Returns
     -------
     result : torch.Tensor
-        Centered 2D Fourier transform of input.
+        2D Fourier transform of input.
     """
-    return torch.fft.fftshift(
-        torch.fft.fft2(torch.fft.ifftshift(array, dim=dim)), dim=dim
-    )
+    if shift:
+        return torch.fft.fftshift(
+            torch.fft.fft2(torch.fft.ifftshift(array, dim=dim)), dim=dim
+        )
+    return torch.fft.fft2(array, dim=dim)
 
 
-def ifft2(array, dim=(-1, -2)):
+def ifft2(array, dim=(-1, -2), shift=False):
     """
-    Compute centered 2D inverse fast Fourier transform.
-
-    Applies fftshift before and after the inverse FFT to center zero-frequency component.
+    Compute 2D inverse fast Fourier transform.
 
     Parameters
     ----------
@@ -37,22 +38,25 @@ def ifft2(array, dim=(-1, -2)):
         Input array in Fourier space.
     dim : tuple of int, optional
         Dimensions along which to compute the inverse FFT. Default is (-1, -2).
+    shift : bool, optional
+        If True, applies fftshift before and after the inverse FFT to center
+        zero-frequency component. Default is False.
 
     Returns
     -------
     result : torch.Tensor
-        Centered 2D inverse Fourier transform of input.
+        2D inverse Fourier transform of input.
     """
-    return torch.fft.fftshift(
-        torch.fft.ifft2(torch.fft.ifftshift(array, dim=dim)), dim=dim
-    )
+    if shift:
+        return torch.fft.fftshift(
+            torch.fft.ifft2(torch.fft.ifftshift(array, dim=dim)), dim=dim
+        )
+    return torch.fft.ifft2(array, dim=dim)
 
 
-def fft3(array, dim=(-1, -2, -3)):
+def fft3(array, dim=(-1, -2, -3), shift=False):
     """
-    Compute centered 3D fast Fourier transform.
-
-    Applies fftshift before and after the FFT to center zero-frequency component.
+    Compute 3D fast Fourier transform.
 
     Parameters
     ----------
@@ -60,22 +64,25 @@ def fft3(array, dim=(-1, -2, -3)):
         Input 3D array.
     dim : tuple of int, optional
         Dimensions along which to compute the FFT. Default is (-1, -2, -3).
+    shift : bool, optional
+        If True, applies fftshift before and after the FFT to center
+        zero-frequency component. Default is False.
 
     Returns
     -------
     result : torch.Tensor
-        Centered 3D Fourier transform of input.
+        3D Fourier transform of input.
     """
-    return torch.fft.fftshift(
-        torch.fft.fftn(torch.fft.ifftshift(array, dim=dim), dim=dim), dim=dim
-    )
+    if shift:
+        return torch.fft.fftshift(
+            torch.fft.fftn(torch.fft.ifftshift(array, dim=dim), dim=dim), dim=dim
+        )
+    return torch.fft.fftn(array, dim=dim)
 
 
-def ifft3(array, dim=(-1, -2, -3)):
+def ifft3(array, dim=(-1, -2, -3), shift=False):
     """
-    Compute centered 3D inverse fast Fourier transform.
-
-    Applies fftshift before and after the inverse FFT to center zero-frequency component.
+    Compute 3D inverse fast Fourier transform.
 
     Parameters
     ----------
@@ -83,22 +90,25 @@ def ifft3(array, dim=(-1, -2, -3)):
         Input 3D array in Fourier space.
     dim : tuple of int, optional
         Dimensions along which to compute the inverse FFT. Default is (-1, -2, -3).
+    shift : bool, optional
+        If True, applies fftshift before and after the inverse FFT to center
+        zero-frequency component. Default is False.
 
     Returns
     -------
     result : torch.Tensor
-        Centered 3D inverse Fourier transform of input.
+        3D inverse Fourier transform of input.
     """
-    return torch.fft.fftshift(
-        torch.fft.ifftn(torch.fft.ifftshift(array, dim=dim), dim=dim), dim=dim
-    )
+    if shift:
+        return torch.fft.fftshift(
+            torch.fft.ifftn(torch.fft.ifftshift(array, dim=dim), dim=dim), dim=dim
+        )
+    return torch.fft.ifftn(array, dim=dim)
 
 
-def fftn(array, dim=None):
+def fftn(array, dim=None, shift=False):
     """
-    Compute centered N-dimensional fast Fourier transform.
-
-    Applies fftshift before and after the FFT to center zero-frequency component.
+    Compute N-dimensional fast Fourier transform.
 
     Parameters
     ----------
@@ -107,22 +117,25 @@ def fftn(array, dim=None):
     dim : tuple of int or None, optional
         Dimensions along which to compute the FFT. If None, computes FFT
         over all dimensions. Default is None.
+    shift : bool, optional
+        If True, applies fftshift before and after the FFT to center
+        zero-frequency component. Default is False.
 
     Returns
     -------
     result : torch.Tensor
-        Centered N-dimensional Fourier transform of input.
+        N-dimensional Fourier transform of input.
     """
-    return torch.fft.fftshift(
-        torch.fft.fftn(torch.fft.ifftshift(array, dim=dim), dim=dim), dim=dim
-    )
+    if shift:
+        return torch.fft.fftshift(
+            torch.fft.fftn(torch.fft.ifftshift(array, dim=dim), dim=dim), dim=dim
+        )
+    return torch.fft.fftn(array, dim=dim)
 
 
-def ifftn(array, dim=None):
+def ifftn(array, dim=None, shift=False):
     """
-    Compute centered N-dimensional inverse fast Fourier transform.
-
-    Applies fftshift before and after the inverse FFT to center zero-frequency component.
+    Compute N-dimensional inverse fast Fourier transform.
 
     Parameters
     ----------
@@ -131,15 +144,20 @@ def ifftn(array, dim=None):
     dim : tuple of int or None, optional
         Dimensions along which to compute the inverse FFT. If None, computes
         inverse FFT over all dimensions. Default is None.
+    shift : bool, optional
+        If True, applies fftshift before and after the inverse FFT to center
+        zero-frequency component. Default is False.
 
     Returns
     -------
     result : torch.Tensor
-        Centered N-dimensional inverse Fourier transform of input.
+        N-dimensional inverse Fourier transform of input.
     """
-    return torch.fft.fftshift(
-        torch.fft.ifftn(torch.fft.ifftshift(array, dim=dim), dim=dim), dim=dim
-    )
+    if shift:
+        return torch.fft.fftshift(
+            torch.fft.ifftn(torch.fft.ifftshift(array, dim=dim), dim=dim), dim=dim
+        )
+    return torch.fft.ifftn(array, dim=dim)
 
 
 def fftconvolve(in1, in2, mode="full", axes=None):

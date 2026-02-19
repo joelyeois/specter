@@ -25,7 +25,7 @@ def k3_200kv(n, dx, device="cpu", return1d=False):
     mtf : torch.Tensor
         - If return1d=False: 2D NxN MTF array (radially symmetric).
         - If return1d=True: Tuple (k_data, mtf_values) for 1D MTF.
-    
+
     References
     ----------
     https://www.gatan.com/sites/default/files/images/mtf_k3_standard_200kV_FL2.star
@@ -115,7 +115,7 @@ def k3_200kv(n, dx, device="cpu", return1d=False):
     if return1d:
         return k_data, _rlnMtfValue
     else:
-        k = torch.fft.fftshift(torch.fft.fftfreq(n, dx, device=device))
+        k = torch.fft.fftfreq(n, dx, device=device)
         kx, ky = torch.meshgrid(k, k, indexing="ij")
         k = torch.sqrt(kx**2 + ky**2)
 
@@ -237,7 +237,7 @@ def k3_300kv(n, dx, device="cpu", return1d=False):
     if return1d:
         return k_data, _rlnMtfValue
     else:
-        k = torch.fft.fftshift(torch.fft.fftfreq(n, dx, device=device))
+        k = torch.fft.fftfreq(n, dx, device=device)
         kx, ky = torch.meshgrid(k, k, indexing="ij")
         k = torch.sqrt(kx**2 + ky**2)
 
@@ -271,7 +271,7 @@ def perfect_detector(n, dx, device="cpu", return1d=False):
         - If return1d=True: Tuple (k_data, mtf_1d) for 1D MTF along a radial line.
     """
     # Frequency grid in cycles per dx
-    k = torch.fft.fftshift(torch.fft.fftfreq(n, d=dx, device=device))
+    k = torch.fft.fftfreq(n, d=dx, device=device)
     if return1d:
         omega = k / (1 / (2 * dx))  # f / f_N
         mtf_1d = torch.sinc(omega / 2)
@@ -329,7 +329,7 @@ def falcon4i_300kv(n, dx, device="cpu", return1d=False):
     )
 
     # sampling coordinates
-    k = torch.fft.fftshift(torch.fft.fftfreq(n, dx, device=device))
+    k = torch.fft.fftfreq(n, dx, device=device)
     kx, ky = torch.meshgrid(k, k, indexing="ij")
     k = torch.sqrt(kx**2 + ky**2)
 
@@ -383,7 +383,7 @@ def falcon4i_200kv(n, dx, device="cpu", return1d=False):
     )
 
     # sampling coordinates
-    k = torch.fft.fftshift(torch.fft.fftfreq(n, dx, device=device))
+    k = torch.fft.fftfreq(n, dx, device=device)
     kx, ky = torch.meshgrid(k, k, indexing="ij")
     k = torch.sqrt(kx**2 + ky**2)
 

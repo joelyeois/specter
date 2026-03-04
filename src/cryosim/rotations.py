@@ -1,8 +1,12 @@
+from __future__ import annotations
+
+import lightning as L
+import numpy as np
 import torch
 import torch.nn.functional as F
-import numpy as np
+from typing import Literal, Sequence
+
 from .fft_tools import fft3, ifft3
-import lightning as L
 
 
 class Rotation:
@@ -11,7 +15,7 @@ class Rotation:
     Internally stores rotation as a unit quaternion in xyzw format.
     """
 
-    def __init__(self, quat: torch.Tensor, eps: float = 1e-6):
+    def __init__(self, quat: torch.Tensor, eps: float = 1e-6) -> None:
         """
         Internal constructor. Stores a unit quaternion (xyzw).
         """
@@ -23,7 +27,7 @@ class Rotation:
 
     # ----------------- Constructors -----------------
     @classmethod
-    def from_quat(cls, quat: torch.Tensor, scalar_first: bool = False):
+    def from_quat(cls, quat: torch.Tensor, scalar_first: bool = False) -> Rotation:
         """
         Create from quaternion.
 
@@ -41,7 +45,7 @@ class Rotation:
         return cls(quat)
 
     @classmethod
-    def from_rotvec(cls, rotvec: torch.Tensor):
+    def from_rotvec(cls, rotvec: torch.Tensor) -> Rotation:
         """
         Create from rotation vector (axis * angle).
 
@@ -63,7 +67,7 @@ class Rotation:
         return cls(quat)
 
     @classmethod
-    def from_matrix(cls, R: torch.Tensor):
+    def from_matrix(cls, R: torch.Tensor) -> Rotation:
         """
         Create from rotation matrix (3x3).
 
@@ -126,7 +130,7 @@ class Rotation:
         return cls(quat)
 
     # ----------------- Conversion Methods -----------------
-    def as_quat(self, scalar_first: bool = False):
+    def as_quat(self, scalar_first: bool = False) -> torch.Tensor:
         """
         Return quaternion.
 
@@ -140,7 +144,7 @@ class Rotation:
             return torch.cat([self._quat[..., 3:], self._quat[..., :3]], dim=-1)
         return self._quat
 
-    def as_rotvec(self):
+    def as_rotvec(self) -> torch.Tensor:
         """
         Return rotation vector (axis * angle).
 
@@ -157,7 +161,7 @@ class Rotation:
         )
         return xyz * scale
 
-    def as_matrix(self):
+    def as_matrix(self) -> torch.Tensor:
         """
         Return 3x3 rotation matrix.
 
@@ -189,7 +193,7 @@ class Rotation:
         return R
 
     # ----------------- Operations -----------------
-    def inv(self):
+    def inv(self) -> Rotation:
         """
         Return inverse rotation.
 
@@ -202,7 +206,12 @@ class Rotation:
         q[..., :3] *= -1
         return Rotation(q)
 
-    def apply(self, vectors, inverse=True, T=None):
+    def apply(
+        self,
+        vectors: torch.Tensor,
+        inverse: bool = True,
+        T: torch.Tensor | None = None,
+    ) -> torch.Tensor:
         """
         Apply rotation(s) to a set of vectors, optionally using the inverse and translation.
 
@@ -240,7 +249,7 @@ class Rotation:
         else:
             return translate_coordinates(rotated, T, inverse=inverse)
 
-    def __mul__(self, other):
+    def __mul__(self, other: Rotation) -> Rotation:
         """
         Compose rotations (quaternion multiplication).
 
@@ -264,7 +273,9 @@ class Rotation:
         return Rotation(quat)
 
 
-def translate_coordinates(vectors, T, inverse=False):
+def translate_coordinates(
+    vectors: torch.Tensor, T: torch.Tensor, inverse: bool = False
+) -> torch.Tensor:
     """
     Apply translation to points, with broadcasting.
 
@@ -308,7 +319,36 @@ def translate_coordinates(vectors, T, inverse=False):
         return vectors + sign * T_full
 
 
-def random_quaternion(batchsize=1, convention="xyzw", device="cpu"):
+def rotate_coordinates(vectors: torch.Tensor, quat: torch.Tensor) -> torch.Tensor:
+    """
+    Rotate vectors by quaternions.
+
+    Parameters
+    ----------
+    vectors : torch.Tensor
+        (N, 3) or (3,) coordinates.
+    quat : torch.Tensor
+        (B, 4) or (4,) quaternions.
+
+    Returns
+    -------
+    rotated : torch.Tensor
+        Rotated coordinates.
+    """
+    if vectors.ndim == 1:
+        vectors = vectors.unsqueeze(0)
+    R = Rotation.from_quat(quat)
+    rotated = R.apply(vectors, inverse=False)
+    if rotated.ndim == 3 and rotated.shape[1] == 1:
+        rotated = rotated.squeeze(1)
+    return rotated
+
+
+def random_quaternion(
+    batchsize: int = 1,
+    convention: Literal["xyzw", "wxyz"] = "xyzw",
+    device: str | torch.device = "cpu",
+) -> torch.Tensor:
     """
     Generate uniformly random unit quaternions using Shoemake's method.
 
@@ -349,7 +389,9 @@ def random_quaternion(batchsize=1, convention="xyzw", device="cpu"):
     return quats
 
 
-def random_rotvec(batchsize=1, device="cpu"):
+def random_rotvec(
+    batchsize: int = 1, device: str | torch.device = "cpu"
+) -> torch.Tensor:
     """
     Generate uniformly random rotation vectors using the Rotation3D class.
 
@@ -374,7 +416,9 @@ def random_rotvec(batchsize=1, device="cpu"):
     return rotvecs
 
 
-def random_rotation_matrix(batchsize=1, device="cpu"):
+def random_rotation_matrix(
+    batchsize: int = 1, device: str | torch.device = "cpu"
+) -> torch.Tensor:
     """
     Generate uniformly random 3x3 rotation matrices using the Rotation3D class.
 
@@ -400,8 +444,12 @@ def random_rotation_matrix(batchsize=1, device="cpu"):
 
 
 def rotate_volume(
-    V, theta, origin="relion", padding_mode="border", align_corners=False
-):
+    V: torch.Tensor,
+    theta: torch.Tensor,
+    origin: Literal["relion", "center"] = "relion",
+    padding_mode: Literal["zeros", "border", "reflection"] = "border",
+    align_corners: bool = False,
+) -> torch.Tensor:
     """
     Rotates a single 3D volume based on the batch of 3x4 affine transform matrices.
 
@@ -474,8 +522,12 @@ def rotate_volume(
 
 
 def rotate_volume_fourier(
-    V, theta, origin="relion", padding_mode="border", align_corners=False
-):
+    V: torch.Tensor,
+    theta: torch.Tensor,
+    origin: Literal["relion", "center"] = "relion",
+    padding_mode: Literal["zeros", "border", "reflection"] = "border",
+    align_corners: bool = False,
+) -> torch.Tensor:
     # Fourier domain
     V_f = fft3(V)  # Z x X x Y
 
@@ -491,7 +543,9 @@ def rotate_volume_fourier(
     return V_rot.real  # B x Z x X x Y
 
 
-def translations_angstrom_to_torch(T, n, voxel_size):
+def translations_angstrom_to_torch(
+    T: torch.Tensor, n: int, voxel_size: float
+) -> torch.Tensor:
     """
     Builds a batch of normalized translation vectors from rlnOriginXAngst and rlnOriginYAngst.
 
@@ -521,7 +575,7 @@ def translations_angstrom_to_torch(T, n, voxel_size):
     return T_norm
 
 
-def build_affine_matrix(R, T=None):
+def build_affine_matrix(R: torch.Tensor, T: torch.Tensor | None = None) -> torch.Tensor:
     if R.ndim == 2:
         R = R.unsqueeze(0)
     if T is not None and T.ndim == 1:
@@ -560,7 +614,11 @@ def build_affine_matrix(R, T=None):
     return theta
 
 
-def rotations_angular_difference(r1, r2, rotation_representation="rotvec"):
+def rotations_angular_difference(
+    r1: torch.Tensor,
+    r2: torch.Tensor,
+    rotation_representation: Literal["quaternion", "rotvec"] = "rotvec",
+) -> np.ndarray:
     """
     Calculates the smallest angles of rotation needed for a batch of 3D rotations (r1) to match another (r2).
 
@@ -719,7 +777,7 @@ class VolumeRotator(L.LightningModule):
     # ------------------------------------------------------------------
     # Core grid construction
     # ------------------------------------------------------------------
-    def _build_base_grid(self) -> torch.Tensor:
+    def _build_base_grid(self) -> None:
         """
         Build base grid.
         """
@@ -837,11 +895,11 @@ class VolumeRotator(L.LightningModule):
         self,
         V: torch.Tensor,
         theta: torch.Tensor,
-        slice_indices: torch.Tensor,
-        roi_center: tuple = None,
-        roi_size: tuple = None,
-        padding_mode: str = None,
-    ):
+        slice_indices: torch.Tensor | Sequence[int] | int,
+        roi_center: tuple[int, int] | None = None,
+        roi_size: tuple[int, int] | None = None,
+        padding_mode: str | None = None,
+    ) -> torch.Tensor:
         """
         Sample multiple Z-slices from a rotated volume, restricted to a ROI in XY.
         The slice_index=0 corresponds to the center of the volume.

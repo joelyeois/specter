@@ -1,6 +1,11 @@
-import torch
-from . import rotations
+from __future__ import annotations
+
 import numpy as np
+import torch
+
+from typing import Any, Sequence
+
+from . import rotations
 
 avogadro = 6.02214076e23
 density_of_amorphous_ice = 0.94  # [g/cm3]
@@ -10,7 +15,9 @@ ndensity_of_amorphous_ice = (
 )  # [particles / Å³]
 
 
-def water_molecule_coordinates(bond_angle=105, bond_length=0.9572):
+def water_molecule_coordinates(
+    bond_angle: float = 105.0, bond_length: float = 0.9572
+) -> tuple[np.ndarray, torch.Tensor]:
     """
     Returns coordinates of a single H2O molecule, where oxygen is defined as the origin (0,0,0).
 
@@ -43,7 +50,9 @@ def water_molecule_coordinates(bond_angle=105, bond_length=0.9572):
     return atomic_numbers, coordinates
 
 
-def create_n_randomly_rotated_water_molecules(n, **kwargs):
+def create_n_randomly_rotated_water_molecules(
+    n: int, **kwargs: Any
+) -> tuple[np.ndarray, torch.Tensor]:
     """
     Create n randomly rotated water molecules.
 
@@ -79,7 +88,9 @@ def create_n_randomly_rotated_water_molecules(n, **kwargs):
     return atomic_numbers, coordinates
 
 
-def volume_of_ice(n_xyz, d_xyz):
+def volume_of_ice(
+    n_xyz: Sequence[int], d_xyz: Sequence[float]
+) -> tuple[np.ndarray, torch.Tensor]:
     """
     Generate coordinates for a volume of amorphous ice.
 

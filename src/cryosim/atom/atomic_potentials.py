@@ -1,15 +1,18 @@
+from __future__ import annotations
+
 from functools import lru_cache
 from importlib import resources
 
 import torch
 from Bio.PDB.MMCIF2Dict import MMCIF2Dict
 from torch.special import modified_bessel_k0, modified_bessel_k1
+
 from ..array_utils import real_to_kgrid_3d
 from ..fft_tools import fftn
 
 
 @lru_cache(maxsize=1)
-def load_kirkland_parameters():
+def load_kirkland_parameters() -> torch.Tensor:
     """
     Load Kirkland's atom scattering parameters from a text file.
 
@@ -80,13 +83,13 @@ def load_kirkland_parameters():
 
 
 @lru_cache(maxsize=1)
-def load_lobato_parameters():
+def load_lobato_parameters() -> torch.Tensor:
     """
     Load Lobato electron scattering parameters from a text file.
 
     Returns
     -------
-    torch.Tensor
+    params : torch.Tensor
         A tensor of shape (104, 5, 2) containing the scattering parameters
         for atomic numbers 0–103. Index 0 is all zeros.
 
@@ -146,13 +149,18 @@ def load_lobato_parameters():
 
 
 @lru_cache(maxsize=1)
-def load_shtyrov_parameters(filepath):
+def load_shtyrov_parameters(filepath: str) -> torch.Tensor:
     """
     Load Shtyrov electron scattering parameters from a MMCIF file.
 
+    Parameters
+    ----------
+    filepath : str
+        Path to the MMCIF file.
+
     Returns
     -------
-    torch.Tensor
+    params : torch.Tensor
         A tensor of shape (N, 5, 2) containing the scattering parameters
         for atomic numbers 0 – N-1. Note that these are NOT elemental numbers.
 
@@ -213,7 +221,9 @@ def load_shtyrov_parameters(filepath):
     return params
 
 
-def kirkland_atomic_potential_2d(atomic_number, r_xy):
+def kirkland_atomic_potential_2d(
+    atomic_number: int, r_xy: torch.Tensor
+) -> torch.Tensor:
     """
     Compute 2D projected electrostatic potential for an atom using Kirkland parameters.
 
@@ -258,7 +268,9 @@ def kirkland_atomic_potential_2d(atomic_number, r_xy):
     return s1 + s2
 
 
-def kirkland_atomic_potential_3d(atomic_number, r_xyz):
+def kirkland_atomic_potential_3d(
+    atomic_number: int, r_xyz: torch.Tensor
+) -> torch.Tensor:
     """
     Compute the 3D atomic potential for a specific element.
 
@@ -306,7 +318,9 @@ def kirkland_atomic_potential_3d(atomic_number, r_xyz):
     return s1 + s2
 
 
-def kirkland_atomic_potential_3d_fourier(atomic_number, k_xyz):
+def kirkland_atomic_potential_3d_fourier(
+    atomic_number: int, k_xyz: torch.Tensor
+) -> torch.Tensor:
     """
     Compute the Fourier transformed 3D atomic potential for a specific element.
 
@@ -346,7 +360,7 @@ def kirkland_atomic_potential_3d_fourier(atomic_number, k_xyz):
     return s1 + s2
 
 
-def lobato_atomic_potential_2d(atomic_number, r_xy):
+def lobato_atomic_potential_2d(atomic_number: int, r_xy: torch.Tensor) -> torch.Tensor:
     """
     Compute the 3D atomic potential for a specific element using Lobato parameterization.
 
@@ -388,7 +402,7 @@ def lobato_atomic_potential_2d(atomic_number, r_xy):
     return s
 
 
-def lobato_atomic_potential_3d(atomic_number, r_xyz):
+def lobato_atomic_potential_3d(atomic_number: int, r_xyz: torch.Tensor) -> torch.Tensor:
     """
     Compute the 3D atomic potential for a specific element using Lobato parameterization.
 
@@ -439,7 +453,9 @@ def lobato_atomic_potential_3d(atomic_number, r_xyz):
     return s1
 
 
-def lobato_atomic_potential_3d_fourier(atomic_number, k_xyz):
+def lobato_atomic_potential_3d_fourier(
+    atomic_number: int, k_xyz: torch.Tensor
+) -> torch.Tensor:
     """
     Compute the Fourier transformed 3D atomic potential for a specific element using Lobato parameterization.
 
@@ -476,7 +492,9 @@ def lobato_atomic_potential_3d_fourier(atomic_number, k_xyz):
     return s1
 
 
-def shtyrov_atomic_potential_3d_fourier(atomic_number, k_xyz, filepath):
+def shtyrov_atomic_potential_3d_fourier(
+    atomic_number: int, k_xyz: torch.Tensor, filepath: str
+) -> torch.Tensor:
     """
     Compute the 3D atomic potential for a specific element using Shtyrov parameterization.
 
@@ -518,7 +536,9 @@ def shtyrov_atomic_potential_3d_fourier(atomic_number, k_xyz, filepath):
     return s1
 
 
-def shtyrov_atomic_potential_3d(atomic_number, r_xyz, filepath, energy=300):
+def shtyrov_atomic_potential_3d(
+    atomic_number: int, r_xyz: torch.Tensor, filepath: str, energy: float = 300
+) -> torch.Tensor:
     """
     Compute the 3D atomic potential for a specific element using Shtyrov parameterization.
 
@@ -571,5 +591,7 @@ def shtyrov_atomic_potential_3d(atomic_number, r_xyz, filepath, energy=300):
     shtyrov_f = shtyrov_atomic_potential_3d_fourier(atomic_number, k_xyz, filepath)
 
     # fourier transform
-    s1 = -c1 * torch.abs(fftn(shtyrov_f)) * dkx * dky * dkz  # need to negate
+    s1 = (
+        -c1 * torch.abs(fftn(shtyrov_f, shift=True)) * dkx * dky * dkz
+    )  # need to negate
     return s1

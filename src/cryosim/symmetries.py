@@ -1,8 +1,13 @@
+from __future__ import annotations
+
+from typing import Literal
+
 import torch
+
 from .rotations import Rotation, rotate_volume, rotate_volume_fourier
 
 
-def get_rotation_matrices(sym, return_affine=True):
+def get_rotation_matrices(sym: str, return_affine: bool = True) -> torch.Tensor:
     """
     Get rotation matrices for crystallographic and icosahedral symmetry groups.
     Returns rotation matrices for applying point group symmetry operations
@@ -1129,7 +1134,12 @@ def get_rotation_matrices(sym, return_affine=True):
         return matrices
 
 
-def apply_symmetry(vol, sym_ops, batchsize=None, method="fourier"):
+def apply_symmetry(
+    vol: torch.Tensor,
+    sym_ops: torch.Tensor | str,
+    batchsize: int | None = None,
+    method: Literal["fourier", "real"] = "fourier",
+) -> torch.Tensor:
     """
     Apply rotational symmetry to a volume.
 

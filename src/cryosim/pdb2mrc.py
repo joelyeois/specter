@@ -1,9 +1,11 @@
+from __future__ import annotations
+
 import torch
-from . import potential
-from . import atom
-from . import pdbtools
 from scipy.spatial import ConvexHull
 from scipy.spatial.distance import pdist
+from typing import Literal
+
+from . import atom, pdbtools, potential
 
 
 class PDB2MRC:
@@ -18,11 +20,16 @@ class PDB2MRC:
         Path to local PDB file.
     """
 
-    def __init__(self, pdb_code=None, pdb_path=None):
+    def __init__(self, pdb_code: str | None = None, pdb_path: str | None = None):
         self.pdb_code = pdb_code
         self.pdb_path = pdb_path
 
-    def fetch_pdb(self, pdb_folder="../pdb-data/", assembly=True, center=True):
+    def fetch_pdb(
+        self,
+        pdb_folder: str = "../pdb-data/",
+        assembly: bool = True,
+        center: bool = True,
+    ) -> None:
         """
         Fetch PDB file or load local file, and extract coordinates.
 
@@ -59,13 +66,13 @@ class PDB2MRC:
 
         self.estimate_max_diameter()
 
-    def estimate_max_diameter(self, coords=None):
+    def estimate_max_diameter(self, coords: torch.Tensor | None = None) -> None:
         """
         Estimate maximum diameter of the particle using Convex Hull.
 
         Parameters
         ----------
-        coords : torch.Tensor or np.ndarray, optional
+        coords : torch.Tensor, optional
             Coordinates. If None, uses `self.centered_coords`.
         """
         if coords is None:
@@ -76,12 +83,12 @@ class PDB2MRC:
 
     def build_particle(
         self,
-        n=256,
-        dx=1,
-        super_sampling_factor=4,
-        method="3d",
-        atom_size_px=11,
-    ):
+        n: int = 256,
+        dx: float = 1.0,
+        super_sampling_factor: int = 4,
+        method: Literal["2d", "3d"] = "3d",
+        atom_size_px: int = 11,
+    ) -> None:
         """
         Build potential volume from atomic coordinates.
 

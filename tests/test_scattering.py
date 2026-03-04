@@ -1,13 +1,14 @@
-import torch
 import numpy as np
+import torch
+
+from cryosim.rotations import Rotation, build_affine_matrix
 from cryosim.scattering import (
+    IterativeScattering,
+    Scattering,
+    complex_potential,
     energy_to_wavelength,
     interaction_parameter,
-    complex_potential,
-    Scattering,
-    IterativeScattering,
 )
-from cryosim.rotations import build_affine_matrix, Rotation
 
 
 def test_energy_to_wavelength():

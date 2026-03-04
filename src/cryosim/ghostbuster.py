@@ -1,51 +1,59 @@
+from __future__ import annotations
+
+from typing import Any, Literal
+
 import lightning as L
 import torch
 import torch.nn as nn
-from .imagegenerator import ImageGenerator
-from .symmetries import get_rotation_matrices, apply_symmetry
-from .fft_tools import fft3, ifft3
+import torch.nn.functional as F
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import (
     CosineAnnealingWarmRestarts,
     ExponentialLR,
     LambdaLR,
+    LRScheduler,
 )
-import torch.nn.functional as F
+
+from .fft_tools import fft3, ifft3
+from .imagegenerator import ImageGenerator
+from .symmetries import apply_symmetry, get_rotation_matrices
 
 
 class Ghostbuster(L.LightningModule):
     def __init__(
         self,
-        V,
-        voxel_size,
-        quaternions,
-        translations,
-        ctf_params,
-        energy,
-        dose_per_angstrom,
-        anisomag=None,
-        alpha=0.0,
-        defocus_offset=torch.tensor(0.0),
-        scattering_model="multislice",
-        aberration_model="holography",
-        klim=None,
-        sparsity=None,
-        lr=None,
-        lr_R=None,
-        lr_T=None,
-        lr_D=None,
-        lr_decay=0.1,
-        scheduler="LambdaLR",
-        kmask=None,
-        flipcurvature=False,
-        fsc_ref=None,
-        fsc_mask=None,
-        rotate_mode="real",
-        symmetry=None,
-        symmetry_batchsize=None,
-        symmetry_mode="fourier",
-        use_cpu_for_symmetry=False,
-    ):
+        V: torch.Tensor,
+        voxel_size: float,
+        quaternions: torch.Tensor,
+        translations: torch.Tensor,
+        ctf_params: dict[str, torch.Tensor],
+        energy: float,
+        dose_per_angstrom: float,
+        anisomag: torch.Tensor | None = None,
+        alpha: float = 0.0,
+        defocus_offset: torch.Tensor = torch.tensor(0.0),
+        scattering_model: str = "multislice",
+        aberration_model: str = "holography",
+        klim: float | None = None,
+        sparsity: float | None = None,
+        lr: float | None = None,
+        lr_R: float | None = None,
+        lr_T: float | None = None,
+        lr_D: float | None = None,
+        lr_decay: float = 0.1,
+        scheduler: Literal[
+            "LambdaLR", "CosineAnnealingWarmRestarts", "MultiplicativeLR"
+        ] = "LambdaLR",
+        kmask: torch.Tensor | None = None,
+        flipcurvature: bool = False,
+        fsc_ref: torch.Tensor | None = None,
+        fsc_mask: torch.Tensor | float | None = None,
+        rotate_mode: Literal["real", "fourier"] = "real",
+        symmetry: str | None = None,
+        symmetry_batchsize: int | None = None,
+        symmetry_mode: Literal["real", "fourier"] = "fourier",
+        use_cpu_for_symmetry: bool = False,
+    ) -> None:
         super().__init__()
 
         # Always use manual optimization to handle masking and multiple optimizers consistently
@@ -150,11 +158,11 @@ class Ghostbuster(L.LightningModule):
             alpha=self.alpha,
         )
 
-    def forward(self, idx):
+    def forward(self, idx: torch.Tensor | int | slice) -> torch.Tensor:
         image = self.imagegenerator(idx)
         return image
 
-    def symmetrize(self):
+    def symmetrize(self) -> None:
         self.V.data = apply_symmetry(
             self.V.data,
             self.sym_rot_matrices,
@@ -162,10 +170,12 @@ class Ghostbuster(L.LightningModule):
             method=self.symmetry_mode,
         )
 
-    def reciprocal_lr_scheduler(self, *args):
+    def reciprocal_lr_scheduler(self, *args: Any) -> float:
         return 1 / (1 + self.lr_decay * self.global_step**0.5)
 
-    def configure_optimizers(self):
+    def configure_optimizers(
+        self,
+    ) -> tuple[list[torch.optim.Optimizer], list[LRScheduler]]:
         # new. Single parameter optimization only
         if self.lr is not None:
             optimizerV = AdamW([self.V], lr=self.lr)
@@ -211,7 +221,9 @@ class Ghostbuster(L.LightningModule):
             opts.append(optimizerD)
         return opts, lr_schedulers
 
-    def _common_step(self, batch, batch_idx):
+    def _common_step(
+        self, batch: tuple[torch.Tensor, torch.Tensor], batch_idx: int
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         # Link parameters to simulator to ensure autograd graph connectivity
         if hasattr(self.imagegenerator, "V"):
             self.imagegenerator.V = self.V
@@ -237,7 +249,9 @@ class Ghostbuster(L.LightningModule):
 
         return loss, out, images
 
-    def training_step(self, batch, batch_idx):
+    def training_step(
+        self, batch: tuple[torch.Tensor, torch.Tensor], batch_idx: int
+    ) -> torch.Tensor:
         opts = self.optimizers()
 
         if not isinstance(opts, (list, tuple)):
@@ -274,7 +288,7 @@ class Ghostbuster(L.LightningModule):
                     s.step()
         return loss
 
-    def on_train_batch_start(self, batch, batch_idx):
+    def on_train_batch_start(self, batch: Any, batch_idx: int) -> None:
         # log lr
         if self.lr is not None:
             self.log_lrs.append(
@@ -283,11 +297,13 @@ class Ghostbuster(L.LightningModule):
                 ]["lr"]
             )
 
-    def on_train_batch_end(self, outputs, batch, batch_idx):
+    def on_train_batch_end(self, outputs: Any, batch: Any, batch_idx: int) -> None:
         if self.kmask is not None:
-            self.V.data = torch.real(ifft3(fft3(self.V.data) * self.kmask))
+            self.V.data = torch.real(
+                ifft3(fft3(self.V.data, shift=True) * self.kmask), shift=True
+            )
 
-    def on_train_epoch_end(self):
+    def on_train_epoch_end(self) -> None:
         # enforce symmetry
         if self.symmetry is not None:
             self.V.data = apply_symmetry(

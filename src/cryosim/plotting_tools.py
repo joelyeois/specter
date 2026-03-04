@@ -1,8 +1,16 @@
+from __future__ import annotations
+
 import matplotlib.pyplot as plt
 import torch
 
 
-def plot3d(vol, title=None, vmin=None, vmax=None, cmap=None):
+def plot3d(
+    vol: torch.Tensor,
+    title: str | None = None,
+    vmin: float | None = None,
+    vmax: float | None = None,
+    cmap: str | None = None,
+) -> None:
     """
     Plot 3 orthogonal projections of a 3D volume.
 
@@ -26,8 +34,14 @@ def plot3d(vol, title=None, vmin=None, vmax=None, cmap=None):
 
 
 def plot_slices(
-    vol, start_idx=0, end_idx=None, axis=0, ylabel=None, vmin=None, vmax=None
-):
+    vol: torch.Tensor,
+    start_idx: int = 0,
+    end_idx: int | None = None,
+    axis: int = 0,
+    ylabel: str | None = None,
+    vmin: float | None = None,
+    vmax: float | None = None,
+) -> None:
     """
     Plot slices of a 3D volume along a specified axis.
 
@@ -76,16 +90,16 @@ def plot_slices(
 
 
 def radial_distribution_function(
-    coords,
-    volume,
-    dr=0.5,
-    r_max=None,
-    number_density=0.03142228327508648,
-    chunk_size=None,
-    approximate=False,
-    n_samples=1000000,
-    plot=True,
-):
+    coords: torch.Tensor,
+    volume: float,
+    dr: float = 0.5,
+    r_max: float | None = None,
+    number_density: float = 0.03142228327508648,
+    chunk_size: int | None = None,
+    approximate: bool = False,
+    n_samples: int = 1000000,
+    plot: bool = True,
+) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Computes the radial distribution function (RDF) from atomic coordinates.
 

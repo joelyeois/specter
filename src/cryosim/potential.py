@@ -1,8 +1,13 @@
+from __future__ import annotations
+
+from typing import Any, Sequence
+
+import gemmi
+import lightning as L
+import numpy as np
 import torch
 import torch.nn.functional as F
-from rich.progress import track, Progress
-import lightning as L
-import gemmi
+from rich.progress import Progress, track
 
 from .array_utils import (
     radial_grid_2d,
@@ -19,10 +24,11 @@ from .atom import (
     shtyrov_atomic_potential_3d,
 )
 from .fft_tools import fftconvolve
-import numpy as np
 
 
-def compute_supersampling_parameters(dx, width_atom=5.0, dx_atom=0.1):
+def compute_supersampling_parameters(
+    dx: float, width_atom: float = 5.0, dx_atom: float = 0.1
+) -> tuple[int, float, int]:
     """
     Compute grid size, pixel spacing and supersampling factor for atomic potentials.
 
@@ -48,10 +54,13 @@ def compute_supersampling_parameters(dx, width_atom=5.0, dx_atom=0.1):
     ssf : int
         Supersampling factor
     """
+    if dx <= 0 or width_atom <= 0 or dx_atom <= 0:
+        raise ValueError("dx, width_atom, and dx_atom must be > 0.")
     if dx <= dx_atom:
         ssf = 1
         ss_dx = dx
         n_atom = int(width_atom / dx)
+        n_atom = max(n_atom, 3)
         # make even
         n_atom = n_atom + (n_atom % 2)
         return n_atom, ss_dx, ssf
@@ -64,6 +73,9 @@ def compute_supersampling_parameters(dx, width_atom=5.0, dx_atom=0.1):
         ssf = int(torch.round(torch.tensor(dx / dx_atom)))
         ss_dx = dx / ssf
 
+        # Ensure pooled kernel has at least 3 pixels per axis.
+        n_atom = max(n_atom, 3 * ssf)
+
         # Step 2: adjust n_atom to satisfy both evenness and divisibility
         # find the smallest even number divisible by ssf and >= n_atom
         while (n_atom % ssf != 0) or (n_atom % 2 != 0):
@@ -73,12 +85,12 @@ def compute_supersampling_parameters(dx, width_atom=5.0, dx_atom=0.1):
 
 
 def build_potential_volume_fftconvolve_3d(
-    atomic_numbers,
-    centered_coords,
-    n_xyz,
-    dx,
-    disable_tqdm=False,
-):
+    atomic_numbers: torch.Tensor,
+    centered_coords: torch.Tensor,
+    n_xyz: int | Sequence[int],
+    dx: float,
+    disable_tqdm: bool = False,
+) -> tuple[torch.Tensor, torch.Tensor, dict[int, torch.Tensor]]:
     """Constructs volumetric potential from list of atomic elements and their
     respective coordinates.
 
@@ -103,7 +115,6 @@ def build_potential_volume_fftconvolve_3d(
         Number of pixels along x,y,z: (nx, ny, nz) of main volume.
     dx : float
         Voxel size of main volume.
-
     Returns
     -------
     potential_volume : 3d tensor
@@ -158,12 +169,12 @@ def build_potential_volume_fftconvolve_3d(
 
 
 def build_potential_volume_fftconvolve_2d(
-    atomic_numbers,
-    centered_coords,
-    n_xyz,
-    dx,
-    disable_tqdm=False,
-):
+    atomic_numbers: torch.Tensor,
+    centered_coords: torch.Tensor,
+    n_xyz: int | Sequence[int],
+    dx: float,
+    disable_tqdm: bool = False,
+) -> tuple[torch.Tensor, torch.Tensor, dict[int, torch.Tensor]]:
     """Constructs volumetric potential from list of atomic elements and their
     respective coordinates.
 
@@ -188,7 +199,6 @@ def build_potential_volume_fftconvolve_2d(
         Number of pixels along x,y,z: (nx, ny, nz) of main volume.
     dx : float
         Pixel size of main volume.
-
     Returns
     -------
     potential_volume : 3d tensor
@@ -282,14 +292,14 @@ class PotentialBuilder(L.LightningModule):
 
     def __init__(
         self,
-        n_xyz,
-        dx,
-        atomic_numbers,
-        verbose=True,
-        parameterization="kirkland",
-        conv_backend="fftconvolve",
-        trainable=False,
-        mmcif_filepath=None,
+        n_xyz: int | Sequence[int],
+        dx: float,
+        atomic_numbers: torch.Tensor,
+        verbose: bool = True,
+        parameterization: str = "kirkland",
+        conv_backend: str = "fftconvolve",
+        trainable: bool = False,
+        mmcif_filepath: str | None = None,
     ):
         super().__init__()
 
@@ -331,7 +341,9 @@ class PotentialBuilder(L.LightningModule):
             self.get_2d_atomic_potentials()
         self.get_3d_atomic_potentials()
 
-    def get_2d_atomic_potentials(self, unique_elements=None):
+    def get_2d_atomic_potentials(
+        self, unique_elements: torch.Tensor | None = None
+    ) -> None:
         """
         Compute and cache 2D atomic potential kernels for unique elements.
 
@@ -368,7 +380,9 @@ class PotentialBuilder(L.LightningModule):
 
             self.atomic_potentials_2d[i] = pot
 
-    def get_3d_atomic_potentials(self, unique_elements=None):
+    def get_3d_atomic_potentials(
+        self, unique_elements: torch.Tensor | None = None
+    ) -> None:
         """
         Compute and cache 3D atomic potential kernels for unique elements.
 
@@ -416,7 +430,12 @@ class PotentialBuilder(L.LightningModule):
 
             self.atomic_potentials_3d[i] = pot
 
-    def forward(self, coordinates, method="3d", conv_backend=None):
+    def forward(
+        self,
+        coordinates: torch.Tensor,
+        method: str = "3d",
+        conv_backend: str | None = None,
+    ) -> torch.Tensor:
         """
         Build potential volume(s) from atomic coordinates.
 
@@ -574,7 +593,13 @@ class GemmiPotentialBuilder:
         Scaling factor for electrostatic potential (2π*e*a₀).
     """
 
-    def __init__(self, n_xyz, dx, atomic_numbers=None, b_factor=None):
+    def __init__(
+        self,
+        n_xyz: int | Sequence[int],
+        dx: float,
+        atomic_numbers: torch.Tensor | None = None,
+        b_factor: float | None = None,
+    ):
         if isinstance(n_xyz, (int, float)):
             self.nx = self.ny = self.nz = n_xyz
         else:
@@ -607,15 +632,19 @@ class GemmiPotentialBuilder:
         e = 14.4  # electron charge, [V·Å]
         self.c1 = 2 * torch.pi * e * a0
 
-    def build_model(self, atom_coordinates, atom_elements):
+    def build_model(
+        self,
+        atom_coordinates: torch.Tensor,
+        atom_elements: torch.Tensor,
+    ) -> gemmi.Model:
         """
         Build Gemmi structure model from atomic coordinates and elements.
 
         Parameters
         ----------
-        atom_coordinates : torch.Tensor or np.ndarray
+        atom_coordinates : torch.Tensor
             Atomic coordinates in Å, shape (N, 3).
-        atom_elements : torch.Tensor or np.ndarray
+        atom_elements : torch.Tensor
             Atomic numbers, shape (N,).
 
         Returns
@@ -663,7 +692,7 @@ class GemmiPotentialBuilder:
             res.add_atom(atom)
         return model
 
-    def build_dencalc(self):
+    def build_dencalc(self) -> gemmi.DensityCalculatorE:
         """
         Build a fresh Gemmi density calculator with current grid settings.
 
@@ -694,7 +723,7 @@ class GemmiPotentialBuilder:
         dencalc.grid.set_size(self.nx, self.ny, self.nz)
         return dencalc
 
-    def build_potential_from_custom_mmcif(self, mmcif_filepath):
+    def build_potential_from_custom_mmcif(self, mmcif_filepath: str) -> torch.Tensor:
         """
         Build potential using custom scattering factors from mmCIF file.
 
@@ -796,7 +825,9 @@ class GemmiPotentialBuilder:
         dencalc.put_model_density_on_grid(st[0])
         return self.c1 * torch.as_tensor(dencalc.grid.array).transpose(0, 2)
 
-    def _build_single_potential(self, coords_elements_tuple):
+    def _build_single_potential(
+        self, coords_elements_tuple: tuple[torch.Tensor, torch.Tensor]
+    ) -> torch.Tensor:
         """
         Build potential for a single set of coordinates (non-parallel).
 
@@ -818,7 +849,7 @@ class GemmiPotentialBuilder:
         return torch.as_tensor(dencalc.grid.array).transpose(0, 2)
 
     @staticmethod
-    def _build_parallelizable_single_potential(args):
+    def _build_parallelizable_single_potential(args: tuple[Any, ...]) -> torch.Tensor:
         """
         Build potential for parallel processing (static method).
 
@@ -889,7 +920,12 @@ class GemmiPotentialBuilder:
         dencalc.put_model_density_on_grid(model)
         return torch.as_tensor(dencalc.grid.array).transpose(0, 2)
 
-    def build_potential(self, atom_coordinates, atomic_numbers=None, n_processes=None):
+    def build_potential(
+        self,
+        atom_coordinates: torch.Tensor,
+        atomic_numbers: torch.Tensor | None = None,
+        n_processes: int | None = None,
+    ) -> torch.Tensor:
         """
         Build electrostatic potential volume from atomic coordinates.
 

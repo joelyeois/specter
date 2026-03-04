@@ -1,8 +1,14 @@
+from __future__ import annotations
+
+from typing import Sequence
+
 import torch
+import torch.nn.functional as F
+
 from .fft_tools import fft2, ifft2
 
 
-def kgrid_1d(n, dx, device="cpu"):
+def kgrid_1d(n: int, dx: float, device: str | torch.device = "cpu") -> torch.Tensor:
     """
     Constructs a 1D k-grid.
 
@@ -12,29 +18,40 @@ def kgrid_1d(n, dx, device="cpu"):
         Number of pixels.
     dx : float
         Pixel size.
+    device : str or torch.device, optional
+        Device for the tensor. Default is 'cpu'.
 
     Returns
     -------
-    k : 1d tensor
+    k : torch.Tensor
+        1D k-grid.
     """
     kx = torch.fft.fftfreq(n, dx, device=device)
     return kx
 
 
-def kgrid_2d(n_xy, d_xy, device="cpu"):
+def kgrid_2d(
+    n_xy: int | Sequence[int],
+    d_xy: float | Sequence[float],
+    device: str | torch.device = "cpu",
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """Constructs the kx, ky meshgrids.
 
     Parameters
     ----------
-    n_xy : int or array-like
-        Number of pixels along x,y. If int, assumes nx=ny=n_xy.
-    d_xy : float or array-like
-        Pixel length along x,y. If float, assumes dx=dy=d_xy.
+    n_xy : int or Sequence of int
+        Number of pixels along x, y. If int, assumes nx=ny=n_xy.
+    d_xy : float or Sequence of float
+        Pixel length along x, y. If float, assumes dx=dy=d_xy.
+    device : str or torch.device, optional
+        Device for the tensor. Default is 'cpu'.
 
     Returns
     -------
-    KX,KY : 2d tensors
-        kx,ky meshgrids.
+    kx, ky : torch.Tensor
+        1D frequency axes.
+    KX, KY : torch.Tensor
+        2D kx, ky meshgrids.
     """
     if isinstance(n_xy, int):
         nx = ny = n_xy
@@ -51,20 +68,30 @@ def kgrid_2d(n_xy, d_xy, device="cpu"):
     return kx, ky, KX, KY
 
 
-def kgrid_3d(n_xyz, d_xyz, device="cpu"):
+def kgrid_3d(
+    n_xyz: int | Sequence[int],
+    d_xyz: float | Sequence[float],
+    device: str | torch.device = "cpu",
+) -> tuple[
+    torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor
+]:
     """Constructs the kx, ky, kz meshgrids.
 
     Parameters
     ----------
-    n_xyz : int or array-like
-        Number of pixels along x,y,z. If int, assumes nx=ny=nz=n_xyz.
-    d_xyz : float or array-like
-        Pixel length along x,y,z. If float, assumes dx=dy=dz=d_xyz.
+    n_xyz : int or Sequence of int
+        Number of pixels along x, y, z. If int, assumes nx=ny=nz=n_xyz.
+    d_xyz : float or Sequence of float
+        Pixel length along x, y, z. If float, assumes dx=dy=dz=d_xyz.
+    device : str or torch.device, optional
+        Device for the tensor. Default is 'cpu'.
 
     Returns
     -------
-    KX, KY, KZ : 2d tensors
-        kx,ky, kz meshgrids.
+    kx, ky, kz : torch.Tensor
+        1D frequency axes.
+    KX, KY, KZ : torch.Tensor
+        3D kx, ky, kz meshgrids.
     """
     if isinstance(n_xyz, int):
         nx = ny = nz = n_xyz
@@ -82,17 +109,21 @@ def kgrid_3d(n_xyz, d_xyz, device="cpu"):
     return kx, ky, kz, KX, KY, KZ
 
 
-def radial_kgrid_2d(n_xy, d_xy, device="cpu"):
+def radial_kgrid_2d(
+    n_xy: int | Sequence[int],
+    d_xy: float | Sequence[float],
+    device: str | torch.device = "cpu",
+) -> torch.Tensor:
     """
     Construct 2D radial frequency grid.
 
     Parameters
     ----------
-    n_xy : int or array-like
-        Number of pixels along x,y. If int, assumes nx=ny=n_xy.
-    d_xy : float or array-like
-        Pixel length along x,y. If float, assumes dx=dy=d_xy.
-    device : str, optional
+    n_xy : int or Sequence of int
+        Number of pixels along x, y. If int, assumes nx=ny=n_xy.
+    d_xy : float or Sequence of float
+        Pixel length along x, y. If float, assumes dx=dy=d_xy.
+    device : str or torch.device, optional
         Device for tensor ('cpu' or 'cuda'). Default is 'cpu'.
 
     Returns
@@ -105,17 +136,21 @@ def radial_kgrid_2d(n_xy, d_xy, device="cpu"):
     return torch.sqrt(KX**2 + KY**2)
 
 
-def radial_kgrid_3d(n_xyz, d_xyz, device="cpu"):
+def radial_kgrid_3d(
+    n_xyz: int | Sequence[int],
+    d_xyz: float | Sequence[float],
+    device: str | torch.device = "cpu",
+) -> torch.Tensor:
     """
     Construct 3D radial frequency grid.
 
     Parameters
     ----------
-    n_xyz : int or array-like
-        Number of pixels along x,y,z. If int, assumes nx=ny=nz=n_xyz.
-    d_xyz : float or array-like
-        Pixel length along x,y,z. If float, assumes dx=dy=dz=d_xyz.
-    device : str, optional
+    n_xyz : int or Sequence of int
+        Number of pixels along x, y, z. If int, assumes nx=ny=nz=n_xyz.
+    d_xyz : float or Sequence of float
+        Pixel length along x, y, z. If float, assumes dx=dy=dz=d_xyz.
+    device : str or torch.device, optional
         Device for tensor ('cpu' or 'cuda'). Default is 'cpu'.
 
     Returns
@@ -128,7 +163,9 @@ def radial_kgrid_3d(n_xyz, d_xyz, device="cpu"):
     return torch.sqrt(KX**2 + KY**2 + KZ**2)
 
 
-def grid_1d(n, dx, convention="relion", device="cpu"):
+def grid_1d(
+    n: int, dx: float, convention: str = "relion", device: str | torch.device = "cpu"
+) -> torch.Tensor:
     """
     Constructs a 1D grid. The coordinate grid convention only matters if the number of
     pixels is even.
@@ -139,16 +176,19 @@ def grid_1d(n, dx, convention="relion", device="cpu"):
         Number of pixels.
     dx : float
         Pixel size.
-    convention : str
+    convention : str, optional
         Determines location of origin (0). If 'relion', origin is located at
         index [n//2], which means coordinates are not symmetric about
         the origin for even number of pixels. If 'torch', forces coordinates to be
         symmetric about the origin, which means for even grids, there is no index
-        for (0).
+        for (0). Default is 'relion'.
+    device : str or torch.device, optional
+        Device for the tensor. Default is 'cpu'.
 
     Returns
     -------
-    x : 1d tensor
+    x : torch.Tensor
+        1D coordinate array.
     """
     if convention == "relion":
         x = (torch.arange(n, device=device) - n // 2) * dx
@@ -157,7 +197,12 @@ def grid_1d(n, dx, convention="relion", device="cpu"):
     return x
 
 
-def grid_2d(n_xy, d_xy, convention="relion", device="cpu"):
+def grid_2d(
+    n_xy: int | Sequence[int],
+    d_xy: float | Sequence[float],
+    convention: str = "relion",
+    device: str | torch.device = "cpu",
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """Constructs the xy coordinate arrays and meshgrids. Meshgrid indexing yields
     area[y_i, x_i] convention which matches cryo-EM software.
 
@@ -165,23 +210,25 @@ def grid_2d(n_xy, d_xy, convention="relion", device="cpu"):
 
     Parameters
     ----------
-    n_xy : int or array-like
-        Number of pixels along x,y. If int, assumes nx=ny=n_xy.
-    d_xy : float or array-like
-        Pixel length along x,y. If float, assumes dx=dy=d_xy.
-    convention : str
+    n_xy : int or Sequence of int
+        Number of pixels along x, y. If int, assumes nx=ny=n_xy.
+    d_xy : float or Sequence of float
+        Pixel length along x, y. If float, assumes dx=dy=d_xy.
+    convention : str, optional
         Determines location of origin (0,0). If 'relion', origin is located at
         index [ny//2, nx//2], which means coordinates are not symmetric about
         the origin for even number of pixels. If 'torch', forces coordinates to be
         symmetric about the origin, which means for even grids, there is no index
-        for (0,0).
+        for (0,0). Default is 'relion'.
+    device : str or torch.device, optional
+        Device for the tensor. Default is 'cpu'.
 
     Returns
     -------
-    x,y : 1d tensors
-        x,y coordinates.
-    X,Y : 2d tensors
-        x,y meshgrids.
+    x, y : torch.Tensor
+        1D x, y coordinates.
+    X, Y : torch.Tensor
+        2D x, y meshgrids.
     """
     if isinstance(n_xy, int):
         nx = ny = n_xy
@@ -198,7 +245,14 @@ def grid_2d(n_xy, d_xy, convention="relion", device="cpu"):
     return x, y, X, Y
 
 
-def grid_3d(n_xyz, d_xyz, convention="relion", device="cpu"):
+def grid_3d(
+    n_xyz: int | Sequence[int],
+    d_xyz: float | Sequence[float],
+    convention: str = "relion",
+    device: str | torch.device = "cpu",
+) -> tuple[
+    torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor
+]:
     """Constructs the xyz coordinate arrays and meshgrids. Meshgrid indexing yields
     vol[z_i, y_i, x_i] convention which matches cryo-EM software.
 
@@ -206,23 +260,25 @@ def grid_3d(n_xyz, d_xyz, convention="relion", device="cpu"):
 
     Parameters
     ----------
-    n_xyz : int or array-like
-        Number of pixels along x,y,z. If int, assumes nx=ny=nz=n_xyz.
-    d_xyz : float or array-like
-        Pixel length along x,y,z. If float, assumes dx=dy=dz=d_xyz.
-    convention : str
+    n_xyz : int or Sequence of int
+        Number of pixels along x, y, z. If int, assumes nx=ny=nz=n_xyz.
+    d_xyz : float or Sequence of float
+        Pixel length along x, y, z. If float, assumes dx=dy=dz=d_xyz.
+    convention : str, optional
         Determines location of origin (0,0,0). If 'relion', origin is located at
         index [nz//2, ny//2, nx//2], which means coordinates are not symmetric about
         the origin for even number of pixels. If 'torch', forces coordinates to be
         symmetric about the origin, which means for even grids, there is no index
-        for (0,0,0).
+        for (0,0,0). Default is 'relion'.
+    device : str or torch.device, optional
+        Device for the tensor. Default is 'cpu'.
 
     Returns
     -------
-    x,y,z : 1d tensors
-        x,y,z coordinates.
-    X,Y,Z : 3d tensors
-        x,y,z meshgrids.
+    x, y, z : torch.Tensor
+        1D x, y, z coordinates.
+    X, Y, Z : torch.Tensor
+        3D x, y, z meshgrids.
     """
     if isinstance(n_xyz, int):
         nx = ny = nz = n_xyz
@@ -240,19 +296,24 @@ def grid_3d(n_xyz, d_xyz, convention="relion", device="cpu"):
     return x, y, z, X, Y, Z
 
 
-def radial_grid_2d(n_xy, d_xy, convention="relion", device="cpu"):
+def radial_grid_2d(
+    n_xy: int | Sequence[int],
+    d_xy: float | Sequence[float],
+    convention: str = "relion",
+    device: str | torch.device = "cpu",
+) -> torch.Tensor:
     """
     Construct 2D radial coordinate grid.
 
     Parameters
     ----------
-    n_xy : int or array-like
-        Number of pixels along x,y. If int, assumes nx=ny=n_xy.
-    d_xy : float or array-like
-        Pixel length along x,y. If float, assumes dx=dy=d_xy.
+    n_xy : int or Sequence of int
+        Number of pixels along x, y. If int, assumes nx=ny=n_xy.
+    d_xy : float or Sequence of float
+        Pixel length along x, y. If float, assumes dx=dy=d_xy.
     convention : str, optional
         Grid origin convention ('relion' or 'torch'). Default is 'relion'.
-    device : str, optional
+    device : str or torch.device, optional
         Device for tensor ('cpu' or 'cuda'). Default is 'cpu'.
 
     Returns
@@ -264,19 +325,24 @@ def radial_grid_2d(n_xy, d_xy, convention="relion", device="cpu"):
     return torch.sqrt(X**2 + Y**2)
 
 
-def radial_grid_3d(n_xyz, d_xyz, convention="relion", device="cpu"):
+def radial_grid_3d(
+    n_xyz: int | Sequence[int],
+    d_xyz: float | Sequence[float],
+    convention: str = "relion",
+    device: str | torch.device = "cpu",
+) -> torch.Tensor:
     """
     Construct 3D radial coordinate grid.
 
     Parameters
     ----------
-    n_xyz : int or array-like
-        Number of pixels along x,y,z. If int, assumes nx=ny=nz=n_xyz.
-    d_xyz : float or array-like
-        Pixel length along x,y,z. If float, assumes dx=dy=dz=d_xyz.
+    n_xyz : int or Sequence of int
+        Number of pixels along x, y, z. If int, assumes nx=ny=nz=n_xyz.
+    d_xyz : float or Sequence of float
+        Pixel length along x, y, z. If float, assumes dx=dy=dz=d_xyz.
     convention : str, optional
         Grid origin convention ('relion' or 'torch'). Default is 'relion'.
-    device : str, optional
+    device : str or torch.device, optional
         Device for tensor ('cpu' or 'cuda'). Default is 'cpu'.
 
     Returns
@@ -288,7 +354,7 @@ def radial_grid_3d(n_xyz, d_xyz, convention="relion", device="cpu"):
     return torch.sqrt(X**2 + Y**2 + Z**2)
 
 
-def real_to_kgrid_3d(R):
+def real_to_kgrid_3d(R: torch.Tensor) -> torch.Tensor:
     """
     Convert real-space radial grid to frequency-space radial grid.
 
@@ -332,7 +398,12 @@ def real_to_kgrid_3d(R):
     return KR
 
 
-def voxelize_coordinates(coords, grid_shape, voxel_size, device=None):
+def voxelize_coordinates(
+    coords: torch.Tensor,
+    grid_shape: tuple[int, int, int],
+    voxel_size: Sequence[float],
+    device: str | torch.device | None = None,
+) -> torch.Tensor:
     """
     Convert 3D coordinates to a 3D binary occupancy grid.
 
@@ -345,9 +416,9 @@ def voxelize_coordinates(coords, grid_shape, voxel_size, device=None):
         Atomic coordinates in physical units (x, y, z), shape (N, 3).
     grid_shape : tuple of int
         Shape of output grid (nx, ny, nz).
-    voxel_size : tuple of float
+    voxel_size : Sequence of float
         Voxel size (dx, dy, dz).
-    device : torch.device, optional
+    device : str or torch.device, optional
         Device for tensors. Default is None (uses coords device).
 
     Returns
@@ -494,7 +565,12 @@ def voxelize_coordinates(coords, grid_shape, voxel_size, device=None):
 #     return volume
 
 
-def soft_voxelize_coordinates(coords, grid_shape, voxel_size, device=None):
+def soft_voxelize_coordinates(
+    coords: torch.Tensor,
+    grid_shape: tuple[int, int, int],
+    voxel_size: float | Sequence[float],
+    device: str | torch.device | None = None,
+) -> torch.Tensor:
     """
     Differentiable 3D soft voxelization using trilinear splatting.
 
@@ -508,9 +584,9 @@ def soft_voxelize_coordinates(coords, grid_shape, voxel_size, device=None):
         for batched volumes.
     grid_shape : tuple of int
         Shape of output grid (nz, ny, nx).
-    voxel_size : float or tuple of float
+    voxel_size : float or Sequence of float
         Voxel size. If float, assumes isotropic. If tuple, (dz, dy, dx).
-    device : torch.device, optional
+    device : str or torch.device, optional
         Device for tensors. Default is None (uses coords device).
 
     Returns
@@ -622,7 +698,12 @@ def soft_voxelize_coordinates(coords, grid_shape, voxel_size, device=None):
     return volume
 
 
-def soft_voxelize_xy_coordinates(coords, grid_shape, voxel_size, device=None):
+def soft_voxelize_xy_coordinates(
+    coords: torch.Tensor,
+    grid_shape: tuple[int, int, int],
+    voxel_size: float | Sequence[float],
+    device: str | torch.device | None = None,
+) -> torch.Tensor:
     """
     Semi-soft 3D voxelization with hard Z assignment and soft XY interpolation.
 
@@ -637,9 +718,9 @@ def soft_voxelize_xy_coordinates(coords, grid_shape, voxel_size, device=None):
         for batched volumes.
     grid_shape : tuple of int
         Shape of output grid (nz, ny, nx).
-    voxel_size : float or tuple of float
+    voxel_size : float or Sequence of float
         Voxel size. If float, assumes isotropic. If tuple, (dz, dy, dx).
-    device : torch.device, optional
+    device : str or torch.device, optional
         Device for tensors. Default is None (uses coords device).
 
     Returns
@@ -739,25 +820,29 @@ def soft_voxelize_xy_coordinates(coords, grid_shape, voxel_size, device=None):
     return volumes
 
 
-def radial_profile_3d(data: torch.Tensor, center=None, return_r=False):
+def radial_profile_3d(
+    data: torch.Tensor,
+    center: tuple[float, float, float] | None = None,
+    return_r: bool = False,
+) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
     """
     Compute the radial average (spherical average) of a 3D volume.
 
     Parameters
     ----------
     data : torch.Tensor
-        3D tensor of shape (m, n, o)
-    center : tuple of floats, optional
+        3D tensor of shape (m, n, o).
+    center : tuple of float, optional
         Center of the radial profile. Defaults to the integer center of the volume (m//2, n//2, o//2).
-    return_r : bool, default False
-        If True, also return the radius indices.
+    return_r : bool, optional
+        If True, also return the radius indices. Default is False.
 
     Returns
     -------
     radialprofile : torch.Tensor
         Radial average.
     r : torch.Tensor, optional
-        Radius indices if return_r=True
+        Radius indices if return_r=True.
     """
     if data.ndim != 3:
         raise ValueError("Input data must be a 3D tensor.")
@@ -794,25 +879,29 @@ def radial_profile_3d(data: torch.Tensor, center=None, return_r=False):
         return radialprofile
 
 
-def radial_profile_2d(data: torch.Tensor, center=None, return_r=False):
+def radial_profile_2d(
+    data: torch.Tensor,
+    center: tuple[float, float] | None = None,
+    return_r: bool = False,
+) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
     """
     Compute the radial average (circular average) of a 2D image.
 
     Parameters
     ----------
     data : torch.Tensor
-        2D tensor of shape (m, n)
-    center : tuple of floats, optional
+        2D tensor of shape (m, n).
+    center : tuple of float, optional
         Center of the radial profile. Defaults to the integer center of the image (m//2, n//2).
-    return_r : bool, default False
-        If True, also return the radius indices.
+    return_r : bool, optional
+        If True, also return the radius indices. Default is False.
 
     Returns
     -------
     radialprofile : torch.Tensor
         Radial average.
     r : torch.Tensor, optional
-        Radius indices if return_r=True
+        Radius indices if return_r=True.
     """
     if data.ndim != 2:
         raise ValueError("Input data must be a 2D tensor.")
@@ -924,7 +1013,14 @@ def radial_profile_2d(data: torch.Tensor, center=None, return_r=False):
 #     return volume
 
 
-def nearest_index(x_arr, y_arr, z_arr, x_coord, y_coord, z_coord):
+def nearest_index(
+    x_arr: torch.Tensor,
+    y_arr: torch.Tensor,
+    z_arr: torch.Tensor,
+    x_coord: float,
+    y_coord: float,
+    z_coord: float,
+) -> tuple[int, int, int]:
     """
     Find the nearest grid indices to specified coordinates.
 
@@ -958,10 +1054,22 @@ def nearest_index(x_arr, y_arr, z_arr, x_coord, y_coord, z_coord):
     return xi, yi, zi
 
 
-def ball3d(N, d):
+def ball3d(N: int, d: float) -> torch.Tensor:
     """
     Generates a 3D tensor with a filled-in ball,
     centered at the DC index corresponding to fftshift.
+
+    Parameters
+    ----------
+    N : int
+        Size of the 3D tensor (N x N x N).
+    d : float
+        Diameter of the ball.
+
+    Returns
+    -------
+    ball : torch.Tensor
+        3D tensor with ones inside the ball, zeros outside.
     """
     x = torch.arange(N)
     y = torch.arange(N)
@@ -976,7 +1084,7 @@ def ball3d(N, d):
     return ball
 
 
-def disk2d(N, d):
+def disk2d(N: int, d: float) -> torch.Tensor:
     """
     Generates a 2D tensor with a filled-in disk,
     centered at the DC index corresponding to fftshift.
@@ -984,14 +1092,14 @@ def disk2d(N, d):
     Parameters
     ----------
     N : int
-        Size of the 2D tensor (N x N)
+        Size of the 2D tensor (N x N).
     d : float
-        Diameter of the disk
+        Diameter of the disk.
 
     Returns
     -------
     disk : torch.Tensor
-        2D tensor of shape (N, N) with ones inside the disk, zeros outside
+        2D tensor of shape (N, N) with ones inside the disk, zeros outside.
     """
     x = torch.arange(N)
     y = torch.arange(N)
@@ -1005,7 +1113,26 @@ def disk2d(N, d):
     return disk
 
 
-def downsample(images, bin_factor=2, method="fft"):
+def downsample(
+    images: torch.Tensor, bin_factor: int = 2, method: str = "fft"
+) -> torch.Tensor:
+    """
+    Downsample images using FFT or average pooling.
+
+    Parameters
+    ----------
+    images : torch.Tensor
+        Input images.
+    bin_factor : int, optional
+        Binning factor. Default is 2.
+    method : str, optional
+        Downsampling method ('fft' or 'avgpool'). Default is 'fft'.
+
+    Returns
+    -------
+    images_bin : torch.Tensor
+        Downsampled images.
+    """
     if method == "fft":
         N = images.shape[-1]
         n = N // bin_factor
@@ -1021,3 +1148,91 @@ def downsample(images, bin_factor=2, method="fft"):
         avgpool = torch.nn.AvgPool2d(bin_factor, stride=bin_factor)
         images_bin = avgpool(images) * bin_factor**2
     return images_bin
+
+
+def centered_pad(X: torch.Tensor, target_shape: Sequence[int]) -> torch.Tensor:
+    """
+    Pad a tensor to a target shape, symmetrically.
+
+    Parameters
+    ----------
+    X : torch.Tensor
+        Input tensor.
+    target_shape : Sequence of int
+        Target shape for padding.
+
+    Returns
+    -------
+    padded : torch.Tensor
+        Padded tensor.
+    """
+    pad = []
+    for size, tgt in zip(reversed(X.shape), reversed(target_shape)):
+        diff = tgt - size
+        pad.extend([diff // 2, diff - diff // 2])
+    return F.pad(X, pad)
+
+
+def pad_to_common_shape(
+    A: torch.Tensor, B: torch.Tensor
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """
+    Pad two tensors to a common shape.
+
+    Parameters
+    ----------
+    A, B : torch.Tensor
+        Input tensors.
+
+    Returns
+    -------
+    padded_A, padded_B : torch.Tensor
+        Padded tensors.
+    """
+    target = [max(a, b) for a, b in zip(A.shape, B.shape)]
+    return centered_pad(A, target), centered_pad(B, target)
+
+
+def radial_symmetrize(image: torch.Tensor, center: float | None = None) -> torch.Tensor:
+    """
+    Radially average a 2D image and map it back to a 2D image.
+
+    Parameters
+    ----------
+    image : torch.Tensor
+        (N, N) input image.
+    center : float, optional
+        Center of the radial average. Default is N // 2.
+
+    Returns
+    -------
+    image_ring : torch.Tensor
+        (N, N) radially averaged image.
+    """
+    assert image.ndim == 2
+    N, M = image.shape
+    assert N == M, "Image must be square"
+
+    device = image.device
+
+    if center is None:
+        center = N // 2
+
+    y, x = torch.meshgrid(
+        torch.arange(N, device=device), torch.arange(N, device=device), indexing="ij"
+    )
+
+    r = torch.sqrt((x - center) ** 2 + (y - center) ** 2)
+    r_int = r.long()
+
+    # Compute radial means
+    radial_sum = torch.bincount(r_int.flatten(), weights=image.flatten())
+
+    radial_count = torch.bincount(r_int.flatten())
+
+    radial_mean = radial_sum / radial_count
+
+    # Map back to 2D image
+    image_ring = radial_mean[r_int]
+
+    return image_ring

@@ -1,15 +1,19 @@
-from . import filters
-from .rotations import VolumeRotator, build_affine_matrix
+from __future__ import annotations
+
+
 import lightning as L
 import torch
-from .fft_tools import fft2, ifft2
 from rich.progress import track
+
+from . import filters
+from .fft_tools import fft2, ifft2
+from .rotations import VolumeRotator, build_affine_matrix
 
 rest_mass_energy = 511.0e3  # [eV]
 hc = 12.398e3  # [eV * Å]
 
 
-def energy_to_wavelength(energy):
+def energy_to_wavelength(energy: float) -> float:
     """
     Convert electron energy to de Broglie wavelength.
 
@@ -35,7 +39,7 @@ def energy_to_wavelength(energy):
     return hc / (ev * (ev + 2.0 * rest_mass_energy)) ** 0.5
 
 
-def interaction_parameter(energy):
+def interaction_parameter(energy: float) -> torch.Tensor:
     """
     Calculate the electron-specimen interaction parameter.
 
@@ -67,7 +71,7 @@ def interaction_parameter(energy):
     )
 
 
-def complex_potential(v, alpha=0.1):
+def complex_potential(v: torch.Tensor, alpha: float = 0.1) -> torch.Tensor:
     """
     Apply amplitude ratio to create complex potential.
 
@@ -103,16 +107,16 @@ def complex_potential(v, alpha=0.1):
 class Scattering(L.LightningModule):
     def __init__(
         self,
-        nxy,
-        pixel_size,
-        energy,
-        dose_per_angstrom,
-        scattering_model="multislice",
-        klim=None,
-        flip_curvature=False,
-        nz=None,
-        alpha=0.0,
-        progressbars=True,
+        nxy: int,
+        pixel_size: float,
+        energy: float,
+        dose_per_angstrom: float,
+        scattering_model: str = "multislice",
+        klim: float | None = None,
+        flip_curvature: bool = False,
+        nz: int | None = None,
+        alpha: float = 0.0,
+        progressbars: bool = True,
     ):
         """
         A scattering module to compute the 2D exitwave from a 3D scattering
@@ -152,7 +156,6 @@ class Scattering(L.LightningModule):
         -----
         .. [1] E. J. Kirkland, Advanced Computing in Electron Microscopy,
            Springer US, Boston, MA, 2010.
-
         """
         super().__init__()
         self.nxy = nxy
@@ -215,7 +218,7 @@ class Scattering(L.LightningModule):
         else:
             self.kmask = 1
 
-    def multislice(self, V):
+    def multislice(self, V: torch.Tensor) -> torch.Tensor:
         """
         Compute exit wave using multislice algorithm.
 
@@ -265,7 +268,7 @@ class Scattering(L.LightningModule):
             exitwave = ifft2(fft2(wv) * F * self.kmask)
         return exitwave
 
-    def rytov(self, V):
+    def rytov(self, V: torch.Tensor) -> torch.Tensor:
         """
         Compute exit wave using Rytov approximation.
 
@@ -300,7 +303,7 @@ class Scattering(L.LightningModule):
         exitwave = exitwave * self.dose_per_pixel**0.5
         return exitwave  # (B x X x Y)
 
-    def firstborn(self, V):
+    def firstborn(self, V: torch.Tensor) -> torch.Tensor:
         """
         Compute exit wave using first Born approximation.
 
@@ -337,7 +340,7 @@ class Scattering(L.LightningModule):
         exitwave *= self.dose_per_pixel**0.5
         return exitwave
 
-    def projection(self, V):
+    def projection(self, V: torch.Tensor) -> torch.Tensor:
         """
         Compute exit wave using projection approximation.
 
@@ -364,7 +367,7 @@ class Scattering(L.LightningModule):
         exitwave = (self.dose_per_pixel**0.5) * torch.exp(1j * self.sigma * V_sum)
         return exitwave
 
-    def ctf(self, V):
+    def ctf(self, V: torch.Tensor) -> torch.Tensor:
         """
         Compute projected potential for CTF-based imaging.
 
@@ -390,8 +393,10 @@ class Scattering(L.LightningModule):
         projection = 2 * self.sigma * torch.sum(V, 1)
         return projection
 
-    def forward(self, V):
+    def forward(self, V: torch.Tensor) -> torch.Tensor:
         """
+        Perform scattering on a batch of 3D potentials.
+
         V is batch of 3D real-valued potentials with shape (B x Z x X x Y), outputs
         a batch of 2D exitwaves with shape (B x Y x X). The CTF scattering model
         outputs projected potential instead of exitwave.
@@ -401,12 +406,12 @@ class Scattering(L.LightningModule):
 
         Parameters
         ----------
-        V : tensor
+        V : torch.Tensor
             Batch of 3D potentials.
 
         Returns
         -------
-        psi : tensor
+        psi : torch.Tensor
             Batch of 2D exitwaves / projected potentials.
         """
         if self.scattering_model == "multislice":
@@ -434,15 +439,15 @@ class IterativeScattering(L.LightningModule):
 
     def __init__(
         self,
-        nxy,
-        pixel_size,
-        energy,
-        dose_per_angstrom,
-        scattering_model="multislice",
-        klim=None,
-        flip_curvature=False,
-        alpha=0.0,
-        progressbars=True,
+        nxy: int,
+        pixel_size: float,
+        energy: float,
+        dose_per_angstrom: float,
+        scattering_model: str = "multislice",
+        klim: float | None = None,
+        flip_curvature: bool = False,
+        alpha: float = 0.0,
+        progressbars: bool = True,
     ):
         """
         Parameters
@@ -498,7 +503,7 @@ class IterativeScattering(L.LightningModule):
         self.register_buffer("F_step_real", F_step.real)
         self.register_buffer("F_step_imag", F_step.imag)
 
-    def _is_identity(self, theta_matrix):
+    def _is_identity(self, theta_matrix: torch.Tensor) -> bool:
         """Check if the affine matrix is identity (no rotation or translation)."""
         B = theta_matrix.shape[0]
         identity = (
@@ -508,7 +513,9 @@ class IterativeScattering(L.LightningModule):
         )
         return torch.allclose(theta_matrix, identity, atol=1e-6)
 
-    def _setup_tilt(self, V, theta_matrix):
+    def _setup_tilt(
+        self, V: torch.Tensor, theta_matrix: torch.Tensor
+    ) -> tuple[int, VolumeRotator]:
         """Helper to calculate rotation parameters and setup VolumeRotator."""
         B, Z, Y, X = V.shape
 
@@ -549,12 +556,17 @@ class IterativeScattering(L.LightningModule):
         nz_new = max(1, nz_new)
 
         rotator = VolumeRotator(
-            nz=Z, ny=Y, nx=X, origin="relion", padding_mode="reflection"
+            nz=Z,
+            ny=Y,
+            nx=X,
+            origin="relion",
+            padding_mode="reflection",
+            init_base_grid=False,  # sample_rotated_slices builds its own grid; base_grid would OOM for large volumes
         ).to(V.device)
 
         return nz_new, rotator
 
-    def _get_propagator(self, distance_slices):
+    def _get_propagator(self, distance_slices: float) -> torch.Tensor:
         """Compute the Fresnel propagator for a given distance in slices."""
         F = torch.exp(
             1j
@@ -566,7 +578,9 @@ class IterativeScattering(L.LightningModule):
         )
         return F
 
-    def multislice(self, V, theta_matrix, slice_batch_size: int = 1):
+    def multislice(
+        self, V: torch.Tensor, theta_matrix: torch.Tensor, slice_batch_size: int = 1
+    ) -> torch.Tensor:
         """
         Compute exit wave using iterative multislice on a transformed volume.
         """
@@ -630,7 +644,9 @@ class IterativeScattering(L.LightningModule):
             exitwave = ifft2(fft2(t * exitwave) * F * self.kmask)
         return exitwave
 
-    def projection(self, V, theta_matrix, slice_batch_size: int = 1):
+    def projection(
+        self, V: torch.Tensor, theta_matrix: torch.Tensor, slice_batch_size: int = 1
+    ) -> torch.Tensor:
         """
         Compute exit wave using iterative projection approximation on a transformed volume.
         """
@@ -685,7 +701,9 @@ class IterativeScattering(L.LightningModule):
         )
         return exitwave
 
-    def rytov(self, V, theta_matrix, slice_batch_size: int = 1):
+    def rytov(
+        self, V: torch.Tensor, theta_matrix: torch.Tensor, slice_batch_size: int = 1
+    ) -> torch.Tensor:
         """
         Compute exit wave using iterative Rytov approximation on a transformed volume.
         """
@@ -750,7 +768,9 @@ class IterativeScattering(L.LightningModule):
         exitwave *= self.dose_per_pixel**0.5
         return exitwave
 
-    def firstborn(self, V, theta_matrix, slice_batch_size: int = 1):
+    def firstborn(
+        self, V: torch.Tensor, theta_matrix: torch.Tensor, slice_batch_size: int = 1
+    ) -> torch.Tensor:
         """
         Compute exit wave using iterative first Born approximation on a transformed volume.
         """
@@ -811,7 +831,9 @@ class IterativeScattering(L.LightningModule):
         exitwave = (1 + 1j * self.sigma * total_scattered) * (self.dose_per_pixel**0.5)
         return exitwave
 
-    def ctf(self, V, theta_matrix, slice_batch_size: int = 1):
+    def ctf(
+        self, V: torch.Tensor, theta_matrix: torch.Tensor, slice_batch_size: int = 1
+    ) -> torch.Tensor:
         """
         Compute iterative projected potential (for CTF) with transformed sampling.
         """
@@ -862,8 +884,12 @@ class IterativeScattering(L.LightningModule):
 
         return 2 * self.sigma * total_potential
 
-    def forward(self, V, pose, slice_batch_size: int = 1):
+    def forward(
+        self, V: torch.Tensor, pose: float | torch.Tensor, slice_batch_size: int = 1
+    ) -> torch.Tensor:
         """
+        Forward pass for iterative scattering.
+
         Parameters
         ----------
         V : torch.Tensor

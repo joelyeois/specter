@@ -1,9 +1,15 @@
+from __future__ import annotations
+
 import torch
+import numpy as np
 from skimage.filters import butterworth
+
 from .fft_tools import fftn, ifftn
 
 
-def normalize_particles(particles, mask_diameter_pixels=None):
+def normalize_particles(
+    particles: torch.Tensor, mask_diameter_pixels: int | None = None
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Normalize particle images using masked mean and standard deviation.
 
@@ -45,7 +51,7 @@ def normalize_particles(particles, mask_diameter_pixels=None):
     return means, stds, normalized_particles
 
 
-def circle2d(N, d):
+def circle2d(N: int, d: int) -> torch.Tensor:
     """
     Generate a 2D binary mask of a filled circle.
 
@@ -73,7 +79,7 @@ def circle2d(N, d):
     return circle
 
 
-def butter(images):
+def butter(images: torch.Tensor | np.ndarray) -> torch.Tensor | np.ndarray:
     """
     Applies butterworth filter to 2D images.
 
@@ -81,14 +87,13 @@ def butter(images):
 
     Parameters
     ----------
-    images : 2D or 3D tensor or ndarray
-        Can be a single or a batch of 2D particles with shape (N, size, size).
+    images : torch.Tensor or np.ndarray
+        Can be a 2D single image (size, size) or a batch of 2D images (N, size, size).
 
     Returns
     -------
-    filtered : 2D or 3D tensor or ndarray
+    filtered : torch.Tensor or np.ndarray
         Butterworth filtered images.
-
     """
 
     istensor = False
@@ -100,6 +105,8 @@ def butter(images):
     if len(images.shape) == 3:
         channel_axis = 0
     elif len(images.shape) == 2:
+        channel_axis = None
+    else:
         channel_axis = None
 
     filtered = butterworth(
@@ -116,7 +123,9 @@ def butter(images):
         return filtered
 
 
-def apply_bfactor(volume, pixel_size, bfactor):
+def apply_bfactor(
+    volume: torch.Tensor, pixel_size: float, bfactor: float
+) -> torch.Tensor:
     """
     Apply B-factor blurring to a 3D scattering potential volume.
 
@@ -161,7 +170,9 @@ def apply_bfactor(volume, pixel_size, bfactor):
         return torch.real(newvolume)
 
 
-def chimera_gaussian_sigma_to_bfactor(sigma):
+def chimera_gaussian_sigma_to_bfactor(
+    sigma: float | torch.Tensor,
+) -> float | torch.Tensor:
     """
     Convert ChimeraX Gaussian width to B-factor.
 

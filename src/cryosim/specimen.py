@@ -1,5 +1,8 @@
-import torch
+from __future__ import annotations
+
 import lightning as L
+import torch
+
 from .crowding import CrowdWithDuplicates
 from .icemaker import Icemaker, NaiveIcemaker
 
@@ -41,17 +44,17 @@ class TomogramGenerator(L.LightningModule):
 
     def __init__(
         self,
-        pixel_size,
-        nz,
-        nxy,
-        scattering_potential=None,
-        crowd_min_distance=None,
-        crowd_max_distance_z=None,
-        ice_model=None,
-        ice_thickness=None,
-        water_air_interface=True,
-        progressbars=True,
-        chunk_size=None,
+        pixel_size: float,
+        nz: int,
+        nxy: int,
+        scattering_potential: torch.Tensor | None = None,
+        crowd_min_distance: float | None = None,
+        crowd_max_distance_z: float | None = None,
+        ice_model: str | None = None,
+        ice_thickness: float | None = None,
+        water_air_interface: bool = True,
+        progressbars: bool = True,
+        chunk_size: int | None = None,
     ):
         super().__init__()
         self.pixel_size = pixel_size
@@ -99,7 +102,7 @@ class TomogramGenerator(L.LightningModule):
         else:
             self.icemaker = None
 
-    def generate(self):
+    def generate(self) -> torch.Tensor:
         """
         Generate the populated 3D volume.
 
@@ -124,7 +127,7 @@ class TomogramGenerator(L.LightningModule):
                 if self.ice_model == "randomchoice":
                     ice = self.icemaker.generate_ice(device=device)
                 else:  # iterative
-                    ice = self.icemaker.generate_big_ice(V.shape).to(device)
+                    ice = self.icemaker.generate_big_ice_fast(V.shape).to(device)
 
                 # Combine with mask to avoid overwriting dense objects
                 # Using 10V as threshold for 'dense'

@@ -1,11 +1,15 @@
-#!/usr/bin/env python
+from __future__ import annotations
+
 import argparse
-import torch
-from torch.utils.data import DataLoader
-import lightning as L
-from cryosim.imagegenerator import ImageGenerator
-from lightning.pytorch.callbacks import BasePredictionWriter
 import os
+from typing import Any, Sequence
+
+import lightning as L
+import torch
+from lightning.pytorch.callbacks import BasePredictionWriter
+from torch.utils.data import DataLoader
+
+from cryosim.imagegenerator import ImageGenerator
 
 
 class CustomWriter(BasePredictionWriter):
@@ -27,11 +31,18 @@ class CustomWriter(BasePredictionWriter):
     output_dir : str
         Directory for saving output files.
     """
-    def __init__(self, output_dir, write_interval):
+
+    def __init__(self, output_dir: str, write_interval: str) -> None:
         super().__init__(write_interval)
         self.output_dir = output_dir
 
-    def write_on_epoch_end(self, trainer, pl_module, predictions, batch_indices):
+    def write_on_epoch_end(
+        self,
+        trainer: L.Trainer,
+        pl_module: L.LightningModule,
+        predictions: Sequence[Any],
+        batch_indices: Sequence[Any],
+    ) -> None:
         """
         Write predictions and batch indices to disk at epoch end.
 
@@ -70,7 +81,7 @@ class CustomWriter(BasePredictionWriter):
         )
 
 
-def str2bool(v):
+def str2bool(v: str | bool) -> bool:
     """
     Convert string representation to boolean value.
 

@@ -1,8 +1,16 @@
+from __future__ import annotations
+
+from typing import Sequence
+
 import torch
 from scipy.fft import next_fast_len
 
 
-def fft2(array, dim=(-1, -2), shift=False):
+def fft2(
+    array: torch.Tensor,
+    dim: tuple[int, int] | Sequence[int] = (-1, -2),
+    shift: bool = False,
+) -> torch.Tensor:
     """
     Compute 2D fast Fourier transform.
 
@@ -10,7 +18,7 @@ def fft2(array, dim=(-1, -2), shift=False):
     ----------
     array : torch.Tensor
         Input array.
-    dim : tuple of int, optional
+    dim : tuple of int or Sequence of int, optional
         Dimensions along which to compute the FFT. Default is (-1, -2).
     shift : bool, optional
         If True, applies fftshift before and after the FFT to center
@@ -23,12 +31,16 @@ def fft2(array, dim=(-1, -2), shift=False):
     """
     if shift:
         return torch.fft.fftshift(
-            torch.fft.fft2(torch.fft.ifftshift(array, dim=dim)), dim=dim
+            torch.fft.fft2(torch.fft.ifftshift(array, dim=dim), dim=dim), dim=dim
         )
     return torch.fft.fft2(array, dim=dim)
 
 
-def ifft2(array, dim=(-1, -2), shift=False):
+def ifft2(
+    array: torch.Tensor,
+    dim: tuple[int, int] | Sequence[int] = (-1, -2),
+    shift: bool = False,
+) -> torch.Tensor:
     """
     Compute 2D inverse fast Fourier transform.
 
@@ -36,7 +48,7 @@ def ifft2(array, dim=(-1, -2), shift=False):
     ----------
     array : torch.Tensor
         Input array in Fourier space.
-    dim : tuple of int, optional
+    dim : tuple of int or Sequence of int, optional
         Dimensions along which to compute the inverse FFT. Default is (-1, -2).
     shift : bool, optional
         If True, applies fftshift before and after the inverse FFT to center
@@ -49,12 +61,16 @@ def ifft2(array, dim=(-1, -2), shift=False):
     """
     if shift:
         return torch.fft.fftshift(
-            torch.fft.ifft2(torch.fft.ifftshift(array, dim=dim)), dim=dim
+            torch.fft.ifft2(torch.fft.ifftshift(array, dim=dim), dim=dim), dim=dim
         )
     return torch.fft.ifft2(array, dim=dim)
 
 
-def fft3(array, dim=(-1, -2, -3), shift=False):
+def fft3(
+    array: torch.Tensor,
+    dim: tuple[int, int, int] | Sequence[int] = (-1, -2, -3),
+    shift: bool = False,
+) -> torch.Tensor:
     """
     Compute 3D fast Fourier transform.
 
@@ -62,7 +78,7 @@ def fft3(array, dim=(-1, -2, -3), shift=False):
     ----------
     array : torch.Tensor
         Input 3D array.
-    dim : tuple of int, optional
+    dim : tuple of int or Sequence of int, optional
         Dimensions along which to compute the FFT. Default is (-1, -2, -3).
     shift : bool, optional
         If True, applies fftshift before and after the FFT to center
@@ -80,7 +96,11 @@ def fft3(array, dim=(-1, -2, -3), shift=False):
     return torch.fft.fftn(array, dim=dim)
 
 
-def ifft3(array, dim=(-1, -2, -3), shift=False):
+def ifft3(
+    array: torch.Tensor,
+    dim: tuple[int, int, int] | Sequence[int] = (-1, -2, -3),
+    shift: bool = False,
+) -> torch.Tensor:
     """
     Compute 3D inverse fast Fourier transform.
 
@@ -88,7 +108,7 @@ def ifft3(array, dim=(-1, -2, -3), shift=False):
     ----------
     array : torch.Tensor
         Input 3D array in Fourier space.
-    dim : tuple of int, optional
+    dim : tuple of int or Sequence of int, optional
         Dimensions along which to compute the inverse FFT. Default is (-1, -2, -3).
     shift : bool, optional
         If True, applies fftshift before and after the inverse FFT to center
@@ -106,7 +126,9 @@ def ifft3(array, dim=(-1, -2, -3), shift=False):
     return torch.fft.ifftn(array, dim=dim)
 
 
-def fftn(array, dim=None, shift=False):
+def fftn(
+    array: torch.Tensor, dim: Sequence[int] | None = None, shift: bool = False
+) -> torch.Tensor:
     """
     Compute N-dimensional fast Fourier transform.
 
@@ -114,7 +136,7 @@ def fftn(array, dim=None, shift=False):
     ----------
     array : torch.Tensor
         Input N-dimensional array.
-    dim : tuple of int or None, optional
+    dim : Sequence of int or None, optional
         Dimensions along which to compute the FFT. If None, computes FFT
         over all dimensions. Default is None.
     shift : bool, optional
@@ -133,15 +155,17 @@ def fftn(array, dim=None, shift=False):
     return torch.fft.fftn(array, dim=dim)
 
 
-def ifftn(array, dim=None, shift=False):
+def ifftn(
+    array: torch.Tensor, dim: Sequence[int] | None = None, shift: bool = False
+) -> torch.Tensor:
     """
     Compute N-dimensional inverse fast Fourier transform.
 
     Parameters
     ----------
     array : torch.Tensor
-        Input N-dimens dimensional array in Fourier space.
-    dim : tuple of int or None, optional
+        Input N-dimensional array in Fourier space.
+    dim : Sequence of int or None, optional
         Dimensions along which to compute the inverse FFT. If None, computes
         inverse FFT over all dimensions. Default is None.
     shift : bool, optional
@@ -160,7 +184,12 @@ def ifftn(array, dim=None, shift=False):
     return torch.fft.ifftn(array, dim=dim)
 
 
-def fftconvolve(in1, in2, mode="full", axes=None):
+def fftconvolve(
+    in1: torch.Tensor,
+    in2: torch.Tensor,
+    mode: str = "full",
+    axes: int | Sequence[int] | None = None,
+) -> torch.Tensor:
     """From scipy fftconvolve.
 
     Convolve two N-dimensional arrays using FFT.
@@ -177,9 +206,9 @@ def fftconvolve(in1, in2, mode="full", axes=None):
 
     Parameters
     ----------
-    in1 : torch.tensor
+    in1 : torch.Tensor
         First input.
-    in2 : torch.tensor
+    in2 : torch.Tensor
         Second input. Should have the same number of dimensions as `in1`.
     mode : str {'full', 'valid', 'same'}, optional
         A string indicating the size of the output:
@@ -200,10 +229,9 @@ def fftconvolve(in1, in2, mode="full", axes=None):
 
     Returns
     -------
-    out : array
+    out : torch.Tensor
         An N-dimensional array containing a subset of the discrete linear
         convolution of `in1` with `in2`.
-
     """
 
     if in1.ndim == in2.ndim == 0:  # scalar inputs
@@ -234,7 +262,13 @@ def fftconvolve(in1, in2, mode="full", axes=None):
     return _apply_conv_mode(ret, s1, s2, mode, axes)
 
 
-def _freq_domain_conv(in1, in2, axes, shape, calc_fast_len=False):
+def _freq_domain_conv(
+    in1: torch.Tensor,
+    in2: torch.Tensor,
+    axes: list[int],
+    shape: list[int],
+    calc_fast_len: bool = False,
+) -> torch.Tensor:
     """From scipy.signal._signaltools
 
     Convolve two arrays in the frequency domain.
@@ -248,13 +282,13 @@ def _freq_domain_conv(in1, in2, axes, shape, calc_fast_len=False):
 
     Parameters
     ----------
-    in1 : torch.tensor
+    in1 : torch.Tensor
         First input.
-    in2 : torch.tensor
+    in2 : torch.Tensor
         Second input. Should have the same number of dimensions as `in1`.
-    axes : array_like of ints
+    axes : list of int
         Axes over which to compute the FFTs.
-    shape : array_like of ints
+    shape : list of int
         The sizes of the FFTs.
     calc_fast_len : bool, optional
         If `True`, set each value of `shape` to the next fast FFT length.
@@ -262,16 +296,16 @@ def _freq_domain_conv(in1, in2, axes, shape, calc_fast_len=False):
 
     Returns
     -------
-    out : torch.tensor
+    out : torch.Tensor
         An N-dimensional array containing the discrete linear convolution of
         `in1` with `in2`.
-
     """
     if not len(axes):
         return in1 * in2
 
     complex_result = torch.is_complex(in1) or torch.is_complex(in2)
 
+    fshape: list[int]
     if calc_fast_len:
         # Speed up FFT by padding to optimal size.
         fshape = [next_fast_len(shape[a], not complex_result) for a in axes]
@@ -295,7 +329,9 @@ def _freq_domain_conv(in1, in2, axes, shape, calc_fast_len=False):
     return ret
 
 
-def _centered(arr, newshape):
+def _centered(
+    arr: torch.Tensor, newshape: Sequence[int] | torch.Tensor
+) -> torch.Tensor:
     """From scipy.signal._signaltools"""
     # Return the center newshape portion of the array.
     newshape = torch.as_tensor(newshape)
@@ -306,7 +342,9 @@ def _centered(arr, newshape):
     return arr[tuple(myslice)]
 
 
-def _apply_conv_mode(ret, s1, s2, mode, axes):
+def _apply_conv_mode(
+    ret: torch.Tensor, s1: list[int], s2: list[int], mode: str, axes: list[int]
+) -> torch.Tensor:
     """From scipy.signal._signaltools
 
     Calculate the convolution result shape based on the `mode` argument.
@@ -315,7 +353,7 @@ def _apply_conv_mode(ret, s1, s2, mode, axes):
 
     Parameters
     ----------
-    ret : torch.tensor
+    ret : torch.Tensor
         The result array, with the appropriate shape for the 'full' mode.
     s1 : list of int
         The shape of the first input.
@@ -324,14 +362,13 @@ def _apply_conv_mode(ret, s1, s2, mode, axes):
     mode : str {'full', 'valid', 'same'}
         A string indicating the size of the output.
         See the documentation `fftconvolve` for more information.
-    axes : list of ints
+    axes : list of int
         Axes over which to compute the convolution.
 
     Returns
     -------
-    ret : array
+    ret : torch.Tensor
         A copy of `res`, sliced to the correct size for the given `mode`.
-
     """
     if mode == "full":
         return ret.clone()
@@ -344,4 +381,4 @@ def _apply_conv_mode(ret, s1, s2, mode, axes):
         ]
         return _centered(ret, shape_valid).clone()
     else:
-        raise ValueError("acceptable mode flags are 'valid'," " 'same', or 'full'")
+        raise ValueError("acceptable mode flags are 'valid', 'same', or 'full'")

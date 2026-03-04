@@ -1,28 +1,38 @@
-import os
-from .atom import atom_number
-import torch
-import requests
+from __future__ import annotations
+
 import gzip
 import io
-from scipy.spatial import ConvexHull
-from scipy.spatial.distance import pdist
+import os
+import warnings
+from typing import TYPE_CHECKING
 
 import biotite.structure.io as strucio
 import numpy as np
-
-from rich.progress import track
-
-from Bio.PDB.MMCIFParser import MMCIFParser
+import requests
+import torch
 from Bio.PDB import PDBParser
+from Bio.PDB.MMCIFParser import MMCIFParser
 from Bio.PDB.PDBExceptions import PDBConstructionWarning  # correct import
-import warnings
+from rich.progress import track
+from scipy.spatial import ConvexHull
+from scipy.spatial.distance import pdist
+
+if TYPE_CHECKING:
+    from Bio.PDB.Structure import Structure
+
+from .atom import atom_number
 
 # Suppress only PDBConstructionWarnings
 warnings.simplefilter("ignore", PDBConstructionWarning)
 
 
 class PDB:
-    def __init__(self, pdb_source, assembly=True, savefolder="../pdb-data/"):
+    def __init__(
+        self,
+        pdb_source: str,
+        assembly: bool = True,
+        savefolder: str = "../pdb-data/",
+    ) -> None:
         """
         Create a PDB object from either a PDB ID or a local file path.
 
@@ -36,7 +46,7 @@ class PDB:
             Default is True.
         savefolder : str, optional
             Folder to store downloaded PDB/mmCIF files. Default is '../pdb-data/'.
-        
+
         Attributes
         ----------
         pdb_id : str
@@ -88,7 +98,12 @@ class PDB:
         self.max_diameter = PDB.estimate_max_diameter(self.coordinates)
 
     @staticmethod
-    def fetch_pdb_file(pdb_id, ext="cif", savefolder="../pdb-data/", assembly=True):
+    def fetch_pdb_file(
+        pdb_id: str,
+        ext: str = "cif",
+        savefolder: str = "../pdb-data/",
+        assembly: bool | int = True,
+    ) -> str:
         """
         Download a PDB file and save it in a given location.
 
@@ -152,7 +167,7 @@ class PDB:
         return file_path
 
     @staticmethod
-    def get_available_assemblies(pdb_id):
+    def get_available_assemblies(pdb_id: str) -> list[str]:
         """
         Return a list of available biological assembly IDs for a PDB entry.
 
@@ -185,7 +200,7 @@ class PDB:
             return []
 
     @staticmethod
-    def get_pdb_structure(filepath):
+    def get_pdb_structure(filepath: str) -> Structure:
         """
         Parse a PDB or mmCIF file and return the structure object.
 
@@ -215,7 +230,9 @@ class PDB:
         return structure
 
     @staticmethod
-    def get_atoms_and_coordinates(structure):
+    def get_atoms_and_coordinates(
+        structure: Structure | str,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Extract atomic elements and coordinates from PDB structure.
 
@@ -259,7 +276,7 @@ class PDB:
         return elements, coords
 
     @staticmethod
-    def center_of_particle(coords):
+    def center_of_particle(coords: torch.Tensor) -> torch.Tensor:
         """
         Return a particle's geometric center.
 
@@ -277,7 +294,7 @@ class PDB:
         return center
 
     @staticmethod
-    def center_coordinates(coords):
+    def center_coordinates(coords: torch.Tensor) -> torch.Tensor:
         """
         Centers coordinates on its geometric center.
 
@@ -296,13 +313,13 @@ class PDB:
         return centered_coordinates
 
     @staticmethod
-    def estimate_max_diameter(coordinates):
+    def estimate_max_diameter(coordinates: torch.Tensor) -> float:
         """
         Estimate the maximum diameter of a structure using convex hull.
 
         Parameters
         ----------
-        coordinates : np.ndarray or torch.Tensor
+        coordinates : torch.Tensor
             Atomic coordinates with shape (N, 3).
 
         Returns
@@ -396,7 +413,9 @@ class PDB:
 #         return torch.from_numpy(elements), torch.from_numpy(coords)
 
 
-def write_xyz_file(input_filename, output_filename, comment=""):
+def write_xyz_file(
+    input_filename: str, output_filename: str, comment: str = ""
+) -> None:
     """
     Write atomic structure to standard XYZ file format.
 

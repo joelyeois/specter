@@ -1,5 +1,9 @@
-import torch
+from __future__ import annotations
+
+from typing import Sequence
+
 import numpy as np
+import torch
 
 ELEMENT_SYMBOLS = np.array(
     [
@@ -220,7 +224,7 @@ ATOMIC_MASSES = torch.tensor(
 )
 
 
-def atom_symbol(z):
+def atom_symbol(z: int | Sequence[int] | torch.Tensor) -> np.ndarray:
     """
     Convert atomic numbers to element symbols.
 
@@ -245,7 +249,7 @@ def atom_symbol(z):
     return ELEMENT_SYMBOLS[z]
 
 
-def atom_number(symbols):
+def atom_number(symbols: str | Sequence[str] | np.ndarray) -> torch.Tensor:
     """
     Convert element symbols to atomic numbers using ELEMENT_SYMBOLS array.
 
@@ -272,7 +276,9 @@ def atom_number(symbols):
     return torch.tensor(numbers, dtype=torch.long)
 
 
-def atom_mass(x):
+def atom_mass(
+    x: str | int | Sequence[str] | Sequence[int] | np.ndarray | torch.Tensor,
+) -> torch.Tensor:
     """
     Return atomic mass of atoms.
 

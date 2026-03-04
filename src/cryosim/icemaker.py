@@ -1,15 +1,18 @@
+from __future__ import annotations
+
+import os
+from typing import Literal, Sequence
+
 import lightning as L
 import torch
 import torch.nn.functional as F
-import os
 from rich.progress import track
-
 from torchinterp1d import interp1d
 
 from . import pdbtools, potential
-from .array_utils import grid_3d, radial_grid_3d, real_to_kgrid_3d, radial_profile_3d
-from .fft_tools import fftconvolve, fft3
+from .array_utils import grid_3d, radial_grid_3d, radial_profile_3d, real_to_kgrid_3d
 from .atom import kirkland_atomic_potential_3d, lobato_atomic_potential_3d
+from .fft_tools import fft3, fftconvolve
 
 avogadro = 6.02214076e23
 density_of_amorphous_ice = 0.94  # [g/cm3]
@@ -19,7 +22,7 @@ ndensity_of_amorphous_ice = (
 )  # [particles / Å³]
 
 
-def rfftn(array):
+def rfftn(array: torch.Tensor) -> torch.Tensor:
     """
     Compute N-dimensional real-input Fourier transform with centering.
 
@@ -43,7 +46,9 @@ def rfftn(array):
     )
 
 
-def torch_peak_local_max(image, min_distance=1, num_peaks=None):
+def torch_peak_local_max(
+    image: torch.Tensor, min_distance: int = 1, num_peaks: int | None = None
+) -> torch.LongTensor:
     """
     Find local maxima in batched 3D images and return fixed number of peaks per batch.
 
@@ -122,14 +127,14 @@ class Icemaker(L.LightningModule):
 
     def __init__(
         self,
-        dx=0.5,
-        n=200,
-        nz=None,
-        chunk_size=None,
-        progressbars=True,
-        parameterization="kirkland",
-        min_distance=1.9,
-        correction_factor=None,
+        dx: float = 0.5,
+        n: int = 200,
+        nz: int | None = None,
+        chunk_size: int | None = None,
+        progressbars: bool = True,
+        parameterization: str = "kirkland",
+        min_distance: float = 1.9,
+        correction_factor: float | None = None,
     ):
         super().__init__()
 
@@ -193,7 +198,13 @@ class Icemaker(L.LightningModule):
 
         self.register_buffer("ice_kernel", self.create_ice_kernel())
 
-    def get_mdsim(self, filepath, trim_size=100, startframe=10, endframe=101):
+    def get_mdsim(
+        self,
+        filepath: str,
+        trim_size: int = 100,
+        startframe: int = 10,
+        endframe: int = 101,
+    ) -> None:
         """
         Load MD simulation dump and convert atomic coordinates into voxel grid.
 
@@ -237,7 +248,7 @@ class Icemaker(L.LightningModule):
             self.mdsim_ice_coordinates.append(centered_coords)
         self.mdsim_ice_deltas = torch.stack(mdsim_ice_deltas)
 
-    def get_mdsim_file(self, filepath):
+    def get_mdsim_file(self, filepath: str) -> None:
         """
         Read MD simulation dump file into memory and find timestep indices.
 
@@ -254,8 +265,11 @@ class Icemaker(L.LightningModule):
         ]
 
     def get_coordinates_from_frame(
-        self, start_line_number, lines=None, no_atoms=128000
-    ):
+        self,
+        start_line_number: int,
+        lines: list[str] | None = None,
+        no_atoms: int = 128000,
+    ) -> torch.Tensor:
         """
         Parse atom coordinates from a given frame in MD dump.
 
@@ -284,7 +298,9 @@ class Icemaker(L.LightningModule):
             coords[i, 2] = float(z)
         return coords
 
-    def trim_coordinates(self, coords, trim_size=100):
+    def trim_coordinates(
+        self, coords: torch.Tensor, trim_size: float = 100
+    ) -> torch.Tensor:
         """
         Trim coordinates to a cube of given size centered at origin.
 
@@ -311,7 +327,9 @@ class Icemaker(L.LightningModule):
         trimmed_coords = torch.stack(trimmed_coords)
         return trimmed_coords
 
-    def get_mdsim_averaged_f_kernel(self, filepath, source="torch"):
+    def get_mdsim_averaged_f_kernel(
+        self, filepath: str, source: Literal["dump", "torch"] = "torch"
+    ) -> None:
         """
         Compute or load the 3D Fourier amplitude of the ice volume.
 
@@ -339,7 +357,7 @@ class Icemaker(L.LightningModule):
         elif source == "torch":
             self.mdsim_ice_deltas_f = torch.load(filepath).to(self.device)
 
-    def get_mdsim_f_radial_avg(self, saved_data_path=None):
+    def get_mdsim_f_radial_avg(self, saved_data_path: str | None = None) -> None:
         """
         Compute or load radial average of MD simulation Fourier amplitudes.
 
@@ -358,7 +376,7 @@ class Icemaker(L.LightningModule):
         mdsim_radial_k = torch.arange(len(self.mdsim_f_radial_avg)) * self.mdsim_dk
         self.register_buffer("mdsim_radial_k", mdsim_radial_k)
 
-    def create_initial_ice_volume(self, batchsize=1):
+    def create_initial_ice_volume(self, batchsize: int = 1) -> torch.Tensor:
         """
         Create a random initial 3D ice volume with specified number of molecules.
 
@@ -394,7 +412,7 @@ class Icemaker(L.LightningModule):
         ice_vol_init = ice_vol_init.view(batchsize, self.nz, self.n, self.n)
         return ice_vol_init
 
-    def interpolate_mdsim_f_kernel(self):
+    def interpolate_mdsim_f_kernel(self) -> None:
         """
         Generate a 3D Fourier amplitude kernel for ice generation.
 
@@ -428,12 +446,12 @@ class Icemaker(L.LightningModule):
 
     def generate_ice_deltas(
         self,
-        niter=5,
-        min_distance=None,
-        add_extra_molecules=True,
-        batchsize=1,
-        reduce_fraction=1.0,
-    ):
+        niter: int = 5,
+        min_distance: float | None = None,
+        add_extra_molecules: bool = True,
+        batchsize: int = 1,
+        reduce_fraction: float = 1.0,
+    ) -> None:
         """
         Iteratively generate ice volume using Fourier amplitude kernel.
 
@@ -540,7 +558,7 @@ class Icemaker(L.LightningModule):
         self.frob_norm = torch.tensor(self.frob_norm)
         self.n_extra_atoms = torch.tensor(self.n_extra_atoms)
 
-    def create_ice_kernel(self):
+    def create_ice_kernel(self, dx: float | None = None) -> torch.Tensor:
         """
         Create the atomic potential kernel for ice atoms.
 
@@ -553,7 +571,9 @@ class Icemaker(L.LightningModule):
             Potential kernel volume, downsampled to simulation grid.
         """
         # create super-sampled (ss) coordinate system
-        ssn, ssdx, ssf = potential.compute_supersampling_parameters(self.dx)
+        if dx is None:
+            dx = self.dx
+        ssn, ssdx, ssf = potential.compute_supersampling_parameters(dx)
         # set original convention to torch to avoid singularity at origin.
         sR = radial_grid_3d(ssn, ssdx, convention="torch")
 
@@ -591,9 +611,11 @@ class Icemaker(L.LightningModule):
             dkz = k_xyz[0, 0, 1] - k_xyz[0, 0, 0]
             pot = -torch.abs(fft3(s1_f, shift=True)) * dkx * dky * dkz  # need to negate
 
-        return avgpool3d(pot[None, None]).squeeze() * self.dx
+        return avgpool3d(pot[None, None]).squeeze() * dx
 
-    def generate_ice(self, batchsize=1, reduce_fraction=1.0):
+    def generate_ice(
+        self, batchsize: int = 1, reduce_fraction: float = 1.0
+    ) -> torch.Tensor:
         """
         Generate ice volumes by running the iterative algorithm and convolving.
 
@@ -629,7 +651,7 @@ class Icemaker(L.LightningModule):
         )
         return self.icecubes
 
-    def irfftn(self, array):
+    def irfftn(self, array: torch.Tensor) -> torch.Tensor:
         """
         Compute inverse N-dimensional real Fourier transform with centering.
 
@@ -654,7 +676,9 @@ class Icemaker(L.LightningModule):
             dim=(-3, -2, -1),
         )
 
-    def generate_big_ice(self, shape, num_unique=8):
+    def generate_big_ice(
+        self, shape: Sequence[int], num_unique: int = 8, bin_factor: int = 1
+    ) -> torch.Tensor:
         """
         Generate a large ice volume by stitching smaller generated blocks.
 
@@ -664,31 +688,77 @@ class Icemaker(L.LightningModule):
         ----------
         shape : tuple of int
             Target shape (B, nz, ny, nx).
+        bin_factor : int, optional
+            Integer 3D binning factor applied to block deltas and kernel before
+            assembly/convolution. Default is 1 (no binning).
 
         Returns
         -------
         big_ice : torch.Tensor
             Large ice volume.
         """
+        if not isinstance(bin_factor, int) or bin_factor < 1:
+            raise ValueError("bin_factor must be an integer >= 1")
+
         B, nz, ny, nx = shape
-        num_z = int(torch.ceil(torch.as_tensor(nz) / self.nz))
-        num_y = int(torch.ceil(torch.as_tensor(ny) / self.n))
-        num_x = int(torch.ceil(torch.as_tensor(nx) / self.n))
-        N_blocks = B * num_z * num_y * num_x
-        num_blocks_per_B = num_z * num_y * num_x
+        if bin_factor > 1:
+            target_shape = (
+                B,
+                int(torch.ceil(torch.as_tensor(nz) / bin_factor)),
+                int(torch.ceil(torch.as_tensor(ny) / bin_factor)),
+                int(torch.ceil(torch.as_tensor(nx) / bin_factor)),
+            )
+            print(
+                f"bin_factor = {bin_factor}, outputing target shape of {target_shape}"
+            )
+        else:
+            target_shape = shape
 
-        # generate unique blocks
-        if num_unique > N_blocks:
-            num_unique = N_blocks
-
-        self.generate_ice_deltas(batchsize=8)
+        print("Generating ice deltas.")
+        self.generate_ice_deltas(batchsize=num_unique)
         icedeltas = self.current_icedeltas.cpu()
 
         # clean up faces of the ice blocks
+        print("Replacing outer faces of ice cubes.")
         icedeltas = replace_outer_faces(icedeltas)
 
+        if bin_factor > 1:
+            pool_scale = bin_factor**3
+            icedeltas = (
+                F.avg_pool3d(
+                    icedeltas.unsqueeze(1),
+                    kernel_size=bin_factor,
+                    stride=bin_factor,
+                ).squeeze(1)
+                * pool_scale
+            )
+
+        block_nz, block_ny, block_nx = icedeltas.shape[-3:]
+        target_nz, target_ny, target_nx = target_shape[1:]
+        num_z = int(torch.ceil(torch.as_tensor(target_nz) / block_nz))
+        num_y = int(torch.ceil(torch.as_tensor(target_ny) / block_ny))
+        num_x = int(torch.ceil(torch.as_tensor(target_nx) / block_nx))
+        N_blocks = B * num_z * num_y * num_x
+        num_blocks_per_B = num_z * num_y * num_x
+
         # assemble into big ice
-        big_ice = assemble_volume_randomized(icedeltas, shape)
+        print("Assembling ice deltas into large volume.")
+        big_ice = assemble_volume_randomized(icedeltas, target_shape)
+
+        if bin_factor > 1:
+            pool_scale = bin_factor**3
+            conv_kernel = (
+                F.avg_pool3d(
+                    self.ice_kernel.unsqueeze(0).unsqueeze(0),
+                    kernel_size=bin_factor,
+                    stride=bin_factor,
+                )
+                .squeeze(0)
+                .squeeze(0)
+                * pool_scale
+            )
+        else:
+            conv_kernel = self.ice_kernel
 
         # We can iterate over blocks, extract them, convolve, and put them back.
         # To vectorize, we can process 'chunk_size' blocks at a time.
@@ -718,9 +788,9 @@ class Icemaker(L.LightningModule):
                 b, z, y, x = ib[j], iz[j], iy[j], ix[j]
                 block = big_ice[
                     b,
-                    z * self.nz : (z + 1) * self.nz,
-                    y * self.n : (y + 1) * self.n,
-                    x * self.n : (x + 1) * self.n,
+                    z * block_nz : (z + 1) * block_nz,
+                    y * block_ny : (y + 1) * block_ny,
+                    x * block_nx : (x + 1) * block_nx,
                 ]
                 blocks.append(block)
 
@@ -730,7 +800,7 @@ class Icemaker(L.LightningModule):
             # Convolve
             # ice_kernel shape: (nz, n, n) -> (1, nz, n, n)
             convolved_batch = fftconvolve(
-                batch, self.ice_kernel.unsqueeze(0), mode="same", axes=(-3, -2, -1)
+                batch, conv_kernel.unsqueeze(0), mode="same", axes=(-3, -2, -1)
             )
 
             # Put back
@@ -741,13 +811,13 @@ class Icemaker(L.LightningModule):
                 b, z, y, x = ib[j], iz[j], iy[j], ix[j]
                 big_ice[
                     b,
-                    z * self.nz : (z + 1) * self.nz,
-                    y * self.n : (y + 1) * self.n,
-                    x * self.n : (x + 1) * self.n,
+                    z * block_nz : (z + 1) * block_nz,
+                    y * block_ny : (y + 1) * block_ny,
+                    x * block_nx : (x + 1) * block_nx,
                 ] = convolved_batch[j]
-        return big_ice[:B, :nz, :ny, :nx]
+        return big_ice[:B, :target_nz, :target_ny, :target_nx]
 
-    def generate_big_ice_old(self, shape):
+    def generate_big_ice_old(self, shape: Sequence[int]) -> torch.Tensor:
         """
         Generate a large ice volume by stitching smaller generated blocks.
 
@@ -913,6 +983,89 @@ class Icemaker(L.LightningModule):
 
         return big_ice[:B, :nz, :ny, :nx]
 
+    def generate_big_ice_fast(
+        self, shape: Sequence[int], num_unique: int = 8, bin_factor: int = 1
+    ) -> torch.Tensor:
+        """
+        Generate a large ice volume from a bank of pre-convolved unique cubes.
+
+        Workflow:
+        1) generate `num_unique` ice delta cubes
+        2) replace outer faces for boundary robustness
+        3) convolve all unique cubes in one batch with `self.ice_kernel`
+        4) bin down the convolved cubes (sum-binning if `bin_factor > 1`)
+        5) assemble a large volume by randomized block tiling
+
+        Parameters
+        ----------
+        shape : tuple of int
+            Target shape (B, nz, ny, nx).
+        num_unique : int, optional
+            Number of unique cubes to generate. Default is 8.
+        bin_factor : int, optional
+            Integer 3D binning factor applied after convolution.
+            Default is 1 (no binning).
+
+        Returns
+        -------
+        big_ice : torch.Tensor
+            Generated large ice volume.
+        """
+        if not isinstance(bin_factor, int) or bin_factor < 1:
+            raise ValueError("bin_factor must be an integer >= 1")
+        if not isinstance(num_unique, int) or num_unique < 1:
+            raise ValueError("num_unique must be an integer >= 1")
+
+        B, nz, ny, nx = shape
+        if bin_factor > 1:
+            target_shape = (
+                B,
+                int(torch.ceil(torch.as_tensor(nz) / bin_factor)),
+                int(torch.ceil(torch.as_tensor(ny) / bin_factor)),
+                int(torch.ceil(torch.as_tensor(nx) / bin_factor)),
+            )
+            print(
+                f"bin_factor = {bin_factor}, outputing target shape of {target_shape}"
+            )
+            print(f"Recomputing ice kernal at {self.dx * bin_factor} A pixel size.")
+            ice_kernel = (self.create_ice_kernel(self.dx * bin_factor)).to(
+                self.ice_kernel.device
+            )
+        else:
+            target_shape = shape
+            ice_kernel = self.ice_kernel
+
+        # 1) generate unique delta cubes
+        self.generate_ice_deltas(batchsize=num_unique)
+        icedeltas = self.current_icedeltas.cpu()
+
+        # 2) clean cube faces
+        icedeltas = replace_outer_faces(icedeltas)
+
+        # 3) batched convolution of all unique cubes
+        convolved = fftconvolve(
+            icedeltas.to(ice_kernel.device),
+            ice_kernel.unsqueeze(0),
+            mode="same",
+            axes=(-3, -2, -1),
+        ).cpu()
+
+        # 4) bin down convolved cubes
+        if bin_factor > 1:
+            pool_scale = bin_factor**3
+            convolved = (
+                F.avg_pool3d(
+                    convolved.unsqueeze(1),
+                    kernel_size=bin_factor,
+                    stride=bin_factor,
+                ).squeeze(1)
+                * pool_scale
+            )
+
+        # 5) randomized assembly into requested binned shape
+        big_ice = assemble_volume_randomized(convolved, target_shape)
+        return big_ice[:B, : target_shape[1], : target_shape[2], : target_shape[3]]
+
 
 class NaiveIcemaker(L.LightningModule):
     """
@@ -933,7 +1086,9 @@ class NaiveIcemaker(L.LightningModule):
         Whether to show progress bars. Default is True.
     """
 
-    def __init__(self, dx, n, nz=None, progressbars=True):
+    def __init__(
+        self, dx: float, n: int, nz: int | None = None, progressbars: bool = True
+    ):
         super().__init__()
 
         self.dx = dx
@@ -962,7 +1117,7 @@ class NaiveIcemaker(L.LightningModule):
 
         self.progressbars = progressbars
 
-    def create_initial_ice_volume(self):
+    def create_initial_ice_volume(self) -> torch.Tensor:
         """
         Create initial ice volume with randomly placed molecules.
 
@@ -986,7 +1141,7 @@ class NaiveIcemaker(L.LightningModule):
         ice_vol_init = ice_vol_init.reshape(self.nz, self.n, self.n)  # z, y, x
         return ice_vol_init
 
-    def create_ice_kernel(self, sn=28):
+    def create_ice_kernel(self, sn: int = 28) -> torch.Tensor:
         """
         Create atomic potential kernel for Oxygen using Kirkland parameterization.
 
@@ -1035,7 +1190,9 @@ class NaiveIcemaker(L.LightningModule):
         avgpool3d = torch.nn.AvgPool3d(4, stride=4)
         return avgpool3d(pot[None, None]).squeeze() * self.dx
 
-    def generate_ice(self, batchsize=1, device=None):
+    def generate_ice(
+        self, batchsize: int = 1, device: torch.device | str | None = None
+    ) -> torch.Tensor:
         """
         Generate ice volumes.
 
@@ -1059,7 +1216,9 @@ class NaiveIcemaker(L.LightningModule):
         return icecubes
 
 
-def remove_deltas_based_on_density(slab, expected_number=None, dx=None):
+def remove_deltas_based_on_density(
+    slab: torch.Tensor, expected_number: int | None = None, dx: float | None = None
+) -> torch.Tensor:
     """
     Randomly remove delta functions from a slab to match expected density.
 
@@ -1229,7 +1388,7 @@ def assemble_volume_randomized(blocks: torch.Tensor, target_shape):
     return torch.stack(batch_volumes, dim=0)
 
 
-def replace_outer_faces(tensors):
+def replace_outer_faces(tensors: torch.Tensor) -> torch.Tensor:
     """
     Replace the 6 outer faces of a batch of 3D tensors with random inner slices.
     Fully vectorized across batch (N < 20 is small, so fine).

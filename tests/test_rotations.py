@@ -1,6 +1,7 @@
-import torch
 import numpy as np
 import pytest
+import torch
+
 from cryosim.rotations import (
     Rotation,
     build_affine_matrix,

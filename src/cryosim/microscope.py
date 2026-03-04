@@ -1,45 +1,51 @@
+from __future__ import annotations
+
+from typing import Any
+
 import lightning as L
 import numpy as np
 import torch
+import torch.nn.functional as F
+
 from .fft_tools import fft2, ifft2
 from .scattering import energy_to_wavelength
-import torch.nn.functional as F
 
 
 class Aberration(L.LightningModule):
+    """
+    An aberration module to apply microscopy aberrations to the 2D exitwaves.
+
+    Parameters
+    ----------
+    n_pixels : int
+        Number of pixels in exitwave, (n_pixels, n_pixels).
+    pixel_size: float
+        Pixel size in Å.
+    energy: float
+        Energy of the electron beam in keV. Typical values are 100/120/200/300 keV.
+    aberration_model: str, optional
+        Specifies aberration model to use. Options include 'holography' and 'ctf'.
+        Default is 'holography'.
+    alpha: float, optional
+        The amplitude contrast ratio to use for the CTF model. Common values
+        are 0.07 and 0.1.
+
+    Notes
+    -----
+    .. [1] E. J. Kirkland, Advanced Computing in Electron Microscopy (Springer
+       US, Boston, MA, 2010).
+    .. [2] P. A. Penczek, “Image Restoration in Cryo-Electron Microscopy” in
+       Methods in Enzymology (Academic Press Inc., 2010)vol. 482, pp. 35–72.
+    """
+
     def __init__(
         self,
-        n_pixels,
-        pixel_size,
-        energy,
-        aberration_model="holography",
-        alpha=None,
+        n_pixels: int,
+        pixel_size: float,
+        energy: float,
+        aberration_model: str = "holography",
+        alpha: float | None = None,
     ):
-        """
-        An aberration module to apply microscopy aberrations to the 2D exitwaves.
-
-        Parameters
-        ----------
-        n_pixels : int
-            Number of pixels in exitwave, (n_pixels, n_pixels).
-        pixel_size: float
-            Pixel size in Å.
-        energy: float
-            Energy of the electron beam in keV. Typical values are 100/120/200/300 keV.
-        aberration_model: str
-            Specifies aberration model to use. Options include 'holography' and 'ctf'.
-        alpha: float
-            The amplitude contrast ratio to use for the CTF model. Common values
-            are 0.07 and 0.1.
-
-        Notes
-        -----
-        .. [1] E. J. Kirkland, Advanced Computing in Electron Microscopy (Springer
-           US, Boston, MA, 2010).
-           [2] P. A. Penczek, “Image Restoration in Cryo-Electron Microscopy” in
-           Methods in Enzymology (Academic Press Inc., 2010)vol. 482, pp. 35–72.
-
-        """
         super().__init__()
         self.n_pixels = n_pixels
         self.pixel_size = pixel_size
@@ -69,7 +75,7 @@ class Aberration(L.LightningModule):
             else:
                 self.alpha = alpha
 
-    def _cs(self, cs):
+    def _cs(self, cs: torch.Tensor) -> torch.Tensor:
         """
         Calculate spherical aberration phase contribution.
 
@@ -85,7 +91,9 @@ class Aberration(L.LightningModule):
         """
         return torch.pi / 2 * self.wavelength**3 * self.k**4 * cs
 
-    def _defocus(self, dfu, dfv, dfang):
+    def _defocus(
+        self, dfu: torch.Tensor, dfv: torch.Tensor, dfang: torch.Tensor
+    ) -> torch.Tensor:
         """
         Calculate defocus phase contribution including astigmatism.
 
@@ -107,7 +115,9 @@ class Aberration(L.LightningModule):
         df = 0.5 * (dfu + dfv + (dfv - dfu) * torch.cos(2 * (self.radian + dfang)))
         return -torch.pi * self.wavelength * self.k2 * df
 
-    def _beamtilt(self, cs, tiltx, tilty):
+    def _beamtilt(
+        self, cs: torch.Tensor, tiltx: torch.Tensor, tilty: torch.Tensor
+    ) -> torch.Tensor:
         """
         Calculate beam tilt phase contribution.
 
@@ -125,13 +135,10 @@ class Aberration(L.LightningModule):
         chi_tilt : torch.Tensor
             Phase contribution from beam tilt.
         """
-        cs = cs
-        tiltx = tiltx
-        tilty = tilty
         tilts = torch.sin(tilty) * self.kxx + torch.sin(tiltx) * self.kyy
         return -2 * torch.pi * self.wavelength**2 * cs * self.k2 * tilts
 
-    def _trefoil(self, trefoil1, trefoil2):
+    def _trefoil(self, trefoil1: torch.Tensor, trefoil2: torch.Tensor) -> torch.Tensor:
         """
         Calculate trefoil (3-fold astigmatism) phase contribution.
 
@@ -147,13 +154,6 @@ class Aberration(L.LightningModule):
         chi_trefoil : torch.Tensor
             Phase contribution from trefoil aberration.
         """
-        trefoil1 = trefoil1
-        trefoil2 = trefoil2
-        # tf1 = trefoil1 * self.k**3 * torch.sin(3 * self.radian)
-        # tf2 = trefoil2 * self.k**3 * torch.cos(3 * self.radian)
-        # return tf1 + tf2
-        # tf1 = trefoil1 * self.k**3 * torch.sin(3 * self.radian)
-        # tf2 = trefoil2 * self.k**3 * torch.cos(3 * self.radian)
         return trefoil1 * self.k**3 * torch.sin(
             3 * self.radian
         ) + trefoil2 * self.k**3 * torch.cos(3 * self.radian)
@@ -180,7 +180,7 @@ class Aberration(L.LightningModule):
         """
         pass
 
-    def _phaseshift(self, phaseshift):
+    def _phaseshift(self, phaseshift: torch.Tensor) -> torch.Tensor:
         """
         Calculate phase shift contribution (e.g., from Volta phase plate).
 
@@ -195,46 +195,56 @@ class Aberration(L.LightningModule):
             Phase shift contribution. For holography model, DC component is
             set to zero to maintain Fourier optics validity.
         """
-        # phaseshift = phaseshift.unsqueeze(1).unsqueeze(2)
         if self.aberration_model == "holography":
             phaseshift = phaseshift * torch.ones_like(self.k)
             # phaseshift must be zero at DC for Fourier optics
             phaseshift[:, self.n_pixels // 2, self.n_pixels // 2] = 0
         return -phaseshift
 
-    def aberration(self, cs, dfu, dfv, dfang, tiltx, tilty, phaseshift, tref1, tref2):
+    def aberration(
+        self,
+        cs: torch.Tensor,
+        dfu: torch.Tensor,
+        dfv: torch.Tensor,
+        dfang: torch.Tensor,
+        tiltx: torch.Tensor,
+        tilty: torch.Tensor,
+        phaseshift: torch.Tensor,
+        tref1: torch.Tensor,
+        tref2: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """
-         Calculate combined aberration phase terms.
+        Calculate combined aberration phase terms.
 
-         Computes gamma and phi for the transfer function.
+        Computes gamma and phi for the transfer function.
 
-         Parameters
-         ----------
-         cs : torch.Tensor
-             Spherical aberration coefficient.
-         dfu : torch.Tensor
-             Defocus along first axis.
-         dfv : torch.Tensor
-             Defocus along second axis.
-         dfang : torch.Tensor
-             Astigmatism angle.
-         tiltx : torch.Tensor
-             Beam tilt in x direction.
-         tilty : torch.Tensor
-             Beam tilt in y direction.
-         phaseshift : torch.Tensor
-             Phase shift (e.g., from phase plate).
-         tref1 : torch.Tensor
-             First trefoil component.
-         tref2 : torch.Tensor
-             Second trefoil component.
+        Parameters
+        ----------
+        cs : torch.Tensor
+            Spherical aberration coefficient.
+        dfu : torch.Tensor
+            Defocus along first axis.
+        dfv : torch.Tensor
+            Defocus along second axis.
+        dfang : torch.Tensor
+            Astigmatism angle.
+        tiltx : torch.Tensor
+            Beam tilt in x direction.
+        tilty : torch.Tensor
+            Beam tilt in y direction.
+        phaseshift : torch.Tensor
+            Phase shift (e.g., from phase plate).
+        tref1 : torch.Tensor
+            First trefoil component.
+        tref2 : torch.Tensor
+            Second trefoil component.
 
         Returns
-         -------
-         gamma : torch.Tensor
-             Axial aberration phase (defocus + Cs - phaseshift).
-         phi : torch.Tensor
-             Non-axial aberration phase (beam tilt + trefoil).
+        -------
+        gamma : torch.Tensor
+            Axial aberration phase (defocus + Cs - phaseshift).
+        phi : torch.Tensor
+            Non-axial aberration phase (beam tilt + trefoil).
         """
         w = self.wavelength
         ang = self.radian
@@ -293,7 +303,18 @@ class Aberration(L.LightningModule):
     #         )
     #         return Et
 
-    def transfer(self, cs, dfu, dfv, dfang, tiltx, tilty, phaseshift, tref1, tref2):
+    def transfer(
+        self,
+        cs: torch.Tensor,
+        dfu: torch.Tensor,
+        dfv: torch.Tensor,
+        dfang: torch.Tensor,
+        tiltx: torch.Tensor,
+        tilty: torch.Tensor,
+        phaseshift: torch.Tensor,
+        tref1: torch.Tensor,
+        tref2: torch.Tensor,
+    ) -> torch.Tensor:
         """
         Compute transfer function with all aberration parameters.
 
@@ -348,7 +369,7 @@ class Aberration(L.LightningModule):
     #     elif self.aberration_model == "holography":
     #         return aberrated_exitwaves
 
-    def transfer_function(self, ctf_params):
+    def transfer_function(self, ctf_params: dict[str, Any]) -> torch.Tensor:
         """
         Compute transfer function from CTF parameters dictionary.
 
@@ -425,7 +446,9 @@ class Aberration(L.LightningModule):
 
         return torch.exp(-1j * chi)
 
-    def forward(self, exitwave, ctf_params):
+    def forward(
+        self, exitwave: torch.Tensor, ctf_params: dict[str, Any]
+    ) -> torch.Tensor:
         """
         Apply microscope aberrations to exit wave.
 
@@ -458,41 +481,47 @@ class Aberration(L.LightningModule):
 
 
 class Detector(L.LightningModule):
+    """
+    A detector module to apply detector noise to images. Future work to include
+    magnification and DQE functionality.
+
+    Parameters
+    ----------
+    pixel_size : float
+        Pixel size in Å.
+    dose_per_angstrom : float
+        Dose of the electron beam in e-/Å².
+    aberration_model : str, optional
+        Specifies aberration model to use. Options include 'holography' and 'ctf'.
+        Default is 'holography'.
+    noise_model : str, optional
+        Specifies noise model. Currently only 'poisson' available. Default is None
+        (no noise applied).
+    magnification : float, optional
+        Magnification factor. Default is None. (To-do: not yet implemented).
+    dqe : bool, optional
+        Detective quantum efficiency. Default is None. (To-do: not yet implemented).
+    mtf : torch.Tensor, optional
+        Modulation transfer function in Fourier space to apply to images.
+        Default is None (no MTF applied).
+    coincidence_radius : float, optional
+        Coincidence radius for detector. Default 0.0.
+    dose_per_angstrom_per_frame : float, optional
+        Dose per frame for dose-fractionated noise. Default 1.0.
+    """
+
     def __init__(
         self,
-        pixel_size,
-        dose_per_angstrom,
-        aberration_model="holography",
-        noise_model=None,
-        magnification=None,
-        dqe=None,
-        mtf=None,
+        pixel_size: float,
+        dose_per_angstrom: float,
+        aberration_model: str = "holography",
+        noise_model: str | None = None,
+        magnification: float | None = None,
+        dqe: bool | None = None,
+        mtf: torch.Tensor | None = None,
+        coincidence_radius: float = 0.0,
+        dose_per_angstrom_per_frame: float = 1.0,
     ):
-        """
-        A detector module to apply detector noise to images. Future work to include
-        magnification and DQE functionality.
-
-        Parameters
-        ----------
-        pixel_size : float
-            Pixel size in Å.
-        dose_per_angstrom : float
-            Dose of the electron beam in e-/Å².
-        aberration_model : str, optional
-            Specifies aberration model to use. Options include 'holography' and 'ctf'.
-            Default is 'holography'.
-        noise_model : str, optional
-            Specifies noise model. Currently only 'poisson' available. Default is None
-            (no noise applied).
-        magnification : float, optional
-            Magnification factor. Default is None. (To-do: not yet implemented).
-        dqe : bool, optional
-            Detective quantum efficiency. Default is None. (To-do: not yet implemented).
-        mtf : torch.Tensor, optional
-            Modulation transfer function in Fourier space to apply to images.
-            Default is None (no MTF applied).
-
-        """
         super().__init__()
         self.pixel_size = pixel_size
         self.dose_per_angstrom = dose_per_angstrom
@@ -500,15 +529,17 @@ class Detector(L.LightningModule):
         self.aberration_model = aberration_model
         self.noise_model = noise_model
         self.register_buffer("mtf", mtf)
+        self.coincidence_radius = coincidence_radius
+        self.dose_per_angstrom_per_frame = dose_per_angstrom_per_frame
 
-    def image(self, aberrated_exitwave):
+    def image(self, aberrated_exitwave: torch.Tensor) -> torch.Tensor:
         """
         Convert aberrated exit wave to detector image.
 
         Parameters
         ----------
         aberrated_exitwave : torch.Tensor
-            Aberrated exit wave from microscope aberration module.
+            Aberrated exit wave from microscope aberration module, shape (B, Y, X).
 
         Returns
         -------
@@ -522,7 +553,9 @@ class Detector(L.LightningModule):
             images = self.dose_per_pixel * (aberrated_exitwave + 1)
         return images
 
-    def anisomagnify(self, images, anisomag):
+    def anisomagnify(
+        self, images: torch.Tensor, anisomag: torch.Tensor
+    ) -> torch.Tensor:
         """
         Apply anisotropic magnification to images.
 
@@ -558,7 +591,7 @@ class Detector(L.LightningModule):
         images = torch.squeeze(images)
         return images
 
-    def add_mtf(self, images, mtf):
+    def add_mtf(self, images: torch.Tensor, mtf: torch.Tensor) -> torch.Tensor:
         """
         Apply modulation transfer function (MTF) to images.
 
@@ -576,7 +609,29 @@ class Detector(L.LightningModule):
         """
         return torch.real(ifft2(fft2(images) * mtf))
 
-    def forward(self, aberrated_exitwave, anisomag=None, nxy=None):
+    def forward(
+        self,
+        aberrated_exitwave: torch.Tensor,
+        anisomag: torch.Tensor | None = None,
+        nxy: int | None = None,
+    ) -> torch.Tensor:
+        """
+        Simulate detection process: conversion to intensity, magnification, MTF, and noise.
+
+        Parameters
+        ----------
+        aberrated_exitwave : torch.Tensor
+            Aberrated exit wave from microscope aberration module.
+        anisomag : torch.Tensor, optional
+            Anisotropic magnification matrices.
+        nxy : int, optional
+            Output image size in pixels. If provided, center-crops the image.
+
+        Returns
+        -------
+        images : torch.Tensor
+            Simulated images after detection.
+        """
         images = self.image(aberrated_exitwave)
 
         # Set default crop size
@@ -606,4 +661,130 @@ class Detector(L.LightningModule):
         if self.noise_model is None:
             return images
         elif self.noise_model == "poisson":
-            return torch.poisson(torch.clamp(images, min=0.0))
+            if images.ndim == 3:
+                return torch.stack([self.apply_coincidence(img) for img in images])
+            else:
+                return self.apply_coincidence(images)
+
+    # def apply_coincidence_frame(self, img_frame):
+    #     """Apply Poisson + coincidence to a single frame."""
+    #     if self.coincidence_radius <= 0.0:
+    #         return torch.poisson(torch.clamp(img_frame, min=0.0))
+
+    #     H, W = img_frame.shape
+    #     electrons_per_pixel = torch.poisson(torch.clamp(img_frame, min=0.0))
+    #     ys, xs = torch.nonzero(electrons_per_pixel, as_tuple=True)
+    #     counts = electrons_per_pixel[ys, xs].long()
+
+    #     if counts.sum() == 0:
+    #         return torch.zeros_like(img_frame)
+
+    #     coords = torch.cat([
+    #         xs.repeat_interleave(counts).unsqueeze(-1) + torch.rand((counts.sum(), 1), device=img_frame.device),
+    #         ys.repeat_interleave(counts).unsqueeze(-1) + torch.rand((counts.sum(), 1), device=img_frame.device)
+    #     ], dim=1)
+
+    #     if coords.shape[0] > 1:
+    #         r_sq = self.coincidence_radius ** 2
+    #         dist_sq = torch.cdist(coords, coords, p=2).pow(2)
+    #         adj = (dist_sq < r_sq) & torch.triu(torch.ones_like(dist_sq, dtype=torch.bool), diagonal=1)
+    #         conflicts = adj.any(dim=0)
+    #         coords = coords[~conflicts]
+
+    #     ix = coords[:, 0].long().clamp(0, W - 1)
+    #     iy = coords[:, 1].long().clamp(0, H - 1)
+    #     flat_idx = ix * H + iy
+    #     pixels = torch.zeros(H * W, device=img_frame.device)
+    #     pixels.scatter_add_(0, flat_idx, torch.ones_like(ix, dtype=torch.float32))
+    #     return pixels.view(H, W)
+
+    # def apply_coincidence(self, img):
+    #     """
+    #     Apply dose-fractionated Poisson + coincidence to the total-dose image.
+    #     """
+    #     if self.noise_model != "poisson" or self.dose_per_angstrom_per_frame <= 0.0:
+    #         # Single-frame Poisson approximation
+    #         return torch.poisson(torch.clamp(img, min=0.0))
+
+    #     # Estimate total dose from image
+    #     # Assuming the image is in e-/Å² units per pixel
+    #     total_dose = img.sum() / (img.shape[0] * img.shape[1])  # e-/Å² average per pixel
+
+    #     n_frames = max(1, int(torch.round(total_dose / self.dose_per_angstrom_per_frame)))
+
+    #     img_per_frame = img / n_frames
+    #     final_image = torch.zeros_like(img)
+    #     for _ in range(n_frames):
+    #         final_image += self.apply_coincidence_frame(img_per_frame)
+
+    #     return final_image
+
+    def apply_coincidence_frame(self, img_frame: torch.Tensor) -> torch.Tensor:
+        """
+        Apply Poisson + coincidence loss to a single frame using pixel-based convolution.
+
+        Parameters
+        ----------
+        img_frame : torch.Tensor
+            Expected electrons per pixel, shape (H, W).
+
+        Returns
+        -------
+        electrons_per_pixel : torch.Tensor
+            Simulated electron counts after coincidence loss.
+        """
+        # 1. Poisson electrons per pixel
+        electrons_per_pixel = torch.poisson(torch.clamp(img_frame, min=0.0))
+
+        # 2. Determine kernel size from coincidence radius
+        # Kernel covers floor(radius) pixels in each direction
+        if self.coincidence_radius > 0.0:
+            r = int(torch.floor(torch.tensor(self.coincidence_radius)))
+            kernel_size = 2 * r + 1
+            kernel = torch.ones(
+                (1, 1, kernel_size, kernel_size), device=img_frame.device
+            )
+
+            # Add batch & channel dims for conv2d
+            neighbors = F.conv2d(
+                electrons_per_pixel.unsqueeze(0).unsqueeze(0), kernel, padding=r
+            )
+
+            # Suppress electrons where neighborhood count > 1
+            mask = neighbors > 1
+            electrons_per_pixel[mask.squeeze(0).squeeze(0)] = 1
+
+        return electrons_per_pixel
+
+    def apply_coincidence(self, img: torch.Tensor) -> torch.Tensor:
+        """
+        Apply dose-fractionated Poisson + coincidence.
+
+        Parameters
+        ----------
+        img : torch.Tensor
+            Total-dose image, shape (H, W).
+
+        Returns
+        -------
+        final_image : torch.Tensor
+            Simulated image after dose-fractionated noise and coincidence.
+        """
+        if self.noise_model != "poisson" or self.dose_per_angstrom_per_frame <= 0.0:
+            return torch.poisson(torch.clamp(img, min=0.0))
+
+        # 1. Compute number of frames based on dose per frame
+        avg_total_dose = img.sum() / (img.shape[0] * img.shape[1])  # e-/Å² per pixel
+        n_frames = max(
+            1, int(torch.round(avg_total_dose / self.dose_per_angstrom_per_frame))
+        )
+
+        # 2. Split total dose per frame
+        img_per_frame = img / n_frames
+
+        # 3. Sum dose-fractionated frames after coincidence
+        final_image = torch.zeros_like(img)
+        for _ in range(n_frames):
+            final_image += self.apply_coincidence_frame(img_per_frame)
+
+        return final_image

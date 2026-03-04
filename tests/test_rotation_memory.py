@@ -8,9 +8,10 @@ box of the tilted volume is larger. This script:
 3. Attempts the actual rotation on cuda:1
 """
 
-import torch
-import math
 import gc
+import math
+
+import torch
 
 
 def compute_nz_new(nz, ny, nx, angle_deg):
@@ -73,7 +74,7 @@ def main():
         grid_bytes = 1 * nz_new * ny * nx * 3 * 4
         total = input_bytes + output_bytes + grid_bytes
         print(
-            f"{angle:>8d} {nz_new:>8d} {output_bytes/1e9:>12.2f} {grid_bytes/1e9:>12.2f} {total/1e9:>12.2f}"
+            f"{angle:>8d} {nz_new:>8d} {output_bytes / 1e9:>12.2f} {grid_bytes / 1e9:>12.2f} {total / 1e9:>12.2f}"
         )
 
     # Attempt actual rotation at 30 degrees
@@ -92,7 +93,7 @@ def main():
         mem_before = torch.cuda.memory_allocated(device)
         V = torch.randn(1, nz, ny, nx, device=device)
         mem_after_input = torch.cuda.memory_allocated(device)
-        print(f"Input allocated: {(mem_after_input - mem_before)/1e9:.2f} GB")
+        print(f"Input allocated: {(mem_after_input - mem_before) / 1e9:.2f} GB")
 
         # Build affine matrix for rotation around X
         angle_rad = math.radians(test_angle)
@@ -128,8 +129,8 @@ def main():
         peak = torch.cuda.max_memory_allocated(device)
 
         print(f"Output shape: {rotated_slices.shape}")
-        print(f"Output allocated: {(mem_after_rot - mem_before_rot)/1e9:.2f} GB")
-        print(f"Peak GPU memory: {peak/1e9:.2f} GB")
+        print(f"Output allocated: {(mem_after_rot - mem_before_rot) / 1e9:.2f} GB")
+        print(f"Peak GPU memory: {peak / 1e9:.2f} GB")
         print("SUCCESS!")
 
         del rotated_slices, V, rotator
@@ -137,7 +138,7 @@ def main():
     except RuntimeError as e:
         print(f"FAILED: {e}")
         peak = torch.cuda.max_memory_allocated(device)
-        print(f"Peak GPU memory before OOM: {peak/1e9:.2f} GB")
+        print(f"Peak GPU memory before OOM: {peak / 1e9:.2f} GB")
 
     gc.collect()
     torch.cuda.empty_cache()

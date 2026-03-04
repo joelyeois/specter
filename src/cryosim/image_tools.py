@@ -1,7 +1,15 @@
+from __future__ import annotations
+
 import torch
+from typing import Literal
 
 
-def normalize_particles(particles, mask_diameter=None, mode="mean", eps=1e-8):
+def normalize_particles(
+    particles: torch.Tensor,
+    mask_diameter: float | None = None,
+    mode: Literal["mean", "median"] = "mean",
+    eps: float = 1e-8,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Vectorized per-particle normalization of a 2D particle stack.
 

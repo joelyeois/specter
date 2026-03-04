@@ -9,15 +9,16 @@ Compares:
 Uses cuda:1, 500x2000x2000 volume at 30° tilt.
 """
 
-import torch
-import time
 import gc
 import sys
+import time
+
+import torch
 
 sys.path.insert(0, "/mnt/cbis/home/e0788253/czii/cryosim/src")
 
-from cryosim.scattering import IterativeScattering
 from cryosim.rotations import build_affine_matrix
+from cryosim.scattering import IterativeScattering
 
 
 def run_test(V, theta, device, slice_batch_size, label):
@@ -60,7 +61,7 @@ def main():
     torch.cuda.set_device(device)
 
     props = torch.cuda.get_device_properties(device)
-    print(f"GPU: {props.name}, {props.total_memory/1e9:.1f} GB")
+    print(f"GPU: {props.name}, {props.total_memory / 1e9:.1f} GB")
 
     nz, ny, nx = 500, 2000, 2000
 
@@ -72,7 +73,7 @@ def main():
     )
     theta = build_affine_matrix(R).to(device)
 
-    print(f"Volume: {nz}x{ny}x{nx} = {nz*ny*nx*4/1e9:.2f} GB (float32)")
+    print(f"Volume: {nz}x{ny}x{nx} = {nz * ny * nx * 4 / 1e9:.2f} GB (float32)")
     print()
 
     # Test 1: V on CPU, batch_size=1 (baseline - current behavior)

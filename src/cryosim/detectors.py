@@ -1,9 +1,13 @@
+from __future__ import annotations
+
 import torch
-from torchinterp1d import interp1d
 from scipy.interpolate import interp1d as scipy_interp1d
+from torchinterp1d import interp1d
 
 
-def k3_200kv(n, dx, device="cpu", return1d=False):
+def k3_200kv(
+    n: int, dx: float, device: str | torch.device = "cpu", return1d: bool = False
+) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
     """
     Return the MTF of a Gatan K3 detector at 200 kV.
 
@@ -125,7 +129,9 @@ def k3_200kv(n, dx, device="cpu", return1d=False):
         return mtf
 
 
-def k3_300kv(n, dx, device="cpu", return1d=False):
+def k3_300kv(
+    n: int, dx: float, device: str | torch.device = "cpu", return1d: bool = False
+) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
     """
     Return the MTF of a Gatan K3 detector at 300 kV.
 
@@ -247,7 +253,9 @@ def k3_300kv(n, dx, device="cpu", return1d=False):
         return mtf
 
 
-def perfect_detector(n, dx, device="cpu", return1d=False):
+def perfect_detector(
+    n: int, dx: float, device: str | torch.device = "cpu", return1d: bool = False
+) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
     """
     Return the MTF of a perfect pixel detector limited only by pixel integration.
 
@@ -289,7 +297,9 @@ def perfect_detector(n, dx, device="cpu", return1d=False):
         return mtf_2d
 
 
-def falcon4i_300kv(n, dx, device="cpu", return1d=False):
+def falcon4i_300kv(
+    n: int, dx: float, device: str | torch.device = "cpu", return1d: bool = False
+) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
     """
     Return the MTF of a Thermo Fisher Falcon 4i detector at 300 kV.
 
@@ -343,7 +353,9 @@ def falcon4i_300kv(n, dx, device="cpu", return1d=False):
         return mtf
 
 
-def falcon4i_200kv(n, dx, device="cpu", return1d=False):
+def falcon4i_200kv(
+    n: int, dx: float, device: str | torch.device = "cpu", return1d: bool = False
+) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
     """
     Return the MTF of a Thermo Fisher Falcon 4i detector at 200 kV.
 

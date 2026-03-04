@@ -2,13 +2,12 @@ import lightning as L
 import torch
 import torch.nn.functional as F
 from rich.progress import track
-
 from torchinterp1d import interp1d
 
 from . import pdbtools, potential
-from .array_utils import grid_3d, radial_grid_3d, real_to_kgrid_3d, radial_profile_3d
-from .fft_tools import fftconvolve, fft3
+from .array_utils import grid_3d, radial_grid_3d, radial_profile_3d, real_to_kgrid_3d
 from .atom import kirkland_atomic_potential_3d, lobato_atomic_potential_3d
+from .fft_tools import fft3, fftconvolve
 
 avogadro = 6.02214076e23
 density_of_amorphous_ice = 0.94  # [g/cm3]

@@ -5,15 +5,16 @@ Tests a 500x2000x2000 volume at 30° tilt with various slice_batch_size values.
 Uses cuda:1, multislice model (the most common and expensive).
 """
 
-import torch
-import time
 import gc
 import sys
+import time
+
+import torch
 
 sys.path.insert(0, "/mnt/cbis/home/e0788253/czii/cryosim/src")
 
-from cryosim.scattering import IterativeScattering
 from cryosim.rotations import build_affine_matrix
+from cryosim.scattering import IterativeScattering
 
 
 def main():
@@ -30,12 +31,12 @@ def main():
     print(f"Volume: {nz}x{ny}x{nx}, angle: {angle_deg}°, nxy: {nxy}")
     print(f"GPU: {torch.cuda.get_device_properties(device).name}")
     print(
-        f"GPU memory: {torch.cuda.get_device_properties(device).total_memory/1e9:.1f} GB"
+        f"GPU memory: {torch.cuda.get_device_properties(device).total_memory / 1e9:.1f} GB"
     )
 
     # Create volume on CPU to save GPU memory (IterativeScattering moves slices)
     V = torch.randn(1, nz, ny, nx)
-    print(f"Volume on CPU: {V.numel()*4/1e9:.2f} GB")
+    print(f"Volume on CPU: {V.numel() * 4 / 1e9:.2f} GB")
 
     # Build affine matrix for 30° tilt around X
     angle_rad = torch.deg2rad(torch.tensor(angle_deg))

@@ -1,16 +1,22 @@
+from __future__ import annotations
+
+import os
+from typing import Literal
+
+import mrcfile
 import numpy as np
+import pandas as pd
+import starfile
 import torch
 from cryosparc.dataset import Dataset
 from scipy.spatial.transform import Rotation
-import starfile
-import mrcfile
-import os
-import pandas as pd
 
 
 def extract_parameters_from_csfile(
-    csfile_path, return_class="0", rotation_representation="quaternion"
-):
+    csfile_path: str,
+    return_class: Literal["0", "1", "all"] = "0",
+    rotation_representation: Literal["quaternion", "rotvec"] = "quaternion",
+) -> tuple:
     """
     Extract poses and CTF parameters from CryoSPARC .cs file.
 
@@ -213,17 +219,17 @@ def extract_parameters_from_csfile(
 
 
 def create_particle_starfile(
-    particles,
-    rotations=None,
-    translations=None,
-    alpha=0.1,
-    folderpath="",
-    energy=None,
-    dx=None,
-    starfilename="particles",
-    mrcfilename=None,
-    ctf_params=None,
-):
+    particles: torch.Tensor,
+    rotations: torch.Tensor | np.ndarray | None = None,
+    translations: torch.Tensor | np.ndarray | None = None,
+    alpha: float = 0.1,
+    folderpath: str = "",
+    energy: float | None = None,
+    dx: float | None = None,
+    starfilename: str = "particles",
+    mrcfilename: str | None = None,
+    ctf_params: torch.Tensor | None = None,
+) -> str:
     """
     Save particle stack as MRCS and create RELION .star file.
 

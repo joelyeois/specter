@@ -9,6 +9,7 @@ import torch.nn.functional as F
 
 from .fft_tools import fft2, ifft2
 from .scattering import energy_to_wavelength
+from rich.progress import track
 
 
 class Aberration(L.LightningModule):
@@ -45,6 +46,7 @@ class Aberration(L.LightningModule):
         energy: float,
         aberration_model: str = "holography",
         alpha: float | None = None,
+        progressbars: bool = True,
     ):
         super().__init__()
         self.n_pixels = n_pixels
@@ -521,6 +523,8 @@ class Detector(L.LightningModule):
         mtf: torch.Tensor | None = None,
         coincidence_radius: float = 0.0,
         dose_per_angstrom_per_frame: float = 1.0,
+        num_frames: int | None = None,
+        progressbars: bool = True,
     ):
         super().__init__()
         self.pixel_size = pixel_size
@@ -531,6 +535,8 @@ class Detector(L.LightningModule):
         self.register_buffer("mtf", mtf)
         self.coincidence_radius = coincidence_radius
         self.dose_per_angstrom_per_frame = dose_per_angstrom_per_frame
+        self.num_frames = num_frames
+        self.progressbars = progressbars
 
     def image(self, aberrated_exitwave: torch.Tensor) -> torch.Tensor:
         """
@@ -666,95 +672,156 @@ class Detector(L.LightningModule):
             else:
                 return self.apply_coincidence(images)
 
-    # def apply_coincidence_frame(self, img_frame):
-    #     """Apply Poisson + coincidence to a single frame."""
-    #     if self.coincidence_radius <= 0.0:
-    #         return torch.poisson(torch.clamp(img_frame, min=0.0))
+    def apply_detector_physics_fast(
+        self,
+        intensity_map: torch.Tensor,
+        pixel_size_angstrom: float,
+        dose_per_angstrom_sq_per_frame: float,
+        coinc_radius_pixels: float = 1.5,
+    ) -> torch.Tensor:
+        det_h, det_w = intensity_map.shape
+        device = intensity_map.device
 
-    #     H, W = img_frame.shape
-    #     electrons_per_pixel = torch.poisson(torch.clamp(img_frame, min=0.0))
-    #     ys, xs = torch.nonzero(electrons_per_pixel, as_tuple=True)
-    #     counts = electrons_per_pixel[ys, xs].long()
+        # 1. Convert physical dose to expected electron count
+        dose_per_pixel = dose_per_angstrom_sq_per_frame * (pixel_size_angstrom**2)
+        total_expected = dose_per_pixel * det_h * det_w
+        n_e = int(torch.poisson(torch.tensor(total_expected, device=device)).item())
+        if n_e <= 0:
+            return torch.zeros_like(intensity_map)
 
-    #     if counts.sum() == 0:
-    #         return torch.zeros_like(img_frame)
+        # 2. Sample landing positions from intensity map + sub-pixel jitter
+        # expected electrons per pixel
+        lambda_map = intensity_map * total_expected
 
-    #     coords = torch.cat([
-    #         xs.repeat_interleave(counts).unsqueeze(-1) + torch.rand((counts.sum(), 1), device=img_frame.device),
-    #         ys.repeat_interleave(counts).unsqueeze(-1) + torch.rand((counts.sum(), 1), device=img_frame.device)
-    #     ], dim=1)
+        # sample electrons per pixel
+        counts = torch.poisson(lambda_map)
 
-    #     if coords.shape[0] > 1:
-    #         r_sq = self.coincidence_radius ** 2
-    #         dist_sq = torch.cdist(coords, coords, p=2).pow(2)
-    #         adj = (dist_sq < r_sq) & torch.triu(torch.ones_like(dist_sq, dtype=torch.bool), diagonal=1)
-    #         conflicts = adj.any(dim=0)
-    #         coords = coords[~conflicts]
+        # get pixels that received electrons
+        iy, ix = torch.nonzero(counts, as_tuple=True)
+        n_per_pixel = counts[iy, ix].long()
 
-    #     ix = coords[:, 0].long().clamp(0, W - 1)
-    #     iy = coords[:, 1].long().clamp(0, H - 1)
-    #     flat_idx = ix * H + iy
-    #     pixels = torch.zeros(H * W, device=img_frame.device)
-    #     pixels.scatter_add_(0, flat_idx, torch.ones_like(ix, dtype=torch.float32))
-    #     return pixels.view(H, W)
+        # total electrons
+        n_e = int(n_per_pixel.sum().item())
+        if n_e == 0:
+            return torch.zeros_like(intensity_map)
 
-    # def apply_coincidence(self, img):
-    #     """
-    #     Apply dose-fractionated Poisson + coincidence to the total-dose image.
-    #     """
-    #     if self.noise_model != "poisson" or self.dose_per_angstrom_per_frame <= 0.0:
-    #         # Single-frame Poisson approximation
-    #         return torch.poisson(torch.clamp(img, min=0.0))
+        # repeat pixel coordinates
+        ix = ix.repeat_interleave(n_per_pixel)
+        iy = iy.repeat_interleave(n_per_pixel)
 
-    #     # Estimate total dose from image
-    #     # Assuming the image is in e-/Å² units per pixel
-    #     total_dose = img.sum() / (img.shape[0] * img.shape[1])  # e-/Å² average per pixel
+        coords = torch.stack([ix.float(), iy.float()], dim=1)
 
-    #     n_frames = max(1, int(torch.round(total_dose / self.dose_per_angstrom_per_frame)))
+        # add subpixel jitter
+        coords += torch.rand((n_e, 2), device=device)
 
-    #     img_per_frame = img / n_frames
-    #     final_image = torch.zeros_like(img)
-    #     for _ in range(n_frames):
-    #         final_image += self.apply_coincidence_frame(img_per_frame)
+        # 3. Assign electrons to coincidence grid cells
+        # cell_size = coinc_radius / sqrt(2) ensures any two points in the
+        # same cell are guaranteed to be within coinc_radius of each other
+        cell_size = coinc_radius_pixels / (2**0.5)
 
-    #     return final_image
+        # Randomly rotate and shift coords before binning to break grid artifacts
+        angle = torch.rand(1, device=device) * 2 * torch.pi
+        cos_a, sin_a = torch.cos(angle), torch.sin(angle)
+        rot_mat = torch.tensor([[cos_a, -sin_a], [sin_a, cos_a]], device=device)
 
-    def apply_coincidence_frame(self, img_frame: torch.Tensor) -> torch.Tensor:
+        # Center coordinates before rotation
+        center = torch.tensor([det_w / 2, det_h / 2], device=device).to(device)
+        coords_rot = torch.matmul(coords - center, rot_mat.T) + center
+
+        # Add a random sub-cell shift
+        shift = torch.rand(2, device=device) * cell_size
+        coords_rot += shift
+
+        cell_x = (coords_rot[:, 0] / cell_size).long()
+        cell_y = (coords_rot[:, 1] / cell_size).long()
+
+        # Use a large enough multiplier to avoid cell_id collisions
+        # grid_w must be larger than any possible cell_x
+        grid_w = int((det_w + det_h + coinc_radius_pixels) / cell_size) + 10
+        cell_id = cell_y * grid_w + cell_x
+
+        # 4. Coincidence suppression: keep one electron per cell
+        sort_idx = torch.argsort(cell_id, stable=True)
+        sorted_cell_id = cell_id[sort_idx]
+        is_first = torch.ones(n_e, dtype=torch.bool, device=device)
+        is_first[1:] = sorted_cell_id[1:] != sorted_cell_id[:-1]
+        coords_kept = coords[sort_idx[is_first]]
+
+        # 5. Bin into detector pixels
+        ix_f = coords_kept[:, 0].long().clamp(0, det_w - 1)
+        iy_f = coords_kept[:, 1].long().clamp(0, det_h - 1)
+        flat_idx = iy_f * det_w + ix_f
+        pixels = torch.zeros(det_h * det_w, dtype=intensity_map.dtype, device=device)
+        pixels.scatter_add_(
+            0, flat_idx, torch.ones_like(flat_idx, dtype=intensity_map.dtype)
+        )
+
+        return pixels.reshape(det_h, det_w)
+
+    def apply_detector_physics(
+        self,
+        intensity_map: torch.Tensor,
+        pixel_size_angstrom: float,
+        dose_per_angstrom_sq_per_frame: float,
+        coinc_radius_pixels: float = 1.5,
+    ) -> torch.Tensor:
         """
-        Apply Poisson + coincidence loss to a single frame using pixel-based convolution.
+        Simulates a single frame of a Direct Electron Detector (DED).
 
-        Parameters
-        ----------
-        img_frame : torch.Tensor
-            Expected electrons per pixel, shape (H, W).
-
-        Returns
-        -------
-        electrons_per_pixel : torch.Tensor
-            Simulated electron counts after coincidence loss.
+        Args:
+            intensity_map: 2D Tensor (normalized psi^2 from multislice).
+            pixel_size_angstrom: Size of one pixel in Angstroms (e.g., 1.0).
+            dose_per_angstrom_sq_per_frame: Physical dose (e/A^2).
+            coinc_radius_pixels: Dead-time radius in pixels.
         """
-        # 1. Poisson electrons per pixel
-        electrons_per_pixel = torch.poisson(torch.clamp(img_frame, min=0.0))
+        det_h, det_w = intensity_map.shape
+        device = intensity_map.device
 
-        # 2. Determine kernel size from coincidence radius
-        # Kernel covers floor(radius) pixels in each direction
-        if self.coincidence_radius > 0.0:
-            r = int(torch.floor(torch.tensor(self.coincidence_radius)))
-            kernel_size = 2 * r + 1
-            kernel = torch.ones(
-                (1, 1, kernel_size, kernel_size), device=img_frame.device
-            )
+        # 1. Convert physical dose to expected electrons in this frame
+        dose_per_pixel = dose_per_angstrom_sq_per_frame * (pixel_size_angstrom**2)
+        total_expected_electrons = dose_per_pixel * (det_h * det_w)
 
-            # Add batch & channel dims for conv2d
-            neighbors = F.conv2d(
-                electrons_per_pixel.unsqueeze(0).unsqueeze(0), kernel, padding=r
-            )
+        # 2. Poisson number of incident electrons
+        n_e = int(
+            torch.poisson(torch.tensor(total_expected_electrons, device=device)).item()
+        )
+        if n_e <= 0:
+            return torch.zeros_like(intensity_map)
 
-            # Suppress electrons where neighborhood count > 1
-            mask = neighbors > 1
-            electrons_per_pixel[mask.squeeze(0).squeeze(0)] = 1
+        # 3. Sample landing coordinates from intensity_map distribution
+        prob_dist = intensity_map.reshape(-1)
+        prob_dist = prob_dist / prob_dist.sum()
+        indices = torch.multinomial(prob_dist, n_e, replacement=True)
 
-        return electrons_per_pixel
+        iy = (indices // det_w).float()
+        ix = (indices % det_w).float()
+        coords = torch.stack([ix, iy], dim=1)
+        coords += torch.rand((n_e, 2), device=device)
+
+        # 4. Coincidence suppression (greedy, as requested)
+        keep = torch.ones(n_e, dtype=torch.bool, device=device)
+        r_sq = float(coinc_radius_pixels) * float(coinc_radius_pixels)
+        for i in range(n_e):
+            if not keep[i]:
+                continue
+            if i + 1 >= n_e:
+                break
+            d_sq = torch.sum((coords[i + 1 :] - coords[i]) ** 2, dim=1)
+            close = d_sq < r_sq
+            keep[i + 1 :][close] = False
+
+        coords = coords[keep]
+
+        # 5. Bin into detector pixels
+        pixels = torch.zeros_like(intensity_map)
+        ix_f = coords[:, 0].long().clamp(0, det_w - 1)
+        iy_f = coords[:, 1].long().clamp(0, det_h - 1)
+        pixels.index_put_(
+            (iy_f, ix_f),
+            torch.ones_like(ix_f, dtype=intensity_map.dtype),
+            accumulate=True,
+        )
+        return pixels
 
     def apply_coincidence(self, img: torch.Tensor) -> torch.Tensor:
         """
@@ -770,21 +837,34 @@ class Detector(L.LightningModule):
         final_image : torch.Tensor
             Simulated image after dose-fractionated noise and coincidence.
         """
-        if self.noise_model != "poisson" or self.dose_per_angstrom_per_frame <= 0.0:
+        if self.noise_model != "poisson":
+            return img
+
+        if self.coincidence_radius <= 0.0:
             return torch.poisson(torch.clamp(img, min=0.0))
 
         # 1. Compute number of frames based on dose per frame
-        avg_total_dose = img.sum() / (img.shape[0] * img.shape[1])  # e-/Å² per pixel
-        n_frames = max(
-            1, int(torch.round(avg_total_dose / self.dose_per_angstrom_per_frame))
-        )
+        n_frames = self.num_frames
 
         # 2. Split total dose per frame
-        img_per_frame = img / n_frames
+        # Normalize img (it might be in dose units already if coming from CTF model,
+        # or intensity units if from holography).
+        # apply_detector_physics expects a probability map (intensity_map).
+        intensity_map = img / img.sum()
 
         # 3. Sum dose-fractionated frames after coincidence
         final_image = torch.zeros_like(img)
-        for _ in range(n_frames):
-            final_image += self.apply_coincidence_frame(img_per_frame)
+        for _ in track(
+            range(n_frames),
+            description="Applying coincidence loss",
+            transient=True,
+            disable=not (self.progressbars),
+        ):
+            final_image += self.apply_detector_physics_fast(
+                intensity_map,
+                self.pixel_size,
+                self.dose_per_angstrom / n_frames,
+                coinc_radius_pixels=self.coincidence_radius,
+            )
 
         return final_image

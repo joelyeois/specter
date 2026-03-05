@@ -79,6 +79,7 @@ class BaseImageGenerator(L.LightningModule):
         progressbars: bool = True,
         verbose: bool = True,
         coincidence_radius: float = 0.0,
+        num_frames: int | None = None,
     ):
         super().__init__()
         self.pixel_size = pixel_size
@@ -96,6 +97,7 @@ class BaseImageGenerator(L.LightningModule):
         self.detector_model = detector_model
         self._init_detector_mtf()
         self.coincidence_radius = coincidence_radius
+        self.num_frames = num_frames
 
         if anisomag is None:
             self.anisomag = anisomag
@@ -153,6 +155,7 @@ class BaseImageGenerator(L.LightningModule):
             noise_model=self.noise_model,
             mtf=self.detector_mtf,
             coincidence_radius=self.coincidence_radius,
+            num_frames=self.num_frames,
         )
 
 
@@ -381,6 +384,8 @@ class ImageGeneratorFromCoordinates(BaseImageGenerator, VolumeProcessingMixin):
         conv_backend: str = "fftconvolve",
         detector_model: str | None = None,
         verbose: bool = True,
+        coincidence_radius: float = 0.0,
+        num_frames: int | None = None,
     ):
         self.pad_fft = pad_fft
         self.ice_thickness = ice_thickness
@@ -413,6 +418,8 @@ class ImageGeneratorFromCoordinates(BaseImageGenerator, VolumeProcessingMixin):
             ctf_params=ctf_params,
             progressbars=False,
             verbose=verbose,
+            coincidence_radius=coincidence_radius,
+            num_frames=num_frames,
         )
         self.ice_model = ice_model
 
@@ -649,6 +656,8 @@ class ImageGenerator(BaseImageGenerator, VolumeProcessingMixin):
         parameterization: str = "kirkland",
         detector_model: str | None = None,
         slice_batch_size: int = 1,
+        coincidence_radius: float = 0.0,
+        num_frames: int | None = None,
     ):
         nxy = scattering_potential.shape[-1]
         self.pad_fft = pad_fft
@@ -681,6 +690,8 @@ class ImageGenerator(BaseImageGenerator, VolumeProcessingMixin):
             ctf_params=ctf_params,
             progressbars=progressbars,
             verbose=verbose,
+            coincidence_radius=coincidence_radius,
+            num_frames=num_frames,
         )
 
         self.parameterization = parameterization
@@ -925,6 +936,7 @@ class MicrographGenerator(BaseImageGenerator):
         progressbars: bool = True,
         verbose: bool = True,
         coincidence_radius: float = 0.0,
+        num_frames: int | None = None,
         **kwargs: Any,
     ):
         # Determine nxy
@@ -977,6 +989,7 @@ class MicrographGenerator(BaseImageGenerator):
             progressbars=progressbars,
             verbose=verbose,
             coincidence_radius=coincidence_radius,
+            num_frames=num_frames,
         )
 
         self.chunk_size = chunk_size
@@ -1357,6 +1370,8 @@ class TiltSeriesGenerator(MicrographGenerator):
         taper_width: int = 0,
         z_taper_width: int = 0,
         tilt_axis: str = "x",
+        coincidence_radius: float = 0.0,
+        num_frames: int | None = None,
         **kwargs: Any,
     ):
         if vol is None:
@@ -1461,6 +1476,9 @@ class TiltSeriesGenerator(MicrographGenerator):
             detector_model=detector_model,
             progressbars=progressbars,
             verbose=verbose,
+            slice_batch_size=slice_batch_size,
+            coincidence_radius=coincidence_radius,
+            num_frames=num_frames,
             **kwargs,
         )
 

@@ -119,6 +119,12 @@ def str2bool(v: str | bool) -> bool:
         raise argparse.ArgumentTypeError("Boolean value expected.")
 
 
+def float_or_none(value):
+    if value.lower() == "none":
+        return None
+    return float(value)
+
+
 def main():
     """
     Simulate particle images using multi-GPU Lightning framework.
@@ -195,11 +201,15 @@ def main():
     parser.add_argument("--scattering_model", type=str, default="multislice")
     parser.add_argument("--aberration_model", type=str, default="holography")
     parser.add_argument("--noise_model", type=str, default=None)
+    parser.add_argument("--coincidence_radius", type=float, default=0.0)
     parser.add_argument("--ice_model", type=str, default=None)
     parser.add_argument("--ice_thickness", type=float, default=0)
     parser.add_argument("--alpha", type=float, default=0.0)
     parser.add_argument("--crowd_min_distance", type=float, default=None)
+    parser.add_argument("--crowd_max_distance_z", type=float_or_none, default=None)
     parser.add_argument("--pad_fft", type=str2bool, default=False)
+    parser.add_argument("--detector_model", type=str, default=None)
+    parser.add_argument("--num_frames", type=int, default=1)
     parser.add_argument(
         "--output_path",
         type=str,
@@ -237,12 +247,16 @@ def main():
         scattering_model=args.scattering_model,
         aberration_model=args.aberration_model,
         noise_model=args.noise_model,
+        coincidence_radius=args.coincidence_radius,
         klim=None,
         flip_curvature=False,
         alpha=args.alpha,
         crowd_min_distance=args.crowd_min_distance,
+        crowd_max_distance_z=args.crowd_max_distance_z,
         pad_fft=args.pad_fft,
+        detector_model=args.detector_model,
         progressbars=False,
+        num_frames=args.num_frames,
     )
     output_path = args.output_path
     output_dir = os.path.dirname(output_path)

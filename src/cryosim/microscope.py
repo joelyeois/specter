@@ -672,92 +672,6 @@ class Detector(L.LightningModule):
             else:
                 return self.apply_coincidence(images)
 
-    def apply_detector_physics_fast(
-        self,
-        intensity_map: torch.Tensor,
-        pixel_size_angstrom: float,
-        dose_per_angstrom_sq_per_frame: float,
-        coinc_radius_pixels: float = 1.5,
-    ) -> torch.Tensor:
-        det_h, det_w = intensity_map.shape
-        device = intensity_map.device
-
-        # 1. Convert physical dose to expected electron count
-        dose_per_pixel = dose_per_angstrom_sq_per_frame * (pixel_size_angstrom**2)
-        total_expected = dose_per_pixel * det_h * det_w
-        n_e = int(torch.poisson(torch.tensor(total_expected, device=device)).item())
-        if n_e <= 0:
-            return torch.zeros_like(intensity_map)
-
-        # 2. Sample landing positions from intensity map + sub-pixel jitter
-        # expected electrons per pixel
-        lambda_map = intensity_map * total_expected
-
-        # sample electrons per pixel
-        counts = torch.poisson(lambda_map)
-
-        # get pixels that received electrons
-        iy, ix = torch.nonzero(counts, as_tuple=True)
-        n_per_pixel = counts[iy, ix].long()
-
-        # total electrons
-        n_e = int(n_per_pixel.sum().item())
-        if n_e == 0:
-            return torch.zeros_like(intensity_map)
-
-        # repeat pixel coordinates
-        ix = ix.repeat_interleave(n_per_pixel)
-        iy = iy.repeat_interleave(n_per_pixel)
-
-        coords = torch.stack([ix.float(), iy.float()], dim=1)
-
-        # add subpixel jitter
-        coords += torch.rand((n_e, 2), device=device)
-
-        # 3. Assign electrons to coincidence grid cells
-        # cell_size = coinc_radius / sqrt(2) ensures any two points in the
-        # same cell are guaranteed to be within coinc_radius of each other
-        cell_size = coinc_radius_pixels / (2**0.5)
-
-        # Randomly rotate and shift coords before binning to break grid artifacts
-        angle = torch.rand(1, device=device) * 2 * torch.pi
-        cos_a, sin_a = torch.cos(angle), torch.sin(angle)
-        rot_mat = torch.tensor([[cos_a, -sin_a], [sin_a, cos_a]], device=device)
-
-        # Center coordinates before rotation
-        center = torch.tensor([det_w / 2, det_h / 2], device=device).to(device)
-        coords_rot = torch.matmul(coords - center, rot_mat.T) + center
-
-        # Add a random sub-cell shift
-        shift = torch.rand(2, device=device) * cell_size
-        coords_rot += shift
-
-        cell_x = (coords_rot[:, 0] / cell_size).long()
-        cell_y = (coords_rot[:, 1] / cell_size).long()
-
-        # Use a large enough multiplier to avoid cell_id collisions
-        # grid_w must be larger than any possible cell_x
-        grid_w = int((det_w + det_h + coinc_radius_pixels) / cell_size) + 10
-        cell_id = cell_y * grid_w + cell_x
-
-        # 4. Coincidence suppression: keep one electron per cell
-        sort_idx = torch.argsort(cell_id, stable=True)
-        sorted_cell_id = cell_id[sort_idx]
-        is_first = torch.ones(n_e, dtype=torch.bool, device=device)
-        is_first[1:] = sorted_cell_id[1:] != sorted_cell_id[:-1]
-        coords_kept = coords[sort_idx[is_first]]
-
-        # 5. Bin into detector pixels
-        ix_f = coords_kept[:, 0].long().clamp(0, det_w - 1)
-        iy_f = coords_kept[:, 1].long().clamp(0, det_h - 1)
-        flat_idx = iy_f * det_w + ix_f
-        pixels = torch.zeros(det_h * det_w, dtype=intensity_map.dtype, device=device)
-        pixels.scatter_add_(
-            0, flat_idx, torch.ones_like(flat_idx, dtype=intensity_map.dtype)
-        )
-
-        return pixels.reshape(det_h, det_w)
-
     def apply_detector_physics(
         self,
         intensity_map: torch.Tensor,
@@ -822,6 +736,97 @@ class Detector(L.LightningModule):
             accumulate=True,
         )
         return pixels
+
+    def apply_detector_physics_fast(
+        self,
+        intensity_map: torch.Tensor,
+        pixel_size_angstrom: float,
+        dose_per_angstrom_sq_per_frame: float,
+        coinc_radius_pixels: float = 1.5,
+    ) -> torch.Tensor:
+        device = intensity_map.device
+
+        # 0. Pad map to avoid edge artifacts
+        pad = int(np.ceil(coinc_radius_pixels * 2))
+        # Use reflect padding to keep intensity levels consistent at the edge
+        intensity_map = F.pad(
+            intensity_map.unsqueeze(0).unsqueeze(0),
+            (pad, pad, pad, pad),
+            mode="reflect",
+        ).squeeze()
+        det_h, det_w = intensity_map.shape
+
+        # 1. Convert physical dose to expected electron count
+        dose_per_pixel = dose_per_angstrom_sq_per_frame * (pixel_size_angstrom**2)
+        total_expected = dose_per_pixel * det_h * det_w
+
+        # 2. Sample landing positions from intensity map + sub-pixel jitter
+        # expected electrons per pixel
+        lambda_map = intensity_map * total_expected
+
+        # sample electrons per pixel
+        counts = torch.poisson(lambda_map)
+
+        # get pixels that received electrons
+        iy, ix = torch.nonzero(counts, as_tuple=True)
+        n_per_pixel = counts[iy, ix].long()
+
+        # total electrons
+        n_e = int(n_per_pixel.sum().item())
+        if n_e == 0:
+            return torch.zeros_like(intensity_map)[pad:-pad, pad:-pad]
+
+        # repeat pixel coordinates
+        ix = ix.repeat_interleave(n_per_pixel)
+        iy = iy.repeat_interleave(n_per_pixel)
+
+        coords = torch.stack([ix.float(), iy.float()], dim=1)
+
+        # add subpixel jitter
+        coords += torch.rand((n_e, 2), device=device)
+
+        # 3. Assign electrons to coincidence grid cells
+        # Introduce a slight randomization to the cell size to mimic detector variation
+        cell_size = coinc_radius_pixels / (2**0.5)
+        cell_size *= (1 + 0.05 * torch.randn(1, device=device)).clamp(0.8, 1.2)
+
+        # Random shift to prevent the grid from "locking" onto specific pixels
+        shift = (torch.rand(2, device=device) - 0.5) * cell_size
+        shifted_coords = coords + shift
+
+        # Calculate cell coordinates
+        cell_x = (shifted_coords[:, 0] / cell_size).floor().long()
+        cell_y = (shifted_coords[:, 1] / cell_size).floor().long()
+
+        # 2. Robust cell_id generation
+        # Normalize to zero by subtracting the minimums found in this specific frame
+        cx_min, cy_min = cell_x.min(), cell_y.min()
+        grid_w = (cell_x.max() - cx_min) + 1
+
+        # Generate unique 1D hash for each grid cell
+        cell_id = (cell_y - cy_min) * grid_w + (cell_x - cx_min)
+
+        # 4. Coincidence suppression
+        # We sort by cell_id and then by a random value to decide WHICH electron in a cell survives
+        # (Currently you just pick the 'first' one after sorting, which is fine)
+        perm = torch.randperm(n_e, device=device)
+        sort_idx = torch.argsort(cell_id[perm], stable=True)
+        sorted_cell_id = cell_id[perm][sort_idx]
+
+        is_first = torch.ones(n_e, dtype=torch.bool, device=device)
+        is_first[1:] = sorted_cell_id[1:] != sorted_cell_id[:-1]
+        coords_kept = coords[perm][sort_idx][is_first]
+
+        # 5. Bin into detector pixels
+        ix_f = coords_kept[:, 0].long().clamp(0, det_w - 1)
+        iy_f = coords_kept[:, 1].long().clamp(0, det_h - 1)
+        flat_idx = iy_f * det_w + ix_f
+        pixels = torch.zeros(det_h * det_w, dtype=intensity_map.dtype, device=device)
+        pixels.scatter_add_(
+            0, flat_idx, torch.ones_like(flat_idx, dtype=intensity_map.dtype)
+        )
+
+        return pixels.reshape(det_h, det_w)[pad:-pad, pad:-pad]
 
     def apply_coincidence(self, img: torch.Tensor) -> torch.Tensor:
         """

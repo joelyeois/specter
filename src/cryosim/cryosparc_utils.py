@@ -14,7 +14,7 @@ from scipy.spatial.transform import Rotation
 
 def extract_parameters_from_csfile(
     csfile_path: str,
-    return_class: Literal["0", "1", "all"] = "0",
+    return_class: Literal["0", "1", "all"] = "all",
     rotation_representation: Literal["quaternion", "rotvec"] = "quaternion",
 ) -> tuple:
     """
@@ -179,6 +179,7 @@ def extract_parameters_from_csfile(
             "tref1": tref1[split == 0],
             "tref2": tref2[split == 0],
         }
+        anisomag_out = None if anisomag is None else anisomag[split == 0]
         return (
             energy_kev,
             pixel_size,
@@ -187,7 +188,7 @@ def extract_parameters_from_csfile(
             translations_A[split == 0],
             ctf_params,
             scale[split == 0],
-            anisomag[split == 0],
+            anisomag_out,
             indices,
         )
     elif return_class == "1":
@@ -205,6 +206,7 @@ def extract_parameters_from_csfile(
             "tref1": tref1[split == 1],
             "tref2": tref2[split == 1],
         }
+        anisomag_out = None if anisomag is None else anisomag[split == 1]
         return (
             energy_kev,
             pixel_size,
@@ -213,7 +215,7 @@ def extract_parameters_from_csfile(
             translations_A[split == 1],
             ctf_params,
             scale[split == 1],
-            anisomag[split == 0],
+            anisomag_out,
             indices,
         )
 

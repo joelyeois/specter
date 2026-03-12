@@ -13,7 +13,7 @@ import torch
 from Bio.PDB import PDBParser
 from Bio.PDB.MMCIFParser import MMCIFParser
 from Bio.PDB.PDBExceptions import PDBConstructionWarning  # correct import
-from rich.progress import track
+from .progress import track
 from scipy.spatial import ConvexHull
 from scipy.spatial.distance import pdist
 

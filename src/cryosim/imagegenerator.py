@@ -6,7 +6,7 @@ import lightning as L
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from rich.progress import track
+from .progress import track
 
 from cryosim import logger
 from cryosim.detectors import k3_200kv, k3_300kv, perfect_detector
@@ -386,6 +386,7 @@ class ImageGeneratorFromCoordinates(BaseImageGenerator, VolumeProcessingMixin):
         verbose: bool = True,
         coincidence_radius: float = 0.0,
         num_frames: int | None = None,
+        mean_squared_displacement_per_dose: float = 0.0,
     ):
         self.pad_fft = pad_fft
         self.ice_thickness = ice_thickness
@@ -438,6 +439,9 @@ class ImageGeneratorFromCoordinates(BaseImageGenerator, VolumeProcessingMixin):
         self.register_buffer("quaternions", quaternions)
         self.register_buffer("translations", translations)
         self.atomic_numbers = atomic_numbers
+        self.mean_squared_displacement_per_dose = mean_squared_displacement_per_dose
+        if mean_squared_displacement_per_dose != 0:
+            print(f"Perturbing coordinates by: {mean_squared_displacement_per_dose}.")
 
         # initialize modules
         self.potentialbuilder = PotentialBuilder(
@@ -537,11 +541,20 @@ class ImageGeneratorFromCoordinates(BaseImageGenerator, VolumeProcessingMixin):
         images : torch.Tensor
             Simulated images.
         """
+        # adds perturbation to coordinates
+        if self.mean_squared_displacement_per_dose != 0.0:
+            msd = self.mean_squared_displacement_per_dose * self.dose_per_angstrom
+            sigma_angstrom = (msd / 3) ** 0.5
+            sigma_pixel = sigma_angstrom / self.pixel_size
+            self.coordinates += torch.randn_like(self.coordinates) * sigma_pixel
+
         # rotate coordinates, returns (B x N x 3)
         coordinates = self.rotate(self.quaternions[idx], self.translations[idx])
 
         # sample coordinates to volume
         V = self.potentialbuilder(coordinates)
+        if V.ndim == 3:
+            V = V.unsqueeze(0)
 
         # pad z
         if self.ice_thickness is not None:
@@ -570,7 +583,8 @@ class ImageGeneratorFromCoordinates(BaseImageGenerator, VolumeProcessingMixin):
                     0,
                     0,  # z-axis
                 ),
-                mode="constant",
+                # mode="constant",
+                mode="reflect",  # for ice coordinates
             )
 
         return self.process_volume(V, idx)

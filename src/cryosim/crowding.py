@@ -5,7 +5,7 @@ from typing import Literal
 import lightning as L
 import numpy as np
 import torch
-from rich.progress import track
+from .progress import track
 
 from . import rotations
 

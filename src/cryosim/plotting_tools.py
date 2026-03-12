@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import matplotlib.pyplot as plt
 import torch
+from .array_utils import radial_profile_2d
 
 
 def plot3d(
@@ -241,3 +242,92 @@ def radial_distribution_function(
         plt.show()
 
     return r, g_r
+
+
+def plot_particle_stack(
+    images: torch.Tensor,
+    pixel_size: float,
+    defocus_values: torch.Tensor | None = None,
+    max_images: int = 5,
+) -> None:
+    """
+    Plot cryo-EM image diagnostics: raw images, FFT magnitude, and radial power spectra.
+
+    Args:
+        images:         Stack of images, shape (N, H, W)
+        pixel_size:     Pixel size in Angstroms
+        defocus_values: Optional defocus values in Angstroms, shape (N,)
+        max_images:     Maximum number of images to display (default 5)
+    """
+    n = min(len(images), max_images)
+    images = images[:n]
+
+    # scale figure width proportionally to number of images
+    fig_w = max(2, 2 * n)
+    fig_h = 6
+
+    fig, axes = plt.subplots(
+        3,
+        n,
+        dpi=200,
+        constrained_layout=True,
+        figsize=(fig_w, fig_h),
+        gridspec_kw={"height_ratios": [2, 2, 1]},
+    )
+
+    # ensure axes is always 2D even for n=1
+    if n == 1:
+        axes = axes[:, None]
+
+    # share y axis across radial profile row
+    for ax in axes[2, 1:]:
+        ax.sharey(axes[2, 0])
+        plt.setp(ax.get_yticklabels(), visible=False)
+
+    for i in range(n):
+        img = images[i]
+        img_centered = img - torch.mean(img)
+        fft_mag = torch.abs(torch.fft.fftshift(torch.fft.fft2(img_centered)))
+
+        # --- row 0: raw image ---
+        ax = axes[0, i]
+        im = ax.imshow(img.numpy(), cmap="gray")
+        ax.set(xticks=[], yticks=[])
+        if defocus_values is not None:
+            ax.set_title(
+                f"Defocus: {defocus_values[i] / 10000:.2f} $\\mu$m", fontsize=6
+            )
+        fig.colorbar(im, ax=ax, location="bottom")
+
+        # --- row 1: FFT magnitude ---
+        ax = axes[1, i]
+        im = ax.imshow(fft_mag.numpy(), cmap="gray")
+        ax.set(xticks=[], yticks=[])
+        fig.colorbar(im, ax=ax, location="bottom")
+
+        # --- row 2: radial profile ---
+        ax = axes[2, i]
+        profile = radial_profile_2d(fft_mag)
+        n_bins = len(profile)
+
+        ax.plot(profile.numpy() if hasattr(profile, "numpy") else profile)
+
+        tick_positions = [int(j * (n_bins - 1) / 4) for j in range(5)]
+        tick_labels = []
+        for pos in tick_positions:
+            if pos == 0:
+                tick_labels.append("∞")
+            else:
+                freq = (pos / (n_bins - 1)) * (1 / (2 * pixel_size))
+                tick_labels.append(f"{1 / freq:.1f}")
+
+        ax.set_xticks(tick_positions)
+        ax.set_xticklabels(tick_labels, fontsize=5)
+        ax.set_xlim(0, n_bins - 1)
+
+    axes[0, 0].set(ylabel="Images")
+    axes[1, 0].set(ylabel="FFT")
+    axes[2, 0].set(ylabel="FFT Radial profile")
+    axes[2, n // 2].set_xlabel("Resolution (Å)")
+
+    plt.show()

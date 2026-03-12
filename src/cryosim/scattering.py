@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import lightning as L
 import torch
-from rich.progress import track
+from .progress import track
 
 from . import filters
 from .fft_tools import fft2, ifft2

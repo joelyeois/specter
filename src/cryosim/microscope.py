@@ -9,7 +9,7 @@ import torch.nn.functional as F
 
 from .fft_tools import fft2, ifft2
 from .scattering import energy_to_wavelength
-from rich.progress import track
+from .progress import track
 
 
 class Aberration(L.LightningModule):
@@ -807,8 +807,6 @@ class Detector(L.LightningModule):
         cell_id = (cell_y - cy_min) * grid_w + (cell_x - cx_min)
 
         # 4. Coincidence suppression
-        # We sort by cell_id and then by a random value to decide WHICH electron in a cell survives
-        # (Currently you just pick the 'first' one after sorting, which is fine)
         perm = torch.randperm(n_e, device=device)
         sort_idx = torch.argsort(cell_id[perm], stable=True)
         sorted_cell_id = cell_id[perm][sort_idx]

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Sequence
+from typing import Union, Sequence, Tuple
 
 import torch
 import torch.nn.functional as F
@@ -1236,3 +1236,50 @@ def radial_symmetrize(image: torch.Tensor, center: float | None = None) -> torch
     image_ring = radial_mean[r_int]
 
     return image_ring
+
+
+def center_crop(
+    x: torch.Tensor, size: Union[int, Tuple[int, ...]], dim: Union[int, Sequence[int]]
+) -> torch.Tensor:
+    """
+    Center crop a tensor along the specified axes (supports negative axes).
+
+    Parameters
+    ----------
+    x : torch.Tensor
+        Input tensor of arbitrary shape
+    size : int or tuple of int
+        Desired crop size. If int, all axes in `dim` use the same size.
+        If tuple, length must match number of axes in `dim`.
+    dim : int or sequence of int
+        Axes along which to crop. Can be negative.
+
+    Returns
+    -------
+    torch.Tensor
+        Center-cropped tensor
+    """
+    # normalize dim to list
+    if isinstance(dim, int):
+        dim = [dim]
+    dim = [d + x.ndim if d < 0 else d for d in dim]  # handle negative axes
+
+    # normalize size to list
+    if isinstance(size, int):
+        crop_size = [size] * len(dim)
+    else:
+        if len(size) != len(dim):
+            raise ValueError(
+                f"Length of size {len(size)} must match number of dims {len(dim)}"
+            )
+        crop_size = list(size)
+
+    slices = [slice(None)] * x.ndim  # default: keep all elements
+    for d, cs in zip(dim, crop_size):
+        L = x.shape[d]
+        if cs > L:
+            raise ValueError(f"Crop size {cs} is larger than axis {d} length {L}")
+        start = (L - cs) // 2
+        slices[d] = slice(start, start + cs)
+
+    return x[tuple(slices)]

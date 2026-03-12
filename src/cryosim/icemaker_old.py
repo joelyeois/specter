@@ -1,7 +1,7 @@
 import lightning as L
 import torch
 import torch.nn.functional as F
-from rich.progress import track
+from .progress import track
 from torchinterp1d import interp1d
 
 from . import pdbtools, potential
@@ -413,12 +413,7 @@ class Icemaker(L.LightningModule):
         self.frob_norm = []
         self.n_extra_atoms = []
 
-        for i in track(
-            range(niter),
-            description="Running ice algorithm",
-            transient=True,
-            disable=not (self.progressbars),
-        ):
+        for i in range(niter):
             ice_vol_f = rfftn(self.current_icedeltas)
 
             # amplitude multiplication

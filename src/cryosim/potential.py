@@ -7,7 +7,7 @@ import lightning as L
 import numpy as np
 import torch
 import torch.nn.functional as F
-from rich.progress import Progress, track
+from .progress import TqdmProgress, track
 
 from .array_utils import (
     radial_grid_2d,
@@ -270,7 +270,7 @@ class PotentialBuilder(L.LightningModule):
         Pixel/voxel size in Å.
     atomic_numbers : torch.Tensor
         Atomic numbers of all atoms in structure.
-    verbose : bool, optional
+    progressbars : bool, optional
         Enable progress bars during computation. Default is True.
     parameterization : str, optional
         Atomic potential parameterization: 'kirkland', 'lobato', or 'shtyrov'.
@@ -295,7 +295,7 @@ class PotentialBuilder(L.LightningModule):
         n_xyz: int | Sequence[int],
         dx: float,
         atomic_numbers: torch.Tensor,
-        verbose: bool = True,
+        progressbars: bool = True,
         parameterization: str = "kirkland",
         conv_backend: str = "fftconvolve",
         trainable: bool = False,
@@ -308,7 +308,7 @@ class PotentialBuilder(L.LightningModule):
         else:
             self.nx, self.ny, self.nz = n_xyz
         self.dx = dx
-        self.verbose = verbose
+        self.progressbars = progressbars
         self.conv_backend = conv_backend
         self.mmcif_filepath = mmcif_filepath
 
@@ -478,7 +478,7 @@ class PotentialBuilder(L.LightningModule):
         )
         self.occupancy = torch.zeros((B, self.nz, self.ny, self.nx), dtype=torch.bool)
 
-        with Progress(transient=True) as progress:
+        with TqdmProgress(transient=True, disable=not self.progressbars) as progress:
             # Create a single task for the outer loop
             task = progress.add_task(
                 "Building element ...", total=len(self.unique_elements)

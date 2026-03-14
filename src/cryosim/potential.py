@@ -3,9 +3,9 @@ from __future__ import annotations
 from typing import Any, Sequence
 
 import gemmi
-import lightning as L
 import numpy as np
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 from .progress import TqdmProgress, track
 
@@ -255,9 +255,9 @@ def build_potential_volume_fftconvolve_2d(
     return potential_volume, sR, atomic_potentials
 
 
-class PotentialBuilder(L.LightningModule):
+class PotentialBuilder(nn.Module):
     """
-    Lightning module for building 3D electrostatic potential volumes from atomic coordinates.
+    Module for building 3D electrostatic potential volumes from atomic coordinates.
 
     Computes potentials using supersampled atomic potential kernels and
     convolution, supporting multiple parameterizations (Kirkland, Lobato, Shtyrov).

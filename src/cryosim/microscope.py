@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from typing import Any
 
-import lightning as L
 import numpy as np
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 
 from .fft_tools import fft2, ifft2
@@ -12,7 +12,7 @@ from .scattering import energy_to_wavelength
 from .progress import track
 
 
-class Aberration(L.LightningModule):
+class Aberration(nn.Module):
     """
     An aberration module to apply microscopy aberrations to the 2D exitwaves.
 
@@ -482,7 +482,7 @@ class Aberration(L.LightningModule):
             return aberrated_exitwaves
 
 
-class Detector(L.LightningModule):
+class Detector(nn.Module):
     """
     A detector module to apply detector noise to images. Future work to include
     magnification and DQE functionality.

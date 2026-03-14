@@ -34,6 +34,72 @@ def plot3d(
     plt.show()
 
 
+try:
+    import lightning as L
+    from IPython.display import display
+
+    class VolumeMonitorCallback(L.Callback):
+        """Lightning callback that plots the reconstructed volume every N training steps."""
+
+        def __init__(self, every_n_steps: int = 100):
+            self.every_n_steps = every_n_steps
+            self._display_handle = None
+
+        def _plot_volume(self, pl_module, title):
+            vol = pl_module.V.data.detach().cpu().float()
+            fig, axes = plt.subplots(
+                1, 3, dpi=200, constrained_layout=True, figsize=(8, 3.6)
+            )
+            for i, ax in enumerate(axes.ravel()):
+                im = ax.imshow(vol.sum(i), cmap="bone")
+                ax.set(xticks=[], yticks=[], title=f"projection along axis {i}")
+                fig.colorbar(im, ax=ax, location="bottom")
+            plt.suptitle(title, fontsize=15)
+            if self._display_handle is None:
+                self._display_handle = display(fig, display_id=True)
+            else:
+                self._display_handle.update(fig)
+            plt.close(fig)
+
+        def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):
+            if trainer.global_step % self.every_n_steps != 0:
+                return
+            total = (
+                trainer.max_steps
+                if trainer.max_steps > 0
+                else trainer.estimated_stepping_batches
+            )
+            self._plot_volume(pl_module, title=f"Step {trainer.global_step} / {total}")
+
+        def on_train_batch_start(self, trainer, pl_module, batch, batch_idx):
+            # Plot after the previous epoch's symmetry has been applied
+            if batch_idx == 0 and trainer.current_epoch > 0:
+                total = (
+                    trainer.max_steps
+                    if trainer.max_steps > 0
+                    else trainer.estimated_stepping_batches
+                )
+                self._plot_volume(
+                    pl_module,
+                    title=f"Epoch {trainer.current_epoch} (Step {trainer.global_step} / {total})",
+                )
+
+        def on_train_end(self, trainer, pl_module):
+            # Plot the final epoch after symmetry
+            total = (
+                trainer.max_steps
+                if trainer.max_steps > 0
+                else trainer.estimated_stepping_batches
+            )
+            self._plot_volume(
+                pl_module,
+                title=f"Epoch {trainer.current_epoch + 1} (Step {trainer.global_step} / {total})",
+            )
+
+except ImportError:
+    pass
+
+
 def plot_slices(
     vol: torch.Tensor,
     start_idx: int = 0,

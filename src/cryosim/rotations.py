@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-import lightning as L
 import numpy as np
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 from typing import Literal, Sequence
 
@@ -529,7 +529,7 @@ def rotate_volume_fourier(
     align_corners: bool = False,
 ) -> torch.Tensor:
     # Fourier domain
-    V_f = fft3(V)  # Z x X x Y
+    V_f = fft3(V, shift=True)  # Z x X x Y
 
     # rotate real and imag parts
     V_f_rot_real = rotate_volume(
@@ -539,7 +539,7 @@ def rotate_volume_fourier(
         V_f.imag, theta, origin="relion", padding_mode="border", align_corners=False
     )
     V_f_rot = torch.complex(V_f_rot_real, V_f_rot_imag)
-    V_rot = ifft3(V_f_rot)
+    V_rot = ifft3(V_f_rot, shift=True)
     return V_rot.real  # B x Z x X x Y
 
 
@@ -663,7 +663,7 @@ def rotations_angular_difference(
     return angles
 
 
-class VolumeRotator(L.LightningModule):
+class VolumeRotator(nn.Module):
     """
     3D volume rotator with cached base grid and RELION / PyTorch center conventions.
     """

@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-import lightning as L
 import torch
+import torch.nn as nn
 
 from .crowding import CrowdWithDuplicates
 from .icemaker import Icemaker, NaiveIcemaker
 
 
-class TomogramGenerator(L.LightningModule):
+class TomogramGenerator(nn.Module):
     """
     Generates a 3D scattering potential volume (tomogram) by populating it with
     molecules and ice.

@@ -14,6 +14,7 @@ from torch.optim.lr_scheduler import (
     LRScheduler,
 )
 
+from .array_utils import compute_nps_2d
 from .fft_tools import fft3, ifft3
 from .imagegenerator import ImageGenerator
 from .symmetries import apply_symmetry, get_rotation_matrices
@@ -45,6 +46,9 @@ class Ghostbuster(L.LightningModule):
             "LambdaLR", "CosineAnnealingWarmRestarts", "MultiplicativeLR"
         ] = "LambdaLR",
         kmask: torch.Tensor | None = None,
+        nps_weight: torch.Tensor | None = None,
+        learn_noise_model: bool = False,
+        noise_ema_momentum: float = 0.9,
         flipcurvature: bool = False,
         fsc_ref: torch.Tensor | None = None,
         fsc_mask: torch.Tensor | float | None = None,
@@ -89,6 +93,13 @@ class Ghostbuster(L.LightningModule):
 
         # masks
         self.register_buffer("kmask", kmask)
+        self.register_buffer("nps_weight", nps_weight)
+
+        # learned noise model (RELION-style): sigma^2(k) estimated from residuals
+        self.learn_noise_model = learn_noise_model
+        self.noise_ema_momentum = noise_ema_momentum
+        n = V.shape[-1]
+        self.register_buffer("sigma2_k", torch.ones(n, n // 2 + 1))
 
         # fsc
         if fsc_mask is None:
@@ -221,6 +232,31 @@ class Ghostbuster(L.LightningModule):
             opts.append(optimizerD)
         return opts, lr_schedulers
 
+    def _update_sigma2(self, residuals: torch.Tensor) -> None:
+        """Update the per-shell noise variance sigma^2(k) from real-space residuals.
+
+        Mirrors the RELION noise model: the unexplained residuals are
+        radially-averaged in Fourier space (via compute_nps_2d) to estimate
+        sigma^2(k) per shell, then an EMA smooths the estimate across batches.
+
+        sigma^2(k) is normalised by its mean after each update so that the
+        relative spectral weighting adapts while the loss magnitude stays
+        stable (comparable to the nps_weight and plain-MSE modes).
+        """
+        with torch.no_grad():
+            # Raw per-shell power spectrum of residuals, shape (H, W//2+1)
+            new_sigma2 = compute_nps_2d(
+                residuals.detach(), normalize=False, zero_dc=False
+            ).clamp(min=1e-10)
+            # EMA update
+            self.sigma2_k = (
+                self.noise_ema_momentum * self.sigma2_k
+                + (1 - self.noise_ema_momentum) * new_sigma2
+            )
+            # Normalise by mean so that a flat sigma^2 gives uniform weights
+            # (i.e. loss magnitude remains comparable to real-space MSE).
+            self.sigma2_k = self.sigma2_k / self.sigma2_k.mean().clamp(min=1e-10)
+
     def _common_step(
         self, batch: tuple[torch.Tensor, torch.Tensor], batch_idx: int
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -233,9 +269,27 @@ class Ghostbuster(L.LightningModule):
         images, idx = batch
         out = self.forward(idx)
 
-        # mseloss
-        loss = F.mse_loss(images, out)
-        # loss = F.l1_loss(images, out)
+        # mseloss (real-space or NPS-weighted Fourier-space)
+        if self.learn_noise_model:
+            # RELION-style: estimate sigma^2(k) from residuals, weight by 1/sigma^2(k).
+            # sigma2_k is updated with no_grad (EM E-step); gradient flows only
+            # through the residuals (M-step).
+            images_f = torch.fft.rfft2(images)
+            out_f = torch.fft.rfft2(out)
+            H, W = images.shape[-2:]
+            self._update_sigma2(images - out)
+            loss = torch.mean(
+                (images_f - out_f).abs() ** 2 / self.sigma2_k.detach()
+            ) / (H * W)
+        elif self.nps_weight is not None:
+            images_f = torch.fft.rfft2(images)
+            out_f = torch.fft.rfft2(out)
+            H, W = images.shape[-2:]
+            # Divide by H*W so that a flat (normalised) NPS weight gives the
+            # same loss magnitude as real-space MSE (Parseval equivalence).
+            loss = torch.mean(self.nps_weight * (images_f - out_f).abs() ** 2) / (H * W)
+        else:
+            loss = F.mse_loss(images, out)
         self.log_norm_loss.append(loss.detach().cpu())
 
         # sparsity loss
@@ -300,7 +354,7 @@ class Ghostbuster(L.LightningModule):
     def on_train_batch_end(self, outputs: Any, batch: Any, batch_idx: int) -> None:
         if self.kmask is not None:
             self.V.data = torch.real(
-                ifft3(fft3(self.V.data, shift=True) * self.kmask), shift=True
+                ifft3(fft3(self.V.data, shift=True) * self.kmask, shift=True)
             )
 
     def on_train_epoch_end(self) -> None:

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 import torch
-import torch.nn as nn
+import lightning as L
 import torch.nn.functional as F
 from typing import Literal, Sequence
 
@@ -663,7 +663,7 @@ def rotations_angular_difference(
     return angles
 
 
-class VolumeRotator(nn.Module):
+class VolumeRotator(L.LightningModule):
     """
     3D volume rotator with cached base grid and RELION / PyTorch center conventions.
     """

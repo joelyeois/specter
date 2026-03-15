@@ -5,7 +5,7 @@ from typing import Any, Sequence
 import gemmi
 import numpy as np
 import torch
-import torch.nn as nn
+import lightning as L
 import torch.nn.functional as F
 from .progress import TqdmProgress, track
 
@@ -255,7 +255,7 @@ def build_potential_volume_fftconvolve_2d(
     return potential_volume, sR, atomic_potentials
 
 
-class PotentialBuilder(nn.Module):
+class PotentialBuilder(L.LightningModule):
     """
     Module for building 3D electrostatic potential volumes from atomic coordinates.
 

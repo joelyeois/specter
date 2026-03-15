@@ -4,7 +4,7 @@ from typing import Literal
 
 import numpy as np
 import torch
-import torch.nn as nn
+import lightning as L
 from .progress import track
 
 from . import rotations
@@ -533,7 +533,7 @@ def filter_by_z_density(
     return pts_filtered, z_distribution
 
 
-class CrowdWithDuplicates(nn.Module):
+class CrowdWithDuplicates(L.LightningModule):
     """
     Generates multiple duplicates of a 3D volume within a micrograph using
     Poisson-disk sampling for spatial placement and random rotations for orientation.

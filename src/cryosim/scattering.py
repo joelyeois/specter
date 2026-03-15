@@ -2,7 +2,7 @@ from __future__ import annotations
 
 
 import torch
-import torch.nn as nn
+import lightning as L
 from .progress import track
 
 from . import filters
@@ -104,7 +104,7 @@ def complex_potential(v: torch.Tensor, alpha: float = 0.1) -> torch.Tensor:
     return v * c
 
 
-class Scattering(nn.Module):
+class Scattering(L.LightningModule):
     def __init__(
         self,
         nxy: int,
@@ -430,7 +430,7 @@ class Scattering(nn.Module):
             return self.ctf(V)
 
 
-class IterativeScattering(nn.Module):
+class IterativeScattering(L.LightningModule):
     """
     Scattering module that computes the 2D exitwave from a 3D scattering
     potential using on-the-fly slice sampling. This is highly memory efficient

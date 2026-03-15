@@ -4,7 +4,7 @@ import os
 from typing import Literal, Sequence
 
 import torch
-import torch.nn as nn
+import lightning as L
 import torch.nn.functional as F
 from .progress import track
 from torchinterp1d import interp1d
@@ -96,7 +96,7 @@ def torch_peak_local_max(
     return peaks
 
 
-class Icemaker(nn.Module):
+class Icemaker(L.LightningModule):
     """
     Generates 3D ice volumes with water-like molecular structure.
 
@@ -1062,7 +1062,7 @@ class Icemaker(nn.Module):
         return big_ice[:B, : target_shape[1], : target_shape[2], : target_shape[3]]
 
 
-class NaiveIcemaker(nn.Module):
+class NaiveIcemaker(L.LightningModule):
     """
     Creates ice through random molecule placement.
 

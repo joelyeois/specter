@@ -37,6 +37,14 @@ Example (HPC, multi-GPU):
 """
 
 import argparse
+import glob
+import os
+import time
+
+from rich.console import Console
+from rich.rule import Rule
+
+_console = Console()
 
 
 def parse_args() -> argparse.Namespace:
@@ -216,6 +224,13 @@ def parse_args() -> argparse.Namespace:
         metavar="True|False",
         help="Normalize particles to zero mean and unit std.",
     )
+    parser.add_argument(
+        "--save_exitwaves",
+        type=lambda x: x.lower() == "true",
+        default=False,
+        metavar="True|False",
+        help="Save exit wave magnitude and phase as separate .mrcs files. Single-device only.",
+    )
 
     # --- Compute ---
     parser.add_argument(
@@ -251,11 +266,19 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def _crop_center(t, nxy: int):
+    """Center-crop a (..., H, W) tensor to (..., nxy, nxy). Matches Detector.forward crop."""
+    H, W = t.shape[-2], t.shape[-1]
+    if H == nxy and W == nxy:
+        return t
+    cy, cx = H // 2, W // 2
+    half = nxy // 2
+    return t[..., cy - half : cy + half + (nxy % 2), cx - half : cx + half + (nxy % 2)]
+
+
 def _section(msg: str) -> None:
-    """Print a bold yellow section separator."""
-    YELLOW_BOLD = "\033[1;33m"
-    RESET = "\033[0m"
-    print(f"\n{YELLOW_BOLD}--- {msg} ---{RESET}")
+    """Print a full-width titled rule as a section separator."""
+    _console.print(Rule(f"[bold yellow]{msg}[/bold yellow]", style="yellow"))
 
 
 def _parse_device(device_str: str) -> tuple[str, str | list[int]]:
@@ -287,27 +310,40 @@ def _parse_device(device_str: str) -> tuple[str, str | list[int]]:
     return "single", device_str
 
 
-def _generate_single(model, n: int, batchsize: int, track):
+def _generate_single(
+    model, n: int, batchsize: int, track, collect_exitwaves: bool = False
+):
     """Run image generation on a single device."""
     import torch
 
     idx = torch.arange(n)
     images = []
+    exitwaves = [] if collect_exitwaves else None
     with torch.no_grad():
         for i in track(range(0, n, batchsize), description="Generating images"):
             batch = model(idx[i : i + batchsize])
             images.append(batch.detach().cpu())
-    return torch.concat(images, dim=0)
+            if collect_exitwaves:
+                exitwaves.append(model.exitwaves.detach().cpu())
+    images = torch.concat(images, dim=0)
+    if collect_exitwaves:
+        exitwaves = torch.concat(exitwaves, dim=0)
+    return images, exitwaves
 
 
-def _generate_multi(model, n: int, batchsize: int, gpu_ids: list, output_dir: str):
+def _generate_multi(
+    model,
+    n: int,
+    batchsize: int,
+    gpu_ids: list,
+    output_dir: str,
+    collect_exitwaves: bool = False,
+):
     """Run image generation across multiple GPUs using Lightning DDP.
 
-    Returns the assembled image tensor on rank 0, None on worker ranks.
+    Returns (images, exitwaves) on rank 0, (None, None) on worker ranks.
+    exitwaves is None if collect_exitwaves is False.
     """
-    import glob
-    import os
-
     import torch
     import lightning as L
     from torch.utils.data import DataLoader
@@ -315,9 +351,23 @@ def _generate_multi(model, n: int, batchsize: int, gpu_ids: list, output_dir: st
     from typing import Any, Sequence
 
     class _Writer(BasePredictionWriter):
-        def __init__(self, out_dir: str) -> None:
+        def __init__(self, out_dir: str, save_exitwaves: bool) -> None:
             super().__init__("epoch")
             self.out_dir = out_dir
+            self.save_exitwaves = save_exitwaves
+            self._exitwaves: list = []
+
+        def on_predict_batch_end(
+            self,
+            trainer: L.Trainer,
+            pl_module: L.LightningModule,
+            outputs: Any,
+            batch: Any,
+            batch_idx: int,
+            dataloader_idx: int = 0,
+        ) -> None:
+            if self.save_exitwaves and hasattr(pl_module, "exitwaves"):
+                self._exitwaves.append(pl_module.exitwaves.cpu())
 
         def write_on_epoch_end(
             self,
@@ -326,16 +376,16 @@ def _generate_multi(model, n: int, batchsize: int, gpu_ids: list, output_dir: st
             predictions: Sequence[Any],
             batch_indices: Sequence[Any],
         ) -> None:
+            rank = trainer.global_rank
             images = torch.concat(predictions, dim=0)
-            torch.save(
-                images,
-                os.path.join(self.out_dir, f"predictions_{trainer.global_rank}.pt"),
-            )
+            torch.save(images, os.path.join(self.out_dir, f"predictions_{rank}.pt"))
             idx = torch.squeeze(torch.tensor(batch_indices)).reshape(-1)
-            torch.save(
-                idx,
-                os.path.join(self.out_dir, f"batch_indices_{trainer.global_rank}.pt"),
-            )
+            torch.save(idx, os.path.join(self.out_dir, f"batch_indices_{rank}.pt"))
+            if self.save_exitwaves and self._exitwaves:
+                torch.save(
+                    torch.cat(self._exitwaves, dim=0),
+                    os.path.join(self.out_dir, f"exitwaves_{rank}.pt"),
+                )
 
     os.makedirs(output_dir, exist_ok=True)
     dataloader = DataLoader(
@@ -352,7 +402,7 @@ def _generate_multi(model, n: int, batchsize: int, gpu_ids: list, output_dir: st
         precision="16-mixed",
         logger=False,
         enable_checkpointing=False,
-        callbacks=[_Writer(output_dir)],
+        callbacks=[_Writer(output_dir, collect_exitwaves)],
     )
 
     print(f"Running multi-GPU generation on GPUs: {gpu_ids}")
@@ -360,21 +410,31 @@ def _generate_multi(model, n: int, batchsize: int, gpu_ids: list, output_dir: st
 
     # Only rank 0 reassembles; worker ranks exit cleanly
     if trainer.global_rank != 0:
-        return None
+        return None, None
 
-    # Reassemble in original order
+    # Reassemble images in original order
     prediction_files = sorted(glob.glob(os.path.join(output_dir, "predictions_*.pt")))
     index_files = sorted(glob.glob(os.path.join(output_dir, "batch_indices_*.pt")))
 
     all_preds = torch.cat([torch.load(f) for f in prediction_files], dim=0)
     all_indices = torch.cat([torch.load(f) for f in index_files], dim=0)
-
-    images = all_preds[torch.argsort(all_indices)]
+    sort_order = torch.argsort(all_indices)
+    images = all_preds[sort_order]
 
     for f in prediction_files + index_files:
         os.remove(f)
 
-    return images
+    # Reassemble exit waves if collected
+    exitwaves = None
+    if collect_exitwaves:
+        exitwave_files = sorted(glob.glob(os.path.join(output_dir, "exitwaves_*.pt")))
+        if exitwave_files:
+            all_exitwaves = torch.cat([torch.load(f) for f in exitwave_files], dim=0)
+            exitwaves = all_exitwaves[sort_order]
+            for f in exitwave_files:
+                os.remove(f)
+
+    return images, exitwaves
 
 
 def main() -> None:
@@ -391,18 +451,14 @@ def main() -> None:
     from cryosim.potential import PotentialBuilder
     from cryosim.progress import track
 
-    import time
-
     args = parse_args()
     cryosim.set_verbosity(logging.INFO)
 
     mode, device_target = _parse_device(args.device)
     t_start = time.perf_counter()
 
-    import os as _os
-
     # LOCAL_RANK is absent in the original process and set (0, 1, ...) in DDP workers
-    is_main = "LOCAL_RANK" not in _os.environ
+    is_main = "LOCAL_RANK" not in os.environ
 
     # --- Building 3D scattering potential ---
     if is_main:
@@ -476,8 +532,13 @@ def main() -> None:
     if mode == "multi":
         if is_main:
             _section(f"Initializing multi-GPU on devices {device_target}")
-        images = _generate_multi(
-            model, n, args.batchsize, device_target, args.output_dir
+        images, exitwaves = _generate_multi(
+            model,
+            n,
+            args.batchsize,
+            device_target,
+            args.output_dir,
+            collect_exitwaves=args.save_exitwaves,
         )
         if images is None:
             return  # worker rank — rank 0 handles saving
@@ -485,7 +546,9 @@ def main() -> None:
         if is_main:
             _section(f"Generating images on {device_target}")
         model = model.to(device_target)
-        images = _generate_single(model, n, args.batchsize, track)
+        images, exitwaves = _generate_single(
+            model, n, args.batchsize, track, collect_exitwaves=args.save_exitwaves
+        )
 
     # --- Post-processing ---
     if is_main:
@@ -510,15 +573,38 @@ def main() -> None:
         folderpath=args.output_dir,
     )
 
+    if exitwaves is not None and is_main:
+        import mrcfile
+
+        _section("Saving exit waves")
+        os.makedirs(args.output_dir, exist_ok=True)
+        if args.pad_fft:
+            exitwaves = _crop_center(exitwaves, args.num_pixels)
+        mag = exitwaves.abs().numpy().astype("float32")
+        phase = exitwaves.angle().numpy().astype("float32")
+        mag_path = os.path.join(
+            args.output_dir, args.filename + "_exitwave_magnitude.mrcs"
+        )
+        phase_path = os.path.join(
+            args.output_dir, args.filename + "_exitwave_phase.mrcs"
+        )
+        with mrcfile.new(mag_path, overwrite=True) as mrc:
+            mrc.set_data(mag)
+        _console.print(f"  [green]✓[/green] {mag_path}")
+        with mrcfile.new(phase_path, overwrite=True) as mrc:
+            mrc.set_data(phase)
+        _console.print(f"  [green]✓[/green] {phase_path}")
+
     elapsed = time.perf_counter() - t_start
     h, rem = divmod(int(elapsed), 3600)
     m, s = divmod(rem, 60)
     if h > 0:
-        print(f"Total time: {h}h {m}m {s}s")
+        time_str = f"{h}h {m}m {s}s"
     elif m > 0:
-        print(f"Total time: {m}m {s}s")
+        time_str = f"{m}m {s}s"
     else:
-        print(f"Total time: {s}s")
+        time_str = f"{s}s"
+    _console.print(f"\n[bold]Total time:[/bold] {time_str}")
 
 
 if __name__ == "__main__":

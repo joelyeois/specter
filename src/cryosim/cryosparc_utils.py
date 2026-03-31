@@ -9,7 +9,10 @@ import pandas as pd
 import starfile
 import torch
 from cryosparc.dataset import Dataset
+from rich.console import Console
 from scipy.spatial.transform import Rotation
+
+_console = Console()
 
 
 def extract_parameters_from_csfile(
@@ -273,7 +276,7 @@ def create_particle_starfile(
     with mrcfile.new(mrcs_path, overwrite=True) as mrc:
         mrc.set_data(particles.numpy().astype(np.float32))
 
-    print("Saved particles at: " + mrcs_path)
+    _console.print(f"  [green]✓[/green] {mrcs_path}")
 
     # convert rotations to Relion euler
     if len(rotations.shape) == 3:
@@ -328,4 +331,4 @@ def create_particle_starfile(
 
     star_path = os.path.join(folderpath, filename + ".star")
     starfile.write(particles_df, star_path, overwrite=True)
-    print("Saved particles metadata at: " + star_path)
+    _console.print(f"  [green]✓[/green] {star_path}")

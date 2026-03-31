@@ -47,3 +47,136 @@ Run the notebooks (you must install jupyter yourself):
 jupyter lab
 ```
 
+---
+
+## Demo scripts
+
+Ready-to-run CLI scripts are in `demo-scripts/`. Activate the environment first (`source .venv/bin/activate`).
+
+### `generate_particle_stack.py`
+
+Simulate a particle stack with randomly sampled poses and CTF parameters.
+
+```bash
+python demo-scripts/generate_particle_stack.py \
+    --pdb_code 6bdf \
+    --n_particles 1000 \
+    --num_pixels 256 \
+    --pixel_size 1.056 \
+    --energy 300 \
+    --dose 53 \
+    --defocus_min 5000 \
+    --defocus_max 15000 \
+    --cs 2.7 \
+    --alpha 0.07 \
+    --noise_model poisson \
+    --coincidence_radius 2.1 \
+    --ice_model iterative \
+    --normalize_particles True \
+    --device cuda:0 \
+    --batchsize 5 \
+    --output_dir ./output/ \
+    --filename my_stack
+```
+
+| Argument | Default | Description |
+|---|---|---|
+| `--pdb_code` | *(required)* | PDB accession code or path to local `.cif`/`.pdb` file |
+| `--n_particles` | `20` | Number of particles to simulate |
+| `--num_pixels` | `256` | Box size in pixels |
+| `--pixel_size` | `1.0` | Pixel size in Å |
+| `--energy` | `300.0` | Beam energy in keV |
+| `--dose` | `20.0` | Electron dose in e⁻/Å² |
+| `--num_frames` | `int(dose)` | Number of frames |
+| `--cs` | `2.0` | Spherical aberration in mm |
+| `--alpha` | `0.1` | Amplitude contrast ratio |
+| `--defocus_min/max` | `5000/15000` | Defocus range in Å |
+| `--shift` | `2.0` | Max in-plane shift in Å (uniform ±shift) |
+| `--scattering_model` | `multislice` | `multislice` \| `firstborn` \| `projection` \| `ctf` |
+| `--aberration_model` | `holography` | `holography` \| `ctf` |
+| `--noise_model` | `poisson` | `poisson` \| `none` |
+| `--coincidence_radius` | `1.8` | Coincidence loss radius in Å; `0` for standard Poisson |
+| `--ice_model` | `iterative` | `iterative` \| `randomchoice` \| `none` |
+| `--ice_thickness` | `0.0` | Ice thickness in Å; `0` = minimum (particle box size) |
+| `--crowd_min_distance` | `pdb.max_diameter` | Min distance between crowded molecules in Å; `0` disables crowding |
+| `--crowd_max_distance_z` | `None` | Max z-separation between crowded molecules in Å |
+| `--pad_fft` | `True` | Pad volume to avoid FFT edge artefacts |
+| `--detector_model` | `none` | `none` \| `perfect` \| `k3_300kv` \| `k3_200kv` |
+| `--normalize_particles` | `True` | Normalise to zero mean and unit std |
+| `--save_exitwaves` | `False` | Also save exit wave magnitude and phase as `.mrcs` |
+| `--device` | `cpu` | `cpu` \| `cuda` \| `cuda:0` \| `0,1,2,3` (multi-GPU) |
+| `--batchsize` | `5` | Particles per forward pass |
+| `--output_dir` | `./output/` | Output directory |
+| `--filename` | `particles` | Base name for output files (no extension) |
+
+---
+
+### `generate_particle_stack_from_csfile.py`
+
+Simulate a particle stack using poses and CTF parameters from a CryoSPARC `.cs` file. Energy, pixel size, and amplitude contrast are read directly from the file — no need to specify them manually.
+
+```bash
+python demo-scripts/generate_particle_stack_from_csfile.py \
+    --cs_path /path/to/particles.cs \
+    --pdb_code 6bdf \
+    --n_particles 1000 \
+    --num_pixels 256 \
+    --dose 53 \
+    --noise_model poisson \
+    --coincidence_radius 2.1 \
+    --ice_model iterative \
+    --normalize_particles True \
+    --device 0,1,2,3 \
+    --batchsize 5 \
+    --output_dir ./output/ \
+    --filename my_stack_from_cs
+```
+
+| Argument | Default | Description |
+|---|---|---|
+| `--cs_path` | *(required)* | Path to CryoSPARC `.cs` file |
+| `--pdb_code` | *(required)* | PDB accession code or path to local `.cif`/`.pdb` file |
+| `--dose` | *(required)* | Electron dose in e⁻/Å² (check the EMDB Experiment tab) |
+| `--n_particles` | all in file | Number of particles to simulate |
+| `--num_pixels` | `256` | Box size in pixels |
+| `--num_frames` | `int(dose)` | Number of frames |
+| `--scattering_model` | `multislice` | `multislice` \| `firstborn` \| `projection` \| `ctf` |
+| `--aberration_model` | `holography` | `holography` \| `ctf` |
+| `--noise_model` | `poisson` | `poisson` \| `none` |
+| `--coincidence_radius` | `2.1` | Coincidence loss radius in Å; `0` for standard Poisson |
+| `--ice_model` | `iterative` | `iterative` \| `randomchoice` \| `none` |
+| `--ice_thickness` | `0.0` | Ice thickness in Å; `0` = minimum (particle box size) |
+| `--crowd_min_distance` | `pdb.max_diameter` | Min distance between crowded molecules in Å; `0` disables crowding |
+| `--crowd_max_distance_z` | `None` | Max z-separation between crowded molecules in Å |
+| `--pad_fft` | `True` | Pad volume to avoid FFT edge artefacts |
+| `--detector_model` | `none` | `none` \| `perfect` \| `k3_300kv` \| `k3_200kv` |
+| `--normalize_particles` | `True` | Normalise to zero mean and unit std |
+| `--save_exitwaves` | `False` | Also save exit wave magnitude and phase as `.mrcs` |
+| `--device` | `cpu` | `cpu` \| `cuda` \| `cuda:0` \| `0,1,2,3` (multi-GPU) |
+| `--batchsize` | `5` | Particles per forward pass |
+| `--output_dir` | `./output/` | Output directory |
+| `--filename` | `particles` | Base name for output files (no extension) |
+
+---
+
+### Output files
+
+Both scripts write to `--output_dir`:
+
+| File | Description |
+|---|---|
+| `<filename>.mrcs` | Particle image stack |
+| `<filename>.star` | RELION-compatible metadata (poses, CTF, pixel size, voltage) |
+| `<filename>_exitwave_magnitude.mrcs` | Exit wave magnitude (`--save_exitwaves True` only) |
+| `<filename>_exitwave_phase.mrcs` | Exit wave phase (`--save_exitwaves True` only) |
+
+### Multi-GPU
+
+Pass a comma-separated list of GPU IDs to `--device` to use Lightning DDP:
+
+```bash
+--device 0,1,2,3   # multi-GPU
+--device cuda:0    # single GPU
+--device cpu       # CPU
+```
+

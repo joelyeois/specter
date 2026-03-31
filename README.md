@@ -51,7 +51,7 @@ jupyter lab
 
 ## Demo scripts
 
-Ready-to-run CLI scripts are in `demo-scripts/`. Activate the environment first (`source .venv/bin/activate`).
+Ready-to-run CLI scripts are in `demo-scripts/`. Activate the environment first (`source .venv/bin/activate`), or you may also run the scripts via `uv run <script name>.py`.
 
 ### `generate_particle_stack.py`
 

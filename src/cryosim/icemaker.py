@@ -9,10 +9,17 @@ import torch.nn.functional as F
 from .progress import track
 from torchinterp1d import interp1d
 
-from . import pdbtools, potential
-from .array_utils import grid_3d, radial_grid_3d, radial_profile_3d, real_to_kgrid_3d
+from . import potential
+from .array_utils import (
+    grid_3d,
+    radial_grid_3d,
+    radial_profile_3d,
+    real_to_kgrid_3d,
+    soft_voxelize_coordinates,
+)
 from .atom import kirkland_atomic_potential_3d, lobato_atomic_potential_3d
 from .fft_tools import fft3, fftconvolve
+from cryosim.pdbtools import PDB
 
 avogadro = 6.02214076e23
 density_of_amorphous_ice = 0.94  # [g/cm3]
@@ -178,6 +185,7 @@ class Icemaker(L.LightningModule):
         self.v = self.dv * self.nv
         min_distance_vox = int(min_distance / dx)
         min_distance_actual = min_distance_vox * dx
+        self.min_distance = min_distance
         self.correction_factor = correction_factor
         if correction_factor is None:
             self.correction_factor = (min_distance / min_distance_actual) ** 3
@@ -231,18 +239,23 @@ class Icemaker(L.LightningModule):
         ):
             coordstart = frame + 9
             coords = self.get_coordinates_from_frame(coordstart)
-
-            # recenters coordinates onto origin (0,0,0)
-            center = pdbtools.center_of_particle(coords)
-            centered_coords = coords - center.reshape(1, -1)
+            centered_coords = PDB.center_coordinates(coords)
             centered_coords = self.trim_coordinates(
                 centered_coords, trim_size=trim_size
             )
 
-            mdsim_ice_delta = torch.zeros(self.mdsim_n, self.mdsim_n, self.mdsim_n)
-            for cc in centered_coords:
-                xi, yi, zi = potential.nearest_index(x, y, z, cc[0], cc[1], cc[2])
-                mdsim_ice_delta[zi, yi, xi] = 1
+            # mdsim_ice_delta = torch.zeros(self.mdsim_n, self.mdsim_n, self.mdsim_n)
+            # for cc in centered_coords:
+            #     xi, yi, zi = potential.nearest_index(x, y, z, cc[0], cc[1], cc[2])
+            #     mdsim_ice_delta[zi, yi, xi] = 1
+
+            # populate elemental volume with delta function atoms
+            # soft_voxelize_atoms is differentiable w.r.t. coordinates.
+            mdsim_ice_delta = soft_voxelize_coordinates(
+                centered_coords.reshape(-1, 3),
+                grid_shape=(self.mdsim_n, self.mdsim_n, self.mdsim_n),
+                voxel_size=self.mdsim_dx,
+            )
 
             mdsim_ice_deltas.append(mdsim_ice_delta)
             self.mdsim_ice_coordinates.append(centered_coords)
@@ -412,6 +425,43 @@ class Icemaker(L.LightningModule):
         ice_vol_init = ice_vol_init.view(batchsize, self.nz, self.n, self.n)
         return ice_vol_init
 
+    def _compute_interp_f_halfkernel(
+        self, dx: float, n_ice_molecules: int
+    ) -> torch.Tensor:
+        """
+        Compute the Fourier amplitude halfkernel for a given voxel size.
+
+        Parameters
+        ----------
+        dx : float
+            Voxel size in Angstroms.
+        n_ice_molecules : int
+            Number of ice molecules for this voxel size.
+
+        Returns
+        -------
+        interp_f_halfkernel : torch.Tensor
+            Half-kernel for use with rfftn, shape (nz, n, n//2 + 1).
+        """
+        # Create frequency grid for the given dx
+        kx = torch.fft.fftshift(torch.fft.fftfreq(self.n, dx))
+        ky = kx
+        kz = torch.fft.fftshift(torch.fft.fftfreq(self.nz, dx))
+        KZ, KY, KX = torch.meshgrid(kz, ky, kx, indexing="ij")
+        K = torch.sqrt(KX**2 + KY**2 + KZ**2)
+
+        # Interpolate MD simulation data onto this grid
+        interp = interp1d(
+            self.mdsim_radial_k[1:], self.mdsim_f_radial_avg[1:], K.ravel()
+        )
+
+        # Build kernel and set DC value
+        interp_f_kernel = interp.reshape(self.nz, self.n, self.n)
+        interp_f_kernel[self.nz // 2, self.n // 2, self.n // 2] = n_ice_molecules
+
+        # Extract half kernel for rfftn
+        return torch.flip(interp_f_kernel[:, :, : self.n // 2 + 1], dims=[2])
+
     def interpolate_mdsim_f_kernel(self) -> None:
         """
         Generate a 3D Fourier amplitude kernel for ice generation.
@@ -451,6 +501,7 @@ class Icemaker(L.LightningModule):
         add_extra_molecules: bool = True,
         batchsize: int = 1,
         reduce_fraction: float = 1.0,
+        dx: float | None = None,
     ) -> None:
         """
         Iteratively generate ice volume using Fourier amplitude kernel.
@@ -469,6 +520,9 @@ class Icemaker(L.LightningModule):
         reduce_fraction : float, optional
             Fraction of target number of molecules to initially target with peak finding.
             Default is 1.0.
+        dx : float, optional
+            Voxel size in Angstroms for interpreting the grid. If None, uses `self.dx`.
+            Default is None. This affects the min_distance voxel calculation.
 
         Notes
         -----
@@ -485,21 +539,37 @@ class Icemaker(L.LightningModule):
         self.niter = niter
         if min_distance is None:
             min_distance = self.min_distance
+        if dx is None:
+            dx = self.dx
+
+        # Compute n_ice_molecules for the given dx
+        dv = dx**3
+        v = dv * self.nv
+        min_distance_vox = int(min_distance / dx)
+        min_distance_actual = min_distance_vox * dx
+        correction_factor = (min_distance / min_distance_actual) ** 3
+        n_ice_molecules = int(ndensity_of_amorphous_ice * v / correction_factor)
 
         self.frob_norm = []
         self.n_extra_atoms = []
+
+        # Compute halfkernel for the given dx
+        if dx != self.dx:
+            interp_f_halfkernel = self._compute_interp_f_halfkernel(dx, n_ice_molecules)
+        else:
+            interp_f_halfkernel = self.interp_f_halfkernel
 
         for i in range(niter):
             ice_vol_f = rfftn(self.current_icedeltas)
 
             # amplitude multiplication
-            ice_vol_f *= self.interp_f_halfkernel.unsqueeze(0)
+            ice_vol_f *= interp_f_halfkernel.unsqueeze(0)
 
             new_ice = torch.abs(self.irfftn(ice_vol_f))
             peaks = torch_peak_local_max(
                 new_ice,
-                num_peaks=int(self.n_ice_molecules * reduce_fraction),
-                min_distance=int(min_distance / self.dx),
+                num_peaks=int(n_ice_molecules * reduce_fraction),
+                min_distance=int(min_distance / dx),
             )
 
             # ice_vol shape: (B, nz, n, n)
@@ -1060,6 +1130,91 @@ class Icemaker(L.LightningModule):
         # 5) randomized assembly into requested binned shape
         big_ice = assemble_volume_randomized(convolved, target_shape)
         return big_ice[:B, : target_shape[1], : target_shape[2], : target_shape[3]]
+
+    def generate_big_ice_interpolate(
+        self, shape: Sequence[int], n_blocks: int = 8, algorithm_dx: float = 0.5
+    ) -> torch.Tensor:
+        """
+        Generate a large ice volume by tiling interpolated blocks.
+
+        Computes the ice algorithm at `algorithm_dx` resolution, then interpolates to self.dx
+        (the user's target voxel size).
+
+        Workflow:
+        1) generate `n_blocks` ice delta cubes
+        2) replace outer faces for boundary robustness
+        3) convolve all unique cubes with kernel at algorithm_dx
+        4) interpolate each convolved cube to self.dx
+        5) assemble large volume using randomized block tiling
+
+        Parameters
+        ----------
+        shape : tuple of int
+            Target shape (nz, ny, nx) in pixels.
+        n_blocks : int, optional
+            Number of unique blocks to generate. Default is 8.
+        algorithm_dx : float, optional
+            Voxel size in Angstroms at which to run the ice generation algorithm.
+            The algorithm is most stable at 0.5A. Default is 0.5.
+
+        Returns
+        -------
+        big_ice : torch.Tensor
+            Generated large ice volume of shape (1, nz, ny, nx) at self.dx voxel size.
+        """
+        if not isinstance(n_blocks, int) or n_blocks < 1:
+            raise ValueError("n_blocks must be an integer >= 1")
+        if algorithm_dx <= 0:
+            raise ValueError("algorithm_dx must be positive")
+
+        nz, ny, nx = shape
+        target_shape = (1, nz, ny, nx)
+
+        # Compute interpolated block size
+        # Native block: 256 pixels at algorithm_dx covers 256*algorithm_dx A
+        # Interpolated block covers same physical size at self.dx
+        interpolated_block_size = int(
+            torch.ceil(torch.as_tensor(256 * algorithm_dx / self.dx))
+        )
+
+        print(
+            f"Generating {n_blocks} blocks at {algorithm_dx}A, interpolating to {self.dx}A"
+        )
+        print(f"Interpolated block size: {interpolated_block_size}^3 at {self.dx}A")
+
+        # 1) generate unique delta cubes at algorithm_dx resolution
+        self.generate_ice_deltas(batchsize=n_blocks, dx=algorithm_dx)
+        icedeltas = self.current_icedeltas.cpu()
+
+        # 2) clean cube faces
+        icedeltas = replace_outer_faces(icedeltas)
+
+        # 3) convolve at algorithm_dx resolution
+        kernel = self.create_ice_kernel(dx=algorithm_dx).to(self.device)
+        convolved = fftconvolve(
+            icedeltas.to(kernel.device),
+            kernel.unsqueeze(0),
+            mode="same",
+            axes=(-3, -2, -1),
+        ).cpu()
+
+        # 4) interpolate each block to self.dx
+        interpolated_blocks = F.interpolate(
+            convolved.unsqueeze(1),  # (n_blocks, 1, 256, 256, 256)
+            size=(
+                interpolated_block_size,
+                interpolated_block_size,
+                interpolated_block_size,
+            ),
+            mode="trilinear",
+            align_corners=False,
+        ).squeeze(
+            1
+        )  # (n_blocks, interpolated_block_size, interpolated_block_size, interpolated_block_size)
+
+        # 5) randomized assembly into requested shape
+        big_ice = assemble_volume_randomized(interpolated_blocks, target_shape)
+        return big_ice[:, : target_shape[1], : target_shape[2], : target_shape[3]]
 
 
 class NaiveIcemaker(L.LightningModule):

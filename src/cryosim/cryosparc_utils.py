@@ -228,8 +228,7 @@ def create_particle_starfile(
     folderpath: str = "",
     energy: float | None = None,
     dx: float | None = None,
-    starfilename: str = "particles",
-    mrcfilename: str | None = None,
+    filename: str = "particles",
     ctf_params: torch.Tensor | None = None,
 ) -> str:
     """
@@ -252,10 +251,8 @@ def create_particle_starfile(
         Electron beam energy in kV. Required.
     dx : float, optional
         Pixel size in Ångstrom. Required.
-    starfilename : str, optional
-        Name of the output STAR file (without extension). Default is "particles".
-    mrcfilename : str, optional
-        Name of the output MRCS file (without extension). Defaults to `starfilename`.
+    filename : str, optional
+        Name of the output starfile and mrcfile (without extension). Default is "particles".
     ctf_params : torch.Tensor, optional
         CTF parameters for each particle, shape (N, K).
         Expected columns: [Cs (Å), dfu (Å), dfv (Å), dfang (rad), ..., phaseshift (rad)].
@@ -272,11 +269,11 @@ def create_particle_starfile(
             os.makedirs(folderpath)
 
     # create projections mrcs file
-    if mrcfilename is None:
-        mrcfilename = starfilename
-    mrcs_path = os.path.join(folderpath, mrcfilename + ".mrcs")
+    mrcs_path = os.path.join(folderpath, filename + ".mrcs")
     with mrcfile.new(mrcs_path, overwrite=True) as mrc:
         mrc.set_data(particles.numpy().astype(np.float32))
+
+    print("Saved particles at: " + mrcs_path)
 
     # convert rotations to Relion euler
     if len(rotations.shape) == 3:
@@ -292,27 +289,43 @@ def create_particle_starfile(
 
     # create associated starfile
     n = len(particles)
+
+    # support both dict and 2-D tensor for ctf_params
+    if isinstance(ctf_params, dict):
+        zeros = torch.zeros(n)
+        cs_A = ctf_params.get("cs", zeros)
+        dfu = ctf_params.get("dfu", zeros)
+        dfv = ctf_params.get("dfv", dfu)
+        dfang = ctf_params.get("dfang", zeros)
+        pshift = ctf_params.get("phaseshift", zeros)
+    else:
+        cs_A = ctf_params[:, 0]
+        dfu = ctf_params[:, 1]
+        dfv = ctf_params[:, 2]
+        dfang = ctf_params[:, 3]
+        pshift = ctf_params[:, 5]
+
     d = {
         "rlnVoltage": energy,
-        "rlnSphericalAberration": ctf_params[:, 0] / 1e7,
+        "rlnSphericalAberration": cs_A / 1e7,
         "rlnAmplitudeContrast": alpha,
         "rlnImagePixelSize": dx,
         "rlnAngleRot": euler[:, 0],
         "rlnAngleTilt": euler[:, 1],
         "rlnAnglePsi": euler[:, 2],
-        "rlnImageName": [str(i) + "@" + mrcfilename + ".mrcs" for i in range(1, n + 1)],
+        "rlnImageName": [str(i) + "@" + filename + ".mrcs" for i in range(1, n + 1)],
     }
 
-    d["rlnDefocusU"] = ctf_params[:, 1]
-    d["rlnDefocusV"] = ctf_params[:, 2]
-    d["rlnDefocusAngle"] = ctf_params[:, 3]
-    d["rlnPhaseShift"] = ctf_params[:, 5]
+    d["rlnDefocusU"] = dfu
+    d["rlnDefocusV"] = dfv
+    d["rlnDefocusAngle"] = dfang
+    d["rlnPhaseShift"] = pshift
 
     d["rlnOriginXAngst"] = translations[:, 0]
     d["rlnOriginYAngst"] = translations[:, 1]
 
     particles_df = pd.DataFrame(data=d)
 
-    star_path = os.path.join(folderpath, starfilename + ".star")
+    star_path = os.path.join(folderpath, filename + ".star")
     starfile.write(particles_df, star_path, overwrite=True)
-    print("Saved at: " + star_path)
+    print("Saved particles metadata at: " + star_path)

@@ -544,9 +544,9 @@ class ImageGeneratorFromCoordinates(BaseImageGenerator, VolumeProcessingMixin):
         # adds perturbation to coordinates
         if self.mean_squared_displacement_per_dose != 0.0:
             msd = self.mean_squared_displacement_per_dose * self.dose_per_angstrom
-            sigma_angstrom = (msd / 3) ** 0.5
-            sigma_pixel = sigma_angstrom / self.pixel_size
-            self.coordinates += torch.randn_like(self.coordinates) * sigma_pixel
+            self.sigma_angstrom = (msd / 3) ** 0.5
+            # coordinates are in Ångstroms, so perturb by sigma_angstrom directly
+            self.coordinates += torch.randn_like(self.coordinates) * self.sigma_angstrom
 
         # rotate coordinates, returns (B x N x 3)
         coordinates = self.rotate(self.quaternions[idx], self.translations[idx])
@@ -586,7 +586,6 @@ class ImageGeneratorFromCoordinates(BaseImageGenerator, VolumeProcessingMixin):
                 # mode="constant",
                 mode="reflect",  # for ice coordinates
             )
-
         return self.process_volume(V, idx)
 
 

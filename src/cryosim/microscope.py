@@ -474,8 +474,8 @@ class Aberration(L.LightningModule):
         Applies transfer function in Fourier space:
         ψ_aberrated = FFT⁻¹[FFT[ψ] * T(CTF)]
         """
-        f = self.transfer_function(ctf_params)
-        aberrated_exitwaves = ifft2(fft2(exitwave) * f)
+        self.tf = self.transfer_function(ctf_params)
+        aberrated_exitwaves = ifft2(fft2(exitwave) * self.tf)
         if self.aberration_model == "ctf":
             return torch.real(aberrated_exitwaves)
         elif self.aberration_model == "holography":
@@ -666,7 +666,8 @@ class Detector(L.LightningModule):
 
         if self.noise_model is None:
             return images
-        elif self.noise_model == "poisson":
+        # elif self.noise_model == "poisson":
+        else:
             if images.ndim == 3:
                 return torch.stack([self.apply_coincidence(img) for img in images])
             else:

@@ -23,6 +23,7 @@ uv.lock
 
 # Jupyter
 .ipynb_checkpoints/
+dev-notebooks/
 
 # Other system files
 .DS_Store

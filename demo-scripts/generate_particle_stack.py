@@ -229,7 +229,14 @@ def parse_args() -> argparse.Namespace:
         type=lambda x: x.lower() == "true",
         default=False,
         metavar="True|False",
-        help="Save exit wave magnitude and phase as separate .mrcs files. Single-device only.",
+        help="Save exit wave magnitude and phase as separate .mrcs files.",
+    )
+    parser.add_argument(
+        "--save_clean_exitwaves",
+        type=lambda x: x.lower() == "true",
+        default=False,
+        metavar="True|False",
+        help="Save clean (particle-only, no ice) exit wave magnitude and phase. Runs scattering twice per batch.",
     )
 
     # --- Compute ---
@@ -311,7 +318,12 @@ def _parse_device(device_str: str) -> tuple[str, str | list[int]]:
 
 
 def _generate_single(
-    model, n: int, batchsize: int, track, collect_exitwaves: bool = False
+    model,
+    n: int,
+    batchsize: int,
+    track,
+    collect_exitwaves: bool = False,
+    collect_clean_exitwaves: bool = False,
 ):
     """Run image generation on a single device."""
     import torch
@@ -319,16 +331,21 @@ def _generate_single(
     idx = torch.arange(n)
     images = []
     exitwaves = [] if collect_exitwaves else None
+    clean_exitwaves = [] if collect_clean_exitwaves else None
     with torch.no_grad():
         for i in track(range(0, n, batchsize), description="Generating images"):
             batch = model(idx[i : i + batchsize])
             images.append(batch.detach().cpu())
             if collect_exitwaves:
                 exitwaves.append(model.exitwaves.detach().cpu())
+            if collect_clean_exitwaves:
+                clean_exitwaves.append(model.clean_exitwaves.detach().cpu())
     images = torch.concat(images, dim=0)
     if collect_exitwaves:
         exitwaves = torch.concat(exitwaves, dim=0)
-    return images, exitwaves
+    if collect_clean_exitwaves:
+        clean_exitwaves = torch.concat(clean_exitwaves, dim=0)
+    return images, exitwaves, clean_exitwaves
 
 
 def _generate_multi(
@@ -338,11 +355,12 @@ def _generate_multi(
     gpu_ids: list,
     output_dir: str,
     collect_exitwaves: bool = False,
+    collect_clean_exitwaves: bool = False,
 ):
     """Run image generation across multiple GPUs using Lightning DDP.
 
-    Returns (images, exitwaves) on rank 0, (None, None) on worker ranks.
-    exitwaves is None if collect_exitwaves is False.
+    Returns (images, exitwaves, clean_exitwaves) on rank 0, (None, None, None) on worker ranks.
+    exitwaves / clean_exitwaves are None if their collect flag is False.
     """
     import torch
     import lightning as L
@@ -351,11 +369,15 @@ def _generate_multi(
     from typing import Any, Sequence
 
     class _Writer(BasePredictionWriter):
-        def __init__(self, out_dir: str, save_exitwaves: bool) -> None:
+        def __init__(
+            self, out_dir: str, save_exitwaves: bool, save_clean_exitwaves: bool
+        ) -> None:
             super().__init__("epoch")
             self.out_dir = out_dir
             self.save_exitwaves = save_exitwaves
+            self.save_clean_exitwaves = save_clean_exitwaves
             self._exitwaves: list = []
+            self._clean_exitwaves: list = []
 
         def on_predict_batch_end(
             self,
@@ -368,6 +390,8 @@ def _generate_multi(
         ) -> None:
             if self.save_exitwaves and hasattr(pl_module, "exitwaves"):
                 self._exitwaves.append(pl_module.exitwaves.cpu())
+            if self.save_clean_exitwaves and hasattr(pl_module, "clean_exitwaves"):
+                self._clean_exitwaves.append(pl_module.clean_exitwaves.cpu())
 
         def write_on_epoch_end(
             self,
@@ -386,6 +410,11 @@ def _generate_multi(
                     torch.cat(self._exitwaves, dim=0),
                     os.path.join(self.out_dir, f"exitwaves_{rank}.pt"),
                 )
+            if self.save_clean_exitwaves and self._clean_exitwaves:
+                torch.save(
+                    torch.cat(self._clean_exitwaves, dim=0),
+                    os.path.join(self.out_dir, f"clean_exitwaves_{rank}.pt"),
+                )
 
     os.makedirs(output_dir, exist_ok=True)
     dataloader = DataLoader(
@@ -402,7 +431,7 @@ def _generate_multi(
         precision="16-mixed",
         logger=False,
         enable_checkpointing=False,
-        callbacks=[_Writer(output_dir, collect_exitwaves)],
+        callbacks=[_Writer(output_dir, collect_exitwaves, collect_clean_exitwaves)],
     )
 
     print(f"Running multi-GPU generation on GPUs: {gpu_ids}")
@@ -410,7 +439,7 @@ def _generate_multi(
 
     # Only rank 0 reassembles; worker ranks exit cleanly
     if trainer.global_rank != 0:
-        return None, None
+        return None, None, None
 
     # Reassemble images in original order
     prediction_files = sorted(glob.glob(os.path.join(output_dir, "predictions_*.pt")))
@@ -434,7 +463,19 @@ def _generate_multi(
             for f in exitwave_files:
                 os.remove(f)
 
-    return images, exitwaves
+    # Reassemble clean exit waves if collected
+    clean_exitwaves = None
+    if collect_clean_exitwaves:
+        clean_files = sorted(
+            glob.glob(os.path.join(output_dir, "clean_exitwaves_*.pt"))
+        )
+        if clean_files:
+            all_clean = torch.cat([torch.load(f) for f in clean_files], dim=0)
+            clean_exitwaves = all_clean[sort_order]
+            for f in clean_files:
+                os.remove(f)
+
+    return images, exitwaves, clean_exitwaves
 
 
 def main() -> None:
@@ -528,17 +569,21 @@ def main() -> None:
         num_frames=num_frames,
     )
 
+    if args.save_clean_exitwaves:
+        model.save_clean_exitwaves = True
+
     # --- Generating images ---
     if mode == "multi":
         if is_main:
             _section(f"Initializing multi-GPU on devices {device_target}")
-        images, exitwaves = _generate_multi(
+        images, exitwaves, clean_exitwaves = _generate_multi(
             model,
             n,
             args.batchsize,
             device_target,
             args.output_dir,
             collect_exitwaves=args.save_exitwaves,
+            collect_clean_exitwaves=args.save_clean_exitwaves,
         )
         if images is None:
             return  # worker rank — rank 0 handles saving
@@ -546,8 +591,13 @@ def main() -> None:
         if is_main:
             _section(f"Generating images on {device_target}")
         model = model.to(device_target)
-        images, exitwaves = _generate_single(
-            model, n, args.batchsize, track, collect_exitwaves=args.save_exitwaves
+        images, exitwaves, clean_exitwaves = _generate_single(
+            model,
+            n,
+            args.batchsize,
+            track,
+            collect_exitwaves=args.save_exitwaves,
+            collect_clean_exitwaves=args.save_clean_exitwaves,
         )
 
     # --- Post-processing ---
@@ -573,27 +623,33 @@ def main() -> None:
         folderpath=args.output_dir,
     )
 
-    if exitwaves is not None and is_main:
+    if is_main:
         import mrcfile
 
-        _section("Saving exit waves")
-        os.makedirs(args.output_dir, exist_ok=True)
-        if args.pad_fft:
-            exitwaves = _crop_center(exitwaves, args.num_pixels)
-        mag = exitwaves.abs().numpy().astype("float32")
-        phase = exitwaves.angle().numpy().astype("float32")
-        mag_path = os.path.join(
-            args.output_dir, args.filename + "_exitwave_magnitude.mrcs"
-        )
-        phase_path = os.path.join(
-            args.output_dir, args.filename + "_exitwave_phase.mrcs"
-        )
-        with mrcfile.new(mag_path, overwrite=True) as mrc:
-            mrc.set_data(mag)
-        _console.print(f"  [green]✓[/green] {mag_path}")
-        with mrcfile.new(phase_path, overwrite=True) as mrc:
-            mrc.set_data(phase)
-        _console.print(f"  [green]✓[/green] {phase_path}")
+        def _save_exitwave_pair(ew, suffix: str) -> None:
+            if args.pad_fft:
+                ew = _crop_center(ew, args.num_pixels)
+            os.makedirs(args.output_dir, exist_ok=True)
+            mag_path = os.path.join(
+                args.output_dir, f"{args.filename}_{suffix}_magnitude.mrcs"
+            )
+            phase_path = os.path.join(
+                args.output_dir, f"{args.filename}_{suffix}_phase.mrcs"
+            )
+            with mrcfile.new(mag_path, overwrite=True) as mrc:
+                mrc.set_data(ew.abs().numpy().astype("float32"))
+            _console.print(f"  [green]✓[/green] {mag_path}")
+            with mrcfile.new(phase_path, overwrite=True) as mrc:
+                mrc.set_data(ew.angle().numpy().astype("float32"))
+            _console.print(f"  [green]✓[/green] {phase_path}")
+
+        if exitwaves is not None:
+            _section("Saving exit waves")
+            _save_exitwave_pair(exitwaves, "exitwave")
+
+        if clean_exitwaves is not None:
+            _section("Saving clean exit waves")
+            _save_exitwave_pair(clean_exitwaves, "clean_exitwave")
 
     elapsed = time.perf_counter() - t_start
     h, rem = divmod(int(elapsed), 3600)

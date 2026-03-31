@@ -246,6 +246,10 @@ class VolumeProcessingMixin:
                         self.vols = vols.detach().cpu()
                     V[i] += vols
 
+        # clean exit wave: scatter particle-only volume before ice is added
+        if getattr(self, "save_clean_exitwaves", False):
+            self.clean_exitwaves = self.scattering(V)
+
         # add ice
         if hasattr(self, "icemaker"):
             if self.verbose:

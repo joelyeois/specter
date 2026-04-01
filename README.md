@@ -159,9 +159,7 @@ python demo-scripts/generate_particle_stack_from_csfile.py \
 
 ---
 
-### Output files
-
-Both scripts write to `--output_dir`:
+### Output files (particle stack scripts)
 
 | File | Description |
 |---|---|
@@ -169,8 +167,10 @@ Both scripts write to `--output_dir`:
 | `<filename>.star` | RELION-compatible metadata (poses, CTF, pixel size, voltage) |
 | `<filename>_exitwave_magnitude.mrcs` | Exit wave magnitude (`--save_exitwaves True` only) |
 | `<filename>_exitwave_phase.mrcs` | Exit wave phase (`--save_exitwaves True` only) |
+| `<filename>_clean_exitwave_magnitude.mrcs` | Clean exit wave magnitude (`--save_clean_exitwaves True` only) |
+| `<filename>_clean_exitwave_phase.mrcs` | Clean exit wave phase (`--save_clean_exitwaves True` only) |
 
-### Multi-GPU
+### Multi-GPU (particle stack scripts only)
 
 Pass a comma-separated list of GPU IDs to `--device` to use Lightning DDP:
 
@@ -179,4 +179,71 @@ Pass a comma-separated list of GPU IDs to `--device` to use Lightning DDP:
 --device cuda:0    # single GPU
 --device cpu       # CPU
 ```
+
+---
+
+### `generate_micrograph.py`
+
+Simulate full-size cryo-EM micrographs. The particle volume, ice, and crowding are assembled once at initialisation; each forward pass applies a different randomly drawn defocus.
+
+```bash
+python demo-scripts/generate_micrograph.py \
+    --pdb_code 6bdf \
+    --n_micrographs 10 \
+    --num_pixels 256 \
+    --pixel_size 1.056 \
+    --micrograph_size 4096 \
+    --energy 300 \
+    --dose 53 \
+    --defocus_min 5000 \
+    --defocus_max 15000 \
+    --cs 2.7 \
+    --alpha 0.07 \
+    --scattering_model multislice \
+    --aberration_model holography \
+    --noise_model poisson \
+    --coincidence_radius 2.1 \
+    --ice_model iterative \
+    --ice_thickness 500 \
+    --chunk_size 8 \
+    --device cuda:0 \
+    --output_dir ./output/ \
+    --filename micrographs
+```
+
+| Argument | Default | Description |
+|---|---|---|
+| `--pdb_code` | *(required)* | PDB accession code or path to local `.cif`/`.pdb` file |
+| `--n_micrographs` | `1` | Number of micrographs to simulate |
+| `--num_pixels` | `256` | Particle box size in pixels (for potential building) |
+| `--pixel_size` | `1.0` | Pixel size in Å |
+| `--micrograph_size` | `4096` | Micrograph size in pixels (square) |
+| `--energy` | `300.0` | Beam energy in keV |
+| `--dose` | `20.0` | Electron dose in e⁻/Å² |
+| `--num_frames` | `int(dose)` | Number of frames |
+| `--cs` | `2.0` | Spherical aberration in mm |
+| `--alpha` | `0.1` | Amplitude contrast ratio |
+| `--defocus_min/max` | `5000/15000` | Defocus range in Å |
+| `--scattering_model` | `multislice` | `multislice` \| `firstborn` \| `projection` \| `ctf` |
+| `--aberration_model` | `holography` | `holography` \| `ctf` |
+| `--noise_model` | `poisson` | `poisson` \| `none` |
+| `--coincidence_radius` | `1.8` | Coincidence loss radius in Å; `0` for standard Poisson |
+| `--ice_model` | `iterative` | `iterative` \| `randomchoice` \| `none` |
+| `--ice_thickness` | `500.0` | Ice thickness in Å |
+| `--crowd_min_distance` | `pdb.max_diameter` | Min distance between crowded molecules in Å; `0` disables crowding |
+| `--crowd_max_distance_z` | `None` | Max z-separation between crowded molecules in Å |
+| `--water_air_interface` | `True` | Simulate water-air interface |
+| `--pad_fft` | `False` | Pad volume to avoid FFT edge artefacts |
+| `--chunk_size` | `None` | Slice chunk size for specimen generation; set (e.g. `8`) if GPU memory is limited |
+| `--detector_model` | `none` | `none` \| `perfect` \| `k3_300kv` \| `k3_200kv` |
+| `--normalize_micrographs` | `False` | Normalise each micrograph to zero mean and unit std |
+| `--device` | `cpu` | `cpu` \| `cuda` \| `cuda:0` |
+| `--output_dir` | `./output/` | Output directory |
+| `--filename` | `micrographs` | Base name for output files (no extension) |
+
+### Output files (micrograph script)
+
+| File | Description |
+|---|---|
+| `<filename>.mrcs` | Micrograph stack |
 

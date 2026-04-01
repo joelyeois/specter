@@ -954,6 +954,7 @@ class MicrographGenerator(BaseImageGenerator):
         verbose: bool = True,
         coincidence_radius: float = 0.0,
         num_frames: int | None = None,
+        save_clean_exitwaves: bool = False,
         **kwargs: Any,
     ):
         # Determine nxy
@@ -1043,6 +1044,8 @@ class MicrographGenerator(BaseImageGenerator):
             progressbars=self.progressbars,
         )
 
+        self.save_clean_exitwaves = save_clean_exitwaves
+
         if vol is not None:
             self.vol = vol
         else:
@@ -1059,6 +1062,7 @@ class MicrographGenerator(BaseImageGenerator):
                 water_air_interface=water_air_interface,
                 progressbars=progressbars,
                 chunk_size=chunk_size,
+                save_clean_exitwaves=save_clean_exitwaves,
             )
             if self.verbose:
                 logger.info(
@@ -1104,6 +1108,25 @@ class MicrographGenerator(BaseImageGenerator):
                     0,  # z-axis
                 ),
                 mode="reflect",
+            )
+
+        # clean exit wave: scatter particle-only volume (no ice)
+        if (
+            self.save_clean_exitwaves
+            and hasattr(self, "specimen_gen")
+            and hasattr(self.specimen_gen, "clean_V")
+        ):
+            V_clean = self.specimen_gen.clean_V.to(self.device).expand(
+                len(idx), -1, -1, -1
+            )
+            if self.pad_fft:
+                V_clean = F.pad(
+                    V_clean,
+                    (self.nxy // 2, self.nxy // 2, self.nxy // 2, self.nxy // 2, 0, 0),
+                    mode="reflect",
+                )
+            self.clean_exitwaves = self.iterative_scattering(
+                V_clean, pose=0, slice_batch_size=self.slice_batch_size
             )
 
         # scatter V

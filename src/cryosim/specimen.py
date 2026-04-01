@@ -55,6 +55,7 @@ class TomogramGenerator(L.LightningModule):
         water_air_interface: bool = True,
         progressbars: bool = True,
         chunk_size: int | None = None,
+        save_clean_exitwaves: bool = False,
     ):
         super().__init__()
         self.pixel_size = pixel_size
@@ -68,6 +69,7 @@ class TomogramGenerator(L.LightningModule):
         self.water_air_interface = water_air_interface
         self.progressbars = progressbars
         self.chunk_size = chunk_size
+        self.save_clean_exitwaves = save_clean_exitwaves
 
         if self.crowd_min_distance is not None and scattering_potential is not None:
             self.crowd = CrowdWithDuplicates(
@@ -120,6 +122,11 @@ class TomogramGenerator(L.LightningModule):
                 V_crowd = self.crowd()
                 if not isinstance(V_crowd, float):
                     V = V + V_crowd.to(device)
+
+        # Hold a reference to V before ice is added (V + ice creates a new tensor,
+        # so this costs no extra memory).
+        if self.save_clean_exitwaves and self.icemaker is not None:
+            self.clean_V = V
 
         # 2. Add ice
         if self.icemaker is not None:

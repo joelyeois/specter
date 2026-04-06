@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 import torch
 
-from cryosim.rotations import (
+from specter.rotations import (
     Rotation,
     build_affine_matrix,
     translations_angstrom_to_torch,
@@ -55,7 +55,7 @@ def test_build_affine_matrix_identity():
 
 
 def test_rotate_volume_ball():
-    from cryosim.rotations import rotate_volume
+    from specter.rotations import rotate_volume
 
     # Construct a 3D ball in a 32x32x32 volume
     nz, ny, nx = 32, 32, 32

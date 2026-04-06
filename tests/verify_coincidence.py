@@ -1,5 +1,5 @@
 import torch
-from cryosim.microscope import Detector
+from specter.microscope import Detector
 
 
 def test_coincidence_loss():

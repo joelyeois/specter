@@ -1,5 +1,5 @@
 def main():
-    print("Hello from cryosim!")
+    print("Hello from specter!")
 
 
 if __name__ == "__main__":

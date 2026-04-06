@@ -19,7 +19,7 @@ from .array_utils import (
 )
 from .atom import kirkland_atomic_potential_3d, lobato_atomic_potential_3d
 from .fft_tools import fft3, fftconvolve
-from cryosim.pdbtools import PDB
+from specter.pdbtools import PDB
 
 avogadro = 6.02214076e23
 density_of_amorphous_ice = 0.94  # [g/cm3]
@@ -147,7 +147,7 @@ class Icemaker(L.LightningModule):
 
         # load 3D radial average of mdsim data
         current_dir = os.path.dirname(os.path.abspath(__file__))
-        # Assuming the repo structure is src/cryosim/icemaker.py and ice-data/ is at root
+        # Assuming the repo structure is src/specter/icemaker.py and ice-data/ is at root
         # root is up 2 levels from current_dir
         root_dir = os.path.dirname(os.path.dirname(current_dir))
         self.saved_data_path = os.path.join(
@@ -1311,7 +1311,7 @@ class NaiveIcemaker(L.LightningModule):
         sZ, sY, sX = torch.meshgrid(sx, sx, sx, indexing="ij")
         sR = torch.sqrt(sX**2 + sY**2 + sZ**2)
 
-        # see cryosim for details.
+        # see specter for details.
         a0 = 0.529  # Bohr radius, [Angstrom]
         e = 14.4  # electron charge, [V-Angstrom]
         c1 = 2 * (torch.pi**2) * a0 * e

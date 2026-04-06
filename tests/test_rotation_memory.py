@@ -105,7 +105,7 @@ def main():
         theta[0, :3, :3] = R
 
         # Create VolumeRotator for the OUTPUT dimensions
-        from cryosim.rotations import VolumeRotator
+        from specter.rotations import VolumeRotator
 
         rotator = VolumeRotator(
             nz=nz, ny=ny, nx=nx, origin="relion", padding_mode="zeros"

@@ -8,8 +8,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from .progress import track
 
-from cryosim import logger
-from cryosim.detectors import k3_200kv, k3_300kv, perfect_detector
+from specter import logger
+from specter.detectors import k3_200kv, k3_300kv, perfect_detector
 
 from . import rotations
 from .crowding import CrowdWithDuplicates

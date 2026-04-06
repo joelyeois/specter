@@ -321,15 +321,15 @@ def main() -> None:
 
     import torch
 
-    import cryosim
-    from cryosim.cryosparc_utils import create_micrograph_starfile
-    from cryosim.imagegenerator import MicrographGenerator
-    from cryosim.pdbtools import PDB
-    from cryosim.potential import PotentialBuilder
-    from cryosim.progress import track
+    import specter
+    from specter.cryosparc_utils import create_micrograph_starfile
+    from specter.imagegenerator import MicrographGenerator
+    from specter.pdbtools import PDB
+    from specter.potential import PotentialBuilder
+    from specter.progress import track
 
     args = parse_args()
-    cryosim.set_verbosity(logging.INFO)
+    specter.set_verbosity(logging.INFO)
 
     t_start = time.perf_counter()
 

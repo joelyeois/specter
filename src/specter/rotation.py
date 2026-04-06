@@ -15,7 +15,7 @@ import torch.nn.functional as F
 from typing import Tuple
 import warnings
 
-from cryosim.welling_rotation import (
+from specter.welling_rotation import (
     euler_to_quaternion,
     select_best_decomposition,
     apply_four_shear_decomposition,

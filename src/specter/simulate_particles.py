@@ -9,7 +9,7 @@ import torch
 from lightning.pytorch.callbacks import BasePredictionWriter
 from torch.utils.data import DataLoader
 
-from cryosim.imagegenerator import ImageGenerator
+from specter.imagegenerator import ImageGenerator
 
 
 class CustomWriter(BasePredictionWriter):

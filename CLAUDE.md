@@ -1,8 +1,8 @@
-# CLAUDE.md — cryosim
+# CLAUDE.md — SPECTER
 
 ## Project Overview
 
-**cryosim** has two main objectives:
+**SPECTER** has two main objectives:
 
 ### 1. Physics-based cryo-EM / cryo-ET simulator
 Generates training data that best matches experimental data. Accurate physics modelling is the top priority. It supports:
@@ -61,7 +61,7 @@ def energy_to_wavelength(energy_kev: float) -> float:
 ## Development Workflow
 
 1. **Prototype** in `dev-notebooks/` — use these freely for experimentation.
-2. **Implement** working code into `src/cryosim/` source modules.
+2. **Implement** working code into `src/specter/` source modules.
 3. **Update demo notebooks** in `demo-notebooks/` to reflect the new functionality. These must always be kept up-to-date and working.
 4. **Add a test** in `tests/` covering the new behaviour (even a minimal smoke test is better than nothing).
 
@@ -75,7 +75,7 @@ When modifying physics-critical code, validate against known physical quantities
 
 ```bash
 python -m pytest tests/ -v
-python -m pytest tests/ --cov=src/cryosim  # with coverage
+python -m pytest tests/ --cov=src/specter  # with coverage
 ```
 
 - GPU tests should gracefully skip or fall back to CPU when CUDA is unavailable.
@@ -85,7 +85,7 @@ python -m pytest tests/ --cov=src/cryosim  # with coverage
 
 Do **not** modify files in:
 
-- `src/cryosim/atom/atom_data/` — parameterised atomic potential data (Kirkland, Lobato, Shtyrov). These are fixed physical constants from published literature.
+- `src/specter/atom/atom_data/` — parameterised atomic potential data (Kirkland, Lobato, Shtyrov). These are fixed physical constants from published literature.
 - `ice-data/` — pre-computed ice simulation data.
 
 Changes to these would silently break the physical accuracy of all simulations.
@@ -93,7 +93,7 @@ Changes to these would silently break the physical accuracy of all simulations.
 ## Repository Structure
 
 ```
-src/cryosim/          # Main source package
+src/specter/          # Main source package
   atom/               # Atomic properties and potential functions
   imagegenerator.py   # Top-level image simulation classes
   specimen.py         # Volume assembly (TomogramGenerator)

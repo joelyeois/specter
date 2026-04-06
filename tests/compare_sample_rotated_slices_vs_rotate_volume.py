@@ -1,6 +1,6 @@
 import torch
 
-from cryosim.rotations import VolumeRotator, build_affine_matrix, rotate_volume
+from specter.rotations import VolumeRotator, build_affine_matrix, rotate_volume
 
 
 def rotation_x_matrix(angle_deg: float, device: torch.device, dtype: torch.dtype):

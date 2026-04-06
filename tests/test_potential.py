@@ -5,7 +5,7 @@ Tests for potential volume construction.
 import pytest
 import torch
 
-from cryosim.potential import build_potential_volume_fftconvolve_3d
+from specter.potential import build_potential_volume_fftconvolve_3d
 
 
 # A small cluster of 5 carbon atoms (Z=6) spread over ~6 Å.

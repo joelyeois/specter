@@ -1,6 +1,7 @@
-# Cryosim
+# SPECTER
+### Scattering & Propagation of Electrons in Cryo-EM: Twin Emulator & Reconstruction
 
-**cryosim** is a Python package for simulating cryo-electron microscopy (cryo-EM) images with physics-based models.  
+**SPECTER** is a Python package for simulating cryo-electron microscopy (cryo-EM) images with physics-based models.  
 It supports aberrations, scattering, detector effects, and integrates with PyTorch for GPU acceleration.
 
 ---
@@ -8,10 +9,10 @@ It supports aberrations, scattering, detector effects, and integrates with PyTor
 ## Installation and running the notebooks
 Clone the repository:
 ```bash
-git clone https://github.com/joelyeois/cryosim.git
-cd cryosim
+git clone https://github.com/joelyeois/specter.git
+cd specter
 ```
-You must install dependencies **and** the `cryosim` package itself.
+You must install dependencies **and** the `specter` package itself.
 
 ### Option 1. Using [uv](https://github.com/astral-sh/uv) (recommended)
 This will create a virtual environment and install all dependencies listed in `pyproject.toml.`
@@ -22,7 +23,7 @@ Activate the environment with:
 ```bash
 source .venv/bin/activate
 ```
-Install `cryosim`:
+Install `specter`:
 ```bash
 uv pip install -e .
 ```
@@ -34,11 +35,11 @@ uv run --with jupyter jupyter lab
 ### Option 2. Conda and pip
 Create an environment and install the dependencies.
 ```bash
-conda create -n cryosim python=3.11
-conda activate cryosim
+conda create -n specter python=3.11
+conda activate specter
 pip install -r requirements.txt
 ```
-Install `cryosim`:
+Install `specter`:
 ```bash
 pip install -e .
 ```
@@ -171,7 +172,7 @@ python demo-scripts/generate_particle_stack_from_csfile.py \
 | File | Description |
 |---|---|
 | `<filename>.mrcs` | Particle image stack |
-| `<filename>.star` | RELION-compatible metadata (poses, CTF, pixel size, voltage) with per-particle `cryosimDosePerAngstrom`, `cryosimCoincidenceRadius`, and `cryosimPotentialScale` columns |
+| `<filename>.star` | RELION-compatible metadata (poses, CTF, pixel size, voltage) with per-particle `specterDosePerAngstrom`, `specterCoincidenceRadius`, and `specterPotentialScale` columns |
 | `<filename>_exitwave_magnitude.mrcs` | Exit wave magnitude (`--save_exitwaves True` only) |
 | `<filename>_exitwave_phase.mrcs` | Exit wave phase (`--save_exitwaves True` only) |
 | `<filename>_clean_exitwave_magnitude.mrcs` | Clean exit wave magnitude (`--save_clean_exitwaves True` only) |
@@ -257,5 +258,5 @@ python demo-scripts/generate_micrograph.py \
 | File | Description |
 |---|---|
 | `<filename>.mrcs` | Micrograph stack |
-| `<filename>.star` | Per-micrograph metadata (defocus, voltage, pixel size, amplitude contrast) with `cryosimDosePerAngstrom`, `cryosimCoincidenceRadius`, and `cryosimPotentialScale` columns |
+| `<filename>.star` | Per-micrograph metadata (defocus, voltage, pixel size, amplitude contrast) with `specterDosePerAngstrom`, `specterCoincidenceRadius`, and `specterPotentialScale` columns |
 

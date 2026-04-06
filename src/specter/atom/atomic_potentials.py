@@ -47,7 +47,7 @@ def load_kirkland_parameters() -> torch.Tensor:
     params_list = []
 
     # Use importlib.resources to get the file path safely
-    data_file = resources.files("cryosim.atom_data").joinpath(
+    data_file = resources.files("specter.atom_data").joinpath(
         "kirkland_scattering_parameters.txt"
     )
 
@@ -115,7 +115,7 @@ def load_lobato_parameters() -> torch.Tensor:
     params_list = []
 
     # Use importlib.resources to get the file path safely
-    data_file = resources.files("cryosim.atom_data").joinpath(
+    data_file = resources.files("specter.atom_data").joinpath(
         "lobato_scattering_parameters.txt"
     )
     with resources.as_file(data_file) as fpath:

@@ -1,6 +1,6 @@
 import torch
 
-from cryosim.imagegenerator import ImageGenerator, TiltSeriesGenerator
+from specter.imagegenerator import ImageGenerator, TiltSeriesGenerator
 
 
 def test_image_generator_initialization(

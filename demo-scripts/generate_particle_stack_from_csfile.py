@@ -437,19 +437,19 @@ def main() -> None:
 
     import torch
 
-    import cryosim
-    from cryosim.cryosparc_utils import (
+    import specter
+    from specter.cryosparc_utils import (
         create_particle_starfile,
         extract_parameters_from_csfile,
     )
-    from cryosim.image_tools import normalize_particles
-    from cryosim.imagegenerator import ImageGenerator
-    from cryosim.pdbtools import PDB
-    from cryosim.potential import PotentialBuilder
-    from cryosim.progress import track
+    from specter.image_tools import normalize_particles
+    from specter.imagegenerator import ImageGenerator
+    from specter.pdbtools import PDB
+    from specter.potential import PotentialBuilder
+    from specter.progress import track
 
     args = parse_args()
-    cryosim.set_verbosity(logging.INFO)
+    specter.set_verbosity(logging.INFO)
 
     mode, device_target = _parse_device(args.device)
     t_start = time.perf_counter()

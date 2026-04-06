@@ -15,10 +15,10 @@ import time
 
 import torch
 
-sys.path.insert(0, "/mnt/cbis/home/e0788253/czii/cryosim/src")
+sys.path.insert(0, "/mnt/cbis/home/e0788253/czii/specter/src")
 
-from cryosim.rotations import build_affine_matrix
-from cryosim.scattering import IterativeScattering
+from specter.rotations import build_affine_matrix
+from specter.scattering import IterativeScattering
 
 
 def run_test(V, theta, device, slice_batch_size, label):

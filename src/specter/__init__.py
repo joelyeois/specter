@@ -1,13 +1,13 @@
 import logging
 
 # Set up package-level logger
-logger = logging.getLogger("cryosim")
+logger = logging.getLogger("specter")
 logger.addHandler(logging.NullHandler())
 
 
 def set_verbosity(level):
     """
-    Set the logging verbosity for cryosim.
+    Set the logging verbosity for specter.
 
     Parameters
     ----------
@@ -20,7 +20,7 @@ def set_verbosity(level):
     # Configure a handler if none exists to ensure output to stderr/notebook
     if not logger.handlers or isinstance(logger.handlers[0], logging.NullHandler):
         handler = logging.StreamHandler()
-        formatter = logging.Formatter("%(levelname)s: cryosim: %(message)s")
+        formatter = logging.Formatter("%(levelname)s: specter: %(message)s")
         handler.setFormatter(formatter)
         logger.addHandler(handler)
         # Remove NullHandler if it was the only one

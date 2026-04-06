@@ -1,7 +1,7 @@
 [project]
-name = "cryosim"
+name = "specter"
 version = "0.1.0"
-description = "Add your description here"
+description = "Scattering & Propagation of Electrons in Cryo-EM: Twin Emulator & Reconstruction"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -44,5 +44,5 @@ dev = [
 include-package-data = true
 
 [tool.setuptools.package-data]
-cryosim = ["atom_data/*.txt"]
+specter = ["atom_data/*.txt"]
 

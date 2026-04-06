@@ -46,7 +46,7 @@ def get_rotation_matrices(sym: str, return_affine: bool = True) -> torch.Tensor:
     Examples
     --------
     >>> import torch
-    >>> from cryosim.symmetries import get_rotation_matrices
+    >>> from specter.symmetries import get_rotation_matrices
     >>> # Get C3 symmetry (3-fold cyclic)
     >>> matrices_c3 = get_rotation_matrices('C3', return_affine=False)
     >>> matrices_c3.shape

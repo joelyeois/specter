@@ -263,11 +263,11 @@ def create_particle_starfile(
         CTF parameters for each particle, shape (N, K).
         Expected columns: [Cs (Å), dfu (Å), dfv (Å), dfang (rad), ..., phaseshift (rad)].
     dose_per_angstrom : torch.Tensor or float, optional
-        Dose per particle in e⁻/Å². Saved as ``cryosimDosePerAngstrom``.
+        Dose per particle in e⁻/Å². Saved as ``specterDosePerAngstrom``.
     coincidence_radius : torch.Tensor or float, optional
-        Coincidence radius per particle in pixels. Saved as ``cryosimCoincidenceRadius``.
+        Coincidence radius per particle in pixels. Saved as ``specterCoincidenceRadius``.
     potential_scale : torch.Tensor or float, optional
-        Per-particle potential scale factor. Saved as ``cryosimPotentialScale``.
+        Per-particle potential scale factor. Saved as ``specterPotentialScale``.
 
     Returns
     -------
@@ -337,11 +337,11 @@ def create_particle_starfile(
     d["rlnOriginYAngst"] = translations[:, 1]
 
     if dose_per_angstrom is not None:
-        d["cryosimDosePerAngstrom"] = torch.as_tensor(dose_per_angstrom).expand(n)
+        d["specterDosePerAngstrom"] = torch.as_tensor(dose_per_angstrom).expand(n)
     if coincidence_radius is not None:
-        d["cryosimCoincidenceRadius"] = torch.as_tensor(coincidence_radius).expand(n)
+        d["specterCoincidenceRadius"] = torch.as_tensor(coincidence_radius).expand(n)
     if potential_scale is not None:
-        d["cryosimPotentialScale"] = torch.as_tensor(potential_scale).expand(n)
+        d["specterPotentialScale"] = torch.as_tensor(potential_scale).expand(n)
 
     particles_df = pd.DataFrame(data=d)
 
@@ -383,11 +383,11 @@ def create_micrograph_starfile(
     filename : str, optional
         Base name for the output files (no extension). Default is "micrographs".
     dose_per_angstrom : torch.Tensor or float, optional
-        Dose per micrograph in e⁻/Å². Saved as ``cryosimDosePerAngstrom``.
+        Dose per micrograph in e⁻/Å². Saved as ``specterDosePerAngstrom``.
     coincidence_radius : torch.Tensor or float, optional
-        Coincidence radius per micrograph in pixels. Saved as ``cryosimCoincidenceRadius``.
+        Coincidence radius per micrograph in pixels. Saved as ``specterCoincidenceRadius``.
     potential_scale : torch.Tensor or float, optional
-        Potential scale per micrograph. Saved as ``cryosimPotentialScale``.
+        Potential scale per micrograph. Saved as ``specterPotentialScale``.
 
     Returns
     -------
@@ -415,11 +415,11 @@ def create_micrograph_starfile(
     }
 
     if dose_per_angstrom is not None:
-        d["cryosimDosePerAngstrom"] = torch.as_tensor(dose_per_angstrom).expand(n)
+        d["specterDosePerAngstrom"] = torch.as_tensor(dose_per_angstrom).expand(n)
     if coincidence_radius is not None:
-        d["cryosimCoincidenceRadius"] = torch.as_tensor(coincidence_radius).expand(n)
+        d["specterCoincidenceRadius"] = torch.as_tensor(coincidence_radius).expand(n)
     if potential_scale is not None:
-        d["cryosimPotentialScale"] = torch.as_tensor(potential_scale).expand(n)
+        d["specterPotentialScale"] = torch.as_tensor(potential_scale).expand(n)
 
     df = pd.DataFrame(data=d)
 

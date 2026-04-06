@@ -1,8 +1,8 @@
 import numpy as np
 import torch
 
-from cryosim.rotations import Rotation, build_affine_matrix
-from cryosim.scattering import (
+from specter.rotations import Rotation, build_affine_matrix
+from specter.scattering import (
     IterativeScattering,
     Scattering,
     complex_potential,

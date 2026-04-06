@@ -1,6 +1,6 @@
 import torch
 import time
-from cryosim.microscope import Detector
+from specter.microscope import Detector
 
 
 def test_fast_detector():

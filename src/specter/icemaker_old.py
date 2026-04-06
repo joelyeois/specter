@@ -732,7 +732,7 @@ class NaiveIcemaker(L.LightningModule):
         sZ, sY, sX = torch.meshgrid(sx, sx, sx, indexing="ij")
         sR = torch.sqrt(sX**2 + sY**2 + sZ**2)
 
-        # see cryosim for details.
+        # see specter for details.
         a0 = 0.529  # Bohr radius, [Angstrom]
         e = 14.4  # electron charge, [V-Angstrom]
         c1 = 2 * (torch.pi**2) * a0 * e

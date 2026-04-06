@@ -20,7 +20,7 @@ Example (HPC):
         --pixel_size 1.056 \\
         --micrograph_size 4096 \\
         --energy 300 \\
-        --dose 53 \\
+        --dose_min 53 \\
         --defocus_min 5000 \\
         --defocus_max 15000 \\
         --cs 2.7 \\
@@ -28,7 +28,7 @@ Example (HPC):
         --scattering_model multislice \\
         --aberration_model holography \\
         --noise_model poisson \\
-        --coincidence_radius 2.1 \\
+        --coincidence_radius_min 2.1 \\
         --ice_model iterative \\
         --ice_thickness 500 \\
         --chunk_size 8 \\
@@ -102,10 +102,16 @@ def parse_args() -> argparse.Namespace:
         help="Electron beam energy in keV.",
     )
     parser.add_argument(
-        "--dose",
+        "--dose_min",
         type=float,
         default=20.0,
-        help="Electron dose in e⁻/Å².",
+        help="Minimum dose in e⁻/Å². Used as fixed dose if --dose_max is not set.",
+    )
+    parser.add_argument(
+        "--dose_max",
+        type=float,
+        default=None,
+        help="Maximum dose in e⁻/Å². If set, dose is sampled uniformly per micrograph.",
     )
     parser.add_argument(
         "--num_frames",
@@ -171,10 +177,28 @@ def parse_args() -> argparse.Namespace:
         help="Noise model. Use 'none' for no noise.",
     )
     parser.add_argument(
-        "--coincidence_radius",
+        "--coincidence_radius_min",
         type=float,
         default=1.8,
-        help="Coincidence loss radius in Ångstrom. Set to 0 for default Poisson.",
+        help="Minimum coincidence radius in pixels. Used as fixed value if --coincidence_radius_max is not set.",
+    )
+    parser.add_argument(
+        "--coincidence_radius_max",
+        type=float,
+        default=None,
+        help="Maximum coincidence radius in pixels. If set, sampled uniformly per micrograph.",
+    )
+    parser.add_argument(
+        "--potential_scale_min",
+        type=float,
+        default=1.0,
+        help="Minimum potential scale factor. Used as fixed value if --potential_scale_max is not set.",
+    )
+    parser.add_argument(
+        "--potential_scale_max",
+        type=float,
+        default=None,
+        help="Maximum potential scale factor. If set, sampled uniformly per micrograph. Values < 1 approximate thicker ice.",
     )
     parser.add_argument(
         "--ice_model",
@@ -298,6 +322,7 @@ def main() -> None:
     import torch
 
     import cryosim
+    from cryosim.cryosparc_utils import create_micrograph_starfile
     from cryosim.imagegenerator import MicrographGenerator
     from cryosim.pdbtools import PDB
     from cryosim.potential import PotentialBuilder
@@ -332,10 +357,35 @@ def main() -> None:
         if args.crowd_min_distance is not None
         else pdb.max_diameter
     )
-    num_frames = args.num_frames if args.num_frames is not None else int(args.dose)
 
-    # Sample all defocus values upfront — one per micrograph
+    # Sample all per-micrograph parameters upfront
     defocus_A = torch.rand(n) * (args.defocus_max - args.defocus_min) + args.defocus_min
+
+    dose_max = args.dose_max if args.dose_max is not None else args.dose_min
+    dose = torch.rand(n) * (dose_max - args.dose_min) + args.dose_min
+
+    cr_max = (
+        args.coincidence_radius_max
+        if args.coincidence_radius_max is not None
+        else args.coincidence_radius_min
+    )
+    coincidence_radius = (
+        torch.rand(n) * (cr_max - args.coincidence_radius_min)
+        + args.coincidence_radius_min
+    )
+
+    ps_max = (
+        args.potential_scale_max
+        if args.potential_scale_max is not None
+        else args.potential_scale_min
+    )
+    potential_scale = (
+        torch.rand(n) * (ps_max - args.potential_scale_min) + args.potential_scale_min
+    )
+
+    num_frames = (
+        args.num_frames if args.num_frames is not None else int(dose.mean().item())
+    )
     ctf_params = {
         "cs": torch.tensor([cs_angstrom] * n),
         "dfu": defocus_A,
@@ -349,7 +399,7 @@ def main() -> None:
         args.pixel_size,
         ctf_params,
         args.energy,
-        args.dose,
+        dose,
         ice_model=ice_model,
         ice_thickness=args.ice_thickness,
         scattering_model=args.scattering_model,
@@ -366,8 +416,9 @@ def main() -> None:
         detector_model=detector_model,
         verbose=False,
         progressbars=False,
-        coincidence_radius=args.coincidence_radius,
+        coincidence_radius=coincidence_radius,
         num_frames=num_frames,
+        potential_scale=potential_scale,
         save_clean_exitwaves=args.save_clean_exitwaves,
     ).to(args.device)
 
@@ -402,7 +453,7 @@ def main() -> None:
         images = (images - mean) / std.clamp(min=1e-8)
 
     # --- Saving ---
-    _section("Saving .mrcs")
+    _section("Saving .mrcs + .star")
     import mrcfile
 
     os.makedirs(args.output_dir, exist_ok=True)
@@ -410,6 +461,19 @@ def main() -> None:
     with mrcfile.new(mrcs_path, overwrite=True) as mrc:
         mrc.set_data(images.numpy().astype("float32"))
     _console.print(f"  [green]✓[/green] {mrcs_path}")
+
+    create_micrograph_starfile(
+        n,
+        energy=args.energy,
+        pixel_size=args.pixel_size,
+        alpha=args.alpha,
+        ctf_params=ctf_params,
+        folderpath=args.output_dir,
+        filename=args.filename,
+        dose_per_angstrom=dose,
+        coincidence_radius=coincidence_radius,
+        potential_scale=potential_scale,
+    )
 
     def _save_exitwave_pair(ew, suffix: str) -> None:
         if args.pad_fft:

@@ -348,3 +348,82 @@ def create_particle_starfile(
     star_path = os.path.join(folderpath, filename + ".star")
     starfile.write(particles_df, star_path, overwrite=True)
     _console.print(f"  [green]✓[/green] {star_path}")
+
+
+def create_micrograph_starfile(
+    n: int,
+    energy: float,
+    pixel_size: float,
+    alpha: float,
+    ctf_params: dict,
+    folderpath: str = "",
+    filename: str = "micrographs",
+    dose_per_angstrom: torch.Tensor | float | None = None,
+    coincidence_radius: torch.Tensor | float | None = None,
+    potential_scale: torch.Tensor | float | None = None,
+) -> str:
+    """
+    Create a RELION-compatible .star file for a simulated micrograph stack.
+
+    Parameters
+    ----------
+    n : int
+        Number of micrographs.
+    energy : float
+        Electron beam energy in kV.
+    pixel_size : float
+        Pixel size in Ångstrom.
+    alpha : float
+        Amplitude contrast ratio.
+    ctf_params : dict
+        CTF parameters, each a 1-D tensor of length n. Expected keys:
+        ``cs`` (Å), ``dfu`` (Å), and optionally ``dfv`` (Å), ``dfang`` (deg).
+    folderpath : str, optional
+        Directory to save the STAR file. Default is "" (current directory).
+    filename : str, optional
+        Base name for the output files (no extension). Default is "micrographs".
+    dose_per_angstrom : torch.Tensor or float, optional
+        Dose per micrograph in e⁻/Å². Saved as ``cryosimDosePerAngstrom``.
+    coincidence_radius : torch.Tensor or float, optional
+        Coincidence radius per micrograph in pixels. Saved as ``cryosimCoincidenceRadius``.
+    potential_scale : torch.Tensor or float, optional
+        Potential scale per micrograph. Saved as ``cryosimPotentialScale``.
+
+    Returns
+    -------
+    star_path : str
+        Path to the saved STAR file.
+    """
+    if folderpath != "" and not os.path.exists(folderpath):
+        os.makedirs(folderpath)
+
+    zeros = torch.zeros(n)
+    cs_A = ctf_params.get("cs", zeros)
+    dfu = ctf_params.get("dfu", zeros)
+    dfv = ctf_params.get("dfv", dfu)
+    dfang = ctf_params.get("dfang", zeros)
+
+    d = {
+        "rlnMicrographName": [str(i + 1) + "@" + filename + ".mrcs" for i in range(n)],
+        "rlnVoltage": energy,
+        "rlnSphericalAberration": torch.as_tensor(cs_A) / 1e7,
+        "rlnAmplitudeContrast": alpha,
+        "rlnImagePixelSize": pixel_size,
+        "rlnDefocusU": dfu,
+        "rlnDefocusV": dfv,
+        "rlnDefocusAngle": dfang,
+    }
+
+    if dose_per_angstrom is not None:
+        d["cryosimDosePerAngstrom"] = torch.as_tensor(dose_per_angstrom).expand(n)
+    if coincidence_radius is not None:
+        d["cryosimCoincidenceRadius"] = torch.as_tensor(coincidence_radius).expand(n)
+    if potential_scale is not None:
+        d["cryosimPotentialScale"] = torch.as_tensor(potential_scale).expand(n)
+
+    df = pd.DataFrame(data=d)
+
+    star_path = os.path.join(folderpath, filename + ".star")
+    starfile.write(df, star_path, overwrite=True)
+    _console.print(f"  [green]✓[/green] {star_path}")
+    return star_path

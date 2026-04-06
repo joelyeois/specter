@@ -991,6 +991,7 @@ class MicrographGenerator(BaseImageGenerator):
         verbose: bool = True,
         coincidence_radius: float | torch.Tensor = 0.0,
         num_frames: int | None = None,
+        potential_scale: float | torch.Tensor = 1.0,
         save_clean_exitwaves: bool = False,
         **kwargs: Any,
     ):
@@ -1045,6 +1046,7 @@ class MicrographGenerator(BaseImageGenerator):
             verbose=verbose,
             coincidence_radius=coincidence_radius,
             num_frames=num_frames,
+            potential_scale=potential_scale,
         )
 
         self.chunk_size = chunk_size

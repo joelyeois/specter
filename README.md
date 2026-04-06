@@ -201,7 +201,7 @@ python demo-scripts/generate_micrograph.py \
     --pixel_size 1.056 \
     --micrograph_size 4096 \
     --energy 300 \
-    --dose 53 \
+    --dose_min 53 \
     --defocus_min 5000 \
     --defocus_max 15000 \
     --cs 2.7 \
@@ -209,7 +209,7 @@ python demo-scripts/generate_micrograph.py \
     --scattering_model multislice \
     --aberration_model holography \
     --noise_model poisson \
-    --coincidence_radius 2.1 \
+    --coincidence_radius_min 2.1 \
     --ice_model iterative \
     --ice_thickness 500 \
     --chunk_size 8 \
@@ -226,15 +226,19 @@ python demo-scripts/generate_micrograph.py \
 | `--pixel_size` | `1.0` | Pixel size in Å |
 | `--micrograph_size` | `4096` | Micrograph size in pixels (square) |
 | `--energy` | `300.0` | Beam energy in keV |
-| `--dose` | `20.0` | Electron dose in e⁻/Å² |
-| `--num_frames` | `int(dose)` | Number of frames |
+| `--dose_min` | `20.0` | Minimum dose in e⁻/Å²; used as fixed dose if `--dose_max` is not set |
+| `--dose_max` | `None` | Maximum dose in e⁻/Å²; if set, dose is sampled uniformly per micrograph |
+| `--num_frames` | `int(mean dose)` | Number of frames |
 | `--cs` | `2.0` | Spherical aberration in mm |
 | `--alpha` | `0.1` | Amplitude contrast ratio |
 | `--defocus_min/max` | `5000/15000` | Defocus range in Å |
 | `--scattering_model` | `multislice` | `multislice` \| `firstborn` \| `projection` \| `ctf` |
 | `--aberration_model` | `holography` | `holography` \| `ctf` |
 | `--noise_model` | `poisson` | `poisson` \| `none` |
-| `--coincidence_radius` | `1.8` | Coincidence loss radius in Å; `0` for standard Poisson |
+| `--coincidence_radius_min` | `1.8` | Minimum coincidence radius in pixels; used as fixed value if `--coincidence_radius_max` is not set |
+| `--coincidence_radius_max` | `None` | Maximum coincidence radius in pixels; if set, sampled uniformly per micrograph |
+| `--potential_scale_min` | `1.0` | Minimum potential scale factor; used as fixed value if `--potential_scale_max` is not set |
+| `--potential_scale_max` | `None` | Maximum potential scale factor; if set, sampled uniformly per micrograph. Values < 1 approximate thicker ice |
 | `--ice_model` | `iterative` | `iterative` \| `randomchoice` \| `none` |
 | `--ice_thickness` | `500.0` | Ice thickness in Å |
 | `--crowd_min_distance` | `pdb.max_diameter` | Min distance between crowded molecules in Å; `0` disables crowding |
@@ -253,4 +257,5 @@ python demo-scripts/generate_micrograph.py \
 | File | Description |
 |---|---|
 | `<filename>.mrcs` | Micrograph stack |
+| `<filename>.star` | Per-micrograph metadata (defocus, voltage, pixel size, amplitude contrast) with `cryosimDosePerAngstrom`, `cryosimCoincidenceRadius`, and `cryosimPotentialScale` columns |
 

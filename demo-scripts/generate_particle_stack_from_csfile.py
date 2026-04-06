@@ -130,7 +130,7 @@ def parse_args() -> argparse.Namespace:
         "--coincidence_radius",
         type=float,
         default=2.1,
-        help="Coincidence loss radius in Ångstrom. Set to 0 for default Poisson.",
+        help="Coincidence loss radius in pixels. Set to 0 for default Poisson.",
     )
     parser.add_argument(
         "--ice_model",
@@ -613,6 +613,8 @@ def main() -> None:
         alpha=alpha,
         filename=args.filename,
         folderpath=args.output_dir,
+        dose_per_angstrom=args.dose,
+        coincidence_radius=args.coincidence_radius,
     )
 
     if is_main:

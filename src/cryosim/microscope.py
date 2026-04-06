@@ -487,12 +487,14 @@ class Detector(L.LightningModule):
     A detector module to apply detector noise to images. Future work to include
     magnification and DQE functionality.
 
+    Dose and coincidence radius are not stored at construction time; they must be
+    supplied per-batch via ``forward()``. This allows per-image randomisation of
+    both quantities from the parent image generator.
+
     Parameters
     ----------
     pixel_size : float
         Pixel size in Å.
-    dose_per_angstrom : float
-        Dose of the electron beam in e-/Å².
     aberration_model : str, optional
         Specifies aberration model to use. Options include 'holography' and 'ctf'.
         Default is 'holography'.
@@ -506,39 +508,34 @@ class Detector(L.LightningModule):
     mtf : torch.Tensor, optional
         Modulation transfer function in Fourier space to apply to images.
         Default is None (no MTF applied).
-    coincidence_radius : float, optional
-        Coincidence radius for detector. Default 0.0.
-    dose_per_angstrom_per_frame : float, optional
-        Dose per frame for dose-fractionated noise. Default 1.0.
+    num_frames : int, optional
+        Number of frames for dose-fractionated noise.
+    progressbars : bool, optional
+        Whether to show progress bars. Default True.
     """
 
     def __init__(
         self,
         pixel_size: float,
-        dose_per_angstrom: float,
         aberration_model: str = "holography",
         noise_model: str | None = None,
         magnification: float | None = None,
         dqe: bool | None = None,
         mtf: torch.Tensor | None = None,
-        coincidence_radius: float = 0.0,
-        dose_per_angstrom_per_frame: float = 1.0,
         num_frames: int | None = None,
         progressbars: bool = True,
     ):
         super().__init__()
         self.pixel_size = pixel_size
-        self.dose_per_angstrom = dose_per_angstrom
-        self.dose_per_pixel = dose_per_angstrom * pixel_size**2
         self.aberration_model = aberration_model
         self.noise_model = noise_model
         self.register_buffer("mtf", mtf)
-        self.coincidence_radius = coincidence_radius
-        self.dose_per_angstrom_per_frame = dose_per_angstrom_per_frame
         self.num_frames = num_frames
         self.progressbars = progressbars
 
-    def image(self, aberrated_exitwave: torch.Tensor) -> torch.Tensor:
+    def image(
+        self, aberrated_exitwave: torch.Tensor, dose: torch.Tensor
+    ) -> torch.Tensor:
         """
         Convert aberrated exit wave to detector image.
 
@@ -546,6 +543,8 @@ class Detector(L.LightningModule):
         ----------
         aberrated_exitwave : torch.Tensor
             Aberrated exit wave from microscope aberration module, shape (B, Y, X).
+        dose : torch.Tensor
+            Dose per image in e-/Å², shape (B,). Used for CTF model scaling.
 
         Returns
         -------
@@ -553,10 +552,11 @@ class Detector(L.LightningModule):
             Detector image. For holography model, returns intensity (squared
             magnitude). For CTF model, returns dose-scaled image.
         """
+        dose_per_pixel = dose * self.pixel_size**2  # (B,)
         if self.aberration_model == "holography":
-            images = torch.abs(aberrated_exitwave) ** 2
+            images = dose_per_pixel[:, None, None] * torch.abs(aberrated_exitwave) ** 2
         elif self.aberration_model == "ctf":
-            images = self.dose_per_pixel * (aberrated_exitwave + 1)
+            images = dose_per_pixel[:, None, None] * (aberrated_exitwave + 1)
         return images
 
     def anisomagnify(
@@ -618,6 +618,8 @@ class Detector(L.LightningModule):
     def forward(
         self,
         aberrated_exitwave: torch.Tensor,
+        dose: torch.Tensor,
+        coincidence_radius: torch.Tensor,
         anisomag: torch.Tensor | None = None,
         nxy: int | None = None,
     ) -> torch.Tensor:
@@ -628,6 +630,10 @@ class Detector(L.LightningModule):
         ----------
         aberrated_exitwave : torch.Tensor
             Aberrated exit wave from microscope aberration module.
+        dose : torch.Tensor
+            Dose per image in e-/Å², shape (B,).
+        coincidence_radius : torch.Tensor
+            Coincidence radius per image in pixels, shape (B,).
         anisomag : torch.Tensor, optional
             Anisotropic magnification matrices.
         nxy : int, optional
@@ -638,7 +644,7 @@ class Detector(L.LightningModule):
         images : torch.Tensor
             Simulated images after detection.
         """
-        images = self.image(aberrated_exitwave)
+        images = self.image(aberrated_exitwave, dose)
 
         # Set default crop size
         if nxy is None:
@@ -666,12 +672,13 @@ class Detector(L.LightningModule):
 
         if self.noise_model is None:
             return images
-        # elif self.noise_model == "poisson":
         else:
-            if images.ndim == 3:
-                return torch.stack([self.apply_coincidence(img) for img in images])
-            else:
-                return self.apply_coincidence(images)
+            return torch.stack(
+                [
+                    self.apply_coincidence(img, d.item(), r.item())
+                    for img, d, r in zip(images, dose, coincidence_radius)
+                ]
+            )
 
     def apply_detector_physics(
         self,
@@ -827,7 +834,9 @@ class Detector(L.LightningModule):
 
         return pixels.reshape(det_h, det_w)[pad:-pad, pad:-pad]
 
-    def apply_coincidence(self, img: torch.Tensor) -> torch.Tensor:
+    def apply_coincidence(
+        self, img: torch.Tensor, dose: float, coincidence_radius: float
+    ) -> torch.Tensor:
         """
         Apply dose-fractionated Poisson + coincidence.
 
@@ -835,6 +844,10 @@ class Detector(L.LightningModule):
         ----------
         img : torch.Tensor
             Total-dose image, shape (H, W).
+        dose : float
+            Total dose for this image in e-/Å².
+        coincidence_radius : float
+            Coincidence radius in pixels. If <= 0, plain Poisson noise is applied.
 
         Returns
         -------
@@ -844,19 +857,15 @@ class Detector(L.LightningModule):
         if self.noise_model != "poisson":
             return img
 
-        if self.coincidence_radius <= 0.0:
+        if coincidence_radius <= 0.0:
             return torch.poisson(torch.clamp(img, min=0.0))
 
-        # 1. Compute number of frames based on dose per frame
         n_frames = self.num_frames
 
-        # 2. Split total dose per frame
-        # Normalize img (it might be in dose units already if coming from CTF model,
-        # or intensity units if from holography).
-        # apply_detector_physics expects a probability map (intensity_map).
+        # Normalize to probability map; apply_detector_physics_fast expects
+        # a probability map (intensity_map).
         intensity_map = img / img.sum()
 
-        # 3. Sum dose-fractionated frames after coincidence
         final_image = torch.zeros_like(img)
         for _ in track(
             range(n_frames),
@@ -867,8 +876,8 @@ class Detector(L.LightningModule):
             final_image += self.apply_detector_physics_fast(
                 intensity_map,
                 self.pixel_size,
-                self.dose_per_angstrom / n_frames,
-                coinc_radius_pixels=self.coincidence_radius,
+                dose / n_frames,
+                coinc_radius_pixels=coincidence_radius,
             )
 
         return final_image

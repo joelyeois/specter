@@ -34,8 +34,9 @@ class BaseImageGenerator(L.LightningModule):
         Pixel size in Å.
     energy : float
         Electron beam energy in kV.
-    dose_per_angstrom : float
-        Electron dose per Å².
+    dose_per_angstrom : float or torch.Tensor
+        Electron dose per Å². Either a scalar applied to all images, or a
+        1-D tensor of length n for per-image values.
     nxy : int
         Image size in pixels.
     nz : int
@@ -52,21 +53,26 @@ class BaseImageGenerator(L.LightningModule):
         Detector model for MTF ('k3_300kv', 'k3_200kv', 'perfect', None).
     anisomag : torch.Tensor, optional
         Anisotropic magnification matrices.
-    ctf_params : dict, optional
-        Dictionary of CTF parameters.
+    ctf_params : dict[str, torch.Tensor], optional
+        Dictionary of CTF parameters, each a 1-D tensor of length n.
     progressbars : bool, optional
         Whether to show progress bars. Default True.
     verbose : bool, optional
         Whether to enable verbose logging for this instance. Default True.
-    coincidence_radius : float, optional
-        Coincidence radius for detector. Default 0.0.
+    coincidence_radius : float or torch.Tensor, optional
+        Coincidence radius in pixels. Either a scalar or a 1-D tensor of
+        length n. Default 0.0.
+    potential_scale : float or torch.Tensor, optional
+        Scalar multiplier applied to the scattering potential V before
+        scattering. Values < 1 approximate thicker ice (weaker particle
+        signal). Scalar or 1-D tensor of length n. Default 1.0.
     """
 
     def __init__(
         self,
         pixel_size: float,
         energy: float,
-        dose_per_angstrom: float,
+        dose_per_angstrom: float | torch.Tensor,
         nxy: int,
         nz: int,
         pad_nxy: int | None = None,
@@ -75,17 +81,16 @@ class BaseImageGenerator(L.LightningModule):
         alpha: float = 0.0,
         detector_model: str | None = None,
         anisomag: torch.Tensor | None = None,
-        ctf_params: dict[str, Any] | None = None,
+        ctf_params: dict[str, torch.Tensor] | None = None,
         progressbars: bool = True,
         verbose: bool = True,
-        coincidence_radius: float = 0.0,
+        coincidence_radius: float | torch.Tensor = 0.0,
         num_frames: int | None = None,
+        potential_scale: float | torch.Tensor = 1.0,
     ):
         super().__init__()
         self.pixel_size = pixel_size
         self.energy = energy
-        self.dose_per_angstrom = dose_per_angstrom
-        self.dose_per_pixel = dose_per_angstrom * pixel_size**2
         self.aberration_model = aberration_model
         self.noise_model = noise_model
         self.alpha = alpha
@@ -96,7 +101,6 @@ class BaseImageGenerator(L.LightningModule):
         self.pad_nxy = pad_nxy if pad_nxy is not None else nxy
         self.detector_model = detector_model
         self._init_detector_mtf()
-        self.coincidence_radius = coincidence_radius
         self.num_frames = num_frames
 
         if anisomag is None:
@@ -105,16 +109,39 @@ class BaseImageGenerator(L.LightningModule):
             self.register_buffer("anisomag", torch.as_tensor(anisomag))
 
         if ctf_params is not None:
-            # Register CTF parameters as buffers.
-            # Ensure they are at least 1D so they can be indexed by [idx]
             for k, v in ctf_params.items():
                 v_tensor = torch.as_tensor(v)
                 if v_tensor.ndim == 0:
                     v_tensor = v_tensor.unsqueeze(0)
                 self.register_buffer(k, v_tensor)
             self._ctf_param_names = list(ctf_params.keys())
+            n = len(next(iter(ctf_params.values())))
         else:
             self._ctf_param_names = []
+            n = None
+
+        # Scalar inputs are expanded to length n so forward() can index them
+        # with [idx] just like quaternions and defocus.
+        dose_per_angstrom = torch.as_tensor(
+            dose_per_angstrom, dtype=torch.float32
+        ).flatten()
+        if n is not None and len(dose_per_angstrom) == 1:
+            dose_per_angstrom = dose_per_angstrom.expand(n).clone()
+        self.register_buffer("dose_per_angstrom", dose_per_angstrom)
+
+        coincidence_radius = torch.as_tensor(
+            coincidence_radius, dtype=torch.float32
+        ).flatten()
+        if n is not None and len(coincidence_radius) == 1:
+            coincidence_radius = coincidence_radius.expand(n).clone()
+        self.register_buffer("coincidence_radius", coincidence_radius)
+
+        potential_scale = torch.as_tensor(
+            potential_scale, dtype=torch.float32
+        ).flatten()
+        if n is not None and len(potential_scale) == 1:
+            potential_scale = potential_scale.expand(n).clone()
+        self.register_buffer("potential_scale", potential_scale)
 
     def _init_detector_mtf(self) -> None:
         """Initialize the detector MTF based on the model name."""
@@ -150,11 +177,9 @@ class BaseImageGenerator(L.LightningModule):
 
         self.detector = Detector(
             self.pixel_size,
-            self.dose_per_angstrom,
             aberration_model=self.aberration_model,
             noise_model=self.noise_model,
             mtf=self.detector_mtf,
-            coincidence_radius=self.coincidence_radius,
             num_frames=self.num_frames,
         )
 
@@ -246,6 +271,10 @@ class VolumeProcessingMixin:
                         self.vols = vols.detach().cpu()
                     V[i] += vols
 
+        # apply per-particle potential scale (approximates varying ice thickness)
+        scale = self.potential_scale[idx].reshape(-1, 1, 1, 1)
+        V = V * scale
+
         # clean exit wave: scatter particle-only volume before ice is added
         if getattr(self, "save_clean_exitwaves", False):
             self.clean_exitwaves = self.scattering(V)
@@ -271,10 +300,16 @@ class VolumeProcessingMixin:
         # image/noise
         if self.verbose:
             logger.info(f"Applying detector and noise using {self.noise_model} model")
+        dose_batch = self.dose_per_angstrom[idx]
+        cr_batch = self.coincidence_radius[idx]
         if getattr(self, "anisomag", None) is None:
-            images = self.detector(self.detector_waves, nxy=self.nxy)
+            images = self.detector(
+                self.detector_waves, dose_batch, cr_batch, nxy=self.nxy
+            )
         else:
-            images = self.detector(self.detector_waves, self.anisomag[idx], self.nxy)
+            images = self.detector(
+                self.detector_waves, dose_batch, cr_batch, self.anisomag[idx], self.nxy
+            )
         return images
 
     def predict_step(self, batch: Any, batch_idx: int) -> torch.Tensor:
@@ -330,8 +365,8 @@ class ImageGeneratorFromCoordinates(BaseImageGenerator, VolumeProcessingMixin):
         CTF parameters.
     energy : float
         Electron beam energy in kV.
-    dose_per_angstrom : float
-        Electron dose per Å².
+    dose_per_angstrom : float or torch.Tensor
+        Electron dose per Å². Scalar or 1-D tensor of length n.
     anisomag : torch.Tensor, optional
         Anisotropic magnification matrices.
     ice_model : str, optional
@@ -372,7 +407,7 @@ class ImageGeneratorFromCoordinates(BaseImageGenerator, VolumeProcessingMixin):
         translations: torch.Tensor,
         ctf_params: dict[str, Any],
         energy: float,
-        dose_per_angstrom: float,
+        dose_per_angstrom: float | torch.Tensor,
         anisomag: torch.Tensor | None = None,
         ice_model: str | None = None,
         ice_thickness: float | None = None,
@@ -388,7 +423,7 @@ class ImageGeneratorFromCoordinates(BaseImageGenerator, VolumeProcessingMixin):
         conv_backend: str = "fftconvolve",
         detector_model: str | None = None,
         verbose: bool = True,
-        coincidence_radius: float = 0.0,
+        coincidence_radius: float | torch.Tensor = 0.0,
         num_frames: int | None = None,
         mean_squared_displacement_per_dose: float = 0.0,
     ):
@@ -470,7 +505,6 @@ class ImageGeneratorFromCoordinates(BaseImageGenerator, VolumeProcessingMixin):
             self.pad_nxy,
             self.pixel_size,
             self.energy,
-            self.dose_per_angstrom,
             scattering_model=self.scattering_model,
             klim=self.klim,
             flip_curvature=self.flip_curvature,
@@ -547,7 +581,9 @@ class ImageGeneratorFromCoordinates(BaseImageGenerator, VolumeProcessingMixin):
         """
         # adds perturbation to coordinates
         if self.mean_squared_displacement_per_dose != 0.0:
-            msd = self.mean_squared_displacement_per_dose * self.dose_per_angstrom
+            msd = (
+                self.mean_squared_displacement_per_dose * self.dose_per_angstrom.mean()
+            )
             self.sigma_angstrom = (msd / 3) ** 0.5
             # coordinates are in Ångstroms, so perturb by sigma_angstrom directly
             self.coordinates += torch.randn_like(self.coordinates) * self.sigma_angstrom
@@ -613,8 +649,8 @@ class ImageGenerator(BaseImageGenerator, VolumeProcessingMixin):
         CTF parameters.
     energy : float
         Electron beam energy in kV.
-    dose_per_angstrom : float
-        Electron dose per Å².
+    dose_per_angstrom : float or torch.Tensor
+        Electron dose per Å². Scalar or 1-D tensor of length n.
     anisomag : torch.Tensor, optional
         Anisotropic magnification matrices.
     ice_model : str, optional
@@ -655,7 +691,7 @@ class ImageGenerator(BaseImageGenerator, VolumeProcessingMixin):
         translations: torch.Tensor,
         ctf_params: dict[str, Any],
         energy: float,
-        dose_per_angstrom: float,
+        dose_per_angstrom: float | torch.Tensor,
         anisomag: torch.Tensor | None = None,
         ice_model: str | None = None,
         ice_thickness: float | None = None,
@@ -673,8 +709,9 @@ class ImageGenerator(BaseImageGenerator, VolumeProcessingMixin):
         parameterization: str = "kirkland",
         detector_model: str | None = None,
         slice_batch_size: int = 1,
-        coincidence_radius: float = 0.0,
+        coincidence_radius: float | torch.Tensor = 0.0,
         num_frames: int | None = None,
+        potential_scale: float | torch.Tensor = 1.0,
     ):
         nxy = scattering_potential.shape[-1]
         self.pad_fft = pad_fft
@@ -709,6 +746,7 @@ class ImageGenerator(BaseImageGenerator, VolumeProcessingMixin):
             verbose=verbose,
             coincidence_radius=coincidence_radius,
             num_frames=num_frames,
+            potential_scale=potential_scale,
         )
 
         self.parameterization = parameterization
@@ -741,7 +779,6 @@ class ImageGenerator(BaseImageGenerator, VolumeProcessingMixin):
             self.pad_nxy,
             self.pixel_size,
             self.energy,
-            self.dose_per_angstrom,
             scattering_model=self.scattering_model,
             klim=self.klim,
             flip_curvature=self.flip_curvature,
@@ -891,8 +928,8 @@ class MicrographGenerator(BaseImageGenerator):
         CTF parameters.
     energy : float
         Electron beam energy in kV.
-    dose_per_angstrom : float
-        Electron dose per Å².
+    dose_per_angstrom : float or torch.Tensor
+        Electron dose per Å². Scalar or 1-D tensor of length n.
     anisomag : torch.Tensor, optional
         Anisotropic magnification matrices.
     ice_model : str, optional
@@ -932,7 +969,7 @@ class MicrographGenerator(BaseImageGenerator):
         pixel_size: float,
         ctf_params: dict[str, Any],
         energy: float,
-        dose_per_angstrom: float,
+        dose_per_angstrom: float | torch.Tensor,
         vol: torch.Tensor | None = None,
         anisomag: torch.Tensor | None = None,
         ice_model: str | None = None,
@@ -952,7 +989,7 @@ class MicrographGenerator(BaseImageGenerator):
         slice_batch_size: int = 1,
         progressbars: bool = True,
         verbose: bool = True,
-        coincidence_radius: float = 0.0,
+        coincidence_radius: float | torch.Tensor = 0.0,
         num_frames: int | None = None,
         save_clean_exitwaves: bool = False,
         **kwargs: Any,
@@ -1037,7 +1074,6 @@ class MicrographGenerator(BaseImageGenerator):
             self.pad_nxy,
             self.pixel_size,
             self.energy,
-            self.dose_per_angstrom,
             scattering_model=self.scattering_model,
             klim=self.klim,
             alpha=self.alpha,
@@ -1070,6 +1106,29 @@ class MicrographGenerator(BaseImageGenerator):
                 )
             self.vol = self.specimen_gen.generate()
 
+        if self.move_to_cpu:
+            self.vol = self.vol.cpu()
+
+    def regenerate_specimen(self) -> None:
+        """
+        Regenerate the specimen volume with fresh ice and crowding placement.
+
+        Allows multiple independent micrographs to be generated from a single
+        model instance without reinstantiating the class.
+
+        Raises
+        ------
+        RuntimeError
+            If the model was constructed with a pre-built ``vol`` rather than
+            a ``scattering_potential``, as there is no ``specimen_gen`` to
+            call.
+        """
+        if not hasattr(self, "specimen_gen"):
+            raise RuntimeError(
+                "regenerate_specimen() requires the model to have been constructed "
+                "with a scattering_potential, not a pre-built vol."
+            )
+        self.vol = self.specimen_gen.generate()
         if self.move_to_cpu:
             self.vol = self.vol.cpu()
 
@@ -1139,13 +1198,19 @@ class MicrographGenerator(BaseImageGenerator):
         self.detector_waves = self.aberration(self.exitwaves, ctf_batch)
 
         # image/noise
+        dose_batch = self.dose_per_angstrom[idx]
+        cr_batch = self.coincidence_radius[idx]
         if self.anisomag is None:
             images = self.detector(
-                self.detector_waves, nxy=self.nxy
-            )  # nxy=None in original
+                self.detector_waves, dose_batch, cr_batch, nxy=self.nxy
+            )
         else:
             images = self.detector(
-                self.detector_waves, self.anisomag[idx], nxy=self.nxy
+                self.detector_waves,
+                dose_batch,
+                cr_batch,
+                self.anisomag[idx],
+                nxy=self.nxy,
             )
         return images
 
@@ -1389,7 +1454,7 @@ class TiltSeriesGenerator(MicrographGenerator):
         pixel_size: float,
         ctf_params: dict[str, Any],
         energy: float,
-        dose_per_angstrom: float,
+        dose_per_angstrom: float | torch.Tensor,
         quaternions: torch.Tensor | None = None,
         translations: torch.Tensor | None = None,
         angles: torch.Tensor | Sequence[float] | None = None,
@@ -1410,7 +1475,7 @@ class TiltSeriesGenerator(MicrographGenerator):
         taper_width: int = 0,
         z_taper_width: int = 0,
         tilt_axis: str = "x",
-        coincidence_radius: float = 0.0,
+        coincidence_radius: float | torch.Tensor = 0.0,
         num_frames: int | None = None,
         **kwargs: Any,
     ):
@@ -1556,7 +1621,6 @@ class TiltSeriesGenerator(MicrographGenerator):
             desired_nxy,
             pixel_size,
             energy,
-            dose_per_angstrom,
             scattering_model=scattering_model,
             klim=klim,
             alpha=alpha,
@@ -1715,10 +1779,14 @@ class TiltSeriesGenerator(MicrographGenerator):
             detector_waves = self.aberration(exitwave, ctf_batch)
 
             # 4. Detection
+            dose_batch = self.dose_per_angstrom[idx]
+            cr_batch = self.coincidence_radius[idx]
             if self.anisomag is None:
-                image = self.detector(detector_waves, nxy=None)
+                image = self.detector(detector_waves, dose_batch, cr_batch, nxy=None)
             else:
-                image = self.detector(detector_waves, self.anisomag[idx], nxy=None)
+                image = self.detector(
+                    detector_waves, dose_batch, cr_batch, self.anisomag[idx], nxy=None
+                )
 
             tilt_series.append(image.detach().cpu())
             exitwaves.append(exitwave.detach().cpu())

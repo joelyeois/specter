@@ -17,7 +17,7 @@ Example (HPC, multi-GPU):
         --num_pixels 256 \
         --pixel_size 1.0 \
         --energy 300 \
-        --dose 20.0 \
+        --dose_min 20.0 \
         --defocus_min 5000 \
         --defocus_max 15000 \
         --cs 2.0 \
@@ -26,7 +26,7 @@ Example (HPC, multi-GPU):
         --scattering_model multislice \
         --aberration_model holography \
         --noise_model poisson \
-        --coincidence_radius 1.8 \
+        --coincidence_radius_min 1.8 \
         --ice_model iterative \
         --ice_thickness 0 \
         --normalize_particles True \
@@ -94,10 +94,16 @@ def parse_args() -> argparse.Namespace:
         help="Electron beam energy in keV.",
     )
     parser.add_argument(
-        "--dose",
+        "--dose_min",
         type=float,
         default=20.0,
-        help="Dose in e⁻/Å².",
+        help="Minimum dose in e⁻/Å². Used as fixed dose if --dose_max is not set.",
+    )
+    parser.add_argument(
+        "--dose_max",
+        type=float,
+        default=None,
+        help="Maximum dose in e⁻/Å². If set, dose is sampled uniformly per particle.",
     )
     parser.add_argument(
         "--num_frames",
@@ -171,10 +177,16 @@ def parse_args() -> argparse.Namespace:
         help="Noise model. Use 'none' for no noise.",
     )
     parser.add_argument(
-        "--coincidence_radius",
+        "--coincidence_radius_min",
         type=float,
         default=1.8,
-        help="Coincidence loss radius in Ångstrom. Set to 0 for default Poisson.",
+        help="Minimum coincidence radius in pixels. Used as fixed value if --coincidence_radius_max is not set.",
+    )
+    parser.add_argument(
+        "--coincidence_radius_max",
+        type=float,
+        default=None,
+        help="Maximum coincidence radius in pixels. If set, sampled uniformly per particle.",
     )
     parser.add_argument(
         "--ice_model",
@@ -200,6 +212,18 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=None,
         help="Max z-distance between crowded particles in Ångstrom. Default: None.",
+    )
+    parser.add_argument(
+        "--potential_scale_min",
+        type=float,
+        default=1.0,
+        help="Minimum potential scale factor. Used as fixed value if --potential_scale_max is not set.",
+    )
+    parser.add_argument(
+        "--potential_scale_max",
+        type=float,
+        default=None,
+        help="Maximum potential scale factor. If set, sampled uniformly per particle. Values < 1 approximate thicker ice.",
     )
     parser.add_argument(
         "--pad_fft",
@@ -522,7 +546,8 @@ def main() -> None:
 
     quats = rotations.random_quaternion(n)
 
-    defocus_A = torch.rand(n) * (args.defocus_max - args.defocus_min) + args.defocus_min
+    defocus_max = args.defocus_max if args.defocus_max is not None else args.defocus_min
+    defocus_A = torch.rand(n) * (defocus_max - args.defocus_min) + args.defocus_min
     ctf_params = {
         "cs": torch.tensor([cs_angstrom] * n),
         "dfu": defocus_A,
@@ -531,6 +556,28 @@ def main() -> None:
     rlnOriginXAngst = 2 * (torch.rand(n) - 0.5) * args.shift
     rlnOriginYAngst = 2 * (torch.rand(n) - 0.5) * args.shift
     translations = torch.stack([rlnOriginXAngst, rlnOriginYAngst], dim=-1)
+
+    dose_max = args.dose_max if args.dose_max is not None else args.dose_min
+    dose = torch.rand(n) * (dose_max - args.dose_min) + args.dose_min
+
+    cr_max = (
+        args.coincidence_radius_max
+        if args.coincidence_radius_max is not None
+        else args.coincidence_radius_min
+    )
+    coincidence_radius = (
+        torch.rand(n) * (cr_max - args.coincidence_radius_min)
+        + args.coincidence_radius_min
+    )
+
+    ps_max = (
+        args.potential_scale_max
+        if args.potential_scale_max is not None
+        else args.potential_scale_min
+    )
+    potential_scale = (
+        torch.rand(n) * (ps_max - args.potential_scale_min) + args.potential_scale_min
+    )
 
     noise_model = None if args.noise_model == "none" else args.noise_model
     ice_model = None if args.ice_model == "none" else args.ice_model
@@ -542,7 +589,9 @@ def main() -> None:
         if args.crowd_min_distance is not None
         else pdb.max_diameter
     )
-    num_frames = args.num_frames if args.num_frames is not None else int(args.dose)
+    num_frames = (
+        args.num_frames if args.num_frames is not None else int(dose.mean().item())
+    )
 
     model = ImageGenerator(
         V,
@@ -551,7 +600,7 @@ def main() -> None:
         translations,
         ctf_params,
         args.energy,
-        args.dose,
+        dose,
         ice_model=ice_model,
         ice_thickness=args.ice_thickness,
         scattering_model=args.scattering_model,
@@ -565,8 +614,9 @@ def main() -> None:
         pad_fft=args.pad_fft,
         detector_model=detector_model,
         verbose=False,
-        coincidence_radius=args.coincidence_radius,
+        coincidence_radius=coincidence_radius,
         num_frames=num_frames,
+        potential_scale=potential_scale,
     )
 
     if args.save_clean_exitwaves:
@@ -621,6 +671,9 @@ def main() -> None:
         alpha=args.alpha,
         filename=args.filename,
         folderpath=args.output_dir,
+        dose_per_angstrom=dose,
+        coincidence_radius=coincidence_radius,
+        potential_scale=potential_scale,
     )
 
     if is_main:

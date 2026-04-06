@@ -110,7 +110,6 @@ class Scattering(L.LightningModule):
         nxy: int,
         pixel_size: float,
         energy: float,
-        dose_per_angstrom: float,
         scattering_model: str = "multislice",
         klim: float | None = None,
         flip_curvature: bool = False,
@@ -130,8 +129,6 @@ class Scattering(L.LightningModule):
             Pixel size in Ångströms. Assumes dz equals pixel_size.
         energy : float
             Electron beam energy in keV. Typical values are 100, 120, 200, or 300 keV.
-        dose_per_angstrom : float
-            Electron dose in e-/Å^2.
         scattering_model : str, optional
             Scattering model to use. Options: 'multislice', 'firstborn',
             'projection', 'ctf' (in order of increasing approximations).
@@ -164,8 +161,6 @@ class Scattering(L.LightningModule):
 
         # model params
         self.energy = energy
-        self.dose_per_angstrom = dose_per_angstrom
-        self.dose_per_pixel = dose_per_angstrom * pixel_size**2
         self.wavelength = energy_to_wavelength(energy)
         self.sigma = interaction_parameter(energy)
         self.scattering_model = scattering_model
@@ -247,7 +242,7 @@ class Scattering(L.LightningModule):
         F = self.F_real + 1j * self.F_imag
         if self.flip_curvature:
             V = torch.flip(V, dims=(1,))
-        exitwave = self.dose_per_pixel**0.5
+        exitwave = 1.0
 
         # iterate across z-planes of 3D potentials.
         # for i in tqdm(range(V.size(1)), desc='Multislicing', leave=False):
@@ -298,9 +293,6 @@ class Scattering(L.LightningModule):
         t = torch.exp(1j * self.sigma * V)  # (B x Z x X x Y)
         exitwaves = ifft2(fft2(t) * F[None, ...])  # propagate each slice
         exitwave = torch.prod(exitwaves, 1)  # product along Z
-
-        # multiply with dose
-        exitwave = exitwave * self.dose_per_pixel**0.5
         return exitwave  # (B x X x Y)
 
     def firstborn(self, V: torch.Tensor) -> torch.Tensor:
@@ -335,9 +327,6 @@ class Scattering(L.LightningModule):
         exitwave = ifft2(exitwave_f)
         exitwave = torch.sum(exitwave, 1)  # sum along Z
         exitwave = 1 + 1j * exitwave
-
-        # multiply with dose
-        exitwave *= self.dose_per_pixel**0.5
         return exitwave
 
     def projection(self, V: torch.Tensor) -> torch.Tensor:
@@ -364,7 +353,7 @@ class Scattering(L.LightningModule):
         This is valid only for thin specimens where propagation effects are negligible.
         """
         V_sum = torch.sum(V, 1)
-        exitwave = (self.dose_per_pixel**0.5) * torch.exp(1j * self.sigma * V_sum)
+        exitwave = torch.exp(1j * self.sigma * V_sum)
         return exitwave
 
     def ctf(self, V: torch.Tensor) -> torch.Tensor:
@@ -442,7 +431,6 @@ class IterativeScattering(L.LightningModule):
         nxy: int,
         pixel_size: float,
         energy: float,
-        dose_per_angstrom: float,
         scattering_model: str = "multislice",
         klim: float | None = None,
         flip_curvature: bool = False,
@@ -458,8 +446,6 @@ class IterativeScattering(L.LightningModule):
             Pixel size in Å.
         energy : float
             Electron beam energy in keV.
-        dose_per_angstrom : float
-            Electron dose in e-/Å^2.
         scattering_model : str
             Scattering model to use ('multislice', 'firstborn', 'rytov', 'projection', 'ctf').
         klim : float, optional
@@ -475,8 +461,6 @@ class IterativeScattering(L.LightningModule):
         self.nxy = nxy
         self.pixel_size = pixel_size
         self.energy = energy
-        self.dose_per_angstrom = dose_per_angstrom
-        self.dose_per_pixel = dose_per_angstrom * pixel_size**2
         self.wavelength = energy_to_wavelength(energy)
         self.sigma = interaction_parameter(energy)
         self.scattering_model = scattering_model
@@ -595,11 +579,8 @@ class IterativeScattering(L.LightningModule):
         device = self.device
 
         F = self.F_step_real + 1j * self.F_step_imag
-        exitwave = torch.full(
-            (B, self.nxy, self.nxy),
-            self.dose_per_pixel**0.5,
-            device=device,
-            dtype=torch.complex64,
+        exitwave = torch.ones(
+            B, self.nxy, self.nxy, device=device, dtype=torch.complex64
         )
 
         indices = torch.arange(nz_new, device=V.device)
@@ -696,9 +677,7 @@ class IterativeScattering(L.LightningModule):
                 total_potential += slices_block[:, i % slice_batch_size]
 
         total_complex = complex_potential(total_potential, alpha=self.alpha)
-        exitwave = (self.dose_per_pixel**0.5) * torch.exp(
-            1j * self.sigma * total_complex
-        )
+        exitwave = torch.exp(1j * self.sigma * total_complex)
         return exitwave
 
     def rytov(
@@ -765,7 +744,6 @@ class IterativeScattering(L.LightningModule):
                 ifft2(fft2(1j * self.sigma * slice_complex) * F_i)
             )
 
-        exitwave *= self.dose_per_pixel**0.5
         return exitwave
 
     def firstborn(
@@ -828,7 +806,7 @@ class IterativeScattering(L.LightningModule):
             F_i = self._get_propagator(float(nz_new - i))
             total_scattered += ifft2(fft2(slice_complex) * F_i)
 
-        exitwave = (1 + 1j * self.sigma * total_scattered) * (self.dose_per_pixel**0.5)
+        exitwave = 1 + 1j * self.sigma * total_scattered
         return exitwave
 
     def ctf(

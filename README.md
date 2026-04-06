@@ -55,7 +55,7 @@ Ready-to-run CLI scripts are in `demo-scripts/`. Activate the environment first 
 
 ### `generate_particle_stack.py`
 
-Simulate a particle stack with randomly sampled poses and CTF parameters.
+Simulate a particle stack with randomly sampled poses and CTF parameters. Defocus, dose, and coincidence radius are each independently randomisable per particle by specifying a `_min`/`_max` range. Omitting `_max` (or setting it equal to `_min`) uses a fixed value for all particles.
 
 ```bash
 python demo-scripts/generate_particle_stack.py \
@@ -64,13 +64,15 @@ python demo-scripts/generate_particle_stack.py \
     --num_pixels 256 \
     --pixel_size 1.056 \
     --energy 300 \
-    --dose 53 \
+    --dose_min 40 \
+    --dose_max 60 \
     --defocus_min 5000 \
     --defocus_max 15000 \
     --cs 2.7 \
     --alpha 0.07 \
     --noise_model poisson \
-    --coincidence_radius 2.1 \
+    --coincidence_radius_min 1.5 \
+    --coincidence_radius_max 2.5 \
     --ice_model iterative \
     --normalize_particles True \
     --device cuda:0 \
@@ -86,16 +88,21 @@ python demo-scripts/generate_particle_stack.py \
 | `--num_pixels` | `256` | Box size in pixels |
 | `--pixel_size` | `1.0` | Pixel size in Å |
 | `--energy` | `300.0` | Beam energy in keV |
-| `--dose` | `20.0` | Electron dose in e⁻/Å² |
-| `--num_frames` | `int(dose)` | Number of frames |
+| `--dose_min` | `20.0` | Minimum dose in e⁻/Å²; used as fixed dose if `--dose_max` is not set |
+| `--dose_max` | `None` | Maximum dose in e⁻/Å²; if set, dose is sampled uniformly per particle |
+| `--num_frames` | `int(mean dose)` | Number of frames |
 | `--cs` | `2.0` | Spherical aberration in mm |
 | `--alpha` | `0.1` | Amplitude contrast ratio |
-| `--defocus_min/max` | `5000/15000` | Defocus range in Å |
+| `--defocus_min` | `5000` | Minimum defocus in Å; used as fixed value if `--defocus_max` is not set |
+| `--defocus_max` | `15000` | Maximum defocus in Å; if set, defocus is sampled uniformly per particle |
 | `--shift` | `2.0` | Max in-plane shift in Å (uniform ±shift) |
 | `--scattering_model` | `multislice` | `multislice` \| `firstborn` \| `projection` \| `ctf` |
 | `--aberration_model` | `holography` | `holography` \| `ctf` |
 | `--noise_model` | `poisson` | `poisson` \| `none` |
-| `--coincidence_radius` | `1.8` | Coincidence loss radius in Å; `0` for standard Poisson |
+| `--coincidence_radius_min` | `1.8` | Minimum coincidence radius in pixels; used as fixed value if `--coincidence_radius_max` is not set |
+| `--coincidence_radius_max` | `None` | Maximum coincidence radius in pixels; if set, sampled uniformly per particle |
+| `--potential_scale_min` | `1.0` | Minimum potential scale factor; used as fixed value if `--potential_scale_max` is not set |
+| `--potential_scale_max` | `None` | Maximum potential scale factor; if set, sampled uniformly per particle. Values < 1 approximate thicker ice (weaker particle signal) |
 | `--ice_model` | `iterative` | `iterative` \| `randomchoice` \| `none` |
 | `--ice_thickness` | `0.0` | Ice thickness in Å; `0` = minimum (particle box size) |
 | `--crowd_min_distance` | `pdb.max_diameter` | Min distance between crowded molecules in Å; `0` disables crowding |
@@ -136,14 +143,14 @@ python demo-scripts/generate_particle_stack_from_csfile.py \
 |---|---|---|
 | `--cs_path` | *(required)* | Path to CryoSPARC `.cs` file |
 | `--pdb_code` | *(required)* | PDB accession code or path to local `.cif`/`.pdb` file |
-| `--dose` | *(required)* | Electron dose in e⁻/Å² (check the EMDB Experiment tab) |
+| `--dose` | *(required)* | Fixed electron dose in e⁻/Å² applied to all particles (check the EMDB Experiment tab) |
 | `--n_particles` | all in file | Number of particles to simulate |
 | `--num_pixels` | `256` | Box size in pixels |
 | `--num_frames` | `int(dose)` | Number of frames |
 | `--scattering_model` | `multislice` | `multislice` \| `firstborn` \| `projection` \| `ctf` |
 | `--aberration_model` | `holography` | `holography` \| `ctf` |
 | `--noise_model` | `poisson` | `poisson` \| `none` |
-| `--coincidence_radius` | `2.1` | Coincidence loss radius in Å; `0` for standard Poisson |
+| `--coincidence_radius` | `2.1` | Fixed coincidence radius in pixels applied to all particles; `0` for standard Poisson |
 | `--ice_model` | `iterative` | `iterative` \| `randomchoice` \| `none` |
 | `--ice_thickness` | `0.0` | Ice thickness in Å; `0` = minimum (particle box size) |
 | `--crowd_min_distance` | `pdb.max_diameter` | Min distance between crowded molecules in Å; `0` disables crowding |
@@ -164,7 +171,7 @@ python demo-scripts/generate_particle_stack_from_csfile.py \
 | File | Description |
 |---|---|
 | `<filename>.mrcs` | Particle image stack |
-| `<filename>.star` | RELION-compatible metadata (poses, CTF, pixel size, voltage) |
+| `<filename>.star` | RELION-compatible metadata (poses, CTF, pixel size, voltage) with per-particle `cryosimDosePerAngstrom`, `cryosimCoincidenceRadius`, and `cryosimPotentialScale` columns |
 | `<filename>_exitwave_magnitude.mrcs` | Exit wave magnitude (`--save_exitwaves True` only) |
 | `<filename>_exitwave_phase.mrcs` | Exit wave phase (`--save_exitwaves True` only) |
 | `<filename>_clean_exitwave_magnitude.mrcs` | Clean exit wave magnitude (`--save_clean_exitwaves True` only) |

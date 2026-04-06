@@ -233,6 +233,9 @@ def create_particle_starfile(
     dx: float | None = None,
     filename: str = "particles",
     ctf_params: torch.Tensor | None = None,
+    dose_per_angstrom: torch.Tensor | float | None = None,
+    coincidence_radius: torch.Tensor | float | None = None,
+    potential_scale: torch.Tensor | float | None = None,
 ) -> str:
     """
     Save particle stack as MRCS and create RELION .star file.
@@ -259,6 +262,12 @@ def create_particle_starfile(
     ctf_params : torch.Tensor, optional
         CTF parameters for each particle, shape (N, K).
         Expected columns: [Cs (Å), dfu (Å), dfv (Å), dfang (rad), ..., phaseshift (rad)].
+    dose_per_angstrom : torch.Tensor or float, optional
+        Dose per particle in e⁻/Å². Saved as ``cryosimDosePerAngstrom``.
+    coincidence_radius : torch.Tensor or float, optional
+        Coincidence radius per particle in pixels. Saved as ``cryosimCoincidenceRadius``.
+    potential_scale : torch.Tensor or float, optional
+        Per-particle potential scale factor. Saved as ``cryosimPotentialScale``.
 
     Returns
     -------
@@ -326,6 +335,13 @@ def create_particle_starfile(
 
     d["rlnOriginXAngst"] = translations[:, 0]
     d["rlnOriginYAngst"] = translations[:, 1]
+
+    if dose_per_angstrom is not None:
+        d["cryosimDosePerAngstrom"] = torch.as_tensor(dose_per_angstrom).expand(n)
+    if coincidence_radius is not None:
+        d["cryosimCoincidenceRadius"] = torch.as_tensor(coincidence_radius).expand(n)
+    if potential_scale is not None:
+        d["cryosimPotentialScale"] = torch.as_tensor(potential_scale).expand(n)
 
     particles_df = pd.DataFrame(data=d)
 

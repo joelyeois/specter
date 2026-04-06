@@ -334,52 +334,54 @@ def main() -> None:
     )
     num_frames = args.num_frames if args.num_frames is not None else int(args.dose)
 
-    # --- Generating micrographs (fresh specimen per micrograph) ---
+    # Sample all defocus values upfront — one per micrograph
+    defocus_A = torch.rand(n) * (args.defocus_max - args.defocus_min) + args.defocus_min
+    ctf_params = {
+        "cs": torch.tensor([cs_angstrom] * n),
+        "dfu": defocus_A,
+    }
+
+    # Build once — __init__ generates the first specimen
+    _section("Building specimen and image generator")
+    model = MicrographGenerator(
+        V,
+        args.micrograph_size,
+        args.pixel_size,
+        ctf_params,
+        args.energy,
+        args.dose,
+        ice_model=ice_model,
+        ice_thickness=args.ice_thickness,
+        scattering_model=args.scattering_model,
+        aberration_model=args.aberration_model,
+        noise_model=noise_model,
+        klim=None,
+        alpha=args.alpha,
+        crowd_min_distance=crowd_min_distance,
+        crowd_max_distance_z=args.crowd_max_distance_z,
+        water_air_interface=args.water_air_interface,
+        pad_fft=args.pad_fft,
+        chunk_size=args.chunk_size,
+        move_to_cpu=True,
+        detector_model=detector_model,
+        verbose=False,
+        progressbars=False,
+        coincidence_radius=args.coincidence_radius,
+        num_frames=num_frames,
+        save_clean_exitwaves=args.save_clean_exitwaves,
+    ).to(args.device)
+
+    # Loop: regenerate fresh specimen for each micrograph, use i-th CTF
     _section(f"Generating {n} micrograph(s) on {args.device}")
     images = []
     exitwaves = [] if args.save_exitwaves else None
     clean_exitwaves = [] if args.save_clean_exitwaves else None
 
     for i in track(range(n), description="Generating micrographs"):
-        _console.print(f"[dim]Micrograph {i + 1}/{n}[/dim]")
-
-        defocus = (
-            torch.rand(1) * (args.defocus_max - args.defocus_min) + args.defocus_min
-        )
-        ctf_params = {
-            "cs": torch.tensor([cs_angstrom]),
-            "dfu": defocus,
-        }
-
-        model = MicrographGenerator(
-            V,
-            args.micrograph_size,
-            args.pixel_size,
-            ctf_params,
-            args.energy,
-            args.dose,
-            ice_model=ice_model,
-            ice_thickness=args.ice_thickness,
-            scattering_model=args.scattering_model,
-            aberration_model=args.aberration_model,
-            noise_model=noise_model,
-            klim=None,
-            alpha=args.alpha,
-            crowd_min_distance=crowd_min_distance,
-            crowd_max_distance_z=args.crowd_max_distance_z,
-            water_air_interface=args.water_air_interface,
-            pad_fft=args.pad_fft,
-            chunk_size=args.chunk_size,
-            move_to_cpu=True,
-            detector_model=detector_model,
-            verbose=True,
-            coincidence_radius=args.coincidence_radius,
-            num_frames=num_frames,
-            save_clean_exitwaves=args.save_clean_exitwaves,
-        ).to(args.device)
-
+        if i > 0:
+            model.regenerate_specimen()
         with torch.no_grad():
-            img = model(torch.tensor([0]))
+            img = model(torch.tensor([i]))
         images.append(img.detach().cpu())
         if exitwaves is not None:
             exitwaves.append(model.exitwaves.detach().cpu())

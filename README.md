@@ -260,3 +260,73 @@ python demo-scripts/generate_micrograph.py \
 | `<filename>.mrcs` | Micrograph stack |
 | `<filename>.star` | Per-micrograph metadata (defocus, voltage, pixel size, amplitude contrast) with `specterDosePerAngstrom`, `specterCoincidenceRadius`, and `specterPotentialScale` columns |
 
+---
+
+### `generate_tilt_series.py`
+
+Simulate a cryo-ET tilt series from a pre-built tomogram volume (e.g. from Polnet or `TomogramGenerator`). Ice is generated using the interpolation method and blended in before simulation.
+
+```bash
+python demo-scripts/generate_tilt_series.py \
+    --mrc_path /path/to/tomo.mrc \
+    --voxel_size 3.0 \
+    --micrograph_size 2100 \
+    --energy 300 \
+    --dose_per_tilt 3.0 \
+    --min_tilt_angle -45 \
+    --max_tilt_angle 45 \
+    --n_tilts 61 \
+    --defocus 22000 \
+    --cs 2.7 \
+    --alpha 0.1 \
+    --tilt_axis y \
+    --scattering_model multislice \
+    --noise_model poisson \
+    --coincidence_radius 1.5 \
+    --num_frames 10 \
+    --add_ice True \
+    --algorithm_dx 0.5 \
+    --n_ice_blocks 8 \
+    --tomo_to_ice_ratio 0.75 \
+    --save_exitwaves True \
+    --device cuda:0 \
+    --output_dir ./output/ \
+    --filename tilt_series
+```
+
+| Argument | Default | Description |
+|---|---|---|
+| `--mrc_path` | *(required)* | Path to input MRC volume (Z, Y, X) |
+| `--voxel_size` | `3.0` | Voxel size in Å |
+| `--micrograph_size` | volume XY size | Output image size in pixels (square) |
+| `--energy` | `300.0` | Beam energy in keV |
+| `--dose_per_tilt` | `3.0` | Dose per tilt angle in e⁻/Å² |
+| `--num_frames` | `10` | Number of movie frames per tilt |
+| `--cs` | `2.0` | Spherical aberration in mm |
+| `--alpha` | `0.1` | Amplitude contrast ratio |
+| `--defocus` | `22000.0` | Defocus in Å (positive = underfocus) |
+| `--min_tilt_angle` | `-45.0` | Minimum tilt angle in degrees |
+| `--max_tilt_angle` | `45.0` | Maximum tilt angle in degrees |
+| `--n_tilts` | `61` | Number of tilt angles (evenly spaced) |
+| `--tilt_axis` | `y` | `x` \| `y` |
+| `--scattering_model` | `multislice` | `multislice` \| `firstborn` \| `projection` \| `ctf` |
+| `--noise_model` | `poisson` | `poisson` \| `none` |
+| `--coincidence_radius` | `1.5` | Coincidence radius in Å for direct-detector modelling |
+| `--add_ice` | `True` | Generate and blend amorphous ice |
+| `--algorithm_dx` | `0.5` | Voxel size in Å at which to run the ice algorithm (most stable at 0.5 Å) |
+| `--n_ice_blocks` | `8` | Number of unique ice blocks to generate and tile |
+| `--tomo_to_ice_ratio` | `0.75` | Scale factor for tomogram intensity relative to ice |
+| `--normalize` | `False` | Normalise each tilt image to zero mean and unit std |
+| `--save_exitwaves` | `False` | Save exit wave magnitude and phase as `.mrcs` |
+| `--device` | `cuda` | `cpu` \| `cuda` \| `cuda:0` |
+| `--output_dir` | `./output/` | Output directory |
+| `--filename` | `tilt_series` | Base name for output files (no extension) |
+
+### Output files (tilt series script)
+
+| File | Description |
+|---|---|
+| `<filename>.mrcs` | Tilt series stack `(n_tilts, H, W)` |
+| `<filename>_exitwave_magnitude.mrcs` | Exit wave magnitude per tilt (`--save_exitwaves True` only) |
+| `<filename>_exitwave_phase.mrcs` | Exit wave phase per tilt (`--save_exitwaves True` only) |
+

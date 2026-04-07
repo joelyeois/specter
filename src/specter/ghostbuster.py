@@ -49,6 +49,7 @@ class Ghostbuster(L.LightningModule):
         nps_weight: torch.Tensor | None = None,
         learn_noise_model: bool = False,
         noise_ema_momentum: float = 0.9,
+        use_ncc: bool = False,
         flipcurvature: bool = False,
         fsc_ref: torch.Tensor | None = None,
         fsc_mask: torch.Tensor | float | None = None,
@@ -98,6 +99,7 @@ class Ghostbuster(L.LightningModule):
         # learned noise model (RELION-style): sigma^2(k) estimated from residuals
         self.learn_noise_model = learn_noise_model
         self.noise_ema_momentum = noise_ema_momentum
+        self.use_ncc = use_ncc
         n = V.shape[-1]
         self.register_buffer("sigma2_k", torch.ones(n, n // 2 + 1))
 
@@ -121,7 +123,8 @@ class Ghostbuster(L.LightningModule):
         # ctf
         self.ctf_params = {}
         for k, v in ctf_params.items():
-            self.register_buffer(k, v)
+            v_adjusted = v + defocus_offset if k in ("dfu", "dfv") else v
+            self.register_buffer(k, v_adjusted)
             self.ctf_params[k] = getattr(self, k)
         if lr_D is None:
             self.register_buffer("defocus_offset", defocus_offset)
@@ -232,6 +235,49 @@ class Ghostbuster(L.LightningModule):
             opts.append(optimizerD)
         return opts, lr_schedulers
 
+    @staticmethod
+    def _ncc_loss(
+        pred: torch.Tensor, target: torch.Tensor, eps: float = 1e-8
+    ) -> torch.Tensor:
+        """Normalized cross-correlation loss scaled to MSE-equivalent units.
+
+        Computes ``var(target) * (1 - NCC)`` per image, then averages over the
+        batch.  The ``var(target)`` factor makes the loss dimensionally
+        equivalent to MSE: at the optimum (low-SNR regime) both quantities
+        converge to the noise variance ``σ²``, so the same learning rate can be
+        used without retuning.
+
+        Parameters
+        ----------
+        pred : torch.Tensor
+            Simulated images, shape ``(B, H, W)``.
+        target : torch.Tensor
+            Experimental images, shape ``(B, H, W)``.
+        eps : float
+            Small constant added to the denominator for numerical stability.
+
+        Returns
+        -------
+        torch.Tensor
+            Scalar loss.
+
+        Notes
+        -----
+        NCC is invariant to multiplicative and additive intensity rescaling,
+        which makes it robust to gain-reference errors and forward-model scale
+        mismatches that inflate ordinary MSE.
+        """
+        p = pred.flatten(1)  # (B, N)
+        t = target.flatten(1)
+        p_c = p - p.mean(dim=1, keepdim=True)
+        t_c = t - t.mean(dim=1, keepdim=True)
+        ncc = (p_c * t_c).sum(dim=1) / (
+            p_c.norm(dim=1) * t_c.norm(dim=1) + eps
+        )  # (B,), range [-1, 1]
+        # var(target) per image: scales (1 - NCC) into MSE-equivalent units
+        var_t = (t_c**2).mean(dim=1)  # (B,)
+        return (var_t * (1.0 - ncc)).mean()
+
     def _update_sigma2(self, residuals: torch.Tensor) -> None:
         """Update the per-shell noise variance sigma^2(k) from real-space residuals.
 
@@ -269,8 +315,10 @@ class Ghostbuster(L.LightningModule):
         images, idx = batch
         out = self.forward(idx)
 
-        # mseloss (real-space or NPS-weighted Fourier-space)
-        if self.learn_noise_model:
+        # loss function
+        if self.use_ncc:
+            loss = self._ncc_loss(out, images)
+        elif self.learn_noise_model:
             # RELION-style: estimate sigma^2(k) from residuals, weight by 1/sigma^2(k).
             # sigma2_k is updated with no_grad (EM E-step); gradient flows only
             # through the residuals (M-step).

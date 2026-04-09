@@ -244,6 +244,7 @@ def main() -> None:
     import torch
 
     import specter
+    from specter.cryosparc_utils import create_micrograph_starfile
     from specter.imagegenerator import TiltSeriesGenerator
     from specter.icemaker import Icemaker
 
@@ -334,6 +335,23 @@ def main() -> None:
     with mrcfile.new(mrcs_path, overwrite=True) as mrc:
         mrc.set_data(images.numpy().astype("float32"))
     _console.print(f"  [green]✓[/green] {mrcs_path}")
+
+    ctf_params_broadcast = {
+        "cs": torch.full((args.n_tilts,), cs_angstrom),
+        "dfu": torch.full((args.n_tilts,), args.defocus),
+    }
+    create_micrograph_starfile(
+        n=args.n_tilts,
+        energy=args.energy,
+        pixel_size=dx,
+        alpha=args.alpha,
+        ctf_params=ctf_params_broadcast,
+        folderpath=args.output_dir,
+        filename=args.filename,
+        dose_per_angstrom=args.dose_per_tilt,
+        coincidence_radius=args.coincidence_radius,
+        tilt_angles=angles,
+    )
 
     if args.save_exitwaves:
         ew_prefix = "exitwave" if args.add_ice else "clean_exitwave"

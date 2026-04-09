@@ -369,6 +369,7 @@ def create_micrograph_starfile(
     dose_per_angstrom: torch.Tensor | float | None = None,
     coincidence_radius: torch.Tensor | float | None = None,
     potential_scale: torch.Tensor | float | None = None,
+    tilt_angles: torch.Tensor | None = None,
 ) -> str:
     """
     Create a RELION-compatible .star file for a simulated micrograph stack.
@@ -396,6 +397,8 @@ def create_micrograph_starfile(
         Coincidence radius per micrograph in pixels. Saved as ``specterCoincidenceRadius``.
     potential_scale : torch.Tensor or float, optional
         Potential scale per micrograph. Saved as ``specterPotentialScale``.
+    tilt_angles : torch.Tensor, optional
+        Tilt angles in degrees for each micrograph. Saved as ``specterTiltAngle``.
 
     Returns
     -------
@@ -428,6 +431,8 @@ def create_micrograph_starfile(
         d["specterCoincidenceRadius"] = torch.as_tensor(coincidence_radius).expand(n)
     if potential_scale is not None:
         d["specterPotentialScale"] = torch.as_tensor(potential_scale).expand(n)
+    if tilt_angles is not None:
+        d["specterTiltAngle"] = torch.as_tensor(tilt_angles)
 
     df = pd.DataFrame(data=d)
 

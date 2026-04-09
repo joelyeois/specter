@@ -249,6 +249,8 @@ python demo-scripts/generate_micrograph.py \
 | `--chunk_size` | `None` | Slice chunk size for specimen generation; set (e.g. `8`) if GPU memory is limited |
 | `--detector_model` | `none` | `none` \| `perfect` \| `k3_300kv` \| `k3_200kv` |
 | `--normalize_micrographs` | `False` | Normalise each micrograph to zero mean and unit std |
+| `--save_exitwaves` | `False` | Save icy exit wave magnitude and phase as `.mrcs` |
+| `--save_clean_exitwaves` | `False` | Save iceless exit wave magnitude and phase. Runs scattering twice per micrograph |
 | `--device` | `cpu` | `cpu` \| `cuda` \| `cuda:0` |
 | `--output_dir` | `./output/` | Output directory |
 | `--filename` | `micrographs` | Base name for output files (no extension) |
@@ -259,6 +261,10 @@ python demo-scripts/generate_micrograph.py \
 |---|---|
 | `<filename>.mrcs` | Micrograph stack |
 | `<filename>.star` | Per-micrograph metadata (defocus, voltage, pixel size, amplitude contrast) with `specterDosePerAngstrom`, `specterCoincidenceRadius`, and `specterPotentialScale` columns |
+| `<filename>_exitwave_magnitude.mrcs` | Icy exit wave magnitude (`--save_exitwaves True` only) |
+| `<filename>_exitwave_phase.mrcs` | Icy exit wave phase (`--save_exitwaves True` only) |
+| `<filename>_clean_exitwave_magnitude.mrcs` | Iceless exit wave magnitude (`--save_clean_exitwaves True` only) |
+| `<filename>_clean_exitwave_phase.mrcs` | Iceless exit wave phase (`--save_clean_exitwaves True` only) |
 
 ---
 
@@ -327,6 +333,8 @@ python demo-scripts/generate_tilt_series.py \
 | File | Description |
 |---|---|
 | `<filename>.mrcs` | Tilt series stack `(n_tilts, H, W)` |
-| `<filename>_exitwave_magnitude.mrcs` | Exit wave magnitude per tilt (`--save_exitwaves True` only) |
-| `<filename>_exitwave_phase.mrcs` | Exit wave phase per tilt (`--save_exitwaves True` only) |
+| `<filename>_exitwave_magnitude.mrcs` | Icy exit wave magnitude per tilt (`--save_exitwaves True`, `--add_ice True`) |
+| `<filename>_exitwave_phase.mrcs` | Icy exit wave phase per tilt (`--save_exitwaves True`, `--add_ice True`) |
+| `<filename>_clean_exitwave_magnitude.mrcs` | Iceless exit wave magnitude per tilt (`--save_exitwaves True`, `--add_ice False`) |
+| `<filename>_clean_exitwave_phase.mrcs` | Iceless exit wave phase per tilt (`--save_exitwaves True`, `--add_ice False`) |
 

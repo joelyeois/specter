@@ -188,7 +188,11 @@ class Icemaker(L.LightningModule):
         self.min_distance = min_distance
         self.correction_factor = correction_factor
         if correction_factor is None:
-            self.correction_factor = (min_distance / min_distance_actual) ** 3
+            if min_distance_actual == 0.0:
+                # dx is coarser than min_distance — no voxel-level correction possible
+                self.correction_factor = 1.0
+            else:
+                self.correction_factor = (min_distance / min_distance_actual) ** 3
         self.n_ice_molecules_theory = int(ndensity_of_amorphous_ice * self.v)
         self.n_ice_molecules = int(
             ndensity_of_amorphous_ice * self.v / self.correction_factor

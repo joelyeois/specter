@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+import datetime
+import json
+from pathlib import Path
 from typing import Any, Literal
 
 import lightning as L
+import mrcfile
 import torch
+import torch.multiprocessing as mp
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.utils.data
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import (
     CosineAnnealingWarmRestarts,
@@ -58,8 +64,30 @@ class Ghostbuster(L.LightningModule):
         symmetry_batchsize: int | None = None,
         symmetry_mode: Literal["real", "fourier"] = "fourier",
         use_cpu_for_symmetry: bool = False,
+        tag: str = "untagged",
+        output_dir: str | Path | None = None,
+        halfset_label: str | None = None,
     ) -> None:
         super().__init__()
+
+        self.save_hyperparameters(
+            ignore=[
+                "V",
+                "quaternions",
+                "translations",
+                "ctf_params",
+                "anisomag",
+                "kmask",
+                "nps_weight",
+                "fsc_ref",
+                "fsc_mask",
+                "output_dir",
+                "halfset_label",
+            ]
+        )
+        self._output_dir = Path(output_dir) if output_dir is not None else None
+        self._run_dir: Path | None = None
+        self._halfset_label: str | None = halfset_label
 
         # Always use manual optimization to handle masking and multiple optimizers consistently
         self.automatic_optimization = False
@@ -405,6 +433,31 @@ class Ghostbuster(L.LightningModule):
                 ifft3(fft3(self.V.data, shift=True) * self.kmask, shift=True)
             )
 
+    def on_fit_start(self) -> None:
+        if self._output_dir is None:
+            return
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        tag = self.hparams.get("tag", "untagged")
+        self._run_dir = self._output_dir / f"{timestamp}__{tag}"
+        self._run_dir.mkdir(parents=True, exist_ok=True)
+        (self._run_dir / "epochs").mkdir(exist_ok=True)
+
+        saved_arrays: list[str] = []
+        for name in ("nps_weight", "kmask"):
+            tensor = getattr(self, name, None)
+            if isinstance(tensor, torch.Tensor):
+                torch.save(tensor.detach().cpu(), self._run_dir / f"{name}.pt")
+                saved_arrays.append(name)
+
+        meta: dict[str, Any] = {"timestamp": timestamp}
+        meta.update(dict(self.hparams))
+        if saved_arrays:
+            meta["saved_arrays"] = saved_arrays
+        (self._run_dir / "params.json").write_text(
+            json.dumps(meta, indent=2, default=str)
+        )
+        print(f"Run directory: {self._run_dir}")
+
     def on_train_epoch_end(self) -> None:
         # enforce symmetry
         if self.symmetry is not None:
@@ -414,6 +467,17 @@ class Ghostbuster(L.LightningModule):
                 batchsize=self.symmetry_batchsize,
                 method=self.symmetry_mode,
             )
+
+        # save per-epoch volume
+        if self._run_dir is not None:
+            epoch = self.current_epoch + 1
+            suffix = (
+                f"_{self._halfset_label}" if self._halfset_label is not None else ""
+            )
+            path = self._run_dir / "epochs" / f"{epoch:03d}{suffix}.mrc"
+            v = self.V.detach().cpu().float().numpy()
+            with mrcfile.new(path, overwrite=True) as mrc:
+                mrc.set_data(v)
 
     def num_training_steps_per_epoch(self) -> int:
         """Get number of training steps per epoch"""
@@ -425,3 +489,304 @@ class Ghostbuster(L.LightningModule):
         num_steps = dataset_size // self.trainer.accumulate_grad_batches
 
         return num_steps
+
+
+def compare_runs(
+    base_dir: str | Path = "output/runs",
+    show_params: list[str] | None = None,
+) -> None:
+    """
+    Print a summary table of all saved Ghostbuster runs.
+
+    Parameters
+    ----------
+    base_dir : str or Path
+        Root directory containing run subdirectories.
+    show_params : list of str, optional
+        Parameter keys to display as columns. Defaults to
+        ``["scattering_model", "lr", "rotate_mode", "use_nps", "niter"]``.
+    """
+    if show_params is None:
+        show_params = ["scattering_model", "lr", "rotate_mode", "use_nps", "niter"]
+
+    runs = sorted(Path(base_dir).glob("*/params.json"))
+    if not runs:
+        print(f"No runs found in {base_dir}.")
+        return
+
+    col_w = 20
+    header = f"{'run':<45}" + "".join(f"  {k:<{col_w}}" for k in show_params)
+    print(header)
+    print("-" * len(header))
+    for p in runs:
+        d = json.loads(p.read_text())
+        row = f"{p.parent.name:<45}" + "".join(
+            f"  {str(d.get(k, '—')):<{col_w}}" for k in show_params
+        )
+        print(row)
+
+
+def _split_halfsets(n: int) -> torch.Tensor:
+    """Assign N particles to two halves by even/odd index.
+
+    Parameters
+    ----------
+    n : int
+        Total number of particles.
+
+    Returns
+    -------
+    torch.Tensor
+        1-D integer label tensor of length ``n`` with values 0 (half A) or
+        1 (half B), alternating as ``[0, 1, 0, 1, ...]``.
+    """
+    labels = torch.zeros(n, dtype=torch.long)
+    labels[1::2] = 1
+    return labels
+
+
+def _halfset_worker(
+    rank: int,
+    run_dir: Path,
+    all_images: list[torch.Tensor],
+    all_ghost_kwargs: list[dict[str, Any]],
+    batch_size: int,
+    max_epochs: int,
+    gpu_ids: list[int | None],
+) -> None:
+    """Worker function executed in each halfset subprocess.
+
+    Parameters
+    ----------
+    rank : int
+        0 for half A, 1 for half B.
+    run_dir : Path
+        Shared output directory created by :func:`run_halfsets`.
+    all_images : list of torch.Tensor
+        ``[images_A, images_B]`` — experimental images for each half.
+    all_ghost_kwargs : list of dict
+        ``[kwargs_A, kwargs_B]`` — constructor kwargs for each half's
+        :class:`Ghostbuster`, with per-particle tensors already sliced.
+    batch_size : int
+        Dataloader batch size.
+    max_epochs : int
+        Number of training epochs.
+    gpu_ids : list of int or None
+        ``[gpu_A, gpu_B]`` — GPU index for each half, or ``None`` for CPU.
+    """
+    label = "AB"[rank]
+    images = all_images[rank]
+    ghost_kwargs = all_ghost_kwargs[rank]
+    gpu_id = gpu_ids[rank]
+
+    # Restrict this process to its assigned GPU so Lightning and CUDA ops
+    # don't accidentally spill onto the other device.
+    use_gpu = gpu_id is not None and torch.cuda.is_available()
+    if use_gpu:
+        torch.cuda.set_device(gpu_id)
+
+    torch.set_float32_matmul_precision("high")
+
+    model = Ghostbuster(**ghost_kwargs, halfset_label=label, output_dir=None)
+    # Pre-assign run_dir so on_fit_start (which returns early when
+    # output_dir is None) does not create a new timestamped directory.
+    model._run_dir = run_dir
+
+    n = images.shape[0]
+    dataset = torch.utils.data.TensorDataset(images, torch.arange(n))
+    # num_workers=0: this function runs inside mp.spawn subprocesses;
+    # spawning DataLoader workers within a spawned process causes nested
+    # multiprocessing overhead. The dataset is already in RAM so there
+    # is no I/O to parallelise anyway.
+    dataloader = torch.utils.data.DataLoader(
+        dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=0,
+    )
+
+    trainer = L.Trainer(
+        accelerator="gpu" if use_gpu else "cpu",
+        devices=[gpu_id] if use_gpu else 1,
+        max_epochs=max_epochs,
+        enable_checkpointing=False,
+        logger=False,
+        enable_progress_bar=True,
+    )
+    trainer.fit(model, dataloader)
+
+    v = model.V.detach().cpu().float().numpy()
+    out_path = run_dir / f"vol_{label}.mrc"
+    with mrcfile.new(out_path, overwrite=True) as mrc:
+        mrc.set_data(v)
+    print(f"[half {label}] saved final volume → {out_path}")
+
+
+def run_halfsets(
+    images: torch.Tensor,
+    V_init: torch.Tensor,
+    voxel_size: float,
+    quaternions: torch.Tensor,
+    translations: torch.Tensor,
+    ctf_params: dict[str, torch.Tensor],
+    energy: float,
+    dose_per_angstrom: float,
+    halfset_labels: torch.Tensor | None = None,
+    batch_size: int = 3,
+    max_epochs: int = 5,
+    output_dir: str | Path = "output/runs",
+    gpus: list[int] | None = None,
+    tag: str | None = None,
+    **ghostbuster_kwargs: Any,
+) -> Path:
+    """Run independent halfset reconstructions and save into a single run folder.
+
+    Splits ``images``, ``quaternions``, ``translations``, and ``ctf_params``
+    into two halves and runs a full :class:`Ghostbuster` reconstruction on each
+    independently.  When ``gpus`` contains two entries, both halves run in
+    parallel via :func:`torch.multiprocessing.spawn` on those specific devices;
+    when it contains one entry, both halves run sequentially on that device.
+
+    Output layout::
+
+        <output_dir>/<timestamp>__<tag>/
+            params.json          ← combined run metadata
+            epochs/
+                001_A.mrc        ← half-A volume after epoch 1
+                001_B.mrc
+                002_A.mrc
+                002_B.mrc
+                ...
+            vol_A.mrc            ← final reconstructed volume, half A
+            vol_B.mrc            ← final reconstructed volume, half B
+
+    Parameters
+    ----------
+    images : torch.Tensor
+        Experimental images, shape ``(N, H, W)``.
+    V_init : torch.Tensor
+        Initial 3-D volume estimate, shape ``(Z, X, Y)``.  Copied for each half.
+    voxel_size : float
+        Voxel size in Angstroms.
+    quaternions : torch.Tensor
+        Per-particle rotation quaternions, shape ``(N, 4)``.
+    translations : torch.Tensor
+        Per-particle translations, shape ``(N, 2)`` or ``(N, 3)``.
+    ctf_params : dict[str, torch.Tensor]
+        Per-particle CTF parameters; each value has leading dimension ``N``.
+    energy : float
+        Electron energy in keV.
+    dose_per_angstrom : float
+        Electron dose in e⁻/Å².
+    halfset_labels : torch.Tensor, optional
+        1-D integer tensor of length ``N`` with values ``0`` (half A) or
+        ``1`` (half B), e.g. ``[0, 0, 1, 0, 1, ...]``.  Matches the
+        ``alignments3D/split`` field returned by
+        :func:`~specter.cryosparc_utils.extract_parameters_from_csfile`.
+        Defaults to alternating even/odd assignment.
+    batch_size : int
+        Dataloader batch size for each half.
+    max_epochs : int
+        Number of training epochs.
+    output_dir : str or Path
+        Root directory under which the run folder is created.
+    gpus : list of int, optional
+        GPU indices to use.  ``[0, 2]`` runs half A on ``cuda:0`` and half B on
+        ``cuda:2`` in parallel.  ``[1]`` runs both halves sequentially on
+        ``cuda:1``.  Defaults to ``[0]`` when CUDA is available, CPU otherwise.
+    tag : str, optional
+        Human-readable tag appended to the run folder name.  ``None`` omits the
+        tag suffix.
+    **ghostbuster_kwargs
+        Additional keyword arguments forwarded to :class:`Ghostbuster` unchanged
+        (e.g. ``lr``, ``scattering_model``, ``symmetry``).
+
+    Returns
+    -------
+    Path
+        Path to the run directory.
+    """
+    # resolve GPU assignment
+    if gpus is None:
+        gpus = [0] if torch.cuda.is_available() else []
+
+    output_dir = Path(output_dir)
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    folder_name = f"{timestamp}__{tag}" if tag is not None else timestamp
+    run_dir = output_dir / folder_name
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "epochs").mkdir(exist_ok=True)
+
+    # determine halfset splits
+    n = quaternions.shape[0]
+    labels = halfset_labels if halfset_labels is not None else _split_halfsets(n)
+    idx_A = torch.where(labels == 0)[0]
+    idx_B = torch.where(labels == 1)[0]
+
+    # write combined params.json (exclude raw tensors)
+    meta: dict[str, Any] = {
+        "timestamp": timestamp,
+        "tag": tag,
+        "gpus": gpus,
+        "n_particles_total": n,
+        "n_particles_A": int(len(idx_A)),
+        "n_particles_B": int(len(idx_B)),
+        "voxel_size": voxel_size,
+        "energy": energy,
+        "dose_per_angstrom": dose_per_angstrom,
+        "max_epochs": max_epochs,
+        "batch_size": batch_size,
+    }
+    meta.update(
+        {k: v for k, v in ghostbuster_kwargs.items() if not isinstance(v, torch.Tensor)}
+    )
+    (run_dir / "params.json").write_text(json.dumps(meta, indent=2, default=str))
+    print(f"Run directory: {run_dir}")
+
+    def _slice_kwargs(idx: torch.Tensor) -> dict[str, Any]:
+        half_ctf = {k: v[idx].cpu() for k, v in ctf_params.items()}
+        return dict(
+            V=V_init.cpu().clone(),
+            voxel_size=voxel_size,
+            quaternions=quaternions[idx].cpu(),
+            translations=translations[idx].cpu(),
+            ctf_params=half_ctf,
+            energy=energy,
+            dose_per_angstrom=dose_per_angstrom,
+            tag=tag,
+            **ghostbuster_kwargs,
+        )
+
+    all_ghost_kwargs = [_slice_kwargs(idx_A), _slice_kwargs(idx_B)]
+    all_images = [images[idx_A].cpu(), images[idx_B].cpu()]
+
+    if len(gpus) >= 2:
+        gpu_ids: list[int | None] = [gpus[0], gpus[1]]
+        mp.spawn(
+            _halfset_worker,
+            args=(
+                run_dir,
+                all_images,
+                all_ghost_kwargs,
+                batch_size,
+                max_epochs,
+                gpu_ids,
+            ),
+            nprocs=2,
+            join=True,
+        )
+    else:
+        gpu_id: int | None = gpus[0] if gpus else None
+        gpu_ids_seq: list[int | None] = [gpu_id, gpu_id]
+        for rank in range(2):
+            _halfset_worker(
+                rank,
+                run_dir,
+                all_images,
+                all_ghost_kwargs,
+                batch_size,
+                max_epochs,
+                gpu_ids_seq,
+            )
+
+    return run_dir

@@ -336,12 +336,13 @@ def main() -> None:
     _console.print(f"  [green]✓[/green] {mrcs_path}")
 
     if args.save_exitwaves:
-        _section("Saving exit waves")
+        ew_prefix = "exitwave" if args.add_ice else "clean_exitwave"
+        _section(f"Saving {ew_prefix.replace('_', ' ')}")
         mag_path = os.path.join(
-            args.output_dir, f"{args.filename}_exitwave_magnitude.mrcs"
+            args.output_dir, f"{args.filename}_{ew_prefix}_magnitude.mrcs"
         )
         phase_path = os.path.join(
-            args.output_dir, f"{args.filename}_exitwave_phase.mrcs"
+            args.output_dir, f"{args.filename}_{ew_prefix}_phase.mrcs"
         )
         with mrcfile.new(mag_path, overwrite=True) as mrc:
             mrc.set_data(exitwaves.abs().numpy().astype("float32"))

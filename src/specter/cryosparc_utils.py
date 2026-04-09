@@ -53,6 +53,11 @@ def extract_parameters_from_csfile(
         Anisotropic magnification matrices (N, 2, 2) or None if identity.
     indices : torch.Tensor
         Indices of the extracted particles from the dataset.
+    halfset_labels : torch.Tensor or None
+        1-D integer tensor of length ``N`` with values ``0`` or ``1`` from
+        ``alignments3D/split``, ready to pass as ``halfset_labels`` to
+        :func:`~specter.ghostbuster.run_halfsets`.
+        Only returned when ``return_class == "all"``; ``None`` otherwise.
     """
     dataset = Dataset.load(csfile_path)
 
@@ -166,6 +171,7 @@ def extract_parameters_from_csfile(
             scale,
             anisomag,
             indices,
+            split,
         )
     elif return_class == "0":
         indices = torch.squeeze(torch.nonzero(split == 0))
@@ -193,6 +199,7 @@ def extract_parameters_from_csfile(
             scale[split == 0],
             anisomag_out,
             indices,
+            None,
         )
     elif return_class == "1":
         indices = torch.squeeze(torch.nonzero(split == 1))
@@ -220,6 +227,7 @@ def extract_parameters_from_csfile(
             scale[split == 1],
             anisomag_out,
             indices,
+            None,
         )
 
 

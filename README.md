@@ -85,6 +85,8 @@ python demo-scripts/generate_particle_stack.py \
 | Argument | Default | Description |
 |---|---|---|
 | `--pdb_code` | *(required)* | PDB accession code or path to local `.cif`/`.pdb` file |
+| `--assembly` | `True` | Fetch biological assembly |
+| `--pdb_savefolder` | `../pdb-data/` | Folder to cache downloaded PDB files |
 | `--n_particles` | `20` | Number of particles to simulate |
 | `--num_pixels` | `256` | Box size in pixels |
 | `--pixel_size` | `1.0` | Pixel size in Å |
@@ -112,6 +114,7 @@ python demo-scripts/generate_particle_stack.py \
 | `--detector_model` | `none` | `none` \| `perfect` \| `k3_300kv` \| `k3_200kv` |
 | `--normalize_particles` | `True` | Normalise to zero mean and unit std |
 | `--save_exitwaves` | `False` | Also save exit wave magnitude and phase as `.mrcs` |
+| `--save_clean_exitwaves` | `False` | Save clean (no-ice) exit wave magnitude and phase; runs scattering twice per batch |
 | `--device` | `cpu` | `cpu` \| `cuda` \| `cuda:0` \| `0,1,2,3` (multi-GPU) |
 | `--batchsize` | `5` | Particles per forward pass |
 | `--output_dir` | `./output/` | Output directory |
@@ -144,6 +147,8 @@ python demo-scripts/generate_particle_stack_from_csfile.py \
 |---|---|---|
 | `--cs_path` | *(required)* | Path to CryoSPARC `.cs` file |
 | `--pdb_code` | *(required)* | PDB accession code or path to local `.cif`/`.pdb` file |
+| `--assembly` | `True` | Fetch biological assembly |
+| `--pdb_savefolder` | `../pdb-data/` | Folder to cache downloaded PDB files |
 | `--dose` | *(required)* | Fixed electron dose in e⁻/Å² applied to all particles (check the EMDB Experiment tab) |
 | `--n_particles` | all in file | Number of particles to simulate |
 | `--num_pixels` | `256` | Box size in pixels |
@@ -160,6 +165,7 @@ python demo-scripts/generate_particle_stack_from_csfile.py \
 | `--detector_model` | `none` | `none` \| `perfect` \| `k3_300kv` \| `k3_200kv` |
 | `--normalize_particles` | `True` | Normalise to zero mean and unit std |
 | `--save_exitwaves` | `False` | Also save exit wave magnitude and phase as `.mrcs` |
+| `--save_clean_exitwaves` | `False` | Save clean (no-ice) exit wave magnitude and phase; runs scattering twice per batch |
 | `--device` | `cpu` | `cpu` \| `cuda` \| `cuda:0` \| `0,1,2,3` (multi-GPU) |
 | `--batchsize` | `5` | Particles per forward pass |
 | `--output_dir` | `./output/` | Output directory |
@@ -222,6 +228,8 @@ python demo-scripts/generate_micrograph.py \
 | Argument | Default | Description |
 |---|---|---|
 | `--pdb_code` | *(required)* | PDB accession code or path to local `.cif`/`.pdb` file |
+| `--assembly` | `True` | Fetch biological assembly |
+| `--pdb_savefolder` | `../pdb-data/` | Folder to cache downloaded PDB files |
 | `--n_micrographs` | `1` | Number of micrographs to simulate |
 | `--num_pixels` | `256` | Particle box size in pixels (for potential building) |
 | `--pixel_size` | `1.0` | Pixel size in Å |
@@ -250,7 +258,7 @@ python demo-scripts/generate_micrograph.py \
 | `--detector_model` | `none` | `none` \| `perfect` \| `k3_300kv` \| `k3_200kv` |
 | `--normalize_micrographs` | `False` | Normalise each micrograph to zero mean and unit std |
 | `--save_exitwaves` | `False` | Save icy exit wave magnitude and phase as `.mrcs` |
-| `--save_clean_exitwaves` | `False` | Save iceless exit wave magnitude and phase. Runs scattering twice per micrograph |
+| `--save_clean_exitwaves` | `False` | Save iceless (no-ice) exit wave magnitude and phase; runs scattering twice per micrograph |
 | `--device` | `cpu` | `cpu` \| `cuda` \| `cuda:0` |
 | `--output_dir` | `./output/` | Output directory |
 | `--filename` | `micrographs` | Base name for output files (no extension) |

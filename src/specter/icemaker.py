@@ -1,15 +1,16 @@
 from __future__ import annotations
 
 import os
-from typing import Literal, Sequence
+from typing import Any, Literal, Sequence
 
+import numpy as np
 import torch
 import lightning as L
 import torch.nn.functional as F
 from .progress import track
 from torchinterp1d import interp1d
 
-from . import potential
+from . import potential, rotations
 from .array_utils import (
     grid_3d,
     radial_grid_3d,
@@ -27,6 +28,113 @@ molar_mass_of_water = 18.01528  # [g/mol]
 ndensity_of_amorphous_ice = (
     density_of_amorphous_ice * avogadro / molar_mass_of_water * 1e-24
 )  # [particles / Å³]
+
+
+def water_molecule_coordinates(
+    bond_angle: float = 105.0, bond_length: float = 0.9572
+) -> tuple[np.ndarray, torch.Tensor]:
+    """
+    Return coordinates of a single H2O molecule with oxygen at the origin.
+
+    Parameters
+    ----------
+    bond_angle : float, optional
+        Bond angle between the O-H bonds in degrees. Default is 105.0.
+    bond_length : float, optional
+        O-H bond length in Å. Default is 0.9572.
+
+    Returns
+    -------
+    atomic_numbers : np.ndarray
+        Atomic numbers of the three atoms [8, 1, 1].
+    coordinates : torch.Tensor
+        xyz coordinates of O, H1, H2 with shape (3, 3).
+    """
+    O_xyz = torch.tensor([0.0, 0.0, 0.0])
+    angle_rad = torch.tensor(bond_angle) / 180 * torch.pi
+    y = bond_length * torch.cos(angle_rad / 2)
+    x = bond_length * torch.sin(angle_rad / 2)
+    H1_xyz = torch.tensor([x, y, 0.0])
+    H2_xyz = torch.tensor([-x, y, 0.0])
+    coordinates = torch.stack((O_xyz, H1_xyz, H2_xyz))
+    atomic_numbers = np.array([8, 1, 1])
+    return atomic_numbers, coordinates
+
+
+def create_n_randomly_rotated_water_molecules(
+    n: int, **kwargs: Any
+) -> tuple[np.ndarray, torch.Tensor]:
+    """
+    Create n randomly rotated water molecules.
+
+    Parameters
+    ----------
+    n : int
+        Number of molecules to create.
+    **kwargs
+        Passed to :func:`water_molecule_coordinates` (``bond_angle``, ``bond_length``).
+
+    Returns
+    -------
+    atomic_numbers : np.ndarray
+        Atomic numbers of all atoms, shape (3*n,).
+    coordinates : torch.Tensor
+        Atomic coordinates of all atoms, shape (3*n, 3).
+    """
+    quats = torch.stack([rotations.random_quaternion() for _ in range(n)])
+    atomic_numbers, coords = water_molecule_coordinates(**kwargs)
+
+    O_coordinates = coords[0].repeat(n, 1)
+    H1_coordinates = rotations.rotate_coordinates(coords[1], quats)
+    H2_coordinates = rotations.rotate_coordinates(coords[2], quats)
+
+    all_coords = torch.zeros(n * 3, 3)
+    all_coords[0::3] = O_coordinates
+    all_coords[1::3] = H1_coordinates
+    all_coords[2::3] = H2_coordinates
+
+    all_atomic_numbers = np.array([8, 1, 1] * n)
+    return all_atomic_numbers, all_coords
+
+
+def volume_of_ice(
+    n_xyz: Sequence[int], d_xyz: Sequence[float]
+) -> tuple[np.ndarray, torch.Tensor]:
+    """
+    Generate atomic coordinates for a volume of amorphous ice.
+
+    Molecules are placed at random positions (overlaps possible) with random
+    orientations. Oxygen is at the molecule centre; hydrogens are rotated randomly.
+
+    Parameters
+    ----------
+    n_xyz : sequence of int
+        Number of voxels (nx, ny, nz).
+    d_xyz : sequence of float
+        Voxel size in Å (dx, dy, dz).
+
+    Returns
+    -------
+    atomic_numbers : np.ndarray
+        Atomic numbers of all ice atoms.
+    coordinates : torch.Tensor
+        Coordinates of all ice atoms in Å.
+    """
+    nx, ny, nz = n_xyz
+    dx, dy, dz = d_xyz
+    total_vol = nx * ny * nz * dx * dy * dz
+    n_molecules = int(ndensity_of_amorphous_ice * total_vol)
+
+    x_ice = (torch.rand(n_molecules) - 0.5) * dx * nx
+    y_ice = (torch.rand(n_molecules) - 0.5) * dy * ny
+    z_ice = (torch.rand(n_molecules) - 0.5) * dz * nz
+    centers = torch.repeat_interleave(
+        torch.stack((x_ice, y_ice, z_ice), dim=1), 3, dim=0
+    )
+
+    atomic_numbers, coords = create_n_randomly_rotated_water_molecules(n_molecules)
+    coords += centers
+    return atomic_numbers, coords
 
 
 def rfftn(array: torch.Tensor) -> torch.Tensor:

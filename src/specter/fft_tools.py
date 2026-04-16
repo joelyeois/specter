@@ -89,11 +89,7 @@ def fft3(
     result : torch.Tensor
         3D Fourier transform of input.
     """
-    if shift:
-        return torch.fft.fftshift(
-            torch.fft.fftn(torch.fft.ifftshift(array, dim=dim), dim=dim), dim=dim
-        )
-    return torch.fft.fftn(array, dim=dim)
+    return fftn(array, dim=list(dim), shift=shift)
 
 
 def ifft3(
@@ -119,11 +115,7 @@ def ifft3(
     result : torch.Tensor
         3D inverse Fourier transform of input.
     """
-    if shift:
-        return torch.fft.fftshift(
-            torch.fft.ifftn(torch.fft.ifftshift(array, dim=dim), dim=dim), dim=dim
-        )
-    return torch.fft.ifftn(array, dim=dim)
+    return ifftn(array, dim=list(dim), shift=shift)
 
 
 def fftn(

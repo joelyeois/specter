@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+import multiprocessing as mp
 from typing import Any, Sequence
 
 import gemmi
+import lightning as L
 import numpy as np
 import torch
-import lightning as L
 import torch.nn.functional as F
+
 from .progress import TqdmProgress, track
 
 from .array_utils import (
@@ -65,23 +67,22 @@ def compute_supersampling_parameters(
         n_atom = n_atom + (n_atom % 2)
         return n_atom, ss_dx, ssf
 
-    else:
-        # Number of pixels at atom sampling
-        n_atom = int(torch.ceil(torch.tensor(width_atom / dx_atom)))
+    # Number of pixels at atom sampling
+    n_atom = int(torch.ceil(torch.tensor(width_atom / dx_atom)))
 
-        # Step 1: make divisible by ssf
-        ssf = int(torch.round(torch.tensor(dx / dx_atom)))
-        ss_dx = dx / ssf
+    # Step 1: make divisible by ssf
+    ssf = int(torch.round(torch.tensor(dx / dx_atom)))
+    ss_dx = dx / ssf
 
-        # Ensure pooled kernel has at least 3 pixels per axis.
-        n_atom = max(n_atom, 3 * ssf)
+    # Ensure pooled kernel has at least 3 pixels per axis.
+    n_atom = max(n_atom, 3 * ssf)
 
-        # Step 2: adjust n_atom to satisfy both evenness and divisibility
-        # find the smallest even number divisible by ssf and >= n_atom
-        while (n_atom % ssf != 0) or (n_atom % 2 != 0):
-            n_atom += 1
+    # Step 2: adjust n_atom to satisfy both evenness and divisibility
+    # find the smallest even number divisible by ssf and >= n_atom
+    while (n_atom % ssf != 0) or (n_atom % 2 != 0):
+        n_atom += 1
 
-        return n_atom, ss_dx, ssf
+    return n_atom, ss_dx, ssf
 
 
 def build_potential_volume_fftconvolve_3d(
@@ -90,37 +91,33 @@ def build_potential_volume_fftconvolve_3d(
     n_xyz: int | Sequence[int],
     dx: float,
     disable_tqdm: bool = False,
-) -> tuple[torch.Tensor, torch.Tensor, dict[int, torch.Tensor]]:
-    """Constructs volumetric potential from list of atomic elements and their
-    respective coordinates.
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """
+    Construct a 3D potential volume by convolving atomic kernels with voxelized positions.
 
-    General strategy is:
-    1. Compute potentials for each unique element on a super-sampled grid (higher
-    resolution than main volume but lesser pixels since the potential decays fast).
-    2. Calculate the potential contributions for each elemental species and sum.
-    2. Bin the potential down to main volume grid size.
-
-    Note:
-    For 2D versions, assumes dx = dy, nx = ny. nz and dz are free to be different.
-    For 3D version, assumes dx = dy = dz, nx = ny = nz.
+    Computes potentials for each unique element on a supersampled grid, then bins
+    down to the main volume resolution via average pooling.
 
     Parameters
     ----------
-    atomic_numbers : 1d tensor
-        Atomic numbers. Hydrogen is 1.
-    centered_coords : 2d tensor
-        xyz coordinates corresponding to each entry in atomic_numbers. Shape of
-        (len(atomic_numbers), 3).
-    n_xyz : array-like
-        Number of pixels along x,y,z: (nx, ny, nz) of main volume.
+    atomic_numbers : torch.Tensor
+        1D tensor of atomic numbers. Hydrogen is 1.
+    centered_coords : torch.Tensor
+        Atomic xyz coordinates, shape (N, 3), centered at origin.
+    n_xyz : int or sequence of int
+        Grid size (nx, ny, nz). If int, assumes cubic grid.
     dx : float
-        Voxel size of main volume.
+        Voxel size of main volume in Å.
+    disable_tqdm : bool, optional
+        Disable progress bar. Default is False.
+
     Returns
     -------
-    potential_volume : 3d tensor
-        The sampled potential volume.
+    potential_volume : torch.Tensor
+        Sampled potential volume, shape (nz, ny, nx).
+    sR : torch.Tensor
+        Radial coordinate grid used for atomic potential sampling.
     """
-    # create main volume coordinate system
     if isinstance(n_xyz, int):
         nx = ny = nz = n_xyz
     else:
@@ -128,44 +125,33 @@ def build_potential_volume_fftconvolve_3d(
 
     # create super-sampled (ss) coordinate system
     ssn, ssdx, ssf = compute_supersampling_parameters(dx)
-    # set origina convention to torch to avoid singularity at origin.
+    # torch convention avoids singularity at origin
     sR = radial_grid_3d(ssn, ssdx, convention="torch")
 
-    # for binning super-sampled grids to main volume grid.
     avgpool3d = torch.nn.AvgPool3d(ssf, stride=ssf)
-
-    # insert atomic potentials into main volume.
     potential_volume = torch.zeros(nz, ny, nx)
-    occupancy = torch.zeros(nz, ny, nx, dtype=torch.bool)
-    atomic_potentials = {}
 
     for elem in track(
         torch.unique(atomic_numbers),
         description="Building elements",
         disable=disable_tqdm,
     ):
-        # Update the description dynamically per element
-        track.description = f"Building element {atom_symbol(int(elem))}"
         atomic_indices = torch.squeeze(torch.argwhere(atomic_numbers == elem))
 
-        # populate elemental volume with delta function atoms
-        # soft_voxelize_atoms is differentiable w.r.t. coordinates.
+        # soft_voxelize_coordinates is differentiable w.r.t. coordinates
         temp_vol = soft_voxelize_coordinates(
             centered_coords[atomic_indices].reshape(-1, 3),
             grid_shape=(nz, ny, nx),
             voxel_size=dx,
         )
-        occupancy = occupancy | (temp_vol > 0)
 
-        # get potential kernel for this element
         pot = kirkland_atomic_potential_3d(int(elem), sR)
 
-        # convolve
         if ssf != 1:
             pot = avgpool3d(pot[None, None]) * dx
             pot = pot.squeeze(0).squeeze(0)
         potential_volume += fftconvolve(temp_vol, pot, mode="same")
-    return potential_volume, sR, atomic_potentials
+    return potential_volume, sR
 
 
 def build_potential_volume_fftconvolve_2d(
@@ -174,85 +160,68 @@ def build_potential_volume_fftconvolve_2d(
     n_xyz: int | Sequence[int],
     dx: float,
     disable_tqdm: bool = False,
-) -> tuple[torch.Tensor, torch.Tensor, dict[int, torch.Tensor]]:
-    """Constructs volumetric potential from list of atomic elements and their
-    respective coordinates.
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """
+    Construct a 3D potential volume using 2D projected atomic kernels.
 
-    General strategy is:
-    1. Compute potentials for each unique element on a super-sampled grid (higher
-    resolution than main volume but lesser pixels since the potential decays fast).
-    2. Calculate the potential contributions for each elemental species and sum.
-    2. Bin the potential down to main volume grid size.
-
-    Note:
-    For 2D versions, assumes dx = dy, nx = ny. nz and dz are free to be different.
-    For 3D version, assumes dx = dy = dz, nx = ny = nz.
+    Projects atoms onto XY slices and convolves with 2D atomic potential kernels.
+    Faster than the 3D variant but less accurate in Z.
 
     Parameters
     ----------
-    atomic_numbers : 1d tensor
-        Atomic numbers. Hydrogen is 1.
-    centered_coords : 2d tensor
-        xyz coordinates corresponding to each entry in atomic_numbers. Shape of
-        (len(atomic_numbers), 3).
-    n_xyz : array-like
-        Number of pixels along x,y,z: (nx, ny, nz) of main volume.
+    atomic_numbers : torch.Tensor
+        1D tensor of atomic numbers. Hydrogen is 1.
+    centered_coords : torch.Tensor
+        Atomic xyz coordinates, shape (N, 3), centered at origin.
+    n_xyz : int or sequence of int
+        Grid size (nx, ny, nz). Assumes nx = ny. If int, assumes cubic grid.
     dx : float
-        Pixel size of main volume.
+        Pixel size of main volume in Å (assumes dx = dy).
+    disable_tqdm : bool, optional
+        Disable progress bar. Default is False.
+
     Returns
     -------
-    potential_volume : 3d tensor
-        The sampled potential volume.
+    potential_volume : torch.Tensor
+        Sampled potential volume, shape (nz, ny, nx).
+    sR : torch.Tensor
+        Radial coordinate grid used for atomic potential sampling.
     """
-    # create main volume coordinate system
     if isinstance(n_xyz, int):
         nx = ny = nz = n_xyz
     else:
         nx, ny, nz = n_xyz
 
-    # create super-sampled (ss) coordinate system
     ssn, ssdx, ssf = compute_supersampling_parameters(dx)
     sR = radial_grid_2d(ssn, ssdx, convention="torch")
-
-    # for binning super-sampled grids to main volume grid.
     avgpool2d = torch.nn.AvgPool2d(ssf, stride=ssf)
-
-    # insert atomic potentials into main volume.
     potential_volume = torch.zeros(nz, ny, nx)
-    occupancy = torch.zeros(nz, ny, nx, dtype=torch.bool)
-    atomic_potentials = {}
 
     for elem in track(
         torch.unique(atomic_numbers),
         description="Building elements",
+        disable=disable_tqdm,
     ):
-        # Update the description dynamically per element
-        track.description = f"Building element {atom_symbol(int(elem))}"
         atomic_indices = torch.squeeze(torch.argwhere(atomic_numbers == elem))
 
-        # populate elemental volume with delta function atoms
-        # soft_voxelize_atoms is differentiable w.r.t. coordinates.
+        # soft_voxelize_xy_coordinates is differentiable w.r.t. coordinates
         temp_vol = soft_voxelize_xy_coordinates(
             centered_coords[atomic_indices].reshape(-1, 3),
             grid_shape=(nz, ny, nx),
             voxel_size=dx,
         )
-        occupancy = occupancy | (temp_vol > 0)
 
-        # get potential kernel for this element
         pot = kirkland_atomic_potential_2d(int(elem), sR)
 
-        # convolve
         if ssf != 1:
             pot = avgpool2d(pot[None, None]) * dx
             pot = pot.squeeze(0).squeeze(0)
 
-        # batch 2D convolve
         temp_vol_b = temp_vol.unsqueeze(1)  # (nz, 1, ny, nx)
         pot_b = pot.unsqueeze(0).unsqueeze(0)  # (1, 1, ky, kx)
         convolved = F.conv2d(temp_vol_b, pot_b, padding="same")
         potential_volume += convolved.squeeze(1)  # (nz, ny, nx)
-    return potential_volume, sR, atomic_potentials
+    return potential_volume, sR
 
 
 class PotentialBuilder(L.LightningModule):
@@ -363,7 +332,7 @@ class PotentialBuilder(L.LightningModule):
         else:
             # update unique elements
             self.unique_elements = unique_elements
-            self.atomic_potentials = torch.empty(
+            self.atomic_potentials_2d = torch.empty(
                 len(unique_elements), self.ssn // self.ssf, self.ssn // self.ssf
             )
 
@@ -373,6 +342,11 @@ class PotentialBuilder(L.LightningModule):
                 pot = kirkland_atomic_potential_2d(int(elem), self.sR_2d)
             elif self.parameterization == "lobato":
                 pot = lobato_atomic_potential_2d(int(elem), self.sR_2d)
+            else:
+                raise ValueError(
+                    f"Unknown parameterization '{self.parameterization}'. "
+                    "Choose 'kirkland' or 'lobato'."
+                )
 
             if self.ssf != 1:
                 pot = self.avgpool2d(pot[None, None]) * self.dx
@@ -403,7 +377,7 @@ class PotentialBuilder(L.LightningModule):
         else:
             # update unique elements
             self.unique_elements = unique_elements
-            self.atomic_potentials = torch.empty(
+            self.atomic_potentials_3d = torch.empty(
                 len(unique_elements),
                 self.ssn // self.ssf,
                 self.ssn // self.ssf,
@@ -419,10 +393,14 @@ class PotentialBuilder(L.LightningModule):
             elif self.parameterization == "shtyrov":
                 if self.mmcif_filepath is None:
                     raise ValueError("mmcif_filepath must be specified.")
-                else:
-                    pot = shtyrov_atomic_potential_3d(
-                        int(elem), self.sR_3d, self.mmcif_filepath
-                    )
+                pot = shtyrov_atomic_potential_3d(
+                    int(elem), self.sR_3d, self.mmcif_filepath
+                )
+            else:
+                raise ValueError(
+                    f"Unknown parameterization '{self.parameterization}'. "
+                    "Choose 'kirkland', 'lobato', or 'shtyrov'."
+                )
 
             if self.ssf != 1:
                 pot = self.avgpool3d(pot[None, None]) * self.dx
@@ -464,7 +442,6 @@ class PotentialBuilder(L.LightningModule):
         if conv_backend is None:
             conv_backend = self.conv_backend
         coordinates = coordinates.to(self.device)
-        self.method = method
 
         # Detect batch
         if coordinates.ndim == 2:  # (N,3) -> add batch dimension
@@ -472,14 +449,11 @@ class PotentialBuilder(L.LightningModule):
 
         B, N, _ = coordinates.shape
 
-        # insert atomic potentials into main volume.
         potential_volume = torch.zeros(
             (B, self.nz, self.ny, self.nx), device=self.device
         )
-        self.occupancy = torch.zeros((B, self.nz, self.ny, self.nx), dtype=torch.bool)
 
         with TqdmProgress(transient=True, disable=not self.progressbars) as progress:
-            # Create a single task for the outer loop
             task = progress.add_task(
                 "Building element ...", total=len(self.unique_elements)
             )
@@ -492,8 +466,6 @@ class PotentialBuilder(L.LightningModule):
                 atomic_indices = torch.squeeze(
                     torch.argwhere(self.atomic_numbers == elem)
                 )
-
-                # Select atomic coordinates for this element
                 coords_elem = coordinates[:, atomic_indices, :]  # (B, Nelem, 3)
 
                 if method == "2d":
@@ -502,27 +474,12 @@ class PotentialBuilder(L.LightningModule):
                         grid_shape=(self.nz, self.ny, self.nx),
                         voxel_size=self.dx,
                     )
-
-                    # Flatten B and Z for conv2d
-                    temp_vol_flat = temp_vol.reshape(
-                        -1, 1, self.ny, self.nx
-                    )  # (B*Z, 1, Y, X)
-
-                    # Kernel: (1, 1, ky, kx)
-                    pot_b = (
-                        self.atomic_potentials_2d[i].unsqueeze(0).unsqueeze(0)
-                    )  # (1,1,ky,kx)
-
-                    # Perform conv2d
-                    convolved_flat = F.conv2d(
-                        temp_vol_flat, pot_b, padding="same"
-                    )  # (B*Z, 1, Y, X)
-
-                    # Reshape back to (B, Z, Y, X)
-                    convolved = convolved_flat.reshape(B, self.nz, self.ny, self.nx)
-
-                    # Add to potential volume
-                    potential_volume += convolved
+                    temp_vol_flat = temp_vol.reshape(-1, 1, self.ny, self.nx)
+                    pot_b = self.atomic_potentials_2d[i].unsqueeze(0).unsqueeze(0)
+                    convolved_flat = F.conv2d(temp_vol_flat, pot_b, padding="same")
+                    potential_volume += convolved_flat.reshape(
+                        B, self.nz, self.ny, self.nx
+                    )
 
                 elif method == "3d":
                     temp_vol = soft_voxelize_coordinates(
@@ -530,36 +487,24 @@ class PotentialBuilder(L.LightningModule):
                         grid_shape=(self.nz, self.ny, self.nx),
                         voxel_size=self.dx,
                     )
-
-                    # convolve
-                    # Convolve 3D potentials per batch
                     if conv_backend == "fftconvolve":
-                        # for b in track(range(B), description='Convolving atoms', transient=True):
                         for b in range(B):
                             potential_volume[b] += fftconvolve(
                                 temp_vol[b], self.atomic_potentials_3d[i], mode="same"
                             )
-
-                    # using conv3d instead
                     elif conv_backend == "conv3d":
                         vol_b = temp_vol.unsqueeze(1)  # (B,1,nz,ny,nx)
-                        kernel = (
-                            self.atomic_potentials_3d[i].unsqueeze(0).unsqueeze(0)
-                        )  # (1,1,kz,ky,kx)
-                        # Use conv3d with groups=1
-                        convolved = F.conv3d(
-                            vol_b, kernel, padding="same"
-                        )  # (B,1,nz,ny,nx)
-                        potential_volume += convolved.squeeze(1)  # (B,nz,ny,nx)
+                        kernel = self.atomic_potentials_3d[i].unsqueeze(0).unsqueeze(0)
+                        convolved = F.conv3d(vol_b, kernel, padding="same")
+                        potential_volume += convolved.squeeze(1)
+                    else:
+                        raise ValueError(
+                            f"Unknown conv_backend '{conv_backend}'. "
+                            "Choose 'fftconvolve' or 'conv3d'."
+                        )
+                else:
+                    raise ValueError(f"Unknown method '{method}'. Choose '2d' or '3d'.")
 
-                    # potential_volume += fftconvolve(
-                    #     temp_vol,
-                    #     self.atomic_potentials_3d[i],
-                    #     mode='same'
-                    # )
-
-                # Update occupancy, very slow.
-                # self.occupancy |= (temp_vol.detach().cpu() > 0)
         if B == 1:
             potential_volume = potential_volume.squeeze(0)
         return potential_volume
@@ -979,8 +924,6 @@ class GemmiPotentialBuilder:
                 )
                 for i in range(n_processes)
             ]
-
-            import multiprocessing as mp
 
             with mp.get_context("spawn").Pool(processes=n_processes) as pool:
                 results = pool.map(

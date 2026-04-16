@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Union, Sequence, Tuple
+from typing import Sequence
 
 import torch
 import torch.nn.functional as F
@@ -194,6 +194,10 @@ def grid_1d(
         x = (torch.arange(n, device=device) - n // 2) * dx
     elif convention == "torch":
         x = (torch.arange(n, device=device) - (n - 1) / 2) * dx
+    else:
+        raise ValueError(
+            f"Unknown convention '{convention}'. Must be 'relion' or 'torch'."
+        )
     return x
 
 
@@ -466,103 +470,6 @@ def voxelize_coordinates(
     )
 
     return grid
-
-
-# def soft_voxelize_coordinates(coords, grid_shape, voxel_size, device=None):
-#     """
-#     Differentiable 3D soft voxelization using trilinear splatting.
-
-#     Args:
-#         coords: (N,3) tensor of atomic coordinates in physical units (x, y, z)
-#         grid_shape: tuple of ints (nz, ny, nx)
-#         voxel_size: tuple of floats (dx, dy, dz)
-#         device: optional, torch device
-
-#     Returns
-#     -------
-#     volume : (nz, ny, nx) tensor
-#         Differentiable soft voxelized volume
-#     """
-#     if device is None:
-#         device = coords.device
-#     coords = coords.to(device)
-#     nz, ny, nx = grid_shape
-#     N = coords.shape[0]
-
-#     values = torch.ones(N, device=device)
-
-#     # Convert physical coordinates to voxel units
-#     if isinstance(voxel_size, (int, float)):
-#         voxel_size = torch.tensor([voxel_size] * 3, device=device)
-#     else:
-#         voxel_size = torch.tensor(voxel_size, device=device)
-#     coords_voxel = coords / voxel_size  # (N,3)
-
-#     # Shift coordinates so origin (0,0,0) is at floor division center
-#     origin = torch.tensor(
-#         [nx // 2, ny // 2, nz // 2], device=device, dtype=coords_voxel.dtype
-#     )
-#     coords_voxel_centered = coords_voxel + origin[None, :]  # (N,3)
-
-#     # Reorder coords to z, y, x for indexing
-#     coords_voxel_centered = coords_voxel_centered[:, [2, 1, 0]]  # (N,3)
-
-#     # Floor and fractional part for trilinear weights
-#     coords_floor = torch.floor(coords_voxel_centered).long()  # (N,3)
-#     frac = coords_voxel_centered - coords_floor.float()  # (N,3)
-#     dz, dy, dx = frac[:, 0], frac[:, 1], frac[:, 2]
-#     z0, y0, x0 = coords_floor[:, 0], coords_floor[:, 1], coords_floor[:, 2]
-
-#     # 8 neighbor offsets
-#     offsets = torch.tensor(
-#         [
-#             [0, 0, 0],
-#             [0, 0, 1],
-#             [0, 1, 0],
-#             [0, 1, 1],
-#             [1, 0, 0],
-#             [1, 0, 1],
-#             [1, 1, 0],
-#             [1, 1, 1],
-#         ],
-#         device=device,
-#     )
-
-#     # Compute neighbor indices (N,8)
-#     z_idx = z0[:, None] + offsets[None, :, 0]
-#     y_idx = y0[:, None] + offsets[None, :, 1]
-#     x_idx = x0[:, None] + offsets[None, :, 2]
-
-#     # Trilinear weights (N,8)
-#     w = (
-#         ((1 - dz)[:, None] * (1 - offsets[None, :, 0])
-#             + dz[:, None] * offsets[None, :, 0])
-#         * ((1 - dy)[:, None] * (1 - offsets[None, :, 1])
-#             + dy[:, None] * offsets[None, :, 1])
-#         * ((1 - dx)[:, None] * (1 - offsets[None, :, 2])
-#             + dx[:, None] * offsets[None, :, 2])
-#     )
-#     w = w * values[:, None]
-
-#     # Mask out-of-bounds
-#     mask = (
-#         (z_idx >= 0)
-#         & (z_idx < nz)
-#         & (y_idx >= 0)
-#         & (y_idx < ny)
-#         & (x_idx >= 0)
-#         & (x_idx < nx)
-#     )
-#     z_idx = z_idx[mask]
-#     y_idx = y_idx[mask]
-#     x_idx = x_idx[mask]
-#     w = w[mask]
-
-#     # Scatter-add into volume
-#     volume = torch.zeros(nz, ny, nx, device=device)
-#     volume.index_put_((z_idx, y_idx, x_idx), w, accumulate=True)
-
-#     return volume
 
 
 def soft_voxelize_coordinates(
@@ -1000,11 +907,12 @@ def compute_nps_3d(
     -------
     nps_1d : torch.Tensor
         1D radial NPS, shape (R,), indexed by integer pixel radius.
-    nps_2d : torch.Tensor
+    nps_3d : torch.Tensor
         3D radial NPS mapped to rfft3 half-plane layout (D, H, W//2+1),
         for direct use in spectral-weighted losses on volumes.
     """
-    assert diff_volume.ndim == 3, "Input must be a 3D volume (D, H, W)"
+    if diff_volume.ndim != 3:
+        raise ValueError("Input must be a 3D volume (D, H, W).")
     D, H, W = diff_volume.shape
     device = diff_volume.device
 
@@ -1045,14 +953,14 @@ def compute_nps_3d(
     kz_r = torch.fft.rfftfreq(W, device=device) * W  # (W//2+1,)
     KX_r, KY_r, KZ_r = torch.meshgrid(kx_r, ky_r, kz_r, indexing="ij")
     r_idx_rfft = torch.sqrt(KX_r**2 + KY_r**2 + KZ_r**2).round().long().clamp(0, R - 1)
-    nps_2d = nps_1d[r_idx_rfft]  # (D, H, W//2+1)
+    nps_3d = nps_1d[r_idx_rfft]  # (D, H, W//2+1)
 
     if normalize:
-        mean_val = nps_2d.mean().clamp(min=1e-10)
+        mean_val = nps_3d.mean().clamp(min=1e-10)
         nps_1d = nps_1d / mean_val
-        nps_2d = nps_2d / mean_val
+        nps_3d = nps_3d / mean_val
 
-    return nps_1d, nps_2d
+    return nps_1d, nps_3d
 
 
 def radial_profile_2d(
@@ -1111,82 +1019,6 @@ def radial_profile_2d(
         return torch.arange(max_r, device=device), radialprofile
     else:
         return radialprofile
-
-
-# def soft_voxelize_xy_coordinates(coords, grid_shape, voxel_size, device=None):
-#     """
-#     Semi-soft 3D voxelization:
-#     - hard assignment along z (nearest slice)
-#     - bilinear interpolation in x and y.
-
-#     Out-of-bounds neighbors are excluded.
-
-#     Args:
-#         coords: (N,3) tensor of atomic coordinates (x, y, z)
-#         grid_shape: tuple of ints (nz, ny, nx)
-#         voxel_size: float or tuple of floats (dx, dy, dz)
-#         device: optional torch.device
-
-#     Returns
-#     -------
-#     volume : (nz, ny, nx) tensor
-#         Semi-soft voxelized volume
-#     """
-#     if device is None:
-#         device = coords.device
-#     coords = coords.to(device)
-#     nz, ny, nx = grid_shape
-#     N = coords.shape[0]
-
-#     values = torch.ones(N, device=device)
-
-#     # Convert to voxel units
-#     if isinstance(voxel_size, (int, float)):
-#         voxel_size = torch.tensor([voxel_size]*3, device=device)
-#     else:
-#         voxel_size = torch.tensor(voxel_size, device=device)
-#     coords_voxel = coords / voxel_size
-
-#     # Shift origin to center
-#     origin = torch.tensor([nx//2, ny//2, nz//2], device=device, dtype=coords_voxel.dtype)
-#     coords_voxel_centered = coords_voxel + origin[None, :]
-
-#     # Separate coordinates
-#     x, y, z = coords_voxel_centered.T
-
-#     # Hard assign Z
-#     z_idx = torch.round(z).long()
-
-#     # XY floor + fractional part for bilinear weights
-#     x0 = torch.floor(x).long()
-#     y0 = torch.floor(y).long()
-#     dx = x - x0.float()
-#     dy = y - y0.float()
-
-#     # 4 neighbor offsets for XY bilinear
-#     offsets = torch.tensor([[0,0],[0,1],[1,0],[1,1]], device=device)
-
-#     x_idx = x0[:, None] + offsets[None,:,1]
-#     y_idx = y0[:, None] + offsets[None,:,0]
-#     z_idx_full = z_idx[:, None].repeat(1,4)
-
-#     # Bilinear weights
-#     w = ((1-dx)[:, None]*(1-offsets[None,:,1]) + dx[:, None]*offsets[None,:,1]) \
-#         * ((1-dy)[:, None]*(1-offsets[None,:,0]) + dy[:, None]*offsets[None,:,0])
-#     w = w * values[:, None]
-
-#     # Mask out-of-bounds
-#     mask = (z_idx_full>=0)&(z_idx_full<nz) & (y_idx>=0)&(y_idx<ny) & (x_idx>=0)&(x_idx<nx)
-#     z_idx_full = z_idx_full[mask]
-#     y_idx = y_idx[mask]
-#     x_idx = x_idx[mask]
-#     w = w[mask]
-
-#     # Scatter
-#     volume = torch.zeros(nz, ny, nx, device=device)
-#     volume.index_put_((z_idx_full, y_idx, x_idx), w, accumulate=True)
-
-#     return volume
 
 
 def nearest_index(
@@ -1262,30 +1094,29 @@ def ball3d(N: int, d: float) -> torch.Tensor:
 
 def disk2d(N: int, d: float) -> torch.Tensor:
     """
-    Generates a 2D tensor with a filled-in disk,
-    centered at the DC index corresponding to fftshift.
+    Generate a 2D binary mask of a filled disk.
+
+    Creates an NxN tensor with 1s inside a centered disk of diameter d
+    and 0s outside. Origin is at index N//2 (consistent with fftshift convention).
 
     Parameters
     ----------
     N : int
-        Size of the 2D tensor (N x N).
+        Size of the output grid in pixels (N x N).
     d : float
-        Diameter of the disk.
+        Diameter of the disk in pixels.
 
     Returns
     -------
     disk : torch.Tensor
-        2D tensor of shape (N, N) with ones inside the disk, zeros outside.
+        Binary mask with shape (N, N). Values are 1.0 inside the disk
+        and 0.0 outside.
     """
     x = torch.arange(N)
-    y = torch.arange(N)
-    X, Y = torch.meshgrid(x, y, indexing="ij")
-
-    center = N // 2  # aligns with DC after fftshift
+    X, Y = torch.meshgrid(x, x, indexing="ij")
+    center = N // 2
     r2 = (X - center) ** 2 + (Y - center) ** 2
-
-    radius = d / 2
-    disk = (r2 <= radius**2).float()
+    disk = (r2 <= (d / 2) ** 2).float()
     return disk
 
 
@@ -1385,37 +1216,32 @@ def radial_symmetrize(image: torch.Tensor, center: float | None = None) -> torch
     image_ring : torch.Tensor
         (N, N) radially averaged image.
     """
-    assert image.ndim == 2
+    if image.ndim != 2:
+        raise ValueError("Input image must be a 2D tensor.")
     N, M = image.shape
-    assert N == M, "Image must be square"
+    if N != M:
+        raise ValueError(f"Image must be square, got shape ({N}, {M}).")
 
     device = image.device
 
     if center is None:
         center = N // 2
 
+    # Compute 1D radial profile using the shared helper
+    radial_mean = radial_profile_2d(image, center=(center, center))
+
+    # Build matching integer radius grid to map back to 2D
     y, x = torch.meshgrid(
         torch.arange(N, device=device), torch.arange(N, device=device), indexing="ij"
     )
+    r_int = torch.sqrt((x - center) ** 2 + (y - center) ** 2).round().long()
+    r_int = r_int.clamp(0, len(radial_mean) - 1)
 
-    r = torch.sqrt((x - center) ** 2 + (y - center) ** 2)
-    r_int = r.long()
-
-    # Compute radial means
-    radial_sum = torch.bincount(r_int.flatten(), weights=image.flatten())
-
-    radial_count = torch.bincount(r_int.flatten())
-
-    radial_mean = radial_sum / radial_count
-
-    # Map back to 2D image
-    image_ring = radial_mean[r_int]
-
-    return image_ring
+    return radial_mean[r_int]
 
 
 def center_crop(
-    x: torch.Tensor, size: Union[int, Tuple[int, ...]], dim: Union[int, Sequence[int]]
+    x: torch.Tensor, size: int | tuple[int, ...], dim: int | Sequence[int]
 ) -> torch.Tensor:
     """
     Center crop a tensor along the specified axes (supports negative axes).

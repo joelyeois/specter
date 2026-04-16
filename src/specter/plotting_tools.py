@@ -23,6 +23,10 @@ def plot3d(
         Super title for the plot.
     vmin : float or None, optional
         Minimum value for colormap scaling.
+    vmax : float or None, optional
+        Maximum value for colormap scaling.
+    cmap : str or None, optional
+        Matplotlib colormap name. Default is None (uses matplotlib default).
     """
     fig, axes = plt.subplots(1, 3, dpi=200, constrained_layout=True, figsize=(8, 3.6))
     for i, ax in enumerate(axes.ravel()):
@@ -132,10 +136,7 @@ def plot_slices(
     nslices = 5
     sh = vol.shape
     if end_idx is None:
-        idx_length = sh[axis] - start_idx - 1
-        end_idx = start_idx + idx_length
-    else:
-        idx_length = end_idx - start_idx
+        end_idx = sh[axis] - 1
     indices = torch.linspace(start_idx, end_idx, nslices).type(torch.int)
 
     fig, axes = plt.subplots(1, 5, dpi=200, figsize=(8, 2.5), constrained_layout=True)
@@ -228,8 +229,6 @@ def radial_distribution_function(
     # 1. Approximate mode
     # ------------------------
     if approximate:
-        device = coords.device
-        N = coords.shape[0]
         total_unordered = N * (N - 1) // 2
 
         # draw n_samples ordered pairs but guaranteed i != j
@@ -319,11 +318,16 @@ def plot_particle_stack(
     """
     Plot cryo-EM image diagnostics: raw images, FFT magnitude, and radial power spectra.
 
-    Args:
-        images:         Stack of images, shape (N, H, W)
-        pixel_size:     Pixel size in Angstroms
-        defocus_values: Optional defocus values in Angstroms, shape (N,)
-        max_images:     Maximum number of images to display (default 5)
+    Parameters
+    ----------
+    images : torch.Tensor
+        Stack of images, shape (N, H, W).
+    pixel_size : float
+        Pixel size in Angstroms.
+    defocus_values : torch.Tensor or None, optional
+        Defocus values in Angstroms, shape (N,). Default is None.
+    max_images : int, optional
+        Maximum number of images to display. Default is 5.
     """
     n = min(len(images), max_images)
     images = images[:n]
@@ -357,7 +361,7 @@ def plot_particle_stack(
 
         # --- row 0: raw image ---
         ax = axes[0, i]
-        im = ax.imshow(img.numpy(), cmap="gray")
+        im = ax.imshow(img, cmap="gray")
         ax.set(xticks=[], yticks=[])
         if defocus_values is not None:
             ax.set_title(
@@ -367,7 +371,7 @@ def plot_particle_stack(
 
         # --- row 1: FFT magnitude ---
         ax = axes[1, i]
-        im = ax.imshow(fft_mag.numpy(), cmap="gray")
+        im = ax.imshow(fft_mag, cmap="gray")
         ax.set(xticks=[], yticks=[])
         fig.colorbar(im, ax=ax, location="bottom")
 
@@ -376,7 +380,7 @@ def plot_particle_stack(
         profile = radial_profile_2d(fft_mag)
         n_bins = len(profile)
 
-        ax.plot(profile.numpy() if hasattr(profile, "numpy") else profile)
+        ax.plot(profile)
 
         tick_positions = [int(j * (n_bins - 1) / 4) for j in range(5)]
         tick_labels = []

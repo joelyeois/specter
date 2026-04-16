@@ -7,78 +7,6 @@ from skimage.filters import butterworth
 from .fft_tools import fftn, ifftn
 
 
-def normalize_particles(
-    particles: torch.Tensor, mask_diameter_pixels: int | None = None
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """
-    Normalize particle images using masked mean and standard deviation.
-
-    Computes normalization statistics (mean and standard deviation) using a
-    circular mask to exclude background regions, then normalizes the particle
-    images to have zero mean and unit variance.
-
-    Parameters
-    ----------
-    particles : torch.Tensor
-        Particle images with shape (N, size, size) where N is the number of
-        particles.
-    mask_diameter_pixels : int, optional
-        Diameter of the circular mask in pixels. Regions outside this diameter
-        are excluded from normalization statistics. Default is None, which uses
-        the full image size.
-
-    Returns
-    -------
-    means : torch.Tensor
-        Mean value for each particle, shape (N,).
-    stds : torch.Tensor
-        Standard deviation for each particle, shape (N,).
-    normalized_particles : torch.Tensor
-        Normalized particle images with shape (N, size, size).
-    """
-    if mask_diameter_pixels is None:
-        mask_diameter_pixels = particles.shape[-1]
-    mask = 1 - circle2d(particles.shape[-1], mask_diameter_pixels)
-    masked_particles = particles * mask[None, ...]  # Element-wise multiplication
-    means = masked_particles.sum(dim=(-1, -2)) / mask.sum()
-
-    vars = (mask * (particles - means[:, None, None]) ** 2).sum(dim=(-1, -2)) / (
-        mask.sum()
-    )
-    stds = torch.sqrt(vars)
-
-    normalized_particles = (particles - means[:, None, None]) / stds[:, None, None]
-    return means, stds, normalized_particles
-
-
-def circle2d(N: int, d: int) -> torch.Tensor:
-    """
-    Generate a 2D binary mask of a filled circle.
-
-    Creates an NxN tensor with 1s inside a centered circle of diameter d
-    and 0s outside the circle.
-
-    Parameters
-    ----------
-    N : int
-        Size of the output grid in pixels (N x N).
-    d : int
-        Diameter of the circle in pixels.
-
-    Returns
-    -------
-    circle : torch.Tensor
-        Binary mask with shape (N, N). Values are 1.0 inside the circle
-        and 0.0 outside.
-    """
-    circle = torch.zeros((N, N))
-    x = torch.linspace(-1, 1, N)
-    y = x
-    [X, Y] = torch.meshgrid(x, y, indexing="ij")
-    circle[X**2 + Y**2 <= (d / N) ** 2] = 1
-    return circle
-
-
 def butter(images: torch.Tensor | np.ndarray) -> torch.Tensor | np.ndarray:
     """
     Applies butterworth filter to 2D images.
@@ -102,12 +30,7 @@ def butter(images: torch.Tensor | np.ndarray) -> torch.Tensor | np.ndarray:
         istensor = True
         images = images.numpy()
 
-    if len(images.shape) == 3:
-        channel_axis = 0
-    elif len(images.shape) == 2:
-        channel_axis = None
-    else:
-        channel_axis = None
+    channel_axis = 0 if images.ndim == 3 else None
 
     filtered = butterworth(
         images,
@@ -158,16 +81,15 @@ def apply_bfactor(
     """
     if bfactor == 0.0:
         return volume
-    else:
-        kx = torch.fft.fftfreq(volume.shape[-1], pixel_size, device=volume.device)
-        KZ, KY, KX = torch.meshgrid(kx, kx, kx, indexing="ij")
-        k2 = KZ**2 + KY**2 + KX**2
-        newvolume = ifftn(fftn(volume) * torch.exp(-bfactor / 4 * k2))
+
+    kx = torch.fft.fftfreq(volume.shape[-1], pixel_size, device=volume.device)
+    KZ, KY, KX = torch.meshgrid(kx, kx, kx, indexing="ij")
+    k2 = KZ**2 + KY**2 + KX**2
+    newvolume = ifftn(fftn(volume) * torch.exp(-bfactor / 4 * k2))
 
     if torch.is_complex(volume):
         return newvolume
-    else:
-        return torch.real(newvolume)
+    return torch.real(newvolume)
 
 
 def chimera_gaussian_sigma_to_bfactor(

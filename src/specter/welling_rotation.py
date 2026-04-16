@@ -6,9 +6,12 @@ Provides robust 3D rotation via FFT-based shearing with automatic
 singularity avoidance through intelligent decomposition selection.
 """
 
+import warnings
+from typing import Tuple
+
 import numpy as np
 import torch
-from typing import Tuple
+import torch.nn.functional as F
 
 
 def quaternion_to_matrix(q: np.ndarray) -> np.ndarray:
@@ -408,3 +411,133 @@ def rotate_euler(
     """
     q = euler_to_quaternion(ax_deg, ay_deg, az_deg)
     return rotate_volume(vol, q)
+
+
+class RotationMethod:
+    """Method selector constants for :func:`rotate_volume_hybrid`."""
+
+    WELLING_FFT = "welling_fft"
+    GRID_SAMPLE = "grid_sample"
+
+
+def _rotate_volume_grid_sample(vol: torch.Tensor, q: np.ndarray) -> torch.Tensor:
+    """
+    Rotate a volume using grid_sample (fallback for Welling singularities).
+
+    Parameters
+    ----------
+    vol : torch.Tensor
+        3D volume (D, H, W).
+    q : np.ndarray
+        Normalized quaternion (x, y, z, w).
+
+    Returns
+    -------
+    torch.Tensor
+        Rotated volume, same shape as input.
+    """
+    N = vol.shape[0]
+    device = vol.device
+
+    R = quaternion_to_matrix(q)
+    P = torch.tensor(
+        [[0, 0, 1], [0, 1, 0], [1, 0, 0]], dtype=torch.float32, device=device
+    )
+    R_gs = P @ torch.tensor(R, dtype=torch.float32, device=device) @ P
+
+    lin = torch.linspace(-1, 1, N, device=device)
+    gz, gy, gx = torch.meshgrid(lin, lin, lin, indexing="ij")
+    src_grid = (torch.stack([gx, gy, gz], dim=-1).view(-1, 3) @ R_gs).view(
+        1, N, N, N, 3
+    )
+
+    return F.grid_sample(
+        vol.view(1, 1, N, N, N),
+        src_grid,
+        mode="bilinear",
+        padding_mode="zeros",
+        align_corners=True,
+    ).squeeze()
+
+
+def rotate_volume_hybrid(
+    vol: torch.Tensor,
+    q: np.ndarray,
+    method: str = RotationMethod.WELLING_FFT,
+) -> Tuple[torch.Tensor, str]:
+    """
+    Rotate a 3D volume using the best available method.
+
+    Tries Welling FFT first (exact, no interpolation) and falls back to
+    grid_sample (trilinear interpolation) for singular cases such as pure
+    180° axis rotations.
+
+    Parameters
+    ----------
+    vol : torch.Tensor
+        3D volume (D, H, W).
+    q : np.ndarray
+        Normalized quaternion (x, y, z, w).
+    method : str, optional
+        Preferred method: ``RotationMethod.WELLING_FFT`` or
+        ``RotationMethod.GRID_SAMPLE``. Default is ``WELLING_FFT``.
+
+    Returns
+    -------
+    rotated : torch.Tensor
+        Rotated volume.
+    method_used : str
+        Name of the method actually used.
+    """
+    q = q / np.linalg.norm(q)
+
+    if method == RotationMethod.WELLING_FFT:
+        try:
+            shear_params, decomp_name, _ = select_best_decomposition(q)
+            return apply_four_shear_decomposition(
+                vol, shear_params, decomp_name
+            ), f"{RotationMethod.WELLING_FFT} ({decomp_name})"
+        except ValueError as e:
+            if "180°" in str(e) or "singular" in str(e).lower():
+                warnings.warn(
+                    "Welling decomposition singular, falling back to grid_sample. "
+                    "(This is normal for certain pure axis rotations)"
+                )
+                return _rotate_volume_grid_sample(vol, q), RotationMethod.GRID_SAMPLE
+            raise
+    elif method == RotationMethod.GRID_SAMPLE:
+        return _rotate_volume_grid_sample(vol, q), RotationMethod.GRID_SAMPLE
+    else:
+        raise ValueError(
+            f"Unknown method '{method}'. Use RotationMethod.WELLING_FFT or GRID_SAMPLE."
+        )
+
+
+def rotate_euler_hybrid(
+    vol: torch.Tensor,
+    ax_deg: float,
+    ay_deg: float,
+    az_deg: float,
+    method: str = RotationMethod.WELLING_FFT,
+) -> Tuple[torch.Tensor, str]:
+    """
+    Rotate a volume by Euler angles using the hybrid Welling/grid_sample method.
+
+    Parameters
+    ----------
+    vol : torch.Tensor
+        3D volume (D, H, W).
+    ax_deg, ay_deg, az_deg : float
+        Roll (X), pitch (Y), yaw (Z) in degrees.
+    method : str, optional
+        Preferred method. Default is ``RotationMethod.WELLING_FFT``.
+
+    Returns
+    -------
+    rotated : torch.Tensor
+        Rotated volume.
+    method_used : str
+        Name of the method actually used.
+    """
+    q = euler_to_quaternion(ax_deg, ay_deg, az_deg)
+    return rotate_volume_hybrid(vol, q, method)

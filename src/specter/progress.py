@@ -25,19 +25,13 @@ class ProgressManager:
         return cls._instance
 
     def _is_notebook(self) -> bool:
-        """Robust notebook detection."""
+        """Detect whether running inside a Jupyter notebook."""
         try:
             from IPython import get_ipython
 
-            shell = get_ipython().__class__.__name__
-            if shell == "ZMQInteractiveShell":
-                return True  # Jupyter notebook or qtconsole
-            elif shell == "TerminalInteractiveShell":
-                return False  # Terminal running IPython
-            else:
-                return False  # Other type (?)
+            return get_ipython().__class__.__name__ == "ZMQInteractiveShell"
         except (NameError, ImportError):
-            return False  # Probably standard Python interpreter
+            return False
 
     def _get_next_available_position(self) -> int:
         pos = 0
@@ -46,30 +40,23 @@ class ProgressManager:
         return pos
 
     def get_pbar(
-        self, iterable: Iterable[T], desc: str, **kwargs: Any
+        self, iterable: Iterable[T] | None, desc: str, **kwargs: Any
     ) -> tuple[tqdm[T], int]:
         with self._lock:
             pos = self._get_next_available_position()
             self._occupied_positions.add(pos)
 
-        is_nb = self._is_notebook()
-
-        # Handle 'transient' (rich) and 'leave' (tqdm)
+        # Map rich-style 'transient' to tqdm 'leave'
         transient = kwargs.pop("transient", None)
         if "leave" not in kwargs:
-            # Leave the bar only if it's the outermost bar (pos 0) and not transient
             kwargs["leave"] = (not transient) if transient is not None else (pos == 0)
 
-        # In notebooks, manually setting 'position' can cause stacking issues
-        # and prevents the bar from clearing correctly in some environments.
-        # tqdm.notebook handles its own vertical stacking of widgets.
-        if is_nb and "position" not in kwargs:
-            pbar = tqdm(iterable, desc=desc, **kwargs)
-        else:
-            if "position" not in kwargs:
-                kwargs["position"] = pos
-            pbar = tqdm(iterable, desc=desc, **kwargs)
+        # In notebooks, tqdm handles its own stacking — setting 'position' manually
+        # causes display issues. Only set it in terminal environments.
+        if not self._is_notebook() and "position" not in kwargs:
+            kwargs["position"] = pos
 
+        pbar = tqdm(iterable, desc=desc, **kwargs)
         return pbar, pos
 
     def release(self, pos: int) -> None:
@@ -113,18 +100,18 @@ def track(
         return
 
     manager = ProgressManager()
-    pbar, pos = manager.get_pbar(  # ← unpack pos
+    pbar, pos = manager.get_pbar(
         iterable,
         desc=description,
         total=total,
-        transient=transient,  # ← let get_pbar handle the mapping, don't duplicate here
+        transient=transient,
         **kwargs,
     )
     try:
         yield from pbar
     finally:
         pbar.close()
-        manager.release(pos)  # ← pass pos
+        manager.release(pos)
 
 
 class TqdmProgress:

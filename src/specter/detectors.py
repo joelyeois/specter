@@ -4,6 +4,91 @@ import torch
 from scipy.interpolate import interp1d as scipy_interp1d
 from torchinterp1d import interp1d
 
+# Shared K3 frequency axis (RELION inverse-pixel units, 0 to ~0.508 Nyquist).
+# Identical for both 200 kV and 300 kV K3 datasheets.
+_K3_FREQ = [
+    0.000000000,
+    0.015873016,
+    0.031746032,
+    0.047619047,
+    0.063492064,
+    0.07936508,
+    0.095238095,
+    0.111111111,
+    0.126984127,
+    0.142857143,
+    0.158730159,
+    0.174603175,
+    0.190476191,
+    0.206349207,
+    0.222222222,
+    0.238095238,
+    0.253968254,
+    0.26984127,
+    0.285714286,
+    0.301587302,
+    0.317460318,
+    0.333333334,
+    0.349206349,
+    0.365079365,
+    0.380952381,
+    0.396825397,
+    0.412698413,
+    0.428571429,
+    0.444444445,
+    0.460317461,
+    0.476190476,
+    0.492063492,
+    0.507936508,
+]
+
+
+def _k3_mtf(
+    n: int,
+    dx: float,
+    device: str | torch.device,
+    return1d: bool,
+    mtf_values: list[float],
+) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
+    """Shared implementation for K3 MTF functions."""
+    k_data = torch.tensor(_K3_FREQ, dtype=torch.float32, device=device) / dx
+    mtf = torch.tensor(mtf_values, dtype=torch.float32, device=device)
+
+    if return1d:
+        return k_data, mtf
+
+    k = torch.fft.fftfreq(n, dx, device=device)
+    kx, ky = torch.meshgrid(k, k, indexing="ij")
+    k_rad = torch.sqrt(kx**2 + ky**2)
+    return interp1d(k_data, mtf, k_rad.ravel()).reshape(n, n)
+
+
+def _falcon4i_mtf(
+    n: int,
+    dx: float,
+    device: str | torch.device,
+    return1d: bool,
+    dqe_values: list[float],
+) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
+    """Shared implementation for Falcon 4i MTF functions."""
+    k_nyquist = 1 / 2 / dx
+    k_points = torch.tensor([0.0, 0.5, 1.0], dtype=torch.float32) * k_nyquist
+    mtf_data = torch.sqrt(torch.tensor(dqe_values, dtype=torch.float32))
+
+    # Quadratic interpolation via scipy (torchinterp1d does not support quadratic)
+    interp = scipy_interp1d(
+        k_points.numpy(), mtf_data.numpy(), kind="quadratic", fill_value="extrapolate"
+    )
+
+    k = torch.fft.fftfreq(n, dx, device=device)
+    kx, ky = torch.meshgrid(k, k, indexing="ij")
+    k_rad = torch.sqrt(kx**2 + ky**2)
+    mtf = torch.from_numpy(interp(k_rad.cpu().numpy())).to(device).reshape(n, n)
+
+    if return1d:
+        return k_rad[n // 2 :, n // 2], mtf[n // 2 :, n // 2]
+    return mtf
+
 
 def k3_200kv(
     n: int, dx: float, device: str | torch.device = "cpu", return1d: bool = False
@@ -34,47 +119,11 @@ def k3_200kv(
     ----------
     https://www.gatan.com/sites/default/files/images/mtf_k3_standard_200kV_FL2.star
     """
-    _rlnResolutionInversePixel = torch.tensor(
-        [
-            0.000000000,
-            0.015873016,
-            0.031746032,
-            0.047619047,
-            0.063492064,
-            0.07936508,
-            0.095238095,
-            0.111111111,
-            0.126984127,
-            0.142857143,
-            0.158730159,
-            0.174603175,
-            0.190476191,
-            0.206349207,
-            0.222222222,
-            0.238095238,
-            0.253968254,
-            0.26984127,
-            0.285714286,
-            0.301587302,
-            0.317460318,
-            0.333333334,
-            0.349206349,
-            0.365079365,
-            0.380952381,
-            0.396825397,
-            0.412698413,
-            0.428571429,
-            0.444444445,
-            0.460317461,
-            0.476190476,
-            0.492063492,
-            0.507936508,
-        ],
-        dtype=torch.float32,
-        device=device,
-    )
-
-    _rlnMtfValue = torch.tensor(
+    return _k3_mtf(
+        n,
+        dx,
+        device,
+        return1d,
         [
             1.000000000,
             0.992006436,
@@ -110,23 +159,7 @@ def k3_200kv(
             0.602899875,
             0.585359435,
         ],
-        dtype=torch.float32,
-        device=device,
     )
-
-    # rescale frequency units
-    k_data = _rlnResolutionInversePixel / dx
-    if return1d:
-        return k_data, _rlnMtfValue
-    else:
-        k = torch.fft.fftfreq(n, dx, device=device)
-        kx, ky = torch.meshgrid(k, k, indexing="ij")
-        k = torch.sqrt(kx**2 + ky**2)
-
-        # interpolate
-        interp = interp1d(k_data, _rlnMtfValue, k.ravel())
-        mtf = interp.reshape(n, n)
-        return mtf
 
 
 def k3_300kv(
@@ -158,47 +191,11 @@ def k3_300kv(
     ----------
     https://www.gatan.com/sites/default/files/images/mtf_k3_standard_300kV_FL2.star
     """
-    _rlnResolutionInversePixel = torch.tensor(
-        [
-            0.000000000,
-            0.015873016,
-            0.031746032,
-            0.047619047,
-            0.063492064,
-            0.07936508,
-            0.095238095,
-            0.111111111,
-            0.126984127,
-            0.142857143,
-            0.158730159,
-            0.174603175,
-            0.190476191,
-            0.206349207,
-            0.222222222,
-            0.238095238,
-            0.253968254,
-            0.26984127,
-            0.285714286,
-            0.301587302,
-            0.317460318,
-            0.333333334,
-            0.349206349,
-            0.365079365,
-            0.380952381,
-            0.396825397,
-            0.412698413,
-            0.428571429,
-            0.444444445,
-            0.460317461,
-            0.476190476,
-            0.492063492,
-            0.507936508,
-        ],
-        dtype=torch.float32,
-        device=device,
-    )
-
-    _rlnMtfValue = torch.tensor(
+    return _k3_mtf(
+        n,
+        dx,
+        device,
+        return1d,
         [
             0.999999586,
             0.994780311,
@@ -234,23 +231,7 @@ def k3_300kv(
             0.644918663,
             0.627949844,
         ],
-        dtype=torch.float32,
-        device=device,
     )
-
-    # rescale frequency units
-    k_data = _rlnResolutionInversePixel / dx
-    if return1d:
-        return k_data, _rlnMtfValue
-    else:
-        k = torch.fft.fftfreq(n, dx, device=device)
-        kx, ky = torch.meshgrid(k, k, indexing="ij")
-        k = torch.sqrt(kx**2 + ky**2)
-
-        # interpolate
-        interp = interp1d(k_data, _rlnMtfValue, k.ravel())
-        mtf = interp.reshape(n, n)
-        return mtf
 
 
 def perfect_detector(
@@ -278,23 +259,16 @@ def perfect_detector(
         - If return1d=False: 2D NxN MTF array (radially symmetric).
         - If return1d=True: Tuple (k_data, mtf_1d) for 1D MTF along a radial line.
     """
-    # Frequency grid in cycles per dx
     k = torch.fft.fftfreq(n, d=dx, device=device)
+
     if return1d:
-        omega = k / (1 / (2 * dx))  # f / f_N
-        mtf_1d = torch.sinc(omega / 2)
-        return k[n // 2 :], mtf_1d[n // 2 :]
-    else:
-        kx, ky = torch.meshgrid(k, k, indexing="ij")
-        k = torch.sqrt(kx**2 + ky**2)  # radial frequency
+        omega = k / (1 / (2 * dx))
+        return k[n // 2 :], torch.sinc(omega / 2)[n // 2 :]
 
-        # Convert to Nyquist units (Nyquist frequency = 1/(2*dx))
-        omega = k / (1 / (2 * dx))  # f / f_N
-
-        # Compute 2D MTF: sinc(pi * omega / 2)
-        # torch.sinc(x) in PyTorch is sin(pi x)/(pi x), so we can directly use:
-        mtf_2d = torch.sinc(omega / 2)  # sinc in PyTorch uses normalized definition
-        return mtf_2d
+    kx, ky = torch.meshgrid(k, k, indexing="ij")
+    k_rad = torch.sqrt(kx**2 + ky**2)
+    omega = k_rad / (1 / (2 * dx))
+    return torch.sinc(omega / 2)
 
 
 def falcon4i_300kv(
@@ -327,30 +301,7 @@ def falcon4i_300kv(
     ----------
     https://www.thermofisher.com/sg/en/home/electron-microscopy/products/accessories-em/falcon-detector.html
     """
-    k_nyquist = 1 / 2 / dx
-    nyquist_fraction = torch.tensor([0.0, 0.5, 1.0], dtype=torch.float32, device=device)
-    k_points = nyquist_fraction * k_nyquist
-    dqe_data = torch.tensor([0.92, 0.72, 0.50], dtype=torch.float32, device=device)
-    mtf_data = torch.sqrt(dqe_data)
-
-    # Use scipy interp1d for quadratic fitting.
-    interp = scipy_interp1d(
-        k_points.numpy(), mtf_data.numpy(), kind="quadratic", fill_value="extrapolate"
-    )
-
-    # sampling coordinates
-    k = torch.fft.fftfreq(n, dx, device=device)
-    kx, ky = torch.meshgrid(k, k, indexing="ij")
-    k = torch.sqrt(kx**2 + ky**2)
-
-    # interpolate
-    interp = torch.from_numpy(interp(k.numpy()))
-    mtf = interp.reshape(n, n)
-
-    if return1d:
-        return k[n // 2 :, n // 2], mtf[n // 2 :, n // 2]
-    else:
-        return mtf
+    return _falcon4i_mtf(n, dx, device, return1d, [0.92, 0.72, 0.50])
 
 
 def falcon4i_200kv(
@@ -383,27 +334,4 @@ def falcon4i_200kv(
     ----------
     https://www.thermofisher.com/sg/en/home/electron-microscopy/products/accessories-em/falcon-detector.html
     """
-    k_nyquist = 1 / 2 / dx
-    nyquist_fraction = torch.tensor([0.0, 0.5, 1.0], dtype=torch.float32, device=device)
-    k_points = nyquist_fraction * k_nyquist
-    dqe_data = torch.tensor([0.91, 0.62, 0.33], dtype=torch.float32, device=device)
-    mtf_data = torch.sqrt(dqe_data)
-
-    # Use scipy interp1d for quadratic fitting.
-    interp = scipy_interp1d(
-        k_points.numpy(), mtf_data.numpy(), kind="quadratic", fill_value="extrapolate"
-    )
-
-    # sampling coordinates
-    k = torch.fft.fftfreq(n, dx, device=device)
-    kx, ky = torch.meshgrid(k, k, indexing="ij")
-    k = torch.sqrt(kx**2 + ky**2)
-
-    # interpolate
-    interp = torch.from_numpy(interp(k.numpy()))
-    mtf = interp.reshape(n, n)
-
-    if return1d:
-        return k[n // 2 :, n // 2], mtf[n // 2 :, n // 2]
-    else:
-        return mtf
+    return _falcon4i_mtf(n, dx, device, return1d, [0.91, 0.62, 0.33])

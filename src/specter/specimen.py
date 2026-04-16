@@ -86,21 +86,18 @@ class TomogramGenerator(L.LightningModule):
         else:
             self.crowd = None
 
-        if self.ice_model is not None:
-            if self.ice_model == "randomchoice":
-                self.icemaker = NaiveIcemaker(
-                    dx=pixel_size, n=nxy, nz=nz, progressbars=progressbars
-                )
-            elif self.ice_model == "iterative":
-                self.icemaker = Icemaker(
-                    n=min(nxy, 256),  # Icemaker usually works with power-of-2 blocks
-                    dx=pixel_size,
-                    nz=min(nz, 256),
-                    chunk_size=chunk_size,
-                    progressbars=progressbars,
-                )
-            else:
-                self.icemaker = None
+        if self.ice_model == "randomchoice":
+            self.icemaker = NaiveIcemaker(
+                dx=pixel_size, n=nxy, nz=nz, progressbars=progressbars
+            )
+        elif self.ice_model == "iterative":
+            self.icemaker = Icemaker(
+                n=min(nxy, 256),  # Icemaker usually works with power-of-2 blocks
+                dx=pixel_size,
+                nz=min(nz, 256),
+                chunk_size=chunk_size,
+                progressbars=progressbars,
+            )
         else:
             self.icemaker = None
 

@@ -148,38 +148,33 @@ class PDB:
         if os.path.exists(file_path):
             print(f"File already exists: {file_path}, skip fetching.")
             return file_path
-        else:
-            # Fetch
-            print("File does not exists, fetching.")
-            url = "https://files.rcsb.org/download/" + filename + ".gz"
-            r = requests.get(url)
-            r.raise_for_status()
 
-            # Decompress in memory
-            with gzip.open(io.BytesIO(r.content), "rt") as f:
-                cif_content = f.read()
+        # Fetch
+        print("File does not exist, fetching.")
+        url = "https://files.rcsb.org/download/" + filename + ".gz"
+        r = requests.get(url)
+        r.raise_for_status()
 
-            # Save to file
-            with open(file_path, "w") as f:
-                f.write(cif_content)
+        # Decompress in memory
+        with gzip.open(io.BytesIO(r.content), "rt") as f:
+            cif_content = f.read()
+
+        # Save to file
+        with open(file_path, "w") as f:
+            f.write(cif_content)
 
         print(f"Downloaded to: {file_path}")
         return file_path
 
     @staticmethod
-    def get_available_assemblies(pdb_id: str) -> list[str]:
+    def get_available_assemblies(pdb_id: str) -> None:
         """
-        Return a list of available biological assembly IDs for a PDB entry.
+        Print the available biological assembly IDs for a PDB entry.
 
         Parameters
         ----------
         pdb_id : str
             4-character PDB ID.
-
-        Returns
-        -------
-        assemblies : list of str
-            List of available assembly IDs. Returns empty list if an error occurs.
 
         Notes
         -----
@@ -282,13 +277,13 @@ class PDB:
 
         Parameters
         ----------
-        coords : ndarray
-            Atom coordinates of molecule with N atoms, shape (N,3)
+        coords : torch.Tensor
+            Atom coordinates of molecule with N atoms, shape (N, 3).
 
         Returns
         -------
-        center : ndarray
-            Atom coordinates of the molecule's geometric, shape (1,3)
+        center : torch.Tensor
+            Geometric center of the molecule, shape (3,).
         """
         center = coords.mean(dim=0)
         return center
@@ -309,8 +304,7 @@ class PDB:
             Centered coordinates, shape (N,3)
         """
         center = PDB.center_of_particle(coords)
-        centered_coordinates = coords - center.reshape(1, -1)
-        return centered_coordinates
+        return coords - center
 
     @staticmethod
     def estimate_max_diameter(coordinates: torch.Tensor) -> float:
@@ -336,81 +330,6 @@ class PDB:
         hull_points = coordinates[hull.vertices]
         max_diameter = pdist(hull_points).max()
         return max_diameter
-
-
-# def get_atoms_and_coordinates_from_pdb(
-#     input_filename,
-#     fov=(100, 100, 100),
-#     debye_factor=0.08,
-#     comment="",
-#     return_array=True,
-#     write_file=False,
-#     output_filename=None,
-#     assemble=True,
-#     **kwargs,
-# ):
-#     """
-#     Writes an XYZ file formatted for Kirkland's multi-slice simulation program.
-
-#     software.
-
-#     Parameters
-#     ----------
-#     input_filename : str
-#         The name of the input file containing the atomic structure.
-#     fov : tuple
-#         Field of view dimensions (default is (100, 100, 100)).
-#     debye_factor : float
-#         Debye-Waller factor (default is 0.08).
-#     comment : str
-#         A comment to include in the header of the output file.
-#     return_array : boolean
-#         If True, returns array for elements and coordinates.
-#     write_file : boolean
-#         If True, writes .txt file.
-#     output_filename : str
-#         The name of the output file to write the XYZ data.
-#     assemble : boolean
-#         If True, assembles biological unit using symmetries in pdb file. Else,
-#         returns assymetric subunit.
-
-#     Returns
-#     ----------
-#     elements : (N,)-shape array
-#     coords : (N,3)-shape array
-#         x,y,z coordinates of each atom
-#     """
-
-#     pdbx_file = pdbx.CIFFile.read(input_filename)
-#     if assemble:
-#         biological_unit = pdbx.get_assembly(pdbx_file, **kwargs)
-#     else:
-#         biological_unit = pdbx.get_structure(pdbx_file, **kwargs)
-#     n_atoms = len(biological_unit.element)
-#     coords = np.squeeze(biological_unit.coord)  # [x, y, z]
-#     elements = np.zeros(n_atoms, dtype=int)
-#     for i in range(n_atoms):
-#         # Read the Atomic Number
-#         elements[i] = get_atomic_number(biological_unit.element[i])
-
-#     if write_file:
-#         if output_filename is None:
-#             output_filename = input_filename + ".txt"
-#         with open(output_filename, "w") as file:
-#             # Write the header
-#             file.write(comment + "\n")
-#             file.write(f"{fov[0]:.2f}\t{fov[1]:.2f}\t{fov[2]:.2f}\n")
-
-#             # Write the coordinates and other details
-#             for elem, coord in zip(elements, coords):
-#                 file.write(
-#                     f"{int(elem)}\t{coord[0]:<8.4f}\t{coord[1]:<8.4f}\t{coord[2]:<8.4f}\t 1.0\t{debye_factor}\n"
-#                 )
-
-#             # Write the comment or end line
-#             file.write("-1")
-#     if return_array:
-#         return torch.from_numpy(elements), torch.from_numpy(coords)
 
 
 def write_xyz_file(
@@ -450,10 +369,6 @@ def write_xyz_file(
 
         # Write the coordinates and other details
         for ii in range(nAtoms):
-            if ii < nAtoms - 1:
-                suffix = "\n"
-            else:
-                suffix = ""
             file.write(
-                f"{inXYZ[ii].element}\t{inXYZ[ii].coord[0]:<8.4f}\t{inXYZ[ii].coord[1]:<8.4f}\t{inXYZ[ii].coord[2]:<8.4f}{suffix}"
+                f"{inXYZ[ii].element}\t{inXYZ[ii].coord[0]:<8.4f}\t{inXYZ[ii].coord[1]:<8.4f}\t{inXYZ[ii].coord[2]:<8.4f}\n"
             )

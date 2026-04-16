@@ -5,7 +5,7 @@ import torch
 import lightning as L
 from .progress import track
 
-from . import filters
+from .array_utils import disk2d
 from .fft_tools import fft2, ifft2
 from .rotations import VolumeRotator, build_affine_matrix
 
@@ -208,7 +208,7 @@ class Scattering(L.LightningModule):
         # Kirkland bandlimit
         self.klim = klim
         if klim is not None:
-            kmask = filters.circle2d(nxy, int(nxy * klim))[None, ...]
+            kmask = disk2d(nxy, int(nxy * klim))[None, ...]
             self.register_buffer("kmask", kmask)
         else:
             self.kmask = 1
@@ -477,7 +477,7 @@ class IterativeScattering(L.LightningModule):
         # Kirkland bandlimit
         self.klim = klim
         if klim is not None:
-            kmask = filters.circle2d(nxy, int(nxy * klim))[None, ...]
+            kmask = disk2d(nxy, int(nxy * klim))[None, ...]
             self.register_buffer("kmask", kmask)
         else:
             self.kmask = 1

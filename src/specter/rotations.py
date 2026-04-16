@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import numpy as np
 import torch
 import lightning as L
 import torch.nn.functional as F
@@ -528,6 +527,30 @@ def rotate_volume_fourier(
     padding_mode: Literal["zeros", "border", "reflection"] = "border",
     align_corners: bool = False,
 ) -> torch.Tensor:
+    """
+    Rotate a 3D volume by interpolating in Fourier space.
+
+    Transforms to Fourier space, rotates real and imaginary parts separately
+    using :func:`rotate_volume`, then transforms back.
+
+    Parameters
+    ----------
+    V : torch.Tensor
+        Volume to rotate, shape (Z, Y, X).
+    theta : torch.Tensor
+        Batch of affine matrices, shape (B, 3, 4).
+    origin : str, optional
+        Rotation origin convention ('relion' or 'center'). Default is 'relion'.
+    padding_mode : str, optional
+        Padding mode for grid sampling. Default is 'border'.
+    align_corners : bool, optional
+        Passed to affine_grid and grid_sample. Default is False.
+
+    Returns
+    -------
+    V_rot : torch.Tensor
+        Rotated volume, shape (B, Z, Y, X).
+    """
     # Fourier domain
     V_f = fft3(V, shift=True)  # Z x X x Y
 
@@ -576,33 +599,31 @@ def translations_angstrom_to_torch(
 
 
 def build_affine_matrix(R: torch.Tensor, T: torch.Tensor | None = None) -> torch.Tensor:
-    if R.ndim == 2:
-        R = R.unsqueeze(0)
-    if T is not None and T.ndim == 1:
-        T = T.unsqueeze(0)
     """
-    Builds a batch of Torch's affine matrices (N, 3, 4) from a batch of rotation
-    matrices (N, 3, 3) and Torch normalized translation vectors (N, 3).
+    Build a batch of Torch affine matrices (N, 3, 4) from rotation matrices and translations.
 
-    CryoSPARC performs shifts before rotations. However, the affine matrix by
-    definition performs rotations before shifts. As such, we need to modify the
-    translation vector, T, by
-    T_1' = R_11T_1 + R_12T_2 + R_13T_3
-    T_2' = R_21T_1 + R_22T_2 + R_23T_3
-    T_3' = R_31T_1 + R_32T_2 + R_33T_3
+    CryoSPARC performs shifts before rotations. The affine matrix performs rotations
+    before shifts, so the translation vector is pre-rotated:
+    T_i' = sum_j R_ij * T_j
 
     Parameters
     ----------
     R : torch.Tensor
-        Batch of rotation matrices with shape (N, 3, 3).
-    T : 2D tensor
-        Batch of Torch normalized translation vectors with shape (N, 3). Note that this is not the same as the shifts directly from CryoSPARC/RELION starfiles. Those shifts must be normalized using translations_angstrom_to_torch.
+        Batch of rotation matrices, shape (N, 3, 3).
+    T : torch.Tensor, optional
+        Batch of Torch-normalized translation vectors, shape (N, 3).
+        Must be normalized via :func:`translations_angstrom_to_torch` first.
+        If None, zero translations are used.
 
     Returns
     -------
     theta : torch.Tensor
-        Batch of affine matrices with shape (N, 3, 4).
+        Batch of affine matrices, shape (N, 3, 4).
     """
+    if R.ndim == 2:
+        R = R.unsqueeze(0)
+    if T is not None and T.ndim == 1:
+        T = T.unsqueeze(0)
     if T is None:
         T = R.new_zeros(R.shape[0], 3)
 
@@ -618,49 +639,43 @@ def rotations_angular_difference(
     r1: torch.Tensor,
     r2: torch.Tensor,
     rotation_representation: Literal["quaternion", "rotvec"] = "rotvec",
-) -> np.ndarray:
+) -> torch.Tensor:
     """
-    Calculates the smallest angles of rotation needed for a batch of 3D rotations (r1) to match another (r2).
+    Compute the smallest angular difference between two batches of rotations.
 
     Parameters
     ----------
     r1 : torch.Tensor
-        Batch of rotation representations (N, ...).
+        Batch of rotation representations, shape (N, ...).
     r2 : torch.Tensor
-        Batch of rotation representations (N, ...).
+        Batch of rotation representations, shape (N, ...).
     rotation_representation : str, optional
-        The rotation representation of the input. Supports only 'quaternion' and
-        'rotvec'. Default 'rotvec'.
+        Input representation: 'quaternion' or 'rotvec'. Default is 'rotvec'.
 
     Returns
     -------
     angles : torch.Tensor
-        The smallest angular difference in degrees.
+        Smallest angular difference in degrees, shape (N,).
 
-    Notes
-    -----
-    .. [1] https://math.stackexchange.com/a/4001635
+    References
+    ----------
+    https://math.stackexchange.com/a/4001635
     """
-    # use scipy Rotation module
     if rotation_representation == "rotvec":
         r1 = Rotation.from_rotvec(r1)
         r2 = Rotation.from_rotvec(r2)
     elif rotation_representation == "quaternion":
         r1 = Rotation.from_quat(r1)
         r2 = Rotation.from_quat(r2)
+    else:
+        raise ValueError(
+            f"Unknown rotation_representation '{rotation_representation}'. Must be 'quaternion' or 'rotvec'."
+        )
 
-    # invert one of them
-    r1_inv = r1.inv()
-
-    # convert to rotation matrices
-    r1_inv_m = r1_inv.as_matrix()
-    r2_m = r2.as_matrix()
-
-    # compute relative angle
-    re_m = np.matmul(r1_inv_m, r2_m)
-    angles_rad = np.arccos((np.trace(re_m, axis1=-1, axis2=-2) - 1) / 2)
-    angles = angles_rad / np.pi * 180
-    return angles
+    re_m = r1.inv().as_matrix() @ r2.as_matrix()
+    trace = torch.diagonal(re_m, dim1=-2, dim2=-1).sum(-1)
+    angles_rad = torch.arccos(((trace - 1) / 2).clamp(-1.0, 1.0))
+    return angles_rad / torch.pi * 180
 
 
 class VolumeRotator(L.LightningModule):
@@ -871,7 +886,7 @@ class VolumeRotator(L.LightningModule):
     # Forward with optional per-call mode override
     # ------------------------------------------------------------------
     def forward(
-        self, V: torch.Tensor, theta: torch.Tensor, mode: str = None
+        self, V: torch.Tensor, theta: torch.Tensor, mode: str | None = None
     ) -> torch.Tensor:
         """
         Forward pass with optional mode override.

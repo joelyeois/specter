@@ -59,7 +59,7 @@ def get_rotation_matrices(sym: str, return_affine: bool = True) -> torch.Tensor:
     sym = sym.upper()
 
     if sym[0] == "D":
-        n = int(sym[1])
+        n = int(sym[1:])
         angs = torch.linspace(0, 360, n + 1)[:-1] / 180 * torch.pi
 
         vecz = torch.tensor([0, 0, 1])  # [x,y,z]
@@ -94,12 +94,11 @@ def get_rotation_matrices(sym: str, return_affine: bool = True) -> torch.Tensor:
         matrices = torch.stack(matrices)
 
     elif sym[0] == "C":
-        n = int(sym[1])
+        n = int(sym[1:])
         angs = torch.linspace(0, 360, n + 1)[:-1] / 180 * torch.pi
 
         vecz = torch.tensor([0, 0, 1])  # [x,y,z]
 
-        # D-syms have additional 180 symmetry around y.
         matrices = []
         for ang in angs:
             # rotation around z
@@ -1126,6 +1125,11 @@ def get_rotation_matrices(sym: str, return_affine: bool = True) -> torch.Tensor:
             ]
         )
 
+    else:
+        raise ValueError(
+            f"Unknown symmetry '{sym}'. Supported: Cn, Dn, T, O, I, I1, I2."
+        )
+
     if return_affine:
         rms = torch.zeros(len(matrices), 3, 4)
         rms[:, :, :-1] = matrices
@@ -1143,14 +1147,23 @@ def apply_symmetry(
     """
     Apply rotational symmetry to a volume.
 
-    Args:
-        vol: torch.Tensor, volume of shape (Z, X, Y)
-        sym_ops: torch.Tensor of shape (n_sym, 3, 3) OR string symmetry label (e.g. 'I', 'O', 'T')
-        batchsize: int, optional batch size for Fourier rotation
-        method: 'fourier' or 'real'
+    Parameters
+    ----------
+    vol : torch.Tensor
+        Volume of shape (Z, Y, X).
+    sym_ops : torch.Tensor or str
+        Either a tensor of shape (n_sym, 3, 4) affine matrices, or a symmetry
+        label string (e.g. 'C3', 'D2', 'I', 'O', 'T').
+    batchsize : int, optional
+        Number of symmetry operations to apply per batch. If None, applies all
+        at once. Default is None.
+    method : str, optional
+        Rotation method: 'fourier' or 'real'. Default is 'fourier'.
 
-    Returns:
-        torch.Tensor: symmetrized volume
+    Returns
+    -------
+    vol_sym : torch.Tensor
+        Symmetrized volume, same shape as input.
     """
 
     # If sym_ops is a string, fetch rotation matrices

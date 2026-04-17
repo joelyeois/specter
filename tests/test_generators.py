@@ -1,0 +1,188 @@
+"""
+Golden-output regression tests for all four image generators.
+
+On the first run, each test saves its output as a fixture under
+tests/test_data/. Subsequent runs load the fixture and assert that
+the output is numerically identical. To regenerate a fixture, delete
+the corresponding .pt file and re-run.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+import torch
+
+from specter.imagegenerator import (
+    ImageGenerator,
+    ImageGeneratorFromCoordinates,
+    MicrographGenerator,
+    TiltSeriesGenerator,
+)
+
+FIXTURE_DIR = Path(__file__).parent / "test_data"
+
+
+def _save_or_compare(name: str, tensor: torch.Tensor) -> None:
+    """Save tensor as a fixture on first run; compare on subsequent runs."""
+    path = FIXTURE_DIR / f"{name}.pt"
+    if path.exists():
+        expected = torch.load(path, weights_only=True)
+        assert torch.allclose(tensor.float(), expected.float(), atol=1e-4), (
+            f"Regression failure for '{name}'. "
+            "Delete the fixture file and re-run to regenerate."
+        )
+    else:
+        FIXTURE_DIR.mkdir(parents=True, exist_ok=True)
+        torch.save(tensor.cpu(), path)
+        pytest.skip(f"Fixture '{name}.pt' generated — re-run to verify.")
+
+
+@pytest.fixture
+def small_volume():
+    """3D volume (nz=16, ny=32, nx=32) with a simple phantom."""
+    vol = torch.zeros(16, 32, 32)
+    vol[6:10, 12:20, 12:20] = 50.0
+    return vol
+
+
+@pytest.fixture
+def small_volume_4d():
+    """4D volume (1, nz=16, ny=32, nx=32) as returned by TomogramGenerator."""
+    vol = torch.zeros(1, 16, 32, 32)
+    vol[0, 6:10, 12:20, 12:20] = 50.0
+    return vol
+
+
+@pytest.fixture
+def small_coords():
+    """Twenty carbon atoms near the origin."""
+    torch.manual_seed(0)
+    coords = torch.randn(20, 3) * 5.0
+    atomic_numbers = torch.full((20,), 6, dtype=torch.long)
+    return coords, atomic_numbers
+
+
+@pytest.fixture
+def ctf_params():
+    return {
+        "dfu": torch.tensor([5000.0]),
+        "dfv": torch.tensor([5000.0]),
+        "dfang": torch.tensor([0.0]),
+        "cs": torch.tensor([2.7]),
+        "phaseshift": torch.tensor([0.0]),
+        "tiltx": torch.tensor([0.0]),
+        "tilty": torch.tensor([0.0]),
+        "trefoil1": torch.tensor([0.0]),
+        "trefoil2": torch.tensor([0.0]),
+    }
+
+
+def test_image_generator_regression(small_volume, ctf_params):
+    """ImageGenerator: multislice scattering, iterative ice, coincidence loss, k3 detector."""
+    torch.manual_seed(0)
+    gen = ImageGenerator(
+        scattering_potential=small_volume,
+        pixel_size=2.0,
+        quaternions=torch.tensor([[0.7071, 0.0, 0.7071, 0.0]]),
+        translations=torch.tensor([[1.0, -1.0]]),
+        ctf_params=ctf_params,
+        energy=300.0,
+        dose_per_angstrom=2.0,
+        noise_model="poisson",
+        scattering_model="multislice",
+        ice_model="randomchoice",
+        alpha=0.1,
+        coincidence_radius=1.8,
+        num_frames=10,
+        detector_model="k3_300kv",
+        crowd_min_distance=60.0,
+        verbose=False,
+        progressbars=False,
+    )
+    torch.manual_seed(0)
+    images = gen(torch.tensor([0]))
+    _save_or_compare("image_generator", images.cpu())
+
+
+def test_image_generator_from_coordinates_regression(small_coords, ctf_params):
+    """ImageGeneratorFromCoordinates: voxelize coords, multislice, randomchoice ice, coincidence."""
+    coords, atomic_numbers = small_coords
+    torch.manual_seed(0)
+    gen = ImageGeneratorFromCoordinates(
+        coordinates=coords,
+        atomic_numbers=atomic_numbers,
+        nxy=16,
+        pixel_size=2.0,
+        quaternions=torch.tensor([[1.0, 0.0, 0.0, 0.0]]),
+        translations=torch.tensor([[0.0, 0.0]]),
+        ctf_params=ctf_params,
+        energy=300.0,
+        dose_per_angstrom=2.0,
+        noise_model="poisson",
+        scattering_model="multislice",
+        ice_model="randomchoice",
+        alpha=0.1,
+        coincidence_radius=1.8,
+        num_frames=10,
+        crowd_min_distance=40.0,
+        verbose=False,
+    )
+    torch.manual_seed(0)
+    images = gen(torch.tensor([0]))
+    _save_or_compare("image_generator_from_coordinates", images.cpu())
+
+
+def test_micrograph_generator_regression(small_volume, ctf_params):
+    """MicrographGenerator: TomogramGenerator specimen, iterative scattering, coincidence."""
+    torch.manual_seed(0)
+    gen = MicrographGenerator(
+        scattering_potential=small_volume,
+        micrograph_size=32,
+        pixel_size=2.0,
+        ctf_params=ctf_params,
+        energy=300.0,
+        dose_per_angstrom=2.0,
+        noise_model="poisson",
+        scattering_model="projection",
+        ice_model="randomchoice",
+        alpha=0.1,
+        coincidence_radius=1.8,
+        num_frames=10,
+        crowd_min_distance=60.0,
+        verbose=False,
+        progressbars=False,
+    )
+    torch.manual_seed(0)
+    images = gen(torch.tensor([0]))
+    _save_or_compare("micrograph_generator", images.cpu())
+
+
+def test_tilt_series_generator_regression(ctf_params):
+    """TiltSeriesGenerator: 3-angle tilt series, coincidence loss, tilt_axis='y'."""
+    vol = torch.zeros(1, 16, 48, 48)
+    vol[0, 5:11, 20:28, 20:28] = 50.0
+    angles = torch.tensor([-10.0, 0.0, 10.0])
+
+    torch.manual_seed(0)
+    gen = TiltSeriesGenerator(
+        vol=vol,
+        micrograph_size=32,
+        pixel_size=2.0,
+        ctf_params=ctf_params,
+        energy=300.0,
+        dose_per_angstrom=2.0,
+        angles=angles,
+        noise_model="poisson",
+        scattering_model="projection",
+        alpha=0.1,
+        coincidence_radius=1.8,
+        num_frames=10,
+        tilt_axis="y",
+        verbose=False,
+        progressbars=False,
+    )
+    torch.manual_seed(0)
+    tilt_series, _, _ = gen.generate_tilt_series(torch.tensor([0]))
+    _save_or_compare("tilt_series_generator", tilt_series.cpu())

@@ -27,6 +27,53 @@ from .symmetries import apply_symmetry, get_rotation_matrices
 
 
 class Ghostbuster(L.LightningModule):
+    """
+    3D reconstruction module for cryo-EM/cryo-ET using differentiable forward models.
+
+    Reconstructs a 3D electrostatic potential volume from 2D experimental images
+    by minimising the discrepancy between simulated and observed images. Supports
+    joint refinement of the volume, rotations, translations, and defocus.
+
+    Parameters
+    ----------
+    V : torch.Tensor
+        Initial volume estimate, shape (Z, Y, X).
+    voxel_size : float
+        Voxel size in Å.
+    quaternions : torch.Tensor
+        Per-particle rotation quaternions, shape (N, 4), in xyzw convention.
+    translations : torch.Tensor
+        Per-particle translations in Å, shape (N, 2).
+    ctf_params : dict[str, torch.Tensor]
+        Per-particle CTF parameters; each value has leading dimension N.
+    energy : float
+        Electron energy in keV.
+    dose_per_angstrom : float
+        Electron dose in e⁻/Å².
+    lr : float, optional
+        Learning rate for volume V. None disables V optimisation.
+    lr_R : float, optional
+        Learning rate for rotations. None disables rotation refinement.
+    lr_T : float, optional
+        Learning rate for translations. None disables translation refinement.
+    lr_D : float, optional
+        Learning rate for defocus offset. None disables defocus refinement.
+    scheduler : {"LambdaLR", "CosineAnnealingWarmRestarts", "MultiplicativeLR"}
+        LR scheduler applied to the volume optimiser. Default is "LambdaLR".
+    sparsity : float, optional
+        L1 regularisation weight on V. None disables sparsity.
+    symmetry : str, optional
+        Symmetry group to enforce (e.g. "C3", "D2"). None disables symmetry.
+    scattering_model : str
+        Scattering model passed to ImageGenerator. Default is "multislice".
+    aberration_model : str
+        Aberration model passed to ImageGenerator. Default is "holography".
+    output_dir : str or Path, optional
+        If provided, per-epoch volumes and metadata are saved here.
+    tag : str
+        Human-readable label appended to the output run directory name.
+    """
+
     def __init__(
         self,
         V: torch.Tensor,
@@ -201,10 +248,23 @@ class Ghostbuster(L.LightningModule):
         )
 
     def forward(self, idx: torch.Tensor | int | slice) -> torch.Tensor:
-        image = self.imagegenerator(idx)
-        return image
+        """
+        Simulate images for the given particle indices.
+
+        Parameters
+        ----------
+        idx : torch.Tensor, int, or slice
+            Indices into the stored rotations/translations/CTF parameters.
+
+        Returns
+        -------
+        torch.Tensor
+            Simulated images, shape (B, H, W).
+        """
+        return self.imagegenerator(idx)
 
     def symmetrize(self) -> None:
+        """Apply the configured point-group symmetry to the current volume in-place."""
         self.V.data = apply_symmetry(
             self.V.data,
             self.sym_rot_matrices,
@@ -213,12 +273,28 @@ class Ghostbuster(L.LightningModule):
         )
 
     def reciprocal_lr_scheduler(self, *args: Any) -> float:
+        """
+        Reciprocal-square-root decay schedule: ``1 / (1 + decay * step^0.5)``.
+
+        Returns
+        -------
+        float
+            LR multiplier at the current global step.
+        """
         return 1 / (1 + self.lr_decay * self.global_step**0.5)
 
     def configure_optimizers(
         self,
     ) -> tuple[list[torch.optim.Optimizer], list[LRScheduler]]:
-        # new. Single parameter optimization only
+        """
+        Build optimizers and LR schedulers for all active parameters.
+
+        Returns
+        -------
+        tuple
+            (optimizers, lr_schedulers) — only the volume optimiser gets a
+            scheduler; rotation/translation/defocus optimisers use a fixed LR.
+        """
         if self.lr is not None:
             optimizerV = AdamW([self.V], lr=self.lr)
             # optimizer = SGD(self.parameters(), lr=self.lr, momentum=0.9)
@@ -232,7 +308,6 @@ class Ghostbuster(L.LightningModule):
         if self.lr_D is not None:
             optimizerD = AdamW([self.defocus_offset], lr=self.lr_D)
 
-        # lr_scheduler = CosineAnnealingLR(optimizer, T_max=self.niter//2, eta_min=1e-6)
         lr_schedulers = []
         if self.lr is not None:
             if self.scheduler == "CosineAnnealingWarmRestarts":
@@ -246,20 +321,21 @@ class Ghostbuster(L.LightningModule):
                 lr_scheduler = ExponentialLR(optimizerV, 0.999)
             elif self.scheduler == "LambdaLR":
                 lr_scheduler = LambdaLR(optimizerV, self.reciprocal_lr_scheduler)
+            else:
+                raise ValueError(
+                    f"Unknown scheduler '{self.scheduler}'. "
+                    "Choose 'LambdaLR', 'CosineAnnealingWarmRestarts', or 'MultiplicativeLR'."
+                )
             lr_schedulers.append(lr_scheduler)
 
-        # new. multi-parameter optimization.
         opts = []
         if self.lr is not None:
             opts.append(optimizerV)
         if self.lr_R is not None:
-            # opts.append({"optimizerR": optimizerR})
             opts.append(optimizerR)
         if self.lr_T is not None:
-            # opts.append({"optimizerT": optimizerT})
             opts.append(optimizerT)
         if self.lr_D is not None:
-            # opts.append({"optimizerD": optimizerD})
             opts.append(optimizerD)
         return opts, lr_schedulers
 
@@ -331,19 +407,25 @@ class Ghostbuster(L.LightningModule):
             # (i.e. loss magnitude remains comparable to real-space MSE).
             self.sigma2_k = self.sigma2_k / self.sigma2_k.mean().clamp(min=1e-10)
 
-    def _common_step(
-        self, batch: tuple[torch.Tensor, torch.Tensor], batch_idx: int
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        # Link parameters to simulator to ensure autograd graph connectivity
-        if hasattr(self.imagegenerator, "V"):
-            self.imagegenerator.V = self.V
-        if hasattr(self.imagegenerator, "quaternions"):
-            self.imagegenerator.quaternions = self.rotations
+    def _compute_loss(self, out: torch.Tensor, images: torch.Tensor) -> torch.Tensor:
+        """
+        Compute the image-domain loss between simulated and experimental images.
 
-        images, idx = batch
-        out = self.forward(idx)
+        Selects the active loss model in priority order: NCC → learned noise →
+        NPS-weighted → plain MSE. Sparsity regularisation on V is added on top.
 
-        # loss function
+        Parameters
+        ----------
+        out : torch.Tensor
+            Simulated images, shape (B, H, W).
+        images : torch.Tensor
+            Experimental images, shape (B, H, W).
+
+        Returns
+        -------
+        torch.Tensor
+            Scalar total loss.
+        """
         if self.use_ncc:
             loss = self._ncc_loss(out, images)
         elif self.learn_noise_model:
@@ -368,27 +450,51 @@ class Ghostbuster(L.LightningModule):
             loss = F.mse_loss(images, out)
         self.log_norm_loss.append(loss.detach().cpu())
 
-        # sparsity loss
         if self.sparsity is not None:
             sparsity_loss = self.sparsity * torch.mean(torch.abs(self.V))
             loss = loss + sparsity_loss
             self.log_sparsity_loss.append(sparsity_loss.detach().cpu())
 
-        # total loss
         self.log_total_loss.append(loss.detach().cpu())
+        return loss
 
+    def _common_step(
+        self, batch: tuple[torch.Tensor, torch.Tensor], batch_idx: int
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        # Link parameters to simulator to ensure autograd graph connectivity
+        if hasattr(self.imagegenerator, "V"):
+            self.imagegenerator.V = self.V
+        if hasattr(self.imagegenerator, "quaternions"):
+            self.imagegenerator.quaternions = self.rotations
+
+        images, idx = batch
+        out = self.forward(idx)
+        loss = self._compute_loss(out, images)
         return loss, out, images
 
     def training_step(
         self, batch: tuple[torch.Tensor, torch.Tensor], batch_idx: int
     ) -> torch.Tensor:
-        opts = self.optimizers()
+        """
+        Run one manual optimisation step.
 
+        Parameters
+        ----------
+        batch : tuple of torch.Tensor
+            (images, indices) from the dataloader.
+        batch_idx : int
+            Batch index (unused, required by Lightning interface).
+
+        Returns
+        -------
+        torch.Tensor
+            Scalar loss for the current batch.
+        """
+        opts = self.optimizers()
         if not isinstance(opts, (list, tuple)):
             opts = [opts]
 
-        loss, out, y1 = self._common_step(batch, batch_idx)
-        # self.log('train_loss', loss)
+        loss, _, _ = self._common_step(batch, batch_idx)
         self.log_dict(
             {"train_loss": loss},
             on_step=False,
@@ -397,14 +503,9 @@ class Ghostbuster(L.LightningModule):
             logger=True,
         )
 
-        # Zero gradients
         for opt in opts:
             opt.zero_grad()
-
-        # Backward
         self.manual_backward(loss)
-
-        # Step optimizers
         for opt in opts:
             opt.step()
 
@@ -419,7 +520,7 @@ class Ghostbuster(L.LightningModule):
         return loss
 
     def on_train_batch_start(self, batch: Any, batch_idx: int) -> None:
-        # log lr
+        """Record the current learning rate before each batch."""
         if self.lr is not None:
             self.log_lrs.append(
                 self.trainer.lr_scheduler_configs[0].scheduler.optimizer.param_groups[
@@ -428,12 +529,14 @@ class Ghostbuster(L.LightningModule):
             )
 
     def on_train_batch_end(self, outputs: Any, batch: Any, batch_idx: int) -> None:
+        """Apply the Fourier-space k-mask to V after each gradient update."""
         if self.kmask is not None:
             self.V.data = torch.real(
                 ifft3(fft3(self.V.data, shift=True) * self.kmask, shift=True)
             )
 
     def on_fit_start(self) -> None:
+        """Create the timestamped run directory and write initial metadata."""
         if self._output_dir is None:
             return
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -459,7 +562,7 @@ class Ghostbuster(L.LightningModule):
         print(f"Run directory: {self._run_dir}")
 
     def on_train_epoch_end(self) -> None:
-        # enforce symmetry
+        """Enforce symmetry and save the current volume to disk after each epoch."""
         if self.symmetry is not None:
             self.V.data = apply_symmetry(
                 self.V.data,
@@ -468,7 +571,6 @@ class Ghostbuster(L.LightningModule):
                 method=self.symmetry_mode,
             )
 
-        # save per-epoch volume
         if self._run_dir is not None:
             epoch = self.current_epoch + 1
             suffix = (
@@ -480,7 +582,14 @@ class Ghostbuster(L.LightningModule):
                 mrc.set_data(v)
 
     def num_training_steps_per_epoch(self) -> int:
-        """Get number of training steps per epoch"""
+        """
+        Return the number of optimizer steps per training epoch.
+
+        Returns
+        -------
+        int
+            Steps per epoch, accounting for gradient accumulation.
+        """
         if self.trainer.max_steps > -1:
             return self.trainer.max_steps
 

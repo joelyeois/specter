@@ -246,8 +246,6 @@ class PotentialBuilder(L.LightningModule):
         Default is 'kirkland'.
     conv_backend : str, optional
         Convolution backend: 'fftconvolve' or 'conv3d'. Default is 'fftconvolve'.
-    trainable : bool, optional
-        Whether parameters are trainable. Default is False.
     mmcif_filepath : str, optional
         Path to mmCIF file for Shtyrov parameterization. Default is None.
 
@@ -267,7 +265,6 @@ class PotentialBuilder(L.LightningModule):
         progressbars: bool = True,
         parameterization: str = "kirkland",
         conv_backend: str = "fftconvolve",
-        trainable: bool = False,
         mmcif_filepath: str | None = None,
     ):
         super().__init__()
@@ -281,14 +278,12 @@ class PotentialBuilder(L.LightningModule):
         self.conv_backend = conv_backend
         self.mmcif_filepath = mmcif_filepath
 
-        # create super-sampled (ss) coordinate system
         self.ssn, self.ssdx, self.ssf = compute_supersampling_parameters(dx)
         sR_2d = radial_grid_2d(self.ssn, self.ssdx, convention="torch")
         sR_3d = radial_grid_3d(self.ssn, self.ssdx, convention="torch")
         self.register_buffer("sR_2d", sR_2d)
         self.register_buffer("sR_3d", sR_3d)
 
-        # create atomic potentials
         self.atomic_numbers = atomic_numbers
         self.unique_elements = torch.unique(atomic_numbers)
         atomic_potentials_2d = torch.empty(
@@ -330,13 +325,11 @@ class PotentialBuilder(L.LightningModule):
         if unique_elements is None:
             unique_elements = self.unique_elements
         else:
-            # update unique elements
             self.unique_elements = unique_elements
             self.atomic_potentials_2d = torch.empty(
                 len(unique_elements), self.ssn // self.ssf, self.ssn // self.ssf
             )
 
-        # fetch potential kernels
         for i, elem in enumerate(self.unique_elements):
             if self.parameterization == "kirkland":
                 pot = kirkland_atomic_potential_2d(int(elem), self.sR_2d)
@@ -384,7 +377,6 @@ class PotentialBuilder(L.LightningModule):
                 self.ssn // self.ssf,
             )
 
-        # fetch potential kernels
         for i, elem in enumerate(self.unique_elements):
             if self.parameterization == "kirkland":
                 pot = kirkland_atomic_potential_3d(int(elem), self.sR_3d)
@@ -443,7 +435,6 @@ class PotentialBuilder(L.LightningModule):
             conv_backend = self.conv_backend
         coordinates = coordinates.to(self.device)
 
-        # Detect batch
         if coordinates.ndim == 2:  # (N,3) -> add batch dimension
             coordinates = coordinates.unsqueeze(0)
 
@@ -530,8 +521,6 @@ class GemmiPotentialBuilder:
 
     Attributes
     ----------
-    dencalc : gemmi.DensityCalculatorE
-        Gemmi density calculator instance.
     translate_to_center : torch.Tensor
         Translation vector to center atoms in grid.
     c1 : float
@@ -555,22 +544,6 @@ class GemmiPotentialBuilder:
             [[self.nx // 2 * dx, self.ny // 2 * dx, self.nz // 2 * dx]]
         )
         self.atomic_numbers = atomic_numbers
-
-        # prepare density calculator
-        self.dencalc = gemmi.DensityCalculatorE()
-
-        # setup box size
-        unit_cell = gemmi.UnitCell(
-            self.nx * self.dx,
-            self.ny * self.dx,
-            self.nz * self.dx,
-            90.0,
-            90.0,
-            90.0,  # for a cubic cell
-        )
-        self.dencalc.grid.unit_cell = unit_cell
-        self.dencalc.grid.spacegroup = gemmi.SpaceGroup("P1")
-        self.dencalc.grid.set_size(self.nx, self.ny, self.nz)
 
         # scaling prefactor
         a0 = 0.529  # Bohr radius, [Å]
@@ -602,13 +575,11 @@ class GemmiPotentialBuilder:
         Filters out atoms outside the grid boundaries.
         All atoms are assigned to chain A, residue 1.
         """
-        # Create placeholder structure
         st = gemmi.Structure()
         model = st.add_model(gemmi.Model(1))
-        chain = model.add_chain("A")  # add chain A
+        chain = model.add_chain("A")
         res = chain.add_residue(gemmi.Residue())
 
-        # Boolean mask for atoms inside the box
         mask = (
             (atom_coordinates[:, 0] >= 0.0)
             & (atom_coordinates[:, 0] <= self.nx * self.dx)
@@ -618,7 +589,6 @@ class GemmiPotentialBuilder:
             & (atom_coordinates[:, 2] <= self.nz * self.dx)
         )
 
-        # Apply mask to coordinates and elements
         filtered_coords = atom_coordinates[mask]
         filtered_elements = atom_elements[mask]
 
@@ -627,13 +597,10 @@ class GemmiPotentialBuilder:
             #     continue
             atom = gemmi.Atom()
             atom.pos = gemmi.Position(float(pos[0]), float(pos[1]), float(pos[2]))
-            atom.element = gemmi.Element(
-                int(z)
-            )  # Element constructed from atomic number
+            atom.element = gemmi.Element(int(z))
             atom.occ = 1.0
             atom.b_iso = self.b_factor
             atom.serial = i
-            # Add atom to residue (Python API returns reference to added atom)
             res.add_atom(atom)
         return model
 
@@ -651,17 +618,14 @@ class GemmiPotentialBuilder:
         Creates a new calculator to avoid state contamination between
         multiple potential calculations.
         """
-        # prepare density calculator
         dencalc = gemmi.DensityCalculatorE()
-
-        # setup box size
         unit_cell = gemmi.UnitCell(
             self.nx * self.dx,
             self.ny * self.dx,
             self.nz * self.dx,
             90.0,
             90.0,
-            90.0,  # for a cubic cell
+            90.0,
         )
         dencalc.grid.unit_cell = unit_cell
         dencalc.grid.spacegroup = gemmi.SpaceGroup("P1")
@@ -690,7 +654,6 @@ class GemmiPotentialBuilder:
         Uses only the first atom from the structure and applies custom
         form factors from the mmCIF file. Atoms are recentered to grid center.
         """
-        # Read the CIF structure file
         st = gemmi.read_structure(mmcif_filepath)
 
         # --- keep only the first atom ---
@@ -703,7 +666,6 @@ class GemmiPotentialBuilder:
         # st = new_st
         # --------------------------------
 
-        # Extract scattering factors from table
         block = gemmi.cif.read_file(mmcif_filepath).sole_block()
         ctable = block.find(
             "_lmb_scat_coef.",
@@ -721,7 +683,6 @@ class GemmiPotentialBuilder:
             ],
         )
 
-        # restructure scattering factors
         coefs = np.empty((len(ctable), 10))
         for ind, row in enumerate(ctable):
             coefs[ind] = [float(field) for field in row]
@@ -736,10 +697,8 @@ class GemmiPotentialBuilder:
         gemmi.set_custom_form_factors(custom_form_factors)
         dencalc = gemmi.DensityCalculatorC()
 
-        # Recenter atoms
         coords = np.array([cra.atom.pos for cra in st[0].all()])  # (N, 3)
         center_geom = coords.mean(axis=0)
-        # Apply shift to all atoms
         for cra in st[0].all():
             translate = -np.asarray(
                 center_geom.tolist()
@@ -755,14 +714,13 @@ class GemmiPotentialBuilder:
                 "Using default B-factor in mmcif file. Set b_factor to 0 if not intended."
             )
 
-        # setup box size
         unit_cell = gemmi.UnitCell(
             self.nx * self.dx,
             self.ny * self.dx,
             self.nz * self.dx,
             90.0,
             90.0,
-            90.0,  # for a cubic cell
+            90.0,
         )
         dencalc.grid.unit_cell = unit_cell
         dencalc.grid.spacegroup = gemmi.SpaceGroup("P1")
@@ -815,13 +773,11 @@ class GemmiPotentialBuilder:
         Creates fresh Gemmi objects to avoid pickling issues.
         """
         coords, elements, nx, ny, nz, dx, b_factor = args
-        # Create placeholder structure
         st = gemmi.Structure()
         model = st.add_model(gemmi.Model(1))
-        chain = model.add_chain("A")  # add chain A
+        chain = model.add_chain("A")
         res = chain.add_residue(gemmi.Residue())
 
-        # Boolean mask for atoms inside the box
         mask = (
             (coords[:, 0] >= 0.0)
             & (coords[:, 0] <= nx * dx)
@@ -831,33 +787,26 @@ class GemmiPotentialBuilder:
             & (coords[:, 2] <= nz * dx)
         )
 
-        # Apply mask to coordinates and elements
         filtered_coords = coords[mask]
         filtered_elements = elements[mask]
 
         for i, (pos, z) in enumerate(zip(filtered_coords, filtered_elements), start=1):
             atom = gemmi.Atom()
             atom.pos = gemmi.Position(float(pos[0]), float(pos[1]), float(pos[2]))
-            atom.element = gemmi.Element(
-                int(z)
-            )  # Element constructed from atomic number
+            atom.element = gemmi.Element(int(z))
             atom.occ = 1.0
             atom.b_iso = b_factor
             atom.serial = i
-            # Add atom to residue (Python API returns reference to added atom)
             res.add_atom(atom)
 
-        # prepare density calculator
         dencalc = gemmi.DensityCalculatorE()
-
-        # setup box size
         unit_cell = gemmi.UnitCell(
             nx * dx,
             ny * dx,
             nz * dx,
             90.0,
             90.0,
-            90.0,  # for a cubic cell
+            90.0,
         )
         dencalc.grid.unit_cell = unit_cell
         dencalc.grid.spacegroup = gemmi.SpaceGroup("P1")
@@ -900,36 +849,29 @@ class GemmiPotentialBuilder:
             atomic_numbers = self.atomic_numbers
         else:
             self.atomic_numbers = atomic_numbers
-        # translate coordinates
         translated_coordinates = atom_coordinates + self.translate_to_center
 
         if n_processes is None:
             vol = self._build_single_potential((translated_coordinates, atomic_numbers))
             return self.c1 * vol
 
-        else:
-            # split atoms into roughly equal chunks
-            chunks_coords = torch.split(translated_coordinates, n_processes)
-            chunks_elements = torch.split(atomic_numbers, n_processes)
-            # pack arguments into single tuples
-            args_list = [
-                (
-                    chunks_coords[i],
-                    chunks_elements[i],
-                    self.nx,
-                    self.ny,
-                    self.nz,
-                    self.dx,
-                    self.b_factor,
-                )
-                for i in range(n_processes)
-            ]
+        chunks_coords = torch.split(translated_coordinates, n_processes)
+        chunks_elements = torch.split(atomic_numbers, n_processes)
+        args_list = [
+            (
+                chunks_coords[i],
+                chunks_elements[i],
+                self.nx,
+                self.ny,
+                self.nz,
+                self.dx,
+                self.b_factor,
+            )
+            for i in range(n_processes)
+        ]
 
-            with mp.get_context("spawn").Pool(processes=n_processes) as pool:
-                results = pool.map(
-                    self._build_parallelizable_single_potential, args_list
-                )
+        with mp.get_context("spawn").Pool(processes=n_processes) as pool:
+            results = pool.map(self._build_parallelizable_single_potential, args_list)
 
-            # sum volumes from all processes
-            total_volume = torch.stack(results).sum(0)
-            return self.c1 * total_volume
+        total_volume = torch.stack(results).sum(0)
+        return self.c1 * total_volume

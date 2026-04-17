@@ -1,0 +1,273 @@
+from __future__ import annotations
+
+from typing import Any
+
+import lightning as L
+import torch
+import torch.nn.functional as F
+
+from specter.detectors import k3_200kv, k3_300kv, perfect_detector
+
+from .microscope import Aberration, Detector
+
+
+def compute_nz(base_nz: int, ice_thickness: float | None, pixel_size: float) -> int:
+    """
+    Number of Z slices given an optional ice thickness.
+
+    Returns ``base_nz`` unchanged if ice thickness is None or smaller than the
+    base volume depth; otherwise uses ice thickness to determine the depth.
+
+    Parameters
+    ----------
+    base_nz : int
+        Depth of the particle volume in slices.
+    ice_thickness : float or None
+        Total ice thickness in Å. None means no ice padding.
+    pixel_size : float
+        Voxel size in Å.
+
+    Returns
+    -------
+    nz : int
+        Number of Z slices to use.
+    """
+    if ice_thickness is None or ice_thickness < base_nz * pixel_size:
+        return base_nz
+    return int(ice_thickness // pixel_size)
+
+
+def pad_volume(
+    V: torch.Tensor,
+    nxy: int,
+    nz: int,
+    ice_thickness: float | None,
+    pad_fft: bool,
+    xy_pad_mode: str = "constant",
+) -> torch.Tensor:
+    """
+    Pad a potential volume in Z and/or XY.
+
+    Z-padding extends the volume to ``nz`` slices (zeros added symmetrically)
+    when ice thickness is set.  XY-padding adds ``nxy // 2`` pixels on each
+    side for FFT antialiasing.
+
+    Parameters
+    ----------
+    V : torch.Tensor
+        Volume of shape (B, Z, Y, X).
+    nxy : int
+        Unpadded image size in pixels.
+    nz : int
+        Target Z depth after padding.
+    ice_thickness : float or None
+        If not None, Z-padding is applied.
+    pad_fft : bool
+        If True, XY-padding is applied.
+    xy_pad_mode : str, optional
+        Padding mode for XY axes. Default 'constant'.
+
+    Returns
+    -------
+    V : torch.Tensor
+        Padded volume.
+    """
+    if ice_thickness is not None:
+        zpad_px = nz - nxy
+        V = F.pad(
+            V,
+            (0, 0, 0, 0, zpad_px // 2, nz - zpad_px // 2 - V.shape[1]),
+            mode="constant",
+        )
+    if pad_fft:
+        V = F.pad(
+            V,
+            (nxy // 2, nxy // 2, nxy // 2, nxy // 2, 0, 0),
+            mode=xy_pad_mode,
+        )
+    return V
+
+
+class BaseImager(L.LightningModule):
+    """
+    Shared base for all image-generation classes.
+
+    Registers CTF parameters, per-image scalars (dose, coincidence radius,
+    potential scale) as Lightning buffers, initialises the detector MTF, and
+    exposes helpers for optics initialisation and defocus shifting.
+
+    Every concrete generator should call ``super().__init__()`` with these
+    arguments, then call ``_init_optics()`` once ``nz`` and ``pad_nxy`` are
+    known.
+
+    Parameters
+    ----------
+    pixel_size : float
+        Pixel size in Å.
+    energy : float
+        Electron beam energy in kV.
+    dose_per_angstrom : float or torch.Tensor
+        Electron dose per Å². Scalar or 1-D tensor of length n.
+    nxy : int
+        Unpadded image size in pixels.
+    nz : int
+        Number of Z slices in the simulation volume.
+    pad_nxy : int, optional
+        XY size after FFT padding. Defaults to ``nxy``.
+    aberration_model : str, optional
+        Aberration model ('holography', 'phase_plate'). Default 'holography'.
+    noise_model : str, optional
+        Noise model ('poisson', 'gaussian', None). Default 'poisson'.
+    alpha : float, optional
+        Amplitude contrast ratio. Default 0.0.
+    detector_model : str, optional
+        Detector MTF model ('k3_300kv', 'k3_200kv', 'perfect', None).
+    anisomag : torch.Tensor, optional
+        Anisotropic magnification matrices, shape (n, 2, 2).
+    ctf_params : dict[str, torch.Tensor], optional
+        CTF parameters; each value is a 1-D tensor of length n.
+    progressbars : bool, optional
+        Whether to show progress bars. Default True.
+    verbose : bool, optional
+        Whether to emit debug-level log messages. Default True.
+    coincidence_radius : float or torch.Tensor, optional
+        Coincidence radius in pixels. Scalar or 1-D tensor of length n.
+        Default 0.0.
+    num_frames : int, optional
+        Number of detector frames to simulate. Default None (single frame).
+    potential_scale : float or torch.Tensor, optional
+        Multiplier applied to the scattering potential before propagation.
+        Scalar or 1-D tensor of length n. Default 1.0.
+    """
+
+    def __init__(
+        self,
+        pixel_size: float,
+        energy: float,
+        dose_per_angstrom: float | torch.Tensor,
+        nxy: int,
+        nz: int,
+        pad_nxy: int | None = None,
+        aberration_model: str = "holography",
+        noise_model: str = "poisson",
+        alpha: float = 0.0,
+        detector_model: str | None = None,
+        anisomag: torch.Tensor | None = None,
+        ctf_params: dict[str, torch.Tensor] | None = None,
+        progressbars: bool = True,
+        verbose: bool = True,
+        coincidence_radius: float | torch.Tensor = 0.0,
+        num_frames: int | None = None,
+        potential_scale: float | torch.Tensor = 1.0,
+    ):
+        super().__init__()
+        self.pixel_size = pixel_size
+        self.energy = energy
+        self.aberration_model = aberration_model
+        self.noise_model = noise_model
+        self.alpha = alpha
+        self.progressbars = progressbars
+        self.verbose = verbose
+        self.nxy = nxy
+        self.nz = nz
+        self.pad_nxy = pad_nxy if pad_nxy is not None else nxy
+        self.detector_model = detector_model
+        self.num_frames = num_frames
+        self._init_detector_mtf()
+
+        if anisomag is None:
+            self.anisomag = None
+        else:
+            self.register_buffer("anisomag", torch.as_tensor(anisomag))
+
+        if ctf_params is not None:
+            for k, v in ctf_params.items():
+                v_tensor = torch.as_tensor(v)
+                if v_tensor.ndim == 0:
+                    v_tensor = v_tensor.unsqueeze(0)
+                self.register_buffer(k, v_tensor)
+            self._ctf_param_names = list(ctf_params.keys())
+            n = len(next(iter(ctf_params.values())))
+        else:
+            self._ctf_param_names = []
+            n = None
+
+        # Scalar inputs are expanded to length-n so forward() can index with [idx].
+        def _to_buffer(val: float | torch.Tensor, name: str) -> None:
+            t = torch.as_tensor(val, dtype=torch.float32).flatten()
+            if n is not None and len(t) == 1:
+                t = t.expand(n).clone()
+            self.register_buffer(name, t)
+
+        _to_buffer(dose_per_angstrom, "dose_per_angstrom")
+        _to_buffer(coincidence_radius, "coincidence_radius")
+        _to_buffer(potential_scale, "potential_scale")
+
+    def _init_detector_mtf(self) -> None:
+        """Register the detector MTF buffer based on the model name."""
+        if self.detector_model == "k3_300kv":
+            self.register_buffer("detector_mtf", k3_300kv(self.nxy, self.pixel_size))
+        elif self.detector_model == "k3_200kv":
+            self.register_buffer("detector_mtf", k3_200kv(self.nxy, self.pixel_size))
+        elif self.detector_model == "perfect":
+            self.register_buffer(
+                "detector_mtf", perfect_detector(self.nxy, self.pixel_size)
+            )
+        else:
+            self.detector_mtf = None
+
+    def _apply_defocus_shift(self, shift_required: bool = True) -> None:
+        """
+        Shift ``dfu`` and ``dfv`` to account for the volume's Z extent.
+
+        The CTF is evaluated at the centre of the volume; without this shift the
+        defocus would be measured from the top face rather than the midplane.
+        Only applied when ``shift_required`` is True (i.e. for multislice — not
+        needed for projection or CTF-only models).
+        """
+        if shift_required:
+            shift = (self.nz * self.pixel_size) / 2
+            if hasattr(self, "dfu"):
+                self.dfu = self.dfu - shift
+            if hasattr(self, "dfv"):
+                self.dfv = self.dfv - shift
+
+    def _init_optics(self) -> None:
+        """Instantiate ``Aberration`` and ``Detector`` from the stored parameters."""
+        self.aberration = Aberration(
+            self.pad_nxy,
+            self.pixel_size,
+            self.energy,
+            aberration_model=self.aberration_model,
+            alpha=self.alpha,
+        )
+        self.detector = Detector(
+            self.pixel_size,
+            aberration_model=self.aberration_model,
+            noise_model=self.noise_model,
+            mtf=self.detector_mtf,
+            num_frames=self.num_frames,
+        )
+
+    def predict_step(self, batch: Any, batch_idx: int) -> torch.Tensor:
+        """Standard Lightning predict step."""
+        return self(batch)
+
+    def predict_epoch_end(self, outputs: list[torch.Tensor]) -> torch.Tensor | None:
+        """
+        Gather predictions from all GPUs at epoch end.
+
+        Parameters
+        ----------
+        outputs : list[torch.Tensor]
+            Per-batch predictions from this GPU.
+
+        Returns
+        -------
+        preds : torch.Tensor or None
+            Concatenated predictions from all ranks; None on non-zero ranks.
+        """
+        preds = torch.cat(outputs, dim=0)
+        preds_all = self.trainer.strategy.all_gather(preds)
+        if self.trainer.is_global_zero:
+            return preds_all.cpu()

@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from typing import Literal
 
+import lightning as L
 import numpy as np
 import torch
-import lightning as L
+
 from .progress import track
 
 from . import rotations
@@ -244,15 +245,12 @@ def poisson_disk_neighbors_3d(
             active.pop(idx)
 
     if seed == "origin":
-        # no candidates were found
         if len(pts) == 1:
             return torch.empty((0, 3))
-        else:
-            # don't include origin
-            pts = pts[1:]
-            return torch.stack(pts[:n_points] if n_points != torch.inf else pts)
+        pts = pts[1:]  # don't include origin
+        return torch.stack(pts if n_points == torch.inf else pts[:n_points])
     elif seed == "random":
-        return torch.stack(pts[:n_points] if n_points != torch.inf else pts)
+        return torch.stack(pts if n_points == torch.inf else pts[:n_points])
 
 
 def crowd_with_duplicates(
@@ -507,6 +505,10 @@ def filter_by_z_density(
     z_min, z_max = -z_length / 2, z_length / 2
     sigma = sigma_frac * z_length
 
+    if len(pts) == 0:
+        z_curve = torch.linspace(z_min, z_max, curve_points)
+        return pts, torch.zeros(curve_points)
+
     # compute z for each point
     z_pts = pts[:, 2]
 
@@ -665,6 +667,10 @@ class CrowdWithDuplicates(L.LightningModule):
                 coords, self.z_distribution = filter_by_z_density(
                     coords, self.max_distance_z
                 )
+        else:
+            raise ValueError(
+                f"Unknown method '{self.poisson_disc_method}'. Choose '2d' or '3d'."
+            )
         self.coords = coords
 
     def generate_affine_matrices(self) -> None:
@@ -698,7 +704,7 @@ class CrowdWithDuplicates(L.LightningModule):
                 range(0, self.N, self.chunk_size),
                 description="Rotating duplicates",
                 transient=True,
-                disable=not (self.progressbars),
+                disable=not self.progressbars,
             ):
                 end = min(start + self.chunk_size, self.N)
                 if self.move_to_cpu:
@@ -735,53 +741,46 @@ class CrowdWithDuplicates(L.LightningModule):
         )
         return micro
 
-    def forward(self) -> torch.Tensor | float:
+    def forward(self) -> torch.Tensor:
         """
         Full pipeline: generate coordinates, random rotations, rotate volumes,
         and insert them into a micrograph.
 
         Returns
         -------
-        torch.Tensor or float
-            The final micrograph containing all duplicates. Returns 0.0 if no candidates
-            were generated.
+        torch.Tensor
+            The final micrograph containing all duplicates, shape (nz_out, nxy_out, nxy_out).
+            All-zeros if no candidate positions were generated.
         """
         self.generate_coordinates()
         self.generate_affine_matrices()
-        # if no candidates, return 0
         if len(self.coords) == 0:
-            return 0.0
+            return torch.zeros(self.nz_out, self.nxy_out, self.nxy_out)
+        if self.chunk_size is None:
+            self.rotate_volumes()
+            micrograph = self.insert_volumes()
+            if self.move_to_cpu:
+                micrograph = micrograph.cpu()
         else:
-            if self.chunk_size is None:
-                self.rotate_volumes()
-                micrograph = self.insert_volumes()
+            micrograph = torch.zeros(self.nz_out, self.nxy_out, self.nxy_out)
+            for start in track(
+                range(0, self.N, self.chunk_size),
+                description="Rotating duplicates and insert into micrograph",
+                transient=True,
+                disable=not self.progressbars,
+            ):
+                end = min(start + self.chunk_size, self.N)
+                vols = rotations.rotate_volume(
+                    self.V,
+                    self.theta[start:end].to(self.V.device),
+                    padding_mode="zeros",
+                )
                 if self.move_to_cpu:
-                    micrograph = micrograph.cpu()
-            else:
-                # create micrograph
-                micrograph = torch.zeros(self.nz_out, self.nxy_out, self.nxy_out)
-                # rotate and insert in batches
-                for start in track(
-                    range(0, self.N, self.chunk_size),
-                    description="Rotating duplicates and insert into micrograph",
-                    transient=True,
-                    disable=not (self.progressbars),
-                ):
-                    # get batch indicies
-                    end = min(start + self.chunk_size, self.N)
-                    # rotate
-                    vols = rotations.rotate_volume(
-                        self.V,
-                        self.theta[start:end].to(self.V.device),
-                        padding_mode="zeros",
-                    )
-                    if self.move_to_cpu:
-                        vols = vols.cpu()
-                    # insert
-                    micrograph = insert_particles_into_micrograph(
-                        vols,
-                        self.coords[start:end],
-                        pixel_size=self.dx,
-                        micrograph=micrograph,
-                    )
-            return micrograph
+                    vols = vols.cpu()
+                micrograph = insert_particles_into_micrograph(
+                    vols,
+                    self.coords[start:end],
+                    pixel_size=self.dx,
+                    micrograph=micrograph,
+                )
+        return micrograph

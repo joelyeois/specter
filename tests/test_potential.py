@@ -24,20 +24,20 @@ _COORDS = torch.tensor(
 
 def _column_potential(dx: float, n: int) -> float:
     """
-    Build a potential volume and return the total column potential.
+    Build a potential volume and return the total volume integral of V.
 
-    The potential builder stores V in units of V·Å (projected potential per
-    slice), because the multislice formula uses exp(i*sigma*V[z]) without
-    any dz factor.  The physically conserved quantity is therefore:
+    The potential builder stores V in units of V (3D electrostatic potential).
+    The dz integration factor is applied in scattering.py. The physically
+    conserved quantity is therefore:
 
-        V.sum() * dx²   [V·Å · Å² = V·Å³]
+        V.sum() * dx³   [V · Å³]
 
-    i.e. the total projected-potential integrated over all XY columns.
+    i.e. the total potential integrated over the full 3D volume.
     """
-    V, _, _ = build_potential_volume_fftconvolve_3d(
+    V, _ = build_potential_volume_fftconvolve_3d(
         _ATOMIC_NUMBERS, _COORDS, n_xyz=n, dx=dx, disable_tqdm=True
     )
-    return (V.sum() * dx**2).item()
+    return (V.sum() * dx**3).item()
 
 
 @pytest.mark.parametrize(
@@ -50,13 +50,13 @@ def _column_potential(dx: float, n: int) -> float:
 )
 def test_potential_integral_pixel_size_invariance(dx1, n1, dx2, n2):
     """
-    Total column potential (V.sum() * dx²) should be approximately the same
+    Total volume integral (V.sum() * dx³) should be approximately the same
     when building from identical atomic coordinates at different pixel sizes,
     as long as the physical box is large enough to contain the particle.
 
-    This invariant follows from the multislice convention: V stores V·Å
-    (projected potential per slice), so V.sum() * dx² gives the total
-    projected-potential integrated over all XY columns.
+    This invariant follows from V storing the 3D electrostatic potential in
+    volts, so V.sum() * dx³ gives the total potential integrated over the
+    full volume.
     """
     col1 = _column_potential(dx1, n1)
     col2 = _column_potential(dx2, n2)

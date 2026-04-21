@@ -148,8 +148,7 @@ def build_potential_volume_fftconvolve_3d(
         pot = kirkland_atomic_potential_3d(int(elem), sR)
 
         if ssf != 1:
-            pot = avgpool3d(pot[None, None]) * dx
-            pot = pot.squeeze(0).squeeze(0)
+            pot = avgpool3d(pot[None, None]).squeeze(0).squeeze(0)
         potential_volume += fftconvolve(temp_vol, pot, mode="same")
     return potential_volume, sR
 
@@ -214,8 +213,7 @@ def build_potential_volume_fftconvolve_2d(
         pot = kirkland_atomic_potential_2d(int(elem), sR)
 
         if ssf != 1:
-            pot = avgpool2d(pot[None, None]) * dx
-            pot = pot.squeeze(0).squeeze(0)
+            pot = avgpool2d(pot[None, None]).squeeze(0).squeeze(0)
 
         temp_vol_b = temp_vol.unsqueeze(1)  # (nz, 1, ny, nx)
         pot_b = pot.unsqueeze(0).unsqueeze(0)  # (1, 1, ky, kx)
@@ -342,8 +340,7 @@ class PotentialBuilder(L.LightningModule):
                 )
 
             if self.ssf != 1:
-                pot = self.avgpool2d(pot[None, None]) * self.dx
-                pot = pot.squeeze(0).squeeze(0)
+                pot = self.avgpool2d(pot[None, None]).squeeze(0).squeeze(0)
 
             self.atomic_potentials_2d[i] = pot
 
@@ -395,8 +392,7 @@ class PotentialBuilder(L.LightningModule):
                 )
 
             if self.ssf != 1:
-                pot = self.avgpool3d(pot[None, None]) * self.dx
-                pot = pot.squeeze(0).squeeze(0)
+                pot = self.avgpool3d(pot[None, None]).squeeze(0).squeeze(0)
 
             self.atomic_potentials_3d[i] = pot
 

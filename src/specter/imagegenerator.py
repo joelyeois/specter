@@ -70,8 +70,9 @@ class ParticleGeneratorBase(BaseImager):
             )
 
         icemask = V.detach().clone()
-        icemask[icemask < 10] = 1
-        icemask[icemask >= 10] = 0
+        threshold = 0.05 * V.max()
+        icemask[icemask < threshold] = 1
+        icemask[icemask >= threshold] = 0
         V = V + ice * icemask
         if hasattr(self, "icemask"):
             self.icemask = icemask.detach().cpu()

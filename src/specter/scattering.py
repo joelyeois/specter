@@ -254,7 +254,7 @@ class Scattering(L.LightningModule):
         ):
             # transmission function
             # t = torch.exp(1j * self.sigma * complex_potential(V[:, i], alpha=self.alpha).to(self.device))
-            t = torch.exp(1j * self.sigma * V[:, i].to(self.device))
+            t = torch.exp(1j * self.sigma * self.pixel_size * V[:, i].to(self.device))
 
             # multiply with incident wave
             wv = t * exitwave
@@ -290,7 +290,7 @@ class Scattering(L.LightningModule):
         if self.flip_curvature:
             V = torch.flip(V, dims=(1,))
 
-        t = torch.exp(1j * self.sigma * V)  # (B x Z x X x Y)
+        t = torch.exp(1j * self.sigma * self.pixel_size * V)  # (B x Z x X x Y)
         exitwaves = ifft2(fft2(t) * F[None, ...])  # propagate each slice
         exitwave = torch.prod(exitwaves, 1)  # product along Z
         return exitwave  # (B x X x Y)
@@ -323,7 +323,7 @@ class Scattering(L.LightningModule):
             V = torch.flip(V, dims=(1,))
 
         V_f = fft2(V)
-        exitwave_f = self.sigma * V_f * F[None, ...]
+        exitwave_f = self.sigma * self.pixel_size * V_f * F[None, ...]
         exitwave = ifft2(exitwave_f)
         exitwave = torch.sum(exitwave, 1)  # sum along Z
         exitwave = 1 + 1j * exitwave
@@ -353,7 +353,7 @@ class Scattering(L.LightningModule):
         This is valid only for thin specimens where propagation effects are negligible.
         """
         V_sum = torch.sum(V, 1)
-        exitwave = torch.exp(1j * self.sigma * V_sum)
+        exitwave = torch.exp(1j * self.sigma * self.pixel_size * V_sum)
         return exitwave
 
     def ctf(self, V: torch.Tensor) -> torch.Tensor:
@@ -379,7 +379,7 @@ class Scattering(L.LightningModule):
         The factor of 2 accounts for the phase-contrast imaging relationship.
         CTF is applied separately in the aberration module.
         """
-        projection = 2 * self.sigma * torch.sum(V, 1)
+        projection = 2 * self.sigma * self.pixel_size * torch.sum(V, 1)
         return projection
 
     def forward(self, V: torch.Tensor) -> torch.Tensor:
@@ -621,7 +621,7 @@ class IterativeScattering(L.LightningModule):
                 slice_sample = slices_block[:, i % slice_batch_size]
 
             slice_complex = complex_potential(slice_sample, alpha=self.alpha)
-            t = torch.exp(1j * self.sigma * slice_complex)
+            t = torch.exp(1j * self.sigma * self.pixel_size * slice_complex)
             exitwave = ifft2(fft2(t * exitwave) * F * self.kmask)
         return exitwave
 
@@ -677,7 +677,7 @@ class IterativeScattering(L.LightningModule):
                 total_potential += slices_block[:, i % slice_batch_size]
 
         total_complex = complex_potential(total_potential, alpha=self.alpha)
-        exitwave = torch.exp(1j * self.sigma * total_complex)
+        exitwave = torch.exp(1j * self.sigma * self.pixel_size * total_complex)
         return exitwave
 
     def rytov(
@@ -741,7 +741,7 @@ class IterativeScattering(L.LightningModule):
             # Distance is nz_new - i
             F_i = self._get_propagator(float(nz_new - i))
             exitwave = exitwave * torch.exp(
-                ifft2(fft2(1j * self.sigma * slice_complex) * F_i)
+                ifft2(fft2(1j * self.sigma * self.pixel_size * slice_complex) * F_i)
             )
 
         return exitwave
@@ -806,7 +806,7 @@ class IterativeScattering(L.LightningModule):
             F_i = self._get_propagator(float(nz_new - i))
             total_scattered += ifft2(fft2(slice_complex) * F_i)
 
-        exitwave = 1 + 1j * self.sigma * total_scattered
+        exitwave = 1 + 1j * self.sigma * self.pixel_size * total_scattered
         return exitwave
 
     def ctf(
@@ -860,7 +860,7 @@ class IterativeScattering(L.LightningModule):
                     ).to(device)
                 total_potential += slices_block[:, i % slice_batch_size]
 
-        return 2 * self.sigma * total_potential
+        return 2 * self.sigma * self.pixel_size * total_potential
 
     def forward(
         self, V: torch.Tensor, pose: float | torch.Tensor, slice_batch_size: int = 1

@@ -32,6 +32,7 @@ class PDB:
         pdb_source: str,
         assembly: bool = True,
         savefolder: str = "../pdb-data/",
+        origin: tuple[float, float, float] | None = None,
     ) -> None:
         """
         Create a PDB object from either a PDB ID or a local file path.
@@ -46,6 +47,10 @@ class PDB:
             Default is True.
         savefolder : str, optional
             Folder to store downloaded PDB/mmCIF files. Default is '../pdb-data/'.
+        origin : tuple[float, float, float] or None, optional
+            Custom origin to subtract from coordinates. If None, coordinates
+            are centered on their geometric center. If a tuple, that point is
+            subtracted directly without auto-centering.
 
         Attributes
         ----------
@@ -58,7 +63,7 @@ class PDB:
         atomic_numbers : torch.Tensor
             Atomic numbers of all atoms in the structure, shape (N,).
         coordinates : torch.Tensor
-            Centered atomic coordinates, shape (N, 3).
+            Coordinates shifted by origin, shape (N, 3).
         max_diameter : float
             Maximum diameter of the structure based on convex hull.
         """
@@ -92,7 +97,12 @@ class PDB:
         )
 
         # center coordinates
-        self.coordinates = PDB.center_coordinates(self.coordinates)
+        if origin is None:
+            self.coordinates = PDB.center_coordinates(self.coordinates)
+        else:
+            self.coordinates = self.coordinates - torch.tensor(
+                origin, dtype=self.coordinates.dtype
+            )
 
         # estimate max diameter
         self.max_diameter = PDB.estimate_max_diameter(self.coordinates)

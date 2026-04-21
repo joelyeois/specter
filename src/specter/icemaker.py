@@ -774,7 +774,7 @@ class Icemaker(L.LightningModule):
                 "Choose 'kirkland', 'lobato', or 'shtyrov'."
             )
 
-        return avgpool3d(pot[None, None]).squeeze() * dx
+        return avgpool3d(pot[None, None]).squeeze()
 
     def generate_ice(
         self, batchsize: int = 1, reduce_fraction: float = 1.0
@@ -1252,7 +1252,7 @@ class NaiveIcemaker(L.LightningModule):
         pot = s1 + s2
 
         avgpool3d = torch.nn.AvgPool3d(4, stride=4)
-        return avgpool3d(pot[None, None]).squeeze() * self.dx
+        return avgpool3d(pot[None, None]).squeeze()
 
     def generate_ice(
         self, batchsize: int = 1, device: torch.device | str | None = None

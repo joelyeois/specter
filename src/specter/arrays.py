@@ -5,7 +5,7 @@ from typing import Sequence
 import torch
 import torch.nn.functional as F
 
-from .fft_tools import fft2, ifft2
+from .fft import fft2, ifft2
 
 
 def kgrid_1d(n: int, dx: float, device: str | torch.device = "cpu") -> torch.Tensor:

@@ -509,10 +509,10 @@ def main() -> None:
 
     import specter
     from specter import rotations
-    from specter.cryosparc_utils import create_particle_starfile
-    from specter.image_tools import normalize_particles
+    from specter.cryosparc import create_particle_starfile
+    from specter.image import normalize_particles
     from specter.imagegenerator import ImageGenerator
-    from specter.pdbtools import PDB
+    from specter.pdb import PDB
     from specter.potential import PotentialBuilder
     from specter.progress import track
 

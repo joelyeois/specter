@@ -11,7 +11,7 @@ import torch.nn.functional as F
 
 from .progress import TqdmProgress, track
 
-from .array_utils import (
+from .arrays import (
     radial_grid_2d,
     radial_grid_3d,
     soft_voxelize_coordinates,
@@ -25,7 +25,7 @@ from .atom import (
     lobato_atomic_potential_3d,
     shtyrov_atomic_potential_3d,
 )
-from .fft_tools import fftconvolve
+from .fft import fftconvolve
 
 
 def compute_supersampling_parameters(

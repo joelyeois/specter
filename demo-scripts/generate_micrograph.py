@@ -322,9 +322,9 @@ def main() -> None:
     import torch
 
     import specter
-    from specter.cryosparc_utils import create_micrograph_starfile
+    from specter.cryosparc import create_micrograph_starfile
     from specter.imagegenerator import MicrographGenerator
-    from specter.pdbtools import PDB
+    from specter.pdb import PDB
     from specter.potential import PotentialBuilder
     from specter.progress import track
 

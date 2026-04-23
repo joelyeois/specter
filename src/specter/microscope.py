@@ -7,7 +7,7 @@ import torch
 import torch.nn.functional as F
 import lightning as L
 
-from .fft_tools import fft2, ifft2
+from .fft import fft2, ifft2
 from .scattering import energy_to_wavelength
 from .progress import track
 

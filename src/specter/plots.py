@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import matplotlib.pyplot as plt
 import torch
-from .array_utils import radial_profile_2d
+from .arrays import radial_profile_2d
+from .coords import radial_distribution_function
 
 
 def plot3d(
@@ -157,155 +158,70 @@ def plot_slices(
     plt.show()
 
 
-def radial_distribution_function(
+def plot_rdf(
     coords: torch.Tensor,
     volume: float,
     dr: float = 0.5,
     r_max: float | None = None,
-    number_density: float = 0.03142228327508648,
+    number_density: float | None = None,
     chunk_size: int | None = None,
     approximate: bool = False,
-    n_samples: int = 1000000,
-    plot: bool = True,
+    n_samples: int = 1_000_000,
+    ax: plt.Axes | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """
-    Computes the radial distribution function (RDF) from atomic coordinates.
+    Compute and plot the radial distribution function g(r).
 
-    The RDF g(r) is defined as:
-
-        g(r) = (1 / (4 * pi * r^2 * rho * N)) *
-               < sum_i sum_{j != i} delta(r - |r_i - r_j|) >
-
-    where
-      - N is the number of particles
-      - rho = N / V is the number density
-      - r_i are the particle coordinates
-      - delta is the Dirac delta function
-      - <> indicates averaging
-
-    Intuitively, g(r) measures how the local density at distance r
-    compares to the average density of the system.
+    Delegates computation to :func:`specter.coords.radial_distribution_function`.
 
     Parameters
     ----------
     coords : torch.Tensor
-        Shape (N, 3) coordinates in Å.
+        Atom positions, shape (N, 3), in Å.
     volume : float
-        Simulation box volume in Å³.
+        System volume in Å³.
     dr : float, optional
-        Bin width in Å. Default = 0.5.
+        Bin width in Å. Default 0.5.
     r_max : float, optional
-        Maximum radius to compute. Default = cubic box length.
+        Maximum radius in Å. Defaults to cube-root of ``volume``.
     number_density : float, optional
-        Number density in [num / Å³].
-    chunk_size : int or None
-        If None, use torch.pdist (fast, exact).
-        If int, compute in chunks (exact, lower memory).
-    approximate : bool
-        If True, approximate RDF by random sampling O(N).
-    n_samples : int
-        Number of random pairs in approximate mode.
-    plot : bool
-        If True, plots g(r).
+        Override number density (particles / Å³). If ``None``, computed
+        from ``len(coords) / volume``.
+    chunk_size : int or None, optional
+        Row block size for chunked exact mode. If ``None``, uses
+        ``torch.pdist`` (full O(N²)).
+    approximate : bool, optional
+        Use random-pair-sampling approximation. Default False.
+    n_samples : int, optional
+        Pairs drawn in approximate mode. Default 1 000 000.
+    ax : matplotlib.axes.Axes, optional
+        Axes to plot into. If ``None``, uses the current axes.
 
     Returns
     -------
     r : torch.Tensor
-        Bin centers.
+        Bin-centre radii in Å.
     g_r : torch.Tensor
         Radial distribution function values.
     """
-
-    device = coords.device
-    N = coords.shape[0]
-    if r_max is None:
-        r_max = volume ** (1 / 3)  # cubic box length
-
-    # bins and histogram container
-    bins = torch.arange(0, r_max + dr, dr, device=device)
-    hist = torch.zeros(len(bins) - 1, device=device)
-
-    # ------------------------
-    # 1. Approximate mode
-    # ------------------------
-    if approximate:
-        total_unordered = N * (N - 1) // 2
-
-        # draw n_samples ordered pairs but guaranteed i != j
-        # efficient trick: draw j from [0..N-2] and bump up where j >= i
-        i = torch.randint(0, N, (n_samples,), device=device)
-        j = torch.randint(0, N - 1, (n_samples,), device=device)
-        j = j + (j >= i).to(dtype=j.dtype)  # now j != i for all entries
-
-        # distances for sampled ordered pairs
-        dists = torch.norm(coords[i] - coords[j], dim=1)
-
-        # bin sampled distances
-        idx = torch.bucketize(dists, bins) - 1
-        idx = idx[(idx >= 0) & (idx < hist.numel())]
-        hist.index_add_(0, idx, torch.ones_like(idx, dtype=hist.dtype))
-
-        # scale histogram to estimate counts over all unordered pairs
-        S_eff = dists.numel()  # actual sampled ordered pairs
-        if S_eff > 0:
-            hist *= total_unordered / S_eff
-
-    # ------------------------
-    # 2. Exact mode: pdist
-    # ------------------------
-    elif chunk_size is None:
-        dists = torch.pdist(coords)  # (N*(N-1)/2,)
-        idx = torch.bucketize(dists, bins) - 1
-        idx = idx[(idx >= 0) & (idx < hist.numel())]
-        hist.index_add_(0, idx, torch.ones_like(idx, dtype=hist.dtype))
-
-    # ------------------------
-    # 3. Exact mode: chunked cdist
-    # ------------------------
-    else:
-        for i in range(0, N, chunk_size):
-            ci = coords[i : i + chunk_size]  # (m, 3)
-            cj = coords[i:]  # (N-i, 3)
-            m = ci.shape[0]
-            if m == 0:
-                continue
-
-            D = torch.cdist(ci, cj)  # (m, N-i)
-
-            # split into in-block vs tail
-            D_block = D[:, :m]
-            D_tail = D[:, m:]
-
-            # strictly upper-triangle of block
-            if m > 1:
-                tri = torch.triu(
-                    torch.ones((m, m), dtype=torch.bool, device=device), diagonal=1
-                )
-                d_block = D_block[tri]
-                dists = torch.cat([d_block, D_tail.reshape(-1)])
-            else:
-                dists = D_tail.reshape(-1)
-
-            # binning
-            idx = torch.bucketize(dists, bins) - 1
-            idx = idx[(idx >= 0) & (idx < hist.numel())]
-            hist.index_add_(0, idx, torch.ones_like(idx, dtype=hist.dtype))
-
-    # ------------------------
-    # Normalize RDF
-    # ------------------------
-    r = bins[:-1] + dr / 2
-    shell_volume = 4 * torch.pi * r**2 * dr
-    g_r = hist / (number_density * N * shell_volume)
-
-    if plot:
-        plt.plot(r.cpu().numpy(), g_r.cpu().numpy())
-        plt.xlabel("r (Å)")
-        plt.ylabel("g(r)")
-        plt.title("Radial Distribution Function")
-        plt.xlim([0, r_max])
-        plt.show()
-
+    r, g_r = radial_distribution_function(
+        coords,
+        volume=volume,
+        dr=dr,
+        r_max=r_max,
+        number_density=number_density,
+        chunk_size=chunk_size,
+        approximate=approximate,
+        n_samples=n_samples,
+    )
+    if ax is None:
+        ax = plt.gca()
+    ax.plot(r.cpu().numpy(), g_r.cpu().numpy())
+    ax.set_xlabel("r (Å)")
+    ax.set_ylabel("g(r)")
+    ax.set_title("Radial Distribution Function")
+    if r_max is not None:
+        ax.set_xlim([0, r_max])
     return r, g_r
 
 

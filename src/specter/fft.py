@@ -367,8 +367,8 @@ def fourier_shell_correlation(
     fsc : torch.Tensor
         FSC curve, one value per Fourier shell.
     """
-    # Lazy import to avoid circular dependency (array_utils imports fft_tools)
-    from .array_utils import radial_profile_3d
+    # Lazy import to avoid circular dependency (arrays imports fft)
+    from .arrays import radial_profile_3d
 
     n = vol1.shape[0]
     device = vol1.device

@@ -5,8 +5,8 @@ import torch
 import lightning as L
 from .progress import track
 
-from .array_utils import disk2d
-from .fft_tools import fft2, ifft2
+from .arrays import disk2d
+from .fft import fft2, ifft2
 from .rotations import VolumeRotator, build_affine_matrix
 
 rest_mass_energy = 511.0e3  # [eV]

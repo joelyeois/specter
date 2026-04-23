@@ -7,8 +7,8 @@ import torch
 from Bio.PDB.MMCIF2Dict import MMCIF2Dict
 from torch.special import modified_bessel_k0, modified_bessel_k1
 
-from ..array_utils import real_to_kgrid_3d
-from ..fft_tools import fftn
+from ..arrays import real_to_kgrid_3d
+from ..fft import fftn
 
 
 @lru_cache(maxsize=1)

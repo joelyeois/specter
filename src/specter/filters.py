@@ -4,7 +4,7 @@ import torch
 import numpy as np
 from skimage.filters import butterworth
 
-from .fft_tools import fftn, ifftn
+from .fft import fftn, ifftn
 
 
 def butter(images: torch.Tensor | np.ndarray) -> torch.Tensor | np.ndarray:

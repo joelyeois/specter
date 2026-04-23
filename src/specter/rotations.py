@@ -5,7 +5,7 @@ import lightning as L
 import torch.nn.functional as F
 from typing import Literal, Sequence
 
-from .fft_tools import fft3, ifft3
+from .fft import fft3, ifft3
 
 
 class Rotation:

@@ -438,13 +438,13 @@ def main() -> None:
     import torch
 
     import specter
-    from specter.cryosparc_utils import (
+    from specter.cryosparc import (
         create_particle_starfile,
         extract_parameters_from_csfile,
     )
-    from specter.image_tools import normalize_particles
+    from specter.image import normalize_particles
     from specter.imagegenerator import ImageGenerator
-    from specter.pdbtools import PDB
+    from specter.pdb import PDB
     from specter.potential import PotentialBuilder
     from specter.progress import track
 

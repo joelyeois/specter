@@ -72,6 +72,13 @@ def test_iterative_scattering_batch_size(dummy_volume):
 
 
 @pytest.fixture
+def dummy_volume() -> torch.Tensor:
+    vol = torch.zeros(1, 32, 64, 64)
+    vol[0, 12:20, 24:40, 24:40] = 1.0
+    return vol
+
+
+@pytest.fixture
 def padded_volume():
     """Single 3D volume (Z, Y, X) with non-zero content only in the central 16^3 block.
 

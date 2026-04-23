@@ -20,8 +20,8 @@ from torch.optim.lr_scheduler import (
     LRScheduler,
 )
 
-from .array_utils import compute_nps_2d
-from .fft_tools import fft3, ifft3
+from .arrays import compute_nps_2d
+from .fft import fft3, ifft3
 from .imagegenerator import ImageGenerator
 from .symmetries import apply_symmetry, get_rotation_matrices
 
@@ -791,7 +791,7 @@ def run_halfsets(
         1-D integer tensor of length ``N`` with values ``0`` (half A) or
         ``1`` (half B), e.g. ``[0, 0, 1, 0, 1, ...]``.  Matches the
         ``alignments3D/split`` field returned by
-        :func:`~specter.cryosparc_utils.extract_parameters_from_csfile`.
+        :func:`~specter.cryosparc.extract_parameters_from_csfile`.
         Defaults to alternating even/odd assignment.
     batch_size : int
         Dataloader batch size for each half.

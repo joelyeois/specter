@@ -27,3 +27,6 @@ dev-notebooks/
 
 # Other system files
 .DS_Store
+
+# Git worktrees
+.worktrees/

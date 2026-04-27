@@ -246,6 +246,12 @@ class PotentialBuilder(L.LightningModule):
         Convolution backend: 'fftconvolve' or 'conv3d'. Default is 'fftconvolve'.
     mmcif_filepath : str, optional
         Path to mmCIF file for Shtyrov parameterization. Default is None.
+    periodic : bool, optional
+        If True, wrap out-of-bounds voxel indices with periodic boundary
+        conditions during soft voxelization. Use when coordinates were
+        generated with periodic BCs (e.g. from GradientSKIcemaker). Only
+        applies to the '3d' method; raises ValueError if used with '2d'.
+        Default is False.
 
     Attributes
     ----------
@@ -264,6 +270,7 @@ class PotentialBuilder(L.LightningModule):
         parameterization: str = "kirkland",
         conv_backend: str = "fftconvolve",
         mmcif_filepath: str | None = None,
+        periodic: bool = False,
     ):
         super().__init__()
 
@@ -275,6 +282,7 @@ class PotentialBuilder(L.LightningModule):
         self.progressbars = progressbars
         self.conv_backend = conv_backend
         self.mmcif_filepath = mmcif_filepath
+        self.periodic = periodic
 
         self.ssn, self.ssdx, self.ssf = compute_supersampling_parameters(dx)
         sR_2d = radial_grid_2d(self.ssn, self.ssdx, convention="torch")
@@ -456,6 +464,11 @@ class PotentialBuilder(L.LightningModule):
                 coords_elem = coordinates[:, atomic_indices, :]  # (B, Nelem, 3)
 
                 if method == "2d":
+                    if self.periodic:
+                        raise ValueError(
+                            "periodic=True is not supported with method='2d'. "
+                            "Use method='3d'."
+                        )
                     temp_vol = soft_voxelize_xy_coordinates(
                         coords_elem,
                         grid_shape=(self.nz, self.ny, self.nx),
@@ -473,6 +486,7 @@ class PotentialBuilder(L.LightningModule):
                         coords_elem,
                         grid_shape=(self.nz, self.ny, self.nx),
                         voxel_size=self.dx,
+                        periodic=self.periodic,
                     )
                     if conv_backend == "fftconvolve":
                         for b in range(B):

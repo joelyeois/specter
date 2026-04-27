@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import os
-import time
 import warnings
-from typing import Any, Literal, Optional, Sequence
+from typing import Any, Optional, Sequence
 
 import lightning as L
 import numpy as np
@@ -11,20 +10,19 @@ import torch
 import torch.nn.functional as F
 from torchinterp1d import interp1d
 
-from .progress import track
+from .progress import ProgressManager, track
 
 from . import potential, rotations
 from .arrays import (
-    grid_3d,
     radial_grid_3d,
     radial_profile_3d,
     real_to_kgrid_3d,
     soft_voxelize_coordinates,
+    tile_volume_from_blocks,
 )
 from .atom import kirkland_atomic_potential_3d, lobato_atomic_potential_3d
 from .fft import fft3, fftconvolve
 from .coords import radial_distribution_function
-from specter.pdb import PDB
 
 avogadro = 6.02214076e23
 density_of_amorphous_ice = 0.94  # [g/cm3]
@@ -307,170 +305,6 @@ class Icemaker(L.LightningModule):
         self.interpolate_mdsim_f_kernel()
 
         self.register_buffer("ice_kernel", self.create_ice_kernel())
-
-    def get_mdsim(
-        self,
-        filepath: str,
-        trim_size: int = 100,
-        startframe: int = 10,
-        endframe: int = 101,
-    ) -> None:
-        """
-        Load MD simulation dump and convert atomic coordinates into voxel grid.
-
-        Parameters
-        ----------
-        filepath : str
-            Path to the MD simulation dump file.
-        trim_size : int, optional
-            Maximum half-size of the cube to retain around particle center. Default is 100.
-        startframe : int, optional
-            Frame index to start processing. Default is 10.
-        endframe : int, optional
-            Frame index to stop processing. Default is 101.
-        """
-        self.get_mdsim_file(filepath)
-        mdsim_ice_deltas = []
-
-        x, y, z, X, Y, Z = grid_3d(self.mdsim_n, self.mdsim_dx)
-
-        self.mdsim_ice_coordinates = []
-        for frame in track(
-            self.mdsim_frame_indexes[startframe:endframe],
-            disable=not self.progressbars,
-        ):
-            coordstart = frame + 9
-            coords = self.get_coordinates_from_frame(coordstart)
-            centered_coords = PDB.center_coordinates(coords)
-            centered_coords = self.trim_coordinates(
-                centered_coords, trim_size=trim_size
-            )
-
-            # mdsim_ice_delta = torch.zeros(self.mdsim_n, self.mdsim_n, self.mdsim_n)
-            # for cc in centered_coords:
-            #     xi, yi, zi = potential.nearest_index(x, y, z, cc[0], cc[1], cc[2])
-            #     mdsim_ice_delta[zi, yi, xi] = 1
-
-            # populate elemental volume with delta function atoms
-            # soft_voxelize_atoms is differentiable w.r.t. coordinates.
-            mdsim_ice_delta = soft_voxelize_coordinates(
-                centered_coords.reshape(-1, 3),
-                grid_shape=(self.mdsim_n, self.mdsim_n, self.mdsim_n),
-                voxel_size=self.mdsim_dx,
-            )
-
-            mdsim_ice_deltas.append(mdsim_ice_delta)
-            self.mdsim_ice_coordinates.append(centered_coords)
-        self.mdsim_ice_deltas = torch.stack(mdsim_ice_deltas)
-
-    def get_mdsim_file(self, filepath: str) -> None:
-        """
-        Read MD simulation dump file into memory and find timestep indices.
-
-        Parameters
-        ----------
-        filepath : str
-            Path to the MD simulation dump file.
-        """
-        with open(filepath) as f:
-            self.lines = f.readlines()
-
-        self.mdsim_frame_indexes = [
-            i for i, x in track(enumerate(self.lines)) if x == "ITEM: TIMESTEP\n"
-        ]
-
-    def get_coordinates_from_frame(
-        self,
-        start_line_number: int,
-        lines: list[str] | None = None,
-        no_atoms: int = 128000,
-    ) -> torch.Tensor:
-        """
-        Parse atom coordinates from a given frame in MD dump.
-
-        Parameters
-        ----------
-        start_line_number : int
-            Line number where atom coordinates start.
-        lines : list of str, optional
-            Pre-loaded file lines. If None, uses `self.lines`. Default is None.
-        no_atoms : int, optional
-            Number of atoms to read. Default is 128000.
-
-        Returns
-        -------
-        coords : torch.Tensor
-            Atomic coordinates (x, y, z) for the frame. Shape (no_atoms, 3).
-        """
-        if lines is None:
-            lines = self.lines
-
-        coords = torch.zeros(no_atoms, 3)
-        for i, s in enumerate(lines[start_line_number : start_line_number + no_atoms]):
-            id, typ, x, y, z = s.split()
-            coords[i, 0] = float(x)
-            coords[i, 1] = float(y)
-            coords[i, 2] = float(z)
-        return coords
-
-    def trim_coordinates(
-        self, coords: torch.Tensor, trim_size: float = 100
-    ) -> torch.Tensor:
-        """
-        Trim coordinates to a cube of given size centered at origin.
-
-        Parameters
-        ----------
-        coords : torch.Tensor
-            Coordinates to trim. Shape (N, 3).
-        trim_size : float, optional
-            Side length of the cube to retain in Å. Default is 100.
-
-        Returns
-        -------
-        trimmed_coords : torch.Tensor
-            Coordinates within the cube. Shape (M, 3).
-        """
-        trimmed_coords = []
-        for co in coords:
-            if not (
-                torch.abs(co[0]) > trim_size // 2
-                or torch.abs(co[1]) > trim_size // 2
-                or torch.abs(co[2]) > trim_size // 2
-            ):
-                trimmed_coords.append(co)
-        trimmed_coords = torch.stack(trimmed_coords)
-        return trimmed_coords
-
-    def get_mdsim_averaged_f_kernel(
-        self, filepath: str, source: Literal["dump", "torch"] = "torch"
-    ) -> None:
-        """
-        Compute or load the 3D Fourier amplitude of the ice volume.
-
-        Parameters
-        ----------
-        filepath : str
-            Path to load precomputed Fourier amplitude tensor from, or MD dump path.
-        source : str, optional
-            - 'dump': Compute FFT from MD simulation dump.
-            - 'torch': Load precomputed tensor from file.
-            Default is 'torch'.
-        """
-        if source == "dump":
-            self.get_mdsim(filepath, trim_size=100)
-            self.mdsim_ice_deltas_f = []
-            for mdsim_ice_delta in track(
-                self.mdsim_ice_deltas, disable=not self.progressbars
-            ):
-                self.mdsim_ice_deltas_f.append(fft3(mdsim_ice_delta))
-            self.mdsim_ice_deltas_f = torch.stack(self.mdsim_ice_deltas_f)
-            self.mdsim_ice_deltas_f = torch.mean(
-                torch.abs(self.mdsim_ice_deltas_f), dim=0
-            )
-
-        elif source == "torch":
-            self.mdsim_ice_deltas_f = torch.load(filepath).to(self.device)
 
     def get_mdsim_f_radial_avg(self, saved_data_path: str | None = None) -> None:
         """
@@ -912,7 +746,7 @@ class Icemaker(L.LightningModule):
 
         # assemble into big ice
         print("Assembling ice deltas into large volume.")
-        big_ice = assemble_volume_randomized(icedeltas, target_shape)
+        big_ice = tile_volume_from_blocks(icedeltas, target_shape)
 
         if bin_factor > 1:
             pool_scale = bin_factor**3
@@ -1066,8 +900,7 @@ class Icemaker(L.LightningModule):
             )
 
         # 5) randomized assembly into requested binned shape
-        big_ice = assemble_volume_randomized(convolved, target_shape)
-        return big_ice[:B, : target_shape[1], : target_shape[2], : target_shape[3]]
+        return tile_volume_from_blocks(convolved, target_shape)
 
     def generate_big_ice_interpolate(
         self, shape: Sequence[int], n_blocks: int = 8, algorithm_dx: float = 0.5
@@ -1151,8 +984,7 @@ class Icemaker(L.LightningModule):
         )  # (n_blocks, interpolated_block_size, interpolated_block_size, interpolated_block_size)
 
         # 5) randomized assembly into requested shape
-        big_ice = assemble_volume_randomized(interpolated_blocks, target_shape)
-        return big_ice[:, : target_shape[1], : target_shape[2], : target_shape[3]]
+        return tile_volume_from_blocks(interpolated_blocks, target_shape)
 
 
 def _wrap_coords(x: torch.Tensor, L: float) -> torch.Tensor:
@@ -1191,6 +1023,8 @@ class MCMCIcemaker:
         Histogram bin width for g(r) in Å.
     device : str or torch.device
         ``"cpu"`` for cell-list sequential path; ``"cuda"`` for GPU path.
+    progressbars : bool, optional
+        Whether to show progress bars. Default is True.
     """
 
     def __init__(
@@ -1202,11 +1036,13 @@ class MCMCIcemaker:
         r_max: Optional[float] = None,
         dr: float = 0.1,
         device: str | torch.device = "cpu",
+        progressbars: bool = True,
     ) -> None:
         self.n = n
         self.dx = dx
         self.nz = nz if nz is not None else n
         self.box_size = n * dx  # cubic box (MCMC assumes isotropy)
+        self.progressbars = progressbars
         if r_max is None:
             r_max = min(self.box_size / 2 - 0.1, 14.0)
         assert (
@@ -1432,18 +1268,12 @@ class MCMCIcemaker:
     # Initialisation
     # ------------------------------------------------------------------
 
-    def init_random(self, seed: int = 42) -> None:
+    def init_random(self) -> None:
         """
         Initialise via Random Sequential Addition with hard-core exclusion.
 
         Uses a cell list for O(N) placement with ``min_distance`` exclusion.
-
-        Parameters
-        ----------
-        seed : int
-            Random seed.
         """
-        rng = np.random.default_rng(seed)
         N = self.n_molecules
         L = self.box_size
         md = self.min_distance
@@ -1462,7 +1292,7 @@ class MCMCIcemaker:
         max_attempts = N * 200
         attempts = 0
         while placed_count < N and attempts < max_attempts:
-            r = rng.random(3).astype(np.float32) * L
+            r = np.random.random(3).astype(np.float32) * L
             c = _cell(r)
             ok = True
             for ddx in (-1, 0, 1):
@@ -1713,77 +1543,95 @@ class MCMCIcemaker:
             self._build_cell_list()
             pos_np = self.positions.cpu().numpy()
 
-        for sweep in range(n_sweeps):
-            T = temps[sweep]
+        _manager = ProgressManager()
+        _pbar, _pbar_pos = _manager.get_pbar(
+            range(n_sweeps),
+            desc="MCMC sweeps",
+            disable=not self.progressbars,
+            transient=True,
+        )
+        try:
+            for sweep in _pbar:
+                T = temps[sweep]
 
-            if use_gpu:
-                n_accepted, n_hard_ok, E_current = self._parallel_gpu_sweep(
-                    T, step_size, chunk_size, n_subgroups
-                )
-                mc_rate = n_accepted / n_hard_ok if n_hard_ok > 0 else 0.0
-                accept_rate = n_accepted / N
-            else:
-                n_accepted = 0
-                n_mc_trials = 0
-                n_mc_accepted = 0
-                j_all = torch.randint(0, N, (N,)).tolist()
-                delta_all = (step_size * (2 * torch.rand(N, 3) - 1)).numpy()
-                u_all = np.random.rand(N)
+                if use_gpu:
+                    n_accepted, n_hard_ok, E_current = self._parallel_gpu_sweep(
+                        T, step_size, chunk_size, n_subgroups
+                    )
+                    mc_rate = n_accepted / n_hard_ok if n_hard_ok > 0 else 0.0
+                    accept_rate = n_accepted / N
+                else:
+                    n_accepted = 0
+                    n_mc_trials = 0
+                    n_mc_accepted = 0
+                    j_all = torch.randint(0, N, (N,)).tolist()
+                    delta_all = (step_size * (2 * torch.rand(N, 3) - 1)).numpy()
+                    u_all = np.random.rand(N)
 
-                for i in range(N):
-                    j = j_all[i]
-                    r_old_np = pos_np[j].copy()
-                    r_new_np = (r_old_np + delta_all[i]) % self.box_size
+                    for i in range(N):
+                        j = j_all[i]
+                        r_old_np = pos_np[j].copy()
+                        r_new_np = (r_old_np + delta_all[i]) % self.box_size
 
-                    nbr_idx = self._cell_neighbors(r_new_np, j)
-                    if len(nbr_idx) == 0:
+                        nbr_idx = self._cell_neighbors(r_new_np, j)
+                        if len(nbr_idx) == 0:
+                            n_mc_trials += 1
+                            continue
+
+                        nbr_pos = self.positions[nbr_idx]
+                        d_new_vec = nbr_pos - torch.from_numpy(r_new_np)
+                        d_new_vec -= self.box_size * torch.round(
+                            d_new_vec / self.box_size
+                        )
+                        d_new = torch.norm(d_new_vec, dim=1)
+                        if d_new.min().item() < self.min_distance:
+                            continue
+
                         n_mc_trials += 1
-                        continue
+                        nbr_old_idx = self._cell_neighbors(r_old_np, j)
+                        nbr_old_pos = self.positions[nbr_old_idx]
+                        d_old_vec = nbr_old_pos - torch.from_numpy(r_old_np)
+                        d_old_vec -= self.box_size * torch.round(
+                            d_old_vec / self.box_size
+                        )
+                        d_old = torch.norm(d_old_vec, dim=1)
 
-                    nbr_pos = self.positions[nbr_idx]
-                    d_new_vec = nbr_pos - torch.from_numpy(r_new_np)
-                    d_new_vec -= self.box_size * torch.round(d_new_vec / self.box_size)
-                    d_new = torch.norm(d_new_vec, dim=1)
-                    if d_new.min().item() < self.min_distance:
-                        continue
+                        h_add = self._hist_from_dists(d_new)
+                        h_rem = self._hist_from_dists(d_old)
+                        delta_hist = 2.0 * (h_add - h_rem)
+                        gr_proposed = (self.gr_hist + delta_hist) / norm.cpu()
+                        E_proposed = float(
+                            torch.mean((gr_proposed - self.gr_target) ** 2)
+                        )
+                        delta_E = E_proposed - E_current
 
-                    n_mc_trials += 1
-                    nbr_old_idx = self._cell_neighbors(r_old_np, j)
-                    nbr_old_pos = self.positions[nbr_old_idx]
-                    d_old_vec = nbr_old_pos - torch.from_numpy(r_old_np)
-                    d_old_vec -= self.box_size * torch.round(d_old_vec / self.box_size)
-                    d_old = torch.norm(d_old_vec, dim=1)
+                        if delta_E < 0 or (T > 0 and u_all[i] < np.exp(-delta_E / T)):
+                            self.positions[j] = torch.from_numpy(r_new_np)
+                            pos_np[j] = r_new_np
+                            self.gr_hist = self.gr_hist + delta_hist
+                            E_current = E_proposed
+                            n_accepted += 1
+                            n_mc_accepted += 1
+                            self._cell_move(j, r_new_np)
 
-                    h_add = self._hist_from_dists(d_new)
-                    h_rem = self._hist_from_dists(d_old)
-                    delta_hist = 2.0 * (h_add - h_rem)
-                    gr_proposed = (self.gr_hist + delta_hist) / norm.cpu()
-                    E_proposed = float(torch.mean((gr_proposed - self.gr_target) ** 2))
-                    delta_E = E_proposed - E_current
+                    mc_rate = n_mc_accepted / n_mc_trials if n_mc_trials > 0 else 0.0
+                    accept_rate = n_accepted / N
 
-                    if delta_E < 0 or (T > 0 and u_all[i] < np.exp(-delta_E / T)):
-                        self.positions[j] = torch.from_numpy(r_new_np)
-                        pos_np[j] = r_new_np
-                        self.gr_hist = self.gr_hist + delta_hist
-                        E_current = E_proposed
-                        n_accepted += 1
-                        n_mc_accepted += 1
-                        self._cell_move(j, r_new_np)
-
-                mc_rate = n_mc_accepted / n_mc_trials if n_mc_trials > 0 else 0.0
-                accept_rate = n_accepted / N
-
-            if sweep % record_every == 0:
-                gr_now = (self.gr_hist / norm).cpu().clone()
-                history["sweep"].append(sweep)
-                history["energy"].append(E_current)
-                history["acceptance"].append(accept_rate)
-                history["acceptance_mc"].append(mc_rate)
-                history["gr"].append(gr_now)
-                print(
-                    f"  sweep {sweep:4d}/{n_sweeps}  E={E_current:.5f}  "
-                    f"accept={accept_rate:.2f}  mc_accept={mc_rate:.2f}  T={T:.2e}"
-                )
+                if sweep % record_every == 0:
+                    gr_now = (self.gr_hist / norm).cpu().clone()
+                    history["sweep"].append(sweep)
+                    history["energy"].append(E_current)
+                    history["acceptance"].append(accept_rate)
+                    history["acceptance_mc"].append(mc_rate)
+                    history["gr"].append(gr_now)
+                    _pbar.set_postfix(
+                        E=f"{E_current:.5f}",
+                        accept=f"{accept_rate:.2f}",
+                        T=f"{T:.2e}",
+                    )
+        finally:
+            _pbar.close()
+            _manager.release(_pbar_pos)
 
         self.positions = self.positions.cpu()
         self.gr_hist = self.gr_hist.cpu()
@@ -1813,7 +1661,6 @@ class MCMCIcemaker:
         batchsize: int = 1,
         n_sweeps: int = 200,
         step_size: float = 0.5,
-        seed: int = 0,
     ) -> torch.Tensor:
         """
         Run ``batchsize`` independent MCMC chains and return voxelized densities.
@@ -1828,8 +1675,6 @@ class MCMCIcemaker:
             MCMC sweeps per volume.
         step_size : float
             Displacement half-width in Å.
-        seed : int
-            Base random seed; each chain uses ``seed + i``.
 
         Returns
         -------
@@ -1840,11 +1685,47 @@ class MCMCIcemaker:
             self.gr_target is not None
         ), "Call set_target_gr_from_md() before generate_ice()"
         results = []
-        for i in range(batchsize):
-            self.init_random(seed=seed + i)
+        for i in track(
+            range(batchsize),
+            description="Generating ice volumes",
+            disable=not self.progressbars,
+            transient=True,
+        ):
+            self.init_random()
             self.run(n_sweeps=n_sweeps, step_size=step_size)
             results.append(self.voxelize())
         return torch.stack(results)
+
+    def generate_big_ice(
+        self,
+        target_shape: tuple[int, int, int, int],
+        num_unique: int = 8,
+        n_sweeps: int = 200,
+        step_size: float = 0.5,
+    ) -> torch.Tensor:
+        """
+        Generate a large ice volume by tiling unique MCMC blocks.
+
+        Parameters
+        ----------
+        target_shape : tuple of int
+            Output shape ``(B, nz, ny, nx)``.
+        num_unique : int, optional
+            Number of unique ice blocks to generate. Default is 8.
+        n_sweeps : int, optional
+            MCMC sweeps per block. Default is 200.
+        step_size : float, optional
+            Displacement half-width in Å. Default is 0.5.
+
+        Returns
+        -------
+        big_ice : torch.Tensor
+            Tiled ice volume of shape ``target_shape``.
+        """
+        cubes = self.generate_ice(
+            batchsize=num_unique, n_sweeps=n_sweeps, step_size=step_size
+        )
+        return tile_volume_from_blocks(cubes, target_shape)
 
 
 class GradientSKIcemaker:
@@ -1872,6 +1753,8 @@ class GradientSKIcemaker:
         Hard-core exclusion radius in Å used only during RSA initialisation.
     device : str or torch.device
         Computation device.
+    progressbars : bool, optional
+        Whether to show progress bars. Default is True.
     """
 
     def __init__(
@@ -1881,9 +1764,11 @@ class GradientSKIcemaker:
         nz: Optional[int] = None,
         min_distance: float = 2.0,
         device: str | torch.device = "cpu",
+        progressbars: bool = True,
     ) -> None:
         self.device = torch.device(device)
         self.min_distance = min_distance
+        self.progressbars = progressbars
 
         _im = Icemaker(n=n, dx=dx, nz=nz)
         self.n = _im.n
@@ -1922,39 +1807,46 @@ class GradientSKIcemaker:
             self.device
         )
 
+        # Repulsion kernel in FFT convention (r=0 at [0,0,0]).
+        # rep_kernel[i,j,k] = 1 if the wrapped displacement (i,j,k) is within
+        # min_distance voxels of the origin, 0 otherwise.  Self-term excluded.
+        # Used for O(N log N) pair exclusion in _sk_loss.
+        r_min_vox = self.min_distance / self.dx
+        zz = torch.arange(self.nz, dtype=torch.float32)
+        yy = torch.arange(self.n, dtype=torch.float32)
+        xx = torch.arange(self.n, dtype=torch.float32)
+        zz = torch.where(zz < self.nz // 2, zz, zz - self.nz)
+        yy = torch.where(yy < self.n // 2, yy, yy - self.n)
+        xx = torch.where(xx < self.n // 2, xx, xx - self.n)
+        ZZ, YY, XX = torch.meshgrid(zz, yy, xx, indexing="ij")
+        R_ker = torch.sqrt(ZZ**2 + YY**2 + XX**2)
+        rep_kernel = (R_ker < r_min_vox).float()
+        rep_kernel[0, 0, 0] = 0.0  # exclude self-contribution
+        self._rep_kernel_rfft: torch.Tensor = torch.fft.rfftn(rep_kernel).to(
+            self.device
+        )
+
         self.positions: Optional[torch.Tensor] = None
 
     # ------------------------------------------------------------------
     # Initialisation
     # ------------------------------------------------------------------
 
-    def init_random(self, seed: int = 42) -> None:
+    def init_random(self) -> None:
         """
         Initialise from uniform random positions (no exclusion).
-
-        Parameters
-        ----------
-        seed : int
-            Random seed.
         """
-        gen = torch.Generator()
-        gen.manual_seed(seed)
-        pos = torch.rand(self.n_molecules, 3, generator=gen)
+        pos = torch.rand(self.n_molecules, 3)
         pos[:, 0] = (pos[:, 0] - 0.5) * self.box_x
         pos[:, 1] = (pos[:, 1] - 0.5) * self.box_y
         pos[:, 2] = (pos[:, 2] - 0.5) * self.box_z
         self.positions = pos
 
-    def init_rsa(self, seed: int = 42) -> None:
+    def init_rsa(self) -> None:
         """
         Initialise via RSA with hard-core exclusion.
 
         Delegates to :class:`MCMCIcemaker` for O(N) cell-list RSA.
-
-        Parameters
-        ----------
-        seed : int
-            Random seed.
         """
         rmc = MCMCIcemaker(
             n=self.n,
@@ -1964,7 +1856,7 @@ class GradientSKIcemaker:
             device="cpu",
         )
         rmc.n_molecules = self.n_molecules
-        rmc.init_random(seed=seed)
+        rmc.init_random()
         raw = rmc.positions.float()
         self.positions = raw - torch.tensor(
             [self.box_x / 2, self.box_y / 2, self.box_z / 2]
@@ -1975,9 +1867,12 @@ class GradientSKIcemaker:
     # Differentiable S(k) loss
     # ------------------------------------------------------------------
 
-    def _sk_loss(self, pos: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    def _sk_loss(
+        self, pos: torch.Tensor, rep_strength: float = 0.0
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """
-        Radial-profile MSE between |FFT(voxelized positions)| and the target.
+        Radial-profile MSE between |FFT(voxelized positions)| and the target,
+        with an optional soft repulsion penalty.
 
         Differentiable w.r.t. ``pos`` through soft voxelization, FFT, and
         scatter-based radial average.
@@ -1986,11 +1881,16 @@ class GradientSKIcemaker:
         ----------
         pos : torch.Tensor
             Positions (N, 3) in Å, centered at origin.
+        rep_strength : float, optional
+            Weight of the pair-exclusion penalty.  ``0.0`` disables repulsion.
+            The penalty counts other particles within ``min_distance`` of each
+            voxel via FFT convolution and applies a squared relu; set to a
+            positive value (e.g. 1.0) to prevent particle overlap.
 
         Returns
         -------
         loss : torch.Tensor
-            Scalar radial-profile MSE.
+            Scalar combined loss (S(k) MSE + repulsion penalty).
         f_amp : torch.Tensor
             |F(k)| in shifted frequency space, shape (nz, n, n).
         """
@@ -1999,12 +1899,25 @@ class GradientSKIcemaker:
             grid_shape=(self.nz, self.n, self.n),
             voxel_size=self.dx,
             device=self.device,
+            periodic=True,
         )
         f_amp = torch.abs(fft3(vox, shift=True))
         bin_sum = torch.zeros(self._n_rbins, device=self.device)
         bin_sum.scatter_add_(0, self._r_bins, f_amp.flatten())
         sim_radial = bin_sum / self._bin_count
         loss = torch.mean((sim_radial - self._f_target_rad_1d) ** 2)
+
+        if rep_strength > 0.0:
+            # Count OTHER particles within min_distance of each voxel via FFT
+            # convolution with the precomputed exclusion kernel.
+            # convolved[i] ≈ 0 for well-spaced ice; > 0 when pairs overlap.
+            vox_rfft = torch.fft.rfftn(vox)
+            convolved = torch.fft.irfftn(
+                vox_rfft * self._rep_kernel_rfft, s=(self.nz, self.n, self.n)
+            )
+            rep_loss = torch.mean(F.relu(convolved) ** 2)
+            loss = loss + rep_strength * rep_loss
+
         return loss, f_amp
 
     # ------------------------------------------------------------------
@@ -2017,6 +1930,7 @@ class GradientSKIcemaker:
         lr: float = 1.0,
         optimizer: str = "lbfgs",
         record_every: int = 5,
+        rep_strength: float = 1.0,
     ) -> dict:
         """
         Pure gradient descent on the S(k) loss — no Langevin noise.
@@ -2036,6 +1950,10 @@ class GradientSKIcemaker:
             ``'lbfgs'`` (default) or ``'adam'``.
         record_every : int
             Diagnostic recording interval.
+        rep_strength : float, optional
+            Weight of the soft pair-exclusion penalty in the loss.  Prevents
+            particles from overlapping during gradient descent.  Set to 0 to
+            disable.  Default is 1.0.
 
         Returns
         -------
@@ -2046,7 +1964,6 @@ class GradientSKIcemaker:
 
         pos = self.positions.to(self.device).clone().requires_grad_(True)
         history: dict[str, list] = {"step": [], "loss": [], "radial_profile": []}
-        t0 = time.time()
 
         if optimizer == "lbfgs":
             opt = torch.optim.LBFGS(
@@ -2060,48 +1977,69 @@ class GradientSKIcemaker:
 
             def closure() -> torch.Tensor:
                 opt.zero_grad()
-                loss, f_amp = self._sk_loss(pos)
+                loss, f_amp = self._sk_loss(pos, rep_strength=rep_strength)
                 loss.backward()
                 last_f_amp[0] = f_amp.detach()
                 return loss
 
-            for step in range(n_steps):
-                loss = opt.step(closure)
-                with torch.no_grad():
-                    pos.data[:, 0] = _wrap_coords(pos.data[:, 0], self.box_x)
-                    pos.data[:, 1] = _wrap_coords(pos.data[:, 1], self.box_y)
-                    pos.data[:, 2] = _wrap_coords(pos.data[:, 2], self.box_z)
-                if step % record_every == 0:
+            _manager = ProgressManager()
+            _pbar, _pbar_pos = _manager.get_pbar(
+                range(n_steps),
+                desc="L-BFGS for ice coordinates",
+                disable=not self.progressbars,
+                transient=True,
+            )
+            try:
+                for step in _pbar:
+                    loss = opt.step(closure)
+                    with torch.no_grad():
+                        pos.data[:, 0] = _wrap_coords(pos.data[:, 0], self.box_x)
+                        pos.data[:, 1] = _wrap_coords(pos.data[:, 1], self.box_y)
+                        pos.data[:, 2] = _wrap_coords(pos.data[:, 2], self.box_z)
                     loss_val = (
                         loss.item() if isinstance(loss, torch.Tensor) else float(loss)
                     )
-                    with torch.no_grad():
-                        rad = radial_profile_3d(last_f_amp[0].cpu())
-                    history["step"].append(step)
-                    history["loss"].append(loss_val)
-                    history["radial_profile"].append(rad)
-                    print(f"  step {step:3d}/{n_steps}  loss={loss_val:.6f}")
+                    _pbar.set_postfix(loss=f"{loss_val:.6f}")
+                    if step % record_every == 0:
+                        with torch.no_grad():
+                            rad = radial_profile_3d(last_f_amp[0].cpu())
+                        history["step"].append(step)
+                        history["loss"].append(loss_val)
+                        history["radial_profile"].append(rad)
+            finally:
+                _pbar.close()
+                _manager.release(_pbar_pos)
 
         else:  # adam
             opt_adam = torch.optim.Adam([pos], lr=lr)
-            for step in range(n_steps):
-                opt_adam.zero_grad()
-                loss, f_amp = self._sk_loss(pos)
-                loss.backward()
-                opt_adam.step()
-                with torch.no_grad():
-                    pos.data[:, 0] = _wrap_coords(pos.data[:, 0], self.box_x)
-                    pos.data[:, 1] = _wrap_coords(pos.data[:, 1], self.box_y)
-                    pos.data[:, 2] = _wrap_coords(pos.data[:, 2], self.box_z)
-                if step % record_every == 0:
+            _manager = ProgressManager()
+            _pbar, _pbar_pos = _manager.get_pbar(
+                range(n_steps),
+                desc="Adam",
+                disable=not self.progressbars,
+                transient=True,
+            )
+            try:
+                for step in _pbar:
+                    opt_adam.zero_grad()
+                    loss, f_amp = self._sk_loss(pos, rep_strength=rep_strength)
+                    loss.backward()
+                    opt_adam.step()
                     with torch.no_grad():
-                        rad = radial_profile_3d(f_amp.detach().cpu())
-                    history["step"].append(step)
-                    history["loss"].append(loss.item())
-                    history["radial_profile"].append(rad)
-                    print(f"  step {step:4d}/{n_steps}  loss={loss.item():.6f}")
+                        pos.data[:, 0] = _wrap_coords(pos.data[:, 0], self.box_x)
+                        pos.data[:, 1] = _wrap_coords(pos.data[:, 1], self.box_y)
+                        pos.data[:, 2] = _wrap_coords(pos.data[:, 2], self.box_z)
+                    _pbar.set_postfix(loss=f"{loss.item():.6f}")
+                    if step % record_every == 0:
+                        with torch.no_grad():
+                            rad = radial_profile_3d(f_amp.detach().cpu())
+                        history["step"].append(step)
+                        history["loss"].append(loss.item())
+                        history["radial_profile"].append(rad)
+            finally:
+                _pbar.close()
+                _manager.release(_pbar_pos)
 
-        print(f"  Finished in {time.time()-t0:.1f}s")
         self.positions = pos.detach().cpu()
         return history
 
@@ -2111,6 +2049,7 @@ class GradientSKIcemaker:
         lr: float = 0.05,
         noise: float = 0.02,
         record_every: int = 50,
+        rep_strength: float = 1.0,
     ) -> dict:
         """
         Langevin sampling around a converged structure.
@@ -2129,6 +2068,8 @@ class GradientSKIcemaker:
             Gaussian noise std per step in Å.
         record_every : int
             Diagnostic recording interval.
+        rep_strength : float, optional
+            Weight of the soft pair-exclusion penalty.  Default is 1.0.
 
         Returns
         -------
@@ -2140,29 +2081,36 @@ class GradientSKIcemaker:
         pos = self.positions.to(self.device).clone().requires_grad_(True)
         opt = torch.optim.Adam([pos], lr=lr)
         history: dict[str, list] = {"step": [], "loss": [], "radial_profile": []}
-        t0 = time.time()
 
-        for step in range(n_steps):
-            opt.zero_grad()
-            loss, f_amp = self._sk_loss(pos)
-            loss.backward()
-            opt.step()
-            with torch.no_grad():
-                pos.data.add_(noise * torch.randn_like(pos))
-                pos.data[:, 0] = _wrap_coords(pos.data[:, 0], self.box_x)
-                pos.data[:, 1] = _wrap_coords(pos.data[:, 1], self.box_y)
-                pos.data[:, 2] = _wrap_coords(pos.data[:, 2], self.box_z)
-            if step % record_every == 0:
+        _manager = ProgressManager()
+        _pbar, _pbar_pos = _manager.get_pbar(
+            range(n_steps),
+            desc="Langevin",
+            disable=not self.progressbars,
+            transient=True,
+        )
+        try:
+            for step in _pbar:
+                opt.zero_grad()
+                loss, f_amp = self._sk_loss(pos, rep_strength=rep_strength)
+                loss.backward()
+                opt.step()
                 with torch.no_grad():
-                    rad = radial_profile_3d(f_amp.detach().cpu())
-                history["step"].append(step)
-                history["loss"].append(loss.item())
-                history["radial_profile"].append(rad)
-                print(
-                    f"  step {step:4d}/{n_steps}  loss={loss.item():.6f}  noise={noise:.4f}"
-                )
+                    pos.data.add_(noise * torch.randn_like(pos))
+                    pos.data[:, 0] = _wrap_coords(pos.data[:, 0], self.box_x)
+                    pos.data[:, 1] = _wrap_coords(pos.data[:, 1], self.box_y)
+                    pos.data[:, 2] = _wrap_coords(pos.data[:, 2], self.box_z)
+                _pbar.set_postfix(loss=f"{loss.item():.6f}", noise=f"{noise:.4f}")
+                if step % record_every == 0:
+                    with torch.no_grad():
+                        rad = radial_profile_3d(f_amp.detach().cpu())
+                    history["step"].append(step)
+                    history["loss"].append(loss.item())
+                    history["radial_profile"].append(rad)
+        finally:
+            _pbar.close()
+            _manager.release(_pbar_pos)
 
-        print(f"  Finished in {time.time()-t0:.1f}s")
         self.positions = pos.detach().cpu()
         return history
 
@@ -2185,6 +2133,7 @@ class GradientSKIcemaker:
                 self.positions.cpu(),
                 grid_shape=(self.nz, self.n, self.n),
                 voxel_size=self.dx,
+                periodic=True,
             )
 
     def generate_ice_deltas(
@@ -2192,14 +2141,15 @@ class GradientSKIcemaker:
         batchsize: int = 1,
         n_steps: int = 50,
         lr: float = 1.0,
-        seed: int = 0,
+        rep_strength: float = 1.0,
+        init_positions=None,
     ) -> torch.Tensor:
         """
         Run ``batchsize`` independent L-BFGS optimisations and return soft-voxelized
         ice position volumes, without convolving with scattering potentials.
 
-        Each volume uses a fresh RSA initialisation with seed ``seed + i``,
-        then L-BFGS optimisation. Result is stored as ``self.current_icedeltas``.
+        Each volume uses a fresh random initialisation then L-BFGS optimisation.
+        Result is stored as ``self.current_icedeltas``.
 
         Parameters
         ----------
@@ -2209,8 +2159,8 @@ class GradientSKIcemaker:
             L-BFGS outer iterations per volume.
         lr : float
             L-BFGS initial step size (line search adapts it automatically).
-        seed : int
-            Base random seed; volume ``i`` uses ``seed + i``.
+        rep_strength : float, optional
+            Weight of the soft pair-exclusion penalty.  Default is 1.0.
 
         Returns
         -------
@@ -2218,11 +2168,22 @@ class GradientSKIcemaker:
             Soft-voxelized ice position volumes, shape (batchsize, nz, n, n).
         """
         results = []
-        for i in range(batchsize):
-            # self.init_rsa(seed=seed + i)
-            self.init_random(seed=seed + i)
+        for i in track(
+            range(batchsize),
+            description="Generating ice volumes",
+            disable=not self.progressbars,
+            transient=True,
+        ):
+            if init_positions is None:
+                self.init_random()
+            else:
+                self.positions = init_positions
             self.optimize(
-                n_steps=n_steps, lr=lr, optimizer="lbfgs", record_every=n_steps
+                n_steps=n_steps,
+                lr=lr,
+                optimizer="lbfgs",
+                record_every=n_steps,
+                rep_strength=rep_strength,
             )
             results.append(self.voxelize())
         self.current_icedeltas = torch.stack(results)
@@ -2233,14 +2194,14 @@ class GradientSKIcemaker:
         batchsize: int = 1,
         n_steps: int = 50,
         lr: float = 1.0,
-        seed: int = 0,
+        rep_strength: float = 1.0,
     ) -> torch.Tensor:
         """
         Run ``batchsize`` independent L-BFGS optimisations and return convolved
         ice potential volumes.
 
-        Each volume uses a fresh RSA initialisation with seed ``seed + i``,
-        then L-BFGS, then convolution with the Kirkland O potential kernel.
+        Each volume uses a fresh random initialisation, then L-BFGS, then
+        convolution with the Kirkland O potential kernel.
 
         Parameters
         ----------
@@ -2250,21 +2211,63 @@ class GradientSKIcemaker:
             L-BFGS outer iterations per volume.
         lr : float
             L-BFGS initial step size (line search adapts it automatically).
-        seed : int
-            Base random seed; volume ``i`` uses ``seed + i``.
+        rep_strength : float, optional
+            Weight of the soft pair-exclusion penalty.  Default is 1.0.
 
         Returns
         -------
         ice : torch.Tensor
             Convolved ice potential volumes, shape (batchsize, nz, n, n).
         """
-        self.generate_ice_deltas(batchsize=batchsize, n_steps=n_steps, lr=lr, seed=seed)
+        self.generate_ice_deltas(
+            batchsize=batchsize, n_steps=n_steps, lr=lr, rep_strength=rep_strength
+        )
         return fftconvolve(
             self.current_icedeltas,
             self._ice_kernel.unsqueeze(0),
             mode="same",
             axes=(-3, -2, -1),
         )
+
+    def generate_big_ice(
+        self,
+        target_shape: tuple[int, int, int, int],
+        num_unique: int = 8,
+        n_steps: int = 50,
+        lr: float = 1.0,
+        optimizer: str = "lbfgs",
+        rep_strength: float = 1.0,
+    ) -> torch.Tensor:
+        """
+        Generate a large ice volume by tiling unique gradient-optimised blocks.
+
+        Parameters
+        ----------
+        target_shape : tuple of int
+            Output shape ``(B, nz, ny, nx)``.
+        num_unique : int, optional
+            Number of unique ice blocks to generate. Default is 8.
+        n_steps : int, optional
+            Optimiser outer iterations per block. Default is 50.
+        lr : float, optional
+            Initial learning rate. Default is 1.0.
+        optimizer : str, optional
+            ``'lbfgs'`` (default) or ``'adam'``.
+        rep_strength : float, optional
+            Weight of the soft pair-exclusion penalty. Default is 1.0.
+
+        Returns
+        -------
+        big_ice : torch.Tensor
+            Tiled ice volume of shape ``target_shape``.
+        """
+        cubes = self.generate_ice(
+            batchsize=num_unique,
+            n_steps=n_steps,
+            lr=lr,
+            rep_strength=rep_strength,
+        )
+        return tile_volume_from_blocks(cubes, target_shape)
 
     @staticmethod
     def assemble_tiles(
@@ -2277,8 +2280,8 @@ class GradientSKIcemaker:
         """
         Assemble ``nx × ny × nz`` independently-optimised tiles into one volume.
 
-        Each tile is a unique set of atom positions (optimised with a different
-        seed), so there is no periodicity artifact.
+        Each tile is a unique set of atom positions (independently optimised),
+        so there is no periodicity artifact.
 
         Parameters
         ----------
@@ -2656,6 +2659,60 @@ class MDSimDump:
         assert gr_sum is not None and r_out is not None
         return r_out, gr_sum / len(coords_list)
 
+    def generate_ice(
+        self,
+        batchsize: int = 1,
+        frames: int | Sequence[int] | torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """
+        Return a batch of voxelized ice volumes sampled from the MD dump.
+
+        Parameters
+        ----------
+        batchsize : int, optional
+            Number of ice volumes to return. Frames are sampled with replacement
+            when ``batchsize`` exceeds the number of available frames.
+            Default is 1.
+        frames : int or sequence of int or Tensor or None, optional
+            Which frames to draw from. ``None`` uses all equilibrated frames
+            (index 10 and above). See :meth:`get_coordinates`.
+
+        Returns
+        -------
+        ice : torch.Tensor
+            Voxelized ice volumes, shape ``(batchsize, n, n, n)``.
+        """
+        voxels = self.get_voxels(frames)
+        idx = torch.randint(0, voxels.shape[0], (batchsize,))
+        return voxels[idx]
+
+    def generate_big_ice(
+        self,
+        target_shape: tuple[int, int, int, int],
+        num_unique: int = 8,
+        frames: int | Sequence[int] | torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """
+        Generate a large ice volume by tiling frames sampled from the MD dump.
+
+        Parameters
+        ----------
+        target_shape : tuple of int
+            Output shape ``(B, nz, ny, nx)``.
+        num_unique : int, optional
+            Number of unique frames to sample as tile sources. Default is 8.
+        frames : int or sequence of int or Tensor or None, optional
+            Which frames to draw from. ``None`` uses all equilibrated frames
+            (index 10 and above). See :meth:`get_coordinates`.
+
+        Returns
+        -------
+        big_ice : torch.Tensor
+            Tiled ice volume of shape ``target_shape``.
+        """
+        cubes = self.generate_ice(batchsize=num_unique, frames=frames)
+        return tile_volume_from_blocks(cubes, target_shape)
+
     def __repr__(self) -> str:
         return (
             f"MDSimDump(n_frames={self.n_frames}, n={self.n}, "
@@ -2794,83 +2851,161 @@ class NaiveIcemaker(L.LightningModule):
         return icecubes
 
 
-def assemble_volume_randomized(
-    blocks: torch.Tensor, target_shape: tuple[int, int, int, int]
-) -> torch.Tensor:
+class IceBank:
     """
-    Tile a batch of cubic blocks into a large volume with random augmentation per tile.
+    Standalone ice generator with a pre-built cache of unique cubes.
 
-    Each tile receives an independent random roll, flip, and 90°-multiple rotation
-    before being placed, so the assembled volume has no visible periodic seams.
+    Call :meth:`build` once to run the algorithm and cache ``num_unique`` cubes.
+    All subsequent calls to :meth:`generate_ice` or :meth:`generate_big_ice` draw
+    from the cached bank with independent random augmentation per sample (roll, flip,
+    90° rotation), so the algorithm never runs again.
 
     Parameters
     ----------
-    blocks : torch.Tensor
-        Bank of pre-generated blocks, shape (N_blocks, S, S, S). Blocks must be cubic.
-    target_shape : tuple of int
-        Desired output shape (N_batch, A, B, C).
+    dx : float, optional
+        Voxel size in Å. Default is 0.5.
+    n : int, optional
+        Number of voxels along x and y. Default is 256.
+    nz : int, optional
+        Number of voxels along z. Defaults to ``n`` (cubic box).
+    method : {'gs', 'gd', 'mcmc'}, optional
+        Ice generation algorithm:
 
-    Returns
-    -------
-    torch.Tensor
-        Assembled volume, shape (N_batch, A, B, C).
+        - ``'gs'`` — Gerchberg–Saxton iterative Fourier amplitude matching
+          (:class:`Icemaker`, default).
+        - ``'gd'`` — gradient descent via L-BFGS (:class:`GradientSKIcemaker`).
+        - ``'mcmc'`` — Metropolis Monte Carlo (:class:`MCMCIcemaker`).
+    **kwargs
+        Forwarded to the underlying generator constructor. Use for method-specific
+        construction parameters such as ``min_distance``, ``device``, or
+        ``parameterization``.
+
+    Attributes
+    ----------
+    generator : Icemaker or GradientSKIcemaker or MCMCIcemaker
+        The underlying generator instance. Access it directly for method-specific
+        setup (e.g. ``bank.generator.set_target_gr_from_md(...)`` for MCMC).
+
+    Examples
+    --------
+    >>> bank = IceBank(dx=0.5, n=256, method='gs')
+    >>> bank.build(num_unique=8)                        # expensive — run once
+    >>> ice = bank.generate_ice(batchsize=4)            # fast — augmented from bank
+    >>> big = bank.generate_big_ice((1, 512, 512, 512)) # fast — tiled from bank
+
+    MCMC requires setting the target g(r) before building:
+
+    >>> bank = IceBank(dx=0.5, n=256, method='mcmc')
+    >>> bank.generator.set_target_gr_from_md('sim.lammpstrj')
+    >>> bank.build(num_unique=8, n_sweeps=200)
     """
-    N_blocks, block_size, _, _ = blocks.shape
-    N_batch, A, B, C = target_shape
 
-    batch_volumes = []
+    _METHOD_MAP: dict[str, type] = {
+        "gs": Icemaker,
+        "gd": GradientSKIcemaker,
+        "mcmc": MCMCIcemaker,
+    }
 
-    for b_idx in range(N_batch):
-        # Compute number of blocks along each axis
-        n_x = (A + block_size - 1) // block_size
-        n_y = (B + block_size - 1) // block_size
-        n_z = (C + block_size - 1) // block_size
+    def __init__(
+        self,
+        dx: float = 0.5,
+        n: int = 256,
+        nz: Optional[int] = None,
+        method: str = "gs",
+        **kwargs: Any,
+    ) -> None:
+        if method not in self._METHOD_MAP:
+            raise ValueError(
+                f"method must be one of {list(self._METHOD_MAP)}, got '{method}'"
+            )
+        self.dx = dx
+        self.n = n
+        self.nz = nz if nz is not None else n
+        self.method = method
 
-        # Random indices for selecting blocks
-        idx = torch.randint(0, N_blocks, (n_x, n_y, n_z))
+        generator_cls = self._METHOD_MAP[method]
+        self.generator = generator_cls(n=n, dx=dx, nz=nz, **kwargs)
+        self._bank: Optional[torch.Tensor] = None
 
-        x_slices = []
-        for i in range(n_x):
-            y_slices = []
-            for j in range(n_y):
-                z_slices = []
-                for k in range(n_z):
-                    b = blocks[idx[i, j, k]]
+    def build(self, num_unique: int = 8, **kwargs: Any) -> None:
+        """
+        Generate and cache ``num_unique`` unique ice cubes.
 
-                    # Random roll along all axes
-                    shift_x = torch.randint(0, block_size, (1,)).item()
-                    shift_y = torch.randint(0, block_size, (1,)).item()
-                    shift_z = torch.randint(0, block_size, (1,)).item()
-                    b = torch.roll(
-                        b, shifts=(shift_x, shift_y, shift_z), dims=(0, 1, 2)
-                    )
+        Parameters
+        ----------
+        num_unique : int, optional
+            Number of unique cubes to generate. Default is 8.
+        **kwargs
+            Forwarded to ``generator.generate_ice(batchsize=num_unique, **kwargs)``.
+            Method-specific build parameters:
 
-                    # Random flip along any axis
-                    if torch.rand(1) < 0.5:
-                        b = torch.flip(b, dims=(0,))
-                    if torch.rand(1) < 0.5:
-                        b = torch.flip(b, dims=(1,))
-                    if torch.rand(1) < 0.5:
-                        b = torch.flip(b, dims=(2,))
+            - ``gs``: ``reduce_fraction``
+            - ``gd``: ``n_steps``, ``lr``, ``rep_strength``
+            - ``mcmc``: ``n_sweeps``, ``step_size``
+        """
+        self._bank = self.generator.generate_ice(batchsize=num_unique, **kwargs)
 
-                    # Random rotation along any plane
-                    k_rot_xy = torch.randint(0, 4, (1,)).item()
-                    b = torch.rot90(b, k=k_rot_xy, dims=(0, 1))
-                    k_rot_xz = torch.randint(0, 4, (1,)).item()
-                    b = torch.rot90(b, k=k_rot_xz, dims=(0, 2))
-                    k_rot_yz = torch.randint(0, 4, (1,)).item()
-                    b = torch.rot90(b, k=k_rot_yz, dims=(1, 2))
+    def generate_ice(self, batchsize: int = 1, **kwargs: Any) -> torch.Tensor:
+        """
+        Return ``batchsize`` ice cubes, drawing from the bank if one exists.
 
-                    z_slices.append(b)
-                y_slices.append(torch.cat(z_slices, dim=2))
-            x_slices.append(torch.cat(y_slices, dim=1))
-        full_volume = torch.cat(x_slices, dim=0)
+        If :meth:`build` has been called, each cube is randomly sampled from the
+        bank and independently augmented (roll, flip, 90° rotation) — no algorithm
+        is re-run. If no bank exists, delegates directly to the underlying generator,
+        forwarding ``**kwargs`` as method-specific arguments.
 
-        # Crop to target shape
-        batch_volumes.append(full_volume)
+        Parameters
+        ----------
+        batchsize : int, optional
+            Number of cubes to return. Default is 1.
+        **kwargs
+            Forwarded to ``generator.generate_ice`` only when no bank exists.
 
-    # Stack all volumes along batch dimension
-    return torch.stack(batch_volumes, dim=0)
+        Returns
+        -------
+        ice : torch.Tensor
+            Shape ``(batchsize, nz, n, n)``.
+        """
+        if self._bank is not None:
+            _, D, H, W = self._bank.shape
+            return tile_volume_from_blocks(self._bank, (batchsize, D, H, W))
+        return self.generator.generate_ice(batchsize=batchsize, **kwargs)
+
+    def generate_big_ice(
+        self,
+        target_shape: tuple[int, int, int, int],
+        num_unique: int = 8,
+        **kwargs: Any,
+    ) -> torch.Tensor:
+        """
+        Tile ice into a large volume, drawing from the bank if one exists.
+
+        If :meth:`build` has been called, tiles are drawn and augmented from the
+        cached bank. If no bank exists, generates ``num_unique`` fresh cubes and
+        tiles them, forwarding ``**kwargs`` to the generator.
+
+        Parameters
+        ----------
+        target_shape : tuple of int
+            Output shape ``(B, nz, ny, nx)``.
+        num_unique : int, optional
+            Number of unique cubes to generate on-the-fly when no bank exists.
+            Ignored when a bank is present. Default is 8.
+        **kwargs
+            Forwarded to ``generator.generate_ice`` only when no bank exists.
+
+        Returns
+        -------
+        big_ice : torch.Tensor
+            Tiled ice volume of shape ``target_shape``.
+        """
+        if self._bank is not None:
+            cubes = replace_outer_faces(self._bank.clone())
+        else:
+            cubes = replace_outer_faces(
+                self.generator.generate_ice(batchsize=num_unique, **kwargs)
+            )
+        return tile_volume_from_blocks(cubes, target_shape)
 
 
 def replace_outer_faces(tensors: torch.Tensor) -> torch.Tensor:

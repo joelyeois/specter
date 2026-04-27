@@ -1,4 +1,6 @@
-# CLAUDE.md — SPECTER
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Project Overview
 
@@ -75,40 +77,91 @@ When modifying physics-critical code, validate against known physical quantities
 
 ```bash
 python -m pytest tests/ -v
+python -m pytest tests/test_generators.py::test_image_generator -v  # single test
 python -m pytest tests/ --cov=src/specter  # with coverage
+ruff check src/ tests/                     # lint
+ruff format src/ tests/                    # format
+mypy src/                                  # type-check
 ```
 
 - GPU tests should gracefully skip or fall back to CPU when CUDA is unavailable.
 - Do not mock physics calculations — test with real (small) inputs to catch numerical regressions.
+- Regression tests in `tests/test_generators.py` use a **save-or-compare** pattern: on first run they save a golden `.pt` file under `tests/test_data/`; subsequent runs compare against it. Delete the fixture file and re-run to regenerate after intentional output changes.
 
 ## Off-Limits Files
 
 Do **not** modify files in:
 
-- `src/specter/atom/atom_data/` — parameterised atomic potential data (Kirkland, Lobato, Shtyrov). These are fixed physical constants from published literature.
+- `src/specter/atom_data/` — parameterised atomic potential data (Kirkland, Lobato, Shtyrov). These are fixed physical constants from published literature.
 - `ice-data/` — pre-computed ice simulation data.
 
 Changes to these would silently break the physical accuracy of all simulations.
 
+## Architecture
+
+### Forward simulation pipeline
+
+All major simulator classes inherit from `BaseImager(L.LightningModule)` so they run via Lightning's GPU/CPU dispatch:
+
+```
+PotentialBuilder            – builds 3D scattering potential from atomic coordinates (PDB/mmCIF)
+    ↓ V [B, Z, Y, X]
+ParticleGeneratorBase       – base shared by ImageGenerator and ImageGeneratorFromCoordinates
+    crowding → solvate (Icemaker/NaiveIcemaker) → Scattering → Aberration → Detector
+        ↓ images [B, Y, X]
+MicrographGenerator         – assembles a full micrograph from many particles
+TiltSeriesGenerator         – generates a tilt series
+```
+
+- `ImageGenerator` takes a **pre-built volume** tensor; `ImageGeneratorFromCoordinates` builds it from atomic coordinates on the fly via `PotentialBuilder`.
+- `Icemaker` / `NaiveIcemaker` generate amorphous ice volumes; `IceBank` caches them for reuse.
+- `Scattering` supports four propagation modes: `multislice`, `rytov`, `firstborn`, `projection` — multislice is most accurate and is the default.
+- `Aberration` and `Detector` (in `microscope.py`) apply CTF, envelope, and detector MTF in Fourier space.
+
+### Inverse problem — Ghostbuster
+
+`Ghostbuster(L.LightningModule)` in `ghostbuster.py` reconstructs a 3D volume from 2D images by minimising the discrepancy between simulated and observed images using the same forward model as `ImageGenerator`. Jointly refines volume, rotations, translations, and defocus via separate learning rates.
+
 ## Repository Structure
 
 ```
-src/specter/          # Main source package
-  atom/               # Atomic properties and potential functions
-  imagegenerator.py   # Top-level image simulation classes
-  specimen.py         # Volume assembly (TomogramGenerator)
-  potential.py        # Scattering potential builder
-  scattering.py       # Wave propagation (multislice, iterative)
-  microscope.py       # Aberration and detector models
-  rotations.py        # Quaternion-based 3D rotations
-  icemaker.py         # Amorphous ice generation
-  crowding.py         # Molecular crowding simulation
-  ghostbuster.py      # 3D reconstruction (PyTorch Lightning)
-tests/                # pytest test suite
-demo-notebooks/       # User-facing, always kept working
-dev-notebooks/        # Prototyping and experimentation (not required to be clean)
-pdb-data/             # PDB structure files
-ice-data/             # Pre-computed ice data (do not modify)
+src/specter/               # Main source package
+  atom/                    # Atomic properties and potential functions
+  atom_data/               # Scattering parameter tables (Kirkland, Lobato) — do not modify
+  imagegenerator.py        # Top-level image simulation classes
+  base_imager.py           # Shared base classes for image generators (BaseImager)
+  specimen.py              # Volume assembly (TomogramGenerator)
+  potential.py             # Scattering potential builder (PotentialBuilder, GemmiPotentialBuilder)
+  scattering.py            # Wave propagation (multislice, rytov, firstborn, projection)
+  microscope.py            # Aberration and detector models
+  detectors.py             # Detector MTF and noise models
+  rotations.py             # Quaternion-based 3D rotations
+  icemaker.py              # Amorphous ice generation (Icemaker, NaiveIcemaker, MCMCIcemaker, IceBank)
+  crowding.py              # Molecular crowding simulation
+  ghostbuster.py           # 3D reconstruction (PyTorch Lightning)
+  arrays.py                # Array utilities (soft voxelization, tiling, crops)
+  coords.py                # Coordinate utilities (RDF, etc.)
+  fft.py                   # FFT wrappers
+  filters.py               # Frequency-domain filters
+  image.py                 # Image-level utilities
+  micrograph.py            # Micrograph assembly
+  pdb.py                   # PDB/mmCIF parsing helpers
+  cryosparc.py             # CryoSPARC .cs file I/O
+  cuda.py                  # CUDA/device utilities
+  plots.py                 # Plotting helpers
+  progress.py              # Progress bar management (ProgressManager)
+  random_seed.py           # Global seed control (exported as specter.seed)
+  simulate_particles.py    # Particle simulation pipeline
+  symmetries.py            # Symmetry operations
+  tiltseries.py            # Tilt-series generation
+  welling_rotation.py      # Welling rotation sampling
+tests/                     # pytest test suite
+  test_data/               # Golden-output fixtures (.pt files) for regression tests
+demo-notebooks/            # User-facing, always kept working
+demo-scripts/              # Ready-to-run command-line scripts
+dev-notebooks/             # Prototyping and experimentation (not required to be clean)
+pdb-data/                  # PDB structure files
+ice-data/                  # Pre-computed ice data (do not modify)
 ```
 
 ## Physics Accuracy Notes
@@ -118,6 +171,13 @@ ice-data/             # Pre-computed ice data (do not modify)
 - Atomic potentials are parameterised; the Kirkland model is the default and most validated.
 - Coincidence loss is modelled for direct electron detectors — do not remove this when simulating K3 detector outputs.
 - CTF sign conventions follow the standard cryo-EM convention (defocus positive = underfocus).
+- Ice volumes are assembled via `tile_volume_from_blocks()` (in `arrays.py`) with random roll/flip/rotation augmentation per tile — do not replace this with a plain repeat/tile which would produce visible seams.
+- MD simulation dump ingestion (`get_mdsim`, `get_mdsim_file`, etc.) was removed from `Icemaker`; ice structure is now driven purely by pre-computed kernels in `ice-data/`.
+
+## Reproducibility
+
+- Use `specter.seed(n)` (re-exported from `random_seed.py`) to set a global seed before any simulation for reproducible outputs.
+- `MCMCIcemaker.init_random()` no longer accepts a seed argument — call `specter.seed()` before instantiating if you need reproducibility.
 
 ## Key Dependencies
 

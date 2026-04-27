@@ -477,6 +477,7 @@ def soft_voxelize_coordinates(
     grid_shape: tuple[int, int, int],
     voxel_size: float | Sequence[float],
     device: str | torch.device | None = None,
+    periodic: bool = False,
 ) -> torch.Tensor:
     """
     Differentiable 3D soft voxelization using trilinear splatting.
@@ -495,6 +496,9 @@ def soft_voxelize_coordinates(
         Voxel size. If float, assumes isotropic. If tuple, (dz, dy, dx).
     device : str or torch.device, optional
         Device for tensors. Default is None (uses coords device).
+    periodic : bool, optional
+        If True, wrap out-of-bounds splat indices with periodic boundary
+        conditions instead of discarding them. Default is False.
 
     Returns
     -------
@@ -584,19 +588,26 @@ def soft_voxelize_coordinates(
 
     # Scatter-add per batch
     for b in range(B):
-        mask = (
-            (z_idx[b] >= 0)
-            & (z_idx[b] < nz)
-            & (y_idx[b] >= 0)
-            & (y_idx[b] < ny)
-            & (x_idx[b] >= 0)
-            & (x_idx[b] < nx)
-        )
-        volume[b].index_put_(
-            (z_idx[b][mask], y_idx[b][mask], x_idx[b][mask]),
-            w[b][mask],
-            accumulate=True,
-        )
+        if periodic:
+            volume[b].index_put_(
+                (z_idx[b] % nz, y_idx[b] % ny, x_idx[b] % nx),
+                w[b],
+                accumulate=True,
+            )
+        else:
+            mask = (
+                (z_idx[b] >= 0)
+                & (z_idx[b] < nz)
+                & (y_idx[b] >= 0)
+                & (y_idx[b] < ny)
+                & (x_idx[b] >= 0)
+                & (x_idx[b] < nx)
+            )
+            volume[b].index_put_(
+                (z_idx[b][mask], y_idx[b][mask], x_idx[b][mask]),
+                w[b][mask],
+                accumulate=True,
+            )
 
     # Remove batch dimension if input was non-batch
     if not batched_input:
@@ -1285,3 +1296,72 @@ def center_crop(
         slices[d] = slice(start, start + cs)
 
     return x[tuple(slices)]
+
+
+def tile_volume_from_blocks(
+    blocks: torch.Tensor,
+    target_shape: tuple[int, int, int, int],
+) -> torch.Tensor:
+    """
+    Tile a bank of 3-D blocks into a larger volume with random augmentation per tile.
+
+    Each placed tile receives an independent random roll, flip, and 90°-multiple
+    rotation before insertion, breaking periodicity that would otherwise create
+    visible seams at block boundaries.
+
+    Parameters
+    ----------
+    blocks : torch.Tensor
+        Pre-generated block bank, shape ``(N_blocks, S, S, S)``. Blocks must be cubic.
+    target_shape : tuple of int
+        Desired output shape ``(N_batch, A, B, C)``.
+
+    Returns
+    -------
+    torch.Tensor
+        Assembled volume cropped to ``target_shape``, shape ``(N_batch, A, B, C)``.
+    """
+    N_blocks, block_size, _, _ = blocks.shape
+    N_batch, A, B, C = target_shape
+
+    batch_volumes = []
+    for _ in range(N_batch):
+        n_a = (A + block_size - 1) // block_size
+        n_b = (B + block_size - 1) // block_size
+        n_c = (C + block_size - 1) // block_size
+
+        tile_idx = torch.randint(0, N_blocks, (n_a, n_b, n_c))
+
+        a_slices = []
+        for i in range(n_a):
+            b_slices = []
+            for j in range(n_b):
+                c_slices = []
+                for k in range(n_c):
+                    blk = blocks[tile_idx[i, j, k]].clone()
+
+                    # Random roll along all three axes
+                    shifts = (
+                        int(torch.randint(0, block_size, (1,)).item()),
+                        int(torch.randint(0, block_size, (1,)).item()),
+                        int(torch.randint(0, block_size, (1,)).item()),
+                    )
+                    blk = torch.roll(blk, shifts=shifts, dims=(0, 1, 2))
+
+                    # Random flip along each axis
+                    for dim in (0, 1, 2):
+                        if torch.rand(1).item() < 0.5:
+                            blk = torch.flip(blk, dims=(dim,))
+
+                    # Random 90° rotations in each plane
+                    for d0, d1 in ((0, 1), (0, 2), (1, 2)):
+                        k_rot = int(torch.randint(0, 4, (1,)).item())
+                        blk = torch.rot90(blk, k=k_rot, dims=(d0, d1))
+
+                    c_slices.append(blk)
+                b_slices.append(torch.cat(c_slices, dim=2))
+            a_slices.append(torch.cat(b_slices, dim=1))
+
+        batch_volumes.append(torch.cat(a_slices, dim=0))
+
+    return torch.stack(batch_volumes, dim=0)[:, :A, :B, :C]

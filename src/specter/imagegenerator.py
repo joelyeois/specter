@@ -194,6 +194,11 @@ class ImageGeneratorFromCoordinates(ParticleGeneratorBase):
         Backend for convolution in potential building. Default 'fftconvolve'.
     detector_model : str, optional
         Detector model name.
+    periodic_potential : bool, optional
+        If True, use periodic boundary conditions when voxelizing coordinates
+        into the potential. Required when coordinates come from a periodic ice
+        generator (e.g. GradientSKIcemaker) to avoid density deficiency at
+        the box boundary. Default False.
     """
 
     def __init__(
@@ -225,6 +230,7 @@ class ImageGeneratorFromCoordinates(ParticleGeneratorBase):
         coincidence_radius: float | torch.Tensor = 0.0,
         num_frames: int | None = None,
         mean_squared_displacement_per_dose: float = 0.0,
+        periodic_potential: bool = False,
     ):
         self.pad_fft = pad_fft
         self.ice_thickness = ice_thickness
@@ -273,6 +279,7 @@ class ImageGeneratorFromCoordinates(ParticleGeneratorBase):
             self.pixel_size,
             self.atomic_numbers,
             conv_backend=conv_backend,
+            periodic=periodic_potential,
         )
         self.atomic_numbers = atomic_numbers
 

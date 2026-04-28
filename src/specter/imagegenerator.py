@@ -11,7 +11,7 @@ from specter import logger
 from . import rotations
 from .base_imager import BaseImager, compute_nz, pad_volume
 from .crowding import CrowdWithDuplicates
-from .icemaker import Icemaker, NaiveIcemaker
+from .icemaker import IceBank
 from .micrograph import MicrographGenerator
 from .potential import PotentialBuilder
 from .rotations import Rotation, VolumeRotator
@@ -60,7 +60,7 @@ class ParticleGeneratorBase(BaseImager):
         V : torch.Tensor
             Volume with ice blended in via icemask.
         """
-        ice = self.icemaker.generate_ice(batchsize=len(V))
+        ice = self.icemaker.generate_ice(batchsize=len(V)).to(V.device)
 
         if self.pad_fft:
             ice = F.pad(
@@ -169,9 +169,13 @@ class ImageGeneratorFromCoordinates(ParticleGeneratorBase):
     anisomag : torch.Tensor, optional
         Anisotropic magnification matrices.
     ice_model : str, optional
-        Model for ice generation.
+        Ice generation algorithm: ``'ap'`` (alternating projections), ``'gd'``
+        (gradient descent), ``'mcmc'`` (Metropolis Monte Carlo), or ``'random'``
+        (naive random placement).
     ice_thickness : float, optional
         Thickness of ice in Å.
+    num_unique_icecubes : int, optional
+        Number of unique ice cubes pre-built into the ``IceBank``. Default 8.
     scattering_model : str, optional
         Scattering model ('multislice', 'projection', 'ctf'). Default 'multislice'.
     aberration_model : str, optional
@@ -215,6 +219,7 @@ class ImageGeneratorFromCoordinates(ParticleGeneratorBase):
         anisomag: torch.Tensor | None = None,
         ice_model: str | None = None,
         ice_thickness: float | None = None,
+        num_unique_icecubes: int = 8,
         scattering_model: str = "multislice",
         aberration_model: str = "holography",
         noise_model: str = "poisson",
@@ -317,13 +322,17 @@ class ImageGeneratorFromCoordinates(ParticleGeneratorBase):
                 seed="origin",
             )
 
-        if self.ice_model == "randomchoice":
-            self.icemaker = NaiveIcemaker(n=self.nxy, dx=pixel_size, nz=self.nz)
-        elif self.ice_model == "iterative":
-            self.icemaker = Icemaker(n=self.nxy, dx=pixel_size, nz=self.nz)
-        elif self.ice_model is not None:
-            raise ValueError(
-                f"Unknown ice_model '{self.ice_model}'. Choose 'randomchoice' or 'iterative'."
+        if self.ice_model is not None:
+            if self.ice_model not in ("ap", "gd", "mcmc", "random"):
+                raise ValueError(
+                    f"Unknown ice_model '{self.ice_model}'. Choose 'ap', 'gd', 'mcmc', or 'random'."
+                )
+            self.icemaker = IceBank(
+                n=self.nxy,
+                dx=pixel_size,
+                nz=self.nz,
+                method=self.ice_model,
+                num_unique=num_unique_icecubes,
             )
 
     def rotate(self, Q: torch.Tensor, T: torch.Tensor) -> torch.Tensor:
@@ -410,9 +419,13 @@ class ImageGenerator(ParticleGeneratorBase):
     anisomag : torch.Tensor, optional
         Anisotropic magnification matrices.
     ice_model : str, optional
-        Ice model.
+        Ice generation algorithm: ``'ap'`` (alternating projections), ``'gd'``
+        (gradient descent), ``'mcmc'`` (Metropolis Monte Carlo), or ``'random'``
+        (naive random placement).
     ice_thickness : float, optional
         Ice thickness in Å.
+    num_unique_icecubes : int, optional
+        Number of unique ice cubes pre-built into the ``IceBank``. Default 8.
     scattering_model : str, optional
         Scattering model. Default 'multislice'.
     aberration_model : str, optional
@@ -451,6 +464,7 @@ class ImageGenerator(ParticleGeneratorBase):
         anisomag: torch.Tensor | None = None,
         ice_model: str | None = None,
         ice_thickness: float | None = None,
+        num_unique_icecubes: int = 8,
         scattering_model: str = "multislice",
         aberration_model: str = "holography",
         noise_model: str = "poisson",
@@ -542,21 +556,17 @@ class ImageGenerator(ParticleGeneratorBase):
                 progressbars=self.progressbars,
             )
 
-        if self.ice_model == "randomchoice":
-            self.icemaker = NaiveIcemaker(
-                n=self.nxy, dx=pixel_size, nz=self.nz, progressbars=self.progressbars
-            )
-        elif self.ice_model == "iterative":
-            self.icemaker = Icemaker(
+        if self.ice_model is not None:
+            if self.ice_model not in ("ap", "gd", "mcmc", "random"):
+                raise ValueError(
+                    f"Unknown ice_model '{self.ice_model}'. Choose 'ap', 'gd', 'mcmc', or 'random'."
+                )
+            self.icemaker = IceBank(
                 n=self.nxy,
                 dx=pixel_size,
                 nz=self.nz,
-                progressbars=self.progressbars,
-                parameterization=self.parameterization,
-            )
-        elif self.ice_model is not None:
-            raise ValueError(
-                f"Unknown ice_model '{self.ice_model}'. Choose 'randomchoice' or 'iterative'."
+                method=self.ice_model,
+                num_unique=num_unique_icecubes,
             )
 
         self._apply_defocus_shift(

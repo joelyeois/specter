@@ -992,7 +992,7 @@ def _wrap_coords(x: torch.Tensor, L: float) -> torch.Tensor:
     return (x + L / 2) % L - L / 2
 
 
-class MCMCIcemaker:
+class MCMCIcemaker(L.LightningModule):
     """
     Reverse Monte Carlo ice coordinate generator.
 
@@ -1038,6 +1038,7 @@ class MCMCIcemaker:
         device: str | torch.device = "cpu",
         progressbars: bool = True,
     ) -> None:
+        super().__init__()
         self.n = n
         self.dx = dx
         self.nz = nz if nz is not None else n
@@ -1053,10 +1054,9 @@ class MCMCIcemaker:
         self.r_max = r_max
         self.dr = dr
         self.n_bins = int(r_max / dr)
-        self.device = torch.device(device)
 
         self.n_molecules = int(ndensity_of_amorphous_ice * self.box_size**3)
-        self.r_centers = (torch.arange(self.n_bins) + 0.5) * dr
+        self.register_buffer("r_centers", (torch.arange(self.n_bins) + 0.5) * dr)
 
         self.positions: Optional[torch.Tensor] = None
         self.gr_hist: Optional[torch.Tensor] = None
@@ -1066,6 +1066,9 @@ class MCMCIcemaker:
         self._nc: int = max(3, int(np.ceil(self.box_size / self._cell_size)))
         self._cell_list: dict[tuple[int, int, int], list[int]] = {}
         self._mol_cell: list[tuple[int, int, int]] = []
+
+        if torch.device(device).type != "cpu":
+            self.to(device)
 
     # ------------------------------------------------------------------
     # Helpers
@@ -1688,7 +1691,7 @@ class MCMCIcemaker:
         for i in track(
             range(batchsize),
             description="Generating ice volumes",
-            disable=not self.progressbars,
+            disable=not self.progressbars or batchsize == 1,
             transient=True,
         ):
             self.init_random()
@@ -1728,7 +1731,7 @@ class MCMCIcemaker:
         return tile_volume_from_blocks(cubes, target_shape)
 
 
-class GradientSKIcemaker:
+class GradientSKIcemaker(L.LightningModule):
     """
     Differentiable S(k)-matching ice coordinate generator.
 
@@ -1766,7 +1769,7 @@ class GradientSKIcemaker:
         device: str | torch.device = "cpu",
         progressbars: bool = True,
     ) -> None:
-        self.device = torch.device(device)
+        super().__init__()
         self.min_distance = min_distance
         self.progressbars = progressbars
 
@@ -1792,7 +1795,7 @@ class GradientSKIcemaker:
         f_kernel = interp_vals.reshape(self.nz, self.n, self.n).float()
         f_kernel = f_kernel * (self.n_molecules**0.5)
         f_kernel[self.nz // 2, self.n // 2, self.n // 2] = float(self.n_molecules)
-        self.f_target: torch.Tensor = f_kernel.to(self.device)
+        self.register_buffer("f_target", f_kernel)
 
         self.dk: float = _im.dk
         self.f_target_radial: torch.Tensor = radial_profile_3d(f_kernel.cpu())
@@ -1800,12 +1803,10 @@ class GradientSKIcemaker:
         r_bins = (_im.K.cpu() / self.dk).round().long().flatten()
         n_rbins = int(r_bins.max().item()) + 1
         bin_count = torch.bincount(r_bins, minlength=n_rbins).float().clamp(min=1)
-        self._r_bins: torch.Tensor = r_bins.to(self.device)
-        self._bin_count: torch.Tensor = bin_count.to(self.device)
+        self.register_buffer("_r_bins", r_bins)
+        self.register_buffer("_bin_count", bin_count)
         self._n_rbins: int = n_rbins
-        self._f_target_rad_1d: torch.Tensor = self.f_target_radial[:n_rbins].to(
-            self.device
-        )
+        self.register_buffer("_f_target_rad_1d", self.f_target_radial[:n_rbins].clone())
 
         # Repulsion kernel in FFT convention (r=0 at [0,0,0]).
         # rep_kernel[i,j,k] = 1 if the wrapped displacement (i,j,k) is within
@@ -1822,11 +1823,12 @@ class GradientSKIcemaker:
         R_ker = torch.sqrt(ZZ**2 + YY**2 + XX**2)
         rep_kernel = (R_ker < r_min_vox).float()
         rep_kernel[0, 0, 0] = 0.0  # exclude self-contribution
-        self._rep_kernel_rfft: torch.Tensor = torch.fft.rfftn(rep_kernel).to(
-            self.device
-        )
+        self.register_buffer("_rep_kernel_rfft", torch.fft.rfftn(rep_kernel))
 
         self.positions: Optional[torch.Tensor] = None
+
+        if torch.device(device).type != "cpu":
+            self.to(device)
 
     # ------------------------------------------------------------------
     # Initialisation
@@ -2851,14 +2853,13 @@ class NaiveIcemaker(L.LightningModule):
         return icecubes
 
 
-class IceBank:
+class IceBank(L.LightningModule):
     """
     Standalone ice generator with a pre-built cache of unique cubes.
 
-    Call :meth:`build` once to run the algorithm and cache ``num_unique`` cubes.
-    All subsequent calls to :meth:`generate_ice` or :meth:`generate_big_ice` draw
-    from the cached bank with independent random augmentation per sample (roll, flip,
-    90° rotation), so the algorithm never runs again.
+    The bank is built lazily on the first call to :meth:`generate_ice`, so that
+    the underlying algorithm runs on whichever device the module has been moved to.
+    Call :meth:`build` explicitly to force an eager build (e.g. after ``.to('cuda')``).
 
     Parameters
     ----------
@@ -2868,17 +2869,19 @@ class IceBank:
         Number of voxels along x and y. Default is 256.
     nz : int, optional
         Number of voxels along z. Defaults to ``n`` (cubic box).
-    method : {'gs', 'gd', 'mcmc'}, optional
+    method : {'ap', 'gd', 'mcmc', 'random'}, optional
         Ice generation algorithm:
 
-        - ``'gs'`` — Gerchberg–Saxton iterative Fourier amplitude matching
+        - ``'ap'`` — alternating projections iterative Fourier amplitude matching
           (:class:`Icemaker`, default).
         - ``'gd'`` — gradient descent via L-BFGS (:class:`GradientSKIcemaker`).
         - ``'mcmc'`` — Metropolis Monte Carlo (:class:`MCMCIcemaker`).
+        - ``'random'`` — random molecule placement (:class:`NaiveIcemaker`).
+    num_unique : int, optional
+        Number of unique cubes to cache when :meth:`build` is called. Default is 8.
     **kwargs
         Forwarded to the underlying generator constructor. Use for method-specific
-        construction parameters such as ``min_distance``, ``device``, or
-        ``parameterization``.
+        construction parameters such as ``min_distance`` or ``parameterization``.
 
     Attributes
     ----------
@@ -2888,22 +2891,30 @@ class IceBank:
 
     Examples
     --------
-    >>> bank = IceBank(dx=0.5, n=256, method='gs')
-    >>> bank.build(num_unique=8)                        # expensive — run once
+    >>> bank = IceBank(dx=0.5, n=256, method='ap', num_unique=8)
+    >>> bank.to('cuda')
+    >>> bank.build()                                    # runs on CUDA
     >>> ice = bank.generate_ice(batchsize=4)            # fast — augmented from bank
-    >>> big = bank.generate_big_ice((1, 512, 512, 512)) # fast — tiled from bank
 
     MCMC requires setting the target g(r) before building:
 
-    >>> bank = IceBank(dx=0.5, n=256, method='mcmc')
+    >>> bank = IceBank(dx=0.5, n=256, method='mcmc', num_unique=8)
     >>> bank.generator.set_target_gr_from_md('sim.lammpstrj')
-    >>> bank.build(num_unique=8, n_sweeps=200)
+    >>> bank.to('cuda')
+    >>> bank.build(n_sweeps=200)
     """
 
     _METHOD_MAP: dict[str, type] = {
-        "gs": Icemaker,
+        "ap": Icemaker,
         "gd": GradientSKIcemaker,
         "mcmc": MCMCIcemaker,
+        "random": NaiveIcemaker,
+    }
+    _METHOD_LABELS: dict[str, str] = {
+        "ap": "Alternating Projections",
+        "gd": "gradient descent",
+        "mcmc": "Monte Carlo Markov Chain",
+        "random": "random",
     }
 
     def __init__(
@@ -2911,9 +2922,11 @@ class IceBank:
         dx: float = 0.5,
         n: int = 256,
         nz: Optional[int] = None,
-        method: str = "gs",
+        method: str = "ap",
+        num_unique: int = 8,
         **kwargs: Any,
     ) -> None:
+        super().__init__()
         if method not in self._METHOD_MAP:
             raise ValueError(
                 f"method must be one of {list(self._METHOD_MAP)}, got '{method}'"
@@ -2922,54 +2935,73 @@ class IceBank:
         self.n = n
         self.nz = nz if nz is not None else n
         self.method = method
+        self._num_unique = num_unique
 
         generator_cls = self._METHOD_MAP[method]
         self.generator = generator_cls(n=n, dx=dx, nz=nz, **kwargs)
         self._bank: Optional[torch.Tensor] = None
 
-    def build(self, num_unique: int = 8, **kwargs: Any) -> None:
+    def build(self, num_unique: int | None = None, **kwargs: Any) -> None:
         """
-        Generate and cache ``num_unique`` unique ice cubes.
+        Generate and cache unique ice cubes on the current device.
 
         Parameters
         ----------
         num_unique : int, optional
-            Number of unique cubes to generate. Default is 8.
+            Number of unique cubes to generate. Defaults to the value passed to
+            ``__init__`` (default 8).
         **kwargs
             Forwarded to ``generator.generate_ice(batchsize=num_unique, **kwargs)``.
             Method-specific build parameters:
 
-            - ``gs``: ``reduce_fraction``
+            - ``ap``: ``reduce_fraction``
             - ``gd``: ``n_steps``, ``lr``, ``rep_strength``
             - ``mcmc``: ``n_sweeps``, ``step_size``
         """
-        self._bank = self.generator.generate_ice(batchsize=num_unique, **kwargs)
+        if num_unique is None:
+            num_unique = self._num_unique
+        if self.method == "ap":
+            # AP runs all cubes in a single batched parallel call — preserve GPU throughput
+            self._bank = self.generator.generate_ice(
+                batchsize=num_unique, **kwargs
+            ).cpu()
+        else:
+            # MCMC and GD are sequential per-cube; lift the loop here for IceBank-level progress
+            cubes = [
+                self.generator.generate_ice(batchsize=1, **kwargs)
+                for _ in track(
+                    range(num_unique),
+                    description=f"Building ice cubes (method: {self._METHOD_LABELS[self.method]})",
+                    total=num_unique,
+                    transient=True,
+                )
+            ]
+            self._bank = torch.cat(cubes, dim=0).cpu()
 
     def generate_ice(self, batchsize: int = 1, **kwargs: Any) -> torch.Tensor:
         """
-        Return ``batchsize`` ice cubes, drawing from the bank if one exists.
+        Return ``batchsize`` ice cubes on the current device.
 
-        If :meth:`build` has been called, each cube is randomly sampled from the
-        bank and independently augmented (roll, flip, 90° rotation) — no algorithm
-        is re-run. If no bank exists, delegates directly to the underlying generator,
-        forwarding ``**kwargs`` as method-specific arguments.
+        Lazily calls :meth:`build` on the first invocation so the algorithm runs
+        on whichever device the module has been placed on. All subsequent calls draw
+        from the cached bank (which is stored on CPU) and move the output to device.
 
         Parameters
         ----------
         batchsize : int, optional
             Number of cubes to return. Default is 1.
         **kwargs
-            Forwarded to ``generator.generate_ice`` only when no bank exists.
+            Forwarded to :meth:`build` only on the first lazy call.
 
         Returns
         -------
         ice : torch.Tensor
-            Shape ``(batchsize, nz, n, n)``.
+            Shape ``(batchsize, nz, n, n)`` on the module's current device.
         """
-        if self._bank is not None:
-            _, D, H, W = self._bank.shape
-            return tile_volume_from_blocks(self._bank, (batchsize, D, H, W))
-        return self.generator.generate_ice(batchsize=batchsize, **kwargs)
+        if self._bank is None:
+            self.build(**kwargs)
+        _, D, H, W = self._bank.shape
+        return tile_volume_from_blocks(self._bank, (batchsize, D, H, W)).to(self.device)
 
     def generate_big_ice(
         self,

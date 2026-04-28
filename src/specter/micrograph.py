@@ -41,9 +41,15 @@ class MicrographGenerator(BaseImager):
     anisomag : torch.Tensor, optional
         Anisotropic magnification matrices, shape (n, 2, 2).
     ice_model : str, optional
-        Ice model passed to ``TomogramGenerator`` ('randomchoice' or 'iterative').
+        Ice generation algorithm passed to ``TomogramGenerator``: ``'ap'``
+        (alternating projections), ``'gd'`` (gradient descent), or ``'mcmc'``
+        (Metropolis Monte Carlo).
     ice_thickness : float, optional
         Ice thickness in Å passed to ``TomogramGenerator``.
+    num_unique_icecubes : int, optional
+        Number of unique ice cubes pre-built into the ``IceBank``. Default 8.
+    icecube_size : int, optional
+        XY and Z side length in voxels of each ice cube in the bank. Default 256.
     crowd_min_distance : float, optional
         Minimum inter-particle distance in Å for crowding.
     crowd_max_distance_z : float, optional
@@ -99,6 +105,8 @@ class MicrographGenerator(BaseImager):
         anisomag: torch.Tensor | None = None,
         ice_model: str | None = None,
         ice_thickness: float | None = None,
+        num_unique_icecubes: int = 8,
+        icecube_size: int = 256,
         crowd_min_distance: float | None = None,
         crowd_max_distance_z: float | None = None,
         water_air_interface: bool = True,
@@ -193,7 +201,7 @@ class MicrographGenerator(BaseImager):
         self.save_clean_exitwaves = save_clean_exitwaves
 
         if vol is not None:
-            self.vol = vol
+            self.register_buffer("vol", vol)
         else:
             self.specimen_gen = TomogramGenerator(
                 pixel_size=pixel_size,
@@ -204,6 +212,8 @@ class MicrographGenerator(BaseImager):
                 crowd_max_distance_z=crowd_max_distance_z,
                 ice_model=ice_model,
                 ice_thickness=ice_thickness,
+                num_unique_icecubes=num_unique_icecubes,
+                icecube_size=icecube_size,
                 water_air_interface=water_air_interface,
                 progressbars=progressbars,
                 chunk_size=chunk_size,

@@ -4,7 +4,7 @@ import torch
 import lightning as L
 
 from .crowding import CrowdWithDuplicates
-from .icemaker import Icemaker, NaiveIcemaker
+from .icemaker import IceBank
 
 
 class TomogramGenerator(L.LightningModule):
@@ -31,7 +31,13 @@ class TomogramGenerator(L.LightningModule):
     crowd_max_distance_z : float, optional
         Range in Z where crowding molecules are placed.
     ice_model : str, optional
-        Name of the ice model ('iterative' or 'randomchoice').
+        Ice generation algorithm: ``'ap'`` (alternating projections), ``'gd'``
+        (gradient descent), or ``'mcmc'`` (Metropolis Monte Carlo).
+    num_unique_icecubes : int, optional
+        Number of unique ice cubes pre-built into the ``IceBank``. Default 8.
+    icecube_size : int, optional
+        XY and Z side length in voxels of each ice cube in the bank.
+        Cubes are tiled to fill the full volume. Default 256.
     ice_thickness : float, optional
         Thickness of the ice layer in Å.
     water_air_interface : bool, optional
@@ -52,6 +58,8 @@ class TomogramGenerator(L.LightningModule):
         crowd_max_distance_z: float | None = None,
         ice_model: str | None = None,
         ice_thickness: float | None = None,
+        num_unique_icecubes: int = 8,
+        icecube_size: int = 256,
         water_air_interface: bool = True,
         progressbars: bool = True,
         chunk_size: int | None = None,
@@ -86,18 +94,18 @@ class TomogramGenerator(L.LightningModule):
         else:
             self.crowd = None
 
-        if self.ice_model == "randomchoice":
-            self.icemaker = NaiveIcemaker(
-                dx=pixel_size, n=nxy, nz=nz, progressbars=progressbars
-            )
-        elif self.ice_model == "iterative":
-            self.icemaker = Icemaker(
-                n=min(nxy, 256),  # Icemaker usually works with power-of-2 blocks
+        if self.ice_model is not None:
+            if self.ice_model not in ("ap", "gd", "mcmc"):
+                raise ValueError(
+                    f"Unknown ice_model '{self.ice_model}'. Choose 'ap', 'gd', or 'mcmc'."
+                )
+            self.icemaker = IceBank(
+                n=icecube_size,
                 dx=pixel_size,
-                nz=min(nz, 256),
-                chunk_size=chunk_size,
-                progressbars=progressbars,
+                nz=icecube_size,
+                method=self.ice_model,
             )
+            self.icemaker.build(num_unique=num_unique_icecubes)
         else:
             self.icemaker = None
 
@@ -128,14 +136,8 @@ class TomogramGenerator(L.LightningModule):
         # 2. Add ice
         if self.icemaker is not None:
             with torch.no_grad():
-                if self.ice_model == "randomchoice":
-                    ice = self.icemaker.generate_ice(device=device)
-                else:  # iterative
-                    ice = self.icemaker.generate_big_ice_fast(V.shape).to(device)
-
-                # Combine with mask to avoid overwriting dense objects
-                # Using 10V as threshold for 'dense'
-                icemask = (V < 10.0).to(V.dtype)
+                ice = self.icemaker.generate_big_ice(V.shape).to(device)
+                icemask = (V < 0.05 * V.max()).to(V.dtype)
                 V = V + ice * icemask
 
         return V

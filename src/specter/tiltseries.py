@@ -360,34 +360,7 @@ class TiltSeriesGenerator(MicrographGenerator):
             num_frames=num_frames,
             **kwargs,
         )
-
-        if move_to_cpu:
-            self.vol = self.vol.cpu()
-            self._vol_device = "cpu"
-            print("[TiltSeriesGenerator] Volume on CPU (move_to_cpu=True).", flush=True)
-        elif torch.cuda.is_available():
-            try:
-                self.vol = self.vol.cuda()
-                torch.cuda.synchronize()
-                self._vol_device = "cuda"
-                print("[TiltSeriesGenerator] Volume on GPU.", flush=True)
-            except RuntimeError as e:
-                if "out of memory" in str(e).lower():
-                    torch.cuda.empty_cache()
-                    self.vol = self.vol.cpu()
-                    self._vol_device = "cpu"
-                    print(
-                        "[TiltSeriesGenerator] GPU VRAM insufficient; volume on CPU.",
-                        flush=True,
-                    )
-                else:
-                    raise
-        else:
-            self.vol = self.vol.cpu()
-            self._vol_device = "cpu"
-            print(
-                "[TiltSeriesGenerator] CUDA not available; volume on CPU.", flush=True
-            )
+        # self.register_buffer("vol", vol)
 
         self.slice_batch_size = slice_batch_size
         self.iterative_scattering = IterativeScattering(
@@ -507,8 +480,6 @@ class TiltSeriesGenerator(MicrographGenerator):
         clean_images : torch.Tensor
             |detector_waves|² before noise, shape (B, N_tilts, Y, X).
         """
-        if self._vol_device == "cuda" and self.vol.device != self.device:
-            self.vol = self.vol.to(self.device)
 
         tilt_series = []
         exitwaves = []

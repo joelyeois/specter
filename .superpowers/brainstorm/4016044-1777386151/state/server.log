@@ -1,0 +1,2 @@
+{"type":"server-started","port":52578,"host":"0.0.0.0","url_host":"0.0.0.0","url":"http://0.0.0.0:52578","screen_dir":"/mnt/cbis/home/e0788253/czii/specter/.superpowers/brainstorm/4016044-1777386151/content","state_dir":"/mnt/cbis/home/e0788253/czii/specter/.superpowers/brainstorm/4016044-1777386151/state"}
+{"type":"server-stopped","reason":"idle timeout"}

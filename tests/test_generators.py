@@ -41,17 +41,17 @@ def _save_or_compare(name: str, tensor: torch.Tensor) -> None:
 
 @pytest.fixture
 def small_volume():
-    """3D volume (nz=16, ny=32, nx=32) with a simple phantom."""
-    vol = torch.zeros(16, 32, 32)
-    vol[6:10, 12:20, 12:20] = 50.0
+    """3D cubic volume (32, 32, 32) with a simple phantom."""
+    vol = torch.zeros(32, 32, 32)
+    vol[12:20, 12:20, 12:20] = 50.0
     return vol
 
 
 @pytest.fixture
 def small_volume_4d():
-    """4D volume (1, nz=16, ny=32, nx=32) as returned by TomogramGenerator."""
-    vol = torch.zeros(1, 16, 32, 32)
-    vol[0, 6:10, 12:20, 12:20] = 50.0
+    """4D cubic volume (1, 32, 32, 32) as returned by TomogramGenerator."""
+    vol = torch.zeros(1, 32, 32, 32)
+    vol[0, 12:20, 12:20, 12:20] = 50.0
     return vol
 
 
@@ -92,7 +92,7 @@ def test_image_generator_regression(small_volume, ctf_params):
         dose_per_angstrom=2.0,
         noise_model="poisson",
         scattering_model="multislice",
-        ice_model="randomchoice",
+        ice_model="random",
         alpha=0.1,
         coincidence_radius=1.8,
         num_frames=10,
@@ -122,7 +122,7 @@ def test_image_generator_from_coordinates_regression(small_coords, ctf_params):
         dose_per_angstrom=2.0,
         noise_model="poisson",
         scattering_model="multislice",
-        ice_model="randomchoice",
+        ice_model="random",
         alpha=0.1,
         coincidence_radius=1.8,
         num_frames=10,
@@ -146,7 +146,7 @@ def test_micrograph_generator_regression(small_volume, ctf_params):
         dose_per_angstrom=2.0,
         noise_model="poisson",
         scattering_model="projection",
-        ice_model="randomchoice",
+        ice_model="random",
         alpha=0.1,
         coincidence_radius=1.8,
         num_frames=10,

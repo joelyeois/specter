@@ -246,7 +246,7 @@ def main() -> None:
     import specter
     from specter.cryosparc import create_micrograph_starfile
     from specter.imagegenerator import TiltSeriesGenerator
-    from specter.icemaker import Icemaker
+    from specter.icemaker import APIcemaker
 
     args = parse_args()
     specter.set_verbosity(logging.INFO)
@@ -270,7 +270,7 @@ def main() -> None:
         _console.print(
             f"  algorithm_dx = {args.algorithm_dx:.2f} Å,  target_dx = {dx:.2f} Å,  n_blocks = {args.n_ice_blocks}"
         )
-        im = Icemaker(n=256, dx=dx)
+        im = APIcemaker(n=256, dx=dx)
         ice = torch.squeeze(
             im.generate_big_ice_interpolate(
                 (tomo.shape[0], tomo.shape[1], tomo.shape[2]),

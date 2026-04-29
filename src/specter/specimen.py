@@ -95,9 +95,9 @@ class TomogramGenerator(L.LightningModule):
             self.crowd = None
 
         if self.ice_model is not None:
-            if self.ice_model not in ("ap", "gd", "mcmc"):
+            if self.ice_model not in ("ap", "gd", "mcmc", "random"):
                 raise ValueError(
-                    f"Unknown ice_model '{self.ice_model}'. Choose 'ap', 'gd', or 'mcmc'."
+                    f"Unknown ice_model '{self.ice_model}'. Choose 'ap', 'gd', 'mcmc', or 'random'."
                 )
             self.icemaker = IceBank(
                 n=icecube_size,

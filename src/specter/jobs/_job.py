@@ -3,10 +3,15 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import types
 from datetime import datetime, timezone
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any, Literal
+
+if TYPE_CHECKING:
+    import matplotlib.figure
+    import torch
 
 
 def _resolve_base_dir(base_dir: str | Path | None) -> Path:
@@ -43,6 +48,8 @@ def _next_job_id(project_dir: Path) -> str:
     if not existing:
         return "J001"
     last = int(existing[-1].name[1:])
+    if last >= 999:
+        raise RuntimeError("Job ID overflow: project has 999 jobs. Use a new project.")
     return f"J{last + 1:03d}"
 
 
@@ -107,7 +114,7 @@ class Job:
             )
         return self._dir
 
-    def __enter__(self) -> "Job":
+    def __enter__(self) -> Job:
         project_dir = self._base_dir / self._project
         project_dir.mkdir(parents=True, exist_ok=True)
         self._job_id = _next_job_id(project_dir)
@@ -119,10 +126,10 @@ class Job:
 
     def __exit__(
         self,
-        exc_type: type | None,
+        exc_type: type[BaseException] | None,
         exc_val: BaseException | None,
-        exc_tb: object,
-    ) -> bool:
+        exc_tb: types.TracebackType | None,
+    ) -> Literal[False]:
         completed_at = datetime.now(timezone.utc).isoformat()
         if exc_type is None:
             self._write_json("complete", completed_at=completed_at)
@@ -131,8 +138,14 @@ class Job:
         return False
 
     def _write_json(self, status: str, **extra: Any) -> None:
-        assert self._dir is not None
-        assert self._job_id is not None
+        if self._dir is None:
+            raise RuntimeError(
+                "Job has not been entered yet. Use 'with Job(...) as job:'"
+            )
+        if self._job_id is None:
+            raise RuntimeError(
+                "Job has not been entered yet. Use 'with Job(...) as job:'"
+            )
         data: dict[str, Any] = {
             "id": self._job_id,
             "type": self._job_type,
@@ -182,7 +195,7 @@ class Job:
         """
         import inspect
 
-        sig = inspect.signature(cls.__init__)
+        sig = inspect.signature(cls.__init__)  # type: ignore[misc]
         bound = sig.bind(None, *args, **kwargs)
         bound.apply_defaults()
         arguments = dict(bound.arguments)
@@ -199,7 +212,7 @@ class Job:
 
         return cls(**arguments)
 
-    def save(self, tensor: "torch.Tensor", filename: str) -> Path:  # noqa: F821
+    def save(self, tensor: torch.Tensor, filename: str) -> Path:
         """
         Save a tensor to the job folder.
 
@@ -210,7 +223,7 @@ class Job:
         filename : str
             Target filename. ``.mrc``/``.mrcs`` use mrcfile; ``.pt`` uses torch.save.
         """
-        import mrcfile
+        import mrcfile  # type: ignore[import-untyped]
         import torch
 
         path = self.dir / filename
@@ -226,7 +239,7 @@ class Job:
             )
         return path
 
-    def save_figure(self, fig: "matplotlib.figure.Figure", filename: str) -> Path:  # noqa: F821
+    def save_figure(self, fig: matplotlib.figure.Figure, filename: str) -> Path:
         """
         Save a matplotlib figure to the job folder.
 

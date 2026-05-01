@@ -9,6 +9,7 @@ import pytest
 import torch
 
 from specter.jobs._job import Job, _resolve_base_dir
+from specter.jobs._database import JobDatabase
 
 
 def test_job_creates_folder(tmp_path: Path) -> None:
@@ -256,3 +257,62 @@ def test_job_save_figure(tmp_path: Path) -> None:
         out = job.save_figure(fig, "plot.png")
     assert out.exists()
     plt.close(fig)
+
+
+# ---------------------------------------------------------------------------
+# Task 5: JobDatabase — list, get, diff
+# ---------------------------------------------------------------------------
+
+
+def _make_job(tmp_path: Path, project: str, job_type: str, params: dict) -> None:  # type: ignore[type-arg]
+    with Job(job_type, project=project, base_dir=tmp_path) as job:
+        job.log(params)
+
+
+def test_database_list_all(tmp_path: Path) -> None:
+    _make_job(tmp_path, "proj-a", "ghostbuster", {"lr": 0.1})
+    _make_job(tmp_path, "proj-a", "ghostbuster", {"lr": 0.05})
+    _make_job(tmp_path, "proj-b", "tilt-series", {"defocus": 1.5})
+    db = JobDatabase(base_dir=tmp_path)
+    all_jobs = db.list()
+    assert len(all_jobs) == 3
+
+
+def test_database_list_by_project(tmp_path: Path) -> None:
+    _make_job(tmp_path, "proj-a", "ghostbuster", {"lr": 0.1})
+    _make_job(tmp_path, "proj-b", "tilt-series", {"defocus": 1.5})
+    db = JobDatabase(base_dir=tmp_path)
+    assert len(db.list(project="proj-a")) == 1
+    assert len(db.list(project="proj-b")) == 1
+
+
+def test_database_get(tmp_path: Path) -> None:
+    _make_job(tmp_path, "proj-a", "ghostbuster", {"lr": 0.1})
+    db = JobDatabase(base_dir=tmp_path)
+    entry = db.get("proj-a", "J001")
+    assert entry["id"] == "J001"
+    assert entry["params"]["lr"] == 0.1
+
+
+def test_database_get_missing_raises(tmp_path: Path) -> None:
+    db = JobDatabase(base_dir=tmp_path)
+    with pytest.raises(FileNotFoundError):
+        db.get("proj-a", "J999")
+
+
+def test_database_diff_changed_keys(tmp_path: Path) -> None:
+    _make_job(tmp_path, "proj-a", "ghostbuster", {"lr": 0.1, "symmetry": "I1"})
+    _make_job(tmp_path, "proj-a", "ghostbuster", {"lr": 0.05, "symmetry": "I1"})
+    db = JobDatabase(base_dir=tmp_path)
+    diff = db.diff("proj-a", "J001", "J002")
+    assert "lr" in diff
+    assert diff["lr"] == (0.1, 0.05)
+    assert "symmetry" not in diff
+
+
+def test_database_diff_missing_key(tmp_path: Path) -> None:
+    _make_job(tmp_path, "proj-a", "ghostbuster", {"lr": 0.1})
+    _make_job(tmp_path, "proj-a", "ghostbuster", {"lr": 0.1, "new_param": "hello"})
+    db = JobDatabase(base_dir=tmp_path)
+    diff = db.diff("proj-a", "J001", "J002")
+    assert diff["new_param"] == (None, "hello")

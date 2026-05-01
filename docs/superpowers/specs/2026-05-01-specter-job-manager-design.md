@@ -68,7 +68,7 @@ Exported from top-level `specter` package alongside existing exports.
 from specter.jobs import Job
 
 with Job("ghostbuster", project="empiar-12391") as job:
-    model = job.create(Ghostbuster, volume_init, orig_pixel_size, rotations, ..., run_dir=job.dir)
+    model = job.create(Ghostbuster, volume_init, orig_pixel_size, rotations, ...)
     job.log({"dose_rescale_factor": dose_per_area, "n_particles": num_particles})
     trainer.fit(model, train_loader)
 ```
@@ -89,26 +89,28 @@ Job(
 
 ### `job.dir`
 
-`Path` to the auto-created job folder. Pass this as `run_dir` to `Ghostbuster`,
-or as the output path for any simulation job.
+`Path` to the auto-created job folder. Available if the user needs to save outputs
+manually via `job.save()`. For classes with a `run_dir` parameter, this is handled
+automatically by `job.create()` — the user does not need to reference `job.dir` directly.
 
 ### `job.create(cls, *args, **kwargs) -> instance`
 
-Factory that captures a complete parameter snapshot and then instantiates the class.
+Factory that captures a complete parameter snapshot, sets the output directory, and
+instantiates the class.
 
 Internally:
 1. Binds `args` and `kwargs` to the class `__init__` signature via
    `inspect.signature(cls.__init__).bind(None, *args, **kwargs).apply_defaults()`
    (the leading `None` stands for `self`)
-2. Serializes the bound arguments into `job.json` under `params`:
+2. If the class `__init__` has a `run_dir` parameter, injects `run_dir=job.dir`
+   automatically, overriding any user-supplied value. The user never needs to
+   mention `job.dir` or `run_dir` explicitly.
+3. Serializes the bound arguments into `job.json` under `params`:
    - Scalars, strings, booleans, lists of scalars → stored as-is
    - `torch.Tensor` → `{"__type__": "Tensor", "shape": [Z, Y, X], "dtype": "float32"}`
    - `dict` of tensors (e.g. `ctf_params`) → each value summarised the same way
    - Any other non-JSON-serializable object → `{"__type__": "<classname>", "repr": str(obj)[:200]}`
-3. Instantiates `cls(*args, **kwargs)` and returns it
-
-The class is instantiated with the original arguments unmodified — `job.create` is a
-transparent wrapper with no side effects on the object itself.
+4. Instantiates `cls(*args, **kwargs)` with the (possibly modified) arguments and returns it
 
 ### `job.log(params: dict)`
 
@@ -268,10 +270,9 @@ The only migration needed when adopting the job manager for a notebook:
 model = Ghostbuster(volume_init, orig_pixel_size, rotations, ...,
                     run_dir="/scratch/loh/joel/my-run/")
 
-# after
+# after — run_dir is handled automatically, user never specifies it
 with Job("ghostbuster", project="empiar-12391") as job:
-    model = job.create(Ghostbuster, volume_init, orig_pixel_size, rotations, ...,
-                       run_dir=job.dir)
+    model = job.create(Ghostbuster, volume_init, orig_pixel_size, rotations, ...)
     job.log({"dose_rescale_factor": dose_per_area, "n_particles": len(images)})
     trainer.fit(model, train_loader)
 ```
@@ -286,6 +287,7 @@ with Job("ghostbuster", project="empiar-12391") as job:
 - `test_job_status_failed`: verify status is `failed` and error is recorded after exception
 - `test_job_id_sequence`: verify J001, J002, J003 assigned in order
 - `test_job_create_captures_defaults`: verify `job.create()` captures args not explicitly passed
+- `test_job_create_injects_run_dir`: verify `run_dir` is set to `job.dir` automatically when the class accepts it
 - `test_job_create_tensor_summary`: verify tensors are stored as shape/dtype dicts
 - `test_job_log_merges`: verify repeated `job.log()` calls accumulate params
 - `test_database_list`: verify `JobDatabase.list()` returns all jobs

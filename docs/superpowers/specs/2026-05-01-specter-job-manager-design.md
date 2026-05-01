@@ -11,7 +11,7 @@ produced which outputs, making it hard to compare runs or revisit past work.
 
 A lightweight, opt-in job management layer that:
 - Auto-creates a unique output folder per run
-- Records a complete parameter snapshot (all args + defaults + git commit) alongside outputs
+- Records a complete parameter snapshot (all constructor args + defaults + git commit) alongside outputs
 - Enables CLI browsing and diffing of past jobs
 - Does **not** break any existing notebook or script workflow
 
@@ -68,7 +68,8 @@ Exported from top-level `specter` package alongside existing exports.
 from specter.jobs import Job
 
 with Job("ghostbuster", project="empiar-12391") as job:
-    model = Ghostbuster(..., run_dir=job.dir)
+    model = job.create(Ghostbuster, volume_init, orig_pixel_size, rotations, ..., run_dir=job.dir)
+    job.log({"dose_rescale_factor": dose_per_area, "n_particles": num_particles})
     trainer.fit(model, train_loader)
 ```
 
@@ -78,30 +79,54 @@ with Job("ghostbuster", project="empiar-12391") as job:
 Job(
     job_type: str,
     project: str,
-    params: dict[str, Any] | None = None,
     base_dir: str | Path | None = None,
 )
 ```
 
 - `job_type`: free-form string label, e.g. `"ghostbuster"`, `"tilt-series"`
 - `project`: groups related jobs into a folder
-- `params`: optional dict of additional params to record beyond what the job itself writes
-- `base_dir`: overrides the default base directory (see configuration)
+- `base_dir`: overrides the default base directory (see Configuration)
 
 ### `job.dir`
 
 `Path` to the auto-created job folder. Pass this as `run_dir` to `Ghostbuster`,
 or as the output path for any simulation job.
 
+### `job.create(cls, *args, **kwargs) -> instance`
+
+Factory that captures a complete parameter snapshot and then instantiates the class.
+
+Internally:
+1. Binds `args` and `kwargs` to the class `__init__` signature via
+   `inspect.signature(cls.__init__).bind(None, *args, **kwargs).apply_defaults()`
+   (the leading `None` stands for `self`)
+2. Serializes the bound arguments into `job.json` under `params`:
+   - Scalars, strings, booleans, lists of scalars → stored as-is
+   - `torch.Tensor` → `{"__type__": "Tensor", "shape": [Z, Y, X], "dtype": "float32"}`
+   - `dict` of tensors (e.g. `ctf_params`) → each value summarised the same way
+   - Any other non-JSON-serializable object → `{"__type__": "<classname>", "repr": str(obj)[:200]}`
+3. Instantiates `cls(*args, **kwargs)` and returns it
+
+The class is instantiated with the original arguments unmodified — `job.create` is a
+transparent wrapper with no side effects on the object itself.
+
 ### `job.log(params: dict)`
 
-Merges additional key-value pairs into `job.json`. Useful for recording
-things that aren't constructor args (e.g. dataset path, number of particles used).
+Merges additional key-value pairs into `job.json["params"]`. Use this for anything
+that happens outside the class constructor — pre-processing steps, dataset paths,
+number of particles used, etc.
+
+```python
+job.log({"dose_rescale_factor": dose_per_area, "n_particles": len(images)})
+```
+
+Values must be JSON-serializable (scalars, strings, lists). Call multiple times if
+needed; each call merges into the existing params.
 
 ### `job.save(tensor, filename)`
 
-Saves a `torch.Tensor` to `job.dir / filename`. Uses `mrcfile` for `.mrc`/`.mrcs`,
-`torch.save` for `.pt`, otherwise raises.
+Saves a `torch.Tensor` to `job.dir / filename`. Converts to numpy internally.
+Uses `mrcfile` for `.mrc`/`.mrcs`, `torch.save` for `.pt`, otherwise raises.
 
 ### `job.save_figure(fig, filename)`
 
@@ -131,17 +156,31 @@ Saves a `matplotlib.Figure` to `job.dir / filename`.
   "specter_version": "0.1.0",
   "specter_commit": "554229b",
   "params": {
+    "voxel_size": 1.06,
+    "energy": 300.0,
+    "dose_per_angstrom": 40.0,
     "lr": 0.1,
+    "lr_R": null,
+    "lr_T": null,
+    "lr_D": null,
+    "lr_decay": 0.1,
+    "scheduler": "LambdaLR",
+    "scattering_model": "rytov",
+    "aberration_model": "holography",
     "symmetry": "I1",
-    "scattering_model": "rytov"
+    "sparsity": 0,
+    "V": {"__type__": "Tensor", "shape": [224, 224, 224], "dtype": "float32"},
+    "quaternions": {"__type__": "Tensor", "shape": [5832, 4], "dtype": "float32"},
+    "translations": {"__type__": "Tensor", "shape": [5832, 2], "dtype": "float32"},
+    "ctf_params": {
+      "dfu": {"__type__": "Tensor", "shape": [5832], "dtype": "float32"},
+      "dfv": {"__type__": "Tensor", "shape": [5832], "dtype": "float32"}
+    },
+    "dose_rescale_factor": 44.944,
+    "n_particles": 5832
   }
 }
 ```
-
-`params` stores whatever was passed via `Job(..., params={...})` or `job.log(...)`.
-It does **not** attempt to auto-capture Ghostbuster's constructor args — Lightning
-already writes `hparams.yaml` for that. The `params` dict is for the user to record
-the high-level choices they made (learning rates, which dataset, etc.).
 
 `specter_commit` is read from `git rev-parse --short HEAD` at job creation time;
 falls back to `"unknown"` if git is unavailable.
@@ -149,8 +188,9 @@ falls back to `"unknown"` if git is unavailable.
 ### Schema evolution
 
 The schema is append-only and unversioned at the field level. Old jobs simply lack
-fields added in the future. The `specter_commit` field pinpoints the exact code
-version that produced any job, making field differences interpretable.
+fields added in the future (e.g. if a new constructor argument is added to Ghostbuster
+tomorrow, old jobs won't have it — which is correct, since those jobs didn't use it).
+The `specter_commit` field pinpoints the exact code version that produced any job.
 
 ---
 
@@ -169,7 +209,8 @@ db.diff("empiar-12391", "J001", "J002")     # → dict of changed keys only
 
 `diff` compares the `params` dicts of two jobs, returning only keys where
 the values differ. Keys present in one job but not the other are included
-with `None` as the missing side's value.
+with `None` as the missing side's value. Tensor summary dicts are compared
+by shape only.
 
 ---
 
@@ -210,6 +251,9 @@ specter-jobs diff empiar-12391 J001 J002
  lr    0.1  →  0.05
 ```
 
+`list` shows a short summary of scalar params only (tensors omitted). `show` renders
+the full `job.json` including tensor summaries.
+
 ---
 
 ## Integration With Existing Notebooks
@@ -221,11 +265,15 @@ The only migration needed when adopting the job manager for a notebook:
 
 ```python
 # before
-model = Ghostbuster(..., run_dir="/scratch/loh/joel/my-run/")
+model = Ghostbuster(volume_init, orig_pixel_size, rotations, ...,
+                    run_dir="/scratch/loh/joel/my-run/")
 
 # after
-with Job("ghostbuster", project="empiar-12391", params={"lr": lr, "symmetry": symmetry}) as job:
-    model = Ghostbuster(..., run_dir=job.dir)
+with Job("ghostbuster", project="empiar-12391") as job:
+    model = job.create(Ghostbuster, volume_init, orig_pixel_size, rotations, ...,
+                       run_dir=job.dir)
+    job.log({"dose_rescale_factor": dose_per_area, "n_particles": len(images)})
+    trainer.fit(model, train_loader)
 ```
 
 ---
@@ -237,6 +285,9 @@ with Job("ghostbuster", project="empiar-12391", params={"lr": lr, "symmetry": sy
 - `test_job_status_complete`: verify status is `complete` after clean exit
 - `test_job_status_failed`: verify status is `failed` and error is recorded after exception
 - `test_job_id_sequence`: verify J001, J002, J003 assigned in order
+- `test_job_create_captures_defaults`: verify `job.create()` captures args not explicitly passed
+- `test_job_create_tensor_summary`: verify tensors are stored as shape/dtype dicts
+- `test_job_log_merges`: verify repeated `job.log()` calls accumulate params
 - `test_database_list`: verify `JobDatabase.list()` returns all jobs
 - `test_database_diff`: verify diff returns only changed keys
 - `test_cli_list`: smoke test CLI list command

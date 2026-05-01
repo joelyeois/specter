@@ -1,5 +1,7 @@
 import logging
 
+from .jobs import Job as Job, JobDatabase as JobDatabase
+
 # Set up package-level logger
 logger = logging.getLogger("specter")
 logger.addHandler(logging.NullHandler())

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import subprocess as proc
+import sys
 from pathlib import Path
 
 import mrcfile
@@ -316,3 +318,69 @@ def test_database_diff_missing_key(tmp_path: Path) -> None:
     db = JobDatabase(base_dir=tmp_path)
     diff = db.diff("proj-a", "J001", "J002")
     assert diff["new_param"] == (None, "hello")
+
+
+# ---------------------------------------------------------------------------
+# Task 6: CLI smoke tests — list, show, diff
+# ---------------------------------------------------------------------------
+
+
+def test_cli_list_smoke(tmp_path: Path) -> None:
+    _make_job(tmp_path, "my-project", "ghostbuster", {"lr": 0.1, "symmetry": "I1"})
+    result = proc.run(
+        [
+            sys.executable,
+            "-m",
+            "specter.jobs._cli",
+            "list",
+            "--base-dir",
+            str(tmp_path),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0
+    assert "my-project" in result.stdout
+    assert "J001" in result.stdout
+
+
+def test_cli_show_smoke(tmp_path: Path) -> None:
+    _make_job(tmp_path, "my-project", "ghostbuster", {"lr": 0.1})
+    result = proc.run(
+        [
+            sys.executable,
+            "-m",
+            "specter.jobs._cli",
+            "show",
+            "my-project",
+            "J001",
+            "--base-dir",
+            str(tmp_path),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0
+    assert "J001" in result.stdout
+
+
+def test_cli_diff_smoke(tmp_path: Path) -> None:
+    _make_job(tmp_path, "my-project", "ghostbuster", {"lr": 0.1})
+    _make_job(tmp_path, "my-project", "ghostbuster", {"lr": 0.05})
+    result = proc.run(
+        [
+            sys.executable,
+            "-m",
+            "specter.jobs._cli",
+            "diff",
+            "my-project",
+            "J001",
+            "J002",
+            "--base-dir",
+            str(tmp_path),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0
+    assert "lr" in result.stdout

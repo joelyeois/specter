@@ -4,7 +4,7 @@ import torch
 import lightning as L
 
 from .crowding import CrowdWithDuplicates
-from .icemaker import IceBank
+from .ice import IceBank
 
 
 class TomogramGenerator(L.LightningModule):

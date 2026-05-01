@@ -8,7 +8,7 @@ import torch.nn.functional as F
 
 from specter.detectors import k3_200kv, k3_300kv, perfect_detector
 
-from .microscope import Aberration, Detector
+from ..microscope import Aberration, Detector
 
 
 def compute_nz(base_nz: int, ice_thickness: float | None, pixel_size: float) -> int:
@@ -138,6 +138,9 @@ class BaseImager(L.LightningModule):
     potential_scale : float or torch.Tensor, optional
         Multiplier applied to the scattering potential before propagation.
         Scalar or 1-D tensor of length n. Default 1.0.
+    bfactor_envelope : float or torch.Tensor or None, optional
+        Isotropic B-factor envelope in Å² applied in the microscope transfer
+        function. None or 0.0 means no envelope. Default None.
     """
 
     def __init__(
@@ -159,6 +162,7 @@ class BaseImager(L.LightningModule):
         coincidence_radius: float | torch.Tensor = 0.0,
         num_frames: int | None = None,
         potential_scale: float | torch.Tensor = 1.0,
+        bfactor_envelope: float | torch.Tensor | None = None,
     ):
         super().__init__()
         self.pixel_size = pixel_size
@@ -202,6 +206,18 @@ class BaseImager(L.LightningModule):
         _to_buffer(dose_per_angstrom, "dose_per_angstrom")
         _to_buffer(coincidence_radius, "coincidence_radius")
         _to_buffer(potential_scale, "potential_scale")
+        if bfactor_envelope is not None:
+            if "bfactor_envelope" in self._ctf_param_names:
+                self._buffers.pop("bfactor_envelope")
+                self._ctf_param_names.remove("bfactor_envelope")
+            _to_buffer(bfactor_envelope, "bfactor_envelope")
+
+    def _ctf_batch(self, idx: torch.Tensor | int) -> dict[str, torch.Tensor]:
+        """Collect per-image transfer-function parameters for a batch."""
+        ctf_batch = {k: getattr(self, k)[idx] for k in self._ctf_param_names}
+        if getattr(self, "bfactor_envelope", None) is not None:
+            ctf_batch["bfactor_envelope"] = self.bfactor_envelope[idx]
+        return ctf_batch
 
     def _init_detector_mtf(self) -> None:
         """Register the detector MTF buffer based on the model name."""

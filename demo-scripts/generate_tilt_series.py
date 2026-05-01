@@ -246,7 +246,7 @@ def main() -> None:
     import specter
     from specter.cryosparc import create_micrograph_starfile
     from specter.imagegenerator import TiltSeriesGenerator
-    from specter.icemaker import APIcemaker
+    from specter.ice import APIcemaker
 
     args = parse_args()
     specter.set_verbosity(logging.INFO)

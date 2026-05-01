@@ -4,12 +4,12 @@ from typing import Any, Sequence
 
 import torch
 import torch.nn.functional as F
-from .progress import track
+from ..progress import track
 
-from . import rotations
-from .micrograph import MicrographGenerator
-from .rotations import Rotation
-from .scattering import IterativeScattering
+from .. import rotations
+from ._micrograph import MicrographGenerator
+from ..rotations import Rotation
+from ..scattering import IterativeScattering
 
 
 class TiltSeriesGenerator(MicrographGenerator):
@@ -83,6 +83,9 @@ class TiltSeriesGenerator(MicrographGenerator):
         Coincidence radius in pixels. Default 0.0.
     num_frames : int, optional
         Number of detector frames to simulate. Default None.
+    bfactor_envelope : float or torch.Tensor or None, optional
+        Isotropic B-factor envelope in Å² applied in the microscope transfer
+        function. None or 0.0 means no envelope. Default None.
     """
 
     # ------------------------------------------------------------------ #
@@ -253,6 +256,7 @@ class TiltSeriesGenerator(MicrographGenerator):
         tilt_axis: str = "x",
         coincidence_radius: float | torch.Tensor = 0.0,
         num_frames: int | None = None,
+        bfactor_envelope: float | torch.Tensor | None = None,
         **kwargs: Any,
     ):
         if vol is None:
@@ -358,6 +362,7 @@ class TiltSeriesGenerator(MicrographGenerator):
             slice_batch_size=slice_batch_size,
             coincidence_radius=coincidence_radius,
             num_frames=num_frames,
+            bfactor_envelope=bfactor_envelope,
             **kwargs,
         )
         # self.register_buffer("vol", vol)

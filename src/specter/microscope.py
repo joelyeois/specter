@@ -388,6 +388,7 @@ class Aberration(L.LightningModule):
             - 'tiltx'/'tilty' : Beam tilt
             - 'trefoil1'/'trefoil2' : Trefoil aberration
             - 'tetrafoil1'/'tetrafoil2'/'tetrafoil3'/'tetrafoil4' : Tetrafoil
+            - 'bfactor_envelope' : Isotropic B-factor envelope in Å²
 
         Returns
         -------
@@ -400,7 +401,7 @@ class Aberration(L.LightningModule):
         Missing parameters default to zero (no contribution to aberration).
         """
         # total aberration phase
-        chi = 0
+        chi = torch.zeros_like(self.k)
 
         # --- Defocus ---
         if any(k in ctf_params for k in ["dfu", "dfv", "dfang"]):
@@ -410,30 +411,30 @@ class Aberration(L.LightningModule):
             dfv = ctf_params.get("dfv", dfu).view(-1, 1, 1)
 
             dfang = ctf_params.get("dfang", self.zero).view(-1, 1, 1)
-            chi += self._defocus(dfu, dfv, dfang)
+            chi = chi + self._defocus(dfu, dfv, dfang)
 
         # --- Cs ---
         if "cs" in ctf_params:
             cs = ctf_params.get("cs", self.zero).view(-1, 1, 1)
-            chi += self._cs(cs)
+            chi = chi + self._cs(cs)
 
         # --- Phaseshift ---
         if "phaseshift" in ctf_params:
             phaseshift = ctf_params.get("phaseshift", self.zero).view(-1, 1, 1)
-            chi += self._phaseshift(phaseshift)
+            chi = chi + self._phaseshift(phaseshift)
 
         # --- Beam tilt ---
         if any(k in ctf_params for k in ["tiltx", "tilty"]):
             cs = ctf_params.get("cs", self.zero).view(-1, 1, 1)
             tiltx = ctf_params.get("tiltx", self.zero).view(-1, 1, 1)
             tilty = ctf_params.get("tilty", self.zero).view(-1, 1, 1)
-            chi += self._beamtilt(cs, tiltx, tilty)
+            chi = chi + self._beamtilt(cs, tiltx, tilty)
 
         # --- Trefoil ---
         if any(k in ctf_params for k in ["trefoil1", "trefoil2"]):
             trefoil1 = ctf_params.get("trefoil1", self.zero).view(-1, 1, 1)
             trefoil2 = ctf_params.get("trefoil2", self.zero).view(-1, 1, 1)
-            chi += self._trefoil(trefoil1, trefoil2)
+            chi = chi + self._trefoil(trefoil1, trefoil2)
 
         # --- Tetrafoil ---
         if any(
@@ -444,9 +445,16 @@ class Aberration(L.LightningModule):
             tetrafoil2 = ctf_params.get("tetrafoil2", self.zero).view(-1, 1, 1)
             tetrafoil3 = ctf_params.get("tetrafoil3", self.zero).view(-1, 1, 1)
             tetrafoil4 = ctf_params.get("tetrafoil4", self.zero).view(-1, 1, 1)
-            chi += self._tetrafoil(tetrafoil1, tetrafoil2, tetrafoil3, tetrafoil4)
+            chi = chi + self._tetrafoil(tetrafoil1, tetrafoil2, tetrafoil3, tetrafoil4)
 
-        return torch.exp(-1j * chi)
+        transfer = torch.exp(-1j * chi)
+
+        if "bfactor_envelope" in ctf_params:
+            bfactor = ctf_params["bfactor_envelope"].view(-1, 1, 1)
+            if torch.any(bfactor != 0):
+                transfer = transfer * torch.exp(-bfactor * self.k2 / 4)
+
+        return transfer
 
     def forward(
         self, exitwave: torch.Tensor, ctf_params: dict[str, Any]

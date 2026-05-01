@@ -8,15 +8,15 @@ import torch.nn.functional as F
 
 from specter import logger
 
-from . import rotations
-from .base_imager import BaseImager, compute_nz, pad_volume
-from .crowding import CrowdWithDuplicates
-from .icemaker import IceBank
-from .micrograph import MicrographGenerator
-from .potential import PotentialBuilder
-from .rotations import Rotation, VolumeRotator
-from .scattering import Scattering
-from .tiltseries import TiltSeriesGenerator
+from .. import rotations
+from ._base import BaseImager, compute_nz, pad_volume
+from ..crowding import CrowdWithDuplicates
+from ..ice import IceBank
+from ._micrograph import MicrographGenerator
+from ..potential import PotentialBuilder
+from ..rotations import Rotation, VolumeRotator
+from ..scattering import Scattering
+from ._tiltseries import TiltSeriesGenerator
 
 
 __all__ = [
@@ -122,8 +122,7 @@ class ParticleGeneratorBase(BaseImager):
 
         if self.verbose:
             logger.info(f"Applying aberrations using {self.aberration_model} model")
-        ctf_batch = {k: getattr(self, k)[idx] for k in self._ctf_param_names}
-        self.detector_waves = self.aberration(self.exitwaves, ctf_batch)
+        self.detector_waves = self.aberration(self.exitwaves, self._ctf_batch(idx))
 
         if self.verbose:
             logger.info(f"Applying detector and noise using {self.noise_model} model")
@@ -176,6 +175,9 @@ class ImageGeneratorFromCoordinates(ParticleGeneratorBase):
         Thickness of ice in Å.
     num_unique_icecubes : int, optional
         Number of unique ice cubes pre-built into the ``IceBank``. Default 8.
+    ice_build_batch_size : int, optional
+        Number of unique ice cubes to generate at once while building the
+        ``IceBank``. Lower values reduce peak GPU memory. Default 1.
     scattering_model : str, optional
         Scattering model ('multislice', 'projection', 'ctf'). Default 'multislice'.
     aberration_model : str, optional
@@ -192,6 +194,9 @@ class ImageGeneratorFromCoordinates(ParticleGeneratorBase):
         Crowding minimum distance.
     crowd_max_distance_z : float, optional
         Crowding maximum Z distance.
+    crowd_chunk_size : int or None, optional
+        Number of crowding volumes rotated per GPU batch. Default 1 (memory-safe).
+        Set to ``None`` to rotate all at once (faster but O(N × volume) GPU RAM).
     pad_fft : bool, optional
         Whether to pad for FFT.
     conv_backend : str, optional
@@ -203,6 +208,9 @@ class ImageGeneratorFromCoordinates(ParticleGeneratorBase):
         into the potential. Required when coordinates come from a periodic ice
         generator (e.g. GradientSKIcemaker) to avoid density deficiency at
         the box boundary. Default False.
+    bfactor_envelope : float or torch.Tensor or None, optional
+        Isotropic B-factor envelope in Å² applied in the microscope transfer
+        function. None or 0.0 means no envelope. Default None.
     """
 
     def __init__(
@@ -220,6 +228,7 @@ class ImageGeneratorFromCoordinates(ParticleGeneratorBase):
         ice_model: str | None = None,
         ice_thickness: float | None = None,
         num_unique_icecubes: int = 8,
+        ice_build_batch_size: int = 1,
         scattering_model: str = "multislice",
         aberration_model: str = "holography",
         noise_model: str = "poisson",
@@ -228,6 +237,7 @@ class ImageGeneratorFromCoordinates(ParticleGeneratorBase):
         alpha: float = 0.0,
         crowd_min_distance: float | None = None,
         crowd_max_distance_z: float | None = None,
+        crowd_chunk_size: int | None = 1,
         pad_fft: bool = False,
         conv_backend: str = "fftconvolve",
         detector_model: str | None = None,
@@ -236,6 +246,7 @@ class ImageGeneratorFromCoordinates(ParticleGeneratorBase):
         num_frames: int | None = None,
         mean_squared_displacement_per_dose: float = 0.0,
         periodic_potential: bool = False,
+        bfactor_envelope: float | torch.Tensor | None = None,
     ):
         self.pad_fft = pad_fft
         self.ice_thickness = ice_thickness
@@ -261,10 +272,13 @@ class ImageGeneratorFromCoordinates(ParticleGeneratorBase):
             verbose=verbose,
             coincidence_radius=coincidence_radius,
             num_frames=num_frames,
+            bfactor_envelope=bfactor_envelope,
         )
         self.ice_model = ice_model
         self.crowd_max_distance_z = (
-            crowd_max_distance_z if crowd_max_distance_z is not None else self.nz
+            crowd_max_distance_z
+            if crowd_max_distance_z is not None
+            else self.nz * pixel_size
         )
         self.scattering_model = scattering_model
         self.klim = klim
@@ -320,6 +334,7 @@ class ImageGeneratorFromCoordinates(ParticleGeneratorBase):
                 method="3d",
                 n_points=torch.inf,
                 seed="origin",
+                chunk_size=crowd_chunk_size,
             )
 
         if self.ice_model is not None:
@@ -333,6 +348,7 @@ class ImageGeneratorFromCoordinates(ParticleGeneratorBase):
                 nz=self.nz,
                 method=self.ice_model,
                 num_unique=num_unique_icecubes,
+                build_batch_size=ice_build_batch_size,
             )
 
     def rotate(self, Q: torch.Tensor, T: torch.Tensor) -> torch.Tensor:
@@ -426,6 +442,9 @@ class ImageGenerator(ParticleGeneratorBase):
         Ice thickness in Å.
     num_unique_icecubes : int, optional
         Number of unique ice cubes pre-built into the ``IceBank``. Default 8.
+    ice_build_batch_size : int, optional
+        Number of unique ice cubes to generate at once while building the
+        ``IceBank``. Lower values reduce peak GPU memory. Default 1.
     scattering_model : str, optional
         Scattering model. Default 'multislice'.
     aberration_model : str, optional
@@ -442,6 +461,11 @@ class ImageGenerator(ParticleGeneratorBase):
         Crowding minimum distance.
     crowd_max_distance_z : float, optional
         Crowding maximum Z distance.
+    crowd_chunk_size : int or None, optional
+        Number of crowding volumes rotated per GPU batch. ``1`` (default) avoids
+        the O(N × nz × ny × nx × 3) peak allocation that causes OOM for large
+        volumes with many crowding particles. Set to ``None`` to rotate all at
+        once (faster but requires N × volume_size RAM).
     pad_fft : bool, optional
         Whether to pad for FFT.
     progressbars : bool, optional
@@ -450,6 +474,9 @@ class ImageGenerator(ParticleGeneratorBase):
         Parameterization for ice potential. Default 'kirkland'.
     detector_model : str, optional
         Detector model name.
+    bfactor_envelope : float or torch.Tensor or None, optional
+        Isotropic B-factor envelope in Å² applied in the microscope transfer
+        function. None or 0.0 means no envelope. Default None.
     """
 
     def __init__(
@@ -465,6 +492,7 @@ class ImageGenerator(ParticleGeneratorBase):
         ice_model: str | None = None,
         ice_thickness: float | None = None,
         num_unique_icecubes: int = 8,
+        ice_build_batch_size: int = 1,
         scattering_model: str = "multislice",
         aberration_model: str = "holography",
         noise_model: str = "poisson",
@@ -473,6 +501,7 @@ class ImageGenerator(ParticleGeneratorBase):
         alpha: float = 0.0,
         crowd_min_distance: float | None = None,
         crowd_max_distance_z: float | None = None,
+        crowd_chunk_size: int | None = 1,
         pad_fft: bool = False,
         progressbars: bool = True,
         verbose: bool = True,
@@ -482,6 +511,7 @@ class ImageGenerator(ParticleGeneratorBase):
         coincidence_radius: float | torch.Tensor = 0.0,
         num_frames: int | None = None,
         potential_scale: float | torch.Tensor = 1.0,
+        bfactor_envelope: float | torch.Tensor | None = None,
     ):
         nxy = scattering_potential.shape[-1]
         self.pad_fft = pad_fft
@@ -509,12 +539,15 @@ class ImageGenerator(ParticleGeneratorBase):
             coincidence_radius=coincidence_radius,
             num_frames=num_frames,
             potential_scale=potential_scale,
+            bfactor_envelope=bfactor_envelope,
         )
 
         self.parameterization = parameterization
         self.ice_model = ice_model
         self.crowd_max_distance_z = (
-            crowd_max_distance_z if crowd_max_distance_z is not None else self.nz
+            crowd_max_distance_z
+            if crowd_max_distance_z is not None
+            else self.nz * pixel_size
         )
         self.scattering_model = scattering_model
         self.klim = klim
@@ -554,6 +587,7 @@ class ImageGenerator(ParticleGeneratorBase):
                 n_points=torch.inf,
                 seed="origin",
                 progressbars=self.progressbars,
+                chunk_size=crowd_chunk_size,
             )
 
         if self.ice_model is not None:
@@ -567,6 +601,7 @@ class ImageGenerator(ParticleGeneratorBase):
                 nz=self.nz,
                 method=self.ice_model,
                 num_unique=num_unique_icecubes,
+                build_batch_size=ice_build_batch_size,
             )
 
         self._apply_defocus_shift(

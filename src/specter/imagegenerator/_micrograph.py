@@ -6,9 +6,9 @@ import torch
 
 from specter import logger
 
-from .base_imager import BaseImager, compute_nz, pad_volume
-from .scattering import IterativeScattering
-from .specimen import TomogramGenerator
+from ._base import BaseImager, compute_nz, pad_volume
+from ..scattering import IterativeScattering
+from ..specimen import TomogramGenerator
 
 
 class MicrographGenerator(BaseImager):
@@ -91,6 +91,9 @@ class MicrographGenerator(BaseImager):
     save_clean_exitwaves : bool, optional
         Save exit waves computed without ice (requires ``scattering_potential``
         path). Default False.
+    bfactor_envelope : float or torch.Tensor or None, optional
+        Isotropic B-factor envelope in Å² applied in the microscope transfer
+        function. None or 0.0 means no envelope. Default None.
     """
 
     def __init__(
@@ -126,6 +129,7 @@ class MicrographGenerator(BaseImager):
         num_frames: int | None = None,
         potential_scale: float | torch.Tensor = 1.0,
         save_clean_exitwaves: bool = False,
+        bfactor_envelope: float | torch.Tensor | None = None,
         **kwargs: Any,
     ):
         if isinstance(micrograph_size, int):
@@ -169,6 +173,7 @@ class MicrographGenerator(BaseImager):
             coincidence_radius=coincidence_radius,
             num_frames=num_frames,
             potential_scale=potential_scale,
+            bfactor_envelope=bfactor_envelope,
         )
 
         self.chunk_size = chunk_size
@@ -286,8 +291,7 @@ class MicrographGenerator(BaseImager):
             V, pose=0, slice_batch_size=self.slice_batch_size
         )
 
-        ctf_batch = {k: getattr(self, k)[idx] for k in self._ctf_param_names}
-        self.detector_waves = self.aberration(self.exitwaves, ctf_batch)
+        self.detector_waves = self.aberration(self.exitwaves, self._ctf_batch(idx))
 
         dose_batch = self.dose_per_angstrom[idx]
         cr_batch = self.coincidence_radius[idx]

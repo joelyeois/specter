@@ -267,8 +267,7 @@ class Scattering(L.LightningModule):
         """
         Compute exit wave using Rytov approximation.
 
-        Treats scattering as a single
-        event. Faster than multislice but less accurate for thick specimens.
+        Faster than multislice but less accurate for thick specimens.
 
         Parameters
         ----------
@@ -282,17 +281,19 @@ class Scattering(L.LightningModule):
 
         Notes
         -----
-        The first Born approximation computes the exit wave as:
-        ψ = exp(i Σ_z [F(z) * V(z)])
-        where F(z) accounts for Fresnel propagation from slice z to the exit plane.
+        The Rytov approximation computes the exit wave as:
+        ψ = exp(iσ Σ_z [F(z) ★ V(z)])
+        where F(z) is the Fresnel propagator from slice z to the exit plane
+        and ★ denotes convolution (Fourier-domain multiplication).
+        This is the exponentiated Born series, reducing to the first Born
+        approximation for small V.
         """
         F = self.F_real + 1j * self.F_imag
         if self.flip_curvature:
             V = torch.flip(V, dims=(1,))
 
-        t = torch.exp(1j * self.sigma * self.pixel_size * V)  # (B x Z x X x Y)
-        exitwaves = ifft2(fft2(t) * F[None, ...])  # propagate each slice
-        exitwave = torch.prod(exitwaves, 1)  # product along Z
+        scattered = ifft2(fft2(1j * self.sigma * self.pixel_size * V) * F[None, ...])
+        exitwave = torch.exp(torch.sum(scattered, dim=1))
         return exitwave  # (B x X x Y)
 
     def firstborn(self, V: torch.Tensor) -> torch.Tensor:

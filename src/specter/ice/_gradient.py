@@ -466,7 +466,7 @@ class GradientSKIcemaker(L.LightningModule):
         for i in track(
             range(batchsize),
             description="Generating ice volumes",
-            disable=not self.progressbars,
+            disable=not self.progressbars or batchsize == 1,
             transient=True,
         ):
             if init_positions is None:

@@ -40,6 +40,9 @@ class IceBank(L.LightningModule):
         - ``'random'`` — random molecule placement (:class:`RandomIcemaker`).
     num_unique : int, optional
         Number of unique cubes to cache when :meth:`build` is called. Default is 8.
+    build_batch_size : int, optional
+        Number of unique cubes to generate per call to the underlying generator
+        when building the bank. Lower values reduce peak GPU memory. Default 1.
     **kwargs
         Forwarded to the underlying generator constructor. Use for method-specific
         construction parameters such as ``min_distance`` or ``parameterization``.
@@ -85,6 +88,7 @@ class IceBank(L.LightningModule):
         nz: Optional[int] = None,
         method: str = "gd",
         num_unique: int = 8,
+        build_batch_size: int = 1,
         **kwargs: Any,
     ) -> None:
         super().__init__()
@@ -97,6 +101,9 @@ class IceBank(L.LightningModule):
         self.nz = nz if nz is not None else n
         self.method = method
         self._num_unique = num_unique
+        if build_batch_size < 1:
+            raise ValueError("build_batch_size must be >= 1")
+        self.build_batch_size = build_batch_size
 
         generator_cls = self._METHOD_MAP[method]
         # Always build cubic blocks — non-cubic volumes are assembled via generate_big_ice
@@ -122,23 +129,18 @@ class IceBank(L.LightningModule):
         """
         if num_unique is None:
             num_unique = self._num_unique
-        if self.method == "ap":
-            # AP runs all cubes in a single batched parallel call — preserve GPU throughput
-            self._bank = self.generator.generate_ice(
-                batchsize=num_unique, **kwargs
-            ).cpu()
-        else:
-            # MCMC and GD are sequential per-cube; lift the loop here for IceBank-level progress
-            cubes = [
-                self.generator.generate_ice(batchsize=1, **kwargs)
-                for _ in track(
-                    range(num_unique),
-                    description=f"Building ice cubes (method: {self._METHOD_LABELS[self.method]})",
-                    total=num_unique,
-                    transient=True,
-                )
-            ]
-            self._bank = torch.cat(cubes, dim=0).cpu()
+        cubes: list[torch.Tensor] = []
+        for start in track(
+            range(0, num_unique, self.build_batch_size),
+            description=f"Building ice cubes (method: {self._METHOD_LABELS[self.method]})",
+            total=(num_unique + self.build_batch_size - 1) // self.build_batch_size,
+            transient=True,
+        ):
+            batchsize = min(self.build_batch_size, num_unique - start)
+            cubes.append(
+                self.generator.generate_ice(batchsize=batchsize, **kwargs).cpu()
+            )
+        self._bank = torch.cat(cubes, dim=0)
 
     def generate_ice(self, batchsize: int = 1, **kwargs: Any) -> torch.Tensor:
         """

@@ -660,7 +660,7 @@ class CrowdWithDuplicates(L.LightningModule):
             coords = poisson_disk_neighbors_3d(
                 self.min_distance,
                 n_points=self.n_points,
-                box=(self.max_distance_z, self.nxy_out, self.nxy_out),
+                box=(self.max_distance_z, self.max_distance_xy, self.max_distance_xy),
                 seed=self.seed,
             )
             if self.water_air_interface:

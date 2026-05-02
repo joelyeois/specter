@@ -57,9 +57,34 @@ def test_resolve_base_dir_from_env(
     assert _resolve_base_dir(None) == tmp_path
 
 
-def test_resolve_base_dir_default(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_resolve_base_dir_raises_when_unconfigured(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import specter.jobs._job as _job_module
+
     monkeypatch.delenv("SPECTER_JOBS_DIR", raising=False)
-    assert _resolve_base_dir(None) == Path.home() / "specter-data"
+    original = _job_module._SESSION_BASE_DIR
+    _job_module._SESSION_BASE_DIR = None
+    try:
+        with pytest.raises(RuntimeError, match="No job output directory"):
+            _resolve_base_dir(None)
+    finally:
+        _job_module._SESSION_BASE_DIR = original
+
+
+def test_resolve_base_dir_from_session(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import specter.jobs._job as _job_module
+    import specter.jobs as jobs
+
+    monkeypatch.delenv("SPECTER_JOBS_DIR", raising=False)
+    original = _job_module._SESSION_BASE_DIR
+    try:
+        jobs.base_directory(tmp_path)
+        assert _resolve_base_dir(None) == tmp_path
+    finally:
+        _job_module._SESSION_BASE_DIR = original
 
 
 def test_job_dir_raises_outside_context(tmp_path: Path) -> None:

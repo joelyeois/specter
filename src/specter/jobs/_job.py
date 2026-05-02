@@ -14,13 +14,48 @@ if TYPE_CHECKING:
     import torch
 
 
+_SESSION_BASE_DIR: Path | None = None
+
+
+def base_directory(path: str | Path) -> None:
+    """
+    Set the default job output directory for the current Python session.
+
+    Call this once at the top of your notebook or script before creating any
+    :class:`Job`. It overrides the ``SPECTER_JOBS_DIR`` environment variable.
+    Alternatively, pass ``base_dir`` explicitly to each :class:`Job` call, or
+    set ``SPECTER_JOBS_DIR`` in your shell environment.
+
+    Parameters
+    ----------
+    path : str or Path
+        Root directory under which project folders and job folders are created.
+
+    Examples
+    --------
+    >>> import specter.jobs as jobs
+    >>> jobs.base_directory("/scratch/user/cryo-runs")
+    >>> with jobs.Job("ghostbuster", "apoferritin") as job:
+    ...     print(job.dir)   # /scratch/user/cryo-runs/apoferritin/J001
+    """
+    global _SESSION_BASE_DIR
+    _SESSION_BASE_DIR = Path(path)
+
+
 def _resolve_base_dir(base_dir: str | Path | None) -> Path:
     if base_dir is not None:
         return Path(base_dir)
+    if _SESSION_BASE_DIR is not None:
+        return _SESSION_BASE_DIR
     env = os.environ.get("SPECTER_JOBS_DIR")
     if env:
         return Path(env)
-    return Path.home() / "specter-data"
+    raise RuntimeError(
+        "No job output directory configured. Do one of:\n"
+        "  1. jobs.base_directory('/your/data/path')  # recommended in notebooks\n"
+        "  2. export SPECTER_JOBS_DIR=/your/data/path  # in your shell / PBS script\n"
+        "  3. Job('type', 'project', base_dir='/your/data/path')  # per-job override"
+    )
 
 
 def _get_git_commit() -> str:

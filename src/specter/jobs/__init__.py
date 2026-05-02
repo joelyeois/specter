@@ -1,4 +1,4 @@
 from ._database import JobDatabase
-from ._job import Job
+from ._job import Job, base_directory
 
-__all__ = ["Job", "JobDatabase"]
+__all__ = ["Job", "JobDatabase", "base_directory"]

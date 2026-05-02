@@ -384,3 +384,43 @@ def test_cli_diff_smoke(tmp_path: Path) -> None:
     )
     assert result.returncode == 0
     assert "lr" in result.stdout
+
+
+# ---------------------------------------------------------------------------
+# Task 7: Job resume via job_id
+# ---------------------------------------------------------------------------
+
+
+def test_job_resume_opens_existing_folder(tmp_path: Path) -> None:
+    with Job("ghostbuster", project="p", base_dir=tmp_path) as job:
+        first_dir = job.dir
+
+    with Job("ghostbuster", project="p", base_dir=tmp_path, job_id="J001") as job:
+        assert job.dir == first_dir
+
+
+def test_job_resume_does_not_allocate_new_id(tmp_path: Path) -> None:
+    with Job("ghostbuster", project="p", base_dir=tmp_path) as _:
+        pass  # J001
+
+    with Job("ghostbuster", project="p", base_dir=tmp_path, job_id="J001") as _:
+        pass
+
+    # Next new job should be J002, not J003
+    with Job("ghostbuster", project="p", base_dir=tmp_path) as job3:
+        assert job3.dir.name == "J002"
+
+
+def test_job_resume_missing_id_raises(tmp_path: Path) -> None:
+    with pytest.raises(FileNotFoundError, match="J099"):
+        with Job("ghostbuster", project="p", base_dir=tmp_path, job_id="J099"):
+            pass
+
+
+def test_job_resume_loads_existing_params(tmp_path: Path) -> None:
+    with Job("ghostbuster", project="p", base_dir=tmp_path) as job:
+        job.log({"lr": 0.01})
+
+    with Job("ghostbuster", project="p", base_dir=tmp_path, job_id="J001") as job:
+        data = json.loads((job.dir / "job.json").read_text())
+        assert data["params"]["lr"] == 0.01

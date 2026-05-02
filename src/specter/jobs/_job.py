@@ -96,10 +96,12 @@ class Job:
         job_type: str,
         project: str,
         base_dir: str | Path | None = None,
+        job_id: str | None = None,
     ) -> None:
         self._job_type = job_type
         self._project = project
         self._base_dir = _resolve_base_dir(base_dir)
+        self._resume_job_id = job_id
         self._dir: Path | None = None
         self._job_id: str | None = None
         self._created_at: str | None = None
@@ -117,10 +119,24 @@ class Job:
     def __enter__(self) -> Job:
         project_dir = self._base_dir / self._project
         project_dir.mkdir(parents=True, exist_ok=True)
-        self._job_id = _next_job_id(project_dir)
-        self._dir = project_dir / self._job_id
-        self._dir.mkdir()
-        self._created_at = datetime.now(timezone.utc).isoformat()
+
+        if self._resume_job_id is not None:
+            self._job_id = self._resume_job_id
+            self._dir = project_dir / self._job_id
+            if not self._dir.exists():
+                raise FileNotFoundError(
+                    f"Job {self._resume_job_id!r} not found in project "
+                    f"{self._project!r} (looked in {self._dir})"
+                )
+            existing = json.loads((self._dir / "job.json").read_text())
+            self._params = existing.get("params", {})
+            self._created_at = existing.get("created_at")
+        else:
+            self._job_id = _next_job_id(project_dir)
+            self._dir = project_dir / self._job_id
+            self._dir.mkdir()
+            self._created_at = datetime.now(timezone.utc).isoformat()
+
         self._write_json("running")
         return self
 

@@ -424,3 +424,51 @@ def test_job_resume_loads_existing_params(tmp_path: Path) -> None:
     with Job("ghostbuster", project="p", base_dir=tmp_path, job_id="J001") as job:
         data = json.loads((job.dir / "job.json").read_text())
         assert data["params"]["lr"] == 0.01
+
+
+# ---------------------------------------------------------------------------
+# Task 8: job.create() param exclusion and resume validation
+# ---------------------------------------------------------------------------
+
+
+class _ExcludeClass:
+    _job_log_exclude: tuple[str, ...] = ("secret",)
+
+    def __init__(self, name: str, secret: str = "hidden") -> None:
+        self.name = name
+        self.secret = secret
+
+
+def test_job_create_excludes_marked_params(tmp_path: Path) -> None:
+    with Job("dummy", project="p", base_dir=tmp_path) as job:
+        job.create(_ExcludeClass, "hello", secret="password")
+    data = json.loads((job.dir / "job.json").read_text())
+    assert "secret" not in data["params"]
+    assert data["params"]["name"] == "hello"
+
+
+def test_job_resume_create_matching_params_ok(tmp_path: Path) -> None:
+    with Job("dummy", project="p", base_dir=tmp_path) as job:
+        job.create(_DummyClass, "hello", value=3.14)
+
+    # Same params — should not raise
+    with Job("dummy", project="p", base_dir=tmp_path, job_id="J001") as job:
+        job.create(_DummyClass, "hello", value=3.14)
+
+
+def test_job_resume_create_mismatched_params_raises(tmp_path: Path) -> None:
+    with Job("dummy", project="p", base_dir=tmp_path) as job:
+        job.create(_DummyClass, "hello", value=3.14)
+
+    with pytest.raises(ValueError, match="value"):
+        with Job("dummy", project="p", base_dir=tmp_path, job_id="J001") as job:
+            job.create(_DummyClass, "hello", value=99.0)
+
+
+def test_job_resume_excluded_param_difference_not_checked(tmp_path: Path) -> None:
+    with Job("dummy", project="p", base_dir=tmp_path) as job:
+        job.create(_ExcludeClass, "hello", secret="password1")
+
+    # Different secret — should not raise because secret is excluded
+    with Job("dummy", project="p", base_dir=tmp_path, job_id="J001") as job:
+        job.create(_ExcludeClass, "hello", secret="password2")

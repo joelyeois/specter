@@ -197,6 +197,13 @@ class Job:
         If ``cls.__init__`` accepts a ``run_dir`` parameter, it is automatically
         set to ``self.dir`` — the user does not need to pass it explicitly.
 
+        If ``cls`` defines ``_job_log_exclude`` (a tuple of parameter names), those
+        keys are omitted from the recorded params in ``job.json``.
+
+        In resume mode (``job_id`` was passed at construction), the incoming params
+        (after exclusion) are validated against the stored params. A ``ValueError``
+        is raised if they differ, preventing accidental halfset mismatches.
+
         Parameters
         ----------
         cls : type
@@ -220,11 +227,31 @@ class Job:
         if "run_dir" in sig.parameters:
             arguments["run_dir"] = self._dir
 
+        exclude: frozenset[str] = frozenset(getattr(cls, "_job_log_exclude", ()))
         serialized = {
-            k: _serialize_value(v) for k, v in arguments.items() if k != "run_dir"
+            k: _serialize_value(v)
+            for k, v in arguments.items()
+            if k not in exclude and k != "run_dir"
         }
-        self._params.update(serialized)
-        self._write_json("running")
+
+        if self._resume_job_id is not None:
+            mismatches = {
+                k: (self._params.get(k), serialized.get(k))
+                for k in set(self._params) | set(serialized)
+                if self._params.get(k) != serialized.get(k)
+            }
+            if mismatches:
+                diff_lines = "\n".join(
+                    f"  {k}: stored={a!r}  incoming={b!r}"
+                    for k, (a, b) in sorted(mismatches.items())
+                )
+                raise ValueError(
+                    f"Params mismatch for job {self._job_id!r}. "
+                    f"Both halfsets must use identical settings:\n{diff_lines}"
+                )
+        else:
+            self._params.update(serialized)
+            self._write_json("running")
 
         return cls(**arguments)
 

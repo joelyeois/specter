@@ -656,6 +656,12 @@ class Ghostbuster:
     """
     End-to-end reconstruction pipeline for cryo-EM/cryo-ET.
 
+    .. note::
+        ``return_class`` is excluded from the job parameter log (see
+        :attr:`_job_log_exclude`) because halfset identity is already encoded
+        in the output filenames (``vol_A.mrc`` / ``vol_B.mrc``).  Both halfset
+        runs must use identical settings for every other parameter.
+
     Loads particle data from CryoSPARC output files, preprocesses images
     (sign flip, dose/scale normalisation), and drives a :class:`Reconstructor`
     via a Lightning ``Trainer``.
@@ -743,6 +749,8 @@ class Ghostbuster:
         :meth:`~specter.jobs.Job.create` when used inside a ``Job`` context.
     """
 
+    _job_log_exclude: tuple[str, ...] = ("return_class",)
+
     def __init__(
         self,
         cs_file: str | Path,
@@ -778,6 +786,9 @@ class Ghostbuster:
         run_dir: str | Path | None = None,
     ) -> None:
         from .cryosparc import extract_parameters_from_csfile
+
+        _halfset_map: dict[str, str | None] = {"0": "A", "1": "B", "all": None}
+        self.halfset_label: str | None = _halfset_map[return_class]
 
         print(f"Loading particle parameters from {Path(cs_file).name} ...")
         (
@@ -906,6 +917,7 @@ class Ghostbuster:
             fsc_ref=self.fsc_ref,
             fsc_mask=self.fsc_mask,
             run_dir=self.run_dir,
+            halfset_label=self.halfset_label,
         )
         return model, loader
 

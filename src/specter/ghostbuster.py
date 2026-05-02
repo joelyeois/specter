@@ -563,18 +563,23 @@ class Reconstructor(L.LightningModule):
         print(f"Run directory: {self._run_dir}")
 
     def on_fit_end(self) -> None:
-        """Save the final reconstructed volume."""
+        """Save the final reconstructed volume and FSC figure."""
         if self._run_dir is None:
             return
         suffix = f"_{self._halfset_label}" if self._halfset_label is not None else ""
-        path = self._run_dir / f"vol{suffix}.mrc"
-        v = self.V.detach().cpu().float().numpy()
-        with mrcfile.new(path, overwrite=True) as mrc:
-            mrc.set_data(v)
-        print(f"Saved final volume → {path}")
+        v = self.V.detach().cpu().float()
+        vol_path = self._run_dir / f"vol{suffix}.mrc"
+        with mrcfile.new(str(vol_path), overwrite=True) as mrc:
+            mrc.set_data(v.numpy())
+        print(f"Saved final volume → {vol_path}")
+
+        if self.fsc_ref is not None:
+            self._save_fsc_figure(
+                v, suffix, self._run_dir / f"fsc{suffix}.png", label=f"final{suffix}"
+            )
 
     def on_train_epoch_end(self) -> None:
-        """Enforce symmetry and save the current volume to disk after each epoch."""
+        """Enforce symmetry, save per-epoch volume, plot3d preview, and FSC."""
         if self.symmetry is not None:
             self.V.data = apply_symmetry(
                 self.V.data,
@@ -583,15 +588,78 @@ class Reconstructor(L.LightningModule):
                 method=self.symmetry_mode,
             )
 
-        if self._run_dir is not None:
-            epoch = self.current_epoch + 1
-            suffix = (
-                f"_{self._halfset_label}" if self._halfset_label is not None else ""
+        if self._run_dir is None:
+            return
+
+        epoch = self.current_epoch + 1
+        suffix = f"_{self._halfset_label}" if self._halfset_label is not None else ""
+        v = self.V.detach().cpu().float()
+
+        mrc_path = self._run_dir / "epochs" / f"{epoch:03d}{suffix}.mrc"
+        with mrcfile.new(str(mrc_path), overwrite=True) as mrc:
+            mrc.set_data(v.numpy())
+
+        self._save_plot3d(v, suffix=suffix, epoch=epoch)
+        if self.fsc_ref is not None:
+            self._save_fsc_figure(
+                v,
+                suffix,
+                self._run_dir / "epochs" / f"fsc_{epoch:03d}{suffix}.png",
+                label=f"epoch {epoch}{suffix}",
             )
-            path = self._run_dir / "epochs" / f"{epoch:03d}{suffix}.mrc"
-            v = self.V.detach().cpu().float().numpy()
-            with mrcfile.new(path, overwrite=True) as mrc:
-                mrc.set_data(v)
+
+    def _save_plot3d(self, v: torch.Tensor, suffix: str, epoch: int) -> None:
+        """Save a plot3d preview of the current volume. Silently skips on failure."""
+        if self._run_dir is None:
+            return
+        try:
+            import matplotlib.pyplot as plt
+
+            from .plots import plot3d
+
+            fig = plot3d(v, title=f"Epoch {epoch}{suffix}", show=False)
+            fig.savefig(
+                self._run_dir / "epochs" / f"{epoch:03d}{suffix}.png",
+                bbox_inches="tight",
+            )
+            plt.close(fig)
+        except Exception as exc:
+            print(f"[Reconstructor] plot3d preview skipped: {exc}")
+
+    def _save_fsc_figure(
+        self,
+        v: torch.Tensor,
+        suffix: str,
+        path: Path,
+        label: str,
+    ) -> None:
+        """Compute and save an FSC figure. Silently skips on failure."""
+        try:
+            import matplotlib.pyplot as plt
+
+            from .plots import plot_map_to_model_fsc
+
+            fsc_ref = (
+                self.fsc_ref.detach().cpu().float()
+                if isinstance(self.fsc_ref, torch.Tensor)
+                else self.fsc_ref
+            )
+            fsc_mask = (
+                self.fsc_mask.detach().cpu().float()
+                if isinstance(self.fsc_mask, torch.Tensor)
+                else None
+            )
+            fig = plot_map_to_model_fsc(
+                [v],
+                fsc_ref,
+                voxel_size=self.voxel_size,
+                mask=fsc_mask,
+                labels=[label],
+            )
+            fig.savefig(path, bbox_inches="tight")
+            plt.close(fig)
+        except Exception as exc:
+            print(f"[Reconstructor] FSC plot skipped: {exc}")
 
     def num_training_steps_per_epoch(self) -> int:
         """

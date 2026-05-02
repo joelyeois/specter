@@ -7,7 +7,6 @@ from typing import Any, Literal
 import lightning as L
 import mrcfile
 import torch
-import torch.multiprocessing as mp
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.utils.data
@@ -25,13 +24,16 @@ from .imagegenerator import ImageGenerator
 from .symmetries import apply_symmetry, get_rotation_matrices
 
 
-class Ghostbuster(L.LightningModule):
+class Reconstructor(L.LightningModule):
     """
-    3D reconstruction module for cryo-EM/cryo-ET using differentiable forward models.
+    Differentiable 3D reconstruction module for cryo-EM/cryo-ET.
 
     Reconstructs a 3D electrostatic potential volume from 2D experimental images
     by minimising the discrepancy between simulated and observed images. Supports
     joint refinement of the volume, rotations, translations, and defocus.
+
+    Typically constructed and driven by :class:`Ghostbuster`, but can be used
+    directly when particle tensors are already available in memory.
 
     Parameters
     ----------
@@ -69,11 +71,10 @@ class Ghostbuster(L.LightningModule):
         Aberration model passed to ImageGenerator. Default is "holography".
     run_dir : str or Path, optional
         Directory to write per-epoch volumes, final volume, and metadata into.
-        Created with ``exist_ok=True`` so two halfset jobs can safely target the
-        same folder.  ``None`` disables all file output.
+        ``None`` disables all file output.
     halfset_label : str, optional
-        Short label (e.g. ``"A"`` or ``"B"``) appended to saved filenames so
-        two halfset runs sharing the same ``run_dir`` do not overwrite each other.
+        Short label (e.g. ``"A"`` or ``"B"``) appended to saved filenames when
+        two halfset runs share the same ``run_dir``.
     """
 
     def __init__(
@@ -239,6 +240,7 @@ class Ghostbuster(L.LightningModule):
             self.ctf_params,
             self.energy,
             self.dose_per_angstrom,
+            anisomag=self.anisomag,
             ice_model=None,
             scattering_model=self.scattering_model,
             aberration_model=self.aberration_model,
@@ -650,213 +652,378 @@ def compare_runs(
         print(row)
 
 
-def _split_halfsets(n: int) -> torch.Tensor:
-    """Assign N particles to two halves by even/odd index.
-
-    Parameters
-    ----------
-    n : int
-        Total number of particles.
-
-    Returns
-    -------
-    torch.Tensor
-        1-D integer label tensor of length ``n`` with values 0 (half A) or
-        1 (half B), alternating as ``[0, 1, 0, 1, ...]``.
+class Ghostbuster:
     """
-    labels = torch.zeros(n, dtype=torch.long)
-    labels[1::2] = 1
-    return labels
+    End-to-end reconstruction pipeline for cryo-EM/cryo-ET.
 
+    Loads particle data from CryoSPARC output files, preprocesses images
+    (sign flip, dose/scale normalisation), and drives a :class:`Reconstructor`
+    via a Lightning ``Trainer``.
 
-def _halfset_worker(
-    rank: int,
-    all_images: list[torch.Tensor],
-    all_ghost_kwargs: list[dict[str, Any]],
-    batch_size: int,
-    max_epochs: int,
-    gpu_ids: list[int | None],
-) -> None:
-    """Worker function executed in each halfset subprocess.
+    All parameters — data paths, physics settings, and training hyperparameters
+    — are passed at construction so that :meth:`~specter.jobs.Job.create` can
+    capture the full run configuration in one call:
 
-    Parameters
-    ----------
-    rank : int
-        0 for half A, 1 for half B.
-    all_images : list of torch.Tensor
-        ``[images_A, images_B]`` — experimental images for each half.
-    all_ghost_kwargs : list of dict
-        ``[kwargs_A, kwargs_B]`` — constructor kwargs for each half's
-        :class:`Ghostbuster`, with per-particle tensors already sliced.
-        Each dict must include ``run_dir`` and will receive ``halfset_label``
-        from this function.
-    batch_size : int
-        Dataloader batch size.
-    max_epochs : int
-        Number of training epochs.
-    gpu_ids : list of int or None
-        ``[gpu_A, gpu_B]`` — GPU index for each half, or ``None`` for CPU.
-    """
-    label = "AB"[rank]
-    images = all_images[rank]
-    ghost_kwargs = all_ghost_kwargs[rank]
-    gpu_id = gpu_ids[rank]
+    .. code-block:: python
 
-    # Restrict this process to its assigned GPU so Lightning and CUDA ops
-    # don't accidentally spill onto the other device.
-    use_gpu = gpu_id is not None and torch.cuda.is_available()
-    if use_gpu:
-        torch.cuda.set_device(gpu_id)
-
-    torch.set_float32_matmul_precision("high")
-
-    model = Ghostbuster(**ghost_kwargs, halfset_label=label)
-
-    n = images.shape[0]
-    dataset = torch.utils.data.TensorDataset(images, torch.arange(n))
-    # num_workers=0: this function runs inside mp.spawn subprocesses;
-    # spawning DataLoader workers within a spawned process causes nested
-    # multiprocessing overhead. The dataset is already in RAM so there
-    # is no I/O to parallelise anyway.
-    dataloader = torch.utils.data.DataLoader(
-        dataset,
-        batch_size=batch_size,
-        shuffle=True,
-        num_workers=0,
-    )
-
-    trainer = L.Trainer(
-        accelerator="gpu" if use_gpu else "cpu",
-        devices=[gpu_id] if use_gpu else 1,
-        max_epochs=max_epochs,
-        enable_checkpointing=False,
-        logger=False,
-        enable_progress_bar=True,
-    )
-    trainer.fit(model, dataloader)
-
-
-def run_halfsets(
-    images: torch.Tensor,
-    V_init: torch.Tensor,
-    voxel_size: float,
-    quaternions: torch.Tensor,
-    translations: torch.Tensor,
-    ctf_params: dict[str, torch.Tensor],
-    energy: float,
-    dose_per_angstrom: float,
-    run_dir: str | Path,
-    halfset_labels: torch.Tensor | None = None,
-    batch_size: int = 3,
-    max_epochs: int = 5,
-    gpus: list[int] | None = None,
-    **ghostbuster_kwargs: Any,
-) -> Path:
-    """Run independent halfset reconstructions and save into a shared folder.
-
-    Splits ``images``, ``quaternions``, ``translations``, and ``ctf_params``
-    into two halves and runs a full :class:`Ghostbuster` reconstruction on each
-    independently.  When ``gpus`` contains two entries, both halves run in
-    parallel via :func:`torch.multiprocessing.spawn` on those specific devices;
-    when it contains one entry, both halves run sequentially on that device.
-
-    Output layout::
-
-        <run_dir>/
-            params_A.json
-            params_B.json
-            epochs/
-                001_A.mrc
-                001_B.mrc
-                002_A.mrc
-                ...
-            vol_A.mrc
-            vol_B.mrc
+        with Job("ghostbuster", "my-project") as job:
+            gb = job.create(
+                Ghostbuster,
+                cs_file="particles.cs",
+                mrc_file="stack.mrcs",
+                dose_per_angstrom=40.0,
+                lr=0.1,
+                symmetry="I1",
+                epochs=5,
+            )
+            model = gb.run(device=0)
 
     Parameters
     ----------
-    images : torch.Tensor
-        Experimental images, shape ``(N, H, W)``.
-    V_init : torch.Tensor
-        Initial 3-D volume estimate, shape ``(Z, X, Y)``.  Copied for each half.
-    voxel_size : float
-        Voxel size in Angstroms.
-    quaternions : torch.Tensor
-        Per-particle rotation quaternions, shape ``(N, 4)``.
-    translations : torch.Tensor
-        Per-particle translations, shape ``(N, 2)`` or ``(N, 3)``.
-    ctf_params : dict[str, torch.Tensor]
-        Per-particle CTF parameters; each value has leading dimension ``N``.
-    energy : float
-        Electron energy in keV.
+    cs_file : str or Path
+        Path to a CryoSPARC ``.cs`` file.
+    mrc_file : str or Path
+        Path to the particle stack ``.mrc``/``.mrcs`` file.
     dose_per_angstrom : float
         Electron dose in e⁻/Å².
-    run_dir : str or Path
-        Directory to write all outputs into.  Created if it does not exist.
-    halfset_labels : torch.Tensor, optional
-        1-D integer tensor of length ``N`` with values ``0`` (half A) or
-        ``1`` (half B).  Matches the ``alignments3D/split`` field from
-        :func:`~specter.cryosparc.extract_parameters_from_csfile`.
-        Defaults to alternating even/odd assignment.
-    batch_size : int
-        Dataloader batch size for each half.
-    max_epochs : int
+    lr : float, optional
+        Learning rate for the volume. ``None`` disables volume optimisation.
+    lr_R : float, optional
+        Learning rate for rotations.
+    lr_T : float, optional
+        Learning rate for translations.
+    lr_D : float, optional
+        Learning rate for defocus offset.
+    scheduler : {"LambdaLR", "CosineAnnealingWarmRestarts", "MultiplicativeLR"}
+        LR scheduler for the volume optimiser.
+    epochs : int
         Number of training epochs.
-    gpus : list of int, optional
-        GPU indices to use.  ``[0, 2]`` runs half A on ``cuda:0`` and half B on
-        ``cuda:2`` in parallel.  ``[1]`` runs both halves sequentially on
-        ``cuda:1``.  Defaults to ``[0]`` when CUDA is available, CPU otherwise.
-    **ghostbuster_kwargs
-        Additional keyword arguments forwarded to :class:`Ghostbuster` unchanged
-        (e.g. ``lr``, ``scattering_model``, ``symmetry``).
-
-    Returns
-    -------
-    Path
-        Path to the run directory.
+    batch_size : int
+        Dataloader batch size.
+    scattering_model : str
+        Wave propagation model (``"multislice"``, ``"rytov"``, ``"firstborn"``,
+        ``"projection"``).
+    aberration_model : str
+        CTF aberration model passed to ``ImageGenerator``.
+    symmetry : str, optional
+        Point-group symmetry to enforce (e.g. ``"C3"``, ``"I1"``).
+    symmetry_batchsize : int, optional
+        Batch size used when applying symmetry to the volume.
+    symmetry_mode : {"real", "fourier"}
+        Domain in which symmetry is applied.
+    sparsity : float, optional
+        L1 regularisation weight on V.
+    rotate_mode : {"real", "fourier"}
+        Domain in which rotations are applied.
+    flipcurvature : bool
+        Whether to flip the CTF curvature sign.
+    klim : float, optional
+        Hard frequency cutoff passed to ``ImageGenerator``.
+    nps_weight : torch.Tensor, optional
+        Per-frequency noise power spectrum weight for the loss.
+    learn_noise_model : bool
+        Whether to estimate sigma²(k) from residuals (RELION-style).
+    use_ncc : bool
+        Whether to use normalised cross-correlation loss instead of MSE.
+    fsc_ref : torch.Tensor, optional
+        Reference volume for map-to-model FSC logging.
+    fsc_mask : torch.Tensor or float, optional
+        Mask applied before FSC computation.
+    precision : str
+        Lightning ``Trainer`` precision (e.g. ``"16-mixed"``, ``"32"``).
+        Falls back to ``"32"`` automatically on CPU.
+    num_workers : int
+        Dataloader worker processes.
+    num_particles : int, optional
+        Use only the first ``num_particles`` particles. Defaults to all.
+    return_class : {"0", "1", "all"}
+        Particle class to extract from the ``.cs`` file.
+    run_dir : str or Path, optional
+        Directory for all job outputs. Injected automatically by
+        :meth:`~specter.jobs.Job.create` when used inside a ``Job`` context.
     """
-    if gpus is None:
-        gpus = [0] if torch.cuda.is_available() else []
 
-    run_dir = Path(run_dir)
-    run_dir.mkdir(parents=True, exist_ok=True)
+    def __init__(
+        self,
+        cs_file: str | Path,
+        mrc_file: str | Path,
+        dose_per_angstrom: float,
+        lr: float | None = None,
+        lr_R: float | None = None,
+        lr_T: float | None = None,
+        lr_D: float | None = None,
+        scheduler: Literal[
+            "LambdaLR", "CosineAnnealingWarmRestarts", "MultiplicativeLR"
+        ] = "LambdaLR",
+        epochs: int = 5,
+        batch_size: int = 3,
+        scattering_model: str = "rytov",
+        aberration_model: str = "holography",
+        symmetry: str | None = None,
+        symmetry_batchsize: int | None = None,
+        symmetry_mode: Literal["real", "fourier"] = "fourier",
+        sparsity: float | None = None,
+        rotate_mode: Literal["real", "fourier"] = "real",
+        flipcurvature: bool = True,
+        klim: float | None = None,
+        nps_weight: torch.Tensor | None = None,
+        learn_noise_model: bool = False,
+        use_ncc: bool = False,
+        fsc_ref: torch.Tensor | None = None,
+        fsc_mask: torch.Tensor | float | None = None,
+        precision: str = "16-mixed",
+        num_workers: int = 0,
+        num_particles: int | None = None,
+        return_class: Literal["0", "1", "all"] = "all",
+        run_dir: str | Path | None = None,
+    ) -> None:
+        from .cryosparc import extract_parameters_from_csfile
 
-    n = quaternions.shape[0]
-    labels = halfset_labels if halfset_labels is not None else _split_halfsets(n)
-    idx_A = torch.where(labels == 0)[0]
-    idx_B = torch.where(labels == 1)[0]
-
-    def _slice_kwargs(idx: torch.Tensor) -> dict[str, Any]:
-        half_ctf = {k: v[idx].cpu() for k, v in ctf_params.items()}
-        return dict(
-            V=V_init.cpu().clone(),
-            voxel_size=voxel_size,
-            quaternions=quaternions[idx].cpu(),
-            translations=translations[idx].cpu(),
-            ctf_params=half_ctf,
-            energy=energy,
-            dose_per_angstrom=dose_per_angstrom,
-            run_dir=run_dir,
-            **ghostbuster_kwargs,
+        print(f"Loading particle parameters from {Path(cs_file).name} ...")
+        (
+            energy,
+            pixel_size,
+            alpha,
+            rotations,
+            translations,
+            ctf_params,
+            scale,
+            anisomag,
+            indices,
+            _split,
+        ) = extract_parameters_from_csfile(str(cs_file), return_class=return_class)
+        _n_loaded = len(rotations)
+        _energy_val = float(energy.item() if hasattr(energy, "item") else energy)
+        _pixel_size_val = float(
+            pixel_size.item() if hasattr(pixel_size, "item") else pixel_size
+        )
+        print(
+            f"  {_n_loaded} particles  |  {_energy_val:.0f} keV  |  {_pixel_size_val:.3f} Å/px"
         )
 
-    all_ghost_kwargs = [_slice_kwargs(idx_A), _slice_kwargs(idx_B)]
-    all_images = [images[idx_A].cpu(), images[idx_B].cpu()]
+        print(f"Loading particle stack from {Path(mrc_file).name} ...")
+        with mrcfile.mmap(str(mrc_file)) as mrc:
+            images = torch.as_tensor((mrc.data[indices]).copy())
+        _h, _w = images.shape[-2], images.shape[-1]
+        print(f"  {len(images)} images  |  box {_h}×{_w}  |  dtype {images.dtype}")
 
-    if len(gpus) >= 2:
-        gpu_ids: list[int | None] = [gpus[0], gpus[1]]
-        mp.spawn(
-            _halfset_worker,
-            args=(all_images, all_ghost_kwargs, batch_size, max_epochs, gpu_ids),
-            nprocs=2,
-            join=True,
+        images = -images
+        voxel_size = float(
+            pixel_size.item() if hasattr(pixel_size, "item") else pixel_size
         )
-    else:
-        gpu_id: int | None = gpus[0] if gpus else None
-        gpu_ids_seq: list[int | None] = [gpu_id, gpu_id]
-        for rank in range(2):
-            _halfset_worker(
-                rank, all_images, all_ghost_kwargs, batch_size, max_epochs, gpu_ids_seq
-            )
+        dose_per_area = dose_per_angstrom * voxel_size**2
+        images = dose_per_area**0.5 * scale[..., None, None] * images + dose_per_area
 
-    return run_dir
+        # preprocessed particle data (not hyperparams — not logged by job.create)
+        self._images = images
+        self._rotations = rotations
+        self._translations = translations
+        self._ctf_params = ctf_params
+        self._anisomag = anisomag
+        self._energy = float(energy.item() if hasattr(energy, "item") else energy)
+        self._voxel_size = voxel_size
+        self._alpha = float(alpha.item() if hasattr(alpha, "item") else alpha)
+
+        # training hyperparameters (stored for run() and test_run())
+        self.lr = lr
+        self.lr_R = lr_R
+        self.lr_T = lr_T
+        self.lr_D = lr_D
+        self.scheduler = scheduler
+        self.epochs = epochs
+        self.batch_size = batch_size
+        self.scattering_model = scattering_model
+        self.aberration_model = aberration_model
+        self.symmetry = symmetry
+        self.symmetry_batchsize = symmetry_batchsize
+        self.symmetry_mode = symmetry_mode
+        self.sparsity = sparsity
+        self.rotate_mode = rotate_mode
+        self.flipcurvature = flipcurvature
+        self.klim = klim
+        self.nps_weight = nps_weight
+        self.learn_noise_model = learn_noise_model
+        self.use_ncc = use_ncc
+        self.fsc_ref = fsc_ref
+        self.fsc_mask = fsc_mask
+        self.precision = precision
+        self.num_workers = num_workers
+        self.num_particles = num_particles
+        self.dose_per_angstrom = dose_per_angstrom
+        self.run_dir = Path(run_dir) if run_dir is not None else None
+
+    def _build_reconstructor_and_loader(
+        self,
+        images: torch.Tensor,
+        voxel_size: float,
+        scattering_model: str,
+        batch_size: int,
+        n_particles: int,
+    ) -> tuple["Reconstructor", torch.utils.data.DataLoader]:
+        from .arrays import ball3d
+
+        n = images.shape[-1]
+        kmask = ball3d(n, n)
+        volume_init = torch.zeros(n, n, n)
+
+        idx = torch.arange(n_particles)
+        dataset = torch.utils.data.TensorDataset(images, idx)
+        loader = torch.utils.data.DataLoader(
+            dataset, batch_size=batch_size, shuffle=True, num_workers=self.num_workers
+        )
+
+        anisomag = self._anisomag[:n_particles] if self._anisomag is not None else None
+        ctf_sliced = {k: v[:n_particles] for k, v in self._ctf_params.items()}
+
+        model = Reconstructor(
+            volume_init,
+            voxel_size,
+            self._rotations[:n_particles],
+            self._translations[:n_particles],
+            ctf_sliced,
+            self._energy,
+            self.dose_per_angstrom,
+            anisomag=anisomag,
+            alpha=self._alpha,
+            scattering_model=scattering_model,
+            aberration_model=self.aberration_model,
+            lr=self.lr,
+            lr_R=self.lr_R,
+            lr_T=self.lr_T,
+            lr_D=self.lr_D,
+            scheduler=self.scheduler,
+            kmask=kmask,
+            klim=self.klim,
+            nps_weight=self.nps_weight,
+            learn_noise_model=self.learn_noise_model,
+            use_ncc=self.use_ncc,
+            sparsity=self.sparsity,
+            rotate_mode=self.rotate_mode,
+            flipcurvature=self.flipcurvature,
+            symmetry=self.symmetry,
+            symmetry_batchsize=self.symmetry_batchsize,
+            symmetry_mode=self.symmetry_mode,
+            fsc_ref=self.fsc_ref,
+            fsc_mask=self.fsc_mask,
+            run_dir=self.run_dir,
+        )
+        return model, loader
+
+    def run(
+        self,
+        device: int = 0,
+        callbacks: list[Any] | None = None,
+    ) -> "Reconstructor":
+        """
+        Run the full reconstruction and return the trained :class:`Reconstructor`.
+
+        Parameters
+        ----------
+        device : int
+            GPU index. Ignored when CUDA is unavailable.
+        callbacks : list, optional
+            Additional Lightning callbacks passed to the ``Trainer``.
+
+        Returns
+        -------
+        Reconstructor
+            The trained model. Access the volume via ``model.V.detach()``.
+        """
+        n_particles = (
+            self.num_particles if self.num_particles is not None else len(self._images)
+        )
+        _box = self._images.shape[-1]
+        use_gpu = torch.cuda.is_available()
+        _device_str = f"GPU {device}" if use_gpu else "CPU"
+        print(
+            f"Starting reconstruction: {n_particles} particles  |  box {_box}³  |  "
+            f"{self.scattering_model}  |  {self.epochs} epochs  |  "
+            f"batch {self.batch_size}  |  {_device_str}"
+        )
+        model, loader = self._build_reconstructor_and_loader(
+            self._images[:n_particles],
+            self._voxel_size,
+            self.scattering_model,
+            self.batch_size,
+            n_particles,
+        )
+
+        trainer = L.Trainer(
+            accelerator="gpu" if use_gpu else "cpu",
+            devices=[device] if use_gpu else 1,
+            max_epochs=self.epochs,
+            precision=self.precision if use_gpu else "32",
+            logger=False,
+            enable_checkpointing=False,
+            callbacks=callbacks or [],
+        )
+        trainer.fit(model, loader)
+        return model
+
+    def test_run(
+        self,
+        bin_factor: int = 8,
+        device: int = 0,
+        callbacks: list[Any] | None = None,
+    ) -> "Reconstructor":
+        """
+        Quick sanity check: run 1 epoch on spatially binned images.
+
+        Bins the loaded images by ``bin_factor`` in each spatial dimension and
+        runs a single training epoch using the symmetry and other settings
+        configured at construction.  Use this after constructing a
+        :class:`Ghostbuster` to verify that files, parameters, and the physics
+        pipeline are all wired up correctly before committing to a full run.
+
+        Parameters
+        ----------
+        bin_factor : int
+            Spatial downsampling factor applied to images and voxel size.
+            Default 8.
+        device : int
+            GPU index. Ignored when CUDA is unavailable.
+        callbacks : list, optional
+            Additional Lightning callbacks passed to the ``Trainer``.
+
+        Returns
+        -------
+        Reconstructor
+            The trained model after one epoch.
+        """
+        n_particles = (
+            self.num_particles if self.num_particles is not None else len(self._images)
+        )
+        print(f"Test run: {n_particles} particles  |  {bin_factor}× binned  |  1 epoch")
+        images = self._images[:n_particles]
+
+        pool = torch.nn.AvgPool2d(bin_factor, stride=bin_factor)
+        images_binned = pool(images.unsqueeze(1)).squeeze(1) * bin_factor**2
+        voxel_size_binned = self._voxel_size * bin_factor
+
+        model, loader = self._build_reconstructor_and_loader(
+            images_binned,
+            voxel_size_binned,
+            self.scattering_model,
+            self.batch_size,
+            n_particles,
+        )
+
+        use_gpu = torch.cuda.is_available()
+        trainer = L.Trainer(
+            accelerator="gpu" if use_gpu else "cpu",
+            devices=[device] if use_gpu else 1,
+            max_epochs=1,
+            precision="32",
+            logger=False,
+            enable_checkpointing=False,
+            callbacks=callbacks or [],
+        )
+        trainer.fit(model, loader)
+
+        v = model.V.detach()
+        print(
+            f"Test run passed — {bin_factor}× binned, {n_particles} particles, "
+            f"box {images_binned.shape[-1]}³  |  "
+            f"V min={v.min():.4f}  max={v.max():.4f}  mean={v.mean():.4f}"
+        )
+        return model

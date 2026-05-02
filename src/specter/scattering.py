@@ -186,7 +186,6 @@ class Scattering(L.LightningModule):
         # Fresnel transfer function for first Born
         if scattering_model == "firstborn" or scattering_model == "rytov":
             F = []
-            # for i in tqdm(range(nz), desc='Create first Born propagators', leave=False):
             for i in track(
                 range(nz),
                 description="Create first Born propagators",

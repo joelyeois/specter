@@ -109,6 +109,7 @@ class Reconstructor(L.LightningModule):
         flipcurvature: bool = False,
         fsc_ref: torch.Tensor | str | Path | None = None,
         fsc_mask: torch.Tensor | float | str | Path | None = None,
+        cryosparc_ref: torch.Tensor | str | Path | None = None,
         rotate_mode: Literal["real", "fourier"] = "real",
         symmetry: str | None = None,
         symmetry_batchsize: int | None = None,
@@ -130,6 +131,7 @@ class Reconstructor(L.LightningModule):
                 "kmask",
                 "nps_weight",
                 "fsc_ref",
+                "cryosparc_ref",
                 "fsc_mask",
                 "run_dir",
                 "halfset_label",
@@ -189,6 +191,11 @@ class Reconstructor(L.LightningModule):
             fsc_mask = 1
         self.fsc_mask = fsc_mask
         self.fsc_ref = fsc_ref
+
+        # cryosparc_ref — load from file if path provided
+        if isinstance(cryosparc_ref, (str, Path)):
+            cryosparc_ref = torch.as_tensor(mrcfile.read(str(cryosparc_ref)))
+        self.cryosparc_ref = cryosparc_ref
 
         # model parameters
         self.dose_per_angstrom = dose_per_angstrom
@@ -637,7 +644,7 @@ class Reconstructor(L.LightningModule):
         path: Path,
         label: str,
     ) -> None:
-        """Compute and save an FSC figure. Silently skips on failure."""
+        """Compute and save an FSC figure with optional CryoSPARC reference. Silently skips on failure."""
         try:
             import matplotlib.pyplot as plt
 
@@ -653,12 +660,27 @@ class Reconstructor(L.LightningModule):
                 if isinstance(self.fsc_mask, torch.Tensor)
                 else None
             )
+
+            # Build list of volumes and labels
+            vols = [v]
+            labels = [label]
+
+            # Add CryoSPARC reference if both fsc_ref and cryosparc_ref are set
+            if self.cryosparc_ref is not None and self.fsc_ref is not None:
+                cs_ref = (
+                    self.cryosparc_ref.detach().cpu().float()
+                    if isinstance(self.cryosparc_ref, torch.Tensor)
+                    else self.cryosparc_ref
+                )
+                vols.append(cs_ref)
+                labels.append("CryoSPARC")
+
             fig = plot_map_to_model_fsc(
-                [v],
+                vols,
                 fsc_ref,
                 voxel_size=self.voxel_size,
                 mask=fsc_mask,
-                labels=[label],
+                labels=labels,
                 show=False,
             )
             fig.savefig(path, bbox_inches="tight")
@@ -810,6 +832,10 @@ class Ghostbuster:
     fsc_mask : torch.Tensor, float, str, Path, or None
         Mask applied before FSC computation. Can be a tensor, scalar, or a
         path to a .mrc file to load.
+    cryosparc_ref : torch.Tensor, str, Path, or None
+        CryoSPARC reference volume for FSC comparison. Can be a tensor or a
+        path to a .mrc file to load. Only plotted alongside fsc_ref when
+        both are provided. Default is None.
     precision : str
         Lightning ``Trainer`` precision (e.g. ``"16-mixed"``, ``"32"``).
         Falls back to ``"32"`` automatically on CPU.
@@ -854,6 +880,7 @@ class Ghostbuster:
         use_ncc: bool = False,
         fsc_ref: torch.Tensor | str | Path | None = None,
         fsc_mask: torch.Tensor | float | str | Path | None = None,
+        cryosparc_ref: torch.Tensor | str | Path | None = None,
         precision: str = "16-mixed",
         num_workers: int = 0,
         num_particles: int | None = None,
@@ -932,6 +959,7 @@ class Ghostbuster:
         self.use_ncc = use_ncc
         self.fsc_ref = fsc_ref
         self.fsc_mask = fsc_mask
+        self.cryosparc_ref = cryosparc_ref
         self.precision = precision
         self.num_workers = num_workers
         self.num_particles = num_particles
@@ -991,6 +1019,7 @@ class Ghostbuster:
             symmetry_mode=self.symmetry_mode,
             fsc_ref=self.fsc_ref,
             fsc_mask=self.fsc_mask,
+            cryosparc_ref=self.cryosparc_ref,
             run_dir=self.run_dir,
             halfset_label=self.halfset_label,
         )

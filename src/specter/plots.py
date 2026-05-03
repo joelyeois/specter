@@ -691,11 +691,27 @@ try:
 
         slider.observe(on_slider_change, names="value")
 
-        # Layout: title, images side-by-side, slider
+        # Create navigation buttons
+        btn_prev = widgets.Button(description="◀", layout=widgets.Layout(width="50px"))
+        btn_next = widgets.Button(description="▶", layout=widgets.Layout(width="50px"))
+
+        def on_prev_clicked(btn) -> None:
+            if slider.value > 0:
+                slider.value -= 1
+
+        def on_next_clicked(btn) -> None:
+            if slider.value < len(all_epochs) - 1:
+                slider.value += 1
+
+        btn_prev.on_click(on_prev_clicked)
+        btn_next.on_click(on_next_clicked)
+
+        # Layout: title, images side-by-side, slider with buttons
         header = widgets.HTML(f"<h3>Job: {job_folder.name}</h3>")
         images_hbox = widgets.HBox([output_fsc, output_vol])
+        slider_hbox = widgets.HBox([btn_prev, slider, btn_next])
 
-        vbox = widgets.VBox([header, images_hbox, slider])
+        vbox = widgets.VBox([header, images_hbox, slider_hbox])
 
         # Initial display
         update_display(0)

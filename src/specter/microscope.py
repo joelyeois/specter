@@ -602,7 +602,7 @@ class Detector(L.LightningModule):
 
         # Apply transformation using grid sampling
         images = F.grid_sample(images, grid, align_corners=False, padding_mode="border")
-        images = torch.squeeze(images)
+        images = torch.squeeze(images, dim=1)
         return images
 
     def add_mtf(self, images: torch.Tensor, mtf: torch.Tensor) -> torch.Tensor:

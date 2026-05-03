@@ -107,8 +107,8 @@ class Reconstructor(L.LightningModule):
         noise_ema_momentum: float = 0.9,
         use_ncc: bool = False,
         flipcurvature: bool = False,
-        fsc_ref: torch.Tensor | None = None,
-        fsc_mask: torch.Tensor | float | None = None,
+        fsc_ref: torch.Tensor | str | Path | None = None,
+        fsc_mask: torch.Tensor | float | str | Path | None = None,
         rotate_mode: Literal["real", "fourier"] = "real",
         symmetry: str | None = None,
         symmetry_batchsize: int | None = None,
@@ -180,7 +180,11 @@ class Reconstructor(L.LightningModule):
         n = V.shape[-1]
         self.register_buffer("sigma2_k", torch.ones(n, n // 2 + 1))
 
-        # fsc
+        # fsc — load from file if path provided
+        if isinstance(fsc_ref, (str, Path)):
+            fsc_ref = torch.as_tensor(mrcfile.read(str(fsc_ref)))
+        if isinstance(fsc_mask, (str, Path)):
+            fsc_mask = torch.as_tensor(mrcfile.read(str(fsc_mask)))
         if fsc_mask is None:
             fsc_mask = 1
         self.fsc_mask = fsc_mask
@@ -503,7 +507,7 @@ class Reconstructor(L.LightningModule):
             on_step=True,
             on_epoch=True,
             prog_bar=True,
-            logger=True,
+            logger=False,
         )
 
         for opt in opts:
@@ -655,6 +659,7 @@ class Reconstructor(L.LightningModule):
                 voxel_size=self.voxel_size,
                 mask=fsc_mask,
                 labels=[label],
+                show=False,
             )
             fig.savefig(path, bbox_inches="tight")
             plt.close(fig)
@@ -799,10 +804,12 @@ class Ghostbuster:
         Whether to estimate sigma²(k) from residuals (RELION-style).
     use_ncc : bool
         Whether to use normalised cross-correlation loss instead of MSE.
-    fsc_ref : torch.Tensor, optional
-        Reference volume for map-to-model FSC logging.
-    fsc_mask : torch.Tensor or float, optional
-        Mask applied before FSC computation.
+    fsc_ref : torch.Tensor, str, Path, or None
+        Reference volume for map-to-model FSC logging. Can be a tensor or a
+        path to a .mrc file to load.
+    fsc_mask : torch.Tensor, float, str, Path, or None
+        Mask applied before FSC computation. Can be a tensor, scalar, or a
+        path to a .mrc file to load.
     precision : str
         Lightning ``Trainer`` precision (e.g. ``"16-mixed"``, ``"32"``).
         Falls back to ``"32"`` automatically on CPU.
@@ -845,8 +852,8 @@ class Ghostbuster:
         nps_weight: torch.Tensor | None = None,
         learn_noise_model: bool = False,
         use_ncc: bool = False,
-        fsc_ref: torch.Tensor | None = None,
-        fsc_mask: torch.Tensor | float | None = None,
+        fsc_ref: torch.Tensor | str | Path | None = None,
+        fsc_mask: torch.Tensor | float | str | Path | None = None,
         precision: str = "16-mixed",
         num_workers: int = 0,
         num_particles: int | None = None,

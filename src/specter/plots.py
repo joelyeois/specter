@@ -14,7 +14,7 @@ def plot3d(
     vmax: float | None = None,
     cmap: str | None = None,
     show: bool = True,
-) -> matplotlib.figure.Figure:
+) -> matplotlib.figure.Figure | None:
     """
     Plot 3 orthogonal projections of a 3D volume.
 
@@ -31,14 +31,15 @@ def plot3d(
     cmap : str or None, optional
         Matplotlib colormap name. Default is None (uses matplotlib default).
     show : bool, optional
-        Whether to call ``plt.show()``. Set ``False`` when saving to disk
-        programmatically. Default is True.
+        Whether to display the figure immediately. Set ``False`` to get the
+        figure object back (e.g. for saving to disk). Default is True.
 
     Returns
     -------
-    matplotlib.figure.Figure
-        The figure object. Caller is responsible for closing it when
-        ``show=False``.
+    matplotlib.figure.Figure or None
+        ``None`` when ``show=True`` (figure is displayed and closed).
+        The figure object when ``show=False``; caller is responsible for
+        closing it.
     """
     fig, axes = plt.subplots(1, 3, dpi=200, constrained_layout=True, figsize=(8, 3.6))
     for i, ax in enumerate(axes.ravel()):
@@ -49,6 +50,8 @@ def plot3d(
         fig.suptitle(title, fontsize=15)
     if show:
         plt.show()
+        plt.close(fig)
+        return None
     return fig
 
 
@@ -338,7 +341,8 @@ def plot_map_to_model_fsc(
     voxel_size: float,
     mask: torch.Tensor | None = None,
     labels: list[str] | None = None,
-) -> matplotlib.figure.Figure:
+    show: bool = True,
+) -> matplotlib.figure.Figure | None:
     """
     Compute and plot map-to-model Fourier Shell Correlations.
 
@@ -362,12 +366,16 @@ def plot_map_to_model_fsc(
         and the reference with the mask before correlation.
     labels : list of str, optional
         One label per volume. Defaults to ``["vol 0", "vol 1", ...]``.
+    show : bool, optional
+        Whether to display the figure immediately. Set ``False`` to get the
+        figure object back (e.g. for saving to disk). Default is True.
 
     Returns
     -------
-    matplotlib.figure.Figure
-        Figure containing the FSC plot. Call ``fig.savefig(...)`` or
-        ``plt.show()`` to display it.
+    matplotlib.figure.Figure or None
+        ``None`` when ``show=True`` (figure is displayed and closed).
+        The figure object when ``show=False``; caller is responsible for
+        closing it.
     """
     import seaborn as sns
 
@@ -449,4 +457,8 @@ def plot_map_to_model_fsc(
     ax.legend(frameon=True, fontsize=8, loc="upper right", framealpha=0.8)
     sns.despine(ax=ax, offset=6)
     fig.tight_layout()
+    if show:
+        plt.show()
+        plt.close(fig)
+        return None
     return fig

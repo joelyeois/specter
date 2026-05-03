@@ -650,13 +650,15 @@ class Reconstructor(L.LightningModule):
 
             from .plots import plot_map_to_model_fsc
 
+            # Move references to volume's device for GPU FSC computation.
+            device = v.device
             fsc_ref = (
-                self.fsc_ref.detach().cpu().float()
+                self.fsc_ref.detach().to(device).float()
                 if isinstance(self.fsc_ref, torch.Tensor)
                 else self.fsc_ref
             )
             fsc_mask = (
-                self.fsc_mask.detach().cpu().float()
+                self.fsc_mask.detach().to(device)
                 if isinstance(self.fsc_mask, torch.Tensor)
                 else None
             )
@@ -668,7 +670,7 @@ class Reconstructor(L.LightningModule):
             # Add CryoSPARC reference if both fsc_ref and cryosparc_ref are set
             if self.cryosparc_ref is not None and self.fsc_ref is not None:
                 cs_ref = (
-                    self.cryosparc_ref.detach().cpu().float()
+                    self.cryosparc_ref.detach().to(device).float()
                     if isinstance(self.cryosparc_ref, torch.Tensor)
                     else self.cryosparc_ref
                 )

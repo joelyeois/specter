@@ -474,14 +474,14 @@ def _extract_epoch_number(filename: str) -> int | None:
     Parameters
     ----------
     filename : str
-        Filename like "fsc_001A.png" or "vol_042.png"
+        Filename like "fsc_001_B.png" or "vol_042_A.png"
 
     Returns
     -------
     int or None
         Epoch number if matched, None otherwise.
     """
-    match = re.search(r"(?:fsc|vol)_(\d+)", filename)
+    match = re.search(r"(?:fsc|vol)_(\d+)(?:_[A-Z])?", filename)
     return int(match.group(1)) if match else None
 
 
@@ -496,7 +496,7 @@ def _discover_fsc_images(
     job_folder : str or Path
         Job folder path.
     suffix : str or None
-        If specified, only return files matching this suffix (e.g., "A" for fsc_001A.png).
+        If specified, only return files matching this suffix (e.g., "A" for fsc_001_A.png).
 
     Returns
     -------
@@ -515,7 +515,7 @@ def _discover_fsc_images(
         raise FileNotFoundError(f"Epochs directory not found: {epochs_dir}")
 
     # Find matching FSC files
-    pattern = f"fsc_*{suffix}.png" if suffix else "fsc_*.png"
+    pattern = f"fsc_*_{suffix}.png" if suffix else "fsc_*.png"
     fsc_files = []
     for fsc_file in sorted(epochs_dir.glob(pattern)):
         epoch = _extract_epoch_number(fsc_file.name)

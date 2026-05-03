@@ -461,11 +461,7 @@ class Reconstructor(L.LightningModule):
             # same loss magnitude as real-space MSE (Parseval equivalence).
             loss = torch.mean(self.nps_weight * (images_f - out_f).abs() ** 2) / (H * W)
         else:
-            # Dose-agnostic MSE: normalize by dose per pixel so gradient magnitude
-            # is independent of dose. To preserve learning dynamics across doses,
-            # scale lr proportionally: lr_new = lr_old * (dose_new / dose_old).
-            dose_per_pixel = self.dose_per_angstrom * self.voxel_size**2
-            loss = F.mse_loss(images, out) / dose_per_pixel
+            loss = F.mse_loss(images, out)
         self.log_norm_loss.append(loss.detach().cpu())
 
         if self.sparsity is not None:

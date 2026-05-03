@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import re
+from pathlib import Path
+
 import matplotlib.figure
 import matplotlib.pyplot as plt
 import torch
@@ -462,3 +465,250 @@ def plot_map_to_model_fsc(
         plt.close(fig)
         return None
     return fig
+
+
+def _extract_epoch_number(filename: str) -> int | None:
+    """
+    Extract epoch number from FSC or volume PNG filename.
+
+    Parameters
+    ----------
+    filename : str
+        Filename like "fsc_001A.png" or "vol_042.png"
+
+    Returns
+    -------
+    int or None
+        Epoch number if matched, None otherwise.
+    """
+    match = re.search(r"(?:fsc|vol)_(\d+)", filename)
+    return int(match.group(1)) if match else None
+
+
+def _discover_fsc_images(
+    job_folder: str | Path, suffix: str | None = None
+) -> list[tuple[int, Path]]:
+    """
+    Find FSC PNG files in job_folder/epochs/, sorted by epoch number.
+
+    Parameters
+    ----------
+    job_folder : str or Path
+        Job folder path.
+    suffix : str or None
+        If specified, only return files matching this suffix (e.g., "A" for fsc_001A.png).
+
+    Returns
+    -------
+    list of (epoch_number, Path) tuples
+        Sorted by epoch number ascending.
+
+    Raises
+    ------
+    FileNotFoundError
+        If job_folder/epochs/ does not exist.
+    """
+    job_folder = Path(job_folder)
+    epochs_dir = job_folder / "epochs"
+
+    if not epochs_dir.exists():
+        raise FileNotFoundError(f"Epochs directory not found: {epochs_dir}")
+
+    # Find matching FSC files
+    pattern = f"fsc_*{suffix}.png" if suffix else "fsc_*.png"
+    fsc_files = []
+    for fsc_file in sorted(epochs_dir.glob(pattern)):
+        epoch = _extract_epoch_number(fsc_file.name)
+        if epoch is not None:
+            fsc_files.append((epoch, fsc_file))
+
+    # Sort by epoch number
+    fsc_files.sort(key=lambda x: x[0])
+    return fsc_files
+
+
+def _discover_vol_images(job_folder: str | Path) -> list[tuple[int, Path]]:
+    """
+    Find volume PNG files in job_folder/epochs/, sorted by epoch number.
+
+    Parameters
+    ----------
+    job_folder : str or Path
+        Job folder path.
+
+    Returns
+    -------
+    list of (epoch_number, Path) tuples
+        Sorted by epoch number ascending.
+
+    Raises
+    ------
+    FileNotFoundError
+        If job_folder/epochs/ does not exist.
+    """
+    job_folder = Path(job_folder)
+    epochs_dir = job_folder / "epochs"
+
+    if not epochs_dir.exists():
+        raise FileNotFoundError(f"Epochs directory not found: {epochs_dir}")
+
+    # Find volume files
+    vol_files = []
+    for vol_file in sorted(epochs_dir.glob("vol_*.png")):
+        epoch = _extract_epoch_number(vol_file.name)
+        if epoch is not None:
+            vol_files.append((epoch, vol_file))
+
+    # Sort by epoch number
+    vol_files.sort(key=lambda x: x[0])
+    return vol_files
+
+
+try:
+    import ipywidgets as widgets
+    from IPython.display import display, Markdown
+
+    def visualize_job_epochs(
+        job_folder: str | Path,
+        suffix: str | None = None,
+        image_width: int = 8,
+    ) -> None:
+        """
+        Display FSC and volume images side-by-side with synchronized epoch slider.
+
+        Interactive Jupyter visualization of reconstruction progress. FSC and volume
+        PNG images are displayed for each epoch with a synchronized slider control.
+        Requires ipywidgets to be installed.
+
+        Parameters
+        ----------
+        job_folder : str or Path
+            Path to the job folder (e.g., "~/specter-data/empiar-10202/J002").
+        suffix : str, optional
+            Filter FSC images by suffix (e.g., "A" shows only fsc_001A.png).
+            If None, all FSC images are shown.
+        image_width : int, optional
+            Display width of each image in inches. Default is 8.
+
+        Raises
+        ------
+        FileNotFoundError
+            If job_folder/epochs/ does not exist.
+        ValueError
+            If no FSC or volume images are found.
+
+        Examples
+        --------
+        >>> visualize_job_epochs("~/specter-data/empiar-10202/J002")
+        >>> visualize_job_epochs("~/specter-data/empiar-10202/J002", suffix="A")
+        """
+        from PIL import Image as PILImage
+
+        job_folder = Path(job_folder).expanduser()
+
+        # Discover images
+        try:
+            fsc_files = _discover_fsc_images(job_folder, suffix=suffix)
+        except FileNotFoundError as e:
+            raise FileNotFoundError(str(e)) from e
+
+        try:
+            vol_files = _discover_vol_images(job_folder)
+        except FileNotFoundError as e:
+            raise FileNotFoundError(str(e)) from e
+
+        if not fsc_files:
+            suffix_str = f" with suffix '{suffix}'" if suffix else ""
+            raise ValueError(
+                f"No FSC images found{suffix_str} in {job_folder / 'epochs'}"
+            )
+        if not vol_files:
+            raise ValueError(f"No volume images found in {job_folder / 'epochs'}")
+
+        # Create epoch lists (use max range, show N/A for missing)
+        fsc_epochs = {epoch: path for epoch, path in fsc_files}
+        vol_epochs = {epoch: path for epoch, path in vol_files}
+        all_epochs = sorted(set(fsc_epochs.keys()) | set(vol_epochs.keys()))
+
+        # Create matplotlib figures for display
+        fig_fsc, ax_fsc = plt.subplots(
+            figsize=(image_width, image_width * 0.75), dpi=100
+        )
+        fig_vol, ax_vol = plt.subplots(
+            figsize=(image_width, image_width * 0.75), dpi=100
+        )
+        plt.close(fig_fsc)
+        plt.close(fig_vol)
+
+        # Create output widgets
+        output_fsc = widgets.Output()
+        output_vol = widgets.Output()
+
+        def update_display(epoch_idx: int) -> None:
+            """Update both images for the selected epoch index."""
+            epoch = all_epochs[epoch_idx]
+
+            output_fsc.clear_output(wait=True)
+            output_vol.clear_output(wait=True)
+
+            with output_fsc:
+                if epoch in fsc_epochs:
+                    img_fsc = PILImage.open(fsc_epochs[epoch])
+                    ax_fsc.clear()
+                    ax_fsc.imshow(img_fsc)
+                    ax_fsc.set_title(f"FSC Epoch {epoch}")
+                    ax_fsc.axis("off")
+                    fig_fsc.tight_layout()
+                    display(fig_fsc)
+                else:
+                    display(Markdown(f"**FSC**: No image for epoch {epoch}"))
+
+            with output_vol:
+                if epoch in vol_epochs:
+                    img_vol = PILImage.open(vol_epochs[epoch])
+                    ax_vol.clear()
+                    ax_vol.imshow(img_vol)
+                    ax_vol.set_title(f"Volume Epoch {epoch}")
+                    ax_vol.axis("off")
+                    fig_vol.tight_layout()
+                    display(fig_vol)
+                else:
+                    display(Markdown(f"**Volume**: No image for epoch {epoch}"))
+
+        # Create slider
+        slider = widgets.IntSlider(
+            value=0,
+            min=0,
+            max=len(all_epochs) - 1,
+            step=1,
+            description="Epoch:",
+            continuous_update=False,
+        )
+
+        # Update on slider change
+        def on_slider_change(change: dict) -> None:
+            update_display(change["new"])
+
+        slider.observe(on_slider_change, names="value")
+
+        # Layout: title, images side-by-side, slider
+        header = widgets.HTML(f"<h3>Job: {job_folder.name}</h3>")
+        images_hbox = widgets.HBox([output_fsc, output_vol])
+
+        vbox = widgets.VBox([header, images_hbox, slider])
+
+        # Initial display
+        update_display(0)
+        display(vbox)
+
+except ImportError:
+
+    def visualize_job_epochs(
+        job_folder: str | Path,
+        suffix: str | None = None,
+        image_width: int = 8,
+    ) -> None:
+        raise ImportError(
+            "visualize_job_epochs() requires ipywidgets. "
+            "Install with: pip install ipywidgets"
+        )

@@ -623,7 +623,7 @@ class Reconstructor(L.LightningModule):
 
             fig = plot3d(v, title=f"Epoch {epoch}{suffix}", show=False)
             fig.savefig(
-                self._run_dir / "epochs" / f"{epoch:03d}{suffix}.png",
+                self._run_dir / "epochs" / f"vol_{epoch:03d}{suffix}.png",
                 bbox_inches="tight",
             )
             plt.close(fig)

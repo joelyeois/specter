@@ -16,11 +16,14 @@ from torch.optim.lr_scheduler import (
     ExponentialLR,
     LambdaLR,
     LRScheduler,
+    OneCycleLR,
 )
 
+from . import rotations
 from .arrays import compute_nps_2d
 from .fft import fft3, ifft3
 from .imagegenerator import ImageGenerator
+from .rotations import Rotation
 from .symmetries import apply_symmetry, get_rotation_matrices
 
 
@@ -59,8 +62,11 @@ class Reconstructor(L.LightningModule):
         Learning rate for translations. None disables translation refinement.
     lr_D : float, optional
         Learning rate for defocus offset. None disables defocus refinement.
-    scheduler : {"LambdaLR", "CosineAnnealingWarmRestarts", "MultiplicativeLR"}
+    scheduler : {"LambdaLR", "OneCycleLR", "CosineAnnealingWarmRestarts", "MultiplicativeLR"}
         LR scheduler applied to the volume optimiser. Default is "LambdaLR".
+        ``"OneCycleLR"`` treats ``lr`` as the peak learning rate and decays
+        aggressively over the configured run, which is useful for short
+        screening jobs.
     sparsity : float, optional
         L1 regularisation weight on V. None disables sparsity.
     symmetry : str, optional
@@ -72,6 +78,9 @@ class Reconstructor(L.LightningModule):
     run_dir : str or Path, optional
         Directory to write per-epoch volumes, final volume, and metadata into.
         ``None`` disables all file output.
+    use_2d_mask : bool
+        If True, rotate ``fsc_mask`` for each particle, project it to 2D, and
+        use that projected mask to weight the image-domain MSE loss.
     halfset_label : str, optional
         Short label (e.g. ``"A"`` or ``"B"``) appended to saved filenames when
         two halfset runs share the same ``run_dir``.
@@ -99,7 +108,10 @@ class Reconstructor(L.LightningModule):
         lr_D: float | None = None,
         lr_decay: float = 0.1,
         scheduler: Literal[
-            "LambdaLR", "CosineAnnealingWarmRestarts", "MultiplicativeLR"
+            "LambdaLR",
+            "OneCycleLR",
+            "CosineAnnealingWarmRestarts",
+            "MultiplicativeLR",
         ] = "LambdaLR",
         kmask: torch.Tensor | None = None,
         nps_weight: torch.Tensor | None = None,
@@ -110,6 +122,7 @@ class Reconstructor(L.LightningModule):
         fsc_ref: torch.Tensor | str | Path | None = None,
         fsc_mask: torch.Tensor | float | str | Path | None = None,
         cryosparc_ref: torch.Tensor | str | Path | None = None,
+        use_2d_mask: bool = False,
         rotate_mode: Literal["real", "fourier"] = "real",
         symmetry: str | None = None,
         symmetry_batchsize: int | None = None,
@@ -174,6 +187,7 @@ class Reconstructor(L.LightningModule):
         # masks
         self.register_buffer("kmask", kmask)
         self.register_buffer("nps_weight", nps_weight)
+        self.use_2d_mask = use_2d_mask
 
         # learned noise model (RELION-style): sigma^2(k) estimated from residuals
         self.learn_noise_model = learn_noise_model
@@ -189,7 +203,10 @@ class Reconstructor(L.LightningModule):
             fsc_mask = torch.as_tensor(mrcfile.read(str(fsc_mask)))
         if fsc_mask is None:
             fsc_mask = 1
-        self.fsc_mask = fsc_mask
+        if isinstance(fsc_mask, torch.Tensor):
+            self.register_buffer("fsc_mask", fsc_mask)
+        else:
+            self.fsc_mask = fsc_mask
         self.fsc_ref = fsc_ref
 
         # cryosparc_ref — load from file if path provided
@@ -331,6 +348,16 @@ class Reconstructor(L.LightningModule):
                     eta_min=1e-6,
                     T_mult=2,
                 )
+            elif self.scheduler == "OneCycleLR":
+                lr_scheduler = OneCycleLR(
+                    optimizerV,
+                    max_lr=self.lr,
+                    total_steps=self.num_training_steps(),
+                    pct_start=0.1,
+                    anneal_strategy="cos",
+                    div_factor=10.0,
+                    final_div_factor=1000.0,
+                )
             elif self.scheduler == "MultiplicativeLR":
                 lr_scheduler = ExponentialLR(optimizerV, 0.999)
             elif self.scheduler == "LambdaLR":
@@ -338,7 +365,8 @@ class Reconstructor(L.LightningModule):
             else:
                 raise ValueError(
                     f"Unknown scheduler '{self.scheduler}'. "
-                    "Choose 'LambdaLR', 'CosineAnnealingWarmRestarts', or 'MultiplicativeLR'."
+                    "Choose 'LambdaLR', 'OneCycleLR', "
+                    "'CosineAnnealingWarmRestarts', or 'MultiplicativeLR'."
                 )
             lr_schedulers.append(lr_scheduler)
 
@@ -421,7 +449,9 @@ class Reconstructor(L.LightningModule):
             # (i.e. loss magnitude remains comparable to real-space MSE).
             self.sigma2_k = self.sigma2_k / self.sigma2_k.mean().clamp(min=1e-10)
 
-    def _compute_loss(self, out: torch.Tensor, images: torch.Tensor) -> torch.Tensor:
+    def _compute_loss(
+        self, out: torch.Tensor, images: torch.Tensor, idx: torch.Tensor
+    ) -> torch.Tensor:
         """
         Compute the image-domain loss between simulated and experimental images.
 
@@ -434,6 +464,8 @@ class Reconstructor(L.LightningModule):
             Simulated images, shape (B, H, W).
         images : torch.Tensor
             Experimental images, shape (B, H, W).
+        idx : torch.Tensor
+            Particle indices for this batch.
 
         Returns
         -------
@@ -461,7 +493,10 @@ class Reconstructor(L.LightningModule):
             # same loss magnitude as real-space MSE (Parseval equivalence).
             loss = torch.mean(self.nps_weight * (images_f - out_f).abs() ** 2) / (H * W)
         else:
-            loss = F.mse_loss(images, out)
+            mse = F.mse_loss(images, out, reduction="none")
+            if self.use_2d_mask:
+                mse = mse * self._project_fsc_mask_2d(idx, images.shape)
+            loss = mse.mean()
         self.log_norm_loss.append(loss.detach().cpu())
 
         if self.sparsity is not None:
@@ -471,6 +506,45 @@ class Reconstructor(L.LightningModule):
 
         self.log_total_loss.append(loss.detach().cpu())
         return loss
+
+    def _project_fsc_mask_2d(
+        self, idx: torch.Tensor, image_shape: torch.Size
+    ) -> torch.Tensor:
+        """Rotate ``fsc_mask`` with the image generator geometry and max-project it."""
+        if not isinstance(self.fsc_mask, torch.Tensor):
+            raise ValueError("use_2d_mask=True requires fsc_mask to be a 3D tensor.")
+        if self.fsc_mask.ndim != 3:
+            raise ValueError(
+                f"use_2d_mask=True requires a 3D fsc_mask, got shape {tuple(self.fsc_mask.shape)}."
+            )
+
+        mask = self.fsc_mask
+        if tuple(mask.shape) != tuple(self.V.shape[-3:]):
+            raise ValueError(
+                "use_2d_mask=True requires fsc_mask shape to match V shape; "
+                f"got {tuple(mask.shape)} and {tuple(self.V.shape[-3:])}."
+            )
+
+        with torch.no_grad():
+            Q = self.rotations[idx]
+            T = self.translations[idx]
+            if len(Q.shape) < 2:
+                Q = Q.unsqueeze(0)
+            if len(T.shape) < 2:
+                T = T.unsqueeze(0)
+            R = Rotation.from_quat(Q)
+            T = rotations.translations_angstrom_to_torch(
+                T, self.imagegenerator.nxy, self.imagegenerator.pixel_size
+            )
+            theta = rotations.build_affine_matrix(R.as_matrix(), T)
+            projected = self.imagegenerator.rotator(mask, theta).max(dim=1).values
+
+        if projected.shape != image_shape:
+            raise ValueError(
+                "Projected 2D mask shape does not match image batch shape; "
+                f"got {tuple(projected.shape)} and {tuple(image_shape)}."
+            )
+        return projected
 
     def _common_step(
         self, batch: tuple[torch.Tensor, torch.Tensor], batch_idx: int
@@ -483,7 +557,7 @@ class Reconstructor(L.LightningModule):
 
         images, idx = batch
         out = self.forward(idx)
-        loss = self._compute_loss(out, images)
+        loss = self._compute_loss(out, images, idx)
         return loss, out, images
 
     def training_step(
@@ -573,8 +647,86 @@ class Reconstructor(L.LightningModule):
         )
         print(f"Run directory: {self._run_dir}")
 
+    def _save_metrics(self) -> None:
+        """Save training metrics (loss, lr) to JSON per epoch."""
+        if self._run_dir is None or not self.log_total_loss:
+            return
+
+        suffix = f"_{self._halfset_label}" if self._halfset_label is not None else ""
+        metrics_path = self._run_dir / f"metrics{suffix}.json"
+
+        # Convert per-batch lists to per-epoch statistics
+        n_batches_per_epoch = len(self.log_total_loss) // max(self.current_epoch, 1)
+        if n_batches_per_epoch == 0:
+            n_batches_per_epoch = len(self.log_total_loss)
+
+        epochs = {}
+        for epoch in range(self.current_epoch + 1):
+            start_idx = epoch * n_batches_per_epoch
+            end_idx = (epoch + 1) * n_batches_per_epoch
+
+            epoch_losses = [
+                float(value) for value in self.log_total_loss[start_idx:end_idx]
+            ]
+            epoch_norm_losses = [
+                float(value) for value in self.log_norm_loss[start_idx:end_idx]
+            ]
+            epoch_lrs = self.log_lrs[start_idx:end_idx]  # Already floats
+
+            epochs[f"epoch_{epoch + 1:02d}"] = {
+                "loss": {
+                    "mean": sum(epoch_losses) / len(epoch_losses)
+                    if epoch_losses
+                    else None,
+                    "min": min(epoch_losses) if epoch_losses else None,
+                    "max": max(epoch_losses) if epoch_losses else None,
+                    "std": (
+                        sum(
+                            (x - (sum(epoch_losses) / len(epoch_losses))) ** 2
+                            for x in epoch_losses
+                        )
+                        / len(epoch_losses)
+                    )
+                    ** 0.5
+                    if len(epoch_losses) > 1
+                    else 0.0,
+                },
+                "norm_loss": {
+                    "mean": sum(epoch_norm_losses) / len(epoch_norm_losses)
+                    if epoch_norm_losses
+                    else None,
+                },
+                "lr": {
+                    "start": epoch_lrs[0] if epoch_lrs else None,
+                    "end": epoch_lrs[-1] if epoch_lrs else None,
+                    "min": min(epoch_lrs) if epoch_lrs else None,
+                },
+            }
+            if self.log_sparsity_loss:
+                epoch_sparsity = [
+                    float(value) for value in self.log_sparsity_loss[start_idx:end_idx]
+                ]
+                epochs[f"epoch_{epoch + 1:02d}"]["sparsity_loss"] = {
+                    "mean": sum(epoch_sparsity) / len(epoch_sparsity)
+                    if epoch_sparsity
+                    else None,
+                }
+
+        meta = {
+            "total_batches": len(self.log_total_loss),
+            "batches_per_epoch": n_batches_per_epoch,
+            "total_epochs": self.current_epoch + 1,
+            "epochs": epochs,
+        }
+
+        metrics_path.write_text(json.dumps(meta, indent=2))
+        print(f"Saved metrics → {metrics_path}")
+
     def on_fit_end(self) -> None:
-        """Save the final reconstructed volume and FSC figure."""
+        """Save the final reconstructed volume, FSC figure, and training metrics."""
+        # Save metrics first (before v is computed, so they capture all epochs)
+        self._save_metrics()
+
         if self._run_dir is None:
             return
         suffix = f"_{self._halfset_label}" if self._halfset_label is not None else ""
@@ -708,6 +860,24 @@ class Reconstructor(L.LightningModule):
 
         return num_steps
 
+    def num_training_steps(self) -> int:
+        """
+        Return the total number of optimizer steps in the configured run.
+
+        Returns
+        -------
+        int
+            Total scheduler steps across all epochs.
+        """
+        if self.trainer.max_steps > -1:
+            return self.trainer.max_steps
+
+        max_epochs = self.trainer.max_epochs
+        if max_epochs is None or max_epochs < 1:
+            raise ValueError("OneCycleLR requires a positive trainer.max_epochs.")
+
+        return self.num_training_steps_per_epoch() * max_epochs
+
 
 def compare_runs(
     base_dir: str | Path = "output/runs",
@@ -797,7 +967,7 @@ class Ghostbuster:
         Learning rate for translations.
     lr_D : float, optional
         Learning rate for defocus offset.
-    scheduler : {"LambdaLR", "CosineAnnealingWarmRestarts", "MultiplicativeLR"}
+    scheduler : {"LambdaLR", "OneCycleLR", "CosineAnnealingWarmRestarts", "MultiplicativeLR"}
         LR scheduler for the volume optimiser.
     epochs : int
         Number of training epochs.
@@ -838,6 +1008,9 @@ class Ghostbuster:
         CryoSPARC reference volume for FSC comparison. Can be a tensor or a
         path to a .mrc file to load. Only plotted alongside fsc_ref when
         both are provided. Default is None.
+    use_2d_mask : bool
+        If True, rotate ``fsc_mask`` for each particle, max-project it to 2D,
+        and use that projected mask to weight the image-domain MSE loss.
     precision : str
         Lightning ``Trainer`` precision (e.g. ``"16-mixed"``, ``"32"``).
         Falls back to ``"32"`` automatically on CPU.
@@ -864,7 +1037,10 @@ class Ghostbuster:
         lr_T: float | None = None,
         lr_D: float | None = None,
         scheduler: Literal[
-            "LambdaLR", "CosineAnnealingWarmRestarts", "MultiplicativeLR"
+            "LambdaLR",
+            "OneCycleLR",
+            "CosineAnnealingWarmRestarts",
+            "MultiplicativeLR",
         ] = "LambdaLR",
         epochs: int = 5,
         batch_size: int = 3,
@@ -883,6 +1059,7 @@ class Ghostbuster:
         fsc_ref: torch.Tensor | str | Path | None = None,
         fsc_mask: torch.Tensor | float | str | Path | None = None,
         cryosparc_ref: torch.Tensor | str | Path | None = None,
+        use_2d_mask: bool = False,
         precision: str = "16-mixed",
         num_workers: int = 0,
         num_particles: int | None = None,
@@ -962,6 +1139,7 @@ class Ghostbuster:
         self.fsc_ref = fsc_ref
         self.fsc_mask = fsc_mask
         self.cryosparc_ref = cryosparc_ref
+        self.use_2d_mask = use_2d_mask
         self.precision = precision
         self.num_workers = num_workers
         self.num_particles = num_particles
@@ -1022,6 +1200,7 @@ class Ghostbuster:
             fsc_ref=self.fsc_ref,
             fsc_mask=self.fsc_mask,
             cryosparc_ref=self.cryosparc_ref,
+            use_2d_mask=self.use_2d_mask,
             run_dir=self.run_dir,
             halfset_label=self.halfset_label,
         )

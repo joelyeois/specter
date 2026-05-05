@@ -5,9 +5,13 @@ from pathlib import Path
 
 import matplotlib.figure
 import matplotlib.pyplot as plt
+import seaborn as sns
 import torch
+from PIL import Image as PILImage
+
 from .arrays import radial_profile_2d
 from .coords import radial_distribution_function
+from .fft import fourier_shell_correlation
 
 
 def plot3d(
@@ -380,10 +384,6 @@ def plot_map_to_model_fsc(
         The figure object when ``show=False``; caller is responsible for
         closing it.
     """
-    import seaborn as sns
-
-    from .fft import fourier_shell_correlation
-
     # Normalise to a flat list of (Z, Y, X) tensors
     if isinstance(vols, torch.Tensor):
         vol_list: list[torch.Tensor] = list(vols) if vols.ndim == 4 else [vols]
@@ -453,6 +453,149 @@ def plot_map_to_model_fsc(
         xticklabels=tick_labels,
         xlabel="resolution (Å)",
         title="Map-to-model FSCs",
+        ylim=[-0.05, 1.05],
+        xlim=[0, nyquist],
+    )
+    ax.grid(True, alpha=0.25, linewidth=0.6)
+    ax.legend(frameon=True, fontsize=8, loc="upper right", framealpha=0.8)
+    sns.despine(ax=ax, offset=6)
+    fig.tight_layout()
+    if show:
+        plt.show()
+        plt.close(fig)
+        return None
+    return fig
+
+
+def plot_halfmap_fsc(
+    vols_A: torch.Tensor | list[torch.Tensor],
+    vols_B: torch.Tensor | list[torch.Tensor],
+    voxel_size: float,
+    mask: torch.Tensor | None = None,
+    labels: list[str] | None = None,
+    show: bool = True,
+) -> matplotlib.figure.Figure | None:
+    """
+    Compute and plot half-map Fourier Shell Correlations.
+
+    Each volume in vols_A is correlated against the corresponding volume in vols_B.
+    When ``mask`` is provided, both an unmasked and a masked FSC are computed for
+    each volume pair. The resolution at FSC = 0.5 is interpolated from each curve
+    and appended to its legend label.
+
+    Parameters
+    ----------
+    vols_A : torch.Tensor or list of torch.Tensor
+        First set of input volumes. Either a ``(B, Z, Y, X)`` batch tensor or a list of
+        ``(Z, Y, X)`` tensors.
+    vols_B : torch.Tensor or list of torch.Tensor
+        Second set of input volumes. Either a ``(B, Z, Y, X)`` batch tensor or a list of
+        ``(Z, Y, X)`` tensors. Must have the same number of volumes as ``vols_A``.
+    voxel_size : float
+        Voxel size in Å. Determines the Nyquist frequency and the x-axis scale.
+    mask : torch.Tensor, optional
+        Binary or soft mask, shape ``(Z, Y, X)``. When provided, a second
+        (masked) FSC is computed for each volume pair by multiplying both the input
+        and the reference with the mask before correlation.
+    labels : list of str, optional
+        One label per volume pair. Defaults to ``["pair 0", "pair 1", ...]``.
+    show : bool, optional
+        Whether to display the figure immediately. Set ``False`` to get the
+        figure object back (e.g. for saving to disk). Default is True.
+
+    Returns
+    -------
+    matplotlib.figure.Figure or None
+        ``None`` when ``show=True`` (figure is displayed and closed).
+        The figure object when ``show=False``; caller is responsible for
+        closing it.
+
+    Raises
+    ------
+    ValueError
+        If the number of volumes in vols_A and vols_B do not match.
+    """
+    # Normalise to flat lists of (Z, Y, X) tensors
+    if isinstance(vols_A, torch.Tensor):
+        vol_list_A: list[torch.Tensor] = list(vols_A) if vols_A.ndim == 4 else [vols_A]
+    else:
+        vol_list_A = list(vols_A)
+
+    if isinstance(vols_B, torch.Tensor):
+        vol_list_B: list[torch.Tensor] = list(vols_B) if vols_B.ndim == 4 else [vols_B]
+    else:
+        vol_list_B = list(vols_B)
+
+    # Check that the number of volumes matches
+    if len(vol_list_A) != len(vol_list_B):
+        raise ValueError(
+            f"Number of volumes in vols_A ({len(vol_list_A)}) must match "
+            f"the number in vols_B ({len(vol_list_B)})"
+        )
+
+    n_vols = len(vol_list_A)
+    if labels is None:
+        labels = [f"pair {i}" for i in range(n_vols)]
+
+    def _res_at_half(k_arr: torch.Tensor, fsc_arr: torch.Tensor) -> str:
+        """Linearly interpolate the resolution (Å) at the last FSC=0.5 crossing."""
+        kf = k_arr.cpu().float()
+        ff = fsc_arr.cpu().float()
+        last_k_cross: torch.Tensor | None = None
+        for i in range(len(ff) - 1):
+            if ff[i] >= 0.5 > ff[i + 1]:
+                t = (0.5 - ff[i]) / (ff[i + 1] - ff[i])
+                last_k_cross = kf[i] + t * (kf[i + 1] - kf[i])
+        if last_k_cross is not None:
+            return f"{1.0 / last_k_cross.item():.2f} Å"
+        return ">Nyquist"
+
+    nyquist = 1.0 / (2.0 * voxel_size)
+    palette = sns.color_palette("deep", n_colors=max(n_vols, 1))
+
+    fig, ax = plt.subplots(figsize=(7, 4.5), dpi=150)
+
+    for i, (vol_a, vol_b, label) in enumerate(zip(vol_list_A, vol_list_B, labels)):
+        color = palette[i]
+        vol_a_f = vol_a.float()
+        vol_b_f = vol_b.float()
+
+        k, fsc = fourier_shell_correlation(vol_a_f, vol_b_f, pixelsize=voxel_size)
+        ax.plot(
+            k.cpu(),
+            fsc.cpu(),
+            color=color,
+            ls="-",
+            lw=1.8,
+            label=f"{label} ({_res_at_half(k, fsc)})",
+        )
+
+        if mask is not None:
+            m = mask.float()
+            k_m, fsc_m = fourier_shell_correlation(
+                vol_a_f * m, vol_b_f * m, pixelsize=voxel_size
+            )
+            ax.plot(
+                k_m.cpu(),
+                fsc_m.cpu(),
+                color=color,
+                ls="--",
+                lw=1.8,
+                label=f"{label} masked ({_res_at_half(k_m, fsc_m)})",
+            )
+
+    # FSC = 0.5 criterion line
+    ax.axhline(0.5, color="#888888", ls=":", lw=1.0, zorder=0)
+
+    # X-axis: evenly spaced frequency ticks from 0 to Nyquist, labelled in Å
+    tick_k = torch.linspace(0, nyquist, 6).tolist()
+    tick_labels = ["∞"] + [f"{1.0 / k:.2f}" for k in tick_k[1:]]
+
+    ax.set(
+        xticks=tick_k,
+        xticklabels=tick_labels,
+        xlabel="resolution (Å)",
+        title="Half-map FSCs",
         ylim=[-0.05, 1.05],
         xlim=[0, nyquist],
     )
@@ -602,8 +745,6 @@ try:
         >>> visualize_job_epochs("~/specter-data/empiar-10202/J002")
         >>> visualize_job_epochs("~/specter-data/empiar-10202/J002", suffix="A")
         """
-        from PIL import Image as PILImage
-
         job_folder = Path(job_folder).expanduser()
 
         # Discover images

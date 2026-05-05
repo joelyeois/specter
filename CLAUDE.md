@@ -17,7 +17,7 @@ Generates training data that best matches experimental data. Accurate physics mo
 - CryoSPARC `.cs` file integration
 
 ### 2. Ghostbuster — 3D reconstruction
-Reconstructs a 3D map from many 2D experimental images paired with their imaging parameters, using the forward models defined in `imagegenerator.py`. Additional features include parameter refinement (rotations, translations, defocus, and other imaging parameters). It is the inverse problem complement to the simulator.
+Reconstructs a 3D map from many 2D experimental images paired with their imaging parameters, using the forward models defined in the `imagegenerator` package. Additional features include parameter refinement (rotations, translations, defocus, and other imaging parameters). It is the inverse problem complement to the simulator.
 
 ## Environment & Package Management
 
@@ -106,15 +106,15 @@ All major simulator classes inherit from `BaseImager(L.LightningModule)` so they
 ```
 PotentialBuilder            – builds 3D scattering potential from atomic coordinates (PDB/mmCIF)
     ↓ V [B, Z, Y, X]
-ParticleGeneratorBase       – base shared by ImageGenerator and ImageGeneratorFromCoordinates
-    crowding → solvate (Icemaker/NaiveIcemaker) → Scattering → Aberration → Detector
+ImageGenerator (or FromCoordinates) – base shared particle generation
+    crowding → solvate (ice makers) → Scattering → Aberration → Detector
         ↓ images [B, Y, X]
 MicrographGenerator         – assembles a full micrograph from many particles
 TiltSeriesGenerator         – generates a tilt series
 ```
 
 - `ImageGenerator` takes a **pre-built volume** tensor; `ImageGeneratorFromCoordinates` builds it from atomic coordinates on the fly via `PotentialBuilder`.
-- `Icemaker` / `NaiveIcemaker` generate amorphous ice volumes; `IceBank` caches them for reuse.
+- Ice makers (`RandomIcemaker`, `APIcemaker`, `MCMCIcemaker`, `GradientSKIcemaker`) generate amorphous ice volumes; `IceBank` (in `ice/_bank.py`) caches them for reuse.
 - `Scattering` supports four propagation modes: `multislice`, `rytov`, `firstborn`, `projection` — multislice is most accurate and is the default.
 - `Aberration` and `Detector` (in `microscope.py`) apply CTF, envelope, and detector MTF in Fourier space.
 
@@ -125,43 +125,57 @@ TiltSeriesGenerator         – generates a tilt series
 ## Repository Structure
 
 ```
-src/specter/               # Main source package
-  atom/                    # Atomic properties and potential functions
-  atom_data/               # Scattering parameter tables (Kirkland, Lobato) — do not modify
-  imagegenerator.py        # Top-level image simulation classes
-  base_imager.py           # Shared base classes for image generators (BaseImager)
-  specimen.py              # Volume assembly (TomogramGenerator)
-  potential.py             # Scattering potential builder (PotentialBuilder, GemmiPotentialBuilder)
-  scattering.py            # Wave propagation (multislice, rytov, firstborn, projection)
-  microscope.py            # Aberration and detector models
-  detectors.py             # Detector MTF and noise models
-  rotations.py             # Quaternion-based 3D rotations
-  icemaker.py              # Amorphous ice generation (Icemaker, NaiveIcemaker, MCMCIcemaker, IceBank)
-  crowding.py              # Molecular crowding simulation
-  ghostbuster.py           # 3D reconstruction (PyTorch Lightning)
-  arrays.py                # Array utilities (soft voxelization, tiling, crops)
-  coords.py                # Coordinate utilities (RDF, etc.)
-  fft.py                   # FFT wrappers
-  filters.py               # Frequency-domain filters
-  image.py                 # Image-level utilities
-  micrograph.py            # Micrograph assembly
-  pdb.py                   # PDB/mmCIF parsing helpers
-  cryosparc.py             # CryoSPARC .cs file I/O
-  cuda.py                  # CUDA/device utilities
-  plots.py                 # Plotting helpers
-  progress.py              # Progress bar management (ProgressManager)
-  random_seed.py           # Global seed control (exported as specter.seed)
-  simulate_particles.py    # Particle simulation pipeline
-  symmetries.py            # Symmetry operations
-  tiltseries.py            # Tilt-series generation
-  welling_rotation.py      # Welling rotation sampling
-tests/                     # pytest test suite
-  test_data/               # Golden-output fixtures (.pt files) for regression tests
-demo-notebooks/            # User-facing, always kept working
-demo-scripts/              # Ready-to-run command-line scripts
-dev-notebooks/             # Prototyping and experimentation (not required to be clean)
-pdb-data/                  # PDB structure files
-ice-data/                  # Pre-computed ice data (do not modify)
+src/specter/                  # Main source package
+  atom/                       # Atomic properties and potential functions
+    atom.py                   # Atom symbols, numbers, masses
+    atomic_potentials.py      # Kirkland, Lobato, Shtyrov parameterizations
+  atom_data/                  # Scattering parameter tables — do not modify
+  imagegenerator/             # Image simulation classes
+    _base.py                  # BaseImager base class
+    _generator.py             # ImageGenerator, ImageGeneratorFromCoordinates
+    _micrograph.py            # MicrographGenerator
+    _tiltseries.py            # TiltSeriesGenerator
+  ice/                        # Amorphous ice generation
+    _ap.py                    # APIcemaker (Atomic Potential-based)
+    _mcmc.py                  # MCMCIcemaker
+    _random.py                # RandomIcemaker
+    _gradient.py              # GradientSKIcemaker
+    _bank.py                  # IceBank (cache)
+    _mdsim.py                 # MDSimDump (legacy support)
+    _helpers.py               # Helper functions (water molecules, FFT, etc.)
+  jobs/                       # Job management and persistence
+    _job.py                   # Job class
+    _database.py              # JobDatabase storage
+    _cli.py                   # CLI interface
+  specimen.py                 # Volume assembly
+  potential.py                # Scattering potential builder
+  scattering.py               # Wave propagation (multislice, rytov, firstborn, projection)
+  microscope.py               # Aberration and detector models
+  detectors.py                # Detector MTF and noise models
+  rotations.py                # Quaternion-based 3D rotations
+  crowding.py                 # Molecular crowding simulation
+  ghostbuster.py              # 3D reconstruction (PyTorch Lightning)
+  arrays.py                   # Array utilities (soft voxelization, tiling, crops)
+  coords.py                   # Coordinate utilities (RDF, etc.)
+  fft.py                      # FFT wrappers
+  filters.py                  # Frequency-domain filters
+  image.py                    # Image-level utilities
+  pdb.py                      # PDB/mmCIF parsing helpers
+  cryosparc.py                # CryoSPARC .cs file I/O
+  cuda.py                     # CUDA/device utilities
+  plots.py                    # Plotting helpers
+  progress.py                 # Progress bar management (ProgressManager)
+  random_seed.py              # Global seed control (exported as specter.seed)
+  simulate_particles.py       # Particle simulation pipeline
+  symmetries.py               # Symmetry operations
+  welling_rotation.py         # Welling rotation sampling
+tests/                        # pytest test suite
+  test_data/                  # Golden-output fixtures (.pt files) for regression tests
+demo-notebooks/               # User-facing, always kept working
+demo-scripts/                 # Ready-to-run command-line scripts
+dev-notebooks/                # Prototyping and experimentation (not required to be clean)
+pdb-data/                     # PDB structure files
+ice-data/                     # Pre-computed ice data (do not modify)
 ```
 
 ## Physics Accuracy Notes

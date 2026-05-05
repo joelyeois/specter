@@ -158,14 +158,14 @@ class Job:
         if self._resume_job_id is not None:
             self._job_id = self._resume_job_id
             self._dir = project_dir / self._job_id
-            if not self._dir.exists():
-                raise FileNotFoundError(
-                    f"Job {self._resume_job_id!r} not found in project "
-                    f"{self._project!r} (looked in {self._dir})"
-                )
-            existing = json.loads((self._dir / "job.json").read_text())
-            self._params = existing.get("params", {})
-            self._created_at = existing.get("created_at")
+            job_json = self._dir / "job.json"
+            if job_json.exists():
+                existing = json.loads(job_json.read_text())
+                self._params = existing.get("params", {})
+                self._created_at = existing.get("created_at")
+            else:
+                self._dir.mkdir(parents=True, exist_ok=True)
+                self._created_at = datetime.now(timezone.utc).isoformat()
         else:
             self._job_id = _next_job_id(project_dir)
             self._dir = project_dir / self._job_id

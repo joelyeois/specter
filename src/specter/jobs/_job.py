@@ -137,6 +137,7 @@ class Job:
         self._project = project
         self._base_dir = _resolve_base_dir(base_dir)
         self._resume_job_id = job_id
+        self._is_resume = False
         self._dir: Path | None = None
         self._job_id: str | None = None
         self._created_at: str | None = None
@@ -161,8 +162,9 @@ class Job:
             job_json = self._dir / "job.json"
             if job_json.exists():
                 existing = json.loads(job_json.read_text())
-                self._params = existing.get("params", {})
+                self._params = existing.get("params") or {}
                 self._created_at = existing.get("created_at")
+                self._is_resume = True
             else:
                 self._dir.mkdir(parents=True, exist_ok=True)
                 self._created_at = datetime.now(timezone.utc).isoformat()
@@ -269,7 +271,7 @@ class Job:
             if k not in exclude and k != "run_dir"
         }
 
-        if self._resume_job_id is not None:
+        if self._is_resume:
             mismatches = {
                 k: (self._params.get(k), serialized.get(k))
                 for k in set(self._params) | set(serialized)

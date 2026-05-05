@@ -537,20 +537,23 @@ def plot_halfmap_fsc(
     if labels is None:
         labels = [f"pair {i}" for i in range(n_vols)]
 
+    nyquist = 1.0 / (2.0 * voxel_size)
+
     def _res_at_half(k_arr: torch.Tensor, fsc_arr: torch.Tensor) -> str:
-        """Linearly interpolate the resolution (Å) at the last FSC=0.5 crossing."""
+        """Linearly interpolate the resolution (Å) at the last FSC=0.143 crossing up to Nyquist."""
         kf = k_arr.cpu().float()
         ff = fsc_arr.cpu().float()
         last_k_cross: torch.Tensor | None = None
         for i in range(len(ff) - 1):
-            if ff[i] >= 0.5 > ff[i + 1]:
-                t = (0.5 - ff[i]) / (ff[i + 1] - ff[i])
+            if kf[i] > nyquist:
+                break
+            if ff[i] >= 0.143 > ff[i + 1]:
+                t = (0.143 - ff[i]) / (ff[i + 1] - ff[i])
                 last_k_cross = kf[i] + t * (kf[i + 1] - kf[i])
         if last_k_cross is not None:
             return f"{1.0 / last_k_cross.item():.2f} Å"
         return ">Nyquist"
 
-    nyquist = 1.0 / (2.0 * voxel_size)
     palette = sns.color_palette("deep", n_colors=max(n_vols, 1))
 
     fig, ax = plt.subplots(figsize=(7, 4.5), dpi=150)
@@ -584,8 +587,8 @@ def plot_halfmap_fsc(
                 label=f"{label} masked ({_res_at_half(k_m, fsc_m)})",
             )
 
-    # FSC = 0.5 criterion line
-    ax.axhline(0.5, color="#888888", ls=":", lw=1.0, zorder=0)
+    # FSC = 0.143 criterion line
+    ax.axhline(0.143, color="#888888", ls=":", lw=1.0, zorder=0)
 
     # X-axis: evenly spaced frequency ticks from 0 to Nyquist, labelled in Å
     tick_k = torch.linspace(0, nyquist, 6).tolist()

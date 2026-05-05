@@ -967,6 +967,8 @@ class Ghostbuster:
         Learning rate for translations.
     lr_D : float, optional
         Learning rate for defocus offset.
+    defocus_offset : float, optional
+        Initial defocus offset in Ångströms added to all particles' dfu and dfv.
     scheduler : {"LambdaLR", "OneCycleLR", "CosineAnnealingWarmRestarts", "MultiplicativeLR"}
         LR scheduler for the volume optimiser.
     epochs : int
@@ -1036,6 +1038,7 @@ class Ghostbuster:
         lr_R: float | None = None,
         lr_T: float | None = None,
         lr_D: float | None = None,
+        defocus_offset: float = 0.0,
         scheduler: Literal[
             "LambdaLR",
             "OneCycleLR",
@@ -1121,6 +1124,7 @@ class Ghostbuster:
         self.lr_R = lr_R
         self.lr_T = lr_T
         self.lr_D = lr_D
+        self.defocus_offset = defocus_offset
         self.scheduler = scheduler
         self.epochs = epochs
         self.batch_size = batch_size
@@ -1179,6 +1183,7 @@ class Ghostbuster:
             self.dose_per_angstrom,
             anisomag=anisomag,
             alpha=self._alpha,
+            defocus_offset=torch.tensor(self.defocus_offset),
             scattering_model=scattering_model,
             aberration_model=self.aberration_model,
             lr=self.lr,

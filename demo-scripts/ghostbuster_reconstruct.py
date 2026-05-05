@@ -62,6 +62,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--lr_r", type=float, default=None)
     parser.add_argument("--lr_t", type=float, default=None)
     parser.add_argument("--lr_d", type=float, default=None)
+    parser.add_argument("--defocus_offset", type=float, default=0.0)
     parser.add_argument("--scheduler", type=str, default="LambdaLR")
     parser.add_argument(
         "--scattering_model",
@@ -129,6 +130,7 @@ def main() -> None:
                 lr_R=args.lr_r,
                 lr_T=args.lr_t,
                 lr_D=args.lr_d,
+                defocus_offset=args.defocus_offset,
                 scheduler=args.scheduler,
                 epochs=args.epochs,
                 batch_size=args.batch_size,

@@ -1131,6 +1131,104 @@ def disk2d(N: int, d: float) -> torch.Tensor:
     return disk
 
 
+def fourier_crop(
+    images: torch.Tensor,
+    current_pixel_size: float,
+    target_pixel_size: float,
+) -> tuple[torch.Tensor, float]:
+    """
+    Resample 2D image(s) via Fourier-space center cropping.
+
+    Downsamples from smaller pixel size (finer resolution) to larger
+    pixel size (coarser resolution) by FFT → center crop → IFFT.
+    Preserves integrated density (sum × pixel_size²) via physics-correct
+    scaling.
+
+    Parameters
+    ----------
+    images : torch.Tensor
+        Shape (H, W) for single image or (N, H, W) for batch.
+        Real-valued, any dtype.
+    current_pixel_size : float
+        Current pixel size (Å or any consistent unit).
+    target_pixel_size : float
+        Desired pixel size (must be ≥ current_pixel_size).
+
+    Returns
+    -------
+    resampled : torch.Tensor
+        Downsampled image(s), same shape as input but with smaller
+        spatial dimensions.
+    actual_pixel_size : float
+        Achieved pixel size (may differ slightly due to rounding).
+
+    Raises
+    ------
+    ValueError
+        If target_pixel_size < current_pixel_size (upsampling not supported).
+
+    Examples
+    --------
+    >>> img = torch.randn(512, 512)
+    >>> resampled, actual_ps = fourier_crop(img, 0.5, 1.0)
+    >>> resampled.shape  # downsampled to ~256x256
+    torch.Size([256, 256])
+    """
+    if target_pixel_size < current_pixel_size:
+        raise ValueError(
+            f"target_pixel_size ({target_pixel_size}) must be >= "
+            f"current_pixel_size ({current_pixel_size}). "
+            "Upsampling not supported."
+        )
+
+    # Handle single vs batch
+    if images.ndim == 2:
+        images = images.unsqueeze(0)
+        squeeze_output = True
+    elif images.ndim == 3:
+        squeeze_output = False
+    else:
+        raise ValueError(
+            f"images must be 2D (H, W) or 3D (N, H, W), got shape {images.shape}"
+        )
+
+    N, H, W = images.shape
+
+    # Compute scaling and output size
+    scale = current_pixel_size / target_pixel_size
+
+    if abs(scale - 1.0) < 1e-7:
+        # No resampling needed
+        result = images.squeeze(0) if squeeze_output else images
+        return result, current_pixel_size
+
+    output_size = int(round(H * scale))
+
+    # FFT with DC at center
+    images_f = fft2(images, shift=True)
+
+    # Center crop in Fourier space
+    start_idx = (H - output_size) // 2
+    end_idx = start_idx + output_size
+    images_f_cropped = images_f[:, start_idx:end_idx, start_idx:end_idx]
+
+    # IFFT back to real space
+    resampled = ifft2(images_f_cropped, shift=True).real
+
+    # Scale to conserve integrated density: multiply by scale²
+    scale_factor = scale**2
+    resampled = resampled * scale_factor
+
+    # Remove batch dimension if input was single image
+    if squeeze_output:
+        resampled = resampled.squeeze(0)
+
+    # Compute actual achieved pixel size
+    actual_pixel_size = current_pixel_size * H / output_size
+
+    return resampled, actual_pixel_size
+
+
 def downsample(
     images: torch.Tensor, bin_factor: int = 2, method: str = "fft"
 ) -> torch.Tensor:
@@ -1252,7 +1350,7 @@ def radial_symmetrize(image: torch.Tensor, center: float | None = None) -> torch
 
 
 def center_crop(
-    x: torch.Tensor, size: int | tuple[int, ...], dim: int | Sequence[int]
+    x: torch.Tensor, size: int | tuple[int, ...], dim: int | Sequence[int] | None = None
 ) -> torch.Tensor:
     """
     Center crop a tensor along the specified axes (supports negative axes).
@@ -1264,16 +1362,19 @@ def center_crop(
     size : int or tuple of int
         Desired crop size. If int, all axes in `dim` use the same size.
         If tuple, length must match number of axes in `dim`.
-    dim : int or sequence of int
-        Axes along which to crop. Can be negative.
+    dim : int, sequence of int, or None
+        Axes along which to crop. Can be negative. Defaults to all dimensions.
 
     Returns
     -------
     torch.Tensor
         Center-cropped tensor
     """
+    # default to all dimensions if not specified
+    if dim is None:
+        dim = list(range(x.ndim))
     # normalize dim to list
-    if isinstance(dim, int):
+    elif isinstance(dim, int):
         dim = [dim]
     dim = [d + x.ndim if d < 0 else d for d in dim]  # handle negative axes
 

@@ -35,7 +35,6 @@ import argparse
 import sys
 
 from specter.ghostbuster import Ghostbuster
-from specter.plots import VolumeMonitorCallback
 import specter.jobs as jobs
 
 
@@ -155,9 +154,7 @@ def main() -> None:
                 return_class=args.return_class,
             )
 
-            _ = gb.run(
-                device=args.device, callbacks=[VolumeMonitorCallback(every_n_steps=100)]
-            )
+            _ = gb.run(device=args.device)
 
             print(f"Training complete. Results saved to {job.dir}")
 

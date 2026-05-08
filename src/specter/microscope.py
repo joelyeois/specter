@@ -764,6 +764,7 @@ class Detector(L.LightningModule):
 
         # 0. Pad map to avoid edge artifacts
         pad = int(np.ceil(coinc_radius_pixels * 2))
+        orig_h, orig_w = intensity_map.shape
         # Use reflect padding to keep intensity levels consistent at the edge
         intensity_map = F.pad(
             intensity_map.unsqueeze(0).unsqueeze(0),
@@ -773,8 +774,10 @@ class Detector(L.LightningModule):
         det_h, det_w = intensity_map.shape
 
         # 1. Convert physical dose to expected electron count
+        # Use original (unpadded) dimensions: Poisson-per-pixel sampling means
+        # padded pixels inflate the per-pixel lambda in the original region.
         dose_per_pixel = dose_per_angstrom_sq_per_frame * (pixel_size_angstrom**2)
-        total_expected = dose_per_pixel * det_h * det_w
+        total_expected = dose_per_pixel * orig_h * orig_w
 
         # 2. Sample landing positions from intensity map + sub-pixel jitter
         # expected electrons per pixel
@@ -869,10 +872,13 @@ class Detector(L.LightningModule):
             return torch.poisson(torch.clamp(img, min=0.0))
 
         n_frames = self.num_frames
-
-        # Normalize to probability map; apply_detector_physics_fast expects
-        # a probability map (intensity_map).
         intensity_map = img / img.sum()
+
+        # Use img.sum() to derive the effective dose so that the radius>0 path
+        # agrees with torch.poisson(img) at radius=0: both correctly account
+        # for real electron absorption from alpha (imaginary potential), and
+        # B-factor attenuation is treated consistently across both paths.
+        dose_effective = img.sum() / (self.pixel_size**2 * img.shape[0] * img.shape[1])
 
         final_image = torch.zeros_like(img)
         for _ in track(
@@ -884,7 +890,7 @@ class Detector(L.LightningModule):
             final_image += self.apply_detector_physics_fast(
                 intensity_map,
                 self.pixel_size,
-                dose / n_frames,
+                dose_effective / n_frames,
                 coinc_radius_pixels=coincidence_radius,
             )
 

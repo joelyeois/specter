@@ -512,9 +512,7 @@ class TiltSeriesGenerator(MicrographGenerator):
                 self.vol, theta_matrix, slice_batch_size=self.slice_batch_size
             )
 
-            ctf_batch = {
-                k: getattr(self, k)[idx].clone() for k in self._ctf_param_names
-            }
+            ctf_batch = self._ctf_batch(idx)
             if self.scattering_model not in ["projection", "ctf"]:
                 nz_new = self.get_nz_tilt(self.vol, theta_matrix)
                 z_offset = (nz_new - self.nz) * self.pixel_size / 2.0

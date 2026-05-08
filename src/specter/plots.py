@@ -9,7 +9,7 @@ import seaborn as sns
 import torch
 from PIL import Image as PILImage
 
-from .arrays import radial_profile_2d
+from .arrays import radial_profile_2d, radial_symmetrize
 from .coords import radial_distribution_function
 from .fft import fourier_shell_correlation
 
@@ -308,10 +308,23 @@ def plot_particle_stack(
             )
         fig.colorbar(im, ax=ax, location="bottom")
 
-        # --- row 1: FFT magnitude ---
+        # --- row 1: FFT magnitude (left half = radially symmetrized, right half = actual) ---
         ax = axes[1, i]
-        im = ax.imshow(fft_mag, cmap="gray")
+        fft_sym = radial_symmetrize(fft_mag)
+        half = fft_mag.shape[1] // 2
+        fft_display = torch.cat([fft_sym[:, :half], fft_mag[:, half:]], dim=1)
+        im = ax.imshow(fft_display, cmap="gray")
         ax.set(xticks=[], yticks=[])
+        kw = dict(
+            fontsize=7,
+            color="white",
+            va="top",
+            bbox=dict(boxstyle="square,pad=0.1", fc="black", alpha=0.4, lw=0),
+        )
+        ax.text(2, 2, "radial avg", ha="left", **kw)
+        ax.text(fft_display.shape[1] - 2, 2, "actual", ha="right", **kw)
+        ax.axvline(half - 0.5, color="white", linewidth=0.6, linestyle=":")
+
         fig.colorbar(im, ax=ax, location="bottom")
 
         # --- row 2: radial profile ---

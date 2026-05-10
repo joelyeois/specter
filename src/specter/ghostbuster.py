@@ -276,6 +276,7 @@ class Reconstructor(L.LightningModule):
             klim=klim,
             flip_curvature=self.flip_curvature,
             alpha=self.alpha,
+            rotate_mode=self.rotate_mode,
         )
 
     def forward(self, idx: torch.Tensor | int | slice) -> torch.Tensor:

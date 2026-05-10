@@ -1,6 +1,8 @@
 # SPECTER
 ### Scattering & Propagation of Electrons in Cryo-EM: Twin Emulator & Reconstruction
 
+[![Documentation Status](https://readthedocs.org/projects/specter/badge/?version=latest)](https://specter.readthedocs.io/en/latest/)
+
 **SPECTER** is a Python package for simulating cryo-electron microscopy (cryo-EM) images with physics-based models.  
 It supports aberrations, scattering, detector effects, and integrates with PyTorch for GPU acceleration.
 

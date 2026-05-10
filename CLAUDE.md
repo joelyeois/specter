@@ -155,7 +155,7 @@ src/specter/                  # Main source package
   rotations.py                # Quaternion-based 3D rotations
   crowding.py                 # Molecular crowding simulation
   ghostbuster.py              # 3D reconstruction (PyTorch Lightning)
-  arrays.py                   # Array utilities (soft voxelization, tiling, crops)
+  arrays.py                   # Array utilities (soft voxelization, tiling, crops, fourier_crop)
   coords.py                   # Coordinate utilities (RDF, etc.)
   fft.py                      # FFT wrappers
   filters.py                  # Frequency-domain filters
@@ -169,6 +169,7 @@ src/specter/                  # Main source package
   simulate_particles.py       # Particle simulation pipeline
   symmetries.py               # Symmetry operations
   welling_rotation.py         # Welling rotation sampling
+  qscore.py                   # Per-atom Q-score (map-model fit; Pintilie et al. 2020)
 tests/                        # pytest test suite
   test_data/                  # Golden-output fixtures (.pt files) for regression tests
 demo-notebooks/               # User-facing, always kept working

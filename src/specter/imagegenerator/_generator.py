@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 import torch
 import torch.nn as nn
@@ -477,6 +477,10 @@ class ImageGenerator(ParticleGeneratorBase):
     bfactor_envelope : float or torch.Tensor or None, optional
         Isotropic B-factor envelope in Å² applied in the microscope transfer
         function. None or 0.0 means no envelope. Default None.
+    rotate_mode : {"real", "fourier"}, optional
+        Volume rotation method. ``"real"`` uses trilinear interpolation;
+        ``"fourier"`` rotates in Fourier space (no boundary artifacts).
+        Default ``"real"``.
     """
 
     def __init__(
@@ -512,6 +516,7 @@ class ImageGenerator(ParticleGeneratorBase):
         num_frames: int | None = None,
         potential_scale: float | torch.Tensor = 1.0,
         bfactor_envelope: float | torch.Tensor | None = None,
+        rotate_mode: Literal["real", "fourier"] = "real",
     ):
         nxy = scattering_potential.shape[-1]
         self.pad_fft = pad_fft
@@ -609,7 +614,7 @@ class ImageGenerator(ParticleGeneratorBase):
         )
 
         nz, ny, nx = self.V.shape
-        self.rotator = VolumeRotator(nz, ny, nx, origin="relion", mode="real")
+        self.rotator = VolumeRotator(nz, ny, nx, origin="relion", mode=rotate_mode)
 
     def rotate(self, Q: torch.Tensor, T: torch.Tensor) -> torch.Tensor:
         """

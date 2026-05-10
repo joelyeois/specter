@@ -872,13 +872,13 @@ class VolumeRotator(L.LightningModule):
         """
         Rotate a volume in Fourier space via real/imag decomposition.
         """
-        V_f = fft3(V)  # complex, (Z, Y, X)
+        V_f = fft3(V, shift=True)  # complex, (Z, Y, X)
 
         V_f_rot_real = self.rotate_real(V_f.real, theta)
         V_f_rot_imag = self.rotate_real(V_f.imag, theta)
 
         V_f_rot = torch.complex(V_f_rot_real, V_f_rot_imag)
-        V_rot = ifft3(V_f_rot)
+        V_rot = ifft3(V_f_rot, shift=True)
 
         return V_rot.real  # (B, Z, Y, X)
 

@@ -26,6 +26,10 @@ uv.lock
 .ipynb_checkpoints/
 dev-notebooks/
 
+# Sphinx docs build output
+docs/_build/
+docs/autoapi/
+
 # Other system files
 .DS_Store
 

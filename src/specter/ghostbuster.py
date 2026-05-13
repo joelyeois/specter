@@ -717,6 +717,7 @@ class Reconstructor(L.LightningModule):
             "total_batches": len(self.log_total_loss),
             "batches_per_epoch": n_batches_per_epoch,
             "total_epochs": self.current_epoch + 1,
+            "total_loss": [float(v) for v in self.log_total_loss],
             "epochs": epochs,
         }
 
@@ -735,6 +736,7 @@ class Reconstructor(L.LightningModule):
         vol_path = self._run_dir / f"vol{suffix}.mrc"
         with mrcfile.new(str(vol_path), overwrite=True) as mrc:
             mrc.set_data(v.numpy())
+            mrc.voxel_size = self.voxel_size
         print(f"Saved final volume → {vol_path}")
 
         if self.fsc_ref is not None:
@@ -762,6 +764,7 @@ class Reconstructor(L.LightningModule):
         mrc_path = self._run_dir / "epochs" / f"{epoch:03d}{suffix}.mrc"
         with mrcfile.new(str(mrc_path), overwrite=True) as mrc:
             mrc.set_data(v.numpy())
+            mrc.voxel_size = self.voxel_size
 
         self._save_plot3d(v, suffix=suffix, epoch=epoch)
         if self.fsc_ref is not None:

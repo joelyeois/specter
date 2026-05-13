@@ -118,9 +118,9 @@ TiltSeriesGenerator         – generates a tilt series
 - `Scattering` supports four propagation modes: `multislice`, `rytov`, `firstborn`, `projection` — multislice is most accurate and is the default.
 - `Aberration` and `Detector` (in `microscope.py`) apply CTF, envelope, and detector MTF in Fourier space.
 
-### Inverse problem — Ghostbuster
+### Inverse problem — Reconstructor
 
-`Ghostbuster(L.LightningModule)` in `ghostbuster.py` reconstructs a 3D volume from 2D images by minimising the discrepancy between simulated and observed images using the same forward model as `ImageGenerator`. Jointly refines volume, rotations, translations, and defocus via separate learning rates.
+`Reconstructor(L.LightningModule)` in `ghostbuster.py` reconstructs a 3D volume from 2D images by minimising the discrepancy between simulated and observed images using the same forward model as `ImageGenerator`. Jointly refines volume, rotations, translations, and defocus via separate learning rates.
 
 ## Repository Structure
 

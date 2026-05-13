@@ -184,7 +184,7 @@ class Scattering(L.LightningModule):
             self.register_buffer("F_imag", F.imag)
 
         # Fresnel transfer function for first Born
-        if scattering_model == "firstborn" or scattering_model == "rytov":
+        if scattering_model in ("firstborn", "rytov", "kinematic"):
             F = []
             for i in track(
                 range(nz),
@@ -329,6 +329,45 @@ class Scattering(L.LightningModule):
         exitwave = 1 + 1j * exitwave
         return exitwave
 
+    def kinematic(self, V: torch.Tensor) -> torch.Tensor:
+        """
+        Compute exit wave using kinematic scattering approximation.
+
+        Each slice sees only the incident plane wave (single scattering).
+        Uses the full transmission function per slice, without the weak-phase
+        linearisation applied by the ``firstborn`` method.
+
+        Parameters
+        ----------
+        V : torch.Tensor
+            Complex-valued 3D potential volume with shape (B, Z, Y, X).
+
+        Returns
+        -------
+        exitwave : torch.Tensor
+            Complex-valued 2D exit wave with shape (B, Y, X).
+
+        Notes
+        -----
+        The exit wave is the first-order term of the multislice Born series:
+
+        ψ = 1 + Σ_z F⁻¹{ F[exp(iσΔz V_z) − 1] · F_z }
+
+        where F_z propagates from slice z to the exit plane. Compared to
+        ``firstborn``, the per-slice amplitude ``exp(iσΔz V_z) − 1`` is kept
+        exact rather than linearised to ``iσΔz V_z``. The two are equivalent
+        for small phase per slice (σΔz V ≪ 1) but diverge for thick slices
+        or dense material.
+        """
+        F = self.F_real + 1j * self.F_imag
+        if self.flip_curvature:
+            V = torch.flip(V, dims=(1,))
+
+        t = torch.exp(1j * self.sigma * self.pixel_size * V) - 1
+        exitwave = ifft2(fft2(t) * F[None, ...])
+        exitwave = 1 + torch.sum(exitwave, 1)
+        return exitwave
+
     def projection(self, V: torch.Tensor) -> torch.Tensor:
         """
         Compute exit wave using projection approximation.
@@ -415,6 +454,9 @@ class Scattering(L.LightningModule):
         elif self.scattering_model == "firstborn":
             V = complex_potential(V, alpha=self.alpha)
             return self.firstborn(V)
+        elif self.scattering_model == "kinematic":
+            V = complex_potential(V, alpha=self.alpha)
+            return self.kinematic(V)
         elif self.scattering_model == "ctf":
             return self.ctf(V)
 
@@ -809,6 +851,73 @@ class IterativeScattering(L.LightningModule):
         exitwave = 1 + 1j * self.sigma * self.pixel_size * total_scattered
         return exitwave
 
+    def kinematic(
+        self, V: torch.Tensor, theta_matrix: torch.Tensor, slice_batch_size: int = 1
+    ) -> torch.Tensor:
+        """
+        Compute exit wave using iterative kinematic scattering approximation.
+
+        Like ``firstborn`` but uses the full per-slice transmission function
+        ``exp(iσΔz V) − 1`` instead of the weak-phase linearisation ``iσΔz V``.
+        """
+        is_identity = self._is_identity(theta_matrix)
+        if is_identity:
+            nz_new = V.shape[1]
+            rotator = None
+        else:
+            nz_new, rotator = self._setup_tilt(V, theta_matrix)
+
+        B = V.shape[0]
+        device = self.device
+
+        total_scattered = torch.zeros(
+            (B, self.nxy, self.nxy), device=device, dtype=torch.complex64
+        )
+        indices = torch.arange(nz_new, device=V.device)
+        if self.flip_curvature:
+            indices = torch.flip(indices, dims=(0,))
+
+        pbar = track(
+            range(nz_new),
+            description="Kinematic (Iterative)",
+            transient=True,
+            disable=not (self.progressbars),
+        )
+
+        slices_block = None
+        y_start = (V.shape[-2] - self.nxy) // 2
+        x_start = (V.shape[-1] - self.nxy) // 2
+
+        for i in pbar:
+            if is_identity:
+                slice_sample = V[
+                    :,
+                    indices[i],
+                    y_start : y_start + self.nxy,
+                    x_start : x_start + self.nxy,
+                ].to(device)
+            else:
+                if i % slice_batch_size == 0:
+                    batch_end = min(i + slice_batch_size, nz_new)
+                    batch_indices = indices[i:batch_end]
+                    slice_indices = batch_indices - (nz_new - 1) / 2
+                    slices_block = rotator.sample_rotated_slices(
+                        V,
+                        theta_matrix,
+                        slice_indices=slice_indices,
+                        roi_size=(self.nxy, self.nxy),
+                        padding_mode="zeros",
+                    ).to(device)
+                slice_sample = slices_block[:, i % slice_batch_size]
+
+            slice_complex = complex_potential(slice_sample, alpha=self.alpha)
+            t = torch.exp(1j * self.sigma * self.pixel_size * slice_complex) - 1
+            F_i = self._get_propagator(float(nz_new - i))
+            total_scattered += ifft2(fft2(t) * F_i)
+
+        exitwave = 1 + total_scattered
+        return exitwave
+
     def ctf(
         self, V: torch.Tensor, theta_matrix: torch.Tensor, slice_batch_size: int = 1
     ) -> torch.Tensor:
@@ -911,5 +1020,7 @@ class IterativeScattering(L.LightningModule):
             return self.projection(V, theta_matrix, slice_batch_size)
         elif self.scattering_model == "firstborn":
             return self.firstborn(V, theta_matrix, slice_batch_size)
+        elif self.scattering_model == "kinematic":
+            return self.kinematic(V, theta_matrix, slice_batch_size)
         else:
             raise ValueError(f"Unknown scattering model: {self.scattering_model}")

@@ -60,7 +60,9 @@ class ParticleGeneratorBase(BaseImager):
         V : torch.Tensor
             Volume with ice blended in via icemask.
         """
-        ice = self.icemaker.generate_ice(batchsize=len(V)).to(V.device)
+        ice = self.icemaker.generate_big_ice((len(V), self.nz, self.nxy, self.nxy)).to(
+            V.device
+        )
 
         if self.pad_fft:
             ice = F.pad(

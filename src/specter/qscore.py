@@ -143,6 +143,11 @@ class QScore:
         the default of 32 covers all realistic protein packing densities.
     epsilon : float
         Denominator regularisation to avoid division by zero. Default 1e-6.
+    cif_path : str, optional
+        If provided, call ``load_cif`` immediately so the structure is ready
+        before any scoring calls.
+    standard_residues_only : bool
+        Passed to ``load_cif`` when ``cif_path`` is given. Default ``True``.
 
     Attributes
     ----------
@@ -159,17 +164,17 @@ class QScore:
 
     Examples
     --------
+    Load CIF once at construction, score against multiple maps:
+
+    >>> qs = QScore(device="cuda:0", cif_path="structure.cif")
+    >>> q1 = qs.score(mrc_path="map_A.mrc")
+    >>> q2 = qs.score(mrc_path="map_B.mrc")
+
     One-liner:
 
     >>> qs = QScore(device="cuda:0")
     >>> q = qs.score("structure.cif", "map.mrc")
     >>> qs.summarize(q)
-
-    Load once, score against multiple maps:
-
-    >>> qs.load_cif("structure.cif")
-    >>> q1 = qs.score_loaded(mrc_path="map_A.mrc")
-    >>> q2 = qs.score_loaded(mrc_path="map_B.mrc")
     """
 
     def __init__(
@@ -180,6 +185,8 @@ class QScore:
         ref_gaussian_width: float = 0.6,
         k_neighbors: int = 32,
         epsilon: float = 1e-6,
+        cif_path: str | None = None,
+        standard_residues_only: bool = True,
     ) -> None:
         self.device = torch.device(device)
         self.num_radii = num_radii
@@ -205,6 +212,9 @@ class QScore:
             "aligned to the MRC map before scoring. Misaligned inputs will "
             "produce Q-scores near zero regardless of map quality."
         )
+
+        if cif_path is not None:
+            self.load_cif(cif_path, standard_residues_only=standard_residues_only)
 
     # ── I/O ──────────────────────────────────────────────────────────────────
 
@@ -497,54 +507,32 @@ class QScore:
 
     def score(
         self,
-        cif_path: str,
-        mrc_path: str,
-        standard_residues_only: bool = True,
-    ) -> torch.Tensor:
-        """Load a structure and map, then return per-atom Q-scores.
-
-        This is the primary entry point. Loaded data is cached as
-        ``self.atoms``, ``self.grid``, and ``self.voxel_size``.
-
-        Parameters
-        ----------
-        cif_path : str
-            Path to a CIF or PDB structure file.
-        mrc_path : str
-            Path to an MRC map built with specter's centre convention
-            (physical origin = voxel N//2).
-        standard_residues_only : bool
-            If ``True`` (default), score only standard amino-acid and
-            nucleotide atoms to match published Q-score values.
-            If ``False``, score all atoms including HETATM.
-
-        Returns
-        -------
-        torch.Tensor
-            Per-atom Q-scores, shape ``(N,)``, on ``self.device``.
-        """
-        self.load_cif(cif_path, standard_residues_only=standard_residues_only)
-        self.load_mrc(mrc_path)
-        return self.compute()
-
-    def score_loaded(
-        self,
         cif_path: str | None = None,
         mrc_path: str | None = None,
         standard_residues_only: bool = True,
     ) -> torch.Tensor:
-        """Score using a mix of freshly loaded and previously cached data.
+        """Load a structure and/or map, then return per-atom Q-scores.
+
+        Arguments that are ``None`` fall back to previously cached data from
+        ``load_cif`` / ``load_mrc`` (or from ``cif_path`` passed to
+        ``__init__``), so a single CIF can be scored against many maps
+        without reloading:
+
+        >>> qs = QScore(cif_path="structure.cif")
+        >>> q1 = qs.score(mrc_path="map_A.mrc")
+        >>> q2 = qs.score(mrc_path="map_B.mrc")
 
         Parameters
         ----------
         cif_path : str, optional
-            If provided, reload atoms from this file; otherwise reuse
-            ``self.atoms`` from the previous ``load_cif`` call.
+            Path to a CIF or PDB structure file. If ``None``, reuse the
+            cached atoms from the last ``load_cif`` call.
         mrc_path : str, optional
-            If provided, reload the map from this file; otherwise reuse
-            ``self.grid`` and ``self.voxel_size``.
+            Path to an MRC map. If ``None``, reuse the cached map from
+            the last ``load_mrc`` call.
         standard_residues_only : bool
-            Passed to ``load_cif`` when ``cif_path`` is given. Default ``True``.
+            If ``True`` (default), score only standard amino-acid and
+            nucleotide atoms. Ignored when ``cif_path`` is ``None``.
 
         Returns
         -------

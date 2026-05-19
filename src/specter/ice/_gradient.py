@@ -196,7 +196,7 @@ class GradientSKIcemaker(L.LightningModule):
             device=self.device,
             periodic=True,
         )
-        f_amp = torch.abs(fft3(vox, shift=True))
+        f_amp = torch.abs(fft3(vox, shift=True)).clamp(min=1e-8)
         bin_sum = torch.zeros(self._n_rbins, device=self.device)
         bin_sum.scatter_add_(0, self._r_bins, f_amp.flatten())
         sim_radial = bin_sum / self._bin_count

@@ -24,7 +24,7 @@ uv.lock
 
 # Jupyter
 .ipynb_checkpoints/
-dev-notebooks/
+dev/
 
 # Sphinx docs build output
 docs/_build/

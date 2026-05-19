@@ -22,7 +22,7 @@ dependencies = [
     "scikit-image>=0.25.2",
     "scipy>=1.16.2",
     "starfile>=0.5.13",
-    "torch>=2.8.0",
+    "torch>=2.5.0",
     "torchinterp1d>=1.1",
     "tqdm>=4.67.1",
 ]
@@ -44,7 +44,6 @@ dev = [
     "pre-commit>=4.3.0",
     "pytest>=9.0.2",
     "pytest-cov>=7.0.0",
-    "qscore",
     "rich>=14.2.0",
     "ruff>=0.14.4",
     "seaborn>=0.13.2",
@@ -53,8 +52,13 @@ dev = [
 [tool.uv]
 package = true
 
+[[tool.uv.index]]
+name = "pytorch-cu121"
+url = "https://download.pytorch.org/whl/cu121"
+explicit = true
+
 [tool.uv.sources]
-qscore = { path = "../../qscore" }
+torch = { index = "pytorch-cu121" }
 
 [tool.setuptools]
 include-package-data = true

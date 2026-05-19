@@ -1309,43 +1309,74 @@ def pad_to_common_shape(
     return centered_pad(A, target), centered_pad(B, target)
 
 
-def radial_symmetrize(image: torch.Tensor, center: float | None = None) -> torch.Tensor:
+def radial_symmetrize(
+    data: torch.Tensor,
+    center: float | None = None,
+    output_ndim: int | None = None,
+) -> torch.Tensor:
     """
-    Radially average a 2D image and map it back to a 2D image.
+    Radially/spherically average a 2D or 3D tensor and map it back.
 
     Parameters
     ----------
-    image : torch.Tensor
-        (N, N) input image.
+    data : torch.Tensor
+        (N, N) or (N, N, N) input tensor.
     center : float, optional
         Center of the radial average. Default is N // 2.
+    output_ndim : {2, 3}, optional
+        Output dimensionality. Defaults to match the input.
+        If the input is 2D and ``output_ndim=3``, the 1D radial profile
+        computed from the 2D image is mapped onto an (N, N, N) volume
+        via spherical distances from the same center.
 
     Returns
     -------
-    image_ring : torch.Tensor
-        (N, N) radially averaged image.
+    torch.Tensor
+        Radially/spherically symmetrised tensor with shape (N, N) or (N, N, N).
     """
-    if image.ndim != 2:
-        raise ValueError("Input image must be a 2D tensor.")
-    N, M = image.shape
-    if N != M:
-        raise ValueError(f"Image must be square, got shape ({N}, {M}).")
+    if data.ndim not in (2, 3):
+        raise ValueError("Input must be a 2D or 3D tensor.")
+    N = data.shape[0]
+    if not all(s == N for s in data.shape):
+        raise ValueError(f"Input must be square/cubic, got shape {tuple(data.shape)}.")
 
-    device = image.device
+    if output_ndim is None:
+        output_ndim = data.ndim
+    if output_ndim not in (2, 3):
+        raise ValueError("output_ndim must be 2 or 3.")
+    if data.ndim == 3 and output_ndim == 2:
+        raise ValueError("Reducing a 3D input to a 2D output is not supported.")
 
+    device = data.device
     if center is None:
         center = N // 2
 
-    # Compute 1D radial profile using the shared helper
-    radial_mean = radial_profile_2d(image, center=(center, center))
+    if data.ndim == 2:
+        radial_mean = radial_profile_2d(data, center=(center, center))
+    else:
+        radial_mean = radial_profile_3d(data, center=(center, center, center))
 
-    # Build matching integer radius grid to map back to 2D
-    y, x = torch.meshgrid(
-        torch.arange(N, device=device), torch.arange(N, device=device), indexing="ij"
-    )
-    r_int = torch.sqrt((x - center) ** 2 + (y - center) ** 2).round().long()
+    if output_ndim == 2:
+        y, x = torch.meshgrid(
+            torch.arange(N, device=device),
+            torch.arange(N, device=device),
+            indexing="ij",
+        )
+        r_int = torch.sqrt((x - center) ** 2 + (y - center) ** 2).round().long()
+    else:
+        z, y, x = torch.meshgrid(
+            torch.arange(N, device=device),
+            torch.arange(N, device=device),
+            torch.arange(N, device=device),
+            indexing="ij",
+        )
+        r_int = (
+            torch.sqrt((x - center) ** 2 + (y - center) ** 2 + (z - center) ** 2)
+            .round()
+            .long()
+        )
+
     r_int = r_int.clamp(0, len(radial_mean) - 1)
-
     return radial_mean[r_int]
 
 

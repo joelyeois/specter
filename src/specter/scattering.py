@@ -112,7 +112,7 @@ class Scattering(L.LightningModule):
         energy: float,
         scattering_model: str = "multislice",
         klim: float | None = None,
-        flip_curvature: bool = False,
+        ews_curvature_sign: str = "negative",
         nz: int | None = None,
         alpha: float = 0.0,
         progressbars: bool = True,
@@ -137,10 +137,10 @@ class Scattering(L.LightningModule):
             Bandlimit parameter for Kirkland's FFT aliasing prevention.
             Setting klim=0.66 prevents aliasing but reduces spatial frequency
             content. Default is None (no bandlimiting).
-        flip_curvature : bool, optional
-            Ewald sphere curvature sign. False for positive curvature,
-            True for negative (CryoSPARC convention). Only affects multislice
-            and first Born models. Default is False.
+        ews_curvature_sign : str, optional
+            Ewald sphere curvature sign matching CryoSPARC's convention.
+            ``'negative'`` (default) or ``'positive'``. Affects multislice,
+            Rytov, and first Born models.
         nz : int, optional
             Number of slices in z dimension. Required for firstborn model.
             Default is None.
@@ -164,7 +164,7 @@ class Scattering(L.LightningModule):
         self.wavelength = energy_to_wavelength(energy)
         self.sigma = interaction_parameter(energy)
         self.scattering_model = scattering_model
-        self.flip_curvature = flip_curvature
+        self.ews_curvature_sign = ews_curvature_sign
         self.alpha = alpha
         self.progressbars = progressbars
 
@@ -239,7 +239,7 @@ class Scattering(L.LightningModule):
         where F is the Fresnel propagator and σ is the interaction parameter.
         """
         F = self.F_real + 1j * self.F_imag
-        if self.flip_curvature:
+        if self.ews_curvature_sign == "negative":
             V = torch.flip(V, dims=(1,))
         exitwave = 1.0
 
@@ -288,7 +288,7 @@ class Scattering(L.LightningModule):
         approximation for small V.
         """
         F = self.F_real + 1j * self.F_imag
-        if self.flip_curvature:
+        if self.ews_curvature_sign == "negative":
             V = torch.flip(V, dims=(1,))
 
         scattered = ifft2(fft2(1j * self.sigma * self.pixel_size * V) * F[None, ...])
@@ -319,7 +319,7 @@ class Scattering(L.LightningModule):
         where F(z) accounts for Fresnel propagation from slice z to the exit plane.
         """
         F = self.F_real + 1j * self.F_imag
-        if self.flip_curvature:
+        if self.ews_curvature_sign == "negative":
             V = torch.flip(V, dims=(1,))
 
         V_f = fft2(V)
@@ -360,7 +360,7 @@ class Scattering(L.LightningModule):
         or dense material.
         """
         F = self.F_real + 1j * self.F_imag
-        if self.flip_curvature:
+        if self.ews_curvature_sign == "negative":
             V = torch.flip(V, dims=(1,))
 
         t = torch.exp(1j * self.sigma * self.pixel_size * V) - 1
@@ -475,7 +475,7 @@ class IterativeScattering(L.LightningModule):
         energy: float,
         scattering_model: str = "multislice",
         klim: float | None = None,
-        flip_curvature: bool = False,
+        ews_curvature_sign: str = "negative",
         alpha: float = 0.0,
         progressbars: bool = True,
     ):
@@ -492,8 +492,10 @@ class IterativeScattering(L.LightningModule):
             Scattering model to use ('multislice', 'firstborn', 'rytov', 'projection', 'ctf').
         klim : float, optional
             Bandlimit parameter.
-        flip_curvature : bool
-            Whether to flip the curvature of the Ewald sphere.
+        ews_curvature_sign : str
+            Ewald sphere curvature sign matching CryoSPARC's convention.
+            ``'negative'`` (default) or ``'positive'``. Affects multislice,
+            Rytov, and first Born models.
         alpha : float
             Amplitude contrast ratio.
         progressbars : bool
@@ -506,7 +508,7 @@ class IterativeScattering(L.LightningModule):
         self.wavelength = energy_to_wavelength(energy)
         self.sigma = interaction_parameter(energy)
         self.scattering_model = scattering_model
-        self.flip_curvature = flip_curvature
+        self.ews_curvature_sign = ews_curvature_sign
         self.alpha = alpha
         self.progressbars = progressbars
 
@@ -626,7 +628,7 @@ class IterativeScattering(L.LightningModule):
         )
 
         indices = torch.arange(nz_new, device=V.device)
-        if self.flip_curvature:
+        if self.ews_curvature_sign == "negative":
             indices = torch.flip(indices, dims=(0,))
 
         pbar = track(
@@ -742,7 +744,7 @@ class IterativeScattering(L.LightningModule):
             (B, self.nxy, self.nxy), device=device, dtype=torch.complex64
         )
         indices = torch.arange(nz_new, device=V.device)
-        if self.flip_curvature:
+        if self.ews_curvature_sign == "negative":
             indices = torch.flip(indices, dims=(0,))
 
         pbar = track(
@@ -808,7 +810,7 @@ class IterativeScattering(L.LightningModule):
             (B, self.nxy, self.nxy), device=device, dtype=torch.complex64
         )
         indices = torch.arange(nz_new, device=V.device)
-        if self.flip_curvature:
+        if self.ews_curvature_sign == "negative":
             indices = torch.flip(indices, dims=(0,))
 
         pbar = track(
@@ -874,7 +876,7 @@ class IterativeScattering(L.LightningModule):
             (B, self.nxy, self.nxy), device=device, dtype=torch.complex64
         )
         indices = torch.arange(nz_new, device=V.device)
-        if self.flip_curvature:
+        if self.ews_curvature_sign == "negative":
             indices = torch.flip(indices, dims=(0,))
 
         pbar = track(

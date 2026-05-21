@@ -1313,6 +1313,7 @@ def radial_symmetrize(
     data: torch.Tensor,
     center: float | None = None,
     output_ndim: int | None = None,
+    return_size: tuple[int, ...] | None = None,
 ) -> torch.Tensor:
     """
     Radially/spherically average a 2D or 3D tensor and map it back.
@@ -1322,17 +1323,34 @@ def radial_symmetrize(
     data : torch.Tensor
         (N, N) or (N, N, N) input tensor.
     center : float, optional
-        Center of the radial average. Default is N // 2.
+        Center used when computing the radial profile from the square/cubic
+        input. Default is N // 2.
     output_ndim : {2, 3}, optional
         Output dimensionality. Defaults to match the input.
         If the input is 2D and ``output_ndim=3``, the 1D radial profile
-        computed from the 2D image is mapped onto an (N, N, N) volume
-        via spherical distances from the same center.
+        computed from the 2D image is mapped onto a volume via spherical
+        distances from the same center.
+    return_size : tuple[int, ...], optional
+        Shape of the output tensor, e.g. ``(512, 256, 256)``.  The number of
+        dimensions must match ``output_ndim`` (or ``data.ndim`` when
+        ``output_ndim`` is not given).
+
+        Each axis is scaled so that its own Nyquist pixel maps to the same
+        radial-profile index as every other axis, i.e. the profile index for
+        output pixel ``(iz, iy, ix)`` is
+
+            ``sqrt((N/Oz*(iz-cz))^2 + (N/Oy*(iy-cy))^2 + (N/Ox*(ix-cx))^2)``
+
+        This preserves equal Nyquist frequency along all axes, matching a
+        real-space volume with uniform voxel size.  When ``return_size`` is
+        omitted (or cubic) the formula reduces to plain Euclidean distance,
+        identical to the previous behaviour.
 
     Returns
     -------
     torch.Tensor
-        Radially/spherically symmetrised tensor with shape (N, N) or (N, N, N).
+        Radially/spherically symmetrised tensor with shape ``return_size`` (if
+        provided) or ``(N,) * output_ndim`` otherwise.
     """
     if data.ndim not in (2, 3):
         raise ValueError("Input must be a 2D or 3D tensor.")
@@ -1347,6 +1365,11 @@ def radial_symmetrize(
     if data.ndim == 3 and output_ndim == 2:
         raise ValueError("Reducing a 3D input to a 2D output is not supported.")
 
+    if return_size is not None and len(return_size) != output_ndim:
+        raise ValueError(
+            f"return_size has {len(return_size)} dimensions but output_ndim={output_ndim}."
+        )
+
     device = data.device
     if center is None:
         center = N // 2
@@ -1356,22 +1379,37 @@ def radial_symmetrize(
     else:
         radial_mean = radial_profile_3d(data, center=(center, center, center))
 
+    out_shape: tuple[int, ...] = (
+        return_size if return_size is not None else (N,) * output_ndim
+    )
+    out_centers = tuple(s // 2 for s in out_shape)
+    # Per-axis scale: maps each axis's Nyquist pixel to the same profile index.
+    scales = tuple(float(N) / s for s in out_shape)
+
     if output_ndim == 2:
+        oh, ow = out_shape
+        cy, cx = out_centers
+        sy, sx = scales
         y, x = torch.meshgrid(
-            torch.arange(N, device=device),
-            torch.arange(N, device=device),
+            torch.arange(oh, device=device),
+            torch.arange(ow, device=device),
             indexing="ij",
         )
-        r_int = torch.sqrt((x - center) ** 2 + (y - center) ** 2).round().long()
+        r_int = torch.sqrt((sx * (x - cx)) ** 2 + (sy * (y - cy)) ** 2).round().long()
     else:
+        oz, oy, ox = out_shape
+        cz, cy, cx = out_centers
+        sz, sy, sx = scales
         z, y, x = torch.meshgrid(
-            torch.arange(N, device=device),
-            torch.arange(N, device=device),
-            torch.arange(N, device=device),
+            torch.arange(oz, device=device),
+            torch.arange(oy, device=device),
+            torch.arange(ox, device=device),
             indexing="ij",
         )
         r_int = (
-            torch.sqrt((x - center) ** 2 + (y - center) ** 2 + (z - center) ** 2)
+            torch.sqrt(
+                (sz * (z - cz)) ** 2 + (sy * (y - cy)) ** 2 + (sx * (x - cx)) ** 2
+            )
             .round()
             .long()
         )

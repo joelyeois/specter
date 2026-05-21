@@ -188,8 +188,9 @@ class ImageGeneratorFromCoordinates(ParticleGeneratorBase):
         Noise model. Default 'poisson'.
     klim : float, optional
         Reciprocal space limit.
-    flip_curvature : bool, optional
-        Whether to flip curvature.
+    ews_curvature_sign : str, optional
+        Ewald sphere curvature sign matching CryoSPARC's convention.
+        ``'negative'`` (default) or ``'positive'``.
     alpha : float, optional
         Amplitude contrast ratio.
     crowd_min_distance : float, optional
@@ -235,7 +236,7 @@ class ImageGeneratorFromCoordinates(ParticleGeneratorBase):
         aberration_model: str = "holography",
         noise_model: str = "poisson",
         klim: float | None = None,
-        flip_curvature: bool = False,
+        ews_curvature_sign: str = "negative",
         alpha: float = 0.0,
         crowd_min_distance: float | None = None,
         crowd_max_distance_z: float | None = None,
@@ -284,7 +285,7 @@ class ImageGeneratorFromCoordinates(ParticleGeneratorBase):
         )
         self.scattering_model = scattering_model
         self.klim = klim
-        self.flip_curvature = flip_curvature
+        self.ews_curvature_sign = ews_curvature_sign
         self.crowd_min_distance = crowd_min_distance
 
         self.coordinates = nn.Parameter(coordinates)
@@ -314,7 +315,7 @@ class ImageGeneratorFromCoordinates(ParticleGeneratorBase):
             self.energy,
             scattering_model=self.scattering_model,
             klim=self.klim,
-            flip_curvature=self.flip_curvature,
+            ews_curvature_sign=self.ews_curvature_sign,
             nz=self.nz,
             alpha=self.alpha,
             progressbars=self.progressbars,
@@ -455,8 +456,9 @@ class ImageGenerator(ParticleGeneratorBase):
         Noise model. Default 'poisson'.
     klim : float, optional
         Reciprocal space limit.
-    flip_curvature : bool, optional
-        Whether to flip curvature.
+    ews_curvature_sign : str, optional
+        Ewald sphere curvature sign matching CryoSPARC's convention.
+        ``'negative'`` (default) or ``'positive'``.
     alpha : float, optional
         Amplitude contrast ratio.
     crowd_min_distance : float, optional
@@ -503,7 +505,7 @@ class ImageGenerator(ParticleGeneratorBase):
         aberration_model: str = "holography",
         noise_model: str = "poisson",
         klim: float | None = None,
-        flip_curvature: bool = False,
+        ews_curvature_sign: str = "negative",
         alpha: float = 0.0,
         crowd_min_distance: float | None = None,
         crowd_max_distance_z: float | None = None,
@@ -558,7 +560,7 @@ class ImageGenerator(ParticleGeneratorBase):
         )
         self.scattering_model = scattering_model
         self.klim = klim
-        self.flip_curvature = flip_curvature
+        self.ews_curvature_sign = ews_curvature_sign
         self.crowd_min_distance = crowd_min_distance
 
         self.register_buffer("V", scattering_potential)
@@ -575,7 +577,7 @@ class ImageGenerator(ParticleGeneratorBase):
             self.energy,
             scattering_model=self.scattering_model,
             klim=self.klim,
-            flip_curvature=self.flip_curvature,
+            ews_curvature_sign=self.ews_curvature_sign,
             nz=self.nz,
             alpha=self.alpha,
             progressbars=self.progressbars,

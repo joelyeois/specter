@@ -541,7 +541,7 @@ def main() -> None:
         aberration_model=args.aberration_model,
         noise_model=noise_model,
         klim=None,
-        flip_curvature=False,
+        ews_curvature_sign="positive",
         alpha=alpha,
         crowd_min_distance=crowd_min_distance,
         crowd_max_distance_z=args.crowd_max_distance_z,

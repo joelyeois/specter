@@ -249,7 +249,7 @@ def main():
         noise_model=args.noise_model,
         coincidence_radius=args.coincidence_radius,
         klim=None,
-        flip_curvature=False,
+        ews_curvature_sign="positive",
         alpha=args.alpha,
         crowd_min_distance=args.crowd_min_distance,
         crowd_max_distance_z=args.crowd_max_distance_z,

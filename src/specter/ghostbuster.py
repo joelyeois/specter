@@ -118,7 +118,7 @@ class Reconstructor(L.LightningModule):
         learn_noise_model: bool = False,
         noise_ema_momentum: float = 0.9,
         use_ncc: bool = False,
-        flipcurvature: bool = False,
+        ews_curvature_sign: str = "negative",
         fsc_ref: torch.Tensor | str | Path | None = None,
         fsc_mask: torch.Tensor | float | str | Path | None = None,
         cryosparc_ref: torch.Tensor | str | Path | None = None,
@@ -255,7 +255,7 @@ class Reconstructor(L.LightningModule):
             self.register_buffer("anisomag", anisomag)
 
         # imaging models
-        self.flip_curvature = flipcurvature
+        self.ews_curvature_sign = ews_curvature_sign
         self.scattering_model = scattering_model
         self.aberration_model = aberration_model
 
@@ -274,7 +274,7 @@ class Reconstructor(L.LightningModule):
             aberration_model=self.aberration_model,
             noise_model=None,
             klim=klim,
-            flip_curvature=self.flip_curvature,
+            ews_curvature_sign=self.ews_curvature_sign,
             alpha=self.alpha,
             rotate_mode=self.rotate_mode,
         )
@@ -996,8 +996,9 @@ class Ghostbuster:
         L1 regularisation weight on V.
     rotate_mode : {"real", "fourier"}
         Domain in which rotations are applied.
-    flipcurvature : bool
-        Whether to flip the CTF curvature sign.
+    ews_curvature_sign : str
+        Ewald sphere curvature sign matching CryoSPARC's convention.
+        ``'negative'`` (default) or ``'positive'``.
     klim : float, optional
         Hard frequency cutoff passed to ``ImageGenerator``.
     nps_weight : torch.Tensor, optional
@@ -1060,7 +1061,7 @@ class Ghostbuster:
         symmetry_mode: Literal["real", "fourier"] = "fourier",
         sparsity: float | None = None,
         rotate_mode: Literal["real", "fourier"] = "real",
-        flipcurvature: bool = True,
+        ews_curvature_sign: str = "negative",
         klim: float | None = None,
         nps_weight: torch.Tensor | None = None,
         learn_noise_model: bool = False,
@@ -1141,7 +1142,7 @@ class Ghostbuster:
         self.symmetry_mode = symmetry_mode
         self.sparsity = sparsity
         self.rotate_mode = rotate_mode
-        self.flipcurvature = flipcurvature
+        self.ews_curvature_sign = ews_curvature_sign
         self.klim = klim
         self.nps_weight = nps_weight
         self.learn_noise_model = learn_noise_model
@@ -1204,7 +1205,7 @@ class Ghostbuster:
             use_ncc=self.use_ncc,
             sparsity=self.sparsity,
             rotate_mode=self.rotate_mode,
-            flipcurvature=self.flipcurvature,
+            ews_curvature_sign=self.ews_curvature_sign,
             symmetry=self.symmetry,
             symmetry_batchsize=self.symmetry_batchsize,
             symmetry_mode=self.symmetry_mode,

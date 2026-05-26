@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find /mnt/cbis/home/e0788253/AreTomo3 -name \"AreTomo3\" -type f 2>/dev/null && find /scratch -name \"AreTomo3\" -maxdepth 5 2>/dev/null | head -5)",
+      "Read(//scratch/**)",
+      "Bash(python3 -c ' *)",
+      "Bash(chmod +x /scratch/loh/joel/polnet/data_generated/368x2150x2150/run_cmd1_df22000.sh)",
+      "Bash(awk 'NR==1 { print; next } { $2 = \"22000.00\"; $3 = \"22000.00\"; print }' /scratch/loh/joel/polnet/data_generated/368x2150x2150/reconstructions/clean/tiltseries_368x2150x2150_5.0A_clean_CTF.txt)",
+      "Bash(bash run_cmd1_df22000.sh)",
+      "Bash(bash run_cmd2_zero_align.sh)",
+      "Bash(bash run_cmd2_zero_align.sh 180)",
+      "Bash(bash run_cmd2_zero_align.sh 0 0)",
+      "Bash(bash run_cmd2_zero_align.sh 0 1)"
+    ]
+  }
+}

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, Sequence
 
 import lightning as L
 import mrcfile
@@ -23,7 +23,10 @@ from . import rotations
 from .arrays import compute_nps_2d
 from .fft import fft3, ifft3
 from .imagegenerator import ImageGenerator
+from .imagegenerator._tiltseries import TiltSeriesGenerator
+from .microscope import Aberration
 from .rotations import Rotation
+from .scattering import IterativeScattering
 from .symmetries import apply_symmetry, get_rotation_matrices
 
 
@@ -1333,6 +1336,938 @@ class Ghostbuster:
         print(
             f"Test run passed — {bin_factor}× binned, {n_particles} particles, "
             f"box {images_binned.shape[-1]}³  |  "
+            f"V min={v.min():.4f}  max={v.max():.4f}  mean={v.mean():.4f}"
+        )
+        return model
+
+
+class TomogramReconstructor(L.LightningModule):
+    """
+    Differentiable tomogram reconstruction from a cryo-ET tilt series.
+
+    Reconstructs a 3D electrostatic potential volume from tilt-series images
+    by minimising the discrepancy between simulated and observed images, using
+    the same forward model as :class:`~specter.imagegenerator.TiltSeriesGenerator`.
+
+    One tilt per training step (``batch_size=1`` in the dataloader) keeps GPU
+    memory bounded regardless of tomogram size.  Larger batch sizes accumulate
+    the loss over multiple tilts before each parameter update.
+
+    Typically constructed and driven by :class:`TomogramGhostbuster`.
+
+    Parameters
+    ----------
+    V : torch.Tensor
+        Initial volume estimate, shape ``(Z, Y, X)``.
+    voxel_size : float
+        Voxel size in Å.
+    quaternions : torch.Tensor
+        Per-tilt rotation quaternions, shape ``(N_tilts, 4)``, xyzw convention.
+    translations : torch.Tensor
+        Per-tilt in-plane translations in Å, shape ``(N_tilts, 2)``.
+    ctf_params : dict[str, torch.Tensor]
+        Per-tilt CTF parameters; each value has leading dimension ``N_tilts``.
+    energy : float
+        Electron beam energy in keV.
+    tilt_axis : str
+        Axis around which the sample tilts (``"x"`` or ``"y"``).  Determines
+        which image dimension shrinks at high tilt for FOV masking.  Default ``"x"``.
+    lr : float, optional
+        Learning rate for volume V.  ``None`` freezes V.
+    sparsity : float, optional
+        L1 regularisation weight on V.
+    taper_width : int
+        Cosine taper applied to V in XY before each forward pass, smoothing
+        the volume-to-vacuum boundary to suppress edge diffraction.  Default 0.
+    z_taper_width : int
+        Cosine taper in Z.  Default 0.
+    use_fov_mask : bool
+        If ``True``, the MSE loss at each tilt is restricted to the central
+        strip corresponding to real (non-padded) volume, eliminating gradient
+        contributions from reflected boundary content.  Default ``True``.
+    scattering_model : str
+        Wave propagation model.  Default ``"multislice"``.
+    aberration_model : str
+        CTF aberration model.  Default ``"holography"``.
+    klim : float, optional
+        Hard reciprocal-space frequency cutoff.
+    alpha : float
+        Amplitude contrast ratio.  Default ``0.0``.
+    scheduler : str
+        LR scheduler for the volume optimiser.  Default ``"LambdaLR"``.
+    lr_decay : float
+        Decay coefficient for the reciprocal-sqrt LR schedule.  Default ``0.1``.
+    kmask : torch.Tensor, optional
+        3-D Fourier-space mask applied to V after every gradient update.
+    slice_batch_size : int
+        Z-slice chunk size passed to ``IterativeScattering``.  Reduce for large
+        volumes to stay within GPU memory.  Default ``1``.
+    run_dir : str or Path, optional
+        Directory for per-epoch MRC volumes and training metrics.  ``None``
+        disables all file output.
+    """
+
+    def __init__(
+        self,
+        V: torch.Tensor,
+        voxel_size: float,
+        quaternions: torch.Tensor,
+        translations: torch.Tensor,
+        ctf_params: dict[str, torch.Tensor],
+        energy: float,
+        tilt_axis: str = "x",
+        lr: float | None = None,
+        sparsity: float | None = None,
+        taper_width: int = 0,
+        z_taper_width: int = 0,
+        use_fov_mask: bool = True,
+        scattering_model: str = "multislice",
+        aberration_model: str = "holography",
+        klim: float | None = None,
+        alpha: float = 0.0,
+        scheduler: Literal[
+            "LambdaLR",
+            "OneCycleLR",
+            "CosineAnnealingWarmRestarts",
+            "MultiplicativeLR",
+        ] = "LambdaLR",
+        lr_decay: float = 0.1,
+        kmask: torch.Tensor | None = None,
+        slice_batch_size: int = 1,
+        run_dir: str | Path | None = None,
+    ) -> None:
+        super().__init__()
+        self.save_hyperparameters(
+            ignore=["V", "quaternions", "translations", "ctf_params", "kmask"]
+        )
+        self._run_dir = Path(run_dir) if run_dir is not None else None
+        self.automatic_optimization = False
+
+        # Geometry
+        self.nxy = V.shape[-1]
+        self.nz = V.shape[0]
+        self.voxel_size = voxel_size
+        self.tilt_axis = tilt_axis.lower()
+
+        # Optimisation settings
+        self.lr = lr
+        self.lr_decay = lr_decay
+        self.scheduler = scheduler
+        self.sparsity = sparsity
+        self.taper_width = taper_width
+        self.z_taper_width = z_taper_width
+        self.use_fov_mask = use_fov_mask
+        self.slice_batch_size = slice_batch_size
+
+        # Logging
+        self.log_total_loss: list[torch.Tensor] = []
+        self.log_norm_loss: list[torch.Tensor] = []
+        self.log_sparsity_loss: list[torch.Tensor] = []
+        self.log_lrs: list[float] = []
+
+        # Volume parameter
+        if lr is None:
+            self.register_buffer("V", V.float())
+        else:
+            self.V = nn.Parameter(V.float())
+
+        # Precompute the XY size needed to cover the widest tilt angle
+        max_tilt_deg = TiltSeriesGenerator._infer_max_tilt_from_inputs(
+            angles=None, quaternions=quaternions
+        )
+        self.required_nxy = int(
+            TiltSeriesGenerator._estimate_required_nxy(self.nxy, self.nz, max_tilt_deg)
+        )
+
+        # Tilt geometry buffers (fixed — orientations are known in cryo-ET)
+        self.register_buffer(
+            "quaternions", torch.as_tensor(quaternions, dtype=torch.float32)
+        )
+        self.register_buffer(
+            "translations", torch.as_tensor(translations, dtype=torch.float32)
+        )
+
+        # Per-tilt CTF params as named buffers
+        self.ctf_params: dict[str, torch.Tensor] = {}
+        for k, v in ctf_params.items():
+            self.register_buffer(k, torch.as_tensor(v, dtype=torch.float32))
+            self.ctf_params[k] = getattr(self, k)
+
+        # Fourier-space mask applied after each gradient step
+        self.register_buffer("kmask", kmask)
+
+        # Physics modules
+        self.iterative_scattering = IterativeScattering(
+            self.nxy,
+            voxel_size,
+            energy,
+            scattering_model=scattering_model,
+            klim=klim,
+            alpha=alpha,
+        )
+        self.aberration = Aberration(
+            self.nxy,
+            voxel_size,
+            energy,
+            aberration_model=aberration_model,
+            alpha=alpha if aberration_model == "ctf" else None,
+        )
+
+    # ------------------------------------------------------------------ #
+    # Forward helpers                                                      #
+    # ------------------------------------------------------------------ #
+
+    def _prepare_volume(self) -> torch.Tensor:
+        """Apply cosine taper and reflect-padding to V for the current tilt pass."""
+        V: torch.Tensor = self.V
+        if self.taper_width > 0 or self.z_taper_width > 0:
+            V = TiltSeriesGenerator._apply_cosine_taper(
+                V, taper_xy=self.taper_width, taper_z=self.z_taper_width
+            )
+        if V.shape[-1] < self.required_nxy:
+            # _pad_vol_xy_for_tilt requires ≥4D input for reflect mode
+            V = TiltSeriesGenerator._pad_vol_xy_for_tilt(
+                V.unsqueeze(0), self.required_nxy, int(V.shape[-1])
+            ).squeeze(0)
+        return V
+
+    @staticmethod
+    def _compute_nz_tilt(V_shape: tuple[int, ...], theta_matrix: torch.Tensor) -> int:
+        """Z-slice count needed to propagate through the rotated volume."""
+        _, Z, Y, X = V_shape
+        R = theta_matrix[:, :3, :3]
+        corners = torch.tensor(
+            [
+                [-X / 2, -Y / 2, -Z / 2],
+                [X / 2, -Y / 2, -Z / 2],
+                [-X / 2, Y / 2, -Z / 2],
+                [X / 2, Y / 2, -Z / 2],
+                [-X / 2, -Y / 2, Z / 2],
+                [X / 2, -Y / 2, Z / 2],
+                [-X / 2, Y / 2, Z / 2],
+                [X / 2, Y / 2, Z / 2],
+            ],
+            device=theta_matrix.device,
+            dtype=theta_matrix.dtype,
+        ).t()  # (3, 8)
+        rotated = torch.bmm(
+            R.transpose(1, 2), corners.unsqueeze(0).expand(R.shape[0], -1, -1)
+        )
+        z_min = rotated[:, 2, :].min(dim=1).values
+        z_max = rotated[:, 2, :].max(dim=1).values
+        return max(1, int(torch.ceil((z_max - z_min).max()).item()))
+
+    def _fov_mask(self, tilt_idx: int) -> torch.Tensor | None:
+        """
+        Binary mask for the real-FOV region at the given tilt.
+
+        Returns ``None`` for near-zero tilts where the full image is real FOV.
+
+        The shrinking dimension is X for ``tilt_axis="y"`` and Y for
+        ``tilt_axis="x"``.
+        """
+        Q = self.quaternions[tilt_idx]
+        rotvec = Rotation.from_quat(Q.unsqueeze(0)).as_rotvec()[0]
+        theta = rotvec.norm()  # radians (scalar tensor)
+
+        cos_t = torch.cos(theta)
+        sin_t = torch.sin(theta)
+        real_fov = int((self.nxy * cos_t - self.nz * sin_t).clamp(min=1).item())
+        if real_fov >= self.nxy:
+            return None
+
+        pad = (self.nxy - real_fov) // 2
+        mask = torch.ones(self.nxy, self.nxy, device=self.device, dtype=torch.float32)
+        if self.tilt_axis == "x":
+            # rotation around X → Y shrinks
+            mask[:pad, :] = 0.0
+            mask[self.nxy - pad :, :] = 0.0
+        else:
+            # rotation around Y → X shrinks
+            mask[:, :pad] = 0.0
+            mask[:, self.nxy - pad :] = 0.0
+        return mask
+
+    def _forward_tilt(self, V_prepared: torch.Tensor, tilt_idx: int) -> torch.Tensor:
+        """
+        Simulate one noiseless tilt image.
+
+        Parameters
+        ----------
+        V_prepared : torch.Tensor
+            Tapered and padded volume, shape ``(Z, Y', X')``.
+        tilt_idx : int
+            Index into ``self.quaternions`` / ``self.translations``.
+
+        Returns
+        -------
+        torch.Tensor
+            Clean intensity image, shape ``(H, W)``, same units as
+            ``TiltSeriesGenerator.generate_tilt_series`` ``clean_images``.
+        """
+        Q = self.quaternions[tilt_idx : tilt_idx + 1]  # (1, 4)
+        T = self.translations[tilt_idx : tilt_idx + 1]  # (1, 2)
+        R_mat = Rotation.from_quat(Q).as_matrix()
+        if R_mat.ndim == 2:
+            R_mat = R_mat.unsqueeze(0)
+        T_torch = rotations.translations_angstrom_to_torch(
+            T, V_prepared.shape[-1], self.voxel_size
+        )
+        theta_matrix = rotations.build_affine_matrix(R_mat, T_torch)
+
+        V_batched = V_prepared.unsqueeze(0)  # (1, Z, Y', X')
+        exitwave = self.iterative_scattering(
+            V_batched, theta_matrix, slice_batch_size=self.slice_batch_size
+        )
+
+        # Defocus correction: multislice propagates nz_new slices instead of
+        # self.nz, shifting the effective specimen centre by z_offset.
+        ctf_batch = {k: v[tilt_idx : tilt_idx + 1] for k, v in self.ctf_params.items()}
+        if self.iterative_scattering.scattering_model not in ("projection", "ctf"):
+            nz_new = self._compute_nz_tilt(tuple(V_batched.shape), theta_matrix)
+            z_offset = (nz_new - self.nz) * self.voxel_size / 2.0
+            if "dfu" in ctf_batch:
+                ctf_batch["dfu"] = ctf_batch["dfu"] - z_offset
+            if "dfv" in ctf_batch:
+                ctf_batch["dfv"] = ctf_batch["dfv"] - z_offset
+
+        detector_waves = self.aberration(exitwave, ctf_batch)
+        return torch.abs(detector_waves[0]) ** 2  # (H, W)
+
+    def forward(self, tilt_idx: int) -> torch.Tensor:
+        """Simulate tilt image ``tilt_idx`` using the current volume."""
+        return self._forward_tilt(self._prepare_volume(), tilt_idx)
+
+    # ------------------------------------------------------------------ #
+    # Loss                                                                 #
+    # ------------------------------------------------------------------ #
+
+    def _compute_loss(
+        self,
+        sim: torch.Tensor,
+        obs: torch.Tensor,
+        tilt_idx: int,
+    ) -> torch.Tensor:
+        """MSE loss with optional FOV masking and sparsity regularisation."""
+        mse = F.mse_loss(sim, obs, reduction="none")
+        if self.use_fov_mask:
+            mask = self._fov_mask(tilt_idx)
+            if mask is not None:
+                mse = mse * mask
+        return mse.mean()
+
+    # ------------------------------------------------------------------ #
+    # Optimisation                                                         #
+    # ------------------------------------------------------------------ #
+
+    def reciprocal_lr_scheduler(self, *args: Any) -> float:
+        """Reciprocal-square-root decay: ``1 / (1 + decay * step^0.5)``."""
+        return 1 / (1 + self.lr_decay * self.global_step**0.5)
+
+    def configure_optimizers(
+        self,
+    ) -> tuple[list[torch.optim.Optimizer], list[LRScheduler]]:
+        """Build AdamW optimiser and LR scheduler for V."""
+        if self.lr is None:
+            return [], []
+
+        optimizerV = AdamW([self.V], lr=self.lr)
+
+        if self.scheduler == "CosineAnnealingWarmRestarts":
+            lr_scheduler: LRScheduler = CosineAnnealingWarmRestarts(
+                optimizerV,
+                self.num_training_steps_per_epoch(),
+                eta_min=1e-6,
+                T_mult=2,
+            )
+        elif self.scheduler == "OneCycleLR":
+            lr_scheduler = OneCycleLR(
+                optimizerV,
+                max_lr=self.lr,
+                total_steps=self.num_training_steps(),
+                pct_start=0.1,
+                anneal_strategy="cos",
+                div_factor=10.0,
+                final_div_factor=1000.0,
+            )
+        elif self.scheduler == "MultiplicativeLR":
+            lr_scheduler = ExponentialLR(optimizerV, 0.999)
+        elif self.scheduler == "LambdaLR":
+            lr_scheduler = LambdaLR(optimizerV, self.reciprocal_lr_scheduler)
+        else:
+            raise ValueError(
+                f"Unknown scheduler '{self.scheduler}'. "
+                "Choose 'LambdaLR', 'OneCycleLR', "
+                "'CosineAnnealingWarmRestarts', or 'MultiplicativeLR'."
+            )
+        return [optimizerV], [lr_scheduler]
+
+    def training_step(
+        self, batch: tuple[torch.Tensor, torch.Tensor], batch_idx: int
+    ) -> torch.Tensor:
+        """
+        Run one manual optimisation step over a batch of tilt images.
+
+        Parameters
+        ----------
+        batch : tuple of torch.Tensor
+            ``(tilt_images, tilt_indices)`` from the dataloader, shapes
+            ``(B, H, W)`` and ``(B,)``.
+        batch_idx : int
+            Batch index (unused, required by Lightning).
+
+        Returns
+        -------
+        torch.Tensor
+            Scalar loss for the current batch.
+        """
+        obs_images, tilt_indices = batch
+
+        opts = self.optimizers()
+        if not isinstance(opts, (list, tuple)):
+            opts = [opts]
+        for opt in opts:
+            opt.zero_grad()
+
+        # Prepare V once per step (taper + padding are deterministic transforms)
+        V_prepared = self._prepare_volume()
+
+        total_norm_loss = torch.tensor(0.0, device=self.device)
+        for i in range(len(tilt_indices)):
+            idx = int(tilt_indices[i].item())
+            sim = self._forward_tilt(V_prepared, idx)
+            norm_loss = self._compute_loss(sim, obs_images[i], idx)
+            total_norm_loss = total_norm_loss + norm_loss
+
+        norm_loss = total_norm_loss / max(len(tilt_indices), 1)
+        loss = norm_loss
+
+        if self.sparsity is not None:
+            sparsity_loss = self.sparsity * torch.mean(torch.abs(self.V))
+            loss = loss + sparsity_loss
+            self.log_sparsity_loss.append(sparsity_loss.detach().cpu())
+
+        self.log_norm_loss.append(norm_loss.detach().cpu())
+        self.log_total_loss.append(loss.detach().cpu())
+
+        self.manual_backward(loss)
+        for opt in opts:
+            opt.step()
+
+        if not self.automatic_optimization:
+            sch = self.lr_schedulers()
+            if sch:
+                if not isinstance(sch, (list, tuple)):
+                    sch = [sch]
+                for s in sch:
+                    s.step()
+
+        self.log_dict(
+            {"train_loss": loss},
+            on_step=True,
+            on_epoch=True,
+            prog_bar=True,
+            logger=False,
+        )
+        return loss
+
+    def on_train_batch_start(self, batch: Any, batch_idx: int) -> None:
+        """Record the learning rate before each batch."""
+        if self.lr is not None and self.trainer.lr_scheduler_configs:
+            self.log_lrs.append(
+                self.trainer.lr_scheduler_configs[0].scheduler.optimizer.param_groups[
+                    0
+                ]["lr"]
+            )
+
+    def on_train_batch_end(self, outputs: Any, batch: Any, batch_idx: int) -> None:
+        """Apply the Fourier-space k-mask to V after each gradient update."""
+        if self.kmask is not None:
+            self.V.data = torch.real(
+                ifft3(fft3(self.V.data, shift=True) * self.kmask, shift=True)
+            )
+
+    # ------------------------------------------------------------------ #
+    # Epoch / fit callbacks                                                #
+    # ------------------------------------------------------------------ #
+
+    def on_fit_start(self) -> None:
+        """Create run directory and write hyperparameter metadata."""
+        if self._run_dir is None:
+            return
+        self._run_dir.mkdir(parents=True, exist_ok=True)
+        (self._run_dir / "epochs").mkdir(exist_ok=True)
+
+        if self.kmask is not None:
+            torch.save(self.kmask.detach().cpu(), self._run_dir / "kmask.pt")
+
+        meta: dict[str, Any] = dict(self.hparams)
+        (self._run_dir / "params.json").write_text(
+            json.dumps(meta, indent=2, default=str)
+        )
+        print(f"Run directory: {self._run_dir}")
+
+    def on_train_epoch_end(self) -> None:
+        """Save per-epoch volume as MRC."""
+        if self._run_dir is None:
+            return
+        epoch = self.current_epoch + 1
+        v = self.V.detach().cpu().float()
+        mrc_path = self._run_dir / "epochs" / f"{epoch:03d}.mrc"
+        with mrcfile.new(str(mrc_path), overwrite=True) as mrc:
+            mrc.set_data(v.numpy())
+            mrc.voxel_size = self.voxel_size
+
+    def on_fit_end(self) -> None:
+        """Save final reconstructed volume and training metrics."""
+        self._save_metrics()
+        if self._run_dir is None:
+            return
+        v = self.V.detach().cpu().float()
+        vol_path = self._run_dir / "vol.mrc"
+        with mrcfile.new(str(vol_path), overwrite=True) as mrc:
+            mrc.set_data(v.numpy())
+            mrc.voxel_size = self.voxel_size
+        print(f"Saved final volume → {vol_path}")
+
+    def _save_metrics(self) -> None:
+        """Save training metrics (loss, lr) to JSON."""
+        if self._run_dir is None or not self.log_total_loss:
+            return
+
+        metrics_path = self._run_dir / "metrics.json"
+        n_batches_per_epoch = len(self.log_total_loss) // max(self.current_epoch, 1)
+        if n_batches_per_epoch == 0:
+            n_batches_per_epoch = len(self.log_total_loss)
+
+        epochs: dict[str, Any] = {}
+        for epoch in range(self.current_epoch + 1):
+            start = epoch * n_batches_per_epoch
+            end = (epoch + 1) * n_batches_per_epoch
+            ep_losses = [float(v) for v in self.log_total_loss[start:end]]
+            ep_norm = [float(v) for v in self.log_norm_loss[start:end]]
+            ep_lrs = self.log_lrs[start:end]
+            key = f"epoch_{epoch + 1:02d}"
+            epochs[key] = {
+                "loss": {
+                    "mean": sum(ep_losses) / len(ep_losses) if ep_losses else None,
+                    "min": min(ep_losses) if ep_losses else None,
+                    "max": max(ep_losses) if ep_losses else None,
+                },
+                "norm_loss": {
+                    "mean": sum(ep_norm) / len(ep_norm) if ep_norm else None,
+                },
+                "lr": {
+                    "start": ep_lrs[0] if ep_lrs else None,
+                    "end": ep_lrs[-1] if ep_lrs else None,
+                },
+            }
+            if self.log_sparsity_loss:
+                ep_sp = [float(v) for v in self.log_sparsity_loss[start:end]]
+                epochs[key]["sparsity_loss"] = {
+                    "mean": sum(ep_sp) / len(ep_sp) if ep_sp else None,
+                }
+
+        metrics_path.write_text(
+            json.dumps(
+                {
+                    "total_batches": len(self.log_total_loss),
+                    "batches_per_epoch": n_batches_per_epoch,
+                    "total_epochs": self.current_epoch + 1,
+                    "total_loss": [float(v) for v in self.log_total_loss],
+                    "epochs": epochs,
+                },
+                indent=2,
+            )
+        )
+        print(f"Saved metrics → {metrics_path}")
+
+    # ------------------------------------------------------------------ #
+    # Step-count helpers (identical to Reconstructor)                      #
+    # ------------------------------------------------------------------ #
+
+    def num_training_steps_per_epoch(self) -> int:
+        """Number of optimiser steps per epoch."""
+        if self.trainer.max_steps > -1:
+            return self.trainer.max_steps
+        self.trainer.fit_loop.setup_data()
+        dataset_size = len(self.trainer.train_dataloader)
+        return dataset_size // self.trainer.accumulate_grad_batches
+
+    def num_training_steps(self) -> int:
+        """Total optimiser steps across the full run."""
+        if self.trainer.max_steps > -1:
+            return self.trainer.max_steps
+        max_epochs = self.trainer.max_epochs
+        if max_epochs is None or max_epochs < 1:
+            raise ValueError("OneCycleLR requires a positive trainer.max_epochs.")
+        return self.num_training_steps_per_epoch() * max_epochs
+
+
+class TomogramGhostbuster:
+    """
+    End-to-end tomogram reconstruction pipeline for cryo-ET tilt series.
+
+    Loads tilt-series images, builds a :class:`TomogramReconstructor`, and
+    drives it via a Lightning ``Trainer``.  The ``run`` / ``test_run`` API
+    mirrors :class:`Ghostbuster`.
+
+    The forward model is noiseless; the observed images are compared directly
+    to ``|CTF(exitwave)|²``.  Images should be preprocessed so that their
+    intensity scale matches this quantity.  For simulated data from
+    :class:`~specter.imagegenerator.TiltSeriesGenerator`, pass
+    ``clean_images`` directly.  For experimental data, dividing by the
+    expected dose per pixel (``dose_per_angstrom * voxel_size²``) brings
+    images into the correct scale.
+
+    Parameters
+    ----------
+    tilt_series : torch.Tensor or str or Path
+        Observed tilt-series images, shape ``(N_tilts, H, W)``, or path to a
+        ``.mrc`` file containing the tilt series.
+    voxel_size : float
+        Pixel size in Å.
+    energy : float
+        Electron beam energy in keV.
+    ctf_params : dict[str, torch.Tensor]
+        Per-tilt CTF parameters; each value must have leading dimension
+        ``N_tilts``.
+    angles : sequence of float or torch.Tensor, optional
+        Tilt angles in degrees.  Mutually exclusive with ``quaternions``.
+    quaternions : torch.Tensor, optional
+        Per-tilt rotation quaternions ``(N_tilts, 4)``.  Mutually exclusive
+        with ``angles``.
+    translations : torch.Tensor, optional
+        Per-tilt in-plane translations in Å ``(N_tilts, 2)``.  Defaults to
+        zero.
+    tilt_axis : str
+        Tilt rotation axis (``"x"`` or ``"y"``).  Default ``"x"``.
+    nz : int, optional
+        Z depth of the reconstructed volume in voxels.  Defaults to the image
+        width (square volume).
+    V_init : torch.Tensor, optional
+        Initial volume ``(Z, Y, X)``.  Defaults to all-zeros.
+    flip_contrast : bool
+        Negate ``tilt_series`` on load (standard cryo-EM convention).
+        Default ``True``.
+    lr : float, optional
+        Learning rate for V.  ``None`` disables optimisation.
+    sparsity : float, optional
+        L1 regularisation weight on V.
+    epochs : int
+        Training epochs.  Default 5.
+    batch_size : int
+        Tilt images per optimisation step.  Default 1 (one tilt per step).
+    scattering_model : str
+        Wave propagation model.  Default ``"multislice"``.
+    aberration_model : str
+        CTF aberration model.  Default ``"holography"``.
+    klim : float, optional
+        Hard frequency cutoff.
+    alpha : float
+        Amplitude contrast ratio.  Default ``0.0``.
+    taper_width : int
+        XY cosine taper on V before each forward pass.  Default 0.
+    z_taper_width : int
+        Z cosine taper on V.  Default 0.
+    use_fov_mask : bool
+        Mask MSE loss to the real-FOV region per tilt.  Default ``True``.
+    scheduler : str
+        LR scheduler.  Default ``"LambdaLR"``.
+    slice_batch_size : int
+        Z-slice chunk size for ``IterativeScattering``.  Default 1.
+    num_workers : int
+        DataLoader worker processes.  Default 0.
+    precision : str
+        Lightning ``Trainer`` precision.  Default ``"16-mixed"``.
+    run_dir : str or Path, optional
+        Output directory for volumes and metadata.
+    """
+
+    def __init__(
+        self,
+        tilt_series: torch.Tensor | str | Path,
+        voxel_size: float,
+        energy: float,
+        ctf_params: dict[str, Any],
+        angles: Sequence[float] | torch.Tensor | None = None,
+        quaternions: torch.Tensor | None = None,
+        translations: torch.Tensor | None = None,
+        tilt_axis: str = "x",
+        nz: int | None = None,
+        V_init: torch.Tensor | None = None,
+        flip_contrast: bool = True,
+        lr: float | None = None,
+        sparsity: float | None = None,
+        epochs: int = 5,
+        batch_size: int = 1,
+        scattering_model: str = "multislice",
+        aberration_model: str = "holography",
+        klim: float | None = None,
+        alpha: float = 0.0,
+        taper_width: int = 0,
+        z_taper_width: int = 0,
+        use_fov_mask: bool = True,
+        scheduler: Literal[
+            "LambdaLR",
+            "OneCycleLR",
+            "CosineAnnealingWarmRestarts",
+            "MultiplicativeLR",
+        ] = "LambdaLR",
+        slice_batch_size: int = 1,
+        num_workers: int = 0,
+        precision: str = "16-mixed",
+        run_dir: str | Path | None = None,
+    ) -> None:
+        # Load tilt series
+        if isinstance(tilt_series, (str, Path)):
+            print(f"Loading tilt series from {Path(tilt_series).name} ...")
+            with mrcfile.open(str(tilt_series)) as mrc:
+                images = torch.as_tensor(mrc.data.copy()).float()
+        else:
+            images = torch.as_tensor(tilt_series).float()
+
+        if flip_contrast:
+            images = -images
+
+        n_tilts, H, W = images.shape
+        print(
+            f"  {n_tilts} tilts  |  {H}×{W} px  |  {voxel_size:.3f} Å/px  |  "
+            f"{energy:.0f} keV"
+        )
+
+        # Resolve rotation quaternions
+        if angles is not None and quaternions is not None:
+            raise ValueError("Provide either 'angles' or 'quaternions', not both.")
+        if angles is None and quaternions is None:
+            raise ValueError("Either 'angles' or 'quaternions' must be provided.")
+
+        if angles is not None:
+            angles_t = torch.as_tensor(angles, dtype=torch.float32)
+            theta_rad = torch.deg2rad(angles_t)
+            tilt_axis_lower = tilt_axis.lower()
+            if tilt_axis_lower == "x":
+                rotvecs = torch.stack(
+                    [
+                        theta_rad,
+                        torch.zeros_like(theta_rad),
+                        torch.zeros_like(theta_rad),
+                    ],
+                    dim=-1,
+                )
+            else:
+                rotvecs = torch.stack(
+                    [
+                        torch.zeros_like(theta_rad),
+                        theta_rad,
+                        torch.zeros_like(theta_rad),
+                    ],
+                    dim=-1,
+                )
+            quaternions = Rotation.from_rotvec(rotvecs).as_quat()
+
+        quats = torch.as_tensor(quaternions, dtype=torch.float32)
+        trans = (
+            torch.zeros(n_tilts, 2, dtype=torch.float32)
+            if translations is None
+            else torch.as_tensor(translations, dtype=torch.float32)
+        )
+
+        # Initial volume
+        nxy = W
+        _nz = nz if nz is not None else nxy
+        if V_init is not None:
+            volume_init = torch.as_tensor(V_init).float()
+        else:
+            volume_init = torch.zeros(_nz, nxy, nxy)
+
+        # Store preprocessed data and settings
+        self._images = images
+        self._quaternions = quats
+        self._translations = trans
+        self._ctf_params = {
+            k: torch.as_tensor(v, dtype=torch.float32) for k, v in ctf_params.items()
+        }
+        self._volume_init = volume_init
+        self._voxel_size = voxel_size
+        self._energy = energy
+
+        self.lr = lr
+        self.sparsity = sparsity
+        self.epochs = epochs
+        self.batch_size = batch_size
+        self.scattering_model = scattering_model
+        self.aberration_model = aberration_model
+        self.klim = klim
+        self.alpha = alpha
+        self.taper_width = taper_width
+        self.z_taper_width = z_taper_width
+        self.use_fov_mask = use_fov_mask
+        self.tilt_axis = tilt_axis
+        self.scheduler = scheduler
+        self.slice_batch_size = slice_batch_size
+        self.num_workers = num_workers
+        self.precision = precision
+        self.run_dir = Path(run_dir) if run_dir is not None else None
+
+    def _build_reconstructor_and_loader(
+        self,
+        images: torch.Tensor,
+        volume_init: torch.Tensor,
+        voxel_size: float,
+        scattering_model: str,
+        batch_size: int,
+    ) -> tuple["TomogramReconstructor", torch.utils.data.DataLoader]:
+        n_tilts = images.shape[0]
+        idx = torch.arange(n_tilts)
+        dataset = torch.utils.data.TensorDataset(images, idx)
+        loader = torch.utils.data.DataLoader(
+            dataset,
+            batch_size=batch_size,
+            shuffle=True,
+            num_workers=self.num_workers,
+        )
+        model = TomogramReconstructor(
+            volume_init,
+            voxel_size,
+            self._quaternions,
+            self._translations,
+            self._ctf_params,
+            self._energy,
+            tilt_axis=self.tilt_axis,
+            lr=self.lr,
+            sparsity=self.sparsity,
+            taper_width=self.taper_width,
+            z_taper_width=self.z_taper_width,
+            use_fov_mask=self.use_fov_mask,
+            scattering_model=scattering_model,
+            aberration_model=self.aberration_model,
+            klim=self.klim,
+            alpha=self.alpha,
+            scheduler=self.scheduler,
+            slice_batch_size=self.slice_batch_size,
+            run_dir=self.run_dir,
+        )
+        return model, loader
+
+    def run(
+        self,
+        device: int = 0,
+        callbacks: list[Any] | None = None,
+    ) -> "TomogramReconstructor":
+        """
+        Run the full reconstruction and return the trained
+        :class:`TomogramReconstructor`.
+
+        Parameters
+        ----------
+        device : int
+            GPU index.  Ignored when CUDA is unavailable.
+        callbacks : list, optional
+            Additional Lightning callbacks.
+
+        Returns
+        -------
+        TomogramReconstructor
+            Trained model.  Access the volume via ``model.V.detach()``.
+        """
+        n_tilts = len(self._images)
+        nz, nxy = self._volume_init.shape[0], self._volume_init.shape[-1]
+        use_gpu = torch.cuda.is_available()
+        _device_str = f"GPU {device}" if use_gpu else "CPU"
+        print(
+            f"Starting reconstruction: {n_tilts} tilts  |  "
+            f"volume {nz}×{nxy}×{nxy}  |  {self.scattering_model}  |  "
+            f"{self.epochs} epochs  |  batch {self.batch_size}  |  {_device_str}"
+        )
+        model, loader = self._build_reconstructor_and_loader(
+            self._images,
+            self._volume_init,
+            self._voxel_size,
+            self.scattering_model,
+            self.batch_size,
+        )
+        trainer = L.Trainer(
+            accelerator="gpu" if use_gpu else "cpu",
+            devices=[device] if use_gpu else 1,
+            max_epochs=self.epochs,
+            precision=self.precision if use_gpu else "32",
+            logger=False,
+            enable_checkpointing=False,
+            callbacks=callbacks or [],
+        )
+        trainer.fit(model, loader)
+        return model
+
+    def test_run(
+        self,
+        bin_factor: int = 4,
+        device: int = 0,
+        callbacks: list[Any] | None = None,
+    ) -> "TomogramReconstructor":
+        """
+        Quick sanity check: 1 epoch on spatially binned tilt images.
+
+        Bins images and volume init by ``bin_factor`` in each spatial
+        dimension and runs a single epoch.  Use this to verify that data
+        loading, CTF parameters, and the physics pipeline are wired up
+        correctly before committing to a full run.
+
+        Parameters
+        ----------
+        bin_factor : int
+            Spatial downsampling factor.  Default 4.
+        device : int
+            GPU index.  Ignored when CUDA is unavailable.
+        callbacks : list, optional
+            Additional Lightning callbacks.
+
+        Returns
+        -------
+        TomogramReconstructor
+            Trained model after one epoch.
+        """
+        print(
+            f"Test run: {len(self._images)} tilts  |  {bin_factor}× binned  |  1 epoch"
+        )
+        pool = nn.AvgPool2d(bin_factor, stride=bin_factor)
+        images_binned = pool(self._images.unsqueeze(1)).squeeze(1) * bin_factor**2
+        voxel_size_binned = self._voxel_size * bin_factor
+
+        # Bin the initial volume in XY and Z with adaptive pooling
+        V_b = (
+            nn.functional.avg_pool3d(
+                self._volume_init.unsqueeze(0).unsqueeze(0),
+                kernel_size=bin_factor,
+                stride=bin_factor,
+            )
+            .squeeze(0)
+            .squeeze(0)
+            * bin_factor**3
+        )
+
+        model, loader = self._build_reconstructor_and_loader(
+            images_binned,
+            V_b,
+            voxel_size_binned,
+            self.scattering_model,
+            self.batch_size,
+        )
+        use_gpu = torch.cuda.is_available()
+        trainer = L.Trainer(
+            accelerator="gpu" if use_gpu else "cpu",
+            devices=[device] if use_gpu else 1,
+            max_epochs=1,
+            precision="32",
+            logger=False,
+            enable_checkpointing=False,
+            callbacks=callbacks or [],
+        )
+        trainer.fit(model, loader)
+        v = model.V.detach()
+        print(
+            f"Test run passed — {bin_factor}× binned, {len(self._images)} tilts, "
+            f"volume {tuple(v.shape)}  |  "
             f"V min={v.min():.4f}  max={v.max():.4f}  mean={v.mean():.4f}"
         )
         return model

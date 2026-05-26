@@ -458,9 +458,7 @@ class PotentialBuilder(L.LightningModule):
                     description=f"Building element {atom_symbol(int(elem))}",
                     advance=1,
                 )
-                atomic_indices = torch.squeeze(
-                    torch.argwhere(self.atomic_numbers == elem)
-                )
+                atomic_indices = torch.argwhere(self.atomic_numbers == elem).squeeze(-1)
                 coords_elem = coordinates[:, atomic_indices, :]  # (B, Nelem, 3)
 
                 if method == "2d":

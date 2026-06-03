@@ -38,8 +38,9 @@ class TiltSeriesGenerator(MicrographGenerator):
         Explicit rotation quaternions of shape (N_tilts, 4). Mutually
         exclusive with ``angles``.
     translations : torch.Tensor, optional
-        Per-tilt translations in Å, shape (N_tilts, 2). Only used when
-        ``quaternions`` is provided.
+        Per-tilt XY translations in Å, shape (N_tilts, 2), ordered [tx, ty]
+        (matching ``rlnOriginXAngst`` / ``rlnOriginYAngst``). Works with both
+        ``quaternions`` and ``angles``; defaults to zero shifts.
     angles : torch.Tensor or sequence of float, optional
         Tilt angles in degrees. Mutually exclusive with ``quaternions``.
     anisomag : torch.Tensor, optional
@@ -413,7 +414,12 @@ class TiltSeriesGenerator(MicrographGenerator):
 
             quats = Rotation.from_rotvec(rotvecs).as_quat()
             self.register_buffer("quaternions", quats)
-            self.register_buffer("translations", torch.zeros(B, 2))
+            self.register_buffer(
+                "translations",
+                torch.as_tensor(translations)
+                if translations is not None
+                else torch.zeros(B, 2),
+            )
         else:
             raise ValueError("Either 'angles' or 'quaternions' must be provided.")
 

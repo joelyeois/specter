@@ -104,8 +104,8 @@ class TomogramGenerator(L.LightningModule):
                 dx=pixel_size,
                 nz=icecube_size,
                 method=self.ice_model,
+                num_unique=num_unique_icecubes,
             )
-            self.icemaker.build(num_unique=num_unique_icecubes)
         else:
             self.icemaker = None
 

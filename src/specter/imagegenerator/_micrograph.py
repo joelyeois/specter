@@ -224,12 +224,13 @@ class MicrographGenerator(BaseImager):
                 chunk_size=chunk_size,
                 save_clean_exitwaves=save_clean_exitwaves,
             )
-            if self.verbose:
-                logger.info(
-                    "Generating specimen volume (this may take a while for large micrographs)"
-                )
-            self.vol = self.specimen_gen.generate()
 
+    def _generate_vol(self) -> None:
+        if self.verbose:
+            logger.info(
+                "Generating specimen volume (this may take a while for large micrographs)"
+            )
+        self.vol = self.specimen_gen.generate()
         if self.move_to_cpu:
             self.vol = self.vol.cpu()
 
@@ -251,9 +252,7 @@ class MicrographGenerator(BaseImager):
                 "regenerate_specimen() requires the model to have been constructed "
                 "with a scattering_potential, not a pre-built vol."
             )
-        self.vol = self.specimen_gen.generate()
-        if self.move_to_cpu:
-            self.vol = self.vol.cpu()
+        self._generate_vol()
 
     def forward(self, idx: int | torch.Tensor) -> torch.Tensor:
         """
@@ -269,6 +268,8 @@ class MicrographGenerator(BaseImager):
         images : torch.Tensor
             Simulated micrographs.
         """
+        if not hasattr(self, "vol"):
+            self._generate_vol()
         V = self.vol.to(self.device).expand(len(idx), -1, -1, -1)
         V = pad_volume(V, self.nxy, self.nz, None, self.pad_fft, xy_pad_mode="reflect")
 

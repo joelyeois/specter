@@ -10,7 +10,19 @@
       "Bash(bash run_cmd2_zero_align.sh)",
       "Bash(bash run_cmd2_zero_align.sh 180)",
       "Bash(bash run_cmd2_zero_align.sh 0 0)",
-      "Bash(bash run_cmd2_zero_align.sh 0 1)"
+      "Bash(bash run_cmd2_zero_align.sh 0 1)",
+      "Bash(python3 -m json.tool)",
+      "Bash(python3 -m json.tool ~/.claude/settings.json)",
+      "Bash(uv tool *)",
+      "Bash(jupyter-mcp-server --help)",
+      "Bash(python3 -c \"import secrets; print\\(secrets.token_hex\\(16\\)\\)\")",
+      "Bash(claude mcp *)",
+      "Bash(uv run *)",
+      "mcp__jupyter__connect_to_jupyter",
+      "mcp__jupyter__use_notebook",
+      "Bash(tmux capture-pane *)",
+      "mcp__jupyter__read_notebook",
+      "mcp__jupyter__read_cell"
     ]
   }
 }

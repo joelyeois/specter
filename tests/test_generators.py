@@ -81,7 +81,7 @@ def ctf_params():
 
 
 def test_image_generator_regression(small_volume, ctf_params):
-    """ImageGenerator: multislice scattering, iterative ice, coincidence loss, k3 detector."""
+    """ImageGenerator: multislice scattering, random ice, coincidence loss, k3 detector."""
     torch.manual_seed(0)
     gen = ImageGenerator(
         scattering_potential=small_volume,
@@ -108,7 +108,7 @@ def test_image_generator_regression(small_volume, ctf_params):
 
 
 def test_image_generator_from_coordinates_regression(small_coords, ctf_params):
-    """ImageGeneratorFromCoordinates: voxelize coords, multislice, randomchoice ice, coincidence."""
+    """ImageGeneratorFromCoordinates: voxelize coords, multislice, random ice, coincidence."""
     coords, atomic_numbers = small_coords
     torch.manual_seed(0)
     gen = ImageGeneratorFromCoordinates(
@@ -136,7 +136,7 @@ def test_image_generator_from_coordinates_regression(small_coords, ctf_params):
 
 
 def test_micrograph_generator_regression(small_volume, ctf_params):
-    """MicrographGenerator: TomogramGenerator specimen, iterative scattering, coincidence."""
+    """MicrographGenerator: projection scattering, random ice, coincidence."""
     torch.manual_seed(0)
     gen = MicrographGenerator(
         scattering_potential=small_volume,

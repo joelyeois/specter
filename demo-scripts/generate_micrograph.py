@@ -29,7 +29,7 @@ Example (HPC):
         --aberration_model holography \\
         --noise_model poisson \\
         --coincidence_radius_min 2.1 \\
-        --ice_model iterative \\
+        --ice_model gd \\
         --ice_thickness 500 \\
         --chunk_size 8 \\
         --normalize_micrographs True \\
@@ -203,9 +203,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--ice_model",
         type=str,
-        default="iterative",
-        choices=["iterative", "randomchoice", "none"],
-        help="Ice model.",
+        default="gd",
+        choices=["gd", "ap", "mcmc", "random", "none"],
+        help="Ice model: 'gd' (gradient descent, default), 'ap' (atomic potential), 'mcmc', 'random', or 'none'.",
     )
     parser.add_argument(
         "--ice_thickness",

@@ -1402,6 +1402,14 @@ class TomogramReconstructor(L.LightningModule):
     slice_batch_size : int
         Z-slice chunk size passed to ``IterativeScattering``.  Reduce for large
         volumes to stay within GPU memory.  Default ``1``.
+    checkpoint_chunks : int or None
+        If set, the multislice slice loop is split into chunks of this size
+        and run under gradient checkpointing.  Only the wave function at chunk
+        boundaries is retained; intermediates are recomputed on the backward
+        pass.  This reduces activation memory from ``O(nz_tilt)`` (tens of GB
+        at high tilt) to ``O(checkpoint_chunks × nxy²)`` at the cost of one
+        extra forward pass per chunk.  Suggested starting value: ``50``.
+        ``None`` disables checkpointing.
     run_dir : str or Path, optional
         Directory for per-epoch MRC volumes and training metrics.  ``None``
         disables all file output.
@@ -1434,6 +1442,7 @@ class TomogramReconstructor(L.LightningModule):
         lr_decay: float = 0.1,
         kmask: torch.Tensor | None = None,
         slice_batch_size: int = 1,
+        checkpoint_chunks: int | None = None,
         run_dir: str | Path | None = None,
     ) -> None:
         super().__init__()
@@ -1458,6 +1467,7 @@ class TomogramReconstructor(L.LightningModule):
         self.z_taper_width = z_taper_width
         self.use_fov_mask = use_fov_mask
         self.slice_batch_size = slice_batch_size
+        self.checkpoint_chunks = checkpoint_chunks
 
         # Logging
         self.log_total_loss: list[torch.Tensor] = []
@@ -1471,7 +1481,8 @@ class TomogramReconstructor(L.LightningModule):
         else:
             self.V = nn.Parameter(V.float())
 
-        # Precompute the XY size needed to cover the widest tilt angle
+        # Informational: minimum XY size a forward model would need for this tilt range.
+        # TomogramReconstructor does NOT pre-pad to this size; it works at nxy throughout.
         max_tilt_deg = TiltSeriesGenerator._infer_max_tilt_from_inputs(
             angles=None, quaternions=quaternions
         )
@@ -1518,17 +1529,20 @@ class TomogramReconstructor(L.LightningModule):
     # ------------------------------------------------------------------ #
 
     def _prepare_volume(self) -> torch.Tensor:
-        """Apply cosine taper and reflect-padding to V for the current tilt pass."""
+        """Apply cosine taper to V for the current tilt pass.
+
+        No XY padding is applied. At the maximum tilt angle the projected
+        volume extent (nxy·cos θ + nz·sin θ) is smaller than nxy, so all
+        volume content fits within the existing grid. Pixels sampled outside
+        the volume boundary by grid_sample return zero (vacuum), which is
+        physically correct. The real-FOV loss mask (use_fov_mask) already
+        discards gradient contributions from the zero-padded periphery.
+        """
         V: torch.Tensor = self.V
         if self.taper_width > 0 or self.z_taper_width > 0:
             V = TiltSeriesGenerator._apply_cosine_taper(
                 V, taper_xy=self.taper_width, taper_z=self.z_taper_width
             )
-        if V.shape[-1] < self.required_nxy:
-            # _pad_vol_xy_for_tilt requires ≥4D input for reflect mode
-            V = TiltSeriesGenerator._pad_vol_xy_for_tilt(
-                V.unsqueeze(0), self.required_nxy, int(V.shape[-1])
-            ).squeeze(0)
         return V
 
     @staticmethod
@@ -1617,12 +1631,20 @@ class TomogramReconstructor(L.LightningModule):
 
         V_batched = V_prepared.unsqueeze(0)  # (1, Z, Y', X')
         exitwave = self.iterative_scattering(
-            V_batched, theta_matrix, slice_batch_size=self.slice_batch_size
+            V_batched,
+            theta_matrix,
+            slice_batch_size=self.slice_batch_size,
+            checkpoint_chunks=self.checkpoint_chunks,
         )
 
         # Defocus correction: multislice propagates nz_new slices instead of
         # self.nz, shifting the effective specimen centre by z_offset.
-        ctf_batch = {k: v[tilt_idx : tilt_idx + 1] for k, v in self.ctf_params.items()}
+        # Use getattr rather than self.ctf_params[k] so we always get the
+        # live buffer (Lightning replaces buffer tensors on .to(device) but
+        # dict entries stored at __init__ time would point to the old CPU tensor).
+        ctf_batch = {
+            k: getattr(self, k)[tilt_idx : tilt_idx + 1] for k in self.ctf_params
+        }
         if self.iterative_scattering.scattering_model not in ("projection", "ctf"):
             nz_new = self._compute_nz_tilt(tuple(V_batched.shape), theta_matrix)
             z_offset = (nz_new - self.nz) * self.voxel_size / 2.0
@@ -1653,7 +1675,10 @@ class TomogramReconstructor(L.LightningModule):
         if self.use_fov_mask:
             mask = self._fov_mask(tilt_idx)
             if mask is not None:
-                mse = mse * mask
+                # Normalise by the number of valid pixels so that all tilt
+                # angles contribute equal gradient signal regardless of FOV
+                # size (which shrinks by cos(θ) at high tilt).
+                return (mse * mask).sum() / mask.sum()
         return mse.mean()
 
     # ------------------------------------------------------------------ #

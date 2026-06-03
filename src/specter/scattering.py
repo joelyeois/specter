@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import torch
 import lightning as L
+from torch.utils.checkpoint import checkpoint as _gradient_checkpoint
 from .progress import track
 
 from .arrays import disk2d
@@ -607,10 +608,33 @@ class IterativeScattering(L.LightningModule):
         return F
 
     def multislice(
-        self, V: torch.Tensor, theta_matrix: torch.Tensor, slice_batch_size: int = 1
+        self,
+        V: torch.Tensor,
+        theta_matrix: torch.Tensor,
+        slice_batch_size: int = 1,
+        checkpoint_chunks: int | None = None,
     ) -> torch.Tensor:
         """
         Compute exit wave using iterative multislice on a transformed volume.
+
+        Parameters
+        ----------
+        V : torch.Tensor
+            Input 3D potential volume, shape ``(B, Z, Y, X)``.
+        theta_matrix : torch.Tensor
+            Affine rotation matrices, shape ``(B, 3, 4)``.
+        slice_batch_size : int
+            Number of slices to sample from V in one ``sample_rotated_slices``
+            call. Larger values trade memory for fewer kernel launches.
+        checkpoint_chunks : int or None
+            If set, the slice loop is split into chunks of this size and each
+            chunk is run under ``torch.utils.checkpoint`` (gradient
+            checkpointing). Only the exitwave at chunk boundaries is retained
+            for backprop; intermediate wave states are recomputed during the
+            backward pass. This reduces activation memory from
+            ``O(nz_new)`` to ``O(checkpoint_chunks)`` at the cost of one
+            extra forward pass per chunk during backward.
+            ``None`` disables checkpointing (original behaviour).
         """
         is_identity = self._is_identity(theta_matrix)
         if is_identity:
@@ -631,42 +655,105 @@ class IterativeScattering(L.LightningModule):
         if self.ews_curvature_sign == "negative":
             indices = torch.flip(indices, dims=(0,))
 
-        pbar = track(
-            range(nz_new),
-            description="Multislice (Iterative)",
-            transient=True,
-            disable=not (self.progressbars),
-        )
-
-        slices_block = None
         y_start = (V.shape[-2] - self.nxy) // 2
         x_start = (V.shape[-1] - self.nxy) // 2
 
-        for i in pbar:
-            if is_identity:
-                slice_sample = V[
-                    :,
-                    indices[i],
-                    y_start : y_start + self.nxy,
-                    x_start : x_start + self.nxy,
-                ].to(device)
-            else:
-                if i % slice_batch_size == 0:
-                    batch_end = min(i + slice_batch_size, nz_new)
-                    batch_indices = indices[i:batch_end]
-                    slice_indices = batch_indices - (nz_new - 1) / 2
-                    slices_block = rotator.sample_rotated_slices(
-                        V,
-                        theta_matrix,
-                        slice_indices=slice_indices,
-                        roi_size=(self.nxy, self.nxy),
-                        padding_mode="zeros",
-                    ).to(device)
-                slice_sample = slices_block[:, i % slice_batch_size]
+        if checkpoint_chunks is None:
+            pbar = track(
+                range(nz_new),
+                description="Multislice (Iterative)",
+                transient=True,
+                disable=not (self.progressbars),
+            )
+            slices_block = None
+            for i in pbar:
+                if is_identity:
+                    slice_sample = V[
+                        :,
+                        indices[i],
+                        y_start : y_start + self.nxy,
+                        x_start : x_start + self.nxy,
+                    ].to(device)
+                else:
+                    if i % slice_batch_size == 0:
+                        batch_end = min(i + slice_batch_size, nz_new)
+                        batch_indices = indices[i:batch_end]
+                        slice_indices = batch_indices - (nz_new - 1) / 2
+                        slices_block = rotator.sample_rotated_slices(
+                            V,
+                            theta_matrix,
+                            slice_indices=slice_indices,
+                            roi_size=(self.nxy, self.nxy),
+                            padding_mode="zeros",
+                        ).to(device)
+                    slice_sample = slices_block[:, i % slice_batch_size]
 
-            slice_complex = complex_potential(slice_sample, alpha=self.alpha)
-            t = torch.exp(1j * self.sigma * self.pixel_size * slice_complex)
-            exitwave = ifft2(fft2(t * exitwave) * F * self.kmask)
+                slice_complex = complex_potential(slice_sample, alpha=self.alpha)
+                t = torch.exp(1j * self.sigma * self.pixel_size * slice_complex)
+                exitwave = ifft2(fft2(t * exitwave) * F * self.kmask)
+        else:
+            # Gradient-checkpointed loop.
+            # Constants captured in the closure; only (exitwave, V) are
+            # passed as explicit differentiable inputs so that
+            # use_reentrant=False can track them properly.
+            _nxy = self.nxy
+            _alpha = self.alpha
+            _sigma = self.sigma
+            _pixel_size = self.pixel_size
+            _F = F
+            _kmask = self.kmask
+
+            pbar = track(
+                range(0, nz_new, checkpoint_chunks),
+                description="Multislice (Checkpointed)",
+                transient=True,
+                disable=not (self.progressbars),
+            )
+            for chunk_start in pbar:
+                chunk_end = min(chunk_start + checkpoint_chunks, nz_new)
+                _ci = indices[chunk_start:chunk_end]
+                _cnz = nz_new
+                _cid = is_identity
+                _crot = rotator
+                _ctheta = theta_matrix
+                _cy, _cx = y_start, x_start
+
+                def _make_chunk(
+                    ci: torch.Tensor,
+                    cnz: int,
+                    cid: bool,
+                    crot: object,
+                    ctheta: torch.Tensor,
+                    cy: int,
+                    cx: int,
+                ):
+                    def _chunk(exitwave: torch.Tensor, V: torch.Tensor) -> torch.Tensor:
+                        ew = exitwave
+                        dev = ew.device
+                        for j in range(len(ci)):
+                            if cid:
+                                s = V[:, ci[j], cy : cy + _nxy, cx : cx + _nxy].to(dev)
+                            else:
+                                si = ci[j : j + 1].float() - (cnz - 1) / 2
+                                s = crot.sample_rotated_slices(
+                                    V,
+                                    ctheta,
+                                    slice_indices=si,
+                                    roi_size=(_nxy, _nxy),
+                                    padding_mode="zeros",
+                                ).to(dev)[:, 0]
+                            sc = complex_potential(s, alpha=_alpha)
+                            t = torch.exp(1j * _sigma * _pixel_size * sc)
+                            ew = ifft2(fft2(t * ew) * _F * _kmask)
+                        return ew
+
+                    return _chunk
+
+                chunk_fn = _make_chunk(_ci, _cnz, _cid, _crot, _ctheta, _cy, _cx)
+                exitwave = _gradient_checkpoint(
+                    chunk_fn, exitwave, V, use_reentrant=False
+                )
+
         return exitwave
 
     def projection(
@@ -789,6 +876,153 @@ class IterativeScattering(L.LightningModule):
             )
 
         return exitwave
+
+    def parallel_rytov(
+        self,
+        V: torch.Tensor,
+        theta_matrix: torch.Tensor,
+        checkpoint_chunks: int | None = None,
+    ) -> torch.Tensor:
+        """
+        Compute exit wave using a fully-parallel Rytov approximation.
+
+        Unlike ``rytov`` (which still loops slice-by-slice), this method
+        exploits the linearity of the Rytov sum to process all slices in
+        batched FFT operations, with optional gradient checkpointing to
+        bound memory.
+
+        The exit wave is:
+
+        .. math::
+            \\psi = \\exp\\!\\left(
+                \\sum_{z} \\mathcal{F}^{-1}\\!\\left[
+                    \\mathcal{F}[i\\sigma\\,\\Delta z\\,V_z] \\cdot F_z
+                \\right]
+            \\right)
+
+        Because the exponent is a *sum* over independent slices, the
+        computation parallelises trivially across the Z dimension.
+
+        Parameters
+        ----------
+        V : torch.Tensor
+            Input 3D potential volume, shape ``(B, Z, Y, X)``.
+        theta_matrix : torch.Tensor
+            Affine rotation matrices, shape ``(B, 3, 4)``.
+        checkpoint_chunks : int or None
+            Chunk size along Z for gradient checkpointing.  Each chunk
+            processes ``checkpoint_chunks`` slices with a single batched
+            FFT pair and accumulates into a running phase sum.  Only the
+            phase sum at chunk boundaries (12 MB) and the chunk's slice
+            inputs are retained; intermediate FFT activations are
+            recomputed during backward.  Suggested value: ``50``.
+            ``None`` processes all slices in one pass (fast but high
+            memory).
+
+        Notes
+        -----
+        Accuracy: Rytov ≈ multislice when σ·Δz·V ≪ 1 per slice (valid
+        for 300 keV electrons through typical cryo-ET ice thicknesses at
+        5 Å/px).
+        """
+        is_identity = self._is_identity(theta_matrix)
+        if is_identity:
+            nz_new = V.shape[1]
+            rotator = None
+        else:
+            nz_new, rotator = self._setup_tilt(V, theta_matrix)
+
+        device = self.device
+        y_start = (V.shape[-2] - self.nxy) // 2
+        x_start = (V.shape[-1] - self.nxy) // 2
+
+        # Processing order: negative EWS sign flips the slice traversal
+        indices = torch.arange(nz_new, device=V.device)
+        if self.ews_curvature_sign == "negative":
+            indices = torch.flip(indices, dims=(0,))
+
+        # Each slice j (processing order) propagates distance (nz_new - j)
+        # to the exit plane.
+        distances = torch.arange(nz_new, 0, -1, dtype=torch.float32, device=device)
+
+        # Running phase accumulator — shape (B, nxy, nxy) complex64
+        B = V.shape[0]
+        phase_sum = torch.zeros(
+            B, self.nxy, self.nxy, device=device, dtype=torch.complex64
+        )
+
+        _nxy = self.nxy
+        _alpha = self.alpha
+        _sigma = self.sigma
+        _pixel_size = self.pixel_size
+        _wavelength = self.wavelength
+        _k2 = self.k2
+
+        chunk_size = checkpoint_chunks if checkpoint_chunks is not None else nz_new
+
+        pbar = track(
+            range(0, nz_new, chunk_size),
+            description="Rytov (Parallel)",
+            transient=True,
+            disable=not (self.progressbars),
+        )
+        for chunk_start in pbar:
+            chunk_end = min(chunk_start + chunk_size, nz_new)
+            _ci = indices[chunk_start:chunk_end]  # volume slice indices
+            _dist = distances[chunk_start:chunk_end]  # Fresnel distances
+
+            _cid = is_identity
+            _crot = rotator
+            _ctheta = theta_matrix
+            _cy, _cx = y_start, x_start
+            _cnz = nz_new
+
+            def _make_chunk(ci, dist, cid, crot, ctheta, cy, cx, cnz):
+                def _chunk(phase_sum: torch.Tensor, V: torch.Tensor) -> torch.Tensor:
+                    dev = phase_sum.device
+                    if cid:
+                        # Identity: direct index into volume
+                        slices = V[:, ci, cy : cy + _nxy, cx : cx + _nxy].to(dev)
+                    else:
+                        si = ci.float() - (cnz - 1) / 2
+                        slices = crot.sample_rotated_slices(
+                            V,
+                            ctheta,
+                            slice_indices=si,
+                            roi_size=(_nxy, _nxy),
+                            padding_mode="zeros",
+                        ).to(dev)
+                    # (B, K, nxy, nxy) real → complex potential
+                    slices_c = complex_potential(slices, alpha=_alpha)
+                    # Fresnel kernels for this chunk — recomputed each time
+                    # (cheap, no learnable params)
+                    d = dist.to(dev)
+                    F_chunk = torch.exp(
+                        1j
+                        * torch.pi
+                        * _wavelength
+                        * _pixel_size
+                        * d[:, None, None]
+                        * _k2[None, ...]
+                    )  # (K, nxy, nxy)
+                    # Batched FFT → Fresnel multiply → batched IFFT
+                    scattered = ifft2(
+                        fft2(1j * _sigma * _pixel_size * slices_c)
+                        * F_chunk.unsqueeze(0)
+                    )  # (B, K, nxy, nxy)
+                    return phase_sum + scattered.sum(dim=1)
+
+                return _chunk
+
+            chunk_fn = _make_chunk(_ci, _dist, _cid, _crot, _ctheta, _cy, _cx, _cnz)
+            if checkpoint_chunks is not None:
+                phase_sum = _gradient_checkpoint(
+                    chunk_fn, phase_sum, V, use_reentrant=False
+                )
+            else:
+                phase_sum = chunk_fn(phase_sum, V)
+
+        return torch.exp(phase_sum)
 
     def firstborn(
         self, V: torch.Tensor, theta_matrix: torch.Tensor, slice_batch_size: int = 1
@@ -974,7 +1208,11 @@ class IterativeScattering(L.LightningModule):
         return 2 * self.sigma * self.pixel_size * total_potential
 
     def forward(
-        self, V: torch.Tensor, pose: float | torch.Tensor, slice_batch_size: int = 1
+        self,
+        V: torch.Tensor,
+        pose: float | torch.Tensor,
+        slice_batch_size: int = 1,
+        checkpoint_chunks: int | None = None,
     ) -> torch.Tensor:
         """
         Forward pass for iterative scattering.
@@ -1015,7 +1253,9 @@ class IterativeScattering(L.LightningModule):
             return self.ctf(V, theta_matrix, slice_batch_size)
 
         if self.scattering_model == "multislice":
-            return self.multislice(V, theta_matrix, slice_batch_size)
+            return self.multislice(V, theta_matrix, slice_batch_size, checkpoint_chunks)
+        elif self.scattering_model == "rytov_parallel":
+            return self.parallel_rytov(V, theta_matrix, checkpoint_chunks)
         elif self.scattering_model == "rytov":
             return self.rytov(V, theta_matrix, slice_batch_size)
         elif self.scattering_model == "projection":

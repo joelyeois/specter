@@ -1,22 +1,73 @@
 from __future__ import annotations
 
+from typing import Sequence
+
 import numpy as np
 import torch
+
+from .rotations import Rotation
+
+
+def tilt_to_quaternions(
+    tilt_angles_deg: torch.Tensor | Sequence[float],
+    rot_deg: float,
+) -> torch.Tensor:
+    """
+    Convert AreTomo3 tilt angles and tilt-axis angle to rotation quaternions.
+
+    AreTomo3 parameterises the tilt geometry with a per-series tilt-axis
+    angle (the ``ROT`` column in the ``.aln`` file) and per-tilt tilt angles
+    (the ``TILT`` column).  This function converts that representation to
+    unit quaternions suitable for ``TiltSeriesGenerator(quaternions=...)``.
+
+    Using quaternions (rather than ``TiltSeriesGenerator(angles=...)``) is
+    necessary when the tilt axis is not exactly horizontal (``'x'``) or
+    vertical (``'y'``), which is typical for real data.
+
+    Parameters
+    ----------
+    tilt_angles_deg : sequence of float or torch.Tensor, shape (N,)
+        Per-tilt tilt angles in degrees (``TILT`` column from the ``.aln``
+        file or ``tilt_angles`` key from :func:`read_aretomo3_aln`).
+    rot_deg : float
+        Tilt-axis angle in degrees measured from horizontal in the image
+        plane (``ROT`` column from the ``.aln`` file — constant across all
+        tilts for a given series).  0° = horizontal (≈ SPECTER ``'x'``),
+        ±90° = vertical (≈ SPECTER ``'y'``).
+
+    Returns
+    -------
+    quaternions : torch.Tensor, shape (N, 4)
+        Unit quaternions in ``[x, y, z, w]`` order, one per tilt.  Pass
+        directly as the ``quaternions`` argument of ``TiltSeriesGenerator``.
+
+    Examples
+    --------
+    >>> result = read_aretomo3_aln("TS_001.aln", pixel_size=1.35)
+    >>> quats = tilt_to_quaternions(result["tilt_angles"], result["tilt_axis"][0].item())
+    >>> tsg = TiltSeriesGenerator(
+    ...     vol=vol,
+    ...     quaternions=quats,
+    ...     translations=result["translations"],
+    ...     ...
+    ... )
+    """
+    theta = torch.deg2rad(torch.as_tensor(tilt_angles_deg, dtype=torch.float32))  # (N,)
+    phi = torch.deg2rad(torch.tensor(rot_deg, dtype=torch.float32))  # scalar
+
+    # Unit tilt axis in the image plane: (cos ROT, sin ROT, 0)
+    axis = torch.stack([phi.cos(), phi.sin(), torch.tensor(0.0)], dim=0)  # (3,)
+
+    rotvecs = theta.unsqueeze(-1) * axis.unsqueeze(0)  # (N, 3)
+    return Rotation.from_rotvec(rotvecs).as_quat()  # (N, 4)
 
 
 def read_aretomo3_aln(
     aln_path: str,
     pixel_size: float,
-) -> dict[str, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Read per-tilt alignment parameters from an AreTomo3 ``.aln`` file.
-
-    The ``.aln`` file is AreTomo3's primary alignment output.  It
-    contains tilt angles, tilt-axis angles, and per-tilt XY shifts for
-    the global alignment, plus an optional local (patch-based) alignment
-    section.  This function reads the global section and returns the
-    shifts as a ``TiltSeriesGenerator``-compatible ``translations``
-    tensor.
 
     Parameters
     ----------
@@ -27,62 +78,28 @@ def read_aretomo3_aln(
 
     Returns
     -------
-    dict with keys:
-
-    ``translations`` : torch.Tensor, shape (N_tilts, 2)
-        Per-tilt XY translations in Å, ordered ``[tx, ty]``, ready for
-        direct use as the ``translations`` argument of
-        ``TiltSeriesGenerator``.
-    ``tilt_angles`` : torch.Tensor, shape (N_tilts,)
-        Tilt angles in degrees (column ``TILT``), in the order they
-        appear in the file (sorted by tilt angle ascending).
-    ``tilt_axis`` : torch.Tensor, shape (N_tilts,)
-        Per-tilt tilt-axis angles in degrees (column ``ROT``).
-    ``sec_indices`` : torch.Tensor, shape (N_tilts,)
-        1-based section indices into the raw MRC stack (column ``SEC``).
-    ``shift_pixels`` : torch.Tensor, shape (N_tilts, 2)
-        Raw shifts ``[TX, TY]`` in full-resolution pixels before the
-        Å conversion.
+    quaternions : torch.Tensor, shape (N_tilts, 4)
+        Per-tilt rotation quaternions ``[x, y, z, w]`` encoding the tilt
+        angle and tilt-axis direction (``ROT`` column).  Pass directly as
+        ``TiltSeriesGenerator(quaternions=...)``.
+    translations : torch.Tensor, shape (N_tilts, 2)
+        Per-tilt XY translations in Å, ordered ``[tx, ty]``.  Pass
+        directly as ``TiltSeriesGenerator(translations=...)``.
 
     Notes
     -----
-    **Units**: TX and TY in the ``.aln`` file are the raw
-    ``CAlignParam`` shifts in full-resolution pixels, written directly
-    by ``CSaveAlignFile::mSaveGlobal``.  The same shifts appear in the
-    ``*_AT_GL.csv`` log file; the two files are equivalent for the
-    global alignment columns.  No pixel-size information is embedded in
-    the ``.aln`` file itself, so ``pixel_size`` must be supplied.
-
-    **Sign convention**: same as :func:`read_aretomo3_global_shifts`.
-    TX > 0 shifts projected content in the +x direction; ty > 0 shifts
-    in the +y direction.  The direct conversion is::
-
-        tx = TX × pixel_size
-        ty = TY × pixel_size
-
-    **Global section column layout** (``CSaveAlignFile::mSaveGlobal``)::
-
-        col 0 : SEC   — 1-based section index in the raw MRC stack
-        col 1 : ROT   — tilt-axis angle (degrees)
-        col 2 : GMAG  — global magnification (always 1.0)
-        col 3 : TX    — shift_x (full-resolution pixels)
-        col 4 : TY    — shift_y (full-resolution pixels)
-        col 5 : SMEAN — intensity mean scale (always 1.0)
-        col 6 : SFIT  — intensity fit scale  (always 1.0)
-        col 7 : SCALE — additional scale     (always 1.0)
-        col 8 : BASE  — intensity base       (always 0.0)
-        col 9 : TILT  — tilt angle (degrees)
-
-    The ``# Local Alignment`` comment marks the start of the patch-based
-    local alignment section; lines after it are ignored by this function.
+    Shifts are stored in the ``.aln`` file in full-resolution pixels and
+    converted to Å by multiplying by ``pixel_size``.  The tilt-axis angle
+    (``ROT`` column, constant per series) is used to build the quaternions
+    via :func:`tilt_to_quaternions`.
 
     Examples
     --------
-    >>> result = read_aretomo3_aln("TS_001.aln", pixel_size=1.35)
+    >>> quats, translations = read_aretomo3_aln("TS_001.aln", pixel_size=1.35)
     >>> tsg = TiltSeriesGenerator(
     ...     vol=vol,
-    ...     angles=result["tilt_angles"],
-    ...     translations=result["translations"],
+    ...     quaternions=quats,
+    ...     translations=translations,
     ...     ...
     ... )
     """
@@ -94,7 +111,6 @@ def read_aretomo3_aln(
             if not line:
                 continue
             if line.startswith("#"):
-                # Stop at the local alignment section
                 if "Local Alignment" in line:
                     break
                 continue
@@ -105,20 +121,14 @@ def read_aretomo3_aln(
 
     data = np.array(global_rows, dtype=np.float32)
 
-    sec_indices = torch.tensor(data[:, 0], dtype=torch.int32)
-    tilt_axis = torch.tensor(data[:, 1], dtype=torch.float32)
+    tilt_axis = data[0, 1]
     shift_pixels = torch.tensor(data[:, 3:5], dtype=torch.float32)
     tilt_angles = torch.tensor(data[:, 9], dtype=torch.float32)
 
     translations = shift_pixels * pixel_size
+    quaternions = tilt_to_quaternions(tilt_angles, float(tilt_axis))
 
-    return {
-        "translations": translations,
-        "tilt_angles": tilt_angles,
-        "tilt_axis": tilt_axis,
-        "sec_indices": sec_indices,
-        "shift_pixels": shift_pixels,
-    }
+    return quaternions, translations
 
 
 def read_aretomo3_global_shifts(

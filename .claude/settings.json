@@ -22,7 +22,9 @@
       "mcp__jupyter__use_notebook",
       "Bash(tmux capture-pane *)",
       "mcp__jupyter__read_notebook",
-      "mcp__jupyter__read_cell"
+      "mcp__jupyter__read_cell",
+      "mcp__jupyter__list_kernels",
+      "mcp__jupyter__list_files"
     ]
   }
 }

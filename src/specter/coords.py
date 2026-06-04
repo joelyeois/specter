@@ -21,8 +21,10 @@ def radial_distribution_function(
 
         g(r) = (1 / (4π r² ρ N)) * Σ_i Σ_{j≠i} δ(r - |r_i - r_j|)
 
-    No periodic boundary conditions are applied; intended for non-periodic or
-    spatially-trimmed coordinate sets.
+    Coordinates are assumed to be centred at the origin. Any atom lying outside
+    the cubic box of side ``volume^(1/3)`` is silently discarded before
+    computing pairwise distances, so the density normalisation remains
+    self-consistent. No periodic boundary conditions are applied.
 
     Three computation modes (controlled by ``chunk_size`` and ``approximate``):
 
@@ -64,6 +66,11 @@ def radial_distribution_function(
         Radial distribution function values, shape (n_bins,).
     """
     device = coords.device
+
+    half_side = (volume ** (1.0 / 3.0)) / 2.0
+    mask = (coords.abs() <= half_side).all(dim=1)
+    coords = coords[mask]
+
     N = coords.shape[0]
 
     if r_max is None:

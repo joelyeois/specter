@@ -6,6 +6,9 @@
 **SPECTER** is a Python package for simulating cryo-electron microscopy (cryo-EM) images with physics-based models.  
 It supports aberrations, scattering, detector effects, and integrates with PyTorch for GPU acceleration.
 
+> **Early development notice**  
+> SPECTER is under active development. APIs and behaviour may change without notice between releases — including breaking changes. It is not yet recommended for production workflows. Feedback and bug reports are welcome via [GitHub Issues](https://github.com/joelyeois/specter/issues).
+
 ---
 
 ## Installation and running the notebooks
@@ -76,7 +79,7 @@ python demo-scripts/generate_particle_stack.py \
     --noise_model poisson \
     --coincidence_radius_min 1.5 \
     --coincidence_radius_max 2.5 \
-    --ice_model iterative \
+    --ice_model gd \
     --normalize_particles True \
     --device cuda:0 \
     --batchsize 5 \
@@ -108,7 +111,7 @@ python demo-scripts/generate_particle_stack.py \
 | `--coincidence_radius_max` | `None` | Maximum coincidence radius in pixels; if set, sampled uniformly per particle |
 | `--potential_scale_min` | `1.0` | Minimum potential scale factor; used as fixed value if `--potential_scale_max` is not set |
 | `--potential_scale_max` | `None` | Maximum potential scale factor; if set, sampled uniformly per particle. Values < 1 approximate thicker ice (weaker particle signal) |
-| `--ice_model` | `iterative` | `iterative` \| `randomchoice` \| `none` |
+| `--ice_model` | `gd` | `gd` (gradient descent) \| `ap` (atomic potential) \| `mcmc` \| `random` \| `none` |
 | `--ice_thickness` | `0.0` | Ice thickness in Å; `0` = minimum (particle box size) |
 | `--crowd_min_distance` | `pdb.max_diameter` | Min distance between crowded molecules in Å; `0` disables crowding |
 | `--crowd_max_distance_z` | `None` | Max z-separation between crowded molecules in Å |
@@ -137,7 +140,7 @@ python demo-scripts/generate_particle_stack_from_csfile.py \
     --dose 53 \
     --noise_model poisson \
     --coincidence_radius 2.1 \
-    --ice_model iterative \
+    --ice_model gd \
     --normalize_particles True \
     --device 0,1,2,3 \
     --batchsize 5 \
@@ -159,7 +162,7 @@ python demo-scripts/generate_particle_stack_from_csfile.py \
 | `--aberration_model` | `holography` | `holography` \| `ctf` |
 | `--noise_model` | `poisson` | `poisson` \| `none` |
 | `--coincidence_radius` | `2.1` | Fixed coincidence radius in pixels applied to all particles; `0` for standard Poisson |
-| `--ice_model` | `iterative` | `iterative` \| `randomchoice` \| `none` |
+| `--ice_model` | `gd` | `gd` (gradient descent) \| `ap` (atomic potential) \| `mcmc` \| `random` \| `none` |
 | `--ice_thickness` | `0.0` | Ice thickness in Å; `0` = minimum (particle box size) |
 | `--crowd_min_distance` | `pdb.max_diameter` | Min distance between crowded molecules in Å; `0` disables crowding |
 | `--crowd_max_distance_z` | `None` | Max z-separation between crowded molecules in Å |
@@ -219,7 +222,7 @@ python demo-scripts/generate_micrograph.py \
     --aberration_model holography \
     --noise_model poisson \
     --coincidence_radius_min 2.1 \
-    --ice_model iterative \
+    --ice_model gd \
     --ice_thickness 500 \
     --chunk_size 8 \
     --device cuda:0 \
@@ -250,7 +253,7 @@ python demo-scripts/generate_micrograph.py \
 | `--coincidence_radius_max` | `None` | Maximum coincidence radius in pixels; if set, sampled uniformly per micrograph |
 | `--potential_scale_min` | `1.0` | Minimum potential scale factor; used as fixed value if `--potential_scale_max` is not set |
 | `--potential_scale_max` | `None` | Maximum potential scale factor; if set, sampled uniformly per micrograph. Values < 1 approximate thicker ice |
-| `--ice_model` | `iterative` | `iterative` \| `randomchoice` \| `none` |
+| `--ice_model` | `gd` | `gd` (gradient descent) \| `ap` (atomic potential) \| `mcmc` \| `random` \| `none` |
 | `--ice_thickness` | `500.0` | Ice thickness in Å |
 | `--crowd_min_distance` | `pdb.max_diameter` | Min distance between crowded molecules in Å; `0` disables crowding |
 | `--crowd_max_distance_z` | `None` | Max z-separation between crowded molecules in Å |

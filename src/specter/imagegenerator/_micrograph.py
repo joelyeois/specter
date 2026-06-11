@@ -7,6 +7,7 @@ import torch
 from specter import logger
 
 from ._base import BaseImager, compute_nz, pad_volume
+from ..progress import status
 from ..scattering import IterativeScattering
 from ..specimen import TomogramGenerator
 
@@ -222,6 +223,7 @@ class MicrographGenerator(BaseImager):
                 water_air_interface=water_air_interface,
                 progressbars=progressbars,
                 chunk_size=chunk_size,
+                move_to_cpu=move_to_cpu,
                 save_clean_exitwaves=save_clean_exitwaves,
             )
 
@@ -270,7 +272,8 @@ class MicrographGenerator(BaseImager):
         """
         if not hasattr(self, "vol"):
             self._generate_vol()
-        V = self.vol.to(self.device).expand(len(idx), -1, -1, -1)
+        with status("Transferring volume to GPU", disable=not self.progressbars):
+            V = self.vol.to(self.device).expand(len(idx), -1, -1, -1)
         V = pad_volume(V, self.nxy, self.nz, None, self.pad_fft, xy_pad_mode="reflect")
 
         if (

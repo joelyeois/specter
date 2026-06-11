@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import threading
+from contextlib import contextmanager
 from typing import Any, Iterable, Iterator, TypeVar
 
 from tqdm.auto import tqdm
@@ -109,6 +110,39 @@ def track(
     )
     try:
         yield from pbar
+    finally:
+        pbar.close()
+        manager.release(pos)
+
+
+@contextmanager
+def status(description: str, disable: bool = False) -> Iterator[None]:
+    """
+    Context manager that shows a running status message with elapsed time.
+
+    Unlike ``track``, this has no iteration count — it just shows that something
+    is happening and how long it has been running, then clears on exit.
+
+    Parameters
+    ----------
+    description : str
+        Label shown next to the elapsed timer.
+    disable : bool, optional
+        If True, no output is shown.
+    """
+    if disable:
+        yield
+        return
+    manager = ProgressManager()
+    pbar, pos = manager.get_pbar(
+        None,
+        desc=description,
+        total=None,
+        bar_format="{desc}: {elapsed}",
+        transient=True,
+    )
+    try:
+        yield
     finally:
         pbar.close()
         manager.release(pos)

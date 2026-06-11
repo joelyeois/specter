@@ -5,6 +5,7 @@ import lightning as L
 
 from .crowding import CrowdWithDuplicates
 from .ice import IceBank
+from .progress import status
 
 
 class TomogramGenerator(L.LightningModule):
@@ -63,6 +64,7 @@ class TomogramGenerator(L.LightningModule):
         water_air_interface: bool = True,
         progressbars: bool = True,
         chunk_size: int | None = None,
+        move_to_cpu: bool = True,
         save_clean_exitwaves: bool = False,
     ):
         super().__init__()
@@ -77,19 +79,27 @@ class TomogramGenerator(L.LightningModule):
         self.water_air_interface = water_air_interface
         self.progressbars = progressbars
         self.chunk_size = chunk_size
+        self.move_to_cpu = move_to_cpu
         self.save_clean_exitwaves = save_clean_exitwaves
 
         if self.crowd_min_distance is not None and scattering_potential is not None:
+            crowd_max_distance_z_ang = (
+                crowd_max_distance_z
+                if crowd_max_distance_z is not None
+                else nz * pixel_size
+            )
             self.crowd = CrowdWithDuplicates(
                 scattering_potential,
                 pixel_size,
                 self.crowd_min_distance,
                 nxy_out=nxy,
                 nz_out=nz,
-                max_distance_z=self.crowd_max_distance_z,
+                max_distance_z=crowd_max_distance_z_ang,
+                max_distance_xy=nxy * pixel_size,
                 progressbars=progressbars,
                 chunk_size=chunk_size,
                 water_air_interface=water_air_interface,
+                move_to_cpu=move_to_cpu,
             )
         else:
             self.crowd = None
@@ -119,14 +129,17 @@ class TomogramGenerator(L.LightningModule):
             Populated 3D volume of shape (1, Z, Y, X).
         """
         device = self.device
-        V = torch.zeros(1, self.nz, self.nxy, self.nxy, device=device)
+        # Assemble on CPU when move_to_cpu is set — avoids holding two copies of the
+        # full micrograph volume in VRAM simultaneously (crowd accumulator + V).
+        assembly_device = torch.device("cpu") if self.move_to_cpu else device
+        V = torch.zeros(1, self.nz, self.nxy, self.nxy, device=assembly_device)
 
         # 1. Add crowd
         if self.crowd is not None:
             with torch.no_grad():
                 V_crowd = self.crowd()
                 if not isinstance(V_crowd, float):
-                    V = V + V_crowd.to(device)
+                    V = V + V_crowd.to(assembly_device)
 
         # Hold a reference to V before ice is added (V + ice creates a new tensor,
         # so this costs no extra memory).
@@ -136,8 +149,10 @@ class TomogramGenerator(L.LightningModule):
         # 2. Add ice
         if self.icemaker is not None:
             with torch.no_grad():
-                ice = self.icemaker.generate_big_ice(V.shape).to(device)
-                icemask = (V < 0.05 * V.max()).to(V.dtype)
-                V = V + ice * icemask
+                with status("Tiling ice volume", disable=not self.progressbars):
+                    ice = self.icemaker.generate_big_ice(V.shape).to(assembly_device)
+                with status("Applying ice mask", disable=not self.progressbars):
+                    icemask = (V < 0.05 * V.max()).to(V.dtype)
+                    V = V + ice * icemask
 
         return V

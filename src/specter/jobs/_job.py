@@ -166,8 +166,9 @@ class Job:
                 self._created_at = existing.get("created_at")
                 self._is_resume = True
             else:
-                self._dir.mkdir(parents=True, exist_ok=True)
-                self._created_at = datetime.now(timezone.utc).isoformat()
+                raise FileNotFoundError(
+                    f"No existing job found at {self._dir} (job_id={self._resume_job_id!r})"
+                )
         else:
             self._job_id = _next_job_id(project_dir)
             self._dir = project_dir / self._job_id

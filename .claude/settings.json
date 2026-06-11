@@ -24,7 +24,13 @@
       "mcp__jupyter__read_notebook",
       "mcp__jupyter__read_cell",
       "mcp__jupyter__list_kernels",
-      "mcp__jupyter__list_files"
+      "mcp__jupyter__list_files",
+      "Bash(rm tests/test_data/ghostbuster_forward_multislice.pt \\\\ *)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)"
+    ],
+    "additionalDirectories": [
+      "/mnt/cbis/home/e0788253/czii/specter/tests/test_data"
     ]
   }
 }

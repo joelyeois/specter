@@ -68,10 +68,10 @@ def compute_supersampling_parameters(
         return n_atom, ss_dx, ssf
 
     # Number of pixels at atom sampling
-    n_atom = int(torch.ceil(torch.tensor(width_atom / dx_atom)))
+    n_atom = int(torch.ceil(torch.as_tensor(width_atom / dx_atom)))
 
     # Step 1: make divisible by ssf
-    ssf = int(torch.round(torch.tensor(dx / dx_atom)))
+    ssf = int(torch.round(torch.as_tensor(dx / dx_atom)))
     ss_dx = dx / ssf
 
     # Ensure pooled kernel has at least 3 pixels per axis.

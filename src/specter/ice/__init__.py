@@ -14,13 +14,14 @@ from ._helpers import (
     water_molecule_coordinates,
 )
 from ._mcmc import MCMCIcemaker
-from ._mdsim import MDSimDump
+from ._mdsim import ExtXYZDump, MDSimDump
 from ._random import RandomIcemaker
 
 __all__ = [
     "APIcemaker",
     "GradientSKIcemaker",
     "MCMCIcemaker",
+    "ExtXYZDump",
     "MDSimDump",
     "RandomIcemaker",
     "IceBank",

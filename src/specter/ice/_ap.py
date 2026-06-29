@@ -133,7 +133,7 @@ class APIcemaker(L.LightningModule):
             `self.mdsim_ice_deltas_f`. Default is None.
         """
         if saved_data_path is not None:
-            mdsim_f_radial_avg = torch.load(saved_data_path)
+            mdsim_f_radial_avg = torch.load(saved_data_path, weights_only=True)
             self.register_buffer("mdsim_f_radial_avg", mdsim_f_radial_avg)
         else:
             # compute 3D radial average of mdsim data

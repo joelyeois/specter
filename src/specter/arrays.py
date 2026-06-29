@@ -58,7 +58,9 @@ def kgrid_2d(
     else:
         nx, ny = n_xy
 
-    if isinstance(d_xy, (int, float)):
+    if isinstance(d_xy, (int, float)) or (
+        isinstance(d_xy, torch.Tensor) and d_xy.ndim == 0
+    ):
         dx = dy = float(d_xy)
     else:
         dx, dy = d_xy
@@ -98,7 +100,9 @@ def kgrid_3d(
     else:
         nx, ny, nz = n_xyz
 
-    if isinstance(d_xyz, (int, float)):
+    if isinstance(d_xyz, (int, float)) or (
+        isinstance(d_xyz, torch.Tensor) and d_xyz.ndim == 0
+    ):
         dx = dy = dz = float(d_xyz)
     else:
         dx, dy, dz = d_xyz
@@ -239,7 +243,9 @@ def grid_2d(
     else:
         nx, ny = n_xy
 
-    if isinstance(d_xy, (int, float)):
+    if isinstance(d_xy, (int, float)) or (
+        isinstance(d_xy, torch.Tensor) and d_xy.ndim == 0
+    ):
         dx = dy = float(d_xy)
     else:
         dx, dy = d_xy
@@ -289,7 +295,9 @@ def grid_3d(
     else:
         nx, ny, nz = n_xyz
 
-    if isinstance(d_xyz, (int, float)):
+    if isinstance(d_xyz, (int, float)) or (
+        isinstance(d_xyz, torch.Tensor) and d_xyz.ndim == 0
+    ):
         dx = dy = dz = float(d_xyz)
     else:
         dx, dy, dz = d_xyz
@@ -529,7 +537,7 @@ def soft_voxelize_coordinates(
     if isinstance(voxel_size, (int, float)):
         voxel_size = torch.tensor([voxel_size] * 3, device=device)
     else:
-        voxel_size = torch.tensor(voxel_size, device=device)
+        voxel_size = torch.as_tensor(voxel_size, device=device)
     coords_voxel = coords / voxel_size  # (B,N,3)
 
     # Shift coordinates so origin is at center
@@ -670,7 +678,7 @@ def soft_voxelize_xy_coordinates(
     if isinstance(voxel_size, (int, float)):
         voxel_size = torch.tensor([voxel_size] * 3, device=device)
     else:
-        voxel_size = torch.tensor(voxel_size, device=device)
+        voxel_size = torch.as_tensor(voxel_size, device=device)
 
     # Shift origin to center
     origin = torch.tensor(

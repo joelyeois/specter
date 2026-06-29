@@ -170,7 +170,7 @@ class IceBank(L.LightningModule):
     def generate_big_ice(
         self,
         target_shape: tuple[int, int, int, int],
-        num_unique: int = 8,
+        num_unique: int | None = None,
         **kwargs: Any,
     ) -> torch.Tensor:
         """
@@ -186,7 +186,8 @@ class IceBank(L.LightningModule):
             Output shape ``(B, nz, ny, nx)``.
         num_unique : int, optional
             Number of unique cubes to generate on-the-fly when no bank exists.
-            Ignored when a bank is present. Default is 8.
+            Defaults to the value passed to ``__init__`` (default 8). Ignored
+            when a bank is present.
         **kwargs
             Forwarded to ``generator.generate_ice`` only when no bank exists.
 
@@ -196,6 +197,8 @@ class IceBank(L.LightningModule):
             Tiled ice volume of shape ``target_shape``.
         """
         if self._bank is None:
+            if num_unique is None:
+                num_unique = self._num_unique
             self.build(num_unique=num_unique, **kwargs)
         cubes = replace_outer_faces(self._bank.clone())
         return tile_volume_from_blocks(cubes, target_shape)

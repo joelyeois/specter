@@ -755,7 +755,9 @@ class CrowdWithDuplicates(L.LightningModule):
         self.generate_coordinates()
         self.generate_affine_matrices()
         if len(self.coords) == 0:
-            return torch.zeros(self.nz_out, self.nxy_out, self.nxy_out)
+            return torch.zeros(
+                self.nz_out, self.nxy_out, self.nxy_out, device=self.device
+            )
         if self.chunk_size is None:
             self.rotate_volumes()
             micrograph = self.insert_volumes()

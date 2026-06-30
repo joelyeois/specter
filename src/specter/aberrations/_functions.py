@@ -197,5 +197,5 @@ def phaseshift(
     if aberration_model == "holography":
         phaseshift = phaseshift * torch.ones_like(k)
         # phaseshift must be zero at DC for Fourier optics
-        phaseshift[:, n_pixels // 2, n_pixels // 2] = 0
+        phaseshift[:, 0, 0] = 0
     return -phaseshift

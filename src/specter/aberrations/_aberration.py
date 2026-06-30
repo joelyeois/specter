@@ -30,6 +30,9 @@ class Aberration(L.LightningModule):
     alpha: float, optional
         The amplitude contrast ratio to use for the CTF model. Common values
         are 0.07 and 0.1.
+    convergence_angle: float, optional
+        Beam convergence semi-angle in milliradians, used for the Cs
+        (spatial coherence) envelope. Default is None (envelope disabled).
 
     Notes
     -----
@@ -46,6 +49,7 @@ class Aberration(L.LightningModule):
         energy: float,
         aberration_model: str = "holography",
         alpha: float | None = None,
+        convergence_angle: float | None = None,
         progressbars: bool = True,
     ):
         super().__init__()
@@ -70,6 +74,8 @@ class Aberration(L.LightningModule):
 
         # dummy tensor for non-existent aberration terms
         self.register_buffer("zero", torch.tensor(0.0))
+
+        self.convergence_angle = convergence_angle
 
         if aberration_model == "ctf":
             if alpha is None:
@@ -309,6 +315,15 @@ class Aberration(L.LightningModule):
             if torch.any(bfactor != 0):
                 transfer = transfer * env.b_envelope(self.k2, bfactor)
 
+        if self.convergence_angle is not None:
+            cs_val = ctf_params.get("cs", self.zero).view(-1, 1, 1)
+            dfu = ctf_params.get("dfu", self.zero).view(-1, 1, 1)
+            dfv = ctf_params.get("dfv", dfu).view(-1, 1, 1)
+            defocus_avg = 0.5 * (dfu + dfv)
+            transfer = transfer * env.cs_envelope(
+                self.k, self.wavelength, cs_val, defocus_avg, self.convergence_angle
+            )
+
         return transfer
 
     def forward(
@@ -341,5 +356,5 @@ class Aberration(L.LightningModule):
         aberrated_exitwaves = ifft2(fft2(exitwave) * self.tf)
         if self.aberration_model == "ctf":
             return torch.real(aberrated_exitwaves)
-        elif self.aberration_model == "holography":
+        else:  # "holography"
             return aberrated_exitwaves

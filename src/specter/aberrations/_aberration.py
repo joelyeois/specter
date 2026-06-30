@@ -46,6 +46,10 @@ class Aberration(L.LightningModule):
     deltaI_I: float, optional
         Relative objective-lens current instability, used by the Cc
         envelope. Default 0.01e-6.
+    dose_envelope: bool, optional
+        Whether to apply the Grant & Grigorieff (2015) cumulative-dose
+        envelope, using the per-image ``dose`` key in ``ctf_params``.
+        Default False.
 
     Notes
     -----
@@ -67,6 +71,7 @@ class Aberration(L.LightningModule):
         energy_spread: float = 0.7,
         deltaV_V: float = 0.06e-6,
         deltaI_I: float = 0.01e-6,
+        dose_envelope: bool = False,
         progressbars: bool = True,
     ):
         super().__init__()
@@ -97,6 +102,7 @@ class Aberration(L.LightningModule):
         self.energy_spread = energy_spread
         self.deltaV_V = deltaV_V
         self.deltaI_I = deltaI_I
+        self.dose_envelope = dose_envelope
 
         if aberration_model == "ctf":
             if alpha is None:
@@ -265,6 +271,8 @@ class Aberration(L.LightningModule):
             - 'trefoil1'/'trefoil2' : Trefoil aberration
             - 'tetrafoil1'/'tetrafoil2'/'tetrafoil3'/'tetrafoil4' : Tetrafoil
             - 'bfactor_envelope' : Isotropic B-factor envelope in Å²
+            - 'dose' : Cumulative electron dose in e-/Angstrom^2, used by
+              the dose envelope when ``dose_envelope=True``
 
         Returns
         -------
@@ -356,6 +364,10 @@ class Aberration(L.LightningModule):
                 self.deltaV_V,
                 self.deltaI_I,
             )
+
+        if self.dose_envelope and "dose" in ctf_params:
+            dose = ctf_params["dose"].view(-1, 1, 1)
+            transfer = transfer * env.dose_envelope(self.k, dose)
 
         return transfer
 

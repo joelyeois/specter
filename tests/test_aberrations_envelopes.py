@@ -164,3 +164,51 @@ def test_aberration_cc_attenuates_high_frequency():
     transfer = ab.transfer_function(ctf_params)
     magnitude = torch.abs(transfer).squeeze(0)
     assert magnitude[0, 1] > magnitude[0, 20]
+
+
+def test_aberration_dose_envelope_false_is_unchanged():
+    ab_off = Aberration(8, pixel_size=1.0, energy=300.0, aberration_model="holography")
+    ab_on = Aberration(
+        8,
+        pixel_size=1.0,
+        energy=300.0,
+        aberration_model="holography",
+        dose_envelope=False,
+    )
+    ctf_params = {"dfu": torch.tensor([5000.0]), "dose": torch.tensor([50.0])}
+    assert torch.allclose(
+        ab_off.transfer_function({"dfu": torch.tensor([5000.0])}),
+        ab_on.transfer_function(ctf_params),
+    )
+
+
+def test_aberration_dose_envelope_attenuates_high_frequency():
+    ab = Aberration(
+        64,
+        pixel_size=1.0,
+        energy=300.0,
+        aberration_model="holography",
+        dose_envelope=True,
+    )
+    ctf_params = {"dfu": torch.tensor([5000.0]), "dose": torch.tensor([50.0])}
+    transfer = ab.transfer_function(ctf_params)
+    magnitude = torch.abs(transfer).squeeze(0)
+    assert magnitude[0, 1] > magnitude[0, 20]
+
+
+def test_ctf_batch_includes_dose():
+    from specter.imagegenerator._base import BaseImager
+
+    gen = BaseImager(
+        pixel_size=1.0,
+        energy=300.0,
+        dose_per_angstrom=torch.tensor([40.0, 60.0]),
+        nxy=16,
+        nz=16,
+        ctf_params={"dfu": torch.tensor([5000.0, 6000.0])},
+        progressbars=False,
+        verbose=False,
+    )
+    batch = gen._ctf_batch(torch.tensor([0, 1]))
+    assert "dose" in batch
+    assert torch.allclose(batch["dose"], torch.tensor([40.0, 60.0]))

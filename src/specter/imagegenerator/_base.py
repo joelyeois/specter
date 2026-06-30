@@ -218,6 +218,7 @@ class BaseImager(L.LightningModule):
         ctf_batch = {k: getattr(self, k)[idx] for k in self._ctf_param_names}
         if getattr(self, "bfactor_envelope", None) is not None:
             ctf_batch["bfactor_envelope"] = self.bfactor_envelope[idx]
+        ctf_batch["dose"] = self.dose_per_angstrom[idx]
         return ctf_batch
 
     def _init_detector_mtf(self) -> None:

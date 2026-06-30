@@ -116,7 +116,7 @@ TiltSeriesGenerator         – generates a tilt series
 - `ImageGenerator` takes a **pre-built volume** tensor; `ImageGeneratorFromCoordinates` builds it from atomic coordinates on the fly via `PotentialBuilder`.
 - Ice makers (`RandomIcemaker`, `APIcemaker`, `MCMCIcemaker`, `GradientSKIcemaker`) generate amorphous ice volumes; `IceBank` (in `ice/_bank.py`) caches them for reuse.
 - `Scattering` supports four propagation modes: `multislice`, `rytov`, `firstborn`, `projection` — multislice is most accurate and is the default.
-- `Aberration` and `Detector` (in `microscope.py`) apply CTF, envelope, and detector MTF in Fourier space.
+- `Aberration` (in `aberrations/`) and `Detector` (in `microscope.py`) apply CTF, envelope, and detector MTF in Fourier space.
 
 ### Inverse problem — Reconstructor
 
@@ -130,6 +130,9 @@ src/specter/                  # Main source package
     atom.py                   # Atom symbols, numbers, masses
     atomic_potentials.py      # Kirkland, Lobato, Shtyrov parameterizations
   atom_data/                  # Scattering parameter tables — do not modify
+  aberrations/                # Aberration phase model
+    _functions.py             # Low-level, stateless phase functions (cs, defocus, beamtilt, trefoil, tetrafoil, phaseshift)
+    _aberration.py            # Aberration(L.LightningModule) — composes the functions above into a transfer function
   imagegenerator/             # Image simulation classes
     _base.py                  # BaseImager base class
     _generator.py             # ImageGenerator, ImageGeneratorFromCoordinates

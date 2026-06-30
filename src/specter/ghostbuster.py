@@ -20,11 +20,11 @@ from torch.optim.lr_scheduler import (
 )
 
 from . import rotations
+from .aberrations import Aberration
 from .arrays import compute_nps_2d
 from .fft import fft3, ifft3
 from .imagegenerator import ImageGenerator
 from .imagegenerator._tiltseries import TiltSeriesGenerator
-from .microscope import Aberration
 from .rotations import Rotation
 from .scattering import IterativeScattering
 from .symmetries import apply_symmetry, get_rotation_matrices

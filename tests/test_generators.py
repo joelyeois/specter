@@ -14,13 +14,13 @@ from pathlib import Path
 import pytest
 import torch
 
+from specter.aberrations import Aberration
 from specter.imagegenerator import (
     ImageGenerator,
     ImageGeneratorFromCoordinates,
     MicrographGenerator,
     TiltSeriesGenerator,
 )
-from specter.microscope import Aberration
 
 FIXTURE_DIR = Path(__file__).parent / "test_data"
 

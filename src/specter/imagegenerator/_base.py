@@ -8,7 +8,8 @@ import torch.nn.functional as F
 
 from specter.detectors import k3_200kv, k3_300kv, perfect_detector
 
-from ..microscope import Aberration, Detector
+from ..aberrations import Aberration
+from ..microscope import Detector
 
 
 def compute_nz(base_nz: int, ice_thickness: float | None, pixel_size: float) -> int:

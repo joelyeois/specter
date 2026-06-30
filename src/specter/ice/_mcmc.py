@@ -115,6 +115,7 @@ class MCMCIcemaker(L.LightningModule):
         return (int(pos[0] / cs) % nc, int(pos[1] / cs) % nc, int(pos[2] / cs) % nc)
 
     def _build_cell_list(self) -> None:
+        assert self.positions is not None, "Call init_random() first"
         self._cell_list = {}
         self._mol_cell = []
         pos_np = self.positions.cpu().numpy()
@@ -380,6 +381,7 @@ class MCMCIcemaker(L.LightningModule):
         print(f"  Initialised with {self.n_molecules} molecules (from APIcemaker)")
 
     def _remove_pbc_violations(self) -> int:
+        assert self.positions is not None, "Call init_random() first"
         d = self.positions.unsqueeze(0) - self.positions.unsqueeze(1)
         d -= self.box_size * torch.round(d / self.box_size)
         dists = torch.norm(d, dim=2)
@@ -401,6 +403,9 @@ class MCMCIcemaker(L.LightningModule):
     def _parallel_gpu_sweep(
         self, T: float, step_size: float, chunk_size: int = 256, n_subgroups: int = 1
     ) -> tuple[int, int, float]:
+        assert self.positions is not None, "Call init_random() first"
+        assert self.gr_target is not None, "Call set_target_gr_from_md() first"
+        assert self.gr_hist is not None, "Call init_random() first"
         N = self.n_molecules
         dev = self.device
         L = self.box_size
@@ -533,6 +538,7 @@ class MCMCIcemaker(L.LightningModule):
         """
         assert self.positions is not None, "Call init_random() first"
         assert self.gr_target is not None, "Call set_target_gr_from_md() first"
+        assert self.gr_hist is not None, "Call init_random() first"
 
         N = self.n_molecules
         use_gpu = self.device.type != "cpu"

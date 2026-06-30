@@ -152,6 +152,7 @@ class GradientSKIcemaker(L.LightningModule):
         )
         rmc.n_molecules = self.n_molecules
         rmc.init_random()
+        assert rmc.positions is not None
         raw = rmc.positions.float()
         self.positions = raw - torch.tensor(
             [self.box_x / 2, self.box_y / 2, self.box_z / 2]

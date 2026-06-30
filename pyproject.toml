@@ -61,6 +61,22 @@ explicit = true
 [tool.uv.sources]
 torch = { index = "pytorch-cu121" }
 
+[[tool.mypy.overrides]]
+module = [
+    "biotite.*",
+    "cryosparc.*",
+    "ipywidgets.*",
+    "mrcfile.*",
+    "pandas.*",
+    "requests.*",
+    "scipy.*",
+    "seaborn.*",
+    "starfile.*",
+    "torchinterp1d.*",
+    "tqdm.*",
+]
+ignore_missing_imports = true
+
 [tool.setuptools]
 include-package-data = true
 

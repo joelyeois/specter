@@ -214,6 +214,7 @@ class RandomIcemaker(L.LightningModule):
         if device is None:
             device = self.device
         self.generate_ice_deltas(batchsize=batchsize)
+        assert self.current_icedeltas is not None
         icecubes = fftconvolve(
             self.current_icedeltas.to(device),
             self.ice_kernel.unsqueeze(0).to(device),

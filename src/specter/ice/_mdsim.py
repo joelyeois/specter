@@ -5,6 +5,7 @@ from typing import Sequence
 
 import ase.io as ase_io
 import numpy as np
+from ase import Atoms
 import pandas as pd
 import torch
 
@@ -463,10 +464,11 @@ class ExtXYZDump:
         self.n = n
         self.dx = dx
 
-        self._atoms_list = ase_io.read(filepath, format="extxyz", index=":")
-        if not isinstance(self._atoms_list, list):
+        atoms_data = ase_io.read(filepath, format="extxyz", index=":")
+        if not isinstance(atoms_data, list):
             # single-frame files are returned as a single Atoms object
-            self._atoms_list = [self._atoms_list]
+            atoms_data = [atoms_data]
+        self._atoms_list: list[Atoms] = atoms_data
 
         self.n_frames: int = len(self._atoms_list)
 

@@ -290,6 +290,7 @@ class APIcemaker(L.LightningModule):
         ice_vol_init = self.create_initial_ice_volume(batchsize=batchsize)
         self.register_buffer("ice_vol_init", ice_vol_init)
 
+        self.current_icedeltas: torch.Tensor
         self.register_buffer("current_icedeltas", self.ice_vol_init.clone())
         self.niter = niter
         if min_distance is None:

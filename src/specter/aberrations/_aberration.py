@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import Any
 
-import numpy as np
 import torch
 import lightning as L
 
@@ -109,149 +108,6 @@ class Aberration(L.LightningModule):
                 raise Exception("Specify alpha for CTF model.")
             else:
                 self.alpha = alpha
-
-    def aberration(
-        self,
-        cs: torch.Tensor,
-        dfu: torch.Tensor,
-        dfv: torch.Tensor,
-        dfang: torch.Tensor,
-        tiltx: torch.Tensor,
-        tilty: torch.Tensor,
-        phaseshift: torch.Tensor,
-        tref1: torch.Tensor,
-        tref2: torch.Tensor,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        """
-        Calculate combined aberration phase terms.
-
-        Computes gamma and phi for the transfer function.
-
-        Parameters
-        ----------
-        cs : torch.Tensor
-            Spherical aberration coefficient.
-        dfu : torch.Tensor
-            Defocus along first axis.
-        dfv : torch.Tensor
-            Defocus along second axis.
-        dfang : torch.Tensor
-            Astigmatism angle.
-        tiltx : torch.Tensor
-            Beam tilt in x direction.
-        tilty : torch.Tensor
-            Beam tilt in y direction.
-        phaseshift : torch.Tensor
-            Phase shift (e.g., from phase plate).
-        tref1 : torch.Tensor
-            First trefoil component.
-        tref2 : torch.Tensor
-            Second trefoil component.
-
-        Returns
-        -------
-        gamma : torch.Tensor
-            Axial aberration phase (defocus + Cs - phaseshift).
-        phi : torch.Tensor
-            Non-axial aberration phase (beam tilt + trefoil).
-        """
-        w = self.wavelength
-        ang = self.radian
-        k2 = self.k2
-        k = self.k
-
-        # defocus
-        dfu = dfu.unsqueeze(1).unsqueeze(2)
-        dfv = dfv.unsqueeze(1).unsqueeze(2)
-        dfang = dfang.unsqueeze(1).unsqueeze(2)
-        cs = cs.unsqueeze(1).unsqueeze(2)
-        df = 0.5 * (dfu + dfv + (dfv - dfu) * torch.cos(2 * (ang + dfang)))
-        gamma = torch.pi * w * k2 * (0.5 * cs * w**2 * k2 - df)
-
-        # beamtilt
-        tiltx = tiltx.unsqueeze(1).unsqueeze(2)
-        tilty = tilty.unsqueeze(1).unsqueeze(2)
-        tilt = (
-            -2
-            * torch.pi
-            * w**2
-            * cs
-            * k2
-            * (torch.sin(tilty) * self.kxx + torch.sin(tiltx) * self.kyy)
-        )
-
-        # trefoil
-        tref1 = tref1.unsqueeze(1).unsqueeze(2)
-        tref2 = tref2.unsqueeze(1).unsqueeze(2)
-        trefoil = tref1 * k**3 * torch.sin(3 * ang) + tref2 * k**3 * torch.cos(3 * ang)
-
-        phi = tilt + trefoil
-
-        # phase shift
-        phaseshift = phaseshift.unsqueeze(1).unsqueeze(2)
-        if self.aberration_model == "holography":
-            # phaseshift must be zero at DC for Fourier optics
-            phaseshift = phaseshift * torch.ones_like(gamma)
-            phaseshift[:, 0, 0] = 0
-        return gamma - phaseshift, phi
-
-    def transfer(
-        self,
-        cs: torch.Tensor,
-        dfu: torch.Tensor,
-        dfv: torch.Tensor,
-        dfang: torch.Tensor,
-        tiltx: torch.Tensor,
-        tilty: torch.Tensor,
-        phaseshift: torch.Tensor,
-        tref1: torch.Tensor,
-        tref2: torch.Tensor,
-    ) -> torch.Tensor:
-        """
-        Compute transfer function with all aberration parameters.
-
-        Legacy method combining aberration calculation with transfer function.
-
-        Parameters
-        ----------
-        cs : torch.Tensor
-            Spherical aberration coefficient.
-        dfu : torch.Tensor
-            Defocus along first axis.
-        dfv : torch.Tensor
-            Defocus along second axis.
-        dfang : torch.Tensor
-            Astigmatism angle.
-        tiltx : torch.Tensor
-            Beam tilt in x direction.
-        tilty : torch.Tensor
-            Beam tilt in y direction.
-        phaseshift : torch.Tensor
-            Phase shift.
-        tref1 : torch.Tensor
-            First trefoil component.
-        tref2 : torch.Tensor
-            Second trefoil component.
-
-        Returns
-        -------
-        transfer : torch.Tensor
-            Complex-valued transfer function.
-
-        Notes
-        -----
-        This method is deprecated in favor of transfer_function(ctf_params).
-        """
-        gamma, phi = self.aberration(
-            cs, dfu, dfv, dfang, tiltx, tilty, phaseshift, tref1, tref2
-        )
-        if self.aberration_model == "ctf":
-            trans = np.sqrt(1 - self.alpha**2) * torch.sin(
-                gamma
-            ) - self.alpha * torch.cos(gamma)
-        elif self.aberration_model == "holography":
-            trans = torch.exp(-1j * gamma)
-        return trans * torch.exp(-1j * phi)
 
     def transfer_function(self, ctf_params: dict[str, Any]) -> torch.Tensor:
         """
@@ -403,3 +259,5 @@ class Aberration(L.LightningModule):
             return torch.real(aberrated_exitwaves)
         elif self.aberration_model == "holography":
             return aberrated_exitwaves
+        else:
+            raise ValueError(f"Unknown aberration_model: {self.aberration_model!r}")

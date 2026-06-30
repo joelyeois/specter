@@ -268,16 +268,18 @@ def create_particle_starfile(
     _console.print(f"  [green]✓[/green] {mrcs_path}")
 
     # convert rotations to Relion euler
-    if len(rotations.shape) == 3:
-        # N x 3 x 3 -> rotation matrices
-        R = Rotation.from_matrix(rotations)
-    elif rotations.shape[-1] == 4:
-        # N x 4 -> quaternions
-        R = Rotation.from_quat(rotations)
-    elif rotations.shape[-1] == 3:
-        # N x 3 -> rotvec
-        R = Rotation.from_rotvec(rotations)
-    euler = R.as_euler("ZYZ", degrees=True)
+    euler = None
+    if rotations is not None:
+        if len(rotations.shape) == 3:
+            # N x 3 x 3 -> rotation matrices
+            R = Rotation.from_matrix(rotations)
+        elif rotations.shape[-1] == 4:
+            # N x 4 -> quaternions
+            R = Rotation.from_quat(rotations)
+        elif rotations.shape[-1] == 3:
+            # N x 3 -> rotvec
+            R = Rotation.from_rotvec(rotations)
+        euler = R.as_euler("ZYZ", degrees=True)
 
     # create associated starfile
     n = len(particles)
@@ -302,9 +304,6 @@ def create_particle_starfile(
         "rlnSphericalAberration": cs_A / 1e7,
         "rlnAmplitudeContrast": alpha,
         "rlnImagePixelSize": dx,
-        "rlnAngleRot": euler[:, 0],
-        "rlnAngleTilt": euler[:, 1],
-        "rlnAnglePsi": euler[:, 2],
         "rlnImageName": [str(i) + "@" + filename + ".mrcs" for i in range(1, n + 1)],
         "rlnDefocusU": dfu,
         "rlnDefocusV": dfv,
@@ -313,6 +312,10 @@ def create_particle_starfile(
         "rlnOriginXAngst": translations[:, 0],
         "rlnOriginYAngst": translations[:, 1],
     }
+    if euler is not None:
+        d["rlnAngleRot"] = euler[:, 0]
+        d["rlnAngleTilt"] = euler[:, 1]
+        d["rlnAnglePsi"] = euler[:, 2]
 
     if dose_per_angstrom is not None:
         d["specterDosePerAngstrom"] = torch.as_tensor(dose_per_angstrom).expand(n)

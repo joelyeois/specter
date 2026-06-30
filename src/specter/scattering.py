@@ -460,6 +460,8 @@ class Scattering(L.LightningModule):
             return self.kinematic(V)
         elif self.scattering_model == "ctf":
             return self.ctf(V)
+        else:
+            raise ValueError(f"Unknown scattering_model: {self.scattering_model!r}")
 
 
 class IterativeScattering(L.LightningModule):
@@ -679,6 +681,7 @@ class IterativeScattering(L.LightningModule):
                         batch_end = min(i + slice_batch_size, nz_new)
                         batch_indices = indices[i:batch_end]
                         slice_indices = batch_indices - (nz_new - 1) / 2
+                        assert rotator is not None
                         slices_block = rotator.sample_rotated_slices(
                             V,
                             theta_matrix,
@@ -798,6 +801,7 @@ class IterativeScattering(L.LightningModule):
                     batch_end = min(i + slice_batch_size, nz_new)
                     batch_indices = indices[i:batch_end]
                     slice_indices = batch_indices - (nz_new - 1) / 2
+                    assert rotator is not None
                     slices_block = rotator.sample_rotated_slices(
                         V,
                         theta_matrix,
@@ -858,6 +862,7 @@ class IterativeScattering(L.LightningModule):
                     batch_end = min(i + slice_batch_size, nz_new)
                     batch_indices = indices[i:batch_end]
                     slice_indices = batch_indices - (nz_new - 1) / 2
+                    assert rotator is not None
                     slices_block = rotator.sample_rotated_slices(
                         V,
                         theta_matrix,
@@ -1071,6 +1076,7 @@ class IterativeScattering(L.LightningModule):
                     batch_end = min(i + slice_batch_size, nz_new)
                     batch_indices = indices[i:batch_end]
                     slice_indices = batch_indices - (nz_new - 1) / 2
+                    assert rotator is not None
                     slices_block = rotator.sample_rotated_slices(
                         V,
                         theta_matrix,
@@ -1137,6 +1143,7 @@ class IterativeScattering(L.LightningModule):
                     batch_end = min(i + slice_batch_size, nz_new)
                     batch_indices = indices[i:batch_end]
                     slice_indices = batch_indices - (nz_new - 1) / 2
+                    assert rotator is not None
                     slices_block = rotator.sample_rotated_slices(
                         V,
                         theta_matrix,
@@ -1196,6 +1203,7 @@ class IterativeScattering(L.LightningModule):
                     batch_end = min(i + slice_batch_size, nz_new)
                     batch_indices = indices[i:batch_end]
                     slice_indices = batch_indices - (nz_new - 1) / 2
+                    assert rotator is not None
                     slices_block = rotator.sample_rotated_slices(
                         V,
                         theta_matrix,

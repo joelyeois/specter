@@ -172,10 +172,10 @@ class Reconstructor(L.LightningModule):
         self.lr_T = lr_T
         self.lr_D = lr_D
         self.lr_decay = lr_decay
-        self.log_lrs = []
-        self.log_total_loss = []
-        self.log_sparsity_loss = []
-        self.log_norm_loss = []
+        self.log_lrs: list[float] = []
+        self.log_total_loss: list[torch.Tensor] = []
+        self.log_sparsity_loss: list[torch.Tensor] = []
+        self.log_norm_loss: list[torch.Tensor] = []
         self.scheduler = scheduler
 
         # symmetry parameters
@@ -197,6 +197,7 @@ class Reconstructor(L.LightningModule):
         self.noise_ema_momentum = noise_ema_momentum
         self.use_ncc = use_ncc
         n = V.shape[-1]
+        self.sigma2_k: torch.Tensor
         self.register_buffer("sigma2_k", torch.ones(n, n // 2 + 1))
 
         # fsc — load from file if path provided
@@ -788,6 +789,7 @@ class Reconstructor(L.LightningModule):
             from .plots import plot3d
 
             fig = plot3d(v, title=f"Epoch {epoch}{suffix}", show=False)
+            assert fig is not None
             fig.savefig(
                 self._run_dir / "epochs" / f"vol_{epoch:03d}{suffix}.png",
                 bbox_inches="tight",
@@ -844,6 +846,7 @@ class Reconstructor(L.LightningModule):
                 labels=labels,
                 show=False,
             )
+            assert fig is not None
             fig.savefig(path, bbox_inches="tight")
             plt.close(fig)
         except Exception as exc:

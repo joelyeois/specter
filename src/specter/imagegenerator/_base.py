@@ -246,9 +246,9 @@ class BaseImager(L.LightningModule):
         if shift_required:
             shift = (self.nz * self.pixel_size) / 2
             if hasattr(self, "dfu"):
-                self.dfu = self.dfu - shift
+                setattr(self, "dfu", getattr(self, "dfu") - shift)
             if hasattr(self, "dfv"):
-                self.dfv = self.dfv - shift
+                setattr(self, "dfv", getattr(self, "dfv") - shift)
 
     def _init_optics(self) -> None:
         """Instantiate ``Aberration`` and ``Detector`` from the stored parameters."""
@@ -289,3 +289,4 @@ class BaseImager(L.LightningModule):
         preds_all = self.trainer.strategy.all_gather(preds)
         if self.trainer.is_global_zero:
             return preds_all.cpu()
+        return None

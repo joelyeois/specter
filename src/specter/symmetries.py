@@ -78,12 +78,12 @@ def get_rotation_matrices(sym: str, return_affine: bool = True) -> torch.Tensor:
         matrices = []
         for ang in angs:
             # rotation around z
-            quatz = torch.tensor(
+            quatz = torch.as_tensor(
                 [
-                    torch.sin(torch.tensor(ang / 2)) * vecz[0],
-                    torch.sin(torch.tensor(ang / 2)) * vecz[1],
-                    torch.sin(torch.tensor(ang / 2)) * vecz[2],
-                    torch.cos(torch.tensor(ang / 2)),
+                    torch.sin(ang / 2) * vecz[0],
+                    torch.sin(ang / 2) * vecz[1],
+                    torch.sin(ang / 2) * vecz[2],
+                    torch.cos(ang / 2),
                 ]
             )
             quatz = Rotation.from_quat(quatz)
@@ -102,12 +102,12 @@ def get_rotation_matrices(sym: str, return_affine: bool = True) -> torch.Tensor:
         matrices = []
         for ang in angs:
             # rotation around z
-            quatz = torch.tensor(
+            quatz = torch.as_tensor(
                 [
-                    torch.sin(torch.tensor(ang / 2)) * vecz[0],
-                    torch.sin(torch.tensor(ang / 2)) * vecz[1],
-                    torch.sin(torch.tensor(ang / 2)) * vecz[2],
-                    torch.cos(torch.tensor(ang / 2)),
+                    torch.sin(ang / 2) * vecz[0],
+                    torch.sin(ang / 2) * vecz[1],
+                    torch.sin(ang / 2) * vecz[2],
+                    torch.cos(ang / 2),
                 ]
             )
             quatz = Rotation.from_quat(quatz)

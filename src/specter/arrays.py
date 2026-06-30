@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Sequence
+from typing import Literal, Sequence, overload
 
 import torch
 import torch.nn.functional as F
@@ -746,6 +746,18 @@ def soft_voxelize_xy_coordinates(
     return volumes
 
 
+@overload
+def radial_profile_3d(
+    data: torch.Tensor,
+    center: tuple[float, float, float] | None = None,
+    return_r: Literal[False] = False,
+) -> torch.Tensor: ...
+@overload
+def radial_profile_3d(
+    data: torch.Tensor,
+    center: tuple[float, float, float] | None = None,
+    return_r: Literal[True] = ...,
+) -> tuple[torch.Tensor, torch.Tensor]: ...
 def radial_profile_3d(
     data: torch.Tensor,
     center: tuple[float, float, float] | None = None,
@@ -982,6 +994,18 @@ def compute_nps_3d(
     return nps_1d, nps_3d
 
 
+@overload
+def radial_profile_2d(
+    data: torch.Tensor,
+    center: tuple[float, float] | None = None,
+    return_r: Literal[False] = False,
+) -> torch.Tensor: ...
+@overload
+def radial_profile_2d(
+    data: torch.Tensor,
+    center: tuple[float, float] | None = None,
+    return_r: Literal[True] = ...,
+) -> tuple[torch.Tensor, torch.Tensor]: ...
 def radial_profile_2d(
     data: torch.Tensor,
     center: tuple[float, float] | None = None,

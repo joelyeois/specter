@@ -164,6 +164,7 @@ class IceBank(L.LightningModule):
         """
         if self._bank is None:
             self.build(**kwargs)
+        assert self._bank is not None
         _, D, H, W = self._bank.shape
         return tile_volume_from_blocks(self._bank, (batchsize, D, H, W)).to(self.device)
 
@@ -200,5 +201,6 @@ class IceBank(L.LightningModule):
             if num_unique is None:
                 num_unique = self._num_unique
             self.build(num_unique=num_unique, **kwargs)
+        assert self._bank is not None
         cubes = replace_outer_faces(self._bank.clone())
         return tile_volume_from_blocks(cubes, target_shape)

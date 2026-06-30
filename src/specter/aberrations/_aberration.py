@@ -33,6 +33,19 @@ class Aberration(L.LightningModule):
     convergence_angle: float, optional
         Beam convergence semi-angle in milliradians, used for the Cs
         (spatial coherence) envelope. Default is None (envelope disabled).
+    cc: float, optional
+        Chromatic aberration coefficient in Angstrom, used for the Cc
+        (temporal coherence) envelope. Default is None (envelope
+        disabled).
+    energy_spread: float, optional
+        FWHM of the beam energy spread in eV, used by the Cc envelope.
+        Default 0.7.
+    deltaV_V: float, optional
+        Relative high-voltage instability, used by the Cc envelope.
+        Default 0.06e-6.
+    deltaI_I: float, optional
+        Relative objective-lens current instability, used by the Cc
+        envelope. Default 0.01e-6.
 
     Notes
     -----
@@ -50,6 +63,10 @@ class Aberration(L.LightningModule):
         aberration_model: str = "holography",
         alpha: float | None = None,
         convergence_angle: float | None = None,
+        cc: float | None = None,
+        energy_spread: float = 0.7,
+        deltaV_V: float = 0.06e-6,
+        deltaI_I: float = 0.01e-6,
         progressbars: bool = True,
     ):
         super().__init__()
@@ -76,6 +93,10 @@ class Aberration(L.LightningModule):
         self.register_buffer("zero", torch.tensor(0.0))
 
         self.convergence_angle = convergence_angle
+        self.cc = cc
+        self.energy_spread = energy_spread
+        self.deltaV_V = deltaV_V
+        self.deltaI_I = deltaI_I
 
         if aberration_model == "ctf":
             if alpha is None:
@@ -322,6 +343,18 @@ class Aberration(L.LightningModule):
             defocus_avg = 0.5 * (dfu + dfv)
             transfer = transfer * env.cs_envelope(
                 self.k, self.wavelength, cs_val, defocus_avg, self.convergence_angle
+            )
+
+        if self.cc is not None:
+            voltage = self.energy * 1e3  # keV -> V (numerically eV-equivalent)
+            transfer = transfer * env.cc_envelope(
+                self.k2,
+                self.wavelength,
+                self.cc,
+                voltage,
+                self.energy_spread,
+                self.deltaV_V,
+                self.deltaI_I,
             )
 
         return transfer

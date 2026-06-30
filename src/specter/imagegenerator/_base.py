@@ -142,6 +142,24 @@ class BaseImager(L.LightningModule):
     bfactor_envelope : float or torch.Tensor or None, optional
         Isotropic B-factor envelope in Å² applied in the microscope transfer
         function. None or 0.0 means no envelope. Default None.
+    convergence_angle : float, optional
+        Beam convergence semi-angle in milliradians, used for the Cs
+        (spatial coherence) envelope. Default None (envelope disabled).
+    cc : float, optional
+        Chromatic aberration coefficient in Angstrom, used for the Cc
+        (temporal coherence) envelope. Default None (envelope disabled).
+    energy_spread : float, optional
+        FWHM of the beam energy spread in eV, used by the Cc envelope.
+        Default 0.7.
+    deltaV_V : float, optional
+        Relative high-voltage instability, used by the Cc envelope.
+        Default 0.06e-6.
+    deltaI_I : float, optional
+        Relative objective-lens current instability, used by the Cc
+        envelope. Default 0.01e-6.
+    dose_envelope : bool, optional
+        Whether to apply the Grant & Grigorieff (2015) cumulative-dose
+        envelope, using ``dose_per_angstrom``. Default False.
     """
 
     def __init__(
@@ -164,6 +182,12 @@ class BaseImager(L.LightningModule):
         num_frames: int | None = None,
         potential_scale: float | torch.Tensor = 1.0,
         bfactor_envelope: float | torch.Tensor | None = None,
+        convergence_angle: float | None = None,
+        cc: float | None = None,
+        energy_spread: float = 0.7,
+        deltaV_V: float = 0.06e-6,
+        deltaI_I: float = 0.01e-6,
+        dose_envelope: bool = False,
     ):
         super().__init__()
         self.pixel_size = pixel_size
@@ -178,6 +202,12 @@ class BaseImager(L.LightningModule):
         self.pad_nxy = pad_nxy if pad_nxy is not None else nxy
         self.detector_model = detector_model
         self.num_frames = num_frames
+        self.convergence_angle = convergence_angle
+        self.cc = cc
+        self.energy_spread = energy_spread
+        self.deltaV_V = deltaV_V
+        self.deltaI_I = deltaI_I
+        self.dose_envelope = dose_envelope
         self._init_detector_mtf()
 
         if anisomag is None:
@@ -258,6 +288,12 @@ class BaseImager(L.LightningModule):
             self.energy,
             aberration_model=self.aberration_model,
             alpha=self.alpha,
+            convergence_angle=self.convergence_angle,
+            cc=self.cc,
+            energy_spread=self.energy_spread,
+            deltaV_V=self.deltaV_V,
+            deltaI_I=self.deltaI_I,
+            dose_envelope=self.dose_envelope,
         )
         self.detector = Detector(
             self.pixel_size,

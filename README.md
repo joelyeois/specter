@@ -101,6 +101,12 @@ python demo-scripts/generate_particle_stack.py \
 | `--num_frames` | `int(mean dose)` | Number of frames |
 | `--cs` | `2.0` | Spherical aberration in mm |
 | `--alpha` | `0.1` | Amplitude contrast ratio |
+| `--convergence_angle` | `None` | Beam convergence semi-angle in mrad; enables the Cs (spatial coherence) envelope |
+| `--cc` | `None` | Chromatic aberration coefficient in mm; enables the Cc (temporal coherence) envelope |
+| `--energy_spread` | `0.7` | FWHM of beam energy spread in eV, used by the Cc envelope |
+| `--deltaV_V` | `0.06e-6` | Relative high-voltage instability, used by the Cc envelope |
+| `--deltaI_I` | `0.01e-6` | Relative objective-lens current instability, used by the Cc envelope |
+| `--dose_envelope` | `False` | Apply the Grant & Grigorieff (2015) cumulative-dose envelope |
 | `--defocus_min` | `5000` | Minimum defocus in Å; used as fixed value if `--defocus_max` is not set |
 | `--defocus_max` | `15000` | Maximum defocus in Å; if set, defocus is sampled uniformly per particle |
 | `--shift` | `2.0` | Max in-plane shift in Å (uniform ±shift) |
@@ -161,6 +167,12 @@ python demo-scripts/generate_particle_stack_from_csfile.py \
 | `--scattering_model` | `multislice` | `multislice` \| `firstborn` \| `projection` \| `ctf` |
 | `--aberration_model` | `holography` | `holography` \| `ctf` |
 | `--noise_model` | `poisson` | `poisson` \| `none` |
+| `--convergence_angle` | `None` | Beam convergence semi-angle in mrad; enables the Cs (spatial coherence) envelope |
+| `--cc` | `None` | Chromatic aberration coefficient in mm; enables the Cc (temporal coherence) envelope |
+| `--energy_spread` | `0.7` | FWHM of beam energy spread in eV, used by the Cc envelope |
+| `--deltaV_V` | `0.06e-6` | Relative high-voltage instability, used by the Cc envelope |
+| `--deltaI_I` | `0.01e-6` | Relative objective-lens current instability, used by the Cc envelope |
+| `--dose_envelope` | `False` | Apply the Grant & Grigorieff (2015) cumulative-dose envelope |
 | `--coincidence_radius` | `2.1` | Fixed coincidence radius in pixels applied to all particles; `0` for standard Poisson |
 | `--ice_model` | `gd` | `gd` (gradient descent) \| `ap` (atomic potential) \| `mcmc` \| `random` \| `none` |
 | `--ice_thickness` | `0.0` | Ice thickness in Å; `0` = minimum (particle box size) |
@@ -245,6 +257,12 @@ python demo-scripts/generate_micrograph.py \
 | `--num_frames` | `int(mean dose)` | Number of frames |
 | `--cs` | `2.0` | Spherical aberration in mm |
 | `--alpha` | `0.1` | Amplitude contrast ratio |
+| `--convergence_angle` | `None` | Beam convergence semi-angle in mrad; enables the Cs (spatial coherence) envelope |
+| `--cc` | `None` | Chromatic aberration coefficient in mm; enables the Cc (temporal coherence) envelope |
+| `--energy_spread` | `0.7` | FWHM of beam energy spread in eV, used by the Cc envelope |
+| `--deltaV_V` | `0.06e-6` | Relative high-voltage instability, used by the Cc envelope |
+| `--deltaI_I` | `0.01e-6` | Relative objective-lens current instability, used by the Cc envelope |
+| `--dose_envelope` | `False` | Apply the Grant & Grigorieff (2015) cumulative-dose envelope |
 | `--defocus_min/max` | `5000/15000` | Defocus range in Å |
 | `--scattering_model` | `multislice` | `multislice` \| `firstborn` \| `projection` \| `ctf` |
 | `--aberration_model` | `holography` | `holography` \| `ctf` |
@@ -323,6 +341,12 @@ python demo-scripts/generate_tilt_series.py \
 | `--num_frames` | `10` | Number of movie frames per tilt |
 | `--cs` | `2.0` | Spherical aberration in mm |
 | `--alpha` | `0.1` | Amplitude contrast ratio |
+| `--convergence_angle` | `None` | Beam convergence semi-angle in mrad; enables the Cs (spatial coherence) envelope |
+| `--cc` | `None` | Chromatic aberration coefficient in mm; enables the Cc (temporal coherence) envelope |
+| `--energy_spread` | `0.7` | FWHM of beam energy spread in eV, used by the Cc envelope |
+| `--deltaV_V` | `0.06e-6` | Relative high-voltage instability, used by the Cc envelope |
+| `--deltaI_I` | `0.01e-6` | Relative objective-lens current instability, used by the Cc envelope |
+| `--dose_envelope` | `False` | Apply the Grant & Grigorieff (2015) cumulative-dose envelope |
 | `--defocus` | `22000.0` | Defocus in Å (positive = underfocus) |
 | `--min_tilt_angle` | `-45.0` | Minimum tilt angle in degrees |
 | `--max_tilt_angle` | `45.0` | Maximum tilt angle in degrees |

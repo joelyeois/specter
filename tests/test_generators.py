@@ -231,6 +231,155 @@ def test_transfer_function_supports_batched_ctf_params():
     assert transfer.shape == (5, 16, 16)
 
 
+def test_image_generator_plumbs_envelope_params(small_volume, ctf_params):
+    """ImageGenerator forwards Cs/Cc/dose envelope params to its Aberration submodule."""
+    gen = ImageGenerator(
+        scattering_potential=small_volume,
+        pixel_size=2.0,
+        quaternions=torch.tensor([[1.0, 0.0, 0.0, 0.0]]),
+        translations=torch.tensor([[0.0, 0.0]]),
+        ctf_params=ctf_params,
+        energy=300.0,
+        dose_per_angstrom=2.0,
+        noise_model=None,
+        scattering_model="projection",
+        convergence_angle=0.02,
+        cc=2.7e7,
+        energy_spread=0.8,
+        deltaV_V=0.05e-6,
+        deltaI_I=0.02e-6,
+        dose_envelope=True,
+        verbose=False,
+        progressbars=False,
+    )
+    assert gen.aberration.convergence_angle == 0.02
+    assert gen.aberration.cc == 2.7e7
+    assert gen.aberration.energy_spread == 0.8
+    assert gen.aberration.deltaV_V == 0.05e-6
+    assert gen.aberration.deltaI_I == 0.02e-6
+    assert gen.aberration.dose_envelope is True
+
+
+def test_image_generator_from_coordinates_plumbs_envelope_params(
+    small_coords, ctf_params
+):
+    """ImageGeneratorFromCoordinates forwards Cs/Cc/dose envelope params to Aberration."""
+    coords, atomic_numbers = small_coords
+    gen = ImageGeneratorFromCoordinates(
+        coordinates=coords,
+        atomic_numbers=atomic_numbers,
+        nxy=16,
+        pixel_size=2.0,
+        quaternions=torch.tensor([[1.0, 0.0, 0.0, 0.0]]),
+        translations=torch.tensor([[0.0, 0.0]]),
+        ctf_params=ctf_params,
+        energy=300.0,
+        dose_per_angstrom=2.0,
+        noise_model=None,
+        scattering_model="projection",
+        convergence_angle=0.02,
+        cc=2.7e7,
+        energy_spread=0.8,
+        deltaV_V=0.05e-6,
+        deltaI_I=0.02e-6,
+        dose_envelope=True,
+        verbose=False,
+    )
+    assert gen.aberration.convergence_angle == 0.02
+    assert gen.aberration.cc == 2.7e7
+    assert gen.aberration.energy_spread == 0.8
+    assert gen.aberration.deltaV_V == 0.05e-6
+    assert gen.aberration.deltaI_I == 0.02e-6
+    assert gen.aberration.dose_envelope is True
+
+
+def test_micrograph_generator_plumbs_envelope_params(small_volume, ctf_params):
+    """MicrographGenerator forwards Cs/Cc/dose envelope params to its Aberration submodule."""
+    gen = MicrographGenerator(
+        scattering_potential=small_volume,
+        micrograph_size=32,
+        pixel_size=2.0,
+        ctf_params=ctf_params,
+        energy=300.0,
+        dose_per_angstrom=2.0,
+        noise_model=None,
+        scattering_model="projection",
+        convergence_angle=0.02,
+        cc=2.7e7,
+        energy_spread=0.8,
+        deltaV_V=0.05e-6,
+        deltaI_I=0.02e-6,
+        dose_envelope=True,
+        verbose=False,
+        progressbars=False,
+    )
+    assert gen.aberration.convergence_angle == 0.02
+    assert gen.aberration.cc == 2.7e7
+    assert gen.aberration.energy_spread == 0.8
+    assert gen.aberration.deltaV_V == 0.05e-6
+    assert gen.aberration.deltaI_I == 0.02e-6
+    assert gen.aberration.dose_envelope is True
+
+
+def test_tilt_series_generator_plumbs_envelope_params(ctf_params):
+    """TiltSeriesGenerator forwards Cs/Cc/dose envelope params to its Aberration submodule."""
+    vol = torch.zeros(1, 16, 48, 48)
+    vol[0, 5:11, 20:28, 20:28] = 50.0
+    angles = torch.tensor([-10.0, 0.0, 10.0])
+
+    gen = TiltSeriesGenerator(
+        vol=vol,
+        micrograph_size=32,
+        pixel_size=2.0,
+        ctf_params=ctf_params,
+        energy=300.0,
+        dose_per_angstrom=2.0,
+        angles=angles,
+        noise_model=None,
+        scattering_model="projection",
+        convergence_angle=0.02,
+        cc=2.7e7,
+        energy_spread=0.8,
+        deltaV_V=0.05e-6,
+        deltaI_I=0.02e-6,
+        dose_envelope=True,
+        verbose=False,
+        progressbars=False,
+    )
+    assert gen.aberration.convergence_angle == 0.02
+    assert gen.aberration.cc == 2.7e7
+    assert gen.aberration.energy_spread == 0.8
+    assert gen.aberration.deltaV_V == 0.05e-6
+    assert gen.aberration.deltaI_I == 0.02e-6
+    assert gen.aberration.dose_envelope is True
+
+
+def test_image_generator_dose_envelope_changes_output(small_volume, ctf_params):
+    """Enabling the dose envelope changes the simulated image given non-trivial dose."""
+    kwargs = dict(
+        scattering_potential=small_volume,
+        pixel_size=2.0,
+        quaternions=torch.tensor([[1.0, 0.0, 0.0, 0.0]]),
+        translations=torch.tensor([[0.0, 0.0]]),
+        ctf_params=ctf_params,
+        energy=300.0,
+        dose_per_angstrom=40.0,
+        noise_model=None,
+        scattering_model="projection",
+        alpha=0.1,
+        verbose=False,
+        progressbars=False,
+    )
+
+    gen_off = ImageGenerator(**kwargs, dose_envelope=False)
+    gen_on = ImageGenerator(**kwargs, dose_envelope=True)
+
+    image_off = gen_off(torch.tensor([0]))
+    image_on = gen_on(torch.tensor([0]))
+
+    assert not torch.allclose(image_off, image_on)
+
+
 def test_image_generator_bfactor_none_and_zero_match(small_volume, ctf_params):
     """Providing None or 0.0 preserves the existing generator behavior."""
     kwargs = dict(

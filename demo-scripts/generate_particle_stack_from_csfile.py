@@ -172,6 +172,45 @@ def parse_args() -> argparse.Namespace:
         help="Detector model.",
     )
 
+    # --- Envelopes ---
+    parser.add_argument(
+        "--convergence_angle",
+        type=float,
+        default=None,
+        help="Beam convergence semi-angle in mrad, for the Cs (spatial coherence) envelope. None disables it.",
+    )
+    parser.add_argument(
+        "--cc",
+        type=float,
+        default=None,
+        help="Chromatic aberration coefficient in mm, for the Cc (temporal coherence) envelope. None disables it.",
+    )
+    parser.add_argument(
+        "--energy_spread",
+        type=float,
+        default=0.7,
+        help="FWHM of the beam energy spread in eV, used by the Cc envelope.",
+    )
+    parser.add_argument(
+        "--deltaV_V",
+        type=float,
+        default=0.06e-6,
+        help="Relative high-voltage instability, used by the Cc envelope.",
+    )
+    parser.add_argument(
+        "--deltaI_I",
+        type=float,
+        default=0.01e-6,
+        help="Relative objective-lens current instability, used by the Cc envelope.",
+    )
+    parser.add_argument(
+        "--dose_envelope",
+        type=lambda x: x.lower() == "true",
+        default=False,
+        metavar="True|False",
+        help="Apply the Grant & Grigorieff (2015) cumulative-dose envelope.",
+    )
+
     # --- Post-processing ---
     parser.add_argument(
         "--normalize_particles",
@@ -527,6 +566,8 @@ def main() -> None:
     )
     num_frames = args.num_frames if args.num_frames is not None else int(args.dose)
 
+    cc_angstrom = args.cc * 1e7 if args.cc is not None else None
+
     model = ImageGenerator(
         V,
         pixel_size.item(),
@@ -550,6 +591,12 @@ def main() -> None:
         verbose=False,
         coincidence_radius=args.coincidence_radius,
         num_frames=num_frames,
+        convergence_angle=args.convergence_angle,
+        cc=cc_angstrom,
+        energy_spread=args.energy_spread,
+        deltaV_V=args.deltaV_V,
+        deltaI_I=args.deltaI_I,
+        dose_envelope=args.dose_envelope,
     )
 
     if args.save_clean_exitwaves:

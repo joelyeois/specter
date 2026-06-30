@@ -132,6 +132,45 @@ def parse_args() -> argparse.Namespace:
         help="Amplitude contrast ratio.",
     )
 
+    # --- Envelopes ---
+    parser.add_argument(
+        "--convergence_angle",
+        type=float,
+        default=None,
+        help="Beam convergence semi-angle in mrad, for the Cs (spatial coherence) envelope. None disables it.",
+    )
+    parser.add_argument(
+        "--cc",
+        type=float,
+        default=None,
+        help="Chromatic aberration coefficient in mm, for the Cc (temporal coherence) envelope. None disables it.",
+    )
+    parser.add_argument(
+        "--energy_spread",
+        type=float,
+        default=0.7,
+        help="FWHM of the beam energy spread in eV, used by the Cc envelope.",
+    )
+    parser.add_argument(
+        "--deltaV_V",
+        type=float,
+        default=0.06e-6,
+        help="Relative high-voltage instability, used by the Cc envelope.",
+    )
+    parser.add_argument(
+        "--deltaI_I",
+        type=float,
+        default=0.01e-6,
+        help="Relative objective-lens current instability, used by the Cc envelope.",
+    )
+    parser.add_argument(
+        "--dose_envelope",
+        type=lambda x: x.lower() == "true",
+        default=False,
+        metavar="True|False",
+        help="Apply the Grant & Grigorieff (2015) cumulative-dose envelope.",
+    )
+
     # --- Defocus ---
     parser.add_argument(
         "--defocus_min",
@@ -393,6 +432,7 @@ def main() -> None:
 
     # Build once — __init__ generates the first specimen
     _section("Building specimen and image generator")
+    cc_angstrom = args.cc * 1e7 if args.cc is not None else None
     model = MicrographGenerator(
         V,
         args.micrograph_size,
@@ -420,6 +460,12 @@ def main() -> None:
         num_frames=num_frames,
         potential_scale=potential_scale,
         save_clean_exitwaves=args.save_clean_exitwaves,
+        convergence_angle=args.convergence_angle,
+        cc=cc_angstrom,
+        energy_spread=args.energy_spread,
+        deltaV_V=args.deltaV_V,
+        deltaI_I=args.deltaI_I,
+        dose_envelope=args.dose_envelope,
     ).to(args.device)
 
     # Loop: regenerate fresh specimen for each micrograph, use i-th CTF

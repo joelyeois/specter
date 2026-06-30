@@ -227,6 +227,24 @@ class ImageGeneratorFromCoordinates(ParticleGeneratorBase):
     bfactor_envelope : float or torch.Tensor or None, optional
         Isotropic B-factor envelope in Å² applied in the microscope transfer
         function. None or 0.0 means no envelope. Default None.
+    convergence_angle : float, optional
+        Beam convergence semi-angle in milliradians, used for the Cs
+        (spatial coherence) envelope. Default None (envelope disabled).
+    cc : float, optional
+        Chromatic aberration coefficient in Angstrom, used for the Cc
+        (temporal coherence) envelope. Default None (envelope disabled).
+    energy_spread : float, optional
+        FWHM of the beam energy spread in eV, used by the Cc envelope.
+        Default 0.7.
+    deltaV_V : float, optional
+        Relative high-voltage instability, used by the Cc envelope.
+        Default 0.06e-6.
+    deltaI_I : float, optional
+        Relative objective-lens current instability, used by the Cc
+        envelope. Default 0.01e-6.
+    dose_envelope : bool, optional
+        Whether to apply the Grant & Grigorieff (2015) cumulative-dose
+        envelope, using ``dose_per_angstrom``. Default False.
     """
 
     def __init__(
@@ -265,6 +283,12 @@ class ImageGeneratorFromCoordinates(ParticleGeneratorBase):
         mean_squared_displacement_per_dose: float = 0.0,
         periodic_potential: bool = False,
         bfactor_envelope: float | torch.Tensor | None = None,
+        convergence_angle: float | None = None,
+        cc: float | None = None,
+        energy_spread: float = 0.7,
+        deltaV_V: float = 0.06e-6,
+        deltaI_I: float = 0.01e-6,
+        dose_envelope: bool = False,
     ):
         self.pad_fft = pad_fft
         self.ice_thickness = ice_thickness
@@ -291,6 +315,12 @@ class ImageGeneratorFromCoordinates(ParticleGeneratorBase):
             coincidence_radius=coincidence_radius,
             num_frames=num_frames,
             bfactor_envelope=bfactor_envelope,
+            convergence_angle=convergence_angle,
+            cc=cc,
+            energy_spread=energy_spread,
+            deltaV_V=deltaV_V,
+            deltaI_I=deltaI_I,
+            dose_envelope=dose_envelope,
         )
         self.ice_model = ice_model
         self.crowd_max_distance_z = (
@@ -513,6 +543,24 @@ class ImageGenerator(ParticleGeneratorBase):
     bfactor_envelope : float or torch.Tensor or None, optional
         Isotropic B-factor envelope in Å² applied in the microscope transfer
         function. None or 0.0 means no envelope. Default None.
+    convergence_angle : float, optional
+        Beam convergence semi-angle in milliradians, used for the Cs
+        (spatial coherence) envelope. Default None (envelope disabled).
+    cc : float, optional
+        Chromatic aberration coefficient in Angstrom, used for the Cc
+        (temporal coherence) envelope. Default None (envelope disabled).
+    energy_spread : float, optional
+        FWHM of the beam energy spread in eV, used by the Cc envelope.
+        Default 0.7.
+    deltaV_V : float, optional
+        Relative high-voltage instability, used by the Cc envelope.
+        Default 0.06e-6.
+    deltaI_I : float, optional
+        Relative objective-lens current instability, used by the Cc
+        envelope. Default 0.01e-6.
+    dose_envelope : bool, optional
+        Whether to apply the Grant & Grigorieff (2015) cumulative-dose
+        envelope, using ``dose_per_angstrom``. Default False.
     rotate_mode : {"real", "fourier"}, optional
         Volume rotation method. ``"real"`` uses trilinear interpolation;
         ``"fourier"`` rotates in Fourier space (no boundary artifacts).
@@ -554,6 +602,12 @@ class ImageGenerator(ParticleGeneratorBase):
         num_frames: int | None = None,
         potential_scale: float | torch.Tensor = 1.0,
         bfactor_envelope: float | torch.Tensor | None = None,
+        convergence_angle: float | None = None,
+        cc: float | None = None,
+        energy_spread: float = 0.7,
+        deltaV_V: float = 0.06e-6,
+        deltaI_I: float = 0.01e-6,
+        dose_envelope: bool = False,
         rotate_mode: Literal["real", "fourier"] = "real",
     ):
         nxy = scattering_potential.shape[-1]
@@ -583,6 +637,12 @@ class ImageGenerator(ParticleGeneratorBase):
             num_frames=num_frames,
             potential_scale=potential_scale,
             bfactor_envelope=bfactor_envelope,
+            convergence_angle=convergence_angle,
+            cc=cc,
+            energy_spread=energy_spread,
+            deltaV_V=deltaV_V,
+            deltaI_I=deltaI_I,
+            dose_envelope=dose_envelope,
         )
 
         self.parameterization = parameterization

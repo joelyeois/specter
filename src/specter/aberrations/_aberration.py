@@ -6,6 +6,7 @@ import numpy as np
 import torch
 import lightning as L
 
+from . import _envelopes as env
 from . import _functions as fn
 from ..fft import fft2, ifft2
 from ..scattering import energy_to_wavelength
@@ -306,7 +307,7 @@ class Aberration(L.LightningModule):
         if "bfactor_envelope" in ctf_params:
             bfactor = ctf_params["bfactor_envelope"].view(-1, 1, 1)
             if torch.any(bfactor != 0):
-                transfer = transfer * torch.exp(-bfactor * self.k2 / 4)
+                transfer = transfer * env.b_envelope(self.k2, bfactor)
 
         return transfer
 

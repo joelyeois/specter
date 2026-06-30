@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import torch
 
+from specter.aberrations import Aberration
 from specter.aberrations._envelopes import (
     b_envelope,
     cc_envelope,
@@ -96,3 +97,14 @@ def test_dose_envelope_decreases_with_frequency_above_threshold():
     result = dose_envelope(k, dose=torch.tensor(50.0))
     assert torch.all(result[:-1] >= result[1:])
     assert result[-1] < result[0]
+
+
+def test_aberration_bfactor_envelope_matches_inline_formula():
+    ab = Aberration(8, pixel_size=1.0, energy=300.0, aberration_model="holography")
+    ctf_params = {
+        "dfu": torch.tensor([5000.0]),
+        "bfactor_envelope": torch.tensor([50.0]),
+    }
+    transfer = ab.transfer_function(ctf_params)
+    expected_envelope = torch.exp(-50.0 * ab.k2 / 4)
+    assert torch.allclose(torch.abs(transfer), expected_envelope, atol=1e-6)

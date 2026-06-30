@@ -356,5 +356,5 @@ class Aberration(L.LightningModule):
         aberrated_exitwaves = ifft2(fft2(exitwave) * self.tf)
         if self.aberration_model == "ctf":
             return torch.real(aberrated_exitwaves)
-        else:  # "holography"
+        elif self.aberration_model == "holography":
             return aberrated_exitwaves

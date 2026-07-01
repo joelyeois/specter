@@ -108,7 +108,26 @@ class IceBank(L.LightningModule):
         generator_cls = self._METHOD_MAP[method]
         # Always build cubic blocks — non-cubic volumes are assembled via generate_big_ice
         self.generator = generator_cls(n=n, dx=dx, **kwargs)
-        self._bank: Optional[torch.Tensor] = None
+        self.register_buffer("_bank", None, persistent=False)
+
+    def allocate_placeholder(self, num_unique: int | None = None) -> None:
+        """
+        Allocate a zero-filled bank of the correct shape without running generation.
+
+        Lets a DDP rank that shouldn't do the (expensive) generation work still
+        hold a buffer of the right shape, to be filled in by Lightning's
+        automatic module-state sync (``_sync_module_states``) from rank 0.
+
+        Parameters
+        ----------
+        num_unique : int, optional
+            Number of unique cubes. Defaults to the value passed to ``__init__``.
+        """
+        if num_unique is None:
+            num_unique = self._num_unique
+        self._bank = torch.zeros(
+            num_unique, self.nz, self.n, self.n, device=self.device
+        )
 
     def build(self, num_unique: int | None = None, **kwargs: Any) -> None:
         """

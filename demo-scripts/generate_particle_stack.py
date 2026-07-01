@@ -162,6 +162,18 @@ def parse_args() -> argparse.Namespace:
         metavar="True|False",
         help="Apply the Grant & Grigorieff (2015) cumulative-dose envelope.",
     )
+    parser.add_argument(
+        "--bfactor",
+        type=float,
+        default=None,
+        help="Isotropic B-factor envelope in Å². None disables it.",
+    )
+    parser.add_argument(
+        "--bfactor",
+        type=float,
+        default=None,
+        help="Isotropic B-factor envelope in Å². None disables it.",
+    )
 
     # --- Defocus ---
     parser.add_argument(
@@ -725,6 +737,7 @@ def main() -> None:
         deltaV_V=args.deltaV_V,
         deltaI_I=args.deltaI_I,
         dose_envelope=args.dose_envelope,
+        bfactor=args.bfactor,
     )
 
     if args.save_clean_exitwaves:

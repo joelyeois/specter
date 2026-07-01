@@ -189,7 +189,7 @@ def test_tilt_series_generator_regression(ctf_params):
     _save_or_compare("tilt_series_generator", tilt_series.cpu())
 
 
-def test_bfactor_envelope_damps_transfer_function():
+def test_bfactor_damps_transfer_function():
     """B-factor envelope is a Fourier-space transfer-function damping term."""
     aberration = Aberration(
         n_pixels=16,
@@ -199,10 +199,8 @@ def test_bfactor_envelope_damps_transfer_function():
     )
 
     no_envelope = aberration.transfer_function({})
-    zero_envelope = aberration.transfer_function(
-        {"bfactor_envelope": torch.tensor([0.0])}
-    )
-    damped = aberration.transfer_function({"bfactor_envelope": torch.tensor([80.0])})
+    zero_envelope = aberration.transfer_function({"bfactor": torch.tensor([0.0])})
+    damped = aberration.transfer_function({"bfactor": torch.tensor([80.0])})
 
     assert torch.equal(no_envelope, zero_envelope)
     assert torch.equal(damped[:, 0, 0], no_envelope[:, 0, 0])
@@ -397,8 +395,8 @@ def test_image_generator_bfactor_none_and_zero_match(small_volume, ctf_params):
         progressbars=False,
     )
 
-    gen_none = ImageGenerator(**kwargs, bfactor_envelope=None)
-    gen_zero = ImageGenerator(**kwargs, bfactor_envelope=0.0)
+    gen_none = ImageGenerator(**kwargs, bfactor=None)
+    gen_zero = ImageGenerator(**kwargs, bfactor=0.0)
 
     image_none = gen_none(torch.tensor([0]))
     image_zero = gen_zero(torch.tensor([0]))

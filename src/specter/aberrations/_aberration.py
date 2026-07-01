@@ -126,7 +126,7 @@ class Aberration(L.LightningModule):
             - 'tiltx'/'tilty' : Beam tilt
             - 'trefoil1'/'trefoil2' : Trefoil aberration
             - 'tetrafoil1'/'tetrafoil2'/'tetrafoil3'/'tetrafoil4' : Tetrafoil
-            - 'bfactor_envelope' : Isotropic B-factor envelope in Å²
+            - 'bfactor' : Isotropic B-factor envelope in Å²
             - 'dose' : Cumulative electron dose in e-/Angstrom^2, used by
               the dose envelope when ``dose_envelope=True``
 
@@ -195,8 +195,8 @@ class Aberration(L.LightningModule):
 
         transfer = torch.exp(-1j * chi)
 
-        if "bfactor_envelope" in ctf_params:
-            bfactor = ctf_params["bfactor_envelope"].view(-1, 1, 1)
+        if "bfactor" in ctf_params:
+            bfactor = ctf_params["bfactor"].view(-1, 1, 1)
             if torch.any(bfactor != 0):
                 transfer = transfer * env.b_envelope(self.k2, bfactor)
 

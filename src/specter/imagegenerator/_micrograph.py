@@ -92,7 +92,7 @@ class MicrographGenerator(BaseImager):
     save_clean_exitwaves : bool, optional
         Save exit waves computed without ice (requires ``scattering_potential``
         path). Default False.
-    bfactor_envelope : float or torch.Tensor or None, optional
+    bfactor : float or torch.Tensor or None, optional
         Isotropic B-factor envelope in Å² applied in the microscope transfer
         function. None or 0.0 means no envelope. Default None.
     convergence_angle : float, optional
@@ -148,7 +148,7 @@ class MicrographGenerator(BaseImager):
         num_frames: int | None = None,
         potential_scale: float | torch.Tensor = 1.0,
         save_clean_exitwaves: bool = False,
-        bfactor_envelope: float | torch.Tensor | None = None,
+        bfactor: float | torch.Tensor | None = None,
         convergence_angle: float | None = None,
         cc: float | None = None,
         energy_spread: float = 0.7,
@@ -198,7 +198,7 @@ class MicrographGenerator(BaseImager):
             coincidence_radius=coincidence_radius,
             num_frames=num_frames,
             potential_scale=potential_scale,
-            bfactor_envelope=bfactor_envelope,
+            bfactor=bfactor,
             convergence_angle=convergence_angle,
             cc=cc,
             energy_spread=energy_spread,

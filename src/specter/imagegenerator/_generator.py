@@ -224,7 +224,7 @@ class ImageGeneratorFromCoordinates(ParticleGeneratorBase):
         into the potential. Required when coordinates come from a periodic ice
         generator (e.g. GradientSKIcemaker) to avoid density deficiency at
         the box boundary. Default False.
-    bfactor_envelope : float or torch.Tensor or None, optional
+    bfactor : float or torch.Tensor or None, optional
         Isotropic B-factor envelope in Å² applied in the microscope transfer
         function. None or 0.0 means no envelope. Default None.
     convergence_angle : float, optional
@@ -282,7 +282,7 @@ class ImageGeneratorFromCoordinates(ParticleGeneratorBase):
         num_frames: int | None = None,
         mean_squared_displacement_per_dose: float = 0.0,
         periodic_potential: bool = False,
-        bfactor_envelope: float | torch.Tensor | None = None,
+        bfactor: float | torch.Tensor | None = None,
         convergence_angle: float | None = None,
         cc: float | None = None,
         energy_spread: float = 0.7,
@@ -314,7 +314,7 @@ class ImageGeneratorFromCoordinates(ParticleGeneratorBase):
             verbose=verbose,
             coincidence_radius=coincidence_radius,
             num_frames=num_frames,
-            bfactor_envelope=bfactor_envelope,
+            bfactor=bfactor,
             convergence_angle=convergence_angle,
             cc=cc,
             energy_spread=energy_spread,
@@ -540,7 +540,7 @@ class ImageGenerator(ParticleGeneratorBase):
         Parameterization for ice potential. Default 'kirkland'.
     detector_model : str, optional
         Detector model name.
-    bfactor_envelope : float or torch.Tensor or None, optional
+    bfactor : float or torch.Tensor or None, optional
         Isotropic B-factor envelope in Å² applied in the microscope transfer
         function. None or 0.0 means no envelope. Default None.
     convergence_angle : float, optional
@@ -601,7 +601,7 @@ class ImageGenerator(ParticleGeneratorBase):
         coincidence_radius: float | torch.Tensor = 0.0,
         num_frames: int | None = None,
         potential_scale: float | torch.Tensor = 1.0,
-        bfactor_envelope: float | torch.Tensor | None = None,
+        bfactor: float | torch.Tensor | None = None,
         convergence_angle: float | None = None,
         cc: float | None = None,
         energy_spread: float = 0.7,
@@ -636,7 +636,7 @@ class ImageGenerator(ParticleGeneratorBase):
             coincidence_radius=coincidence_radius,
             num_frames=num_frames,
             potential_scale=potential_scale,
-            bfactor_envelope=bfactor_envelope,
+            bfactor=bfactor,
             convergence_angle=convergence_angle,
             cc=cc,
             energy_spread=energy_spread,

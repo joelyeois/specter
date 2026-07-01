@@ -77,7 +77,7 @@ def full_ctf_params() -> dict[str, torch.Tensor]:
         "tilty": torch.tensor([-0.003]),
         "trefoil1": torch.tensor([200.0]),
         "trefoil2": torch.tensor([-150.0]),
-        "bfactor_envelope": torch.tensor([60.0]),
+        "bfactor": torch.tensor([60.0]),
     }
 
 
@@ -238,7 +238,7 @@ def test_trefoil_changes_output(small_volume: torch.Tensor) -> None:
     assert not torch.equal(img_no, img_yes)
 
 
-def test_bfactor_envelope_damps_ghostbuster_output(small_volume: torch.Tensor) -> None:
+def test_bfactor_damps_ghostbuster_output(small_volume: torch.Tensor) -> None:
     """B-factor envelope reduces high-frequency power in simulated images."""
     base = dict(
         V=small_volume,
@@ -254,7 +254,7 @@ def test_bfactor_envelope_damps_ghostbuster_output(small_volume: torch.Tensor) -
     params_b = {
         "dfu": torch.tensor([5000.0]),
         "cs": torch.tensor([2.7]),
-        "bfactor_envelope": torch.tensor([200.0]),
+        "bfactor": torch.tensor([200.0]),
     }
     img_no_b = Reconstructor(**base, ctf_params=params_no_b).forward(torch.tensor([0]))
     img_b = Reconstructor(**base, ctf_params=params_b).forward(torch.tensor([0]))

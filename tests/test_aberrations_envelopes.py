@@ -99,11 +99,11 @@ def test_dose_envelope_decreases_with_frequency_above_threshold():
     assert result[-1] < result[0]
 
 
-def test_aberration_bfactor_envelope_matches_inline_formula():
+def test_aberration_bfactor_matches_inline_formula():
     ab = Aberration(8, pixel_size=1.0, energy=300.0, aberration_model="holography")
     ctf_params = {
         "dfu": torch.tensor([5000.0]),
-        "bfactor_envelope": torch.tensor([50.0]),
+        "bfactor": torch.tensor([50.0]),
     }
     transfer = ab.transfer_function(ctf_params)
     expected_envelope = torch.exp(-50.0 * ab.k2 / 4)

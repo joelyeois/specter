@@ -84,7 +84,7 @@ class TiltSeriesGenerator(MicrographGenerator):
         Coincidence radius in pixels. Default 0.0.
     num_frames : int, optional
         Number of detector frames to simulate. Default None.
-    bfactor_envelope : float or torch.Tensor or None, optional
+    bfactor : float or torch.Tensor or None, optional
         Isotropic B-factor envelope in Å² applied in the microscope transfer
         function. None or 0.0 means no envelope. Default None.
     convergence_angle : float, optional
@@ -275,7 +275,7 @@ class TiltSeriesGenerator(MicrographGenerator):
         tilt_axis: str = "x",
         coincidence_radius: float | torch.Tensor = 0.0,
         num_frames: int | None = None,
-        bfactor_envelope: float | torch.Tensor | None = None,
+        bfactor: float | torch.Tensor | None = None,
         convergence_angle: float | None = None,
         cc: float | None = None,
         energy_spread: float = 0.7,
@@ -387,7 +387,7 @@ class TiltSeriesGenerator(MicrographGenerator):
             slice_batch_size=slice_batch_size,
             coincidence_radius=coincidence_radius,
             num_frames=num_frames,
-            bfactor_envelope=bfactor_envelope,
+            bfactor=bfactor,
             convergence_angle=convergence_angle,
             cc=cc,
             energy_spread=energy_spread,

@@ -19,6 +19,7 @@ def extract_parameters_from_csfile(
     csfile_path: str,
     return_class: Literal["0", "1", "all"] = "all",
     rotation_representation: Literal["quaternion", "rotvec"] = "quaternion",
+    n_particles: int | None = None,
 ) -> tuple:
     """
     Extract poses and CTF parameters from CryoSPARC .cs file.
@@ -32,6 +33,9 @@ def extract_parameters_from_csfile(
         Default is 'all'.
     rotation_representation : str, optional
         Representation of rotations. 'quaternion' or 'rotvec'. Default is 'quaternion'.
+    n_particles : int, optional
+        If given, only the first ``n_particles`` particles (after filtering by
+        ``return_class``) are returned. Default is None (return all).
 
     Returns
     -------
@@ -167,17 +171,31 @@ def extract_parameters_from_csfile(
             "tref1": tref1,
             "tref2": tref2,
         }
+        rotations_out = rotations
+        translations_out = translations_A
+        scale_out = scale
+        anisomag_out = anisomag
+        indices_out = indices
+        split_out = split
+        if n_particles is not None:
+            rotations_out = rotations_out[:n_particles]
+            translations_out = translations_out[:n_particles]
+            ctf_params = {k: v[:n_particles] for k, v in ctf_params.items()}
+            scale_out = scale_out[:n_particles]
+            anisomag_out = None if anisomag_out is None else anisomag_out[:n_particles]
+            indices_out = indices_out[:n_particles]
+            split_out = split_out[:n_particles]
         return (
             energy_kev,
             pixel_size,
             alpha,
-            rotations,
-            translations_A,
+            rotations_out,
+            translations_out,
             ctf_params,
-            scale,
-            anisomag,
-            indices,
-            split,
+            scale_out,
+            anisomag_out,
+            indices_out,
+            split_out,
         )
     else:  # "0" or "1"
         split_val = int(return_class)
@@ -195,14 +213,24 @@ def extract_parameters_from_csfile(
             "tref2": tref2[mask],
         }
         anisomag_out = None if anisomag is None else anisomag[mask]
+        rotations_out = rotations[mask]
+        translations_out = translations_A[mask]
+        scale_out = scale[mask]
+        if n_particles is not None:
+            rotations_out = rotations_out[:n_particles]
+            translations_out = translations_out[:n_particles]
+            ctf_params = {k: v[:n_particles] for k, v in ctf_params.items()}
+            scale_out = scale_out[:n_particles]
+            anisomag_out = None if anisomag_out is None else anisomag_out[:n_particles]
+            indices = indices[:n_particles]
         return (
             energy_kev,
             pixel_size,
             alpha,
-            rotations[mask],
-            translations_A[mask],
+            rotations_out,
+            translations_out,
             ctf_params,
-            scale[mask],
+            scale_out,
             anisomag_out,
             indices,
             None,

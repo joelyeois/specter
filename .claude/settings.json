@@ -27,10 +27,13 @@
       "mcp__jupyter__list_files",
       "Bash(rm tests/test_data/ghostbuster_forward_multislice.pt \\\\ *)",
       "Bash(git add *)",
-      "Bash(git commit -m ' *)"
+      "Bash(git commit -m ' *)",
+      "Bash(sed -i 's/_setup/_prepare_propagation_parameters/g' src/torch_scattering/_core.py src/torch_scattering/firstborn.py src/torch_scattering/rytov.py src/torch_scattering/multislice.py && grep -rn \"_prepare_propagation_parameters\" src/torch_scattering/)"
     ],
     "additionalDirectories": [
-      "/mnt/cbis/home/e0788253/czii/specter/tests/test_data"
+      "/mnt/cbis/home/e0788253/czii/specter/tests/test_data",
+      "/mnt/cbis/home/e0788253/torch-scattering/examples",
+      "/mnt/cbis/home/e0788253/torch-scattering/src/torch_scattering"
     ]
   }
 }

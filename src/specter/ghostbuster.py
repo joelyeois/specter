@@ -1099,7 +1099,9 @@ class Ghostbuster:
             anisomag,
             indices,
             _split,
-        ) = extract_parameters_from_csfile(str(cs_file), return_class=return_class)
+        ) = extract_parameters_from_csfile(
+            str(cs_file), return_class=return_class, n_particles=num_particles
+        )
         _n_loaded = len(rotations)
         _energy_val = float(energy.item() if hasattr(energy, "item") else energy)
         _pixel_size_val = float(
@@ -1169,7 +1171,6 @@ class Ghostbuster:
         voxel_size: float,
         scattering_model: str,
         batch_size: int,
-        n_particles: int,
     ) -> tuple["Reconstructor", torch.utils.data.DataLoader]:
         from .arrays import ball3d
 
@@ -1177,24 +1178,21 @@ class Ghostbuster:
         kmask = ball3d(n, n)
         volume_init = torch.zeros(n, n, n)
 
-        idx = torch.arange(n_particles)
+        idx = torch.arange(len(images))
         dataset = torch.utils.data.TensorDataset(images, idx)
         loader = torch.utils.data.DataLoader(
             dataset, batch_size=batch_size, shuffle=True, num_workers=self.num_workers
         )
 
-        anisomag = self._anisomag[:n_particles] if self._anisomag is not None else None
-        ctf_sliced = {k: v[:n_particles] for k, v in self._ctf_params.items()}
-
         model = Reconstructor(
             volume_init,
             voxel_size,
-            self._rotations[:n_particles],
-            self._translations[:n_particles],
-            ctf_sliced,
+            self._rotations,
+            self._translations,
+            self._ctf_params,
             self._energy,
             self.dose_per_angstrom,
-            anisomag=anisomag,
+            anisomag=self._anisomag,
             alpha=self._alpha,
             defocus_offset=torch.tensor(self.defocus_offset),
             scattering_model=scattering_model,
@@ -1244,23 +1242,19 @@ class Ghostbuster:
         Reconstructor
             The trained model. Access the volume via ``model.V.detach()``.
         """
-        n_particles = (
-            self.num_particles if self.num_particles is not None else len(self._images)
-        )
         _box = self._images.shape[-1]
         use_gpu = torch.cuda.is_available()
         _device_str = f"GPU {device}" if use_gpu else "CPU"
         print(
-            f"Starting reconstruction: {n_particles} particles  |  box {_box}³  |  "
+            f"Starting reconstruction: {len(self._images)} particles  |  box {_box}³  |  "
             f"{self.scattering_model}  |  {self.epochs} epochs  |  "
             f"batch {self.batch_size}  |  {_device_str}"
         )
         model, loader = self._build_reconstructor_and_loader(
-            self._images[:n_particles],
+            self._images,
             self._voxel_size,
             self.scattering_model,
             self.batch_size,
-            n_particles,
         )
 
         trainer = L.Trainer(
@@ -1305,14 +1299,11 @@ class Ghostbuster:
         Reconstructor
             The trained model after one epoch.
         """
-        n_particles = (
-            self.num_particles if self.num_particles is not None else len(self._images)
-        )
+        n_particles = len(self._images)
         print(f"Test run: {n_particles} particles  |  {bin_factor}× binned  |  1 epoch")
-        images = self._images[:n_particles]
 
         pool = torch.nn.AvgPool2d(bin_factor, stride=bin_factor)
-        images_binned = pool(images.unsqueeze(1)).squeeze(1) * bin_factor**2
+        images_binned = pool(self._images.unsqueeze(1)).squeeze(1) * bin_factor**2
         voxel_size_binned = self._voxel_size * bin_factor
 
         model, loader = self._build_reconstructor_and_loader(
@@ -1320,7 +1311,6 @@ class Ghostbuster:
             voxel_size_binned,
             self.scattering_model,
             self.batch_size,
-            n_particles,
         )
 
         use_gpu = torch.cuda.is_available()

@@ -166,9 +166,11 @@ class Job:
                 self._created_at = existing.get("created_at")
                 self._is_resume = True
             else:
-                raise FileNotFoundError(
-                    f"No existing job found at {self._dir} (job_id={self._resume_job_id!r})"
-                )
+                # No job.json yet at this explicit ID: create fresh rather than
+                # resume, so callers can pin a deterministic job_id (e.g. from a
+                # PBS script) on the very first invocation.
+                self._dir.mkdir(parents=True, exist_ok=True)
+                self._created_at = datetime.now(timezone.utc).isoformat()
         else:
             self._job_id = _next_job_id(project_dir)
             self._dir = project_dir / self._job_id

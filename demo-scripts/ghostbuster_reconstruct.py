@@ -16,7 +16,9 @@ Usage:
         --symmetry I1 \\
         --return_class 1
 
-Save dataset B to same J001 as dataset A:
+Save dataset B to same J001 as dataset A (or pin a fixed --job_id from the
+start, e.g. from a PBS script — the first call creates the job, later calls
+with the same --job_id resume into it):
     python ghostbuster_reconstruct.py \\
         --project empiar-10202 \\
         --job_id J001 \\
@@ -105,7 +107,10 @@ def parse_args() -> argparse.Namespace:
         "--job_id",
         type=str,
         default=None,
-        help="Save into existing job directory (e.g. 'J001'). Omit to create new job.",
+        help=(
+            "Pin a job directory (e.g. 'J001'): resumes if it already exists, "
+            "creates it otherwise. Omit to auto-assign a new job id."
+        ),
     )
 
     return parser.parse_args()

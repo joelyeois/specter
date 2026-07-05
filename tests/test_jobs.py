@@ -436,10 +436,25 @@ def test_job_resume_does_not_allocate_new_id(tmp_path: Path) -> None:
         assert job3.dir.name == "J002"
 
 
-def test_job_resume_missing_id_raises(tmp_path: Path) -> None:
-    with pytest.raises(FileNotFoundError, match="J099"):
-        with Job("ghostbuster", project="p", base_dir=tmp_path, job_id="J099"):
-            pass
+def test_job_explicit_id_creates_when_missing(tmp_path: Path) -> None:
+    # An explicit job_id with no existing job.json creates a fresh job at that
+    # exact path, rather than raising — lets callers (e.g. a PBS script) pin a
+    # deterministic job_id on the very first invocation.
+    with Job("ghostbuster", project="p", base_dir=tmp_path, job_id="J099") as job:
+        assert job.dir.name == "J099"
+        assert (job.dir / "job.json").exists()
+    data = json.loads((tmp_path / "p" / "J099" / "job.json").read_text())
+    assert data["status"] == "complete"
+
+
+def test_job_explicit_id_creates_when_dir_preexists_empty(tmp_path: Path) -> None:
+    # Mirrors a shell script pre-creating the job folder with `mkdir -p` before
+    # job.json exists.
+    (tmp_path / "p").mkdir(parents=True)
+    (tmp_path / "p" / "J001").mkdir()
+    with Job("ghostbuster", project="p", base_dir=tmp_path, job_id="J001") as job:
+        assert job.dir.name == "J001"
+        assert (job.dir / "job.json").exists()
 
 
 def test_job_resume_loads_existing_params(tmp_path: Path) -> None:

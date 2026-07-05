@@ -15,53 +15,27 @@ from scipy.spatial.transform import Rotation
 _console = Console()
 
 
-def extract_parameters_from_csfile(
+def _load_csfile_parameters(
     csfile_path: str,
-    return_class: Literal["0", "1", "all"] = "all",
-    rotation_representation: Literal["quaternion", "rotvec"] = "quaternion",
-    n_particles: int | None = None,
-) -> tuple:
-    """
-    Extract poses and CTF parameters from CryoSPARC .cs file.
-
-    Parameters
-    ----------
-    csfile_path : str
-        Path of the .cs file.
-    return_class : str, optional
-        Specifies which particle class to return. Options are '0', '1', or 'all'.
-        Default is 'all'.
-    rotation_representation : str, optional
-        Representation of rotations. 'quaternion' or 'rotvec'. Default is 'quaternion'.
-    n_particles : int, optional
-        If given, only the first ``n_particles`` particles (after filtering by
-        ``return_class``) are returned. Default is None (return all).
+    rotation_representation: Literal["quaternion", "rotvec"],
+) -> tuple[
+    torch.Tensor,
+    torch.Tensor,
+    torch.Tensor,
+    torch.Tensor,
+    torch.Tensor,
+    dict[str, torch.Tensor],
+    torch.Tensor,
+    torch.Tensor | None,
+    torch.Tensor,
+]:
+    """Load and derive all per-particle imaging parameters from a .cs file, unfiltered.
 
     Returns
     -------
-    energy_kev : torch.Tensor
-        Energy in keV.
-    pixel_size : torch.Tensor
-        Pixel sizes in Ångstrom.
-    alpha : torch.Tensor
-        Amplitude contrast ratio.
-    rotations : torch.Tensor
-        Quaternions with shape (N, 4) or rotation vectors.
-    translations_A : torch.Tensor
-        xy-translations in Ångstrom with shape (N, 2).
-    ctf_params : torch.Tensor
-        CTF parameters with shape (N, 7). Parameters are (Cs, dfu, dfv, dfang, tiltx, tilty, phaseshift).
-    scale : torch.Tensor
-        Per-particle scale factors.
-    anisomag : torch.Tensor or None
-        Anisotropic magnification matrices (N, 2, 2) or None if identity.
-    indices : torch.Tensor
-        Indices of the extracted particles from the dataset.
-    halfset_labels : torch.Tensor or None
-        1-D integer tensor of length ``N`` with values ``0`` or ``1`` from
-        ``alignments3D/split``, ready to pass as ``halfset_labels`` to
-        :func:`~specter.ghostbuster.run_halfsets`.
-        Only returned when ``return_class == "all"``; ``None`` otherwise.
+    tuple
+        ``(energy_kev, pixel_size, alpha, rotations, translations_A, ctf_params,
+        scale, anisomag, split)`` for every particle in the dataset.
     """
     dataset = Dataset.load(csfile_path)
 
@@ -156,85 +130,166 @@ def extract_parameters_from_csfile(
         corrected_shifts = corrected_shifts.squeeze(-1)
         translations_A = corrected_shifts
 
-    if return_class == "all":
-        indices = torch.arange(len(split))
+    ctf_params = {
+        "cs": cs_A,
+        "dfu": dfu_A,
+        "dfv": dfv_A,
+        "dfang": dfang_deg,
+        "tiltx": beamtiltx_rad,
+        "tilty": beamtilty_rad,
+        "phaseshift": phaseshift_rad,
+        "tref1": tref1,
+        "tref2": tref2,
+    }
 
-        # build ctf_params
-        ctf_params = {
-            "cs": cs_A,
-            "dfu": dfu_A,
-            "dfv": dfv_A,
-            "dfang": dfang_deg,
-            "tiltx": beamtiltx_rad,
-            "tilty": beamtilty_rad,
-            "phaseshift": phaseshift_rad,
-            "tref1": tref1,
-            "tref2": tref2,
-        }
-        rotations_out = rotations
-        translations_out = translations_A
-        scale_out = scale
-        anisomag_out = anisomag
-        indices_out = indices
-        split_out = split
-        if n_particles is not None:
-            rotations_out = rotations_out[:n_particles]
-            translations_out = translations_out[:n_particles]
-            ctf_params = {k: v[:n_particles] for k, v in ctf_params.items()}
-            scale_out = scale_out[:n_particles]
-            anisomag_out = None if anisomag_out is None else anisomag_out[:n_particles]
-            indices_out = indices_out[:n_particles]
-            split_out = split_out[:n_particles]
-        return (
-            energy_kev,
-            pixel_size,
-            alpha,
-            rotations_out,
-            translations_out,
-            ctf_params,
-            scale_out,
-            anisomag_out,
-            indices_out,
-            split_out,
-        )
+    return (
+        energy_kev,
+        pixel_size,
+        alpha,
+        rotations,
+        translations_A,
+        ctf_params,
+        scale,
+        anisomag,
+        split,
+    )
+
+
+def _select_particles(
+    mask: torch.Tensor,
+    indices: torch.Tensor,
+    rotations: torch.Tensor,
+    translations_A: torch.Tensor,
+    ctf_params: dict[str, torch.Tensor],
+    scale: torch.Tensor,
+    anisomag: torch.Tensor | None,
+    n_particles: int | None,
+) -> tuple[
+    torch.Tensor,
+    torch.Tensor,
+    torch.Tensor,
+    dict[str, torch.Tensor],
+    torch.Tensor,
+    torch.Tensor | None,
+]:
+    """Apply a per-particle boolean mask, then truncate to the first n_particles.
+
+    Returns
+    -------
+    tuple
+        ``(indices, rotations, translations_A, ctf_params, scale, anisomag)``.
+    """
+    rotations = rotations[mask]
+    translations_A = translations_A[mask]
+    ctf_params = {k: v[mask] for k, v in ctf_params.items()}
+    scale = scale[mask]
+    anisomag = None if anisomag is None else anisomag[mask]
+
+    if n_particles is not None:
+        indices = indices[:n_particles]
+        rotations = rotations[:n_particles]
+        translations_A = translations_A[:n_particles]
+        ctf_params = {k: v[:n_particles] for k, v in ctf_params.items()}
+        scale = scale[:n_particles]
+        anisomag = None if anisomag is None else anisomag[:n_particles]
+
+    return indices, rotations, translations_A, ctf_params, scale, anisomag
+
+
+def extract_parameters_from_csfile(
+    csfile_path: str,
+    return_class: Literal["0", "1", "all"] = "all",
+    rotation_representation: Literal["quaternion", "rotvec"] = "quaternion",
+    n_particles: int | None = None,
+) -> tuple:
+    """
+    Extract poses and CTF parameters from CryoSPARC .cs file.
+
+    Parameters
+    ----------
+    csfile_path : str
+        Path of the .cs file.
+    return_class : str, optional
+        Specifies which particle class to return. Options are '0', '1', or 'all'.
+        Default is 'all'.
+    rotation_representation : str, optional
+        Representation of rotations. 'quaternion' or 'rotvec'. Default is 'quaternion'.
+    n_particles : int, optional
+        If given, only the first ``n_particles`` particles (after filtering by
+        ``return_class``) are returned. Default is None (return all).
+
+    Returns
+    -------
+    energy_kev : torch.Tensor
+        Energy in keV.
+    pixel_size : torch.Tensor
+        Pixel sizes in Ångstrom.
+    alpha : torch.Tensor
+        Amplitude contrast ratio.
+    rotations : torch.Tensor
+        Quaternions with shape (N, 4) or rotation vectors.
+    translations_A : torch.Tensor
+        xy-translations in Ångstrom with shape (N, 2).
+    ctf_params : torch.Tensor
+        CTF parameters with shape (N, 7). Parameters are (Cs, dfu, dfv, dfang, tiltx, tilty, phaseshift).
+    scale : torch.Tensor
+        Per-particle scale factors.
+    anisomag : torch.Tensor or None
+        Anisotropic magnification matrices (N, 2, 2) or None if identity.
+    indices : torch.Tensor
+        Indices of the extracted particles from the dataset.
+    halfset_labels : torch.Tensor or None
+        1-D integer tensor of length ``N`` with values ``0`` or ``1`` from
+        ``alignments3D/split``, ready to pass as ``halfset_labels`` to
+        :func:`~specter.ghostbuster.run_halfsets`.
+        Only returned when ``return_class == "all"``; ``None`` otherwise.
+    """
+    (
+        energy_kev,
+        pixel_size,
+        alpha,
+        rotations,
+        translations_A,
+        ctf_params,
+        scale,
+        anisomag,
+        split,
+    ) = _load_csfile_parameters(csfile_path, rotation_representation)
+
+    if return_class == "all":
+        mask = torch.ones_like(split, dtype=torch.bool)
+        indices = torch.arange(len(split))
+        halfset_labels: torch.Tensor | None = split
     else:  # "0" or "1"
-        split_val = int(return_class)
-        mask = split == split_val
+        mask = split == int(return_class)
         indices = torch.squeeze(torch.nonzero(mask))
-        ctf_params = {
-            "cs": cs_A[mask],
-            "dfu": dfu_A[mask],
-            "dfv": dfv_A[mask],
-            "dfang": dfang_deg[mask],
-            "tiltx": beamtiltx_rad[mask],
-            "tilty": beamtilty_rad[mask],
-            "phaseshift": phaseshift_rad[mask],
-            "tref1": tref1[mask],
-            "tref2": tref2[mask],
-        }
-        anisomag_out = None if anisomag is None else anisomag[mask]
-        rotations_out = rotations[mask]
-        translations_out = translations_A[mask]
-        scale_out = scale[mask]
-        if n_particles is not None:
-            rotations_out = rotations_out[:n_particles]
-            translations_out = translations_out[:n_particles]
-            ctf_params = {k: v[:n_particles] for k, v in ctf_params.items()}
-            scale_out = scale_out[:n_particles]
-            anisomag_out = None if anisomag_out is None else anisomag_out[:n_particles]
-            indices = indices[:n_particles]
-        return (
-            energy_kev,
-            pixel_size,
-            alpha,
-            rotations_out,
-            translations_out,
-            ctf_params,
-            scale_out,
-            anisomag_out,
-            indices,
-            None,
-        )
+        halfset_labels = None
+
+    indices, rotations, translations_A, ctf_params, scale, anisomag = _select_particles(
+        mask,
+        indices,
+        rotations,
+        translations_A,
+        ctf_params,
+        scale,
+        anisomag,
+        n_particles,
+    )
+    if halfset_labels is not None and n_particles is not None:
+        halfset_labels = halfset_labels[:n_particles]
+
+    return (
+        energy_kev,
+        pixel_size,
+        alpha,
+        rotations,
+        translations_A,
+        ctf_params,
+        scale,
+        anisomag,
+        indices,
+        halfset_labels,
+    )
 
 
 def create_particle_starfile(

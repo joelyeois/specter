@@ -79,7 +79,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--symmetry_mode", type=str, default="fourier")
     parser.add_argument("--sparsity", type=float, default=None)
     parser.add_argument("--rotate_mode", type=str, default="real")
-    parser.add_argument("--flipcurvature", action="store_true", default=True)
+    parser.add_argument(
+        "--ews_curvature_sign",
+        type=str,
+        default="negative",
+        choices=["negative", "positive"],
+    )
     parser.add_argument("--klim", type=float, default=None)
     parser.add_argument("--nps_weight", type=float, default=None)
     parser.add_argument("--learn_noise_model", action="store_true")
@@ -140,7 +145,7 @@ def main() -> None:
                 symmetry_mode=args.symmetry_mode,
                 sparsity=args.sparsity,
                 rotate_mode=args.rotate_mode,
-                flipcurvature=args.flipcurvature,
+                ews_curvature_sign=args.ews_curvature_sign,
                 klim=args.klim,
                 nps_weight=args.nps_weight,
                 learn_noise_model=args.learn_noise_model,

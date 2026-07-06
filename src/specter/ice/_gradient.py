@@ -51,6 +51,10 @@ class GradientSKIcemaker(L.LightningModule):
         Computation device.
     progressbars : bool, optional
         Whether to show progress bars. Default is True.
+    mdsim_target_path : str, optional
+        Path to a precomputed radial-average |F(k)| target ``.pt`` file (see
+        :class:`~specter.ice.APIcemaker`). If None, uses the bundled default
+        target. Default is None.
     """
 
     def __init__(
@@ -61,12 +65,13 @@ class GradientSKIcemaker(L.LightningModule):
         min_distance: float = 2.0,
         device: str | torch.device = "cpu",
         progressbars: bool = True,
+        mdsim_target_path: str | None = None,
     ) -> None:
         super().__init__()
         self.min_distance = min_distance
         self.progressbars = progressbars
 
-        _im = APIcemaker(n=n, dx=dx, nz=nz)
+        _im = APIcemaker(n=n, dx=dx, nz=nz, mdsim_target_path=mdsim_target_path)
         self.n = _im.n
         self.nz = _im.nz
         self.dx = _im.dx

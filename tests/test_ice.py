@@ -4,7 +4,7 @@ Tests for IceBank.
 
 import torch
 
-from specter.ice import IceBank
+from specter.ice import APIcemaker, GradientSKIcemaker, IceBank
 
 
 def test_allocate_placeholder_shape_and_zeros():
@@ -31,3 +31,32 @@ def test_allocate_placeholder_matches_build_shape():
     built_bank.build()
 
     assert placeholder_bank._bank.shape == built_bank._bank.shape
+
+
+def test_apicemaker_custom_mdsim_target_path_overrides_default(tmp_path):
+    """A custom mdsim_target_path should replace the bundled default kernel."""
+    custom_target = torch.linspace(1.0, 0.0, 80)
+    target_path = tmp_path / "custom_target.pt"
+    torch.save(custom_target, target_path)
+
+    default_im = APIcemaker(n=32, dx=1.0, progressbars=False)
+    custom_im = APIcemaker(
+        n=32, dx=1.0, progressbars=False, mdsim_target_path=str(target_path)
+    )
+
+    assert torch.allclose(custom_im.mdsim_f_radial_avg, custom_target)
+    assert not torch.allclose(custom_im.interp_f_kernel, default_im.interp_f_kernel)
+
+
+def test_gradientskicemaker_forwards_custom_mdsim_target_path(tmp_path):
+    """GradientSKIcemaker should forward mdsim_target_path to its internal APIcemaker."""
+    custom_target = torch.linspace(1.0, 0.0, 80)
+    target_path = tmp_path / "custom_target.pt"
+    torch.save(custom_target, target_path)
+
+    default_gd = GradientSKIcemaker(n=32, dx=1.0, progressbars=False)
+    custom_gd = GradientSKIcemaker(
+        n=32, dx=1.0, progressbars=False, mdsim_target_path=str(target_path)
+    )
+
+    assert not torch.allclose(custom_gd.f_target, default_gd.f_target)

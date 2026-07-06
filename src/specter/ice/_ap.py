@@ -51,6 +51,11 @@ class APIcemaker(L.LightningModule):
         Atomic potential parameterization ('kirkland', 'lobato', 'shryov'). Default is 'kirkland'.
     min_distance : float, optional
         Minimum distance between water molecules in Angstroms. Default is 1.9.
+    mdsim_target_path : str, optional
+        Path to a precomputed radial-average |F(k)| target ``.pt`` file, in the
+        same format as the bundled default (a 1D tensor indexed by k-bin on a
+        400x400x400, 0.25 Å grid). If None, uses the bundled
+        ``mdsim_f_radial_avg_400x400x400_0.25A.pt``. Default is None.
 
     Attributes
     ----------
@@ -68,13 +73,14 @@ class APIcemaker(L.LightningModule):
         parameterization: str = "kirkland",
         min_distance: float = 1.9,
         correction_factor: float | None = None,
+        mdsim_target_path: str | None = None,
     ):
         super().__init__()
 
         # load 3D radial average of mdsim data
         current_dir = os.path.dirname(os.path.abspath(__file__))
         root_dir = os.path.dirname(os.path.dirname(os.path.dirname(current_dir)))
-        self.saved_data_path = os.path.join(
+        self.saved_data_path = mdsim_target_path or os.path.join(
             root_dir, "ice-data", "mdsim_f_radial_avg_400x400x400_0.25A.pt"
         )
         self.mdsim_dx = 0.25

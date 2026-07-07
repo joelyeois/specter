@@ -253,6 +253,7 @@ def plot_particle_stack(
     pixel_size: float,
     defocus_values: torch.Tensor | None = None,
     max_images: int = 5,
+    fftmax: float | None = None,
 ) -> None:
     """
     Plot cryo-EM image diagnostics: raw images, FFT magnitude, and radial power spectra.
@@ -313,7 +314,7 @@ def plot_particle_stack(
         fft_sym = radial_symmetrize(fft_mag)
         half = fft_mag.shape[1] // 2
         fft_display = torch.cat([fft_sym[:, :half], fft_mag[:, half:]], dim=1)
-        im = ax.imshow(fft_display, cmap="gray")
+        im = ax.imshow(fft_display, cmap="gray", vmax=fftmax)
         ax.set(xticks=[], yticks=[])
         kw = dict(
             fontsize=7,
@@ -350,6 +351,8 @@ def plot_particle_stack(
     axes[0, 0].set(ylabel="Images")
     axes[1, 0].set(ylabel="FFT")
     axes[2, 0].set(ylabel="FFT Radial profile")
+    if fftmax is not None:
+        axes[2, 0].set_ylim(top=fftmax)
     axes[2, n // 2].set_xlabel("Resolution (Å)")
 
     plt.show()

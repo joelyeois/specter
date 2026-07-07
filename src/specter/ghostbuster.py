@@ -65,6 +65,12 @@ class Reconstructor(L.LightningModule):
         Learning rate for translations. None disables translation refinement.
     lr_D : float, optional
         Learning rate for defocus offset. None disables defocus refinement.
+    bfactor : float or torch.Tensor, optional
+        Isotropic B-factor envelope in Å² applied in the microscope transfer
+        function, damping high-resolution signal. Scalar (applied to all
+        particles) or per-particle tensor. If given, overrides any
+        ``"bfactor"`` entry already present in ``ctf_params``. None or 0.0
+        means no envelope. Default None.
     scheduler : {"LambdaLR", "OneCycleLR", "CosineAnnealingWarmRestarts", "MultiplicativeLR"}
         LR scheduler applied to the volume optimiser. Default is "LambdaLR".
         ``"OneCycleLR"`` treats ``lr`` as the peak learning rate and decays
@@ -101,6 +107,7 @@ class Reconstructor(L.LightningModule):
         anisomag: torch.Tensor | None = None,
         alpha: float = 0.0,
         defocus_offset: torch.Tensor = torch.tensor(0.0),
+        bfactor: float | torch.Tensor | None = None,
         scattering_model: str = "multislice",
         aberration_model: str = "holography",
         klim: float | None = None,
@@ -144,6 +151,7 @@ class Reconstructor(L.LightningModule):
                 "translations",
                 "ctf_params",
                 "anisomag",
+                "bfactor",
                 "kmask",
                 "nps_weight",
                 "fsc_ref",
@@ -281,6 +289,7 @@ class Reconstructor(L.LightningModule):
             ews_curvature_sign=self.ews_curvature_sign,
             alpha=self.alpha,
             rotate_mode=self.rotate_mode,
+            bfactor=bfactor,
         )
 
     def forward(self, idx: torch.Tensor | int | slice) -> torch.Tensor:
@@ -981,6 +990,10 @@ class Ghostbuster:
         Learning rate for defocus offset.
     defocus_offset : float, optional
         Initial defocus offset in Ångströms added to all particles' dfu and dfv.
+    bfactor : float, optional
+        Isotropic B-factor envelope in Å² applied in the microscope transfer
+        function, damping high-resolution signal. None or 0.0 means no
+        envelope. Default None.
     scheduler : {"LambdaLR", "OneCycleLR", "CosineAnnealingWarmRestarts", "MultiplicativeLR"}
         LR scheduler for the volume optimiser.
     epochs : int
@@ -1052,6 +1065,7 @@ class Ghostbuster:
         lr_T: float | None = None,
         lr_D: float | None = None,
         defocus_offset: float = 0.0,
+        bfactor: float | None = None,
         scheduler: Literal[
             "LambdaLR",
             "OneCycleLR",
@@ -1140,6 +1154,7 @@ class Ghostbuster:
         self.lr_T = lr_T
         self.lr_D = lr_D
         self.defocus_offset = defocus_offset
+        self.bfactor = bfactor
         self.scheduler = scheduler
         self.epochs = epochs
         self.batch_size = batch_size
@@ -1195,6 +1210,7 @@ class Ghostbuster:
             anisomag=self._anisomag,
             alpha=self._alpha,
             defocus_offset=torch.tensor(self.defocus_offset),
+            bfactor=self.bfactor,
             scattering_model=scattering_model,
             aberration_model=self.aberration_model,
             lr=self.lr,

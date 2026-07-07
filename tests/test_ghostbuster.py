@@ -262,6 +262,54 @@ def test_bfactor_damps_ghostbuster_output(small_volume: torch.Tensor) -> None:
     assert img_b.var() < img_no_b.var()
 
 
+def test_bfactor_kwarg_matches_ctf_params_bfactor(small_volume: torch.Tensor) -> None:
+    """The bfactor kwarg produces the same result as an equal ctf_params["bfactor"]."""
+    base = dict(
+        V=small_volume,
+        voxel_size=2.0,
+        quaternions=torch.tensor([[1.0, 0.0, 0.0, 0.0]]),
+        translations=torch.tensor([[0.0, 0.0]]),
+        energy=300.0,
+        dose_per_angstrom=2.0,
+        alpha=0.0,
+        scattering_model="projection",
+    )
+    params = {"dfu": torch.tensor([5000.0]), "cs": torch.tensor([2.7])}
+    img_via_ctf_params = Reconstructor(
+        **base, ctf_params={**params, "bfactor": torch.tensor([200.0])}
+    ).forward(torch.tensor([0]))
+    img_via_kwarg = Reconstructor(**base, ctf_params=params, bfactor=200.0).forward(
+        torch.tensor([0])
+    )
+    assert torch.allclose(img_via_kwarg, img_via_ctf_params)
+
+
+def test_bfactor_kwarg_overrides_ctf_params_bfactor(small_volume: torch.Tensor) -> None:
+    """An explicit bfactor kwarg replaces (not adds to) ctf_params["bfactor"]."""
+    base = dict(
+        V=small_volume,
+        voxel_size=2.0,
+        quaternions=torch.tensor([[1.0, 0.0, 0.0, 0.0]]),
+        translations=torch.tensor([[0.0, 0.0]]),
+        energy=300.0,
+        dose_per_angstrom=2.0,
+        alpha=0.0,
+        scattering_model="projection",
+    )
+    params = {
+        "dfu": torch.tensor([5000.0]),
+        "cs": torch.tensor([2.7]),
+        "bfactor": torch.tensor([200.0]),
+    }
+    img_overridden_to_zero = Reconstructor(
+        **base, ctf_params=params, bfactor=0.0
+    ).forward(torch.tensor([0]))
+    img_no_bfactor = Reconstructor(
+        **base, ctf_params={k: v for k, v in params.items() if k != "bfactor"}
+    ).forward(torch.tensor([0]))
+    assert torch.allclose(img_overridden_to_zero, img_no_bfactor)
+
+
 # ---------------------------------------------------------------------------
 # Documented limitations
 # ---------------------------------------------------------------------------

@@ -341,7 +341,7 @@ class Reconstructor(L.LightningModule):
             scheduler; rotation/translation/defocus optimisers use a fixed LR.
         """
         if self.lr is not None:
-            optimizerV = AdamW([self.V], lr=self.lr)
+            optimizerV = AdamW([self.V], lr=self.lr, weight_decay=0.0)
             # optimizer = SGD(self.parameters(), lr=self.lr, momentum=0.9)
             # optimizer = NAdam(self.parameters(), lr=self.lr)
         if self.lr_R is not None:
@@ -1705,7 +1705,7 @@ class TomogramReconstructor(L.LightningModule):
         if self.lr is None:
             return [], []
 
-        optimizerV = AdamW([self.V], lr=self.lr)
+        optimizerV = AdamW([self.V], lr=self.lr, weight_decay=0.0)
 
         if self.scheduler == "CosineAnnealingWarmRestarts":
             lr_scheduler: LRScheduler = CosineAnnealingWarmRestarts(

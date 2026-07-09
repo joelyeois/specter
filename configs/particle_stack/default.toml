@@ -14,6 +14,7 @@ pixel_size = 1.0              # Å
 energy = 300.0                # keV
 dose_min = 20.0                # e⁻/Å²
 # dose_max = 60.0               # e⁻/Å², uncomment to randomize dose per particle
+# num_frames = 20                # frames, uncomment to override default (int(dose_min) if None)
 cs = 2.0                       # mm
 alpha = 0.1                    # unitless, amplitude contrast ratio
 

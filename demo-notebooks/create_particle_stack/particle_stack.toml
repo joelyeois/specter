@@ -11,7 +11,7 @@ cs = 2.0             # mm
 alpha = 0.1          # unitless, amplitude contrast ratio
 
 [envelopes]
-bfactor = 0.0        # Å², matches the notebook's explicit 0.0 (not "disabled")
+bfactor = 0.0        # Å²
 
 [defocus]
 defocus_min = 5000.0   # Å
@@ -36,5 +36,5 @@ ice_thickness = 0.0       # Å
 num_unique_icecubes = 1   # this notebook builds a single ice cube, not the config default of 8
 
 [compute]
-device = "cuda:1"  # adjust to an available device on your machine, e.g. "cuda:0" or "cpu"
-batchsize = 5
+device = "cuda:0"  # adjust to an available device on your machine, e.g. "cuda:0" or "cpu"
+batchsize = 5      # reduce if out of memory. 

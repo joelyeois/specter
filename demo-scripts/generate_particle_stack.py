@@ -48,319 +48,322 @@ _console = Console()
 
 
 def parse_args() -> argparse.Namespace:
+    from specter.config import REPO_ROOT
+
     parser = argparse.ArgumentParser(
         description="Simulate a cryo-EM particle stack and save as .mrcs + .star.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+
+    parser.add_argument(
+        "--config",
+        type=str,
+        default=str(REPO_ROOT / "configs" / "particle_stack" / "default.toml"),
+        help="Path to a TOML config file. Every other flag below overrides a field in it.",
     )
 
     # --- PDB / potential ---
     parser.add_argument(
         "--pdb_code",
         type=str,
-        required=True,
-        help="PDB accession code or path to a local .cif/.pdb file. (required)",
+        default=argparse.SUPPRESS,
+        help="PDB accession code or path to a local .cif/.pdb file. Overrides --config.",
     )
     parser.add_argument(
         "--assembly",
         type=lambda x: x.lower() == "true",
-        default=True,
+        default=argparse.SUPPRESS,
         metavar="True|False",
-        help="Fetch biological assembly.",
+        help="Fetch biological assembly. Overrides --config.",
     )
     parser.add_argument(
         "--pdb_savefolder",
         type=str,
-        default="../pdb-data/",
-        help="Folder to cache downloaded PDB files.",
+        default=argparse.SUPPRESS,
+        help="Folder to cache downloaded PDB files. Overrides --config.",
     )
     parser.add_argument(
         "--num_pixels",
         type=int,
-        default=256,
-        help="Number of pixels per axis for the 3-D potential box.",
+        default=argparse.SUPPRESS,
+        help="Number of pixels per axis for the 3-D potential box. Overrides --config.",
     )
     parser.add_argument(
         "--pixel_size",
         type=float,
-        default=1.0,
-        help="Pixel size in Ångstrom.",
+        default=argparse.SUPPRESS,
+        help="Pixel size in Ångstrom. Overrides --config.",
     )
 
     # --- Microscope / physics ---
     parser.add_argument(
         "--energy",
         type=float,
-        default=300.0,
-        help="Electron beam energy in keV.",
+        default=argparse.SUPPRESS,
+        help="Electron beam energy in keV. Overrides --config.",
     )
     parser.add_argument(
         "--dose_min",
         type=float,
-        default=20.0,
-        help="Minimum dose in e⁻/Å². Used as fixed dose if --dose_max is not set.",
+        default=argparse.SUPPRESS,
+        help="Minimum dose in e⁻/Å². Used as fixed dose if --dose_max is not set. Overrides --config.",
     )
     parser.add_argument(
         "--dose_max",
         type=float,
-        default=None,
-        help="Maximum dose in e⁻/Å². If set, dose is sampled uniformly per particle.",
+        default=argparse.SUPPRESS,
+        help="Maximum dose in e⁻/Å². If set, dose is sampled uniformly per particle. Overrides --config.",
     )
     parser.add_argument(
         "--num_frames",
         type=int,
-        default=None,
-        help="Number of frames. Defaults to int(dose) if not set.",
+        default=argparse.SUPPRESS,
+        help="Number of frames. Defaults to int(dose) if not set. Overrides --config.",
     )
     parser.add_argument(
         "--cs",
         type=float,
-        default=2.0,
-        help="Spherical aberration in mm (1–3 mm typical).",
+        default=argparse.SUPPRESS,
+        help="Spherical aberration in mm (1-3 mm typical). Overrides --config.",
     )
     parser.add_argument(
         "--alpha",
         type=float,
-        default=0.1,
-        help="Amplitude contrast ratio.",
+        default=argparse.SUPPRESS,
+        help="Amplitude contrast ratio. Overrides --config.",
     )
 
     # --- Envelopes ---
     parser.add_argument(
         "--convergence_angle",
         type=float,
-        default=None,
-        help="Beam convergence semi-angle in mrad, for the Cs (spatial coherence) envelope. None disables it.",
+        default=argparse.SUPPRESS,
+        help="Beam convergence semi-angle in mrad, for the Cs envelope. Overrides --config.",
     )
     parser.add_argument(
         "--cc",
         type=float,
-        default=None,
-        help="Chromatic aberration coefficient in mm, for the Cc (temporal coherence) envelope. None disables it.",
+        default=argparse.SUPPRESS,
+        help="Chromatic aberration coefficient in mm, for the Cc envelope. Overrides --config.",
     )
     parser.add_argument(
         "--energy_spread",
         type=float,
-        default=0.7,
-        help="FWHM of the beam energy spread in eV, used by the Cc envelope.",
+        default=argparse.SUPPRESS,
+        help="FWHM of the beam energy spread in eV, used by the Cc envelope. Overrides --config.",
     )
     parser.add_argument(
         "--deltaV_V",
         type=float,
-        default=0.06e-6,
-        help="Relative high-voltage instability, used by the Cc envelope.",
+        default=argparse.SUPPRESS,
+        help="Relative high-voltage instability, used by the Cc envelope. Overrides --config.",
     )
     parser.add_argument(
         "--deltaI_I",
         type=float,
-        default=0.01e-6,
-        help="Relative objective-lens current instability, used by the Cc envelope.",
+        default=argparse.SUPPRESS,
+        help="Relative objective-lens current instability, used by the Cc envelope. Overrides --config.",
     )
     parser.add_argument(
         "--dose_envelope",
         type=lambda x: x.lower() == "true",
-        default=False,
+        default=argparse.SUPPRESS,
         metavar="True|False",
-        help="Apply the Grant & Grigorieff (2015) cumulative-dose envelope.",
+        help="Apply the Grant & Grigorieff (2015) cumulative-dose envelope. Overrides --config.",
     )
     parser.add_argument(
         "--bfactor",
         type=float,
-        default=None,
-        help="Isotropic B-factor envelope in Å². None disables it.",
-    )
-    parser.add_argument(
-        "--bfactor",
-        type=float,
-        default=None,
-        help="Isotropic B-factor envelope in Å². None disables it.",
+        default=argparse.SUPPRESS,
+        help="Isotropic B-factor envelope in Å². Overrides --config.",
     )
 
     # --- Defocus ---
     parser.add_argument(
         "--defocus_min",
         type=float,
-        default=5000.0,
-        help="Minimum defocus in Ångstrom.",
+        default=argparse.SUPPRESS,
+        help="Minimum defocus in Ångstrom. Overrides --config.",
     )
     parser.add_argument(
         "--defocus_max",
         type=float,
-        default=15000.0,
-        help="Maximum defocus in Ångstrom.",
+        default=argparse.SUPPRESS,
+        help="Maximum defocus in Ångstrom. Overrides --config.",
     )
 
     # --- Translations / shifts ---
     parser.add_argument(
         "--shift",
         type=float,
-        default=2.0,
-        help="Max in-plane shift in Ångstrom (uniform ±shift).",
+        default=argparse.SUPPRESS,
+        help="Max in-plane shift in Ångstrom (uniform ±shift). Overrides --config.",
     )
 
     # --- Dataset size ---
     parser.add_argument(
         "--n_particles",
         type=int,
-        default=20,
-        help="Number of particles to simulate.",
+        default=argparse.SUPPRESS,
+        help="Number of particles to simulate. Overrides --config.",
     )
 
     # --- Models ---
     parser.add_argument(
         "--scattering_model",
         type=str,
-        default="multislice",
+        default=argparse.SUPPRESS,
         choices=["multislice", "firstborn", "projection", "ctf"],
-        help="Scattering model.",
+        help="Scattering model. Overrides --config.",
     )
     parser.add_argument(
         "--aberration_model",
         type=str,
-        default="holography",
+        default=argparse.SUPPRESS,
         choices=["holography", "ctf"],
-        help="Aberration model.",
+        help="Aberration model. Overrides --config.",
     )
     parser.add_argument(
         "--noise_model",
         type=str,
-        default="poisson",
+        default=argparse.SUPPRESS,
         choices=["poisson", "none"],
-        help="Noise model. Use 'none' for no noise.",
+        help="Noise model. Use 'none' for no noise. Overrides --config.",
     )
     parser.add_argument(
         "--coincidence_radius_min",
         type=float,
-        default=0.0,
-        help="Minimum coincidence radius in pixels. Used as fixed value if --coincidence_radius_max is not set.",
+        default=argparse.SUPPRESS,
+        help="Minimum coincidence radius in pixels. Overrides --config.",
     )
     parser.add_argument(
         "--coincidence_radius_max",
         type=float,
-        default=None,
-        help="Maximum coincidence radius in pixels. If set, sampled uniformly per particle.",
+        default=argparse.SUPPRESS,
+        help="Maximum coincidence radius in pixels. Overrides --config.",
     )
     parser.add_argument(
         "--ice_model",
         type=str,
-        default="gd",
+        default=argparse.SUPPRESS,
         choices=["gd", "ap", "mcmc", "random", "none"],
-        help="Ice model: 'gd' (gradient descent, default), 'ap' (atomic potential), 'mcmc', 'random', or 'none'.",
+        help="Ice model. Overrides --config.",
     )
     parser.add_argument(
         "--ice_thickness",
         type=float,
-        default=0.0,
-        help="Ice thickness in Ångstrom. 0 = minimum (particle box size).",
+        default=argparse.SUPPRESS,
+        help="Ice thickness in Ångstrom. 0 = minimum (particle box size). Overrides --config.",
     )
     parser.add_argument(
         "--num_unique_icecubes",
         type=int,
-        default=8,
-        help="Number of unique ice cubes to pre-build into the IceBank.",
+        default=argparse.SUPPRESS,
+        help="Number of unique ice cubes to pre-build into the IceBank. Overrides --config.",
     )
     parser.add_argument(
         "--ice_build_batch_size",
         type=int,
-        default=1,
-        help="Number of unique ice cubes to generate at once while building the IceBank. Lower values reduce peak GPU memory.",
+        default=argparse.SUPPRESS,
+        help="Number of unique ice cubes to generate at once while building the IceBank. Overrides --config.",
     )
     parser.add_argument(
         "--icecube_size",
         type=int,
-        default=None,
-        help="Side length (in voxels) of each cubic ice block generated by the IceBank. Smaller cubes build faster (especially for 'gd') and are tiled to fill the volume. Defaults to whichever is smaller: num_pixels, or the voxel count spanning 256 Å (256 / pixel_size).",
+        default=argparse.SUPPRESS,
+        help="Side length (in voxels) of each cubic ice block. Overrides --config.",
     )
     parser.add_argument(
         "--crowd_min_distance",
         type=float,
-        default=None,
-        help="Min distance between crowded particles in Ångstrom. Defaults to pdb.max_diameter. Set to 0 to disable crowding.",
+        default=argparse.SUPPRESS,
+        help="Min distance between crowded particles in Ångstrom. Overrides --config.",
     )
     parser.add_argument(
         "--crowd_max_distance_z",
         type=float,
-        default=None,
-        help="Max z-distance between crowded particles in Ångstrom. Default: None.",
+        default=argparse.SUPPRESS,
+        help="Max z-distance between crowded particles in Ångstrom. Overrides --config.",
     )
     parser.add_argument(
         "--potential_scale_min",
         type=float,
-        default=1.0,
-        help="Minimum potential scale factor. Used as fixed value if --potential_scale_max is not set.",
+        default=argparse.SUPPRESS,
+        help="Minimum potential scale factor. Overrides --config.",
     )
     parser.add_argument(
         "--potential_scale_max",
         type=float,
-        default=None,
-        help="Maximum potential scale factor. If set, sampled uniformly per particle. Values < 1 approximate thicker ice.",
+        default=argparse.SUPPRESS,
+        help="Maximum potential scale factor. Overrides --config.",
     )
     parser.add_argument(
         "--pad_fft",
         type=lambda x: x.lower() == "true",
-        default=True,
+        default=argparse.SUPPRESS,
         metavar="True|False",
-        help="Pad volume for FFT to avoid edge artifacts.",
+        help="Pad volume for FFT to avoid edge artifacts. Overrides --config.",
     )
     parser.add_argument(
         "--detector_model",
         type=str,
-        default="none",
+        default=argparse.SUPPRESS,
         choices=["none", "perfect", "k3_300kv", "k3_200kv"],
-        help="Detector model.",
+        help="Detector model. Overrides --config.",
     )
 
     # --- Post-processing ---
     parser.add_argument(
         "--normalize_particles",
         type=lambda x: x.lower() == "true",
-        default=True,
+        default=argparse.SUPPRESS,
         metavar="True|False",
-        help="Normalize particles to zero mean and unit std.",
+        help="Normalize particles to zero mean and unit std. Overrides --config.",
     )
     parser.add_argument(
         "--save_exitwaves",
         type=lambda x: x.lower() == "true",
-        default=False,
+        default=argparse.SUPPRESS,
         metavar="True|False",
-        help="Save exit wave magnitude and phase as separate .mrcs files.",
+        help="Save exit wave magnitude and phase as separate .mrcs files. Overrides --config.",
     )
     parser.add_argument(
         "--save_clean_exitwaves",
         type=lambda x: x.lower() == "true",
-        default=False,
+        default=argparse.SUPPRESS,
         metavar="True|False",
-        help="Save clean (particle-only, no ice) exit wave magnitude and phase. Runs scattering twice per batch.",
+        help="Save clean (particle-only, no ice) exit wave magnitude and phase. Overrides --config.",
     )
 
     # --- Compute ---
     parser.add_argument(
         "--device",
         type=str,
-        default="cpu",
+        default=argparse.SUPPRESS,
         help=(
             "Device to use. Options: cpu | cuda | cuda:0 | 0,1,2,3. "
-            "Comma-separated integers trigger multi-GPU Lightning DDP."
+            "Comma-separated integers trigger multi-GPU Lightning DDP. Overrides --config."
         ),
     )
     parser.add_argument(
         "--batchsize",
         type=int,
-        default=5,
-        help="Number of particles per forward pass.",
+        default=argparse.SUPPRESS,
+        help="Number of particles per forward pass. Overrides --config.",
     )
 
     # --- Output ---
     parser.add_argument(
         "--output_dir",
         type=str,
-        default="./output/",
-        help="Directory to save .mrcs and .star files.",
+        default=argparse.SUPPRESS,
+        help="Directory to save .mrcs and .star files. Overrides --config.",
     )
     parser.add_argument(
         "--filename",
         type=str,
-        default="particles",
-        help="Base name for output files (no extension).",
+        default=argparse.SUPPRESS,
+        help="Base name for output files (no extension). Overrides --config.",
     )
 
     return parser.parse_args()
@@ -586,10 +589,15 @@ def main() -> None:
     from specter.potential import PotentialBuilder
     from specter.progress import track
 
+    from specter.config import apply_overrides, load_config
+
     args = parse_args()
+    config = load_config(args.config)
+    overrides = {k: v for k, v in vars(args).items() if k != "config"}
+    apply_overrides(config, overrides)
     specter.set_verbosity(logging.INFO)
 
-    mode, device_target = _parse_device(args.device)
+    mode, device_target = _parse_device(config.device)
     t_start = time.perf_counter()
 
     # LOCAL_RANK is absent in the original process and set (0, 1, ...) in DDP workers
@@ -598,10 +606,12 @@ def main() -> None:
     # --- Building 3D scattering potential ---
     if is_main:
         _section("Building 3D scattering potential")
-    pdb = PDB(args.pdb_code, assembly=args.assembly, savefolder=args.pdb_savefolder)
+    pdb = PDB(
+        config.pdb_code, assembly=config.assembly, savefolder=config.pdb_savefolder
+    )
 
     # Convert cs from mm → Ångstrom (1 mm = 1e7 Å)
-    cs_angstrom = args.cs * 1e7
+    cs_angstrom = config.cs * 1e7
 
     # Only the main process (always global rank 0 for this single-node launcher)
     # builds V for real. Other DDP ranks hold a zero placeholder of the same
@@ -610,68 +620,71 @@ def main() -> None:
     # (V is a registered buffer) to every rank — so building it per-rank would
     # just be wasted, redundant compute.
     if is_main:
-        pb = PotentialBuilder(args.num_pixels, args.pixel_size, pdb.atomic_numbers).to(
-            "cpu"
-        )
+        pb = PotentialBuilder(
+            config.num_pixels, config.pixel_size, pdb.atomic_numbers
+        ).to("cpu")
         with torch.no_grad():
             V = pb(pdb.coordinates).clone()
     else:
-        V = torch.zeros(args.num_pixels, args.num_pixels, args.num_pixels)
+        V = torch.zeros(config.num_pixels, config.num_pixels, config.num_pixels)
 
     # --- Sampling poses, defocus, and translations ---
     if is_main:
         _section("Sampling poses, defocus, and translations")
-    n = args.n_particles
+    n = config.n_particles
 
     quats = rotations.random_quaternion(n)
 
-    defocus_max = args.defocus_max if args.defocus_max is not None else args.defocus_min
-    defocus_A = torch.rand(n) * (defocus_max - args.defocus_min) + args.defocus_min
+    defocus_max = (
+        config.defocus_max if config.defocus_max is not None else config.defocus_min
+    )
+    defocus_A = torch.rand(n) * (defocus_max - config.defocus_min) + config.defocus_min
     ctf_params = {
         "cs": torch.tensor([cs_angstrom] * n),
         "dfu": defocus_A,
     }
 
-    rlnOriginXAngst = 2 * (torch.rand(n) - 0.5) * args.shift
-    rlnOriginYAngst = 2 * (torch.rand(n) - 0.5) * args.shift
+    rlnOriginXAngst = 2 * (torch.rand(n) - 0.5) * config.shift
+    rlnOriginYAngst = 2 * (torch.rand(n) - 0.5) * config.shift
     translations = torch.stack([rlnOriginXAngst, rlnOriginYAngst], dim=-1)
 
-    dose_max = args.dose_max if args.dose_max is not None else args.dose_min
-    dose = torch.rand(n) * (dose_max - args.dose_min) + args.dose_min
+    dose_max = config.dose_max if config.dose_max is not None else config.dose_min
+    dose = torch.rand(n) * (dose_max - config.dose_min) + config.dose_min
 
     cr_max = (
-        args.coincidence_radius_max
-        if args.coincidence_radius_max is not None
-        else args.coincidence_radius_min
+        config.coincidence_radius_max
+        if config.coincidence_radius_max is not None
+        else config.coincidence_radius_min
     )
     coincidence_radius = (
-        torch.rand(n) * (cr_max - args.coincidence_radius_min)
-        + args.coincidence_radius_min
+        torch.rand(n) * (cr_max - config.coincidence_radius_min)
+        + config.coincidence_radius_min
     )
 
     ps_max = (
-        args.potential_scale_max
-        if args.potential_scale_max is not None
-        else args.potential_scale_min
+        config.potential_scale_max
+        if config.potential_scale_max is not None
+        else config.potential_scale_min
     )
     potential_scale = (
-        torch.rand(n) * (ps_max - args.potential_scale_min) + args.potential_scale_min
+        torch.rand(n) * (ps_max - config.potential_scale_min)
+        + config.potential_scale_min
     )
 
-    noise_model = None if args.noise_model == "none" else args.noise_model
-    ice_model = None if args.ice_model == "none" else args.ice_model
-    detector_model = None if args.detector_model == "none" else args.detector_model
+    noise_model = None if config.noise_model == "none" else config.noise_model
+    ice_model = None if config.ice_model == "none" else config.ice_model
+    detector_model = None if config.detector_model == "none" else config.detector_model
     crowd_min_distance = (
         None
-        if args.crowd_min_distance == 0
-        else args.crowd_min_distance
-        if args.crowd_min_distance is not None
+        if config.crowd_min_distance == 0
+        else config.crowd_min_distance
+        if config.crowd_min_distance is not None
         else pdb.max_diameter
     )
     num_frames = (
-        args.num_frames if args.num_frames is not None else int(dose.mean().item())
+        config.num_frames if config.num_frames is not None else int(dose.mean().item())
     )
-    cc_angstrom = args.cc * 1e7 if args.cc is not None else None
+    cc_angstrom = config.cc * 1e7 if config.cc is not None else None
 
     # --- Pre-building ice bank ---
     # IceBank.build() runs an internal L-BFGS optimization (for the 'gd' method)
@@ -682,9 +695,9 @@ def main() -> None:
     # shape and rely on Lightning's automatic _sync_module_states() (see the V
     # comment above) to receive rank 0's real bank before predicting.
     icecube_size = (
-        args.icecube_size
-        if args.icecube_size is not None
-        else min(args.num_pixels, int(256 / args.pixel_size))
+        config.icecube_size
+        if config.icecube_size is not None
+        else min(config.num_pixels, int(256 / config.pixel_size))
     )
     icemaker = None
     if ice_model is not None:
@@ -692,10 +705,10 @@ def main() -> None:
             _section("Pre-building ice bank")
         icemaker = IceBank(
             n=icecube_size,
-            dx=args.pixel_size,
+            dx=config.pixel_size,
             method=ice_model,
-            num_unique=args.num_unique_icecubes,
-            build_batch_size=args.ice_build_batch_size,
+            num_unique=config.num_unique_icecubes,
+            build_batch_size=config.ice_build_batch_size,
         )
         if is_main:
             icemaker_device = (
@@ -709,38 +722,38 @@ def main() -> None:
 
     model = ImageGenerator(
         V,
-        args.pixel_size,
+        config.pixel_size,
         quats,
         translations,
         ctf_params,
-        args.energy,
+        config.energy,
         dose,
         icemaker=icemaker,
-        ice_thickness=args.ice_thickness,
-        scattering_model=args.scattering_model,
-        aberration_model=args.aberration_model,
+        ice_thickness=config.ice_thickness,
+        scattering_model=config.scattering_model,
+        aberration_model=config.aberration_model,
         noise_model=noise_model,
         klim=None,
         ews_curvature_sign="positive",
-        alpha=args.alpha,
+        alpha=config.alpha,
         crowd_min_distance=crowd_min_distance,
-        crowd_max_distance_z=args.crowd_max_distance_z,
-        pad_fft=args.pad_fft,
+        crowd_max_distance_z=config.crowd_max_distance_z,
+        pad_fft=config.pad_fft,
         detector_model=detector_model,
         verbose=False,
         coincidence_radius=coincidence_radius,
         num_frames=num_frames,
         potential_scale=potential_scale,
-        convergence_angle=args.convergence_angle,
+        convergence_angle=config.convergence_angle,
         cc=cc_angstrom,
-        energy_spread=args.energy_spread,
-        deltaV_V=args.deltaV_V,
-        deltaI_I=args.deltaI_I,
-        dose_envelope=args.dose_envelope,
-        bfactor=args.bfactor,
+        energy_spread=config.energy_spread,
+        deltaV_V=config.deltaV_V,
+        deltaI_I=config.deltaI_I,
+        dose_envelope=config.dose_envelope,
+        bfactor=config.bfactor,
     )
 
-    if args.save_clean_exitwaves:
+    if config.save_clean_exitwaves:
         model.save_clean_exitwaves = True
 
     # --- Generating images ---
@@ -750,11 +763,11 @@ def main() -> None:
         images, exitwaves, clean_exitwaves = _generate_multi(
             model,
             n,
-            args.batchsize,
+            config.batchsize,
             device_target,
-            args.output_dir,
-            collect_exitwaves=args.save_exitwaves,
-            collect_clean_exitwaves=args.save_clean_exitwaves,
+            config.output_dir,
+            collect_exitwaves=config.save_exitwaves,
+            collect_clean_exitwaves=config.save_clean_exitwaves,
         )
         if images is None:
             return  # worker rank — rank 0 handles saving
@@ -765,16 +778,16 @@ def main() -> None:
         images, exitwaves, clean_exitwaves = _generate_single(
             model,
             n,
-            args.batchsize,
+            config.batchsize,
             track,
-            collect_exitwaves=args.save_exitwaves,
-            collect_clean_exitwaves=args.save_clean_exitwaves,
+            collect_exitwaves=config.save_exitwaves,
+            collect_clean_exitwaves=config.save_clean_exitwaves,
         )
 
     # --- Post-processing ---
     if is_main:
         _section("Post-processing")
-    if args.normalize_particles:
+    if config.normalize_particles:
         particles, _means, _stds = normalize_particles(images)
         particles = -particles
     else:
@@ -787,11 +800,11 @@ def main() -> None:
         rotations=quats,
         translations=translations,
         ctf_params=ctf_params,
-        dx=args.pixel_size,
-        energy=args.energy,
-        alpha=args.alpha,
-        filename=args.filename,
-        folderpath=args.output_dir,
+        dx=config.pixel_size,
+        energy=config.energy,
+        alpha=config.alpha,
+        filename=config.filename,
+        folderpath=config.output_dir,
         dose_per_angstrom=dose,
         coincidence_radius=coincidence_radius,
         potential_scale=potential_scale,
@@ -801,14 +814,14 @@ def main() -> None:
         import mrcfile
 
         def _save_exitwave_pair(ew, suffix: str) -> None:
-            if args.pad_fft:
-                ew = _crop_center(ew, args.num_pixels)
-            os.makedirs(args.output_dir, exist_ok=True)
+            if config.pad_fft:
+                ew = _crop_center(ew, config.num_pixels)
+            os.makedirs(config.output_dir, exist_ok=True)
             mag_path = os.path.join(
-                args.output_dir, f"{args.filename}_{suffix}_magnitude.mrcs"
+                config.output_dir, f"{config.filename}_{suffix}_magnitude.mrcs"
             )
             phase_path = os.path.join(
-                args.output_dir, f"{args.filename}_{suffix}_phase.mrcs"
+                config.output_dir, f"{config.filename}_{suffix}_phase.mrcs"
             )
             with mrcfile.new(mag_path, overwrite=True) as mrc:
                 mrc.set_data(ew.abs().numpy().astype("float32"))

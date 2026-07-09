@@ -7,8 +7,8 @@ import lightning as L
 
 from . import _envelopes as env
 from . import _functions as fn
+from ..constants import energy_to_wavelength
 from ..fft import fft2, ifft2
-from ..scattering import energy_to_wavelength
 
 
 class Aberration(L.LightningModule):

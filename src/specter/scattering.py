@@ -7,69 +7,9 @@ from torch.utils.checkpoint import checkpoint as _gradient_checkpoint
 from .progress import track
 
 from .arrays import disk2d
+from .constants import energy_to_wavelength, interaction_parameter
 from .fft import fft2, ifft2
 from .rotations import VolumeRotator, build_affine_matrix
-
-rest_mass_energy = 511.0e3  # [eV]
-hc = 12.398e3  # [eV * Å]
-
-
-def energy_to_wavelength(energy: float) -> float:
-    """
-    Convert electron energy to de Broglie wavelength.
-
-    Uses the relativistic formula for electron wavelength calculation.
-
-    Parameters
-    ----------
-    energy : float
-        Electron beam energy in keV.
-
-    Returns
-    -------
-    wavelength : float
-        De Broglie wavelength in Å.
-
-    Notes
-    -----
-    Uses the relativistic formula:
-    λ = hc / sqrt(E * (E + 2*m_e*c²))
-    where m_e*c² = 511 keV (rest mass energy of electron).
-    """
-    ev = energy * 1.0e3  # [eV]
-    return hc / (ev * (ev + 2.0 * rest_mass_energy)) ** 0.5
-
-
-def interaction_parameter(energy: float) -> torch.Tensor:
-    """
-    Calculate the electron-specimen interaction parameter.
-
-    Computes the interaction constant σ for electron scattering, following
-    Kirkland Eq. (5.6).
-
-    Parameters
-    ----------
-    energy : float
-        Electron beam energy in keV.
-
-    Returns
-    -------
-    sigma : torch.Tensor
-        Interaction parameter in units of 1/(Å·V).
-
-    References
-    ----------
-    .. [1] E. J. Kirkland, Advanced Computing in Electron Microscopy,
-       Eq. (5.6), Springer US, Boston, MA, 2010.
-    """
-    w = energy_to_wavelength(energy)
-    ev = energy * 1e3
-    return (
-        2.0
-        * torch.pi
-        / (w * ev)
-        * ((ev + rest_mass_energy) / (ev + 2.0 * rest_mass_energy))
-    )
 
 
 def complex_potential(v: torch.Tensor, alpha: float = 0.1) -> torch.Tensor:

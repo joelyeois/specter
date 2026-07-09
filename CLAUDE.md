@@ -183,7 +183,6 @@ src/specter/                  # Main source package
   plots.py                    # Plotting helpers
   progress.py                 # Progress bar management (ProgressManager)
   random_seed.py              # Global seed control (exported as specter.seed)
-  simulate_particles.py       # Particle simulation pipeline
   symmetries.py               # Symmetry operations
   welling_rotation.py         # Welling rotation sampling
   qscore.py                   # Per-atom Q-score (map-model fit; Pintilie et al. 2020)

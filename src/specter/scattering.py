@@ -609,6 +609,170 @@ class IterativeScattering(L.LightningModule):
         )
         return F
 
+    # ------------------------------------------------------------------
+    # Shared slice-fetching machinery
+    #
+    # Every iterative scattering model (multislice, rytov, firstborn,
+    # kinematic, projection, parallel_rytov) needs to: resolve how many
+    # Z-slices to traverse for the given rotation, decide the traversal
+    # order (Ewald sphere curvature sign), and fetch each slice either
+    # directly from V (identity transform) or by resampling the rotated
+    # volume. These helpers factor that out so each model method only
+    # has to express its own per-slice physics.
+    # ------------------------------------------------------------------
+
+    def _resolve_tilt_setup(
+        self, V: torch.Tensor, theta_matrix: torch.Tensor
+    ) -> tuple[int, VolumeRotator | None, bool]:
+        """
+        Resolve the number of Z-slices to traverse and the rotator needed
+        to sample them, short-circuiting rotated-volume setup entirely for
+        the identity transform.
+
+        Returns
+        -------
+        nz_new : int
+            Number of Z-slices to traverse (equals V's Z-extent for identity).
+        rotator : VolumeRotator or None
+            None for the identity transform (slices are read directly from V).
+        is_identity : bool
+        """
+        is_identity = self._is_identity(theta_matrix)
+        if is_identity:
+            return V.shape[1], None, is_identity
+        nz_new, rotator = self._setup_tilt(V, theta_matrix)
+        return nz_new, rotator, is_identity
+
+    def _roi_start(self, V: torch.Tensor) -> tuple[int, int]:
+        """Top-left pixel of the centered (nxy, nxy) ROI within V's (Y, X) extent."""
+        y_start = (V.shape[-2] - self.nxy) // 2
+        x_start = (V.shape[-1] - self.nxy) // 2
+        return y_start, x_start
+
+    def _slice_processing_order(
+        self, nz_new: int, device: str | torch.device
+    ) -> torch.Tensor:
+        """Z-slice traversal order; negative EWS curvature reverses it."""
+        indices = torch.arange(nz_new, device=device)
+        if self.ews_curvature_sign == "negative":
+            indices = torch.flip(indices, dims=(0,))
+        return indices
+
+    def _fetch_volume_slices(
+        self,
+        V: torch.Tensor,
+        slice_positions: torch.Tensor,
+        is_identity: bool,
+        rotator: VolumeRotator | None,
+        theta_matrix: torch.Tensor,
+        nz_new: int,
+        y_start: int,
+        x_start: int,
+        device: str | torch.device,
+    ) -> torch.Tensor:
+        """
+        Fetch Z-slices of `V` at the given processing-order positions.
+
+        For the identity transform, slices are read directly out of `V`
+        (no resampling needed). Otherwise they are resampled from the
+        rotated volume via `rotator.sample_rotated_slices`.
+
+        Parameters
+        ----------
+        slice_positions : torch.Tensor
+            1D tensor of slice indices (in processing order), shape (K,).
+
+        Returns
+        -------
+        torch.Tensor
+            Real-valued slices, shape (B, K, nxy, nxy).
+        """
+        if is_identity:
+            return V[
+                :,
+                slice_positions,
+                y_start : y_start + self.nxy,
+                x_start : x_start + self.nxy,
+            ].to(device)
+        assert rotator is not None
+        slice_indices = slice_positions.float() - (nz_new - 1) / 2
+        return rotator.sample_rotated_slices(
+            V,
+            theta_matrix,
+            slice_indices=slice_indices,
+            roi_size=(self.nxy, self.nxy),
+            padding_mode="zeros",
+        ).to(device)
+
+    def _iter_slices(
+        self,
+        V: torch.Tensor,
+        theta_matrix: torch.Tensor,
+        slice_batch_size: int,
+        description: str,
+    ):
+        """
+        Yield ``(i, nz_new, slice_sample)`` for each Z-slice of a (possibly
+        rotated) volume, in EWS processing order.
+
+        For the identity transform, each slice is fetched individually
+        (cheap direct indexing). Otherwise slices are fetched in
+        ``slice_batch_size``-sized batches via `_fetch_volume_slices` and
+        cached, trading memory for fewer `sample_rotated_slices` calls.
+
+        Yields
+        ------
+        i : int
+            Loop index (0-indexed position in processing order).
+        nz_new : int
+            Total number of slices being traversed.
+        slice_sample : torch.Tensor
+            Real-valued slice, shape (B, nxy, nxy).
+        """
+        nz_new, rotator, is_identity = self._resolve_tilt_setup(V, theta_matrix)
+        device = self.device
+        y_start, x_start = self._roi_start(V)
+        indices = self._slice_processing_order(nz_new, device=V.device)
+
+        pbar = track(
+            range(nz_new),
+            description=description,
+            transient=True,
+            disable=not (self.progressbars),
+        )
+
+        slices_block = None
+        for i in pbar:
+            if is_identity:
+                slice_sample = self._fetch_volume_slices(
+                    V,
+                    indices[i : i + 1],
+                    is_identity,
+                    rotator,
+                    theta_matrix,
+                    nz_new,
+                    y_start,
+                    x_start,
+                    device,
+                )[:, 0]
+            else:
+                if i % slice_batch_size == 0:
+                    batch_end = min(i + slice_batch_size, nz_new)
+                    slices_block = self._fetch_volume_slices(
+                        V,
+                        indices[i:batch_end],
+                        is_identity,
+                        rotator,
+                        theta_matrix,
+                        nz_new,
+                        y_start,
+                        x_start,
+                        device,
+                    )
+                slice_sample = slices_block[:, i % slice_batch_size]
+
+            yield i, nz_new, slice_sample
+
     def multislice(
         self,
         V: torch.Tensor,
@@ -638,13 +802,6 @@ class IterativeScattering(L.LightningModule):
             extra forward pass per chunk during backward.
             ``None`` disables checkpointing (original behaviour).
         """
-        is_identity = self._is_identity(theta_matrix)
-        if is_identity:
-            nz_new = V.shape[1]
-            rotator = None
-        else:
-            nz_new, rotator = self._setup_tilt(V, theta_matrix)
-
         B = V.shape[0]
         device = self.device
 
@@ -653,53 +810,22 @@ class IterativeScattering(L.LightningModule):
             B, self.nxy, self.nxy, device=device, dtype=torch.complex64
         )
 
-        indices = torch.arange(nz_new, device=V.device)
-        if self.ews_curvature_sign == "negative":
-            indices = torch.flip(indices, dims=(0,))
-
-        y_start = (V.shape[-2] - self.nxy) // 2
-        x_start = (V.shape[-1] - self.nxy) // 2
-
         if checkpoint_chunks is None:
-            pbar = track(
-                range(nz_new),
-                description="Multislice (Iterative)",
-                transient=True,
-                disable=not (self.progressbars),
-            )
-            slices_block = None
-            for i in pbar:
-                if is_identity:
-                    slice_sample = V[
-                        :,
-                        indices[i],
-                        y_start : y_start + self.nxy,
-                        x_start : x_start + self.nxy,
-                    ].to(device)
-                else:
-                    if i % slice_batch_size == 0:
-                        batch_end = min(i + slice_batch_size, nz_new)
-                        batch_indices = indices[i:batch_end]
-                        slice_indices = batch_indices - (nz_new - 1) / 2
-                        assert rotator is not None
-                        slices_block = rotator.sample_rotated_slices(
-                            V,
-                            theta_matrix,
-                            slice_indices=slice_indices,
-                            roi_size=(self.nxy, self.nxy),
-                            padding_mode="zeros",
-                        ).to(device)
-                    slice_sample = slices_block[:, i % slice_batch_size]
-
+            for i, _, slice_sample in self._iter_slices(
+                V, theta_matrix, slice_batch_size, "Multislice (Iterative)"
+            ):
                 slice_complex = complex_potential(slice_sample, alpha=self.alpha)
                 t = torch.exp(1j * self.sigma * self.pixel_size * slice_complex)
                 exitwave = ifft2(fft2(t * exitwave) * F * self.kmask)
         else:
+            nz_new, rotator, is_identity = self._resolve_tilt_setup(V, theta_matrix)
+            y_start, x_start = self._roi_start(V)
+            indices = self._slice_processing_order(nz_new, device=V.device)
+
             # Gradient-checkpointed loop.
             # Constants captured in the closure; only (exitwave, V) are
             # passed as explicit differentiable inputs so that
             # use_reentrant=False can track them properly.
-            _nxy = self.nxy
             _alpha = self.alpha
             _sigma = self.sigma
             _pixel_size = self.pixel_size
@@ -725,7 +851,7 @@ class IterativeScattering(L.LightningModule):
                     ci: torch.Tensor,
                     cnz: int,
                     cid: bool,
-                    crot: object,
+                    crot: VolumeRotator | None,
                     ctheta: torch.Tensor,
                     cy: int,
                     cx: int,
@@ -734,17 +860,9 @@ class IterativeScattering(L.LightningModule):
                         ew = exitwave
                         dev = ew.device
                         for j in range(len(ci)):
-                            if cid:
-                                s = V[:, ci[j], cy : cy + _nxy, cx : cx + _nxy].to(dev)
-                            else:
-                                si = ci[j : j + 1].float() - (cnz - 1) / 2
-                                s = crot.sample_rotated_slices(
-                                    V,
-                                    ctheta,
-                                    slice_indices=si,
-                                    roi_size=(_nxy, _nxy),
-                                    padding_mode="zeros",
-                                ).to(dev)[:, 0]
+                            s = self._fetch_volume_slices(
+                                V, ci[j : j + 1], cid, crot, ctheta, cnz, cy, cx, dev
+                            )[:, 0]
                             sc = complex_potential(s, alpha=_alpha)
                             t = torch.exp(1j * _sigma * _pixel_size * sc)
                             ew = ifft2(fft2(t * ew) * _F * _kmask)
@@ -765,18 +883,16 @@ class IterativeScattering(L.LightningModule):
         """
         Compute exit wave using iterative projection approximation on a transformed volume.
         """
-        is_identity = self._is_identity(theta_matrix)
-        if is_identity:
-            nz_new = V.shape[1]
-            rotator = None
-        else:
-            nz_new, rotator = self._setup_tilt(V, theta_matrix)
-
+        nz_new, rotator, is_identity = self._resolve_tilt_setup(V, theta_matrix)
         B = V.shape[0]
         device = self.device
 
         total_potential = torch.zeros((B, self.nxy, self.nxy), device=device)
+        # Note: unlike the other iterative models, projection sums slices in
+        # a commutative accumulation, so it does not apply the EWS curvature
+        # traversal order.
         indices = torch.arange(nz_new, device=V.device)
+        y_start, x_start = self._roi_start(V)
 
         pbar = track(
             range(nz_new),
@@ -785,30 +901,34 @@ class IterativeScattering(L.LightningModule):
             disable=not (self.progressbars),
         )
 
-        y_start = (V.shape[-2] - self.nxy) // 2
-        x_start = (V.shape[-1] - self.nxy) // 2
-
+        slices_block = None
         for i in pbar:
             if is_identity:
-                total_potential += V[
-                    :,
-                    indices[i],
-                    y_start : y_start + self.nxy,
-                    x_start : x_start + self.nxy,
-                ].to(device)
+                total_potential += self._fetch_volume_slices(
+                    V,
+                    indices[i : i + 1],
+                    is_identity,
+                    rotator,
+                    theta_matrix,
+                    nz_new,
+                    y_start,
+                    x_start,
+                    device,
+                )[:, 0]
             else:
                 if i % slice_batch_size == 0:
                     batch_end = min(i + slice_batch_size, nz_new)
-                    batch_indices = indices[i:batch_end]
-                    slice_indices = batch_indices - (nz_new - 1) / 2
-                    assert rotator is not None
-                    slices_block = rotator.sample_rotated_slices(
+                    slices_block = self._fetch_volume_slices(
                         V,
+                        indices[i:batch_end],
+                        is_identity,
+                        rotator,
                         theta_matrix,
-                        slice_indices=slice_indices,
-                        roi_size=(self.nxy, self.nxy),
-                        padding_mode="zeros",
-                    ).to(device)
+                        nz_new,
+                        y_start,
+                        x_start,
+                        device,
+                    )
                 total_potential += slices_block[:, i % slice_batch_size]
 
         total_complex = complex_potential(total_potential, alpha=self.alpha)
@@ -821,57 +941,16 @@ class IterativeScattering(L.LightningModule):
         """
         Compute exit wave using iterative Rytov approximation on a transformed volume.
         """
-        is_identity = self._is_identity(theta_matrix)
-        if is_identity:
-            nz_new = V.shape[1]
-            rotator = None
-        else:
-            nz_new, rotator = self._setup_tilt(V, theta_matrix)
-
         B = V.shape[0]
         device = self.device
 
         exitwave = torch.ones(
             (B, self.nxy, self.nxy), device=device, dtype=torch.complex64
         )
-        indices = torch.arange(nz_new, device=V.device)
-        if self.ews_curvature_sign == "negative":
-            indices = torch.flip(indices, dims=(0,))
 
-        pbar = track(
-            range(nz_new),
-            description="Rytov (Iterative)",
-            transient=True,
-            disable=not (self.progressbars),
-        )
-
-        slices_block = None
-        y_start = (V.shape[-2] - self.nxy) // 2
-        x_start = (V.shape[-1] - self.nxy) // 2
-
-        for i in pbar:
-            if is_identity:
-                slice_sample = V[
-                    :,
-                    indices[i],
-                    y_start : y_start + self.nxy,
-                    x_start : x_start + self.nxy,
-                ].to(device)
-            else:
-                if i % slice_batch_size == 0:
-                    batch_end = min(i + slice_batch_size, nz_new)
-                    batch_indices = indices[i:batch_end]
-                    slice_indices = batch_indices - (nz_new - 1) / 2
-                    assert rotator is not None
-                    slices_block = rotator.sample_rotated_slices(
-                        V,
-                        theta_matrix,
-                        slice_indices=slice_indices,
-                        roi_size=(self.nxy, self.nxy),
-                        padding_mode="zeros",
-                    ).to(device)
-                slice_sample = slices_block[:, i % slice_batch_size]
-
+        for i, nz_new, slice_sample in self._iter_slices(
+            V, theta_matrix, slice_batch_size, "Rytov (Iterative)"
+        ):
             slice_complex = complex_potential(slice_sample, alpha=self.alpha)
             # Propagate transmission of slice i to exit plane
             # Distance is nz_new - i
@@ -930,21 +1009,12 @@ class IterativeScattering(L.LightningModule):
         for 300 keV electrons through typical cryo-ET ice thicknesses at
         5 Å/px).
         """
-        is_identity = self._is_identity(theta_matrix)
-        if is_identity:
-            nz_new = V.shape[1]
-            rotator = None
-        else:
-            nz_new, rotator = self._setup_tilt(V, theta_matrix)
-
+        nz_new, rotator, is_identity = self._resolve_tilt_setup(V, theta_matrix)
         device = self.device
-        y_start = (V.shape[-2] - self.nxy) // 2
-        x_start = (V.shape[-1] - self.nxy) // 2
+        y_start, x_start = self._roi_start(V)
 
         # Processing order: negative EWS sign flips the slice traversal
-        indices = torch.arange(nz_new, device=V.device)
-        if self.ews_curvature_sign == "negative":
-            indices = torch.flip(indices, dims=(0,))
+        indices = self._slice_processing_order(nz_new, device=V.device)
 
         # Each slice j (processing order) propagates distance (nz_new - j)
         # to the exit plane.
@@ -956,7 +1026,6 @@ class IterativeScattering(L.LightningModule):
             B, self.nxy, self.nxy, device=device, dtype=torch.complex64
         )
 
-        _nxy = self.nxy
         _alpha = self.alpha
         _sigma = self.sigma
         _pixel_size = self.pixel_size
@@ -985,18 +1054,9 @@ class IterativeScattering(L.LightningModule):
             def _make_chunk(ci, dist, cid, crot, ctheta, cy, cx, cnz):
                 def _chunk(phase_sum: torch.Tensor, V: torch.Tensor) -> torch.Tensor:
                     dev = phase_sum.device
-                    if cid:
-                        # Identity: direct index into volume
-                        slices = V[:, ci, cy : cy + _nxy, cx : cx + _nxy].to(dev)
-                    else:
-                        si = ci.float() - (cnz - 1) / 2
-                        slices = crot.sample_rotated_slices(
-                            V,
-                            ctheta,
-                            slice_indices=si,
-                            roi_size=(_nxy, _nxy),
-                            padding_mode="zeros",
-                        ).to(dev)
+                    slices = self._fetch_volume_slices(
+                        V, ci, cid, crot, ctheta, cnz, cy, cx, dev
+                    )
                     # (B, K, nxy, nxy) real → complex potential
                     slices_c = complex_potential(slices, alpha=_alpha)
                     # Fresnel kernels for this chunk — recomputed each time
@@ -1035,57 +1095,16 @@ class IterativeScattering(L.LightningModule):
         """
         Compute exit wave using iterative first Born approximation on a transformed volume.
         """
-        is_identity = self._is_identity(theta_matrix)
-        if is_identity:
-            nz_new = V.shape[1]
-            rotator = None
-        else:
-            nz_new, rotator = self._setup_tilt(V, theta_matrix)
-
         B = V.shape[0]
         device = self.device
 
         total_scattered = torch.zeros(
             (B, self.nxy, self.nxy), device=device, dtype=torch.complex64
         )
-        indices = torch.arange(nz_new, device=V.device)
-        if self.ews_curvature_sign == "negative":
-            indices = torch.flip(indices, dims=(0,))
 
-        pbar = track(
-            range(nz_new),
-            description="First Born (Iterative)",
-            transient=True,
-            disable=not (self.progressbars),
-        )
-
-        slices_block = None
-        y_start = (V.shape[-2] - self.nxy) // 2
-        x_start = (V.shape[-1] - self.nxy) // 2
-
-        for i in pbar:
-            if is_identity:
-                slice_sample = V[
-                    :,
-                    indices[i],
-                    y_start : y_start + self.nxy,
-                    x_start : x_start + self.nxy,
-                ].to(device)
-            else:
-                if i % slice_batch_size == 0:
-                    batch_end = min(i + slice_batch_size, nz_new)
-                    batch_indices = indices[i:batch_end]
-                    slice_indices = batch_indices - (nz_new - 1) / 2
-                    assert rotator is not None
-                    slices_block = rotator.sample_rotated_slices(
-                        V,
-                        theta_matrix,
-                        slice_indices=slice_indices,
-                        roi_size=(self.nxy, self.nxy),
-                        padding_mode="zeros",
-                    ).to(device)
-                slice_sample = slices_block[:, i % slice_batch_size]
-
+        for i, nz_new, slice_sample in self._iter_slices(
+            V, theta_matrix, slice_batch_size, "First Born (Iterative)"
+        ):
             slice_complex = complex_potential(slice_sample, alpha=self.alpha)
             F_i = self._get_propagator(float(nz_new - i))
             total_scattered += ifft2(fft2(slice_complex) * F_i)
@@ -1102,57 +1121,16 @@ class IterativeScattering(L.LightningModule):
         Like ``firstborn`` but uses the full per-slice transmission function
         ``exp(iσΔz V) − 1`` instead of the weak-phase linearisation ``iσΔz V``.
         """
-        is_identity = self._is_identity(theta_matrix)
-        if is_identity:
-            nz_new = V.shape[1]
-            rotator = None
-        else:
-            nz_new, rotator = self._setup_tilt(V, theta_matrix)
-
         B = V.shape[0]
         device = self.device
 
         total_scattered = torch.zeros(
             (B, self.nxy, self.nxy), device=device, dtype=torch.complex64
         )
-        indices = torch.arange(nz_new, device=V.device)
-        if self.ews_curvature_sign == "negative":
-            indices = torch.flip(indices, dims=(0,))
 
-        pbar = track(
-            range(nz_new),
-            description="Kinematic (Iterative)",
-            transient=True,
-            disable=not (self.progressbars),
-        )
-
-        slices_block = None
-        y_start = (V.shape[-2] - self.nxy) // 2
-        x_start = (V.shape[-1] - self.nxy) // 2
-
-        for i in pbar:
-            if is_identity:
-                slice_sample = V[
-                    :,
-                    indices[i],
-                    y_start : y_start + self.nxy,
-                    x_start : x_start + self.nxy,
-                ].to(device)
-            else:
-                if i % slice_batch_size == 0:
-                    batch_end = min(i + slice_batch_size, nz_new)
-                    batch_indices = indices[i:batch_end]
-                    slice_indices = batch_indices - (nz_new - 1) / 2
-                    assert rotator is not None
-                    slices_block = rotator.sample_rotated_slices(
-                        V,
-                        theta_matrix,
-                        slice_indices=slice_indices,
-                        roi_size=(self.nxy, self.nxy),
-                        padding_mode="zeros",
-                    ).to(device)
-                slice_sample = slices_block[:, i % slice_batch_size]
-
+        for i, nz_new, slice_sample in self._iter_slices(
+            V, theta_matrix, slice_batch_size, "Kinematic (Iterative)"
+        ):
             slice_complex = complex_potential(slice_sample, alpha=self.alpha)
             t = torch.exp(1j * self.sigma * self.pixel_size * slice_complex) - 1
             F_i = self._get_propagator(float(nz_new - i))
@@ -1167,18 +1145,15 @@ class IterativeScattering(L.LightningModule):
         """
         Compute iterative projected potential (for CTF) with transformed sampling.
         """
-        is_identity = self._is_identity(theta_matrix)
-        if is_identity:
-            nz_new = V.shape[1]
-            rotator = None
-        else:
-            nz_new, rotator = self._setup_tilt(V, theta_matrix)
-
+        nz_new, rotator, is_identity = self._resolve_tilt_setup(V, theta_matrix)
         B = V.shape[0]
         device = self.device
 
         total_potential = torch.zeros((B, self.nxy, self.nxy), device=device)
+        # Note: like projection, this is a commutative sum, so it does not
+        # apply the EWS curvature traversal order.
         indices = torch.arange(nz_new, device=V.device)
+        y_start, x_start = self._roi_start(V)
 
         pbar = track(
             range(nz_new),
@@ -1187,30 +1162,34 @@ class IterativeScattering(L.LightningModule):
             disable=not (self.progressbars),
         )
 
-        y_start = (V.shape[-2] - self.nxy) // 2
-        x_start = (V.shape[-1] - self.nxy) // 2
-
+        slices_block = None
         for i in pbar:
             if is_identity:
-                total_potential += V[
-                    :,
-                    indices[i],
-                    y_start : y_start + self.nxy,
-                    x_start : x_start + self.nxy,
-                ].to(device)
+                total_potential += self._fetch_volume_slices(
+                    V,
+                    indices[i : i + 1],
+                    is_identity,
+                    rotator,
+                    theta_matrix,
+                    nz_new,
+                    y_start,
+                    x_start,
+                    device,
+                )[:, 0]
             else:
                 if i % slice_batch_size == 0:
                     batch_end = min(i + slice_batch_size, nz_new)
-                    batch_indices = indices[i:batch_end]
-                    slice_indices = batch_indices - (nz_new - 1) / 2
-                    assert rotator is not None
-                    slices_block = rotator.sample_rotated_slices(
+                    slices_block = self._fetch_volume_slices(
                         V,
+                        indices[i:batch_end],
+                        is_identity,
+                        rotator,
                         theta_matrix,
-                        slice_indices=slice_indices,
-                        roi_size=(self.nxy, self.nxy),
-                        padding_mode="zeros",
-                    ).to(device)
+                        nz_new,
+                        y_start,
+                        x_start,
+                        device,
+                    )
                 total_potential += slices_block[:, i % slice_batch_size]
 
         return 2 * self.sigma * self.pixel_size * total_potential

@@ -71,6 +71,125 @@ def test_iterative_scattering_batch_size(dummy_volume):
     assert torch.allclose(psi1_rytov, psi4_rytov, atol=1e-5)
 
 
+def test_multislice_checkpointing_matches_uncheckpointed(dummy_volume):
+    """Gradient checkpointing must not change the multislice exit wave."""
+    scat_iter = IterativeScattering(
+        nxy=64, pixel_size=1.0, energy=300.0, progressbars=False
+    )
+    R = (
+        Rotation.from_rotvec(torch.tensor([[0.0, 0.1, 0.0]]))
+        .as_matrix()
+        .to(dummy_volume.device)
+    )
+    theta_matrix = build_affine_matrix(R)
+
+    psi = scat_iter.multislice(dummy_volume, theta_matrix)
+    psi_ckpt3 = scat_iter.multislice(dummy_volume, theta_matrix, checkpoint_chunks=3)
+    psi_ckpt8 = scat_iter.multislice(dummy_volume, theta_matrix, checkpoint_chunks=8)
+
+    assert torch.allclose(psi, psi_ckpt3, atol=1e-5)
+    assert torch.allclose(psi, psi_ckpt8, atol=1e-5)
+
+
+def test_multislice_checkpointing_backprops(dummy_volume):
+    """Gradients must flow through the checkpointed multislice path."""
+    scat_iter = IterativeScattering(
+        nxy=64, pixel_size=1.0, energy=300.0, progressbars=False
+    )
+    R = (
+        Rotation.from_rotvec(torch.tensor([[0.0, 0.1, 0.0]]))
+        .as_matrix()
+        .to(dummy_volume.device)
+    )
+    theta_matrix = build_affine_matrix(R)
+
+    V = dummy_volume.clone().requires_grad_(True)
+    psi = scat_iter.multislice(V, theta_matrix, checkpoint_chunks=3)
+    psi.abs().sum().backward()
+
+    assert V.grad is not None
+    assert torch.isfinite(V.grad).all()
+    assert V.grad.abs().sum() > 0
+
+
+def test_parallel_rytov_matches_iterative_rytov(dummy_volume):
+    """The fully-parallel Rytov path should agree with the slice-by-slice one."""
+    scat_iter = IterativeScattering(
+        nxy=64, pixel_size=1.0, energy=300.0, progressbars=False
+    )
+    R = (
+        Rotation.from_rotvec(torch.tensor([[0.0, 0.1, 0.0]]))
+        .as_matrix()
+        .to(dummy_volume.device)
+    )
+    theta_matrix = build_affine_matrix(R)
+
+    psi_iterative = scat_iter.rytov(dummy_volume, theta_matrix)
+    psi_parallel = scat_iter.parallel_rytov(dummy_volume, theta_matrix)
+    psi_parallel_ckpt = scat_iter.parallel_rytov(
+        dummy_volume, theta_matrix, checkpoint_chunks=5
+    )
+
+    assert torch.allclose(psi_iterative, psi_parallel, atol=1e-4)
+    assert torch.allclose(psi_parallel, psi_parallel_ckpt, atol=1e-5)
+
+
+@pytest.mark.xfail(
+    reason=(
+        "Pre-existing bug (not introduced by this refactor, confirmed against "
+        "the pre-refactor code and reproducible with a minimal ifft2(fft2(x)*k)"
+        ".sum(dim=1) example with no scattering.py or checkpoint involved): "
+        "parallel_rytov's backward pass raises 'MKL FFT error: Intel oneMKL "
+        "DFTI ERROR: Inconsistent configuration parameters' regardless of "
+        "checkpoint_chunks. Needs investigation in fft.py / the MKL backend."
+    ),
+    strict=True,
+)
+def test_parallel_rytov_checkpointing_backprops(dummy_volume):
+    """Gradients must flow through the checkpointed parallel_rytov path."""
+    scat_iter = IterativeScattering(
+        nxy=64, pixel_size=1.0, energy=300.0, progressbars=False
+    )
+    R = (
+        Rotation.from_rotvec(torch.tensor([[0.0, 0.1, 0.0]]))
+        .as_matrix()
+        .to(dummy_volume.device)
+    )
+    theta_matrix = build_affine_matrix(R)
+
+    V = dummy_volume.clone().requires_grad_(True)
+    psi = scat_iter.parallel_rytov(V, theta_matrix, checkpoint_chunks=5)
+    psi.abs().sum().backward()
+
+    assert V.grad is not None
+    assert torch.isfinite(V.grad).all()
+    assert V.grad.abs().sum() > 0
+
+
+@pytest.mark.parametrize("scattering_model", ["firstborn", "kinematic", "ctf"])
+def test_iterative_models_consistent_across_batch_size(dummy_volume, scattering_model):
+    """firstborn/kinematic/ctf must be invariant to the slice_batch_size chunking."""
+    scat_iter = IterativeScattering(
+        nxy=64,
+        pixel_size=1.0,
+        energy=300.0,
+        scattering_model=scattering_model,
+        progressbars=False,
+    )
+    R = (
+        Rotation.from_rotvec(torch.tensor([[0.0, 0.1, 0.0]]))
+        .as_matrix()
+        .to(dummy_volume.device)
+    )
+    theta_matrix = build_affine_matrix(R)
+
+    method = getattr(scat_iter, scattering_model)
+    psi1 = method(dummy_volume, theta_matrix, slice_batch_size=1)
+    psi4 = method(dummy_volume, theta_matrix, slice_batch_size=4)
+
+    assert torch.allclose(psi1, psi4, atol=1e-5)
+
+
 @pytest.fixture
 def dummy_volume() -> torch.Tensor:
     vol = torch.zeros(1, 32, 64, 64)

@@ -4,8 +4,8 @@ Quaternion-based 3D rotations, coordinate/volume transforms, and the
 3D volume.
 
 Split across:
-    _rotation.py        - Rotation class, translate_coordinates
-    _transforms.py       - coordinate/quaternion utilities built on Rotation
+    _rotation.py        - Rotation class, translate_coordinates, rotate_coordinates
+    _random.py           - random quaternion/rotvec/matrix generators, rotations_angular_difference
     _volume.py           - rotate_volume, rotate_volume_fourier, affine matrix helpers
     _volume_rotator.py   - VolumeRotator (LightningModule) and its private helpers
 
@@ -13,14 +13,13 @@ Everything is re-exported here so existing `from .rotations import X` /
 `from specter.rotations import X` usage is unaffected by the split.
 """
 
-from ._rotation import Rotation, translate_coordinates
-from ._transforms import (
+from ._random import (
     random_quaternion,
     random_rotation_matrix,
     random_rotvec,
-    rotate_coordinates,
     rotations_angular_difference,
 )
+from ._rotation import Rotation, rotate_coordinates, translate_coordinates
 from ._volume import (
     build_affine_matrix,
     rotate_volume,

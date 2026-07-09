@@ -7,31 +7,6 @@ import torch
 from ._rotation import Rotation
 
 
-def rotate_coordinates(vectors: torch.Tensor, quat: torch.Tensor) -> torch.Tensor:
-    """
-    Rotate vectors by quaternions.
-
-    Parameters
-    ----------
-    vectors : torch.Tensor
-        (N, 3) or (3,) coordinates.
-    quat : torch.Tensor
-        (B, 4) or (4,) quaternions.
-
-    Returns
-    -------
-    rotated : torch.Tensor
-        Rotated coordinates.
-    """
-    if vectors.ndim == 1:
-        vectors = vectors.unsqueeze(0)
-    R = Rotation.from_quat(quat)
-    rotated = R.apply(vectors, inverse=False)
-    if rotated.ndim == 3 and rotated.shape[1] == 1:
-        rotated = rotated.squeeze(1)
-    return rotated
-
-
 def random_quaternion(
     batchsize: int = 1,
     convention: Literal["xyzw", "wxyz"] = "xyzw",

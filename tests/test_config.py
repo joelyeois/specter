@@ -76,3 +76,13 @@ def test_apply_overrides_with_empty_dict_is_noop() -> None:
     config = ParticleStackConfig(pdb_code="6bdf")
     apply_overrides(config, {})
     assert config.n_particles == 20  # dataclass default, untouched
+
+
+def test_default_toml_loads_and_matches_expected_values() -> None:
+    path = str(REPO_ROOT / "configs" / "particle_stack" / "default.toml")
+    config = load_config(path)
+    assert config.pdb_code == "6bdf"
+    assert config.num_pixels == 256
+    assert config.pixel_size == 1.0
+    assert config.scattering_model == "multislice"
+    assert config.device == "cpu"

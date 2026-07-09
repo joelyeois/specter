@@ -1,0 +1,68 @@
+# Canonical default config for demo-scripts/generate_particle_stack.py and
+# demo-notebooks/particle_stack/particle-stack-generator.ipynb.
+# Any field can be overridden on the command line, e.g.:
+#   python demo-scripts/generate_particle_stack.py --config configs/particle_stack/default.toml --n_particles 3000
+
+[potential]
+pdb_code = "6bdf"
+assembly = true
+pdb_savefolder = "pdb-data"  # resolved relative to the repo root
+num_pixels = 256
+pixel_size = 1.0              # Å
+
+[microscope]
+energy = 300.0                # keV
+dose_min = 20.0                # e⁻/Å²
+# dose_max = 60.0               # e⁻/Å², uncomment to randomize dose per particle
+cs = 2.0                       # mm
+alpha = 0.1                    # unitless, amplitude contrast ratio
+
+[envelopes]
+# convergence_angle = 1.0       # mrad, uncomment to enable the Cs envelope
+# cc = 2.0                      # mm, uncomment to enable the Cc envelope
+energy_spread = 0.7            # eV (FWHM)
+deltaV_V = 0.06e-6              # unitless (ΔV/V)
+deltaI_I = 0.01e-6               # unitless (ΔI/I)
+dose_envelope = false
+# bfactor = 50.0                # Å², uncomment to enable a B-factor envelope
+
+[defocus]
+defocus_min = 5000.0            # Å
+defocus_max = 15000.0           # Å
+
+[translations]
+shift = 2.0                    # Å
+
+[dataset]
+n_particles = 20
+
+[models]
+scattering_model = "multislice"  # multislice | firstborn | projection | ctf
+aberration_model = "holography"  # holography | ctf
+noise_model = "poisson"          # poisson | none
+coincidence_radius_min = 0.0     # pixels
+# coincidence_radius_max = 3.0    # pixels, uncomment to randomize per particle
+ice_model = "gd"                 # gd | ap | mcmc | random | none
+ice_thickness = 0.0              # Å, 0 = minimum (particle box size)
+num_unique_icecubes = 8
+ice_build_batch_size = 1
+# icecube_size = 256              # voxels
+# crowd_min_distance = 100.0      # Å, uncomment to crowd particles; defaults to pdb.max_diameter
+# crowd_max_distance_z = 50.0     # Å
+potential_scale_min = 1.0        # unitless
+# potential_scale_max = 1.0       # unitless, values < 1 approximate thicker ice
+pad_fft = true
+detector_model = "none"          # none | perfect | k3_300kv | k3_200kv
+
+[postprocessing]
+normalize_particles = true
+save_exitwaves = false
+save_clean_exitwaves = false
+
+[compute]
+device = "cpu"                   # cpu | cuda | cuda:0 | 0,1,2,3 (multi-GPU)
+batchsize = 5
+
+[output]
+output_dir = "./output/"
+filename = "particles"

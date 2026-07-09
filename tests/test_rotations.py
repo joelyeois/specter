@@ -5,6 +5,10 @@ import torch
 from specter.rotations import (
     Rotation,
     VolumeRotator,
+    _build_roi_query_points,
+    _normalize_slice_indices,
+    _prepare_volume_for_grid_sample,
+    _resolve_roi,
     build_affine_matrix,
     rotate_volume,
 )
@@ -179,3 +183,61 @@ def test_sample_rotated_slices_matches_rotate_volume(angle_deg: float) -> None:
     )
 
     torch.testing.assert_close(vol_slices, vol_ref, atol=2e-5, rtol=1e-4)
+
+
+# ---------------------------------------------------------------------------
+# sample_rotated_slices helper functions
+# ---------------------------------------------------------------------------
+
+
+def test_normalize_slice_indices_accepts_int_list_and_tensor() -> None:
+    assert torch.equal(
+        _normalize_slice_indices(0, "cpu"), torch.as_tensor(0).unsqueeze(0)
+    )
+    assert torch.equal(_normalize_slice_indices([-1, 1], "cpu"), torch.tensor([-1, 1]))
+    assert torch.equal(
+        _normalize_slice_indices(torch.tensor([2, 3]), "cpu"), torch.tensor([2, 3])
+    )
+
+
+def test_resolve_roi_defaults_to_full_centered_volume() -> None:
+    roi_center, roi_size = _resolve_roi(None, None, ny=10, nx=20)
+    assert roi_center == (5, 10)
+    assert roi_size == (10, 20)
+
+
+def test_resolve_roi_preserves_explicit_values() -> None:
+    roi_center, roi_size = _resolve_roi((3, 4), (6, 8), ny=10, nx=20)
+    assert roi_center == (3, 4)
+    assert roi_size == (6, 8)
+
+
+def test_build_roi_query_points_center_pixel_is_zero() -> None:
+    slice_indices = torch.tensor([0])
+    points = _build_roi_query_points(
+        slice_indices,
+        roi_center=(5, 5),
+        roi_size=(11, 11),
+        ny=10,
+        nx=10,
+        device="cpu",
+        dtype=torch.float32,
+    )
+    # roi is centered on (5, 5) == volume center, so its middle pixel (index
+    # 5, 5) must be the (x, y, z) = (0, 0, 0) query point.
+    assert torch.equal(points[0, 5, 5], torch.tensor([0.0, 0.0, 0.0]))
+
+
+def test_prepare_volume_for_grid_sample_normalizes_all_ndim_variants() -> None:
+    B = 3
+    vol_3d = torch.rand(4, 5, 6)
+    vol_4d = vol_3d.unsqueeze(0).expand(B, -1, -1, -1)
+    vol_5d = vol_4d.unsqueeze(1)
+
+    out_3d = _prepare_volume_for_grid_sample(vol_3d, B)
+    out_4d = _prepare_volume_for_grid_sample(vol_4d, B)
+    out_5d = _prepare_volume_for_grid_sample(vol_5d, B)
+
+    assert out_3d.shape == out_4d.shape == out_5d.shape == (B, 1, 4, 5, 6)
+    assert torch.equal(out_3d, out_4d)
+    assert torch.equal(out_4d, out_5d)

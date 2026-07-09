@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import itertools
 from typing import Literal, Sequence, overload
 
 import torch
@@ -480,6 +481,97 @@ def voxelize_coordinates(
     return grid
 
 
+def _normalize_voxel_size(
+    voxel_size: float | Sequence[float], device: str | torch.device
+) -> torch.Tensor:
+    """
+    Broadcast a scalar or (dz, dy, dx) sequence voxel size to a (3,) tensor.
+    """
+    if isinstance(voxel_size, (int, float)):
+        return torch.tensor([voxel_size] * 3, device=device)
+    return torch.as_tensor(voxel_size, device=device)
+
+
+def _ensure_batched_coords(coords: torch.Tensor) -> tuple[torch.Tensor, bool]:
+    """
+    Add a batch dimension to (N, 3) coordinates if missing.
+
+    Returns
+    -------
+    coords : torch.Tensor
+        Coordinates with shape (B, N, 3).
+    was_unbatched : bool
+        True if a batch dimension was added (caller should squeeze it back
+        out of the result).
+    """
+    if coords.ndim == 2:
+        return coords.unsqueeze(0), True
+    return coords, False
+
+
+def _linear_interp_offsets_and_weights(
+    frac: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """
+    N-linear interpolation corner offsets and weights from fractional coordinates.
+
+    Parameters
+    ----------
+    frac : torch.Tensor
+        Fractional part of voxel coordinates, shape (..., D).
+
+    Returns
+    -------
+    offsets : torch.Tensor
+        Integer corner offsets, shape (2**D, D).
+    weights : torch.Tensor
+        Interpolation weight per corner, shape (..., 2**D).
+    """
+    d = frac.shape[-1]
+    offsets = torch.tensor(
+        list(itertools.product((0, 1), repeat=d)), device=frac.device
+    )
+    one_minus_frac = 1 - frac
+    # per-dimension weight is frac where offset==1, else (1 - frac)
+    per_dim_weight = torch.where(
+        offsets.bool(), frac.unsqueeze(-2), one_minus_frac.unsqueeze(-2)
+    )  # (..., 2**D, D)
+    weights = per_dim_weight.prod(dim=-1)
+    return offsets, weights
+
+
+def _scatter_splat(
+    volume: torch.Tensor,
+    indices: torch.Tensor,
+    weights: torch.Tensor,
+    periodic: bool = False,
+) -> None:
+    """
+    In-place accumulate `weights` into `volume` at `indices`.
+
+    Parameters
+    ----------
+    volume : torch.Tensor
+        Target grid, shape (d0, d1, ..., dk), modified in place.
+    indices : torch.Tensor
+        Integer indices, shape (..., k) matching `volume.ndim`.
+    weights : torch.Tensor
+        Weight per index, shape (...) matching `indices.shape[:-1]`.
+    periodic : bool, optional
+        If True, wrap out-of-bounds indices instead of discarding them.
+    """
+    grid_shape = torch.tensor(volume.shape, device=volume.device)
+    if periodic:
+        indices = indices % grid_shape
+    else:
+        in_bounds = ((indices >= 0) & (indices < grid_shape)).all(dim=-1)
+        indices = indices[in_bounds]
+        weights = weights[in_bounds]
+
+    idx_tuple = tuple(indices[..., i].reshape(-1) for i in range(indices.shape[-1]))
+    volume.index_put_(idx_tuple, weights.reshape(-1), accumulate=True)
+
+
 def soft_voxelize_coordinates(
     coords: torch.Tensor,
     grid_shape: tuple[int, int, int],
@@ -522,22 +614,12 @@ def soft_voxelize_coordinates(
     if device is None:
         device = coords.device
     coords = coords.to(device)
-
-    # Handle non-batch input
-    batched_input = True
-    if coords.ndim == 2:  # (N,3) -> add batch dimension
-        coords = coords.unsqueeze(0)
-        batched_input = False
+    coords, was_unbatched = _ensure_batched_coords(coords)
 
     B, N, _ = coords.shape
     nz, ny, nx = grid_shape
-    values = torch.ones(B, N, device=device)
 
-    # Convert physical coordinates to voxel units
-    if isinstance(voxel_size, (int, float)):
-        voxel_size = torch.tensor([voxel_size] * 3, device=device)
-    else:
-        voxel_size = torch.as_tensor(voxel_size, device=device)
+    voxel_size = _normalize_voxel_size(voxel_size, device)
     coords_voxel = coords / voxel_size  # (B,N,3)
 
     # Shift coordinates so origin is at center
@@ -549,76 +631,17 @@ def soft_voxelize_coordinates(
     # Reorder to z,y,x
     coords_voxel_centered = coords_voxel_centered[..., [2, 1, 0]]
 
-    # Floor and fractional part
     coords_floor = torch.floor(coords_voxel_centered).long()  # (B,N,3)
     frac = coords_voxel_centered - coords_floor.float()
-    dz, dy, dx = frac[..., 0], frac[..., 1], frac[..., 2]
-    z0, y0, x0 = coords_floor[..., 0], coords_floor[..., 1], coords_floor[..., 2]
 
-    # 8 neighbor offsets
-    offsets = torch.tensor(
-        [
-            [0, 0, 0],
-            [0, 0, 1],
-            [0, 1, 0],
-            [0, 1, 1],
-            [1, 0, 0],
-            [1, 0, 1],
-            [1, 1, 0],
-            [1, 1, 1],
-        ],
-        device=device,
-    )
+    offsets, weights = _linear_interp_offsets_and_weights(frac)  # (8,3), (B,N,8)
+    indices = coords_floor.unsqueeze(-2) + offsets  # (B,N,8,3)
 
-    z_idx = z0[..., None] + offsets[None, None, :, 0]
-    y_idx = y0[..., None] + offsets[None, None, :, 1]
-    x_idx = x0[..., None] + offsets[None, None, :, 2]
-
-    # Trilinear weights
-    w = (
-        (
-            (1 - dz)[..., None] * (1 - offsets[None, None, :, 0])
-            + dz[..., None] * offsets[None, None, :, 0]
-        )
-        * (
-            (1 - dy)[..., None] * (1 - offsets[None, None, :, 1])
-            + dy[..., None] * offsets[None, None, :, 1]
-        )
-        * (
-            (1 - dx)[..., None] * (1 - offsets[None, None, :, 2])
-            + dx[..., None] * offsets[None, None, :, 2]
-        )
-    )
-    w = w * values[..., None]
-
-    # Initialize volume
     volume = torch.zeros(B, nz, ny, nx, device=device)
-
-    # Scatter-add per batch
     for b in range(B):
-        if periodic:
-            volume[b].index_put_(
-                (z_idx[b] % nz, y_idx[b] % ny, x_idx[b] % nx),
-                w[b],
-                accumulate=True,
-            )
-        else:
-            mask = (
-                (z_idx[b] >= 0)
-                & (z_idx[b] < nz)
-                & (y_idx[b] >= 0)
-                & (y_idx[b] < ny)
-                & (x_idx[b] >= 0)
-                & (x_idx[b] < nx)
-            )
-            volume[b].index_put_(
-                (z_idx[b][mask], y_idx[b][mask], x_idx[b][mask]),
-                w[b][mask],
-                accumulate=True,
-            )
+        _scatter_splat(volume[b], indices[b], weights[b], periodic=periodic)
 
-    # Remove batch dimension if input was non-batch
-    if not batched_input:
+    if was_unbatched:
         volume = volume.squeeze(0)
 
     return volume
@@ -663,87 +686,43 @@ def soft_voxelize_xy_coordinates(
     if device is None:
         device = coords.device
     coords = coords.to(device)
-
-    # Ensure batch dimension
-    if coords.ndim == 2:  # (N,3)
-        coords = coords.unsqueeze(0)
-        squeeze_output = True
-    else:
-        squeeze_output = False
+    coords, was_unbatched = _ensure_batched_coords(coords)
 
     B, N, _ = coords.shape
     nz, ny, nx = grid_shape
 
-    # Convert voxel size
-    if isinstance(voxel_size, (int, float)):
-        voxel_size = torch.tensor([voxel_size] * 3, device=device)
-    else:
-        voxel_size = torch.as_tensor(voxel_size, device=device)
-
-    # Shift origin to center
+    voxel_size = _normalize_voxel_size(voxel_size, device)
     origin = torch.tensor(
         [nx // 2, ny // 2, nz // 2], device=device, dtype=coords.dtype
     )
 
-    volumes = torch.zeros(B, nz, ny, nx, device=device)
-    offsets = torch.tensor([[0, 0], [0, 1], [1, 0], [1, 1]], device=device)
-
+    volume = torch.zeros(B, nz, ny, nx, device=device)
     for b in range(B):
-        batch_coords = coords[b]
-        values = torch.ones(N, device=device)
-
-        coords_voxel = batch_coords / voxel_size
-        coords_voxel_centered = coords_voxel + origin[None, :]
-
-        # Extract x, y, z safely without .T
-        x = coords_voxel_centered[:, 0]
-        y = coords_voxel_centered[:, 1]
-        z = coords_voxel_centered[:, 2]
+        coords_voxel_centered = coords[b] / voxel_size + origin[None, :]
+        x, y, z = (
+            coords_voxel_centered[:, 0],
+            coords_voxel_centered[:, 1],
+            coords_voxel_centered[:, 2],
+        )
 
         # Hard Z assignment
         z_idx = torch.round(z).long()
 
-        # XY floor + fractional for bilinear
-        x0 = torch.floor(x).long()
-        y0 = torch.floor(y).long()
-        dx = x - x0.float()
-        dy = y - y0.float()
+        # Soft XY assignment (bilinear)
+        xy_floor = torch.floor(torch.stack([y, x], dim=-1)).long()  # (N,2)
+        frac_yx = torch.stack([y, x], dim=-1) - xy_floor.float()
+        offsets, weights = _linear_interp_offsets_and_weights(frac_yx)  # (4,2), (N,4)
+        yx_idx = xy_floor.unsqueeze(-2) + offsets  # (N,4,2)
 
-        # Neighbor indices for bilinear
-        x_idx = x0[:, None] + offsets[None, :, 1]
-        y_idx = y0[:, None] + offsets[None, :, 0]
-        z_idx_full = z_idx[:, None].repeat(1, 4)
+        z_idx_full = z_idx[:, None].expand(-1, weights.shape[-1])  # (N,4)
+        indices = torch.cat([z_idx_full.unsqueeze(-1), yx_idx], dim=-1)  # (N,4,3)
 
-        # Bilinear weights
-        w = (
-            (1 - dx)[:, None] * (1 - offsets[None, :, 1])
-            + dx[:, None] * offsets[None, :, 1]
-        ) * (
-            (1 - dy)[:, None] * (1 - offsets[None, :, 0])
-            + dy[:, None] * offsets[None, :, 0]
-        )
-        w = w * values[:, None]
+        _scatter_splat(volume[b], indices, weights)
 
-        # Mask out-of-bounds
-        mask = (
-            (z_idx_full >= 0)
-            & (z_idx_full < nz)
-            & (y_idx >= 0)
-            & (y_idx < ny)
-            & (x_idx >= 0)
-            & (x_idx < nx)
-        )
-        z_idx_full = z_idx_full[mask]
-        y_idx = y_idx[mask]
-        x_idx = x_idx[mask]
-        w = w[mask]
+    if was_unbatched:
+        volume = volume.squeeze(0)
 
-        # Scatter values into volume
-        volumes[b].index_put_((z_idx_full, y_idx, x_idx), w, accumulate=True)
-
-    if squeeze_output:
-        return volumes[0]
-    return volumes
+    return volume
 
 
 @overload

@@ -35,3 +35,8 @@ docs/autoapi/
 
 # Git worktrees
 .worktrees/
+
+# Agent tooling state
+.codex
+.claude/
+.superpowers/

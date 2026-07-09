@@ -164,7 +164,11 @@ src/specter/                  # Main source package
   scattering.py               # Wave propagation (multislice, rytov, firstborn, projection)
   microscope.py               # Aberration and detector models
   detectors.py                # Detector MTF and noise models
-  rotations.py                # Quaternion-based 3D rotations
+  rotations/                  # Quaternion-based 3D rotations
+    _rotation.py               # Rotation class, translate_coordinates
+    _transforms.py             # Coordinate/quaternion utilities built on Rotation
+    _volume.py                 # rotate_volume, rotate_volume_fourier, affine matrix helpers
+    _volume_rotator.py         # VolumeRotator (LightningModule) for sampling rotated slices
   crowding.py                 # Molecular crowding simulation
   ghostbuster.py              # 3D reconstruction (PyTorch Lightning)
   arrays.py                   # Array utilities (soft voxelization, tiling, crops, fourier_crop)

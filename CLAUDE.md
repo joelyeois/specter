@@ -69,6 +69,13 @@ def energy_to_wavelength(energy_kev: float) -> float:
 
 When modifying physics-critical code, validate against known physical quantities (e.g. wavelength at 300 kV ≈ 1.969 pm) before committing.
 
+## Superpowers working files
+
+`.superpowers/` at the repo root (gitignored) is where Claude Code's superpowers
+skill stores design specs and other working documents (e.g. `.superpowers/specs/`).
+This is separate from `docs/`, which is reserved for Read the Docs / Sphinx
+content only — do not put specs or planning docs there.
+
 ## Testing
 
 - Tests live in `tests/` and use `pytest`.
@@ -166,6 +173,7 @@ src/specter/                  # Main source package
   pdb.py                      # PDB/mmCIF parsing helpers
   cryosparc.py                # CryoSPARC .cs file I/O
   cuda.py                     # CUDA/device utilities
+  config.py                   # ParticleStackConfig dataclass + load_config()/apply_overrides() for TOML-driven runs
   plots.py                    # Plotting helpers
   progress.py                 # Progress bar management (ProgressManager)
   random_seed.py              # Global seed control (exported as specter.seed)
@@ -176,7 +184,11 @@ src/specter/                  # Main source package
 tests/                        # pytest test suite
   test_data/                  # Golden-output fixtures (.pt files) for regression tests
 demo-notebooks/               # User-facing, always kept working
+  particle_stack/              # script+notebook config pattern: notebook + its curated TOML
 demo-scripts/                 # Ready-to-run command-line scripts
+configs/                      # TOML config files consumed by demo-scripts/ and demo-notebooks/
+  particle_stack/
+    default.toml                # canonical defaults for generate_particle_stack.py
 dev-notebooks/                # Prototyping and experimentation (not required to be clean)
 pdb-data/                     # PDB structure files
 ice-data/                     # Pre-computed ice data (do not modify)

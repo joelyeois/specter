@@ -63,8 +63,11 @@ Ready-to-run CLI scripts are in `demo-scripts/`. Activate the environment first 
 
 Simulate a particle stack with randomly sampled poses and CTF parameters. Defocus, dose, and coincidence radius are each independently randomisable per particle by specifying a `_min`/`_max` range. Omitting `_max` (or setting it equal to `_min`) uses a fixed value for all particles.
 
+Parameters are loaded from a TOML config file (`configs/particle_stack/default.toml` by default); any flag below overrides a single field without editing the file.
+
 ```bash
 python demo-scripts/generate_particle_stack.py \
+    --config configs/particle_stack/default.toml \
     --pdb_code 6bdf \
     --n_particles 1000 \
     --num_pixels 256 \

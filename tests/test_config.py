@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from specter.config import REPO_ROOT, ParticleStackConfig, load_config
+from specter.config import REPO_ROOT, ParticleStackConfig, apply_overrides, load_config
 
 
 def _write_toml(tmp_path: Path, text: str) -> str:
@@ -62,3 +62,17 @@ def test_particle_stack_config_requires_pdb_code() -> None:
 
     with pytest.raises(TypeError):
         ParticleStackConfig()  # type: ignore[call-arg]
+
+
+def test_apply_overrides_sets_fields() -> None:
+    config = ParticleStackConfig(pdb_code="6bdf")
+    result = apply_overrides(config, {"n_particles": 500, "device": "cuda:0"})
+    assert result is config
+    assert config.n_particles == 500
+    assert config.device == "cuda:0"
+
+
+def test_apply_overrides_with_empty_dict_is_noop() -> None:
+    config = ParticleStackConfig(pdb_code="6bdf")
+    apply_overrides(config, {})
+    assert config.n_particles == 20  # dataclass default, untouched

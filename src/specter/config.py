@@ -114,3 +114,26 @@ def load_config(path: str) -> ParticleStackConfig:
     if not os.path.isabs(config.pdb_savefolder):
         config.pdb_savefolder = str(REPO_ROOT / config.pdb_savefolder)
     return config
+
+
+def apply_overrides(
+    config: ParticleStackConfig, overrides: dict
+) -> ParticleStackConfig:
+    """
+    Set fields on a `ParticleStackConfig` in place from a dict of overrides.
+
+    Parameters
+    ----------
+    config : ParticleStackConfig
+        Config to mutate.
+    overrides : dict
+        Field name -> value pairs, e.g. from parsed CLI arguments.
+
+    Returns
+    -------
+    ParticleStackConfig
+        The same `config` instance, mutated.
+    """
+    for key, value in overrides.items():
+        setattr(config, key, value)
+    return config

@@ -22,7 +22,7 @@ Example (HPC, multi-GPU):
         --defocus_max 15000 \
         --cs 2.0 \
         --alpha 0.1 \
-        --shift_angstroms 2.0 \
+        --shift 2.0 \
         --scattering_model multislice \
         --aberration_model holography \
         --noise_model poisson \

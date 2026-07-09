@@ -160,6 +160,34 @@ def test_micrograph_generator_regression(small_volume, ctf_params):
     _save_or_compare("micrograph_generator", images.cpu())
 
 
+def test_micrograph_generator_accepts_prebuilt_icemaker(small_volume, ctf_params):
+    """A pre-built IceBank passed via icemaker= is reused, not rebuilt internally."""
+    from specter.ice import IceBank
+
+    bank = IceBank(dx=2.0, n=32, method="random", num_unique=1)
+    bank.build()
+
+    gen = MicrographGenerator(
+        scattering_potential=small_volume,
+        micrograph_size=32,
+        pixel_size=2.0,
+        ctf_params=ctf_params,
+        energy=300.0,
+        dose_per_angstrom=2.0,
+        noise_model="poisson",
+        scattering_model="projection",
+        icemaker=bank,
+        alpha=0.1,
+        coincidence_radius=1.8,
+        num_frames=10,
+        verbose=False,
+        progressbars=False,
+    )
+    assert gen.specimen_gen.icemaker is bank
+    images = gen(torch.tensor([0]))
+    assert images.shape == (1, 32, 32)
+
+
 def test_tilt_series_generator_regression(ctf_params):
     """TiltSeriesGenerator: 3-angle tilt series, coincidence loss, tilt_axis='y'."""
     vol = torch.zeros(1, 16, 48, 48)

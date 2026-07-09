@@ -7,6 +7,7 @@ import torch
 from specter import logger
 
 from ._base import BaseImager, compute_nz, pad_volume
+from ..ice import IceBank
 from ..progress import status
 from ..scattering import IterativeScattering
 from ..specimen import TomogramGenerator
@@ -44,13 +45,21 @@ class MicrographGenerator(BaseImager):
     ice_model : str, optional
         Ice generation algorithm passed to ``TomogramGenerator``: ``'ap'``
         (alternating projections), ``'gd'`` (gradient descent), or ``'mcmc'``
-        (Metropolis Monte Carlo).
+        (Metropolis Monte Carlo). Ignored when ``icemaker`` is provided.
     ice_thickness : float, optional
         Ice thickness in Å passed to ``TomogramGenerator``.
     num_unique_icecubes : int, optional
         Number of unique ice cubes pre-built into the ``IceBank``. Default 8.
+        Ignored when ``icemaker`` is provided.
     icecube_size : int, optional
         XY and Z side length in voxels of each ice cube in the bank. Default 256.
+        Ignored when ``icemaker`` is provided.
+    icemaker : IceBank, optional
+        A pre-built :class:`~specter.ice.IceBank` instance to reuse across
+        multiple ``MicrographGenerator`` instances. When supplied, ``ice_model``,
+        ``num_unique_icecubes``, and ``icecube_size`` are all ignored. Ignored
+        entirely when ``vol`` is provided directly (no ``TomogramGenerator`` is
+        built in that case).
     crowd_min_distance : float, optional
         Minimum inter-particle distance in Å for crowding.
     crowd_max_distance_z : float, optional
@@ -129,6 +138,7 @@ class MicrographGenerator(BaseImager):
         ice_thickness: float | None = None,
         num_unique_icecubes: int = 8,
         icecube_size: int = 256,
+        icemaker: IceBank | None = None,
         crowd_min_distance: float | None = None,
         crowd_max_distance_z: float | None = None,
         water_air_interface: bool = True,
@@ -250,6 +260,7 @@ class MicrographGenerator(BaseImager):
                 ice_thickness=ice_thickness,
                 num_unique_icecubes=num_unique_icecubes,
                 icecube_size=icecube_size,
+                icemaker=icemaker,
                 water_air_interface=water_air_interface,
                 progressbars=progressbars,
                 chunk_size=chunk_size,

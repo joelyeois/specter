@@ -33,12 +33,21 @@ class TomogramGenerator(L.LightningModule):
         Range in Z where crowding molecules are placed.
     ice_model : str, optional
         Ice generation algorithm: ``'ap'`` (alternating projections), ``'gd'``
-        (gradient descent), or ``'mcmc'`` (Metropolis Monte Carlo).
+        (gradient descent), or ``'mcmc'`` (Metropolis Monte Carlo). Ignored
+        when ``icemaker`` is provided.
     num_unique_icecubes : int, optional
         Number of unique ice cubes pre-built into the ``IceBank``. Default 8.
+        Ignored when ``icemaker`` is provided.
     icecube_size : int, optional
         XY and Z side length in voxels of each ice cube in the bank.
-        Cubes are tiled to fill the full volume. Default 256.
+        Cubes are tiled to fill the full volume. Default 256. Ignored when
+        ``icemaker`` is provided.
+    icemaker : IceBank, optional
+        A pre-built :class:`~specter.ice.IceBank` instance to reuse across
+        multiple ``TomogramGenerator`` instances. When supplied, ``ice_model``,
+        ``num_unique_icecubes``, and ``icecube_size`` are all ignored. The
+        bank must already be built (i.e. :meth:`IceBank.build` has been
+        called or will be triggered lazily on first use).
     ice_thickness : float, optional
         Thickness of the ice layer in Å.
     water_air_interface : bool, optional
@@ -61,6 +70,7 @@ class TomogramGenerator(L.LightningModule):
         ice_thickness: float | None = None,
         num_unique_icecubes: int = 8,
         icecube_size: int = 256,
+        icemaker: IceBank | None = None,
         water_air_interface: bool = True,
         progressbars: bool = True,
         chunk_size: int | None = None,
@@ -104,7 +114,10 @@ class TomogramGenerator(L.LightningModule):
         else:
             self.crowd = None
 
-        if self.ice_model is not None:
+        if icemaker is not None:
+            self.icemaker = icemaker
+            self.ice_model = icemaker.method
+        elif self.ice_model is not None:
             if self.ice_model not in ("ap", "gd", "mcmc", "random"):
                 raise ValueError(
                     f"Unknown ice_model '{self.ice_model}'. Choose 'ap', 'gd', 'mcmc', or 'random'."

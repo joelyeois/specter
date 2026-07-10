@@ -58,7 +58,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--config",
         type=str,
-        default=str(REPO_ROOT / "configs" / "particle_stack" / "default.toml"),
+        default=str(REPO_ROOT / "configs" / "particle_stack" / "particle.toml"),
         help="Path to a TOML config file. Every other flag below overrides a field in it.",
     )
 

@@ -4,7 +4,7 @@ import os
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Literal, TypeVar, overload
 
 import specter
 
@@ -87,9 +87,92 @@ class ParticleStackConfig:
     filename: str = "particles"
 
 
-def load_config(path: str) -> ParticleStackConfig:
+@dataclass
+class MicrographConfig:
+    """Parameters for micrograph generation, loaded from a TOML config file."""
+
+    # --- PDB / potential ---
+    pdb_code: str
+    assembly: bool = True
+    pdb_savefolder: str = "pdb-data"  # resolved against REPO_ROOT if relative
+    num_pixels: int = 256
+    pixel_size: float = 1.0  # Å
+    micrograph_size: int = 4096
+
+    # --- Microscope / physics ---
+    energy: float = 300.0  # keV
+    dose_min: float = 20.0  # e⁻/Å²
+    dose_max: float | None = None  # e⁻/Å²
+    num_frames: int | None = None
+    cs: float = 2.0  # mm
+    alpha: float = 0.1  # unitless, amplitude contrast ratio
+
+    # --- Envelopes ---
+    convergence_angle: float | None = None  # mrad
+    cc: float | None = None  # mm
+    energy_spread: float = 0.7  # eV (FWHM)
+    deltaV_V: float = 0.06e-6  # unitless (ΔV/V)
+    deltaI_I: float = 0.01e-6  # unitless (ΔI/I)
+    dose_envelope: bool = False
+
+    # --- Defocus ---
+    defocus_min: float = 5000.0  # Å
+    defocus_max: float = 15000.0  # Å
+
+    # --- Dataset size ---
+    n_micrographs: int = 1
+
+    # --- Models ---
+    scattering_model: Literal["multislice", "firstborn", "projection", "ctf"] = (
+        "multislice"
+    )
+    aberration_model: Literal["holography", "ctf"] = "holography"
+    noise_model: Literal["poisson", "none"] = "poisson"
+    coincidence_radius_min: float = 1.8  # pixels
+    coincidence_radius_max: float | None = None  # pixels
+    ice_model: Literal["gd", "ap", "mcmc", "random", "none"] = "gd"
+    ice_thickness: float = 500.0  # Å, 0 = minimum (particle box size)
+    num_unique_icecubes: int = 8
+    ice_build_batch_size: int = 1
+    icecube_size: int | None = None  # voxels
+    crowd_min_distance: float | None = None  # Å
+    crowd_max_distance_z: float | None = None  # Å
+    water_air_interface: bool = True
+    potential_scale_min: float = 1.0  # unitless
+    potential_scale_max: float | None = None  # unitless
+    pad_fft: bool = False
+    chunk_size: int | None = None
+    detector_model: Literal["none", "perfect", "k3_300kv", "k3_200kv"] = "none"
+
+    # --- Post-processing ---
+    normalize_micrographs: bool = False
+    save_exitwaves: bool = False
+    save_clean_exitwaves: bool = False
+
+    # --- Compute ---
+    device: str = "cpu"
+
+    # --- Output ---
+    output_dir: str = "./output/"
+    filename: str = "micrographs"
+
+
+ConfigT = TypeVar("ConfigT", ParticleStackConfig, MicrographConfig)
+
+
+@overload
+def load_config(
+    path: str, config_cls: type[ParticleStackConfig] = ...
+) -> ParticleStackConfig: ...
+@overload
+def load_config(path: str, config_cls: type[MicrographConfig]) -> MicrographConfig: ...
+def load_config(
+    path: str,
+    config_cls: type[ParticleStackConfig]
+    | type[MicrographConfig] = ParticleStackConfig,
+) -> ParticleStackConfig | MicrographConfig:
     """
-    Load a `ParticleStackConfig` from a TOML file.
+    Load a config dataclass from a TOML file.
 
     Parameters
     ----------
@@ -97,11 +180,14 @@ def load_config(path: str) -> ParticleStackConfig:
         Path to a TOML config file. May use tables (e.g. `[potential]`) to
         group fields for readability; all tables are flattened into one
         namespace before validation.
+    config_cls : type[ParticleStackConfig] | type[MicrographConfig]
+        Dataclass to populate from the TOML fields. Defaults to
+        `ParticleStackConfig` for backward compatibility.
 
     Returns
     -------
-    ParticleStackConfig
-        Config with unset fields filled from `ParticleStackConfig` defaults.
+    ParticleStackConfig | MicrographConfig
+        Config with unset fields filled from `config_cls` defaults.
     """
     with open(path, "rb") as f:
         raw = tomllib.load(f)
@@ -110,28 +196,26 @@ def load_config(path: str) -> ParticleStackConfig:
         if isinstance(value, dict):
             flat.update(value)
     flat.update({k: v for k, v in raw.items() if not isinstance(v, dict)})
-    config = ParticleStackConfig(**flat)
+    config = config_cls(**flat)
     if not os.path.isabs(config.pdb_savefolder):
         config.pdb_savefolder = str(REPO_ROOT / config.pdb_savefolder)
     return config
 
 
-def apply_overrides(
-    config: ParticleStackConfig, overrides: dict
-) -> ParticleStackConfig:
+def apply_overrides(config: ConfigT, overrides: dict) -> ConfigT:
     """
-    Set fields on a `ParticleStackConfig` in place from a dict of overrides.
+    Set fields on a config dataclass in place from a dict of overrides.
 
     Parameters
     ----------
-    config : ParticleStackConfig
+    config : ParticleStackConfig | MicrographConfig
         Config to mutate.
     overrides : dict
         Field name -> value pairs, e.g. from parsed CLI arguments.
 
     Returns
     -------
-    ParticleStackConfig
+    ParticleStackConfig | MicrographConfig
         The same `config` instance, mutated.
     """
     for key, value in overrides.items():

@@ -1,0 +1,36 @@
+[potential]
+pdb_code = "6bdf"
+assembly = true
+num_pixels = 256
+pixel_size = 0.83       # Å
+micrograph_size = 4096  # pixels, square
+
+[microscope]
+energy = 300.0     # keV
+dose_min = 20.0     # e⁻/Å², used as a fixed dose (this notebook doesn't randomize per micrograph)
+num_frames = 50      # frames, usually ~1-2 e⁻/Å²/frame
+cs = 2.0               # mm
+alpha = 0.1              # unitless, amplitude contrast ratio
+
+[defocus]
+defocus_min = 5000.0    # Å
+defocus_max = 15000.0   # Å
+
+[dataset]
+n_micrographs = 1
+
+[models]
+scattering_model = "multislice"
+aberration_model = "holography"
+noise_model = "poisson"
+ice_model = "random"          # fast, worst accuracy. try "gd" (slow, highest accuracy) or "ap"/"mcmc"
+detector_model = "none"
+coincidence_radius_min = 1.8  # pixels
+chunk_size = 8                # slice chunk size for specimen generation; lower if GPU memory is limited
+
+[ice]
+ice_thickness = 500.0    # Å
+num_unique_icecubes = 8
+
+[compute]
+device = "cuda:0"  # adjust to an available device on your machine, e.g. "cuda:0" or "cpu"

@@ -64,7 +64,7 @@ def energy_to_wavelength(energy_kev: float) -> float:
 
 ## Development Workflow
 
-1. **Prototype** in `dev-notebooks/` — use these freely for experimentation.
+1. **Prototype** in `dev/` — use these freely for experimentation.
 2. **Implement** working code into `src/specter/` source modules.
 3. **Update demo notebooks** in `demo-notebooks/` to reflect the new functionality. These must always be kept up-to-date and working.
 4. **Add a test** in `tests/` covering the new behaviour (even a minimal smoke test is better than nothing).
@@ -189,12 +189,15 @@ src/specter/                  # Main source package
 tests/                        # pytest test suite
   test_data/                  # Golden-output fixtures (.pt files) for regression tests
 demo-notebooks/               # User-facing, always kept working
-  particle_stack/              # script+notebook config pattern: notebook + its curated TOML
+  create_particle_stack/       # script+notebook config pattern: notebook + its curated TOML
+  create_micrograph/           # same pattern, for MicrographGenerator
 demo-scripts/                 # Ready-to-run command-line scripts
 configs/                      # TOML config files consumed by demo-scripts/ and demo-notebooks/
   particle_stack/
-    default.toml                # canonical defaults for generate_particle_stack.py
-dev-notebooks/                # Prototyping and experimentation (not required to be clean)
+    particle.toml                # canonical defaults for generate_particle_stack.py
+  micrograph/
+    micrograph.toml              # canonical defaults for generate_micrograph.py
+dev/                           # Prototyping and experimentation (not required to be clean)
 pdb-data/                     # PDB structure files
 ice-data/                     # Pre-computed ice data (do not modify)
 ```
@@ -206,7 +209,7 @@ ice-data/                     # Pre-computed ice data (do not modify)
 - Atomic potentials are parameterised; the Kirkland model is the default and most validated.
 - Coincidence loss is modelled for direct electron detectors — do not remove this when simulating K3 detector outputs.
 - CTF sign conventions follow the standard cryo-EM convention (defocus positive = underfocus).
-- Ice volumes are assembled via `tile_volume_from_blocks()` (in `arrays.py`) with random roll/flip/rotation augmentation per tile — do not replace this with a plain repeat/tile which would produce visible seams.
+- Ice volumes are assembled via `tile_volume_from_blocks_blended()` (in `arrays.py`) — overlap-add tiling with random roll/flip/rotation augmentation per tile — do not replace this with a plain repeat/tile or hard-edge concatenation (`tile_volume_from_blocks()`), which would produce visible seams. `IceBank` (via `ice/_helpers.py::assemble_big_ice`) is the sole place ice tiling happens; the individual algorithm classes (`GradientSKIcemaker`, `APIcemaker`, `MCMCIcemaker`, `RandomIcemaker`) only produce unique blocks (`generate_ice`), they don't assemble large volumes themselves.
 - MD simulation dump ingestion (`get_mdsim`, `get_mdsim_file`, etc.) was removed from `Icemaker`; ice structure is now driven purely by pre-computed kernels in `ice-data/`.
 
 ## Reproducibility

@@ -78,8 +78,8 @@ def test_apply_overrides_with_empty_dict_is_noop() -> None:
     assert config.n_particles == 20  # dataclass default, untouched
 
 
-def test_default_toml_loads_and_matches_expected_values() -> None:
-    path = str(REPO_ROOT / "configs" / "particle_stack" / "default.toml")
+def test_particle_toml_loads_and_matches_expected_values() -> None:
+    path = str(REPO_ROOT / "configs" / "particle_stack" / "particle.toml")
     config = load_config(path)
     assert config.pdb_code == "6bdf"
     assert config.num_pixels == 256

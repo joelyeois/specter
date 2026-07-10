@@ -7,6 +7,9 @@ each forward pass applies a different CTF (defocus drawn uniformly at random).
 Usage:
     python demo-scripts/generate_micrograph.py --pdb_code 6bdf --output_dir /path/to/output
 
+Parameters are loaded from --config (default: configs/micrograph/micrograph.toml);
+any flag below overrides the corresponding field in that file.
+
 Device options:
     --device cpu          Single CPU
     --device cuda         Single GPU (default)
@@ -14,6 +17,7 @@ Device options:
 
 Example (HPC):
     python demo-scripts/generate_micrograph.py \\
+        --config configs/micrograph/micrograph.toml \\
         --pdb_code 6bdf \\
         --n_micrographs 10 \\
         --num_pixels 256 \\
@@ -34,7 +38,6 @@ Example (HPC):
         --chunk_size 8 \\
         --normalize_micrographs True \\
         --device cuda:0 \\
-        --batchsize 1 \\
         --output_dir ./output/ \\
         --filename micrographs
 """
@@ -50,309 +53,318 @@ _console = Console()
 
 
 def parse_args() -> argparse.Namespace:
+    from specter.config import REPO_ROOT
+
     parser = argparse.ArgumentParser(
         description="Simulate cryo-EM micrographs and save as .mrcs.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+
+    parser.add_argument(
+        "--config",
+        type=str,
+        default=str(REPO_ROOT / "configs" / "micrograph" / "micrograph.toml"),
+        help="Path to a TOML config file. Every other flag below overrides a field in it.",
     )
 
     # --- PDB / potential ---
     parser.add_argument(
         "--pdb_code",
         type=str,
-        required=True,
-        help="PDB accession code or path to a local .cif/.pdb file. (required)",
+        default=argparse.SUPPRESS,
+        help="PDB accession code or path to a local .cif/.pdb file. Overrides --config.",
     )
     parser.add_argument(
         "--assembly",
         type=lambda x: x.lower() == "true",
-        default=True,
+        default=argparse.SUPPRESS,
         metavar="True|False",
-        help="Fetch biological assembly.",
+        help="Fetch biological assembly. Overrides --config.",
     )
     parser.add_argument(
         "--pdb_savefolder",
         type=str,
-        default="../pdb-data/",
-        help="Folder to cache downloaded PDB files.",
+        default=argparse.SUPPRESS,
+        help="Folder to cache downloaded PDB files. Overrides --config.",
     )
     parser.add_argument(
         "--num_pixels",
         type=int,
-        default=256,
-        help="Particle box size in pixels (used to build the scattering potential).",
+        default=argparse.SUPPRESS,
+        help="Particle box size in pixels (used to build the scattering potential). Overrides --config.",
     )
     parser.add_argument(
         "--pixel_size",
         type=float,
-        default=1.0,
-        help="Pixel size in Ångstrom.",
+        default=argparse.SUPPRESS,
+        help="Pixel size in Ångstrom. Overrides --config.",
     )
     parser.add_argument(
         "--micrograph_size",
         type=int,
-        default=4096,
-        help="Micrograph size in pixels (square).",
+        default=argparse.SUPPRESS,
+        help="Micrograph size in pixels (square). Overrides --config.",
     )
 
     # --- Microscope / physics ---
     parser.add_argument(
         "--energy",
         type=float,
-        default=300.0,
-        help="Electron beam energy in keV.",
+        default=argparse.SUPPRESS,
+        help="Electron beam energy in keV. Overrides --config.",
     )
     parser.add_argument(
         "--dose_min",
         type=float,
-        default=20.0,
-        help="Minimum dose in e⁻/Å². Used as fixed dose if --dose_max is not set.",
+        default=argparse.SUPPRESS,
+        help="Minimum dose in e⁻/Å². Used as fixed dose if --dose_max is not set. Overrides --config.",
     )
     parser.add_argument(
         "--dose_max",
         type=float,
-        default=None,
-        help="Maximum dose in e⁻/Å². If set, dose is sampled uniformly per micrograph.",
+        default=argparse.SUPPRESS,
+        help="Maximum dose in e⁻/Å². If set, dose is sampled uniformly per micrograph. Overrides --config.",
     )
     parser.add_argument(
         "--num_frames",
         type=int,
-        default=None,
-        help="Number of frames. Defaults to int(dose) if not set.",
+        default=argparse.SUPPRESS,
+        help="Number of frames. Defaults to int(dose) if not set. Overrides --config.",
     )
     parser.add_argument(
         "--cs",
         type=float,
-        default=2.0,
-        help="Spherical aberration in mm (1–3 mm typical).",
+        default=argparse.SUPPRESS,
+        help="Spherical aberration in mm (1–3 mm typical). Overrides --config.",
     )
     parser.add_argument(
         "--alpha",
         type=float,
-        default=0.1,
-        help="Amplitude contrast ratio.",
+        default=argparse.SUPPRESS,
+        help="Amplitude contrast ratio. Overrides --config.",
     )
 
     # --- Envelopes ---
     parser.add_argument(
         "--convergence_angle",
         type=float,
-        default=None,
-        help="Beam convergence semi-angle in mrad, for the Cs (spatial coherence) envelope. None disables it.",
+        default=argparse.SUPPRESS,
+        help="Beam convergence semi-angle in mrad, for the Cs (spatial coherence) envelope. Overrides --config.",
     )
     parser.add_argument(
         "--cc",
         type=float,
-        default=None,
-        help="Chromatic aberration coefficient in mm, for the Cc (temporal coherence) envelope. None disables it.",
+        default=argparse.SUPPRESS,
+        help="Chromatic aberration coefficient in mm, for the Cc (temporal coherence) envelope. Overrides --config.",
     )
     parser.add_argument(
         "--energy_spread",
         type=float,
-        default=0.7,
-        help="FWHM of the beam energy spread in eV, used by the Cc envelope.",
+        default=argparse.SUPPRESS,
+        help="FWHM of the beam energy spread in eV, used by the Cc envelope. Overrides --config.",
     )
     parser.add_argument(
         "--deltaV_V",
         type=float,
-        default=0.06e-6,
-        help="Relative high-voltage instability, used by the Cc envelope.",
+        default=argparse.SUPPRESS,
+        help="Relative high-voltage instability, used by the Cc envelope. Overrides --config.",
     )
     parser.add_argument(
         "--deltaI_I",
         type=float,
-        default=0.01e-6,
-        help="Relative objective-lens current instability, used by the Cc envelope.",
+        default=argparse.SUPPRESS,
+        help="Relative objective-lens current instability, used by the Cc envelope. Overrides --config.",
     )
     parser.add_argument(
         "--dose_envelope",
         type=lambda x: x.lower() == "true",
-        default=False,
+        default=argparse.SUPPRESS,
         metavar="True|False",
-        help="Apply the Grant & Grigorieff (2015) cumulative-dose envelope.",
+        help="Apply the Grant & Grigorieff (2015) cumulative-dose envelope. Overrides --config.",
     )
 
     # --- Defocus ---
     parser.add_argument(
         "--defocus_min",
         type=float,
-        default=5000.0,
-        help="Minimum defocus in Ångstrom.",
+        default=argparse.SUPPRESS,
+        help="Minimum defocus in Ångstrom. Overrides --config.",
     )
     parser.add_argument(
         "--defocus_max",
         type=float,
-        default=15000.0,
-        help="Maximum defocus in Ångstrom.",
+        default=argparse.SUPPRESS,
+        help="Maximum defocus in Ångstrom. Overrides --config.",
     )
 
     # --- Dataset size ---
     parser.add_argument(
         "--n_micrographs",
         type=int,
-        default=1,
-        help="Number of micrographs to simulate.",
+        default=argparse.SUPPRESS,
+        help="Number of micrographs to simulate. Overrides --config.",
     )
 
     # --- Models ---
     parser.add_argument(
         "--scattering_model",
         type=str,
-        default="multislice",
+        default=argparse.SUPPRESS,
         choices=["multislice", "firstborn", "projection", "ctf"],
-        help="Scattering model.",
+        help="Scattering model. Overrides --config.",
     )
     parser.add_argument(
         "--aberration_model",
         type=str,
-        default="holography",
+        default=argparse.SUPPRESS,
         choices=["holography", "ctf"],
-        help="Aberration model.",
+        help="Aberration model. Overrides --config.",
     )
     parser.add_argument(
         "--noise_model",
         type=str,
-        default="poisson",
+        default=argparse.SUPPRESS,
         choices=["poisson", "none"],
-        help="Noise model. Use 'none' for no noise.",
+        help="Noise model. Use 'none' for no noise. Overrides --config.",
     )
     parser.add_argument(
         "--coincidence_radius_min",
         type=float,
-        default=1.8,
-        help="Minimum coincidence radius in pixels. Used as fixed value if --coincidence_radius_max is not set.",
+        default=argparse.SUPPRESS,
+        help="Minimum coincidence radius in pixels. Used as fixed value if --coincidence_radius_max is not set. Overrides --config.",
     )
     parser.add_argument(
         "--coincidence_radius_max",
         type=float,
-        default=None,
-        help="Maximum coincidence radius in pixels. If set, sampled uniformly per micrograph.",
+        default=argparse.SUPPRESS,
+        help="Maximum coincidence radius in pixels. If set, sampled uniformly per micrograph. Overrides --config.",
     )
     parser.add_argument(
         "--potential_scale_min",
         type=float,
-        default=1.0,
-        help="Minimum potential scale factor. Used as fixed value if --potential_scale_max is not set.",
+        default=argparse.SUPPRESS,
+        help="Minimum potential scale factor. Used as fixed value if --potential_scale_max is not set. Overrides --config.",
     )
     parser.add_argument(
         "--potential_scale_max",
         type=float,
-        default=None,
-        help="Maximum potential scale factor. If set, sampled uniformly per micrograph. Values < 1 approximate thicker ice.",
+        default=argparse.SUPPRESS,
+        help="Maximum potential scale factor. If set, sampled uniformly per micrograph. Values < 1 approximate thicker ice. Overrides --config.",
     )
     parser.add_argument(
         "--ice_model",
         type=str,
-        default="gd",
+        default=argparse.SUPPRESS,
         choices=["gd", "ap", "mcmc", "random", "none"],
-        help="Ice model: 'gd' (gradient descent, default), 'ap' (atomic potential), 'mcmc', 'random', or 'none'.",
+        help="Ice model: 'gd' (gradient descent, default), 'ap' (atomic potential), 'mcmc', 'random', or 'none'. Overrides --config.",
     )
     parser.add_argument(
         "--ice_thickness",
         type=float,
-        default=500.0,
-        help="Ice thickness in Ångstrom.",
+        default=argparse.SUPPRESS,
+        help="Ice thickness in Ångstrom. Overrides --config.",
     )
     parser.add_argument(
         "--num_unique_icecubes",
         type=int,
-        default=8,
-        help="Number of unique ice cubes to pre-build into the IceBank.",
+        default=argparse.SUPPRESS,
+        help="Number of unique ice cubes to pre-build into the IceBank. Overrides --config.",
     )
     parser.add_argument(
         "--ice_build_batch_size",
         type=int,
-        default=1,
-        help="Number of unique ice cubes to generate at once while building the IceBank. Lower values reduce peak GPU memory.",
+        default=argparse.SUPPRESS,
+        help="Number of unique ice cubes to generate at once while building the IceBank. Lower values reduce peak GPU memory. Overrides --config.",
     )
     parser.add_argument(
         "--icecube_size",
         type=int,
-        default=None,
-        help="Side length (in voxels) of each cubic ice block generated by the IceBank. Smaller cubes build faster (especially for 'gd') and are tiled to fill the micrograph. Defaults to whichever is smaller: num_pixels, or the voxel count spanning 256 Å (256 / pixel_size).",
+        default=argparse.SUPPRESS,
+        help="Side length (in voxels) of each cubic ice block generated by the IceBank. Smaller cubes build faster (especially for 'gd') and are tiled to fill the micrograph. Defaults to whichever is smaller: num_pixels, or the voxel count spanning 256 Å (256 / pixel_size). Overrides --config.",
     )
     parser.add_argument(
         "--crowd_min_distance",
         type=float,
-        default=None,
-        help="Min distance between crowded particles in Ångstrom. Defaults to pdb.max_diameter. Set to 0 to disable crowding.",
+        default=argparse.SUPPRESS,
+        help="Min distance between crowded particles in Ångstrom. Defaults to pdb.max_diameter. Set to 0 to disable crowding. Overrides --config.",
     )
     parser.add_argument(
         "--crowd_max_distance_z",
         type=float,
-        default=None,
-        help="Max z-distance between crowded particles in Ångstrom. Default: None (uses ice thickness).",
+        default=argparse.SUPPRESS,
+        help="Max z-distance between crowded particles in Ångstrom. Default: None (uses ice thickness). Overrides --config.",
     )
     parser.add_argument(
         "--water_air_interface",
         type=lambda x: x.lower() == "true",
-        default=True,
+        default=argparse.SUPPRESS,
         metavar="True|False",
-        help="Simulate water-air interface.",
+        help="Simulate water-air interface. Overrides --config.",
     )
     parser.add_argument(
         "--pad_fft",
         type=lambda x: x.lower() == "true",
-        default=False,
+        default=argparse.SUPPRESS,
         metavar="True|False",
-        help="Pad volume for FFT to avoid edge artifacts.",
+        help="Pad volume for FFT to avoid edge artifacts. Overrides --config.",
     )
     parser.add_argument(
         "--chunk_size",
         type=int,
-        default=None,
-        help="Slice chunk size for specimen generation. Set if GPU memory is limited (e.g. 8).",
+        default=argparse.SUPPRESS,
+        help="Slice chunk size for specimen generation. Set if GPU memory is limited (e.g. 8). Overrides --config.",
     )
     parser.add_argument(
         "--detector_model",
         type=str,
-        default="none",
+        default=argparse.SUPPRESS,
         choices=["none", "perfect", "k3_300kv", "k3_200kv"],
-        help="Detector model.",
+        help="Detector model. Overrides --config.",
     )
 
     # --- Post-processing ---
     parser.add_argument(
         "--normalize_micrographs",
         type=lambda x: x.lower() == "true",
-        default=False,
+        default=argparse.SUPPRESS,
         metavar="True|False",
-        help="Normalize micrographs to zero mean and unit std.",
+        help="Normalize micrographs to zero mean and unit std. Overrides --config.",
     )
     parser.add_argument(
         "--save_exitwaves",
         type=lambda x: x.lower() == "true",
-        default=False,
+        default=argparse.SUPPRESS,
         metavar="True|False",
-        help="Save icy exit wave magnitude and phase as separate .mrcs files.",
+        help="Save icy exit wave magnitude and phase as separate .mrcs files. Overrides --config.",
     )
     parser.add_argument(
         "--save_clean_exitwaves",
         type=lambda x: x.lower() == "true",
-        default=False,
+        default=argparse.SUPPRESS,
         metavar="True|False",
-        help="Save clean (no-ice) exit wave magnitude and phase. Runs scattering twice per micrograph.",
+        help="Save clean (no-ice) exit wave magnitude and phase. Runs scattering twice per micrograph. Overrides --config.",
     )
 
     # --- Compute ---
     parser.add_argument(
         "--device",
         type=str,
-        default="cpu",
-        help="Device to use. Options: cpu | cuda | cuda:0.",
+        default=argparse.SUPPRESS,
+        help="Device to use. Options: cpu | cuda | cuda:0. Overrides --config.",
     )
 
     # --- Output ---
     parser.add_argument(
         "--output_dir",
         type=str,
-        default="./output/",
-        help="Directory to save output files.",
+        default=argparse.SUPPRESS,
+        help="Directory to save output files. Overrides --config.",
     )
     parser.add_argument(
         "--filename",
         type=str,
-        default="micrographs",
-        help="Base name for output files (no extension).",
+        default=argparse.SUPPRESS,
+        help="Base name for output files (no extension). Overrides --config.",
     )
 
     return parser.parse_args()
@@ -379,6 +391,7 @@ def main() -> None:
     import torch
 
     import specter
+    from specter.config import apply_overrides, load_config, MicrographConfig
     from specter.cryosparc import create_micrograph_starfile
     from specter.ice import IceBank
     from specter.imagegenerator import MicrographGenerator
@@ -387,62 +400,70 @@ def main() -> None:
     from specter.progress import track
 
     args = parse_args()
+    config = load_config(args.config, MicrographConfig)
+    overrides = {k: v for k, v in vars(args).items() if k != "config"}
+    apply_overrides(config, overrides)
     specter.set_verbosity(logging.INFO)
 
     t_start = time.perf_counter()
 
     # --- Building 3D scattering potential ---
     _section("Building 3D scattering potential")
-    pdb = PDB(args.pdb_code, assembly=args.assembly, savefolder=args.pdb_savefolder)
+    pdb = PDB(
+        config.pdb_code, assembly=config.assembly, savefolder=config.pdb_savefolder
+    )
 
-    cs_angstrom = args.cs * 1e7
+    cs_angstrom = config.cs * 1e7
 
-    pb = PotentialBuilder(args.num_pixels, args.pixel_size, pdb.atomic_numbers).to(
+    pb = PotentialBuilder(config.num_pixels, config.pixel_size, pdb.atomic_numbers).to(
         "cpu"
     )
     with torch.no_grad():
         V = pb(pdb.coordinates).clone()
 
-    n = args.n_micrographs
+    n = config.n_micrographs
 
-    noise_model = None if args.noise_model == "none" else args.noise_model
-    ice_model = None if args.ice_model == "none" else args.ice_model
-    detector_model = None if args.detector_model == "none" else args.detector_model
+    noise_model = None if config.noise_model == "none" else config.noise_model
+    ice_model = None if config.ice_model == "none" else config.ice_model
+    detector_model = None if config.detector_model == "none" else config.detector_model
     crowd_min_distance = (
         None
-        if args.crowd_min_distance == 0
-        else args.crowd_min_distance
-        if args.crowd_min_distance is not None
+        if config.crowd_min_distance == 0
+        else config.crowd_min_distance
+        if config.crowd_min_distance is not None
         else pdb.max_diameter
     )
 
     # Sample all per-micrograph parameters upfront
-    defocus_A = torch.rand(n) * (args.defocus_max - args.defocus_min) + args.defocus_min
+    defocus_A = (
+        torch.rand(n) * (config.defocus_max - config.defocus_min) + config.defocus_min
+    )
 
-    dose_max = args.dose_max if args.dose_max is not None else args.dose_min
-    dose = torch.rand(n) * (dose_max - args.dose_min) + args.dose_min
+    dose_max = config.dose_max if config.dose_max is not None else config.dose_min
+    dose = torch.rand(n) * (dose_max - config.dose_min) + config.dose_min
 
     cr_max = (
-        args.coincidence_radius_max
-        if args.coincidence_radius_max is not None
-        else args.coincidence_radius_min
+        config.coincidence_radius_max
+        if config.coincidence_radius_max is not None
+        else config.coincidence_radius_min
     )
     coincidence_radius = (
-        torch.rand(n) * (cr_max - args.coincidence_radius_min)
-        + args.coincidence_radius_min
+        torch.rand(n) * (cr_max - config.coincidence_radius_min)
+        + config.coincidence_radius_min
     )
 
     ps_max = (
-        args.potential_scale_max
-        if args.potential_scale_max is not None
-        else args.potential_scale_min
+        config.potential_scale_max
+        if config.potential_scale_max is not None
+        else config.potential_scale_min
     )
     potential_scale = (
-        torch.rand(n) * (ps_max - args.potential_scale_min) + args.potential_scale_min
+        torch.rand(n) * (ps_max - config.potential_scale_min)
+        + config.potential_scale_min
     )
 
     num_frames = (
-        args.num_frames if args.num_frames is not None else int(dose.mean().item())
+        config.num_frames if config.num_frames is not None else int(dose.mean().item())
     )
     ctf_params = {
         "cs": torch.tensor([cs_angstrom] * n),
@@ -453,44 +474,44 @@ def main() -> None:
     # Built once, upfront, on the target device — regenerate_specimen() draws
     # fresh (randomly tiled) ice from the same cached cubes on every call.
     icecube_size = (
-        args.icecube_size
-        if args.icecube_size is not None
-        else min(args.num_pixels, int(256 / args.pixel_size))
+        config.icecube_size
+        if config.icecube_size is not None
+        else min(config.num_pixels, int(256 / config.pixel_size))
     )
     icemaker = None
     if ice_model is not None:
         _section("Pre-building ice bank")
         icemaker = IceBank(
             n=icecube_size,
-            dx=args.pixel_size,
+            dx=config.pixel_size,
             method=ice_model,
-            num_unique=args.num_unique_icecubes,
-            build_batch_size=args.ice_build_batch_size,
-        ).to(args.device)
+            num_unique=config.num_unique_icecubes,
+            build_batch_size=config.ice_build_batch_size,
+        ).to(config.device)
         icemaker.build()
 
     # Build once — __init__ generates the first specimen
     _section("Building specimen and image generator")
-    cc_angstrom = args.cc * 1e7 if args.cc is not None else None
+    cc_angstrom = config.cc * 1e7 if config.cc is not None else None
     model = MicrographGenerator(
         V,
-        args.micrograph_size,
-        args.pixel_size,
+        config.micrograph_size,
+        config.pixel_size,
         ctf_params,
-        args.energy,
+        config.energy,
         dose,
         icemaker=icemaker,
-        ice_thickness=args.ice_thickness,
-        scattering_model=args.scattering_model,
-        aberration_model=args.aberration_model,
+        ice_thickness=config.ice_thickness,
+        scattering_model=config.scattering_model,
+        aberration_model=config.aberration_model,
         noise_model=noise_model,
         klim=None,
-        alpha=args.alpha,
+        alpha=config.alpha,
         crowd_min_distance=crowd_min_distance,
-        crowd_max_distance_z=args.crowd_max_distance_z,
-        water_air_interface=args.water_air_interface,
-        pad_fft=args.pad_fft,
-        chunk_size=args.chunk_size,
+        crowd_max_distance_z=config.crowd_max_distance_z,
+        water_air_interface=config.water_air_interface,
+        pad_fft=config.pad_fft,
+        chunk_size=config.chunk_size,
         move_to_cpu=True,
         detector_model=detector_model,
         verbose=False,
@@ -498,20 +519,20 @@ def main() -> None:
         coincidence_radius=coincidence_radius,
         num_frames=num_frames,
         potential_scale=potential_scale,
-        save_clean_exitwaves=args.save_clean_exitwaves,
-        convergence_angle=args.convergence_angle,
+        save_clean_exitwaves=config.save_clean_exitwaves,
+        convergence_angle=config.convergence_angle,
         cc=cc_angstrom,
-        energy_spread=args.energy_spread,
-        deltaV_V=args.deltaV_V,
-        deltaI_I=args.deltaI_I,
-        dose_envelope=args.dose_envelope,
-    ).to(args.device)
+        energy_spread=config.energy_spread,
+        deltaV_V=config.deltaV_V,
+        deltaI_I=config.deltaI_I,
+        dose_envelope=config.dose_envelope,
+    ).to(config.device)
 
     # Loop: regenerate fresh specimen for each micrograph, use i-th CTF
-    _section(f"Generating {n} micrograph(s) on {args.device}")
+    _section(f"Generating {n} micrograph(s) on {config.device}")
     images = []
-    exitwaves = [] if args.save_exitwaves else None
-    clean_exitwaves = [] if args.save_clean_exitwaves else None
+    exitwaves = [] if config.save_exitwaves else None
+    clean_exitwaves = [] if config.save_clean_exitwaves else None
 
     for i in track(range(n), description="Generating micrographs"):
         if i > 0:
@@ -532,7 +553,7 @@ def main() -> None:
 
     # --- Post-processing ---
     _section("Post-processing")
-    if args.normalize_micrographs:
+    if config.normalize_micrographs:
         mean = images.mean(dim=(-2, -1), keepdim=True)
         std = images.std(dim=(-2, -1), keepdim=True)
         images = (images - mean) / std.clamp(min=1e-8)
@@ -541,33 +562,33 @@ def main() -> None:
     _section("Saving .mrcs + .star")
     import mrcfile
 
-    os.makedirs(args.output_dir, exist_ok=True)
-    mrcs_path = os.path.join(args.output_dir, args.filename + ".mrcs")
+    os.makedirs(config.output_dir, exist_ok=True)
+    mrcs_path = os.path.join(config.output_dir, config.filename + ".mrcs")
     with mrcfile.new(mrcs_path, overwrite=True) as mrc:
         mrc.set_data(images.numpy().astype("float32"))
     _console.print(f"  [green]✓[/green] {mrcs_path}")
 
     create_micrograph_starfile(
         n,
-        energy=args.energy,
-        pixel_size=args.pixel_size,
-        alpha=args.alpha,
+        energy=config.energy,
+        pixel_size=config.pixel_size,
+        alpha=config.alpha,
         ctf_params=ctf_params,
-        folderpath=args.output_dir,
-        filename=args.filename,
+        folderpath=config.output_dir,
+        filename=config.filename,
         dose_per_angstrom=dose,
         coincidence_radius=coincidence_radius,
         potential_scale=potential_scale,
     )
 
     def _save_exitwave_pair(ew, suffix: str) -> None:
-        if args.pad_fft:
-            ew = _crop_center(ew, args.micrograph_size)
+        if config.pad_fft:
+            ew = _crop_center(ew, config.micrograph_size)
         mag_path = os.path.join(
-            args.output_dir, f"{args.filename}_{suffix}_magnitude.mrcs"
+            config.output_dir, f"{config.filename}_{suffix}_magnitude.mrcs"
         )
         phase_path = os.path.join(
-            args.output_dir, f"{args.filename}_{suffix}_phase.mrcs"
+            config.output_dir, f"{config.filename}_{suffix}_phase.mrcs"
         )
         with mrcfile.new(mag_path, overwrite=True) as mrc:
             mrc.set_data(ew.abs().numpy().astype("float32"))

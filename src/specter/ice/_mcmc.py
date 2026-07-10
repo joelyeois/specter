@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import warnings
 from typing import Optional
 
 import lightning as L
 import numpy as np
 import torch
 
-from ..arrays import soft_voxelize_coordinates, tile_volume_from_blocks
+from ..arrays import soft_voxelize_coordinates
 from ..progress import ProgressManager, track
 from ._ap import APIcemaker
 from ._helpers import ndensity_of_amorphous_ice
@@ -18,6 +19,13 @@ class MCMCIcemaker(L.LightningModule):
 
     Generates oxygen molecule positions by matching the O-O pair correlation
     function g(r) derived from an MD simulation frame via Metropolis MCMC.
+
+    .. deprecated::
+        Not recommended for production use — produces lower-quality ice than
+        ``'gd'`` or ``'ap'`` and isn't part of the actively-maintained ice
+        pipeline (e.g. its ``generate_ice`` never convolves with a scattering
+        potential kernel, unlike the other three methods). Prefer
+        ``IceBank(method='gd')`` or ``IceBank(method='ap')``.
 
     Two execution paths
     -------------------
@@ -59,6 +67,12 @@ class MCMCIcemaker(L.LightningModule):
         progressbars: bool = True,
     ) -> None:
         super().__init__()
+        warnings.warn(
+            "MCMCIcemaker is deprecated and not recommended for production "
+            "use — prefer method='gd' or 'ap'.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         self.n = n
         self.dx = dx
         self.nz = nz if nz is not None else n
@@ -724,34 +738,3 @@ class MCMCIcemaker(L.LightningModule):
             self.run(n_sweeps=n_sweeps, step_size=step_size)
             results.append(self.voxelize())
         return torch.stack(results)
-
-    def generate_big_ice(
-        self,
-        target_shape: tuple[int, int, int, int],
-        num_unique: int = 8,
-        n_sweeps: int = 200,
-        step_size: float = 0.5,
-    ) -> torch.Tensor:
-        """
-        Generate a large ice volume by tiling unique MCMC blocks.
-
-        Parameters
-        ----------
-        target_shape : tuple of int
-            Output shape ``(B, nz, ny, nx)``.
-        num_unique : int, optional
-            Number of unique ice blocks to generate. Default is 8.
-        n_sweeps : int, optional
-            MCMC sweeps per block. Default is 200.
-        step_size : float, optional
-            Displacement half-width in Å. Default is 0.5.
-
-        Returns
-        -------
-        big_ice : torch.Tensor
-            Tiled ice volume of shape ``target_shape``.
-        """
-        cubes = self.generate_ice(
-            batchsize=num_unique, n_sweeps=n_sweeps, step_size=step_size
-        )
-        return tile_volume_from_blocks(cubes, target_shape)

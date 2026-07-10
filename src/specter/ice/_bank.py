@@ -5,11 +5,10 @@ from typing import Any, Optional
 import lightning as L
 import torch
 
-from ..arrays import tile_volume_from_blocks
 from ..progress import track
 from ._ap import APIcemaker
 from ._gradient import GradientSKIcemaker
-from ._helpers import replace_outer_faces
+from ._helpers import assemble_big_ice
 from ._mcmc import MCMCIcemaker
 from ._random import RandomIcemaker
 
@@ -36,7 +35,8 @@ class IceBank(L.LightningModule):
         - ``'gd'`` — gradient descent via L-BFGS (:class:`GradientSKIcemaker`, default).
         - ``'ap'`` — alternating projections iterative Fourier amplitude matching
           (:class:`APIcemaker`).
-        - ``'mcmc'`` — Metropolis Monte Carlo (:class:`MCMCIcemaker`).
+        - ``'mcmc'`` — Metropolis Monte Carlo (:class:`MCMCIcemaker`,
+          deprecated — prefer ``'gd'`` or ``'ap'``).
         - ``'random'`` — random molecule placement (:class:`RandomIcemaker`).
     num_unique : int, optional
         Number of unique cubes to cache when :meth:`build` is called. Default is 8.
@@ -185,7 +185,9 @@ class IceBank(L.LightningModule):
             self.build(**kwargs)
         assert self._bank is not None
         _, D, H, W = self._bank.shape
-        return tile_volume_from_blocks(self._bank, (batchsize, D, H, W)).to(self.device)
+        return assemble_big_ice(
+            self._bank, (batchsize, D, H, W), replace_faces=False
+        ).to(self.device)
 
     def generate_big_ice(
         self,
@@ -221,5 +223,4 @@ class IceBank(L.LightningModule):
                 num_unique = self._num_unique
             self.build(num_unique=num_unique, **kwargs)
         assert self._bank is not None
-        cubes = replace_outer_faces(self._bank.clone())
-        return tile_volume_from_blocks(cubes, target_shape)
+        return assemble_big_ice(self._bank, target_shape, replace_faces=True)

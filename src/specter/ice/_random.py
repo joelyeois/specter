@@ -8,6 +8,7 @@ import torch
 from ..arrays import soft_voxelize_coordinates
 from ..fft import fftconvolve
 from ._helpers import ndensity_of_amorphous_ice
+from ._kernels import build_atomic_potential_kernel
 
 
 class RandomIcemaker(L.LightningModule):
@@ -56,7 +57,9 @@ class RandomIcemaker(L.LightningModule):
         self.nv = n**2 * self.nz
         self.total_vol = self.nv * self.dv
         self.n_ice_molecules = int(ndensity_of_amorphous_ice * self.total_vol)
-        self.register_buffer("ice_kernel", self.create_ice_kernel())
+        self.register_buffer(
+            "ice_kernel", build_atomic_potential_kernel(self.dx, "kirkland")
+        )
 
         self.progressbars = progressbars
         self.positions: Optional[torch.Tensor] = None
@@ -105,59 +108,6 @@ class RandomIcemaker(L.LightningModule):
             voxel_size=self.dx,
             periodic=True,
         )
-
-    # ------------------------------------------------------------------
-    # Ice kernel
-    # ------------------------------------------------------------------
-
-    def create_ice_kernel(self, sn: int = 28) -> torch.Tensor:
-        """
-        Create atomic potential kernel for Oxygen using Kirkland parameterization.
-
-        Parameters
-        ----------
-        sn : int, optional
-            Size of the supersampled grid kernel. Default is 28.
-
-        Returns
-        -------
-        pot : torch.Tensor
-            Potential kernel volume.
-        """
-        # sample a 28x28 grid to represent kernel first.
-        # 4xbin down to 7x7, centerd on atom origin
-        sx = (torch.arange(sn) - (sn - 1) / 2) * self.dx / 4
-        sZ, sY, sX = torch.meshgrid(sx, sx, sx, indexing="ij")
-        sR = torch.sqrt(sX**2 + sY**2 + sZ**2)
-
-        # see specter for details.
-        a0 = 0.529  # Bohr radius, [Angstrom]
-        e = 14.4  # electron charge, [V-Angstrom]
-        c1 = 2 * (torch.pi**2) * a0 * e
-        c2 = 2 * (torch.pi ** (5 / 2)) * a0 * e
-
-        # P params for Oxygen. See Kirkland Appendix C.
-        P = torch.tensor(
-            [
-                [3.39969204e-001, 3.81570280e-001, 3.07570172e-001, 3.81571436e-001],
-                [1.30369072e-001, 1.91919745e001, 8.83326058e-002, 7.60635525e-001],
-                [1.96586700e-001, 2.07401094e000, 9.96220028e-004, 3.03266869e-002],
-            ]
-        )
-        P = P.T
-        # tile scattering factors to match r_xy grid
-        P = P[:, :, None, None, None].expand((4, 3) + sR.shape)
-
-        s1 = c1 * torch.sum(
-            P[0] / sR * torch.exp(-2 * torch.pi * sR * torch.sqrt(P[1])), 0
-        )
-        s2 = c2 * torch.sum(
-            P[2] * P[3] ** (-3 / 2) * torch.exp(-(torch.pi**2) * (sR**2) / P[3]), 0
-        )
-        pot = s1 + s2
-
-        avgpool3d = torch.nn.AvgPool3d(4, stride=4)
-        return avgpool3d(pot[None, None]).squeeze()
 
     # ------------------------------------------------------------------
     # Generation

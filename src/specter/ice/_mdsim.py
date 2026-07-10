@@ -12,7 +12,7 @@ import torch
 from ..arrays import (
     radial_profile_3d,
     soft_voxelize_coordinates,
-    tile_volume_from_blocks,
+    tile_volume_from_blocks_blended,
 )
 from ..coords import radial_distribution_function
 from ..fft import fft3
@@ -409,7 +409,7 @@ class MDSimDump:
             Tiled ice volume of shape ``target_shape``.
         """
         cubes = self.generate_ice(batchsize=num_unique, frames=frames)
-        return tile_volume_from_blocks(cubes, target_shape)
+        return tile_volume_from_blocks_blended(cubes, target_shape)
 
     def __repr__(self) -> str:
         return (
@@ -837,7 +837,7 @@ class ExtXYZDump:
         cubes = self.generate_ice(
             batchsize=num_unique, frames=frames, t_min=t_min, t_max=t_max
         )
-        return tile_volume_from_blocks(cubes, target_shape)
+        return tile_volume_from_blocks_blended(cubes, target_shape)
 
     def __repr__(self) -> str:
         temp_str = ""

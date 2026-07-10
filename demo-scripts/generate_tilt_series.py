@@ -31,7 +31,7 @@ Example (HPC):
         --coincidence_radius 1.5 \\
         --num_frames 10 \\
         --add_ice True \\
-        --algorithm_dx 0.5 \\
+        --ice_method gd \\
         --n_ice_blocks 8 \\
         --tomo_to_ice_ratio 0.75 \\
         --save_exitwaves True \\
@@ -213,10 +213,13 @@ def parse_args() -> argparse.Namespace:
         help="Generate and blend amorphous ice into the volume.",
     )
     parser.add_argument(
-        "--algorithm_dx",
-        type=float,
-        default=0.5,
-        help="Voxel size in Å at which to run the ice generation algorithm (most stable at 0.5 Å).",
+        "--ice_method",
+        type=str,
+        default="gd",
+        choices=["gd", "ap", "mcmc", "random"],
+        help="Ice generation algorithm (see IceBank). 'gd' works well at any "
+        "pixel size; 'ap' is not recommended above ~1.5 Å (its peak-finding "
+        "step can't resolve the minimum O-O separation at coarse pixel sizes).",
     )
     parser.add_argument(
         "--n_ice_blocks",
@@ -285,7 +288,7 @@ def main() -> None:
     import specter
     from specter.cryosparc import create_micrograph_starfile
     from specter.imagegenerator import TiltSeriesGenerator
-    from specter.ice import APIcemaker
+    from specter.ice import IceBank
 
     args = parse_args()
     specter.set_verbosity(logging.INFO)
@@ -307,16 +310,19 @@ def main() -> None:
     if args.add_ice:
         _section("Generating amorphous ice")
         _console.print(
-            f"  algorithm_dx = {args.algorithm_dx:.2f} Å,  target_dx = {dx:.2f} Å,  n_blocks = {args.n_ice_blocks}"
+            f"  method = {args.ice_method},  dx = {dx:.2f} Å,  n_blocks = {args.n_ice_blocks}"
         )
-        im = APIcemaker(n=256, dx=dx)
+        icecube_size = min(min(tomo.shape), int(256 / dx))
+        icemaker = IceBank(
+            n=icecube_size,
+            dx=dx,
+            method=args.ice_method,
+            num_unique=args.n_ice_blocks,
+        ).to(args.device)
+        icemaker.build()
         ice = torch.squeeze(
-            im.generate_big_ice_interpolate(
-                (tomo.shape[0], tomo.shape[1], tomo.shape[2]),
-                n_blocks=args.n_ice_blocks,
-                algorithm_dx=args.algorithm_dx,
-            )
-        )
+            icemaker.generate_big_ice((1, tomo.shape[0], tomo.shape[1], tomo.shape[2]))
+        ).cpu()
         ratio = args.tomo_to_ice_ratio
         tomo = tomo * torch.max(ice) * ratio + ice * (tomo < 0.1)
 

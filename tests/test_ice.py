@@ -2,9 +2,18 @@
 Tests for IceBank.
 """
 
+import warnings
+
+import pytest
 import torch
 
-from specter.ice import APIcemaker, GradientSKIcemaker, IceBank
+from specter.ice import APIcemaker, GradientSKIcemaker, IceBank, MCMCIcemaker
+from specter.ice._helpers import assemble_big_ice
+from specter.ice._kernels import (
+    build_atomic_potential_kernel,
+    ice_kspace_radial_grid,
+    interpolate_target_kernel,
+)
 
 
 def test_allocate_placeholder_shape_and_zeros():
@@ -60,3 +69,115 @@ def test_gradientskicemaker_forwards_custom_mdsim_target_path(tmp_path):
     )
 
     assert not torch.allclose(custom_gd.f_target, default_gd.f_target)
+
+
+# ---------------------------------------------------------------------------
+# assemble_big_ice — the single shared tiling entry point, used solely by
+# IceBank (every algorithm class only produces blocks; nothing needs a
+# resolution-mismatched "generate at algorithm_dx, interpolate to dx" path
+# now that method='gd' works fine at coarse pixel sizes).
+# ---------------------------------------------------------------------------
+
+
+def test_assemble_big_ice_shape_and_finite():
+    torch.manual_seed(0)
+    cubes = torch.rand(4, 8, 8, 8)
+    out = assemble_big_ice(cubes, (2, 20, 20, 20))
+    assert out.shape == (2, 20, 20, 20)
+    assert torch.isfinite(out).all()
+
+
+def test_assemble_big_ice_replace_faces_false_skips_face_replacement():
+    torch.manual_seed(1)
+    cubes = torch.rand(4, 8, 8, 8)
+    out = assemble_big_ice(cubes, (1, 8, 8, 8), replace_faces=False)
+    assert out.shape == (1, 8, 8, 8)
+    assert torch.isfinite(out).all()
+
+
+# ---------------------------------------------------------------------------
+# Algorithm classes only produce blocks now — tiling lives solely in IceBank
+# (via assemble_big_ice). No algorithm class assembles large volumes itself.
+# ---------------------------------------------------------------------------
+
+
+def test_algorithm_classes_have_no_generate_big_ice():
+    from specter.ice import RandomIcemaker
+
+    for cls in (GradientSKIcemaker, MCMCIcemaker, APIcemaker, RandomIcemaker):
+        assert not hasattr(cls, "generate_big_ice")
+        assert not hasattr(cls, "generate_big_ice_fast")
+        assert not hasattr(cls, "generate_big_ice_interpolate")
+
+
+def test_apicemaker_warns_above_resolution_limit():
+    # dx=1.6 (just above the 1.5 Å limit) with the default min_distance=1.9
+    # keeps min_distance_vox = int(1.9/1.6) = 1, avoiding a separate,
+    # pre-existing ZeroDivisionError in generate_ice_deltas' correction_factor
+    # calc when min_distance_vox rounds all the way down to 0 (e.g. dx=3.0).
+    im = APIcemaker(n=32, dx=1.6, progressbars=False)
+    with pytest.warns(UserWarning, match="1.5"):
+        im.generate_ice_deltas(batchsize=1, niter=1)
+
+
+def test_apicemaker_no_warning_below_resolution_limit():
+    im = APIcemaker(n=32, dx=1.0, progressbars=False)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        im.generate_ice_deltas(batchsize=1, niter=1)
+
+
+def test_mcmcicemaker_emits_deprecation_warning():
+    with pytest.warns(DeprecationWarning, match="deprecated"):
+        MCMCIcemaker(n=16, dx=1.0, progressbars=False)
+
+
+# ---------------------------------------------------------------------------
+# ice/_kernels.py — shared physics-kernel construction, used by APIcemaker,
+# GradientSKIcemaker, and RandomIcemaker instead of each duplicating it.
+# ---------------------------------------------------------------------------
+
+
+def test_kernels_atomic_potential_matches_apicemaker_wrapper():
+    dx = 1.0
+    direct = build_atomic_potential_kernel(dx, "kirkland")
+    im = APIcemaker(n=32, dx=dx, progressbars=False)
+    assert torch.allclose(direct, im.create_ice_kernel())
+
+
+def test_kernels_kspace_grid_shape_and_dc_center():
+    n, nz, dx = 16, 12, 1.0
+    K = ice_kspace_radial_grid(n, nz, dx)
+    assert K.shape == (nz, n, n)
+    assert torch.isfinite(K).all()
+    # DC (zero frequency) sits at the center voxel after fftshift.
+    assert K[nz // 2, n // 2, n // 2].item() == pytest.approx(0.0)
+
+
+def test_kernels_interpolate_target_half_matches_full_slice_and_flip():
+    im = APIcemaker(n=16, dx=1.0, progressbars=False)
+    full = interpolate_target_kernel(
+        im.K, im.mdsim_radial_k, im.mdsim_f_radial_avg, im.n_ice_molecules
+    )
+    half = interpolate_target_kernel(
+        im.K,
+        im.mdsim_radial_k,
+        im.mdsim_f_radial_avg,
+        im.n_ice_molecules,
+        half=True,
+    )
+    n = full.shape[-1]
+    expected_half = torch.flip(full[:, :, : n // 2 + 1], dims=[2])
+    assert torch.allclose(half, expected_half)
+
+
+def test_gradientskicemaker_does_not_import_apicemaker():
+    import specter.ice._gradient as gradient_module
+
+    assert "APIcemaker" not in dir(gradient_module)
+
+
+def test_gradientskicemaker_ice_kernel_matches_direct_build():
+    dx = 1.0
+    gd = GradientSKIcemaker(n=16, dx=dx, progressbars=False)
+    assert torch.allclose(gd._ice_kernel, build_atomic_potential_kernel(dx, "kirkland"))

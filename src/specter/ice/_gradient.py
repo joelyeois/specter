@@ -5,18 +5,17 @@ from typing import Optional
 import lightning as L
 import torch
 import torch.nn.functional as F
-from torchinterp1d import interp1d
 
-from ..arrays import (
-    radial_profile_3d,
-    soft_voxelize_coordinates,
-    tile_volume_from_blocks,
-)
+from ..arrays import radial_profile_3d, soft_voxelize_coordinates
 from ..fft import fft3, fftconvolve
 from ..progress import ProgressManager, track
-from ._ap import APIcemaker
 from ._helpers import ndensity_of_amorphous_ice
-from ._mcmc import MCMCIcemaker
+from ._kernels import (
+    build_atomic_potential_kernel,
+    ice_kspace_radial_grid,
+    interpolate_target_kernel,
+    load_mdsim_f_radial_avg,
+)
 
 
 def _wrap_coords(x: torch.Tensor, L: float) -> torch.Tensor:
@@ -46,7 +45,8 @@ class GradientSKIcemaker(L.LightningModule):
     nz : int, optional
         Number of voxels along z. Defaults to ``n``.
     min_distance : float
-        Hard-core exclusion radius in Å used only during RSA initialisation.
+        Hard-core exclusion radius in Å for the soft pair-exclusion penalty
+        used during optimisation (see ``rep_strength`` on :meth:`optimize`).
     device : str or torch.device
         Computation device.
     progressbars : bool, optional
@@ -71,34 +71,31 @@ class GradientSKIcemaker(L.LightningModule):
         self.min_distance = min_distance
         self.progressbars = progressbars
 
-        _im = APIcemaker(n=n, dx=dx, nz=nz, mdsim_target_path=mdsim_target_path)
-        self.n = _im.n
-        self.nz = _im.nz
-        self.dx = _im.dx
+        self.n = n
+        self.nz = nz if nz is not None else n
+        self.dx = dx
         self.box_x = self.n * self.dx
         self.box_y = self.n * self.dx
         self.box_z = self.nz * self.dx
-        self._ice_kernel: torch.Tensor = _im.ice_kernel.cpu()
+        self._ice_kernel: torch.Tensor = build_atomic_potential_kernel(
+            self.dx, "kirkland"
+        )
 
         self.n_molecules = int(
             ndensity_of_amorphous_ice * self.box_x * self.box_y * self.box_z
         )
 
-        K_flat = _im.K.cpu().ravel()
-        interp_vals = interp1d(
-            _im.mdsim_radial_k[1:].cpu(),
-            _im.mdsim_f_radial_avg[1:].cpu(),
-            K_flat,
-        )
-        f_kernel = interp_vals.reshape(self.nz, self.n, self.n).float()
-        f_kernel = f_kernel * (self.n_molecules**0.5)
-        f_kernel[self.nz // 2, self.n // 2, self.n // 2] = float(self.n_molecules)
+        mdsim_radial_k, mdsim_f_radial_avg = load_mdsim_f_radial_avg(mdsim_target_path)
+        K = ice_kspace_radial_grid(self.n, self.nz, self.dx)
+        f_kernel = interpolate_target_kernel(
+            K, mdsim_radial_k, mdsim_f_radial_avg, self.n_molecules
+        ).float()
         self.register_buffer("f_target", f_kernel)
 
-        self.dk: float = _im.dk
+        self.dk: float = 1 / self.n / self.dx
         self.f_target_radial: torch.Tensor = radial_profile_3d(f_kernel.cpu())
 
-        r_bins = (_im.K.cpu() / self.dk).round().long().flatten()
+        r_bins = (K / self.dk).round().long().flatten()
         n_rbins = int(r_bins.max().item()) + 1
         bin_count = torch.bincount(r_bins, minlength=n_rbins).float().clamp(min=1)
         self.register_buffer("_r_bins", r_bins)
@@ -141,28 +138,6 @@ class GradientSKIcemaker(L.LightningModule):
         pos[:, 1] = (pos[:, 1] - 0.5) * self.box_y
         pos[:, 2] = (pos[:, 2] - 0.5) * self.box_z
         self.positions = pos
-
-    def init_rsa(self) -> None:
-        """
-        Initialise via RSA with hard-core exclusion.
-
-        Delegates to :class:`MCMCIcemaker` for O(N) cell-list RSA.
-        """
-        rmc = MCMCIcemaker(
-            n=self.n,
-            dx=self.dx,
-            nz=self.nz,
-            min_distance=self.min_distance,
-            device="cpu",
-        )
-        rmc.n_molecules = self.n_molecules
-        rmc.init_random()
-        assert rmc.positions is not None
-        raw = rmc.positions.float()
-        self.positions = raw - torch.tensor(
-            [self.box_x / 2, self.box_y / 2, self.box_z / 2]
-        )
-        self.n_molecules = rmc.n_molecules
 
     # ------------------------------------------------------------------
     # Differentiable S(k) loss
@@ -261,7 +236,7 @@ class GradientSKIcemaker(L.LightningModule):
         history : dict
             Keys: ``'step'``, ``'loss'``, ``'radial_profile'``.
         """
-        assert self.positions is not None, "Call init_random() or init_rsa() first"
+        assert self.positions is not None, "Call init_random() first"
 
         pos = self.positions.to(self.device).clone().requires_grad_(True)
         history: dict[str, list] = {"step": [], "loss": [], "radial_profile": []}
@@ -529,46 +504,6 @@ class GradientSKIcemaker(L.LightningModule):
             mode="same",
             axes=(-3, -2, -1),
         )
-
-    def generate_big_ice(
-        self,
-        target_shape: tuple[int, int, int, int],
-        num_unique: int = 8,
-        n_steps: int = 50,
-        lr: float = 1.0,
-        optimizer: str = "lbfgs",
-        rep_strength: float = 1.0,
-    ) -> torch.Tensor:
-        """
-        Generate a large ice volume by tiling unique gradient-optimised blocks.
-
-        Parameters
-        ----------
-        target_shape : tuple of int
-            Output shape ``(B, nz, ny, nx)``.
-        num_unique : int, optional
-            Number of unique ice blocks to generate. Default is 8.
-        n_steps : int, optional
-            Optimiser outer iterations per block. Default is 50.
-        lr : float, optional
-            Initial learning rate. Default is 1.0.
-        optimizer : str, optional
-            ``'lbfgs'`` (default) or ``'adam'``.
-        rep_strength : float, optional
-            Weight of the soft pair-exclusion penalty. Default is 1.0.
-
-        Returns
-        -------
-        big_ice : torch.Tensor
-            Tiled ice volume of shape ``target_shape``.
-        """
-        cubes = self.generate_ice(
-            batchsize=num_unique,
-            n_steps=n_steps,
-            lr=lr,
-            rep_strength=rep_strength,
-        )
-        return tile_volume_from_blocks(cubes, target_shape)
 
     @staticmethod
     def assemble_tiles(

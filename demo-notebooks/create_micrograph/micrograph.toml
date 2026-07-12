@@ -3,7 +3,7 @@ pdb_code = "6bdf"
 assembly = true
 num_pixels = 256
 pixel_size = 0.83       # Å
-micrograph_size = 4096  # pixels, square
+micrograph_size = 2048  # pixels, square
 
 [microscope]
 energy = 300.0     # keV

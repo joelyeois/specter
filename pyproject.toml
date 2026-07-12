@@ -17,6 +17,7 @@ dependencies = [
     "numpy>=2.3.3",
     "pandas>=2.3.3",
     "plotly>=6.3.1",
+    "prodigyopt>=1.1.2",
     "requests>=2.32.5",
     "rich>=14.2.0",
     "scikit-image>=0.25.2",

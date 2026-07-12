@@ -420,7 +420,7 @@ def plot_map_to_model_fsc(
                 t = (0.5 - ff[i]) / (ff[i + 1] - ff[i])
                 last_k_cross = kf[i] + t * (kf[i + 1] - kf[i])
         if last_k_cross is not None:
-            return f"{1.0 / last_k_cross.item():.2f} Å"
+            return f"{1.0 / last_k_cross.item():.3f} Å"
         return ">Nyquist"
 
     nyquist = 1.0 / (2.0 * voxel_size)

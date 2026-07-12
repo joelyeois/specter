@@ -379,3 +379,74 @@ def test_reconstructor_training_updates_volume(
     assert not torch.equal(
         model.V.data, V_init
     ), "V was not updated after one gradient step"
+
+
+# ---------------------------------------------------------------------------
+# Per-particle scale weighting
+# ---------------------------------------------------------------------------
+
+
+def test_scale_defaults_to_ones(gb_kwargs: dict) -> None:
+    """Without an explicit scale, every particle is weighted equally."""
+    gb = Reconstructor(**gb_kwargs, scattering_model="projection")
+    assert torch.equal(gb.scale, torch.ones(1))
+
+
+def test_scale_is_registered_as_buffer(gb_kwargs: dict) -> None:
+    """An explicit per-particle scale is stored and used verbatim."""
+    scale = torch.tensor([1.5])
+    gb = Reconstructor(**gb_kwargs, scale=scale, scattering_model="projection")
+    assert torch.allclose(gb.scale, scale)
+
+
+def test_scale_scales_mse_loss_linearly(gb_kwargs: dict) -> None:
+    """Doubling every particle's scale doubles the plain-MSE loss."""
+    n_particles = 3
+    n = gb_kwargs["V"].shape[-1]
+    images = torch.randn(n_particles, n, n)
+    out = torch.randn(n_particles, n, n)
+    idx = torch.arange(n_particles)
+
+    base = dict(gb_kwargs)
+    base.update(
+        quaternions=base["quaternions"].repeat(n_particles, 1),
+        translations=base["translations"].repeat(n_particles, 1),
+        ctf_params={k: v.repeat(n_particles) for k, v in base["ctf_params"].items()},
+        scattering_model="projection",
+    )
+
+    gb_unit = Reconstructor(**base, scale=torch.ones(n_particles))
+    gb_double = Reconstructor(**base, scale=torch.full((n_particles,), 2.0))
+
+    loss_unit = gb_unit._compute_loss(out, images, idx)
+    loss_double = gb_double._compute_loss(out, images, idx)
+    assert torch.allclose(loss_double, 2.0 * loss_unit, rtol=1e-4)
+
+
+def test_small_scale_reduces_gradient_contribution(gb_kwargs: dict) -> None:
+    """A particle with a small scale contributes less to the volume gradient."""
+    n_particles = 2
+    n = gb_kwargs["V"].shape[-1]
+    torch.manual_seed(0)
+    images = torch.randn(n_particles, n, n)
+
+    base = dict(gb_kwargs)
+    base.update(
+        quaternions=base["quaternions"].repeat(n_particles, 1),
+        translations=base["translations"].repeat(n_particles, 1),
+        ctf_params={k: v.repeat(n_particles) for k, v in base["ctf_params"].items()},
+        scattering_model="projection",
+        lr=0.1,
+    )
+    idx = torch.arange(n_particles)
+
+    def volume_grad_norm(scale: torch.Tensor) -> torch.Tensor:
+        model = Reconstructor(**{**base, "V": base["V"].clone()}, scale=scale)
+        out = model.forward(idx)
+        loss = model._compute_loss(out, images, idx)
+        (grad,) = torch.autograd.grad(loss, model.V)
+        return grad.norm()
+
+    grad_uniform = volume_grad_norm(torch.tensor([1.0, 1.0]))
+    grad_downweighted = volume_grad_norm(torch.tensor([1.0, 0.01]))
+    assert grad_downweighted < grad_uniform

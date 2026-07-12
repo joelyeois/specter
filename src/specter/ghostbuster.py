@@ -53,6 +53,12 @@ class Reconstructor(L.LightningModule):
         Per-particle translations in Å, shape (N, 2).
     ctf_params : dict[str, torch.Tensor]
         Per-particle CTF parameters; each value has leading dimension N.
+    scale : torch.Tensor, optional
+        Per-particle loss weight, shape (N,) (e.g. cryoSPARC
+        ``alignments3D/alpha``). Multiplies each particle's contribution to
+        the image-domain loss before batch averaging — particles with a
+        small scale are down-weighted in the gradient update. ``None``
+        (default) weights every particle equally.
     energy : float
         Electron energy in keV.
     dose_per_angstrom : float
@@ -125,6 +131,7 @@ class Reconstructor(L.LightningModule):
         ] = "LambdaLR",
         kmask: torch.Tensor | None = None,
         nps_weight: torch.Tensor | None = None,
+        scale: torch.Tensor | None = None,
         learn_noise_model: bool = False,
         noise_ema_momentum: float = 0.9,
         use_ncc: bool = False,
@@ -154,6 +161,7 @@ class Reconstructor(L.LightningModule):
                 "bfactor",
                 "kmask",
                 "nps_weight",
+                "scale",
                 "fsc_ref",
                 "cryosparc_ref",
                 "fsc_mask",
@@ -266,6 +274,11 @@ class Reconstructor(L.LightningModule):
         else:
             self.register_buffer("anisomag", anisomag)
 
+        # per-particle loss weight (e.g. cryoSPARC scale factor)
+        if scale is None:
+            scale = torch.ones(quaternions.shape[0])
+        self.register_buffer("scale", scale)
+
         # imaging models
         self.ews_curvature_sign = ews_curvature_sign
         self.scattering_model = scattering_model
@@ -373,7 +386,7 @@ class Reconstructor(L.LightningModule):
                     final_div_factor=1000.0,
                 )
             elif self.scheduler == "MultiplicativeLR":
-                lr_scheduler = ExponentialLR(optimizerV, 0.999)
+                lr_scheduler = ExponentialLR(optimizerV, 0.9999)
             elif self.scheduler == "LambdaLR":
                 lr_scheduler = LambdaLR(optimizerV, self.reciprocal_lr_scheduler)
             else:
@@ -399,13 +412,12 @@ class Reconstructor(L.LightningModule):
     def _ncc_loss(
         pred: torch.Tensor, target: torch.Tensor, eps: float = 1e-8
     ) -> torch.Tensor:
-        """Normalized cross-correlation loss scaled to MSE-equivalent units.
+        """Per-image normalized cross-correlation loss in MSE-equivalent units.
 
-        Computes ``var(target) * (1 - NCC)`` per image, then averages over the
-        batch.  The ``var(target)`` factor makes the loss dimensionally
-        equivalent to MSE: at the optimum (low-SNR regime) both quantities
-        converge to the noise variance ``σ²``, so the same learning rate can be
-        used without retuning.
+        Computes ``var(target) * (1 - NCC)`` per image.  The ``var(target)``
+        factor makes the loss dimensionally equivalent to MSE: at the optimum
+        (low-SNR regime) both quantities converge to the noise variance
+        ``σ²``, so the same learning rate can be used without retuning.
 
         Parameters
         ----------
@@ -419,7 +431,8 @@ class Reconstructor(L.LightningModule):
         Returns
         -------
         torch.Tensor
-            Scalar loss.
+            Per-image loss, shape ``(B,)``. Callers reduce over the batch
+            (optionally weighting by a per-particle scale first).
 
         Notes
         -----
@@ -436,7 +449,7 @@ class Reconstructor(L.LightningModule):
         )  # (B,), range [-1, 1]
         # var(target) per image: scales (1 - NCC) into MSE-equivalent units
         var_t = (t_c**2).mean(dim=1)  # (B,)
-        return (var_t * (1.0 - ncc)).mean()
+        return var_t * (1.0 - ncc)
 
     def _update_sigma2(self, residuals: torch.Tensor) -> None:
         """Update the per-shell noise variance sigma^2(k) from real-space residuals.
@@ -485,9 +498,20 @@ class Reconstructor(L.LightningModule):
         -------
         torch.Tensor
             Scalar total loss.
+
+        Notes
+        -----
+        Each branch is weighted by the per-particle ``self.scale[idx]``
+        before the final batch mean, so a small scale down-weights that
+        particle's contribution to the gradient update. Weighting is applied
+        as a plain multiply-then-mean (not normalised by the sum of weights
+        in the batch), since scale values are meaningful relative to each
+        other across the whole dataset, not just within one batch.
         """
+        w = self.scale[idx]  # (B,)
         if self.use_ncc:
-            loss = self._ncc_loss(out, images)
+            ncc_loss = self._ncc_loss(out, images)  # (B,)
+            loss = (w * ncc_loss).mean()
         elif self.learn_noise_model:
             # RELION-style: estimate sigma^2(k) from residuals, weight by 1/sigma^2(k).
             # sigma2_k is updated with no_grad (EM E-step); gradient flows only
@@ -496,21 +520,21 @@ class Reconstructor(L.LightningModule):
             out_f = torch.fft.rfft2(out)
             H, W = images.shape[-2:]
             self._update_sigma2(images - out)
-            loss = torch.mean(
-                (images_f - out_f).abs() ** 2 / self.sigma2_k.detach()
-            ) / (H * W)
+            residual = (images_f - out_f).abs() ** 2 / self.sigma2_k.detach()
+            loss = torch.mean(w[:, None, None] * residual) / (H * W)
         elif self.nps_weight is not None:
             images_f = torch.fft.rfft2(images)
             out_f = torch.fft.rfft2(out)
             H, W = images.shape[-2:]
             # Divide by H*W so that a flat (normalised) NPS weight gives the
             # same loss magnitude as real-space MSE (Parseval equivalence).
-            loss = torch.mean(self.nps_weight * (images_f - out_f).abs() ** 2) / (H * W)
+            residual = self.nps_weight * (images_f - out_f).abs() ** 2
+            loss = torch.mean(w[:, None, None] * residual) / (H * W)
         else:
             mse = F.mse_loss(images, out, reduction="none")
             if self.use_2d_mask:
                 mse = mse * self._project_fsc_mask_2d(idx, images.shape)
-            loss = mse.mean()
+            loss = (w[:, None, None] * mse).mean()
         self.log_norm_loss.append(loss.detach().cpu())
 
         if self.sparsity is not None:
@@ -1136,13 +1160,14 @@ class Ghostbuster:
             pixel_size.item() if hasattr(pixel_size, "item") else pixel_size
         )
         dose_per_area = dose_per_angstrom * voxel_size**2
-        images = dose_per_area**0.5 * scale[..., None, None] * images + dose_per_area
+        images = dose_per_area**0.5 * images + dose_per_area
 
         # preprocessed particle data (not hyperparams — not logged by job.create)
         self._images = images
         self._rotations = rotations
         self._translations = translations
         self._ctf_params = ctf_params
+        self._scale = scale
         self._anisomag = anisomag
         self._energy = float(energy.item() if hasattr(energy, "item") else energy)
         self._voxel_size = voxel_size
@@ -1209,6 +1234,7 @@ class Ghostbuster:
             self.dose_per_angstrom,
             anisomag=self._anisomag,
             alpha=self._alpha,
+            scale=self._scale,
             defocus_offset=torch.tensor(self.defocus_offset),
             bfactor=self.bfactor,
             scattering_model=scattering_model,
@@ -1725,7 +1751,7 @@ class TomogramReconstructor(L.LightningModule):
                 final_div_factor=1000.0,
             )
         elif self.scheduler == "MultiplicativeLR":
-            lr_scheduler = ExponentialLR(optimizerV, 0.999)
+            lr_scheduler = ExponentialLR(optimizerV, 0.9999)
         elif self.scheduler == "LambdaLR":
             lr_scheduler = LambdaLR(optimizerV, self.reciprocal_lr_scheduler)
         else:

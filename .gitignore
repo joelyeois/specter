@@ -25,6 +25,8 @@ uv.lock
 # Jupyter
 .ipynb_checkpoints/
 dev/
+.jupyter/
+.jupyter_ystore.db
 
 # Sphinx docs build output
 docs/_build/

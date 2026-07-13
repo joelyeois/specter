@@ -17,7 +17,14 @@ REPO_ROOT = Path(specter.__file__).resolve().parents[2]
 
 @dataclass
 class ParticleStackConfig:
-    """Parameters for particle-stack generation, loaded from a TOML config file."""
+    """Parameters for particle-stack generation, loaded from a TOML config file.
+
+    Set `cs_path` to drive generation from a CryoSPARC .cs file instead of
+    randomly-sampled poses/CTF: `pixel_size`, `energy`, `alpha`, defocus, and
+    shifts are then read from the .cs file at run time via
+    `extract_parameters_from_csfile` and take precedence over the
+    corresponding fields below, which are unused in that mode.
+    """
 
     # --- PDB / potential ---
     pdb_code: str
@@ -25,6 +32,10 @@ class ParticleStackConfig:
     pdb_savefolder: str = "pdb-data"  # resolved against REPO_ROOT if relative
     num_pixels: int = 256
     pixel_size: float = 1.0  # Å
+
+    # --- CryoSPARC input ---
+    # if set, poses/CTF/pixel_size/energy/alpha come from here
+    cs_path: str | None = None
 
     # --- Microscope / physics ---
     energy: float = 300.0  # keV

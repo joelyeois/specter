@@ -1,0 +1,54 @@
+# Config for demo-notebooks/simulate-particles-from-csfile.ipynb, loaded via
+# specter.config.load_config("simulate-particles-from-csfile.toml").
+#
+# This notebook drives ImageGenerator from a CryoSPARC .cs file, so unlike
+# configs/particle.toml, it does NOT need pixel_size, energy, cs, alpha,
+# defocus, or shift — extract_parameters_from_csfile() reads all of those
+# straight from the .cs file at run time and overrides the (unused)
+# ParticleStackConfig defaults for those fields.
+
+[cryosparc]
+cs_path = "/scratch/loh/joel/cryosparc_tutorial/CS-cryosparc-tutorial/J35/J35_passthrough_particles.cs"
+
+[potential]
+pdb_code = "6bdf"
+assembly = true
+num_pixels = 256
+
+[microscope]
+dose_min = 53.0                # e⁻/Å², from EMDB Experiment tab
+# num_frames = 53                # frames, uncomment to override default (int(dose_min) if None)
+
+[envelopes]
+# convergence_angle = 1.0       # mrad, uncomment to enable the Cs envelope
+# cc = 2.0                      # mm, uncomment to enable the Cc envelope
+energy_spread = 0.7            # eV (FWHM)
+deltaV_V = 0.06e-6              # unitless (ΔV/V)
+deltaI_I = 0.01e-6               # unitless (ΔI/I)
+dose_envelope = false
+bfactor = 200.0                 # Å²
+
+[dataset]
+n_particles = 10                 # number of particles to load from the .cs file
+
+[models]
+scattering_model = "multislice"  # multislice | firstborn | projection | ctf
+aberration_model = "holography"  # holography | ctf
+noise_model = "poisson"          # poisson | none
+coincidence_radius_min = 2.0     # pixels
+ice_model = "gd"                 # gd | ap | mcmc | random | none
+ice_thickness = 0.0              # Å, 0 = minimum (particle box size)
+num_unique_icecubes = 8
+ice_build_batch_size = 1
+# icecube_size = 256              # voxels
+# crowd_min_distance = 100.0      # Å, uncomment to crowd particles; defaults to pdb.max_diameter
+# crowd_max_distance_z = 50.0     # Å
+pad_fft = true
+detector_model = "none"          # none | perfect | k3_300kv | k3_200kv
+
+[postprocessing]
+normalize_particles = true
+
+[compute]
+device = "cuda:0"                # cpu | cuda | cuda:0
+batchsize = 5

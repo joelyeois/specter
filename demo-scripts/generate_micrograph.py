@@ -7,7 +7,7 @@ each forward pass applies a different CTF (defocus drawn uniformly at random).
 Usage:
     python demo-scripts/generate_micrograph.py --pdb_code 6bdf --output_dir /path/to/output
 
-Parameters are loaded from --config (default: configs/micrograph/micrograph.toml);
+Parameters are loaded from --config (default: configs/micrograph.toml);
 any flag below overrides the corresponding field in that file.
 
 Device options:
@@ -17,7 +17,7 @@ Device options:
 
 Example (HPC):
     python demo-scripts/generate_micrograph.py \\
-        --config configs/micrograph/micrograph.toml \\
+        --config configs/micrograph.toml \\
         --pdb_code 6bdf \\
         --n_micrographs 10 \\
         --num_pixels 256 \\
@@ -63,7 +63,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--config",
         type=str,
-        default=str(REPO_ROOT / "configs" / "micrograph" / "micrograph.toml"),
+        default=str(REPO_ROOT / "configs" / "micrograph.toml"),
         help="Path to a TOML config file. Every other flag below overrides a field in it.",
     )
 

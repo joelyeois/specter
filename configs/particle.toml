@@ -1,7 +1,7 @@
 # Canonical default config for demo-scripts/generate_particle_stack.py and
 # demo-notebooks/particle_stack/particle-stack-generator.ipynb.
 # Any field can be overridden on the command line, e.g.:
-#   python demo-scripts/generate_particle_stack.py --config configs/particle_stack/particle.toml --n_particles 3000
+#   python demo-scripts/generate_particle_stack.py --config configs/particle.toml --n_particles 3000
 
 [potential]
 pdb_code = "6bdf"

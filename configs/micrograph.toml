@@ -1,6 +1,6 @@
 # Canonical default config for demo-scripts/generate_micrograph.py.
 # Any field can be overridden on the command line, e.g.:
-#   python demo-scripts/generate_micrograph.py --config configs/micrograph/micrograph.toml --n_micrographs 10
+#   python demo-scripts/generate_micrograph.py --config configs/micrograph.toml --n_micrographs 10
 
 [potential]
 pdb_code = "6bdf"

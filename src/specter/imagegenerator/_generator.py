@@ -42,6 +42,9 @@ class ParticleGeneratorBase(BaseImager):
     of shape (B, Z, Y, X) and passing it to ``process_volume``.
     """
 
+    quaternions: torch.Tensor
+    translations: torch.Tensor
+
     def solvate(self, V: torch.Tensor) -> torch.Tensor:
         """
         Embed the volume in amorphous ice.

@@ -1,8 +1,10 @@
 import numpy as np
 import pytest
+import starfile
 import torch
 
 from specter import cryosparc
+from specter.imagegenerator import ImageGenerator
 
 
 class _FakeDataset(dict):
@@ -92,3 +94,82 @@ def test_extract_parameters_n_particles_all() -> None:
     assert rotations.shape == (4, 4)
     assert torch.equal(indices, torch.arange(4))
     assert torch.equal(halfset_labels, torch.tensor([0, 1, 0, 1]))
+
+
+def test_create_particle_starfile_writes_bfactor_column(tmp_path) -> None:
+    n = 3
+    ctf_params = {
+        "dfu": torch.full((n,), 5000.0),
+        "dfv": torch.full((n,), 5000.0),
+        "dfang": torch.zeros(n),
+        "cs": torch.full((n,), 2.7),
+        "phaseshift": torch.zeros(n),
+    }
+    cryosparc.create_particle_starfile(
+        torch.randn(n, 8, 8),
+        rotations=torch.tensor([[0.0, 0.0, 0.0, 1.0]] * n),
+        translations=torch.zeros(n, 2),
+        alpha=0.1,
+        folderpath=str(tmp_path),
+        energy=300.0,
+        dx=1.5,
+        filename="particles",
+        ctf_params=ctf_params,
+        dose_per_angstrom=2.0,
+        coincidence_radius=1.8,
+        potential_scale=0.75,
+        bfactor=42.0,
+    )
+
+    df = starfile.read(tmp_path / "particles.star")
+    assert (df["specterBfactor"] == 42.0).all()
+    assert (df["specterPotentialScale"] == 0.75).all()
+    assert (df["specterCoincidenceRadius"] == 1.8).all()
+    assert (df["specterDosePerAngstrom"] == 2.0).all()
+
+
+def test_create_particle_starfile_from_model_matches_model_params(tmp_path) -> None:
+    volume = torch.zeros(16, 16, 16)
+    volume[6:10, 6:10, 6:10] = 50.0
+    ctf_params = {
+        "dfu": torch.tensor([5000.0]),
+        "dfv": torch.tensor([5000.0]),
+        "dfang": torch.tensor([0.0]),
+        "cs": torch.tensor([2.7]),
+        "phaseshift": torch.tensor([0.0]),
+    }
+
+    torch.manual_seed(0)
+    model = ImageGenerator(
+        scattering_potential=volume,
+        pixel_size=2.0,
+        quaternions=torch.tensor([[0.7071, 0.0, 0.7071, 0.0]]),
+        translations=torch.tensor([[1.0, -1.0]]),
+        ctf_params=ctf_params,
+        energy=300.0,
+        dose_per_angstrom=2.0,
+        noise_model=None,
+        scattering_model="multislice",
+        alpha=0.1,
+        coincidence_radius=1.8,
+        potential_scale=0.75,
+        bfactor=42.0,
+        verbose=False,
+        progressbars=False,
+    )
+    particles = model(torch.tensor([0]))
+
+    cryosparc.create_particle_starfile_from_model(
+        particles, model, folderpath=str(tmp_path), filename="particles"
+    )
+
+    df = starfile.read(tmp_path / "particles.star")
+    assert (df["specterBfactor"] == 42.0).all()
+    assert (df["specterPotentialScale"] == 0.75).all()
+    assert (df["specterCoincidenceRadius"] == 1.8).all()
+    assert (df["specterDosePerAngstrom"] == 2.0).all()
+    # Multislice internally shifts dfu/dfv to the volume's midplane (see
+    # _apply_defocus_shift); the saved STAR file must have the original,
+    # externally-meaningful defocus, not the internally-shifted one.
+    assert (df["rlnDefocusU"] == 5000.0).all()
+    assert (df["rlnImagePixelSize"] == 2.0).all()

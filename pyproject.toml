@@ -7,7 +7,7 @@ requires-python = ">=3.11"
 dependencies = [
     "biopython>=1.85",
     "biotite>=1.4.0",
-    "cryosparc-tools>=4.7.1",
+    "cryosparc-tools>=5.0",
     "eerfile>=0.0.4",
     "gemmi>=0.7.3",
     "h5py>=3.14.0",

@@ -430,3 +430,34 @@ def test_image_generator_bfactor_none_and_zero_match(small_volume, ctf_params):
     image_zero = gen_zero(torch.tensor([0]))
 
     assert torch.equal(image_none, image_zero)
+
+
+def test_ctf_params_dict_undoes_multislice_defocus_shift(small_volume, ctf_params):
+    """
+    Multislice evaluates the CTF at the volume's midplane, which requires
+    internally shifting dfu/dfv by half the volume's Z extent (see
+    _apply_defocus_shift). ctf_params_dict() is the external-facing accessor
+    (used e.g. by create_particle_starfile_from_model) and must undo that
+    shift, returning the original CryoSPARC/RELION-convention defocus rather
+    than the internally-adjusted one.
+    """
+    original_dfu = ctf_params["dfu"].clone()
+    gen = ImageGenerator(
+        scattering_potential=small_volume,
+        pixel_size=2.0,
+        quaternions=torch.tensor([[1.0, 0.0, 0.0, 0.0]]),
+        translations=torch.tensor([[0.0, 0.0]]),
+        ctf_params=ctf_params,
+        energy=300.0,
+        dose_per_angstrom=2.0,
+        noise_model=None,
+        scattering_model="multislice",
+        alpha=0.1,
+        verbose=False,
+        progressbars=False,
+    )
+
+    expected_shift = gen.nz * gen.pixel_size / 2
+    assert expected_shift > 0
+    assert torch.allclose(gen.dfu, original_dfu - expected_shift)
+    assert torch.allclose(gen.ctf_params_dict()["dfu"], original_dfu)

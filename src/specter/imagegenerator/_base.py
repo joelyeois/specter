@@ -251,6 +251,27 @@ class BaseImager(L.LightningModule):
         ctf_batch["dose"] = self.dose_per_angstrom[idx]
         return ctf_batch
 
+    def ctf_params_dict(self) -> dict[str, torch.Tensor]:
+        """
+        Full (unindexed) CTF parameter buffers, keyed by name.
+
+        Useful for re-exporting exactly the CTF parameters a model was
+        constructed with, e.g. when writing a particle stack to a STAR file.
+
+        ``dfu``/``dfv`` are un-shifted back to the convention they were
+        constructed with (e.g. CryoSPARC/RELION's) if :meth:`_apply_defocus_shift`
+        moved them to the volume's midplane for internal multislice use — this
+        method always returns the original, externally-meaningful values.
+        """
+        params = {k: getattr(self, k) for k in self._ctf_param_names}
+        shift = getattr(self, "_defocus_shift_A", 0.0)
+        if shift:
+            if "dfu" in params:
+                params["dfu"] = params["dfu"] + shift
+            if "dfv" in params:
+                params["dfv"] = params["dfv"] + shift
+        return params
+
     def _init_detector_mtf(self) -> None:
         """Register the detector MTF buffer based on the model name."""
         if self.detector_model == "k3_300kv":
@@ -273,8 +294,9 @@ class BaseImager(L.LightningModule):
         Only applied when ``shift_required`` is True (i.e. for multislice — not
         needed for projection or CTF-only models).
         """
-        if shift_required:
-            shift = (self.nz * self.pixel_size) / 2
+        shift = (self.nz * self.pixel_size) / 2 if shift_required else 0.0
+        self._defocus_shift_A = shift
+        if shift:
             if hasattr(self, "dfu"):
                 setattr(self, "dfu", getattr(self, "dfu") - shift)
             if hasattr(self, "dfv"):

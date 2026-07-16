@@ -48,8 +48,9 @@ class APIcemaker(L.LightningModule):
     mdsim_target_path : str, optional
         Path to a precomputed radial-average |F(k)| target ``.pt`` file, in the
         same format as the bundled default (a 1D tensor indexed by k-bin on a
-        400x400x400, 0.25 Å grid). If None, uses the bundled
-        ``mdsim_f_radial_avg_400x400x400_0.25A.pt``. Default is None.
+        400x400x400, 0.25 Å grid). If None, uses the bundled LDA-80K
+        (low-density amorphous ice, 80K/0atm) target,
+        ``mdsim_f_radial_avg_400x400x400_0.25A_LDA_80K.pt``. Default is None.
 
     Attributes
     ----------
@@ -75,7 +76,7 @@ class APIcemaker(L.LightningModule):
         current_dir = os.path.dirname(os.path.abspath(__file__))
         root_dir = os.path.dirname(os.path.dirname(os.path.dirname(current_dir)))
         self.saved_data_path = mdsim_target_path or os.path.join(
-            root_dir, "ice-data", "mdsim_f_radial_avg_400x400x400_0.25A.pt"
+            root_dir, "ice-data", "mdsim_f_radial_avg_400x400x400_0.25A_LDA_80K.pt"
         )
         self.mdsim_dx = MDSIM_DX
         self.mdsim_n = MDSIM_N

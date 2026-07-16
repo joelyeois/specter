@@ -9,6 +9,8 @@ import torch.nn.functional as F
 
 from ..arrays import radial_profile_3d
 from ..fft import fftconvolve
+from ..progress import track
+from ._energy import mlbop_energy as _mlbop_energy
 from ._helpers import ndensity_of_amorphous_ice, rfftn, torch_peak_local_max
 from ._kernels import (
     MDSIM_DX,
@@ -418,6 +420,48 @@ class APIcemaker(L.LightningModule):
             axes=(-3, -2, -1),
         )
         return self.icecubes
+
+    def mlbop_energy(
+        self, pbc: bool = True, progressbar: bool = True
+    ) -> list[dict[str, float]]:
+        """
+        Score the most recently generated batch against the ML-BOP potential.
+
+        See :func:`specter.ice._energy.mlbop_energy`. Defaults to periodic
+        boundaries (``pbc=True``): each generated block is designed to be
+        tiled seamlessly into a larger periodic ice volume (see
+        :func:`~specter.ice._helpers.assemble_big_ice`), unlike e.g.
+        :class:`~specter.ice.MDSimDump`'s hard-edge-trimmed MD frames.
+
+        Parameters
+        ----------
+        pbc : bool, optional
+            Whether to treat each block as periodic with box lengths
+            ``(nz*dx, n*dx, n*dx)``. Default is True.
+        progressbar : bool, optional
+            Whether to show a progress bar over the batch. Default is True.
+
+        Returns
+        -------
+        list[dict[str, float]]
+            One ML-BOP result dict per batch element in
+            ``self.ice_coordinates``, in the same order.
+        """
+        if getattr(self, "ice_coordinates", None) is None:
+            raise RuntimeError(
+                "No ice coordinates -- call generate_ice_deltas() or "
+                "generate_ice() first."
+            )
+        box = (self.nz * self.dx, self.n * self.dx, self.n * self.dx)  # (z, y, x)
+        return [
+            _mlbop_energy(coords * self.dx, box_size=box, pbc=pbc, progressbar=False)
+            for coords in track(
+                self.ice_coordinates,
+                description="Scoring batch (ML-BOP)",
+                disable=not progressbar,
+                transient=True,
+            )
+        ]
 
     def irfftn(self, array: torch.Tensor) -> torch.Tensor:
         """

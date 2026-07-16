@@ -7,6 +7,7 @@ import torch
 
 from ..arrays import soft_voxelize_coordinates
 from ..fft import fftconvolve
+from ._energy import mlbop_energy as _mlbop_energy
 from ._helpers import ndensity_of_amorphous_ice
 from ._kernels import build_atomic_potential_kernel
 
@@ -172,3 +173,40 @@ class RandomIcemaker(L.LightningModule):
             axes=(-3, -2, -1),
         )
         return icecubes
+
+    # ------------------------------------------------------------------
+    # Diagnostics
+    # ------------------------------------------------------------------
+
+    def mlbop_energy(
+        self, pbc: bool = True, progressbar: bool = True
+    ) -> dict[str, float]:
+        """
+        Score the last-generated positions against the ML-BOP potential.
+
+        See :func:`specter.ice._energy.mlbop_energy`. Defaults to periodic
+        boundaries (``pbc=True``): each generated block is designed to be
+        tiled seamlessly into a larger periodic ice volume (see
+        :func:`~specter.ice._helpers.assemble_big_ice`), unlike e.g.
+        :class:`~specter.ice.MDSimDump`'s hard-edge-trimmed MD frames.
+
+        Parameters
+        ----------
+        pbc : bool, optional
+            Whether to treat the block as periodic with box lengths
+            ``(box_x, box_y, box_z)``. Default is True.
+        progressbar : bool, optional
+            Whether to show a progress bar over the per-atom energy loop.
+            Default is True.
+
+        Returns
+        -------
+        dict[str, float]
+            See :func:`specter.ice._energy.mlbop_energy` for the fields
+            returned.
+        """
+        assert self.positions is not None, "No positions — call init_random() first"
+        box = (self.box_x, self.box_y, self.box_z)
+        return _mlbop_energy(
+            self.positions, box_size=box, pbc=pbc, progressbar=progressbar
+        )

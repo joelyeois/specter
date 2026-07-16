@@ -7,7 +7,13 @@ import warnings
 import pytest
 import torch
 
-from specter.ice import APIcemaker, GradientSKIcemaker, IceBank, MCMCIcemaker
+from specter.ice import (
+    APIcemaker,
+    GradientSKIcemaker,
+    IceBank,
+    MCMCIcemaker,
+    RandomIcemaker,
+)
 from specter.ice._helpers import assemble_big_ice
 from specter.ice._kernels import (
     build_atomic_potential_kernel,
@@ -181,3 +187,59 @@ def test_gradientskicemaker_ice_kernel_matches_direct_build():
     dx = 1.0
     gd = GradientSKIcemaker(n=16, dx=dx, progressbars=False)
     assert torch.allclose(gd._ice_kernel, build_atomic_potential_kernel(dx, "kirkland"))
+
+
+# ---------------------------------------------------------------------------
+# mlbop_energy() diagnostic wired into AP/Random/GradientSK (see
+# specter.ice._energy) -- MCMCIcemaker is deprecated and intentionally
+# excluded.
+# ---------------------------------------------------------------------------
+
+_MLBOP_KEYS = {
+    "E_total",
+    "E_per_atom",
+    "rij_mean",
+    "rij_var",
+    "theta_mean",
+    "theta_var",
+}
+
+
+def test_apicemaker_mlbop_energy_returns_one_result_per_batch_element():
+    im = APIcemaker(n=16, dx=1.0, progressbars=False)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        im.generate_ice_deltas(batchsize=2, niter=1)
+
+    results = im.mlbop_energy(progressbar=False)
+
+    assert len(results) == 2
+    for result in results:
+        assert set(result) == _MLBOP_KEYS
+        assert torch.isfinite(torch.tensor(result["E_total"]))
+
+
+def test_apicemaker_mlbop_energy_requires_generated_coordinates():
+    im = APIcemaker(n=16, dx=1.0, progressbars=False)
+    with pytest.raises(RuntimeError, match="No ice coordinates"):
+        im.mlbop_energy(progressbar=False)
+
+
+def test_randomicemaker_mlbop_energy():
+    rm = RandomIcemaker(n=16, dx=1.0, progressbars=False)
+    rm.init_random()
+
+    result = rm.mlbop_energy(progressbar=False)
+
+    assert set(result) == _MLBOP_KEYS
+    assert torch.isfinite(torch.tensor(result["E_total"]))
+
+
+def test_gradientskicemaker_mlbop_energy():
+    gd = GradientSKIcemaker(n=16, dx=1.0, progressbars=False)
+    gd.init_random()
+
+    result = gd.mlbop_energy(progressbar=False)
+
+    assert set(result) == _MLBOP_KEYS
+    assert torch.isfinite(torch.tensor(result["E_total"]))

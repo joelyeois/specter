@@ -1,11 +1,22 @@
 """
-Tests for MDSimDump's LAMMPS dump parsing.
+Tests for MDSimDump's LAMMPS dump parsing and ExtXYZDump's extxyz reading.
 """
 
 import pytest
 import torch
+from ase import Atoms
+from ase.io import write
 
-from specter.ice._mdsim import MDSimDump
+from specter.ice._mdsim import ExtXYZDump, MDSimDump
+
+_MLBOP_KEYS = {
+    "E_total",
+    "E_per_atom",
+    "rij_mean",
+    "rij_var",
+    "theta_mean",
+    "theta_var",
+}
 
 _DUMP_WITH_TYPE = """\
 ITEM: TIMESTEP
@@ -105,3 +116,74 @@ def test_compute_sk_3d_dc_is_sqrt_n_atoms(tmp_path):
 
     dc = sk3d[8, 8, 8]  # center voxel post-fftshift for n=16
     torch.testing.assert_close(dc, torch.tensor(float(n_atoms) ** 0.5))
+
+
+def test_mlbop_energy_returns_one_result_per_frame(tmp_path):
+    # Box centre is (10, 10, 10); after centering these atoms sit at small
+    # (some negative) offsets from the origin -- the regime that used to
+    # break ASE's non-periodic binning (see test_ice_energy.py's
+    # translation-invariance regression test) before positions were shifted
+    # into ASE's [0, box_size) convention.
+    n_atoms = 9
+    offsets = [
+        (-1, -1, -1),
+        (-1, -1, 1),
+        (-1, 1, -1),
+        (-1, 1, 1),
+        (1, -1, -1),
+        (1, -1, 1),
+        (1, 1, -1),
+        (1, 1, 1),
+        (0, 0, 0),
+    ]
+    lines = [
+        "ITEM: TIMESTEP",
+        "0",
+        "ITEM: NUMBER OF ATOMS",
+        str(n_atoms),
+        "ITEM: BOX BOUNDS pp pp pp",
+        "0.0 20.0",
+        "0.0 20.0",
+        "0.0 20.0",
+        "ITEM: ATOMS id type x y z",
+    ]
+    for i, (dx_, dy_, dz_) in enumerate(offsets):
+        lines.append(f"{i + 1} 1 {10 + dx_} {10 + dy_} {10 + dz_}")
+    filepath = tmp_path / "cluster.dump"
+    filepath.write_text("\n".join(lines) + "\n")
+
+    mdsim = MDSimDump(str(filepath), n=16, dx=1.0, trim_size=16.0)
+    with pytest.warns(UserWarning, match="pre-steady-state"):
+        results = mdsim.mlbop_energy(frames=0, progressbar=False)
+
+    assert len(results) == 1
+    assert set(results[0]) == _MLBOP_KEYS
+    assert torch.isfinite(torch.tensor(results[0]["E_total"]))
+
+
+def test_extxyzdump_mlbop_energy_uses_real_frame_cell(tmp_path):
+    # ExtXYZDump.mlbop_energy() should use each frame's actual periodic
+    # cell (as parsed by ASE from the extxyz file) directly, rather than
+    # reconstructing an orthorhombic box from n*dx -- unlike MDSimDump,
+    # there's no trimming/box-size mismatch to worry about here.
+    box = 20.0
+    torch.manual_seed(0)
+    positions = torch.rand(8, 3) * box
+    atoms = Atoms(
+        numbers=[8] * 8,
+        positions=positions.numpy(),
+        cell=[box, box, box],
+        pbc=True,
+    )
+    filepath = tmp_path / "traj.extxyz"
+    write(str(filepath), [atoms, atoms], format="extxyz")
+
+    dump = ExtXYZDump(str(filepath), n=8, dx=1.0)
+    results = dump.mlbop_energy(progressbar=False)
+
+    assert len(results) == 2
+    for result in results:
+        assert set(result) == _MLBOP_KEYS
+        assert torch.isfinite(torch.tensor(result["E_total"]))
+    # both frames are identical copies of the same structure
+    assert results[0]["E_total"] == pytest.approx(results[1]["E_total"])

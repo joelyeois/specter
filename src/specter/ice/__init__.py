@@ -1,5 +1,6 @@
 from ._ap import APIcemaker
 from ._bank import IceBank
+from ._energy import MLBOP, mlbop_energy
 from ._gradient import GradientSKIcemaker
 from ._helpers import (
     avogadro,
@@ -25,6 +26,8 @@ __all__ = [
     "MDSimDump",
     "RandomIcemaker",
     "IceBank",
+    "MLBOP",
+    "mlbop_energy",
     "avogadro",
     "density_of_amorphous_ice",
     "molar_mass_of_water",

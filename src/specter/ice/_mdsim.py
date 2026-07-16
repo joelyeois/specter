@@ -16,6 +16,9 @@ from ..arrays import (
 )
 from ..coords import radial_distribution_function
 from ..fft import fft3
+from ..progress import track
+from ._energy import MLBOP
+from ._energy import mlbop_energy as _mlbop_energy
 
 
 class MDSimDump:
@@ -399,6 +402,49 @@ class MDSimDump:
 
         assert gr_sum is not None and r_out is not None
         return r_out, gr_sum / len(coords_list)
+
+    def mlbop_energy(
+        self,
+        frames: int | Sequence[int] | torch.Tensor | None = None,
+        pbc: bool = False,
+        progressbar: bool = True,
+    ) -> list[dict[str, float]]:
+        """
+        Score frames against the ML-BOP coarse-grained water potential.
+
+        See :func:`specter.ice._energy.mlbop_energy` for what the returned
+        fields mean. No periodic boundary conditions are applied by default,
+        consistent with :meth:`compute_rdf` — coordinates are a hard-edge
+        cube trimmed out of a larger MD box, not a self-contained periodic
+        tile, so wrapping them would create artificial neighbor contacts at
+        the trim boundary.
+
+        Parameters
+        ----------
+        frames : int or sequence of int or Tensor or None, optional
+            See :meth:`get_coordinates`.
+        pbc : bool, optional
+            Whether to treat the trimmed cube as periodic with box length
+            ``trim_size``. Default is False.
+        progressbar : bool, optional
+            Whether to show a progress bar over frames. Default is True.
+
+        Returns
+        -------
+        list[dict[str, float]]
+            One ML-BOP result dict per requested frame, in the same order
+            as ``frames``.
+        """
+        coords_list = self.get_coordinates(frames)
+        return [
+            _mlbop_energy(coords, box_size=self.trim_size, pbc=pbc, progressbar=False)
+            for coords in track(
+                coords_list,
+                description="Scoring frames (ML-BOP)",
+                disable=not progressbar,
+                transient=True,
+            )
+        ]
 
     def generate_ice(
         self,
@@ -831,6 +877,51 @@ class ExtXYZDump:
 
         assert gr_sum is not None and r_out is not None
         return r_out, gr_sum / len(coords_list)
+
+    def mlbop_energy(
+        self,
+        frames: int | Sequence[int] | torch.Tensor | None = None,
+        t_min: float | None = None,
+        t_max: float | None = None,
+        progressbar: bool = True,
+    ) -> list[dict[str, float]]:
+        """
+        Score frames against the ML-BOP coarse-grained water potential.
+
+        Unlike :func:`specter.ice._energy.mlbop_energy` (which builds an
+        orthorhombic box from a coordinate tensor), this uses each frame's
+        real periodic cell exactly as parsed from the extxyz file --
+        correct even for triclinic MD cells, and needs no box
+        reconstruction since :class:`ase.Atoms` already carries the right
+        cell and ``pbc``.
+
+        Parameters
+        ----------
+        frames : int or sequence of int or Tensor or None, optional
+            See :meth:`get_coordinates`.
+        t_min : float or None, optional
+            See :meth:`get_coordinates`.
+        t_max : float or None, optional
+            See :meth:`get_coordinates`.
+        progressbar : bool, optional
+            Whether to show a progress bar over frames. Default is True.
+
+        Returns
+        -------
+        list[dict[str, float]]
+            One ML-BOP result dict per requested frame, in the same order.
+        """
+        frame_list = self._resolve_frames(frames, t_min, t_max)
+        model = MLBOP()
+        return [
+            model.compute_energy(self._atoms_list[i], progressbar=False)
+            for i in track(
+                frame_list,
+                description="Scoring frames (ML-BOP)",
+                disable=not progressbar,
+                transient=True,
+            )
+        ]
 
     def generate_ice(
         self,

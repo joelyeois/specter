@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from typing import Optional
 
 import lightning as L
@@ -53,8 +54,9 @@ class GradientSKIcemaker(L.LightningModule):
         Whether to show progress bars. Default is True.
     mdsim_target_path : str, optional
         Path to a precomputed radial-average |F(k)| target ``.pt`` file (see
-        :class:`~specter.ice.APIcemaker`). If None, uses the bundled default
-        target. Default is None.
+        :class:`~specter.ice.APIcemaker`). If None, uses the bundled LDA-80K
+        (low-density amorphous ice, 80K/0atm) target,
+        ``mdsim_f_radial_avg_400x400x400_0.25A_LDA_80K.pt``. Default is None.
     """
 
     def __init__(
@@ -85,6 +87,14 @@ class GradientSKIcemaker(L.LightningModule):
             ndensity_of_amorphous_ice * self.box_x * self.box_y * self.box_z
         )
 
+        if mdsim_target_path is None:
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            root_dir = os.path.dirname(os.path.dirname(os.path.dirname(current_dir)))
+            mdsim_target_path = os.path.join(
+                root_dir,
+                "ice-data",
+                "mdsim_f_radial_avg_400x400x400_0.25A_LDA_80K.pt",
+            )
         mdsim_radial_k, mdsim_f_radial_avg = load_mdsim_f_radial_avg(mdsim_target_path)
         K = ice_kspace_radial_grid(self.n, self.nz, self.dx)
         f_kernel = interpolate_target_kernel(

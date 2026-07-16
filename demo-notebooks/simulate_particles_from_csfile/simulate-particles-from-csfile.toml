@@ -43,6 +43,7 @@ ice_build_batch_size = 1
 # icecube_size = 256              # voxels
 # crowd_min_distance = 100.0      # Å, uncomment to crowd particles; defaults to pdb.max_diameter
 # crowd_max_distance_z = 50.0     # Å
+# potential_scale_min = 0.5       # unitless, uncomment to scale the potential before scattering
 pad_fft = true
 detector_model = "none"          # none | perfect | k3_300kv | k3_200kv
 

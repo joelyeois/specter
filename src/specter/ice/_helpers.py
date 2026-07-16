@@ -5,11 +5,12 @@ from typing import Any, Sequence
 import numpy as np
 import torch
 import torch.nn.functional as F
+from scipy import constants as _sc
 
 from .. import rotations
 from ..arrays import tile_volume_from_blocks_blended
 
-avogadro = 6.02214076e23
+avogadro = _sc.Avogadro
 density_of_amorphous_ice = 0.94  # [g/cm3]
 molar_mass_of_water = 18.01528  # [g/mol]
 ndensity_of_amorphous_ice = (

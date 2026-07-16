@@ -58,8 +58,11 @@ class MDSimDump:
     #   5: xlo xhi
     #   6: ylo yhi
     #   7: zlo zhi
-    #   8: ITEM: ATOMS id type x y z
+    #   8: ITEM: ATOMS id [type] x y z [...]
     #   9+: atom data
+    # The column set after "id" varies by dump (some include a "type" column,
+    # some carry extra per-atom values like "c_1"), so the x/y/z offset is
+    # parsed from this header rather than assumed fixed.
     _HEADER_LINES = 9
 
     def __init__(
@@ -90,11 +93,34 @@ class MDSimDump:
         ]
         self.n_frames: int = len(self._frame_starts)
         self._box_center: torch.Tensor = self._parse_box_center(0)
+        self._coord_start: int = self._parse_coord_column_start(0)
         self.coordinates: list[torch.Tensor] | None = None
 
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    def _parse_coord_column_start(self, frame_idx: int) -> int:
+        """Return the index of the ``x`` column within a per-atom data row.
+
+        Parsed from the ``ITEM: ATOMS ...`` header (e.g. ``id type x y z``
+        or ``id x y z c_1``), assuming ``x y z`` appear contiguously and in
+        order. Assumed constant across all frames of the dump.
+        """
+        fs = self._frame_starts[frame_idx]
+        header = self._lines[fs + 8]
+        names = header.split()[2:]  # drop "ITEM:" "ATOMS"
+        try:
+            x_idx = names.index("x")
+        except ValueError as exc:
+            raise ValueError(
+                f"Could not find an 'x' column in dump ATOMS header: {header!r}"
+            ) from exc
+        if names[x_idx : x_idx + 3] != ["x", "y", "z"]:
+            raise ValueError(
+                f"Expected contiguous 'x y z' columns in dump ATOMS header: {header!r}"
+            )
+        return x_idx
 
     def _parse_box_center(self, frame_idx: int) -> torch.Tensor:
         """Return (cx, cy, cz) from the box-bound lines of one frame.
@@ -134,7 +160,10 @@ class MDSimDump:
         coord_start = fs + self._HEADER_LINES
 
         lines_block = self._lines[coord_start : coord_start + n_atoms]
-        coords_np = np.array([ln.split()[2:5] for ln in lines_block], dtype=np.float32)
+        s = self._coord_start
+        coords_np = np.array(
+            [ln.split()[s : s + 3] for ln in lines_block], dtype=np.float32
+        )
         coords = torch.from_numpy(np.ascontiguousarray(coords_np))
         coords -= self._box_center
 
@@ -246,10 +275,17 @@ class MDSimDump:
         frames: int | Sequence[int] | torch.Tensor | None = None,
     ) -> torch.Tensor:
         """
-        Compute the mean Fourier amplitude |FFT3| averaged over frames.
+        Compute the mean Fourier amplitude sqrt(S(k)) averaged over frames.
 
-        Equivalent to the square root of the structure factor S(k) ensemble-
-        averaged over the requested frames:  mean_f( |FFT3(vox_f)| ).
+        By the definition S(k) = |FFT3(vox_f)|^2 / N_f (N_f = atom count of
+        frame f, which varies slightly frame-to-frame as atoms drift across
+        the trim boundary — see :meth:`get_coordinates`), so each frame's
+        raw |FFT3| is divided by sqrt(N_f) *before* averaging over frames:
+        mean_f( |FFT3(vox_f)| / sqrt(N_f) ). Without this, the result scales
+        with the trimmed atom count instead of being an intensive (per-atom)
+        quantity, which would make it meaningless as a target to rescale by a
+        *different* target atom count downstream (see
+        :func:`specter.ice._kernels.interpolate_target_kernel`).
 
         Parameters
         ----------
@@ -262,7 +298,14 @@ class MDSimDump:
             Shape ``(n, n, n)``, DC component at centre (fftshift applied).
         """
         voxels = self.get_voxels(frames)
-        return torch.mean(torch.abs(fft3(voxels, shift=True)), dim=0)
+        assert self.coordinates is not None
+        n_atoms = torch.tensor(
+            [c.shape[0] for c in self.coordinates], dtype=voxels.dtype
+        )
+        amplitudes = torch.abs(fft3(voxels, shift=True)) / n_atoms.sqrt().view(
+            -1, 1, 1, 1
+        )
+        return torch.mean(amplitudes, dim=0)
 
     def compute_sk_radial(
         self,
@@ -652,7 +695,15 @@ class ExtXYZDump:
         t_max: float | None = None,
     ) -> torch.Tensor:
         """
-        Compute the mean Fourier amplitude |FFT3| averaged over frames.
+        Compute the mean Fourier amplitude sqrt(S(k)) averaged over frames.
+
+        By the definition S(k) = |FFT3(vox_f)|^2 / N_f (N_f = atom count of
+        frame f), each frame's raw |FFT3| is divided by sqrt(N_f) *before*
+        averaging over frames: mean_f( |FFT3(vox_f)| / sqrt(N_f) ). Without
+        this, the result scales with the frame's atom count instead of being
+        an intensive (per-atom) quantity, which would make it meaningless as
+        a target to rescale by a *different* target atom count downstream
+        (see :func:`specter.ice._kernels.interpolate_target_kernel`).
 
         Parameters
         ----------
@@ -669,7 +720,14 @@ class ExtXYZDump:
             Shape ``(n, n, n)``, DC component at centre (fftshift applied).
         """
         voxels = self.get_voxels(frames, t_min=t_min, t_max=t_max)
-        return torch.mean(torch.abs(fft3(voxels, shift=True)), dim=0)
+        assert self.coordinates is not None
+        n_atoms = torch.tensor(
+            [c.shape[0] for c in self.coordinates], dtype=voxels.dtype
+        )
+        amplitudes = torch.abs(fft3(voxels, shift=True)) / n_atoms.sqrt().view(
+            -1, 1, 1, 1
+        )
+        return torch.mean(amplitudes, dim=0)
 
     def compute_sk_radial(
         self,

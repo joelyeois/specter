@@ -13,16 +13,29 @@ identity. Delete the corresponding .pt file and re-run to regenerate.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
+import lightning as L
+import mrcfile
 import pytest
 import torch
+import torch.utils.data
 
+from specter.arrays import ball3d
+from specter.fft import fft3
 from specter.ghostbuster import Reconstructor
+from specter.symmetries import apply_symmetry, get_rotation_matrices
 
 FIXTURE_DIR = Path(__file__).parent / "test_data"
 
 SCATTERING_MODELS = ["multislice", "firstborn", "projection", "ctf", "rytov"]
+SCHEDULERS = [
+    "LambdaLR",
+    "OneCycleLR",
+    "CosineAnnealingWarmRestarts",
+    "MultiplicativeLR",
+]
 
 
 # ---------------------------------------------------------------------------
@@ -450,3 +463,410 @@ def test_small_scale_reduces_gradient_contribution(gb_kwargs: dict) -> None:
     grad_uniform = volume_grad_norm(torch.tensor([1.0, 1.0]))
     grad_downweighted = volume_grad_norm(torch.tensor([1.0, 0.01]))
     assert grad_downweighted < grad_uniform
+
+
+# ---------------------------------------------------------------------------
+# Optimizer / scheduler wiring
+# ---------------------------------------------------------------------------
+
+
+def _fit_one_epoch(
+    model: Reconstructor, images: torch.Tensor, max_epochs: int = 1
+) -> None:
+    idx = torch.arange(len(images))
+    loader = torch.utils.data.DataLoader(
+        torch.utils.data.TensorDataset(images, idx), batch_size=len(images)
+    )
+    trainer = L.Trainer(
+        accelerator="cpu",
+        max_epochs=max_epochs,
+        precision="32",
+        logger=False,
+        enable_checkpointing=False,
+        enable_progress_bar=False,
+        enable_model_summary=False,
+    )
+    trainer.fit(model, loader)
+
+
+@pytest.mark.parametrize("scheduler", SCHEDULERS)
+def test_configure_optimizers_all_schedulers(
+    small_volume: torch.Tensor,
+    full_ctf_params: dict[str, torch.Tensor],
+    scheduler: str,
+) -> None:
+    """Each supported scheduler string trains for one epoch without error."""
+    n_particles = 2
+    ctf = {k: v.repeat(n_particles) for k, v in full_ctf_params.items()}
+    images = torch.randn(n_particles, *small_volume.shape[-2:])
+
+    model = Reconstructor(
+        V=small_volume.clone(),
+        voxel_size=2.0,
+        quaternions=torch.tensor([[1.0, 0.0, 0.0, 0.0]]).repeat(n_particles, 1),
+        translations=torch.zeros(n_particles, 2),
+        ctf_params=ctf,
+        energy=300.0,
+        dose_per_angstrom=2.0,
+        scattering_model="projection",
+        lr=0.1,
+        scheduler=scheduler,
+    )
+    V_init = model.V.data.clone()
+
+    _fit_one_epoch(model, images)
+
+    assert not torch.equal(model.V.data, V_init)
+    assert len(model.log_lrs) == 1
+
+
+def test_configure_optimizers_unknown_scheduler_raises(
+    small_volume: torch.Tensor, full_ctf_params: dict[str, torch.Tensor]
+) -> None:
+    """An unrecognised scheduler string raises ValueError from configure_optimizers."""
+    model = Reconstructor(
+        V=small_volume,
+        voxel_size=2.0,
+        quaternions=torch.tensor([[1.0, 0.0, 0.0, 0.0]]),
+        translations=torch.zeros(1, 2),
+        ctf_params=full_ctf_params,
+        energy=300.0,
+        dose_per_angstrom=2.0,
+        scattering_model="projection",
+        lr=0.1,
+        scheduler="BogusScheduler",
+    )
+    with pytest.raises(ValueError, match="Unknown scheduler"):
+        model.configure_optimizers()
+
+
+# ---------------------------------------------------------------------------
+# Fourier k-mask
+# ---------------------------------------------------------------------------
+
+
+def test_kmask_zeros_high_frequencies(
+    small_volume: torch.Tensor, full_ctf_params: dict[str, torch.Tensor]
+) -> None:
+    """on_train_batch_end zeros Fourier components outside the k-mask, in-place."""
+    torch.manual_seed(0)
+    n = small_volume.shape[-1]
+    model = Reconstructor(
+        V=torch.randn(n, n, n),
+        voxel_size=2.0,
+        quaternions=torch.tensor([[1.0, 0.0, 0.0, 0.0]]),
+        translations=torch.zeros(1, 2),
+        ctf_params=full_ctf_params,
+        energy=300.0,
+        dose_per_angstrom=2.0,
+        scattering_model="projection",
+        lr=0.1,
+        kmask=ball3d(n, n // 2),
+    )
+    model.on_train_batch_end(None, None, 0)
+    spectrum = fft3(model.V.data, shift=True)
+    outside_mask = spectrum[model.kmask == 0]
+    assert torch.allclose(outside_mask, torch.zeros_like(outside_mask), atol=1e-5)
+
+
+# ---------------------------------------------------------------------------
+# run_dir file output and symmetry enforcement
+# ---------------------------------------------------------------------------
+
+
+def test_run_dir_writes_expected_artifacts(
+    tmp_path: Path,
+    small_volume: torch.Tensor,
+    full_ctf_params: dict[str, torch.Tensor],
+) -> None:
+    """A configured run_dir receives params/metrics/volumes/previews across epochs."""
+    n_particles = 2
+    n = small_volume.shape[-1]
+    ctf = {k: v.repeat(n_particles) for k, v in full_ctf_params.items()}
+    images = torch.randn(n_particles, n, n)
+    fsc_ref = torch.rand(n, n, n)
+    cryosparc_ref = torch.rand(n, n, n)
+
+    model = Reconstructor(
+        V=small_volume.clone(),
+        voxel_size=2.0,
+        quaternions=torch.tensor([[1.0, 0.0, 0.0, 0.0]]).repeat(n_particles, 1),
+        translations=torch.zeros(n_particles, 2),
+        ctf_params=ctf,
+        energy=300.0,
+        dose_per_angstrom=2.0,
+        scattering_model="projection",
+        lr=0.1,
+        symmetry="C2",
+        kmask=ball3d(n, n),
+        fsc_ref=fsc_ref,
+        cryosparc_ref=cryosparc_ref,
+        run_dir=tmp_path,
+        halfset_label="A",
+    )
+    _fit_one_epoch(model, images, max_epochs=2)
+
+    assert (tmp_path / "params_A.json").exists()
+    assert (tmp_path / "metrics_A.json").exists()
+    assert (tmp_path / "vol_A.mrc").exists()
+    assert (tmp_path / "kmask.pt").exists()
+    assert (tmp_path / "fsc_A.png").exists()
+    assert (tmp_path / "epochs" / "001_A.mrc").exists()
+    assert (tmp_path / "epochs" / "002_A.mrc").exists()
+    assert (tmp_path / "epochs" / "vol_001_A.png").exists()
+    assert (tmp_path / "epochs" / "fsc_001_A.png").exists()
+
+    metrics = json.loads((tmp_path / "metrics_A.json").read_text())
+    assert metrics["total_batches"] == 2  # 1 batch/epoch x 2 epochs
+    assert {"epoch_01", "epoch_02"} <= set(metrics["epochs"])
+
+
+def test_symmetrize_applies_configured_symmetry(
+    small_volume: torch.Tensor, full_ctf_params: dict[str, torch.Tensor]
+) -> None:
+    """symmetrize() calls apply_symmetry with the constructor's symmetry settings."""
+    torch.manual_seed(0)
+    n = small_volume.shape[-1]
+    model = Reconstructor(
+        V=torch.randn(n, n, n),
+        voxel_size=2.0,
+        quaternions=torch.tensor([[1.0, 0.0, 0.0, 0.0]]),
+        translations=torch.zeros(1, 2),
+        ctf_params=full_ctf_params,
+        energy=300.0,
+        dose_per_angstrom=2.0,
+        scattering_model="projection",
+        symmetry="C2",
+        symmetry_mode="real",
+        symmetry_batchsize=4,
+    )
+    v_before = model.V.data.clone()
+    model.symmetrize()
+    expected = apply_symmetry(
+        v_before, get_rotation_matrices("C2"), batchsize=4, method="real"
+    )
+    assert torch.allclose(model.V.data, expected)
+
+
+def test_on_train_epoch_end_applies_symmetry(
+    small_volume: torch.Tensor, full_ctf_params: dict[str, torch.Tensor]
+) -> None:
+    """on_train_epoch_end applies apply_symmetry to V (run_dir=None, so that's
+    the only effect it has) using the constructor's symmetry settings."""
+    torch.manual_seed(0)
+    n = small_volume.shape[-1]
+    model = Reconstructor(
+        V=torch.randn(n, n, n),
+        voxel_size=2.0,
+        quaternions=torch.tensor([[1.0, 0.0, 0.0, 0.0]]),
+        translations=torch.zeros(1, 2),
+        ctf_params=full_ctf_params,
+        energy=300.0,
+        dose_per_angstrom=2.0,
+        scattering_model="projection",
+        symmetry="C2",
+        symmetry_mode="real",
+        symmetry_batchsize=4,
+    )
+    v_before = model.V.data.clone()
+    model.on_train_epoch_end()
+    expected = apply_symmetry(
+        v_before, get_rotation_matrices("C2"), batchsize=4, method="real"
+    )
+    assert torch.allclose(model.V.data, expected)
+
+
+# ---------------------------------------------------------------------------
+# FSC / CryoSPARC reference loading
+# ---------------------------------------------------------------------------
+
+
+def test_fsc_ref_and_mask_accept_tensor(
+    small_volume: torch.Tensor, full_ctf_params: dict[str, torch.Tensor]
+) -> None:
+    """fsc_ref and fsc_mask tensors are stored verbatim."""
+    n = small_volume.shape[-1]
+    ref = torch.rand(n, n, n)
+    mask = torch.ones(n, n, n)
+    model = Reconstructor(
+        V=small_volume,
+        voxel_size=2.0,
+        quaternions=torch.tensor([[1.0, 0.0, 0.0, 0.0]]),
+        translations=torch.zeros(1, 2),
+        ctf_params=full_ctf_params,
+        energy=300.0,
+        dose_per_angstrom=2.0,
+        scattering_model="projection",
+        fsc_ref=ref,
+        fsc_mask=mask,
+    )
+    assert torch.equal(model.fsc_ref, ref)
+    assert torch.equal(model.fsc_mask, mask)
+
+
+def test_fsc_ref_and_cryosparc_ref_load_from_file(
+    tmp_path: Path,
+    small_volume: torch.Tensor,
+    full_ctf_params: dict[str, torch.Tensor],
+) -> None:
+    """fsc_ref and cryosparc_ref accept a path to an .mrc file and load it."""
+    n = small_volume.shape[-1]
+    ref = torch.rand(n, n, n).numpy().astype("float32")
+    cs_ref = torch.rand(n, n, n).numpy().astype("float32")
+    ref_path = tmp_path / "ref.mrc"
+    cs_path = tmp_path / "cs_ref.mrc"
+    with mrcfile.new(str(ref_path), overwrite=True) as mrc:
+        mrc.set_data(ref)
+    with mrcfile.new(str(cs_path), overwrite=True) as mrc:
+        mrc.set_data(cs_ref)
+
+    model = Reconstructor(
+        V=small_volume,
+        voxel_size=2.0,
+        quaternions=torch.tensor([[1.0, 0.0, 0.0, 0.0]]),
+        translations=torch.zeros(1, 2),
+        ctf_params=full_ctf_params,
+        energy=300.0,
+        dose_per_angstrom=2.0,
+        scattering_model="projection",
+        fsc_ref=ref_path,
+        cryosparc_ref=cs_path,
+    )
+    assert torch.allclose(model.fsc_ref, torch.as_tensor(ref))
+    assert torch.allclose(model.cryosparc_ref, torch.as_tensor(cs_ref))
+
+
+# ---------------------------------------------------------------------------
+# 2D-projected FSC mask weighting
+# ---------------------------------------------------------------------------
+
+
+def test_use_2d_mask_weights_loss(
+    small_volume: torch.Tensor, full_ctf_params: dict[str, torch.Tensor]
+) -> None:
+    """use_2d_mask=True projects fsc_mask and produces a finite weighted loss."""
+    n = small_volume.shape[-1]
+    mask = torch.zeros(n, n, n)
+    mask[4:12, 4:12, 4:12] = 1.0
+    model = Reconstructor(
+        V=small_volume,
+        voxel_size=2.0,
+        quaternions=torch.tensor([[1.0, 0.0, 0.0, 0.0]]),
+        translations=torch.zeros(1, 2),
+        ctf_params=full_ctf_params,
+        energy=300.0,
+        dose_per_angstrom=2.0,
+        scattering_model="projection",
+        fsc_mask=mask,
+        use_2d_mask=True,
+    )
+    out = model.forward(torch.tensor([0]))
+    images = torch.randn_like(out)
+    loss = model._compute_loss(out, images, torch.tensor([0]))
+    assert torch.isfinite(loss)
+
+
+def test_use_2d_mask_requires_tensor_mask(
+    small_volume: torch.Tensor, full_ctf_params: dict[str, torch.Tensor]
+) -> None:
+    """use_2d_mask=True without a 3D tensor fsc_mask raises ValueError."""
+    model = Reconstructor(
+        V=small_volume,
+        voxel_size=2.0,
+        quaternions=torch.tensor([[1.0, 0.0, 0.0, 0.0]]),
+        translations=torch.zeros(1, 2),
+        ctf_params=full_ctf_params,
+        energy=300.0,
+        dose_per_angstrom=2.0,
+        scattering_model="projection",
+        use_2d_mask=True,
+    )
+    out = model.forward(torch.tensor([0]))
+    images = torch.randn_like(out)
+    with pytest.raises(ValueError, match="requires fsc_mask"):
+        model._compute_loss(out, images, torch.tensor([0]))
+
+
+# ---------------------------------------------------------------------------
+# Alternate loss models (NCC / learned noise / NPS-weighted)
+# ---------------------------------------------------------------------------
+
+
+def test_compute_loss_ncc_branch_differs_from_mse(
+    small_volume: torch.Tensor, full_ctf_params: dict[str, torch.Tensor]
+) -> None:
+    """use_ncc=True routes _compute_loss through the NCC branch."""
+    torch.manual_seed(0)
+    n = small_volume.shape[-1]
+    out = torch.randn(2, n, n)
+    images = torch.randn(2, n, n)
+    idx = torch.arange(2)
+    ctf = {k: v.repeat(2) for k, v in full_ctf_params.items()}
+    base = dict(
+        V=small_volume,
+        voxel_size=2.0,
+        quaternions=torch.tensor([[1.0, 0.0, 0.0, 0.0]]).repeat(2, 1),
+        translations=torch.zeros(2, 2),
+        ctf_params=ctf,
+        energy=300.0,
+        dose_per_angstrom=2.0,
+        scattering_model="projection",
+    )
+    loss_mse = Reconstructor(**base)._compute_loss(out, images, idx)
+    loss_ncc = Reconstructor(**base, use_ncc=True)._compute_loss(out, images, idx)
+    assert torch.isfinite(loss_ncc)
+    assert not torch.allclose(loss_mse, loss_ncc)
+
+
+def test_compute_loss_learn_noise_model_updates_sigma2(
+    small_volume: torch.Tensor, full_ctf_params: dict[str, torch.Tensor]
+) -> None:
+    """learn_noise_model=True updates sigma2_k via an EMA over residual power."""
+    torch.manual_seed(0)
+    n = small_volume.shape[-1]
+    out = torch.randn(2, n, n)
+    images = torch.randn(2, n, n)
+    idx = torch.arange(2)
+    ctf = {k: v.repeat(2) for k, v in full_ctf_params.items()}
+    model = Reconstructor(
+        V=small_volume,
+        voxel_size=2.0,
+        quaternions=torch.tensor([[1.0, 0.0, 0.0, 0.0]]).repeat(2, 1),
+        translations=torch.zeros(2, 2),
+        ctf_params=ctf,
+        energy=300.0,
+        dose_per_angstrom=2.0,
+        scattering_model="projection",
+        learn_noise_model=True,
+    )
+    sigma2_before = model.sigma2_k.clone()
+    loss = model._compute_loss(out, images, idx)
+    assert torch.isfinite(loss)
+    assert not torch.allclose(model.sigma2_k, sigma2_before)
+
+
+def test_compute_loss_nps_weight_branch_differs_from_mse(
+    small_volume: torch.Tensor, full_ctf_params: dict[str, torch.Tensor]
+) -> None:
+    """A non-trivial nps_weight routes _compute_loss through the NPS-weighted branch."""
+    torch.manual_seed(0)
+    n = small_volume.shape[-1]
+    out = torch.randn(2, n, n)
+    images = torch.randn(2, n, n)
+    idx = torch.arange(2)
+    ctf = {k: v.repeat(2) for k, v in full_ctf_params.items()}
+    nps = torch.rand(n, n // 2 + 1) + 0.5
+    base = dict(
+        V=small_volume,
+        voxel_size=2.0,
+        quaternions=torch.tensor([[1.0, 0.0, 0.0, 0.0]]).repeat(2, 1),
+        translations=torch.zeros(2, 2),
+        ctf_params=ctf,
+        energy=300.0,
+        dose_per_angstrom=2.0,
+        scattering_model="projection",
+    )
+    loss_mse = Reconstructor(**base)._compute_loss(out, images, idx)
+    loss_nps = Reconstructor(**base, nps_weight=nps)._compute_loss(out, images, idx)
+    assert torch.isfinite(loss_nps)
+    assert not torch.allclose(loss_mse, loss_nps)

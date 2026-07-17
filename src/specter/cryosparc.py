@@ -112,11 +112,12 @@ def _load_csfile_parameters(
     # extract anisotropic magnification
     # cryosparc defines the M matrix in Fourier space, and stores it after
     # subtracting away the identity. Ghostbuster uses the real-space M instead.
-    anisomag = torch.as_tensor(dataset["ctf/anisomag"]).reshape(-1, 2, 2)
-    if torch.allclose(torch.tensor(0.0), torch.sum(anisomag)):
+    anisomag_raw = torch.as_tensor(dataset["ctf/anisomag"]).reshape(-1, 2, 2)
+    anisomag: torch.Tensor | None
+    if torch.allclose(torch.tensor(0.0), torch.sum(anisomag_raw)):
         anisomag = None
     else:
-        anisomag = anisomag + torch.eye(2).unsqueeze(0)
+        anisomag = anisomag_raw + torch.eye(2).unsqueeze(0)
         # Compute the real-space equivalent matrix
         anisomag = torch.inverse(anisomag.mT)
 
@@ -382,10 +383,14 @@ def create_particle_starfile(
 
     # create associated starfile
     n = len(particles)
+    translations = (
+        torch.zeros(n, 2) if translations is None else torch.as_tensor(translations)
+    )
 
-    # support both dict and 2-D tensor for ctf_params
-    if isinstance(ctf_params, dict):
+    # support both dict and 2-D tensor for ctf_params (None means "all zeros")
+    if ctf_params is None or isinstance(ctf_params, dict):
         zeros = torch.zeros(n)
+        ctf_params = ctf_params or {}
         cs_A = ctf_params.get("cs", zeros)
         dfu = ctf_params.get("dfu", zeros)
         dfv = ctf_params.get("dfv", dfu)

@@ -242,11 +242,10 @@ def atom_symbol(z: int | Sequence[int] | torch.Tensor) -> np.ndarray:
         Element symbol(s) as strings.
     """
     # Convert torch tensor to numpy if needed
-    if isinstance(z, torch.Tensor):
-        z = z.cpu().numpy()
+    z_np = z.cpu().numpy() if isinstance(z, torch.Tensor) else z
     # Convert to numpy array for indexing
-    z = np.asarray(z)
-    return ELEMENT_SYMBOLS[z]
+    z_np = np.asarray(z_np)
+    return ELEMENT_SYMBOLS[z_np]
 
 
 def atom_number(symbols: str | Sequence[str] | np.ndarray) -> torch.Tensor:

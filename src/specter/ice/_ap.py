@@ -300,8 +300,8 @@ class APIcemaker(L.LightningModule):
         correction_factor = (min_distance / min_distance_actual) ** 3
         n_ice_molecules = int(ndensity_of_amorphous_ice * v / correction_factor)
 
-        self.frob_norm = []
-        self.n_extra_atoms = []
+        frob_norm_list: list[torch.Tensor] = []
+        n_extra_atoms_list: list[int] = []
 
         # Compute halfkernel for the given dx
         if dx != self.dx:
@@ -350,7 +350,7 @@ class APIcemaker(L.LightningModule):
             if add_extra_molecules:
                 if peaks.shape[1] < n_ice_molecules:
                     n_extra = n_ice_molecules - peaks.shape[1]
-                    self.n_extra_atoms.append(n_extra)
+                    n_extra_atoms_list.append(n_extra)
 
                     zero_idx = (self.ice_vol == 0).nonzero(as_tuple=False)
                     perm = torch.randperm(zero_idx.shape[0], device=self.device)
@@ -358,14 +358,14 @@ class APIcemaker(L.LightningModule):
                     self.ice_vol[chosen[:, 0], chosen[:, 1], chosen[:, 2]] = 1
 
             mse = F.mse_loss(self.current_icedeltas.cpu(), self.ice_vol.cpu())
-            self.frob_norm.append(mse)
+            frob_norm_list.append(mse)
             self.current_icedeltas = self.ice_vol
-            if i > 1 and torch.isclose(self.frob_norm[-1], self.frob_norm[-2]):
+            if i > 1 and torch.isclose(frob_norm_list[-1], frob_norm_list[-2]):
                 break
         self.n_peaks = peaks.shape[1]
         self.ice_coordinates = peaks.cpu()
-        self.frob_norm = torch.tensor(self.frob_norm)
-        self.n_extra_atoms = torch.tensor(self.n_extra_atoms)
+        self.frob_norm = torch.stack(frob_norm_list)
+        self.n_extra_atoms = torch.tensor(n_extra_atoms_list)
 
     def create_ice_kernel(self, dx: float | None = None) -> torch.Tensor:
         """

@@ -14,10 +14,11 @@ class ProgressManager:
     Manages progress bar positions and handles notebook-specific stacking issues.
     """
 
-    _instance = None
+    _instance: "ProgressManager | None" = None
     _lock = threading.Lock()
+    _occupied_positions: set[int]
 
-    def __new__(cls):
+    def __new__(cls) -> "ProgressManager":
         if cls._instance is None:
             with cls._lock:
                 if cls._instance is None:

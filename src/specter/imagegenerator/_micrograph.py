@@ -144,7 +144,7 @@ class MicrographGenerator(BaseImager):
         water_air_interface: bool = True,
         scattering_model: str = "multislice",
         aberration_model: str = "holography",
-        noise_model: str = "poisson",
+        noise_model: str | None = "poisson",
         klim: float | None = None,
         alpha: float = 0.0,
         pad_fft: bool = False,
@@ -313,8 +313,9 @@ class MicrographGenerator(BaseImager):
         """
         if not hasattr(self, "vol"):
             self._generate_vol()
+        batch_size = len(idx) if isinstance(idx, torch.Tensor) else 1
         with status("Transferring volume to GPU", disable=not self.progressbars):
-            V = self.vol.to(self.device).expand(len(idx), -1, -1, -1)
+            V = self.vol.to(self.device).expand(batch_size, -1, -1, -1)
         V = pad_volume(V, self.nxy, self.nz, None, self.pad_fft, xy_pad_mode="reflect")
 
         if (
@@ -323,7 +324,7 @@ class MicrographGenerator(BaseImager):
             and hasattr(self.specimen_gen, "clean_V")
         ):
             V_clean = self.specimen_gen.clean_V.to(self.device).expand(
-                len(idx), -1, -1, -1
+                batch_size, -1, -1, -1
             )
             V_clean = pad_volume(
                 V_clean, self.nxy, self.nz, None, self.pad_fft, xy_pad_mode="reflect"

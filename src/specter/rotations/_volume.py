@@ -38,7 +38,7 @@ def _relion_rotation_grid(
     null_rot[:, 0, 0] = 1.0
     null_rot[:, 1, 1] = 1.0
     null_rot[:, 2, 2] = 1.0
-    grid = F.affine_grid(null_rot, (B, 1, nz, ny, nx), align_corners=align_corners)
+    grid = F.affine_grid(null_rot, [B, 1, nz, ny, nx], align_corners=align_corners)
 
     # scale coordinates by (nx-1)/2, (ny-1)/2, (nz-1)/2 to make them isotropic
     scale = torch.tensor(
@@ -103,7 +103,7 @@ def rotate_volume(
     if origin == "relion":
         grid = _relion_rotation_grid(theta, nz, ny, nx, align_corners)
     elif origin == "center":
-        grid = F.affine_grid(theta, (B, 1, nz, ny, nx), align_corners=align_corners)
+        grid = F.affine_grid(theta, [B, 1, nz, ny, nx], align_corners=align_corners)
 
     # transform the volume
     V = V.unsqueeze(0).unsqueeze(1)  # (1 x 1 x Z x Y x X)

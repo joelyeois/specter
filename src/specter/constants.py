@@ -56,7 +56,7 @@ def energy_to_wavelength(energy: float) -> float:
     return hc() / (ev * (ev + 2.0 * rest_mass_energy())) ** 0.5
 
 
-def interaction_parameter(energy: float) -> torch.Tensor:
+def interaction_parameter(energy: float) -> float:
     """
     Calculate the electron-specimen interaction parameter.
 
@@ -70,7 +70,7 @@ def interaction_parameter(energy: float) -> torch.Tensor:
 
     Returns
     -------
-    sigma : torch.Tensor
+    sigma : float
         Interaction parameter in units of 1/(Å·V).
 
     References

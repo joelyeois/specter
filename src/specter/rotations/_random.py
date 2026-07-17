@@ -133,17 +133,17 @@ def rotations_angular_difference(
     https://math.stackexchange.com/a/4001635
     """
     if rotation_representation == "rotvec":
-        r1 = Rotation.from_rotvec(r1)
-        r2 = Rotation.from_rotvec(r2)
+        rot1 = Rotation.from_rotvec(r1)
+        rot2 = Rotation.from_rotvec(r2)
     elif rotation_representation == "quaternion":
-        r1 = Rotation.from_quat(r1)
-        r2 = Rotation.from_quat(r2)
+        rot1 = Rotation.from_quat(r1)
+        rot2 = Rotation.from_quat(r2)
     else:
         raise ValueError(
             f"Unknown rotation_representation '{rotation_representation}'. Must be 'quaternion' or 'rotvec'."
         )
 
-    re_m = r1.inv().as_matrix() @ r2.as_matrix()
+    re_m = rot1.inv().as_matrix() @ rot2.as_matrix()
     trace = torch.diagonal(re_m, dim1=-2, dim2=-1).sum(-1)
     angles_rad = torch.arccos(((trace - 1) / 2).clamp(-1.0, 1.0))
     return angles_rad / torch.pi * 180

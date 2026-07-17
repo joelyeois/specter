@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 import lightning as L
 import torch
@@ -171,7 +171,7 @@ class BaseImager(L.LightningModule):
         nz: int,
         pad_nxy: int | None = None,
         aberration_model: str = "holography",
-        noise_model: str = "poisson",
+        noise_model: str | None = "poisson",
         alpha: float = 0.0,
         detector_model: str | None = None,
         anisomag: torch.Tensor | None = None,
@@ -274,14 +274,16 @@ class BaseImager(L.LightningModule):
 
     def _init_detector_mtf(self) -> None:
         """Register the detector MTF buffer based on the model name."""
+        # return1d defaults to False, so these always return a single Tensor here.
         if self.detector_model == "k3_300kv":
-            self.register_buffer("detector_mtf", k3_300kv(self.nxy, self.pixel_size))
+            mtf = cast(torch.Tensor, k3_300kv(self.nxy, self.pixel_size))
+            self.register_buffer("detector_mtf", mtf)
         elif self.detector_model == "k3_200kv":
-            self.register_buffer("detector_mtf", k3_200kv(self.nxy, self.pixel_size))
+            mtf = cast(torch.Tensor, k3_200kv(self.nxy, self.pixel_size))
+            self.register_buffer("detector_mtf", mtf)
         elif self.detector_model == "perfect":
-            self.register_buffer(
-                "detector_mtf", perfect_detector(self.nxy, self.pixel_size)
-            )
+            mtf = cast(torch.Tensor, perfect_detector(self.nxy, self.pixel_size))
+            self.register_buffer("detector_mtf", mtf)
         else:
             self.detector_mtf = None
 

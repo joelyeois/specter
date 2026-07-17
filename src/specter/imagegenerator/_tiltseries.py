@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from typing import Any, Sequence
 
 import torch
@@ -116,20 +117,20 @@ class TiltSeriesGenerator(MicrographGenerator):
         desired_nxy: int, nz: int, max_tilt_angle_deg: float
     ) -> int:
         """Minimum XY size so the tilted projection still covers ``desired_nxy`` pixels."""
-        theta_rad = torch.deg2rad(max_tilt_angle_deg)
-        cos_t = torch.cos(theta_rad)
-        sin_t = torch.sin(theta_rad)
-        return int(torch.ceil((desired_nxy + nz * sin_t) / cos_t))
+        theta_rad = math.radians(max_tilt_angle_deg)
+        cos_t = math.cos(theta_rad)
+        sin_t = math.sin(theta_rad)
+        return math.ceil((desired_nxy + nz * sin_t) / cos_t)
 
     @staticmethod
     def _estimate_max_allowed_nxy(
         available_nxy: int, nz: int, max_tilt_angle_deg: float
     ) -> int:
         """Maximum output XY achievable given the available volume at this tilt."""
-        theta_rad = torch.deg2rad(max_tilt_angle_deg)
-        cos_t = torch.cos(theta_rad)
-        sin_t = torch.sin(theta_rad)
-        return int(torch.ceil(available_nxy * cos_t - nz * sin_t))
+        theta_rad = math.radians(max_tilt_angle_deg)
+        cos_t = math.cos(theta_rad)
+        sin_t = math.sin(theta_rad)
+        return math.ceil(available_nxy * cos_t - nz * sin_t)
 
     @staticmethod
     def _estimate_max_allowed_tilt_deg(
@@ -153,7 +154,7 @@ class TiltSeriesGenerator(MicrographGenerator):
             rotvecs = Rotation.from_quat(torch.as_tensor(quaternions)).as_rotvec()
             max_angle_rad = torch.linalg.norm(rotvecs, dim=-1).max()
             return max_angle_rad * (180.0 / torch.pi)
-        return torch.tensor([0.0])
+        return 0.0
 
     @staticmethod
     def _pad_vol_xy_for_tilt(
@@ -259,7 +260,7 @@ class TiltSeriesGenerator(MicrographGenerator):
         anisomag: torch.Tensor | None = None,
         scattering_model: str = "multislice",
         aberration_model: str = "holography",
-        noise_model: str = "poisson",
+        noise_model: str | None = "poisson",
         klim: float | None = None,
         alpha: float = 0.0,
         pad_fft: bool = False,
@@ -525,7 +526,7 @@ class TiltSeriesGenerator(MicrographGenerator):
         tilt_series = []
         exitwaves = []
         clean_images = []
-        B = len(idx)
+        B = len(idx) if isinstance(idx, torch.Tensor) else 1
         n_frames = len(self.quaternions)
 
         for i in track(

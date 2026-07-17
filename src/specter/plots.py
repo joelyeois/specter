@@ -244,7 +244,7 @@ def plot_rdf(
     ax.set_ylabel("g(r)")
     ax.set_title("Radial Distribution Function")
     if r_max is not None:
-        ax.set_xlim([0, r_max])
+        ax.set_xlim((0, r_max))
     return r, g_r
 
 

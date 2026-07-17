@@ -1206,7 +1206,7 @@ def apply_symmetry(
         return vols.mean(dim=0)
 
     # Batched summation
-    vols_sum = 0
+    vols_sum = torch.zeros_like(vol)
     for i in range(0, n_sym, batchsize):
         batch_ops = sym_ops[i : i + batchsize]
         vols_sum += rotate_fn(vol, batch_ops).sum(dim=0)

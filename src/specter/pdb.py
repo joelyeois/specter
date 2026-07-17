@@ -202,7 +202,7 @@ class PDB:
             print("Assemblies available: " + ", ".join(assemblies))
         except Exception as e:
             print(f"Error fetching assemblies for {pdb_id}: {e}")
-            return []
+            return
 
     @staticmethod
     def get_pdb_structure(filepath: str) -> Structure:
@@ -225,6 +225,7 @@ class PDB:
             If the file format is not 'pdb' or 'cif'.
         """
         ext = filepath[-3:]
+        parser: PDBParser | MMCIFParser
         if ext == "pdb":
             parser = PDBParser()
         elif ext == "cif":
@@ -265,18 +266,18 @@ class PDB:
             structure = PDB.get_pdb_structure(structure)
 
         # Extract atomic data
-        coords = []
-        elements = []
+        coords_list = []
+        element_symbols = []
         for atom in track(
             structure.get_atoms(), description="Extracting atom coordinates and element"
         ):
             element_symbol = atom.element.strip().upper()
-            elements.append(element_symbol)
+            element_symbols.append(element_symbol)
 
             coord = atom.get_coord()
-            coords.append(coord)
-        coords = torch.as_tensor(np.array(coords))
-        elements = atom_number(elements)
+            coords_list.append(coord)
+        coords = torch.as_tensor(np.array(coords_list))
+        elements = atom_number(element_symbols)
 
         return elements, coords
 

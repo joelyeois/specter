@@ -157,6 +157,9 @@ class VolumeRotator(L.LightningModule):
         # Rotation center
         # -------------------------------
         # Calculate center based on dimensions and conventions
+        cz: float
+        cy: float
+        cx: float
         if origin == "relion":
             cz, cy, cx = nz // 2, ny // 2, nx // 2
         else:
@@ -201,7 +204,7 @@ class VolumeRotator(L.LightningModule):
         """
         eye = torch.eye(3, 4).unsqueeze(0)  # (1, 3, 4)
         base_grid = F.affine_grid(
-            eye, (1, 1, self.nz, self.ny, self.nx), align_corners=self.align_corners
+            eye, [1, 1, self.nz, self.ny, self.nx], align_corners=self.align_corners
         )
         self.register_buffer("base_grid", base_grid)
 

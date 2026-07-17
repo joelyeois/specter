@@ -199,7 +199,7 @@ def select_best_decomposition(q: np.ndarray) -> Tuple[np.ndarray, str, float]:
             best_name = name
             best_params = params
 
-    if best_name is None or np.isinf(best_merit):
+    if best_name is None or best_params is None or np.isinf(best_merit):
         raise ValueError(
             f"Cannot decompose quaternion {q}. "
             "This is a pure 180° rotation around a coordinate axis, "

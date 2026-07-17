@@ -270,7 +270,7 @@ class ImageGeneratorFromCoordinates(ParticleGeneratorBase):
         icemaker: IceBank | None = None,
         scattering_model: str = "multislice",
         aberration_model: str = "holography",
-        noise_model: str = "poisson",
+        noise_model: str | None = "poisson",
         klim: float | None = None,
         ews_curvature_sign: str = "negative",
         alpha: float = 0.0,
@@ -444,7 +444,9 @@ class ImageGeneratorFromCoordinates(ParticleGeneratorBase):
                 self.mean_squared_displacement_per_dose * self.dose_per_angstrom.mean()
             )
             self.sigma_angstrom = (msd / 3) ** 0.5
-            self.coordinates += torch.randn_like(self.coordinates) * self.sigma_angstrom
+            self.coordinates.add_(
+                torch.randn_like(self.coordinates) * self.sigma_angstrom
+            )
 
         coordinates = self.rotate(self.quaternions[idx], self.translations[idx])
 
@@ -588,7 +590,7 @@ class ImageGenerator(ParticleGeneratorBase):
         icemaker: IceBank | None = None,
         scattering_model: str = "multislice",
         aberration_model: str = "holography",
-        noise_model: str = "poisson",
+        noise_model: str | None = "poisson",
         klim: float | None = None,
         ews_curvature_sign: str = "negative",
         alpha: float = 0.0,

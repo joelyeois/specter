@@ -126,7 +126,11 @@ class Scattering(L.LightningModule):
 
         # Fresnel transfer function for first Born
         if scattering_model in ("firstborn", "rytov", "kinematic"):
-            F = []
+            if nz is None:
+                raise ValueError(
+                    f"nz is required for scattering_model={scattering_model!r}."
+                )
+            F_slices = []
             for i in track(
                 range(nz),
                 description="Create first Born propagators",
@@ -139,8 +143,8 @@ class Scattering(L.LightningModule):
                 f = torch.exp(
                     1j * torch.pi * self.wavelength * pixel_size * (nz - i) * k**2
                 )
-                F.append(f)
-            F = torch.stack(F)
+                F_slices.append(f)
+            F = torch.stack(F_slices)
             # self.register_buffer("F", F)
             self.register_buffer("F_real", F.real)
             self.register_buffer("F_imag", F.imag)
@@ -182,7 +186,7 @@ class Scattering(L.LightningModule):
         F = self.F_real + 1j * self.F_imag
         if self.ews_curvature_sign == "negative":
             V = torch.flip(V, dims=(1,))
-        exitwave = 1.0
+        exitwave: torch.Tensor | None = None
 
         # iterate across z-planes of 3D potentials.
         # for i in tqdm(range(V.size(1)), desc='Multislicing', leave=False):
@@ -196,11 +200,12 @@ class Scattering(L.LightningModule):
             # t = torch.exp(1j * self.sigma * complex_potential(V[:, i], alpha=self.alpha).to(self.device))
             t = torch.exp(1j * self.sigma * self.pixel_size * V[:, i].to(self.device))
 
-            # multiply with incident wave
-            wv = t * exitwave
+            # multiply with incident wave (unit incident wave on the first slice)
+            wv = t if exitwave is None else t * exitwave
 
             # propagate wave to next slice, also applies Kirkland's 0.66 bandlimit
             exitwave = ifft2(fft2(wv) * F * self.kmask)
+        assert exitwave is not None, "V must have at least one z-slice"
         return exitwave
 
     def rytov(self, V: torch.Tensor) -> torch.Tensor:
@@ -681,7 +686,7 @@ class IterativeScattering(L.LightningModule):
             disable=not (self.progressbars),
         )
 
-        slices_block = None
+        slices_block: torch.Tensor | None = None
         for i in pbar:
             if is_identity:
                 slice_sample = self._fetch_volume_slices(
@@ -709,6 +714,7 @@ class IterativeScattering(L.LightningModule):
                         x_start,
                         device,
                     )
+                assert slices_block is not None
                 slice_sample = slices_block[:, i % slice_batch_size]
 
             yield i, nz_new, slice_sample
@@ -841,7 +847,7 @@ class IterativeScattering(L.LightningModule):
             disable=not (self.progressbars),
         )
 
-        slices_block = None
+        slices_block: torch.Tensor | None = None
         for i in pbar:
             if is_identity:
                 total_potential += self._fetch_volume_slices(
@@ -869,6 +875,7 @@ class IterativeScattering(L.LightningModule):
                         x_start,
                         device,
                     )
+                assert slices_block is not None
                 total_potential += slices_block[:, i % slice_batch_size]
 
         total_complex = complex_potential(total_potential, alpha=self.alpha)
@@ -1102,7 +1109,7 @@ class IterativeScattering(L.LightningModule):
             disable=not (self.progressbars),
         )
 
-        slices_block = None
+        slices_block: torch.Tensor | None = None
         for i in pbar:
             if is_identity:
                 total_potential += self._fetch_volume_slices(
@@ -1130,6 +1137,7 @@ class IterativeScattering(L.LightningModule):
                         x_start,
                         device,
                     )
+                assert slices_block is not None
                 total_potential += slices_block[:, i % slice_batch_size]
 
         return 2 * self.sigma * self.pixel_size * total_potential

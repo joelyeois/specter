@@ -10,7 +10,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.optim import AdamW
-from torch.optim.lr_scheduler import LRScheduler
+from torch.optim.lr_scheduler import LRScheduler, ReduceLROnPlateau
 
 from .. import rotations
 from ..aberrations import Aberration
@@ -449,6 +449,12 @@ class TomogramReconstructor(L.LightningModule):
                 if not isinstance(sch, (list, tuple)):
                     sch = [sch]
                 for s in sch:
+                    if isinstance(s, ReduceLROnPlateau):
+                        raise TypeError(
+                            "ReduceLROnPlateau is not supported by this manual "
+                            "scheduler step loop; _build_lr_scheduler never "
+                            "constructs one."
+                        )
                     s.step()
 
         self.log_dict(
@@ -536,6 +542,7 @@ class TomogramReconstructor(L.LightningModule):
         if self.trainer.max_steps > -1:
             return self.trainer.max_steps
         self.trainer.fit_loop.setup_data()
+        assert self.trainer.train_dataloader is not None
         dataset_size = len(self.trainer.train_dataloader)
         return dataset_size // self.trainer.accumulate_grad_batches
 

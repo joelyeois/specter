@@ -60,7 +60,7 @@ def poisson_disk_neighbors(
     active = [0]
 
     while active and len(pts) < n_points:
-        idx = torch.randint(len(active), (1,)).item()
+        idx = int(torch.randint(len(active), (1,)).item())
         center_point = pts[active[idx]]
 
         # generate k candidates in annulus [min_distance, 2*min_distance]
@@ -99,7 +99,7 @@ def poisson_disk_neighbors(
     if n_points == torch.inf:
         return torch.stack(pts)
     else:
-        return torch.stack(pts[:n_points])
+        return torch.stack(pts[: int(n_points)])
 
 
 def poisson_disk_neighbors_3d(
@@ -180,7 +180,7 @@ def poisson_disk_neighbors_3d(
     grid[zi, yi, xi] = 0
 
     while active and len(pts) < n_points:
-        idx = torch.randint(len(active), (1,)).item()
+        idx = int(torch.randint(len(active), (1,)).item())
         center_point = pts[active[idx]]
 
         # generate k candidates in spherical shell
@@ -222,7 +222,7 @@ def poisson_disk_neighbors_3d(
                             and 0 <= ny < grid_shape[1]
                             and 0 <= nx < grid_shape[2]
                         ):
-                            pid = grid[nz, ny, nx].item()
+                            pid = int(grid[nz, ny, nx].item())
                             if pid != -1:
                                 dist = torch.norm(c - pts[pid])
                                 if dist < min_distance:
@@ -248,9 +248,9 @@ def poisson_disk_neighbors_3d(
         if len(pts) == 1:
             return torch.empty((0, 3))
         pts = pts[1:]  # don't include origin
-        return torch.stack(pts if n_points == torch.inf else pts[:n_points])
+        return torch.stack(pts if n_points == torch.inf else pts[: int(n_points)])
     elif seed == "random":
-        return torch.stack(pts if n_points == torch.inf else pts[:n_points])
+        return torch.stack(pts if n_points == torch.inf else pts[: int(n_points)])
 
 
 def crowd_with_duplicates(
@@ -419,9 +419,9 @@ def insert_particles_into_micrograph(
 
     for i in range(N):
         # Convert centered coords to array indices
-        cx_index = cx_center + positions_int[i, 0]
-        cy_index = cy_center + positions_int[i, 1]
-        cz_index = cz_center + positions_int[i, 2]
+        cx_index = cx_center + int(positions_int[i, 0].item())
+        cy_index = cy_center + int(positions_int[i, 1].item())
+        cz_index = cz_center + int(positions_int[i, 2].item())
 
         # Particle slice bounds
         z0 = cz_index - hz

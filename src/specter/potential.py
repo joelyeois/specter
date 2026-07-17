@@ -599,6 +599,7 @@ class GemmiPotentialBuilder:
 
         filtered_coords = atom_coordinates[mask]
         filtered_elements = atom_elements[mask]
+        b_iso = self.b_factor if self.b_factor is not None else 20.0
 
         for i, (pos, z) in enumerate(zip(filtered_coords, filtered_elements), start=1):
             # if not (0. <= pos[0] <= self.nx * self.dx and 0. <= pos[1] <= self.ny * self.dx and 0. <= pos[2] <= self.nz * self.dx):
@@ -607,7 +608,7 @@ class GemmiPotentialBuilder:
             atom.pos = gemmi.Position(float(pos[0]), float(pos[1]), float(pos[2]))
             atom.element = gemmi.Element(int(z))
             atom.occ = 1.0
-            atom.b_iso = self.b_factor
+            atom.b_iso = b_iso
             atom.serial = i
             res.add_atom(atom)
         return model
@@ -702,7 +703,7 @@ class GemmiPotentialBuilder:
             custom_form_factors[int(serial)] = coefs[int(scat_id)]
             # print(scat_id)
             # break
-        gemmi.set_custom_form_factors(custom_form_factors)
+        gemmi.set_custom_form_factors(custom_form_factors.tolist())
         dencalc = gemmi.DensityCalculatorC()
 
         coords = np.array([cra.atom.pos for cra in st[0].all()])  # (N, 3)
@@ -857,6 +858,11 @@ class GemmiPotentialBuilder:
             atomic_numbers = self.atomic_numbers
         else:
             self.atomic_numbers = atomic_numbers
+        if atomic_numbers is None:
+            raise ValueError(
+                "atomic_numbers must be provided, either as an argument or set on "
+                "the builder at construction time."
+            )
         translated_coordinates = atom_coordinates + self.translate_to_center
 
         if n_processes is None:

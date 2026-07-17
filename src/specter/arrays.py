@@ -619,8 +619,8 @@ def soft_voxelize_coordinates(
     B, N, _ = coords.shape
     nz, ny, nx = grid_shape
 
-    voxel_size = _normalize_voxel_size(voxel_size, device)
-    coords_voxel = coords / voxel_size  # (B,N,3)
+    voxel_size_t = _normalize_voxel_size(voxel_size, device)
+    coords_voxel = coords / voxel_size_t  # (B,N,3)
 
     # Shift coordinates so origin is at center
     origin = torch.tensor(
@@ -691,14 +691,14 @@ def soft_voxelize_xy_coordinates(
     B, N, _ = coords.shape
     nz, ny, nx = grid_shape
 
-    voxel_size = _normalize_voxel_size(voxel_size, device)
+    voxel_size_t = _normalize_voxel_size(voxel_size, device)
     origin = torch.tensor(
         [nx // 2, ny // 2, nz // 2], device=device, dtype=coords.dtype
     )
 
     volume = torch.zeros(B, nz, ny, nx, device=device)
     for b in range(B):
-        coords_voxel_centered = coords[b] / voxel_size + origin[None, :]
+        coords_voxel_centered = coords[b] / voxel_size_t + origin[None, :]
         x, y, z = (
             coords_voxel_centered[:, 0],
             coords_voxel_centered[:, 1],
@@ -783,7 +783,7 @@ def radial_profile_3d(
     data_flat = data.flatten()
 
     # Sum values per bin and count voxels per bin
-    max_r = r_bin.max().item() + 1
+    max_r = int(r_bin.max().item()) + 1
     sum_bin = torch.bincount(r_bin, weights=data_flat, minlength=max_r)
     count_bin = torch.bincount(r_bin, minlength=max_r)
 
@@ -944,7 +944,7 @@ def compute_nps_3d(
     r_idx_full = r_grid.round().long()
 
     # Compute 1D radial NPS by averaging shells
-    R = r_idx_full.max().item() + 1
+    R = int(r_idx_full.max().item()) + 1
     nps_1d = torch.zeros(R, device=device)
     counts = torch.zeros(R, device=device)
     r_flat = r_idx_full.clamp(0, R - 1).reshape(-1)
@@ -1030,7 +1030,7 @@ def radial_profile_2d(
     data_flat = data.flatten()
 
     # Sum values per bin and count pixels per bin
-    max_r = r_bin.max().item() + 1
+    max_r = int(r_bin.max().item()) + 1
     sum_bin = torch.bincount(r_bin, weights=data_flat, minlength=max_r)
     count_bin = torch.bincount(r_bin, minlength=max_r)
 
@@ -1078,9 +1078,9 @@ def nearest_index(
     zi : int
         Index in z_arr closest to z_coord.
     """
-    xi = torch.argmin(torch.abs(x_arr - x_coord))
-    yi = torch.argmin(torch.abs(y_arr - y_coord))
-    zi = torch.argmin(torch.abs(z_arr - z_coord))
+    xi = int(torch.argmin(torch.abs(x_arr - x_coord)).item())
+    yi = int(torch.argmin(torch.abs(y_arr - y_coord)).item())
+    zi = int(torch.argmin(torch.abs(z_arr - z_coord)).item())
     return xi, yi, zi
 
 

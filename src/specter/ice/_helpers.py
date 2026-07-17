@@ -151,7 +151,7 @@ def rfftn(array: torch.Tensor) -> torch.Tensor:
 
 def torch_peak_local_max(
     image: torch.Tensor, min_distance: int = 1, num_peaks: int | None = None
-) -> torch.LongTensor:
+) -> torch.Tensor:
     """
     Find local maxima in batched 3D images and return fixed number of peaks per batch.
 
@@ -185,7 +185,7 @@ def torch_peak_local_max(
     flat_image_masked[~flat_mask] = -float("inf")
 
     if num_peaks is None:
-        num_peaks = flat_mask.sum(dim=1).min().item()  # take min available peaks
+        num_peaks = int(flat_mask.sum(dim=1).min().item())  # take min available peaks
 
     # Top-k per batch
     topk_vals, topk_idx = flat_image_masked.topk(num_peaks, dim=1)

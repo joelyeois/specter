@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 import lightning as L
 import mrcfile
@@ -439,7 +439,7 @@ class Ghostbuster:
             accelerator="gpu" if use_gpu else "cpu",
             devices=[device] if use_gpu else 1,
             max_epochs=self.epochs,
-            precision=self.precision if use_gpu else "32",
+            precision=cast(Any, self.precision if use_gpu else "32"),
             logger=False,
             enable_checkpointing=False,
             callbacks=callbacks or [],

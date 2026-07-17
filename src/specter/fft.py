@@ -487,7 +487,11 @@ def halfmap_fsc_weight_2d(
 
 
 def _apply_conv_mode(
-    ret: torch.Tensor, s1: list[int], s2: list[int], mode: str, axes: list[int]
+    ret: torch.Tensor,
+    s1: Sequence[int],
+    s2: Sequence[int],
+    mode: str,
+    axes: list[int],
 ) -> torch.Tensor:
     """From scipy.signal._signaltools
 

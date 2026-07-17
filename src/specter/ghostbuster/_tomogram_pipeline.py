@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Literal, Sequence
+from typing import Any, Literal, Sequence, cast
 
 import lightning as L
 import mrcfile
@@ -317,7 +317,7 @@ class TomogramGhostbuster:
             accelerator="gpu" if use_gpu else "cpu",
             devices=[device] if use_gpu else 1,
             max_epochs=self.epochs,
-            precision=self.precision if use_gpu else "32",
+            precision=cast(Any, self.precision if use_gpu else "32"),
             logger=False,
             enable_checkpointing=False,
             callbacks=callbacks or [],

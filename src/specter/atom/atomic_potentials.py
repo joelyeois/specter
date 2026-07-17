@@ -191,7 +191,7 @@ def load_shtyrov_parameters(filepath: str) -> torch.Tensor:
     ids = torch.tensor(
         [int(x) for x in cif_dict["_lmb_scat_coef.scat_id"]], dtype=torch.long
     )
-    max_id = torch.max(ids).item()
+    max_id = int(torch.max(ids).item())
 
     # parse coefficients
     a_keys = [f"_lmb_scat_coef.coef_a{i}" for i in range(1, 6)]

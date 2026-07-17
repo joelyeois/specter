@@ -92,6 +92,7 @@ class TomogramGenerator(L.LightningModule):
         self.move_to_cpu = move_to_cpu
         self.save_clean_exitwaves = save_clean_exitwaves
 
+        self.crowd: CrowdWithDuplicates | None
         if self.crowd_min_distance is not None and scattering_potential is not None:
             crowd_max_distance_z_ang = (
                 crowd_max_distance_z
@@ -114,6 +115,7 @@ class TomogramGenerator(L.LightningModule):
         else:
             self.crowd = None
 
+        self.icemaker: IceBank | None
         if icemaker is not None:
             self.icemaker = icemaker
             self.ice_model = icemaker.method
@@ -163,7 +165,9 @@ class TomogramGenerator(L.LightningModule):
         if self.icemaker is not None:
             with torch.no_grad():
                 with status("Tiling ice volume", disable=not self.progressbars):
-                    ice = self.icemaker.generate_big_ice(V.shape).to(assembly_device)
+                    ice = self.icemaker.generate_big_ice(
+                        (V.shape[0], V.shape[1], V.shape[2], V.shape[3])
+                    ).to(assembly_device)
                 with status("Applying ice mask", disable=not self.progressbars):
                     icemask = (V < 0.05 * V.max()).to(V.dtype)
                     V = V + ice * icemask

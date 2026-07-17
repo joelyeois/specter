@@ -117,7 +117,7 @@ class Detector(L.LightningModule):
         M_affine = M_affine[:, :2, :]  # Shape: (B, 2, 3)
 
         # Generate affine grid for the batch
-        grid = F.affine_grid(M_affine, images.shape, align_corners=False)
+        grid = F.affine_grid(M_affine, list(images.shape), align_corners=False)
 
         # Apply transformation using grid sampling
         images = F.grid_sample(images, grid, align_corners=False, padding_mode="border")
@@ -325,8 +325,10 @@ class Detector(L.LightningModule):
 
         # 3. Assign electrons to coincidence grid cells
         # Introduce a slight randomization to the cell size to mimic detector variation
-        cell_size = coinc_radius_pixels / (2**0.5)
-        cell_size *= (1 + 0.05 * torch.randn(1, device=device)).clamp(0.8, 1.2)
+        base_cell_size = coinc_radius_pixels / (2**0.5)
+        cell_size = base_cell_size * (1 + 0.05 * torch.randn(1, device=device)).clamp(
+            0.8, 1.2
+        )
 
         # Random shift to prevent the grid from "locking" onto specific pixels
         shift = (torch.rand(2, device=device) - 0.5) * cell_size
@@ -390,6 +392,11 @@ class Detector(L.LightningModule):
         if coincidence_radius <= 0.0:
             return torch.poisson(torch.clamp(img, min=0.0))
 
+        if self.num_frames is None:
+            raise ValueError(
+                "num_frames must be set on the Detector to apply dose-fractionated "
+                "coincidence loss (coincidence_radius > 0)."
+            )
         n_frames = self.num_frames
         intensity_map = img / img.sum()
 
@@ -397,7 +404,9 @@ class Detector(L.LightningModule):
         # agrees with torch.poisson(img) at radius=0: both correctly account
         # for real electron absorption from alpha (imaginary potential), and
         # B-factor attenuation is treated consistently across both paths.
-        dose_effective = img.sum() / (self.pixel_size**2 * img.shape[0] * img.shape[1])
+        dose_effective = (
+            img.sum() / (self.pixel_size**2 * img.shape[0] * img.shape[1])
+        ).item()
 
         final_image = torch.zeros_like(img)
         for _ in track(

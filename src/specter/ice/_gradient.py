@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-import os
-from typing import Optional
+from typing import Any, Optional
 
 import lightning as L
 import torch
@@ -10,10 +9,12 @@ import torch.nn.functional as F
 from ..arrays import radial_profile_3d, soft_voxelize_coordinates
 from ..fft import fft3, fftconvolve
 from ..progress import ProgressManager, track
+from ._energy import MLBOP
 from ._energy import mlbop_energy as _mlbop_energy
 from ._helpers import ndensity_of_amorphous_ice
 from ._kernels import (
     build_atomic_potential_kernel,
+    compute_native_target,
     ice_kspace_radial_grid,
     interpolate_target_kernel,
     load_mdsim_f_radial_avg,
@@ -54,10 +55,23 @@ class GradientSKIcemaker(L.LightningModule):
     progressbars : bool, optional
         Whether to show progress bars. Default is True.
     mdsim_target_path : str, optional
-        Path to a precomputed radial-average |F(k)| target ``.pt`` file (see
-        :class:`~specter.ice.APIcemaker`). If None, uses the bundled LDA-80K
-        (low-density amorphous ice, 80K/0atm) target,
-        ``mdsim_f_radial_avg_400x400x400_0.25A_LDA_80K.pt``. Default is None.
+        Path to a precomputed radial-average |F(k)| target ``.pt`` file, in
+        the fixed 400x400x400, dx=0.25 Å format :func:`~specter.ice._kernels.
+        load_mdsim_f_radial_avg` expects. If None (default), the target is
+        instead computed natively at this instance's own ``(n, dx, nz)`` via
+        :func:`~specter.ice._kernels.compute_native_target`, from the bundled
+        LDA-80K (low-density amorphous ice, 80K/0atm) reference frame.
+        Matching ``dx`` between target and training grid matters far more
+        than matching absolute box size -- interpolating a fine-``dx``
+        target across a coarser training grid is a lossy comparison (the
+        simulated side is aliased by coarse voxelization, the target isn't),
+        which was validated this way: coarse-``dx`` training against the old
+        fixed fine-grid default got stuck (S(k) loss O(1)-O(1e3)); against a
+        natively-computed target at the same ``dx`` it converges cleanly
+        (O(1e-5)-O(1e-7)), across dx=0.5/1.0/2.0 and box sizes from 16 Å up
+        to 256 Å (beyond the ~127 Å real MD cell, via safe box-size
+        extrapolation -- see :func:`compute_native_target`). Pass an
+        explicit path to opt back into the old fixed-target behavior.
     """
 
     def __init__(
@@ -89,14 +103,13 @@ class GradientSKIcemaker(L.LightningModule):
         )
 
         if mdsim_target_path is None:
-            current_dir = os.path.dirname(os.path.abspath(__file__))
-            root_dir = os.path.dirname(os.path.dirname(os.path.dirname(current_dir)))
-            mdsim_target_path = os.path.join(
-                root_dir,
-                "ice-data",
-                "mdsim_f_radial_avg_400x400x400_0.25A_LDA_80K.pt",
+            mdsim_radial_k, mdsim_f_radial_avg = compute_native_target(
+                n=self.n, dx=self.dx, nz=self.nz
             )
-        mdsim_radial_k, mdsim_f_radial_avg = load_mdsim_f_radial_avg(mdsim_target_path)
+        else:
+            mdsim_radial_k, mdsim_f_radial_avg = load_mdsim_f_radial_avg(
+                mdsim_target_path
+            )
         K = ice_kspace_radial_grid(self.n, self.nz, self.dx)
         f_kernel = interpolate_target_kernel(
             K, mdsim_radial_k, mdsim_f_radial_avg, self.n_molecules
@@ -155,11 +168,15 @@ class GradientSKIcemaker(L.LightningModule):
     # ------------------------------------------------------------------
 
     def _sk_loss(
-        self, pos: torch.Tensor, rep_strength: float = 0.0
+        self,
+        pos: torch.Tensor,
+        rep_strength: float = 0.0,
+        mlbop_strength: float = 0.0,
+        mlbop_target: float | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Radial-profile MSE between |FFT(voxelized positions)| and the target,
-        with an optional soft repulsion penalty.
+        with an optional soft repulsion penalty and/or ML-BOP energy penalty.
 
         Differentiable w.r.t. ``pos`` through soft voxelization, FFT, and
         scatter-based radial average.
@@ -169,15 +186,37 @@ class GradientSKIcemaker(L.LightningModule):
         pos : torch.Tensor
             Positions (N, 3) in Å, centered at origin.
         rep_strength : float, optional
-            Weight of the pair-exclusion penalty.  ``0.0`` disables repulsion.
-            The penalty counts other particles within ``min_distance`` of each
-            voxel via FFT convolution and applies a squared relu; set to a
-            positive value (e.g. 1.0) to prevent particle overlap.
+            Weight of the artificial pair-exclusion penalty.  ``0.0``
+            disables it (default).  The penalty counts other particles
+            within ``min_distance`` of each voxel via FFT convolution and
+            applies a squared relu; set to a positive value (e.g. 1.0) to
+            prevent particle overlap. This is a cheap, purely geometric
+            stand-in for a real interatomic potential.
+        mlbop_strength : float, optional
+            Weight of a physically-motivated alternative to
+            ``rep_strength``: the ML-BOP per-atom energy (see
+            :meth:`~specter.ice._energy.MLBOP.compute_energy_differentiable`),
+            which penalizes both overlap (two-body term) and unrealistic
+            O-O-O angles (three-body bond-order term) rather than just
+            overlap. ``0.0`` disables it (default). Can be combined with
+            ``rep_strength`` or used on its own.
+        mlbop_target : float or None, optional
+            If set, the ML-BOP penalty becomes
+            ``(E_per_atom - mlbop_target) ** 2`` instead of minimizing
+            ``E_per_atom`` directly. Amorphous ice phases are metastable,
+            not energy-minimal -- LDA ice in particular is a *compressed*
+            amorphous phase, so its ML-BOP energy sits measurably above the
+            true minimum (real LDA-80K MD frames score around -0.41 eV/atom,
+            not the more negative values a denser/more crystalline packing
+            would reach). Minimizing ``E_per_atom`` unboundedly pulls the
+            optimizer toward that lower-energy, more ordered packing instead
+            of matching the target amorphous phase. Ignored (falls back to
+            direct minimization) if ``None`` (default).
 
         Returns
         -------
         loss : torch.Tensor
-            Scalar combined loss (S(k) MSE + repulsion penalty).
+            Scalar combined loss (S(k) MSE + any enabled penalty terms).
         f_amp : torch.Tensor
             |F(k)| in shifted frequency space, shape (nz, n, n).
         """
@@ -205,6 +244,19 @@ class GradientSKIcemaker(L.LightningModule):
             rep_loss = torch.mean(F.relu(convolved) ** 2)
             loss = loss + rep_strength * rep_loss
 
+        if mlbop_strength > 0.0:
+            model = MLBOP(device=pos.device)
+            box = (self.box_x, self.box_y, self.box_z)
+            mlbop_result = model.compute_energy_differentiable(
+                pos, box_size=box, pbc=True
+            )
+            e_per_atom = mlbop_result["E_per_atom"]
+            if mlbop_target is None:
+                mlbop_penalty = e_per_atom
+            else:
+                mlbop_penalty = (e_per_atom - mlbop_target) ** 2
+            loss = loss + mlbop_strength * mlbop_penalty
+
         return loss, f_amp
 
     # ------------------------------------------------------------------
@@ -218,6 +270,10 @@ class GradientSKIcemaker(L.LightningModule):
         optimizer: str = "lbfgs",
         record_every: int = 5,
         rep_strength: float = 1.0,
+        mlbop_strength: float = 0.0,
+        mlbop_target: float | None = None,
+        tol: Optional[float] = 1e-4,
+        patience: int = 10,
     ) -> dict:
         """
         Pure gradient descent on the S(k) loss — no Langevin noise.
@@ -238,19 +294,67 @@ class GradientSKIcemaker(L.LightningModule):
         record_every : int
             Diagnostic recording interval.
         rep_strength : float, optional
-            Weight of the soft pair-exclusion penalty in the loss.  Prevents
-            particles from overlapping during gradient descent.  Set to 0 to
-            disable.  Default is 1.0.
+            Weight of the artificial pair-exclusion penalty in the loss (see
+            :meth:`_sk_loss`).  Prevents particles from overlapping during
+            gradient descent.  Set to 0 to disable.  Default is 1.0.
+        mlbop_strength : float, optional
+            Weight of the ML-BOP-energy-based penalty (see :meth:`_sk_loss`),
+            as an alternative to ``rep_strength``.  Unlike ``rep_strength``,
+            this now runs fully differentiably inside the optimisation loop
+            (see :meth:`~specter.ice._energy.MLBOP.compute_energy_differentiable`),
+            so it can be used every step rather than just as an offline
+            diagnostic.  Set to 0 to disable (default).
+        mlbop_target : float or None, optional
+            If set, matches ``E_per_atom`` to this value instead of
+            minimizing it unboundedly (see :meth:`_sk_loss`) -- use the
+            ML-BOP energy of a real MD reference frame (e.g. via
+            :meth:`~specter.ice._mdsim.MDSimDump.mlbop_energy`) so the
+            result matches the target *phase* of ice rather than drifting
+            toward an arbitrarily low-energy (more crystalline) packing.
+            Only meaningful when ``mlbop_strength > 0``. Default is ``None``.
+        tol : float or None, optional
+            Relative loss-improvement tolerance for early stopping: once the
+            fractional change in loss, ``abs(prev - cur) / abs(prev)``, stays
+            below ``tol`` for ``patience`` consecutive steps, optimisation
+            stops before reaching ``n_steps``. This tracks the combined
+            differentiable loss (S(k) MSE + whichever penalty is enabled)
+            already computed every step. Set to ``None`` to disable and
+            always run the full ``n_steps``. Default is 1e-4 — tuned against
+            the S(k) loss curve on the bundled LDA-80K target (n=400,
+            dx=0.25): 1e-6 never sustains for ``patience`` steps within a few
+            hundred iterations, since the loss keeps making ~1e-5-scale
+            wiggles long after it's practically converged.
+        patience : int, optional
+            Consecutive below-``tol`` steps required to trigger early
+            stopping. Default is 10.
 
         Returns
         -------
         history : dict
-            Keys: ``'step'``, ``'loss'``, ``'radial_profile'``.
+            Keys: ``'step'``, ``'loss'`` (combined loss actually optimized),
+            ``'sk_loss'`` (raw S(k) MSE alone, with no penalty term --
+            comparable across different ``rep_strength``/``mlbop_strength``
+            settings, unlike ``'loss'``), ``'radial_profile'``, and
+            ``'stopped_early'`` (bool — whether ``tol``/``patience`` cut the
+            run short of ``n_steps``).
         """
         assert self.positions is not None, "Call init_random() first"
 
         pos = self.positions.to(self.device).clone().requires_grad_(True)
-        history: dict[str, list] = {"step": [], "loss": [], "radial_profile": []}
+        history: dict[str, Any] = {
+            "step": [],
+            "loss": [],
+            "sk_loss": [],
+            "radial_profile": [],
+        }
+        stopped_early = False
+        prev_loss: Optional[float] = None
+        plateau_count = 0
+
+        def _raw_sk_loss() -> float:
+            with torch.no_grad():
+                sk_loss, _ = self._sk_loss(pos, rep_strength=0.0, mlbop_strength=0.0)
+                return sk_loss.item()
 
         if optimizer == "lbfgs":
             opt = torch.optim.LBFGS(
@@ -264,7 +368,12 @@ class GradientSKIcemaker(L.LightningModule):
 
             def closure() -> torch.Tensor:
                 opt.zero_grad()
-                loss, f_amp = self._sk_loss(pos, rep_strength=rep_strength)
+                loss, f_amp = self._sk_loss(
+                    pos,
+                    rep_strength=rep_strength,
+                    mlbop_strength=mlbop_strength,
+                    mlbop_target=mlbop_target,
+                )
                 loss.backward()
                 last_f_amp[0] = f_amp.detach()
                 return loss
@@ -286,13 +395,30 @@ class GradientSKIcemaker(L.LightningModule):
                     loss_val = (
                         loss.item() if isinstance(loss, torch.Tensor) else float(loss)
                     )
+                    if tol is not None and prev_loss is not None:
+                        rel_change = abs(prev_loss - loss_val) / (
+                            abs(prev_loss) + 1e-12
+                        )
+                        plateau_count = plateau_count + 1 if rel_change < tol else 0
+                    prev_loss = loss_val
                     _pbar.set_postfix(loss=f"{loss_val:.6f}")
                     if step % record_every == 0:
                         with torch.no_grad():
                             rad = radial_profile_3d(last_f_amp[0].cpu())
                         history["step"].append(step)
                         history["loss"].append(loss_val)
+                        history["sk_loss"].append(_raw_sk_loss())
                         history["radial_profile"].append(rad)
+                    if tol is not None and plateau_count >= patience:
+                        stopped_early = True
+                        if history["step"] and history["step"][-1] != step:
+                            with torch.no_grad():
+                                rad = radial_profile_3d(last_f_amp[0].cpu())
+                            history["step"].append(step)
+                            history["loss"].append(loss_val)
+                            history["sk_loss"].append(_raw_sk_loss())
+                            history["radial_profile"].append(rad)
+                        break
             finally:
                 _pbar.close()
                 _manager.release(_pbar_pos)
@@ -309,24 +435,48 @@ class GradientSKIcemaker(L.LightningModule):
             try:
                 for step in _pbar:
                     opt_adam.zero_grad()
-                    loss, f_amp = self._sk_loss(pos, rep_strength=rep_strength)
+                    loss, f_amp = self._sk_loss(
+                        pos,
+                        rep_strength=rep_strength,
+                        mlbop_strength=mlbop_strength,
+                        mlbop_target=mlbop_target,
+                    )
                     loss.backward()
                     opt_adam.step()
                     with torch.no_grad():
                         pos.data[:, 0] = _wrap_coords(pos.data[:, 0], self.box_x)
                         pos.data[:, 1] = _wrap_coords(pos.data[:, 1], self.box_y)
                         pos.data[:, 2] = _wrap_coords(pos.data[:, 2], self.box_z)
-                    _pbar.set_postfix(loss=f"{loss.item():.6f}")
+                    loss_val = loss.item()
+                    if tol is not None and prev_loss is not None:
+                        rel_change = abs(prev_loss - loss_val) / (
+                            abs(prev_loss) + 1e-12
+                        )
+                        plateau_count = plateau_count + 1 if rel_change < tol else 0
+                    prev_loss = loss_val
+                    _pbar.set_postfix(loss=f"{loss_val:.6f}")
                     if step % record_every == 0:
                         with torch.no_grad():
                             rad = radial_profile_3d(f_amp.detach().cpu())
                         history["step"].append(step)
-                        history["loss"].append(loss.item())
+                        history["loss"].append(loss_val)
+                        history["sk_loss"].append(_raw_sk_loss())
                         history["radial_profile"].append(rad)
+                    if tol is not None and plateau_count >= patience:
+                        stopped_early = True
+                        if history["step"] and history["step"][-1] != step:
+                            with torch.no_grad():
+                                rad = radial_profile_3d(f_amp.detach().cpu())
+                            history["step"].append(step)
+                            history["loss"].append(loss_val)
+                            history["sk_loss"].append(_raw_sk_loss())
+                            history["radial_profile"].append(rad)
+                        break
             finally:
                 _pbar.close()
                 _manager.release(_pbar_pos)
 
+        history["stopped_early"] = stopped_early
         self.positions = pos.detach().cpu()
         return history
 
@@ -337,6 +487,8 @@ class GradientSKIcemaker(L.LightningModule):
         noise: float = 0.02,
         record_every: int = 50,
         rep_strength: float = 1.0,
+        mlbop_strength: float = 0.0,
+        mlbop_target: float | None = None,
     ) -> dict:
         """
         Langevin sampling around a converged structure.
@@ -356,7 +508,13 @@ class GradientSKIcemaker(L.LightningModule):
         record_every : int
             Diagnostic recording interval.
         rep_strength : float, optional
-            Weight of the soft pair-exclusion penalty.  Default is 1.0.
+            Weight of the artificial pair-exclusion penalty.  Default is 1.0.
+        mlbop_strength : float, optional
+            Weight of the ML-BOP-energy-based penalty, as an alternative to
+            ``rep_strength`` (see :meth:`_sk_loss`).  Default is 0.0.
+        mlbop_target : float or None, optional
+            Matches ``E_per_atom`` to this value instead of minimizing it
+            unboundedly (see :meth:`_sk_loss`).  Default is ``None``.
 
         Returns
         -------
@@ -379,7 +537,12 @@ class GradientSKIcemaker(L.LightningModule):
         try:
             for step in _pbar:
                 opt.zero_grad()
-                loss, f_amp = self._sk_loss(pos, rep_strength=rep_strength)
+                loss, f_amp = self._sk_loss(
+                    pos,
+                    rep_strength=rep_strength,
+                    mlbop_strength=mlbop_strength,
+                    mlbop_target=mlbop_target,
+                )
                 loss.backward()
                 opt.step()
                 with torch.no_grad():
@@ -429,7 +592,11 @@ class GradientSKIcemaker(L.LightningModule):
         n_steps: int = 50,
         lr: float = 1.0,
         rep_strength: float = 1.0,
+        mlbop_strength: float = 0.0,
+        mlbop_target: float | None = None,
         init_positions=None,
+        tol: Optional[float] = 1e-4,
+        patience: int = 10,
     ) -> torch.Tensor:
         """
         Run ``batchsize`` independent L-BFGS optimisations and return soft-voxelized
@@ -443,11 +610,23 @@ class GradientSKIcemaker(L.LightningModule):
         batchsize : int
             Number of independent ice volumes.
         n_steps : int
-            L-BFGS outer iterations per volume.
+            L-BFGS outer iterations per volume (upper bound — see ``tol``).
         lr : float
             L-BFGS initial step size (line search adapts it automatically).
         rep_strength : float, optional
-            Weight of the soft pair-exclusion penalty.  Default is 1.0.
+            Weight of the artificial pair-exclusion penalty.  Default is 1.0.
+        mlbop_strength : float, optional
+            Weight of the ML-BOP-energy-based penalty, as an alternative to
+            ``rep_strength`` (see :meth:`_sk_loss`).  Default is 0.0.
+        mlbop_target : float or None, optional
+            Matches ``E_per_atom`` to this value instead of minimizing it
+            unboundedly (see :meth:`_sk_loss`).  Default is ``None``.
+        tol : float or None, optional
+            Early-stopping tolerance forwarded to :meth:`optimize`. Default
+            is 1e-4; set to ``None`` to always run the full ``n_steps``.
+        patience : int, optional
+            Early-stopping patience forwarded to :meth:`optimize`. Default
+            is 10.
 
         Returns
         -------
@@ -471,6 +650,10 @@ class GradientSKIcemaker(L.LightningModule):
                 optimizer="lbfgs",
                 record_every=n_steps,
                 rep_strength=rep_strength,
+                mlbop_strength=mlbop_strength,
+                mlbop_target=mlbop_target,
+                tol=tol,
+                patience=patience,
             )
             results.append(self.voxelize())
         self.current_icedeltas = torch.stack(results)
@@ -482,6 +665,10 @@ class GradientSKIcemaker(L.LightningModule):
         n_steps: int = 50,
         lr: float = 1.0,
         rep_strength: float = 1.0,
+        mlbop_strength: float = 0.0,
+        mlbop_target: float | None = None,
+        tol: Optional[float] = 1e-4,
+        patience: int = 10,
     ) -> torch.Tensor:
         """
         Run ``batchsize`` independent L-BFGS optimisations and return convolved
@@ -495,11 +682,23 @@ class GradientSKIcemaker(L.LightningModule):
         batchsize : int
             Number of independent ice volumes.
         n_steps : int
-            L-BFGS outer iterations per volume.
+            L-BFGS outer iterations per volume (upper bound — see ``tol``).
         lr : float
             L-BFGS initial step size (line search adapts it automatically).
         rep_strength : float, optional
-            Weight of the soft pair-exclusion penalty.  Default is 1.0.
+            Weight of the artificial pair-exclusion penalty.  Default is 1.0.
+        mlbop_strength : float, optional
+            Weight of the ML-BOP-energy-based penalty, as an alternative to
+            ``rep_strength`` (see :meth:`_sk_loss`).  Default is 0.0.
+        mlbop_target : float or None, optional
+            Matches ``E_per_atom`` to this value instead of minimizing it
+            unboundedly (see :meth:`_sk_loss`).  Default is ``None``.
+        tol : float or None, optional
+            Early-stopping tolerance forwarded to :meth:`optimize`. Default
+            is 1e-4; set to ``None`` to always run the full ``n_steps``.
+        patience : int, optional
+            Early-stopping patience forwarded to :meth:`optimize`. Default
+            is 10.
 
         Returns
         -------
@@ -507,7 +706,14 @@ class GradientSKIcemaker(L.LightningModule):
             Convolved ice potential volumes, shape (batchsize, nz, n, n).
         """
         self.generate_ice_deltas(
-            batchsize=batchsize, n_steps=n_steps, lr=lr, rep_strength=rep_strength
+            batchsize=batchsize,
+            n_steps=n_steps,
+            lr=lr,
+            rep_strength=rep_strength,
+            mlbop_strength=mlbop_strength,
+            mlbop_target=mlbop_target,
+            tol=tol,
+            patience=patience,
         )
         return fftconvolve(
             self.current_icedeltas,

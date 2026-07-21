@@ -129,6 +129,35 @@ class IceBank(L.LightningModule):
             num_unique, self.nz, self.n, self.n, device=self.device
         )
 
+    # Validated default for method='gd': matches real LDA-80K MD ice
+    # (see dev/ice/get_md_reference.py -- E_per_atom is stable to +/-0.0001
+    # across widely-separated MD frames) rather than the previous
+    # rep_strength=1.0-only default, which converges S(k) fine but leaves
+    # badly-overlapping local structure (S(k) matching alone is a weak
+    # constraint on local atomic arrangement -- confirmed across every
+    # resolution tested this session, from n=16 up through the n=256,
+    # dx=1.0 production default). mlbop_strength=0.5 was the best balance
+    # of energy-match quality vs. S(k) fidelity found across dx=0.5/1.0/2.0
+    # and box sizes up to 256 Å.
+    #
+    # n_steps=400 replaces the old default of 50, which is nowhere near
+    # enough: at n=256,dx=1.0 (~527k atoms), sk_loss is still 0.58 (vs
+    # ~0.0002-0.0008 by step 200-400) after only 50 steps. 400 was chosen
+    # since sk_loss's practical gains taper off by ~200-300 steps at this
+    # scale (~2.2s/step here, so ~15 min); E_per_atom keeps improving more
+    # slowly out to 600+ steps for large systems specifically (~527k atoms:
+    # -0.11 at 591 steps vs -0.26 to -0.35 for smaller ~31k-atom boxes in
+    # the same budget) -- pass n_steps explicitly for more/less than this
+    # default trade-off. tol=1e-4/patience=10 (optimize()'s own defaults)
+    # still apply on top of this, so smaller/easier configs typically stop
+    # well short of the ceiling.
+    _GD_DEFAULT_KWARGS: dict[str, Any] = {
+        "rep_strength": 0.0,
+        "mlbop_strength": 0.5,
+        "mlbop_target": -0.413,
+        "n_steps": 400,
+    }
+
     def build(self, num_unique: int | None = None, **kwargs: Any) -> None:
         """
         Generate and cache unique ice cubes on the current device.
@@ -142,12 +171,20 @@ class IceBank(L.LightningModule):
             Forwarded to ``generator.generate_ice(batchsize=num_unique, **kwargs)``.
             Method-specific build parameters:
 
-            - ``gd``: ``n_steps``, ``lr``, ``rep_strength``
+            - ``gd``: ``n_steps``, ``lr``, ``rep_strength``, ``mlbop_strength``,
+              ``mlbop_target``. If none of the latter three are given, defaults
+              to matching real amorphous ice via ML-BOP energy (see
+              :attr:`_GD_DEFAULT_KWARGS`) rather than the geometric-only
+              ``rep_strength=1.0`` penalty; pass ``rep_strength=1.0,
+              mlbop_strength=0.0`` explicitly to opt back into the old
+              behavior.
             - ``ap``: ``reduce_fraction``
             - ``mcmc``: ``n_sweeps``, ``step_size``
         """
         if num_unique is None:
             num_unique = self._num_unique
+        if self.method == "gd":
+            kwargs = {**self._GD_DEFAULT_KWARGS, **kwargs}
         cubes: list[torch.Tensor] = []
         for start in track(
             range(0, num_unique, self.build_batch_size),

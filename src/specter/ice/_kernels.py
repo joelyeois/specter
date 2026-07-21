@@ -16,7 +16,12 @@ import torch
 from torchinterp1d import interp1d
 
 from .. import potential
-from ..arrays import radial_grid_3d, real_to_kgrid_3d
+from ..arrays import (
+    radial_grid_3d,
+    radial_profile_3d,
+    real_to_kgrid_3d,
+    soft_voxelize_coordinates,
+)
 from ..atom import kirkland_atomic_potential_3d, lobato_atomic_potential_3d
 from ..fft import fft3
 
@@ -25,6 +30,16 @@ from ..fft import fft3
 # .pt file was generated on, not something independently choosable per call.
 MDSIM_DX = 0.25
 MDSIM_N = 400
+
+# Real extent of the LDA-80K MD simulation's periodic cell (see the dump
+# file's own BOX BOUNDS header): ~127.12 A per side. A native target can
+# only be computed directly up to this size before requiring the box-size
+# extrapolation handled by interpolate_target_kernel's own interp1d call
+# (safe -- box size only changes k-sampling density of the same underlying
+# bulk curve) -- see compute_native_target. Kept conservative relative to
+# the true ~127A limit since 100A is what was empirically validated.
+_REFERENCE_MAX_BOX = 100.0
+_REFERENCE_COORDS_CACHE: dict[str, torch.Tensor] = {}
 
 
 def load_mdsim_f_radial_avg(
@@ -56,6 +71,115 @@ def load_mdsim_f_radial_avg(
         )
     mdsim_f_radial_avg = torch.load(saved_data_path, weights_only=True)
     mdsim_dk = 1 / MDSIM_N / MDSIM_DX
+    mdsim_radial_k = torch.arange(len(mdsim_f_radial_avg)) * mdsim_dk
+    return mdsim_radial_k, mdsim_f_radial_avg
+
+
+def compute_native_target(
+    n: int,
+    dx: float,
+    nz: int | None = None,
+    reference_coords_path: str | None = None,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """
+    Compute a radial-average |F(k)| target natively at the requested grid
+    resolution, instead of interpolating the bundled 400x400x400, dx=0.25 Å
+    default across a mismatched ``dx``.
+
+    Matching ``dx`` between the target and the training grid matters far
+    more than matching absolute box size: soft-voxelizing coordinates at a
+    coarse ``dx`` is a lossy, aliasing discretization (high-frequency
+    structure folds back into the representable k-range rather than being
+    cleanly discarded), so the *simulated* radial |F(k)| computed during
+    training is systematically biased relative to a target that was
+    computed on a much finer grid. Comparing a biased quantity against an
+    unbiased one creates a mismatch no amount of atom repositioning can
+    close, which is what makes coarse-``dx`` training converge poorly
+    against the bundled fine-grid target. Computing the target through the
+    *same* voxelize → FFT → radial-average pipeline at the *same* ``dx``
+    removes that bias (validated: dx=0.5/1.0/2.0 all went from stuck losses
+    of O(1)-O(1000) to O(1e-5)-O(1e-7) once matched).
+
+    Box size, by contrast, is safe to extrapolate: for a bulk material the
+    true S(k) shape barely depends on sample size once it's large enough,
+    so a box bigger than the reference simulation's real periodic cell
+    (~127 Å for the bundled LDA-80K trajectory) is handled by capping the
+    native computation at ``_REFERENCE_MAX_BOX`` and letting
+    :func:`interpolate_target_kernel`'s existing ``interp1d`` call resample
+    onto the requested grid's own (denser) k-values -- Nyquist depends only
+    on ``dx``, not box size, so this never needs to extrapolate beyond the
+    native computation's own k-range, only resample it more finely.
+
+    Parameters
+    ----------
+    n : int
+        Number of voxels along x and y.
+    dx : float
+        Voxel size in Å.
+    nz : int, optional
+        Number of voxels along z. Defaults to ``n``.
+    reference_coords_path : str, optional
+        Path to a pre-extracted single-frame coordinate tensor (shape
+        ``(N, 3)``, centered, full simulation box). Defaults to the bundled
+        ``ice-data/lda_80k_frame799_full_coords.pt`` (frame 799 of the
+        LDA-80K trajectory -- single-frame vs. 790-frame-averaged targets
+        were validated to give statistically indistinguishable downstream
+        training results, so a single frame is used for speed).
+
+    Returns
+    -------
+    mdsim_radial_k : torch.Tensor
+        k-axis (1/Å) matching ``mdsim_f_radial_avg``'s bins.
+    mdsim_f_radial_avg : torch.Tensor
+        Radial-average |F(k)| (stores sqrt(S(k))), same convention as
+        :func:`load_mdsim_f_radial_avg` -- a drop-in replacement for it.
+    """
+    nz = n if nz is None else nz
+    if reference_coords_path is None:
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        root_dir = os.path.dirname(os.path.dirname(os.path.dirname(current_dir)))
+        reference_coords_path = os.path.join(
+            root_dir, "ice-data", "lda_80k_frame799_full_coords.pt"
+        )
+
+    if reference_coords_path not in _REFERENCE_COORDS_CACHE:
+        _REFERENCE_COORDS_CACHE[reference_coords_path] = torch.load(
+            reference_coords_path, weights_only=True
+        )
+    coords = _REFERENCE_COORDS_CACHE[reference_coords_path]
+
+    box_xy = n * dx
+    box_z = nz * dx
+    trim_xy = min(box_xy, _REFERENCE_MAX_BOX)
+    trim_z = min(box_z, _REFERENCE_MAX_BOX)
+
+    half_xy, half_z = trim_xy / 2.0, trim_z / 2.0
+    mask = (
+        (coords[:, 0].abs() <= half_xy)
+        & (coords[:, 1].abs() <= half_xy)
+        & (coords[:, 2].abs() <= half_z)
+    )
+    trimmed = coords[mask]
+    if trimmed.shape[0] == 0:
+        raise ValueError(
+            f"No reference atoms found within the trimmed box (n={n}, nz={nz}, "
+            f"dx={dx}); check reference_coords_path."
+        )
+
+    # If the requested box exceeds the reference's real extent, this scales
+    # down to the equivalent voxel count at the SAME dx and capped box size
+    # (n_native * dx == trim_xy exactly), so the native computation stays at
+    # the correct dx -- interpolate_target_kernel resamples the rest.
+    n_native = max(1, round(n * trim_xy / box_xy))
+    nz_native = max(1, round(nz * trim_z / box_z))
+
+    vox = soft_voxelize_coordinates(
+        trimmed, grid_shape=(nz_native, n_native, n_native), voxel_size=dx
+    )
+    amplitude = torch.abs(fft3(vox, shift=True)) / (trimmed.shape[0] ** 0.5)
+    _, mdsim_f_radial_avg = radial_profile_3d(amplitude, return_r=True)
+
+    mdsim_dk = 1 / n_native / dx
     mdsim_radial_k = torch.arange(len(mdsim_f_radial_avg)) * mdsim_dk
     return mdsim_radial_k, mdsim_f_radial_avg
 

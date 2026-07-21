@@ -25,6 +25,7 @@ dependencies = [
     "torch>=2.5.0",
     "torchinterp1d>=1.1",
     "tqdm>=4.67.1",
+    "vesin-torch>=0.6.0",
 ]
 
 [project.optional-dependencies]
@@ -75,6 +76,7 @@ module = [
     "starfile.*",
     "torchinterp1d.*",
     "tqdm.*",
+    "vesin_torch.*",
 ]
 ignore_missing_imports = true
 

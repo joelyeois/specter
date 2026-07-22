@@ -293,9 +293,7 @@ class MLBOP:
             else nan,
         }
 
-    def compute_energy(
-        self, atoms: Atoms, progressbar: bool = True
-    ) -> dict[str, float]:
+    def compute_energy(self, atoms: Atoms) -> dict[str, float]:
         """
         Compute total, per-atom ML-BOP energy and O-O structural statistics.
 
@@ -307,10 +305,6 @@ class MLBOP:
             automatically, including cells smaller than the cutoff (ASE's
             neighbor list transparently extends to however many periodic
             images are needed).
-        progressbar : bool, optional
-            Unused -- kept for backwards compatibility. The computation
-            below is a single batched op with no per-atom loop to report
-            progress over.
 
         Returns
         -------
@@ -456,7 +450,6 @@ def mlbop_energy(
     coordinates: torch.Tensor,
     box_size: tuple[float, float, float] | float,
     pbc: bool = True,
-    progressbar: bool = True,
 ) -> dict[str, float]:
     """
     Score a single generated ice bead configuration with the ML-BOP potential.
@@ -483,10 +476,6 @@ def mlbop_energy(
         ``coordinates``. A single float is broadcast to a cubic box.
     pbc : bool, optional
         Whether to apply periodic boundary conditions using ``box_size``.
-        Default is True, matching the periodic tiling used when assembling
-        ice volumes (:func:`~specter.ice._helpers.assemble_big_ice`).
-    progressbar : bool, optional
-        Whether to show a progress bar over the per-atom energy loop.
         Default is True.
 
     Returns
@@ -524,4 +513,4 @@ def mlbop_energy(
     if pbc:
         atoms = _ensure_min_cell_size(atoms, model.r_cut)
 
-    return model.compute_energy(atoms, progressbar=progressbar)
+    return model.compute_energy(atoms)

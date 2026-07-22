@@ -21,7 +21,7 @@ def test_mlbop_energy_isolated_dimer_matches_closed_form():
     r = 3.0
     coords = torch.tensor([[0.0, 0.0, 0.0], [r, 0.0, 0.0]])
 
-    result = mlbop_energy(coords, box_size=20.0, pbc=False, progressbar=False)
+    result = mlbop_energy(coords, box_size=20.0, pbc=False)
 
     p = ML_BOP_PARAMS
     f_R = p["A"] * np.exp(-p["lambda1"] * r)
@@ -53,12 +53,8 @@ def test_mlbop_energy_ice_like_spacing_scores_lower_than_overlapping():
         torch.rand(lattice_coords.shape[0], 3) * 0.5
     )  # crammed into 0.5 Å cube
 
-    lattice_result = mlbop_energy(
-        lattice_coords, box_size=box, pbc=True, progressbar=False
-    )
-    overlapping_result = mlbop_energy(
-        overlapping_coords, box_size=box, pbc=True, progressbar=False
-    )
+    lattice_result = mlbop_energy(lattice_coords, box_size=box, pbc=True)
+    overlapping_result = mlbop_energy(overlapping_coords, box_size=box, pbc=True)
 
     assert lattice_result["E_per_atom"] < overlapping_result["E_per_atom"]
     assert overlapping_result["E_per_atom"] > 0  # net repulsive when beads overlap
@@ -97,6 +93,6 @@ def test_mlbop_energy_shifts_centred_coordinates_into_non_negative_range(monkeyp
     monkeypatch.setattr(energy_module, "Atoms", spy_atoms)
 
     coords = torch.tensor([[-5.0, -5.0, -5.0], [5.0, 5.0, 5.0]])
-    mlbop_energy(coords, box_size=20.0, pbc=False, progressbar=False)
+    mlbop_energy(coords, box_size=20.0, pbc=False)
 
     assert (captured["positions"] >= 0).all()

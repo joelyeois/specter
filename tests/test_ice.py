@@ -6,7 +6,6 @@ import pytest
 import torch
 
 from specter.ice import GradientSKIcemaker, RandomIcemaker
-from specter.ice._helpers import assemble_big_ice
 from specter.ice._kernels import (
     build_atomic_potential_kernel,
     compute_native_target,
@@ -17,7 +16,7 @@ from specter.ice._kernels import (
 
 
 def test_gradientskicemaker_forwards_custom_mdsim_target_path(tmp_path):
-    """GradientSKIcemaker should forward mdsim_target_path to its internal APIcemaker."""
+    """GradientSKIcemaker should forward mdsim_target_path to its own target loading."""
     custom_target = torch.linspace(1.0, 0.0, 80)
     target_path = tmp_path / "custom_target.pt"
     torch.save(custom_target, target_path)
@@ -28,30 +27,6 @@ def test_gradientskicemaker_forwards_custom_mdsim_target_path(tmp_path):
     )
 
     assert not torch.allclose(custom_gd.f_target, default_gd.f_target)
-
-
-# ---------------------------------------------------------------------------
-# assemble_big_ice — general block-tiling helper (used directly by
-# MDSimDump/ExtXYZDump's own generate_big_ice via arrays.py's
-# tile_volume_from_blocks_blended; not used by IceBank, which tiles in
-# coordinate space instead -- see specter.ice._bank).
-# ---------------------------------------------------------------------------
-
-
-def test_assemble_big_ice_shape_and_finite():
-    torch.manual_seed(0)
-    cubes = torch.rand(4, 8, 8, 8)
-    out = assemble_big_ice(cubes, (2, 20, 20, 20))
-    assert out.shape == (2, 20, 20, 20)
-    assert torch.isfinite(out).all()
-
-
-def test_assemble_big_ice_replace_faces_false_skips_face_replacement():
-    torch.manual_seed(1)
-    cubes = torch.rand(4, 8, 8, 8)
-    out = assemble_big_ice(cubes, (1, 8, 8, 8), replace_faces=False)
-    assert out.shape == (1, 8, 8, 8)
-    assert torch.isfinite(out).all()
 
 
 # ---------------------------------------------------------------------------
@@ -82,23 +57,6 @@ def test_kernels_kspace_grid_shape_and_dc_center():
     assert torch.isfinite(K).all()
     # DC (zero frequency) sits at the center voxel after fftshift.
     assert K[nz // 2, n // 2, n // 2].item() == pytest.approx(0.0)
-
-
-def test_kernels_interpolate_target_half_matches_full_slice_and_flip():
-    n, nz, dx = 16, 16, 1.0
-    K = ice_kspace_radial_grid(n, nz, dx)
-    mdsim_radial_k, mdsim_f_radial_avg = compute_native_target(n=n, nz=nz, dx=dx)
-    n_ice_molecules = 1000.0
-
-    full = interpolate_target_kernel(
-        K, mdsim_radial_k, mdsim_f_radial_avg, n_ice_molecules
-    )
-    half = interpolate_target_kernel(
-        K, mdsim_radial_k, mdsim_f_radial_avg, n_ice_molecules, half=True
-    )
-    n_out = full.shape[-1]
-    expected_half = torch.flip(full[:, :, : n_out // 2 + 1], dims=[2])
-    assert torch.allclose(half, expected_half)
 
 
 def test_gradientskicemaker_ice_kernel_matches_direct_build():
@@ -336,8 +294,8 @@ def test_gradientskicemaker_mlbop_target_matches_target_not_unbounded_minimize()
         tol=None,
     )
 
-    e_min = gd_min.mlbop_energy(progressbar=False)["E_per_atom"]
-    e_target = gd_target.mlbop_energy(progressbar=False)["E_per_atom"]
+    e_min = gd_min.mlbop_energy()["E_per_atom"]
+    e_target = gd_target.mlbop_energy()["E_per_atom"]
 
     assert abs(e_target - target) < abs(e_min - target)
 
@@ -394,7 +352,7 @@ def test_randomicemaker_mlbop_energy():
     rm = RandomIcemaker(n=16, dx=1.0, progressbars=False)
     rm.init_random()
 
-    result = rm.mlbop_energy(progressbar=False)
+    result = rm.mlbop_energy()
 
     assert set(result) == _MLBOP_KEYS
     assert torch.isfinite(torch.tensor(result["E_total"]))
@@ -404,7 +362,7 @@ def test_gradientskicemaker_mlbop_energy():
     gd = GradientSKIcemaker(n=16, dx=1.0, progressbars=False)
     gd.init_random()
 
-    result = gd.mlbop_energy(progressbar=False)
+    result = gd.mlbop_energy()
 
     assert set(result) == _MLBOP_KEYS
     assert torch.isfinite(torch.tensor(result["E_total"]))

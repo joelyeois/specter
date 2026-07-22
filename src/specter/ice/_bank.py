@@ -418,9 +418,9 @@ class IceBank(L.LightningModule):
         """
         Short local MLBOP-only relaxation of atoms near tile seams, holding
         every other atom fixed. See ``dev/ice/seam_relax_256_assemble.py``
-        for the validation behind this (naive tiling: E/atom flips
-        favorable-to-unfavorable at the seams; this recovers most of it in
-        a few seconds -- see the seaming-strategy discussion this session).
+        for the validation behind this: naive tiling alone leaves E/atom
+        flipped from favorable to unfavorable at the seams, and this
+        recovers most of it within a few seconds.
 
         Explicitly wrapped in ``torch.enable_grad()`` since this is called
         from ``generate_big_ice``/``generate_big_ice_deltas``, which callers
@@ -618,9 +618,7 @@ class IceBank(L.LightningModule):
     # Diagnostics
     # ------------------------------------------------------------------
 
-    def mlbop_energy(
-        self, pbc: bool = False, progressbar: bool = True
-    ) -> dict[str, float]:
+    def mlbop_energy(self, pbc: bool = False) -> dict[str, float]:
         """
         Score the last-extracted crop against the ML-BOP potential.
 
@@ -635,9 +633,6 @@ class IceBank(L.LightningModule):
         ----------
         pbc : bool, optional
             Whether to treat the crop as periodic. Default is False.
-        progressbar : bool, optional
-            Whether to show a progress bar over the per-atom energy loop.
-            Default is True.
 
         Returns
         -------
@@ -652,9 +647,7 @@ class IceBank(L.LightningModule):
             self.box_x is not None and self.box_y is not None and self.box_z is not None
         )
         box = (self.box_x, self.box_y, self.box_z)
-        return _mlbop_energy(
-            self.positions, box_size=box, pbc=pbc, progressbar=progressbar
-        )
+        return _mlbop_energy(self.positions, box_size=box, pbc=pbc)
 
     def plot_diagnostics(
         self, save_path: str | None = None, show: bool = True
@@ -699,9 +692,7 @@ class IceBank(L.LightningModule):
                 config["dx"],
             )
             labels.append(os.path.basename(path))
-            energies.append(
-                _mlbop_energy(pos, box_size=(box_L,) * 3, pbc=True, progressbar=False)
-            )
+            energies.append(_mlbop_energy(pos, box_size=(box_L,) * 3, pbc=True))
             vox = soft_voxelize_coordinates(
                 pos, grid_shape=(n, n, n), voxel_size=dx, periodic=True
             )
@@ -781,6 +772,18 @@ def build_ice_cache(
     meant to be run once (or occasionally, to extend/refresh the library),
     not per-session.
 
+    This function runs all ``num_configs`` sequentially, on a single
+    device, in one process. The bundled ``ice-data/ice_cache`` (20 configs
+    at ``n=256, dx=1.0``) was instead produced with
+    ``dev/ice/generate_ice_cache_worker.py``, which builds one config per
+    subprocess invocation -- letting configs run in parallel across
+    multiple GPUs, and letting a single config's transient failure (e.g. a
+    GPU OOM from other processes sharing the device) be retried in
+    isolation without losing the rest of the batch. Prefer that script over
+    this function for another large, production-scale generation run;
+    reach for this function for smaller/one-off library extensions where
+    that operational overhead isn't worth it.
+
     ``n_steps=600`` (vs. the class-level default of 400): S(k) gains taper
     by ~200-300 steps at this scale, but ``E_per_atom`` keeps improving out
     past 600 for ~527k-atom systems -- since these configs are permanent,
@@ -820,7 +823,7 @@ def build_ice_cache(
         history = gd.optimize(
             n_steps=n_steps, record_every=n_steps, tol=1e-4, patience=10
         )
-        energy = gd.mlbop_energy(progressbar=False)
+        energy = gd.mlbop_energy()
         assert gd.positions is not None
 
         torch.save(

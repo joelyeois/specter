@@ -8,7 +8,6 @@ import torch.nn.functional as F
 from scipy import constants as _sc
 
 from .. import rotations
-from ..arrays import tile_volume_from_blocks_blended
 
 avogadro = _sc.Avogadro
 density_of_amorphous_ice = 0.94  # [g/cm3]
@@ -197,94 +196,3 @@ def torch_peak_local_max(
 
     peaks = torch.stack([z, y, x_], dim=2)  # (B, num_peaks, 3)
     return peaks
-
-
-def replace_outer_faces(tensors: torch.Tensor) -> torch.Tensor:
-    """
-    Replace the 6 outer faces of a batch of 3D tensors with random inner slices.
-
-    Prevents boundary discontinuities when tiling ice blocks by filling each
-    face with a copy of a randomly chosen interior slice.
-
-    Parameters
-    ----------
-    tensors : torch.Tensor
-        Batch of 3D volumes, shape (N, D, H, W). Modified in-place.
-
-    Returns
-    -------
-    torch.Tensor
-        Modified tensors with outer faces replaced.
-    """
-    N, D, H, W = tensors.shape
-
-    if D <= 2 or H <= 2 or W <= 2:
-        raise ValueError("Tensor too small to have inner slices")
-
-    # Random inner indices for each tensor in the batch
-    z_idx = torch.randint(1, D - 1, (N,))
-    y_idx = torch.randint(1, H - 1, (N,))
-    x_idx = torch.randint(1, W - 1, (N,))
-
-    batch_idx = torch.arange(N)
-
-    # Front/back faces
-    tensors[batch_idx, 0, :, :] = tensors[batch_idx, z_idx, :, :]
-    tensors[batch_idx, -1, :, :] = tensors[batch_idx, z_idx, :, :]
-
-    # Top/bottom faces
-    tensors[batch_idx, :, 0, :] = tensors[batch_idx, :, y_idx, :]
-    tensors[batch_idx, :, -1, :] = tensors[batch_idx, :, y_idx, :]
-
-    # Left/right faces
-    tensors[batch_idx, :, :, 0] = tensors[batch_idx, :, :, x_idx]
-    tensors[batch_idx, :, :, -1] = tensors[batch_idx, :, :, x_idx]
-
-    return tensors
-
-
-def assemble_big_ice(
-    cubes: torch.Tensor,
-    target_shape: tuple[int, int, int, int],
-    overlap_frac: float = 0.5,
-    conserve_sum: bool = True,
-    replace_faces: bool = True,
-) -> torch.Tensor:
-    """
-    Assemble a bank of unique ice cubes into a large volume.
-
-    Single shared implementation of "tile blocks into a big volume" for all
-    ice-generation algorithms — every algorithm class is responsible only for
-    producing unique cubes (``generate_ice``); this function is the one place
-    that turns those cubes into a large volume, so tiling behavior (and any
-    future changes to it) doesn't need to be kept in sync across each class.
-
-    Parameters
-    ----------
-    cubes : torch.Tensor
-        Bank of unique ice cubes, shape ``(N_blocks, S, S, S)``.
-    target_shape : tuple of int
-        Desired output shape ``(N_batch, A, B, C)``.
-    overlap_frac : float, optional
-        Forwarded to :func:`~specter.arrays.tile_volume_from_blocks_blended`.
-        Default is 0.5.
-    conserve_sum : bool, optional
-        Forwarded to :func:`~specter.arrays.tile_volume_from_blocks_blended`.
-        Default is True.
-    replace_faces : bool, optional
-        If True (default), replace each cube's outer faces via
-        :func:`replace_outer_faces` before tiling.
-
-    Returns
-    -------
-    torch.Tensor
-        Assembled volume, shape ``(N_batch, A, B, C)``.
-    """
-    if replace_faces:
-        cubes = replace_outer_faces(cubes.clone())
-    return tile_volume_from_blocks_blended(
-        cubes,
-        target_shape,
-        overlap_frac=overlap_frac,
-        conserve_sum=conserve_sum,
-    )

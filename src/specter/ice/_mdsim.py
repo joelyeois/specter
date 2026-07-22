@@ -437,7 +437,7 @@ class MDSimDump:
         """
         coords_list = self.get_coordinates(frames)
         return [
-            _mlbop_energy(coords, box_size=self.trim_size, pbc=pbc, progressbar=False)
+            _mlbop_energy(coords, box_size=self.trim_size, pbc=pbc)
             for coords in track(
                 coords_list,
                 description="Scoring frames (ML-BOP)",
@@ -914,7 +914,7 @@ class ExtXYZDump:
         frame_list = self._resolve_frames(frames, t_min, t_max)
         model = MLBOP()
         return [
-            model.compute_energy(self._atoms_list[i], progressbar=False)
+            model.compute_energy(self._atoms_list[i])
             for i in track(
                 frame_list,
                 description="Scoring frames (ML-BOP)",

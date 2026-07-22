@@ -6,7 +6,7 @@ import pytest
 import torch
 
 from specter.ice import GradientSKIcemaker, IceBank
-from specter.ice._bank import random_rotation_matrix
+from specter.ice._bank import build_ice_cache, random_rotation_matrix
 from specter.ice._helpers import ndensity_of_amorphous_ice
 
 
@@ -74,9 +74,9 @@ def test_icebank_raises_for_oversized_request(tmp_path):
 
 def test_icebank_mlbop_energy_matches_source_quality(tmp_path):
     """A crop's local structure should be inherited from its source, not
-    degraded by the extraction itself -- same story validated in
-    dev/ice/seam_relax_256_*.py this session (crop vs source E_per_atom
-    differ only by a gentle edge-truncation effect)."""
+    degraded by the extraction itself -- same story validated at production
+    scale in dev/ice/seam_relax_256_*.py (crop vs source E_per_atom differ
+    only by a gentle edge-truncation effect)."""
     torch.manual_seed(42)
     gd = GradientSKIcemaker(n=32, dx=1.0, progressbars=False)
     gd.init_random()
@@ -88,7 +88,7 @@ def test_icebank_mlbop_energy_matches_source_quality(tmp_path):
         mlbop_target=-0.413,
         tol=None,
     )
-    source_energy = gd.mlbop_energy(progressbar=False)
+    source_energy = gd.mlbop_energy()
     path = tmp_path / "config_000.pt"
     torch.save(
         {"positions": gd.positions.half(), "box_L": 32.0, "n": 32, "dx": 1.0}, path
@@ -97,18 +97,18 @@ def test_icebank_mlbop_energy_matches_source_quality(tmp_path):
     cache = IceBank(str(tmp_path), progressbars=False)
     torch.manual_seed(7)
     cache.generate_ice_deltas(n=16, dx=1.0, batchsize=1)
-    crop_energy = cache.mlbop_energy(progressbar=False)
+    crop_energy = cache.mlbop_energy()
 
     assert abs(crop_energy["E_per_atom"] - source_energy["E_per_atom"]) < 0.3
     assert abs(crop_energy["rij_var"] - source_energy["rij_var"]) < 0.1
 
 
 def test_icebank_full_size_crop_atom_count_matches_density(tmp_path):
-    """Regression test for the periodic-image bug found this session: a
-    crop whose extent equals the source's own box size needs reach >
-    box_L/2, where the naive single-nearest-image wraparound silently
-    drops atoms. Requesting a crop at == the source's own box size should
-    still recover close to the expected atom count."""
+    """Regression test for a periodic-image bug: a crop whose extent equals
+    the source's own box size needs reach > box_L/2, where the naive
+    single-nearest-image wraparound silently drops atoms. Requesting a crop
+    at == the source's own box size should still recover close to the
+    expected atom count."""
     torch.manual_seed(3)
     gd = GradientSKIcemaker(n=24, dx=1.0, progressbars=False)
     gd.init_random()
@@ -174,11 +174,11 @@ def test_icebank_generate_big_ice_relaxation_improves_energy(tmp_path):
 
     torch.manual_seed(5)
     cache.generate_big_ice_deltas(n=64, dx=1.0, batchsize=1, relax_steps=0)
-    e_naive = cache.mlbop_energy(pbc=False, progressbar=False)
+    e_naive = cache.mlbop_energy(pbc=False)
 
     torch.manual_seed(5)
     cache.generate_big_ice_deltas(n=64, dx=1.0, batchsize=1, relax_steps=50)
-    e_relaxed = cache.mlbop_energy(pbc=False, progressbar=False)
+    e_relaxed = cache.mlbop_energy(pbc=False)
 
     assert e_relaxed["E_per_atom"] < e_naive["E_per_atom"]
     assert abs(e_relaxed["E_per_atom"] - (-0.413)) < abs(
@@ -195,4 +195,33 @@ def test_icebank_generate_big_ice_request_fitting_single_tile(tmp_path):
     torch.manual_seed(0)
     ice = cache.generate_big_ice(n=32, dx=1.0, batchsize=1, relax_steps=10)
     assert ice.shape == (1, 32, 32, 32)
+    assert torch.isfinite(ice).all()
+
+
+def test_build_ice_cache_writes_loadable_configs(tmp_path):
+    """Smoke test: build_ice_cache() is a slower, single-process alternative
+    to dev/ice/generate_ice_cache_worker.py (see its own docstring) for
+    generating cache entries -- check its output round-trips through
+    IceBank at a tiny, fast scale, not that it converges well."""
+    torch.manual_seed(0)
+    build_ice_cache(
+        str(tmp_path),
+        num_configs=2,
+        n=8,
+        dx=1.0,
+        n_steps=3,
+        device="cpu",
+        seed_start=0,
+        progressbars=False,
+    )
+
+    written = sorted(tmp_path.glob("config_*.pt"))
+    assert len(written) == 2
+    assert written[0].name == "config_000.pt"
+    assert written[1].name == "config_001.pt"
+
+    cache = IceBank(str(tmp_path), progressbars=False)
+    assert len(cache) == 2
+    ice = cache.generate_ice(n=8, dx=1.0, batchsize=1)
+    assert ice.shape == (1, 8, 8, 8)
     assert torch.isfinite(ice).all()

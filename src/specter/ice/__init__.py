@@ -12,7 +12,6 @@ from ._helpers import (
     density_of_amorphous_ice,
     molar_mass_of_water,
     ndensity_of_amorphous_ice,
-    replace_outer_faces,
     rfftn,
     torch_peak_local_max,
     volume_of_ice,
@@ -41,5 +40,4 @@ __all__ = [
     "volume_of_ice",
     "rfftn",
     "torch_peak_local_max",
-    "replace_outer_faces",
 ]

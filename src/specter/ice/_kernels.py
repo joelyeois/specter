@@ -247,7 +247,6 @@ def interpolate_target_kernel(
     mdsim_radial_k: torch.Tensor,
     mdsim_f_radial_avg: torch.Tensor,
     n_ice_molecules: float,
-    half: bool = False,
 ) -> torch.Tensor:
     """
     Interpolate the 1D MD-simulation radial-average target onto a 3D k-grid.
@@ -257,39 +256,22 @@ def interpolate_target_kernel(
     K : torch.Tensor
         DC-centered 3D k-space radial magnitude grid, shape ``(nz, n, n)`` — see
         :func:`ice_kspace_radial_grid`. Must be radially symmetric (a function of
-        ``|K|`` only) for the ``half=True`` half-kernel to be correct (see Notes).
+        ``|K|`` only).
     mdsim_radial_k, mdsim_f_radial_avg : torch.Tensor
         Target radial profile — see :func:`load_mdsim_f_radial_avg`.
     n_ice_molecules : float
         Number of ice molecules in the target volume; scales the interpolated
         amplitude and sets the DC (center) term.
-    half : bool, optional
-        If True, return the rfftn half-kernel view instead of the full kernel.
 
     Returns
     -------
     torch.Tensor
-        Full kernel, shape ``K.shape``, or (if ``half``) the half-kernel, shape
-        ``(nz, n, n // 2 + 1)``.
-
-    Notes
-    -----
-    ``half=True`` builds the half-kernel by flipping the first half of the fully
-    *centered* kernel along the x-axis, rather than building a second,
-    separately x-unshifted K-grid. This is only valid because the kernel is
-    radially symmetric (``f(-kx) == f(kx)``, since it depends only on ``|K|``):
-    for such a kernel, the centered array's first half (most-negative-frequency
-    through DC) is the mirror image of the unshifted rfftn half (DC through
-    most-positive-frequency), so flipping one gives the other exactly. The
-    half-kernel is x-axis-unshifted / z,y-axes-centered, matching the layout
-    ``torch.fft.irfftn`` expects after only ``ifftshift``-ing the z, y axes.
+        Full kernel, shape ``K.shape``.
     """
     nz, n, _ = K.shape
     interp = interp1d(mdsim_radial_k[1:], mdsim_f_radial_avg[1:], K.ravel())
     kernel = interp.reshape(nz, n, n) * (n_ice_molecules**0.5)
     kernel[nz // 2, n // 2, n // 2] = n_ice_molecules
-    if half:
-        return torch.flip(kernel[:, :, : n // 2 + 1], dims=[2])
     return kernel
 
 

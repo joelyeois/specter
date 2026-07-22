@@ -123,7 +123,7 @@ TiltSeriesGenerator         – generates a tilt series
 ```
 
 - `ImageGenerator` takes a **pre-built volume** tensor; `ImageGeneratorFromCoordinates` builds it from atomic coordinates on the fly via `PotentialBuilder`.
-- Ice makers (`RandomIcemaker`, `APIcemaker`, `MCMCIcemaker`, `GradientSKIcemaker`) generate amorphous ice volumes; `IceBank` (in `ice/_bank.py`) caches them for reuse.
+- `RandomIcemaker` (cheap, instant) and `GradientSKIcemaker` (S(k)/MLBOP-optimised, expensive) generate amorphous ice volumes. `IceBank` (in `ice/_bank.py`) does not build ice itself — it draws randomly rotated/translated crops from a bundled cache of pre-optimised `GradientSKIcemaker` configs (`ice-data/ice_cache/`, shipped with the repo) at near-zero marginal cost, and tiles multiple crops together (with a short local MLBOP seam relaxation) for volumes larger than a single cached config.
 - `Scattering` supports four propagation modes: `multislice`, `rytov`, `firstborn`, `projection` — multislice is most accurate and is the default.
 - `Aberration` (in `aberrations/`) and `Detector` (in `microscope.py`) apply CTF, envelope, and detector MTF in Fourier space.
 
@@ -148,12 +148,12 @@ src/specter/                  # Main source package
     _micrograph.py            # MicrographGenerator
     _tiltseries.py            # TiltSeriesGenerator
   ice/                        # Amorphous ice generation
-    _ap.py                    # APIcemaker (Atomic Potential-based)
-    _mcmc.py                  # MCMCIcemaker
     _random.py                # RandomIcemaker
     _gradient.py              # GradientSKIcemaker
-    _bank.py                  # IceBank (cache)
-    _mdsim.py                 # MDSimDump (legacy support)
+    _bank.py                  # IceBank (cache) + build_ice_cache()
+    _energy.py                # MLBOP coarse-grained water potential (structural diagnostic)
+    _kernels.py               # Shared physics-kernel construction (atomic potential, S(k) target)
+    _mdsim.py                 # MDSimDump/ExtXYZDump (legacy MD trajectory ingestion)
     _helpers.py               # Helper functions (water molecules, FFT, etc.)
   jobs/                       # Job management and persistence
     _job.py                   # Job class
@@ -209,13 +209,12 @@ ice-data/                     # Pre-computed ice data (do not modify)
 - Atomic potentials are parameterised; the Kirkland model is the default and most validated.
 - Coincidence loss is modelled for direct electron detectors — do not remove this when simulating K3 detector outputs.
 - CTF sign conventions follow the standard cryo-EM convention (defocus positive = underfocus).
-- Ice volumes are assembled via `tile_volume_from_blocks_blended()` (in `arrays.py`) — overlap-add tiling with random roll/flip/rotation augmentation per tile — do not replace this with a plain repeat/tile or hard-edge concatenation (`tile_volume_from_blocks()`), which would produce visible seams. `IceBank` (via `ice/_helpers.py::assemble_big_ice`) is the sole place ice tiling happens; the individual algorithm classes (`GradientSKIcemaker`, `APIcemaker`, `MCMCIcemaker`, `RandomIcemaker`) only produce unique blocks (`generate_ice`), they don't assemble large volumes themselves.
-- MD simulation dump ingestion (`get_mdsim`, `get_mdsim_file`, etc.) was removed from `Icemaker`; ice structure is now driven purely by pre-computed kernels in `ice-data/`.
+- `IceBank` tiles volumes larger than a single cached config in **coordinate space**: it draws multiple independently rotated/translated crops (`_place_tiles`), places them side by side, and heals the tile boundaries with a short local MLBOP relaxation (`_relax_seams`) rather than voxel-space blending — do not replace this with a plain repeat/tile or hard-edge concatenation, which would leave visible seams (and, unrelaxed, measurably unfavorable energy at the boundaries). `tile_volume_from_blocks_blended()` (in `arrays.py`) is a separate, still-used utility for **voxel-space** tiling — overlap-add with random roll/flip/rotation augmentation per tile — used by `MDSimDump`/`ExtXYZDump` to assemble MD trajectory frames into larger volumes, not by `IceBank`. `RandomIcemaker`/`GradientSKIcemaker` only produce single unique blocks (`generate_ice`); they don't assemble large volumes themselves.
+- Ice structure is driven by `GradientSKIcemaker` (optimised against pre-computed S(k)/MLBOP targets in `ice-data/`) and cached via `IceBank`; `RandomIcemaker` is a fast, low-fidelity fallback for quick tests.
 
 ## Reproducibility
 
 - Use `specter.seed(n)` (re-exported from `random_seed.py`) to set a global seed before any simulation for reproducible outputs.
-- `MCMCIcemaker.init_random()` no longer accepts a seed argument — call `specter.seed()` before instantiating if you need reproducibility.
 
 ## Key Dependencies
 

@@ -4,7 +4,7 @@ from ._bank import (
     default_ice_cache_dir,
     random_rotation_matrix,
 )
-from ._energy import MLBOP, mlbop_energy
+from ._energy import MLBOP
 from ._gradient import GradientSKIcemaker
 from ._helpers import (
     avogadro,
@@ -30,7 +30,6 @@ __all__ = [
     "default_ice_cache_dir",
     "random_rotation_matrix",
     "MLBOP",
-    "mlbop_energy",
     "avogadro",
     "density_of_amorphous_ice",
     "molar_mass_of_water",

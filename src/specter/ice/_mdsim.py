@@ -18,7 +18,6 @@ from ..coords import radial_distribution_function
 from ..fft import fft3
 from ..progress import track
 from ._energy import MLBOP
-from ._energy import mlbop_energy as _mlbop_energy
 
 
 class MDSimDump:
@@ -412,12 +411,12 @@ class MDSimDump:
         """
         Score frames against the ML-BOP coarse-grained water potential.
 
-        See :func:`specter.ice._energy.mlbop_energy` for what the returned
-        fields mean. No periodic boundary conditions are applied by default,
-        consistent with :meth:`compute_rdf` — coordinates are a hard-edge
-        cube trimmed out of a larger MD box, not a self-contained periodic
-        tile, so wrapping them would create artificial neighbor contacts at
-        the trim boundary.
+        See :meth:`specter.ice._energy.MLBOP.compute_energy` for what the
+        returned fields mean. No periodic boundary conditions are applied
+        by default, consistent with :meth:`compute_rdf` — coordinates are a
+        hard-edge cube trimmed out of a larger MD box, not a self-contained
+        periodic tile, so wrapping them would create artificial neighbor
+        contacts at the trim boundary.
 
         Parameters
         ----------
@@ -436,15 +435,18 @@ class MDSimDump:
             as ``frames``.
         """
         coords_list = self.get_coordinates(frames)
-        return [
-            _mlbop_energy(coords, box_size=self.trim_size, pbc=pbc)
-            for coords in track(
-                coords_list,
-                description="Scoring frames (ML-BOP)",
-                disable=not progressbar,
-                transient=True,
-            )
-        ]
+        model = MLBOP(device=coords_list[0].device if coords_list else "cpu")
+        results = []
+        for coords in track(
+            coords_list,
+            description="Scoring frames (ML-BOP)",
+            disable=not progressbar,
+            transient=True,
+        ):
+            with torch.no_grad():
+                result = model.compute_energy(coords, box_size=self.trim_size, pbc=pbc)
+            results.append({k: v.item() for k, v in result.items()})
+        return results
 
     def generate_ice(
         self,
@@ -888,9 +890,10 @@ class ExtXYZDump:
         """
         Score frames against the ML-BOP coarse-grained water potential.
 
-        Unlike :func:`specter.ice._energy.mlbop_energy` (which builds an
-        orthorhombic box from a coordinate tensor), this uses each frame's
-        real periodic cell exactly as parsed from the extxyz file --
+        Passes each frame's own cell matrix (``atoms.cell.array``, a
+        ``(3, 3)`` tensor of lattice vectors) straight to
+        :meth:`specter.ice._energy.MLBOP.compute_energy` instead of
+        reconstructing an orthorhombic box from a coordinate tensor --
         correct even for triclinic MD cells, and needs no box
         reconstruction since :class:`ase.Atoms` already carries the right
         cell and ``pbc``.
@@ -913,15 +916,21 @@ class ExtXYZDump:
         """
         frame_list = self._resolve_frames(frames, t_min, t_max)
         model = MLBOP()
-        return [
-            model.compute_energy(self._atoms_list[i])
-            for i in track(
-                frame_list,
-                description="Scoring frames (ML-BOP)",
-                disable=not progressbar,
-                transient=True,
-            )
-        ]
+        results = []
+        for i in track(
+            frame_list,
+            description="Scoring frames (ML-BOP)",
+            disable=not progressbar,
+            transient=True,
+        ):
+            atoms = self._atoms_list[i]
+            positions = torch.as_tensor(atoms.positions, dtype=torch.float32)
+            cell = torch.as_tensor(atoms.cell.array, dtype=torch.float32)
+            pbc = bool(np.any(atoms.pbc))
+            with torch.no_grad():
+                result = model.compute_energy(positions, box_size=cell, pbc=pbc)
+            results.append({k: v.item() for k, v in result.items()})
+        return results
 
     def generate_ice(
         self,

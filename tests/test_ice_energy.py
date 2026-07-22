@@ -6,9 +6,13 @@ import numpy as np
 import pytest
 import torch
 
-import specter.ice._energy as energy_module
-from specter.ice import mlbop_energy
+from specter.ice import MLBOP
 from specter.ice._energy import ML_BOP_PARAMS
+
+
+def _energy(coords, box_size, pbc=True):
+    result = MLBOP().compute_energy(coords, box_size=box_size, pbc=pbc)
+    return {k: v.item() for k, v in result.items()}
 
 
 def test_mlbop_energy_isolated_dimer_matches_closed_form():
@@ -21,7 +25,7 @@ def test_mlbop_energy_isolated_dimer_matches_closed_form():
     r = 3.0
     coords = torch.tensor([[0.0, 0.0, 0.0], [r, 0.0, 0.0]])
 
-    result = mlbop_energy(coords, box_size=20.0, pbc=False)
+    result = _energy(coords, box_size=20.0, pbc=False)
 
     p = ML_BOP_PARAMS
     f_R = p["A"] * np.exp(-p["lambda1"] * r)
@@ -53,8 +57,8 @@ def test_mlbop_energy_ice_like_spacing_scores_lower_than_overlapping():
         torch.rand(lattice_coords.shape[0], 3) * 0.5
     )  # crammed into 0.5 Å cube
 
-    lattice_result = mlbop_energy(lattice_coords, box_size=box, pbc=True)
-    overlapping_result = mlbop_energy(overlapping_coords, box_size=box, pbc=True)
+    lattice_result = _energy(lattice_coords, box_size=box, pbc=True)
+    overlapping_result = _energy(overlapping_coords, box_size=box, pbc=True)
 
     assert lattice_result["E_per_atom"] < overlapping_result["E_per_atom"]
     assert overlapping_result["E_per_atom"] > 0  # net repulsive when beads overlap
@@ -62,37 +66,85 @@ def test_mlbop_energy_ice_like_spacing_scores_lower_than_overlapping():
 
 def test_mlbop_energy_rejects_wrong_shape():
     with pytest.raises(ValueError):
-        mlbop_energy(torch.zeros(5, 2), box_size=10.0)
+        MLBOP().compute_energy(torch.zeros(5, 2), box_size=10.0)
 
 
-def test_mlbop_energy_shifts_centred_coordinates_into_non_negative_range(monkeypatch):
+def test_mlbop_energy_translation_invariant():
     """
-    ASE's cell is always anchored at the origin (spans [0, box_size)).
-    Centred input -- e.g. MDSimDump's, GradientSKIcemaker's, or
-    RandomIcemaker's coordinates, which span [-box/2, box/2) -- must be
-    shifted into that range before being handed to ASE.
-
-    This isn't just a convention mismatch: ASE's non-periodic binning
-    silently *clips* negative coordinates onto the boundary bin instead of
-    rejecting them, which folds the entire negative-coordinate half-space
-    into a single bin. Pair counts still come out right at small scale (the
-    same-bin fallback catches same-bin pairs directly), so a "does the
-    energy match" test can't detect this -- it only shows up as the
-    per-bin atom count scaling with N instead of local density, which blew
-    up to a 3.68 TiB allocation for a real 31k-atom MDSimDump frame. So
-    check the actual mechanism directly: the positions ASE receives must
-    never be negative.
+    The vesin-based compute_energy has no origin dependence: shifting every
+    coordinate by the same constant must not change the result, with no
+    special-casing needed for centred (e.g. [-box/2, box/2)) input. (The
+    old ASE-based path anchored its cell at the origin and needed centred
+    coordinates shifted into [0, box_size) first to avoid a binning bug --
+    see git history; that workaround and its test no longer apply.)
     """
-    captured: dict[str, np.ndarray] = {}
-    real_atoms = energy_module.Atoms
+    torch.manual_seed(0)
+    coords = torch.rand(20, 3) * 9.0 - 4.5  # centred in [-4.5, 4.5)
+    box = (9.0, 9.0, 9.0)
 
-    def spy_atoms(*args, **kwargs):
-        captured["positions"] = kwargs["positions"]
-        return real_atoms(*args, **kwargs)
+    result_centred = _energy(coords, box_size=box, pbc=True)
+    result_shifted = _energy(coords + 100.0, box_size=box, pbc=True)
 
-    monkeypatch.setattr(energy_module, "Atoms", spy_atoms)
+    assert result_centred["E_per_atom"] == pytest.approx(
+        result_shifted["E_per_atom"], rel=1e-5
+    )
 
-    coords = torch.tensor([[-5.0, -5.0, -5.0], [5.0, 5.0, 5.0]])
-    mlbop_energy(coords, box_size=20.0, pbc=False)
 
-    assert (captured["positions"] >= 0).all()
+def test_mlbop_energy_accepts_full_cell_matrix():
+    """
+    box_size may be a full (3, 3) cell matrix (rows as lattice vectors, ASE's
+    convention) instead of just a diagonal box -- needed for triclinic MD
+    cells (see ExtXYZDump.mlbop_energy). A diagonal 3x3 matrix must agree
+    exactly with the equivalent tuple form, and a genuinely sheared cell
+    should just work rather than error.
+    """
+    torch.manual_seed(1)
+    coords = torch.rand(20, 3) * 9.0
+    box_tuple = (9.0, 9.0, 9.0)
+    box_matrix = torch.diag(torch.tensor(box_tuple))
+
+    result_tuple = _energy(coords, box_size=box_tuple, pbc=True)
+    result_matrix = _energy(coords, box_size=box_matrix, pbc=True)
+    assert result_tuple["E_per_atom"] == pytest.approx(result_matrix["E_per_atom"])
+
+    box_triclinic = torch.tensor([[9.0, 0.0, 0.0], [2.0, 9.0, 0.0], [1.0, 1.0, 9.0]])
+    result_triclinic = _energy(coords, box_size=box_triclinic, pbc=True)
+    assert np.isfinite(result_triclinic["E_per_atom"])
+
+
+def test_mlbop_energy_small_cell_matches_repeated_reference():
+    """
+    Regression guard for removing the old ASE-path-matching '>= 2x cutoff'
+    restriction: a cell smaller than 2x the ML-BOP cutoff must give the same
+    per-atom energy as the same atoms placed in a properly-repeated, much
+    larger reference cell -- vesin's neighbor search already handles the
+    small-cell case correctly on its own (verified empirically before
+    removing the restriction; see git history), so no manual cell-repeat
+    workaround is needed.
+    """
+    model = MLBOP()
+    L = 5.0  # < 2 * r_cut (~7.1)
+    torch.manual_seed(2)
+    coords = torch.rand(30, 3, dtype=torch.float64) * L
+
+    result_small = model.compute_energy(coords, box_size=L, pbc=True)
+
+    reps = 4
+    offsets = (
+        torch.tensor(
+            [
+                [ix, iy, iz]
+                for ix in range(reps)
+                for iy in range(reps)
+                for iz in range(reps)
+            ],
+            dtype=torch.float64,
+        )
+        * L
+    )
+    coords_big = (coords.unsqueeze(0) + offsets.unsqueeze(1)).reshape(-1, 3)
+    result_big = model.compute_energy(coords_big, box_size=L * reps, pbc=True)
+
+    assert result_small["E_per_atom"].item() == pytest.approx(
+        result_big["E_per_atom"].item(), rel=1e-8
+    )

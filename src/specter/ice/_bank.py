@@ -21,7 +21,6 @@ from ..arrays import soft_voxelize_coordinates
 from ..fft import fftconvolve
 from ..progress import track
 from ._energy import MLBOP
-from ._energy import mlbop_energy as _mlbop_energy
 from ._kernels import build_atomic_potential_kernel
 
 
@@ -154,6 +153,7 @@ class IceBank(L.LightningModule):
         # config got drawn, for any cache mixing config sizes.
         self._configs: list[dict] = [self._load_config(p) for p in self._config_paths]
         self._kernel_cache: dict[float, torch.Tensor] = {}
+        self._source_pos_cache: dict[int, tuple[torch.device, torch.Tensor]] = {}
         self.progressbars = progressbars
 
         self.positions: Optional[torch.Tensor] = None
@@ -184,6 +184,31 @@ class IceBank(L.LightningModule):
         if dx not in self._kernel_cache:
             self._kernel_cache[dx] = build_atomic_potential_kernel(dx, "kirkland")
         return self._kernel_cache[dx]
+
+    def _get_source_pos(self, config: dict) -> torch.Tensor:
+        """
+        Device-resident copy of ``config["positions"]``, cached per config.
+
+        ``config["positions"]`` itself always stays on CPU (that's the
+        eagerly-loaded copy from disk, shared regardless of which device
+        this instance is on). The crop-extraction math in
+        :meth:`_extract_crop` is otherwise CPU-only even when
+        ``self.device`` is a GPU -- moving just the candidate-gathering
+        computation there is a real win when many small crops are drawn in
+        a loop (as :meth:`_place_tiles` does): ~4x faster per call in
+        practice, and cheap in memory (a single ~527k-atom config is a few
+        MB, and the transient candidate tensor per call is ~150-350 MB,
+        trivial next to a modern GPU's total memory) -- see
+        ``dev/ice/`` benchmarking behind this. Invalidated and rebuilt if
+        ``self.device`` changes between calls.
+        """
+        key = id(config)
+        cached = self._source_pos_cache.get(key)
+        if cached is not None and cached[0] == self.device:
+            return cached[1]
+        pos = config["positions"].to(self.device)
+        self._source_pos_cache[key] = (self.device, pos)
+        return pos
 
     # ------------------------------------------------------------------
     # Extraction
@@ -220,16 +245,26 @@ class IceBank(L.LightningModule):
             )
         idx = int(torch.randint(len(candidates), (1,), generator=generator).item())
         config = candidates[idx]
-        source_pos = config["positions"]
         box_L = config["box_L"]
 
-        half_extent = torch.tensor([e / 2 for e in crop_extent])
+        # Random draws stay on CPU regardless of self.device -- generator
+        # (if given) is a CPU torch.Generator by convention throughout this
+        # module/its tests, and these are tiny tensors anyway. Only the
+        # actual candidate-gathering math below (O(n_source_atoms x
+        # n_periodic_images), the real cost for small crops out of a large
+        # source -- see _get_source_pos) runs on self.device.
+        center_cpu = (torch.rand(3, generator=generator) - 0.5) * box_L
+        R_cpu = random_rotation_matrix(generator=generator)
+
+        source_pos = self._get_source_pos(config)
+        half_extent = torch.tensor(
+            [e / 2 for e in crop_extent], device=source_pos.device
+        )
         reach = float(
             half_extent.norm()
         )  # corner-to-center distance of the (possibly non-cubic) crop box
-
-        center = (torch.rand(3, generator=generator) - 0.5) * box_L
-        R = random_rotation_matrix(generator=generator)
+        center = center_cpu.to(source_pos.device)
+        R = R_cpu.to(source_pos.device)
 
         # Gather candidates via periodic wraparound of the source, using
         # enough periodic images to safely cover `reach` regardless of how
@@ -248,7 +283,10 @@ class IceBank(L.LightningModule):
         # wraparound at all) whenever reach <= box_L/2, which is wrong
         # for any center near a box edge.
         m = 1 + math.floor(reach / box_L)
-        shifts = torch.arange(-m, m + 1, dtype=source_pos.dtype) * box_L
+        shifts = (
+            torch.arange(-m, m + 1, dtype=source_pos.dtype, device=source_pos.device)
+            * box_L
+        )
         sx, sy, sz = torch.meshgrid(shifts, shifts, shifts, indexing="ij")
         image_offsets = torch.stack([sx.flatten(), sy.flatten(), sz.flatten()], dim=1)
 
@@ -259,7 +297,7 @@ class IceBank(L.LightningModule):
 
         local = candidates @ R
         in_crop = (local.abs() <= half_extent).all(dim=1)
-        return local[in_crop]
+        return local[in_crop].cpu()
 
     # ------------------------------------------------------------------
     # Generation
@@ -470,9 +508,7 @@ class IceBank(L.LightningModule):
             ):
                 opt.zero_grad()
                 full = torch.cat([frozen, mobile], dim=0)
-                result = model.compute_energy_differentiable(
-                    full, box_size=box, pbc=True
-                )
+                result = model.compute_energy(full, box_size=box, pbc=True)
                 loss = (
                     result["E_per_atom"]
                     if mlbop_target is None
@@ -657,7 +693,7 @@ class IceBank(L.LightningModule):
         """
         Score the last-extracted crop against the ML-BOP potential.
 
-        See :func:`specter.ice._energy.mlbop_energy`. Defaults to
+        See :meth:`specter.ice._energy.MLBOP.compute_energy`. Defaults to
         non-periodic (``pbc=False``), unlike the other icemaker classes --
         an extracted crop is a finite chunk of a larger periodic source, not
         periodic on its own (see :meth:`generate_ice_deltas`). Pass
@@ -672,8 +708,8 @@ class IceBank(L.LightningModule):
         Returns
         -------
         dict[str, float]
-            See :func:`specter.ice._energy.mlbop_energy` for the fields
-            returned.
+            See :meth:`specter.ice._energy.MLBOP.compute_energy` for the
+            fields returned.
         """
         assert (
             self.positions is not None
@@ -682,7 +718,10 @@ class IceBank(L.LightningModule):
             self.box_x is not None and self.box_y is not None and self.box_z is not None
         )
         box = (self.box_x, self.box_y, self.box_z)
-        return _mlbop_energy(self.positions, box_size=box, pbc=pbc)
+        model = MLBOP(device=self.positions.device)
+        with torch.no_grad():
+            result = model.compute_energy(self.positions, box_size=box, pbc=pbc)
+        return {k: v.item() for k, v in result.items()}
 
     def plot_diagnostics(
         self, save_path: str | None = None, show: bool = True
@@ -696,7 +735,10 @@ class IceBank(L.LightningModule):
         Each config is scored with ``pbc=True`` (unlike :meth:`mlbop_energy`'s
         own ``pbc=False`` default) since a full cached config -- unlike an
         extracted crop -- genuinely is the periodic cell it was optimised
-        as.
+        as, and on ``self.device`` (under ``torch.no_grad()`` -- no
+        gradients are needed here): scoring a full ~527k-atom config takes
+        ~0.2s on GPU, so across 20 configs this stays a quick quality check
+        rather than several minutes of CPU time.
 
         Parameters
         ----------
@@ -718,6 +760,7 @@ class IceBank(L.LightningModule):
         from ..fft import fft3
         from ._kernels import compute_native_target
 
+        model = MLBOP(device=self.device)
         labels, energies, sk_profiles, dks = [], [], [], []
         for path, config in zip(self._config_paths, self._configs):
             pos, box_L, n, dx = (
@@ -727,7 +770,11 @@ class IceBank(L.LightningModule):
                 config["dx"],
             )
             labels.append(os.path.basename(path))
-            energies.append(_mlbop_energy(pos, box_size=(box_L,) * 3, pbc=True))
+            with torch.no_grad():
+                result = model.compute_energy(
+                    pos.to(self.device), box_size=(box_L,) * 3, pbc=True
+                )
+            energies.append({k: v.item() for k, v in result.items()})
             vox = soft_voxelize_coordinates(
                 pos, grid_shape=(n, n, n), voxel_size=dx, periodic=True
             )

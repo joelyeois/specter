@@ -38,6 +38,17 @@ Angstrom, and c/d/cos_theta0/n/beta are dimensionless. Consequently
 :meth:`MLBOP.compute_energy` returns energies in eV, provided atomic
 positions are supplied in Angstrom.
 
+BACKEND
+-------
+The pairwise neighbor search runs on `vesin <https://github.com/Luthaf/vesin>`_'s
+``torch`` bindings (the ``vesin-torch`` package), not ASE: it stays entirely
+in ``torch`` (positions on GPU stay on GPU, no host<->device round trip per
+call), supports a general (triclinic) periodic cell as well as an
+orthorhombic one, and its returned distances/displacement vectors are
+themselves differentiable w.r.t. the input positions, so :meth:`MLBOP.
+compute_energy` doubles as a loss term (e.g. in :class:`~specter.ice.
+_bank.IceBank`'s seam relaxation) as well as a QC diagnostic.
+
 NOTE ON THE EXTRA TABLE-3 ROW (m, Gamma, lambda3)
 --------------------------------------------------
 The published parameter table also lists m=1.0, Gamma=1.0, lambda3=0.0.
@@ -53,11 +64,8 @@ from __future__ import annotations
 
 import math
 
-import numpy as np
 import torch
 import vesin_torch
-from ase import Atoms
-from ase.neighborlist import neighbor_list
 
 # ML-BOP, Table 3, Chan et al., Nat. Commun. 10, 379 (2019)
 ML_BOP_PARAMS: dict[str, float] = {
@@ -75,48 +83,11 @@ ML_BOP_PARAMS: dict[str, float] = {
 }
 
 
-def _ensure_min_cell_size(atoms: Atoms, min_length: float) -> Atoms:
-    """
-    Tile a periodic structure so every lattice vector clears ``min_length``.
-
-    Guards against the same neighbor atom appearing via multiple periodic
-    images within the cutoff, which the ML-BOP three-body sum does not
-    disambiguate. A 2x safety margin is used because the minimum-image
-    convention requires each axis to be longer than *twice* the cutoff,
-    not just longer than it.
-
-    Parameters
-    ----------
-    atoms : ase.Atoms
-        Structure to check.
-    min_length : float
-        The interaction cutoff (``r_cut = R + D``) in Angstrom.
-
-    Returns
-    -------
-    ase.Atoms
-        Either the original atoms (if already large enough or non-periodic),
-        or a repeated copy.
-    """
-    if not np.any(atoms.get_pbc()):
-        return atoms
-
-    lengths = atoms.cell.lengths()
-    safe_length = 2.0 * min_length
-    reps = [
-        int(np.ceil(safe_length / length)) if length > 1e-6 else 1 for length in lengths
-    ]
-
-    if all(r <= 1 for r in reps):
-        return atoms
-
-    return atoms.repeat(tuple(reps))
-
-
 class MLBOP:
     """
     Evaluates ML-BOP potential energy for a set of coarse-grained water bead
-    positions, with optional orthorhombic periodic boundary conditions.
+    positions, with optional periodic boundary conditions (orthorhombic or
+    general/triclinic).
 
     Parameters
     ----------
@@ -177,11 +148,10 @@ class MLBOP:
         """
         Batched three-body sum given an already-resolved neighbor pair list.
 
-        Shared by :meth:`compute_energy` (pairs and distances straight from
-        ASE, no grad) and :meth:`compute_energy_differentiable` (same pair
-        indices from ASE, but distances/vectors recomputed from live
-        positions so grad flows through) -- keeping this logic in one place
-        means the two entry points are guaranteed to agree numerically.
+        Shared core used by :meth:`compute_energy`, kept as its own method
+        since it's a substantial, independently-testable piece of physics
+        (the Tersoff-style three-body sum) rather than backend-specific
+        plumbing.
 
         Parameters
         ----------
@@ -293,124 +263,52 @@ class MLBOP:
             else nan,
         }
 
-    def compute_energy(self, atoms: Atoms) -> dict[str, float]:
-        """
-        Compute total, per-atom ML-BOP energy and O-O structural statistics.
-
-        Parameters
-        ----------
-        atoms : ase.Atoms
-            Bead positions in Angstrom. If ``atoms.pbc`` is set (with a
-            non-degenerate cell), periodic boundary conditions are applied
-            automatically, including cells smaller than the cutoff (ASE's
-            neighbor list transparently extends to however many periodic
-            images are needed).
-
-        Returns
-        -------
-        dict[str, float]
-            ``E_total`` (eV), ``E_per_atom`` (eV), ``rij_mean``/``rij_var``
-            (Å, bead-bead distance mean/variance) and ``theta_mean``/
-            ``theta_var`` (cos(theta) mean/variance over all triplets used
-            in the three-body sum).
-        """
-        n_atoms = len(atoms)
-        device = self.device
-        nan_result = {
-            "E_total": 0.0,
-            "E_per_atom": float("nan"),
-            "rij_mean": float("nan"),
-            "rij_var": float("nan"),
-            "theta_mean": float("nan"),
-            "theta_var": float("nan"),
-        }
-        if n_atoms == 0:
-            return nan_result
-
-        # 'i', 'j': neighbor pair indices (each pair appears in both
-        # directions, i.e. bothways=True convention); 'd': scalar distances;
-        # 'D': Cartesian displacement vectors r_j - r_i, already correctly
-        # wrapped through PBC/minimum image by ASE (this part stays on ASE's
-        # cell-list neighbor search, which is what correctly handles
-        # triclinic MD cells -- reimplementing general minimum-image PBC
-        # is not worth it since this isn't the bottleneck).
-        i_idx, j_idx, dists, vecs = neighbor_list("ijdD", atoms, cutoff=self.r_cut)
-        if len(i_idx) == 0:
-            return nan_result
-
-        i_idx_t = torch.as_tensor(i_idx, dtype=torch.long, device=device)
-        j_idx_t = torch.as_tensor(j_idx, dtype=torch.long, device=device)
-        rij_t = torch.as_tensor(dists, dtype=torch.float64, device=device)
-        vec_t = torch.as_tensor(vecs, dtype=torch.float64, device=device)
-
-        result = self._energy_from_pairs(n_atoms, i_idx_t, j_idx_t, rij_t, vec_t)
-        return {k: v.item() for k, v in result.items()}
-
-    def compute_energy_differentiable(
+    def compute_energy(
         self,
         positions: torch.Tensor,
-        box_size: tuple[float, float, float] | float,
+        box_size: tuple[float, float, float] | float | torch.Tensor,
         pbc: bool = True,
     ) -> dict[str, torch.Tensor]:
         """
-        Differentiable counterpart to :meth:`compute_energy`.
-
-        :meth:`compute_energy` takes a plain :class:`ase.Atoms`, which means
-        ``coordinates.detach().cpu().numpy()`` has already happened by the
-        time it runs -- fine for the QC-diagnostic use case, but useless as
-        a loss term since gradients can't flow back to the positions that
-        generated it.
+        Compute total, per-atom ML-BOP energy and O-O structural statistics.
 
         Uses `vesin <https://github.com/Luthaf/vesin>`_'s ``torch`` neighbor
-        list (the ``vesin-torch`` package) instead of ASE: it resolves the
-        same discrete pair list (which atoms are within cutoff, and how many
-        periodic images apart -- inherently non-differentiable choices in
-        any neighbor-search implementation), but its returned distances and
-        displacement vectors are themselves ``torch`` ops wired directly to
-        the input positions, so no manual recomputation is needed and
-        ``E_total``/``E_per_atom`` carry a ``grad_fn`` straight back to
-        ``positions``. Unlike the ASE path, this never leaves ``torch``/the
-        input device -- positions on GPU stay on GPU, with no host sync per
-        call (ASE's neighbor search is numpy/CPU-only, so a differentiable
-        wrapper around it -- an earlier version of this method -- pays a
-        host<->device round trip every optimizer step; profiling that
-        version showed it accounted for roughly a third of its added
-        per-step cost relative to :meth:`compute_energy`).
+        list (the ``vesin-torch`` package): it stays entirely in ``torch``
+        (positions on GPU stay on GPU, no host<->device round trip per
+        call), and its returned distances/displacement vectors are
+        themselves ``torch`` ops wired directly to ``positions``, so
+        ``E_total``/``E_per_atom`` carry a ``grad_fn`` back to it -- this
+        doubles as a differentiable loss term (e.g. in :class:`~specter.
+        ice._bank.IceBank`'s seam relaxation) as well as a QC diagnostic.
 
         Parameters
         ----------
         positions : torch.Tensor
             Bead positions in Angstrom, shape ``(N, 3)``, on ``self.device``.
             May require grad.
-        box_size : float or tuple[float, float, float]
-            Periodic box lengths in Angstrom, in the same axis order as
-            ``positions``. A single float is broadcast to a cubic box.
+        box_size : float, tuple[float, float, float], or torch.Tensor
+            Periodic cell. A single float is broadcast to a cubic
+            orthorhombic cell; a 3-tuple gives an orthorhombic cell's own
+            (x, y, z) lengths (in the same axis order as ``positions``); a
+            ``(3, 3)`` tensor is used directly as a general (triclinic)
+            cell matrix, rows as lattice vectors (ASE's convention).
         pbc : bool, optional
             Whether to apply periodic boundary conditions. Default True.
 
         Returns
         -------
         dict[str, torch.Tensor]
-            Same fields as :meth:`compute_energy`, as 0-d tensors on
-            ``positions``'s device/dtype (``E_total``/``E_per_atom`` retain
-            a ``grad_fn``; the rest are diagnostics with no gradient use).
-
-        Raises
-        ------
-        ValueError
-            If ``pbc`` is True and ``box_size`` is smaller than twice the
-            cutoff along any axis. :meth:`compute_energy` handles this by
-            repeating the ASE cell (see :func:`_ensure_min_cell_size`); this
-            method instead just rejects it, matching that same constraint
-            rather than relying on vesin's (correct, but separately
-            unverified here) handling of that regime -- use a larger box.
+            0-d tensors on ``positions``'s device/dtype: ``E_total`` (eV),
+            ``E_per_atom`` (eV), ``rij_mean``/``rij_var`` (Å, bead-bead
+            distance mean/variance) and ``theta_mean``/``theta_var``
+            (cos(theta) mean/variance over all triplets used in the
+            three-body sum). ``E_total``/``E_per_atom`` retain a
+            ``grad_fn``; the rest are diagnostics with no gradient use.
         """
         if positions.ndim != 2 or positions.shape[-1] != 3:
             raise ValueError(
                 f"positions must have shape (N, 3), got {tuple(positions.shape)}"
             )
-        if isinstance(box_size, (int, float)):
-            box_size = (float(box_size),) * 3
 
         n_atoms = positions.shape[0]
         device = positions.device
@@ -426,16 +324,13 @@ class MLBOP:
         if n_atoms == 0:
             return nan_result
 
-        if pbc and any(length < 2 * self.r_cut for length in box_size):
-            raise ValueError(
-                "box_size is smaller than 2x the ML-BOP cutoff "
-                f"({2 * self.r_cut:.3f} Å) along at least one axis. "
-                "compute_energy() handles this by repeating the ASE cell; "
-                "compute_energy_differentiable() does not -- use a larger "
-                "box_size."
-            )
+        if isinstance(box_size, torch.Tensor):
+            box_t = box_size.to(dtype=dtype, device=device)
+        else:
+            if isinstance(box_size, (int, float)):
+                box_size = (float(box_size),) * 3
+            box_t = torch.diag(torch.as_tensor(box_size, dtype=dtype, device=device))
 
-        box_t = torch.diag(torch.as_tensor(box_size, dtype=dtype, device=device))
         nl = vesin_torch.NeighborList(cutoff=self.r_cut, full_list=True)
         i_idx_t, j_idx_t, rij_t, vec_t = nl.compute(
             positions, box_t, periodic=pbc, quantities="ijdD"
@@ -444,73 +339,3 @@ class MLBOP:
             return nan_result
 
         return self._energy_from_pairs(n_atoms, i_idx_t, j_idx_t, rij_t, vec_t)
-
-
-def mlbop_energy(
-    coordinates: torch.Tensor,
-    box_size: tuple[float, float, float] | float,
-    pbc: bool = True,
-) -> dict[str, float]:
-    """
-    Score a single generated ice bead configuration with the ML-BOP potential.
-
-    Treats every coordinate as a coarse-grained water bead (one bead per
-    water molecule) and reports the ML-BOP energy, a lower-is-more-ice-like
-    structural diagnostic independent of whatever objective the icemaker
-    itself optimized. Not part of any generation hot path — the three-body
-    sum runs as a single batched ``torch`` computation on ``coordinates``'s
-    own device (see :meth:`MLBOP.compute_energy`), but it is still intended
-    for occasional QC checks, not per-batch monitoring.
-
-    Parameters
-    ----------
-    coordinates : torch.Tensor
-        Bead positions in Angstrom, shape ``(N, 3)``. Axis order must match
-        ``box_size``, but is otherwise arbitrary (energies are translation-
-        and axis-order-invariant) — for example ``GradientSKIcemaker.positions``,
-        ``IceBank.positions``, or ``RandomIcemaker.positions`` (``(x, y, z)``,
-        centered at the origin) all work as long as ``box_size`` uses the
-        same axis order.
-    box_size : float or tuple[float, float, float]
-        Periodic box lengths in Angstrom, in the same axis order as
-        ``coordinates``. A single float is broadcast to a cubic box.
-    pbc : bool, optional
-        Whether to apply periodic boundary conditions using ``box_size``.
-        Default is True.
-
-    Returns
-    -------
-    dict[str, float]
-        See :meth:`MLBOP.compute_energy` for the fields returned.
-    """
-    if coordinates.ndim != 2 or coordinates.shape[-1] != 3:
-        raise ValueError(
-            f"coordinates must have shape (N, 3), got {tuple(coordinates.shape)}"
-        )
-
-    if isinstance(box_size, (int, float)):
-        box_size = (float(box_size),) * 3
-
-    device = coordinates.device
-    positions = coordinates.detach().cpu().numpy().astype(float)
-    # ASE's cell is anchored at the origin, spanning [0, box_size) along each
-    # axis. Icemaker coordinate conventions vary (e.g. RandomIcemaker/
-    # GradientSKIcemaker/MDSimDump centre at the origin, [-box/2, box/2)),
-    # and ASE's non-periodic binning silently clips out-of-cell coordinates
-    # to the boundary bin rather than rejecting them -- so centred,
-    # non-periodic input would otherwise pile every atom with a negative
-    # coordinate onto a single edge bin. Shift into [0, box_size) so the
-    # function is translation-invariant regardless of the input convention.
-    positions = positions - positions.min(axis=0, keepdims=True)
-    atoms = Atoms(
-        numbers=np.full(len(positions), 8),  # oxygen stand-in for a CG water bead
-        positions=positions,
-        cell=np.diag(box_size),
-        pbc=pbc,
-    )
-
-    model = MLBOP(device=device)
-    if pbc:
-        atoms = _ensure_min_cell_size(atoms, model.r_cut)
-
-    return model.compute_energy(atoms)

@@ -10,7 +10,6 @@ from ..arrays import radial_profile_3d, soft_voxelize_coordinates
 from ..fft import fft3, fftconvolve
 from ..progress import ProgressManager, track
 from ._energy import MLBOP
-from ._energy import mlbop_energy as _mlbop_energy
 from ._helpers import ndensity_of_amorphous_ice
 from ._kernels import (
     build_atomic_potential_kernel,
@@ -213,7 +212,7 @@ class GradientSKIcemaker(L.LightningModule):
         mlbop_strength : float, optional
             Weight of a physically-motivated alternative to
             ``rep_strength``: the ML-BOP per-atom energy (see
-            :meth:`~specter.ice._energy.MLBOP.compute_energy_differentiable`),
+            :meth:`~specter.ice._energy.MLBOP.compute_energy`),
             which penalizes both overlap (two-body term) and unrealistic
             O-O-O angles (three-body bond-order term) rather than just
             overlap. ``0.0`` disables it (default). Can be combined with
@@ -265,9 +264,7 @@ class GradientSKIcemaker(L.LightningModule):
         if mlbop_strength > 0.0:
             model = MLBOP(device=pos.device)
             box = (self.box_x, self.box_y, self.box_z)
-            mlbop_result = model.compute_energy_differentiable(
-                pos, box_size=box, pbc=True
-            )
+            mlbop_result = model.compute_energy(pos, box_size=box, pbc=True)
             e_per_atom = mlbop_result["E_per_atom"]
             if mlbop_target is None:
                 mlbop_penalty = e_per_atom
@@ -331,7 +328,7 @@ class GradientSKIcemaker(L.LightningModule):
             Weight of the ML-BOP-energy-based penalty (see :meth:`_sk_loss`),
             the default alternative to ``rep_strength``. Runs fully
             differentiably inside the optimisation loop (see
-            :meth:`~specter.ice._energy.MLBOP.compute_energy_differentiable`),
+            :meth:`~specter.ice._energy.MLBOP.compute_energy`),
             penalizing both overlap (two-body term) and unrealistic O-O-O
             angles (three-body term) rather than just overlap -- validated
             across dx=0.5/1.0/2.0 and box sizes up to 256 Å as the best
@@ -773,9 +770,9 @@ class GradientSKIcemaker(L.LightningModule):
         """
         Score the last-generated positions against the ML-BOP potential.
 
-        See :func:`specter.ice._energy.mlbop_energy`. Defaults to periodic
-        boundaries (``pbc=True``): a generated block is itself the full
-        periodic cell it was optimised as, unlike e.g.
+        See :meth:`specter.ice._energy.MLBOP.compute_energy`. Defaults to
+        periodic boundaries (``pbc=True``): a generated block is itself the
+        full periodic cell it was optimised as, unlike e.g.
         :class:`~specter.ice.MDSimDump`'s hard-edge-trimmed MD frames.
 
         Parameters
@@ -787,12 +784,15 @@ class GradientSKIcemaker(L.LightningModule):
         Returns
         -------
         dict[str, float]
-            See :func:`specter.ice._energy.mlbop_energy` for the fields
-            returned.
+            See :meth:`specter.ice._energy.MLBOP.compute_energy` for the
+            fields returned.
         """
         assert self.positions is not None, "Call optimize() or init_* first"
         box = (self.box_x, self.box_y, self.box_z)
-        return _mlbop_energy(self.positions, box_size=box, pbc=pbc)
+        model = MLBOP(device=self.positions.device)
+        with torch.no_grad():
+            result = model.compute_energy(self.positions, box_size=box, pbc=pbc)
+        return {k: v.item() for k, v in result.items()}
 
     @staticmethod
     def assemble_tiles(

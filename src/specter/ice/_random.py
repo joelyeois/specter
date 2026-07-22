@@ -7,7 +7,7 @@ import torch
 
 from ..arrays import soft_voxelize_coordinates
 from ..fft import fftconvolve
-from ._energy import mlbop_energy as _mlbop_energy
+from ._energy import MLBOP
 from ._helpers import ndensity_of_amorphous_ice
 from ._kernels import build_atomic_potential_kernel
 
@@ -182,9 +182,9 @@ class RandomIcemaker(L.LightningModule):
         """
         Score the last-generated positions against the ML-BOP potential.
 
-        See :func:`specter.ice._energy.mlbop_energy`. Defaults to periodic
-        boundaries (``pbc=True``): a generated block is itself the full
-        periodic cell it was placed in, unlike e.g.
+        See :meth:`specter.ice._energy.MLBOP.compute_energy`. Defaults to
+        periodic boundaries (``pbc=True``): a generated block is itself the
+        full periodic cell it was placed in, unlike e.g.
         :class:`~specter.ice.MDSimDump`'s hard-edge-trimmed MD frames.
 
         Parameters
@@ -196,9 +196,12 @@ class RandomIcemaker(L.LightningModule):
         Returns
         -------
         dict[str, float]
-            See :func:`specter.ice._energy.mlbop_energy` for the fields
-            returned.
+            See :meth:`specter.ice._energy.MLBOP.compute_energy` for the
+            fields returned.
         """
         assert self.positions is not None, "No positions — call init_random() first"
         box = (self.box_x, self.box_y, self.box_z)
-        return _mlbop_energy(self.positions, box_size=box, pbc=pbc)
+        model = MLBOP(device=self.positions.device)
+        with torch.no_grad():
+            result = model.compute_energy(self.positions, box_size=box, pbc=pbc)
+        return {k: v.item() for k, v in result.items()}

@@ -237,10 +237,10 @@ def test_gradientskicemaker_optimize_mlbop_strength_reduces_sk_loss():
     """
     mlbop_strength replaces the artificial FFT repulsion term with a
     differentiable ML-BOP energy penalty (see specter.ice._energy.MLBOP.
-    compute_energy_differentiable). It should train like any other penalty
-    weight: loss finite every step, and the *raw* S(k) MSE (tracked
-    separately from the combined loss precisely so it's comparable across
-    different penalty settings) should improve over the run.
+    compute_energy). It should train like any other penalty weight: loss
+    finite every step, and the *raw* S(k) MSE (tracked separately from the
+    combined loss precisely so it's comparable across different penalty
+    settings) should improve over the run.
     """
     torch.manual_seed(0)
     gd = GradientSKIcemaker(n=16, dx=1.0, progressbars=False)

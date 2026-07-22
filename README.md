@@ -120,7 +120,8 @@ python demo-scripts/generate_particle_stack.py \
 | `--coincidence_radius_max` | `None` | Maximum coincidence radius in pixels; if set, sampled uniformly per particle |
 | `--potential_scale_min` | `1.0` | Minimum potential scale factor; used as fixed value if `--potential_scale_max` is not set |
 | `--potential_scale_max` | `None` | Maximum potential scale factor; if set, sampled uniformly per particle. Values < 1 approximate thicker ice (weaker particle signal) |
-| `--ice_model` | `gd` | `gd` (gradient descent) \| `ap` (atomic potential) \| `mcmc` \| `random` \| `none` |
+| `--ice_model` | `gd` | `gd` (samples from the pre-generated `IceBank` cache) \| `random` (instant, cheap `RandomIcemaker` placement) \| `none` |
+| `--ice_cache_dir` | `None` | Directory of cached ice configs for `ice_model='gd'`. Defaults to the bundled `ice-data/ice_cache` |
 | `--ice_thickness` | `0.0` | Ice thickness in Å; `0` = minimum (particle box size) |
 | `--crowd_min_distance` | `pdb.max_diameter` | Min distance between crowded molecules in Å; `0` disables crowding |
 | `--crowd_max_distance_z` | `None` | Max z-separation between crowded molecules in Å |
@@ -177,7 +178,8 @@ python demo-scripts/generate_particle_stack_from_csfile.py \
 | `--deltaI_I` | `0.01e-6` | Relative objective-lens current instability, used by the Cc envelope |
 | `--dose_envelope` | `False` | Apply the Grant & Grigorieff (2015) cumulative-dose envelope |
 | `--coincidence_radius` | `2.1` | Fixed coincidence radius in pixels applied to all particles; `0` for standard Poisson |
-| `--ice_model` | `gd` | `gd` (gradient descent) \| `ap` (atomic potential) \| `mcmc` \| `random` \| `none` |
+| `--ice_model` | `gd` | `gd` (samples from the pre-generated `IceBank` cache) \| `random` (instant, cheap `RandomIcemaker` placement) \| `none` |
+| `--ice_cache_dir` | `None` | Directory of cached ice configs for `ice_model='gd'`. Defaults to the bundled `ice-data/ice_cache` |
 | `--ice_thickness` | `0.0` | Ice thickness in Å; `0` = minimum (particle box size) |
 | `--crowd_min_distance` | `pdb.max_diameter` | Min distance between crowded molecules in Å; `0` disables crowding |
 | `--crowd_max_distance_z` | `None` | Max z-separation between crowded molecules in Å |
@@ -274,7 +276,8 @@ python demo-scripts/generate_micrograph.py \
 | `--coincidence_radius_max` | `None` | Maximum coincidence radius in pixels; if set, sampled uniformly per micrograph |
 | `--potential_scale_min` | `1.0` | Minimum potential scale factor; used as fixed value if `--potential_scale_max` is not set |
 | `--potential_scale_max` | `None` | Maximum potential scale factor; if set, sampled uniformly per micrograph. Values < 1 approximate thicker ice |
-| `--ice_model` | `gd` | `gd` (gradient descent) \| `ap` (atomic potential) \| `mcmc` \| `random` \| `none` |
+| `--ice_model` | `gd` | `gd` (samples from the pre-generated `IceBank` cache) \| `random` (instant, cheap `RandomIcemaker` placement) \| `none` |
+| `--ice_cache_dir` | `None` | Directory of cached ice configs for `ice_model='gd'`. Defaults to the bundled `ice-data/ice_cache` |
 | `--ice_thickness` | `500.0` | Ice thickness in Å |
 | `--crowd_min_distance` | `pdb.max_diameter` | Min distance between crowded molecules in Å; `0` disables crowding |
 | `--crowd_max_distance_z` | `None` | Max z-separation between crowded molecules in Å |
@@ -304,7 +307,7 @@ python demo-scripts/generate_micrograph.py \
 
 ### `generate_tilt_series.py`
 
-Simulate a cryo-ET tilt series from a pre-built tomogram volume (e.g. from Polnet or `TomogramGenerator`). Ice is generated using the interpolation method and blended in before simulation.
+Simulate a cryo-ET tilt series from a pre-built tomogram volume (e.g. from Polnet or `TomogramGenerator`). Ice is generated via `IceBank` (drawn from the bundled pre-optimised cache) or `RandomIcemaker`, and blended in before simulation.
 
 ```bash
 python demo-scripts/generate_tilt_series.py \
@@ -325,8 +328,7 @@ python demo-scripts/generate_tilt_series.py \
     --coincidence_radius 1.5 \
     --num_frames 10 \
     --add_ice True \
-    --algorithm_dx 0.5 \
-    --n_ice_blocks 8 \
+    --ice_method gd \
     --tomo_to_ice_ratio 0.75 \
     --save_exitwaves True \
     --device cuda:0 \
@@ -359,8 +361,8 @@ python demo-scripts/generate_tilt_series.py \
 | `--noise_model` | `poisson` | `poisson` \| `none` |
 | `--coincidence_radius` | `1.5` | Coincidence radius in Å for direct-detector modelling |
 | `--add_ice` | `True` | Generate and blend amorphous ice |
-| `--algorithm_dx` | `0.5` | Voxel size in Å at which to run the ice algorithm (most stable at 0.5 Å) |
-| `--n_ice_blocks` | `8` | Number of unique ice blocks to generate and tile |
+| `--ice_method` | `gd` | `gd` (samples from the pre-generated `IceBank` cache) \| `random` (instant, cheap `RandomIcemaker` placement) |
+| `--ice_cache_dir` | `None` | Directory of cached ice configs for `ice_method='gd'`. Defaults to the bundled `ice-data/ice_cache` |
 | `--tomo_to_ice_ratio` | `0.75` | Scale factor for tomogram intensity relative to ice |
 | `--normalize` | `False` | Normalise each tilt image to zero mean and unit std |
 | `--save_exitwaves` | `False` | Save exit wave magnitude and phase as `.mrcs` |

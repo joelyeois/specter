@@ -474,11 +474,10 @@ def mlbop_energy(
     coordinates : torch.Tensor
         Bead positions in Angstrom, shape ``(N, 3)``. Axis order must match
         ``box_size``, but is otherwise arbitrary (energies are translation-
-        and axis-order-invariant) — for example
-        ``APIcemaker.ice_coordinates[b] * icemaker.dx`` (voxel-index order
-        ``(z, y, x)``, uncentered) or ``GradientSKIcemaker.positions`` /
-        ``RandomIcemaker.positions`` (``(x, y, z)``, centered at the origin)
-        both work as long as ``box_size`` uses the same axis order.
+        and axis-order-invariant) — for example ``GradientSKIcemaker.positions``,
+        ``IceBank.positions``, or ``RandomIcemaker.positions`` (``(x, y, z)``,
+        centered at the origin) all work as long as ``box_size`` uses the
+        same axis order.
     box_size : float or tuple[float, float, float]
         Periodic box lengths in Angstrom, in the same axis order as
         ``coordinates``. A single float is broadcast to a cubic box.

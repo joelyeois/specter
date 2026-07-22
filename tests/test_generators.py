@@ -161,11 +161,10 @@ def test_micrograph_generator_regression(small_volume, ctf_params):
 
 
 def test_micrograph_generator_accepts_prebuilt_icemaker(small_volume, ctf_params):
-    """A pre-built IceBank passed via icemaker= is reused, not rebuilt internally."""
-    from specter.ice import IceBank
+    """A pre-built icemaker passed via icemaker= is reused, not rebuilt internally."""
+    from specter.ice import RandomIcemaker
 
-    bank = IceBank(dx=2.0, n=32, method="random", num_unique=1)
-    bank.build()
+    icemaker = RandomIcemaker(dx=2.0, n=32, nz=32, progressbars=False)
 
     gen = MicrographGenerator(
         scattering_potential=small_volume,
@@ -176,14 +175,14 @@ def test_micrograph_generator_accepts_prebuilt_icemaker(small_volume, ctf_params
         dose_per_angstrom=2.0,
         noise_model="poisson",
         scattering_model="projection",
-        icemaker=bank,
+        icemaker=icemaker,
         alpha=0.1,
         coincidence_radius=1.8,
         num_frames=10,
         verbose=False,
         progressbars=False,
     )
-    assert gen.specimen_gen.icemaker is bank
+    assert gen.specimen_gen.icemaker is icemaker
     images = gen(torch.tensor([0]))
     assert images.shape == (1, 32, 32)
 

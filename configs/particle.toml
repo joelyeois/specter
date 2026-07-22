@@ -43,11 +43,9 @@ aberration_model = "holography"  # holography | ctf
 noise_model = "poisson"          # poisson | none
 coincidence_radius_min = 0.0     # pixels
 # coincidence_radius_max = 3.0    # pixels, uncomment to randomize per particle
-ice_model = "gd"                 # gd | ap | mcmc | random | none
+ice_model = "gd"                 # gd | random | none
 ice_thickness = 0.0              # Å, 0 = minimum (particle box size)
-num_unique_icecubes = 8
-ice_build_batch_size = 1
-# icecube_size = 256              # voxels
+# ice_cache_dir = "ice-data/ice_cache"  # defaults to the bundled cache
 # crowd_min_distance = 100.0      # Å, uncomment to crowd particles; defaults to pdb.max_diameter
 # crowd_max_distance_z = 50.0     # Å
 potential_scale_min = 1.0        # unitless

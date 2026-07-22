@@ -4,7 +4,7 @@ import torch
 import lightning as L
 
 from .crowding import CrowdWithDuplicates
-from .ice import IceBank
+from .ice import IceBank, RandomIcemaker
 from .progress import status
 
 
@@ -32,22 +32,19 @@ class TomogramGenerator(L.LightningModule):
     crowd_max_distance_z : float, optional
         Range in Z where crowding molecules are placed.
     ice_model : str, optional
-        Ice generation algorithm: ``'ap'`` (alternating projections), ``'gd'``
-        (gradient descent), or ``'mcmc'`` (Metropolis Monte Carlo). Ignored
+        Ice generation algorithm: ``'gd'`` (samples from the pre-generated
+        :class:`~specter.ice.IceBank` cache) or ``'random'`` (instant, cheap
+        :class:`~specter.ice.RandomIcemaker` placement -- no realism, useful
+        as a fast baseline/smoke test). Ignored when ``icemaker`` is provided.
+    ice_cache_dir : str, optional
+        Directory of cached ice configs for ``ice_model='gd'`` (see
+        :func:`specter.ice.build_ice_cache`). Defaults to the bundled
+        ``ice-data/ice_cache``. Ignored for other ``ice_model`` values or
         when ``icemaker`` is provided.
-    num_unique_icecubes : int, optional
-        Number of unique ice cubes pre-built into the ``IceBank``. Default 8.
-        Ignored when ``icemaker`` is provided.
-    icecube_size : int, optional
-        XY and Z side length in voxels of each ice cube in the bank.
-        Cubes are tiled to fill the full volume. Default 256. Ignored when
-        ``icemaker`` is provided.
-    icemaker : IceBank, optional
-        A pre-built :class:`~specter.ice.IceBank` instance to reuse across
-        multiple ``TomogramGenerator`` instances. When supplied, ``ice_model``,
-        ``num_unique_icecubes``, and ``icecube_size`` are all ignored. The
-        bank must already be built (i.e. :meth:`IceBank.build` has been
-        called or will be triggered lazily on first use).
+    icemaker : IceBank or RandomIcemaker, optional
+        A pre-built icemaker instance to reuse across multiple
+        ``TomogramGenerator`` instances. When supplied, ``ice_model`` and
+        ``ice_cache_dir`` are both ignored.
     ice_thickness : float, optional
         Thickness of the ice layer in Å.
     water_air_interface : bool, optional
@@ -68,9 +65,8 @@ class TomogramGenerator(L.LightningModule):
         crowd_max_distance_z: float | None = None,
         ice_model: str | None = None,
         ice_thickness: float | None = None,
-        num_unique_icecubes: int = 8,
-        icecube_size: int = 256,
-        icemaker: IceBank | None = None,
+        ice_cache_dir: str | None = None,
+        icemaker: IceBank | RandomIcemaker | None = None,
         water_air_interface: bool = True,
         progressbars: bool = True,
         chunk_size: int | None = None,
@@ -115,22 +111,21 @@ class TomogramGenerator(L.LightningModule):
         else:
             self.crowd = None
 
-        self.icemaker: IceBank | None
+        self.icemaker: IceBank | RandomIcemaker | None
         if icemaker is not None:
             self.icemaker = icemaker
             self.ice_model = icemaker.method
         elif self.ice_model is not None:
-            if self.ice_model not in ("ap", "gd", "mcmc", "random"):
+            if self.ice_model == "gd":
+                self.icemaker = IceBank(cache_dir=ice_cache_dir)
+            elif self.ice_model == "random":
+                self.icemaker = RandomIcemaker(dx=pixel_size, n=nxy, nz=nz)
+            elif self.ice_model == "none":
+                self.icemaker = None
+            else:
                 raise ValueError(
-                    f"Unknown ice_model '{self.ice_model}'. Choose 'ap', 'gd', 'mcmc', or 'random'."
+                    f"Unknown ice_model '{self.ice_model}'. Choose 'gd', 'random', or 'none'."
                 )
-            self.icemaker = IceBank(
-                n=icecube_size,
-                dx=pixel_size,
-                nz=icecube_size,
-                method=self.ice_model,
-                num_unique=num_unique_icecubes,
-            )
         else:
             self.icemaker = None
 
@@ -165,9 +160,17 @@ class TomogramGenerator(L.LightningModule):
         if self.icemaker is not None:
             with torch.no_grad():
                 with status("Tiling ice volume", disable=not self.progressbars):
-                    ice = self.icemaker.generate_big_ice(
-                        (V.shape[0], V.shape[1], V.shape[2], V.shape[3])
-                    ).to(assembly_device)
+                    if isinstance(self.icemaker, IceBank):
+                        ice = self.icemaker.generate_big_ice(
+                            n=self.nxy,
+                            dx=self.pixel_size,
+                            nz=self.nz,
+                            batchsize=V.shape[0],
+                        ).to(assembly_device)
+                    else:
+                        ice = self.icemaker.generate_ice(batchsize=V.shape[0]).to(
+                            assembly_device
+                        )
                 with status("Applying ice mask", disable=not self.progressbars):
                     icemask = (V < 0.05 * V.max()).to(V.dtype)
                     V = V + ice * icemask

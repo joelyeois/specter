@@ -23,14 +23,14 @@ n_micrographs = 1
 scattering_model = "multislice"
 aberration_model = "holography"
 noise_model = "poisson"
-ice_model = "random"          # fast, worst accuracy. try "gd" (slow, highest accuracy) or "ap"/"mcmc"
+ice_model = "random"          # fast, worst accuracy. try "gd" (slow, highest accuracy, cached)
 detector_model = "none"
 coincidence_radius_min = 1.8  # pixels
 chunk_size = 8                # slice chunk size for specimen generation; lower if GPU memory is limited
 
 [ice]
 ice_thickness = 500.0    # Å
-num_unique_icecubes = 8
+# ice_cache_dir = "../../ice-data/ice_cache"  # defaults to the bundled cache
 
 [compute]
 device = "cuda:0"  # adjust to an available device on your machine, e.g. "cuda:0" or "cpu"

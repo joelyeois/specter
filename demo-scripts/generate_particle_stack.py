@@ -246,7 +246,7 @@ def parse_args() -> argparse.Namespace:
         "--ice_model",
         type=str,
         default=argparse.SUPPRESS,
-        choices=["gd", "ap", "mcmc", "random", "none"],
+        choices=["gd", "random", "none"],
         help="Ice model. Overrides --config.",
     )
     parser.add_argument(
@@ -256,22 +256,11 @@ def parse_args() -> argparse.Namespace:
         help="Ice thickness in Ångstrom. 0 = minimum (particle box size). Overrides --config.",
     )
     parser.add_argument(
-        "--num_unique_icecubes",
-        type=int,
+        "--ice_cache_dir",
+        type=str,
         default=argparse.SUPPRESS,
-        help="Number of unique ice cubes to pre-build into the IceBank. Overrides --config.",
-    )
-    parser.add_argument(
-        "--ice_build_batch_size",
-        type=int,
-        default=argparse.SUPPRESS,
-        help="Number of unique ice cubes to generate at once while building the IceBank. Overrides --config.",
-    )
-    parser.add_argument(
-        "--icecube_size",
-        type=int,
-        default=argparse.SUPPRESS,
-        help="Side length (in voxels) of each cubic ice block. Overrides --config.",
+        help="Directory of cached ice configs for ice_model='gd'. Defaults to the "
+        "bundled ice-data/ice_cache. Overrides --config.",
     )
     parser.add_argument(
         "--crowd_min_distance",
@@ -686,39 +675,26 @@ def main() -> None:
     )
     cc_angstrom = config.cc * 1e7 if config.cc is not None else None
 
-    # --- Pre-building ice bank ---
-    # IceBank.build() runs an internal L-BFGS optimization (for the 'gd' method)
-    # that requires autograd, so it can't happen lazily inside solvate() under
-    # torch.no_grad()/Lightning's inference-mode predict loop — it must be built
-    # eagerly here, before any forward pass. Only the main process (rank 0) does
-    # this real build; other DDP ranks allocate a zero placeholder of the same
-    # shape and rely on Lightning's automatic _sync_module_states() (see the V
-    # comment above) to receive rank 0's real bank before predicting.
-    icecube_size = (
-        config.icecube_size
-        if config.icecube_size is not None
-        else min(config.num_pixels, int(256 / config.pixel_size))
-    )
+    # --- Ice ---
+    # Unlike the old on-demand-building IceBank, IceBank(cache_dir=...) just
+    # loads small pre-generated coordinate files from disk -- cheap enough
+    # that every DDP rank can construct it independently (no rank-0-builds-
+    # then-broadcasts dance needed, unlike V above).
     icemaker = None
-    if ice_model is not None:
-        if is_main:
-            _section("Pre-building ice bank")
-        icemaker = IceBank(
-            n=icecube_size,
-            dx=config.pixel_size,
-            method=ice_model,
-            num_unique=config.num_unique_icecubes,
-            build_batch_size=config.ice_build_batch_size,
+    if ice_model == "random":
+        from specter.ice import RandomIcemaker
+
+        n_ice = min(config.num_pixels, int(256 / config.pixel_size))
+        icemaker = RandomIcemaker(dx=config.pixel_size, n=n_ice)
+    elif ice_model == "gd":
+        icemaker = IceBank(cache_dir=config.ice_cache_dir)
+
+    if icemaker is not None:
+        icemaker_device = (
+            f"cuda:{device_target[0]}" if mode == "multi" else device_target
         )
-        if is_main:
-            icemaker_device = (
-                f"cuda:{device_target[0]}" if mode == "multi" else device_target
-            )
-            if icemaker_device != "cpu":
-                icemaker = icemaker.to(icemaker_device)
-            icemaker.build()
-        else:
-            icemaker.allocate_placeholder()
+        if icemaker_device != "cpu":
+            icemaker = icemaker.to(icemaker_device)
 
     model = ImageGenerator(
         V,

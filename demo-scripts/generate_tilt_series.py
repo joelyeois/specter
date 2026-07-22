@@ -32,7 +32,6 @@ Example (HPC):
         --num_frames 10 \\
         --add_ice True \\
         --ice_method gd \\
-        --n_ice_blocks 8 \\
         --tomo_to_ice_ratio 0.75 \\
         --save_exitwaves True \\
         --device cuda:0 \\
@@ -216,16 +215,17 @@ def parse_args() -> argparse.Namespace:
         "--ice_method",
         type=str,
         default="gd",
-        choices=["gd", "ap", "mcmc", "random"],
-        help="Ice generation algorithm (see IceBank). 'gd' works well at any "
-        "pixel size; 'ap' is not recommended above ~1.5 Å (its peak-finding "
-        "step can't resolve the minimum O-O separation at coarse pixel sizes).",
+        choices=["gd", "random"],
+        help="Ice generation algorithm: 'gd' (samples from the pre-generated "
+        "IceBank cache, default) or 'random' (instant, cheap RandomIcemaker "
+        "placement).",
     )
     parser.add_argument(
-        "--n_ice_blocks",
-        type=int,
-        default=8,
-        help="Number of unique ice blocks to generate and tile.",
+        "--ice_cache_dir",
+        type=str,
+        default=None,
+        help="Directory of cached ice configs for ice_method='gd'. Defaults to "
+        "the bundled ice-data/ice_cache.",
     )
     parser.add_argument(
         "--tomo_to_ice_ratio",
@@ -309,20 +309,21 @@ def main() -> None:
     # --- Ice ---
     if args.add_ice:
         _section("Generating amorphous ice")
-        _console.print(
-            f"  method = {args.ice_method},  dx = {dx:.2f} Å,  n_blocks = {args.n_ice_blocks}"
-        )
-        icecube_size = min(min(tomo.shape), int(256 / dx))
-        icemaker = IceBank(
-            n=icecube_size,
-            dx=dx,
-            method=args.ice_method,
-            num_unique=args.n_ice_blocks,
-        ).to(args.device)
-        icemaker.build()
-        ice = torch.squeeze(
-            icemaker.generate_big_ice((1, tomo.shape[0], tomo.shape[1], tomo.shape[2]))
-        ).cpu()
+        _console.print(f"  method = {args.ice_method},  dx = {dx:.2f} Å")
+        if args.ice_method == "random":
+            from specter.ice import RandomIcemaker
+
+            icemaker = RandomIcemaker(dx=dx, n=tomo.shape[-1], nz=tomo.shape[0]).to(
+                args.device
+            )
+            ice = torch.squeeze(icemaker.generate_ice(batchsize=1)).cpu()
+        else:  # gd
+            icemaker = IceBank(cache_dir=args.ice_cache_dir).to(args.device)
+            ice = torch.squeeze(
+                icemaker.generate_big_ice(
+                    n=tomo.shape[-1], dx=dx, nz=tomo.shape[0], batchsize=1
+                )
+            ).cpu()
         ratio = args.tomo_to_ice_ratio
         tomo = tomo * torch.max(ice) * ratio + ice * (tomo < 0.1)
 

@@ -72,11 +72,9 @@ class ParticleStackConfig:
     noise_model: Literal["poisson", "none"] = "poisson"
     coincidence_radius_min: float = 0.0  # pixels
     coincidence_radius_max: float | None = None  # pixels
-    ice_model: Literal["gd", "ap", "mcmc", "random", "none"] = "gd"
+    ice_model: Literal["gd", "random", "none"] = "gd"
     ice_thickness: float = 0.0  # Å, 0 = minimum (particle box size)
-    num_unique_icecubes: int = 8
-    ice_build_batch_size: int = 1
-    icecube_size: int | None = None  # voxels
+    ice_cache_dir: str | None = None  # defaults to the bundled ice-data/ice_cache
     crowd_min_distance: float | None = None  # Å
     crowd_max_distance_z: float | None = None  # Å
     potential_scale_min: float = 1.0  # unitless
@@ -141,11 +139,9 @@ class MicrographConfig:
     noise_model: Literal["poisson", "none"] = "poisson"
     coincidence_radius_min: float = 1.8  # pixels
     coincidence_radius_max: float | None = None  # pixels
-    ice_model: Literal["gd", "ap", "mcmc", "random", "none"] = "gd"
+    ice_model: Literal["gd", "random", "none"] = "gd"
     ice_thickness: float = 500.0  # Å, 0 = minimum (particle box size)
-    num_unique_icecubes: int = 8
-    ice_build_batch_size: int = 1
-    icecube_size: int | None = None  # voxels
+    ice_cache_dir: str | None = None  # defaults to the bundled ice-data/ice_cache
     crowd_min_distance: float | None = None  # Å
     crowd_max_distance_z: float | None = None  # Å
     water_air_interface: bool = True

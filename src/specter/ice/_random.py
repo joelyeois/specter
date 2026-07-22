@@ -20,8 +20,7 @@ class RandomIcemaker(L.LightningModule):
     randomly places them as continuous Angstrom coordinates, soft-voxelizes
     onto the grid, then convolves with a scattering kernel.
 
-    Two-stage pipeline (mirrors :class:`GradientSKIcemaker` and
-    :class:`MCMCIcemaker`):
+    Two-stage pipeline (mirrors :class:`GradientSKIcemaker`):
 
     1. :meth:`init_random` — draw ``n_ice_molecules`` uniform positions in
        ``[-box/2, box/2]`` Å.  Stored as ``self.positions`` with columns
@@ -40,6 +39,8 @@ class RandomIcemaker(L.LightningModule):
     progressbars : bool, optional
         Whether to show progress bars. Default is True.
     """
+
+    method: str = "random"
 
     def __init__(
         self, dx: float, n: int, nz: int | None = None, progressbars: bool = True
@@ -94,8 +95,7 @@ class RandomIcemaker(L.LightningModule):
 
         Uses trilinear splatting via
         :func:`~specter.arrays.soft_voxelize_coordinates` with periodic
-        boundary conditions, consistent with :class:`GradientSKIcemaker` and
-        :class:`MCMCIcemaker`.
+        boundary conditions, consistent with :class:`GradientSKIcemaker`.
 
         Returns
         -------

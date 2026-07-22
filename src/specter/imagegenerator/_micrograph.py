@@ -7,7 +7,7 @@ import torch
 from specter import logger
 
 from ._base import BaseImager, compute_nz, pad_volume
-from ..ice import IceBank
+from ..ice import IceBank, RandomIcemaker
 from ..progress import status
 from ..scattering import IterativeScattering
 from ..specimen import TomogramGenerator
@@ -43,23 +43,22 @@ class MicrographGenerator(BaseImager):
     anisomag : torch.Tensor, optional
         Anisotropic magnification matrices, shape (n, 2, 2).
     ice_model : str, optional
-        Ice generation algorithm passed to ``TomogramGenerator``: ``'ap'``
-        (alternating projections), ``'gd'`` (gradient descent), or ``'mcmc'``
-        (Metropolis Monte Carlo). Ignored when ``icemaker`` is provided.
+        Ice generation algorithm passed to ``TomogramGenerator``: ``'gd'``
+        (samples from the pre-generated :class:`~specter.ice.IceBank` cache)
+        or ``'random'`` (instant, cheap :class:`~specter.ice.RandomIcemaker`
+        placement). Ignored when ``icemaker`` is provided.
     ice_thickness : float, optional
         Ice thickness in Å passed to ``TomogramGenerator``.
-    num_unique_icecubes : int, optional
-        Number of unique ice cubes pre-built into the ``IceBank``. Default 8.
-        Ignored when ``icemaker`` is provided.
-    icecube_size : int, optional
-        XY and Z side length in voxels of each ice cube in the bank. Default 256.
-        Ignored when ``icemaker`` is provided.
-    icemaker : IceBank, optional
-        A pre-built :class:`~specter.ice.IceBank` instance to reuse across
-        multiple ``MicrographGenerator`` instances. When supplied, ``ice_model``,
-        ``num_unique_icecubes``, and ``icecube_size`` are all ignored. Ignored
-        entirely when ``vol`` is provided directly (no ``TomogramGenerator`` is
-        built in that case).
+    ice_cache_dir : str, optional
+        Directory of cached ice configs for ``ice_model='gd'`` (see
+        :func:`specter.ice.build_ice_cache`). Defaults to the bundled
+        ``ice-data/ice_cache``. Ignored for other ``ice_model`` values or
+        when ``icemaker`` is provided.
+    icemaker : IceBank or RandomIcemaker, optional
+        A pre-built icemaker instance to reuse across multiple
+        ``MicrographGenerator`` instances. When supplied, ``ice_model`` and
+        ``ice_cache_dir`` are both ignored. Ignored entirely when ``vol`` is
+        provided directly (no ``TomogramGenerator`` is built in that case).
     crowd_min_distance : float, optional
         Minimum inter-particle distance in Å for crowding.
     crowd_max_distance_z : float, optional
@@ -136,9 +135,8 @@ class MicrographGenerator(BaseImager):
         anisomag: torch.Tensor | None = None,
         ice_model: str | None = None,
         ice_thickness: float | None = None,
-        num_unique_icecubes: int = 8,
-        icecube_size: int = 256,
-        icemaker: IceBank | None = None,
+        ice_cache_dir: str | None = None,
+        icemaker: IceBank | RandomIcemaker | None = None,
         crowd_min_distance: float | None = None,
         crowd_max_distance_z: float | None = None,
         water_air_interface: bool = True,
@@ -258,8 +256,7 @@ class MicrographGenerator(BaseImager):
                 crowd_max_distance_z=crowd_max_distance_z,
                 ice_model=ice_model,
                 ice_thickness=ice_thickness,
-                num_unique_icecubes=num_unique_icecubes,
-                icecube_size=icecube_size,
+                ice_cache_dir=ice_cache_dir,
                 icemaker=icemaker,
                 water_air_interface=water_air_interface,
                 progressbars=progressbars,

@@ -122,13 +122,28 @@ class GradientSKIcemaker(L.LightningModule):
         self.dk: float = 1 / self.n / self.dx
         self.f_target_radial: torch.Tensor = radial_profile_3d(f_kernel.cpu())
 
+        # Physical |k|-magnitude bins -- NOT radial_profile_3d's voxel-index
+        # bins (used just above for f_target_radial), which only coincide
+        # with these when nz == n. For anisotropic grids (nz != n), a voxel
+        # step along z spans a different physical k-spacing (1/(nz*dx)) than
+        # a voxel step along x/y (1/(n*dx)=dk), so voxel-index distance and
+        # physical |k| distance diverge along the shorter axis -- binning
+        # the target by voxel-index distance while the simulated |F(k)|
+        # below is binned by physical distance silently produces mismatched
+        # bin counts (and a physically meaningless comparison even where
+        # shapes happen to match). Bin the target with the same _r_bins/
+        # _bin_count used for the simulated side so both stay on identical,
+        # physically-correct bins regardless of aspect ratio.
         r_bins = (K / self.dk).round().long().flatten()
         n_rbins = int(r_bins.max().item()) + 1
         bin_count = torch.bincount(r_bins, minlength=n_rbins).float().clamp(min=1)
         self.register_buffer("_r_bins", r_bins)
         self.register_buffer("_bin_count", bin_count)
         self._n_rbins: int = n_rbins
-        self.register_buffer("_f_target_rad_1d", self.f_target_radial[:n_rbins].clone())
+        target_bin_sum = torch.bincount(
+            r_bins, weights=f_kernel.flatten(), minlength=n_rbins
+        )
+        self.register_buffer("_f_target_rad_1d", target_bin_sum / bin_count)
 
         # Repulsion kernel in FFT convention (r=0 at [0,0,0]).
         # rep_kernel[i,j,k] = 1 if the wrapped displacement (i,j,k) is within

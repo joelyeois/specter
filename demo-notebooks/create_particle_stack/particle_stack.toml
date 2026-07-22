@@ -33,7 +33,7 @@ coincidence_radius_min = 1.8  # pixels
 
 [ice]
 ice_thickness = 0.0       # Å
-num_unique_icecubes = 1   # this notebook builds a single ice cube, not the config default of 8
+# ice_cache_dir = "../../ice-data/ice_cache"  # defaults to the bundled cache
 
 [compute]
 device = "cuda:1"  # adjust to an available device on your machine, e.g. "cuda:0" or "cpu"

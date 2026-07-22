@@ -1,11 +1,11 @@
 """
 Shared, stateless physics-kernel construction for ice generation.
 
-These functions used to be duplicated (with minor variations) across
-``APIcemaker``, ``GradientSKIcemaker``, and ``RandomIcemaker`` — see the
-individual docstrings below for what each one replaces. Keeping them here as
-pure functions means every algorithm class builds these kernels the same way,
-by construction, instead of by convention.
+These functions used to be duplicated (with minor variations) across the
+individual icemaker classes — see the individual docstrings below for what
+each one replaces. Keeping them here as pure functions means every algorithm
+class builds these kernels the same way, by construction, instead of by
+convention.
 """
 
 from __future__ import annotations
@@ -177,9 +177,37 @@ def compute_native_target(
         trimmed, grid_shape=(nz_native, n_native, n_native), voxel_size=dx
     )
     amplitude = torch.abs(fft3(vox, shift=True)) / (trimmed.shape[0] ** 0.5)
-    _, mdsim_f_radial_avg = radial_profile_3d(amplitude, return_r=True)
 
     mdsim_dk = 1 / n_native / dx
+    if n_native == nz_native:
+        # radial_profile_3d's voxel-index binning coincides exactly with
+        # physical |k|-magnitude binning when the grid is cubic (see the
+        # anisotropic branch below for why they diverge otherwise) -- kept
+        # as the fast path since it avoids rebuilding the k-grid.
+        _, mdsim_f_radial_avg = radial_profile_3d(amplitude, return_r=True)
+    else:
+        # n_native != nz_native happens whenever the requested (n, nz) is
+        # anisotropic and at least one axis stays under _REFERENCE_MAX_BOX
+        # (e.g. n=64, nz=32 -- both under the cap, no rescaling, genuinely
+        # anisotropic; distinct from e.g. n=256, nz=128, which both get
+        # capped to the same 100 A limit and so end up accidentally cubic).
+        # radial_profile_3d bins by voxel-INDEX distance from center, which
+        # only equals physical |k| distance when voxel spacing is the same
+        # along every axis -- for an anisotropic grid a voxel step along the
+        # shorter axis spans a coarser physical k-spacing than a step along
+        # the longer axes, so voxel-index bins silently mislabel the target's
+        # own k-axis (validated: peak amplitude off by ~30%, peak position
+        # shifted, and a pure binning-artifact falloff near the shorter
+        # axis's Nyquist edge). Bin by physical |k|/dk instead, matching
+        # exactly how GradientSKIcemaker.__init__ bins the training target
+        # and the simulated |F(k)| during optimisation.
+        k_native = ice_kspace_radial_grid(n_native, nz_native, dx)
+        r_bins = (k_native / mdsim_dk).round().long().flatten()
+        n_rbins = int(r_bins.max().item()) + 1
+        bin_count = torch.bincount(r_bins, minlength=n_rbins).float().clamp(min=1)
+        bin_sum = torch.bincount(r_bins, weights=amplitude.flatten(), minlength=n_rbins)
+        mdsim_f_radial_avg = bin_sum / bin_count
+
     mdsim_radial_k = torch.arange(len(mdsim_f_radial_avg)) * mdsim_dk
     return mdsim_radial_k, mdsim_f_radial_avg
 
@@ -252,10 +280,9 @@ def interpolate_target_kernel(
     radially symmetric (``f(-kx) == f(kx)``, since it depends only on ``|K|``):
     for such a kernel, the centered array's first half (most-negative-frequency
     through DC) is the mirror image of the unshifted rfftn half (DC through
-    most-positive-frequency), so flipping one gives the other exactly.
-    ``APIcemaker.irfftn`` expects precisely this x-axis-unshifted /
-    z,y-axes-centered half-kernel convention (it only ``ifftshift``s the z, y
-    axes before calling ``torch.fft.irfftn``).
+    most-positive-frequency), so flipping one gives the other exactly. The
+    half-kernel is x-axis-unshifted / z,y-axes-centered, matching the layout
+    ``torch.fft.irfftn`` expects after only ``ifftshift``-ing the z, y axes.
     """
     nz, n, _ = K.shape
     interp = interp1d(mdsim_radial_k[1:], mdsim_f_radial_avg[1:], K.ravel())

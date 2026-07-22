@@ -79,7 +79,7 @@ def test_apply_overrides_with_empty_dict_is_noop() -> None:
 
 
 def test_particle_toml_loads_and_matches_expected_values() -> None:
-    path = str(REPO_ROOT / "configs" / "particle_stack" / "particle.toml")
+    path = str(REPO_ROOT / "configs" / "particle.toml")
     config = load_config(path)
     assert config.pdb_code == "6bdf"
     assert config.num_pixels == 256

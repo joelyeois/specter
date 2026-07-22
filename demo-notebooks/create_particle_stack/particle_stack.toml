@@ -36,5 +36,5 @@ ice_thickness = 0.0       # Å
 num_unique_icecubes = 1   # this notebook builds a single ice cube, not the config default of 8
 
 [compute]
-device = "cuda:0"  # adjust to an available device on your machine, e.g. "cuda:0" or "cpu"
+device = "cuda:1"  # adjust to an available device on your machine, e.g. "cuda:0" or "cpu"
 batchsize = 5      # reduce if out of memory. 

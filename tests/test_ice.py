@@ -274,11 +274,24 @@ def test_gradientskicemaker_default_target_is_native_not_bundled_fixed_grid():
 
 
 def test_gradientskicemaker_optimize_stops_early_when_converged():
+    """Uses the old cheap geometric-only loss (rep_strength=1.0,
+    mlbop_strength=0.0) rather than the current mlbop_strength=0.5 default,
+    since this test is about the tol/patience control flow itself, not
+    which loss recipe is default -- the heavier default loss doesn't
+    plateau this tightly within so few steps at this tiny scale."""
     torch.manual_seed(0)
     gd = GradientSKIcemaker(n=16, dx=1.0, progressbars=False)
     gd.init_random()
 
-    history = gd.optimize(n_steps=60, record_every=1, tol=1e-2, patience=3)
+    history = gd.optimize(
+        n_steps=60,
+        record_every=1,
+        rep_strength=1.0,
+        mlbop_strength=0.0,
+        mlbop_target=None,
+        tol=1e-2,
+        patience=3,
+    )
 
     assert history["stopped_early"] is True
     assert history["step"][-1] < 59
@@ -365,12 +378,24 @@ def test_gradientskicemaker_mlbop_target_matches_target_not_unbounded_minimize()
 def test_gradientskicemaker_optimize_records_final_step_on_early_stop():
     """Even with a sparse record_every, the step that triggers early
     stopping must still land in history -- otherwise the caller can't see
-    the converged state that early stopping actually converged to."""
+    the converged state that early stopping actually converged to.
+
+    Uses the old cheap geometric-only loss (see the similar note on
+    test_gradientskicemaker_optimize_stops_early_when_converged) since this
+    is a control-flow test, not one about the mlbop_strength=0.5 default."""
     torch.manual_seed(0)
     gd = GradientSKIcemaker(n=16, dx=1.0, progressbars=False)
     gd.init_random()
 
-    history = gd.optimize(n_steps=60, record_every=1000, tol=1e-2, patience=3)
+    history = gd.optimize(
+        n_steps=60,
+        record_every=1000,
+        rep_strength=1.0,
+        mlbop_strength=0.0,
+        mlbop_target=None,
+        tol=1e-2,
+        patience=3,
+    )
 
     assert history["stopped_early"] is True
     # record_every=1000 only naturally records step 0; the stopping step

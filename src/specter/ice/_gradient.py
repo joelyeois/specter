@@ -48,8 +48,11 @@ class GradientSKIcemaker(L.LightningModule):
     nz : int, optional
         Number of voxels along z. Defaults to ``n``.
     min_distance : float
-        Hard-core exclusion radius in Å for the soft pair-exclusion penalty
-        used during optimisation (see ``rep_strength`` on :meth:`optimize`).
+        Hard-core exclusion radius in Å for the artificial soft
+        pair-exclusion penalty (see ``rep_strength`` on :meth:`optimize`).
+        Only takes effect if ``rep_strength`` is set above its default of
+        0.0 -- the default optimisation path uses ``mlbop_strength`` instead,
+        which does not depend on this parameter.
     device : str or torch.device
         Computation device.
     progressbars : bool, optional
@@ -265,13 +268,13 @@ class GradientSKIcemaker(L.LightningModule):
 
     def optimize(
         self,
-        n_steps: int = 50,
+        n_steps: int = 400,
         lr: float = 1.0,
         optimizer: str = "lbfgs",
         record_every: int = 5,
-        rep_strength: float = 1.0,
-        mlbop_strength: float = 0.0,
-        mlbop_target: float | None = None,
+        rep_strength: float = 0.0,
+        mlbop_strength: float = 0.5,
+        mlbop_target: float | None = -0.413,
         tol: Optional[float] = 1e-4,
         patience: int = 10,
     ) -> dict:
@@ -286,7 +289,14 @@ class GradientSKIcemaker(L.LightningModule):
         ----------
         n_steps : int
             Optimizer outer iterations. For L-BFGS each outer step may call
-            the closure up to 10 times for line search.
+            the closure up to 10 times for line search. Default is 400 --
+            the old default of 50 is nowhere near enough once
+            ``mlbop_strength`` is active: at n=256, dx=1.0 (~527k atoms),
+            sk_loss is still ~0.58 (vs ~0.0002-0.0008 by step 200-400) after
+            only 50 steps. ``tol``/``patience`` still apply on top of this
+            ceiling, so smaller/easier configs typically stop well short of
+            it. Pass a smaller value explicitly to trade convergence quality
+            for speed.
         lr : float
             Step size. Keep at 1.0 for L-BFGS; use ~0.01 for Adam.
         optimizer : str
@@ -295,15 +305,23 @@ class GradientSKIcemaker(L.LightningModule):
             Diagnostic recording interval.
         rep_strength : float, optional
             Weight of the artificial pair-exclusion penalty in the loss (see
-            :meth:`_sk_loss`).  Prevents particles from overlapping during
-            gradient descent.  Set to 0 to disable.  Default is 1.0.
+            :meth:`_sk_loss`).  A cheap, purely geometric stand-in for a real
+            interatomic potential -- it prevents particle overlap but is a
+            weak constraint on local structure (S(k) matching alone can hide
+            badly-overlapping atoms behind a good Fourier-amplitude match).
+            Set to a positive value (e.g. 1.0) to opt back into this
+            geometric-only behavior.  Default is 0.0 (disabled in favor of
+            ``mlbop_strength``).
         mlbop_strength : float, optional
             Weight of the ML-BOP-energy-based penalty (see :meth:`_sk_loss`),
-            as an alternative to ``rep_strength``.  Unlike ``rep_strength``,
-            this now runs fully differentiably inside the optimisation loop
-            (see :meth:`~specter.ice._energy.MLBOP.compute_energy_differentiable`),
-            so it can be used every step rather than just as an offline
-            diagnostic.  Set to 0 to disable (default).
+            the default alternative to ``rep_strength``. Runs fully
+            differentiably inside the optimisation loop (see
+            :meth:`~specter.ice._energy.MLBOP.compute_energy_differentiable`),
+            penalizing both overlap (two-body term) and unrealistic O-O-O
+            angles (three-body term) rather than just overlap -- validated
+            across dx=0.5/1.0/2.0 and box sizes up to 256 Å as the best
+            balance of energy-match quality vs. S(k) fidelity. Default is
+            0.5; set to 0 to disable and fall back to ``rep_strength``.
         mlbop_target : float or None, optional
             If set, matches ``E_per_atom`` to this value instead of
             minimizing it unboundedly (see :meth:`_sk_loss`) -- use the
@@ -311,7 +329,10 @@ class GradientSKIcemaker(L.LightningModule):
             :meth:`~specter.ice._mdsim.MDSimDump.mlbop_energy`) so the
             result matches the target *phase* of ice rather than drifting
             toward an arbitrarily low-energy (more crystalline) packing.
-            Only meaningful when ``mlbop_strength > 0``. Default is ``None``.
+            Only meaningful when ``mlbop_strength > 0``. Default is -0.413,
+            matching real LDA-80K MD ice (stable to +/-0.0001 across widely
+            separated MD frames -- see ``dev/ice/get_md_reference.py``); set
+            to ``None`` to minimize ``E_per_atom`` unboundedly instead.
         tol : float or None, optional
             Relative loss-improvement tolerance for early stopping: once the
             fractional change in loss, ``abs(prev - cur) / abs(prev)``, stays
@@ -486,9 +507,9 @@ class GradientSKIcemaker(L.LightningModule):
         lr: float = 0.05,
         noise: float = 0.02,
         record_every: int = 50,
-        rep_strength: float = 1.0,
-        mlbop_strength: float = 0.0,
-        mlbop_target: float | None = None,
+        rep_strength: float = 0.0,
+        mlbop_strength: float = 0.5,
+        mlbop_target: float | None = -0.413,
     ) -> dict:
         """
         Langevin sampling around a converged structure.
@@ -508,13 +529,16 @@ class GradientSKIcemaker(L.LightningModule):
         record_every : int
             Diagnostic recording interval.
         rep_strength : float, optional
-            Weight of the artificial pair-exclusion penalty.  Default is 1.0.
+            Weight of the artificial pair-exclusion penalty.  Default is 0.0
+            (disabled in favor of ``mlbop_strength``).
         mlbop_strength : float, optional
-            Weight of the ML-BOP-energy-based penalty, as an alternative to
-            ``rep_strength`` (see :meth:`_sk_loss`).  Default is 0.0.
+            Weight of the ML-BOP-energy-based penalty, the default
+            alternative to ``rep_strength`` (see :meth:`_sk_loss` and
+            :meth:`optimize`).  Default is 0.5.
         mlbop_target : float or None, optional
             Matches ``E_per_atom`` to this value instead of minimizing it
-            unboundedly (see :meth:`_sk_loss`).  Default is ``None``.
+            unboundedly (see :meth:`_sk_loss`).  Default is -0.413, matching
+            real LDA-80K MD ice.
 
         Returns
         -------
@@ -589,11 +613,11 @@ class GradientSKIcemaker(L.LightningModule):
     def generate_ice_deltas(
         self,
         batchsize: int = 1,
-        n_steps: int = 50,
+        n_steps: int = 400,
         lr: float = 1.0,
-        rep_strength: float = 1.0,
-        mlbop_strength: float = 0.0,
-        mlbop_target: float | None = None,
+        rep_strength: float = 0.0,
+        mlbop_strength: float = 0.5,
+        mlbop_target: float | None = -0.413,
         init_positions=None,
         tol: Optional[float] = 1e-4,
         patience: int = 10,
@@ -611,16 +635,20 @@ class GradientSKIcemaker(L.LightningModule):
             Number of independent ice volumes.
         n_steps : int
             L-BFGS outer iterations per volume (upper bound — see ``tol``).
+            Default is 400 (see :meth:`optimize`).
         lr : float
             L-BFGS initial step size (line search adapts it automatically).
         rep_strength : float, optional
-            Weight of the artificial pair-exclusion penalty.  Default is 1.0.
+            Weight of the artificial pair-exclusion penalty.  Default is 0.0
+            (disabled in favor of ``mlbop_strength``; see :meth:`optimize`).
         mlbop_strength : float, optional
-            Weight of the ML-BOP-energy-based penalty, as an alternative to
-            ``rep_strength`` (see :meth:`_sk_loss`).  Default is 0.0.
+            Weight of the ML-BOP-energy-based penalty, the default
+            alternative to ``rep_strength`` (see :meth:`_sk_loss` and
+            :meth:`optimize`).  Default is 0.5.
         mlbop_target : float or None, optional
             Matches ``E_per_atom`` to this value instead of minimizing it
-            unboundedly (see :meth:`_sk_loss`).  Default is ``None``.
+            unboundedly (see :meth:`_sk_loss`).  Default is -0.413, matching
+            real LDA-80K MD ice.
         tol : float or None, optional
             Early-stopping tolerance forwarded to :meth:`optimize`. Default
             is 1e-4; set to ``None`` to always run the full ``n_steps``.
@@ -662,11 +690,11 @@ class GradientSKIcemaker(L.LightningModule):
     def generate_ice(
         self,
         batchsize: int = 1,
-        n_steps: int = 50,
+        n_steps: int = 400,
         lr: float = 1.0,
-        rep_strength: float = 1.0,
-        mlbop_strength: float = 0.0,
-        mlbop_target: float | None = None,
+        rep_strength: float = 0.0,
+        mlbop_strength: float = 0.5,
+        mlbop_target: float | None = -0.413,
         tol: Optional[float] = 1e-4,
         patience: int = 10,
     ) -> torch.Tensor:
@@ -683,16 +711,20 @@ class GradientSKIcemaker(L.LightningModule):
             Number of independent ice volumes.
         n_steps : int
             L-BFGS outer iterations per volume (upper bound — see ``tol``).
+            Default is 400 (see :meth:`optimize`).
         lr : float
             L-BFGS initial step size (line search adapts it automatically).
         rep_strength : float, optional
-            Weight of the artificial pair-exclusion penalty.  Default is 1.0.
+            Weight of the artificial pair-exclusion penalty.  Default is 0.0
+            (disabled in favor of ``mlbop_strength``; see :meth:`optimize`).
         mlbop_strength : float, optional
-            Weight of the ML-BOP-energy-based penalty, as an alternative to
-            ``rep_strength`` (see :meth:`_sk_loss`).  Default is 0.0.
+            Weight of the ML-BOP-energy-based penalty, the default
+            alternative to ``rep_strength`` (see :meth:`_sk_loss` and
+            :meth:`optimize`).  Default is 0.5.
         mlbop_target : float or None, optional
             Matches ``E_per_atom`` to this value instead of minimizing it
-            unboundedly (see :meth:`_sk_loss`).  Default is ``None``.
+            unboundedly (see :meth:`_sk_loss`).  Default is -0.413, matching
+            real LDA-80K MD ice.
         tol : float or None, optional
             Early-stopping tolerance forwarded to :meth:`optimize`. Default
             is 1e-4; set to ``None`` to always run the full ``n_steps``.

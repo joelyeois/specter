@@ -127,6 +127,45 @@ def test_icebank_full_size_crop_atom_count_matches_density(tmp_path):
     assert abs(n_atoms - expected) / expected < 0.05
 
 
+def test_icebank_small_crop_atom_count_matches_density_on_average(tmp_path):
+    """Regression test: a crop much smaller than the source's own box (here
+    1/4 of it, reach/box_L well under 0.5) must recover the expected atom
+    count on average, regardless of where the random center happens to
+    land.
+
+    This is the regime the periodic-image count formula got wrong: m =
+    ceil(reach/box_L - 0.5) gives m=0 (no wraparound at all, not even one
+    neighboring image) whenever reach <= box_L/2, silently dropping every
+    atom that should have wrapped in from the opposite side whenever the
+    random center lands near a box edge -- systematically biasing the
+    count low (was ~35-50% of expected in this regime), not just adding
+    noise. Checks the *mean* over many draws against the expected density
+    (not a single draw, or even the worst of several) since at this crop
+    size (~130 expected atoms) plain Poisson counting noise alone spans a
+    wide range (~75-125% of expected per draw) that would otherwise mask a
+    real systematic bias of this size, or trigger false failures unrelated
+    to it."""
+    torch.manual_seed(4)
+    gd = GradientSKIcemaker(n=64, dx=1.0, progressbars=False)
+    gd.init_random()
+    path = tmp_path / "config_000.pt"
+    torch.save(
+        {"positions": gd.positions.clone().half(), "box_L": 64.0, "n": 64, "dx": 1.0},
+        path,
+    )
+
+    cache = IceBank(str(tmp_path), progressbars=False)
+    expected = ndensity_of_amorphous_ice * 16.0**3
+    counts = []
+    for seed in range(50):
+        torch.manual_seed(seed)
+        cache.generate_ice_deltas(n=16, dx=1.0, batchsize=1)  # reach/box_L ~ 0.22
+        counts.append(cache.positions.shape[0])
+
+    mean_ratio = (sum(counts) / len(counts)) / expected
+    assert abs(mean_ratio - 1.0) < 0.1
+
+
 def test_icebank_deterministic_filtering_with_mixed_config_sizes(tmp_path):
     """Regression test: requesting an extent that only the larger of two
     differently-sized cached configs can satisfy must always succeed,

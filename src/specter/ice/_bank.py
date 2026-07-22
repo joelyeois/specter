@@ -19,6 +19,7 @@ import torch
 
 from ..arrays import soft_voxelize_coordinates
 from ..fft import fftconvolve
+from ..progress import track
 from ._energy import MLBOP
 from ._energy import mlbop_energy as _mlbop_energy
 from ._kernels import build_atomic_potential_kernel
@@ -231,12 +232,22 @@ class IceBank(L.LightningModule):
         R = random_rotation_matrix(generator=generator)
 
         # Gather candidates via periodic wraparound of the source, using
-        # enough periodic images to safely cover `reach` even when it
-        # exceeds half the source box (the minimum-image convention only
-        # holds for reach <= box_L/2 -- see dev/ice/rotated_tiling_
-        # composition_check.py for the bug this fixes: a naive single-image
-        # wraparound silently drops atoms once reach > box_L/2).
-        m = max(0, math.ceil(reach / box_L - 0.5))
+        # enough periodic images to safely cover `reach` regardless of how
+        # it compares to box_L. For center c and atom a each confined to
+        # [-box_L/2, box_L/2), the offset c - a spans (-box_L, box_L), so
+        # the largest image index that can ever matter is the largest
+        # integer strictly below (box_L + reach) / box_L = 1 + reach/box_L,
+        # i.e. m = floor(1 + reach/box_L) -- equivalently
+        # 1 + floor(reach/box_L), which is always >= 1 (never just the
+        # unwrapped primary cell, even for small reach: a center and atom
+        # near opposite box edges still need the neighboring image to see
+        # each other). See dev/ice/rotated_tiling_composition_check.py for
+        # the original bug this fixes, and the notebook run that showed a
+        # sharp, reach/box_L-dependent gap in atom count is not fixed by
+        # this: m = ceil(reach/box_L - 0.5) silently gives m=0 (no
+        # wraparound at all) whenever reach <= box_L/2, which is wrong
+        # for any center near a box edge.
+        m = 1 + math.floor(reach / box_L)
         shifts = torch.arange(-m, m + 1, dtype=source_pos.dtype) * box_L
         sx, sy, sz = torch.meshgrid(shifts, shifts, shifts, indexing="ij")
         image_offsets = torch.stack([sx.flatten(), sy.flatten(), sz.flatten()], dim=1)
@@ -295,7 +306,12 @@ class IceBank(L.LightningModule):
         crop_extent = (self.box_x, self.box_y, self.box_z)
 
         results = []
-        for _ in range(batchsize):
+        for _ in track(
+            range(batchsize),
+            description="Extracting ice crops",
+            disable=not self.progressbars or batchsize == 1,
+            transient=True,
+        ):
             self.positions = self._extract_crop(crop_extent, generator=generator)
             vox = soft_voxelize_coordinates(
                 self.positions,
@@ -385,21 +401,30 @@ class IceBank(L.LightningModule):
         half = tile_extent / 2
         all_parts: list[torch.Tensor] = []
         mobile_parts: list[torch.Tensor] = []
-        for ix in range(nx):
-            for iy in range(ny):
-                for iz in range(nz_tiles):
-                    offset = torch.tensor(
-                        [
-                            (ix - (nx - 1) / 2) * tile_extent,
-                            (iy - (ny - 1) / 2) * tile_extent,
-                            (iz - (nz_tiles - 1) / 2) * tile_extent,
-                        ]
-                    )
-                    crop = self._extract_crop(
-                        (tile_extent, tile_extent, tile_extent), generator=generator
-                    )
-                    mobile_parts.append((crop.abs() > (half - seam_margin)).any(dim=1))
-                    all_parts.append(crop + offset)
+        tile_indices = [
+            (ix, iy, iz)
+            for ix in range(nx)
+            for iy in range(ny)
+            for iz in range(nz_tiles)
+        ]
+        for ix, iy, iz in track(
+            tile_indices,
+            description="Placing ice tiles",
+            disable=not self.progressbars or len(tile_indices) == 1,
+            transient=True,
+        ):
+            offset = torch.tensor(
+                [
+                    (ix - (nx - 1) / 2) * tile_extent,
+                    (iy - (ny - 1) / 2) * tile_extent,
+                    (iz - (nz_tiles - 1) / 2) * tile_extent,
+                ]
+            )
+            crop = self._extract_crop(
+                (tile_extent, tile_extent, tile_extent), generator=generator
+            )
+            mobile_parts.append((crop.abs() > (half - seam_margin)).any(dim=1))
+            all_parts.append(crop + offset)
         positions = torch.cat(all_parts, dim=0)
         mobile_mask = torch.cat(mobile_parts, dim=0)
         assembled_box = (nx * tile_extent, ny * tile_extent, nz_tiles * tile_extent)
@@ -437,7 +462,12 @@ class IceBank(L.LightningModule):
             frozen = positions[~mobile_mask].to(device)
             mobile = positions[mobile_mask].to(device).clone().requires_grad_(True)
             opt = torch.optim.Adam([mobile], lr=lr)
-            for _ in range(n_steps):
+            for _ in track(
+                range(n_steps),
+                description="Relaxing tile seams",
+                disable=not self.progressbars,
+                transient=True,
+            ):
                 opt.zero_grad()
                 full = torch.cat([frozen, mobile], dim=0)
                 result = model.compute_energy_differentiable(
@@ -531,7 +561,12 @@ class IceBank(L.LightningModule):
         nz_tiles = max(1, math.ceil(self.box_z / tile_extent))
 
         results = []
-        for _ in range(batchsize):
+        for _ in track(
+            range(batchsize),
+            description="Generating tiled ice volumes",
+            disable=not self.progressbars or batchsize == 1,
+            transient=True,
+        ):
             positions, mobile_mask, assembled_box = self._place_tiles(
                 (nx_tiles, ny_tiles, nz_tiles),
                 tile_extent,

@@ -431,6 +431,64 @@ def test_image_generator_bfactor_none_and_zero_match(small_volume, ctf_params):
     assert torch.equal(image_none, image_zero)
 
 
+def test_micrograph_generator_potential_scale_changes_output(small_volume, ctf_params):
+    """potential_scale multiplies the volume before scattering, so it must change output.
+
+    Regression guard: previously accepted and stored as a buffer but never applied to the
+    volume in MicrographGenerator.forward(), silently a no-op.
+    """
+    kwargs = dict(
+        scattering_potential=None,
+        vol=small_volume.unsqueeze(0),
+        micrograph_size=32,
+        pixel_size=2.0,
+        ctf_params=ctf_params,
+        energy=300.0,
+        dose_per_angstrom=2.0,
+        noise_model=None,
+        scattering_model="projection",
+        verbose=False,
+        progressbars=False,
+    )
+
+    gen_default = MicrographGenerator(**kwargs)
+    gen_scaled = MicrographGenerator(**kwargs, potential_scale=2.0)
+
+    image_default = gen_default(torch.tensor([0]))
+    image_scaled = gen_scaled(torch.tensor([0]))
+
+    assert not torch.allclose(image_default, image_scaled)
+
+
+def test_tilt_series_generator_potential_scale_changes_output(ctf_params):
+    """Same regression guard as above, for TiltSeriesGenerator.generate_tilt_series()."""
+    vol = torch.zeros(1, 16, 48, 48)
+    vol[0, 5:11, 20:28, 20:28] = 50.0
+    angles = torch.tensor([-10.0, 0.0, 10.0])
+    kwargs = dict(
+        vol=vol,
+        micrograph_size=32,
+        pixel_size=2.0,
+        ctf_params=ctf_params,
+        energy=300.0,
+        dose_per_angstrom=2.0,
+        angles=angles,
+        noise_model=None,
+        scattering_model="projection",
+        tilt_axis="y",
+        verbose=False,
+        progressbars=False,
+    )
+
+    gen_default = TiltSeriesGenerator(**kwargs)
+    gen_scaled = TiltSeriesGenerator(**kwargs, potential_scale=2.0)
+
+    tilt_series_default, _, _ = gen_default.generate_tilt_series(torch.tensor([0]))
+    tilt_series_scaled, _, _ = gen_scaled.generate_tilt_series(torch.tensor([0]))
+
+    assert not torch.allclose(tilt_series_default, tilt_series_scaled)
+
+
 def test_ctf_params_dict_undoes_multislice_defocus_shift(small_volume, ctf_params):
     """
     Multislice evaluates the CTF at the volume's midplane, which requires
@@ -460,3 +518,127 @@ def test_ctf_params_dict_undoes_multislice_defocus_shift(small_volume, ctf_param
     assert expected_shift > 0
     assert torch.allclose(gen.dfu, original_dfu - expected_shift)
     assert torch.allclose(gen.ctf_params_dict()["dfu"], original_dfu)
+
+
+def test_tilt_series_generator_edge_margin_pads_beyond_geometric_minimum(ctf_params):
+    """edge_margin adds real interpolation slack beyond the exact geometric minimum.
+
+    Regression guard for a tilt-angle artifact: required_nxy (the geometric minimum
+    computed by _estimate_required_nxy) leaves zero slack, so output pixels at the
+    edge of the crop have a per-slice sampling footprint that lands exactly on the
+    padded-volume boundary at the deepest Z, with no room for interpolation. That
+    produced a real artifact -- a bright line through the origin in the FFT, aligned
+    with the tilt axis (see dev/tilt series/diag_line_source.png). edge_margin fixes
+    it by always padding beyond the geometric minimum, independent of taper_width
+    (which only fades pixels beyond required_nxy that are provably never sampled --
+    verified to have zero effect on output, see dev/tilt series/ investigation).
+    """
+    vol = torch.zeros(1, 16, 48, 48)
+    vol[0, 5:11, 20:28, 20:28] = 50.0
+    angles = torch.tensor([45.0])
+    kwargs = dict(
+        vol=vol,
+        micrograph_size=32,
+        pixel_size=2.0,
+        ctf_params=ctf_params,
+        energy=300.0,
+        dose_per_angstrom=2.0,
+        angles=angles,
+        noise_model=None,
+        scattering_model="projection",
+        tilt_axis="y",
+        verbose=False,
+        progressbars=False,
+    )
+
+    gen_no_margin = TiltSeriesGenerator(**kwargs, edge_margin=0)
+    gen_default = TiltSeriesGenerator(**kwargs)  # edge_margin=8 by default
+
+    assert gen_default.vol.shape[-1] == gen_no_margin.vol.shape[-1] + 2 * 8
+
+    tilt_series_no_margin, _, _ = gen_no_margin.generate_tilt_series(torch.tensor([0]))
+    tilt_series_default, _, _ = gen_default.generate_tilt_series(torch.tensor([0]))
+    assert not torch.allclose(tilt_series_no_margin, tilt_series_default)
+
+
+def test_tilt_series_generator_pad_fft_multislice_shapes_match(ctf_params):
+    """pad_fft=True must not change output shapes, and must not crash -- at any tilt.
+
+    Regression guard for a tilt-angle artifact distinct from edge_margin's:
+    multislice's per-slice Fresnel propagation is an FFT-based convolution that is
+    periodic over whatever canvas it runs on. Propagating at exactly the output size
+    gives it zero headroom; under tilt (hundreds to 1000+ multislice steps), the
+    resulting per-step wraparound compounds coherently into a real, visible artifact
+    along all four frame edges (confirmed via direct comparison against
+    scattering_model="projection", which cannot exhibit this artifact by
+    construction, at both toy and production scale -- see
+    dev/tilt series/verify_recursion_pad*.py).
+
+    pad_fft=True fixes this inside IterativeScattering.multislice: pad once before
+    the whole nz_new-step recursion, run the entire recursion at the padded canvas,
+    crop back to the true output size once at the end. self.nxy (and
+    self.iterative_scattering.nxy) are always the true output size -- there is no
+    more separate pad_nxy concept for TiltSeriesGenerator, and self.aberration is
+    never rebuilt.
+
+    This also covers the exact scenario that used to crash: the identity/no-rotation
+    (0deg) path previously did raw tensor indexing with no bounds handling, and the
+    padded canvas wasn't guaranteed to fit inside the edge_margin-provisioned volume
+    -- a RuntimeError shape mismatch. 0deg is included below specifically to guard
+    against regressing that.
+    """
+    vol = torch.zeros(1, 16, 48, 48)
+    vol[0, 5:11, 20:28, 20:28] = 50.0
+    kwargs = dict(
+        vol=vol,
+        micrograph_size=32,
+        pixel_size=2.0,
+        ctf_params=ctf_params,
+        energy=300.0,
+        dose_per_angstrom=2.0,
+        noise_model=None,
+        scattering_model="multislice",
+        tilt_axis="y",
+        verbose=False,
+        progressbars=False,
+    )
+
+    for angle in (0.0, 45.0):
+        gen = TiltSeriesGenerator(**kwargs, angles=torch.tensor([angle]), pad_fft=True)
+        assert gen.iterative_scattering.nxy == gen.nxy == gen.pad_nxy
+
+        tilt_series, exitwaves, clean_images = gen.generate_tilt_series(
+            torch.tensor([0])
+        )
+        for tensor in (tilt_series, exitwaves, clean_images):
+            assert tensor.shape[-2:] == (32, 32)
+
+
+def test_tilt_series_generator_pad_fft_changes_output_under_tilt(ctf_params):
+    """pad_fft=True materially changes multislice output at a non-trivial tilt.
+
+    Companion to the shapes test above: confirms pad_fft is not a silent no-op at
+    45deg (where the artifact it fixes is actually present), while leaving 0deg
+    numerically close to unchanged (no tilt-induced wraparound to fix there).
+    """
+    vol = torch.zeros(1, 16, 48, 48)
+    vol[0, 5:11, 20:28, 20:28] = 50.0
+    kwargs = dict(
+        vol=vol,
+        micrograph_size=32,
+        pixel_size=2.0,
+        ctf_params=ctf_params,
+        energy=300.0,
+        dose_per_angstrom=2.0,
+        noise_model=None,
+        scattering_model="multislice",
+        tilt_axis="y",
+        verbose=False,
+        progressbars=False,
+    )
+
+    gen_base = TiltSeriesGenerator(**kwargs, angles=torch.tensor([45.0]), pad_fft=False)
+    gen_pad = TiltSeriesGenerator(**kwargs, angles=torch.tensor([45.0]), pad_fft=True)
+    _, exitwaves_base, _ = gen_base.generate_tilt_series(torch.tensor([0]))
+    _, exitwaves_pad, _ = gen_pad.generate_tilt_series(torch.tensor([0]))
+    assert not torch.allclose(exitwaves_base, exitwaves_pad)

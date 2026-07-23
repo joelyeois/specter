@@ -1,6 +1,7 @@
 import logging
 
 from .jobs import Job as Job, JobDatabase as JobDatabase
+from .random_seed import set_seed as seed  # noqa: F401
 
 # Set up package-level logger
 logger = logging.getLogger("specter")

@@ -314,6 +314,8 @@ class MicrographGenerator(BaseImager):
         with status("Transferring volume to GPU", disable=not self.progressbars):
             V = self.vol.to(self.device).expand(batch_size, -1, -1, -1)
         V = pad_volume(V, self.nxy, self.nz, None, self.pad_fft, xy_pad_mode="reflect")
+        scale = self.potential_scale[idx].reshape(-1, 1, 1, 1).to(V.device)
+        V = V * scale
 
         if (
             self.save_clean_exitwaves
@@ -326,6 +328,7 @@ class MicrographGenerator(BaseImager):
             V_clean = pad_volume(
                 V_clean, self.nxy, self.nz, None, self.pad_fft, xy_pad_mode="reflect"
             )
+            V_clean = V_clean * scale
             self.clean_exitwaves = self.iterative_scattering(
                 V_clean, pose=0, slice_batch_size=self.slice_batch_size
             )

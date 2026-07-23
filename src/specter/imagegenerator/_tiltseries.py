@@ -57,7 +57,28 @@ class TiltSeriesGenerator(MicrographGenerator):
     alpha : float, optional
         Amplitude contrast ratio. Default 0.0.
     pad_fft : bool, optional
-        Whether to XY-pad the volume for FFT antialiasing. Default False.
+        Give multislice's per-slice FFT-based Fresnel propagation extra canvas
+        headroom for the whole tilt recursion, rather than propagating at exactly
+        the output size with zero headroom. At zero headroom, each step's circular
+        convolution wraps slightly at the same fixed frame boundary every step;
+        under tilt (hundreds to 1000+ multislice steps), that small per-step
+        wraparound compounds coherently into a real, visible artifact along all
+        four frame edges. Confirmed fixed by padding once, running the *entire*
+        recursion at the padded size, and cropping back to the true output size
+        only once at the end (validated against ``scattering_model="projection"``,
+        which cannot exhibit this artifact by construction, at both toy and
+        production scale -- nz=368, ~1000+ multislice steps, see
+        ``dev/tilt series/verify_recursion_pad*.py``). Has no effect on
+        ``scattering_model`` other than ``"multislice"``. Default False -- this is
+        a real, confirmed fix, but flipping the *default* on requires re-validating
+        against the full real-data survey, which has not been redone with this
+        implementation.
+    fft_pad_margin : int, optional
+        Padding added on each side of the propagation canvas when ``pad_fft=True``.
+        Always zero-filled (a tilted slice's flanks are real vacuum, not continuing
+        ice, so reflecting would fabricate density that isn't physically present).
+        Validated at 16-32px -- identical result across that whole range (already
+        converged), independent of volume size or multislice step count. Default 16.
     chunk_size : int, optional
         Chunk size for ``TomogramGenerator`` (unused here but passed to parent).
     move_to_cpu : bool, optional
@@ -73,12 +94,45 @@ class TiltSeriesGenerator(MicrographGenerator):
     pad_volume : bool, optional
         Automatically pad volume in XY when it is too small for the requested
         tilt coverage (reflect padding). Default True.
+    edge_margin : int, optional
+        Extra reflect-padded pixels on each XY side, added on top of the exact
+        geometrically-required tilt coverage. The geometric minimum computed by
+        ``_estimate_required_nxy`` leaves *zero* slack: output pixels at the edge of
+        the crop have a per-slice sampling footprint that, at the deepest Z, lands
+        exactly on the padded-volume boundary, with no room for interpolation. That
+        produces a real, tilt-axis-aligned artifact -- visible in the image as
+        banding at the two edges perpendicular to the tilt axis, and in its Fourier
+        transform as a bright line through the origin along the tilt-axis direction
+        (confirmed by rotating ``tilt_axis`` and watching the line rotate with it).
+        A small default margin removes that slack deficit; empirically, ~8px cut the
+        radial-power-spectrum shape-correlation gap between 0deg and a 45deg tilt
+        roughly in half on a 192px/92-slice test volume (see dev/tilt series/ for the
+        sweep). This is intentionally independent of ``taper_width``: tapering the
+        *extra* margin beyond the geometric minimum has no effect on the output
+        (those pixels are provably never sampled), so it cannot substitute for this.
+        Default 8.
     taper_width : int, optional
         Extra reflect-padded apron pixels on each XY side beyond tilt-coverage
-        padding, with a cosine taper applied. Default 0.
+        padding (already inclusive of ``edge_margin``), with a cosine taper applied.
+        Note: since this fades pixels strictly beyond the geometrically-required
+        coverage (now ``edge_margin``-inflated), those pixels are never read by the
+        interpolation that produces the output -- this taper has no measurable
+        effect on the result and exists only to avoid a literal hard edge at the
+        outermost boundary of the padded array itself. Default 0.
     z_taper_width : int, optional
-        Cosine taper width in Z pixels at the top and bottom of the volume.
-        Default 0.
+        Cosine taper width in Z pixels at the top and bottom of the volume. Applied
+        after ``z_edge_margin``'s zero-padding (if any), so a nonzero value here
+        smooths the transition into that new zero region rather than merely dimming
+        the sample's own edge slices. Default 0.
+    z_edge_margin : int, optional
+        Zero-pads this many pixels onto each Z edge before any tapering. Unlike XY (a
+        cryo-ET sample continues laterally past any crop -- see ``edge_margin``), Z
+        really is bounded by vacuum above/below the ice, so zero is the physically
+        correct fill here -- but a hard step to zero is still a discontinuity that
+        produces the same kind of tilt-induced Fourier artifact XY does (tilting mixes
+        X and Z), so pair this with ``z_taper_width`` to smooth the transition rather
+        than leaving a cliff. Matters most when ``pad_fft=True`` inflates the working
+        canvas well beyond what ``edge_margin`` alone covers. Default 0 (off).
     tilt_axis : str, optional
         Axis around which the sample tilts ('x' or 'y'). Default 'x'.
     coincidence_radius : float or torch.Tensor, optional
@@ -264,6 +318,7 @@ class TiltSeriesGenerator(MicrographGenerator):
         klim: float | None = None,
         alpha: float = 0.0,
         pad_fft: bool = False,
+        fft_pad_margin: int = 16,
         chunk_size: int | None = None,
         move_to_cpu: bool = False,
         detector_model: str | None = None,
@@ -271,6 +326,8 @@ class TiltSeriesGenerator(MicrographGenerator):
         verbose: bool = True,
         slice_batch_size: int = 1,
         pad_volume: bool = True,
+        edge_margin: int = 8,
+        z_edge_margin: int = 0,
         taper_width: int = 0,
         z_taper_width: int = 0,
         tilt_axis: str = "x",
@@ -314,8 +371,13 @@ class TiltSeriesGenerator(MicrographGenerator):
             nz=nz_input,
             max_tilt_angle_deg=max_tilt_angle_deg,
         )
-        target_nxy = required_nxy + 2 * taper_width
+        # required_nxy is the exact geometric minimum -- zero interpolation slack for
+        # crop-edge output pixels (see edge_margin's docstring). Inflate it before
+        # taper_width (a separate, purely cosmetic apron) gets added on top.
+        required_nxy_padded = required_nxy + 2 * int(edge_margin)
+        target_nxy = required_nxy_padded + 2 * taper_width
         self.recommended_nxy_for_max_tilt = required_nxy
+        self.edge_margin = int(edge_margin)
         self.max_tilt_angle_deg = float(max_tilt_angle_deg)
         self.max_allowed_tilt_deg_for_volume = self._estimate_max_allowed_tilt_deg(
             desired_nxy=desired_nxy, nz=nz_input, available_nxy=available_nxy
@@ -334,7 +396,8 @@ class TiltSeriesGenerator(MicrographGenerator):
                     + (" and taper" if taper_width > 0 else "")
                     + f"; padded (reflect) from {available_nxy} to {vol.shape[-1]} px in XY.\n"
                     f"  micrograph_size={desired_nxy}, requested_max_tilt={self.max_tilt_angle_deg:.2f} deg, "
-                    f"required_volume_nxy>={required_nxy}"
+                    f"required_volume_nxy>={required_nxy}, edge_margin={edge_margin} "
+                    f"(-> required_nxy_padded>={required_nxy_padded})"
                 )
                 if taper_width > 0:
                     msg += f", target_nxy (with taper)>={target_nxy}"
@@ -349,6 +412,31 @@ class TiltSeriesGenerator(MicrographGenerator):
                     f"  max_allowed_tilt_with_current_volume\u2248{self.max_allowed_tilt_deg_for_volume:.2f} deg,\n"
                     f"  max_allowed_nxy\u2248{self.max_allowed_nxy}."
                 )
+
+        if z_edge_margin > 0:
+            # Unlike XY (where the sample genuinely continues past our crop -- reflect is
+            # correct) or edge_margin (a small interpolation-slack margin), Z really is
+            # bounded by vacuum above/below the ice: zero-fill is the *physically correct*
+            # answer here, not an approximation. But "correct value" and "safe to use
+            # abruptly" are different things -- multislice's FFT-based propagation doesn't
+            # care whether a discontinuity is physically justified, only that it's a
+            # discontinuity. A hard step from real ice/protein density to exactly zero,
+            # right at the true Z boundary, still produces the same class of artifact once
+            # the sample is tilted (rotation mixes X and Z, so this Z-edge shows up in the
+            # tilted image just like the XY boundary did). So: extend with real zeros
+            # (correct), then taper across the new seam (z_taper_width, right below) so the
+            # transition is gradual rather than a cliff -- mirroring how a real ice/vacuum
+            # interface isn't a mathematical step function either.
+            vol = F.pad(
+                vol,
+                (0, 0, 0, 0, z_edge_margin, z_edge_margin),
+                mode="constant",
+                value=0.0,
+            )
+            print(
+                f"[TiltSeriesGenerator] Zero-padded {z_edge_margin} px at each Z edge "
+                f"(physically correct vacuum above/below the sample)."
+            )
 
         if taper_width > 0 or z_taper_width > 0:
             vol = self._apply_cosine_taper(
@@ -379,7 +467,16 @@ class TiltSeriesGenerator(MicrographGenerator):
             noise_model=noise_model,
             klim=klim,
             alpha=alpha,
-            pad_fft=pad_fft,
+            # NOT pad_fft: MicrographGenerator/BaseImager's own pad_fft mechanism
+            # (pad_nxy -> whole-volume XY padding, aberration built at pad_nxy) is
+            # specific to MicrographGenerator.forward(), which TiltSeriesGenerator
+            # never calls (generate_tilt_series uses self.iterative_scattering
+            # directly). Forwarding pad_fft here would inflate self.pad_nxy and build
+            # self.aberration at that size, mismatching the exitwave that
+            # self.iterative_scattering now always returns at self.nxy. This class's
+            # own pad_fft controls IterativeScattering's internal multislice-canvas
+            # padding only (see below), entirely independent of the parent's.
+            pad_fft=False,
             chunk_size=chunk_size,
             move_to_cpu=move_to_cpu,
             detector_model=detector_model,
@@ -400,14 +497,33 @@ class TiltSeriesGenerator(MicrographGenerator):
         # self.register_buffer("vol", vol)
 
         self.slice_batch_size = slice_batch_size
+        # pad_fft=True (multislice only) gives the per-slice FFT-based Fresnel
+        # propagation extra canvas headroom for the *entire* nz_new-step recursion,
+        # padding once before the loop and cropping back to self.nxy once at the end
+        # -- see IterativeScattering.multislice for the mechanism. Validated this
+        # gives an artifact-free result matching scattering_model="projection" (which
+        # cannot exhibit this artifact by construction) at both toy and production
+        # scale (nz=368, ~1000+ multislice steps, see dev/tilt series/). Always uses
+        # zeros for the padded region (not reflection): a tilted slice's flanks are
+        # real vacuum there, not continuing ice, so reflecting would fabricate density
+        # that isn't physically present.
+        #
+        # Unlike the old implementation, this does not inflate self.nxy/the volume-ROI
+        # sampling size at all -- self.iterative_scattering.nxy is always the true
+        # output size, so the exitwave it returns is already self.nxy-sized whenever
+        # pad_fft=True, and self.aberration (built at self.nxy by the parent's
+        # _init_optics()) never needs to be rebuilt.
         self.iterative_scattering = IterativeScattering(
-            desired_nxy,
+            self.nxy,
             pixel_size,
             energy,
             scattering_model=scattering_model,
             klim=klim,
             alpha=alpha,
             progressbars=progressbars,
+            roi_padding_mode="zeros",
+            pad_fft=pad_fft,
+            fft_pad_margin=fft_pad_margin,
         )
 
         if quaternions is not None:
@@ -529,6 +645,9 @@ class TiltSeriesGenerator(MicrographGenerator):
         B = len(idx) if isinstance(idx, torch.Tensor) else 1
         n_frames = len(self.quaternions)
 
+        scale = self.potential_scale[idx].reshape(-1, 1, 1, 1).to(self.vol.device)
+        vol_scaled = self.vol * scale
+
         for i in track(
             range(n_frames),
             description="Generating tilt series.",
@@ -546,7 +665,7 @@ class TiltSeriesGenerator(MicrographGenerator):
             theta_matrix = rotations.build_affine_matrix(R_mat, T_torch)
 
             exitwave = self.iterative_scattering(
-                self.vol, theta_matrix, slice_batch_size=self.slice_batch_size
+                vol_scaled, theta_matrix, slice_batch_size=self.slice_batch_size
             )
 
             ctf_batch = self._ctf_batch(idx)

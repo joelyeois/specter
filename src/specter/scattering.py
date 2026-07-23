@@ -6,7 +6,7 @@ import lightning as L
 from torch.utils.checkpoint import checkpoint as _gradient_checkpoint
 from .progress import track
 
-from .arrays import disk2d
+from .arrays import center_crop, disk2d
 from .constants import energy_to_wavelength, interaction_parameter
 from .fft import fft2, ifft2
 from .rotations import VolumeRotator, build_affine_matrix
@@ -426,6 +426,9 @@ class IterativeScattering(L.LightningModule):
         ews_curvature_sign: str = "negative",
         alpha: float = 0.0,
         progressbars: bool = True,
+        roi_padding_mode: str = "zeros",
+        pad_fft: bool = False,
+        fft_pad_margin: int = 16,
     ):
         """
         Parameters
@@ -448,6 +451,45 @@ class IterativeScattering(L.LightningModule):
             Amplitude contrast ratio.
         progressbars : bool
             Whether to show progress bars.
+        roi_padding_mode : str, optional
+            ``padding_mode`` passed to ``grid_sample`` (via
+            ``VolumeRotator.sample_rotated_slices``) in ``_fetch_volume_slices``, for
+            ROI queries (under rotation) that fall outside the input volume's extent.
+            ``'zeros'`` (default) treats out-of-bounds queries as vacuum, which is the
+            physically correct assumption for a discrete object surrounded by empty
+            space, but wrong for a continuous medium like a vitreous-ice lamella (which
+            has no vacuum -- real content everywhere) sampled with an ROI larger than
+            the requested volume's own padding: it introduces a real, measurable
+            density cliff exactly at the volume boundary (a discontinuity with slowly
+            decaying, ~1/k, Fourier content, spread broadly rather than confined to a
+            single spatial frequency). ``'reflection'`` or ``'border'`` avoid the value
+            discontinuity (at the cost of a gradient kink, ~1/k^2, a much gentler
+            artifact) by mirroring or clamping the real content instead. See
+            ``TiltSeriesGenerator``'s ``pad_fft`` for where this matters in practice.
+        pad_fft : bool, optional
+            For ``scattering_model="multislice"`` only: give the per-slice FFT-based
+            Fresnel propagation extra canvas headroom for the whole ``nz_new``-step
+            recursion, rather than propagating at exactly ``nxy`` with zero headroom.
+            Zero headroom lets each step's circular convolution wrap slightly at the
+            same fixed frame boundary every step; under tilt (hundreds to 1000+ steps),
+            that small per-step wraparound compounds coherently into a real, visible
+            artifact along all four frame edges (confirmed via direct comparison against
+            ``scattering_model="projection"``, which cannot exhibit this artifact by
+            construction, at both toy and production scale -- see ``dev/tilt series/``).
+            The fix is to pad once, run the *entire* recursion at the padded size, and
+            crop back to ``nxy`` only once at the end -- padding and cropping every
+            individual step was also tested and made things worse, since it discards
+            genuinely-propagating field content on every iteration instead of only
+            preventing wraparound. Default False.
+        fft_pad_margin : int, optional
+            Padding added on each side of the propagation canvas when ``pad_fft=True``,
+            i.e. the recursion runs at ``nxy + 2 * fft_pad_margin``. Always filled with
+            zeros (not reflection): the region a tilted slice's flanks sample is real
+            vacuum, not continuing material, so reflecting would fabricate density that
+            isn't there. Validated at 16-32px -- the result is identical across that
+            whole range (converged), including at production scale (nz=368, ~1000+
+            multislice steps), so this does not need to scale with volume size or step
+            count. Default 16.
         """
         super().__init__()
         self.nxy = nxy
@@ -459,6 +501,9 @@ class IterativeScattering(L.LightningModule):
         self.ews_curvature_sign = ews_curvature_sign
         self.alpha = alpha
         self.progressbars = progressbars
+        self.roi_padding_mode = roi_padding_mode
+        self.pad_fft = pad_fft
+        self.fft_pad_margin = fft_pad_margin
 
         # frequency coordinates
         kx = torch.fft.fftfreq(nxy, pixel_size)
@@ -478,6 +523,24 @@ class IterativeScattering(L.LightningModule):
         F_step = torch.exp(1j * torch.pi * self.wavelength * pixel_size * k**2)
         self.register_buffer("F_step_real", F_step.real)
         self.register_buffer("F_step_imag", F_step.imag)
+
+        # Second propagator/bandlimit at the padded canvas size, used only when
+        # pad_fft=True (see multislice()).
+        self.padded_nxy = nxy + 2 * fft_pad_margin if pad_fft else nxy
+        if pad_fft:
+            kx_p = torch.fft.fftfreq(self.padded_nxy, pixel_size)
+            kxx_p, kyy_p = torch.meshgrid(kx_p, kx_p, indexing="ij")
+            k_p = torch.sqrt(kxx_p**2 + kyy_p**2)
+            F_step_p = torch.exp(1j * torch.pi * self.wavelength * pixel_size * k_p**2)
+            self.register_buffer("F_step_padded_real", F_step_p.real)
+            self.register_buffer("F_step_padded_imag", F_step_p.imag)
+            if klim is not None:
+                kmask_p = disk2d(self.padded_nxy, int(self.padded_nxy * klim))[
+                    None, ...
+                ]
+                self.register_buffer("kmask_padded", kmask_p)
+            else:
+                self.kmask_padded = 1
 
     def _is_identity(self, theta_matrix: torch.Tensor) -> bool:
         """Check if the affine matrix is identity (no rotation or translation)."""
@@ -588,10 +651,13 @@ class IterativeScattering(L.LightningModule):
         nz_new, rotator = self._setup_tilt(V, theta_matrix)
         return nz_new, rotator, is_identity
 
-    def _roi_start(self, V: torch.Tensor) -> tuple[int, int]:
-        """Top-left pixel of the centered (nxy, nxy) ROI within V's (Y, X) extent."""
-        y_start = (V.shape[-2] - self.nxy) // 2
-        x_start = (V.shape[-1] - self.nxy) // 2
+    def _roi_start(
+        self, V: torch.Tensor, roi_size: int | None = None
+    ) -> tuple[int, int]:
+        """Top-left pixel of the centered (roi_size, roi_size) ROI within V's (Y, X) extent."""
+        size = self.nxy if roi_size is None else roi_size
+        y_start = (V.shape[-2] - size) // 2
+        x_start = (V.shape[-1] - size) // 2
         return y_start, x_start
 
     def _slice_processing_order(
@@ -614,6 +680,7 @@ class IterativeScattering(L.LightningModule):
         y_start: int,
         x_start: int,
         device: str | torch.device,
+        roi_size: int | None = None,
     ) -> torch.Tensor:
         """
         Fetch Z-slices of `V` at the given processing-order positions.
@@ -626,27 +693,44 @@ class IterativeScattering(L.LightningModule):
         ----------
         slice_positions : torch.Tensor
             1D tensor of slice indices (in processing order), shape (K,).
+        roi_size : int, optional
+            Size of the square ROI to fetch. Defaults to ``self.nxy``; callers
+            that need a larger canvas (e.g. ``multislice`` with ``pad_fft=True``)
+            pass it explicitly.
 
         Returns
         -------
         torch.Tensor
-            Real-valued slices, shape (B, K, nxy, nxy).
+            Real-valued slices, shape (B, K, roi_size, roi_size).
         """
+        size = self.nxy if roi_size is None else roi_size
         if is_identity:
-            return V[
-                :,
-                slice_positions,
-                y_start : y_start + self.nxy,
-                x_start : x_start + self.nxy,
-            ].to(device)
+            B = V.shape[0]
+            K = slice_positions.shape[0]
+            Y, X = V.shape[-2], V.shape[-1]
+            y_end, x_end = y_start + size, x_start + size
+            # Requested window may exceed V's actual extent (e.g. a padded canvas
+            # requested from a volume only sized for the unpadded ROI). Anything
+            # outside V is genuine vacuum -- zero-fill it instead of silently
+            # truncating (which used to produce a shape mismatch downstream).
+            y0, y1 = max(y_start, 0), min(y_end, Y)
+            x0, x1 = max(x_start, 0), min(x_end, X)
+            if y0 == y_start and y1 == y_end and x0 == x_start and x1 == x_end:
+                return V[:, slice_positions, y_start:y_end, x_start:x_end].to(device)
+            out = torch.zeros(B, K, size, size, device=device, dtype=V.dtype)
+            if y1 > y0 and x1 > x0:
+                out[:, :, y0 - y_start : y1 - y_start, x0 - x_start : x1 - x_start] = V[
+                    :, slice_positions, y0:y1, x0:x1
+                ].to(device)
+            return out
         assert rotator is not None
         slice_indices = slice_positions.float() - (nz_new - 1) / 2
         return rotator.sample_rotated_slices(
             V,
             theta_matrix,
             slice_indices=slice_indices,
-            roi_size=(self.nxy, self.nxy),
-            padding_mode="zeros",
+            roi_size=(size, size),
+            padding_mode=self.roi_padding_mode,
         ).to(device)
 
     def _iter_slices(
@@ -655,6 +739,7 @@ class IterativeScattering(L.LightningModule):
         theta_matrix: torch.Tensor,
         slice_batch_size: int,
         description: str,
+        roi_size: int | None = None,
     ):
         """
         Yield ``(i, nz_new, slice_sample)`` for each Z-slice of a (possibly
@@ -665,6 +750,12 @@ class IterativeScattering(L.LightningModule):
         ``slice_batch_size``-sized batches via `_fetch_volume_slices` and
         cached, trading memory for fewer `sample_rotated_slices` calls.
 
+        Parameters
+        ----------
+        roi_size : int, optional
+            Size of the square ROI to fetch per slice. Defaults to ``self.nxy``;
+            ``multislice`` passes ``self.padded_nxy`` when ``pad_fft=True``.
+
         Yields
         ------
         i : int
@@ -672,11 +763,11 @@ class IterativeScattering(L.LightningModule):
         nz_new : int
             Total number of slices being traversed.
         slice_sample : torch.Tensor
-            Real-valued slice, shape (B, nxy, nxy).
+            Real-valued slice, shape (B, roi_size, roi_size).
         """
         nz_new, rotator, is_identity = self._resolve_tilt_setup(V, theta_matrix)
         device = self.device
-        y_start, x_start = self._roi_start(V)
+        y_start, x_start = self._roi_start(V, roi_size=roi_size)
         indices = self._slice_processing_order(nz_new, device=V.device)
 
         pbar = track(
@@ -699,6 +790,7 @@ class IterativeScattering(L.LightningModule):
                     y_start,
                     x_start,
                     device,
+                    roi_size=roi_size,
                 )[:, 0]
             else:
                 if i % slice_batch_size == 0:
@@ -713,6 +805,7 @@ class IterativeScattering(L.LightningModule):
                         y_start,
                         x_start,
                         device,
+                        roi_size=roi_size,
                     )
                 assert slices_block is not None
                 slice_sample = slices_block[:, i % slice_batch_size]
@@ -751,21 +844,33 @@ class IterativeScattering(L.LightningModule):
         B = V.shape[0]
         device = self.device
 
-        F = self.F_step_real + 1j * self.F_step_imag
-        exitwave = torch.ones(
-            B, self.nxy, self.nxy, device=device, dtype=torch.complex64
-        )
+        if self.pad_fft:
+            F = self.F_step_padded_real + 1j * self.F_step_padded_imag
+            kmask = self.kmask_padded
+            canvas = self.padded_nxy
+            roi_size: int | None = canvas
+        else:
+            F = self.F_step_real + 1j * self.F_step_imag
+            kmask = self.kmask
+            canvas = self.nxy
+            roi_size = None
+
+        exitwave = torch.ones(B, canvas, canvas, device=device, dtype=torch.complex64)
 
         if checkpoint_chunks is None:
             for i, _, slice_sample in self._iter_slices(
-                V, theta_matrix, slice_batch_size, "Multislice (Iterative)"
+                V,
+                theta_matrix,
+                slice_batch_size,
+                "Multislice (Iterative)",
+                roi_size=roi_size,
             ):
                 slice_complex = complex_potential(slice_sample, alpha=self.alpha)
                 t = torch.exp(1j * self.sigma * self.pixel_size * slice_complex)
-                exitwave = ifft2(fft2(t * exitwave) * F * self.kmask)
+                exitwave = ifft2(fft2(t * exitwave) * F * kmask)
         else:
             nz_new, rotator, is_identity = self._resolve_tilt_setup(V, theta_matrix)
-            y_start, x_start = self._roi_start(V)
+            y_start, x_start = self._roi_start(V, roi_size=roi_size)
             indices = self._slice_processing_order(nz_new, device=V.device)
 
             # Gradient-checkpointed loop.
@@ -776,7 +881,8 @@ class IterativeScattering(L.LightningModule):
             _sigma = self.sigma
             _pixel_size = self.pixel_size
             _F = F
-            _kmask = self.kmask
+            _kmask = kmask
+            _roi_size = roi_size
 
             pbar = track(
                 range(0, nz_new, checkpoint_chunks),
@@ -801,13 +907,23 @@ class IterativeScattering(L.LightningModule):
                     ctheta: torch.Tensor,
                     cy: int,
                     cx: int,
+                    roi: int | None,
                 ):
                     def _chunk(exitwave: torch.Tensor, V: torch.Tensor) -> torch.Tensor:
                         ew = exitwave
                         dev = ew.device
                         for j in range(len(ci)):
                             s = self._fetch_volume_slices(
-                                V, ci[j : j + 1], cid, crot, ctheta, cnz, cy, cx, dev
+                                V,
+                                ci[j : j + 1],
+                                cid,
+                                crot,
+                                ctheta,
+                                cnz,
+                                cy,
+                                cx,
+                                dev,
+                                roi_size=roi,
                             )[:, 0]
                             sc = complex_potential(s, alpha=_alpha)
                             t = torch.exp(1j * _sigma * _pixel_size * sc)
@@ -816,11 +932,15 @@ class IterativeScattering(L.LightningModule):
 
                     return _chunk
 
-                chunk_fn = _make_chunk(_ci, _cnz, _cid, _crot, _ctheta, _cy, _cx)
+                chunk_fn = _make_chunk(
+                    _ci, _cnz, _cid, _crot, _ctheta, _cy, _cx, _roi_size
+                )
                 exitwave = _gradient_checkpoint(
                     chunk_fn, exitwave, V, use_reentrant=False
                 )
 
+        if self.pad_fft:
+            exitwave = center_crop(exitwave, self.nxy, dim=(-2, -1))
         return exitwave
 
     def projection(

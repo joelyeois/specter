@@ -3,9 +3,9 @@ from __future__ import annotations
 import torch
 import lightning as L
 
-from .crowding import CrowdWithDuplicates
-from .ice import IceBank, RandomIcemaker
-from .progress import status
+from ..crowding import CrowdWithDuplicates
+from ..ice import IceBank, RandomIcemaker
+from ..progress import status
 
 
 class TomogramGenerator(L.LightningModule):

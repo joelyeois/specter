@@ -6,6 +6,7 @@ import lightning as L
 import numpy as np
 import torch
 
+from .arrays import clip_insert_bounds
 from .progress import track
 
 from . import rotations
@@ -385,7 +386,6 @@ def insert_particles_into_micrograph(
     within bounds is inserted (clipping at edges).
     """
     N, Zp, Yp, Xp = volumes.shape
-    hz, hy, hx = Zp // 2, Yp // 2, Xp // 2
     device = volumes.device
 
     # Allocate micrograph
@@ -423,38 +423,13 @@ def insert_particles_into_micrograph(
         cy_index = cy_center + int(positions_int[i, 1].item())
         cz_index = cz_center + int(positions_int[i, 2].item())
 
-        # Particle slice bounds
-        z0 = cz_index - hz
-        z1 = cz_index + hz
-        y0 = cy_index - hy
-        y1 = cy_index + hy
-        x0 = cx_index - hx
-        x1 = cx_index + hx
-
-        # Clip to micrograph bounds
-        z0_clip = max(z0, 0)
-        z1_clip = min(z1, Z)
-        y0_clip = max(y0, 0)
-        y1_clip = min(y1, Y)
-        x0_clip = max(x0, 0)
-        x1_clip = min(x1, X)
-
-        # Corresponding subvolume slice
-        pz0 = z0_clip - z0
-        pz1 = pz0 + (z1_clip - z0_clip)
-        py0 = y0_clip - y0
-        py1 = py0 + (y1_clip - y0_clip)
-        px0 = x0_clip - x0
-        px1 = px0 + (x1_clip - x0_clip)
-
-        # Skip if fully outside bounds
-        if (z1_clip <= z0_clip) or (y1_clip <= y0_clip) or (x1_clip <= x0_clip):
+        bounds = clip_insert_bounds(
+            (cz_index, cy_index, cx_index), (Zp, Yp, Xp), (Z, Y, X)
+        )
+        if bounds is None:
             continue
-
-        # Add the volume to the micrograph
-        micrograph[z0_clip:z1_clip, y0_clip:y1_clip, x0_clip:x1_clip] += volumes[
-            i, pz0:pz1, py0:py1, px0:px1
-        ]
+        dst, src = bounds
+        micrograph[dst] += volumes[i][src]
 
     return micrograph
 

@@ -1429,6 +1429,55 @@ def radial_symmetrize(
     return radial_mean[r_int]
 
 
+def clip_insert_bounds(
+    center: Sequence[float],
+    local_shape: Sequence[int],
+    volume_shape: Sequence[int],
+) -> tuple[tuple[slice, ...], tuple[slice, ...]] | None:
+    """
+    Compute the destination/source slices for inserting a small array
+    centered at `center` into a larger array, clipping at the boundaries.
+
+    Shared low-level geometry for "stamp a local array into a big one at an
+    arbitrary center, cropping whatever falls outside" -- used by both
+    crowding.py (batched, centered coordinates, additive merge) and
+    specimen/cryoet.py (one array at a time, absolute coordinates, max
+    merge). Only the index arithmetic lives here; callers own the actual
+    merge (`+=`, `torch.maximum`, ...) since that differs by use case.
+
+    Parameters
+    ----------
+    center : sequence of float
+        Index (one per axis) in the destination array where the local
+        array's center voxel (``local_shape[i] // 2``) should land. Rounded
+        to the nearest integer.
+    local_shape : sequence of int
+        Shape of the array being inserted.
+    volume_shape : sequence of int
+        Shape of the destination array.
+
+    Returns
+    -------
+    tuple of (dst_slices, src_slices), or None
+        `dst_slices`/`src_slices` are tuples of `slice`, one per axis, ready
+        to index the destination/source arrays directly (e.g.
+        ``volume[dst_slices] += local[src_slices]``). None if the local
+        array falls entirely outside the volume's bounds.
+    """
+    dst_slices = []
+    src_slices = []
+    for c, lp, vp in zip(center, local_shape, volume_shape):
+        half = lp // 2
+        d0 = int(round(c)) - half
+        d1 = d0 + lp
+        d0_clip, d1_clip = max(d0, 0), min(d1, vp)
+        if d1_clip <= d0_clip:
+            return None
+        dst_slices.append(slice(d0_clip, d1_clip))
+        src_slices.append(slice(d0_clip - d0, lp - (d1 - d1_clip)))
+    return tuple(dst_slices), tuple(src_slices)
+
+
 def center_crop(
     x: torch.Tensor, size: int | tuple[int, ...], dim: int | Sequence[int] | None = None
 ) -> torch.Tensor:

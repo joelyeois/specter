@@ -10,13 +10,19 @@ particle picking." BMC Bioinformatics. 2016;17(1):405.
 doi:10.1186/s12859-016-1283-3. PMCID: PMC5050594.
 https://pmc.ncbi.nlm.nih.gov/articles/PMC5050594/
 
-The 21 entries below (PDB code, name, molecular weight, minimum bounding
+The entries below (PDB code, name, molecular weight, minimum bounding
 sphere radius, relative occurrence frequency) are transcribed from that
 paper's Additional file 1 (Table S1), which is not rendered in the article's
 HTML/PDF and had to be pulled from the journal's supplementary-material
 store directly. `occurrence_freq` is the paper's own relative-abundance
 weighting (their normalization of proteomic abundance data), reused here
 only for the *ratio* between species -- see build_filler_protein_specs.
+
+The paper's table has 21 rows; only 20 are listed here. Its 2AWB entry
+(bacterial 70S ribosome) was obsoleted by the PDB on 2014-12-10 and merged
+into 4V4Q -- confirmed live against RCSB (2026-07-24: 2AWB 404s, the other
+20 all 200 OK). Dropped rather than repointed to 4V4Q, since it would have
+just duplicated a ribosome-class target's size range anyway.
 
 This is one reasonable, published reference set for "generic crowded
 cytoplasm," not a claim about the true composition of any specific real
@@ -70,13 +76,6 @@ PEI2016_CROWDING_TABLE: list[dict] = [
         "mw_kda": 97.70,
         "radius_nm": 4.7670,
         "occurrence_freq": 0.0072,
-    },
-    {
-        "code": "2AWB",
-        "name": "Bacterial 70S ribosome (E. coli)",
-        "mw_kda": 4293.42,
-        "radius_nm": 11.4888,
-        "occurrence_freq": 0.0206,
     },
     {
         "code": "2BYU",

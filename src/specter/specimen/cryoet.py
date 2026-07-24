@@ -153,7 +153,14 @@ class CryoETSpecimenGenerator:
         """
         if code not in self._pdb_cache:
             Path(self.pdb_cache_dir).mkdir(parents=True, exist_ok=True)
-            self._pdb_cache[code] = PDB(code, savefolder=self.pdb_cache_dir)
+            # Raw fetch/assembly/progress-bar chatter is silenced regardless of
+            # self.verbose -- the per-species "N atoms, built in Xs" summary
+            # line below already covers this, and with a few dozen species
+            # (targets + cytosolic filler) the underlying PDB fetch mechanics
+            # noise multiplies into far more lines than it's worth.
+            self._pdb_cache[code] = PDB(
+                code, savefolder=self.pdb_cache_dir, verbose=False
+            )
         return self._pdb_cache[code]
 
     # ------------------------------------------------------------------

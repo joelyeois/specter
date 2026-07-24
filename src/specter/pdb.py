@@ -33,6 +33,7 @@ class PDB:
         assembly: bool = True,
         savefolder: str = "../pdb-data/",
         origin: tuple[float, float, float] | None = None,
+        verbose: bool = True,
     ) -> None:
         """
         Create a PDB object from either a PDB ID or a local file path.
@@ -51,6 +52,11 @@ class PDB:
             Custom origin to subtract from coordinates. If None, coordinates
             are centered on their geometric center. If a tuple, that point is
             subtracted directly without auto-centering.
+        verbose : bool, optional
+            Print fetch/assembly status and show the atom-extraction progress
+            bar. Default True; set False to silence per-fetch chatter (e.g.
+            when constructing many PDB objects in a loop with your own
+            higher-level progress reporting).
 
         Attributes
         ----------
@@ -77,7 +83,7 @@ class PDB:
             # Treat as PDB ID
             self.pdb_id = pdb_source
             self.filepath = PDB.fetch_pdb_file(
-                pdb_source, savefolder=savefolder, assembly=assembly
+                pdb_source, savefolder=savefolder, assembly=assembly, verbose=verbose
             )
             self.assembly = assembly
             self.savefolder = savefolder
@@ -93,7 +99,7 @@ class PDB:
 
         # get atomic elements and coordinates
         self.atomic_numbers, self.coordinates = PDB.get_atoms_and_coordinates(
-            self.structure
+            self.structure, verbose=verbose
         )
 
         # center coordinates
@@ -113,6 +119,7 @@ class PDB:
         ext: str = "cif",
         savefolder: str = "../pdb-data/",
         assembly: bool | int = True,
+        verbose: bool = True,
     ) -> str:
         """
         Download a PDB file and save it in a given location.
@@ -130,23 +137,28 @@ class PDB:
             - False → fetch asymmetric unit.
             - int   → fetch that specific assembly if available, fallback to default
                PDBx/mmCIF file.
+        verbose : bool, optional
+            Print fetch/assembly status. Default True.
 
         Returns
         -------
         str
             Path to the saved PDB file
         """
-        PDB.get_available_assemblies(pdb_id)
+        PDB.get_available_assemblies(pdb_id, verbose=verbose)
 
         # Decide what to fetch
         if assembly is True:
-            print(f"{pdb_id}: Fetching default Biological Assembly 1")
+            if verbose:
+                print(f"{pdb_id}: Fetching default Biological Assembly 1")
             filename = f"{pdb_id}-assembly{1}.{ext}"
         elif assembly is False:
-            print(f"{pdb_id}: Fetching default PDBx/mmCIF file.")
+            if verbose:
+                print(f"{pdb_id}: Fetching default PDBx/mmCIF file.")
             filename = f"{pdb_id}.{ext}"
         elif isinstance(assembly, int):
-            print(f"{pdb_id}: Fetching Biological Assembly {assembly}")
+            if verbose:
+                print(f"{pdb_id}: Fetching Biological Assembly {assembly}")
             filename = f"{pdb_id}-assembly{assembly}.{ext}"
         else:
             raise ValueError("assembly must be True, False, or int")
@@ -156,11 +168,13 @@ class PDB:
 
         # Return existing file if available
         if os.path.exists(file_path):
-            print(f"File already exists: {file_path}, skip fetching.")
+            if verbose:
+                print(f"File already exists: {file_path}, skip fetching.")
             return file_path
 
         # Fetch
-        print("File does not exist, fetching.")
+        if verbose:
+            print("File does not exist, fetching.")
         url = "https://files.rcsb.org/download/" + filename + ".gz"
         r = requests.get(url)
         r.raise_for_status()
@@ -173,11 +187,12 @@ class PDB:
         with open(file_path, "w") as f:
             f.write(cif_content)
 
-        print(f"Downloaded to: {file_path}")
+        if verbose:
+            print(f"Downloaded to: {file_path}")
         return file_path
 
     @staticmethod
-    def get_available_assemblies(pdb_id: str) -> None:
+    def get_available_assemblies(pdb_id: str, verbose: bool = True) -> None:
         """
         Print the available biological assembly IDs for a PDB entry.
 
@@ -185,6 +200,8 @@ class PDB:
         ----------
         pdb_id : str
             4-character PDB ID.
+        verbose : bool, optional
+            Print the result (or fetch error). Default True.
 
         Notes
         -----
@@ -199,9 +216,11 @@ class PDB:
             assemblies = data.get("rcsb_entry_container_identifiers", {}).get(
                 "assembly_ids", []
             )
-            print("Assemblies available: " + ", ".join(assemblies))
+            if verbose:
+                print("Assemblies available: " + ", ".join(assemblies))
         except Exception as e:
-            print(f"Error fetching assemblies for {pdb_id}: {e}")
+            if verbose:
+                print(f"Error fetching assemblies for {pdb_id}: {e}")
             return
 
     @staticmethod
@@ -238,6 +257,7 @@ class PDB:
     @staticmethod
     def get_atoms_and_coordinates(
         structure: Structure | str,
+        verbose: bool = True,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Extract atomic elements and coordinates from PDB structure.
@@ -248,6 +268,8 @@ class PDB:
             Either a parsed Biopython structure object or a filepath to a
             PDB/mmCIF file. If a filepath is provided, the structure will be
             loaded automatically.
+        verbose : bool, optional
+            Show the extraction progress bar. Default True.
 
         Returns
         -------
@@ -269,7 +291,9 @@ class PDB:
         coords_list = []
         element_symbols = []
         for atom in track(
-            structure.get_atoms(), description="Extracting atom coordinates and element"
+            structure.get_atoms(),
+            description="Extracting atom coordinates and element",
+            disable=not verbose,
         ):
             element_symbol = atom.element.strip().upper()
             element_symbols.append(element_symbol)

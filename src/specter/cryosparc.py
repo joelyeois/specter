@@ -103,8 +103,8 @@ def _load_csfile_parameters(
     translations_A -= beamshift_A
 
     # extract trefoil
-    tref1 = torch.as_tensor(dataset["ctf/trefoil_A"][:, 0] / 1000)
-    tref2 = torch.as_tensor(dataset["ctf/trefoil_A"][:, 1] / 1000)
+    trefoil1 = torch.as_tensor(dataset["ctf/trefoil_A"][:, 0] / 1000)
+    trefoil2 = torch.as_tensor(dataset["ctf/trefoil_A"][:, 1] / 1000)
 
     # extract per-particle scale factors
     scale = torch.as_tensor(dataset["alignments3D/alpha"])
@@ -141,8 +141,8 @@ def _load_csfile_parameters(
         "tiltx": beamtiltx_rad,
         "tilty": beamtilty_rad,
         "phaseshift": phaseshift_rad,
-        "tref1": tref1,
-        "tref2": tref2,
+        "trefoil1": trefoil1,
+        "trefoil2": trefoil2,
     }
 
     return (

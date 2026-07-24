@@ -4,7 +4,7 @@ import torch
 import lightning as L
 
 from ..crowding import CrowdWithDuplicates
-from ..ice import IceBank, RandomIcemaker
+from ..ice import IceBank, RandomIcemaker, blend_ice_into_volume, resolve_icemaker
 from ..progress import status
 
 
@@ -111,23 +111,16 @@ class TomogramGenerator(L.LightningModule):
         else:
             self.crowd = None
 
-        self.icemaker: IceBank | RandomIcemaker | None
+        self.icemaker: IceBank | RandomIcemaker | None = resolve_icemaker(
+            self.ice_model,
+            pixel_size,
+            nxy=nxy,
+            nz=nz,
+            ice_cache_dir=ice_cache_dir,
+            icemaker=icemaker,
+        )
         if icemaker is not None:
-            self.icemaker = icemaker
             self.ice_model = icemaker.method
-        elif self.ice_model is not None:
-            if self.ice_model == "gd":
-                self.icemaker = IceBank(cache_dir=ice_cache_dir)
-            elif self.ice_model == "random":
-                self.icemaker = RandomIcemaker(dx=pixel_size, n=nxy, nz=nz)
-            elif self.ice_model == "none":
-                self.icemaker = None
-            else:
-                raise ValueError(
-                    f"Unknown ice_model '{self.ice_model}'. Choose 'gd', 'random', or 'none'."
-                )
-        else:
-            self.icemaker = None
 
     def generate(self) -> torch.Tensor:
         """
@@ -160,19 +153,6 @@ class TomogramGenerator(L.LightningModule):
         if self.icemaker is not None:
             with torch.no_grad():
                 with status("Tiling ice volume", disable=not self.progressbars):
-                    if isinstance(self.icemaker, IceBank):
-                        ice = self.icemaker.generate_big_ice(
-                            n=self.nxy,
-                            dx=self.pixel_size,
-                            nz=self.nz,
-                            batchsize=V.shape[0],
-                        ).to(assembly_device)
-                    else:
-                        ice = self.icemaker.generate_ice(batchsize=V.shape[0]).to(
-                            assembly_device
-                        )
-                with status("Applying ice mask", disable=not self.progressbars):
-                    icemask = (V < 0.05 * V.max()).to(V.dtype)
-                    V = V + ice * icemask
+                    V = blend_ice_into_volume(V, self.icemaker, self.pixel_size)
 
         return V

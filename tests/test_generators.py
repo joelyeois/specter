@@ -187,6 +187,56 @@ def test_micrograph_generator_accepts_prebuilt_icemaker(small_volume, ctf_params
     assert images.shape == (1, 32, 32)
 
 
+def test_micrograph_generator_blends_ice_into_prebuilt_vol(small_volume_4d, ctf_params):
+    """MicrographGenerator(vol=..., ice_model=...) blends ice into vol at construction,
+    matching its size/voxel size, only where vol had little existing potential."""
+    torch.manual_seed(0)
+    original_vol = small_volume_4d.clone()
+
+    gen = MicrographGenerator(
+        scattering_potential=None,
+        vol=small_volume_4d.clone(),
+        micrograph_size=32,
+        pixel_size=2.0,
+        ctf_params=ctf_params,
+        energy=300.0,
+        dose_per_angstrom=2.0,
+        ice_model="random",
+        verbose=False,
+        progressbars=False,
+    )
+
+    # Same shape as the input vol -- ice fills the existing volume, doesn't grow it.
+    assert gen.vol.shape == original_vol.shape
+    # Particle region (originally high potential, above the ice mask threshold) is
+    # untouched.
+    assert torch.equal(
+        gen.vol[0, 12:20, 12:20, 12:20], original_vol[0, 12:20, 12:20, 12:20]
+    )
+    # Elsewhere (originally near-zero potential), ice has been added.
+    assert not torch.equal(gen.vol, original_vol)
+    assert gen.vol[0, 0, 0, 0] > 0
+
+
+def test_micrograph_generator_vol_without_ice_model_is_unchanged(
+    small_volume_4d, ctf_params
+):
+    """vol= with no ice_model/icemaker is registered as-is (no ice added)."""
+    original_vol = small_volume_4d.clone()
+    gen = MicrographGenerator(
+        scattering_potential=None,
+        vol=small_volume_4d.clone(),
+        micrograph_size=32,
+        pixel_size=2.0,
+        ctf_params=ctf_params,
+        energy=300.0,
+        dose_per_angstrom=2.0,
+        verbose=False,
+        progressbars=False,
+    )
+    assert torch.equal(gen.vol, original_vol)
+
+
 def test_tilt_series_generator_regression(ctf_params):
     """TiltSeriesGenerator: 3-angle tilt series, coincidence loss, tilt_axis='y'."""
     vol = torch.zeros(1, 16, 48, 48)
@@ -214,6 +264,41 @@ def test_tilt_series_generator_regression(ctf_params):
     torch.manual_seed(0)
     tilt_series, _, _ = gen.generate_tilt_series(torch.tensor([0]))
     _save_or_compare("tilt_series_generator", tilt_series.cpu())
+
+
+def test_tilt_series_generator_blends_ice_into_vol(ctf_params):
+    """TiltSeriesGenerator(vol=..., ice_model=...) blends ice into vol, matching its
+    size/voxel size, before the class's own tilt-coverage padding is applied."""
+    torch.manual_seed(0)
+    vol = torch.zeros(1, 16, 48, 48)
+    vol[0, 5:11, 20:28, 20:28] = 50.0
+    original_vol = vol.clone()
+
+    gen = TiltSeriesGenerator(
+        vol=vol.clone(),
+        micrograph_size=32,
+        pixel_size=2.0,
+        ctf_params=ctf_params,
+        energy=300.0,
+        dose_per_angstrom=2.0,
+        angles=torch.tensor([0.0]),
+        ice_model="random",
+        tilt_axis="y",
+        verbose=False,
+        progressbars=False,
+    )
+
+    # No tilt-coverage padding triggered at this geometry (available_nxy already
+    # meets target_nxy), so gen.vol's shape matches the raw input exactly.
+    assert gen.vol.shape == original_vol.shape
+    # Particle region (originally high potential, above the ice mask threshold) is
+    # untouched.
+    assert torch.equal(
+        gen.vol[0, 5:11, 20:28, 20:28], original_vol[0, 5:11, 20:28, 20:28]
+    )
+    # Elsewhere (originally near-zero potential), ice has been added.
+    assert not torch.equal(gen.vol, original_vol)
+    assert gen.vol[0, 0, 0, 0] > 0
 
 
 def test_bfactor_damps_transfer_function():

@@ -22,6 +22,7 @@ from ..fft import fftconvolve
 from ..progress import track
 from ._energy import MLBOP
 from ._kernels import build_atomic_potential_kernel
+from ._random import RandomIcemaker
 
 
 def default_ice_cache_dir() -> str:
@@ -922,3 +923,97 @@ def build_ice_cache(
             },
             os.path.join(cache_dir, f"config_{i:03d}.pt"),
         )
+
+
+def resolve_icemaker(
+    ice_model: str | None,
+    pixel_size: float,
+    nxy: int,
+    nz: int,
+    ice_cache_dir: str | None = None,
+    icemaker: "IceBank | RandomIcemaker | None" = None,
+) -> "IceBank | RandomIcemaker | None":
+    """
+    Resolve the ``ice_model``/``icemaker``/``ice_cache_dir`` kwargs shared
+    across :class:`~specter.specimen.TomogramGenerator`,
+    :class:`~specter.imagegenerator.MicrographGenerator`, and
+    :class:`~specter.imagegenerator.TiltSeriesGenerator` into a concrete
+    icemaker instance (or ``None`` if ice is disabled).
+
+    Parameters
+    ----------
+    ice_model : str or None
+        ``'gd'`` (:class:`IceBank`), ``'random'`` (:class:`RandomIcemaker`),
+        ``'none'`` or ``None`` (no ice). Ignored when ``icemaker`` is given.
+    pixel_size : float
+        Voxel size in Å, used to construct a fresh ``RandomIcemaker``.
+    nxy : int
+        XY size in voxels, used to construct a fresh ``RandomIcemaker``.
+    nz : int
+        Z size in voxels, used to construct a fresh ``RandomIcemaker``.
+    ice_cache_dir : str, optional
+        Cache directory forwarded to a fresh ``IceBank``.
+    icemaker : IceBank or RandomIcemaker, optional
+        A pre-built icemaker to reuse as-is. When given, ``ice_model`` and
+        ``ice_cache_dir`` are ignored.
+
+    Returns
+    -------
+    IceBank or RandomIcemaker or None
+    """
+    if icemaker is not None:
+        return icemaker
+    if ice_model is None or ice_model == "none":
+        return None
+    if ice_model == "gd":
+        return IceBank(cache_dir=ice_cache_dir)
+    if ice_model == "random":
+        return RandomIcemaker(dx=pixel_size, n=nxy, nz=nz)
+    raise ValueError(
+        f"Unknown ice_model '{ice_model}'. Choose 'gd', 'random', or 'none'."
+    )
+
+
+def blend_ice_into_volume(
+    V: torch.Tensor,
+    icemaker: "IceBank | RandomIcemaker",
+    pixel_size: float,
+    threshold: float = 0.05,
+) -> torch.Tensor:
+    """
+    Add ice into a scattering-potential volume, masked to voxels with little
+    existing potential.
+
+    Same masking rule used across specter's ice integration points: a voxel
+    is considered ice-free (and thus eligible to receive ice) when its value
+    is below ``threshold * V.max()``.
+
+    Parameters
+    ----------
+    V : torch.Tensor
+        Scattering-potential volume, shape (B, Z, Y, X).
+    icemaker : IceBank or RandomIcemaker
+        Ice source. An :class:`IceBank` draws a tiled crop matching ``V``'s
+        own size via :meth:`IceBank.generate_big_ice`; a
+        :class:`RandomIcemaker` is called via :meth:`RandomIcemaker.generate_ice`
+        (its own fixed ``(n, dx, nz)`` must already match ``V``).
+    pixel_size : float
+        Voxel size in Å, forwarded to ``IceBank.generate_big_ice``.
+    threshold : float, optional
+        Fraction of ``V.max()`` below which a voxel is treated as ice-free.
+        Default 0.05.
+
+    Returns
+    -------
+    torch.Tensor
+        ``V`` with ice added at masked voxels; same shape/dtype/device.
+    """
+    batchsize, nz, nxy, _ = V.shape
+    if isinstance(icemaker, IceBank):
+        ice = icemaker.generate_big_ice(
+            n=nxy, dx=pixel_size, nz=nz, batchsize=batchsize
+        ).to(V.device)
+    else:
+        ice = icemaker.generate_ice(batchsize=batchsize).to(V.device)
+    mask = (V.detach() < threshold * V.max()).to(V.dtype)
+    return V + ice * mask

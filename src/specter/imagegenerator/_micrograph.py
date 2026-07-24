@@ -7,7 +7,7 @@ import torch
 from specter import logger
 
 from ._base import BaseImager, compute_nz, pad_volume
-from ..ice import IceBank, RandomIcemaker
+from ..ice import IceBank, RandomIcemaker, blend_ice_into_volume, resolve_icemaker
 from ..progress import status
 from ..scattering import IterativeScattering
 from ..specimen import TomogramGenerator
@@ -38,27 +38,39 @@ class MicrographGenerator(BaseImager):
     dose_per_angstrom : float or torch.Tensor
         Electron dose per Å². Scalar or 1-D tensor of length n.
     vol : torch.Tensor, optional
-        Pre-assembled specimen volume of shape (1, Z, Y, X).  When provided,
-        ``scattering_potential``, crowding, and ice parameters are ignored.
+        Pre-assembled specimen volume of shape (1, Z, Y, X) -- e.g. the
+        particles+membranes output of
+        :class:`~specter.specimen.CryoETSpecimenGenerator`.  When provided,
+        ``scattering_potential`` and crowding parameters are ignored, but
+        ``ice_model``/``icemaker`` are still honored: if either is set, ice
+        is generated to match ``vol``'s own size and voxel size and blended
+        in wherever ``vol`` has little existing scattering potential (same
+        masking rule as ``ImageGenerator``'s ``solvate()``), once, at
+        construction time. ``ice_thickness`` is ignored in this path since
+        the volume's Z extent is fixed by ``vol`` itself.
     anisomag : torch.Tensor, optional
         Anisotropic magnification matrices, shape (n, 2, 2).
     ice_model : str, optional
-        Ice generation algorithm passed to ``TomogramGenerator``: ``'gd'``
-        (samples from the pre-generated :class:`~specter.ice.IceBank` cache)
-        or ``'random'`` (instant, cheap :class:`~specter.ice.RandomIcemaker`
-        placement). Ignored when ``icemaker`` is provided.
+        Ice generation algorithm: ``'gd'`` (samples from the pre-generated
+        :class:`~specter.ice.IceBank` cache) or ``'random'`` (instant, cheap
+        :class:`~specter.ice.RandomIcemaker` placement). Used by
+        ``TomogramGenerator`` when ``scattering_potential`` is given, or
+        blended directly into ``vol`` when ``vol`` is given (see above).
+        Ignored when ``icemaker`` is provided.
     ice_thickness : float, optional
-        Ice thickness in Å passed to ``TomogramGenerator``.
+        Ice thickness in Å passed to ``TomogramGenerator``. Ignored when
+        ``vol`` is given.
     ice_cache_dir : str, optional
         Directory of cached ice configs for ``ice_model='gd'`` (see
         :func:`specter.ice.build_ice_cache`). Defaults to the bundled
         ``ice-data/ice_cache``. Ignored for other ``ice_model`` values or
         when ``icemaker`` is provided.
     icemaker : IceBank or RandomIcemaker, optional
-        A pre-built icemaker instance to reuse across multiple
-        ``MicrographGenerator`` instances. When supplied, ``ice_model`` and
-        ``ice_cache_dir`` are both ignored. Ignored entirely when ``vol`` is
-        provided directly (no ``TomogramGenerator`` is built in that case).
+        A pre-built icemaker instance to reuse across multiple generator
+        instances. When supplied, ``ice_model`` and ``ice_cache_dir`` are
+        both ignored. Honored both when ``scattering_potential`` is given
+        (forwarded to ``TomogramGenerator``) and when ``vol`` is given
+        (blended directly into ``vol``, see above).
     crowd_min_distance : float, optional
         Minimum inter-particle distance in Å for crowding.
     crowd_max_distance_z : float, optional
@@ -245,6 +257,22 @@ class MicrographGenerator(BaseImager):
         self.save_clean_exitwaves = save_clean_exitwaves
 
         if vol is not None:
+            vol_icemaker = resolve_icemaker(
+                ice_model,
+                pixel_size,
+                nxy=vol.shape[-1],
+                nz=vol.shape[-3],
+                ice_cache_dir=ice_cache_dir,
+                icemaker=icemaker,
+            )
+            if vol_icemaker is not None:
+                if self.verbose:
+                    logger.info(f"Adding ice to volume using {ice_model} model")
+                with (
+                    torch.no_grad(),
+                    status("Tiling ice volume", disable=not self.progressbars),
+                ):
+                    vol = blend_ice_into_volume(vol, vol_icemaker, pixel_size)
             self.register_buffer("vol", vol)
         else:
             self.specimen_gen = TomogramGenerator(

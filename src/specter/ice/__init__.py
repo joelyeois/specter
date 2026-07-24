@@ -1,8 +1,10 @@
 from ._bank import (
     IceBank,
+    blend_ice_into_volume,
     build_ice_cache,
     default_ice_cache_dir,
     random_rotation_matrix,
+    resolve_icemaker,
 )
 from ._energy import MLBOP
 from ._gradient import GradientSKIcemaker
@@ -26,9 +28,11 @@ __all__ = [
     "MDSimDump",
     "RandomIcemaker",
     "IceBank",
+    "blend_ice_into_volume",
     "build_ice_cache",
     "default_ice_cache_dir",
     "random_rotation_matrix",
+    "resolve_icemaker",
     "MLBOP",
     "avogadro",
     "density_of_amorphous_ice",

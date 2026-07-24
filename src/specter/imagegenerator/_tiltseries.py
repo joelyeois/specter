@@ -5,9 +5,10 @@ from typing import Any, Sequence
 
 import torch
 import torch.nn.functional as F
-from ..progress import track
+from ..progress import status, track
 
 from .. import rotations
+from ..ice import IceBank, RandomIcemaker, blend_ice_into_volume, resolve_icemaker
 from ._micrograph import MicrographGenerator
 from ..rotations import Rotation
 from ..scattering import IterativeScattering
@@ -24,7 +25,14 @@ class TiltSeriesGenerator(MicrographGenerator):
     Parameters
     ----------
     vol : torch.Tensor
-        Pre-assembled specimen volume of shape (1, Z, Y, X).
+        Pre-assembled specimen volume of shape (1, Z, Y, X) -- e.g. the
+        particles+membranes output of
+        :class:`~specter.specimen.CryoETSpecimenGenerator`. If ``ice_model``
+        or ``icemaker`` is given, ice is blended into ``vol`` (matching its
+        own size and voxel size, masked to voxels with little existing
+        scattering potential -- see ``ice_model`` below) before any of this
+        class's own tilt-coverage/taper padding is applied, so that padding
+        still sees, and extends, the ice-filled volume.
     micrograph_size : int or tuple[int, int]
         Output image size in pixels (must be square).
     pixel_size : float
@@ -46,6 +54,21 @@ class TiltSeriesGenerator(MicrographGenerator):
         Tilt angles in degrees. Mutually exclusive with ``quaternions``.
     anisomag : torch.Tensor, optional
         Anisotropic magnification matrices, shape (n, 2, 2).
+    ice_model : str, optional
+        Ice generation algorithm used to blend ice into ``vol`` (see
+        ``vol`` above): ``'gd'`` (samples from the pre-generated
+        :class:`~specter.ice.IceBank` cache) or ``'random'`` (instant,
+        cheap :class:`~specter.ice.RandomIcemaker` placement). ``None``
+        (default) or ``'none'`` adds no ice. Ignored when ``icemaker`` is
+        provided.
+    ice_cache_dir : str, optional
+        Directory of cached ice configs for ``ice_model='gd'`` (see
+        :func:`specter.ice.build_ice_cache`). Defaults to the bundled
+        ``ice-data/ice_cache``. Ignored for other ``ice_model`` values or
+        when ``icemaker`` is provided.
+    icemaker : IceBank or RandomIcemaker, optional
+        A pre-built icemaker instance to blend into ``vol`` directly. When
+        supplied, ``ice_model`` and ``ice_cache_dir`` are both ignored.
     scattering_model : str, optional
         Scattering model passed to ``IterativeScattering``. Default 'multislice'.
     aberration_model : str, optional
@@ -312,6 +335,9 @@ class TiltSeriesGenerator(MicrographGenerator):
         translations: torch.Tensor | None = None,
         angles: torch.Tensor | Sequence[float] | None = None,
         anisomag: torch.Tensor | None = None,
+        ice_model: str | None = None,
+        ice_cache_dir: str | None = None,
+        icemaker: IceBank | RandomIcemaker | None = None,
         scattering_model: str = "multislice",
         aberration_model: str = "holography",
         noise_model: str | None = "poisson",
@@ -344,6 +370,28 @@ class TiltSeriesGenerator(MicrographGenerator):
     ):
         if vol is None:
             raise ValueError("'vol' must be provided for TiltSeriesGenerator.")
+
+        vol_icemaker = resolve_icemaker(
+            ice_model,
+            pixel_size,
+            nxy=vol.shape[-1],
+            nz=vol.shape[-3],
+            ice_cache_dir=ice_cache_dir,
+            icemaker=icemaker,
+        )
+        if vol_icemaker is not None:
+            # Blend ice into the raw input volume before any of this class's own
+            # tilt-coverage/z-vacuum/taper padding below, so that padding still
+            # operates on (and, for the reflect-padded XY margin, naturally
+            # extends) the ice-filled volume, and the z_edge_margin/taper
+            # regions -- which are meant to be real vacuum, not ice -- stay
+            # untouched.
+            if verbose:
+                print(
+                    f"[TiltSeriesGenerator] Adding ice to volume using {ice_model} model"
+                )
+            with torch.no_grad(), status("Tiling ice volume", disable=not progressbars):
+                vol = blend_ice_into_volume(vol, vol_icemaker, pixel_size)
 
         if isinstance(micrograph_size, int):
             desired_nxy = micrograph_size

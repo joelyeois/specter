@@ -217,11 +217,16 @@ class Detector(L.LightningModule):
         """
         Simulates a single frame of a Direct Electron Detector (DED).
 
-        Args:
-            intensity_map: 2D Tensor (normalized psi^2 from multislice).
-            pixel_size_angstrom: Size of one pixel in Angstroms (e.g., 1.0).
-            dose_per_angstrom_sq_per_frame: Physical dose (e/A^2).
-            coinc_radius_pixels: Dead-time radius in pixels.
+        Parameters
+        ----------
+        intensity_map : torch.Tensor
+            2D Tensor (normalized psi^2 from multislice).
+        pixel_size_angstrom : float
+            Size of one pixel in Angstroms (e.g., 1.0).
+        dose_per_angstrom_sq_per_frame : float
+            Physical dose (e/A^2).
+        coinc_radius_pixels : float, optional
+            Dead-time radius in pixels.
         """
         det_h, det_w = intensity_map.shape
         device = intensity_map.device

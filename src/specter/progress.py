@@ -153,12 +153,14 @@ class TqdmProgress:
     """
     A context manager wrapper around ProgressManager that mimics rich.progress.Progress.
 
-    Example
-    -------
-    with TqdmProgress(transient=True) as progress:
-        task = progress.add_task("Processing", total=10)
-        for i in range(10):
-            progress.update(task, advance=1)
+    Examples
+    --------
+    ::
+
+        with TqdmProgress(transient=True) as progress:
+            task = progress.add_task("Processing", total=10)
+            for i in range(10):
+                progress.update(task, advance=1)
     """
 
     def __init__(self, transient: bool = False, **kwargs: Any):

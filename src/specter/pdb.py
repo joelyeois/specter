@@ -64,14 +64,10 @@ class PDB:
             The PDB ID if pdb_source is a PDB ID.
         filepath : str
             Path to the PDB/mmCIF file.
-        structure : Bio.PDB.Structure.Structure
-            Parsed PDB structure object.
         atomic_numbers : torch.Tensor
             Atomic numbers of all atoms in the structure, shape (N,).
         coordinates : torch.Tensor
             Coordinates shifted by origin, shape (N, 3).
-        max_diameter : float
-            Maximum diameter of the structure based on convex hull.
         """
 
         # Determine whether pdb_source is a PDB ID or file path
@@ -96,6 +92,7 @@ class PDB:
 
         # get pdb structure
         self.structure = PDB.get_pdb_structure(self.filepath)
+        """Bio.PDB.Structure.Structure: Parsed PDB structure object."""
 
         # get atomic elements and coordinates
         self.atomic_numbers, self.coordinates = PDB.get_atoms_and_coordinates(
@@ -112,6 +109,7 @@ class PDB:
 
         # estimate max diameter
         self.max_diameter = PDB.estimate_max_diameter(self.coordinates)
+        """float: Maximum diameter of the structure based on convex hull."""
 
     @staticmethod
     def fetch_pdb_file(

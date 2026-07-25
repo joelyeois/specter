@@ -17,7 +17,7 @@ def radial_distribution_function(
     Compute the radial distribution function (RDF) g(r) from atomic coordinates.
 
     g(r) is defined as the probability of finding a particle at distance r
-    relative to the bulk average:
+    relative to the bulk average::
 
         g(r) = (1 / (4π r² ρ N)) * Σ_i Σ_{j≠i} δ(r - |r_i - r_j|)
 

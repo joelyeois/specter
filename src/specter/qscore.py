@@ -149,19 +149,6 @@ class QScore:
     standard_residues_only : bool
         Passed to ``load_cif`` when ``cif_path`` is given. Default ``True``.
 
-    Attributes
-    ----------
-    atoms : torch.Tensor or None
-        Centred atom coordinates cached by the last call to ``load_cif``.
-    grid : torch.Tensor or None
-        Density grid cached by the last call to ``load_mrc``.
-    voxel_size : float or None
-        Voxel size cached by the last call to ``load_mrc``.
-    residue_index : np.ndarray or None
-        Integer array of shape ``(N,)`` mapping each atom to its residue.
-    residue_labels : list[str] or None
-        Per-residue labels ``"chain:resnum:resname"``.
-
     Examples
     --------
     Load CIF once at construction, score against multiple maps:
@@ -200,10 +187,15 @@ class QScore:
 
         # Cached state populated by load_cif / load_mrc.
         self.atoms: torch.Tensor | None = None
+        """torch.Tensor or None: Centred atom coordinates cached by the last call to ``load_cif``."""
         self.grid: torch.Tensor | None = None
+        """torch.Tensor or None: Density grid cached by the last call to ``load_mrc``."""
         self.voxel_size: float | None = None
+        """float or None: Voxel size cached by the last call to ``load_mrc``."""
         self.residue_index: np.ndarray | None = None
+        """np.ndarray or None: Integer array of shape ``(N,)`` mapping each atom to its residue."""
         self.residue_labels: list[str] | None = None
+        """list[str] or None: Per-residue labels ``"chain:resnum:resname"``."""
         self._centroid: np.ndarray | None = None
         self._atom_keys: list[tuple[str, int, str, str]] | None = None
 

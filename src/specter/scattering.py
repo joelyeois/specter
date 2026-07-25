@@ -60,7 +60,8 @@ class Scattering(L.LightningModule):
     ):
         """
         A scattering module to compute the 2D exitwave from a 3D scattering
-        potential. Various scattering modes are available.
+        potential. Various scattering modes are available, following the
+        multislice formalism of Kirkland [1]_.
 
         Parameters
         ----------

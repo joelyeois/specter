@@ -39,4 +39,16 @@ Given an experimental particle stack and CryoSPARC ``.cs`` metadata:
        --symmetry C1 \
        --return_class 1
 
-See ``demo-notebooks/`` for interactive worked examples.
+Each run is recorded under its ``--project`` name in a local job database.
+Inspect past runs with the ``specter-jobs`` CLI (installed automatically
+with the package):
+
+.. code-block:: bash
+
+   specter-jobs list --project my-project
+   specter-jobs show <job_id>
+   specter-jobs diff <job_id_1> <job_id_2>
+
+See ``demo-notebooks/`` for interactive worked examples, including
+micrograph and tilt-series generation (``create_micrograph/``,
+``tilt-series-generator.ipynb``).

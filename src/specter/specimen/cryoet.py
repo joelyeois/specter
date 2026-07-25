@@ -277,19 +277,26 @@ class CryoETSpecimenGenerator:
         (x, y, z)[::-1] / target_v_size, matching how _stamp_proteins/
         _stamp_membranes insert them. Must be called after generate().
 
-        Args:
-            output_dir: Directory to write the .ndjson files into.
-            annotation_version: Used only in the output filename, matching
-                the portal's "{name}-{version}_{type}.ndjson" convention.
-            oriented: If True, protein picks are written as "orientedPoint"
-                with each instance's rotation matrix included; if False,
-                as plain "point" (location only).
-            include_membranes: If True, also write one "point" file with
-                each fitted membrane's center (no orientation/size -- just
-                a location, since membranes aren't point particles).
+        Parameters
+        ----------
+        output_dir : str or pathlib.Path
+            Directory to write the .ndjson files into.
+        annotation_version : str, optional
+            Used only in the output filename, matching the portal's
+            ``"{name}-{version}_{type}.ndjson"`` convention.
+        oriented : bool, optional
+            If True, protein picks are written as ``"orientedPoint"`` with
+            each instance's rotation matrix included; if False, as plain
+            ``"point"`` (location only).
+        include_membranes : bool, optional
+            If True, also write one ``"point"`` file with each fitted
+            membrane's center (no orientation/size -- just a location,
+            since membranes aren't point particles).
 
-        Returns:
-            dict mapping species/"membrane" -> written file Path.
+        Returns
+        -------
+        dict[str, pathlib.Path]
+            Mapping of species/"membrane" to written file path.
         """
         if not hasattr(self, "protein_instances"):
             raise RuntimeError("call generate() before export_picks()")

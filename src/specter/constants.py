@@ -61,7 +61,7 @@ def interaction_parameter(energy: float) -> float:
     Calculate the electron-specimen interaction parameter.
 
     Computes the interaction constant σ for electron scattering, following
-    Kirkland Eq. (5.6).
+    Kirkland Eq. (5.6) [1]_.
 
     Parameters
     ----------

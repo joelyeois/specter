@@ -195,19 +195,25 @@ def build_filler_protein_specs(
     the default as a starting point to tune empirically against your own
     target volume and resolution, not a physical constant.
 
-    Args:
-        codes: PDB codes to include (must exist in PEI2016_CROWDING_TABLE).
-            Defaults to the full table.
-        exclude_codes: PDB codes to drop from the (defaulted-to-full) table.
-            Mutually exclusive with `codes`.
-        total_occupancy: Combined PMER_OCC budget across all selected
-            species.
-        **overrides: Extra protein_specs keys applied to every generated
-            entry, e.g. PMER_OVER_TOL=0.02.
+    Parameters
+    ----------
+    codes : list of str, optional
+        PDB codes to include (must exist in PEI2016_CROWDING_TABLE).
+        Defaults to the full table.
+    exclude_codes : list of str, optional
+        PDB codes to drop from the (defaulted-to-full) table. Mutually
+        exclusive with ``codes``.
+    total_occupancy : float, optional
+        Combined PMER_OCC budget across all selected species.
+    **overrides
+        Extra protein_specs keys applied to every generated entry, e.g.
+        ``PMER_OVER_TOL=0.02``.
 
-    Returns:
-        list[dict]: one entry per selected species, each
-        {"PDB_CODE": ..., "PMER_OCC": ..., **overrides} -- ready to
+    Returns
+    -------
+    list[dict]
+        One entry per selected species, each
+        ``{"PDB_CODE": ..., "PMER_OCC": ..., **overrides}`` -- ready to
         concatenate onto your own protein_specs list.
     """
     if codes is not None and exclude_codes is not None:

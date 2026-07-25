@@ -438,7 +438,8 @@ def halfmap_fsc_weight_2d(
     grid for use as a loss weight in the Reconstructor Fourier-space loss.
 
     The returned tensor has shape (H, W//2+1), matching torch.fft.rfft2 output,
-    and can be multiplied directly against squared residuals:
+    and can be multiplied directly against squared residuals::
+
         loss = mean(weight * |img_f - out_f|^2) / (H * W)
 
     High-FSC (well-resolved) shells get weight ≈ 1; low-FSC (noisy) shells

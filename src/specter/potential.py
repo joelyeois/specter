@@ -526,13 +526,6 @@ class GemmiPotentialBuilder:
         Atomic numbers of all atoms. Default is None.
     b_factor : float, optional
         Isotropic B-factor. Default is 20.0.
-
-    Attributes
-    ----------
-    translate_to_center : torch.Tensor
-        Translation vector to center atoms in grid.
-    c1 : float
-        Scaling factor for electrostatic potential (2π*e*a₀).
     """
 
     def __init__(
@@ -551,12 +544,14 @@ class GemmiPotentialBuilder:
         self.translate_to_center = torch.tensor(
             [[self.nx // 2 * dx, self.ny // 2 * dx, self.nz // 2 * dx]]
         )
+        """torch.Tensor: Translation vector to center atoms in grid."""
         self.atomic_numbers = atomic_numbers
 
         # scaling prefactor
         a0 = 0.529  # Bohr radius, [Å]
         e = 14.4  # electron charge, [V·Å]
         self.c1 = 2 * torch.pi * e * a0
+        """float: Scaling factor for electrostatic potential (2π*e*a₀)."""
 
     def build_model(
         self,

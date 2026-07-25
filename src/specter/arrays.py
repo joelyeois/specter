@@ -800,7 +800,7 @@ def compute_nps_1d(images: torch.Tensor) -> torch.Tensor:
     """
     Estimate the 1D radial noise power spectrum from a batch of images.
 
-    Computed as the mean radial profile of |FFT2(images)|^2, averaged
+    Computed as the mean radial profile of ``|FFT2(images)|^2``, averaged
     over the batch. In low-SNR regimes (typical cryo-EM), the total power
     spectrum approximates the noise power spectrum.
 
@@ -832,7 +832,7 @@ def compute_nps_2d(
     """
     Compute the 2D radial noise power spectrum from one or more images.
 
-    Estimates the NPS as the mean power spectrum |FFT2(images)|^2, radially
+    Estimates the NPS as the mean power spectrum ``|FFT2(images)|^2``, radially
     averaged to enforce isotropy, then mapped back to 2D. Returns in rfft2
     half-plane format (H, W//2+1) for direct use in spectral-weighted losses.
 
@@ -901,7 +901,7 @@ def compute_nps_3d(
     Estimate the 3D noise power spectrum from a half-map difference volume.
 
     The difference (halfmap1 - halfmap2) cancels the signal, leaving 2x the
-    noise. The NPS is estimated as |FFT3(diff)|^2 / 2, radially averaged to
+    noise. The NPS is estimated as ``|FFT3(diff)|^2 / 2``, radially averaged to
     enforce isotropy.
 
     Parameters

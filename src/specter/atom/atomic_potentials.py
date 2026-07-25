@@ -25,19 +25,21 @@ def load_kirkland_parameters() -> torch.Tensor:
     Notes
     -----
     Kirkland uses a parameterization of 12 parameters to model the scattering potential.
-    For a single element, params[i] is a 3x4 array:
-    params[i] = [
-        [a1, b1, a2, b2],
-        [a3, b3, c1, d1],
-        [c2, d2, c3, d3]
-    ]
+    For a single element, params[i] is a 3x4 array::
 
-    We reorder this to
-    out[i] = [
-        [a1, b1, c1, d1],
-        [a2, b2, c2, d2],
-        [a3, b3, c3, d3]
-    ]
+        params[i] = [
+            [a1, b1, a2, b2],
+            [a3, b3, c1, d1],
+            [c2, d2, c3, d3]
+        ]
+
+    We reorder this to::
+
+        out[i] = [
+            [a1, b1, c1, d1],
+            [a2, b2, c2, d2],
+            [a3, b3, c3, d3]
+        ]
 
     References
     ----------
@@ -96,14 +98,15 @@ def load_lobato_parameters() -> torch.Tensor:
     Notes
     -----
     Lobato uses a parameterization of 10 parameters to model the scattering potential.
-    For a single element, params[i] is a 5x2 array:
-    params_tensor[i] = [
-        [a1, b1],
-        [a2, b2],
-        [a3, b3],
-        [a4, b4],
-        [a5, b5]
-    ]
+    For a single element, params[i] is a 5x2 array::
+
+        params_tensor[i] = [
+            [a1, b1],
+            [a2, b2],
+            [a3, b3],
+            [a4, b4],
+            [a5, b5]
+        ]
 
     References
     ----------
@@ -167,14 +170,15 @@ def load_shtyrov_parameters(filepath: str) -> torch.Tensor:
     Notes
     -----
     Shtyrov uses a parameterization of 10 parameters to model the scattering potential.
-    For a single element, params[i] is a 5x2 array:
-    params_tensor[i] = [
-        [a1, b1],
-        [a2, b2],
-        [a3, b3],
-        [a4, b4],
-        [a5, b5]
-    ]
+    For a single element, params[i] is a 5x2 array::
+
+        params_tensor[i] = [
+            [a1, b1],
+            [a2, b2],
+            [a3, b3],
+            [a4, b4],
+            [a5, b5]
+        ]
 
     References
     ----------

@@ -122,7 +122,7 @@ def compute_figure_of_merit(params: np.ndarray) -> float:
     """
     Compute figure of merit for shear parameters (Equation 11 from paper).
 
-    Uses: fm = |a| + |b| + |c| + |d| + |e| + |f| + |g| + |h|
+    Uses: ``fm = |a| + |b| + |c| + |d| + |e| + |f| + |g| + |h|``
 
     Lower values are better (smaller shears = more numerically stable).
 

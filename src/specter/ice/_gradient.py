@@ -30,10 +30,11 @@ class GradientSKIcemaker(L.LightningModule):
     Differentiable S(k)-matching ice coordinate generator.
 
     Generates oxygen molecule positions by matching the target 3D Fourier
-    amplitude |F(k)| from MD simulations via L-BFGS gradient descent on
+    amplitude ``|F(k)|`` from MD simulations via L-BFGS gradient descent on
     continuously-valued atomic positions.
 
-    Forward pass (fully differentiable):
+    Forward pass (fully differentiable)::
+
         positions → soft_voxelize_coordinates → FFT → radial |F(k)| → MSE → backward()
 
     Cost per step: O(N log N) vs O(N²) per MCMC sweep.
@@ -57,7 +58,7 @@ class GradientSKIcemaker(L.LightningModule):
     progressbars : bool, optional
         Whether to show progress bars. Default is True.
     mdsim_target_path : str, optional
-        Path to a precomputed radial-average |F(k)| target ``.pt`` file, in
+        Path to a precomputed radial-average ``|F(k)|`` target ``.pt`` file, in
         the fixed 400x400x400, dx=0.25 Å format :func:`~specter.ice._kernels.
         load_mdsim_f_radial_avg` expects. If None (default), the target is
         instead computed natively at this instance's own ``(n, dx, nz)`` via
@@ -235,7 +236,7 @@ class GradientSKIcemaker(L.LightningModule):
         loss : torch.Tensor
             Scalar combined loss (S(k) MSE + any enabled penalty terms).
         f_amp : torch.Tensor
-            |F(k)| in shifted frequency space, shape (nz, n, n).
+            ``|F(k)|`` in shifted frequency space, shape (nz, n, n).
         """
         vox = soft_voxelize_coordinates(
             pos,

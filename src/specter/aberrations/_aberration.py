@@ -13,7 +13,8 @@ from ..fft import fft2, ifft2
 
 class Aberration(L.LightningModule):
     """
-    An aberration module to apply microscopy aberrations to the 2D exitwaves.
+    An aberration module to apply microscopy aberrations to the 2D exitwaves,
+    following the conventions of Kirkland [1]_ and Penczek [2]_.
 
     Parameters
     ----------
@@ -55,7 +56,7 @@ class Aberration(L.LightningModule):
     .. [1] E. J. Kirkland, Advanced Computing in Electron Microscopy (Springer
        US, Boston, MA, 2010).
     .. [2] P. A. Penczek, “Image Restoration in Cryo-Electron Microscopy” in
-       Methods in Enzymology (Academic Press Inc., 2010)vol. 482, pp. 35–72.
+       Methods in Enzymology (Academic Press Inc., 2010) vol. 482, pp. 35–72.
     """
 
     def __init__(
@@ -120,6 +121,7 @@ class Aberration(L.LightningModule):
         ----------
         ctf_params : dict
             Dictionary of CTF parameters. Supported keys:
+
             - 'dfu'/'dfv'/'dfang' : Defocus and astigmatism
             - 'cs' : Spherical aberration
             - 'phaseshift' : Phase shift (e.g., phase plate)

@@ -112,24 +112,13 @@ class IceBank(L.LightningModule):
     progressbars : bool, optional
         Whether to show progress bars over batched generation. Default is
         True.
-
-    Attributes
-    ----------
-    method : str
-        Always ``"gd"`` -- every cached config was generated via
-        :class:`GradientSKIcemaker`. Kept for compatibility with code that
-        reads ``icemaker.method`` (e.g. to log/report which ice model an
-        externally-constructed icemaker uses).
-    positions : torch.Tensor or None
-        The most recently extracted crop's coordinates (N, 3), in the
-        crop's own local frame, centered at the origin. Non-periodic --
-        unlike the other icemaker classes' outputs, a crop is a finite
-        chunk of a larger periodic source, not periodic on its own.
-    current_icedeltas : torch.Tensor or None
-        The most recently generated batch's soft-voxelized deltas.
     """
 
     method: str = "gd"
+    """str: Always ``"gd"`` -- every cached config was generated via
+    :class:`GradientSKIcemaker`. Kept for compatibility with code that reads
+    ``icemaker.method`` (e.g. to log/report which ice model an
+    externally-constructed icemaker uses)."""
 
     def __init__(
         self,
@@ -158,7 +147,14 @@ class IceBank(L.LightningModule):
         self.progressbars = progressbars
 
         self.positions: Optional[torch.Tensor] = None
+        """torch.Tensor or None: The most recently extracted crop's
+        coordinates (N, 3), in the crop's own local frame, centered at the
+        origin. Non-periodic -- unlike the other icemaker classes' outputs, a
+        crop is a finite chunk of a larger periodic source, not periodic on
+        its own."""
         self.current_icedeltas: Optional[torch.Tensor] = None
+        """torch.Tensor or None: The most recently generated batch's
+        soft-voxelized deltas."""
         self.n: Optional[int] = None
         self.dx: Optional[float] = None
         self.nz: Optional[int] = None

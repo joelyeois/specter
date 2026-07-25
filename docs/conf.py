@@ -30,6 +30,7 @@ autoapi_options = [
     "undoc-members",
     "show-inheritance",
     "show-module-summary",
+    "imported-members",
 ]
 autoapi_python_class_content = "both"
 autoapi_member_order = "groupwise"

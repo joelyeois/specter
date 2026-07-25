@@ -40,15 +40,6 @@ class MDSimDump:
     trim_size : float, optional
         Side length in Å of the cubic region extracted around the box centre.
         Default 100.0.
-
-    Attributes
-    ----------
-    n_frames : int
-        Total number of timestep frames found in the dump.
-    coordinates : list of torch.Tensor or None
-        Set by :meth:`get_coordinates`; one tensor per requested frame,
-        each of shape ``(N_i, 3)`` in Å (N_i may vary between frames as
-        atoms drift across the trim boundary).
     """
 
     # LAMMPS dump header is exactly 9 lines per frame:
@@ -94,9 +85,13 @@ class MDSimDump:
             i for i, ln in enumerate(self._lines) if ln == "ITEM: TIMESTEP\n"
         ]
         self.n_frames: int = len(self._frame_starts)
+        """int: Total number of timestep frames found in the dump."""
         self._box_center: torch.Tensor = self._parse_box_center(0)
         self._coord_start: int = self._parse_coord_column_start(0)
         self.coordinates: list[torch.Tensor] | None = None
+        """list of torch.Tensor or None: Set by :meth:`get_coordinates`; one
+        tensor per requested frame, each of shape ``(N_i, 3)`` in Å (N_i may
+        vary between frames as atoms drift across the trim boundary)."""
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -279,15 +274,15 @@ class MDSimDump:
         """
         Compute the mean Fourier amplitude sqrt(S(k)) averaged over frames.
 
-        By the definition S(k) = |FFT3(vox_f)|^2 / N_f (N_f = atom count of
-        frame f, which varies slightly frame-to-frame as atoms drift across
-        the trim boundary — see :meth:`get_coordinates`), so each frame's
-        raw |FFT3| is divided by sqrt(N_f) *before* averaging over frames:
-        mean_f( |FFT3(vox_f)| / sqrt(N_f) ). Without this, the result scales
-        with the trimmed atom count instead of being an intensive (per-atom)
-        quantity, which would make it meaningless as a target to rescale by a
-        *different* target atom count downstream (see
-        :func:`specter.ice._kernels.interpolate_target_kernel`).
+        By the definition ``S(k) = |FFT3(vox_f)|^2 / N_f`` (N_f = atom count
+        of frame f, which varies slightly frame-to-frame as atoms drift
+        across the trim boundary — see :meth:`get_coordinates`), so each
+        frame's raw ``|FFT3|`` is divided by sqrt(N_f) *before* averaging
+        over frames: ``mean_f( |FFT3(vox_f)| / sqrt(N_f) )``. Without this,
+        the result scales with the trimmed atom count instead of being an
+        intensive (per-atom) quantity, which would make it meaningless as a
+        target to rescale by a *different* target atom count downstream
+        (see :func:`specter.ice._kernels.interpolate_target_kernel`).
 
         Parameters
         ----------
@@ -532,17 +527,6 @@ class ExtXYZDump:
         When provided, temperatures are stored in ``self.temperatures``.
         The CSV is expected to follow the format of ``gr_all_210K_280K_52frames.csv``
         where the last row (index ``-1``) is the temperature of each frame column.
-
-    Attributes
-    ----------
-    n_frames : int
-        Total number of frames found in the trajectory.
-    temperatures : torch.Tensor or None
-        Per-frame temperatures in K, shape ``(n_frames,)``, or ``None`` if no
-        metadata CSV was supplied.
-    coordinates : list of torch.Tensor or None
-        Set by :meth:`get_coordinates`; one tensor per requested frame,
-        each of shape ``(N, 3)`` in Å relative to the box centre.
     """
 
     def __init__(
@@ -562,6 +546,7 @@ class ExtXYZDump:
         self._atoms_list: list[Atoms] = atoms_data
 
         self.n_frames: int = len(self._atoms_list)
+        """int: Total number of frames found in the trajectory."""
 
         fov = n * dx
         cell0 = self._atoms_list[0].cell.array
@@ -575,6 +560,8 @@ class ExtXYZDump:
             )
 
         self.temperatures: torch.Tensor | None = None
+        """torch.Tensor or None: Per-frame temperatures in K, shape
+        ``(n_frames,)``, or ``None`` if no metadata CSV was supplied."""
         if metadata_csv is not None:
             df = pd.read_csv(metadata_csv, index_col=0)
             temps = df.iloc[-1, :].to_numpy(dtype=np.float32)
@@ -588,6 +575,9 @@ class ExtXYZDump:
             self.temperatures = torch.from_numpy(temps)
 
         self.coordinates: list[torch.Tensor] | None = None
+        """list of torch.Tensor or None: Set by :meth:`get_coordinates`; one
+        tensor per requested frame, each of shape ``(N, 3)`` in Å relative to
+        the box centre."""
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -745,13 +735,14 @@ class ExtXYZDump:
         """
         Compute the mean Fourier amplitude sqrt(S(k)) averaged over frames.
 
-        By the definition S(k) = |FFT3(vox_f)|^2 / N_f (N_f = atom count of
-        frame f), each frame's raw |FFT3| is divided by sqrt(N_f) *before*
-        averaging over frames: mean_f( |FFT3(vox_f)| / sqrt(N_f) ). Without
-        this, the result scales with the frame's atom count instead of being
-        an intensive (per-atom) quantity, which would make it meaningless as
-        a target to rescale by a *different* target atom count downstream
-        (see :func:`specter.ice._kernels.interpolate_target_kernel`).
+        By the definition ``S(k) = |FFT3(vox_f)|^2 / N_f`` (N_f = atom count
+        of frame f), each frame's raw ``|FFT3|`` is divided by sqrt(N_f)
+        *before* averaging over frames: ``mean_f( |FFT3(vox_f)| / sqrt(N_f) )``.
+        Without this, the result scales with the frame's atom count instead
+        of being an intensive (per-atom) quantity, which would make it
+        meaningless as a target to rescale by a *different* target atom
+        count downstream (see
+        :func:`specter.ice._kernels.interpolate_target_kernel`).
 
         Parameters
         ----------

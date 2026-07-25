@@ -684,7 +684,7 @@ class TiltSeriesGenerator(MicrographGenerator):
         exitwaves : torch.Tensor
             Exit waves, shape (B, N_tilts, Y, X).
         clean_images : torch.Tensor
-            |detector_waves|² before noise, shape (B, N_tilts, Y, X).
+            ``|detector_waves|²`` before noise, shape (B, N_tilts, Y, X).
         """
 
         tilt_series = []

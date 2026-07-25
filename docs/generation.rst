@@ -592,7 +592,7 @@ particle picker.
        --min_tilt_angle -45 --max_tilt_angle 45 --n_tilts 61 \
        --dose_per_tilt 3.0 \
        --defocus 22000 \
-       --ice_method gd \
+       --ice_model gd \
        --device cuda:0
 
 Dose per tilt is typically only a few electrons per Å² — a single tilt
@@ -677,13 +677,13 @@ data.
    * - ``--add_ice``
      - ``True``
      - Generate and blend amorphous ice
-   * - ``--ice_method``
+   * - ``--ice_model``
      - ``gd``
      - ``gd`` (samples from the pre-generated ``IceBank`` cache) \|
        ``random`` (instant, cheap ``RandomIcemaker`` placement)
    * - ``--ice_cache_dir``
      - ``None``
-     - Directory of cached ice configs for ``ice_method='gd'``. Defaults to
+     - Directory of cached ice configs for ``ice_model='gd'``. Defaults to
        the bundled ``ice-data/ice_cache``
    * - ``--tomo_to_ice_ratio``
      - ``0.75``
@@ -720,10 +720,6 @@ data.
      - Iceless exit wave magnitude per tilt (``--save_exitwaves True``, ``--add_ice False``)
    * - ``<filename>_clean_exitwave_phase.mrcs``
      - Iceless exit wave phase per tilt (``--save_exitwaves True``, ``--add_ice False``)
-
-.. note::
-   **Naming inconsistency.** This script spells the ice flag
-   ``--ice_method``, while every other script uses ``--ice_model``.
 
 **Matching a real tilt series.** ``specter.aretomo3`` reads AreTomo3
 alignment files. ``tilt_to_quaternions`` converts the ``TILT`` and ``ROT``

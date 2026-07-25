@@ -171,7 +171,3 @@ people:
   walking up to the repository root. Installing SPECTER outside a
   checkout means copying ``ice-data/ice_cache/`` or pointing
   ``--ice_cache_dir`` at it.
-
-.. note::
-   **Naming inconsistency.** ``generate_tilt_series.py`` spells this flag
-   ``--ice_method``, while every other script uses ``--ice_model``.

@@ -31,7 +31,7 @@ Example (HPC):
         --coincidence_radius 1.5 \\
         --num_frames 10 \\
         --add_ice True \\
-        --ice_method gd \\
+        --ice_model gd \\
         --tomo_to_ice_ratio 0.75 \\
         --save_exitwaves True \\
         --device cuda:0 \\
@@ -212,7 +212,7 @@ def parse_args() -> argparse.Namespace:
         help="Generate and blend amorphous ice into the volume.",
     )
     parser.add_argument(
-        "--ice_method",
+        "--ice_model",
         type=str,
         default="gd",
         choices=["gd", "random"],
@@ -224,7 +224,7 @@ def parse_args() -> argparse.Namespace:
         "--ice_cache_dir",
         type=str,
         default=None,
-        help="Directory of cached ice configs for ice_method='gd'. Defaults to "
+        help="Directory of cached ice configs for ice_model='gd'. Defaults to "
         "the bundled ice-data/ice_cache.",
     )
     parser.add_argument(
@@ -309,8 +309,8 @@ def main() -> None:
     # --- Ice ---
     if args.add_ice:
         _section("Generating amorphous ice")
-        _console.print(f"  method = {args.ice_method},  dx = {dx:.2f} Å")
-        if args.ice_method == "random":
+        _console.print(f"  method = {args.ice_model},  dx = {dx:.2f} Å")
+        if args.ice_model == "random":
             from specter.ice import RandomIcemaker
 
             icemaker = RandomIcemaker(dx=dx, n=tomo.shape[-1], nz=tomo.shape[0]).to(

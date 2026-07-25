@@ -138,6 +138,16 @@ size throughout — there is no independent slice-thickness parameter.
 seventh mode (``rytov_parallel``) and samples rotated slices on demand
 instead of rotating a whole tomogram-sized volume.
 
+.. note::
+   **Not all modes are reachable from the CLI.** The generation demo
+   scripts (``generate_particle_stack.py``, ``generate_micrograph.py``,
+   ``generate_particle_stack_from_csfile.py``, ``generate_tilt_series.py``)
+   only expose ``--scattering_model {multislice, firstborn, projection,
+   ctf}``. ``ghostbuster_reconstruct.py`` separately exposes ``{multislice,
+   rytov, firstborn, projection}``. ``kinematic`` and ``rytov_parallel``
+   are not wired into any script's CLI — use them by constructing
+   ``Scattering``/``IterativeScattering`` directly in Python.
+
 7 — Aberration
 ------------------
 

@@ -62,7 +62,7 @@ comma-separated device list and the run distributes under Lightning DDP:
      - ``True``
      - Fetch biological assembly
    * - ``--pdb_savefolder``
-     - ``../pdb-data/``
+     - ``pdb-data``
      - Folder to cache downloaded PDB files
    * - ``--n_particles``
      - ``20``
@@ -133,7 +133,7 @@ comma-separated device list and the run distributes under Lightning DDP:
      - ``poisson``
      - ``poisson`` \| ``none``
    * - ``--coincidence_radius_min``
-     - ``1.8``
+     - ``0.0``
      - Minimum coincidence radius in pixels; used as fixed value if
        ``--coincidence_radius_max`` is not set
    * - ``--coincidence_radius_max``
@@ -405,7 +405,7 @@ surfaces rather than spread evenly through the slab.
      - ``True``
      - Fetch biological assembly
    * - ``--pdb_savefolder``
-     - ``../pdb-data/``
+     - ``pdb-data``
      - Folder to cache downloaded PDB files
    * - ``--n_micrographs``
      - ``1``

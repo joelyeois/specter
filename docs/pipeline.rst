@@ -228,7 +228,10 @@ visible), and radial profiles of those transforms against resolution.
 .. important::
    **Sign convention.** SPECTER's raw output is physical: dense regions
    scatter electrons away and appear *dark*. Cryo-EM convention stores
-   particles normalised, with a bright particle on a dark background.
-   Generation therefore ends with a sign flip and standardisation, and
-   reconstruction must undo it — which is a common source of confusing
-   results. See :doc:`reconstruction`.
+   particles normalised, with a bright particle on a dark background. The
+   particle-stack scripts end with a sign flip and standardisation when
+   ``normalize_particles`` is enabled (the default), and reconstruction
+   must undo it — which is a common source of confusing results. See
+   :doc:`reconstruction`. Micrographs and tilt series are standardised but
+   never sign-flipped — they stay in the raw dense-is-dark convention
+   regardless of normalisation settings.

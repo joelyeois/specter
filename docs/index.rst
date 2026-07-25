@@ -118,8 +118,10 @@ the corresponding textbook figure alongside it for direct comparison.
 Scattering factors are expressed as a sum of three Lorentzian and three
 Gaussian terms in reciprocal space, with element-specific coefficients
 tabulated by Kirkland. Lobato and Shtyrov parameterisations are also
-implemented. The tables these come from live in ``src/specter/atom_data/``
-and are treated as fixed physical constants — editing them silently changes
+implemented — Kirkland's and Lobato's tables ship in
+``src/specter/atom_data/`` and are treated as fixed physical constants;
+Shtyrov's is loaded at call time from a user-supplied mmCIF file rather
+than bundled. Editing the bundled tables silently changes
 the accuracy of every simulation in the package.
 
 .. toctree::

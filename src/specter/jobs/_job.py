@@ -122,8 +122,10 @@ class Job:
     project : str
         Groups related jobs under a shared folder.
     base_dir : str or Path, optional
-        Root directory for all job folders. Defaults to ``~/specter-data/``
-        or the ``SPECTER_JOBS_DIR`` environment variable.
+        Root directory for all job folders. If not given, falls back to
+        the session default set via :func:`base_directory`, then the
+        ``SPECTER_JOBS_DIR`` environment variable. Raises if none of these
+        are set — there is no implicit default location.
     """
 
     def __init__(

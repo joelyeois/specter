@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="images/logo-v2.png" alt="SPECTER logo" width="360">
+  <img src="images/logo-v2.png" alt="SPECTER logo" width="200">
 </p>
 
 # SPECTER

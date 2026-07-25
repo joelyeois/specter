@@ -66,6 +66,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--defocus_offset", type=float, default=0.0)
     parser.add_argument("--scheduler", type=str, default="LambdaLR")
     parser.add_argument(
+        "--lr_decay",
+        type=float,
+        default=0.1,
+        help=(
+            "Decay rate for the volume optimiser's LambdaLR schedule: "
+            "multiplier = 1 / (1 + lr_decay * sqrt(global_step)). Unused "
+            "when --scheduler is not LambdaLR."
+        ),
+    )
+    parser.add_argument(
         "--scattering_model",
         type=str,
         default="rytov",
@@ -141,6 +151,7 @@ def main() -> None:
                 lr_D=args.lr_d,
                 defocus_offset=args.defocus_offset,
                 scheduler=args.scheduler,
+                lr_decay=args.lr_decay,
                 epochs=args.epochs,
                 batch_size=args.batch_size,
                 scattering_model=args.scattering_model,

@@ -111,6 +111,10 @@ class Ghostbuster:
         envelope. Default None.
     scheduler : {"LambdaLR", "OneCycleLR", "CosineAnnealingWarmRestarts", "MultiplicativeLR"}
         LR scheduler for the volume optimiser.
+    lr_decay : float, optional
+        Decay rate for the ``"LambdaLR"`` schedule: multiplier =
+        ``1 / (1 + lr_decay * sqrt(global_step))``. Unused by other
+        schedulers. Default 0.1.
     epochs : int
         Number of training epochs.
     batch_size : int
@@ -187,6 +191,7 @@ class Ghostbuster:
             "CosineAnnealingWarmRestarts",
             "MultiplicativeLR",
         ] = "LambdaLR",
+        lr_decay: float = 0.1,
         epochs: int = 5,
         batch_size: int = 3,
         scattering_model: str = "rytov",
@@ -251,6 +256,7 @@ class Ghostbuster:
         self.defocus_offset = defocus_offset
         self.bfactor = bfactor
         self.scheduler = scheduler
+        self.lr_decay = lr_decay
         self.epochs = epochs
         self.batch_size = batch_size
         self.scattering_model = scattering_model
@@ -380,6 +386,7 @@ class Ghostbuster:
             lr_T=self.lr_T,
             lr_D=self.lr_D,
             scheduler=self.scheduler,
+            lr_decay=self.lr_decay,
             kmask=kmask,
             klim=self.klim,
             nps_weight=self.nps_weight,

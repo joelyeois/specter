@@ -1138,12 +1138,18 @@ class IterativeScattering(L.LightningModule):
                         * d[:, None, None]
                         * _k2[None, ...]
                     )  # (K, nxy, nxy)
-                    # Batched FFT → Fresnel multiply → batched IFFT
-                    scattered = ifft2(
-                        fft2(1j * _sigma * _pixel_size * slices_c)
-                        * F_chunk.unsqueeze(0)
-                    )  # (B, K, nxy, nxy)
-                    return phase_sum + scattered.sum(dim=1)
+                    # Batched FFT → Fresnel multiply → sum over slices (still in
+                    # Fourier space, where IFFT is linear and commutes with the
+                    # sum) → single IFFT. Summing before the IFFT is
+                    # mathematically identical to summing after it, but avoids
+                    # ever backpropagating a broadcast-expanded gradient (from
+                    # the slice-dim sum) through an FFT: MKL's FFT backward
+                    # raises "Inconsistent configuration parameters" on such
+                    # inputs.
+                    scattered = fft2(
+                        1j * _sigma * _pixel_size * slices_c
+                    ) * F_chunk.unsqueeze(0)
+                    return phase_sum + ifft2(scattered.sum(dim=1))
 
                 return _chunk
 

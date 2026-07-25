@@ -120,17 +120,6 @@ def test_parallel_rytov_matches_iterative_rytov(dummy_volume):
     assert torch.allclose(psi_parallel, psi_parallel_ckpt, atol=1e-5)
 
 
-@pytest.mark.xfail(
-    reason=(
-        "Pre-existing bug (not introduced by this refactor, confirmed against "
-        "the pre-refactor code and reproducible with a minimal ifft2(fft2(x)*k)"
-        ".sum(dim=1) example with no scattering.py or checkpoint involved): "
-        "parallel_rytov's backward pass raises 'MKL FFT error: Intel oneMKL "
-        "DFTI ERROR: Inconsistent configuration parameters' regardless of "
-        "checkpoint_chunks. Needs investigation in fft.py / the MKL backend."
-    ),
-    strict=True,
-)
 def test_parallel_rytov_checkpointing_backprops(dummy_volume):
     """Gradients must flow through the checkpointed parallel_rytov path."""
     scat_iter = IterativeScattering(

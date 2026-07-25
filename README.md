@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="images/logo.png" alt="SPECTER logo" width="200">
+</p>
+
 # SPECTER
 ### Scattering & Propagation of Electrons in Cryo-EM: Twin Emulator & Reconstruction
 

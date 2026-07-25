@@ -132,6 +132,19 @@ All four accept per-particle weights through ``scale`` — CryoSPARC's
 less. An optional ``sparsity`` term adds an L1 penalty on the volume,
 suppressing low-level noise in empty regions.
 
+The NCC loss is scaled by the target variance so it sits in the same
+units as MSE, letting you switch loss functions without retuning ``lr``:
+
+.. math::
+
+   \mathrm{NCC} = \frac{\sum_i (p_i - \bar{p})(t_i - \bar{t})}
+                       {\lVert p - \bar{p} \rVert \, \lVert t - \bar{t} \rVert}
+   \qquad
+   \mathcal{L}_{ncc} = \mathrm{Var}(t) \cdot (1 - \mathrm{NCC})
+
+where :math:`p` is the simulated image, :math:`t` the experimental one,
+and the sums run over pixels within one image.
+
 **Frequency masking — kmask, and why it is applied every batch.**
 ``kmask`` restricts the volume to a region of frequency space after each
 batch — typically ``ball3d(n, n)``, a sphere reaching to the Nyquist
@@ -144,11 +157,14 @@ would otherwise accumulate noise that looks like structure.
    particles. Converting back means undoing the sign flip and the
    standardisation applied at generation:
 
-   .. code-block:: text
+   .. math::
 
-      images = -(dose_per_area**0.5) * particles + dose_per_area
+      I_{\text{counts}} = -\sqrt{D_{\text{area}}} \cdot p + D_{\text{area}}
+      \qquad
+      D_{\text{area}} = \text{dose\_per\_angstrom} \times \text{voxel\_size}^2
 
-   The ``Ghostbuster`` driver does this for you. Driving ``Reconstructor``
+   where :math:`p` is the raw normalised particle stack. The
+   ``Ghostbuster`` driver does this for you. Driving ``Reconstructor``
    directly means doing it yourself.
 
    **Tomograms differ.** The tomogram path's forward model is noiseless,
@@ -184,7 +200,14 @@ Judging the result
 
 Two Fourier shell correlation functions exist and they apply different
 thresholds. Using the wrong one is a reliable way to misreport a
-resolution.
+resolution. For two volumes' Fourier transforms :math:`F_1(\mathbf{k})`,
+:math:`F_2(\mathbf{k})`, FSC is the normalised cross-correlation within
+each spatial-frequency shell :math:`|\mathbf{k}|`:
+
+.. math::
+
+   \mathrm{FSC}(k) = \frac{\mathrm{Re}\sum_{\mathbf{k}\in\text{shell}} F_1(\mathbf{k})\,F_2^*(\mathbf{k})}
+                          {\sqrt{\sum_{\mathbf{k}\in\text{shell}} |F_1(\mathbf{k})|^2 \cdot \sum_{\mathbf{k}\in\text{shell}} |F_2(\mathbf{k})|^2}}
 
 .. list-table::
    :widths: 30 35 35

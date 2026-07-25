@@ -131,8 +131,45 @@ Six modes are implemented, trading accuracy for speed:
      - Conventional CTF-only workflows.
 
 The interaction parameter σ is energy-dependent and computed
-relativistically. The slice thickness Δz is assumed equal to the pixel
-size throughout — there is no independent slice-thickness parameter.
+relativistically, following Kirkland Eq. (5.6):
+
+.. math::
+
+   \lambda = \frac{hc}{\sqrt{E(E + 2m_ec^2)}}
+   \qquad\qquad
+   \sigma = \frac{2\pi}{\lambda E} \cdot \frac{E + m_ec^2}{E + 2m_ec^2}
+
+The slice thickness Δz is assumed equal to the pixel size throughout —
+there is no independent slice-thickness parameter. In terms of σ, Δz, a
+slice potential :math:`V(z)`, and the Fresnel propagator :math:`F(z)`
+(complex exponential of :math:`k^2`, wavelength and Δz) from slice
+:math:`z` to the exit plane, the exit wave :math:`\psi` for each mode is:
+
+.. math::
+
+   \text{multislice (per slice, iteratively):}\quad
+   \psi \leftarrow \mathcal{F}^{-1}\Big[\mathcal{F}\big[\psi \, e^{i\sigma\Delta z\,V(z)}\big] \cdot F(z)\Big]
+
+.. math::
+
+   \text{rytov:}\quad
+   \psi = \exp\!\left(i\sigma\Delta z \sum_z \mathcal{F}^{-1}\big[\hat{F}(z)\cdot\hat{V}(z)\big]\right)
+
+.. math::
+
+   \text{firstborn:}\quad
+   \psi = 1 + i\sigma\Delta z \sum_z \mathcal{F}^{-1}\big[\hat{F}(z)\cdot\hat{V}(z)\big]
+
+.. math::
+
+   \text{kinematic:}\quad
+   \psi = 1 + \sum_z \mathcal{F}^{-1}\Big[\hat{F}(z)\cdot\mathcal{F}\big[e^{i\sigma\Delta z\,V(z)} - 1\big]\Big]
+
+where :math:`\mathcal{F}` denotes the 2D Fourier transform. ``kinematic``
+keeps the per-slice amplitude :math:`e^{i\sigma\Delta z\,V} - 1` exact,
+where ``firstborn`` linearises it to :math:`i\sigma\Delta z\,V` — the two
+agree when :math:`\sigma\Delta z\,V \ll 1` per slice and diverge for thick
+or dense slices.
 
 ``IterativeScattering``, used for micrographs and tilt series, adds a
 seventh mode (``rytov_parallel``) and samples rotated slices on demand
@@ -163,8 +200,55 @@ The phase term is assembled from whichever parameters you supply:
 - **Phase shift** — for phase-plate work.
 - **Beam tilt** and **trefoil** — higher-order terms.
 
+The transfer function is :math:`\exp(-i\chi(k))`, where :math:`\chi(k)`
+sums whichever of these terms are supplied (:math:`k` = spatial frequency
+magnitude, :math:`\theta` = its azimuthal angle, :math:`\lambda` =
+wavelength):
+
+.. math::
+
+   \chi_{cs} = \frac{\pi}{2}\lambda^3 C_s k^4
+   \qquad
+   \chi_{defocus} = -\pi\lambda k^2 \Delta f
+
+.. math::
+
+   \Delta f = \tfrac{1}{2}\Big[(\Delta f_u + \Delta f_v) + (\Delta f_v - \Delta f_u)\cos\big(2(\theta + \theta_{ast})\big)\Big]
+
+.. math::
+
+   \chi_{trefoil} = t_1 k^3 \sin(3\theta) + t_2 k^3 \cos(3\theta)
+
+.. math::
+
+   \chi_{tilt} = -2\pi\lambda^2 C_s k^2 \big(\sin(\tau_y)\,k_x + \sin(\tau_x)\,k_y\big)
+
+A supplied phase shift (Volta phase plate, holography model) contributes a
+uniform :math:`\chi_{phaseshift} = -\phi_0`, forced to zero at DC to keep
+Fourier optics valid.
+
 Four envelopes then damp high frequencies, each switched on by supplying
-its parameter:
+its parameter. Each multiplies the transfer function's amplitude:
+
+.. math::
+
+   E_{bfactor}(k) = \exp\!\left(-\frac{B k^2}{4}\right)
+
+.. math::
+
+   E_{spatial}(k) = \exp\!\left(-\left(\frac{\pi\alpha_c}{\lambda}\right)^{\!2}\left(C_s\lambda^3 k^3 + \lambda\,\Delta f\,k\right)^{\!2}\right)
+
+.. math::
+
+   E_{temporal}(k) = \exp\!\left(-\tfrac{1}{2}\left(\pi\lambda\,\Delta f_c\,k^2\right)^{\!2}\right)
+   \qquad
+   \Delta f_c = C_c\sqrt{\left(\frac{\Delta E}{V}\right)^{\!2} + \left(\frac{\Delta V}{V}\right)^{\!2} + \left(2\frac{\Delta I}{I}\right)^{\!2}}
+
+where :math:`\alpha_c` is the beam convergence semi-angle
+(``convergence_angle``) and :math:`\Delta f_c` is the chromatic focus
+spread, combining ``cc``, ``energy_spread``, ``deltaV_V`` and ``deltaI_I``.
+The dose envelope (Grant & Grigorieff 2015) is a fitted, dose-dependent
+curve rather than a closed form — see the table below.
 
 .. list-table::
    :widths: 25 25 50

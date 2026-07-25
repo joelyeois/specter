@@ -19,7 +19,9 @@ a simulated cryo-EM particle stack from a PDB code:
        --output_dir ./output
 
 This downloads the structure, builds the scattering potential, applies CTF and
-detector effects, and writes a ``.mrcs`` / ``.star`` file pair.
+detector effects, and writes a ``.mrcs`` / ``.star`` file pair. For the other
+three workflows (a CryoSPARC dataset twin, full micrographs, cryo-ET tilt
+series) and the complete CLI reference, see :doc:`generation`.
 
 Reconstruct a volume (Ghostbuster)
 ------------------------------------
@@ -39,9 +41,12 @@ Given an experimental particle stack and CryoSPARC ``.cs`` metadata:
        --symmetry C1 \
        --return_class 1
 
+See :doc:`reconstruction` for what each setting does and the most common
+setup mistakes.
+
 Each run is recorded under its ``--project`` name in a local job database.
 Inspect past runs with the ``specter-jobs`` CLI (installed automatically
-with the package):
+with the package) — see :doc:`jobs`:
 
 .. code-block:: bash
 

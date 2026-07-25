@@ -567,7 +567,7 @@ def plot_halfmap_fsc(
                 t = (0.143 - ff[i]) / (ff[i + 1] - ff[i])
                 last_k_cross = kf[i] + t * (kf[i + 1] - kf[i])
         if last_k_cross is not None:
-            return f"{1.0 / last_k_cross.item():.2f} Å"
+            return f"{1.0 / last_k_cross.item():.3f} Å"
         return ">Nyquist"
 
     palette = sns.color_palette("deep", n_colors=max(n_vols, 1))

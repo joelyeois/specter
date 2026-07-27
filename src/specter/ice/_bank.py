@@ -17,8 +17,8 @@ import lightning as L
 import matplotlib.figure
 import torch
 
-from ..arrays import soft_voxelize_coordinates
-from ..fft import fftconvolve
+from ..arrays import soft_voxelize_coordinates, soft_voxelize_coordinates_into
+from ..fft import spatial_convolve3d_same
 from ..progress import track
 from ._energy import MLBOP
 from ._kernels import build_atomic_potential_kernel
@@ -398,11 +398,8 @@ class IceBank(L.LightningModule):
         )
         assert self.current_icedeltas is not None
         kernel = self._get_kernel(dx)
-        return fftconvolve(
-            self.current_icedeltas.to(device),
-            kernel.unsqueeze(0).to(device),
-            mode="same",
-            axes=(-3, -2, -1),
+        return spatial_convolve3d_same(
+            self.current_icedeltas.to(device), kernel.to(device)
         )
 
     # ------------------------------------------------------------------
@@ -415,10 +412,31 @@ class IceBank(L.LightningModule):
         tile_extent: float,
         seam_margin: float,
         generator: torch.Generator | None = None,
+        splat_volume: torch.Tensor | None = None,
+        splat_voxel_size: float | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor, tuple[float, float, float]]:
         """
         Draw one independently rotated/translated crop of size
         ``tile_extent`` per grid cell and place them side by side.
+
+        Parameters
+        ----------
+        splat_volume : torch.Tensor, optional
+            If given, each tile's placed atoms are also splatted directly
+            into this preallocated ``(nz, n, n)`` grid as soon as they're
+            drawn (via :func:`soft_voxelize_coordinates_into`), instead of
+            only being accumulated into the returned ``positions`` tensor.
+            Splatting one tile (~10^5-10^6 atoms) at a time keeps peak
+            memory bounded by a single tile's atom count rather than the
+            full assembled volume's -- for a request spanning many tiles
+            that difference is the whole point (see ``IceBank.generate_
+            big_ice``'s docstring). Only valid to use when the caller
+            won't subsequently move any positions (i.e. ``relax_steps ==
+            0``): seam relaxation moves atoms after placement, which would
+            leave the splat stale.
+        splat_voxel_size : float, optional
+            Voxel size (Å) for ``splat_volume``. Required if
+            ``splat_volume`` is given.
 
         Returns
         -------
@@ -459,7 +477,13 @@ class IceBank(L.LightningModule):
                 (tile_extent, tile_extent, tile_extent), generator=generator
             )
             mobile_parts.append((crop.abs() > (half - seam_margin)).any(dim=1))
-            all_parts.append(crop + offset)
+            crop_global = crop + offset
+            all_parts.append(crop_global)
+            if splat_volume is not None:
+                assert splat_voxel_size is not None
+                soft_voxelize_coordinates_into(
+                    splat_volume, crop_global, splat_voxel_size, periodic=False
+                )
         positions = torch.cat(all_parts, dim=0)
         mobile_mask = torch.cat(mobile_parts, dim=0)
         assembled_box = (nx * tile_extent, ny * tile_extent, nz_tiles * tile_extent)
@@ -600,11 +624,24 @@ class IceBank(L.LightningModule):
             disable=not self.progressbars or batchsize == 1,
             transient=True,
         ):
+            # relax_steps == 0 means positions never move after placement,
+            # so each tile can be splatted into the output the moment it's
+            # drawn -- peak memory then scales with one tile's atom count,
+            # not the whole assembled volume's (see _place_tiles). Seam
+            # relaxation moves atoms after the fact, so that path still
+            # needs the full assembled `positions` before voxelizing.
+            vox = (
+                torch.zeros(self.nz, self.n, self.n, device=device)
+                if relax_steps == 0
+                else None
+            )
             positions, mobile_mask, assembled_box = self._place_tiles(
                 (nx_tiles, ny_tiles, nz_tiles),
                 tile_extent,
                 seam_margin,
                 generator=generator,
+                splat_volume=vox,
+                splat_voxel_size=self.dx if vox is not None else None,
             )
             if relax_steps > 0 and mobile_mask.any():
                 positions = self._relax_seams(
@@ -622,12 +659,13 @@ class IceBank(L.LightningModule):
                 & (positions[:, 2].abs() <= self.box_z / 2)
             )
             self.positions = positions[keep]
-            vox = soft_voxelize_coordinates(
-                self.positions,
-                grid_shape=(self.nz, self.n, self.n),
-                voxel_size=self.dx,
-                periodic=False,
-            )
+            if vox is None:
+                vox = soft_voxelize_coordinates(
+                    self.positions,
+                    grid_shape=(self.nz, self.n, self.n),
+                    voxel_size=self.dx,
+                    periodic=False,
+                )
             results.append(vox)
         self.current_icedeltas = torch.stack(results)
         return self.current_icedeltas
@@ -675,11 +713,8 @@ class IceBank(L.LightningModule):
         )
         assert self.current_icedeltas is not None
         kernel = self._get_kernel(dx)
-        return fftconvolve(
-            self.current_icedeltas.to(device),
-            kernel.unsqueeze(0).to(device),
-            mode="same",
-            axes=(-3, -2, -1),
+        return spatial_convolve3d_same(
+            self.current_icedeltas.to(device), kernel.to(device)
         )
 
     # ------------------------------------------------------------------

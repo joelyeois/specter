@@ -5,6 +5,7 @@ Tests for IceBank.
 import pytest
 import torch
 
+from specter.arrays import soft_voxelize_coordinates
 from specter.ice import GradientSKIcemaker, IceBank
 from specter.ice._bank import build_ice_cache, random_rotation_matrix
 from specter.ice._helpers import ndensity_of_amorphous_ice
@@ -201,6 +202,24 @@ def test_icebank_generate_big_ice_deltas_noncubic_and_batched(tmp_path):
         n=64, nz=48, dx=1.0, batchsize=2, relax_steps=15
     )
     assert deltas.shape == (2, 48, 64, 64)
+
+
+def test_icebank_generate_big_ice_deltas_streamed_splat_matches_monolithic(tmp_path):
+    """When relax_steps=0, generate_big_ice_deltas splats each tile into
+    the output volume as soon as it's drawn (bounding peak memory to a
+    single tile's atom count) instead of gathering every tile's atoms into
+    one tensor before voxelizing. Splatting is linear/accumulating, so the
+    streamed result must exactly match voxelizing the same (post-`keep`)
+    positions in one monolithic call."""
+    _make_cache_config(tmp_path, "config_000.pt", n=32, dx=1.0)
+    cache = IceBank(str(tmp_path), progressbars=False)
+
+    torch.manual_seed(9)
+    streamed = cache.generate_big_ice_deltas(n=64, dx=1.0, batchsize=1, relax_steps=0)
+    reference = soft_voxelize_coordinates(
+        cache.positions, grid_shape=(64, 64, 64), voxel_size=1.0, periodic=False
+    )
+    assert torch.allclose(streamed[0], reference, atol=1e-5)
 
 
 def test_icebank_generate_big_ice_relaxation_improves_energy(tmp_path):

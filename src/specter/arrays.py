@@ -482,7 +482,7 @@ def voxelize_coordinates(
 
 
 def _normalize_voxel_size(
-    voxel_size: float | Sequence[float], device: str | torch.device
+    voxel_size: float | Sequence[float] | torch.Tensor, device: str | torch.device
 ) -> torch.Tensor:
     """
     Broadcast a scalar or (dz, dy, dx) sequence voxel size to a (3,) tensor.
@@ -572,6 +572,63 @@ def _scatter_splat(
     volume.index_put_(idx_tuple, weights.reshape(-1), accumulate=True)
 
 
+def soft_voxelize_coordinates_into(
+    volume: torch.Tensor,
+    coords: torch.Tensor,
+    voxel_size: float | Sequence[float] | torch.Tensor,
+    periodic: bool = False,
+) -> None:
+    """
+    Accumulate `coords` into a preallocated `volume` via trilinear
+    splatting, in place.
+
+    Uses the same centered-origin convention and interpolation as
+    :func:`soft_voxelize_coordinates`, but never allocates a
+    `volume`-shaped zero tensor itself -- callers preallocate `volume`
+    once and can call this repeatedly (e.g. once per chunk of a much
+    larger coordinate set) to keep peak memory bounded by the chunk size
+    rather than the total coordinate count. Splatting disjoint chunks this
+    way is exactly equivalent to a single call with every coordinate
+    concatenated, since splatting is a linear (accumulating) operation --
+    see :func:`_scatter_splat`.
+
+    Parameters
+    ----------
+    volume : torch.Tensor
+        Target grid, shape (nz, ny, nx), modified in place.
+    coords : torch.Tensor
+        Atomic coordinates, shape (N, 3).
+    voxel_size : float or Sequence of float
+        Voxel size. If float, assumes isotropic. If tuple, (dz, dy, dx).
+    periodic : bool, optional
+        If True, wrap out-of-bounds splat indices with periodic boundary
+        conditions instead of discarding them. Default is False.
+    """
+    device = volume.device
+    coords = coords.to(device)
+    nz, ny, nx = volume.shape
+
+    voxel_size_t = _normalize_voxel_size(voxel_size, device)
+    coords_voxel = coords / voxel_size_t  # (N,3)
+
+    # Shift coordinates so origin is at center
+    origin = torch.tensor(
+        [nx // 2, ny // 2, nz // 2], device=device, dtype=coords_voxel.dtype
+    )
+    coords_voxel_centered = coords_voxel + origin[None, :]  # (N,3)
+
+    # Reorder to z,y,x
+    coords_voxel_centered = coords_voxel_centered[..., [2, 1, 0]]
+
+    coords_floor = torch.floor(coords_voxel_centered).long()  # (N,3)
+    frac = coords_voxel_centered - coords_floor.float()
+
+    offsets, weights = _linear_interp_offsets_and_weights(frac)  # (8,3), (N,8)
+    indices = coords_floor.unsqueeze(-2) + offsets  # (N,8,3)
+
+    _scatter_splat(volume, indices, weights, periodic=periodic)
+
+
 def soft_voxelize_coordinates(
     coords: torch.Tensor,
     grid_shape: tuple[int, int, int],
@@ -620,26 +677,12 @@ def soft_voxelize_coordinates(
     nz, ny, nx = grid_shape
 
     voxel_size_t = _normalize_voxel_size(voxel_size, device)
-    coords_voxel = coords / voxel_size_t  # (B,N,3)
-
-    # Shift coordinates so origin is at center
-    origin = torch.tensor(
-        [nx // 2, ny // 2, nz // 2], device=device, dtype=coords_voxel.dtype
-    )
-    coords_voxel_centered = coords_voxel + origin[None, None, :]  # (B,N,3)
-
-    # Reorder to z,y,x
-    coords_voxel_centered = coords_voxel_centered[..., [2, 1, 0]]
-
-    coords_floor = torch.floor(coords_voxel_centered).long()  # (B,N,3)
-    frac = coords_voxel_centered - coords_floor.float()
-
-    offsets, weights = _linear_interp_offsets_and_weights(frac)  # (8,3), (B,N,8)
-    indices = coords_floor.unsqueeze(-2) + offsets  # (B,N,8,3)
 
     volume = torch.zeros(B, nz, ny, nx, device=device)
     for b in range(B):
-        _scatter_splat(volume[b], indices[b], weights[b], periodic=periodic)
+        soft_voxelize_coordinates_into(
+            volume[b], coords[b], voxel_size_t, periodic=periodic
+        )
 
     if was_unbatched:
         volume = volume.squeeze(0)

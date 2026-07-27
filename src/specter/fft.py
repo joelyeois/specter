@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Sequence
 
 import torch
+import torch.nn.functional as F
 from scipy.fft import next_fast_len
 
 
@@ -252,6 +253,102 @@ def fftconvolve(
     ret = _freq_domain_conv(in1, in2, axes, shape, calc_fast_len=True)
 
     return _apply_conv_mode(ret, s1, s2, mode, axes)
+
+
+# Conservative margin under the ~2**31 (INT32_MAX) per-sample spatial-size
+# limit that trips PyTorch/cuDNN's "large non-batch-splittable
+# convolutions" warning on cuDNN < 9.3 without the v8 API. Past that point
+# PyTorch silently falls back to an unfold/im2col-based convolution whose
+# memory cost is O(output_elements * kernel_elements) -- a few voxels of
+# kernel turning into a >1 TB allocation attempt for a volume the size
+# IceBank.generate_big_ice can request. Chunking below this keeps every
+# individual conv3d call on the cheap, direct cuDNN path regardless of the
+# cuDNN version actually installed.
+_CUDNN_SAFE_CONV3D_SPATIAL_ELEMENTS = 2**30
+
+
+def _conv3d_same_core(
+    volume: torch.Tensor, weight: torch.Tensor, kz: int, ky: int, kx: int
+) -> torch.Tensor:
+    """'same'-mode conv3d (see :func:`spatial_convolve3d_same`) for a chunk
+    small enough to hand to a single ``F.conv3d`` call directly."""
+    full = F.conv3d(volume.unsqueeze(1), weight, padding=(kz - 1, ky - 1, kx - 1))
+    full = full.squeeze(1)
+    z0, y0, x0 = (kz - 1) // 2, (ky - 1) // 2, (kx - 1) // 2
+    z, y, x = volume.shape[-3:]
+    return full[:, z0 : z0 + z, y0 : y0 + y, x0 : x0 + x]
+
+
+def spatial_convolve3d_same(
+    volume: torch.Tensor,
+    kernel: torch.Tensor,
+    _max_spatial_elements: int = _CUDNN_SAFE_CONV3D_SPATIAL_ELEMENTS,
+) -> torch.Tensor:
+    """
+    Direct (non-FFT) 'same'-mode 3D convolution of a batched volume with a
+    single kernel shared across the batch, matching ``fftconvolve(volume,
+    kernel, mode="same", axes=(-3, -2, -1))`` exactly -- including its
+    centered-crop convention for even-sized kernel axes (see
+    :func:`_centered`) -- but via ``torch.nn.functional.conv3d`` instead of
+    an FFT.
+
+    FFT convolution pays the cost of transforming the *entire* volume into
+    (complex-valued, ~2x memory) frequency space regardless of kernel size.
+    Direct convolution's cost instead scales with the kernel, not the
+    volume, so for a kernel that is tiny relative to the volume -- e.g. a
+    ~4-15 voxel atomic potential kernel (:func:`specter.ice._kernels.
+    build_atomic_potential_kernel`) convolved against an ice volume with
+    billions of voxels in :meth:`specter.ice.IceBank.generate_big_ice` --
+    this avoids an OOM that plain ``fftconvolve`` hits on volumes too large
+    to hold several complex-valued copies of at once. ``conv3d`` computes
+    cross-correlation (no kernel flip), so the kernel is flipped here to
+    recover true convolution.
+
+    When a single sample's spatial size (``Z*Y*X``) exceeds
+    ``_max_spatial_elements``, the volume is convolved in Z-chunks instead
+    of one ``conv3d`` call -- see ``_CUDNN_SAFE_CONV3D_SPATIAL_ELEMENTS``.
+    Each chunk is extended by ``kz - 1`` voxels of real neighboring context
+    on either side (clipped at the true volume boundary, where zero-padding
+    is correct anyway) before convolving, so its cropped core exactly
+    matches what a single whole-volume call would have produced -- chunking
+    changes only memory/compute path, never the result.
+
+    Parameters
+    ----------
+    volume : torch.Tensor
+        Shape (B, Z, Y, X).
+    kernel : torch.Tensor
+        Shape (Z', Y', X') or (1, Z', Y', X'); the same kernel is applied
+        to every volume in the batch.
+
+    Returns
+    -------
+    torch.Tensor
+        Convolved volume, shape (B, Z, Y, X).
+    """
+    if kernel.ndim == 4:
+        kernel = kernel.squeeze(0)
+    kz, ky, kx = kernel.shape
+    weight = (
+        kernel.flip([0, 1, 2])
+        .to(device=volume.device, dtype=volume.dtype)
+        .unsqueeze(0)
+        .unsqueeze(0)
+    )
+    z, y, x = volume.shape[-3:]
+    if z * y * x <= _max_spatial_elements:
+        return _conv3d_same_core(volume, weight, kz, ky, kx)
+
+    halo = kz - 1
+    chunk_z = max(1, _max_spatial_elements // (y * x))
+    out = torch.empty_like(volume)
+    for z0 in range(0, z, chunk_z):
+        z1 = min(z0 + chunk_z, z)
+        ctx0 = max(0, z0 - halo)
+        ctx1 = min(z, z1 + halo)
+        chunk_out = _conv3d_same_core(volume[:, ctx0:ctx1], weight, kz, ky, kx)
+        out[:, z0:z1] = chunk_out[:, z0 - ctx0 : z0 - ctx0 + (z1 - z0)]
+    return out
 
 
 def _freq_domain_conv(

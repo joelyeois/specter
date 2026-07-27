@@ -47,6 +47,11 @@ class TomogramGenerator(L.LightningModule):
         ``ice_cache_dir`` are both ignored.
     ice_thickness : float, optional
         Thickness of the ice layer in Å.
+    ice_relax_steps : int, optional
+        Forwarded to :meth:`~specter.ice.IceBank.generate_big_ice` when
+        ``ice_model='gd'`` (or an ``IceBank`` ``icemaker``): number of local
+        MLBOP relaxation steps used to heal tile seams. Default 0 (no
+        relaxation). Ignored for ``RandomIcemaker``.
     water_air_interface : bool, optional
         Whether to account for water-air interface in crowding and ice.
     progressbars : bool, optional
@@ -67,6 +72,7 @@ class TomogramGenerator(L.LightningModule):
         ice_thickness: float | None = None,
         ice_cache_dir: str | None = None,
         icemaker: IceBank | RandomIcemaker | None = None,
+        ice_relax_steps: int = 0,
         water_air_interface: bool = True,
         progressbars: bool = True,
         chunk_size: int | None = None,
@@ -82,6 +88,7 @@ class TomogramGenerator(L.LightningModule):
         self.crowd_max_distance_z = crowd_max_distance_z
         self.ice_model = ice_model
         self.ice_thickness = ice_thickness
+        self.ice_relax_steps = ice_relax_steps
         self.water_air_interface = water_air_interface
         self.progressbars = progressbars
         self.chunk_size = chunk_size
@@ -153,6 +160,11 @@ class TomogramGenerator(L.LightningModule):
         if self.icemaker is not None:
             with torch.no_grad():
                 with status("Tiling ice volume", disable=not self.progressbars):
-                    V = blend_ice_into_volume(V, self.icemaker, self.pixel_size)
+                    V = blend_ice_into_volume(
+                        V,
+                        self.icemaker,
+                        self.pixel_size,
+                        relax_steps=self.ice_relax_steps,
+                    )
 
         return V

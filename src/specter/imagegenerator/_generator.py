@@ -65,7 +65,11 @@ class ParticleGeneratorBase(BaseImager):
         """
         if isinstance(self.icemaker, IceBank):
             ice = self.icemaker.generate_big_ice(
-                n=self.nxy, dx=self.pixel_size, nz=self.nz, batchsize=len(V)
+                n=self.nxy,
+                dx=self.pixel_size,
+                nz=self.nz,
+                batchsize=len(V),
+                relax_steps=self.ice_relax_steps,
             ).to(V.device)
         else:
             ice = self.icemaker.generate_ice(batchsize=len(V)).to(V.device)
@@ -191,6 +195,11 @@ class ImageGeneratorFromCoordinates(ParticleGeneratorBase):
         ``ImageGenerator`` instances. When supplied, ``ice_model`` and
         ``ice_cache_dir`` are both ignored. ``ice_thickness`` is still
         respected for computing ``nz``.
+    ice_relax_steps : int, optional
+        Forwarded to :meth:`~specter.ice.IceBank.generate_big_ice` when
+        ``ice_model='gd'`` (or an ``IceBank`` ``icemaker``): number of local
+        MLBOP relaxation steps used to heal tile seams. Default 0 (no
+        relaxation). Ignored for ``RandomIcemaker``.
     scattering_model : str, optional
         Scattering model ('multislice', 'projection', 'ctf'). Default 'multislice'.
     aberration_model : str, optional
@@ -261,6 +270,7 @@ class ImageGeneratorFromCoordinates(ParticleGeneratorBase):
         ice_thickness: float | None = None,
         ice_cache_dir: str | None = None,
         icemaker: IceBank | RandomIcemaker | None = None,
+        ice_relax_steps: int = 0,
         scattering_model: str = "multislice",
         aberration_model: str = "holography",
         noise_model: str | None = "poisson",
@@ -288,6 +298,7 @@ class ImageGeneratorFromCoordinates(ParticleGeneratorBase):
     ):
         self.pad_fft = pad_fft
         self.ice_thickness = ice_thickness
+        self.ice_relax_steps = ice_relax_steps
         self.nxy = nxy
 
         self.pad_nxy = nxy + (nxy // 2) * 2 if pad_fft else nxy
@@ -499,6 +510,11 @@ class ImageGenerator(ParticleGeneratorBase):
         ``ImageGeneratorFromCoordinates`` instances. When supplied,
         ``ice_model`` and ``ice_cache_dir`` are both ignored. ``ice_thickness``
         is still respected for computing ``nz``.
+    ice_relax_steps : int, optional
+        Forwarded to :meth:`~specter.ice.IceBank.generate_big_ice` when
+        ``ice_model='gd'`` (or an ``IceBank`` ``icemaker``): number of local
+        MLBOP relaxation steps used to heal tile seams. Default 0 (no
+        relaxation). Ignored for ``RandomIcemaker``.
     scattering_model : str, optional
         Scattering model. Default 'multislice'.
     aberration_model : str, optional
@@ -570,6 +586,7 @@ class ImageGenerator(ParticleGeneratorBase):
         ice_thickness: float | None = None,
         ice_cache_dir: str | None = None,
         icemaker: IceBank | RandomIcemaker | None = None,
+        ice_relax_steps: int = 0,
         scattering_model: str = "multislice",
         aberration_model: str = "holography",
         noise_model: str | None = "poisson",
@@ -600,6 +617,7 @@ class ImageGenerator(ParticleGeneratorBase):
         nxy = scattering_potential.shape[-1]
         self.pad_fft = pad_fft
         self.ice_thickness = ice_thickness
+        self.ice_relax_steps = ice_relax_steps
         self.pad_nxy = nxy + (nxy // 2) * 2 if pad_fft else nxy
 
         vol_nz = scattering_potential.shape[0]

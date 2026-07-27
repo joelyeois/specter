@@ -1010,6 +1010,7 @@ def blend_ice_into_volume(
     icemaker: "IceBank | RandomIcemaker",
     pixel_size: float,
     threshold: float = 0.05,
+    relax_steps: int = 200,
 ) -> torch.Tensor:
     """
     Add ice into a scattering-potential volume, masked to voxels with little
@@ -1033,6 +1034,9 @@ def blend_ice_into_volume(
     threshold : float, optional
         Fraction of ``V.max()`` below which a voxel is treated as ice-free.
         Default 0.05.
+    relax_steps : int, optional
+        Forwarded to :meth:`IceBank.generate_big_ice` (ignored for
+        ``RandomIcemaker``, which has no tile seams to relax). Default 200.
 
     Returns
     -------
@@ -1042,7 +1046,7 @@ def blend_ice_into_volume(
     batchsize, nz, nxy, _ = V.shape
     if isinstance(icemaker, IceBank):
         ice = icemaker.generate_big_ice(
-            n=nxy, dx=pixel_size, nz=nz, batchsize=batchsize
+            n=nxy, dx=pixel_size, nz=nz, batchsize=batchsize, relax_steps=relax_steps
         ).to(V.device)
     else:
         ice = icemaker.generate_ice(batchsize=batchsize).to(V.device)

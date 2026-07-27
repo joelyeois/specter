@@ -71,6 +71,11 @@ class MicrographGenerator(BaseImager):
         both ignored. Honored both when ``scattering_potential`` is given
         (forwarded to ``TomogramGenerator``) and when ``vol`` is given
         (blended directly into ``vol``, see above).
+    ice_relax_steps : int, optional
+        Forwarded to :meth:`~specter.ice.IceBank.generate_big_ice` when
+        ``ice_model='gd'`` (or an ``IceBank`` ``icemaker``): number of local
+        MLBOP relaxation steps used to heal tile seams. Default 0 (no
+        relaxation). Ignored for ``RandomIcemaker``.
     crowd_min_distance : float, optional
         Minimum inter-particle distance in Å for crowding.
     crowd_max_distance_z : float, optional
@@ -149,6 +154,7 @@ class MicrographGenerator(BaseImager):
         ice_thickness: float | None = None,
         ice_cache_dir: str | None = None,
         icemaker: IceBank | RandomIcemaker | None = None,
+        ice_relax_steps: int = 0,
         crowd_min_distance: float | None = None,
         crowd_max_distance_z: float | None = None,
         water_air_interface: bool = True,
@@ -272,7 +278,9 @@ class MicrographGenerator(BaseImager):
                     torch.no_grad(),
                     status("Tiling ice volume", disable=not self.progressbars),
                 ):
-                    vol = blend_ice_into_volume(vol, vol_icemaker, pixel_size)
+                    vol = blend_ice_into_volume(
+                        vol, vol_icemaker, pixel_size, relax_steps=ice_relax_steps
+                    )
             self.register_buffer("vol", vol)
         else:
             self.specimen_gen = TomogramGenerator(
@@ -286,6 +294,7 @@ class MicrographGenerator(BaseImager):
                 ice_thickness=ice_thickness,
                 ice_cache_dir=ice_cache_dir,
                 icemaker=icemaker,
+                ice_relax_steps=ice_relax_steps,
                 water_air_interface=water_air_interface,
                 progressbars=progressbars,
                 chunk_size=chunk_size,

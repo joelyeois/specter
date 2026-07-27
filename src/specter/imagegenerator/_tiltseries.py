@@ -69,6 +69,15 @@ class TiltSeriesGenerator(MicrographGenerator):
     icemaker : IceBank or RandomIcemaker, optional
         A pre-built icemaker instance to blend into ``vol`` directly. When
         supplied, ``ice_model`` and ``ice_cache_dir`` are both ignored.
+    ice_relax_steps : int, optional
+        Forwarded to :meth:`~specter.ice.IceBank.generate_big_ice` when
+        ``ice_model='gd'`` (or an ``IceBank`` ``icemaker``): number of local
+        MLBOP relaxation steps used to heal tile seams. Default 0 here
+        (unlike ``IceBank.generate_big_ice``'s own default of 200) --
+        tilt series volumes are typically large/tiled often enough that
+        seam relaxation cost adds up, and the un-relaxed seams have not been
+        a problem in practice for this class's usage. Ignored for
+        ``RandomIcemaker``.
     scattering_model : str, optional
         Scattering model passed to ``IterativeScattering``. Default 'multislice'.
     aberration_model : str, optional
@@ -338,6 +347,7 @@ class TiltSeriesGenerator(MicrographGenerator):
         ice_model: str | None = None,
         ice_cache_dir: str | None = None,
         icemaker: IceBank | RandomIcemaker | None = None,
+        ice_relax_steps: int = 0,
         scattering_model: str = "multislice",
         aberration_model: str = "holography",
         noise_model: str | None = "poisson",
@@ -391,7 +401,9 @@ class TiltSeriesGenerator(MicrographGenerator):
                     f"[TiltSeriesGenerator] Adding ice to volume using {ice_model} model"
                 )
             with torch.no_grad(), status("Tiling ice volume", disable=not progressbars):
-                vol = blend_ice_into_volume(vol, vol_icemaker, pixel_size)
+                vol = blend_ice_into_volume(
+                    vol, vol_icemaker, pixel_size, relax_steps=ice_relax_steps
+                )
 
         if isinstance(micrograph_size, int):
             desired_nxy = micrograph_size

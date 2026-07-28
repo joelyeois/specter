@@ -47,4 +47,10 @@ intersphinx_mapping = {
 
 html_theme = "furo"
 html_title = "SPECTER"
+html_static_path = ["_static"]
+html_favicon = "_static/favicon.ico"
+html_theme_options = {
+    "light_logo": "logo-light.png",
+    "dark_logo": "logo-dark.png",
+}
 exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]

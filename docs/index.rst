@@ -1,6 +1,18 @@
 SPECTER
 =======
 
+.. image:: _static/logo-light.png
+   :alt: SPECTER logo
+   :width: 220px
+   :align: center
+   :class: only-light
+
+.. image:: _static/logo-dark.png
+   :alt: SPECTER logo
+   :width: 220px
+   :align: center
+   :class: only-dark
+
 **Scattering & Propagation of Electrons in Cryo-EM: Twin Emulator & Reconstruction**
 
 A microscope you can run backwards. SPECTER simulates what a cryo-electron

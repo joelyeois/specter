@@ -175,6 +175,52 @@ def build_protein_params(spec: dict, mmer_svol_filename: str) -> dict:
     }
 
 
+def build_low_res_sample_with_membranes(
+    shape: tuple[int, int, int],
+    v_size: float,
+    offset: tuple[int, int, int],
+    membrane_params: list[dict],
+    max_mbtries: int = 10,
+) -> SyntheticSample:
+    """Construct the low-res SyntheticSample and run polnet's membrane
+    placement into it (populates sample's VOI/occupancy grid and
+    sample.mbs_vtp). Depends only on shape/v_size/membrane_params -- not on
+    any protein SVOL, so this is safe to run concurrently (e.g. on a
+    background thread) with add_proteins_to_sample's SVOL-building
+    prerequisite (build_low_res_svol) as long as add_proteins_to_sample
+    itself is only called after this function returns (protein packing
+    reads the membrane-updated occupancy grid to avoid overlapping placed
+    membranes).
+    """
+    sample = SyntheticSample(shape=shape, v_size=v_size, offset=offset)
+    for params in membrane_params:
+        sample.add_set_membranes(params=params, max_mbtries=max_mbtries)
+    return sample
+
+
+def add_proteins_to_sample(
+    sample: SyntheticSample,
+    protein_params: list[dict],
+    scratch_dir: Path,
+    mmer_tries: int = 20,
+    pmer_tries: int = 100,
+    surf_dec: float = 0.9,
+) -> None:
+    """Pack cytosolic proteins into an already-built sample (mutates it in
+    place). Must run after any membrane placement on this sample -- each
+    species' packing reads/updates the shared occupancy grid, so this loop
+    itself stays strictly sequential across protein_params.
+    """
+    for params in protein_params:
+        sample.add_set_cproteins(
+            params=params,
+            data_path=scratch_dir,
+            surf_dec=surf_dec,
+            mmer_tries=mmer_tries,
+            pmer_tries=pmer_tries,
+        )
+
+
 def build_low_res_sample(
     shape: tuple[int, int, int],
     v_size: float,
@@ -190,21 +236,28 @@ def build_low_res_sample(
     """Run polnet's placement entirely at low resolution and return the
     populated SyntheticSample. No TEM config is ever supplied -- IMOD is
     never touched.
+
+    Purely sequential convenience wrapper around
+    build_low_res_sample_with_membranes + add_proteins_to_sample; callers
+    that want membrane placement to run concurrently with protein SVOL
+    building (see CryoETSpecimenGenerator._run_low_res_placement) should
+    call those two functions directly instead.
     """
-    sample = SyntheticSample(shape=shape, v_size=v_size, offset=offset)
-
-    for params in membrane_params:
-        sample.add_set_membranes(params=params, max_mbtries=max_mbtries)
-
-    for params in protein_params:
-        sample.add_set_cproteins(
-            params=params,
-            data_path=scratch_dir,
-            surf_dec=surf_dec,
-            mmer_tries=mmer_tries,
-            pmer_tries=pmer_tries,
-        )
-
+    sample = build_low_res_sample_with_membranes(
+        shape=shape,
+        v_size=v_size,
+        offset=offset,
+        membrane_params=membrane_params,
+        max_mbtries=max_mbtries,
+    )
+    add_proteins_to_sample(
+        sample,
+        protein_params,
+        scratch_dir,
+        mmer_tries=mmer_tries,
+        pmer_tries=pmer_tries,
+        surf_dec=surf_dec,
+    )
     return sample
 
 

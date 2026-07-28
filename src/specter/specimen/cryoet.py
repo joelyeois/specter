@@ -16,6 +16,7 @@ import logging
 import tempfile
 import time
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import numpy as np
@@ -163,22 +164,13 @@ class CryoETSpecimenGenerator:
             )
         return self._pdb_cache[code]
 
-    # ------------------------------------------------------------------
-    # Step 1-3: low-resolution placement via polnet
-    # ------------------------------------------------------------------
-    def _run_low_res_placement(self):
-        if self.seed is not None:
-            import random
-
-            random.seed(self.seed)
-            np.random.seed(self.seed)
-
-        self._log(
-            f"[cryoet] low-res placement: {self.low_res_shape} voxels "
-            f"@ {self.low_res_v_size} A/vx, {len(self.protein_specs)} protein "
-            f"species, {len(self.membrane_specs)} membrane spec(s)"
-        )
-        scratch = self._scratch()
+    def _build_protein_svols(self, scratch: Path) -> list[dict]:
+        """Build each protein species' low-res SVOL placeholder and return
+        the corresponding .pns-equivalent param dicts, in protein_specs
+        order. Runs on its own thread from _run_low_res_placement,
+        concurrently with polnet's membrane placement -- see the comment
+        there for why that's safe.
+        """
         protein_param_dicts = []
         for spec in self.protein_specs:
             code = spec["PDB_CODE"]
@@ -196,19 +188,59 @@ class CryoETSpecimenGenerator:
                 f"low-res placeholder built in {time.time() - t0:.1f}s"
             )
             protein_param_dicts.append(pb.build_protein_params(spec, filename))
+        return protein_param_dicts
 
-        self._log("[cryoet] running polnet placement (membranes + protein packing)...")
-        t0 = time.time()
-        offset = (4, 4, 4)
-        sample = pb.build_low_res_sample(
-            shape=self.low_res_shape,
-            v_size=self.low_res_v_size,
-            offset=offset,
-            membrane_params=self.membrane_specs,
-            protein_params=protein_param_dicts,
-            scratch_dir=scratch,
+    # ------------------------------------------------------------------
+    # Step 1-3: low-resolution placement via polnet
+    # ------------------------------------------------------------------
+    def _run_low_res_placement(self):
+        if self.seed is not None:
+            import random
+
+            random.seed(self.seed)
+            np.random.seed(self.seed)
+
+        self._log(
+            f"[cryoet] low-res placement: {self.low_res_shape} voxels "
+            f"@ {self.low_res_v_size} A/vx, {len(self.protein_specs)} protein "
+            f"species, {len(self.membrane_specs)} membrane spec(s)"
         )
-        self._log(f"[cryoet] polnet placement done in {time.time() - t0:.1f}s")
+        scratch = self._scratch()
+        offset = (4, 4, 4)
+
+        # Membrane placement (polnet's own occupancy-driven packing) and
+        # building each protein species' low-res SVOL placeholder
+        # (specter's PotentialBuilder) touch disjoint state -- the former
+        # only mutates a fresh SyntheticSample, the latter only reads PDB
+        # data and writes per-species MRC files to scratch -- so they run
+        # concurrently on background threads. Only the protein *packing*
+        # step (add_set_cproteins) actually needs both results together: it
+        # reads the membrane-updated occupancy grid off the sample AND the
+        # SVOL filenames, so it has to wait for both and stays sequential
+        # (see build_low_res_sample_with_membranes/add_proteins_to_sample
+        # docstrings in polnet_bridge.py).
+        t0 = time.time()
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            membrane_future = pool.submit(
+                pb.build_low_res_sample_with_membranes,
+                shape=self.low_res_shape,
+                v_size=self.low_res_v_size,
+                offset=offset,
+                membrane_params=self.membrane_specs,
+            )
+            svol_future = pool.submit(self._build_protein_svols, scratch)
+
+            sample = membrane_future.result()
+            protein_param_dicts = svol_future.result()
+        self._log(
+            f"[cryoet] membrane placement + protein SVOL builds done in "
+            f"{time.time() - t0:.1f}s (ran concurrently)"
+        )
+
+        self._log("[cryoet] running polnet protein packing...")
+        t0 = time.time()
+        pb.add_proteins_to_sample(sample, protein_param_dicts, scratch)
+        self._log(f"[cryoet] polnet protein packing done in {time.time() - t0:.1f}s")
 
         protein_instances = pb.get_protein_instances(sample)
         self._log(f"[cryoet] {len(protein_instances)} protein instance(s) placed")

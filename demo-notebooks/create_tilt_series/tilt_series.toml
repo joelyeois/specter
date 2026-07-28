@@ -1,0 +1,75 @@
+# Small/fast specimen + tilt scheme so this notebook runs in a few minutes.
+# Scale target_shape/target_v_size and n_tilts up for production runs -- see
+# configs/tilt_series.toml for full/canonical defaults and the "Notes for
+# scaling up" section of dev/cryoet-specimen-generation/10440.ipynb.
+
+[[protein_specs]]
+PDB_CODE = "7VD8"   # ferritin_complex
+PMER_OCC = 0.078
+
+[[protein_specs]]
+PDB_CODE = "6QZP"   # cytosolic_ribosome
+PMER_OCC = 0.646
+
+[[protein_specs]]
+PDB_CODE = "7B75"   # thyroglobulin
+PMER_OCC = 0.099
+
+[[protein_specs]]
+PDB_CODE = "6N4V"   # pp7_vlp
+PMER_OCC = 0.432
+
+[[protein_specs]]
+PDB_CODE = "6DRV"   # beta_galactosidase
+PMER_OCC = 0.022
+
+[[protein_specs]]
+PDB_CODE = "1FA2"   # beta_amylase
+PMER_OCC = 0.010
+
+[[membrane_specs]]
+MB_TYPE = "sphere"
+MB_THICK_RG = [25.0, 35.0]
+MB_LAYER_S_RG = [0.5, 2.0]
+MB_OCC_RG = [0.0025, 0.005]
+MB_OVER_TOL = 0.0
+MB_DEN_CF_RG = [0.3, 0.5]
+MB_MIN_RAD = 180.0
+MB_MAX_RAD = 450.0
+
+[specimen]
+filler_occupancy = 0.1     # generic cytosolic filler; None disables
+target_shape = [92, 256, 256]   # (Z, Y, X) voxels -- modest, finishes quickly
+target_v_size = 5.0             # Å/voxel
+low_res_v_size = 10.0           # Å/voxel, polnet's placement-pass resolution
+seed = 11
+
+[microscope]
+energy = 300.0
+dose_per_tilt = 3.0
+num_frames = 10
+cs = 2.0
+alpha = 0.1
+
+[defocus]
+defocus = 22000.0
+
+[tilt_geometry]
+min_tilt_angle = -30.0
+max_tilt_angle = 30.0
+n_tilts = 5              # quick smoke test; use ~41-61 for a real tilt scheme
+tilt_axis = "y"
+
+[models]
+scattering_model = "multislice"
+aberration_model = "holography"
+noise_model = "poisson"
+ice_model = "gd"          # bundled IceBank cache; try "random" for a faster/cheaper placeholder
+ice_relax_steps = 0
+detector_model = "none"
+
+[postprocessing]
+save_exitwaves = false
+
+[compute]
+device = "cuda:0"  # adjust to an available device on your machine, e.g. "cuda:0" or "cpu"

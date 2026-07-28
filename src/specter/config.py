@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import os
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal, TypeVar, overload
+from typing import Any, Literal, TypeVar, overload
 
 import specter
 
@@ -164,7 +164,95 @@ class MicrographConfig:
     filename: str = "micrographs"
 
 
-ConfigT = TypeVar("ConfigT", ParticleStackConfig, MicrographConfig)
+@dataclass
+class TiltSeriesConfig:
+    """Parameters for cryoET tilt-series generation, loaded from a TOML config file.
+
+    Combines the two-stage pipeline from `dev/cryoet-specimen-generation/10440.ipynb`:
+    `specter.specimen.CryoETSpecimenGenerator` places proteins/membranes into a
+    specimen volume, then `TiltSeriesGenerator` blends in ice and simulates the
+    tilted acquisition (multislice scattering, CTF, dose, detector, noise).
+    """
+
+    # --- Specimen placement (CryoETSpecimenGenerator) ---
+    # One dict per protein species, e.g. {"PDB_CODE": "6qzp", "PMER_OCC": 0.6}.
+    # Only "PDB_CODE" is required; see CryoETSpecimenGenerator's docstring for
+    # the other optional polnet-style keys (PMER_OCC, PMER_L, PMER_L_MAX,
+    # PMER_OVER_TOL, MMER_ISO). In TOML, provide as [[protein_specs]] tables.
+    protein_specs: list[dict[str, Any]]
+    # One dict per membrane species/population, polnet .mbs-equivalent keys
+    # (MB_TYPE, MB_THICK_RG, MB_LAYER_S_RG, MB_OCC_RG, MB_OVER_TOL,
+    # MB_DEN_CF_RG, MB_MIN_RAD/MB_MAX_RAD or MB_MIN_AXIS/MB_MAX_AXIS/
+    # MB_MAX_ECC). In TOML, provide as [[membrane_specs]] tables.
+    membrane_specs: list[dict[str, Any]] = field(default_factory=list)
+    # Generic cytosolic filler (build_filler_protein_specs) total occupancy,
+    # added on top of protein_specs to avoid an empty/flat background. None
+    # disables it.
+    filler_occupancy: float | None = None
+    pdb_savefolder: str = "pdb-data"  # resolved against REPO_ROOT if relative
+    target_shape: list[int] = field(
+        default_factory=lambda: [184, 630, 630]
+    )  # (Z, Y, X) voxels
+    target_v_size: float = 5.0  # Å/voxel
+    low_res_v_size: float = 10.0  # Å/voxel, polnet's placement-pass resolution
+    membrane_potential_scale: float = (
+        1.0  # unitless, on top of the auto-calibrated reference
+    )
+    seed: int | None = None
+
+    # --- Microscope / physics ---
+    micrograph_size: int | None = (
+        None  # pixels, square; defaults to target_shape's XY extent
+    )
+    energy: float = 300.0  # keV
+    dose_per_tilt: float = 3.0  # e⁻/Å², per tilt angle
+    num_frames: int = 10  # movie frames per tilt
+    cs: float = 2.0  # mm
+    alpha: float = 0.1  # unitless, amplitude contrast ratio
+
+    # --- Envelopes ---
+    convergence_angle: float | None = None  # mrad
+    cc: float | None = None  # mm
+    energy_spread: float = 0.7  # eV (FWHM)
+    deltaV_V: float = 0.06e-6  # unitless (ΔV/V)
+    deltaI_I: float = 0.01e-6  # unitless (ΔI/I)
+    dose_envelope: bool = False
+
+    # --- Defocus ---
+    defocus: float = 22000.0  # Å (positive = underfocus)
+
+    # --- Tilt geometry ---
+    min_tilt_angle: float = -45.0  # degrees
+    max_tilt_angle: float = 45.0  # degrees
+    n_tilts: int = 61
+    tilt_axis: Literal["x", "y"] = "y"
+
+    # --- Models ---
+    scattering_model: Literal["multislice", "firstborn", "projection", "ctf"] = (
+        "multislice"
+    )
+    aberration_model: Literal["holography", "ctf"] = "holography"
+    noise_model: Literal["poisson", "none"] = "poisson"
+    coincidence_radius: float = 1.5  # pixels
+    ice_model: Literal["gd", "random", "none"] = "gd"
+    ice_cache_dir: str | None = None  # defaults to the bundled ice-data/ice_cache
+    ice_relax_steps: int = 0  # local MLBOP seam-relaxation steps for ice_model="gd"
+    pad_fft: bool = False
+    detector_model: Literal["none", "perfect", "k3_300kv", "k3_200kv"] = "none"
+
+    # --- Post-processing ---
+    normalize_tilt_series: bool = False
+    save_exitwaves: bool = False
+
+    # --- Compute ---
+    device: str = "cpu"
+
+    # --- Output ---
+    output_dir: str = "./output/"
+    filename: str = "tilt_series"
+
+
+ConfigT = TypeVar("ConfigT", ParticleStackConfig, MicrographConfig, TiltSeriesConfig)
 
 
 @overload
@@ -173,11 +261,14 @@ def load_config(
 ) -> ParticleStackConfig: ...
 @overload
 def load_config(path: str, config_cls: type[MicrographConfig]) -> MicrographConfig: ...
+@overload
+def load_config(path: str, config_cls: type[TiltSeriesConfig]) -> TiltSeriesConfig: ...
 def load_config(
     path: str,
     config_cls: type[ParticleStackConfig]
-    | type[MicrographConfig] = ParticleStackConfig,
-) -> ParticleStackConfig | MicrographConfig:
+    | type[MicrographConfig]
+    | type[TiltSeriesConfig] = ParticleStackConfig,
+) -> ParticleStackConfig | MicrographConfig | TiltSeriesConfig:
     """
     Load a config dataclass from a TOML file.
 
@@ -186,14 +277,15 @@ def load_config(
     path : str
         Path to a TOML config file. May use tables (e.g. `[potential]`) to
         group fields for readability; all tables are flattened into one
-        namespace before validation.
-    config_cls : type[ParticleStackConfig] | type[MicrographConfig]
+        namespace before validation. List-of-tables fields (e.g.
+        `[[protein_specs]]`) are passed through as `list[dict]`.
+    config_cls : type[ParticleStackConfig] | type[MicrographConfig] | type[TiltSeriesConfig]
         Dataclass to populate from the TOML fields. Defaults to
         `ParticleStackConfig` for backward compatibility.
 
     Returns
     -------
-    ParticleStackConfig | MicrographConfig
+    ParticleStackConfig | MicrographConfig | TiltSeriesConfig
         Config with unset fields filled from `config_cls` defaults.
     """
     with open(path, "rb") as f:

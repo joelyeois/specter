@@ -1,0 +1,103 @@
+# Canonical default config for the create_tilt_series demo notebook
+# (demo-notebooks/create_tilt_series/tilt-series-generator.ipynb), loaded via
+# specter.config.load_config("...", TiltSeriesConfig).
+#
+# Combines the two-stage pipeline from dev/cryoet-specimen-generation/10440.ipynb:
+#   1. CryoETSpecimenGenerator places proteins/membranes into a specimen volume.
+#   2. TiltSeriesGenerator blends in ice and simulates the tilted acquisition.
+#
+# protein_specs/membrane_specs are TOML arrays-of-tables ([[protein_specs]]) --
+# each entry is one self-contained species/population dict, same shape as the
+# plain Python dicts CryoETSpecimenGenerator expects.
+
+[[protein_specs]]
+PDB_CODE = "7VD8"   # ferritin_complex
+PMER_OCC = 0.078
+
+[[protein_specs]]
+PDB_CODE = "6QZP"   # cytosolic_ribosome
+PMER_OCC = 0.646
+
+[[protein_specs]]
+PDB_CODE = "7B75"   # thyroglobulin
+PMER_OCC = 0.099
+
+[[protein_specs]]
+PDB_CODE = "6N4V"   # pp7_vlp
+PMER_OCC = 0.432
+
+[[protein_specs]]
+PDB_CODE = "6DRV"   # beta_galactosidase
+PMER_OCC = 0.022
+
+[[protein_specs]]
+PDB_CODE = "1FA2"   # beta_amylase
+PMER_OCC = 0.010
+
+[[membrane_specs]]
+MB_TYPE = "sphere"
+MB_THICK_RG = [25.0, 35.0]
+MB_LAYER_S_RG = [0.5, 2.0]
+MB_OCC_RG = [0.0025, 0.005]     # ~0.71% mean, matches real 83.3% of 0.27-1.6%
+MB_OVER_TOL = 0.0
+MB_DEN_CF_RG = [0.3, 0.5]
+MB_MIN_RAD = 180.0
+MB_MAX_RAD = 450.0
+
+[specimen]
+# generic, non-annotated cytosolic crowding filling the background around the
+# annotated targets above; see build_filler_protein_specs's docstring. None disables it.
+filler_occupancy = 0.1
+pdb_savefolder = "pdb-data"       # resolved relative to the repo root
+target_shape = [184, 630, 630]    # (Z, Y, X) voxels
+target_v_size = 5.0               # Å/voxel
+low_res_v_size = 10.0             # Å/voxel, polnet's placement-pass resolution
+membrane_potential_scale = 1.0    # unitless, on top of the auto-calibrated reference
+# seed = 11                       # uncomment for reproducible placement
+
+[microscope]
+micrograph_size = 630              # pixels, square; defaults to target_shape's XY extent
+energy = 300.0                     # keV
+dose_per_tilt = 3.0                # e⁻/Å², per tilt angle
+num_frames = 10                    # movie frames per tilt
+cs = 2.0                           # mm
+alpha = 0.1                        # unitless, amplitude contrast ratio
+
+[envelopes]
+# convergence_angle = 1.0          # mrad, uncomment to enable the Cs envelope
+# cc = 2.0                         # mm, uncomment to enable the Cc envelope
+energy_spread = 0.7                # eV (FWHM)
+deltaV_V = 0.06e-6                 # unitless (ΔV/V)
+deltaI_I = 0.01e-6                 # unitless (ΔI/I)
+dose_envelope = false
+
+[defocus]
+defocus = 22000.0                  # Å (positive = underfocus)
+
+[tilt_geometry]
+min_tilt_angle = -45.0             # degrees
+max_tilt_angle = 45.0              # degrees
+n_tilts = 61
+tilt_axis = "y"                    # x | y
+
+[models]
+scattering_model = "multislice"    # multislice | firstborn | projection | ctf
+aberration_model = "holography"    # holography | ctf
+noise_model = "poisson"            # poisson | none
+coincidence_radius = 1.5           # pixels
+ice_model = "gd"                   # gd | random | none
+# ice_cache_dir = "ice-data/ice_cache"  # defaults to the bundled cache
+ice_relax_steps = 0                # local MLBOP seam-relaxation steps for ice_model="gd"
+pad_fft = false
+detector_model = "none"            # none | perfect | k3_300kv | k3_200kv
+
+[postprocessing]
+normalize_tilt_series = false
+save_exitwaves = false
+
+[compute]
+device = "cpu"                     # cpu | cuda | cuda:0
+
+[output]
+output_dir = "./output/"
+filename = "tilt_series"

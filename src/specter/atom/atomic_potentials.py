@@ -9,6 +9,17 @@ import torch
 from Bio.PDB.MMCIF2Dict import MMCIF2Dict
 from torch.special import modified_bessel_k0, modified_bessel_k1
 
+# A handful of bundled Shtyrov bonded-species entries (e.g. 'O(C, amide)',
+# 'H(N)') have a b_i = 0 term. In the b_i*exp(-b_i*k^2/4) Fourier-space
+# parameterization that is a constant (frequency-independent) contribution,
+# whose real-space inverse transform is a Dirac delta at r=0 — the closed-form
+# real-space formula (4*pi/b)^1.5 * exp(-pi^2*r^2/b*4) divides by b, so it is
+# NaN exactly at b=0. Flooring b at this epsilon turns the idealized delta
+# into an extremely narrow but finite Gaussian (real-space width ~1e-3 Å,
+# negligible at any grid spacing this codebase uses), consistent with the
+# point-charge-like singularity at r=0 these potentials already have.
+MIN_GAUSSIAN_B = 1e-4
+
 
 @lru_cache(maxsize=1)
 def load_kirkland_parameters() -> torch.Tensor:
@@ -576,7 +587,7 @@ def shtyrov_atomic_potential_3d(
     shtyrov_params = load_shtyrov_parameters(filepath)  # shape (N, 5, 2)
     P = shtyrov_params[atomic_number].to(r_xyz.device)  # shape (5, 2)
     a = P[:, 0].unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)  # shape (5,1,1,1)
-    b = P[:, 1].unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
+    b = P[:, 1].unsqueeze(-1).unsqueeze(-1).unsqueeze(-1).clamp(min=MIN_GAUSSIAN_B)
 
     r2 = (r_xyz**2).unsqueeze(0)  # shape (1, Nx, Ny, Nz)
 
@@ -704,7 +715,7 @@ def shtyrov_atomic_potential_3d_by_species(
 
     P = params[species].to(r_xyz.device)  # shape (5, 2)
     a = P[:, 0].unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
-    b = P[:, 1].unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
+    b = P[:, 1].unsqueeze(-1).unsqueeze(-1).unsqueeze(-1).clamp(min=MIN_GAUSSIAN_B)
 
     r2 = (r_xyz**2).unsqueeze(0)
 
@@ -744,10 +755,188 @@ def peng_atomic_potential_3d(atomic_number: int, r_xyz: torch.Tensor) -> torch.T
 
     coef = gemmi.Element(atomic_number).c4322
     a = torch.tensor(coef.a, dtype=torch.float32, device=r_xyz.device).view(5, 1, 1, 1)
-    b = torch.tensor(coef.b, dtype=torch.float32, device=r_xyz.device).view(5, 1, 1, 1)
+    b = (
+        torch.tensor(coef.b, dtype=torch.float32, device=r_xyz.device)
+        .view(5, 1, 1, 1)
+        .clamp(min=MIN_GAUSSIAN_B)
+    )
 
     r2 = (r_xyz**2).unsqueeze(0)
 
     return c1 * torch.sum(
         a * (4 * torch.pi / b) ** 1.5 * torch.exp(-(torch.pi**2) * r2 / b * 4), 0
     )
+
+
+def yukawa_shell_average(
+    p: torch.Tensor, R: torch.Tensor | float, lam: torch.Tensor
+) -> torch.Tensor:
+    """
+    Exact volume-average of a Yukawa/screened-Coulomb term `exp(-lam*r)/r`
+    over a sphere of radius `R`, at distance `p` from the singularity.
+
+    Kirkland's and Lobato's real-space potentials both contain terms of this
+    form (`a/r * exp(-2*pi*r*sqrt(b))` and similar), which have a genuine,
+    unbounded singularity at r=0 — unlike a Gaussian's large-but-finite peak,
+    this cannot be handled by the exact `erf` voxel-average approach used for
+    Shtyrov/Peng (a Gaussian separates into independent x/y/z 1D integrals;
+    `1/r` depends on the full radius and does not separate that way, and any
+    coarse or naive point sample risks landing arbitrarily close to the true
+    singularity — confirmed empirically to blow up to 10^5-10^7-times the
+    correct value for some sub-voxel atom positions).
+
+    This function instead computes the *exact* average of the term over a
+    sphere approximating the voxel's volume (a standard "smeared/screened
+    potential" technique from electrostatics/Ewald-summation literature):
+    the spherical-shell mean of a radial function at an off-center point
+    reduces, via the substitution u=|point-atom|, to a 1D integral that is
+    finite everywhere (derived and verified with sympy: finite as `p->0`,
+    continuous at `p=R`, reduces exactly to the point value `exp(-lam*p)/p`
+    as `R->0`). Verified numerically against Monte Carlo cube-integration
+    (random, non-grid-aligned sampling): ~2-3% relative error for the atom's
+    own nearest voxel, growing to ~18-20% at that voxel's edge/corner (where
+    approximating the cube by a sphere is least accurate) — a bounded,
+    understood geometric approximation, categorically different from the
+    unbounded blow-ups of point/coarse sampling.
+
+    Parameters
+    ----------
+    p : torch.Tensor
+        Distance from the singularity (atom) to the sphere's center, in Å.
+    R : torch.Tensor or float
+        Sphere radius, in Å — typically `h*(6/pi)**(1/3)` for a cubic voxel
+        of half-width `h`, matching the voxel's volume.
+    lam : torch.Tensor
+        Decay rate of the term (`2*pi*sqrt(b)` for Kirkland's Yukawa term,
+        `2*pi/sqrt(b)` for Lobato's).
+
+    Returns
+    -------
+    torch.Tensor
+        Volume-averaged value, same shape as the broadcast of `p` and `lam`.
+    """
+    # The near-field branch is mathematically finite as p->0 (verified via
+    # sympy limit), but evaluating it at a *literal* tiny p in float32 hits
+    # catastrophic cancellation (numerator and 1/p both blow up and only
+    # cancel in exact arithmetic) — confirmed empirically: p=1e-8 gives a
+    # value ~3x too large in float32, while p=1e-3 matches the float64
+    # reference to <0.01%. 1e-3 Å is physically negligible (atoms essentially
+    # never sit closer than this to a voxel center) but numerically safe.
+    p = p.clamp(min=1e-3)
+    # Two independent overflow risks, both handled below:
+    # (1) torch.where evaluates *both* branches everywhere and backprops
+    #     through both (grad_output is zeroed for the unselected branch, but
+    #     0*inf=nan still corrupts the sum): `near`'s exp(lam*(R+p)) grows
+    #     unboundedly as p->inf (window-edge points far outside its p<=R
+    #     domain), and `far`'s /p term blows up as p->0 (outside its p>R
+    #     domain). Fixed by clamping each branch's own p input to its safe
+    #     domain so neither branch ever evaluates out of range.
+    # (2) The textbook far/near forms each contain a bare exp(2*R*lam) factor
+    #     that is *combined* with a decaying exp(-lam*(...)) factor down-
+    #     stream — mathematically the product is always bounded, but
+    #     evaluating exp(2*R*lam) as its own intermediate value overflows in
+    #     float32 for fast-decaying terms (confirmed for e.g. Kirkland
+    #     sulfur's b=167 Yukawa term, lam~81/A, 2*R*lam~101 -> exp(101)=inf)
+    #     even though the true combined value is finite and tiny. Fixed by
+    #     algebraically pre-combining exponents (verified equal to the
+    #     original via sympy) so every exponent actually evaluated is <=0
+    #     within that branch's clamped domain, regardless of lam.
+    p_far = p.clamp(min=R)
+    p_near = p.clamp(max=R)
+    far = (
+        3
+        * (
+            (R * lam - 1) * torch.exp(lam * (R - p_far))
+            + (R * lam + 1) * torch.exp(-lam * (R + p_far))
+        )
+        / (2 * R**3 * lam**3 * p_far)
+    )
+    near = (
+        3
+        * (
+            2 * lam * p_near
+            + (R * lam + 1) * torch.exp(-lam * (R + p_near))
+            - (R * lam + 1) * torch.exp(lam * (p_near - R))
+        )
+        / (2 * R**3 * lam**3 * p_near)
+    )
+    return torch.where(p > R, far, near)
+
+
+def plain_exp_shell_average(
+    p: torch.Tensor, R: torch.Tensor | float, lam: torch.Tensor
+) -> torch.Tensor:
+    """
+    Exact volume-average of a plain exponential term `exp(-lam*r)` (no
+    `1/r` factor, no singularity) over a sphere of radius `R` at distance
+    `p` from the sphere's reference point.
+
+    Companion to :func:`yukawa_shell_average` for Lobato's real-space term
+    `a/b^1.5 * (sqrt(b)/(pi*r) + 1) * exp(-2*pi*r/sqrt(b))`, which splits
+    exactly into `(a/(pi*b)) * yukawa_shell_average(...)` (the `1/r` part)
+    plus `(a/b**1.5) * plain_exp_shell_average(...)` (the `+1` part). This
+    term has no true singularity, but is still radially symmetric (not
+    separable into independent x/y/z integrals), so it uses the same
+    shell-averaging derivation. Derived and verified the same way (sympy:
+    finite at `p=0`, continuous at `p=R`, reduces to `exp(-lam*p)` as
+    `R->0`; Monte Carlo cube-integration: ~3% typical, ~10% worst-case at
+    the voxel edge — better-behaved than the singular term, as expected).
+
+    Parameters
+    ----------
+    p : torch.Tensor
+        Distance from the origin to the sphere's center, in Å.
+    R : torch.Tensor or float
+        Sphere radius, in Å.
+    lam : torch.Tensor
+        Decay rate of the term.
+
+    Returns
+    -------
+    torch.Tensor
+        Volume-averaged value, same shape as the broadcast of `p` and `lam`.
+    """
+    # The near-field branch is mathematically finite as p->0 (verified via
+    # sympy limit), but evaluating it at a *literal* tiny p in float32 hits
+    # catastrophic cancellation (numerator and 1/p both blow up and only
+    # cancel in exact arithmetic) — confirmed empirically: p=1e-8 gives a
+    # value ~3x too large in float32, while p=1e-3 matches the float64
+    # reference to <0.01%. 1e-3 Å is physically negligible (atoms essentially
+    # never sit closer than this to a voxel center) but numerically safe.
+    p = p.clamp(min=1e-3)
+    # Same two overflow risks as yukawa_shell_average (see its comments for
+    # the full explanation): (1) torch.where computing both branches
+    # everywhere, with near's exp(2*lam*p)/exp(lam*(R+p)) blowing up at
+    # window-edge p far outside its p<=R domain, and far's /p blowing up as
+    # p->0 outside its p>R domain — fixed by clamping each branch's own p
+    # input to its safe domain; (2) the textbook forms' bare exp(2*R*lam)
+    # factor overflows in float32 for fast-decaying terms even though it's
+    # always combined with a decaying exp(-lam*(...)) factor into a finite
+    # product — fixed by algebraically pre-combining exponents (verified
+    # equal to the original via sympy; the near branch's 4*lam*p*exp(lam*(R+p))
+    # term combines with the outer exp(-lam*(R+p)) to cancel exactly to
+    # 4*lam*p, no exponential at all) so every exponent evaluated is <=0.
+    p_far = p.clamp(min=R)
+    p_near = p.clamp(max=R)
+    far = (
+        3
+        * (
+            (R**2 * lam**2 + R * lam**2 * p_far + 3 * R * lam + lam * p_far + 3)
+            * torch.exp(-lam * (R + p_far))
+            + (-(R**2) * lam**2 + R * lam**2 * p_far + 3 * R * lam - lam * p_far - 3)
+            * torch.exp(lam * (R - p_far))
+        )
+        / (2 * R**3 * lam**4 * p_far)
+    )
+    near = (
+        3
+        * (
+            (-(R**2) * lam**2 + R * lam**2 * p_near - 3 * R * lam + lam * p_near - 3)
+            * torch.exp(lam * (p_near - R))
+            + (R**2 * lam**2 + R * lam**2 * p_near + 3 * R * lam + lam * p_near + 3)
+            * torch.exp(-lam * (R + p_near))
+            + 4 * lam * p_near
+        )
+        / (2 * R**3 * lam**4 * p_near)
+    )
+    return torch.where(p > R, far, near)

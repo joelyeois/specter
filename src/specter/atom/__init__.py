@@ -1,5 +1,6 @@
 from .atom import atom_mass, atom_number, atom_symbol
 from .atomic_potentials import (
+    MIN_GAUSSIAN_B,
     kirkland_atomic_potential_2d,
     kirkland_atomic_potential_3d,
     kirkland_atomic_potential_3d_fourier,
@@ -11,16 +12,19 @@ from .atomic_potentials import (
     lobato_atomic_potential_3d,
     lobato_atomic_potential_3d_fourier,
     peng_atomic_potential_3d,
+    plain_exp_shell_average,
     shtyrov_atomic_potential_3d,
     shtyrov_atomic_potential_3d_by_species,
     shtyrov_atomic_potential_3d_fourier,
     shtyrov_atomic_potential_3d_fourier_by_species,
+    yukawa_shell_average,
 )
 
 __all__ = [
     "atom_number",
     "atom_symbol",
     "atom_mass",
+    "MIN_GAUSSIAN_B",
     "kirkland_atomic_potential_2d",
     "kirkland_atomic_potential_3d",
     "kirkland_atomic_potential_3d_fourier",
@@ -32,8 +36,10 @@ __all__ = [
     "lobato_atomic_potential_3d",
     "lobato_atomic_potential_3d_fourier",
     "peng_atomic_potential_3d",
+    "plain_exp_shell_average",
     "shtyrov_atomic_potential_3d",
     "shtyrov_atomic_potential_3d_by_species",
     "shtyrov_atomic_potential_3d_fourier",
     "shtyrov_atomic_potential_3d_fourier_by_species",
+    "yukawa_shell_average",
 ]

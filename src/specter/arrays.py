@@ -367,45 +367,57 @@ def radial_grid_3d(
     return torch.sqrt(X**2 + Y**2 + Z**2)
 
 
-def real_to_kgrid_3d(R: torch.Tensor) -> torch.Tensor:
+def real_to_kgrid_3d(
+    n_xyz: int | Sequence[int],
+    d_xyz: float | Sequence[float],
+    device: str | torch.device = "cpu",
+) -> torch.Tensor:
     """
-    Convert real-space radial grid to frequency-space radial grid.
-
-    Given a 3D real-space meshgrid magnitude R, returns the corresponding
-    frequency-space radial grid KR for FFTs.
+    Construct the 3D frequency-space radial grid conjugate to a real-space grid.
 
     Parameters
     ----------
-    R : torch.Tensor
-        3D tensor of radial distances in real space, shape (nx, ny, nz).
+    n_xyz : int or Sequence of int
+        Number of pixels along x, y, z. If int, assumes nx=ny=nz=n_xyz.
+    d_xyz : float or Sequence of float
+        Real-space pixel spacing along x, y, z (Å). If float, assumes
+        dx=dy=dz=d_xyz.
+    device : str or torch.device, optional
+        Device for the tensor. Default is 'cpu'.
 
     Returns
     -------
     KR : torch.Tensor
-        3D tensor of radial distances in Fourier space, shape (nx, ny, nz).
+        3D tensor of radial spatial frequencies, shape (nz, ny, nx).
 
     Notes
     -----
-    Supports non-cubic grids with different spacings along each axis.
-    Assumes uniform spacing along each individual axis.
+    Takes the grid shape and real-space spacing directly, rather than
+    inferring spacing from a real-space radial-*distance* grid: for a
+    genuine 3D radial magnitude `R = sqrt(x²+y²+z²)`, `R[1,0,0] - R[0,0,0]`
+    does not equal the pixel spacing (adjacent radial magnitudes differ by
+    more than one axis's step unless the other two axes sit exactly at
+    zero, which `radial_grid_3d`'s conventions don't guarantee) — an
+    earlier version of this function tried that and silently produced the
+    wrong frequency grid for every caller.
     """
-    device = R.device
+    if isinstance(n_xyz, int):
+        nx = ny = nz = n_xyz
+    else:
+        nx, ny, nz = n_xyz
 
-    # number of points along each axis
-    nx, ny, nz = R.shape
-
-    # compute spacing along each axis (assumes uniform spacing)
-    dx = R[1, 0, 0] - R[0, 0, 0]
-    dy = R[0, 1, 0] - R[0, 0, 0]
-    dz = R[0, 0, 1] - R[0, 0, 0]
+    if isinstance(d_xyz, (int, float)):
+        dx = dy = dz = float(d_xyz)
+    else:
+        dx, dy, dz = d_xyz
 
     # frequency axes
     kx = torch.fft.fftfreq(nx, dx, device=device)
     ky = torch.fft.fftfreq(ny, dy, device=device)
     kz = torch.fft.fftfreq(nz, dz, device=device)
 
-    # 3D frequency grids
-    KX, KY, KZ = torch.meshgrid(kx, ky, kz, indexing="ij")
+    # 3D frequency grids (nz, ny, nx), matching radial_grid_3d's convention
+    KZ, KY, KX = torch.meshgrid(kz, ky, kx, indexing="ij")
     KR = torch.sqrt(KX**2 + KY**2 + KZ**2)
 
     return KR

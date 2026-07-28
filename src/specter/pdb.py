@@ -3,10 +3,13 @@ from __future__ import annotations
 import gzip
 import io
 import os
+import sys
 import warnings
+from collections import defaultdict
 from typing import TYPE_CHECKING
 
 import biotite.structure.io as strucio
+import gemmi
 import numpy as np
 import requests
 import torch
@@ -34,6 +37,7 @@ class PDB:
         savefolder: str = "../pdb-data/",
         origin: tuple[float, float, float] | None = None,
         verbose: bool = True,
+        compute_atom_species: bool = False,
     ) -> None:
         """
         Create a PDB object from either a PDB ID or a local file path.
@@ -57,6 +61,11 @@ class PDB:
             bar. Default True; set False to silence per-fetch chatter (e.g.
             when constructing many PDB objects in a loop with your own
             higher-level progress reporting).
+        compute_atom_species : bool, optional
+            Also compute `atom_species` (bonded-neighbor species descriptors,
+            e.g. for the Shtyrov potential parameterization). Requires an
+            mmCIF source and re-parses it via gemmi, so it is opt-in.
+            Default is False.
 
         Attributes
         ----------
@@ -68,6 +77,9 @@ class PDB:
             Atomic numbers of all atoms in the structure, shape (N,).
         coordinates : torch.Tensor
             Coordinates shifted by origin, shape (N, 3).
+        atom_species : list of str or None, optional
+            Bonded-neighbor species descriptor per atom (e.g. `"O(HH)"`,
+            `"C(HHHC)"`), only set when `compute_atom_species=True`.
         """
 
         # Determine whether pdb_source is a PDB ID or file path
@@ -98,6 +110,11 @@ class PDB:
         self.atomic_numbers, self.coordinates = PDB.get_atoms_and_coordinates(
             self.structure, verbose=verbose
         )
+
+        # bonded-neighbor species descriptors (e.g. for Shtyrov potentials)
+        self.atom_species: list[str | None] | None = None
+        if compute_atom_species:
+            self.atom_species = PDB.get_atom_species(self.filepath, verbose=verbose)
 
         # center coordinates
         if origin is None:
@@ -302,6 +319,169 @@ class PDB:
         elements = atom_number(element_symbols)
 
         return elements, coords
+
+    @staticmethod
+    def get_atom_species(
+        filepath: str,
+        monomer_library_path: str | None = None,
+        verbose: bool = True,
+    ) -> list[str | None]:
+        """
+        Determine each atom's bonded-neighbor species descriptor.
+
+        Mirrors the atom-typing approach used by `sffit
+        <https://github.com/as2875/sffit>`_ to fit bonded-species electron
+        scattering factors: builds a bond topology with
+        ``gemmi.prepare_topology`` and describes each atom as its element
+        plus the elements of its directly bonded neighbors, e.g. `"O(HH)"`
+        for a water oxygen or `"C(HHHC)"` for a methyl carbon, with the same
+        carboxyl/amide override sffit uses for Asp/Glu/Asn/Gln side-chain
+        oxygens.
+
+        Parameters
+        ----------
+        filepath : str
+            Path to an mmCIF file. Bond templates come from the file's own
+            embedded chemical-component definitions (`_chem_comp_bond`) plus
+            explicit links (`_struct_conn`, e.g. disulfides or metal
+            coordination) and standard polymer backbone connectivity, all
+            resolved by gemmi. The legacy PDB format carries none of this,
+            so this function requires mmCIF.
+        monomer_library_path : str, optional
+            Path to a CCP4 Monomer Library (as used by REFMAC/Coot/
+            Servalcat). If None, falls back to the `CLIBD_MON` environment
+            variable, and if that is unset too, to gemmi's built-in
+            defaults. Bond topology for standard residues is available
+            either way, but hydrogens can only be added with a real monomer
+            library — without one, H-containing species (e.g. `"O(HH)"`,
+            `"C(HHHC)"`) will not be resolved and those atoms fall back to
+            `None`.
+        verbose : bool, optional
+            Print how many atoms were successfully typed. Default True.
+
+        Returns
+        -------
+        species : list of str or None
+            One entry per atom, in the same file/chain/residue/atom order
+            as `get_atoms_and_coordinates`. `None` where no neighbors could
+            be determined (e.g. isolated ions, or unresolved components).
+        """
+        if not filepath.lower().endswith("cif"):
+            warnings.warn(
+                "get_atom_species requires an mmCIF source (bond templates "
+                "are not available in legacy PDB format); returning None "
+                "for all atoms.",
+                stacklevel=2,
+            )
+            structure = PDB.get_pdb_structure(filepath)
+            return [None for _ in structure.get_atoms()]
+
+        monlib_path = monomer_library_path or os.environ.get("CLIBD_MON")
+
+        st = gemmi.read_structure(filepath)
+        st.setup_entities()
+
+        if monlib_path:
+            try:
+                monlib = gemmi.read_monomer_lib(
+                    monlib_path, st[0].get_all_residue_names()
+                )
+            except RuntimeError as err:
+                warnings.warn(str(err), RuntimeWarning, stacklevel=2)
+                monlib = gemmi.MonLib()
+        else:
+            warnings.warn(
+                "CLIBD_MON is not set; falling back to gemmi's built-in "
+                "chemical-component definitions. Bond topology for standard "
+                "residues is still derived from the file itself, but "
+                "hydrogens cannot be added, so H-containing Shtyrov species "
+                "(e.g. 'O(HH)', 'C(HHHC)') will not be resolved.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+            monlib = gemmi.MonLib()
+
+        warnings_sink = sys.stderr if verbose else io.StringIO()
+
+        # First pass: complete the model (adds hydrogens as dummy,
+        # zero-occupancy atoms if the monomer library has geometry for
+        # them — a no-op without one), mirroring sffit's from_gemmi().
+        topo = gemmi.prepare_topology(
+            st, monlib, h_change=gemmi.HydrogenChange.ReAdd, warnings=warnings_sink
+        )
+        for m in topo.find_missing_atoms(including_hydrogen=True):
+            mon = monlib.monomers[m.res_id.name]
+            monat = mon.find_atom(m.atom_name)
+            atom = gemmi.Atom()
+            atom.occ = 0.0
+            atom.element = monat.el
+            atom.name = m.atom_name
+            st[0].find_cra(m).residue.add_atom(atom)
+
+        # Second pass: final bond graph, now including any added atoms.
+        topo = gemmi.prepare_topology(
+            st, monlib, h_change=gemmi.HydrogenChange.NoChange, warnings=warnings_sink
+        )
+
+        # Atom objects returned by gemmi are stable dict keys for the same
+        # underlying atom (mirrors sffit's `lookup` pattern in from_gemmi).
+        # Neighbors are tracked by atom identity, not element, so that e.g.
+        # a methyl carbon's three separate hydrogen neighbors are each
+        # counted (not collapsed into one "H").
+        identity = {
+            cra.atom: (cra.chain.name, cra.residue.seqid.num or 0, cra.atom.name)
+            for cra in st[0].all()
+        }
+        element_of = {key: atom.element.name for atom, key in identity.items()}
+        neighbor_keys: dict[tuple[str, int, str], set[tuple[str, int, str]]] = (
+            defaultdict(set)
+        )
+        for bond in topo.bonds:
+            a, b = bond.atoms
+            ka, kb = identity[a], identity[b]
+            neighbor_keys[ka].add(kb)
+            neighbor_keys[kb].add(ka)
+
+        species: list[str | None] = []
+        n_matched = 0
+        seen: set[tuple[str, int, str]] = set()
+        for cra in st[0].all():
+            if cra.atom.occ == 0.0:
+                # dummy atom added only to inform its neighbors' typing
+                continue
+            key = (cra.chain.name, cra.residue.seqid.num or 0, cra.atom.name)
+            if key in seen:
+                # alternate conformer of an atom already typed (gemmi's
+                # `all()` visits every altloc; Biopython/get_atoms_and_
+                # coordinates collapses them to one atom per position, so
+                # we keep only the first here to stay index-aligned with
+                # atomic_numbers/coordinates — bonding topology doesn't
+                # differ between altlocs of the same atom in practice).
+                continue
+            seen.add(key)
+            neighbors = neighbor_keys.get(key)
+            if not neighbors:
+                species.append(None)
+                continue
+
+            elem = cra.atom.element.name
+            neighbor_elems = [element_of[nk] for nk in neighbors]
+            neighbor_str = "".join(
+                sorted(neighbor_elems, key=lambda e: gemmi.Element(e).atomic_number)
+            )
+            descriptor = f"{elem}({neighbor_str})"
+            if cra.atom.name in ("OD1", "OD2", "OE1", "OE2"):
+                if cra.residue.name in ("ASP", "GLU"):
+                    descriptor = f"{elem}({neighbor_str}, carboxyl)"
+                elif cra.residue.name in ("ASN", "GLN"):
+                    descriptor = f"{elem}({neighbor_str}, amide)"
+            species.append(descriptor)
+            n_matched += 1
+
+        if verbose:
+            print(f"[get_atom_species] {n_matched}/{len(species)} atoms typed")
+
+        return species
 
     @staticmethod
     def center_of_particle(coords: torch.Tensor) -> torch.Tensor:

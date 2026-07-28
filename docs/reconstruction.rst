@@ -21,35 +21,54 @@ that argument is also the on/off switch: **leaving it unset means the
 quantity is held fixed**. This is the least obvious thing about the API
 and the most common source of confusion.
 
+.. caution::
+   **Only volume refinement (``lr``) is validated.** Pose (``lr_R``),
+   shift (``lr_T``) and defocus (``lr_D``) refinement are implemented and
+   wired into the optimiser — the code runs and the loss goes down — but
+   we have not yet verified that the recovered orientations, shifts or
+   defocus offset are *correct*, e.g. against known ground truth or
+   against an independent refinement (CryoSPARC, RELION). Treat them as
+   work in progress, not as a trustworthy alternative to upstream pose
+   refinement. Until this is verified, keep ``lr_R``, ``lr_T`` and
+   ``lr_D`` unset and supply poses, shifts and defocus you already trust
+   — the volume-only path below is the one that's actually been checked.
+
 .. list-table::
-   :widths: 15 25 20 40
+   :widths: 13 20 16 24 27
    :header-rows: 1
 
    * - Argument
      - Controls
      - If unset
      - If given a value
+     - Status
    * - ``lr``
      - The 3D volume
      - frozen
      - refined + scheduled
+     - Verified — the primary, tested path
    * - ``lr_R``
      - Per-particle orientation
      - poses held fixed
      - refined, constant rate
+     - **Unverified** — wired in, not yet checked for correctness
    * - ``lr_T``
      - Per-particle shift
      - shifts held fixed
      - refined, constant rate
+     - **Unverified** — wired in, not yet checked for correctness
    * - ``lr_D``
      - One global defocus offset
      - defocus held fixed
      - refined, constant rate
+     - **Unverified** — wired in, not yet checked for correctness
 
 .. note::
    **On lr_D.** The defocus offset is a single scalar shared by the
    entire stack, not a per-particle value. It corrects a systematic error
-   in the defocus estimate, not individual particle defoci.
+   in the defocus estimate, not individual particle defoci. Like
+   ``lr_R`` and ``lr_T`` above, this has not yet been verified to
+   converge to the correct offset.
 
 Running it
 -------------

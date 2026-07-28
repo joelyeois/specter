@@ -588,7 +588,7 @@ class IceBank(L.LightningModule):
         batchsize: int = 1,
         tile_extent: float | None = None,
         seam_margin: float = 6.0,
-        relax_steps: int = 200,
+        relax_steps: int = 0,
         relax_lr: float = 0.01,
         mlbop_target: float | None = -0.413,
         device: torch.device | str | None = None,
@@ -626,10 +626,12 @@ class IceBank(L.LightningModule):
             treated as a seam candidate for relaxation. Default 6.0 (matches
             the validated setting from this session's 256^3/128^3 tests).
         relax_steps : int, optional
-            Adam steps for the seam relaxation. Default 200 (the point at
-            which the validated 256^3 test had already plateaued). Set to
-            0 to skip relaxation entirely (naive tiling only -- not
-            recommended, see the validation notes on ``_relax_seams``).
+            Adam steps for the seam relaxation. Default 0 (skip relaxation
+            entirely -- naive tiling only, matching every higher-level
+            caller's own default). Set to e.g. 200 (the point at which the
+            validated 256^3 test had already plateaued) for production-
+            quality seams -- see the validation notes on ``_relax_seams``
+            for why unrelaxed seams carry measurably unfavorable energy.
         relax_lr : float, optional
             Adam learning rate for the relaxation. Default 0.01.
         mlbop_target : float or None, optional
@@ -725,7 +727,7 @@ class IceBank(L.LightningModule):
         batchsize: int = 1,
         tile_extent: float | None = None,
         seam_margin: float = 6.0,
-        relax_steps: int = 200,
+        relax_steps: int = 0,
         relax_lr: float = 0.01,
         mlbop_target: float | None = -0.413,
         device: torch.device | str | None = None,
@@ -1057,7 +1059,7 @@ def blend_ice_into_volume(
     icemaker: "IceBank | RandomIcemaker",
     pixel_size: float,
     threshold: float = 0.05,
-    relax_steps: int = 200,
+    relax_steps: int = 0,
 ) -> torch.Tensor:
     """
     Add ice into a scattering-potential volume, masked to voxels with little
@@ -1083,7 +1085,9 @@ def blend_ice_into_volume(
         Default 0.05.
     relax_steps : int, optional
         Forwarded to :meth:`IceBank.generate_big_ice` (ignored for
-        ``RandomIcemaker``, which has no tile seams to relax). Default 200.
+        ``RandomIcemaker``, which has no tile seams to relax). Default 0,
+        matching every higher-level caller (``ImageGenerator``,
+        ``MicrographGenerator``, ``TiltSeriesGenerator``, ...).
 
     Returns
     -------

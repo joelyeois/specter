@@ -10,6 +10,30 @@ from . import _functions as fn
 from ..constants import energy_to_wavelength
 from ..fft import fft2, ifft2
 
+# Keys read out of the per-batch `ctf_params` dict passed to `forward()` --
+# see `Aberration.transfer_function`. Never constructor arguments -- `bfactor`
+# is the one exception, accepted as a constructor kwarg (see `__init__`) for
+# consistency with `ImageGenerator`/`BaseImager`/`Reconstructor`, which all
+# offer the same convenience with the same override-wins precedence.
+_CTF_PARAM_NAMES = frozenset(
+    {
+        "dfu",
+        "dfv",
+        "dfang",
+        "cs",
+        "phaseshift",
+        "tiltx",
+        "tilty",
+        "trefoil1",
+        "trefoil2",
+        "tetrafoil1",
+        "tetrafoil2",
+        "tetrafoil3",
+        "tetrafoil4",
+        "dose",
+    }
+)
+
 
 class Aberration(L.LightningModule):
     """
@@ -50,9 +74,26 @@ class Aberration(L.LightningModule):
         Whether to apply the Grant & Grigorieff (2015) cumulative-dose
         envelope, using the per-image ``dose`` key in ``ctf_params``.
         Default False.
+    bfactor: float or torch.Tensor, optional
+        Isotropic B-factor envelope in Å² applied in the microscope transfer
+        function, damping high-resolution signal. Scalar (applied to all
+        particles) or per-particle tensor. If given, overrides any
+        ``"bfactor"`` entry already present in the ``ctf_params`` passed to
+        :meth:`forward` -- the same convenience and precedence offered by
+        ``ImageGenerator``/``BaseImager``/``Reconstructor``. None or 0.0
+        means no envelope. Default None.
 
     Notes
     -----
+    Per-image CTF terms other than ``bfactor`` (``dfu``, ``dfv``, ``dfang``,
+    ``cs``, ``phaseshift``, ``tiltx``, ``tilty``, ``trefoil1/2``,
+    ``tetrafoil1-4``, ``dose``) are never constructor arguments -- they're
+    passed to :meth:`forward` via the ``ctf_params`` dict, since they
+    genuinely vary per particle. ``bfactor`` is the one exception: it's
+    usually a single calibration value applied uniformly across a batch, so
+    it gets the same constructor-level convenience as ``dose_per_angstrom``
+    one level up, rather than requiring a hand-built per-particle tensor.
+
     .. [1] E. J. Kirkland, Advanced Computing in Electron Microscopy (Springer
        US, Boston, MA, 2010).
     .. [2] P. A. Penczek, “Image Restoration in Cryo-Electron Microscopy” in
@@ -72,8 +113,22 @@ class Aberration(L.LightningModule):
         deltaV_V: float = 0.06e-6,
         deltaI_I: float = 0.01e-6,
         dose_envelope: bool = False,
+        bfactor: float | torch.Tensor | None = None,
         progressbars: bool = True,
+        **kwargs: Any,
     ):
+        if kwargs:
+            bad = _CTF_PARAM_NAMES & kwargs.keys()
+            if bad:
+                raise TypeError(
+                    f"Aberration() does not accept {sorted(bad)} as constructor "
+                    "arguments -- these are per-image CTF parameters, passed to "
+                    "forward() via the `ctf_params` dict instead, e.g. "
+                    "Aberration(...)(exitwave, {'dfu': ...})."
+                )
+            raise TypeError(
+                f"Aberration() got unexpected keyword arguments: {sorted(kwargs)}"
+            )
         super().__init__()
         self.n_pixels = n_pixels
         self.pixel_size = pixel_size
@@ -103,6 +158,13 @@ class Aberration(L.LightningModule):
         self.deltaV_V = deltaV_V
         self.deltaI_I = deltaI_I
         self.dose_envelope = dose_envelope
+
+        if bfactor is None:
+            self.bfactor: torch.Tensor | None = None
+        else:
+            self.register_buffer(
+                "bfactor", torch.as_tensor(bfactor, dtype=torch.float32).flatten()
+            )
 
         if aberration_model == "ctf":
             if alpha is None:
@@ -255,6 +317,8 @@ class Aberration(L.LightningModule):
         Applies transfer function in Fourier space:
         ψ_aberrated = FFT⁻¹[FFT[ψ] * T(CTF)]
         """
+        if self.bfactor is not None:
+            ctf_params = {**ctf_params, "bfactor": self.bfactor}
         self.tf = self.transfer_function(ctf_params)
         aberrated_exitwaves = ifft2(fft2(exitwave) * self.tf)
         if self.aberration_model == "ctf":

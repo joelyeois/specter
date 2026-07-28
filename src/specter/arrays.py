@@ -1363,6 +1363,83 @@ def pad_to_common_shape(
     return centered_pad(A, target), centered_pad(B, target)
 
 
+def compute_nz(base_nz: int, ice_thickness: float | None, pixel_size: float) -> int:
+    """
+    Number of Z slices given an optional ice thickness.
+
+    Returns ``base_nz`` unchanged if ice thickness is None or smaller than the
+    base volume depth; otherwise uses ice thickness to determine the depth.
+
+    Parameters
+    ----------
+    base_nz : int
+        Depth of the particle volume in slices.
+    ice_thickness : float or None
+        Total ice thickness in Å. None means no ice padding.
+    pixel_size : float
+        Voxel size in Å.
+
+    Returns
+    -------
+    nz : int
+        Number of Z slices to use.
+    """
+    if ice_thickness is None or ice_thickness < base_nz * pixel_size:
+        return base_nz
+    return int(ice_thickness // pixel_size)
+
+
+def pad_volume(
+    V: torch.Tensor,
+    nxy: int,
+    nz: int,
+    ice_thickness: float | None,
+    pad_fft: bool,
+    xy_pad_mode: str = "constant",
+) -> torch.Tensor:
+    """
+    Pad a potential volume in Z and/or XY.
+
+    Z-padding extends the volume to ``nz`` slices (zeros added symmetrically)
+    when ice thickness is set.  XY-padding adds ``nxy // 2`` pixels on each
+    side for FFT antialiasing.
+
+    Parameters
+    ----------
+    V : torch.Tensor
+        Volume of shape (B, Z, Y, X).
+    nxy : int
+        Unpadded image size in pixels.
+    nz : int
+        Target Z depth after padding.
+    ice_thickness : float or None
+        If not None, Z-padding is applied.
+    pad_fft : bool
+        If True, XY-padding is applied.
+    xy_pad_mode : str, optional
+        Padding mode for XY axes. Default 'constant'.
+
+    Returns
+    -------
+    V : torch.Tensor
+        Padded volume.
+    """
+    if ice_thickness is not None:
+        zpad_px = nz - nxy
+        V = F.pad(
+            V,
+            (0, 0, 0, 0, zpad_px // 2, nz - zpad_px // 2 - V.shape[1]),
+            mode="constant",
+        )
+    if pad_fft:
+        V = F.pad(
+            V,
+            (nxy // 2, nxy // 2, nxy // 2, nxy // 2, 0, 0),
+            mode=xy_pad_mode,
+        )
+    return V
+
+
 def radial_symmetrize(
     data: torch.Tensor,
     center: float | None = None,

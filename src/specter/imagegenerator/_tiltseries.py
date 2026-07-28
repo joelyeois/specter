@@ -72,12 +72,12 @@ class TiltSeriesGenerator(MicrographGenerator):
     ice_relax_steps : int, optional
         Forwarded to :meth:`~specter.ice.IceBank.generate_big_ice` when
         ``ice_model='gd'`` (or an ``IceBank`` ``icemaker``): number of local
-        MLBOP relaxation steps used to heal tile seams. Default 0 here
-        (unlike ``IceBank.generate_big_ice``'s own default of 200) --
+        MLBOP relaxation steps used to heal tile seams. Default 0 (no
+        relaxation, matching ``IceBank.generate_big_ice``'s own default) --
         tilt series volumes are typically large/tiled often enough that
         seam relaxation cost adds up, and the un-relaxed seams have not been
-        a problem in practice for this class's usage. Ignored for
-        ``RandomIcemaker``.
+        a problem in practice for this class's usage. Set higher for
+        production-quality seams. Ignored for ``RandomIcemaker``.
     scattering_model : str, optional
         Scattering model passed to ``IterativeScattering``. Default 'multislice'.
     aberration_model : str, optional

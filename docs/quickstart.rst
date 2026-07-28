@@ -56,4 +56,7 @@ with the package) — see :doc:`jobs`:
 
 See ``demo-notebooks/`` for interactive worked examples, including
 micrograph and tilt-series generation (``create_micrograph/``,
-``tilt-series-generator.ipynb``).
+``tilt-series-generator.ipynb``). For an example of composing the forward
+model's individual modules by hand (e.g. to swap in a custom aberration
+model) instead of going through ``ImageGenerator``, see
+``modular_pipeline/``.

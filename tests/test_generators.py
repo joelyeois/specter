@@ -321,6 +321,44 @@ def test_bfactor_damps_transfer_function():
     )
 
 
+def test_aberration_bfactor_kwarg_matches_ctf_params_bfactor():
+    """Aberration's constructor bfactor kwarg matches an equal ctf_params['bfactor']."""
+    exitwave = torch.ones(1, 16, 16, dtype=torch.complex64)
+    ctf_params = {"dfu": torch.tensor([5000.0]), "cs": torch.tensor([2.7])}
+
+    img_via_ctf_params = Aberration(16, 2.0, 300.0)(
+        exitwave, {**ctf_params, "bfactor": torch.tensor([80.0])}
+    )
+    img_via_kwarg = Aberration(16, 2.0, 300.0, bfactor=80.0)(exitwave, ctf_params)
+
+    assert torch.allclose(img_via_kwarg, img_via_ctf_params)
+
+
+def test_aberration_bfactor_kwarg_overrides_ctf_params_bfactor():
+    """An explicit bfactor kwarg replaces (not adds to) ctf_params['bfactor']."""
+    exitwave = torch.ones(1, 16, 16, dtype=torch.complex64)
+    ctf_params = {
+        "dfu": torch.tensor([5000.0]),
+        "cs": torch.tensor([2.7]),
+        "bfactor": torch.tensor([200.0]),
+    }
+
+    img_overridden_to_zero = Aberration(16, 2.0, 300.0, bfactor=0.0)(
+        exitwave, ctf_params
+    )
+    img_no_bfactor = Aberration(16, 2.0, 300.0)(
+        exitwave, {k: v for k, v in ctf_params.items() if k != "bfactor"}
+    )
+
+    assert torch.allclose(img_overridden_to_zero, img_no_bfactor)
+
+
+def test_aberration_rejects_per_image_ctf_params_as_constructor_kwargs():
+    """dfu/cs/etc. genuinely vary per particle -- still not constructor args."""
+    with pytest.raises(TypeError, match="dfu"):
+        Aberration(16, 2.0, 300.0, dfu=5000.0)
+
+
 def test_transfer_function_supports_batched_ctf_params():
     """Batched CTF parameters should broadcast over the Fourier grid."""
     aberration = Aberration(

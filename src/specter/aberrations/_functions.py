@@ -200,3 +200,31 @@ def phaseshift(
         # phaseshift must be zero at DC for Fourier optics
         phaseshift[:, 0, 0] = 0
     return -phaseshift
+
+
+def defocus_midplane_shift(nz: int, pixel_size: float) -> float:
+    """
+    Å shift between a volume's entry face and its midplane.
+
+    Multislice evaluates the exit wave's phase at the centre of the
+    volume's Z extent, but defocus values follow the CryoSPARC/RELION
+    convention of being measured from the specimen's entry face. Subtract
+    this shift from ``dfu``/``dfv`` before building a transfer function for
+    a multislice-propagated exit wave; add it back to recover the original
+    entry-face convention (e.g. before exporting to a STAR/`.cs` file).
+    Not needed for the ``'projection'``/``'ctf'`` scattering models, which
+    have no Z extent to offset from.
+
+    Parameters
+    ----------
+    nz : int
+        Number of Z slices in the (possibly padded) simulation volume.
+    pixel_size : float
+        Voxel size in Å.
+
+    Returns
+    -------
+    float
+        Shift in Å.
+    """
+    return (nz * pixel_size) / 2

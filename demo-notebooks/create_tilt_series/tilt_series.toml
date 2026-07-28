@@ -55,8 +55,8 @@ alpha = 0.1
 defocus = 22000.0
 
 [tilt_geometry]
-min_tilt_angle = -30.0
-max_tilt_angle = 30.0
+min_tilt_angle = -45.0
+max_tilt_angle = 45.0
 n_tilts = 5              # quick smoke test; use ~41-61 for a real tilt scheme
 tilt_axis = "y"
 
@@ -67,9 +67,8 @@ noise_model = "poisson"
 ice_model = "gd"          # bundled IceBank cache; try "random" for a faster/cheaper placeholder
 ice_relax_steps = 0
 detector_model = "none"
-
-[postprocessing]
-save_exitwaves = false
+coincidence_radius = 0
+pad_fft = true  # fixes multislice edge-wraparound artifacts at this wider tilt range
 
 [compute]
 device = "cuda:0"  # adjust to an available device on your machine, e.g. "cuda:0" or "cpu"

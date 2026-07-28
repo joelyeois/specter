@@ -11,6 +11,7 @@ convention.
 from __future__ import annotations
 
 import os
+from importlib import resources
 
 import torch
 from torchinterp1d import interp1d
@@ -19,10 +20,14 @@ from .. import potential
 from ..arrays import (
     radial_grid_3d,
     radial_profile_3d,
-    real_to_kgrid_3d,
     soft_voxelize_coordinates,
 )
-from ..atom import kirkland_atomic_potential_3d, lobato_atomic_potential_3d
+from ..atom import (
+    kirkland_atomic_potential_3d,
+    load_shtyrov_species_parameters,
+    lobato_atomic_potential_3d,
+    shtyrov_atomic_potential_3d_by_species,
+)
 from ..fft import fft3
 
 # Grid the bundled (and any custom) mdsim radial-average target files are
@@ -305,29 +310,11 @@ def build_atomic_potential_kernel(
     elif parameterization == "lobato":
         pot = lobato_atomic_potential_3d(8, sR)
     elif parameterization == "shtyrov":
-        # from params_cat.json, 'O(HH)'
-        params = torch.tensor(
-            [
-                [0.3131, 0.8722],
-                [0.8102, 4.9669],
-                [0.9812, 14.1666],
-                [-0.5997, 64.1638],
-                [-0.1519, 121.3711],
-            ]
-        )
-        # Separate columns: a_i, b_i
-        a = params[:, 0].unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)  # shape (3,1,1,1)
-        b = params[:, 1].unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
-
-        k_xyz = real_to_kgrid_3d(sR)
-        k2 = k_xyz**2
-        k2 = k2.unsqueeze(0)  # shape (1, Nx, Ny, Nz)
-
-        s1_f = torch.sum(a * torch.exp(-b * k2 / 4), 0)
-        dkx = k_xyz[1, 0, 0] - k_xyz[0, 0, 0]
-        dky = k_xyz[0, 1, 0] - k_xyz[0, 0, 0]
-        dkz = k_xyz[0, 0, 1] - k_xyz[0, 0, 0]
-        pot = -torch.abs(fft3(s1_f, shift=True)) * dkx * dky * dkz  # need to negate
+        # Water oxygen is always the 'O(HH)' bonded species.
+        species_path = resources.files("specter.atom_data").joinpath("params_cat.json")
+        with resources.as_file(species_path) as fpath:
+            species_params = load_shtyrov_species_parameters(str(fpath))
+        pot = shtyrov_atomic_potential_3d_by_species("O(HH)", sR, species_params)
     else:
         raise ValueError(
             f"Unknown parameterization '{parameterization}'. "

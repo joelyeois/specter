@@ -6,11 +6,15 @@ from .atomic_potentials import (
     load_kirkland_parameters,
     load_lobato_parameters,
     load_shtyrov_parameters,
+    load_shtyrov_species_parameters,
     lobato_atomic_potential_2d,
     lobato_atomic_potential_3d,
     lobato_atomic_potential_3d_fourier,
+    peng_atomic_potential_3d,
     shtyrov_atomic_potential_3d,
+    shtyrov_atomic_potential_3d_by_species,
     shtyrov_atomic_potential_3d_fourier,
+    shtyrov_atomic_potential_3d_fourier_by_species,
 )
 
 __all__ = [
@@ -23,9 +27,13 @@ __all__ = [
     "load_kirkland_parameters",
     "load_lobato_parameters",
     "load_shtyrov_parameters",
+    "load_shtyrov_species_parameters",
     "lobato_atomic_potential_2d",
     "lobato_atomic_potential_3d",
     "lobato_atomic_potential_3d_fourier",
+    "peng_atomic_potential_3d",
     "shtyrov_atomic_potential_3d",
+    "shtyrov_atomic_potential_3d_by_species",
     "shtyrov_atomic_potential_3d_fourier",
+    "shtyrov_atomic_potential_3d_fourier_by_species",
 ]

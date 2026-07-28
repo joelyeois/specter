@@ -1,14 +1,13 @@
 from __future__ import annotations
 
+import json
 from functools import lru_cache
 from importlib import resources
 
+import gemmi
 import torch
 from Bio.PDB.MMCIF2Dict import MMCIF2Dict
 from torch.special import modified_bessel_k0, modified_bessel_k1
-
-from ..arrays import real_to_kgrid_3d
-from ..fft import fftn
 
 
 @lru_cache(maxsize=1)
@@ -541,7 +540,10 @@ def shtyrov_atomic_potential_3d_fourier(
 
 
 def shtyrov_atomic_potential_3d(
-    atomic_number: int, r_xyz: torch.Tensor, filepath: str, energy: float = 300
+    atomic_number: int,
+    r_xyz: torch.Tensor,
+    filepath: str,
+    energy: float = 300,
 ) -> torch.Tensor:
     """
     Compute the 3D atomic potential for a specific element using Shtyrov parameterization.
@@ -567,35 +569,185 @@ def shtyrov_atomic_potential_3d(
     potential : torch.Tensor
         Atomic potential in units of V·Å, same shape as r_xyz.
     """
-    # device = r_xyz.device
-    # r2 = r_xyz**2
-    # r2 = r2.unsqueeze(0)  # shape (1, Nx, Ny, Nz)
-    k_xyz = real_to_kgrid_3d(r_xyz)
-    dkx = k_xyz[1, 0, 0] - k_xyz[0, 0, 0]
-    dky = k_xyz[0, 1, 0] - k_xyz[0, 0, 0]
-    dkz = k_xyz[0, 0, 1] - k_xyz[0, 0, 0]
-
     a0 = 0.529  # Bohr radius, [Å]
     e = 14.4  # electron charge, [V·Å]
     c1 = 2 * torch.pi * e * a0
 
-    # get scattering factors
-    # shtyrov_params = load_shtyrov_parameters(filepath)  # shape (N, 5, 2)
-    # P = shtyrov_params[atomic_number]  # shape (5, 2)
-    # P = P.to(device)
+    shtyrov_params = load_shtyrov_parameters(filepath)  # shape (N, 5, 2)
+    P = shtyrov_params[atomic_number].to(r_xyz.device)  # shape (5, 2)
+    a = P[:, 0].unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)  # shape (5,1,1,1)
+    b = P[:, 1].unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
 
-    # Separate columns: a_i, b_i
-    # a = P[:, 0].unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)  # shape (3,1,1,1)
-    # b = P[:, 1].unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
+    r2 = (r_xyz**2).unsqueeze(0)  # shape (1, Nx, Ny, Nz)
 
-    # use analytical fourier transform (if b_i=0 will cause nans)
-    # s1 = c1 * torch.sum(a * (torch.pi * 4 / b)**1.5 * torch.exp(-torch.pi**2 * r2 / b * 4), 0)
-
-    # get scattering factors
-    shtyrov_f = shtyrov_atomic_potential_3d_fourier(atomic_number, k_xyz, filepath)
-
-    # fourier transform
-    s1 = (
-        -c1 * torch.abs(fftn(shtyrov_f, shift=True)) * dkx * dky * dkz
-    )  # need to negate
+    # Closed-form 3D inverse Fourier transform of a sum of a_i*exp(-b_i*k^2/4)
+    # Gaussians — same functional form Kirkland/Lobato use for their Gaussian
+    # terms, evaluated directly with no FFT/grid dependence (unlike an FFT
+    # route, this needs no periodic box large enough to resolve the
+    # slowest-decaying terms without aliasing).
+    s1 = c1 * torch.sum(
+        a * (4 * torch.pi / b) ** 1.5 * torch.exp(-(torch.pi**2) * r2 / b * 4), 0
+    )
     return s1
+
+
+@lru_cache(maxsize=4)
+def load_shtyrov_species_parameters(json_filepath: str) -> dict[str, torch.Tensor]:
+    """
+    Load Shtyrov bonded-species electron scattering parameters from a JSON file.
+
+    Parameters
+    ----------
+    json_filepath : str
+        Path to an sffit-format JSON parameter file (e.g. the bundled
+        ``specter.atom_data/params_cat.json`` or ``params_emdb.json``).
+
+    Returns
+    -------
+    params : dict of str to torch.Tensor
+        Maps each bonded-species descriptor (e.g. `"O(HH)"`, `"C(HHHC)"`,
+        as produced by :meth:`specter.pdb.PDB.get_atom_species`) to a
+        tensor of shape (5, 2) of `(a_i, b_i)` coefficients.
+
+    Notes
+    -----
+    Unlike :func:`load_shtyrov_parameters`, which reads a numeric-`scat_id`
+    mmCIF table, this reads sffit's native JSON output keyed directly by
+    the human-readable bonded-species string, matching what
+    :meth:`specter.pdb.PDB.get_atom_species` produces.
+
+    References
+    ----------
+    sffit: https://github.com/as2875/sffit
+    """
+    with open(json_filepath, "r", encoding="utf-8") as f:
+        raw = json.load(f)
+
+    params = {}
+    for species, entry in raw.items():
+        coeffs = entry["coefficients"]
+        params[species] = torch.tensor(
+            [[c["a"], c["b"]] for c in coeffs], dtype=torch.float32
+        )
+    return params
+
+
+def shtyrov_atomic_potential_3d_fourier_by_species(
+    species: str, k_xyz: torch.Tensor, params: dict[str, torch.Tensor]
+) -> torch.Tensor:
+    """
+    Compute the 3D Fourier-space atomic potential for a bonded species.
+
+    Based on Shtyrov 2025 Eq.18. Same functional form as
+    :func:`shtyrov_atomic_potential_3d_fourier`, but keyed by bonded-species
+    descriptor (e.g. `"O(HH)"`) instead of atomic number.
+
+    Parameters
+    ----------
+    species : str
+        Bonded-species descriptor, as produced by
+        :meth:`specter.pdb.PDB.get_atom_species` (e.g. `"O(HH)"`).
+    k_xyz : torch.Tensor
+        Distances from the atomic core in units of 1/Å. k^2 = kx^2 + ky^2 + kz^2.
+    params : dict of str to torch.Tensor
+        Species parameter table, as returned by
+        :func:`load_shtyrov_species_parameters`.
+
+    Returns
+    -------
+    potential : torch.Tensor
+        Atomic potential in Fourier space, same shape as `k_xyz`.
+    """
+    device = k_xyz.device
+    P = params[species].to(device)  # shape (5, 2)
+
+    a = P[:, 0].unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
+    b = P[:, 1].unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
+
+    k2 = k_xyz**2
+    k2 = k2.unsqueeze(0)
+
+    return torch.sum(a * torch.exp(-b * k2 / 4), 0)
+
+
+def shtyrov_atomic_potential_3d_by_species(
+    species: str,
+    r_xyz: torch.Tensor,
+    params: dict[str, torch.Tensor],
+) -> torch.Tensor:
+    """
+    Compute the 3D real-space atomic potential for a bonded species.
+
+    Based on Shtyrov 2025 Eq.18. Same closed-form Gaussian-sum approach as
+    :func:`shtyrov_atomic_potential_3d`, but keyed by bonded-species
+    descriptor (e.g. `"O(HH)"`) instead of atomic number.
+
+    Parameters
+    ----------
+    species : str
+        Bonded-species descriptor, as produced by
+        :meth:`specter.pdb.PDB.get_atom_species` (e.g. `"O(HH)"`).
+    r_xyz : torch.Tensor
+        3D grid of radial distances, in Å.
+    params : dict of str to torch.Tensor
+        Species parameter table, as returned by
+        :func:`load_shtyrov_species_parameters`.
+
+    Returns
+    -------
+    potential : torch.Tensor
+        Atomic potential in units of V·Å, same shape as `r_xyz`.
+    """
+    a0 = 0.529  # Bohr radius, [Å]
+    e = 14.4  # electron charge, [V·Å]
+    c1 = 2 * torch.pi * e * a0
+
+    P = params[species].to(r_xyz.device)  # shape (5, 2)
+    a = P[:, 0].unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
+    b = P[:, 1].unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
+
+    r2 = (r_xyz**2).unsqueeze(0)
+
+    return c1 * torch.sum(
+        a * (4 * torch.pi / b) ** 1.5 * torch.exp(-(torch.pi**2) * r2 / b * 4), 0
+    )
+
+
+def peng_atomic_potential_3d(atomic_number: int, r_xyz: torch.Tensor) -> torch.Tensor:
+    """
+    Compute the 3D real-space atomic potential using gemmi's built-in
+    standalone-atom electron scattering factors (Peng et al. 1996, `c4322`).
+
+    This is the same fallback sffit itself uses (`sffit fit.py::do_mmcif`)
+    for any bonded species not covered by a fitted Shtyrov parameter table:
+    a per-element, unbonded (independent-atom-model) scattering factor,
+    evaluated with the same closed-form Gaussian-sum approach as
+    :func:`shtyrov_atomic_potential_3d_by_species`, so it combines
+    coherently (same units, same sign convention) with matched-species
+    Shtyrov kernels in the same potential volume.
+
+    Parameters
+    ----------
+    atomic_number : int
+        Atomic number, Hydrogen has number 1.
+    r_xyz : torch.Tensor
+        3D grid of radial distances, in Å.
+
+    Returns
+    -------
+    potential : torch.Tensor
+        Atomic potential in units of V·Å, same shape as `r_xyz`.
+    """
+    a0 = 0.529  # Bohr radius, [Å]
+    e = 14.4  # electron charge, [V·Å]
+    c1 = 2 * torch.pi * e * a0
+
+    coef = gemmi.Element(atomic_number).c4322
+    a = torch.tensor(coef.a, dtype=torch.float32, device=r_xyz.device).view(5, 1, 1, 1)
+    b = torch.tensor(coef.b, dtype=torch.float32, device=r_xyz.device).view(5, 1, 1, 1)
+
+    r2 = (r_xyz**2).unsqueeze(0)
+
+    return c1 * torch.sum(
+        a * (4 * torch.pi / b) ** 1.5 * torch.exp(-(torch.pi**2) * r2 / b * 4), 0
+    )

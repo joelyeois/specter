@@ -414,7 +414,8 @@ class IceBank(L.LightningModule):
         generator: torch.Generator | None = None,
         splat_volume: torch.Tensor | None = None,
         splat_voxel_size: float | None = None,
-    ) -> tuple[torch.Tensor, torch.Tensor, tuple[float, float, float]]:
+        halo_margin: float = 0.0,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, tuple[float, float, float]]:
         """
         Draw one independently rotated/translated crop of size
         ``tile_extent`` per grid cell and place them side by side.
@@ -437,6 +438,12 @@ class IceBank(L.LightningModule):
         splat_voxel_size : float, optional
             Voxel size (Å) for ``splat_volume``. Required if
             ``splat_volume`` is given.
+        halo_margin : float, optional
+            Extra distance (Å) beyond ``seam_margin``, used to additionally
+            flag frozen atoms close enough to a face that a mobile atom
+            (from this tile or a neighbor sharing that face) could still be
+            within interaction range of them -- see ``halo_mask`` below.
+            Default 0.0 (``halo_mask`` then equals ``mobile_mask``).
 
         Returns
         -------
@@ -445,6 +452,17 @@ class IceBank(L.LightningModule):
         mobile_mask : torch.Tensor
             Bool mask, True for atoms within ``seam_margin`` of their own
             tile's own face (candidates for seam relaxation).
+        halo_mask : torch.Tensor
+            Bool mask, True for atoms within ``seam_margin + halo_margin``
+            of their own tile's own face -- a superset of ``mobile_mask``
+            wide enough to cover every frozen atom that could still
+            interact with some mobile atom, given the energy model's finite
+            interaction range. Two tiles placed side by side share the same
+            physical face location, so this per-tile, own-face-only test
+            already covers atoms relevant to a neighboring tile's mobile
+            atoms too, without needing an explicit cross-tile neighbor
+            search. Used by ``_relax_seams`` to avoid feeding the entire
+            assembled volume into the energy model on every step.
         assembled_box : tuple of float
             The full tiled box size, ``(nx*tile_extent, ny*tile_extent,
             nz*tile_extent)`` -- generally larger than the final requested
@@ -454,6 +472,7 @@ class IceBank(L.LightningModule):
         half = tile_extent / 2
         all_parts: list[torch.Tensor] = []
         mobile_parts: list[torch.Tensor] = []
+        halo_parts: list[torch.Tensor] = []
         tile_indices = [
             (ix, iy, iz)
             for ix in range(nx)
@@ -476,7 +495,11 @@ class IceBank(L.LightningModule):
             crop = self._extract_crop(
                 (tile_extent, tile_extent, tile_extent), generator=generator
             )
-            mobile_parts.append((crop.abs() > (half - seam_margin)).any(dim=1))
+            dist_to_face = crop.abs()
+            mobile_parts.append((dist_to_face > (half - seam_margin)).any(dim=1))
+            halo_parts.append(
+                (dist_to_face > (half - seam_margin - halo_margin)).any(dim=1)
+            )
             crop_global = crop + offset
             all_parts.append(crop_global)
             if splat_volume is not None:
@@ -486,13 +509,15 @@ class IceBank(L.LightningModule):
                 )
         positions = torch.cat(all_parts, dim=0)
         mobile_mask = torch.cat(mobile_parts, dim=0)
+        halo_mask = torch.cat(halo_parts, dim=0)
         assembled_box = (nx * tile_extent, ny * tile_extent, nz_tiles * tile_extent)
-        return positions, mobile_mask, assembled_box
+        return positions, mobile_mask, halo_mask, assembled_box
 
     def _relax_seams(
         self,
         positions: torch.Tensor,
         mobile_mask: torch.Tensor,
+        halo_mask: torch.Tensor,
         box: tuple[float, float, float],
         n_steps: int,
         lr: float,
@@ -506,6 +531,18 @@ class IceBank(L.LightningModule):
         flipped from favorable to unfavorable at the seams, and this
         recovers most of it within a few seconds.
 
+        Only ``halo_mask`` atoms (mobile atoms plus the surrounding frozen
+        band from ``_place_tiles``) are ever fed into the energy model.
+        ML-BOP's own cutoff is ~3.55 A (``MLBOP.r_cut``), and the three-body
+        term reaches one further hop, so anything outside that band cannot
+        influence a mobile atom's energy or gradient -- including it would
+        only add cost (this model's per-step cost scales with however many
+        atoms are passed in, not just how many need a gradient), not
+        accuracy. For a many-tile assembly the excluded bulk can be the
+        overwhelming majority of atoms, so this matters a lot in practice.
+        The untouched bulk (``~halo_mask``) is reattached unchanged at the
+        end without ever being moved to ``device``.
+
         Explicitly wrapped in ``torch.enable_grad()`` since this is called
         from ``generate_big_ice``/``generate_big_ice_deltas``, which callers
         commonly wrap in ``torch.no_grad()`` (matching how downstream
@@ -516,9 +553,11 @@ class IceBank(L.LightningModule):
         """
         if not mobile_mask.any():
             return positions
+        far_mask = ~halo_mask
+        local_frozen_mask = halo_mask & ~mobile_mask
         with torch.enable_grad():
             model = MLBOP(device=device)
-            frozen = positions[~mobile_mask].to(device)
+            frozen = positions[local_frozen_mask].to(device)
             mobile = positions[mobile_mask].to(device).clone().requires_grad_(True)
             opt = torch.optim.Adam([mobile], lr=lr)
             for _ in track(
@@ -537,7 +576,9 @@ class IceBank(L.LightningModule):
                 )
                 loss.backward()
                 opt.step()
-        return torch.cat([frozen, mobile.detach()], dim=0).cpu()
+        return torch.cat(
+            [positions[far_mask], frozen.cpu(), mobile.detach().cpu()], dim=0
+        )
 
     def generate_big_ice_deltas(
         self,
@@ -635,18 +676,24 @@ class IceBank(L.LightningModule):
                 if relax_steps == 0
                 else None
             )
-            positions, mobile_mask, assembled_box = self._place_tiles(
+            # Only widen mobile_mask into a halo when relaxation will actually
+            # run -- otherwise halo_mask is dead weight (relax_steps == 0
+            # never looks at it).
+            halo_margin = 2.0 * MLBOP().r_cut if relax_steps > 0 else 0.0
+            positions, mobile_mask, halo_mask, assembled_box = self._place_tiles(
                 (nx_tiles, ny_tiles, nz_tiles),
                 tile_extent,
                 seam_margin,
                 generator=generator,
                 splat_volume=vox,
                 splat_voxel_size=self.dx if vox is not None else None,
+                halo_margin=halo_margin,
             )
             if relax_steps > 0 and mobile_mask.any():
                 positions = self._relax_seams(
                     positions,
                     mobile_mask,
+                    halo_mask,
                     assembled_box,
                     relax_steps,
                     relax_lr,

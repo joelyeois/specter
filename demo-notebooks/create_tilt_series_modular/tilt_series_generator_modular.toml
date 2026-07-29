@@ -42,7 +42,7 @@ MB_MAX_RAD = 450.0
 # (the extra filler species need their own PDB downloads + PotentialBuilder
 # calls). Uncomment to enable:
 # filler_occupancy = 0.1
-target_shape = [256, 512, 512]   # (Z, Y, X) voxels -- modest, finishes quickly
+target_shape = [256, 1024, 1024]   # (Z, Y, X) voxels -- modest, finishes quickly
 target_v_size = 2             # Å/voxel
 low_res_v_size = 10.0           # Å/voxel, polnet's placement-pass resolution
 seed = 11

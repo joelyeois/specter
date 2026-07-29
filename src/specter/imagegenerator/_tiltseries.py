@@ -634,9 +634,17 @@ class TiltSeriesGenerator(MicrographGenerator):
     # Forward methods                                                      #
     # ------------------------------------------------------------------ #
 
-    def get_nz_tilt(self, V: torch.Tensor, theta_matrix: torch.Tensor) -> int:
+    @staticmethod
+    def get_nz_tilt(V: torch.Tensor, theta_matrix: torch.Tensor) -> int:
         """
         Number of Z slices needed to fully cover the tilted volume.
+
+        A pure function of ``V``'s shape and the pose -- doesn't touch any
+        instance state, so (like ``_estimate_required_nxy``/
+        ``_pad_vol_xy_for_tilt`` above) it's reusable standalone, e.g. from
+        code that composes ``IterativeScattering``/``Aberration``/``Detector``
+        by hand instead of going through this class (see
+        ``demo-notebooks/create_tilt_series_modular/``).
 
         Parameters
         ----------

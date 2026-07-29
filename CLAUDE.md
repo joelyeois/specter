@@ -16,10 +16,10 @@ Generates training data that best matches experimental data. Accurate physics mo
 - Amorphous ice simulation
 - Detector effects (MTF, noise, coincidence loss)
 - GPU-accelerated volume rotation and potential calculation
-- CryoSPARC `.cs` file integration
+- CryoSPARC `.cs` and RELION `.star` file integration (`io/` package)
 
 ### 2. Ghostbuster — 3D reconstruction
-Reconstructs a 3D map from many 2D experimental images paired with their imaging parameters, using the forward models defined in the `imagegenerator` package. Additional features include parameter refinement (rotations, translations, defocus, and other imaging parameters). It is the inverse problem complement to the simulator.
+Reconstructs a 3D map from many 2D experimental images paired with their imaging parameters, using the forward models defined in the `imagegenerator` package. Additional features include parameter refinement (rotations, translations, defocus, and other imaging parameters). It is the inverse problem complement to the simulator. Covers both single-particle (`Ghostbuster`/`Reconstructor`) and cryo-ET tilt-series (`TomogramGhostbuster`/`TomogramReconstructor`) reconstruction — see `ghostbuster/` under Repository Structure.
 
 ## Environment & Package Management
 
@@ -129,7 +129,15 @@ TiltSeriesGenerator         – generates a tilt series
 
 ### Inverse problem — Reconstructor
 
-`Reconstructor(L.LightningModule)` in `ghostbuster.py` reconstructs a 3D volume from 2D images by minimising the discrepancy between simulated and observed images using the same forward model as `ImageGenerator`. Jointly refines volume, rotations, translations, and defocus via separate learning rates.
+`ghostbuster/` is a package, not a single file:
+
+- `_reconstructor.py` — `Reconstructor(L.LightningModule)` reconstructs a 3D volume from 2D single-particle images by minimising the discrepancy between simulated and observed images using the same forward model as `ImageGenerator`. Jointly refines volume, rotations, translations, and defocus via separate learning rates.
+- `_pipeline.py` — `Ghostbuster` + `compare_runs()`: end-to-end single-particle pipeline; loads CryoSPARC particle data, preprocesses images (sign flip, dose/scale normalisation), drives `Reconstructor` via a Lightning `Trainer`.
+- `_tomogram_reconstructor.py` — `TomogramReconstructor(L.LightningModule)`: reconstructs a volume from a cryo-ET tilt series using the same forward model as `TiltSeriesGenerator`. One tilt per training step keeps GPU memory bounded regardless of tomogram size. The forward model is noiseless; observed images are compared directly to `|CTF(exitwave)|²`.
+- `_tomogram_pipeline.py` — `TomogramGhostbuster`: end-to-end tomogram pipeline, mirrors `Ghostbuster`'s `run`/`test_run` API.
+- `_helpers.py` — shared helpers (LR scheduler construction, k-space masking, image preprocessing) used by both reconstructors.
+
+Pose/shift/defocus refinement is flagged **unverified** (wired in, not yet checked for correctness) in `docs/reconstruction.rst`.
 
 ## Repository Structure
 
@@ -151,7 +159,7 @@ src/specter/                  # Main source package
     _random.py                # RandomIcemaker
     _gradient.py              # GradientSKIcemaker
     _bank.py                  # IceBank (cache) + build_ice_cache()
-    _energy.py                # MLBOP coarse-grained water potential (structural diagnostic)
+    _energy.py                # MLBOP coarse-grained water potential (structural diagnostic; neighbor search via vesin-torch, not ASE)
     _kernels.py               # Shared physics-kernel construction (atomic potential, S(k) target)
     _mdsim.py                 # MDSimDump/ExtXYZDump (legacy MD trajectory ingestion)
     _helpers.py               # Helper functions (water molecules, FFT, etc.)
@@ -159,25 +167,34 @@ src/specter/                  # Main source package
     _job.py                   # Job class
     _database.py              # JobDatabase storage
     _cli.py                   # CLI interface
-  specimen.py                 # Volume assembly
+  specimen/                   # Volume assembly (package)
+    single_particle.py        # TomogramGenerator — populates a volume with template potentials + crowding + ice
+    cryoet.py                 # CryoETSpecimenGenerator — large high-res cryoET specimen: polnet placement (proteins+membranes) at low res, rendered at full res via PotentialBuilder
+    polnet_bridge.py          # polnet-facing half of the cryoET pipeline: placement/packing only, never renders density or invokes TEM/IMOD
+    cytosolic_filler.py       # PEI2016_CROWDING_TABLE + build_filler_protein_specs() — generic cytosolic background reference (Pei et al. 2016)
   potential.py                # Scattering potential builder
   scattering.py               # Wave propagation (multislice, rytov, firstborn, projection)
   microscope.py               # Aberration and detector models
   detectors.py                # Detector MTF and noise models
-  rotations/                  # Quaternion-based 3D rotations
-    _rotation.py               # Rotation class, translate_coordinates
-    _transforms.py             # Coordinate/quaternion utilities built on Rotation
+  aretomo3.py                 # AreTomo3 .aln tilt-geometry → quaternions, for TiltSeriesGenerator
+  constants.py                # Physical constants (rest_mass_energy, hc, energy_to_wavelength; CODATA via scipy.constants)
+  rotations/                  # Quaternion-based 3D rotations (built on the `roma` library)
+    _rotation.py               # roma-wrapped translate_coordinates, rotate_coordinates
+    _random.py                 # roma-wrapped random_quaternion/random_rotvec/random_rotation_matrix, rotations_angular_difference
     _volume.py                 # rotate_volume, rotate_volume_fourier, affine matrix helpers
     _volume_rotator.py         # VolumeRotator (LightningModule) for sampling rotated slices
   crowding.py                 # Molecular crowding simulation
-  ghostbuster.py              # 3D reconstruction (PyTorch Lightning)
+  ghostbuster/                # 3D reconstruction (PyTorch Lightning) — see "Inverse problem" above
   arrays.py                   # Array utilities (soft voxelization, tiling, crops, fourier_crop)
   coords.py                   # Coordinate utilities (RDF, etc.)
   fft.py                      # FFT wrappers
   filters.py                  # Frequency-domain filters
   image.py                    # Image-level utilities
   pdb.py                      # PDB/mmCIF parsing helpers
-  cryosparc.py                # CryoSPARC .cs file I/O
+  io/                          # Particle/micrograph metadata I/O (package)
+    _cryosparc.py               # extract_parameters_from_csfile() — reads CryoSPARC .cs files
+    _relion.py                   # RELION .star read/write: extract_parameters_from_starfile(), create_particle_starfile[_from_model](), create_micrograph_starfile()
+    _common.py                   # _select_particles() — shared per-particle mask/truncate helper for both backends
   cuda.py                     # CUDA/device utilities
   config.py                   # ParticleStackConfig dataclass + load_config()/apply_overrides() for TOML-driven runs
   plots.py                    # Plotting helpers
@@ -190,13 +207,18 @@ tests/                        # pytest test suite
   test_data/                  # Golden-output fixtures (.pt files) for regression tests
 demo-notebooks/               # User-facing, always kept working
   create_particle_stack/       # script+notebook config pattern: notebook + its curated TOML
+  create_particle_stack_modular/  # same pattern, modular forward-model pipeline variant
   create_micrograph/           # same pattern, for MicrographGenerator
+  create_tilt_series/          # same pattern, for TiltSeriesGenerator
+  create_tilt_series_modular/  # same pattern, modular variant
+  simulate_particles_from_csfile/  # same pattern, driven from an existing CryoSPARC .cs file
+                                # (plus standalone notebooks with no paired TOML, e.g. cryoet-specimen-generator.ipynb,
+                                # generate-and-reconstruct.ipynb, coordinates-to-images.ipynb)
 demo-scripts/                 # Ready-to-run command-line scripts
-configs/                      # TOML config files consumed by demo-scripts/ and demo-notebooks/
-  particle_stack/
-    particle.toml                # canonical defaults for generate_particle_stack.py
-  micrograph/
-    micrograph.toml              # canonical defaults for generate_micrograph.py
+configs/                      # TOML config files consumed by demo-scripts/ and demo-notebooks/ (flat, not nested)
+  particle.toml                # canonical defaults for generate_particle_stack.py
+  micrograph.toml              # canonical defaults for generate_micrograph.py
+  tilt_series.toml             # canonical defaults for generate_tilt_series.py
 dev/                           # Prototyping and experimentation (not required to be clean)
 pdb-data/                     # PDB structure files
 ice-data/                     # Pre-computed ice data (do not modify)
@@ -209,7 +231,7 @@ ice-data/                     # Pre-computed ice data (do not modify)
 - Atomic potentials are parameterised; the Kirkland model is the default and most validated.
 - Coincidence loss is modelled for direct electron detectors — do not remove this when simulating K3 detector outputs.
 - CTF sign conventions follow the standard cryo-EM convention (defocus positive = underfocus).
-- `IceBank` tiles volumes larger than a single cached config in **coordinate space**: it draws multiple independently rotated/translated crops (`_place_tiles`), places them side by side, and heals the tile boundaries with a short local MLBOP relaxation (`_relax_seams`) rather than voxel-space blending — do not replace this with a plain repeat/tile or hard-edge concatenation, which would leave visible seams (and, unrelaxed, measurably unfavorable energy at the boundaries). `tile_volume_from_blocks_blended()` (in `arrays.py`) is a separate, still-used utility for **voxel-space** tiling — overlap-add with random roll/flip/rotation augmentation per tile — used by `MDSimDump`/`ExtXYZDump` to assemble MD trajectory frames into larger volumes, not by `IceBank`. `RandomIcemaker`/`GradientSKIcemaker` only produce single unique blocks (`generate_ice`); they don't assemble large volumes themselves.
+- `IceBank` tiles volumes larger than a single cached config in **coordinate space**: it draws multiple independently rotated/translated crops (`_place_tiles`), places them side by side, and heals the tile boundaries with a short local MLBOP relaxation (`_relax_seams`) rather than voxel-space blending — do not replace this with a plain repeat/tile or hard-edge concatenation, which would leave visible seams (and, unrelaxed, measurably unfavorable energy at the boundaries). Relaxation cost is bounded to a halo band around each seam (`_place_tiles`'s `halo_margin`; only halo atoms are fed to the energy model, the untouched bulk is reattached unchanged), and is off by default — `generate_big_ice`/`generate_big_ice_deltas`'s `relax_steps` (exposed as `ice_relax_steps` on `TiltSeriesGenerator`/`ImageGenerator`/`MicrographGenerator`/`ParticleStackConfig`) defaults to 0. `generate_big_ice` is also memory-bounded for very large volumes. `tile_volume_from_blocks_blended()` (in `arrays.py`) is a separate, still-used utility for **voxel-space** tiling — overlap-add with random roll/flip/rotation augmentation per tile — used by `MDSimDump`/`ExtXYZDump` to assemble MD trajectory frames into larger volumes, not by `IceBank`. `RandomIcemaker`/`GradientSKIcemaker` only produce single unique blocks (`generate_ice`); they don't assemble large volumes themselves.
 - Ice structure is driven by `GradientSKIcemaker` (optimised against pre-computed S(k)/MLBOP targets in `ice-data/`) and cached via `IceBank`; `RandomIcemaker` is a fast, low-fidelity fallback for quick tests.
 
 ## Reproducibility
@@ -222,7 +244,12 @@ ice-data/                     # Pre-computed ice data (do not modify)
 |---|---|
 | `torch` | GPU computation, all array ops |
 | `lightning` | Distributed training (ghostbuster) |
-| `biopython`, `gemmi` | PDB/mmCIF parsing |
-| `cryosparc-tools` | `.cs` file I/O |
-| `mrcfile`, `starfile` | Cryo-EM file formats |
+| `biopython`, `biotite`, `gemmi` | PDB/mmCIF parsing |
+| `cryosparc-tools` | `.cs` file I/O, isolated to `io/_cryosparc.py` |
+| `mrcfile`, `starfile`, `eerfile` | Cryo-EM file formats; `starfile` backs RELION `.star` I/O in `io/_relion.py` |
+| `roma` | Quaternion/rotation math (`rotations/`) |
+| `vesin-torch` | Pairwise neighbor search for the MLBOP ice energy (`ice/_energy.py`), replaces the old ASE-based path |
+| `polnet` (git dep, pinned rev) | Low-res placement/packing backend for `CryoETSpecimenGenerator` |
 | `ruff`, `mypy` | Code quality |
+
+`ase` is an optional `dev`-group dependency only (not a runtime dependency); `seaborn` has been dropped entirely (`plots.py` hardcodes its "deep" palette instead).

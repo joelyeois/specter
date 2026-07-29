@@ -348,11 +348,22 @@ class IceBank(L.LightningModule):
             transient=True,
         ):
             self.positions = self._extract_crop(crop_extent, generator=generator)
+            # periodic=True here isn't claiming the crop is self-periodic -- it's a
+            # fix for a splat-grid fencepost bug: origin=n//2 centers voxel 0 exactly
+            # at -half_extent (no atoms exist below it) while voxel n-1 sits a full
+            # voxel inside +half_extent (atoms on both sides), so voxel 0 gets only
+            # ~half the local density of an interior voxel and voxel n-1 gets nearly
+            # all of it. Wrapping the overflow that would otherwise drop past index n
+            # back onto index 0 restores voxel 0's missing "neighbor below"
+            # contribution -- measured to bring low-face density from ~0.49-0.50x
+            # interior up to ~0.92-0.94x, matching the high-face level (see
+            # dev/ice/ for the face-statistics comparison behind this). Cheap: same
+            # index-tensor op as the mask it replaces, no extra cost.
             vox = soft_voxelize_coordinates(
                 self.positions,
                 grid_shape=(self.nz, self.n, self.n),
                 voxel_size=self.dx,
-                periodic=False,  # a crop is a finite chunk, not self-periodic
+                periodic=True,
             )
             results.append(vox)
         self.current_icedeltas = torch.stack(results)
@@ -504,8 +515,16 @@ class IceBank(L.LightningModule):
             all_parts.append(crop_global)
             if splat_volume is not None:
                 assert splat_voxel_size is not None
+                # periodic=True wraps only atoms landing outside splat_volume's own
+                # extent (the true outer boundary of the requested output, since
+                # splat_volume is sized to the final (nz, n, n) request, not the
+                # possibly-larger tile grid) -- see generate_ice_deltas for why this
+                # matters (a splat-grid fencepost bug, not an actual periodicity
+                # claim). Interior tile-to-tile seams are untouched: an atom near
+                # one tile's own face still lands at an in-bounds index of the
+                # shared buffer, so this doesn't change anything there.
                 soft_voxelize_coordinates_into(
-                    splat_volume, crop_global, splat_voxel_size, periodic=False
+                    splat_volume, crop_global, splat_voxel_size, periodic=True
                 )
         positions = torch.cat(all_parts, dim=0)
         mobile_mask = torch.cat(mobile_parts, dim=0)
@@ -709,11 +728,14 @@ class IceBank(L.LightningModule):
             )
             self.positions = positions[keep]
             if vox is None:
+                # periodic=True: see generate_ice_deltas -- same outer-boundary
+                # fencepost fix, applied here to the final keep-trimmed, already-
+                # relaxed atom set.
                 vox = soft_voxelize_coordinates(
                     self.positions,
                     grid_shape=(self.nz, self.n, self.n),
                     voxel_size=self.dx,
-                    periodic=False,
+                    periodic=True,
                 )
             results.append(vox)
         self.current_icedeltas = torch.stack(results)

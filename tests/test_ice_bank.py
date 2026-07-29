@@ -221,7 +221,7 @@ def test_icebank_generate_big_ice_deltas_streamed_splat_matches_monolithic(tmp_p
     torch.manual_seed(9)
     streamed = cache.generate_big_ice_deltas(n=64, dx=1.0, batchsize=1, relax_steps=0)
     reference = soft_voxelize_coordinates(
-        cache.positions, grid_shape=(64, 64, 64), voxel_size=1.0, periodic=False
+        cache.positions, grid_shape=(64, 64, 64), voxel_size=1.0, periodic=True
     )
     assert torch.allclose(streamed[0], reference, atol=1e-5)
 

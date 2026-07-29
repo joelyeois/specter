@@ -9,16 +9,47 @@ import pandas as pd
 import roma
 import starfile
 import torch
-from cryosparc.dataset import Dataset
 from rich.console import Console
 
-from .imagegenerator import ParticleGeneratorBase
+from ..imagegenerator import ParticleGeneratorBase
+from ._common import _select_particles
 
 _console = Console()
 
+_REQUIRED_STAR_COLUMNS = (
+    "rlnVoltage",
+    "rlnSphericalAberration",
+    "rlnAmplitudeContrast",
+    "rlnImagePixelSize",
+    "rlnDefocusU",
+)
 
-def _load_csfile_parameters(
-    csfile_path: str,
+
+def _merge_optics(particles: pd.DataFrame, optics: pd.DataFrame) -> pd.DataFrame:
+    """Merge a RELION 3.1+ ``optics`` block into the ``particles`` block."""
+    particles = particles.copy()
+    if "rlnOpticsGroup" in particles.columns and "rlnOpticsGroup" in optics.columns:
+        shared = [
+            c
+            for c in optics.columns
+            if c in particles.columns and c != "rlnOpticsGroup"
+        ]
+        return particles.merge(
+            optics.drop(columns=shared), on="rlnOpticsGroup", how="left"
+        )
+    if len(optics) > 1:
+        raise ValueError(
+            "STAR file has multiple optics groups but the particles table has "
+            "no 'rlnOpticsGroup' column to match them against."
+        )
+    for col in optics.columns:
+        if col not in particles.columns:
+            particles[col] = optics[col].iloc[0]
+    return particles
+
+
+def _load_starfile_parameters(
+    starfile_path: str,
     rotation_representation: Literal["quaternion", "rotvec"],
 ) -> tuple[
     torch.Tensor,
@@ -29,120 +60,112 @@ def _load_csfile_parameters(
     dict[str, torch.Tensor],
     torch.Tensor,
     torch.Tensor | None,
-    torch.Tensor,
+    torch.Tensor | None,
 ]:
-    """Load and derive all per-particle imaging parameters from a .cs file, unfiltered.
+    """Load and derive all per-particle imaging parameters from a RELION STAR file, unfiltered.
 
     Returns
     -------
     tuple
         ``(energy_kev, pixel_size, alpha, rotations, translations_A, ctf_params,
-        scale, anisomag, split)`` for every particle in the dataset.
+        scale, anisomag, split)`` for every particle in the file. ``anisomag``
+        is always ``None`` (anisotropic magnification is not currently parsed
+        from STAR files). ``split`` is ``None`` if the file has no
+        ``rlnRandomSubset`` column.
     """
-    dataset = Dataset.load(csfile_path)
-
-    # extract translations
-    translations_px = torch.as_tensor(dataset["alignments3D/shift"])
-    pixel_size = torch.as_tensor(dataset["alignments3D/psize_A"])
-    translations_A = translations_px * pixel_size[..., None]
-    if torch.allclose(pixel_size[0], pixel_size.mean()):
-        pixel_size = pixel_size[0]
+    data = starfile.read(starfile_path)
+    if isinstance(data, dict):
+        if "particles" not in data or "optics" not in data:
+            raise KeyError(
+                "Multi-block STAR file must contain 'optics' and 'particles' blocks."
+            )
+        particles = _merge_optics(data["particles"], data["optics"])
     else:
+        particles = data
+
+    missing = [c for c in _REQUIRED_STAR_COLUMNS if c not in particles.columns]
+    if missing:
+        raise KeyError(f"STAR file is missing required column(s): {', '.join(missing)}")
+
+    n = len(particles)
+
+    def col(name: str, default: float = 0.0) -> torch.Tensor:
+        if name in particles.columns:
+            return torch.as_tensor(
+                particles[name].to_numpy(dtype=np.float64), dtype=torch.float32
+            )
+        return torch.full((n,), float(default))
+
+    def scalar_col(name: str) -> torch.Tensor:
+        values = col(name)
+        if torch.allclose(values[0], values.mean()):
+            return values[0]
         _console.print(
-            "[yellow]Warning:[/yellow] pixel size is not the same for all particles."
+            f"[yellow]Warning:[/yellow] {name} is not the same for all particles."
         )
+        return values
 
-    # extract spherical aberration
-    cs_mm = torch.as_tensor(dataset["ctf/cs_mm"])
-    cs_A = cs_mm * 1e7
+    energy_kev = scalar_col("rlnVoltage")
+    pixel_size = scalar_col("rlnImagePixelSize")
+    alpha = scalar_col("rlnAmplitudeContrast")
 
-    # extract defocus
-    dfang_rad = torch.as_tensor(dataset["ctf/df_angle_rad"])
-    dfang_deg = dfang_rad / torch.pi * 180
-    dfu_A = torch.as_tensor(dataset["ctf/df1_A"])
-    dfv_A = torch.as_tensor(dataset["ctf/df2_A"])
-
-    # extract amplitude contrast
-    alpha = torch.as_tensor(dataset["ctf/amp_contrast"])
-    if torch.allclose(alpha[0], alpha.mean()):
-        alpha = alpha[0]
-    else:
-        _console.print(
-            "[yellow]Warning:[/yellow] amplitude contrast is not the same for all particles."
-        )
-
-    # extract energy
-    energy_kev = torch.as_tensor(dataset["ctf/accel_kv"])
-    if torch.allclose(energy_kev[0], energy_kev.mean()):
-        energy_kev = energy_kev[0]
-    else:
-        _console.print(
-            "[yellow]Warning:[/yellow] energy is not the same for all particles."
-        )
-
-    # extract rotations
-    pose = torch.as_tensor(dataset["alignments3D/pose"], dtype=torch.float32)
-    if rotation_representation == "quaternion":
-        rotations = roma.rotvec_to_unitquat(pose)
-    elif rotation_representation == "rotvec":
-        rotations = pose
-
-    # extract split
-    split = torch.as_tensor(dataset["alignments3D/split"].astype(int))
-
-    # extract beamtilt
-    beamtiltx_rad = torch.arcsin(torch.as_tensor(dataset["ctf/tilt_A"][:, 0] / cs_A))
-    beamtilty_rad = torch.arcsin(torch.as_tensor(dataset["ctf/tilt_A"][:, 1] / cs_A))
-
-    # extract phaseshift
-    phaseshift_rad = torch.as_tensor(dataset["ctf/phase_shift_rad"])
-
-    # extract ctf shift, and add to translations
-    beamshift_A = torch.as_tensor(dataset["ctf/shift_A"])
-    translations_A -= beamshift_A
-
-    # extract trefoil
-    trefoil1 = torch.as_tensor(dataset["ctf/trefoil_A"][:, 0] / 1000)
-    trefoil2 = torch.as_tensor(dataset["ctf/trefoil_A"][:, 1] / 1000)
-
-    # extract per-particle scale factors
-    scale = torch.as_tensor(dataset["alignments3D/alpha"])
-
-    # extract anisotropic magnification
-    # cryosparc defines the M matrix in Fourier space, and stores it after
-    # subtracting away the identity. Ghostbuster uses the real-space M instead.
-    anisomag_raw = torch.as_tensor(dataset["ctf/anisomag"]).reshape(-1, 2, 2)
-    anisomag: torch.Tensor | None
-    if torch.allclose(torch.tensor(0.0), torch.sum(anisomag_raw)):
-        anisomag = None
-    else:
-        anisomag = anisomag_raw + torch.eye(2).unsqueeze(0)
-        # Compute the real-space equivalent matrix
-        anisomag = torch.inverse(anisomag.mT)
-
-        # correct for anisotropic shift
-        corrected_shifts = translations_A.unsqueeze(
-            -1
-        )  # Add a dimension to make it (B, 2, 1)
-
-        # Perform batch matrix multiplication
-        corrected_shifts = torch.bmm(anisomag, corrected_shifts)
-
-        # Remove the last dimension to get (B, 2)
-        corrected_shifts = corrected_shifts.squeeze(-1)
-        translations_A = corrected_shifts
+    cs_A = col("rlnSphericalAberration") * 1e7
+    dfu_A = col("rlnDefocusU")
+    dfv_A = col("rlnDefocusV") if "rlnDefocusV" in particles.columns else dfu_A
+    dfang_deg = col("rlnDefocusAngle")
+    # RELION stores phase shift in degrees, unlike specter's internal radians
+    phaseshift_rad = col("rlnPhaseShift") * torch.pi / 180
 
     ctf_params = {
         "cs": cs_A,
         "dfu": dfu_A,
         "dfv": dfv_A,
         "dfang": dfang_deg,
-        "tiltx": beamtiltx_rad,
-        "tilty": beamtilty_rad,
         "phaseshift": phaseshift_rad,
-        "trefoil1": trefoil1,
-        "trefoil2": trefoil2,
     }
+    if "rlnBeamTiltX" in particles.columns or "rlnBeamTiltY" in particles.columns:
+        ctf_params["tiltx"] = col("rlnBeamTiltX") * 1e-3
+        ctf_params["tilty"] = col("rlnBeamTiltY") * 1e-3
+
+    # extract rotations (RELION ZYZ Euler convention: rot, tilt, psi)
+    if {"rlnAngleRot", "rlnAngleTilt", "rlnAnglePsi"} <= set(particles.columns):
+        euler_deg = torch.stack(
+            [col("rlnAngleRot"), col("rlnAngleTilt"), col("rlnAnglePsi")], dim=-1
+        )
+        if rotation_representation == "quaternion":
+            rotations = roma.euler_to_unitquat("ZYZ", euler_deg, degrees=True)
+        else:
+            rotations = roma.euler_to_rotvec("ZYZ", euler_deg, degrees=True)
+    else:
+        rotations = (
+            torch.tensor([[0.0, 0.0, 0.0, 1.0]] * n)
+            if rotation_representation == "quaternion"
+            else torch.zeros(n, 3)
+        )
+
+    # extract translations
+    if {"rlnOriginXAngst", "rlnOriginYAngst"} <= set(particles.columns):
+        translations_A = torch.stack(
+            [col("rlnOriginXAngst"), col("rlnOriginYAngst")], dim=-1
+        )
+    elif {"rlnOriginX", "rlnOriginY"} <= set(particles.columns):
+        translations_px = torch.stack([col("rlnOriginX"), col("rlnOriginY")], dim=-1)
+        translations_A = translations_px * pixel_size
+    else:
+        translations_A = torch.zeros(n, 2)
+
+    # extract per-particle CTF scale factor
+    scale = col("rlnCtfScalefactor", default=1.0)
+
+    # anisotropic magnification is not currently parsed from STAR files
+    anisomag: torch.Tensor | None = None
+
+    # extract half-set label (raw RELION values: 1 or 2)
+    split = (
+        col("rlnRandomSubset").to(torch.int64)
+        if "rlnRandomSubset" in particles.columns
+        else None
+    )
 
     return (
         energy_kev,
@@ -157,63 +180,27 @@ def _load_csfile_parameters(
     )
 
 
-def _select_particles(
-    mask: torch.Tensor,
-    indices: torch.Tensor,
-    rotations: torch.Tensor,
-    translations_A: torch.Tensor,
-    ctf_params: dict[str, torch.Tensor],
-    scale: torch.Tensor,
-    anisomag: torch.Tensor | None,
-    n_particles: int | None,
-) -> tuple[
-    torch.Tensor,
-    torch.Tensor,
-    torch.Tensor,
-    dict[str, torch.Tensor],
-    torch.Tensor,
-    torch.Tensor | None,
-]:
-    """Apply a per-particle boolean mask, then truncate to the first n_particles.
-
-    Returns
-    -------
-    tuple
-        ``(indices, rotations, translations_A, ctf_params, scale, anisomag)``.
-    """
-    rotations = rotations[mask]
-    translations_A = translations_A[mask]
-    ctf_params = {k: v[mask] for k, v in ctf_params.items()}
-    scale = scale[mask]
-    anisomag = None if anisomag is None else anisomag[mask]
-
-    if n_particles is not None:
-        indices = indices[:n_particles]
-        rotations = rotations[:n_particles]
-        translations_A = translations_A[:n_particles]
-        ctf_params = {k: v[:n_particles] for k, v in ctf_params.items()}
-        scale = scale[:n_particles]
-        anisomag = None if anisomag is None else anisomag[:n_particles]
-
-    return indices, rotations, translations_A, ctf_params, scale, anisomag
-
-
-def extract_parameters_from_csfile(
-    csfile_path: str,
-    return_class: Literal["0", "1", "all"] = "all",
+def extract_parameters_from_starfile(
+    starfile_path: str,
+    return_class: Literal["1", "2", "all"] = "all",
     rotation_representation: Literal["quaternion", "rotvec"] = "quaternion",
     n_particles: int | None = None,
 ) -> tuple:
     """
-    Extract poses and CTF parameters from CryoSPARC .cs file.
+    Extract poses and CTF parameters from a RELION-format STAR file.
+
+    Equivalent to :func:`~specter.io.extract_parameters_from_csfile`, but for
+    RELION ``.star`` files instead of CryoSPARC ``.cs`` files. Supports both
+    the single-block layout written by :func:`create_particle_starfile` and
+    the two-block (``optics`` + ``particles``) layout used by RELION 3.1+.
 
     Parameters
     ----------
-    csfile_path : str
-        Path of the .cs file.
+    starfile_path : str
+        Path of the .star file.
     return_class : str, optional
-        Specifies which particle class to return. Options are '0', '1', or 'all'.
-        Default is 'all'.
+        Which RELION half-set to return, matching the raw values of
+        ``rlnRandomSubset`` ('1' or '2'), or 'all'. Default is 'all'.
     rotation_representation : str, optional
         Representation of rotations. 'quaternion' or 'rotvec'. Default is 'quaternion'.
     n_particles : int, optional
@@ -225,26 +212,27 @@ def extract_parameters_from_csfile(
     energy_kev : torch.Tensor
         Energy in keV.
     pixel_size : torch.Tensor
-        Pixel sizes in Ångstrom.
+        Pixel size in Ångstrom.
     alpha : torch.Tensor
         Amplitude contrast ratio.
     rotations : torch.Tensor
         Quaternions with shape (N, 4) or rotation vectors.
     translations_A : torch.Tensor
         xy-translations in Ångstrom with shape (N, 2).
-    ctf_params : torch.Tensor
-        CTF parameters with shape (N, 7). Parameters are (Cs, dfu, dfv, dfang, tiltx, tilty, phaseshift).
+    ctf_params : dict[str, torch.Tensor]
+        CTF parameters keyed by name (``cs``, ``dfu``, ``dfv``, ``dfang``,
+        ``phaseshift``, plus ``tiltx``/``tilty`` if present in the file).
     scale : torch.Tensor
-        Per-particle scale factors.
-    anisomag : torch.Tensor or None
-        Anisotropic magnification matrices (N, 2, 2) or None if identity.
+        Per-particle CTF scale factor (``rlnCtfScalefactor``), or ones if absent.
+    anisomag : None
+        Always ``None`` — anisotropic magnification is not currently parsed
+        from STAR files.
     indices : torch.Tensor
-        Indices of the extracted particles from the dataset.
+        Indices of the extracted particles from the file.
     halfset_labels : torch.Tensor or None
-        1-D integer tensor of length ``N`` with values ``0`` or ``1`` from
-        ``alignments3D/split``, ready to pass as ``halfset_labels`` to
-        :func:`~specter.ghostbuster.run_halfsets`.
-        Only returned when ``return_class == "all"``; ``None`` otherwise.
+        1-D integer tensor of length ``N`` with the raw ``rlnRandomSubset``
+        values (1 or 2). Only returned when ``return_class == "all"``;
+        ``None`` otherwise.
     """
     (
         energy_kev,
@@ -256,13 +244,19 @@ def extract_parameters_from_csfile(
         scale,
         anisomag,
         split,
-    ) = _load_csfile_parameters(csfile_path, rotation_representation)
+    ) = _load_starfile_parameters(starfile_path, rotation_representation)
+
+    n_total = len(rotations)
 
     if return_class == "all":
-        mask = torch.ones_like(split, dtype=torch.bool)
-        indices = torch.arange(len(split))
+        mask = torch.ones(n_total, dtype=torch.bool)
+        indices = torch.arange(n_total)
         halfset_labels: torch.Tensor | None = split
-    else:  # "0" or "1"
+    else:
+        if split is None:
+            raise ValueError(
+                "STAR file has no 'rlnRandomSubset' column; cannot filter by return_class."
+            )
         mask = split == int(return_class)
         indices = torch.squeeze(torch.nonzero(mask))
         halfset_labels = None

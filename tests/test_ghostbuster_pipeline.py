@@ -19,7 +19,6 @@ import numpy as np
 import pytest
 import torch
 
-from specter import cryosparc
 from specter.ghostbuster import (
     Ghostbuster,
     Reconstructor,
@@ -27,6 +26,7 @@ from specter.ghostbuster import (
     TomogramReconstructor,
     compare_runs,
 )
+from specter.io import _cryosparc
 
 # ---------------------------------------------------------------------------
 # Fake CryoSPARC dataset (mirrors tests/test_cryosparc.py's _FakeDataset)
@@ -67,7 +67,7 @@ class _FakeDataset(dict):
 
 @pytest.fixture(autouse=True)
 def _patch_dataset(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(cryosparc, "Dataset", _FakeDataset)
+    monkeypatch.setattr(_cryosparc, "Dataset", _FakeDataset)
 
 
 @pytest.fixture

@@ -486,10 +486,7 @@ def main() -> None:
 
     import specter
     from specter.arrays import compute_nz
-    from specter.cryosparc import (
-        create_particle_starfile,
-        extract_parameters_from_csfile,
-    )
+    from specter.io import create_particle_starfile, extract_parameters_from_csfile
     from specter.ice import resolve_icemaker
     from specter.image import normalize_particles
     from specter.imagegenerator import ImageGenerator
@@ -521,6 +518,7 @@ def main() -> None:
         scale,
         anisomag,
         indices,
+        _halfset_labels,
     ) = extract_parameters_from_csfile(args.cs_path)
 
     n_total = len(rotations)

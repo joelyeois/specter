@@ -382,7 +382,7 @@ def main() -> None:
 
     import specter
     from specter.config import apply_overrides, load_config, MicrographConfig
-    from specter.cryosparc import create_micrograph_starfile
+    from specter.io import create_micrograph_starfile
     from specter.ice import IceBank
     from specter.imagegenerator import MicrographGenerator
     from specter.pdb import PDB

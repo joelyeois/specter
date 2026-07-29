@@ -298,7 +298,7 @@ class Ghostbuster:
         torch.Tensor,
     ]:
         """Extract poses, CTF parameters, and particle indices from a .cs file."""
-        from ..cryosparc import extract_parameters_from_csfile
+        from ..io import extract_parameters_from_csfile
 
         print(f"Loading particle parameters from {Path(cs_file).name} ...")
         (

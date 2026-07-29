@@ -360,7 +360,7 @@ def main() -> None:
 
     import specter
     from specter.config import TiltSeriesConfig, apply_overrides, load_config
-    from specter.cryosparc import create_micrograph_starfile
+    from specter.io import create_micrograph_starfile
     from specter.imagegenerator import TiltSeriesGenerator
     from specter.specimen.cryoet import CryoETSpecimenGenerator
     from specter.specimen.cytosolic_filler import build_filler_protein_specs

@@ -127,7 +127,8 @@ class CryoETSpecimenGenerator:
             phys = (
                 np.array(target_shape[::-1]) * target_v_size
             )  # -> (X,Y,Z) physical extent
-            low_res_shape = tuple(int(np.ceil(p / low_res_v_size)) for p in phys)
+            lx, ly, lz = (int(np.ceil(p / low_res_v_size)) for p in phys)
+            low_res_shape = (lx, ly, lz)
         self.low_res_shape = low_res_shape  # polnet's (X, Y, Z)
 
         self._scratch_dir = Path(scratch_dir) if scratch_dir else None
@@ -518,7 +519,7 @@ def _insert_clipped(
     0..extent -- NOT centered like specter's own crowding.py convention, so
     no volume-center offset is added here).
     """
-    bounds = clip_insert_bounds(pos_zyx, local.shape, volume.shape)
+    bounds = clip_insert_bounds(pos_zyx.tolist(), local.shape, volume.shape)
     if bounds is None:
         return
     dst, src = bounds

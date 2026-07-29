@@ -73,6 +73,7 @@ module = [
     "ipywidgets.*",
     "mrcfile.*",
     "pandas.*",
+    "polnet.*",
     "requests.*",
     "roma.*",
     "scipy.*",
@@ -81,6 +82,7 @@ module = [
     "torchinterp1d.*",
     "tqdm.*",
     "vesin_torch.*",
+    "vtk.*",
 ]
 ignore_missing_imports = true
 

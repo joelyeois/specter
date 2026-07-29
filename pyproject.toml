@@ -51,7 +51,6 @@ dev = [
     "pytest-cov>=7.0.0",
     "rich>=14.2.0",
     "ruff>=0.14.4",
-    "seaborn>=0.13.2",
 ]
 
 [tool.uv]
@@ -77,7 +76,6 @@ module = [
     "requests.*",
     "roma.*",
     "scipy.*",
-    "seaborn.*",
     "starfile.*",
     "torchinterp1d.*",
     "tqdm.*",

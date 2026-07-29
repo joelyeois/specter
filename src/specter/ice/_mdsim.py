@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import warnings
-from typing import Sequence
+from typing import TYPE_CHECKING, Sequence
 
-import ase.io as ase_io
 import numpy as np
-from ase import Atoms
 import pandas as pd
 import torch
+
+if TYPE_CHECKING:
+    from ase import Atoms
 
 from ..arrays import (
     radial_profile_3d,
@@ -538,6 +539,14 @@ class ExtXYZDump:
     ) -> None:
         self.n = n
         self.dx = dx
+
+        try:
+            import ase.io as ase_io
+        except ImportError as exc:
+            raise ImportError(
+                "ExtXYZDump requires the optional 'ase' dependency. "
+                "Install it with `pip install ase`."
+            ) from exc
 
         atoms_data = ase_io.read(filepath, format="extxyz", index=":")
         if not isinstance(atoms_data, list):

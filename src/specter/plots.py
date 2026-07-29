@@ -3,15 +3,43 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import matplotlib.axes
 import matplotlib.figure
 import matplotlib.pyplot as plt
-import seaborn as sns
 import torch
 from PIL import Image as PILImage
 
 from .arrays import radial_profile_2d, radial_symmetrize
 from .coords import radial_distribution_function
 from .fft import fourier_shell_correlation
+
+# seaborn's "deep" categorical palette, hardcoded to avoid a seaborn dependency
+# for two matplotlib-only plotting helpers.
+_DEEP_PALETTE = [
+    "#4C72B0",
+    "#DD8452",
+    "#55A868",
+    "#C44E52",
+    "#8172B2",
+    "#937860",
+    "#DA8BC3",
+    "#8C8C8C",
+    "#CCB974",
+    "#64B5CD",
+]
+
+
+def _deep_palette(n_colors: int) -> list[str]:
+    """Cycle through :data:`_DEEP_PALETTE` to get ``n_colors`` colors."""
+    return [_DEEP_PALETTE[i % len(_DEEP_PALETTE)] for i in range(n_colors)]
+
+
+def _despine(ax: matplotlib.axes.Axes, offset: float = 0) -> None:
+    """Hide top/right spines and move the rest outward, seaborn-``despine``-style."""
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    for side in ("left", "bottom"):
+        ax.spines[side].set_position(("outward", offset))
 
 
 def plot3d(
@@ -424,7 +452,7 @@ def plot_map_to_model_fsc(
         return ">Nyquist"
 
     nyquist = 1.0 / (2.0 * voxel_size)
-    palette = sns.color_palette("deep", n_colors=max(n_vols, 1))
+    palette = _deep_palette(max(n_vols, 1))
 
     fig, ax = plt.subplots(figsize=(7, 4.5), dpi=150)
 
@@ -474,7 +502,7 @@ def plot_map_to_model_fsc(
     )
     ax.grid(True, alpha=0.25, linewidth=0.6)
     ax.legend(frameon=True, fontsize=8, loc="upper right", framealpha=0.8)
-    sns.despine(ax=ax, offset=6)
+    _despine(ax, offset=6)
     fig.tight_layout()
     if show:
         plt.show()
@@ -570,7 +598,7 @@ def plot_halfmap_fsc(
             return f"{1.0 / last_k_cross.item():.3f} Å"
         return ">Nyquist"
 
-    palette = sns.color_palette("deep", n_colors=max(n_vols, 1))
+    palette = _deep_palette(max(n_vols, 1))
 
     fig, ax = plt.subplots(figsize=(7, 4.5), dpi=150)
 
@@ -620,7 +648,7 @@ def plot_halfmap_fsc(
     )
     ax.grid(True, alpha=0.25, linewidth=0.6)
     ax.legend(frameon=True, fontsize=8, loc="upper right", framealpha=0.8)
-    sns.despine(ax=ax, offset=6)
+    _despine(ax, offset=6)
     fig.tight_layout()
     if show:
         plt.show()

@@ -46,8 +46,11 @@ MB_MAX_RAD = 450.0
 
 [specimen]
 # generic, non-annotated cytosolic crowding filling the background around the
-# annotated targets above; see build_filler_protein_specs's docstring. None disables it.
-filler_occupancy = 0.1
+# annotated targets above; see build_filler_protein_specs's docstring. Off by
+# default -- fetching/building the extra filler species adds noticeable
+# runtime (extra PDB downloads + PotentialBuilder calls on first use).
+# Uncomment to enable:
+# filler_occupancy = 0.1
 pdb_savefolder = "pdb-data"       # resolved relative to the repo root
 target_shape = [184, 630, 630]    # (Z, Y, X) voxels
 target_v_size = 5.0               # Å/voxel

@@ -38,7 +38,10 @@ MB_MIN_RAD = 180.0
 MB_MAX_RAD = 450.0
 
 [specimen]
-filler_occupancy = 0.1     # generic cytosolic filler; None disables
+# generic cytosolic filler; off by default so this notebook finishes quickly
+# (the extra filler species need their own PDB downloads + PotentialBuilder
+# calls). Uncomment to enable:
+# filler_occupancy = 0.1
 target_shape = [92, 256, 256]   # (Z, Y, X) voxels -- modest, finishes quickly
 target_v_size = 5.0             # Å/voxel
 low_res_v_size = 10.0           # Å/voxel, polnet's placement-pass resolution

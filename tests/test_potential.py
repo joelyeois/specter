@@ -19,6 +19,7 @@ from specter.potential import (
     build_potential_volume_analytic_scatter_kirkland,
     build_potential_volume_analytic_scatter_lobato,
     build_potential_volume_fftconvolve_3d,
+    recommended_rcut,
 )
 
 
@@ -791,3 +792,88 @@ def test_potential_builder_shtyrov_peng_only_analytic():
 
     assert torch.isfinite(vol_none).all()
     assert torch.allclose(vol_none, vol_list)
+
+
+@pytest.mark.parametrize("parameterization", ["kirkland", "lobato"])
+def test_recommended_rcut_scales_with_slowest_element_present(parameterization):
+    """
+    recommended_rcut should return a small radius for a light-element-only
+    (H/C/N/O) structure, and a larger one once a slower-decaying element
+    (K) is added -- and should equal the max over whatever's present, not
+    e.g. the mean.
+    """
+    light_only = torch.tensor([1, 6, 6, 7, 8, 8], dtype=torch.long)
+    with_potassium = torch.tensor([1, 6, 6, 7, 8, 8, 19], dtype=torch.long)
+
+    r_light = recommended_rcut(light_only, parameterization)
+    r_k = recommended_rcut(with_potassium, parameterization)
+
+    assert r_light < 3.0
+    assert r_k > r_light
+    assert r_k == max(
+        recommended_rcut(torch.tensor([z]), parameterization)
+        for z in with_potassium.unique().tolist()
+    )
+
+
+def test_recommended_rcut_shtyrov_species_and_peng_fallback():
+    """
+    recommended_rcut for parameterization="shtyrov" should use the species
+    table for matched atoms and the per-element Peng table as a fallback
+    for unmatched/None species, taking the max across all atoms present.
+    """
+    atomic_numbers = torch.tensor([8, 6], dtype=torch.long)
+
+    # O(HH) needs ~3.6A (see _SHTYROV_MIN_RCUT); an unmatched carbon falls
+    # back to the Peng table's value for Z=6.
+    r = recommended_rcut(atomic_numbers, "shtyrov", atom_species=["O(HH)", None])
+    assert r == pytest.approx(3.6)
+
+    # atom_species=None entirely -> every atom uses the Peng table.
+    r_no_species = recommended_rcut(atomic_numbers, "shtyrov", atom_species=None)
+    assert r_no_species < 3.0  # O and C are both fast-decaying in Peng's table
+
+
+def test_recommended_rcut_handles_shtyrov_mixed_sign_species():
+    """
+    Regression test for the mixed-sign-Gaussian-term bug found while
+    building this table: Shtyrov's O(HH) has two negative-amplitude terms
+    (a=-0.60, b=64.2 and a=-0.15, b=121.4) that decay slower than its
+    positive terms, so a naive bisection assuming the captured-integral
+    fraction is monotonic in radius converges on a radius far too small
+    (found: 0.6A, giving ~17.5% too much total potential in practice).
+    The corrected, monotonicity-robust table entry must be large enough
+    to actually be safe.
+    """
+    r = recommended_rcut(torch.tensor([8]), "shtyrov", atom_species=["O(HH)"])
+    assert r >= 3.5
+
+
+def test_potential_builder_default_rcut_is_auto_detected():
+    """
+    PotentialBuilder's rcut defaults to None, which auto-selects via
+    recommended_rcut based on the elements actually present -- not a fixed
+    constant. An explicitly-passed rcut must override the auto-detection.
+    """
+    light_only = torch.tensor([1, 6, 6, 7, 8, 8], dtype=torch.long)
+    with_potassium = torch.tensor([1, 6, 6, 7, 8, 8, 19], dtype=torch.long)
+
+    pb_light = PotentialBuilder(
+        16, 1.0, light_only, parameterization="kirkland", progressbars=False
+    )
+    pb_k = PotentialBuilder(
+        16, 1.0, with_potassium, parameterization="kirkland", progressbars=False
+    )
+    assert pb_light.rcut == recommended_rcut(light_only, "kirkland")
+    assert pb_k.rcut == recommended_rcut(with_potassium, "kirkland")
+    assert pb_light.rcut < pb_k.rcut
+
+    pb_explicit = PotentialBuilder(
+        16,
+        1.0,
+        with_potassium,
+        parameterization="kirkland",
+        rcut=2.0,
+        progressbars=False,
+    )
+    assert pb_explicit.rcut == 2.0

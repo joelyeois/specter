@@ -622,6 +622,151 @@ def build_potential_volume_analytic_scatter_lobato(
     return _scatter_window_values(vals, center_idx, offsets_vox, grid_shape)
 
 
+# Per-element/species minimum `rcut` (Å) needed for `method="analytic"` to
+# capture >=99.5% of that element/species' total integrated potential, for
+# *every* radius beyond it too (verified via numerical radial integration --
+# integral_0^r V(r)*4*pi*r^2 dr vs. the same integral to r=inf, scanning
+# every r on a fine grid and taking the largest r where the deviation still
+# exceeds 0.5% -- not a naive bisection assuming the captured fraction is
+# monotonic in r, which it is *not* whenever a species/element has mixed-sign
+# Gaussian terms: e.g. Shtyrov's O(HH) has two negative-amplitude terms
+# (a=-0.60, b=64.2 and a=-0.15, b=121.4) that decay slower than its positive
+# terms, so the naive cumulative-fraction curve overshoots 100% before the
+# slow negative tail pulls it back down -- a plain bisection would have
+# stopped at the first crossing (~0.6 Å) and given a value giving ~17.5%
+# *too much* total potential in practice, caught by
+# test_potential_builder_analytic_robust_to_subvoxel_position. 14/42 Shtyrov
+# species and most Lobato/light-Peng elements have this mixed-sign
+# structure; Kirkland's coefficients happen to have no negative terms.
+# 99.5% was chosen to match (and for some elements, improve on) the accuracy
+# the previous fixed default of rcut=5.0 actually achieved for realistic
+# biological elements (e.g. K/Na, the common ions with the slowest-decaying
+# tails among elements that actually appear in cryo-EM structures -- rcut=5.0
+# gave them only ~99.4-99.8%). Exotic heavy alkali metals (Rb, Cs, Fr) need
+# up to ~5.8-5.9 Å; light elements (H, C, N, O -- the bulk of any structure)
+# only need ~1.9-2.5 Å. Index 0 is an unused padding row (element 0 doesn't
+# exist), matching load_kirkland_parameters()'s convention. See
+# `recommended_rcut` below, which `PotentialBuilder` uses by default.
+_KIRKLAND_MIN_RCUT = [
+    0.0, 2.4, 1.6, 4.9, 3.5, 2.9, 2.5, 2.1, 1.9, 1.7,
+    1.5, 4.8, 3.9, 3.8, 3.3, 2.9, 2.5, 2.3, 2.1, 5.2,
+    4.4, 4.1, 3.9, 3.7, 3.9, 3.5, 3.5, 3.4, 3.3, 3.4,
+    3.2, 3.5, 3.2, 2.9, 2.6, 2.4, 2.2, 5.8, 4.8, 4.5,
+    4.1, 3.8, 3.7, 3.5, 3.5, 3.4, 2.4, 3.3, 3.1, 3.5,
+    3.3, 3.0, 2.8, 2.6, 2.4, 4.9, 4.7, 4.5, 4.5, 4.7,
+    4.5, 4.6, 4.5, 4.5, 4.2, 4.4, 4.4, 4.3, 4.2, 4.2,
+    3.8, 3.6, 3.5, 3.2, 3.1, 3.1, 3.0, 2.8, 2.7, 2.6,
+    2.6, 3.5, 3.2, 2.9, 2.5, 2.7, 2.6, 5.3, 4.2, 3.9,
+    4.1, 4.3, 4.2, 4.2, 4.3, 4.2, 3.9, 3.9, 4.1, 4.0,
+    4.0, 3.9, 3.8, 3.7,
+]  # fmt: skip
+
+_LOBATO_MIN_RCUT = [
+    0.0, 2.3, 1.6, 4.4, 3.2, 2.7, 2.4, 2.1, 1.9, 1.7,
+    1.5, 4.5, 3.6, 3.5, 3.1, 2.7, 2.4, 2.2, 1.9, 5.1,
+    4.1, 3.8, 3.7, 3.5, 3.9, 3.3, 3.2, 3.1, 3.1, 3.2,
+    3.0, 3.3, 3.0, 2.7, 2.5, 2.3, 2.1, 5.8, 4.8, 4.3,
+    4.0, 4.1, 4.0, 3.9, 3.9, 3.8, 2.5, 3.4, 2.9, 3.3,
+    3.1, 2.9, 2.7, 2.4, 2.3, 5.9, 5.1, 4.6, 4.9, 4.8,
+    4.8, 4.7, 4.7, 4.6, 4.2, 4.5, 4.5, 4.4, 4.4, 4.4,
+    4.3, 3.9, 3.6, 3.4, 3.2, 3.1, 3.0, 2.7, 3.0, 2.7,
+    2.7, 3.1, 3.2, 3.1, 2.9, 2.7, 2.5, 5.4, 4.8, 4.3,
+    3.9, 4.1, 4.1, 4.0, 4.2, 4.2, 3.9, 3.8, 4.0, 4.0,
+    4.0, 3.9, 3.9, 3.6,
+]  # fmt: skip
+
+# Peng (gemmi c4322) fallback table. gemmi has no c4322 entry for Z=99-103
+# (the heaviest synthetic actinides/transactinides), so those rows use a
+# safe fallback of 5.0 (matching the old fixed default) rather than an
+# extrapolated number -- these elements essentially never appear in cryo-EM
+# structures.
+_PENG_MIN_RCUT = [
+    0.0, 2.2, 1.6, 4.2, 3.1, 2.7, 2.4, 2.1, 1.8, 1.6,
+    1.5, 4.2, 3.5, 3.4, 3.1, 2.7, 2.4, 2.1, 2.0, 4.9,
+    4.2, 3.8, 3.7, 3.5, 3.6, 3.3, 3.2, 3.2, 3.0, 3.2,
+    2.9, 3.3, 3.0, 2.7, 2.4, 2.3, 2.1, 4.5, 4.3, 3.9,
+    3.7, 3.5, 3.4, 3.3, 3.2, 3.1, 2.2, 3.0, 2.9, 3.2,
+    3.1, 2.8, 2.6, 2.5, 2.3, 4.7, 4.5, 4.1, 4.1, 4.3,
+    4.3, 4.2, 4.2, 4.0, 3.9, 4.1, 4.1, 3.6, 4.0, 3.9,
+    3.9, 3.6, 3.4, 3.2, 3.1, 3.0, 2.8, 2.8, 2.6, 2.5,
+    2.5, 3.0, 2.9, 2.8, 2.7, 2.5, 2.4, 4.9, 4.3, 4.0,
+    3.6, 3.9, 3.8, 3.3, 4.0, 3.8, 3.6, 3.5, 3.2, 5.0,
+    5.0, 5.0, 5.0, 5.0,
+]  # fmt: skip
+
+_SHTYROV_MIN_RCUT = {
+    "C(CCC)": 3.1, "C(CCN)": 2.7, "C(CCO)": 2.5,
+    "C(CNN)": 2.5, "C(CNO)": 3.2, "C(COO)": 3.5,
+    "C(HCC)": 3.4, "C(HCCC)": 3.1, "C(HCCN)": 3.5,
+    "C(HCCO)": 2.9, "C(HCN)": 2.1, "C(HCNO)": 2.5,
+    "C(HHC)": 2.3, "C(HHCC)": 2.7, "C(HHCN)": 3.0,
+    "C(HHCO)": 2.6, "C(HHCS)": 2.9, "C(HHHC)": 3.1,
+    "C(HHHS)": 2.7, "C(HNN)": 1.7, "C(NNN)": 2.3,
+    "Fe(NNNN)": 2.3, "H(C)": 3.8, "H(N)": 4.1,
+    "N(CC)": 2.0, "N(CCC)": 3.2, "N(CCFe)": 2.6,
+    "N(HCC)": 3.4, "N(HHC)": 3.7, "N(HHHC)": 2.8,
+    "O(C)": 3.3, "O(C, amide)": 3.4, "O(C, carboxyl)": 3.3,
+    "O(CC)": 2.5, "O(CP)": 2.2, "O(HC)": 3.0,
+    "O(HH)": 3.6, "O(P)": 1.7, "O(PP)": 2.6,
+    "P(OOOO)": 2.5, "S(CC)": 1.7, "S(HC)": 2.3,
+}  # fmt: skip
+
+
+def recommended_rcut(
+    atomic_numbers: torch.Tensor,
+    parameterization: str = "kirkland",
+    atom_species: Sequence[str | None] | None = None,
+) -> float:
+    """
+    Recommend a `method="analytic"` `rcut` (Å) for the given structure.
+
+    Looks up each present element (or, for Shtyrov, each present bonded
+    species -- falling back to its element for unmatched/Peng-fallback
+    atoms) in a precomputed table of the minimum radius needed to capture
+    >=99.5% of that element/species' total integrated potential, and
+    returns the max over everything actually present. Structures made only
+    of light elements (H, C, N, O) need only ~2-2.5 Å; heavier or more
+    diffuse elements (e.g. K, Na) need more (~5 Å) -- see the module-level
+    `_KIRKLAND_MIN_RCUT`/etc. tables' docstring comment for the full
+    derivation and validation.
+
+    Parameters
+    ----------
+    atomic_numbers : torch.Tensor
+        Atomic numbers present in the structure.
+    parameterization : str, optional
+        'kirkland', 'lobato', or 'shtyrov'. Default 'kirkland'.
+    atom_species : sequence of str or None, optional
+        Per-atom bonded-species descriptors, same length/order as
+        `atomic_numbers`. Only used when `parameterization='shtyrov'`.
+        Default is None (every atom uses its plain per-element Peng value).
+
+    Returns
+    -------
+    float
+        Recommended `rcut`, in Å.
+    """
+    unique_z = torch.unique(atomic_numbers).tolist()
+    if parameterization == "kirkland":
+        return max(_KIRKLAND_MIN_RCUT[z] for z in unique_z)
+    if parameterization == "lobato":
+        return max(_LOBATO_MIN_RCUT[z] for z in unique_z)
+    if parameterization == "shtyrov":
+        if atom_species is None:
+            return max(_PENG_MIN_RCUT[z] for z in unique_z)
+        needed = []
+        for z, species in zip(atomic_numbers.tolist(), atom_species):
+            if species is not None and species in _SHTYROV_MIN_RCUT:
+                needed.append(_SHTYROV_MIN_RCUT[species])
+            else:
+                needed.append(_PENG_MIN_RCUT[z])
+        return max(needed)
+    raise ValueError(
+        f"Unknown parameterization '{parameterization}'. "
+        "Choose 'kirkland', 'lobato', or 'shtyrov'."
+    )
+
+
 class PotentialBuilder(L.LightningModule):
     """
     Module for building 3D electrostatic potential volumes from atomic coordinates.
@@ -663,11 +808,14 @@ class PotentialBuilder(L.LightningModule):
         `specter.atom_data/params_cat.json`.
     rcut : float, optional
         Radius (Å) of the local evaluation window used by
-        `forward(method="analytic")`, for every `parameterization`. Default
-        5.0 Å, matching sffit's own `--rcut` convention — verified to hold
-        every bundled Shtyrov species and Peng/gemmi element, as well as
-        every Kirkland/Lobato element, to well under 0.05% of peak value at
-        this radius. Only used by `method="analytic"`.
+        `forward(method="analytic")`, for every `parameterization`. Only
+        used by `method="analytic"`. Default is None, which auto-selects
+        the smallest radius that still captures >=99.5% of the total
+        integrated potential of every element/species actually present
+        (see `recommended_rcut`) — e.g. ~2-2.5 Å for a light-element-only
+        (H/C/N/O) structure, up to ~5-6 Å if heavier or more diffuse
+        elements (e.g. K, Na, or heavier alkali metals) are present. Pass
+        an explicit value to override the auto-selection.
     periodic : bool, optional
         If True, wrap out-of-bounds voxel indices with periodic boundary
         conditions during soft voxelization. Use when coordinates were
@@ -694,7 +842,7 @@ class PotentialBuilder(L.LightningModule):
         mmcif_filepath: str | None = None,
         atom_species: Sequence[str | None] | None = None,
         shtyrov_params_path: str | None = None,
-        rcut: float = 5.0,
+        rcut: float | None = None,
         periodic: bool = False,
     ):
         super().__init__()
@@ -709,7 +857,11 @@ class PotentialBuilder(L.LightningModule):
         self.mmcif_filepath = mmcif_filepath
         self.atom_species = atom_species
         self.shtyrov_params_path = shtyrov_params_path
-        self.rcut = rcut
+        self.rcut = (
+            rcut
+            if rcut is not None
+            else recommended_rcut(atomic_numbers, parameterization, atom_species)
+        )
         self.periodic = periodic
         # Cache for method="analytic"'s per-atom (a, b) coefficients — built
         # lazily on first use since it needs a full atom_species lookup pass.

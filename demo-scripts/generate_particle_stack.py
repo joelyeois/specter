@@ -682,10 +682,15 @@ def main() -> None:
     # then-broadcasts dance needed, unlike V above).
     icemaker = None
     if ice_model == "random":
+        from specter.arrays import compute_nz
         from specter.ice import RandomIcemaker
 
-        n_ice = min(config.num_pixels, int(256 / config.pixel_size))
-        icemaker = RandomIcemaker(dx=config.pixel_size, n=n_ice)
+        # RandomIcemaker has no tiling support (unlike IceBank), so its own
+        # fixed (n, nz) must exactly match the particle volume V it gets
+        # blended into: n=config.num_pixels, and nz computed the same way
+        # ImageGenerator itself derives it from ice_thickness.
+        ice_nz = compute_nz(config.num_pixels, config.ice_thickness, config.pixel_size)
+        icemaker = RandomIcemaker(dx=config.pixel_size, n=config.num_pixels, nz=ice_nz)
     elif ice_model == "gd":
         icemaker = IceBank(cache_dir=config.ice_cache_dir)
 

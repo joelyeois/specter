@@ -2,6 +2,7 @@
 Tests for potential volume construction.
 """
 
+import warnings
 from importlib import resources
 
 import gemmi
@@ -877,3 +878,44 @@ def test_potential_builder_default_rcut_is_auto_detected():
         progressbars=False,
     )
     assert pb_explicit.rcut == 2.0
+
+
+def test_potential_builder_defaults_to_shtyrov_analytic():
+    """
+    PotentialBuilder's parameterization defaults to 'shtyrov' and
+    forward()'s method defaults to 'analytic' -- constructing and calling
+    with no explicit overrides should just work (falling back to plain
+    per-element Peng factors, with no warning, since no atom_species was
+    given at all -- see test_potential_builder_shtyrov_peng_only_analytic
+    for the atom_species=None-vs-explicit-None-list distinction).
+    """
+    atomic_numbers = torch.tensor([6, 7, 8, 16], dtype=torch.long)
+    coords = torch.tensor(
+        [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
+    )
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        pb = PotentialBuilder(16, 1.0, atomic_numbers, progressbars=False)
+        assert pb.parameterization == "shtyrov"
+        vol = pb.forward(coords)  # no explicit method
+    assert torch.isfinite(vol).all()
+    assert vol.sum() > 0
+
+
+def test_potential_builder_analytic_rejects_periodic():
+    """
+    method="analytic" (now the default) does not implement periodic
+    boundary wrapping, unlike '2d'/'3d' -- must raise a clear error rather
+    than silently ignoring periodic=True and producing wrong results.
+    """
+    atomic_numbers = torch.tensor([6], dtype=torch.long)
+    coords = torch.tensor([[0.0, 0.0, 0.0]])
+    pb = PotentialBuilder(16, 1.0, atomic_numbers, periodic=True, progressbars=False)
+    with pytest.raises(ValueError, match="periodic"):
+        pb.forward(coords)
+    with pytest.raises(ValueError, match="periodic"):
+        pb.forward(coords, method="analytic")
+    # '3d' should still work fine with periodic=True.
+    vol = pb.forward(coords, method="3d")
+    assert torch.isfinite(vol).all()

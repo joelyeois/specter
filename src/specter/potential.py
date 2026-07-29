@@ -714,7 +714,7 @@ _SHTYROV_MIN_RCUT = {
 
 def recommended_rcut(
     atomic_numbers: torch.Tensor,
-    parameterization: str = "kirkland",
+    parameterization: str = "shtyrov",
     atom_species: Sequence[str | None] | None = None,
 ) -> float:
     """
@@ -786,7 +786,9 @@ class PotentialBuilder(L.LightningModule):
         Enable progress bars during computation. Default is True.
     parameterization : str, optional
         Atomic potential parameterization: 'kirkland', 'lobato', or 'shtyrov'.
-        Default is 'kirkland'.
+        Default is 'shtyrov' (bonded-species-aware if `atom_species` is
+        given, otherwise per-element Peng `c4322` factors — see
+        `atom_species` below).
     conv_backend : str, optional
         Convolution backend: 'fftconvolve' or 'conv3d'. Default is 'fftconvolve'.
     mmcif_filepath : str, optional
@@ -837,7 +839,7 @@ class PotentialBuilder(L.LightningModule):
         dx: float,
         atomic_numbers: torch.Tensor,
         progressbars: bool = True,
-        parameterization: str = "kirkland",
+        parameterization: str = "shtyrov",
         conv_backend: str = "fftconvolve",
         mmcif_filepath: str | None = None,
         atom_species: Sequence[str | None] | None = None,
@@ -855,6 +857,12 @@ class PotentialBuilder(L.LightningModule):
         self.progressbars = progressbars
         self.conv_backend = conv_backend
         self.mmcif_filepath = mmcif_filepath
+        # Captured before atom_species may get normalized from None to
+        # [None]*N below (see get_3d_atomic_potentials) -- used to silence
+        # the "fell back to Peng" warning when the user never provided
+        # species typing at all (the common default case), while still
+        # warning when they explicitly gave species and some didn't match.
+        self._atom_species_explicitly_given = atom_species is not None
         self.atom_species = atom_species
         self.shtyrov_params_path = shtyrov_params_path
         self.rcut = (
@@ -1042,7 +1050,7 @@ class PotentialBuilder(L.LightningModule):
             {int(z) for z in self.atomic_numbers[unmatched_mask].tolist()}
         )
 
-        if fallback_elements:
+        if fallback_elements and self._atom_species_explicitly_given:
             warnings.warn(
                 f"{int(unmatched_mask.sum())} atom(s) had no matching Shtyrov "
                 f"species (elements: {[str(atom_symbol(z)) for z in fallback_elements]}); "
@@ -1118,7 +1126,7 @@ class PotentialBuilder(L.LightningModule):
             a_coefs[i] = P[:, 0]
             b_coefs[i] = P[:, 1]
 
-        if fallback_elements:
+        if fallback_elements and self._atom_species_explicitly_given:
             warnings.warn(
                 f"{n_fallback} atom(s) had no matching Shtyrov species "
                 f"(elements: {sorted(fallback_elements)}); falling back to "
@@ -1159,7 +1167,7 @@ class PotentialBuilder(L.LightningModule):
     def forward(
         self,
         coordinates: torch.Tensor,
-        method: str = "3d",
+        method: str = "analytic",
         conv_backend: str | None = None,
     ) -> torch.Tensor:
         """
@@ -1180,7 +1188,9 @@ class PotentialBuilder(L.LightningModule):
             `build_potential_volume_analytic_scatter` when `atom_species` is
             given, falling back to plain per-element Peng `c4322` factors
             for atoms without a species, or for every atom when
-            `atom_species` is None entirely). Default is '3d'.
+            `atom_species` is None entirely). Default is 'analytic'. Not
+            supported with `periodic=True` (raises `ValueError`) — use
+            `method='3d'` for periodic boundary conditions.
         conv_backend : str, optional
             Convolution backend override. Default is None (uses self.conv_backend).
             Unused for `method='analytic'`.
@@ -1201,6 +1211,13 @@ class PotentialBuilder(L.LightningModule):
         ~1600-atom structure) and fully differentiable w.r.t. `coordinates`.
         """
         if method == "analytic":
+            if self.periodic:
+                raise ValueError(
+                    "method='analytic' does not implement periodic boundary "
+                    "wrapping (unlike '2d'/'3d', which wrap out-of-bounds "
+                    "voxel indices when periodic=True). Use method='3d' for "
+                    "periodic boundary conditions."
+                )
             coordinates = coordinates.to(self.device)
             if coordinates.ndim == 2:
                 coordinates = coordinates.unsqueeze(0)

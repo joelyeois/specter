@@ -228,6 +228,14 @@ def parse_args() -> argparse.Namespace:
         "the bundled ice-data/ice_cache.",
     )
     parser.add_argument(
+        "--ice_relax_steps",
+        type=int,
+        default=0,
+        help="Local MLBOP relaxation steps used to heal ice tile seams "
+        "(ice_model='gd' only). Same default/semantics as "
+        "TiltSeriesGenerator's own ice_relax_steps.",
+    )
+    parser.add_argument(
         "--tomo_to_ice_ratio",
         type=float,
         default=0.75,
@@ -288,7 +296,7 @@ def main() -> None:
     import specter
     from specter.cryosparc import create_micrograph_starfile
     from specter.imagegenerator import TiltSeriesGenerator
-    from specter.ice import IceBank
+    from specter.ice import IceBank, resolve_icemaker
 
     args = parse_args()
     specter.set_verbosity(logging.INFO)
@@ -310,21 +318,33 @@ def main() -> None:
     if args.add_ice:
         _section("Generating amorphous ice")
         _console.print(f"  method = {args.ice_model},  dx = {dx:.2f} Å")
-        if args.ice_model == "random":
-            from specter.ice import RandomIcemaker
-
-            icemaker = RandomIcemaker(dx=dx, n=tomo.shape[-1], nz=tomo.shape[0]).to(
-                args.device
-            )
-            ice = torch.squeeze(icemaker.generate_ice(batchsize=1)).cpu()
-        else:  # gd
-            icemaker = IceBank(cache_dir=args.ice_cache_dir).to(args.device)
+        icemaker = resolve_icemaker(
+            args.ice_model,
+            dx,
+            tomo.shape[-1],
+            tomo.shape[0],
+            ice_cache_dir=args.ice_cache_dir,
+        ).to(args.device)
+        if isinstance(icemaker, IceBank):
             ice = torch.squeeze(
                 icemaker.generate_big_ice(
-                    n=tomo.shape[-1], dx=dx, nz=tomo.shape[0], batchsize=1
+                    n=tomo.shape[-1],
+                    dx=dx,
+                    nz=tomo.shape[0],
+                    batchsize=1,
+                    relax_steps=args.ice_relax_steps,
                 )
             ).cpu()
+        else:
+            ice = torch.squeeze(icemaker.generate_ice(batchsize=1)).cpu()
         ratio = args.tomo_to_ice_ratio
+        # The input MRC is treated as a raw scattering-potential volume (e.g.
+        # from Polnet) whose intensity scale is not calibrated against
+        # specter's own potential units, unlike volumes built internally by
+        # PotentialBuilder/TomogramGenerator -- so it's rescaled relative to
+        # the freshly generated ice before blending, rather than added
+        # directly via ice.blend_ice_into_volume (which assumes a matching
+        # scale already).
         tomo = tomo * torch.max(ice) * ratio + ice * (tomo < 0.1)
 
     # --- Build tilt series generator ---

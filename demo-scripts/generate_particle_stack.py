@@ -570,8 +570,9 @@ def main() -> None:
 
     import specter
     from specter import rotations
+    from specter.arrays import compute_nz
     from specter.cryosparc import create_particle_starfile
-    from specter.ice import IceBank
+    from specter.ice import resolve_icemaker
     from specter.image import normalize_particles
     from specter.imagegenerator import ImageGenerator
     from specter.pdb import PDB
@@ -676,23 +677,20 @@ def main() -> None:
     cc_angstrom = config.cc * 1e7 if config.cc is not None else None
 
     # --- Ice ---
-    # Unlike the old on-demand-building IceBank, IceBank(cache_dir=...) just
-    # loads small pre-generated coordinate files from disk -- cheap enough
-    # that every DDP rank can construct it independently (no rank-0-builds-
-    # then-broadcasts dance needed, unlike V above).
-    icemaker = None
-    if ice_model == "random":
-        from specter.arrays import compute_nz
-        from specter.ice import RandomIcemaker
-
-        # RandomIcemaker has no tiling support (unlike IceBank), so its own
-        # fixed (n, nz) must exactly match the particle volume V it gets
-        # blended into: n=config.num_pixels, and nz computed the same way
-        # ImageGenerator itself derives it from ice_thickness.
-        ice_nz = compute_nz(config.num_pixels, config.ice_thickness, config.pixel_size)
-        icemaker = RandomIcemaker(dx=config.pixel_size, n=config.num_pixels, nz=ice_nz)
-    elif ice_model == "gd":
-        icemaker = IceBank(cache_dir=config.ice_cache_dir)
+    # resolve_icemaker derives (n, nz) for a fresh RandomIcemaker itself, so
+    # it always matches the particle volume V it gets blended into --
+    # IceBank(cache_dir=...) just loads small pre-generated coordinate files
+    # from disk, cheap enough that every DDP rank can construct it
+    # independently (no rank-0-builds-then-broadcasts dance needed, unlike V
+    # above).
+    ice_nz = compute_nz(config.num_pixels, config.ice_thickness, config.pixel_size)
+    icemaker = resolve_icemaker(
+        ice_model,
+        config.pixel_size,
+        config.num_pixels,
+        ice_nz,
+        ice_cache_dir=config.ice_cache_dir,
+    )
 
     if icemaker is not None:
         icemaker_device = (

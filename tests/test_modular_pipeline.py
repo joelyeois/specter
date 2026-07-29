@@ -13,6 +13,7 @@ defocus midplane shift, this test should catch the divergence between the
 
 from __future__ import annotations
 
+import roma
 import torch
 
 from specter import rotations
@@ -20,7 +21,7 @@ from specter.aberrations import Aberration, defocus_midplane_shift
 from specter.arrays import compute_nz, pad_volume
 from specter.imagegenerator import ImageGenerator
 from specter.microscope import Detector
-from specter.rotations import Rotation, VolumeRotator
+from specter.rotations import VolumeRotator
 from specter.scattering import Scattering
 
 
@@ -64,9 +65,9 @@ def test_modular_pipeline_matches_image_generator():
     pad_nxy = nxy + (nxy // 2) * 2
 
     rotator = VolumeRotator(nz, nxy, nxy, origin="relion")
-    R = Rotation.from_quat(quaternions)
+    R = roma.unitquat_to_rotmat(quaternions)
     T = rotations.translations_angstrom_to_torch(translations, nxy, pixel_size)
-    theta = rotations.build_affine_matrix(R.as_matrix(), T)
+    theta = rotations.build_affine_matrix(R, T)
     V = rotator(V0.clone(), theta)
     V = pad_volume(V, nxy, nz, None, True)
 

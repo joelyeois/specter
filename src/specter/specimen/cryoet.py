@@ -20,13 +20,14 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import numpy as np
+import roma
 import torch
 from polnet.logging_conf import setup_logger as _setup_polnet_logger
 
 from ..arrays import clip_insert_bounds
 from ..potential import PotentialBuilder
 from ..pdb import PDB
-from ..rotations import Rotation, build_affine_matrix, rotate_volume
+from ..rotations import build_affine_matrix, rotate_volume
 from . import polnet_bridge as pb
 
 # Fine-tuning multiplier applied on top of the physically-derived membrane
@@ -351,10 +352,10 @@ class CryoETSpecimenGenerator:
                     x, y, z = (float(v) for v in inst.position_xyz)
                     row = {"type": point_type, "location": {"x": x, "y": y, "z": z}}
                     if oriented:
-                        R = Rotation.from_quat(
-                            torch.as_tensor(inst.quat_wxyz, dtype=torch.float32),
-                            scalar_first=True,
-                        ).as_matrix()
+                        quat_xyzw = roma.quat_wxyz_to_xyzw(
+                            torch.as_tensor(inst.quat_wxyz, dtype=torch.float32)
+                        )
+                        R = roma.unitquat_to_rotmat(quat_xyzw)
                         row["xyz_rotation_matrix"] = R.numpy().tolist()
                     f.write(json.dumps(row) + "\n")
             written[code] = path
@@ -410,10 +411,10 @@ class CryoETSpecimenGenerator:
         t0 = time.time()
         for inst in instances:
             template = templates[inst.code]
-            R = Rotation.from_quat(
-                torch.as_tensor(inst.quat_wxyz, dtype=torch.float32),
-                scalar_first=True,
-            ).as_matrix()
+            quat_xyzw = roma.quat_wxyz_to_xyzw(
+                torch.as_tensor(inst.quat_wxyz, dtype=torch.float32)
+            )
+            R = roma.unitquat_to_rotmat(quat_xyzw)
             theta = build_affine_matrix(R)
             rotated = rotate_volume(template, theta, padding_mode="zeros")[0]
 

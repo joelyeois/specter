@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 from typing import Any, Sequence
 
+import roma
 import torch
 import torch.nn.functional as F
 from ..progress import status, track
@@ -10,7 +11,6 @@ from ..progress import status, track
 from .. import rotations
 from ..ice import IceBank, RandomIcemaker, blend_ice_into_volume, resolve_icemaker
 from ._micrograph import MicrographGenerator
-from ..rotations import Rotation
 from ..scattering import IterativeScattering
 
 
@@ -237,7 +237,7 @@ class TiltSeriesGenerator(MicrographGenerator):
         if angles is not None:
             return angles.abs().max()
         if quaternions is not None:
-            rotvecs = Rotation.from_quat(torch.as_tensor(quaternions)).as_rotvec()
+            rotvecs = roma.unitquat_to_rotvec(torch.as_tensor(quaternions))
             max_angle_rad = torch.linalg.norm(rotvecs, dim=-1).max()
             return max_angle_rad * (180.0 / torch.pi)
         return 0.0
@@ -619,7 +619,7 @@ class TiltSeriesGenerator(MicrographGenerator):
                     dim=-1,
                 )
 
-            quats = Rotation.from_rotvec(rotvecs).as_quat()
+            quats = roma.rotvec_to_unitquat(rotvecs)
             self.register_buffer("quaternions", quats)
             self.register_buffer(
                 "translations",
@@ -716,7 +716,7 @@ class TiltSeriesGenerator(MicrographGenerator):
             Q = self.quaternions[i].unsqueeze(0).expand(B, -1)
             T = self.translations[i].unsqueeze(0).expand(B, -1)
 
-            R_mat = Rotation.from_quat(Q).as_matrix()
+            R_mat = roma.unitquat_to_rotmat(Q)
             if R_mat.ndim == 2:
                 R_mat = R_mat.unsqueeze(0)
             T_torch = rotations.translations_angstrom_to_torch(

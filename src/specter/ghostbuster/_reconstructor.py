@@ -6,6 +6,7 @@ from typing import Any, Literal
 
 import lightning as L
 import mrcfile
+import roma
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -15,7 +16,6 @@ from torch.optim.lr_scheduler import LRScheduler, ReduceLROnPlateau
 from .. import rotations
 from ..arrays import compute_nps_2d
 from ..imagegenerator import ImageGenerator
-from ..rotations import Rotation
 from ..symmetries import apply_symmetry, get_rotation_matrices
 from ._helpers import (
     _apply_kmask_inplace,
@@ -639,11 +639,11 @@ class Reconstructor(L.LightningModule):
                 Q = Q.unsqueeze(0)
             if len(T.shape) < 2:
                 T = T.unsqueeze(0)
-            R = Rotation.from_quat(Q)
+            R = roma.unitquat_to_rotmat(Q)
             T = rotations.translations_angstrom_to_torch(
                 T, self.imagegenerator.nxy, self.imagegenerator.pixel_size
             )
-            theta = rotations.build_affine_matrix(R.as_matrix(), T)
+            theta = rotations.build_affine_matrix(R, T)
             projected = self.imagegenerator.rotator(mask, theta).max(dim=1).values
 
         if projected.shape != image_shape:

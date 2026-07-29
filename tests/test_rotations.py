@@ -1,9 +1,9 @@
 import numpy as np
 import pytest
+import roma
 import torch
 
 from specter.rotations import (
-    Rotation,
     VolumeRotator,
     _build_roi_query_points,
     _normalize_slice_indices,
@@ -96,17 +96,19 @@ def test_coordinate_rotation_matches_volume_rotation(angle_deg: float) -> None:
     wrong sign, wrong origin) while being robust to interpolation asymmetry.
 
     Convention validated (matches imagegenerator.py):
-      - Rotation.apply(coords, inverse=True) applies the inverse rotation R^T.
-      - rotate_volume with build_affine_matrix(R) also moves content by R^T.
-      Both paths apply the same transformation, so the two volumes must agree.
+      - Applying the inverse rotation R^T to coordinates (as
+        ImageGenerator.rotate() does via roma.unitquat_to_rotmat(...).transpose)
+        matches rotate_volume with build_affine_matrix(R), which also moves
+        content by R^T. Both paths apply the same transformation, so the two
+        volumes must agree.
     """
     R_matrix = _rot_z(angle_deg)
-    rot = Rotation.from_matrix(R_matrix)
+    R_inv = roma.rotmat_inverse(R_matrix)
 
     # Method A: rotate atomic coordinates, then build Gaussian density map.
-    # Mirrors imagegenerator.py line ~340: R.apply(self.coordinates) with
-    # default inverse=True, which applies the inverse rotation R^T.
-    coords_rot = rot.apply(_COORDS, inverse=True)
+    # Mirrors imagegenerator.py's rotate(): vectors @ R.T with R already the
+    # inverse rotation matrix.
+    coords_rot = _COORDS @ R_inv.T
     vol_A = _gaussian_volume(coords_rot, _GRID, _VOXEL_SIZE)
 
     # Method B: build Gaussian density map from original coordinates, then rotate.

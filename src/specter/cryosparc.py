@@ -6,11 +6,11 @@ from typing import Literal
 import mrcfile
 import numpy as np
 import pandas as pd
+import roma
 import starfile
 import torch
 from cryosparc.dataset import Dataset
 from rich.console import Console
-from scipy.spatial.transform import Rotation
 
 from .imagegenerator import ParticleGeneratorBase
 
@@ -81,12 +81,11 @@ def _load_csfile_parameters(
         )
 
     # extract rotations
-    r = Rotation.from_rotvec(dataset["alignments3D/pose"])
+    pose = torch.as_tensor(dataset["alignments3D/pose"], dtype=torch.float32)
     if rotation_representation == "quaternion":
-        rotations = torch.from_numpy(r.as_quat()).type(torch.float32)
+        rotations = roma.rotvec_to_unitquat(pose)
     elif rotation_representation == "rotvec":
-        # rotations = torch.from_numpy(r.as_rotvec()).type(torch.float32)
-        rotations = torch.as_tensor(dataset["alignments3D/pose"])
+        rotations = pose
 
     # extract split
     split = torch.as_tensor(dataset["alignments3D/split"].astype(int))
@@ -370,16 +369,18 @@ def create_particle_starfile(
     # convert rotations to Relion euler
     euler = None
     if rotations is not None:
-        if len(rotations.shape) == 3:
-            # N x 3 x 3 -> rotation matrices
-            R = Rotation.from_matrix(rotations)
-        elif rotations.shape[-1] == 4:
+        rotations_t = torch.as_tensor(rotations, dtype=torch.float32)
+        if len(rotations_t.shape) == 3:
+            # N x 3 x 3 -> rotation matrices (re-orthonormalized, matching
+            # scipy's from_matrix Markley-SVD correction for inexact input)
+            R = roma.special_procrustes(rotations_t)
+        elif rotations_t.shape[-1] == 4:
             # N x 4 -> quaternions
-            R = Rotation.from_quat(rotations)
-        elif rotations.shape[-1] == 3:
+            R = roma.unitquat_to_rotmat(rotations_t)
+        elif rotations_t.shape[-1] == 3:
             # N x 3 -> rotvec
-            R = Rotation.from_rotvec(rotations)
-        euler = R.as_euler("ZYZ", degrees=True)
+            R = roma.rotvec_to_rotmat(rotations_t)
+        euler = roma.rotmat_to_euler("ZYZ", R, degrees=True).numpy()
 
     # create associated starfile
     n = len(particles)

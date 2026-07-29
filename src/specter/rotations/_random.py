@@ -2,9 +2,8 @@ from __future__ import annotations
 
 from typing import Literal
 
+import roma
 import torch
-
-from ._rotation import Rotation
 
 
 def random_quaternion(
@@ -13,7 +12,7 @@ def random_quaternion(
     device: str | torch.device = "cpu",
 ) -> torch.Tensor:
     """
-    Generate uniformly random unit quaternions using Shoemake's method.
+    Generate uniformly random unit quaternions.
 
     Parameters
     ----------
@@ -29,22 +28,11 @@ def random_quaternion(
     quats : torch.Tensor
         Random unit quaternions. Shape (batchsize, 4) or (4,) if batchsize=1.
     """
+    quats = roma.random_unitquat(size=(batchsize,), device=device)  # xyzw
 
-    u1, u2, u3 = torch.rand(3, batchsize, device=device)
-
-    sqrt_u1 = torch.sqrt(u1)
-    sqrt_1u1 = torch.sqrt(1 - u1)
-
-    q_w = sqrt_1u1 * torch.sin(2 * torch.pi * u2)
-    q_x = sqrt_1u1 * torch.cos(2 * torch.pi * u2)
-    q_y = sqrt_u1 * torch.sin(2 * torch.pi * u3)
-    q_z = sqrt_u1 * torch.cos(2 * torch.pi * u3)
-
-    if convention == "xyzw":
-        quats = torch.stack([q_x, q_y, q_z, q_w], dim=-1)
-    elif convention == "wxyz":
-        quats = torch.stack([q_w, q_x, q_y, q_z], dim=-1)
-    else:
+    if convention == "wxyz":
+        quats = roma.quat_xyzw_to_wxyz(quats)
+    elif convention != "xyzw":
         raise ValueError("convention must be 'xyzw' or 'wxyz'")
 
     if batchsize == 1:
@@ -56,7 +44,7 @@ def random_rotvec(
     batchsize: int = 1, device: str | torch.device = "cpu"
 ) -> torch.Tensor:
     """
-    Generate uniformly random rotation vectors using the Rotation3D class.
+    Generate uniformly random rotation vectors.
 
     Parameters
     ----------
@@ -70,9 +58,7 @@ def random_rotvec(
     rotvecs : torch.Tensor
         Tensor of shape (batchsize, 3) with rotation vectors (axis * angle).
     """
-    quats = random_quaternion(batchsize=batchsize, convention="xyzw", device=device)
-    R = Rotation.from_quat(quats)
-    rotvecs = R.as_rotvec()
+    rotvecs = roma.random_rotvec(size=(batchsize,), device=device)
 
     if batchsize == 1:
         return rotvecs.squeeze(0)
@@ -83,7 +69,7 @@ def random_rotation_matrix(
     batchsize: int = 1, device: str | torch.device = "cpu"
 ) -> torch.Tensor:
     """
-    Generate uniformly random 3x3 rotation matrices using the Rotation3D class.
+    Generate uniformly random 3x3 rotation matrices.
 
     Parameters
     ----------
@@ -97,9 +83,7 @@ def random_rotation_matrix(
     rotmats : torch.Tensor
         Tensor of shape (batchsize, 3, 3) containing rotation matrices.
     """
-    quats = random_quaternion(batchsize=batchsize, convention="xyzw", device=device)
-    R = Rotation.from_quat(quats)
-    rotmats = R.as_matrix()
+    rotmats = roma.random_rotmat(size=(batchsize,), device=device)
 
     if batchsize == 1:
         return rotmats.squeeze(0)
@@ -127,23 +111,17 @@ def rotations_angular_difference(
     -------
     angles : torch.Tensor
         Smallest angular difference in degrees, shape (N,).
-
-    References
-    ----------
-    https://math.stackexchange.com/a/4001635
     """
     if rotation_representation == "rotvec":
-        rot1 = Rotation.from_rotvec(r1)
-        rot2 = Rotation.from_rotvec(r2)
+        R1 = roma.rotvec_to_rotmat(r1)
+        R2 = roma.rotvec_to_rotmat(r2)
     elif rotation_representation == "quaternion":
-        rot1 = Rotation.from_quat(r1)
-        rot2 = Rotation.from_quat(r2)
+        R1 = roma.unitquat_to_rotmat(r1)
+        R2 = roma.unitquat_to_rotmat(r2)
     else:
         raise ValueError(
             f"Unknown rotation_representation '{rotation_representation}'. Must be 'quaternion' or 'rotvec'."
         )
 
-    re_m = rot1.inv().as_matrix() @ rot2.as_matrix()
-    trace = torch.diagonal(re_m, dim1=-2, dim2=-1).sum(-1)
-    angles_rad = torch.arccos(((trace - 1) / 2).clamp(-1.0, 1.0))
+    angles_rad = roma.rotmat_geodesic_distance(R1, R2)
     return angles_rad / torch.pi * 180

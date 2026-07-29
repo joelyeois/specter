@@ -3,9 +3,8 @@ from __future__ import annotations
 from typing import Sequence
 
 import numpy as np
+import roma
 import torch
-
-from .rotations import Rotation
 
 
 def tilt_to_quaternions(
@@ -59,7 +58,7 @@ def tilt_to_quaternions(
     axis = torch.stack([phi.cos(), phi.sin(), torch.tensor(0.0)], dim=0)  # (3,)
 
     rotvecs = theta.unsqueeze(-1) * axis.unsqueeze(0)  # (N, 3)
-    return Rotation.from_rotvec(rotvecs).as_quat()  # (N, 4)
+    return roma.rotvec_to_unitquat(rotvecs)  # (N, 4)
 
 
 def read_aretomo3_aln(

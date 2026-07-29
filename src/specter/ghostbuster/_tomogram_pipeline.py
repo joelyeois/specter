@@ -5,11 +5,11 @@ from typing import Any, Literal, Sequence, cast
 
 import lightning as L
 import mrcfile
+import roma
 import torch
 import torch.nn as nn
 import torch.utils.data
 
-from ..rotations import Rotation
 from ._tomogram_reconstructor import TomogramReconstructor
 
 
@@ -222,7 +222,7 @@ class TomogramGhostbuster:
                     ],
                     dim=-1,
                 )
-            quaternions = Rotation.from_rotvec(rotvecs).as_quat()
+            quaternions = roma.rotvec_to_unitquat(rotvecs)
 
         return torch.as_tensor(quaternions, dtype=torch.float32)
 

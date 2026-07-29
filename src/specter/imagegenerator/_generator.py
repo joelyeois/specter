@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
+import roma
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -14,7 +15,7 @@ from ..crowding import CrowdWithDuplicates
 from ..ice import IceBank, RandomIcemaker
 from ._micrograph import MicrographGenerator
 from ..potential import PotentialBuilder
-from ..rotations import Rotation, VolumeRotator
+from ..rotations import VolumeRotator, translate_coordinates
 from ..scattering import Scattering
 from ._tiltseries import TiltSeriesGenerator
 
@@ -424,9 +425,16 @@ class ImageGeneratorFromCoordinates(ParticleGeneratorBase):
         r_coordinates : torch.Tensor
             Rotated and translated coordinates.
         """
-        R = Rotation.from_quat(Q)
+        R = roma.unitquat_to_rotmat(Q).transpose(-2, -1)  # inverse rotation
         T = rotations.translations_angstrom_to_torch(T, self.nxy, self.pixel_size)
-        r_coordinates = R.apply(self.coordinates, T=T)
+        N = self.coordinates.shape[0]
+        if R.ndim == 2:
+            rotated = self.coordinates @ R.T
+        else:
+            B = R.shape[0]
+            vectors_exp = self.coordinates.unsqueeze(0).expand(B, N, 3)
+            rotated = torch.einsum("bij,bkj->bki", R, vectors_exp)
+        r_coordinates = translate_coordinates(rotated, T, inverse=True)
         return r_coordinates
 
     def forward(self, idx: int | torch.Tensor) -> torch.Tensor:
@@ -741,9 +749,9 @@ class ImageGenerator(ParticleGeneratorBase):
             Q = Q.unsqueeze(0)
         if len(T.shape) < 2:
             T = T.unsqueeze(0)
-        R = Rotation.from_quat(Q)
+        R = roma.unitquat_to_rotmat(Q)
         T = rotations.translations_angstrom_to_torch(T, self.nxy, self.pixel_size)
-        theta = rotations.build_affine_matrix(R.as_matrix(), T)
+        theta = rotations.build_affine_matrix(R, T)
         V = self.rotator(self.V, theta)
         return V
 

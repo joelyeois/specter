@@ -1,8 +1,9 @@
 import numpy as np
 import pytest
+import roma
 import torch
 
-from specter.rotations import Rotation, build_affine_matrix, rotate_volume
+from specter.rotations import build_affine_matrix, rotate_volume
 from specter.scattering import (
     IterativeScattering,
     Scattering,
@@ -31,11 +32,7 @@ def test_iterative_scattering_batch_size(dummy_volume):
         progressbars=False,
     )
 
-    R = (
-        Rotation.from_rotvec(torch.tensor([[0.0, 0.1, 0.0]]))
-        .as_matrix()
-        .to(dummy_volume.device)
-    )
+    R = roma.rotvec_to_rotmat(torch.tensor([[0.0, 0.1, 0.0]])).to(dummy_volume.device)
     theta_matrix = build_affine_matrix(R)
 
     psi1 = scat_iter.forward(dummy_volume, theta_matrix, slice_batch_size=1)
@@ -62,11 +59,7 @@ def test_multislice_checkpointing_matches_uncheckpointed(dummy_volume):
     scat_iter = IterativeScattering(
         nxy=64, pixel_size=1.0, energy=300.0, progressbars=False
     )
-    R = (
-        Rotation.from_rotvec(torch.tensor([[0.0, 0.1, 0.0]]))
-        .as_matrix()
-        .to(dummy_volume.device)
-    )
+    R = roma.rotvec_to_rotmat(torch.tensor([[0.0, 0.1, 0.0]])).to(dummy_volume.device)
     theta_matrix = build_affine_matrix(R)
 
     psi = scat_iter.multislice(dummy_volume, theta_matrix)
@@ -82,11 +75,7 @@ def test_multislice_checkpointing_backprops(dummy_volume):
     scat_iter = IterativeScattering(
         nxy=64, pixel_size=1.0, energy=300.0, progressbars=False
     )
-    R = (
-        Rotation.from_rotvec(torch.tensor([[0.0, 0.1, 0.0]]))
-        .as_matrix()
-        .to(dummy_volume.device)
-    )
+    R = roma.rotvec_to_rotmat(torch.tensor([[0.0, 0.1, 0.0]])).to(dummy_volume.device)
     theta_matrix = build_affine_matrix(R)
 
     V = dummy_volume.clone().requires_grad_(True)
@@ -103,11 +92,7 @@ def test_parallel_rytov_matches_iterative_rytov(dummy_volume):
     scat_iter = IterativeScattering(
         nxy=64, pixel_size=1.0, energy=300.0, progressbars=False
     )
-    R = (
-        Rotation.from_rotvec(torch.tensor([[0.0, 0.1, 0.0]]))
-        .as_matrix()
-        .to(dummy_volume.device)
-    )
+    R = roma.rotvec_to_rotmat(torch.tensor([[0.0, 0.1, 0.0]])).to(dummy_volume.device)
     theta_matrix = build_affine_matrix(R)
 
     psi_iterative = scat_iter.rytov(dummy_volume, theta_matrix)
@@ -125,11 +110,7 @@ def test_parallel_rytov_checkpointing_backprops(dummy_volume):
     scat_iter = IterativeScattering(
         nxy=64, pixel_size=1.0, energy=300.0, progressbars=False
     )
-    R = (
-        Rotation.from_rotvec(torch.tensor([[0.0, 0.1, 0.0]]))
-        .as_matrix()
-        .to(dummy_volume.device)
-    )
+    R = roma.rotvec_to_rotmat(torch.tensor([[0.0, 0.1, 0.0]])).to(dummy_volume.device)
     theta_matrix = build_affine_matrix(R)
 
     V = dummy_volume.clone().requires_grad_(True)
@@ -151,11 +132,7 @@ def test_iterative_models_consistent_across_batch_size(dummy_volume, scattering_
         scattering_model=scattering_model,
         progressbars=False,
     )
-    R = (
-        Rotation.from_rotvec(torch.tensor([[0.0, 0.1, 0.0]]))
-        .as_matrix()
-        .to(dummy_volume.device)
-    )
+    R = roma.rotvec_to_rotmat(torch.tensor([[0.0, 0.1, 0.0]])).to(dummy_volume.device)
     theta_matrix = build_affine_matrix(R)
 
     method = getattr(scat_iter, scattering_model)

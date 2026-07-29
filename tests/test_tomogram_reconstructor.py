@@ -13,13 +13,13 @@ from pathlib import Path
 
 import lightning as L
 import pytest
+import roma
 import torch
 import torch.utils.data
 
 from specter.arrays import ball3d
 from specter.fft import fft3
 from specter.ghostbuster import TomogramReconstructor
-from specter.rotations import Rotation
 
 SCHEDULERS = [
     "LambdaLR",
@@ -50,7 +50,7 @@ def tilt_quaternions() -> torch.Tensor:
     rotvecs = torch.stack(
         [theta, torch.zeros_like(theta), torch.zeros_like(theta)], dim=-1
     )
-    return Rotation.from_rotvec(rotvecs).as_quat()
+    return roma.rotvec_to_unitquat(rotvecs)
 
 
 @pytest.fixture

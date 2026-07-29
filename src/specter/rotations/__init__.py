@@ -1,11 +1,13 @@
 """
-Quaternion-based 3D rotations, coordinate/volume transforms, and the
+Rotation representations are handled directly via the `roma` library
+(xyzw quaternion convention, matching roma's default). This package keeps
+only what roma doesn't provide: coordinate/volume transforms and the
 `VolumeRotator` module used for sampling (possibly tilted) slices out of a
 3D volume.
 
 Split across:
-    _rotation.py        - Rotation class, translate_coordinates, rotate_coordinates
-    _random.py           - random quaternion/rotvec/matrix generators, rotations_angular_difference
+    _rotation.py        - translate_coordinates, rotate_coordinates (thin roma wrapper)
+    _random.py           - random quaternion/rotvec/matrix generators, rotations_angular_difference (thin roma wrappers)
     _volume.py           - rotate_volume, rotate_volume_fourier, affine matrix helpers
     _volume_rotator.py   - VolumeRotator (LightningModule) and its private helpers
 
@@ -19,7 +21,7 @@ from ._random import (
     random_rotvec,
     rotations_angular_difference,
 )
-from ._rotation import Rotation, rotate_coordinates, translate_coordinates
+from ._rotation import rotate_coordinates, translate_coordinates
 from ._volume import (
     build_affine_matrix,
     rotate_volume,
@@ -35,7 +37,6 @@ from ._volume_rotator import (
 from ._volume_rotator import _resolve_roi as _resolve_roi
 
 __all__ = [
-    "Rotation",
     "translate_coordinates",
     "rotate_coordinates",
     "random_quaternion",

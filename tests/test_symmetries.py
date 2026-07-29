@@ -1,7 +1,7 @@
 import pytest
+import roma
 import torch
 
-from specter.rotations import Rotation
 from specter.symmetries import apply_symmetry, get_rotation_matrices
 
 # ---------------------------------------------------------------------------
@@ -75,7 +75,7 @@ def test_arbitrary_orthonormal_matrices_are_not_closed() -> None:
     random_angles = torch.rand(5) * 2 * torch.pi
     matrices = torch.stack(
         [
-            Rotation.from_rotvec(angle * axis / axis.norm()).as_matrix()
+            roma.rotvec_to_rotmat(angle * axis / axis.norm())
             for axis, angle in zip(random_axes, random_angles)
         ]
     )

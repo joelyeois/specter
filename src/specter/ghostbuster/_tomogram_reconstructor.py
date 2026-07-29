@@ -6,6 +6,7 @@ from typing import Any, Literal
 
 import lightning as L
 import mrcfile
+import roma
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -15,7 +16,6 @@ from torch.optim.lr_scheduler import LRScheduler, ReduceLROnPlateau
 from .. import rotations
 from ..aberrations import Aberration
 from ..imagegenerator._tiltseries import TiltSeriesGenerator
-from ..rotations import Rotation
 from ..scattering import IterativeScattering
 from ._helpers import (
     _apply_kmask_inplace,
@@ -265,7 +265,7 @@ class TomogramReconstructor(L.LightningModule):
         ``tilt_axis="x"``.
         """
         Q = self.quaternions[tilt_idx]
-        rotvec = Rotation.from_quat(Q.unsqueeze(0)).as_rotvec()[0]
+        rotvec = roma.unitquat_to_rotvec(Q.unsqueeze(0))[0]
         theta = rotvec.norm()  # radians (scalar tensor)
 
         cos_t = torch.cos(theta)
@@ -305,7 +305,7 @@ class TomogramReconstructor(L.LightningModule):
         """
         Q = self.quaternions[tilt_idx : tilt_idx + 1]  # (1, 4)
         T = self.translations[tilt_idx : tilt_idx + 1]  # (1, 2)
-        R_mat = Rotation.from_quat(Q).as_matrix()
+        R_mat = roma.unitquat_to_rotmat(Q)
         if R_mat.ndim == 2:
             R_mat = R_mat.unsqueeze(0)
         T_torch = rotations.translations_angstrom_to_torch(

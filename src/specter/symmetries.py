@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from typing import Literal
 
+import roma
 import torch
 
-from .rotations import Rotation, rotate_volume, rotate_volume_fourier
+from .rotations import rotate_volume, rotate_volume_fourier
 
 # Hardcoded point-group rotation matrices for the symmetry groups that don't
 # reduce to a simple closed-form generator (icosahedral, tetrahedral,
@@ -1049,7 +1050,7 @@ def _cyclic_matrices(n: int) -> torch.Tensor:
     """
     axis = torch.tensor([0.0, 0.0, 1.0])
     angles = torch.linspace(0, 360, n + 1)[:-1] / 180 * torch.pi
-    return torch.stack([Rotation.from_rotvec(ang * axis).as_matrix() for ang in angles])
+    return roma.rotvec_to_rotmat(angles.unsqueeze(-1) * axis.unsqueeze(0))
 
 
 def _dihedral_matrices(n: int) -> torch.Tensor:
@@ -1069,14 +1070,14 @@ def _dihedral_matrices(n: int) -> torch.Tensor:
     """
     axis_z = torch.tensor([0.0, 0.0, 1.0])
     axis_y = torch.tensor([0.0, 1.0, 0.0])
-    y_flip = Rotation.from_rotvec(torch.pi * axis_y)
+    y_flip = roma.rotvec_to_rotmat(torch.pi * axis_y)
 
     angles = torch.linspace(0, 360, n + 1)[:-1] / 180 * torch.pi
     matrices = []
     for ang in angles:
-        z_rot = Rotation.from_rotvec(ang * axis_z)
-        matrices.append(z_rot.as_matrix())
-        matrices.append((z_rot * y_flip).as_matrix())
+        z_rot = roma.rotvec_to_rotmat(ang * axis_z)
+        matrices.append(z_rot)
+        matrices.append(z_rot @ y_flip)
     return torch.stack(matrices)
 
 

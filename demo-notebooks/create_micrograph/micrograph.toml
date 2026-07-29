@@ -23,7 +23,12 @@ n_micrographs = 1
 scattering_model = "multislice"
 aberration_model = "holography"
 noise_model = "poisson"
-ice_model = "random"          # fast, worst accuracy. try "gd" (slow, highest accuracy, cached)
+ice_model = "gd"              # tiled from a pre-baked cache: scales to large micrographs at
+                               # near-constant memory (unlike "random", which builds one
+                               # single ice cube the full size of the micrograph -- fine for
+                               # small particle boxes, but memory-heavy at this notebook's
+                               # 2048x2048 micrograph_size). "random" is fast/cheap and still a
+                               # good choice for smaller micrographs.
 detector_model = "none"
 coincidence_radius_min = 1.8  # pixels
 chunk_size = 8                # slice chunk size for specimen generation; lower if GPU memory is limited

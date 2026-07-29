@@ -466,10 +466,20 @@ def main() -> None:
     # cached configs on every call.
     icemaker = None
     if ice_model == "random":
+        from specter.arrays import compute_nz
         from specter.ice import RandomIcemaker
 
-        n_ice = min(config.num_pixels, int(256 / config.pixel_size))
-        icemaker = RandomIcemaker(dx=config.pixel_size, n=n_ice).to(config.device)
+        # RandomIcemaker has no tiling support (unlike IceBank), so its own
+        # fixed (n, nz) must exactly match the micrograph volume it gets
+        # blended into: n=config.micrograph_size (not config.num_pixels,
+        # the separate, usually much smaller, particle-potential
+        # resolution), and nz computed the same way MicrographGenerator
+        # itself derives it from ice_thickness -- Z is generally much
+        # smaller than the XY micrograph size, not a cube.
+        ice_nz = compute_nz(V.shape[0], config.ice_thickness, config.pixel_size)
+        icemaker = RandomIcemaker(
+            dx=config.pixel_size, n=config.micrograph_size, nz=ice_nz
+        ).to(config.device)
     elif ice_model == "gd":
         icemaker = IceBank(cache_dir=config.ice_cache_dir).to(config.device)
 

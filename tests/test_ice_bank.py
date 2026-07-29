@@ -6,8 +6,12 @@ import pytest
 import torch
 
 from specter.arrays import soft_voxelize_coordinates
-from specter.ice import GradientSKIcemaker, IceBank
-from specter.ice._bank import build_ice_cache, random_rotation_matrix
+from specter.ice import GradientSKIcemaker, IceBank, RandomIcemaker
+from specter.ice._bank import (
+    blend_ice_into_volume,
+    build_ice_cache,
+    random_rotation_matrix,
+)
 from specter.ice._helpers import ndensity_of_amorphous_ice
 
 
@@ -283,3 +287,28 @@ def test_build_ice_cache_writes_loadable_configs(tmp_path):
     ice = cache.generate_ice(n=8, dx=1.0, batchsize=1)
     assert ice.shape == (1, 8, 8, 8)
     assert torch.isfinite(ice).all()
+
+
+def test_blend_ice_into_volume_random_icemaker_noncubic_nxy_nz():
+    """
+    blend_ice_into_volume's docstring states that a RandomIcemaker's own
+    fixed (n, dx, nz) "must already match V" -- it has no tiling support,
+    unlike IceBank. Regression test for a real bug found in
+    demo-scripts/generate_micrograph.py and the matching notebook: both
+    constructed RandomIcemaker with n=config.num_pixels (the separate,
+    usually much smaller, particle-potential resolution) instead of
+    n=config.micrograph_size, and relied on RandomIcemaker's nz defaulting
+    to n (a cube) instead of the actual, generally much smaller nz derived
+    from ice_thickness -- causing a broadcasting RuntimeError (and, once
+    n was fixed but nz still defaulted to a cube, a large spurious CUDA
+    OOM from allocating a needlessly cubic ice volume). This test builds
+    V and the RandomIcemaker with genuinely different, non-cube (nz, nxy)
+    to guard against a similar mismatch being reintroduced.
+    """
+    nz, nxy = 6, 16
+    V = torch.zeros(1, nz, nxy, nxy)
+    icemaker = RandomIcemaker(dx=1.0, n=nxy, nz=nz, progressbars=False)
+
+    result = blend_ice_into_volume(V, icemaker, pixel_size=1.0)
+    assert result.shape == (1, nz, nxy, nxy)
+    assert torch.isfinite(result).all()

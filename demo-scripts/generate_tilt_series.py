@@ -1,38 +1,43 @@
 """
-Generate a simulated cryo-ET tilt series from a pre-built tomogram volume and save as an .mrcs stack.
+Generate a simulated cryo-ET tilt series end-to-end: place proteins/membranes with
+CryoETSpecimenGenerator (polnet-driven placement + specter's own PotentialBuilder for
+density), then blend in ice and simulate the tilted acquisition with TiltSeriesGenerator.
+Saves the result as an .mrcs stack.
 
-The input MRC file is treated as the scattering potential volume (e.g. from Polnet or
-TomogramGenerator). Ice is optionally generated and blended in before simulation.
+Mirrors demo-notebooks/create_tilt_series/tilt-series-generator.ipynb.
 
 Usage:
-    python demo-scripts/generate_tilt_series.py --mrc_path /path/to/tomo.mrc --voxel_size 3.0
+    python demo-scripts/generate_tilt_series.py --config configs/tilt_series.toml
+
+Parameters are loaded from --config (default: configs/tilt_series.toml); any flag
+below overrides the corresponding scalar field in that file. protein_specs and
+membrane_specs are TOML-only (list-of-tables): edit --config directly to change
+species/populations, there is no per-species CLI flag.
 
 Device options:
     --device cpu          Single CPU
-    --device cuda         Single GPU (default: cuda)
-    --device cuda:0       Specific GPU
+    --device cuda         Single GPU (default device)
+    --device cuda:0       Specific single GPU
 
 Example (HPC):
     python demo-scripts/generate_tilt_series.py \\
-        --mrc_path /path/to/tomo.mrc \\
-        --voxel_size 3.0 \\
-        --micrograph_size 2100 \\
+        --config configs/tilt_series.toml \\
+        --target_shape 184 630 630 \\
+        --target_v_size 5.0 \\
         --energy 300 \\
         --dose_per_tilt 3.0 \\
         --min_tilt_angle -45 \\
         --max_tilt_angle 45 \\
         --n_tilts 61 \\
         --defocus 22000 \\
-        --cs 2.7 \\
+        --cs 2.0 \\
         --alpha 0.1 \\
         --tilt_axis y \\
         --scattering_model multislice \\
         --noise_model poisson \\
         --coincidence_radius 1.5 \\
         --num_frames 10 \\
-        --add_ice True \\
         --ice_model gd \\
-        --tomo_to_ice_ratio 0.75 \\
         --save_exitwaves True \\
         --device cuda:0 \\
         --output_dir ./output/ \\
@@ -50,234 +55,294 @@ _console = Console()
 
 
 def parse_args() -> argparse.Namespace:
+    from specter.config import REPO_ROOT
+
     parser = argparse.ArgumentParser(
-        description="Simulate a cryo-ET tilt series from a tomogram MRC and save as .mrcs.",
+        description="Simulate a cryo-ET tilt series (polnet placement + specter "
+        "density + ice + tilted acquisition) and save as .mrcs.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
 
-    # --- Input volume ---
     parser.add_argument(
-        "--mrc_path",
+        "--config",
         type=str,
-        required=True,
-        help="Path to the input MRC volume (Z, Y, X). (required)",
+        default=str(REPO_ROOT / "configs" / "tilt_series.toml"),
+        help="Path to a TOML config file. Every other flag below overrides a field in it.",
+    )
+
+    # --- Specimen placement (CryoETSpecimenGenerator) ---
+    parser.add_argument(
+        "--pdb_savefolder",
+        type=str,
+        default=argparse.SUPPRESS,
+        help="Folder to cache downloaded PDB files. Overrides --config.",
     )
     parser.add_argument(
-        "--voxel_size",
-        type=float,
-        default=3.0,
-        help="Voxel size in Ångstrom.",
-    )
-    parser.add_argument(
-        "--micrograph_size",
+        "--target_shape",
         type=int,
-        default=None,
-        help="Output micrograph size in pixels. Defaults to the XY dimension of the volume.",
+        nargs=3,
+        metavar=("Z", "Y", "X"),
+        default=argparse.SUPPRESS,
+        help="Output specimen volume shape in voxels. Overrides --config.",
+    )
+    parser.add_argument(
+        "--target_v_size",
+        type=float,
+        default=argparse.SUPPRESS,
+        help="Target voxel size in Ångstrom. Overrides --config.",
+    )
+    parser.add_argument(
+        "--low_res_v_size",
+        type=float,
+        default=argparse.SUPPRESS,
+        help="Voxel size used for polnet's low-resolution placement pass, in Ångstrom. "
+        "Overrides --config.",
+    )
+    parser.add_argument(
+        "--membrane_potential_scale",
+        type=float,
+        default=argparse.SUPPRESS,
+        help="Membrane potential scale factor, on top of the auto-calibrated "
+        "reference. Overrides --config.",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=argparse.SUPPRESS,
+        help="Random seed for polnet's placement. Overrides --config.",
+    )
+    parser.add_argument(
+        "--filler_occupancy",
+        type=float,
+        default=argparse.SUPPRESS,
+        help="Total occupancy of generic cytosolic filler added on top of "
+        "protein_specs. Set to 0 or omit from --config to disable. Overrides --config.",
     )
 
     # --- Microscope / physics ---
     parser.add_argument(
+        "--micrograph_size",
+        type=int,
+        default=argparse.SUPPRESS,
+        help="Output tilt-image size in pixels (square). Defaults to the XY "
+        "dimension of target_shape. Overrides --config.",
+    )
+    parser.add_argument(
         "--energy",
         type=float,
-        default=300.0,
-        help="Electron beam energy in keV.",
+        default=argparse.SUPPRESS,
+        help="Electron beam energy in keV. Overrides --config.",
     )
     parser.add_argument(
         "--dose_per_tilt",
         type=float,
-        default=3.0,
-        help="Dose per tilt angle in e⁻/Å².",
+        default=argparse.SUPPRESS,
+        help="Dose per tilt angle in e⁻/Å². Overrides --config.",
     )
     parser.add_argument(
         "--num_frames",
         type=int,
-        default=10,
-        help="Number of movie frames per tilt.",
+        default=argparse.SUPPRESS,
+        help="Number of movie frames per tilt. Overrides --config.",
     )
     parser.add_argument(
         "--cs",
         type=float,
-        default=2.0,
-        help="Spherical aberration in mm (1–3 mm typical).",
+        default=argparse.SUPPRESS,
+        help="Spherical aberration in mm (1-3 mm typical). Overrides --config.",
     )
     parser.add_argument(
         "--alpha",
         type=float,
-        default=0.1,
-        help="Amplitude contrast ratio.",
+        default=argparse.SUPPRESS,
+        help="Amplitude contrast ratio. Overrides --config.",
     )
 
     # --- Envelopes ---
     parser.add_argument(
         "--convergence_angle",
         type=float,
-        default=None,
-        help="Beam convergence semi-angle in mrad, for the Cs (spatial coherence) envelope. None disables it.",
+        default=argparse.SUPPRESS,
+        help="Beam convergence semi-angle in mrad, for the Cs (spatial coherence) "
+        "envelope. None disables it. Overrides --config.",
     )
     parser.add_argument(
         "--cc",
         type=float,
-        default=None,
-        help="Chromatic aberration coefficient in mm, for the Cc (temporal coherence) envelope. None disables it.",
+        default=argparse.SUPPRESS,
+        help="Chromatic aberration coefficient in mm, for the Cc (temporal "
+        "coherence) envelope. None disables it. Overrides --config.",
     )
     parser.add_argument(
         "--energy_spread",
         type=float,
-        default=0.7,
-        help="FWHM of the beam energy spread in eV, used by the Cc envelope.",
+        default=argparse.SUPPRESS,
+        help="FWHM of the beam energy spread in eV, used by the Cc envelope. "
+        "Overrides --config.",
     )
     parser.add_argument(
         "--deltaV_V",
         type=float,
-        default=0.06e-6,
-        help="Relative high-voltage instability, used by the Cc envelope.",
+        default=argparse.SUPPRESS,
+        help="Relative high-voltage instability, used by the Cc envelope. "
+        "Overrides --config.",
     )
     parser.add_argument(
         "--deltaI_I",
         type=float,
-        default=0.01e-6,
-        help="Relative objective-lens current instability, used by the Cc envelope.",
+        default=argparse.SUPPRESS,
+        help="Relative objective-lens current instability, used by the Cc envelope. "
+        "Overrides --config.",
     )
     parser.add_argument(
         "--dose_envelope",
         type=lambda x: x.lower() == "true",
-        default=False,
+        default=argparse.SUPPRESS,
         metavar="True|False",
-        help="Apply the Grant & Grigorieff (2015) cumulative-dose envelope.",
+        help="Apply the Grant & Grigorieff (2015) cumulative-dose envelope. "
+        "Overrides --config.",
     )
 
     # --- Defocus ---
     parser.add_argument(
         "--defocus",
         type=float,
-        default=22000.0,
-        help="Defocus in Ångstrom (positive = underfocus).",
+        default=argparse.SUPPRESS,
+        help="Defocus in Ångstrom (positive = underfocus). Overrides --config.",
     )
 
     # --- Tilt geometry ---
     parser.add_argument(
         "--min_tilt_angle",
         type=float,
-        default=-45.0,
-        help="Minimum tilt angle in degrees.",
+        default=argparse.SUPPRESS,
+        help="Minimum tilt angle in degrees. Overrides --config.",
     )
     parser.add_argument(
         "--max_tilt_angle",
         type=float,
-        default=45.0,
-        help="Maximum tilt angle in degrees.",
+        default=argparse.SUPPRESS,
+        help="Maximum tilt angle in degrees. Overrides --config.",
     )
     parser.add_argument(
         "--n_tilts",
         type=int,
-        default=61,
-        help="Number of tilt angles (evenly spaced from min to max).",
+        default=argparse.SUPPRESS,
+        help="Number of tilt angles (evenly spaced from min to max). Overrides --config.",
     )
     parser.add_argument(
         "--tilt_axis",
         type=str,
-        default="y",
+        default=argparse.SUPPRESS,
         choices=["x", "y"],
-        help="Tilt axis.",
+        help="Tilt axis. Overrides --config.",
     )
 
     # --- Models ---
     parser.add_argument(
         "--scattering_model",
         type=str,
-        default="multislice",
+        default=argparse.SUPPRESS,
         choices=["multislice", "firstborn", "projection", "ctf"],
-        help="Scattering model.",
+        help="Scattering model. Overrides --config.",
+    )
+    parser.add_argument(
+        "--aberration_model",
+        type=str,
+        default=argparse.SUPPRESS,
+        choices=["holography", "ctf"],
+        help="Aberration model. Overrides --config.",
     )
     parser.add_argument(
         "--noise_model",
         type=str,
-        default="poisson",
+        default=argparse.SUPPRESS,
         choices=["poisson", "none"],
-        help="Noise model. Use 'none' for no noise.",
+        help="Noise model. Use 'none' for no noise. Overrides --config.",
     )
     parser.add_argument(
         "--coincidence_radius",
         type=float,
-        default=1.5,
-        help="Coincidence radius in Ångstrom for direct-detector modelling.",
-    )
-
-    # --- Ice ---
-    parser.add_argument(
-        "--add_ice",
-        type=lambda x: x.lower() == "true",
-        default=True,
-        metavar="True|False",
-        help="Generate and blend amorphous ice into the volume.",
+        default=argparse.SUPPRESS,
+        help="Coincidence radius in pixels for direct-detector modelling. "
+        "Overrides --config.",
     )
     parser.add_argument(
         "--ice_model",
         type=str,
-        default="gd",
-        choices=["gd", "random"],
+        default=argparse.SUPPRESS,
+        choices=["gd", "random", "none"],
         help="Ice generation algorithm: 'gd' (samples from the pre-generated "
-        "IceBank cache, default) or 'random' (instant, cheap RandomIcemaker "
-        "placement).",
+        "IceBank cache, default), 'random' (instant, cheap RandomIcemaker "
+        "placement), or 'none'. Overrides --config.",
     )
     parser.add_argument(
         "--ice_cache_dir",
         type=str,
-        default=None,
+        default=argparse.SUPPRESS,
         help="Directory of cached ice configs for ice_model='gd'. Defaults to "
-        "the bundled ice-data/ice_cache.",
+        "the bundled ice-data/ice_cache. Overrides --config.",
     )
     parser.add_argument(
         "--ice_relax_steps",
         type=int,
-        default=0,
+        default=argparse.SUPPRESS,
         help="Local MLBOP relaxation steps used to heal ice tile seams "
-        "(ice_model='gd' only). Same default/semantics as "
-        "TiltSeriesGenerator's own ice_relax_steps.",
+        "(ice_model='gd' only). Overrides --config.",
     )
     parser.add_argument(
-        "--tomo_to_ice_ratio",
-        type=float,
-        default=0.75,
-        help="Scale factor for tomogram intensity relative to ice.",
+        "--pad_fft",
+        type=lambda x: x.lower() == "true",
+        default=argparse.SUPPRESS,
+        metavar="True|False",
+        help="Pad volume for FFT to avoid multislice edge-wraparound artifacts "
+        "under tilt. Overrides --config.",
+    )
+    parser.add_argument(
+        "--detector_model",
+        type=str,
+        default=argparse.SUPPRESS,
+        choices=["none", "perfect", "k3_300kv", "k3_200kv"],
+        help="Detector model. Overrides --config.",
     )
 
     # --- Post-processing ---
     parser.add_argument(
-        "--normalize",
+        "--normalize_tilt_series",
         type=lambda x: x.lower() == "true",
-        default=False,
+        default=argparse.SUPPRESS,
         metavar="True|False",
-        help="Normalize each tilt image to zero mean and unit std.",
+        help="Normalize each tilt image to zero mean and unit std. Overrides --config.",
     )
     parser.add_argument(
         "--save_exitwaves",
         type=lambda x: x.lower() == "true",
-        default=False,
+        default=argparse.SUPPRESS,
         metavar="True|False",
-        help="Save exit wave magnitude and phase as separate .mrcs files.",
+        help="Save exit wave magnitude and phase as separate .mrcs files. "
+        "Overrides --config.",
     )
 
     # --- Compute ---
     parser.add_argument(
         "--device",
         type=str,
-        default="cuda",
-        help="Device to use. Options: cpu | cuda | cuda:0.",
+        default=argparse.SUPPRESS,
+        help="Device to use. Options: cpu | cuda | cuda:0. Overrides --config.",
     )
 
     # --- Output ---
     parser.add_argument(
         "--output_dir",
         type=str,
-        default="./output/",
-        help="Directory to save output files.",
+        default=argparse.SUPPRESS,
+        help="Directory to save output files. Overrides --config.",
     )
     parser.add_argument(
         "--filename",
         type=str,
-        default="tilt_series",
-        help="Base name for output files (no extension).",
+        default=argparse.SUPPRESS,
+        help="Base name for output files (no extension). Overrides --config.",
     )
 
     return parser.parse_args()
@@ -294,100 +359,104 @@ def main() -> None:
     import torch
 
     import specter
+    from specter.config import TiltSeriesConfig, apply_overrides, load_config
     from specter.cryosparc import create_micrograph_starfile
     from specter.imagegenerator import TiltSeriesGenerator
-    from specter.ice import IceBank, resolve_icemaker
+    from specter.specimen.cryoet import CryoETSpecimenGenerator
+    from specter.specimen.cytosolic_filler import build_filler_protein_specs
 
     args = parse_args()
+    config = load_config(args.config, TiltSeriesConfig)
+    overrides = {k: v for k, v in vars(args).items() if k != "config"}
+    apply_overrides(config, overrides)
     specter.set_verbosity(logging.INFO)
 
     t_start = time.perf_counter()
 
-    # --- Load volume ---
-    _section("Loading MRC volume")
-    with mrcfile.open(args.mrc_path) as mrc:
-        tomo = torch.as_tensor(mrc.data[...].copy())
-    _console.print(f"  Volume shape: {tuple(tomo.shape)}  (Z, Y, X)")
+    # --- Specimen placement + density (polnet placement, specter density) ---
+    _section("Building specimen (polnet placement + PotentialBuilder density)")
+    protein_specs = list(config.protein_specs)
+    if config.filler_occupancy is not None:
+        protein_specs += build_filler_protein_specs(
+            total_occupancy=config.filler_occupancy
+        )
 
-    dx = args.voxel_size
-    micrograph_size = (
-        args.micrograph_size if args.micrograph_size is not None else tomo.shape[-1]
+    gen = CryoETSpecimenGenerator(
+        protein_specs=protein_specs,
+        membrane_specs=config.membrane_specs,
+        target_shape=tuple(config.target_shape),
+        target_v_size=config.target_v_size,
+        low_res_v_size=config.low_res_v_size,
+        pdb_cache_dir=config.pdb_savefolder,
+        membrane_potential_scale=config.membrane_potential_scale,
+        seed=config.seed,
     )
-
-    # --- Ice ---
-    if args.add_ice:
-        _section("Generating amorphous ice")
-        _console.print(f"  method = {args.ice_model},  dx = {dx:.2f} Å")
-        icemaker = resolve_icemaker(
-            args.ice_model,
-            dx,
-            tomo.shape[-1],
-            tomo.shape[0],
-            ice_cache_dir=args.ice_cache_dir,
-        ).to(args.device)
-        if isinstance(icemaker, IceBank):
-            ice = torch.squeeze(
-                icemaker.generate_big_ice(
-                    n=tomo.shape[-1],
-                    dx=dx,
-                    nz=tomo.shape[0],
-                    batchsize=1,
-                    relax_steps=args.ice_relax_steps,
-                )
-            ).cpu()
-        else:
-            ice = torch.squeeze(icemaker.generate_ice(batchsize=1)).cpu()
-        ratio = args.tomo_to_ice_ratio
-        # The input MRC is treated as a raw scattering-potential volume (e.g.
-        # from Polnet) whose intensity scale is not calibrated against
-        # specter's own potential units, unlike volumes built internally by
-        # PotentialBuilder/TomogramGenerator -- so it's rescaled relative to
-        # the freshly generated ice before blending, rather than added
-        # directly via ice.blend_ice_into_volume (which assumes a matching
-        # scale already).
-        tomo = tomo * torch.max(ice) * ratio + ice * (tomo < 0.1)
+    volume = gen.generate()
+    _console.print(f"  Volume shape: {tuple(volume.shape)}  (Z, Y, X)")
 
     # --- Build tilt series generator ---
+    # TiltSeriesGenerator resolves ice_model/ice_cache_dir/ice_relax_steps into a
+    # concrete icemaker itself and blends it into the volume before simulation --
+    # no separate ice-generation step needed here, unlike volumes sourced from
+    # outside specter (e.g. raw Polnet/TomogramGenerator MRCs) whose intensity
+    # scale isn't guaranteed to already match specter's own potential units.
     _section("Building TiltSeriesGenerator")
-    cs_angstrom = args.cs * 1e7
-    angles = torch.linspace(args.min_tilt_angle, args.max_tilt_angle, args.n_tilts)
+    dx = config.target_v_size
+    micrograph_size = (
+        config.micrograph_size
+        if config.micrograph_size is not None
+        else int(volume.shape[-1])
+    )
+    angles = torch.linspace(
+        config.min_tilt_angle, config.max_tilt_angle, config.n_tilts
+    )
     _console.print(
-        f"  Tilt angles: {args.n_tilts} steps from {args.min_tilt_angle}° to {args.max_tilt_angle}°"
+        f"  Tilt angles: {config.n_tilts} steps from {config.min_tilt_angle}° "
+        f"to {config.max_tilt_angle}°"
     )
 
-    noise_model = None if args.noise_model == "none" else args.noise_model
+    cs_angstrom = config.cs * 1e7
+    cc_angstrom = config.cc * 1e7 if config.cc is not None else None
 
     ctf_params = {
         "cs": torch.tensor([cs_angstrom]),
-        "dfu": torch.tensor([args.defocus]),
+        "dfu": torch.tensor([config.defocus]),
     }
 
-    cc_angstrom = args.cc * 1e7 if args.cc is not None else None
+    ice_model = None if config.ice_model == "none" else config.ice_model
+    noise_model = None if config.noise_model == "none" else config.noise_model
+    detector_model = None if config.detector_model == "none" else config.detector_model
 
     model = TiltSeriesGenerator(
-        tomo[None, ...],  # add batch dim: (1, Z, Y, X)
+        volume.unsqueeze(0),  # add batch dim: (1, Z, Y, X)
         micrograph_size,
         dx,
         ctf_params,
-        args.energy,
-        args.dose_per_tilt,
+        config.energy,
+        config.dose_per_tilt,
         angles=angles,
-        scattering_model=args.scattering_model,
+        ice_model=ice_model,
+        ice_cache_dir=config.ice_cache_dir,
+        ice_relax_steps=config.ice_relax_steps,
+        scattering_model=config.scattering_model,
+        aberration_model=config.aberration_model,
         noise_model=noise_model,
-        alpha=args.alpha,
-        tilt_axis=args.tilt_axis,
-        coincidence_radius=args.coincidence_radius,
-        num_frames=args.num_frames,
-        convergence_angle=args.convergence_angle,
+        alpha=config.alpha,
+        pad_fft=config.pad_fft,
+        tilt_axis=config.tilt_axis,
+        coincidence_radius=config.coincidence_radius,
+        num_frames=config.num_frames,
+        convergence_angle=config.convergence_angle,
         cc=cc_angstrom,
-        energy_spread=args.energy_spread,
-        deltaV_V=args.deltaV_V,
-        deltaI_I=args.deltaI_I,
-        dose_envelope=args.dose_envelope,
-    ).to(args.device)
+        energy_spread=config.energy_spread,
+        deltaV_V=config.deltaV_V,
+        deltaI_I=config.deltaI_I,
+        dose_envelope=config.dose_envelope,
+        detector_model=detector_model,
+    ).to(config.device)
 
     # --- Generate ---
-    _section(f"Generating tilt series on {args.device}")
+    _section(f"Generating tilt series on {config.device}")
     with torch.no_grad():
         images, exitwaves, cleans = model.generate_tilt_series(torch.tensor([0]))
     # images: (1, n_tilts, H, W)
@@ -395,46 +464,46 @@ def main() -> None:
     exitwaves = exitwaves[0].cpu()  # (n_tilts, H, W) complex
 
     # --- Post-processing ---
-    if args.normalize:
+    if config.normalize_tilt_series:
         _section("Normalizing")
         mean = images.mean(dim=(-2, -1), keepdim=True)
         std = images.std(dim=(-2, -1), keepdim=True)
         images = (images - mean) / std.clamp(min=1e-8)
 
-    # --- Save ---
+    # --- Saving ---
     _section("Saving")
-    os.makedirs(args.output_dir, exist_ok=True)
+    os.makedirs(config.output_dir, exist_ok=True)
 
-    mrcs_path = os.path.join(args.output_dir, args.filename + ".mrcs")
+    mrcs_path = os.path.join(config.output_dir, config.filename + ".mrcs")
     with mrcfile.new(mrcs_path, overwrite=True) as mrc:
         mrc.set_data(images.numpy().astype("float32"))
     _console.print(f"  [green]✓[/green] {mrcs_path}")
 
     ctf_params_broadcast = {
-        "cs": torch.full((args.n_tilts,), cs_angstrom),
-        "dfu": torch.full((args.n_tilts,), args.defocus),
+        "cs": torch.full((config.n_tilts,), cs_angstrom),
+        "dfu": torch.full((config.n_tilts,), config.defocus),
     }
     create_micrograph_starfile(
-        n=args.n_tilts,
-        energy=args.energy,
+        n=config.n_tilts,
+        energy=config.energy,
         pixel_size=dx,
-        alpha=args.alpha,
+        alpha=config.alpha,
         ctf_params=ctf_params_broadcast,
-        folderpath=args.output_dir,
-        filename=args.filename,
-        dose_per_angstrom=args.dose_per_tilt,
-        coincidence_radius=args.coincidence_radius,
+        folderpath=config.output_dir,
+        filename=config.filename,
+        dose_per_angstrom=config.dose_per_tilt,
+        coincidence_radius=config.coincidence_radius,
         tilt_angles=angles,
     )
 
-    if args.save_exitwaves:
-        ew_prefix = "exitwave" if args.add_ice else "clean_exitwave"
+    if config.save_exitwaves:
+        ew_prefix = "exitwave" if ice_model is not None else "clean_exitwave"
         _section(f"Saving {ew_prefix.replace('_', ' ')}")
         mag_path = os.path.join(
-            args.output_dir, f"{args.filename}_{ew_prefix}_magnitude.mrcs"
+            config.output_dir, f"{config.filename}_{ew_prefix}_magnitude.mrcs"
         )
         phase_path = os.path.join(
-            args.output_dir, f"{args.filename}_{ew_prefix}_phase.mrcs"
+            config.output_dir, f"{config.filename}_{ew_prefix}_phase.mrcs"
         )
         with mrcfile.new(mag_path, overwrite=True) as mrc:
             mrc.set_data(exitwaves.abs().numpy().astype("float32"))

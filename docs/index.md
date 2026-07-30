@@ -7,14 +7,11 @@
 
 **Scattering & Propagation of Electrons in Cryo-EM: Twin Emulator & Reconstruction**
 
-A microscope you can run backwards. SPECTER simulates what a cryo-electron
-microscope would record from a known molecule, and then uses that same
-simulation in reverse to recover a molecule from real images. Both directions
-run on one shared piece of physics — the forward model is differentiable, so
-the same code that generates an image can have gradients pushed back through
-it to recover the structure that produced one. See
-[Pipeline overview](concepts/pipeline-overview.md) for how that works end
-to end, and [Concepts](concepts/index.md) for the underlying equations.
+SPECTER simulates what a cryo-electron microscope would record from a known
+molecule — a physics-based generator built to match experimental data as
+closely as possible. See [Pipeline overview](concepts/pipeline-overview.md)
+for how a simulation is put together end to end, and
+[Concepts](concepts/index.md) for the underlying equations.
 
 ## If you are new to cryo-EM
 
@@ -23,7 +20,7 @@ water holding copies of a protein, each frozen in a random orientation. The
 resulting images are extremely noisy — the dose has to stay low or the
 electrons destroy the very thing you are imaging. Recovering a 3D structure
 means combining hundreds of thousands of these faint, randomly-oriented
-shadows. SPECTER can both **fake** that data convincingly and **solve** it.
+shadows. SPECTER exists to **fake** that data convincingly.
 
 ## If you work in the field
 
@@ -50,8 +47,7 @@ target S(k) and an MLBOP water potential.
 
     ---
 
-    Simulate a particle stack from a PDB code, or reconstruct a volume
-    with Ghostbuster, in one command.
+    Simulate a particle stack from a PDB code in one command.
 
     [:octicons-arrow-right-24: Quickstart](quickstart.md)
 
@@ -64,15 +60,6 @@ competitive comparison. Each is unusual on its own; together they define
 what SPECTER is for.
 
 <div class="grid cards" markdown>
-
--   :material-sync:{ .lg .middle } **Shared model**
-
-    ---
-
-    Simulation and reconstruction are the same code. Ghostbuster
-    instantiates the ordinary `ImageGenerator` and optimises through it —
-    there is no separate, simplified reconstruction physics to drift out
-    of sync.
 
 -   :material-snowflake:{ .lg .middle } **Ice**
 

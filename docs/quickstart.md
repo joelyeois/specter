@@ -2,11 +2,11 @@
 
 ## Simulate a particle stack
 
-The `generate_particle_stack.py` demo script is the quickest way to produce
-a simulated cryo-EM particle stack from a PDB code:
+The `specter simulate particles` CLI is the quickest way to produce a
+simulated cryo-EM particle stack from a PDB code:
 
 ```bash
-python demo-scripts/generate_particle_stack.py \
+specter simulate particles \
     --pdb_code 6bdf \
     --n_particles 20 \
     --num_pixels 256 \

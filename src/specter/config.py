@@ -89,7 +89,9 @@ class ParticleStackConfig:
     scattering_model: Literal["multislice", "firstborn", "projection", "ctf"] = (
         "multislice"
     )
-    detector_model: Literal["none", "perfect", "k3_300kv", "k3_200kv"] = "none"
+    detector_model: Literal[
+        "none", "perfect", "k3_300kv", "k3_200kv", "falcon4i_300kv", "falcon4i_200kv"
+    ] = "none"
 
     # --- Post-processing (basic) ---
     normalize_particles: bool = True
@@ -126,6 +128,57 @@ class ParticleStackConfig:
     crowd_max_distance_z: float | None = None  # Å
     potential_scale: str = "1"  # unitless
     pad_fft: bool = True
+
+    # --- Advanced: potential building ---
+    potential_parameterization: Literal["shtyrov", "kirkland", "lobato"] = "shtyrov"
+    potential_method: Literal["analytic", "2d", "3d"] = "analytic"
+    rcut: float | None = None  # Å, auto-detected per-structure if unset
+    conv_backend: str = "fftconvolve"
+    periodic: bool = False
+    # per-atom bonded species for Shtyrov typing; auto-detected from PDB bonds if
+    # unset. Sized to the structure's atom count -- config-only, not a CLI flag.
+    atom_species: list[str] | None = None
+    shtyrov_params_path: str | None = None
+    mmcif_filepath: str | None = None
+
+    # --- Advanced: scattering ---
+    ews_curvature_sign: Literal["negative", "positive"] = "positive"
+    klim: float | None = None  # 1/Å
+    rotate_mode: Literal["real", "fourier"] = "real"
+
+    # --- Advanced: ice ---
+    ice_parameterization: Literal["kirkland", "lobato", "shtyrov"] = "shtyrov"
+    ice_relax_steps: int = 0
+
+    # --- Advanced: crowding ---
+    crowd_chunk_size: int | None = 1
+    crowd_max_distance_xy: float | None = None  # Å
+    crowd_method: Literal["2d", "3d"] = "3d"
+    crowd_n_points: int | None = None
+    crowd_seed: Literal["origin", "random"] = "origin"
+    crowd_move_to_cpu: bool = False
+    water_air_interface: bool = False
+
+    # --- Advanced: reproducibility ---
+    seed: int | None = None
+
+    # --- Advanced: aberration richness for synthetic (non-.cs-driven) generation ---
+    astigmatism: str = "0"  # Å, magnitude of dfu - dfv
+    astigmatism_angle: str = "0,180"  # degrees, dfang
+    phaseshift: str = "0"  # radians
+    tiltx: str = "0"  # radians
+    tilty: str = "0"  # radians
+    trefoil1: str = "0"  # Å^3
+    trefoil2: str = "0"  # Å^3
+
+    # --- Advanced: anisotropic magnification ---
+    # [[m00, m01], [m10, m11]], identity (no correction) by default. One fixed
+    # matrix applied to every particle in a run (a microscope/session-level
+    # calibration constant, not something that varies per particle).
+    anisomag_m00: float = 1.0
+    anisomag_m01: float = 0.0
+    anisomag_m10: float = 0.0
+    anisomag_m11: float = 1.0
 
 
 # Human-readable per-field descriptions for ParticleStackConfig, used to build
@@ -187,6 +240,62 @@ PARTICLE_STACK_HELP: dict[str, str] = {
     "approximate thicker ice): a single value for constant scale, or "
     "'low,high' to sample uniformly per particle.",
     "pad_fft": "Pad the volume for FFT to avoid edge artifacts.",
+    "potential_parameterization": "Atomic potential model used to build the "
+    "structure's scattering potential.",
+    "potential_method": "Voxelization method: 'analytic' (per-atom closed-form, "
+    "no splat/FFT), '2d' (soft XY, hard Z), or '3d' (trilinear).",
+    "rcut": "Cutoff radius in Angstrom for the atomic potential kernel. "
+    "Auto-detected per-structure if unset.",
+    "conv_backend": "Convolution backend for potential building. Unused for "
+    "potential_method='analytic'.",
+    "periodic": "Use periodic boundary conditions when voxelizing coordinates "
+    "into the potential. Forces potential_method='3d'.",
+    "shtyrov_params_path": "Override the bundled Shtyrov parameter table.",
+    "mmcif_filepath": "Explicit mmCIF source for bond-typing, if pdb_code alone "
+    "is ambiguous.",
+    "ews_curvature_sign": "Ewald sphere curvature sign, matching CryoSPARC's "
+    "convention.",
+    "klim": "Reciprocal-space cutoff in 1/Angstrom. Unset uses the full Nyquist range.",
+    "rotate_mode": "Volume rotation method: 'real' (trilinear interpolation) or "
+    "'fourier' (no boundary artifacts).",
+    "ice_parameterization": "Atomic potential model used for the ice volume "
+    "specifically (independent of potential_parameterization).",
+    "ice_relax_steps": "Local MLBOP seam-relaxation steps, only used when "
+    "ice_model='gd' tiles multiple cached blocks.",
+    "crowd_chunk_size": "Crowding volumes rotated per GPU batch. Raise for "
+    "speed if you have RAM to spare; None rotates all at once.",
+    "crowd_max_distance_xy": "Maximum xy-distance between crowded particles in "
+    "Angstrom.",
+    "crowd_method": "Poisson-disk sampling dimensionality for crowding particle "
+    "placement.",
+    "crowd_n_points": "Cap on the number of crowding duplicates. Unset means no cap.",
+    "crowd_seed": "Crowding placement seed strategy: 'origin' (first point at "
+    "the structure's center) or 'random'.",
+    "crowd_move_to_cpu": "Move crowding intermediates to CPU between steps, to "
+    "trade speed for lower GPU memory.",
+    "water_air_interface": "Model a water-air interface when placing ice/"
+    "crowding (bimodal density along z instead of uniform).",
+    "seed": "RNG seed for pose/CTF/dose sampling. Auto-generated and logged if unset.",
+    "astigmatism": "Astigmatism magnitude (dfu - dfv) in Angstrom: a single "
+    "value for constant, or 'low,high' to sample uniformly per particle.",
+    "astigmatism_angle": "Astigmatism angle in degrees: a single value or "
+    "'low,high' range. Irrelevant when astigmatism is 0.",
+    "phaseshift": "Phase shift in radians (e.g. from a Volta phase plate): a "
+    "single value or 'low,high' range.",
+    "tiltx": "Beam tilt (x) in radians: a single value or 'low,high' range.",
+    "tilty": "Beam tilt (y) in radians: a single value or 'low,high' range.",
+    "trefoil1": "First trefoil (3-fold astigmatism) component in Angstrom^3: a "
+    "single value or 'low,high' range.",
+    "trefoil2": "Second trefoil component in Angstrom^3: a single value or "
+    "'low,high' range.",
+    "anisomag_m00": "Anisotropic magnification matrix element [0,0]. Identity "
+    "(1.0) means no correction.",
+    "anisomag_m01": "Anisotropic magnification matrix element [0,1]. Identity "
+    "(0.0) means no correction.",
+    "anisomag_m10": "Anisotropic magnification matrix element [1,0]. Identity "
+    "(0.0) means no correction.",
+    "anisomag_m11": "Anisotropic magnification matrix element [1,1]. Identity "
+    "(1.0) means no correction.",
 }
 
 

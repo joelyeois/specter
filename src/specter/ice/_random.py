@@ -36,6 +36,9 @@ class RandomIcemaker(L.LightningModule):
         Number of pixels in xy-axis. Assumes a square field-of-view.
     nz : int, optional
         Number of pixels along z. If None, defaults to ``n``.
+    parameterization : str, optional
+        Atomic potential parameterization for the ice kernel: ``'kirkland'``,
+        ``'lobato'``, or ``'shtyrov'``. Default ``'kirkland'``.
     progressbars : bool, optional
         Whether to show progress bars. Default is True.
     """
@@ -43,13 +46,19 @@ class RandomIcemaker(L.LightningModule):
     method: str = "random"
 
     def __init__(
-        self, dx: float, n: int, nz: int | None = None, progressbars: bool = True
+        self,
+        dx: float,
+        n: int,
+        nz: int | None = None,
+        parameterization: str = "kirkland",
+        progressbars: bool = True,
     ):
         super().__init__()
 
         self.dx = dx
         self.n = n
         self.nz = n if nz is None else nz
+        self.parameterization = parameterization
 
         self.box_x: float = n * dx
         self.box_y: float = n * dx
@@ -60,7 +69,8 @@ class RandomIcemaker(L.LightningModule):
         self.total_vol = self.nv * self.dv
         self.n_ice_molecules = int(ndensity_of_amorphous_ice * self.total_vol)
         self.register_buffer(
-            "ice_kernel", build_atomic_potential_kernel(self.dx, "kirkland")
+            "ice_kernel",
+            build_atomic_potential_kernel(self.dx, self.parameterization),
         )
 
         self.progressbars = progressbars

@@ -53,6 +53,16 @@ def test_icebank_basic_extraction_shape_and_finite(tmp_path):
     assert torch.isfinite(ice).all()
 
 
+def test_icebank_parameterization_changes_kernel(tmp_path):
+    """Regression guard: IceBank._get_kernel should honor `parameterization`,
+    not silently fall back to a hardcoded 'kirkland'."""
+    _make_cache_config(tmp_path, "config_000.pt", n=32, dx=1.0)
+    kirkland = IceBank(str(tmp_path), progressbars=False)
+    lobato = IceBank(str(tmp_path), progressbars=False, parameterization="lobato")
+
+    assert not torch.allclose(kirkland._get_kernel(1.0), lobato._get_kernel(1.0))
+
+
 def test_icebank_generate_ice_deltas_shape(tmp_path):
     _make_cache_config(tmp_path, "config_000.pt", n=32, dx=1.0)
     cache = IceBank(str(tmp_path), progressbars=False)

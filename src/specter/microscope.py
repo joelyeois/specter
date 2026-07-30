@@ -11,8 +11,7 @@ from .progress import track
 
 class Detector(L.LightningModule):
     """
-    A detector module to apply detector noise to images. Future work to include
-    magnification and DQE functionality.
+    A detector module to apply detector noise to images.
 
     Dose and coincidence radius are not stored at construction time; they must be
     supplied per-batch via ``forward()``. This allows per-image randomisation of
@@ -28,10 +27,6 @@ class Detector(L.LightningModule):
     noise_model : str, optional
         Specifies noise model. Currently only 'poisson' available. Default is None
         (no noise applied).
-    magnification : float, optional
-        Magnification factor. Default is None. (To-do: not yet implemented).
-    dqe : bool, optional
-        Detective quantum efficiency. Default is None. (To-do: not yet implemented).
     mtf : torch.Tensor, optional
         Modulation transfer function in Fourier space to apply to images.
         Default is None (no MTF applied).
@@ -46,8 +41,6 @@ class Detector(L.LightningModule):
         pixel_size: float,
         aberration_model: str = "holography",
         noise_model: str | None = None,
-        magnification: float | None = None,
-        dqe: bool | None = None,
         mtf: torch.Tensor | None = None,
         num_frames: int | None = None,
         progressbars: bool = True,

@@ -58,3 +58,49 @@ ice_thickness = 0.0              # Å, 0 = minimum (particle box size)
 # crowd_max_distance_z = 50.0     # Å
 potential_scale = "1"            # unitless; single value, or "low,high" (values < 1 approximate thicker ice)
 pad_fft = true
+
+# potential building
+potential_parameterization = "shtyrov"   # shtyrov | kirkland | lobato
+potential_method = "analytic"            # analytic | 2d | 3d
+# rcut = 6.0                     # Å, auto-detected per-structure if unset
+conv_backend = "fftconvolve"     # unused for potential_method="analytic"
+periodic = false                 # forces potential_method="3d" if true
+# atom_species = ["C.3", "N.ar"]  # per-atom bonded species; auto-detected from PDB bonds if unset
+# shtyrov_params_path = "path/to/params.json"  # override the bundled Shtyrov parameter table
+# mmcif_filepath = "path/to/structure.cif"     # explicit mmCIF source for bond-typing
+
+# scattering
+ews_curvature_sign = "positive"  # negative | positive, matches CryoSPARC's convention
+# klim = 0.5                     # 1/Å, reciprocal-space cutoff; unset uses the full Nyquist range
+rotate_mode = "real"             # real | fourier
+
+# ice
+ice_parameterization = "shtyrov"  # kirkland | lobato | shtyrov
+ice_relax_steps = 0               # local MLBOP seam-relaxation steps, only used when ice_model="gd" tiles multiple cached blocks
+
+# crowding
+crowd_chunk_size = 1              # crowding volumes rotated per GPU batch; raise for speed if you have RAM to spare
+# crowd_max_distance_xy = 200.0   # Å
+crowd_method = "3d"               # 2d | 3d
+# crowd_n_points = 50             # cap on the number of crowding duplicates
+crowd_seed = "origin"             # origin | random
+crowd_move_to_cpu = false
+water_air_interface = false
+
+# reproducibility
+# seed = 20260731                # RNG seed for pose/CTF/dose sampling; auto-generated and logged if unset
+
+# aberration richness for synthetic (non-.cs-driven) generation
+astigmatism = "0"                # Å, magnitude of dfu - dfv; single value or "low,high"
+astigmatism_angle = "0,180"      # degrees, dfang; irrelevant when astigmatism is 0
+phaseshift = "0"                 # radians
+tiltx = "0"                      # radians
+tilty = "0"                      # radians
+trefoil1 = "0"                   # Å^3
+trefoil2 = "0"                   # Å^3
+
+# anisotropic magnification -- identity (no correction) by default
+anisomag_m00 = 1.0
+anisomag_m01 = 0.0
+anisomag_m10 = 0.0
+anisomag_m11 = 1.0

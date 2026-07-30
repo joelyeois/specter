@@ -94,6 +94,61 @@ def test_particle_toml_loads_and_matches_expected_values() -> None:
     assert config.device == "cpu"
 
 
+def test_particle_stack_config_advanced_field_defaults() -> None:
+    """Defaults for the newly-exposed 'Advanced' fields should reproduce
+    today's previously-hardcoded behavior (or, for ice_parameterization, the
+    deliberately-changed shtyrov default -- see config.py's docstring)."""
+    config = ParticleStackConfig(pdb_code="6bdf")
+    assert config.potential_parameterization == "shtyrov"
+    assert config.potential_method == "analytic"
+    assert config.rcut is None
+    assert config.conv_backend == "fftconvolve"
+    assert config.periodic is False
+    assert config.atom_species is None
+    assert config.ews_curvature_sign == "positive"
+    assert config.klim is None
+    assert config.rotate_mode == "real"
+    assert config.ice_parameterization == "shtyrov"
+    assert config.ice_relax_steps == 0
+    assert config.crowd_chunk_size == 1
+    assert config.crowd_max_distance_xy is None
+    assert config.crowd_method == "3d"
+    assert config.crowd_n_points is None
+    assert config.crowd_seed == "origin"
+    assert config.crowd_move_to_cpu is False
+    assert config.water_air_interface is False
+    assert config.seed is None
+    assert config.astigmatism == "0"
+    assert config.astigmatism_angle == "0,180"
+    assert config.phaseshift == "0"
+    assert config.tiltx == "0"
+    assert config.tilty == "0"
+    assert config.trefoil1 == "0"
+    assert config.trefoil2 == "0"
+    assert (
+        config.anisomag_m00,
+        config.anisomag_m01,
+        config.anisomag_m10,
+        config.anisomag_m11,
+    ) == (1.0, 0.0, 0.0, 1.0)
+
+
+def test_particle_stack_config_falcon4i_is_valid_detector_model() -> None:
+    config = ParticleStackConfig(pdb_code="6bdf", detector_model="falcon4i_300kv")
+    assert config.detector_model == "falcon4i_300kv"
+
+
+def test_particle_toml_loads_advanced_fields() -> None:
+    """The bundled particle.toml's [advanced] block should parse and match
+    the dataclass defaults it was written to mirror."""
+    path = str(REPO_ROOT / "configs" / "particle.toml")
+    config = load_config(path)
+    assert config.potential_parameterization == "shtyrov"
+    assert config.ice_parameterization == "shtyrov"
+    assert config.astigmatism == "0"
+    assert config.anisomag_m11 == 1.0
+
+
 def test_load_config_tilt_series_parses_array_of_tables(tmp_path: Path) -> None:
     path = _write_toml(
         tmp_path,

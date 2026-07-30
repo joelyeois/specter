@@ -16,7 +16,15 @@ import torch
 from rich.console import Console
 from rich.rule import Rule
 
+from specter.config import parse_scalar_or_range
+
 _console = Console()
+
+
+def _uniform_sample(value: str, n: int) -> torch.Tensor:
+    """Sample `n` values uniformly from a `parse_scalar_or_range` "value"/"low,high" string."""
+    low, high = parse_scalar_or_range(value)
+    return torch.rand(n) * (high - low) + low
 
 
 def _section(msg: str) -> None:

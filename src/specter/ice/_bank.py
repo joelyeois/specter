@@ -109,6 +109,12 @@ class IceBank(L.LightningModule):
         ``ice-data/ice_cache`` shipped with the repository.
     device : str or torch.device, optional
         Computation device. Default is ``"cpu"``.
+    parameterization : str, optional
+        Atomic potential parameterization for the ice kernel: ``'kirkland'``,
+        ``'lobato'``, or ``'shtyrov'``. Default ``'kirkland'``. Note this only
+        affects the kernel used to voxelize a crop's coordinates -- it does
+        not change which cached configs (already-optimized coordinate sets)
+        are drawn from.
     progressbars : bool, optional
         Whether to show progress bars over batched generation. Default is
         True.
@@ -124,12 +130,14 @@ class IceBank(L.LightningModule):
         self,
         cache_dir: str | None = None,
         device: str | torch.device = "cpu",
+        parameterization: str = "kirkland",
         progressbars: bool = True,
     ) -> None:
         super().__init__()
         if cache_dir is None:
             cache_dir = default_ice_cache_dir()
         self.cache_dir = cache_dir
+        self.parameterization = parameterization
         self._config_paths = sorted(glob.glob(os.path.join(cache_dir, "*.pt")))
         if not self._config_paths:
             raise FileNotFoundError(
@@ -179,7 +187,9 @@ class IceBank(L.LightningModule):
 
     def _get_kernel(self, dx: float) -> torch.Tensor:
         if dx not in self._kernel_cache:
-            self._kernel_cache[dx] = build_atomic_potential_kernel(dx, "kirkland")
+            self._kernel_cache[dx] = build_atomic_potential_kernel(
+                dx, self.parameterization
+            )
         return self._kernel_cache[dx]
 
     def _get_source_pos(self, config: dict) -> torch.Tensor:
@@ -1034,6 +1044,7 @@ def resolve_icemaker(
     nz: int,
     ice_cache_dir: str | None = None,
     icemaker: "IceBank | RandomIcemaker | None" = None,
+    parameterization: str = "kirkland",
 ) -> "IceBank | RandomIcemaker | None":
     """
     Resolve the ``ice_model``/``icemaker``/``ice_cache_dir`` kwargs shared
@@ -1058,6 +1069,10 @@ def resolve_icemaker(
     icemaker : IceBank or RandomIcemaker, optional
         A pre-built icemaker to reuse as-is. When given, ``ice_model`` and
         ``ice_cache_dir`` are ignored.
+    parameterization : str, optional
+        Atomic potential parameterization for a freshly-built icemaker's
+        kernel: ``'kirkland'``, ``'lobato'``, or ``'shtyrov'``. Default
+        ``'kirkland'``. Ignored when ``icemaker`` is given.
 
     Returns
     -------
@@ -1068,9 +1083,11 @@ def resolve_icemaker(
     if ice_model is None or ice_model == "none":
         return None
     if ice_model == "gd":
-        return IceBank(cache_dir=ice_cache_dir)
+        return IceBank(cache_dir=ice_cache_dir, parameterization=parameterization)
     if ice_model == "random":
-        return RandomIcemaker(dx=pixel_size, n=nxy, nz=nz)
+        return RandomIcemaker(
+            dx=pixel_size, n=nxy, nz=nz, parameterization=parameterization
+        )
     raise ValueError(
         f"Unknown ice_model '{ice_model}'. Choose 'gd', 'random', or 'none'."
     )

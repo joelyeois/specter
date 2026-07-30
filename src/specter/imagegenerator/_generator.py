@@ -540,17 +540,36 @@ class ImageGenerator(ParticleGeneratorBase):
         Crowding minimum distance.
     crowd_max_distance_z : float, optional
         Crowding maximum Z distance.
+    crowd_max_distance_xy : float, optional
+        Crowding maximum XY distance. Defaults to ``nxy_out * dx + min_distance``.
     crowd_chunk_size : int or None, optional
         Number of crowding volumes rotated per GPU batch. ``1`` (default) avoids
         the O(N × nz × ny × nx × 3) peak allocation that causes OOM for large
         volumes with many crowding particles. Set to ``None`` to rotate all at
         once (faster but requires N × volume_size RAM).
+    crowd_method : {"2d", "3d"}, optional
+        Poisson-disk sampling dimensionality for crowding placement. Default
+        ``"3d"``.
+    crowd_n_points : int, optional
+        Cap on the number of crowding duplicates. ``None`` (default) fills the
+        volume (no cap).
+    crowd_seed : {"origin", "random"}, optional
+        Crowding placement seed strategy. Default ``"origin"``.
+    crowd_move_to_cpu : bool, optional
+        Move crowding intermediates to CPU between steps, trading speed for
+        lower GPU memory. Default False.
+    water_air_interface : bool, optional
+        Apply a bimodal density distribution along z when placing crowding
+        duplicates, mimicking particle adsorption at the ice-water interface.
+        Default False.
     pad_fft : bool, optional
         Whether to pad for FFT.
     progressbars : bool, optional
         Whether to show progress bars. Default True.
-    parameterization : str, optional
-        Parameterization for ice potential. Default 'kirkland'.
+    ice_parameterization : str, optional
+        Atomic potential parameterization used to build the ice kernel:
+        ``'kirkland'``, ``'lobato'``, or ``'shtyrov'``. Default ``'shtyrov'``,
+        matching :class:`~specter.potential.PotentialBuilder`'s own default.
     detector_model : str, optional
         Detector model name.
     bfactor : float or torch.Tensor or None, optional
@@ -603,13 +622,18 @@ class ImageGenerator(ParticleGeneratorBase):
         alpha: float = 0.0,
         crowd_min_distance: float | None = None,
         crowd_max_distance_z: float | None = None,
+        crowd_max_distance_xy: float | None = None,
         crowd_chunk_size: int | None = 1,
+        crowd_method: Literal["2d", "3d"] = "3d",
+        crowd_n_points: int | None = None,
+        crowd_seed: Literal["origin", "random"] = "origin",
+        crowd_move_to_cpu: bool = False,
+        water_air_interface: bool = False,
         pad_fft: bool = False,
         progressbars: bool = True,
         verbose: bool = True,
-        parameterization: str = "kirkland",
+        ice_parameterization: str = "shtyrov",
         detector_model: str | None = None,
-        slice_batch_size: int = 1,
         coincidence_radius: float | torch.Tensor = 0.0,
         num_frames: int | None = None,
         potential_scale: float | torch.Tensor = 1.0,
@@ -658,7 +682,7 @@ class ImageGenerator(ParticleGeneratorBase):
             dose_envelope=dose_envelope,
         )
 
-        self.parameterization = parameterization
+        self.ice_parameterization = ice_parameterization
         self.ice_model = ice_model
         self.crowd_max_distance_z = (
             crowd_max_distance_z
@@ -698,12 +722,14 @@ class ImageGenerator(ParticleGeneratorBase):
                 nxy_out=self.pad_nxy if pad_fft else self.nxy,
                 nz_out=self.nz,
                 max_distance_z=self.crowd_max_distance_z,
-                max_distance_xy=None,
-                method="3d",
-                n_points=torch.inf,
-                seed="origin",
+                max_distance_xy=crowd_max_distance_xy,
+                method=crowd_method,
+                n_points=crowd_n_points if crowd_n_points is not None else torch.inf,
+                seed=crowd_seed,
+                move_to_cpu=crowd_move_to_cpu,
                 progressbars=self.progressbars,
                 chunk_size=crowd_chunk_size,
+                water_air_interface=water_air_interface,
             )
 
         # No assignment at all (rather than self.icemaker = None) when ice_model
@@ -714,9 +740,19 @@ class ImageGenerator(ParticleGeneratorBase):
             self.icemaker = icemaker
             self.ice_model = icemaker.method
         elif self.ice_model == "gd":
-            self.icemaker = IceBank(cache_dir=ice_cache_dir)
+            self.icemaker = IceBank(
+                cache_dir=ice_cache_dir,
+                parameterization=self.ice_parameterization,
+                progressbars=self.progressbars,
+            )
         elif self.ice_model == "random":
-            self.icemaker = RandomIcemaker(dx=pixel_size, n=self.nxy, nz=self.nz)
+            self.icemaker = RandomIcemaker(
+                dx=pixel_size,
+                n=self.nxy,
+                nz=self.nz,
+                parameterization=self.ice_parameterization,
+                progressbars=self.progressbars,
+            )
         elif self.ice_model not in (None, "none"):
             raise ValueError(
                 f"Unknown ice_model '{self.ice_model}'. Choose 'gd', 'random', or 'none'."

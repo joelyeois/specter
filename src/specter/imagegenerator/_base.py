@@ -5,7 +5,13 @@ from typing import Any, cast
 import lightning as L
 import torch
 
-from specter.detectors import k3_200kv, k3_300kv, perfect_detector
+from specter.detectors import (
+    falcon4i_200kv,
+    falcon4i_300kv,
+    k3_200kv,
+    k3_300kv,
+    perfect_detector,
+)
 
 from ..aberrations import Aberration, defocus_midplane_shift
 from ..arrays import compute_nz, pad_volume
@@ -213,6 +219,12 @@ class BaseImager(L.LightningModule):
         elif self.detector_model == "perfect":
             mtf = cast(torch.Tensor, perfect_detector(self.nxy, self.pixel_size))
             self.register_buffer("detector_mtf", mtf)
+        elif self.detector_model == "falcon4i_300kv":
+            mtf = cast(torch.Tensor, falcon4i_300kv(self.nxy, self.pixel_size))
+            self.register_buffer("detector_mtf", mtf)
+        elif self.detector_model == "falcon4i_200kv":
+            mtf = cast(torch.Tensor, falcon4i_200kv(self.nxy, self.pixel_size))
+            self.register_buffer("detector_mtf", mtf)
         else:
             self.detector_mtf = None
 
@@ -251,6 +263,7 @@ class BaseImager(L.LightningModule):
             deltaV_V=self.deltaV_V,
             deltaI_I=self.deltaI_I,
             dose_envelope=self.dose_envelope,
+            progressbars=self.progressbars,
         )
         self.detector = Detector(
             self.pixel_size,
@@ -258,6 +271,7 @@ class BaseImager(L.LightningModule):
             noise_model=self.noise_model,
             mtf=self.detector_mtf,
             num_frames=self.num_frames,
+            progressbars=self.progressbars,
         )
 
     def predict_step(self, batch: Any, batch_idx: int) -> torch.Tensor:

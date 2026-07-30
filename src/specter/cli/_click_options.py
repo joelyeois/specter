@@ -32,6 +32,9 @@ def build_config_options(
         become ``click.Choice``; ``bool`` fields accept Click's flexible
         boolean parsing (``true``/``false``/``1``/``0``/``yes``/``no``,
         case-insensitive); ``X | None`` fields are treated as ``X``.
+        ``list[...]``-typed fields are skipped entirely (config/TOML-only,
+        e.g. a per-atom list sized to the structure -- no single CLI value
+        can represent them).
     field_help : dict[str, str], optional
         Field name -> help text describing what the flag itself does. Fields
         not present here fall back to a generic "Overrides the 'x' field in
@@ -77,6 +80,12 @@ def build_config_options(
         if get_origin(ftype) in (Union, types.UnionType):
             non_none = [a for a in get_args(ftype) if a is not type(None)]
             ftype = non_none[0]
+
+        # list-typed fields (e.g. `atom_species: list[str] | None`) are sized
+        # to the structure/dataset, not a single value a flag can hold --
+        # config/TOML-only, skip rather than raising.
+        if get_origin(ftype) is list:
+            continue
 
         help_text = field_help.get(
             f.name, f"Overrides the '{f.name}' field in --config."

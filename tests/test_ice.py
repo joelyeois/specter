@@ -29,6 +29,27 @@ def test_gradientskicemaker_forwards_custom_mdsim_target_path(tmp_path):
     assert not torch.allclose(custom_gd.f_target, default_gd.f_target)
 
 
+def test_random_icemaker_parameterization_changes_kernel():
+    """RandomIcemaker's ice_kernel should differ between parameterizations --
+    regression guard against build_atomic_potential_kernel silently reverting
+    to a hardcoded 'kirkland' regardless of what's passed in."""
+    kirkland = RandomIcemaker(dx=1.0, n=16, parameterization="kirkland")
+    lobato = RandomIcemaker(dx=1.0, n=16, parameterization="lobato")
+
+    assert not torch.allclose(kirkland.ice_kernel, lobato.ice_kernel)
+
+
+def test_gradientskicemaker_parameterization_changes_kernel():
+    """Same regression guard as test_random_icemaker_parameterization_changes_kernel,
+    for GradientSKIcemaker's kernel."""
+    kirkland = GradientSKIcemaker(n=16, dx=1.0, progressbars=False)
+    lobato = GradientSKIcemaker(
+        n=16, dx=1.0, progressbars=False, parameterization="lobato"
+    )
+
+    assert not torch.allclose(kirkland._ice_kernel, lobato._ice_kernel)
+
+
 # ---------------------------------------------------------------------------
 # Algorithm classes only produce blocks -- tiling for volumes larger than a
 # single block lives in IceBank (coordinate-space tiling + MLBOP seam

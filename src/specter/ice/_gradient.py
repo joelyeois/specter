@@ -55,6 +55,9 @@ class GradientSKIcemaker(L.LightningModule):
         which does not depend on this parameter.
     device : str or torch.device
         Computation device.
+    parameterization : str, optional
+        Atomic potential parameterization for the ice kernel: ``'kirkland'``,
+        ``'lobato'``, or ``'shtyrov'``. Default ``'kirkland'``.
     progressbars : bool, optional
         Whether to show progress bars. Default is True.
     mdsim_target_path : str, optional
@@ -84,12 +87,14 @@ class GradientSKIcemaker(L.LightningModule):
         nz: Optional[int] = None,
         min_distance: float = 2.0,
         device: str | torch.device = "cpu",
+        parameterization: str = "kirkland",
         progressbars: bool = True,
         mdsim_target_path: str | None = None,
     ) -> None:
         super().__init__()
         self.min_distance = min_distance
         self.progressbars = progressbars
+        self.parameterization = parameterization
 
         self.n = n
         self.nz = nz if nz is not None else n
@@ -98,7 +103,7 @@ class GradientSKIcemaker(L.LightningModule):
         self.box_y = self.n * self.dx
         self.box_z = self.nz * self.dx
         self._ice_kernel: torch.Tensor = build_atomic_potential_kernel(
-            self.dx, "kirkland"
+            self.dx, self.parameterization
         )
 
         self.n_molecules = int(

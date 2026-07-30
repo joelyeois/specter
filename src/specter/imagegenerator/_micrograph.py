@@ -33,8 +33,8 @@ class MicrographGenerator(BaseImager):
         Pixel size in Å.
     ctf_params : dict[str, torch.Tensor]
         CTF parameters; each value is a 1-D tensor of length n.
-    energy : float
-        Electron beam energy in kV.
+    voltage : float
+        Electron beam accelerating voltage in kV.
     dose_per_angstrom : float or torch.Tensor
         Electron dose per Å². Scalar or 1-D tensor of length n.
     vol : torch.Tensor, optional
@@ -146,7 +146,7 @@ class MicrographGenerator(BaseImager):
         micrograph_size: int | tuple[int, int],
         pixel_size: float,
         ctf_params: dict[str, Any],
-        energy: float,
+        voltage: float,
         dose_per_angstrom: float | torch.Tensor,
         vol: torch.Tensor | None = None,
         anisomag: torch.Tensor | None = None,
@@ -208,7 +208,7 @@ class MicrographGenerator(BaseImager):
 
         super().__init__(
             pixel_size=pixel_size,
-            energy=energy,
+            voltage=voltage,
             dose_per_angstrom=dose_per_angstrom,
             nxy=nxy,
             nz=self.nz,
@@ -253,7 +253,7 @@ class MicrographGenerator(BaseImager):
         self.iterative_scattering = IterativeScattering(
             self.pad_nxy,
             self.pixel_size,
-            self.energy,
+            self.voltage,
             scattering_model=self.scattering_model,
             klim=self.klim,
             alpha=self.alpha,

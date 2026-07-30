@@ -23,7 +23,7 @@ Example (HPC):
         --num_pixels 256 \\
         --pixel_size 1.056 \\
         --micrograph_size 4096 \\
-        --energy 300 \\
+        --voltage 300 \\
         --dose_min 53 \\
         --defocus_min 5000 \\
         --defocus_max 15000 \\
@@ -108,10 +108,10 @@ def parse_args() -> argparse.Namespace:
 
     # --- Microscope / physics ---
     parser.add_argument(
-        "--energy",
+        "--voltage",
         type=float,
         default=argparse.SUPPRESS,
-        help="Electron beam energy in keV. Overrides --config.",
+        help="Electron beam accelerating voltage in kV. Overrides --config.",
     )
     parser.add_argument(
         "--dose_min",
@@ -161,7 +161,7 @@ def parse_args() -> argparse.Namespace:
         "--energy_spread",
         type=float,
         default=argparse.SUPPRESS,
-        help="FWHM of the beam energy spread in eV, used by the Cc envelope. Overrides --config.",
+        help="FWHM of the beam voltage spread in eV, used by the Cc envelope. Overrides --config.",
     )
     parser.add_argument(
         "--deltaV_V",
@@ -491,7 +491,7 @@ def main() -> None:
         config.micrograph_size,
         config.pixel_size,
         ctf_params,
-        config.energy,
+        config.voltage,
         dose,
         icemaker=icemaker,
         ice_thickness=config.ice_thickness,
@@ -563,7 +563,7 @@ def main() -> None:
 
     create_micrograph_starfile(
         n,
-        energy=config.energy,
+        voltage=config.voltage,
         pixel_size=config.pixel_size,
         alpha=config.alpha,
         ctf_params=ctf_params,

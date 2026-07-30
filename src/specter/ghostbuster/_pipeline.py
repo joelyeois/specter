@@ -220,7 +220,7 @@ class Ghostbuster:
         self.halfset_label: str | None = _halfset_map[return_class]
 
         (
-            energy,
+            voltage,
             pixel_size,
             alpha,
             rotations,
@@ -244,7 +244,7 @@ class Ghostbuster:
         self._ctf_params = ctf_params
         self._scale = scale
         self._anisomag = anisomag
-        self._energy = float(energy.item() if hasattr(energy, "item") else energy)
+        self._voltage = float(voltage.item() if hasattr(voltage, "item") else voltage)
         self._voxel_size = voxel_size
         self._alpha = float(alpha.item() if hasattr(alpha, "item") else alpha)
 
@@ -302,7 +302,7 @@ class Ghostbuster:
 
         print(f"Loading particle parameters from {Path(cs_file).name} ...")
         (
-            energy,
+            voltage,
             pixel_size,
             alpha,
             rotations,
@@ -316,15 +316,15 @@ class Ghostbuster:
             str(cs_file), return_class=return_class, n_particles=num_particles
         )
         n_loaded = len(rotations)
-        energy_val = float(energy.item() if hasattr(energy, "item") else energy)
+        voltage_val = float(voltage.item() if hasattr(voltage, "item") else voltage)
         pixel_size_val = float(
             pixel_size.item() if hasattr(pixel_size, "item") else pixel_size
         )
         print(
-            f"  {n_loaded} particles  |  {energy_val:.0f} keV  |  {pixel_size_val:.3f} Å/px"
+            f"  {n_loaded} particles  |  {voltage_val:.0f} kV  |  {pixel_size_val:.3f} Å/px"
         )
         return (
-            energy,
+            voltage,
             pixel_size,
             alpha,
             rotations,
@@ -372,7 +372,7 @@ class Ghostbuster:
             self._rotations,
             self._translations,
             self._ctf_params,
-            self._energy,
+            self._voltage,
             self.dose_per_angstrom,
             anisomag=self._anisomag,
             alpha=self._alpha,

@@ -67,7 +67,7 @@ def _load_starfile_parameters(
     Returns
     -------
     tuple
-        ``(energy_kev, pixel_size, alpha, rotations, translations_A, ctf_params,
+        ``(voltage_kv, pixel_size, alpha, rotations, translations_A, ctf_params,
         scale, anisomag, split)`` for every particle in the file. ``anisomag``
         is always ``None`` (anisotropic magnification is not currently parsed
         from STAR files). ``split`` is ``None`` if the file has no
@@ -105,7 +105,7 @@ def _load_starfile_parameters(
         )
         return values
 
-    energy_kev = scalar_col("rlnVoltage")
+    voltage_kv = scalar_col("rlnVoltage")
     pixel_size = scalar_col("rlnImagePixelSize")
     alpha = scalar_col("rlnAmplitudeContrast")
 
@@ -168,7 +168,7 @@ def _load_starfile_parameters(
     )
 
     return (
-        energy_kev,
+        voltage_kv,
         pixel_size,
         alpha,
         rotations,
@@ -209,8 +209,8 @@ def extract_parameters_from_starfile(
 
     Returns
     -------
-    energy_kev : torch.Tensor
-        Energy in keV.
+    voltage_kv : torch.Tensor
+        Voltage in kV.
     pixel_size : torch.Tensor
         Pixel size in Ångstrom.
     alpha : torch.Tensor
@@ -235,7 +235,7 @@ def extract_parameters_from_starfile(
         ``None`` otherwise.
     """
     (
-        energy_kev,
+        voltage_kv,
         pixel_size,
         alpha,
         rotations,
@@ -275,7 +275,7 @@ def extract_parameters_from_starfile(
         halfset_labels = halfset_labels[:n_particles]
 
     return (
-        energy_kev,
+        voltage_kv,
         pixel_size,
         alpha,
         rotations,
@@ -294,7 +294,7 @@ def create_particle_starfile(
     translations: torch.Tensor | np.ndarray | None = None,
     alpha: float = 0.1,
     folderpath: str = "",
-    energy: float | None = None,
+    voltage: float | None = None,
     dx: float | None = None,
     filename: str = "particles",
     ctf_params: torch.Tensor | dict[str, torch.Tensor] | None = None,
@@ -319,8 +319,8 @@ def create_particle_starfile(
         Amplitude contrast ratio. Default is 0.1.
     folderpath : str, optional
         Directory to save MRCS and STAR files. Default is "" (current directory).
-    energy : float, optional
-        Electron beam energy in kV. Required.
+    voltage : float, optional
+        Electron beam accelerating voltage in kV. Required.
     dx : float, optional
         Pixel size in Ångstrom. Required.
     filename : str, optional
@@ -399,7 +399,7 @@ def create_particle_starfile(
         pshift = ctf_params[:, 5]
 
     d = {
-        "rlnVoltage": energy,
+        "rlnVoltage": voltage,
         "rlnSphericalAberration": cs_A / 1e7,
         "rlnAmplitudeContrast": alpha,
         "rlnImagePixelSize": dx,
@@ -468,7 +468,7 @@ def create_particle_starfile_from_model(
         translations=model.translations,
         alpha=model.alpha,
         folderpath=folderpath,
-        energy=model.energy,
+        voltage=model.voltage,
         dx=model.pixel_size,
         filename=filename,
         ctf_params=model.ctf_params_dict(),
@@ -481,7 +481,7 @@ def create_particle_starfile_from_model(
 
 def create_micrograph_starfile(
     n: int,
-    energy: float,
+    voltage: float,
     pixel_size: float,
     alpha: float,
     ctf_params: dict,
@@ -500,8 +500,8 @@ def create_micrograph_starfile(
     ----------
     n : int
         Number of micrographs.
-    energy : float
-        Electron beam energy in kV.
+    voltage : float
+        Electron beam accelerating voltage in kV.
     pixel_size : float
         Pixel size in Ångstrom.
     alpha : float
@@ -540,7 +540,7 @@ def create_micrograph_starfile(
 
     d = {
         "rlnMicrographName": [str(i + 1) + "@" + filename + ".mrcs" for i in range(n)],
-        "rlnVoltage": energy,
+        "rlnVoltage": voltage,
         "rlnSphericalAberration": torch.as_tensor(cs_A) / 1e7,
         "rlnAmplitudeContrast": alpha,
         "rlnImagePixelSize": pixel_size,

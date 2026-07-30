@@ -24,7 +24,7 @@ Example (HPC):
         --config configs/tilt_series.toml \\
         --target_shape 184 630 630 \\
         --target_v_size 5.0 \\
-        --energy 300 \\
+        --voltage 300 \\
         --dose_per_tilt 3.0 \\
         --min_tilt_angle -45 \\
         --max_tilt_angle 45 \\
@@ -128,10 +128,10 @@ def parse_args() -> argparse.Namespace:
         "dimension of target_shape. Overrides --config.",
     )
     parser.add_argument(
-        "--energy",
+        "--voltage",
         type=float,
         default=argparse.SUPPRESS,
-        help="Electron beam energy in keV. Overrides --config.",
+        help="Electron beam accelerating voltage in kV. Overrides --config.",
     )
     parser.add_argument(
         "--dose_per_tilt",
@@ -177,7 +177,7 @@ def parse_args() -> argparse.Namespace:
         "--energy_spread",
         type=float,
         default=argparse.SUPPRESS,
-        help="FWHM of the beam energy spread in eV, used by the Cc envelope. "
+        help="FWHM of the beam voltage spread in eV, used by the Cc envelope. "
         "Overrides --config.",
     )
     parser.add_argument(
@@ -432,7 +432,7 @@ def main() -> None:
         micrograph_size,
         dx,
         ctf_params,
-        config.energy,
+        config.voltage,
         config.dose_per_tilt,
         angles=angles,
         ice_model=ice_model,
@@ -485,7 +485,7 @@ def main() -> None:
     }
     create_micrograph_starfile(
         n=config.n_tilts,
-        energy=config.energy,
+        voltage=config.voltage,
         pixel_size=dx,
         alpha=config.alpha,
         ctf_params=ctf_params_broadcast,

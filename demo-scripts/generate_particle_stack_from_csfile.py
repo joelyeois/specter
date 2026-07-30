@@ -1,7 +1,7 @@
 """
 Generate a simulated cryo-EM particle stack from a CryoSPARC .cs file.
 
-Poses, CTF parameters, pixel size, energy, and amplitude contrast are all
+Poses, CTF parameters, pixel size, voltage, and amplitude contrast are all
 read directly from the .cs file — no random sampling needed.
 
 Usage:
@@ -197,7 +197,7 @@ def parse_args() -> argparse.Namespace:
         "--energy_spread",
         type=float,
         default=0.7,
-        help="FWHM of the beam energy spread in eV, used by the Cc envelope.",
+        help="FWHM of the beam voltage spread in eV, used by the Cc envelope.",
     )
     parser.add_argument(
         "--deltaV_V",
@@ -509,7 +509,7 @@ def main() -> None:
         _section("Loading parameters from .cs file")
 
     (
-        energy_kev,
+        voltage_kv,
         pixel_size,
         alpha,
         rotations,
@@ -532,7 +532,7 @@ def main() -> None:
         _tbl.add_column("val")
         _tbl.add_row("Particles in file", str(n_total))
         _tbl.add_row("Simulating", f"[bold]{n}[/bold]")
-        _tbl.add_row("Energy", f"{energy_kev:.1f} keV")
+        _tbl.add_row("Voltage", f"{voltage_kv:.1f} kV")
         _tbl.add_row("Pixel size", f"{pixel_size.item():.4f} Å")
         _tbl.add_row("Alpha", f"{alpha:.3f}")
         _console.print(_tbl)
@@ -604,7 +604,7 @@ def main() -> None:
         rotations,
         translations_A,
         ctf_params,
-        energy_kev,
+        voltage_kv,
         args.dose,
         icemaker=icemaker,
         ice_thickness=args.ice_thickness,
@@ -686,7 +686,7 @@ def main() -> None:
         translations=translations_A,
         ctf_params=ctf_params,
         dx=pixel_size.item(),
-        energy=energy_kev,
+        voltage=voltage_kv,
         alpha=alpha,
         filename=args.filename,
         folderpath=args.output_dir,

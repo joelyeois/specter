@@ -27,7 +27,7 @@ def test_iterative_scattering_batch_size(dummy_volume):
     scat_iter = IterativeScattering(
         nxy=64,
         pixel_size=1.0,
-        energy=300.0,
+        voltage=300.0,
         scattering_model="multislice",
         progressbars=False,
     )
@@ -43,7 +43,7 @@ def test_iterative_scattering_batch_size(dummy_volume):
     scat_iter_rytov = IterativeScattering(
         nxy=64,
         pixel_size=1.0,
-        energy=300.0,
+        voltage=300.0,
         scattering_model="rytov",
         progressbars=False,
     )
@@ -57,7 +57,7 @@ def test_iterative_scattering_batch_size(dummy_volume):
 def test_multislice_checkpointing_matches_uncheckpointed(dummy_volume):
     """Gradient checkpointing must not change the multislice exit wave."""
     scat_iter = IterativeScattering(
-        nxy=64, pixel_size=1.0, energy=300.0, progressbars=False
+        nxy=64, pixel_size=1.0, voltage=300.0, progressbars=False
     )
     R = roma.rotvec_to_rotmat(torch.tensor([[0.0, 0.1, 0.0]])).to(dummy_volume.device)
     theta_matrix = build_affine_matrix(R)
@@ -73,7 +73,7 @@ def test_multislice_checkpointing_matches_uncheckpointed(dummy_volume):
 def test_multislice_checkpointing_backprops(dummy_volume):
     """Gradients must flow through the checkpointed multislice path."""
     scat_iter = IterativeScattering(
-        nxy=64, pixel_size=1.0, energy=300.0, progressbars=False
+        nxy=64, pixel_size=1.0, voltage=300.0, progressbars=False
     )
     R = roma.rotvec_to_rotmat(torch.tensor([[0.0, 0.1, 0.0]])).to(dummy_volume.device)
     theta_matrix = build_affine_matrix(R)
@@ -90,7 +90,7 @@ def test_multislice_checkpointing_backprops(dummy_volume):
 def test_parallel_rytov_matches_iterative_rytov(dummy_volume):
     """The fully-parallel Rytov path should agree with the slice-by-slice one."""
     scat_iter = IterativeScattering(
-        nxy=64, pixel_size=1.0, energy=300.0, progressbars=False
+        nxy=64, pixel_size=1.0, voltage=300.0, progressbars=False
     )
     R = roma.rotvec_to_rotmat(torch.tensor([[0.0, 0.1, 0.0]])).to(dummy_volume.device)
     theta_matrix = build_affine_matrix(R)
@@ -108,7 +108,7 @@ def test_parallel_rytov_matches_iterative_rytov(dummy_volume):
 def test_parallel_rytov_checkpointing_backprops(dummy_volume):
     """Gradients must flow through the checkpointed parallel_rytov path."""
     scat_iter = IterativeScattering(
-        nxy=64, pixel_size=1.0, energy=300.0, progressbars=False
+        nxy=64, pixel_size=1.0, voltage=300.0, progressbars=False
     )
     R = roma.rotvec_to_rotmat(torch.tensor([[0.0, 0.1, 0.0]])).to(dummy_volume.device)
     theta_matrix = build_affine_matrix(R)
@@ -128,7 +128,7 @@ def test_iterative_models_consistent_across_batch_size(dummy_volume, scattering_
     scat_iter = IterativeScattering(
         nxy=64,
         pixel_size=1.0,
-        energy=300.0,
+        voltage=300.0,
         scattering_model=scattering_model,
         progressbars=False,
     )
@@ -185,7 +185,7 @@ def test_scattering_vs_iterative_consistency(padded_volume, angle_deg, atol):
     kwargs = dict(
         nxy=nxy,
         pixel_size=1.0,
-        energy=300.0,
+        voltage=300.0,
         scattering_model="projection",
         alpha=0.1,
         progressbars=False,

@@ -6,7 +6,7 @@ pixel_size = 0.83       # Å
 micrograph_size = 2048  # pixels, square
 
 [microscope]
-energy = 300.0     # keV
+voltage = 300.0     # kV
 dose_min = 20.0     # e⁻/Å², used as a fixed dose (this notebook doesn't randomize per micrograph)
 num_frames = 50      # frames, usually ~1-2 e⁻/Å²/frame
 cs = 2.0               # mm

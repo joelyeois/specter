@@ -48,7 +48,7 @@ low_res_v_size = 10.0           # Å/voxel, polnet's placement-pass resolution
 seed = 11
 
 [microscope]
-energy = 300.0
+voltage = 300.0
 dose_per_tilt = 3.0
 num_frames = 10
 cs = 2.0

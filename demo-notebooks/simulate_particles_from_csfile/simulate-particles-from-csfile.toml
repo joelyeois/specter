@@ -2,7 +2,7 @@
 # specter.config.load_config("simulate-particles-from-csfile.toml").
 #
 # This notebook drives ImageGenerator from a CryoSPARC .cs file, so unlike
-# configs/particle.toml, it does NOT need pixel_size, energy, cs, alpha,
+# configs/particle.toml, it does NOT need pixel_size, voltage, cs, alpha,
 # defocus, or shift -- extract_parameters_from_csfile() reads all of those
 # straight from the .cs file at run time and overrides the (unused)
 # ParticleStackConfig defaults for those fields.

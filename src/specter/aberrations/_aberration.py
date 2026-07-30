@@ -46,8 +46,8 @@ class Aberration(L.LightningModule):
         Number of pixels in exitwave, (n_pixels, n_pixels).
     pixel_size: float
         Pixel size in Å.
-    energy: float
-        Energy of the electron beam in keV. Typical values are 100/120/200/300 keV.
+    voltage: float
+        Accelerating voltage of the electron beam in kV. Typical values are 100/120/200/300 kV.
     aberration_model: str, optional
         Specifies aberration model to use. Options include 'holography' and 'ctf'.
         Default is 'holography'.
@@ -104,7 +104,7 @@ class Aberration(L.LightningModule):
         self,
         n_pixels: int,
         pixel_size: float,
-        energy: float,
+        voltage: float,
         aberration_model: str = "holography",
         alpha: float | None = None,
         convergence_angle: float | None = None,
@@ -134,8 +134,8 @@ class Aberration(L.LightningModule):
         self.pixel_size = pixel_size
 
         # model params
-        self.energy = energy
-        self.wavelength = energy_to_wavelength(energy)
+        self.voltage = voltage
+        self.wavelength = energy_to_wavelength(voltage)
         self.aberration_model = aberration_model
 
         # frequency coordinates
@@ -274,12 +274,12 @@ class Aberration(L.LightningModule):
             )
 
         if self.cc is not None:
-            voltage = self.energy * 1e3  # keV -> V (numerically eV-equivalent)
+            voltage_v = self.voltage * 1e3  # kV -> V (numerically eV-equivalent)
             transfer = transfer * env.cc_envelope(
                 self.k2,
                 self.wavelength,
                 self.cc,
-                voltage,
+                voltage_v,
                 self.energy_spread,
                 self.deltaV_V,
                 self.deltaI_I,

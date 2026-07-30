@@ -26,13 +26,13 @@ def test_load_config_flattens_tables(tmp_path: Path) -> None:
         num_pixels = 128
 
         [microscope]
-        energy = 200.0
+        voltage = 200.0
         """,
     )
     config = load_config(path)
     assert config.pdb_code == "6bdf"
     assert config.num_pixels == 128
-    assert config.energy == 200.0
+    assert config.voltage == 200.0
 
 
 def test_load_config_fills_defaults_for_missing_fields(tmp_path: Path) -> None:

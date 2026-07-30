@@ -46,14 +46,14 @@ The environment is self-contained. No additional GPU or cluster setup is require
 Example docstring format:
 
 ```python
-def energy_to_wavelength(energy_kev: float) -> float:
+def energy_to_wavelength(voltage_kv: float) -> float:
     """
     Compute the relativistic de Broglie wavelength of an electron.
 
     Parameters
     ----------
-    energy_kev : float
-        Accelerating voltage in kiloelectronvolts.
+    voltage_kv : float
+        Accelerating voltage in kilovolts.
 
     Returns
     -------

@@ -76,7 +76,7 @@ def tr_kwargs(
         quaternions=tilt_quaternions,
         translations=torch.zeros(3, 2),
         ctf_params=tilt_ctf_params,
-        energy=300.0,
+        voltage=300.0,
     )
 
 

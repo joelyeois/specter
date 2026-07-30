@@ -57,7 +57,7 @@ class ParticleStackConfig:
     actually tune; everything under "Advanced" exists but is rarely touched.
 
     Set `cs_path` to drive generation from a CryoSPARC .cs file instead of
-    randomly-sampled poses/CTF: `pixel_size`, `energy`, `alpha`, defocus, and
+    randomly-sampled poses/CTF: `pixel_size`, `voltage`, `alpha`, defocus, and
     shifts are then read from the .cs file at run time via
     `extract_parameters_from_csfile` and take precedence over the
     corresponding fields below, which are unused in that mode.
@@ -75,7 +75,7 @@ class ParticleStackConfig:
     pixel_size: float = 1.0  # Å
 
     # --- Microscope (basic) ---
-    energy: float = 300.0  # keV
+    voltage: float = 300.0  # kV
     dose: str = "20"  # e⁻/Å²
     cs: float = 2.0  # mm
     alpha: float = 0.1  # unitless, amplitude contrast ratio
@@ -108,7 +108,7 @@ class ParticleStackConfig:
 
     # --- Advanced ---
     pdb_savefolder: str = "pdb-data"  # resolved against REPO_ROOT if relative
-    # if set, poses/CTF/pixel_size/energy/alpha come from here
+    # if set, poses/CTF/pixel_size/voltage/alpha come from here
     cs_path: str | None = None
     num_frames: int | None = None
     convergence_angle: float | None = None  # mrad
@@ -190,7 +190,7 @@ PARTICLE_STACK_HELP: dict[str, str] = {
     "assembly": "Fetch the biological assembly.",
     "num_pixels": "Number of pixels per axis for the 3-D potential box.",
     "pixel_size": "Pixel size in Angstrom.",
-    "energy": "Electron beam energy in keV.",
+    "voltage": "Electron beam accelerating voltage in kV.",
     "dose": "Dose in e-/A^2: a single value (e.g. 20) for constant dose per "
     "particle, or 'low,high' (e.g. 20,60) to sample uniformly per particle.",
     "cs": "Spherical aberration in mm (1-3 mm typical).",
@@ -312,7 +312,7 @@ class MicrographConfig:
     micrograph_size: int = 4096
 
     # --- Microscope / physics ---
-    energy: float = 300.0  # keV
+    voltage: float = 300.0  # kV
     dose_min: float = 20.0  # e⁻/Å²
     dose_max: float | None = None  # e⁻/Å²
     num_frames: int | None = None
@@ -407,7 +407,7 @@ class TiltSeriesConfig:
     micrograph_size: int | None = (
         None  # pixels, square; defaults to target_shape's XY extent
     )
-    energy: float = 300.0  # keV
+    voltage: float = 300.0  # kV
     dose_per_tilt: float = 3.0  # e⁻/Å², per tilt angle
     num_frames: int = 10  # movie frames per tilt
     cs: float = 2.0  # mm

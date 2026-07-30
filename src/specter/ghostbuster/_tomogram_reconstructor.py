@@ -51,8 +51,8 @@ class TomogramReconstructor(L.LightningModule):
         Per-tilt in-plane translations in Å, shape ``(N_tilts, 2)``.
     ctf_params : dict[str, torch.Tensor]
         Per-tilt CTF parameters; each value has leading dimension ``N_tilts``.
-    energy : float
-        Electron beam energy in keV.
+    voltage : float
+        Electron beam accelerating voltage in kV.
     tilt_axis : str
         Axis around which the sample tilts (``"x"`` or ``"y"``).  Determines
         which image dimension shrinks at high tilt for FOV masking.  Default ``"x"``.
@@ -106,7 +106,7 @@ class TomogramReconstructor(L.LightningModule):
         quaternions: torch.Tensor,
         translations: torch.Tensor,
         ctf_params: dict[str, torch.Tensor],
-        energy: float,
+        voltage: float,
         tilt_axis: str = "x",
         lr: float | None = None,
         sparsity: float | None = None,
@@ -195,7 +195,7 @@ class TomogramReconstructor(L.LightningModule):
         self.iterative_scattering = IterativeScattering(
             self.nxy,
             voxel_size,
-            energy,
+            voltage,
             scattering_model=scattering_model,
             klim=klim,
             alpha=alpha,
@@ -203,7 +203,7 @@ class TomogramReconstructor(L.LightningModule):
         self.aberration = Aberration(
             self.nxy,
             voxel_size,
-            energy,
+            voltage,
             aberration_model=aberration_model,
             alpha=alpha if aberration_model == "ctf" else None,
         )

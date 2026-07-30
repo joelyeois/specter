@@ -11,7 +11,7 @@ pixel_size = 1.0              # Å
 micrograph_size = 4096        # pixels, square
 
 [microscope]
-energy = 300.0                # keV
+voltage = 300.0                # kV
 dose_min = 20.0                # e⁻/Å²
 # dose_max = 60.0               # e⁻/Å², uncomment to randomize dose per micrograph
 # num_frames = 20                # frames, uncomment to override default (int(dose_min) if None)

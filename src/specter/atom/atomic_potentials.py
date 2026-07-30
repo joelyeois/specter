@@ -554,7 +554,7 @@ def shtyrov_atomic_potential_3d(
     atomic_number: int,
     r_xyz: torch.Tensor,
     filepath: str,
-    energy: float = 300,
+    voltage: float = 300,
 ) -> torch.Tensor:
     """
     Compute the 3D atomic potential for a specific element using Shtyrov parameterization.
@@ -572,8 +572,8 @@ def shtyrov_atomic_potential_3d(
         3D grid of radial distances.
     filepath : str
         Path to the Shtyrov parameter file.
-    energy : float, optional
-        Beam energy in kV. Default 300.
+    voltage : float, optional
+        Beam accelerating voltage in kV. Default 300.
 
     Returns
     -------

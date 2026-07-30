@@ -100,7 +100,7 @@ def test_dose_envelope_decreases_with_frequency_above_threshold():
 
 
 def test_aberration_bfactor_matches_inline_formula():
-    ab = Aberration(8, pixel_size=1.0, energy=300.0, aberration_model="holography")
+    ab = Aberration(8, pixel_size=1.0, voltage=300.0, aberration_model="holography")
     ctf_params = {
         "dfu": torch.tensor([5000.0]),
         "bfactor": torch.tensor([50.0]),
@@ -111,11 +111,11 @@ def test_aberration_bfactor_matches_inline_formula():
 
 
 def test_aberration_convergence_angle_none_is_unchanged():
-    ab_off = Aberration(8, pixel_size=1.0, energy=300.0, aberration_model="holography")
+    ab_off = Aberration(8, pixel_size=1.0, voltage=300.0, aberration_model="holography")
     ab_on = Aberration(
         8,
         pixel_size=1.0,
-        energy=300.0,
+        voltage=300.0,
         aberration_model="holography",
         convergence_angle=None,
     )
@@ -129,7 +129,7 @@ def test_aberration_convergence_angle_attenuates_high_frequency():
     ab = Aberration(
         64,
         pixel_size=1.0,
-        energy=300.0,
+        voltage=300.0,
         aberration_model="holography",
         convergence_angle=0.02,
     )
@@ -142,9 +142,9 @@ def test_aberration_convergence_angle_attenuates_high_frequency():
 
 
 def test_aberration_cc_none_is_unchanged():
-    ab_off = Aberration(8, pixel_size=1.0, energy=300.0, aberration_model="holography")
+    ab_off = Aberration(8, pixel_size=1.0, voltage=300.0, aberration_model="holography")
     ab_on = Aberration(
-        8, pixel_size=1.0, energy=300.0, aberration_model="holography", cc=None
+        8, pixel_size=1.0, voltage=300.0, aberration_model="holography", cc=None
     )
     ctf_params = {"dfu": torch.tensor([5000.0])}
     assert torch.allclose(
@@ -156,7 +156,7 @@ def test_aberration_cc_attenuates_high_frequency():
     ab = Aberration(
         64,
         pixel_size=1.0,
-        energy=300.0,
+        voltage=300.0,
         aberration_model="holography",
         cc=2.7e7,
     )
@@ -167,11 +167,11 @@ def test_aberration_cc_attenuates_high_frequency():
 
 
 def test_aberration_dose_envelope_false_is_unchanged():
-    ab_off = Aberration(8, pixel_size=1.0, energy=300.0, aberration_model="holography")
+    ab_off = Aberration(8, pixel_size=1.0, voltage=300.0, aberration_model="holography")
     ab_on = Aberration(
         8,
         pixel_size=1.0,
-        energy=300.0,
+        voltage=300.0,
         aberration_model="holography",
         dose_envelope=False,
     )
@@ -186,7 +186,7 @@ def test_aberration_dose_envelope_attenuates_high_frequency():
     ab = Aberration(
         64,
         pixel_size=1.0,
-        energy=300.0,
+        voltage=300.0,
         aberration_model="holography",
         dose_envelope=True,
     )
@@ -201,7 +201,7 @@ def test_ctf_batch_includes_dose():
 
     gen = BaseImager(
         pixel_size=1.0,
-        energy=300.0,
+        voltage=300.0,
         dose_per_angstrom=torch.tensor([40.0, 60.0]),
         nxy=16,
         nz=16,

@@ -215,7 +215,7 @@ def test_tomogram_ghostbuster_angles_path(
     tgb = TomogramGhostbuster(
         tilt_series=tilt_series,
         voxel_size=2.0,
-        energy=300.0,
+        voltage=300.0,
         ctf_params=tomo_ctf_params,
         angles=[-20.0, 0.0, 20.0],
         scattering_model="projection",
@@ -238,7 +238,7 @@ def test_tomogram_ghostbuster_quaternions_path(
     tgb = TomogramGhostbuster(
         tilt_series=tilt_series,
         voxel_size=2.0,
-        energy=300.0,
+        voltage=300.0,
         ctf_params=tomo_ctf_params,
         quaternions=quats,
         scattering_model="projection",
@@ -255,7 +255,7 @@ def test_tomogram_ghostbuster_rejects_both_angles_and_quaternions(
         TomogramGhostbuster(
             tilt_series=tilt_series,
             voxel_size=2.0,
-            energy=300.0,
+            voltage=300.0,
             ctf_params=tomo_ctf_params,
             angles=[0.0, 10.0, 20.0],
             quaternions=torch.zeros(3, 4),
@@ -269,6 +269,6 @@ def test_tomogram_ghostbuster_requires_angles_or_quaternions(
         TomogramGhostbuster(
             tilt_series=tilt_series,
             voxel_size=2.0,
-            energy=300.0,
+            voltage=300.0,
             ctf_params=tomo_ctf_params,
         )

@@ -40,7 +40,7 @@ def _patch_dataset(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_extract_parameters_all_particles() -> None:
     (
-        energy_kev,
+        voltage_kv,
         pixel_size,
         alpha,
         rotations,

@@ -50,7 +50,7 @@ class Scattering(L.LightningModule):
         self,
         nxy: int,
         pixel_size: float,
-        energy: float,
+        voltage: float,
         scattering_model: str = "multislice",
         klim: float | None = None,
         ews_curvature_sign: str = "negative",
@@ -69,8 +69,9 @@ class Scattering(L.LightningModule):
             Number of pixels in x and y dimensions, (nxy, nxy).
         pixel_size : float
             Pixel size in Ångströms. Assumes dz equals pixel_size.
-        energy : float
-            Electron beam energy in keV. Typical values are 100, 120, 200, or 300 keV.
+        voltage : float
+            Electron beam accelerating voltage in kV. Typical values are 100,
+            120, 200, or 300 kV.
         scattering_model : str, optional
             Scattering model to use. Options: 'multislice', 'firstborn',
             'projection', 'ctf' (in order of increasing approximations).
@@ -102,9 +103,9 @@ class Scattering(L.LightningModule):
         self.pixel_size = pixel_size
 
         # model params
-        self.energy = energy
-        self.wavelength = energy_to_wavelength(energy)
-        self.sigma = interaction_parameter(energy)
+        self.voltage = voltage
+        self.wavelength = energy_to_wavelength(voltage)
+        self.sigma = interaction_parameter(voltage)
         self.scattering_model = scattering_model
         self.ews_curvature_sign = ews_curvature_sign
         self.alpha = alpha
@@ -421,7 +422,7 @@ class IterativeScattering(L.LightningModule):
         self,
         nxy: int,
         pixel_size: float,
-        energy: float,
+        voltage: float,
         scattering_model: str = "multislice",
         klim: float | None = None,
         ews_curvature_sign: str = "negative",
@@ -438,8 +439,8 @@ class IterativeScattering(L.LightningModule):
             Number of pixels in x and y dimensions.
         pixel_size : float
             Pixel size in Å.
-        energy : float
-            Electron beam energy in keV.
+        voltage : float
+            Electron beam accelerating voltage in kV.
         scattering_model : str
             Scattering model to use ('multislice', 'firstborn', 'rytov', 'projection', 'ctf').
         klim : float, optional
@@ -495,9 +496,9 @@ class IterativeScattering(L.LightningModule):
         super().__init__()
         self.nxy = nxy
         self.pixel_size = pixel_size
-        self.energy = energy
-        self.wavelength = energy_to_wavelength(energy)
-        self.sigma = interaction_parameter(energy)
+        self.voltage = voltage
+        self.wavelength = energy_to_wavelength(voltage)
+        self.sigma = interaction_parameter(voltage)
         self.scattering_model = scattering_model
         self.ews_curvature_sign = ews_curvature_sign
         self.alpha = alpha

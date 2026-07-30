@@ -27,7 +27,7 @@ _PARTICLE_STACK_GROUPS: list[tuple[str, list[str]]] = [
     ),
     (
         "Microscope",
-        ["energy", "dose", "cs", "alpha"],
+        ["voltage", "dose", "cs", "alpha"],
     ),
     (
         "Sampling",

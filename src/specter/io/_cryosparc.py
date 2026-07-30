@@ -31,7 +31,7 @@ def _load_csfile_parameters(
     Returns
     -------
     tuple
-        ``(energy_kev, pixel_size, alpha, rotations, translations_A, ctf_params,
+        ``(voltage_kv, pixel_size, alpha, rotations, translations_A, ctf_params,
         scale, anisomag, split)`` for every particle in the dataset.
     """
     dataset = Dataset.load(csfile_path)
@@ -66,13 +66,13 @@ def _load_csfile_parameters(
             "[yellow]Warning:[/yellow] amplitude contrast is not the same for all particles."
         )
 
-    # extract energy
-    energy_kev = torch.as_tensor(dataset["ctf/accel_kv"])
-    if torch.allclose(energy_kev[0], energy_kev.mean()):
-        energy_kev = energy_kev[0]
+    # extract voltage
+    voltage_kv = torch.as_tensor(dataset["ctf/accel_kv"])
+    if torch.allclose(voltage_kv[0], voltage_kv.mean()):
+        voltage_kv = voltage_kv[0]
     else:
         _console.print(
-            "[yellow]Warning:[/yellow] energy is not the same for all particles."
+            "[yellow]Warning:[/yellow] voltage is not the same for all particles."
         )
 
     # extract rotations
@@ -140,7 +140,7 @@ def _load_csfile_parameters(
     }
 
     return (
-        energy_kev,
+        voltage_kv,
         pixel_size,
         alpha,
         rotations,
@@ -176,8 +176,8 @@ def extract_parameters_from_csfile(
 
     Returns
     -------
-    energy_kev : torch.Tensor
-        Energy in keV.
+    voltage_kv : torch.Tensor
+        Voltage in kV.
     pixel_size : torch.Tensor
         Pixel sizes in Ångstrom.
     alpha : torch.Tensor
@@ -201,7 +201,7 @@ def extract_parameters_from_csfile(
         Only returned when ``return_class == "all"``; ``None`` otherwise.
     """
     (
-        energy_kev,
+        voltage_kv,
         pixel_size,
         alpha,
         rotations,
@@ -235,7 +235,7 @@ def extract_parameters_from_csfile(
         halfset_labels = halfset_labels[:n_particles]
 
     return (
-        energy_kev,
+        voltage_kv,
         pixel_size,
         alpha,
         rotations,

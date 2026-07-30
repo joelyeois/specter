@@ -36,8 +36,8 @@ class TomogramGhostbuster:
         ``.mrc`` file containing the tilt series.
     voxel_size : float
         Pixel size in Å.
-    energy : float
-        Electron beam energy in keV.
+    voltage : float
+        Electron beam accelerating voltage in kV.
     ctf_params : dict[str, torch.Tensor]
         Per-tilt CTF parameters; each value must have leading dimension
         ``N_tilts``.
@@ -97,7 +97,7 @@ class TomogramGhostbuster:
         self,
         tilt_series: torch.Tensor | str | Path,
         voxel_size: float,
-        energy: float,
+        voltage: float,
         ctf_params: dict[str, Any],
         angles: Sequence[float] | torch.Tensor | None = None,
         quaternions: torch.Tensor | None = None,
@@ -132,7 +132,7 @@ class TomogramGhostbuster:
         n_tilts, H, W = images.shape
         print(
             f"  {n_tilts} tilts  |  {H}×{W} px  |  {voxel_size:.3f} Å/px  |  "
-            f"{energy:.0f} keV"
+            f"{voltage:.0f} kV"
         )
 
         quats = self._resolve_tilt_quaternions(angles, quaternions, tilt_axis)
@@ -152,7 +152,7 @@ class TomogramGhostbuster:
         }
         self._volume_init = volume_init
         self._voxel_size = voxel_size
-        self._energy = energy
+        self._voltage = voltage
 
         self.lr = lr
         self.sparsity = sparsity
@@ -259,7 +259,7 @@ class TomogramGhostbuster:
             self._quaternions,
             self._translations,
             self._ctf_params,
-            self._energy,
+            self._voltage,
             tilt_axis=self.tilt_axis,
             lr=self.lr,
             sparsity=self.sparsity,

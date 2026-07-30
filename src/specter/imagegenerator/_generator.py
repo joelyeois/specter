@@ -173,8 +173,8 @@ class ImageGeneratorFromCoordinates(ParticleGeneratorBase):
         Translations (x, y) in Å for each batch item. Shape (B, 2).
     ctf_params : dict
         CTF parameters.
-    energy : float
-        Electron beam energy in kV.
+    voltage : float
+        Electron beam accelerating voltage in kV.
     dose_per_angstrom : float or torch.Tensor
         Electron dose per Å². Scalar or 1-D tensor of length n.
     anisomag : torch.Tensor, optional
@@ -264,7 +264,7 @@ class ImageGeneratorFromCoordinates(ParticleGeneratorBase):
         quaternions: torch.Tensor,
         translations: torch.Tensor,
         ctf_params: dict[str, Any],
-        energy: float,
+        voltage: float,
         dose_per_angstrom: float | torch.Tensor,
         anisomag: torch.Tensor | None = None,
         ice_model: str | None = None,
@@ -307,7 +307,7 @@ class ImageGeneratorFromCoordinates(ParticleGeneratorBase):
 
         super().__init__(
             pixel_size=pixel_size,
-            energy=energy,
+            voltage=voltage,
             dose_per_angstrom=dose_per_angstrom,
             nxy=self.nxy,
             nz=self.nz,
@@ -365,7 +365,7 @@ class ImageGeneratorFromCoordinates(ParticleGeneratorBase):
         self.scattering = Scattering(
             self.pad_nxy,
             self.pixel_size,
-            self.energy,
+            self.voltage,
             scattering_model=self.scattering_model,
             klim=self.klim,
             ews_curvature_sign=self.ews_curvature_sign,
@@ -495,8 +495,8 @@ class ImageGenerator(ParticleGeneratorBase):
         Translations (x, y) in Å. Shape (B, 2).
     ctf_params : dict
         CTF parameters.
-    energy : float
-        Electron beam energy in kV.
+    voltage : float
+        Electron beam accelerating voltage in kV.
     dose_per_angstrom : float or torch.Tensor
         Electron dose per Å². Scalar or 1-D tensor of length n.
     anisomag : torch.Tensor, optional
@@ -606,7 +606,7 @@ class ImageGenerator(ParticleGeneratorBase):
         quaternions: torch.Tensor,
         translations: torch.Tensor,
         ctf_params: dict[str, Any],
-        energy: float,
+        voltage: float,
         dose_per_angstrom: float | torch.Tensor,
         anisomag: torch.Tensor | None = None,
         ice_model: str | None = None,
@@ -657,7 +657,7 @@ class ImageGenerator(ParticleGeneratorBase):
 
         super().__init__(
             pixel_size=pixel_size,
-            energy=energy,
+            voltage=voltage,
             dose_per_angstrom=dose_per_angstrom,
             nxy=nxy,
             nz=self.nz,
@@ -705,7 +705,7 @@ class ImageGenerator(ParticleGeneratorBase):
         self.scattering = Scattering(
             self.pad_nxy,
             self.pixel_size,
-            self.energy,
+            self.voltage,
             scattering_model=self.scattering_model,
             klim=self.klim,
             ews_curvature_sign=self.ews_curvature_sign,

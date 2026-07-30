@@ -29,7 +29,7 @@ def test_modular_pipeline_matches_image_generator():
     """Hand-composed rotate/pad/scatter/aberrate/detect == ImageGenerator output."""
     nxy = 32
     pixel_size = 1.5
-    energy = 300.0
+    voltage = 300.0
     dose = 20.0
 
     V0 = torch.zeros(nxy, nxy, nxy)
@@ -46,7 +46,7 @@ def test_modular_pipeline_matches_image_generator():
         quaternions,
         translations,
         ctf_params,
-        energy,
+        voltage,
         dose,
         ice_model=None,
         scattering_model="multislice",
@@ -74,7 +74,7 @@ def test_modular_pipeline_matches_image_generator():
     scattering = Scattering(
         pad_nxy,
         pixel_size,
-        energy,
+        voltage,
         scattering_model="multislice",
         ews_curvature_sign="positive",
         nz=nz,
@@ -94,7 +94,7 @@ def test_modular_pipeline_matches_image_generator():
     }
 
     aberration = Aberration(
-        pad_nxy, pixel_size, energy, aberration_model="holography", alpha=0.0
+        pad_nxy, pixel_size, voltage, aberration_model="holography", alpha=0.0
     )
     with torch.no_grad():
         detector_waves = aberration(exitwaves, manual_ctf_params)

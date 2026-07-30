@@ -30,16 +30,16 @@ def hc() -> float:
     return _sc.h * _sc.c / _sc.e * 1.0e10
 
 
-def energy_to_wavelength(energy: float) -> float:
+def energy_to_wavelength(voltage: float) -> float:
     """
-    Convert electron energy to de Broglie wavelength.
+    Convert electron beam accelerating voltage to de Broglie wavelength.
 
     Uses the relativistic formula for electron wavelength calculation.
 
     Parameters
     ----------
-    energy : float
-        Electron beam energy in keV.
+    voltage : float
+        Electron beam accelerating voltage in kV.
 
     Returns
     -------
@@ -50,13 +50,15 @@ def energy_to_wavelength(energy: float) -> float:
     -----
     Uses the relativistic formula:
     λ = hc / sqrt(E * (E + 2*m_e*c²))
-    where m_e*c² = 511 keV (rest mass energy of electron).
+    where E is the electron's kinetic energy (numerically equal to the
+    accelerating voltage in eV) and m_e*c² = 511 keV (rest mass energy of
+    electron).
     """
-    ev = energy * 1.0e3  # [eV]
+    ev = voltage * 1.0e3  # [eV]
     return hc() / (ev * (ev + 2.0 * rest_mass_energy())) ** 0.5
 
 
-def interaction_parameter(energy: float) -> float:
+def interaction_parameter(voltage: float) -> float:
     """
     Calculate the electron-specimen interaction parameter.
 
@@ -65,8 +67,8 @@ def interaction_parameter(energy: float) -> float:
 
     Parameters
     ----------
-    energy : float
-        Electron beam energy in keV.
+    voltage : float
+        Electron beam accelerating voltage in kV.
 
     Returns
     -------
@@ -78,7 +80,7 @@ def interaction_parameter(energy: float) -> float:
     .. [1] E. J. Kirkland, Advanced Computing in Electron Microscopy,
        Eq. (5.6), Springer US, Boston, MA, 2010.
     """
-    w = energy_to_wavelength(energy)
-    ev = energy * 1e3
+    w = energy_to_wavelength(voltage)
+    ev = voltage * 1e3
     m = rest_mass_energy()
     return 2.0 * torch.pi / (w * ev) * ((ev + m) / (ev + 2.0 * m))

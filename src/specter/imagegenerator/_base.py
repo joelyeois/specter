@@ -40,8 +40,8 @@ class BaseImager(L.LightningModule):
     ----------
     pixel_size : float
         Pixel size in Å.
-    energy : float
-        Electron beam energy in kV.
+    voltage : float
+        Electron beam accelerating voltage in kV.
     dose_per_angstrom : float or torch.Tensor
         Electron dose per Å². Scalar or 1-D tensor of length n.
     nxy : int
@@ -100,7 +100,7 @@ class BaseImager(L.LightningModule):
     def __init__(
         self,
         pixel_size: float,
-        energy: float,
+        voltage: float,
         dose_per_angstrom: float | torch.Tensor,
         nxy: int,
         nz: int,
@@ -126,7 +126,7 @@ class BaseImager(L.LightningModule):
     ):
         super().__init__()
         self.pixel_size = pixel_size
-        self.energy = energy
+        self.voltage = voltage
         self.aberration_model = aberration_model
         self.noise_model = noise_model
         self.alpha = alpha
@@ -254,7 +254,7 @@ class BaseImager(L.LightningModule):
         self.aberration = Aberration(
             self.pad_nxy,
             self.pixel_size,
-            self.energy,
+            self.voltage,
             aberration_model=self.aberration_model,
             alpha=self.alpha,
             convergence_angle=self.convergence_angle,

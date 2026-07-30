@@ -60,7 +60,7 @@ membrane_potential_scale = 1.0    # unitless, on top of the auto-calibrated refe
 
 [microscope]
 micrograph_size = 630              # pixels, square; defaults to target_shape's XY extent
-energy = 300.0                     # keV
+voltage = 300.0                     # kV
 dose_per_tilt = 3.0                # e⁻/Å², per tilt angle
 num_frames = 10                    # movie frames per tilt
 cs = 2.0                           # mm

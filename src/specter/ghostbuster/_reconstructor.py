@@ -54,8 +54,8 @@ class Reconstructor(L.LightningModule):
         the image-domain loss before batch averaging — particles with a
         small scale are down-weighted in the gradient update. ``None``
         (default) weights every particle equally.
-    energy : float
-        Electron energy in keV.
+    voltage : float
+        Electron beam accelerating voltage in kV.
     dose_per_angstrom : float
         Electron dose in e⁻/Å².
     lr : float, optional
@@ -103,7 +103,7 @@ class Reconstructor(L.LightningModule):
         quaternions: torch.Tensor,
         translations: torch.Tensor,
         ctf_params: dict[str, torch.Tensor],
-        energy: float,
+        voltage: float,
         dose_per_angstrom: float,
         anisomag: torch.Tensor | None = None,
         alpha: float = 0.0,
@@ -181,7 +181,7 @@ class Reconstructor(L.LightningModule):
         self.dose_per_angstrom = dose_per_angstrom
         self.voxel_size = voxel_size
         self.alpha = alpha
-        self.energy = energy
+        self.voltage = voltage
         self.rotate_mode = rotate_mode
         self._register_volume(V, lr)
         self._register_ctf_params(ctf_params, defocus_offset, lr_D)
@@ -359,7 +359,7 @@ class Reconstructor(L.LightningModule):
             self.rotations,
             self.translations,
             self.ctf_params,
-            self.energy,
+            self.voltage,
             self.dose_per_angstrom,
             anisomag=self.anisomag,
             ice_model=None,

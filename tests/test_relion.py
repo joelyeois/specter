@@ -27,7 +27,7 @@ def test_create_particle_starfile_writes_bfactor_column(tmp_path) -> None:
         translations=torch.zeros(n, 2),
         alpha=0.1,
         folderpath=str(tmp_path),
-        energy=300.0,
+        voltage=300.0,
         dx=1.5,
         filename="particles",
         ctf_params=ctf_params,
@@ -62,7 +62,7 @@ def test_create_particle_starfile_from_model_matches_model_params(tmp_path) -> N
         quaternions=torch.tensor([[0.7071, 0.0, 0.7071, 0.0]]),
         translations=torch.tensor([[1.0, -1.0]]),
         ctf_params=ctf_params,
-        energy=300.0,
+        voltage=300.0,
         dose_per_angstrom=2.0,
         noise_model=None,
         scattering_model="multislice",
@@ -119,7 +119,7 @@ def test_extract_parameters_from_starfile_single_block(tmp_path) -> None:
     starfile.write(df, star_path, overwrite=True)
 
     (
-        energy_kev,
+        voltage_kv,
         pixel_size,
         alpha,
         rotations,
@@ -131,7 +131,7 @@ def test_extract_parameters_from_starfile_single_block(tmp_path) -> None:
         halfset_labels,
     ) = extract_parameters_from_starfile(str(star_path))
 
-    assert energy_kev.item() == pytest.approx(300.0)
+    assert voltage_kv.item() == pytest.approx(300.0)
     assert pixel_size.item() == pytest.approx(1.5)
     assert alpha.item() == pytest.approx(0.1)
     assert ctf_params["cs"].shape == (4,)
@@ -254,7 +254,7 @@ def test_extract_parameters_from_starfile_two_block_optics(tmp_path) -> None:
     )
 
     (
-        energy_kev,
+        voltage_kv,
         pixel_size,
         alpha,
         rotations,
@@ -266,7 +266,7 @@ def test_extract_parameters_from_starfile_two_block_optics(tmp_path) -> None:
         halfset_labels,
     ) = extract_parameters_from_starfile(str(star_path))
 
-    assert energy_kev.item() == pytest.approx(300.0)
+    assert voltage_kv.item() == pytest.approx(300.0)
     assert pixel_size.item() == pytest.approx(1.5)
     assert alpha.item() == pytest.approx(0.1)
     assert rotations.shape == (n, 4)

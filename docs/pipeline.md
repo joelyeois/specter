@@ -185,10 +185,9 @@ instead of rotating a whole tomogram-sized volume.
     scripts (`generate_particle_stack.py`, `generate_micrograph.py`,
     `generate_particle_stack_from_csfile.py`, `generate_tilt_series.py`)
     only expose `--scattering_model {multislice, firstborn, projection,
-    ctf}`. `ghostbuster_reconstruct.py` separately exposes `{multislice,
-    rytov, firstborn, projection}`. `kinematic` and `rytov_parallel`
-    are not wired into any script's CLI — use them by constructing
-    `Scattering`/`IterativeScattering` directly in Python.
+    ctf}`. `kinematic` and `rytov_parallel` are not wired into any
+    script's CLI — use them by constructing `Scattering`/
+    `IterativeScattering` directly in Python.
 
 ## 7 — Aberration
 

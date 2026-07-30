@@ -67,14 +67,60 @@ These are the properties that follow from reading the source, not a
 competitive comparison. Each is unusual on its own; together they define
 what SPECTER is for.
 
-| | |
-|---|---|
-| **Shared model** | Simulation and reconstruction are the same code. Ghostbuster instantiates the ordinary `ImageGenerator` and optimises through it — there is no separate, simplified reconstruction physics to drift out of sync. |
-| **Ice** | Water is structured, not scattered. Ice comes from configurations optimised against a measured structure factor and a coarse-grained water potential, not randomly placed molecules at the right bulk density. See [Ice](ice.md). |
-| **Detector** | Coincidence loss is simulated per electron. Individual electrons are placed and then merged when they land too close together, reproducing the low-frequency suppression that real counting detectors show. |
-| **Dataset twins** | Poses can come from a real experiment. Reading a CryoSPARC `.cs` file gives simulated data with the same poses, defoci and optics as a real dataset — with ground truth attached. |
-| **Propagation** | Multislice, not just a CTF multiply. The default propagates the wave slice by slice through the specimen, so thickness and multiple scattering are represented rather than assumed away. |
-| **Provenance** | Runs record themselves. Every job stores its complete effective configuration, the package version and the git commit, and refuses to resume under changed settings. See [Job management](jobs.md). |
+<div class="grid cards" markdown>
+
+-   :material-sync:{ .lg .middle } **Shared model**
+
+    ---
+
+    Simulation and reconstruction are the same code. Ghostbuster
+    instantiates the ordinary `ImageGenerator` and optimises through it —
+    there is no separate, simplified reconstruction physics to drift out
+    of sync.
+
+-   :material-snowflake:{ .lg .middle } **Ice**
+
+    ---
+
+    Water is structured, not scattered. Ice comes from configurations
+    optimised against a measured structure factor and a coarse-grained
+    water potential, not randomly placed molecules at the right bulk
+    density. See [Ice](ice.md).
+
+-   :material-camera-iris:{ .lg .middle } **Detector**
+
+    ---
+
+    Coincidence loss is simulated per electron. Individual electrons are
+    placed and then merged when they land too close together,
+    reproducing the low-frequency suppression that real counting
+    detectors show.
+
+-   :material-content-duplicate:{ .lg .middle } **Dataset twins**
+
+    ---
+
+    Poses can come from a real experiment. Reading a CryoSPARC `.cs`
+    file gives simulated data with the same poses, defoci and optics as
+    a real dataset — with ground truth attached.
+
+-   :material-wave:{ .lg .middle } **Propagation**
+
+    ---
+
+    Multislice, not just a CTF multiply. The default propagates the
+    wave slice by slice through the specimen, so thickness and multiple
+    scattering are represented rather than assumed away.
+
+-   :material-history:{ .lg .middle } **Provenance**
+
+    ---
+
+    Runs record themselves. Every job stores its complete effective
+    configuration, the package version and the git commit, and refuses
+    to resume under changed settings. See [Job management](jobs.md).
+
+</div>
 
 ## How the physics is checked
 

@@ -1,0 +1,3 @@
+# specter.atom
+
+::: specter.atom

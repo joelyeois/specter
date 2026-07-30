@@ -75,7 +75,7 @@ When modifying physics-critical code, validate against known physical quantities
 
 `.superpowers/` at the repo root (gitignored) is where Claude Code's superpowers
 skill stores design specs and other working documents (e.g. `.superpowers/specs/`).
-This is separate from `docs/`, which is reserved for Read the Docs / Sphinx
+This is separate from `docs/`, which is reserved for Read the Docs / Zensical
 content only — do not put specs or planning docs there.
 
 ## Testing

@@ -1,0 +1,87 @@
+# Core modules
+
+Standalone top-level modules that are not grouped into a subpackage.
+
+## specter.potential
+
+::: specter.potential
+
+## specter.scattering
+
+::: specter.scattering
+
+## specter.microscope
+
+::: specter.microscope
+
+## specter.detectors
+
+::: specter.detectors
+
+## specter.crowding
+
+::: specter.crowding
+
+## specter.pdb
+
+::: specter.pdb
+
+## specter.config
+
+::: specter.config
+
+## specter.arrays
+
+::: specter.arrays
+
+## specter.coords
+
+::: specter.coords
+
+## specter.fft
+
+::: specter.fft
+
+## specter.filters
+
+::: specter.filters
+
+## specter.image
+
+::: specter.image
+
+## specter.plots
+
+::: specter.plots
+
+## specter.progress
+
+::: specter.progress
+
+## specter.qscore
+
+::: specter.qscore
+
+## specter.random_seed
+
+::: specter.random_seed
+
+## specter.symmetries
+
+::: specter.symmetries
+
+## specter.welling_rotation
+
+::: specter.welling_rotation
+
+## specter.aretomo3
+
+::: specter.aretomo3
+
+## specter.constants
+
+::: specter.constants
+
+## specter.cuda
+
+::: specter.cuda

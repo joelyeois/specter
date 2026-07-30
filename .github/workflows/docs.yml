@@ -26,11 +26,11 @@ jobs:
         run: uv sync --extra docs
 
       - name: Build docs
-        run: uv run sphinx-build -b html docs docs/_build/html
+        run: uv run zensical build
 
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: docs/_build/html
+          path: site
 
   deploy:
     needs: build

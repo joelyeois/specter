@@ -28,9 +28,8 @@ dev/
 .jupyter/
 .jupyter_ystore.db
 
-# Sphinx docs build output
-docs/_build/
-docs/autoapi/
+# Docs build output
+site/
 
 # Other system files
 .DS_Store

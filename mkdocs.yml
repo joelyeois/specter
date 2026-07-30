@@ -1,0 +1,85 @@
+site_name: SPECTER
+site_description: Scattering & Propagation of Electrons in Cryo-EM — Twin Emulator & Reconstruction
+repo_url: https://github.com/joelyeois/specter
+repo_name: joelyeois/specter
+docs_dir: docs
+
+theme:
+  name: material
+  favicon: assets/favicon.png
+  logo: assets/logo-light.png
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+    - content.code.annotate
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight
+  - pymdownx.arithmatex:
+      generic: true
+  - pymdownx.snippets:
+      base_path: ["."]
+      check_paths: true
+
+extra_javascript:
+  - https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js
+
+nav:
+  - Home: index.md
+  - User guide:
+      - Installation: installation.md
+      - Quickstart: quickstart.md
+  - Field guide:
+      - Pipeline: pipeline.md
+      - Ice: ice.md
+      - Configuration: configuration.md
+      - Data generation: generation.md
+      - Reconstruction: reconstruction.md
+      - Job management: jobs.md
+  - Reference:
+      - Overview: api/index.md
+      - specter: api/specter.md
+      - specter.aberrations: api/aberrations.md
+      - specter.atom: api/atom.md
+      - specter.ghostbuster: api/ghostbuster.md
+      - specter.ice: api/ice.md
+      - specter.imagegenerator: api/imagegenerator.md
+      - specter.io: api/io.md
+      - specter.jobs: api/jobs.md
+      - specter.rotations: api/rotations.md
+      - specter.specimen: api/specimen.md
+      - Core modules: api/core.md
+
+plugins:
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [src]
+          options:
+            docstring_style: numpy
+            show_source: false
+            show_root_heading: true
+            show_root_full_path: false
+            merge_init_into_class: true
+            docstring_section_style: table
+            members_order: source

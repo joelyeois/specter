@@ -1,0 +1,3 @@
+# specter.ghostbuster
+
+::: specter.ghostbuster

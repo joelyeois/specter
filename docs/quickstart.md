@@ -3,23 +3,53 @@
 ## Simulate a particle stack
 
 The `specter simulate particles` CLI is the quickest way to produce a
-simulated cryo-EM particle stack from a PDB code:
+simulated cryo-EM particle stack. With no flags, it loads every setting
+from `configs/particle.toml`:
+
+```bash
+specter simulate particles
+```
+
+This downloads the structure, builds the scattering potential, applies CTF
+and detector effects, and writes a `.mrcs` / `.star` file pair.
+
+Any field in the config can be overridden on the command line without
+editing the file:
 
 ```bash
 specter simulate particles \
     --pdb_code 6bdf \
-    --n_particles 20 \
-    --num_pixels 256 \
-    --pixel_size 1.0 \
-    --energy 300 \
-    --scattering_model multislice \
-    --output_dir ./output
+    --n_particles 200 \
+    --device cuda:0 \
+    --output_dir ./output/
 ```
 
-This downloads the structure, builds the scattering potential, applies CTF and
-detector effects, and writes a `.mrcs` / `.star` file pair. For the other
-three workflows (a CryoSPARC dataset twin, full micrographs, cryo-ET tilt
-series), see [Generate a particle stack](user-guide/particle-stack.md),
+`configs/particle.toml` looks like this:
+
+```toml
+# Canonical default config for `specter simulate particles`.
+# Any field can be overridden on the command line, e.g.:
+#   specter simulate particles --config configs/particle.toml --n_particles 3000
+
+[potential]
+pdb_code = "6bdf"
+assembly = true
+num_pixels = 256
+pixel_size = 1.0              # Å
+
+[microscope]
+energy = 300.0                # keV
+dose = "20"                    # e⁻/Å²; single value, or "low,high" to sample per particle
+cs = 2.0                       # mm
+alpha = 0.1                    # unitless, amplitude contrast ratio
+
+# ... see the full file: configs/particle.toml
+```
+
+See [Configure a run](user-guide/configuration.md) for the complete field
+reference. For the other three workflows (a CryoSPARC dataset twin, full
+micrographs, cryo-ET tilt series), see
+[Generate a particle stack](user-guide/particle-stack.md),
 [Generate a micrograph](user-guide/micrograph.md), and
 [Generate a tilt series](user-guide/tilt-series.md).
 

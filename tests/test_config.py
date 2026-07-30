@@ -41,7 +41,7 @@ def test_load_config_fills_defaults_for_missing_fields(tmp_path: Path) -> None:
     assert config.num_pixels == 256
     assert config.pixel_size == 1.0
     assert config.scattering_model == "multislice"
-    assert config.dose_max is None
+    assert config.dose == "20"
 
 
 def test_load_config_resolves_relative_pdb_savefolder_to_repo_root(

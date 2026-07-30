@@ -15,37 +15,100 @@ import specter
 REPO_ROOT = Path(specter.__file__).resolve().parents[2]
 
 
+def parse_scalar_or_range(value: str) -> tuple[float, float]:
+    """
+    Parse a "value" or "low,high" string into a (low, high) range.
+
+    A bare scalar becomes a zero-width range (``low == high``), so callers
+    can always uniformly sample between the two bounds without special-
+    casing the constant case.
+
+    Parameters
+    ----------
+    value : str
+        Either a single number (e.g. ``"20"``) or two comma-separated
+        numbers (e.g. ``"5000,15000"``).
+
+    Returns
+    -------
+    tuple[float, float]
+        ``(low, high)``.
+
+    Raises
+    ------
+    ValueError
+        If ``value`` isn't one or two comma-separated numbers.
+    """
+    parts = [p.strip() for p in value.split(",")]
+    if len(parts) == 1:
+        v = float(parts[0])
+        return v, v
+    if len(parts) == 2:
+        return float(parts[0]), float(parts[1])
+    raise ValueError(f"Expected 'value' or 'low,high', got {value!r}")
+
+
 @dataclass
 class ParticleStackConfig:
     """Parameters for particle-stack generation, loaded from a TOML config file.
+
+    Fields are ordered basic-first, advanced-last (mirrored by
+    `specter.cli.simulate`'s panel layout): the first block is what most runs
+    actually tune; everything under "Advanced" exists but is rarely touched.
 
     Set `cs_path` to drive generation from a CryoSPARC .cs file instead of
     randomly-sampled poses/CTF: `pixel_size`, `energy`, `alpha`, defocus, and
     shifts are then read from the .cs file at run time via
     `extract_parameters_from_csfile` and take precedence over the
     corresponding fields below, which are unused in that mode.
+
+    `dose`, `defocus`, `coincidence_radius`, and `potential_scale` each take
+    either a single value (e.g. ``"20"``, constant for every particle) or a
+    ``"low,high"`` range (e.g. ``"5000,15000"``, sampled uniformly per
+    particle) -- see :func:`parse_scalar_or_range`.
     """
 
-    # --- PDB / potential ---
+    # --- Structure & potential (basic) ---
     pdb_code: str
     assembly: bool = True
-    pdb_savefolder: str = "pdb-data"  # resolved against REPO_ROOT if relative
     num_pixels: int = 256
     pixel_size: float = 1.0  # Å
 
-    # --- CryoSPARC input ---
-    # if set, poses/CTF/pixel_size/energy/alpha come from here
-    cs_path: str | None = None
-
-    # --- Microscope / physics ---
+    # --- Microscope (basic) ---
     energy: float = 300.0  # keV
-    dose_min: float = 20.0  # e⁻/Å²
-    dose_max: float | None = None  # e⁻/Å²
-    num_frames: int | None = None
+    dose: str = "20"  # e⁻/Å²
     cs: float = 2.0  # mm
     alpha: float = 0.1  # unitless, amplitude contrast ratio
 
-    # --- Envelopes ---
+    # --- Sampling (basic) ---
+    defocus: str = "5000,15000"  # Å
+    shift: float = 2.0  # Å, max in-plane shift (uniform ±shift)
+    n_particles: int = 20
+
+    # --- Models (basic) ---
+    scattering_model: Literal["multislice", "firstborn", "projection", "ctf"] = (
+        "multislice"
+    )
+    detector_model: Literal["none", "perfect", "k3_300kv", "k3_200kv"] = "none"
+
+    # --- Post-processing (basic) ---
+    normalize_particles: bool = True
+    save_exitwaves: bool = False
+    save_clean_exitwaves: bool = False
+
+    # --- Compute (basic) ---
+    device: str = "cpu"
+    batchsize: int = 5
+
+    # --- Output (basic) ---
+    output_dir: str = "./output/"
+    filename: str = "particles"
+
+    # --- Advanced ---
+    pdb_savefolder: str = "pdb-data"  # resolved against REPO_ROOT if relative
+    # if set, poses/CTF/pixel_size/energy/alpha come from here
+    cs_path: str | None = None
+    num_frames: int | None = None
     convergence_angle: float | None = None  # mrad
     cc: float | None = None  # mm
     energy_spread: float = 0.7  # eV (FWHM)
@@ -53,47 +116,78 @@ class ParticleStackConfig:
     deltaI_I: float = 0.01e-6  # unitless (ΔI/I)
     dose_envelope: bool = False
     bfactor: float | None = None  # Å²
-
-    # --- Defocus ---
-    defocus_min: float = 5000.0  # Å
-    defocus_max: float = 15000.0  # Å
-
-    # --- Translations / shifts ---
-    shift: float = 2.0  # Å, max in-plane shift (uniform ±shift)
-
-    # --- Dataset size ---
-    n_particles: int = 20
-
-    # --- Models ---
-    scattering_model: Literal["multislice", "firstborn", "projection", "ctf"] = (
-        "multislice"
-    )
     aberration_model: Literal["holography", "ctf"] = "holography"
     noise_model: Literal["poisson", "none"] = "poisson"
-    coincidence_radius_min: float = 0.0  # pixels
-    coincidence_radius_max: float | None = None  # pixels
+    coincidence_radius: str = "0"  # pixels
     ice_model: Literal["gd", "random", "none"] = "gd"
     ice_thickness: float = 0.0  # Å, 0 = minimum (particle box size)
     ice_cache_dir: str | None = None  # defaults to the bundled ice-data/ice_cache
     crowd_min_distance: float | None = None  # Å
     crowd_max_distance_z: float | None = None  # Å
-    potential_scale_min: float = 1.0  # unitless
-    potential_scale_max: float | None = None  # unitless
+    potential_scale: str = "1"  # unitless
     pad_fft: bool = True
-    detector_model: Literal["none", "perfect", "k3_300kv", "k3_200kv"] = "none"
 
-    # --- Post-processing ---
-    normalize_particles: bool = True
-    save_exitwaves: bool = False
-    save_clean_exitwaves: bool = False
 
-    # --- Compute ---
-    device: str = "cpu"
-    batchsize: int = 5
-
-    # --- Output ---
-    output_dir: str = "./output/"
-    filename: str = "particles"
+# Human-readable per-field descriptions for ParticleStackConfig, used to build
+# `specter simulate particles --help` (see specter/cli/_click_options.py). Kept
+# here, next to the dataclass, so adding/renaming a field and its help text happen
+# in the same place.
+PARTICLE_STACK_HELP: dict[str, str] = {
+    "pdb_code": "PDB accession code or path to a local .cif/.pdb file.",
+    "assembly": "Fetch the biological assembly.",
+    "num_pixels": "Number of pixels per axis for the 3-D potential box.",
+    "pixel_size": "Pixel size in Angstrom.",
+    "energy": "Electron beam energy in keV.",
+    "dose": "Dose in e-/A^2: a single value (e.g. 20) for constant dose per "
+    "particle, or 'low,high' (e.g. 20,60) to sample uniformly per particle.",
+    "cs": "Spherical aberration in mm (1-3 mm typical).",
+    "alpha": "Amplitude contrast ratio.",
+    "defocus": "Defocus in Angstrom: a single value (e.g. 8000) for constant "
+    "defocus, or 'low,high' (e.g. 5000,15000) to sample uniformly per particle.",
+    "shift": "Max in-plane shift in Angstrom (uniform +/-shift).",
+    "n_particles": "Number of particles to simulate.",
+    "scattering_model": "Scattering model.",
+    "detector_model": "Detector model.",
+    "normalize_particles": "Normalize particles to zero mean and unit std.",
+    "save_exitwaves": "Save exit wave magnitude and phase as separate .mrcs files.",
+    "save_clean_exitwaves": "Save clean (particle-only, no ice) exit wave "
+    "magnitude and phase.",
+    "device": "Device to use: cpu | cuda | cuda:0 | 0,1,2,3. "
+    "Comma-separated integers trigger multi-GPU Lightning DDP.",
+    "batchsize": "Number of particles per forward pass.",
+    "output_dir": "Directory to save .mrcs and .star files.",
+    "filename": "Base name for output files (no extension).",
+    "pdb_savefolder": "Folder to cache downloaded PDB files.",
+    "cs_path": "Path to a CryoSPARC .cs file to drive generation from real "
+    "poses/CTF instead of random sampling. Not yet used by this command "
+    "(reserved for a future release).",
+    "num_frames": "Number of movie frames. Defaults to int(dose) if not set.",
+    "convergence_angle": "Beam convergence semi-angle in mrad, for the Cs "
+    "(spatial coherence) envelope.",
+    "cc": "Chromatic aberration coefficient in mm, for the Cc (temporal "
+    "coherence) envelope.",
+    "energy_spread": "FWHM of the beam energy spread in eV, used by the Cc envelope.",
+    "deltaV_V": "Relative high-voltage instability, used by the Cc envelope.",
+    "deltaI_I": "Relative objective-lens current instability, used by the Cc envelope.",
+    "dose_envelope": "Apply the Grant & Grigorieff (2015) cumulative-dose envelope.",
+    "bfactor": "Isotropic B-factor envelope in Angstrom^2.",
+    "aberration_model": "Aberration model.",
+    "noise_model": "Noise model. Use 'none' for no noise.",
+    "coincidence_radius": "Coincidence radius in pixels: a single value for "
+    "constant radius, or 'low,high' to sample uniformly per particle.",
+    "ice_model": "Ice model: 'gd' (samples the pre-generated IceBank "
+    "cache), 'random' (cheap, low-realism), or 'none'.",
+    "ice_thickness": "Ice thickness in Angstrom. 0 = minimum (particle box size).",
+    "ice_cache_dir": "Directory of cached ice configs for ice_model='gd'. "
+    "Defaults to the bundled ice-data/ice_cache.",
+    "crowd_min_distance": "Minimum distance between crowded particles in "
+    "Angstrom. Unset disables crowding.",
+    "crowd_max_distance_z": "Maximum z-distance between crowded particles in Angstrom.",
+    "potential_scale": "Potential scale factor (unitless, values < 1 "
+    "approximate thicker ice): a single value for constant scale, or "
+    "'low,high' to sample uniformly per particle.",
+    "pad_fft": "Pad the volume for FFT to avoid edge artifacts.",
+}
 
 
 @dataclass

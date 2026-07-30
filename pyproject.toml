@@ -7,6 +7,7 @@ requires-python = ">=3.11"
 dependencies = [
     "biopython>=1.85",
     "biotite>=1.4.0",
+    "click>=8.4.2",
     "cryosparc-tools>=5.0",
     "eerfile>=0.0.4",
     "gemmi>=0.7.3",
@@ -20,6 +21,7 @@ dependencies = [
     "polnet",
     "requests>=2.32.5",
     "rich>=14.2.0",
+    "rich-click>=1.9.8",
     "roma>=1.5.7",
     "scikit-image>=0.25.2",
     "scipy>=1.16.2",
@@ -90,5 +92,6 @@ include-package-data = true
 specter = ["atom_data/*.txt"]
 
 [project.scripts]
+specter = "specter.cli._cli:main"
 specter-jobs = "specter.jobs._cli:main"
 

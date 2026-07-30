@@ -16,19 +16,23 @@ source .venv/bin/activate
 uv pip install -e .
 ```
 
-## Launch the notebooks
+!!! success "Verify installation"
+    After installation, verify that the CLI is available:
 
-```bash
-uv run --with jupyter jupyter lab
-```
+        specter --help
 
-## Verify installation
+    You should see output similar to the following:
 
-```bash
-specter --help
-```
-
-You should see the SPECTER CLI's usage and command list.
+         Usage: specter [OPTIONS] COMMAND [ARGS]...
+        
+         SPECTER command-line interface.
+        
+        ╭─ Options ────────────────────────────────────────────────────────────────────╮
+        │ --help  -h  Show this message and exit.                                      │
+        ╰──────────────────────────────────────────────────────────────────────────────╯
+        ╭─ Commands ───────────────────────────────────────────────────────────────────╮
+        │ simulate           Simulate cryo-EM/cryo-ET data                             │
+        ╰──────────────────────────────────────────────────────────────────────────────╯
 
 ## Installing with conda/pip instead
 

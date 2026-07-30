@@ -19,13 +19,15 @@ python demo-scripts/generate_particle_stack.py \
 This downloads the structure, builds the scattering potential, applies CTF and
 detector effects, and writes a `.mrcs` / `.star` file pair. For the other
 three workflows (a CryoSPARC dataset twin, full micrographs, cryo-ET tilt
-series) and the complete CLI reference, see [Data generation](generation.md).
+series), see [Generate a particle stack](user-guide/particle-stack.md),
+[Generate a micrograph](user-guide/micrograph.md), and
+[Generate a tilt series](user-guide/tilt-series.md).
 
 ## Job management
 
 Generation runs can be recorded under a project name in a local job
 database. Inspect past runs with the `specter-jobs` CLI (installed
-automatically with the package) — see [Job management](jobs.md):
+automatically with the package) — see [Manage jobs](user-guide/jobs.md):
 
 ```bash
 specter-jobs list --project my-project

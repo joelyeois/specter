@@ -12,9 +12,9 @@ microscope would record from a known molecule, and then uses that same
 simulation in reverse to recover a molecule from real images. Both directions
 run on one shared piece of physics — the forward model is differentiable, so
 the same code that generates an image can have gradients pushed back through
-it to recover the structure that produced one. See [Pipeline](pipeline.md)
-for how that works end to end, and [Physics](physics/index.md) for the
-underlying equations.
+it to recover the structure that produced one. See
+[Pipeline overview](concepts/pipeline-overview.md) for how that works end
+to end, and [Concepts](concepts/index.md) for the underlying equations.
 
 ## If you are new to cryo-EM
 
@@ -81,7 +81,7 @@ what SPECTER is for.
     Water is structured, not scattered. Ice comes from configurations
     optimised against a measured structure factor and a coarse-grained
     water potential, not randomly placed molecules at the right bulk
-    density. See [Ice](ice.md).
+    density. See [Ice structure](concepts/ice.md).
 
 -   :material-camera-iris:{ .lg .middle } **Detector**
 
@@ -114,6 +114,6 @@ what SPECTER is for.
 
     Runs record themselves. Every job stores its complete effective
     configuration, the package version and the git commit, and refuses
-    to resume under changed settings. See [Job management](jobs.md).
+    to resume under changed settings. See [Manage jobs](user-guide/jobs.md).
 
 </div>

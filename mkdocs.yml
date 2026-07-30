@@ -58,26 +58,29 @@ nav:
   - Get started:
       - Installation: installation.md
       - Quickstart: quickstart.md
-  - Guide:
-      - Pipeline: pipeline.md
-      - Ice: ice.md
-      - Configuration: configuration.md
-      - Data generation: generation.md
-      - Reconstruction: reconstruction.md
-      - Job management: jobs.md
-  - Physics:
-      - Overview: physics/index.md
-      - Atomic potentials: physics/potential.md
-      - Pose & crowding: physics/pose-crowding.md
-      - Ice structure: physics/ice.md
+  - User Guide:
+      - Generate a particle stack: user-guide/particle-stack.md
+      - Generate a micrograph: user-guide/micrograph.md
+      - Generate a tilt series: user-guide/tilt-series.md
+      - Generate a CryoSPARC dataset twin: user-guide/dataset-twin.md
+      - Using the ice cache: user-guide/ice-cache.md
+      - Configure a run: user-guide/configuration.md
+      - Manage jobs: user-guide/jobs.md
+      - Reconstruct a volume: user-guide/reconstruction.md
+  - Concepts:
+      - Overview: concepts/index.md
+      - Pipeline overview: concepts/pipeline-overview.md
+      - Atomic potentials: concepts/atomic-potentials.md
+      - Pose & crowding: concepts/pose-crowding.md
+      - Ice structure: concepts/ice.md
       - Scattering:
-          - Overview: physics/scattering/index.md
-          - Multislice: physics/scattering/multislice.md
-          - Rytov: physics/scattering/rytov.md
-          - Other modes: physics/scattering/other-modes.md
-      - Aberrations: physics/aberrations.md
-      - Detector: physics/detector.md
-      - Reconstruction math: physics/reconstruction-math.md
+          - Overview: concepts/scattering/index.md
+          - Multislice: concepts/scattering/multislice.md
+          - Rytov: concepts/scattering/rytov.md
+          - Other modes: concepts/scattering/other-modes.md
+      - Aberrations: concepts/aberrations.md
+      - Detector: concepts/detector.md
+      - Reconstruction math: concepts/reconstruction-math.md
   - Reference:
       - Overview: api/index.md
       - specter: api/specter.md

@@ -92,7 +92,7 @@ Only `atom_data/*.txt` is declared as package data. The ice cache in
 `ice-data/` is **not**, and is located by walking up to the repository
 root. A `pip install` from outside a clone will find no ice cache, and
 any run with `ice_model="gd"` will fail until you copy the cache or set
-`--ice_cache_dir`. See [Ice](ice.md) for details.
+`--ice_cache_dir`. See [Using the ice cache](user-guide/ice-cache.md) for details.
 
 ## Checking your work
 

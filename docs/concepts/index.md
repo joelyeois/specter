@@ -1,14 +1,15 @@
-# Physics
+# Concepts
 
 !!! info "Work in progress"
-    This section will lay out the mathematics behind each stage of the
-    forward model — one page per topic, with equations rather than prose.
-    For the practical, code-oriented walkthrough of the same stages, see
-    [Pipeline](../pipeline.md).
+    This section lays out the physics and math behind SPECTER, one topic
+    per page — the same role PyTorch's "Developer Notes" or NumPy's
+    conceptual guide play for those projects. For task-oriented,
+    CLI-driven how-tos instead, see the [User Guide](../user-guide/particle-stack.md).
 
 Planned pages:
 
-- [Atomic potentials](potential.md)
+- [Pipeline overview](pipeline-overview.md)
+- [Atomic potentials](atomic-potentials.md)
 - [Pose & crowding](pose-crowding.md)
 - [Ice structure](ice.md)
 - Scattering

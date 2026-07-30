@@ -38,6 +38,36 @@ your pixel size, so a coarse grid still sees a correctly-shaped atom.
 Render a built potential with `plot3d(V)` — the standard way to eyeball a
 volume before simulating from it.
 
+### How the potential is checked
+
+The atomic potential and imaging code are validated against the worked
+examples in Kirkland's *Advanced Computing in Electron Microscopy*. The
+figure below is SPECTER's own output for the standard five-element test
+row, reproducing the textbook's coherent bright-field line scan.
+
+![Coherent bright-field line scan through C, Si, Cu, Au and U.](assets/images/coherent-bright-field-linescan-kirkland.png){ width="700" }
+
+Contrast deepens with atomic number, reaching roughly 0.73 at uranium.
+Produced by `compare-atomic-potentials-with-kirkland.ipynb`, which places
+the corresponding textbook figure alongside it for direct comparison.
+
+<div class="grid" markdown>
+
+![3D atomic potential against radius, per element.](assets/images/atomic-potential-3d-kirkland.png){ width="340" }
+
+![The same potentials projected to 2D, as used by the faster projection path.](assets/images/projected-atomic-potential-2d-kirkland.png){ width="340" }
+
+</div>
+
+Scattering factors are expressed as a sum of three Lorentzian and three
+Gaussian terms in reciprocal space, with element-specific coefficients
+tabulated by Kirkland. Lobato and Shtyrov parameterisations are also
+implemented — Kirkland's and Lobato's tables ship in
+`src/specter/atom_data/` and are treated as fixed physical constants;
+Shtyrov's is loaded at call time from a user-supplied mmCIF file rather
+than bundled. Editing the bundled tables silently changes
+the accuracy of every simulation in the package.
+
 ## 2 — Pose
 
 Each particle gets a quaternion and a 2D translation in Ångström. The

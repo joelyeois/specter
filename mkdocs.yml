@@ -55,16 +55,29 @@ extra_javascript:
 
 nav:
   - Home: index.md
-  - User guide:
+  - Get started:
       - Installation: installation.md
       - Quickstart: quickstart.md
-  - Field guide:
+  - Guide:
       - Pipeline: pipeline.md
       - Ice: ice.md
       - Configuration: configuration.md
       - Data generation: generation.md
       - Reconstruction: reconstruction.md
       - Job management: jobs.md
+  - Physics:
+      - Overview: physics/index.md
+      - Atomic potentials: physics/potential.md
+      - Pose & crowding: physics/pose-crowding.md
+      - Ice structure: physics/ice.md
+      - Scattering:
+          - Overview: physics/scattering/index.md
+          - Multislice: physics/scattering/multislice.md
+          - Rytov: physics/scattering/rytov.md
+          - Other modes: physics/scattering/other-modes.md
+      - Aberrations: physics/aberrations.md
+      - Detector: physics/detector.md
+      - Reconstruction math: physics/reconstruction-math.md
   - Reference:
       - Overview: api/index.md
       - specter: api/specter.md

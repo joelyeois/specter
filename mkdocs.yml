@@ -86,11 +86,13 @@ nav:
       - specter: api/specter.md
       - specter.aberrations: api/aberrations.md
       - specter.atom: api/atom.md
+      - specter.cli: api/cli.md
       - specter.ghostbuster: api/ghostbuster.md
       - specter.ice: api/ice.md
       - specter.imagegenerator: api/imagegenerator.md
       - specter.io: api/io.md
       - specter.jobs: api/jobs.md
+      - specter.pipelines: api/pipelines.md
       - specter.rotations: api/rotations.md
       - specter.specimen: api/specimen.md
       - Core modules: api/core.md

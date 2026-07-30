@@ -25,13 +25,10 @@ uv run --with jupyter jupyter lab
 ## Verify installation
 
 ```bash
-python demo-scripts/generate_particle_stack.py \
-    --config configs/particle.toml \
-    --n_particles 4 --num_pixels 128 \
-    --device cpu --output_dir ./output/
+specter --help
 ```
 
-You should get `output/particles.mrcs` and `output/particles.star`.
+You should see the SPECTER CLI's usage and command list.
 
 ## Installing with conda/pip instead
 

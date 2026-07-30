@@ -7,29 +7,8 @@
 
 **Scattering & Propagation of Electrons in Cryo-EM: Twin Emulator & Reconstruction**
 
-SPECTER simulates what a cryo-electron microscope would record from a known
-molecule — a physics-based generator built to match experimental data as
-closely as possible. See [Pipeline overview](concepts/pipeline-overview.md)
-for how a simulation is put together end to end, and
-[Concepts](concepts/index.md) for the underlying equations.
-
-## If you are new to cryo-EM
-
-A cryo-electron microscope fires electrons through a thin film of frozen
-water holding copies of a protein, each frozen in a random orientation. The
-resulting images are extremely noisy — the dose has to stay low or the
-electrons destroy the very thing you are imaging. Recovering a 3D structure
-means combining hundreds of thousands of these faint, randomly-oriented
-shadows. SPECTER exists to **fake** that data convincingly.
-
-## If you work in the field
-
-Kirkland-parameterised atomic potentials on a soft-voxelised grid; full
-multislice propagation with relativistic wavelength and energy-dependent
-interaction parameter; a complex transfer function with spatial- and
-temporal-coherence envelopes; per-electron detector modelling including
-coincidence loss; and structurally optimised amorphous ice matched to a
-target S(k) and an MLBOP water potential.
+Physics-based cryo-EM simulation, built to match experimental data as
+closely as possible.
 
 ## Get started
 

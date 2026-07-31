@@ -527,7 +527,76 @@ TILT_SERIES_HELP: dict[str, str] = {
 }
 
 
-ConfigT = TypeVar("ConfigT", ParticleStackConfig, MicrographConfig, TiltSeriesConfig)
+@dataclass
+class TomogramConfig:
+    """Parameters for hard-sphere-packed tomogram specimen generation, loaded
+    from a TOML config file.
+
+    Drives `specter.specimen.SpherePackingSpecimenGenerator`: packs several
+    PDB-derived protein species -- each at its own real physical size -- via
+    hard-sphere Random Sequential Addition (see `specter.crowding.
+    pack_hard_spheres_3d`), renders each placed instance's real scattering
+    potential, and saves the assembled volume as .mrc (directly usable as
+    `TiltSeriesConfig.volume_path`) plus one copick-style .ndjson pick file
+    per species.
+    """
+
+    # --- Specimen ---
+    # One dict per protein species, e.g. {"pdb_source": "6qzp", "ratio": 1.0}.
+    # Only "pdb_source" is required ("ratio" defaults to 1.0, i.e. uniform
+    # across species left at default). In TOML, provide as [[protein_specs]]
+    # tables.
+    protein_specs: list[dict[str, Any]] = field(default_factory=list)
+    target_shape: list[int] = field(
+        default_factory=lambda: [128, 256, 256]
+    )  # (Z, Y, X) voxels
+    v_size: float = 5.0  # Å/voxel
+    occupancy_fraction: float = 0.2  # target bare-sphere volume fraction
+    gap_angstrom: float = 5.0  # minimum clearance between placed spheres
+    pdb_savefolder: str = "pdb-data"  # resolved against REPO_ROOT if relative
+    parameterization: Literal["kirkland", "lobato"] = "kirkland"
+    seed: int | None = None
+
+    # --- Ground-truth picks ---
+    write_picks: bool = True
+    annotation_version: str = "1.0"
+
+    # --- Compute ---
+    device: str = "cpu"
+
+    # --- Output ---
+    output_dir: str = "./output/"
+    filename: str = "tomogram"
+
+
+TOMOGRAM_HELP: dict[str, str] = {
+    "protein_specs": "Protein species to pack (TOML-only, [[protein_specs]] "
+    "tables), each {'pdb_source': <code or path>, 'ratio': <relative "
+    "abundance weight, default 1.0>}.",
+    "target_shape": "Output specimen volume shape in voxels (Z, Y, X).",
+    "v_size": "Voxel size in Angstrom.",
+    "occupancy_fraction": "Target packing density: candidates are drawn "
+    "(species-ratio-weighted) until their combined bare-sphere volume "
+    "reaches this fraction of the box volume. May not be fully reachable "
+    "at high values -- see SpherePackingSpecimenGenerator's docstring.",
+    "gap_angstrom": "Minimum clearance between placed spheres' surfaces, in Angstrom.",
+    "pdb_savefolder": "Folder to cache downloaded PDB files.",
+    "parameterization": "Atomic scattering-factor parameterization.",
+    "seed": "Random seed.",
+    "write_picks": "Write one copick-style .ndjson pick file per species "
+    "alongside the volume.",
+    "annotation_version": "Version string used in pick filenames "
+    "('{species}-{version}_orientedpoint.ndjson').",
+    "device": "Device for the packing step: cpu | cuda | cuda:0. Rendering "
+    "always runs on CPU regardless.",
+    "output_dir": "Directory to save output files.",
+    "filename": "Base name for the output volume (no extension).",
+}
+
+
+ConfigT = TypeVar(
+    "ConfigT", ParticleStackConfig, MicrographConfig, TiltSeriesConfig, TomogramConfig
+)
 
 
 @overload
@@ -538,12 +607,15 @@ def load_config(
 def load_config(path: str, config_cls: type[MicrographConfig]) -> MicrographConfig: ...
 @overload
 def load_config(path: str, config_cls: type[TiltSeriesConfig]) -> TiltSeriesConfig: ...
+@overload
+def load_config(path: str, config_cls: type[TomogramConfig]) -> TomogramConfig: ...
 def load_config(
     path: str,
     config_cls: type[ParticleStackConfig]
     | type[MicrographConfig]
-    | type[TiltSeriesConfig] = ParticleStackConfig,
-) -> ParticleStackConfig | MicrographConfig | TiltSeriesConfig:
+    | type[TiltSeriesConfig]
+    | type[TomogramConfig] = ParticleStackConfig,
+) -> ParticleStackConfig | MicrographConfig | TiltSeriesConfig | TomogramConfig:
     """
     Load a config dataclass from a TOML file.
 
@@ -554,13 +626,13 @@ def load_config(
         group fields for readability; all tables are flattened into one
         namespace before validation. List-of-tables fields (e.g.
         `[[protein_specs]]`) are passed through as `list[dict]`.
-    config_cls : type[ParticleStackConfig] | type[MicrographConfig] | type[TiltSeriesConfig]
+    config_cls : type[ParticleStackConfig] | type[MicrographConfig] | type[TiltSeriesConfig] | type[TomogramConfig]
         Dataclass to populate from the TOML fields. Defaults to
         `ParticleStackConfig` for backward compatibility.
 
     Returns
     -------
-    ParticleStackConfig | MicrographConfig | TiltSeriesConfig
+    ParticleStackConfig | MicrographConfig | TiltSeriesConfig | TomogramConfig
         Config with unset fields filled from `config_cls` defaults.
     """
     with open(path, "rb") as f:

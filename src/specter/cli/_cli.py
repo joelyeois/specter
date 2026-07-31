@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import rich_click as click
 
+from .build import build_build_group
 from .simulate import CONTEXT_SETTINGS, build_simulate_group
 
 
@@ -13,6 +14,7 @@ def cli() -> None:
 
 
 cli.add_command(build_simulate_group())
+cli.add_command(build_build_group())
 
 
 def main() -> None:

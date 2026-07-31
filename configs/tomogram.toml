@@ -1,0 +1,49 @@
+# Canonical default config for `specter build tomogram`, loaded via
+# specter.config.load_config("...", TomogramConfig).
+#
+# Drives SpherePackingSpecimenGenerator: packs several PDB-derived protein
+# species -- each at its own real physical size -- via hard-sphere Random
+# Sequential Addition (specter.crowding.pack_hard_spheres_3d), renders each
+# placed instance's real scattering potential, and saves the assembled
+# volume as .mrc (directly usable as `specter simulate tiltseries`'s
+# --volume_path) plus one copick-style .ndjson pick file per species.
+#
+# protein_specs is a TOML array-of-tables ([[protein_specs]]) -- each entry
+# is one species: "pdb_source" (PDB code or file path, required) and "ratio"
+# (relative abundance weight, default 1.0 -- only the RATIO between species
+# matters).
+
+[[protein_specs]]
+pdb_source = "1bxn"   # cytosolic RNA polymerase II complex (large)
+ratio = 1.0
+
+[[protein_specs]]
+pdb_source = "1fa2"   # beta amylase (medium)
+ratio = 2.0
+
+[[protein_specs]]
+pdb_source = "1mbo"   # myoglobin (small)
+ratio = 4.0
+
+[specimen]
+target_shape = [128, 256, 256]    # (Z, Y, X) voxels
+v_size = 5.0                       # Å/voxel
+occupancy_fraction = 0.2           # target bare-sphere volume fraction
+gap_angstrom = 5.0                 # minimum clearance between placed spheres
+pdb_savefolder = "pdb-data"        # resolved relative to the repo root
+parameterization = "kirkland"      # kirkland | lobato
+# seed = 11                        # uncomment for reproducible packing
+
+[picks]
+write_picks = true
+annotation_version = "1.0"
+
+[compute]
+device = "cpu"                     # cpu | cuda | cuda:0 -- see
+                                    # SpherePackingSpecimenGenerator's own
+                                    # docstring on why "cpu" has outperformed
+                                    # "cuda" at every scale tested so far
+
+[output]
+output_dir = "./output/"
+filename = "tomogram"

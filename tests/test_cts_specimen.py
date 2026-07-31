@@ -17,7 +17,11 @@ import torch
 from specter.arrays import ball3d
 from specter.specimen._cts_grid import BeadGenerator, CarbonFilmGenerator
 from specter.specimen._cts_membrane import MembraneBlobGenerator
-from specter.specimen._cts_placement import ParticlePlacer, ParticleSpec
+from specter.specimen._cts_placement import (
+    HierarchicalParticlePlacer,
+    ParticlePlacer,
+    ParticleSpec,
+)
 from specter.specimen.cryotomosim import (
     BeadSpec,
     CryoTomoSimSpecimenGenerator,
@@ -176,6 +180,110 @@ def test_particle_placer_location_flag_requires_mask():
 
 
 # ---------------------------------------------------------------------
+# HierarchicalParticlePlacer -- same invariants as ParticlePlacer above
+# ---------------------------------------------------------------------
+
+
+def test_hierarchical_placer_avoids_overlap_and_respects_density_cutoff():
+    torch.manual_seed(0)
+    vol = torch.zeros((64, 64, 64))
+    density = ball3d(9, 6.0)
+    spec = ParticleSpec(
+        species_id="ball", density=density, max_count=100, max_attempts_per_copy=30
+    )
+    placer = HierarchicalParticlePlacer(
+        volume=vol,
+        density_cutoff=0.15,
+        coarse_factor=8,
+        rng=torch.Generator().manual_seed(0),
+    )
+    placed = placer.run([spec])
+
+    assert len(placed) > 0
+    occupied = (vol > 0).float().mean().item()
+    assert occupied <= 0.15 + 1e-6
+
+    centers = torch.stack([p.center_zyx for p in placed])
+    if len(centers) > 1:
+        dists = torch.cdist(centers, centers)
+        dists.fill_diagonal_(float("inf"))
+        assert dists.min().item() >= 5.5
+
+
+def test_hierarchical_placer_stops_when_volume_full():
+    torch.manual_seed(0)
+    vol = torch.zeros((16, 16, 16))
+    density = ball3d(5, 4.0)
+    spec = ParticleSpec(species_id="ball", density=density, max_count=1000)
+    placer = HierarchicalParticlePlacer(
+        volume=vol,
+        density_cutoff=0.3,
+        coarse_factor=4,
+        rng=torch.Generator().manual_seed(1),
+    )
+    placed = placer.run([spec])
+    assert (vol > 0).float().mean().item() <= 0.3 + 0.02
+    assert len(placed) < 1000
+
+
+def test_hierarchical_placer_location_flag_requires_mask():
+    vol = torch.zeros((16, 16, 16))
+    density = ball3d(3, 2.0)
+    spec = ParticleSpec(
+        species_id="memprot", density=density, max_count=1, location="membrane"
+    )
+    placer = HierarchicalParticlePlacer(volume=vol)
+    with pytest.raises(ValueError):
+        placer.run([spec])
+
+
+def test_hierarchical_placer_rejects_cluster_and_bundle_modes():
+    vol = torch.zeros((32, 32, 32))
+    density = ball3d(5, 3.0)
+    placer = HierarchicalParticlePlacer(volume=vol, coarse_factor=4)
+    for mode in ("cluster", "bundle"):
+        spec = ParticleSpec(species_id="p", density=density, max_count=5, mode=mode)
+        with pytest.raises(NotImplementedError):
+            placer.run([spec])
+
+
+def test_hierarchical_placer_membrane_vesicle_cytosol_gating():
+    """Same membrane/vesicle/cytosol location-flag test as
+    test_membrane_flagged_particle_lands_on_shell_not_free_in_cytosol /
+    test_vesicle_and_cytosol_flags_respect_inside_outside, but exercising
+    HierarchicalParticlePlacer instead of ParticlePlacer."""
+    vol, _placer, masks, normals, ignores = _placed_membrane()
+    small_density = ball3d(5, 3.0)
+
+    for loc in ["membrane", "vesicle", "cytosol"]:
+        p = HierarchicalParticlePlacer(
+            volume=vol.clone(),
+            density_cutoff=0.4,
+            coarse_factor=4,
+            rng=torch.Generator().manual_seed(5),
+        )
+        spec = ParticleSpec(
+            species_id=f"p_{loc}",
+            density=small_density,
+            max_count=5,
+            location=loc,
+            max_attempts_per_copy=30,
+        )
+        n_placed = p.place_species(
+            spec, location_masks=masks, normal_fields=normals, ignore_masks=ignores
+        )
+        assert n_placed > 0, f"expected at least one {loc} placement to succeed"
+        for placed in p.placements:
+            zi, yi, xi = (int(v) for v in placed.center_zyx.tolist())
+            zi = min(max(zi, 0), masks[loc].shape[0] - 1)
+            yi = min(max(yi, 0), masks[loc].shape[1] - 1)
+            xi = min(max(xi, 0), masks[loc].shape[2] - 1)
+            assert masks[loc][
+                zi, yi, xi
+            ], f"{loc}-flagged particle landed outside its mask"
+
+
+# ---------------------------------------------------------------------
 # CarbonFilmGenerator / BeadGenerator
 # ---------------------------------------------------------------------
 
@@ -222,7 +330,7 @@ def test_cryotomosim_generator_end_to_end():
     target_shape = (32, 48, 48)
     gen = CryoTomoSimSpecimenGenerator(
         protein_specs=[ProteinSpec(pdb_source=str(_PDB_FIXTURE), max_count=2)],
-        membrane_specs=[MembraneSpec(count=1, size=100.0, thickness=30.0)],
+        membrane_specs=[MembraneSpec(count=1, size=50.0, thickness=30.0)],
         bead_spec=BeadSpec(radii=[40.0], count_per_radius=1),
         grid_spec=GridSpec(thickness=100.0, hole_radius=150.0),
         target_shape=target_shape,
@@ -264,7 +372,14 @@ def test_cryotomosim_generator_no_extras_still_works():
 
 def _placed_membrane(v_size=8.0, size=220.0, roughness=0.75, thickness=35.0, seed=1):
     """Generate and place one membrane into a plain volume; return
-    (volume, placer, location_masks, normal_fields)."""
+    (volume, placer, location_masks, normal_fields, ignore_masks).
+
+    `location_masks["membrane"]` is the thin mid-thickness SKELETON (used
+    for candidate sampling); `ignore_masks["membrane"]` is the FULL
+    bilayer-thickness shell (used only for the overlap-ignore mechanism)
+    -- see `_build_membrane_location_fields`'s docstring for why these
+    must stay two separate masks.
+    """
     torch.manual_seed(0)
     vol = torch.zeros((64, 64, 64))
     placer = ParticlePlacer(
@@ -274,14 +389,14 @@ def _placed_membrane(v_size=8.0, size=220.0, roughness=0.75, thickness=35.0, see
     inst = mem_gen.generate(size=size, roughness=roughness, thickness=thickness)
     placer.run([ParticleSpec(species_id="mem", density=inst.density, max_count=1)])
     assert len(placer.placements) == 1, "membrane failed to place at all"
-    masks, normals = _build_membrane_location_fields(
+    masks, normals, ignores = _build_membrane_location_fields(
         placer.placements, {"mem": inst}, (64, 64, 64)
     )
-    return vol, placer, masks, normals
+    return vol, placer, masks, normals, ignores
 
 
-def test_membrane_flagged_particle_lands_on_shell_not_free_in_cytosol():
-    vol, placer, masks, normals = _placed_membrane()
+def test_membrane_flagged_particle_lands_on_skeleton_not_free_in_cytosol():
+    vol, placer, masks, normals, ignores = _placed_membrane()
     density = ball3d(5, 3.0)
     spec = ParticleSpec(
         species_id="memprot",
@@ -290,7 +405,9 @@ def test_membrane_flagged_particle_lands_on_shell_not_free_in_cytosol():
         location="membrane",
         max_attempts_per_copy=30,
     )
-    n_placed = placer.place_species(spec, location_masks=masks, normal_fields=normals)
+    n_placed = placer.place_species(
+        spec, location_masks=masks, normal_fields=normals, ignore_masks=ignores
+    )
     assert n_placed > 0
 
     memprot_placements = [p for p in placer.placements if p.species_id == "memprot"]
@@ -300,14 +417,77 @@ def test_membrane_flagged_particle_lands_on_shell_not_free_in_cytosol():
         zi = min(max(zi, 0), masks["membrane"].shape[0] - 1)
         yi = min(max(yi, 0), masks["membrane"].shape[1] - 1)
         xi = min(max(xi, 0), masks["membrane"].shape[2] - 1)
-        assert masks["membrane"][
-            zi, yi, xi
-        ], "membrane-flagged particle center is not on the membrane shell mask"
+        # masks["membrane"] IS the thin mid-thickness skeleton (not the
+        # full shell) -- candidates are sampled directly from it, so exact
+        # membership here is the strongest possible "landed on the true
+        # mid-thickness ridge" check (distance 0, not merely "small").
+        assert masks["membrane"][zi, yi, xi], (
+            "membrane-flagged particle center is not on the membrane's "
+            "mid-thickness skeleton"
+        )
         assert not masks["cytosol"][zi, yi, xi]
 
 
+def test_membrane_overlap_ignore_mask_not_conflated_with_skeleton():
+    """The overlap-ignore mask must stay the FULL shell thickness, not the
+    thin skeleton -- placement success should collapse to near-zero
+    without it (since a candidate centered on the skeleton genuinely
+    overlaps the surrounding full-thickness bilayer material), and recover
+    once the correct full-shell ignore mask is supplied."""
+    vol, placer, masks, normals, ignores = _placed_membrane()
+    density = ball3d(5, 3.0)
+
+    # Without ignore_masks: every candidate's rotated density will
+    # generally overlap the membrane's own full-thickness material at its
+    # insertion site, so almost nothing should place successfully.
+    placer_no_ignore = ParticlePlacer(
+        volume=vol.clone(), density_cutoff=0.4, rng=torch.Generator().manual_seed(9)
+    )
+    spec_no_ignore = ParticleSpec(
+        species_id="memprot_no_ignore",
+        density=density,
+        max_count=15,
+        location="membrane",
+        max_attempts_per_copy=30,
+    )
+    n_no_ignore = placer_no_ignore.place_species(
+        spec_no_ignore, location_masks=masks, normal_fields=normals
+    )
+
+    # With the correct full-shell ignore_masks: placement should succeed
+    # at a healthy rate, same as test_membrane_flagged_particle_lands_on_skeleton_....
+    placer_with_ignore = ParticlePlacer(
+        volume=vol.clone(), density_cutoff=0.4, rng=torch.Generator().manual_seed(9)
+    )
+    spec_with_ignore = ParticleSpec(
+        species_id="memprot_with_ignore",
+        density=density,
+        max_count=15,
+        location="membrane",
+        max_attempts_per_copy=30,
+    )
+    n_with_ignore = placer_with_ignore.place_species(
+        spec_with_ignore,
+        location_masks=masks,
+        normal_fields=normals,
+        ignore_masks=ignores,
+    )
+
+    assert n_with_ignore > 0, "expected the ignore-mask path to place successfully"
+    assert n_with_ignore > n_no_ignore, (
+        "overlap-ignore mask isn't providing its intended benefit -- "
+        f"with-ignore placed {n_with_ignore}, without-ignore placed "
+        f"{n_no_ignore} (expected without-ignore to be much worse, "
+        "collapsing toward zero)"
+    )
+    assert n_no_ignore <= max(1, n_with_ignore // 3), (
+        "placement without the full-shell ignore mask succeeded far more "
+        "than expected -- check the two masks haven't been conflated"
+    )
+
+
 def test_vesicle_and_cytosol_flags_respect_inside_outside():
-    vol, placer, masks, normals = _placed_membrane()
+    vol, placer, masks, normals, ignores = _placed_membrane()
     small_density = ball3d(5, 3.0)
 
     for loc in ["vesicle", "cytosol"]:
@@ -420,7 +600,7 @@ def test_export_picks_writes_expected_ndjson_files(tmp_path):
     v_size = 10.0
     gen = CryoTomoSimSpecimenGenerator(
         protein_specs=[ProteinSpec(pdb_source=str(_PDB_FIXTURE), max_count=3)],
-        membrane_specs=[MembraneSpec(count=1, size=100.0, thickness=30.0)],
+        membrane_specs=[MembraneSpec(count=1, size=50.0, thickness=30.0)],
         bead_spec=BeadSpec(radii=[40.0], count_per_radius=1),
         target_shape=target_shape,
         v_size=v_size,
@@ -483,3 +663,93 @@ def test_export_picks_unoriented_omits_rotation_matrix(tmp_path):
         row = json.loads(line)
         assert row["type"] == "point"
         assert "xyz_rotation_matrix" not in row
+
+
+# ---------------------------------------------------------------------
+# Hybrid RSA integration (membranes + "any"-location single-mode proteins)
+# ---------------------------------------------------------------------
+
+
+@pytest.mark.skipif(not _PDB_FIXTURE.exists(), reason="bundled PDB fixture missing")
+def test_rsa_packing_respects_radius_sum_nonoverlap():
+    """Membranes + free (RSA-eligible) proteins placed via
+    CryoTomoSimSpecimenGenerator's hybrid path should never land closer
+    than their bounding-radius sum -- the core RSA guarantee."""
+    from specter.pdb import PDB
+    from specter.specimen.cryotomosim import _bounding_radius_voxels
+
+    target_shape = (60, 120, 120)
+    v_size = 10.0
+    gen = CryoTomoSimSpecimenGenerator(
+        protein_specs=[ProteinSpec(pdb_source=str(_PDB_FIXTURE), max_count=15)],
+        membrane_specs=[MembraneSpec(count=3, size=50.0, thickness=30.0)],
+        target_shape=target_shape,
+        v_size=v_size,
+        ice_opacity=0.0,
+        density_cutoff=0.5,
+        seed=7,
+    )
+    gen.generate()
+
+    protein_radius = (
+        float(
+            PDB(str(_PDB_FIXTURE), savefolder="pdb-data/", verbose=False).max_diameter
+        )
+        / 2.0
+    )
+    membrane_radii = [
+        _bounding_radius_voxels(inst.density) * v_size
+        for inst in gen.membrane_instances
+    ]
+
+    membrane_iter = iter(membrane_radii)
+    records: list[tuple[torch.Tensor, float]] = []
+    for p in gen.placements:
+        center_xyz = p.center_zyx.flip(0) * v_size
+        if p.species_id.startswith("membrane_"):
+            records.append((center_xyz, next(membrane_iter)))
+        else:
+            records.append((center_xyz, protein_radius))
+
+    assert len(records) > 5, "expected a non-trivial number of RSA-packed instances"
+    for i in range(len(records)):
+        for j in range(i + 1, len(records)):
+            ci, ri = records[i]
+            cj, rj = records[j]
+            dist = (ci - cj).norm().item()
+            assert dist >= ri + rj - 1e-2, (
+                f"RSA-packed instances {i},{j} violate radius-sum "
+                f"non-overlap: dist={dist:.2f}, r_sum={ri + rj:.2f}"
+            )
+
+
+@pytest.mark.skipif(not _PDB_FIXTURE.exists(), reason="bundled PDB fixture missing")
+def test_rsa_membrane_still_supports_membrane_flagged_protein():
+    """A protein flagged 'membrane' should still land on an RSA-packed
+    membrane's shell, exercising the sequential pass that runs on top of
+    RSA-placed membranes."""
+    target_shape = (60, 120, 120)
+    v_size = 10.0
+    gen = CryoTomoSimSpecimenGenerator(
+        protein_specs=[
+            ProteinSpec(pdb_source=str(_PDB_FIXTURE), max_count=5, location="cytosol"),
+            ProteinSpec(pdb_source=str(_PDB_FIXTURE), max_count=5, location="membrane"),
+        ],
+        membrane_specs=[MembraneSpec(count=1, size=80.0, thickness=35.0)],
+        target_shape=target_shape,
+        v_size=v_size,
+        ice_opacity=0.0,
+        density_cutoff=0.5,
+        seed=3,
+    )
+    gen.generate()
+
+    membrane_placed = [
+        p for p in gen.placements if p.species_id.startswith("membrane_")
+    ]
+    assert len(membrane_placed) == 1, "expected the single membrane to be RSA-packed"
+
+    protein_placed = [
+        p for p in gen.placements if not p.species_id.startswith("membrane_")
+    ]
+    assert len(protein_placed) > 0, "expected at least some proteins placed"

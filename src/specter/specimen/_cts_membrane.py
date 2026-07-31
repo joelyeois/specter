@@ -276,17 +276,116 @@ def _point_in_alpha_solid(
     return inside
 
 
+def _skeletonize_shell(
+    shell_mask: np.ndarray, edge_border: int = 2, min_component_size: int = 20
+) -> np.ndarray:
+    """
+    Thin a full-thickness bilayer shell mask down to a true 1-voxel-thin
+    mid-thickness ridge -- port of CTS's ``vesskeletonize`` (``gen_memvol.m``):
+
+    .. code-block:: matlab
+
+        function skel = vesskeletonize(memvol)
+        bw = bwdist(~memvol);                    % distance-to-boundary, inside the shell
+        mask = rescale(imgradient3(bw))>0.5;      % high-gradient = near either edge
+        skel = (bw.*~mask)>max(bw,[],'all')/2-1;  % keep near-max-distance, low-gradient voxels
+        skel = ctsutil('edgeblank',skel,2);       % clear a small edge border
+        skel = bwareaopen(skel,20);                % drop small disconnected noise components
+        end
+
+    Translation notes:
+
+    - ``bwdist(~memvol)`` in MATLAB finds, per voxel, the distance to the
+      nearest TRUE voxel of ``~memvol`` (i.e. nearest voxel OUTSIDE the
+      shell) -- MATLAB's ``bwdist`` always measures to the nearest
+      foreground (true) voxel, so reaching "distance to background" needs
+      an explicit complement. ``scipy.ndimage.distance_transform_edt``
+      has the OPPOSITE built-in convention: it measures, per voxel,
+      distance to the nearest ZERO-valued (background) voxel of its input
+      DIRECTLY -- so the correct call here is
+      ``distance_transform_edt(shell_mask)`` with NO complement, not
+      ``distance_transform_edt(~shell_mask)`` (verified against a
+      hand-computed 1D case and a synthetic 3D hollow-shell case before
+      relying on this: a spherical shell's ridge came out at mean radius
+      7.92 vs. an expected 8.0 mid-thickness radius).
+    - MATLAB's ``rescale`` maps an array's own [min, max] to [0, 1];
+      reproduced here as a plain min-max normalization of the gradient
+      magnitude (not just a divide-by-max, which would only coincide with
+      a true rescale if the gradient's minimum happens to be exactly 0).
+    - ``imgradient3`` computes the 3D gradient magnitude; reproduced via
+      ``np.gradient`` per axis, combined as a Euclidean norm.
+    - ``ctsutil('edgeblank', skel, 2)`` clears a small border around the
+      whole array so nothing gets placed touching the local grid's own
+      edge; reproduced by zeroing the outermost `edge_border` voxels on
+      every face.
+    - ``bwareaopen(skel, 20)`` removes connected components smaller than
+      20 voxels; reproduced via ``scipy.ndimage.label`` + a size filter
+      (`min_component_size`, default 20 -- CTS's own value; not
+      independently re-derived for this codebase's own typical grid
+      resolutions, so worth revisiting if it turns out too
+      aggressive/lenient at very coarse or very fine voxel sizes).
+
+    Parameters
+    ----------
+    shell_mask : np.ndarray
+        Bool, shape (nz, ny, nx) -- the FULL-thickness bilayer footprint
+        (both leaflets, head to tail).
+    edge_border : int, optional
+        Border width (voxels) to blank on every face. Default 2.
+    min_component_size : int, optional
+        Minimum connected-component size (voxels) to keep. Default 20.
+
+    Returns
+    -------
+    np.ndarray
+        Bool, shape (nz, ny, nx). A thin (ideally 1-voxel) ridge at the
+        shell's mid-thickness -- used ONLY for candidate position
+        sampling of membrane-embedded proteins (see
+        ``BlobMembraneInstance.skeleton_mask``'s docstring for why this
+        must stay separate from `shell_mask` itself, which is still what
+        the overlap-ignore mechanism in ``_cts_placement.py`` uses).
+    """
+    bw = ndimage.distance_transform_edt(shell_mask)
+    if bw.max() == 0:
+        return np.zeros_like(shell_mask, dtype=bool)
+
+    gz, gy, gx = np.gradient(bw)
+    grad_mag = np.sqrt(gz**2 + gy**2 + gx**2)
+    g_min, g_max = grad_mag.min(), grad_mag.max()
+    grad_rescaled = (grad_mag - g_min) / (g_max - g_min) if g_max > g_min else grad_mag
+    high_gradient = grad_rescaled > 0.5
+
+    skel = (bw * ~high_gradient) > (bw.max() / 2 - 1)
+
+    if edge_border > 0:
+        skel[:edge_border] = False
+        skel[-edge_border:] = False
+        skel[:, :edge_border] = False
+        skel[:, -edge_border:] = False
+        skel[:, :, :edge_border] = False
+        skel[:, :, -edge_border:] = False
+
+    labeled, num = ndimage.label(skel)
+    if num > 0:
+        sizes = ndimage.sum(np.ones_like(labeled), labeled, index=np.arange(1, num + 1))
+        small_labels = np.nonzero(sizes < min_component_size)[0] + 1
+        if small_labels.size > 0:
+            skel[np.isin(labeled, small_labels)] = False
+
+    return skel
+
+
 def _compute_geometry_fields(
     base_points: np.ndarray,
     alpha: float,
     density: torch.Tensor,
     center: np.ndarray,
     v_size: float,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """
-    Derive a shell (bilayer footprint) mask, an interior (vesicle lumen)
-    mask, and a local outward-normal vector field, on `density`'s own
-    voxel grid.
+    Derive a shell (bilayer footprint) mask, a mid-thickness skeleton
+    ridge, an interior (vesicle lumen) mask, and a local outward-normal
+    vector field, on `density`'s own voxel grid.
 
     The interior/exterior test uses the ORIGINAL (pre-shell-thickening)
     smoothed blob point cloud's alpha-complex solid (`base_points`/`alpha`,
@@ -318,7 +417,20 @@ def _compute_geometry_fields(
     -------
     shell_mask : torch.Tensor
         Bool, shape (nz, ny, nx). Voxels considered "in/on the bilayer" --
-        simply the (lightly dilated) occupied-voxel mask.
+        simply the (lightly dilated) occupied-voxel mask. This is the
+        FULL bilayer thickness footprint (both leaflets, head to tail) --
+        used by ``_cts_placement.py``'s overlap-ignore mechanism (a
+        membrane-embedded protein is expected to displace the local lipid
+        across its whole insertion footprint), NOT for candidate position
+        sampling (see `skeleton_mask` for that).
+    skeleton_mask : torch.Tensor
+        Bool, shape (nz, ny, nx). A thin mid-thickness ridge through
+        `shell_mask`, via ``_skeletonize_shell`` (port of CTS's
+        ``vesskeletonize``) -- used ONLY for membrane-embedded protein
+        CANDIDATE POSITION SAMPLING, so a placed protein's insertion depth
+        is consistently centered in the bilayer rather than uniformly
+        random anywhere from outer to inner leaflet (or genuinely
+        mid-bilayer) as sampling from the full `shell_mask` would give.
     interior_mask : torch.Tensor
         Bool, shape (nz, ny, nx). Voxels inside the base blob's solid
         alpha-shape but not themselves part of the bilayer shell (the
@@ -343,6 +455,7 @@ def _compute_geometry_fields(
     # _cts_placement.py's `ignore_overlap_mask`) undercount the membrane's
     # own footprint and spuriously block placement.
     shell_mask_np = ndimage.binary_dilation(density.numpy() > 0, iterations=3)
+    skeleton_mask_np = _skeletonize_shell(shell_mask_np)
 
     zz, yy, xx = np.meshgrid(np.arange(n), np.arange(n), np.arange(n), indexing="ij")
     query = np.stack(
@@ -368,6 +481,7 @@ def _compute_geometry_fields(
 
     return (
         torch.as_tensor(shell_mask_np),
+        torch.as_tensor(skeleton_mask_np),
         torch.as_tensor(interior_mask_np),
         torch.as_tensor(normal_xyz, dtype=torch.float32),
     )
@@ -390,7 +504,18 @@ class BlobMembraneInstance:
     v_size : float
         Voxel size (Angstrom) of `density`.
     shell_mask : torch.Tensor
-        Bool, shape (nz, ny, nx) -- see ``_compute_geometry_fields``.
+        Bool, shape (nz, ny, nx) -- see ``_compute_geometry_fields``. Full
+        bilayer thickness footprint -- for the overlap-ignore mechanism,
+        NOT candidate sampling.
+    skeleton_mask : torch.Tensor
+        Bool, shape (nz, ny, nx) -- see ``_compute_geometry_fields``. Thin
+        mid-thickness ridge -- for membrane-embedded candidate position
+        sampling, NOT the overlap-ignore mechanism. Keep these two masks'
+        uses separate downstream (see ``_cts_placement.py``'s
+        `ignore_masks` plumbing): sampling from `shell_mask` directly
+        would let a placed protein's insertion depth land anywhere from
+        outer to inner leaflet at random, instead of consistently at
+        mid-bilayer.
     interior_mask : torch.Tensor
         Bool, shape (nz, ny, nx) -- see ``_compute_geometry_fields``.
     normal_field : torch.Tensor
@@ -402,6 +527,7 @@ class BlobMembraneInstance:
     thickness: float
     v_size: float
     shell_mask: torch.Tensor
+    skeleton_mask: torch.Tensor
     interior_mask: torch.Tensor
     normal_field: torch.Tensor
 
@@ -499,14 +625,17 @@ class MembraneBlobGenerator:
 
         all_points = np.concatenate([head, tail], axis=0)
         density, raster_center = self._rasterize(all_points)
-        shell_mask, interior_mask, normal_field = _compute_geometry_fields(
-            base_points, alpha, density, raster_center, self.v_size
+        shell_mask, skeleton_mask, interior_mask, normal_field = (
+            _compute_geometry_fields(
+                base_points, alpha, density, raster_center, self.v_size
+            )
         )
         return BlobMembraneInstance(
             density=density,
             thickness=thickness,
             v_size=self.v_size,
             shell_mask=shell_mask,
+            skeleton_mask=skeleton_mask,
             interior_mask=interior_mask,
             normal_field=normal_field,
         )

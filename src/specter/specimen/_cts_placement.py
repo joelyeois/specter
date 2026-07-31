@@ -41,6 +41,33 @@ CTS's membrane-protein inputs require: the supplied particle density must
 already be oriented with its own membrane-insertion axis along local +Z.
 Cluster/bundle satellites and non-"membrane" flags always use a fully
 random rotation -- normal alignment is not applied there.
+
+Two placement STRATEGIES share the exact same per-voxel overlap test
+(``_local_overlap_test_and_insert``, always exact -- no bounding-sphere/
+ellipsoid approximation anywhere in this module) but differ in how
+candidate positions are found for the unmasked ("any"-location) case:
+
+- ``ParticlePlacer`` (the original): candidates for "any" are drawn via
+  direct uniform per-axis index draws with O(1) occupancy rejection
+  (falling back to an exhaustive ``nonzero`` scan only near saturation).
+  Good for small-to-moderate volumes/occupancies.
+- ``HierarchicalParticlePlacer``: adds a coarse/fine spatial hierarchy on
+  top of the same exact fine-grained test -- a downsampled coarse
+  occupancy grid tracks which coarse cells are already fully occupied, so
+  candidate sampling for "any" can cheaply skip whole already-saturated
+  regions (a ``nonzero`` scan over the much-smaller coarse grid, not the
+  fine volume) instead of repeatedly drawing candidates that fall in
+  already-packed space as global occupancy climbs. Only ``mode="single"``
+  is supported for this first pass -- ``"cluster"``/``"bundle"`` raise
+  ``NotImplementedError`` (deferred, not silently ignored). Masked
+  location flags (membrane/vesicle/cytosol) use the same cached-nonzero-
+  over-the-mask approach as ``ParticlePlacer`` in both strategies, since a
+  location mask is typically already a bounded region, not a full-volume-
+  scan problem the way "any" is.
+
+Both classes share the same ``ParticleSpec``/``PlacedInstance`` types and
+``place_species``/``run`` interface, so either is a drop-in choice for
+``CryoTomoSimSpecimenGenerator``.
 """
 
 from __future__ import annotations
@@ -51,6 +78,7 @@ from typing import Literal
 
 import roma
 import torch
+import torch.nn.functional as F
 
 from ..arrays import clip_insert_bounds
 from ..rotations import build_affine_matrix, random_rotation_matrix, rotate_volume
@@ -170,6 +198,68 @@ def _random_rotation_aligned_to_normal(
     return r_align @ r_spin
 
 
+def _local_overlap_test_and_insert(
+    volume: torch.Tensor,
+    rotated_density: torch.Tensor,
+    center_zyx: torch.Tensor,
+    ignore_overlap_mask: torch.Tensor | None = None,
+) -> tuple[bool, int, tuple[slice, ...] | None]:
+    """
+    Exact per-voxel overlap test + max-merge insert, local to the
+    candidate's own bounding box via ``clip_insert_bounds`` -- shared by
+    both ``ParticlePlacer`` and ``HierarchicalParticlePlacer``, since the
+    fine-grained check itself is identical between the two strategies
+    (they only differ in how a candidate position is FOUND, not in how
+    it's verified/rendered).
+
+    `ignore_overlap_mask`, if given, marks voxels that don't count as a
+    blocking overlap even if already occupied -- used for membrane-flagged
+    placements, where a transmembrane protein is expected to displace the
+    local lipid at its own insertion site (CTS's own ``testmem``
+    subfunction does the equivalent by subtracting the local membrane
+    density from the destination before testing overlap; masking it out
+    of the overlap test here has the same effect while still catching
+    overlap with any OTHER content at non-masked voxels within the
+    footprint, and still composites the membrane density normally via the
+    max-merge below).
+
+    Returns
+    -------
+    success : bool
+    newly_occupied : int
+        Number of voxels that transitioned from unoccupied to occupied
+        (0 if `success` is False), for the caller's own running occupancy
+        count.
+    dst : tuple of slice, or None
+        The destination region actually touched in `volume` (None if
+        `success` is False or the candidate fell entirely outside
+        `volume`'s bounds) -- `HierarchicalParticlePlacer` uses this to
+        know which coarse cells to refresh.
+    """
+    bounds = clip_insert_bounds(
+        center_zyx.tolist(), rotated_density.shape, volume.shape
+    )
+    if bounds is None:
+        return False, 0, None
+    dst, src = bounds
+    existing = volume[dst]
+    candidate = rotated_density[src]
+    existing_for_test = existing
+    if ignore_overlap_mask is not None:
+        existing_for_test = existing.clone()
+        existing_for_test[ignore_overlap_mask[dst]] = 0
+    overlap = (existing_for_test > 0) & (candidate > 0)
+    if overlap.any():
+        return False, 0, None
+    # Track the occupancy delta from the ORIGINAL existing values (not
+    # existing_for_test, which may have been zeroed out under
+    # ignore_overlap_mask) so the caller's occupied count stays exact
+    # regardless of membrane-overlap-ignore placements.
+    newly_occupied = int(((existing == 0) & (candidate > 0)).sum().item())
+    volume[dst] = torch.maximum(existing, candidate)
+    return True, newly_occupied, dst
+
+
 @dataclass
 class ParticlePlacer:
     """
@@ -195,30 +285,95 @@ class ParticlePlacer:
     density_cutoff: float = 0.4
     rng: torch.Generator | None = None
     placements: list[PlacedInstance] = field(default_factory=list)
+    _mask_candidate_cache: dict[int, torch.Tensor] = field(
+        default_factory=dict, repr=False
+    )
+    #: Running count of occupied (> 0) voxels, lazily initialized (one
+    #: full-volume scan) on first use and then updated incrementally by
+    #: `_test_and_insert` -- see `_occupied_fraction`'s docstring for why
+    #: this can't just be computed once in `__post_init__` instead.
+    _occupied_count: int | None = field(default=None, repr=False)
+
+    #: Direct uniform-index draws to try (see _random_candidate_voxel's
+    #: unmasked path) before falling back to an exhaustive nonzero scan.
+    #: At density_cutoff <= ~0.6 the free-voxel fraction at the point
+    #: placement stops is always >= ~0.4, so the expected number of draws
+    #: to hit a free voxel is ~2.5 even in the worst case at the cutoff
+    #: boundary -- 50 is a large safety margin for locally denser regions
+    #: (e.g. near a just-placed cluster), not a tight bound.
+    _DIRECT_SAMPLE_TRIES = 50
 
     def __post_init__(self) -> None:
         if self.rng is None:
             self.rng = torch.Generator()
 
     def _occupied_fraction(self) -> float:
-        return (self.volume > 0).float().mean().item()
+        """Fraction of occupied (> 0) voxels in `self.volume`.
+
+        Called before every single placement attempt (not just
+        successes) to check the density cutoff, so at large volumes
+        (tens of millions of voxels) recomputing this from scratch every
+        time would itself dominate runtime -- `_occupied_count` is
+        computed fresh exactly once, lazily, the first time this is
+        called (capturing whatever pre-existing content, e.g. a carbon
+        film, the caller already added to `self.volume` before placement
+        started -- this placer has no way to know about such prior
+        mutations except by scanning once), and updated incrementally by
+        `_test_and_insert` from then on.
+        """
+        if self._occupied_count is None:
+            self._occupied_count = int((self.volume > 0).sum().item())
+        return self._occupied_count / self.volume.numel()
 
     def _random_candidate_voxel(
         self, location_mask: torch.Tensor | None
     ) -> torch.Tensor | None:
         """Pick a uniformly random voxel index (z, y, x) satisfying
         `location_mask` (or any voxel not yet occupied, if no mask given).
-        Returns None if no valid candidate voxels exist at all."""
-        if location_mask is not None:
-            candidates = torch.nonzero(location_mask, as_tuple=False)
-        else:
+        Returns None if no valid candidate voxels exist at all.
+
+        Unmasked ("any") case: samples via direct uniform per-axis index
+        draws with cheap O(1) occupancy rejection, instead of
+        materializing the full free-voxel index list via
+        ``torch.nonzero`` -- at large volumes (tens of millions of
+        voxels) and many placement attempts, a full-volume ``nonzero``
+        scan on every single attempt (not just successes) would dominate
+        runtime. Falls back to the exhaustive scan only if direct
+        sampling doesn't find a free voxel within
+        `_DIRECT_SAMPLE_TRIES` (i.e. the volume is likely nearly
+        saturated) -- a correctness backstop, not the common path.
+
+        Masked case: a location mask (membrane/vesicle/cytosol) is built
+        once per specimen and doesn't change across placement attempts
+        within a run (unlike `self.volume`'s occupancy, which changes on
+        every successful placement) -- so its candidate-index list is
+        cached (keyed by the mask tensor's identity) rather than
+        recomputed via ``nonzero`` on every attempt.
+        """
+        if location_mask is None:
+            shape = self.volume.shape
+            shape_t = torch.tensor(shape, dtype=torch.float32)
+            for _ in range(self._DIRECT_SAMPLE_TRIES):
+                idx = (torch.rand(3, generator=self.rng) * shape_t).long()
+                if self.volume[idx[0], idx[1], idx[2]] == 0:
+                    return idx.float()
+            # Fallback: volume is likely nearly saturated for uniform
+            # sampling to find a free voxel quickly.
             candidates = torch.nonzero(self.volume == 0, as_tuple=False)
+        else:
+            key = id(location_mask)
+            cached = self._mask_candidate_cache.get(key)
+            if cached is None:
+                cached = torch.nonzero(location_mask, as_tuple=False)
+                self._mask_candidate_cache[key] = cached
+            candidates = cached
+
         if candidates.shape[0] == 0:
             return None
-        idx = int(
+        chosen_idx = int(
             torch.randint(0, candidates.shape[0], (1,), generator=self.rng).item()
         )
-        return candidates[idx].float()
+        return candidates[chosen_idx].float()
 
     def _test_and_insert(
         self,
@@ -228,35 +383,17 @@ class ParticlePlacer:
     ) -> bool:
         """Overlap-test `rotated_density` at `center_zyx`; if no overlap
         with already-occupied voxels, insert (max-merge) and return True.
-
-        `ignore_overlap_mask`, if given, marks voxels that don't count as
-        a blocking overlap even if already occupied -- used for
-        membrane-flagged placements, where a transmembrane protein is
-        expected to displace the local lipid at its own insertion site
-        (CTS's own ``testmem`` subfunction does the equivalent by
-        subtracting the local membrane density from the destination
-        before testing overlap; masking it out of the overlap test here
-        has the same effect while still catching overlap with any OTHER
-        content at non-masked voxels within the footprint, and still
-        composites the membrane density normally via the max-merge below).
+        Thin wrapper around the module-level `_local_overlap_test_and_insert`
+        (shared with `HierarchicalParticlePlacer`) that also maintains this
+        placer's own incremental `_occupied_count`. See that function's
+        docstring for `ignore_overlap_mask`'s semantics.
         """
-        bounds = clip_insert_bounds(
-            center_zyx.tolist(), rotated_density.shape, self.volume.shape
+        success, newly_occupied, _dst = _local_overlap_test_and_insert(
+            self.volume, rotated_density, center_zyx, ignore_overlap_mask
         )
-        if bounds is None:
-            return False
-        dst, src = bounds
-        existing = self.volume[dst]
-        candidate = rotated_density[src]
-        existing_for_test = existing
-        if ignore_overlap_mask is not None:
-            existing_for_test = existing.clone()
-            existing_for_test[ignore_overlap_mask[dst]] = 0
-        overlap = (existing_for_test > 0) & (candidate > 0)
-        if overlap.any():
-            return False
-        self.volume[dst] = torch.maximum(existing, candidate)
-        return True
+        if success and self._occupied_count is not None:
+            self._occupied_count += newly_occupied
+        return success
 
     def _pick_rotation(
         self,
@@ -281,17 +418,26 @@ class ParticlePlacer:
         spec: ParticleSpec,
         mask: torch.Tensor | None,
         normal_field: torch.Tensor | None,
+        ignore_mask: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor] | None:
         """Try up to `spec.max_attempts_per_copy` times to place one copy
         of `spec` at a random (mask-restricted) location. Returns
         (center_zyx, rotation_matrix) on success, None on exhausted
-        retries or no valid candidate voxels left."""
-        # A membrane-flagged particle is expected to displace the local
-        # lipid at its own insertion site (see _test_and_insert's
-        # docstring) -- only relevant/passed for the "membrane" flag, not
-        # "vesicle"/"cytosol"/"any", where any occupied voxel is a real
-        # blocking overlap.
-        ignore_overlap_mask = mask if spec.location == "membrane" else None
+        retries or no valid candidate voxels left.
+
+        `mask` (candidate SAMPLING region) and `ignore_mask` (voxels that
+        don't count as a blocking overlap) are deliberately separate
+        parameters, not the same mask reused for both purposes: for a
+        membrane-flagged spec, `mask` is expected to be the membrane's
+        thin mid-thickness SKELETON (so insertion depth is consistent,
+        not uniformly random across the full bilayer thickness), while
+        `ignore_mask` is expected to be the FULL bilayer thickness
+        footprint (so the overlap test doesn't wrongly block a candidate
+        whose rotated density genuinely spans the whole membrane
+        thickness once centered on the skeleton). See
+        `_test_and_insert`'s docstring for why the ignore mechanism
+        itself exists.
+        """
         for _ in range(spec.max_attempts_per_copy):
             center = self._random_candidate_voxel(mask)
             if center is None:
@@ -299,7 +445,7 @@ class ParticlePlacer:
             R = self._pick_rotation(spec, center, normal_field)
             theta = build_affine_matrix(R.unsqueeze(0))
             rotated = rotate_volume(spec.density, theta, padding_mode="zeros")[0]
-            if self._test_and_insert(rotated, center, ignore_overlap_mask):
+            if self._test_and_insert(rotated, center, ignore_mask):
                 self.placements.append(
                     PlacedInstance(
                         species_id=spec.species_id, center_zyx=center, rotation_matrix=R
@@ -313,12 +459,13 @@ class ParticlePlacer:
         spec: ParticleSpec,
         mask: torch.Tensor | None,
         normal_field: torch.Tensor | None,
+        ignore_mask: torch.Tensor | None = None,
     ) -> int:
         placed = 0
         for _ in range(spec.max_count):
             if self._occupied_fraction() >= self.density_cutoff:
                 break
-            if self._attempt_single(spec, mask, normal_field) is None:
+            if self._attempt_single(spec, mask, normal_field, ignore_mask) is None:
                 continue
             placed += 1
         return placed
@@ -328,10 +475,11 @@ class ParticlePlacer:
         spec: ParticleSpec,
         mask: torch.Tensor | None,
         normal_field: torch.Tensor | None,
+        ignore_mask: torch.Tensor | None = None,
     ) -> int:
         """Port of CTS's ``radialfill`` cluster mode: place one primary,
         then scatter satellites at Gaussian-radius offsets around it."""
-        primary = self._attempt_single(spec, mask, normal_field)
+        primary = self._attempt_single(spec, mask, normal_field, ignore_mask)
         if primary is None:
             return 0
         placed = 1
@@ -365,12 +513,13 @@ class ParticlePlacer:
         spec: ParticleSpec,
         mask: torch.Tensor | None,
         normal_field: torch.Tensor | None,
+        ignore_mask: torch.Tensor | None = None,
     ) -> int:
         """Port of CTS's ``radialfill`` bundle mode: place one primary,
         then place satellites radially around a shared random axis through
         it, sliding along the axis and growing the radius on repeated
         failures."""
-        primary = self._attempt_single(spec, mask, normal_field)
+        primary = self._attempt_single(spec, mask, normal_field, ignore_mask)
         if primary is None:
             return 0
         placed = 1
@@ -437,6 +586,7 @@ class ParticlePlacer:
         spec: ParticleSpec,
         location_masks: dict[str, torch.Tensor] | None = None,
         normal_fields: dict[str, torch.Tensor] | None = None,
+        ignore_masks: dict[str, torch.Tensor] | None = None,
     ) -> int:
         """
         Attempt to place up to `spec.max_count` copies of one species,
@@ -447,13 +597,30 @@ class ParticlePlacer:
         spec : ParticleSpec
         location_masks : dict, optional
             Maps location-flag name ("membrane"/"vesicle"/"cytosol") to a
-            boolean mask over `self.volume`'s voxels. Required if
-            `spec.location != "any"`.
+            boolean mask over `self.volume`'s voxels -- the region
+            candidate positions are SAMPLED from. Required if
+            `spec.location != "any"`. For `"membrane"`, this is expected
+            to be the membrane's thin mid-thickness skeleton (see
+            `_attempt_single`'s docstring), not the full bilayer
+            thickness footprint.
         normal_fields : dict, optional
             Maps location-flag name to a physical-(x,y,z)-component normal
             vector field, shape (3, nz, ny, nx), matching `self.volume`'s
             shape. Only consulted for `spec.location == "membrane"` and
             `spec.mode == "single"` (see module docstring).
+        ignore_masks : dict, optional
+            Maps location-flag name to a boolean mask of voxels that don't
+            count as a blocking overlap even if already occupied. Only
+            consulted for `spec.location == "membrane"` -- expected to be
+            the membrane's FULL bilayer thickness footprint (deliberately
+            NOT the same mask as `location_masks["membrane"]`; see
+            `_attempt_single`'s docstring for why these two must stay
+            separate). If omitted for a `"membrane"`-flagged spec, no
+            overlap is ignored (every occupied voxel blocks placement,
+            which in practice makes membrane-embedded placement fail
+            almost entirely, since the candidate's own footprint
+            genuinely overlaps the membrane material it's meant to sit
+            in).
 
         Returns
         -------
@@ -473,12 +640,20 @@ class ParticlePlacer:
         if normal_fields is not None and spec.location in normal_fields:
             normal_field = normal_fields[spec.location]
 
+        ignore_mask = None
+        if (
+            spec.location == "membrane"
+            and ignore_masks is not None
+            and spec.location in ignore_masks
+        ):
+            ignore_mask = ignore_masks[spec.location]
+
         if spec.mode == "single":
-            return self._place_single_many(spec, mask, normal_field)
+            return self._place_single_many(spec, mask, normal_field, ignore_mask)
         elif spec.mode == "cluster":
-            return self._place_cluster(spec, mask, normal_field)
+            return self._place_cluster(spec, mask, normal_field, ignore_mask)
         elif spec.mode == "bundle":
-            return self._place_bundle(spec, mask, normal_field)
+            return self._place_bundle(spec, mask, normal_field, ignore_mask)
         raise ValueError(f"unknown placement mode {spec.mode!r}")
 
     def run(
@@ -486,6 +661,7 @@ class ParticlePlacer:
         specs: list[ParticleSpec],
         location_masks: dict[str, torch.Tensor] | None = None,
         normal_fields: dict[str, torch.Tensor] | None = None,
+        ignore_masks: dict[str, torch.Tensor] | None = None,
     ) -> list[PlacedInstance]:
         """
         Place every species in `specs`, in order, respecting the shared
@@ -502,5 +678,366 @@ class ParticlePlacer:
         for spec in specs:
             if self._occupied_fraction() >= self.density_cutoff:
                 break
-            self.place_species(spec, location_masks, normal_fields)
+            self.place_species(spec, location_masks, normal_fields, ignore_masks)
+        return self.placements[before:]
+
+
+def _compute_coarse_full_mask(
+    volume: torch.Tensor, coarse_factor: int, full_threshold: float = 1.0
+) -> torch.Tensor:
+    """
+    Downsample `(volume > 0)` into a coarse grid (`coarse_factor` voxels
+    per axis per coarse cell) marking which coarse cells are "practically
+    full" -- their occupied VOXEL FRACTION is at or above `full_threshold`.
+
+    `full_threshold` matters a lot in practice: for spherical/irregular
+    (non-space-filling) particles, a coarse cell can have a handful of
+    stray never-touched voxels essentially forever (e.g. the corners
+    between packed spheres), so requiring literal 100% occupancy
+    (`full_threshold=1.0`) means cells almost never get marked full at
+    all -- the coarse grid then provides close to zero speedup, since
+    "not full" ends up meaning almost the whole grid, even once a region
+    is genuinely too crowded to fit another particle. A lower threshold
+    (e.g. 0.6-0.8) marks a cell full once it's merely MOSTLY occupied,
+    which is what actually predicts "a same-sized new particle is
+    unlikely to fit here" for realistic particle shapes. This only
+    affects candidate-search SPEED, never correctness: a cell wrongly
+    marked full just gets skipped (a completeness cost, occasionally
+    missing a spot that genuinely still fits), while the fine-grained
+    exact overlap test downstream is unaffected and remains authoritative
+    either way.
+
+    Vectorized via ``avg_pool3d`` (one pooling pass over the whole volume)
+    rather than a Python loop over coarse cells -- cheap regardless of
+    volume size, used for the one-time initial grid build (and available
+    for a full rebuild if ever needed, though `HierarchicalParticlePlacer`
+    normally only refreshes the handful of cells touched by each new
+    placement, not the whole grid).
+
+    Volume dimensions not evenly divisible by `coarse_factor` are padded
+    with "occupied" (1.0) rather than "free" -- conservative: an edge cell
+    might be marked full when it actually has a little real free space
+    beyond the volume's own edge, which only costs a few skipped edge
+    candidates, never a false "not full" that could mask a real overlap
+    (the fine-grained exact test downstream still catches any actual
+    collision regardless).
+    """
+    occ = (volume > 0).float()
+    nz, ny, nx = occ.shape
+    cf = coarse_factor
+    pad_z, pad_y, pad_x = (-nz) % cf, (-ny) % cf, (-nx) % cf
+    if pad_z or pad_y or pad_x:
+        occ = F.pad(occ, (0, pad_x, 0, pad_y, 0, pad_z), value=1.0)
+    pooled = F.avg_pool3d(occ.unsqueeze(0).unsqueeze(0), kernel_size=cf, stride=cf)
+    return pooled[0, 0] >= full_threshold - 1e-6
+
+
+@dataclass
+class HierarchicalParticlePlacer:
+    """
+    Exact-collision particle placer -- same per-voxel correctness guarantee
+    as `ParticlePlacer` (no bounding-sphere/ellipsoid approximation
+    anywhere) -- with a two-level coarse/fine spatial hierarchy for fast
+    candidate discovery in the unmasked ("any"-location) case. See the
+    module docstring's "Two placement STRATEGIES" section for the
+    conceptual comparison against `ParticlePlacer`.
+
+    Limitation: only `mode="single"` is supported in this first pass;
+    `"cluster"`/`"bundle"` raise `NotImplementedError` (deferred, not
+    silently ignored -- `ParticlePlacer` still supports those directly).
+
+    Parameters
+    ----------
+    volume : torch.Tensor
+        The specimen volume to place into and mutate in place, shape
+        (nz, ny, nx).
+    density_cutoff : float, optional
+        Same semantics as `ParticlePlacer.density_cutoff`. Default 0.4.
+    coarse_factor : int, optional
+        Coarse-grid downsample factor per axis. Default 8 -- a reasonable
+        middle ground for typical protein-sized particles (tens of voxels
+        across) at typical cryo-ET voxel sizes: large enough that a
+        meaningful number of fine voxels share one coarse cell (so "fully
+        occupied" cells actually start appearing as density climbs,
+        making the skip-fully-occupied-cells optimization pay off), small
+        enough that a coarse cell isn't so big it stays "not full" long
+        after most of its own volume is already packed (which would waste
+        attempts sampling into a nearly-saturated cell just as a full-
+        volume approach would). Pass a larger factor for much bigger
+        particles relative to the volume (e.g. large membranes), smaller
+        for very fine/small ones.
+    full_occupancy_threshold : float, optional
+        Occupied-voxel-fraction (within one coarse cell) at or above which
+        the cell is treated as "full" and skipped for new candidates.
+        Default 0.7 -- deliberately NOT 1.0 (literal "every voxel
+        nonzero"): for spherical/irregular particles, a handful of stray
+        never-touched voxels (e.g. the gaps between packed spheres) can
+        persist in a cell indefinitely, so requiring exact 100% occupancy
+        means cells rarely if ever get marked full, and the coarse grid
+        stops paying for itself right when it matters most (high global
+        occupancy, where most candidates would otherwise be wasted
+        attempts in already-crowded space). See
+        `_compute_coarse_full_mask`'s docstring for the full reasoning --
+        this only trades candidate-search completeness for speed, never
+        correctness (the fine-grained exact test is unaffected).
+    rng : torch.Generator, optional
+        Random generator for rotations/positions. Default: a fresh
+        generator seeded from the OS.
+    """
+
+    volume: torch.Tensor
+    density_cutoff: float = 0.4
+    coarse_factor: int = 8
+    full_occupancy_threshold: float = 0.7
+    rng: torch.Generator | None = None
+    placements: list[PlacedInstance] = field(default_factory=list)
+    _mask_candidate_cache: dict[int, torch.Tensor] = field(
+        default_factory=dict, repr=False
+    )
+    _occupied_count: int | None = field(default=None, repr=False)
+
+    def __post_init__(self) -> None:
+        if self.rng is None:
+            self.rng = torch.Generator()
+        cf = self.coarse_factor
+        nz, ny, nx = self.volume.shape
+        self._coarse_shape = (
+            (nz + cf - 1) // cf,
+            (ny + cf - 1) // cf,
+            (nx + cf - 1) // cf,
+        )
+        # One-time vectorized build -- captures whatever pre-existing
+        # content (e.g. a carbon film) the caller already added to
+        # `self.volume` before this placer was constructed, same reason
+        # `_occupied_count` is lazily scanned rather than assumed zero.
+        self._coarse_full_mask = _compute_coarse_full_mask(
+            self.volume, cf, self.full_occupancy_threshold
+        )
+
+    def _occupied_fraction(self) -> float:
+        if self._occupied_count is None:
+            self._occupied_count = int((self.volume > 0).sum().item())
+        return self._occupied_count / self.volume.numel()
+
+    def _coarse_cell_fine_slice(
+        self, cz: int, cy: int, cx: int
+    ) -> tuple[slice, slice, slice]:
+        cf = self.coarse_factor
+        nz, ny, nx = self.volume.shape
+        return (
+            slice(cz * cf, min((cz + 1) * cf, nz)),
+            slice(cy * cf, min((cy + 1) * cf, ny)),
+            slice(cx * cf, min((cx + 1) * cf, nx)),
+        )
+
+    def _refresh_coarse_cell(self, cz: int, cy: int, cx: int) -> None:
+        sl = self._coarse_cell_fine_slice(cz, cy, cx)
+        block = self.volume[sl]
+        occupied_fraction = (block > 0).float().mean()
+        self._coarse_full_mask[cz, cy, cx] = (
+            occupied_fraction >= self.full_occupancy_threshold
+        )
+
+    def _refresh_coarse_cells_touched(self, dst: tuple[slice, ...]) -> None:
+        """Refresh only the (few) coarse cells overlapping `dst` -- bounded
+        by one placed particle's own footprint in coarse-cell units, never
+        a full coarse-grid rebuild."""
+        cf = self.coarse_factor
+        cz0, cz1 = dst[0].start // cf, (dst[0].stop - 1) // cf + 1
+        cy0, cy1 = dst[1].start // cf, (dst[1].stop - 1) // cf + 1
+        cx0, cx1 = dst[2].start // cf, (dst[2].stop - 1) // cf + 1
+        for cz in range(cz0, cz1):
+            for cy in range(cy0, cy1):
+                for cx in range(cx0, cx1):
+                    self._refresh_coarse_cell(cz, cy, cx)
+
+    def _random_candidate_voxel(
+        self, location_mask: torch.Tensor | None
+    ) -> torch.Tensor | None:
+        """Masked case: identical cached-nonzero-over-the-mask approach as
+        `ParticlePlacer`. Unmasked case: draw a coarse cell uniformly among
+        NOT-fully-occupied cells (cheap -- a `nonzero` scan over the small
+        coarse grid, not the fine volume), then a random fine voxel within
+        it."""
+        if location_mask is not None:
+            key = id(location_mask)
+            cached = self._mask_candidate_cache.get(key)
+            if cached is None:
+                cached = torch.nonzero(location_mask, as_tuple=False)
+                self._mask_candidate_cache[key] = cached
+            candidates = cached
+            if candidates.shape[0] == 0:
+                return None
+            chosen_idx = int(
+                torch.randint(0, candidates.shape[0], (1,), generator=self.rng).item()
+            )
+            return candidates[chosen_idx].float()
+
+        free_cells = torch.nonzero(~self._coarse_full_mask, as_tuple=False)
+        if free_cells.shape[0] == 0:
+            return None
+        chosen_idx = int(
+            torch.randint(0, free_cells.shape[0], (1,), generator=self.rng).item()
+        )
+        cell = free_cells[chosen_idx]
+        sl = self._coarse_cell_fine_slice(int(cell[0]), int(cell[1]), int(cell[2]))
+        lo = torch.tensor([sl[0].start, sl[1].start, sl[2].start], dtype=torch.float32)
+        span = torch.tensor(
+            [
+                sl[0].stop - sl[0].start,
+                sl[1].stop - sl[1].start,
+                sl[2].stop - sl[2].start,
+            ],
+            dtype=torch.float32,
+        )
+        offset = (torch.rand(3, generator=self.rng) * span).floor()
+        return lo + offset
+
+    def _pick_rotation(
+        self,
+        spec: ParticleSpec,
+        center_zyx: torch.Tensor,
+        normal_field: torch.Tensor | None,
+    ) -> torch.Tensor:
+        """Identical logic to `ParticlePlacer._pick_rotation`."""
+        if spec.location == "membrane" and normal_field is not None:
+            zi, yi, xi = (int(v) for v in center_zyx.tolist())
+            zi = min(max(zi, 0), normal_field.shape[1] - 1)
+            yi = min(max(yi, 0), normal_field.shape[2] - 1)
+            xi = min(max(xi, 0), normal_field.shape[3] - 1)
+            normal_xyz = normal_field[:, zi, yi, xi]
+            return _random_rotation_aligned_to_normal(normal_xyz, self.rng)
+        return random_rotation_matrix(batchsize=1)
+
+    def _attempt_single(
+        self,
+        spec: ParticleSpec,
+        mask: torch.Tensor | None,
+        normal_field: torch.Tensor | None,
+        ignore_mask: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor] | None:
+        """See `ParticlePlacer._attempt_single`'s docstring for why `mask`
+        (candidate sampling) and `ignore_mask` (overlap-ignore) are kept
+        separate parameters rather than one shared mask."""
+        if spec.mode != "single":
+            raise NotImplementedError(
+                f"HierarchicalParticlePlacer only supports mode='single' "
+                f"in this first pass (got spec.mode={spec.mode!r} for "
+                f"species {spec.species_id!r}); use ParticlePlacer for "
+                f"'cluster'/'bundle'."
+            )
+        for _ in range(spec.max_attempts_per_copy):
+            center = self._random_candidate_voxel(mask)
+            if center is None:
+                return None
+            R = self._pick_rotation(spec, center, normal_field)
+            theta = build_affine_matrix(R.unsqueeze(0))
+            rotated = rotate_volume(spec.density, theta, padding_mode="zeros")[0]
+            success, newly_occupied, dst = _local_overlap_test_and_insert(
+                self.volume, rotated, center, ignore_mask
+            )
+            if success:
+                if self._occupied_count is not None:
+                    self._occupied_count += newly_occupied
+                if dst is not None:
+                    self._refresh_coarse_cells_touched(dst)
+                self.placements.append(
+                    PlacedInstance(
+                        species_id=spec.species_id,
+                        center_zyx=center,
+                        rotation_matrix=R,
+                    )
+                )
+                return center, R
+        return None
+
+    def place_species(
+        self,
+        spec: ParticleSpec,
+        location_masks: dict[str, torch.Tensor] | None = None,
+        normal_fields: dict[str, torch.Tensor] | None = None,
+        ignore_masks: dict[str, torch.Tensor] | None = None,
+    ) -> int:
+        """
+        Attempt to place up to `spec.max_count` copies of one species.
+        Only `spec.mode == "single"` is supported (see class docstring).
+
+        Parameters
+        ----------
+        spec : ParticleSpec
+        location_masks : dict, optional
+            Maps location-flag name ("membrane"/"vesicle"/"cytosol") to a
+            boolean mask over `self.volume`'s voxels -- the candidate
+            SAMPLING region. Required if `spec.location != "any"`. For
+            `"membrane"`, expected to be the thin mid-thickness skeleton,
+            not the full bilayer footprint (see
+            `ParticlePlacer._attempt_single`'s docstring).
+        normal_fields : dict, optional
+            Maps location-flag name to a physical-(x,y,z)-component normal
+            vector field, shape (3, nz, ny, nx). Only consulted for
+            `spec.location == "membrane"`.
+        ignore_masks : dict, optional
+            Maps location-flag name to a boolean mask of voxels that
+            don't count as a blocking overlap. Only consulted for
+            `spec.location == "membrane"` -- expected to be the FULL
+            bilayer thickness footprint (deliberately different from
+            `location_masks["membrane"]`).
+
+        Returns
+        -------
+        int
+            Number of copies actually placed.
+        """
+        mask = None
+        if spec.location != "any":
+            if location_masks is None or spec.location not in location_masks:
+                raise ValueError(
+                    f"species {spec.species_id!r} requests location "
+                    f"{spec.location!r} but no matching mask was supplied"
+                )
+            mask = location_masks[spec.location]
+
+        normal_field = None
+        if normal_fields is not None and spec.location in normal_fields:
+            normal_field = normal_fields[spec.location]
+
+        ignore_mask = None
+        if (
+            spec.location == "membrane"
+            and ignore_masks is not None
+            and spec.location in ignore_masks
+        ):
+            ignore_mask = ignore_masks[spec.location]
+
+        placed = 0
+        for _ in range(spec.max_count):
+            if self._occupied_fraction() >= self.density_cutoff:
+                break
+            if self._attempt_single(spec, mask, normal_field, ignore_mask) is None:
+                continue
+            placed += 1
+        return placed
+
+    def run(
+        self,
+        specs: list[ParticleSpec],
+        location_masks: dict[str, torch.Tensor] | None = None,
+        normal_fields: dict[str, torch.Tensor] | None = None,
+        ignore_masks: dict[str, torch.Tensor] | None = None,
+    ) -> list[PlacedInstance]:
+        """
+        Place every species in `specs`, in order, respecting the shared
+        `density_cutoff` across all of them.
+
+        Returns
+        -------
+        list of PlacedInstance
+            All successful placements from this call (also accumulated in
+            `self.placements`).
+        """
+        before = len(self.placements)
+        for spec in specs:
+            if self._occupied_fraction() >= self.density_cutoff:
+                break
+            self.place_species(spec, location_masks, normal_fields, ignore_masks)
         return self.placements[before:]

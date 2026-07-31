@@ -45,6 +45,14 @@ MB_MIN_RAD = 180.0
 MB_MAX_RAD = 450.0
 
 [specimen]
+# Path to a pre-built (Z, Y, X) scattering-potential volume (.mrc/.mrcs/.pt),
+# already in scattering-potential units. When set, `specter simulate
+# tiltseries` loads this directly instead of running the polnet-based
+# placement below (protein_specs/membrane_specs/filler_occupancy/
+# target_shape/target_v_size/low_res_v_size/membrane_potential_scale/seed
+# are then unused). Uncomment to enable:
+# volume_path = "path/to/specimen.mrc"
+
 # generic, non-annotated cytosolic crowding filling the background around the
 # annotated targets above; see build_filler_protein_specs's docstring. Off by
 # default -- fetching/building the extra filler species adds noticeable

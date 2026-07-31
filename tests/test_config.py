@@ -200,11 +200,13 @@ def test_load_config_tilt_series_fills_defaults_for_missing_fields(
     assert config.ice_model == "gd"
 
 
-def test_tilt_series_config_requires_protein_specs() -> None:
-    import pytest
-
-    with pytest.raises(TypeError):
-        TiltSeriesConfig()  # type: ignore[call-arg]
+def test_tilt_series_config_constructs_with_no_args() -> None:
+    """protein_specs is optional now -- only meaningful in polnet mode, and
+    the volume_path path shouldn't require an unrelated [[protein_specs]]
+    block."""
+    config = TiltSeriesConfig()
+    assert config.protein_specs == []
+    assert config.volume_path == ""
 
 
 def test_tilt_series_toml_loads_and_matches_expected_values() -> None:
@@ -216,3 +218,21 @@ def test_tilt_series_toml_loads_and_matches_expected_values() -> None:
     assert config.target_v_size == 5.0
     assert config.scattering_model == "multislice"
     assert config.device == "cpu"
+    assert config.volume_path == ""
+
+
+def test_tilt_series_toml_volume_path_round_trip(tmp_path: Path) -> None:
+    path = _write_toml(
+        tmp_path,
+        """
+        [specimen]
+        volume_path = "path/to/specimen.mrc"
+
+        [tilt_geometry]
+        n_tilts = 5
+        """,
+    )
+    config = load_config(path, TiltSeriesConfig)
+    assert config.volume_path == "path/to/specimen.mrc"
+    assert config.protein_specs == []
+    assert config.n_tilts == 5

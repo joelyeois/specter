@@ -6,7 +6,9 @@ import rich_click as click
 
 from specter.config import (
     PARTICLE_STACK_HELP,
+    TILT_SERIES_HELP,
     ParticleStackConfig,
+    TiltSeriesConfig,
     apply_overrides,
     load_config,
 )
@@ -102,15 +104,80 @@ _PARTICLE_STACK_GROUPS: list[tuple[str, list[str]]] = [
 ]
 
 
+# (panel title, field names) for `specter simulate tiltseries` -- same
+# basic-first-advanced-last convention as `_PARTICLE_STACK_GROUPS`. This first
+# pass only drives the `volume_path` specimen source (see
+# `specter.pipelines.run_tilt_series`); the polnet-only fields
+# (`protein_specs`/`membrane_specs`/`filler_occupancy`/`target_shape`/
+# `target_v_size`/`low_res_v_size`/`membrane_potential_scale`/`seed`) still
+# get flags (for forward compatibility once polnet placement is wired into
+# this pipeline) but live in "Advanced" since this command's default path
+# doesn't use them. `protein_specs`/`membrane_specs` themselves are
+# list[dict]-typed and skipped entirely by `build_config_options` -- not
+# listed here, same as `atom_species` isn't listed in `_PARTICLE_STACK_GROUPS`.
+_TILT_SERIES_GROUPS: list[tuple[str, list[str]]] = [
+    ("Specimen", ["volume_path"]),
+    (
+        "Microscope",
+        ["voltage", "dose_per_tilt", "num_frames", "cs", "alpha"],
+    ),
+    ("Defocus", ["defocus"]),
+    (
+        "Tilt geometry",
+        ["min_tilt_angle", "max_tilt_angle", "n_tilts", "tilt_axis"],
+    ),
+    (
+        "Models",
+        ["scattering_model", "aberration_model", "noise_model", "detector_model"],
+    ),
+    (
+        "Post-processing",
+        ["normalize_tilt_series", "save_exitwaves"],
+    ),
+    ("Compute", ["device"]),
+    ("Output", ["output_dir", "filename"]),
+    (
+        "Advanced",
+        [
+            "pdb_savefolder",
+            "target_shape",
+            "target_v_size",
+            "low_res_v_size",
+            "membrane_potential_scale",
+            "seed",
+            "filler_occupancy",
+            "micrograph_size",
+            "convergence_angle",
+            "cc",
+            "energy_spread",
+            "deltaV_V",
+            "deltaI_I",
+            "dose_envelope",
+            "coincidence_radius",
+            "ice_model",
+            "ice_cache_dir",
+            "ice_relax_steps",
+            "pad_fft",
+        ],
+    ),
+]
+
+
 def _default_particle_config_path() -> str:
     from specter.config import REPO_ROOT
 
     return str(REPO_ROOT / "configs" / "particle.toml")
 
 
-def _field_panels() -> dict[str, str]:
-    """Field name -> rich-click panel title, derived from `_PARTICLE_STACK_GROUPS`."""
-    return {name: title for title, names in _PARTICLE_STACK_GROUPS for name in names}
+def _default_tiltseries_config_path() -> str:
+    from specter.config import REPO_ROOT
+
+    return str(REPO_ROOT / "configs" / "tilt_series.toml")
+
+
+def _field_panels(groups: list[tuple[str, list[str]]]) -> dict[str, str]:
+    """Field name -> rich-click panel title, derived from a (title, field names) list."""
+    return {name: title for title, names in groups for name in names}
 
 
 def _particles_callback(config: str, **_overrides_raw: object) -> None:
@@ -140,7 +207,7 @@ def _build_particles_command() -> click.RichCommand:
         *build_config_options(
             ParticleStackConfig,
             field_help=PARTICLE_STACK_HELP,
-            field_panels=_field_panels(),
+            field_panels=_field_panels(_PARTICLE_STACK_GROUPS),
         ),
     ]
     return click.RichCommand(
@@ -154,6 +221,48 @@ def _build_particles_command() -> click.RichCommand:
     )
 
 
+def _tiltseries_callback(config: str, **_overrides_raw: object) -> None:
+    """Handle `specter simulate tiltseries`."""
+    from specter.pipelines import run_tilt_series
+
+    ctx = click.get_current_context()
+    assert ctx is not None
+    overrides = collect_overrides(ctx, exclude={"config"})
+
+    cfg = load_config(config, TiltSeriesConfig)
+    apply_overrides(cfg, overrides)
+    run_tilt_series(cfg)
+
+
+def _build_tiltseries_command() -> click.RichCommand:
+    params: list[click.Parameter] = [
+        click.RichOption(
+            ["--config"],
+            type=str,
+            default=_default_tiltseries_config_path(),
+            show_default=True,
+            help="TOML config file. Always loaded first, before any flags below "
+            "are applied.",
+            panel="Config",
+        ),
+        *build_config_options(
+            TiltSeriesConfig,
+            field_help=TILT_SERIES_HELP,
+            field_panels=_field_panels(_TILT_SERIES_GROUPS),
+        ),
+    ]
+    return click.RichCommand(
+        name="tiltseries",
+        params=params,
+        callback=_tiltseries_callback,
+        context_settings=CONTEXT_SETTINGS,
+        help="Simulate a cryo-ET tilt series from a pre-built specimen volume "
+        "(--volume_path) and save it as .mrcs + .star. A TOML config "
+        "(--config) is always loaded first -- every flag below is optional "
+        "and, if given, overrides one field of it.",
+    )
+
+
 def build_simulate_group() -> click.RichGroup:
     """Build the `simulate` command group and its subcommands."""
     group = click.RichGroup(
@@ -162,4 +271,5 @@ def build_simulate_group() -> click.RichGroup:
         context_settings=CONTEXT_SETTINGS,
     )
     group.add_command(_build_particles_command())
+    group.add_command(_build_tiltseries_command())
     return group

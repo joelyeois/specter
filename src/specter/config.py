@@ -377,12 +377,20 @@ class TiltSeriesConfig:
     tilted acquisition (multislice scattering, CTF, dose, detector, noise).
     """
 
-    # --- Specimen placement (CryoETSpecimenGenerator) ---
+    # --- Specimen source ---
+    # Path to a pre-built (Z, Y, X) scattering-potential volume (.mrc/.mrcs/.pt).
+    # When set, generation loads this volume directly instead of running the
+    # polnet-based placement below -- the protein_specs/membrane_specs/
+    # filler_occupancy/target_shape/target_v_size/low_res_v_size/
+    # membrane_potential_scale/seed fields are then unused.
+    volume_path: str = ""
+
+    # --- Specimen placement (CryoETSpecimenGenerator; unused if volume_path is set) ---
     # One dict per protein species, e.g. {"PDB_CODE": "6qzp", "PMER_OCC": 0.6}.
     # Only "PDB_CODE" is required; see CryoETSpecimenGenerator's docstring for
     # the other optional polnet-style keys (PMER_OCC, PMER_L, PMER_L_MAX,
     # PMER_OVER_TOL, MMER_ISO). In TOML, provide as [[protein_specs]] tables.
-    protein_specs: list[dict[str, Any]]
+    protein_specs: list[dict[str, Any]] = field(default_factory=list)
     # One dict per membrane species/population, polnet .mbs-equivalent keys
     # (MB_TYPE, MB_THICK_RG, MB_LAYER_S_RG, MB_OCC_RG, MB_OVER_TOL,
     # MB_DEN_CF_RG, MB_MIN_RAD/MB_MAX_RAD or MB_MIN_AXIS/MB_MAX_AXIS/
@@ -453,6 +461,70 @@ class TiltSeriesConfig:
     # --- Output ---
     output_dir: str = "./output/"
     filename: str = "tilt_series"
+
+
+# Human-readable per-field descriptions for TiltSeriesConfig, used to build
+# `specter simulate tiltseries --help` (see specter/cli/_click_options.py).
+# Kept here, next to the dataclass, so adding/renaming a field and its help
+# text happen in the same place.
+TILT_SERIES_HELP: dict[str, str] = {
+    "volume_path": "Path to a pre-built (Z, Y, X) scattering-potential volume "
+    "(.mrc/.mrcs/.pt), already in scattering-potential units. When set, this "
+    "is loaded directly instead of running polnet placement.",
+    "protein_specs": "polnet protein species (TOML-only, [[protein_specs]] "
+    "tables). Unused when volume_path is set.",
+    "membrane_specs": "polnet membrane species (TOML-only, [[membrane_specs]] "
+    "tables). Unused when volume_path is set.",
+    "filler_occupancy": "Total occupancy of generic cytosolic filler added on "
+    "top of protein_specs. None disables it. Unused when volume_path is set.",
+    "pdb_savefolder": "Folder to cache downloaded PDB files.",
+    "target_shape": "Output specimen volume shape in voxels (Z, Y, X). "
+    "Unused when volume_path is set.",
+    "target_v_size": "Target voxel size in Angstrom. Unused when volume_path is set.",
+    "low_res_v_size": "Voxel size used for polnet's low-resolution placement "
+    "pass, in Angstrom. Unused when volume_path is set.",
+    "membrane_potential_scale": "Membrane potential scale factor, on top of "
+    "the auto-calibrated reference. Unused when volume_path is set.",
+    "seed": "Random seed for polnet's placement. Unused when volume_path is set.",
+    "micrograph_size": "Output tilt-image size in pixels (square). Defaults "
+    "to the XY dimension of the specimen volume.",
+    "voltage": "Electron beam accelerating voltage in kV.",
+    "dose_per_tilt": "Dose per tilt angle in e-/A^2.",
+    "num_frames": "Number of movie frames per tilt.",
+    "cs": "Spherical aberration in mm (1-3 mm typical).",
+    "alpha": "Amplitude contrast ratio.",
+    "convergence_angle": "Beam convergence semi-angle in mrad, for the Cs "
+    "(spatial coherence) envelope.",
+    "cc": "Chromatic aberration coefficient in mm, for the Cc (temporal "
+    "coherence) envelope.",
+    "energy_spread": "FWHM of the beam energy spread in eV, used by the Cc envelope.",
+    "deltaV_V": "Relative high-voltage instability, used by the Cc envelope.",
+    "deltaI_I": "Relative objective-lens current instability, used by the Cc envelope.",
+    "dose_envelope": "Apply the Grant & Grigorieff (2015) cumulative-dose envelope.",
+    "defocus": "Defocus in Angstrom (positive = underfocus).",
+    "min_tilt_angle": "Minimum tilt angle in degrees.",
+    "max_tilt_angle": "Maximum tilt angle in degrees.",
+    "n_tilts": "Number of tilt angles (evenly spaced from min to max).",
+    "tilt_axis": "Tilt axis.",
+    "scattering_model": "Scattering model.",
+    "aberration_model": "Aberration model.",
+    "noise_model": "Noise model. Use 'none' for no noise.",
+    "coincidence_radius": "Coincidence radius in pixels for direct-detector modelling.",
+    "ice_model": "Ice generation algorithm: 'gd' (IceBank cache), 'random' "
+    "(cheap RandomIcemaker), or 'none'.",
+    "ice_cache_dir": "Directory of cached ice configs for ice_model='gd'. "
+    "Defaults to the bundled ice-data/ice_cache.",
+    "ice_relax_steps": "Local MLBOP relaxation steps used to heal ice tile "
+    "seams (ice_model='gd' only).",
+    "pad_fft": "Pad volume for FFT to avoid multislice edge-wraparound "
+    "artifacts under tilt.",
+    "detector_model": "Detector model.",
+    "normalize_tilt_series": "Normalize each tilt image to zero mean and unit std.",
+    "save_exitwaves": "Save exit wave magnitude and phase as separate .mrcs files.",
+    "device": "Device to use: cpu | cuda | cuda:0.",
+    "output_dir": "Directory to save output files.",
+    "filename": "Base name for output files (no extension).",
+}
 
 
 ConfigT = TypeVar("ConfigT", ParticleStackConfig, MicrographConfig, TiltSeriesConfig)

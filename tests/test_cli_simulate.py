@@ -143,3 +143,85 @@ def test_cli_particles_falcon4i_detector_model_reachable(tmp_path: Path) -> None
     result = proc.run(args, capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
     assert (tmp_path / "particles.mrcs").exists()
+
+
+def test_cli_tiltseries_smoke(tmp_path: Path) -> None:
+    """`specter simulate tiltseries --volume_path ...` loads a pre-built
+    volume from disk and runs the imaging pipeline end to end."""
+    import torch
+
+    volume_path = tmp_path / "volume.pt"
+    torch.save(torch.rand(32, 48, 48) * 0.01, volume_path)
+
+    args = [
+        sys.executable,
+        "-m",
+        "specter.cli._cli",
+        "simulate",
+        "tiltseries",
+        "--volume_path",
+        str(volume_path),
+        "--target_v_size",
+        "4.0",
+        "--micrograph_size",
+        "48",
+        "--min_tilt_angle",
+        "-5",
+        "--max_tilt_angle",
+        "5",
+        "--n_tilts",
+        "3",
+        "--num_frames",
+        "1",
+        "--ice_model",
+        "none",
+        "--detector_model",
+        "none",
+        "--scattering_model",
+        "ctf",
+        "--device",
+        "cpu",
+        "--output_dir",
+        str(tmp_path),
+        "--filename",
+        "tiltseries",
+    ]
+    result = proc.run(args, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    assert (tmp_path / "tiltseries.mrcs").exists()
+    assert (tmp_path / "tiltseries.star").exists()
+
+    import mrcfile
+
+    with mrcfile.open(tmp_path / "tiltseries.mrcs") as mrc:
+        assert mrc.data.shape == (3, 48, 48)
+
+
+def test_cli_tiltseries_help_smoke() -> None:
+    result = proc.run(
+        [sys.executable, "-m", "specter.cli._cli", "simulate", "tiltseries", "--help"],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0
+    assert "--volume_path" in result.stdout
+    assert "--n_tilts" in result.stdout
+
+
+def test_cli_tiltseries_requires_volume_path(tmp_path: Path) -> None:
+    """Without --volume_path, run_tilt_series should fail with a clear error
+    rather than silently falling back to some other specimen source."""
+    args = [
+        sys.executable,
+        "-m",
+        "specter.cli._cli",
+        "simulate",
+        "tiltseries",
+        "--device",
+        "cpu",
+        "--output_dir",
+        str(tmp_path),
+    ]
+    result = proc.run(args, capture_output=True, text=True)
+    assert result.returncode != 0
+    assert "volume_path" in result.stderr

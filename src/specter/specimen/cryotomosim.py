@@ -87,7 +87,7 @@ import torch
 
 from ..arrays import clip_insert_bounds
 from ..crowding import insert_particles_into_micrograph, pack_hard_spheres_3d
-from ..ice import RandomIcemaker, blend_ice_into_volume
+from ..ice import IceBank, RandomIcemaker, blend_ice_into_volume
 from ..pdb import PDB
 from ..potential import PotentialBuilder
 from ..rotations import build_affine_matrix, random_rotation_matrix, rotate_volume
@@ -586,6 +586,13 @@ class CryoTomoSimSpecimenGenerator:
     icemaker : RandomIcemaker or IceBank, optional
         Pre-constructed ice source; if not given, a fresh
         ``RandomIcemaker`` sized to `target_shape`/`v_size` is used.
+    ice_method : str, optional
+        Forwarded to ``blend_ice_into_volume``'s own ``method``: ``'convolve'``
+        (default, unchanged behaviour) or ``'analytic'`` (occupancy-aware,
+        in-place per-tile analytic insertion -- see
+        ``IceBank.insert_analytic_ice``; only meaningful when `icemaker` is
+        an ``IceBank``, since a default/passed ``RandomIcemaker`` ignores
+        `method` either way).
     target_shape : tuple of int
         Output volume shape (Z, Y, X), voxels.
     v_size : float
@@ -610,7 +617,8 @@ class CryoTomoSimSpecimenGenerator:
         bead_spec: BeadSpec | None = None,
         grid_spec: GridSpec | None = None,
         ice_opacity: float = 1.0,
-        icemaker: RandomIcemaker | None = None,
+        icemaker: RandomIcemaker | IceBank | None = None,
+        ice_method: str = "convolve",
         target_shape: tuple[int, int, int] = (128, 256, 256),
         v_size: float = 5.0,
         pdb_cache_dir: str = "../pdb-data/",
@@ -624,6 +632,7 @@ class CryoTomoSimSpecimenGenerator:
         self.grid_spec = grid_spec
         self.ice_opacity = ice_opacity
         self.icemaker = icemaker
+        self.ice_method = ice_method
         self.target_shape = target_shape
         self.v_size = v_size
         self.pdb_cache_dir = pdb_cache_dir
@@ -787,7 +796,10 @@ class CryoTomoSimSpecimenGenerator:
                 )
             pre_ice = volume.clone()
             iced = blend_ice_into_volume(
-                volume.unsqueeze(0), icemaker, pixel_size=self.v_size
+                volume.unsqueeze(0),
+                icemaker,
+                pixel_size=self.v_size,
+                method=self.ice_method,
             )[0]
             # blend_ice_into_volume adds ice at full strength; scale only
             # the ice-only delta by ice_opacity, not the whole volume.

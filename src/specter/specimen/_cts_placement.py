@@ -78,9 +78,8 @@ from typing import Literal
 
 import roma
 import torch
-import torch.nn.functional as F
 
-from ..arrays import clip_insert_bounds
+from ..arrays import clip_insert_bounds, coarse_occupancy_mask
 from ..rotations import build_affine_matrix, random_rotation_matrix, rotate_volume
 
 LocationFlag = str  # "any" | "membrane" | "vesicle" | "cytosol"
@@ -682,56 +681,6 @@ class ParticlePlacer:
         return self.placements[before:]
 
 
-def _compute_coarse_full_mask(
-    volume: torch.Tensor, coarse_factor: int, full_threshold: float = 1.0
-) -> torch.Tensor:
-    """
-    Downsample `(volume > 0)` into a coarse grid (`coarse_factor` voxels
-    per axis per coarse cell) marking which coarse cells are "practically
-    full" -- their occupied VOXEL FRACTION is at or above `full_threshold`.
-
-    `full_threshold` matters a lot in practice: for spherical/irregular
-    (non-space-filling) particles, a coarse cell can have a handful of
-    stray never-touched voxels essentially forever (e.g. the corners
-    between packed spheres), so requiring literal 100% occupancy
-    (`full_threshold=1.0`) means cells almost never get marked full at
-    all -- the coarse grid then provides close to zero speedup, since
-    "not full" ends up meaning almost the whole grid, even once a region
-    is genuinely too crowded to fit another particle. A lower threshold
-    (e.g. 0.6-0.8) marks a cell full once it's merely MOSTLY occupied,
-    which is what actually predicts "a same-sized new particle is
-    unlikely to fit here" for realistic particle shapes. This only
-    affects candidate-search SPEED, never correctness: a cell wrongly
-    marked full just gets skipped (a completeness cost, occasionally
-    missing a spot that genuinely still fits), while the fine-grained
-    exact overlap test downstream is unaffected and remains authoritative
-    either way.
-
-    Vectorized via ``avg_pool3d`` (one pooling pass over the whole volume)
-    rather than a Python loop over coarse cells -- cheap regardless of
-    volume size, used for the one-time initial grid build (and available
-    for a full rebuild if ever needed, though `HierarchicalParticlePlacer`
-    normally only refreshes the handful of cells touched by each new
-    placement, not the whole grid).
-
-    Volume dimensions not evenly divisible by `coarse_factor` are padded
-    with "occupied" (1.0) rather than "free" -- conservative: an edge cell
-    might be marked full when it actually has a little real free space
-    beyond the volume's own edge, which only costs a few skipped edge
-    candidates, never a false "not full" that could mask a real overlap
-    (the fine-grained exact test downstream still catches any actual
-    collision regardless).
-    """
-    occ = (volume > 0).float()
-    nz, ny, nx = occ.shape
-    cf = coarse_factor
-    pad_z, pad_y, pad_x = (-nz) % cf, (-ny) % cf, (-nx) % cf
-    if pad_z or pad_y or pad_x:
-        occ = F.pad(occ, (0, pad_x, 0, pad_y, 0, pad_z), value=1.0)
-    pooled = F.avg_pool3d(occ.unsqueeze(0).unsqueeze(0), kernel_size=cf, stride=cf)
-    return pooled[0, 0] >= full_threshold - 1e-6
-
-
 @dataclass
 class HierarchicalParticlePlacer:
     """
@@ -777,7 +726,7 @@ class HierarchicalParticlePlacer:
         stops paying for itself right when it matters most (high global
         occupancy, where most candidates would otherwise be wasted
         attempts in already-crowded space). See
-        `_compute_coarse_full_mask`'s docstring for the full reasoning --
+        `coarse_occupancy_mask`'s docstring for the full reasoning --
         this only trades candidate-search completeness for speed, never
         correctness (the fine-grained exact test is unaffected).
     rng : torch.Generator, optional
@@ -810,7 +759,7 @@ class HierarchicalParticlePlacer:
         # content (e.g. a carbon film) the caller already added to
         # `self.volume` before this placer was constructed, same reason
         # `_occupied_count` is lazily scanned rather than assumed zero.
-        self._coarse_full_mask = _compute_coarse_full_mask(
+        self._coarse_full_mask = coarse_occupancy_mask(
             self.volume, cf, self.full_occupancy_threshold
         )
 

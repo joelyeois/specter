@@ -11,14 +11,25 @@ from __future__ import annotations
 import glob
 import math
 import os
+from importlib import resources
 from typing import Optional
 
 import lightning as L
 import matplotlib.figure
 import torch
 
-from ..arrays import soft_voxelize_coordinates, soft_voxelize_coordinates_into
+from ..arrays import (
+    coarse_occupancy_mask,
+    soft_voxelize_coordinates,
+    soft_voxelize_coordinates_into,
+)
+from ..atom.atomic_potentials import load_shtyrov_species_parameters
 from ..fft import spatial_convolve3d_same
+from ..potential import (
+    build_potential_volume_analytic_scatter,
+    build_potential_volume_analytic_scatter_kirkland,
+    build_potential_volume_analytic_scatter_lobato,
+)
 from ..progress import track
 from ._energy import MLBOP
 from ._kernels import build_atomic_potential_kernel
@@ -152,6 +163,7 @@ class IceBank(L.LightningModule):
         self._configs: list[dict] = [self._load_config(p) for p in self._config_paths]
         self._kernel_cache: dict[float, torch.Tensor] = {}
         self._source_pos_cache: dict[int, tuple[torch.device, torch.Tensor]] = {}
+        self._ice_species_coefs: tuple[torch.Tensor, torch.Tensor] | None = None
         self.progressbars = progressbars
 
         self.positions: Optional[torch.Tensor] = None
@@ -491,6 +503,9 @@ class IceBank(L.LightningModule):
         """
         nx, ny, nz_tiles = tile_grid_shape
         half = tile_extent / 2
+        assert (
+            self.box_x is not None and self.box_y is not None and self.box_z is not None
+        ), "box_x/box_y/box_z must be set (by generate_big_ice_deltas) before _place_tiles"
         all_parts: list[torch.Tensor] = []
         mobile_parts: list[torch.Tensor] = []
         halo_parts: list[torch.Tensor] = []
@@ -533,8 +548,36 @@ class IceBank(L.LightningModule):
                 # claim). Interior tile-to-tile seams are untouched: an atom near
                 # one tile's own face still lands at an in-bounds index of the
                 # shared buffer, so this doesn't change anything there.
+                #
+                # But this only holds if crop_global itself never strays far past
+                # splat_volume's own extent -- and a tile's own footprint
+                # (tile_extent) routinely does, by design: every edge tile's
+                # assembled-box placement overhangs the true requested box (see
+                # assembled_box's own docstring above), and a "big request" that
+                # only needs a single tile (assembled_box == tile_extent >
+                # requested box) overhangs on every axis. _scatter_splat's
+                # periodic=True is an *unconditional* index % grid_shape, which
+                # doesn't distinguish "just past by a fencepost voxel" from
+                # "hundreds of Angstrom outside" -- the latter previously got
+                # wrapped back in from arbitrary far positions instead of being
+                # dropped, silently inflating ice density by up to
+                # (tile_extent / requested box)^3 (measured ~5.6x for a 256 A
+                # tile filling a 160 A request -- see
+                # dev/ice/analytic_tile_insertion_benchmark.py). Explicitly
+                # dropping atoms beyond the true requested half-extent first --
+                # the same bound generate_big_ice_deltas's own `keep` filter
+                # uses after relaxation, just applied per-tile before splatting
+                # instead -- leaves only genuine sub-voxel fencepost overflow for
+                # periodic=True to wrap, restoring the original intent without
+                # reintroducing the low-face density bug periodic=True was added
+                # to fix.
+                keep = (
+                    (crop_global[:, 0].abs() <= self.box_x / 2)
+                    & (crop_global[:, 1].abs() <= self.box_y / 2)
+                    & (crop_global[:, 2].abs() <= self.box_z / 2)
+                )
                 soft_voxelize_coordinates_into(
-                    splat_volume, crop_global, splat_voxel_size, periodic=True
+                    splat_volume, crop_global[keep], splat_voxel_size, periodic=True
                 )
         positions = torch.cat(all_parts, dim=0)
         mobile_mask = torch.cat(mobile_parts, dim=0)
@@ -797,6 +840,253 @@ class IceBank(L.LightningModule):
         return spatial_convolve3d_same(
             self.current_icedeltas.to(device), kernel.to(device)
         )
+
+    # ------------------------------------------------------------------
+    # In-place, occupancy-aware analytic insertion
+    # ------------------------------------------------------------------
+
+    def _get_ice_species_coefficients(
+        self, device: torch.device | str
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Cached Shtyrov `(a, b)` coefficients for water oxygen (`O(HH)`,
+        the same fixed bonded species `build_atomic_potential_kernel`'s
+        shtyrov branch hardcodes), shape (5,) each."""
+        if self._ice_species_coefs is None:
+            species_path = resources.files("specter.atom_data").joinpath(
+                "params_cat.json"
+            )
+            with resources.as_file(species_path) as fpath:
+                species_params = load_shtyrov_species_parameters(str(fpath))
+            P = species_params["O(HH)"]  # (5, 2)
+            self._ice_species_coefs = (P[:, 0].clone(), P[:, 1].clone())
+        a, b = self._ice_species_coefs
+        return a.to(device), b.to(device)
+
+    def _ice_analytic_potential(
+        self,
+        crop: torch.Tensor,
+        grid_shape: tuple[int, int, int],
+        dx: float,
+        rcut: float,
+    ) -> torch.Tensor:
+        """Analytically evaluate one crop's atoms (always water oxygen) onto
+        a small local grid -- the same per-atom, exact-sub-voxel-position
+        evaluation `PotentialBuilder.forward(method='analytic')` uses,
+        dispatched on `self.parameterization` exactly as that method does."""
+        n = crop.shape[0]
+        device = crop.device
+        if self.parameterization == "kirkland":
+            atomic_numbers = torch.full((n,), 8, dtype=torch.long, device=device)
+            return build_potential_volume_analytic_scatter_kirkland(
+                atomic_numbers, crop, grid_shape=grid_shape, dx=dx, rcut=rcut
+            )
+        if self.parameterization == "lobato":
+            atomic_numbers = torch.full((n,), 8, dtype=torch.long, device=device)
+            return build_potential_volume_analytic_scatter_lobato(
+                atomic_numbers, crop, grid_shape=grid_shape, dx=dx, rcut=rcut
+            )
+        if self.parameterization == "shtyrov":
+            a, b = self._get_ice_species_coefficients(device)
+            return build_potential_volume_analytic_scatter(
+                crop,
+                a.expand(n, -1),
+                b.expand(n, -1),
+                grid_shape=grid_shape,
+                dx=dx,
+                rcut=rcut,
+            )
+        raise ValueError(f"Unknown parameterization '{self.parameterization}'.")
+
+    def insert_analytic_ice(
+        self,
+        volume: torch.Tensor,
+        dx: float,
+        threshold: float = 0.05,
+        tile_extent: float | None = None,
+        rcut: float = 5.0,
+        coarse_factor: int = 8,
+        full_occupancy_threshold: float = 0.95,
+        generator: torch.Generator | None = None,
+    ) -> torch.Tensor:
+        """
+        Insert ice directly into `volume`, in place, tile by tile -- an
+        occupancy-aware alternative to `generate_big_ice` +
+        `blend_ice_into_volume`'s splat/convolve/mask pipeline.
+
+        Rather than building a second full-size ice tensor and masking it
+        against `volume` afterward, this walks a tile grid like
+        `generate_big_ice_deltas` does, but per tile: (1) skips tiles whose
+        destination region is already almost entirely occupied (via
+        `coarse_occupancy_mask`, the same helper `HierarchicalParticlePlacer`
+        uses for fast candidate search), (2) for the rest, evaluates that
+        tile's own atoms' closed-form potential analytically in a small
+        local window (`build_potential_volume_analytic_scatter_kirkland`/
+        `_lobato`/species-aware Shtyrov -- the same per-atom, exact-sub-
+        voxel-position evaluation `PotentialBuilder.forward(method=
+        'analytic')` uses, no shared-kernel/convolution approximation), and
+        (3) masks and writes only that tile straight into the corresponding
+        slice of `volume`.
+
+        Never materializes a same-shape-as-`volume` ice tensor -- peak extra
+        memory is one (padded) tile's own local window, not the whole
+        volume. Compute scales with (tiles actually visited) x (atoms per
+        tile), not with `volume`'s total voxel count -- unlike
+        `generate_big_ice`'s convolution step, which touches every voxel
+        regardless of occupancy.
+
+        Each tile is read with an `rcut`-wide halo past its own face (mirrors
+        `spatial_convolve3d_same`'s own chunk-boundary handling) so a tile's
+        own written core matches what a single whole-volume analytic call
+        would have produced near its boundaries -- but tile-to-tile seams
+        are otherwise naive/unrelaxed, the same tradeoff
+        `generate_big_ice(relax_steps=0)` (every current caller's default)
+        already accepts. Unlike `generate_big_ice_deltas`, this has no
+        `relax_steps` option: MLBOP seam relaxation needs neighboring tiles'
+        atoms before any tile's positions are final, which conflicts with
+        writing each tile once and discarding its atoms immediately.
+
+        Parameters
+        ----------
+        volume : torch.Tensor
+            Scattering-potential volume to modify in place, shape
+            (nz, ny, nx).
+        dx : float
+            Voxel size in Å.
+        threshold : float, optional
+            Fraction of `volume.max()` (evaluated once, before any ice is
+            added) below which a voxel is eligible to receive ice. Default
+            0.05, matching `blend_ice_into_volume`.
+        tile_extent : float, optional
+            Core size (Å) of each tile, before the `rcut` halo. Defaults to
+            ``min(100.0, smallest cached config's own box size - 2 * rcut)``
+            -- deliberately not "as large as the cache allows" (unlike
+            `generate_big_ice_deltas`'s own tile_extent default): analytic
+            evaluation's cost scales with atom count, and bulk water atom
+            count scales with volume, so an oversized tile pulls in and
+            evaluates hundreds of thousands of atoms per tile -- slower and
+            more memory-hungry than splat+convolve, not less. Too small a
+            tile instead pays too much per-tile Python/kernel-launch
+            overhead. 100 Å was chosen empirically (see
+            `dev/ice/analytic_tile_insertion_benchmark.py`) as a reasonable
+            balance; tune it for your own volume/occupancy pattern if
+            needed.
+        rcut : float, optional
+            Radius (Å) of the local window evaluated around each atom (see
+            `build_potential_volume_analytic_scatter`); also the halo width
+            read past each tile's own face. Default 5.0.
+        coarse_factor : int, optional
+            Passed to `coarse_occupancy_mask`. Default 8.
+        full_occupancy_threshold : float, optional
+            Passed to `coarse_occupancy_mask` as `full_threshold`. Default
+            0.95 -- deliberately high (unlike `HierarchicalParticlePlacer`'s
+            0.7 default): skipping a tile here is a one-shot, irreversible
+            decision (no fine-grained fallback test afterward, unlike
+            placement's exact overlap test), so this should only skip tiles
+            that are genuinely almost entirely solid.
+        generator : torch.Generator, optional
+            RNG for reproducibility. Default is the global RNG.
+
+        Returns
+        -------
+        torch.Tensor
+            `volume`, modified in place (also returned for chaining).
+        """
+        if volume.ndim != 3:
+            raise ValueError(
+                f"volume must be (nz, ny, nx); got shape {tuple(volume.shape)}"
+            )
+        nz, ny, nx = volume.shape
+        device = volume.device
+
+        thresh_val = threshold * volume.detach().max()
+
+        # rcut_vox (not raw rcut) is the actual halo width applied below --
+        # computing the default tile_extent from raw rcut instead would
+        # under-count it by up to one voxel's worth (rcut/dx rounded up)
+        # and could size a "default" tile that overshoots the smallest
+        # cached config's own box after padding.
+        rcut_vox = int(math.ceil(rcut / dx))
+        smallest_box_L = min(c["box_L"] for c in self._configs)
+        if tile_extent is None:
+            # Deliberately NOT "as large as the cache allows" (unlike
+            # generate_big_ice_deltas's own tile_extent default): analytic
+            # evaluation's cost/memory scales with atom count, not grid
+            # voxels, and bulk water atom count scales with volume (~0.033
+            # atoms/Å^3) -- a tile sized to (near) a full 256 Å cached
+            # config would pull in and evaluate ~5x10^5 atoms per tile
+            # (confirmed in dev/ice/analytic_tile_insertion_benchmark.py:
+            # this made the analytic path both slower and higher peak
+            # memory than splat+convolve, the opposite of the intent).
+            # 100 Å balances that against the other direction: too small a
+            # tile means too many tile-loop iterations, and per-tile
+            # overhead (an independent crop draw + kernel launches) starts
+            # to dominate instead -- benchmarked empirically in
+            # dev/ice/analytic_tile_insertion_benchmark.py, which showed a
+            # ~25x runtime penalty at tile_extent=40 vs. 100 for the same
+            # request, while peak memory stayed roughly flat up to ~150.
+            tile_extent = min(100.0, smallest_box_L - 2 * rcut_vox * dx)
+            if tile_extent <= 0:
+                raise ValueError(
+                    "Smallest cached config's box_L "
+                    f"({smallest_box_L} Å) is too small to fit a halo of "
+                    f"2*rcut ({2 * rcut_vox * dx} Å); pass a smaller `rcut` "
+                    "or extend the ice cache."
+                )
+        tile_vox = max(1, int(round(tile_extent / dx)))
+        pad_vox = tile_vox + 2 * rcut_vox
+        if pad_vox * dx > smallest_box_L + 1e-6:
+            raise ValueError(
+                f"tile_extent + 2*rcut ({pad_vox * dx:.1f} Å) exceeds the "
+                f"smallest cached config's own box size ({smallest_box_L} Å)."
+            )
+
+        nz_tiles = math.ceil(nz / tile_vox)
+        ny_tiles = math.ceil(ny / tile_vox)
+        nx_tiles = math.ceil(nx / tile_vox)
+
+        coarse_mask = coarse_occupancy_mask(
+            volume, coarse_factor, full_occupancy_threshold
+        )
+
+        tile_indices = [
+            (iz, iy, ix)
+            for iz in range(nz_tiles)
+            for iy in range(ny_tiles)
+            for ix in range(nx_tiles)
+        ]
+        for iz, iy, ix in track(
+            tile_indices,
+            description="Inserting analytic ice tiles",
+            disable=not self.progressbars or len(tile_indices) == 1,
+            transient=True,
+        ):
+            z0, y0, x0 = iz * tile_vox, iy * tile_vox, ix * tile_vox
+            z1 = min(nz, z0 + tile_vox)
+            y1 = min(ny, y0 + tile_vox)
+            x1 = min(nx, x0 + tile_vox)
+
+            cf = coarse_factor
+            cz0, cy0, cx0 = z0 // cf, y0 // cf, x0 // cf
+            cz1, cy1, cx1 = math.ceil(z1 / cf), math.ceil(y1 / cf), math.ceil(x1 / cf)
+            if coarse_mask[cz0:cz1, cy0:cy1, cx0:cx1].all():
+                continue
+
+            crop = self._extract_crop((pad_vox * dx,) * 3, generator=generator).to(
+                device
+            )
+            pot_local = self._ice_analytic_potential(
+                crop, grid_shape=(pad_vox, pad_vox, pad_vox), dx=dx, rcut=rcut
+            )
+            core = pot_local[
+                rcut_vox : rcut_vox + (z1 - z0),
+                rcut_vox : rcut_vox + (y1 - y0),
+                rcut_vox : rcut_vox + (x1 - x0),
+            ]
+            region = volume[z0:z1, y0:y1, x0:x1]
+            mask = (region.detach() < thresh_val).to(core.dtype)
+            region += core * mask
+
+        return volume
 
     # ------------------------------------------------------------------
     # Diagnostics
@@ -1099,6 +1389,7 @@ def blend_ice_into_volume(
     pixel_size: float,
     threshold: float = 0.05,
     relax_steps: int = 0,
+    method: str = "convolve",
 ) -> torch.Tensor:
     """
     Add ice into a scattering-potential volume, masked to voxels with little
@@ -1114,19 +1405,36 @@ def blend_ice_into_volume(
         Scattering-potential volume, shape (B, Z, Y, X).
     icemaker : IceBank or RandomIcemaker
         Ice source. An :class:`IceBank` draws a tiled crop matching ``V``'s
-        own size via :meth:`IceBank.generate_big_ice`; a
+        own size via :meth:`IceBank.generate_big_ice` (``method='convolve'``)
+        or :meth:`IceBank.insert_analytic_ice` (``method='analytic'``); a
         :class:`RandomIcemaker` is called via :meth:`RandomIcemaker.generate_ice`
-        (its own fixed ``(n, dx, nz)`` must already match ``V``).
+        (its own fixed ``(n, dx, nz)`` must already match ``V``) regardless
+        of ``method``.
     pixel_size : float
-        Voxel size in Å, forwarded to ``IceBank.generate_big_ice``.
+        Voxel size in Å, forwarded to ``IceBank.generate_big_ice``/
+        ``insert_analytic_ice``.
     threshold : float, optional
         Fraction of ``V.max()`` below which a voxel is treated as ice-free.
         Default 0.05.
     relax_steps : int, optional
         Forwarded to :meth:`IceBank.generate_big_ice` (ignored for
-        ``RandomIcemaker``, which has no tile seams to relax). Default 0,
-        matching every higher-level caller (``ImageGenerator``,
-        ``MicrographGenerator``, ``TiltSeriesGenerator``, ...).
+        ``RandomIcemaker``, which has no tile seams to relax, and for
+        ``method='analytic'``, which has no relaxation option at all -- see
+        :meth:`IceBank.insert_analytic_ice`). Default 0, matching every
+        higher-level caller (``ImageGenerator``, ``MicrographGenerator``,
+        ``TiltSeriesGenerator``, ...).
+    method : str, optional
+        ``'convolve'`` (default): splat-and-convolve via
+        :meth:`IceBank.generate_big_ice`, then mask the whole result against
+        ``V`` -- materializes a same-shape-as-``V`` ice tensor. ``'analytic'``:
+        occupancy-aware, in-place, per-tile analytic evaluation via
+        :meth:`IceBank.insert_analytic_ice` -- never materializes a second
+        full-size tensor, and skips tiles already almost entirely occupied.
+        Only supported for :class:`IceBank` with a single-sample ``V``
+        (``V.shape[0] == 1``); raises ``ValueError`` otherwise. Ignored
+        (falls back to ``RandomIcemaker.generate_ice``) for a
+        :class:`RandomIcemaker`, which is already a single cheap full-volume
+        draw with no tiling to exploit.
 
     Returns
     -------
@@ -1134,6 +1442,15 @@ def blend_ice_into_volume(
         ``V`` with ice added at masked voxels; same shape/dtype/device.
     """
     batchsize, nz, nxy, _ = V.shape
+    if method == "analytic" and isinstance(icemaker, IceBank):
+        if batchsize != 1:
+            raise ValueError(
+                "method='analytic' only supports a single-sample V "
+                f"(V.shape[0] == 1); got batchsize={batchsize}."
+            )
+        return icemaker.insert_analytic_ice(V[0], dx=pixel_size, threshold=threshold)[
+            None
+        ]
     if isinstance(icemaker, IceBank):
         ice = icemaker.generate_big_ice(
             n=nxy, dx=pixel_size, nz=nz, batchsize=batchsize, relax_steps=relax_steps

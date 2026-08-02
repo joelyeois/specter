@@ -1561,6 +1561,67 @@ def radial_symmetrize(
     return radial_mean[r_int]
 
 
+def coarse_occupancy_mask(
+    volume: torch.Tensor, coarse_factor: int, full_threshold: float = 1.0
+) -> torch.Tensor:
+    """
+    Downsample `(volume > 0)` into a coarse grid (`coarse_factor` voxels
+    per axis per coarse cell) marking which coarse cells are "practically
+    full" -- their occupied VOXEL FRACTION is at or above `full_threshold`.
+
+    `full_threshold` matters a lot in practice: for spherical/irregular
+    (non-space-filling) particles, a coarse cell can have a handful of
+    stray never-touched voxels essentially forever (e.g. the corners
+    between packed spheres), so requiring literal 100% occupancy
+    (`full_threshold=1.0`) means cells almost never get marked full at
+    all -- the coarse grid then provides close to zero speedup, since
+    "not full" ends up meaning almost the whole grid, even once a region
+    is genuinely too crowded for more content. A lower threshold (e.g.
+    0.6-0.8) marks a cell full once it's merely MOSTLY occupied, which is
+    what actually predicts "nothing more meaningfully fits here" for
+    realistic particle shapes. This only affects candidate-search/fill
+    SPEED, never correctness downstream: a cell wrongly marked full just
+    gets skipped (a completeness cost, occasionally missing a spot that
+    genuinely still fits or still has a little real free space), while
+    any fine-grained exact test downstream is unaffected and remains
+    authoritative either way.
+
+    Vectorized via ``avg_pool3d`` (one pooling pass over the whole volume)
+    rather than a Python loop over coarse cells -- cheap regardless of
+    volume size.
+
+    Volume dimensions not evenly divisible by `coarse_factor` are padded
+    with "occupied" (1.0) rather than "free" -- conservative: an edge cell
+    might be marked full when it actually has a little real free space
+    beyond the volume's own edge, which only costs a few skipped edge
+    candidates, never a false "not full" that could mask a real overlap.
+
+    Parameters
+    ----------
+    volume : torch.Tensor
+        Shape (nz, ny, nx).
+    coarse_factor : int
+        Coarse-grid downsample factor per axis.
+    full_threshold : float, optional
+        Occupied-voxel-fraction (within one coarse cell) at or above which
+        the cell is marked full. Default 1.0 (literal 100%).
+
+    Returns
+    -------
+    torch.Tensor
+        Bool, shape ``(ceil(nz/coarse_factor), ceil(ny/coarse_factor),
+        ceil(nx/coarse_factor))``.
+    """
+    occ = (volume > 0).float()
+    nz, ny, nx = occ.shape
+    cf = coarse_factor
+    pad_z, pad_y, pad_x = (-nz) % cf, (-ny) % cf, (-nx) % cf
+    if pad_z or pad_y or pad_x:
+        occ = F.pad(occ, (0, pad_x, 0, pad_y, 0, pad_z), value=1.0)
+    pooled = F.avg_pool3d(occ.unsqueeze(0).unsqueeze(0), kernel_size=cf, stride=cf)
+    return pooled[0, 0] >= full_threshold - 1e-6
+
+
 def clip_insert_bounds(
     center: Sequence[float],
     local_shape: Sequence[int],

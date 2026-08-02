@@ -236,6 +236,59 @@ def test_icebank_generate_big_ice_deltas_streamed_splat_matches_monolithic(tmp_p
     assert torch.allclose(streamed[0], reference, atol=1e-5)
 
 
+def test_icebank_generate_big_ice_streamed_splat_matches_trimmed_monolithic_with_overflow(
+    tmp_path,
+):
+    """Same invariant as the test above, but at a request size (48, with a
+    32 A tile) that is NOT an exact multiple of the tile size -- unlike
+    n=64 above, every edge tile's own footprint here genuinely overhangs
+    the true requested box, exercising the per-tile overflow-discard fix
+    in _place_tiles (a prior version of this splat call used an
+    unconditional periodic wrap that pulled far-outside overflow atoms
+    back in via modulo instead of dropping them, silently inflating
+    density near the overhanging edges -- this is the regression guard for
+    that, alongside the density-based checks below)."""
+    _make_cache_config(tmp_path, "config_000.pt", n=32, dx=1.0)
+    cache = IceBank(str(tmp_path), progressbars=False)
+
+    torch.manual_seed(11)
+    streamed = cache.generate_big_ice_deltas(n=48, dx=1.0, batchsize=1, relax_steps=0)
+    reference = soft_voxelize_coordinates(
+        cache.positions, grid_shape=(48, 48, 48), voxel_size=1.0, periodic=True
+    )
+    assert torch.allclose(streamed[0], reference, atol=1e-5)
+
+
+def test_icebank_generate_big_ice_deltas_request_smaller_than_tile_matches_density(
+    tmp_path,
+):
+    """Regression test for a real bug: a request smaller than a single
+    tile (here tile_extent defaults to the cached config's own 64 A box,
+    for a 24 A request) used to have its single tile's full-box atom set
+    wrapped almost entirely into the small destination grid via an
+    unconditional periodic index wrap in _place_tiles, inflating density
+    by roughly (tile / request)^3 -- ~(64/24)^3 ~= 19x was observed before
+    the fix, for a smaller-scale repro of the ~5.6x measured at production
+    scale in dev/ice/analytic_tile_insertion_benchmark.py. Splatted mass
+    (deltas.sum()) approximates atom count for a trilinear splat, so this
+    checks it against the expected bulk-water atom count directly."""
+    torch.manual_seed(5)
+    gd = GradientSKIcemaker(n=64, dx=1.0, progressbars=False)
+    gd.init_random()
+    path = tmp_path / "config_000.pt"
+    torch.save(
+        {"positions": gd.positions.clone().half(), "box_L": 64.0, "n": 64, "dx": 1.0},
+        path,
+    )
+    cache = IceBank(str(tmp_path), progressbars=False)
+
+    torch.manual_seed(6)
+    deltas = cache.generate_big_ice_deltas(n=24, dx=1.0, batchsize=1, relax_steps=0)
+
+    expected = ndensity_of_amorphous_ice * 24.0**3
+    assert abs(deltas.sum().item() - expected) / expected < 0.3
+
+
 def test_icebank_generate_big_ice_relaxation_improves_energy(tmp_path):
     """The core value proposition: naive tile concatenation (relax_steps=0)
     should be measurably worse than the same tiling with seam relaxation
@@ -322,3 +375,121 @@ def test_blend_ice_into_volume_random_icemaker_noncubic_nxy_nz():
     result = blend_ice_into_volume(V, icemaker, pixel_size=1.0)
     assert result.shape == (1, nz, nxy, nxy)
     assert torch.isfinite(result).all()
+
+
+def test_insert_analytic_ice_leaves_occupied_region_untouched(tmp_path):
+    """The whole point of insert_analytic_ice: pre-existing (occupied)
+    voxels must be exactly preserved, both because they fail the
+    per-voxel mask test and because a coarse-fully-occupied tile is
+    skipped before any ice is even drawn for it."""
+    _make_cache_config(tmp_path, "config_000.pt", n=32, dx=1.0)
+    cache = IceBank(str(tmp_path), progressbars=False)
+
+    volume = torch.zeros(20, 24, 24)
+    volume[4:16, 4:20, 4:20] = 5.0
+    occupied = volume.clone()
+
+    torch.manual_seed(0)
+    out = cache.insert_analytic_ice(volume, dx=1.0, tile_extent=12.0, rcut=3.0)
+
+    assert out is volume  # modified (and returned) in place
+    assert torch.equal(out[4:16, 4:20, 4:20], occupied[4:16, 4:20, 4:20])
+
+
+def test_insert_analytic_ice_fills_free_region_at_expected_density(tmp_path):
+    """Free voxels should pick up a nonzero, finite potential whose overall
+    density is in the right ballpark for bulk amorphous ice -- same
+    expected-density check style as the crop-atom-count regression tests
+    above, just carried through to the final analytically-evaluated
+    potential rather than a raw atom count."""
+    _make_cache_config(tmp_path, "config_000.pt", n=32, dx=1.0)
+    cache = IceBank(str(tmp_path), progressbars=False)
+
+    volume = torch.zeros(20, 24, 24)
+    # blend_ice_into_volume's masking convention is `V < threshold * V.max()`
+    # -- an all-zero V has V.max() == 0, so nothing is ever "below threshold"
+    # and no ice would ever be added, matching the existing convolve path's
+    # own behaviour on an all-zero V. A single high "occupied" corner voxel
+    # establishes a realistic V.max() (as any real specimen volume already
+    # has, from particle/crowding density) without meaningfully shrinking
+    # the free region under test.
+    volume[0, 0, 0] = 10.0
+    free_mask = volume == 0
+
+    torch.manual_seed(1)
+    out = cache.insert_analytic_ice(volume, dx=1.0, tile_extent=12.0, rcut=3.0)
+
+    assert torch.isfinite(out).all()
+    assert (out[free_mask] > 0).all()
+    # A lone oxygen atom's own peak potential is a fixed, dx-independent
+    # physical quantity (~11-12 V at dx=1 Å per the Kirkland kernel/analytic
+    # cross-check used to validate this feature) -- bulk water's per-voxel
+    # mean should sit well under that (heavily overlapping, partially
+    # cancelling neighbor tails), and well above zero.
+    assert 0.5 < out[free_mask].mean().item() < 11.0
+
+
+def test_insert_analytic_ice_skips_fully_occupied_volume(tmp_path):
+    """A volume that's already fully occupied (coarse mask all-full) must
+    come back completely unmodified -- every tile gets skipped before any
+    crop is drawn."""
+    _make_cache_config(tmp_path, "config_000.pt", n=32, dx=1.0)
+    cache = IceBank(str(tmp_path), progressbars=False)
+
+    volume = torch.full((20, 24, 24), 5.0)
+    original = volume.clone()
+
+    torch.manual_seed(2)
+    out = cache.insert_analytic_ice(volume, dx=1.0, tile_extent=12.0, rcut=3.0)
+    assert torch.equal(out, original)
+
+
+@pytest.mark.parametrize("parameterization", ["kirkland", "lobato", "shtyrov"])
+def test_insert_analytic_ice_every_parameterization(tmp_path, parameterization):
+    """Smoke test: every parameterization IceBank supports for the
+    splat/convolve kernel must also work through the analytic dispatch in
+    _ice_analytic_potential."""
+    _make_cache_config(tmp_path, "config_000.pt", n=32, dx=1.0)
+    cache = IceBank(
+        str(tmp_path), parameterization=parameterization, progressbars=False
+    )
+
+    volume = torch.zeros(16, 16, 16)
+    volume[0, 0, 0] = 10.0  # establish a realistic V.max() > 0 -- see note above
+    torch.manual_seed(3)
+    out = cache.insert_analytic_ice(volume, dx=1.0, tile_extent=10.0, rcut=3.0)
+    assert torch.isfinite(out).all()
+    assert (out > 0).any()
+
+
+def test_blend_ice_into_volume_method_analytic_matches_direct_call(tmp_path):
+    """blend_ice_into_volume(method='analytic') should be a thin wrapper
+    around IceBank.insert_analytic_ice on V[0] -- same result, batch dim
+    added back."""
+    _make_cache_config(tmp_path, "config_000.pt", n=32, dx=1.0)
+    cache = IceBank(str(tmp_path), progressbars=False)
+
+    volume = torch.zeros(1, 16, 16, 16)
+    torch.manual_seed(4)
+    result = blend_ice_into_volume(
+        volume.clone(), cache, pixel_size=1.0, method="analytic"
+    )
+
+    cache2 = IceBank(str(tmp_path), progressbars=False)
+    torch.manual_seed(4)
+    expected = cache2.insert_analytic_ice(volume[0].clone(), dx=1.0)
+
+    assert result.shape == (1, 16, 16, 16)
+    assert torch.equal(result[0], expected)
+
+
+def test_blend_ice_into_volume_method_analytic_rejects_batch(tmp_path):
+    """method='analytic' only supports a single-sample V -- documented,
+    explicit ValueError rather than silently only blending the first
+    sample."""
+    _make_cache_config(tmp_path, "config_000.pt", n=32, dx=1.0)
+    cache = IceBank(str(tmp_path), progressbars=False)
+
+    volume = torch.zeros(2, 16, 16, 16)
+    with pytest.raises(ValueError):
+        blend_ice_into_volume(volume, cache, pixel_size=1.0, method="analytic")

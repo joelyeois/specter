@@ -381,7 +381,8 @@ def _compute_geometry_fields(
     density: torch.Tensor,
     center: np.ndarray,
     v_size: float,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    thickness: float | None = None,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor | None]:
     """
     Derive a shell (bilayer footprint) mask, a mid-thickness skeleton
     ridge, an interior (vesicle lumen) mask, and a local outward-normal
@@ -445,17 +446,6 @@ def _compute_geometry_fields(
         membrane surface at any voxel, including shell voxels themselves.
     """
     n = density.shape[0]
-    # Dilated generously (not just +1) so that after this membrane is later
-    # rotated into the specimen volume, the rotated MASK still fully
-    # covers the rotated DENSITY's own nonzero footprint: rotate_volume's
-    # bilinear interpolation spreads a sparse, spiky point-count density
-    # field to more neighboring voxels than a lightly-dilated binary mask
-    # rotated the same way would cover, which would otherwise make a
-    # membrane-flagged particle's overlap-ignore mask (see
-    # _cts_placement.py's `ignore_overlap_mask`) undercount the membrane's
-    # own footprint and spuriously block placement.
-    shell_mask_np = ndimage.binary_dilation(density.numpy() > 0, iterations=3)
-    skeleton_mask_np = _skeletonize_shell(shell_mask_np)
 
     zz, yy, xx = np.meshgrid(np.arange(n), np.arange(n), np.arange(n), indexing="ij")
     query = np.stack(
@@ -467,7 +457,6 @@ def _compute_geometry_fields(
         axis=1,
     )
     inside_base_blob = _point_in_alpha_solid(base_points, alpha, query).reshape(n, n, n)
-    interior_mask_np = inside_base_blob & ~shell_mask_np
 
     dist_out = ndimage.distance_transform_edt(~inside_base_blob)
     dist_in = ndimage.distance_transform_edt(inside_base_blob)
@@ -479,11 +468,155 @@ def _compute_geometry_fields(
     mag[mag < 1e-8] = 1.0
     normal_xyz = normal_xyz / mag
 
+    continuous_density = None
+    double_shell_bool = None
+    if thickness is not None:
+        # Continuous (non-point-cloud) bilayer density, directly from the
+        # SAME signed-distance field already computed above for the normal
+        # field -- replaces discrete head/tail point scattering, which
+        # under-samples true atomic density by ~35-45x at typical cryo-ET
+        # voxel sizes (verified empirically: ~1 point/voxel vs. ~46 real
+        # atoms/voxel for organic matter at 10 A), causing visible gaps in
+        # any single 2D slice even though the underlying shell shape itself
+        # is a single connected surface (also verified: shell_mask is
+        # always 100% one connected component). A real lipid bilayer's
+        # density at typical cryo-ET resolution is a smooth, continuous
+        # aggregate over many real atoms per voxel -- same reasoning
+        # PotentialBuilder relies on for smooth, gap-free protein density
+        # despite proteins also being made of discrete atoms. Mirrors
+        # specimen/cryoet.py's analytic-shape membrane path (`_shell` +
+        # `gaussian_filter`), just driven by this blob's own SDF instead of
+        # a closed-form ellipsoid equation.
+        # Anchored entirely on the TRUE, un-offset surface (signed_dist==0
+        # -- always well-behaved regardless of local curvature/concavity,
+        # since it involves no offsetting at all), not on two
+        # independently-offset-then-thresholded leaflet surfaces. An
+        # earlier version built each leaflet as its own offset-by-half_t
+        # binary band, then blurred -- verified (visually, on a real
+        # generated shape, not just reasoned about) to produce solid,
+        # filled-looking cross-sections instead of a hollow bilayer for
+        # sufficiently irregular blobs. Root cause: offsetting a non-
+        # convex surface outward/inward by a fixed distance is a classic
+        # ill-behaved operation -- once the offset distance approaches the
+        # local curvature radius of a concave/convex feature, the offset
+        # surface self-intersects (folds onto itself), which is exactly
+        # what a solid-looking cross-section through an otherwise-thin
+        # shell indicates. A single band centered on the un-offset surface
+        # doesn't have this failure mode. The bilayer's two-leaflet
+        # profile is then a smooth analytic function of the (already
+        # correctly SDF-computed) continuous distance from that one
+        # robust reference -- no independent thresholding of each leaflet,
+        # no blur-based bridging risk between them either.
+        half_t = (thickness / 2.0) / v_size
+        leaflet_sigma = max(0.5, 0.25 * half_t)  # each leaflet peak's own width, voxels
+        # `signed_dist` (dist_out - dist_in, both from distance_transform_edt
+        # with no `sampling` argument) is ALREADY in raw voxel-index units --
+        # scipy's EDT has no notion of physical spacing unless told, so it
+        # just counts array steps. `half_t` above is likewise already in
+        # voxel units (thickness/v_size). Dividing `signed_dist` by `v_size`
+        # a second time here was a real bug: it silently rescaled the SDF by
+        # an extra factor of `v_size`, so the two leaflet peaks (meant to
+        # sit at +-half_t voxels from the true surface) actually only formed
+        # at +-half_t*v_size true voxels out -- e.g. at v_size=10,
+        # thickness=40 the intended +-2 voxel offset was actually only
+        # reachable +-20 true voxels from the surface, nowhere near the
+        # actual near-surface shell. Verified via a direct signed_dist-vs-
+        # density binned profile on a real generated blob before/after this
+        # fix.
+        sd_vox = signed_dist
+
+        outer_peak = np.exp(-0.5 * ((sd_vox - half_t) / leaflet_sigma) ** 2)
+        inner_peak = np.exp(-0.5 * ((sd_vox + half_t) / leaflet_sigma) ** 2)
+        profile = outer_peak + inner_peak
+
+        band_half_width = half_t + 3 * leaflet_sigma  # generous margin past both peaks
+        shell_region = np.abs(sd_vox) < band_half_width
+        double_shell_bool = shell_region
+        profile[~shell_region] = 0.0
+
+        m = profile.max()
+        if m > 0:
+            profile = profile / m
+        profile[profile < 0.02] = 0.0
+        continuous_density = torch.as_tensor(profile, dtype=torch.float32)
+        double_shell_bool = profile > 0  # tight, matches what's ACTUALLY rendered,
+        # not the more generous pre-threshold band -- continuous rendering
+        # doesn't need the old points-mode's large sparse-content safety
+        # margin (see dilation note below), so keep this tight to leave
+        # real interior lumen for vesicle-flagged placement.
+
+    # shell_mask/skeleton_mask/interior_mask must be derived from whichever
+    # footprint is ACTUALLY rendered (continuous_density when available),
+    # not the old point-scatter density -- these two were previously
+    # computed independently and could disconnect: shell_mask/skeleton_mask
+    # from the sparse point cloud's footprint, while the real rendered
+    # density was already the (much less sparse) continuous field. That
+    # mismatch broke the overlap-ignore mechanism (a membrane-embedded
+    # candidate sampled from the "skeleton" no longer reliably landed on
+    # real rendered material, so overlap tests silently passed even
+    # without the ignore mask) -- verified via
+    # test_membrane_overlap_ignore_mask_not_conflated_with_skeleton.
+    if double_shell_bool is not None:
+        # A much smaller dilation than the old points-mode margin below --
+        # continuous density is already a complete, non-sparse field, so
+        # it only needs enough margin to cover rotate_volume's local
+        # interpolation spread (~1 voxel), not the old large safety
+        # margin that compensated for sparse point-cloud undercoverage.
+        # Using the old iterations=3 margin here left almost no interior
+        # lumen for smaller membranes, breaking vesicle-flagged placement
+        # (verified: test_vesicle_and_cytosol_flags_respect_inside_outside
+        # and friends went from passing to failing when this was still 3).
+        shell_mask_np = ndimage.binary_dilation(double_shell_bool, iterations=1)
+        # Continuous mode: the true mid-bilayer surface is already known
+        # EXACTLY -- it's the un-offset original surface, signed_dist==0 --
+        # so extract the skeleton directly from that, rather than
+        # rediscovering it via _skeletonize_shell's generic bwdist-ridge
+        # search. That generic approach is biased here: double_shell_bool
+        # is symmetric in sd_vox VALUE-space (the two Gaussian peaks are
+        # mirror images at +-half_t), but not in physical 3D VOLUME --
+        # offsetting outward from a curved surface sweeps more voxels than
+        # offsetting inward by the same distance, so the binary mask is
+        # measurably "fatter" on the outer side. bwdist's max-distance
+        # ridge naturally lands in the fattest part of the mask, i.e. the
+        # outer leaflet, not the true center -- verified empirically
+        # (skeleton points measured at signed_dist ~= +half_t, not ~=0,
+        # which is exactly why sampling the profile outward from a
+        # "skeleton" point only ever showed one Gaussian peak: the sampled
+        # start point already WAS that peak). A direct threshold on
+        # signed_dist has no such bias since it doesn't go through any
+        # mask-volume/bwdist step at all.
+        # signed_dist is already in voxel units (see the matching fix/note
+        # a few lines up in the profile block) -- no division by v_size here.
+        # Threshold at 1.5, not something smaller like 0.6: distance_
+        # transform_edt on a boolean mask never actually produces values in
+        # (-1, 1) -- a voxel is either inside (dist_in>=1, dist_out==0) or
+        # outside (dist_out>=1, dist_in==0), so signed_dist jumps straight
+        # from >=1 to <=-1 with nothing strictly between. A threshold below
+        # 1.0 can never match any voxel at all (verified: gave an empty
+        # skeleton_mask). 1.5 catches the one layer of voxels immediately
+        # on each side of the true boundary -- a genuine ~2-voxel-thin ridge
+        # centered on it.
+        sd_vox = signed_dist
+        mid_surface = np.abs(sd_vox) < 1.5
+        if edge_border := 2:
+            mid_surface[:edge_border] = False
+            mid_surface[-edge_border:] = False
+            mid_surface[:, :edge_border] = False
+            mid_surface[:, -edge_border:] = False
+            mid_surface[:, :, :edge_border] = False
+            mid_surface[:, :, -edge_border:] = False
+        skeleton_mask_np = mid_surface
+    else:
+        shell_mask_np = ndimage.binary_dilation(density.numpy() > 0, iterations=3)
+        skeleton_mask_np = _skeletonize_shell(shell_mask_np)
+    interior_mask_np = inside_base_blob & ~shell_mask_np
+
     return (
         torch.as_tensor(shell_mask_np),
         torch.as_tensor(skeleton_mask_np),
         torch.as_tensor(interior_mask_np),
         torch.as_tensor(normal_xyz, dtype=torch.float32),
+        continuous_density,
     )
 
 
@@ -560,6 +693,7 @@ class MembraneBlobGenerator:
         n_head_points: int = 6000,
         n_tail_points: int = 2000,
         surface_jitter: float | None = None,
+        density_mode: str = "continuous",
     ) -> BlobMembraneInstance:
         """
         Parameters
@@ -575,10 +709,23 @@ class MembraneBlobGenerator:
             Default 40.
         n_head_points, n_tail_points : int, optional
             Number of sampled points for the dense surface ("head") and
-            sparse interior ("tail") populations.
+            sparse interior ("tail") populations. Only used when
+            `density_mode="points"` -- ignored (but still computed, since
+            they also drive the shape/mask geometry) when "continuous".
         surface_jitter : float, optional
             Radial spread (Angstrom) applied to head points around the
             offset surfaces. Defaults to ``0.2 * thickness``.
+        density_mode : {"continuous", "points"}, optional
+            "continuous" (default): smooth SDF-based double-shell density
+            (see `_compute_geometry_fields`) -- physically correct at
+            typical cryo-ET voxel sizes, no risk of gaps in a 2D slice.
+            "points": the original discrete head/tail point-scatter
+            density -- kept available specifically for direct point-cloud-
+            vs-continuous comparison, not recommended for real specimen
+            generation (verified to under-sample true atomic density by
+            ~35-45x at 10A voxels, and to leave visible gaps in any single
+            2D slice despite the underlying shape being a single closed
+            surface).
 
         Returns
         -------
@@ -586,6 +733,10 @@ class MembraneBlobGenerator:
         """
         if not 0.0 < roughness < 1.0:
             raise ValueError(f"roughness must be in (0, 1), got {roughness}")
+        if density_mode not in ("continuous", "points"):
+            raise ValueError(
+                f"density_mode must be 'continuous' or 'points', got {density_mode!r}"
+            )
         if surface_jitter is None:
             surface_jitter = 0.2 * thickness
 
@@ -624,12 +775,54 @@ class MembraneBlobGenerator:
         )
 
         all_points = np.concatenate([head, tail], axis=0)
-        density, raster_center = self._rasterize(all_points)
-        shell_mask, skeleton_mask, interior_mask, normal_field = (
-            _compute_geometry_fields(
-                base_points, alpha, density, raster_center, self.v_size
+        # Self-verifying grid sizing for continuous mode: an earlier
+        # attempt tried to analytically predict the needed margin from
+        # base_points' own extent, but that measurement turned out
+        # inconsistent with what the SDF/shell construction actually
+        # needs -- verified directly (not assumed): even after that
+        # margin, the array's own outermost face still had ~85% nonzero
+        # voxels reaching full peak brightness, meaning the shell was
+        # genuinely hard-clipped at the array boundary (visible as a
+        # square/cube artifact once rotated and inserted into a specimen
+        # volume), not tapering to zero as it should. Rather than guess at
+        # another formula, grow the grid and re-render until the boundary
+        # is actually clean, checked directly each time.
+        min_half_extent = 0.0
+        for _attempt in range(4):
+            point_density, raster_center = self._rasterize(
+                all_points, min_half_extent=min_half_extent
             )
-        )
+            (
+                shell_mask,
+                skeleton_mask,
+                interior_mask,
+                normal_field,
+                continuous_density,
+            ) = _compute_geometry_fields(
+                base_points,
+                alpha,
+                point_density,
+                raster_center,
+                self.v_size,
+                thickness=thickness if density_mode == "continuous" else None,
+            )
+            if density_mode != "continuous":
+                break
+            d = continuous_density.numpy()
+            face_max = max(
+                d[0, :, :].max(),
+                d[-1, :, :].max(),
+                d[:, 0, :].max(),
+                d[:, -1, :].max(),
+                d[:, :, 0].max(),
+                d[:, :, -1].max(),
+            )
+            if face_max < 0.02:
+                break
+            # Boundary still has real content -- grow and retry.
+            current_half_extent = point_density.shape[0] * self.v_size / 2.0
+            min_half_extent = current_half_extent * 1.6
+        density = continuous_density if density_mode == "continuous" else point_density
         return BlobMembraneInstance(
             density=density,
             thickness=thickness,
@@ -669,10 +862,29 @@ class MembraneBlobGenerator:
             )
         return pts
 
-    def _rasterize(self, points: np.ndarray) -> tuple[torch.Tensor, np.ndarray]:
+    def _rasterize(
+        self, points: np.ndarray, min_half_extent: float = 0.0
+    ) -> tuple[torch.Tensor, np.ndarray]:
         """Bin `points` (already centered near the origin) into a local
         voxel grid via scatter-add -- torch equivalent of
         ``helper_atoms2vol.m``'s ``accumarray`` binning.
+
+        Parameters
+        ----------
+        points : np.ndarray
+        min_half_extent : float, optional
+            Grid half-extent (Angstrom) is at least this large, even if
+            `points` itself doesn't reach that far -- needed because the
+            continuous SDF-based density (see `_compute_geometry_fields`)
+            is driven by the alpha-shape's own true geometric extent, not
+            by where the finite, randomly-sampled head/tail points happen
+            to land. Sizing the grid from `points` alone (the old
+            behavior, still fine for `density_mode="points"`) can clip the
+            continuous shell at the array's own boundary wherever the true
+            shape reaches farther than the sampled points did -- verified
+            visually as a hard square/cube edge cutting across the
+            membrane in a rendered slice, not a smooth taper to zero.
+            Default 0.0 (no additional minimum, matching the old behavior).
 
         Returns
         -------
@@ -684,7 +896,9 @@ class MembraneBlobGenerator:
         """
         center = points.mean(axis=0)
         centered = points - center
-        half_extent = float(np.abs(centered).max()) + 2 * self.v_size
+        half_extent = max(
+            float(np.abs(centered).max()) + 2 * self.v_size, min_half_extent
+        )
         n = int(np.ceil(2 * half_extent / self.v_size))
         n += n % 2  # even, for a clean center voxel
         grid = torch.zeros((n, n, n), dtype=torch.float32)

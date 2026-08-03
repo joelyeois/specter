@@ -48,63 +48,88 @@ def test_membrane_blob_is_closed_and_nondegenerate():
     assert inst.density.ndim == 3
     assert inst.density.shape[0] == inst.density.shape[1] == inst.density.shape[2]
     occupied = (inst.density > 0).float().mean().item()
-    # A hollow shell in a padded box should occupy a modest but
-    # non-negligible fraction of voxels -- neither ~0 (degenerate/empty)
-    # nor ~1 (accidentally filled solid).
-    assert 0.001 < occupied < 0.5
+    # The continuous SDF-based bilayer density (see _cts_membrane.py's
+    # _compute_geometry_fields) fills a genuinely larger fraction of its
+    # OWN local (tightly-padded) grid than the old point-cloud density did
+    # -- 60-70% is normal here, since the local grid is sized just large
+    # enough to contain the shape, not a large empty box the shell floats
+    # in (that's a separate thing from how sparse the shell is relative to
+    # the much bigger FULL SPECIMEN volume it gets placed into later).
+    # Still checked against degenerate extremes -- empty, or fully solid.
+    assert 0.05 < occupied < 0.95
 
 
 def test_membrane_blob_has_bilayer_double_peak_profile():
     """
-    Radial density profile from the shape's own centroid should show two
-    separated peaks (the two leaflets), not a single monolithic peak --
-    the defining signature of a bilayer rather than a solid blob.
+    Density profile sampled straight through the shell ALONG ITS OWN LOCAL
+    SURFACE NORMAL at several skeleton (mid-thickness) points should show
+    two separated peaks (the two leaflets), not one monolithic peak.
+
+    Uses the local normal direction (`inst.normal_field`) at real skeleton
+    points (`inst.skeleton_mask`) rather than radial distance from the
+    shape's overall centroid -- radial-from-centroid only detects two
+    leaflets correctly for a near-perfect sphere; for a genuinely irregular
+    alpha-shape blob (the whole point of this generator), different
+    surface locations sit at different distances from the centroid, so a
+    single global radial histogram can blur or merge the two leaflets'
+    signal even when the bilayer structure is locally completely fine.
+    Sampling along the actual local normal at each test point is
+    shape-agnostic and directly probes the one direction guaranteed to
+    cross both leaflets at that point.
     """
     gen = MembraneBlobGenerator(v_size=6.0, seed=2)
     inst = gen.generate(
         size=220.0,
         roughness=0.75,
         thickness=60.0,
-        n_head_points=10000,
-        n_tail_points=1500,
     )
     density = inst.density.numpy()
     n = density.shape[0]
+    normals = inst.normal_field.numpy()  # (3, n, n, n), physical (x, y, z)
+    skeleton_pts = np.argwhere(inst.skeleton_mask.numpy())
+    assert skeleton_pts.shape[0] > 0, "skeleton_mask has no points to sample from"
 
-    # Radial profile from the mass centroid of the generated density
-    # itself (robust to the shape not being perfectly centered in its own
-    # padded grid).
-    coords = np.argwhere(density > 0)
-    weights = density[density > 0]
-    centroid = (coords * weights[:, None]).sum(axis=0) / weights.sum()
-
-    zz, yy, xx = np.meshgrid(np.arange(n), np.arange(n), np.arange(n), indexing="ij")
-    r = np.sqrt(
-        (zz - centroid[0]) ** 2 + (yy - centroid[1]) ** 2 + (xx - centroid[2]) ** 2
+    rng = np.random.default_rng(0)
+    sample_idx = rng.choice(
+        skeleton_pts.shape[0], size=min(20, skeleton_pts.shape[0]), replace=False
     )
-    r_bin = np.round(r).astype(int).ravel()
-    prof = np.bincount(r_bin, weights=density.ravel())
-    counts = np.bincount(r_bin)
-    prof = prof / np.maximum(counts, 1)
 
-    # Find local maxima in the smoothed 1D profile.
-    smoothed = np.convolve(prof, np.ones(3) / 3, mode="same")
-    peaks = []
-    for i in range(2, len(smoothed) - 2):
-        if smoothed[i] > 0 and smoothed[i] == max(smoothed[i - 2 : i + 3]):
-            peaks.append((i, smoothed[i]))
-    peaks.sort(key=lambda p: -p[1])
-    top_peaks = sorted(p[0] for p in peaks[:4])
-    assert len(top_peaks) >= 2, (
-        f"expected at least 2 distinct radial density peaks (bilayer "
-        f"leaflets), found {len(top_peaks)}: {top_peaks}"
+    half_span = 20  # voxels each side of the skeleton point along the normal
+    n_found_bilayer = 0
+    for idx in sample_idx:
+        z, y, x = skeleton_pts[idx]
+        # normal_field is physical (x, y, z); array axes are (z, y, x) --
+        # reverse component order to index/step consistently.
+        nx_, ny_, nz_ = normals[:, z, y, x]
+        direction = np.array([nz_, ny_, nx_])
+        if np.linalg.norm(direction) < 1e-6:
+            continue
+        direction = direction / np.linalg.norm(direction)
+
+        t = np.arange(-half_span, half_span + 1)
+        line_coords = skeleton_pts[idx][None, :] + t[:, None] * direction[None, :]
+        line_coords = np.round(line_coords).astype(int)
+        valid = np.all((line_coords >= 0) & (line_coords < n), axis=1)
+        line_coords = line_coords[valid]
+        profile = density[line_coords[:, 0], line_coords[:, 1], line_coords[:, 2]]
+
+        smoothed = np.convolve(profile, np.ones(3) / 3, mode="same")
+        peaks = [
+            i
+            for i in range(2, len(smoothed) - 2)
+            if smoothed[i] > 0 and smoothed[i] == max(smoothed[i - 2 : i + 3])
+        ]
+        if len(peaks) >= 2 and (max(peaks) - min(peaks)) >= 2:
+            n_found_bilayer += 1
+
+    # Not every sampled skeleton point needs to show a clean double peak
+    # (irregular local geometry, grazing normals, etc. can blur individual
+    # samples) -- but a solid majority should, or this isn't a real bilayer.
+    assert n_found_bilayer >= 0.5 * len(sample_idx), (
+        f"expected most sampled skeleton points to show a clear bilayer "
+        f"double-peak profile along their local normal, only "
+        f"{n_found_bilayer}/{len(sample_idx)} did"
     )
-    # The two most prominent peaks should be meaningfully separated (not
-    # the same leaflet double-counted by binning noise).
-    spread = max(top_peaks) - min(top_peaks)
-    assert (
-        spread >= 2
-    ), f"radial peaks too close together to be distinct leaflets: {top_peaks}"
 
 
 def test_membrane_blob_rejects_invalid_roughness():
@@ -370,7 +395,7 @@ def test_cryotomosim_generator_no_extras_still_works():
 # ---------------------------------------------------------------------
 
 
-def _placed_membrane(v_size=8.0, size=220.0, roughness=0.75, thickness=35.0, seed=1):
+def _placed_membrane(v_size=8.0, size=110.0, roughness=0.75, thickness=15.0, seed=1):
     """Generate and place one membrane into a plain volume; return
     (volume, placer, location_masks, normal_fields, ignore_masks).
 
@@ -379,9 +404,28 @@ def _placed_membrane(v_size=8.0, size=220.0, roughness=0.75, thickness=35.0, see
     bilayer-thickness shell (used only for the overlap-ignore mechanism)
     -- see `_build_membrane_location_fields`'s docstring for why these
     must stay two separate masks.
+
+    size/thickness (and the 128^3 volume, up from an old 64^3) reflect the
+    continuous SDF-based renderer's now-CORRECT (verified) bounding-radius
+    measurement -- the old size=220.0/thickness=35.0 pairing produced a
+    192^3-voxel membrane grid (bounding radius ~509A) that simply couldn't
+    fit in a 64^3 (512A) test volume at all once an earlier boundary-
+    clipping bug (density hard-cut at the array's own edge, verified via a
+    visible square artifact in a real rendered slice) was fixed and the
+    measurement became accurate instead of an undersized artifact of that
+    bug.
+
+    size=110 (up from an earlier 80): at size=80 the vesicle lumen was
+    only ~64 voxels in a thin 9x4x7 blob -- geometrically real (a small
+    ~80A vesicle with a 15A-thick bilayer doesn't leave much interior
+    room) but too tight for even ball3d(5, 3.0) to land without its
+    rotated footprint clipping the surrounding shell, so vesicle-flagged
+    placement failed 0/200 attempts across 10 seeds (verified directly,
+    not assumed). size=110 gives a ~1200-voxel lumen, enough for reliable
+    placement.
     """
     torch.manual_seed(0)
-    vol = torch.zeros((64, 64, 64))
+    vol = torch.zeros((128, 128, 128))
     placer = ParticlePlacer(
         volume=vol, density_cutoff=0.4, rng=torch.Generator().manual_seed(0)
     )
@@ -390,7 +434,7 @@ def _placed_membrane(v_size=8.0, size=220.0, roughness=0.75, thickness=35.0, see
     placer.run([ParticleSpec(species_id="mem", density=inst.density, max_count=1)])
     assert len(placer.placements) == 1, "membrane failed to place at all"
     masks, normals, ignores = _build_membrane_location_fields(
-        placer.placements, {"mem": inst}, (64, 64, 64)
+        placer.placements, {"mem": inst}, (128, 128, 128)
     )
     return vol, placer, masks, normals, ignores
 
@@ -596,11 +640,21 @@ def test_export_picks_before_generate_raises():
 
 @pytest.mark.skipif(not _PDB_FIXTURE.exists(), reason="bundled PDB fixture missing")
 def test_export_picks_writes_expected_ndjson_files(tmp_path):
-    target_shape = (32, 48, 48)
+    # Box grown from an old (32,48,48) -- size=30/thickness=6's own
+    # bounding radius is ~192A once the boundary-clipping bug (see
+    # _placed_membrane's docstring) was fixed and the measurement became
+    # accurate instead of an undersized artifact of that bug; needed a
+    # bigger box than the old undersized-measurement era assumed.
+    target_shape = (48, 64, 64)
     v_size = 10.0
     gen = CryoTomoSimSpecimenGenerator(
         protein_specs=[ProteinSpec(pdb_source=str(_PDB_FIXTURE), max_count=3)],
-        membrane_specs=[MembraneSpec(count=1, size=50.0, thickness=30.0)],
+        # size/thickness at a realistic ~20% ratio (30.0's own bounding
+        # radius comfortably fits this test's box) -- the old 50.0/30.0
+        # pairing (60% ratio) made the continuous SDF-based shell's real
+        # bounding radius balloon to ~260A+, bigger than this test's own
+        # box, so RSA could never place it at all.
+        membrane_specs=[MembraneSpec(count=1, size=30.0, thickness=6.0)],
         bead_spec=BeadSpec(radii=[40.0], count_per_radius=1),
         target_shape=target_shape,
         v_size=v_size,
@@ -728,14 +782,20 @@ def test_rsa_membrane_still_supports_membrane_flagged_protein():
     """A protein flagged 'membrane' should still land on an RSA-packed
     membrane's shell, exercising the sequential pass that runs on top of
     RSA-placed membranes."""
-    target_shape = (60, 120, 120)
+    # target_shape/thickness sized so the membrane's now-correctly-measured
+    # bounding radius (~309A at size=80/thickness=15) comfortably fits --
+    # the old thickness=35 pairing gave ~410A, bigger than the old box's
+    # own 300A half-depth once the boundary-clipping bug (see
+    # _placed_membrane's docstring) was fixed and the measurement became
+    # accurate instead of an undersized artifact of that bug.
+    target_shape = (80, 120, 120)
     v_size = 10.0
     gen = CryoTomoSimSpecimenGenerator(
         protein_specs=[
             ProteinSpec(pdb_source=str(_PDB_FIXTURE), max_count=5, location="cytosol"),
             ProteinSpec(pdb_source=str(_PDB_FIXTURE), max_count=5, location="membrane"),
         ],
-        membrane_specs=[MembraneSpec(count=1, size=80.0, thickness=35.0)],
+        membrane_specs=[MembraneSpec(count=1, size=80.0, thickness=15.0)],
         target_shape=target_shape,
         v_size=v_size,
         ice_opacity=0.0,

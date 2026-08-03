@@ -214,13 +214,25 @@ def _local_overlap_test_and_insert(
     `ignore_overlap_mask`, if given, marks voxels that don't count as a
     blocking overlap even if already occupied -- used for membrane-flagged
     placements, where a transmembrane protein is expected to displace the
-    local lipid at its own insertion site (CTS's own ``testmem``
-    subfunction does the equivalent by subtracting the local membrane
-    density from the destination before testing overlap; masking it out
-    of the overlap test here has the same effect while still catching
-    overlap with any OTHER content at non-masked voxels within the
-    footprint, and still composites the membrane density normally via the
-    max-merge below).
+    local lipid at its own insertion site. Beyond just exempting these
+    voxels from the overlap TEST, the composite step also performs
+    explicit displacement: within `candidate`'s own real footprint
+    (wherever its density is nonzero), the membrane's existing density is
+    zeroed out before merging, rather than left to compete via a plain
+    max-merge. This matches real physics (two things can't occupy the same
+    space -- where a protein's atoms are, there's genuinely no lipid, not
+    "less lipid") more closely than max-merge, which only approximates
+    exclusion when the protein's local density happens to already exceed
+    the membrane's -- max-merge can let phantom lipid signal show through
+    a voxel that should be fully displaced whenever the membrane is
+    locally brighter than the protein at that exact point (e.g. near the
+    protein's own low-density edges). CTS's own ``testmem`` only ever
+    subtracted membrane density for the temporary overlap-TEST copy, not
+    the final composite (its real insert used a plain additive sum) -- so
+    this is a genuine physical-accuracy improvement over CTS's own
+    approach, not just a port of it. Non-membrane-flagged placements
+    (`ignore_overlap_mask is None`) are unaffected -- still plain
+    max-merge, unchanged.
 
     Returns
     -------
@@ -255,7 +267,18 @@ def _local_overlap_test_and_insert(
     # ignore_overlap_mask) so the caller's occupied count stays exact
     # regardless of membrane-overlap-ignore placements.
     newly_occupied = int(((existing == 0) & (candidate > 0)).sum().item())
-    volume[dst] = torch.maximum(existing, candidate)
+    if ignore_overlap_mask is not None:
+        # Explicit lipid displacement: zero the membrane's own contribution
+        # wherever the protein's real footprint is present, THEN merge --
+        # equivalent to "protein wins outright" in its own footprint,
+        # membrane preserved everywhere else (including small gaps within
+        # the protein's own bounding box where its density is genuinely
+        # zero, e.g. between atoms).
+        displaced = existing.clone()
+        displaced[candidate > 0] = 0
+        volume[dst] = torch.maximum(displaced, candidate)
+    else:
+        volume[dst] = torch.maximum(existing, candidate)
     return True, newly_occupied, dst
 
 

@@ -10,6 +10,16 @@ from .cryotomosim import (
     ProteinSpec,
 )
 from .pdb_packing import SpherePackingSpecimenGenerator, SphereProteinSpec
+from .tetris_packing import (
+    TetrisPackingSpecimenGenerator,
+    TetrisPlacement,
+    TetrisProteinSpec,
+)
+from ._membrane_generator import (
+    MembraneGenerator,
+    TransmembranePlacement,
+    TransmembraneSpec,
+)
 
 __all__ = [
     "TomogramGenerator",
@@ -24,4 +34,10 @@ __all__ = [
     "GridSpec",
     "SpherePackingSpecimenGenerator",
     "SphereProteinSpec",
+    "TetrisPackingSpecimenGenerator",
+    "TetrisPlacement",
+    "TetrisProteinSpec",
+    "MembraneGenerator",
+    "TransmembranePlacement",
+    "TransmembraneSpec",
 ]

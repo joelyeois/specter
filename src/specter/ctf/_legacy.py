@@ -69,7 +69,17 @@ def ctf_params_dict_to_parameters(
         :class:`LegacyAberrationAdapter` -- it's a
         ``TransferFunction``-construction-time argument, not a per-call
         one, since in practice it's always the same constant value across
-        every particle anyway).
+        every particle anyway). ``"lpp_params"``, if present, is a
+        ``CTFParameters``-native-units laser-phase-plate dict (see
+        ``CTFParameters``'s ``lpp_params`` -- no unit conversion applied,
+        unlike every other key here) and takes precedence over
+        ``"phaseshift"``: since ``torch_ctf.calc_LPP_ctf_2D`` has no
+        phase_shift argument at all, a physical laser phase plate replaces
+        a uniform phase shift rather than combining with it, so
+        ``"phaseshift"`` is dropped entirely whenever ``"lpp_params"`` is
+        set (regardless of whether it's zero, absent, or a stale nonzero
+        leftover from an existing dict) rather than raising
+        ``CTFParameters``'s own mutual-exclusivity error.
     pixel_size : float
         Pixel size in Angstrom.
     image_shape : tuple[int, int]
@@ -118,6 +128,7 @@ def ctf_params_dict_to_parameters(
         odd_zernike["Z31s"] = -prefactor * torch.as_tensor(tilty)
 
     dose = ctf_params.get("dose")
+    lpp_params = ctf_params.get("lpp_params")
 
     return CTFParameters(
         defocus=defocus_um,
@@ -125,8 +136,16 @@ def ctf_params_dict_to_parameters(
         astigmatism_angle=dfang,
         voltage=voltage,
         spherical_aberration=torch.as_tensor(cs_angstrom) / 1e7,
-        phase_shift=torch.rad2deg(torch.as_tensor(phaseshift_rad)),
+        # lpp_params overwrites phase_shift -- a physical laser phase plate
+        # replaces a uniform phase shift rather than combining with it (see
+        # the "lpp_params" entry in this function's docstring).
+        phase_shift=(
+            0.0
+            if lpp_params is not None
+            else torch.rad2deg(torch.as_tensor(phaseshift_rad))
+        ),
         odd_zernike=odd_zernike or None,
+        lpp_params=lpp_params,
         dose=dose,
     )
 

@@ -18,11 +18,23 @@ import pytest
 import torch
 
 from specter.aberrations import Aberration
-from specter.ctf import LegacyAberrationAdapter
+from specter.ctf import CTFParameters, LegacyAberrationAdapter, TransferFunction
 
 N_PIXELS = 16
 PIXEL_SIZE = 1.5
 VOLTAGE = 300.0
+
+_LPP_KWARGS = dict(
+    NA=0.1,
+    laser_wavelength_angstrom=10640.0,
+    focal_length_angstrom=2e7,
+    laser_xy_angle_deg=0.0,
+    laser_xz_angle_deg=0.0,
+    laser_long_offset_angstrom=0.0,
+    laser_trans_offset_angstrom=0.0,
+    laser_polarization_angle_deg=0.0,
+    peak_phase_deg=90.0,
+)
 
 
 def _exitwave(n: int, seed: int, n_pixels: int = N_PIXELS) -> torch.Tensor:
@@ -232,3 +244,54 @@ def test_real_csfile_particles_match_old_aberration_end_to_end():
 
     assert old_out.shape == new_out.shape == (20, n_pixels, n_pixels)
     assert torch.allclose(old_out, new_out, atol=1e-4)
+
+
+def test_lpp_params_matches_direct_ctfparameters_construction():
+    """ctf_params["lpp_params"] passed through the dict bridge must match
+    building CTFParameters(lpp_params=...) directly -- no old-Aberration
+    comparison is possible here (Aberration has no LPP model at all), so
+    this checks the bridge's *wiring* against the already-validated
+    native-units path (see test_ctf_transfer.py's LPP tests)."""
+    exitwave = _exitwave(1, seed=8)
+    ctf_params = {
+        "dfu": torch.tensor([15000.0]),
+        "cs": torch.tensor([2.7e7]),
+        "lpp_params": _LPP_KWARGS,
+    }
+
+    adapter = LegacyAberrationAdapter(
+        N_PIXELS, PIXEL_SIZE, VOLTAGE, aberration_model="holography"
+    )
+    bridged_out = adapter(exitwave, ctf_params)
+
+    params = CTFParameters(
+        defocus=15000.0 / 1e4, spherical_aberration=2.7e7 / 1e7, lpp_params=_LPP_KWARGS
+    )
+    tf = TransferFunction(N_PIXELS, PIXEL_SIZE, aberration_model="holography")
+    direct_out = tf(exitwave, params)
+
+    assert torch.allclose(bridged_out, direct_out, atol=1e-6)
+
+
+def test_lpp_params_overrides_stale_nonzero_phaseshift():
+    """A stale nonzero "phaseshift" left over in a ctf_params dict must not
+    raise CTFParameters's lpp_params/phase_shift mutual-exclusivity error,
+    and must not affect the output -- lpp_params always wins."""
+    exitwave = _exitwave(1, seed=9)
+    base_ctf_params = {
+        "dfu": torch.tensor([15000.0]),
+        "cs": torch.tensor([2.7e7]),
+        "lpp_params": _LPP_KWARGS,
+    }
+    ctf_params_with_stale_phaseshift = {
+        **base_ctf_params,
+        "phaseshift": torch.tensor([0.5]),
+    }
+
+    adapter = LegacyAberrationAdapter(
+        N_PIXELS, PIXEL_SIZE, VOLTAGE, aberration_model="holography"
+    )
+    out_without_phaseshift = adapter(exitwave, base_ctf_params)
+    out_with_stale_phaseshift = adapter(exitwave, ctf_params_with_stale_phaseshift)
+
+    assert torch.allclose(out_without_phaseshift, out_with_stale_phaseshift, atol=1e-6)

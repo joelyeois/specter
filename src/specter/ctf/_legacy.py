@@ -17,6 +17,19 @@ Z31c/Z31s) is exactly what's verified term-by-term against
 against a real multi-particle CryoSPARC .cs file -- nothing new is
 introduced here, this module only wires that already-validated conversion
 into the legacy dict-based calling convention.
+
+TODO (unit convention): the ``ctf_params`` dict handled here mirrors
+CryoSPARC's own parameterization (dfu/dfv/cs in Angstrom, tiltx/tilty/
+phaseshift in radians, trefoil in Angstrom^3) -- it is not torch-ctf's
+native convention (defocus in um, Cs in mm, angles in degrees,
+dimensionless Zernike coefficients normalized by the grid's rho_max, see
+``_units.zernike_rho_max``). Someone coming from RELION, or who already
+has parameters in torch-ctf's own units, has no equally convenient entry
+point today -- ``CTFParameters`` accepts native units directly, so
+nothing is physically blocked, but there is no wrapper analogous to
+``LegacyAberrationAdapter`` for that convention. Build one (or document
+constructing ``CTFParameters`` directly) once a concrete RELION-style
+consumer shows up.
 """
 
 from __future__ import annotations

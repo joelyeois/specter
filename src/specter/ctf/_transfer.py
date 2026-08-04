@@ -156,13 +156,39 @@ class TransferFunction(nn.Module):
         coefficient is present this falls back to computing each
         particle's transfer function with its own scalar Zernike
         coefficients (the code path already proven correct) and stacks the
-        results -- slower, but correct. The fast vectorized call below
-        still runs whenever every Zernike coefficient is scalar (shared
-        across particles) or absent, which is the common case.
+        results -- slower, but correct.
+
+        Before that fallback is even considered, every *non-learnable*
+        Zernike coefficient that's uniform across its batch dimension is
+        collapsed to a single value (see ``_collapse_if_uniform``). This
+        matters in practice: cryoSPARC's .cs schema stores every CTF term
+        as a flat per-particle array regardless of whether the underlying
+        value is actually per-particle, and trefoil/beam-tilt/Cs are
+        physically per-optics-group properties (shared across potentially
+        thousands of particles), not truly per-particle like defocus is --
+        confirmed against a real .cs file, where a 200-particle sample had
+        198 unique defocus values but exactly 1 unique trefoil/beam-tilt/Cs
+        value. So the common case is a "batched" tensor that's secretly
+        uniform, and collapsing it lets the fast vectorized path run
+        instead of the slow per-particle loop below. Restricted to
+        non-learnable coefficients specifically: collapsing a *learnable*
+        per-particle tensor that happens to be uniformly initialized would
+        route the gradient through only the one retained element, silently
+        leaving every other element's gradient at zero instead of each
+        particle getting its own -- a real correctness bug, not just a
+        missed optimization, so learnable coefficients always take the
+        slow-but-correct path regardless of current uniformity.
         """
         lpp_params = kwargs.pop("lpp_params", None)
         fn = calc_LPP_ctf_2D if lpp_params is not None else calculate_ctf_2d
         extra_kwargs = lpp_params or {}
+
+        for key in ("even_zernike_coeffs", "odd_zernike_coeffs"):
+            if kwargs.get(key):
+                kwargs[key] = {
+                    name: _collapse_if_uniform(coeff)
+                    for name, coeff in kwargs[key].items()
+                }
 
         zernike_dicts = [
             kwargs.get("even_zernike_coeffs"),
@@ -271,3 +297,19 @@ class TransferFunction(nn.Module):
         transfer = self.transfer_function(ctf_params, idx=idx)
         aberrated = ifft2(fft2(exitwave) * transfer)
         return torch.real(aberrated) if self.aberration_model == "ctf" else aberrated
+
+
+def _collapse_if_uniform(coeff: torch.Tensor) -> torch.Tensor:
+    """Collapse a >1-element, non-learnable, uniform-valued tensor down to
+    a single element; pass everything else through unchanged.
+
+    See :meth:`TransferFunction._call_calculate_ctf_2d` for why this
+    matters and why it's restricted to non-learnable coefficients.
+    """
+    if (
+        coeff.numel() > 1
+        and not coeff.requires_grad
+        and torch.all(coeff == coeff.flatten()[0])
+    ):
+        return coeff.flatten()[:1]
+    return coeff

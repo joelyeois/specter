@@ -883,6 +883,119 @@ def test_mixed_batched_and_scalar_zernike_coefficients():
 
 
 # ---------------------------------------------------------------------------
+# Uniform-batched-Zernike-coefficient collapse: cryoSPARC's .cs schema
+# stores every CTF term as a flat per-particle array regardless of whether
+# the underlying value is actually per-particle -- confirmed against a real
+# .cs file's *entire* 30,515-particle dataset: exactly 1 unique
+# trefoil/beam-tilt/Cs/phase-shift value each, vs. ~30,000+ unique defocus
+# values. TransferFunction collapses a per-particle-*shaped* but
+# uniform-*valued* Zernike coefficient to a single value so the fast
+# vectorized calculate_ctf_2d path runs instead of the slow per-particle
+# loop -- this is the common case in practice, not a rare one.
+# ---------------------------------------------------------------------------
+
+
+def test_collapse_if_uniform_helper():
+    from specter.ctf._transfer import _collapse_if_uniform
+
+    uniform = torch.full((5,), 0.3)
+    collapsed = _collapse_if_uniform(uniform)
+    assert collapsed.numel() == 1
+    assert collapsed.item() == pytest.approx(0.3)
+
+    nonuniform = torch.tensor([0.1, 0.2, 0.3])
+    assert _collapse_if_uniform(nonuniform) is nonuniform
+
+    scalar = torch.tensor(0.5)
+    assert _collapse_if_uniform(scalar) is scalar
+
+    learnable_uniform = torch.nn.Parameter(torch.full((5,), 0.3))
+    assert _collapse_if_uniform(learnable_uniform) is learnable_uniform
+
+
+def test_uniform_batched_trefoil_with_per_particle_defocus_matches_manual_loop():
+    """Realistic .cs-file shape: trefoil stored per-particle but every value
+    identical, alongside genuinely per-particle defocus. Must match the
+    same per-particle reconstruction the (slow, unoptimized) loop would
+    give -- the optimization must not change the result, only the path."""
+    defocus = torch.tensor([0.8, 1.0, 1.2, 0.9, 1.1])
+    trefoil_c_uniform = torch.full((5,), 0.15)
+
+    params = CTFParameters(
+        defocus=defocus,
+        spherical_aberration=2.7,
+        odd_zernike={"Z33c": trefoil_c_uniform},
+    )
+    tf = TransferFunction(N_PIXELS, PIXEL_SIZE, aberration_model="holography")
+    out = tf.transfer_function(params)
+
+    expected = torch.cat(
+        [
+            tf.transfer_function(
+                CTFParameters(
+                    defocus=defocus[i : i + 1],
+                    spherical_aberration=2.7,
+                    odd_zernike={"Z33c": torch.tensor(0.15)},
+                )
+            )
+            for i in range(5)
+        ],
+        dim=0,
+    )
+    assert out.shape == (5, N_PIXELS, N_PIXELS)
+    assert torch.allclose(out, expected, atol=1e-6)
+    # Particles still differ from each other via defocus, despite the
+    # shared/collapsed trefoil value.
+    assert not torch.allclose(out[0], out[1], atol=1e-6)
+
+
+def test_learnable_uniform_zernike_coefficient_gets_independent_gradients():
+    """The safety guard: a *learnable* per-particle Zernike coefficient
+    that happens to start out uniform must not be collapsed, or every
+    particle but one would silently get zero gradient. Verified by
+    checking each of N particles -- which see different defocus, so
+    genuinely have independent loss contributions -- gets its own nonzero
+    gradient, not just a single collapsed element.
+
+    Applies the transfer function to an actual (broadband, non-constant)
+    exit wave rather than testing on the bare transfer_function() output:
+    exp(-i*chi) has unit magnitude everywhere by construction, so
+    |transfer_function()|^2 is trivially constant and its gradient w.r.t.
+    any CTF parameter is ~0 regardless of correctness -- not a meaningful
+    gradient check on its own.
+    """
+    defocus = torch.tensor([0.8, 1.0, 1.2])
+    params = CTFParameters(
+        defocus=defocus,
+        spherical_aberration=2.7,
+        odd_zernike={"Z33c": torch.full((3,), 0.15)},
+        learnable={"Z33c"},
+    )
+    coeff = params.odd_zernike["Z33c"].value
+    assert isinstance(coeff, torch.nn.Parameter)
+
+    tf = TransferFunction(N_PIXELS, PIXEL_SIZE, aberration_model="holography")
+    exitwave = torch.randn(
+        3,
+        N_PIXELS,
+        N_PIXELS,
+        dtype=torch.complex64,
+        generator=torch.Generator().manual_seed(0),
+    )
+    out = tf(exitwave, params)
+    # Per-particle loss so each particle's gradient contribution is distinct.
+    loss = (out.abs() ** 2 * torch.tensor([1.0, 2.0, 3.0]).view(-1, 1, 1)).sum()
+    loss.backward()
+
+    assert coeff.grad is not None
+    assert torch.isfinite(coeff.grad).all()
+    assert torch.all(coeff.grad.flatten() != 0), (
+        "every particle's trefoil gradient must be independently nonzero -- "
+        "a collapse bug would leave all but one element exactly zero"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Real-world validation: first 5 particles from an actual CryoSPARC .cs
 # file, run through the real extraction/unit-conversion path
 # (specter.io.extract_parameters_from_csfile), not hand-picked synthetic

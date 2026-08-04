@@ -1,9 +1,9 @@
 """
 Rasterize a membrane's geometry and calibrated potential onto an output grid.
 
-Combines a :class:`~specter.specimen._membrane_field.MembraneField` (organic
+Combines a :class:`~specter.specimen.membrane._field.MembraneField` (organic
 shape, on its own fine working grid) with a
-:class:`~specter.specimen._membrane_profile.BilayerProfile` (calibrated
+:class:`~specter.specimen.membrane._profile.BilayerProfile` (calibrated
 ``psi(d)``) into a physical density volume at whatever voxel size and grid
 placement the caller requests.
 
@@ -25,8 +25,8 @@ from __future__ import annotations
 import torch
 import torch.nn.functional as F
 
-from ._membrane_field import MembraneField, _grid_points_xyz
-from ._membrane_profile import BilayerProfile
+from ._field import MembraneField, _grid_points_xyz
+from ._profile import BilayerProfile
 
 
 def _gaussian_blur3d(volume: torch.Tensor, sigma_vox: float) -> torch.Tensor:
@@ -59,10 +59,10 @@ def rasterize_membrane_density(
     ----------
     field : MembraneField
         Membrane geometry, on its own fine working grid (see
-        :func:`~specter.specimen._membrane_field.generate_membrane_field`).
+        :func:`~specter.specimen.membrane._field.generate_membrane_field`).
     profile : BilayerProfile
         Calibrated bilayer potential profile (see
-        :func:`~specter.specimen._membrane_profile.compute_bilayer_profile`).
+        :func:`~specter.specimen.membrane._profile.compute_bilayer_profile`).
     target_shape_zyx : tuple of int
         Output grid shape.
     target_spacing_a : float

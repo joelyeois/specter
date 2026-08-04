@@ -26,12 +26,12 @@ from typing import Literal, Sequence
 import torch
 import torch.nn.functional as F
 
-from ..arrays import clip_insert_bounds
-from ..fft import fftconvolve
-from ..pdb import PDB
-from ..potential import PotentialBuilder
-from ..progress import TqdmProgress
-from ..rotations import build_affine_matrix, random_rotation_matrix, rotate_volume
+from ...arrays import clip_insert_bounds
+from ...fft import fftconvolve
+from ...pdb import PDB
+from ...potential import PotentialBuilder
+from ...progress import TqdmProgress
+from ...rotations import build_affine_matrix, random_rotation_matrix, rotate_volume
 from .pdb_packing import estimate_protein_box_size
 
 CorrelationBackend = Literal["conv3d", "fft", "auto"]

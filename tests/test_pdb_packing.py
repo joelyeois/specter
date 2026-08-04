@@ -1,8 +1,8 @@
 """
-Smoke tests for SpherePackingSpecimenGenerator (specter.specimen.pdb_packing)
--- the hard-sphere-RSA-based specimen generator, promoted from
-dev/packing_algorithms.py's algorithm comparison. Uses locally-cached PDB
-fixtures (no network fetch).
+Smoke tests for SpherePackingSpecimenGenerator
+(specter.specimen.packing.pdb_packing) -- the hard-sphere specimen
+generator, promoted from dev/packing_algorithms.py's algorithm comparison.
+Uses locally-cached PDB fixtures (no network fetch).
 """
 
 from __future__ import annotations
@@ -12,11 +12,14 @@ from pathlib import Path
 import pytest
 import torch
 
-from specter.crowding import pack_hard_spheres_3d
-from specter.specimen.pdb_packing import (
+from specter.specimen.packing import (
     SpherePackingSpecimenGenerator,
     SphereProteinSpec,
+    draw_species_pool,
+    pack_hard_spheres_3d,
+    pack_hard_spheres_3d_dense,
 )
+from specter.specimen.packing.algorithms import _fb_verify_no_overlap
 
 _SMALL_FIXTURE = Path(__file__).parent.parent / "pdb-data" / "1mbo.cif"
 _LARGE_FIXTURE = Path(__file__).parent.parent / "pdb-data" / "1bxn-assembly1.cif"
@@ -110,3 +113,201 @@ def test_sphere_packing_generator_multi_species_ratios():
     species_ids = {p.species_id for p in gen.placements}
     assert str(_SMALL_FIXTURE) in species_ids
     assert str(_LARGE_FIXTURE) in species_ids
+
+
+def test_draw_species_pool_respects_ratio_and_sorts_largest_first():
+    species_radii = torch.tensor([5.0, 20.0])
+    species_ratios = torch.tensor([3.0, 1.0])
+    # small box_volume/large occupancy_fraction => many draws, so the drawn
+    # mix should land close to the 3:1 ratio (weak law of large numbers).
+    occupancy_fraction, box_volume = 50_000.0, 1000.0
+    radii, species_idx = draw_species_pool(
+        species_radii, species_ratios, occupancy_fraction, box_volume, seed=0
+    )
+    assert radii.numel() == species_idx.numel() > 100
+    assert bool((radii[:-1] >= radii[1:]).all())  # largest-first sort
+
+    frac_small = float((species_idx == 0).float().mean())
+    assert 0.6 < frac_small < 0.9  # expected 0.75, allow sampling noise
+
+    accumulated = float((4.0 / 3.0 * torch.pi * radii**3).sum())
+    assert accumulated >= occupancy_fraction * box_volume
+
+
+def test_draw_species_pool_empty_when_occupancy_fraction_zero():
+    radii, species_idx = draw_species_pool(
+        torch.tensor([10.0]),
+        torch.tensor([1.0]),
+        occupancy_fraction=0.0,
+        box_volume=1000.0,
+    )
+    assert radii.numel() == 0
+    assert species_idx.numel() == 0
+
+
+def test_pack_hard_spheres_3d_dense_is_overlap_free_and_inside_box():
+    box = (120.0, 120.0, 120.0)
+    gap = 2.0
+    coords, radii_out, species_idx_out = pack_hard_spheres_3d_dense(
+        torch.tensor([10.0]),
+        torch.tensor([1.0]),
+        occupancy_fraction=0.15,
+        box=box,
+        gap=gap,
+        seed=0,
+        pad_fraction=1.0,
+        n_stages=3,
+        iterations_per_stage=15,
+    )
+
+    assert coords.shape[0] == radii_out.shape[0] == species_idx_out.shape[0]
+    assert coords.shape[0] > 0
+    assert _fb_verify_no_overlap(coords, radii_out, gap=gap, box=None)
+
+    half = torch.tensor([60.0, 60.0, 60.0])
+    assert bool((coords.abs() + radii_out.unsqueeze(1) <= half + 1e-3).all())
+
+
+def test_pack_hard_spheres_3d_dense_empty_input():
+    coords, radii_out, species_idx_out = pack_hard_spheres_3d_dense(
+        torch.tensor([10.0]),
+        torch.tensor([1.0]),
+        occupancy_fraction=0.0,
+        box=(100.0, 100.0, 100.0),
+        device="cpu",
+    )
+    assert coords.shape == (0, 3)
+    assert radii_out.shape == (0,)
+    assert species_idx_out.shape == (0,)
+
+
+def test_pack_hard_spheres_3d_dense_warns_when_species_radius_large_relative_to_box():
+    with pytest.warns(UserWarning, match="disproportionately discard"):
+        pack_hard_spheres_3d_dense(
+            torch.tensor([31.4, 67.3]),
+            torch.tensor([3.0, 1.0]),
+            occupancy_fraction=0.15,
+            box=(320.0, 640.0, 640.0),
+            gap=5.0,
+            seed=0,
+            pad_fraction=0.5,
+            n_stages=1,
+            iterations_per_stage=1,  # correctness of the result doesn't matter here
+        )
+
+
+@pytest.mark.skipif(not _SMALL_FIXTURE.exists(), reason="bundled PDB fixture missing")
+def test_sphere_packing_generator_dense_method_produces_valid_instance_labels():
+    target_shape = (24, 32, 32)
+    gen = SpherePackingSpecimenGenerator(
+        protein_specs=[SphereProteinSpec(pdb_source=str(_SMALL_FIXTURE))],
+        target_shape=target_shape,
+        v_size=10.0,
+        occupancy_fraction=0.1,
+        gap_angstrom=5.0,
+        seed=0,
+        packing_method="dense",
+        pad_fraction=1.0,
+    )
+    volume = gen.generate()
+
+    assert volume.shape == target_shape
+    assert len(gen.placements) > 0
+    _assert_instance_labels_match_placements(gen, target_shape)
+
+
+@pytest.mark.skipif(not _SMALL_FIXTURE.exists(), reason="bundled PDB fixture missing")
+def test_sphere_packing_generator_rsa_method_produces_valid_instance_labels():
+    target_shape = (32, 48, 48)
+    gen = SpherePackingSpecimenGenerator(
+        protein_specs=[SphereProteinSpec(pdb_source=str(_SMALL_FIXTURE))],
+        target_shape=target_shape,
+        v_size=10.0,
+        occupancy_fraction=0.15,
+        gap_angstrom=5.0,
+        seed=0,
+        packing_method="rsa",
+    )
+    gen.generate()
+
+    assert len(gen.placements) > 0
+    _assert_instance_labels_match_placements(gen, target_shape)
+
+
+def _assert_instance_labels_match_placements(
+    gen: SpherePackingSpecimenGenerator, target_shape: tuple[int, int, int]
+) -> None:
+    """Shared checks for the `instance_labels` mask: right shape/dtype, one
+    label id per placement (no more, no fewer), background stays 0, and
+    every placement's id actually appears somewhere in the volume."""
+    labels = gen.instance_labels
+    assert labels is not None
+    assert labels.shape == target_shape
+    assert labels.dtype == torch.int32
+    assert bool((labels >= 0).all())
+
+    placement_ids = {p.instance_id for p in gen.placements}
+    assert len(placement_ids) == len(gen.placements)  # every id unique
+
+    present_ids = set(torch.unique(labels[labels > 0]).tolist())
+    assert present_ids == placement_ids
+
+
+def test_sphere_packing_generator_rejects_unknown_packing_method():
+    with pytest.raises(ValueError, match="packing_method"):
+        SpherePackingSpecimenGenerator(
+            protein_specs=[SphereProteinSpec(pdb_source="1abc")],
+            packing_method="bogus",  # type: ignore[arg-type]
+        )
+
+
+def test_pack_hard_spheres_3d_clip_axes_allows_poking_past_wall_on_clippable_axes():
+    box = (60.0, 200.0, 200.0)  # thin in z, roomy in y/x
+    gap = 2.0
+    radii = torch.full((200,), 20.0)
+    half = torch.tensor([100.0, 100.0, 30.0])  # x, y, z
+
+    coords_default, _ = pack_hard_spheres_3d(radii, box, gap=gap, seed=0, device="cpu")
+    assert bool((coords_default.abs() + 20.0 <= half + 1e-3).all())
+
+    coords_clip, idx_clip = pack_hard_spheres_3d(
+        radii, box, gap=gap, seed=0, device="cpu", clip_axes=(False, True, True)
+    )
+    r_clip = radii[idx_clip]
+    # z (non-clippable) must still fully contain every sphere
+    assert bool((coords_clip[:, 2].abs() + r_clip <= half[2] + 1e-3).all())
+    # centers always stay in-bounds, even on clippable axes
+    assert bool((coords_clip[:, :2].abs() <= half[:2] + 1e-3).all())
+    # allowing xy clipping should place at least as many spheres as the
+    # strict default (more candidates survive the relaxed xy wall check)
+    assert coords_clip.shape[0] >= coords_default.shape[0]
+    # and at least one of them actually needed the relaxation (extends past
+    # the xy wall) -- otherwise this test isn't exercising the new behavior
+    assert bool(
+        ((coords_clip[:, :2].abs() + r_clip.unsqueeze(1)) > half[:2] + 1e-3).any()
+    )
+
+
+def test_pack_hard_spheres_3d_dense_clip_axes_allows_poking_past_wall_on_clippable_axes():
+    box = (320.0, 640.0, 640.0)
+    gap = 5.0
+    half = torch.tensor([320.0, 320.0, 160.0])  # x, y, z
+
+    coords, radii_out, _ = pack_hard_spheres_3d_dense(
+        torch.tensor([31.4, 67.3]),
+        torch.tensor([3.0, 1.0]),
+        occupancy_fraction=0.15,
+        box=box,
+        gap=gap,
+        seed=0,
+        pad_fraction=0.5,
+        n_stages=3,
+        iterations_per_stage=15,
+        clip_axes=(False, True, True),
+    )
+    assert coords.shape[0] > 0
+    assert bool((coords[:, 2].abs() + radii_out <= half[2] + 1e-3).all())
+    assert bool((coords[:, :2].abs() <= half[:2] + 1e-3).all())
+    assert bool(
+        ((coords[:, :2].abs() + radii_out.unsqueeze(1)) > half[:2] + 1e-3).any()
+    )

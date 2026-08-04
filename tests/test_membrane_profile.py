@@ -1,6 +1,6 @@
 import torch
 
-from specter.specimen._membrane_profile import (
+from specter.specimen.membrane._profile import (
     _LEAFLET_TEMPLATE,
     BilayerProfile,
     build_reference_lipid_patch,

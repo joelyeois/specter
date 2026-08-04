@@ -39,9 +39,9 @@ or ``specimen.polnet_bridge``).
 
 Placement is a HYBRID of two mechanisms, chosen per placement request:
 
-- **Bulk hard-sphere RSA** (``specter.crowding.pack_hard_spheres_3d`` +
+- **Bulk hard-sphere RSA** (``specter.specimen.packing.pack_hard_spheres_3d`` +
   ``insert_particles_into_micrograph``, the same fully-vectorized,
-  ~90x-faster-than-one-at-a-time machinery ``specimen/pdb_packing.py``'s
+  ~90x-faster-than-one-at-a-time machinery ``specimen/packing/pdb_packing.py``'s
   ``SpherePackingSpecimenGenerator`` uses) handles every membrane instance
   and every ``"any"``-location, ``"single"``-mode protein species together
   in ONE packing pass -- these are a genuine "pack non-overlapping spheres
@@ -49,7 +49,7 @@ Placement is a HYBRID of two mechanisms, chosen per placement request:
   (only accepted instances get rendered, once). Membranes use their own
   true outer bounding-sphere radius (from the actual generated blob
   geometry, not an arbitrary constant); proteins use ``pdb.max_diameter/2``,
-  matching ``pdb_packing.py``'s own convention. This is a real accuracy
+  matching ``packing/pdb_packing.py``'s own convention. This is a real accuracy
   tradeoff vs. the old one-at-a-time voxel-overlap test: a bounding sphere
   is more conservative than the true (irregular, rotated) shape, so
   RSA-packed content won't pack QUITE as tightly as exact voxel-overlap
@@ -86,7 +86,7 @@ import numpy as np
 import torch
 
 from ..arrays import clip_insert_bounds
-from ..crowding import insert_particles_into_micrograph, pack_hard_spheres_3d
+from ..crowding import insert_particles_into_micrograph
 from ..ice import IceBank, RandomIcemaker, blend_ice_into_volume
 from ..pdb import PDB
 from ..potential import PotentialBuilder
@@ -94,6 +94,7 @@ from ..rotations import build_affine_matrix, random_rotation_matrix, rotate_volu
 from ._cts_grid import BeadGenerator, CarbonFilmGenerator
 from ._cts_membrane import BlobMembraneInstance, MembraneBlobGenerator
 from ._cts_placement import ParticlePlacer, ParticleSpec, PlacedInstance, PlacementMode
+from .packing import pack_hard_spheres_3d
 
 # specter.potential.compute_supersampling_parameters's own default atomic
 # kernel width (potential.py: width_atom=5.0) -- each atom's own potential
@@ -170,7 +171,7 @@ def _bounding_radius_voxels(density: torch.Tensor) -> float:
 
     Used only for membrane instances here -- real protein species use
     ``pdb.max_diameter / 2`` instead (matching
-    ``specimen/pdb_packing.py``'s convention), since membranes have no PDB
+    ``specimen/packing/pdb_packing.py``'s convention), since membranes have no PDB
     structure to measure a diameter from.
     """
     coords = torch.nonzero(density > 0, as_tuple=False).float()
@@ -185,7 +186,7 @@ def _physical_xyz_to_voxel_zyx(
 ) -> torch.Tensor:
     """
     Convert a box-centered physical (x, y, z) position (Angstrom, the
-    convention ``specter.crowding.pack_hard_spheres_3d``/
+    convention ``specter.specimen.packing.pack_hard_spheres_3d``/
     ``insert_particles_into_micrograph`` use) to a corner-relative voxel
     index (z, y, x) (the convention ``_cts_placement.PlacedInstance``/
     ``ParticlePlacer`` use) -- the exact same rounding/center convention
@@ -232,12 +233,12 @@ def _pack_membranes_and_free_proteins(
     """
     Pack every membrane instance and every RSA-eligible ("any"-location,
     "single"-mode) protein species instance into `volume` in ONE hard-
-    sphere RSA pass (``specter.crowding.pack_hard_spheres_3d``), then
+    sphere RSA pass (``specter.specimen.packing.pack_hard_spheres_3d``), then
     render only the accepted instances -- membranes individually (their
     real bilayer geometry, not a sphere -- the sphere was only a collision-
     detection proxy), proteins batched per species via
     ``insert_particles_into_micrograph`` (mirrors
-    ``specimen/pdb_packing.py``'s own per-species chunked rendering loop).
+    ``specimen/packing/pdb_packing.py``'s own per-species chunked rendering loop).
 
     Mutates `volume` in place (and also returns it implicitly via the
     caller's own reference, same object).

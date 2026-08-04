@@ -1,6 +1,6 @@
 import torch
 
-from specter.specimen.tetris_packing import (
+from specter.specimen.packing import (
     TetrisPackingSpecimenGenerator,
     TetrisProteinSpec,
 )

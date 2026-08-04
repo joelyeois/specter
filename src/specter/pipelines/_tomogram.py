@@ -2,7 +2,7 @@
 .ndjson picks out.
 
 Drives `specter.specimen.SpherePackingSpecimenGenerator` (hard-sphere RSA
-placement, see `specter.crowding.pack_hard_spheres_3d`), saves the assembled
+placement, see `specter.specimen.packing.pack_hard_spheres_3d`), saves the assembled
 volume as .mrc -- directly usable as `specter simulate tiltseries`'s
 `--volume_path` -- plus one copick-style .ndjson pick file per species.
 """

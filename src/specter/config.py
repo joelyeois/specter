@@ -534,7 +534,7 @@ class TomogramConfig:
 
     Drives `specter.specimen.SpherePackingSpecimenGenerator`: packs several
     PDB-derived protein species -- each at its own real physical size -- via
-    hard-sphere Random Sequential Addition (see `specter.crowding.
+    hard-sphere Random Sequential Addition (see `specter.specimen.packing.
     pack_hard_spheres_3d`), renders each placed instance's real scattering
     potential, and saves the assembled volume as .mrc (directly usable as
     `TiltSeriesConfig.volume_path`) plus one copick-style .ndjson pick file

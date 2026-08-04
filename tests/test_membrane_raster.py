@@ -1,12 +1,12 @@
 import torch
 
-from specter.specimen._membrane_field import MembraneField, generate_membrane_field
-from specter.specimen._membrane_profile import (
+from specter.specimen.membrane._field import MembraneField, generate_membrane_field
+from specter.specimen.membrane._profile import (
     BilayerProfile,
     build_reference_lipid_patch,
     compute_bilayer_profile,
 )
-from specter.specimen._membrane_raster import rasterize_membrane_density
+from specter.specimen.membrane._raster import rasterize_membrane_density
 
 
 def _synthetic_bilayer_profile() -> BilayerProfile:

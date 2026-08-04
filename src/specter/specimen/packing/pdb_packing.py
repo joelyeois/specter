@@ -1,10 +1,10 @@
 """
 SpherePackingSpecimenGenerator: builds a specimen volume by packing several
 PDB-derived protein species -- each at its own real physical size, from
-``PDB.max_diameter`` -- via hard-sphere Random Sequential Addition
-(:func:`specter.crowding.pack_hard_spheres_3d`), then rendering each
-accepted instance's real high-resolution scattering potential
-(``PotentialBuilder``) at its packed position and a random rotation.
+``PDB.max_diameter`` -- via hard-sphere packing (:mod:`.algorithms`), then
+rendering each accepted instance's real high-resolution scattering
+potential (``PotentialBuilder``) at its packed position and a random
+rotation.
 
 A third, independent alternative alongside specter's other two specimen
 generators -- ``specimen/cryoet.py``'s ``CryoETSpecimenGenerator`` (polnet
@@ -13,16 +13,18 @@ SAWLC placement + membranes) and ``specimen/cryotomosim.py``'s
 Monte Carlo with direct density-overlap testing). This one approximates
 each species as a bounding sphere for placement (not the true molecular
 shape, unlike the other two -- a real cost in packing fidelity for oddly
-shaped molecules), in exchange for speed: ``pack_hard_spheres_3d`` resolves
-many candidates' accept/reject decisions per pass instead of one at a time,
+shaped molecules), in exchange for speed and density: `packing_method="rsa"`
+(default, :func:`.algorithms.pack_hard_spheres_3d`) resolves many
+candidates' accept/reject decisions per pass instead of one at a time,
 roughly 90x faster than a naive one-candidate-at-a-time loop at a few
-thousand instances (see ``dev/packing_algorithms.py`` for the full
-algorithm comparison -- RSA vs. force-biased vs. Lubachevsky-Stillinger,
-sequential vs. batched vs. voxel-grid -- this was promoted from). No
-membranes, ice, or carbon film here -- just densely packed protein species
-at whatever occupancy fraction and species-ratio mix is requested; layer
-ice on top separately (e.g. ``specter.ice.blend_ice_into_volume``) if
-needed.
+thousand instances; `packing_method="dense"`
+(:func:`.algorithms.pack_hard_spheres_3d_dense`) trades that speed for
+substantially higher occupancy via periodic force-biased relaxation (see
+``dev/packing_algorithms.py`` for the full algorithm comparison this pair
+was promoted from). No membranes, ice, or carbon film here -- just densely
+packed protein species at whatever occupancy fraction and species-ratio mix
+is requested; layer ice on top separately (e.g.
+``specter.ice.blend_ice_into_volume``) if needed.
 """
 
 from __future__ import annotations
@@ -30,14 +32,21 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 import numpy as np
 import torch
 
-from ..crowding import insert_particles_into_micrograph, pack_hard_spheres_3d
-from ..pdb import PDB
-from ..potential import PotentialBuilder
-from ..rotations import build_affine_matrix, random_rotation_matrix, rotate_volume
+from ...arrays import clip_insert_bounds
+from ...crowding import insert_particles_into_micrograph
+from ...pdb import PDB
+from ...potential import PotentialBuilder
+from ...rotations import build_affine_matrix, random_rotation_matrix, rotate_volume
+from .algorithms import (
+    draw_species_pool,
+    pack_hard_spheres_3d,
+    pack_hard_spheres_3d_dense,
+)
 
 # specter.potential.compute_supersampling_parameters's own default atomic
 # kernel width (potential.py: width_atom=5.0) -- each atom's own potential
@@ -50,6 +59,15 @@ from ..rotations import build_affine_matrix, random_rotation_matrix, rotate_volu
 # crowding/pdb/potential/rotations, matching cryotomosim.py's own
 # zero-cross-generator-coupling convention.
 ATOM_KERNEL_HALF_WIDTH_A = 2.5
+
+# Binarization threshold for per-instance label masks, as a fraction of
+# that species' own unrotated template peak. `rotate_volume`'s trilinear
+# resampling leaves tiny non-zero "bleed" density just outside a shape's
+# true edge (see specimen/packing/tetris.py's docstring on the same
+# issue) -- thresholding relative to each species' own peak (rather than a
+# fixed absolute value) keeps the bar equally strict across species whose
+# absolute potential scale differs with atomic composition.
+_INSTANCE_LABEL_REL_THRESHOLD = 0.01
 
 
 def estimate_protein_box_size(max_diameter: float, v_size: float) -> int:
@@ -71,6 +89,42 @@ def estimate_protein_box_size(max_diameter: float, v_size: float) -> int:
     n = int(np.ceil((max_diameter + 2 * margin_a) / v_size))
     n += n % 2
     return n
+
+
+def _insert_instance_labels(
+    binarized: torch.Tensor,
+    positions: torch.Tensor,
+    pixel_size: float,
+    labels: torch.Tensor,
+) -> torch.Tensor:
+    """Stamp per-instance integer labels into a shared label volume. Same
+    clip-insert bookkeeping as `insert_particles_into_micrograph`, but
+    overwriting each destination voxel with the instance id (not summing
+    density) -- `labels[dst]` only changes where `binarized[src] > 0`, so
+    already-labeled voxels from earlier instances are preserved (placement
+    already keeps instances non-overlapping given `gap_angstrom`, so this
+    should be a formality, not a real conflict resolution)."""
+    N, Zp, Yp, Xp = binarized.shape
+    device = binarized.device
+    Z, Y, X = labels.shape
+    positions = positions.to(device)
+    positions_int = (positions / pixel_size).round().long()
+    cz_center, cy_center, cx_center = Z // 2, Y // 2, X // 2
+
+    for i in range(N):
+        cx_index = cx_center + int(positions_int[i, 0].item())
+        cy_index = cy_center + int(positions_int[i, 1].item())
+        cz_index = cz_center + int(positions_int[i, 2].item())
+        bounds = clip_insert_bounds(
+            (cz_index, cy_index, cx_index), (Zp, Yp, Xp), (Z, Y, X)
+        )
+        if bounds is None:
+            continue
+        dst, src = bounds
+        chunk = binarized[i][src]
+        labels[dst] = torch.where(chunk > 0, chunk, labels[dst])
+
+    return labels
 
 
 @dataclass
@@ -103,13 +157,15 @@ class SpherePlacement:
     species_id: str  # the owning spec's pdb_source
     position_xyz: torch.Tensor  # (3,) physical Angstrom, box-centered
     rotation_matrix: torch.Tensor  # (3, 3)
+    # 1-based; matches this instance's voxel value in `instance_labels`
+    instance_id: int
 
 
 class SpherePackingSpecimenGenerator:
     """
     Packs several PDB-derived protein species into a volume via hard-sphere
-    RSA, sized to each species' own real physical radius, then renders each
-    placed instance's real scattering potential.
+    packing, sized to each species' own real physical radius, then renders
+    each placed instance's real scattering potential.
 
     Parameters
     ----------
@@ -127,13 +183,47 @@ class SpherePackingSpecimenGenerator:
         `gap_angstrom`) -- an `occupancy_fraction` whose implied
         excluded-volume fraction exceeds the random-close-packing ceiling
         for spheres (~0.64) is not physically achievable by any packing
-        algorithm; `pack_hard_spheres_3d` will simply place as many
+        algorithm; the packing backend will simply place as many
         candidates as fit rather than erroring -- compare
         `len(placements)` to `n_candidates` below to see how much of the
-        target was actually reached. Default 0.2.
+        target was actually reached (only meaningful for
+        `packing_method="rsa"`; see that parameter). Default 0.2.
     gap_angstrom : float, optional
         Minimum clearance between placed spheres' surfaces, Angstrom
         (steric/hydration-shell buffer). Default 5.0.
+    packing_method : {"rsa", "dense"}, optional
+        Packing backend. "rsa" (default,
+        :func:`.algorithms.pack_hard_spheres_3d`) is fast (sub-second to a
+        few seconds at a few thousand instances) but capped by RSA's
+        jamming limit (~28-41% occupancy depending on species-size
+        diversity). "dense" (:func:`.algorithms.pack_hard_spheres_3d_dense`)
+        is typically denser via periodic force-biased relaxation, at the
+        cost of a few minutes of wall time at a few thousand instances --
+        see that function's own docstring for the pad/relax/crop technique
+        it uses and an important caveat: its density advantage is reliable
+        well below the physical jamming ceiling, but becomes "best effort"
+        (and less reproducible across machines) as `occupancy_fraction` is
+        pushed toward it. Default "rsa".
+    pad_fraction : float, optional
+        Only used when `packing_method="dense"` -- passed straight through
+        to `pack_hard_spheres_3d_dense`'s `pad_fraction`. Default 0.5. That
+        function's own docstring has an important caveat for small
+        `target_shape`/large-species combinations: `occupancy_fraction` can
+        be substantially undershot when a species' diameter is a large
+        fraction of `target_shape`'s smallest extent -- a warning is raised
+        in that regime.
+    clip_axes : tuple of bool, optional
+        (z, y, x), matching `target_shape`'s own axis order. True on an
+        axis means placed spheres are allowed to extend past that wall --
+        they're truncated naturally when rendered (`insert_particles_into_
+        micrograph` already clips at volume boundaries) rather than being
+        rejected/discarded outright. False (default, all axes) requires
+        every instance's full extent to fit within `target_shape`. Useful
+        e.g. for a tomogram whose xy field of view is a crop of a larger
+        cellular region (edge particles there are fine to truncate) but
+        whose z extent is a real specimen-thickness boundary particles
+        should not cross: `clip_axes=(False, True, True)`. Passed straight
+        through to whichever backend `packing_method` selects.
     pdb_cache_dir : str, optional
         Directory for downloaded PDB/mmCIF files. Default "../pdb-data/".
     parameterization : str, optional
@@ -142,11 +232,10 @@ class SpherePackingSpecimenGenerator:
     seed : int, optional
         Random seed.
     device : str or torch.device, optional
-        Device for the packing step (`pack_hard_spheres_3d`) -- see that
-        function's own docstring on why "cpu" (the default) has
-        outperformed "cuda" at every scale tested so far. Rotation/
-        rendering always happens on CPU regardless (this generator doesn't
-        move volumes to GPU).
+        Device for the packing step -- see `pack_hard_spheres_3d`'s own
+        docstring on why "cpu" (the default) has outperformed "cuda" at
+        every scale tested so far. Rotation/rendering always happens on
+        CPU regardless (this generator doesn't move volumes to GPU).
     chunk_size : int, optional
         Number of instances to rotate per batch, per species -- caps peak
         memory when a species has many placed instances (mirrors
@@ -158,7 +247,17 @@ class SpherePackingSpecimenGenerator:
     placements : list of SpherePlacement
         Every successfully placed instance, set after `generate()` runs.
     n_candidates : int
-        Size of the drawn candidate pool, set after `generate()` runs.
+        Size of the drawn candidate pool, set after `generate()` runs. Only
+        directly meaningful for `packing_method="rsa"` -- the "dense"
+        backend draws its own, larger, padded-box candidate pool
+        internally and does not track an unmet target size, so this is
+        just set equal to the number of instances actually placed.
+    instance_labels : torch.Tensor
+        Per-instance integer label volume, shape `target_shape`, dtype
+        int32. 0 is background; each placed instance's voxels (its
+        rotated template, thresholded at `_INSTANCE_LABEL_REL_THRESHOLD` of
+        that species' own peak) carry its `SpherePlacement.instance_id`.
+        Set after `generate()` runs.
     """
 
     def __init__(
@@ -168,6 +267,9 @@ class SpherePackingSpecimenGenerator:
         v_size: float = 5.0,
         occupancy_fraction: float = 0.2,
         gap_angstrom: float = 5.0,
+        packing_method: Literal["rsa", "dense"] = "rsa",
+        pad_fraction: float = 0.5,
+        clip_axes: tuple[bool, bool, bool] = (False, False, False),
         pdb_cache_dir: str = "../pdb-data/",
         parameterization: str = "kirkland",
         seed: int | None = None,
@@ -176,11 +278,18 @@ class SpherePackingSpecimenGenerator:
     ):
         if not protein_specs:
             raise ValueError("protein_specs must be non-empty")
+        if packing_method not in ("rsa", "dense"):
+            raise ValueError(
+                f"packing_method must be 'rsa' or 'dense', got {packing_method!r}"
+            )
         self.protein_specs = protein_specs
         self.target_shape = target_shape
         self.v_size = v_size
         self.occupancy_fraction = occupancy_fraction
         self.gap_angstrom = gap_angstrom
+        self.packing_method = packing_method
+        self.pad_fraction = pad_fraction
+        self.clip_axes = clip_axes
         self.pdb_cache_dir = pdb_cache_dir
         self.parameterization = parameterization
         self.seed = seed
@@ -189,42 +298,7 @@ class SpherePackingSpecimenGenerator:
 
         self.placements: list[SpherePlacement] = []
         self.n_candidates = 0
-
-    def _draw_instance_pool(
-        self,
-        species_radii: torch.Tensor,
-        species_ratios: torch.Tensor,
-        box_volume: float,
-        gen: torch.Generator,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Draw a candidate instance pool (one row per sphere to attempt
-        placing) whose combined bare-sphere volume reaches
-        `occupancy_fraction * box_volume`, species drawn with probability
-        proportional to `species_ratios`. Returns (radii, species_idx),
-        both length N, sorted largest-radius-first (matches
-        `pack_hard_spheres_3d`'s own largest-first staging, though it
-        re-groups by radius internally regardless of input order)."""
-        target_volume = self.occupancy_fraction * box_volume
-        probs = species_ratios / species_ratios.sum()
-
-        radii_list: list[float] = []
-        species_list: list[int] = []
-        accumulated = 0.0
-        for _ in range(1_000_000):  # defensive cap, see draw_instance_pool precedent
-            if accumulated >= target_volume:
-                break
-            k = int(torch.multinomial(probs, 1, generator=gen))
-            r = float(species_radii[k])
-            radii_list.append(r)
-            species_list.append(k)
-            accumulated += (4.0 / 3.0) * torch.pi * r**3
-
-        radii = torch.tensor(radii_list)
-        species_idx = torch.tensor(species_list, dtype=torch.long)
-        if radii.numel() > 0:
-            perm = torch.argsort(radii, descending=True)
-            radii, species_idx = radii[perm], species_idx[perm]
-        return radii, species_idx
+        self.instance_labels: torch.Tensor | None = None
 
     def generate(self) -> torch.Tensor:
         """
@@ -235,10 +309,10 @@ class SpherePackingSpecimenGenerator:
         torch.Tensor
             Shape `target_shape`, dtype float32.
         """
-        gen = torch.Generator()
         if self.seed is not None:
-            torch.manual_seed(self.seed)
-            gen.manual_seed(self.seed)
+            torch.manual_seed(
+                self.seed
+            )  # random_rotation_matrix has no generator= param
 
         pdbs = [
             PDB(spec.pdb_source, savefolder=self.pdb_cache_dir, verbose=False)
@@ -254,18 +328,42 @@ class SpherePackingSpecimenGenerator:
         )
         box_volume = box[0] * box[1] * box[2]
 
-        pool_radii, pool_species_idx = self._draw_instance_pool(
-            species_radii, species_ratios, box_volume, gen
-        )
-        self.n_candidates = int(pool_radii.numel())
-
-        coords, accepted_idx = pack_hard_spheres_3d(
-            pool_radii, box, gap=self.gap_angstrom, seed=self.seed, device=self.device
-        )
-        accepted_species_idx = pool_species_idx[accepted_idx]
+        if self.packing_method == "rsa":
+            pool_radii, pool_species_idx = draw_species_pool(
+                species_radii,
+                species_ratios,
+                self.occupancy_fraction,
+                box_volume,
+                seed=self.seed,
+            )
+            self.n_candidates = int(pool_radii.numel())
+            coords, accepted_idx = pack_hard_spheres_3d(
+                pool_radii,
+                box,
+                gap=self.gap_angstrom,
+                seed=self.seed,
+                device=self.device,
+                clip_axes=self.clip_axes,
+            )
+            accepted_species_idx = pool_species_idx[accepted_idx]
+        else:
+            coords, _radii_out, accepted_species_idx = pack_hard_spheres_3d_dense(
+                species_radii,
+                species_ratios,
+                self.occupancy_fraction,
+                box,
+                gap=self.gap_angstrom,
+                seed=self.seed,
+                device=self.device,
+                pad_fraction=self.pad_fraction,
+                clip_axes=self.clip_axes,
+            )
+            self.n_candidates = int(coords.shape[0])
 
         volume = torch.zeros(self.target_shape, dtype=torch.float32)
+        instance_labels = torch.zeros(self.target_shape, dtype=torch.int32)
         self.placements = []
+        next_instance_id = 1
 
         for species_i, spec in enumerate(self.protein_specs):
             mask = accepted_species_idx == species_i
@@ -280,7 +378,8 @@ class SpherePackingSpecimenGenerator:
                 progressbars=False,
                 parameterization=self.parameterization,
             )
-            template = builder.forward(pdb.coordinates, method="3d")
+            template = builder.forward(pdb.coordinates, method="analytic")
+            label_threshold = _INSTANCE_LABEL_REL_THRESHOLD * float(template.max())
 
             species_coords = coords[mask]
             n_instances = species_coords.shape[0]
@@ -288,6 +387,11 @@ class SpherePackingSpecimenGenerator:
             if R.dim() == 2:
                 R = R.unsqueeze(0)
             theta = build_affine_matrix(R)
+
+            instance_ids = torch.arange(
+                next_instance_id, next_instance_id + n_instances, dtype=torch.int32
+            )
+            next_instance_id += n_instances
 
             step = self.chunk_size or n_instances
             for start in range(0, n_instances, step):
@@ -301,6 +405,15 @@ class SpherePackingSpecimenGenerator:
                     pixel_size=self.v_size,
                     micrograph=volume,
                 )
+                binarized = (rotated > label_threshold).to(torch.int32) * instance_ids[
+                    start:end
+                ].view(-1, 1, 1, 1)
+                instance_labels = _insert_instance_labels(
+                    binarized,
+                    species_coords[start:end],
+                    pixel_size=self.v_size,
+                    labels=instance_labels,
+                )
 
             for i in range(n_instances):
                 self.placements.append(
@@ -308,9 +421,11 @@ class SpherePackingSpecimenGenerator:
                         species_id=spec.pdb_source,
                         position_xyz=species_coords[i],
                         rotation_matrix=R[i],
+                        instance_id=int(instance_ids[i]),
                     )
                 )
 
+        self.instance_labels = instance_labels
         return volume
 
     def export_picks(
@@ -329,12 +444,12 @@ class SpherePackingSpecimenGenerator:
 
         Coordinates are converted from this generator's box-centered
         convention (`SpherePlacement.position_xyz`, origin at the volume's
-        center, matching `crowding.pack_hard_spheres_3d`) to the
-        corner-relative (``0..extent``) convention copick/the portal
-        actually use -- the same conversion `CryoETSpecimenGenerator.
-        export_picks` performs, just starting from a different internal
-        coordinate origin (see that method's own docstring for the
-        underlying axis-convention note).
+        center, matching `pack_hard_spheres_3d`) to the corner-relative
+        (``0..extent``) convention copick/the portal actually use -- the
+        same conversion `CryoETSpecimenGenerator.export_picks` performs,
+        just starting from a different internal coordinate origin (see
+        that method's own docstring for the underlying axis-convention
+        note).
 
         Must be called after `generate()`.
 

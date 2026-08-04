@@ -1,8 +1,8 @@
 import pytest
 import torch
 
-from specter.specimen._membrane_field import MembraneField, blend_field, MetaballSource
-from specter.specimen._membrane_placement import (
+from specter.specimen.membrane._field import MembraneField, blend_field, MetaballSource
+from specter.specimen.membrane._placement import (
     align_principal_axis_to_z,
     align_transmembrane_depth,
     orientation_for_normal,

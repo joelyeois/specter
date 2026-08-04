@@ -29,10 +29,10 @@ from dataclasses import dataclass
 
 import torch
 
-from ..atom import atom_number
-from ..potential import PotentialBuilder
+from ...atom import atom_number
+from ...potential import PotentialBuilder
 
-# Same value as specimen/pdb_packing.py's, specimen/polnet_bridge.py's, and
+# Same value as specimen/packing/pdb_packing.py's, specimen/polnet_bridge.py's, and
 # specimen/cryotomosim.py's own independent copies of this constant -- each
 # specimen generator keeps its own rather than importing, so this module's
 # dependencies stay limited to atom/potential.

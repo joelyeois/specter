@@ -2,7 +2,7 @@
 Transmembrane insertion geometry: surface site sampling and normal-aligned
 orientation.
 
-Because a :class:`~specter.specimen._membrane_field.MembraneField` is a
+Because a :class:`~specter.specimen.membrane._field.MembraneField` is a
 dense signed field defined everywhere (not just at mesh vertices), the local
 surface normal at any candidate insertion point is just its gradient --
 exact, and available via Newton projection without a mesh or a KD-tree
@@ -19,7 +19,7 @@ import math
 import roma
 import torch
 
-from ._membrane_field import MembraneField
+from ._field import MembraneField
 
 
 def _project_to_surface(

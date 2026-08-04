@@ -1,7 +1,7 @@
 import pytest
 import torch
 
-from specter.specimen._membrane_generator import (
+from specter.specimen.membrane._generator import (
     MembraneGenerator,
     TransmembraneSpec,
 )
@@ -108,11 +108,11 @@ def test_build_template_uses_analytic_method_matching_membrane_profile():
     # builder now actually calls PotentialBuilder with method="analytic".
     from specter.pdb import PDB
     from specter.potential import PotentialBuilder
-    from specter.specimen._membrane_placement import (
+    from specter.specimen.membrane._placement import (
         align_principal_axis_to_z,
         align_transmembrane_depth,
     )
-    from specter.specimen.pdb_packing import estimate_protein_box_size
+    from specter.specimen.packing import estimate_protein_box_size
 
     gen = MembraneGenerator(
         pdb_cache_dir="pdb-data/",

@@ -2,14 +2,14 @@
 Public membrane specimen generator.
 
 Ties together the four membrane submodules built this session into one
-class: organic shape (``_membrane_field``), calibrated bilayer potential
-(``_membrane_profile``), anti-aliased rasterization onto an output grid
-(``_membrane_raster``), and normal-aligned transmembrane protein insertion
-(``_membrane_placement``).
+class: organic shape (``_field``), calibrated bilayer potential
+(``_profile``), anti-aliased rasterization onto an output grid
+(``_raster``), and normal-aligned transmembrane protein insertion
+(``_placement``).
 
 Everything shares one centered-origin physical coordinate frame: physical
 ``(0, 0, 0)`` is the volume's own center, matching the convention already
-used throughout ``_membrane_field``/``_membrane_raster``. This generator
+used throughout ``_field``/``_raster``. This generator
 does not yet support placing a membrane instance off-center within a larger
 tomogram -- that compositing step belongs to a higher-level assembler, the
 same way the other specimen generators in this package are used standalone
@@ -22,24 +22,24 @@ from dataclasses import dataclass
 
 import torch
 
-from ..arrays import clip_insert_bounds
-from ..pdb import PDB
-from ..potential import PotentialBuilder
-from ..rotations import build_affine_matrix, rotate_volume
-from ._membrane_field import MembraneField, generate_membrane_field
-from ._membrane_placement import (
+from ...arrays import clip_insert_bounds
+from ...pdb import PDB
+from ...potential import PotentialBuilder
+from ...rotations import build_affine_matrix, rotate_volume
+from ..packing import estimate_protein_box_size
+from ._field import MembraneField, generate_membrane_field
+from ._placement import (
     align_principal_axis_to_z,
     align_transmembrane_depth,
     orientation_for_normal,
     sample_surface_sites,
 )
-from ._membrane_profile import (
+from ._profile import (
     BilayerProfile,
     build_reference_lipid_patch,
     compute_bilayer_profile,
 )
-from ._membrane_raster import rasterize_membrane_density
-from .pdb_packing import estimate_protein_box_size
+from ._raster import rasterize_membrane_density
 
 
 @dataclass
@@ -58,7 +58,7 @@ class TransmembraneSpec:
         Boolean mask, same atom order as the loaded structure's
         coordinates, selecting the transmembrane span. Default None, which
         centers the full structure's z-extent instead (see
-        :func:`~specter.specimen._membrane_placement.align_transmembrane_depth`).
+        :func:`~specter.specimen.membrane._placement.align_transmembrane_depth`).
         Ignored when ``template`` is supplied -- depth alignment must
         already be baked into a prebuilt template.
     parameterization : str, optional
@@ -103,7 +103,7 @@ class MembraneGenerator:
         Source radius range, Angstrom. Default ``(150.0, 400.0)``.
     spread_a : float, optional
         Source center spread, Angstrom. Default is
-        :func:`~specter.specimen._membrane_field.generate_membrane_field`'s
+        :func:`~specter.specimen.membrane._field.generate_membrane_field`'s
         own default (a quarter of the working grid's smallest extent).
     noise_amplitude_a : float, optional
         Undulation noise amplitude, Angstrom. Default 15.0.
@@ -113,7 +113,7 @@ class MembraneGenerator:
         Curvature-capping relaxation steps. Default 30.
     n_lipids_per_leaflet : int, optional
         Reference lipid patch size for the calibrated bilayer profile (see
-        :func:`~specter.specimen._membrane_profile.build_reference_lipid_patch`).
+        :func:`~specter.specimen.membrane._profile.build_reference_lipid_patch`).
         Default 200.
     parameterization : str, optional
         PotentialBuilder parameterization for the lipid reference patch.
@@ -244,7 +244,7 @@ class MembraneGenerator:
             Angstrom. Default 40.0.
         max_attempts : int, optional
             Passed to
-            :func:`~specter.specimen._membrane_placement.sample_surface_sites`.
+            :func:`~specter.specimen.membrane._placement.sample_surface_sites`.
             Default is that function's own default.
 
         Returns

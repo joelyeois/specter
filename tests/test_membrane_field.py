@@ -4,7 +4,7 @@ import warnings
 import pytest
 import torch
 
-from specter.specimen._membrane_field import (
+from specter.specimen.membrane._field import (
     MembraneField,
     MetaballSource,
     _value_noise_grid,

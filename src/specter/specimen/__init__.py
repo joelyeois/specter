@@ -9,13 +9,14 @@ from .cryotomosim import (
     MembraneSpec,
     ProteinSpec,
 )
-from .pdb_packing import SpherePackingSpecimenGenerator, SphereProteinSpec
-from .tetris_packing import (
+from .packing import (
+    SpherePackingSpecimenGenerator,
+    SphereProteinSpec,
     TetrisPackingSpecimenGenerator,
     TetrisPlacement,
     TetrisProteinSpec,
 )
-from ._membrane_generator import (
+from .membrane import (
     MembraneGenerator,
     TransmembranePlacement,
     TransmembraneSpec,

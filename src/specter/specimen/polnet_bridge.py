@@ -116,7 +116,7 @@ def build_low_res_svol(
     mmer_id: str,
     v_size: float,
     scratch_dir: Path,
-    parameterization: str = "kirkland",
+    parameterization: str = "shtyrov",
 ) -> str:
     """Build a small placeholder potential map for one PDB species and save
     it as an MRC for polnet's cytosolic-protein placement to reference as
@@ -142,7 +142,7 @@ def build_low_res_svol(
         progressbars=False,
         parameterization=parameterization,
     )
-    vol = builder.forward(pdb.coordinates, method="3d")
+    vol = builder.forward(pdb.coordinates)
     vol_np = vol.detach().cpu().numpy().astype(np.float32)
 
     # vol_np is specter-native (Z, Y, X), which is ALSO raw-mrcfile's native

@@ -17,8 +17,10 @@ Two pieces of specter's existing, physically-accurate infrastructure ARE
 reused (both plain physics utilities, neither polnet-related):
 
 - ``specter.potential.PotentialBuilder`` -- every real protein species'
-  density is built from its actual PDB atomic coordinates via Kirkland/
-  Lobato scattering potentials, instead of CTS's own hand-tuned
+  density is built from its actual PDB atomic coordinates via
+  ``PotentialBuilder``'s own default (Shtyrov parameterization,
+  ``method="analytic"``; Kirkland/Lobato remain available via
+  ``parameterization=``), instead of CTS's own hand-tuned
   Z-plus-fractional-hydrogen atomic table (``helper_pdb2vol.m``'s ``edat``).
 - ``specter.ice`` (``RandomIcemaker`` by default, or any ``IceBank``
   instance) -- the ice/solvent layer uses real Kirkland-oxygen-potential-
@@ -602,7 +604,8 @@ class CryoTomoSimSpecimenGenerator:
         Directory for downloaded PDB/mmCIF files. Default "../pdb-data/".
     parameterization : str, optional
         Atomic scattering-factor parameterization for `PotentialBuilder`
-        ("kirkland" or "lobato"). Default "kirkland".
+        ("shtyrov", "kirkland", or "lobato"). Default "shtyrov", matching
+        `PotentialBuilder`'s own default.
     density_cutoff : float, optional
         Shared occupancy cutoff across all particle/bead placement,
         matching CTS's own default (``param_model.m``'s `density`).
@@ -623,7 +626,7 @@ class CryoTomoSimSpecimenGenerator:
         target_shape: tuple[int, int, int] = (128, 256, 256),
         v_size: float = 5.0,
         pdb_cache_dir: str = "../pdb-data/",
-        parameterization: str = "kirkland",
+        parameterization: str = "shtyrov",
         density_cutoff: float = 0.4,
         seed: int | None = None,
     ):
@@ -687,9 +690,7 @@ class CryoTomoSimSpecimenGenerator:
                 progressbars=False,
                 parameterization=self.parameterization,
             )
-            protein_templates[spec.pdb_source] = builder.forward(
-                pdb.coordinates, method="3d"
-            )
+            protein_templates[spec.pdb_source] = builder.forward(pdb.coordinates)
             protein_pdbs[spec.pdb_source] = pdb
 
         reference = _estimate_organic_potential_reference(

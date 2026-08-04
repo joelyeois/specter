@@ -29,6 +29,8 @@ from ..potential import PotentialBuilder
 from ..pdb import PDB
 from ..rotations import build_affine_matrix, rotate_volume
 from . import polnet_bridge as pb
+from .filament import FilamentSpec, place_filaments
+from .membrane._placement import align_principal_axis_to_z
 
 # Fine-tuning multiplier applied on top of the physically-derived membrane
 # potential baseline (see _estimate_organic_potential_reference): the
@@ -66,6 +68,16 @@ class CryoETSpecimenGenerator:
         "MB_DEN_CF_RG": (0.3, 0.5), "MB_MIN_RAD": 150.0, "MB_MAX_RAD": 300.0}``
         (ellipsoid uses MB_MIN_AXIS/MB_MAX_AXIS/MB_MAX_ECC instead of
         MB_MIN_RAD/MB_MAX_RAD; toroid uses MB_MIN_RAD/MB_MAX_RAD).
+    filament_specs : list of dict, optional
+        One dict per filament species, converted to a ``filament.FilamentSpec``
+        (see there for field meanings), e.g. ``{"code": "1TUB", "step": 85.0,
+        "flex_deg": 3.0, "n_filaments": 4}``, or just pass
+        ``dataclasses.asdict(filament.MICROTUBULE_SPEC)`` /
+        ``dataclasses.asdict(filament.ACTIN_SPEC)`` for the built-in
+        microtubule/actin presets. Unlike proteins/membranes, filaments are
+        placed by specter's own random-walk code (``filament.place_filaments``),
+        not polnet -- no low-res placement pass, no occupancy-aware packing
+        against the other species. Default None (no filaments).
     target_shape : tuple of int
         Output volume shape (Z, Y, X) in voxels, at target_v_size.
     target_v_size : float
@@ -84,7 +96,8 @@ class CryoETSpecimenGenerator:
         See DEFAULT_MEMBRANE_POTENTIAL_SCALE above.
     parameterization : str, optional
         Atomic scattering-factor parameterization for PotentialBuilder
-        ("kirkland" or "lobato"). Default "kirkland".
+        ("shtyrov", "kirkland", or "lobato"). Default "shtyrov", matching
+        `PotentialBuilder`'s own default.
     seed : int, optional
         Random seed for polnet's placement.
     verbose : bool, optional
@@ -102,17 +115,19 @@ class CryoETSpecimenGenerator:
         membrane_specs: list[dict],
         target_shape: tuple[int, int, int],
         target_v_size: float,
+        filament_specs: list[dict] | None = None,
         low_res_v_size: float = 10.0,
         low_res_shape: tuple[int, int, int] | None = None,
         scratch_dir: str | Path | None = None,
         pdb_cache_dir: str | Path | None = None,
         membrane_potential_scale: float = DEFAULT_MEMBRANE_POTENTIAL_SCALE,
-        parameterization: str = "kirkland",
+        parameterization: str = "shtyrov",
         seed: int | None = None,
         verbose: bool = True,
     ):
         self.protein_specs = protein_specs
         self.membrane_specs = membrane_specs
+        self.filament_specs = [FilamentSpec(**spec) for spec in (filament_specs or [])]
         self.target_shape = target_shape  # (Z, Y, X)
         self.target_v_size = target_v_size
         self.low_res_v_size = low_res_v_size
@@ -267,6 +282,24 @@ class CryoETSpecimenGenerator:
         return protein_instances, membrane_instances
 
     # ------------------------------------------------------------------
+    # Step 4: filament placement (specter-native, no polnet involved)
+    # ------------------------------------------------------------------
+    def _run_filament_placement(self) -> list:
+        if not self.filament_specs:
+            return []
+        generator = torch.Generator()
+        if self.seed is not None:
+            generator.manual_seed(self.seed)
+        instances = place_filaments(
+            self.filament_specs, self.target_shape, self.target_v_size, generator
+        )
+        self._log(
+            f"[cryoet] {len(instances)} filament monomer instance(s) placed "
+            f"({len(self.filament_specs)} species)"
+        )
+        return instances
+
+    # ------------------------------------------------------------------
     # Step 5: high-resolution assembly
     # ------------------------------------------------------------------
     def generate(self) -> torch.Tensor:
@@ -274,14 +307,16 @@ class CryoETSpecimenGenerator:
         specimen volume, shape target_shape, specter-native (Z, Y, X).
 
         Also stores the raw placements on self.protein_instances /
-        self.membrane_instances (lists of ProteinInstance/MembraneInstance,
-        see polnet_bridge.py) after this call, e.g. to inspect/plot SAWLC
-        chain membership yourself (group by (code, polymer)) rather than
-        just trusting the verbose-mode log summary.
+        self.membrane_instances / self.filament_instances (lists of
+        ProteinInstance/MembraneInstance, see polnet_bridge.py, and
+        FilamentInstance, see filament/_generator.py) after this call, e.g.
+        to inspect/plot SAWLC chain membership yourself (group by (code,
+        polymer)) rather than just trusting the verbose-mode log summary.
         """
         protein_instances, membrane_instances = self._run_low_res_placement()
         self.protein_instances = protein_instances
         self.membrane_instances = membrane_instances
+        self.filament_instances = self._run_filament_placement()
 
         self._log(
             f"[cryoet] high-res assembly: {self.target_shape} voxels "
@@ -291,6 +326,7 @@ class CryoETSpecimenGenerator:
 
         self._stamp_proteins(volume, protein_instances)
         self._stamp_membranes(volume, membrane_instances)
+        self._stamp_filaments(volume, self.filament_instances)
 
         return volume
 
@@ -300,6 +336,7 @@ class CryoETSpecimenGenerator:
         annotation_version: str = "1.0",
         oriented: bool = True,
         include_membranes: bool = True,
+        include_filaments: bool = True,
     ) -> dict[str, Path]:
         """Write one copick/CryoET-Data-Portal-style .ndjson pick file per
         placed species, matching the real portal's point-pick schema
@@ -326,6 +363,12 @@ class CryoETSpecimenGenerator:
             If True, also write one ``"point"`` file with each fitted
             membrane's center (no orientation/size -- just a location,
             since membranes aren't point particles).
+        include_filaments : bool, optional
+            If True, also write one ``"point"``/``"orientedPoint"`` file per
+            filament species, one row per monomer instance (same
+            oriented/point choice as proteins, via each instance's own
+            rotation_matrix -- no quaternion round-trip needed since
+            FilamentInstance already stores rotation_matrix directly).
 
         Returns
         -------
@@ -374,6 +417,29 @@ class CryoETSpecimenGenerator:
                     )
             written["membrane"] = path
 
+        if include_filaments and getattr(self, "filament_instances", None):
+            by_filament_code: dict[str, list] = {}
+            for inst in self.filament_instances:
+                by_filament_code.setdefault(inst.code, []).append(inst)
+            for code, insts in by_filament_code.items():
+                path = (
+                    output_dir
+                    / f"{code}-{annotation_version}_{point_type.lower()}.ndjson"
+                )
+                with open(path, "w") as f:
+                    for inst in insts:
+                        x, y, z = (float(v) for v in inst.position_xyz)
+                        row = {
+                            "type": point_type,
+                            "location": {"x": x, "y": y, "z": z},
+                        }
+                        if oriented:
+                            row["xyz_rotation_matrix"] = (
+                                inst.rotation_matrix.numpy().tolist()
+                            )
+                        f.write(json.dumps(row) + "\n")
+                written[code] = path
+
         return written
 
     def _stamp_proteins(self, volume: torch.Tensor, instances: list) -> None:
@@ -392,7 +458,7 @@ class CryoETSpecimenGenerator:
                 parameterization=self.parameterization,
             )
             # specter-native (Z, Y, X), matches rotate_volume's expectation.
-            templates[code] = builder.forward(pdb.coordinates, method="3d")
+            templates[code] = builder.forward(pdb.coordinates)
             self._log(
                 f"[cryoet]   {code}: high-res potential ({n}^3 @ "
                 f"{self.target_v_size} A/vx) built in {time.time() - t0:.1f}s"
@@ -451,6 +517,48 @@ class CryoETSpecimenGenerator:
             )
         self._log(
             f"[cryoet] stamped {len(instances)} membrane instance(s) "
+            f"in {time.time() - t0:.1f}s"
+        )
+
+    def _stamp_filaments(self, volume: torch.Tensor, instances: list) -> None:
+        # One high-res potential per unique monomer species, built once --
+        # same caching shape as _stamp_proteins, except the coordinates are
+        # first PCA-realigned (align_principal_axis_to_z) so the monomer's
+        # own longest axis -- its stacking axis, see filament/_placement.py
+        # -- lands along local +Z before rendering, matching what
+        # filament_orientations' rotations assume they're rotating.
+        species = sorted({inst.code for inst in instances})
+        templates: dict[str, torch.Tensor] = {}
+        for code in species:
+            t0 = time.time()
+            pdb = self._get_pdb(code)
+            n = pb.estimate_protein_box_size(pdb.max_diameter, self.target_v_size)
+            builder = PotentialBuilder(
+                n_xyz=n,
+                dx=self.target_v_size,
+                atomic_numbers=pdb.atomic_numbers,
+                progressbars=False,
+                parameterization=self.parameterization,
+            )
+            aligned_coordinates = align_principal_axis_to_z(pdb.coordinates)
+            templates[code] = builder.forward(aligned_coordinates)
+            self._log(
+                f"[cryoet]   {code}: high-res filament monomer potential "
+                f"({n}^3 @ {self.target_v_size} A/vx) built in "
+                f"{time.time() - t0:.1f}s"
+            )
+
+        t0 = time.time()
+        for inst in instances:
+            template = templates[inst.code]
+            theta = build_affine_matrix(inst.rotation_matrix)
+            rotated = rotate_volume(template, theta, padding_mode="zeros")[0]
+            center_vx_zyx = torch.flip(
+                inst.position_xyz / self.target_v_size, dims=[0]
+            ).numpy()
+            _insert_clipped(volume, rotated, center_vx_zyx)
+        self._log(
+            f"[cryoet] stamped {len(instances)} filament monomer instance(s) "
             f"in {time.time() - t0:.1f}s"
         )
 

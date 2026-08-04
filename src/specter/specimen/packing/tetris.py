@@ -361,7 +361,7 @@ class TetrisPackingSpecimenGenerator:
             progressbars=False,
             parameterization=self.parameterization,
         )
-        return builder.forward(pdb.coordinates, method="3d").to(self.device)
+        return builder.forward(pdb.coordinates).to(self.device)
 
     def _rotate_template(
         self, template: torch.Tensor, rotation_matrix: torch.Tensor

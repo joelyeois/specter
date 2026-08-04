@@ -18,6 +18,7 @@ before being composited.
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass
 
 import torch
@@ -124,6 +125,27 @@ class MembraneGenerator:
     pdb_cache_dir : str, optional
         Passed to `PDB` for PDB-backed transmembrane specs. Default
         "../pdb-data/".
+    max_field_voxels : int, optional
+        Safety cap on the working field grid's total voxel count. The
+        field's own spacing is derived to resolve the bilayer's physical
+        extent (see `generate`'s inline comment) independent of
+        `target_shape_zyx` -- fine at the small scales this was built and
+        tested at, but that spacing applied UNIFORMLY across a real
+        production-scale volume (hundreds of voxels per axis) produces a
+        working grid orders of magnitude larger than `target_shape_zyx`
+        itself: confirmed a (200, 600, 600)-voxel, 10 A/voxel target
+        implying a 500x1500x1500 (~1.1 billion voxel) field, ballooning to
+        50+ GB of resident memory across the several such arrays field
+        generation allocates, well past what's practical. If the naive
+        spacing would exceed this budget, it's coarsened (increased) just
+        enough to fit, with a warning -- a real, disclosed accuracy
+        tradeoff (a coarser-than-ideal field resolves the bilayer's own
+        sub-structure less crisply), not a silent one; this is a stopgap,
+        not a fix for the underlying issue (the field is one uniform grid
+        over the WHOLE domain regardless of how much of it is actually
+        near a membrane surface -- a real architectural limitation, worth
+        a proper adaptive/local-patch redesign later, not attempted here).
+        Default 200_000_000 (~800 MB at float32 per array).
     device : str or torch.device, optional
         Device for generation. Default "cpu".
     seed : int, optional
@@ -144,6 +166,7 @@ class MembraneGenerator:
         parameterization: str = "shtyrov",
         transmembrane_specs: list[TransmembraneSpec] | None = None,
         pdb_cache_dir: str = "../pdb-data/",
+        max_field_voxels: int = 200_000_000,
         device: str | torch.device = "cpu",
         seed: int | None = None,
     ):
@@ -160,6 +183,7 @@ class MembraneGenerator:
         self.parameterization = parameterization
         self.transmembrane_specs = transmembrane_specs or []
         self.pdb_cache_dir = pdb_cache_dir
+        self.max_field_voxels = max_field_voxels
         self.device = torch.device(device)
         self.seed = seed
 
@@ -205,6 +229,28 @@ class MembraneGenerator:
             int(torch.ceil(extent_a[1] / field_spacing_a)),
             int(torch.ceil(extent_a[0] / field_spacing_a)),
         )
+        n_field_voxels = field_shape_zyx[0] * field_shape_zyx[1] * field_shape_zyx[2]
+        if n_field_voxels > self.max_field_voxels:
+            # coarsen just enough to fit max_field_voxels (voxel count
+            # scales as 1/spacing^3) -- see max_field_voxels' own
+            # docstring for why this is needed and what it trades away.
+            field_spacing_a *= (n_field_voxels / self.max_field_voxels) ** (1.0 / 3.0)
+            field_shape_zyx = (
+                int(torch.ceil(extent_a[2] / field_spacing_a)),
+                int(torch.ceil(extent_a[1] / field_spacing_a)),
+                int(torch.ceil(extent_a[0] / field_spacing_a)),
+            )
+            warnings.warn(
+                f"MembraneGenerator: the working field grid at the resolution "
+                f"needed to fully resolve the bilayer ({n_field_voxels:,} voxels) "
+                f"exceeds max_field_voxels ({self.max_field_voxels:,}) -- "
+                f"coarsened field_spacing_a to {field_spacing_a:.2f} A "
+                f"({field_shape_zyx[2]}x{field_shape_zyx[1]}x{field_shape_zyx[0]} "
+                "voxels). The bilayer's own sub-structure will be resolved less "
+                "crisply than at full resolution; raise max_field_voxels if you "
+                "have the memory to spare.",
+                stacklevel=2,
+            )
         self.field = generate_membrane_field(
             shape_zyx=field_shape_zyx,
             spacing_a=field_spacing_a,

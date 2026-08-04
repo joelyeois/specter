@@ -228,7 +228,8 @@ class SpherePackingSpecimenGenerator:
         Directory for downloaded PDB/mmCIF files. Default "../pdb-data/".
     parameterization : str, optional
         Atomic scattering-factor parameterization for `PotentialBuilder`
-        ("kirkland" or "lobato"). Default "kirkland".
+        ("shtyrov", "kirkland", or "lobato"). Default "shtyrov", matching
+        `PotentialBuilder`'s own default.
     seed : int, optional
         Random seed.
     device : str or torch.device, optional
@@ -271,7 +272,7 @@ class SpherePackingSpecimenGenerator:
         pad_fraction: float = 0.5,
         clip_axes: tuple[bool, bool, bool] = (False, False, False),
         pdb_cache_dir: str = "../pdb-data/",
-        parameterization: str = "kirkland",
+        parameterization: str = "shtyrov",
         seed: int | None = None,
         device: str | torch.device = "cpu",
         chunk_size: int | None = None,

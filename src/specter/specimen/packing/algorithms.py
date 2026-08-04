@@ -42,6 +42,7 @@ import warnings
 from collections import defaultdict
 
 import torch
+import torch.nn.functional as F
 
 # Matches FORCE_SCALING_FACTOR in BezrukovJodreyToryStep.cpp:
 # https://github.com/VasiliBaranov/packing-generation/blob/master/PackingGeneration/Generation/PackingGenerators/Source/BezrukovJodreyToryStep.cpp
@@ -125,6 +126,9 @@ def pack_hard_spheres_3d(
     max_passes: int = 200,
     stall_patience: int = 15,
     clip_axes: tuple[bool, bool, bool] = (False, False, False),
+    exclusion_distance_field: torch.Tensor | None = None,
+    field_v_size: float | None = None,
+    sampling_mask: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Pack hard spheres of given (possibly different) radii into a box via
@@ -199,6 +203,54 @@ def pack_hard_spheres_3d(
         be a crop of a larger cellular region (so edge particles there are
         fine to be truncated) but whose z extent is a real specimen-
         thickness boundary particles should not cross.
+    exclusion_distance_field : torch.Tensor, optional
+        Physical distance (Angstrom) to the nearest FORBIDDEN voxel, shape
+        ``(Z, Y, X)``, on a box-centered grid at `field_v_size` spacing
+        (same centering convention `.membrane._raster.rasterize_membrane_
+        density` uses by default -- e.g. build this via ``scipy.ndimage.
+        distance_transform_edt`` on the complement of a boolean "forbidden"
+        mask). A candidate is rejected if the field, trilinearly sampled at
+        its center, is less than `radius + gap` -- i.e. its full sphere
+        (plus gap) must clear the forbidden region. This single mechanism
+        covers two distinct use cases with one field: hard obstacle
+        avoidance (forbidden = e.g. a membrane's own occupied shell) and
+        region restriction (forbidden = the complement of wherever this
+        species is allowed, e.g. everywhere outside a vesicle's lumen for a
+        lumen-only species) -- a caller wanting both combines them into one
+        mask (union) before taking the distance transform. Default None
+        (no exclusion). Points outside the field's own extent sample the
+        nearest boundary value (clamped, not wrapped).
+    field_v_size : float, optional
+        Voxel size of `exclusion_distance_field`/`sampling_mask`, Angstrom
+        (the two share one grid). Required if either is given. Trilinear
+        interpolation of a coarse `exclusion_distance_field` lets a
+        candidate's sampled distance run a little past the true
+        (exact-voxel) value near a boundary -- confirmed a couple of
+        Angstrom of bleed at `field_v_size=5` for `gap=2`, vanishing by
+        `field_v_size=2`; keep this fine relative to `gap` (or pad the
+        forbidden mask by a voxel or two before taking its distance
+        transform) if a hard guarantee matters more than exact `gap`
+        fidelity at the boundary.
+    sampling_mask : torch.Tensor, optional
+        Boolean mask, shape ``(Z, Y, X)``, same grid as
+        `exclusion_distance_field`. When given, candidates are drawn from a
+        uniformly random True voxel of this mask (plus sub-voxel jitter)
+        instead of uniformly across the whole `box`. This matters --
+        distinct from what `exclusion_distance_field` alone already gets
+        you -- whenever the geometrically valid region for a candidate's
+        CENTER is a small fraction of `box`'s own volume: uniform box-wide
+        sampling then has to blindly get lucky before rejection filtering
+        can even engage, e.g. confirmed a real case (packing into a small
+        vesicle lumen, valid region 0.008% of the box) placing 0 of 1
+        candidates within `max_passes`, purely from having astronomically
+        low odds of a hit at all, despite an exactly-computed valid region
+        genuinely existing. Restricting sampling to the allowed region (its
+        looser, unfiltered form -- e.g. the same region a corresponding
+        `exclusion_distance_field` was built to keep candidates fully
+        inside) fixes this by construction, the same technique
+        `specimen._cts_placement.ParticlePlacer` already uses via
+        `torch.nonzero(location_mask)`. Default None (uniform box-wide
+        sampling, the original behavior).
 
     Returns
     -------
@@ -212,6 +264,37 @@ def pack_hard_spheres_3d(
     """
     import vesin_torch
 
+    has_field_consumer = (
+        exclusion_distance_field is not None or sampling_mask is not None
+    )
+    if has_field_consumer != (field_v_size is not None):
+        raise ValueError(
+            "field_v_size is required together with (and only with) "
+            "exclusion_distance_field and/or sampling_mask"
+        )
+    if (
+        exclusion_distance_field is not None
+        and sampling_mask is not None
+        and exclusion_distance_field.shape != sampling_mask.shape
+    ):
+        raise ValueError(
+            "exclusion_distance_field and sampling_mask must have the same shape"
+        )
+
+    mask_voxel_positions_xyz: torch.Tensor | None = None
+    if sampling_mask is not None:
+        nz, ny, nx = sampling_mask.shape
+        voxel_idx_zyx = sampling_mask.nonzero(as_tuple=False)
+        if voxel_idx_zyx.shape[0] == 0:
+            raise ValueError("sampling_mask has no True voxels")
+        extent = (
+            torch.tensor([nx, ny, nz], dtype=torch.float32, device=device)
+            * field_v_size
+        )
+        origin = -0.5 * extent
+        idx_xyz = voxel_idx_zyx[:, [2, 1, 0]].to(device=device, dtype=torch.float32)
+        mask_voxel_positions_xyz = origin + (idx_xyz + 0.5) * field_v_size
+
     def _half_extents_xyz(box: tuple[float, float, float]) -> torch.Tensor:
         D, H, W = box
         return torch.tensor([W / 2, H / 2, D / 2], device=device)
@@ -219,6 +302,35 @@ def pack_hard_spheres_3d(
     def _box_dims_xyz(box: tuple[float, float, float]) -> torch.Tensor:
         D, H, W = box
         return torch.tensor([W, H, D], device=device)
+
+    def _sample_exclusion_distance(points_xyz: torch.Tensor) -> torch.Tensor:
+        """Trilinearly sample `exclusion_distance_field` at physical (x, y,
+        z) points on its own box-centered grid -- same normalized-grid
+        convention as `MembraneField._normalized_grid`, kept independent
+        (not imported) so `specimen/packing` stays uncoupled from
+        `specimen/membrane`."""
+        assert exclusion_distance_field is not None and field_v_size is not None
+        nz, ny, nx = exclusion_distance_field.shape
+        extent = (
+            torch.tensor([nx, ny, nz], dtype=points_xyz.dtype, device=device)
+            * field_v_size
+        )
+        origin = -0.5 * extent
+        idx = (points_xyz - origin) / field_v_size
+        norm = (
+            2.0
+            * (idx + 0.5)
+            / torch.tensor([nx, ny, nz], dtype=points_xyz.dtype, device=device)
+            - 1.0
+        )
+        grid = norm.view(1, -1, 1, 1, 3)
+        volume = exclusion_distance_field[None, None].to(
+            device=device, dtype=points_xyz.dtype
+        )
+        sampled = F.grid_sample(
+            volume, grid, mode="bilinear", padding_mode="border", align_corners=False
+        )
+        return sampled.reshape(points_xyz.shape[0])
 
     def _run_stage(
         row_idx: torch.Tensor,
@@ -232,17 +344,38 @@ def pack_hard_spheres_3d(
             if remaining.numel() == 0:
                 break
             cand_radii = radii[remaining]
-            cand = (
-                (torch.rand(remaining.numel(), 3, generator=gen, device=device) - 0.5)
-                * 2
-                * half
-            )
+            if mask_voxel_positions_xyz is not None:
+                assert field_v_size is not None
+                chosen = torch.randint(
+                    0,
+                    mask_voxel_positions_xyz.shape[0],
+                    (remaining.numel(),),
+                    generator=gen,
+                    device=device,
+                )
+                jitter = (
+                    torch.rand(remaining.numel(), 3, generator=gen, device=device) - 0.5
+                ) * field_v_size
+                cand = mask_voxel_positions_xyz[chosen] + jitter
+            else:
+                cand = (
+                    (
+                        torch.rand(remaining.numel(), 3, generator=gen, device=device)
+                        - 0.5
+                    )
+                    * 2
+                    * half
+                )
             # full sphere must fit on non-clippable axes; only the center
             # needs to stay in-bounds on clippable ones (see `clip_axes`).
             required_margin = torch.where(
                 clip_allowed_xyz.unsqueeze(0), 0.0, cand_radii.unsqueeze(1)
             )
             blocked = ((cand.abs() + required_margin) > half.unsqueeze(0)).any(dim=1)
+
+            if exclusion_distance_field is not None:
+                dist = _sample_exclusion_distance(cand)
+                blocked = blocked | (dist < cand_radii + gap)
 
             # candidates vs. already-accepted spheres (all prior stages
             # plus anything already accepted this stage)

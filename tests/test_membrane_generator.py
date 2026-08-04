@@ -1,3 +1,5 @@
+import warnings
+
 import pytest
 import torch
 
@@ -135,3 +137,41 @@ def test_build_template_uses_analytic_method_matching_membrane_profile():
     expected = builder.forward(coordinates, method="analytic")
 
     assert torch.allclose(template.cpu(), expected, atol=1e-3)
+
+
+def test_max_field_voxels_coarsens_and_warns_instead_of_exploding_memory():
+    """Regression test for a real production-scale finding: the naive
+    field spacing heuristic, applied uniformly to a large target_shape_zyx,
+    produced a ~1.1 billion voxel working grid (50+ GB resident across the
+    several such arrays field generation allocates) for a real
+    (200, 600, 600)-voxel/10A tomogram. A tiny max_field_voxels here forces
+    the same coarsening path at a scale cheap enough to test quickly."""
+    gen = MembraneGenerator(
+        target_shape_zyx=(32, 32, 32),
+        v_size=6.0,
+        n_sources=3,
+        radius_range_a=(20.0, 30.0),
+        spread_a=10.0,
+        noise_amplitude_a=0.0,
+        curvature_iterations=5,
+        n_lipids_per_leaflet=6,
+        max_field_voxels=1000,
+        seed=0,
+    )
+    with pytest.warns(UserWarning, match="coarsened field_spacing_a"):
+        volume = gen.generate()
+
+    assert volume.shape == (32, 32, 32)
+    assert torch.isfinite(volume).all()
+    assert gen.field is not None
+    n_field_voxels = (
+        gen.field.phi.shape[0] * gen.field.phi.shape[1] * gen.field.phi.shape[2]
+    )
+    assert n_field_voxels <= 1000 * 1.5  # ceil() rounding can push slightly over
+
+
+def test_max_field_voxels_default_does_not_warn_at_small_scale():
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", UserWarning)
+        gen = MembraneGenerator(seed=0, **_SMALL_KWARGS)
+        gen.generate()  # would raise if the coarsening warning fired

@@ -21,6 +21,11 @@ from .membrane import (
     TransmembranePlacement,
     TransmembraneSpec,
 )
+from .tomogram import (
+    MembraneTomogramGenerator,
+    TomogramPlacement,
+    TomogramProteinSpec,
+)
 
 __all__ = [
     "TomogramGenerator",
@@ -41,4 +46,7 @@ __all__ = [
     "MembraneGenerator",
     "TransmembranePlacement",
     "TransmembraneSpec",
+    "MembraneTomogramGenerator",
+    "TomogramPlacement",
+    "TomogramProteinSpec",
 ]

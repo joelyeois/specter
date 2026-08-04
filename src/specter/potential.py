@@ -1093,6 +1093,19 @@ class PotentialBuilder(L.LightningModule):
         own `(a, b)` coefficients (matched species, or the Peng `c4322`
         fallback) are looked up directly.
 
+        Vectorized as: one O(N) pass over `self.atom_species` assigning each
+        atom an integer group id (matched species string, or `("elem", z)`
+        for the fallback case) via plain dict/set lookups (cheap, no tensor
+        allocation per atom -- unlike an earlier version of this method,
+        which called `gemmi.Element(...)`/`torch.tensor(...)` inside a
+        Python loop over every individual atom; for a ~224k-atom structure
+        that took ~8s, ~12x slower than the equivalent Kirkland analytic
+        path on the same structure, entirely from this one loop), then a
+        single vectorized gather from a small (n_groups, 5) coefficient
+        table -- n_groups is bounded by the number of distinct species/
+        elements actually present (rarely more than a few dozen), not by
+        atom count.
+
         Returns
         -------
         a_coefs, b_coefs : torch.Tensor
@@ -1109,22 +1122,45 @@ class PotentialBuilder(L.LightningModule):
             )
         species_table = load_shtyrov_species_parameters(params_path)
 
-        n = len(self.atom_species)
-        a_coefs = torch.empty(n, 5, device=self.device)
-        b_coefs = torch.empty(n, 5, device=self.device)
+        group_of_atom: list[str | tuple[str, int]] = [
+            s if (s is not None and s in species_table) else ("elem", int(z))
+            for s, z in zip(self.atom_species, self.atomic_numbers.tolist())
+        ]
+
+        group_index: dict[str | tuple[str, int], int] = {}
+        group_ids: list[int] = []
+        for g in group_of_atom:
+            idx = group_index.get(g)
+            if idx is None:
+                idx = len(group_index)
+                group_index[g] = idx
+            group_ids.append(idx)
+
+        n_groups = len(group_index)
+        a_table = torch.empty(n_groups, 5)
+        b_table = torch.empty(n_groups, 5)
         fallback_elements: set[str] = set()
-        n_fallback = 0
-        for i, species in enumerate(self.atom_species):
-            if species is not None and species in species_table:
-                P = species_table[species]
-            else:
-                z = int(self.atomic_numbers[i])
+        fallback_group_id_list: list[int] = []
+        for g, idx in group_index.items():
+            if isinstance(g, tuple):
+                z = g[1]
                 coef = gemmi.Element(z).c4322
-                P = torch.stack([torch.tensor(coef.a), torch.tensor(coef.b)], dim=-1)
+                a_table[idx] = torch.tensor(coef.a)
+                b_table[idx] = torch.tensor(coef.b)
                 fallback_elements.add(str(atom_symbol(z)))
-                n_fallback += 1
-            a_coefs[i] = P[:, 0]
-            b_coefs[i] = P[:, 1]
+                fallback_group_id_list.append(idx)
+            else:
+                P = species_table[g]
+                a_table[idx] = P[:, 0]
+                b_table[idx] = P[:, 1]
+
+        group_ids_t = torch.tensor(group_ids, dtype=torch.long)
+        n_fallback = 0
+        if fallback_elements:
+            fallback_group_ids = torch.tensor(fallback_group_id_list)
+            n_fallback = int(torch.isin(group_ids_t, fallback_group_ids).sum().item())
+        a_coefs = a_table[group_ids_t].to(self.device)
+        b_coefs = b_table[group_ids_t].to(self.device)
 
         if fallback_elements and self._atom_species_explicitly_given:
             warnings.warn(
@@ -1144,6 +1180,10 @@ class PotentialBuilder(L.LightningModule):
         `atom_species` bonded typing was given — every atom uses its plain,
         unbonded per-element scattering factor (no species table lookup).
 
+        Vectorized per unique element (see `_get_analytic_atom_coefficients`
+        for why: same per-atom-Python-loop cost this method used to pay,
+        fixed the same way) rather than per atom.
+
         Returns
         -------
         a_coefs, b_coefs : torch.Tensor
@@ -1153,13 +1193,17 @@ class PotentialBuilder(L.LightningModule):
             return self._analytic_coefs
 
         atomic_numbers = self.atomic_numbers.to(self.device)
-        n = len(atomic_numbers)
-        a_coefs = torch.empty(n, 5, device=self.device)
-        b_coefs = torch.empty(n, 5, device=self.device)
-        for i in range(n):
-            coef = gemmi.Element(int(atomic_numbers[i])).c4322
-            a_coefs[i] = torch.tensor(coef.a)
-            b_coefs[i] = torch.tensor(coef.b)
+        unique_z, group_ids_t = torch.unique(atomic_numbers, return_inverse=True)
+
+        a_table = torch.empty(len(unique_z), 5, device=self.device)
+        b_table = torch.empty(len(unique_z), 5, device=self.device)
+        for i, z in enumerate(unique_z.tolist()):
+            coef = gemmi.Element(int(z)).c4322
+            a_table[i] = torch.tensor(coef.a)
+            b_table[i] = torch.tensor(coef.b)
+
+        a_coefs = a_table[group_ids_t]
+        b_coefs = b_table[group_ids_t]
 
         self._analytic_coefs = (a_coefs, b_coefs)
         return self._analytic_coefs

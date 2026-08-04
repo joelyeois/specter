@@ -195,6 +195,15 @@ class CTFParameters(nn.Module):
         at ``peak_phase_deg=0`` -- a genuine 0/0 upstream singularity that
         produces NaN, not a no-op. Use a small nonzero value (e.g. 1e-4) or
         omit ``lpp_params`` entirely instead.
+    dose : float | torch.Tensor, optional
+        Cumulative electron dose in e-/Angstrom^2, for
+        :class:`~specter.ctf.TransferFunction`'s dose envelope (Grant &
+        Grigorieff 2015). Not a torch-ctf argument at all -- like
+        ``aberrations.Aberration``, dose describes a specific exposure, not
+        a lens/specimen CTF property, so it's applied as a separate
+        post-hoc envelope rather than folded into ``torch_ctf_kwargs()``.
+        None (default) disables the dose envelope regardless of whether
+        ``TransferFunction`` was constructed with ``dose_envelope=True``.
     learnable : Iterable[str], optional
         Names to promote to ``nn.Parameter`` -- any of the scalar names
         above, a Zernike key (e.g. ``"Z33c"``), or ``"beam_tilt_mrad"``.
@@ -221,6 +230,7 @@ class CTFParameters(nn.Module):
         odd_zernike: dict[str, float | torch.Tensor] | None = None,
         beam_tilt_mrad: Iterable[float] | torch.Tensor | None = None,
         lpp_params: dict[str, float] | None = None,
+        dose: float | torch.Tensor | None = None,
         learnable: Iterable[str] = (),
         group_index: dict[str, torch.Tensor] | None = None,
     ) -> None:
@@ -304,6 +314,15 @@ class CTFParameters(nn.Module):
             )
         else:
             self.beam_tilt_mrad = None
+
+        if dose is not None:
+            self.dose: ParamField | None = ParamField(
+                torch.as_tensor(dose, dtype=torch.float32),
+                learnable="dose" in learnable,
+                group_index=group_index.get("dose"),
+            )
+        else:
+            self.dose = None
 
     def torch_ctf_kwargs(
         self,

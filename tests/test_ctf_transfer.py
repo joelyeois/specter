@@ -813,13 +813,98 @@ def test_forward_end_to_end_matches_old_aberration_ctf_model():
 # ---------------------------------------------------------------------------
 
 
-def test_unported_envelopes_fail_loudly_not_silently():
-    with pytest.raises(TypeError):
-        TransferFunction(N_PIXELS, PIXEL_SIZE, convergence_angle=1.0)  # type: ignore[call-arg]
-    with pytest.raises(TypeError):
-        TransferFunction(N_PIXELS, PIXEL_SIZE, cc=1.0)  # type: ignore[call-arg]
-    with pytest.raises(TypeError):
-        TransferFunction(N_PIXELS, PIXEL_SIZE, dose_envelope=True)  # type: ignore[call-arg]
+def test_cs_envelope_matches_old_aberration():
+    """Spatial-coherence (beam convergence) envelope -- needs the
+    defocus/Cs micrometers/mm -> Angstrom conversion at the call site."""
+    dfu, cs_ang = 15000.0, 2.7e7
+    old = _old_transfer(
+        {"dfu": torch.tensor(dfu), "cs": torch.tensor(cs_ang)},
+    )
+    old_full = Aberration(
+        N_PIXELS,
+        PIXEL_SIZE,
+        VOLTAGE,
+        aberration_model="holography",
+        convergence_angle=1.0,
+    )
+    old_t = old_full.transfer_function(
+        {"dfu": torch.tensor(dfu), "cs": torch.tensor(cs_ang)}
+    ).squeeze()
+
+    params = CTFParameters(
+        defocus=dfu / 1e4, spherical_aberration=cs_ang / 1e7, voltage=VOLTAGE
+    )
+    new_tf = TransferFunction(
+        N_PIXELS, PIXEL_SIZE, aberration_model="holography", convergence_angle=1.0
+    )
+    new_t = new_tf.transfer_function(params).squeeze()
+
+    assert torch.allclose(old_t, new_t, atol=1e-4)
+    # And it must actually do something (differ from the no-envelope case).
+    assert not torch.allclose(old_t, old, atol=1e-3)
+
+
+def test_cc_envelope_matches_old_aberration():
+    """Temporal-coherence (chromatic aberration) envelope."""
+    dfu, cs_ang = 15000.0, 2.7e7
+    old = Aberration(
+        N_PIXELS, PIXEL_SIZE, VOLTAGE, aberration_model="holography", cc=1.4e7
+    )
+    old_t = old.transfer_function(
+        {"dfu": torch.tensor(dfu), "cs": torch.tensor(cs_ang)}
+    ).squeeze()
+
+    params = CTFParameters(
+        defocus=dfu / 1e4, spherical_aberration=cs_ang / 1e7, voltage=VOLTAGE
+    )
+    new_tf = TransferFunction(
+        N_PIXELS, PIXEL_SIZE, aberration_model="holography", cc=1.4e7
+    )
+    new_t = new_tf.transfer_function(params).squeeze()
+
+    assert torch.allclose(old_t, new_t, atol=1e-4)
+
+
+def test_dose_envelope_matches_old_aberration():
+    """Grant & Grigorieff (2015) cumulative-dose envelope -- dose lives on
+    CTFParameters (matching old Aberration reading it from the same
+    per-image ctf_params dict as everything else), not as a
+    TransferFunction constructor convenience like bfactor."""
+    dfu, cs_ang = 15000.0, 2.7e7
+    old = Aberration(
+        N_PIXELS, PIXEL_SIZE, VOLTAGE, aberration_model="holography", dose_envelope=True
+    )
+    old_t = old.transfer_function(
+        {
+            "dfu": torch.tensor(dfu),
+            "cs": torch.tensor(cs_ang),
+            "dose": torch.tensor(40.0),
+        }
+    ).squeeze()
+
+    params = CTFParameters(
+        defocus=dfu / 1e4, spherical_aberration=cs_ang / 1e7, voltage=VOLTAGE, dose=40.0
+    )
+    new_tf = TransferFunction(
+        N_PIXELS, PIXEL_SIZE, aberration_model="holography", dose_envelope=True
+    )
+    new_t = new_tf.transfer_function(params).squeeze()
+
+    assert torch.allclose(old_t, new_t, atol=1e-4)
+
+
+def test_dose_envelope_disabled_without_ctf_params_dose():
+    """dose_envelope=True on TransferFunction but no dose on CTFParameters
+    must be a no-op (matches old Aberration's `"dose" in ctf_params` gate),
+    not an error."""
+    params = CTFParameters(defocus=1.0, spherical_aberration=2.7)
+    tf_with_envelope = TransferFunction(
+        N_PIXELS, PIXEL_SIZE, aberration_model="holography", dose_envelope=True
+    )
+    tf_without = TransferFunction(N_PIXELS, PIXEL_SIZE, aberration_model="holography")
+    assert torch.allclose(
+        tf_with_envelope.transfer_function(params), tf_without.transfer_function(params)
+    )
 
 
 # ---------------------------------------------------------------------------

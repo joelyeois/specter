@@ -15,8 +15,9 @@ import torch
 import torch.nn as nn
 from torch_ctf import calc_LPP_ctf_2D, calculate_ctf_2d
 
-from ..aberrations import b_envelope
+from ..aberrations import b_envelope, cc_envelope, cs_envelope, dose_envelope
 from ..arrays import kgrid_2d
+from ..constants import energy_to_wavelength
 from ..fft import fft2, ifft2
 from ._parameters import CTFParameters
 
@@ -56,10 +57,27 @@ class TransferFunction(nn.Module):
         absorption applied upstream (e.g. alpha=0 was used everywhere).
     bfactor : float | torch.Tensor, optional
         Isotropic B-factor envelope in Angstrom^2. None (default) disables
-        it. The only envelope ported so far -- Cs/Cc/dose envelopes need
-        unit conversions (CTFParameters' defocus/cs are in
-        micrometers/mm, aberrations._envelopes expects Angstrom) that
-        aren't wired up yet; see TODO in :meth:`forward`.
+        it.
+    convergence_angle : float, optional
+        Beam convergence semi-angle in milliradians, used for the Cs
+        (spatial coherence) envelope. None (default) disables it. Matches
+        ``aberrations.Aberration``'s constructor-level convenience exactly.
+    cc : float, optional
+        Chromatic aberration coefficient in Angstrom, used for the Cc
+        (temporal coherence) envelope. None (default) disables it.
+    energy_spread : float, optional
+        FWHM of the beam energy spread in eV, used by the Cc envelope.
+        Default 0.7.
+    deltaV_V : float, optional
+        Relative high-voltage instability, used by the Cc envelope.
+        Default 0.06e-6.
+    deltaI_I : float, optional
+        Relative objective-lens current instability, used by the Cc
+        envelope. Default 0.01e-6.
+    dose_envelope : bool, optional
+        Whether to apply the Grant & Grigorieff (2015) cumulative-dose
+        envelope, using ``ctf_params.dose`` (see :class:`CTFParameters`).
+        Default False.
     """
 
     def __init__(
@@ -69,6 +87,12 @@ class TransferFunction(nn.Module):
         aberration_model: str = "holography",
         specimen_absorption: bool = True,
         bfactor: float | torch.Tensor | None = None,
+        convergence_angle: float | None = None,
+        cc: float | None = None,
+        energy_spread: float = 0.7,
+        deltaV_V: float = 0.06e-6,
+        deltaI_I: float = 0.01e-6,
+        dose_envelope: bool = False,
     ) -> None:
         super().__init__()
         if aberration_model not in ("holography", "ctf"):
@@ -77,9 +101,17 @@ class TransferFunction(nn.Module):
         self.pixel_size = pixel_size
         self.aberration_model = aberration_model
         self.specimen_absorption = specimen_absorption
+        self.convergence_angle = convergence_angle
+        self.cc = cc
+        self.energy_spread = energy_spread
+        self.deltaV_V = deltaV_V
+        self.deltaI_I = deltaI_I
+        self.dose_envelope = dose_envelope
 
         _, _, KX, KY = kgrid_2d(n_pixels, pixel_size)
-        self.register_buffer("k2", (KX**2 + KY**2).unsqueeze(0))
+        k2 = (KX**2 + KY**2).unsqueeze(0)
+        self.register_buffer("k2", k2)
+        self.register_buffer("k", torch.sqrt(k2))
 
         if bfactor is None:
             self.bfactor: torch.Tensor | None = None
@@ -262,11 +294,42 @@ class TransferFunction(nn.Module):
             bfactor = self.bfactor.view(-1, 1, 1)
             if torch.any(bfactor != 0):
                 transfer = transfer * b_envelope(self.k2, bfactor)
-        # TODO: Cc/Cs-envelope and dose-envelope parity with
-        # aberrations.Aberration -- needs defocus (um -> Angstrom, x1e4)
-        # and spherical_aberration (mm -> Angstrom, x1e7) unit conversion
-        # at the call site before reusing aberrations._envelopes.cs_envelope
-        # / cc_envelope / dose_envelope unchanged.
+
+        # Cs/Cc/dose envelopes: aberrations._envelopes expects Angstrom
+        # throughout, but CTFParameters' defocus/spherical_aberration are
+        # in torch-ctf's own units (micrometers/mm) -- converted here, at
+        # the point of use, rather than changing CTFParameters' units.
+        if self.convergence_angle is not None:
+            cs_angstrom = (kwargs["spherical_aberration"] * 1e7).view(-1, 1, 1)
+            # CTFParameters.defocus is already the (dfu + dfv) / 2 mean,
+            # matching aberrations.Aberration's own defocus_avg.
+            defocus_avg_angstrom = (kwargs["defocus"] * 1e4).view(-1, 1, 1)
+            wavelength = energy_to_wavelength(kwargs["voltage"])
+            transfer = transfer * cs_envelope(
+                self.k,
+                wavelength,
+                cs_angstrom,
+                defocus_avg_angstrom,
+                self.convergence_angle,
+            )
+
+        if self.cc is not None:
+            wavelength = energy_to_wavelength(kwargs["voltage"])
+            voltage_v = kwargs["voltage"] * 1e3  # kV -> V (numerically eV-equivalent)
+            transfer = transfer * cc_envelope(
+                self.k2,
+                wavelength,
+                self.cc,
+                voltage_v,
+                self.energy_spread,
+                self.deltaV_V,
+                self.deltaI_I,
+            )
+
+        if self.dose_envelope and ctf_params.dose is not None:
+            dose = ctf_params.dose.gather(idx).view(-1, 1, 1)
+            transfer = transfer * dose_envelope(self.k, dose)
+
         return transfer
 
     def forward(

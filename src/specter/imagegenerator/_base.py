@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 import lightning as L
 import torch
@@ -15,6 +15,7 @@ from specter.detectors import (
 
 from ..aberrations import Aberration, defocus_midplane_shift
 from ..arrays import compute_nz, pad_volume
+from ..ctf import LegacyAberrationAdapter
 from ..microscope import Detector
 
 __all__ = [
@@ -95,6 +96,15 @@ class BaseImager(L.LightningModule):
     dose_envelope : bool, optional
         Whether to apply the Grant & Grigorieff (2015) cumulative-dose
         envelope, using ``dose_per_angstrom``. Default False.
+    aberration_backend : {"legacy", "torch_ctf"}, optional
+        Which engine computes the CTF/aberration transfer function.
+        ``"legacy"`` (default) uses ``aberrations.Aberration`` unchanged --
+        no behaviour change for any existing caller. ``"torch_ctf"`` uses
+        ``ctf.LegacyAberrationAdapter`` (torch-ctf-backed, verified
+        bit-identical to ``"legacy"`` term-by-term and against real
+        multi-particle CryoSPARC .cs data -- see
+        tests/test_ctf_legacy_adapter.py). Opt-in only; not yet the
+        default.
     """
 
     def __init__(
@@ -123,6 +133,7 @@ class BaseImager(L.LightningModule):
         deltaV_V: float = 0.06e-6,
         deltaI_I: float = 0.01e-6,
         dose_envelope: bool = False,
+        aberration_backend: Literal["legacy", "torch_ctf"] = "legacy",
     ):
         super().__init__()
         self.pixel_size = pixel_size
@@ -130,6 +141,7 @@ class BaseImager(L.LightningModule):
         self.aberration_model = aberration_model
         self.noise_model = noise_model
         self.alpha = alpha
+        self.aberration_backend = aberration_backend
         self.progressbars = progressbars
         self.verbose = verbose
         self.nxy = nxy
@@ -250,21 +262,41 @@ class BaseImager(L.LightningModule):
                 setattr(self, "dfv", getattr(self, "dfv") - shift)
 
     def _init_optics(self) -> None:
-        """Instantiate ``Aberration`` and ``Detector`` from the stored parameters."""
-        self.aberration = Aberration(
-            self.pad_nxy,
-            self.pixel_size,
-            self.voltage,
-            aberration_model=self.aberration_model,
-            alpha=self.alpha,
-            convergence_angle=self.convergence_angle,
-            cc=self.cc,
-            energy_spread=self.energy_spread,
-            deltaV_V=self.deltaV_V,
-            deltaI_I=self.deltaI_I,
-            dose_envelope=self.dose_envelope,
-            progressbars=self.progressbars,
-        )
+        """Instantiate the aberration engine and ``Detector`` from the
+        stored parameters. Which class ``self.aberration`` is depends on
+        ``self.aberration_backend`` -- both have the exact same call
+        signature (``self.aberration(exitwave, ctf_batch_dict)``), so no
+        other code needs to know or care which one is in use."""
+        self.aberration: Aberration | LegacyAberrationAdapter
+        if self.aberration_backend == "torch_ctf":
+            self.aberration = LegacyAberrationAdapter(
+                self.pad_nxy,
+                self.pixel_size,
+                self.voltage,
+                aberration_model=self.aberration_model,
+                bfactor=getattr(self, "bfactor", None),
+                convergence_angle=self.convergence_angle,
+                cc=self.cc,
+                energy_spread=self.energy_spread,
+                deltaV_V=self.deltaV_V,
+                deltaI_I=self.deltaI_I,
+                dose_envelope=self.dose_envelope,
+            )
+        else:
+            self.aberration = Aberration(
+                self.pad_nxy,
+                self.pixel_size,
+                self.voltage,
+                aberration_model=self.aberration_model,
+                alpha=self.alpha,
+                convergence_angle=self.convergence_angle,
+                cc=self.cc,
+                energy_spread=self.energy_spread,
+                deltaV_V=self.deltaV_V,
+                deltaI_I=self.deltaI_I,
+                dose_envelope=self.dose_envelope,
+                progressbars=self.progressbars,
+            )
         self.detector = Detector(
             self.pixel_size,
             aberration_model=self.aberration_model,

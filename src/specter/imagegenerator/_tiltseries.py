@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import math
-from typing import Any, Sequence
+from typing import Any, Literal, Sequence
 
 import roma
 import torch
@@ -376,6 +376,7 @@ class TiltSeriesGenerator(MicrographGenerator):
         deltaV_V: float = 0.06e-6,
         deltaI_I: float = 0.01e-6,
         dose_envelope: bool = False,
+        aberration_backend: Literal["legacy", "torch_ctf"] = "legacy",
         **kwargs: Any,
     ):
         if vol is None:
@@ -552,6 +553,7 @@ class TiltSeriesGenerator(MicrographGenerator):
             deltaV_V=deltaV_V,
             deltaI_I=deltaI_I,
             dose_envelope=dose_envelope,
+            aberration_backend=aberration_backend,
             **kwargs,
         )
         # self.register_buffer("vol", vol)

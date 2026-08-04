@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 import torch
 
@@ -181,6 +181,7 @@ class MicrographGenerator(BaseImager):
         deltaV_V: float = 0.06e-6,
         deltaI_I: float = 0.01e-6,
         dose_envelope: bool = False,
+        aberration_backend: Literal["legacy", "torch_ctf"] = "legacy",
         **kwargs: Any,
     ):
         if isinstance(micrograph_size, int):
@@ -231,6 +232,7 @@ class MicrographGenerator(BaseImager):
             deltaV_V=deltaV_V,
             deltaI_I=deltaI_I,
             dose_envelope=dose_envelope,
+            aberration_backend=aberration_backend,
         )
 
         self.chunk_size = chunk_size

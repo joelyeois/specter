@@ -138,16 +138,18 @@ class Aberration(L.LightningModule):
         self.wavelength = energy_to_wavelength(voltage)
         self.aberration_model = aberration_model
 
-        # frequency coordinates
+        # frequency coordinates -- KY varies along axis 0 (rows), KX along
+        # axis 1 (columns), matching the row/col = y/x convention used
+        # elsewhere in specter (see arrays.grid_2d/kgrid_2d).
         kx = torch.fft.fftfreq(n_pixels, pixel_size)
-        kxx, kyy = torch.meshgrid(kx, kx, indexing="ij")
-        k2 = kxx**2 + kyy**2
-        radian = torch.arctan2(kyy, kxx)
+        KY, KX = torch.meshgrid(kx, kx, indexing="ij")
+        k2 = KX**2 + KY**2
+        radian = torch.arctan2(KX, KY)
         self.register_buffer("k", torch.sqrt(k2).unsqueeze(0))
         self.register_buffer("radian", radian.unsqueeze(0))
         self.register_buffer("k2", k2.unsqueeze(0))
-        self.register_buffer("kxx", kxx)
-        self.register_buffer("kyy", kyy)
+        self.register_buffer("KY", KY)
+        self.register_buffer("KX", KX)
 
         # dummy tensor for non-existent aberration terms
         self.register_buffer("zero", torch.tensor(0.0))
@@ -237,7 +239,7 @@ class Aberration(L.LightningModule):
             tiltx = ctf_params.get("tiltx", self.zero).view(-1, 1, 1)
             tilty = ctf_params.get("tilty", self.zero).view(-1, 1, 1)
             chi = chi + fn.beamtilt(
-                self.k2, self.kxx, self.kyy, self.wavelength, cs, tiltx, tilty
+                self.k2, self.KY, self.KX, self.wavelength, cs, tiltx, tilty
             )
 
         # --- Trefoil ---

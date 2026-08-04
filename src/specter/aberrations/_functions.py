@@ -78,8 +78,8 @@ def defocus(
 
 def beamtilt(
     k2: torch.Tensor,
-    kxx: torch.Tensor,
-    kyy: torch.Tensor,
+    KY: torch.Tensor,
+    KX: torch.Tensor,
     wavelength: float,
     cs: torch.Tensor,
     tiltx: torch.Tensor,
@@ -92,10 +92,11 @@ def beamtilt(
     ----------
     k2 : torch.Tensor
         Squared frequency magnitude grid, in 1/Angstrom^2.
-    kxx : torch.Tensor
-        Frequency grid component along the first axis, in 1/Angstrom.
-    kyy : torch.Tensor
-        Frequency grid component along the second axis, in 1/Angstrom.
+    KY : torch.Tensor
+        Frequency grid component along the first (row/y) axis, in 1/Angstrom.
+    KX : torch.Tensor
+        Frequency grid component along the second (column/x) axis, in
+        1/Angstrom.
     wavelength : float
         Electron wavelength, in Angstrom.
     cs : torch.Tensor
@@ -110,7 +111,7 @@ def beamtilt(
     chi_tilt : torch.Tensor
         Phase contribution from beam tilt.
     """
-    tilts = torch.sin(tilty) * kxx + torch.sin(tiltx) * kyy
+    tilts = torch.sin(tilty) * KY + torch.sin(tiltx) * KX
     return -2 * torch.pi * wavelength**2 * cs * k2 * tilts
 
 

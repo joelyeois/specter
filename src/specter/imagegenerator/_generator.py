@@ -297,6 +297,7 @@ class ImageGeneratorFromCoordinates(ParticleGeneratorBase):
         deltaI_I: float = 0.01e-6,
         dose_envelope: bool = False,
         aberration_backend: Literal["legacy", "torch_ctf"] = "legacy",
+        lpp_params: dict[str, float] | None = None,
     ):
         self.pad_fft = pad_fft
         self.ice_thickness = ice_thickness
@@ -331,6 +332,7 @@ class ImageGeneratorFromCoordinates(ParticleGeneratorBase):
             deltaI_I=deltaI_I,
             dose_envelope=dose_envelope,
             aberration_backend=aberration_backend,
+            lpp_params=lpp_params,
         )
         self.ice_model = ice_model
         self.crowd_max_distance_z = (
@@ -648,6 +650,7 @@ class ImageGenerator(ParticleGeneratorBase):
         dose_envelope: bool = False,
         rotate_mode: Literal["real", "fourier"] = "real",
         aberration_backend: Literal["legacy", "torch_ctf"] = "legacy",
+        lpp_params: dict[str, float] | None = None,
     ):
         nxy = scattering_potential.shape[-1]
         self.pad_fft = pad_fft
@@ -684,6 +687,7 @@ class ImageGenerator(ParticleGeneratorBase):
             deltaI_I=deltaI_I,
             dose_envelope=dose_envelope,
             aberration_backend=aberration_backend,
+            lpp_params=lpp_params,
         )
 
         self.ice_parameterization = ice_parameterization

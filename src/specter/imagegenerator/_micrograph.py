@@ -182,6 +182,7 @@ class MicrographGenerator(BaseImager):
         deltaI_I: float = 0.01e-6,
         dose_envelope: bool = False,
         aberration_backend: Literal["legacy", "torch_ctf"] = "legacy",
+        lpp_params: dict[str, float] | None = None,
         **kwargs: Any,
     ):
         if isinstance(micrograph_size, int):
@@ -233,6 +234,7 @@ class MicrographGenerator(BaseImager):
             deltaI_I=deltaI_I,
             dose_envelope=dose_envelope,
             aberration_backend=aberration_backend,
+            lpp_params=lpp_params,
         )
 
         self.chunk_size = chunk_size

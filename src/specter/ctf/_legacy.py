@@ -9,6 +9,14 @@ call signature as ``aberrations.Aberration`` (``forward(exitwave,
 ctf_params_dict)``), so ``self.aberration = LegacyAberrationAdapter(...)``
 is the only change needed anywhere.
 
+``lpp_params`` (laser phase plate) is deliberately *not* a ``ctf_params``
+dict key, unlike every other term here: it's always a single shared
+laser-instrument config, never per-particle, so it's a
+:class:`LegacyAberrationAdapter` *construction-time* argument instead --
+the same category as ``bfactor``/``convergence_angle``/``cc`` below, and a
+natural match for its own separate section in a TOML config, rather than
+being nested inside the per-particle CTF parameter dict.
+
 Every unit conversion and Zernike-coefficient mapping here (dfu/dfv
 Angstrom -> defocus/astigmatism micrometers, cs Angstrom -> mm, phaseshift
 radians -> degrees, trefoil1/trefoil2 -> Z33c/Z33s, tiltx/tilty ->
@@ -51,6 +59,7 @@ def ctf_params_dict_to_parameters(
     pixel_size: float,
     image_shape: tuple[int, int],
     voltage: float,
+    lpp_params: dict[str, float] | None = None,
 ) -> CTFParameters:
     """Convert a legacy Angstrom/radian-based ``ctf_params`` dict (the
     ``aberrations.Aberration`` / ``BaseImager._ctf_batch()`` convention)
@@ -69,17 +78,7 @@ def ctf_params_dict_to_parameters(
         :class:`LegacyAberrationAdapter` -- it's a
         ``TransferFunction``-construction-time argument, not a per-call
         one, since in practice it's always the same constant value across
-        every particle anyway). ``"lpp_params"``, if present, is a
-        ``CTFParameters``-native-units laser-phase-plate dict (see
-        ``CTFParameters``'s ``lpp_params`` -- no unit conversion applied,
-        unlike every other key here) and takes precedence over
-        ``"phaseshift"``: since ``torch_ctf.calc_LPP_ctf_2D`` has no
-        phase_shift argument at all, a physical laser phase plate replaces
-        a uniform phase shift rather than combining with it, so
-        ``"phaseshift"`` is dropped entirely whenever ``"lpp_params"`` is
-        set (regardless of whether it's zero, absent, or a stale nonzero
-        leftover from an existing dict) rather than raising
-        ``CTFParameters``'s own mutual-exclusivity error.
+        every particle anyway).
     pixel_size : float
         Pixel size in Angstrom.
     image_shape : tuple[int, int]
@@ -88,6 +87,19 @@ def ctf_params_dict_to_parameters(
         ``zernike_rho_max``).
     voltage : float
         Accelerating voltage in kV.
+    lpp_params : dict[str, float], optional
+        ``CTFParameters``-native-units laser-phase-plate dict (see
+        ``CTFParameters``'s own ``lpp_params``  -- no unit conversion
+        applied here, unlike every ``ctf_params`` dict key above), passed
+        separately rather than as a ``ctf_params`` dict key since it's
+        never per-particle. If set, takes precedence over
+        ``ctf_params["phaseshift"]``: since ``torch_ctf.calc_LPP_ctf_2D``
+        has no phase_shift argument at all, a physical laser phase plate
+        replaces a uniform phase shift rather than combining with it, so
+        ``"phaseshift"`` is dropped entirely whenever ``lpp_params`` is
+        set (regardless of whether it's zero, absent, or a stale nonzero
+        leftover in ``ctf_params``) rather than raising
+        ``CTFParameters``'s own mutual-exclusivity error.
 
     Returns
     -------
@@ -128,7 +140,6 @@ def ctf_params_dict_to_parameters(
         odd_zernike["Z31s"] = -prefactor * torch.as_tensor(tilty)
 
     dose = ctf_params.get("dose")
-    lpp_params = ctf_params.get("lpp_params")
 
     return CTFParameters(
         defocus=defocus_um,
@@ -165,6 +176,16 @@ class LegacyAberrationAdapter(nn.Module):
     which class ``self.aberration`` is constructed from needs to change.
     Converts the legacy dict to :class:`CTFParameters` fresh on every
     call via :func:`ctf_params_dict_to_parameters`.
+
+    Parameters
+    ----------
+    lpp_params : dict[str, float], optional
+        Laser-phase-plate config, in ``CTFParameters``-native units. A
+        construction-time argument, like ``bfactor``/``convergence_angle``/
+        ``cc`` below, not a per-call ``ctf_params`` dict key -- it's always
+        a single shared laser-instrument config, never per-particle. If
+        set, overrides ``ctf_params["phaseshift"]`` on every call (see
+        :func:`ctf_params_dict_to_parameters`).
     """
 
     def __init__(
@@ -180,11 +201,13 @@ class LegacyAberrationAdapter(nn.Module):
         deltaV_V: float = 0.06e-6,
         deltaI_I: float = 0.01e-6,
         dose_envelope: bool = False,
+        lpp_params: dict[str, float] | None = None,
     ) -> None:
         super().__init__()
         self.pixel_size = pixel_size
         self.voltage = voltage
         self.image_shape = (n_pixels, n_pixels)
+        self.lpp_params = lpp_params
         self.transfer_function_module = TransferFunction(
             n_pixels,
             pixel_size,
@@ -202,6 +225,10 @@ class LegacyAberrationAdapter(nn.Module):
         self, exitwave: torch.Tensor, ctf_params: dict[str, Any]
     ) -> torch.Tensor:
         params = ctf_params_dict_to_parameters(
-            ctf_params, self.pixel_size, self.image_shape, self.voltage
+            ctf_params,
+            self.pixel_size,
+            self.image_shape,
+            self.voltage,
+            lpp_params=self.lpp_params,
         )
         return self.transfer_function_module(exitwave, params)

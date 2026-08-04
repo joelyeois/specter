@@ -377,6 +377,7 @@ class TiltSeriesGenerator(MicrographGenerator):
         deltaI_I: float = 0.01e-6,
         dose_envelope: bool = False,
         aberration_backend: Literal["legacy", "torch_ctf"] = "legacy",
+        lpp_params: dict[str, float] | None = None,
         **kwargs: Any,
     ):
         if vol is None:
@@ -554,6 +555,7 @@ class TiltSeriesGenerator(MicrographGenerator):
             deltaI_I=deltaI_I,
             dose_envelope=dose_envelope,
             aberration_backend=aberration_backend,
+            lpp_params=lpp_params,
             **kwargs,
         )
         # self.register_buffer("vol", vol)

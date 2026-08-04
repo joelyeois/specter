@@ -253,3 +253,75 @@ def test_tilt_series_generator_matches_across_backends(realistic_ctf_params):
 
     assert legacy_series.shape == torch_ctf_series.shape
     assert torch.allclose(legacy_series, torch_ctf_series, atol=1e-3)
+
+
+_LPP_PARAMS = dict(
+    NA=0.1,
+    laser_wavelength_angstrom=10640.0,
+    focal_length_angstrom=2e7,
+    laser_xy_angle_deg=0.0,
+    laser_xz_angle_deg=0.0,
+    laser_long_offset_angstrom=0.0,
+    laser_trans_offset_angstrom=0.0,
+    laser_polarization_angle_deg=0.0,
+    peak_phase_deg=90.0,
+)
+
+
+def test_lpp_params_end_to_end_through_image_generator(small_volume):
+    """lpp_params, passed to ImageGenerator as a constructor kwarg (not a
+    ctf_params dict key -- see ctf/_legacy.py), reaches the rendered image:
+    a laser phase plate must change the output relative to the same run
+    with no phase plate at all."""
+    ctf_params = {"dfu": torch.tensor([5000.0]), "cs": torch.tensor([2.7e7])}
+
+    def build(lpp_params):
+        torch.manual_seed(0)
+        gen = ImageGenerator(
+            scattering_potential=small_volume,
+            pixel_size=2.0,
+            quaternions=torch.tensor([[1.0, 0.0, 0.0, 0.0]]),
+            translations=torch.tensor([[0.0, 0.0]]),
+            ctf_params=ctf_params,
+            voltage=300.0,
+            dose_per_angstrom=2.0,
+            noise_model=None,
+            scattering_model="multislice",
+            ice_model=None,
+            alpha=0.1,
+            verbose=False,
+            progressbars=False,
+            aberration_backend="torch_ctf",
+            lpp_params=lpp_params,
+        )
+        torch.manual_seed(0)
+        return gen(torch.tensor([0]))
+
+    without_lpp = build(None)
+    with_lpp = build(_LPP_PARAMS)
+
+    assert without_lpp.shape == with_lpp.shape
+    assert not torch.allclose(without_lpp, with_lpp)
+
+
+def test_lpp_params_with_legacy_backend_raises(small_volume):
+    """aberrations.Aberration has no laser-phase-plate model -- lpp_params
+    with the default aberration_backend='legacy' must raise at
+    construction time, not silently have no effect."""
+    with pytest.raises(ValueError, match="lpp_params"):
+        ImageGenerator(
+            scattering_potential=small_volume,
+            pixel_size=2.0,
+            quaternions=torch.tensor([[1.0, 0.0, 0.0, 0.0]]),
+            translations=torch.tensor([[0.0, 0.0]]),
+            ctf_params={"dfu": torch.tensor([5000.0]), "cs": torch.tensor([2.7e7])},
+            voltage=300.0,
+            dose_per_angstrom=2.0,
+            noise_model=None,
+            scattering_model="multislice",
+            ice_model=None,
+            alpha=0.1,
+            verbose=False,
+            progressbars=False,
+            lpp_params=_LPP_PARAMS,
+        )

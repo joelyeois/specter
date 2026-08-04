@@ -105,6 +105,15 @@ class BaseImager(L.LightningModule):
         multi-particle CryoSPARC .cs data -- see
         tests/test_ctf_legacy_adapter.py). Opt-in only; not yet the
         default.
+    lpp_params : dict[str, float], optional
+        Laser-phase-plate config, in ``ctf.CTFParameters``-native units
+        (see ``ctf.LegacyAberrationAdapter``). Requires
+        ``aberration_backend="torch_ctf"`` -- ``aberrations.Aberration``
+        has no LPP model, so this raises at construction time if set with
+        the default ``"legacy"`` backend rather than silently having no
+        effect. A single shared laser-instrument config, never
+        per-particle, so it's a constructor argument here rather than a
+        ``ctf_params`` dict key.
     """
 
     def __init__(
@@ -134,14 +143,21 @@ class BaseImager(L.LightningModule):
         deltaI_I: float = 0.01e-6,
         dose_envelope: bool = False,
         aberration_backend: Literal["legacy", "torch_ctf"] = "legacy",
+        lpp_params: dict[str, float] | None = None,
     ):
         super().__init__()
+        if lpp_params is not None and aberration_backend != "torch_ctf":
+            raise ValueError(
+                "lpp_params requires aberration_backend='torch_ctf' -- "
+                "aberrations.Aberration has no laser-phase-plate model."
+            )
         self.pixel_size = pixel_size
         self.voltage = voltage
         self.aberration_model = aberration_model
         self.noise_model = noise_model
         self.alpha = alpha
         self.aberration_backend = aberration_backend
+        self.lpp_params = lpp_params
         self.progressbars = progressbars
         self.verbose = verbose
         self.nxy = nxy
@@ -281,6 +297,7 @@ class BaseImager(L.LightningModule):
                 deltaV_V=self.deltaV_V,
                 deltaI_I=self.deltaI_I,
                 dose_envelope=self.dose_envelope,
+                lpp_params=self.lpp_params,
             )
         else:
             self.aberration = Aberration(

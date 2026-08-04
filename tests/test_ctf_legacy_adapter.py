@@ -247,20 +247,22 @@ def test_real_csfile_particles_match_old_aberration_end_to_end():
 
 
 def test_lpp_params_matches_direct_ctfparameters_construction():
-    """ctf_params["lpp_params"] passed through the dict bridge must match
-    building CTFParameters(lpp_params=...) directly -- no old-Aberration
-    comparison is possible here (Aberration has no LPP model at all), so
-    this checks the bridge's *wiring* against the already-validated
-    native-units path (see test_ctf_transfer.py's LPP tests)."""
+    """lpp_params, passed as a LegacyAberrationAdapter *construction-time*
+    argument (not a ctf_params dict key -- it's a single shared
+    laser-instrument config, never per-particle), must match building
+    CTFParameters(lpp_params=...) directly -- no old-Aberration comparison
+    is possible here (Aberration has no LPP model at all), so this checks
+    the bridge's *wiring* against the already-validated native-units path
+    (see test_ctf_transfer.py's LPP tests)."""
     exitwave = _exitwave(1, seed=8)
-    ctf_params = {
-        "dfu": torch.tensor([15000.0]),
-        "cs": torch.tensor([2.7e7]),
-        "lpp_params": _LPP_KWARGS,
-    }
+    ctf_params = {"dfu": torch.tensor([15000.0]), "cs": torch.tensor([2.7e7])}
 
     adapter = LegacyAberrationAdapter(
-        N_PIXELS, PIXEL_SIZE, VOLTAGE, aberration_model="holography"
+        N_PIXELS,
+        PIXEL_SIZE,
+        VOLTAGE,
+        aberration_model="holography",
+        lpp_params=_LPP_KWARGS,
     )
     bridged_out = adapter(exitwave, ctf_params)
 
@@ -276,20 +278,21 @@ def test_lpp_params_matches_direct_ctfparameters_construction():
 def test_lpp_params_overrides_stale_nonzero_phaseshift():
     """A stale nonzero "phaseshift" left over in a ctf_params dict must not
     raise CTFParameters's lpp_params/phase_shift mutual-exclusivity error,
-    and must not affect the output -- lpp_params always wins."""
+    and must not affect the output -- a construction-time lpp_params
+    always wins."""
     exitwave = _exitwave(1, seed=9)
-    base_ctf_params = {
-        "dfu": torch.tensor([15000.0]),
-        "cs": torch.tensor([2.7e7]),
-        "lpp_params": _LPP_KWARGS,
-    }
+    base_ctf_params = {"dfu": torch.tensor([15000.0]), "cs": torch.tensor([2.7e7])}
     ctf_params_with_stale_phaseshift = {
         **base_ctf_params,
         "phaseshift": torch.tensor([0.5]),
     }
 
     adapter = LegacyAberrationAdapter(
-        N_PIXELS, PIXEL_SIZE, VOLTAGE, aberration_model="holography"
+        N_PIXELS,
+        PIXEL_SIZE,
+        VOLTAGE,
+        aberration_model="holography",
+        lpp_params=_LPP_KWARGS,
     )
     out_without_phaseshift = adapter(exitwave, base_ctf_params)
     out_with_stale_phaseshift = adapter(exitwave, ctf_params_with_stale_phaseshift)

@@ -125,7 +125,8 @@ TiltSeriesGenerator         – generates a tilt series
 - `ImageGenerator` takes a **pre-built volume** tensor; `ImageGeneratorFromCoordinates` builds it from atomic coordinates on the fly via `PotentialBuilder`.
 - `RandomIcemaker` (cheap, instant) and `GradientSKIcemaker` (S(k)/MLBOP-optimised, expensive) generate amorphous ice volumes. `IceBank` (in `ice/_bank.py`) does not build ice itself — it draws randomly rotated/translated crops from a bundled cache of pre-optimised `GradientSKIcemaker` configs (`ice-data/ice_cache/`, shipped with the repo) at near-zero marginal cost, and tiles multiple crops together (with a short local MLBOP seam relaxation) for volumes larger than a single cached config.
 - `Scattering` supports four propagation modes: `multislice`, `rytov`, `firstborn`, `projection` — multislice is most accurate and is the default.
-- `Aberration` (in `aberrations/`) and `Detector` (in `microscope.py`) apply CTF, envelope, and detector MTF in Fourier space.
+- `Aberration` (in `aberrations/`) and `Detector` (in `microscope.py`) apply CTF, envelope, and detector MTF in Fourier space. `aberrations/_envelopes.py` holds the Fourier-space envelope functions (B-factor, Cc/spatial-coherence, dose) as pure functions, ported from teamtomo's `torch_fourier_filter.envelopes`.
+- A second, opt-in CTF backend lives in `ctf/` (`CTFParameters`, `TransferFunction`), ported from `torch-ctf` conventions and verified term-by-term against `Aberration` (including against a real multi-particle CryoSPARC `.cs` file). Every `BaseImager` subclass takes `aberration_backend: Literal["legacy", "torch_ctf"] = "legacy"`; `"torch_ctf"` swaps in `ctf/_legacy.py`'s `LegacyAberrationAdapter`, which has the same `forward(exitwave, ctf_params_dict)` signature as `Aberration` so call sites don't change. The legacy `ctf_params` dict still mirrors CryoSPARC's own units (dfu/dfv/cs in Angstrom, angles in radians) — not `CTFParameters`' native units (defocus in µm, Cs in mm, angles in degrees, dimensionless Zernike coefficients) — see [[project_torch_ctf_native_units_wrapper_todo]] memory for the still-open native-units-wrapper gap. `lpp_params` (laser phase plate) is a `LegacyAberrationAdapter` constructor-time argument, not a `ctf_params` dict key, since it's a shared instrument config rather than per-particle.
 
 ### Inverse problem — Reconstructor
 
@@ -137,7 +138,12 @@ TiltSeriesGenerator         – generates a tilt series
 - `_tomogram_pipeline.py` — `TomogramGhostbuster`: end-to-end tomogram pipeline, mirrors `Ghostbuster`'s `run`/`test_run` API.
 - `_helpers.py` — shared helpers (LR scheduler construction, k-space masking, image preprocessing) used by both reconstructors.
 
-Pose/shift/defocus refinement is flagged **unverified** (wired in, not yet checked for correctness) in `docs/reconstruction.rst`.
+Pose/shift/defocus refinement (`lr_R`/`lr_T`/`lr_defocus` on `Reconstructor`/`TomogramReconstructor`) is wired in but still **unverified** for correctness — no test currently checks recovered rotations/translations/defocus against ground truth. The public reconstruction docs (`docs/user-guide/reconstruction.md`) are just a "work in progress" stub pending publication, so this status isn't documented anywhere outside this file and the code itself.
+
+### CLI & pipelines
+
+- `cli/` — the `specter` command (entry point `specter.cli._cli:main`), built on `click`/`rich-click`. Exposes `specter simulate particles`, `specter simulate tiltseries`, `specter build tomogram`. Each subcommand (`simulate.py`, `build.py`) loads a TOML config via `config.py`'s dataclasses (`ParticleStackConfig`, `TiltSeriesConfig`, `TomogramConfig`) with `load_config()`, applies only the flags the user actually passed via `_click_options.py`'s `build_config_options()`/`collect_overrides()` (unset flags never clobber the TOML), then calls into `pipelines/`. This is unrelated to the older `specter-jobs` entry point (`jobs/_cli.py`), a separate job-database CLI.
+- `pipelines/` — `run_particle_stack()`, `run_tilt_series()`, `run_build_tomogram()`: the actual end-to-end implementations behind the `cli/` commands, kept separate so `cli/` stays a thin argument-parsing layer. `_common.py` holds logic shared across all three.
 
 ## Repository Structure
 
@@ -150,6 +156,12 @@ src/specter/                  # Main source package
   aberrations/                # Aberration phase model
     _functions.py             # Low-level, stateless phase functions (cs, defocus, beamtilt, trefoil, tetrafoil, phaseshift)
     _aberration.py            # Aberration(L.LightningModule) — composes the functions above into a transfer function
+    _envelopes.py             # B-factor/Cc/spatial-coherence/dose envelope functions (pure functions of k-grid + params)
+  ctf/                        # torch-ctf-backed CTF — opt-in second backend, verified parity with aberrations/
+    _parameters.py             # CTFParameters, ParamField
+    _transfer.py                # TransferFunction
+    _legacy.py                   # LegacyAberrationAdapter — bridges the legacy ctf_params dict to CTFParameters
+    _units.py                    # zernike_rho_max and other native-unit helpers
   imagegenerator/             # Image simulation classes
     _base.py                  # BaseImager base class
     _generator.py             # ImageGenerator, ImageGeneratorFromCoordinates
@@ -163,15 +175,21 @@ src/specter/                  # Main source package
     _kernels.py               # Shared physics-kernel construction (atomic potential, S(k) target)
     _mdsim.py                 # MDSimDump/ExtXYZDump (legacy MD trajectory ingestion)
     _helpers.py               # Helper functions (water molecules, FFT, etc.)
-  jobs/                       # Job management and persistence
+  jobs/                       # Job management and persistence (specter-jobs entry point — unrelated to cli/)
     _job.py                   # Job class
     _database.py              # JobDatabase storage
     _cli.py                   # CLI interface
-  specimen/                   # Volume assembly (package)
+  cli/                        # `specter` CLI (specter simulate ..., specter build ...) — see "CLI & pipelines" below
+  pipelines/                  # run_particle_stack/run_tilt_series/run_build_tomogram — see "CLI & pipelines" below
+  specimen/                   # Volume assembly (package) — under heavy active development, structure below is
+                              # partial/illustrative only; read the package directly rather than trusting this list.
     single_particle.py        # TomogramGenerator — populates a volume with template potentials + crowding + ice
     cryoet.py                 # CryoETSpecimenGenerator — large high-res cryoET specimen: polnet placement (proteins+membranes) at low res, rendered at full res via PotentialBuilder
     polnet_bridge.py          # polnet-facing half of the cryoET pipeline: placement/packing only, never renders density or invokes TEM/IMOD
     cytosolic_filler.py       # PEI2016_CROWDING_TABLE + build_filler_protein_specs() — generic cytosolic background reference (Pei et al. 2016)
+    tomogram/, filament/, membrane/, packing/  # newer subpackages (tomogram/specimen assembly, filament placement,
+                              # organic membranes, sphere/tetris packing algorithms); also cryotomosim.py and
+                              # from_volume.py at the top level — still in flux, deliberately not detailed here
   potential.py                # Scattering potential builder
   scattering.py               # Wave propagation (multislice, rytov, firstborn, projection)
   microscope.py               # Aberration and detector models
@@ -196,7 +214,7 @@ src/specter/                  # Main source package
     _relion.py                   # RELION .star read/write: extract_parameters_from_starfile(), create_particle_starfile[_from_model](), create_micrograph_starfile()
     _common.py                   # _select_particles() — shared per-particle mask/truncate helper for both backends
   cuda.py                     # CUDA/device utilities
-  config.py                   # ParticleStackConfig dataclass + load_config()/apply_overrides() for TOML-driven runs
+  config.py                   # ParticleStackConfig/MicrographConfig/TiltSeriesConfig/TomogramConfig dataclasses + load_config()/apply_overrides() for TOML-driven runs (shared by demo-scripts/ and cli/)
   plots.py                    # Plotting helpers
   progress.py                 # Progress bar management (ProgressManager)
   random_seed.py              # Global seed control (exported as specter.seed)
@@ -213,12 +231,17 @@ demo-notebooks/               # User-facing, always kept working
   create_tilt_series_modular/  # same pattern, modular variant
   simulate_particles_from_csfile/  # same pattern, driven from an existing CryoSPARC .cs file
                                 # (plus standalone notebooks with no paired TOML, e.g. cryoet-specimen-generator.ipynb,
-                                # generate-and-reconstruct.ipynb, coordinates-to-images.ipynb)
-demo-scripts/                 # Ready-to-run command-line scripts
-configs/                      # TOML config files consumed by demo-scripts/ and demo-notebooks/ (flat, not nested)
-  particle.toml                # canonical defaults for generate_particle_stack.py
+                                # cryotomosim-specimen-generator.ipynb, generate-and-reconstruct.ipynb,
+                                # coordinates-to-images.ipynb, compare-atomic-potentials-with-kirkland.ipynb)
+demo-scripts/                 # Ready-to-run command-line scripts (generate_micrograph.py, generate_tilt_series.py,
+                              # generate_particle_stack_from_csfile.py, generate_particle_stack_from_starfile.py,
+                              # ghostbuster_reconstruct.py) — plain particle-stack generation now lives in the
+                              # `specter simulate particles` CLI instead of a demo-script
+configs/                      # TOML config files consumed by demo-scripts/ and the `specter` CLI (flat, not nested)
+  particle.toml                # canonical defaults for `specter simulate particles`
   micrograph.toml              # canonical defaults for generate_micrograph.py
-  tilt_series.toml             # canonical defaults for generate_tilt_series.py
+  tilt_series.toml             # canonical defaults for generate_tilt_series.py / `specter simulate tiltseries`
+  tomogram.toml                 # canonical defaults for `specter build tomogram`
 dev/                           # Prototyping and experimentation (not required to be clean)
 pdb-data/                     # PDB structure files
 ice-data/                     # Pre-computed ice data (do not modify)
@@ -250,6 +273,7 @@ ice-data/                     # Pre-computed ice data (do not modify)
 | `roma` | Quaternion/rotation math (`rotations/`) |
 | `vesin-torch` | Pairwise neighbor search for the MLBOP ice energy (`ice/_energy.py`), replaces the old ASE-based path |
 | `polnet` (git dep, pinned rev) | Low-res placement/packing backend for `CryoETSpecimenGenerator` |
+| `click`, `rich-click` | The `specter` CLI (`cli/` package) |
 | `ruff`, `mypy` | Code quality |
 
 `ase` is an optional `dev`-group dependency only (not a runtime dependency); `seaborn` has been dropped entirely (`plots.py` hardcodes its "deep" palette instead).

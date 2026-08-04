@@ -9,7 +9,11 @@ from __future__ import annotations
 import pytest
 import torch
 
-from specter.imagegenerator import ImageGenerator
+from specter.imagegenerator import (
+    ImageGenerator,
+    MicrographGenerator,
+    TiltSeriesGenerator,
+)
 
 
 @pytest.fixture
@@ -17,6 +21,26 @@ def small_volume():
     vol = torch.zeros(32, 32, 32)
     vol[12:20, 12:20, 12:20] = 50.0
     return vol
+
+
+@pytest.fixture
+def realistic_ctf_params():
+    """Every CTF term nonzero at once -- same values used by the
+    ImageGenerator parity test above, single particle (matches how
+    test_generators.py's MicrographGenerator/TiltSeriesGenerator
+    regression fixtures call gen(torch.tensor([0]))/
+    generate_tilt_series(torch.tensor([0]))."""
+    return {
+        "dfu": torch.tensor([5200.0]),
+        "dfv": torch.tensor([4900.0]),
+        "dfang": torch.tensor([12.0]),
+        "cs": torch.tensor([2.7e7]),
+        "phaseshift": torch.tensor([0.1]),
+        "tiltx": torch.tensor([5e-4]),
+        "tilty": torch.tensor([-2e-4]),
+        "trefoil1": torch.tensor([0.3]),
+        "trefoil2": torch.tensor([-0.15]),
+    }
 
 
 def _build(small_volume, ctf_params, aberration_backend, seed=0):
@@ -156,3 +180,76 @@ def test_real_csfile_particles_match_across_backends_end_to_end(small_volume):
 
     assert legacy_images.shape == torch_ctf_images.shape == (5, 32, 32)
     assert torch.allclose(legacy_images, torch_ctf_images, atol=1e-3)
+
+
+def test_micrograph_generator_matches_across_backends(
+    small_volume, realistic_ctf_params
+):
+    """Same scattering_potential/micrograph_size/pixel_size/projection-model
+    setup as test_generators.py::test_micrograph_generator_regression, with
+    nonzero realistic_ctf_params instead of that test's all-zero fixture so
+    every CTF term is actually exercised."""
+
+    def build(backend):
+        torch.manual_seed(0)
+        gen = MicrographGenerator(
+            scattering_potential=small_volume,
+            micrograph_size=32,
+            pixel_size=2.0,
+            ctf_params=realistic_ctf_params,
+            voltage=300.0,
+            dose_per_angstrom=2.0,
+            noise_model=None,
+            scattering_model="projection",
+            ice_model=None,
+            alpha=0.1,
+            verbose=False,
+            progressbars=False,
+            aberration_backend=backend,
+        )
+        torch.manual_seed(0)
+        return gen(torch.tensor([0]))
+
+    legacy_images = build("legacy")
+    torch_ctf_images = build("torch_ctf")
+
+    assert legacy_images.shape == torch_ctf_images.shape
+    assert torch.allclose(legacy_images, torch_ctf_images, atol=1e-3)
+
+
+def test_tilt_series_generator_matches_across_backends(realistic_ctf_params):
+    """Same vol/angles/tilt_axis='y'/projection-model setup as
+    test_generators.py::test_tilt_series_generator_regression, with
+    nonzero realistic_ctf_params instead of that test's all-zero fixture."""
+    vol = torch.zeros(1, 16, 48, 48)
+    vol[0, 5:11, 20:28, 20:28] = 50.0
+    angles = torch.tensor([-10.0, 0.0, 10.0])
+
+    def build(backend):
+        torch.manual_seed(0)
+        gen = TiltSeriesGenerator(
+            vol=vol.clone(),
+            micrograph_size=32,
+            pixel_size=2.0,
+            ctf_params=realistic_ctf_params,
+            voltage=300.0,
+            dose_per_angstrom=2.0,
+            angles=angles,
+            noise_model=None,
+            scattering_model="projection",
+            ice_model=None,
+            alpha=0.1,
+            tilt_axis="y",
+            verbose=False,
+            progressbars=False,
+            aberration_backend=backend,
+        )
+        torch.manual_seed(0)
+        tilt_series, _, _ = gen.generate_tilt_series(torch.tensor([0]))
+        return tilt_series
+
+    legacy_series = build("legacy")
+    torch_ctf_series = build("torch_ctf")
+
+    assert legacy_series.shape == torch_ctf_series.shape
+    assert torch.allclose(legacy_series, torch_ctf_series, atol=1e-3)

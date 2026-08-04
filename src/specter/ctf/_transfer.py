@@ -218,7 +218,7 @@ class TransferFunction(nn.Module):
         for key in ("even_zernike_coeffs", "odd_zernike_coeffs"):
             if kwargs.get(key):
                 kwargs[key] = {
-                    name: _collapse_if_uniform(coeff)
+                    name: _prepare_zernike_coeff(coeff)
                     for name, coeff in kwargs[key].items()
                 }
 
@@ -376,3 +376,30 @@ def _collapse_if_uniform(coeff: torch.Tensor) -> torch.Tensor:
     ):
         return coeff.flatten()[:1]
     return coeff
+
+
+def _prepare_zernike_coeff(coeff: torch.Tensor) -> torch.Tensor:
+    """``_collapse_if_uniform`` then, if a single element remains, flatten
+    it from ``_broadcast_for_grid``'s 3-D ``(1, 1, 1)`` shape down to 1-D
+    ``(1,)``.
+
+    Needed even for a genuinely single-particle call (never multi-particle
+    to begin with, so ``_collapse_if_uniform`` never touches it):
+    ``apply_odd_zernikes``/``apply_even_zernikes`` initialize their phase
+    accumulator as ``torch.zeros_like(rho)`` (unbatched, shape ``(H, W)``)
+    and accumulate in place. Broadcasting a *2-D* ``rho**3`` against a
+    *3-D* ``(1, 1, 1)`` coefficient prepends a new leading batch dim
+    (result ``(1, H, W)``), which the in-place accumulate can't absorb --
+    the same upstream bug ``_call_calculate_ctf_2d`` documents for genuine
+    multi-particle coefficients, but triggered here purely by shape rank,
+    independent of batch size. A 1-D ``(1,)`` coefficient, by contrast,
+    aligns against ``rho``'s trailing (W) dimension and broadcasts to
+    ``(H, W)`` with no new dim -- confirmed via
+    ``test_micrograph_generator_matches_across_backends``/
+    ``test_tilt_series_generator_matches_across_backends``, both
+    single-particle calls with nonzero trefoil/beam-tilt terms. Flattening
+    is a reshape (a view), so it's always safe regardless of
+    ``requires_grad``.
+    """
+    coeff = _collapse_if_uniform(coeff)
+    return coeff.flatten() if coeff.numel() == 1 else coeff

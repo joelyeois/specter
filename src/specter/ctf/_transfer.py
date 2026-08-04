@@ -13,7 +13,7 @@ import warnings
 
 import torch
 import torch.nn as nn
-from torch_ctf import calculate_ctf_2d
+from torch_ctf import calc_LPP_ctf_2D, calculate_ctf_2d
 
 from ..aberrations import b_envelope
 from ..arrays import kgrid_2d
@@ -140,22 +140,30 @@ class TransferFunction(nn.Module):
         return transfer
 
     def _call_calculate_ctf_2d(self, kwargs: dict) -> torch.Tensor:
-        """calculate_ctf_2d(**kwargs, return_complex_ctf=True), working
-        around a real upstream limitation: torch_ctf's apply_odd_zernikes/
-        apply_even_zernikes initialize their phase accumulator as
-        ``torch.zeros_like(rho)`` (shape (H, W), *not* batched) and then
-        accumulate into it in place, which raises a broadcast error the
-        moment any Zernike coefficient is a per-particle tensor rather than
-        a scalar -- confirmed against a real multi-particle .cs file, where
-        trefoil/beam-tilt-derived Zernike coefficients are legitimately
-        per-particle. Not fixable from this side without a torch_ctf PR, so
-        when a batched Zernike coefficient is present this falls back to
-        computing each particle's transfer function with its own scalar
-        Zernike coefficients (the code path already proven correct) and
-        stacks the results -- slower, but correct. The fast vectorized call
-        below still runs whenever every Zernike coefficient is scalar
-        (shared across particles) or absent, which is the common case.
+        """calculate_ctf_2d(**kwargs, return_complex_ctf=True) -- or
+        calc_LPP_ctf_2D if ``kwargs["lpp_params"]`` is set (always a single
+        shared laser-instrument config, never per-particle, so it needs no
+        special-casing below beyond being passed through unchanged to every
+        call) -- working around a real upstream limitation: torch_ctf's
+        apply_odd_zernikes/apply_even_zernikes initialize their phase
+        accumulator as ``torch.zeros_like(rho)`` (shape (H, W), *not*
+        batched) and then accumulate into it in place, which raises a
+        broadcast error the moment any Zernike coefficient is a
+        per-particle tensor rather than a scalar -- confirmed against a
+        real multi-particle .cs file, where trefoil/beam-tilt-derived
+        Zernike coefficients are legitimately per-particle. Not fixable
+        from this side without a torch_ctf PR, so when a batched Zernike
+        coefficient is present this falls back to computing each
+        particle's transfer function with its own scalar Zernike
+        coefficients (the code path already proven correct) and stacks the
+        results -- slower, but correct. The fast vectorized call below
+        still runs whenever every Zernike coefficient is scalar (shared
+        across particles) or absent, which is the common case.
         """
+        lpp_params = kwargs.pop("lpp_params", None)
+        fn = calc_LPP_ctf_2D if lpp_params is not None else calculate_ctf_2d
+        extra_kwargs = lpp_params or {}
+
         zernike_dicts = [
             kwargs.get("even_zernike_coeffs"),
             kwargs.get("odd_zernike_coeffs"),
@@ -168,7 +176,7 @@ class TransferFunction(nn.Module):
                 if coeff.numel() > 1:
                     batch_size = coeff.numel()
         if batch_size is None:
-            return calculate_ctf_2d(**kwargs, return_complex_ctf=True)
+            return fn(**kwargs, **extra_kwargs, return_complex_ctf=True)
 
         per_particle_outputs = []
         for i in range(batch_size):
@@ -200,13 +208,13 @@ class TransferFunction(nn.Module):
                 "voltage",
                 "spherical_aberration",
                 "amplitude_contrast",
-                "phase_shift",
+                *(["phase_shift"] if lpp_params is None else []),
             ):
                 value = kwargs[key]
                 if value.numel() > 1:
                     particle_kwargs[key] = value.flatten()[i : i + 1]
             per_particle_outputs.append(
-                calculate_ctf_2d(**particle_kwargs, return_complex_ctf=True)
+                fn(**particle_kwargs, **extra_kwargs, return_complex_ctf=True)
             )
         return torch.cat(per_particle_outputs, dim=0)
 

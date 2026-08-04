@@ -50,6 +50,21 @@ _SCALAR_NAMES = (
     "phase_shift",
 )
 
+# Required keys for `lpp_params` -- exactly torch_ctf.calc_LPP_ctf_2D's laser
+# geometry arguments. "dual_laser" is optional there (defaults False) so it's
+# not required here either.
+_LPP_PARAM_NAMES = (
+    "NA",
+    "laser_wavelength_angstrom",
+    "focal_length_angstrom",
+    "laser_xy_angle_deg",
+    "laser_xz_angle_deg",
+    "laser_long_offset_angstrom",
+    "laser_trans_offset_angstrom",
+    "laser_polarization_angle_deg",
+    "peak_phase_deg",
+)
+
 
 class ParamField(nn.Module):
     """A single named CTF term: a storage tensor, optionally trainable,
@@ -150,18 +165,42 @@ class CTFParameters(nn.Module):
         nonzero default here would silently double-count it for anyone
         using this class through :class:`TransferFunction` unchanged.
     phase_shift : float | torch.Tensor, optional
-        Phase-plate phase shift in degrees. Default 0.0.
+        Uniform (Volta/hole) phase-plate phase shift in degrees. Default
+        0.0. Mutually exclusive with `lpp_params` -- a laser phase plate's
+        spatially-varying pattern replaces a uniform phase_shift physically
+        (torch_ctf.calc_LPP_ctf_2D doesn't take a phase_shift argument at
+        all), so passing both a nonzero phase_shift and lpp_params raises.
     even_zernike, odd_zernike : dict[str, float | torch.Tensor], optional
         Sparse Zernike coefficients, e.g. ``{"Z44c": 0.1}`` or
         ``{"Z33c": 0.1, "Z33s": 0.2}``. None/omitted (default) means no
         higher-order aberrations at all.
     beam_tilt_mrad : Sequence[float] | torch.Tensor, optional
         ``[bx, by]`` in mrad. None (default) disables beam tilt.
+    lpp_params : dict[str, float], optional
+        Laser phase plate geometry, dispatching to
+        ``torch_ctf.calc_LPP_ctf_2D`` instead of ``calculate_ctf_2d``.
+        Always a single shared (non-per-particle) instrument configuration
+        -- one physical laser setup per simulated dataset, not something
+        that varies particle to particle. Must contain every key in
+        ``{"NA", "laser_wavelength_angstrom", "focal_length_angstrom",
+        "laser_xy_angle_deg", "laser_xz_angle_deg",
+        "laser_long_offset_angstrom", "laser_trans_offset_angstrom",
+        "laser_polarization_angle_deg", "peak_phase_deg"}``, plus an
+        optional ``"dual_laser"`` bool (default False). None (default)
+        disables it -- standard uniform-phase-shift / no-phase-plate path.
+        Do not set ``peak_phase_deg`` to exactly 0.0 to mean "negligible
+        laser power": torch_ctf.get_eta0_from_peak_phase_deg divides
+        ``eta0_test * peak_phase_deg / peak_phase_deg_test`` where both the
+        numerator and ``peak_phase_deg_test`` are themselves exactly zero
+        at ``peak_phase_deg=0`` -- a genuine 0/0 upstream singularity that
+        produces NaN, not a no-op. Use a small nonzero value (e.g. 1e-4) or
+        omit ``lpp_params`` entirely instead.
     learnable : Iterable[str], optional
         Names to promote to ``nn.Parameter`` -- any of the scalar names
         above, a Zernike key (e.g. ``"Z33c"``), or ``"beam_tilt_mrad"``.
-        Everything else is a fixed buffer. Default: nothing is learnable
-        (pure forward simulation).
+        `lpp_params` is never learnable (forward-simulation-only, plain
+        floats). Everything else is a fixed buffer. Default: nothing is
+        learnable (pure forward simulation).
     group_index : dict[str, torch.Tensor], optional
         Per-field group index (see :class:`ParamField`) for terms shared
         across a group of particles (e.g.
@@ -181,12 +220,39 @@ class CTFParameters(nn.Module):
         even_zernike: dict[str, float | torch.Tensor] | None = None,
         odd_zernike: dict[str, float | torch.Tensor] | None = None,
         beam_tilt_mrad: Iterable[float] | torch.Tensor | None = None,
+        lpp_params: dict[str, float] | None = None,
         learnable: Iterable[str] = (),
         group_index: dict[str, torch.Tensor] | None = None,
     ) -> None:
         super().__init__()
         learnable = set(learnable)
         group_index = group_index or {}
+
+        if lpp_params is not None:
+            missing = set(_LPP_PARAM_NAMES) - lpp_params.keys()
+            if missing:
+                raise ValueError(
+                    f"lpp_params is missing required keys: {sorted(missing)}"
+                )
+            extra = lpp_params.keys() - set(_LPP_PARAM_NAMES) - {"dual_laser"}
+            if extra:
+                raise ValueError(f"lpp_params has unrecognized keys: {sorted(extra)}")
+            if (
+                phase_shift is not None
+                and float(torch.as_tensor(phase_shift).max()) != 0.0
+            ):
+                raise ValueError(
+                    "lpp_params and a nonzero phase_shift are mutually exclusive -- "
+                    "a laser phase plate's spatially-varying pattern replaces a "
+                    "uniform phase_shift physically; torch_ctf.calc_LPP_ctf_2D "
+                    "doesn't accept a phase_shift argument at all."
+                )
+            self.lpp_params: dict[str, float] | None = {
+                "dual_laser": False,
+                **lpp_params,
+            }
+        else:
+            self.lpp_params = None
 
         provided = dict(
             defocus=defocus,
@@ -293,6 +359,12 @@ class CTFParameters(nn.Module):
             }
         if self.beam_tilt_mrad is not None:
             out["beam_tilt_mrad"] = self.beam_tilt_mrad.gather(idx)
+        if self.lpp_params is not None:
+            # calc_LPP_ctf_2D has no phase_shift parameter -- the laser
+            # pattern replaces it entirely (enforced mutually exclusive at
+            # construction time already).
+            del out["phase_shift"]
+            out["lpp_params"] = self.lpp_params
         return out
 
 

@@ -958,3 +958,153 @@ def test_first_five_particles_of_real_csfile_match_old_aberration():
 
     assert old_t.shape == new_t.shape == (5, n_pixels, n_pixels)
     assert torch.allclose(old_t, new_t, atol=1e-4)
+
+
+# ---------------------------------------------------------------------------
+# Laser phase plate (torch_ctf.calc_LPP_ctf_2D). No old-Aberration parity is
+# possible here -- Aberration only has a spatially-uniform phase_shift, not
+# a physical LPP model -- and the underlying laser physics (relativistic
+# ponderomotive phase from a standing wave) is specialized enough that
+# reimplementing it independently isn't the right form of verification
+# either. Instead: verify the *wiring* (matches a direct calc_LPP_ctf_2D
+# call), verify DC-pinning/batching/validation all still hold, and check
+# basic physical sanity (peak_phase_deg=0 is a near no-op).
+# ---------------------------------------------------------------------------
+
+_LPP_KWARGS = dict(
+    NA=0.1,
+    laser_wavelength_angstrom=10640.0,
+    focal_length_angstrom=2e7,
+    laser_xy_angle_deg=0.0,
+    laser_xz_angle_deg=0.0,
+    laser_long_offset_angstrom=0.0,
+    laser_trans_offset_angstrom=0.0,
+    laser_polarization_angle_deg=0.0,
+    peak_phase_deg=90.0,
+)
+
+
+def test_lpp_wiring_matches_direct_calc_LPP_ctf_2D():
+    from torch_ctf import calc_LPP_ctf_2D
+
+    params = CTFParameters(
+        defocus=1.0, spherical_aberration=2.7, lpp_params=_LPP_KWARGS
+    )
+    tf = TransferFunction(N_PIXELS, PIXEL_SIZE, aberration_model="ctf")
+    new_t = tf.transfer_function(params).squeeze()
+
+    manual = calc_LPP_ctf_2D(
+        defocus=1.0,
+        astigmatism=0.0,
+        astigmatism_angle=0.0,
+        voltage=VOLTAGE,
+        spherical_aberration=2.7,
+        amplitude_contrast=0.0,
+        pixel_size=PIXEL_SIZE,
+        image_shape=(N_PIXELS, N_PIXELS),
+        rfft=False,
+        fftshift=False,
+        return_complex_ctf=True,
+        **_LPP_KWARGS,
+    )
+    assert torch.allclose(new_t, manual, atol=1e-6)
+
+
+def test_lpp_dc_pinned_in_holography_mode():
+    params = CTFParameters(
+        defocus=1.0, spherical_aberration=2.7, lpp_params=_LPP_KWARGS
+    )
+    tf = TransferFunction(N_PIXELS, PIXEL_SIZE, aberration_model="holography")
+    out = tf.transfer_function(params).squeeze()
+    assert torch.allclose(out[0, 0], torch.tensor(1.0 + 0.0j), atol=1e-6)
+    # Off-DC, the laser pattern must actually have an effect.
+    assert not torch.allclose(out[3, 5], torch.tensor(1.0 + 0.0j), atol=1e-3)
+
+
+def test_lpp_peak_phase_zero_is_a_real_upstream_nan_singularity():
+    """torch_ctf.get_eta0_from_peak_phase_deg computes
+    ``eta0 = eta0_test * peak_phase_deg / peak_phase_deg_test`` where both
+    eta0_test and peak_phase_deg_test are themselves exactly zero when
+    peak_phase_deg=0 (zero laser power) -- a genuine 0/0 upstream
+    singularity, not a wiring bug on this side. Documented here so it isn't
+    mistaken for a regression if hit again."""
+    zero_power = {**_LPP_KWARGS, "peak_phase_deg": 0.0}
+    params_lpp = CTFParameters(
+        defocus=1.0, spherical_aberration=2.7, lpp_params=zero_power
+    )
+    tf = TransferFunction(N_PIXELS, PIXEL_SIZE, aberration_model="holography")
+    out_lpp = tf.transfer_function(params_lpp).squeeze()
+    assert torch.isnan(out_lpp).any()
+
+
+def test_lpp_near_zero_peak_phase_is_near_noop():
+    """Physical sanity check (not wiring): with negligible (but nonzero,
+    avoiding the singularity above) laser power, the LPP transfer function
+    should be close to the plain defocus-only CTF, not introduce spurious
+    structure."""
+    near_zero_power = {**_LPP_KWARGS, "peak_phase_deg": 1e-4}
+    params_lpp = CTFParameters(
+        defocus=1.0, spherical_aberration=2.7, lpp_params=near_zero_power
+    )
+    params_plain = CTFParameters(defocus=1.0, spherical_aberration=2.7)
+    tf = TransferFunction(N_PIXELS, PIXEL_SIZE, aberration_model="holography")
+    out_lpp = tf.transfer_function(params_lpp).squeeze()
+    out_plain = tf.transfer_function(params_plain).squeeze()
+    assert torch.allclose(out_lpp, out_plain, atol=1e-3)
+
+
+def test_lpp_mutually_exclusive_with_nonzero_phase_shift():
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        CTFParameters(defocus=1.0, phase_shift=10.0, lpp_params=_LPP_KWARGS)
+    # A zero/default phase_shift alongside lpp_params is fine.
+    CTFParameters(defocus=1.0, phase_shift=0.0, lpp_params=_LPP_KWARGS)
+    CTFParameters(defocus=1.0, lpp_params=_LPP_KWARGS)
+
+
+def test_lpp_missing_required_key_raises():
+    with pytest.raises(ValueError, match="missing required keys"):
+        CTFParameters(defocus=1.0, lpp_params={"NA": 0.1})
+
+
+def test_lpp_unrecognized_key_raises():
+    with pytest.raises(ValueError, match="unrecognized keys"):
+        CTFParameters(defocus=1.0, lpp_params={**_LPP_KWARGS, "bogus_key": 1.0})
+
+
+def test_lpp_combined_with_per_particle_defocus_and_trefoil():
+    """LPP is always a single shared instrument config, but it must still
+    compose correctly with genuinely per-particle terms (defocus, trefoil)
+    -- exercising the same per-particle fallback loop the batched-Zernike
+    regression tests use, now with calc_LPP_ctf_2D as the inner function."""
+    from torch_ctf import calc_LPP_ctf_2D
+
+    defocus = torch.tensor([0.8, 1.0, 1.2])
+    trefoil_c = torch.tensor([0.1, -0.1, 0.05])
+    params = CTFParameters(
+        defocus=defocus,
+        spherical_aberration=2.7,
+        lpp_params=_LPP_KWARGS,
+        odd_zernike={"Z33c": trefoil_c},
+    )
+    tf = TransferFunction(N_PIXELS, PIXEL_SIZE, aberration_model="holography")
+    out = tf.transfer_function(params)
+    assert out.shape == (3, N_PIXELS, N_PIXELS)
+
+    for i in range(3):
+        manual = calc_LPP_ctf_2D(
+            defocus=defocus[i].item(),
+            astigmatism=0.0,
+            astigmatism_angle=0.0,
+            voltage=VOLTAGE,
+            spherical_aberration=2.7,
+            amplitude_contrast=0.0,
+            pixel_size=PIXEL_SIZE,
+            image_shape=(N_PIXELS, N_PIXELS),
+            rfft=False,
+            fftshift=False,
+            odd_zernike_coeffs={"Z33c": trefoil_c[i]},
+            return_complex_ctf=True,
+            **_LPP_KWARGS,
+        ).clone()
+        manual[0, 0] = 1.0 + 0.0j  # DC pin, matching holography mode
+        assert torch.allclose(out[i], manual, atol=1e-6)

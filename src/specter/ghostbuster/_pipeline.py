@@ -2,15 +2,15 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import Any, Literal
 
-import lightning as L
 import mrcfile
 import torch
 import torch.utils.data
 
 from ._helpers import _preprocess_particle_images
 from ._reconstructor import Reconstructor
+from ._run_helpers import build_trainer
 
 
 def compare_runs(
@@ -457,15 +457,7 @@ class Ghostbuster:
             self.batch_size,
         )
 
-        trainer = L.Trainer(
-            accelerator="gpu" if use_gpu else "cpu",
-            devices=[device] if use_gpu else 1,
-            max_epochs=self.epochs,
-            precision=cast(Any, self.precision if use_gpu else "32"),
-            logger=False,
-            enable_checkpointing=False,
-            callbacks=callbacks or [],
-        )
+        trainer = build_trainer(use_gpu, device, self.epochs, self.precision, callbacks)
         trainer.fit(model, loader)
         return model
 
@@ -514,15 +506,7 @@ class Ghostbuster:
         )
 
         use_gpu = torch.cuda.is_available()
-        trainer = L.Trainer(
-            accelerator="gpu" if use_gpu else "cpu",
-            devices=[device] if use_gpu else 1,
-            max_epochs=1,
-            precision="32",
-            logger=False,
-            enable_checkpointing=False,
-            callbacks=callbacks or [],
-        )
+        trainer = build_trainer(use_gpu, device, 1, "32", callbacks)
         trainer.fit(model, loader)
 
         v = model.V.detach()

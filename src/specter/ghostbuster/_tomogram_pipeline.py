@@ -1,15 +1,15 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Literal, Sequence, cast
+from typing import Any, Literal, Sequence
 
-import lightning as L
 import mrcfile
 import roma
 import torch
 import torch.nn as nn
 import torch.utils.data
 
+from ._run_helpers import build_trainer
 from ._tomogram_reconstructor import TomogramReconstructor
 
 
@@ -328,15 +328,7 @@ class TomogramGhostbuster:
             self.scattering_model,
             self.batch_size,
         )
-        trainer = L.Trainer(
-            accelerator="gpu" if use_gpu else "cpu",
-            devices=[device] if use_gpu else 1,
-            max_epochs=self.epochs,
-            precision=cast(Any, self.precision if use_gpu else "32"),
-            logger=False,
-            enable_checkpointing=False,
-            callbacks=callbacks or [],
-        )
+        trainer = build_trainer(use_gpu, device, self.epochs, self.precision, callbacks)
         trainer.fit(model, loader)
         return model
 
@@ -395,15 +387,7 @@ class TomogramGhostbuster:
             self.batch_size,
         )
         use_gpu = torch.cuda.is_available()
-        trainer = L.Trainer(
-            accelerator="gpu" if use_gpu else "cpu",
-            devices=[device] if use_gpu else 1,
-            max_epochs=1,
-            precision="32",
-            logger=False,
-            enable_checkpointing=False,
-            callbacks=callbacks or [],
-        )
+        trainer = build_trainer(use_gpu, device, 1, "32", callbacks)
         trainer.fit(model, loader)
         v = model.V.detach()
         print(

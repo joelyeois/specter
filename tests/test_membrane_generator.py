@@ -1,4 +1,5 @@
 import warnings
+from pathlib import Path
 
 import pytest
 import torch
@@ -175,3 +176,112 @@ def test_max_field_voxels_default_does_not_warn_at_small_scale():
         warnings.simplefilter("error", UserWarning)
         gen = MembraneGenerator(seed=0, **_SMALL_KWARGS)
         gen.generate()  # would raise if the coarsening warning fired
+
+
+_ALPHA_SHAPE_KWARGS = dict(
+    target_shape_zyx=(80, 80, 80),
+    v_size=4.0,
+    shape_backend="alpha_shape",
+    blob_size_a=40.0,
+    blob_roughness=0.4,
+    n_lipids_per_leaflet=6,
+)
+
+
+def test_alpha_shape_backend_produces_correct_shape_with_membrane_density():
+    """shape_backend="alpha_shape" (CTS-derived) must be a drop-in for
+    "metaball" through the rest of the pipeline -- same output contract,
+    same calibrated BilayerProfile underneath, only the shape geometry
+    differs."""
+    gen = MembraneGenerator(seed=0, **_ALPHA_SHAPE_KWARGS)
+    volume = gen.generate()
+
+    assert volume.shape == _ALPHA_SHAPE_KWARGS["target_shape_zyx"]
+    assert torch.isfinite(volume).all()
+    assert volume.max() > 0
+    assert gen.field is not None
+    assert gen.profile is not None
+
+
+def test_alpha_shape_backend_is_seed_reproducible():
+    gen_a = MembraneGenerator(seed=3, **_ALPHA_SHAPE_KWARGS)
+    gen_b = MembraneGenerator(seed=3, **_ALPHA_SHAPE_KWARGS)
+    volume_a = gen_a.generate()
+    volume_b = gen_b.generate()
+    assert torch.equal(volume_a, volume_b)
+
+
+def test_alpha_shape_backend_supports_transmembrane_placement():
+    """The whole point of building this backend on top of MembraneGenerator
+    rather than reusing CTS's own MembraneBlobGenerator directly: correct
+    normal-aligned transmembrane placement, which CTS's own "location"
+    mechanism does not provide for arbitrary (non-pre-oriented) PDB
+    structures."""
+    pdb_path = Path(__file__).parent.parent / "pdb-data" / "1mbo.cif"
+    if not pdb_path.exists():
+        pytest.skip("bundled PDB fixture missing")
+    gen = MembraneGenerator(
+        transmembrane_specs=[TransmembraneSpec(pdb_source=str(pdb_path), frequency=3)],
+        seed=0,
+        **_ALPHA_SHAPE_KWARGS,
+    )
+    gen.generate()
+    placements = gen.place_transmembrane(min_spacing_a=15.0)
+    assert len(placements) > 0
+
+
+def test_shape_backend_rejects_unknown_value():
+    with pytest.raises(ValueError, match="shape_backend"):
+        MembraneGenerator(
+            target_shape_zyx=(32, 32, 32), v_size=6.0, shape_backend="not_a_backend"
+        )
+
+
+def test_alpha_shape_backend_warns_when_blob_too_small_for_reliable_resolution():
+    """Regression test for a real finding: a blob_size_a too small relative
+    to the working grid's spacing makes sample_surface_sites' Newton
+    projection unreliable, previously silently finding zero transmembrane
+    sites with no warning at all. Both this proactive check (fires during
+    generate()) and the reactive one in place_transmembrane below must
+    fire, not just one -- verified directly across a v_size sweep that a
+    too-small blob keeps failing regardless of v_size once field spacing
+    saturates at its own resolution floor (driven by the bilayer profile,
+    not v_size), so this is a real, not incidental, gap to guard."""
+    gen = MembraneGenerator(
+        target_shape_zyx=(80, 80, 80),
+        v_size=4.0,
+        shape_backend="alpha_shape",
+        blob_size_a=25.0,  # ~6 voxels/radius at this spacing -- below the
+        # verified-reliable floor (see _field_alpha.py's
+        # _MIN_RELIABLE_VOXELS_PER_RADIUS)
+        blob_roughness=0.5,
+        n_lipids_per_leaflet=6,
+        seed=0,
+    )
+    with pytest.warns(UserWarning, match="voxels/radius"):
+        gen.generate()
+
+
+def test_place_transmembrane_warns_on_partial_or_zero_placement():
+    """Pre-existing gap, not specific to the new backend: place_transmembrane
+    silently returned fewer (or zero) placements than requested with no
+    warning at all, for either shape_backend. Fixed for both."""
+    pdb_path = Path(__file__).parent.parent / "pdb-data" / "1mbo.cif"
+    if not pdb_path.exists():
+        pytest.skip("bundled PDB fixture missing")
+    gen = MembraneGenerator(
+        target_shape_zyx=(80, 80, 80),
+        v_size=4.0,
+        shape_backend="alpha_shape",
+        blob_size_a=25.0,
+        blob_roughness=0.5,
+        n_lipids_per_leaflet=6,
+        transmembrane_specs=[TransmembraneSpec(pdb_source=str(pdb_path), frequency=3)],
+        seed=0,
+    )
+    with warnings.catch_warnings(record=True):
+        warnings.simplefilter("ignore")  # let generate()'s own warning through quietly
+        gen.generate()
+    with pytest.warns(UserWarning, match="requested transmembrane sites were found"):
+        placements = gen.place_transmembrane(min_spacing_a=15.0)
+    assert len(placements) < 3

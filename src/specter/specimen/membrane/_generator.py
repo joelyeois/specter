@@ -29,6 +29,7 @@ from ...potential import PotentialBuilder
 from ...rotations import build_affine_matrix, rotate_volume
 from ..packing import estimate_protein_box_size
 from ._field import MembraneField, generate_membrane_field
+from ._field_alpha import generate_membrane_field_alpha_shape
 from ._placement import (
     align_principal_axis_to_z,
     align_transmembrane_depth,
@@ -98,20 +99,48 @@ class MembraneGenerator:
     v_size : float
         Output voxel size, Angstrom. Also used to render transmembrane
         protein templates, so their scale matches the membrane's.
+    shape_backend : {"metaball", "alpha_shape"}, optional
+        Which organic-shape algorithm builds the underlying
+        :class:`~specter.specimen.membrane._field.MembraneField` --
+        `"metaball"` (default, unchanged from before this parameter
+        existed) blends `n_sources` isotropically-scattered spheres, which
+        stays a compact blob regardless of noise/curvature tuning (verified
+        by direct sweep). `"alpha_shape"` instead wraps a noisy point cloud
+        in an alpha shape (a from-scratch port of CTS's own `gen_mem.m`
+        algorithm, :func:`~specter.specimen.membrane._field_alpha.
+        generate_membrane_field_alpha_shape`), which -- via `blob_roughness`
+        -- can produce genuinely non-convex/elongated, even tube-like,
+        shapes (verified by direct sweep: 0.7/0.5/0.3/0.15 goes from a
+        rounded bowl to a twisted ribbon to a thin tube). Both backends are
+        read afterward only through `MembraneField`'s public contract, so
+        the calibrated bilayer profile and transmembrane placement below
+        are identical either way -- this choice only affects the shape.
     n_sources : int, optional
-        Number of blended metaball sources for the organic shape. Default 6.
+        Number of blended metaball sources for the organic shape.
+        `"metaball"` backend only. Default 6.
     radius_range_a : tuple of float, optional
-        Source radius range, Angstrom. Default ``(150.0, 400.0)``.
+        Source radius range, Angstrom. `"metaball"` backend only. Default
+        ``(150.0, 400.0)``.
     spread_a : float, optional
-        Source center spread, Angstrom. Default is
-        :func:`~specter.specimen.membrane._field.generate_membrane_field`'s
+        Source center spread, Angstrom. `"metaball"` backend only. Default
+        is :func:`~specter.specimen.membrane._field.generate_membrane_field`'s
         own default (a quarter of the working grid's smallest extent).
     noise_amplitude_a : float, optional
-        Undulation noise amplitude, Angstrom. Default 15.0.
+        Undulation noise amplitude, Angstrom. `"metaball"` backend only.
+        Default 15.0.
     correlation_length_a : float, optional
-        Undulation noise correlation length, Angstrom. Default 40.0.
+        Undulation noise correlation length, Angstrom. `"metaball"` backend
+        only. Default 40.0.
     curvature_iterations : int, optional
-        Curvature-capping relaxation steps. Default 30.
+        Curvature-capping relaxation steps. `"metaball"` backend only.
+        Default 30.
+    blob_size_a : float, optional
+        Rough target blob radius, Angstrom (CTS's own `size`). `"alpha_shape"`
+        backend only. Default 300.0.
+    blob_roughness : float, optional
+        In (0, 1); lower is more irregular/elongated, down to tube-like at
+        very low values -- see `shape_backend`'s docstring. `"alpha_shape"`
+        backend only. Default 0.3.
     n_lipids_per_leaflet : int, optional
         Reference lipid patch size for the calibrated bilayer profile (see
         :func:`~specter.specimen.membrane._profile.build_reference_lipid_patch`).
@@ -156,12 +185,15 @@ class MembraneGenerator:
         self,
         target_shape_zyx: tuple[int, int, int],
         v_size: float,
+        shape_backend: str = "metaball",
         n_sources: int = 6,
         radius_range_a: tuple[float, float] = (150.0, 400.0),
         spread_a: float | None = None,
         noise_amplitude_a: float = 15.0,
         correlation_length_a: float = 40.0,
         curvature_iterations: int = 30,
+        blob_size_a: float = 300.0,
+        blob_roughness: float = 0.3,
         n_lipids_per_leaflet: int = 200,
         parameterization: str = "shtyrov",
         transmembrane_specs: list[TransmembraneSpec] | None = None,
@@ -170,15 +202,22 @@ class MembraneGenerator:
         device: str | torch.device = "cpu",
         seed: int | None = None,
     ):
+        if shape_backend not in ("metaball", "alpha_shape"):
+            raise ValueError(
+                f"shape_backend must be 'metaball' or 'alpha_shape', got {shape_backend!r}"
+            )
         tz, ty, tx = target_shape_zyx
         self.target_shape_zyx: tuple[int, int, int] = (int(tz), int(ty), int(tx))
         self.v_size = float(v_size)
+        self.shape_backend = shape_backend
         self.n_sources = n_sources
         self.radius_range_a = radius_range_a
         self.spread_a = spread_a
         self.noise_amplitude_a = noise_amplitude_a
         self.correlation_length_a = correlation_length_a
         self.curvature_iterations = curvature_iterations
+        self.blob_size_a = blob_size_a
+        self.blob_roughness = blob_roughness
         self.n_lipids_per_leaflet = n_lipids_per_leaflet
         self.parameterization = parameterization
         self.transmembrane_specs = transmembrane_specs or []
@@ -251,18 +290,28 @@ class MembraneGenerator:
                 "have the memory to spare.",
                 stacklevel=2,
             )
-        self.field = generate_membrane_field(
-            shape_zyx=field_shape_zyx,
-            spacing_a=field_spacing_a,
-            n_sources=self.n_sources,
-            radius_range_a=self.radius_range_a,
-            spread_a=self.spread_a,
-            noise_amplitude_a=self.noise_amplitude_a,
-            correlation_length_a=self.correlation_length_a,
-            curvature_iterations=self.curvature_iterations,
-            device=self.device,
-            seed=self.seed,
-        )
+        if self.shape_backend == "alpha_shape":
+            self.field = generate_membrane_field_alpha_shape(
+                shape_zyx=field_shape_zyx,
+                spacing_a=field_spacing_a,
+                blob_size_a=self.blob_size_a,
+                blob_roughness=self.blob_roughness,
+                device=self.device,
+                seed=self.seed,
+            )
+        else:
+            self.field = generate_membrane_field(
+                shape_zyx=field_shape_zyx,
+                spacing_a=field_spacing_a,
+                n_sources=self.n_sources,
+                radius_range_a=self.radius_range_a,
+                spread_a=self.spread_a,
+                noise_amplitude_a=self.noise_amplitude_a,
+                correlation_length_a=self.correlation_length_a,
+                curvature_iterations=self.curvature_iterations,
+                device=self.device,
+                seed=self.seed,
+            )
 
         self.volume = rasterize_membrane_density(
             self.field,
@@ -310,6 +359,26 @@ class MembraneGenerator:
             max_attempts=max_attempts,
             seed=self.seed,
         )
+        n_found = sites_xyz.shape[0]
+        if n_found < n_sites:
+            severity = "zero" if n_found == 0 else "only"
+            warnings.warn(
+                f"MembraneGenerator.place_transmembrane: {severity} {n_found}/{n_sites} "
+                "requested transmembrane sites were found -- sample_surface_sites' "
+                "Newton-projection surface search exhausted max_attempts before "
+                "reaching the target count. Common causes: the membrane's surface "
+                "area is too small for this many well-spaced sites at this "
+                "min_spacing_a (try reducing min_spacing_a or n_sites/frequency), "
+                "or -- shape_backend='alpha_shape' specifically -- the working "
+                "field grid is too coarse relative to blob_size_a for reliable "
+                "surface projection (see generate_membrane_field_alpha_shape's own "
+                "Notes; that function also warns proactively on this). This is not "
+                "raised as an error since a partial/empty result is sometimes "
+                "intended (e.g. deliberately testing a too-small membrane), but "
+                f"placements will be missing/absent if not: {n_found} of "
+                f"{n_sites} transmembrane instances will be placed.",
+                stacklevel=2,
+            )
 
         templates = {
             spec.pdb_source: self._build_template(spec)

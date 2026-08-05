@@ -566,6 +566,12 @@ class TomogramConfig:
         0.5  # bare-sphere volume fraction budget for filler
     )
     gap_angstrom: float = 5.0  # minimum clearance between placed spheres
+    # (z, y, x), matching target_shape's axis order. True on an axis lets a
+    # placed instance's center stay in-bounds while its body pokes past
+    # that wall (truncated naturally at render time) instead of being
+    # rejected outright -- e.g. for a tomogram whose xy field of view is a
+    # crop of a larger cellular region.
+    clip_axes: list[bool] = field(default_factory=lambda: [False, False, False])
     packing_method: Literal["rsa", "dense"] = "rsa"  # filler-stage backend
     pad_fraction: float = 0.5  # only used when packing_method="dense"
     pdb_savefolder: str = "pdb-data"  # resolved against REPO_ROOT if relative
@@ -599,6 +605,9 @@ TOMOGRAM_HELP: dict[str, str] = {
     "until it jams rather than needing this hand-tuned. Lower it only for a "
     "deliberately sparser filler layer.",
     "gap_angstrom": "Minimum clearance between placed spheres' surfaces, in Angstrom.",
+    "clip_axes": "(z, y, x) -- True on an axis lets a placed instance's "
+    "body extend past that wall (truncated at render time) instead of "
+    "being rejected outright. TOML-only (list[bool]).",
     "packing_method": "Packing backend for the filler stage: 'rsa' (fast, "
     "the only backend that can avoid already-placed targets) or 'dense' "
     "(denser but no obstacle avoidance -- only usable when targets is empty).",

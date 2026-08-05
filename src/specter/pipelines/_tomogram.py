@@ -55,6 +55,7 @@ def run_build_tomogram(config: TomogramConfig) -> None:
         v_size=config.v_size,
         filler_occupancy_fraction=config.filler_occupancy_fraction,
         gap_angstrom=config.gap_angstrom,
+        clip_axes=tuple(config.clip_axes),  # type: ignore[arg-type]
         packing_method=config.packing_method,
         pad_fraction=config.pad_fraction,
         pdb_cache_dir=config.pdb_savefolder,

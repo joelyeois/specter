@@ -42,6 +42,11 @@ packing_method = "rsa"             # rsa | dense -- filler-stage backend;
                                     # only works when targets is empty
 pdb_savefolder = "pdb-data"        # resolved relative to the repo root
 # seed = 11                        # uncomment for reproducible packing
+# clip_axes = [false, true, true]  # (z, y, x) -- True lets placed instances
+                                    # poke past that wall instead of being
+                                    # rejected, e.g. for a tomogram whose xy
+                                    # field of view is a crop of a larger
+                                    # cellular region
 
 [picks]
 write_picks = true

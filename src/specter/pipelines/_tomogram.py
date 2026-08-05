@@ -2,8 +2,8 @@
 .ndjson picks out.
 
 Drives `specter.specimen.SpherePackingSpecimenGenerator` (two-stage hard-
-sphere placement -- exact-count targets first, then ratio-weighted filler
-avoiding them; see `specter.specimen.packing.pack_hard_spheres_3d`), saves
+sphere placement -- exact-count targets first, then equal-attempt-weight
+filler avoiding them; see `specter.specimen.packing.pack_hard_spheres_3d`), saves
 the assembled volume as .mrc -- directly usable as `specter simulate
 tiltseries`'s `--volume_path` -- plus one copick-style .ndjson pick file per
 species.
@@ -46,10 +46,7 @@ def run_build_tomogram(config: TomogramConfig) -> None:
         for spec in config.targets
     ]
     filler_specs = [
-        SphereProteinSpec(
-            pdb_source=spec["pdb_source"], ratio=float(spec.get("ratio", 1.0))
-        )
-        for spec in config.filler
+        SphereProteinSpec(pdb_source=spec["pdb_source"]) for spec in config.filler
     ]
     gen = SpherePackingSpecimenGenerator(
         target_specs=target_specs,

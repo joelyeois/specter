@@ -69,8 +69,9 @@ specter build tomogram --config configs/tomogram.toml
 
 Species are placed in two priority stages: `[[targets]]` first, each at an
 exact instance count (the annotated ground truth), then `[[filler]]`
-second, ratio-weighted, packed around the already-placed targets to crowd
-out the rest of the volume. An example config lives in
+second, drawn with equal attempt-weight across species, packed around the
+already-placed targets to crowd out the rest of the volume. An example
+config lives in
 [`configs/tomogram.toml`](https://github.com/joelyeois/specter/tree/main/configs) —
 copy it and edit for your own runs. It looks like this:
 
@@ -83,7 +84,6 @@ n_copies = 20
 
 [[filler]]
 pdb_source = "1mbo"   # myoglobin (small)
-ratio = 4.0
 
 [specimen]
 target_shape = [128, 256, 256]    # (Z, Y, X) voxels

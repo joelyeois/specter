@@ -20,17 +20,14 @@ n_copies = 20
 pdb_source = "6qzp"
 n_copies = 10
 
-# [[filler]] -- placed SECOND, around the already-placed targets, ratio-
-# weighted and budgeted by filler_occupancy_fraction below. "ratio" is
-# optional (default 1.0, i.e. equal representation across filler species) --
-# it only needs tuning if you deliberately want an uneven mix.
+# [[filler]] -- placed SECOND, around the already-placed targets, drawn
+# with equal attempt-weight across species and budgeted by
+# filler_occupancy_fraction below.
 [[filler]]
 pdb_source = "1fa2"   # beta amylase (medium)
-ratio = 2.0
 
 [[filler]]
 pdb_source = "1mbo"   # myoglobin (small)
-ratio = 4.0
 
 [specimen]
 target_shape = [128, 256, 256]    # (Z, Y, X) voxels

@@ -90,15 +90,15 @@ def test_sphere_packing_generator_filler_only():
     not (_SMALL_FIXTURE.exists() and _LARGE_FIXTURE.exists()),
     reason="bundled PDB fixtures missing",
 )
-def test_sphere_packing_generator_filler_ratios():
-    """Two differently-sized filler species, ratio-weighted -- both should
-    end up represented among the placements."""
+def test_sphere_packing_generator_filler_multi_species():
+    """Two differently-sized filler species, equal attempt-weight -- both
+    should end up represented among the placements."""
     target_shape = (32, 64, 64)
     gen = SpherePackingSpecimenGenerator(
         target_specs=[],
         filler_specs=[
-            SphereProteinSpec(pdb_source=str(_SMALL_FIXTURE), ratio=3.0),
-            SphereProteinSpec(pdb_source=str(_LARGE_FIXTURE), ratio=1.0),
+            SphereProteinSpec(pdb_source=str(_SMALL_FIXTURE)),
+            SphereProteinSpec(pdb_source=str(_LARGE_FIXTURE)),
         ],
         target_shape=target_shape,
         v_size=10.0,
@@ -127,7 +127,7 @@ def test_sphere_packing_generator_targets_exact_count_and_filler_avoids_them():
     gap = 5.0
     gen = SpherePackingSpecimenGenerator(
         target_specs=[SphereProteinSpec(pdb_source=str(_LARGE_FIXTURE), n_copies=3)],
-        filler_specs=[SphereProteinSpec(pdb_source=str(_SMALL_FIXTURE), ratio=1.0)],
+        filler_specs=[SphereProteinSpec(pdb_source=str(_SMALL_FIXTURE))],
         target_shape=target_shape,
         v_size=10.0,
         filler_occupancy_fraction=0.1,

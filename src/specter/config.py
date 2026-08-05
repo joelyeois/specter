@@ -541,8 +541,9 @@ class TomogramConfig:
     volume_path`) plus one copick-style .ndjson pick file per species.
 
     Species are split into two priority groups, packed in two stages: exact-
-    count `targets` first (the annotated ground truth), then ratio-weighted
-    `filler` second, filling remaining space around the targets.
+    count `targets` first (the annotated ground truth), then equal-
+    attempt-weight `filler` second, filling remaining space around the
+    targets.
     """
 
     # --- Specimen ---
@@ -550,11 +551,12 @@ class TomogramConfig:
     # Both keys required. Placed FIRST, at this exact count. In TOML,
     # provide as [[targets]] tables.
     targets: list[dict[str, Any]] = field(default_factory=list)
-    # One dict per filler species, e.g. {"pdb_source": "1mbo", "ratio": 1.0}.
-    # Only "pdb_source" is required ("ratio" defaults to 1.0, i.e. uniform
-    # across species left at default). Placed SECOND, around the already-
-    # placed targets, budgeted by filler_occupancy_fraction. In TOML,
-    # provide as [[filler]] tables.
+    # One dict per filler species, e.g. {"pdb_source": "1mbo"}. Only
+    # "pdb_source" is required -- all filler species are drawn with equal
+    # attempt-weight (no per-species knob, see SphereProteinSpec's own
+    # docstring for why). Placed SECOND, around the already-placed targets,
+    # budgeted by filler_occupancy_fraction. In TOML, provide as [[filler]]
+    # tables.
     filler: list[dict[str, Any]] = field(default_factory=list)
     target_shape: list[int] = field(
         default_factory=lambda: [128, 256, 256]
@@ -586,9 +588,8 @@ TOMOGRAM_HELP: dict[str, str] = {
     "tables), each {'pdb_source': <code or path>, 'n_copies': <exact "
     "instance count>}. Placed first, always exported to picks.",
     "filler": "Filler protein species to pack (TOML-only, [[filler]] "
-    "tables), each {'pdb_source': <code or path>, 'ratio': <relative "
-    "abundance weight, default 1.0>}. Placed second, around the already-"
-    "placed targets.",
+    "tables), each {'pdb_source': <code or path>}. Placed second, around "
+    "the already-placed targets, with equal attempt-weight across species.",
     "target_shape": "Output specimen volume shape in voxels (Z, Y, X).",
     "v_size": "Voxel size in Angstrom.",
     "filler_occupancy_fraction": "Target packing density for filler species, "

@@ -18,14 +18,15 @@ shaped molecules), in exchange for speed and density.
 Species split into two priority groups, packed in two sequential stages:
 
 - `target_specs` -- placed FIRST, each at an exact `SphereProteinSpec.
-  n_copies` count (not ratio-weighted), via
-  :func:`.algorithms.pack_hard_spheres_3d`. These are the ground-truth
-  particles you actually want annotated -- exact, reproducible counts
-  matter more here than crowding density.
-- `filler_specs` -- placed SECOND, ratio-weighted and budget-driven by
-  `filler_occupancy_fraction` (default a generously high ceiling, so the
-  backend naturally jams out rather than needing a hand-tuned target --
-  see that parameter), avoiding every already-placed target via an
+  n_copies` count, via :func:`.algorithms.pack_hard_spheres_3d`. These are
+  the ground-truth particles you actually want annotated -- exact,
+  reproducible counts matter more here than crowding density.
+- `filler_specs` -- placed SECOND, drawn with equal attempt-weight across
+  species (no per-species knob -- see `SphereProteinSpec`'s own docstring
+  for why) and budget-driven by `filler_occupancy_fraction` (default a
+  generously high ceiling, so the backend naturally jams out rather than
+  needing a hand-tuned target -- see that parameter), avoiding every
+  already-placed target via an
   `exclusion_distance_field` built from their positions/radii
   (`_build_sphere_exclusion_field`). `packing_method="rsa"` (default)
   resolves many candidates' accept/reject decisions per pass instead of
@@ -213,25 +214,26 @@ class SphereProteinSpec:
     pdb_source : str
         PDB ID (4-character code, fetched from RCSB) or a local PDB/mmCIF
         file path.
-    ratio : float, optional
-        Relative abundance weight, used only for `filler_specs` (ignored
-        for `target_specs`, which use `n_copies` instead): species are
-        drawn into the candidate pool with probability proportional to
-        `ratio` across all filler specs -- only the RATIO between species
-        matters, not the absolute value (matches how `specter.specimen.
-        cytosolic_filler.PEI2016_CROWDING_TABLE`'s `occurrence_freq` is
-        meant to be used). Default 1.0 (uniform across species if left at
-        default for all -- a reasonable default even when you don't want
-        to think about it, since `filler_occupancy_fraction` now does the
-        "how much total" job on its own).
     n_copies : int, optional
-        Exact instance count, used only for `target_specs` (ignored for
-        `filler_specs`, which use `ratio` instead). Required (must be a
+        Exact instance count, used only for `target_specs` (ignored, and
+        must be left unset, for `filler_specs`). Required (must be a
         positive int) for every spec passed as a `target_spec`.
+
+        There's deliberately no per-species weight for `filler_specs`: an
+        earlier `ratio` field (relative attempt-count weight) turned out to
+        be a confusing lever -- `pack_hard_spheres_3d`'s largest-first
+        staging already gives every species a fair shot in placement order,
+        but the ACTUAL placed mix is dominated by geometry regardless of
+        any requested weighting (large species hit a hard jamming ceiling
+        no `ratio` can move; small species fill whatever fragments of space
+        are left over and dominate the final count almost no matter what).
+        Since that geometric effect swamps any deliberate weighting between
+        differently-sized species anyway, all filler species are now drawn
+        with equal attempt-weight -- see `SpherePackingSpecimenGenerator.
+        generate`.
     """
 
     pdb_source: str
-    ratio: float = 1.0
     n_copies: int | None = None
 
 
@@ -265,8 +267,8 @@ class SpherePackingSpecimenGenerator:
         be set on every entry). These are the annotated ground truth --
         always exported by `export_picks`.
     filler_specs : list of SphereProteinSpec, optional
-        Species placed SECOND, ratio-weighted, filling whatever space is
-        left around the already-placed targets (see
+        Species placed SECOND, equal attempt-weight across species, filling
+        whatever space is left around the already-placed targets (see
         `filler_occupancy_fraction`). Default empty (no filler).
     target_shape : tuple of int, optional
         Output volume shape (Z, Y, X), voxels. Default (128, 256, 256).
@@ -470,10 +472,13 @@ class SpherePackingSpecimenGenerator:
             target_accepted_radii = torch.empty((0,))
         self.n_targets_placed = int(target_coords.shape[0])
 
-        # --- Stage 2: filler, ratio-weighted, avoiding placed targets ---
+        # --- Stage 2: filler, equal attempt-weight, avoiding placed targets ---
         if self.filler_specs:
             filler_species_radii = species_radii[n_targets:]
-            filler_ratios = torch.tensor([spec.ratio for spec in self.filler_specs])
+            # No per-species weight (see SphereProteinSpec's own docstring
+            # for why) -- draw_species_pool/pack_hard_spheres_3d_dense still
+            # take a ratios tensor, so pass a uniform one.
+            filler_ratios = torch.ones(len(self.filler_specs))
 
             if self.packing_method == "rsa":
                 pool_radii, pool_species_idx = draw_species_pool(

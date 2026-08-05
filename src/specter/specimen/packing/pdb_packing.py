@@ -13,17 +13,34 @@ SAWLC placement + membranes) and ``specimen/cryotomosim.py``'s
 Monte Carlo with direct density-overlap testing). This one approximates
 each species as a bounding sphere for placement (not the true molecular
 shape, unlike the other two -- a real cost in packing fidelity for oddly
-shaped molecules), in exchange for speed and density: `packing_method="rsa"`
-(default, :func:`.algorithms.pack_hard_spheres_3d`) resolves many
-candidates' accept/reject decisions per pass instead of one at a time,
-roughly 90x faster than a naive one-candidate-at-a-time loop at a few
-thousand instances; `packing_method="dense"`
-(:func:`.algorithms.pack_hard_spheres_3d_dense`) trades that speed for
-substantially higher occupancy via periodic force-biased relaxation (see
-``dev/packing_algorithms.py`` for the full algorithm comparison this pair
-was promoted from). No membranes, ice, or carbon film here -- just densely
-packed protein species at whatever occupancy fraction and species-ratio mix
-is requested; layer ice on top separately (e.g.
+shaped molecules), in exchange for speed and density.
+
+Species split into two priority groups, packed in two sequential stages:
+
+- `target_specs` -- placed FIRST, each at an exact `SphereProteinSpec.
+  n_copies` count (not ratio-weighted), via
+  :func:`.algorithms.pack_hard_spheres_3d`. These are the ground-truth
+  particles you actually want annotated -- exact, reproducible counts
+  matter more here than crowding density.
+- `filler_specs` -- placed SECOND, ratio-weighted and budget-driven by
+  `filler_occupancy_fraction` (default a generously high ceiling, so the
+  backend naturally jams out rather than needing a hand-tuned target --
+  see that parameter), avoiding every already-placed target via an
+  `exclusion_distance_field` built from their positions/radii
+  (`_build_sphere_exclusion_field`). `packing_method="rsa"` (default)
+  resolves many candidates' accept/reject decisions per pass instead of
+  one at a time, roughly 90x faster than a naive one-candidate-at-a-time
+  loop at a few thousand instances, and is the only backend that can honor
+  an exclusion field; `packing_method="dense"`
+  (:func:`.algorithms.pack_hard_spheres_3d_dense`) trades that for
+  substantially higher occupancy via periodic force-biased relaxation, but
+  has no obstacle-avoidance mechanism -- it's only usable when
+  `target_specs` is empty (see the error raised otherwise). See
+  ``dev/packing_algorithms.py`` for the full algorithm comparison this
+  pair was promoted from.
+
+No membranes, ice, or carbon film here -- just densely packed protein
+species; layer ice on top separately (e.g.
 ``specter.ice.blend_ice_into_volume``) if needed.
 """
 
@@ -36,6 +53,7 @@ from typing import Literal
 
 import numpy as np
 import torch
+from scipy import ndimage
 
 from ...arrays import clip_insert_bounds
 from ...crowding import insert_particles_into_micrograph
@@ -127,6 +145,64 @@ def _insert_instance_labels(
     return labels
 
 
+def _build_sphere_exclusion_field(
+    coords_xyz: torch.Tensor,
+    radii: torch.Tensor,
+    target_shape: tuple[int, int, int],
+    v_size: float,
+) -> tuple[torch.Tensor, float]:
+    """
+    Rasterize already-placed spheres into a boolean occupied grid and
+    return its Euclidean distance transform, ready to pass straight through
+    as `pack_hard_spheres_3d`'s `exclusion_distance_field` (so a later
+    packing stage can avoid overlapping these fixed spheres). Only the raw
+    sphere volume is marked occupied -- `gap` clearance is applied later, at
+    comparison time, by the caller's own `gap` argument to that function.
+
+    Parameters
+    ----------
+    coords_xyz : torch.Tensor, shape (N, 3)
+        Sphere centers (x, y, z), Angstrom, box-centered -- same convention
+        `pack_hard_spheres_3d` returns.
+    radii : torch.Tensor, shape (N,)
+        Sphere radius per instance, Angstrom.
+    target_shape : tuple of int
+        (Z, Y, X) voxels.
+    v_size : float
+        Grid spacing, Angstrom -- shared by the occupied grid and the
+        returned distance field.
+
+    Returns
+    -------
+    field : torch.Tensor, shape target_shape
+        Distance (Angstrom) from each voxel to the nearest occupied voxel.
+    field_v_size : float
+        Equal to `v_size` -- returned alongside the field only to match
+        `pack_hard_spheres_3d`'s `exclusion_distance_field`/`field_v_size`
+        calling convention.
+    """
+    Z, Y, X = target_shape
+    occupied = np.zeros((Z, Y, X), dtype=bool)
+    cz, cy, cx = Z / 2.0, Y / 2.0, X / 2.0
+
+    coords_np = coords_xyz.numpy()
+    radii_np = radii.numpy()
+    for (x, y, z), r in zip(coords_np, radii_np):
+        vz, vy, vx = cz + z / v_size, cy + y / v_size, cx + x / v_size
+        r_vox = r / v_size
+        z0, z1 = max(0, int(np.floor(vz - r_vox))), min(Z, int(np.ceil(vz + r_vox)) + 1)
+        y0, y1 = max(0, int(np.floor(vy - r_vox))), min(Y, int(np.ceil(vy + r_vox)) + 1)
+        x0, x1 = max(0, int(np.floor(vx - r_vox))), min(X, int(np.ceil(vx + r_vox)) + 1)
+        if z0 >= z1 or y0 >= y1 or x0 >= x1:
+            continue
+        zz, yy, xx = np.mgrid[z0:z1, y0:y1, x0:x1]
+        dist2 = (zz - vz) ** 2 + (yy - vy) ** 2 + (xx - vx) ** 2
+        occupied[z0:z1, y0:y1, x0:x1] |= dist2 <= r_vox**2
+
+    field = ndimage.distance_transform_edt(~occupied, sampling=(v_size,) * 3)
+    return torch.from_numpy(field).float(), v_size
+
+
 @dataclass
 class SphereProteinSpec:
     """
@@ -138,16 +214,25 @@ class SphereProteinSpec:
         PDB ID (4-character code, fetched from RCSB) or a local PDB/mmCIF
         file path.
     ratio : float, optional
-        Relative abundance weight: species are drawn into the candidate
-        pool with probability proportional to `ratio` across all specs --
-        only the RATIO between species matters, not the absolute value
-        (matches how `specter.specimen.cytosolic_filler.
-        PEI2016_CROWDING_TABLE`'s `occurrence_freq` is meant to be used).
-        Default 1.0 (uniform across species if left at default for all).
+        Relative abundance weight, used only for `filler_specs` (ignored
+        for `target_specs`, which use `n_copies` instead): species are
+        drawn into the candidate pool with probability proportional to
+        `ratio` across all filler specs -- only the RATIO between species
+        matters, not the absolute value (matches how `specter.specimen.
+        cytosolic_filler.PEI2016_CROWDING_TABLE`'s `occurrence_freq` is
+        meant to be used). Default 1.0 (uniform across species if left at
+        default for all -- a reasonable default even when you don't want
+        to think about it, since `filler_occupancy_fraction` now does the
+        "how much total" job on its own).
+    n_copies : int, optional
+        Exact instance count, used only for `target_specs` (ignored for
+        `filler_specs`, which use `ratio` instead). Required (must be a
+        positive int) for every spec passed as a `target_spec`.
     """
 
     pdb_source: str
     ratio: float = 1.0
+    n_copies: int | None = None
 
 
 @dataclass
@@ -159,6 +244,12 @@ class SpherePlacement:
     rotation_matrix: torch.Tensor  # (3, 3)
     # 1-based; matches this instance's voxel value in `instance_labels`
     instance_id: int
+    # "target" or "filler" -- which stage placed this instance. Tracked
+    # separately from species_id since the same pdb_source can legitimately
+    # appear in both target_specs and filler_specs (e.g. a target species
+    # that's also generically abundant as background); export_picks uses
+    # this, not species_id, to decide what counts as ground truth.
+    role: Literal["target", "filler"] = "target"
 
 
 class SpherePackingSpecimenGenerator:
@@ -169,49 +260,50 @@ class SpherePackingSpecimenGenerator:
 
     Parameters
     ----------
-    protein_specs : list of SphereProteinSpec
-        Species to place.
+    target_specs : list of SphereProteinSpec
+        Species placed FIRST, each at its own exact `n_copies` count (must
+        be set on every entry). These are the annotated ground truth --
+        always exported by `export_picks`.
+    filler_specs : list of SphereProteinSpec, optional
+        Species placed SECOND, ratio-weighted, filling whatever space is
+        left around the already-placed targets (see
+        `filler_occupancy_fraction`). Default empty (no filler).
     target_shape : tuple of int, optional
         Output volume shape (Z, Y, X), voxels. Default (128, 256, 256).
     v_size : float, optional
         Voxel size, Angstrom. Default 5.0.
-    occupancy_fraction : float, optional
-        Target packing density: candidate instances are drawn (species-
-        ratio-weighted) until their combined bare-sphere volume reaches
-        this fraction of the box volume. The box's real, gap-inflated
-        excluded-volume requirement is higher than this number (see
-        `gap_angstrom`) -- an `occupancy_fraction` whose implied
-        excluded-volume fraction exceeds the random-close-packing ceiling
-        for spheres (~0.64) is not physically achievable by any packing
-        algorithm; the packing backend will simply place as many
-        candidates as fit rather than erroring -- compare
-        `len(placements)` to `n_candidates` below to see how much of the
-        target was actually reached (only meaningful for
-        `packing_method="rsa"`; see that parameter). Default 0.2.
+    filler_occupancy_fraction : float, optional
+        Target packing density for `filler_specs`, as a bare-sphere
+        fraction of the box volume (ignored if `filler_specs` is empty).
+        Both packing backends already self-limit at their own physical
+        jamming ceiling rather than erroring when this is unreachable
+        (RSA: ~28-41%; dense: higher but "best effort" near random-close-
+        packing, ~0.64) -- so instead of hand-tuning this to a precise
+        number, the default (0.5) is deliberately set high enough that
+        filler simply packs until it jams, for whichever species mix and
+        box you give it. Compare `len(placements)` (minus target count) to
+        `n_filler_candidates` after `generate()` to see how much was
+        actually placed. Lower this only if you deliberately want a
+        sparser-than-maximal filler layer. Default 0.5.
     gap_angstrom : float, optional
         Minimum clearance between placed spheres' surfaces, Angstrom
         (steric/hydration-shell buffer). Default 5.0.
     packing_method : {"rsa", "dense"}, optional
-        Packing backend. "rsa" (default,
+        Packing backend for the FILLER stage only (targets always use RSA,
+        since exact counts have no equivalent in the dense backend's
+        occupancy-fraction-driven API). "rsa" (default,
         :func:`.algorithms.pack_hard_spheres_3d`) is fast (sub-second to a
-        few seconds at a few thousand instances) but capped by RSA's
-        jamming limit (~28-41% occupancy depending on species-size
-        diversity). "dense" (:func:`.algorithms.pack_hard_spheres_3d_dense`)
-        is typically denser via periodic force-biased relaxation, at the
-        cost of a few minutes of wall time at a few thousand instances --
-        see that function's own docstring for the pad/relax/crop technique
-        it uses and an important caveat: its density advantage is reliable
-        well below the physical jamming ceiling, but becomes "best effort"
-        (and less reproducible across machines) as `occupancy_fraction` is
-        pushed toward it. Default "rsa".
+        few seconds at a few thousand instances) and is the only backend
+        that can honor an exclusion field, so it's the only one that can
+        correctly avoid already-placed targets. "dense"
+        (:func:`.algorithms.pack_hard_spheres_3d_dense`) is typically
+        denser via periodic force-biased relaxation, at the cost of a few
+        minutes of wall time at a few thousand instances -- but has no
+        obstacle-avoidance mechanism at all, so it raises `ValueError` if
+        `target_specs` is non-empty. Default "rsa".
     pad_fraction : float, optional
         Only used when `packing_method="dense"` -- passed straight through
-        to `pack_hard_spheres_3d_dense`'s `pad_fraction`. Default 0.5. That
-        function's own docstring has an important caveat for small
-        `target_shape`/large-species combinations: `occupancy_fraction` can
-        be substantially undershot when a species' diameter is a large
-        fraction of `target_shape`'s smallest extent -- a warning is raised
-        in that regime.
+        to `pack_hard_spheres_3d_dense`'s `pad_fraction`. Default 0.5.
     clip_axes : tuple of bool, optional
         (z, y, x), matching `target_shape`'s own axis order. True on an
         axis means placed spheres are allowed to extend past that wall --
@@ -222,14 +314,10 @@ class SpherePackingSpecimenGenerator:
         e.g. for a tomogram whose xy field of view is a crop of a larger
         cellular region (edge particles there are fine to truncate) but
         whose z extent is a real specimen-thickness boundary particles
-        should not cross: `clip_axes=(False, True, True)`. Passed straight
-        through to whichever backend `packing_method` selects.
+        should not cross: `clip_axes=(False, True, True)`. Applied to both
+        the target and filler stages.
     pdb_cache_dir : str, optional
         Directory for downloaded PDB/mmCIF files. Default "../pdb-data/".
-    parameterization : str, optional
-        Atomic scattering-factor parameterization for `PotentialBuilder`
-        ("shtyrov", "kirkland", or "lobato"). Default "shtyrov", matching
-        `PotentialBuilder`'s own default.
     seed : int, optional
         Random seed.
     device : str or torch.device, optional
@@ -246,13 +334,20 @@ class SpherePackingSpecimenGenerator:
     Attributes
     ----------
     placements : list of SpherePlacement
-        Every successfully placed instance, set after `generate()` runs.
+        Every successfully placed instance (targets then filler), set
+        after `generate()` runs.
+    n_target_requested : int
+        Total requested target count (sum of `target_specs[i].n_copies`),
+        set after `generate()` runs.
+    n_targets_placed : int
+        How many target instances were actually placed -- compare against
+        `n_target_requested` to see any shortfall (the box couldn't fit
+        every requested copy). Set after `generate()` runs.
+    n_filler_candidates : int
+        Size of the drawn filler candidate pool, set after `generate()`
+        runs (0 if `filler_specs` is empty).
     n_candidates : int
-        Size of the drawn candidate pool, set after `generate()` runs. Only
-        directly meaningful for `packing_method="rsa"` -- the "dense"
-        backend draws its own, larger, padded-box candidate pool
-        internally and does not track an unmet target size, so this is
-        just set equal to the number of instances actually placed.
+        `n_target_requested + n_filler_candidates`, for convenience.
     instance_labels : torch.Tensor
         Per-instance integer label volume, shape `target_shape`, dtype
         int32. 0 is background; each placed instance's voxels (its
@@ -263,41 +358,59 @@ class SpherePackingSpecimenGenerator:
 
     def __init__(
         self,
-        protein_specs: list[SphereProteinSpec],
+        target_specs: list[SphereProteinSpec],
+        filler_specs: list[SphereProteinSpec] | None = None,
         target_shape: tuple[int, int, int] = (128, 256, 256),
         v_size: float = 5.0,
-        occupancy_fraction: float = 0.2,
+        filler_occupancy_fraction: float = 0.5,
         gap_angstrom: float = 5.0,
         packing_method: Literal["rsa", "dense"] = "rsa",
         pad_fraction: float = 0.5,
         clip_axes: tuple[bool, bool, bool] = (False, False, False),
         pdb_cache_dir: str = "../pdb-data/",
-        parameterization: str = "shtyrov",
         seed: int | None = None,
         device: str | torch.device = "cpu",
         chunk_size: int | None = None,
     ):
-        if not protein_specs:
-            raise ValueError("protein_specs must be non-empty")
+        filler_specs = list(filler_specs) if filler_specs else []
+        if not target_specs and not filler_specs:
+            raise ValueError("target_specs and filler_specs can't both be empty")
         if packing_method not in ("rsa", "dense"):
             raise ValueError(
                 f"packing_method must be 'rsa' or 'dense', got {packing_method!r}"
             )
-        self.protein_specs = protein_specs
+        if packing_method == "dense" and target_specs and filler_specs:
+            raise ValueError(
+                "packing_method='dense' has no obstacle-avoidance mechanism, "
+                "so it can't guarantee filler avoids already-placed targets "
+                "-- use packing_method='rsa' whenever both target_specs and "
+                "filler_specs are non-empty."
+            )
+        for spec in target_specs:
+            if not spec.n_copies or spec.n_copies <= 0:
+                raise ValueError(
+                    f"target spec {spec.pdb_source!r} needs n_copies set to "
+                    "a positive int (targets are placed at an exact count, "
+                    "not ratio-weighted)."
+                )
+        self.target_specs = target_specs
+        self.filler_specs = filler_specs
         self.target_shape = target_shape
         self.v_size = v_size
-        self.occupancy_fraction = occupancy_fraction
+        self.filler_occupancy_fraction = filler_occupancy_fraction
         self.gap_angstrom = gap_angstrom
         self.packing_method = packing_method
         self.pad_fraction = pad_fraction
         self.clip_axes = clip_axes
         self.pdb_cache_dir = pdb_cache_dir
-        self.parameterization = parameterization
         self.seed = seed
         self.device = device
         self.chunk_size = chunk_size
 
         self.placements: list[SpherePlacement] = []
+        self.n_target_requested = 0
+        self.n_targets_placed = 0
+        self.n_filler_candidates = 0
         self.n_candidates = 0
         self.instance_labels: torch.Tensor | None = None
 
@@ -315,12 +428,13 @@ class SpherePackingSpecimenGenerator:
                 self.seed
             )  # random_rotation_matrix has no generator= param
 
+        all_specs = list(self.target_specs) + list(self.filler_specs)
+        n_targets = len(self.target_specs)
         pdbs = [
             PDB(spec.pdb_source, savefolder=self.pdb_cache_dir, verbose=False)
-            for spec in self.protein_specs
+            for spec in all_specs
         ]
         species_radii = torch.tensor([float(pdb.max_diameter) / 2.0 for pdb in pdbs])
-        species_ratios = torch.tensor([spec.ratio for spec in self.protein_specs])
 
         box = (
             self.target_shape[0] * self.v_size,
@@ -329,44 +443,107 @@ class SpherePackingSpecimenGenerator:
         )
         box_volume = box[0] * box[1] * box[2]
 
-        if self.packing_method == "rsa":
-            pool_radii, pool_species_idx = draw_species_pool(
-                species_radii,
-                species_ratios,
-                self.occupancy_fraction,
-                box_volume,
-                seed=self.seed,
-            )
-            self.n_candidates = int(pool_radii.numel())
-            coords, accepted_idx = pack_hard_spheres_3d(
-                pool_radii,
+        # --- Stage 1: targets, exact counts, placed first ---
+        target_radii_list: list[float] = []
+        target_species_list: list[int] = []
+        for i, spec in enumerate(self.target_specs):
+            target_radii_list += [float(species_radii[i])] * spec.n_copies  # type: ignore[operator]
+            target_species_list += [i] * spec.n_copies  # type: ignore[operator]
+        self.n_target_requested = len(target_radii_list)
+
+        if target_radii_list:
+            target_radii_t = torch.tensor(target_radii_list)
+            target_coords, target_accepted_idx = pack_hard_spheres_3d(
+                target_radii_t,
                 box,
                 gap=self.gap_angstrom,
                 seed=self.seed,
                 device=self.device,
                 clip_axes=self.clip_axes,
             )
-            accepted_species_idx = pool_species_idx[accepted_idx]
+            target_species_t = torch.tensor(target_species_list, dtype=torch.long)
+            target_accepted_species = target_species_t[target_accepted_idx]
+            target_accepted_radii = target_radii_t[target_accepted_idx]
         else:
-            coords, _radii_out, accepted_species_idx = pack_hard_spheres_3d_dense(
-                species_radii,
-                species_ratios,
-                self.occupancy_fraction,
-                box,
-                gap=self.gap_angstrom,
-                seed=self.seed,
-                device=self.device,
-                pad_fraction=self.pad_fraction,
-                clip_axes=self.clip_axes,
-            )
-            self.n_candidates = int(coords.shape[0])
+            target_coords = torch.empty((0, 3))
+            target_accepted_species = torch.empty((0,), dtype=torch.long)
+            target_accepted_radii = torch.empty((0,))
+        self.n_targets_placed = int(target_coords.shape[0])
+
+        # --- Stage 2: filler, ratio-weighted, avoiding placed targets ---
+        if self.filler_specs:
+            filler_species_radii = species_radii[n_targets:]
+            filler_ratios = torch.tensor([spec.ratio for spec in self.filler_specs])
+
+            if self.packing_method == "rsa":
+                pool_radii, pool_species_idx = draw_species_pool(
+                    filler_species_radii,
+                    filler_ratios,
+                    self.filler_occupancy_fraction,
+                    box_volume,
+                    seed=self.seed,
+                )
+                self.n_filler_candidates = int(pool_radii.numel())
+                exclusion_field: torch.Tensor | None = None
+                field_v_size: float | None = None
+                if target_coords.shape[0] > 0:
+                    # Pad the forbidden mask by one voxel before the distance
+                    # transform (exclusion_distance_field's own docstring
+                    # recommendation) so trilinear-interpolation "bleed" on a
+                    # coarse grid can't let a filler candidate creep closer
+                    # to a target than `gap` actually allows.
+                    exclusion_field, field_v_size = _build_sphere_exclusion_field(
+                        target_coords,
+                        target_accepted_radii + self.v_size,
+                        self.target_shape,
+                        self.v_size,
+                    )
+                filler_coords, filler_accepted_idx = pack_hard_spheres_3d(
+                    pool_radii,
+                    box,
+                    gap=self.gap_angstrom,
+                    seed=self.seed,
+                    device=self.device,
+                    clip_axes=self.clip_axes,
+                    exclusion_distance_field=exclusion_field,
+                    field_v_size=field_v_size,
+                )
+                filler_accepted_species = (
+                    pool_species_idx[filler_accepted_idx] + n_targets
+                )
+            else:
+                filler_coords, _filler_radii_out, filler_species_out = (
+                    pack_hard_spheres_3d_dense(
+                        filler_species_radii,
+                        filler_ratios,
+                        self.filler_occupancy_fraction,
+                        box,
+                        gap=self.gap_angstrom,
+                        seed=self.seed,
+                        device=self.device,
+                        pad_fraction=self.pad_fraction,
+                        clip_axes=self.clip_axes,
+                    )
+                )
+                self.n_filler_candidates = int(filler_coords.shape[0])
+                filler_accepted_species = filler_species_out + n_targets
+        else:
+            filler_coords = torch.empty((0, 3))
+            filler_accepted_species = torch.empty((0,), dtype=torch.long)
+            self.n_filler_candidates = 0
+
+        coords = torch.cat([target_coords, filler_coords], dim=0)
+        accepted_species_idx = torch.cat(
+            [target_accepted_species, filler_accepted_species], dim=0
+        )
+        self.n_candidates = self.n_target_requested + self.n_filler_candidates
 
         volume = torch.zeros(self.target_shape, dtype=torch.float32)
         instance_labels = torch.zeros(self.target_shape, dtype=torch.int32)
         self.placements = []
         next_instance_id = 1
 
-        for species_i, spec in enumerate(self.protein_specs):
+        for species_i, spec in enumerate(all_specs):
             mask = accepted_species_idx == species_i
             if not bool(mask.any()):
                 continue
@@ -377,7 +554,6 @@ class SpherePackingSpecimenGenerator:
                 dx=self.v_size,
                 atomic_numbers=pdb.atomic_numbers,
                 progressbars=False,
-                parameterization=self.parameterization,
             )
             template = builder.forward(pdb.coordinates, method="analytic")
             label_threshold = _INSTANCE_LABEL_REL_THRESHOLD * float(template.max())
@@ -416,6 +592,9 @@ class SpherePackingSpecimenGenerator:
                     labels=instance_labels,
                 )
 
+            role: Literal["target", "filler"] = (
+                "target" if species_i < n_targets else "filler"
+            )
             for i in range(n_instances):
                 self.placements.append(
                     SpherePlacement(
@@ -423,6 +602,7 @@ class SpherePackingSpecimenGenerator:
                         position_xyz=species_coords[i],
                         rotation_matrix=R[i],
                         instance_id=int(instance_ids[i]),
+                        role=role,
                     )
                 )
 
@@ -434,14 +614,22 @@ class SpherePackingSpecimenGenerator:
         output_dir: str | Path,
         annotation_version: str = "1.0",
         oriented: bool = True,
+        include_filler: bool = False,
     ) -> dict[str, Path]:
         """
         Write one copick/CryoET-Data-Portal-style .ndjson pick file per
-        placed species -- same schema as `specimen.cryoet.
+        placed TARGET species -- same schema as `specimen.cryoet.
         CryoETSpecimenGenerator.export_picks` (one JSON object per line:
         ``{"type": "point"|"orientedPoint", "location": {"x", "y", "z"}[,
         "xyz_rotation_matrix"]}``), so picks from either generator are
         interchangeable downstream.
+
+        Filler placements are excluded by default (see `include_filler`) --
+        they're crowding background, not annotated ground truth. Grouping
+        is by `SpherePlacement.role` first, then `species_id`, so a
+        pdb_source used as BOTH a target and filler species still keeps
+        its target instances and filler instances in separate files (never
+        silently merged) if `include_filler=True`.
 
         Coordinates are converted from this generator's box-centered
         convention (`SpherePlacement.position_xyz`, origin at the volume's
@@ -465,12 +653,17 @@ class SpherePackingSpecimenGenerator:
             If True (default), picks are written as ``"orientedPoint"``
             with each instance's rotation matrix included; if False, as
             plain ``"point"`` (location only).
+        include_filler : bool, optional
+            If True, also write pick files for filler species (suffixed
+            ``-filler`` when their pdb_source collides with a target's, to
+            avoid overwriting the target's own file). Default False.
 
         Returns
         -------
         dict[str, pathlib.Path]
-            Mapping of species id (`SphereProteinSpec.pdb_source`) to
-            written file path.
+            Mapping of species id (`SphereProteinSpec.pdb_source`, suffixed
+            ``-filler`` on a target/filler pdb_source collision) to written
+            file path.
         """
         if not self.placements:
             raise RuntimeError("call generate() before export_picks()")
@@ -487,9 +680,15 @@ class SpherePackingSpecimenGenerator:
             * self.v_size
         )
 
+        target_sources = {spec.pdb_source for spec in self.target_specs}
         by_species: dict[str, list[SpherePlacement]] = {}
         for placed in self.placements:
-            by_species.setdefault(placed.species_id, []).append(placed)
+            if placed.role == "filler" and not include_filler:
+                continue
+            key = placed.species_id
+            if placed.role == "filler" and placed.species_id in target_sources:
+                key = f"{placed.species_id}-filler"
+            by_species.setdefault(key, []).append(placed)
 
         point_type = "orientedPoint" if oriented else "point"
         for species_id, placed_list in by_species.items():

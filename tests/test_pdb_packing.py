@@ -58,13 +58,14 @@ def test_pack_hard_spheres_3d_empty_input():
 
 
 @pytest.mark.skipif(not _SMALL_FIXTURE.exists(), reason="bundled PDB fixture missing")
-def test_sphere_packing_generator_single_species():
+def test_sphere_packing_generator_filler_only():
     target_shape = (32, 48, 48)
     gen = SpherePackingSpecimenGenerator(
-        protein_specs=[SphereProteinSpec(pdb_source=str(_SMALL_FIXTURE))],
+        target_specs=[],
+        filler_specs=[SphereProteinSpec(pdb_source=str(_SMALL_FIXTURE))],
         target_shape=target_shape,
         v_size=10.0,
-        occupancy_fraction=0.15,
+        filler_occupancy_fraction=0.15,
         gap_angstrom=5.0,
         seed=0,
     )
@@ -89,19 +90,19 @@ def test_sphere_packing_generator_single_species():
     not (_SMALL_FIXTURE.exists() and _LARGE_FIXTURE.exists()),
     reason="bundled PDB fixtures missing",
 )
-def test_sphere_packing_generator_multi_species_ratios():
-    """Two differently-sized species, ratio-weighted -- both should end up
-    represented among the placements, and the larger species' instances
-    should each occupy more volume per instance than the smaller one's."""
+def test_sphere_packing_generator_filler_ratios():
+    """Two differently-sized filler species, ratio-weighted -- both should
+    end up represented among the placements."""
     target_shape = (32, 64, 64)
     gen = SpherePackingSpecimenGenerator(
-        protein_specs=[
+        target_specs=[],
+        filler_specs=[
             SphereProteinSpec(pdb_source=str(_SMALL_FIXTURE), ratio=3.0),
             SphereProteinSpec(pdb_source=str(_LARGE_FIXTURE), ratio=1.0),
         ],
         target_shape=target_shape,
         v_size=10.0,
-        occupancy_fraction=0.15,
+        filler_occupancy_fraction=0.15,
         gap_angstrom=5.0,
         seed=0,
     )
@@ -113,6 +114,47 @@ def test_sphere_packing_generator_multi_species_ratios():
     species_ids = {p.species_id for p in gen.placements}
     assert str(_SMALL_FIXTURE) in species_ids
     assert str(_LARGE_FIXTURE) in species_ids
+
+
+@pytest.mark.skipif(
+    not (_SMALL_FIXTURE.exists() and _LARGE_FIXTURE.exists()),
+    reason="bundled PDB fixtures missing",
+)
+def test_sphere_packing_generator_targets_exact_count_and_filler_avoids_them():
+    """Targets are placed at an exact n_copies count, and filler -- packed
+    afterward via the exclusion field -- must not overlap any of them."""
+    target_shape = (32, 64, 64)
+    gap = 5.0
+    gen = SpherePackingSpecimenGenerator(
+        target_specs=[SphereProteinSpec(pdb_source=str(_LARGE_FIXTURE), n_copies=3)],
+        filler_specs=[SphereProteinSpec(pdb_source=str(_SMALL_FIXTURE), ratio=1.0)],
+        target_shape=target_shape,
+        v_size=10.0,
+        filler_occupancy_fraction=0.1,
+        gap_angstrom=gap,
+        seed=0,
+    )
+    gen.generate()
+
+    assert gen.n_target_requested == 3
+    assert gen.n_targets_placed == 3  # box is roomy enough to fit all 3
+    target_placements = [
+        p for p in gen.placements if p.species_id == str(_LARGE_FIXTURE)
+    ]
+    filler_placements = [
+        p for p in gen.placements if p.species_id == str(_SMALL_FIXTURE)
+    ]
+    assert len(target_placements) == 3
+    assert len(filler_placements) > 0
+
+    from specter.pdb import PDB
+
+    target_radius = PDB(str(_LARGE_FIXTURE), verbose=False).max_diameter / 2.0
+    filler_radius = PDB(str(_SMALL_FIXTURE), verbose=False).max_diameter / 2.0
+    for t in target_placements:
+        for f in filler_placements:
+            dist = float((t.position_xyz - f.position_xyz).norm())
+            assert dist >= target_radius + filler_radius + gap - 1e-1
 
 
 def test_draw_species_pool_respects_ratio_and_sorts_largest_first():
@@ -200,10 +242,11 @@ def test_pack_hard_spheres_3d_dense_warns_when_species_radius_large_relative_to_
 def test_sphere_packing_generator_dense_method_produces_valid_instance_labels():
     target_shape = (24, 32, 32)
     gen = SpherePackingSpecimenGenerator(
-        protein_specs=[SphereProteinSpec(pdb_source=str(_SMALL_FIXTURE))],
+        target_specs=[],
+        filler_specs=[SphereProteinSpec(pdb_source=str(_SMALL_FIXTURE))],
         target_shape=target_shape,
         v_size=10.0,
-        occupancy_fraction=0.1,
+        filler_occupancy_fraction=0.1,
         gap_angstrom=5.0,
         seed=0,
         packing_method="dense",
@@ -220,10 +263,11 @@ def test_sphere_packing_generator_dense_method_produces_valid_instance_labels():
 def test_sphere_packing_generator_rsa_method_produces_valid_instance_labels():
     target_shape = (32, 48, 48)
     gen = SpherePackingSpecimenGenerator(
-        protein_specs=[SphereProteinSpec(pdb_source=str(_SMALL_FIXTURE))],
+        target_specs=[],
+        filler_specs=[SphereProteinSpec(pdb_source=str(_SMALL_FIXTURE))],
         target_shape=target_shape,
         v_size=10.0,
-        occupancy_fraction=0.15,
+        filler_occupancy_fraction=0.15,
         gap_angstrom=5.0,
         seed=0,
         packing_method="rsa",
@@ -256,8 +300,25 @@ def _assert_instance_labels_match_placements(
 def test_sphere_packing_generator_rejects_unknown_packing_method():
     with pytest.raises(ValueError, match="packing_method"):
         SpherePackingSpecimenGenerator(
-            protein_specs=[SphereProteinSpec(pdb_source="1abc")],
+            target_specs=[],
+            filler_specs=[SphereProteinSpec(pdb_source="1abc")],
             packing_method="bogus",  # type: ignore[arg-type]
+        )
+
+
+def test_sphere_packing_generator_rejects_target_without_n_copies():
+    with pytest.raises(ValueError, match="n_copies"):
+        SpherePackingSpecimenGenerator(
+            target_specs=[SphereProteinSpec(pdb_source="1abc")],
+        )
+
+
+def test_sphere_packing_generator_rejects_dense_with_targets_and_filler():
+    with pytest.raises(ValueError, match="obstacle-avoidance"):
+        SpherePackingSpecimenGenerator(
+            target_specs=[SphereProteinSpec(pdb_source="1abc", n_copies=1)],
+            filler_specs=[SphereProteinSpec(pdb_source="1def")],
+            packing_method="dense",
         )
 
 

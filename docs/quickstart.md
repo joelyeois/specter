@@ -56,6 +56,47 @@ micrographs, cryo-ET tilt series), see
 [Generate a micrograph](user-guide/micrograph.md), and
 [Generate a tilt series](user-guide/tilt-series.md).
 
+## Build a tomogram specimen
+
+The `specter build tomogram` CLI packs PDB structures into a crowded 3-D
+specimen volume via hard-sphere placement (no membranes yet — that's coming
+in a future release), saving a `.mrc` volume plus copick-style `.ndjson`
+ground-truth picks:
+
+```bash
+specter build tomogram --config configs/tomogram.toml
+```
+
+Species are placed in two priority stages: `[[targets]]` first, each at an
+exact instance count (the annotated ground truth), then `[[filler]]`
+second, ratio-weighted, packed around the already-placed targets to crowd
+out the rest of the volume. An example config lives in
+[`configs/tomogram.toml`](https://github.com/joelyeois/specter/tree/main/configs) —
+copy it and edit for your own runs. It looks like this:
+
+```toml
+# Canonical default config for `specter build tomogram`.
+
+[[targets]]
+pdb_source = "1bxn"   # cytosolic RNA polymerase II complex (large)
+n_copies = 20
+
+[[filler]]
+pdb_source = "1mbo"   # myoglobin (small)
+ratio = 4.0
+
+[specimen]
+target_shape = [128, 256, 256]    # (Z, Y, X) voxels
+v_size = 5.0                       # Å/voxel
+filler_occupancy_fraction = 0.5    # bare-sphere volume fraction budget for filler
+
+# ... see the full file: configs/tomogram.toml
+```
+
+The resulting `.mrc` is directly usable as `specter simulate tiltseries`'s
+`--volume_path`. See the field docstrings in
+`specter.config.TomogramConfig` for the complete reference.
+
 ## Job management
 
 Generation runs can be recorded under a project name in a local job

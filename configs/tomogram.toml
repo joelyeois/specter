@@ -2,36 +2,48 @@
 # specter.config.load_config("...", TomogramConfig).
 #
 # Drives SpherePackingSpecimenGenerator: packs several PDB-derived protein
-# species -- each at its own real physical size -- via hard-sphere Random
-# Sequential Addition (specter.crowding.pack_hard_spheres_3d), renders each
-# placed instance's real scattering potential, and saves the assembled
-# volume as .mrc (directly usable as `specter simulate tiltseries`'s
-# --volume_path) plus one copick-style .ndjson pick file per species.
+# species -- each at its own real physical size -- via hard-sphere packing
+# (specter.specimen.packing.pack_hard_spheres_3d), renders each placed
+# instance's real scattering potential, and saves the assembled volume as
+# .mrc (directly usable as `specter simulate tiltseries`'s --volume_path)
+# plus one copick-style .ndjson pick file per species.
 #
-# protein_specs is a TOML array-of-tables ([[protein_specs]]) -- each entry
-# is one species: "pdb_source" (PDB code or file path, required) and "ratio"
-# (relative abundance weight, default 1.0 -- only the RATIO between species
-# matters).
-
-[[protein_specs]]
+# Species are packed in two priority stages:
+#
+# [[targets]] -- placed FIRST, each at an exact "n_copies" count. These are
+# the annotated ground truth, always exported to picks.
+[[targets]]
 pdb_source = "1bxn"   # cytosolic RNA polymerase II complex (large)
-ratio = 1.0
+n_copies = 20
 
-[[protein_specs]]
+[[targets]]
+pdb_source = "6qzp"
+n_copies = 10
+
+# [[filler]] -- placed SECOND, around the already-placed targets, ratio-
+# weighted and budgeted by filler_occupancy_fraction below. "ratio" is
+# optional (default 1.0, i.e. equal representation across filler species) --
+# it only needs tuning if you deliberately want an uneven mix.
+[[filler]]
 pdb_source = "1fa2"   # beta amylase (medium)
 ratio = 2.0
 
-[[protein_specs]]
+[[filler]]
 pdb_source = "1mbo"   # myoglobin (small)
 ratio = 4.0
 
 [specimen]
 target_shape = [128, 256, 256]    # (Z, Y, X) voxels
 v_size = 5.0                       # Å/voxel
-occupancy_fraction = 0.2           # target bare-sphere volume fraction
+filler_occupancy_fraction = 0.5    # bare-sphere volume fraction budget for
+                                    # filler -- deliberately high so it packs
+                                    # until it jams rather than needing to be
+                                    # precisely calibrated (see TOMOGRAM_HELP)
 gap_angstrom = 5.0                 # minimum clearance between placed spheres
+packing_method = "rsa"             # rsa | dense -- filler-stage backend;
+                                    # dense has no obstacle avoidance, so it
+                                    # only works when targets is empty
 pdb_savefolder = "pdb-data"        # resolved relative to the repo root
-parameterization = "kirkland"      # kirkland | lobato
 # seed = 11                        # uncomment for reproducible packing
 
 [picks]

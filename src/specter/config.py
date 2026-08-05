@@ -534,27 +534,39 @@ class TomogramConfig:
 
     Drives `specter.specimen.SpherePackingSpecimenGenerator`: packs several
     PDB-derived protein species -- each at its own real physical size -- via
-    hard-sphere Random Sequential Addition (see `specter.specimen.packing.
-    pack_hard_spheres_3d`), renders each placed instance's real scattering
-    potential, and saves the assembled volume as .mrc (directly usable as
-    `TiltSeriesConfig.volume_path`) plus one copick-style .ndjson pick file
-    per species.
+    hard-sphere packing (see `specter.specimen.packing.pack_hard_spheres_3d`),
+    renders each placed instance's real scattering potential (always
+    Shtyrov-parameterized, `PotentialBuilder`'s own default), and saves the
+    assembled volume as .mrc (directly usable as `TiltSeriesConfig.
+    volume_path`) plus one copick-style .ndjson pick file per species.
+
+    Species are split into two priority groups, packed in two stages: exact-
+    count `targets` first (the annotated ground truth), then ratio-weighted
+    `filler` second, filling remaining space around the targets.
     """
 
     # --- Specimen ---
-    # One dict per protein species, e.g. {"pdb_source": "6qzp", "ratio": 1.0}.
+    # One dict per target species, e.g. {"pdb_source": "6qzp", "n_copies": 15}.
+    # Both keys required. Placed FIRST, at this exact count. In TOML,
+    # provide as [[targets]] tables.
+    targets: list[dict[str, Any]] = field(default_factory=list)
+    # One dict per filler species, e.g. {"pdb_source": "1mbo", "ratio": 1.0}.
     # Only "pdb_source" is required ("ratio" defaults to 1.0, i.e. uniform
-    # across species left at default). In TOML, provide as [[protein_specs]]
-    # tables.
-    protein_specs: list[dict[str, Any]] = field(default_factory=list)
+    # across species left at default). Placed SECOND, around the already-
+    # placed targets, budgeted by filler_occupancy_fraction. In TOML,
+    # provide as [[filler]] tables.
+    filler: list[dict[str, Any]] = field(default_factory=list)
     target_shape: list[int] = field(
         default_factory=lambda: [128, 256, 256]
     )  # (Z, Y, X) voxels
     v_size: float = 5.0  # Å/voxel
-    occupancy_fraction: float = 0.2  # target bare-sphere volume fraction
+    filler_occupancy_fraction: float = (
+        0.5  # bare-sphere volume fraction budget for filler
+    )
     gap_angstrom: float = 5.0  # minimum clearance between placed spheres
+    packing_method: Literal["rsa", "dense"] = "rsa"  # filler-stage backend
+    pad_fraction: float = 0.5  # only used when packing_method="dense"
     pdb_savefolder: str = "pdb-data"  # resolved against REPO_ROOT if relative
-    parameterization: Literal["kirkland", "lobato"] = "kirkland"
     seed: int | None = None
 
     # --- Ground-truth picks ---
@@ -570,18 +582,28 @@ class TomogramConfig:
 
 
 TOMOGRAM_HELP: dict[str, str] = {
-    "protein_specs": "Protein species to pack (TOML-only, [[protein_specs]] "
+    "targets": "Target protein species to pack (TOML-only, [[targets]] "
+    "tables), each {'pdb_source': <code or path>, 'n_copies': <exact "
+    "instance count>}. Placed first, always exported to picks.",
+    "filler": "Filler protein species to pack (TOML-only, [[filler]] "
     "tables), each {'pdb_source': <code or path>, 'ratio': <relative "
-    "abundance weight, default 1.0>}.",
+    "abundance weight, default 1.0>}. Placed second, around the already-"
+    "placed targets.",
     "target_shape": "Output specimen volume shape in voxels (Z, Y, X).",
     "v_size": "Voxel size in Angstrom.",
-    "occupancy_fraction": "Target packing density: candidates are drawn "
-    "(species-ratio-weighted) until their combined bare-sphere volume "
-    "reaches this fraction of the box volume. May not be fully reachable "
-    "at high values -- see SpherePackingSpecimenGenerator's docstring.",
+    "filler_occupancy_fraction": "Target packing density for filler species, "
+    "as a bare-sphere fraction of the box volume. The default (0.5) is "
+    "deliberately high -- both packing backends self-limit at their own "
+    "physical jamming ceiling rather than erroring, so filler simply packs "
+    "until it jams rather than needing this hand-tuned. Lower it only for a "
+    "deliberately sparser filler layer.",
     "gap_angstrom": "Minimum clearance between placed spheres' surfaces, in Angstrom.",
+    "packing_method": "Packing backend for the filler stage: 'rsa' (fast, "
+    "the only backend that can avoid already-placed targets) or 'dense' "
+    "(denser but no obstacle avoidance -- only usable when targets is empty).",
+    "pad_fraction": "Padding fraction for the periodic relax-and-crop box, "
+    "only used when packing_method='dense'.",
     "pdb_savefolder": "Folder to cache downloaded PDB files.",
-    "parameterization": "Atomic scattering-factor parameterization.",
     "seed": "Random seed.",
     "write_picks": "Write one copick-style .ndjson pick file per species "
     "alongside the volume.",

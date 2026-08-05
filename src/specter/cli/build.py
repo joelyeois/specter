@@ -16,16 +16,16 @@ from ._click_options import build_config_options, collect_overrides
 CONTEXT_SETTINGS = {"help_option_names": ["-h", "--help"]}
 
 # (panel title, field names) -- basic-first-advanced-last, same convention as
-# cli/simulate.py's _PARTICLE_STACK_GROUPS/_TILT_SERIES_GROUPS. protein_specs
-# itself is list[dict]-typed and skipped entirely by build_config_options
+# cli/simulate.py's _PARTICLE_STACK_GROUPS/_TILT_SERIES_GROUPS. targets/filler
+# themselves are list[dict]-typed and skipped entirely by build_config_options
 # (TOML-only) -- not listed here, same treatment as that module's own
 # protein_specs/membrane_specs.
 _TOMOGRAM_GROUPS: list[tuple[str, list[str]]] = [
     (
         "Specimen",
-        ["target_shape", "v_size", "occupancy_fraction", "gap_angstrom"],
+        ["target_shape", "v_size", "filler_occupancy_fraction", "gap_angstrom"],
     ),
-    ("Models", ["parameterization"]),
+    ("Packing", ["packing_method", "pad_fraction"]),
     ("Picks", ["write_picks", "annotation_version"]),
     ("Compute", ["device"]),
     ("Output", ["output_dir", "filename"]),

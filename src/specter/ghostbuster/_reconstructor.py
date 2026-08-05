@@ -8,17 +8,22 @@ import mrcfile
 import roma
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import LRScheduler, ReduceLROnPlateau
 
 from .. import rotations
-from ..arrays import compute_nps_2d
 from ..imagegenerator import ImageGenerator
 from ..symmetries import apply_symmetry, get_rotation_matrices
 from ._base_reconstructor import _BaseReconstructor
 from ._helpers import _build_lr_scheduler
 from ._io import save_fsc_figure, save_plot3d_preview, save_volume_mrc
+from ._losses import (
+    mse_loss,
+    ncc_loss,
+    nps_weighted_loss,
+    noise_weighted_loss,
+    update_sigma2,
+)
 
 
 class Reconstructor(_BaseReconstructor):
@@ -459,112 +464,6 @@ class Reconstructor(_BaseReconstructor):
             opts.append(optimizerD)
         return opts, lr_schedulers
 
-    @staticmethod
-    def _ncc_loss(
-        pred: torch.Tensor, target: torch.Tensor, eps: float = 1e-8
-    ) -> torch.Tensor:
-        """Per-image normalized cross-correlation loss in MSE-equivalent units.
-
-        Computes ``var(target) * (1 - NCC)`` per image.  The ``var(target)``
-        factor makes the loss dimensionally equivalent to MSE: at the optimum
-        (low-SNR regime) both quantities converge to the noise variance
-        ``σ²``, so the same learning rate can be used without retuning.
-
-        Parameters
-        ----------
-        pred : torch.Tensor
-            Simulated images, shape ``(B, H, W)``.
-        target : torch.Tensor
-            Experimental images, shape ``(B, H, W)``.
-        eps : float
-            Small constant added to the denominator for numerical stability.
-
-        Returns
-        -------
-        torch.Tensor
-            Per-image loss, shape ``(B,)``. Callers reduce over the batch
-            (optionally weighting by a per-particle scale first).
-
-        Notes
-        -----
-        NCC is invariant to multiplicative and additive intensity rescaling,
-        which makes it robust to gain-reference errors and forward-model scale
-        mismatches that inflate ordinary MSE.
-        """
-        p = pred.flatten(1)  # (B, N)
-        t = target.flatten(1)
-        p_c = p - p.mean(dim=1, keepdim=True)
-        t_c = t - t.mean(dim=1, keepdim=True)
-        ncc = (p_c * t_c).sum(dim=1) / (
-            p_c.norm(dim=1) * t_c.norm(dim=1) + eps
-        )  # (B,), range [-1, 1]
-        # var(target) per image: scales (1 - NCC) into MSE-equivalent units
-        var_t = (t_c**2).mean(dim=1)  # (B,)
-        return var_t * (1.0 - ncc)
-
-    def _update_sigma2(self, residuals: torch.Tensor) -> None:
-        """Update the per-shell noise variance sigma^2(k) from real-space residuals.
-
-        Mirrors the RELION noise model: the unexplained residuals are
-        radially-averaged in Fourier space (via compute_nps_2d) to estimate
-        sigma^2(k) per shell, then an EMA smooths the estimate across batches.
-
-        sigma^2(k) is normalised by its mean after each update so that the
-        relative spectral weighting adapts while the loss magnitude stays
-        stable (comparable to the nps_weight and plain-MSE modes).
-        """
-        with torch.no_grad():
-            # Raw per-shell power spectrum of residuals, shape (H, W//2+1)
-            new_sigma2 = compute_nps_2d(
-                residuals.detach(), normalize=False, zero_dc=False
-            ).clamp(min=1e-10)
-            # EMA update
-            self.sigma2_k = (
-                self.noise_ema_momentum * self.sigma2_k
-                + (1 - self.noise_ema_momentum) * new_sigma2
-            )
-            # Normalise by mean so that a flat sigma^2 gives uniform weights
-            # (i.e. loss magnitude remains comparable to real-space MSE).
-            self.sigma2_k = self.sigma2_k / self.sigma2_k.mean().clamp(min=1e-10)
-
-    def _noise_weighted_loss(
-        self, out: torch.Tensor, images: torch.Tensor, w: torch.Tensor
-    ) -> torch.Tensor:
-        """RELION-style loss: weight residuals by 1/sigma^2(k), sigma^2(k)
-        estimated from residuals via an EMA (E-step, no_grad); gradient flows
-        only through the residuals (M-step)."""
-        images_f = torch.fft.rfft2(images)
-        out_f = torch.fft.rfft2(out)
-        H, W = images.shape[-2:]
-        self._update_sigma2(images - out)
-        residual = (images_f - out_f).abs() ** 2 / self.sigma2_k.detach()
-        return torch.mean(w[:, None, None] * residual) / (H * W)
-
-    def _nps_weighted_loss(
-        self, out: torch.Tensor, images: torch.Tensor, w: torch.Tensor
-    ) -> torch.Tensor:
-        """MSE weighted by the noise power spectrum in Fourier space."""
-        images_f = torch.fft.rfft2(images)
-        out_f = torch.fft.rfft2(out)
-        H, W = images.shape[-2:]
-        # Divide by H*W so that a flat (normalised) NPS weight gives the
-        # same loss magnitude as real-space MSE (Parseval equivalence).
-        residual = self.nps_weight * (images_f - out_f).abs() ** 2
-        return torch.mean(w[:, None, None] * residual) / (H * W)
-
-    def _mse_loss(
-        self,
-        out: torch.Tensor,
-        images: torch.Tensor,
-        idx: torch.Tensor,
-        w: torch.Tensor,
-    ) -> torch.Tensor:
-        """Plain real-space MSE, optionally weighted by a projected 2D FSC mask."""
-        mse = F.mse_loss(images, out, reduction="none")
-        if self.use_2d_mask:
-            mse = mse * self._project_fsc_mask_2d(idx, images.shape)
-        return (w[:, None, None] * mse).mean()
-
     def _compute_loss(
         self, out: torch.Tensor, images: torch.Tensor, idx: torch.Tensor
     ) -> torch.Tensor:
@@ -599,13 +498,21 @@ class Reconstructor(_BaseReconstructor):
         """
         w = self.scale[idx]  # (B,)
         if self.use_ncc:
-            loss = (w * self._ncc_loss(out, images)).mean()
+            loss = (w * ncc_loss(out, images)).mean()
         elif self.learn_noise_model:
-            loss = self._noise_weighted_loss(out, images, w)
+            self.sigma2_k = update_sigma2(
+                self.sigma2_k, images - out, self.noise_ema_momentum
+            )
+            loss = noise_weighted_loss(out, images, self.sigma2_k, w)
         elif self.nps_weight is not None:
-            loss = self._nps_weighted_loss(out, images, w)
+            loss = nps_weighted_loss(out, images, self.nps_weight, w)
         else:
-            loss = self._mse_loss(out, images, idx, w)
+            mask = (
+                self._project_fsc_mask_2d(idx, images.shape)
+                if self.use_2d_mask
+                else None
+            )
+            loss = mse_loss(out, images, w, mask=mask)
         self.log_norm_loss.append(loss.detach().cpu())
 
         if self.sparsity is not None:

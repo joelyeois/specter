@@ -23,11 +23,14 @@ import dataclasses
 import os
 import time
 
+import torch
+
 from specter.config import TomogramConfig
 from specter.specimen import (
     CRYOETSIM_PARTICLE_TABLE,
     PEI2016_CROWDING_TABLE,
     MembraneGenerator,
+    MembraneInstance,
     MembraneTomogramGenerator,
     SpherePackingSpecimenGenerator,
     SphereProteinSpec,
@@ -88,13 +91,6 @@ def run_build_tomogram(config: TomogramConfig, n_tomograms: int = 1) -> None:
             "packing are two independent backends, not reconciled into one "
             "call yet."
         )
-    if len(config.membrane) > 1:
-        raise ValueError(
-            "run_build_tomogram: config.membrane must have at most one "
-            f"[[membrane]] entry (v1 single-instance scope), got "
-            f"{len(config.membrane)}."
-        )
-
     for i in range(n_tomograms):
         run_config = config
         if n_tomograms > 1:
@@ -155,8 +151,6 @@ def _build_sphere_packing_generator(
 def _build_membrane_tomogram_generator(
     config: TomogramConfig,
 ) -> MembraneTomogramGenerator:
-    membrane_kwargs = dict(config.membrane[0])
-    parameterization = membrane_kwargs.pop("parameterization", "shtyrov")
     transmembrane_specs = [
         TransmembraneSpec(
             pdb_source=d["pdb_source"],
@@ -173,17 +167,33 @@ def _build_membrane_tomogram_generator(
         )
         for d in config.membrane_protein_specs
     ]
-    mgen = MembraneGenerator(
+
+    membrane_instances = []
+    for entry in config.membrane:
+        # dict(entry) copies the OUTER dict before .pop() -- config.membrane[i]
+        # itself is never mutated, so this stays safe even when the same
+        # TomogramConfig (and its membrane list) is reused, un-deep-copied,
+        # across multiple dataclasses.replace(...) calls in a --n_tomograms>1
+        # run (see run_build_tomogram).
+        instance_kwargs = dict(entry)
+        position_xyz = tuple(instance_kwargs.pop("position_xyz", (0.0, 0.0, 0.0)))
+        mgen = MembraneGenerator(
+            target_shape_zyx=tuple(config.target_shape),  # type: ignore[arg-type]
+            v_size=config.v_size,
+            transmembrane_specs=list(transmembrane_specs),
+            pdb_cache_dir=config.pdb_savefolder,
+            device=config.device,
+            seed=config.seed,
+            **instance_kwargs,
+        )
+        membrane_instances.append(
+            MembraneInstance(generator=mgen, position_xyz=position_xyz)  # type: ignore[arg-type]
+        )
+
+    return MembraneTomogramGenerator(
+        membrane_instances=membrane_instances,
         target_shape_zyx=tuple(config.target_shape),  # type: ignore[arg-type]
         v_size=config.v_size,
-        transmembrane_specs=transmembrane_specs,
-        pdb_cache_dir=config.pdb_savefolder,
-        device=config.device,
-        seed=config.seed,
-        **membrane_kwargs,
-    )
-    return MembraneTomogramGenerator(
-        membrane_generator=mgen,
         protein_specs=protein_specs,
         occupancy_fraction=config.membrane_occupancy_fraction,
         gap_angstrom=config.gap_angstrom,
@@ -191,7 +201,7 @@ def _build_membrane_tomogram_generator(
         region_max_passes=config.membrane_region_max_passes,
         min_transmembrane_spacing_a=config.membrane_min_transmembrane_spacing_a,
         pdb_cache_dir=config.pdb_savefolder,
-        parameterization=parameterization,
+        parameterization=config.membrane_parameterization,
         seed=config.seed,
         device=config.device,
     )
@@ -257,6 +267,38 @@ def _run_single_tomogram(config: TomogramConfig) -> None:
         )
         for path in written.values():
             _console.print(f"  [green]✓[/green] {path}")
+
+    if config.write_segmentation:
+        # The segmentation mask, not a coordinate file, is the intended
+        # ground truth for membrane geometry (a membrane surface has no
+        # single natural "position" the way a protein does) -- see
+        # TomogramConfig.write_segmentation's own docstring. MRC has no
+        # int32 mode (verified directly against mrcfile), so labels are
+        # cast to uint16 (65535 headroom) -- uint8 was considered for the
+        # 3-category region mask, but mrcfile silently upconverts uint8 to
+        # the same on-disk uint16 mode anyway (no true unsigned-8-bit MRC
+        # mode exists), so there's no actual size benefit to requesting it.
+        def _write_label_mrc(suffix: str, labels: torch.Tensor, dtype: str) -> None:
+            path = os.path.join(config.output_dir, config.filename + suffix)
+            with mrcfile.new(path, overwrite=True) as mrc:
+                mrc.set_data(labels.cpu().numpy().astype(dtype))
+                mrc.voxel_size = config.v_size
+            _console.print(f"  [green]✓[/green] {path}")
+
+        assert gen.instance_labels is not None
+        _write_label_mrc("_protein_labels.mrc", gen.instance_labels, "uint16")
+
+        if config.membrane:
+            assert membrane_gen.membrane_labels is not None
+            _write_label_mrc(
+                "_membrane_labels.mrc", membrane_gen.membrane_labels, "uint16"
+            )
+
+            assert membrane_gen.regions is not None
+            regions_volume = torch.zeros_like(membrane_gen.membrane_labels)
+            regions_volume[membrane_gen.regions["shell"]] = 1
+            regions_volume[membrane_gen.regions["lumen"]] = 2
+            _write_label_mrc("_regions.mrc", regions_volume, "uint16")
 
     elapsed = time.perf_counter() - t_start
     _console.print(f"\n[bold]Total time:[/bold] {_format_elapsed(elapsed)}")

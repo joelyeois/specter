@@ -38,16 +38,27 @@ filler = [
 
 # --- Organic membrane mode (mutually exclusive with [targets]/[filler] above) ---
 # Uncomment the whole block below (and comment out/empty [targets]/[filler])
-# to build an organic membrane + region-gated cytosol/lumen protein packing
-# instead of hard-sphere packing. shape_backend is one of "metaball",
+# to build one or more organic membranes + region-gated cytosol/lumen protein
+# packing instead of hard-sphere packing. shape_backend is one of "metaball",
 # "alpha_shape", "spherical_harmonics", "swept_spline" -- see
 # specter.specimen.membrane.MembraneGenerator's own docstring for each
-# backend's full parameter set.
+# backend's full parameter set. Each [[membrane]] entry is composited into
+# the same shared tomogram at its own position_xyz (physical Angstrom offset
+# from the tomogram's own center, default [0,0,0]) -- v1 has no automatic
+# overlap avoidance between instances, so choose values that don't collide.
 # [[membrane]]
 # shape_backend = "spherical_harmonics"
 # sh_axes_a = [300.0, 300.0, 300.0]
 # sh_amplitude = 0.15
 # bilayer_thickness_a = 30.0
+# position_xyz = [-400.0, 0.0, 0.0]
+#
+# [[membrane]]
+# shape_backend = "swept_spline"
+# swept_total_length_a = 600.0
+# swept_tube_radius_a = 30.0
+# bilayer_thickness_a = 30.0
+# position_xyz = [400.0, 0.0, 0.0]
 #
 # [[membrane_transmembrane_specs]]
 # pdb_source = "6qzp"
@@ -63,6 +74,12 @@ filler = [
 #
 # membrane_occupancy_fraction = 0.2   # bare-sphere fraction of EACH REGION's
 #                                     # own volume (not the whole box)
+# membrane_parameterization = "shtyrov"  # cytosol/lumen protein potential step
+# write_segmentation = true          # {filename}_protein_labels.mrc always;
+#                                     # membrane mode also gets
+#                                     # {filename}_membrane_labels.mrc (which
+#                                     # instance) and {filename}_regions.mrc
+#                                     # (0=cytosol/1=shell/2=lumen)
 
 [specimen]
 target_shape = [128, 512, 512]    # (Z, Y, X) voxels

@@ -23,6 +23,7 @@ from .membrane import (
     TransmembraneSpec,
 )
 from .tomogram import (
+    MembraneInstance,
     MembraneTomogramGenerator,
     TomogramPlacement,
     TomogramProteinSpec,
@@ -49,6 +50,7 @@ __all__ = [
     "MembraneGenerator",
     "TransmembranePlacement",
     "TransmembraneSpec",
+    "MembraneInstance",
     "MembraneTomogramGenerator",
     "TomogramPlacement",
     "TomogramProteinSpec",

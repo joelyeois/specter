@@ -24,15 +24,29 @@ Independent of, and not integrated with, the older CTS-derived generators
 a clean-room second approach, meant to be benchmarked against CTS later,
 not merged with it now.
 
-v1 scope: single-instance placement only (no CellPACK-style cluster/bundle
-correlated placement -- a separate, later feature). Multiple disjoint
-membrane compartments (e.g. several vesicles) are supported for free, since
-:func:`.classify_membrane_regions`'s connected-components approach doesn't
-special-case a single compartment. Transmembrane placements are NOT given
-per-instance voxel labels in `instance_labels` (their density is correctly
-present in the volume via `MembraneGenerator.place_transmembrane` itself,
-which already exists and is unmodified here; only cytosol/lumen instances
-get per-instance labels in v1) -- a documented gap, not an oversight.
+Supports MULTIPLE independently-configured membrane instances
+(:class:`MembraneInstance`, each with its own `MembraneGenerator` --
+potentially a different `shape_backend` per instance -- and physical
+`position_xyz` offset) composited into one shared tomogram volume:
+generate each instance in its own centered local frame (unmodified
+`MembraneGenerator`, no changes needed there), max-merge the resulting
+density volumes into the shared canvas, then classify shell/lumen/cytosol
+regions ONCE on the composite -- `classify_membrane_regions`'s connected-
+components approach already handles multiple disjoint compartments (several
+separate vesicles, whether from one instance or several) without any
+special-casing. v1 placement is explicit-`position_xyz`-only (no automatic
+overlap avoidance/auto-packing -- a separate, later feature) and every
+instance renders at the full shared canvas size (a smaller per-instance box
+is a natural later addition, not precluded by the compositing math here,
+which is already shape-agnostic).
+
+Per-instance voxel labels exist for TWO separate categories:
+`membrane_labels` (which membrane instance a shell voxel belongs to, new)
+and `instance_labels` (which cytosol/lumen PROTEIN instance a voxel
+belongs to, as before). Transmembrane placements still get no per-instance
+voxel labels (their density is correctly present in the volume via
+`MembraneGenerator.place_transmembrane` itself, unmodified here) -- a
+documented gap, not an oversight.
 """
 
 from __future__ import annotations
@@ -94,6 +108,84 @@ def _insert_instance_labels(
     return labels
 
 
+def _position_to_center_index(
+    position_xyz: tuple[float, float, float],
+    shape_zyx: tuple[int, ...],
+    v_size: float,
+) -> tuple[int, int, int]:
+    """Physical (x, y, z) offset from a volume's own center -> absolute
+    (z, y, x) voxel index of that offset -- the center-relative convention
+    `MembraneGenerator` itself uses (physical (0,0,0) = volume center),
+    matching `_insert_instance_labels`'s own indexing math above. NOT
+    `cryoet.py`'s `_insert_clipped`, which uses a corner-relative (0..extent)
+    convention for genuinely small local arrays -- the wrong frame for a
+    MembraneGenerator instance, which always renders on its own full target
+    grid centered at (0,0,0) (see that class's own module docstring)."""
+    z_center, y_center, x_center = (
+        shape_zyx[0] // 2,
+        shape_zyx[1] // 2,
+        shape_zyx[2] // 2,
+    )
+    px, py, pz = position_xyz
+    return (
+        z_center + int(round(pz / v_size)),
+        y_center + int(round(py / v_size)),
+        x_center + int(round(px / v_size)),
+    )
+
+
+def _insert_volume_max(
+    volume: torch.Tensor,
+    local: torch.Tensor,
+    position_xyz: tuple[float, float, float],
+    v_size: float,
+) -> torch.Tensor:
+    """Max-merge `local` (same center-relative convention as `volume`,
+    i.e. physical (0,0,0) at its own center) into `volume`, shifted by
+    `position_xyz`. See `_position_to_center_index` for why this uses a
+    different convention than `cryoet.py`'s `_insert_clipped`."""
+    center_zyx = _position_to_center_index(position_xyz, tuple(volume.shape), v_size)
+    bounds = clip_insert_bounds(center_zyx, local.shape, volume.shape)
+    if bounds is None:
+        return volume
+    dst, src = bounds
+    volume[dst] = torch.maximum(volume[dst], local[src])
+    return volume
+
+
+def _insert_shell_label(
+    labels: torch.Tensor,
+    shell_mask: torch.Tensor,
+    instance_id: int,
+    position_xyz: tuple[float, float, float],
+    v_size: float,
+) -> tuple[torch.Tensor, bool]:
+    """Stamp `instance_id` into `labels` wherever `shell_mask` (same
+    center-relative convention, see `_insert_volume_max`) is True, shifted
+    by `position_xyz` -- FIRST-write-wins: a voxel already claimed by an
+    earlier instance is never overwritten (unlike `_insert_instance_labels`
+    above, which is last-write-wins -- harmless there since placed protein
+    instances never spatially overlap by construction, but membrane
+    instances in v1 have no automatic overlap avoidance, so which instance
+    "wins" a genuine overlap must be a deliberate, deterministic choice).
+
+    Returns
+    -------
+    (torch.Tensor, bool)
+        The updated `labels`, and whether this instance's shell overlapped
+        any voxel an earlier instance had already claimed.
+    """
+    center_zyx = _position_to_center_index(position_xyz, tuple(labels.shape), v_size)
+    bounds = clip_insert_bounds(center_zyx, shell_mask.shape, labels.shape)
+    if bounds is None:
+        return labels, False
+    dst, src = bounds
+    chunk = shell_mask[src].to(labels.dtype) * instance_id
+    overlap = bool(((chunk > 0) & (labels[dst] > 0)).any())
+    labels[dst] = torch.where(labels[dst] > 0, labels[dst], chunk)
+    return labels, overlap
+
+
 @dataclass
 class TomogramProteinSpec:
     """
@@ -130,6 +222,33 @@ class TomogramPlacement:
     instance_id: int
 
 
+@dataclass
+class MembraneInstance:
+    """
+    One membrane, already configured, to composite into a shared tomogram
+    alongside others.
+
+    Attributes
+    ----------
+    generator : MembraneGenerator
+        Already-configured (not yet `.generate()`-called) membrane
+        generator -- any `shape_backend`, independent per instance. v1
+        renders every instance at the FULL shared canvas size (its own
+        `target_shape_zyx` should match the owning
+        `MembraneTomogramGenerator`'s `target_shape_zyx`), always centered
+        at physical (0,0,0) (`MembraneGenerator`'s own convention), then
+        shifted into place via `position_xyz` at composite time.
+    position_xyz : tuple of float, optional
+        Physical (x, y, z) offset from the shared tomogram's own center,
+        Angstrom. Default (0.0, 0.0, 0.0). v1 has no automatic overlap
+        avoidance -- choose values that don't collide, or expect a
+        first-write-wins overlap warning.
+    """
+
+    generator: MembraneGenerator
+    position_xyz: tuple[float, float, float] = (0.0, 0.0, 0.0)
+
+
 class MembraneTomogramGenerator:
     """
     Assemble a tomogram from a pre-configured membrane plus densely packed
@@ -137,10 +256,18 @@ class MembraneTomogramGenerator:
 
     Parameters
     ----------
-    membrane_generator : MembraneGenerator
-        Already-configured (not yet `.generate()`-called) membrane
-        generator -- its own shape/transmembrane_specs/target_shape_zyx/
-        v_size parameters are used as-is and not duplicated here.
+    membrane_instances : list of MembraneInstance
+        One or more membranes to composite into the shared tomogram (see
+        `MembraneInstance`) -- each instance's own shape/transmembrane_specs
+        are used as-is and not duplicated here. Non-empty; every instance's
+        own `generator.v_size` must match `v_size` below (raises
+        `ValueError` naming the offending index otherwise).
+    target_shape_zyx : tuple of int
+        Shared tomogram canvas shape, `(Z, Y, X)` voxels -- every instance
+        composites into this same grid.
+    v_size : float
+        Shared voxel size, Angstrom -- must match every instance's own
+        `generator.v_size`.
     protein_specs : list of TomogramProteinSpec
         Cytosolic/lumen species to pack.
     occupancy_fraction : float, optional
@@ -182,21 +309,31 @@ class MembraneTomogramGenerator:
     ----------
     regions : dict of str to torch.Tensor
         ``{"shell", "lumen", "cytosol"}`` boolean masks, set after
-        `generate()` runs (see `classify_membrane_regions`).
+        `generate()` runs (see `classify_membrane_regions`) -- computed on
+        the COMPOSITED (all instances merged) volume.
+    membrane_labels : torch.Tensor
+        Per-instance integer label volume for the membrane SHELL itself --
+        `membrane_labels == i+1` is instance `i`'s own shell (first-write-
+        wins where instances overlap, see `_insert_shell_label`), shape
+        `target_shape_zyx`, dtype int32. Set after `generate()` runs.
     transmembrane_placements : list of TransmembranePlacement
-        From `MembraneGenerator.place_transmembrane`, set after
-        `generate()` runs.
+        From every instance's own `MembraneGenerator.place_transmembrane`,
+        with `center_xyz` offset into shared-tomogram coordinates by that
+        instance's `position_xyz`. Set after `generate()` runs.
     placements : list of TomogramPlacement
         Every placed cytosolic/lumen instance, set after `generate()` runs.
     instance_labels : torch.Tensor
-        Per-instance integer label volume for cytosol/lumen instances only
-        (see module docstring), shape matching `membrane_generator.
-        target_shape_zyx`, dtype int32. Set after `generate()` runs.
+        Per-instance integer label volume for cytosol/lumen PROTEIN
+        instances only (see module docstring -- a separate label space
+        from `membrane_labels`), shape `target_shape_zyx`, dtype int32.
+        Set after `generate()` runs.
     """
 
     def __init__(
         self,
-        membrane_generator: MembraneGenerator,
+        membrane_instances: list[MembraneInstance],
+        target_shape_zyx: tuple[int, int, int],
+        v_size: float,
         protein_specs: list[TomogramProteinSpec],
         occupancy_fraction: float = 0.2,
         gap_angstrom: float = 5.0,
@@ -211,7 +348,19 @@ class MembraneTomogramGenerator:
     ):
         if not protein_specs:
             raise ValueError("protein_specs must be non-empty")
-        self.membrane_generator = membrane_generator
+        if not membrane_instances:
+            raise ValueError("membrane_instances must be non-empty")
+        for i, mi in enumerate(membrane_instances):
+            if mi.generator.v_size != v_size:
+                raise ValueError(
+                    f"MembraneTomogramGenerator: membrane_instances[{i}]'s own "
+                    f"v_size ({mi.generator.v_size}) does not match the shared "
+                    f"v_size ({v_size}) -- every instance must render on the "
+                    "same voxel grid to be compositable."
+                )
+        self.membrane_instances = membrane_instances
+        self.target_shape_zyx = target_shape_zyx
+        self.v_size = v_size
         self.protein_specs = protein_specs
         self.occupancy_fraction = occupancy_fraction
         self.gap_angstrom = gap_angstrom
@@ -225,6 +374,7 @@ class MembraneTomogramGenerator:
         self.chunk_size = chunk_size
 
         self.regions: dict[str, torch.Tensor] | None = None
+        self.membrane_labels: torch.Tensor | None = None
         self.transmembrane_placements: list[TransmembranePlacement] = []
         self.placements: list[TomogramPlacement] = []
         self.instance_labels: torch.Tensor | None = None
@@ -236,30 +386,72 @@ class MembraneTomogramGenerator:
         Returns
         -------
         torch.Tensor
-            Shape `membrane_generator.target_shape_zyx`, dtype float32.
+            Shape `target_shape_zyx`, dtype float32.
         """
         if self.seed is not None:
             torch.manual_seed(
                 self.seed
             )  # random_rotation_matrix has no generator= param
 
-        mgen = self.membrane_generator
-        v_size = mgen.v_size
-        target_shape = mgen.target_shape_zyx
+        v_size = self.v_size
+        target_shape = self.target_shape_zyx
         box = (
             target_shape[0] * v_size,
             target_shape[1] * v_size,
             target_shape[2] * v_size,
         )
 
-        mgen.generate()
-        self.transmembrane_placements = mgen.place_transmembrane(
-            min_spacing_a=self.min_transmembrane_spacing_a
-        )
-        volume = mgen.volume
-        assert volume is not None
+        # Generate + place transmembrane proteins per instance, each in its
+        # own centered local frame (MembraneGenerator unmodified), then
+        # composite densities into the shared canvas (max-merge) before any
+        # region classification -- classify_membrane_regions needs the full
+        # composite, not per-instance pieces.
+        volume = torch.zeros(target_shape, dtype=torch.float32)
+        self.transmembrane_placements = []
+        instance_volumes: list[tuple[MembraneInstance, torch.Tensor]] = []
+        for mi in self.membrane_instances:
+            mi.generator.generate()
+            tm_placements = mi.generator.place_transmembrane(
+                min_spacing_a=self.min_transmembrane_spacing_a
+            )
+            offset = torch.tensor(mi.position_xyz, dtype=torch.float32)
+            for tp in tm_placements:
+                tp.center_xyz = tp.center_xyz + offset
+            self.transmembrane_placements.extend(tm_placements)
 
-        self.regions = classify_membrane_regions(volume, self.region_density_threshold)
+            local_volume = mi.generator.volume
+            assert local_volume is not None
+            instance_volumes.append((mi, local_volume))
+            volume = _insert_volume_max(volume, local_volume, mi.position_xyz, v_size)
+
+        # One scalar threshold, shared by the global region classification
+        # AND every instance's own shell mask below -- computed from the
+        # COMPOSITE (classify_membrane_regions' own default depends on the
+        # volume it's given, so it can only be resolved after compositing),
+        # then reused verbatim so per-instance shell IDs and the global
+        # shell/lumen/cytosol masks agree on every voxel by construction.
+        threshold = self.region_density_threshold
+        if threshold is None:
+            peak = float(volume.max())
+            threshold = 0.05 * peak if peak > 0 else 0.0
+        self.regions = classify_membrane_regions(volume, threshold)
+
+        membrane_labels = torch.zeros(target_shape, dtype=torch.int32)
+        for instance_id, (mi, local_volume) in enumerate(instance_volumes, start=1):
+            shell_mask = local_volume > threshold
+            membrane_labels, overlap = _insert_shell_label(
+                membrane_labels, shell_mask, instance_id, mi.position_xyz, v_size
+            )
+            if overlap:
+                warnings.warn(
+                    f"MembraneTomogramGenerator: membrane instance {instance_id} "
+                    "(1-indexed, in membrane_instances order) overlaps a voxel "
+                    "already claimed by an earlier instance in membrane_labels "
+                    "-- the earlier instance's label wins there (first-write-"
+                    "wins). Adjust position_xyz if this overlap wasn't intended.",
+                    stacklevel=2,
+                )
+        self.membrane_labels = membrane_labels
 
         instance_labels = torch.zeros(target_shape, dtype=torch.int32)
         self.placements = []
@@ -406,8 +598,8 @@ class MembraneTomogramGenerator:
         output_dir.mkdir(parents=True, exist_ok=True)
         written: dict[str, Path] = {}
 
-        target_shape = self.membrane_generator.target_shape_zyx
-        v_size = self.membrane_generator.v_size
+        target_shape = self.target_shape_zyx
+        v_size = self.v_size
         extent_xyz = (
             torch.tensor(
                 [target_shape[2], target_shape[1], target_shape[0]],

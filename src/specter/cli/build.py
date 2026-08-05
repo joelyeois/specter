@@ -43,9 +43,13 @@ _TOMOGRAM_GROUPS: list[tuple[str, list[str]]] = [
             "membrane_region_density_threshold",
             "membrane_region_max_passes",
             "membrane_min_transmembrane_spacing_a",
+            "membrane_parameterization",
         ],
     ),
-    ("Picks", ["write_picks", "annotation_version"]),
+    (
+        "Picks & segmentation",
+        ["write_picks", "annotation_version", "write_segmentation"],
+    ),
     ("Compute", ["device"]),
     ("Output", ["output_dir", "filename"]),
     ("Advanced", ["pdb_savefolder", "seed"]),
@@ -111,14 +115,15 @@ def _build_tomogram_command() -> click.RichCommand:
         callback=_tomogram_callback,
         context_settings=CONTEXT_SETTINGS,
         help="Pack a specimen volume from PDB species via hard-sphere RSA "
-        "(default), or -- when --config's TOML sets [[membrane]] -- build "
-        "an organic membrane (any shape_backend) with region-gated cytosol/"
-        "lumen protein packing instead (mutually exclusive with "
-        "targets/filler). Either way, saves the volume as .mrc (usable as "
-        "`specter simulate tiltseries`'s --volume_path) plus copick-style "
-        ".ndjson picks. A TOML config (--config) is always loaded first -- "
-        "every flag below is optional and, if given, overrides one field "
-        "of it.",
+        "(default), or -- when --config's TOML sets one or more [[membrane]] "
+        "entries -- build one or more composited organic membranes (each its "
+        "own shape_backend and position_xyz) with region-gated cytosol/lumen "
+        "protein packing instead (mutually exclusive with targets/filler). "
+        "Either way, saves the volume as .mrc (usable as `specter simulate "
+        "tiltseries`'s --volume_path) plus copick-style .ndjson picks and, "
+        "by default, segmentation label volumes (--write_segmentation). A "
+        "TOML config (--config) is always loaded first -- every flag below "
+        "is optional and, if given, overrides one field of it.",
     )
 
 

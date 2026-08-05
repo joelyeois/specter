@@ -4,6 +4,9 @@ import subprocess as proc
 import sys
 from pathlib import Path
 
+import mrcfile
+import numpy as np
+
 _SMALL_FIXTURE = Path(__file__).parent.parent / "pdb-data" / "1mbo.cif"
 _LARGE_FIXTURE = Path(__file__).parent.parent / "pdb-data" / "1bxn-assembly1.cif"
 
@@ -198,17 +201,102 @@ def test_cli_build_tomogram_membrane_and_targets_conflict(tmp_path: Path) -> Non
     assert "can't be combined" in result.stderr
 
 
-def test_cli_build_tomogram_membrane_too_many_entries(tmp_path: Path) -> None:
-    config_path = tmp_path / "too_many_tomogram.toml"
+def test_cli_build_tomogram_membrane_multi_instance_smoke(tmp_path: Path) -> None:
+    """Two [[membrane]] entries at distinct position_xyz -- composited into
+    one tomogram, both membrane instances' worth of cytosol picks and a
+    _membrane_labels.mrc with 2 distinct instance IDs appear."""
+    config_path = tmp_path / "multi_membrane_tomogram.toml"
+    config_path.write_text(
+        f"""
+[[membrane]]
+n_sources = 2
+radius_range_a = [50.0, 60.0]
+spread_a = 5.0
+noise_amplitude_a = 0.0
+curvature_iterations = 5
+n_lipids_per_leaflet = 6
+position_xyz = [-150.0, 0.0, 0.0]
+
+[[membrane]]
+n_sources = 2
+radius_range_a = [50.0, 60.0]
+spread_a = 5.0
+noise_amplitude_a = 0.0
+curvature_iterations = 5
+n_lipids_per_leaflet = 6
+position_xyz = [150.0, 0.0, 0.0]
+
+[[membrane_protein_specs]]
+pdb_source = "{_LARGE_FIXTURE}"
+location = "cytosol"
+
+membrane_occupancy_fraction = 0.05
+
+[specimen]
+target_shape = [80, 80, 80]
+v_size = 8.0
+gap_angstrom = 5.0
+seed = 0
+
+[output]
+output_dir = "{tmp_path}"
+filename = "test_multi_membrane_tomogram"
+"""
+    )
+
+    result = _run_build_cli(config_path)
+    assert result.returncode == 0, result.stderr
+    assert (tmp_path / "test_multi_membrane_tomogram.mrc").exists()
+
+    with mrcfile.open(
+        tmp_path / "test_multi_membrane_tomogram_membrane_labels.mrc"
+    ) as mrc:
+        unique_ids = set(np.unique(mrc.data).tolist()) - {0}
+    assert unique_ids == {1, 2}
+
+
+def test_cli_build_tomogram_write_segmentation_smoke(tmp_path: Path) -> None:
+    """Membrane mode writes protein/membrane/region label .mrc files by
+    default (write_segmentation defaults True)."""
+    config_path = tmp_path / "membrane_tomogram.toml"
     _write_membrane_test_config(
         config_path, tmp_path, include_lumen=False, include_transmembrane=False
     )
-    with open(config_path, "a") as f:
-        f.write("\n[[membrane]]\nn_sources = 2\n")
 
     result = _run_build_cli(config_path)
-    assert result.returncode != 0
-    assert "at most one" in result.stderr
+    assert result.returncode == 0, result.stderr
+    assert (tmp_path / "test_membrane_tomogram_protein_labels.mrc").exists()
+    assert (tmp_path / "test_membrane_tomogram_membrane_labels.mrc").exists()
+    assert (tmp_path / "test_membrane_tomogram_regions.mrc").exists()
+
+
+def test_cli_build_tomogram_write_segmentation_override(tmp_path: Path) -> None:
+    """--write_segmentation False overrides the loaded TOML config's default
+    (True) end to end -- no label .mrc files should be written."""
+    config_path = tmp_path / "membrane_tomogram.toml"
+    _write_membrane_test_config(
+        config_path, tmp_path, include_lumen=False, include_transmembrane=False
+    )
+
+    result = _run_build_cli(config_path, "--write_segmentation", "False")
+    assert result.returncode == 0, result.stderr
+    assert (tmp_path / "test_membrane_tomogram.mrc").exists()
+    assert not (tmp_path / "test_membrane_tomogram_protein_labels.mrc").exists()
+    assert not (tmp_path / "test_membrane_tomogram_membrane_labels.mrc").exists()
+    assert not (tmp_path / "test_membrane_tomogram_regions.mrc").exists()
+
+
+def test_cli_build_tomogram_sphere_packing_write_segmentation(tmp_path: Path) -> None:
+    """Sphere-packing (non-membrane) mode also gets a _protein_labels.mrc
+    under the generalized write_segmentation."""
+    config_path = tmp_path / "tomogram.toml"
+    _write_test_config(config_path, tmp_path)
+
+    result = _run_build_cli(config_path)
+    assert result.returncode == 0, result.stderr
+    assert (tmp_path / "test_tomogram_protein_labels.mrc").exists()
+    assert not (tmp_path / "test_tomogram_membrane_labels.mrc").exists()
+    assert not (tmp_path / "test_tomogram_regions.mrc").exists()
 
 
 def test_cli_build_tomogram_write_picks_override(tmp_path: Path) -> None:

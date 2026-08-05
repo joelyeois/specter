@@ -808,6 +808,9 @@ class MembraneBlobGenerator:
             )
             if density_mode != "continuous":
                 break
+            # `thickness` was passed non-None above, so `_compute_geometry_fields`
+            # is guaranteed to have populated continuous_density.
+            assert continuous_density is not None
             d = continuous_density.numpy()
             face_max = max(
                 d[0, :, :].max(),
@@ -822,7 +825,11 @@ class MembraneBlobGenerator:
             # Boundary still has real content -- grow and retry.
             current_half_extent = point_density.shape[0] * self.v_size / 2.0
             min_half_extent = current_half_extent * 1.6
-        density = continuous_density if density_mode == "continuous" else point_density
+        if density_mode == "continuous":
+            assert continuous_density is not None
+            density = continuous_density
+        else:
+            density = point_density
         return BlobMembraneInstance(
             density=density,
             thickness=thickness,
@@ -840,7 +847,14 @@ class MembraneBlobGenerator:
         n = max(20, int(8 + size ** (0.2 + sp)))
         rad = size * sp
         var = size * (1 - sp) * 2
-        az = self.rng.random(n) * np.pi
+        # Azimuthal angle needs the full [0, 2*pi) range; the polar angle
+        # (el) correctly stays within [0, pi]. Sampling `az` from [0, pi]
+        # only (as previously here) makes sin(az) non-negative everywhere,
+        # so y = r*sin(el)*sin(az) never goes negative -- collapsing the
+        # point cloud to the y>=0 half-space instead of a full sphere
+        # (verified directly: measured Y-extent was ~half the X/Z extent,
+        # consistently across seeds and roughness values).
+        az = self.rng.random(n) * 2.0 * np.pi
         el = self.rng.random(n) * np.pi
         r = self.rng.random(n) * var + rad
         x = r * np.sin(el) * np.cos(az)

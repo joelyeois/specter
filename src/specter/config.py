@@ -593,21 +593,29 @@ class TomogramConfig:
     seed: int | None = None
 
     # --- Organic membrane (mutually exclusive with targets/filler above) ---
-    # At most one dict, [[membrane]] tables. Keys are passed as **kwargs
-    # straight into specter.specimen.membrane.MembraneGenerator -- e.g.
+    # One or more dicts, [[membrane]] tables -- one membrane instance each,
+    # composited into the shared tomogram (see specter.specimen.tomogram.
+    # MembraneInstance). Keys are passed as **kwargs straight into
+    # specter.specimen.membrane.MembraneGenerator -- e.g.
     # {"shape_backend": "spherical_harmonics", "sh_axes_a": [300.0, 300.0,
-    # 300.0], "sh_amplitude": 0.15, "bilayer_thickness_a": 30.0}. See
-    # MembraneGenerator's own docstring for the full per-backend parameter
-    # set (shape_backend one of "metaball"/"alpha_shape"/
-    # "spherical_harmonics"/"swept_spline"). target_shape_zyx/v_size/seed/
-    # device/pdb_cache_dir come from this config's own target_shape/v_size/
-    # seed/device/pdb_savefolder fields, not from this dict.
+    # 300.0], "sh_amplitude": 0.15, "bilayer_thickness_a": 30.0}, PLUS an
+    # optional "position_xyz" = [x, y, z] key (physical Angstrom offset from
+    # the tomogram's own center, default [0,0,0] -- v1 has no automatic
+    # overlap avoidance between instances, choose values that don't
+    # collide). See MembraneGenerator's own docstring for the full
+    # per-backend parameter set (shape_backend one of "metaball"/
+    # "alpha_shape"/"spherical_harmonics"/"swept_spline"). target_shape_zyx/
+    # v_size/seed/device/pdb_cache_dir come from this config's own
+    # target_shape/v_size/seed/device/pdb_savefolder fields for every
+    # instance, not from this dict.
     membrane: list[dict[str, Any]] = field(default_factory=list)
     # Each {"pdb_source": <code or path>, "frequency": 1, "parameterization":
     # "shtyrov"}. In TOML, provide as [[membrane_transmembrane_specs]] tables.
+    # Applies across ALL membrane instances (not per-instance in v1).
     membrane_transmembrane_specs: list[dict[str, Any]] = field(default_factory=list)
     # Each {"pdb_source": <code or path>, "location": "cytosol"|"lumen",
     # "ratio": 1.0}. In TOML, provide as [[membrane_protein_specs]] tables.
+    # Applies across ALL membrane instances/regions (not per-instance in v1).
     membrane_protein_specs: list[dict[str, Any]] = field(default_factory=list)
     # Packing density for cytosol/lumen species, as a bare-sphere fraction of
     # EACH REGION's own volume (not the whole box -- NOT the same quantity
@@ -616,10 +624,25 @@ class TomogramConfig:
     membrane_region_density_threshold: float | None = None
     membrane_region_max_passes: int = 300
     membrane_min_transmembrane_spacing_a: float = 40.0
+    # Atomic scattering-factor parameterization for the cytosol/lumen
+    # PotentialBuilder step (MembraneTomogramGenerator's own, distinct from
+    # each MembraneGenerator instance's own "parameterization" key inside
+    # its [[membrane]] dict, if set there) -- a top-level field rather than
+    # read from membrane[0] since it applies across all instances, not any
+    # one of them.
+    membrane_parameterization: str = "shtyrov"
 
-    # --- Ground-truth picks ---
+    # --- Ground-truth picks & segmentation ---
     write_picks: bool = True
     annotation_version: str = "1.0"
+    # Save per-instance integer label volumes as .mrc alongside the density
+    # volume ({filename}_protein_labels.mrc always; membrane mode also gets
+    # {filename}_membrane_labels.mrc and {filename}_regions.mrc (0=cytosol/
+    # 1=shell/2=lumen)) -- cast to uint16 (MRC has no int32 mode). The
+    # segmentation mask, not a coordinate file, is the intended ground truth
+    # for membrane geometry (a membrane surface has no single natural
+    # "position" the way a protein does).
+    write_segmentation: bool = True
 
     # --- Compute ---
     device: str = "cpu"
@@ -668,19 +691,23 @@ TOMOGRAM_HELP: dict[str, str] = {
     "only used when packing_method='dense'.",
     "pdb_savefolder": "Folder to cache downloaded PDB files.",
     "seed": "Random seed.",
-    "membrane": "MembraneGenerator kwargs (TOML-only, [[membrane]] tables, "
-    "at most one entry) -- mutually exclusive with targets/filler/"
-    "filler_from_pei2016/filler_from_cryoetsim. e.g. {'shape_backend': "
-    "'spherical_harmonics', 'sh_axes_a': [300.0, 300.0, 300.0], "
-    "'sh_amplitude': 0.15}. See MembraneGenerator's own docstring for the "
-    "full per-backend parameter set.",
+    "membrane": "One or more MembraneGenerator kwargs dicts (TOML-only, "
+    "[[membrane]] tables, one per composited instance) -- mutually "
+    "exclusive with targets/filler/filler_from_pei2016/filler_from_"
+    "cryoetsim. e.g. {'shape_backend': 'spherical_harmonics', 'sh_axes_a': "
+    "[300.0, 300.0, 300.0], 'sh_amplitude': 0.15, 'position_xyz': [0.0, "
+    "0.0, 0.0]}. See MembraneGenerator's own docstring for the full "
+    "per-backend parameter set; 'position_xyz' (physical Angstrom offset "
+    "from the tomogram center, default [0,0,0]) places this instance -- "
+    "v1 has no automatic overlap avoidance between instances.",
     "membrane_transmembrane_specs": "Transmembrane protein species (TOML-"
     "only, [[membrane_transmembrane_specs]] tables), each {'pdb_source': "
     "<code or path>, 'frequency': 1, 'parameterization': 'shtyrov'}. "
-    "Membrane mode only.",
+    "Membrane mode only, applies across all membrane instances.",
     "membrane_protein_specs": "Cytosol/lumen protein species (TOML-only, "
     "[[membrane_protein_specs]] tables), each {'pdb_source': <code or "
-    "path>, 'location': 'cytosol'|'lumen', 'ratio': 1.0}. Membrane mode only.",
+    "path>, 'location': 'cytosol'|'lumen', 'ratio': 1.0}. Membrane mode "
+    "only, applies across all membrane instances/regions.",
     "membrane_occupancy_fraction": "Packing density for cytosol/lumen "
     "species, as a bare-sphere fraction of EACH REGION's own volume (not "
     "the whole box). Membrane mode only.",
@@ -692,10 +719,19 @@ TOMOGRAM_HELP: dict[str, str] = {
     "membrane_min_transmembrane_spacing_a": "Minimum center-to-center "
     "spacing between placed transmembrane proteins, Angstrom. Membrane "
     "mode only.",
+    "membrane_parameterization": "Atomic scattering-factor parameterization "
+    "for the cytosol/lumen protein potential step. Membrane mode only.",
     "write_picks": "Write one copick-style .ndjson pick file per species "
     "alongside the volume.",
     "annotation_version": "Version string used in pick filenames "
     "('{species}-{version}_orientedpoint.ndjson').",
+    "write_segmentation": "Save per-instance integer label volumes as "
+    ".mrc alongside the density volume -- the intended ground truth for "
+    "membrane geometry specifically (not a coordinate file, since a "
+    "membrane surface has no single natural 'position' the way a protein "
+    "does). {filename}_protein_labels.mrc is written in both modes; "
+    "membrane mode also writes {filename}_membrane_labels.mrc (which "
+    "instance) and {filename}_regions.mrc (0=cytosol/1=shell/2=lumen).",
     "device": "Device for PotentialBuilder's potential-building step only: "
     "cpu | cuda | cuda:0. Packing always runs on CPU regardless (vesin's "
     "neighbor list is both slower and OOM-prone on GPU at realistic "

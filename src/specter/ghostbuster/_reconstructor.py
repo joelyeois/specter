@@ -23,6 +23,7 @@ from ._helpers import (
     _build_lr_scheduler,
     _log_current_lr,
 )
+from ._io import save_fsc_figure, save_plot3d_preview, save_volume_mrc
 
 
 class Reconstructor(L.LightningModule):
@@ -798,9 +799,7 @@ class Reconstructor(L.LightningModule):
         suffix = f"_{self._halfset_label}" if self._halfset_label is not None else ""
         v = self.V.detach().cpu().float()
         vol_path = self._run_dir / f"vol{suffix}.mrc"
-        with mrcfile.new(str(vol_path), overwrite=True) as mrc:
-            mrc.set_data(v.numpy())
-            mrc.voxel_size = self.voxel_size
+        save_volume_mrc(vol_path, v, self.voxel_size)
         print(f"Saved final volume → {vol_path}")
 
         if self.fsc_ref is not None:
@@ -826,9 +825,7 @@ class Reconstructor(L.LightningModule):
         v = self.V.detach().cpu().float()
 
         mrc_path = self._run_dir / "epochs" / f"{epoch:03d}{suffix}.mrc"
-        with mrcfile.new(str(mrc_path), overwrite=True) as mrc:
-            mrc.set_data(v.numpy())
-            mrc.voxel_size = self.voxel_size
+        save_volume_mrc(mrc_path, v, self.voxel_size)
 
         self._save_plot3d(v, suffix=suffix, epoch=epoch)
         if self.fsc_ref is not None:
@@ -843,20 +840,11 @@ class Reconstructor(L.LightningModule):
         """Save a plot3d preview of the current volume. Silently skips on failure."""
         if self._run_dir is None:
             return
-        try:
-            import matplotlib.pyplot as plt
-
-            from ..plots import plot3d
-
-            fig = plot3d(v, title=f"Epoch {epoch}{suffix}", show=False)
-            assert fig is not None
-            fig.savefig(
-                self._run_dir / "epochs" / f"vol_{epoch:03d}{suffix}.png",
-                bbox_inches="tight",
-            )
-            plt.close(fig)
-        except Exception as exc:
-            print(f"[Reconstructor] plot3d preview skipped: {exc}")
+        save_plot3d_preview(
+            self._run_dir / "epochs" / f"vol_{epoch:03d}{suffix}.png",
+            v,
+            title=f"Epoch {epoch}{suffix}",
+        )
 
     def _save_fsc_figure(
         self,
@@ -866,54 +854,23 @@ class Reconstructor(L.LightningModule):
         label: str,
     ) -> None:
         """Compute and save an FSC figure with optional CryoSPARC reference. Silently skips on failure."""
-        try:
-            import matplotlib.pyplot as plt
-
-            from ..plots import plot_map_to_model_fsc
-
-            # Move references to volume's device for GPU FSC computation.
-            device = v.device
-            fsc_ref = (
-                self.fsc_ref.detach().to(device).float()
-                if isinstance(self.fsc_ref, torch.Tensor)
-                else self.fsc_ref
-            )
-            assert (
-                fsc_ref is not None
-            ), "_save_fsc_figure requires self.fsc_ref to be set"
-            fsc_mask = (
-                self.fsc_mask.detach().to(device)
-                if isinstance(self.fsc_mask, torch.Tensor)
-                else None
-            )
-
-            # Build list of volumes and labels
-            vols = [v]
-            labels = [label]
-
-            # Add CryoSPARC reference if both fsc_ref and cryosparc_ref are set
-            if self.cryosparc_ref is not None and self.fsc_ref is not None:
-                cs_ref = (
-                    self.cryosparc_ref.detach().to(device).float()
-                    if isinstance(self.cryosparc_ref, torch.Tensor)
-                    else self.cryosparc_ref
-                )
-                vols.append(cs_ref)
-                labels.append("CryoSPARC")
-
-            fig = plot_map_to_model_fsc(
-                vols,
-                fsc_ref,
-                voxel_size=self.voxel_size,
-                mask=fsc_mask,
-                labels=labels,
-                show=False,
-            )
-            assert fig is not None
-            fig.savefig(path, bbox_inches="tight")
-            plt.close(fig)
-        except Exception as exc:
-            print(f"[Reconstructor] FSC plot skipped: {exc}")
+        assert (
+            self.fsc_ref is not None
+        ), "_save_fsc_figure requires self.fsc_ref to be set"
+        cryosparc_ref = (
+            self.cryosparc_ref
+            if self.cryosparc_ref is not None and self.fsc_ref is not None
+            else None
+        )
+        save_fsc_figure(
+            path,
+            v,
+            self.fsc_ref,
+            self.voxel_size,
+            label,
+            fsc_mask=self.fsc_mask,
+            cryosparc_ref=cryosparc_ref,
+        )
 
     def num_training_steps_per_epoch(self) -> int:
         """

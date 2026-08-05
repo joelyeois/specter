@@ -5,7 +5,6 @@ from pathlib import Path
 from typing import Any, Literal
 
 import lightning as L
-import mrcfile
 import roma
 import torch
 import torch.nn as nn
@@ -24,6 +23,7 @@ from ._helpers import (
     _build_lr_scheduler,
     _log_current_lr,
 )
+from ._io import save_volume_mrc
 
 
 class TomogramReconstructor(L.LightningModule):
@@ -529,9 +529,7 @@ class TomogramReconstructor(L.LightningModule):
         epoch = self.current_epoch + 1
         v = self.V.detach().cpu().float()
         mrc_path = self._run_dir / "epochs" / f"{epoch:03d}.mrc"
-        with mrcfile.new(str(mrc_path), overwrite=True) as mrc:
-            mrc.set_data(v.numpy())
-            mrc.voxel_size = self.voxel_size
+        save_volume_mrc(mrc_path, v, self.voxel_size)
 
     def on_fit_end(self) -> None:
         """Save final reconstructed volume and training metrics."""
@@ -540,9 +538,7 @@ class TomogramReconstructor(L.LightningModule):
             return
         v = self.V.detach().cpu().float()
         vol_path = self._run_dir / "vol.mrc"
-        with mrcfile.new(str(vol_path), overwrite=True) as mrc:
-            mrc.set_data(v.numpy())
-            mrc.voxel_size = self.voxel_size
+        save_volume_mrc(vol_path, v, self.voxel_size)
         print(f"Saved final volume → {vol_path}")
 
     def _save_metrics(self) -> None:

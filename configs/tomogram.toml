@@ -27,6 +27,15 @@ filler = [
     { pdb_source = "1mbo" },  # myoglobin (small)
 ]
 
+# Optional, additive to [filler] above: pull extra filler species from the
+# bundled reference tables instead of (or alongside) hand-listing codes.
+# filler_from_pei2016 = true         # Pei et al. 2016 generic crowding table
+# filler_from_cryoetsim = true       # Stojanovska et al. 2025 CryoETSim table
+# filler_table_categories = ["distractors", "nucleosomes"]  # cryoetsim only;
+#                                     # omit for all 4 usable categories
+# filler_table_max_mw_kda = 300.0    # applied to whichever table(s) above
+# filler_table_min_mw_kda = 20.0     # are enabled
+
 [specimen]
 target_shape = [128, 512, 512]    # (Z, Y, X) voxels
 v_size = 5.0                       # Å/voxel

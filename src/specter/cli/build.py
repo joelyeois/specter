@@ -25,6 +25,15 @@ _TOMOGRAM_GROUPS: list[tuple[str, list[str]]] = [
         "Specimen",
         ["target_shape", "v_size", "filler_occupancy_fraction", "gap_angstrom"],
     ),
+    (
+        "Filler tables",
+        [
+            "filler_from_pei2016",
+            "filler_from_cryoetsim",
+            "filler_table_max_mw_kda",
+            "filler_table_min_mw_kda",
+        ],
+    ),
     ("Packing", ["packing_method", "pad_fraction"]),
     ("Picks", ["write_picks", "annotation_version"]),
     ("Compute", ["device"]),

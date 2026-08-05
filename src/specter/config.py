@@ -558,6 +558,21 @@ class TomogramConfig:
     # budgeted by filler_occupancy_fraction. In TOML, provide as [[filler]]
     # tables.
     filler: list[dict[str, Any]] = field(default_factory=list)
+    # Additive to filler above: pull extra filler species from the
+    # bundled reference tables (specter.specimen.cytosolic_filler.
+    # PEI2016_CROWDING_TABLE and/or specter.specimen.cryoetsim_particles.
+    # CRYOETSIM_PARTICLE_TABLE), rather than hand-listing every species.
+    # Both can be enabled at once -- their results are concatenated.
+    filler_from_pei2016: bool = False
+    filler_from_cryoetsim: bool = False
+    # Only affects filler_from_cryoetsim (CRYOETSIM_PARTICLE_TABLE has a
+    # "category" column; PEI2016_CROWDING_TABLE doesn't, so this filter
+    # has no effect there). None = all 4 usable categories (macromolecules,
+    # distractors, transcription_translation, nucleosomes).
+    filler_table_categories: list[str] | None = None
+    # Mass range applied to whichever table(s) above are enabled.
+    filler_table_max_mw_kda: float | None = None
+    filler_table_min_mw_kda: float | None = None
     target_shape: list[int] = field(
         default_factory=lambda: [128, 256, 256]
     )  # (Z, Y, X) voxels
@@ -596,6 +611,19 @@ TOMOGRAM_HELP: dict[str, str] = {
     "filler": "Filler protein species to pack (TOML-only, [[filler]] "
     "tables), each {'pdb_source': <code or path>}. Placed second, around "
     "the already-placed targets, with equal attempt-weight across species.",
+    "filler_from_pei2016": "Additive to filler: also pull filler species "
+    "from the bundled PEI2016_CROWDING_TABLE (Pei et al. 2016 generic "
+    "cytosolic crowding reference).",
+    "filler_from_cryoetsim": "Additive to filler: also pull filler species "
+    "from the bundled CRYOETSIM_PARTICLE_TABLE (CryoETSim dataset "
+    "reference, Stojanovska et al. 2025).",
+    "filler_table_categories": "Only used with filler_from_cryoetsim: "
+    "restrict to these CRYOETSIM_PARTICLE_TABLE categories (macromolecules, "
+    "distractors, transcription_translation, nucleosomes). None = all.",
+    "filler_table_max_mw_kda": "Only used with filler_from_pei2016/"
+    "filler_from_cryoetsim: exclude species above this mass, kDa.",
+    "filler_table_min_mw_kda": "Only used with filler_from_pei2016/"
+    "filler_from_cryoetsim: exclude species below this mass, kDa.",
     "target_shape": "Output specimen volume shape in voxels (Z, Y, X).",
     "v_size": "Voxel size in Angstrom.",
     "filler_occupancy_fraction": "Target packing density for filler species, "

@@ -15,7 +15,13 @@ import os
 import time
 
 from specter.config import TomogramConfig
-from specter.specimen import SpherePackingSpecimenGenerator, SphereProteinSpec
+from specter.specimen import (
+    CRYOETSIM_PARTICLE_TABLE,
+    PEI2016_CROWDING_TABLE,
+    SpherePackingSpecimenGenerator,
+    SphereProteinSpec,
+    build_filler_pool_specs,
+)
 
 from ._common import _console, _format_elapsed, _section
 
@@ -30,12 +36,21 @@ def run_build_tomogram(config: TomogramConfig) -> None:
     config : TomogramConfig
         Fully-resolved run configuration, e.g. from
         :func:`specter.config.load_config`, or constructed directly in
-        Python. ``config.targets`` and ``config.filler`` can't both be empty.
+        Python. ``config.targets``, ``config.filler``,
+        ``config.filler_from_pei2016``, and ``config.filler_from_cryoetsim``
+        can't all be empty/False.
     """
-    if not config.targets and not config.filler:
+    if (
+        not config.targets
+        and not config.filler
+        and not config.filler_from_pei2016
+        and not config.filler_from_cryoetsim
+    ):
         raise ValueError(
-            "run_build_tomogram: config.targets and config.filler can't "
-            "both be empty -- at least one species is required."
+            "run_build_tomogram: config.targets, config.filler, "
+            "config.filler_from_pei2016, and config.filler_from_cryoetsim "
+            "can't all be empty/False -- at least one species source is "
+            "required."
         )
 
     t_start = time.perf_counter()
@@ -48,6 +63,25 @@ def run_build_tomogram(config: TomogramConfig) -> None:
     filler_specs = [
         SphereProteinSpec(pdb_source=spec["pdb_source"]) for spec in config.filler
     ]
+    if config.filler_from_pei2016:
+        filler_specs += [
+            SphereProteinSpec(pdb_source=d["pdb_source"])
+            for d in build_filler_pool_specs(
+                PEI2016_CROWDING_TABLE,
+                max_mw_kda=config.filler_table_max_mw_kda,
+                min_mw_kda=config.filler_table_min_mw_kda,
+            )
+        ]
+    if config.filler_from_cryoetsim:
+        filler_specs += [
+            SphereProteinSpec(pdb_source=d["pdb_source"])
+            for d in build_filler_pool_specs(
+                CRYOETSIM_PARTICLE_TABLE,
+                max_mw_kda=config.filler_table_max_mw_kda,
+                min_mw_kda=config.filler_table_min_mw_kda,
+                categories=config.filler_table_categories,
+            )
+        ]
     gen = SpherePackingSpecimenGenerator(
         target_specs=target_specs,
         filler_specs=filler_specs,

@@ -53,17 +53,17 @@ def _field_panels(groups: list[tuple[str, list[str]]]) -> dict[str, str]:
     return {name: title for title, names in groups for name in names}
 
 
-def _tomogram_callback(config: str, **_overrides_raw: object) -> None:
+def _tomogram_callback(config: str, n_tomograms: int, **_overrides_raw: object) -> None:
     """Handle `specter build tomogram`."""
     from specter.pipelines import run_build_tomogram
 
     ctx = click.get_current_context()
     assert ctx is not None
-    overrides = collect_overrides(ctx, exclude={"config"})
+    overrides = collect_overrides(ctx, exclude={"config", "n_tomograms"})
 
     cfg = load_config(config, TomogramConfig)
     apply_overrides(cfg, overrides)
-    run_build_tomogram(cfg)
+    run_build_tomogram(cfg, n_tomograms=n_tomograms)
 
 
 def _build_tomogram_command() -> click.RichCommand:
@@ -75,6 +75,18 @@ def _build_tomogram_command() -> click.RichCommand:
             show_default=True,
             help="TOML config file. Always loaded first, before any flags below "
             "are applied.",
+            panel="Config",
+        ),
+        click.RichOption(
+            ["--n_tomograms"],
+            type=int,
+            default=1,
+            show_default=True,
+            help="Number of independent tomograms to generate. Beyond the "
+            "first, each one is written into its own numbered subdirectory "
+            "of --output_dir (0001/, 0002/, ...) and, if --seed/"
+            "config.seed is set, gets its own incrementing seed, so runs "
+            "don't collide but stay reproducible.",
             panel="Config",
         ),
         *build_config_options(

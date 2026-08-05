@@ -11,6 +11,7 @@ species.
 
 from __future__ import annotations
 
+import dataclasses
 import os
 import time
 
@@ -26,10 +27,10 @@ from specter.specimen import (
 from ._common import _console, _format_elapsed, _section
 
 
-def run_build_tomogram(config: TomogramConfig) -> None:
+def run_build_tomogram(config: TomogramConfig, n_tomograms: int = 1) -> None:
     """
-    Pack a specimen volume from PDB species via hard-sphere packing and save
-    it as ``.mrc`` (+ copick-style ``.ndjson`` picks).
+    Pack one or more specimen volumes from PDB species via hard-sphere
+    packing and save each as ``.mrc`` (+ copick-style ``.ndjson`` picks).
 
     Parameters
     ----------
@@ -39,6 +40,18 @@ def run_build_tomogram(config: TomogramConfig) -> None:
         Python. ``config.targets``, ``config.filler``,
         ``config.filler_from_pei2016``, and ``config.filler_from_cryoetsim``
         can't all be empty/False.
+    n_tomograms : int, optional
+        Number of independent tomograms to generate, default 1. Each one
+        beyond the first is written into its own numbered subdirectory of
+        ``config.output_dir`` (``0001/``, ``0002/``, ...) so outputs don't
+        collide -- pick files in particular are named after the species,
+        not ``config.filename`` (see `SpherePackingSpecimenGenerator.
+        export_picks`), so a shared flat output_dir would silently
+        overwrite them across tomograms. If ``config.seed`` is set, each
+        tomogram also gets its own seed (``config.seed``, ``config.seed +
+        1``, ...) so runs are reproducible but distinct; if ``config.seed``
+        is ``None``, each call simply draws from wherever the global RNG
+        state already is, which likewise differs run to run.
     """
     if (
         not config.targets
@@ -53,6 +66,20 @@ def run_build_tomogram(config: TomogramConfig) -> None:
             "required."
         )
 
+    for i in range(n_tomograms):
+        run_config = config
+        if n_tomograms > 1:
+            _section(f"Tomogram {i + 1}/{n_tomograms}")
+            run_config = dataclasses.replace(
+                config,
+                output_dir=os.path.join(config.output_dir, f"{i + 1:04d}"),
+                seed=None if config.seed is None else config.seed + i,
+            )
+        _run_single_tomogram(run_config)
+
+
+def _run_single_tomogram(config: TomogramConfig) -> None:
+    """Build and save exactly one tomogram from an already-resolved config."""
     t_start = time.perf_counter()
 
     _section("Building specimen volume")

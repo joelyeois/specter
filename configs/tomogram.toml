@@ -9,28 +9,26 @@
 # plus one copick-style .ndjson pick file per species.
 #
 # Species are packed in two priority stages:
-#
-# [[targets]] -- placed FIRST, each at an exact "n_copies" count. These are
+
+# [targets] -- placed FIRST, each at an exact "n_copies" count. These are
 # the annotated ground truth, always exported to picks.
-[[targets]]
-pdb_source = "1bxn"   # cytosolic RNA polymerase II complex (large)
-n_copies = 20
+[targets]
+targets = [
+    { pdb_source = "1bxn", n_copies = 20 },  # cytosolic RNA polymerase II complex (large)
+    { pdb_source = "6qzp", n_copies = 10 },
+]
 
-[[targets]]
-pdb_source = "6qzp"
-n_copies = 10
-
-# [[filler]] -- placed SECOND, around the already-placed targets, drawn
-# with equal attempt-weight across species and budgeted by
+# [filler] -- placed SECOND, around the already-placed targets, drawn with
+# equal attempt-weight across species and budgeted by
 # filler_occupancy_fraction below.
-[[filler]]
-pdb_source = "1fa2"   # beta amylase (medium)
-
-[[filler]]
-pdb_source = "1mbo"   # myoglobin (small)
+[filler]
+filler = [
+    { pdb_source = "1fa2" },  # beta amylase (medium)
+    { pdb_source = "1mbo" },  # myoglobin (small)
+]
 
 [specimen]
-target_shape = [128, 256, 256]    # (Z, Y, X) voxels
+target_shape = [128, 512, 512]    # (Z, Y, X) voxels
 v_size = 5.0                       # Å/voxel
 filler_occupancy_fraction = 0.5    # bare-sphere volume fraction budget for
                                     # filler -- deliberately high so it packs
@@ -42,7 +40,7 @@ packing_method = "rsa"             # rsa | dense -- filler-stage backend;
                                     # only works when targets is empty
 pdb_savefolder = "pdb-data"        # resolved relative to the repo root
 # seed = 11                        # uncomment for reproducible packing
-# clip_axes = [false, true, true]  # (z, y, x) -- True lets placed instances
+clip_axes = [false, true, true]  # (z, y, x) -- True lets placed instances
                                     # poke past that wall instead of being
                                     # rejected, e.g. for a tomogram whose xy
                                     # field of view is a crop of a larger
@@ -53,10 +51,11 @@ write_picks = true
 annotation_version = "1.0"
 
 [compute]
-device = "cpu"                     # cpu | cuda | cuda:0 -- see
-                                    # SpherePackingSpecimenGenerator's own
-                                    # docstring on why "cpu" has outperformed
-                                    # "cuda" at every scale tested so far
+device = "cuda"                     # cpu | cuda | cuda:0 -- used ONLY for
+                                    # PotentialBuilder's potential-building
+                                    # step; packing always runs on CPU
+                                    # regardless (vesin's neighbor list is
+                                    # slower and OOM-prone on GPU)
 
 [output]
 output_dir = "./output/"

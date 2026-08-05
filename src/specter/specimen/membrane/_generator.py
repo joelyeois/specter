@@ -30,6 +30,8 @@ from ...rotations import build_affine_matrix, rotate_volume
 from ..packing import estimate_protein_box_size
 from ._field import MembraneField, generate_membrane_field
 from ._field_alpha import generate_membrane_field_alpha_shape
+from ._field_spherical_harmonics import generate_membrane_field_spherical_harmonics
+from ._field_swept_spline import generate_membrane_field_swept_spline
 from ._placement import (
     align_principal_axis_to_z,
     align_transmembrane_depth,
@@ -100,7 +102,7 @@ class MembraneGenerator:
     v_size : float
         Output voxel size, Angstrom. Also used to render transmembrane
         protein templates, so their scale matches the membrane's.
-    shape_backend : {"metaball", "alpha_shape"}, optional
+    shape_backend : {"metaball", "alpha_shape", "spherical_harmonics", "swept_spline"}, optional
         Which organic-shape algorithm builds the underlying
         :class:`~specter.specimen.membrane._field.MembraneField` --
         `"metaball"` (default, unchanged from before this parameter
@@ -112,10 +114,27 @@ class MembraneGenerator:
         generate_membrane_field_alpha_shape`), which -- via `blob_roughness`
         -- can produce genuinely non-convex/elongated, even tube-like,
         shapes (verified by direct sweep: 0.7/0.5/0.3/0.15 goes from a
-        rounded bowl to a twisted ribbon to a thin tube). Both backends are
-        read afterward only through `MembraneField`'s public contract, so
-        the calibrated bilayer profile and transmembrane placement below
-        are identical either way -- this choice only affects the shape.
+        rounded bowl to a twisted ribbon to a thin tube). `"spherical_harmonics"`
+        instead perturbs an ellipsoid with a random real spherical-harmonic
+        expansion (:func:`~specter.specimen.membrane.
+        _field_spherical_harmonics.generate_membrane_field_spherical_harmonics`)
+        -- smooth by construction (no faceting to clean up, unlike
+        `"alpha_shape"`) and given a physically-motivated (Helfrich
+        bending-mode) undulation spectrum, but -- being a radius function of
+        direction -- restricted to STAR-CONVEX topology: good for vesicles,
+        nuclei, and roughly-spherical (or ellipsoidal, via `sh_axes_a`)
+        mitochondria; cannot represent branching/self-occluding shapes the
+        way `"alpha_shape"` at low `blob_roughness` can. `"swept_spline"`
+        instead sweeps a sphere along a smoothly wandering random path
+        (:func:`~specter.specimen.membrane._field_swept_spline.
+        generate_membrane_field_swept_spline`) -- an elongated, tube-shaped
+        organelle (ER-tubule-like) rather than a closed blob, and unlike the
+        star-convex backends it CAN self-approach/loop back near itself
+        (a real topological capability the radius-function-of-direction
+        backends structurally lack). All four backends are read afterward
+        only through `MembraneField`'s public contract, so the calibrated
+        bilayer profile and transmembrane placement below are identical
+        either way -- this choice only affects the shape.
     n_sources : int, optional
         Number of blended metaball sources for the organic shape.
         `"metaball"` backend only. Default 6.
@@ -153,6 +172,59 @@ class MembraneGenerator:
         See `generate_membrane_field_alpha_shape`'s own docstring for why
         this is expressed in voxels rather than Angstrom. `"alpha_shape"`
         backend only. Default 2.0.
+    sh_max_degree : int, optional
+        Highest spherical-harmonic degree in the random surface
+        perturbation -- higher values add finer surface detail. See
+        `generate_membrane_field_spherical_harmonics`'s own docstring.
+        `"spherical_harmonics"` backend only. Default 8.
+    sh_axes_a : tuple of float, optional
+        Physical semi-axes `(a_x, a_y, a_z)` of the base ellipsoid,
+        Angstrom -- isotropic axes give a roughly spherical organelle,
+        anisotropic axes give an elongated/flattened one.
+        `"spherical_harmonics"` backend only. Default `(300.0, 300.0, 300.0)`.
+    sh_amplitude : float, optional
+        RMS fractional radius perturbation (dimensionless) -- picked from a
+        direct visual sweep, see `generate_membrane_field_spherical_harmonics`'s
+        own docstring. `"spherical_harmonics"` backend only. Default 0.15.
+    sh_spectrum_power : float, optional
+        Exponent `p` in `Var(a_lm) ~ 1 / [l*(l+1)]**p`; `2.0` matches the
+        Helfrich (1973) thermal bending-mode spectrum of a lipid bilayer at
+        equilibrium. `"spherical_harmonics"` backend only. Default 2.0.
+    swept_total_length_a : float, optional
+        Approximate path CONTOUR length (not bounding-box extent), Angstrom.
+        See `generate_membrane_field_swept_spline`'s own docstring.
+        `"swept_spline"` backend only. Default 500.0.
+    swept_step_length_a : float, optional
+        Distance between consecutive metaball source centers along the
+        path, Angstrom -- must stay well under `2 * swept_tube_radius_a` or
+        the tube shows visible beading (warned about proactively).
+        `"swept_spline"` backend only. Default 15.0.
+    swept_tube_radius_a : float, optional
+        Tube radius, Angstrom. `"swept_spline"` backend only. Default 25.0.
+    swept_flexibility : float, optional
+        In (0, 1]; picked from a direct visual sweep (see
+        `generate_membrane_field_swept_spline`'s own docstring): 0.05 is
+        nearly a straight rod, 0.35+ produces sharp hooks/loops, 0.15 gives
+        a gently organic, clearly non-straight tube. `"swept_spline"`
+        backend only. Default 0.15.
+    swept_blend_sharpness_a : float, optional
+        Smooth-min blend radius, Angstrom. Default (`None`) is
+        `0.5 * swept_tube_radius_a` -- deliberately NOT the `"metaball"`
+        backend's own default, which under-blends a dense chain of sources
+        into visible beading. `"swept_spline"` backend only.
+    swept_path_smoothing_sigma_points : float, optional
+        Path-order-aware smoothing (`scipy.ndimage.gaussian_filter1d`),
+        in PATH POINTS -- see `generate_membrane_field_swept_spline`'s own
+        docstring for why this must be order-aware rather than spatial.
+        `"swept_spline"` backend only. Default 1.5.
+    swept_curvature_iterations : int, optional
+        Curvature-capping relaxation steps -- reused here for the same
+        reason `"metaball"` applies it by default (an analytic smooth-min
+        blend can still have locally sharp concave curvature). `"swept_spline"`
+        backend only. Default 15.
+    swept_curvature_step_fraction : float, optional
+        See :func:`~specter.specimen.membrane._field.cap_curvature`.
+        `"swept_spline"` backend only. Default 0.15.
     n_lipids_per_leaflet : int, optional
         Reference lipid patch size used ONLY to calibrate the bilayer
         profile's peak amplitude against real atomic scattering physics
@@ -227,6 +299,18 @@ class MembraneGenerator:
         blob_size_a: float = 300.0,
         blob_roughness: float = 0.3,
         blob_surface_smoothing_voxels: float = 2.0,
+        sh_max_degree: int = 8,
+        sh_axes_a: tuple[float, float, float] = (300.0, 300.0, 300.0),
+        sh_amplitude: float = 0.15,
+        sh_spectrum_power: float = 2.0,
+        swept_total_length_a: float = 500.0,
+        swept_step_length_a: float = 15.0,
+        swept_tube_radius_a: float = 25.0,
+        swept_flexibility: float = 0.15,
+        swept_blend_sharpness_a: float | None = None,
+        swept_path_smoothing_sigma_points: float = 1.5,
+        swept_curvature_iterations: int = 15,
+        swept_curvature_step_fraction: float = 0.15,
         n_lipids_per_leaflet: int = 200,
         parameterization: str = "shtyrov",
         bilayer_thickness_a: float = 30.0,
@@ -237,9 +321,16 @@ class MembraneGenerator:
         device: str | torch.device = "cpu",
         seed: int | None = None,
     ):
-        if shape_backend not in ("metaball", "alpha_shape"):
+        if shape_backend not in (
+            "metaball",
+            "alpha_shape",
+            "spherical_harmonics",
+            "swept_spline",
+        ):
             raise ValueError(
-                f"shape_backend must be 'metaball' or 'alpha_shape', got {shape_backend!r}"
+                "shape_backend must be 'metaball', 'alpha_shape', "
+                "'spherical_harmonics', or 'swept_spline', got "
+                f"{shape_backend!r}"
             )
         tz, ty, tx = target_shape_zyx
         self.target_shape_zyx: tuple[int, int, int] = (int(tz), int(ty), int(tx))
@@ -254,6 +345,18 @@ class MembraneGenerator:
         self.blob_size_a = blob_size_a
         self.blob_roughness = blob_roughness
         self.blob_surface_smoothing_voxels = blob_surface_smoothing_voxels
+        self.sh_max_degree = sh_max_degree
+        self.sh_axes_a = sh_axes_a
+        self.sh_amplitude = sh_amplitude
+        self.sh_spectrum_power = sh_spectrum_power
+        self.swept_total_length_a = swept_total_length_a
+        self.swept_step_length_a = swept_step_length_a
+        self.swept_tube_radius_a = swept_tube_radius_a
+        self.swept_flexibility = swept_flexibility
+        self.swept_blend_sharpness_a = swept_blend_sharpness_a
+        self.swept_path_smoothing_sigma_points = swept_path_smoothing_sigma_points
+        self.swept_curvature_iterations = swept_curvature_iterations
+        self.swept_curvature_step_fraction = swept_curvature_step_fraction
         self.n_lipids_per_leaflet = n_lipids_per_leaflet
         self.parameterization = parameterization
         self.bilayer_thickness_a = bilayer_thickness_a
@@ -344,6 +447,32 @@ class MembraneGenerator:
                 device=self.device,
                 seed=self.seed,
             )
+        elif self.shape_backend == "spherical_harmonics":
+            self.field = generate_membrane_field_spherical_harmonics(
+                shape_zyx=field_shape_zyx,
+                spacing_a=field_spacing_a,
+                sh_max_degree=self.sh_max_degree,
+                sh_axes_a=self.sh_axes_a,
+                sh_amplitude=self.sh_amplitude,
+                sh_spectrum_power=self.sh_spectrum_power,
+                device=self.device,
+                seed=self.seed,
+            )
+        elif self.shape_backend == "swept_spline":
+            self.field = generate_membrane_field_swept_spline(
+                shape_zyx=field_shape_zyx,
+                spacing_a=field_spacing_a,
+                total_length_a=self.swept_total_length_a,
+                step_length_a=self.swept_step_length_a,
+                tube_radius_a=self.swept_tube_radius_a,
+                flexibility=self.swept_flexibility,
+                blend_sharpness_a=self.swept_blend_sharpness_a,
+                path_smoothing_sigma_points=self.swept_path_smoothing_sigma_points,
+                curvature_iterations=self.swept_curvature_iterations,
+                curvature_step_fraction=self.swept_curvature_step_fraction,
+                device=self.device,
+                seed=self.seed,
+            )
         else:
             self.field = generate_membrane_field(
                 shape_zyx=field_shape_zyx,
@@ -414,10 +543,12 @@ class MembraneGenerator:
                 "reaching the target count. Common causes: the membrane's surface "
                 "area is too small for this many well-spaced sites at this "
                 "min_spacing_a (try reducing min_spacing_a or n_sites/frequency), "
-                "or -- shape_backend='alpha_shape' specifically -- the working "
-                "field grid is too coarse relative to blob_size_a for reliable "
-                "surface projection (see generate_membrane_field_alpha_shape's own "
-                "Notes; that function also warns proactively on this). This is not "
+                "or -- shape_backend='alpha_shape'/'spherical_harmonics' "
+                "specifically -- the working field grid is too coarse relative to "
+                "blob_size_a/sh_axes_a for reliable surface projection (see "
+                "generate_membrane_field_alpha_shape's/"
+                "generate_membrane_field_spherical_harmonics's own Notes; both "
+                "functions also warn proactively on this). This is not "
                 "raised as an error since a partial/empty result is sometimes "
                 "intended (e.g. deliberately testing a too-small membrane), but "
                 f"placements will be missing/absent if not: {n_found} of "

@@ -1,6 +1,7 @@
 pdb-data/
 cache/
 manuscript/
+output/
 
 # Python
 __pycache__/

@@ -15,6 +15,7 @@ from torch.optim.lr_scheduler import LRScheduler, ReduceLROnPlateau
 
 from .. import rotations
 from ..aberrations import Aberration
+from ..ctf import LegacyAberrationAdapter
 from ..imagegenerator._tiltseries import TiltSeriesGenerator
 from ..scattering import IterativeScattering
 from ._helpers import (
@@ -73,6 +74,15 @@ class TomogramReconstructor(L.LightningModule):
         Wave propagation model.  Default ``"multislice"``.
     aberration_model : str
         CTF aberration model.  Default ``"holography"``.
+    aberration_backend : {"legacy", "torch_ctf"}, optional
+        Which engine computes the CTF/aberration transfer function.
+        ``"legacy"`` (default) uses ``aberrations.Aberration``; ``"torch_ctf"``
+        uses ``ctf.LegacyAberrationAdapter`` (verified parity, see
+        ``ImageGenerator``'s docstring). Opt-in only; not yet the default.
+    lpp_params : dict[str, float], optional
+        Laser-phase-plate config, in ``ctf.CTFParameters``-native units.
+        Requires ``aberration_backend="torch_ctf"``; raises at construction
+        time otherwise, since ``aberrations.Aberration`` has no LPP model.
     klim : float, optional
         Hard reciprocal-space frequency cutoff.
     alpha : float
@@ -115,6 +125,8 @@ class TomogramReconstructor(L.LightningModule):
         use_fov_mask: bool = True,
         scattering_model: str = "multislice",
         aberration_model: str = "holography",
+        aberration_backend: Literal["legacy", "torch_ctf"] = "legacy",
+        lpp_params: dict[str, float] | None = None,
         klim: float | None = None,
         alpha: float = 0.0,
         scheduler: Literal[
@@ -130,6 +142,11 @@ class TomogramReconstructor(L.LightningModule):
         run_dir: str | Path | None = None,
     ) -> None:
         super().__init__()
+        if lpp_params is not None and aberration_backend != "torch_ctf":
+            raise ValueError(
+                "lpp_params requires aberration_backend='torch_ctf' -- "
+                "aberrations.Aberration has no laser-phase-plate model."
+            )
         self.save_hyperparameters(
             ignore=["V", "quaternions", "translations", "ctf_params", "kmask"]
         )
@@ -200,13 +217,24 @@ class TomogramReconstructor(L.LightningModule):
             klim=klim,
             alpha=alpha,
         )
-        self.aberration = Aberration(
-            self.nxy,
-            voxel_size,
-            voltage,
-            aberration_model=aberration_model,
-            alpha=alpha if aberration_model == "ctf" else None,
-        )
+        self.aberration_backend = aberration_backend
+        self.aberration: Aberration | LegacyAberrationAdapter
+        if aberration_backend == "torch_ctf":
+            self.aberration = LegacyAberrationAdapter(
+                self.nxy,
+                voxel_size,
+                voltage,
+                aberration_model=aberration_model,
+                lpp_params=lpp_params,
+            )
+        else:
+            self.aberration = Aberration(
+                self.nxy,
+                voxel_size,
+                voltage,
+                aberration_model=aberration_model,
+                alpha=alpha if aberration_model == "ctf" else None,
+            )
 
     # ------------------------------------------------------------------ #
     # Forward helpers                                                      #

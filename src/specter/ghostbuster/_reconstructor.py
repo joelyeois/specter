@@ -85,6 +85,17 @@ class Reconstructor(L.LightningModule):
         Scattering model passed to ImageGenerator. Default is "multislice".
     aberration_model : str
         Aberration model passed to ImageGenerator. Default is "holography".
+    aberration_backend : {"legacy", "torch_ctf"}, optional
+        Which engine computes the CTF/aberration transfer function inside
+        the underlying ``ImageGenerator``. ``"legacy"`` (default) uses
+        ``aberrations.Aberration``; ``"torch_ctf"`` uses
+        ``ctf.LegacyAberrationAdapter`` (verified parity, see
+        ``ImageGenerator``'s own docstring). Opt-in only; not yet the
+        default.
+    lpp_params : dict[str, float], optional
+        Laser-phase-plate config, in ``ctf.CTFParameters``-native units.
+        Requires ``aberration_backend="torch_ctf"``; raises at
+        construction time otherwise (via ``ImageGenerator``).
     run_dir : str or Path, optional
         Directory to write per-epoch volumes, final volume, and metadata into.
         ``None`` disables all file output.
@@ -111,6 +122,8 @@ class Reconstructor(L.LightningModule):
         bfactor: float | torch.Tensor | None = None,
         scattering_model: str = "multislice",
         aberration_model: str = "holography",
+        aberration_backend: Literal["legacy", "torch_ctf"] = "legacy",
+        lpp_params: dict[str, float] | None = None,
         klim: float | None = None,
         sparsity: float | None = None,
         lr: float | None = None,
@@ -192,6 +205,8 @@ class Reconstructor(L.LightningModule):
         self.ews_curvature_sign = ews_curvature_sign
         self.scattering_model = scattering_model
         self.aberration_model = aberration_model
+        self.aberration_backend = aberration_backend
+        self.lpp_params = lpp_params
         self._build_imagegenerator(klim, bfactor)
 
     def _setup_optimization_state(
@@ -371,6 +386,8 @@ class Reconstructor(L.LightningModule):
             alpha=self.alpha,
             rotate_mode=self.rotate_mode,
             bfactor=bfactor,
+            aberration_backend=self.aberration_backend,
+            lpp_params=self.lpp_params,
         )
 
     def forward(self, idx: torch.Tensor | int | slice) -> torch.Tensor:

@@ -124,6 +124,15 @@ class Ghostbuster:
         ``"projection"``).
     aberration_model : str
         CTF aberration model passed to ``ImageGenerator``.
+    aberration_backend : {"legacy", "torch_ctf"}, optional
+        Which engine computes the CTF/aberration transfer function.
+        ``"legacy"`` (default) uses ``aberrations.Aberration``; ``"torch_ctf"``
+        uses ``ctf.LegacyAberrationAdapter`` (verified parity, see
+        ``ImageGenerator``'s docstring). Opt-in only; not yet the default.
+    lpp_params : dict[str, float], optional
+        Laser-phase-plate config, in ``ctf.CTFParameters``-native units.
+        Requires ``aberration_backend="torch_ctf"``; raises at construction
+        time otherwise.
     symmetry : str, optional
         Point-group symmetry to enforce (e.g. ``"C3"``, ``"I1"``).
     symmetry_batchsize : int, optional
@@ -196,6 +205,8 @@ class Ghostbuster:
         batch_size: int = 3,
         scattering_model: str = "rytov",
         aberration_model: str = "holography",
+        aberration_backend: Literal["legacy", "torch_ctf"] = "legacy",
+        lpp_params: dict[str, float] | None = None,
         symmetry: str | None = None,
         symmetry_batchsize: int | None = None,
         symmetry_mode: Literal["real", "fourier"] = "fourier",
@@ -261,6 +272,8 @@ class Ghostbuster:
         self.batch_size = batch_size
         self.scattering_model = scattering_model
         self.aberration_model = aberration_model
+        self.aberration_backend = aberration_backend
+        self.lpp_params = lpp_params
         self.symmetry = symmetry
         self.symmetry_batchsize = symmetry_batchsize
         self.symmetry_mode = symmetry_mode
@@ -381,6 +394,8 @@ class Ghostbuster:
             bfactor=self.bfactor,
             scattering_model=scattering_model,
             aberration_model=self.aberration_model,
+            aberration_backend=self.aberration_backend,
+            lpp_params=self.lpp_params,
             lr=self.lr,
             lr_R=self.lr_R,
             lr_T=self.lr_T,

@@ -71,6 +71,15 @@ class TomogramGhostbuster:
         Wave propagation model.  Default ``"multislice"``.
     aberration_model : str
         CTF aberration model.  Default ``"holography"``.
+    aberration_backend : {"legacy", "torch_ctf"}, optional
+        Which engine computes the CTF/aberration transfer function.
+        ``"legacy"`` (default) uses ``aberrations.Aberration``; ``"torch_ctf"``
+        uses ``ctf.LegacyAberrationAdapter`` (verified parity, see
+        ``ImageGenerator``'s docstring). Opt-in only; not yet the default.
+    lpp_params : dict[str, float], optional
+        Laser-phase-plate config, in ``ctf.CTFParameters``-native units.
+        Requires ``aberration_backend="torch_ctf"``; raises at construction
+        time otherwise, since ``aberrations.Aberration`` has no LPP model.
     klim : float, optional
         Hard frequency cutoff.
     alpha : float
@@ -112,6 +121,8 @@ class TomogramGhostbuster:
         batch_size: int = 1,
         scattering_model: str = "multislice",
         aberration_model: str = "holography",
+        aberration_backend: Literal["legacy", "torch_ctf"] = "legacy",
+        lpp_params: dict[str, float] | None = None,
         klim: float | None = None,
         alpha: float = 0.0,
         taper_width: int = 0,
@@ -160,6 +171,8 @@ class TomogramGhostbuster:
         self.batch_size = batch_size
         self.scattering_model = scattering_model
         self.aberration_model = aberration_model
+        self.aberration_backend = aberration_backend
+        self.lpp_params = lpp_params
         self.klim = klim
         self.alpha = alpha
         self.taper_width = taper_width
@@ -268,6 +281,8 @@ class TomogramGhostbuster:
             use_fov_mask=self.use_fov_mask,
             scattering_model=scattering_model,
             aberration_model=self.aberration_model,
+            aberration_backend=self.aberration_backend,
+            lpp_params=self.lpp_params,
             klim=self.klim,
             alpha=self.alpha,
             scheduler=self.scheduler,

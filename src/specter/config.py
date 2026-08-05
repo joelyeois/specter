@@ -619,8 +619,10 @@ TOMOGRAM_HELP: dict[str, str] = {
     "alongside the volume.",
     "annotation_version": "Version string used in pick filenames "
     "('{species}-{version}_orientedpoint.ndjson').",
-    "device": "Device for the packing step: cpu | cuda | cuda:0. Rendering "
-    "always runs on CPU regardless.",
+    "device": "Device for PotentialBuilder's potential-building step only: "
+    "cpu | cuda | cuda:0. Packing always runs on CPU regardless (vesin's "
+    "neighbor list is both slower and OOM-prone on GPU at realistic "
+    "particle counts).",
     "output_dir": "Directory to save output files.",
     "filename": "Base name for the output volume (no extension).",
 }

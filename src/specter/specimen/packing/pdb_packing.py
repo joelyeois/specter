@@ -60,6 +60,7 @@ from ...arrays import clip_insert_bounds
 from ...crowding import insert_particles_into_micrograph
 from ...pdb import PDB
 from ...potential import PotentialBuilder
+from ...progress import TqdmProgress, status
 from ...rotations import build_affine_matrix, random_rotation_matrix, rotate_volume
 from .algorithms import (
     draw_species_pool,
@@ -323,15 +324,26 @@ class SpherePackingSpecimenGenerator:
     seed : int, optional
         Random seed.
     device : str or torch.device, optional
-        Device for the packing step -- see `pack_hard_spheres_3d`'s own
-        docstring on why "cpu" (the default) has outperformed "cuda" at
-        every scale tested so far. Rotation/rendering always happens on
-        CPU regardless (this generator doesn't move volumes to GPU).
+        Device for `PotentialBuilder`'s potential-building step ONLY --
+        the FFT-based convolution that's the real compute cost for large
+        species. Packing always runs on CPU regardless of this setting: the
+        `vesin_torch`-based neighbor list `pack_hard_spheres_3d` uses is
+        both slower on GPU at realistic particle counts (kernel-launch/
+        neighbor-list-construction overhead dominates -- see that
+        function's own docstring) and prone to OOM there for larger
+        candidate pools, so it's hardcoded to "cpu" rather than exposed
+        here. Rotation/insertion/label-stamping also always run on CPU --
+        each species' built potential is moved back to CPU immediately
+        after `PotentialBuilder.forward` returns.
     chunk_size : int, optional
         Number of instances to rotate per batch, per species -- caps peak
         memory when a species has many placed instances (mirrors
         `specter.crowding.CrowdWithDuplicates`'s own `chunk_size`). Default
         None (rotate all of a species' instances at once).
+    progressbars : bool, optional
+        Show progress bars for PDB loading, packing, and per-species
+        rendering (including `PotentialBuilder`'s own build progress) while
+        `generate()` runs. Default True.
 
     Attributes
     ----------
@@ -373,6 +385,7 @@ class SpherePackingSpecimenGenerator:
         seed: int | None = None,
         device: str | torch.device = "cpu",
         chunk_size: int | None = None,
+        progressbars: bool = True,
     ):
         filler_specs = list(filler_specs) if filler_specs else []
         if not target_specs and not filler_specs:
@@ -408,6 +421,7 @@ class SpherePackingSpecimenGenerator:
         self.seed = seed
         self.device = device
         self.chunk_size = chunk_size
+        self.progressbars = progressbars
 
         self.placements: list[SpherePlacement] = []
         self.n_target_requested = 0
@@ -432,10 +446,15 @@ class SpherePackingSpecimenGenerator:
 
         all_specs = list(self.target_specs) + list(self.filler_specs)
         n_targets = len(self.target_specs)
-        pdbs = [
-            PDB(spec.pdb_source, savefolder=self.pdb_cache_dir, verbose=False)
-            for spec in all_specs
-        ]
+        with TqdmProgress(transient=True, disable=not self.progressbars) as progress:
+            pdb_task = progress.add_task("Loading PDB structures", total=len(all_specs))
+            pdbs = []
+            for spec in all_specs:
+                progress.update(pdb_task, description=f"Loading {spec.pdb_source}")
+                pdbs.append(
+                    PDB(spec.pdb_source, savefolder=self.pdb_cache_dir, verbose=False)
+                )
+                progress.update(pdb_task, advance=1)
         species_radii = torch.tensor([float(pdb.max_diameter) / 2.0 for pdb in pdbs])
 
         box = (
@@ -455,14 +474,18 @@ class SpherePackingSpecimenGenerator:
 
         if target_radii_list:
             target_radii_t = torch.tensor(target_radii_list)
-            target_coords, target_accepted_idx = pack_hard_spheres_3d(
-                target_radii_t,
-                box,
-                gap=self.gap_angstrom,
-                seed=self.seed,
-                device=self.device,
-                clip_axes=self.clip_axes,
-            )
+            with status(
+                f"Packing {len(target_radii_list)} target instances",
+                disable=not self.progressbars,
+            ):
+                target_coords, target_accepted_idx = pack_hard_spheres_3d(
+                    target_radii_t,
+                    box,
+                    gap=self.gap_angstrom,
+                    seed=self.seed,
+                    device="cpu",  # see self.device's own docstring
+                    clip_axes=self.clip_axes,
+                )
             target_species_t = torch.tensor(target_species_list, dtype=torch.long)
             target_accepted_species = target_species_t[target_accepted_idx]
             target_accepted_radii = target_radii_t[target_accepted_idx]
@@ -480,58 +503,63 @@ class SpherePackingSpecimenGenerator:
             # take a ratios tensor, so pass a uniform one.
             filler_ratios = torch.ones(len(self.filler_specs))
 
-            if self.packing_method == "rsa":
-                pool_radii, pool_species_idx = draw_species_pool(
-                    filler_species_radii,
-                    filler_ratios,
-                    self.filler_occupancy_fraction,
-                    box_volume,
-                    seed=self.seed,
-                )
-                self.n_filler_candidates = int(pool_radii.numel())
-                exclusion_field: torch.Tensor | None = None
-                field_v_size: float | None = None
-                if target_coords.shape[0] > 0:
-                    # Pad the forbidden mask by one voxel before the distance
-                    # transform (exclusion_distance_field's own docstring
-                    # recommendation) so trilinear-interpolation "bleed" on a
-                    # coarse grid can't let a filler candidate creep closer
-                    # to a target than `gap` actually allows.
-                    exclusion_field, field_v_size = _build_sphere_exclusion_field(
-                        target_coords,
-                        target_accepted_radii + self.v_size,
-                        self.target_shape,
-                        self.v_size,
-                    )
-                filler_coords, filler_accepted_idx = pack_hard_spheres_3d(
-                    pool_radii,
-                    box,
-                    gap=self.gap_angstrom,
-                    seed=self.seed,
-                    device=self.device,
-                    clip_axes=self.clip_axes,
-                    exclusion_distance_field=exclusion_field,
-                    field_v_size=field_v_size,
-                )
-                filler_accepted_species = (
-                    pool_species_idx[filler_accepted_idx] + n_targets
-                )
-            else:
-                filler_coords, _filler_radii_out, filler_species_out = (
-                    pack_hard_spheres_3d_dense(
+            with status(
+                f"Packing filler instances ({self.packing_method})",
+                disable=not self.progressbars,
+            ):
+                if self.packing_method == "rsa":
+                    pool_radii, pool_species_idx = draw_species_pool(
                         filler_species_radii,
                         filler_ratios,
                         self.filler_occupancy_fraction,
+                        box_volume,
+                        seed=self.seed,
+                    )
+                    self.n_filler_candidates = int(pool_radii.numel())
+                    exclusion_field: torch.Tensor | None = None
+                    field_v_size: float | None = None
+                    if target_coords.shape[0] > 0:
+                        # Pad the forbidden mask by one voxel before the
+                        # distance transform (exclusion_distance_field's own
+                        # docstring recommendation) so trilinear-
+                        # interpolation "bleed" on a coarse grid can't let a
+                        # filler candidate creep closer to a target than
+                        # `gap` actually allows.
+                        exclusion_field, field_v_size = _build_sphere_exclusion_field(
+                            target_coords,
+                            target_accepted_radii + self.v_size,
+                            self.target_shape,
+                            self.v_size,
+                        )
+                    filler_coords, filler_accepted_idx = pack_hard_spheres_3d(
+                        pool_radii,
                         box,
                         gap=self.gap_angstrom,
                         seed=self.seed,
-                        device=self.device,
-                        pad_fraction=self.pad_fraction,
+                        device="cpu",  # see self.device's own docstring
                         clip_axes=self.clip_axes,
+                        exclusion_distance_field=exclusion_field,
+                        field_v_size=field_v_size,
                     )
-                )
-                self.n_filler_candidates = int(filler_coords.shape[0])
-                filler_accepted_species = filler_species_out + n_targets
+                    filler_accepted_species = (
+                        pool_species_idx[filler_accepted_idx] + n_targets
+                    )
+                else:
+                    filler_coords, _filler_radii_out, filler_species_out = (
+                        pack_hard_spheres_3d_dense(
+                            filler_species_radii,
+                            filler_ratios,
+                            self.filler_occupancy_fraction,
+                            box,
+                            gap=self.gap_angstrom,
+                            seed=self.seed,
+                            device="cpu",  # see self.device's own docstring
+                            pad_fraction=self.pad_fraction,
+                            clip_axes=self.clip_axes,
+                        )
+                    )
+                    self.n_filler_candidates = int(filler_coords.shape[0])
+                    filler_accepted_species = filler_species_out + n_targets
         else:
             filler_coords = torch.empty((0, 3))
             filler_accepted_species = torch.empty((0,), dtype=torch.long)
@@ -548,68 +576,83 @@ class SpherePackingSpecimenGenerator:
         self.placements = []
         next_instance_id = 1
 
-        for species_i, spec in enumerate(all_specs):
-            mask = accepted_species_idx == species_i
-            if not bool(mask.any()):
-                continue
-            pdb = pdbs[species_i]
-            n = estimate_protein_box_size(pdb.max_diameter, self.v_size)
-            builder = PotentialBuilder(
-                n_xyz=n,
-                dx=self.v_size,
-                atomic_numbers=pdb.atomic_numbers,
-                progressbars=False,
-            )
-            template = builder.forward(pdb.coordinates, method="analytic")
-            label_threshold = _INSTANCE_LABEL_REL_THRESHOLD * float(template.max())
-
-            species_coords = coords[mask]
-            n_instances = species_coords.shape[0]
-            R = random_rotation_matrix(n_instances)
-            if R.dim() == 2:
-                R = R.unsqueeze(0)
-            theta = build_affine_matrix(R)
-
-            instance_ids = torch.arange(
-                next_instance_id, next_instance_id + n_instances, dtype=torch.int32
-            )
-            next_instance_id += n_instances
-
-            step = self.chunk_size or n_instances
-            for start in range(0, n_instances, step):
-                end = min(start + step, n_instances)
-                rotated = rotate_volume(
-                    template, theta[start:end], padding_mode="zeros"
+        with TqdmProgress(transient=True, disable=not self.progressbars) as progress:
+            render_task = progress.add_task("Rendering species", total=len(all_specs))
+            for species_i, spec in enumerate(all_specs):
+                mask = accepted_species_idx == species_i
+                if not bool(mask.any()):
+                    progress.update(render_task, advance=1)
+                    continue
+                n_instances_preview = int(mask.sum())
+                progress.update(
+                    render_task,
+                    description=(
+                        f"Rendering {spec.pdb_source} ({n_instances_preview} instances)"
+                    ),
                 )
-                volume = insert_particles_into_micrograph(
-                    rotated,
-                    species_coords[start:end],
-                    pixel_size=self.v_size,
-                    micrograph=volume,
-                )
-                binarized = (rotated > label_threshold).to(torch.int32) * instance_ids[
-                    start:end
-                ].view(-1, 1, 1, 1)
-                instance_labels = _insert_instance_labels(
-                    binarized,
-                    species_coords[start:end],
-                    pixel_size=self.v_size,
-                    labels=instance_labels,
-                )
+                pdb = pdbs[species_i]
+                n = estimate_protein_box_size(pdb.max_diameter, self.v_size)
+                builder = PotentialBuilder(
+                    n_xyz=n,
+                    dx=self.v_size,
+                    atomic_numbers=pdb.atomic_numbers,
+                    progressbars=self.progressbars,
+                ).to(self.device)
+                # Brought back to CPU immediately -- rotation/insertion/label
+                # stamping below stay CPU-only regardless of self.device (see
+                # that parameter's own docstring); only the potential build
+                # itself runs on self.device.
+                template = builder.forward(pdb.coordinates, method="analytic").to("cpu")
+                label_threshold = _INSTANCE_LABEL_REL_THRESHOLD * float(template.max())
 
-            role: Literal["target", "filler"] = (
-                "target" if species_i < n_targets else "filler"
-            )
-            for i in range(n_instances):
-                self.placements.append(
-                    SpherePlacement(
-                        species_id=spec.pdb_source,
-                        position_xyz=species_coords[i],
-                        rotation_matrix=R[i],
-                        instance_id=int(instance_ids[i]),
-                        role=role,
+                species_coords = coords[mask]
+                n_instances = species_coords.shape[0]
+                R = random_rotation_matrix(n_instances)
+                if R.dim() == 2:
+                    R = R.unsqueeze(0)
+                theta = build_affine_matrix(R)
+
+                instance_ids = torch.arange(
+                    next_instance_id, next_instance_id + n_instances, dtype=torch.int32
+                )
+                next_instance_id += n_instances
+
+                step = self.chunk_size or n_instances
+                for start in range(0, n_instances, step):
+                    end = min(start + step, n_instances)
+                    rotated = rotate_volume(
+                        template, theta[start:end], padding_mode="zeros"
                     )
+                    volume = insert_particles_into_micrograph(
+                        rotated,
+                        species_coords[start:end],
+                        pixel_size=self.v_size,
+                        micrograph=volume,
+                    )
+                    binarized = (rotated > label_threshold).to(
+                        torch.int32
+                    ) * instance_ids[start:end].view(-1, 1, 1, 1)
+                    instance_labels = _insert_instance_labels(
+                        binarized,
+                        species_coords[start:end],
+                        pixel_size=self.v_size,
+                        labels=instance_labels,
+                    )
+
+                role: Literal["target", "filler"] = (
+                    "target" if species_i < n_targets else "filler"
                 )
+                for i in range(n_instances):
+                    self.placements.append(
+                        SpherePlacement(
+                            species_id=spec.pdb_source,
+                            position_xyz=species_coords[i],
+                            rotation_matrix=R[i],
+                            instance_id=int(instance_ids[i]),
+                            role=role,
+                        )
+                    )
+                progress.update(render_task, advance=1)
 
         self.instance_labels = instance_labels
         return volume

@@ -63,12 +63,19 @@ def run_build_tomogram(config: TomogramConfig) -> None:
         device=config.device,
     )
     volume = gen.generate()
-    _console.print(f"  Volume shape: {tuple(volume.shape)}  (Z, Y, X)")
+    size_angstrom = tuple(s * config.v_size for s in volume.shape)
+    _console.print(
+        f"  Volume shape: {tuple(volume.shape)}  (Z, Y, X), "
+        f"{size_angstrom[0]:.0f} x {size_angstrom[1]:.0f} x {size_angstrom[2]:.0f} A"
+    )
     _console.print(f"  Targets: {gen.n_targets_placed}/{gen.n_target_requested} placed")
     _console.print(
         f"  Filler: {len(gen.placements) - gen.n_targets_placed} placed "
         f"from a {gen.n_filler_candidates}-candidate pool"
     )
+    assert gen.instance_labels is not None
+    occupancy_fraction = float((gen.instance_labels > 0).float().mean())
+    _console.print(f"  Occupancy: {occupancy_fraction:.1%} of volume")
 
     _section("Saving")
     import mrcfile

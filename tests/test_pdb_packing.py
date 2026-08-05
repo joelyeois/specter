@@ -322,6 +322,29 @@ def test_sphere_packing_generator_rejects_dense_with_targets_and_filler():
         )
 
 
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA")
+@pytest.mark.skipif(not _SMALL_FIXTURE.exists(), reason="bundled PDB fixture missing")
+def test_sphere_packing_generator_device_only_moves_potential_builder():
+    """device='cuda' must route only to PotentialBuilder's potential build
+    (the real compute cost); packing stays on CPU (vesin's neighbor list is
+    slower and OOM-prone on GPU at realistic particle counts), and the
+    final volume always lands back on CPU regardless of device."""
+    gen = SpherePackingSpecimenGenerator(
+        target_specs=[SphereProteinSpec(pdb_source=str(_SMALL_FIXTURE), n_copies=3)],
+        target_shape=(24, 32, 32),
+        v_size=10.0,
+        device="cuda",
+        seed=0,
+        progressbars=False,
+    )
+    volume = gen.generate()
+
+    assert volume.device.type == "cpu"
+    assert len(gen.placements) == 3
+    assert gen.instance_labels is not None
+    assert gen.instance_labels.device.type == "cpu"
+
+
 def test_pack_hard_spheres_3d_clip_axes_allows_poking_past_wall_on_clippable_axes():
     box = (60.0, 200.0, 200.0)  # thin in z, roomy in y/x
     gap = 2.0

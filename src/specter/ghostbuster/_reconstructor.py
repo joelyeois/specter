@@ -4,7 +4,6 @@ import json
 from pathlib import Path
 from typing import Any, Literal
 
-import lightning as L
 import mrcfile
 import roma
 import torch
@@ -17,16 +16,12 @@ from .. import rotations
 from ..arrays import compute_nps_2d
 from ..imagegenerator import ImageGenerator
 from ..symmetries import apply_symmetry, get_rotation_matrices
-from ._helpers import (
-    _apply_kmask_inplace,
-    _build_epoch_metrics,
-    _build_lr_scheduler,
-    _log_current_lr,
-)
+from ._base_reconstructor import _BaseReconstructor
+from ._helpers import _build_lr_scheduler
 from ._io import save_fsc_figure, save_plot3d_preview, save_volume_mrc
 
 
-class Reconstructor(L.LightningModule):
+class Reconstructor(_BaseReconstructor):
     """
     Differentiable 3D reconstruction module for cryo-EM/cryo-ET.
 
@@ -416,17 +411,6 @@ class Reconstructor(L.LightningModule):
             method=self.symmetry_mode,
         )
 
-    def reciprocal_lr_scheduler(self, *args: Any) -> float:
-        """
-        Reciprocal-square-root decay schedule: ``1 / (1 + decay * step^0.5)``.
-
-        Returns
-        -------
-        float
-            LR multiplier at the current global step.
-        """
-        return 1 / (1 + self.lr_decay * self.global_step**0.5)
-
     def configure_optimizers(
         self,
     ) -> tuple[list[torch.optim.Optimizer], list[LRScheduler]]:
@@ -738,13 +722,9 @@ class Reconstructor(L.LightningModule):
                     s.step()
         return loss
 
-    def on_train_batch_start(self, batch: Any, batch_idx: int) -> None:
-        """Record the current learning rate before each batch."""
-        _log_current_lr(self.trainer, self.lr, self.log_lrs)
-
-    def on_train_batch_end(self, outputs: Any, batch: Any, batch_idx: int) -> None:
-        """Apply the Fourier-space k-mask to V after each gradient update."""
-        _apply_kmask_inplace(self.V, self.kmask)
+    def _metrics_path_suffix(self) -> str:
+        """Filename suffix for saved metrics/volumes, from the halfset label."""
+        return f"_{self._halfset_label}" if self._halfset_label is not None else ""
 
     def on_fit_start(self) -> None:
         """Create the run directory and write metadata."""
@@ -764,39 +744,20 @@ class Reconstructor(L.LightningModule):
         meta.update(dict(self.hparams))
         if saved_arrays:
             meta["saved_arrays"] = saved_arrays
-        suffix = f"_{self._halfset_label}" if self._halfset_label is not None else ""
+        suffix = self._metrics_path_suffix()
         (self._run_dir / f"params{suffix}.json").write_text(
             json.dumps(meta, indent=2, default=str)
         )
         print(f"Run directory: {self._run_dir}")
 
-    def _save_metrics(self) -> None:
-        """Save training metrics (loss, lr) to JSON per epoch."""
-        if self._run_dir is None or not self.log_total_loss:
-            return
-
-        suffix = f"_{self._halfset_label}" if self._halfset_label is not None else ""
-        metrics_path = self._run_dir / f"metrics{suffix}.json"
-        meta = _build_epoch_metrics(
-            self.log_total_loss,
-            self.log_norm_loss,
-            self.log_sparsity_loss,
-            self.log_lrs,
-            self.current_epoch,
-            include_loss_std=True,
-            include_lr_min=True,
-        )
-        metrics_path.write_text(json.dumps(meta, indent=2))
-        print(f"Saved metrics → {metrics_path}")
-
     def on_fit_end(self) -> None:
         """Save the final reconstructed volume, FSC figure, and training metrics."""
         # Save metrics first (before v is computed, so they capture all epochs)
-        self._save_metrics()
+        self._save_metrics(include_loss_std=True, include_lr_min=True)
 
         if self._run_dir is None:
             return
-        suffix = f"_{self._halfset_label}" if self._halfset_label is not None else ""
+        suffix = self._metrics_path_suffix()
         v = self.V.detach().cpu().float()
         vol_path = self._run_dir / f"vol{suffix}.mrc"
         save_volume_mrc(vol_path, v, self.voxel_size)
@@ -821,7 +782,7 @@ class Reconstructor(L.LightningModule):
             return
 
         epoch = self.current_epoch + 1
-        suffix = f"_{self._halfset_label}" if self._halfset_label is not None else ""
+        suffix = self._metrics_path_suffix()
         v = self.V.detach().cpu().float()
 
         mrc_path = self._run_dir / "epochs" / f"{epoch:03d}{suffix}.mrc"
@@ -871,40 +832,3 @@ class Reconstructor(L.LightningModule):
             fsc_mask=self.fsc_mask,
             cryosparc_ref=cryosparc_ref,
         )
-
-    def num_training_steps_per_epoch(self) -> int:
-        """
-        Return the number of optimizer steps per training epoch.
-
-        Returns
-        -------
-        int
-            Steps per epoch, accounting for gradient accumulation.
-        """
-        if self.trainer.max_steps > -1:
-            return self.trainer.max_steps
-
-        self.trainer.fit_loop.setup_data()
-        assert self.trainer.train_dataloader is not None
-        dataset_size = len(self.trainer.train_dataloader)
-        num_steps = dataset_size // self.trainer.accumulate_grad_batches
-
-        return num_steps
-
-    def num_training_steps(self) -> int:
-        """
-        Return the total number of optimizer steps in the configured run.
-
-        Returns
-        -------
-        int
-            Total scheduler steps across all epochs.
-        """
-        if self.trainer.max_steps > -1:
-            return self.trainer.max_steps
-
-        max_epochs = self.trainer.max_epochs
-        if max_epochs is None or max_epochs < 1:
-            raise ValueError("OneCycleLR requires a positive trainer.max_epochs.")
-
-        return self.num_training_steps_per_epoch() * max_epochs

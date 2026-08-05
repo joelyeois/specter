@@ -4,7 +4,6 @@ import json
 from pathlib import Path
 from typing import Any, Literal
 
-import lightning as L
 import roma
 import torch
 import torch.nn as nn
@@ -17,16 +16,12 @@ from ..aberrations import Aberration
 from ..ctf import LegacyAberrationAdapter
 from ..imagegenerator._tiltseries import TiltSeriesGenerator
 from ..scattering import IterativeScattering
-from ._helpers import (
-    _apply_kmask_inplace,
-    _build_epoch_metrics,
-    _build_lr_scheduler,
-    _log_current_lr,
-)
+from ._base_reconstructor import _BaseReconstructor
+from ._helpers import _build_lr_scheduler
 from ._io import save_volume_mrc
 
 
-class TomogramReconstructor(L.LightningModule):
+class TomogramReconstructor(_BaseReconstructor):
     """
     Differentiable tomogram reconstruction from a cryo-ET tilt series.
 
@@ -397,10 +392,6 @@ class TomogramReconstructor(L.LightningModule):
     # Optimisation                                                         #
     # ------------------------------------------------------------------ #
 
-    def reciprocal_lr_scheduler(self, *args: Any) -> float:
-        """Reciprocal-square-root decay: ``1 / (1 + decay * step^0.5)``."""
-        return 1 / (1 + self.lr_decay * self.global_step**0.5)
-
     def configure_optimizers(
         self,
     ) -> tuple[list[torch.optim.Optimizer], list[LRScheduler]]:
@@ -494,14 +485,6 @@ class TomogramReconstructor(L.LightningModule):
         )
         return loss
 
-    def on_train_batch_start(self, batch: Any, batch_idx: int) -> None:
-        """Record the learning rate before each batch."""
-        _log_current_lr(self.trainer, self.lr, self.log_lrs)
-
-    def on_train_batch_end(self, outputs: Any, batch: Any, batch_idx: int) -> None:
-        """Apply the Fourier-space k-mask to V after each gradient update."""
-        _apply_kmask_inplace(self.V, self.kmask)
-
     # ------------------------------------------------------------------ #
     # Epoch / fit callbacks                                                #
     # ------------------------------------------------------------------ #
@@ -540,41 +523,3 @@ class TomogramReconstructor(L.LightningModule):
         vol_path = self._run_dir / "vol.mrc"
         save_volume_mrc(vol_path, v, self.voxel_size)
         print(f"Saved final volume → {vol_path}")
-
-    def _save_metrics(self) -> None:
-        """Save training metrics (loss, lr) to JSON."""
-        if self._run_dir is None or not self.log_total_loss:
-            return
-
-        metrics_path = self._run_dir / "metrics.json"
-        meta = _build_epoch_metrics(
-            self.log_total_loss,
-            self.log_norm_loss,
-            self.log_sparsity_loss,
-            self.log_lrs,
-            self.current_epoch,
-        )
-        metrics_path.write_text(json.dumps(meta, indent=2))
-        print(f"Saved metrics → {metrics_path}")
-
-    # ------------------------------------------------------------------ #
-    # Step-count helpers (identical to Reconstructor)                      #
-    # ------------------------------------------------------------------ #
-
-    def num_training_steps_per_epoch(self) -> int:
-        """Number of optimiser steps per epoch."""
-        if self.trainer.max_steps > -1:
-            return self.trainer.max_steps
-        self.trainer.fit_loop.setup_data()
-        assert self.trainer.train_dataloader is not None
-        dataset_size = len(self.trainer.train_dataloader)
-        return dataset_size // self.trainer.accumulate_grad_batches
-
-    def num_training_steps(self) -> int:
-        """Total optimiser steps across the full run."""
-        if self.trainer.max_steps > -1:
-            return self.trainer.max_steps
-        max_epochs = self.trainer.max_epochs
-        if max_epochs is None or max_epochs < 1:
-            raise ValueError("OneCycleLR requires a positive trainer.max_epochs.")
-        return self.num_training_steps_per_epoch() * max_epochs

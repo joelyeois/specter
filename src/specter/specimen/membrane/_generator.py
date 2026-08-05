@@ -38,8 +38,9 @@ from ._placement import (
 )
 from ._profile import (
     BilayerProfile,
+    build_analytic_bilayer_profile,
     build_reference_lipid_patch,
-    compute_bilayer_profile,
+    estimate_bilayer_peak_amplitude,
 )
 from ._raster import rasterize_membrane_density
 
@@ -141,13 +142,44 @@ class MembraneGenerator:
         In (0, 1); lower is more irregular/elongated, down to tube-like at
         very low values -- see `shape_backend`'s docstring. `"alpha_shape"`
         backend only. Default 0.3.
+    blob_surface_smoothing_voxels : float, optional
+        Blur-then-rethreshold smoothing of the alpha-shape's solid mask
+        before the surface is extracted, in working-field-grid voxels --
+        removes the sharp Delaunay-facet kinks the alpha-shape wrap
+        otherwise leaves visible at any realistic (100+ A) `blob_size_a`
+        (verified directly, including against CTS's own native generator
+        reusing the same underlying point-cloud/alpha-shape algorithm: the
+        faceting is inherent to it, not something this backend introduced).
+        See `generate_membrane_field_alpha_shape`'s own docstring for why
+        this is expressed in voxels rather than Angstrom. `"alpha_shape"`
+        backend only. Default 2.0.
     n_lipids_per_leaflet : int, optional
-        Reference lipid patch size for the calibrated bilayer profile (see
-        :func:`~specter.specimen.membrane._profile.build_reference_lipid_patch`).
-        Default 200.
+        Reference lipid patch size used ONLY to calibrate the bilayer
+        profile's peak amplitude against real atomic scattering physics
+        (see :func:`~specter.specimen.membrane._profile.
+        estimate_bilayer_peak_amplitude`) -- not its shape, see
+        `bilayer_thickness_a`/`bilayer_layer_sigma_a`. Default 200.
     parameterization : str, optional
         PotentialBuilder parameterization for the lipid reference patch.
         Default "shtyrov".
+    bilayer_thickness_a : float, optional
+        Phosphate-to-phosphate (outer-leaflet-peak to inner-leaflet-peak)
+        spacing, Angstrom, for the analytic two-Gaussian-peak bilayer
+        profile (:func:`~specter.specimen.membrane._profile.
+        build_analytic_bilayer_profile` -- matches real cryo-EM bilayer
+        micrographs' two-line "railroad track" appearance directly, rather
+        than emerging from a simulated atomic point cloud, which proved
+        fragile: see that function's own docstring for the concrete bugs
+        this replaced). Default 30.0 -- midpoint of `polnet`'s own
+        `MB_THICK_RG` default range (25.0, 35.0) (an earlier default of
+        38.0, taken from the old atomic model's own headgroup z-offsets
+        rather than cross-checked against polnet specifically, sat above
+        polnet's entire range and visibly read as too widely spaced).
+    bilayer_layer_sigma_a : float, optional
+        Gaussian width of each leaflet peak, Angstrom -- matches `polnet`'s
+        own `MB_LAYER_S_RG` parameter. Default 1.25, the midpoint of
+        polnet's own default range (0.5, 2.0) (an earlier default of 2.0
+        sat at that range's blurriest end, not a representative value).
     transmembrane_specs : list of TransmembraneSpec, optional
         Transmembrane protein species to attempt placing. Default None (no
         transmembrane proteins).
@@ -194,8 +226,11 @@ class MembraneGenerator:
         curvature_iterations: int = 30,
         blob_size_a: float = 300.0,
         blob_roughness: float = 0.3,
+        blob_surface_smoothing_voxels: float = 2.0,
         n_lipids_per_leaflet: int = 200,
         parameterization: str = "shtyrov",
+        bilayer_thickness_a: float = 30.0,
+        bilayer_layer_sigma_a: float = 1.25,
         transmembrane_specs: list[TransmembraneSpec] | None = None,
         pdb_cache_dir: str = "../pdb-data/",
         max_field_voxels: int = 200_000_000,
@@ -218,8 +253,11 @@ class MembraneGenerator:
         self.curvature_iterations = curvature_iterations
         self.blob_size_a = blob_size_a
         self.blob_roughness = blob_roughness
+        self.blob_surface_smoothing_voxels = blob_surface_smoothing_voxels
         self.n_lipids_per_leaflet = n_lipids_per_leaflet
         self.parameterization = parameterization
+        self.bilayer_thickness_a = bilayer_thickness_a
+        self.bilayer_layer_sigma_a = bilayer_layer_sigma_a
         self.transmembrane_specs = transmembrane_specs or []
         self.pdb_cache_dir = pdb_cache_dir
         self.max_field_voxels = max_field_voxels
@@ -247,8 +285,14 @@ class MembraneGenerator:
             seed=self.seed,
             device=self.device,
         )
-        self.profile = compute_bilayer_profile(
+        peak_amplitude = estimate_bilayer_peak_amplitude(
             atomic_numbers, coordinates, parameterization=self.parameterization
+        )
+        self.profile = build_analytic_bilayer_profile(
+            thickness_a=self.bilayer_thickness_a,
+            layer_sigma_a=self.bilayer_layer_sigma_a,
+            amplitude=peak_amplitude,
+            device=self.device,
         )
 
         # The field's working spacing must stay fine enough to resolve the
@@ -296,6 +340,7 @@ class MembraneGenerator:
                 spacing_a=field_spacing_a,
                 blob_size_a=self.blob_size_a,
                 blob_roughness=self.blob_roughness,
+                surface_smoothing_voxels=self.blob_surface_smoothing_voxels,
                 device=self.device,
                 seed=self.seed,
             )

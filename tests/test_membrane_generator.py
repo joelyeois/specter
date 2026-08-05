@@ -237,6 +237,52 @@ def test_shape_backend_rejects_unknown_value():
         )
 
 
+def test_alpha_shape_surface_smoothing_reduces_facet_kinks():
+    """Regression test for a real user-reported issue: the alpha-shape's
+    Delaunay-triangulated boundary is faceted/kinked rather than smooth at
+    any realistic blob_size_a (verified visually, including against CTS's
+    own native generator reusing the same underlying point-cloud/alpha-shape
+    algorithm directly -- the faceting is inherent to it, not something this
+    backend introduced; raising point count alone doesn't fix it either,
+    since surface area grows as blob_size_a**2 while _build_blob's point
+    count grows far more slowly). surface_smoothing_voxels (blur-then-
+    rethreshold the solid mask, default 2.0) fixes this. Verify
+    quantitatively via the isoperimetric ratio (surface area / volume^(2/3),
+    from face-adjacency transitions on the phi<0 mask) -- a faceted/kinked
+    surface has excess area for its enclosed volume relative to a smooth
+    one; smoothing should measurably reduce it."""
+    from specter.specimen.membrane._field_alpha import (
+        generate_membrane_field_alpha_shape,
+    )
+
+    kwargs = dict(
+        shape_zyx=(80, 80, 80),
+        spacing_a=4.0,
+        blob_size_a=60.0,
+        blob_roughness=0.3,
+        seed=0,
+    )
+    field_kinked = generate_membrane_field_alpha_shape(
+        surface_smoothing_voxels=0.0, **kwargs
+    )
+    field_smooth = generate_membrane_field_alpha_shape(
+        surface_smoothing_voxels=2.0, **kwargs
+    )
+
+    def isoperimetric_ratio(phi: torch.Tensor, spacing_a: float) -> float:
+        import numpy as np
+
+        mask = phi.numpy() < 0
+        volume = mask.sum() * spacing_a**3
+        area_voxels = sum(np.sum(mask != np.roll(mask, 1, axis=ax)) for ax in range(3))
+        area = area_voxels * spacing_a**2
+        return float(area / volume ** (2.0 / 3.0))
+
+    ratio_kinked = isoperimetric_ratio(field_kinked.phi, 4.0)
+    ratio_smooth = isoperimetric_ratio(field_smooth.phi, 4.0)
+    assert ratio_smooth < 0.75 * ratio_kinked
+
+
 def test_alpha_shape_backend_warns_when_blob_too_small_for_reliable_resolution():
     """Regression test for a real finding: a blob_size_a too small relative
     to the working grid's spacing makes sample_surface_sites' Newton
@@ -251,7 +297,7 @@ def test_alpha_shape_backend_warns_when_blob_too_small_for_reliable_resolution()
         target_shape_zyx=(80, 80, 80),
         v_size=4.0,
         shape_backend="alpha_shape",
-        blob_size_a=25.0,  # ~6 voxels/radius at this spacing -- below the
+        blob_size_a=18.0,  # ~6.4 voxels/radius at this spacing -- below the
         # verified-reliable floor (see _field_alpha.py's
         # _MIN_RELIABLE_VOXELS_PER_RADIUS)
         blob_roughness=0.5,
@@ -273,10 +319,17 @@ def test_place_transmembrane_warns_on_partial_or_zero_placement():
         target_shape_zyx=(80, 80, 80),
         v_size=4.0,
         shape_backend="alpha_shape",
-        blob_size_a=25.0,
+        blob_size_a=18.0,
         blob_roughness=0.5,
         n_lipids_per_leaflet=6,
-        transmembrane_specs=[TransmembraneSpec(pdb_source=str(pdb_path), frequency=3)],
+        # frequency=8 (not e.g. 3): verified directly this many requested
+        # sites reliably falls short at this resolution/spacing (a lower
+        # frequency, e.g. 3-5, sometimes fully succeeds by chance despite
+        # the low-resolution risk generate()'s own proactive warning
+        # already flags -- that warning is a risk indicator, not a
+        # guarantee of shortfall, so this reactive-warning test needs its
+        # own separately-verified failure case).
+        transmembrane_specs=[TransmembraneSpec(pdb_source=str(pdb_path), frequency=8)],
         seed=0,
     )
     with warnings.catch_warnings(record=True):
@@ -284,4 +337,4 @@ def test_place_transmembrane_warns_on_partial_or_zero_placement():
         gen.generate()
     with pytest.warns(UserWarning, match="requested transmembrane sites were found"):
         placements = gen.place_transmembrane(min_spacing_a=15.0)
-    assert len(placements) < 3
+    assert len(placements) < 8

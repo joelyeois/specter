@@ -49,17 +49,29 @@ ATOM_KERNEL_HALF_WIDTH_A = 2.5
 # a *tighter* jitter_scale -- real bilayer electron-density profiles show
 # the phosphate peak as the tallest, sharpest feature, which only comes
 # through here if that cluster is kept spatially tight rather than given
-# the same disorder as everything else. The first below-glycerol chain
-# carbon level gets a *looser* jitter_scale so it doesn't spatially
-# reinforce the glycerol/ester cluster into competing with the phosphate
-# peak. Acyl chain carbons are spread across several z-levels rather than a
-# few dense clusters, and the terminal methyls get extra jitter_scale --
-# both leaflets' chain termini converge near the mid-plane, so
-# under-spreading them (or giving them ordinary disorder) creates a
-# spurious *central* density peak instead of the real bilayer's "methyl
-# trough" (the terminal carbons are the most conformationally disordered
-# part of the chain, which is exactly why real bilayers show a dip there,
-# not a peak).
+# the same disorder as everything else.
+#
+# Regression note: an earlier version of the acyl-chain rows below used
+# jitter_scale 1.0-1.6 (only slightly looser than the headgroup) across 6
+# fixed z-levels 2A apart. That is NOT loose enough for adjacent clusters'
+# per-atom Gaussian jitter to actually blend together -- verified directly
+# (both on the raw atom z-histogram, before any voxel rendering, and on the
+# rendered psi(d) profile): it produced a *second*, nearly phosphate-height
+# density hump around +-8A (the acyl-chain region as a whole has ~3-4x more
+# atoms than the compact headgroup, spread across only 6 distinct z-values,
+# each individually under-blended into its neighbors), instead of a single
+# broad, smoothly-declining shoulder -- the opposite of a real bilayer
+# electron-density profile's two-peaks-with-a-clearly-weaker-middle shape.
+# jitter_scale raised to 2.2-3.0 here (each cluster's std now clearly wider
+# than the 2A inter-cluster spacing) fixes this: verified the rendered
+# profile no longer has any competing peak in the +-4 to +-14A shoulder
+# region (see test_compute_bilayer_profile_no_competing_peak_in_chain_
+# region in tests/test_membrane_profile.py). The terminal methyls are
+# pushed to the mid-plane itself (0.5A, was 1.0A) with even higher
+# jitter_scale (4.5, was 2.5) so both leaflets' chain termini spread widely
+# rather than piling up right at z=0 -- real bilayers show a genuine dip
+# there (the "methyl trough"), not a peak, precisely because the terminal
+# segment is the MOST conformationally disordered part of the chain.
 _LEAFLET_TEMPLATE: list[tuple[str, float, int, float]] = [
     ("N", 21.5, 1, 0.45),  # choline nitrogen
     ("C", 20.5, 3, 0.45),  # choline methyls
@@ -68,13 +80,13 @@ _LEAFLET_TEMPLATE: list[tuple[str, float, int, float]] = [
     ("C", 15.0, 3, 1.3),  # glycerol backbone
     ("O", 13.5, 2, 1.3),  # ester oxygens
     ("O", 13.0, 2, 1.3),  # carbonyl oxygens
-    ("C", 12.0, 3, 1.6),  # acyl chains
-    ("C", 10.0, 4, 1.0),  # acyl chains
-    ("C", 8.0, 4, 1.0),  # acyl chains
-    ("C", 6.0, 4, 1.0),  # acyl chains
-    ("C", 4.0, 4, 1.2),  # acyl chains, distal
-    ("C", 2.0, 4, 1.5),  # acyl chains, distal
-    ("C", 1.0, 2, 2.5),  # terminal methyls -- high disorder, "methyl trough"
+    ("C", 12.0, 3, 2.2),  # acyl chains
+    ("C", 10.0, 4, 2.2),  # acyl chains
+    ("C", 8.0, 4, 2.2),  # acyl chains
+    ("C", 6.0, 4, 2.2),  # acyl chains
+    ("C", 4.0, 4, 2.6),  # acyl chains, distal
+    ("C", 2.0, 4, 3.0),  # acyl chains, distal
+    ("C", 0.5, 2, 4.5),  # terminal methyls -- high disorder, "methyl trough"
 ]
 
 
@@ -263,8 +275,132 @@ def compute_bilayer_profile(
     return BilayerProfile(distance_a=distance_a, psi=psi)
 
 
+def estimate_bilayer_peak_amplitude(
+    atomic_numbers: torch.Tensor,
+    coordinates: torch.Tensor,
+    v_size: float = 2.0,
+    parameterization: str = "shtyrov",
+    lateral_core_fraction: float = 0.6,
+    device: str | torch.device = "cpu",
+) -> float:
+    """
+    One-time atomic render of a reference lipid patch, reduced to a single
+    number: its peak (phosphate headgroup) potential value.
+
+    Used to calibrate :func:`build_analytic_bilayer_profile`'s `amplitude`
+    against real atomic scattering physics (same units as
+    ``PotentialBuilder``-rendered protein templates), without depending on
+    the reference patch's full detailed SHAPE -- see that function's own
+    docstring for why the shape is built analytically instead.
+
+    Parameters
+    ----------
+    atomic_numbers, coordinates : torch.Tensor
+        From :func:`build_reference_lipid_patch`.
+    v_size, parameterization, lateral_core_fraction, device
+        Forwarded to :func:`compute_bilayer_profile`.
+
+    Returns
+    -------
+    float
+    """
+    profile = compute_bilayer_profile(
+        atomic_numbers,
+        coordinates,
+        v_size=v_size,
+        parameterization=parameterization,
+        lateral_core_fraction=lateral_core_fraction,
+        device=device,
+    )
+    return float(profile.psi.max())
+
+
+def build_analytic_bilayer_profile(
+    thickness_a: float = 30.0,
+    layer_sigma_a: float = 1.25,
+    amplitude: float = 1.0,
+    distance_half_range_a: float | None = None,
+    n_points: int = 241,
+    device: str | torch.device = "cpu",
+) -> BilayerProfile:
+    """
+    Build a bilayer profile as two analytic Gaussian peaks, matching
+    real cryo-EM bilayer micrographs' "railroad track" appearance far more
+    directly than :func:`compute_bilayer_profile`'s simulated-atom-cloud
+    approach does.
+
+    ``compute_bilayer_profile`` derives the profile's SHAPE by jittering a
+    schematic atomic lipid model and rendering it -- physically motivated,
+    but fragile: getting the acyl-chain region to actually stay featureless
+    relative to the phosphate peaks (rather than accidentally forming a
+    competing secondary hump, or leaving the center only mildly lower than
+    the chain shoulder -- both real bugs found and fixed by direct
+    inspection, see this module's git history) means fighting per-cluster
+    jitter-scale tuning against emergent Gaussian-sum interference, with no
+    guarantee a slightly different lipid count/seed doesn't reintroduce a
+    bump. `polnet` (`polnet.sample.membranes.mb_sphere.SphGen._build`) takes
+    a structurally different, much more robust approach for exactly this
+    problem: build two geometrically-separated thin shells (one per
+    leaflet, offset by `+-thickness/2`) and Gaussian-blur them with a small
+    sigma -- since the blur is far smaller than the leaflet separation, the
+    two peaks cannot bleed into each other or spawn a secondary peak
+    in between, by construction, not by tuning. This function is the same
+    idea reduced to 1D (`psi(d)` is already evaluated against a signed
+    distance from the mid-plane everywhere it's used, so the exact "thin
+    shell" step is unnecessary -- a Gaussian centered at each leaflet's
+    offset IS the 1D cross-section of that shell-then-blur construction).
+
+    Parameters
+    ----------
+    thickness_a : float, optional
+        Phosphate-to-phosphate (outer leaflet peak to inner leaflet peak)
+        spacing, Angstrom. Default 30.0 -- midpoint of `polnet`'s own
+        `MB_THICK_RG` default range (25.0, 35.0); matched to polnet
+        directly rather than to the old atomic model's own headgroup
+        z-offsets (38.0), which sat above polnet's entire range and read
+        as visibly too widely spaced.
+    layer_sigma_a : float, optional
+        Gaussian width of each leaflet peak, Angstrom -- matches `polnet`'s
+        own `MB_LAYER_S_RG` parameter. Default 1.25, the midpoint of
+        polnet's own default range (0.5, 2.0).
+    amplitude : float, optional
+        Peak height. Pass :func:`estimate_bilayer_peak_amplitude`'s output
+        to calibrate against real scattering-potential units rather than an
+        arbitrary constant. Default 1.0 (uncalibrated).
+    distance_half_range_a : float, optional
+        Half-width of the returned lookup table's domain, Angstrom. Default
+        ``thickness_a / 2 + 6 * layer_sigma_a`` (comfortably past both
+        peaks' Gaussian tails). Values beyond this range are clamped to the
+        table's edge (near-zero) by `BilayerProfile.__call__`.
+    n_points : int, optional
+        Lookup table resolution. Default 241 -- fine enough for accurate
+        interpolation at any downstream rendering voxel size, independent
+        of `layer_sigma_a`.
+    device : str or torch.device, optional
+        Device for the returned tensors. Default "cpu".
+
+    Returns
+    -------
+    BilayerProfile
+    """
+    if distance_half_range_a is None:
+        distance_half_range_a = thickness_a / 2.0 + 6.0 * layer_sigma_a
+
+    distance_a = torch.linspace(
+        -distance_half_range_a, distance_half_range_a, n_points, device=device
+    )
+    half_t = thickness_a / 2.0
+    outer_leaflet = torch.exp(-0.5 * ((distance_a - half_t) / layer_sigma_a) ** 2)
+    inner_leaflet = torch.exp(-0.5 * ((distance_a + half_t) / layer_sigma_a) ** 2)
+    psi = amplitude * (outer_leaflet + inner_leaflet)
+
+    return BilayerProfile(distance_a=distance_a, psi=psi)
+
+
 __all__ = [
     "build_reference_lipid_patch",
     "compute_bilayer_profile",
+    "estimate_bilayer_peak_amplitude",
+    "build_analytic_bilayer_profile",
     "BilayerProfile",
 ]

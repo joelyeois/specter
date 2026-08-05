@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import warnings
 
+import numpy as np
 import torch
 from scipy import ndimage
 
@@ -56,6 +57,7 @@ def generate_membrane_field_alpha_shape(
     spacing_a: float,
     blob_size_a: float = 300.0,
     blob_roughness: float = 0.3,
+    surface_smoothing_voxels: float = 2.0,
     device: str | torch.device = "cpu",
     seed: int | None = None,
 ) -> MembraneField:
@@ -90,6 +92,31 @@ def generate_membrane_field_alpha_shape(
         parameter -- see module docstring for the visual sweep this default
         is based on). Default 0.3 (visibly non-convex/elongated, short of
         the thin-tube extreme at 0.15).
+    surface_smoothing_voxels : float, optional
+        Blur-then-rethreshold smoothing applied to the alpha-solid mask
+        before the distance transform, in working-grid voxels. `_build_blob`
+        wraps a sparse point cloud in a Delaunay-triangulation-derived alpha
+        shape (as few as ~20-80 points even at CTS's own default
+        `blob_size_a`/`blob_roughness`, verified directly) -- the resulting
+        boundary is a faceted polyhedron, visible as sharp kinks rather than
+        a smooth organic surface once rendered at any reasonably zoomed-out
+        scale. Raising the point count instead (to shrink facets directly)
+        only pushes the problem out, not away (surface area grows with
+        `blob_size_a**2` while `_build_blob`'s point count grows far more
+        slowly), and gets expensive fast. Blurring the boolean mask by a few
+        voxels and rethresholding at 0.5 removes this faceting cheaply and
+        uniformly across scale (verified directly: rounds sharp polyhedral
+        corners into organic curves on both compact and elongated shapes,
+        confirmed on both CTS's own default point density and a much denser
+        one -- the faceting is inherent to the triangulated boundary, not
+        fixable by point count alone). Deliberately expressed in *voxels*,
+        not Angstrom or a fraction of `blob_size_a`: a fixed physical
+        smoothing length large enough to smooth 300+ A blobs was verified
+        directly to erase genuinely thin, low-`blob_roughness` tube-like
+        protrusions entirely (their cross-section can be far smaller than
+        `blob_size_a` itself), whereas a small fixed voxel count scales down
+        automatically with `spacing_a` and only removes sub-facet-scale
+        jaggedness. Set to 0 to disable. Default 2.0.
     device : str or torch.device, optional
         Device for the returned field. Default ``"cpu"``.
     seed : int, optional
@@ -128,6 +155,16 @@ def generate_membrane_field_alpha_shape(
     points_xyz = _grid_points_xyz(shape_zyx, spacing_a, origin_xyz, device="cpu")
     query = points_xyz.reshape(-1, 3).numpy()
     inside = _point_in_alpha_solid(base_points, alpha, query).reshape(shape_zyx)
+
+    # Blur-then-rethreshold: removes the alpha-shape's Delaunay-facet
+    # kinks (see this function's own surface_smoothing_voxels docstring)
+    # without touching _build_blob itself, so CTS's own native generator
+    # (which reuses _build_blob directly) is unaffected.
+    if surface_smoothing_voxels > 0:
+        smoothed = ndimage.gaussian_filter(
+            inside.astype(np.float32), sigma=surface_smoothing_voxels
+        )
+        inside = smoothed > 0.5
 
     # Physical-Angstrom signed distance, matching MembraneField.phi's
     # contract exactly (negative inside, positive outside, zero at the

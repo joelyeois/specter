@@ -314,22 +314,33 @@ def test_hierarchical_placer_membrane_vesicle_cytosol_gating():
 
 
 def test_bead_generator_bulk_density_is_sane():
-    """A gold bead's peak voxel value should reflect gold's real bulk
-    number density (atoms/A^3, scaled by voxel volume), of the same
-    order of magnitude across a couple of voxel sizes."""
+    """A gold bead's peak voxel value should be gold's real mean inner
+    potential (volts, literature ballpark ~25-30 V for bulk gold), not a
+    raw atom count."""
     gen = BeadGenerator(v_size=5.0)
     bead = gen.generate(radius=50.0)
     assert bead.density.shape[0] > 0
     assert (bead.density > 0).any()
-    # ~4.5e-2 atoms/A^3 for gold * 125 A^3/voxel (5A)^3 ~ 5.7 atoms/voxel
-    assert 1.0 < bead.density.max().item() < 50.0
+    assert 20.0 < bead.density.max().item() < 40.0
     assert torch.isfinite(bead.density).all()
+
+
+def test_bead_generator_mean_inner_potential_independent_of_voxel_size():
+    mips = [
+        BeadGenerator(v_size=v_size).mean_inner_potential for v_size in (2.0, 5.0, 10.0)
+    ]
+    assert max(mips) - min(mips) < 0.05 * np.mean(mips)
 
 
 def test_bead_generator_rejects_nonpositive_radius():
     gen = BeadGenerator(v_size=5.0)
     with pytest.raises(ValueError):
         gen.generate(radius=0.0)
+
+
+def test_bead_generator_rejects_shtyrov():
+    with pytest.raises(ValueError):
+        BeadGenerator(v_size=5.0, parameterization="shtyrov")
 
 
 def test_carbon_film_has_hole_and_sane_density():
@@ -343,6 +354,149 @@ def test_carbon_film_has_hole_and_sane_density():
     center_mass = film.density[:, 24:40, 24:40].mean().item()
     edge_mass = film.density[:, :8, :8].mean().item()
     assert edge_mass > center_mass
+
+
+@pytest.mark.parametrize("parameterization", ["kirkland", "lobato", "shtyrov"])
+def test_carbon_film_mean_inner_potential_matches_literature(parameterization):
+    """Carbon's per-voxel value should be a real mean inner potential (volts),
+    in the literature ballpark for amorphous carbon (~8-13 V), not a raw atom
+    count -- and, being a physical bulk quantity, independent of voxel size."""
+    mips = [
+        CarbonFilmGenerator(
+            v_size=v_size, parameterization=parameterization
+        ).mean_inner_potential
+        for v_size in (2.0, 5.0, 10.0, 15.0)
+    ]
+    for mip in mips:
+        assert 5.0 < mip < 20.0
+    assert max(mips) - min(mips) < 0.05 * np.mean(mips)
+
+
+def test_carbon_film_is_solid_away_from_hole_regardless_of_grid_size():
+    """The film should be uniformly solid (every voxel at the same MIP)
+    away from the hole, at both a small and a much larger target_shape --
+    the whole point of the analytic (not point-cloud) hole boundary is
+    that coverage doesn't thin out as the grid grows."""
+    gen_small = CarbonFilmGenerator(v_size=15.0, seed=0)
+    film_small = gen_small.generate(
+        target_shape=(16, 64, 64), thickness=150.0, hole_radius=300.0
+    )
+    gen_large = CarbonFilmGenerator(v_size=15.0, seed=0)
+    film_large = gen_large.generate(
+        target_shape=(16, 512, 512), thickness=150.0, hole_radius=300.0
+    )
+    # Far outside the hole, at the film's mid-thickness z-slice (both
+    # share nz=16 -- only the XY footprint differs), every voxel of the
+    # slab should be fully occupied at the same MIP in both cases -- not a
+    # sparse speckle that gets sparser as the footprint grows.
+    corner_small = film_small.density[8, :8, :8]
+    corner_large = film_large.density[8, :8, :8]
+    assert torch.allclose(corner_small, corner_large)
+    assert (corner_large > 0).all()
+
+
+def test_carbon_film_hole_center_offsets_the_edge():
+    """A large hole_radius combined with a non-zero hole_center should put
+    a hole boundary near one side of the frame -- one far corner fully
+    inside the hole (empty), the opposite far corner fully on the carbon
+    -- rather than a small hole fully contained in the middle of the
+    frame (the default, `hole_center=(0, 0)`, unrealistic-scale case)."""
+    gen = CarbonFilmGenerator(v_size=10.0, seed=0)
+    film = gen.generate(
+        target_shape=(8, 128, 128),
+        thickness=150.0,
+        hole_radius=3000.0,
+        edge_roughness=0.0,
+        hole_center=(-2600.0, 0.0),
+    )
+    mid_z = 4
+    # Left edge of the frame (x very negative) sits close to the offset
+    # hole's center -> inside the hole -> empty.
+    assert (film.density[mid_z, :, 0] == 0).all()
+    # Right edge of the frame (x very positive) is far outside the
+    # offset hole's radius -> on the carbon -> occupied.
+    assert (film.density[mid_z, :, -1] > 0).all()
+
+
+def test_carbon_film_hole_shape_independent_of_voxel_size():
+    """The same seed/physical hole geometry should classify a given
+    physical (x, y) point as inside/outside the hole the same way
+    regardless of how finely the volume is discretized."""
+    hole_radius, edge_roughness = 300.0, 30.0
+    coarse = CarbonFilmGenerator(v_size=20.0, seed=1).generate(
+        target_shape=(8, 48, 48),
+        thickness=150.0,
+        hole_radius=hole_radius,
+        edge_roughness=edge_roughness,
+    )
+    fine = CarbonFilmGenerator(v_size=5.0, seed=1).generate(
+        target_shape=(32, 192, 192),
+        thickness=150.0,
+        hole_radius=hole_radius,
+        edge_roughness=edge_roughness,
+    )
+    # Same physical footprint (960x960 A either way). Compare the far
+    # corner (well outside the hole regardless of edge roughness, so this
+    # isolates resolution-independence rather than boundary placement): a
+    # coarse voxel at (iz, iy, ix) covers the same physical region as a
+    # 4x4x4 block of fine voxels: (iz*4:iz*4+4, iy*4:iy*4+4, ix*4:ix*4+4).
+    occupied_coarse = coarse.density[4, 0, 0] > 0
+    fine_block = fine.density[16:20, 0:4, 0:4] > 0
+    assert bool(occupied_coarse) == bool(fine_block.all()) == bool(fine_block.any())
+
+
+def test_carbon_film_explicit_edge_grain_size_matches_across_resolutions():
+    """With an explicit (not auto-picked) edge_grain_size, the jittered
+    boundary is a fixed function of physical angle -- so, unlike the
+    default (which intentionally scales grain size with v_size, see
+    `edge_grain_size`'s docstring), an explicit value should reproduce the
+    same boundary exactly across resolutions, all the way up to points
+    right next to the boundary, not just a far corner."""
+    hole_radius, edge_roughness, edge_grain_size = 300.0, 40.0, 60.0
+    coarse = CarbonFilmGenerator(v_size=20.0, seed=1).generate(
+        target_shape=(8, 48, 48),
+        thickness=150.0,
+        hole_radius=hole_radius,
+        edge_roughness=edge_roughness,
+        edge_grain_size=edge_grain_size,
+    )
+    fine = CarbonFilmGenerator(v_size=5.0, seed=1).generate(
+        target_shape=(32, 192, 192),
+        thickness=150.0,
+        hole_radius=hole_radius,
+        edge_roughness=edge_roughness,
+        edge_grain_size=edge_grain_size,
+    )
+    # Every coarse voxel's physical corner matches one fine voxel exactly
+    # (same v_size ratio as the other cross-resolution test): compare the
+    # full mid-thickness XY slice, not just a single far-off point.
+    coarse_slice = coarse.density[4, :, :] > 0
+    fine_corners = fine.density[16, 0::4, 0::4] > 0
+    assert torch.equal(coarse_slice, fine_corners)
+
+
+def test_carbon_film_default_edge_is_jagged_not_smooth():
+    """The default (auto edge_grain_size) boundary should have many local
+    turning points across the frame -- genuine jaggedness -- not the
+    smooth, few-extrema wave a low-order analytic function would give."""
+    gen = CarbonFilmGenerator(v_size=4.0, seed=2)
+    film = gen.generate(
+        target_shape=(4, 200, 200),
+        thickness=150.0,
+        hole_radius=20000.0,
+        hole_center=(-19700.0, 0.0),
+        edge_roughness=40.0,
+    )
+    # hole_center offsets along x, so the boundary runs vertically: for
+    # each row (fixed y) find the first occupied column (x position).
+    occupied = film.density[2] > 0
+    boundary_col = occupied.float().argmax(dim=1)
+    diffs = boundary_col[1:].float() - boundary_col[:-1].float()
+    sign_changes = (diffs[1:] * diffs[:-1] < 0).sum().item()
+    # A smooth, low-order wave crossing this frame would turn direction a
+    # handful of times at most (order 1-5); genuine grain-scale jaggedness
+    # turns direction roughly every other independent grain.
+    assert sign_changes > 20
 
 
 # ---------------------------------------------------------------------

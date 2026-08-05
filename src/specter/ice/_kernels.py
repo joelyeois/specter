@@ -281,10 +281,15 @@ def interpolate_target_kernel(
 
 
 def build_atomic_potential_kernel(
-    dx: float, parameterization: str = "kirkland"
+    dx: float,
+    parameterization: str = "kirkland",
+    atomic_number: int = 8,
+    shtyrov_species: str = "O(HH)",
 ) -> torch.Tensor:
     """
-    Build the real-space atomic potential kernel for a water molecule (oxygen).
+    Build the real-space atomic potential kernel for a single atom/bonded
+    species. Defaults to a water molecule (oxygen), the ice use case this
+    was originally written for.
 
     Parameters
     ----------
@@ -292,6 +297,13 @@ def build_atomic_potential_kernel(
         Voxel size in Å.
     parameterization : str, optional
         ``'kirkland'`` (default), ``'lobato'``, or ``'shtyrov'``.
+    atomic_number : int, optional
+        Atomic number, used by the ``'kirkland'``/``'lobato'`` branches.
+        Default 8 (oxygen).
+    shtyrov_species : str, optional
+        Bonded species key into ``params_cat.json``, used only by the
+        ``'shtyrov'`` branch (shtyrov parameterizes bonded species, not bare
+        atomic numbers). Default ``"O(HH)"`` (water oxygen).
 
     Returns
     -------
@@ -306,15 +318,16 @@ def build_atomic_potential_kernel(
     avgpool3d = torch.nn.AvgPool3d(ssf, stride=ssf)
 
     if parameterization == "kirkland":
-        pot = kirkland_atomic_potential_3d(8, sR)
+        pot = kirkland_atomic_potential_3d(atomic_number, sR)
     elif parameterization == "lobato":
-        pot = lobato_atomic_potential_3d(8, sR)
+        pot = lobato_atomic_potential_3d(atomic_number, sR)
     elif parameterization == "shtyrov":
-        # Water oxygen is always the 'O(HH)' bonded species.
         species_path = resources.files("specter.atom_data").joinpath("params_cat.json")
         with resources.as_file(species_path) as fpath:
             species_params = load_shtyrov_species_parameters(str(fpath))
-        pot = shtyrov_atomic_potential_3d_by_species("O(HH)", sR, species_params)
+        pot = shtyrov_atomic_potential_3d_by_species(
+            shtyrov_species, sR, species_params
+        )
     else:
         raise ValueError(
             f"Unknown parameterization '{parameterization}'. "

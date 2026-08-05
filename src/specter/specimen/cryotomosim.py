@@ -93,7 +93,12 @@ from ..ice import IceBank, RandomIcemaker, blend_ice_into_volume
 from ..pdb import PDB
 from ..potential import PotentialBuilder
 from ..rotations import build_affine_matrix, random_rotation_matrix, rotate_volume
-from ._cts_grid import BeadGenerator, CarbonFilmGenerator
+from ._cts_grid import (
+    QUANTIFOIL_R1_2_HOLE_RADIUS,
+    BeadGenerator,
+    CarbonFilmGenerator,
+    edge_hole_center,
+)
 from ._cts_membrane import BlobMembraneInstance, MembraneBlobGenerator
 from ._cts_placement import ParticlePlacer, ParticleSpec, PlacedInstance, PlacementMode
 from .packing import pack_hard_spheres_3d
@@ -563,10 +568,52 @@ class BeadSpec:
 
 @dataclass
 class GridSpec:
-    """Carbon support film, forwarded to ``CarbonFilmGenerator.generate``."""
+    """
+    Carbon support film, forwarded to ``CarbonFilmGenerator.generate``.
+
+    Describes a realistic single-field-of-view carbon film: a big,
+    real-scale hole (`hole_radius`) of which only a thin strip
+    (`edge_fraction` of the frame) intrudes from one edge (`edge_side`) --
+    see ``edge_hole_center``'s docstring for why that, not a small hole
+    fully contained in frame, is the realistic case.
+
+    Attributes
+    ----------
+    thickness : float, optional
+        Film thickness, Angstrom. Default 150.
+    hole_radius : float, optional
+        Real physical hole radius, Angstrom. Default
+        ``QUANTIFOIL_R1_2_HOLE_RADIUS`` (6000 A / 0.6 micron) -- the fixed
+        real-product spec for Quantifoil R1.2/1.3, the standard grid for
+        high-resolution collection (see that constant's comment for the
+        source), deliberately much larger than a typical `target_shape`
+        field of view.
+    edge_fraction : float or tuple of float, optional
+        Fraction (0-1) of the frame that ends up carbon, entering from
+        `edge_side`. Either a fixed value, or a ``(low, high)`` range to
+        draw uniformly at random each ``generate()`` call (using the same
+        seed as everything else here) -- real images don't all happen to
+        catch exactly the same amount of a hole's edge. Default
+        ``(0.02, 0.05)``.
+    edge_side : str, optional
+        Which frame edge the carbon intrudes from: ``'left'``,
+        ``'right'``, ``'top'``, ``'bottom'``, or ``'random'`` (default).
+    edge_roughness : float, optional
+        Approximate standard deviation of the hole boundary's radial
+        perturbation, Angstrom. Default 30.
+    edge_grain_size : float or None, optional
+        Angstrom arc-length of one independent boundary jitter point (see
+        ``CarbonFilmGenerator.generate``'s docstring for why the edge is
+        built from independent per-point jitter rather than a smooth
+        function). Default None picks ``3 * v_size`` at generate-time.
+    """
 
     thickness: float = 150.0
-    hole_radius: float = 400.0
+    hole_radius: float = QUANTIFOIL_R1_2_HOLE_RADIUS
+    edge_fraction: float | tuple[float, float] = (0.02, 0.05)
+    edge_side: str = "random"
+    edge_roughness: float = 30.0
+    edge_grain_size: float | None = None
 
 
 class CryoTomoSimSpecimenGenerator:
@@ -667,10 +714,25 @@ class CryoTomoSimSpecimenGenerator:
 
         if self.grid_spec is not None:
             carbon_gen = CarbonFilmGenerator(v_size=self.v_size, seed=np_rng_seed)
+            grid_rng = np.random.default_rng(np_rng_seed)
+            edge_fraction = self.grid_spec.edge_fraction
+            if isinstance(edge_fraction, tuple):
+                edge_fraction = grid_rng.uniform(*edge_fraction)
+            hole_center = edge_hole_center(
+                target_shape=self.target_shape,
+                v_size=self.v_size,
+                hole_radius=self.grid_spec.hole_radius,
+                edge_fraction=edge_fraction,
+                side=self.grid_spec.edge_side,
+                rng=grid_rng,
+            )
             film = carbon_gen.generate(
                 target_shape=self.target_shape,
                 thickness=self.grid_spec.thickness,
                 hole_radius=self.grid_spec.hole_radius,
+                hole_center=hole_center,
+                edge_roughness=self.grid_spec.edge_roughness,
+                edge_grain_size=self.grid_spec.edge_grain_size,
             )
             volume += film.density
 

@@ -37,8 +37,10 @@ get per-instance labels in v1) -- a documented gap, not an oversight.
 
 from __future__ import annotations
 
+import json
 import warnings
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Literal
 
 import torch
@@ -342,6 +344,125 @@ class MembraneTomogramGenerator:
 
         self.instance_labels = instance_labels
         return volume
+
+    def export_picks(
+        self,
+        output_dir: str | Path,
+        annotation_version: str = "1.0",
+        oriented: bool = True,
+        include_transmembrane: bool = True,
+    ) -> dict[str, Path]:
+        """
+        Write one copick/CryoET-Data-Portal-style .ndjson pick file per
+        placed cytosol/lumen species (grouped by `(location, species_id)`
+        so the same `pdb_source` declared at both locations never collides
+        in one file) plus, by default, one per transmembrane species --
+        same schema as `specimen.packing.pdb_packing.
+        SpherePackingSpecimenGenerator.export_picks`/`specimen.cryoet.
+        CryoETSpecimenGenerator.export_picks` (one JSON object per line:
+        ``{"type": "point"|"orientedPoint", "location": {"x", "y", "z"}[,
+        "xyz_rotation_matrix"]}``), so picks from any of these generators
+        are interchangeable downstream.
+
+        Transmembrane picks are oriented (a real `rotation_matrix`, unlike
+        `CryoETSpecimenGenerator`'s own plain-point membrane picks) since
+        `TransmembranePlacement` actually carries one.
+
+        Coordinates are converted from this generator's box-centered
+        convention (`position_xyz`/`center_xyz`, origin at the volume's
+        center, matching `MembraneGenerator`'s own convention) to the
+        corner-relative (``0..extent``) convention copick/the portal
+        actually use -- the same conversion the other two generators'
+        `export_picks` perform.
+
+        Must be called after `generate()`.
+
+        Parameters
+        ----------
+        output_dir : str or pathlib.Path
+            Directory to write the .ndjson files into.
+        annotation_version : str, optional
+            Used only in the output filename
+            (``"{name}-{version}_{type}.ndjson"``). Default "1.0".
+        oriented : bool, optional
+            If True (default), picks are written as ``"orientedPoint"``
+            with each instance's rotation matrix included; if False, as
+            plain ``"point"`` (location only).
+        include_transmembrane : bool, optional
+            If True (default), also write pick file(s) for transmembrane
+            species, suffixed ``-transmembrane``.
+
+        Returns
+        -------
+        dict[str, pathlib.Path]
+            Mapping of a grouping key (``"{species}-{location}"`` for
+            cytosol/lumen instances, ``"{species}-transmembrane"`` for
+            transmembrane instances) to written file path.
+        """
+        if not self.placements and not self.transmembrane_placements:
+            raise RuntimeError("call generate() before export_picks()")
+
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        written: dict[str, Path] = {}
+
+        target_shape = self.membrane_generator.target_shape_zyx
+        v_size = self.membrane_generator.v_size
+        extent_xyz = (
+            torch.tensor(
+                [target_shape[2], target_shape[1], target_shape[0]],
+                dtype=torch.float32,
+            )
+            * v_size
+        )
+        point_type = "orientedPoint" if oriented else "point"
+
+        by_key: dict[str, list[TomogramPlacement]] = {}
+        for placed in self.placements:
+            name = Path(placed.species_id).stem
+            by_key.setdefault(f"{name}-{placed.location}", []).append(placed)
+        for key, placed_list in by_key.items():
+            path = (
+                output_dir / f"{key}-{annotation_version}_{point_type.lower()}.ndjson"
+            )
+            with open(path, "w") as f:
+                for placed in placed_list:
+                    corner_xyz = placed.position_xyz + extent_xyz / 2
+                    x, y, z = (float(v) for v in corner_xyz)
+                    row: dict = {
+                        "type": point_type,
+                        "location": {"x": x, "y": y, "z": z},
+                    }
+                    if oriented:
+                        row["xyz_rotation_matrix"] = (
+                            placed.rotation_matrix.numpy().tolist()
+                        )
+                    f.write(json.dumps(row) + "\n")
+            written[key] = path
+
+        if include_transmembrane and self.transmembrane_placements:
+            by_species: dict[str, list[TransmembranePlacement]] = {}
+            for tp in self.transmembrane_placements:
+                by_species.setdefault(Path(tp.species_id).stem, []).append(tp)
+            for species, tps in by_species.items():
+                key = f"{species}-transmembrane"
+                path = (
+                    output_dir
+                    / f"{key}-{annotation_version}_{point_type.lower()}.ndjson"
+                )
+                with open(path, "w") as f:
+                    for tp in tps:
+                        corner_xyz = tp.center_xyz + extent_xyz / 2
+                        x, y, z = (float(v) for v in corner_xyz)
+                        row = {"type": point_type, "location": {"x": x, "y": y, "z": z}}
+                        if oriented:
+                            row["xyz_rotation_matrix"] = (
+                                tp.rotation_matrix.numpy().tolist()
+                            )
+                        f.write(json.dumps(row) + "\n")
+                written[key] = path
+
+        return written
 
     def _render_species_pool(
         self,

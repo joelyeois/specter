@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 
 _SMALL_FIXTURE = Path(__file__).parent.parent / "pdb-data" / "1mbo.cif"
+_LARGE_FIXTURE = Path(__file__).parent.parent / "pdb-data" / "1bxn-assembly1.cif"
 
 
 def _write_test_config(path: Path, output_dir: Path) -> None:
@@ -85,6 +86,129 @@ def test_cli_build_tomogram_n_tomograms(tmp_path: Path) -> None:
 
     assert list((tmp_path / "0001").glob("*.ndjson"))
     assert list((tmp_path / "0002").glob("*.ndjson"))
+
+
+def _write_membrane_test_config(
+    path: Path, output_dir: Path, *, include_lumen: bool, include_transmembrane: bool
+) -> None:
+    # Same tuned scale as tests/test_tomogram_generator.py's own
+    # _MEMBRANE_KWARGS: two blended metaball sources enclosing a lumen big
+    # enough to actually hold 1mbo (verified there; smaller configs leave
+    # no room for even one instance). Lumen and transmembrane specs are
+    # kept in SEPARATE tests (not combined here) -- verified directly that
+    # inserting transmembrane protein density collapses this particular
+    # tuned lumen to 0 voxels (classify_membrane_regions' own density-
+    # threshold classification, pre-existing behavior unrelated to the CLI
+    # wiring this test suite covers -- stacking two independently-marginal
+    # conditions in one config would make this test flaky for a reason
+    # that has nothing to do with what it's meant to check).
+    transmembrane_block = (
+        f"""
+[[membrane_transmembrane_specs]]
+pdb_source = "{_SMALL_FIXTURE}"
+frequency = 1
+"""
+        if include_transmembrane
+        else ""
+    )
+    lumen_block = (
+        f"""
+[[membrane_protein_specs]]
+pdb_source = "{_SMALL_FIXTURE}"
+location = "lumen"
+"""
+        if include_lumen
+        else ""
+    )
+    path.write_text(
+        f"""
+[[membrane]]
+n_sources = 2
+radius_range_a = [60.0, 80.0]
+spread_a = 5.0
+noise_amplitude_a = 0.0
+curvature_iterations = 5
+n_lipids_per_leaflet = 6
+{transmembrane_block}
+{lumen_block}
+[[membrane_protein_specs]]
+pdb_source = "{_LARGE_FIXTURE}"
+location = "cytosol"
+
+membrane_occupancy_fraction = 0.1
+
+[specimen]
+target_shape = [64, 64, 64]
+v_size = 8.0
+gap_angstrom = 5.0
+seed = 0
+
+[output]
+output_dir = "{output_dir}"
+filename = "test_membrane_tomogram"
+"""
+    )
+
+
+def test_cli_build_tomogram_membrane_smoke(tmp_path: Path) -> None:
+    """Cytosol + lumen packing end to end through the CLI."""
+    config_path = tmp_path / "membrane_tomogram.toml"
+    _write_membrane_test_config(
+        config_path, tmp_path, include_lumen=True, include_transmembrane=False
+    )
+
+    result = _run_build_cli(config_path)
+    assert result.returncode == 0, result.stderr
+    assert (tmp_path / "test_membrane_tomogram.mrc").exists()
+
+    pick_files = {p.name for p in tmp_path.glob("*.ndjson")}
+    assert any("-lumen-" in name for name in pick_files), pick_files
+    assert any("-cytosol-" in name for name in pick_files), pick_files
+
+
+def test_cli_build_tomogram_membrane_transmembrane_smoke(tmp_path: Path) -> None:
+    """Cytosol + transmembrane placement end to end through the CLI."""
+    config_path = tmp_path / "membrane_tomogram.toml"
+    _write_membrane_test_config(
+        config_path, tmp_path, include_lumen=False, include_transmembrane=True
+    )
+
+    result = _run_build_cli(config_path)
+    assert result.returncode == 0, result.stderr
+    assert (tmp_path / "test_membrane_tomogram.mrc").exists()
+
+    pick_files = {p.name for p in tmp_path.glob("*.ndjson")}
+    assert any("-cytosol-" in name for name in pick_files), pick_files
+    assert any("-transmembrane-" in name for name in pick_files), pick_files
+
+
+def test_cli_build_tomogram_membrane_and_targets_conflict(tmp_path: Path) -> None:
+    """config.membrane can't be combined with targets/filler in v1 -- the
+    pipeline's own mutual-exclusivity ValueError must surface as a CLI
+    failure, not silently pick one mode."""
+    config_path = tmp_path / "conflict_tomogram.toml"
+    _write_membrane_test_config(
+        config_path, tmp_path, include_lumen=False, include_transmembrane=False
+    )
+    with open(config_path, "a") as f:
+        f.write(f'\n[[targets]]\npdb_source = "{_SMALL_FIXTURE}"\nn_copies = 1\n')
+
+    result = _run_build_cli(config_path)
+    assert result.returncode != 0
+    assert "can't be combined" in result.stderr
+
+
+def test_cli_build_tomogram_membrane_too_many_entries(tmp_path: Path) -> None:
+    config_path = tmp_path / "too_many_tomogram.toml"
+    _write_membrane_test_config(
+        config_path, tmp_path, include_lumen=False, include_transmembrane=False
+    )
+    with open(config_path, "a") as f:
+        f.write("\n[[membrane]]\nn_sources = 2\n")
+
+    result = _run_build_cli(config_path)
+    assert result.returncode != 0
+    assert "at most one" in result.stderr
 
 
 def test_cli_build_tomogram_write_picks_override(tmp_path: Path) -> None:

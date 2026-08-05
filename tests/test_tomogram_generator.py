@@ -139,3 +139,64 @@ def test_membrane_tomogram_generator_rejects_empty_protein_specs():
     mgen = MembraneGenerator(seed=0, **_MEMBRANE_KWARGS)
     with pytest.raises(ValueError, match="protein_specs"):
         MembraneTomogramGenerator(membrane_generator=mgen, protein_specs=[])
+
+
+@pytest.mark.skipif(
+    not (_SMALL_FIXTURE.exists() and _LARGE_FIXTURE.exists()),
+    reason="bundled PDB fixtures missing",
+)
+def test_membrane_tomogram_generator_export_picks(tmp_path):
+    """export_picks: coordinate conversion (corner-relative, not centered)
+    against a known placement, and transmembrane species get their own
+    suffixed file distinct from cytosol/lumen files."""
+    from specter.specimen.membrane import TransmembraneSpec
+
+    mgen = MembraneGenerator(
+        transmembrane_specs=[
+            TransmembraneSpec(pdb_source=str(_SMALL_FIXTURE), frequency=1)
+        ],
+        seed=0,
+        **_MEMBRANE_KWARGS,
+    )
+    gen = MembraneTomogramGenerator(
+        membrane_generator=mgen,
+        protein_specs=[
+            TomogramProteinSpec(pdb_source=str(_LARGE_FIXTURE), location="cytosol"),
+        ],
+        occupancy_fraction=0.1,
+        gap_angstrom=5.0,
+        pdb_cache_dir="pdb-data/",
+        seed=0,
+    )
+    gen.generate()
+    assert len(gen.placements) > 0
+    assert len(gen.transmembrane_placements) > 0
+
+    written = gen.export_picks(tmp_path, annotation_version="2.0")
+    cytosol_key = next(k for k in written if k.endswith("-cytosol"))
+    transmembrane_key = next(k for k in written if k.endswith("-transmembrane"))
+    assert cytosol_key != transmembrane_key
+    assert written[cytosol_key].name.endswith("-2.0_orientedpoint.ndjson")
+    assert written[transmembrane_key].exists()
+
+    v_size = mgen.v_size
+    shape_zyx = mgen.target_shape_zyx
+    extent_xyz = (
+        torch.tensor([shape_zyx[2], shape_zyx[1], shape_zyx[0]], dtype=torch.float32)
+        * v_size
+    )
+
+    placed = gen.placements[0]
+    lines = written[cytosol_key].read_text().strip().splitlines()
+    # Match this placement's own row by its corner-relative x coordinate
+    # (each placement gets a distinct enough position at this scale).
+    import json
+
+    expected_corner = placed.position_xyz + extent_xyz / 2
+    rows = [json.loads(line) for line in lines]
+    match = next(
+        r for r in rows if abs(r["location"]["x"] - float(expected_corner[0])) < 1e-3
+    )
+    assert abs(match["location"]["y"] - float(expected_corner[1])) < 1e-3
+    assert abs(match["location"]["z"] - float(expected_corner[2])) < 1e-3
+    assert "xyz_rotation_matrix" in match

@@ -16,9 +16,10 @@ from ._click_options import build_config_options, collect_overrides
 CONTEXT_SETTINGS = {"help_option_names": ["-h", "--help"]}
 
 # (panel title, field names) -- basic-first-advanced-last, same convention as
-# cli/simulate.py's _PARTICLE_STACK_GROUPS/_TILT_SERIES_GROUPS. targets/filler
-# themselves are list[dict]-typed and skipped entirely by build_config_options
-# (TOML-only) -- not listed here, same treatment as that module's own
+# cli/simulate.py's _PARTICLE_STACK_GROUPS/_TILT_SERIES_GROUPS. targets/filler/
+# membrane/membrane_transmembrane_specs/membrane_protein_specs are all
+# list[dict]-typed and skipped entirely by build_config_options (TOML-only)
+# -- not listed here, same treatment as that module's own
 # protein_specs/membrane_specs.
 _TOMOGRAM_GROUPS: list[tuple[str, list[str]]] = [
     (
@@ -35,6 +36,15 @@ _TOMOGRAM_GROUPS: list[tuple[str, list[str]]] = [
         ],
     ),
     ("Packing", ["packing_method", "pad_fraction"]),
+    (
+        "Membrane",
+        [
+            "membrane_occupancy_fraction",
+            "membrane_region_density_threshold",
+            "membrane_region_max_passes",
+            "membrane_min_transmembrane_spacing_a",
+        ],
+    ),
     ("Picks", ["write_picks", "annotation_version"]),
     ("Compute", ["device"]),
     ("Output", ["output_dir", "filename"]),
@@ -100,11 +110,15 @@ def _build_tomogram_command() -> click.RichCommand:
         params=params,
         callback=_tomogram_callback,
         context_settings=CONTEXT_SETTINGS,
-        help="Pack a specimen volume from PDB species via hard-sphere RSA and "
-        "save it as .mrc (usable as `specter simulate tiltseries`'s "
-        "--volume_path) plus copick-style .ndjson picks. A TOML config "
-        "(--config) is always loaded first -- every flag below is optional "
-        "and, if given, overrides one field of it.",
+        help="Pack a specimen volume from PDB species via hard-sphere RSA "
+        "(default), or -- when --config's TOML sets [[membrane]] -- build "
+        "an organic membrane (any shape_backend) with region-gated cytosol/"
+        "lumen protein packing instead (mutually exclusive with "
+        "targets/filler). Either way, saves the volume as .mrc (usable as "
+        "`specter simulate tiltseries`'s --volume_path) plus copick-style "
+        ".ndjson picks. A TOML config (--config) is always loaded first -- "
+        "every flag below is optional and, if given, overrides one field "
+        "of it.",
     )
 
 

@@ -36,6 +36,34 @@ filler = [
 # filler_table_max_mw_kda = 300.0    # applied to whichever table(s) above
 # filler_table_min_mw_kda = 20.0     # are enabled
 
+# --- Organic membrane mode (mutually exclusive with [targets]/[filler] above) ---
+# Uncomment the whole block below (and comment out/empty [targets]/[filler])
+# to build an organic membrane + region-gated cytosol/lumen protein packing
+# instead of hard-sphere packing. shape_backend is one of "metaball",
+# "alpha_shape", "spherical_harmonics", "swept_spline" -- see
+# specter.specimen.membrane.MembraneGenerator's own docstring for each
+# backend's full parameter set.
+# [[membrane]]
+# shape_backend = "spherical_harmonics"
+# sh_axes_a = [300.0, 300.0, 300.0]
+# sh_amplitude = 0.15
+# bilayer_thickness_a = 30.0
+#
+# [[membrane_transmembrane_specs]]
+# pdb_source = "6qzp"
+# frequency = 1
+#
+# [[membrane_protein_specs]]
+# pdb_source = "1mbo"
+# location = "lumen"
+#
+# [[membrane_protein_specs]]
+# pdb_source = "1bxn"
+# location = "cytosol"
+#
+# membrane_occupancy_fraction = 0.2   # bare-sphere fraction of EACH REGION's
+#                                     # own volume (not the whole box)
+
 [specimen]
 target_shape = [128, 512, 512]    # (Z, Y, X) voxels
 v_size = 5.0                       # Å/voxel

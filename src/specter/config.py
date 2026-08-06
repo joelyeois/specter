@@ -592,22 +592,38 @@ class TomogramConfig:
     seed: int | None = None
 
     # --- Organic membrane (mutually exclusive with targets/filler above) ---
-    # One or more dicts, [[membrane]] tables -- one membrane instance each,
+    # One or more dicts, [[membrane]] tables -- one membrane TEMPLATE each,
     # composited into the shared tomogram (see specter.specimen.tomogram.
     # MembraneInstance). Keys are passed as **kwargs straight into
     # specter.specimen.membrane.MembraneGenerator -- e.g.
     # {"shape_backend": "spherical_harmonics", "sh_axes_a": [300.0, 300.0,
-    # 300.0], "sh_amplitude": 0.15, "bilayer_thickness_a": 30.0}, PLUS an
-    # optional "position_xyz" = [x, y, z] key (physical Angstrom offset from
-    # the tomogram's own center, default [0,0,0] -- v1 has no automatic
-    # overlap avoidance between instances, choose values that don't
-    # collide). See MembraneGenerator's own docstring for the full
-    # per-backend parameter set (shape_backend one of "spherical_harmonics"
-    # (default)/"swept_spline", or "metaball"/"alpha_shape" -- both
-    # DEPRECATED, kept for backward compatibility only). target_shape_zyx/
-    # v_size/seed/device/pdb_cache_dir come from this config's own
-    # target_shape/v_size/seed/device/pdb_savefolder fields for every
-    # instance, not from this dict.
+    # 300.0], "sh_amplitude": 0.15, "bilayer_thickness_a": 30.0} -- PLUS
+    # three keys not real MembraneGenerator kwargs, popped before that call:
+    #   - "n_instances" (int, default 1): expands this one entry into that
+    #     many independent instances sharing the same template, each its
+    #     own seed (config.seed + i, restarting at i=0 per entry -- editing/
+    #     adding another [[membrane]] entry never perturbs an earlier
+    #     entry's own instances). Can't be combined with an explicit
+    #     "position_xyz" in the same entry (every copy would want the same
+    #     spot) -- raises if both are given.
+    #   - "position_xyz" = [x, y, z] (physical Angstrom offset from the
+    #     tomogram's own center). Default omitted (None): resolved via
+    #     collision-rejecting random placement against every other
+    #     omitted-position instance (see MembraneTomogramGenerator's own
+    #     docstring) -- an instance that doesn't fit is dropped, not
+    #     retried. Give it explicitly for manual placement instead (then
+    #     n_instances must be 1).
+    #   - "target_shape_zyx" = [Z, Y, X] voxels. Default omitted (None):
+    #     MembraneGenerator auto-sizes a small local working grid from the
+    #     organelle's own size (see its own docstring) instead of every
+    #     instance rendering on a grid the size of the WHOLE tomogram
+    #     canvas. Give it explicitly only if this instance genuinely needs
+    #     a specific working-grid size.
+    # v_size/seed/device/pdb_cache_dir still come from this config's own
+    # v_size/seed/device/pdb_savefolder fields for every instance, not from
+    # this dict (shape_backend one of "spherical_harmonics" (default)/
+    # "swept_spline", or "metaball"/"alpha_shape" -- both DEPRECATED, kept
+    # for backward compatibility only).
     membrane: list[dict[str, Any]] = field(default_factory=list)
     # Each {"pdb_source": <code or path>, "frequency": 1, "parameterization":
     # "shtyrov"}. In TOML, provide as [[membrane_transmembrane_specs]] tables.
@@ -646,6 +662,23 @@ class TomogramConfig:
 
     # --- Compute ---
     device: str = "cpu"
+    # How many PDB species render concurrently (background threads) within
+    # a single tomogram: membrane mode's transmembrane_specs (rendered once,
+    # shared across every [[membrane]] entry/n_instances copy) and
+    # membrane_protein_specs (cytosol/lumen, rendered once per tomogram) --
+    # see MembraneGenerator/MembraneTomogramGenerator's own render_workers
+    # docstrings. Not used in non-membrane (targets/filler) mode. Default 1:
+    # fully serial, identical to the original behaviour -- species'
+    # PotentialBuilder.forward calls release the GIL for their actual
+    # compute, so raising this gives real wall-clock overlap even on CPU,
+    # not just I/O overlap from PDB fetch/parse.
+    render_workers: int = 1
+    # Optional device pool to round-robin those concurrent species across
+    # (e.g. ["cuda:0", "cuda:1"] on a multi-GPU machine). None (default):
+    # every species renders on `device` above, still concurrently across
+    # render_workers threads, just not spread across multiple physical
+    # devices. TOML-only (list[str]).
+    render_devices: list[str] | None = None
 
     # --- Output ---
     output_dir: str = "./output/"
@@ -692,14 +725,15 @@ TOMOGRAM_HELP: dict[str, str] = {
     "pdb_savefolder": "Folder to cache downloaded PDB files.",
     "seed": "Random seed.",
     "membrane": "One or more MembraneGenerator kwargs dicts (TOML-only, "
-    "[[membrane]] tables, one per composited instance) -- mutually "
+    "[[membrane]] tables, one per composited TEMPLATE) -- mutually "
     "exclusive with targets/filler/filler_from_pei2016/filler_from_"
-    "cryoetsim. e.g. {'shape_backend': 'spherical_harmonics', 'sh_axes_a': "
-    "[300.0, 300.0, 300.0], 'sh_amplitude': 0.15, 'position_xyz': [0.0, "
-    "0.0, 0.0]}. See MembraneGenerator's own docstring for the full "
-    "per-backend parameter set; 'position_xyz' (physical Angstrom offset "
-    "from the tomogram center, default [0,0,0]) places this instance -- "
-    "v1 has no automatic overlap avoidance between instances.",
+    "cryoetsim. e.g. {'shape_backend': 'spherical_harmonics', "
+    "'n_instances': 3}. See MembraneGenerator's own docstring for the full "
+    "per-backend parameter set; plus 'n_instances' (int, default 1, "
+    "expands one entry into that many independently-seeded instances), "
+    "'position_xyz' (physical Angstrom offset from the tomogram center, "
+    "default omitted = collision-rejecting random placement), and "
+    "'target_shape_zyx' (default omitted = auto-sized per instance).",
     "membrane_transmembrane_specs": "Transmembrane protein species (TOML-"
     "only, [[membrane_transmembrane_specs]] tables), each {'pdb_source': "
     "<code or path>, 'frequency': 1, 'parameterization': 'shtyrov'}. "

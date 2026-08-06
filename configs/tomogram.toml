@@ -44,23 +44,23 @@ filler = [
 # backends -- or "metaball"/"alpha_shape", both DEPRECATED (kept for backward
 # compatibility only, emit a DeprecationWarning). See
 # specter.specimen.membrane.MembraneGenerator's own docstring for each
-# backend's full parameter set. Each [[membrane]] entry is composited into
-# the same shared tomogram at its own position_xyz (physical Angstrom offset
-# from the tomogram's own center, default [0,0,0]) -- v1 has no automatic
-# overlap avoidance between instances, so choose values that don't collide.
+# backend's full parameter set. Each [[membrane]] entry is a TEMPLATE, not
+# necessarily one instance: size (sh_axes_a/swept_tube_radius_a/etc.),
+# position_xyz, and target_shape_zyx all default to auto (realistic random
+# size, collision-rejecting random placement, auto-sized local working grid
+# respectively) if omitted -- see MembraneGenerator's/MembraneTomogramGenerator's
+# own docstrings. n_instances (default 1) expands one entry into that many
+# independent, independently-seeded, independently-placed instances sharing
+# the rest of that entry's kwargs.
 # [[membrane]]
 # shape_backend = "spherical_harmonics"
-# sh_axes_a = [300.0, 300.0, 300.0]
-# sh_amplitude = 0.15
+# n_instances = 3
 # bilayer_thickness_a = 30.0
-# position_xyz = [-400.0, 0.0, 0.0]
 #
 # [[membrane]]
 # shape_backend = "swept_spline"
-# swept_total_length_a = 600.0
-# swept_tube_radius_a = 30.0
 # bilayer_thickness_a = 30.0
-# position_xyz = [400.0, 0.0, 0.0]
+# position_xyz = [400.0, 0.0, 0.0]   # explicit placement instead (n_instances must stay 1)
 #
 # [[membrane_transmembrane_specs]]
 # pdb_source = "6qzp"

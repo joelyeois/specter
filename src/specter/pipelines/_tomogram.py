@@ -37,6 +37,11 @@ from specter.specimen import (
     TomogramProteinSpec,
     TransmembraneSpec,
     build_filler_pool_specs,
+    render_transmembrane_template,
+)
+from specter.specimen._parallel_render import (
+    build_templates_concurrently,
+    resolve_render_devices,
 )
 
 from ._common import _console, _format_elapsed, _section
@@ -168,6 +173,31 @@ def _build_membrane_tomogram_generator(
         for d in config.membrane_protein_specs
     ]
 
+    # Pre-render every transmembrane species' template ONCE here, shared
+    # across every [[membrane]] entry AND every one of its n_instances
+    # copies below -- otherwise each instance's own MembraneGenerator would
+    # redundantly rebuild the same handful of species from scratch (see
+    # render_transmembrane_template's own docstring). Rendering itself can
+    # run concurrently across config.render_workers/config.render_devices
+    # (see TomogramConfig.render_workers's own docstring); attaching the
+    # result via dataclasses.replace(..., template=...) makes every
+    # downstream MembraneGenerator._build_template call a no-op cache hit
+    # regardless of how many instances end up sharing it.
+    if transmembrane_specs:
+        devices = resolve_render_devices(config.device, config.render_devices)
+        built = build_templates_concurrently(
+            keys=list(range(len(transmembrane_specs))),
+            build_one=lambda i, device: render_transmembrane_template(
+                transmembrane_specs[i], config.v_size, config.pdb_savefolder, device
+            ),
+            devices=devices,
+            max_workers=config.render_workers,
+        )
+        transmembrane_specs = [
+            dataclasses.replace(spec, template=built[i])
+            for i, spec in enumerate(transmembrane_specs)
+        ]
+
     membrane_instances = []
     for entry in config.membrane:
         # dict(entry) copies the OUTER dict before .pop() -- config.membrane[i]
@@ -176,19 +206,62 @@ def _build_membrane_tomogram_generator(
         # across multiple dataclasses.replace(...) calls in a --n_tomograms>1
         # run (see run_build_tomogram).
         instance_kwargs = dict(entry)
-        position_xyz = tuple(instance_kwargs.pop("position_xyz", (0.0, 0.0, 0.0)))
-        mgen = MembraneGenerator(
-            target_shape_zyx=tuple(config.target_shape),  # type: ignore[arg-type]
-            v_size=config.v_size,
-            transmembrane_specs=list(transmembrane_specs),
-            pdb_cache_dir=config.pdb_savefolder,
-            device=config.device,
-            seed=config.seed,
-            **instance_kwargs,
+        n_instances = int(instance_kwargs.pop("n_instances", 1))
+
+        position_xyz_raw = instance_kwargs.pop("position_xyz", None)
+        if n_instances > 1 and position_xyz_raw is not None:
+            raise ValueError(
+                "run_build_tomogram: a [[membrane]] entry can't combine "
+                f"n_instances={n_instances} with an explicit position_xyz -- "
+                "every copy would want the same spot. Omit position_xyz "
+                "(each instance is placed automatically, collision-checked "
+                "against the others) or use n_instances=1 for manual "
+                "placement."
+            )
+        # None (not (0,0,0)) by default -- MembraneTomogramGenerator resolves
+        # an omitted position_xyz via collision-rejecting random placement
+        # (see its own docstring); forcing every unspecified instance to the
+        # literal origin, the old behaviour, defeats that entirely once more
+        # than one instance is in play.
+        position_xyz = tuple(position_xyz_raw) if position_xyz_raw is not None else None
+
+        # None (not config.target_shape) by default -- MembraneGenerator
+        # auto-sizes a small working grid from the organelle's own size when
+        # omitted (see its own docstring), instead of every instance
+        # rendering on a working grid the size of the WHOLE tomogram
+        # canvas, the old behaviour. A [[membrane]] entry can still request
+        # a specific target_shape_zyx explicitly (e.g. to match a scale
+        # requirement of its own), popped here rather than left for
+        # MembraneGenerator's **kwargs since it needs a tuple() cast like
+        # config.target_shape gets below.
+        target_shape_zyx_raw = instance_kwargs.pop("target_shape_zyx", None)
+        target_shape_zyx = (
+            tuple(target_shape_zyx_raw) if target_shape_zyx_raw is not None else None
         )
-        membrane_instances.append(
-            MembraneInstance(generator=mgen, position_xyz=position_xyz)  # type: ignore[arg-type]
-        )
+
+        for i in range(n_instances):
+            # Restarts from config.seed at i=0 for EVERY entry (not a
+            # running counter across entries) -- editing/adding another
+            # [[membrane]] entry then never perturbs an earlier entry's own
+            # instances' random realizations. The tradeoff (two entries at
+            # the same index CAN start from an identical seed if they also
+            # share shape_backend/kwargs) only matters when seed is set at
+            # all -- the default (seed=None) draws every instance
+            # independently regardless, so this is purely an advanced-user,
+            # reproducibility-mode consideration.
+            instance_seed = None if config.seed is None else config.seed + i
+            mgen = MembraneGenerator(
+                target_shape_zyx=target_shape_zyx,  # type: ignore[arg-type]
+                v_size=config.v_size,
+                transmembrane_specs=list(transmembrane_specs),
+                pdb_cache_dir=config.pdb_savefolder,
+                device=config.device,
+                seed=instance_seed,
+                **instance_kwargs,
+            )
+            membrane_instances.append(
+                MembraneInstance(generator=mgen, position_xyz=position_xyz)  # type: ignore[arg-type]
+            )
 
     return MembraneTomogramGenerator(
         membrane_instances=membrane_instances,
@@ -204,6 +277,8 @@ def _build_membrane_tomogram_generator(
         parameterization=config.membrane_parameterization,
         seed=config.seed,
         device=config.device,
+        render_workers=config.render_workers,
+        render_devices=config.render_devices,
     )
 
 

@@ -547,6 +547,14 @@ class MembraneGenerator:
                 _draw_uniform(meta_rng, lo, hi),
                 _draw_uniform(meta_rng, lo, hi),
             )
+        else:
+            # Normalize to a tuple even when given one already -- a caller
+            # passing a plain list (e.g. every TOML-sourced config value,
+            # since TOML arrays decode to Python lists) would otherwise make
+            # the clamp check below's `clamped != sh_axes_a` compare a tuple
+            # against a list and spuriously fire even when nothing needed
+            # clamping (tuple != list in Python regardless of contents).
+            sh_axes_a = (float(sh_axes_a[0]), float(sh_axes_a[1]), float(sh_axes_a[2]))
         if swept_tube_radius_a is None:
             lo, hi = _resolve_range(
                 "swept_tube_radius_range_a", swept_tube_radius_range_a, min_low=1e-6

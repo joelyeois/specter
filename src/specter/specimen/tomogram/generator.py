@@ -62,7 +62,7 @@ from scipy import ndimage
 
 from ...arrays import clip_insert_bounds
 from ...crowding import insert_particles_into_micrograph
-from ...pdb import PDB
+from ...pdb import DEFAULT_PDB_SAVEFOLDER, PDB
 from ...potential import PotentialBuilder
 from ...rotations import build_affine_matrix, random_rotation_matrix, rotate_volume
 from ..membrane import MembraneGenerator, TransmembranePlacement
@@ -292,7 +292,9 @@ class MembraneTomogramGenerator:
     min_transmembrane_spacing_a : float, optional
         Passed to `MembraneGenerator.place_transmembrane`. Default 40.0.
     pdb_cache_dir : str, optional
-        Directory for downloaded PDB/mmCIF files. Default "../pdb-data/".
+        Directory for downloaded PDB/mmCIF files. Default is
+        `specter.pdb.DEFAULT_PDB_SAVEFOLDER` (the repo's own `pdb-data/`,
+        anchored to the package location, not the caller's cwd).
     parameterization : str, optional
         Atomic scattering-factor parameterization for `PotentialBuilder`.
         Default "shtyrov", matching `PotentialBuilder`'s own default.
@@ -340,7 +342,7 @@ class MembraneTomogramGenerator:
         region_density_threshold: float | None = None,
         region_max_passes: int = 300,
         min_transmembrane_spacing_a: float = 40.0,
-        pdb_cache_dir: str = "../pdb-data/",
+        pdb_cache_dir: str = DEFAULT_PDB_SAVEFOLDER,
         parameterization: str = "shtyrov",
         seed: int | None = None,
         device: str | torch.device = "cpu",

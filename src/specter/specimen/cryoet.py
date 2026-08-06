@@ -26,7 +26,7 @@ from polnet.logging_conf import setup_logger as _setup_polnet_logger
 
 from ..arrays import clip_insert_bounds
 from ..potential import PotentialBuilder
-from ..pdb import PDB
+from ..pdb import DEFAULT_PDB_SAVEFOLDER, PDB
 from ..rotations import build_affine_matrix, rotate_volume
 from . import polnet_bridge as pb
 from .filament import FilamentSpec, place_filaments
@@ -90,8 +90,9 @@ class CryoETSpecimenGenerator:
     scratch_dir : str or Path, optional
         Directory for low-res placeholder MRCs. Defaults to a temp dir.
     pdb_cache_dir : str or Path, optional
-        Directory for downloaded PDB/mmCIF files. Defaults to specter's
-        usual "../pdb-data/" (see specter.pdb.PDB).
+        Directory for downloaded PDB/mmCIF files. Defaults to
+        `specter.pdb.DEFAULT_PDB_SAVEFOLDER` (the repo's own `pdb-data/`,
+        anchored to the package location, not the caller's cwd).
     membrane_potential_scale : float, optional
         See DEFAULT_MEMBRANE_POTENTIAL_SCALE above.
     parameterization : str, optional
@@ -131,7 +132,9 @@ class CryoETSpecimenGenerator:
         self.target_shape = target_shape  # (Z, Y, X)
         self.target_v_size = target_v_size
         self.low_res_v_size = low_res_v_size
-        self.pdb_cache_dir = str(pdb_cache_dir) if pdb_cache_dir else "../pdb-data/"
+        self.pdb_cache_dir = (
+            str(pdb_cache_dir) if pdb_cache_dir else DEFAULT_PDB_SAVEFOLDER
+        )
         self.membrane_potential_scale = membrane_potential_scale
         self.parameterization = parameterization
         self.seed = seed

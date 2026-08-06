@@ -28,7 +28,7 @@ import torch.nn.functional as F
 
 from ...arrays import clip_insert_bounds
 from ...fft import fftconvolve
-from ...pdb import PDB
+from ...pdb import DEFAULT_PDB_SAVEFOLDER, PDB
 from ...potential import PotentialBuilder
 from ...progress import TqdmProgress
 from ...rotations import build_affine_matrix, random_rotation_matrix, rotate_volume
@@ -299,7 +299,7 @@ class TetrisPackingSpecimenGenerator:
         threshold_mode: ThresholdMode = "auto",
         relative_threshold_fraction: float = 0.15,
         overlap_penalty: float = 100.0,
-        pdb_cache_dir: str = "../pdb-data/",
+        pdb_cache_dir: str = DEFAULT_PDB_SAVEFOLDER,
         parameterization: str = "shtyrov",
         device: str | torch.device = "cpu",
         correlation_backend: CorrelationBackend = "conv3d",

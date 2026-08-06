@@ -2,10 +2,12 @@
 Tests for PDB parsing, in particular bonded-species atom typing.
 """
 
+import gzip
 from pathlib import Path
 
 import pytest
 
+import specter.pdb as pdb_module
 from specter.pdb import PDB
 
 # Myoglobin (oxy form): standard amino acids, a heme group coordinated by a
@@ -48,6 +50,45 @@ def _atom_species_by_name(structure_species, filepath, resname, resseq, atom_nam
         if resn == resname and seq == resseq and atn == atom_name:
             return sp
     raise AssertionError(f"Atom {resname}{resseq}:{atom_name} not found")
+
+
+class _FakeResponse:
+    def __init__(self, content: bytes = b"", json_data: dict | None = None):
+        self.content = content
+        self._json_data = json_data or {}
+
+    def raise_for_status(self):
+        pass
+
+    def json(self):
+        return self._json_data
+
+
+def test_fetch_pdb_file_creates_missing_savefolder(tmp_path, monkeypatch):
+    # Regression test: savefolder is a plain filesystem path (resolved
+    # against the caller's own cwd, not the specter repo root), and
+    # fetch_pdb_file used to crash with a raw FileNotFoundError from
+    # open(file_path, "w") if that directory didn't already exist, rather
+    # than creating it on demand.
+    fake_cif = "data_1ABC\n#\n"
+    compressed = gzip.compress(fake_cif.encode())
+
+    def fake_get(url, *args, **kwargs):
+        if "rest/v1/core/entry" in url:
+            return _FakeResponse(
+                json_data={"rcsb_entry_container_identifiers": {"assembly_ids": []}}
+            )
+        return _FakeResponse(content=compressed)
+
+    monkeypatch.setattr(pdb_module.requests, "get", fake_get)
+
+    missing_dir = tmp_path / "not" / "yet" / "created"
+    assert not missing_dir.exists()
+
+    filepath = PDB.fetch_pdb_file("1abc", savefolder=str(missing_dir), verbose=False)
+
+    assert missing_dir.exists()
+    assert Path(filepath).read_text() == fake_cif
 
 
 def test_get_atom_species_requires_mmcif(tmp_path):

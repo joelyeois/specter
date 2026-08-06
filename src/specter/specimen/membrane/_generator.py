@@ -24,7 +24,7 @@ from dataclasses import dataclass
 import torch
 
 from ...arrays import clip_insert_bounds
-from ...pdb import PDB
+from ...pdb import DEFAULT_PDB_SAVEFOLDER, PDB
 from ...potential import PotentialBuilder
 from ...rotations import build_affine_matrix, rotate_volume
 from ..packing import estimate_protein_box_size
@@ -211,6 +211,18 @@ class MembraneGenerator:
         nearly a straight rod, 0.35+ produces sharp hooks/loops, 0.15 gives
         a gently organic, clearly non-straight tube. `"swept_spline"`
         backend only. Default 0.15.
+    swept_radius_variation : float, optional
+        RMS fractional variation in tube radius along the path -- see
+        `generate_membrane_field_swept_spline`'s own docstring ("Radius
+        variation"). `"swept_spline"` backend only. Default 0.0 (constant
+        radius).
+    swept_radius_variation_sigma_points : float, optional
+        Path-order smoothing for the radius noise, in PATH POINTS -- see
+        `generate_membrane_field_swept_spline`'s own docstring for why 2.0
+        (not a larger, intuitively "smoother" value) was picked from a
+        direct visual sweep. Only affects the field when
+        `swept_radius_variation > 0`. `"swept_spline"` backend only.
+        Default 2.0.
     swept_blend_sharpness_a : float, optional
         Smooth-min blend radius, Angstrom. Default (`None`) is
         `0.5 * swept_tube_radius_a` -- deliberately NOT the `"metaball"`
@@ -259,9 +271,38 @@ class MembraneGenerator:
     transmembrane_specs : list of TransmembraneSpec, optional
         Transmembrane protein species to attempt placing. Default None (no
         transmembrane proteins).
+    transmembrane_occupancy_fraction : float, optional
+        Controls how transmembrane protein density is combined with the
+        membrane's own density at each placement, in `_insert_blend`. A
+        real transmembrane protein displaces lipid where it sits rather
+        than coexisting with it, so naively adding the two (the previous
+        behaviour) double-counts density in the overlap and is physically
+        wrong. Instead, wherever the (already-rendered) protein template's
+        own density exceeds `1.5 * transmembrane_occupancy_fraction *
+        self.profile.psi.max()` (the bilayer's own calibrated peak
+        density -- an already-computed, physically anchored scale, rather
+        than an arbitrary constant), the membrane's density there is fully
+        replaced by the protein's instead of summed with it; below `0.5 *`
+        that same threshold, the membrane is left completely untouched. In
+        between, a smoothstep (not a sigmoid -- a sigmoid's tail never
+        truly reaches 0, which left a template's near-zero background,
+        e.g. `rotate_volume`'s own zero-padding, weakly but non-negligibly
+        suppressing membrane density across the whole inserted bounding
+        box rather than just near the protein's actual mass) blends the
+        two, avoiding a visible cutout edge at the template's own decaying
+        density tail while still saturating to exactly 0/1 away from it.
+        See `_insert_blend`'s own implementation for the exact band. This
+        reuses the
+        template density already computed for insertion as a proxy for
+        occupancy rather than building a separate excluded-volume/solvent-
+        accessible-surface geometry step from the atom coordinates -- a
+        deliberately simpler approximation: the "hole" boundary tracks
+        wherever the atomic potential happens to decay past this
+        threshold, not a true van-der-Waals silhouette. Default 0.05.
     pdb_cache_dir : str, optional
-        Passed to `PDB` for PDB-backed transmembrane specs. Default
-        "../pdb-data/".
+        Passed to `PDB` for PDB-backed transmembrane specs. Default is
+        `specter.pdb.DEFAULT_PDB_SAVEFOLDER` (the repo's own `pdb-data/`,
+        anchored to the package location, not the caller's cwd).
     max_field_voxels : int, optional
         Safety cap on the working field grid's total voxel count. The
         field's own spacing is derived to resolve the bilayer's physical
@@ -311,6 +352,8 @@ class MembraneGenerator:
         swept_step_length_a: float = 15.0,
         swept_tube_radius_a: float = 25.0,
         swept_flexibility: float = 0.15,
+        swept_radius_variation: float = 0.0,
+        swept_radius_variation_sigma_points: float = 2.0,
         swept_blend_sharpness_a: float | None = None,
         swept_path_smoothing_sigma_points: float = 1.5,
         swept_curvature_iterations: int = 15,
@@ -320,7 +363,8 @@ class MembraneGenerator:
         bilayer_thickness_a: float = 30.0,
         bilayer_layer_sigma_a: float = 1.25,
         transmembrane_specs: list[TransmembraneSpec] | None = None,
-        pdb_cache_dir: str = "../pdb-data/",
+        transmembrane_occupancy_fraction: float = 0.05,
+        pdb_cache_dir: str = DEFAULT_PDB_SAVEFOLDER,
         max_field_voxels: int = 200_000_000,
         device: str | torch.device = "cpu",
         seed: int | None = None,
@@ -367,6 +411,8 @@ class MembraneGenerator:
         self.swept_step_length_a = swept_step_length_a
         self.swept_tube_radius_a = swept_tube_radius_a
         self.swept_flexibility = swept_flexibility
+        self.swept_radius_variation = swept_radius_variation
+        self.swept_radius_variation_sigma_points = swept_radius_variation_sigma_points
         self.swept_blend_sharpness_a = swept_blend_sharpness_a
         self.swept_path_smoothing_sigma_points = swept_path_smoothing_sigma_points
         self.swept_curvature_iterations = swept_curvature_iterations
@@ -376,6 +422,7 @@ class MembraneGenerator:
         self.bilayer_thickness_a = bilayer_thickness_a
         self.bilayer_layer_sigma_a = bilayer_layer_sigma_a
         self.transmembrane_specs = transmembrane_specs or []
+        self.transmembrane_occupancy_fraction = transmembrane_occupancy_fraction
         self.pdb_cache_dir = pdb_cache_dir
         self.max_field_voxels = max_field_voxels
         self.device = torch.device(device)
@@ -480,6 +527,8 @@ class MembraneGenerator:
                 step_length_a=self.swept_step_length_a,
                 tube_radius_a=self.swept_tube_radius_a,
                 flexibility=self.swept_flexibility,
+                radius_variation=self.swept_radius_variation,
+                radius_variation_sigma_points=self.swept_radius_variation_sigma_points,
                 blend_sharpness_a=self.swept_blend_sharpness_a,
                 path_smoothing_sigma_points=self.swept_path_smoothing_sigma_points,
                 curvature_iterations=self.swept_curvature_iterations,
@@ -593,7 +642,7 @@ class MembraneGenerator:
             rotated = rotate_volume(template, theta, padding_mode="zeros")[0]
 
             center_zyx = self._physical_to_voxel_index(sites_xyz[i])
-            self._insert_add(rotated, center_zyx)
+            self._insert_blend(rotated, center_zyx)
 
             placements.append(
                 TransmembranePlacement(
@@ -640,17 +689,48 @@ class MembraneGenerator:
         idx_zyx = torch.stack([idx_xyz[2], idx_xyz[1], idx_xyz[0]])
         return idx_zyx.round().long()
 
-    def _insert_add(
+    def _insert_blend(
         self, local_density: torch.Tensor, center_zyx: torch.Tensor
     ) -> None:
+        """
+        Insert a transmembrane protein template, replacing (not adding to)
+        the membrane's own density wherever the template is occupied -- see
+        `transmembrane_occupancy_fraction`'s own docstring for why plain
+        addition double-counts density and how this threshold is chosen.
+        """
         assert self.volume is not None
+        assert self.profile is not None
         bounds = clip_insert_bounds(
             center_zyx.tolist(), local_density.shape, self.volume.shape
         )
         if bounds is None:
             return
         dst, src = bounds
-        self.volume[dst] += local_density[src].to(self.volume.device)
+        protein = local_density[src].to(self.volume.device)
+
+        threshold = self.transmembrane_occupancy_fraction * float(
+            self.profile.psi.max()
+        )
+        if threshold <= 0:
+            self.volume[dst] += protein
+            return
+
+        # Smoothstep over a band centered on `threshold`, not an
+        # unbounded-tail sigmoid: a sigmoid never truly reaches 0, so a
+        # template's near-zero background (e.g. rotate_volume's own
+        # zero-padding, or a real potential's slowly-decaying tail) still
+        # picks up a small but nonzero weight EVERYWHERE the template was
+        # inserted, incorrectly attenuating membrane density across the
+        # whole (padded) bounding box rather than just near the protein's
+        # actual mass (caught directly: a synthetic single-hot-voxel
+        # template made this visible as a net *decrease* in total density
+        # after insertion). Smoothstep instead saturates to EXACTLY 0/1
+        # outside its band, so density far from the protein is left
+        # untouched.
+        low, high = 0.5 * threshold, 1.5 * threshold
+        t = torch.clamp((protein - low) / (high - low), 0.0, 1.0)
+        weight = t * t * (3.0 - 2.0 * t)
+        self.volume[dst] = (1.0 - weight) * self.volume[dst] + weight * protein
 
 
 __all__ = [

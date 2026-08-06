@@ -52,6 +52,51 @@ def test_place_transmembrane_with_no_specs_returns_empty_list():
     assert gen.place_transmembrane() == []
 
 
+def test_insert_blend_replaces_occupied_region_and_preserves_untouched_background():
+    # Regression test for the additive-insertion fix: a transmembrane
+    # protein displaces lipid where it sits rather than coexisting with it,
+    # so plain addition (the old behaviour) double-counts density in the
+    # overlap. _insert_blend should instead fully REPLACE membrane density
+    # where the protein template is occupied, and leave it EXACTLY
+    # untouched elsewhere -- the latter also catches a real bug an earlier
+    # sigmoid-based (rather than smoothstep) blend had: its tail never
+    # truly reaches 0, so a template's zero background picked up a small
+    # but nonzero weight too, silently attenuating membrane density across
+    # the whole inserted bounding box, not just near the protein's own mass.
+    gen = MembraneGenerator(seed=0, **_SMALL_KWARGS)
+    gen.generate()
+
+    # Pick an actual on-membrane voxel (nonzero density), not an arbitrary
+    # point that might land in empty space, so replace-vs-add is a
+    # meaningfully different outcome.
+    peak_idx = (gen.volume == gen.volume.max()).nonzero()[0]
+    center_zyx = peak_idx.clone()
+    baseline_center = gen.volume[tuple(peak_idx.tolist())].clone()
+    assert baseline_center.item() > 0  # sanity: real density here, not empty space
+    offset_idx = peak_idx + torch.tensor([2, 0, 0])
+    baseline_offset = gen.volume[tuple(offset_idx.tolist())].clone()
+
+    template = torch.zeros(5, 5, 5)
+    template[2, 2, 2] = 1000.0  # far above any plausible bilayer peak amplitude
+    gen._insert_blend(template, center_zyx)
+
+    # occupied voxel: replaced by the protein value, not baseline + protein
+    # (an absolute, not relative, tolerance -- the baseline density here is
+    # tiny relative to 1000.0, so a relative check can't tell replace and
+    # add apart).
+    assert gen.volume[tuple(peak_idx.tolist())].item() == pytest.approx(
+        1000.0, abs=1e-3
+    )
+    assert gen.volume[tuple(peak_idx.tolist())].item() != pytest.approx(
+        (baseline_center + 1000.0).item(), abs=1e-3
+    )
+    # background voxel within the inserted bounding box but zero protein
+    # density there: left exactly as it was.
+    assert gen.volume[tuple(offset_idx.tolist())].item() == pytest.approx(
+        baseline_offset.item()
+    )
+
+
 def test_place_transmembrane_with_prebuilt_template_inserts_and_records_placement():
     template = torch.zeros(9, 9, 9)
     template[4, 4, 4] = 50.0

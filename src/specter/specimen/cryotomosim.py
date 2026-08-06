@@ -90,7 +90,7 @@ import torch
 from ..arrays import clip_insert_bounds
 from ..crowding import insert_particles_into_micrograph
 from ..ice import IceBank, RandomIcemaker, blend_ice_into_volume
-from ..pdb import PDB
+from ..pdb import DEFAULT_PDB_SAVEFOLDER, PDB
 from ..potential import PotentialBuilder
 from ..rotations import build_affine_matrix, random_rotation_matrix, rotate_volume
 from ._cts_grid import (
@@ -648,7 +648,9 @@ class CryoTomoSimSpecimenGenerator:
     v_size : float
         Voxel size, Angstrom.
     pdb_cache_dir : str, optional
-        Directory for downloaded PDB/mmCIF files. Default "../pdb-data/".
+        Directory for downloaded PDB/mmCIF files. Default is
+        `specter.pdb.DEFAULT_PDB_SAVEFOLDER` (the repo's own `pdb-data/`,
+        anchored to the package location, not the caller's cwd).
     parameterization : str, optional
         Atomic scattering-factor parameterization for `PotentialBuilder`
         ("shtyrov", "kirkland", or "lobato"). Default "shtyrov", matching
@@ -672,7 +674,7 @@ class CryoTomoSimSpecimenGenerator:
         ice_method: str = "convolve",
         target_shape: tuple[int, int, int] = (128, 256, 256),
         v_size: float = 5.0,
-        pdb_cache_dir: str = "../pdb-data/",
+        pdb_cache_dir: str = DEFAULT_PDB_SAVEFOLDER,
         parameterization: str = "shtyrov",
         density_cutoff: float = 0.4,
         seed: int | None = None,

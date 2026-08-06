@@ -24,6 +24,13 @@ if TYPE_CHECKING:
     from Bio.PDB.Structure import Structure
 
 from .atom import atom_number
+from .config import REPO_ROOT
+
+# Anchored to the specter package's own location (repo_root/pdb-data), not a
+# plain "../pdb-data/" relative path -- that broke as soon as a caller's own
+# cwd wasn't exactly one level below the repo root (e.g. a notebook launched
+# from anywhere else), see REPO_ROOT's own comment in config.py.
+DEFAULT_PDB_SAVEFOLDER = str(REPO_ROOT / "pdb-data")
 
 # Suppress only PDBConstructionWarnings
 warnings.simplefilter("ignore", PDBConstructionWarning)
@@ -34,7 +41,7 @@ class PDB:
         self,
         pdb_source: str,
         assembly: bool = True,
-        savefolder: str = "../pdb-data/",
+        savefolder: str = DEFAULT_PDB_SAVEFOLDER,
         origin: tuple[float, float, float] | None = None,
         verbose: bool = True,
         compute_atom_species: bool = False,
@@ -51,7 +58,9 @@ class PDB:
             Whether to fetch the biological assembly when using a PDB ID.
             Default is True.
         savefolder : str, optional
-            Folder to store downloaded PDB/mmCIF files. Default is '../pdb-data/'.
+            Folder to store downloaded PDB/mmCIF files. Default is the
+            specter repo's own `pdb-data/` (anchored to the package's own
+            location via `REPO_ROOT`, not the caller's cwd).
         origin : tuple[float, float, float] or None, optional
             Custom origin to subtract from coordinates. If None, coordinates
             are centered on their geometric center. If a tuple, that point is
@@ -132,7 +141,7 @@ class PDB:
     def fetch_pdb_file(
         pdb_id: str,
         ext: str = "cif",
-        savefolder: str = "../pdb-data/",
+        savefolder: str = DEFAULT_PDB_SAVEFOLDER,
         assembly: bool | int = True,
         verbose: bool = True,
     ) -> str:
@@ -198,7 +207,11 @@ class PDB:
         with gzip.open(io.BytesIO(r.content), "rt") as f:
             cif_content = f.read()
 
-        # Save to file
+        # Save to file -- savefolder is just a plain relative-or-absolute
+        # path (resolved against the current process's cwd, not the
+        # specter repo root), so create it on demand rather than crashing
+        # with a raw FileNotFoundError if it doesn't exist yet.
+        os.makedirs(savefolder, exist_ok=True)
         with open(file_path, "w") as f:
             f.write(cif_content)
 

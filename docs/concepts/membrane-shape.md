@@ -50,10 +50,10 @@ The organelle's shape is a sum of these patterns with random coefficients
 ## Coefficient spectrum
 
 \[
-c_{lm} \sim \mathcal{N}\!\left(0,\ \big[l(l+1)\big]^{-p}\right), \qquad p = \texttt{sh\_spectrum\_power}
+c_{lm} \sim \mathcal{N}\!\left(0,\ \big[l(l+1)\big]^{-p}\right)
 \]
 
-\(p = 2\) (default) reproduces the Helfrich (1973) thermal bending-mode
+\(p\) is `sh_spectrum_power`. \(p = 2\) (default) reproduces the Helfrich (1973) thermal bending-mode
 spectrum of a lipid bilayer: long-wavelength undulations dominate,
 short-wavelength wrinkles are suppressed. Lower \(p\) shifts weight toward
 finer, less membrane-like roughness.

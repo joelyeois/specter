@@ -41,7 +41,7 @@ import torch
 from scipy import ndimage
 
 from .._cts_membrane import MembraneBlobGenerator, _point_in_alpha_solid
-from ._field import MembraneField, _grid_points_xyz
+from ._field import MembraneField, _grid_points_xyz, _signed_distance_transform
 
 # Verified directly (see this module's own docstring): a 25A-radius blob at
 # ~7 voxels/radius made sample_surface_sites find zero valid transmembrane
@@ -174,12 +174,9 @@ def generate_membrane_field_alpha_shape(
     # once already (its own signed_dist there is deliberately left in
     # voxel-index units for a different downstream use; MembraneField.phi
     # is physical Angstrom, a different contract, so that convention is
-    # NOT reused here).
-    dist_out = ndimage.distance_transform_edt(~inside, sampling=spacing_a)
-    dist_in = ndimage.distance_transform_edt(inside, sampling=spacing_a)
-    phi_np = dist_out - dist_in
-
-    phi = torch.as_tensor(phi_np, dtype=torch.float32, device=device)
+    # NOT reused here). See _signed_distance_transform's own docstring for
+    # why this is GPU-accelerated (optionally) rather than always scipy.
+    phi = _signed_distance_transform(inside, spacing_a, device)
 
     voxels_per_radius = blob_size_a / spacing_a
     if voxels_per_radius < _MIN_RELIABLE_VOXELS_PER_RADIUS:

@@ -107,11 +107,18 @@ write_picks = true
 annotation_version = "1.0"
 
 [compute]
-device = "cuda"                     # cpu | cuda | cuda:0 -- used ONLY for
+device = "cuda"                     # cpu | cuda | cuda:0. Non-membrane mode
+                                    # (targets/filler): used ONLY for
                                     # PotentialBuilder's potential-building
                                     # step; packing always runs on CPU
                                     # regardless (vesin's neighbor list is
-                                    # slower and OOM-prone on GPU)
+                                    # slower and OOM-prone on GPU). Membrane
+                                    # mode ([[membrane]] present): drives the
+                                    # entire MembraneGenerator/
+                                    # MembraneTomogramGenerator pipeline for
+                                    # every instance (shape field, bilayer
+                                    # profile, rasterization, transmembrane
+                                    # protein rendering).
 
 [output]
 output_dir = "./output/"

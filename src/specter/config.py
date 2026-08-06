@@ -733,10 +733,13 @@ TOMOGRAM_HELP: dict[str, str] = {
     "does). {filename}_protein_labels.mrc is written in both modes; "
     "membrane mode also writes {filename}_membrane_labels.mrc (which "
     "instance) and {filename}_regions.mrc (0=cytosol/1=shell/2=lumen).",
-    "device": "Device for PotentialBuilder's potential-building step only: "
-    "cpu | cuda | cuda:0. Packing always runs on CPU regardless (vesin's "
-    "neighbor list is both slower and OOM-prone on GPU at realistic "
-    "particle counts).",
+    "device": "cpu | cuda | cuda:0. Non-membrane mode (targets/filler): "
+    "used only for PotentialBuilder's potential-building step -- packing "
+    "always runs on CPU regardless (vesin's neighbor list is both slower "
+    "and OOM-prone on GPU at realistic particle counts). Membrane mode "
+    "(membrane present): drives the entire MembraneGenerator/"
+    "MembraneTomogramGenerator pipeline for every instance (shape field, "
+    "bilayer profile, rasterization, transmembrane protein rendering).",
     "output_dir": "Directory to save output files.",
     "filename": "Base name for the output volume (no extension).",
 }

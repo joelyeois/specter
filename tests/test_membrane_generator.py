@@ -1,9 +1,12 @@
 import warnings
 from pathlib import Path
 
+import numpy as np
 import pytest
 import torch
+from scipy import ndimage
 
+from specter.specimen.membrane._field import _signed_distance_transform
 from specter.specimen.membrane._generator import (
     MembraneGenerator,
     TransmembraneSpec,
@@ -759,3 +762,70 @@ def test_place_transmembrane_warns_on_partial_or_zero_placement():
     with pytest.warns(UserWarning, match="requested transmembrane sites were found"):
         placements = gen.place_transmembrane(min_spacing_a=15.0)
     assert len(placements) < 8
+
+
+def _synthetic_inside_mask(shape=(30, 30, 30), radius=8.0) -> np.ndarray:
+    zz, yy, xx = np.mgrid[0 : shape[0], 0 : shape[1], 0 : shape[2]]
+    c = np.array(shape) / 2.0
+    r = np.sqrt((zz - c[0]) ** 2 + (yy - c[1]) ** 2 + (xx - c[2]) ** 2)
+    return r < radius
+
+
+def test_signed_distance_transform_cpu_matches_scipy_directly():
+    inside = _synthetic_inside_mask()
+    spacing_a = 3.0
+    phi = _signed_distance_transform(inside, spacing_a, device="cpu")
+
+    dist_out = ndimage.distance_transform_edt(~inside, sampling=spacing_a)
+    dist_in = ndimage.distance_transform_edt(inside, sampling=spacing_a)
+    expected = torch.as_tensor(dist_out - dist_in, dtype=torch.float32)
+
+    assert phi.device.type == "cpu"
+    assert torch.equal(phi, expected)
+
+
+def test_signed_distance_transform_gpu_matches_cpu_when_cupy_available():
+    if not torch.cuda.is_available():
+        pytest.skip("CUDA not available")
+    pytest.importorskip("cupy", reason="optional gpu-edt extra not installed")
+
+    inside = _synthetic_inside_mask()
+    spacing_a = 3.0
+    phi_gpu = _signed_distance_transform(inside, spacing_a, device="cuda")
+    phi_cpu = _signed_distance_transform(inside, spacing_a, device="cpu")
+
+    assert phi_gpu.device.type == "cuda"
+    assert torch.allclose(phi_gpu.cpu(), phi_cpu, atol=1e-4)
+
+
+def test_signed_distance_transform_falls_back_to_cpu_without_cupy(monkeypatch):
+    # Regression test: the optional GPU path (cupyx.scipy.ndimage.
+    # distance_transform_edt) must degrade gracefully -- not crash -- when
+    # 'cupy' isn't installed, since it's an optional extra
+    # (`specter[gpu-edt]`), not a core dependency. Requires an actual CUDA
+    # device since the GPU path is only ever attempted for device="cuda".
+    if not torch.cuda.is_available():
+        pytest.skip("CUDA not available")
+
+    import builtins
+
+    real_import = builtins.__import__
+
+    def fake_import(name, *args, **kwargs):
+        if name == "cupy" or name.startswith("cupy."):
+            raise ImportError("simulated: cupy not installed")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+
+    inside = _synthetic_inside_mask()
+    spacing_a = 3.0
+    with pytest.warns(UserWarning, match="cupy' dependency isn't installed"):
+        phi = _signed_distance_transform(inside, spacing_a, device="cuda")
+
+    dist_out = ndimage.distance_transform_edt(~inside, sampling=spacing_a)
+    dist_in = ndimage.distance_transform_edt(inside, sampling=spacing_a)
+    expected = torch.as_tensor(dist_out - dist_in, dtype=torch.float32)
+
+    assert phi.device.type == "cuda"
+    assert torch.equal(phi.cpu(), expected)

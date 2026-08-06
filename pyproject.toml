@@ -40,6 +40,9 @@ docs = [
     "mkdocstrings[python]>=0.30",
     "mkdocs-material>=9.6",  # fallback renderer for ReadTheDocs' native mkdocs builder
 ]
+gpu-edt = [
+    "cupy-cuda12x>=13.0",
+]
 
 [dependency-groups]
 dev = [
@@ -72,6 +75,8 @@ polnet = { git = "https://github.com/anmartinezs/polnet.git", rev = "v1.1.2" }
 module = [
     "biotite.*",
     "cryosparc.*",
+    "cupy.*",
+    "cupyx.*",
     "ipywidgets.*",
     "mrcfile.*",
     "pandas.*",

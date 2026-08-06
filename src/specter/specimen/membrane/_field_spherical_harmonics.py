@@ -73,10 +73,9 @@ import warnings
 import numpy as np
 import torch
 import torch.nn.functional as F
-from scipy import ndimage
 from scipy.special import sph_harm_y, sph_harm_y_all
 
-from ._field import MembraneField, _grid_points_xyz
+from ._field import MembraneField, _grid_points_xyz, _signed_distance_transform
 
 # Same underlying cause as _field_alpha.py's own identically-named constant:
 # _placement.py's Newton projection (`x - phi(x) * normal(x)`) only converges
@@ -454,11 +453,9 @@ def generate_membrane_field_spherical_harmonics(
     r_surface = np.clip(1.0 + sh_amplitude * perturbation, 0.05, None)
     inside = (r_prime < r_surface).reshape(shape_zyx)
 
-    dist_out = ndimage.distance_transform_edt(~inside, sampling=spacing_a)
-    dist_in = ndimage.distance_transform_edt(inside, sampling=spacing_a)
-    phi_np = dist_out - dist_in
-
-    phi = torch.as_tensor(phi_np, dtype=torch.float32, device=device)
+    # See _signed_distance_transform's own docstring for why this is
+    # GPU-accelerated (optionally) rather than always scipy.
+    phi = _signed_distance_transform(inside, spacing_a, device)
 
     voxels_per_radius = min(sh_axes_a) / spacing_a
     if voxels_per_radius < _MIN_RELIABLE_VOXELS_PER_RADIUS:

@@ -34,6 +34,20 @@ uv pip install -e .
         │ simulate           Simulate cryo-EM/cryo-ET data                             │
         ╰──────────────────────────────────────────────────────────────────────────────╯
 
+## Optional extras
+
+- `docs` -- build these docs locally (`uv sync --extra docs`).
+- `gpu-edt` -- GPU-accelerated (CuPy-backed) distance transforms for the
+  `spherical_harmonics`/`alpha_shape` membrane shape backends
+  (`specter.specimen.membrane`). Purely a speed optimization: falls back
+  automatically to CPU (`scipy`) when not installed, or when no CUDA
+  device is available at runtime, so it's safe to skip. Requires a CUDA
+  12.x GPU (matching the CUDA 12.1 build `torch` itself is pinned to).
+
+    ```bash
+    uv sync --extra gpu-edt
+    ```
+
 ## Installing with conda/pip instead
 
 ```bash

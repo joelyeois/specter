@@ -176,7 +176,7 @@ def _active_crop(
     volume: torch.Tensor,
     centers_zyx: list[torch.Tensor],
     margin: int,
-) -> tuple[tuple[slice, slice, slice], torch.Tensor]:
+) -> tuple[tuple[slice, ...], torch.Tensor]:
     if not centers_zyx:
         full = tuple(slice(0, s) for s in volume.shape)
         return full, volume
@@ -190,7 +190,7 @@ def _active_crop(
 
 def _repad_like(
     cropped: torch.Tensor,
-    slices: tuple[slice, slice, slice],
+    slices: tuple[slice, ...],
     shape: Sequence[int],
 ) -> torch.Tensor:
     out = cropped.new_zeros(tuple(shape))
@@ -401,7 +401,7 @@ class TetrisPackingSpecimenGenerator:
 
     def _current_occupancy(
         self, volume: torch.Tensor, centers_zyx: list[torch.Tensor], margin: int
-    ) -> tuple[tuple[slice, slice, slice], torch.Tensor]:
+    ) -> tuple[tuple[slice, ...], torch.Tensor]:
         slices, cropped = _active_crop(volume, centers_zyx, margin)
         binary = self._make_binary(cropped).to(torch.float32)
         return slices, binary
@@ -542,7 +542,7 @@ class TetrisPackingSpecimenGenerator:
                         dtype=torch.float32,
                     )
 
-                    chosen = active_indices[torch.multinomial(weights, 1).item()]
+                    chosen = active_indices[int(torch.multinomial(weights, 1).item())]
 
                     spec = self.protein_specs[chosen]
                     template = templates[chosen]

@@ -493,7 +493,12 @@ def generate_membrane_field_spherical_harmonics(
             stacklevel=2,
         )
 
-    return MembraneField(phi=phi, spacing_a=spacing_a, origin_xyz=origin_xyz.to(device))
+    return MembraneField(
+        phi=phi,
+        spacing_a=spacing_a,
+        origin_xyz=origin_xyz.to(device),
+        clipped_at_boundary=clipped,
+    )
 
 
 __all__ = ["generate_membrane_field_spherical_harmonics"]

@@ -34,11 +34,31 @@ density volumes into the shared canvas, then classify shell/lumen/cytosol
 regions ONCE on the composite -- `classify_membrane_regions`'s connected-
 components approach already handles multiple disjoint compartments (several
 separate vesicles, whether from one instance or several) without any
-special-casing. v1 placement is explicit-`position_xyz`-only (no automatic
-overlap avoidance/auto-packing -- a separate, later feature) and every
-instance renders at the full shared canvas size (a smaller per-instance box
-is a natural later addition, not precluded by the compositing math here,
-which is already shape-agnostic).
+special-casing.
+
+Each instance renders on its OWN local working grid -- typically much
+smaller than the shared canvas (`MembraneGenerator`'s own `target_shape_zyx`
+auto-sizes from the organelle's size when omitted; see that class's own
+docstring) -- then `clip_insert_bounds`-based compositing crops/places it
+into the shared canvas at `position_xyz`, the same mechanism already used
+for transmembrane protein templates. This was always how the compositing
+math worked (`_insert_volume_max`/`_insert_shell_label` never required a
+same-shape `local`); it just wasn't exercised until `MembraneGenerator`
+gained auto-sizing, since giving every instance a hand-picked box the size
+of the whole tomogram was the only practical option before that.
+
+`position_xyz` is optional per instance: when omitted, `generate()` resolves
+it via `pack_hard_spheres_3d` (the same RSA backend used for cytosol/lumen
+protein packing below), treating each instance as a bounding sphere -- an
+instance that doesn't fit without colliding (with another auto-placed
+instance; NOT currently checked against explicitly-`position_xyz`'d ones,
+a known v1 gap) is dropped rather than retried at a new position, matching
+this module's "reject and move on" philosophy elsewhere. An instance whose
+own `clipped_at_boundary` ends up `True` after `generate()` (its local grid
+was too small for what actually got drawn) is also dropped, with its own
+warning -- caught even though the bounding-sphere check above already tries
+to avoid this, since that check is necessarily approximate for
+`swept_spline`'s wandering-path shape.
 
 Per-instance voxel labels exist for TWO separate categories:
 `membrane_labels` (which membrane instance a shell voxel belongs to, new)
@@ -153,6 +173,27 @@ def _insert_volume_max(
     return volume
 
 
+def _instance_bounding_radius(generator: MembraneGenerator) -> float:
+    """Conservative bounding-sphere radius for a membrane instance's own
+    (already-resolved, see MembraneGenerator.__init__) size, used only for
+    collision-rejecting random placement -- deliberately generous rather
+    than exact (this module's own "not caring about packing tightly"
+    philosophy, see its docstring): for `swept_spline`, a wandering path's
+    true bounding box is smaller than its contour length (same reasoning
+    MembraneGenerator's own auto-sizing uses), so treating the FULL
+    contour length as if straight overestimates, not underestimates."""
+    if generator.shape_backend == "spherical_harmonics":
+        return max(generator.sh_axes_a)
+    if generator.shape_backend == "swept_spline":
+        return 0.5 * generator.swept_total_length_a + generator.swept_tube_radius_a
+    # metaball/alpha_shape (deprecated): neither has one clean "size"
+    # parameter the way the two supported backends do, and target_shape_zyx
+    # is required (not auto-sized) for them -- fall back to half that box's
+    # own smallest extent as a conservative stand-in.
+    tz, ty, tx = generator.target_shape_zyx
+    return 0.5 * min(tz, ty, tx) * generator.v_size
+
+
 def _insert_shell_label(
     labels: torch.Tensor,
     shell_mask: torch.Tensor,
@@ -232,21 +273,27 @@ class MembraneInstance:
     ----------
     generator : MembraneGenerator
         Already-configured (not yet `.generate()`-called) membrane
-        generator -- any `shape_backend`, independent per instance. v1
-        renders every instance at the FULL shared canvas size (its own
-        `target_shape_zyx` should match the owning
-        `MembraneTomogramGenerator`'s `target_shape_zyx`), always centered
-        at physical (0,0,0) (`MembraneGenerator`'s own convention), then
-        shifted into place via `position_xyz` at composite time.
+        generator -- any `shape_backend`, independent per instance. Always
+        centered at physical (0,0,0) (`MembraneGenerator`'s own
+        convention), then shifted into place via `position_xyz` at
+        composite time -- its own `target_shape_zyx` need NOT match the
+        owning `MembraneTomogramGenerator`'s (typically shouldn't: leave it
+        `None` for a small, auto-sized local grid, see `MembraneGenerator`'s
+        own docstring).
     position_xyz : tuple of float, optional
         Physical (x, y, z) offset from the shared tomogram's own center,
-        Angstrom. Default (0.0, 0.0, 0.0). v1 has no automatic overlap
-        avoidance -- choose values that don't collide, or expect a
-        first-write-wins overlap warning.
+        Angstrom. Default `None`: resolved automatically by `generate()`
+        via collision-rejecting random placement (see this module's own
+        docstring) -- an instance that doesn't fit gets dropped, and
+        `position_xyz` is set here (mutated in place) for whichever
+        instances are accepted, so it's inspectable afterward. Pass an
+        explicit value to place (and exclude from collision-avoidance
+        against other auto-placed instances -- a known v1 gap, see module
+        docstring) a specific instance manually instead.
     """
 
     generator: MembraneGenerator
-    position_xyz: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    position_xyz: tuple[float, float, float] | None = None
 
 
 class MembraneTomogramGenerator:
@@ -276,9 +323,10 @@ class MembraneTomogramGenerator:
         for `"lumen"` species targets 20% of the LUMEN's own volume, not
         20% of the whole tomogram. Default 0.2.
     gap_angstrom : float, optional
-        Minimum clearance between placed spheres' surfaces, and between a
-        placed sphere and the membrane shell (same value used for both).
-        Default 5.0.
+        Minimum clearance between placed spheres' surfaces, between a
+        placed sphere and the membrane shell, AND between auto-placed
+        membrane instances' own bounding spheres (all three reuse this one
+        value). Default 5.0.
     region_density_threshold : float, optional
         Passed to `classify_membrane_regions`. Default None (that
         function's own default).
@@ -403,16 +451,73 @@ class MembraneTomogramGenerator:
             target_shape[2] * v_size,
         )
 
+        # Resolve any omitted position_xyz via collision-rejecting random
+        # placement, treating each instance as a bounding sphere (see
+        # _instance_bounding_radius) -- an instance that doesn't fit
+        # without colliding is dropped (never .generate()-called at all,
+        # cheaper than generating first and rejecting after), matching
+        # this module's own "reject and move on" packing philosophy rather
+        # than retrying at new positions. Instances with an explicit
+        # position_xyz are placed as given and NOT included in this
+        # collision check (a known v1 gap -- see module docstring).
+        auto_instances = [
+            mi for mi in self.membrane_instances if mi.position_xyz is None
+        ]
+        to_composite = [
+            mi for mi in self.membrane_instances if mi.position_xyz is not None
+        ]
+        if auto_instances:
+            radii = torch.tensor(
+                [_instance_bounding_radius(mi.generator) for mi in auto_instances]
+            )
+            coords, accepted_idx = pack_hard_spheres_3d(
+                radii,
+                box,
+                gap=self.gap_angstrom,
+                seed=self.seed,
+                device=self.device,
+            )
+            n_dropped = len(auto_instances) - accepted_idx.numel()
+            if n_dropped:
+                warnings.warn(
+                    f"MembraneTomogramGenerator: {n_dropped}/{len(auto_instances)} "
+                    "membrane instances with automatic (position_xyz=None) "
+                    "placement did not fit without colliding and were dropped "
+                    "(never generated).",
+                    stacklevel=2,
+                )
+            for k, orig_idx in enumerate(accepted_idx.tolist()):
+                mi = auto_instances[orig_idx]
+                mi.position_xyz = tuple(coords[k].tolist())
+                to_composite.append(mi)
+
         # Generate + place transmembrane proteins per instance, each in its
-        # own centered local frame (MembraneGenerator unmodified), then
-        # composite densities into the shared canvas (max-merge) before any
-        # region classification -- classify_membrane_regions needs the full
-        # composite, not per-instance pieces.
+        # own centered local frame, then composite densities into the
+        # shared canvas (max-merge) before any region classification --
+        # classify_membrane_regions needs the full composite, not
+        # per-instance pieces.
         volume = torch.zeros(target_shape, dtype=torch.float32)
         self.transmembrane_placements = []
         instance_volumes: list[tuple[MembraneInstance, torch.Tensor]] = []
-        for mi in self.membrane_instances:
+        for mi in to_composite:
+            # Every mi here has a concrete position_xyz by construction:
+            # to_composite starts as the explicitly-positioned instances,
+            # then only accepted (position_xyz just set above) auto_instances
+            # are appended to it.
+            assert mi.position_xyz is not None
             mi.generator.generate()
+            if mi.generator.clipped_at_boundary:
+                warnings.warn(
+                    "MembraneTomogramGenerator: a membrane instance's own "
+                    "working grid was too small for the organelle size it "
+                    "actually drew (clipped_at_boundary=True on its "
+                    "MembraneGenerator) -- skipped rather than compositing a "
+                    "visibly truncated shape. Increase that instance's own "
+                    "target_shape_zyx/v_size, or omit target_shape_zyx "
+                    "entirely for auto-sizing.",
+                    stacklevel=2,
+                )
+                continue
             tm_placements = mi.generator.place_transmembrane(
                 min_spacing_a=self.min_transmembrane_spacing_a
             )
@@ -440,6 +545,7 @@ class MembraneTomogramGenerator:
 
         membrane_labels = torch.zeros(target_shape, dtype=torch.int32)
         for instance_id, (mi, local_volume) in enumerate(instance_volumes, start=1):
+            assert mi.position_xyz is not None  # see identical assert above
             shell_mask = local_volume > threshold
             membrane_labels, overlap = _insert_shell_label(
                 membrane_labels, shell_mask, instance_id, mi.position_xyz, v_size

@@ -64,11 +64,20 @@ class MembraneField:
         Isotropic voxel spacing of ``phi``, Angstrom.
     origin_xyz : torch.Tensor
         Physical ``(x, y, z)`` location of grid index ``(0, 0, 0)``, Angstrom.
+    clipped_at_boundary : bool, optional
+        Whether the organelle's solid interior touched the working grid's
+        own boundary during construction -- the same condition each shape
+        backend's own boundary-clip warning already fires on, surfaced here
+        as a plain checkable flag (rather than requiring a caller to sniff
+        warning text) so a higher-level caller (e.g.
+        ``MembraneTomogramGenerator``) can programmatically skip compositing
+        a visibly-truncated instance. Default ``False``.
     """
 
     phi: torch.Tensor
     spacing_a: float
     origin_xyz: torch.Tensor
+    clipped_at_boundary: bool = False
 
     def sample(self, points_xyz: torch.Tensor) -> torch.Tensor:
         """
@@ -440,12 +449,17 @@ def generate_membrane_field(
 
     phi = cap_curvature(phi, spacing_a, curvature_iterations, curvature_step_fraction)
 
-    _warn_if_clipped_at_boundary(phi)
+    clipped = _warn_if_clipped_at_boundary(phi)
 
-    return MembraneField(phi=phi, spacing_a=spacing_a, origin_xyz=origin_xyz)
+    return MembraneField(
+        phi=phi, spacing_a=spacing_a, origin_xyz=origin_xyz, clipped_at_boundary=clipped
+    )
 
 
-def _warn_if_clipped_at_boundary(phi: torch.Tensor) -> None:
+def _warn_if_clipped_at_boundary(phi: torch.Tensor) -> bool:
+    """Warn (as before) and return whether the solid interior touches
+    phi's own boundary, so callers can act on it programmatically instead
+    of only seeing the warning (see MembraneField.clipped_at_boundary)."""
     boundary = torch.cat(
         [
             phi[0].reshape(-1),
@@ -456,7 +470,8 @@ def _warn_if_clipped_at_boundary(phi: torch.Tensor) -> None:
             phi[:, :, -1].reshape(-1),
         ]
     )
-    if bool((boundary < 0).any()):
+    clipped = bool((boundary < 0).any())
+    if clipped:
         warnings.warn(
             "generate_membrane_field: the membrane's solid interior "
             "(phi < 0) touches shape_zyx's boundary -- the organic shape "
@@ -468,6 +483,7 @@ def _warn_if_clipped_at_boundary(phi: torch.Tensor) -> None:
             "extent -- including noise excursions -- fits within the grid.",
             stacklevel=2,
         )
+    return clipped
 
 
 def _signed_distance_transform(

@@ -144,7 +144,14 @@ def test_membrane_tomogram_generator_warns_when_lumen_species_has_no_region():
             seed=0,
         )
     gen = MembraneTomogramGenerator(
-        membrane_instances=[MembraneInstance(generator=mgen)],
+        # Explicit position_xyz -- this test's own oversized-radius trick
+        # (deliberately bigger than the box) would otherwise also get
+        # rejected by auto-placement's collision/fit check, dropping the
+        # instance and short-circuiting the actual thing under test (the
+        # "no lumen region" warning path, not placement itself).
+        membrane_instances=[
+            MembraneInstance(generator=mgen, position_xyz=(0.0, 0.0, 0.0))
+        ],
         target_shape_zyx=(24, 24, 24),
         v_size=8.0,
         protein_specs=[
@@ -224,16 +231,89 @@ def test_membrane_tomogram_generator_composites_two_non_overlapping_instances():
     assert (id2_x >= big_shape_zyx[2] // 2).float().mean() > 0.8
 
 
+def test_membrane_tomogram_generator_auto_places_non_colliding_instances():
+    """Two instances with position_xyz left at its default (None) in a box
+    generously sized for both -- both should be accepted (no "dropped"
+    warning), get distinct, non-overlapping labels, and have their own
+    position_xyz mutated in place to the resolved coordinates (inspectable
+    after generate())."""
+    big_shape_zyx = (140, 140, 140)
+    kwargs = dict(_MEMBRANE_KWARGS, target_shape_zyx=big_shape_zyx)
+    mgen_a = MembraneGenerator(seed=0, **kwargs)
+    mgen_b = MembraneGenerator(seed=1, **kwargs)
+    instance_a = MembraneInstance(generator=mgen_a)
+    instance_b = MembraneInstance(generator=mgen_b)
+    assert instance_a.position_xyz is None
+    gen = MembraneTomogramGenerator(
+        membrane_instances=[instance_a, instance_b],
+        target_shape_zyx=big_shape_zyx,
+        v_size=_V_SIZE,
+        protein_specs=[
+            TomogramProteinSpec(pdb_source=str(_LARGE_FIXTURE), location="cytosol")
+        ],
+        occupancy_fraction=0.05,
+        pdb_cache_dir="pdb-data/",
+        seed=0,
+    )
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        gen.generate()
+    dropped_warns = [x for x in w if "dropped" in str(x.message)]
+    assert not dropped_warns
+
+    assert instance_a.position_xyz is not None
+    assert instance_b.position_xyz is not None
+    labels = gen.membrane_labels
+    assert labels is not None
+    assert set(torch.unique(labels).tolist()) - {0} == {1, 2}
+
+
+def test_membrane_tomogram_generator_drops_instances_that_dont_fit():
+    """Several instances, deliberately too many/too-large for a small box
+    -- some must be dropped (warned about), and a dropped instance's own
+    generator is never .generate()-called (self.field stays None) since
+    rejection happens before generation, not after."""
+    small_shape_zyx = (30, 30, 30)  # 30*8 = 240 A per axis
+    kwargs = dict(
+        _MEMBRANE_KWARGS, target_shape_zyx=small_shape_zyx, sh_axes_a=(70.0, 70.0, 70.0)
+    )
+    instances = [
+        MembraneInstance(generator=MembraneGenerator(seed=i, **kwargs))
+        for i in range(4)
+    ]
+    gen = MembraneTomogramGenerator(
+        membrane_instances=instances,
+        target_shape_zyx=small_shape_zyx,
+        v_size=_V_SIZE,
+        protein_specs=[
+            TomogramProteinSpec(pdb_source=str(_LARGE_FIXTURE), location="cytosol")
+        ],
+        occupancy_fraction=0.05,
+        pdb_cache_dir="pdb-data/",
+        seed=0,
+    )
+    with pytest.warns(UserWarning, match="did not fit without colliding"):
+        gen.generate()
+
+    n_placed = sum(1 for mi in instances if mi.position_xyz is not None)
+    assert 0 < n_placed < len(instances)
+    for mi in instances:
+        if mi.position_xyz is None:
+            assert mi.generator.field is None
+
+
 def test_membrane_tomogram_generator_overlapping_instances_first_write_wins():
-    """Two fully-overlapping instances (both at the default position_xyz)
-    -- warns on overlap, membrane_labels shows only ID 1 in the overlap
-    region (first-write-wins, deterministic)."""
+    """Two fully-overlapping instances (both explicitly at the origin --
+    position_xyz now defaults to None/auto-placed, so this test pins both
+    to (0,0,0) explicitly to keep testing overlap detection specifically,
+    not auto-placement) -- warns on overlap, membrane_labels shows only ID
+    1 in the overlap region (first-write-wins, deterministic)."""
     mgen_a = MembraneGenerator(seed=0, **_MEMBRANE_KWARGS)
     mgen_b = MembraneGenerator(seed=0, **_MEMBRANE_KWARGS)
     gen = MembraneTomogramGenerator(
         membrane_instances=[
-            MembraneInstance(generator=mgen_a),
-            MembraneInstance(generator=mgen_b),
+            MembraneInstance(generator=mgen_a, position_xyz=(0.0, 0.0, 0.0)),
+            MembraneInstance(generator=mgen_b, position_xyz=(0.0, 0.0, 0.0)),
         ],
         target_shape_zyx=_TARGET_SHAPE_ZYX,
         v_size=_V_SIZE,
@@ -266,7 +346,9 @@ def test_membrane_tomogram_generator_transmembrane_reflects_position_offset():
         transmembrane_specs=transmembrane_specs, seed=0, **kwargs
     )
     gen_origin = MembraneTomogramGenerator(
-        membrane_instances=[MembraneInstance(generator=mgen_origin)],
+        membrane_instances=[
+            MembraneInstance(generator=mgen_origin, position_xyz=(0.0, 0.0, 0.0))
+        ],
         target_shape_zyx=_TARGET_SHAPE_ZYX,
         v_size=_V_SIZE,
         protein_specs=[TomogramProteinSpec(pdb_source=str(_SMALL_FIXTURE))],

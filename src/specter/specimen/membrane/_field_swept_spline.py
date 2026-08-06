@@ -274,6 +274,17 @@ def generate_membrane_field_swept_spline(
         noise = ndimage.gaussian_filter1d(
             noise, sigma=radius_variation_sigma_points, mode="nearest"
         )
+        # Center BEFORE scaling to unit RMS, not just divide by std: at
+        # small n_points, a smoothed sequence's own mean is generically
+        # nonzero (not guaranteed near zero the way the raw i.i.d. noise
+        # was), and dividing an off-center sequence by its own (possibly
+        # small) std amplifies that offset along with the genuine spread --
+        # confirmed directly to occasionally shift EVERY point several
+        # std past the floor clip (e.g. n_points=18, seed=3 above: raw
+        # smoothed mean -0.43 vs std 0.06, an uncentered divide put every
+        # normalized value below -5, collapsing the whole radius sequence
+        # to the floor instead of the intended mild, varying perturbation).
+        noise = noise - noise.mean()
         noise_std = float(noise.std())
         if noise_std > 0.0:
             noise = noise / noise_std
@@ -325,9 +336,14 @@ def generate_membrane_field_swept_spline(
     phi = blend_field(sources, points_xyz, blend_sharpness_a)
     phi = cap_curvature(phi, spacing_a, curvature_iterations, curvature_step_fraction)
 
-    _warn_if_clipped_at_boundary(phi)
+    clipped = _warn_if_clipped_at_boundary(phi)
 
-    return MembraneField(phi=phi, spacing_a=spacing_a, origin_xyz=origin_xyz.to(device))
+    return MembraneField(
+        phi=phi,
+        spacing_a=spacing_a,
+        origin_xyz=origin_xyz.to(device),
+        clipped_at_boundary=clipped,
+    )
 
 
 __all__ = ["generate_membrane_field_swept_spline"]

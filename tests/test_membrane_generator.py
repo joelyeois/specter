@@ -865,6 +865,48 @@ def test_swept_spline_radius_variation_changes_field_and_is_reproducible():
     assert not torch.equal(field_a.phi, field_constant.phi)
 
 
+def test_swept_spline_radius_variation_mean_preserved_at_small_n_points():
+    """Regression test: at few path points, a smoothed noise sequence's own
+    mean is generically nonzero (not guaranteed near zero the way i.i.d.
+    noise was) -- dividing by std alone (not centering first) amplified
+    that offset, collapsing every drawn radius to the _MIN_RADIUS_FRACTION
+    floor for some seeds instead of the intended mild variation around
+    tube_radius_a. Reproduces the exact failing case found via
+    MembraneGenerator's swept-spline defaults (18 points, seed 3): mean
+    drawn radius must land close to tube_radius_a, not near the floor."""
+    import numpy as np
+    from scipy import ndimage
+
+    from specter.specimen.membrane._field_swept_spline import (
+        _MIN_RADIUS_FRACTION,
+        _sample_wandering_path,
+    )
+
+    total_length_a, step_length_a, tube_radius_a = (
+        262.2857142857143,
+        15.0,
+        21.857142857142858,
+    )
+    radius_variation, sigma_points, flexibility, seed = 0.1943228840827942, 2.0, 0.15, 3
+
+    n_points = max(2, round(total_length_a / step_length_a) + 1)
+    rng = np.random.default_rng(seed)
+    _sample_wandering_path(n_points, step_length_a, flexibility, rng)
+    noise = rng.normal(size=n_points)
+    noise = ndimage.gaussian_filter1d(noise, sigma=sigma_points, mode="nearest")
+    noise = noise - noise.mean()
+    noise_std = float(noise.std())
+    if noise_std > 0.0:
+        noise = noise / noise_std
+    radii = tube_radius_a * np.clip(
+        1.0 + radius_variation * noise, _MIN_RADIUS_FRACTION, None
+    )
+
+    assert abs(radii.mean() - tube_radius_a) < 0.1 * tube_radius_a
+    floor = _MIN_RADIUS_FRACTION * tube_radius_a
+    assert not np.allclose(radii, floor, atol=0.5)
+
+
 def test_swept_spline_radius_variation_rejects_negative():
     from specter.specimen.membrane._field_swept_spline import (
         generate_membrane_field_swept_spline,

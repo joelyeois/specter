@@ -215,7 +215,12 @@ def generate_membrane_field_alpha_shape(
             stacklevel=2,
         )
 
-    return MembraneField(phi=phi, spacing_a=spacing_a, origin_xyz=origin_xyz.to(device))
+    return MembraneField(
+        phi=phi,
+        spacing_a=spacing_a,
+        origin_xyz=origin_xyz.to(device),
+        clipped_at_boundary=bool(clipped),
+    )
 
 
 __all__ = ["generate_membrane_field_alpha_shape"]

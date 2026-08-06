@@ -11,6 +11,7 @@ region-gating is the point, not realism.
 from __future__ import annotations
 
 import json
+import warnings
 from pathlib import Path
 
 import pytest
@@ -29,17 +30,15 @@ _LARGE_FIXTURE = Path(__file__).parent.parent / "pdb-data" / "1bxn-assembly1.cif
 _TARGET_SHAPE_ZYX = (64, 64, 64)
 _V_SIZE = 8.0
 
-# Two blended metaball sources at this scale enclose a lumen with equivalent
-# spherical radius ~48A -- comfortably bigger than 1mbo's own ~31.4A radius
-# (verified directly; smaller configs leave no room for even one instance).
+# A spherical_harmonics ellipsoid at this scale encloses a lumen with
+# equivalent spherical radius ~59A -- comfortably bigger than 1mbo's own
+# ~31.4A radius (verified directly; smaller configs leave no room for even
+# one instance).
 _MEMBRANE_KWARGS = dict(
     target_shape_zyx=_TARGET_SHAPE_ZYX,
     v_size=_V_SIZE,
-    n_sources=2,
-    radius_range_a=(60.0, 80.0),
-    spread_a=5.0,
-    noise_amplitude_a=0.0,
-    curvature_iterations=5,
+    sh_axes_a=(70.0, 70.0, 70.0),
+    sh_amplitude=0.15,
     n_lipids_per_leaflet=6,
 )
 
@@ -122,18 +121,28 @@ def test_membrane_tomogram_generator_instance_labels_match_placements():
 
 @pytest.mark.skipif(not _SMALL_FIXTURE.exists(), reason="bundled PDB fixture missing")
 def test_membrane_tomogram_generator_warns_when_lumen_species_has_no_region():
-    # tiny/flat membrane config unlikely to enclose any lumen at all
-    mgen = MembraneGenerator(
-        target_shape_zyx=(24, 24, 24),
-        v_size=8.0,
-        n_sources=1,
-        radius_range_a=(200.0, 200.0),  # much larger than the grid -> no closed shell
-        spread_a=0.0,
-        noise_amplitude_a=0.0,
-        curvature_iterations=2,
-        n_lipids_per_leaflet=6,
-        seed=0,
-    )
+    # tiny/flat membrane config unlikely to enclose any lumen at all --
+    # deliberately uses the deprecated "metaball" backend for its
+    # oversized-radius-clips-the-grid trick (a single sphere source larger
+    # than the grid never closes into a shell); the point of this test is
+    # the degenerate-geometry warning path, not backend choice.
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        mgen = MembraneGenerator(
+            target_shape_zyx=(24, 24, 24),
+            v_size=8.0,
+            shape_backend="metaball",
+            n_sources=1,
+            radius_range_a=(
+                200.0,
+                200.0,
+            ),  # much larger than the grid -> no closed shell
+            spread_a=0.0,
+            noise_amplitude_a=0.0,
+            curvature_iterations=2,
+            n_lipids_per_leaflet=6,
+            seed=0,
+        )
     gen = MembraneTomogramGenerator(
         membrane_instances=[MembraneInstance(generator=mgen)],
         target_shape_zyx=(24, 24, 24),
@@ -302,12 +311,23 @@ def test_membrane_tomogram_generator_export_picks(tmp_path):
     """export_picks: coordinate conversion (corner-relative, not centered)
     against a known placement, and transmembrane species get their own
     suffixed file distinct from cytosol/lumen files."""
+    # A bigger sh_axes_a than _MEMBRANE_KWARGS' own (100A vs 70A radius) --
+    # verified directly: 70A reliably finds zero transmembrane sites for
+    # 1mbo at this seed/box (Newton-projection surface search exhausts
+    # max_attempts against too-tight a curvature), 100A reliably finds one.
+    # This test doesn't need a lumen (cytosol-only protein_specs below), so
+    # unlike _MEMBRANE_KWARGS's own tuning target there's no competing
+    # constraint pulling toward a smaller radius.
     mgen = MembraneGenerator(
+        target_shape_zyx=_TARGET_SHAPE_ZYX,
+        v_size=_V_SIZE,
+        sh_axes_a=(100.0, 100.0, 100.0),
+        sh_amplitude=0.15,
+        n_lipids_per_leaflet=6,
         transmembrane_specs=[
             TransmembraneSpec(pdb_source=str(_SMALL_FIXTURE), frequency=1)
         ],
         seed=0,
-        **_MEMBRANE_KWARGS,
     )
     gen = MembraneTomogramGenerator(
         membrane_instances=[MembraneInstance(generator=mgen)],

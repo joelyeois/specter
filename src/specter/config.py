@@ -603,8 +603,9 @@ class TomogramConfig:
     # the tomogram's own center, default [0,0,0] -- v1 has no automatic
     # overlap avoidance between instances, choose values that don't
     # collide). See MembraneGenerator's own docstring for the full
-    # per-backend parameter set (shape_backend one of "metaball"/
-    # "alpha_shape"/"spherical_harmonics"/"swept_spline"). target_shape_zyx/
+    # per-backend parameter set (shape_backend one of "spherical_harmonics"
+    # (default)/"swept_spline", or "metaball"/"alpha_shape" -- both
+    # DEPRECATED, kept for backward compatibility only). target_shape_zyx/
     # v_size/seed/device/pdb_cache_dir come from this config's own
     # target_shape/v_size/seed/device/pdb_savefolder fields for every
     # instance, not from this dict.

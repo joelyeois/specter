@@ -95,16 +95,17 @@ def _write_membrane_test_config(
     path: Path, output_dir: Path, *, include_lumen: bool, include_transmembrane: bool
 ) -> None:
     # Same tuned scale as tests/test_tomogram_generator.py's own
-    # _MEMBRANE_KWARGS: two blended metaball sources enclosing a lumen big
-    # enough to actually hold 1mbo (verified there; smaller configs leave
-    # no room for even one instance). Lumen and transmembrane specs are
+    # _MEMBRANE_KWARGS: a spherical_harmonics ellipsoid enclosing a lumen
+    # big enough to actually hold 1mbo. Lumen and transmembrane specs are
     # kept in SEPARATE tests (not combined here) -- verified directly that
-    # inserting transmembrane protein density collapses this particular
-    # tuned lumen to 0 voxels (classify_membrane_regions' own density-
-    # threshold classification, pre-existing behavior unrelated to the CLI
-    # wiring this test suite covers -- stacking two independently-marginal
-    # conditions in one config would make this test flaky for a reason
-    # that has nothing to do with what it's meant to check).
+    # the two cases need DIFFERENT sh_axes_a: 70A reliably encloses a lumen
+    # at this seed/box but reliably finds zero transmembrane sites for 1mbo
+    # (Newton-projection surface search exhausts max_attempts against too-
+    # tight a curvature); 100A reliably places one transmembrane site but
+    # reliably encloses zero lumen at this same seed. Stacking both
+    # requirements in one config would make this test flaky for a reason
+    # that has nothing to do with what it's meant to check.
+    sh_radius_a = 100.0 if include_transmembrane else 70.0
     transmembrane_block = (
         f"""
 [[membrane_transmembrane_specs]]
@@ -126,11 +127,8 @@ location = "lumen"
     path.write_text(
         f"""
 [[membrane]]
-n_sources = 2
-radius_range_a = [60.0, 80.0]
-spread_a = 5.0
-noise_amplitude_a = 0.0
-curvature_iterations = 5
+sh_axes_a = [{sh_radius_a}, {sh_radius_a}, {sh_radius_a}]
+sh_amplitude = 0.15
 n_lipids_per_leaflet = 6
 {transmembrane_block}
 {lumen_block}
@@ -209,20 +207,15 @@ def test_cli_build_tomogram_membrane_multi_instance_smoke(tmp_path: Path) -> Non
     config_path.write_text(
         f"""
 [[membrane]]
-n_sources = 2
-radius_range_a = [50.0, 60.0]
-spread_a = 5.0
-noise_amplitude_a = 0.0
-curvature_iterations = 5
+sh_axes_a = [55.0, 55.0, 55.0]
+sh_amplitude = 0.15
 n_lipids_per_leaflet = 6
 position_xyz = [-150.0, 0.0, 0.0]
 
 [[membrane]]
-n_sources = 2
-radius_range_a = [50.0, 60.0]
-spread_a = 5.0
-noise_amplitude_a = 0.0
-curvature_iterations = 5
+shape_backend = "swept_spline"
+swept_total_length_a = 150.0
+swept_tube_radius_a = 35.0
 n_lipids_per_leaflet = 6
 position_xyz = [150.0, 0.0, 0.0]
 

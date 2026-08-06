@@ -12,11 +12,8 @@ from specter.specimen.membrane._generator import (
 _SMALL_KWARGS = dict(
     target_shape_zyx=(32, 32, 32),
     v_size=6.0,
-    n_sources=3,
-    radius_range_a=(20.0, 30.0),
-    spread_a=10.0,
-    noise_amplitude_a=0.0,
-    curvature_iterations=5,
+    sh_axes_a=(50.0, 50.0, 50.0),
+    sh_amplitude=0.15,
     n_lipids_per_leaflet=6,
 )
 
@@ -150,11 +147,8 @@ def test_max_field_voxels_coarsens_and_warns_instead_of_exploding_memory():
     gen = MembraneGenerator(
         target_shape_zyx=(32, 32, 32),
         v_size=6.0,
-        n_sources=3,
-        radius_range_a=(20.0, 30.0),
-        spread_a=10.0,
-        noise_amplitude_a=0.0,
-        curvature_iterations=5,
+        sh_axes_a=(50.0, 50.0, 50.0),
+        sh_amplitude=0.15,
         n_lipids_per_leaflet=6,
         max_field_voxels=1000,
         seed=0,
@@ -176,6 +170,76 @@ def test_max_field_voxels_default_does_not_warn_at_small_scale():
         warnings.simplefilter("error", UserWarning)
         gen = MembraneGenerator(seed=0, **_SMALL_KWARGS)
         gen.generate()  # would raise if the coarsening warning fired
+
+
+_METABALL_KWARGS = dict(
+    target_shape_zyx=(32, 32, 32),
+    v_size=6.0,
+    shape_backend="metaball",
+    n_sources=3,
+    radius_range_a=(20.0, 30.0),
+    spread_a=10.0,
+    noise_amplitude_a=0.0,
+    curvature_iterations=5,
+    n_lipids_per_leaflet=6,
+)
+
+
+def test_metaball_backend_produces_correct_shape_with_membrane_density():
+    """shape_backend="metaball" is deprecated (see
+    test_deprecated_backends_warn_on_construction) but must remain fully
+    functional -- explicit smoke coverage now that it's no longer the
+    implicit default every other test exercised for free."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        gen = MembraneGenerator(seed=0, **_METABALL_KWARGS)
+        volume = gen.generate()
+
+    assert volume.shape == _METABALL_KWARGS["target_shape_zyx"]
+    assert torch.isfinite(volume).all()
+    assert volume.max() > 0
+
+
+def test_metaball_backend_is_seed_reproducible():
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        gen_a = MembraneGenerator(seed=3, **_METABALL_KWARGS)
+        gen_b = MembraneGenerator(seed=3, **_METABALL_KWARGS)
+    volume_a = gen_a.generate()
+    volume_b = gen_b.generate()
+    assert torch.equal(volume_a, volume_b)
+
+
+@pytest.mark.parametrize("shape_backend", ["metaball", "alpha_shape"])
+def test_deprecated_backends_warn_on_construction(shape_backend):
+    with pytest.warns(DeprecationWarning, match=shape_backend):
+        if shape_backend == "metaball":
+            MembraneGenerator(seed=0, **_METABALL_KWARGS)
+        else:
+            MembraneGenerator(
+                target_shape_zyx=(80, 80, 80),
+                v_size=4.0,
+                shape_backend="alpha_shape",
+                blob_size_a=40.0,
+                blob_roughness=0.4,
+                n_lipids_per_leaflet=6,
+                seed=0,
+            )
+
+
+def test_spherical_harmonics_and_swept_spline_do_not_warn_on_construction():
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", DeprecationWarning)
+        MembraneGenerator(seed=0, **_SMALL_KWARGS)
+        MembraneGenerator(
+            target_shape_zyx=(32, 32, 32),
+            v_size=6.0,
+            shape_backend="swept_spline",
+            swept_total_length_a=60.0,
+            swept_tube_radius_a=8.0,
+            n_lipids_per_leaflet=6,
+            seed=0,
+        )
 
 
 _ALPHA_SHAPE_KWARGS = dict(

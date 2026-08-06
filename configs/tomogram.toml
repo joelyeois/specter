@@ -39,8 +39,10 @@ filler = [
 # --- Organic membrane mode (mutually exclusive with [targets]/[filler] above) ---
 # Uncomment the whole block below (and comment out/empty [targets]/[filler])
 # to build one or more organic membranes + region-gated cytosol/lumen protein
-# packing instead of hard-sphere packing. shape_backend is one of "metaball",
-# "alpha_shape", "spherical_harmonics", "swept_spline" -- see
+# packing instead of hard-sphere packing. shape_backend is one of
+# "spherical_harmonics" (default), "swept_spline" -- the two supported
+# backends -- or "metaball"/"alpha_shape", both DEPRECATED (kept for backward
+# compatibility only, emit a DeprecationWarning). See
 # specter.specimen.membrane.MembraneGenerator's own docstring for each
 # backend's full parameter set. Each [[membrane]] entry is composited into
 # the same shared tomogram at its own position_xyz (physical Angstrom offset

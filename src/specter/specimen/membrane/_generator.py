@@ -102,39 +102,43 @@ class MembraneGenerator:
     v_size : float
         Output voxel size, Angstrom. Also used to render transmembrane
         protein templates, so their scale matches the membrane's.
-    shape_backend : {"metaball", "alpha_shape", "spherical_harmonics", "swept_spline"}, optional
+    shape_backend : {"spherical_harmonics", "swept_spline", "metaball", "alpha_shape"}, optional
         Which organic-shape algorithm builds the underlying
-        :class:`~specter.specimen.membrane._field.MembraneField` --
-        `"metaball"` (default, unchanged from before this parameter
-        existed) blends `n_sources` isotropically-scattered spheres, which
-        stays a compact blob regardless of noise/curvature tuning (verified
-        by direct sweep). `"alpha_shape"` instead wraps a noisy point cloud
-        in an alpha shape (a from-scratch port of CTS's own `gen_mem.m`
-        algorithm, :func:`~specter.specimen.membrane._field_alpha.
-        generate_membrane_field_alpha_shape`), which -- via `blob_roughness`
-        -- can produce genuinely non-convex/elongated, even tube-like,
-        shapes (verified by direct sweep: 0.7/0.5/0.3/0.15 goes from a
-        rounded bowl to a twisted ribbon to a thin tube). `"spherical_harmonics"`
-        instead perturbs an ellipsoid with a random real spherical-harmonic
+        :class:`~specter.specimen.membrane._field.MembraneField`. The two
+        supported, non-deprecated options: `"spherical_harmonics"`
+        (default) perturbs an ellipsoid with a random real spherical-harmonic
         expansion (:func:`~specter.specimen.membrane.
         _field_spherical_harmonics.generate_membrane_field_spherical_harmonics`)
-        -- smooth by construction (no faceting to clean up, unlike
-        `"alpha_shape"`) and given a physically-motivated (Helfrich
+        -- smooth by construction and given a physically-motivated (Helfrich
         bending-mode) undulation spectrum, but -- being a radius function of
         direction -- restricted to STAR-CONVEX topology: good for vesicles,
         nuclei, and roughly-spherical (or ellipsoidal, via `sh_axes_a`)
-        mitochondria; cannot represent branching/self-occluding shapes the
-        way `"alpha_shape"` at low `blob_roughness` can. `"swept_spline"`
-        instead sweeps a sphere along a smoothly wandering random path
-        (:func:`~specter.specimen.membrane._field_swept_spline.
+        mitochondria; cannot represent branching/self-occluding shapes.
+        `"swept_spline"` instead sweeps a sphere along a smoothly wandering
+        random path (:func:`~specter.specimen.membrane._field_swept_spline.
         generate_membrane_field_swept_spline`) -- an elongated, tube-shaped
-        organelle (ER-tubule-like) rather than a closed blob, and unlike the
-        star-convex backends it CAN self-approach/loop back near itself
-        (a real topological capability the radius-function-of-direction
-        backends structurally lack). All four backends are read afterward
-        only through `MembraneField`'s public contract, so the calibrated
-        bilayer profile and transmembrane placement below are identical
-        either way -- this choice only affects the shape.
+        organelle (ER-tubule-like) rather than a closed blob, and unlike
+        `"spherical_harmonics"` it CAN self-approach/loop back near itself (a
+        real topological capability the radius-function-of-direction backend
+        structurally lacks).
+
+        `"metaball"` and `"alpha_shape"` are DEPRECATED (kept only for
+        backward compatibility -- constructing with either emits a
+        `DeprecationWarning`, but both remain fully functional): `"metaball"`
+        blends `n_sources` isotropically-scattered spheres, which stays a
+        compact blob regardless of noise/curvature tuning (verified by direct
+        sweep). `"alpha_shape"` wraps a noisy point cloud in an alpha shape
+        (a from-scratch port of CTS's own `gen_mem.m` algorithm,
+        :func:`~specter.specimen.membrane._field_alpha.
+        generate_membrane_field_alpha_shape`), which -- via `blob_roughness`
+        -- can produce genuinely non-convex/elongated, even tube-like, shapes
+        (verified by direct sweep: 0.7/0.5/0.3/0.15 goes from a rounded bowl
+        to a twisted ribbon to a thin tube).
+
+        All four backends are read afterward only through `MembraneField`'s
+        public contract, so the calibrated bilayer profile and transmembrane
+        placement below are identical either way -- this choice only affects
+        the shape.
     n_sources : int, optional
         Number of blended metaball sources for the organic shape.
         `"metaball"` backend only. Default 6.
@@ -289,7 +293,7 @@ class MembraneGenerator:
         self,
         target_shape_zyx: tuple[int, int, int],
         v_size: float,
-        shape_backend: str = "metaball",
+        shape_backend: str = "spherical_harmonics",
         n_sources: int = 6,
         radius_range_a: tuple[float, float] = (150.0, 400.0),
         spread_a: float | None = None,
@@ -328,9 +332,19 @@ class MembraneGenerator:
             "swept_spline",
         ):
             raise ValueError(
-                "shape_backend must be 'metaball', 'alpha_shape', "
-                "'spherical_harmonics', or 'swept_spline', got "
+                "shape_backend must be 'spherical_harmonics', 'swept_spline', "
+                "'metaball', or 'alpha_shape', got "
                 f"{shape_backend!r}"
+            )
+        if shape_backend in ("metaball", "alpha_shape"):
+            warnings.warn(
+                f"MembraneGenerator: shape_backend={shape_backend!r} is "
+                "deprecated -- 'spherical_harmonics' (the new default) and "
+                "'swept_spline' are the supported shape backends going "
+                f"forward. {shape_backend!r} remains fully functional, kept "
+                "for backward compatibility only.",
+                DeprecationWarning,
+                stacklevel=2,
             )
         tz, ty, tx = target_shape_zyx
         self.target_shape_zyx: tuple[int, int, int] = (int(tz), int(ty), int(tx))

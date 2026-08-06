@@ -297,7 +297,7 @@ def figure_degree_buildup(ref: dict) -> None:
         fontsize=11,
     )
     path = f"{OUT_DIR}/membrane-sh-degree-buildup.png"
-    plt.savefig(path, dpi=170)
+    plt.savefig(path, dpi=170, bbox_inches="tight")
     plt.close(fig)
     print(f"saved {path}")
 

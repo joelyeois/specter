@@ -20,7 +20,7 @@ from specter.config import ParticleStackConfig
 from specter.ice import resolve_icemaker
 from specter.image import normalize_particles
 from specter.imagegenerator import ImageGenerator
-from specter.io import create_particle_starfile
+from specter.io import create_particle_starfile, extract_parameters_from_csfile
 from specter.pdb import PDB
 from specter.potential import PotentialBuilder
 from specter.progress import track
@@ -74,7 +74,24 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
         config.pdb_code, assembly=config.assembly, savefolder=config.pdb_savefolder
     )
 
-    # Convert cs from mm -> Angstrom (1 mm = 1e7 Angstrom)
+    # pixel_size/voltage/alpha come from the .cs file when cs_path is set --
+    # extract once, up front, since PotentialBuilder below needs the resolved
+    # pixel_size (matches ImageGeneratorFromCoordinates' notebook counterpart).
+    cs_particles = None
+    if config.cs_path is not None:
+        cs_particles = extract_parameters_from_csfile(
+            config.cs_path, n_particles=config.n_particles
+        )
+        pixel_size = cs_particles[1].item()
+        voltage = cs_particles[0].item()
+        alpha = cs_particles[2].item()
+    else:
+        pixel_size = config.pixel_size
+        voltage = config.voltage
+        alpha = config.alpha
+
+    # Convert cs from mm -> Angstrom (1 mm = 1e7 Angstrom); unused when
+    # cs_path is set, since Cs then comes per-particle from the .cs file.
     cs_angstrom = config.cs * 1e7
 
     # Only the main process (always global rank 0 for this single-node launcher)
@@ -86,7 +103,7 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
     if is_main:
         pb = PotentialBuilder(
             config.num_pixels,
-            config.pixel_size,
+            pixel_size,
             pdb.atomic_numbers,
             parameterization=config.potential_parameterization,
             conv_backend=config.conv_backend,
@@ -104,54 +121,73 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
     # --- Sampling poses, defocus, and translations ---
     if is_main:
         _section("Sampling poses, defocus, and translations")
-    n = config.n_particles
 
-    quats = rotations.random_quaternion(n)
+    if cs_particles is not None:
+        # Poses/CTF/translations/anisomag come straight from the .cs file --
+        # dose, coincidence radius, and potential scale still aren't part of
+        # a CryoSPARC passthrough .cs, so those three are still sampled below.
+        (
+            _,
+            _,
+            _,
+            quats,
+            translations,
+            ctf_params,
+            _scale,
+            anisomag,
+            _indices,
+            _split,
+        ) = cs_particles
+        n = quats.shape[0]
+    else:
+        n = config.n_particles
 
-    defocus_A = _uniform_sample(config.defocus, n)
-    astigmatism_magnitude = _uniform_sample(config.astigmatism, n)
-    dfang = _uniform_sample(config.astigmatism_angle, n)
-    dfv = defocus_A - astigmatism_magnitude
-    phaseshift = _uniform_sample(config.phaseshift, n)
-    tiltx = _uniform_sample(config.tiltx, n)
-    tilty = _uniform_sample(config.tilty, n)
-    trefoil1 = _uniform_sample(config.trefoil1, n)
-    trefoil2 = _uniform_sample(config.trefoil2, n)
-    ctf_params = {
-        "cs": torch.tensor([cs_angstrom] * n),
-        "dfu": defocus_A,
-        "dfv": dfv,
-        "dfang": dfang,
-        "phaseshift": phaseshift,
-        "tiltx": tiltx,
-        "tilty": tilty,
-        "trefoil1": trefoil1,
-        "trefoil2": trefoil2,
-    }
+        quats = rotations.random_quaternion(n)
 
-    anisomag_matrix = (
-        config.anisomag_m00,
-        config.anisomag_m01,
-        config.anisomag_m10,
-        config.anisomag_m11,
-    )
-    anisomag = (
-        None
-        if anisomag_matrix == (1.0, 0.0, 0.0, 1.0)
-        else torch.tensor(
-            [
-                [config.anisomag_m00, config.anisomag_m01],
-                [config.anisomag_m10, config.anisomag_m11],
-            ]
+        defocus_A = _uniform_sample(config.defocus, n)
+        astigmatism_magnitude = _uniform_sample(config.astigmatism, n)
+        dfang = _uniform_sample(config.astigmatism_angle, n)
+        dfv = defocus_A - astigmatism_magnitude
+        phaseshift = _uniform_sample(config.phaseshift, n)
+        tiltx = _uniform_sample(config.tiltx, n)
+        tilty = _uniform_sample(config.tilty, n)
+        trefoil1 = _uniform_sample(config.trefoil1, n)
+        trefoil2 = _uniform_sample(config.trefoil2, n)
+        ctf_params = {
+            "cs": torch.tensor([cs_angstrom] * n),
+            "dfu": defocus_A,
+            "dfv": dfv,
+            "dfang": dfang,
+            "phaseshift": phaseshift,
+            "tiltx": tiltx,
+            "tilty": tilty,
+            "trefoil1": trefoil1,
+            "trefoil2": trefoil2,
+        }
+
+        anisomag_matrix = (
+            config.anisomag_m00,
+            config.anisomag_m01,
+            config.anisomag_m10,
+            config.anisomag_m11,
         )
-        .unsqueeze(0)
-        .expand(n, 2, 2)
-        .contiguous()
-    )
+        anisomag = (
+            None
+            if anisomag_matrix == (1.0, 0.0, 0.0, 1.0)
+            else torch.tensor(
+                [
+                    [config.anisomag_m00, config.anisomag_m01],
+                    [config.anisomag_m10, config.anisomag_m11],
+                ]
+            )
+            .unsqueeze(0)
+            .expand(n, 2, 2)
+            .contiguous()
+        )
 
-    rlnOriginXAngst = 2 * (torch.rand(n) - 0.5) * config.shift
-    rlnOriginYAngst = 2 * (torch.rand(n) - 0.5) * config.shift
-    translations = torch.stack([rlnOriginXAngst, rlnOriginYAngst], dim=-1)
+        rlnOriginXAngst = 2 * (torch.rand(n) - 0.5) * config.shift
+        rlnOriginYAngst = 2 * (torch.rand(n) - 0.5) * config.shift
+        translations = torch.stack([rlnOriginXAngst, rlnOriginYAngst], dim=-1)
 
     dose = _uniform_sample(config.dose, n)
     coincidence_radius = _uniform_sample(config.coincidence_radius, n)
@@ -178,10 +214,10 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
     # (cache_dir=...) just loads small pre-generated coordinate files from
     # disk, cheap enough that every DDP rank can construct it independently
     # (no rank-0-builds-then-broadcasts dance needed, unlike V above).
-    ice_nz = compute_nz(config.num_pixels, config.ice_thickness, config.pixel_size)
+    ice_nz = compute_nz(config.num_pixels, config.ice_thickness, pixel_size)
     icemaker = resolve_icemaker(
         ice_model,
-        config.pixel_size,
+        pixel_size,
         config.num_pixels,
         ice_nz,
         ice_cache_dir=config.ice_cache_dir,
@@ -197,11 +233,11 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
 
     model = ImageGenerator(
         V,
-        config.pixel_size,
+        pixel_size,
         quats,
         translations,
         ctf_params,
-        config.voltage,
+        voltage,
         dose,
         anisomag=anisomag,
         icemaker=icemaker,
@@ -213,7 +249,7 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
         noise_model=noise_model,
         klim=config.klim,
         ews_curvature_sign=config.ews_curvature_sign,
-        alpha=config.alpha,
+        alpha=alpha,
         crowd_min_distance=crowd_min_distance,
         crowd_max_distance_z=config.crowd_max_distance_z,
         crowd_max_distance_xy=config.crowd_max_distance_xy,
@@ -287,9 +323,9 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
         rotations=quats,
         translations=translations,
         ctf_params=ctf_params,
-        dx=config.pixel_size,
-        voltage=config.voltage,
-        alpha=config.alpha,
+        dx=pixel_size,
+        voltage=voltage,
+        alpha=alpha,
         filename=config.filename,
         folderpath=config.output_dir,
         dose_per_angstrom=dose,

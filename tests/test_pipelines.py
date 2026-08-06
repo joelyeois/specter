@@ -1,0 +1,87 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+import mrcfile
+import numpy as np
+import starfile
+from cryosparc.dataset import Dataset
+
+from specter.config import ParticleStackConfig
+from specter.pipelines import run_particle_stack
+
+# Every field _load_csfile_parameters (specter.io._cryosparc) reads off a
+# CryoSPARC passthrough .cs -- fabricated here so the test needs no real
+# external dataset. Values are deliberately distinct from
+# ParticleStackConfig's defaults (voltage=300.0, alpha=0.1, cs=2.0) so a
+# passing assertion actually proves they came from the .cs file.
+_VOLTAGE_KV = 200.0
+_PIXEL_SIZE_A = 1.35
+_CS_MM = 2.7
+_ALPHA = 0.12
+_DFU_A = 9000.0
+_DFV_A = 8700.0
+
+
+def _write_minimal_csfile(path: Path, n: int) -> None:
+    Dataset(
+        {
+            "uid": np.arange(n, dtype=np.uint64),
+            "alignments3D/shift": np.zeros((n, 2), dtype=np.float32),
+            "alignments3D/psize_A": np.full(n, _PIXEL_SIZE_A, dtype=np.float32),
+            "alignments3D/pose": np.zeros((n, 3), dtype=np.float32),
+            "alignments3D/split": np.zeros(n, dtype=np.uint32),
+            "alignments3D/alpha": np.ones(n, dtype=np.float32),
+            "ctf/cs_mm": np.full(n, _CS_MM, dtype=np.float32),
+            "ctf/df_angle_rad": np.zeros(n, dtype=np.float32),
+            "ctf/df1_A": np.full(n, _DFU_A, dtype=np.float32),
+            "ctf/df2_A": np.full(n, _DFV_A, dtype=np.float32),
+            "ctf/amp_contrast": np.full(n, _ALPHA, dtype=np.float32),
+            "ctf/accel_kv": np.full(n, _VOLTAGE_KV, dtype=np.float32),
+            "ctf/tilt_A": np.zeros((n, 2), dtype=np.float32),
+            "ctf/phase_shift_rad": np.zeros(n, dtype=np.float32),
+            "ctf/shift_A": np.zeros((n, 2), dtype=np.float32),
+            "ctf/trefoil_A": np.zeros((n, 2), dtype=np.float32),
+            "ctf/anisomag": np.zeros((n, 4), dtype=np.float32),
+        }
+    ).save(str(path))
+
+
+def test_run_particle_stack_from_csfile(tmp_path: Path) -> None:
+    """cs_path drives pixel_size/voltage/alpha/poses/CTF from a CryoSPARC
+    passthrough .cs file instead of synthetic sampling -- see
+    src/specter/pipelines/_particles.py. For a real-data demonstration of
+    this same code path against EMPIAR-11377, see
+    docs/user-guide/particle-stack.md and
+    docs-figures/particle_stack_empiar_11377.py.
+    """
+    cs_path = tmp_path / "minimal.cs"
+    _write_minimal_csfile(cs_path, n=5)
+
+    config = ParticleStackConfig(
+        pdb_code="6bdf",
+        num_pixels=64,
+        cs_path=str(cs_path),
+        n_particles=5,
+        scattering_model="projection",
+        ice_model="none",
+        detector_model="none",
+        device="cpu",
+        batchsize=5,
+        output_dir=str(tmp_path),
+        filename="cs_particles",
+    )
+    run_particle_stack(config)
+
+    with mrcfile.open(tmp_path / "cs_particles.mrcs") as mrc:
+        assert mrc.data.shape == (5, 64, 64)
+
+    df = starfile.read(tmp_path / "cs_particles.star")
+    assert len(df) == 5
+    # These come from the .cs file, not ParticleStackConfig's (unused) defaults.
+    assert df["rlnVoltage"].iloc[0] == _VOLTAGE_KV
+    assert df["rlnSphericalAberration"].iloc[0] == _CS_MM
+    assert abs(df["rlnImagePixelSize"].iloc[0] - _PIXEL_SIZE_A) < 1e-4
+    assert df["rlnAmplitudeContrast"].iloc[0] == _ALPHA
+    assert df["rlnDefocusU"].iloc[0] == _DFU_A
+    assert df["rlnDefocusV"].iloc[0] == _DFV_A

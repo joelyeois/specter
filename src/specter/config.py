@@ -212,8 +212,7 @@ PARTICLE_STACK_HELP: dict[str, str] = {
     "filename": "Base name for output files (no extension).",
     "pdb_savefolder": "Folder to cache downloaded PDB files.",
     "cs_path": "Path to a CryoSPARC .cs file to drive generation from real "
-    "poses/CTF instead of random sampling. Not yet used by this command "
-    "(reserved for a future release).",
+    "pixel_size/voltage/alpha/poses/CTF instead of random sampling.",
     "num_frames": "Number of movie frames. Defaults to int(dose) if not set.",
     "convergence_angle": "Beam convergence semi-angle in mrad, for the Cs "
     "(spatial coherence) envelope.",

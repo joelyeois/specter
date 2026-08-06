@@ -17,6 +17,7 @@ from pathlib import Path
 import pytest
 import torch
 
+from specter.specimen.filament import FilamentSpec
 from specter.specimen.membrane import MembraneGenerator, TransmembraneSpec
 from specter.specimen.tomogram import (
     MembraneInstance,
@@ -453,3 +454,111 @@ def test_membrane_tomogram_generator_export_picks(tmp_path):
     assert abs(match["location"]["y"] - float(expected_corner[1])) < 1e-3
     assert abs(match["location"]["z"] - float(expected_corner[2])) < 1e-3
     assert "xyz_rotation_matrix" in match
+
+
+@pytest.mark.skipif(not _SMALL_FIXTURE.exists(), reason="bundled PDB fixture missing")
+def test_membrane_tomogram_generator_places_filaments():
+    """filament_specs scatters monomer instances independently of the
+    membrane/protein packing above, continuing instance_labels' own
+    instance-id counter (see _stamp_filaments)."""
+    mgen = MembraneGenerator(seed=0, **_MEMBRANE_KWARGS)
+    gen = MembraneTomogramGenerator(
+        membrane_instances=[MembraneInstance(generator=mgen)],
+        target_shape_zyx=_TARGET_SHAPE_ZYX,
+        v_size=_V_SIZE,
+        protein_specs=[
+            TomogramProteinSpec(pdb_source=str(_SMALL_FIXTURE), location="cytosol")
+        ],
+        filament_specs=[
+            FilamentSpec(
+                code=str(_SMALL_FIXTURE),
+                step=30.0,
+                flex_deg=8.0,
+                n_filaments=2,
+                n_monomers=4,
+            )
+        ],
+        occupancy_fraction=0.05,
+        gap_angstrom=5.0,
+        pdb_cache_dir="pdb-data/",
+        seed=0,
+    )
+    volume = gen.generate()
+
+    assert torch.isfinite(volume).all()
+    assert len(gen.filament_instances) == 2 * 4
+    assert all(inst.code == str(_SMALL_FIXTURE) for inst in gen.filament_instances)
+
+    labels = gen.instance_labels
+    assert labels is not None
+    protein_ids = {p.instance_id for p in gen.placements}
+    present_ids = set(torch.unique(labels[labels > 0]).tolist())
+    # Filament monomers got their own ids, continuing the same counter --
+    # more distinct ids present than just the cytosol/lumen placements.
+    assert present_ids.issuperset(protein_ids)
+    assert len(present_ids) > len(protein_ids)
+
+
+def test_membrane_tomogram_generator_no_filament_specs_places_nothing():
+    mgen = MembraneGenerator(seed=0, **_MEMBRANE_KWARGS)
+    gen = MembraneTomogramGenerator(
+        membrane_instances=[MembraneInstance(generator=mgen)],
+        target_shape_zyx=_TARGET_SHAPE_ZYX,
+        v_size=_V_SIZE,
+        protein_specs=[
+            TomogramProteinSpec(pdb_source=str(_SMALL_FIXTURE), location="cytosol")
+        ],
+        occupancy_fraction=0.05,
+        pdb_cache_dir="pdb-data/",
+        seed=0,
+    )
+    gen.generate()
+    assert gen.filament_instances == []
+
+
+@pytest.mark.skipif(not _SMALL_FIXTURE.exists(), reason="bundled PDB fixture missing")
+def test_membrane_tomogram_generator_export_picks_includes_filaments(tmp_path):
+    mgen = MembraneGenerator(seed=0, **_MEMBRANE_KWARGS)
+    gen = MembraneTomogramGenerator(
+        membrane_instances=[MembraneInstance(generator=mgen)],
+        target_shape_zyx=_TARGET_SHAPE_ZYX,
+        v_size=_V_SIZE,
+        protein_specs=[
+            TomogramProteinSpec(pdb_source=str(_SMALL_FIXTURE), location="cytosol")
+        ],
+        filament_specs=[
+            FilamentSpec(
+                code=str(_SMALL_FIXTURE),
+                step=30.0,
+                flex_deg=8.0,
+                n_filaments=1,
+                n_monomers=3,
+            )
+        ],
+        occupancy_fraction=0.05,
+        pdb_cache_dir="pdb-data/",
+        seed=0,
+    )
+    gen.generate()
+
+    written = gen.export_picks(tmp_path)
+    filament_key = next(k for k in written if k.endswith("-filament"))
+    lines = written[filament_key].read_text().strip().splitlines()
+    assert len(lines) == 3
+    rows = [json.loads(line) for line in lines]
+    assert all(row["type"] == "orientedPoint" for row in rows)
+    assert all("xyz_rotation_matrix" in row for row in rows)
+
+    # Filament picks are written directly in place_filaments' own
+    # corner-relative [0, extent) frame -- no `+ extent_xyz / 2` shift, see
+    # export_picks' own docstring -- so every coordinate should land within
+    # the volume's physical extent.
+    v_size = _V_SIZE
+    shape_zyx = _TARGET_SHAPE_ZYX
+    extent_xyz = (
+        torch.tensor([shape_zyx[2], shape_zyx[1], shape_zyx[0]], dtype=torch.float32)
+        * v_size
+    )
+    for row in rows:
+        for axis, extent in zip("xyz", extent_xyz.tolist()):
+            assert 0.0 <= row["location"][axis] <= extent

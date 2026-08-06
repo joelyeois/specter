@@ -29,6 +29,7 @@ from ...arrays import clip_insert_bounds
 from ...pdb import DEFAULT_PDB_SAVEFOLDER, PDB
 from ...potential import PotentialBuilder
 from ...rotations import build_affine_matrix, rotate_volume
+from .._parallel_render import build_templates_concurrently, resolve_render_devices
 from ..packing import estimate_protein_box_size
 from ._field import MembraneField, generate_membrane_field
 from ._field_alpha import generate_membrane_field_alpha_shape
@@ -108,6 +109,64 @@ class TransmembraneSpec:
     tm_span_mask: torch.Tensor | None = None
     parameterization: str = "shtyrov"
     template: torch.Tensor | None = None
+
+
+def render_transmembrane_template(
+    spec: TransmembraneSpec,
+    v_size: float,
+    pdb_cache_dir: str,
+    device: str | torch.device,
+) -> torch.Tensor:
+    """
+    Build one transmembrane species' potential template from its PDB source.
+
+    Pure/stateless (no `MembraneGenerator` instance involved) so a caller
+    driving several `MembraneGenerator`s that all share the same
+    `transmembrane_specs` -- e.g. `n_instances` copies of one `[[membrane]]`
+    entry in `specter build tomogram` -- can call this ONCE per species and
+    pass the result via `TransmembraneSpec.template`, instead of letting
+    each instance's own `MembraneGenerator._build_template` rebuild the same
+    species redundantly. `MembraneGenerator._build_template` itself is a
+    thin device-routing wrapper around this function.
+
+    Parameters
+    ----------
+    spec : TransmembraneSpec
+        Species to render (``spec.template``, if set, is ignored here --
+        callers that already have a template have no reason to call this).
+    v_size : float
+        Output voxel size, Angstrom.
+    pdb_cache_dir : str
+        Passed to `PDB` for fetching/caching `spec.pdb_source`.
+    device : str or torch.device
+        Device to build the `PotentialBuilder` (and run its `forward`) on.
+
+    Returns
+    -------
+    torch.Tensor
+        Density template, shape ``(Z, Y, X)``, on `device`.
+    """
+    pdb = PDB(spec.pdb_source, savefolder=pdb_cache_dir, verbose=False)
+    coordinates = align_principal_axis_to_z(pdb.coordinates)
+    coordinates = align_transmembrane_depth(coordinates, spec.tm_span_mask)
+    n = estimate_protein_box_size(pdb.max_diameter, v_size)
+    builder = PotentialBuilder(
+        n_xyz=n,
+        dx=v_size,
+        atomic_numbers=pdb.atomic_numbers,
+        progressbars=False,
+        parameterization=spec.parameterization,
+    ).to(device)
+    # "analytic" (PotentialBuilder's own documented default), not "3d" --
+    # confirmed empirically the two methods integrate to the same total
+    # potential (ratio ~1.001 across a 10x span of voxel sizes, on a real
+    # structure) but "3d"'s convolution-based approach spreads that same
+    # total over a visibly lower, smoother peak (25-45% lower max value
+    # than "analytic" for identical atoms). The bilayer profile is
+    # rendered with "analytic"; using "3d" here compared two differently-
+    # sharpened renderings of the same underlying physics, not a
+    # deliberate contrast difference between membrane and protein.
+    return builder.forward(coordinates, method="analytic")
 
 
 @dataclass
@@ -441,6 +500,19 @@ class MembraneGenerator:
         Device for generation. Default "cpu".
     seed : int, optional
         Random seed. Default None.
+    render_workers : int, optional
+        Number of `transmembrane_specs` species rendered concurrently (on
+        background threads) when building each species' `PotentialBuilder`
+        template -- see `_build_template`. Only matters when
+        `transmembrane_specs` has more than one entry AND none of them
+        already supply their own `TransmembraneSpec.template` (those are
+        never rebuilt regardless of this setting). Default 1: fully serial,
+        identical to the pre-parallel behaviour.
+    render_devices : list of str or torch.device, optional
+        Device pool to round-robin those concurrent species across (e.g.
+        multiple GPUs). Default None: every species renders on `device`
+        above, still concurrently across `render_workers` threads, just not
+        spread across multiple physical devices.
     """
 
     def __init__(
@@ -487,6 +559,8 @@ class MembraneGenerator:
         max_field_voxels: int = 200_000_000,
         device: str | torch.device = "cpu",
         seed: int | None = None,
+        render_workers: int = 1,
+        render_devices: list[str | torch.device] | None = None,
     ):
         if shape_backend not in (
             "metaball",
@@ -704,6 +778,8 @@ class MembraneGenerator:
         self.max_field_voxels = max_field_voxels
         self.device = torch.device(device)
         self.seed = seed
+        self.render_workers = render_workers
+        self.render_devices = resolve_render_devices(self.device, render_devices)
 
         self.field: MembraneField | None = None
         self.profile: BilayerProfile | None = None
@@ -925,9 +1001,22 @@ class MembraneGenerator:
                 stacklevel=2,
             )
 
+        # Keyed by index, not pdb_source, while building (a duplicate
+        # pdb_source across specs is legal -- the original serial dict
+        # comprehension just let the later one silently win); remapped to
+        # pdb_source -> template below to preserve that exact "last spec
+        # wins" behaviour for lookups in the placement loop further down.
+        index_templates = build_templates_concurrently(
+            keys=list(range(len(self.transmembrane_specs))),
+            build_one=lambda i, device: self._build_template(
+                self.transmembrane_specs[i], device
+            ),
+            devices=self.render_devices,
+            max_workers=self.render_workers,
+        )
         templates = {
-            spec.pdb_source: self._build_template(spec)
-            for spec in self.transmembrane_specs
+            spec.pdb_source: index_templates[i]
+            for i, spec in enumerate(self.transmembrane_specs)
         }
         weights = torch.tensor(
             [spec.frequency for spec in self.transmembrane_specs], dtype=torch.float32
@@ -961,32 +1050,34 @@ class MembraneGenerator:
         self.placements = placements
         return placements
 
-    def _build_template(self, spec: TransmembraneSpec) -> torch.Tensor:
+    def _build_template(
+        self, spec: TransmembraneSpec, device: torch.device | None = None
+    ) -> torch.Tensor:
+        """
+        Build (or reuse) one transmembrane species' potential template.
+
+        Parameters
+        ----------
+        spec : TransmembraneSpec
+            Species to render, or reuse via `spec.template` if supplied.
+        device : torch.device, optional
+            Device to build the `PotentialBuilder` (and run its `forward`)
+            on -- lets concurrent callers (`build_templates_concurrently`)
+            spread species across `self.render_devices` instead of
+            serializing everything onto `self.device`. Default None: use
+            `self.device`, matching pre-parallel behaviour exactly. Either
+            way, the returned template always ends up on `self.device`
+            (this method's only externally-visible contract), since that's
+            what every downstream consumer -- `_insert_blend` chief among
+            them -- assumes.
+        """
         if spec.template is not None:
             return spec.template.detach().to(self.device, dtype=torch.float32)
 
-        pdb = PDB(spec.pdb_source, savefolder=self.pdb_cache_dir, verbose=False)
-        coordinates = align_principal_axis_to_z(pdb.coordinates)
-        coordinates = align_transmembrane_depth(coordinates, spec.tm_span_mask)
-        n = estimate_protein_box_size(pdb.max_diameter, self.v_size)
-        builder = PotentialBuilder(
-            n_xyz=n,
-            dx=self.v_size,
-            atomic_numbers=pdb.atomic_numbers,
-            progressbars=False,
-            parameterization=spec.parameterization,
-        )
-        # "analytic" (PotentialBuilder's own documented default), not "3d" --
-        # confirmed empirically the two methods integrate to the same total
-        # potential (ratio ~1.001 across a 10x span of voxel sizes, on a
-        # real structure) but "3d"'s convolution-based approach spreads that
-        # same total over a visibly lower, smoother peak (25-45% lower
-        # max value than "analytic" for identical atoms). The bilayer
-        # profile is rendered with "analytic"; using "3d" here compared two
-        # differently-sharpened renderings of the same underlying physics,
-        # not a deliberate contrast difference between membrane and
-        # protein.
-        return builder.forward(coordinates, method="analytic").to(self.device)
+        build_device = self.device if device is None else device
+        return render_transmembrane_template(
+            spec, self.v_size, self.pdb_cache_dir, build_device
+        ).to(self.device)
 
     def _physical_to_voxel_index(self, site_xyz: torch.Tensor) -> torch.Tensor:
         assert self._origin_xyz is not None

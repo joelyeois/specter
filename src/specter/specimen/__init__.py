@@ -10,6 +10,7 @@ from .cryotomosim import (
     MembraneSpec,
     ProteinSpec,
 )
+from .filament import ACTIN_SPEC, MICROTUBULE_SPEC, FilamentInstance, FilamentSpec
 from .packing import (
     SpherePackingSpecimenGenerator,
     SphereProteinSpec,
@@ -21,6 +22,7 @@ from .membrane import (
     MembraneGenerator,
     TransmembranePlacement,
     TransmembraneSpec,
+    render_transmembrane_template,
 )
 from .tomogram import (
     MembraneInstance,
@@ -50,8 +52,13 @@ __all__ = [
     "MembraneGenerator",
     "TransmembranePlacement",
     "TransmembraneSpec",
+    "render_transmembrane_template",
     "MembraneInstance",
     "MembraneTomogramGenerator",
     "TomogramPlacement",
     "TomogramProteinSpec",
+    "ACTIN_SPEC",
+    "MICROTUBULE_SPEC",
+    "FilamentInstance",
+    "FilamentSpec",
 ]

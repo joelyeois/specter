@@ -9,6 +9,7 @@ generate(), which none of these tests call."""
 from __future__ import annotations
 
 import pytest
+import torch
 
 from specter.config import TomogramConfig
 from specter.pipelines._tomogram import _build_membrane_tomogram_generator
@@ -104,3 +105,79 @@ def test_membrane_config_entry_dict_never_mutated():
     config = TomogramConfig(membrane=[entry], seed=0, **_BASE_KWARGS)
     _build_membrane_tomogram_generator(config)
     assert entry == {"shape_backend": "spherical_harmonics", "n_instances": 2}
+
+
+def test_render_workers_and_devices_reach_membrane_tomogram_generator():
+    config = TomogramConfig(
+        membrane=[{"shape_backend": "spherical_harmonics", "n_instances": 2}],
+        render_workers=4,
+        render_devices=["cpu"],
+        **_BASE_KWARGS,
+    )
+    gen = _build_membrane_tomogram_generator(config)
+    assert gen.render_workers == 4
+    assert gen.render_devices == [torch.device("cpu")]
+    # Every MembraneGenerator instance still gets its own default (1) --
+    # transmembrane_specs is empty in _BASE_KWARGS, so there's nothing for
+    # a per-instance render pass to parallelize anyway (see
+    # _build_membrane_tomogram_generator's own pre-render comment).
+    assert all(mi.generator.render_workers == 1 for mi in gen.membrane_instances)
+
+
+def test_render_workers_default_is_serial():
+    config = TomogramConfig(
+        membrane=[{"shape_backend": "spherical_harmonics"}],
+        **_BASE_KWARGS,
+    )
+    gen = _build_membrane_tomogram_generator(config)
+    assert gen.render_workers == 1
+    assert gen.render_devices == [torch.device("cpu")]
+
+
+def test_filaments_config_builds_filament_specs():
+    config = TomogramConfig(
+        membrane=[{"shape_backend": "spherical_harmonics"}],
+        filaments=[{"code": "1TUB", "step": 85.0, "flex_deg": 3.0, "n_filaments": 4}],
+        **_BASE_KWARGS,
+    )
+    gen = _build_membrane_tomogram_generator(config)
+    assert len(gen.filament_specs) == 1
+    spec = gen.filament_specs[0]
+    assert spec.code == "1TUB"
+    assert spec.step == 85.0
+    assert spec.flex_deg == 3.0
+    assert spec.n_filaments == 4
+
+
+def test_actin_flag_appends_actin_spec():
+    from specter.specimen import ACTIN_SPEC
+
+    config = TomogramConfig(
+        membrane=[{"shape_backend": "spherical_harmonics"}],
+        actin=True,
+        **_BASE_KWARGS,
+    )
+    gen = _build_membrane_tomogram_generator(config)
+    assert ACTIN_SPEC in gen.filament_specs
+
+
+def test_actin_flag_is_additive_to_filaments():
+    config = TomogramConfig(
+        membrane=[{"shape_backend": "spherical_harmonics"}],
+        filaments=[{"code": "1TUB", "step": 85.0, "flex_deg": 3.0}],
+        actin=True,
+        **_BASE_KWARGS,
+    )
+    gen = _build_membrane_tomogram_generator(config)
+    assert len(gen.filament_specs) == 2
+    codes = {spec.code for spec in gen.filament_specs}
+    assert codes == {"1TUB", "1J6Z"}
+
+
+def test_no_filaments_or_actin_leaves_filament_specs_empty():
+    config = TomogramConfig(
+        membrane=[{"shape_backend": "spherical_harmonics"}],
+        **_BASE_KWARGS,
+    )
+    gen = _build_membrane_tomogram_generator(config)
+    assert gen.filament_specs == []

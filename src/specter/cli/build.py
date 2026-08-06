@@ -17,10 +17,11 @@ CONTEXT_SETTINGS = {"help_option_names": ["-h", "--help"]}
 
 # (panel title, field names) -- basic-first-advanced-last, same convention as
 # cli/simulate.py's _PARTICLE_STACK_GROUPS/_TILT_SERIES_GROUPS. targets/filler/
-# membrane/membrane_transmembrane_specs/membrane_protein_specs are all
-# list[dict]-typed and skipped entirely by build_config_options (TOML-only)
-# -- not listed here, same treatment as that module's own
-# protein_specs/membrane_specs.
+# membrane/membrane_transmembrane_specs/membrane_protein_specs/filaments are
+# all list[dict]-typed and skipped entirely by build_config_options
+# (TOML-only) -- not listed here, same treatment as that module's own
+# protein_specs/membrane_specs. "actin" (bool) is the one filaments-related
+# field that IS a real CLI flag.
 _TOMOGRAM_GROUPS: list[tuple[str, list[str]]] = [
     (
         "Specimen",
@@ -46,11 +47,12 @@ _TOMOGRAM_GROUPS: list[tuple[str, list[str]]] = [
             "membrane_parameterization",
         ],
     ),
+    ("Filaments", ["actin"]),
     (
         "Picks & segmentation",
         ["write_picks", "annotation_version", "write_segmentation"],
     ),
-    ("Compute", ["device"]),
+    ("Compute", ["device", "render_workers"]),
     ("Output", ["output_dir", "filename"]),
     ("Advanced", ["pdb_savefolder", "seed"]),
 ]

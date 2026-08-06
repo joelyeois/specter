@@ -10,7 +10,10 @@ Two mutually exclusive modes, selected by whether `config.membrane` is set:
 - Membrane mode (`config.membrane` set): drives `specter.specimen.
   MembraneGenerator` (organic membrane shape + transmembrane placement)
   composed with `specter.specimen.MembraneTomogramGenerator` (region-gated
-  cytosol/lumen protein packing).
+  cytosol/lumen protein packing). This mode also accepts `config.filaments`/
+  `config.actin` -- filament species (e.g. F-actin, microtubules) scattered
+  through the volume via `specter.specimen.filament.place_filaments`,
+  independent of the membrane/protein packing above.
 
 Either way, saves the assembled volume as .mrc -- directly usable as
 `specter simulate tiltseries`'s `--volume_path` -- plus one copick-style
@@ -27,8 +30,10 @@ import torch
 
 from specter.config import TomogramConfig
 from specter.specimen import (
+    ACTIN_SPEC,
     CRYOETSIM_PARTICLE_TABLE,
     PEI2016_CROWDING_TABLE,
+    FilamentSpec,
     MembraneGenerator,
     MembraneInstance,
     MembraneTomogramGenerator,
@@ -172,6 +177,9 @@ def _build_membrane_tomogram_generator(
         )
         for d in config.membrane_protein_specs
     ]
+    filament_specs = [FilamentSpec(**d) for d in config.filaments]
+    if config.actin:
+        filament_specs.append(ACTIN_SPEC)
 
     # Pre-render every transmembrane species' template ONCE here, shared
     # across every [[membrane]] entry AND every one of its n_instances
@@ -268,6 +276,7 @@ def _build_membrane_tomogram_generator(
         target_shape_zyx=tuple(config.target_shape),  # type: ignore[arg-type]
         v_size=config.v_size,
         protein_specs=protein_specs,
+        filament_specs=filament_specs,
         occupancy_fraction=config.membrane_occupancy_fraction,
         gap_angstrom=config.gap_angstrom,
         region_density_threshold=config.membrane_region_density_threshold,
@@ -278,7 +287,7 @@ def _build_membrane_tomogram_generator(
         seed=config.seed,
         device=config.device,
         render_workers=config.render_workers,
-        render_devices=config.render_devices,
+        render_devices=config.render_devices,  # type: ignore[arg-type]
     )
 
 
@@ -302,6 +311,11 @@ def _run_single_tomogram(config: TomogramConfig) -> None:
         for location in ("cytosol", "lumen"):
             n_here = sum(1 for p in membrane_gen.placements if p.location == location)
             _console.print(f"  {location.capitalize()}: {n_here} placed")
+        if membrane_gen.filament_specs:
+            _console.print(
+                f"  Filaments: {len(membrane_gen.filament_instances)} "
+                f"monomer instance(s) placed ({len(membrane_gen.filament_specs)} species)"
+            )
         assert membrane_gen.instance_labels is not None
         occupancy_fraction = float((membrane_gen.instance_labels > 0).float().mean())
         _console.print(f"  Occupancy: {occupancy_fraction:.1%} of volume")

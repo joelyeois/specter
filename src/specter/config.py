@@ -648,6 +648,24 @@ class TomogramConfig:
     # one of them.
     membrane_parameterization: str = "shtyrov"
 
+    # --- Filaments (membrane mode only, additive on top of it) ---
+    # One dict per filament species, mapping straight onto
+    # specter.specimen.filament.FilamentSpec's own kwargs, e.g.
+    # {"code": "1TUB", "step": 85.0, "flex_deg": 3.0, "n_filaments": 4}.
+    # Placed via specter.specimen.filament.place_filaments -- specter-native
+    # random-walk placement, independent of membrane/protein packing (no
+    # region-gating, no collision avoidance against anything else in the
+    # tomogram; see MembraneTomogramGenerator's own docstring). In TOML,
+    # provide as [[filaments]] tables.
+    filaments: list[dict[str, Any]] = field(default_factory=list)
+    # Convenience toggle: also place the bundled ACTIN_SPEC preset (real
+    # F-actin helical repeat -- step/twist from Holmes/Egelman) without
+    # hand-writing a [[filaments]] entry. Additive to filaments above (both
+    # may be set at once). ACTIN_SPEC's own n_filaments default (1) applies
+    # here too -- for more instances or other filament species (e.g.
+    # microtubules, MICROTUBULE_SPEC), use [[filaments]] instead.
+    actin: bool = False
+
     # --- Ground-truth picks & segmentation ---
     write_picks: bool = True
     annotation_version: str = "1.0"
@@ -755,6 +773,17 @@ TOMOGRAM_HELP: dict[str, str] = {
     "mode only.",
     "membrane_parameterization": "Atomic scattering-factor parameterization "
     "for the cytosol/lumen protein potential step. Membrane mode only.",
+    "filaments": "Filament species to scatter through the tomogram (TOML-"
+    "only, [[filaments]] tables), each mapping onto "
+    "specter.specimen.filament.FilamentSpec kwargs, e.g. {'code': '1TUB', "
+    "'step': 85.0, 'flex_deg': 3.0, 'n_filaments': 4}. Membrane mode only. "
+    "Placed independently of membrane/protein packing -- no region-gating, "
+    "no collision avoidance against anything else in the tomogram.",
+    "actin": "Convenience toggle: also place the bundled ACTIN_SPEC preset "
+    "(real F-actin helical repeat) without writing a [[filaments]] entry. "
+    "Additive to filaments above. Membrane mode only. For more instances "
+    "or other filament species (e.g. microtubules), use [[filaments]] "
+    "instead.",
     "write_picks": "Write one copick-style .ndjson pick file per species "
     "alongside the volume.",
     "annotation_version": "Version string used in pick filenames "
@@ -773,6 +802,16 @@ TOMOGRAM_HELP: dict[str, str] = {
     "(membrane present): drives the entire MembraneGenerator/"
     "MembraneTomogramGenerator pipeline for every instance (shape field, "
     "bilayer profile, rasterization, transmembrane protein rendering).",
+    "render_workers": "Membrane mode only: number of PDB species rendered "
+    "concurrently within one tomogram (transmembrane_specs and "
+    "membrane_protein_specs each get their own concurrent build pass). "
+    "Default 1 (serial, original behaviour) -- raise for tomograms with "
+    "several species, especially with n_instances>1 [[membrane]] entries "
+    "(all instances of one entry share one render pass).",
+    "render_devices": "Membrane mode only, TOML-only (list[str]): device "
+    "pool to round-robin those concurrent species across, e.g. "
+    "['cuda:0', 'cuda:1']. None (default) keeps every species on `device` "
+    "above, still concurrent across render_workers threads.",
     "output_dir": "Directory to save output files.",
     "filename": "Base name for the output volume (no extension).",
 }

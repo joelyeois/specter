@@ -82,6 +82,22 @@ filler = [
 #                                     # {filename}_membrane_labels.mrc (which
 #                                     # instance) and {filename}_regions.mrc
 #                                     # (0=cytosol/1=shell/2=lumen)
+#
+# Filaments (membrane mode only, additive on top of it): scattered through
+# the tomogram independently of the membrane/protein packing above (no
+# region-gating, no collision avoidance against anything else). Either
+# hand-write [[filaments]] entries (specter.specimen.filament.FilamentSpec
+# kwargs)...
+# [[filaments]]
+# code = "1TUB"        # PDB ID or local file path for the repeated monomer
+# step = 85.0          # axial rise per monomer, Angstrom
+# flex_deg = 3.0       # max per-step path curvature, degrees
+# n_filaments = 4
+#
+# ...or set `actin = true` for the quick, no-config-needed built-in ACTIN_SPEC
+# preset (real F-actin helical repeat) -- equivalent to `specter build
+# tomogram --actin`:
+# actin = true
 
 [specimen]
 target_shape = [128, 512, 512]    # (Z, Y, X) voxels
@@ -119,6 +135,18 @@ device = "cuda"                     # cpu | cuda | cuda:0. Non-membrane mode
                                     # every instance (shape field, bilayer
                                     # profile, rasterization, transmembrane
                                     # protein rendering).
+# render_workers = 4                # Membrane mode only: render this many
+                                    # PDB species concurrently (background
+                                    # threads) instead of one at a time --
+                                    # transmembrane_specs render ONCE, shared
+                                    # across every [[membrane]] entry/
+                                    # n_instances copy, and
+                                    # membrane_protein_specs render once per
+                                    # tomogram. Default 1 (serial).
+# render_devices = ["cuda:0", "cuda:1"]  # optional multi-GPU pool to
+                                    # round-robin those concurrent species
+                                    # across; default (omitted) keeps every
+                                    # species on device above.
 
 [output]
 output_dir = "./output/"

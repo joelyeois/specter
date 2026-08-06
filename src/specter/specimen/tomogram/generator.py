@@ -67,6 +67,18 @@ belongs to, as before). Transmembrane placements still get no per-instance
 voxel labels (their density is correctly present in the volume via
 `MembraneGenerator.place_transmembrane` itself, unmodified here) -- a
 documented gap, not an oversight.
+
+Optionally also scatters filament species (e.g. F-actin, microtubules)
+through the tomogram via ``specimen.filament.place_filaments`` -- the same
+specter-native random-walk placement `CryoETSpecimenGenerator` uses, with
+no region-gating (filaments are dropped anywhere in the volume regardless
+of cytosol/lumen/membrane-shell classification, matching that generator's
+own "no occupancy-aware packing against other species" scope) and no
+collision avoidance against the membrane or the cytosol/lumen protein
+pools. Rendered last, after cytosol/lumen packing, and stamped as
+additional entries in the shared `instance_labels` volume (continuing the
+same instance-id counter) so filament monomers are visible in the
+segmentation ground truth alongside cytosol/lumen protein instances.
 """
 
 from __future__ import annotations
@@ -85,7 +97,10 @@ from ...crowding import insert_particles_into_micrograph
 from ...pdb import DEFAULT_PDB_SAVEFOLDER, PDB
 from ...potential import PotentialBuilder
 from ...rotations import build_affine_matrix, random_rotation_matrix, rotate_volume
+from .._parallel_render import build_templates_concurrently, resolve_render_devices
+from ..filament import FilamentInstance, FilamentSpec, place_filaments
 from ..membrane import MembraneGenerator, TransmembranePlacement
+from ..membrane._placement import align_principal_axis_to_z
 from ..packing import draw_species_pool, estimate_protein_box_size, pack_hard_spheres_3d
 from ._regions import classify_membrane_regions
 
@@ -317,6 +332,13 @@ class MembraneTomogramGenerator:
         `generator.v_size`.
     protein_specs : list of TomogramProteinSpec
         Cytosolic/lumen species to pack.
+    filament_specs : list of FilamentSpec, optional
+        Filament species (e.g. `specimen.filament.ACTIN_SPEC`/
+        `MICROTUBULE_SPEC`) to scatter through the tomogram via
+        `specimen.filament.place_filaments` -- specter-native random-walk
+        placement, independent of membrane/protein packing (no region-
+        gating, no collision avoidance against anything else in the
+        tomogram; see module docstring). Default None (no filaments).
     occupancy_fraction : float, optional
         Target packing density (see `pack_hard_spheres_3d`/
         `draw_species_pool`), applied independently per region -- e.g. 0.2
@@ -349,11 +371,24 @@ class MembraneTomogramGenerator:
     seed : int, optional
         Random seed.
     device : str or torch.device, optional
-        Device for the packing step. Default "cpu" -- see
-        `pack_hard_spheres_3d`'s own docstring on why.
+        Device for the packing step (see `pack_hard_spheres_3d`'s own
+        docstring on why that specifically stays CPU-bound regardless) AND,
+        by default, for `_render_species_pool`'s own `PotentialBuilder`
+        step -- override the latter alone via `render_devices` below.
+        Default "cpu".
     chunk_size : int, optional
         Instances rotated per batch, per species. Default None (all of a
         species' instances at once).
+    render_workers : int, optional
+        Number of cytosol/lumen `protein_specs` species rendered
+        concurrently (on background threads) when building each species'
+        `PotentialBuilder` template -- see `_render_species_pool`. Default
+        1: fully serial, identical to the pre-parallel behaviour.
+    render_devices : list of str or torch.device, optional
+        Device pool to round-robin those concurrent species across (e.g.
+        multiple GPUs). Default None: every species renders on `device`
+        above, still concurrently across `render_workers` threads, just not
+        spread across multiple physical devices.
 
     Attributes
     ----------
@@ -374,9 +409,17 @@ class MembraneTomogramGenerator:
         Every placed cytosolic/lumen instance, set after `generate()` runs.
     instance_labels : torch.Tensor
         Per-instance integer label volume for cytosol/lumen PROTEIN
-        instances only (see module docstring -- a separate label space
-        from `membrane_labels`), shape `target_shape_zyx`, dtype int32.
-        Set after `generate()` runs.
+        instances AND, when `filament_specs` is non-empty, filament monomer
+        instances too (a continuation of the same instance-id counter, not
+        a separate label space -- see module docstring), shape
+        `target_shape_zyx`, dtype int32. Set after `generate()` runs.
+    filament_instances : list of FilamentInstance
+        Every placed filament monomer, from `specimen.filament.
+        place_filaments` (`position_xyz` in the same corner-relative,
+        `[0, extent)` convention `export_picks` writes directly -- NOT the
+        center-relative convention `instance_labels`/`volume` use
+        internally, see `_stamp_filaments`). Set after `generate()` runs
+        (empty if `filament_specs` was empty/None).
     """
 
     def __init__(
@@ -385,6 +428,7 @@ class MembraneTomogramGenerator:
         target_shape_zyx: tuple[int, int, int],
         v_size: float,
         protein_specs: list[TomogramProteinSpec],
+        filament_specs: list[FilamentSpec] | None = None,
         occupancy_fraction: float = 0.2,
         gap_angstrom: float = 5.0,
         region_density_threshold: float | None = None,
@@ -395,6 +439,8 @@ class MembraneTomogramGenerator:
         seed: int | None = None,
         device: str | torch.device = "cpu",
         chunk_size: int | None = None,
+        render_workers: int = 1,
+        render_devices: list[str | torch.device] | None = None,
     ):
         if not protein_specs:
             raise ValueError("protein_specs must be non-empty")
@@ -412,6 +458,7 @@ class MembraneTomogramGenerator:
         self.target_shape_zyx = target_shape_zyx
         self.v_size = v_size
         self.protein_specs = protein_specs
+        self.filament_specs = filament_specs or []
         self.occupancy_fraction = occupancy_fraction
         self.gap_angstrom = gap_angstrom
         self.region_density_threshold = region_density_threshold
@@ -422,12 +469,15 @@ class MembraneTomogramGenerator:
         self.seed = seed
         self.device = device
         self.chunk_size = chunk_size
+        self.render_workers = render_workers
+        self.render_devices = resolve_render_devices(device, render_devices)
 
         self.regions: dict[str, torch.Tensor] | None = None
         self.membrane_labels: torch.Tensor | None = None
         self.transmembrane_placements: list[TransmembranePlacement] = []
         self.placements: list[TomogramPlacement] = []
         self.instance_labels: torch.Tensor | None = None
+        self.filament_instances: list[FilamentInstance] = []
 
     def generate(self) -> torch.Tensor:
         """
@@ -496,7 +546,7 @@ class MembraneTomogramGenerator:
         # shared canvas (max-merge) before any region classification --
         # classify_membrane_regions needs the full composite, not
         # per-instance pieces.
-        volume = torch.zeros(target_shape, dtype=torch.float32)
+        volume = torch.zeros(target_shape, dtype=torch.float32, device=self.device)
         self.transmembrane_placements = []
         instance_volumes: list[tuple[MembraneInstance, torch.Tensor]] = []
         for mi in to_composite:
@@ -543,7 +593,9 @@ class MembraneTomogramGenerator:
             threshold = 0.05 * peak if peak > 0 else 0.0
         self.regions = classify_membrane_regions(volume, threshold)
 
-        membrane_labels = torch.zeros(target_shape, dtype=torch.int32)
+        membrane_labels = torch.zeros(
+            target_shape, dtype=torch.int32, device=self.device
+        )
         for instance_id, (mi, local_volume) in enumerate(instance_volumes, start=1):
             assert mi.position_xyz is not None  # see identical assert above
             shell_mask = local_volume > threshold
@@ -561,10 +613,32 @@ class MembraneTomogramGenerator:
                 )
         self.membrane_labels = membrane_labels
 
-        instance_labels = torch.zeros(target_shape, dtype=torch.int32)
+        instance_labels = torch.zeros(
+            target_shape, dtype=torch.int32, device=self.device
+        )
         self.placements = []
         next_instance_id = 1
         pdb_cache: dict[str, PDB] = {}
+
+        # Pre-load every unique cytosol/lumen pdb_source ONCE, up front,
+        # concurrently across self.render_workers -- measured directly on a
+        # 161-species production-scale run that PDB fetch+parse (not
+        # rendering) was the single largest bottleneck (~45% of total wall
+        # time) precisely because this loop used to run fully serially, one
+        # species at a time, entirely outside render_workers' reach. CPU-
+        # only (fetch/parse has no GPU path) regardless of self.device/
+        # render_devices, so devices is a fixed single-CPU pool here, not
+        # self.render_devices.
+        unique_sources = sorted({s.pdb_source for s in self.protein_specs})
+        if unique_sources:
+            pdb_cache = build_templates_concurrently(
+                keys=unique_sources,
+                build_one=lambda source, _device: PDB(
+                    source, savefolder=self.pdb_cache_dir, verbose=False
+                ),
+                devices=[torch.device("cpu")],
+                max_workers=self.render_workers,
+            )
 
         for location in ("cytosol", "lumen"):
             specs_here = [s for s in self.protein_specs if s.location == location]
@@ -642,8 +716,117 @@ class MembraneTomogramGenerator:
                 v_size,
             )
 
+        if self.filament_specs:
+            volume, instance_labels, next_instance_id = self._stamp_filaments(
+                volume, instance_labels, next_instance_id, v_size
+            )
+        else:
+            self.filament_instances = []
+
         self.instance_labels = instance_labels
         return volume
+
+    def _stamp_filaments(
+        self,
+        volume: torch.Tensor,
+        instance_labels: torch.Tensor,
+        next_instance_id: int,
+        v_size: float,
+    ) -> tuple[torch.Tensor, torch.Tensor, int]:
+        """Place and render every `filament_specs` species, continuing
+        `instance_labels`'s own instance-id counter from wherever the
+        cytosol/lumen protein loop left it.
+
+        `place_filaments` draws positions in `[0, extent)` -- a corner-
+        relative box -- while `volume`/`instance_labels` (and
+        `insert_particles_into_micrograph`/`_insert_instance_labels`, both
+        already used for cytosol/lumen proteins above) are centered at
+        physical (0,0,0). Only the LOCAL `positions_centered` used for
+        rendering is shifted by `-extent/2` to bridge that; `self.
+        filament_instances` keeps each `FilamentInstance`'s original
+        corner-relative `position_xyz` untouched, since that's the
+        convention `export_picks` itself writes out directly.
+        """
+        target_shape = self.target_shape_zyx
+        extent_xyz = torch.tensor(target_shape[::-1], dtype=torch.float32) * v_size
+
+        rng = torch.Generator()
+        if self.seed is not None:
+            rng.manual_seed(self.seed)
+        instances = place_filaments(self.filament_specs, target_shape, v_size, rng)
+        self.filament_instances = instances
+        if not instances:
+            return volume, instance_labels, next_instance_id
+
+        by_code: dict[str, list[FilamentInstance]] = {}
+        for inst in instances:
+            by_code.setdefault(inst.code, []).append(inst)
+
+        pdb_cache: dict[str, PDB] = {}
+        templates: dict[str, torch.Tensor] = {}
+        for code in by_code:
+            if code not in pdb_cache:
+                pdb_cache[code] = PDB(
+                    code, savefolder=self.pdb_cache_dir, verbose=False
+                )
+            pdb = pdb_cache[code]
+            n = estimate_protein_box_size(pdb.max_diameter, v_size)
+            builder = PotentialBuilder(
+                n_xyz=n,
+                dx=v_size,
+                atomic_numbers=pdb.atomic_numbers,
+                progressbars=False,
+                parameterization=self.parameterization,
+            ).to(self.device)
+            aligned_coordinates = align_principal_axis_to_z(pdb.coordinates)
+            templates[code] = builder.forward(
+                aligned_coordinates, method="analytic"
+            ).to(self.device)
+
+        offset = (extent_xyz / 2).to(self.device)
+        for code, insts in by_code.items():
+            template = templates[code]
+            label_threshold = _INSTANCE_LABEL_REL_THRESHOLD * float(template.max())
+
+            n_instances = len(insts)
+            positions_centered = (
+                torch.stack([inst.position_xyz for inst in insts]).to(self.device)
+                - offset
+            )
+            R = torch.stack([inst.rotation_matrix for inst in insts]).to(self.device)
+            theta = build_affine_matrix(R)
+
+            instance_ids = torch.arange(
+                next_instance_id,
+                next_instance_id + n_instances,
+                dtype=torch.int32,
+                device=self.device,
+            )
+            next_instance_id += n_instances
+
+            step = self.chunk_size or n_instances
+            for start in range(0, n_instances, step):
+                end = min(start + step, n_instances)
+                rotated = rotate_volume(
+                    template, theta[start:end], padding_mode="zeros"
+                )
+                volume = insert_particles_into_micrograph(
+                    rotated,
+                    positions_centered[start:end],
+                    pixel_size=v_size,
+                    micrograph=volume,
+                )
+                binarized = (rotated > label_threshold).to(torch.int32) * instance_ids[
+                    start:end
+                ].view(-1, 1, 1, 1)
+                instance_labels = _insert_instance_labels(
+                    binarized,
+                    positions_centered[start:end],
+                    pixel_size=v_size,
+                    labels=instance_labels,
+                )
+
+        return volume, instance_labels, next_instance_id
 
     def export_picks(
         self,
@@ -651,6 +834,7 @@ class MembraneTomogramGenerator:
         annotation_version: str = "1.0",
         oriented: bool = True,
         include_transmembrane: bool = True,
+        include_filaments: bool = True,
     ) -> dict[str, Path]:
         """
         Write one copick/CryoET-Data-Portal-style .ndjson pick file per
@@ -691,15 +875,27 @@ class MembraneTomogramGenerator:
         include_transmembrane : bool, optional
             If True (default), also write pick file(s) for transmembrane
             species, suffixed ``-transmembrane``.
+        include_filaments : bool, optional
+            If True (default), also write one pick file per filament
+            species, suffixed ``-filament``. Each `FilamentInstance`'s own
+            `position_xyz` is already in the corner-relative convention
+            used here (see `_stamp_filaments`), so -- unlike
+            placements/transmembrane above -- it's written directly, with
+            no `+ extent_xyz / 2` conversion.
 
         Returns
         -------
         dict[str, pathlib.Path]
             Mapping of a grouping key (``"{species}-{location}"`` for
             cytosol/lumen instances, ``"{species}-transmembrane"`` for
-            transmembrane instances) to written file path.
+            transmembrane instances, ``"{species}-filament"`` for filament
+            instances) to written file path.
         """
-        if not self.placements and not self.transmembrane_placements:
+        if (
+            not self.placements
+            and not self.transmembrane_placements
+            and not self.filament_instances
+        ):
             raise RuntimeError("call generate() before export_picks()")
 
         output_dir = Path(output_dir)
@@ -762,7 +958,41 @@ class MembraneTomogramGenerator:
                         f.write(json.dumps(row) + "\n")
                 written[key] = path
 
+        if include_filaments and self.filament_instances:
+            by_filament_code: dict[str, list[FilamentInstance]] = {}
+            for inst in self.filament_instances:
+                by_filament_code.setdefault(inst.code, []).append(inst)
+            for code, insts in by_filament_code.items():
+                key = f"{Path(code).stem}-filament"
+                path = (
+                    output_dir
+                    / f"{key}-{annotation_version}_{point_type.lower()}.ndjson"
+                )
+                with open(path, "w") as f:
+                    for inst in insts:
+                        x, y, z = (float(v) for v in inst.position_xyz)
+                        row = {"type": point_type, "location": {"x": x, "y": y, "z": z}}
+                        if oriented:
+                            row["xyz_rotation_matrix"] = (
+                                inst.rotation_matrix.numpy().tolist()
+                            )
+                        f.write(json.dumps(row) + "\n")
+                written[key] = path
+
         return written
+
+    def _build_species_template(
+        self, pdb: PDB, v_size: float, device: torch.device
+    ) -> torch.Tensor:
+        n = estimate_protein_box_size(pdb.max_diameter, v_size)
+        builder = PotentialBuilder(
+            n_xyz=n,
+            dx=v_size,
+            atomic_numbers=pdb.atomic_numbers,
+            progressbars=False,
+            parameterization=self.parameterization,
+        ).to(device)
+        return builder.forward(pdb.coordinates, method="analytic").to(self.device)
 
     def _render_species_pool(
         self,
@@ -776,31 +1006,47 @@ class MembraneTomogramGenerator:
         location: str,
         v_size: float,
     ) -> tuple[torch.Tensor, torch.Tensor, int]:
+        active_species_i = [
+            species_i
+            for species_i in range(len(specs))
+            if bool((accepted_species_idx == species_i).any())
+        ]
+        # Build every active species' potential template up front (optionally
+        # concurrently across self.render_workers threads/self.render_devices
+        # -- see MembraneTomogramGenerator's own render_workers docstring),
+        # then run the rotate/insert loop below exactly as before. That loop
+        # mutates volume/instance_labels/next_instance_id in place across
+        # iterations and is comparatively cheap (batched GPU tensor ops), so
+        # it stays sequential -- only the per-species PDB fetch/parse +
+        # PotentialBuilder.forward is parallelized.
+        templates = build_templates_concurrently(
+            keys=active_species_i,
+            build_one=lambda species_i, device: self._build_species_template(
+                pdbs[species_i], v_size, device
+            ),
+            devices=self.render_devices,
+            max_workers=self.render_workers,
+        )
+
         for species_i, spec in enumerate(specs):
             mask = accepted_species_idx == species_i
             if not bool(mask.any()):
                 continue
-            pdb = pdbs[species_i]
-            n = estimate_protein_box_size(pdb.max_diameter, v_size)
-            builder = PotentialBuilder(
-                n_xyz=n,
-                dx=v_size,
-                atomic_numbers=pdb.atomic_numbers,
-                progressbars=False,
-                parameterization=self.parameterization,
-            )
-            template = builder.forward(pdb.coordinates, method="analytic")
+            template = templates[species_i]
             label_threshold = _INSTANCE_LABEL_REL_THRESHOLD * float(template.max())
 
             species_coords = coords[mask]
             n_instances = species_coords.shape[0]
-            R = random_rotation_matrix(n_instances)
+            R = random_rotation_matrix(n_instances, device=self.device)
             if R.dim() == 2:
                 R = R.unsqueeze(0)
             theta = build_affine_matrix(R)
 
             instance_ids = torch.arange(
-                next_instance_id, next_instance_id + n_instances, dtype=torch.int32
+                next_instance_id,
+                next_instance_id + n_instances,
+                dtype=torch.int32,
+                device=self.device,
             )
             next_instance_id += n_instances
 
@@ -831,8 +1077,8 @@ class MembraneTomogramGenerator:
                     TomogramPlacement(
                         species_id=spec.pdb_source,
                         location=location,
-                        position_xyz=species_coords[i],
-                        rotation_matrix=R[i],
+                        position_xyz=species_coords[i].detach().cpu(),
+                        rotation_matrix=R[i].detach().cpu(),
                         instance_id=int(instance_ids[i]),
                     )
                 )

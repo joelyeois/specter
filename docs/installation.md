@@ -53,8 +53,23 @@ uv pip install -e .
 ```bash
 conda create -n specter python=3.11
 conda activate specter
-pip install -r requirements.txt
 pip install -e .
+```
+
+`pip install -e .` reads the full dependency list from `pyproject.toml`, so no
+separate requirements file is needed. `polnet` is pinned to a git revision via
+`[tool.uv.sources]`, which `uv` resolves automatically but plain `pip` does
+not -- if `pip install -e .` fails to resolve it, install it explicitly first:
+
+```bash
+pip install "polnet @ git+https://github.com/anmartinezs/polnet.git@v1.1.2"
+```
+
+To install the optional extras (see above) via pip instead of `uv sync`:
+
+```bash
+pip install -e ".[docs]"      # build docs locally
+pip install -e ".[gpu-edt]"   # GPU-accelerated distance transforms
 ```
 
 ## Next steps

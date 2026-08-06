@@ -73,6 +73,7 @@ nav:
       - Atomic potentials: concepts/atomic-potentials.md
       - Pose & crowding: concepts/pose-crowding.md
       - Ice structure: concepts/ice.md
+      - Membrane shape: concepts/membrane-shape.md
       - Scattering:
           - Overview: concepts/scattering/index.md
           - Multislice: concepts/scattering/multislice.md

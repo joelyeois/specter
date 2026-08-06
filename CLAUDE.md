@@ -242,7 +242,12 @@ configs/                      # TOML config files consumed by demo-scripts/ and 
   micrograph.toml              # canonical defaults for generate_micrograph.py
   tilt_series.toml             # canonical defaults for generate_tilt_series.py / `specter simulate tiltseries`
   tomogram.toml                 # canonical defaults for `specter build tomogram`
-dev/                           # Prototyping and experimentation (not required to be clean)
+dev/                           # Prototyping and experimentation (not required to be clean; gitignored, never pushed)
+docs-figures/                  # Tracked scripts that regenerate docs/assets/images/ figures for Concepts pages —
+                              # one script per concept page (e.g. membrane_shape.py -> concepts/membrane-shape.md's
+                              # figures). Kept separate from demo-scripts/ (runnable end-user pipeline examples) and
+                              # dev/ (gitignored scratch) since these are doc tooling that must stay reachable on
+                              # GitHub for anyone regenerating a figure after an algorithm change.
 pdb-data/                     # PDB structure files
 ice-data/                     # Pre-computed ice data (do not modify)
 ```

@@ -3,10 +3,9 @@ Centerline-spline-swept membrane shape backend.
 
 For elongated, wandering TUBE topology (ER-tubule-like) -- NOT the
 star-convex "radius function of direction" family
-``_field_spherical_harmonics.py``/``_field_fourier.py`` belong to; this is
-the complementary case those two structurally cannot represent (a tube that
-curls back near itself is crossed more than once by some rays from any
-single center).
+``_field_spherical_harmonics.py`` belongs to; this is the complementary case
+that backend structurally cannot represent (a tube that curls back near
+itself is crossed more than once by some rays from any single center).
 
 Reuses ``_field.py``'s existing metaball machinery almost entirely: a swept
 tube's signed field IS a smooth-min union of many small sphere SDFs whose
@@ -20,8 +19,8 @@ Because ``phi`` comes directly from ``blend_field``'s analytic smooth-min of
 exact sphere SDFs, it is well-behaved (Eikonal property, ``|grad(phi)| ~=
 1``) BY CONSTRUCTION, the same category ``generate_membrane_field``
 (metaball) is in -- unlike the EDT-derived backends
-(``_field_alpha.py``/``_field_spherical_harmonics.py``/``_field_fourier.py``),
-there is no boolean-mask/``distance_transform_edt`` step here, and
+(``_field_alpha.py``/``_field_spherical_harmonics.py``), there is no
+boolean-mask/``distance_transform_edt`` step here, and
 correspondingly no ``_MIN_RELIABLE_VOXELS_PER_RADIUS``-style reliability
 warning is needed (metaball itself has none, for the same reason).
 Performance: ``blend_field`` loops one smooth-min pass per source

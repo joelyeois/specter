@@ -575,72 +575,6 @@ def test_coarse_angular_grid_interpolation_matches_direct_evaluation():
     assert max_err < 0.01, f"interpolation max error {max_err} exceeds 1% bound"
 
 
-def test_fourier_zero_amplitude_isotropic_matches_sphere_sdf():
-    """fourier_amplitude=0.0 with isotropic fourier_axes_a collapses to a
-    plain sphere -- mirrors test_spherical_harmonics_zero_amplitude_isotropic_
-    matches_sphere_sdf."""
-    from specter.specimen.membrane._field_fourier import (
-        generate_membrane_field_fourier,
-    )
-
-    spacing_a = 4.0
-    radius_a = 60.0
-    field = generate_membrane_field_fourier(
-        shape_zyx=(80, 80, 80),
-        spacing_a=spacing_a,
-        fourier_axes_a=(radius_a, radius_a, radius_a),
-        fourier_amplitude=0.0,
-        seed=0,
-    )
-    points = torch.tensor(
-        [[0.0, 0.0, 0.0], [radius_a, 0.0, 0.0], [0.0, 0.0, -radius_a], [30.0, 0.0, 0.0]]
-    )
-    expected = torch.linalg.norm(points, dim=-1) - radius_a
-    sampled = field.sample(points)
-    assert torch.allclose(sampled, expected, atol=1.5 * spacing_a)
-
-
-def test_fourier_phi_seam_is_continuous():
-    """Regression test for this backend's own distinguishing risk area (see
-    module docstring): f_phi must be integer or the perturbation has a hard
-    discontinuity at the phi=0/2*pi seam. Sample the actual generated field
-    at physical points just on either side of the seam (y=0, x>0 approached
-    from y=0+ and y=0-) and assert they agree closely."""
-    from specter.specimen.membrane._field_fourier import (
-        generate_membrane_field_fourier,
-    )
-
-    field = generate_membrane_field_fourier(
-        shape_zyx=(80, 80, 80),
-        spacing_a=4.0,
-        fourier_axes_a=(60.0, 60.0, 60.0),
-        fourier_amplitude=0.2,
-        fourier_n_terms=30,
-        seed=2,
-    )
-    just_above = torch.tensor([[60.0, 0.5, 5.0]])
-    just_below = torch.tensor([[60.0, -0.5, 5.0]])
-    assert torch.allclose(field.sample(just_above), field.sample(just_below), atol=2.0)
-
-
-def test_fourier_backend_is_seed_reproducible():
-    from specter.specimen.membrane._field_fourier import (
-        generate_membrane_field_fourier,
-    )
-
-    kwargs = dict(
-        shape_zyx=(70, 70, 70),
-        spacing_a=5.0,
-        fourier_axes_a=(120.0, 120.0, 120.0),
-        seed=4,
-    )
-    with warnings.catch_warnings():
-        warnings.simplefilter("error", UserWarning)
-        field_a = generate_membrane_field_fourier(**kwargs)
-        field_b = generate_membrane_field_fourier(**kwargs)
-    assert torch.equal(field_a.phi, field_b.phi)
-
-
 def test_swept_spline_near_straight_path_matches_capsule_sdf():
     """A near-straight path (flexibility ~ 0) sampled well away from either
     end should match a capsule/stadium SDF: perpendicular distance from the
@@ -729,49 +663,6 @@ def test_swept_spline_warns_on_beading_risk():
             tube_radius_a=20.0,
             seed=0,
         )
-
-
-def test_grf_zero_noise_isotropic_matches_sphere_sdf():
-    """grf_noise_amplitude=0.0 with isotropic grf_axes_a collapses to a
-    plain sphere -- mirrors the SH/Fourier backends' own zero-amplitude
-    sanity tests."""
-    from specter.specimen.membrane._field_gaussian_random_field import (
-        generate_membrane_field_gaussian_random_field,
-    )
-
-    spacing_a = 4.0
-    radius_a = 60.0
-    field = generate_membrane_field_gaussian_random_field(
-        shape_zyx=(80, 80, 80),
-        spacing_a=spacing_a,
-        grf_axes_a=(radius_a, radius_a, radius_a),
-        grf_noise_amplitude=0.0,
-        seed=0,
-    )
-    points = torch.tensor(
-        [[0.0, 0.0, 0.0], [radius_a, 0.0, 0.0], [0.0, 0.0, -radius_a], [30.0, 0.0, 0.0]]
-    )
-    expected = torch.linalg.norm(points, dim=-1) - radius_a
-    sampled = field.sample(points)
-    assert torch.allclose(sampled, expected, atol=1.5 * spacing_a)
-
-
-def test_grf_backend_is_seed_reproducible():
-    from specter.specimen.membrane._field_gaussian_random_field import (
-        generate_membrane_field_gaussian_random_field,
-    )
-
-    kwargs = dict(
-        shape_zyx=(90, 90, 90),
-        spacing_a=4.0,
-        grf_axes_a=(120.0, 120.0, 120.0),
-        seed=9,
-    )
-    with warnings.catch_warnings():
-        warnings.simplefilter("error", UserWarning)
-        field_a = generate_membrane_field_gaussian_random_field(**kwargs)
-        field_b = generate_membrane_field_gaussian_random_field(**kwargs)
-    assert torch.equal(field_a.phi, field_b.phi)
 
 
 def test_place_transmembrane_warns_on_partial_or_zero_placement():

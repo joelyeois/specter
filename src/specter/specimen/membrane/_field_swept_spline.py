@@ -66,8 +66,39 @@ into a smooth continuous tube (rather than a visible string of beads) if
 ``generate_membrane_field``'s own default ``blend_sharpness_a`` (tuned for a
 handful of sparse, independent blobs) would under-blend a dense chain if
 reused verbatim, so this module computes its own default instead. Warns if
-``step_length_a > tube_radius_a``, a real, previously observed failure mode
-(visible beading), not a hypothetical one.
+``step_length_a`` exceeds the (mean, see "Radius variation" below) tube
+radius, a real, previously observed failure mode (visible beading), not a
+hypothetical one.
+
+Radius variation
+-----------------
+``radius_variation`` (default 0, off) draws a per-source radius instead of
+reusing ``tube_radius_a`` for every sphere: i.i.d. Gaussian noise, one value
+per path point, smoothed with ``gaussian_filter1d`` along path order (the
+SAME tool and reasoning as the path-smoothing step above, reused for a
+second, independent field) at ``radius_variation_sigma_points``, then
+rescaled to unit RMS and applied multiplicatively --
+``tube_radius_a * clip(1 + radius_variation * noise, _MIN_RADIUS_FRACTION,
+None)`` -- the same amplitude-normalized-perturbation pattern
+``_field_spherical_harmonics.py`` uses for its own random radius function,
+not a fresh scheme.
+
+Deliberately NOT a second persistent random walk (like the path direction
+itself): direction lives on a bounded manifold (the unit sphere), so a
+persistent walk there just wanders in place indefinitely, but radius is
+unbounded -- an actual random walk in radius would drift to implausible
+values over a long path. Smoothed Gaussian noise stays anchored to
+``tube_radius_a`` regardless of path length.
+
+This also changes what the beading check (above) should mean: with
+non-zero ``radius_variation``, the LOCAL radius will occasionally dip below
+``step_length_a`` wherever the (smooth, non-periodic) noise is low, which
+is intentional -- it produces sparse, irregularly-spaced constrictions
+along the tube, not the mechanically-repeating beading pattern the check
+exists to catch. Warning on every such local dip would suppress this
+effect entirely, so the check instead compares ``step_length_a`` against
+the MEAN drawn radius: it fires only when beading would be the norm along
+the whole tube, not the occasional exception.
 """
 
 from __future__ import annotations
@@ -86,6 +117,15 @@ from ._field import (
     blend_field,
     cap_curvature,
 )
+
+# Floor for radius_variation's multiplicative perturbation -- keeps even an
+# aggressive draw from collapsing a source's radius toward zero (which would
+# pinch the tube toward disconnection). Mirrors _field_spherical_harmonics.py's
+# own floor on its radius perturbation (0.05), but expressed relative to THIS
+# module's radius scale (tube_radius_a, default 25 A) rather than that
+# module's unit-sphere convention -- the two floors are not directly
+# comparable numbers.
+_MIN_RADIUS_FRACTION = 0.25
 
 
 def _sample_wandering_path(
@@ -135,6 +175,8 @@ def generate_membrane_field_swept_spline(
     step_length_a: float = 15.0,
     tube_radius_a: float = 25.0,
     flexibility: float = 0.15,
+    radius_variation: float = 0.0,
+    radius_variation_sigma_points: float = 2.0,
     blend_sharpness_a: float | None = None,
     path_smoothing_sigma_points: float = 1.5,
     curvature_iterations: int = 15,
@@ -171,6 +213,25 @@ def generate_membrane_field_swept_spline(
         stress case, not a good default); 0.15 gave a gently organic,
         clearly non-straight tube with no beading at this module's other
         defaults.
+    radius_variation : float, optional
+        RMS fractional variation in tube radius along the path
+        (dimensionless, relative to `tube_radius_a`) -- see module
+        docstring's "Radius variation" section. Default 0.0 (constant
+        radius, this function's behaviour before this parameter existed).
+    radius_variation_sigma_points : float, optional
+        ``scipy.ndimage.gaussian_filter1d`` sigma for the radius noise, in
+        PATH POINTS. Default 2.0, picked from a direct visual sweep (1/2/3,
+        see ``dev/swept_spline_radius_variation_sweep.py``) -- NOT the
+        larger value (4.0) that seemed intuitive going in: at this
+        function's own default path length (~34 points), sigma=4 leaves
+        too few effectively-independent points for more than one broad
+        swell to fit, and ``gaussian_filter1d``'s ``nearest`` edge padding
+        then biases that single swell into looking like a monotonic taper
+        (a systematic effect, reproduced across multiple seeds, not
+        coincidence) -- the opposite of the several-irregular-bumps look
+        this parameter exists to produce. sigma=1-2 reliably gives multiple
+        organic-looking swells instead. Only affects the field when
+        `radius_variation > 0`.
     blend_sharpness_a : float, optional
         Smooth-min blend radius, Angstrom (see
         :func:`~specter.specimen.membrane._field.blend_field`). Default
@@ -199,23 +260,45 @@ def generate_membrane_field_swept_spline(
     -------
     MembraneField
     """
-    if step_length_a > tube_radius_a:
-        warnings.warn(
-            f"generate_membrane_field_swept_spline: step_length_a "
-            f"({step_length_a:.1f} A) exceeds tube_radius_a ({tube_radius_a:.1f} A) "
-            "-- consecutive sphere sources are spaced too far apart relative to "
-            "their own radius to fuse into a smooth tube (a real, previously "
-            "observed failure mode: visible beading/segmentation along the path "
-            "rather than a continuous surface). Decrease step_length_a, or "
-            "increase tube_radius_a.",
-            stacklevel=2,
-        )
     if not 0.0 < flexibility <= 1.0:
         raise ValueError(f"flexibility must be in (0, 1], got {flexibility}")
+    if radius_variation < 0.0:
+        raise ValueError(f"radius_variation must be >= 0, got {radius_variation}")
 
     n_points = max(2, round(total_length_a / step_length_a) + 1)
     rng = np.random.default_rng(seed)
     positions = _sample_wandering_path(n_points, step_length_a, flexibility, rng)
+
+    if radius_variation > 0.0:
+        noise = rng.normal(size=n_points)
+        noise = ndimage.gaussian_filter1d(
+            noise, sigma=radius_variation_sigma_points, mode="nearest"
+        )
+        noise_std = float(noise.std())
+        if noise_std > 0.0:
+            noise = noise / noise_std
+        radii = tube_radius_a * np.clip(
+            1.0 + radius_variation * noise, _MIN_RADIUS_FRACTION, None
+        )
+    else:
+        radii = np.full(n_points, tube_radius_a)
+
+    if step_length_a > float(radii.mean()):
+        warnings.warn(
+            f"generate_membrane_field_swept_spline: step_length_a "
+            f"({step_length_a:.1f} A) exceeds the mean tube radius "
+            f"({radii.mean():.1f} A) -- consecutive sphere sources are spaced "
+            "too far apart relative to their own radius to fuse into a smooth "
+            "tube ON AVERAGE (a real, previously observed failure mode: "
+            "visible beading/segmentation along the path rather than a "
+            "continuous surface). Decrease step_length_a, or increase "
+            "tube_radius_a. (With radius_variation > 0, occasional local "
+            "narrowing below step_length_a is expected -- it produces sparse, "
+            "irregular constrictions rather than this failure mode -- so this "
+            "check only fires when beading would be the norm, not the "
+            "exception.)",
+            stacklevel=2,
+        )
 
     bbox_mid = 0.5 * (positions.min(axis=0) + positions.max(axis=0))
     positions = positions - bbox_mid
@@ -228,7 +311,7 @@ def generate_membrane_field_swept_spline(
 
     positions_t = torch.as_tensor(positions, dtype=torch.float32, device=device)
     sources = [
-        MetaballSource(center_xyz=positions_t[i], radius=tube_radius_a)
+        MetaballSource(center_xyz=positions_t[i], radius=float(radii[i]))
         for i in range(n_points)
     ]
 

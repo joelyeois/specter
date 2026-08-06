@@ -298,6 +298,50 @@ def figure_curvature_capping() -> None:
     print(f"saved {path}")
 
 
+def figure_radius_variation() -> None:
+    """radius_variation off vs. on, SAME seed -- path sampling happens
+    before the radius-noise draw in generate_membrane_field_swept_spline,
+    so the underlying wandering path is bit-identical between the two
+    panels regardless of radius_variation; only the sphere calibers
+    differ. Isolates the caliber effect from the path's own random shape.
+
+    radius_variation_sigma_points uses the default (2.0), deliberately not
+    a larger, intuitively "smoother" value -- see
+    generate_membrane_field_swept_spline's own docstring and
+    dev/swept_spline_radius_variation_sweep.py for why a larger sigma
+    collapses to a misleading monotonic taper at this module's typical
+    path lengths."""
+    configs = [("radius_variation=0 (constant)", 0.0), ("radius_variation=0.3", 0.3)]
+    fig, axes = plt.subplots(
+        1,
+        len(configs),
+        figsize=(4.2 * len(configs), 4.6),
+        subplot_kw={"projection": "3d"},
+    )
+    for ax, (label, rv) in zip(axes, configs):
+        gen = MembraneGenerator(
+            target_shape_zyx=SHAPE_ZYX,
+            v_size=SPACING_A,
+            shape_backend="swept_spline",
+            swept_total_length_a=TOTAL_LENGTH_A,
+            swept_step_length_a=STEP_LENGTH_A,
+            swept_tube_radius_a=TUBE_RADIUS_A,
+            swept_flexibility=FLEXIBILITY,
+            swept_radius_variation=rv,
+            n_lipids_per_leaflet=1,
+            seed=SEED,
+        )
+        gen.generate()
+        isosurface_axes(ax, gen.field.phi.numpy(), SPACING_A, TEAL)
+        ax.set_title(label, fontsize=11)
+        ax.view_init(elev=15, azim=25)
+    plt.tight_layout()
+    path = f"{OUT_DIR}/membrane-swept-radius-variation.png"
+    plt.savefig(path, dpi=200)
+    plt.close(fig)
+    print(f"saved {path}")
+
+
 if __name__ == "__main__":
     ref = _reference_instance()
     figure_hero(ref)
@@ -305,4 +349,5 @@ if __name__ == "__main__":
     figure_beading(ref)
     figure_flexibility_sweep()
     figure_curvature_capping()
+    figure_radius_variation()
     print("done")

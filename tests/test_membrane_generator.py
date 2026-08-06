@@ -777,6 +777,102 @@ def test_swept_spline_warns_on_beading_risk():
         )
 
 
+def test_swept_spline_radius_variation_zero_matches_constant_radius():
+    """radius_variation=0.0 (the default) must reproduce the exact
+    pre-existing constant-radius field bit-for-bit -- this parameter's
+    addition must not change any existing caller's output."""
+    from specter.specimen.membrane._field_swept_spline import (
+        generate_membrane_field_swept_spline,
+    )
+
+    kwargs = dict(
+        shape_zyx=(70, 70, 70),
+        spacing_a=4.0,
+        total_length_a=300.0,
+        step_length_a=15.0,
+        seed=7,
+    )
+    field_default = generate_membrane_field_swept_spline(**kwargs)
+    field_explicit_zero = generate_membrane_field_swept_spline(
+        radius_variation=0.0, **kwargs
+    )
+    assert torch.equal(field_default.phi, field_explicit_zero.phi)
+
+
+def test_swept_spline_radius_variation_changes_field_and_is_reproducible():
+    from specter.specimen.membrane._field_swept_spline import (
+        generate_membrane_field_swept_spline,
+    )
+
+    kwargs = dict(
+        shape_zyx=(70, 70, 70),
+        spacing_a=4.0,
+        total_length_a=300.0,
+        step_length_a=15.0,
+        radius_variation=0.35,
+        seed=7,
+    )
+    field_a = generate_membrane_field_swept_spline(**kwargs)
+    field_b = generate_membrane_field_swept_spline(**kwargs)
+    assert torch.equal(field_a.phi, field_b.phi)
+
+    field_constant = generate_membrane_field_swept_spline(
+        **{**kwargs, "radius_variation": 0.0}
+    )
+    assert not torch.equal(field_a.phi, field_constant.phi)
+
+
+def test_swept_spline_radius_variation_rejects_negative():
+    from specter.specimen.membrane._field_swept_spline import (
+        generate_membrane_field_swept_spline,
+    )
+
+    with pytest.raises(ValueError, match="radius_variation"):
+        generate_membrane_field_swept_spline(
+            shape_zyx=(60, 60, 60),
+            spacing_a=4.0,
+            total_length_a=200.0,
+            step_length_a=15.0,
+            radius_variation=-0.1,
+            seed=0,
+        )
+
+
+def test_swept_spline_beading_warning_uses_mean_radius_not_local_minimum():
+    """With radius_variation > 0, step_length_a should only warn when it
+    exceeds the MEAN drawn radius -- occasional local narrowing below
+    step_length_a is the intended source of sparse, irregular
+    constrictions (see module docstring's "Radius variation" section) and
+    must not itself trigger the beading warning."""
+    from specter.specimen.membrane._field_swept_spline import (
+        generate_membrane_field_swept_spline,
+    )
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        generate_membrane_field_swept_spline(
+            shape_zyx=(90, 90, 90),
+            spacing_a=4.0,
+            total_length_a=200.0,
+            step_length_a=15.0,
+            tube_radius_a=25.0,
+            radius_variation=0.35,
+            radius_variation_sigma_points=2.0,
+            seed=0,
+        )
+
+    with pytest.warns(UserWarning, match="beading"):
+        generate_membrane_field_swept_spline(
+            shape_zyx=(110, 110, 110),
+            spacing_a=4.0,
+            total_length_a=400.0,
+            step_length_a=45.0,
+            tube_radius_a=20.0,
+            radius_variation=0.35,
+            seed=0,
+        )
+
+
 def test_place_transmembrane_warns_on_partial_or_zero_placement():
     """Pre-existing gap, not specific to the new backend: place_transmembrane
     silently returned fewer (or zero) placements than requested with no

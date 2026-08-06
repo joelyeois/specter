@@ -63,6 +63,42 @@ Spacing consecutive spheres (`step_length_a`) too far apart relative to
 
 ![Longitudinal slice through a straight chain of spheres: smooth fusion vs. visible beading.](../../assets/images/membrane-swept-beading.png){ width="700" style="display:block;margin:1.2em auto;" }
 
+## Varying the radius
+
+`tube_radius_a` doesn't have to be constant. `radius_variation` draws a
+per-sphere radius instead: Gaussian noise, one value per path point,
+smoothed along path order (`radius_variation_sigma_points`) and applied
+multiplicatively, the same amplitude-normalized-perturbation pattern the
+[spherical harmonics](spherical-harmonics.md) backend uses for its own
+random radius function --
+
+\[
+r_i = \texttt{tube\_radius\_a} \cdot \max(1 + a\,n_i,\ 0.25)
+\]
+
+with \(n_i\) the smoothed, unit-RMS noise and \(a\) = `radius_variation`.
+Not a second persistent random walk like the path direction: direction
+lives on a bounded sphere, so a persistent walk there just wanders in
+place, but radius is unbounded -- an actual random walk in radius would
+drift over a long path. Smoothed noise stays anchored to `tube_radius_a`
+regardless of path length.
+
+![Same random path, constant vs. varying radius.](../../assets/images/membrane-swept-radius-variation.png){ width="800" style="display:block;margin:1.2em auto;" }
+
+Both tubes above come from the same seed -- path sampling happens before
+the radius draw, so the underlying wander is identical; only the caliber
+differs.
+
+This changes what the beading check means, too: with `radius_variation >
+0`, the local radius will occasionally dip below `step_length_a` wherever
+the noise is low. That's intentional -- since the noise is smooth and
+non-periodic, those dips land at irregular, uncorrelated points along the
+tube, reading as sparse varicosities rather than the mechanically-repeating
+beading pattern the check exists to catch. The check therefore compares
+`step_length_a` against the *mean* drawn radius, not the local minimum, so
+it only fires when beading would be the norm rather than the occasional
+exception.
+
 ## Curvature capping
 
 A smooth-min blend can still have sharp concave curvature at tight bends,
@@ -91,6 +127,8 @@ adjacent convex bulge is pulled inward -- both reduce local curvature.
 | `total_length_a` | Path contour length, Å | 500.0 |
 | `step_length_a` | Spacing between sphere centers, Å | 15.0 |
 | `tube_radius_a` | Tube radius, Å | 25.0 |
+| `radius_variation` | RMS fractional radius variation \(a\) | 0.0 |
+| `radius_variation_sigma_points` | Path-order smoothing for the radius noise, points | 2.0 |
 | `blend_sharpness_a` | Smooth-min blend radius \(k\), Å | `0.5 * tube_radius_a` |
 | `curvature_iterations` | Number of Laplacian relaxation steps | 15 |
 

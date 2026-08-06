@@ -12,7 +12,9 @@ Planned pages:
 - [Atomic potentials](atomic-potentials.md)
 - [Pose & crowding](pose-crowding.md)
 - [Ice structure](ice.md)
-- [Membrane shape](membrane-shape.md)
+- Membrane shape
+    - [Spherical harmonics](membrane-shape/spherical-harmonics.md)
+    - [Swept spline](membrane-shape/swept-spline.md)
 - Scattering
     - [Overview](scattering/index.md)
     - [Multislice](scattering/multislice.md)

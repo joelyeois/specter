@@ -1,6 +1,7 @@
 """
-Generate the step-by-step figures for docs/concepts/membrane-shape.md, which
-explains the ``spherical_harmonics`` membrane shape backend
+Generate the step-by-step figures for
+docs/concepts/membrane-shape/spherical-harmonics.md, which explains the
+``spherical_harmonics`` membrane shape backend
 (``specter.specimen.membrane._field_spherical_harmonics``).
 
 Every figure walks through one concept/step of that module's own Algorithm
@@ -16,9 +17,9 @@ calls the SAME private helpers the real function calls
 so the figures cannot silently drift from what the shipped code actually
 does.
 
-Run with: uv run python docs-figures/membrane_shape.py
+Run with: uv run python docs-figures/membrane_shape_spherical_harmonics.py
 Saves PNGs directly into docs/assets/images/ (consumed by
-docs/concepts/membrane-shape.md).
+docs/concepts/membrane-shape/spherical-harmonics.md).
 """
 
 from __future__ import annotations
@@ -31,10 +32,9 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib import colors as mcolors
-from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 from scipy import ndimage
-from skimage.measure import marching_cubes
 
+from _render import TEAL, isosurface_axes
 from specter.specimen.membrane._field import _grid_points_xyz
 from specter.specimen.membrane._field_spherical_harmonics import (
     _angular_grid_resolution,
@@ -46,7 +46,6 @@ from specter.specimen.membrane._field_spherical_harmonics import (
 from specter.specimen.membrane._generator import MembraneGenerator
 
 OUT_DIR = "docs/assets/images"
-TEAL = np.array([0.0, 0.45, 0.45])
 
 # Reference instance shared across most figures, matching
 # generate_membrane_field_spherical_harmonics' own defaults
@@ -139,47 +138,6 @@ def _phi_field_at_resolution(
     return dist_out - dist_in
 
 
-def _shade_mesh(
-    verts: np.ndarray, faces: np.ndarray, normals: np.ndarray, base_color: np.ndarray
-):
-    """Poly3DCollection with Gouraud-like Lambertian shading -- shades each
-    face by its vertices' averaged, renormalized marching-cubes NORMAL
-    (gradient-based, smoothly varying across the surface), not the face's
-    own flat geometric normal (cross product of its own edges): flat
-    geometric normals are piecewise-constant per triangle and make even a
-    smooth isosurface look faceted under directional light, since
-    neighboring triangles' normals then jump discretely at each edge."""
-    tris = verts[faces]
-    face_normals = normals[faces].mean(axis=1)
-    face_normals /= np.linalg.norm(face_normals, axis=1, keepdims=True) + 1e-12
-    light_dir = np.array([0.4, 0.35, 0.85])
-    light_dir /= np.linalg.norm(light_dir)
-    intensity = np.clip(-face_normals @ light_dir, 0.0, 1.0)
-    intensity = 0.55 + 0.45 * intensity
-    colors = base_color[None, :] * intensity[:, None]
-    mesh = Poly3DCollection(tris, facecolor=colors, edgecolor="none", antialiased=False)
-    return mesh
-
-
-def _isosurface_axes(
-    ax, phi_field: np.ndarray, spacing_a: float, base_color: np.ndarray
-):
-    verts, faces, normals, _ = marching_cubes(
-        phi_field, level=0.0, spacing=(spacing_a,) * 3
-    )
-    mesh = _shade_mesh(verts, faces, normals, base_color)
-    ax.add_collection3d(mesh)
-    lo = verts.min(axis=0)
-    hi = verts.max(axis=0)
-    center = 0.5 * (lo + hi)
-    radius = 0.5 * (hi - lo).max()
-    ax.set_xlim(center[0] - radius, center[0] + radius)
-    ax.set_ylim(center[1] - radius, center[1] + radius)
-    ax.set_zlim(center[2] - radius, center[2] + radius)
-    ax.set_box_aspect((1, 1, 1))
-    ax.set_axis_off()
-
-
 def figure_hero(ref: dict) -> None:
     """Page-top hero: shaded 3D isosurface of the reference organelle, at a
     finer working-grid resolution than the other (slice-based) figures need.
@@ -197,16 +155,16 @@ def figure_hero(ref: dict) -> None:
     boundary VOXEL, not to the continuous analytic surface, so the
     resulting field has genuine voxel-grid-scale ripple -- finer
     `hero_spacing_a` shrinks it (this resolution + a softened light in
-    `_shade_mesh` were chosen empirically to make it unobtrusive) but never
-    removes it outright. Harmless for the field's actual use (the bilayer
-    profile only ever samples within a thin band near the zero level set),
-    but worth knowing before assuming a rendering bug."""
+    `_render.shade_mesh` were chosen empirically to make it unobtrusive) but
+    never removes it outright. Harmless for the field's actual use (the
+    bilayer profile only ever samples within a thin band near the zero level
+    set), but worth knowing before assuming a rendering bug."""
     hero_shape_zyx = (300, 300, 300)
     hero_spacing_a = 1.4
     hero_phi = _phi_field_at_resolution(ref, hero_shape_zyx, hero_spacing_a)
     fig = plt.figure(figsize=(5, 5))
     ax = fig.add_subplot(111, projection="3d")
-    _isosurface_axes(ax, hero_phi, hero_spacing_a, TEAL)
+    isosurface_axes(ax, hero_phi, hero_spacing_a, TEAL)
     ax.view_init(elev=18, azim=35)
     plt.tight_layout(pad=0)
     path = f"{OUT_DIR}/membrane-sh-hero.png"

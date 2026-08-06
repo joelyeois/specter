@@ -20,9 +20,9 @@ that shape is constructed.
 
 ## Star-convex surfaces
 
-The method requires star-convexity: every ray from the organelle's center
-crosses the surface exactly once. True for vesicles, nuclei, and most
-mitochondria.
+The method requires [star-convexity](https://en.wikipedia.org/wiki/Star_domain):
+every ray from the organelle's center crosses the surface exactly once. True
+for vesicles, nuclei, and most mitochondria.
 
 A star-convex surface reduces to one scalar function of direction:
 
@@ -36,7 +36,7 @@ R(\theta, \phi)
 R(\theta, \phi) = 1 + a \sum_{l=2}^{L} \sum_{m=-l}^{l} c_{lm}\, Y_l^m(\theta, \phi)
 \]
 
-- \(Y_l^m\): real spherical harmonics, degree \(l\), order \(m\).
+- \(Y_l^m\): real [spherical harmonics](https://en.wikipedia.org/wiki/Spherical_harmonics), degree \(l\), order \(m\).
 - \(a\) = `sh_amplitude`: perturbation size, as a fraction of the base radius.
 - \(L\) = `sh_max_degree`: highest degree included.
 - \(l=0\) (uniform offset) and \(l=1\) (pure translation) carry no shape
@@ -53,17 +53,20 @@ The organelle's shape is a sum of these patterns with random coefficients
 c_{lm} \sim \mathcal{N}\!\left(0,\ \big[l(l+1)\big]^{-p}\right)
 \]
 
-\(p\) is `sh_spectrum_power`. \(p = 2\) (default) reproduces the Helfrich (1973) thermal bending-mode
-spectrum of a lipid bilayer: long-wavelength undulations dominate,
-short-wavelength wrinkles are suppressed. Lower \(p\) shifts weight toward
-finer, less membrane-like roughness.
+\(p\) is `sh_spectrum_power`. \(p = 2\) (default) reproduces the
+[Helfrich](#references) (1973) thermal bending-mode spectrum of a lipid
+bilayer: long-wavelength undulations dominate, short-wavelength wrinkles are
+suppressed. Lower \(p\) shifts weight toward finer, less membrane-like
+roughness.
 
 ![Var(a_lm) vs. harmonic degree l, for several values of spectrum_power.](../assets/images/membrane-sh-spectrum.png){ width="420"  style="display:block;margin:1.2em auto;" }
 
 Coefficients are rescaled so \(\sum_{l,m} c_{lm}^2 = 1\). Since the
-\(Y_l^m\) are orthonormal, Parseval's theorem fixes the perturbation's RMS
-to exactly \(1\) regardless of `sh_max_degree`/`sh_spectrum_power` --
-`sh_amplitude` alone sets the overall scale.
+\(Y_l^m\) are orthonormal,
+[Parseval's theorem](https://en.wikipedia.org/wiki/Parseval%27s_theorem)
+fixes the perturbation's RMS to exactly \(1\) regardless of
+`sh_max_degree`/`sh_spectrum_power` -- `sh_amplitude` alone sets the overall
+scale.
 
 ![The same random coefficients, with the harmonic sum truncated at increasing degree L.](../assets/images/membrane-sh-degree-buildup.png){ width="900"  style="display:block;margin:1.2em auto;" }
 
@@ -85,9 +88,10 @@ direction \((\theta, \phi)\). The voxel is inside if
 ## Solid to signed distance field
 
 Protein placement and bilayer rasterization need distance to the surface,
-not just inside/outside. SPECTER builds a signed distance field \(\phi\)
-(negative inside, positive outside, zero at the surface) via two Euclidean
-distance transforms:
+not just inside/outside. SPECTER builds a
+[signed distance field](https://en.wikipedia.org/wiki/Signed_distance_function)
+\(\phi\) (negative inside, positive outside, zero at the surface) via two
+[Euclidean distance transforms](https://en.wikipedia.org/wiki/Distance_transform):
 
 \[
 \phi = \mathrm{EDT}(\text{outside}) - \mathrm{EDT}(\text{inside})
@@ -106,9 +110,11 @@ zero at the surface.
 ## Fast harmonic synthesis
 
 Evaluating the harmonic sum at every voxel's own direction is expensive
-(~70s at a 10M-voxel grid). Since the perturbation is band-limited to
-degree \(L\), it's instead synthesized once on a small \((n_\theta, n_\phi)\)
-grid and bilinearly interpolated per voxel.
+(~70s at a 10M-voxel grid). Since the perturbation is
+[band-limited](https://en.wikipedia.org/wiki/Bandlimiting) to degree
+\(L\), it's instead synthesized once on a small \((n_\theta, n_\phi)\) grid
+and [bilinearly interpolated](https://en.wikipedia.org/wiki/Bilinear_interpolation)
+per voxel.
 
 ![A small coarse synthesis grid next to the bilinearly interpolated field it stands in for.](../assets/images/membrane-sh-angular-grid-interp.png){ width="800"  style="display:block;margin:1.2em auto;" }
 
@@ -147,3 +153,9 @@ concavity artifacts.
   raking light (see the hero image) -- an expected consequence of computing
   distance to the nearest boundary voxel rather than the continuous
   surface. It's below the scale that affects the bilayer profile.
+
+## References
+
+- Helfrich, W. (1973). Elastic properties of lipid bilayers: theory and
+  possible experiments. *Zeitschrift für Naturforschung C*, 28(11-12),
+  693-703. [doi:10.1515/znc-1973-11-1209](https://doi.org/10.1515/znc-1973-11-1209)

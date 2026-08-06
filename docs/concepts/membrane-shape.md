@@ -42,7 +42,7 @@ R(\theta, \phi) = 1 + a \sum_{l=2}^{L} \sum_{m=-l}^{l} c_{lm}\, Y_l^m(\theta, \p
 - \(l=0\) (uniform offset) and \(l=1\) (pure translation) carry no shape
   information and are excluded.
 
-![Six real spherical harmonics rendered as colored, radius-perturbed unit spheres.](../assets/images/membrane-sh-basis-gallery.png){ width="720" }
+![Six real spherical harmonics rendered as colored, radius-perturbed unit spheres.](../assets/images/membrane-sh-basis-gallery.png){ width="720"  style="display:block;margin:1.2em auto;" }
 
 The organelle's shape is a sum of these patterns with random coefficients
 \(c_{lm}\).
@@ -58,14 +58,14 @@ spectrum of a lipid bilayer: long-wavelength undulations dominate,
 short-wavelength wrinkles are suppressed. Lower \(p\) shifts weight toward
 finer, less membrane-like roughness.
 
-![Var(a_lm) vs. harmonic degree l, for several values of spectrum_power.](../assets/images/membrane-sh-spectrum.png){ width="420" }
+![Var(a_lm) vs. harmonic degree l, for several values of spectrum_power.](../assets/images/membrane-sh-spectrum.png){ width="420"  style="display:block;margin:1.2em auto;" }
 
 Coefficients are rescaled so \(\sum_{l,m} c_{lm}^2 = 1\). Since the
 \(Y_l^m\) are orthonormal, Parseval's theorem fixes the perturbation's RMS
 to exactly \(1\) regardless of `sh_max_degree`/`sh_spectrum_power` --
 `sh_amplitude` alone sets the overall scale.
 
-![The same random coefficients, with the harmonic sum truncated at increasing degree L.](../assets/images/membrane-sh-degree-buildup.png){ width="900" }
+![The same random coefficients, with the harmonic sum truncated at increasing degree L.](../assets/images/membrane-sh-degree-buildup.png){ width="900"  style="display:block;margin:1.2em auto;" }
 
 Same random draw, increasing \(L\): more terms add finer wrinkles on top of
 the same broad shape.
@@ -80,7 +80,7 @@ direction \((\theta, \phi)\). The voxel is inside if
 |p'| < R(\theta, \phi)
 \]
 
-![Central slice of the raw boolean inside/outside test, before any distance transform.](../assets/images/membrane-sh-inside-test.png){ width="380" }
+![Central slice of the raw boolean inside/outside test, before any distance transform.](../assets/images/membrane-sh-inside-test.png){ width="380"  style="display:block;margin:1.2em auto;" }
 
 ## Solid to signed distance field
 
@@ -97,7 +97,7 @@ This is used instead of the radial residual \(|p'| - R(\theta,\phi)\): that
 residual's error grows with local slope and would distort the bilayer's
 calibrated thickness at high curvature.
 
-![Central slice of the final signed distance field, with the zero contour marking the membrane surface, and a 1D linescan showing phi crossing zero there.](../assets/images/membrane-sh-sdf-slice.png){ width="900" }
+![Central slice of the final signed distance field, with the zero contour marking the membrane surface, and a 1D linescan showing phi crossing zero there.](../assets/images/membrane-sh-sdf-slice.png){ width="900"  style="display:block;margin:1.2em auto;" }
 
 Left: \(\phi\) over one slice (red = inside, blue = outside), zero contour
 in black. Right: a linescan through the center, showing \(\phi\) crossing
@@ -110,7 +110,7 @@ Evaluating the harmonic sum at every voxel's own direction is expensive
 degree \(L\), it's instead synthesized once on a small \((n_\theta, n_\phi)\)
 grid and bilinearly interpolated per voxel.
 
-![A small coarse synthesis grid next to the bilinearly interpolated field it stands in for.](../assets/images/membrane-sh-angular-grid-interp.png){ width="800" }
+![A small coarse synthesis grid next to the bilinearly interpolated field it stands in for.](../assets/images/membrane-sh-angular-grid-interp.png){ width="800"  style="display:block;margin:1.2em auto;" }
 
 Interpolation error is ~0.17% of the perturbation's RMS -- well below the
 distance-transform's own discretization noise -- for a 30-150x reduction in
@@ -125,13 +125,13 @@ wall time.
 | `sh_amplitude` | RMS fractional radius perturbation \(a\) | 0.15 |
 | `sh_spectrum_power` | Exponent \(p\) in \(\mathrm{Var}(c_{lm}) \propto [l(l+1)]^{-p}\) | 2.0 |
 
-![Amplitude and degree swept across six organelles, outline only.](../assets/images/membrane-sh-parameter-sweep.png){ width="900" }
+![Amplitude and degree swept across six organelles, outline only.](../assets/images/membrane-sh-parameter-sweep.png){ width="900"  style="display:block;margin:1.2em auto;" }
 
 `sh_amplitude=0.15`: 0.10 is close to spherical, 0.40 produces visible
 concave dimples, 0.15 is the smallest value that reads as organic without
 concavity artifacts.
 
-![Isotropic, elongated, and flattened base ellipsoids, same random perturbation.](../assets/images/membrane-sh-axes-sweep.png){ width="700" }
+![Isotropic, elongated, and flattened base ellipsoids, same random perturbation.](../assets/images/membrane-sh-axes-sweep.png){ width="700"  style="display:block;margin:1.2em auto;" }
 
 `sh_axes_a` sets the base ellipsoid the perturbation rides on.
 

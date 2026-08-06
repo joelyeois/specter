@@ -242,11 +242,18 @@ class MembraneGenerator:
         See :func:`~specter.specimen.membrane._field.cap_curvature`.
         `"swept_spline"` backend only. Default 0.15.
     n_lipids_per_leaflet : int, optional
-        Reference lipid patch size used ONLY to calibrate the bilayer
-        profile's peak amplitude against real atomic scattering physics
-        (see :func:`~specter.specimen.membrane._profile.
-        estimate_bilayer_peak_amplitude`) -- not its shape, see
-        `bilayer_thickness_a`/`bilayer_layer_sigma_a`. Default 200.
+        Reference lipid patch size, passed to
+        :func:`~specter.specimen.membrane._profile.build_reference_lipid_patch`.
+        `estimate_bilayer_peak_amplitude` (the only thing this patch feeds
+        into -- not the profile's shape, see `bilayer_thickness_a`/
+        `bilayer_layer_sigma_a`) only reads off the patch's set of unique
+        atomic species, not its size or layout, so in practice any value
+        that includes at least one of every species in the lipid template
+        gives the same calibrated amplitude -- this parameter has no
+        material effect on `generate()`'s output at its default template.
+        Kept for backward compatibility and in case a future custom lipid
+        template makes species presence itself patch-size-dependent.
+        Default 200.
     parameterization : str, optional
         PotentialBuilder parameterization for the lipid reference patch.
         Default "shtyrov".
@@ -268,6 +275,20 @@ class MembraneGenerator:
         own `MB_LAYER_S_RG` parameter. Default 1.25, the midpoint of
         polnet's own default range (0.5, 2.0) (an earlier default of 2.0
         sat at that range's blurriest end, not a representative value).
+    membrane_scale_range : tuple of float, optional
+        ``(low, high)``: a single random multiplicative scale, drawn
+        uniformly from this range once per `generate()` call (seeded from
+        `seed`, reproducible), applied to the calibrated bilayer peak
+        amplitude BEFORE `build_analytic_bilayer_profile` -- an
+        augmentation knob for varying membrane contrast/intensity across
+        many generated instances. Applied to the amplitude that feeds
+        `self.profile`, not as a separate post-hoc multiply on
+        `self.volume` -- that keeps `_insert_blend`'s occupancy threshold
+        (itself derived from `self.profile.psi.max()`) automatically
+        consistent with whatever scale was drawn, with no extra
+        bookkeeping. The drawn value is recorded in `self.membrane_scale`.
+        Default ``(0.5, 1.0)``; pass ``(1.0, 1.0)`` for no randomization
+        (always scales by exactly 1).
     transmembrane_specs : list of TransmembraneSpec, optional
         Transmembrane protein species to attempt placing. Default None (no
         transmembrane proteins).
@@ -362,6 +383,7 @@ class MembraneGenerator:
         parameterization: str = "shtyrov",
         bilayer_thickness_a: float = 30.0,
         bilayer_layer_sigma_a: float = 1.25,
+        membrane_scale_range: tuple[float, float] = (0.5, 1.0),
         transmembrane_specs: list[TransmembraneSpec] | None = None,
         transmembrane_occupancy_fraction: float = 0.05,
         pdb_cache_dir: str = DEFAULT_PDB_SAVEFOLDER,
@@ -379,6 +401,12 @@ class MembraneGenerator:
                 "shape_backend must be 'spherical_harmonics', 'swept_spline', "
                 "'metaball', or 'alpha_shape', got "
                 f"{shape_backend!r}"
+            )
+        low, high = membrane_scale_range
+        if low > high or low < 0:
+            raise ValueError(
+                "membrane_scale_range must be (low, high) with "
+                f"0 <= low <= high, got {membrane_scale_range!r}"
             )
         if shape_backend in ("metaball", "alpha_shape"):
             warnings.warn(
@@ -421,6 +449,7 @@ class MembraneGenerator:
         self.parameterization = parameterization
         self.bilayer_thickness_a = bilayer_thickness_a
         self.bilayer_layer_sigma_a = bilayer_layer_sigma_a
+        self.membrane_scale_range = membrane_scale_range
         self.transmembrane_specs = transmembrane_specs or []
         self.transmembrane_occupancy_fraction = transmembrane_occupancy_fraction
         self.pdb_cache_dir = pdb_cache_dir
@@ -432,6 +461,7 @@ class MembraneGenerator:
         self.profile: BilayerProfile | None = None
         self.volume: torch.Tensor | None = None
         self.placements: list[TransmembranePlacement] = []
+        self.membrane_scale: float | None = None
         self._origin_xyz: torch.Tensor | None = None
 
     def generate(self) -> torch.Tensor:
@@ -452,6 +482,23 @@ class MembraneGenerator:
         peak_amplitude = estimate_bilayer_peak_amplitude(
             atomic_numbers, coordinates, parameterization=self.parameterization
         )
+
+        # Random per-instance contrast augmentation: drawn from
+        # membrane_scale_range and folded into the amplitude BEFORE
+        # build_analytic_bilayer_profile, not applied as a separate
+        # post-hoc multiply on self.volume -- that keeps
+        # _insert_blend's occupancy threshold (itself derived from
+        # self.profile.psi.max()) automatically consistent with
+        # whatever scale gets drawn here, with no extra bookkeeping.
+        scale_generator = torch.Generator(device="cpu")
+        if self.seed is not None:
+            scale_generator.manual_seed(self.seed)
+        low, high = self.membrane_scale_range
+        self.membrane_scale = float(
+            torch.empty(1).uniform_(low, high, generator=scale_generator).item()
+        )
+        peak_amplitude *= self.membrane_scale
+
         self.profile = build_analytic_bilayer_profile(
             thickness_a=self.bilayer_thickness_a,
             layer_sigma_a=self.bilayer_layer_sigma_a,

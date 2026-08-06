@@ -135,7 +135,22 @@ def test_compute_bilayer_profile_no_competing_peak_in_chain_region():
     assert center_region.mean() < 0.9 * chain_region.mean()
 
 
-def test_estimate_bilayer_peak_amplitude_is_positive_and_scale_consistent():
+def test_estimate_bilayer_peak_amplitude_matches_raw_isolated_atom_peak():
+    """Regression test for a real, user-reported bug: estimate_bilayer_
+    peak_amplitude used to read off compute_bilayer_profile's LATERALLY-
+    AVERAGED peak (averaged over ~70 lipids' worth of mostly-empty lateral
+    area at n_lipids_per_leaflet=200), diluting the true atomic peak by
+    ~20x with no physical justification -- a transmembrane protein
+    rendered into the same volume looked 5-10x brighter than the
+    surrounding membrane as a direct, visible consequence. Verify the
+    fix: amplitude must match a raw, undiluted single-atom render (same
+    PotentialBuilder physics, no lateral averaging), and must NOT match
+    compute_bilayer_profile's own laterally-averaged peak, which stays
+    ~20x lower."""
+    from specter.atom import atom_number
+    from specter.potential import PotentialBuilder
+    from specter.specimen.membrane._profile import ATOM_KERNEL_HALF_WIDTH_A
+
     atomic_numbers, coordinates = build_reference_lipid_patch(
         n_lipids_per_leaflet=60, seed=0
     )
@@ -143,13 +158,48 @@ def test_estimate_bilayer_peak_amplitude_is_positive_and_scale_consistent():
         atomic_numbers, coordinates, parameterization="shtyrov"
     )
     assert amplitude > 0
-    # Must match compute_bilayer_profile's own peak (same underlying
-    # render) -- this function only reduces that profile to its peak, it
-    # doesn't independently recompute anything.
+
+    # Raw isolated-atom peak, computed independently (not by calling the
+    # function under test) -- phosphorus, the heaviest/dominant species in
+    # the default lipid template.
+    v_size = 2.0
+    n = int(2 * ATOM_KERNEL_HALF_WIDTH_A / v_size) // 2 * 2 + 2
+    builder = PotentialBuilder(
+        n_xyz=(n, n, n),
+        dx=v_size,
+        atomic_numbers=atom_number(["P"]),
+        progressbars=False,
+        parameterization="shtyrov",
+    )
+    expected = float(builder.forward(torch.zeros((1, 3)), method="analytic").max())
+    assert amplitude == pytest.approx(expected, rel=1e-4)
+
+    # Must NOT match the old, diluted, laterally-averaged behaviour.
     profile = compute_bilayer_profile(
         atomic_numbers, coordinates, parameterization="shtyrov"
     )
-    assert amplitude == pytest.approx(float(profile.psi.max()))
+    assert amplitude > 5 * float(profile.psi.max())
+
+
+def test_estimate_bilayer_peak_amplitude_independent_of_patch_size():
+    """A single-atom peak has no position dependence, so unlike the old
+    laterally-averaged behaviour, the calibrated amplitude should be the
+    same regardless of how many lipids the reference patch has -- only
+    the SET of atomic species present matters, and the lipid template's
+    species set doesn't change with patch size."""
+    small_numbers, small_coords = build_reference_lipid_patch(
+        n_lipids_per_leaflet=2, seed=0
+    )
+    large_numbers, large_coords = build_reference_lipid_patch(
+        n_lipids_per_leaflet=200, seed=1
+    )
+    amplitude_small = estimate_bilayer_peak_amplitude(
+        small_numbers, small_coords, parameterization="shtyrov"
+    )
+    amplitude_large = estimate_bilayer_peak_amplitude(
+        large_numbers, large_coords, parameterization="shtyrov"
+    )
+    assert amplitude_small == pytest.approx(amplitude_large)
 
 
 def test_build_analytic_bilayer_profile_is_two_clean_peaks_with_zero_between():

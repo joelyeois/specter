@@ -3,14 +3,13 @@ Physically calibrated bilayer scattering-potential profile.
 
 Builds a small, schematic atomic lipid-bilayer patch and renders it once
 through :class:`~specter.potential.PotentialBuilder` to obtain a 1D lookup
-``psi(d)``: the laterally-averaged scattering potential as a function of
-signed distance ``d`` from the bilayer mid-plane. Downstream membrane
-rasterization looks up ``psi(phi(x))`` for every voxel of every generated
-membrane instance -- so the atomic-resolution step happens once and is
-reused, rather than rendering real lipids everywhere -- and the resulting
-density sits on the same physical scale as ``PotentialBuilder``-rendered
-protein templates (same atomic form factors), instead of an arbitrary
-constant.
+``psi(d)``: the scattering potential as a function of signed distance ``d``
+from the bilayer mid-plane. Downstream membrane rasterization looks up
+``psi(phi(x))`` for every voxel of every generated membrane instance -- so
+the atomic-resolution step happens once and is reused, rather than
+rendering real lipids everywhere -- and the resulting density sits on the
+same physical scale as ``PotentialBuilder``-rendered protein templates
+(same atomic form factors), instead of an arbitrary constant.
 
 The lipid coordinates are a schematic idealized model: per-leaflet atom
 z-offsets from the mid-plane (phosphate headgroup peak, glycerol backbone,
@@ -20,6 +19,19 @@ small per-atom jitter standing in for conformational disorder -- not a
 relaxed or MD-equilibrated structure. Good enough to get the profile's
 shape and physical length scale right; swap in a real coordinate set later
 if higher fidelity is needed.
+
+Amplitude calibration is deliberately NOT read off a laterally-averaged
+multi-lipid render (an earlier version of ``estimate_bilayer_peak_
+amplitude`` did exactly that, and diluted the true peak by ~20x with no
+physical justification -- see that function's own docstring for the full
+story and the measured numbers). Real membranes aren't laterally
+pre-averaged before imaging any more than a protein's atoms are; the
+smoothing that makes real cryo-ET membranes look continuous comes from the
+microscope's own resolution limits (CTF, multislice, detector MTF),
+applied identically to membrane and protein potential alike AFTER the
+ground truth is built (and already handled downstream by
+``_raster.py``'s anti-aliasing step) -- not baked into the ground truth
+itself.
 """
 
 from __future__ import annotations
@@ -275,44 +287,96 @@ def compute_bilayer_profile(
     return BilayerProfile(distance_a=distance_a, psi=psi)
 
 
+def _isolated_atom_peak_potential(
+    atomic_number: int,
+    v_size: float,
+    parameterization: str,
+    device: str | torch.device,
+) -> float:
+    """Raw, undiluted peak scattering potential of a single isolated atom
+    -- the calibration reference `estimate_bilayer_peak_amplitude` uses.
+    Same `PotentialBuilder` atomic-form-factor physics as everything else
+    in this module, just with nothing else nearby to average against."""
+    n = int(math.ceil(2 * ATOM_KERNEL_HALF_WIDTH_A / v_size)) // 2 * 2 + 2
+    builder = PotentialBuilder(
+        n_xyz=(n, n, n),
+        dx=v_size,
+        atomic_numbers=torch.tensor([atomic_number], device=device),
+        progressbars=False,
+        parameterization=parameterization,
+    )
+    volume = builder.forward(torch.zeros((1, 3), device=device), method="analytic")
+    return float(volume.max())
+
+
 def estimate_bilayer_peak_amplitude(
     atomic_numbers: torch.Tensor,
     coordinates: torch.Tensor,
     v_size: float = 2.0,
     parameterization: str = "shtyrov",
-    lateral_core_fraction: float = 0.6,
     device: str | torch.device = "cpu",
 ) -> float:
     """
-    One-time atomic render of a reference lipid patch, reduced to a single
-    number: its peak (phosphate headgroup) potential value.
+    Peak scattering potential to calibrate
+    :func:`build_analytic_bilayer_profile`'s `amplitude` against real
+    atomic scattering physics -- the same units as ``PotentialBuilder``-
+    rendered protein templates, so a membrane and an inserted
+    transmembrane protein sit on a physically consistent scale in the same
+    rendered volume.
 
-    Used to calibrate :func:`build_analytic_bilayer_profile`'s `amplitude`
-    against real atomic scattering physics (same units as
-    ``PotentialBuilder``-rendered protein templates), without depending on
-    the reference patch's full detailed SHAPE -- see that function's own
-    docstring for why the shape is built analytically instead.
+    Renders each unique atomic species present in `atomic_numbers` (via
+    :func:`_isolated_atom_peak_potential`) as a single ISOLATED atom, not
+    the full reference lipid patch, and returns the tallest of those raw
+    peaks -- typically the phosphate phosphorus, the heaviest/most
+    strongly-scattering species in the default lipid template, matching
+    real bilayer electron-density profiles where the phosphate headgroup
+    is the dominant feature.
+
+    An earlier version instead rendered the FULL reference lipid patch
+    (:func:`compute_bilayer_profile`) and took its LATERALLY-AVERAGED peak
+    (``psi.max()``, averaged over ``lateral_core_fraction`` of the whole
+    patch -- ~70 lipids' worth of mostly-empty lateral area at this
+    module's own default ``n_lipids_per_leaflet=200``). Measured directly
+    on a real patch: that diluted the true single-atom peak by ~20x (97.5
+    -> 4.8), with no physical justification -- a real bilayer's phosphate
+    atoms don't scatter more weakly than the same atom embedded in a
+    protein, and the visual "smoothness" real membranes show in cryo-ET
+    data comes from the microscope's own resolution limits applied to the
+    ground truth AFTER it's built (already handled by
+    ``rasterize_membrane_density``'s anti-aliasing step), not from
+    pre-averaging the ground truth itself. This was a real, previously
+    unnoticed bug (a user-reported visual mismatch -- a transmembrane
+    protein's density looked 5-10x brighter than the surrounding membrane
+    in a rendered volume -- led directly to finding and fixing it), not a
+    deliberate design choice.
 
     Parameters
     ----------
-    atomic_numbers, coordinates : torch.Tensor
-        From :func:`build_reference_lipid_patch`.
-    v_size, parameterization, lateral_core_fraction, device
-        Forwarded to :func:`compute_bilayer_profile`.
+    atomic_numbers : torch.Tensor
+        From :func:`build_reference_lipid_patch` (or any atom set) --
+        only the set of unique species present is used; a single-atom
+        peak has no position dependence, so patch size no longer matters
+        here (unlike `compute_bilayer_profile`, which still needs a large
+        patch to converge the profile's SHAPE past per-lipid sampling
+        noise -- these are independent uses of the same reference patch).
+    coordinates : torch.Tensor
+        Unused; accepted for call-site symmetry with
+        :func:`compute_bilayer_profile` (both are built together by
+        :func:`build_reference_lipid_patch`).
+    v_size, parameterization, device
+        Forwarded to the single-atom :class:`~specter.potential.PotentialBuilder`
+        render.
 
     Returns
     -------
     float
     """
-    profile = compute_bilayer_profile(
-        atomic_numbers,
-        coordinates,
-        v_size=v_size,
-        parameterization=parameterization,
-        lateral_core_fraction=lateral_core_fraction,
-        device=device,
+    del coordinates  # unused, see docstring
+    unique_z = atomic_numbers.unique().tolist()
+    return max(
+        _isolated_atom_peak_potential(z, v_size, parameterization, device)
+        for z in unique_z
     )
-    return float(profile.psi.max())
 
 
 def build_analytic_bilayer_profile(

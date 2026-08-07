@@ -118,6 +118,11 @@ try:
             plt.close(fig)
 
         def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):
+            # Rank-0-only under multi-GPU (DDP): pl_module.V is already
+            # identical across replicas (DDP gradient all-reduce every
+            # step), so every rank would otherwise plot/display redundantly.
+            if not trainer.is_global_zero:
+                return
             if trainer.global_step % self.every_n_steps != 0:
                 return
             total = (
@@ -128,6 +133,8 @@ try:
             self._plot_volume(pl_module, title=f"Step {trainer.global_step} / {total}")
 
         def on_train_batch_start(self, trainer, pl_module, batch, batch_idx):
+            if not trainer.is_global_zero:
+                return
             # Plot after the previous epoch's symmetry has been applied
             if batch_idx == 0 and trainer.current_epoch > 0:
                 total = (
@@ -141,6 +148,8 @@ try:
                 )
 
         def on_train_end(self, trainer, pl_module):
+            if not trainer.is_global_zero:
+                return
             # Plot the final epoch after symmetry
             total = (
                 trainer.max_steps

@@ -455,8 +455,11 @@ class TomogramReconstructor(_BaseReconstructor):
             loss = loss + sparsity_loss
             self.log_sparsity_loss.append(sparsity_loss.detach().cpu())
 
-        self.log_norm_loss.append(norm_loss.detach().cpu())
-        self.log_total_loss.append(loss.detach().cpu())
+        # Gathered/averaged across ranks under multi-GPU (DDP) for logging
+        # only -- `loss` itself (fed to manual_backward below) stays the
+        # local, per-rank value; DDP synchronises gradients on its own.
+        self.log_norm_loss.append(self._gather_for_logging(norm_loss).cpu())
+        self.log_total_loss.append(self._gather_for_logging(loss).cpu())
 
         self.manual_backward(loss)
         for opt in opts:
@@ -490,8 +493,12 @@ class TomogramReconstructor(_BaseReconstructor):
     # ------------------------------------------------------------------ #
 
     def on_fit_start(self) -> None:
-        """Create run directory and write hyperparameter metadata."""
-        if self._run_dir is None:
+        """Create run directory and write hyperparameter metadata.
+
+        Rank-0-only under multi-GPU (DDP): every replica would otherwise
+        race to create/write the same files.
+        """
+        if self._run_dir is None or not self.trainer.is_global_zero:
             return
         self._run_dir.mkdir(parents=True, exist_ok=True)
         (self._run_dir / "epochs").mkdir(exist_ok=True)
@@ -506,8 +513,14 @@ class TomogramReconstructor(_BaseReconstructor):
         print(f"Run directory: {self._run_dir}")
 
     def on_train_epoch_end(self) -> None:
-        """Save per-epoch volume as MRC."""
-        if self._run_dir is None:
+        """Save per-epoch volume as MRC.
+
+        Rank-0-only under multi-GPU (DDP): ``self.V`` is already identical
+        across replicas at this point (kept in sync by DDP's gradient
+        all-reduce every step), so every rank would otherwise race to write
+        the same file.
+        """
+        if self._run_dir is None or not self.trainer.is_global_zero:
             return
         epoch = self.current_epoch + 1
         v = self.V.detach().cpu().float()
@@ -515,9 +528,13 @@ class TomogramReconstructor(_BaseReconstructor):
         save_volume_mrc(mrc_path, v, self.voxel_size)
 
     def on_fit_end(self) -> None:
-        """Save final reconstructed volume and training metrics."""
+        """Save final reconstructed volume and training metrics.
+
+        Rank-0-only under multi-GPU (DDP), same reasoning as
+        ``on_train_epoch_end``.
+        """
         self._save_metrics()
-        if self._run_dir is None:
+        if self._run_dir is None or not self.trainer.is_global_zero:
             return
         v = self.V.detach().cpu().float()
         vol_path = self._run_dir / "vol.mrc"

@@ -293,7 +293,7 @@ class TomogramGhostbuster:
 
     def run(
         self,
-        device: int = 0,
+        device: int | Sequence[int] = 0,
         callbacks: list[Any] | None = None,
     ) -> "TomogramReconstructor":
         """
@@ -302,8 +302,12 @@ class TomogramGhostbuster:
 
         Parameters
         ----------
-        device : int
-            GPU index.  Ignored when CUDA is unavailable.
+        device : int or sequence of int
+            GPU index, or a sequence of GPU indices (e.g. ``[0, 1]``) to
+            train across multiple GPUs via Lightning DDP. A single tomogram's
+            tilt series is usually small (tens of tilts), so the benefit of
+            splitting it across GPUs is more limited than for particle-stack
+            reconstruction. Ignored when CUDA is unavailable.
         callbacks : list, optional
             Additional Lightning callbacks.
 
@@ -335,7 +339,7 @@ class TomogramGhostbuster:
     def test_run(
         self,
         bin_factor: int = 4,
-        device: int = 0,
+        device: int | Sequence[int] = 0,
         callbacks: list[Any] | None = None,
     ) -> "TomogramReconstructor":
         """
@@ -350,8 +354,10 @@ class TomogramGhostbuster:
         ----------
         bin_factor : int
             Spatial downsampling factor.  Default 4.
-        device : int
-            GPU index.  Ignored when CUDA is unavailable.
+        device : int or sequence of int
+            GPU index, or a sequence of GPU indices (e.g. ``[0, 1]``) to run
+            across multiple GPUs via Lightning DDP. Ignored when CUDA is
+            unavailable.
         callbacks : list, optional
             Additional Lightning callbacks.
 

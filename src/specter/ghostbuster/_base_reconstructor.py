@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import lightning as L
 import torch
@@ -101,11 +101,55 @@ class _BaseReconstructor(L.LightningModule):
         """Filename suffix for saved metrics. Override for e.g. halfset labelling."""
         return ""
 
+    def _gather_for_logging(self, value: torch.Tensor) -> torch.Tensor:
+        """
+        Reduce a per-rank scalar to a single global value, for logging only.
+
+        Under multi-GPU (DDP), each rank computes ``value`` from a different
+        local batch -- averaging across ranks here (matching DDP's own
+        gradient all-reduce semantics) makes the logged value reflect the
+        true global-batch loss, not just one rank's local view. A no-op
+        (returns ``value`` unchanged) outside DDP, or when no ``Trainer`` is
+        attached at all (e.g. calling ``_compute_loss``/``training_step``
+        directly without going through ``Trainer.fit()``) -- checks the
+        private ``_trainer`` attribute directly rather than the ``trainer``
+        property, since that property *raises* (rather than returning
+        ``None``) when unattached.
+
+        Only ever call this on a value being logged/recorded. Never use its
+        result in place of the original ``value`` for ``backward()`` -- DDP
+        already synchronises gradients correctly via its own hook, and
+        averaging the loss a second time here before backward would double
+        that averaging and silently change the effective learning rate.
+        """
+        if self._trainer is None or self.trainer.world_size <= 1:
+            return value.detach()
+        # self.all_gather's signature also accepts/returns dict/list/tuple
+        # (for gathering nested structures); we only ever pass a Tensor, so
+        # the result is always a Tensor too.
+        gathered = cast(torch.Tensor, self.all_gather(value.detach()))
+        return gathered.mean()
+
     def _save_metrics(
         self, include_loss_std: bool = False, include_lr_min: bool = False
     ) -> None:
-        """Save training metrics (loss, lr) to JSON."""
-        if self._run_dir is None or not self.log_total_loss:
+        """Save training metrics (loss, lr) to JSON.
+
+        Rank-0-only under multi-GPU (DDP) to avoid every replica racing to
+        write the same file. ``log_total_loss``/``log_norm_loss`` are
+        gathered/averaged across ranks at the point they're recorded (see
+        ``_gather_for_logging``), so under DDP the saved metrics reflect the
+        true global-batch loss, not just rank 0's local view.
+        ``log_sparsity_loss`` needs no such gathering -- it depends only on
+        the already-synced volume ``V``, identical on every rank already.
+        ``log_lrs`` likewise needs none -- the learning rate is a
+        deterministic function of step count, not of data.
+        """
+        if (
+            self._run_dir is None
+            or not self.log_total_loss
+            or not self.trainer.is_global_zero
+        ):
             return
 
         suffix = self._metrics_path_suffix()

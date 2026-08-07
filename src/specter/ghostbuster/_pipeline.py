@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, Sequence
 
 import mrcfile
 import torch
@@ -424,7 +424,7 @@ class Ghostbuster:
 
     def run(
         self,
-        device: int = 0,
+        device: int | Sequence[int] = 0,
         callbacks: list[Any] | None = None,
     ) -> "Reconstructor":
         """
@@ -432,8 +432,13 @@ class Ghostbuster:
 
         Parameters
         ----------
-        device : int
-            GPU index. Ignored when CUDA is unavailable.
+        device : int or sequence of int
+            GPU index, or a sequence of GPU indices (e.g. ``[0, 1]``) to train
+            across multiple GPUs via Lightning DDP (``strategy="ddp"``).
+            Gradients (for the volume, and for rotations/translations/defocus
+            when pose refinement is enabled) are synchronised every step via
+            DDP's all-reduce, so the returned model is identical whichever
+            rank produced it. Ignored when CUDA is unavailable.
         callbacks : list, optional
             Additional Lightning callbacks passed to the ``Trainer``.
 
@@ -464,7 +469,7 @@ class Ghostbuster:
     def test_run(
         self,
         bin_factor: int = 8,
-        device: int = 0,
+        device: int | Sequence[int] = 0,
         callbacks: list[Any] | None = None,
     ) -> "Reconstructor":
         """
@@ -481,8 +486,10 @@ class Ghostbuster:
         bin_factor : int
             Spatial downsampling factor applied to images and voxel size.
             Default 8.
-        device : int
-            GPU index. Ignored when CUDA is unavailable.
+        device : int or sequence of int
+            GPU index, or a sequence of GPU indices (e.g. ``[0, 1]``) to run
+            across multiple GPUs via Lightning DDP. Ignored when CUDA is
+            unavailable.
         callbacks : list, optional
             Additional Lightning callbacks passed to the ``Trainer``.
 

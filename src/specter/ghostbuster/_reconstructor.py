@@ -495,6 +495,12 @@ class Reconstructor(_BaseReconstructor):
         as a plain multiply-then-mean (not normalised by the sum of weights
         in the batch), since scale values are meaningful relative to each
         other across the whole dataset, not just within one batch.
+
+        Under multi-GPU (DDP), the *logged* norm/total loss is
+        gathered/averaged across ranks (see ``_gather_for_logging``) so it
+        reflects the true global-batch loss -- but the ``loss`` this method
+        returns (which feeds ``manual_backward``) stays the local, per-rank
+        value throughout; DDP synchronises gradients on its own.
         """
         w = self.scale[idx]  # (B,)
         if self.use_ncc:
@@ -513,14 +519,14 @@ class Reconstructor(_BaseReconstructor):
                 else None
             )
             loss = mse_loss(out, images, w, mask=mask)
-        self.log_norm_loss.append(loss.detach().cpu())
+        self.log_norm_loss.append(self._gather_for_logging(loss).cpu())
 
         if self.sparsity is not None:
             sparsity_loss = self.sparsity * torch.mean(torch.abs(self.V))
             loss = loss + sparsity_loss
             self.log_sparsity_loss.append(sparsity_loss.detach().cpu())
 
-        self.log_total_loss.append(loss.detach().cpu())
+        self.log_total_loss.append(self._gather_for_logging(loss).cpu())
         return loss
 
     def _project_fsc_mask_2d(
@@ -634,8 +640,12 @@ class Reconstructor(_BaseReconstructor):
         return f"_{self._halfset_label}" if self._halfset_label is not None else ""
 
     def on_fit_start(self) -> None:
-        """Create the run directory and write metadata."""
-        if self._run_dir is None:
+        """Create the run directory and write metadata.
+
+        Rank-0-only under multi-GPU (DDP): every replica would otherwise
+        race to create/write the same files.
+        """
+        if self._run_dir is None or not self.trainer.is_global_zero:
             return
         self._run_dir.mkdir(parents=True, exist_ok=True)
         (self._run_dir / "epochs").mkdir(exist_ok=True)
@@ -658,11 +668,17 @@ class Reconstructor(_BaseReconstructor):
         print(f"Run directory: {self._run_dir}")
 
     def on_fit_end(self) -> None:
-        """Save the final reconstructed volume, FSC figure, and training metrics."""
+        """Save the final reconstructed volume, FSC figure, and training metrics.
+
+        Rank-0-only under multi-GPU (DDP): ``self.V`` is already identical
+        across replicas at this point (kept in sync by DDP's gradient
+        all-reduce every step), so every rank would otherwise race to write
+        the same output files.
+        """
         # Save metrics first (before v is computed, so they capture all epochs)
         self._save_metrics(include_loss_std=True, include_lr_min=True)
 
-        if self._run_dir is None:
+        if self._run_dir is None or not self.trainer.is_global_zero:
             return
         suffix = self._metrics_path_suffix()
         v = self.V.detach().cpu().float()
@@ -676,7 +692,13 @@ class Reconstructor(_BaseReconstructor):
             )
 
     def on_train_epoch_end(self) -> None:
-        """Enforce symmetry, save per-epoch volume, plot3d preview, and FSC."""
+        """Enforce symmetry, save per-epoch volume, plot3d preview, and FSC.
+
+        Symmetrisation runs on every rank under multi-GPU (DDP) -- it mutates
+        each replica's local ``V.data`` in place, and skipping it on
+        non-zero ranks would desync the replicas for the next epoch. Only
+        the file-writing tail below is rank-0-only.
+        """
         if self.symmetry is not None:
             self.V.data = apply_symmetry(
                 self.V.data,
@@ -685,7 +707,7 @@ class Reconstructor(_BaseReconstructor):
                 method=self.symmetry_mode,
             )
 
-        if self._run_dir is None:
+        if self._run_dir is None or not self.trainer.is_global_zero:
             return
 
         epoch = self.current_epoch + 1

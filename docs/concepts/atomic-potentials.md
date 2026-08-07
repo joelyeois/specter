@@ -110,14 +110,19 @@ agree closely in practice.
 
 ## Shtyrov: bonded-species Gaussian sum
 
-Kirkland and Lobato both fit *bare, unbonded* elements. At cryo-EM
-resolutions, most atoms sit in covalent or hydrogen-bonded environments
-(the oxygen in a water molecule, a carbon in a peptide backbone) whose
-local electron density differs measurably from an isolated atom's. Shtyrov
-et al.'s parameterization ([`sffit`](https://github.com/as2875/sffit))
-fits a pure five-term Gaussian sum per *bonded species descriptor* (e.g.
+Kirkland and Lobato both fit *bare, unbonded* elements, computed ab initio
+from relativistic Hartree-Fock atomic structure. At cryo-EM resolutions,
+most atoms sit in covalent or hydrogen-bonded environments (the oxygen in
+a water molecule, a carbon in a peptide backbone) whose local electron
+density differs measurably from an isolated atom's. Shtyrov et al. (2026)
+take a different approach entirely: rather than computing scattering
+factors ab initio, they infer them empirically -- via a Bayesian
+approach -- directly from high-resolution cryo-EM electrostatic-potential
+maps (catalase reconstructions plus a broader public training set), then
+fit a pure five-term Gaussian sum per *bonded species descriptor* (e.g.
 `"O(HH)"`, `"C(HHHC)"`, as produced by `PDB.get_atom_species`) rather than
-per element:
+per element, as implemented by their [`sffit`](https://github.com/as2875/sffit)
+tool:
 
 \[
 f_e(k) = \sum_{i=1}^{5} a_i\, e^{-b_i k^2 / 4}
@@ -218,8 +223,14 @@ element match to within plotting resolution.
   neutral atoms that obey all physical constraints. *Acta Crystallographica
   Section A: Foundations and Advances*, 70(6), 636-649.
   [doi:10.1107/S205327331401643X](https://doi.org/10.1107/S205327331401643X)
-- Shtyrov, A. et al. Bonded-species electron scattering factors, as
-  implemented by [`sffit`](https://github.com/as2875/sffit).
+- Shtyrov, A., Wilson, H., Slowik, D., Yamashita, K., Li, J., Wojdyr, M.,
+  Chen, S., McMullan, G., Short, J. M., Russo, C. J., Henderson, R., &
+  Murshudov, G. N. (2026). Measurement of atomic scattering factors by
+  cryoelectron microscopy. *Proceedings of the National Academy of
+  Sciences*, 123(19), e2528758123.
+  [doi:10.1073/pnas.2528758123](https://doi.org/10.1073/pnas.2528758123).
+  Bonded-species parameterization used here as implemented by
+  [`sffit`](https://github.com/as2875/sffit).
 - Peng, L.-M., Ren, G., Dudarev, S. L., & Whelan, M. J. (1996). Robust
   parameterization of elastic and absorptive electron atomic scattering
   factors. *Acta Crystallographica Section A*, 52(2), 257-276. (gemmi's

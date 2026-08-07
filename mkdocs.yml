@@ -70,20 +70,26 @@ nav:
   - Concepts:
       - Overview: concepts/index.md
       - Pipeline overview: concepts/pipeline-overview.md
-      - Atomic potentials: concepts/atomic-potentials.md
-      - Pose & crowding: concepts/pose-crowding.md
-      - Ice structure: concepts/ice.md
-      - Membrane shape:
-          - Overview: concepts/membrane-shape/index.md
-          - Spherical harmonics: concepts/membrane-shape/spherical-harmonics.md
-          - Swept spline: concepts/membrane-shape/swept-spline.md
-      - Scattering:
-          - Overview: concepts/scattering/index.md
-          - Multislice: concepts/scattering/multislice.md
-          - Rytov: concepts/scattering/rytov.md
-          - Other modes: concepts/scattering/other-modes.md
-      - Aberrations: concepts/aberrations.md
-      - Detector: concepts/detector.md
+      - Specimens:
+          - Overview: concepts/specimens.md
+          - Atomic potentials: concepts/atomic-potentials.md
+          - Ice structure: concepts/ice.md
+          - Single-particle:
+              - Pose & crowding: concepts/pose-crowding.md
+          - Cryo-ET:
+              - Membrane shape:
+                  - Overview: concepts/membrane-shape/index.md
+                  - Spherical harmonics: concepts/membrane-shape/spherical-harmonics.md
+                  - Swept spline: concepts/membrane-shape/swept-spline.md
+      - Forward simulation:
+          - Overview: concepts/forward-simulation.md
+          - Scattering:
+              - Overview: concepts/scattering/index.md
+              - Multislice: concepts/scattering/multislice.md
+              - Rytov: concepts/scattering/rytov.md
+              - Other modes: concepts/scattering/other-modes.md
+          - Aberrations: concepts/aberrations.md
+          - Detector: concepts/detector.md
       - Reconstruction math: concepts/reconstruction-math.md
   - Reference:
       - Overview: api/index.md

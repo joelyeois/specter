@@ -9,17 +9,23 @@
 Planned pages:
 
 - [Pipeline overview](pipeline-overview.md)
-- [Atomic potentials](atomic-potentials.md)
-- [Pose & crowding](pose-crowding.md)
-- [Ice structure](ice.md)
-- Membrane shape
-    - [Spherical harmonics](membrane-shape/spherical-harmonics.md)
-    - [Swept spline](membrane-shape/swept-spline.md)
-- Scattering
-    - [Overview](scattering/index.md)
-    - [Multislice](scattering/multislice.md)
-    - [Rytov](scattering/rytov.md)
-    - [Other propagation modes](scattering/other-modes.md)
-- [Aberrations](aberrations.md)
-- [Detector](detector.md)
+- Specimens
+    - [Overview](specimens.md)
+    - [Atomic potentials](atomic-potentials.md)
+    - [Ice structure](ice.md)
+    - Single-particle
+        - [Pose & crowding](pose-crowding.md)
+    - Cryo-ET
+        - Membrane shape
+            - [Spherical harmonics](membrane-shape/spherical-harmonics.md)
+            - [Swept spline](membrane-shape/swept-spline.md)
+- Forward simulation
+    - [Overview](forward-simulation.md)
+    - Scattering
+        - [Overview](scattering/index.md)
+        - [Multislice](scattering/multislice.md)
+        - [Rytov](scattering/rytov.md)
+        - [Other propagation modes](scattering/other-modes.md)
+    - [Aberrations](aberrations.md)
+    - [Detector](detector.md)
 - [Reconstruction math](reconstruction-math.md)

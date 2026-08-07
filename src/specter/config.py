@@ -680,23 +680,27 @@ class TomogramConfig:
 
     # --- Compute ---
     device: str = "cpu"
-    # How many PDB species render concurrently (background threads) within
-    # a single tomogram: membrane mode's transmembrane_specs (rendered once,
-    # shared across every [[membrane]] entry/n_instances copy) and
-    # membrane_protein_specs (cytosol/lumen, rendered once per tomogram) --
-    # see MembraneGenerator/MembraneTomogramGenerator's own render_workers
-    # docstrings. Not used in non-membrane (targets/filler) mode. Default 1:
-    # fully serial, identical to the original behaviour -- species'
-    # PotentialBuilder.forward calls release the GIL for their actual
-    # compute, so raising this gives real wall-clock overlap even on CPU,
-    # not just I/O overlap from PDB fetch/parse.
-    render_workers: int = 1
+    # How many PDB species render/fetch concurrently within a single
+    # tomogram: membrane mode's transmembrane_specs (rendered once, shared
+    # across every [[membrane]] entry/n_instances copy) and
+    # membrane_protein_specs (cytosol/lumen, rendered + PDB-fetched once
+    # per tomogram) -- see MembraneGenerator/MembraneTomogramGenerator's own
+    # render_workers docstrings. Not used in non-membrane (targets/filler)
+    # mode. Default 1: fully serial, identical to the original behaviour.
+    # "auto" resolves per-pool via specter.specimen._parallel_render.
+    # recommend_render_workers -- min(n_species, 8), the measured sweet spot
+    # from a full production-scale sweep (see that function's own
+    # docstring); recommended over hand-picking a number.
+    render_workers: int | Literal["auto"] = 1
     # Optional device pool to round-robin those concurrent species across
     # (e.g. ["cuda:0", "cuda:1"] on a multi-GPU machine). None (default):
     # every species renders on `device` above, still concurrently across
     # render_workers threads, just not spread across multiple physical
-    # devices. TOML-only (list[str]).
-    render_devices: list[str] | None = None
+    # devices. "auto": every visible CUDA GPU (or None/CPU-fallback if
+    # there aren't any) -- device choice was measured to barely matter at
+    # the recommended worker count, so this doesn't try to be clever about
+    # which subset to use. TOML-only (list[str] | "auto").
+    render_devices: list[str] | Literal["auto"] | None = None
 
     # --- Output ---
     output_dir: str = "./output/"
@@ -807,11 +811,17 @@ TOMOGRAM_HELP: dict[str, str] = {
     "membrane_protein_specs each get their own concurrent build pass). "
     "Default 1 (serial, original behaviour) -- raise for tomograms with "
     "several species, especially with n_instances>1 [[membrane]] entries "
-    "(all instances of one entry share one render pass).",
-    "render_devices": "Membrane mode only, TOML-only (list[str]): device "
-    "pool to round-robin those concurrent species across, e.g. "
+    "(all instances of one entry share one render pass). Set to 'auto' "
+    "(TOML/Python config only -- the --render_workers CLI flag stays "
+    "integer-only) to pick min(n_species, 8) per pool automatically, the "
+    "measured sweet spot from a full production-scale sweep -- see "
+    "specter.specimen._parallel_render.recommend_render_workers.",
+    "render_devices": "Membrane mode only, TOML-only (list[str] | 'auto'): "
+    "device pool to round-robin those concurrent species across, e.g. "
     "['cuda:0', 'cuda:1']. None (default) keeps every species on `device` "
-    "above, still concurrent across render_workers threads.",
+    "above, still concurrent across render_workers threads. 'auto' uses "
+    "every visible CUDA GPU (falls back to `device` if none) -- device "
+    "choice was measured to barely matter at the recommended worker count.",
     "output_dir": "Directory to save output files.",
     "filename": "Base name for the output volume (no extension).",
 }

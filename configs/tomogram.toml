@@ -135,18 +135,29 @@ device = "cuda"                     # cpu | cuda | cuda:0. Non-membrane mode
                                     # every instance (shape field, bilayer
                                     # profile, rasterization, transmembrane
                                     # protein rendering).
-# render_workers = 4                # Membrane mode only: render this many
-                                    # PDB species concurrently (background
-                                    # threads) instead of one at a time --
-                                    # transmembrane_specs render ONCE, shared
-                                    # across every [[membrane]] entry/
-                                    # n_instances copy, and
-                                    # membrane_protein_specs render once per
-                                    # tomogram. Default 1 (serial).
-# render_devices = ["cuda:0", "cuda:1"]  # optional multi-GPU pool to
-                                    # round-robin those concurrent species
-                                    # across; default (omitted) keeps every
-                                    # species on device above.
+# render_workers = "auto"            # Membrane mode only: render/fetch this
+                                    # many PDB species concurrently instead
+                                    # of one at a time -- transmembrane_specs
+                                    # render ONCE, shared across every
+                                    # [[membrane]] entry/n_instances copy,
+                                    # and membrane_protein_specs render+fetch
+                                    # once per tomogram. Default 1 (serial).
+                                    # "auto" (recommended) picks
+                                    # min(n_species, 8) per pool -- the
+                                    # measured sweet spot from a full
+                                    # production-scale sweep; going manual
+                                    # instead is rarely worth it (see
+                                    # specter.specimen._parallel_render.
+                                    # recommend_render_workers).
+# render_devices = "auto"            # optional device pool to round-robin
+                                    # those concurrent species across.
+                                    # "auto" uses every visible CUDA GPU
+                                    # (falls back to device above if none);
+                                    # device choice barely mattered at the
+                                    # recommended worker count. Or set
+                                    # explicitly, e.g. ["cuda:0", "cuda:1"].
+                                    # Default (omitted) keeps every species
+                                    # on device above.
 
 [output]
 output_dir = "./output/"

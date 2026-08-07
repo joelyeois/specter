@@ -97,7 +97,12 @@ from ...crowding import insert_particles_into_micrograph
 from ...pdb import DEFAULT_PDB_SAVEFOLDER, PDB
 from ...potential import PotentialBuilder
 from ...rotations import build_affine_matrix, random_rotation_matrix, rotate_volume
-from .._parallel_render import build_templates_concurrently, resolve_render_devices
+from .._parallel_render import (
+    build_pdb_cache_concurrently,
+    build_templates_concurrently,
+    resolve_render_devices,
+    resolve_render_workers,
+)
 from ..filament import FilamentInstance, FilamentSpec, place_filaments
 from ..membrane import MembraneGenerator, TransmembranePlacement
 from ..membrane._placement import align_principal_axis_to_z
@@ -379,11 +384,15 @@ class MembraneTomogramGenerator:
     chunk_size : int, optional
         Instances rotated per batch, per species. Default None (all of a
         species' instances at once).
-    render_workers : int, optional
-        Number of cytosol/lumen `protein_specs` species rendered
-        concurrently (on background threads) when building each species'
-        `PotentialBuilder` template -- see `_render_species_pool`. Default
-        1: fully serial, identical to the pre-parallel behaviour.
+    render_workers : int or "auto", optional
+        Number of cytosol/lumen `protein_specs` species rendered/fetched
+        concurrently (`_render_species_pool`'s own `PotentialBuilder`
+        templates on threads, and `generate()`'s PDB preload on processes
+        above `_MIN_SOURCES_FOR_PROCESS_POOL`). Default 1: fully serial,
+        identical to the pre-parallel behaviour. `"auto"` resolves via
+        `recommend_render_workers(len(protein_specs))` -- min(n_species, 8),
+        the measured sweet spot from a full production-scale sweep (see
+        that function's own docstring).
     render_devices : list of str or torch.device, optional
         Device pool to round-robin those concurrent species across (e.g.
         multiple GPUs). Default None: every species renders on `device`
@@ -439,7 +448,7 @@ class MembraneTomogramGenerator:
         seed: int | None = None,
         device: str | torch.device = "cpu",
         chunk_size: int | None = None,
-        render_workers: int = 1,
+        render_workers: int | Literal["auto"] = 1,
         render_devices: list[str | torch.device] | None = None,
     ):
         if not protein_specs:
@@ -469,7 +478,7 @@ class MembraneTomogramGenerator:
         self.seed = seed
         self.device = device
         self.chunk_size = chunk_size
-        self.render_workers = render_workers
+        self.render_workers = resolve_render_workers(render_workers, len(protein_specs))
         self.render_devices = resolve_render_devices(device, render_devices)
 
         self.regions: dict[str, torch.Tensor] | None = None
@@ -625,18 +634,19 @@ class MembraneTomogramGenerator:
         # 161-species production-scale run that PDB fetch+parse (not
         # rendering) was the single largest bottleneck (~45% of total wall
         # time) precisely because this loop used to run fully serially, one
-        # species at a time, entirely outside render_workers' reach. CPU-
-        # only (fetch/parse has no GPU path) regardless of self.device/
-        # render_devices, so devices is a fixed single-CPU pool here, not
-        # self.render_devices.
+        # species at a time, entirely outside render_workers' reach. Uses
+        # PROCESSES, not threads (build_pdb_cache_concurrently, not
+        # build_templates_concurrently) -- also measured directly:
+        # thread-pooling this specific step gave ZERO wall-clock benefit
+        # despite dispatching correctly, because Biopython's structure
+        # parser doesn't release the GIL for most of its work. See
+        # build_pdb_cache_concurrently's own docstring for the spawn/
+        # __main__-guard caveat that comes with using processes here.
         unique_sources = sorted({s.pdb_source for s in self.protein_specs})
         if unique_sources:
-            pdb_cache = build_templates_concurrently(
-                keys=unique_sources,
-                build_one=lambda source, _device: PDB(
-                    source, savefolder=self.pdb_cache_dir, verbose=False
-                ),
-                devices=[torch.device("cpu")],
+            pdb_cache = build_pdb_cache_concurrently(
+                pdb_sources=unique_sources,
+                pdb_cache_dir=self.pdb_cache_dir,
                 max_workers=self.render_workers,
             )
 

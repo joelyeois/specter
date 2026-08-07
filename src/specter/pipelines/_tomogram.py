@@ -47,6 +47,7 @@ from specter.specimen import (
 from specter.specimen._parallel_render import (
     build_templates_concurrently,
     resolve_render_devices,
+    resolve_render_workers,
 )
 
 from ._common import _console, _format_elapsed, _section
@@ -193,13 +194,16 @@ def _build_membrane_tomogram_generator(
     # regardless of how many instances end up sharing it.
     if transmembrane_specs:
         devices = resolve_render_devices(config.device, config.render_devices)
+        workers = resolve_render_workers(
+            config.render_workers, len(transmembrane_specs)
+        )
         built = build_templates_concurrently(
             keys=list(range(len(transmembrane_specs))),
             build_one=lambda i, device: render_transmembrane_template(
                 transmembrane_specs[i], config.v_size, config.pdb_savefolder, device
             ),
             devices=devices,
-            max_workers=config.render_workers,
+            max_workers=workers,
         )
         transmembrane_specs = [
             dataclasses.replace(spec, template=built[i])

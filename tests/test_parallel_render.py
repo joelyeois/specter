@@ -1,20 +1,35 @@
-"""Tests for specter.specimen._parallel_render -- the thread-pool helper
-`specter build tomogram` (membrane mode) uses to render multiple PDB
-species' PotentialBuilder templates concurrently. Pure/stateless helper, so
-these use dummy build functions rather than real PDB/PotentialBuilder work
-(covered end-to-end, network-dependent, by
-tests/test_tomogram_pipeline_membrane.py and tests/test_membrane_generator.py)."""
+"""Tests for specter.specimen._parallel_render -- the concurrency helpers
+`specter build tomogram` (membrane mode) uses to fetch/parse multiple PDB
+species (processes, build_pdb_cache_concurrently) and render their
+PotentialBuilder templates (threads, build_templates_concurrently). The
+thread-pool tests use dummy build functions (pure/stateless helper); the
+process-pool tests use real, already-cached PDB codes since correctness
+there depends on real pickling across a process boundary, which a dummy
+function wouldn't exercise (covered end-to-end otherwise by
+tests/test_tomogram_pipeline_membrane.py and tests/test_membrane_generator.py).
+
+NOTE: build_pdb_cache_concurrently uses spawn-context multiprocessing --
+safe here because pytest's own entry point is already __main__-guarded
+(see that function's own docstring for why this matters at all)."""
 
 from __future__ import annotations
 
 import threading
 import time
 
+import pytest
 import torch
 
+import specter.specimen._parallel_render as parallel_render_module
+from specter.specimen import CRYOETSIM_PARTICLE_TABLE
 from specter.specimen._parallel_render import (
+    RECOMMENDED_MAX_RENDER_WORKERS,
+    build_pdb_cache_concurrently,
     build_templates_concurrently,
+    recommend_render_devices,
+    recommend_render_workers,
     resolve_render_devices,
+    resolve_render_workers,
 )
 
 
@@ -94,3 +109,105 @@ def test_build_templates_concurrently_round_robins_devices():
         (2, torch.device("cpu")),
         (3, torch.device("meta")),
     ]
+
+
+def test_build_pdb_cache_concurrently_serial():
+    cache = build_pdb_cache_concurrently(
+        pdb_sources=["1mbo"], pdb_cache_dir="pdb-data", max_workers=1
+    )
+    assert set(cache) == {"1mbo"}
+    assert cache["1mbo"].coordinates.shape[0] > 0
+
+
+def test_build_pdb_cache_concurrently_below_threshold_skips_process_pool(monkeypatch):
+    def _boom(*args, **kwargs):
+        raise AssertionError(
+            "ProcessPoolExecutor must not be used below "
+            "_MIN_SOURCES_FOR_PROCESS_POOL -- see that constant's own comment"
+        )
+
+    monkeypatch.setattr(parallel_render_module, "ProcessPoolExecutor", _boom)
+    cache = build_pdb_cache_concurrently(
+        pdb_sources=["1mbo", "1fa2", "1a6m"], pdb_cache_dir="pdb-data", max_workers=8
+    )
+    assert set(cache) == {"1mbo", "1fa2", "1a6m"}
+
+
+def test_build_pdb_cache_concurrently_parallel_matches_serial():
+    # Above _MIN_SOURCES_FOR_PROCESS_POOL, so this genuinely exercises the
+    # process-pool path (see the below-threshold test above for the
+    # fallback-to-serial case).
+    n = parallel_render_module._MIN_SOURCES_FOR_PROCESS_POOL + 2
+    sources = [d["code"] for d in CRYOETSIM_PARTICLE_TABLE[:n]]
+    serial = build_pdb_cache_concurrently(
+        pdb_sources=sources, pdb_cache_dir="pdb-data", max_workers=1
+    )
+    parallel = build_pdb_cache_concurrently(
+        pdb_sources=sources, pdb_cache_dir="pdb-data", max_workers=4
+    )
+    assert set(parallel) == set(serial) == set(sources)
+    for source in sources:
+        # PDB objects pickled across the process boundary should carry the
+        # same data as an in-process (serial) parse.
+        assert parallel[source].max_diameter == pytest.approx(
+            serial[source].max_diameter
+        )
+        assert (
+            parallel[source].atomic_numbers.shape == serial[source].atomic_numbers.shape
+        )
+        assert torch.allclose(parallel[source].coordinates, serial[source].coordinates)
+
+
+def test_build_pdb_cache_concurrently_deduplicates_sources():
+    n = parallel_render_module._MIN_SOURCES_FOR_PROCESS_POOL + 2
+    sources = [d["code"] for d in CRYOETSIM_PARTICLE_TABLE[:n]]
+    cache = build_pdb_cache_concurrently(
+        pdb_sources=sources + sources[:3],  # duplicate a few sources
+        pdb_cache_dir="pdb-data",
+        max_workers=4,
+    )
+    assert set(cache) == set(sources)
+
+
+def test_recommend_render_workers_caps_at_measured_sweet_spot():
+    assert recommend_render_workers(1000) == RECOMMENDED_MAX_RENDER_WORKERS
+
+
+def test_recommend_render_workers_never_exceeds_species_count():
+    assert recommend_render_workers(3) == 3
+    assert recommend_render_workers(1) == 1
+
+
+def test_recommend_render_workers_floors_at_one():
+    assert recommend_render_workers(0) == 1
+    assert recommend_render_workers(-5) == 1
+
+
+def test_recommend_render_devices_matches_visible_gpus():
+    devices = recommend_render_devices()
+    if torch.cuda.is_available():
+        assert devices == [f"cuda:{i}" for i in range(torch.cuda.device_count())]
+    else:
+        assert devices is None
+
+
+def test_resolve_render_workers_passes_through_non_auto():
+    assert resolve_render_workers(3, n_species=100) == 3
+    assert resolve_render_workers(1, n_species=100) == 1
+
+
+def test_resolve_render_workers_resolves_auto():
+    assert (
+        resolve_render_workers("auto", n_species=1000) == RECOMMENDED_MAX_RENDER_WORKERS
+    )
+    assert resolve_render_workers("auto", n_species=3) == 3
+
+
+def test_resolve_render_devices_resolves_auto():
+    devices = resolve_render_devices("cpu", "auto")
+    if torch.cuda.is_available():
+        assert devices == [
+            torch.device(f"cuda:{i}") for i in range(torch.cuda.device_count())
+        ]
+    else:
+        assert devices == [torch.device("cpu")]

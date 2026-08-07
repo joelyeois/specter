@@ -22,6 +22,7 @@ from __future__ import annotations
 import math
 import warnings
 from dataclasses import dataclass
+from typing import Literal
 
 import torch
 
@@ -29,7 +30,11 @@ from ...arrays import clip_insert_bounds
 from ...pdb import DEFAULT_PDB_SAVEFOLDER, PDB
 from ...potential import PotentialBuilder
 from ...rotations import build_affine_matrix, rotate_volume
-from .._parallel_render import build_templates_concurrently, resolve_render_devices
+from .._parallel_render import (
+    build_templates_concurrently,
+    resolve_render_devices,
+    resolve_render_workers,
+)
 from ..packing import estimate_protein_box_size
 from ._field import MembraneField, generate_membrane_field
 from ._field_alpha import generate_membrane_field_alpha_shape
@@ -500,14 +505,16 @@ class MembraneGenerator:
         Device for generation. Default "cpu".
     seed : int, optional
         Random seed. Default None.
-    render_workers : int, optional
+    render_workers : int or "auto", optional
         Number of `transmembrane_specs` species rendered concurrently (on
         background threads) when building each species' `PotentialBuilder`
         template -- see `_build_template`. Only matters when
         `transmembrane_specs` has more than one entry AND none of them
         already supply their own `TransmembraneSpec.template` (those are
         never rebuilt regardless of this setting). Default 1: fully serial,
-        identical to the pre-parallel behaviour.
+        identical to the pre-parallel behaviour. `"auto"` resolves via
+        `recommend_render_workers(len(transmembrane_specs))` -- see that
+        function's own docstring.
     render_devices : list of str or torch.device, optional
         Device pool to round-robin those concurrent species across (e.g.
         multiple GPUs). Default None: every species renders on `device`
@@ -559,7 +566,7 @@ class MembraneGenerator:
         max_field_voxels: int = 200_000_000,
         device: str | torch.device = "cpu",
         seed: int | None = None,
-        render_workers: int = 1,
+        render_workers: int | Literal["auto"] = 1,
         render_devices: list[str | torch.device] | None = None,
     ):
         if shape_backend not in (
@@ -778,7 +785,9 @@ class MembraneGenerator:
         self.max_field_voxels = max_field_voxels
         self.device = torch.device(device)
         self.seed = seed
-        self.render_workers = render_workers
+        self.render_workers = resolve_render_workers(
+            render_workers, len(self.transmembrane_specs)
+        )
         self.render_devices = resolve_render_devices(self.device, render_devices)
 
         self.field: MembraneField | None = None

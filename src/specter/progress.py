@@ -1,12 +1,36 @@
 from __future__ import annotations
 
 import threading
+import time
 from contextlib import contextmanager
 from typing import Any, Iterable, Iterator, TypeVar
 
+from rich.console import Console
+from rich.rule import Rule
 from tqdm.auto import tqdm
 
 T = TypeVar("T")
+
+# Independent Console instance from pipelines/_common.py's own `_console`
+# (this module sits below `pipelines/` in the dependency graph, so it
+# can't import that one) -- rich.console.Console is safe to instantiate
+# more than once; both write to the same stdout/terminal regardless.
+_section_console = Console()
+
+
+def _format_elapsed(seconds: float) -> str:
+    """Format an elapsed-time duration as e.g. "1h 2m 3s", dropping empty
+    leading units. Independent copy of pipelines/_common.py's own helper
+    of the same name (this module sits below `pipelines/` in the
+    dependency graph, and it's a two-line function -- not worth an import
+    the wrong way just to avoid duplicating it)."""
+    h, rem = divmod(int(seconds), 3600)
+    m, s = divmod(rem, 60)
+    if h > 0:
+        return f"{h}h {m}m {s}s"
+    if m > 0:
+        return f"{m}m {s}s"
+    return f"{s}s"
 
 
 class ProgressManager:
@@ -124,6 +148,16 @@ def status(description: str, disable: bool = False) -> Iterator[None]:
     Unlike ``track``, this has no iteration count — it just shows that something
     is happening and how long it has been running, then clears on exit.
 
+    A background thread calls ``pbar.refresh()`` every 0.3s for the
+    duration of the ``with`` block -- tqdm only redraws on an explicit
+    ``update()``/``refresh()`` call, so without this the elapsed timer
+    (and the whole line) would print once and then sit frozen for the
+    entire duration of a single long blocking call wrapped in ``status``
+    (e.g. one big ``pack_hard_spheres_3d`` invocation with no natural
+    iteration point of its own) -- confirmed directly: this is not
+    cosmetic, callers were reporting a "stuck" run that was actually still
+    working.
+
     Parameters
     ----------
     description : str
@@ -142,11 +176,114 @@ def status(description: str, disable: bool = False) -> Iterator[None]:
         bar_format="{desc}: {elapsed}",
         transient=True,
     )
+    stop_heartbeat = threading.Event()
+
+    def _heartbeat() -> None:
+        while not stop_heartbeat.wait(0.3):
+            pbar.refresh()
+
+    heartbeat = threading.Thread(target=_heartbeat, daemon=True)
+    heartbeat.start()
     try:
         yield
     finally:
+        stop_heartbeat.set()
+        heartbeat.join(timeout=1.0)
         pbar.close()
         manager.release(pos)
+
+
+@contextmanager
+def phase(description: str, disable: bool = False) -> Iterator[None]:
+    """
+    Context manager that prints a titled section-header rule for a named
+    pipeline phase (e.g. "generating membranes", "fetching PDB
+    structures") on entry, then a PERSISTENT one-line completion summary
+    -- "{description}: {elapsed}" -- via ``tqdm.write`` (safe to
+    interleave with any other active ``track``/``status``/``TqdmProgress``
+    bars without corrupting their display, unlike a plain ``print``) when
+    it exits. Same visual convention as `pipelines._common._section`
+    (a full-width titled rule), so CLI output reads consistently across
+    `specter simulate`/`specter build` regardless of which layer is
+    driving a given phase.
+
+    Meant to wrap a whole pipeline phase that itself contains one or more
+    transient ``status``/``TqdmProgress`` bars for live per-item feedback
+    -- those still clear themselves on completion, but the header/summary
+    pair leaves a permanent record in scrollback of what ran and how long
+    it took, so a caller isn't left with zero information about a
+    finished phase the moment its own transient bar disappears.
+
+    Parameters
+    ----------
+    description : str
+        Label for the section header and the printed summary line.
+    disable : bool, optional
+        If True, no output is shown (the block still runs and is still
+        timed internally, just not printed).
+    """
+    if disable:
+        yield
+        return
+    start = phase_start(description)
+    try:
+        yield
+    finally:
+        phase_done(description, start)
+
+
+def phase_start(description: str, disable: bool = False) -> float:
+    """
+    Print the same titled section-header rule `phase()` would on entry,
+    for a block that can't easily be wrapped in a ``with phase(...):``
+    (e.g. retrofitting a large pre-existing block without reindenting
+    it). Pairs with `phase_done`: call this immediately before the block,
+    keep the returned value, then call
+    ``phase_done(description, start)`` after it.
+
+    Parameters
+    ----------
+    description : str
+        Label for the section header.
+    disable : bool, optional
+        If True, no output is shown.
+
+    Returns
+    -------
+    float
+        A ``time.perf_counter()`` value, timestamped right after printing
+        -- pass this straight through to `phase_done`.
+    """
+    if not disable:
+        _section_console.print(
+            Rule(f"[bold yellow]{description}[/bold yellow]", style="yellow")
+        )
+    return time.perf_counter()
+
+
+def phase_done(description: str, start: float, disable: bool = False) -> None:
+    """
+    Print a persistent ``"{description}: {elapsed}"`` completion summary
+    for a block that already recorded its own ``time.perf_counter()``
+    start time (typically from `phase_start`, though any timestamp
+    works) -- use this when wrapping the block in a ``with phase(...):``
+    isn't practical (e.g. retrofitting a large pre-existing block without
+    reindenting it): call ``start = phase_start(description)`` before the
+    block, then ``phase_done(description, start)`` after it.
+
+    Parameters
+    ----------
+    description : str
+        Label for the printed summary line.
+    start : float
+        A ``time.perf_counter()`` value captured before the timed block ran.
+    disable : bool, optional
+        If True, no output is shown.
+    """
+    if disable:
+        return
+    elapsed = time.perf_counter() - start
+    tqdm.write(f"{description}: {_format_elapsed(elapsed)}")
 
 
 class TqdmProgress:

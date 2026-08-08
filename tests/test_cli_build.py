@@ -44,7 +44,7 @@ def _run_build_cli(config_path: Path, *extra_args: str) -> proc.CompletedProcess
         str(config_path),
         *extra_args,
     ]
-    return proc.run(args, capture_output=True, text=True)
+    return proc.run(args, capture_output=True, encoding="utf-8")
 
 
 def test_cli_build_tomogram_smoke(tmp_path: Path) -> None:
@@ -67,7 +67,7 @@ def test_cli_build_tomogram_help_smoke() -> None:
     result = proc.run(
         [sys.executable, "-m", "specter.cli._cli", "build", "tomogram", "--help"],
         capture_output=True,
-        text=True,
+        encoding="utf-8",
     )
     assert result.returncode == 0
     assert "--filler_occupancy_fraction" in result.stdout
@@ -117,7 +117,7 @@ frequency = 1
     )
     lumen_block = (
         f"""
-[[membrane_protein_specs]]
+[[filler]]
 pdb_source = "{_SMALL_FIXTURE}"
 location = "lumen"
 """
@@ -132,11 +132,11 @@ sh_amplitude = 0.15
 n_lipids_per_leaflet = 6
 {transmembrane_block}
 {lumen_block}
-[[membrane_protein_specs]]
+[[filler]]
 pdb_source = "{_LARGE_FIXTURE}"
 location = "cytosol"
 
-membrane_occupancy_fraction = 0.1
+filler_occupancy_fraction = 0.1
 
 [specimen]
 target_shape = [64, 64, 64]
@@ -183,11 +183,11 @@ def test_cli_build_tomogram_membrane_transmembrane_smoke(tmp_path: Path) -> None
     assert any("-transmembrane-" in name for name in pick_files), pick_files
 
 
-def test_cli_build_tomogram_membrane_and_targets_conflict(tmp_path: Path) -> None:
-    """config.membrane can't be combined with targets/filler in v1 -- the
-    pipeline's own mutual-exclusivity ValueError must surface as a CLI
-    failure, not silently pick one mode."""
-    config_path = tmp_path / "conflict_tomogram.toml"
+def test_cli_build_tomogram_membrane_and_targets_combined(tmp_path: Path) -> None:
+    """config.membrane, config.targets (exact-count), and config.filler
+    (ratio) can all be combined in one tomogram -- no more mutual-exclusivity
+    error between "membrane mode" and "sphere-packing mode"."""
+    config_path = tmp_path / "combined_tomogram.toml"
     _write_membrane_test_config(
         config_path, tmp_path, include_lumen=False, include_transmembrane=False
     )
@@ -195,8 +195,16 @@ def test_cli_build_tomogram_membrane_and_targets_conflict(tmp_path: Path) -> Non
         f.write(f'\n[[targets]]\npdb_source = "{_SMALL_FIXTURE}"\nn_copies = 1\n')
 
     result = _run_build_cli(config_path)
-    assert result.returncode != 0
-    assert "can't be combined" in result.stderr
+    assert result.returncode == 0, result.stderr
+    assert (tmp_path / "test_membrane_tomogram.mrc").exists()
+
+    pick_files = {p.name for p in tmp_path.glob("*.ndjson")}
+    assert any(
+        _SMALL_FIXTURE.stem in name and "-cytosol-" in name for name in pick_files
+    ), pick_files
+    assert any(
+        _LARGE_FIXTURE.stem in name and "-cytosol-" in name for name in pick_files
+    ), pick_files
 
 
 def test_cli_build_tomogram_membrane_multi_instance_smoke(tmp_path: Path) -> None:
@@ -219,11 +227,11 @@ swept_tube_radius_a = 35.0
 n_lipids_per_leaflet = 6
 position_xyz = [150.0, 0.0, 0.0]
 
-[[membrane_protein_specs]]
+[[filler]]
 pdb_source = "{_LARGE_FIXTURE}"
 location = "cytosol"
 
-membrane_occupancy_fraction = 0.05
+filler_occupancy_fraction = 0.05
 
 [specimen]
 target_shape = [80, 80, 80]

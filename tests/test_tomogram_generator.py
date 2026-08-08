@@ -167,11 +167,26 @@ def test_membrane_tomogram_generator_warns_when_lumen_species_has_no_region():
     assert len(gen.placements) == 0
 
 
-def test_membrane_tomogram_generator_rejects_empty_protein_specs():
+def test_membrane_tomogram_generator_allows_empty_protein_specs():
+    """A membrane-only tomogram (no packed protein population) is valid --
+    protein_specs may be empty as long as membrane_instances/filament_specs
+    isn't."""
     mgen = MembraneGenerator(seed=0, **_MEMBRANE_KWARGS)
-    with pytest.raises(ValueError, match="protein_specs"):
+    gen = MembraneTomogramGenerator(
+        membrane_instances=[MembraneInstance(generator=mgen)],
+        target_shape_zyx=_TARGET_SHAPE_ZYX,
+        v_size=_V_SIZE,
+        protein_specs=[],
+    )
+    volume = gen.generate()
+    assert volume.shape == _TARGET_SHAPE_ZYX
+    assert gen.placements == []
+
+
+def test_membrane_tomogram_generator_rejects_all_empty():
+    with pytest.raises(ValueError, match="at least one"):
         MembraneTomogramGenerator(
-            membrane_instances=[MembraneInstance(generator=mgen)],
+            membrane_instances=[],
             target_shape_zyx=_TARGET_SHAPE_ZYX,
             v_size=_V_SIZE,
             protein_specs=[],

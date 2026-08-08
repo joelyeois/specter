@@ -1,10 +1,37 @@
 """
-MembraneTomogramGenerator: assembles a full specimen tomogram around an
-organic membrane -- transmembrane proteins on the bilayer, plus densely
-packed cytosolic and vesicle-lumen protein populations, region-gated
-against the membrane's own geometry so a "lumen" species can only land
-inside an enclosed compartment and a "cytosol" species can only land
-outside one.
+MembraneTomogramGenerator: assembles a full specimen tomogram from an
+optional organic membrane -- transmembrane proteins on the bilayer, plus
+densely packed cytosolic and vesicle-lumen protein populations, region-
+gated against the membrane's own geometry so a "lumen" species can only
+land inside an enclosed compartment and a "cytosol" species can only land
+outside one -- plus optional scattered filament species (e.g. F-actin).
+
+This is the ONE specimen generator behind `specter build tomogram`:
+`membrane_instances` may be empty (no membranes at all -- the whole volume
+is then one cytosol region, since `classify_membrane_regions` already
+treats "no membrane" that way by design, see `._regions`'s own docstring),
+`protein_specs` may be empty (membranes/filaments with no packed protein
+population), and `filament_specs` may be empty -- any combination is
+valid as long as at least one of the three is non-empty. There is no
+longer a separate non-membrane sphere-packing generator/mode: a species in
+`protein_specs` can be placed either at an exact count
+(`TomogramProteinSpec.n_copies`, ground-truth "target" semantics) or
+ratio-weighted up to `occupancy_fraction` of its region
+(`TomogramProteinSpec.ratio`, "filler"/crowding semantics), matching what
+`SpherePackingSpecimenGenerator`'s two-stage target/filler split used to
+provide, now region-gated too.
+
+Generation order is membranes, then filaments, then protein fill (exact-
+count species per region before ratio-weighted ones) -- see `generate()`'s
+own body. Placed filament voxels (`instance_labels > 0` right after
+`_stamp_filaments`) are folded into the exclusion field/sampling mask used
+by the protein-fill stage, so packed spheres are kept clear of already-
+placed filaments the same way they're already kept clear of the membrane
+shell -- both are bounding-sphere-vs-distance-field approximations, not an
+exact voxel-overlap guarantee (a placed protein's true, non-spherical
+rendered shape can still graze a filament or the shell very close to the
+boundary; consistent with the approximate, "reject and move on" philosophy
+already used everywhere else in this generator).
 
 Composes three independently-developed pieces rather than reimplementing
 any of them: ``specimen.membrane.MembraneGenerator`` (organic shape +
@@ -74,22 +101,30 @@ specter-native random-walk placement `CryoETSpecimenGenerator` uses, with
 no region-gating (filaments are dropped anywhere in the volume regardless
 of cytosol/lumen/membrane-shell classification, matching that generator's
 own "no occupancy-aware packing against other species" scope) and no
-collision avoidance against the membrane or the cytosol/lumen protein
-pools. Rendered last, after cytosol/lumen packing, and stamped as
-additional entries in the shared `instance_labels` volume (continuing the
-same instance-id counter) so filament monomers are visible in the
+collision avoidance against the membrane shell or against each other.
+Rendered right after membranes, BEFORE cytosol/lumen protein packing (see
+module docstring) -- unlike the membrane shell, filaments themselves have
+no fixed geometry to region-gate against, so this is purely an ordering
+choice, not a region restriction -- and stamped as the first entries in
+the shared `instance_labels` volume (protein instances continue the same
+instance-id counter afterward) so filament monomers are visible in the
 segmentation ground truth alongside cytosol/lumen protein instances.
 """
 
 from __future__ import annotations
 
+import gc
 import json
+import math
+import time
 import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+import numpy as np
 import torch
+import torch.nn.functional as F
 from scipy import ndimage
 
 from ...arrays import clip_insert_bounds
@@ -108,12 +143,27 @@ from ..membrane import MembraneGenerator, TransmembranePlacement
 from ..membrane._placement import align_principal_axis_to_z
 from ..packing import draw_species_pool, estimate_protein_box_size, pack_hard_spheres_3d
 from ._regions import classify_membrane_regions
+from ...progress import TqdmProgress, phase_done, phase_start, status
 
 # Same convention as specimen/packing/pdb_packing.py's own
 # _INSTANCE_LABEL_REL_THRESHOLD -- kept as an independent copy rather than
 # imported, matching this codebase's established per-generator
 # zero-cross-coupling convention (see e.g. cryotomosim.py's own docstring).
 _INSTANCE_LABEL_REL_THRESHOLD = 0.01
+
+# A region covering at least this fraction of the whole tomogram box (e.g.
+# a large cytosol with no membrane, or with just one small organelle in a
+# big box) behaves like an open box for RSA packing purposes -- it
+# saturates fast, so pack_hard_spheres_3d's own default stall_patience
+# (15) is enough. Below this threshold (e.g. a small vesicle lumen), the
+# region-restricted sampling_mask docstring's own reasoning applies: many
+# more consecutive misses can be needed before a geometrically valid spot
+# turns up, so region_max_passes' own (much larger) value is used instead.
+# Verified directly on a 200x600x600 box (see PR discussion): stall_patience
+# =15 packed the same PEI2016 candidate pool to within ~3% of stall_patience
+# =300's own density in roughly half the wall time.
+_TIGHT_REGION_FRACTION_THRESHOLD = 0.25
+_OPEN_REGION_STALL_PATIENCE = 15  # matches pack_hard_spheres_3d's own default
 
 
 def _insert_instance_labels(
@@ -124,9 +174,14 @@ def _insert_instance_labels(
 ) -> torch.Tensor:
     """Stamp per-instance integer labels into a shared label volume --
     identical mechanism to specimen/packing/pdb_packing.py's own helper of
-    the same name, duplicated rather than imported (see module docstring)."""
+    the same name, duplicated rather than imported (see module docstring).
+    `binarized`/`positions` are moved to `labels`' own device (not the
+    other way around) -- `labels` is the shared, potentially large
+    accumulator (see MembraneTomogramGenerator's own `accumulator_device`
+    docstring), `binarized` is one small per-chunk rotated result."""
+    device = labels.device
+    binarized = binarized.to(device)
     N, Zp, Yp, Xp = binarized.shape
-    device = binarized.device
     Z, Y, X = labels.shape
     positions = positions.to(device)
     positions_int = (positions / pixel_size).round().long()
@@ -183,14 +238,194 @@ def _insert_volume_max(
     """Max-merge `local` (same center-relative convention as `volume`,
     i.e. physical (0,0,0) at its own center) into `volume`, shifted by
     `position_xyz`. See `_position_to_center_index` for why this uses a
-    different convention than `cryoet.py`'s `_insert_clipped`."""
+    different convention than `cryoet.py`'s `_insert_clipped`. `local` is
+    moved to `volume`'s own device (not the other way around) -- `volume`
+    is the shared, potentially large accumulator (see
+    MembraneTomogramGenerator's own `accumulator_device` docstring),
+    `local` is one membrane instance's own (much smaller) working grid."""
     center_zyx = _position_to_center_index(position_xyz, tuple(volume.shape), v_size)
     bounds = clip_insert_bounds(center_zyx, local.shape, volume.shape)
     if bounds is None:
         return volume
     dst, src = bounds
-    volume[dst] = torch.maximum(volume[dst], local[src])
+    volume[dst] = torch.maximum(volume[dst], local[src].to(volume.device))
     return volume
+
+
+def _build_sphere_exclusion_field(
+    coords_xyz: torch.Tensor,
+    radii: torch.Tensor,
+    target_shape: tuple[int, int, int],
+    v_size: float,
+) -> torch.Tensor:
+    """Rasterize already-placed spheres into a boolean occupied grid and
+    return its Euclidean distance transform, ready to combine (elementwise
+    minimum, matching `pack_hard_spheres_3d`'s own "union of forbidden
+    regions" guidance) with another `exclusion_distance_field` for a
+    following packing stage. Identical mechanism to
+    `specimen/packing/pdb_packing.py`'s own helper of the same name,
+    duplicated rather than imported (see module docstring's "zero-cross-
+    coupling" convention)."""
+    Z, Y, X = target_shape
+    occupied = np.zeros((Z, Y, X), dtype=bool)
+    cz, cy, cx = Z / 2.0, Y / 2.0, X / 2.0
+
+    coords_np = coords_xyz.cpu().numpy()
+    radii_np = radii.cpu().numpy()
+    for (x, y, z), r in zip(coords_np, radii_np):
+        vz, vy, vx = cz + z / v_size, cy + y / v_size, cx + x / v_size
+        r_vox = r / v_size
+        z0, z1 = max(0, int(np.floor(vz - r_vox))), min(Z, int(np.ceil(vz + r_vox)) + 1)
+        y0, y1 = max(0, int(np.floor(vy - r_vox))), min(Y, int(np.ceil(vy + r_vox)) + 1)
+        x0, x1 = max(0, int(np.floor(vx - r_vox))), min(X, int(np.ceil(vx + r_vox)) + 1)
+        if z0 >= z1 or y0 >= y1 or x0 >= x1:
+            continue
+        zz, yy, xx = np.mgrid[z0:z1, y0:y1, x0:x1]
+        dist2 = (zz - vz) ** 2 + (yy - vy) ** 2 + (xx - vx) ** 2
+        occupied[z0:z1, y0:y1, x0:x1] |= dist2 <= r_vox**2
+
+    field = ndimage.distance_transform_edt(~occupied, sampling=(v_size,) * 3)
+    return torch.from_numpy(field).float()
+
+
+# Voxel budget for building an exclusion_distance_field/sampling_mask (see
+# _resolve_exclusion_field_grid) -- scipy's distance_transform_edt over the
+# WHOLE box is the dominant cost of packing at production scale regardless
+# of how sparse the actual "forbidden" voxels are (confirmed directly:
+# ~12 minutes and tens of GB of resident memory for one rebuild on a
+# 4.5-billion-voxel box, with only ~90 small spheres actually occupied).
+# 200_000_000 matches MembraneGenerator's own max_field_voxels default --
+# same "how big a grid is worth paying for" budget, applied here to a
+# different generator.
+_MAX_EXCLUSION_FIELD_VOXELS = 200_000_000
+
+
+def _resolve_exclusion_field_grid(
+    target_shape: tuple[int, int, int], v_size: float
+) -> tuple[float, tuple[int, int, int], int]:
+    """
+    Coarsen ``(v_size, target_shape)`` for exclusion-field construction if
+    the box exceeds ``_MAX_EXCLUSION_FIELD_VOXELS`` voxels.
+
+    Safe to do because ``pack_hard_spheres_3d``'s own
+    ``exclusion_distance_field``/``field_v_size`` mechanism is already
+    documented to support (and trilinearly sample) a coarser grid than the
+    box's own placement precision -- gap/radii here are tens of Angstrom,
+    while ``v_size`` can be a small fraction of one; that docstring's own
+    empirical finding ("a couple of Angstrom of bleed at field_v_size=5
+    for gap=2, vanishing by field_v_size=2") already characterizes exactly
+    this tradeoff. This just exploits a capability that was always
+    available but never used before now (``field_v_size`` was always
+    passed equal to ``v_size``).
+
+    Returns
+    -------
+    field_v_size : float
+        Coarsened voxel size, Angstrom (equals ``v_size`` if no
+        coarsening was needed).
+    field_shape : tuple of int
+        Coarsened grid shape, ``ceil(target_shape / factor)`` per axis.
+    factor : int
+        Integer downsampling factor (1 if no coarsening was needed).
+    """
+    n = target_shape[0] * target_shape[1] * target_shape[2]
+    if n <= _MAX_EXCLUSION_FIELD_VOXELS:
+        return v_size, target_shape, 1
+    factor = max(1, math.ceil((n / _MAX_EXCLUSION_FIELD_VOXELS) ** (1.0 / 3.0)))
+    field_shape = tuple(math.ceil(s / factor) for s in target_shape)
+    return v_size * factor, field_shape, factor
+
+
+def _downsample_mask_maxpool(
+    mask: torch.Tensor, factor: int, field_shape: tuple[int, int, int]
+) -> torch.Tensor:
+    """
+    Coarsen a boolean mask by ``factor`` via max-pooling.
+
+    ``ceil_mode=True`` so a coarse voxel is True if ANY of its
+    constituent fine voxels is True -- a permissive/growing bias (the
+    coarse "allowed" region can only be equal to or larger than the true
+    fine one), matching the same direction of approximation
+    ``pack_hard_spheres_3d``'s own coarse-field tolerance already accepts
+    (see ``_resolve_exclusion_field_grid``), rather than a stricter
+    erosion that risks losing thin true region.
+    """
+    pooled = F.max_pool3d(
+        mask.to(torch.float32)[None, None],
+        kernel_size=factor,
+        stride=factor,
+        ceil_mode=True,
+    )[0, 0]
+    assert tuple(pooled.shape) == field_shape
+    return pooled > 0
+
+
+# Bytes/voxel for each accumulator tensor (volume: float32, instance_labels
+# + membrane_labels: int32 -- all 4 bytes/voxel, so this is just a
+# multiplier for how many of these coexist at once).
+_ACCUMULATOR_BYTES_PER_VOXEL = 4
+_ACCUMULATOR_N_TENSORS = 3  # volume, instance_labels, membrane_labels
+
+# Maximum fraction of a CUDA device's CURRENTLY FREE memory the canvas is
+# allowed to consume before recommend_accumulator_device falls back to
+# CPU -- deliberately conservative (not "however much fits"), since
+# rendering/rotation on that SAME device need real memory too, at the
+# same time as the canvas exists, not before/after it.
+_ACCUMULATOR_GPU_BUDGET_FRACTION = 0.5
+
+
+def recommend_accumulator_device(
+    device: str | torch.device,
+    target_shape_zyx: tuple[int, int, int],
+) -> torch.device:
+    """
+    Suggest an `accumulator_device`: `device` itself if the canvas
+    (`target_shape_zyx`'s voxel count x `_ACCUMULATOR_N_TENSORS` same-
+    sized tensors) fits within `_ACCUMULATOR_GPU_BUDGET_FRACTION` of that
+    device's currently free memory, "cpu" otherwise. Trivially "cpu"
+    whenever `device` isn't CUDA (or CUDA isn't available at all) --
+    nothing to decouple from in that case.
+
+    Parameters
+    ----------
+    device : str or torch.device
+        The generator's own compute device (rendering/rotation/field
+        generation) -- NOT necessarily the same as the returned
+        accumulator device once this recommends "cpu".
+    target_shape_zyx : tuple of int
+        (Z, Y, X) voxels -- the shape every accumulator tensor will be.
+
+    Returns
+    -------
+    torch.device
+    """
+    device_t = torch.device(device)
+    if device_t.type != "cuda" or not torch.cuda.is_available():
+        return torch.device("cpu")
+    n_voxels = target_shape_zyx[0] * target_shape_zyx[1] * target_shape_zyx[2]
+    estimated_bytes = n_voxels * _ACCUMULATOR_BYTES_PER_VOXEL * _ACCUMULATOR_N_TENSORS
+    free_bytes, _total_bytes = torch.cuda.mem_get_info(device_t)
+    if estimated_bytes > _ACCUMULATOR_GPU_BUDGET_FRACTION * free_bytes:
+        return torch.device("cpu")
+    return device_t
+
+
+def resolve_accumulator_device(
+    device: str | torch.device,
+    accumulator_device: str | torch.device | Literal["auto"] | None,
+    target_shape_zyx: tuple[int, int, int],
+) -> torch.device:
+    """
+    Normalize an `accumulator_device` config value -- `None` matches
+    `device` (the original, one-device behaviour, unchanged default);
+    `"auto"` resolves via `recommend_accumulator_device`; anything else
+    (a concrete device string/`torch.device`) is used exactly as given.
+    """
+    if accumulator_device is None:
+        return torch.device(device)
+    if accumulator_device == "auto":
+        return recommend_accumulator_device(device, target_shape_zyx)
+    return torch.device(accumulator_device)
 
 
 def _instance_bounding_radius(generator: MembraneGenerator) -> float:
@@ -235,13 +470,16 @@ def _insert_shell_label(
     (torch.Tensor, bool)
         The updated `labels`, and whether this instance's shell overlapped
         any voxel an earlier instance had already claimed.
+
+    `shell_mask` is moved to `labels`' own device (not the other way
+    around) -- see `_insert_volume_max`'s own docstring for why.
     """
     center_zyx = _position_to_center_index(position_xyz, tuple(labels.shape), v_size)
     bounds = clip_insert_bounds(center_zyx, shell_mask.shape, labels.shape)
     if bounds is None:
         return labels, False
     dst, src = bounds
-    chunk = shell_mask[src].to(labels.dtype) * instance_id
+    chunk = shell_mask[src].to(device=labels.device, dtype=labels.dtype) * instance_id
     overlap = bool(((chunk > 0) & (labels[dst] > 0)).any())
     labels[dst] = torch.where(labels[dst] > 0, labels[dst], chunk)
     return labels, overlap
@@ -261,26 +499,50 @@ class TomogramProteinSpec:
         every membrane compartment) or "lumen" (inside an enclosed
         compartment, e.g. a vesicle's interior). Default "cytosol".
     ratio : float, optional
-        Relative abundance weight among OTHER specs sharing the same
-        `location` (species at different locations are packed
-        independently, so ratios don't compare across locations). Default
-        1.0.
+        Relative abundance weight among OTHER `ratio`-mode specs sharing
+        the same `location` (species at different locations are packed
+        independently, so ratios don't compare across locations). Ignored
+        if `n_copies` is set. Default 1.0.
+    n_copies : int, optional
+        If set, place exactly this many instances of this species instead
+        of ratio-weighted filling -- "target"/ground-truth semantics,
+        matching `SpherePackingSpecimenGenerator`'s `SphereProteinSpec.
+        n_copies`. Placed FIRST within this spec's `location`, before any
+        `ratio`-mode species there (which then avoid the exact-count
+        placements via an exclusion field, same mechanism used to avoid
+        the membrane shell/filaments). Default None (ratio-weighted
+        filler mode).
     """
 
     pdb_source: str
     location: Literal["cytosol", "lumen"] = "cytosol"
     ratio: float = 1.0
+    n_copies: int | None = None
+
+    def __post_init__(self) -> None:
+        if self.n_copies is not None and self.n_copies <= 0:
+            raise ValueError(
+                f"TomogramProteinSpec({self.pdb_source!r}): n_copies must be "
+                f"a positive int if set, got {self.n_copies}."
+            )
 
 
 @dataclass
 class TomogramPlacement:
-    """One placed cytosolic/lumen instance, for ground-truth bookkeeping."""
+    """One placed cytosolic/lumen instance, for ground-truth bookkeeping.
+
+    `role` mirrors `specimen.packing.pdb_packing.SpherePlacement.role`:
+    "target" for a `TomogramProteinSpec` placed via `n_copies` (exact
+    count), "filler" for one placed via `ratio` -- `export_picks` excludes
+    "filler" placements by default, same convention.
+    """
 
     species_id: str
     location: str
     position_xyz: torch.Tensor
     rotation_matrix: torch.Tensor
     instance_id: int
+    role: Literal["target", "filler"] = "target"
 
 
 @dataclass
@@ -324,9 +586,11 @@ class MembraneTomogramGenerator:
     Parameters
     ----------
     membrane_instances : list of MembraneInstance
-        One or more membranes to composite into the shared tomogram (see
+        Membranes to composite into the shared tomogram (see
         `MembraneInstance`) -- each instance's own shape/transmembrane_specs
-        are used as-is and not duplicated here. Non-empty; every instance's
+        are used as-is and not duplicated here. May be EMPTY (no membranes
+        at all -- `generate()` then treats the whole tomogram as one
+        cytosol region, no lumen; see module docstring). Every instance's
         own `generator.v_size` must match `v_size` below (raises
         `ValueError` naming the offending index otherwise).
     target_shape_zyx : tuple of int
@@ -336,14 +600,17 @@ class MembraneTomogramGenerator:
         Shared voxel size, Angstrom -- must match every instance's own
         `generator.v_size`.
     protein_specs : list of TomogramProteinSpec
-        Cytosolic/lumen species to pack.
+        Cytosolic/lumen species to pack, exact-count (`n_copies`) and/or
+        ratio-weighted (`ratio`). May be EMPTY (membranes/filaments with no
+        packed protein population).
     filament_specs : list of FilamentSpec, optional
         Filament species (e.g. `specimen.filament.ACTIN_SPEC`/
         `MICROTUBULE_SPEC`) to scatter through the tomogram via
         `specimen.filament.place_filaments` -- specter-native random-walk
-        placement, independent of membrane/protein packing (no region-
-        gating, no collision avoidance against anything else in the
-        tomogram; see module docstring). Default None (no filaments).
+        placement, with no region-gating and no collision avoidance
+        against the membrane shell or each other, but DOES get avoided by
+        the `protein_specs` packing stage that follows it (see module
+        docstring). Default None (no filaments).
     occupancy_fraction : float, optional
         Target packing density (see `pack_hard_spheres_3d`/
         `draw_species_pool`), applied independently per region -- e.g. 0.2
@@ -354,6 +621,14 @@ class MembraneTomogramGenerator:
         placed sphere and the membrane shell, AND between auto-placed
         membrane instances' own bounding spheres (all three reuse this one
         value). Default 5.0.
+    clip_axes : tuple of bool, optional
+        (z, y, x), matching `target_shape_zyx`'s axis order -- passed
+        straight through to every `pack_hard_spheres_3d` call here (auto-
+        placed membrane instances AND cytosol/lumen protein packing). True
+        on an axis lets a placed instance's center stay in-bounds while its
+        body pokes past that wall (truncated at render time) instead of
+        being rejected outright -- e.g. for a tomogram whose xy field of
+        view is a crop of a larger cellular region. Default all False.
     region_density_threshold : float, optional
         Passed to `classify_membrane_regions`. Default None (that
         function's own default).
@@ -398,6 +673,26 @@ class MembraneTomogramGenerator:
         multiple GPUs). Default None: every species renders on `device`
         above, still concurrently across `render_workers` threads, just not
         spread across multiple physical devices.
+    progressbars : bool, optional
+        Show progress bars/status spinners during `generate()` (membrane
+        instance generation, filament placement, PDB fetch, packing, and
+        per-species rendering) via `specter.progress`'s `TqdmProgress`/
+        `status` -- same convention as `SpherePackingSpecimenGenerator`'s
+        own `progressbars`. Default True. Set False for quiet/scripted runs.
+    accumulator_device : str or torch.device or "auto", optional
+        Device for the shared canvas tensors (`volume`/`instance_labels`/
+        `membrane_labels`), decoupled from `device` (which stays the
+        compute device for rendering/rotation regardless). Default None:
+        same as `device`, identical to the original one-device behaviour.
+        "auto" resolves via `recommend_accumulator_device` -- estimates
+        the canvas' own memory footprint from `target_shape_zyx` and
+        falls back to "cpu" if it would exceed half of `device`'s
+        CURRENTLY FREE memory (conservative on purpose: rendering/
+        rotation on `device` need real memory too, at the same time).
+        Explicit "cpu" always works regardless of that estimate. Set this
+        for a large field of view whose canvas exceeds GPU VRAM but fits
+        in system RAM -- see this generator's own module-level discussion
+        for the numbers this matters at.
 
     Attributes
     ----------
@@ -440,6 +735,7 @@ class MembraneTomogramGenerator:
         filament_specs: list[FilamentSpec] | None = None,
         occupancy_fraction: float = 0.2,
         gap_angstrom: float = 5.0,
+        clip_axes: tuple[bool, bool, bool] = (False, False, False),
         region_density_threshold: float | None = None,
         region_max_passes: int = 300,
         min_transmembrane_spacing_a: float = 40.0,
@@ -450,11 +746,15 @@ class MembraneTomogramGenerator:
         chunk_size: int | None = None,
         render_workers: int | Literal["auto"] = 1,
         render_devices: list[str | torch.device] | None = None,
+        progressbars: bool = True,
+        accumulator_device: str | torch.device | Literal["auto"] | None = None,
     ):
-        if not protein_specs:
-            raise ValueError("protein_specs must be non-empty")
-        if not membrane_instances:
-            raise ValueError("membrane_instances must be non-empty")
+        if not protein_specs and not membrane_instances and not filament_specs:
+            raise ValueError(
+                "MembraneTomogramGenerator: at least one of "
+                "membrane_instances, protein_specs, or filament_specs must "
+                "be non-empty -- an empty tomogram has nothing to generate."
+            )
         for i, mi in enumerate(membrane_instances):
             if mi.generator.v_size != v_size:
                 raise ValueError(
@@ -470,6 +770,7 @@ class MembraneTomogramGenerator:
         self.filament_specs = filament_specs or []
         self.occupancy_fraction = occupancy_fraction
         self.gap_angstrom = gap_angstrom
+        self.clip_axes = clip_axes
         self.region_density_threshold = region_density_threshold
         self.region_max_passes = region_max_passes
         self.min_transmembrane_spacing_a = min_transmembrane_spacing_a
@@ -480,6 +781,27 @@ class MembraneTomogramGenerator:
         self.chunk_size = chunk_size
         self.render_workers = resolve_render_workers(render_workers, len(protein_specs))
         self.render_devices = resolve_render_devices(device, render_devices)
+        self.progressbars = progressbars
+        # Where the shared, potentially very large canvas tensors (volume/
+        # instance_labels/membrane_labels) live -- default None resolves
+        # to `device` (identical to the pre-existing behaviour: everything
+        # on one device). Set to "cpu" to decouple them from `device`: all
+        # per-particle/per-instance COMPUTE (PotentialBuilder rendering,
+        # rotate_volume, MembraneGenerator field generation) still runs on
+        # `device` (GPU, for speed) exactly as before, but each small
+        # rotated/rasterized result is moved to `accumulator_device` right
+        # before being stamped into the big canvas -- letting the canvas
+        # itself be sized by system RAM instead of GPU VRAM (e.g. a
+        # (1333, 4000, 4000)-voxel volume at 1.5 A/voxel is ~85 GB, past
+        # any single GPU's VRAM but plausible in system RAM on a
+        # workstation/cluster node). The per-instance insertion helpers
+        # (`_insert_volume_max`/`_insert_shell_label`/
+        # `_insert_instance_labels`) already move the SMALL side to the
+        # accumulator's device internally, so this is safe regardless of
+        # where `device` itself points.
+        self.accumulator_device = resolve_accumulator_device(
+            device, accumulator_device, target_shape_zyx
+        )
 
         self.regions: dict[str, torch.Tensor] | None = None
         self.membrane_labels: torch.Tensor | None = None
@@ -519,6 +841,9 @@ class MembraneTomogramGenerator:
         # than retrying at new positions. Instances with an explicit
         # position_xyz are placed as given and NOT included in this
         # collision check (a known v1 gap -- see module docstring).
+        _membrane_phase_start = phase_start(
+            "Membranes", disable=not self.progressbars or not self.membrane_instances
+        )
         auto_instances = [
             mi for mi in self.membrane_instances if mi.position_xyz is None
         ]
@@ -529,13 +854,18 @@ class MembraneTomogramGenerator:
             radii = torch.tensor(
                 [_instance_bounding_radius(mi.generator) for mi in auto_instances]
             )
-            coords, accepted_idx = pack_hard_spheres_3d(
-                radii,
-                box,
-                gap=self.gap_angstrom,
-                seed=self.seed,
-                device=self.device,
-            )
+            with status(
+                f"Placing {len(auto_instances)} membrane instance(s)",
+                disable=not self.progressbars,
+            ):
+                coords, accepted_idx = pack_hard_spheres_3d(
+                    radii,
+                    box,
+                    gap=self.gap_angstrom,
+                    seed=self.seed,
+                    device="cpu",  # see self.device's own docstring
+                    clip_axes=self.clip_axes,
+                )
             n_dropped = len(auto_instances) - accepted_idx.numel()
             if n_dropped:
                 warnings.warn(
@@ -555,47 +885,107 @@ class MembraneTomogramGenerator:
         # shared canvas (max-merge) before any region classification --
         # classify_membrane_regions needs the full composite, not
         # per-instance pieces.
-        volume = torch.zeros(target_shape, dtype=torch.float32, device=self.device)
+        volume = torch.zeros(
+            target_shape, dtype=torch.float32, device=self.accumulator_device
+        )
         self.transmembrane_placements = []
-        instance_volumes: list[tuple[MembraneInstance, torch.Tensor]] = []
-        for mi in to_composite:
-            # Every mi here has a concrete position_xyz by construction:
-            # to_composite starts as the explicitly-positioned instances,
-            # then only accepted (position_xyz just set above) auto_instances
-            # are appended to it.
-            assert mi.position_xyz is not None
-            mi.generator.generate()
-            if mi.generator.clipped_at_boundary:
-                warnings.warn(
-                    "MembraneTomogramGenerator: a membrane instance's own "
-                    "working grid was too small for the organelle size it "
-                    "actually drew (clipped_at_boundary=True on its "
-                    "MembraneGenerator) -- skipped rather than compositing a "
-                    "visibly truncated shape. Increase that instance's own "
-                    "target_shape_zyx/v_size, or omit target_shape_zyx "
-                    "entirely for auto-sizing.",
-                    stacklevel=2,
-                )
-                continue
-            tm_placements = mi.generator.place_transmembrane(
-                min_spacing_a=self.min_transmembrane_spacing_a
+        instance_shell_masks: list[tuple[MembraneInstance, torch.Tensor]] = []
+        membrane_progress = TqdmProgress(
+            transient=True, disable=not self.progressbars or not to_composite
+        )
+        with membrane_progress as progress:
+            membrane_task = progress.add_task(
+                "Generating membrane instances", total=len(to_composite)
             )
-            offset = torch.tensor(mi.position_xyz, dtype=torch.float32)
-            for tp in tm_placements:
-                tp.center_xyz = tp.center_xyz + offset
-            self.transmembrane_placements.extend(tm_placements)
+            for mi in to_composite:
+                # Every mi here has a concrete position_xyz by construction:
+                # to_composite starts as the explicitly-positioned instances,
+                # then only accepted (position_xyz just set above) auto_instances
+                # are appended to it.
+                assert mi.position_xyz is not None
+                mi.generator.generate()
+                progress.update(membrane_task, advance=1)
+                if mi.generator.clipped_at_boundary:
+                    warnings.warn(
+                        "MembraneTomogramGenerator: a membrane instance's own "
+                        "working grid was too small for the organelle size it "
+                        "actually drew (clipped_at_boundary=True on its "
+                        "MembraneGenerator) -- skipped rather than compositing a "
+                        "visibly truncated shape. Increase that instance's own "
+                        "target_shape_zyx/v_size, or omit target_shape_zyx "
+                        "entirely for auto-sizing.",
+                        stacklevel=2,
+                    )
+                    continue
+                tm_placements = mi.generator.place_transmembrane(
+                    min_spacing_a=self.min_transmembrane_spacing_a
+                )
+                offset = torch.tensor(mi.position_xyz, dtype=torch.float32)
+                for tp in tm_placements:
+                    tp.center_xyz = tp.center_xyz + offset
+                self.transmembrane_placements.extend(tm_placements)
 
-            local_volume = mi.generator.volume
-            assert local_volume is not None
-            instance_volumes.append((mi, local_volume))
-            volume = _insert_volume_max(volume, local_volume, mi.position_xyz, v_size)
+                local_volume = mi.generator.volume
+                assert local_volume is not None
+                volume = _insert_volume_max(
+                    volume, local_volume, mi.position_xyz, v_size
+                )
+                # Per-instance shell mask, computed and stashed as a bool
+                # (~4x smaller than float32, and ~4-8x smaller again than
+                # keeping the full density array around) NOW, while
+                # local_volume is still cheaply available, rather than in a
+                # second pass after every instance has run. A GLOBAL
+                # threshold (shared across every instance) would need the
+                # full composite's peak, which isn't known until the loop
+                # finishes -- forcing every instance's full-resolution
+                # array to stay resident simultaneously until then.
+                # Confirmed directly: that OOMs well before this loop even
+                # finishes, now that generation-resolution decoupling
+                # (MembraneGenerator's max_field_voxels) lets a single
+                # instance's own volume reach tens of GB. Using THIS
+                # instance's own peak instead when region_density_threshold
+                # is auto (None) -- membrane_scale already randomizes
+                # contrast per instance (see MembraneGenerator's own
+                # docstring), so a per-instance peak is arguably more
+                # correct for per-instance shell LABELING anyway (a dim
+                # instance's true shell isn't mislabeled as background just
+                # because a brighter sibling set a higher global bar).
+                # When region_density_threshold is explicitly set, it's
+                # already an absolute density value (not a fraction, see
+                # this same fallback below for self.regions), so using it
+                # directly here is identical to a shared global threshold
+                # -- no behaviour change in that case.
+                if self.region_density_threshold is not None:
+                    instance_threshold = self.region_density_threshold
+                else:
+                    local_peak = float(local_volume.max())
+                    instance_threshold = 0.05 * local_peak if local_peak > 0 else 0.0
+                shell_mask = (local_volume > instance_threshold).cpu()
+                instance_shell_masks.append((mi, shell_mask))
+                mi.generator.volume = None
+                # Dropping the last reference above is not enough by
+                # itself: PyTorch's CUDA caching allocator keeps freed
+                # blocks in its own pool rather than returning them to the
+                # driver, and each instance's own working/output grid can
+                # be a DIFFERENT size (random per-instance organelle size),
+                # so the next instance's allocation can fail on
+                # fragmentation even though the previous instance's memory
+                # was already dereferenced -- confirmed directly: a second
+                # instance's OOM here, with the traceback showing several
+                # GiB "reserved but unallocated" at the same time as the
+                # failing allocation. gc.collect() first in case any
+                # tensor is only reachable via a reference cycle (autograd
+                # graphs can create these) that plain refcounting wouldn't
+                # free promptly.
+                del local_volume
+                if torch.device(self.device).type == "cuda":
+                    gc.collect()
+                    torch.cuda.empty_cache()
 
-        # One scalar threshold, shared by the global region classification
-        # AND every instance's own shell mask below -- computed from the
-        # COMPOSITE (classify_membrane_regions' own default depends on the
-        # volume it's given, so it can only be resolved after compositing),
-        # then reused verbatim so per-instance shell IDs and the global
-        # shell/lumen/cytosol masks agree on every voxel by construction.
+        # classify_membrane_regions' own threshold: needs the FULL
+        # composite's peak (unlike instance_shell_masks' per-instance
+        # thresholds above), so can only be resolved after every instance
+        # is merged into volume.
         threshold = self.region_density_threshold
         if threshold is None:
             peak = float(volume.max())
@@ -603,11 +993,10 @@ class MembraneTomogramGenerator:
         self.regions = classify_membrane_regions(volume, threshold)
 
         membrane_labels = torch.zeros(
-            target_shape, dtype=torch.int32, device=self.device
+            target_shape, dtype=torch.int32, device=self.accumulator_device
         )
-        for instance_id, (mi, local_volume) in enumerate(instance_volumes, start=1):
+        for instance_id, (mi, shell_mask) in enumerate(instance_shell_masks, start=1):
             assert mi.position_xyz is not None  # see identical assert above
-            shell_mask = local_volume > threshold
             membrane_labels, overlap = _insert_shell_label(
                 membrane_labels, shell_mask, instance_id, mi.position_xyz, v_size
             )
@@ -621,12 +1010,53 @@ class MembraneTomogramGenerator:
                     stacklevel=2,
                 )
         self.membrane_labels = membrane_labels
+        phase_done(
+            f"Membranes ({len(instance_shell_masks)} instance(s))",
+            _membrane_phase_start,
+            disable=not self.progressbars or not self.membrane_instances,
+        )
+        # instance_shell_masks (up to several GB/instance -- see where it's
+        # built above) is never read again after the membrane_labels loop
+        # just above, but stays in scope for the rest of this (long)
+        # method otherwise -- filaments/packing below are memory-hungry
+        # enough at production scale that leaving it needlessly resident
+        # is worth avoiding explicitly rather than waiting for generate()
+        # to return.
+        del instance_shell_masks
 
         instance_labels = torch.zeros(
-            target_shape, dtype=torch.int32, device=self.device
+            target_shape, dtype=torch.int32, device=self.accumulator_device
         )
-        self.placements = []
         next_instance_id = 1
+
+        # Filaments render right after membranes, BEFORE cytosol/lumen
+        # protein packing (see module docstring) -- filament_mask (voxels
+        # they actually occupy, from instance_labels before any protein
+        # instance touches it) is then folded into the per-region
+        # exclusion field/sampling_mask below, the same mechanism already
+        # used to keep packed spheres clear of the membrane shell.
+        if self.filament_specs:
+            _filament_phase_start = phase_start(
+                "Filaments", disable=not self.progressbars
+            )
+            with status(
+                f"Placing {len(self.filament_specs)} filament species",
+                disable=not self.progressbars,
+            ):
+                volume, instance_labels, next_instance_id = self._stamp_filaments(
+                    volume, instance_labels, next_instance_id, v_size
+                )
+            phase_done(
+                f"Filaments ({len(self.filament_instances)} monomer instance(s))",
+                _filament_phase_start,
+                disable=not self.progressbars,
+            )
+            filament_mask = instance_labels > 0
+        else:
+            self.filament_instances = []
+            filament_mask = None
+
+        self.placements = []
         pdb_cache: dict[str, PDB] = {}
 
         # Pre-load every unique cytosol/lumen pdb_source ONCE, up front,
@@ -644,94 +1074,279 @@ class MembraneTomogramGenerator:
         # __main__-guard caveat that comes with using processes here.
         unique_sources = sorted({s.pdb_source for s in self.protein_specs})
         if unique_sources:
-            pdb_cache = build_pdb_cache_concurrently(
-                pdb_sources=unique_sources,
-                pdb_cache_dir=self.pdb_cache_dir,
-                max_workers=self.render_workers,
+            _fetch_phase_start = phase_start(
+                "Fetching PDB structures", disable=not self.progressbars
+            )
+            with TqdmProgress(
+                transient=True, disable=not self.progressbars
+            ) as progress:
+                fetch_task = progress.add_task(
+                    "Fetching PDB structures", total=len(unique_sources)
+                )
+                pdb_cache = build_pdb_cache_concurrently(
+                    pdb_sources=unique_sources,
+                    pdb_cache_dir=self.pdb_cache_dir,
+                    max_workers=self.render_workers,
+                    on_result=lambda source: progress.update(
+                        fetch_task, advance=1, description=f"Fetched {source}"
+                    ),
+                )
+            phase_done(
+                f"Fetched {len(unique_sources)} PDB structure(s)",
+                _fetch_phase_start,
+                disable=not self.progressbars,
             )
 
         for location in ("cytosol", "lumen"):
             specs_here = [s for s in self.protein_specs if s.location == location]
             if not specs_here:
                 continue
+            _location_phase_start = phase_start(
+                f"{location.capitalize()} species", disable=not self.progressbars
+            )
 
             region_mask = self.regions[location]
+            if filament_mask is not None:
+                region_mask = region_mask & ~filament_mask
             region_voxels = int(region_mask.sum())
             if region_voxels == 0:
                 warnings.warn(
                     f"MembraneTomogramGenerator: no '{location}' region found "
-                    f"(0 voxels) -- {len(specs_here)} species declared for it "
-                    "will not be placed. For 'lumen', this means the membrane "
-                    "has no enclosed compartment.",
+                    f"(0 voxels, after excluding already-placed filaments) -- "
+                    f"{len(specs_here)} species declared for it will not be "
+                    "placed. For 'lumen', this means the membrane has no "
+                    "enclosed compartment.",
                     stacklevel=2,
                 )
                 continue
             region_volume_a3 = region_voxels * v_size**3
+            region_fraction = region_voxels / (
+                target_shape[0] * target_shape[1] * target_shape[2]
+            )
+            region_stall_patience = (
+                self.region_max_passes
+                if region_fraction < _TIGHT_REGION_FRACTION_THRESHOLD
+                else min(_OPEN_REGION_STALL_PATIENCE, self.region_max_passes)
+            )
 
-            pdbs = []
+            pdbs_by_source: dict[str, PDB] = {}
             for spec in specs_here:
                 if spec.pdb_source not in pdb_cache:
                     pdb_cache[spec.pdb_source] = PDB(
                         spec.pdb_source, savefolder=self.pdb_cache_dir, verbose=False
                     )
-                pdbs.append(pdb_cache[spec.pdb_source])
-            species_radii = torch.tensor(
-                [float(pdb.max_diameter) / 2.0 for pdb in pdbs]
-            )
-            species_ratios = torch.tensor([s.ratio for s in specs_here])
+                pdbs_by_source[spec.pdb_source] = pdb_cache[spec.pdb_source]
 
-            pool_radii, pool_species_idx = draw_species_pool(
-                species_radii,
-                species_ratios,
-                self.occupancy_fraction,
-                region_volume_a3,
-                seed=self.seed,
+            # field_v_size/field_shape: the grid exclusion_field/
+            # region_mask_field/sampling_mask below are built and sampled
+            # at -- coarser than v_size at production scale, see
+            # _resolve_exclusion_field_grid's own docstring for why this
+            # is safe. exact_specs/ratio_specs' pack_hard_spheres_3d calls
+            # pass field_v_size (not v_size) accordingly.
+            field_v_size, field_shape, field_factor = _resolve_exclusion_field_grid(
+                target_shape, v_size
+            )
+            region_mask_field = (
+                _downsample_mask_maxpool(region_mask, field_factor, field_shape)
+                if field_factor > 1
+                else region_mask
             )
 
+            # Deliberately kept on CPU (not self.device) -- pack_hard_spheres_3d
+            # is always called with device="cpu" below (see its own docstring),
+            # and its internal _sample_exclusion_distance re-touches this
+            # field on EVERY pass, not once -- if it started on a different
+            # device (e.g. self.device="cuda"), that per-pass .to() would
+            # silently re-copy the whole field GPU<->CPU every single pass.
+            # Confirmed directly: this was responsible for 414 of 480s (86%)
+            # in a real profiled run, not the RSA algorithm itself.
             exclusion_field = (
                 torch.from_numpy(
-                    ndimage.distance_transform_edt(region_mask.cpu().numpy())
-                ).to(device=self.device, dtype=torch.float32)
-                * v_size
+                    ndimage.distance_transform_edt(region_mask_field.cpu().numpy())
+                ).float()
+                * field_v_size
             )
 
-            coords, accepted_idx = pack_hard_spheres_3d(
-                pool_radii,
-                box,
-                gap=self.gap_angstrom,
-                seed=self.seed,
-                device=self.device,
-                exclusion_distance_field=exclusion_field,
-                field_v_size=v_size,
-                sampling_mask=region_mask,
-                max_passes=self.region_max_passes,
-                # region-restricted sampling can need many more consecutive
-                # misses than a "box is saturated" heuristic expects before
-                # finding a geometrically valid spot (see pack_hard_spheres_3d's
-                # own sampling_mask docstring) -- exhaust max_passes instead
-                # of bailing out early on a run of misses.
-                stall_patience=self.region_max_passes,
-            )
-            accepted_species_idx = pool_species_idx[accepted_idx]
+            exact_specs = [s for s in specs_here if s.n_copies is not None]
+            ratio_specs = [s for s in specs_here if s.n_copies is None]
 
-            volume, instance_labels, next_instance_id = self._render_species_pool(
-                specs_here,
-                pdbs,
-                coords,
-                accepted_species_idx,
-                volume,
-                instance_labels,
-                next_instance_id,
-                location,
-                v_size,
-            )
+            # Exact-count ("target") species placed FIRST within this
+            # region -- same two-stage exact-then-exclusion-field pattern
+            # SpherePackingSpecimenGenerator used for its own target/filler
+            # split (see module docstring), now region-gated instead of
+            # whole-box.
+            if exact_specs:
+                exact_pdbs = [pdbs_by_source[s.pdb_source] for s in exact_specs]
+                exact_radii = torch.cat(
+                    [
+                        torch.full((s.n_copies,), float(pdb.max_diameter) / 2.0)  # type: ignore[arg-type]
+                        for s, pdb in zip(exact_specs, exact_pdbs)
+                    ]
+                )
+                exact_species_map = torch.cat(
+                    [
+                        torch.full((s.n_copies,), i, dtype=torch.long)  # type: ignore[arg-type]
+                        for i, s in enumerate(exact_specs)
+                    ]
+                )
+                _exact_pack_start = time.perf_counter()
+                with status(
+                    f"Packing {int(exact_radii.numel())} target instance(s) "
+                    f"({location})",
+                    disable=not self.progressbars,
+                ):
+                    coords, accepted_idx = pack_hard_spheres_3d(
+                        exact_radii,
+                        box,
+                        gap=self.gap_angstrom,
+                        seed=self.seed,
+                        device="cpu",  # see self.device's own docstring
+                        exclusion_distance_field=exclusion_field,
+                        field_v_size=field_v_size,
+                        sampling_mask=region_mask_field,
+                        max_passes=self.region_max_passes,
+                        stall_patience=region_stall_patience,
+                        clip_axes=self.clip_axes,
+                    )
+                phase_done(
+                    f"  Target packing ({location})",
+                    _exact_pack_start,
+                    disable=not self.progressbars,
+                )
+                n_requested = int(exact_radii.numel())
+                n_placed = int(accepted_idx.numel())
+                if n_placed < n_requested:
+                    warnings.warn(
+                        f"MembraneTomogramGenerator: only {n_placed}/"
+                        f"{n_requested} exact-count instances fit in the "
+                        f"'{location}' region without colliding -- it may be "
+                        "too small or too crowded for the requested "
+                        "n_copies.",
+                        stacklevel=2,
+                    )
+                accepted_species_idx = exact_species_map[accepted_idx]
 
-        if self.filament_specs:
-            volume, instance_labels, next_instance_id = self._stamp_filaments(
-                volume, instance_labels, next_instance_id, v_size
+                _exact_render_start = time.perf_counter()
+                volume, instance_labels, next_instance_id = self._render_species_pool(
+                    exact_specs,
+                    exact_pdbs,
+                    coords,
+                    accepted_species_idx,
+                    volume,
+                    instance_labels,
+                    next_instance_id,
+                    location,
+                    v_size,
+                    role="target",
+                )
+                phase_done(
+                    f"  Target rendering ({location})",
+                    _exact_render_start,
+                    disable=not self.progressbars,
+                )
+
+                if coords.numel():
+                    _rebuild_start = time.perf_counter()
+                    placed_radii = exact_radii[accepted_idx]
+                    # Also kept on CPU -- see exclusion_field's own comment
+                    # above for why moving this to self.device would be a
+                    # silent, severe per-pass performance regression, not
+                    # just a style choice.
+                    exact_exclusion_field = _build_sphere_exclusion_field(
+                        coords, placed_radii, field_shape, field_v_size
+                    )
+                    exclusion_field = torch.minimum(
+                        exclusion_field, exact_exclusion_field
+                    )
+                    phase_done(
+                        f"  Exclusion field rebuild ({location})",
+                        _rebuild_start,
+                        disable=not self.progressbars,
+                    )
+
+            # Ratio-weighted ("filler") species, drawn to fill
+            # occupancy_fraction of this region -- avoiding the exact-count
+            # placements above (if any), the filament mask, and the
+            # membrane shell, all folded into exclusion_field/region_mask
+            # by this point.
+            if ratio_specs:
+                ratio_pdbs = [pdbs_by_source[s.pdb_source] for s in ratio_specs]
+                species_radii = torch.tensor(
+                    [float(pdb.max_diameter) / 2.0 for pdb in ratio_pdbs]
+                )
+                species_ratios = torch.tensor([s.ratio for s in ratio_specs])
+
+                pool_radii, pool_species_idx = draw_species_pool(
+                    species_radii,
+                    species_ratios,
+                    self.occupancy_fraction,
+                    region_volume_a3,
+                    seed=self.seed,
+                )
+
+                _filler_pack_start = time.perf_counter()
+                with status(
+                    f"Packing filler instances ({location})",
+                    disable=not self.progressbars,
+                ):
+                    coords, accepted_idx = pack_hard_spheres_3d(
+                        pool_radii,
+                        box,
+                        gap=self.gap_angstrom,
+                        seed=self.seed,
+                        device="cpu",  # see self.device's own docstring
+                        exclusion_distance_field=exclusion_field,
+                        field_v_size=field_v_size,
+                        sampling_mask=region_mask_field,
+                        max_passes=self.region_max_passes,
+                        # A TIGHT region (small fraction of the box, e.g. a
+                        # vesicle lumen) can need many more consecutive
+                        # misses than a "box is saturated" heuristic expects
+                        # before finding a geometrically valid spot (see
+                        # pack_hard_spheres_3d's own sampling_mask
+                        # docstring) -- region_stall_patience exhausts
+                        # region_max_passes there instead of bailing out
+                        # early. An OPEN region (e.g. cytosol with no
+                        # membrane, or with only a small organelle) instead
+                        # gets pack_hard_spheres_3d's own fast default --
+                        # it saturates quickly, so patiently retrying after
+                        # that just burns time for near-zero extra density
+                        # (see _TIGHT_REGION_FRACTION_THRESHOLD's own comment
+                        # for a benchmark).
+                        stall_patience=region_stall_patience,
+                        clip_axes=self.clip_axes,
+                    )
+                phase_done(
+                    f"  Filler packing ({location})",
+                    _filler_pack_start,
+                    disable=not self.progressbars,
+                )
+                accepted_species_idx = pool_species_idx[accepted_idx]
+
+                _filler_render_start = time.perf_counter()
+                volume, instance_labels, next_instance_id = self._render_species_pool(
+                    ratio_specs,
+                    ratio_pdbs,
+                    coords,
+                    accepted_species_idx,
+                    volume,
+                    instance_labels,
+                    next_instance_id,
+                    location,
+                    v_size,
+                    role="filler",
+                )
+                phase_done(
+                    f"  Filler rendering ({location})",
+                    _filler_render_start,
+                    disable=not self.progressbars,
+                )
+
+            phase_done(
+                f"{location.capitalize()} species",
+                _location_phase_start,
+                disable=not self.progressbars,
             )
-        else:
-            self.filament_instances = []
 
         self.instance_labels = instance_labels
         return volume
@@ -820,6 +1435,12 @@ class MembraneTomogramGenerator:
                 rotated = rotate_volume(
                     template, theta[start:end], padding_mode="zeros"
                 )
+                # Moved to the ACCUMULATOR's device (not necessarily
+                # self.device) right after the compute-heavy rotation --
+                # only this small per-chunk result crosses devices, never
+                # the shared canvas itself (see accumulator_device's own
+                # docstring).
+                rotated = rotated.to(volume.device)
                 volume = insert_particles_into_micrograph(
                     rotated,
                     positions_centered[start:end],
@@ -828,7 +1449,7 @@ class MembraneTomogramGenerator:
                 )
                 binarized = (rotated > label_threshold).to(torch.int32) * instance_ids[
                     start:end
-                ].view(-1, 1, 1, 1)
+                ].to(volume.device).view(-1, 1, 1, 1)
                 instance_labels = _insert_instance_labels(
                     binarized,
                     positions_centered[start:end],
@@ -845,6 +1466,7 @@ class MembraneTomogramGenerator:
         oriented: bool = True,
         include_transmembrane: bool = True,
         include_filaments: bool = True,
+        include_filler: bool = True,
     ) -> dict[str, Path]:
         """
         Write one copick/CryoET-Data-Portal-style .ndjson pick file per
@@ -857,6 +1479,20 @@ class MembraneTomogramGenerator:
         ``{"type": "point"|"orientedPoint", "location": {"x", "y", "z"}[,
         "xyz_rotation_matrix"]}``), so picks from any of these generators
         are interchangeable downstream.
+
+        `TomogramPlacement.role == "filler"` placements (species declared
+        via `ratio`, not `n_copies`) are INCLUDED by default here, unlike
+        `SpherePackingSpecimenGenerator.export_picks`'s own
+        `include_filler` (default False) -- `protein_specs` predates the
+        exact-count/ratio split (every declared cytosol/lumen species used
+        to be exported unconditionally), so defaulting to True preserves
+        that behavior for existing `ratio`-only configs. Pass
+        `include_filler=False` to export only `n_copies`-declared species
+        once you're using the new distinction deliberately. A
+        `(species_id, location)` pair placed as BOTH a target and filler
+        (declared twice, once with `n_copies` and once with just `ratio`)
+        keeps its filler instances in a separate ``-filler``-suffixed file,
+        never merged with the target file.
 
         Transmembrane picks are oriented (a real `rotation_matrix`, unlike
         `CryoETSpecimenGenerator`'s own plain-point membrane picks) since
@@ -892,6 +1528,11 @@ class MembraneTomogramGenerator:
             used here (see `_stamp_filaments`), so -- unlike
             placements/transmembrane above -- it's written directly, with
             no `+ extent_xyz / 2` conversion.
+        include_filler : bool, optional
+            If True, also write pick files for `role == "filler"`
+            cytosol/lumen placements (suffixed ``-filler`` on a
+            target/filler `(species_id, location)` collision, to avoid
+            overwriting the target's own file). Default False.
 
         Returns
         -------
@@ -923,10 +1564,23 @@ class MembraneTomogramGenerator:
         )
         point_type = "orientedPoint" if oriented else "point"
 
+        target_keys = {
+            (placed.species_id, placed.location)
+            for placed in self.placements
+            if placed.role == "target"
+        }
         by_key: dict[str, list[TomogramPlacement]] = {}
         for placed in self.placements:
+            if placed.role == "filler" and not include_filler:
+                continue
             name = Path(placed.species_id).stem
-            by_key.setdefault(f"{name}-{placed.location}", []).append(placed)
+            key = f"{name}-{placed.location}"
+            if (
+                placed.role == "filler"
+                and (placed.species_id, placed.location) in target_keys
+            ):
+                key = f"{key}-filler"
+            by_key.setdefault(key, []).append(placed)
         for key, placed_list in by_key.items():
             path = (
                 output_dir / f"{key}-{annotation_version}_{point_type.lower()}.ndjson"
@@ -1015,6 +1669,7 @@ class MembraneTomogramGenerator:
         next_instance_id: int,
         location: str,
         v_size: float,
+        role: Literal["target", "filler"] = "target",
     ) -> tuple[torch.Tensor, torch.Tensor, int]:
         active_species_i = [
             species_i
@@ -1029,68 +1684,101 @@ class MembraneTomogramGenerator:
         # iterations and is comparatively cheap (batched GPU tensor ops), so
         # it stays sequential -- only the per-species PDB fetch/parse +
         # PotentialBuilder.forward is parallelized.
-        templates = build_templates_concurrently(
-            keys=active_species_i,
-            build_one=lambda species_i, device: self._build_species_template(
-                pdbs[species_i], v_size, device
-            ),
-            devices=self.render_devices,
-            max_workers=self.render_workers,
-        )
-
-        for species_i, spec in enumerate(specs):
-            mask = accepted_species_idx == species_i
-            if not bool(mask.any()):
-                continue
-            template = templates[species_i]
-            label_threshold = _INSTANCE_LABEL_REL_THRESHOLD * float(template.max())
-
-            species_coords = coords[mask]
-            n_instances = species_coords.shape[0]
-            R = random_rotation_matrix(n_instances, device=self.device)
-            if R.dim() == 2:
-                R = R.unsqueeze(0)
-            theta = build_affine_matrix(R)
-
-            instance_ids = torch.arange(
-                next_instance_id,
-                next_instance_id + n_instances,
-                dtype=torch.int32,
-                device=self.device,
+        with TqdmProgress(
+            transient=True, disable=not self.progressbars or not active_species_i
+        ) as progress:
+            template_task = progress.add_task(
+                f"Rendering species templates ({location}, {role})",
+                total=len(active_species_i),
             )
-            next_instance_id += n_instances
+            templates = build_templates_concurrently(
+                keys=active_species_i,
+                build_one=lambda species_i, device: self._build_species_template(
+                    pdbs[species_i], v_size, device
+                ),
+                devices=self.render_devices,
+                max_workers=self.render_workers,
+                on_result=lambda species_i: progress.update(
+                    template_task,
+                    advance=1,
+                    description=(
+                        f"Rendered {specs[species_i].pdb_source} ({location}, {role})"
+                    ),
+                ),
+            )
 
-            step = self.chunk_size or n_instances
-            for start in range(0, n_instances, step):
-                end = min(start + step, n_instances)
-                rotated = rotate_volume(
-                    template, theta[start:end], padding_mode="zeros"
-                )
-                volume = insert_particles_into_micrograph(
-                    rotated,
-                    species_coords[start:end],
-                    pixel_size=v_size,
-                    micrograph=volume,
-                )
-                binarized = (rotated > label_threshold).to(torch.int32) * instance_ids[
-                    start:end
-                ].view(-1, 1, 1, 1)
-                instance_labels = _insert_instance_labels(
-                    binarized,
-                    species_coords[start:end],
-                    pixel_size=v_size,
-                    labels=instance_labels,
-                )
+        with TqdmProgress(
+            transient=True, disable=not self.progressbars or not active_species_i
+        ) as progress:
+            render_task = progress.add_task(
+                f"Placing species ({location}, {role})", total=len(active_species_i)
+            )
+            for species_i, spec in enumerate(specs):
+                mask = accepted_species_idx == species_i
+                if not bool(mask.any()):
+                    continue
+                template = templates[species_i]
+                label_threshold = _INSTANCE_LABEL_REL_THRESHOLD * float(template.max())
 
-            for i in range(n_instances):
-                self.placements.append(
-                    TomogramPlacement(
-                        species_id=spec.pdb_source,
-                        location=location,
-                        position_xyz=species_coords[i].detach().cpu(),
-                        rotation_matrix=R[i].detach().cpu(),
-                        instance_id=int(instance_ids[i]),
+                species_coords = coords[mask]
+                n_instances = species_coords.shape[0]
+                progress.update(
+                    render_task,
+                    description=(
+                        f"Placing {spec.pdb_source} ({n_instances} instances, "
+                        f"{location}, {role})"
+                    ),
+                )
+                R = random_rotation_matrix(n_instances, device=self.device)
+                if R.dim() == 2:
+                    R = R.unsqueeze(0)
+                theta = build_affine_matrix(R)
+
+                instance_ids = torch.arange(
+                    next_instance_id,
+                    next_instance_id + n_instances,
+                    dtype=torch.int32,
+                    device=self.device,
+                )
+                next_instance_id += n_instances
+
+                step = self.chunk_size or n_instances
+                for start in range(0, n_instances, step):
+                    end = min(start + step, n_instances)
+                    rotated = rotate_volume(
+                        template, theta[start:end], padding_mode="zeros"
                     )
-                )
+                    # See _stamp_filaments' own identical comment: only
+                    # this small per-chunk result crosses devices, never
+                    # the shared canvas.
+                    rotated = rotated.to(volume.device)
+                    volume = insert_particles_into_micrograph(
+                        rotated,
+                        species_coords[start:end],
+                        pixel_size=v_size,
+                        micrograph=volume,
+                    )
+                    binarized = (rotated > label_threshold).to(
+                        torch.int32
+                    ) * instance_ids[start:end].to(volume.device).view(-1, 1, 1, 1)
+                    instance_labels = _insert_instance_labels(
+                        binarized,
+                        species_coords[start:end],
+                        pixel_size=v_size,
+                        labels=instance_labels,
+                    )
+
+                for i in range(n_instances):
+                    self.placements.append(
+                        TomogramPlacement(
+                            species_id=spec.pdb_source,
+                            location=location,
+                            position_xyz=species_coords[i].detach().cpu(),
+                            rotation_matrix=R[i].detach().cpu(),
+                            instance_id=int(instance_ids[i]),
+                            role=role,
+                        )
+                    )
+                progress.update(render_task, advance=1)
 
         return volume, instance_labels, next_instance_id

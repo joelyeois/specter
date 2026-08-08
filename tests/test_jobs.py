@@ -362,7 +362,7 @@ def test_cli_list_smoke(tmp_path: Path) -> None:
             str(tmp_path),
         ],
         capture_output=True,
-        text=True,
+        encoding="utf-8",
     )
     assert result.returncode == 0
     assert "my-project" in result.stdout
@@ -383,7 +383,7 @@ def test_cli_show_smoke(tmp_path: Path) -> None:
             str(tmp_path),
         ],
         capture_output=True,
-        text=True,
+        encoding="utf-8",
     )
     assert result.returncode == 0
     assert "J001" in result.stdout
@@ -405,7 +405,7 @@ def test_cli_diff_smoke(tmp_path: Path) -> None:
             str(tmp_path),
         ],
         capture_output=True,
-        text=True,
+        encoding="utf-8",
     )
     assert result.returncode == 0
     assert "lr" in result.stdout

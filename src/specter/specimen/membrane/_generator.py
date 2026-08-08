@@ -36,7 +36,7 @@ from .._parallel_render import (
     resolve_render_workers,
 )
 from ..packing import estimate_protein_box_size
-from ._field import MembraneField, generate_membrane_field
+from ._field import MembraneField, _grid_points_xyz, generate_membrane_field
 from ._field_alpha import generate_membrane_field_alpha_shape
 from ._field_spherical_harmonics import generate_membrane_field_spherical_harmonics
 from ._field_swept_spline import generate_membrane_field_swept_spline
@@ -79,6 +79,74 @@ def _resolve_range(
 
 def _draw_uniform(rng: torch.Generator, low: float, high: float) -> float:
     return float(torch.empty(1).uniform_(low, high, generator=rng).item())
+
+
+# Per-call element budget for _chunked_upsample_density's grid_sample calls
+# -- chosen well under the ~2^31 total-element limit confirmed directly on
+# both F.interpolate and F.grid_sample's CUDA kernels ("invalid
+# configuration argument", regardless of available memory), with enough
+# margin that the per-chunk coordinate buffer (3 floats/point) also stays
+# small (~1.2 GB at this budget).
+_UPSAMPLE_CHUNK_VOXELS = 100_000_000
+
+
+def _chunked_upsample_density(
+    coarse_volume: torch.Tensor,
+    gen_v_size: float,
+    origin_xyz: torch.Tensor,
+    target_shape_zyx: tuple[int, int, int],
+    v_size: float,
+) -> torch.Tensor:
+    """
+    Upsample a coarse density raster onto a fine target grid, in Z-chunks.
+
+    Reuses `MembraneField.sample()` -- the same trilinear point-sampling
+    machinery `rasterize_membrane_density` already uses for the primary
+    (non-decoupled) raster path -- rather than `F.interpolate`, so both
+    agree on the exact same align_corners=False/pixel-center convention
+    (`MembraneField._normalized_grid`). Chunked along Z so neither the
+    coordinate buffer nor any one CUDA kernel launch has to handle the
+    whole (potentially multi-billion-voxel) fine grid at once -- see
+    `_UPSAMPLE_CHUNK_VOXELS`.
+
+    Parameters
+    ----------
+    coarse_volume : torch.Tensor
+        Density raster on the coarse generation grid, shape matching
+        `coarse_volume.shape`, spacing `gen_v_size`.
+    gen_v_size : float
+        Coarse grid's voxel size, Angstrom.
+    origin_xyz : torch.Tensor
+        Physical `(x, y, z)` location of index `(0, 0, 0)`, shared by both
+        the coarse and fine grids (same physical extent, see caller).
+    target_shape_zyx : tuple of int
+        Fine output grid shape.
+    v_size : float
+        Fine grid's voxel size, Angstrom.
+
+    Returns
+    -------
+    torch.Tensor
+        Density volume, shape `target_shape_zyx`, same device/dtype as
+        `coarse_volume`.
+    """
+    coarse_field = MembraneField(
+        phi=coarse_volume, spacing_a=gen_v_size, origin_xyz=origin_xyz
+    )
+    nz, ny, nx = target_shape_zyx
+    chunk_z = max(1, _UPSAMPLE_CHUNK_VOXELS // max(1, ny * nx))
+    fine = torch.empty(
+        target_shape_zyx, dtype=coarse_volume.dtype, device=coarse_volume.device
+    )
+    for z0 in range(0, nz, chunk_z):
+        z1 = min(nz, z0 + chunk_z)
+        chunk_origin = origin_xyz.clone()
+        chunk_origin[2] = chunk_origin[2] + z0 * v_size
+        points_xyz = _grid_points_xyz(
+            (z1 - z0, ny, nx), v_size, chunk_origin, coarse_volume.device
+        )
+        fine[z0:z1] = coarse_field.sample(points_xyz)
+    return fine
 
 
 @dataclass
@@ -481,26 +549,70 @@ class MembraneGenerator:
         `specter.pdb.DEFAULT_PDB_SAVEFOLDER` (the repo's own `pdb-data/`,
         anchored to the package location, not the caller's cwd).
     max_field_voxels : int, optional
-        Safety cap on the working field grid's total voxel count. The
-        field's own spacing is derived to resolve the bilayer's physical
-        extent (see `generate`'s inline comment) independent of
-        `target_shape_zyx` -- fine at the small scales this was built and
-        tested at, but that spacing applied UNIFORMLY across a real
-        production-scale volume (hundreds of voxels per axis) produces a
-        working grid orders of magnitude larger than `target_shape_zyx`
-        itself: confirmed a (200, 600, 600)-voxel, 10 A/voxel target
-        implying a 500x1500x1500 (~1.1 billion voxel) field, ballooning to
-        50+ GB of resident memory across the several such arrays field
-        generation allocates, well past what's practical. If the naive
-        spacing would exceed this budget, it's coarsened (increased) just
-        enough to fit, with a warning -- a real, disclosed accuracy
-        tradeoff (a coarser-than-ideal field resolves the bilayer's own
-        sub-structure less crisply), not a silent one; this is a stopgap,
-        not a fix for the underlying issue (the field is one uniform grid
-        over the WHOLE domain regardless of how much of it is actually
-        near a membrane surface -- a real architectural limitation, worth
-        a proper adaptive/local-patch redesign later, not attempted here).
+        Safety cap on the working field grid's total voxel count, AND (see
+        `max_output_voxels` below for the distinction) on the resolution
+        `generate()` actually GENERATES the output raster at. The field's
+        own spacing is derived to resolve the bilayer's physical extent
+        (see `generate`'s inline comment) independent of `target_shape_zyx`
+        -- fine at the small scales this was built and tested at, but that
+        spacing applied UNIFORMLY across a real production-scale volume
+        (hundreds of voxels per axis) produces a working grid orders of
+        magnitude larger than `target_shape_zyx` itself: confirmed a (200,
+        600, 600)-voxel, 10 A/voxel target implying a 500x1500x1500 (~1.1
+        billion voxel) field, ballooning to 50+ GB of resident memory
+        across the several such arrays field generation allocates, well
+        past what's practical. If the naive spacing would exceed this
+        budget, it's coarsened (increased) just enough to fit, with a
+        warning -- a real, disclosed accuracy tradeoff (a coarser-than-
+        ideal field resolves the bilayer's own sub-structure less
+        crisply), not a silent one; this is a stopgap, not a fix for the
+        underlying issue (the field is one uniform grid over the WHOLE
+        domain regardless of how much of it is actually near a membrane
+        surface -- a real architectural limitation, worth a proper
+        adaptive/local-patch redesign later, not attempted here).
+
+        Separately, if `target_shape_zyx` (explicit or auto-sized from
+        organelle size/`v_size`) itself exceeds this many voxels,
+        `generate()` GENERATES the field/raster on a coarser grid of
+        exactly this budget -- covering the SAME physical extent as
+        `target_shape_zyx`, just at coarser spacing -- and upsamples onto
+        the full-resolution `target_shape_zyx` afterward via
+        `_chunked_upsample_density` (trilinear point-sampling in Z-chunks,
+        not a single `F.interpolate` call -- both `F.interpolate` and
+        plain `F.grid_sample` hit a hard CUDA kernel "invalid
+        configuration argument" past ~2^31 total elements, confirmed
+        directly, regardless of available memory; chunking sidesteps it).
+        This decouples the EXPENSIVE part (dense field generation, ~14x a
+        single array's own size in peak memory, confirmed directly) from
+        the requested output resolution: a large, fine-`v_size` organelle
+        that would otherwise need hundreds of GB to generate directly can
+        instead generate cheaply at this budget and upsample for close to
+        just the final array's own size (each upsample chunk is a small,
+        bounded point-sampling call -- see `_UPSAMPLE_CHUNK_VOXELS`). The
+        organelle's PHYSICAL size is preserved exactly -- only its
+        resolved sub-structure crispness is traded away, same as the
+        field-coarsening tradeoff above. See `max_output_voxels` for the
+        separate, much larger ceiling on the upsampled FINAL array itself.
         Default 200_000_000 (~800 MB at float32 per array).
+    max_output_voxels : int, optional
+        Hard ceiling on `target_shape_zyx`'s own total voxel count -- i.e.
+        on the size of the single dense array `generate()` must ultimately
+        materialize as `self.volume` (post-upsample, see `max_field_voxels`
+        above), regardless of how cheaply generation itself is made via
+        the coarse-then-upsample mechanism. When `target_shape_zyx` is
+        auto-sized (omitted), exceeding this SHRINKS the organelle's own
+        physical size to fit (same mechanism, and same warning style, as
+        `max_field_voxels` used to apply directly before generation-
+        resolution decoupling existed) -- this only fires for genuinely
+        extreme requests, since `max_field_voxels`-based decoupling above
+        already handles the common case of "fits fine once materialized,
+        just too expensive to generate directly" without shrinking
+        anything. When `target_shape_zyx` is given explicitly and exceeds
+        this budget, raises instead of silently resizing what the caller
+        explicitly asked for. Default 4_000_000_000 (~16 GB at float32 --
+        comfortably fits a 24+ GB GPU; raise for a larger card, e.g. a
+        40 GB budget comfortably covers several billion voxels once
+        `max_field_voxels` is keeping generation itself cheap).
     device : str or torch.device, optional
         Device for generation. Default "cpu".
     seed : int, optional
@@ -564,6 +676,7 @@ class MembraneGenerator:
         transmembrane_occupancy_fraction: float = 0.05,
         pdb_cache_dir: str = DEFAULT_PDB_SAVEFOLDER,
         max_field_voxels: int = 200_000_000,
+        max_output_voxels: int = 4_000_000_000,
         device: str | torch.device = "cpu",
         seed: int | None = None,
         render_workers: int | Literal["auto"] = 1,
@@ -689,6 +802,62 @@ class MembraneGenerator:
                     0.5 * swept_total_length_a + swept_tube_radius_a
                 ) / _SIZE_MARGIN_FRACTION
             n = max(1, math.ceil(2.0 * safe_half_extent_a / v_size))
+            # This OUTPUT canvas (what becomes self.volume) is a SEPARATE
+            # concern from the internal working field max_field_voxels
+            # already protects (generate()'s own field_spacing_a
+            # coarsening) -- and, since generation-resolution decoupling
+            # was added (see max_field_voxels' own docstring), a large n
+            # here is now normally absorbed by generating at a coarser
+            # grid and upsampling, WITHOUT shrinking the organelle at all.
+            # max_output_voxels below is the last-resort fallback for when
+            # even the upsampled FINAL array (materialized via chunked
+            # point-sampling, not one giant call -- see
+            # _chunked_upsample_density) still wouldn't fit -- SHRINKS the
+            # organelle's own physical size to fit, the same mechanism the
+            # explicit-target_shape_zyx branch below already uses.
+            if n**3 > max_output_voxels:
+                n_capped = max(1, round(max_output_voxels ** (1.0 / 3.0)))
+                scale = n_capped / n
+                if shape_backend == "spherical_harmonics":
+                    new_sh_axes_a = (
+                        sh_axes_a[0] * scale,
+                        sh_axes_a[1] * scale,
+                        sh_axes_a[2] * scale,
+                    )
+                    warnings.warn(
+                        f"MembraneGenerator: sh_axes_a {sh_axes_a} at "
+                        f"v_size={v_size:.2f} A implies a {n}^3 output canvas, "
+                        f"exceeding max_output_voxels ({max_output_voxels:,}) -- "
+                        f"scaled down by {scale:.2f}x (to "
+                        f"{tuple(round(a, 1) for a in new_sh_axes_a)}) to avoid "
+                        "an OOM materializing the final array. Raise "
+                        "max_output_voxels if you have the memory to spare, "
+                        "increase v_size, or set sh_axes_a explicitly to get "
+                        "the originally requested size.",
+                        stacklevel=2,
+                    )
+                    sh_axes_a = new_sh_axes_a
+                else:
+                    new_total_length_a = swept_total_length_a * scale
+                    new_tube_radius_a = swept_tube_radius_a * scale
+                    warnings.warn(
+                        "MembraneGenerator: swept_total_length_a/"
+                        f"swept_tube_radius_a ({swept_total_length_a:.1f} A/"
+                        f"{swept_tube_radius_a:.1f} A) at v_size={v_size:.2f} A "
+                        f"imply a {n}^3 output canvas, exceeding "
+                        f"max_output_voxels ({max_output_voxels:,}) -- scaled "
+                        f"both down by {scale:.2f}x (to {new_total_length_a:.1f} "
+                        f"A/{new_tube_radius_a:.1f} A) to avoid an OOM "
+                        "materializing the final array. Raise max_output_voxels "
+                        "if you have the memory to spare, or increase v_size, "
+                        "to get the originally requested size.",
+                        stacklevel=2,
+                    )
+                    swept_total_length_a = new_total_length_a
+                    swept_tube_radius_a = new_tube_radius_a
+                    if swept_step_length_a > swept_tube_radius_a:
+                        swept_step_length_a = 0.5 * swept_tube_radius_a
+                n = n_capped
             target_shape_zyx = (n, n, n)
         elif shape_backend in ("spherical_harmonics", "swept_spline"):
             tz, ty, tx = target_shape_zyx
@@ -744,7 +913,59 @@ class MembraneGenerator:
 
         tz, ty, tx = target_shape_zyx
         self.target_shape_zyx: tuple[int, int, int] = (int(tz), int(ty), int(tx))
+        n_out_voxels = (
+            self.target_shape_zyx[0]
+            * self.target_shape_zyx[1]
+            * self.target_shape_zyx[2]
+        )
+        if n_out_voxels > max_output_voxels:
+            # Only reachable for an EXPLICIT target_shape_zyx -- the auto-
+            # sizing branch above already shrinks the organelle so its own
+            # n**3 satisfies max_output_voxels, so n_out_voxels can't
+            # exceed it there. An explicit shape is a direct caller
+            # request, so raise rather than silently resize it.
+            raise ValueError(
+                f"MembraneGenerator: target_shape_zyx={self.target_shape_zyx!r} "
+                f"({n_out_voxels:,} voxels) exceeds max_output_voxels "
+                f"({max_output_voxels:,}) -- this many voxels can't be safely "
+                "materialized as one dense output array regardless of "
+                "generation-resolution decoupling (see max_output_voxels' own "
+                "docstring). Raise max_output_voxels, or reduce "
+                "target_shape_zyx/v_size."
+            )
+        # Decouple GENERATION resolution from the fine v_size the output
+        # canvas above must end up at -- see max_field_voxels' own
+        # docstring for the coarse-then-upsample mechanism and its
+        # measured cost. Physical extent is preserved exactly (same
+        # origin, same span); only the requested sub-structure crispness
+        # is traded away when this triggers.
+        if n_out_voxels > max_field_voxels:
+            gen_scale = (max_field_voxels / n_out_voxels) ** (1.0 / 3.0)
+            self._gen_shape_zyx: tuple[int, int, int] = (
+                max(1, round(self.target_shape_zyx[0] * gen_scale)),
+                max(1, round(self.target_shape_zyx[1] * gen_scale)),
+                max(1, round(self.target_shape_zyx[2] * gen_scale)),
+            )
+            self._gen_v_size = v_size / gen_scale
+            self._needs_upsample = True
+            warnings.warn(
+                f"MembraneGenerator: target_shape_zyx={self.target_shape_zyx!r} "
+                f"({n_out_voxels:,} voxels) at v_size={v_size:.2f} A exceeds "
+                f"max_field_voxels ({max_field_voxels:,}) -- generating on a "
+                f"coarser {self._gen_shape_zyx!r} grid at "
+                f"{self._gen_v_size:.2f} A/voxel instead, then upsampling "
+                "(trilinear) to the full requested resolution. The bilayer's "
+                "own sub-structure will be resolved less crisply than at full "
+                "resolution; raise max_field_voxels if you have the memory to "
+                "spare.",
+                stacklevel=2,
+            )
+        else:
+            self._gen_shape_zyx = self.target_shape_zyx
+            self._gen_v_size = v_size
+            self._needs_upsample = False
         self.v_size = v_size
+        self.max_output_voxels = max_output_voxels
         self.shape_backend = shape_backend
         self.n_sources = n_sources
         self.radius_range_a = radius_range_a
@@ -854,7 +1075,14 @@ class MembraneGenerator:
         # hardcoded thickness, so this stays correct if the profile's
         # template is retuned later.
         half_extent_a = float(self.profile.distance_a.abs().max())
-        field_spacing_a = min(self.v_size, half_extent_a / 8)
+        # Keyed to _gen_v_size (the resolution generate() actually renders
+        # at), not the fine self.v_size the output ends up at post-
+        # upsample -- resolving the field finer than the raster it feeds
+        # would buy nothing once generation-resolution decoupling is
+        # already coarsening that raster (see max_field_voxels' own
+        # docstring). Equal to self.v_size whenever decoupling didn't
+        # trigger, matching the pre-decoupling behaviour exactly.
+        field_spacing_a = min(self._gen_v_size, half_extent_a / 8)
 
         nz, ny, nx = self.target_shape_zyx
         extent_a = torch.tensor([nx, ny, nz], dtype=torch.float32) * self.v_size
@@ -944,10 +1172,23 @@ class MembraneGenerator:
         self.volume = rasterize_membrane_density(
             self.field,
             self.profile,
-            target_shape_zyx=self.target_shape_zyx,
-            target_spacing_a=self.v_size,
+            target_shape_zyx=self._gen_shape_zyx,
+            target_spacing_a=self._gen_v_size,
             target_origin_xyz=self._origin_xyz,
         )
+        if self._needs_upsample:
+            # _gen_shape_zyx/_gen_v_size cover the SAME physical extent as
+            # target_shape_zyx/v_size, anchored at the same origin (see
+            # __init__) -- see _chunked_upsample_density's own docstring
+            # for why this goes through MembraneField.sample() in chunks
+            # rather than a single F.interpolate call.
+            self.volume = _chunked_upsample_density(
+                self.volume,
+                self._gen_v_size,
+                self._origin_xyz,
+                self.target_shape_zyx,
+                self.v_size,
+            )
         return self.volume
 
     def place_transmembrane(

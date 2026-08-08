@@ -33,7 +33,7 @@ def _run_particles_cli(output_dir: Path, n_particles: int = 2) -> proc.Completed
         "--filename",
         "particles",
     ]
-    return proc.run(args, capture_output=True, text=True)
+    return proc.run(args, capture_output=True, encoding="utf-8")
 
 
 def test_cli_particles_smoke(tmp_path: Path) -> None:
@@ -47,7 +47,7 @@ def test_cli_particles_help_smoke() -> None:
     result = proc.run(
         [sys.executable, "-m", "specter.cli._cli", "simulate", "particles", "--help"],
         capture_output=True,
-        text=True,
+        encoding="utf-8",
     )
     assert result.returncode == 0
     assert "--pdb_code" in result.stdout
@@ -102,7 +102,7 @@ def test_cli_particles_advanced_flags_reach_the_star_file(tmp_path: Path) -> Non
         "--phaseshift",
         "0.1,0.2",
     ]
-    result = proc.run(args, capture_output=True, text=True)
+    result = proc.run(args, capture_output=True, encoding="utf-8")
     assert result.returncode == 0, result.stderr
 
     df = starfile.read(tmp_path / "particles.star")
@@ -140,7 +140,7 @@ def test_cli_particles_falcon4i_detector_model_reachable(tmp_path: Path) -> None
         "--filename",
         "particles",
     ]
-    result = proc.run(args, capture_output=True, text=True)
+    result = proc.run(args, capture_output=True, encoding="utf-8")
     assert result.returncode == 0, result.stderr
     assert (tmp_path / "particles.mrcs").exists()
 
@@ -186,7 +186,7 @@ def test_cli_tiltseries_smoke(tmp_path: Path) -> None:
         "--filename",
         "tiltseries",
     ]
-    result = proc.run(args, capture_output=True, text=True)
+    result = proc.run(args, capture_output=True, encoding="utf-8")
     assert result.returncode == 0, result.stderr
     assert (tmp_path / "tiltseries.mrcs").exists()
     assert (tmp_path / "tiltseries.star").exists()
@@ -201,7 +201,7 @@ def test_cli_tiltseries_help_smoke() -> None:
     result = proc.run(
         [sys.executable, "-m", "specter.cli._cli", "simulate", "tiltseries", "--help"],
         capture_output=True,
-        text=True,
+        encoding="utf-8",
     )
     assert result.returncode == 0
     assert "--volume_path" in result.stdout
@@ -222,6 +222,6 @@ def test_cli_tiltseries_requires_volume_path(tmp_path: Path) -> None:
         "--output_dir",
         str(tmp_path),
     ]
-    result = proc.run(args, capture_output=True, text=True)
+    result = proc.run(args, capture_output=True, encoding="utf-8")
     assert result.returncode != 0
     assert "volume_path" in result.stderr

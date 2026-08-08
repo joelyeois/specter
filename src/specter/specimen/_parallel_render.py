@@ -37,7 +37,7 @@ from __future__ import annotations
 
 import multiprocessing
 from collections.abc import Callable, Hashable, Sequence
-from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 from typing import TYPE_CHECKING, Literal, TypeVar
 
 import torch
@@ -162,6 +162,7 @@ def build_templates_concurrently(
     build_one: Callable[[K, torch.device], V],
     devices: Sequence[torch.device],
     max_workers: int,
+    on_result: Callable[[K], None] | None = None,
 ) -> dict[K, V]:
     """
     Build one result per key, optionally concurrently, on background
@@ -187,6 +188,15 @@ def build_templates_concurrently(
         Number of keys processed concurrently. ``<= 1`` (or a single key)
         skips the thread pool entirely and runs fully serially, matching
         the pre-parallel behaviour exactly.
+    on_result : callable, optional
+        ``on_result(key)``, called once per key as soon as its result is
+        available -- in COMPLETION order when concurrent (via
+        `as_completed`, not submission order, so a progress bar driven by
+        this actually reflects wall-clock progress instead of stalling on
+        whichever future happens to be first in the dict), in `keys`
+        order when serial. Meant for a caller-side progress tick (e.g.
+        `specter.progress.TqdmProgress`); exceptions from it propagate
+        immediately, same as `build_one`'s own.
 
     Returns
     -------
@@ -197,15 +207,24 @@ def build_templates_concurrently(
         at a time).
     """
     if max_workers <= 1 or len(keys) <= 1:
-        return {
-            key: build_one(key, devices[i % len(devices)]) for i, key in enumerate(keys)
-        }
+        results = {}
+        for i, key in enumerate(keys):
+            results[key] = build_one(key, devices[i % len(devices)])
+            if on_result is not None:
+                on_result(key)
+        return results
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         futures = {
             pool.submit(build_one, key, devices[i % len(devices)]): key
             for i, key in enumerate(keys)
         }
-        return {futures[fut]: fut.result() for fut in futures}
+        results = {}
+        for fut in as_completed(futures):
+            key = futures[fut]
+            results[key] = fut.result()
+            if on_result is not None:
+                on_result(key)
+        return results
 
 
 def _fetch_one_pdb(args: tuple[str, str]) -> "PDB":
@@ -228,6 +247,7 @@ def build_pdb_cache_concurrently(
     pdb_sources: Sequence[str],
     pdb_cache_dir: str,
     max_workers: int,
+    on_result: Callable[[str], None] | None = None,
 ) -> dict[str, "PDB"]:
     """
     Fetch/parse multiple PDB sources concurrently across OS PROCESSES (not
@@ -251,6 +271,12 @@ def build_pdb_cache_concurrently(
         job, and avoids the measured net LOSS from paying spawn overhead
         without enough work to amortize it (see that constant's own
         comment for the numbers).
+    on_result : callable, optional
+        ``on_result(pdb_source)``, called once per unique source as soon
+        as its `PDB` is available -- in COMPLETION order when the process
+        pool runs (via `as_completed`, not submission order), in
+        `unique_sources` order when serial. Meant for a caller-side
+        progress tick; exceptions from it propagate immediately.
 
     Returns
     -------
@@ -276,14 +302,22 @@ def build_pdb_cache_concurrently(
     if max_workers <= 1 or len(unique_sources) < _MIN_SOURCES_FOR_PROCESS_POOL:
         from ..pdb import PDB
 
-        return {
-            source: PDB(source, savefolder=pdb_cache_dir, verbose=False)
-            for source in unique_sources
-        }
+        results = {}
+        for source in unique_sources:
+            results[source] = PDB(source, savefolder=pdb_cache_dir, verbose=False)
+            if on_result is not None:
+                on_result(source)
+        return results
     ctx = multiprocessing.get_context("spawn")
     with ProcessPoolExecutor(max_workers=max_workers, mp_context=ctx) as pool:
         futures = {
             pool.submit(_fetch_one_pdb, (source, pdb_cache_dir)): source
             for source in unique_sources
         }
-        return {futures[fut]: fut.result() for fut in futures}
+        results = {}
+        for fut in as_completed(futures):
+            source = futures[fut]
+            results[source] = fut.result()
+            if on_result is not None:
+                on_result(source)
+        return results

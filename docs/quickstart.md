@@ -58,37 +58,47 @@ micrographs, cryo-ET tilt series), see
 
 ## Build a tomogram specimen
 
-The `specter build tomogram` CLI packs PDB structures into a crowded 3-D
-specimen volume via hard-sphere placement (no membranes yet — that's coming
-in a future release), saving a `.mrc` volume plus copick-style `.ndjson`
-ground-truth picks:
+The `specter build tomogram` CLI composites a specimen volume from any
+combination of: one or more organic membranes, filament species (e.g.
+F-actin), and densely packed protein species (region-gated to
+cytosol/lumen when a membrane is present) — saving a `.mrc` volume plus
+copick-style `.ndjson` ground-truth picks and, by default, segmentation
+label volumes:
 
 ```bash
 specter build tomogram --config configs/tomogram.toml
 ```
 
-Species are placed in two priority stages: `[[targets]]` first, each at an
-exact instance count (the annotated ground truth), then `[[filler]]`
-second, drawn with equal attempt-weight across species, packed around the
-already-placed targets to crowd out the rest of the volume. An example
-config lives in
+Protein species are placed in two priority stages within their region:
+`[targets]` first, each at an exact instance count (the annotated ground
+truth, always exported to picks), then `[filler]` second, packed around
+the already-placed targets to crowd out the rest of that region (excluded
+from picks by default). Generation order overall is membranes, then
+filaments, then this protein fill — each stage avoids the previous ones'
+placements. An example config lives in
 [`configs/tomogram.toml`](https://github.com/joelyeois/specter/tree/main/configs) —
 copy it and edit for your own runs. It looks like this:
 
 ```toml
 # Canonical default config for `specter build tomogram`.
 
-[[targets]]
-pdb_source = "1bxn"   # cytosolic RNA polymerase II complex (large)
-n_copies = 20
+[targets]
+targets = [
+    { pdb_source = "1bxn", n_copies = 20 },  # cytosolic RNA polymerase II complex (large)
+]
 
-[[filler]]
-pdb_source = "1mbo"   # myoglobin (small)
+[filler]
+filler = [
+    { pdb_source = "1mbo" },  # myoglobin (small)
+]
+
+[[membrane]]
+shape_backend = "spherical_harmonics"   # omit [[membrane]] entirely for no membranes
 
 [specimen]
 target_shape = [128, 256, 256]    # (Z, Y, X) voxels
 v_size = 5.0                       # Å/voxel
-filler_occupancy_fraction = 0.5    # bare-sphere volume fraction budget for filler
+filler_occupancy_fraction = 0.5    # bare-sphere volume fraction budget for filler, per region
 
 # ... see the full file: configs/tomogram.toml
 ```

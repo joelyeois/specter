@@ -169,7 +169,7 @@ def test_reconstructor_multi_gpu_ddp_matches_single_gpu(tmp_path: Path):
                 str(problem_path),
             ],
             capture_output=True,
-            text=True,
+            encoding="utf-8",
             timeout=300,
         )
         assert result.returncode == 0, (

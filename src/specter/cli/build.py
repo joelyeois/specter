@@ -17,11 +17,10 @@ CONTEXT_SETTINGS = {"help_option_names": ["-h", "--help"]}
 
 # (panel title, field names) -- basic-first-advanced-last, same convention as
 # cli/simulate.py's _PARTICLE_STACK_GROUPS/_TILT_SERIES_GROUPS. targets/filler/
-# membrane/membrane_transmembrane_specs/membrane_protein_specs/filaments are
-# all list[dict]-typed and skipped entirely by build_config_options
-# (TOML-only) -- not listed here, same treatment as that module's own
-# protein_specs/membrane_specs. "actin" (bool) is the one filaments-related
-# field that IS a real CLI flag.
+# membrane/membrane_transmembrane_specs/filaments are all list[dict]-typed
+# and skipped entirely by build_config_options (TOML-only) -- not listed
+# here, same treatment as that module's own protein_specs/membrane_specs.
+# "actin" (bool) is the one filaments-related field that IS a real CLI flag.
 _TOMOGRAM_GROUPS: list[tuple[str, list[str]]] = [
     (
         "Specimen",
@@ -36,15 +35,13 @@ _TOMOGRAM_GROUPS: list[tuple[str, list[str]]] = [
             "filler_table_min_mw_kda",
         ],
     ),
-    ("Packing", ["packing_method", "pad_fraction"]),
     (
         "Membrane",
         [
-            "membrane_occupancy_fraction",
             "membrane_region_density_threshold",
             "membrane_region_max_passes",
             "membrane_min_transmembrane_spacing_a",
-            "membrane_parameterization",
+            "parameterization",
         ],
     ),
     ("Filaments", ["actin"]),
@@ -52,7 +49,7 @@ _TOMOGRAM_GROUPS: list[tuple[str, list[str]]] = [
         "Picks & segmentation",
         ["write_picks", "annotation_version", "write_segmentation"],
     ),
-    ("Compute", ["device", "render_workers"]),
+    ("Compute", ["device", "accumulator_device", "render_workers", "chunk_size"]),
     ("Output", ["output_dir", "filename"]),
     ("Advanced", ["pdb_savefolder", "seed"]),
 ]
@@ -116,16 +113,19 @@ def _build_tomogram_command() -> click.RichCommand:
         params=params,
         callback=_tomogram_callback,
         context_settings=CONTEXT_SETTINGS,
-        help="Pack a specimen volume from PDB species via hard-sphere RSA "
-        "(default), or -- when --config's TOML sets one or more [[membrane]] "
-        "entries -- build one or more composited organic membranes (each its "
-        "own shape_backend and position_xyz) with region-gated cytosol/lumen "
-        "protein packing instead (mutually exclusive with targets/filler). "
-        "Either way, saves the volume as .mrc (usable as `specter simulate "
-        "tiltseries`'s --volume_path) plus copick-style .ndjson picks and, "
-        "by default, segmentation label volumes (--write_segmentation). A "
-        "TOML config (--config) is always loaded first -- every flag below "
-        "is optional and, if given, overrides one field of it.",
+        help="Build a specimen tomogram from any combination of: one or "
+        "more composited organic membranes (--config's TOML [[membrane]] "
+        "entries, each its own shape_backend and position_xyz), filament "
+        "species scattered through it (--actin or [[filaments]]), and "
+        "densely packed protein species (--config's [targets]/[filler] "
+        "tables, region-gated to cytosol/lumen when a membrane is present). "
+        "Generation order is membranes, then filaments, then protein fill -- "
+        "each stage avoids the previous ones' placements. Saves the volume "
+        "as .mrc (usable as `specter simulate tiltseries`'s --volume_path) "
+        "plus copick-style .ndjson picks and, by default, segmentation "
+        "label volumes (--write_segmentation). A TOML config (--config) is "
+        "always loaded first -- every flag below is optional and, if "
+        "given, overrides one field of it.",
     )
 
 

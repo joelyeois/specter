@@ -528,40 +528,53 @@ TILT_SERIES_HELP: dict[str, str] = {
 
 @dataclass
 class TomogramConfig:
-    """Parameters for hard-sphere-packed tomogram specimen generation, loaded
-    from a TOML config file.
+    """Parameters for tomogram specimen generation, loaded from a TOML
+    config file.
 
-    Drives `specter.specimen.SpherePackingSpecimenGenerator`: packs several
-    PDB-derived protein species -- each at its own real physical size -- via
-    hard-sphere packing (see `specter.specimen.packing.pack_hard_spheres_3d`),
-    renders each placed instance's real scattering potential (always
-    Shtyrov-parameterized, `PotentialBuilder`'s own default), and saves the
-    assembled volume as .mrc (directly usable as `TiltSeriesConfig.
-    volume_path`) plus one copick-style .ndjson pick file per species.
+    Drives `specter.specimen.tomogram.MembraneTomogramGenerator`, the ONE
+    generator behind `specter build tomogram` -- an optional composited
+    organic membrane (`membrane`), optional scattered filament species
+    (`filaments`/`actin`), and densely packed protein species
+    (`targets`/`filler`, region-gated to `location: "cytosol"|"lumen"` when
+    a membrane is present, otherwise everywhere is "cytosol" -- see
+    `MembraneTomogramGenerator`'s own module docstring). Generation order
+    is membranes, then filaments, then protein fill; each stage avoids the
+    previous ones' placements. Renders every placed instance's real
+    scattering potential (always Shtyrov-parameterized, `PotentialBuilder`'s
+    own default) and saves the assembled volume as .mrc (directly usable as
+    `TiltSeriesConfig.volume_path`) plus one copick-style .ndjson pick file
+    per species.
 
-    Species are split into two priority groups, packed in two stages: exact-
-    count `targets` first (the annotated ground truth), then equal-
-    attempt-weight `filler` second, filling remaining space around the
-    targets.
+    Any combination of membrane/filaments/targets/filler is valid as long
+    as at least one is non-empty -- there is no longer a separate non-
+    membrane "sphere-packing" mode/generator to choose between.
     """
 
     # --- Specimen ---
-    # One dict per target species, e.g. {"pdb_source": "6qzp", "n_copies": 15}.
-    # Both keys required. Placed FIRST, at this exact count. In TOML,
-    # provide as [[targets]] tables.
+    # One dict per target species, e.g. {"pdb_source": "6qzp", "n_copies":
+    # 15}. "pdb_source" and "n_copies" required; "location" optional
+    # ("cytosol"|"lumen", default "cytosol" -- only meaningful when
+    # `membrane` is set, otherwise there's no "lumen" to place into). Placed
+    # FIRST within its location, at this exact count, always exported to
+    # picks. In TOML, provide as [[targets]] tables.
     targets: list[dict[str, Any]] = field(default_factory=list)
     # One dict per filler species, e.g. {"pdb_source": "1mbo"}. Only
-    # "pdb_source" is required -- all filler species are drawn with equal
-    # attempt-weight (no per-species knob, see SphereProteinSpec's own
-    # docstring for why). Placed SECOND, around the already-placed targets,
-    # budgeted by filler_occupancy_fraction. In TOML, provide as [[filler]]
-    # tables.
+    # "pdb_source" is required; optional "location" (as `targets` above,
+    # default "cytosol") and "ratio" (relative abundance weight among OTHER
+    # filler species sharing the same location, default 1.0 -- equal
+    # attempt-weight across species if left at the default for all of
+    # them). Placed SECOND within its location, around any already-placed
+    # targets there, budgeted by filler_occupancy_fraction. Excluded from
+    # picks by default (see write_picks/TomogramProteinSpec.role). In TOML,
+    # provide as [[filler]] tables.
     filler: list[dict[str, Any]] = field(default_factory=list)
     # Additive to filler above: pull extra filler species from the
     # bundled reference tables (specter.specimen.cytosolic_filler.
     # PEI2016_CROWDING_TABLE and/or specter.specimen.cryoetsim_particles.
     # CRYOETSIM_PARTICLE_TABLE), rather than hand-listing every species.
-    # Both can be enabled at once -- their results are concatenated.
+    # Both can be enabled at once -- their results are concatenated. Always
+    # placed at location="cytosol" (these tables have no lumen/cytosol
+    # distinction of their own).
     filler_from_pei2016: bool = False
     filler_from_cryoetsim: bool = False
     # Only affects filler_from_cryoetsim (CRYOETSIM_PARTICLE_TABLE has a
@@ -576,9 +589,16 @@ class TomogramConfig:
         default_factory=lambda: [128, 256, 256]
     )  # (Z, Y, X) voxels
     v_size: float = 5.0  # Å/voxel
-    filler_occupancy_fraction: float = (
-        0.5  # bare-sphere volume fraction budget for filler
-    )
+    # Target packing density for `ratio`-mode filler species, as a bare-
+    # sphere fraction of EACH REGION's own volume it's placed in (the whole
+    # box when `membrane` is empty, since then "cytosol" IS the whole box --
+    # see MembraneTomogramGenerator's own occupancy_fraction docstring).
+    # Deliberately high by default -- RSA self-limits at its own physical
+    # jamming ceiling rather than erroring, so filler simply packs until it
+    # jams rather than needing this hand-tuned. Lower it for a deliberately
+    # sparser filler layer, or if a small region (e.g. a tight vesicle
+    # lumen) makes the candidate pool this implies impractically large.
+    filler_occupancy_fraction: float = 0.5
     gap_angstrom: float = 5.0  # minimum clearance between placed spheres
     # (z, y, x), matching target_shape's axis order. True on an axis lets a
     # placed instance's center stay in-bounds while its body pokes past
@@ -586,16 +606,15 @@ class TomogramConfig:
     # rejected outright -- e.g. for a tomogram whose xy field of view is a
     # crop of a larger cellular region.
     clip_axes: list[bool] = field(default_factory=lambda: [False, False, False])
-    packing_method: Literal["rsa", "dense"] = "rsa"  # filler-stage backend
-    pad_fraction: float = 0.5  # only used when packing_method="dense"
     pdb_savefolder: str = "pdb-data"  # resolved against REPO_ROOT if relative
     seed: int | None = None
 
-    # --- Organic membrane (mutually exclusive with targets/filler above) ---
+    # --- Organic membrane (optional) ---
     # One or more dicts, [[membrane]] tables -- one membrane TEMPLATE each,
     # composited into the shared tomogram (see specter.specimen.tomogram.
-    # MembraneInstance). Keys are passed as **kwargs straight into
-    # specter.specimen.membrane.MembraneGenerator -- e.g.
+    # MembraneInstance). Empty (default): no membrane at all -- the whole
+    # tomogram is then one cytosol region. Keys are passed as **kwargs
+    # straight into specter.specimen.membrane.MembraneGenerator -- e.g.
     # {"shape_backend": "spherical_harmonics", "sh_axes_a": [300.0, 300.0,
     # 300.0], "sh_amplitude": 0.15, "bilayer_thickness_a": 30.0} -- PLUS
     # three keys not real MembraneGenerator kwargs, popped before that call:
@@ -627,36 +646,31 @@ class TomogramConfig:
     membrane: list[dict[str, Any]] = field(default_factory=list)
     # Each {"pdb_source": <code or path>, "frequency": 1, "parameterization":
     # "shtyrov"}. In TOML, provide as [[membrane_transmembrane_specs]] tables.
-    # Applies across ALL membrane instances (not per-instance in v1).
+    # Applies across ALL membrane instances (not per-instance in v1). Only
+    # meaningful when `membrane` is set (no bilayer to embed into otherwise).
     membrane_transmembrane_specs: list[dict[str, Any]] = field(default_factory=list)
-    # Each {"pdb_source": <code or path>, "location": "cytosol"|"lumen",
-    # "ratio": 1.0}. In TOML, provide as [[membrane_protein_specs]] tables.
-    # Applies across ALL membrane instances/regions (not per-instance in v1).
-    membrane_protein_specs: list[dict[str, Any]] = field(default_factory=list)
-    # Packing density for cytosol/lumen species, as a bare-sphere fraction of
-    # EACH REGION's own volume (not the whole box -- NOT the same quantity
-    # as filler_occupancy_fraction above, deliberately a separate field).
-    membrane_occupancy_fraction: float = 0.2
     membrane_region_density_threshold: float | None = None
     membrane_region_max_passes: int = 300
     membrane_min_transmembrane_spacing_a: float = 40.0
-    # Atomic scattering-factor parameterization for the cytosol/lumen
-    # PotentialBuilder step (MembraneTomogramGenerator's own, distinct from
-    # each MembraneGenerator instance's own "parameterization" key inside
-    # its [[membrane]] dict, if set there) -- a top-level field rather than
-    # read from membrane[0] since it applies across all instances, not any
-    # one of them.
-    membrane_parameterization: str = "shtyrov"
+    # Atomic scattering-factor parameterization for the targets/filler
+    # protein-fill step (MembraneTomogramGenerator's own `parameterization`,
+    # distinct from each MembraneGenerator instance's own "parameterization"
+    # key inside its [[membrane]] dict, if set there -- that one's for the
+    # bilayer/transmembrane step specifically). A top-level field rather
+    # than read from membrane[0] since it applies regardless of whether
+    # membrane is even set.
+    parameterization: str = "shtyrov"
 
-    # --- Filaments (membrane mode only, additive on top of it) ---
+    # --- Filaments (optional, additive on top of membranes if present) ---
     # One dict per filament species, mapping straight onto
     # specter.specimen.filament.FilamentSpec's own kwargs, e.g.
     # {"code": "1TUB", "step": 85.0, "flex_deg": 3.0, "n_filaments": 4}.
     # Placed via specter.specimen.filament.place_filaments -- specter-native
-    # random-walk placement, independent of membrane/protein packing (no
-    # region-gating, no collision avoidance against anything else in the
-    # tomogram; see MembraneTomogramGenerator's own docstring). In TOML,
-    # provide as [[filaments]] tables.
+    # random-walk placement, with no region-gating and no collision
+    # avoidance against the membrane shell or each other, but DOES get
+    # avoided by targets/filler packing (placed right after membranes,
+    # before protein fill -- see MembraneTomogramGenerator's own
+    # docstring). In TOML, provide as [[filaments]] tables.
     filaments: list[dict[str, Any]] = field(default_factory=list)
     # Convenience toggle: also place the bundled ACTIN_SPEC preset (real
     # F-actin helical repeat -- step/twist from Holmes/Egelman) without
@@ -680,14 +694,31 @@ class TomogramConfig:
 
     # --- Compute ---
     device: str = "cpu"
+    # Device for the shared canvas tensors (volume/instance_labels/
+    # membrane_labels), decoupled from `device` above (which stays the
+    # compute device for rendering/rotation/field-generation regardless).
+    # None (default): same as `device` -- one device for everything, the
+    # original behaviour. "auto": estimate the canvas' own memory
+    # footprint from target_shape/v_size and fall back to "cpu" if it
+    # would exceed half of `device`'s currently free memory (see
+    # MembraneTomogramGenerator.recommend_accumulator_device's own
+    # docstring). Explicit "cpu" always works regardless of that
+    # estimate, keeping `device`="cuda" (fast rendering/rotation) while
+    # letting the canvas itself be sized by system RAM instead of GPU
+    # VRAM -- e.g. a large field of view at fine v_size can need tens of
+    # GB, past any single GPU's VRAM but often fine in system RAM on a
+    # workstation/cluster node. Rotation/rendering speed is unaffected
+    # either way; the only added cost is moving each already-small
+    # rotated chunk across devices once, not the canvas itself.
+    accumulator_device: str | None = None
     # How many PDB species render/fetch concurrently within a single
-    # tomogram: membrane mode's transmembrane_specs (rendered once, shared
-    # across every [[membrane]] entry/n_instances copy) and
-    # membrane_protein_specs (cytosol/lumen, rendered + PDB-fetched once
-    # per tomogram) -- see MembraneGenerator/MembraneTomogramGenerator's own
-    # render_workers docstrings. Not used in non-membrane (targets/filler)
-    # mode. Default 1: fully serial, identical to the original behaviour.
-    # "auto" resolves per-pool via specter.specimen._parallel_render.
+    # tomogram: membrane_transmembrane_specs (rendered once, shared across
+    # every [[membrane]] entry/n_instances copy, membrane mode only) and
+    # targets/filler (cytosol/lumen protein-fill, rendered + PDB-fetched
+    # once per tomogram, always) -- see MembraneGenerator/
+    # MembraneTomogramGenerator's own render_workers docstrings. Default 1:
+    # fully serial, identical to the original behaviour. "auto" resolves
+    # per-pool via specter.specimen._parallel_render.
     # recommend_render_workers -- min(n_species, 8), the measured sweet spot
     # from a full production-scale sweep (see that function's own
     # docstring); recommended over hand-picking a number.
@@ -701,6 +732,19 @@ class TomogramConfig:
     # the recommended worker count, so this doesn't try to be clever about
     # which subset to use. TOML-only (list[str] | "auto").
     render_devices: list[str] | Literal["auto"] | None = None
+    # Instances rotated per GPU batch, per species, in the targets/filler
+    # protein-fill stage (MembraneTomogramGenerator's own chunk_size --
+    # rotate_volume batches ALL of a species' accepted instances into one
+    # call when this is None, the original behaviour). Fine at small
+    # scale, but a species with hundreds of instances (a real filler
+    # species count at production target_shape/occupancy_fraction) can
+    # then need many GB for one rotation call alone -- confirmed directly:
+    # an 8.7 GB single allocation from one such batch, on top of whatever
+    # else was already resident, was what actually tipped a production-
+    # scale run into a CUDA OOM. None (default) preserves the original,
+    # small-scale-safe behaviour; set e.g. 32-64 once a config's species
+    # counts get into the hundreds.
+    chunk_size: int | None = None
 
     # --- Output ---
     output_dir: str = "./output/"
@@ -710,16 +754,22 @@ class TomogramConfig:
 TOMOGRAM_HELP: dict[str, str] = {
     "targets": "Target protein species to pack (TOML-only, [[targets]] "
     "tables), each {'pdb_source': <code or path>, 'n_copies': <exact "
-    "instance count>}. Placed first, always exported to picks.",
+    "instance count>, 'location': 'cytosol'|'lumen' (optional, default "
+    "'cytosol' -- only meaningful when [[membrane]] is set)}. Placed FIRST "
+    "within its location, at this exact count, always exported to picks.",
     "filler": "Filler protein species to pack (TOML-only, [[filler]] "
-    "tables), each {'pdb_source': <code or path>}. Placed second, around "
-    "the already-placed targets, with equal attempt-weight across species.",
+    "tables), each {'pdb_source': <code or path>, 'location': "
+    "'cytosol'|'lumen' (optional, default 'cytosol'), 'ratio': 1.0 "
+    "(optional, relative attempt-weight among other filler species sharing "
+    "the same location)}. Placed SECOND within its location, around any "
+    "already-placed targets there. Excluded from picks by default (see "
+    "write_picks).",
     "filler_from_pei2016": "Additive to filler: also pull filler species "
-    "from the bundled PEI2016_CROWDING_TABLE (Pei et al. 2016 generic "
-    "cytosolic crowding reference).",
+    "(location='cytosol') from the bundled PEI2016_CROWDING_TABLE (Pei et "
+    "al. 2016 generic cytosolic crowding reference).",
     "filler_from_cryoetsim": "Additive to filler: also pull filler species "
-    "from the bundled CRYOETSIM_PARTICLE_TABLE (CryoETSim dataset "
-    "reference, Stojanovska et al. 2025).",
+    "(location='cytosol') from the bundled CRYOETSIM_PARTICLE_TABLE "
+    "(CryoETSim dataset reference, Stojanovska et al. 2025).",
     "filler_table_categories": "Only used with filler_from_cryoetsim: "
     "restrict to these CRYOETSIM_PARTICLE_TABLE categories (macromolecules, "
     "distractors, transcription_translation, nucleosomes). None = all.",
@@ -729,27 +779,24 @@ TOMOGRAM_HELP: dict[str, str] = {
     "filler_from_cryoetsim: exclude species below this mass, kDa.",
     "target_shape": "Output specimen volume shape in voxels (Z, Y, X).",
     "v_size": "Voxel size in Angstrom.",
-    "filler_occupancy_fraction": "Target packing density for filler species, "
-    "as a bare-sphere fraction of the box volume. The default (0.5) is "
-    "deliberately high -- both packing backends self-limit at their own "
-    "physical jamming ceiling rather than erroring, so filler simply packs "
-    "until it jams rather than needing this hand-tuned. Lower it only for a "
-    "deliberately sparser filler layer.",
+    "filler_occupancy_fraction": "Target packing density for filler "
+    "species, as a bare-sphere fraction of EACH REGION's own volume it's "
+    "placed in (the whole box when [[membrane]] is empty -- 'cytosol' is "
+    "then the whole box). Deliberately high by default -- RSA self-limits "
+    "at its own physical jamming ceiling rather than erroring, so filler "
+    "simply packs until it jams rather than needing this hand-tuned. Lower "
+    "it for a sparser filler layer, or if a small region (e.g. a tight "
+    "vesicle lumen) makes the implied candidate pool impractically large.",
     "gap_angstrom": "Minimum clearance between placed spheres' surfaces, in Angstrom.",
     "clip_axes": "(z, y, x) -- True on an axis lets a placed instance's "
     "body extend past that wall (truncated at render time) instead of "
     "being rejected outright. TOML-only (list[bool]).",
-    "packing_method": "Packing backend for the filler stage: 'rsa' (fast, "
-    "the only backend that can avoid already-placed targets) or 'dense' "
-    "(denser but no obstacle avoidance -- only usable when targets is empty).",
-    "pad_fraction": "Padding fraction for the periodic relax-and-crop box, "
-    "only used when packing_method='dense'.",
     "pdb_savefolder": "Folder to cache downloaded PDB files.",
     "seed": "Random seed.",
     "membrane": "One or more MembraneGenerator kwargs dicts (TOML-only, "
-    "[[membrane]] tables, one per composited TEMPLATE) -- mutually "
-    "exclusive with targets/filler/filler_from_pei2016/filler_from_"
-    "cryoetsim. e.g. {'shape_backend': 'spherical_harmonics', "
+    "[[membrane]] tables, one per composited TEMPLATE) -- optional, empty "
+    "by default (no membrane at all; the whole tomogram is then one "
+    "cytosol region). e.g. {'shape_backend': 'spherical_harmonics', "
     "'n_instances': 3}. See MembraneGenerator's own docstring for the full "
     "per-backend parameter set; plus 'n_instances' (int, default 1, "
     "expands one entry into that many independently-seeded instances), "
@@ -758,70 +805,80 @@ TOMOGRAM_HELP: dict[str, str] = {
     "'target_shape_zyx' (default omitted = auto-sized per instance).",
     "membrane_transmembrane_specs": "Transmembrane protein species (TOML-"
     "only, [[membrane_transmembrane_specs]] tables), each {'pdb_source': "
-    "<code or path>, 'frequency': 1, 'parameterization': 'shtyrov'}. "
-    "Membrane mode only, applies across all membrane instances.",
-    "membrane_protein_specs": "Cytosol/lumen protein species (TOML-only, "
-    "[[membrane_protein_specs]] tables), each {'pdb_source': <code or "
-    "path>, 'location': 'cytosol'|'lumen', 'ratio': 1.0}. Membrane mode "
-    "only, applies across all membrane instances/regions.",
-    "membrane_occupancy_fraction": "Packing density for cytosol/lumen "
-    "species, as a bare-sphere fraction of EACH REGION's own volume (not "
-    "the whole box). Membrane mode only.",
+    "<code or path>, 'frequency': 1, 'parameterization': 'shtyrov'}. Only "
+    "meaningful when [[membrane]] is set, applies across all instances.",
     "membrane_region_density_threshold": "Passed through to "
-    "MembraneTomogramGenerator's own region_density_threshold. Membrane "
-    "mode only.",
+    "MembraneTomogramGenerator's own region_density_threshold.",
     "membrane_region_max_passes": "Passed through to "
-    "MembraneTomogramGenerator's own region_max_passes. Membrane mode only.",
+    "MembraneTomogramGenerator's own region_max_passes.",
     "membrane_min_transmembrane_spacing_a": "Minimum center-to-center "
-    "spacing between placed transmembrane proteins, Angstrom. Membrane "
-    "mode only.",
-    "membrane_parameterization": "Atomic scattering-factor parameterization "
-    "for the cytosol/lumen protein potential step. Membrane mode only.",
+    "spacing between placed transmembrane proteins, Angstrom. Only "
+    "meaningful when [[membrane]] is set.",
+    "parameterization": "Atomic scattering-factor parameterization for "
+    "the targets/filler protein-fill step.",
     "filaments": "Filament species to scatter through the tomogram (TOML-"
     "only, [[filaments]] tables), each mapping onto "
     "specter.specimen.filament.FilamentSpec kwargs, e.g. {'code': '1TUB', "
-    "'step': 85.0, 'flex_deg': 3.0, 'n_filaments': 4}. Membrane mode only. "
-    "Placed independently of membrane/protein packing -- no region-gating, "
-    "no collision avoidance against anything else in the tomogram.",
+    "'step': 85.0, 'flex_deg': 3.0, 'n_filaments': 4}. Placed right after "
+    "membranes, before targets/filler -- no region-gating, no collision "
+    "avoidance against the membrane shell or each other, but targets/"
+    "filler DO avoid already-placed filaments.",
     "actin": "Convenience toggle: also place the bundled ACTIN_SPEC preset "
     "(real F-actin helical repeat) without writing a [[filaments]] entry. "
-    "Additive to filaments above. Membrane mode only. For more instances "
-    "or other filament species (e.g. microtubules), use [[filaments]] "
-    "instead.",
+    "Additive to filaments above. For more instances or other filament "
+    "species (e.g. microtubules), use [[filaments]] instead.",
     "write_picks": "Write one copick-style .ndjson pick file per species "
-    "alongside the volume.",
+    "alongside the volume. Filler species (declared via 'ratio', not "
+    "'n_copies') are included by default -- see TomogramProteinSpec's own "
+    "role/export_picks docstrings for how to exclude them instead.",
     "annotation_version": "Version string used in pick filenames "
     "('{species}-{version}_orientedpoint.ndjson').",
     "write_segmentation": "Save per-instance integer label volumes as "
     ".mrc alongside the density volume -- the intended ground truth for "
     "membrane geometry specifically (not a coordinate file, since a "
     "membrane surface has no single natural 'position' the way a protein "
-    "does). {filename}_protein_labels.mrc is written in both modes; "
-    "membrane mode also writes {filename}_membrane_labels.mrc (which "
-    "instance) and {filename}_regions.mrc (0=cytosol/1=shell/2=lumen).",
-    "device": "cpu | cuda | cuda:0. Non-membrane mode (targets/filler): "
-    "used only for PotentialBuilder's potential-building step -- packing "
-    "always runs on CPU regardless (vesin's neighbor list is both slower "
-    "and OOM-prone on GPU at realistic particle counts). Membrane mode "
-    "(membrane present): drives the entire MembraneGenerator/"
-    "MembraneTomogramGenerator pipeline for every instance (shape field, "
-    "bilayer profile, rasterization, transmembrane protein rendering).",
-    "render_workers": "Membrane mode only: number of PDB species rendered "
-    "concurrently within one tomogram (transmembrane_specs and "
-    "membrane_protein_specs each get their own concurrent build pass). "
-    "Default 1 (serial, original behaviour) -- raise for tomograms with "
-    "several species, especially with n_instances>1 [[membrane]] entries "
-    "(all instances of one entry share one render pass). Set to 'auto' "
-    "(TOML/Python config only -- the --render_workers CLI flag stays "
-    "integer-only) to pick min(n_species, 8) per pool automatically, the "
-    "measured sweet spot from a full production-scale sweep -- see "
+    "does). {filename}_protein_labels.mrc is always written; "
+    "{filename}_membrane_labels.mrc and {filename}_regions.mrc "
+    "(0=cytosol/1=shell/2=lumen) are added when [[membrane]] is set.",
+    "device": "cpu | cuda | cuda:0. Drives the whole "
+    "MembraneGenerator/MembraneTomogramGenerator pipeline (shape field, "
+    "bilayer profile, rasterization, transmembrane/targets/filler "
+    "PotentialBuilder rendering) -- packing itself always runs on CPU "
+    "regardless (vesin's neighbor list is both slower and OOM-prone on "
+    "GPU at realistic particle counts).",
+    "accumulator_device": "Device for the shared canvas tensors "
+    "(volume/instance_labels/membrane_labels), decoupled from 'device' "
+    "above (which stays the compute device regardless). None (default): "
+    "same as 'device'. 'auto': estimate the canvas' own memory footprint "
+    "and fall back to 'cpu' if it would exceed half of 'device''s "
+    "currently free memory. Explicit 'cpu' always keeps 'device'='cuda' "
+    "for fast rendering/rotation while letting the canvas itself be sized "
+    "by system RAM instead of GPU VRAM -- useful for a large field of "
+    "view at fine v_size whose canvas alone would exceed any single "
+    "GPU's VRAM. Rotation/rendering speed is unaffected either way; only "
+    "each already-small rotated chunk crosses devices, never the canvas "
+    "itself.",
+    "render_workers": "Number of PDB species rendered concurrently within "
+    "one tomogram (membrane_transmembrane_specs and targets/filler each "
+    "get their own concurrent build pass). Default 1 (serial, original "
+    "behaviour) -- raise for tomograms with several species, especially "
+    "with n_instances>1 [[membrane]] entries (all instances of one entry "
+    "share one render pass). Set to 'auto' (TOML/Python config only -- the "
+    "--render_workers CLI flag stays integer-only) to pick min(n_species, "
+    "8) per pool automatically, the measured sweet spot from a full "
+    "production-scale sweep -- see "
     "specter.specimen._parallel_render.recommend_render_workers.",
-    "render_devices": "Membrane mode only, TOML-only (list[str] | 'auto'): "
-    "device pool to round-robin those concurrent species across, e.g. "
-    "['cuda:0', 'cuda:1']. None (default) keeps every species on `device` "
-    "above, still concurrent across render_workers threads. 'auto' uses "
-    "every visible CUDA GPU (falls back to `device` if none) -- device "
-    "choice was measured to barely matter at the recommended worker count.",
+    "render_devices": "TOML-only (list[str] | 'auto'): device pool to "
+    "round-robin those concurrent species across, e.g. ['cuda:0', "
+    "'cuda:1']. None (default) keeps every species on `device` above, "
+    "still concurrent across render_workers threads. 'auto' uses every "
+    "visible CUDA GPU (falls back to `device` if none) -- device choice "
+    "was measured to barely matter at the recommended worker count.",
+    "chunk_size": "Instances rotated per GPU batch, per species, when "
+    "rendering targets/filler. None (default) rotates all of a species' "
+    "accepted instances in one batched call -- fine at small scale, but a "
+    "species with hundreds of instances can then need many GB for that "
+    "one call. Set e.g. 32-64 once species counts get into the hundreds.",
     "output_dir": "Directory to save output files.",
     "filename": "Base name for the output volume (no extension).",
 }

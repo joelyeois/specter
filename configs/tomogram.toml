@@ -1,91 +1,112 @@
 # Canonical default config for `specter build tomogram`, loaded via
-# specter.config.load_config("...", TomogramConfig).
+# specter.config.load_config("...", TomogramConfig). Composites an optional
+# organic membrane, optional filaments, and densely packed protein species
+# (targets/filler, region-gated to cytosol/lumen when a membrane is
+# present) into one specimen volume; output .mrc is usable as `specter
+# simulate tiltseries`'s --volume_path. Run `specter build tomogram --help`
+# for full field docs.
 #
-# Drives SpherePackingSpecimenGenerator: packs several PDB-derived protein
-# species -- each at its own real physical size -- via hard-sphere packing
-# (specter.specimen.packing.pack_hard_spheres_3d), renders each placed
-# instance's real scattering potential, and saves the assembled volume as
-# .mrc (directly usable as `specter simulate tiltseries`'s --volume_path)
-# plus one copick-style .ndjson pick file per species.
-#
-# Species are packed in two priority stages:
+# This default config demonstrates all of it at once: 6 composited
+# membranes (3 spherical_harmonics + 3 swept_spline instances, all
+# randomly sized/placed), F-actin filaments, the 6 CZII challenge target
+# species (exact count, cytosol), and generic PEI2016 cytosolic crowding
+# plus one lumen filler species.
 
-# [targets] -- placed FIRST, each at an exact "n_copies" count. These are
-# the annotated ground truth, always exported to picks.
+# [targets] -- placed FIRST, each at an exact "n_copies" count. Always
+# exported to picks. The 6 CryoET Object Identification Challenge classes
+# (apoferritin, beta-amylase, beta-galactosidase, ribosome, thyroglobulin,
+# virus-like particle). 15 copies each is sparse, not excessive, for this
+# box size (1000 x 3000 x 3000 A at v_size=5.0) -- raise if you want denser
+# ground truth.
 [targets]
 targets = [
-    { pdb_source = "1bxn", n_copies = 20 },  # cytosolic RNA polymerase II complex (large)
-    { pdb_source = "6qzp", n_copies = 10 },
+    { pdb_source = "7VD8", n_copies = 15 },  # apoferritin
+    { pdb_source = "1FA2", n_copies = 15 },  # beta-amylase
+    { pdb_source = "6DRV", n_copies = 15 },  # beta-galactosidase
+    { pdb_source = "6QZP", n_copies = 15 },  # ribosome
+    { pdb_source = "7B75", n_copies = 15 },  # thyroglobulin
+    { pdb_source = "6N4V", n_copies = 15 },  # virus-like particle
 ]
 
-# [filler] -- placed SECOND, around the already-placed targets, drawn with
-# equal attempt-weight across species and budgeted by
-# filler_occupancy_fraction below.
+# [filler] -- placed SECOND, around already-placed targets, budgeted by
+# filler_occupancy_fraction below. "location" defaults to "cytosol";
+# ratio-mode filler is excluded from picks by default (write_picks help).
 [filler]
 filler = [
-    { pdb_source = "1fa2" },  # beta amylase (medium)
-    { pdb_source = "1mbo" },  # myoglobin (small)
+    { pdb_source = "1fa2", location = "lumen" },  # beta amylase, as an example lumen filler
 ]
 
-# Optional, additive to [filler] above: pull extra filler species from the
+# Additive to filler above: pull extra cytosolic crowding species from the
 # bundled reference tables instead of (or alongside) hand-listing codes.
-# filler_from_pei2016 = true         # Pei et al. 2016 generic crowding table
+filler_from_pei2016 = true
 # filler_from_cryoetsim = true       # Stojanovska et al. 2025 CryoETSim table
-# filler_table_categories = ["distractors", "nucleosomes"]  # cryoetsim only;
-#                                     # omit for all 4 usable categories
-# filler_table_max_mw_kda = 300.0    # applied to whichever table(s) above
-# filler_table_min_mw_kda = 20.0     # are enabled
+# filler_table_categories = ["distractors", "nucleosomes"]  # cryoetsim only
+# filler_table_max_mw_kda = 300.0
+# filler_table_min_mw_kda = 20.0
 
-# --- Organic membrane mode (mutually exclusive with [targets]/[filler] above) ---
-# Uncomment the whole block below (and comment out/empty [targets]/[filler])
-# to build one or more organic membranes + region-gated cytosol/lumen protein
-# packing instead of hard-sphere packing. shape_backend is one of
-# "spherical_harmonics" (default), "swept_spline" -- the two supported
-# backends -- or "metaball"/"alpha_shape", both DEPRECATED (kept for backward
-# compatibility only, emit a DeprecationWarning). See
+# Organic membranes -- optional (omit [[membrane]] entirely for no
+# membranes, e.g. plain crowded-cytosol targets/filler). shape_backend is
+# one of "spherical_harmonics" (default), "swept_spline" -- the two
+# supported backends -- or "metaball"/"alpha_shape", both DEPRECATED (kept
+# for backward compatibility only, emit a DeprecationWarning). See
 # specter.specimen.membrane.MembraneGenerator's own docstring for each
 # backend's full parameter set. Each [[membrane]] entry is a TEMPLATE, not
 # necessarily one instance: size (sh_axes_a/swept_tube_radius_a/etc.),
 # position_xyz, and target_shape_zyx all default to auto (realistic random
 # size, collision-rejecting random placement, auto-sized local working grid
-# respectively) if omitted -- see MembraneGenerator's/MembraneTomogramGenerator's
-# own docstrings. n_instances (default 1) expands one entry into that many
-# independent, independently-seeded, independently-placed instances sharing
-# the rest of that entry's kwargs.
-# [[membrane]]
-# shape_backend = "spherical_harmonics"
-# n_instances = 3
-# bilayer_thickness_a = 30.0
-#
-# [[membrane]]
-# shape_backend = "swept_spline"
-# bilayer_thickness_a = 30.0
-# position_xyz = [400.0, 0.0, 0.0]   # explicit placement instead (n_instances must stay 1)
-#
-# [[membrane_transmembrane_specs]]
+# respectively) if omitted -- see MembraneGenerator's/
+# MembraneTomogramGenerator's own docstrings. n_instances (default 1)
+# expands one entry into that many independent, independently-seeded,
+# independently-placed instances sharing the rest of that entry's kwargs.
+# Large organelles, deliberately bigger than half the tomogram's own XY
+# extent (6000 A) and several times its Z extent (1000 A) -- explicit
+# sh_axes_a/swept_total_length_a+swept_tube_radius_a below skip
+# _cap_membrane_auto_size_ranges' box-relative auto-draw cap entirely (it
+# only fires when nothing already constrains the size, see its own
+# docstring), and clip_axes=[true,true,true] below lets these get placed
+# with just their CENTER in-bounds -- their body extends past the box
+# walls (Z guaranteed, given diameter >> 1000 A) and gets naturally
+# cropped at insertion by _insert_volume_max/_insert_shell_label's own
+# existing clip-to-overlap logic. Generation itself stays cheap regardless
+# of this physical size via max_field_voxels' coarse-generate-then-
+# upsample decoupling (default 200_000_000 is untouched here); the only
+# thing that needs raising is max_output_voxels, since the requested
+# diameter implies an ~1880-2350 voxel/axis FINAL array at v_size=2.0 --
+# comfortably under the explicit 12_000_000_000 cap below (~25-27 GB),
+# not the dataclass default (4_000_000_000, which would silently shrink
+# these back down).
+[[membrane]]
+shape_backend = "spherical_harmonics"
+bilayer_thickness_a = 30.0
+sh_axes_a = [1600.0, 1600.0, 1600.0]  # ~3200 A diameter
+max_output_voxels = 12_000_000_000
+n_instances = 1
+
+[[membrane]]
+shape_backend = "swept_spline"
+bilayer_thickness_a = 30.0
+swept_total_length_a = 2800.0   # contour length, A
+swept_tube_radius_a = 200.0     # tube radius, A -- reach ~ (2800/2 + 200) = 1600 A
+max_output_voxels = 12_000_000_000
+n_instances = 1
+
+# [[membrane_transmembrane_specs]]  # embedded IN the bilayer itself, distinct from cytosol/lumen filler above
 # pdb_source = "6qzp"
 # frequency = 1
-#
-# [[membrane_protein_specs]]
-# pdb_source = "1mbo"
-# location = "lumen"
-#
-# [[membrane_protein_specs]]
-# pdb_source = "1bxn"
-# location = "cytosol"
-#
-# membrane_occupancy_fraction = 0.2   # bare-sphere fraction of EACH REGION's
-#                                     # own volume (not the whole box)
-# membrane_parameterization = "shtyrov"  # cytosol/lumen protein potential step
-# write_segmentation = true          # {filename}_protein_labels.mrc always;
-#                                     # membrane mode also gets
-#                                     # {filename}_membrane_labels.mrc (which
-#                                     # instance) and {filename}_regions.mrc
-#                                     # (0=cytosol/1=shell/2=lumen)
-#
-# Filaments (membrane mode only, additive on top of it): scattered through
-# the tomogram independently of the membrane/protein packing above (no
-# region-gating, no collision avoidance against anything else). Either
+
+# Any section name works here (load_config flattens every table into one
+# namespace) -- kept distinct from the `membrane`/`membrane_transmembrane_specs`
+# array-of-tables keys above, since TOML can't reuse a key as both an array
+# and a table, and a bare `key = value` right after a [[membrane]] block
+# would otherwise be absorbed into that LAST membrane entry, not the
+# top-level config.
+[membrane_settings]
+membrane_region_density_threshold = 0.05
+membrane_min_transmembrane_spacing_a = 40.0
+parameterization = "shtyrov"  # targets/filler protein potential step
+
+# Filaments -- additive on top of everything above, placed right after
+# membranes (before targets/filler, which then avoid them). Either
 # hand-write [[filaments]] entries (specter.specimen.filament.FilamentSpec
 # kwargs)...
 # [[filaments]]
@@ -97,56 +118,66 @@ filler = [
 # ...or set `actin = true` for the quick, no-config-needed built-in ACTIN_SPEC
 # preset (real F-actin helical repeat) -- equivalent to `specter build
 # tomogram --actin`:
-# actin = true
+actin = true
 
 [specimen]
-target_shape = [128, 512, 512]    # (Z, Y, X) voxels
-v_size = 5.0                       # Å/voxel
-filler_occupancy_fraction = 0.5    # bare-sphere volume fraction budget for
-                                    # filler -- deliberately high so it packs
-                                    # until it jams rather than needing to be
-                                    # precisely calibrated (see TOMOGRAM_HELP)
-gap_angstrom = 5.0                 # minimum clearance between placed spheres
-packing_method = "rsa"             # rsa | dense -- filler-stage backend;
-                                    # dense has no obstacle avoidance, so it
-                                    # only works when targets is empty
+target_shape = [500, 3000, 3000]    # (Z, Y, X) voxels
+v_size = 2.0                       # Å/voxel
+filler_occupancy_fraction = 0.5    # bare-sphere fraction budget for filler,
+                                    # per region -- deliberately high so it
+                                    # packs until it jams rather than
+                                    # needing to be precisely calibrated
+                                    # (see TOMOGRAM_HELP)
+gap_angstrom = 5.0                 # minimum clearance between placed spheres, Å
 pdb_savefolder = "pdb-data"        # resolved relative to the repo root
 # seed = 11                        # uncomment for reproducible packing
-clip_axes = [false, true, true]  # (z, y, x) -- True lets placed instances
-                                    # poke past that wall instead of being
-                                    # rejected, e.g. for a tomogram whose xy
-                                    # field of view is a crop of a larger
-                                    # cellular region
+clip_axes = [true, true, true]     # (z, y, x) -- True lets instances poke past that wall.
+                                    # Z included: a real cryo-ET lamella is
+                                    # thin, and organelles routinely extend
+                                    # past its top/bottom in reality --
+                                    # letting instances truncate there
+                                    # (instead of requiring the full body to
+                                    # fit) is what lets [[membrane]] auto-
+                                    # sizing use the much larger X/Y extent
+                                    # as its size reference instead of Z.
 
 [picks]
 write_picks = true
 annotation_version = "1.0"
+write_segmentation = true
 
 [compute]
-device = "cuda"                     # cpu | cuda | cuda:0. Non-membrane mode
-                                    # (targets/filler): used ONLY for
-                                    # PotentialBuilder's potential-building
-                                    # step; packing always runs on CPU
-                                    # regardless (vesin's neighbor list is
-                                    # slower and OOM-prone on GPU). Membrane
-                                    # mode ([[membrane]] present): drives the
-                                    # entire MembraneGenerator/
-                                    # MembraneTomogramGenerator pipeline for
-                                    # every instance (shape field, bilayer
-                                    # profile, rasterization, transmembrane
-                                    # protein rendering).
-# render_workers = "auto"            # Membrane mode only: render/fetch this
-                                    # many PDB species concurrently instead
-                                    # of one at a time -- transmembrane_specs
-                                    # render ONCE, shared across every
-                                    # [[membrane]] entry/n_instances copy,
-                                    # and membrane_protein_specs render+fetch
-                                    # once per tomogram. Default 1 (serial).
-                                    # "auto" (recommended) picks
-                                    # min(n_species, 8) per pool -- the
+device = "cuda"                     # cpu | cuda | cuda:0. Drives the whole
+                                    # pipeline (shape field, bilayer
+                                    # profile, rasterization, transmembrane/
+                                    # targets/filler rendering); packing
+                                    # itself always runs on CPU regardless.
+accumulator_device = "auto"         # Device for the shared canvas tensors
+                                    # (volume/instance_labels/
+                                    # membrane_labels), decoupled from
+                                    # device above. "auto" (recommended)
+                                    # estimates the canvas' own memory
+                                    # footprint and falls back to "cpu"
+                                    # if it would exceed half of device's
+                                    # currently free memory -- avoids a
+                                    # GPU OOM for a large field of view
+                                    # without giving up GPU speed for
+                                    # rendering/rotation on smaller ones.
+render_workers = "auto"             # concurrent species render/fetch --
+                                    # transmembrane_specs render ONCE,
+                                    # shared across every [[membrane]]
+                                    # entry/n_instances copy; targets/
+                                    # filler render+fetch once per
+                                    # tomogram. Left at the TomogramConfig
+                                    # dataclass default (1, serial) it's a
+                                    # real bottleneck once targets+filler+
+                                    # filler_from_pei2016 add up to dozens
+                                    # of species (confirmed directly: ~27
+                                    # species took 56s to fetch and several
+                                    # minutes to render serially) -- "auto"
+                                    # picks min(n_species, 8) per pool, the
                                     # measured sweet spot from a full
-                                    # production-scale sweep; going manual
-                                    # instead is rarely worth it (see
+                                    # production-scale sweep (see
                                     # specter.specimen._parallel_render.
                                     # recommend_render_workers).
 # render_devices = "auto"            # optional device pool to round-robin
@@ -158,6 +189,18 @@ device = "cuda"                     # cpu | cuda | cuda:0. Non-membrane mode
                                     # explicitly, e.g. ["cuda:0", "cuda:1"].
                                     # Default (omitted) keeps every species
                                     # on device above.
+chunk_size = 64                     # Instances rotated per GPU batch, per
+                                    # species, when rendering targets/
+                                    # filler. Left at the dataclass default
+                                    # (unset -- all of a species' instances
+                                    # rotated in ONE call) this box's own
+                                    # filler species counts (into the
+                                    # hundreds, from filler_occupancy_fraction
+                                    # above) confirmed directly to need an
+                                    # 8+ GB single allocation for one
+                                    # species alone -- a real contributor to
+                                    # a production-scale OOM. 64 keeps that
+                                    # bounded regardless of species count.
 
 [output]
 output_dir = "./output/"

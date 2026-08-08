@@ -300,6 +300,39 @@ def test_cli_build_tomogram_sphere_packing_write_segmentation(tmp_path: Path) ->
     assert not (tmp_path / "test_tomogram_regions.mrc").exists()
 
 
+def test_cli_build_tomogram_zero_instances_fit_smoke(tmp_path: Path) -> None:
+    """A box too small for the requested species (0/n exact-count instances
+    fit) must still complete and save a volume, not crash in export_picks --
+    an empty self.placements is a legitimate generate() outcome, not
+    evidence generate() was never called."""
+    config_path = tmp_path / "tomogram.toml"
+    config_path.write_text(
+        f"""
+[targets]
+targets = [
+    {{ pdb_source = "{_LARGE_FIXTURE}", n_copies = 3 }},
+]
+
+[specimen]
+target_shape = [8, 8, 8]
+v_size = 2.0
+filler_occupancy_fraction = 0.0
+gap_angstrom = 5.0
+seed = 0
+
+[output]
+output_dir = "{tmp_path}"
+filename = "test_tomogram"
+"""
+    )
+
+    result = _run_build_cli(config_path)
+    assert result.returncode == 0, result.stderr
+    assert "only 0/3 exact-count instances fit" in result.stderr
+    assert (tmp_path / "test_tomogram.mrc").exists()
+    assert list(tmp_path.glob("*.ndjson")) == []
+
+
 def test_cli_build_tomogram_write_picks_override(tmp_path: Path) -> None:
     """--write_picks False overrides the loaded TOML config's default (True)
     end to end -- no .ndjson files should be written."""

@@ -1542,11 +1542,7 @@ class MembraneTomogramGenerator:
             transmembrane instances, ``"{species}-filament"`` for filament
             instances) to written file path.
         """
-        if (
-            not self.placements
-            and not self.transmembrane_placements
-            and not self.filament_instances
-        ):
+        if self.instance_labels is None:
             raise RuntimeError("call generate() before export_picks()")
 
         output_dir = Path(output_dir)

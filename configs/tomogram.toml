@@ -58,41 +58,51 @@ filler_from_pei2016 = true
 # MembraneTomogramGenerator's own docstrings. n_instances (default 1)
 # expands one entry into that many independent, independently-seeded,
 # independently-placed instances sharing the rest of that entry's kwargs.
-# Large organelles, deliberately bigger than half the tomogram's own XY
-# extent (6000 A) and several times its Z extent (1000 A) -- explicit
-# sh_axes_a/swept_total_length_a+swept_tube_radius_a below skip
-# _cap_membrane_auto_size_ranges' box-relative auto-draw cap entirely (it
-# only fires when nothing already constrains the size, see its own
-# docstring), and clip_axes=[true,true,true] below lets these get placed
-# with just their CENTER in-bounds -- their body extends past the box
-# walls (Z guaranteed, given diameter >> 1000 A) and gets naturally
-# cropped at insertion by _insert_volume_max/_insert_shell_label's own
-# existing clip-to-overlap logic. Generation itself stays cheap regardless
-# of this physical size via max_field_voxels' coarse-generate-then-
-# upsample decoupling (default 200_000_000 is untouched here); the only
-# thing that needs raising is max_output_voxels, since the requested
-# diameter implies an ~1880-2350 voxel/axis FINAL array at v_size=2.0 --
-# comfortably under the explicit 12_000_000_000 cap below (~25-27 GB),
-# not the dataclass default (4_000_000_000, which would silently shrink
-# these back down).
+# Size ranges raised to allow organelles up to ~3200 A (reach 1600 A),
+# deliberately bigger than half the tomogram's own XY extent (6000 A) and
+# several times its Z extent (1000 A) -- verified directly this size
+# generates in ~7-34s at ~32-33 GB peak GPU (max_field_voxels' coarse-
+# generate-then-upsample decoupling keeps this cheap regardless of
+# physical size; max_output_voxels below is the only thing that needed
+# raising past the dataclass default, since the FINAL array at v_size=2.0
+# scales with physical size, not generation cost -- see
+# specimen.membrane.MembraneGenerator's own docstring). Explicit
+# sh_axes_range_a/swept_total_length_range_a/swept_tube_radius_range_a
+# below skip _cap_membrane_auto_size_ranges' box-relative auto-draw cap
+# entirely (it only fires when nothing already constrains the size, see
+# its own docstring) -- each instance's actual draw still varies within
+# its range, same as the original small-organelle defaults, just with a
+# much higher ceiling. clip_axes=[true,true,true] below lets an instance
+# whose draw lands near that ceiling get placed with just its CENTER
+# in-bounds -- its body extends past the box walls (Z guaranteed once
+# diameter exceeds 1000 A) and gets naturally cropped at insertion by
+# _insert_volume_max/_insert_shell_label's own existing clip-to-overlap
+# logic. A box this crowded with multiple large instances can also just
+# drop some via pack_hard_spheres_3d's own collision-avoidance if they
+# don't all fit without overlapping -- expected, not a bug.
 [[membrane]]
 shape_backend = "spherical_harmonics"
 bilayer_thickness_a = 30.0
-sh_axes_a = [1600.0, 1600.0, 1600.0]  # ~3200 A diameter
+sh_axes_range_a = [150.0, 1600.0]  # semi-axis, A -- up to ~3200 A diameter
 max_output_voxels = 12_000_000_000
-n_instances = 1
+n_instances = 3
 
 [[membrane]]
 shape_backend = "swept_spline"
 bilayer_thickness_a = 30.0
-swept_total_length_a = 2800.0   # contour length, A
-swept_tube_radius_a = 200.0     # tube radius, A -- reach ~ (2800/2 + 200) = 1600 A
+swept_total_length_range_a = [1500.0, 2400.0]  # contour length, A
+swept_tube_radius_range_a = [150.0, 400.0]     # tube radius, A -- worst-case
+                                                # reach (2400/2 + 400) = 1600 A,
+                                                # matching sh_axes_range_a above
 max_output_voxels = 12_000_000_000
-n_instances = 1
+n_instances = 3
 
-# [[membrane_transmembrane_specs]]  # embedded IN the bilayer itself, distinct from cytosol/lumen filler above
-# pdb_source = "6qzp"
-# frequency = 1
+# Embedded IN the bilayer itself, distinct from cytosol/lumen filler above.
+# 1C3W (bacteriorhodopsin, 7-TM-helix) is a standard transmembrane cryo-EM
+# test structure, already used elsewhere in this codebase's own tests.
+[[membrane_transmembrane_specs]]
+pdb_source = "1C3W"
+frequency = 1
 
 # Any section name works here (load_config flattens every table into one
 # namespace) -- kept distinct from the `membrane`/`membrane_transmembrane_specs`
@@ -117,8 +127,19 @@ parameterization = "shtyrov"  # targets/filler protein potential step
 #
 # ...or set `actin = true` for the quick, no-config-needed built-in ACTIN_SPEC
 # preset (real F-actin helical repeat) -- equivalent to `specter build
-# tomogram --actin`:
-actin = true
+# tomogram --actin`. ACTIN_SPEC's own n_filaments default is 1, though --
+# fine for a quick smoke test, but a single ~20-60-monomer strand in a
+# 1000x6000x6000 A box is sparse enough to be easy to miss in a slice/
+# projection. Spelled out explicitly here (same code/step/flex_deg/
+# twist_deg as ACTIN_SPEC) with n_filaments raised instead, so multiple
+# independent strands actually read as a visible network:
+[[filaments]]
+code = "1J6Z"        # F-actin monomer (same as the built-in ACTIN_SPEC)
+step = 27.3           # axial rise per monomer, Angstrom (real F-actin repeat)
+flex_deg = 12.0        # max per-step path curvature, degrees
+twist_deg = 166.15    # helical twist per monomer, degrees
+n_filaments = 20
+n_monomers = [20, 60]
 
 [specimen]
 target_shape = [500, 3000, 3000]    # (Z, Y, X) voxels

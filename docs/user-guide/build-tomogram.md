@@ -105,43 +105,59 @@ comments walk through the concrete OOM numbers that motivated each default.
 ## Benchmarks: resolution vs. time and memory
 
 To give a concrete feel for how `v_size` trades off against runtime and
-memory, the same specimen — [quickstart](../quickstart.md)'s own example
-project (one `spherical_harmonics` membrane, target species `1bxn` × 20,
-filler species `1mbo`) — was built at a **fixed physical field of view**
-(640 × 1280 × 1280 Å) and three voxel sizes, so only the voxel grid
-resolution changes between runs, not the amount of specimen content:
+memory, a specimen was built at `configs/tomogram.toml`'s own
+**production-scale field of view** (1500 × 6000 × 6000 Å) at three voxel
+sizes, so only the voxel grid resolution changes between runs, not the
+physical amount of specimen content. The specimen itself: one
+`spherical_harmonics` membrane, target species `1bxn` × 20, and
+`filler_from_pei2016` (20 species sharing a 0.5 occupancy-fraction budget,
+same filler approach as the canonical config) — a single hand-picked
+filler species was tried first and rejected, since at this box size it
+packed ~109,000 instances of that one small species to hit occupancy,
+both unrepresentative of real configs and, at v_size=2, dominated by
+per-instance rendering cost:
 
-![Same field of view rendered at v_size = 10, 5, and 2 Å/voxel — a max-intensity Z projection of each output volume, showing the same membrane and crowded protein layout at increasing voxel resolution.](../assets/images/tomogram-benchmark-projections.png){ width="900" style="display:block;margin:1.2em auto;" }
+![Same field of view rendered at v_size = 10, 5, and 2 Å/voxel — a sum Z projection of each output volume, showing the same membrane and densely crowded protein layout at increasing voxel resolution.](../assets/images/tomogram-benchmark-projections.png){ width="900" style="display:block;margin:1.2em auto;" }
 
 | `v_size` (Å/voxel) | Shape (Z, Y, X voxels) | Wall time | GPU peak (allocated) | RAM peak |
 |---|---|---|---|---|
-| 10 | 64 × 128 × 128 | 13 s | 0.33 GB | 2.97 GB |
-| 5  | 128 × 256 × 256 | 13 s | 0.52 GB | 2.09 GB |
-| 2  | 320 × 640 × 640 | 64 s | 7.95 GB | 8.43 GB |
+| 10 | 150 × 600 × 600 | 118 s | 3.40 GB | 12.81 GB |
+| 5  | 300 × 1200 × 1200 | 94 s | 9.94 GB | 6.13 GB |
+| 2  | 750 × 3000 × 3000 (~6.75B voxels) | 344 s (5m 44s) | 6.51 GB | 154.04 GB |
 
-Wall time and GPU memory stay nearly flat from 10 Å down to 5 Å — at this
-field of view, fixed per-run overhead (PDB rendering, RSA packing of the
-same ~15-20 target and ~150+ filler instances regardless of voxel size)
-dominates over the small canvas itself. Both jump sharply at 2 Å, once the
-voxel count crosses into the hundreds of millions and per-instance
-rendering grids get correspondingly finer. RAM sits at a roughly constant
-~2-3 GB baseline (Python/PyTorch/Lightning process overhead) until the same
-2 Å jump. Take the exact numbers with a grain of salt — they're one run on
-one machine, not a statistically averaged sweep — but the *shape* of the
-scaling (flat, then a step change once resolution gets fine) is the
-useful, likely-to-generalize part.
+The numbers don't move in a clean monotonic line at 10→5 Å — wall time and
+RAM both bounce around within roughly a factor of 2, since at this scale
+species fetch/render/packing overhead (fixed per-run, not per-voxel)
+dominates over the canvas itself. What's unambiguous is the step change at
+2 Å: wall time roughly triples versus 5 Å, and RAM jumps to **154 GB**.
+That RAM spike is `accumulator_device="auto"` doing exactly what [Compute &
+scaling flags](#compute-scaling-flags) above says it does — at ~6.75
+billion voxels the density volume alone is ~27 GB, comfortably past half
+of this GPU's free VRAM, so the shared canvas tensors get pushed to system
+RAM instead of failing with a CUDA OOM. That's also why **GPU peak
+actually drops** from 5 Å (9.94 GB) to 2 Å (6.51 GB): the single biggest
+consumer (the canvas) has moved off the GPU entirely, leaving only
+per-instance rendering buffers behind. Take the exact numbers with a grain
+of salt — one run on one machine, not a statistically averaged sweep — but
+the *shape* (noisy at coarse resolution, a sharp RAM/time step once the
+canvas stops fitting in VRAM) is the useful, likely-to-generalize part.
 
 **Hardware**: single NVIDIA L40 (46 GB VRAM, `device="cuda:3"`,
-`accumulator_device="auto"`, `render_workers="auto"`), on a host with an
-AMD EPYC 7763 64-Core Processor (128 threads) and 503 GB system RAM. Wall
-time is the `run_build_tomogram()` call only (a one-time CUDA context
-init immediately before it is excluded, since it's a constant ~1-2s
-regardless of resolution); GPU peak is
+`accumulator_device="auto"`, `render_workers="auto"`, `chunk_size=64`), on
+a host with an AMD EPYC 7763 64-Core Processor (128 threads) and 503 GB
+system RAM. Wall time is the `run_build_tomogram()` call only (a one-time
+CUDA context init immediately before it is excluded, since it's a constant
+~1-2s regardless of resolution); GPU peak is
 `torch.cuda.max_memory_allocated()`; RAM peak is `/usr/bin/time -v`'s
 "Maximum resident set size" for the whole process, each resolution run in
-its own fresh subprocess so peaks don't carry over between runs.
-Reproduce with
-[`docs-figures/build_tomogram_benchmark.py`](https://github.com/joelyeois/specter/blob/main/docs-figures/build_tomogram_benchmark.py).
+its own fresh subprocess so peaks don't carry over between runs. Picks and
+segmentation output were disabled for these runs specifically (at
+v_size=2, those label volumes alone would add ~40 GB of writes on top of
+the ~27 GB density volume — real runs at this scale should budget disk
+space accordingly). Reproduce with
+[`docs-figures/build_tomogram_benchmark.py`](https://github.com/joelyeois/specter/blob/main/docs-figures/build_tomogram_benchmark.py)
+(writes its scratch output outside the repo — the 2 Å volume alone is
+larger than many systems' per-user home-directory quota).
 
 ## Output: picks & segmentation
 

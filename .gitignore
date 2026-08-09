@@ -31,6 +31,7 @@ dev/
 
 # Docs build output
 site/
+docs-figures/data/tomogram_benchmark_scratch/
 
 # Other system files
 .DS_Store

@@ -104,8 +104,9 @@ filler_occupancy_fraction = 0.5    # bare-sphere volume fraction budget for fill
 ```
 
 The resulting `.mrc` is directly usable as `specter simulate tiltseries`'s
-`--volume_path`. See the field docstrings in
-`specter.config.TomogramConfig` for the complete reference.
+`--volume_path`. See [Build a tomogram specimen](user-guide/build-tomogram.md)
+for the full flag reference, including placement priority, region gating,
+and the compute/scaling flags for larger runs.
 
 ## Job management
 

@@ -62,6 +62,7 @@ nav:
       - Generate a particle stack: user-guide/particle-stack.md
       - Generate a micrograph: user-guide/micrograph.md
       - Generate a tilt series: user-guide/tilt-series.md
+      - Build a tomogram specimen: user-guide/build-tomogram.md
       - Generate a CryoSPARC dataset twin: user-guide/dataset-twin.md
       - Using the ice cache: user-guide/ice-cache.md
       - Configure a run: user-guide/configuration.md

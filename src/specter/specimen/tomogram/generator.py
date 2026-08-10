@@ -19,8 +19,8 @@ longer a separate non-membrane sphere-packing generator/mode: a species in
 (`TomogramProteinSpec.n_copies`, ground-truth "target" semantics) or
 ratio-weighted up to `occupancy_fraction` of its region
 (`TomogramProteinSpec.ratio`, "filler"/crowding semantics), matching what
-`SpherePackingSpecimenGenerator`'s two-stage target/filler split used to
-provide, now region-gated too.
+the now-deleted `SpherePackingSpecimenGenerator`'s two-stage target/filler
+split used to provide, now region-gated too.
 
 Generation order is membranes, then filaments, then protein fill (exact-
 count species per region before ratio-weighted ones) -- see `generate()`'s
@@ -40,12 +40,14 @@ transmembrane placement, unmodified), :func:`.classify_membrane_regions`
 (shell/lumen/cytosol masks via connected-components flood-fill, this
 subpackage), and ``specimen.packing.pack_hard_spheres_3d``'s
 `exclusion_distance_field` (obstacle- and region-aware RSA, this session).
-Deliberately uses the RSA backend, not `pack_hard_spheres_3d_dense`: a
-production-scale tomogram (hundreds of voxels per axis) draws candidate
-pools far too large for the force-biased backend's per-iteration Python-
-loop cost to stay practical (verified to run into the hours at that scale)
--- RSA's own ~28-41% ceiling, reached in seconds, is the actual target
-here, not `pack_hard_spheres_3d_dense`'s higher-but-impractical one.
+Deliberately built on the RSA backend, not the periodic force-biased
+relaxation that used to live alongside it as `pack_hard_spheres_3d_dense`
+(since deleted -- see git history if it's ever needed as a reference
+again): a production-scale tomogram (hundreds of voxels per axis) draws
+candidate pools far too large for that backend's per-iteration Python-loop
+cost to stay practical (verified to run into the hours at that scale) --
+RSA's own ~28-41% ceiling, reached in seconds, was the actual target here,
+not the force-biased backend's higher-but-impractical one.
 
 A clean-room second approach relative to CTS (CryoTomoSim), not a port of
 its placement/membrane algorithms -- those used to live in a separate
@@ -536,9 +538,8 @@ class TomogramProteinSpec:
         if `n_copies` is set. Default 1.0.
     n_copies : int, optional
         If set, place exactly this many instances of this species instead
-        of ratio-weighted filling -- "target"/ground-truth semantics,
-        matching `SpherePackingSpecimenGenerator`'s `SphereProteinSpec.
-        n_copies`. Placed FIRST within this spec's `location`, before any
+        of ratio-weighted filling -- "target"/ground-truth semantics.
+        Placed FIRST within this spec's `location`, before any
         `ratio`-mode species there (which then avoid the exact-count
         placements via an exclusion field, same mechanism used to avoid
         the membrane shell/filaments). Default None (ratio-weighted
@@ -562,10 +563,9 @@ class TomogramProteinSpec:
 class TomogramPlacement:
     """One placed cytosolic/lumen instance, for ground-truth bookkeeping.
 
-    `role` mirrors `specimen.packing.pdb_packing.SpherePlacement.role`:
-    "target" for a `TomogramProteinSpec` placed via `n_copies` (exact
-    count), "filler" for one placed via `ratio` -- `export_picks` excludes
-    "filler" placements by default, same convention.
+    `role` is "target" for a `TomogramProteinSpec` placed via `n_copies`
+    (exact count), "filler" for one placed via `ratio` -- `export_picks`
+    excludes "filler" placements by default.
     """
 
     species_id: str
@@ -766,8 +766,7 @@ class MembraneTomogramGenerator:
         Show progress bars/status spinners during `generate()` (membrane
         instance generation, filament placement, PDB fetch, packing, and
         per-species rendering) via `specter.progress`'s `TqdmProgress`/
-        `status` -- same convention as `SpherePackingSpecimenGenerator`'s
-        own `progressbars`. Default True. Set False for quiet/scripted runs.
+        `status`. Default True. Set False for quiet/scripted runs.
     accumulator_device : str or torch.device or "auto", optional
         Device for the shared canvas tensors (`volume`/`instance_labels`/
         `membrane_labels`), decoupled from `device` (which stays the
@@ -1307,9 +1306,9 @@ class MembraneTomogramGenerator:
 
             # Exact-count ("target") species placed FIRST within this
             # region -- same two-stage exact-then-exclusion-field pattern
-            # SpherePackingSpecimenGenerator used for its own target/filler
-            # split (see module docstring), now region-gated instead of
-            # whole-box.
+            # the now-deleted SpherePackingSpecimenGenerator used for its
+            # own target/filler split (see module docstring), now
+            # region-gated instead of whole-box.
             if exact_specs:
                 exact_pdbs = [pdbs_by_source[s.pdb_source] for s in exact_specs]
                 exact_radii = torch.cat(
@@ -1773,20 +1772,18 @@ class MembraneTomogramGenerator:
         placed cytosol/lumen species (grouped by `(location, species_id)`
         so the same `pdb_source` declared at both locations never collides
         in one file) plus, by default, one per transmembrane species --
-        same schema as `specimen.packing.pdb_packing.
-        SpherePackingSpecimenGenerator.export_picks`/`specimen.cryoet.
-        CryoETSpecimenGenerator.export_picks` (one JSON object per line:
+        same schema as `specimen.cryoet.CryoETSpecimenGenerator.
+        export_picks` (one JSON object per line:
         ``{"type": "point"|"orientedPoint", "location": {"x", "y", "z"}[,
-        "xyz_rotation_matrix"]}``), so picks from any of these generators
-        are interchangeable downstream.
+        "xyz_rotation_matrix"]}``), so picks from either generator are
+        interchangeable downstream.
 
         `TomogramPlacement.role == "filler"` placements (species declared
-        via `ratio`, not `n_copies`) are INCLUDED by default here, unlike
-        `SpherePackingSpecimenGenerator.export_picks`'s own
-        `include_filler` (default False) -- `protein_specs` predates the
-        exact-count/ratio split (every declared cytosol/lumen species used
-        to be exported unconditionally), so defaulting to True preserves
-        that behavior for existing `ratio`-only configs. Pass
+        via `ratio`, not `n_copies`) are INCLUDED by default here --
+        `protein_specs` predates the exact-count/ratio split (every
+        declared cytosol/lumen species used to be exported
+        unconditionally), so defaulting to True preserves that behavior
+        for existing `ratio`-only configs. Pass
         `include_filler=False` to export only `n_copies`-declared species
         once you're using the new distinction deliberately. A
         `(species_id, location)` pair placed as BOTH a target and filler

@@ -221,46 +221,6 @@ def add_proteins_to_sample(
         )
 
 
-def build_low_res_sample(
-    shape: tuple[int, int, int],
-    v_size: float,
-    offset: tuple[int, int, int],
-    membrane_params: list[dict],
-    protein_params: list[dict],
-    scratch_dir: Path,
-    max_mbtries: int = 10,
-    mmer_tries: int = 20,
-    pmer_tries: int = 100,
-    surf_dec: float = 0.9,
-) -> SyntheticSample:
-    """Run polnet's placement entirely at low resolution and return the
-    populated SyntheticSample. No TEM config is ever supplied -- IMOD is
-    never touched.
-
-    Purely sequential convenience wrapper around
-    build_low_res_sample_with_membranes + add_proteins_to_sample; callers
-    that want membrane placement to run concurrently with protein SVOL
-    building (see CryoETSpecimenGenerator._run_low_res_placement) should
-    call those two functions directly instead.
-    """
-    sample = build_low_res_sample_with_membranes(
-        shape=shape,
-        v_size=v_size,
-        offset=offset,
-        membrane_params=membrane_params,
-        max_mbtries=max_mbtries,
-    )
-    add_proteins_to_sample(
-        sample,
-        protein_params,
-        scratch_dir,
-        mmer_tries=mmer_tries,
-        pmer_tries=pmer_tries,
-        surf_dec=surf_dec,
-    )
-    return sample
-
-
 def get_protein_instances(sample: SyntheticSample) -> list[ProteinInstance]:
     """Extract per-instance protein placements from sample.motifs.
 

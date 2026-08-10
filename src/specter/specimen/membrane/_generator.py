@@ -1078,8 +1078,10 @@ class MembraneGenerator:
         Sample surface sites and insert transmembrane protein templates.
 
         Must be called after :meth:`generate`. Species are chosen per site
-        by weighted random draw (weights = ``frequency``), matching
-        ``TetrisPackingSpecimenGenerator``'s species-selection convention.
+        by weighted random draw (weights = ``frequency``), the same
+        weighted-selection idea `specimen.tomogram.
+        MembraneTomogramGenerator`'s own ratio-mode filler species use
+        (there via `draw_species_pool`).
 
         Parameters
         ----------

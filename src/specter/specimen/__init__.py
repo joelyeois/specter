@@ -9,13 +9,6 @@ from .cytosolic_filler import (
 from .from_volume import load_specimen_volume
 from ._grid import BeadSpec, GridSpec
 from .filament import ACTIN_SPEC, MICROTUBULE_SPEC, FilamentInstance, FilamentSpec
-from .packing import (
-    SpherePackingSpecimenGenerator,
-    SphereProteinSpec,
-    TetrisPackingSpecimenGenerator,
-    TetrisPlacement,
-    TetrisProteinSpec,
-)
 from .membrane import (
     MembraneGenerator,
     TransmembranePlacement,
@@ -41,11 +34,6 @@ __all__ = [
     "load_specimen_volume",
     "BeadSpec",
     "GridSpec",
-    "SpherePackingSpecimenGenerator",
-    "SphereProteinSpec",
-    "TetrisPackingSpecimenGenerator",
-    "TetrisPlacement",
-    "TetrisProteinSpec",
     "MembraneGenerator",
     "TransmembranePlacement",
     "TransmembraneSpec",

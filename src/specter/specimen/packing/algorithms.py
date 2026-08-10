@@ -1,52 +1,66 @@
 """
-Multi-species hard-sphere packing algorithms for specimen generation.
+Multi-species hard-sphere packing for specimen generation.
 
-Two backends, sharing the "draw a candidate pool, then place it" pattern:
+:func:`pack_hard_spheres_3d` -- Random Sequential Addition (RSA), fully
+vectorized across candidates, fast (sub-second to a few seconds at a few
+thousand instances), capped by RSA's known jamming limit (~28-41%
+depending on species-size diversity, well below random-close-packing).
+This is the backend behind `specter build tomogram`
+(`specimen.tomogram.MembraneTomogramGenerator`).
 
-- :func:`pack_hard_spheres_3d` -- Random Sequential Addition (RSA), fast
-  (sub-second to a few seconds at a few thousand instances), capped by RSA's
-  known jamming limit (~28-41% depending on species-size diversity, well
-  below random-close-packing).
-- :func:`pack_hard_spheres_3d_dense` -- force-biased relaxation in a padded,
-  periodic box, cropped back down to the requested (walled) box. Slower
-  (a few minutes at a few thousand instances) and typically denser than
-  `pack_hard_spheres_3d` at the same request, though by how much is
-  parameter-dependent -- see that function's own docstring for verified
-  numbers and an important caveat about `occupancy_fraction` requests near
-  the physical jamming ceiling.
-
-Both were benchmarked in ``dev/packing_algorithms.py`` against several other
+Benchmarked in ``dev/packing_algorithms.py`` against several other
 candidates (naive/voxel-grid RSA, Lubachevsky-Stillinger, a CellPACK-style
-incremental distance field, an SDF-scored variant, and Tetris-style
-contact-correlation packing) -- see that file for the full comparison; only
-the two winners (fast-but-looser vs. slow-but-denser) are promoted here.
-`pack_hard_spheres_3d` itself began as ``pack_rsa_batched`` there.
-
-The force-biased core is a torch re-implementation of the update rule in
-Vasili Baranov's PackingGeneration (C++, MIT license):
-https://github.com/VasiliBaranov/packing-generation -- specifically
-``BezrukovJodreyToryStep.cpp`` (Bezrukov, Bargiel & Stoyan 2002). It is
-periodic-only (no walled-box variant): the reference implementation only
-ever packs a periodic unit cell, and its reported densities (comfortably
-beating RSA, approaching random-close-packing) are periodic-cell numbers --
-relaxing directly against hard walls was tried first and plateaus around
-15-20% regardless of iteration budget (particles driven toward a wall have
-nowhere to go and jam there), well *below* RSA. :func:`pack_hard_spheres_3d_dense`
-recovers walled-box behavior by relaxing in a padded periodic box and
-cropping back to the requested box afterward -- see its own docstring.
+incremental distance field, an SDF-scored variant, a periodic force-biased
+relaxation reaching substantially higher density but with no
+obstacle-avoidance mechanism, and Tetris-style contact-correlation
+packing) -- see that file for the full comparison; this RSA
+implementation is the one winner promoted here (began as
+``pack_rsa_batched`` there). The force-biased and Tetris-style approaches
+were themselves promoted into this package at one point
+(``pack_hard_spheres_3d_dense``, `specimen.packing.tetris`) but never
+gained a real caller beyond their own generators, which were themselves
+superseded by `MembraneTomogramGenerator`; both were removed rather than
+carried along unused -- see git history if either is ever needed as a
+reference again.
 """
 
 from __future__ import annotations
 
-import warnings
-from collections import defaultdict
-
+import numpy as np
 import torch
 import torch.nn.functional as F
 
-# Matches FORCE_SCALING_FACTOR in BezrukovJodreyToryStep.cpp:
-# https://github.com/VasiliBaranov/packing-generation/blob/master/PackingGeneration/Generation/PackingGenerators/Source/BezrukovJodreyToryStep.cpp
-_FORCE_SCALING_FACTOR = 0.5
+# specter.potential.compute_supersampling_parameters's own default atomic
+# kernel width (potential.py: width_atom=5.0) -- each atom's own potential
+# is evaluated over a +/-2.5 A box around it, so a molecule's bounding box
+# needs at least this much margin beyond its outermost atom or that atom's
+# kernel gets truncated by convolution. Same value as
+# specimen/polnet_bridge.py's ATOM_KERNEL_HALF_WIDTH_A -- kept as an
+# independent local constant (not imported) to keep this module's
+# dependencies limited, matching this codebase's established
+# per-generator zero-cross-coupling convention.
+ATOM_KERNEL_HALF_WIDTH_A = 2.5
+
+
+def estimate_protein_box_size(max_diameter: float, v_size: float) -> int:
+    """
+    Grid size (voxels, per axis) for a molecule with the given max diameter
+    (Angstrom, from ``PDB.max_diameter``) at voxel size ``v_size``.
+
+    Parameters
+    ----------
+    max_diameter : float
+    v_size : float
+
+    Returns
+    -------
+    int
+        Even grid size in voxels.
+    """
+    margin_a = 2 * ATOM_KERNEL_HALF_WIDTH_A
+    n = int(np.ceil((max_diameter + 2 * margin_a) / v_size))
+    n += n % 2
+    return n
 
 
 def draw_species_pool(
@@ -475,501 +489,3 @@ def pack_hard_spheres_3d(
         )
 
     return accepted_pos.cpu(), accepted_row.cpu()
-
-
-# ---------------------------------------------------------------------------
-# Force-biased periodic relaxation (dense backend) -- private helpers
-# ---------------------------------------------------------------------------
-#
-# Periodic-only: the only caller (`pack_hard_spheres_3d_dense`) always
-# relaxes inside a padded periodic box, never against real walls, so the
-# walled-box branches present in the dev/ comparison version are dropped
-# here rather than carried along unused.
-
-
-def _fb_half_extents_xyz(
-    box: tuple[float, float, float], device: str | torch.device = "cpu"
-) -> torch.Tensor:
-    D, H, W = box
-    return torch.tensor([W / 2, H / 2, D / 2], device=device)
-
-
-def _fb_box_dims_xyz(
-    box: tuple[float, float, float], device: str | torch.device = "cpu"
-) -> torch.Tensor:
-    D, H, W = box
-    return torch.tensor([W, H, D], device=device)
-
-
-def _fb_wrap_positions(
-    positions: torch.Tensor, box: tuple[float, float, float]
-) -> torch.Tensor:
-    """Wrap positions into the periodic box, coordinates in [-half, half)."""
-    dims = _fb_box_dims_xyz(box, device=positions.device)
-    return (positions + dims / 2) % dims - dims / 2
-
-
-def _fb_periodic_diff(
-    diff: torch.Tensor, box: tuple[float, float, float]
-) -> torch.Tensor:
-    """Minimum-image displacement (broadcasts over any leading shape, last dim=3)."""
-    dims = _fb_box_dims_xyz(box, device=diff.device)
-    return diff - dims * torch.round(diff / dims)
-
-
-def _fb_grid_shape(
-    box: tuple[float, float, float], cell_size: float
-) -> tuple[int, int, int]:
-    D, H, W = box
-    return (
-        max(1, int(W / cell_size)),
-        max(1, int(H / cell_size)),
-        max(1, int(D / cell_size)),
-    )
-
-
-def _fb_cell_index(
-    pos: torch.Tensor,
-    cell_size: float,
-    half: torch.Tensor,
-    grid_shape: tuple[int, int, int],
-) -> tuple[int, int, int]:
-    idx = torch.floor((pos + half) / cell_size).long()
-    gx, gy, gz = grid_shape
-    return (int(idx[0]) % gx, int(idx[1]) % gy, int(idx[2]) % gz)
-
-
-def _fb_neighbor_cells(cell: tuple[int, int, int], grid_shape: tuple[int, int, int]):
-    cx, cy, cz = cell
-    gx, gy, gz = grid_shape
-    seen: set[tuple[int, int, int]] = set()
-    for dx in (-1, 0, 1):
-        for dy in (-1, 0, 1):
-            for dz in (-1, 0, 1):
-                nb = ((cx + dx) % gx, (cy + dy) % gy, (cz + dz) % gz)
-                if nb not in seen:
-                    seen.add(nb)
-                    yield nb
-
-
-def _fb_find_overlapping_pairs(
-    positions: torch.Tensor,
-    radii: torch.Tensor,
-    gap: float,
-    cell_size: float,
-    half: torch.Tensor,
-    box: tuple[float, float, float],
-    overlap_tol: float = 0.0,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-    """Grid-accelerated overlap query (minimum-image, periodic). Candidate
-    pairs are found via a spatial hash (python dict, cell size = touch-
-    distance of the two largest radii so any overlap is confined to the
-    3x3x3 wrap-around neighborhood); distance/overlap for the found
-    candidates is then computed vectorized. Returns (i_idx, j_idx, overlap,
-    diffs, dist) for pairs with overlap > `overlap_tol`, i_idx < j_idx (each
-    unordered pair reported exactly once). `overlap_tol` matters a lot in
-    practice: `_fb_relax_overlaps`'s pairwise displacement converges
-    asymptotically (like gradient descent near an optimum), so a strict
-    `overlap_tol=0.0` (the default, appropriate for driving the relaxation
-    itself) will keep reporting hundreds of physically negligible
-    sub-Angstrom-fraction "overlaps" as real ones long after they stop
-    mattering -- callers deciding whether a packing is "done"
-    (`_fb_drop_worst_overlaps`, `_fb_verify_no_overlap`) should pass a small
-    positive tolerance instead, the same way polnet's own placement config
-    has PMER_OVER_TOL/MB_OVER_TOL rather than demanding exact non-overlap.
-    """
-    n = positions.shape[0]
-    if n == 0:
-        z = torch.empty(0, dtype=torch.long)
-        return z, z, torch.empty(0), torch.empty((0, 3)), torch.empty(0)
-
-    grid_shape = _fb_grid_shape(box, cell_size)
-    grid: dict[tuple[int, int, int], list[int]] = defaultdict(list)
-    for i in range(n):
-        grid[_fb_cell_index(positions[i], cell_size, half, grid_shape)].append(i)
-
-    pairs_i: list[int] = []
-    pairs_j: list[int] = []
-    for cell, idxs in grid.items():
-        neighbor_idxs: list[int] = []
-        for nb in _fb_neighbor_cells(cell, grid_shape):
-            neighbor_idxs.extend(grid.get(nb, []))
-        for i in idxs:
-            for j in neighbor_idxs:
-                if j > i:
-                    pairs_i.append(i)
-                    pairs_j.append(j)
-
-    if not pairs_i:
-        z = torch.empty(0, dtype=torch.long)
-        return z, z, torch.empty(0), torch.empty((0, 3)), torch.empty(0)
-
-    i_idx = torch.tensor(pairs_i, dtype=torch.long)
-    j_idx = torch.tensor(pairs_j, dtype=torch.long)
-    diffs = positions[i_idx] - positions[j_idx]
-    diffs = _fb_periodic_diff(diffs, box)
-    dist = diffs.norm(dim=1)
-    contact = radii[i_idx] + radii[j_idx] + gap
-    overlap = contact - dist
-    mask = overlap > overlap_tol
-    return i_idx[mask], j_idx[mask], overlap[mask], diffs[mask], dist[mask]
-
-
-def _fb_verify_no_overlap(
-    positions: torch.Tensor,
-    radii: torch.Tensor,
-    gap: float,
-    box: tuple[float, float, float] | None = None,
-    overlap_tol: float | None = None,
-) -> bool:
-    """Brute-force O(n^2) verification (only meant to be run once, after
-    packing) that no two accepted spheres overlap by more than
-    `overlap_tol` Angstrom -- a small positive default, not exact zero; see
-    `_fb_find_overlapping_pairs`'s docstring for why (`_fb_relax_overlaps`
-    converges asymptotically, so "exactly zero" is an unreasonable bar).
-    `overlap_tol=None` (default) uses `1e-3 * radii.mean()`, matching the
-    packing algorithm's own `tol_frac` convention -- scaling with radius
-    rather than a fixed Angstrom value keeps the bar equally strict (0.1%
-    of radius) whether species are 15 A or 60 A. `box` is only used if
-    `periodic` minimum-image distance is needed by the caller -- pass None
-    for a plain (non-periodic) cropped set, matching how
-    `pack_hard_spheres_3d_dense` verifies its final, walled-box result."""
-    n = positions.shape[0]
-    if n < 2:
-        return True
-    if overlap_tol is None:
-        overlap_tol = 1e-3 * float(radii.mean())
-    diffs = positions.unsqueeze(0) - positions.unsqueeze(1)
-    if box is not None:
-        diffs = _fb_periodic_diff(diffs, box)
-    dist = diffs.norm(dim=-1)
-    contact = radii.unsqueeze(0) + radii.unsqueeze(1) + gap
-    overlap = contact - dist
-    overlap.fill_diagonal_(-float("inf"))
-    return bool((overlap <= overlap_tol).all())
-
-
-def _fb_relax_overlaps(
-    positions: torch.Tensor,
-    radii: torch.Tensor,
-    gap: float,
-    half: torch.Tensor,
-    box: tuple[float, float, float],
-    max_iterations: int,
-    force_scale: float = _FORCE_SCALING_FACTOR,
-    tol_frac: float = 1e-3,
-) -> tuple[torch.Tensor, int, bool]:
-    """Force-biased overlap relaxation in a periodic box -- the core
-    mechanism of `pack_hard_spheres_3d_dense`. Returns (positions,
-    n_iterations_run, converged)."""
-    if positions.shape[0] == 0:
-        return positions, 0, True
-    cell_size = 2 * float(radii.max()) + gap
-    it = 0
-    for it in range(max_iterations):
-        i_idx, j_idx, overlap, diffs, dist = _fb_find_overlapping_pairs(
-            positions, radii, gap, cell_size, half, box
-        )
-        if i_idx.numel() == 0 or overlap.max() < tol_frac * radii.mean():
-            return positions, it, True
-        dist_safe = dist.clamp_min(1e-6)
-        unit = diffs / dist_safe.unsqueeze(1)
-        mass_i = radii[i_idx] ** 3
-        mass_j = radii[j_idx] ** 3
-        frac_i = (mass_j / (mass_i + mass_j)).unsqueeze(1)
-        frac_j = (mass_i / (mass_i + mass_j)).unsqueeze(1)
-        disp = torch.zeros_like(positions)
-        disp.index_add_(0, i_idx, unit * overlap.unsqueeze(1) * force_scale * frac_i)
-        disp.index_add_(0, j_idx, -unit * overlap.unsqueeze(1) * force_scale * frac_j)
-        positions = _fb_wrap_positions(positions + disp, box)
-    i_idx, *_ = _fb_find_overlapping_pairs(positions, radii, gap, cell_size, half, box)
-    return positions, it + 1, i_idx.numel() == 0
-
-
-def _fb_drop_worst_overlaps(
-    positions: torch.Tensor,
-    radii: torch.Tensor,
-    species_idx: torch.Tensor,
-    gap: float,
-    half: torch.Tensor,
-    box: tuple[float, float, float],
-    max_drops: int = 10_000,
-    overlap_tol: float = 1e-3,
-    relax_between_drops: int = 20,
-    force_scale: float = _FORCE_SCALING_FACTOR,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """Cleanup pass: repeatedly drop the more-overlapping particle of the
-    worst remaining overlapping pair (by more than `overlap_tol` -- NOT
-    exact zero, see `_fb_find_overlapping_pairs`) until none remain,
-    re-running a short `_fb_relax_overlaps` burst (`relax_between_drops`
-    iterations) every few drops so the freed-up space actually gets used by
-    the survivors instead of them sitting frozen in their pre-drop
-    positions. Without that, `_fb_relax_overlaps`'s own convergence check (a
-    single global max-overlap threshold) routinely leaves hundreds of pairs
-    with a physically negligible but nonzero residual overlap each, and a
-    zero-tolerance drop loop with no further relaxation would delete most
-    of them for essentially no reason.
-    """
-    keep = torch.ones(positions.shape[0], dtype=torch.bool)
-    n_since_relax = 0
-    for _ in range(max_drops):
-        active = keep.nonzero(as_tuple=True)[0]
-        if active.numel() < 2:
-            break
-        pos = positions[active]
-        rad = radii[active]
-        cell_size = 2 * float(rad.max()) + gap
-        i_idx, j_idx, overlap, *_ = _fb_find_overlapping_pairs(
-            pos, rad, gap, cell_size, half, box, overlap_tol=overlap_tol
-        )
-        if i_idx.numel() == 0:
-            break
-        worst = int(overlap.argmax())
-        keep[active[int(j_idx[worst])]] = False
-        n_since_relax += 1
-        if n_since_relax >= relax_between_drops:
-            active = keep.nonzero(as_tuple=True)[0]
-            pos, _, _ = _fb_relax_overlaps(
-                positions[active],
-                radii[active],
-                gap,
-                half,
-                box,
-                relax_between_drops,
-                force_scale,
-            )
-            positions = positions.clone()
-            positions[active] = pos
-            n_since_relax = 0
-    return positions[keep], radii[keep], species_idx[keep]
-
-
-def pack_hard_spheres_3d_dense(
-    species_radii: torch.Tensor,
-    species_ratios: torch.Tensor,
-    occupancy_fraction: float,
-    box: tuple[float, float, float],
-    gap: float = 0.0,
-    seed: int | None = None,
-    device: str | torch.device = "cpu",
-    pad_fraction: float = 0.5,
-    n_stages: int = 20,
-    iterations_per_stage: int = 100,
-    initial_scale: float = 0.3,
-    force_scale: float = _FORCE_SCALING_FACTOR,
-    tol_frac: float = 1e-3,
-    clip_axes: tuple[bool, bool, bool] = (False, False, False),
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """
-    Pack hard spheres of given (possibly different) species densely into a
-    box via force-biased relaxation, using the "pad, relax periodically,
-    crop" technique to recover walled-box behavior from an algorithm that
-    only works well periodically (see the module docstring).
-
-    A candidate pool is drawn (species-ratio-weighted, largest-first, via
-    `draw_species_pool`) sized to reach `occupancy_fraction` of a PADDED
-    box (`box` grown by `pad_fraction` on each side), started at uniformly
-    random positions and relaxed with periodic boundaries via a staged
-    homotopy: sphere radii are scaled from `initial_scale` up to 1.0 (real
-    target) over `n_stages` stages, relaxing `iterations_per_stage` times
-    at each (temporarily shrunk) stage before growing further -- this
-    mirrors the reference's own approach of relaxing at an artificially
-    large nominal diameter and shrinking it down, letting particles
-    rearrange with breathing room before the real constraint tightens.
-    Residual overlaps after all stages are cleaned up by repeatedly
-    dropping the more-overlapping particle of the worst remaining pair, so
-    the result is always overlap-free (fewer instances may be *dropped*
-    than requested, unlike `pack_hard_spheres_3d` which only ever *fails to
-    attempt* excess candidates).
-
-    Only spheres landing fully inside the ORIGINAL (unpadded) box are kept
-    on non-clippable axes (see `clip_axes`) -- this is what makes the
-    periodic result usable as a real, walled specimen volume: a sphere
-    whose center is near the padded box's own periodic wrap boundary can
-    straddle it (needing its periodic image to look whole), which would
-    render as an abrupt cut if used directly, but `pad_fraction`'s margin
-    keeps the crop boundary well inside the relaxed, homogeneous interior,
-    away from that wrap boundary. A non-overlapping periodic set's cropped
-    subset is trivially also non-overlapping, so no re-verification is
-    needed after cropping.
-
-    Always overlap-free (verified via `_fb_verify_no_overlap`'s brute-force
-    check whenever this is tested), and typically denser than
-    `pack_hard_spheres_3d` at the same request -- but the SIZE of that
-    advantage is sensitive to how close `occupancy_fraction` is pushed
-    toward the physical jamming ceiling for the given species mix (random-
-    close-packing for spheres, ~64% bare-sphere fraction). Near that
-    ceiling, the staged homotopy may not fully converge within
-    `iterations_per_stage` at every stage -- residual overlaps then get
-    resolved by `_fb_drop_worst_overlaps`'s cleanup, which can end up
-    dropping a substantial and not precisely predictable fraction of the
-    padded pool, so achieved occupancy in that regime is "best effort," not
-    a guarantee, and can vary between otherwise-identical environments
-    (results ARE bit-reproducible for a fixed seed on one machine/build,
-    confirmed by rerunning the relaxation trajectory and comparing
-    checksums -- but summation order in the underlying `index_add_` calls
-    is not guaranteed identical across different thread counts/BLAS
-    builds, so don't expect the exact achieved occupancy to transfer
-    across machines at this parameter regime). Comfortably below the
-    ceiling (e.g. `occupancy_fraction` a few tenths, well clear of ~0.6+),
-    convergence is reliable and this backend's density advantage over
-    `pack_hard_spheres_3d` is consistent and easy to reproduce -- that is
-    the regime this is intended for; treat requests near the ceiling as
-    exploratory, not something to build a pipeline around without
-    rechecking `achieved_occupancy` (compute it from the returned
-    `radii_out`) on your own actual run. This backend costs on the order of
-    a few minutes at a few thousand instances vs. `pack_hard_spheres_3d`'s
-    sub-second-to-seconds, so it's the "I can afford to wait for real
-    density" option, not the default.
-
-    `occupancy_fraction` is honored accurately only when `box` is large,
-    on its non-clippable axes, relative to the largest species diameter
-    (true of any realistic specimen volume, and true of the regime this
-    was benchmarked in above: a 600 A box against species up to 32 A
-    radius). The crop step keeps only spheres landing fully inside the
-    ORIGINAL box on those axes -- a sphere's own center must stay `radius`
-    away from every non-clippable wall -- so the fraction of the
-    (homogeneously relaxed) padded pool that survives cropping shrinks per
-    axis as that species' radius approaches the box's own extent on that
-    axis, compounding across all non-clippable axes. For a box whose
-    smallest non-clippable extent is only a few sphere diameters across,
-    this can make the actual achieved occupancy silently undershoot the
-    request by several-fold (unlike `pack_hard_spheres_3d`, where a
-    too-small box just triggers ordinary RSA rejections against
-    `n_candidates`, visible and interpretable) -- a warning is raised in
-    that regime; consider `pack_hard_spheres_3d` instead there, a much
-    larger `pad_fraction`, or allowing clipping on the tight axis via
-    `clip_axes`.
-
-    Parameters
-    ----------
-    species_radii : torch.Tensor, shape (S,)
-        Real physical radius of each species, Angstrom.
-    species_ratios : torch.Tensor, shape (S,)
-        Relative abundance weight per species (see `draw_species_pool`).
-    occupancy_fraction : float
-        Target bare-sphere volume fraction, relative to `box` (not the
-        internally padded box).
-    box : tuple of float
-        (D, H, W) box extents in Angstrom (z, y, x), centered at the
-        origin.
-    gap : float, optional
-        Extra clearance between sphere surfaces, Angstrom. Default 0.0.
-    seed : int, optional
-        Random seed.
-    device : str or torch.device, optional
-        Device for the relaxation. Default "cpu".
-    pad_fraction : float, optional
-        Each box dimension is grown by this fraction (e.g. 0.5 means a
-        600 A box is relaxed inside a 900 A periodic box) before cropping
-        back down. Larger values give a more homogeneous, edge-effect-free
-        crop at the cost of relaxing more candidate spheres. Default 0.5.
-    n_stages, iterations_per_stage, initial_scale, force_scale, tol_frac
-        Force-biased relaxation homotopy parameters -- see the function
-        body / module docstring. Defaults match the values benchmarked in
-        `dev/packing_algorithms.py`.
-    clip_axes : tuple of bool, optional
-        (z, y, x), matching `box`'s own axis order. True on an axis means a
-        sphere's CENTER just needs to stay within the original box on that
-        axis to survive the crop -- the sphere itself may extend past that
-        wall (truncated naturally at render time, matching
-        `pack_hard_spheres_3d`'s own `clip_axes`). False (default, all
-        axes) requires the full sphere to fit, the original behavior. See
-        the note above on `occupancy_fraction` accuracy -- allowing
-        clipping on a tight axis avoids that undershoot entirely for that
-        axis, since spheres are no longer discarded for crossing it.
-
-    Returns
-    -------
-    coords : torch.Tensor, shape (M, 3)
-        Accepted sphere centers (x, y, z), Angstrom, box-centered.
-    radii_out : torch.Tensor, shape (M,)
-        Radius of each accepted sphere, Angstrom.
-    species_idx_out : torch.Tensor, shape (M,)
-        Index into `species_radii`/`species_ratios` for each accepted
-        sphere.
-    """
-    non_clippable_extents = [box[i] for i in range(3) if not clip_axes[i]]
-    if (
-        non_clippable_extents
-        and species_radii.numel() > 0
-        and float(species_radii.max()) > 0.15 * min(non_clippable_extents)
-    ):
-        warnings.warn(
-            "pack_hard_spheres_3d_dense: the largest species radius "
-            f"({float(species_radii.max()):.1f} A) is large relative to the "
-            f"non-clippable box extent ({min(non_clippable_extents):.1f} A) -- "
-            "the crop step will disproportionately discard large-species "
-            "instances, and occupancy_fraction may be substantially "
-            "undershot. See this function's docstring; pack_hard_spheres_3d "
-            "may be a better fit for this box/species-size regime, or allow "
-            "clipping on the tight axis via clip_axes.",
-            stacklevel=2,
-        )
-
-    half_target = _fb_half_extents_xyz(box, device=device)
-    padded_box = (
-        box[0] * (1.0 + pad_fraction),
-        box[1] * (1.0 + pad_fraction),
-        box[2] * (1.0 + pad_fraction),
-    )
-    padded_box_volume = padded_box[0] * padded_box[1] * padded_box[2]
-
-    gen = torch.Generator(device=device)
-    if seed is not None:
-        gen.manual_seed(seed)
-
-    radii, species_idx = draw_species_pool(
-        species_radii, species_ratios, occupancy_fraction, padded_box_volume, seed=seed
-    )
-    n = radii.shape[0]
-    empty = torch.empty((0, 3), device=device)
-    if n == 0:
-        return (
-            empty,
-            torch.empty((0,), device=device),
-            torch.empty((0,), dtype=torch.long),
-        )
-
-    radii = radii.to(device)
-    species_idx = species_idx.to(device)
-    half_padded = _fb_half_extents_xyz(padded_box, device=device)
-
-    positions = (torch.rand(n, 3, generator=gen, device=device) - 0.5) * 2 * half_padded
-
-    scales = torch.linspace(initial_scale, 1.0, n_stages)
-    for scale in scales:
-        eff_radii = radii * float(scale)
-        positions, _, _ = _fb_relax_overlaps(
-            positions,
-            eff_radii,
-            gap,
-            half_padded,
-            padded_box,
-            iterations_per_stage,
-            force_scale,
-            tol_frac,
-        )
-
-    overlap_tol = tol_frac * float(radii.mean())
-    positions, radii, species_idx = _fb_drop_worst_overlaps(
-        positions,
-        radii,
-        species_idx,
-        gap,
-        half_padded,
-        padded_box,
-        overlap_tol=overlap_tol,
-        force_scale=force_scale,
-    )
-
-    # full sphere must fit on non-clippable axes; only the center needs to
-    # stay in-bounds on clippable ones (see `clip_axes`).
-    clip_allowed_xyz = torch.tensor(
-        [clip_axes[2], clip_axes[1], clip_axes[0]], dtype=torch.bool, device=device
-    )
-    required_margin = torch.where(
-        clip_allowed_xyz.unsqueeze(0), 0.0, radii.unsqueeze(1)
-    )
-    inside = ((positions.abs() + required_margin) <= half_target).all(dim=1)
-    return positions[inside].cpu(), radii[inside].cpu(), species_idx[inside].cpu()

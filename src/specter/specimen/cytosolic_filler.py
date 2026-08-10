@@ -12,9 +12,8 @@ protein-spec dict format):
   `CryoETSpecimenGenerator`'s polnet-style ``{"PDB_CODE", "PMER_OCC"}``
   protein_specs, weighted by the source paper's own relative-abundance
   data.
-- `CRYOETSIM_PARTICLE_TABLE` + `build_filler_pool_specs` -- adapts to the
-  packing-based generators' (`SpherePackingSpecimenGenerator`,
-  `MembraneTomogramGenerator`/`specter build tomogram`) flat
+- `CRYOETSIM_PARTICLE_TABLE` + `build_filler_pool_specs` -- adapts to
+  `MembraneTomogramGenerator`'s (`specter build tomogram`) flat
   ``{"pdb_source"}`` filler_specs; also works on `PEI2016_CROWDING_TABLE`
   (see its own docstring), so `specter build tomogram`'s
   `filler_from_pei2016`/`filler_from_cryoetsim` both route through this
@@ -298,9 +297,11 @@ def build_filler_protein_specs(
 #   are the same underlying structures under this same non-standard-naming
 #   problem and are excluded for the same reason.
 #
-# Revisit the membrane proteins and cytoskeleton categories once
-# transmembrane/filament support is added to `SpherePackingSpecimenGenerator`
-# (see CLAUDE.md's "Off-Limits"/architecture notes on current scope).
+# Revisit the membrane proteins and cytoskeleton categories once there's a
+# real use for them -- the per-category reasons above (non-standard
+# aliases, no RCSB entry, not PDB structures at all) are data-format
+# problems independent of any particular generator's own placement
+# capabilities, so this isn't blocked on anything in specter itself.
 #
 # This is one reasonable, published reference set, not a claim about the
 # true composition of any specific real specimen -- swap in a different/
@@ -1307,9 +1308,11 @@ def build_filler_pool_specs(
 ) -> list[dict]:
     """
     Filter a filler reference table down to a mass range and/or category,
-    and adapt it to `SpherePackingSpecimenGenerator`'s `filler_specs`
-    shape (``{"pdb_source": ...}`` -- filler has no per-species weight,
-    see `.packing.SphereProteinSpec`'s own docstring for why).
+    and adapt it to `MembraneTomogramGenerator`'s (`specter build
+    tomogram`) flat ``{"pdb_source": ...}`` filler_specs shape -- one
+    entry per selected species, weighted implicitly equally (via
+    `TomogramProteinSpec.ratio`'s own default) unless a caller overrides
+    that afterward.
 
     Works on any ``list[dict]`` with a ``"code"``/``"mw_kda"`` key per
     entry -- both `CRYOETSIM_PARTICLE_TABLE` and `PEI2016_CROWDING_TABLE`

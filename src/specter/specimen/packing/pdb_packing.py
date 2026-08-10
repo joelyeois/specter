@@ -6,13 +6,13 @@ rendering each accepted instance's real high-resolution scattering
 potential (``PotentialBuilder``) at its packed position and a random
 rotation.
 
-A third, independent alternative alongside specter's other two specimen
-generators -- ``specimen/cryoet.py``'s ``CryoETSpecimenGenerator`` (polnet
-SAWLC placement + membranes) and ``specimen/cryotomosim.py``'s
-``CryoTomoSimSpecimenGenerator`` (a from-scratch CTS port: reject-and-retry
-Monte Carlo with direct density-overlap testing). This one approximates
-each species as a bounding sphere for placement (not the true molecular
-shape, unlike the other two -- a real cost in packing fidelity for oddly
+An independent alternative alongside specter's other specimen generators --
+``specimen/cryoet.py``'s ``CryoETSpecimenGenerator`` (polnet SAWLC
+placement + membranes) and ``specimen/tomogram``'s
+``MembraneTomogramGenerator`` (the generator behind `specter build
+tomogram`, RSA hard-sphere packing + region-gated cytosol/lumen fill).
+This one approximates each species as a bounding sphere for placement (not
+the true molecular shape -- a real cost in packing fidelity for oddly
 shaped molecules), in exchange for speed and density.
 
 Species split into two priority groups, packed in two sequential stages:
@@ -73,11 +73,10 @@ from .algorithms import (
 # is evaluated over a +/-2.5 A box around it, so a molecule's bounding box
 # needs at least this much margin beyond its outermost atom or that atom's
 # kernel gets truncated by convolution. Same value as
-# specimen/polnet_bridge.py's ATOM_KERNEL_HALF_WIDTH_A and
-# specimen/cryotomosim.py's own copy -- kept as an independent local
-# constant (not imported) to keep this generator's dependencies limited to
-# crowding/pdb/potential/rotations, matching cryotomosim.py's own
-# zero-cross-generator-coupling convention.
+# specimen/polnet_bridge.py's ATOM_KERNEL_HALF_WIDTH_A -- kept as an
+# independent local constant (not imported) to keep this generator's
+# dependencies limited to crowding/pdb/potential/rotations, matching this
+# codebase's established per-generator zero-cross-coupling convention.
 ATOM_KERNEL_HALF_WIDTH_A = 2.5
 
 # Binarization threshold for per-instance label masks, as a fraction of

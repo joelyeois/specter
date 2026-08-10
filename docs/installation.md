@@ -38,7 +38,7 @@ uv pip install -e .
 
 - `docs` -- build these docs locally (`uv sync --extra docs`).
 - `gpu-edt` -- GPU-accelerated (CuPy-backed) distance transforms for the
-  `spherical_harmonics`/`alpha_shape` membrane shape backends
+  `spherical_harmonics` membrane shape backend
   (`specter.specimen.membrane`). Purely a speed optimization: falls back
   automatically to CPU (`scipy`) when not installed, or when no CUDA
   device is available at runtime, so it's safe to skip. Requires a CUDA

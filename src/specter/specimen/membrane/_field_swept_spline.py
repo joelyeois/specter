@@ -7,36 +7,35 @@ star-convex "radius function of direction" family
 that backend structurally cannot represent (a tube that curls back near
 itself is crossed more than once by some rays from any single center).
 
-Reuses ``_field.py``'s existing metaball machinery almost entirely: a swept
-tube's signed field IS a smooth-min union of many small sphere SDFs whose
-centers walk along a smooth path -- exactly what ``blend_field`` already
-computes for the ``"metaball"`` backend's randomly-SCATTERED sources. The
-only new piece here is the source SAMPLING: a correlated ("persistent")
-random walk instead of ``sample_metaball_sources``' independent uniform
-scatter in a box.
+Reuses ``_field.py``'s shared smooth-min blend machinery (``SphereSource``/
+``blend_field``/``cap_curvature`` -- the only other consumer of these was a
+deprecated ``shape_backend="metaball"`` backend, isotropically-SCATTERED
+sources rather than a swept path, since deleted): a swept tube's signed
+field IS a smooth-min union of many small sphere SDFs whose centers walk
+along a smooth path -- exactly what ``blend_field`` computes given any
+list of sources, regardless of how they were sampled. The only new piece
+here is the source SAMPLING: a correlated ("persistent") random walk
+through space, rather than an independent uniform scatter in a box.
 
 Because ``phi`` comes directly from ``blend_field``'s analytic smooth-min of
 exact sphere SDFs, it is well-behaved (Eikonal property, ``|grad(phi)| ~=
-1``) BY CONSTRUCTION, the same category ``generate_membrane_field``
-(metaball) is in -- unlike the EDT-derived backends
-(``_field_alpha.py``/``_field_spherical_harmonics.py``), there is no
-boolean-mask/``distance_transform_edt`` step here, and
+1``) BY CONSTRUCTION -- unlike the EDT-derived ``_field_spherical_harmonics.py``
+backend, there is no boolean-mask/``distance_transform_edt`` step here, and
 correspondingly no ``_MIN_RELIABLE_VOXELS_PER_RADIUS``-style reliability
-warning is needed (metaball itself has none, for the same reason).
-Performance: ``blend_field`` loops one smooth-min pass per source
-sequentially (Python-level loop, each pass a full elementwise grid op) --
-plausibly a concern for a dense tube needing dozens-to-hundreds of sources,
-but measured directly rather than assumed: ~1.3s for 121 sources on a
-150^3 grid, and ~3.9s for a realistic ~9.8M-voxel (214^3) working grid at
-this module's own default source count (~34, from `total_length_a=500`/
-`step_length_a=15`) -- comparable to the other fast backends, not a
-bottleneck in practice at these scales.
+warning is needed. Performance: ``blend_field`` loops one smooth-min pass
+per source sequentially (Python-level loop, each pass a full elementwise
+grid op) -- plausibly a concern for a dense tube needing dozens-to-hundreds
+of sources, but measured directly rather than assumed: ~1.3s for 121
+sources on a 150^3 grid, and ~3.9s for a realistic ~9.8M-voxel (214^3)
+working grid at this module's own default source count (~34, from
+`total_length_a=500`/`step_length_a=15`) -- comparable to the other fast
+backend, not a bottleneck in practice at these scales.
 
-``cap_curvature`` IS still applied, though, exactly as metaball does by
-default: an analytic smooth-min blend can still have locally sharp concave
-curvature, and a sharply-bending (low ``flexibility``) tube is exactly the
-case most at risk of violating the bilayer self-intersection guarantee the
-later ``+-thickness/2`` leaflet offset depends on.
+``cap_curvature`` IS still applied: an analytic smooth-min blend can still
+have locally sharp concave curvature, and a sharply-bending (low
+``flexibility``) tube is exactly the case most at risk of violating the
+bilayer self-intersection guarantee the later ``+-thickness/2`` leaflet
+offset depends on.
 
 Path construction
 ------------------
@@ -51,21 +50,19 @@ re-normalized. The resulting point sequence is:
    origin, a random walk drifts and is not naturally centered.
 2. Smoothed with ``scipy.ndimage.gaussian_filter1d(..., axis=0)`` --
    smooths along the array's own PATH ORDER, not spatial proximity. This
-   matters: ``_cts_membrane.py``'s own ``_smooth_points`` (k-nearest-
-   neighbor averaging, correct for an unordered surface point cloud, its
-   actual use there) would be WRONG here -- a sufficiently sinuous tube can
-   curl close to itself in physical space, and k-NN smoothing would then
-   average together points that are near in space but far apart along the
-   path, corrupting exactly the self-approaching topology this backend
-   exists to produce.
+   matters: a k-nearest-neighbor averaging smoother (correct for an
+   unordered surface point cloud, but not what this is) would be WRONG
+   here -- a sufficiently sinuous tube can curl close to itself in physical
+   space, and k-NN smoothing would then average together points that are
+   near in space but far apart along the path, corrupting exactly the
+   self-approaching topology this backend exists to produce.
 
 Beading risk: same-radius spheres spaced ``step_length_a`` apart only fuse
 into a smooth continuous tube (rather than a visible string of beads) if
 ``step_length_a`` stays well under ``2 * tube_radius_a`` and
-``blend_sharpness_a`` is on the order of ``tube_radius_a`` itself --
-``generate_membrane_field``'s own default ``blend_sharpness_a`` (tuned for a
-handful of sparse, independent blobs) would under-blend a dense chain if
-reused verbatim, so this module computes its own default instead. Warns if
+``blend_sharpness_a`` is on the order of ``tube_radius_a`` itself -- a
+default tuned for a handful of sparse, independent blobs would under-blend
+a dense chain, so this module computes its own default instead. Warns if
 ``step_length_a`` exceeds the (mean, see "Radius variation" below) tube
 radius, a real, previously observed failure mode (visible beading), not a
 hypothetical one.
@@ -111,7 +108,7 @@ from scipy import ndimage
 
 from ._field import (
     MembraneField,
-    MetaballSource,
+    SphereSource,
     _grid_points_xyz,
     _warn_if_clipped_at_boundary,
     blend_field,
@@ -200,8 +197,8 @@ def generate_membrane_field_swept_spline(
         wandering path's bounding box is typically much smaller than its
         contour length), Angstrom. Default 500.0.
     step_length_a : float, optional
-        Distance between consecutive metaball source centers along the
-        path, Angstrom. Must stay well under ``2 * tube_radius_a`` (see
+        Distance between consecutive blended sphere source centers along
+        the path, Angstrom. Must stay well under ``2 * tube_radius_a`` (see
         module docstring's beading-risk warning). Default 15.0.
     tube_radius_a : float, optional
         Tube radius, Angstrom. Default 25.0.
@@ -235,10 +232,9 @@ def generate_membrane_field_swept_spline(
     blend_sharpness_a : float, optional
         Smooth-min blend radius, Angstrom (see
         :func:`~specter.specimen.membrane._field.blend_field`). Default
-        ``0.5 * tube_radius_a`` -- deliberately NOT
-        ``generate_membrane_field``'s own default (tuned for a handful of
-        sparse, independent blobs, which under-blends a dense chain of
-        sources into visible beading).
+        ``0.5 * tube_radius_a`` -- a default tuned for a handful of sparse,
+        independent blobs would under-blend a dense chain of sources into
+        visible beading, so this module computes its own instead.
     path_smoothing_sigma_points : float, optional
         ``scipy.ndimage.gaussian_filter1d`` sigma, in PATH POINTS (not
         Angstrom or voxels) -- see module docstring for why this is
@@ -246,8 +242,8 @@ def generate_membrane_field_swept_spline(
     curvature_iterations : int, optional
         Curvature-capping relaxation steps (see
         :func:`~specter.specimen.membrane._field.cap_curvature`). Default
-        15 -- lower than metaball's own default 30, since a swept tube's
-        curvature is already gentler by construction than a compact blob's.
+        15 -- a swept tube's curvature is already gentler by construction
+        than a compact blob's, so fewer relaxation steps are needed.
     curvature_step_fraction : float, optional
         See :func:`~specter.specimen.membrane._field.cap_curvature`.
         Default 0.15.
@@ -322,7 +318,7 @@ def generate_membrane_field_swept_spline(
 
     positions_t = torch.as_tensor(positions, dtype=torch.float32, device=device)
     sources = [
-        MetaballSource(center_xyz=positions_t[i], radius=float(radii[i]))
+        SphereSource(center_xyz=positions_t[i], radius=float(radii[i]))
         for i in range(n_points)
     ]
 

@@ -38,5 +38,5 @@ simulation](forward-simulation.md).
     both pipelines. Single-particle specimen assembly lives in
     `specter.imagegenerator` and `specter.specimen.single_particle`;
     cryo-ET specimen assembly lives in `specter.specimen` (`cryoet.py`,
-    `cryotomosim.py`, `membrane/`, `filament/`, `packing/` -- under heavy
+    `tomogram/`, `membrane/`, `filament/`, `packing/` -- under heavy
     active development, see that package directly for the current state).

@@ -1,15 +1,19 @@
 from ._regions import classify_membrane_regions
 from .generator import (
+    BeadPlacement,
     MembraneInstance,
     MembraneTomogramGenerator,
+    TomogramBeadSpec,
     TomogramPlacement,
     TomogramProteinSpec,
 )
 
 __all__ = [
     "classify_membrane_regions",
+    "BeadPlacement",
     "MembraneInstance",
     "MembraneTomogramGenerator",
+    "TomogramBeadSpec",
     "TomogramPlacement",
     "TomogramProteinSpec",
 ]

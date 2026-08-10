@@ -1,15 +1,23 @@
 """
 Signed-field geometry for organic membrane shapes.
 
-Builds a single dense signed field ``phi`` whose zero level set is a smooth,
-non-self-intersecting membrane mid-surface: a smooth-min ("metaball") blend of
-randomly placed spherical sources, perturbed with multi-octave value noise for
-undulation, then relaxed with a bounded number of diffusion steps to cap
-curvature. The bilayer leaflets are later extracted elsewhere as the ``+-
-t/2`` level sets of this same field -- because both leaflets come from one
-field rather than two independently offset surfaces, they cannot
-self-intersect on concave geometry as long as the local curvature radius
-stays above ``t/2`` everywhere, which the curvature-capping step guarantees.
+Core primitives for building a dense signed field ``phi`` whose zero level
+set is a smooth, non-self-intersecting membrane mid-surface: a smooth-min
+blend of spherical sources (:func:`blend_field`) relaxed with a bounded
+number of diffusion steps to cap curvature (:func:`cap_curvature`). The
+bilayer leaflets are later extracted elsewhere as the ``+-t/2`` level sets
+of this same field -- because both leaflets come from one field rather than
+two independently offset surfaces, they cannot self-intersect on concave
+geometry as long as the local curvature radius stays above ``t/2``
+everywhere, which the curvature-capping step guarantees.
+
+Currently consumed by ``_field_swept_spline.py`` (a correlated random walk
+of spherical sources, fed through the same ``blend_field``/``cap_curvature``
+machinery) -- the module's own top-level field generator that used to live
+here, ``generate_membrane_field`` (isotropically-scattered sources, i.e. a
+"metaball" blend), was deleted along with the deprecated
+``shape_backend="metaball"`` it backed; see git history if either is ever
+needed as a reference again.
 
 All lengths are physical (Angstrom); the working grid's voxel spacing is a
 parameter independent of any downstream output voxel size, so shape fidelity
@@ -23,7 +31,6 @@ centered-at-atom convention used by ``soft_voxelize_coordinates``).
 
 from __future__ import annotations
 
-import math
 import warnings
 from dataclasses import dataclass
 
@@ -34,7 +41,7 @@ from scipy import ndimage
 
 
 @dataclass
-class MetaballSource:
+class SphereSource:
     """
     One spherical source contributing to a smooth-min blended field.
 
@@ -149,45 +156,6 @@ class MembraneField:
         return torch.stack([norm_x, norm_y, norm_z], dim=-1).reshape(1, -1, 1, 1, 3)
 
 
-def sample_metaball_sources(
-    n_sources: int,
-    radius_range_a: tuple[float, float],
-    spread_a: float,
-    device: str | torch.device = "cpu",
-    seed: int | None = None,
-) -> list[MetaballSource]:
-    """
-    Draw randomly placed, randomly sized spherical sources.
-
-    Parameters
-    ----------
-    n_sources : int
-        Number of sources.
-    radius_range_a : tuple of float
-        ``(min, max)`` radius, Angstrom.
-    spread_a : float
-        Sources are drawn uniformly within ``[-spread_a, spread_a]`` on each
-        axis, centered on the physical origin.
-    device : str or torch.device, optional
-        Device for the returned source centers. Default ``"cpu"``.
-    seed : int, optional
-        Random seed. Default ``None``.
-
-    Returns
-    -------
-    list of MetaballSource
-    """
-    generator = torch.Generator(device="cpu")
-    if seed is not None:
-        generator.manual_seed(seed)
-    radii = torch.empty(n_sources).uniform_(*radius_range_a, generator=generator)
-    centers = (torch.rand((n_sources, 3), generator=generator) * 2.0 - 1.0) * spread_a
-    return [
-        MetaballSource(center_xyz=centers[i].to(device), radius=float(radii[i]))
-        for i in range(n_sources)
-    ]
-
-
 def _smin_pair(a: torch.Tensor, b: torch.Tensor, k: float) -> torch.Tensor:
     if k <= 0:
         return torch.minimum(a, b)
@@ -196,7 +164,7 @@ def _smin_pair(a: torch.Tensor, b: torch.Tensor, k: float) -> torch.Tensor:
 
 
 def blend_field(
-    sources: list[MetaballSource], points_xyz: torch.Tensor, k: float
+    sources: list[SphereSource], points_xyz: torch.Tensor, k: float
 ) -> torch.Tensor:
     """
     Evaluate the smooth-min union of ``sources`` at arbitrary points.
@@ -208,7 +176,7 @@ def blend_field(
 
     Parameters
     ----------
-    sources : list of MetaballSource
+    sources : list of SphereSource
     points_xyz : torch.Tensor
         Physical ``(x, y, z)`` points, shape ``(..., 3)``, Angstrom.
     k : float
@@ -249,64 +217,6 @@ def _grid_points_xyz(
     y = origin[1] + yy * spacing_a
     z = origin[2] + zz * spacing_a
     return torch.stack([x, y, z], dim=-1)
-
-
-def _value_noise_grid(
-    shape_zyx: tuple[int, int, int],
-    spacing_a: float,
-    correlation_length_a: float,
-    octaves: int,
-    seed: int | None,
-    device: str | torch.device,
-    dtype: torch.dtype = torch.float32,
-) -> torch.Tensor:
-    generator = torch.Generator(device="cpu")
-    if seed is not None:
-        generator.manual_seed(seed)
-    noise = torch.zeros(shape_zyx, device=device, dtype=dtype)
-    amplitude = 1.0
-    total_amplitude = 0.0
-    length = correlation_length_a
-    for _ in range(octaves):
-        lattice_shape = tuple(
-            max(2, int(math.ceil(s * spacing_a / length)) + 1) for s in shape_zyx
-        )
-        lattice = (torch.rand(lattice_shape, generator=generator) * 2.0 - 1.0).to(
-            device=device, dtype=dtype
-        )
-        upsampled = F.interpolate(
-            lattice[None, None], size=shape_zyx, mode="trilinear", align_corners=True
-        )[0, 0]
-        # F.interpolate's trilinear mode is *linear* interpolation between
-        # lattice points -- only C0 continuous, so wherever the lattice is
-        # sparse relative to the domain it leaves visible piecewise-flat
-        # creases (confirmed: disabling this blur reproduces a visibly
-        # faceted/polygonal membrane boundary). A half-lattice-cell Gaussian
-        # blur rounds off those creases without touching the octave's
-        # actual large-scale undulation, which lives at the full
-        # lattice-cell scale.
-        cell_size_vox = length / spacing_a
-        upsampled = _gaussian_blur3d(upsampled, sigma_vox=0.5 * cell_size_vox)
-        noise = noise + amplitude * upsampled
-        total_amplitude += amplitude
-        amplitude *= 0.5
-        length *= 0.5
-    return noise / total_amplitude
-
-
-def _gaussian_blur3d(volume: torch.Tensor, sigma_vox: float) -> torch.Tensor:
-    if sigma_vox <= 0:
-        return volume
-    radius = max(1, int(3 * sigma_vox))
-    x = torch.arange(-radius, radius + 1, dtype=volume.dtype, device=volume.device)
-    kernel1d = torch.exp(-(x**2) / (2 * sigma_vox**2))
-    kernel1d = kernel1d / kernel1d.sum()
-    out = volume[None, None]
-    for shape in ((-1, 1, 1), (1, -1, 1), (1, 1, -1)):
-        kernel = kernel1d.reshape(1, 1, *shape)
-        pad = tuple(radius if s == -1 else 0 for s in shape)
-        out = F.conv3d(out, kernel, padding=pad)
-    return out[0, 0]
 
 
 def _laplacian3d(volume: torch.Tensor) -> torch.Tensor:
@@ -360,102 +270,6 @@ def cap_curvature(
     return out
 
 
-def generate_membrane_field(
-    shape_zyx: tuple[int, int, int],
-    spacing_a: float,
-    n_sources: int = 6,
-    radius_range_a: tuple[float, float] = (150.0, 400.0),
-    spread_a: float | None = None,
-    blend_sharpness_a: float | None = None,
-    noise_amplitude_a: float = 15.0,
-    correlation_length_a: float = 40.0,
-    noise_octaves: int = 3,
-    curvature_iterations: int = 30,
-    curvature_step_fraction: float = 0.15,
-    device: str | torch.device = "cpu",
-    seed: int | None = None,
-) -> MembraneField:
-    """
-    Generate an organic membrane mid-surface field.
-
-    Combines a smooth-min blend of randomly placed spheres (arbitrary,
-    non-primitive topology), multi-octave value noise (undulation), and
-    diffusion-based curvature capping (guarantees a safe later bilayer
-    offset) into a single dense :class:`MembraneField`.
-
-    Parameters
-    ----------
-    shape_zyx : tuple of int
-        Working grid shape, ``(Z, Y, X)``. Should cover the intended membrane
-        instance's bounding box, not necessarily a full tomogram -- callers
-        generating within a larger volume should crop to a local region
-        first to keep memory bounded.
-    spacing_a : float
-        Working grid voxel spacing, Angstrom. Independent of any downstream
-        output voxel size; choose e.g. ``min(v_size, thickness_a / 8)`` so
-        curvature capping stays well-resolved regardless of the final raster
-        resolution.
-    n_sources : int, optional
-        Number of blended spherical sources. Default 6.
-    radius_range_a : tuple of float, optional
-        Source radius range, Angstrom. Default ``(150.0, 400.0)``.
-    spread_a : float, optional
-        Source center spread, Angstrom (see :func:`sample_metaball_sources`).
-        Default ``0.25`` of the smallest grid physical extent.
-    blend_sharpness_a : float, optional
-        Smooth-min blend radius, Angstrom. Default ``0.3`` of the mean
-        source radius.
-    noise_amplitude_a : float, optional
-        Undulation noise amplitude, Angstrom. Default 15.0.
-    correlation_length_a : float, optional
-        Coarsest noise octave's correlation length, Angstrom. Default 40.0.
-    noise_octaves : int, optional
-        Number of noise octaves. Default 3.
-    curvature_iterations : int, optional
-        Curvature-capping relaxation steps. Default 30.
-    curvature_step_fraction : float, optional
-        See :func:`cap_curvature`. Default 0.15.
-    device : str or torch.device, optional
-        Device for the returned field. Default ``"cpu"``.
-    seed : int, optional
-        Random seed. Default ``None``.
-
-    Returns
-    -------
-    MembraneField
-    """
-    extent_a = (
-        torch.tensor([shape_zyx[2], shape_zyx[1], shape_zyx[0]], dtype=torch.float32)
-        * spacing_a
-    )
-    origin_xyz = -0.5 * extent_a
-
-    if spread_a is None:
-        spread_a = 0.25 * float(extent_a.min())
-    if blend_sharpness_a is None:
-        blend_sharpness_a = 0.3 * sum(radius_range_a) / 2.0
-
-    points_xyz = _grid_points_xyz(shape_zyx, spacing_a, origin_xyz, device)
-    sources = sample_metaball_sources(
-        n_sources, radius_range_a, spread_a, device=device, seed=seed
-    )
-    phi = blend_field(sources, points_xyz, blend_sharpness_a)
-
-    if noise_amplitude_a > 0:
-        noise = _value_noise_grid(
-            shape_zyx, spacing_a, correlation_length_a, noise_octaves, seed, device
-        )
-        phi = phi + noise_amplitude_a * noise
-
-    phi = cap_curvature(phi, spacing_a, curvature_iterations, curvature_step_fraction)
-
-    clipped = _warn_if_clipped_at_boundary(phi)
-
-    return MembraneField(
-        phi=phi, spacing_a=spacing_a, origin_xyz=origin_xyz, clipped_at_boundary=clipped
-    )
-
-
 def _warn_if_clipped_at_boundary(phi: torch.Tensor) -> bool:
     """Warn (as before) and return whether the solid interior touches
     phi's own boundary, so callers can act on it programmatically instead
@@ -473,14 +287,13 @@ def _warn_if_clipped_at_boundary(phi: torch.Tensor) -> bool:
     clipped = bool((boundary < 0).any())
     if clipped:
         warnings.warn(
-            "generate_membrane_field: the membrane's solid interior "
-            "(phi < 0) touches shape_zyx's boundary -- the organic shape "
-            "is being clipped by the working grid rather than tapering to "
-            "zero inside it (a real, previously observed failure mode: it "
-            "produces an unphysical flat cut where the box face truncates "
-            "the shape). Increase shape_zyx, or reduce spread_a / "
-            "radius_range_a / noise_amplitude_a, so the shape's full "
-            "extent -- including noise excursions -- fits within the grid.",
+            "the membrane's solid interior (phi < 0) touches shape_zyx's "
+            "boundary -- the organic shape is being clipped by the working "
+            "grid rather than tapering to zero inside it (a real, "
+            "previously observed failure mode: it produces an unphysical "
+            "flat cut where the box face truncates the shape). Increase "
+            "shape_zyx, or reduce the shape's own size parameters, so its "
+            "full extent fits within the grid.",
             stacklevel=2,
         )
     return clipped
@@ -495,10 +308,9 @@ def _signed_distance_transform(
     inside, positive outside, zero at the surface): ``dist_out - dist_in``
     from two exact Euclidean distance transforms.
 
-    Shared by ``generate_membrane_field_alpha_shape`` and
-    ``generate_membrane_field_spherical_harmonics``, both of which derive
-    their shape from a boolean solid mask on a dense working grid. This is
-    the single dominant cost in both (measured directly: ~60% of wall time
+    Used by ``generate_membrane_field_spherical_harmonics``, which derives
+    its shape from a boolean solid mask on a dense working grid. This is
+    the single dominant cost there (measured directly: ~60% of wall time
     at a realistic 300**3-voxel working grid) -- `scipy.ndimage.
     distance_transform_edt` has no GPU path, so it runs on CPU regardless
     of `device`.
@@ -595,10 +407,8 @@ def _try_gpu_signed_distance_transform(
 
 
 __all__ = [
-    "MetaballSource",
+    "SphereSource",
     "MembraneField",
-    "sample_metaball_sources",
     "blend_field",
     "cap_curvature",
-    "generate_membrane_field",
 ]

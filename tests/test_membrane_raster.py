@@ -1,6 +1,9 @@
 import torch
 
-from specter.specimen.membrane._field import MembraneField, generate_membrane_field
+from specter.specimen.membrane._field import MembraneField
+from specter.specimen.membrane._field_swept_spline import (
+    generate_membrane_field_swept_spline,
+)
 from specter.specimen.membrane._profile import (
     BilayerProfile,
     build_reference_lipid_patch,
@@ -82,13 +85,12 @@ def test_rasterize_output_shape_matches_request():
 
 
 def test_rasterize_end_to_end_with_real_field_and_calibrated_profile():
-    field = generate_membrane_field(
+    field = generate_membrane_field_swept_spline(
         shape_zyx=(40, 40, 40),
         spacing_a=4.0,
-        n_sources=3,
-        radius_range_a=(35.0, 60.0),
-        spread_a=0.0,
-        noise_amplitude_a=5.0,
+        total_length_a=80.0,
+        step_length_a=6.0,
+        tube_radius_a=12.0,
         curvature_iterations=10,
         seed=0,
     )

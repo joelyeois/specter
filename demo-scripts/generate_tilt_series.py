@@ -398,7 +398,7 @@ def main() -> None:
     # TiltSeriesGenerator resolves ice_model/ice_cache_dir/ice_relax_steps into a
     # concrete icemaker itself and blends it into the volume before simulation --
     # no separate ice-generation step needed here, unlike volumes sourced from
-    # outside specter (e.g. raw Polnet/TomogramGenerator MRCs) whose intensity
+    # outside specter (e.g. raw Polnet/MicrographSpecimenGenerator MRCs) whose intensity
     # scale isn't guaranteed to already match specter's own potential units.
     _section("Building TiltSeriesGenerator")
     dx = config.target_v_size

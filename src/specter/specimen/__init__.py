@@ -1,15 +1,13 @@
-from .single_particle import TomogramGenerator
+from .single_particle import MicrographSpecimenGenerator
 from .cryoet import CryoETSpecimenGenerator
-from .cytosolic_filler import PEI2016_CROWDING_TABLE, build_filler_protein_specs
-from .cryoetsim_particles import CRYOETSIM_PARTICLE_TABLE, build_filler_pool_specs
-from .from_volume import load_specimen_volume
-from .cryotomosim import (
-    BeadSpec,
-    CryoTomoSimSpecimenGenerator,
-    GridSpec,
-    MembraneSpec,
-    ProteinSpec,
+from .cytosolic_filler import (
+    CRYOETSIM_PARTICLE_TABLE,
+    PEI2016_CROWDING_TABLE,
+    build_filler_pool_specs,
+    build_filler_protein_specs,
 )
+from .from_volume import load_specimen_volume
+from ._grid import BeadSpec, GridSpec
 from .filament import ACTIN_SPEC, MICROTUBULE_SPEC, FilamentInstance, FilamentSpec
 from .packing import (
     SpherePackingSpecimenGenerator,
@@ -25,23 +23,22 @@ from .membrane import (
     render_transmembrane_template,
 )
 from .tomogram import (
+    BeadPlacement,
     MembraneInstance,
     MembraneTomogramGenerator,
+    TomogramBeadSpec,
     TomogramPlacement,
     TomogramProteinSpec,
 )
 
 __all__ = [
-    "TomogramGenerator",
+    "MicrographSpecimenGenerator",
     "CryoETSpecimenGenerator",
     "PEI2016_CROWDING_TABLE",
     "build_filler_protein_specs",
     "CRYOETSIM_PARTICLE_TABLE",
     "build_filler_pool_specs",
     "load_specimen_volume",
-    "CryoTomoSimSpecimenGenerator",
-    "ProteinSpec",
-    "MembraneSpec",
     "BeadSpec",
     "GridSpec",
     "SpherePackingSpecimenGenerator",
@@ -57,6 +54,8 @@ __all__ = [
     "MembraneTomogramGenerator",
     "TomogramPlacement",
     "TomogramProteinSpec",
+    "BeadPlacement",
+    "TomogramBeadSpec",
     "ACTIN_SPEC",
     "MICROTUBULE_SPEC",
     "FilamentInstance",

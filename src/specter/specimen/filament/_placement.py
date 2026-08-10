@@ -57,10 +57,9 @@ def _rotation_aligning(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
     """Rotation matrix R such that ``R @ a`` (both normalized) equals ``b``.
 
     Same small "align two vectors" construction as
-    ``_cts_placement._random_rotation_aligned_to_normal`` and
     ``membrane._placement._rotation_aligning`` -- kept as a local copy
-    rather than a cross-module import, matching how each of those two
-    already keep their own copy rather than sharing one.
+    rather than a cross-module import, matching this codebase's established
+    per-generator zero-cross-coupling convention.
     """
     a = a / a.norm().clamp_min(1e-8)
     b = b / b.norm().clamp_min(1e-8)

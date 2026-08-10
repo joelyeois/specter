@@ -19,7 +19,7 @@ enclosed, and thus "lumen". This is deliberately membrane-shape-agnostic:
 it works for a single vesicle, several disjoint vesicles, a sheet, or no
 membrane at all (in which case shell/lumen are empty and cytosol is
 everything) without any special-casing, unlike an approach that keyed off
-the membrane generator's own internal metaball source positions.
+the membrane generator's own internal shape-construction state.
 """
 
 from __future__ import annotations

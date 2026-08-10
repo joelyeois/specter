@@ -2,8 +2,9 @@
 
 `specter build tomogram` composites a cryo-ET specimen volume from any
 combination of: one or more organic membranes, filament species (e.g.
-F-actin), and densely packed protein species (region-gated to cytosol/lumen
-when a membrane is present). It writes a `.mrc` density volume plus
+F-actin), gold fiducial beads, a carbon support film, and densely packed
+protein species (region-gated to cytosol/lumen when a membrane is present).
+It writes a `.mrc` density volume plus
 copick-style `.ndjson` ground-truth picks and, by default, segmentation
 label volumes. The `.mrc` is directly usable as `specter simulate
 tiltseries`'s `--volume_path` — this is the specimen-building half of the
@@ -47,14 +48,23 @@ membranes, filaments, exact-count targets, ratio-based filler); run
   of one template.
 - **Filaments** — `actin` (quick built-in F-actin preset) or hand-written
   `[[filaments]]` entries for other species (e.g. microtubules).
+- **Gold fiducial beads** — `[[beads]]` entries (`radius`, `count`), one per
+  bead radius population. Placed avoiding the membrane shell and already-
+  placed filaments; not region-gated to cytosol/lumen.
+- **Carbon support film** — at most one `[[grid]]` table
+  (`hole_radius`/`edge_fraction`/`edge_side`/etc.). Painted into the volume
+  before anything else is placed.
 
 Everything else — picks/segmentation toggles, compute/scaling knobs, output
 naming — lives under its own panel in `specter build tomogram --help`.
 
 ## Placement order & regions
 
-Generation always proceeds membranes → filaments → protein fill; each stage
-avoids the placements of the ones before it. Within the protein-fill stage,
+Generation always proceeds carbon film → membranes → filaments → gold
+fiducial beads → protein fill; each stage avoids the placements of the ones
+before it (the carbon film is the one exception — placement is not carbon-
+aware, matching the CryoTomoSim algorithm this feature was ported from; see
+`MembraneTomogramGenerator`'s own docstring). Within the protein-fill stage,
 species are placed in two priority tiers, independently per region:
 
 1. **`[[targets]]`** — placed first, each at an exact `n_copies` instance

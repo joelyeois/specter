@@ -46,9 +46,7 @@ filler_from_pei2016 = true
 
 # Organic membranes -- optional (omit [[membrane]] entirely for no
 # membranes, e.g. plain crowded-cytosol targets/filler). shape_backend is
-# one of "spherical_harmonics" (default), "swept_spline" -- the two
-# supported backends -- or "metaball"/"alpha_shape", both DEPRECATED (kept
-# for backward compatibility only, emit a DeprecationWarning). See
+# one of "spherical_harmonics" (default) or "swept_spline". See
 # specter.specimen.membrane.MembraneGenerator's own docstring for each
 # backend's full parameter set. Each [[membrane]] entry is a TEMPLATE, not
 # necessarily one instance: size (sh_axes_a/swept_tube_radius_a/etc.),
@@ -140,6 +138,23 @@ flex_deg = 12.0        # max per-step path curvature, degrees
 twist_deg = 166.15    # helical twist per monomer, degrees
 n_filaments = 20
 n_monomers = [20, 60]
+
+# Carbon support film -- optional, at most one [[grid]] table. Painted into
+# the volume before anything else is placed; not carbon-aware for
+# placement (a real FOV this small usually sits entirely inside one real
+# Quantifoil hole anyway, see specter.specimen.GridSpec's own
+# hole_radius docstring). Uncomment to add one:
+# [[grid]]
+# hole_radius = 6000.0          # Å (0.6 micron, real Quantifoil R1.2/1.3 spec)
+# edge_fraction = [0.02, 0.05]  # fraction of the frame that ends up carbon
+# edge_side = "random"          # "left" | "right" | "top" | "bottom" | "random"
+
+# Gold fiducial beads -- optional, one [[beads]] table per radius
+# population. Avoids the membrane shell and already-placed filaments, not
+# region-gated to cytosol/lumen. Uncomment to add some:
+# [[beads]]
+# radius = 100.0
+# count = 20
 
 [specimen]
 target_shape = [500, 3000, 3000]    # (Z, Y, X) voxels

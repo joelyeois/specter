@@ -1338,7 +1338,7 @@ def resolve_icemaker(
 ) -> "IceBank | RandomIcemaker | None":
     """
     Resolve the ``ice_model``/``icemaker``/``ice_cache_dir`` kwargs shared
-    across :class:`~specter.specimen.TomogramGenerator`,
+    across :class:`~specter.specimen.MicrographSpecimenGenerator`,
     :class:`~specter.imagegenerator.MicrographGenerator`, and
     :class:`~specter.imagegenerator.TiltSeriesGenerator` into a concrete
     icemaker instance (or ``None`` if ice is disabled).

@@ -263,204 +263,11 @@ def test_max_field_voxels_default_does_not_warn_at_small_scale():
         gen.generate()  # would raise if the coarsening warning fired
 
 
-_METABALL_KWARGS = dict(
-    target_shape_zyx=(32, 32, 32),
-    v_size=6.0,
-    shape_backend="metaball",
-    n_sources=3,
-    radius_range_a=(20.0, 30.0),
-    spread_a=10.0,
-    noise_amplitude_a=0.0,
-    curvature_iterations=5,
-    n_lipids_per_leaflet=6,
-)
-
-
-def test_metaball_backend_produces_correct_shape_with_membrane_density():
-    """shape_backend="metaball" is deprecated (see
-    test_deprecated_backends_warn_on_construction) but must remain fully
-    functional -- explicit smoke coverage now that it's no longer the
-    implicit default every other test exercised for free."""
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", DeprecationWarning)
-        gen = MembraneGenerator(seed=0, **_METABALL_KWARGS)
-        volume = gen.generate()
-
-    assert volume.shape == _METABALL_KWARGS["target_shape_zyx"]
-    assert torch.isfinite(volume).all()
-    assert volume.max() > 0
-
-
-def test_metaball_backend_is_seed_reproducible():
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", DeprecationWarning)
-        gen_a = MembraneGenerator(seed=3, **_METABALL_KWARGS)
-        gen_b = MembraneGenerator(seed=3, **_METABALL_KWARGS)
-    volume_a = gen_a.generate()
-    volume_b = gen_b.generate()
-    assert torch.equal(volume_a, volume_b)
-
-
-@pytest.mark.parametrize("shape_backend", ["metaball", "alpha_shape"])
-def test_deprecated_backends_warn_on_construction(shape_backend):
-    with pytest.warns(DeprecationWarning, match=shape_backend):
-        if shape_backend == "metaball":
-            MembraneGenerator(seed=0, **_METABALL_KWARGS)
-        else:
-            MembraneGenerator(
-                target_shape_zyx=(80, 80, 80),
-                v_size=4.0,
-                shape_backend="alpha_shape",
-                blob_size_a=40.0,
-                blob_roughness=0.4,
-                n_lipids_per_leaflet=6,
-                seed=0,
-            )
-
-
-def test_spherical_harmonics_and_swept_spline_do_not_warn_on_construction():
-    with warnings.catch_warnings():
-        warnings.simplefilter("error", DeprecationWarning)
-        MembraneGenerator(seed=0, **_SMALL_KWARGS)
-        MembraneGenerator(
-            target_shape_zyx=(32, 32, 32),
-            v_size=6.0,
-            shape_backend="swept_spline",
-            swept_total_length_a=60.0,
-            swept_tube_radius_a=8.0,
-            n_lipids_per_leaflet=6,
-            seed=0,
-        )
-
-
-_ALPHA_SHAPE_KWARGS = dict(
-    target_shape_zyx=(80, 80, 80),
-    v_size=4.0,
-    shape_backend="alpha_shape",
-    blob_size_a=40.0,
-    blob_roughness=0.4,
-    n_lipids_per_leaflet=6,
-)
-
-
-def test_alpha_shape_backend_produces_correct_shape_with_membrane_density():
-    """shape_backend="alpha_shape" (CTS-derived) must be a drop-in for
-    "metaball" through the rest of the pipeline -- same output contract,
-    same calibrated BilayerProfile underneath, only the shape geometry
-    differs."""
-    gen = MembraneGenerator(seed=0, **_ALPHA_SHAPE_KWARGS)
-    volume = gen.generate()
-
-    assert volume.shape == _ALPHA_SHAPE_KWARGS["target_shape_zyx"]
-    assert torch.isfinite(volume).all()
-    assert volume.max() > 0
-    assert gen.field is not None
-    assert gen.profile is not None
-
-
-def test_alpha_shape_backend_is_seed_reproducible():
-    gen_a = MembraneGenerator(seed=3, **_ALPHA_SHAPE_KWARGS)
-    gen_b = MembraneGenerator(seed=3, **_ALPHA_SHAPE_KWARGS)
-    volume_a = gen_a.generate()
-    volume_b = gen_b.generate()
-    assert torch.equal(volume_a, volume_b)
-
-
-def test_alpha_shape_backend_supports_transmembrane_placement():
-    """The whole point of building this backend on top of MembraneGenerator
-    rather than reusing CTS's own MembraneBlobGenerator directly: correct
-    normal-aligned transmembrane placement, which CTS's own "location"
-    mechanism does not provide for arbitrary (non-pre-oriented) PDB
-    structures."""
-    pdb_path = Path(__file__).parent.parent / "pdb-data" / "1mbo.cif"
-    if not pdb_path.exists():
-        pytest.skip("bundled PDB fixture missing")
-    gen = MembraneGenerator(
-        transmembrane_specs=[TransmembraneSpec(pdb_source=str(pdb_path), frequency=3)],
-        seed=0,
-        **_ALPHA_SHAPE_KWARGS,
-    )
-    gen.generate()
-    placements = gen.place_transmembrane(min_spacing_a=15.0)
-    assert len(placements) > 0
-
-
 def test_shape_backend_rejects_unknown_value():
     with pytest.raises(ValueError, match="shape_backend"):
         MembraneGenerator(
             target_shape_zyx=(32, 32, 32), v_size=6.0, shape_backend="not_a_backend"
         )
-
-
-def test_alpha_shape_surface_smoothing_reduces_facet_kinks():
-    """Regression test for a real user-reported issue: the alpha-shape's
-    Delaunay-triangulated boundary is faceted/kinked rather than smooth at
-    any realistic blob_size_a (verified visually, including against CTS's
-    own native generator reusing the same underlying point-cloud/alpha-shape
-    algorithm directly -- the faceting is inherent to it, not something this
-    backend introduced; raising point count alone doesn't fix it either,
-    since surface area grows as blob_size_a**2 while _build_blob's point
-    count grows far more slowly). surface_smoothing_voxels (blur-then-
-    rethreshold the solid mask, default 2.0) fixes this. Verify
-    quantitatively via the isoperimetric ratio (surface area / volume^(2/3),
-    from face-adjacency transitions on the phi<0 mask) -- a faceted/kinked
-    surface has excess area for its enclosed volume relative to a smooth
-    one; smoothing should measurably reduce it."""
-    from specter.specimen.membrane._field_alpha import (
-        generate_membrane_field_alpha_shape,
-    )
-
-    kwargs = dict(
-        shape_zyx=(80, 80, 80),
-        spacing_a=4.0,
-        blob_size_a=60.0,
-        blob_roughness=0.3,
-        seed=0,
-    )
-    field_kinked = generate_membrane_field_alpha_shape(
-        surface_smoothing_voxels=0.0, **kwargs
-    )
-    field_smooth = generate_membrane_field_alpha_shape(
-        surface_smoothing_voxels=2.0, **kwargs
-    )
-
-    def isoperimetric_ratio(phi: torch.Tensor, spacing_a: float) -> float:
-        import numpy as np
-
-        mask = phi.numpy() < 0
-        volume = mask.sum() * spacing_a**3
-        area_voxels = sum(np.sum(mask != np.roll(mask, 1, axis=ax)) for ax in range(3))
-        area = area_voxels * spacing_a**2
-        return float(area / volume ** (2.0 / 3.0))
-
-    ratio_kinked = isoperimetric_ratio(field_kinked.phi, 4.0)
-    ratio_smooth = isoperimetric_ratio(field_smooth.phi, 4.0)
-    assert ratio_smooth < 0.75 * ratio_kinked
-
-
-def test_alpha_shape_backend_warns_when_blob_too_small_for_reliable_resolution():
-    """Regression test for a real finding: a blob_size_a too small relative
-    to the working grid's spacing makes sample_surface_sites' Newton
-    projection unreliable, previously silently finding zero transmembrane
-    sites with no warning at all. Both this proactive check (fires during
-    generate()) and the reactive one in place_transmembrane below must
-    fire, not just one -- verified directly across a v_size sweep that a
-    too-small blob keeps failing regardless of v_size once field spacing
-    saturates at its own resolution floor (driven by the bilayer profile,
-    not v_size), so this is a real, not incidental, gap to guard."""
-    gen = MembraneGenerator(
-        target_shape_zyx=(80, 80, 80),
-        v_size=4.0,
-        shape_backend="alpha_shape",
-        blob_size_a=18.0,  # ~6.4 voxels/radius at this spacing -- below the
-        # verified-reliable floor (see _field_alpha.py's
-        # _MIN_RELIABLE_VOXELS_PER_RADIUS)
-        blob_roughness=0.5,
-        n_lipids_per_leaflet=6,
-        seed=0,
-    )
-    with pytest.warns(UserWarning, match="voxels/radius"):
-        gen.generate()
 
 
 _SH_KWARGS = dict(
@@ -510,9 +317,12 @@ def test_spherical_harmonics_backend_supports_transmembrane_placement():
 
 
 def test_spherical_harmonics_backend_warns_when_axes_too_small_for_reliable_resolution():
-    """Mirrors test_alpha_shape_backend_warns_when_blob_too_small_for_reliable_resolution:
-    the same Eikonal/grid-resolution reasoning applies here since this backend
-    also derives phi from distance_transform_edt on a boolean mask."""
+    """Regression test for a real finding: sh_axes_a too small relative to
+    the working grid's spacing makes sample_surface_sites' Newton
+    projection unreliable, previously silently finding zero transmembrane
+    sites with no warning at all -- this backend derives phi from
+    distance_transform_edt on a boolean mask, so the same Eikonal/grid-
+    resolution reasoning applies."""
     gen = MembraneGenerator(
         target_shape_zyx=(80, 80, 80),
         v_size=4.0,
@@ -577,8 +387,8 @@ def test_spherical_harmonics_zero_amplitude_isotropic_matches_sphere_sdf():
     """sh_amplitude=0.0 with isotropic sh_axes_a collapses to a plain sphere
     -- phi should match the analytic sphere SDF to within the EDT grid's own
     discretization (one voxel), mirroring
-    test_single_source_field_matches_sphere_sdf's tolerance/style for the
-    metaball backend's exact analytic case."""
+    test_single_source_field_matches_sphere_sdf's tolerance/style for
+    blend_field's own exact analytic case."""
     from specter.specimen.membrane._field_spherical_harmonics import (
         generate_membrane_field_spherical_harmonics,
     )
@@ -959,18 +769,16 @@ def test_swept_spline_beading_warning_uses_mean_radius_not_local_minimum():
 
 
 def test_place_transmembrane_warns_on_partial_or_zero_placement():
-    """Pre-existing gap, not specific to the new backend: place_transmembrane
-    silently returned fewer (or zero) placements than requested with no
-    warning at all, for either shape_backend. Fixed for both."""
+    """Pre-existing gap: place_transmembrane silently returned fewer (or
+    zero) placements than requested with no warning at all. Fixed."""
     pdb_path = Path(__file__).parent.parent / "pdb-data" / "1mbo.cif"
     if not pdb_path.exists():
         pytest.skip("bundled PDB fixture missing")
     gen = MembraneGenerator(
         target_shape_zyx=(80, 80, 80),
         v_size=4.0,
-        shape_backend="alpha_shape",
-        blob_size_a=18.0,
-        blob_roughness=0.5,
+        shape_backend="spherical_harmonics",
+        sh_axes_a=(18.0, 18.0, 18.0),
         n_lipids_per_leaflet=6,
         # frequency=8 (not e.g. 3): verified directly this many requested
         # sites reliably falls short at this resolution/spacing (a lower

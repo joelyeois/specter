@@ -183,13 +183,15 @@ src/specter/                  # Main source package
   pipelines/                  # run_particle_stack/run_tilt_series/run_build_tomogram — see "CLI & pipelines" below
   specimen/                   # Volume assembly (package) — under heavy active development, structure below is
                               # partial/illustrative only; read the package directly rather than trusting this list.
-    single_particle.py        # TomogramGenerator — populates a volume with template potentials + crowding + ice
+    single_particle.py        # MicrographSpecimenGenerator — populates a volume with template potentials + crowding + ice
     cryoet.py                 # CryoETSpecimenGenerator — large high-res cryoET specimen: polnet placement (proteins+membranes) at low res, rendered at full res via PotentialBuilder
     polnet_bridge.py          # polnet-facing half of the cryoET pipeline: placement/packing only, never renders density or invokes TEM/IMOD
     cytosolic_filler.py       # PEI2016_CROWDING_TABLE + build_filler_protein_specs() — generic cytosolic background reference (Pei et al. 2016)
     tomogram/, filament/, membrane/, packing/  # newer subpackages (tomogram/specimen assembly, filament placement,
-                              # organic membranes, sphere/tetris packing algorithms); also cryotomosim.py and
-                              # from_volume.py at the top level — still in flux, deliberately not detailed here
+                              # organic membranes, sphere/tetris packing algorithms); also from_volume.py at the
+                              # top level — still in flux, deliberately not detailed here
+    _grid.py                  # CarbonFilmGenerator/BeadGenerator — carbon support film + gold fiducial bead physics
+                              # for specimen.tomogram.MembraneTomogramGenerator (`specter build tomogram`)
   potential.py                # Scattering potential builder
   scattering.py               # Wave propagation (multislice, rytov, firstborn, projection)
   microscope.py               # Aberration and detector models
@@ -231,8 +233,8 @@ demo-notebooks/               # User-facing, always kept working
   create_tilt_series_modular/  # same pattern, modular variant
   simulate_particles_from_csfile/  # same pattern, driven from an existing CryoSPARC .cs file
                                 # (plus standalone notebooks with no paired TOML, e.g. cryoet-specimen-generator.ipynb,
-                                # cryotomosim-specimen-generator.ipynb, generate-and-reconstruct.ipynb,
-                                # coordinates-to-images.ipynb, compare-atomic-potentials-with-kirkland.ipynb)
+                                # generate-and-reconstruct.ipynb, coordinates-to-images.ipynb,
+                                # compare-atomic-potentials-with-kirkland.ipynb)
 demo-scripts/                 # Ready-to-run command-line scripts (generate_micrograph.py, generate_tilt_series.py,
                               # generate_particle_stack_from_csfile.py, generate_particle_stack_from_starfile.py,
                               # ghostbuster_reconstruct.py) — plain particle-stack generation now lives in the

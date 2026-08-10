@@ -4,7 +4,8 @@ optional organic membrane -- transmembrane proteins on the bilayer, plus
 densely packed cytosolic and vesicle-lumen protein populations, region-
 gated against the membrane's own geometry so a "lumen" species can only
 land inside an enclosed compartment and a "cytosol" species can only land
-outside one -- plus optional scattered filament species (e.g. F-actin).
+outside one -- plus optional scattered filament species (e.g. F-actin),
+an optional carbon support film, and optional gold fiducial beads.
 
 This is the ONE specimen generator behind `specter build tomogram`:
 `membrane_instances` may be empty (no membranes at all -- the whole volume
@@ -46,10 +47,45 @@ loop cost to stay practical (verified to run into the hours at that scale)
 -- RSA's own ~28-41% ceiling, reached in seconds, is the actual target
 here, not `pack_hard_spheres_3d_dense`'s higher-but-impractical one.
 
-Independent of, and not integrated with, the older CTS-derived generators
-(``cryotomosim.py``, ``_cts_membrane.py``, ``_cts_placement.py``) -- this is
-a clean-room second approach, meant to be benchmarked against CTS later,
-not merged with it now.
+A clean-room second approach relative to CTS (CryoTomoSim), not a port of
+its placement/membrane algorithms -- those used to live in a separate
+generator (``cryotomosim.py``, ``_cts_membrane.py``, ``_cts_placement.py``),
+deleted once this generator reached feature parity with it (carbon
+film/gold beads were the last two gaps -- see git history for that
+generator if the CTS algorithm itself is ever needed as a reference
+again). This generator DOES still reuse ``.._grid``
+(``CarbonFilmGenerator``/``BeadGenerator``) for the carbon film/gold bead
+physics below -- that module is generic bulk-material potential code with
+no CTS-specific placement logic of its own (see its own module docstring),
+so it outlived the deleted generator rather than going with it.
+``_cts_membrane.py`` did NOT similarly outlive it: its only other consumer
+was ``specimen.membrane``'s own deprecated ``shape_backend="alpha_shape"``,
+removed in the same cleanup -- see git history if either is ever needed as
+a reference again.
+
+Carbon film (``grid_spec``) is painted directly into the shared canvas
+before anything else is placed -- matching the deleted CTS-derived
+generator's own ordering and its same documented limitation: obstacle-
+aware placement (membrane/protein packing, below) has no notion of the
+film, so placed content could in principle land on top of it. Not a
+practical concern at the real Quantifoil hole scale ``GridSpec``'s own
+defaults use (a FOV this generator targets almost always sits entirely
+inside one hole, with at most a thin edge strip of carbon at one border --
+see ``GridSpec.hole_radius``'s own docstring), so this is left unfixed
+here exactly as it was in the CTS port.
+
+Gold fiducial beads (``bead_specs``) are scattered via the same RSA
+backend (``pack_hard_spheres_3d``) used for membrane instances and protein
+packing -- unlike the deleted CTS-derived generator's own bead placement,
+which stayed on a slower sequential particle placer with a standing TODO
+noting beads are "literally already spheres" and a natural RSA candidate.
+Beads are placed right after filaments (see
+``_stamp_beads``), avoiding the membrane shell and any already-placed
+filaments, and are themselves then avoided by the cytosol/lumen protein-
+fill stage that follows (folded into the same ``instance_labels``-derived
+obstacle mask filaments already use) -- a real accuracy improvement over
+the CTS port's fully independent, unaware-of-anything-placed-after-it bead
+placement.
 
 Supports MULTIPLE independently-configured membrane instances
 (:class:`MembraneInstance`, each with its own `MembraneGenerator` --
@@ -132,6 +168,7 @@ from ...crowding import insert_particles_into_micrograph
 from ...pdb import DEFAULT_PDB_SAVEFOLDER, PDB
 from ...potential import PotentialBuilder
 from ...rotations import build_affine_matrix, random_rotation_matrix, rotate_volume
+from .._grid import BeadGenerator, CarbonFilmGenerator, GridSpec, edge_hole_center
 from .._parallel_render import (
     build_pdb_cache_concurrently,
     build_templates_concurrently,
@@ -147,8 +184,9 @@ from ...progress import TqdmProgress, phase_done, phase_start, status
 
 # Same convention as specimen/packing/pdb_packing.py's own
 # _INSTANCE_LABEL_REL_THRESHOLD -- kept as an independent copy rather than
-# imported, matching this codebase's established per-generator
-# zero-cross-coupling convention (see e.g. cryotomosim.py's own docstring).
+# imported, matching this codebase's established per-generator zero-cross-
+# coupling convention (independent generators duplicate small shared
+# helpers rather than importing across each other).
 _INSTANCE_LABEL_REL_THRESHOLD = 0.01
 
 # A region covering at least this fraction of the whole tomogram box (e.g.
@@ -439,14 +477,7 @@ def _instance_bounding_radius(generator: MembraneGenerator) -> float:
     contour length as if straight overestimates, not underestimates."""
     if generator.shape_backend == "spherical_harmonics":
         return max(generator.sh_axes_a)
-    if generator.shape_backend == "swept_spline":
-        return 0.5 * generator.swept_total_length_a + generator.swept_tube_radius_a
-    # metaball/alpha_shape (deprecated): neither has one clean "size"
-    # parameter the way the two supported backends do, and target_shape_zyx
-    # is required (not auto-sized) for them -- fall back to half that box's
-    # own smallest extent as a conservative stand-in.
-    tz, ty, tx = generator.target_shape_zyx
-    return 0.5 * min(tz, ty, tx) * generator.v_size
+    return 0.5 * generator.swept_total_length_a + generator.swept_tube_radius_a
 
 
 def _insert_shell_label(
@@ -546,6 +577,44 @@ class TomogramPlacement:
 
 
 @dataclass
+class TomogramBeadSpec:
+    """
+    One gold fiducial bead population to place -- solid spheres at gold's
+    real mean inner potential (see `.._grid.BeadGenerator`), scattered at
+    an unrestricted ("any") location: fiducials sit in the ice itself, not
+    a specific cytosol/lumen compartment, so there's no `location` field
+    here the way `TomogramProteinSpec` has one. Placement still avoids the
+    membrane shell and any already-placed filaments/other bead populations
+    (see `MembraneTomogramGenerator._stamp_beads`).
+
+    Attributes
+    ----------
+    radius : float
+        Bead radius, Angstrom.
+    count : int, optional
+        Number of instances to place. Default 1.
+    """
+
+    radius: float
+    count: int = 1
+
+    def __post_init__(self) -> None:
+        if self.radius <= 0:
+            raise ValueError(f"TomogramBeadSpec: radius must be > 0, got {self.radius}")
+        if self.count <= 0:
+            raise ValueError(f"TomogramBeadSpec: count must be > 0, got {self.count}")
+
+
+@dataclass
+class BeadPlacement:
+    """One placed gold fiducial bead instance, for ground-truth bookkeeping."""
+
+    radius: float
+    position_xyz: torch.Tensor
+    instance_id: int
+
+
+@dataclass
 class MembraneInstance:
     """
     One membrane, already configured, to composite into a shared tomogram
@@ -583,6 +652,19 @@ class MembraneTomogramGenerator:
     Assemble a tomogram from a pre-configured membrane plus densely packed
     cytosolic and vesicle-lumen protein populations.
 
+    Places any number of distinct species (see `protein_specs` below),
+    purely for DENSITY -- each region (cytosol/lumen) is packed as densely
+    as `occupancy_fraction` allows via RSA hard-sphere placement, uniformly
+    throughout it, with no distributional shaping of any one species' own
+    spatial statistics. Contrast `specter.specimen.single_particle.
+    MicrographSpecimenGenerator` (the single-particle-micrograph backend):
+    single-species only (many duplicate copies of ONE template), but its
+    placement (`~specter.crowding.CrowdWithDuplicates`) supports an
+    optional water-air-interface adsorption bias that this generator has
+    no equivalent of -- crowding realism here instead comes from
+    region-gating against real membrane geometry, not from shaping any
+    species' own Z-distribution.
+
     Parameters
     ----------
     membrane_instances : list of MembraneInstance
@@ -611,6 +693,13 @@ class MembraneTomogramGenerator:
         against the membrane shell or each other, but DOES get avoided by
         the `protein_specs` packing stage that follows it (see module
         docstring). Default None (no filaments).
+    grid_spec : GridSpec, optional
+        Carbon support film to paint into the shared canvas before
+        anything else is placed (see module docstring). Default None (no
+        film -- pure ice, the original behaviour).
+    bead_specs : list of TomogramBeadSpec, optional
+        Gold fiducial bead populations to scatter (see module docstring
+        and `TomogramBeadSpec`). Default None (no beads).
     occupancy_fraction : float, optional
         Target packing density (see `pack_hard_spheres_3d`/
         `draw_species_pool`), applied independently per region -- e.g. 0.2
@@ -724,6 +813,9 @@ class MembraneTomogramGenerator:
         center-relative convention `instance_labels`/`volume` use
         internally, see `_stamp_filaments`). Set after `generate()` runs
         (empty if `filament_specs` was empty/None).
+    bead_instances : list of BeadPlacement
+        Every placed gold fiducial bead, set after `generate()` runs
+        (empty if `bead_specs` was empty/None).
     """
 
     def __init__(
@@ -733,6 +825,8 @@ class MembraneTomogramGenerator:
         v_size: float,
         protein_specs: list[TomogramProteinSpec],
         filament_specs: list[FilamentSpec] | None = None,
+        grid_spec: GridSpec | None = None,
+        bead_specs: list[TomogramBeadSpec] | None = None,
         occupancy_fraction: float = 0.2,
         gap_angstrom: float = 5.0,
         clip_axes: tuple[bool, bool, bool] = (False, False, False),
@@ -749,11 +843,18 @@ class MembraneTomogramGenerator:
         progressbars: bool = True,
         accumulator_device: str | torch.device | Literal["auto"] | None = None,
     ):
-        if not protein_specs and not membrane_instances and not filament_specs:
+        if (
+            not protein_specs
+            and not membrane_instances
+            and not filament_specs
+            and not bead_specs
+            and grid_spec is None
+        ):
             raise ValueError(
                 "MembraneTomogramGenerator: at least one of "
-                "membrane_instances, protein_specs, or filament_specs must "
-                "be non-empty -- an empty tomogram has nothing to generate."
+                "membrane_instances, protein_specs, filament_specs, "
+                "bead_specs, or grid_spec must be non-empty/set -- an empty "
+                "tomogram has nothing to generate."
             )
         for i, mi in enumerate(membrane_instances):
             if mi.generator.v_size != v_size:
@@ -768,6 +869,8 @@ class MembraneTomogramGenerator:
         self.v_size = v_size
         self.protein_specs = protein_specs
         self.filament_specs = filament_specs or []
+        self.grid_spec = grid_spec
+        self.bead_specs = bead_specs or []
         self.occupancy_fraction = occupancy_fraction
         self.gap_angstrom = gap_angstrom
         self.clip_axes = clip_axes
@@ -809,6 +912,7 @@ class MembraneTomogramGenerator:
         self.placements: list[TomogramPlacement] = []
         self.instance_labels: torch.Tensor | None = None
         self.filament_instances: list[FilamentInstance] = []
+        self.bead_instances: list[BeadPlacement] = []
 
     def generate(self) -> torch.Tensor:
         """
@@ -888,6 +992,15 @@ class MembraneTomogramGenerator:
         volume = torch.zeros(
             target_shape, dtype=torch.float32, device=self.accumulator_device
         )
+        if self.grid_spec is not None:
+            _grid_phase_start = phase_start(
+                "Carbon film", disable=not self.progressbars
+            )
+            with status(
+                "Generating carbon support film", disable=not self.progressbars
+            ):
+                volume = self._stamp_carbon_film(volume, target_shape, v_size)
+            phase_done("Carbon film", _grid_phase_start, disable=not self.progressbars)
         self.transmembrane_placements = []
         instance_shell_masks: list[tuple[MembraneInstance, torch.Tensor]] = []
         membrane_progress = TqdmProgress(
@@ -1029,12 +1142,13 @@ class MembraneTomogramGenerator:
         )
         next_instance_id = 1
 
-        # Filaments render right after membranes, BEFORE cytosol/lumen
-        # protein packing (see module docstring) -- filament_mask (voxels
-        # they actually occupy, from instance_labels before any protein
-        # instance touches it) is then folded into the per-region
-        # exclusion field/sampling_mask below, the same mechanism already
-        # used to keep packed spheres clear of the membrane shell.
+        # Filaments (then gold fiducial beads, see below) render right
+        # after membranes, BEFORE cytosol/lumen protein packing (see module
+        # docstring) -- obstacle_mask (voxels they actually occupy, from
+        # instance_labels before any protein instance touches it) is then
+        # folded into the per-region exclusion field/sampling_mask below,
+        # the same mechanism already used to keep packed spheres clear of
+        # the membrane shell.
         if self.filament_specs:
             _filament_phase_start = phase_start(
                 "Filaments", disable=not self.progressbars
@@ -1051,10 +1165,31 @@ class MembraneTomogramGenerator:
                 _filament_phase_start,
                 disable=not self.progressbars,
             )
-            filament_mask = instance_labels > 0
+            obstacle_mask = instance_labels > 0
         else:
             self.filament_instances = []
-            filament_mask = None
+            obstacle_mask = None
+
+        # Gold fiducial beads render right after filaments, still BEFORE
+        # cytosol/lumen protein packing -- avoids the membrane shell and
+        # any already-placed filaments (obstacle_mask), and is itself then
+        # folded into obstacle_mask so the protein-fill stage below avoids
+        # already-placed beads too (see module docstring/_stamp_beads).
+        if self.bead_specs:
+            _bead_phase_start = phase_start(
+                "Gold fiducial beads", disable=not self.progressbars
+            )
+            volume, instance_labels, next_instance_id = self._stamp_beads(
+                volume, instance_labels, next_instance_id, v_size, obstacle_mask
+            )
+            phase_done(
+                f"Gold fiducial beads ({len(self.bead_instances)} placed)",
+                _bead_phase_start,
+                disable=not self.progressbars,
+            )
+            obstacle_mask = instance_labels > 0
+        else:
+            self.bead_instances = []
 
         self.placements = []
         pdb_cache: dict[str, PDB] = {}
@@ -1106,8 +1241,8 @@ class MembraneTomogramGenerator:
             )
 
             region_mask = self.regions[location]
-            if filament_mask is not None:
-                region_mask = region_mask & ~filament_mask
+            if obstacle_mask is not None:
+                region_mask = region_mask & ~obstacle_mask
             region_voxels = int(region_mask.sum())
             if region_voxels == 0:
                 warnings.warn(
@@ -1351,6 +1486,170 @@ class MembraneTomogramGenerator:
         self.instance_labels = instance_labels
         return volume
 
+    def _stamp_carbon_film(
+        self,
+        volume: torch.Tensor,
+        target_shape: tuple[int, int, int],
+        v_size: float,
+    ) -> torch.Tensor:
+        """Paint `self.grid_spec`'s carbon support film directly into
+        `volume` (a plain add -- there's nothing else occupying `volume`
+        yet at this point in `generate()`, so max-merge vs. add makes no
+        difference here). See module docstring for why placement isn't
+        made carbon-aware (a documented, CTS-parity limitation, not new
+        here)."""
+        grid_spec = self.grid_spec
+        assert grid_spec is not None
+        carbon_gen = CarbonFilmGenerator(
+            v_size=v_size, parameterization=self.parameterization, seed=self.seed
+        )
+        grid_rng = np.random.default_rng(self.seed)
+        edge_fraction = grid_spec.edge_fraction
+        if isinstance(edge_fraction, tuple):
+            edge_fraction = grid_rng.uniform(*edge_fraction)
+        hole_center = edge_hole_center(
+            target_shape=target_shape,
+            v_size=v_size,
+            hole_radius=grid_spec.hole_radius,
+            edge_fraction=edge_fraction,
+            side=grid_spec.edge_side,
+            rng=grid_rng,
+        )
+        film = carbon_gen.generate(
+            target_shape=target_shape,
+            thickness=grid_spec.thickness,
+            hole_radius=grid_spec.hole_radius,
+            hole_center=hole_center,
+            edge_roughness=grid_spec.edge_roughness,
+            edge_grain_size=grid_spec.edge_grain_size,
+        )
+        return volume + film.density.to(volume.device)
+
+    def _stamp_beads(
+        self,
+        volume: torch.Tensor,
+        instance_labels: torch.Tensor,
+        next_instance_id: int,
+        v_size: float,
+        obstacle_mask: torch.Tensor | None,
+    ) -> tuple[torch.Tensor, torch.Tensor, int]:
+        """
+        Place and render every `bead_specs` population -- solid gold
+        spheres, no rotation needed (spherically symmetric) -- via the same
+        RSA backend (`pack_hard_spheres_3d`) used for membrane instances and
+        protein packing (see module docstring for why this differs from
+        the deleted CTS-derived generator's own sequential bead placement).
+
+        Sampling is restricted to outside the membrane shell (beads
+        embedded in the bilayer would be a glaring, physically wrong
+        artifact -- gold's mean inner potential dwarfs everything else in
+        the volume) and outside `obstacle_mask` (already-placed filaments,
+        if any). NOT region-gated to cytosol/lumen -- fiducials sit in the
+        ice itself, see `TomogramBeadSpec`'s own docstring.
+        """
+        target_shape = self.target_shape_zyx
+        box = (
+            target_shape[0] * v_size,
+            target_shape[1] * v_size,
+            target_shape[2] * v_size,
+        )
+
+        # self.regions is always set by this point in generate() (region
+        # classification runs unconditionally, right after membrane
+        # compositing -- see that method's own body).
+        assert self.regions is not None
+        forbidden = self.regions["shell"].cpu()
+        if obstacle_mask is not None:
+            forbidden = forbidden | obstacle_mask.cpu()
+        allowed = ~forbidden
+
+        field_v_size, field_shape, field_factor = _resolve_exclusion_field_grid(
+            target_shape, v_size
+        )
+        allowed_field = (
+            _downsample_mask_maxpool(allowed, field_factor, field_shape)
+            if field_factor > 1
+            else allowed
+        )
+        exclusion_field = (
+            torch.from_numpy(
+                ndimage.distance_transform_edt(allowed_field.numpy())
+            ).float()
+            * field_v_size
+        )
+
+        radii = torch.cat(
+            [torch.full((spec.count,), spec.radius) for spec in self.bead_specs]
+        )
+        with status(
+            f"Packing {int(radii.numel())} gold fiducial bead(s)",
+            disable=not self.progressbars,
+        ):
+            coords, accepted_idx = pack_hard_spheres_3d(
+                radii,
+                box,
+                gap=self.gap_angstrom,
+                seed=self.seed,
+                device="cpu",  # see self.device's own docstring
+                exclusion_distance_field=exclusion_field,
+                field_v_size=field_v_size,
+                sampling_mask=allowed_field,
+                max_passes=self.region_max_passes,
+                clip_axes=self.clip_axes,
+            )
+        n_requested = int(radii.numel())
+        n_placed = int(accepted_idx.numel())
+        if n_placed < n_requested:
+            warnings.warn(
+                f"MembraneTomogramGenerator: only {n_placed}/{n_requested} "
+                "gold fiducial beads fit without colliding with the "
+                "membrane shell/already-placed filaments.",
+                stacklevel=2,
+            )
+        if n_placed == 0:
+            return volume, instance_labels, next_instance_id
+
+        accepted_radii = radii[accepted_idx]
+
+        bead_gen = BeadGenerator(v_size=v_size)
+        instance_ids = torch.arange(
+            next_instance_id, next_instance_id + n_placed, dtype=torch.int32
+        )
+        next_instance_id += n_placed
+
+        for unique_radius in sorted(set(accepted_radii.tolist())):
+            mask = accepted_radii == unique_radius
+            bead = bead_gen.generate(radius=unique_radius)
+            density = bead.density.to(volume.device)
+            bead_coords = coords[mask]
+            bead_instance_ids = instance_ids[mask]
+
+            n = int(mask.sum())
+            template = density.unsqueeze(0).expand(n, *density.shape)
+            volume = insert_particles_into_micrograph(
+                template,
+                bead_coords,
+                pixel_size=v_size,
+                micrograph=volume,
+            )
+            binarized = (template > 0).to(torch.int32) * bead_instance_ids.to(
+                volume.device
+            ).view(-1, 1, 1, 1)
+            instance_labels = _insert_instance_labels(
+                binarized, bead_coords, pixel_size=v_size, labels=instance_labels
+            )
+
+        for i in range(n_placed):
+            self.bead_instances.append(
+                BeadPlacement(
+                    radius=float(accepted_radii[i]),
+                    position_xyz=coords[i].detach().cpu(),
+                    instance_id=int(instance_ids[i]),
+                )
+            )
+
+        return volume, instance_labels, next_instance_id
+
     def _stamp_filaments(
         self,
         volume: torch.Tensor,
@@ -1467,6 +1766,7 @@ class MembraneTomogramGenerator:
         include_transmembrane: bool = True,
         include_filaments: bool = True,
         include_filler: bool = True,
+        include_beads: bool = True,
     ) -> dict[str, Path]:
         """
         Write one copick/CryoET-Data-Portal-style .ndjson pick file per
@@ -1533,6 +1833,12 @@ class MembraneTomogramGenerator:
             cytosol/lumen placements (suffixed ``-filler`` on a
             target/filler `(species_id, location)` collision, to avoid
             overwriting the target's own file). Default False.
+        include_beads : bool, optional
+            If True (default), also write one pick file per gold fiducial
+            bead radius, suffixed ``-bead`` (species name
+            ``f"bead_{radius:g}"``). Always written as plain ``"point"``
+            regardless of `oriented` -- a solid sphere has no meaningful
+            per-instance orientation.
 
         Returns
         -------
@@ -1637,6 +1943,25 @@ class MembraneTomogramGenerator:
                                 inst.rotation_matrix.numpy().tolist()
                             )
                         f.write(json.dumps(row) + "\n")
+                written[key] = path
+
+        if include_beads and self.bead_instances:
+            by_radius: dict[float, list[BeadPlacement]] = {}
+            for bead in self.bead_instances:
+                by_radius.setdefault(bead.radius, []).append(bead)
+            for radius, beads in by_radius.items():
+                key = f"bead_{radius:g}-bead"
+                path = output_dir / f"{key}-{annotation_version}_point.ndjson"
+                with open(path, "w") as f:
+                    for bead in beads:
+                        corner_xyz = bead.position_xyz + extent_xyz / 2
+                        x, y, z = (float(v) for v in corner_xyz)
+                        f.write(
+                            json.dumps(
+                                {"type": "point", "location": {"x": x, "y": y, "z": z}}
+                            )
+                            + "\n"
+                        )
                 written[key] = path
 
         return written

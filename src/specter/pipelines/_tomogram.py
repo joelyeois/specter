@@ -5,16 +5,18 @@ Drives `specter.specimen.tomogram.MembraneTomogramGenerator` -- the ONE
 generator behind `specter build tomogram`. An optional composited organic
 membrane (`config.membrane`, `specter.specimen.MembraneGenerator` per
 instance), optional scattered filament species (`config.filaments`/
-`config.actin`, `specter.specimen.filament.place_filaments`), and densely
-packed protein species (`config.targets`/`config.filler`, region-gated to
-`location: "cytosol"|"lumen"` when a membrane is present -- otherwise the
-whole volume is one cytosol region). Generation order is membranes, then
-filaments, then protein fill; each stage avoids the previous ones'
-placements (see `MembraneTomogramGenerator`'s own module docstring).
+`config.actin`, `specter.specimen.filament.place_filaments`), optional gold
+fiducial beads (`config.beads`) and an optional carbon support film
+(`config.grid`), and densely packed protein species (`config.targets`/
+`config.filler`, region-gated to `location: "cytosol"|"lumen"` when a
+membrane is present -- otherwise the whole volume is one cytosol region).
+Generation order is carbon film, then membranes, then filaments, then
+beads, then protein fill; each stage avoids the previous ones' placements
+(see `MembraneTomogramGenerator`'s own module docstring).
 
-Any combination of membrane/filaments/targets/filler is valid as long as
-at least one is non-empty -- there's no separate non-membrane "sphere-
-packing" mode/generator to choose between anymore.
+Any combination of membrane/filaments/beads/grid/targets/filler is valid
+as long as at least one is non-empty -- there's no separate non-membrane
+"sphere-packing" mode/generator to choose between anymore.
 
 Saves the assembled volume as .mrc -- directly usable as `specter simulate
 tiltseries`'s `--volume_path` -- plus one copick-style .ndjson pick file
@@ -35,9 +37,11 @@ from specter.specimen import (
     CRYOETSIM_PARTICLE_TABLE,
     PEI2016_CROWDING_TABLE,
     FilamentSpec,
+    GridSpec,
     MembraneGenerator,
     MembraneInstance,
     MembraneTomogramGenerator,
+    TomogramBeadSpec,
     TomogramProteinSpec,
     TransmembraneSpec,
     build_filler_pool_specs,
@@ -64,9 +68,9 @@ def run_build_tomogram(config: TomogramConfig, n_tomograms: int = 1) -> None:
         :func:`specter.config.load_config`, or constructed directly in
         Python. ``config.targets``, ``config.filler``,
         ``config.filler_from_pei2016``, ``config.filler_from_cryoetsim``,
-        ``config.membrane``, ``config.filaments``, and ``config.actin``
-        can't all be empty/False -- at least one species source is
-        required.
+        ``config.membrane``, ``config.filaments``, ``config.actin``,
+        ``config.grid``, and ``config.beads`` can't all be empty/False --
+        at least one species source is required.
     n_tomograms : int, optional
         Number of independent tomograms to generate, default 1. Each one
         beyond the first is written into its own numbered subdirectory of
@@ -88,13 +92,22 @@ def run_build_tomogram(config: TomogramConfig, n_tomograms: int = 1) -> None:
         or config.membrane
         or config.filaments
         or config.actin
+        or config.grid
+        or config.beads
     )
     if not has_species_source:
         raise ValueError(
             "run_build_tomogram: config.targets, config.filler, "
             "config.filler_from_pei2016, config.filler_from_cryoetsim, "
-            "config.membrane, config.filaments, and config.actin can't all "
-            "be empty/False -- at least one species source is required."
+            "config.membrane, config.filaments, config.actin, config.grid, "
+            "and config.beads can't all be empty/False -- at least one "
+            "species source is required."
+        )
+    if len(config.grid) > 1:
+        raise ValueError(
+            f"run_build_tomogram: config.grid has {len(config.grid)} entries "
+            "-- there is only one carbon film per tomogram, at most one "
+            "[[grid]] table is allowed."
         )
     for i in range(n_tomograms):
         run_config = config
@@ -132,9 +145,8 @@ def _protein_specs_from_dicts(
 # MembraneGenerator's own default size-draw ranges (sh_axes_range_a,
 # swept_total_length_range_a, swept_tube_radius_range_a) -- duplicated
 # here rather than imported, matching this codebase's established
-# zero-cross-generator-coupling convention (see e.g. cryotomosim.py's own
-# docstring). Used only as the UPPER bound to cap against below; the
-# biology-motivated LOWER bounds are never shrunk.
+# zero-cross-generator-coupling convention. Used only as the UPPER bound to
+# cap against below; the biology-motivated LOWER bounds are never shrunk.
 _SH_AXES_RANGE_A = (150.0, 450.0)
 _SWEPT_TOTAL_LENGTH_RANGE_A = (1500.0, 2500.0)
 _SWEPT_TUBE_RADIUS_RANGE_A = (150.0, 400.0)
@@ -190,8 +202,7 @@ def _cap_membrane_auto_size_ranges(
     `_MEMBRANE_AUTO_SIZE_BOX_FRACTION` of the tomogram box's own LIMITING
     axis extent (see that constant's own comment for exactly what that
     means and why), computed from `config.target_shape`/`config.v_size`/
-    `config.clip_axes`. metaball/alpha_shape (deprecated backends, which
-    already require an explicit target_shape_zyx) are left untouched.
+    `config.clip_axes`.
     """
     if target_shape_zyx is not None:
         return instance_kwargs
@@ -374,12 +385,21 @@ def _build_tomogram_generator(config: TomogramConfig) -> MembraneTomogramGenerat
                 MembraneInstance(generator=mgen, position_xyz=position_xyz)  # type: ignore[arg-type]
             )
 
+    # len(config.grid) > 1 is already rejected in run_build_tomogram.
+    grid_spec = GridSpec(**config.grid[0]) if config.grid else None
+    bead_specs = [
+        TomogramBeadSpec(radius=float(d["radius"]), count=int(d.get("count", 1)))
+        for d in config.beads
+    ]
+
     return MembraneTomogramGenerator(
         membrane_instances=membrane_instances,
         target_shape_zyx=tuple(config.target_shape),  # type: ignore[arg-type]
         v_size=config.v_size,
         protein_specs=protein_specs,
         filament_specs=filament_specs,
+        grid_spec=grid_spec,
+        bead_specs=bead_specs,
         occupancy_fraction=config.filler_occupancy_fraction,
         gap_angstrom=config.gap_angstrom,
         clip_axes=tuple(config.clip_axes),  # type: ignore[arg-type]
@@ -425,6 +445,13 @@ def _run_single_tomogram(config: TomogramConfig) -> None:
         _console.print(
             f"  Filaments: {len(gen.filament_instances)} "
             f"monomer instance(s) placed ({len(gen.filament_specs)} species)"
+        )
+    if gen.grid_spec is not None:
+        _console.print("  Carbon film: generated")
+    if gen.bead_specs:
+        n_requested = sum(spec.count for spec in gen.bead_specs)
+        _console.print(
+            f"  Gold fiducial beads: {len(gen.bead_instances)}/{n_requested} placed"
         )
     for location in ("cytosol", "lumen"):
         placed_here = [p for p in gen.placements if p.location == location]

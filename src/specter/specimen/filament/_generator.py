@@ -6,10 +6,9 @@ Pure geometry only -- no PDB fetching, no potential rendering. A caller
 (``CryoETSpecimenGenerator._run_filament_placement``/``_stamp_filaments``)
 fetches each spec's monomer structure, builds one potential template per
 species, then rotates/inserts a copy at every ``FilamentInstance`` this
-module returns -- the same division of labor ``_cts_placement.py`` and
-``cryoet.py``'s protein stamping already use (geometry decided here,
-rendering done by the caller, which alone knows about voxel sizes/atomic
-potentials).
+module returns -- the same division of labor ``cryoet.py``'s protein
+stamping already uses (geometry decided here, rendering done by the
+caller, which alone knows about voxel sizes/atomic potentials).
 """
 
 from __future__ import annotations

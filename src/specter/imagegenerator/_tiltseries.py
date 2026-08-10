@@ -112,7 +112,7 @@ class TiltSeriesGenerator(MicrographGenerator):
         Validated at 16-32px -- identical result across that whole range (already
         converged), independent of volume size or multislice step count. Default 16.
     chunk_size : int, optional
-        Chunk size for ``TomogramGenerator`` (unused here but passed to parent).
+        Chunk size for ``MicrographSpecimenGenerator`` (unused here but passed to parent).
     move_to_cpu : bool, optional
         Move volume to CPU after setup. Default False (tries GPU first).
     detector_model : str, optional

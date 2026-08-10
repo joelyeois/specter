@@ -50,7 +50,7 @@ def small_volume():
 
 @pytest.fixture
 def small_volume_4d():
-    """4D cubic volume (1, 32, 32, 32) as returned by TomogramGenerator."""
+    """4D cubic volume (1, 32, 32, 32) as returned by MicrographSpecimenGenerator."""
     vol = torch.zeros(1, 32, 32, 32)
     vol[0, 12:20, 12:20, 12:20] = 50.0
     return vol

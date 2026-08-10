@@ -1,7 +1,7 @@
 """Load a pre-built specimen volume from disk, for `TiltSeriesConfig`'s
 ``volume_path`` -- the "user already has a specimen volume" path, as opposed
 to building one in-process via `CryoETSpecimenGenerator` (polnet placement)
-or `TomogramGenerator`.
+or `MicrographSpecimenGenerator`.
 """
 
 from __future__ import annotations

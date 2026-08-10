@@ -10,7 +10,7 @@ from ._base import BaseImager, compute_nz, pad_volume
 from ..ice import IceBank, RandomIcemaker, blend_ice_into_volume, resolve_icemaker
 from ..progress import status
 from ..scattering import IterativeScattering
-from ..specimen import TomogramGenerator
+from ..specimen import MicrographSpecimenGenerator
 
 
 class MicrographGenerator(BaseImager):
@@ -18,14 +18,14 @@ class MicrographGenerator(BaseImager):
     Generates large micrographs by processing a full specimen volume.
 
     The volume is either supplied directly (``vol``) or assembled internally
-    via ``TomogramGenerator`` from a ``scattering_potential`` template with
+    via ``MicrographSpecimenGenerator`` from a ``scattering_potential`` template with
     optional crowding and ice.  Scattering is performed slice-by-slice using
     ``IterativeScattering``.
 
     Parameters
     ----------
     scattering_potential : torch.Tensor or None
-        Template potential (Z, Y, X) used by ``TomogramGenerator`` to build
+        Template potential (Z, Y, X) used by ``MicrographSpecimenGenerator`` to build
         the specimen volume.  Must be ``None`` when ``vol`` is provided.
     micrograph_size : int or tuple[int, int]
         Output image size in pixels (must be square).
@@ -54,11 +54,11 @@ class MicrographGenerator(BaseImager):
         Ice generation algorithm: ``'gd'`` (samples from the pre-generated
         :class:`~specter.ice.IceBank` cache) or ``'random'`` (instant, cheap
         :class:`~specter.ice.RandomIcemaker` placement). Used by
-        ``TomogramGenerator`` when ``scattering_potential`` is given, or
+        ``MicrographSpecimenGenerator`` when ``scattering_potential`` is given, or
         blended directly into ``vol`` when ``vol`` is given (see above).
         Ignored when ``icemaker`` is provided.
     ice_thickness : float, optional
-        Ice thickness in Å passed to ``TomogramGenerator``. Ignored when
+        Ice thickness in Å passed to ``MicrographSpecimenGenerator``. Ignored when
         ``vol`` is given.
     ice_cache_dir : str, optional
         Directory of cached ice configs for ``ice_model='gd'`` (see
@@ -69,7 +69,7 @@ class MicrographGenerator(BaseImager):
         A pre-built icemaker instance to reuse across multiple generator
         instances. When supplied, ``ice_model`` and ``ice_cache_dir`` are
         both ignored. Honored both when ``scattering_potential`` is given
-        (forwarded to ``TomogramGenerator``) and when ``vol`` is given
+        (forwarded to ``MicrographSpecimenGenerator``) and when ``vol`` is given
         (blended directly into ``vol``, see above).
     ice_relax_steps : int, optional
         Forwarded to :meth:`~specter.ice.IceBank.generate_big_ice` when
@@ -95,7 +95,7 @@ class MicrographGenerator(BaseImager):
     pad_fft : bool, optional
         Whether to XY-pad the volume for FFT antialiasing. Default False.
     chunk_size : int, optional
-        Chunk size for ``TomogramGenerator`` parallel processing.
+        Chunk size for ``MicrographSpecimenGenerator`` parallel processing.
     move_to_cpu : bool, optional
         Move the assembled volume to CPU after generation to save GPU memory.
         Default True.
@@ -287,7 +287,7 @@ class MicrographGenerator(BaseImager):
                     )
             self.register_buffer("vol", vol)
         else:
-            self.specimen_gen = TomogramGenerator(
+            self.specimen_gen = MicrographSpecimenGenerator(
                 pixel_size=pixel_size,
                 nz=self.nz,
                 nxy=self.nxy,

@@ -17,11 +17,13 @@ from pathlib import Path
 import pytest
 import torch
 
+from specter.specimen._grid import GridSpec
 from specter.specimen.filament import FilamentSpec
 from specter.specimen.membrane import MembraneGenerator, TransmembraneSpec
 from specter.specimen.tomogram import (
     MembraneInstance,
     MembraneTomogramGenerator,
+    TomogramBeadSpec,
     TomogramProteinSpec,
 )
 
@@ -122,34 +124,25 @@ def test_membrane_tomogram_generator_instance_labels_match_placements():
 
 @pytest.mark.skipif(not _SMALL_FIXTURE.exists(), reason="bundled PDB fixture missing")
 def test_membrane_tomogram_generator_warns_when_lumen_species_has_no_region():
-    # tiny/flat membrane config unlikely to enclose any lumen at all --
-    # deliberately uses the deprecated "metaball" backend for its
-    # oversized-radius-clips-the-grid trick (a single sphere source larger
-    # than the grid never closes into a shell); the point of this test is
-    # the degenerate-geometry warning path, not backend choice.
+    # Degenerate membrane config unlikely to enclose any lumen at all --
+    # bilayer_thickness_a far exceeds the vesicle's own radius, so the two
+    # leaflet offset surfaces invert/overlap through the whole interior
+    # instead of leaving a hollow enclosed cavity; the point of this test
+    # is the degenerate-geometry warning path, not backend choice.
     with warnings.catch_warnings():
-        warnings.simplefilter("ignore", DeprecationWarning)
+        warnings.simplefilter("ignore", UserWarning)
         mgen = MembraneGenerator(
             target_shape_zyx=(24, 24, 24),
             v_size=8.0,
-            shape_backend="metaball",
-            n_sources=1,
-            radius_range_a=(
-                200.0,
-                200.0,
-            ),  # much larger than the grid -> no closed shell
-            spread_a=0.0,
-            noise_amplitude_a=0.0,
-            curvature_iterations=2,
+            shape_backend="spherical_harmonics",
+            sh_axes_a=(20.0, 20.0, 20.0),
+            bilayer_thickness_a=150.0,  # >> sh_axes_a -> no hollow lumen
             n_lipids_per_leaflet=6,
             seed=0,
         )
     gen = MembraneTomogramGenerator(
-        # Explicit position_xyz -- this test's own oversized-radius trick
-        # (deliberately bigger than the box) would otherwise also get
-        # rejected by auto-placement's collision/fit check, dropping the
-        # instance and short-circuiting the actual thing under test (the
-        # "no lumen region" warning path, not placement itself).
+        # Explicit position_xyz for determinism -- the actual thing under
+        # test is the "no lumen region" warning path, not placement itself.
         membrane_instances=[
             MembraneInstance(generator=mgen, position_xyz=(0.0, 0.0, 0.0))
         ],
@@ -577,3 +570,134 @@ def test_membrane_tomogram_generator_export_picks_includes_filaments(tmp_path):
     for row in rows:
         for axis, extent in zip("xyz", extent_xyz.tolist()):
             assert 0.0 <= row["location"][axis] <= extent
+
+
+# ---------------------------------------------------------------------
+# Carbon support film (grid_spec) / gold fiducial beads (bead_specs)
+# ---------------------------------------------------------------------
+
+
+def test_membrane_tomogram_generator_grid_spec_paints_carbon_film():
+    """A grid_spec-only tomogram (no membrane/protein/filament) is valid --
+    the carbon film should occupy part of the volume (not all of it, since
+    hole_radius/edge_fraction are chosen here to leave a real hole) at
+    carbon's real mean inner potential ballpark (~9-13 V, see
+    specter.specimen._grid's own module docstring), and leave the rest at
+    exactly zero."""
+    gen = MembraneTomogramGenerator(
+        membrane_instances=[],
+        target_shape_zyx=_TARGET_SHAPE_ZYX,
+        v_size=_V_SIZE,
+        protein_specs=[],
+        grid_spec=GridSpec(hole_radius=150.0, edge_fraction=0.5, edge_side="left"),
+        seed=0,
+    )
+    volume = gen.generate()
+
+    assert torch.isfinite(volume).all()
+    occupied = volume > 0
+    assert 0.0 < occupied.float().mean().item() < 1.0
+    assert 5.0 < volume.max().item() < 20.0
+    assert (volume[~occupied] == 0).all()
+
+
+def test_membrane_tomogram_generator_grid_spec_rejects_multiple_entries():
+    """MembraneTomogramGenerator itself takes a single grid_spec (not a
+    list) -- the "at most one [[grid]] table" constraint is enforced one
+    layer up, in run_build_tomogram/config.py, not here."""
+    gen = MembraneTomogramGenerator(
+        membrane_instances=[],
+        target_shape_zyx=_TARGET_SHAPE_ZYX,
+        v_size=_V_SIZE,
+        protein_specs=[],
+        grid_spec=GridSpec(),
+        seed=0,
+    )
+    assert gen.grid_spec is not None
+
+
+@pytest.mark.skipif(not _SMALL_FIXTURE.exists(), reason="bundled PDB fixture missing")
+def test_membrane_tomogram_generator_bead_specs_avoid_membrane_shell():
+    mgen = MembraneGenerator(seed=0, **_MEMBRANE_KWARGS)
+    gen = MembraneTomogramGenerator(
+        membrane_instances=[MembraneInstance(generator=mgen)],
+        target_shape_zyx=_TARGET_SHAPE_ZYX,
+        v_size=_V_SIZE,
+        protein_specs=[],
+        bead_specs=[TomogramBeadSpec(radius=15.0, count=10)],
+        seed=1,
+    )
+    gen.generate()
+
+    assert len(gen.bead_instances) > 0
+    shell = gen.regions["shell"]
+    v_size = _V_SIZE
+    shape_zyx = _TARGET_SHAPE_ZYX
+    center_zyx = torch.tensor([shape_zyx[0] / 2, shape_zyx[1] / 2, shape_zyx[2] / 2])
+    for bead in gen.bead_instances:
+        idx_xyz = (bead.position_xyz / v_size) + center_zyx[[2, 1, 0]]
+        ix, iy, iz = idx_xyz.round().long().tolist()
+        assert not bool(shell[iz, iy, ix])
+
+
+def test_membrane_tomogram_generator_bead_specs_only_is_valid():
+    """A bead_specs-only tomogram (no membrane/protein/filament/grid) is
+    valid -- beads are unrestricted ("any" location) so no membrane is
+    needed to define cytosol/lumen regions."""
+    gen = MembraneTomogramGenerator(
+        membrane_instances=[],
+        target_shape_zyx=_TARGET_SHAPE_ZYX,
+        v_size=_V_SIZE,
+        protein_specs=[],
+        bead_specs=[TomogramBeadSpec(radius=10.0, count=5)],
+        seed=0,
+    )
+    volume = gen.generate()
+    assert volume.shape == _TARGET_SHAPE_ZYX
+    assert len(gen.bead_instances) > 0
+    assert gen.instance_labels is not None
+    assert int(gen.instance_labels.max()) == len(gen.bead_instances)
+
+
+def test_membrane_tomogram_generator_bead_specs_excluded_from_protein_packing():
+    """Beads placed before cytosol/lumen protein packing should be avoided
+    by it -- no placed protein's center should land inside a bead's own
+    radius."""
+    gen = MembraneTomogramGenerator(
+        membrane_instances=[],
+        target_shape_zyx=_TARGET_SHAPE_ZYX,
+        v_size=_V_SIZE,
+        protein_specs=[TomogramProteinSpec(pdb_source=str(_SMALL_FIXTURE))],
+        bead_specs=[TomogramBeadSpec(radius=30.0, count=3)],
+        occupancy_fraction=0.05,
+        pdb_cache_dir="pdb-data/",
+        seed=0,
+    )
+    gen.generate()
+
+    assert len(gen.bead_instances) > 0
+    assert len(gen.placements) > 0
+    for bead in gen.bead_instances:
+        for placed in gen.placements:
+            dist = (placed.position_xyz - bead.position_xyz).norm().item()
+            assert dist > bead.radius
+
+
+def test_membrane_tomogram_generator_export_picks_includes_beads(tmp_path):
+    gen = MembraneTomogramGenerator(
+        membrane_instances=[],
+        target_shape_zyx=_TARGET_SHAPE_ZYX,
+        v_size=_V_SIZE,
+        protein_specs=[],
+        bead_specs=[TomogramBeadSpec(radius=20.0, count=2)],
+        seed=0,
+    )
+    gen.generate()
+
+    written = gen.export_picks(tmp_path)
+    bead_key = next(k for k in written if k.endswith("-bead"))
+    lines = written[bead_key].read_text().strip().splitlines()
+    assert len(lines) == 2
+    rows = [json.loads(line) for line in lines]
+    assert all(row["type"] == "point" for row in rows)
+    assert all("xyz_rotation_matrix" not in row for row in rows)

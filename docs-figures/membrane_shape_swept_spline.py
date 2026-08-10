@@ -26,7 +26,7 @@ from scipy import ndimage
 
 from _render import TEAL, isosurface_axes
 from specter.specimen.membrane._field import (
-    MetaballSource,
+    SphereSource,
     _grid_points_xyz,
     blend_field,
     cap_curvature,
@@ -67,7 +67,7 @@ def _reference_instance() -> dict:
 
     positions_t = torch.as_tensor(smoothed, dtype=torch.float32)
     sources = [
-        MetaballSource(center_xyz=positions_t[i], radius=TUBE_RADIUS_A)
+        SphereSource(center_xyz=positions_t[i], radius=TUBE_RADIUS_A)
         for i in range(n_points)
     ]
 
@@ -135,7 +135,7 @@ def _straight_chain_phi(step_length_a: float, n_points: int = 8) -> np.ndarray:
     centers = torch.zeros((n_points, 3), dtype=torch.float32)
     centers[:, 0] = torch.arange(n_points, dtype=torch.float32) * step_length_a
     sources = [
-        MetaballSource(center_xyz=centers[i], radius=TUBE_RADIUS_A)
+        SphereSource(center_xyz=centers[i], radius=TUBE_RADIUS_A)
         for i in range(n_points)
     ]
     shape_zyx = (40, 60, 220)
@@ -239,7 +239,7 @@ def figure_curvature_capping() -> None:
     )
     positions_t = torch.as_tensor(positions, dtype=torch.float32)
     sources = [
-        MetaballSource(center_xyz=positions_t[i], radius=TUBE_RADIUS_A)
+        SphereSource(center_xyz=positions_t[i], radius=TUBE_RADIUS_A)
         for i in range(n_points)
     ]
 

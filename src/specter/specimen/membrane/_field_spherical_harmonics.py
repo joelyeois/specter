@@ -1,27 +1,28 @@
 """
 Spherical-harmonic membrane shape backend.
 
-``_field.py``'s metaball blend is mathematically capped at "compact blob";
-``_field_alpha.py``'s CTS-derived alpha shape can fold into genuinely
-elongated/tubular topology but pays for that with a noisy-point-cloud/
-Delaunay-alpha-shape construction that needs an explicit blur-and-rethreshold
-pass to remove visible facet kinks (see that module's own docstring). This
-module offers a third option, specifically for CLOSED, STAR-CONVEX organelles
-(vesicles, nuclei, roughly-spherical mitochondria): every ray from the
-organelle's center crosses the surface exactly once, so the surface is fully
-described by a radius function of direction, ``R(theta, phi)``, expanded in
-real spherical harmonics. This is smooth by construction (no faceting to
-clean up) and gives direct, physically-motivated control over the undulation
-spectrum (see ``_sample_sh_coefficients``'s Helfrich-spectrum docstring) --
-at the cost of being unable to represent non-star-convex topology (branching
-tubules, self-occluding folds) at all; use ``"alpha_shape"`` for that.
+``_field_swept_spline.py``'s smooth-min sphere blend produces elongated,
+tube-like topology but cannot represent a closed, roughly-spherical
+organelle without stringing many overlapping sources together. This module
+offers a purpose-built construction for that case instead, specifically for
+CLOSED, STAR-CONVEX organelles (vesicles, nuclei, roughly-spherical
+mitochondria): every ray from the organelle's center crosses the surface
+exactly once, so the surface is fully described by a radius function of
+direction, ``R(theta, phi)``, expanded in real spherical harmonics. This is
+smooth by construction (no faceting to clean up) and gives direct,
+physically-motivated control over the undulation spectrum (see
+``_sample_sh_coefficients``'s Helfrich-spectrum docstring) -- at the cost
+of being unable to represent non-star-convex topology (branching tubules,
+self-occluding folds) at all; ``"swept_spline"`` (``_field_swept_spline.py``)
+covers elongated, tube-like organelles instead, though not full branching
+topology either.
 
-Like ``_field_alpha.py``, only the SHAPE (a solid to compute a signed-distance
-field from) is constructed here; the calibrated bilayer profile
-(``_profile.py``/``_raster.py``) and transmembrane surface-site sampling
-(``_placement.py``) are completely shape-backend-agnostic already, reading the
-result only through :class:`~specter.specimen.membrane._field.MembraneField`'s
-public contract.
+Only the SHAPE (a solid to compute a signed-distance field from) is
+constructed here; the calibrated bilayer profile (``_profile.py``/
+``_raster.py``) and transmembrane surface-site sampling (``_placement.py``)
+are completely shape-backend-agnostic already, reading the result only
+through :class:`~specter.specimen.membrane._field.MembraneField`'s public
+contract.
 
 Algorithm
 ---------
@@ -55,8 +56,8 @@ Algorithm
    is less than the harmonic-perturbed surface radius at the point's own
    direction.
 4. Feed the resulting boolean solid mask through
-   ``scipy.ndimage.distance_transform_edt`` exactly as
-   ``_field_alpha.py`` does, to get a real, physical-Angstrom, Eikonal-
+   ``scipy.ndimage.distance_transform_edt`` (via ``_signed_distance_
+   transform``) to get a real, physical-Angstrom, Eikonal-
    respecting (``|grad(phi)| ~= 1``) signed distance field -- never an
    analytic-but-approximate radial-residual SDF, whose error grows with the
    surface's local slope and would distort the physically-calibrated
@@ -77,13 +78,10 @@ from scipy.special import sph_harm_y, sph_harm_y_all
 
 from ._field import MembraneField, _grid_points_xyz, _signed_distance_transform
 
-# Same underlying cause as _field_alpha.py's own identically-named constant:
 # _placement.py's Newton projection (`x - phi(x) * normal(x)`) only converges
 # reliably if phi closely satisfies the Eikonal property near the surface --
 # true by construction for distance_transform_edt output, but only as
-# well-resolved as the grid. Duplicated here rather than imported/shared to
-# keep this module fully independent, matching how _field_alpha.py itself
-# imports nothing analogous from _field.py either.
+# well-resolved as the grid.
 _MIN_RELIABLE_VOXELS_PER_RADIUS = 8.0
 
 
@@ -350,8 +348,7 @@ def generate_membrane_field_spherical_harmonics(
     """
     Generate an organic membrane mid-surface field from a random spherical-
     harmonic-perturbed ellipsoid, in the same :class:`MembraneField`
-    representation ``generate_membrane_field`` (metaball) and
-    ``generate_membrane_field_alpha_shape`` produce.
+    representation every other shape backend produces.
 
     Parameters
     ----------
@@ -397,10 +394,9 @@ def generate_membrane_field_spherical_harmonics(
 
     Notes
     -----
-    Unlike ``generate_membrane_field_alpha_shape``, there is no
-    blur-then-rethreshold surface-smoothing step here: the harmonic-
-    perturbed surface is smooth by construction (no Delaunay faceting is
-    ever introduced), so there is nothing analogous to clean up.
+    No blur-then-rethreshold surface-smoothing step is needed here: the
+    harmonic-perturbed surface is smooth by construction (no faceting is
+    ever introduced), unlike a point-cloud/mesh-based shape construction.
 
     The harmonic perturbation itself is synthesized once on a small
     ``_angular_grid_resolution(sh_max_degree)`` angular grid and bilinearly
@@ -411,8 +407,7 @@ def generate_membrane_field_spherical_harmonics(
     discretization noise already present, for a measured 30-150x wall-time
     reduction depending on working-grid size.
 
-    Same Eikonal/grid-resolution caveat as
-    ``generate_membrane_field_alpha_shape`` applies to
+    The same Eikonal/grid-resolution caveat applies to
     `_placement.sample_surface_sites`'s Newton-projection surface search --
     see this function's own warning below.
 
@@ -464,9 +459,7 @@ def generate_membrane_field_spherical_harmonics(
             f"({min(sh_axes_a):.1f} A) is only {voxels_per_radius:.1f} "
             f"working-grid voxels at spacing_a={spacing_a:.2f} A -- below the "
             f"{_MIN_RELIABLE_VOXELS_PER_RADIUS:.0f} voxels/radius verified reliable "
-            "(see generate_membrane_field_alpha_shape's own Notes for the same "
-            "underlying Eikonal/grid-resolution reasoning) for "
-            "sample_surface_sites' Newton-projection surface sampling. "
+            "for sample_surface_sites' Newton-projection surface sampling. "
             "Transmembrane placement may silently find zero sites at this "
             "resolution. Increase sh_axes_a, or decrease spacing_a (e.g. a "
             "smaller v_size on the owning MembraneGenerator), to raise this "

@@ -8,14 +8,38 @@ from ..ice import IceBank, RandomIcemaker, blend_ice_into_volume, resolve_icemak
 from ..progress import status
 
 
-class TomogramGenerator(L.LightningModule):
+class MicrographSpecimenGenerator(L.LightningModule):
     """
-    Generates a 3D scattering potential volume (tomogram) by populating it with
-    molecules and ice.
+    Generates a 3D scattering potential volume by populating it with many
+    duplicate copies of ONE particle template plus amorphous ice.
 
     This class modularizes the volume generation process, allowing it to be used
-    independently of the imaging simulators. It combines template potentials
-    (e.g., proteins from coordinates), crowding molecules, and amorphous ice.
+    independently of the imaging simulators. It combines a single template
+    potential (e.g., a protein from coordinates), crowding duplicates of that
+    one template, and amorphous ice.
+
+    Single-species only, unlike `specter.specimen.tomogram.
+    MembraneTomogramGenerator` (the `specter build tomogram` backend), which
+    places any number of distinct species. The two also differ in what their
+    placement step actually optimizes for, matching their different end
+    goals:
+
+    - Here, particle placement (`~specter.crowding.CrowdWithDuplicates`) is
+      built for realistic SINGLE-PARTICLE MICROGRAPH statistics -- besides
+      Poisson-disk minimum-distance packing, it supports an optional
+      `water_air_interface` bias that skews the Z-distribution of placed
+      copies toward the ice's top/bottom surfaces (real particles
+      preferentially adsorb there during vitrification; see
+      `~specter.crowding.filter_by_z_density`), since a plausible
+      through-ice distribution matters for particle-picking-style
+      benchmarking.
+    - `MembraneTomogramGenerator`'s protein placement (RSA hard-sphere
+      packing) instead optimizes purely for DENSITY -- packing each region
+      (cytosol/lumen) as densely as `occupancy_fraction` allows, uniformly
+      throughout it. There is no equivalent distributional shaping there
+      (no water-air-interface bias or similar) -- crowding realism there
+      comes from region-gating against real membrane geometry, not from
+      shaping any one species' own spatial statistics.
 
     Parameters
     ----------
@@ -43,7 +67,7 @@ class TomogramGenerator(L.LightningModule):
         when ``icemaker`` is provided.
     icemaker : IceBank or RandomIcemaker, optional
         A pre-built icemaker instance to reuse across multiple
-        ``TomogramGenerator`` instances. When supplied, ``ice_model`` and
+        ``MicrographSpecimenGenerator`` instances. When supplied, ``ice_model`` and
         ``ice_cache_dir`` are both ignored.
     ice_thickness : float, optional
         Thickness of the ice layer in Å.

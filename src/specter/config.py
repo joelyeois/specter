@@ -570,7 +570,7 @@ class TomogramConfig:
     filler: list[dict[str, Any]] = field(default_factory=list)
     # Additive to filler above: pull extra filler species from the
     # bundled reference tables (specter.specimen.cytosolic_filler.
-    # PEI2016_CROWDING_TABLE and/or specter.specimen.cryoetsim_particles.
+    # PEI2016_CROWDING_TABLE and/or specter.specimen.cytosolic_filler.
     # CRYOETSIM_PARTICLE_TABLE), rather than hand-listing every species.
     # Both can be enabled at once -- their results are concatenated. Always
     # placed at location="cytosol" (these tables have no lumen/cytosol
@@ -640,9 +640,8 @@ class TomogramConfig:
     #     a specific working-grid size.
     # v_size/seed/device/pdb_cache_dir still come from this config's own
     # v_size/seed/device/pdb_savefolder fields for every instance, not from
-    # this dict (shape_backend one of "spherical_harmonics" (default)/
-    # "swept_spline", or "metaball"/"alpha_shape" -- both DEPRECATED, kept
-    # for backward compatibility only).
+    # this dict (shape_backend one of "spherical_harmonics" (default) or
+    # "swept_spline").
     membrane: list[dict[str, Any]] = field(default_factory=list)
     # Each {"pdb_source": <code or path>, "frequency": 1, "parameterization":
     # "shtyrov"}. In TOML, provide as [[membrane_transmembrane_specs]] tables.
@@ -679,6 +678,27 @@ class TomogramConfig:
     # here too -- for more instances or other filament species (e.g.
     # microtubules, MICROTUBULE_SPEC), use [[filaments]] instead.
     actin: bool = False
+
+    # --- Carbon support film (optional, single film) ---
+    # Zero or one [[grid]] table, mapping onto
+    # specter.specimen.GridSpec's own kwargs (thickness, hole_radius,
+    # edge_fraction, edge_side, edge_roughness, edge_grain_size) -- e.g.
+    # {"hole_radius": 6000.0, "edge_fraction": [0.02, 0.05]}. Painted
+    # directly into the volume before anything else is placed; placement
+    # (membranes/targets/filler) is NOT carbon-aware (a documented,
+    # CTS-parity limitation -- see MembraneTomogramGenerator's own
+    # docstring). More than one entry raises. Empty (default): no carbon
+    # film, pure ice.
+    grid: list[dict[str, Any]] = field(default_factory=list)
+
+    # --- Gold fiducial beads (optional) ---
+    # One dict per bead population, {"radius": <Angstrom>, "count": 1}.
+    # "radius" is required. Placed via the same RSA packing used for
+    # membranes/targets/filler, avoiding the membrane shell and any
+    # already-placed filaments -- NOT region-gated to cytosol/lumen (see
+    # specter.specimen.TomogramBeadSpec's own docstring). In TOML, provide
+    # as [[beads]] tables.
+    beads: list[dict[str, Any]] = field(default_factory=list)
 
     # --- Ground-truth picks & segmentation ---
     write_picks: bool = True
@@ -827,6 +847,16 @@ TOMOGRAM_HELP: dict[str, str] = {
     "(real F-actin helical repeat) without writing a [[filaments]] entry. "
     "Additive to filaments above. For more instances or other filament "
     "species (e.g. microtubules), use [[filaments]] instead.",
+    "grid": "Zero or one [[grid]] table (TOML-only) describing a carbon "
+    "support film, mapping onto specter.specimen.GridSpec kwargs "
+    "(thickness, hole_radius, edge_fraction, edge_side, edge_roughness, "
+    "edge_grain_size). Painted into the volume before anything else is "
+    "placed; not carbon-aware for placement (see MembraneTomogramGenerator's "
+    "own docstring). Empty (default): no carbon film.",
+    "beads": "Gold fiducial bead populations to pack (TOML-only, [[beads]] "
+    "tables), each {'radius': <Angstrom>, 'count': 1}. Placed via the same "
+    "RSA packing as membranes/targets/filler, avoiding the membrane shell "
+    "and already-placed filaments -- not region-gated to cytosol/lumen.",
     "write_picks": "Write one copick-style .ndjson pick file per species "
     "alongside the volume. Filler species (declared via 'ratio', not "
     "'n_copies') are included by default -- see TomogramProteinSpec's own "

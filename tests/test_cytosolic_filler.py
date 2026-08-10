@@ -1,19 +1,20 @@
 """
-Smoke tests for specter.specimen.cryoetsim_particles -- table integrity
+Smoke tests for specter.specimen.cytosolic_filler -- table integrity
 (no duplicate/malformed codes) and build_filler_pool_specs's filtering,
-including cross-compatibility with the unrelated PEI2016_CROWDING_TABLE.
-No network access needed (pure dict filtering, no PDB fetch).
+including cross-compatibility between its two bundled tables
+(CRYOETSIM_PARTICLE_TABLE and PEI2016_CROWDING_TABLE). No network access
+needed (pure dict filtering, no PDB fetch).
 """
 
 from __future__ import annotations
 
 from collections import Counter
 
-from specter.specimen.cryoetsim_particles import (
+from specter.specimen.cytosolic_filler import (
     CRYOETSIM_PARTICLE_TABLE,
+    PEI2016_CROWDING_TABLE,
     build_filler_pool_specs,
 )
-from specter.specimen.cytosolic_filler import PEI2016_CROWDING_TABLE
 
 
 def test_cryoetsim_particle_table_entries_are_well_formed():

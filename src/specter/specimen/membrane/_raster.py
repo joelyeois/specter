@@ -59,7 +59,9 @@ def rasterize_membrane_density(
     ----------
     field : MembraneField
         Membrane geometry, on its own fine working grid (see
-        :func:`~specter.specimen.membrane._field.generate_membrane_field`).
+        :class:`~specter.specimen.membrane._field.MembraneField`, produced
+        by e.g. :func:`~specter.specimen.membrane.
+        _field_spherical_harmonics.generate_membrane_field_spherical_harmonics`).
     profile : BilayerProfile
         Calibrated bilayer potential profile (see
         :func:`~specter.specimen.membrane._profile.compute_bilayer_profile`).

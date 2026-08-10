@@ -247,9 +247,7 @@ def pack_hard_spheres_3d(
         genuinely existing. Restricting sampling to the allowed region (its
         looser, unfiltered form -- e.g. the same region a corresponding
         `exclusion_distance_field` was built to keep candidates fully
-        inside) fixes this by construction, the same technique
-        `specimen._cts_placement.ParticlePlacer` already uses via
-        `torch.nonzero(location_mask)`. Default None (uniform box-wide
+        inside) fixes this by construction. Default None (uniform box-wide
         sampling, the original behavior).
 
     Returns

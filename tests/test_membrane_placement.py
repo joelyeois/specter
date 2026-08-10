@@ -1,7 +1,7 @@
 import pytest
 import torch
 
-from specter.specimen.membrane._field import MembraneField, blend_field, MetaballSource
+from specter.specimen.membrane._field import MembraneField, blend_field, SphereSource
 from specter.specimen.membrane._placement import (
     align_principal_axis_to_z,
     align_transmembrane_depth,
@@ -25,7 +25,7 @@ def _sphere_field(
     )
     points_xyz = torch.stack([xx, yy, zz], dim=-1)
     phi = blend_field(
-        [MetaballSource(center_xyz=torch.zeros(3, device=device), radius=radius)],
+        [SphereSource(center_xyz=torch.zeros(3, device=device), radius=radius)],
         points_xyz,
         k=0.0,
     )

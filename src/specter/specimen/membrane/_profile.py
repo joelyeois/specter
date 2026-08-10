@@ -44,10 +44,10 @@ import torch
 from ...atom import atom_number
 from ...potential import PotentialBuilder
 
-# Same value as specimen/packing/pdb_packing.py's, specimen/polnet_bridge.py's, and
-# specimen/cryotomosim.py's own independent copies of this constant -- each
-# specimen generator keeps its own rather than importing, so this module's
-# dependencies stay limited to atom/potential.
+# Same value as specimen/packing/pdb_packing.py's and
+# specimen/polnet_bridge.py's own independent copies of this constant --
+# each specimen generator keeps its own rather than importing, so this
+# module's dependencies stay limited to atom/potential.
 ATOM_KERNEL_HALF_WIDTH_A = 2.5
 
 # Schematic single-leaflet lipid atom template: (element, z_offset_a, count,

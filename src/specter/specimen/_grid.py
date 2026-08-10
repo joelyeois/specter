@@ -3,7 +3,14 @@ Carbon support film and gold fiducial bead generation -- a from-scratch
 port of CryoTomoSim (CTS)'s ``gen_carbon.m`` and ``gen_beads.m``. No
 dependency on polnet or VTK.
 
-Both generators are homogeneous-bulk-material models -- there is no
+Generic, self-contained physics (no CTS-specific placement logic). Used by
+``specimen.tomogram.MembraneTomogramGenerator`` (the generator behind
+`specter build tomogram`) -- see its own module docstring. Originally
+shared with ``specimen.cryotomosim``'s now-deleted CTS-replica generator;
+kept as its own module rather than folded into ``tomogram/generator.py``
+directly, since nothing about this physics is tomogram-generator-specific.
+
+Both classes below are homogeneous-bulk-material models -- there is no
 atomic/molecular structure to hand ``specter.potential.PotentialBuilder``,
 so intensity has to be derived from real bulk mass density rather than
 from explicit atom coordinates.
@@ -106,6 +113,22 @@ def _mean_inner_potential(
 
 
 @dataclass
+class BeadSpec:
+    """Gold fiducial beads to place, one population per radius.
+
+    Attributes
+    ----------
+    radii : list of float
+        One bead radius (Angstrom) per requested bead population.
+    count_per_radius : int, optional
+        Number of copies to place per radius. Default 1.
+    """
+
+    radii: list[float]
+    count_per_radius: int = 1
+
+
+@dataclass
 class BeadInstance:
     """A single solid gold fiducial bead.
 
@@ -180,6 +203,56 @@ class BeadGenerator:
 
 
 @dataclass
+class GridSpec:
+    """
+    Carbon support film, forwarded to ``CarbonFilmGenerator.generate``.
+
+    Describes a realistic single-field-of-view carbon film: a big,
+    real-scale hole (`hole_radius`) of which only a thin strip
+    (`edge_fraction` of the frame) intrudes from one edge (`edge_side`) --
+    see ``edge_hole_center``'s docstring for why that, not a small hole
+    fully contained in frame, is the realistic case.
+
+    Attributes
+    ----------
+    thickness : float, optional
+        Film thickness, Angstrom. Default 150.
+    hole_radius : float, optional
+        Real physical hole radius, Angstrom. Default
+        ``QUANTIFOIL_R1_2_HOLE_RADIUS`` (6000 A / 0.6 micron) -- the fixed
+        real-product spec for Quantifoil R1.2/1.3, the standard grid for
+        high-resolution collection (see that constant's comment for the
+        source), deliberately much larger than a typical `target_shape`
+        field of view.
+    edge_fraction : float or tuple of float, optional
+        Fraction (0-1) of the frame that ends up carbon, entering from
+        `edge_side`. Either a fixed value, or a ``(low, high)`` range to
+        draw uniformly at random each ``generate()`` call (using the same
+        seed as everything else here) -- real images don't all happen to
+        catch exactly the same amount of a hole's edge. Default
+        ``(0.02, 0.05)``.
+    edge_side : str, optional
+        Which frame edge the carbon intrudes from: ``'left'``,
+        ``'right'``, ``'top'``, ``'bottom'``, or ``'random'`` (default).
+    edge_roughness : float, optional
+        Approximate standard deviation of the hole boundary's radial
+        perturbation, Angstrom. Default 30.
+    edge_grain_size : float or None, optional
+        Angstrom arc-length of one independent boundary jitter point (see
+        ``CarbonFilmGenerator.generate``'s docstring for why the edge is
+        built from independent per-point jitter rather than a smooth
+        function). Default None picks ``3 * v_size`` at generate-time.
+    """
+
+    thickness: float = 150.0
+    hole_radius: float = QUANTIFOIL_R1_2_HOLE_RADIUS
+    edge_fraction: float | tuple[float, float] = (0.02, 0.05)
+    edge_side: str = "random"
+    edge_roughness: float = 30.0
+    edge_grain_size: float | None = None
+
+
+@dataclass
 class CarbonFilmInstance:
     """A carbon support film slab with a circular hole cut out.
 
@@ -214,11 +287,11 @@ class CarbonFilmGenerator:
     jitter at points spaced around the hole's circumference, linearly
     interpolated in between (see `edge_grain_size` below) -- rather than
     by resampling a fixed-size point cloud through an alpha shape (the
-    previous approach here, and still how
-    ``_cts_membrane.MembraneBlobGenerator`` handles its own, genuinely
-    3D-irregular blob shapes -- appropriate there since a membrane's whole
-    *shape* is the random part, but overkill for a hole boundary that's a
-    circle plus a 1D perturbation). This matters for two separate reasons:
+    previous approach here; a point-cloud/alpha-shape wrap would be
+    appropriate for a genuinely 3D-irregular blob shape, where the whole
+    *shape* is the random part, but is overkill for a hole boundary that's
+    a circle plus a 1D perturbation). This matters for two separate
+    reasons:
 
     - Reproducibility across resolutions: a point cloud sampled at a fixed
       count spreads over a `target_shape`-sized footprint, so the same

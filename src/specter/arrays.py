@@ -423,76 +423,6 @@ def real_to_kgrid_3d(
     return KR
 
 
-def voxelize_coordinates(
-    coords: torch.Tensor,
-    grid_shape: tuple[int, int, int],
-    voxel_size: Sequence[float],
-    device: str | torch.device | None = None,
-) -> torch.Tensor:
-    """
-    Convert 3D coordinates to a 3D binary occupancy grid.
-
-    Creates a binary grid with 1s at the nearest voxel positions corresponding
-    to the input coordinates, and 0s elsewhere.
-
-    Parameters
-    ----------
-    coords : torch.Tensor
-        Atomic coordinates in physical units (x, y, z), shape (N, 3).
-    grid_shape : tuple of int
-        Shape of output grid (nx, ny, nz).
-    voxel_size : Sequence of float
-        Voxel size (dx, dy, dz).
-    device : str or torch.device, optional
-        Device for tensors. Default is None (uses coords device).
-
-    Returns
-    -------
-    grid : torch.Tensor
-        Binary occupancy grid with shape (nz, ny, nx). 1s at voxel positions
-        of atoms, 0s elsewhere.
-
-    Notes
-    -----
-    Grid center is assumed to be at (nz//2, ny//2, nx//2).
-    Uses nearest-neighbor assignment (hard voxelization).
-    """
-    device = device or coords.device
-    coords = coords.to(device)
-    nx, ny, nz = grid_shape  # number of voxels along x, y, z
-
-    # Compute the center of the grid in voxel units
-    center_voxel = torch.tensor([nx // 2, ny // 2, nz // 2], device=device)
-
-    # Convert physical coordinates to voxel indices, shifting center
-    indices = coords / torch.tensor(voxel_size, device=device)  # voxel units
-    indices = indices + center_voxel  # shift so center is at middle voxel
-    indices = torch.round(indices).long()
-
-    # Mask atoms inside the grid
-    mask = (
-        (indices[:, 0] >= 0)
-        & (indices[:, 0] < nx)
-        & (indices[:, 1] >= 0)
-        & (indices[:, 1] < ny)
-        & (indices[:, 2] >= 0)
-        & (indices[:, 2] < nz)
-    )
-    indices = indices[mask]
-
-    # Create empty grid (z, y, x)
-    grid = torch.zeros((nz, ny, nx), device=device, dtype=torch.float32)
-
-    # Insert ones at valid voxel indices
-    grid.index_put_(
-        (indices[:, 2], indices[:, 1], indices[:, 0]),
-        torch.ones(indices.shape[0], device=device),
-        accumulate=True,
-    )
-
-    return grid
-
-
 def _normalize_voxel_size(
     voxel_size: float | Sequence[float] | torch.Tensor, device: str | torch.device
 ) -> torch.Tensor:
@@ -1096,47 +1026,6 @@ def radial_profile_2d(
         return torch.arange(max_r, device=device), radialprofile
     else:
         return radialprofile
-
-
-def nearest_index(
-    x_arr: torch.Tensor,
-    y_arr: torch.Tensor,
-    z_arr: torch.Tensor,
-    x_coord: float,
-    y_coord: float,
-    z_coord: float,
-) -> tuple[int, int, int]:
-    """
-    Find the nearest grid indices to specified coordinates.
-
-    Parameters
-    ----------
-    x_arr : torch.Tensor
-        1D array of x-coordinates defining the grid.
-    y_arr : torch.Tensor
-        1D array of y-coordinates defining the grid.
-    z_arr : torch.Tensor
-        1D array of z-coordinates defining the grid.
-    x_coord : float
-        Target x-coordinate.
-    y_coord : float
-        Target y-coordinate.
-    z_coord : float
-        Target z-coordinate.
-
-    Returns
-    -------
-    xi : int
-        Index in x_arr closest to x_coord.
-    yi : int
-        Index in y_arr closest to y_coord.
-    zi : int
-        Index in z_arr closest to z_coord.
-    """
-    xi = int(torch.argmin(torch.abs(x_arr - x_coord)).item())
-    yi = int(torch.argmin(torch.abs(y_arr - y_coord)).item())
-    zi = int(torch.argmin(torch.abs(z_arr - z_coord)).item())
-    return xi, yi, zi
 
 
 def ball3d(N: int, d: float) -> torch.Tensor:

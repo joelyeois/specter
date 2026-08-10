@@ -70,10 +70,6 @@ Standalone top-level modules that are not grouped into a subpackage.
 
 ::: specter.symmetries
 
-## specter.welling_rotation
-
-::: specter.welling_rotation
-
 ## specter.aretomo3
 
 ::: specter.aretomo3
@@ -81,7 +77,3 @@ Standalone top-level modules that are not grouped into a subpackage.
 ## specter.constants
 
 ::: specter.constants
-
-## specter.cuda
-
-::: specter.cuda

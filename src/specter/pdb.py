@@ -8,7 +8,6 @@ import warnings
 from collections import defaultdict
 from typing import TYPE_CHECKING
 
-import biotite.structure.io as strucio
 import gemmi
 import numpy as np
 import requests
@@ -556,45 +555,3 @@ class PDB:
         hull_points = coordinates[hull.vertices]
         max_diameter = pdist(hull_points).max()
         return max_diameter
-
-
-def write_xyz_file(
-    input_filename: str, output_filename: str, comment: str = ""
-) -> None:
-    """
-    Write atomic structure to standard XYZ file format.
-
-    Parameters
-    ----------
-    input_filename : str
-        Path to input structure file (PDB, mmCIF, etc.).
-    output_filename : str
-        Path for output XYZ file.
-    comment : str, optional
-        Comment line to include in XYZ file header. Default is empty string.
-
-    Returns
-    -------
-    None
-        Writes XYZ file to disk.
-
-    Notes
-    -----
-    XYZ format:= Header commented line 1: number of atoms
-    Line 2: comment
-    Lines 3+: element x y z
-    """
-
-    inXYZ = strucio.load_structure(input_filename)
-
-    with open(output_filename, "w") as file:
-        # Write the header
-        nAtoms = inXYZ.shape[0]
-        file.write(f"{int(nAtoms)}\n")
-        file.write(comment + "\n")
-
-        # Write the coordinates and other details
-        for ii in range(nAtoms):
-            file.write(
-                f"{inXYZ[ii].element}\t{inXYZ[ii].coord[0]:<8.4f}\t{inXYZ[ii].coord[1]:<8.4f}\t{inXYZ[ii].coord[2]:<8.4f}\n"
-            )

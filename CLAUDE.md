@@ -213,13 +213,11 @@ src/specter/                  # Main source package
     _cryosparc.py               # extract_parameters_from_csfile() — reads CryoSPARC .cs files
     _relion.py                   # RELION .star read/write: extract_parameters_from_starfile(), create_particle_starfile[_from_model](), create_micrograph_starfile()
     _common.py                   # _select_particles() — shared per-particle mask/truncate helper for both backends
-  cuda.py                     # CUDA/device utilities
   config.py                   # ParticleStackConfig/MicrographConfig/TiltSeriesConfig/TomogramConfig dataclasses + load_config()/apply_overrides() for TOML-driven runs (shared by demo-scripts/ and cli/)
   plots.py                    # Plotting helpers
   progress.py                 # Progress bar management (ProgressManager)
   random_seed.py              # Global seed control (exported as specter.seed)
   symmetries.py               # Symmetry operations
-  welling_rotation.py         # Welling rotation sampling
   qscore.py                   # Per-atom Q-score (map-model fit; Pintilie et al. 2020)
 tests/                        # pytest test suite
   test_data/                  # Golden-output fixtures (.pt files) for regression tests

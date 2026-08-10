@@ -26,8 +26,9 @@ class TiltSeriesGenerator(MicrographGenerator):
     ----------
     vol : torch.Tensor
         Pre-assembled specimen volume of shape (1, Z, Y, X) -- e.g. the
-        particles+membranes output of
-        :class:`~specter.specimen.CryoETSpecimenGenerator`. If ``ice_model``
+        output of
+        :func:`~specter.pipelines.build_tomogram_generator`/`specter build
+        tomogram`. If ``ice_model``
         or ``icemaker`` is given, ice is blended into ``vol`` (matching its
         own size and voxel size, masked to voxels with little existing
         scattering potential -- see ``ice_model`` below) before any of this

@@ -134,12 +134,11 @@ voxel labels (their density is correctly present in the volume via
 documented gap, not an oversight.
 
 Optionally also scatters filament species (e.g. F-actin, microtubules)
-through the tomogram via ``specimen.filament.place_filaments`` -- the same
-specter-native random-walk placement `CryoETSpecimenGenerator` uses, with
-no region-gating (filaments are dropped anywhere in the volume regardless
-of cytosol/lumen/membrane-shell classification, matching that generator's
-own "no occupancy-aware packing against other species" scope) and no
-collision avoidance against the membrane shell or against each other.
+through the tomogram via ``specimen.filament.place_filaments`` --
+specter-native random-walk placement, with no region-gating (filaments are
+dropped anywhere in the volume regardless of cytosol/lumen/membrane-shell
+classification) and no collision avoidance against the membrane shell or
+against each other.
 Rendered right after membranes, BEFORE cytosol/lumen protein packing (see
 module docstring) -- unlike the membrane shell, filaments themselves have
 no fixed geometry to region-gate against, so this is purely an ordering
@@ -184,11 +183,6 @@ from ..packing import draw_species_pool, estimate_protein_box_size, pack_hard_sp
 from ._regions import classify_membrane_regions
 from ...progress import TqdmProgress, phase_done, phase_start, status
 
-# Same convention as specimen/packing/pdb_packing.py's own
-# _INSTANCE_LABEL_REL_THRESHOLD -- kept as an independent copy rather than
-# imported, matching this codebase's established per-generator zero-cross-
-# coupling convention (independent generators duplicate small shared
-# helpers rather than importing across each other).
 _INSTANCE_LABEL_REL_THRESHOLD = 0.01
 
 # A region covering at least this fraction of the whole tomogram box (e.g.
@@ -212,9 +206,7 @@ def _insert_instance_labels(
     pixel_size: float,
     labels: torch.Tensor,
 ) -> torch.Tensor:
-    """Stamp per-instance integer labels into a shared label volume --
-    identical mechanism to specimen/packing/pdb_packing.py's own helper of
-    the same name, duplicated rather than imported (see module docstring).
+    """Stamp per-instance integer labels into a shared label volume.
     `binarized`/`positions` are moved to `labels`' own device (not the
     other way around) -- `labels` is the shared, potentially large
     accumulator (see MembraneTomogramGenerator's own `accumulator_device`
@@ -252,8 +244,8 @@ def _position_to_center_index(
     (z, y, x) voxel index of that offset -- the center-relative convention
     `MembraneGenerator` itself uses (physical (0,0,0) = volume center),
     matching `_insert_instance_labels`'s own indexing math above. NOT
-    `cryoet.py`'s `_insert_clipped`, which uses a corner-relative (0..extent)
-    convention for genuinely small local arrays -- the wrong frame for a
+    `clip_insert_bounds`'s own corner-relative (0..extent) convention,
+    which is for genuinely small local arrays -- the wrong frame for a
     MembraneGenerator instance, which always renders on its own full target
     grid centered at (0,0,0) (see that class's own module docstring)."""
     z_center, y_center, x_center = (
@@ -278,7 +270,7 @@ def _insert_volume_max(
     """Max-merge `local` (same center-relative convention as `volume`,
     i.e. physical (0,0,0) at its own center) into `volume`, shifted by
     `position_xyz`. See `_position_to_center_index` for why this uses a
-    different convention than `cryoet.py`'s `_insert_clipped`. `local` is
+    different convention than `clip_insert_bounds`. `local` is
     moved to `volume`'s own device (not the other way around) -- `volume`
     is the shared, potentially large accumulator (see
     MembraneTomogramGenerator's own `accumulator_device` docstring),
@@ -302,10 +294,7 @@ def _build_sphere_exclusion_field(
     return its Euclidean distance transform, ready to combine (elementwise
     minimum, matching `pack_hard_spheres_3d`'s own "union of forbidden
     regions" guidance) with another `exclusion_distance_field` for a
-    following packing stage. Identical mechanism to
-    `specimen/packing/pdb_packing.py`'s own helper of the same name,
-    duplicated rather than imported (see module docstring's "zero-cross-
-    coupling" convention)."""
+    following packing stage."""
     Z, Y, X = target_shape
     occupied = np.zeros((Z, Y, X), dtype=bool)
     cz, cy, cx = Z / 2.0, Y / 2.0, X / 2.0
@@ -1772,11 +1761,8 @@ class MembraneTomogramGenerator:
         placed cytosol/lumen species (grouped by `(location, species_id)`
         so the same `pdb_source` declared at both locations never collides
         in one file) plus, by default, one per transmembrane species --
-        same schema as `specimen.cryoet.CryoETSpecimenGenerator.
-        export_picks` (one JSON object per line:
-        ``{"type": "point"|"orientedPoint", "location": {"x", "y", "z"}[,
-        "xyz_rotation_matrix"]}``), so picks from either generator are
-        interchangeable downstream.
+        one JSON object per line: ``{"type": "point"|"orientedPoint",
+        "location": {"x", "y", "z"}[, "xyz_rotation_matrix"]}``.
 
         `TomogramPlacement.role == "filler"` placements (species declared
         via `ratio`, not `n_copies`) are INCLUDED by default here --
@@ -1792,7 +1778,7 @@ class MembraneTomogramGenerator:
         never merged with the target file.
 
         Transmembrane picks are oriented (a real `rotation_matrix`, unlike
-        `CryoETSpecimenGenerator`'s own plain-point membrane picks) since
+        other membrane picks here, which are plain points) since
         `TransmembranePlacement` actually carries one.
 
         Coordinates are converted from this generator's box-centered

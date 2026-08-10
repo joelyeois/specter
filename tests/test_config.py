@@ -149,73 +149,46 @@ def test_particle_toml_loads_advanced_fields() -> None:
     assert config.anisomag_m11 == 1.0
 
 
-def test_load_config_tilt_series_parses_array_of_tables(tmp_path: Path) -> None:
+def test_load_config_tilt_series_parses_scalar_fields(tmp_path: Path) -> None:
     path = _write_toml(
         tmp_path,
         """
-        [[protein_specs]]
-        PDB_CODE = "7VD8"
-        PMER_OCC = 0.078
-
-        [[protein_specs]]
-        PDB_CODE = "6QZP"
-
-        [[membrane_specs]]
-        MB_TYPE = "sphere"
-        MB_THICK_RG = [25.0, 35.0]
-        MB_MIN_RAD = 180.0
-        MB_MAX_RAD = 450.0
-
         [specimen]
-        target_shape = [92, 256, 256]
         target_v_size = 5.0
+
+        [tilt_geometry]
+        n_tilts = 21
+        tilt_axis = "x"
         """,
     )
     config = load_config(path, TiltSeriesConfig)
-    assert config.protein_specs == [
-        {"PDB_CODE": "7VD8", "PMER_OCC": 0.078},
-        {"PDB_CODE": "6QZP"},
-    ]
-    assert config.membrane_specs == [
-        {
-            "MB_TYPE": "sphere",
-            "MB_THICK_RG": [25.0, 35.0],
-            "MB_MIN_RAD": 180.0,
-            "MB_MAX_RAD": 450.0,
-        }
-    ]
-    assert config.target_shape == [92, 256, 256]
     assert config.target_v_size == 5.0
+    assert config.n_tilts == 21
+    assert config.tilt_axis == "x"
 
 
 def test_load_config_tilt_series_fills_defaults_for_missing_fields(
     tmp_path: Path,
 ) -> None:
-    path = _write_toml(tmp_path, '[[protein_specs]]\nPDB_CODE = "6bdf"\n')
+    path = _write_toml(tmp_path, "[specimen]\ntarget_v_size = 5.0\n")
     config = load_config(path, TiltSeriesConfig)
-    assert config.membrane_specs == []
-    assert config.filler_occupancy is None
+    assert config.volume_path == ""
     assert config.n_tilts == 61
     assert config.scattering_model == "multislice"
     assert config.ice_model == "gd"
 
 
 def test_tilt_series_config_constructs_with_no_args() -> None:
-    """protein_specs is optional now -- only meaningful in polnet mode, and
-    the volume_path path shouldn't require an unrelated [[protein_specs]]
-    block."""
+    """The volume_path path shouldn't require any other TOML table."""
     config = TiltSeriesConfig()
-    assert config.protein_specs == []
     assert config.volume_path == ""
 
 
 def test_tilt_series_toml_loads_and_matches_expected_values() -> None:
     path = str(REPO_ROOT / "configs" / "tilt_series.toml")
     config = load_config(path, TiltSeriesConfig)
-    assert len(config.protein_specs) == 6
-    assert len(config.membrane_specs) == 1
-    assert config.target_shape == [184, 630, 630]
-    assert config.target_v_size == 5.0
+    assert config.target_v_size == 2.0
+    assert config.n_tilts == 61
     assert config.scattering_model == "multislice"
     assert config.device == "cpu"
     assert config.volume_path == ""
@@ -234,5 +207,4 @@ def test_tilt_series_toml_volume_path_round_trip(tmp_path: Path) -> None:
     )
     config = load_config(path, TiltSeriesConfig)
     assert config.volume_path == "path/to/specimen.mrc"
-    assert config.protein_specs == []
     assert config.n_tilts == 5

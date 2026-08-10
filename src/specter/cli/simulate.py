@@ -105,18 +105,12 @@ _PARTICLE_STACK_GROUPS: list[tuple[str, list[str]]] = [
 
 
 # (panel title, field names) for `specter simulate tiltseries` -- same
-# basic-first-advanced-last convention as `_PARTICLE_STACK_GROUPS`. This first
-# pass only drives the `volume_path` specimen source (see
-# `specter.pipelines.run_tilt_series`); the polnet-only fields
-# (`protein_specs`/`membrane_specs`/`filler_occupancy`/`target_shape`/
-# `target_v_size`/`low_res_v_size`/`membrane_potential_scale`/`seed`) still
-# get flags (for forward compatibility once polnet placement is wired into
-# this pipeline) but live in "Advanced" since this command's default path
-# doesn't use them. `protein_specs`/`membrane_specs` themselves are
-# list[dict]-typed and skipped entirely by `build_config_options` -- not
-# listed here, same as `atom_species` isn't listed in `_PARTICLE_STACK_GROUPS`.
+# basic-first-advanced-last convention as `_PARTICLE_STACK_GROUPS`. Drives
+# the `volume_path` specimen source only (see `specter.pipelines.
+# run_tilt_series`) -- specimen BUILDING is `specter build tomogram`'s job
+# (a separate command/config entirely), not this one's.
 _TILT_SERIES_GROUPS: list[tuple[str, list[str]]] = [
-    ("Specimen", ["volume_path"]),
+    ("Specimen", ["volume_path", "target_v_size"]),
     (
         "Microscope",
         ["voltage", "dose_per_tilt", "num_frames", "cs", "alpha"],
@@ -139,13 +133,6 @@ _TILT_SERIES_GROUPS: list[tuple[str, list[str]]] = [
     (
         "Advanced",
         [
-            "pdb_savefolder",
-            "target_shape",
-            "target_v_size",
-            "low_res_v_size",
-            "membrane_potential_scale",
-            "seed",
-            "filler_occupancy",
             "micrograph_size",
             "convergence_angle",
             "cc",

@@ -1632,11 +1632,12 @@ def clip_insert_bounds(
     centered at `center` into a larger array, clipping at the boundaries.
 
     Shared low-level geometry for "stamp a local array into a big one at an
-    arbitrary center, cropping whatever falls outside" -- used by both
+    arbitrary center, cropping whatever falls outside" -- used by
     crowding.py (batched, centered coordinates, additive merge) and
-    specimen/cryoet.py (one array at a time, absolute coordinates, max
-    merge). Only the index arithmetic lives here; callers own the actual
-    merge (`+=`, `torch.maximum`, ...) since that differs by use case.
+    specimen/tomogram/generator.py (one array at a time, absolute
+    coordinates, max merge). Only the index arithmetic lives here; callers
+    own the actual merge (`+=`, `torch.maximum`, ...) since that differs by
+    use case.
 
     Parameters
     ----------

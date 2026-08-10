@@ -1,13 +1,10 @@
 """Tilt-series generation pipeline: `TiltSeriesConfig` in, .mrcs + .star out.
 
-This first pass only supports the ``volume_path`` specimen source (a
-pre-built scattering-potential volume loaded from disk) -- the polnet-driven
-placement path (`protein_specs`/`membrane_specs`) stays reachable only via
-`demo-scripts/generate_tilt_series.py` / the tilt-series notebook until it
-gets its own dispatch branch here.
-
-Mirrors `demo-scripts/generate_tilt_series.py`'s imaging/save logic, with the
-specimen-building step replaced by loading `config.volume_path` from disk.
+This is the imaging half of the cryo-ET pipeline only -- it loads a
+pre-built specimen volume from ``config.volume_path`` and simulates the
+tilted acquisition. For the specimen-building half, see `specter build
+tomogram` (`specter.pipelines.run_build_tomogram`/`TomogramConfig`), which
+writes a `.mrc` volume this pipeline then loads directly.
 """
 
 from __future__ import annotations
@@ -43,15 +40,14 @@ def run_tilt_series(config: TiltSeriesConfig) -> None:
     config : TiltSeriesConfig
         Fully-resolved run configuration, e.g. from
         :func:`specter.config.load_config`, or constructed directly in
-        Python. ``config.volume_path`` must be set -- this pass only
-        supports loading a pre-built specimen volume from disk.
+        Python. ``config.volume_path`` must be set -- e.g. the output of
+        `specter build tomogram`.
     """
     if not config.volume_path:
         raise ValueError(
-            "run_tilt_series: config.volume_path must be set. This pass only "
-            "supports generating a tilt series from a pre-built specimen "
-            "volume -- polnet-driven placement isn't wired into this "
-            "pipeline yet (see demo-scripts/generate_tilt_series.py)."
+            "run_tilt_series: config.volume_path must be set to a "
+            "pre-built specimen volume -- build one first with `specter "
+            "build tomogram`."
         )
 
     specter.set_verbosity(logging.INFO)

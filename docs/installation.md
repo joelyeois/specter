@@ -57,13 +57,7 @@ pip install -e .
 ```
 
 `pip install -e .` reads the full dependency list from `pyproject.toml`, so no
-separate requirements file is needed. `polnet` is pinned to a git revision via
-`[tool.uv.sources]`, which `uv` resolves automatically but plain `pip` does
-not -- if `pip install -e .` fails to resolve it, install it explicitly first:
-
-```bash
-pip install "polnet @ git+https://github.com/anmartinezs/polnet.git@v1.1.2"
-```
+separate requirements file is needed.
 
 To install the optional extras (see above) via pip instead of `uv sync`:
 

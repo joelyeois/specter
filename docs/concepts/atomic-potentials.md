@@ -141,7 +141,7 @@ Atoms whose bonded species isn't in the bundled table fall back to
 scattering factors (Peng et al. 1996), evaluated with this same closed
 form, so it combines coherently (same units, same functional form) with
 matched-species Shtyrov kernels in one potential volume. `PotentialBuilder`
-and `MicrographSpecimenGenerator`/`CryoETSpecimenGenerator` default to
+and `MicrographSpecimenGenerator`/`MembraneTomogramGenerator` default to
 `parameterization="shtyrov"` for this reason.
 
 ![Kirkland, Lobato, and Peng's independent-atom-model potentials for carbon, overlaid.](../assets/images/atomic-potential-parameterization-comparison.png){ width="600" }

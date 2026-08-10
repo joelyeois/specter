@@ -184,9 +184,7 @@ src/specter/                  # Main source package
   specimen/                   # Volume assembly (package) — under heavy active development, structure below is
                               # partial/illustrative only; read the package directly rather than trusting this list.
     single_particle.py        # MicrographSpecimenGenerator — populates a volume with template potentials + crowding + ice
-    cryoet.py                 # CryoETSpecimenGenerator — large high-res cryoET specimen: polnet placement (proteins+membranes) at low res, rendered at full res via PotentialBuilder
-    polnet_bridge.py          # polnet-facing half of the cryoET pipeline: placement/packing only, never renders density or invokes TEM/IMOD
-    cytosolic_filler.py       # PEI2016_CROWDING_TABLE + build_filler_protein_specs() — generic cytosolic background reference (Pei et al. 2016)
+    cytosolic_filler.py       # PEI2016_CROWDING_TABLE + CRYOETSIM_PARTICLE_TABLE + build_filler_pool_specs() — generic cytosolic background reference tables
     tomogram/, filament/, membrane/, packing/  # newer subpackages (tomogram/specimen assembly, filament placement,
                               # organic membranes, sphere/tetris packing algorithms); also from_volume.py at the
                               # top level — still in flux, deliberately not detailed here
@@ -232,7 +230,7 @@ demo-notebooks/               # User-facing, always kept working
   create_tilt_series/          # same pattern, for TiltSeriesGenerator
   create_tilt_series_modular/  # same pattern, modular variant
   simulate_particles_from_csfile/  # same pattern, driven from an existing CryoSPARC .cs file
-                                # (plus standalone notebooks with no paired TOML, e.g. cryoet-specimen-generator.ipynb,
+                                # (plus standalone notebooks with no paired TOML, e.g.
                                 # generate-and-reconstruct.ipynb, coordinates-to-images.ipynb,
                                 # compare-atomic-potentials-with-kirkland.ipynb)
 demo-scripts/                 # Ready-to-run command-line scripts (generate_micrograph.py, generate_tilt_series.py,
@@ -279,7 +277,6 @@ ice-data/                     # Pre-computed ice data (do not modify)
 | `mrcfile`, `starfile`, `eerfile` | Cryo-EM file formats; `starfile` backs RELION `.star` I/O in `io/_relion.py` |
 | `roma` | Quaternion/rotation math (`rotations/`) |
 | `vesin-torch` | Pairwise neighbor search for the MLBOP ice energy (`ice/_energy.py`), replaces the old ASE-based path |
-| `polnet` (git dep, pinned rev) | Low-res placement/packing backend for `CryoETSpecimenGenerator` |
 | `click`, `rich-click` | The `specter` CLI (`cli/` package) |
 | `ruff`, `mypy` | Code quality |
 

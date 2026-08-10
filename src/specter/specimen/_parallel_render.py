@@ -13,8 +13,7 @@ looking like the same shape of problem:
 - `PotentialBuilder.forward` releases the GIL for its real compute, so
   `build_templates_concurrently`'s plain `ThreadPoolExecutor` gives real
   wall-clock overlap across species with no multiprocessing/pickling
-  complexity. Same pattern `specimen.cryoet.CryoETSpecimenGenerator`
-  already uses for its own 2-way membrane/protein overlap.
+  complexity.
 - `PDB.__init__`'s structure parsing (Biopython/gemmi) does NOT release
   the GIL for most of its work -- confirmed the hard way, not assumed:
   threading it gave zero wall-clock speedup on a 161-species production

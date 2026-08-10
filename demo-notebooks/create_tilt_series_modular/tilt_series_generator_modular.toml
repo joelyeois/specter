@@ -1,51 +1,10 @@
-# Small/fast specimen + tilt scheme so this notebook runs in a few minutes.
-# Scale target_shape/target_v_size and n_tilts up for production runs -- see
-# configs/tilt_series.toml for full/canonical defaults and the "Notes for
-# scaling up" section of dev/cryoet-specimen-generation/10440.ipynb.
-
-[[protein_specs]]
-PDB_CODE = "7VD8"   # ferritin_complex
-PMER_OCC = 0.078
-
-[[protein_specs]]
-PDB_CODE = "6QZP"   # cytosolic_ribosome
-PMER_OCC = 0.646
-
-[[protein_specs]]
-PDB_CODE = "7B75"   # thyroglobulin
-PMER_OCC = 0.099
-
-[[protein_specs]]
-PDB_CODE = "6N4V"   # pp7_vlp
-PMER_OCC = 0.432
-
-[[protein_specs]]
-PDB_CODE = "6DRV"   # beta_galactosidase
-PMER_OCC = 0.022
-
-[[protein_specs]]
-PDB_CODE = "1FA2"   # beta_amylase
-PMER_OCC = 0.010
-
-[[membrane_specs]]
-MB_TYPE = "sphere"
-MB_THICK_RG = [25.0, 35.0]
-MB_LAYER_S_RG = [0.5, 2.0]
-MB_OCC_RG = [0.0025, 0.005]
-MB_OVER_TOL = 0.0
-MB_DEN_CF_RG = [0.3, 0.5]
-MB_MIN_RAD = 180.0
-MB_MAX_RAD = 450.0
+# Imaging half of the two-stage cryo-ET pipeline this notebook walks
+# through stage by stage: tomogram.toml (this folder) builds the specimen
+# volume, this file supplies the imaging parameters used below.
+# target_v_size MUST match tomogram.toml's own v_size.
 
 [specimen]
-# generic cytosolic filler; off by default so this notebook finishes quickly
-# (the extra filler species need their own PDB downloads + PotentialBuilder
-# calls). Uncomment to enable:
-# filler_occupancy = 0.1
-target_shape = [256, 1024, 1024]   # (Z, Y, X) voxels -- modest, finishes quickly
-target_v_size = 2             # Å/voxel
-low_res_v_size = 10.0           # Å/voxel, polnet's placement-pass resolution
-seed = 11
+target_v_size = 5.0   # Å/voxel -- must match tomogram.toml's v_size
 
 [microscope]
 voltage = 300.0
@@ -74,4 +33,8 @@ coincidence_radius = 0
 pad_fft = true  # fixes multislice edge-wraparound artifacts at this wider tilt range
 
 [compute]
-device = "cuda:2"  # adjust to an available device on your machine, e.g. "cuda:0" or "cpu"
+device = "cuda:0"  # adjust to an available device on your machine, e.g. "cuda:0" or "cpu"
+
+[output]
+output_dir = "./output/"
+filename = "tilt_series_modular"

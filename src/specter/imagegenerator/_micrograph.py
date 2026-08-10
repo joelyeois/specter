@@ -39,8 +39,9 @@ class MicrographGenerator(BaseImager):
         Electron dose per Å². Scalar or 1-D tensor of length n.
     vol : torch.Tensor, optional
         Pre-assembled specimen volume of shape (1, Z, Y, X) -- e.g. the
-        particles+membranes output of
-        :class:`~specter.specimen.CryoETSpecimenGenerator`.  When provided,
+        output of
+        :func:`~specter.pipelines.build_tomogram_generator`/`specter build
+        tomogram`.  When provided,
         ``scattering_potential`` and crowding parameters are ignored, but
         ``ice_model``/``icemaker`` are still honored: if either is set, ice
         is generated to match ``vol``'s own size and voxel size and blended

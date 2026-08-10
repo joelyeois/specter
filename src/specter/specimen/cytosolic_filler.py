@@ -3,21 +3,16 @@ Reference lists of generic, non-target cytosolic macromolecules, for
 filling the "everything else" background of a specimen (crowding
 below/around whatever specific species you're annotating as targets).
 
-Two independent, additive tables (originally two separate modules, merged
-here since both are the same kind of thing -- a reference table plus an
-adapter function that shapes it for a specific consumer's own
-protein-spec dict format):
+Two independent, additive tables, both adapted by the same function --
+`build_filler_pool_specs` -- to `MembraneTomogramGenerator`'s
+(`specter build tomogram`) flat ``{"pdb_source"}`` filler_specs format.
+`specter build tomogram`'s `filler_from_pei2016`/`filler_from_cryoetsim`
+both route through this one function regardless of which table they pull
+from:
 
-- `PEI2016_CROWDING_TABLE` + `build_filler_protein_specs` -- adapts to
-  `CryoETSpecimenGenerator`'s polnet-style ``{"PDB_CODE", "PMER_OCC"}``
-  protein_specs, weighted by the source paper's own relative-abundance
-  data.
-- `CRYOETSIM_PARTICLE_TABLE` + `build_filler_pool_specs` -- adapts to
-  `MembraneTomogramGenerator`'s (`specter build tomogram`) flat
-  ``{"pdb_source"}`` filler_specs; also works on `PEI2016_CROWDING_TABLE`
-  (see its own docstring), so `specter build tomogram`'s
-  `filler_from_pei2016`/`filler_from_cryoetsim` both route through this
-  one function regardless of which table they pull from.
+- `PEI2016_CROWDING_TABLE`, weighted by the source paper's own
+  relative-abundance data.
+- `CRYOETSIM_PARTICLE_TABLE` (see its own docstring below).
 
 ## PEI2016_CROWDING_TABLE
 
@@ -33,7 +28,7 @@ paper's Additional file 1 (Table S1), which is not rendered in the article's
 HTML/PDF and had to be pulled from the journal's supplementary-material
 store directly. `occurrence_freq` is the paper's own relative-abundance
 weighting (their normalization of proteomic abundance data), reused here
-only for the *ratio* between species -- see build_filler_protein_specs.
+only for the *ratio* between species -- see build_filler_pool_specs.
 
 The paper's table has 21 rows; only 20 are listed here. Its 2AWB entry
 (bacterial 70S ribosome) was obsoleted by the PDB on 2014-12-10 and merged
@@ -193,70 +188,6 @@ PEI2016_CROWDING_TABLE: list[dict] = [
         "occurrence_freq": 0.0486,
     },
 ]
-
-
-def build_filler_protein_specs(
-    codes: list[str] | None = None,
-    exclude_codes: list[str] | None = None,
-    total_occupancy: float = 0.05,
-    **overrides,
-) -> list[dict]:
-    """Build protein_specs entries for generic cytosolic filler, from
-    PEI2016_CROWDING_TABLE (see module docstring for source/credit).
-
-    Splits `total_occupancy` across the selected species in proportion to
-    their relative occurrence_freq in the table (renormalized over just the
-    selected subset), giving each a PMER_OCC. Only the *ratio* between
-    species is taken from the source paper -- total_occupancy itself has no
-    universally-correct value (see cryoet.py's discussion of this); treat
-    the default as a starting point to tune empirically against your own
-    target volume and resolution, not a physical constant.
-
-    Parameters
-    ----------
-    codes : list of str, optional
-        PDB codes to include (must exist in PEI2016_CROWDING_TABLE).
-        Defaults to the full table.
-    exclude_codes : list of str, optional
-        PDB codes to drop from the (defaulted-to-full) table. Mutually
-        exclusive with ``codes``.
-    total_occupancy : float, optional
-        Combined PMER_OCC budget across all selected species.
-    **overrides
-        Extra protein_specs keys applied to every generated entry, e.g.
-        ``PMER_OVER_TOL=0.02``.
-
-    Returns
-    -------
-    list[dict]
-        One entry per selected species, each
-        ``{"PDB_CODE": ..., "PMER_OCC": ..., **overrides}`` -- ready to
-        concatenate onto your own protein_specs list.
-    """
-    if codes is not None and exclude_codes is not None:
-        raise ValueError("pass only one of codes / exclude_codes, not both")
-
-    table = PEI2016_CROWDING_TABLE
-    if codes is not None:
-        by_code = {e["code"]: e for e in table}
-        missing = [c for c in codes if c not in by_code]
-        if missing:
-            raise ValueError(f"not in PEI2016_CROWDING_TABLE: {missing}")
-        selected = [by_code[c] for c in codes]
-    elif exclude_codes is not None:
-        selected = [e for e in table if e["code"] not in exclude_codes]
-    else:
-        selected = table
-
-    freq_sum = sum(e["occurrence_freq"] for e in selected)
-    return [
-        {
-            "PDB_CODE": e["code"],
-            "PMER_OCC": total_occupancy * e["occurrence_freq"] / freq_sum,
-            **overrides,
-        }
-        for e in selected
-    ]
 
 
 # =============================================================================

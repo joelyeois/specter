@@ -6,7 +6,7 @@ helical polymers like F-actin and microtubule protofilaments use.
 
 This module only computes the path-tangent rotations; identifying which
 axis of the monomer itself is the "stacking axis" is a separate, earlier
-step (see ``CryoETSpecimenGenerator._stamp_filaments``, which pre-rotates
+step (see ``MembraneTomogramGenerator._stamp_filaments``, which pre-rotates
 each monomer's own coordinates via
 ``specter.specimen.membrane._placement.align_principal_axis_to_z`` before
 building its potential template -- the same argument that function's

@@ -370,49 +370,25 @@ class MicrographConfig:
 class TiltSeriesConfig:
     """Parameters for cryoET tilt-series generation, loaded from a TOML config file.
 
-    Combines the two-stage pipeline from `dev/cryoet-specimen-generation/10440.ipynb`:
-    `specter.specimen.CryoETSpecimenGenerator` places proteins/membranes into a
-    specimen volume, then `TiltSeriesGenerator` blends in ice and simulates the
-    tilted acquisition (multislice scattering, CTF, dose, detector, noise).
+    Loads a pre-built specimen volume and simulates the tilted acquisition
+    (multislice scattering, CTF, dose, detector, noise) -- this is the
+    imaging half of the cryo-ET pipeline only. For the specimen-building
+    half, see `specter build tomogram` (`TomogramConfig`/
+    `specter.specimen.tomogram.MembraneTomogramGenerator`), which writes a
+    `.mrc` volume that `volume_path` below then loads directly.
     """
 
     # --- Specimen source ---
-    # Path to a pre-built (Z, Y, X) scattering-potential volume (.mrc/.mrcs/.pt).
-    # When set, generation loads this volume directly instead of running the
-    # polnet-based placement below -- the protein_specs/membrane_specs/
-    # filler_occupancy/target_shape/target_v_size/low_res_v_size/
-    # membrane_potential_scale/seed fields are then unused.
+    # Path to a pre-built (Z, Y, X) scattering-potential volume (.mrc/.mrcs/.pt),
+    # e.g. `specter build tomogram`'s own output. Required.
     volume_path: str = ""
 
-    # --- Specimen placement (CryoETSpecimenGenerator; unused if volume_path is set) ---
-    # One dict per protein species, e.g. {"PDB_CODE": "6qzp", "PMER_OCC": 0.6}.
-    # Only "PDB_CODE" is required; see CryoETSpecimenGenerator's docstring for
-    # the other optional polnet-style keys (PMER_OCC, PMER_L, PMER_L_MAX,
-    # PMER_OVER_TOL, MMER_ISO). In TOML, provide as [[protein_specs]] tables.
-    protein_specs: list[dict[str, Any]] = field(default_factory=list)
-    # One dict per membrane species/population, polnet .mbs-equivalent keys
-    # (MB_TYPE, MB_THICK_RG, MB_LAYER_S_RG, MB_OCC_RG, MB_OVER_TOL,
-    # MB_DEN_CF_RG, MB_MIN_RAD/MB_MAX_RAD or MB_MIN_AXIS/MB_MAX_AXIS/
-    # MB_MAX_ECC). In TOML, provide as [[membrane_specs]] tables.
-    membrane_specs: list[dict[str, Any]] = field(default_factory=list)
-    # Generic cytosolic filler (build_filler_protein_specs) total occupancy,
-    # added on top of protein_specs to avoid an empty/flat background. None
-    # disables it.
-    filler_occupancy: float | None = None
-    pdb_savefolder: str = "pdb-data"  # resolved against REPO_ROOT if relative
-    target_shape: list[int] = field(
-        default_factory=lambda: [184, 630, 630]
-    )  # (Z, Y, X) voxels
-    target_v_size: float = 5.0  # Å/voxel
-    low_res_v_size: float = 10.0  # Å/voxel, polnet's placement-pass resolution
-    membrane_potential_scale: float = (
-        1.0  # unitless, on top of the auto-calibrated reference
-    )
-    seed: int | None = None
-
     # --- Microscope / physics ---
+    # Å/voxel of the loaded volume -- must match whatever produced it (e.g.
+    # `TomogramConfig.v_size`), not auto-detected from the file itself.
+    target_v_size: float = 5.0
     micrograph_size: int | None = (
-        None  # pixels, square; defaults to target_shape's XY extent
+        None  # pixels, square; defaults to the loaded volume's own XY extent
     )
     voltage: float = 300.0  # kV
     dose_per_tilt: float = 3.0  # e⁻/Å², per tilt angle
@@ -468,23 +444,10 @@ class TiltSeriesConfig:
 # text happen in the same place.
 TILT_SERIES_HELP: dict[str, str] = {
     "volume_path": "Path to a pre-built (Z, Y, X) scattering-potential volume "
-    "(.mrc/.mrcs/.pt), already in scattering-potential units. When set, this "
-    "is loaded directly instead of running polnet placement.",
-    "protein_specs": "polnet protein species (TOML-only, [[protein_specs]] "
-    "tables). Unused when volume_path is set.",
-    "membrane_specs": "polnet membrane species (TOML-only, [[membrane_specs]] "
-    "tables). Unused when volume_path is set.",
-    "filler_occupancy": "Total occupancy of generic cytosolic filler added on "
-    "top of protein_specs. None disables it. Unused when volume_path is set.",
-    "pdb_savefolder": "Folder to cache downloaded PDB files.",
-    "target_shape": "Output specimen volume shape in voxels (Z, Y, X). "
-    "Unused when volume_path is set.",
-    "target_v_size": "Target voxel size in Angstrom. Unused when volume_path is set.",
-    "low_res_v_size": "Voxel size used for polnet's low-resolution placement "
-    "pass, in Angstrom. Unused when volume_path is set.",
-    "membrane_potential_scale": "Membrane potential scale factor, on top of "
-    "the auto-calibrated reference. Unused when volume_path is set.",
-    "seed": "Random seed for polnet's placement. Unused when volume_path is set.",
+    "(.mrc/.mrcs/.pt), already in scattering-potential units -- e.g. `specter "
+    "build tomogram`'s own output. Required.",
+    "target_v_size": "Voxel size of the loaded volume, in Angstrom -- must "
+    "match whatever produced it.",
     "micrograph_size": "Output tilt-image size in pixels (square). Defaults "
     "to the XY dimension of the specimen volume.",
     "voltage": "Electron beam accelerating voltage in kV.",
@@ -963,7 +926,10 @@ def load_config(
             flat.update(value)
     flat.update({k: v for k, v in raw.items() if not isinstance(v, dict)})
     config = config_cls(**flat)
-    if not os.path.isabs(config.pdb_savefolder):
+    # Not every config dataclass has pdb_savefolder (e.g. TiltSeriesConfig,
+    # the imaging-only half of the cryo-ET pipeline, has no PDB fetching of
+    # its own) -- resolve it against REPO_ROOT only when present.
+    if hasattr(config, "pdb_savefolder") and not os.path.isabs(config.pdb_savefolder):
         config.pdb_savefolder = str(REPO_ROOT / config.pdb_savefolder)
     return config
 

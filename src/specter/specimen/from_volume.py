@@ -1,7 +1,7 @@
 """Load a pre-built specimen volume from disk, for `TiltSeriesConfig`'s
 ``volume_path`` -- the "user already has a specimen volume" path, as opposed
-to building one in-process via `CryoETSpecimenGenerator` (polnet placement)
-or `MicrographSpecimenGenerator`.
+to building one in-process via `build_tomogram_generator`/`specter build
+tomogram` or `MicrographSpecimenGenerator`.
 """
 
 from __future__ import annotations
@@ -20,9 +20,8 @@ def load_specimen_volume(path: str) -> torch.Tensor:
     path : str
         Path to the volume file. ``.mrc``/``.mrcs`` are loaded via
         ``mrcfile`` (its on-disk storage order already matches specter's own
-        ``(Z, Y, X)`` convention -- no axis swap needed, see
-        ``specimen/polnet_bridge.py``'s note on this). ``.pt`` is loaded via
-        ``torch.load``.
+        ``(Z, Y, X)`` convention -- no axis swap needed). ``.pt`` is loaded
+        via ``torch.load``.
 
     Returns
     -------

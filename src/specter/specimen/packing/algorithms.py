@@ -35,7 +35,7 @@ import torch.nn.functional as F
 # is evaluated over a +/-2.5 A box around it, so a molecule's bounding box
 # needs at least this much margin beyond its outermost atom or that atom's
 # kernel gets truncated by convolution. Same value as
-# specimen/polnet_bridge.py's ATOM_KERNEL_HALF_WIDTH_A -- kept as an
+# specimen/membrane/_profile.py's ATOM_KERNEL_HALF_WIDTH_A -- kept as an
 # independent local constant (not imported) to keep this module's
 # dependencies limited, matching this codebase's established
 # per-generator zero-cross-coupling convention.

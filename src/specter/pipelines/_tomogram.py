@@ -253,7 +253,28 @@ def _cap_membrane_auto_size_ranges(
     return instance_kwargs
 
 
-def _build_tomogram_generator(config: TomogramConfig) -> MembraneTomogramGenerator:
+def build_tomogram_generator(config: TomogramConfig) -> MembraneTomogramGenerator:
+    """
+    Build a `MembraneTomogramGenerator` from a `TomogramConfig`, without
+    calling `.generate()` or writing anything to disk.
+
+    This is the same config-to-generator translation `run_build_tomogram`
+    uses internally, exposed directly for callers (e.g. notebooks) that
+    want the assembled volume tensor and the generator's own inspectable
+    attributes (`.placements`, `.regions`, `.membrane_labels`, etc.)
+    in-process, without a disk round-trip through `.mrc` + `load_specimen_volume`.
+
+    Parameters
+    ----------
+    config : TomogramConfig
+        Fully-resolved run configuration, e.g. from
+        :func:`specter.config.load_config`.
+
+    Returns
+    -------
+    MembraneTomogramGenerator
+        Not yet `.generate()`-called.
+    """
     protein_specs = _protein_specs_from_dicts(
         config.targets
     ) + _protein_specs_from_dicts(config.filler)
@@ -436,7 +457,7 @@ def _run_single_tomogram(config: TomogramConfig) -> None:
         f"{size_angstrom[1]:.0f} x {size_angstrom[2]:.0f} A"
     )
 
-    gen = _build_tomogram_generator(config)
+    gen = build_tomogram_generator(config)
     volume = gen.generate()
     if gen.membrane_instances:
         _console.print(f"  Membrane instances: {len(gen.membrane_instances)}")

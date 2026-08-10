@@ -1,6 +1,6 @@
 # Generate a tilt series
 
 !!! info "Work in progress"
-    Will cover `generate_tilt_series.py`, cryo-ET specimen building with
-    `CryoETSpecimenGenerator`, and matching a real tilt series via
-    AreTomo3 alignment files.
+    Will cover `specter build tomogram` + `specter simulate tiltseries`
+    (or the combined `generate_tilt_series.py` convenience script), and
+    matching a real tilt series via AreTomo3 alignment files.

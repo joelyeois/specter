@@ -1,0 +1,30 @@
+# Small/fast specimen so this notebook's specimen-building step finishes in
+# a couple of minutes. Scale target_shape/v_size/n_copies up for production
+# runs -- see configs/tomogram.toml for full/canonical defaults.
+
+[targets]
+targets = [
+    { pdb_source = "7VD8", n_copies = 2 },  # apoferritin
+    { pdb_source = "6QZP", n_copies = 1 },  # ribosome
+    { pdb_source = "7B75", n_copies = 1 },  # thyroglobulin
+    { pdb_source = "6N4V", n_copies = 1 },  # virus-like particle
+    { pdb_source = "6DRV", n_copies = 1 },  # beta-galactosidase
+    { pdb_source = "1FA2", n_copies = 1 },  # beta-amylase
+]
+
+[[membrane]]
+shape_backend = "spherical_harmonics"
+sh_axes_a = [80.0, 80.0, 80.0]
+
+[specimen]
+# generic cytosolic filler; off by default so this notebook finishes
+# quickly. Uncomment to enable:
+# filler_from_pei2016 = true
+target_shape = [64, 160, 160]   # (Z, Y, X) voxels -- modest, finishes quickly
+v_size = 5.0                    # Å/voxel
+filler_occupancy_fraction = 0.0
+seed = 11
+
+[output]
+output_dir = "./output/"
+filename = "tilt_series_specimen"

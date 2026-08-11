@@ -92,13 +92,16 @@ packing hundreds of filler instances can be slow or OOM — which is why
 `accumulator_device = "auto"`, and `chunk_size = 64`. Most runs can just
 keep those `"auto"` defaults rather than hand-tuning:
 
+- **`device`** — `cpu | cuda | cuda:0 | 0,1,2 | auto`. A comma-separated
+  list of GPU indices (or `"auto"`, every visible GPU) pools those GPUs for
+  concurrent per-species rendering instead of a single device; the first
+  entry becomes the primary device for everything else (packing itself
+  always runs on CPU regardless).
 - **`render_workers`** — how many PDB species render/fetch concurrently.
   `"auto"` picks `min(n_species, 8)`, the measured sweet spot from a
   production-scale sweep (TOML/Python config only — the `--render_workers`
-  CLI flag stays integer-only).
-- **`render_devices`** — an optional device pool (e.g. `["cuda:0",
-  "cuda:1"]`) to round-robin those concurrent species across on a
-  multi-GPU machine; `"auto"` uses every visible GPU.
+  CLI flag stays integer-only). Device choice was measured to barely
+  matter at this worker count.
 - **`accumulator_device`** — device for the shared canvas tensors,
   decoupled from `device` (which stays the compute device regardless).
   `"auto"` estimates the canvas' memory footprint and falls back to CPU
@@ -108,9 +111,6 @@ keep those `"auto"` defaults rather than hand-tuning:
   Only matters once a filler species' instance count reaches the hundreds
   (a single unchunked batch has been measured at 8+ GB); leave unset for
   small runs.
-
-If you do need to reason about these directly, `configs/tomogram.toml`'s
-comments walk through the concrete OOM numbers that motivated each default.
 
 ## Benchmarks: resolution vs. time and memory
 

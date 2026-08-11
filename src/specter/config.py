@@ -676,6 +676,12 @@ class TomogramConfig:
     write_segmentation: bool = True
 
     # --- Compute ---
+    # "cpu" | "cuda" | "cuda:0" | a bare GPU index ("0") | a comma-separated
+    # list of GPU indices ("0,1,2") to pool multiple GPUs for concurrent
+    # per-species rendering (see render_workers below) | "auto" to pool
+    # every visible CUDA GPU. A pooled value's first entry becomes the
+    # primary device for everything else (see
+    # specter.specimen._parallel_render.parse_device_pool).
     device: str = "cpu"
     # Device for the shared canvas tensors (volume/instance_labels/
     # membrane_labels), decoupled from `device` above (which stays the
@@ -706,15 +712,6 @@ class TomogramConfig:
     # from a full production-scale sweep (see that function's own
     # docstring); recommended over hand-picking a number.
     render_workers: int | Literal["auto"] = 1
-    # Optional device pool to round-robin those concurrent species across
-    # (e.g. ["cuda:0", "cuda:1"] on a multi-GPU machine). None (default):
-    # every species renders on `device` above, still concurrently across
-    # render_workers threads, just not spread across multiple physical
-    # devices. "auto": every visible CUDA GPU (or None/CPU-fallback if
-    # there aren't any) -- device choice was measured to barely matter at
-    # the recommended worker count, so this doesn't try to be clever about
-    # which subset to use. TOML-only (list[str] | "auto").
-    render_devices: list[str] | Literal["auto"] | None = None
     # Instances rotated per GPU batch, per species, in the targets/filler
     # protein-fill stage (MembraneTomogramGenerator's own chunk_size --
     # rotate_volume batches ALL of a species' accepted instances into one
@@ -833,12 +830,15 @@ TOMOGRAM_HELP: dict[str, str] = {
     "does). {filename}_protein_labels.mrc is always written; "
     "{filename}_membrane_labels.mrc and {filename}_regions.mrc "
     "(0=cytosol/1=shell/2=lumen) are added when [[membrane]] is set.",
-    "device": "cpu | cuda | cuda:0. Drives the whole "
+    "device": "cpu | cuda | cuda:0 | 0,1,2 | auto. Drives the whole "
     "MembraneGenerator/MembraneTomogramGenerator pipeline (shape field, "
     "bilayer profile, rasterization, transmembrane/targets/filler "
     "PotentialBuilder rendering) -- packing itself always runs on CPU "
     "regardless (vesin's neighbor list is both slower and OOM-prone on "
-    "GPU at realistic particle counts).",
+    "GPU at realistic particle counts). A comma-separated list of GPU "
+    "indices (or 'auto', every visible GPU) pools those GPUs for "
+    "concurrent per-species rendering (see render_workers); the first "
+    "entry becomes the primary device for everything else.",
     "accumulator_device": "Device for the shared canvas tensors "
     "(volume/instance_labels/membrane_labels), decoupled from 'device' "
     "above (which stays the compute device regardless). None (default): "
@@ -860,13 +860,10 @@ TOMOGRAM_HELP: dict[str, str] = {
     "--render_workers CLI flag stays integer-only) to pick min(n_species, "
     "8) per pool automatically, the measured sweet spot from a full "
     "production-scale sweep -- see "
-    "specter.specimen._parallel_render.recommend_render_workers.",
-    "render_devices": "TOML-only (list[str] | 'auto'): device pool to "
-    "round-robin those concurrent species across, e.g. ['cuda:0', "
-    "'cuda:1']. None (default) keeps every species on `device` above, "
-    "still concurrent across render_workers threads. 'auto' uses every "
-    "visible CUDA GPU (falls back to `device` if none) -- device choice "
-    "was measured to barely matter at the recommended worker count.",
+    "specter.specimen._parallel_render.recommend_render_workers. Round-"
+    "robins across device's GPU pool when device is set to a "
+    "comma-separated list or 'auto' (see device above); device choice was "
+    "measured to barely matter at the recommended worker count.",
     "chunk_size": "Instances rotated per GPU batch, per species, when "
     "rendering targets/filler. None (default) rotates all of a species' "
     "accepted instances in one batched call -- fine at small scale, but a "

@@ -108,15 +108,21 @@ def test_membrane_config_entry_dict_never_mutated():
 
 
 def test_render_workers_and_devices_reach_membrane_tomogram_generator():
+    # A comma-separated `device` pools multiple GPUs for concurrent
+    # per-species rendering (see specter.specimen._parallel_render.
+    # parse_device_pool) -- torch.device("cuda:N") is a valid descriptor
+    # regardless of whether GPU N is actually present, so this doesn't
+    # need real multi-GPU hardware to test the wiring.
     config = TomogramConfig(
         membrane=[{"shape_backend": "spherical_harmonics", "n_instances": 2}],
         render_workers=4,
-        render_devices=["cpu"],
+        device="0,1",
         **_BASE_KWARGS,
     )
     gen = build_tomogram_generator(config)
     assert gen.render_workers == 4
-    assert gen.render_devices == [torch.device("cpu")]
+    assert gen.render_devices == [torch.device("cuda:0"), torch.device("cuda:1")]
+    assert gen.device == "cuda:0"
     # Every MembraneGenerator instance still gets its own default (1) --
     # transmembrane_specs is empty in _BASE_KWARGS, so there's nothing for
     # a per-instance render pass to parallelize anyway (see

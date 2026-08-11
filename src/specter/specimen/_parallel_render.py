@@ -114,6 +114,47 @@ def recommend_render_devices() -> list[str] | None:
     return [f"cuda:{i}" for i in range(n_gpus)]
 
 
+def parse_device_pool(device: str) -> tuple[str, list[str] | None]:
+    """
+    Parse a single `device` config/CLI value into a primary device and an
+    optional multi-device pool for concurrent per-species rendering.
+
+    Lets config/CLI callers set one field instead of two separate
+    `device`/`render_devices` values. A scalar (`"cpu"`, `"cuda"`,
+    `"cuda:0"`, or a bare GPU index like `"0"`) means "everything on this
+    one device" -- unchanged from the pre-merge `device`-only behaviour.
+    A comma-separated list of GPU indices (`"0,1,2"`) pools those GPUs for
+    per-species rendering, with the first as the primary device for
+    everything else (membrane/filament generation, rotation, accumulator
+    sizing). `"auto"` pools every visible CUDA GPU (see
+    `recommend_render_devices`), falling back to `"cpu"` if none are
+    visible.
+
+    Parameters
+    ----------
+    device : str
+
+    Returns
+    -------
+    primary : str
+        Device for everything outside per-species rendering.
+    pool : list[str] or None
+        Pass straight through as `resolve_render_devices`'s own
+        `render_devices` argument. None means no pooling: render on
+        `primary` alone.
+    """
+    if device == "auto":
+        pool = recommend_render_devices()
+        return (pool[0] if pool else "cpu"), pool
+    parts = [p.strip() for p in device.split(",")]
+    if len(parts) > 1:
+        pool = [f"cuda:{p}" if p.isdigit() else p for p in parts]
+        return pool[0], pool
+    if parts[0].isdigit():
+        return f"cuda:{parts[0]}", None
+    return device, None
+
+
 def resolve_render_workers(
     render_workers: int | Literal["auto"],
     n_species: int,

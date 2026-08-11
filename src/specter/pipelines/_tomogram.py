@@ -49,6 +49,7 @@ from specter.specimen import (
 )
 from specter.specimen._parallel_render import (
     build_templates_concurrently,
+    parse_device_pool,
     resolve_render_devices,
     resolve_render_workers,
 )
@@ -275,6 +276,8 @@ def build_tomogram_generator(config: TomogramConfig) -> MembraneTomogramGenerato
     MembraneTomogramGenerator
         Not yet `.generate()`-called.
     """
+    device, render_devices = parse_device_pool(config.device)
+
     protein_specs = _protein_specs_from_dicts(
         config.targets
     ) + _protein_specs_from_dicts(config.filler)
@@ -315,13 +318,13 @@ def build_tomogram_generator(config: TomogramConfig) -> MembraneTomogramGenerato
     # copies below -- otherwise each instance's own MembraneGenerator would
     # redundantly rebuild the same handful of species from scratch (see
     # render_transmembrane_template's own docstring). Rendering itself can
-    # run concurrently across config.render_workers/config.render_devices
+    # run concurrently across config.render_workers/device's own GPU pool
     # (see TomogramConfig.render_workers's own docstring); attaching the
     # result via dataclasses.replace(..., template=...) makes every
     # downstream MembraneGenerator._build_template call a no-op cache hit
     # regardless of how many instances end up sharing it.
     if transmembrane_specs:
-        devices = resolve_render_devices(config.device, config.render_devices)
+        devices = resolve_render_devices(device, render_devices)
         workers = resolve_render_workers(
             config.render_workers, len(transmembrane_specs)
         )
@@ -398,7 +401,7 @@ def build_tomogram_generator(config: TomogramConfig) -> MembraneTomogramGenerato
                 v_size=config.v_size,
                 transmembrane_specs=list(transmembrane_specs),
                 pdb_cache_dir=config.pdb_savefolder,
-                device=config.device,
+                device=device,
                 seed=instance_seed,
                 **instance_kwargs,
             )
@@ -430,10 +433,10 @@ def build_tomogram_generator(config: TomogramConfig) -> MembraneTomogramGenerato
         pdb_cache_dir=config.pdb_savefolder,
         parameterization=config.parameterization,
         seed=config.seed,
-        device=config.device,
+        device=device,
         accumulator_device=config.accumulator_device,
         render_workers=config.render_workers,
-        render_devices=config.render_devices,  # type: ignore[arg-type]
+        render_devices=render_devices,  # type: ignore[arg-type]
         chunk_size=config.chunk_size,
     )
 

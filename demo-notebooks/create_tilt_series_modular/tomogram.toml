@@ -1,26 +1,95 @@
-# Small/fast specimen so this notebook's specimen-building step finishes
-# quickly -- the focus of this notebook is the per-stage imaging pipeline
-# below it, not specimen complexity. Scale target_shape/v_size/n_copies up
-# for production runs -- see configs/tomogram.toml for full/canonical
-# defaults.
+# Specimen config for this notebook -- same composition/style as the canonical
+# configs/tomogram.toml, just a smaller box for a quick demo. Loaded below via
+# load_config("tomogram.toml", TomogramConfig). Full field docs:
+# docs/user-guide/build-tomogram.md (or `specter build tomogram --help`).
+# The notebook itself only syncs tilt_series_generator_modular.toml's
+# target_v_size to this file's own v_size below -- everything else about the
+# specimen is edited here, not in the notebook.
 
 [targets]
 targets = [
-    { pdb_source = "7VD8", n_copies = 2 },  # apoferritin
-    { pdb_source = "6QZP", n_copies = 1 },  # ribosome
-    { pdb_source = "1FA2", n_copies = 1 },  # beta-amylase
+    { pdb_source = "7VD8", n_copies = 15 },  # apoferritin
+    { pdb_source = "1FA2", n_copies = 15 },  # beta-amylase
+    { pdb_source = "6DRV", n_copies = 15 },  # beta-galactosidase
+    { pdb_source = "6QZP", n_copies = 15 },  # ribosome
+    { pdb_source = "7B75", n_copies = 15 },  # thyroglobulin
+    { pdb_source = "6N4V", n_copies = 15 },  # virus-like particle
 ]
 
+[filler]
+filler = [
+    { pdb_source = "1fa2", location = "lumen" },  # beta amylase, as an example lumen filler
+]
+
+filler_from_pei2016 = true
+
+# No explicit size range here (unlike configs/tomogram.toml's production-scale
+# entries) -- omitting it lets each instance auto-cap its own draw to a
+# fraction of [specimen]'s own target_shape box below (see
+# _cap_membrane_auto_size_ranges in specter.pipelines._tomogram).
 [[membrane]]
 shape_backend = "spherical_harmonics"
-sh_axes_a = [70.0, 70.0, 70.0]
+bilayer_thickness_a = 30.0
+max_output_voxels = 12_000_000_000
+n_instances = 3
+
+[[membrane]]
+shape_backend = "swept_spline"
+bilayer_thickness_a = 30.0
+max_output_voxels = 12_000_000_000
+n_instances = 3
+
+[[membrane_transmembrane_specs]]
+pdb_source = "1C3W"  # bacteriorhodopsin
+frequency = 10
+
+[membrane_settings]
+membrane_region_density_threshold = 0.05
+membrane_min_transmembrane_spacing_a = 40.0
+parameterization = "shtyrov"
+
+# Filaments -- optional. Either hand-write [[filaments]] entries (FilamentSpec
+# kwargs) or set `actin = true` for the built-in ACTIN_SPEC preset. Uncomment to add:
+# [[filaments]]
+# code = "1J6Z"          # F-actin monomer
+# step = 27.3            # axial rise per monomer, A
+# flex_deg = 12.0        # max per-step path curvature, degrees
+# twist_deg = 166.15     # helical twist per monomer, degrees
+# n_filaments = 20
+# n_monomers = [20, 60]
+
+# Carbon support film -- optional, at most one [[grid]] table. Uncomment to add:
+# [[grid]]
+# hole_radius = 6000.0          # A (0.6 micron, Quantifoil R1.2/1.3)
+# edge_fraction = [0.02, 0.05]  # fraction of the frame that ends up carbon
+# edge_side = "random"          # "left" | "right" | "top" | "bottom" | "random"
+
+# Gold fiducial beads -- optional, one [[beads]] table per radius population.
+# Uncomment to add:
+# [[beads]]
+# radius = 100.0
+# count = 20
 
 [specimen]
-target_shape = [56, 144, 144]   # (Z, Y, X) voxels -- modest, finishes quickly
-v_size = 5.0                    # Å/voxel
-filler_occupancy_fraction = 0.0
-seed = 11
+target_shape = [128, 256, 256]      # (Z, Y, X) voxels -- small/fast; raise for denser results
+v_size = 10.0                        # A/voxel -- notebook syncs tilt_series_generator_modular.toml's target_v_size to this
+filler_occupancy_fraction = 0.5
+gap_angstrom = 5.0                  # minimum clearance between placed spheres, A
+pdb_savefolder = "pdb-data"         # resolved relative to the repo root
+# seed = 11                         # uncomment for reproducible packing
+clip_axes = [true, true, true]      # (z, y, x) -- True lets instances poke past that wall
+
+[picks]
+write_picks = true
+annotation_version = "1.0"
+write_segmentation = true
+
+[compute]
+device = "cuda"                     # cpu | cuda | cuda:0 | 0,1,2 | auto
+accumulator_device = "auto"
+render_workers = "auto"
+chunk_size = 64
 
 [output]
 output_dir = "./output/"
-filename = "tilt_series_modular_specimen"
+filename = "tomogram"

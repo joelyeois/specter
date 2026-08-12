@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import math
 from typing import Any, Literal, Sequence
 
 import roma
@@ -9,6 +8,7 @@ import torch.nn.functional as F
 from ..progress import status, track
 
 from .. import rotations
+from .. import tilt as tilt_geometry
 from ..ice import IceBank, RandomIcemaker, blend_ice_into_volume, resolve_icemaker
 from ._micrograph import MicrographGenerator
 from ..scattering import IterativeScattering
@@ -196,140 +196,6 @@ class TiltSeriesGenerator(MicrographGenerator):
     """
 
     # ------------------------------------------------------------------ #
-    # Static helpers for geometry calculations                             #
-    # ------------------------------------------------------------------ #
-
-    @staticmethod
-    def _estimate_required_nxy(
-        desired_nxy: int, nz: int, max_tilt_angle_deg: float
-    ) -> int:
-        """Minimum XY size so the tilted projection still covers ``desired_nxy`` pixels."""
-        theta_rad = math.radians(max_tilt_angle_deg)
-        cos_t = math.cos(theta_rad)
-        sin_t = math.sin(theta_rad)
-        return math.ceil((desired_nxy + nz * sin_t) / cos_t)
-
-    @staticmethod
-    def _estimate_max_allowed_nxy(
-        available_nxy: int, nz: int, max_tilt_angle_deg: float
-    ) -> int:
-        """Maximum output XY achievable given the available volume at this tilt."""
-        theta_rad = math.radians(max_tilt_angle_deg)
-        cos_t = math.cos(theta_rad)
-        sin_t = math.sin(theta_rad)
-        return math.ceil(available_nxy * cos_t - nz * sin_t)
-
-    @staticmethod
-    def _estimate_max_allowed_tilt_deg(
-        desired_nxy: int, nz: int, available_nxy: int
-    ) -> float:
-        """Largest tilt (degrees) such that the available volume still covers ``desired_nxy``."""
-        thetas_deg = torch.linspace(0.0, 89.9, 4000)
-        thetas_rad = torch.deg2rad(thetas_deg)
-        spans = available_nxy * torch.cos(thetas_rad) - nz * torch.sin(thetas_rad)
-        valid = spans >= desired_nxy
-        if not bool(valid.any()):
-            return 0.0
-        return float(thetas_deg[valid][-1].item())
-
-    @staticmethod
-    def _infer_max_tilt_from_inputs(angles=None, quaternions=None) -> float:
-        """Infer max tilt magnitude in degrees from provided poses."""
-        if angles is not None:
-            return angles.abs().max()
-        if quaternions is not None:
-            rotvecs = roma.unitquat_to_rotvec(torch.as_tensor(quaternions))
-            max_angle_rad = torch.linalg.norm(rotvecs, dim=-1).max()
-            return max_angle_rad * (180.0 / torch.pi)
-        return 0.0
-
-    @staticmethod
-    def _pad_vol_xy_for_tilt(
-        vol: torch.Tensor, required_nxy: int, available_nxy: int
-    ) -> torch.Tensor:
-        """
-        Pad ``vol`` symmetrically in XY using reflect mode to reach ``required_nxy``.
-
-        Parameters
-        ----------
-        vol : torch.Tensor
-            Volume of shape (..., Z, Y, X).
-        required_nxy : int
-            Target XY size after padding.
-        available_nxy : int
-            Current XY extent of ``vol``.
-
-        Returns
-        -------
-        vol : torch.Tensor
-            Reflect-padded volume.
-        """
-        pad_each_side = (required_nxy - available_nxy + 1) // 2
-        return F.pad(
-            vol,
-            (pad_each_side, pad_each_side, pad_each_side, pad_each_side, 0, 0),
-            mode="reflect",
-        )
-
-    @staticmethod
-    def _get_cosine_window(n: int, taper_px: int, device, dtype) -> torch.Tensor:
-        """1-D cosine window of length ``n`` with ``taper_px``-wide fade at each end."""
-        win = torch.ones(n, device=device, dtype=dtype)
-        taper_px = min(taper_px, n // 2)
-        if taper_px <= 0:
-            return win
-        ramp = 0.5 * (
-            1
-            - torch.cos(
-                torch.pi * torch.linspace(0, 1, taper_px, device=device, dtype=dtype)
-            )
-        )
-        win[:taper_px] = ramp
-        win[-taper_px:] = ramp.flip(0)
-        return win
-
-    @staticmethod
-    def _apply_cosine_taper(
-        vol: torch.Tensor, taper_xy: int = 0, taper_z: int = 0
-    ) -> torch.Tensor:
-        """
-        Apply a cosine taper to the XY and/or Z edges of the volume.
-
-        Parameters
-        ----------
-        vol : torch.Tensor
-            Volume of shape (..., Z, Y, X).
-        taper_xy : int
-            Taper width in XY pixels. 0 to skip.
-        taper_z : int
-            Taper width in Z pixels. 0 to skip.
-
-        Returns
-        -------
-        vol : torch.Tensor
-            Volume with taper applied.
-        """
-        if taper_xy <= 0 and taper_z <= 0:
-            return vol
-
-        nz, ny, nx = vol.shape[-3], vol.shape[-2], vol.shape[-1]
-        device, dtype = vol.device, vol.dtype
-        mask = torch.ones(1, device=device, dtype=dtype)
-
-        if taper_xy > 0:
-            win_y = TiltSeriesGenerator._get_cosine_window(ny, taper_xy, device, dtype)
-            win_x = TiltSeriesGenerator._get_cosine_window(nx, taper_xy, device, dtype)
-            mask = mask * win_y[:, None] * win_x[None, :]
-
-        if taper_z > 0:
-            win_z = TiltSeriesGenerator._get_cosine_window(nz, taper_z, device, dtype)
-            mask = (
-                win_z[:, None, None] * mask if mask.ndim == 2 else win_z[:, None, None]
-            )
-
-        return vol * mask
-
-    # ------------------------------------------------------------------ #
     # Initialisation                                                       #
     # ------------------------------------------------------------------ #
 
@@ -423,13 +289,13 @@ class TiltSeriesGenerator(MicrographGenerator):
         if self.tilt_axis not in ["x", "y"]:
             raise ValueError(f"Unsupported tilt_axis: {tilt_axis}. Use 'x' or 'y'.")
 
-        max_tilt_angle_deg = self._infer_max_tilt_from_inputs(
+        max_tilt_angle_deg = tilt_geometry.infer_max_tilt_from_inputs(
             angles=angles, quaternions=quaternions
         )
 
         nz_input = int(vol.shape[-3])
         available_nxy = int(min(vol.shape[-2], vol.shape[-1]))
-        required_nxy = self._estimate_required_nxy(
+        required_nxy = tilt_geometry.estimate_required_nxy(
             desired_nxy=desired_nxy,
             nz=nz_input,
             max_tilt_angle_deg=max_tilt_angle_deg,
@@ -442,10 +308,12 @@ class TiltSeriesGenerator(MicrographGenerator):
         self.recommended_nxy_for_max_tilt = required_nxy
         self.edge_margin = int(edge_margin)
         self.max_tilt_angle_deg = float(max_tilt_angle_deg)
-        self.max_allowed_tilt_deg_for_volume = self._estimate_max_allowed_tilt_deg(
-            desired_nxy=desired_nxy, nz=nz_input, available_nxy=available_nxy
+        self.max_allowed_tilt_deg_for_volume = (
+            tilt_geometry.estimate_max_allowed_tilt_deg(
+                desired_nxy=desired_nxy, nz=nz_input, available_nxy=available_nxy
+            )
         )
-        self.max_allowed_nxy = self._estimate_max_allowed_nxy(
+        self.max_allowed_nxy = tilt_geometry.estimate_max_allowed_nxy(
             available_nxy=available_nxy,
             nz=nz_input,
             max_tilt_angle_deg=max_tilt_angle_deg,
@@ -453,7 +321,7 @@ class TiltSeriesGenerator(MicrographGenerator):
 
         if available_nxy < target_nxy:
             if pad_volume:
-                vol = self._pad_vol_xy_for_tilt(vol, target_nxy, available_nxy)
+                vol = tilt_geometry.pad_vol_xy_for_tilt(vol, target_nxy, available_nxy)
                 msg = (
                     "[TiltSeriesGenerator] Volume XY too small for requested tilt coverage"
                     + (" and taper" if taper_width > 0 else "")
@@ -502,7 +370,7 @@ class TiltSeriesGenerator(MicrographGenerator):
             )
 
         if taper_width > 0 or z_taper_width > 0:
-            vol = self._apply_cosine_taper(
+            vol = tilt_geometry.apply_volume_cosine_taper(
                 vol, taper_xy=int(taper_width), taper_z=int(z_taper_width)
             )
             if taper_width > 0:
@@ -639,58 +507,6 @@ class TiltSeriesGenerator(MicrographGenerator):
     # Forward methods                                                      #
     # ------------------------------------------------------------------ #
 
-    @staticmethod
-    def get_nz_tilt(V: torch.Tensor, theta_matrix: torch.Tensor) -> int:
-        """
-        Number of Z slices needed to fully cover the tilted volume.
-
-        A pure function of ``V``'s shape and the pose -- doesn't touch any
-        instance state, so (like ``_estimate_required_nxy``/
-        ``_pad_vol_xy_for_tilt`` above) it's reusable standalone, e.g. from
-        code that composes ``IterativeScattering``/``Aberration``/``Detector``
-        by hand instead of going through this class (see
-        ``demo-notebooks/create_tilt_series_modular/``).
-
-        Parameters
-        ----------
-        V : torch.Tensor
-            Volume of shape (B, Z, Y, X).
-        theta_matrix : torch.Tensor
-            Affine transformation matrix of shape (B, 3, 4) or (B, 4, 4).
-
-        Returns
-        -------
-        nz_new : int
-            Number of slices.
-        """
-        B, Z, Y, X = V.shape
-        device = V.device
-        theta_matrix = theta_matrix.to(device)
-        R = theta_matrix[:, :3, :3]
-
-        corners = torch.tensor(
-            [
-                [-X / 2, -Y / 2, -Z / 2],
-                [X / 2, -Y / 2, -Z / 2],
-                [-X / 2, Y / 2, -Z / 2],
-                [X / 2, Y / 2, -Z / 2],
-                [-X / 2, -Y / 2, Z / 2],
-                [X / 2, -Y / 2, Z / 2],
-                [-X / 2, Y / 2, Z / 2],
-                [X / 2, Y / 2, Z / 2],
-            ],
-            device=device,
-            dtype=V.dtype,
-        ).t()  # (3, 8)
-
-        rotated_corners = torch.bmm(
-            R.transpose(1, 2), corners.unsqueeze(0).expand(B, -1, -1)
-        )
-        z_min = rotated_corners[:, 2, :].min(dim=1).values
-        z_max = rotated_corners[:, 2, :].max(dim=1).values
-        nz_new = int(torch.ceil((z_max - z_min).max()).item())
-        return max(1, nz_new)
-
     def generate_tilt_series(
         self, idx: int | torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -743,12 +559,13 @@ class TiltSeriesGenerator(MicrographGenerator):
 
             ctf_batch = self._ctf_batch(idx)
             if self.scattering_model not in ["projection", "ctf"]:
-                nz_new = self.get_nz_tilt(self.vol, theta_matrix)
-                z_offset = (nz_new - self.nz) * self.pixel_size / 2.0
-                if "dfu" in ctf_batch:
-                    ctf_batch["dfu"] = ctf_batch["dfu"] - z_offset
-                if "dfv" in ctf_batch:
-                    ctf_batch["dfv"] = ctf_batch["dfv"] - z_offset
+                ctf_batch = tilt_geometry.shift_ctf_defocus_for_tilt(
+                    ctf_batch,
+                    tuple(self.vol.shape),
+                    theta_matrix,
+                    self.nz,
+                    self.pixel_size,
+                )
 
             detector_waves = self.aberration(exitwave, ctf_batch)
 

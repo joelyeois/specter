@@ -3,6 +3,7 @@ from ._bank import (
     blend_ice_into_volume,
     build_ice_cache,
     default_ice_cache_dir,
+    ice_blend_mask,
     random_rotation_matrix,
     resolve_icemaker,
 )
@@ -31,6 +32,7 @@ __all__ = [
     "blend_ice_into_volume",
     "build_ice_cache",
     "default_ice_cache_dir",
+    "ice_blend_mask",
     "random_rotation_matrix",
     "resolve_icemaker",
     "MLBOP",

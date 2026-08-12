@@ -55,6 +55,15 @@ def random_rotation_matrix(generator: torch.Generator | None = None) -> torch.Te
     QR decomposition of a random Gaussian matrix (Mezzadri, 2007), sign- and
     determinant-corrected for a proper rotation (no reflection).
 
+    Deliberately *not* :func:`specter.rotations.random_rotation_matrix`
+    (roma-based): roma's ``random_rotmat``/``random_unitquat`` only forwards
+    the given ``generator`` to one of its three underlying random draws (the
+    other two always fall back to the global RNG -- confirmed empirically,
+    not documented), so it cannot give the fully generator-reproducible
+    output :meth:`IceBank._extract_crop` needs. This QR-based path's only
+    random draw is the single ``torch.randn(..., generator=generator)``
+    below, so it is.
+
     Parameters
     ----------
     generator : torch.Generator, optional
@@ -1383,6 +1392,31 @@ def resolve_icemaker(
     )
 
 
+def ice_blend_mask(V: torch.Tensor, threshold: float = 0.05) -> torch.Tensor:
+    """
+    Boolean mask of voxels eligible to receive ice.
+
+    Shared masking rule for every ice-blending entry point in specter (this
+    module's :func:`blend_ice_into_volume` and
+    :meth:`~specter.imagegenerator._generator.ParticleGeneratorBase.solvate`):
+    a voxel is eligible when its value is below ``threshold * V.max()``.
+
+    Parameters
+    ----------
+    V : torch.Tensor
+        Scattering-potential volume.
+    threshold : float, optional
+        Fraction of ``V.max()`` below which a voxel is treated as ice-free.
+        Default 0.05.
+
+    Returns
+    -------
+    torch.Tensor
+        Boolean mask, same shape as ``V``.
+    """
+    return V.detach() < threshold * V.max()
+
+
 def blend_ice_into_volume(
     V: torch.Tensor,
     icemaker: "IceBank | RandomIcemaker",
@@ -1457,5 +1491,5 @@ def blend_ice_into_volume(
         ).to(V.device)
     else:
         ice = icemaker.generate_ice(batchsize=batchsize).to(V.device)
-    mask = (V.detach() < threshold * V.max()).to(V.dtype)
+    mask = ice_blend_mask(V, threshold).to(V.dtype)
     return V + ice * mask

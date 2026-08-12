@@ -12,9 +12,9 @@ from torch.optim import AdamW
 from torch.optim.lr_scheduler import LRScheduler, ReduceLROnPlateau
 
 from .. import rotations
+from .. import tilt as tilt_geometry
 from ..aberrations import Aberration
 from ..ctf import LegacyAberrationAdapter
-from ..imagegenerator._tiltseries import TiltSeriesGenerator
 from ..scattering import IterativeScattering
 from ._base_reconstructor import _BaseReconstructor
 from ._helpers import _build_lr_scheduler
@@ -179,11 +179,11 @@ class TomogramReconstructor(_BaseReconstructor):
 
         # Informational: minimum XY size a forward model would need for this tilt range.
         # TomogramReconstructor does NOT pre-pad to this size; it works at nxy throughout.
-        max_tilt_deg = TiltSeriesGenerator._infer_max_tilt_from_inputs(
+        max_tilt_deg = tilt_geometry.infer_max_tilt_from_inputs(
             angles=None, quaternions=quaternions
         )
         self.required_nxy = int(
-            TiltSeriesGenerator._estimate_required_nxy(self.nxy, self.nz, max_tilt_deg)
+            tilt_geometry.estimate_required_nxy(self.nxy, self.nz, max_tilt_deg)
         )
 
         # Tilt geometry buffers (fixed — orientations are known in cryo-ET)
@@ -247,36 +247,10 @@ class TomogramReconstructor(_BaseReconstructor):
         """
         V: torch.Tensor = self.V
         if self.taper_width > 0 or self.z_taper_width > 0:
-            V = TiltSeriesGenerator._apply_cosine_taper(
+            V = tilt_geometry.apply_volume_cosine_taper(
                 V, taper_xy=self.taper_width, taper_z=self.z_taper_width
             )
         return V
-
-    @staticmethod
-    def _compute_nz_tilt(V_shape: tuple[int, ...], theta_matrix: torch.Tensor) -> int:
-        """Z-slice count needed to propagate through the rotated volume."""
-        _, Z, Y, X = V_shape
-        R = theta_matrix[:, :3, :3]
-        corners = torch.tensor(
-            [
-                [-X / 2, -Y / 2, -Z / 2],
-                [X / 2, -Y / 2, -Z / 2],
-                [-X / 2, Y / 2, -Z / 2],
-                [X / 2, Y / 2, -Z / 2],
-                [-X / 2, -Y / 2, Z / 2],
-                [X / 2, -Y / 2, Z / 2],
-                [-X / 2, Y / 2, Z / 2],
-                [X / 2, Y / 2, Z / 2],
-            ],
-            device=theta_matrix.device,
-            dtype=theta_matrix.dtype,
-        ).t()  # (3, 8)
-        rotated = torch.bmm(
-            R.transpose(1, 2), corners.unsqueeze(0).expand(R.shape[0], -1, -1)
-        )
-        z_min = rotated[:, 2, :].min(dim=1).values
-        z_max = rotated[:, 2, :].max(dim=1).values
-        return max(1, int(torch.ceil((z_max - z_min).max()).item()))
 
     def _fov_mask(self, tilt_idx: int) -> torch.Tensor | None:
         """
@@ -353,12 +327,13 @@ class TomogramReconstructor(_BaseReconstructor):
             k: getattr(self, k)[tilt_idx : tilt_idx + 1] for k in self.ctf_params
         }
         if self.iterative_scattering.scattering_model not in ("projection", "ctf"):
-            nz_new = self._compute_nz_tilt(tuple(V_batched.shape), theta_matrix)
-            z_offset = (nz_new - self.nz) * self.voxel_size / 2.0
-            if "dfu" in ctf_batch:
-                ctf_batch["dfu"] = ctf_batch["dfu"] - z_offset
-            if "dfv" in ctf_batch:
-                ctf_batch["dfv"] = ctf_batch["dfv"] - z_offset
+            ctf_batch = tilt_geometry.shift_ctf_defocus_for_tilt(
+                ctf_batch,
+                tuple(V_batched.shape),
+                theta_matrix,
+                self.nz,
+                self.voxel_size,
+            )
 
         detector_waves = self.aberration(exitwave, ctf_batch)
         return torch.abs(detector_waves[0]) ** 2  # (H, W)

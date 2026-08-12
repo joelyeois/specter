@@ -106,6 +106,7 @@ nav:
       - specter.pipelines: api/pipelines.md
       - specter.rotations: api/rotations.md
       - specter.specimen: api/specimen.md
+      - specter.tilt: api/tilt.md
       - Core modules: api/core.md
 
 plugins:

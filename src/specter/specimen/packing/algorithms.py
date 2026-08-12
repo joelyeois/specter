@@ -187,7 +187,7 @@ def pack_hard_spheres_3d(
     box : tuple of float
         (D, H, W) box extents in Angstrom (z, y, x), centered at the
         origin -- same convention as
-        :func:`specter.crowding.poisson_disk_neighbors_3d`.
+        :func:`specter.coords.poisson_disk_neighbors_3d`.
     gap : float, optional
         Extra clearance between sphere surfaces, Angstrom, beyond simple
         touching. Default 0.0.

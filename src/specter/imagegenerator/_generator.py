@@ -12,7 +12,7 @@ from specter import logger
 from .. import rotations
 from ._base import BaseImager, compute_nz, pad_volume
 from ..crowding import CrowdWithDuplicates
-from ..ice import IceBank, RandomIcemaker
+from ..ice import IceBank, RandomIcemaker, ice_blend_mask
 from ._micrograph import MicrographGenerator
 from ..potential import PotentialBuilder
 from ..rotations import VolumeRotator, translate_coordinates
@@ -82,8 +82,7 @@ class ParticleGeneratorBase(BaseImager):
                 mode="reflect",
             )
 
-        threshold = 0.05 * V.max()
-        mask = V.detach() < threshold
+        mask = ice_blend_mask(V)
         ice.mul_(mask)
         V = V.add_(ice)
         if hasattr(self, "icemask"):

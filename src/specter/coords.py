@@ -1,6 +1,257 @@
 from __future__ import annotations
 
+from typing import Literal
+
+import numpy as np
 import torch
+
+
+def poisson_disk_neighbors(
+    min_distance: float,
+    n_points: int | float = torch.inf,
+    box: tuple[int, int] = (256, 256),  # (height, width)
+    k: int = 30,
+    seed: Literal["origin", "random"] = "origin",
+) -> torch.Tensor:
+    """
+    2D Poisson-disk sampling in a rectangular box centered at the origin.
+
+    Parameters
+    ----------
+    min_distance : float
+        Minimum spacing between points.
+    n_points : int
+        Total number of points to generate (including seed).
+    box : tuple of int
+        (height, width) of the bounding box in pixels. Origin is at (0,0).
+        Valid coordinates are y in [-H/2, H/2), x in [-W/2, W/2).
+    k : int
+        Number of candidate points to try per active point.
+    seed : {"origin", "random"}
+        If "origin", first point is at the center (0,0).
+        If "random", first point is chosen uniformly inside the box.
+
+    Returns
+    -------
+    pts : (m,2) torch.Tensor
+        Sampled 2D coordinates, including the seed point.
+    """
+    H, W = box
+    y_min, y_max = -H // 2, H // 2
+    x_min, x_max = -W // 2, W // 2
+
+    # initialize first point
+    if seed == "origin":
+        first_point = torch.tensor([0.0, 0.0])
+        n_points += 1  # don't count origin.
+    elif seed == "random":
+        y = (y_max - y_min) * torch.rand(1) + y_min
+        x = (x_max - x_min) * torch.rand(1) + x_min
+        first_point = torch.tensor([y.item(), x.item()])
+    else:
+        raise ValueError("seed must be 'origin' or 'random'")
+
+    pts = [first_point]
+    active = [0]
+
+    while active and len(pts) < n_points:
+        idx = int(torch.randint(len(active), (1,)).item())
+        center_point = pts[active[idx]]
+
+        # generate k candidates in annulus [min_distance, 2*min_distance]
+        theta = torch.rand(k) * 2 * torch.pi
+        radius = min_distance + min_distance * torch.rand(k)
+        candidates = center_point.unsqueeze(0) + torch.stack(
+            (radius * torch.cos(theta), radius * torch.sin(theta)), dim=1
+        )
+
+        # reject candidates outside the centered box
+        mask = (
+            (candidates[:, 0] >= y_min)
+            & (candidates[:, 0] < y_max)
+            & (candidates[:, 1] >= x_min)
+            & (candidates[:, 1] < x_max)
+        )
+        candidates = candidates[mask]
+
+        if candidates.shape[0] == 0:
+            active.pop(idx)
+            continue
+
+        # distance check against all existing points
+        pts_tensor = torch.stack(pts)
+        diff = candidates[:, None, :] - pts_tensor[None, :, :]
+        dist2 = (diff**2).sum(dim=2)
+        min_dist2, _ = dist2.min(dim=1)
+        candidates = candidates[min_dist2 >= min_distance**2]
+
+        if candidates.shape[0] > 0:
+            pts.append(candidates[0])
+            active.append(len(pts) - 1)
+        else:
+            active.pop(idx)
+
+    if n_points == torch.inf:
+        return torch.stack(pts)
+    else:
+        return torch.stack(pts[: int(n_points)])
+
+
+def poisson_disk_neighbors_3d(
+    min_distance: float,
+    n_points: int | float = torch.inf,
+    box: tuple[float, float, float] = (256.0, 256.0, 256.0),  # (D,H,W)
+    k: int = 30,
+    seed: Literal["origin", "random"] = "origin",
+) -> torch.Tensor:
+    """
+    Generate 3D points using Poisson-disk sampling within a 3D tensor volume.
+
+    This function produces points in a (D, H, W) volume such that no two points
+    are closer than `min_distance` pixels, creating a uniform but spatially
+    separated distribution.
+
+    Parameters
+    ----------
+    min_distance : float
+        Minimum allowed distance between points, in Å.
+    n_points : int or torch.inf, optional
+        Maximum number of points to generate. Default is infinite (fill the volume).
+    box : tuple of float, optional
+        Dimensions of the 3D volume in Å, as (D, H, W). Default is (256, 256, 256).
+    k : int, optional
+        Number of candidate points to generate around each active point. Higher
+        values produce denser sampling. Default is 30.
+    seed : {'origin', 'random'}, optional
+        Determines the initial seed point:
+        - 'origin': starts at (0, 0, 0)
+        - 'random': starts at a random location within the box
+
+    Returns
+    -------
+    torch.Tensor
+        Tensor of shape (N, 3), where each row is a point coordinate (x, y, z) in Å.
+
+    Notes
+    -----
+    - The coordinate system is centered at (0,0,0), with ranges:
+      x ∈ [-W/2, W/2], y ∈ [-H/2, H/2], z ∈ [-D/2, D/2].
+    - The function uses a grid-accelerated version of Bridson's Poisson-disk sampling
+      algorithm for efficient neighbor checking.
+    """
+    D, H, W = box
+    z_min, z_max = -D / 2, D / 2
+    y_min, y_max = -H / 2, H / 2
+    x_min, x_max = -W / 2, W / 2
+
+    # Grid acceleration
+    cell_size = min_distance / np.sqrt(3)
+    grid_shape = tuple(torch.ceil(torch.tensor([D, H, W]) / cell_size).int().tolist())
+    grid = -torch.ones(grid_shape, dtype=torch.long)
+    # Two points within min_distance can land up to ceil(min_distance / cell_size)
+    # cells apart along a single axis (e.g. each just inside opposite ends of
+    # adjacent-but-one cells), so the neighbor scan below must reach that far --
+    # checking only the immediate 1-cell ring (as earlier versions of this
+    # function did) silently admits points closer than min_distance.
+    neighbor_reach = int(np.ceil(min_distance / cell_size))
+
+    def point_to_grid(p):
+        # p = (x, y, z)
+        zi = ((p[2] - z_min) / cell_size).long().clamp(0, grid_shape[0] - 1)
+        yi = ((p[1] - y_min) / cell_size).long().clamp(0, grid_shape[1] - 1)
+        xi = ((p[0] - x_min) / cell_size).long().clamp(0, grid_shape[2] - 1)
+        return zi, yi, xi
+
+    # initialize first point
+    if seed == "origin":
+        first_point = torch.tensor([0.0, 0.0, 0.0])  # x,y,z
+        n_points += 1
+    elif seed == "random":
+        x = (x_max - x_min) * torch.rand(1) + x_min
+        y = (y_max - y_min) * torch.rand(1) + y_min
+        z = (z_max - z_min) * torch.rand(1) + z_min
+        first_point = torch.tensor([x.item(), y.item(), z.item()])
+    else:
+        raise ValueError("seed must be 'origin' or 'random'")
+
+    pts = [first_point]
+    active = [0]
+
+    zi, yi, xi = point_to_grid(first_point)
+    grid[zi, yi, xi] = 0
+
+    while active and len(pts) < n_points:
+        idx = int(torch.randint(len(active), (1,)).item())
+        center_point = pts[active[idx]]
+
+        # generate k candidates in spherical shell
+        phi = torch.acos(2 * torch.rand(k) - 1)
+        theta = 2 * torch.pi * torch.rand(k)
+        r = min_distance * (1 + torch.rand(k))
+
+        dx = r * torch.sin(phi) * torch.cos(theta)
+        dy = r * torch.sin(phi) * torch.sin(theta)
+        dz = r * torch.cos(phi)
+        candidates = center_point.unsqueeze(0) + torch.stack([dx, dy, dz], dim=1)
+
+        # filter candidates in tensor bounds (z,y,x)
+        mask = (
+            (candidates[:, 0] >= x_min)
+            & (candidates[:, 0] < x_max)
+            & (candidates[:, 1] >= y_min)
+            & (candidates[:, 1] < y_max)
+            & (candidates[:, 2] >= z_min)
+            & (candidates[:, 2] < z_max)
+        )
+        candidates = candidates[mask]
+
+        if candidates.shape[0] == 0:
+            active.pop(idx)
+            continue
+
+        # grid neighbor check
+        accepted = []
+        for c in candidates:
+            zi, yi, xi = point_to_grid(c)
+            neighbor_found = False
+            for dz_i in range(-neighbor_reach, neighbor_reach + 1):
+                for dy_i in range(-neighbor_reach, neighbor_reach + 1):
+                    for dx_i in range(-neighbor_reach, neighbor_reach + 1):
+                        nz, ny, nx = zi + dz_i, yi + dy_i, xi + dx_i
+                        if (
+                            0 <= nz < grid_shape[0]
+                            and 0 <= ny < grid_shape[1]
+                            and 0 <= nx < grid_shape[2]
+                        ):
+                            pid = int(grid[nz, ny, nx].item())
+                            if pid != -1:
+                                dist = torch.norm(c - pts[pid])
+                                if dist < min_distance:
+                                    neighbor_found = True
+                                    break
+                    if neighbor_found:
+                        break
+                if neighbor_found:
+                    break
+            if not neighbor_found:
+                accepted.append(c)
+
+        if accepted:
+            new_pt = accepted[0]
+            pts.append(new_pt)
+            active.append(len(pts) - 1)
+            zi, yi, xi = point_to_grid(new_pt)
+            grid[zi, yi, xi] = len(pts) - 1
+        else:
+            active.pop(idx)
+
+    if seed == "origin":
+        if len(pts) == 1:
+            return torch.empty((0, 3))
+        pts = pts[1:]  # don't include origin
+        return torch.stack(pts if n_points == torch.inf else pts[: int(n_points)])
+    elif seed == "random":
+        return torch.stack(pts if n_points == torch.inf else pts[: int(n_points)])
 
 
 def radial_distribution_function(

@@ -70,10 +70,6 @@ Standalone top-level modules that are not grouped into a subpackage.
 
 ::: specter.symmetries
 
-## specter.aretomo3
-
-::: specter.aretomo3
-
 ## specter.constants
 
 ::: specter.constants

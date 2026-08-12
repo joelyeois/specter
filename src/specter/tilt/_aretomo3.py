@@ -1,3 +1,17 @@
+"""
+Parsers for AreTomo3's tilt-geometry output formats (``.aln``, global-shift
+CSV, ``.xf``) into quaternions and shifts for ``TiltSeriesGenerator``.
+
+References
+----------
+Zheng, S., Wolff, G., Greenan, G., Chen, Z., Faas, F. G. A., Bárcena, M.,
+Koster, A. J., Cheng, Y., & Agard, D. A. (2022). AreTomo: An integrated
+software package for automated marker-free, motion-corrected cryo-electron
+tomographic alignment and reconstruction. Journal of Structural Biology: X, 6,
+100068. https://doi.org/10.1016/j.yjsbx.2022.100068
+AreTomo3 source: https://github.com/czimaginginstitute/AreTomo3
+"""
+
 from __future__ import annotations
 
 from typing import Sequence

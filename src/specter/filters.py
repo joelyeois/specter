@@ -46,6 +46,47 @@ def butter(images: torch.Tensor | np.ndarray) -> torch.Tensor | np.ndarray:
         return filtered
 
 
+def cosine_taper_window(
+    n: int,
+    taper_px: int,
+    device: torch.device | str | None = None,
+    dtype: torch.dtype | None = None,
+) -> torch.Tensor:
+    """
+    1-D cosine window of length ``n`` with a ``taper_px``-wide fade at each end.
+
+    Parameters
+    ----------
+    n : int
+        Length of the window.
+    taper_px : int
+        Width of the fade at each end, in samples. Clamped to ``n // 2``.
+        A value <= 0 returns an all-ones window.
+    device : torch.device or str, optional
+        Device for the output tensor.
+    dtype : torch.dtype, optional
+        Dtype for the output tensor.
+
+    Returns
+    -------
+    torch.Tensor
+        Shape ``(n,)``, values in ``[0, 1]``, 1 away from the edges.
+    """
+    win = torch.ones(n, device=device, dtype=dtype)
+    taper_px = min(taper_px, n // 2)
+    if taper_px <= 0:
+        return win
+    ramp = 0.5 * (
+        1
+        - torch.cos(
+            torch.pi * torch.linspace(0, 1, taper_px, device=device, dtype=dtype)
+        )
+    )
+    win[:taper_px] = ramp
+    win[-taper_px:] = ramp.flip(0)
+    return win
+
+
 def apply_bfactor(
     volume: torch.Tensor, pixel_size: float, bfactor: float
 ) -> torch.Tensor:

@@ -146,38 +146,61 @@ def trefoil(
 
 
 def tetrafoil(
+    k: torch.Tensor,
+    radian: torch.Tensor,
     tetrafoil1: torch.Tensor,
     tetrafoil2: torch.Tensor,
     tetrafoil3: torch.Tensor,
     tetrafoil4: torch.Tensor,
-):
+) -> torch.Tensor:
     """
-    Calculate tetrafoil (4-fold astigmatism) phase contribution.
+    Calculate tetrafoil phase contribution.
+
+    Covers the full 4th-order, non-rotationally-symmetric aberration
+    subspace: secondary astigmatism (Zernike n=4, m=+-2, the
+    ``tetrafoil1``/``tetrafoil2`` terms) and true 4-fold tetrafoil
+    (n=4, m=+-4, ``tetrafoil3``/``tetrafoil4``). Spherical aberration
+    (n=4, m=0) is handled separately by :func:`cs`.
 
     Parameters
     ----------
+    k : torch.Tensor
+        Frequency magnitude grid, in 1/Angstrom.
+    radian : torch.Tensor
+        Frequency angle grid, in radians.
     tetrafoil1 : torch.Tensor
-        First tetrafoil component.
+        Coefficient of the k^4 cos(2*radian) (secondary astigmatism) term.
     tetrafoil2 : torch.Tensor
-        Second tetrafoil component.
+        Coefficient of the k^4 sin(2*radian) (secondary astigmatism) term.
     tetrafoil3 : torch.Tensor
-        Third tetrafoil component.
+        Coefficient of the k^4 cos(4*radian) (tetrafoil) term.
     tetrafoil4 : torch.Tensor
-        Fourth tetrafoil component.
+        Coefficient of the k^4 sin(4*radian) (tetrafoil) term.
 
     Returns
     -------
-    chi_tetrafoil : torch.Tensor or None
-        Phase contribution from tetrafoil aberration. Currently not implemented.
+    chi_tetrafoil : torch.Tensor
+        Phase contribution from tetrafoil aberration.
     """
-    pass
+    k4 = k**4
+    return (
+        tetrafoil1 * k4 * torch.cos(2 * radian)
+        + tetrafoil2 * k4 * torch.sin(2 * radian)
+        + tetrafoil3 * k4 * torch.cos(4 * radian)
+        + tetrafoil4 * k4 * torch.sin(4 * radian)
+    )
 
 
 def phaseshift(
-    phaseshift: torch.Tensor, k: torch.Tensor, n_pixels: int, aberration_model: str
+    phaseshift: torch.Tensor,
+    k: torch.Tensor,
+    n_pixels: int,
+    aberration_model: str,
+    alpha: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """
-    Calculate phase shift contribution (e.g., from Volta phase plate).
+    Calculate phase shift contribution (e.g., from Volta phase plate),
+    plus the amplitude-contrast phase offset for the CTF model.
 
     Parameters
     ----------
@@ -189,6 +212,16 @@ def phaseshift(
         Number of pixels along each axis of the grid.
     aberration_model : str
         Aberration model in use; 'holography' or 'ctf'.
+    alpha : torch.Tensor, optional
+        Amplitude contrast ratio. Only meaningful for the 'ctf' model,
+        where the exit wave is real-valued and has no complex/absorptive
+        component of its own -- amplitude contrast has to be represented
+        as this k-independent chi offset instead (``-acos(alpha)``,
+        matching CryoSPARC's convention: ``phase_shift - arccos(amp_contrast)``).
+        None (default) omits the term entirely, matching the 'holography'
+        model (where amplitude contrast is instead baked into the exit
+        wave upstream via ``scattering.complex_potential``, so adding it
+        again here would double-count it).
 
     Returns
     -------
@@ -196,6 +229,8 @@ def phaseshift(
         Phase shift contribution. For holography model, DC component is
         set to zero to maintain Fourier optics validity.
     """
+    if aberration_model == "ctf" and alpha is not None:
+        phaseshift = phaseshift - torch.acos(alpha)
     if aberration_model == "holography":
         phaseshift = phaseshift * torch.ones_like(k)
         # phaseshift must be zero at DC for Fourier optics

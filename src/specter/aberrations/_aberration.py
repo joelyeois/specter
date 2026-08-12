@@ -53,7 +53,24 @@ class Aberration(L.LightningModule):
         Default is 'holography'.
     alpha: float, optional
         The amplitude contrast ratio to use for the CTF model. Common values
-        are 0.07 and 0.1.
+        are 0.07 and 0.1. Only has an effect on the transfer function when
+        ``specimen_absorption=False`` (see below) -- required whenever
+        ``aberration_model="ctf"`` regardless, since :meth:`__init__`
+        raises if it's missing, but with the default ``specimen_absorption``
+        it's stored and otherwise unused.
+    specimen_absorption: bool, optional
+        If True (default), amplitude contrast is assumed to already be
+        baked into the exit wave via ``scattering.complex_potential``
+        upstream (true for every ``scattering_model`` except ``"ctf"``,
+        which yields a real-valued, non-absorptive exit wave with nowhere
+        else to represent it) -- so ``alpha`` is accepted but not applied
+        again here, avoiding double-counting the same physical effect at
+        both the specimen and lens stages. Set False to instead fold
+        ``-acos(alpha)`` into the phase-shift term (CryoSPARC's own
+        convention: ``phase_shift - arccos(amp_contrast)``), which is what
+        an exit wave from ``scattering_model="ctf"`` needs. Mirrors
+        ``ctf.TransferFunction``'s identically-named, identically-purposed
+        parameter.
     convergence_angle: float, optional
         Beam convergence semi-angle in milliradians, used for the Cs
         (spatial coherence) envelope. Default is None (envelope disabled).
@@ -107,6 +124,7 @@ class Aberration(L.LightningModule):
         voltage: float,
         aberration_model: str = "holography",
         alpha: float | None = None,
+        specimen_absorption: bool = True,
         convergence_angle: float | None = None,
         cc: float | None = None,
         energy_spread: float = 0.7,
@@ -173,6 +191,7 @@ class Aberration(L.LightningModule):
                 raise Exception("Specify alpha for CTF model.")
             else:
                 self.alpha = alpha
+        self.specimen_absorption = specimen_absorption
 
     def transfer_function(self, ctf_params: dict[str, Any]) -> torch.Tensor:
         """
@@ -226,11 +245,15 @@ class Aberration(L.LightningModule):
             cs = ctf_params.get("cs", self.zero).view(-1, 1, 1)
             chi = chi + fn.cs(self.k, self.wavelength, cs)
 
-        # --- Phaseshift ---
-        if "phaseshift" in ctf_params:
+        # --- Phaseshift (+ amplitude-contrast offset for the CTF model) ---
+        needs_amp_contrast_offset = (
+            self.aberration_model == "ctf" and not self.specimen_absorption
+        )
+        if "phaseshift" in ctf_params or needs_amp_contrast_offset:
             phaseshift = ctf_params.get("phaseshift", self.zero).view(-1, 1, 1)
+            alpha = torch.as_tensor(self.alpha) if needs_amp_contrast_offset else None
             chi = chi + fn.phaseshift(
-                phaseshift, self.k, self.n_pixels, self.aberration_model
+                phaseshift, self.k, self.n_pixels, self.aberration_model, alpha=alpha
             )
 
         # --- Beam tilt ---
@@ -257,7 +280,9 @@ class Aberration(L.LightningModule):
             tetrafoil2 = ctf_params.get("tetrafoil2", self.zero).view(-1, 1, 1)
             tetrafoil3 = ctf_params.get("tetrafoil3", self.zero).view(-1, 1, 1)
             tetrafoil4 = ctf_params.get("tetrafoil4", self.zero).view(-1, 1, 1)
-            chi = chi + fn.tetrafoil(tetrafoil1, tetrafoil2, tetrafoil3, tetrafoil4)
+            chi = chi + fn.tetrafoil(
+                self.k, self.radian, tetrafoil1, tetrafoil2, tetrafoil3, tetrafoil4
+            )
 
         transfer = torch.exp(-1j * chi)
 

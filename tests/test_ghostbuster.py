@@ -251,6 +251,35 @@ def test_trefoil_changes_output(small_volume: torch.Tensor) -> None:
     assert not torch.equal(img_no, img_yes)
 
 
+def test_tetrafoil_changes_output(small_volume: torch.Tensor) -> None:
+    """Non-zero tetrafoil changes the transfer function output."""
+    base = dict(
+        V=small_volume,
+        voxel_size=2.0,
+        quaternions=torch.tensor([[1.0, 0.0, 0.0, 0.0]]),
+        translations=torch.tensor([[0.0, 0.0]]),
+        voltage=300.0,
+        dose_per_angstrom=2.0,
+        alpha=0.0,
+        scattering_model="projection",
+    )
+    no_tetrafoil = {"dfu": torch.tensor([5000.0]), "cs": torch.tensor([2.7])}
+    with_tetrafoil = {
+        "dfu": torch.tensor([5000.0]),
+        "cs": torch.tensor([2.7]),
+        "tetrafoil1": torch.tensor([100.0]),
+        "tetrafoil2": torch.tensor([-80.0]),
+        "tetrafoil3": torch.tensor([60.0]),
+        "tetrafoil4": torch.tensor([-40.0]),
+    }
+    img_no = Reconstructor(**base, ctf_params=no_tetrafoil).forward(torch.tensor([0]))
+    img_yes = Reconstructor(**base, ctf_params=with_tetrafoil).forward(
+        torch.tensor([0])
+    )
+    assert not torch.equal(img_no, img_yes)
+    assert torch.isfinite(img_yes).all()
+
+
 def test_bfactor_damps_ghostbuster_output(small_volume: torch.Tensor) -> None:
     """B-factor envelope reduces high-frequency power in simulated images."""
     base = dict(
@@ -321,33 +350,6 @@ def test_bfactor_kwarg_overrides_ctf_params_bfactor(small_volume: torch.Tensor) 
         **base, ctf_params={k: v for k, v in params.items() if k != "bfactor"}
     ).forward(torch.tensor([0]))
     assert torch.allclose(img_overridden_to_zero, img_no_bfactor)
-
-
-# ---------------------------------------------------------------------------
-# Documented limitations
-# ---------------------------------------------------------------------------
-
-
-def test_tetrafoil_not_implemented(small_volume: torch.Tensor) -> None:
-    """Tetrafoil keys in ctf_params cause TypeError because _tetrafoil returns None."""
-    gb = Reconstructor(
-        V=small_volume,
-        voxel_size=2.0,
-        quaternions=torch.tensor([[1.0, 0.0, 0.0, 0.0]]),
-        translations=torch.tensor([[0.0, 0.0]]),
-        ctf_params={
-            "dfu": torch.tensor([5000.0]),
-            "tetrafoil1": torch.tensor([100.0]),
-            "tetrafoil2": torch.tensor([0.0]),
-            "tetrafoil3": torch.tensor([0.0]),
-            "tetrafoil4": torch.tensor([0.0]),
-        },
-        voltage=300.0,
-        dose_per_angstrom=2.0,
-        scattering_model="projection",
-    )
-    with pytest.raises(TypeError):
-        gb.forward(torch.tensor([0]))
 
 
 # ---------------------------------------------------------------------------

@@ -7,6 +7,7 @@ import torch
 from cryosparc.dataset import Dataset
 from rich.console import Console
 
+from ..constants import energy_to_wavelength
 from ._common import _select_particles
 
 _console = Console()
@@ -74,6 +75,7 @@ def _load_csfile_parameters(
         _console.print(
             "[yellow]Warning:[/yellow] voltage is not the same for all particles."
         )
+    wavelength_A = energy_to_wavelength(voltage_kv)
 
     # extract rotations
     pose = torch.as_tensor(dataset["alignments3D/pose"], dtype=torch.float32)
@@ -96,9 +98,28 @@ def _load_csfile_parameters(
     beamshift_A = torch.as_tensor(dataset["ctf/shift_A"])
     translations_A -= beamshift_A
 
-    # extract trefoil
-    trefoil1 = torch.as_tensor(dataset["ctf/trefoil_A"][:, 0] / 1000)
-    trefoil2 = torch.as_tensor(dataset["ctf/trefoil_A"][:, 1] / 1000)
+    # extract trefoil. CryoSPARC's ctf/trefoil_A is a raw Angstrom-scale
+    # coefficient; specter's trefoil1/trefoil2 (see
+    # aberrations._functions.trefoil) are the direct k^3-domain phase
+    # coefficients in Angstrom^3, related by chi_trefoil =
+    # (2*pi/3)*wavelength^2*trefoil_A -- see newctf.py's
+    # params_to_coeffs_odd/gen_basis_odd for the CryoSPARC-side derivation.
+    trefoil_A = torch.as_tensor(dataset["ctf/trefoil_A"])
+    trefoil1 = (2 * torch.pi / 3) * wavelength_A**2 * trefoil_A[:, 0]
+    trefoil2 = (2 * torch.pi / 3) * wavelength_A**2 * trefoil_A[:, 1]
+
+    # extract tetrafoil. CryoSPARC's ctf/tetra_A holds 4 raw Angstrom-scale
+    # coefficients spanning secondary astigmatism (n=4, m=+-2) and true
+    # tetrafoil (n=4, m=+-4); specter's tetrafoil1-4 (see
+    # aberrations._functions.tetrafoil) are the direct k^4-domain phase
+    # coefficients in Angstrom^4. See newctf.py's
+    # params_to_coeffs_even/gen_basis_even for the CryoSPARC-side
+    # derivation of these prefactors (including the sign/index mapping).
+    tetra_A = torch.as_tensor(dataset["ctf/tetra_A"])
+    tetrafoil1 = -2 * torch.pi * wavelength_A**3 * tetra_A[:, 0]
+    tetrafoil2 = 2 * torch.pi * wavelength_A**3 * tetra_A[:, 1]
+    tetrafoil3 = (torch.pi / 2) * wavelength_A**3 * tetra_A[:, 2]
+    tetrafoil4 = -(torch.pi / 2) * wavelength_A**3 * tetra_A[:, 3]
 
     # extract per-particle scale factors
     scale = torch.as_tensor(dataset["alignments3D/alpha"])
@@ -137,6 +158,10 @@ def _load_csfile_parameters(
         "phaseshift": phaseshift_rad,
         "trefoil1": trefoil1,
         "trefoil2": trefoil2,
+        "tetrafoil1": tetrafoil1,
+        "tetrafoil2": tetrafoil2,
+        "tetrafoil3": tetrafoil3,
+        "tetrafoil4": tetrafoil4,
     }
 
     return (

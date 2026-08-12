@@ -42,6 +42,7 @@ def _write_minimal_csfile(path: Path, n: int) -> None:
             "ctf/phase_shift_rad": np.zeros(n, dtype=np.float32),
             "ctf/shift_A": np.zeros((n, 2), dtype=np.float32),
             "ctf/trefoil_A": np.zeros((n, 2), dtype=np.float32),
+            "ctf/tetra_A": np.zeros((n, 4), dtype=np.float32),
             "ctf/anisomag": np.zeros((n, 4), dtype=np.float32),
         }
     ).save(str(path))

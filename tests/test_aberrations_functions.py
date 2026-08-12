@@ -117,11 +117,123 @@ def test_trefoil_has_three_fold_symmetry():
     assert torch.allclose(result[0], result[1], atol=1e-5)
 
 
+def test_tetrafoil_zero_at_zero_frequency():
+    k = torch.tensor([0.0])
+    radian = torch.tensor([0.3])
+    result = tetrafoil(
+        k,
+        radian,
+        torch.tensor(10.0),
+        torch.tensor(5.0),
+        torch.tensor(3.0),
+        torch.tensor(2.0),
+    )
+    assert torch.allclose(result, torch.zeros_like(result))
+
+
+def test_tetrafoil_matches_formula():
+    k = torch.tensor([0.1])
+    radian = torch.tensor([0.3])
+    t1, t2, t3, t4 = 10.0, 5.0, 3.0, 2.0
+    result = tetrafoil(
+        k,
+        radian,
+        torch.tensor(t1),
+        torch.tensor(t2),
+        torch.tensor(t3),
+        torch.tensor(t4),
+    )
+    expected = (
+        t1 * 0.1**4 * math.cos(2 * 0.3)
+        + t2 * 0.1**4 * math.sin(2 * 0.3)
+        + t3 * 0.1**4 * math.cos(4 * 0.3)
+        + t4 * 0.1**4 * math.sin(4 * 0.3)
+    )
+    assert torch.allclose(result, torch.tensor([expected]), atol=1e-6)
+
+
+def test_tetrafoil_four_fold_term_has_four_fold_symmetry():
+    """tetrafoil3/tetrafoil4 (true 4-fold tetrafoil, n=4 m=+-4) are
+    invariant under a pi/2 rotation; tetrafoil1/tetrafoil2 (secondary
+    astigmatism, n=4 m=+-2) are not, so isolate the 4-fold terms here."""
+    k = torch.tensor([0.1, 0.1])
+    radian = torch.tensor([0.3, 0.3 + math.pi / 2])
+    result = tetrafoil(
+        k,
+        radian,
+        torch.tensor(0.0),
+        torch.tensor(0.0),
+        torch.tensor(3.0),
+        torch.tensor(2.0),
+    )
+    assert torch.allclose(result[0], result[1], atol=1e-5)
+
+
 def test_phaseshift_ctf_model_returns_negative_input_unchanged():
     phaseshift_val = torch.tensor([0.5])
     k = torch.zeros((1, 4, 4))
     result = phaseshift(phaseshift_val, k, n_pixels=4, aberration_model="ctf")
     assert torch.allclose(result, -phaseshift_val)
+
+
+def test_phaseshift_ctf_model_with_alpha_adds_amp_contrast_offset():
+    """CryoSPARC convention: chi_c0 = phase_shift - acos(amp_contrast), so
+    chi_phaseshift = -phase_shift + acos(amp_contrast) -- matches the
+    (2*pi/3)*wavelength^2 trefoil derivation's -1 global sign convention."""
+    phaseshift_val = torch.tensor([0.5])
+    alpha = torch.tensor(0.1)
+    k = torch.zeros((1, 4, 4))
+    result = phaseshift(
+        phaseshift_val, k, n_pixels=4, aberration_model="ctf", alpha=alpha
+    )
+    expected = -phaseshift_val + math.acos(0.1)
+    assert torch.allclose(result, expected)
+
+
+def test_phaseshift_ctf_model_alpha_zero_still_adds_quarter_turn():
+    """acos(0) = pi/2 exactly -- amplitude contrast defaulting to zero is
+    still a real, nonzero phase-quadrature offset in CryoSPARC's
+    convention, not a no-op."""
+    phaseshift_val = torch.tensor([0.0])
+    alpha = torch.tensor(0.0)
+    k = torch.zeros((1, 4, 4))
+    result = phaseshift(
+        phaseshift_val, k, n_pixels=4, aberration_model="ctf", alpha=alpha
+    )
+    assert torch.allclose(result, torch.tensor([math.pi / 2]))
+
+
+def test_phaseshift_ctf_model_alpha_none_matches_no_alpha_arg():
+    """alpha=None (the default) must reproduce the pre-fix behaviour
+    exactly -- this is the specimen_absorption=True / non-"ctf"-scattering
+    case, where amplitude contrast is already applied upstream via
+    scattering.complex_potential and must not be double-counted here."""
+    phaseshift_val = torch.tensor([0.5])
+    k = torch.zeros((1, 4, 4))
+    with_none = phaseshift(
+        phaseshift_val, k, n_pixels=4, aberration_model="ctf", alpha=None
+    )
+    without_arg = phaseshift(phaseshift_val, k, n_pixels=4, aberration_model="ctf")
+    assert torch.allclose(with_none, without_arg)
+
+
+def test_phaseshift_holography_model_ignores_alpha():
+    """alpha is only meaningful for the "ctf" model -- holography mode
+    must ignore it even if passed, since amplitude contrast there is
+    represented in the exit wave's complex/absorptive component instead."""
+    phaseshift_val = torch.tensor([0.5])
+    k = torch.zeros((1, 4, 4))
+    with_alpha = phaseshift(
+        phaseshift_val,
+        k,
+        n_pixels=4,
+        aberration_model="holography",
+        alpha=torch.tensor(0.1),
+    )
+    without_alpha = phaseshift(
+        phaseshift_val, k, n_pixels=4, aberration_model="holography"
+    )
+    assert torch.allclose(with_alpha, without_alpha)
 
 
 def test_phaseshift_holography_model_broadcasts_to_grid():
@@ -145,18 +257,3 @@ def test_phaseshift_holography_zeroes_dc():
     assert result[0, 0, 0] == 0
     # Nyquist pixel (index n_pixels // 2) is unaffected.
     assert result[0, n_pixels // 2, n_pixels // 2] == -0.5
-
-
-# ---------------------------------------------------------------------------
-# Documented limitations
-# ---------------------------------------------------------------------------
-
-
-def test_tetrafoil_not_implemented():
-    """tetrafoil() is a stub that returns None; see also
-    test_ghostbuster.test_tetrafoil_not_implemented for the TypeError this
-    causes downstream in Aberration.transfer_function."""
-    result = tetrafoil(
-        torch.tensor(1.0), torch.tensor(0.0), torch.tensor(0.0), torch.tensor(0.0)
-    )
-    assert result is None

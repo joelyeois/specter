@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 
+from typing import overload
+
 import torch
 from scipy import constants as _sc
 
@@ -30,7 +32,11 @@ def hc() -> float:
     return _sc.h * _sc.c / _sc.e * 1.0e10
 
 
-def energy_to_wavelength(voltage: float) -> float:
+@overload
+def energy_to_wavelength(voltage: float) -> float: ...
+@overload
+def energy_to_wavelength(voltage: torch.Tensor) -> torch.Tensor: ...
+def energy_to_wavelength(voltage: float | torch.Tensor) -> float | torch.Tensor:
     """
     Convert electron beam accelerating voltage to de Broglie wavelength.
 
@@ -38,12 +44,13 @@ def energy_to_wavelength(voltage: float) -> float:
 
     Parameters
     ----------
-    voltage : float
-        Electron beam accelerating voltage in kV.
+    voltage : float or torch.Tensor
+        Electron beam accelerating voltage in kV. A tensor is accepted for
+        the (rare) per-particle-voltage case; all operations are elementwise.
 
     Returns
     -------
-    wavelength : float
+    wavelength : float or torch.Tensor
         De Broglie wavelength in Å.
 
     Notes

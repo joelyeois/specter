@@ -59,6 +59,7 @@ class _FakeDataset(dict):
                 "ctf/phase_shift_rad": np.zeros(n, dtype=dtype),
                 "ctf/shift_A": np.zeros((n, 2), dtype=dtype),
                 "ctf/trefoil_A": np.zeros((n, 2), dtype=dtype),
+                "ctf/tetra_A": np.zeros((n, 4), dtype=dtype),
                 "alignments3D/alpha": np.ones(n, dtype=dtype),
                 "ctf/anisomag": np.zeros((n, 4), dtype=dtype),
             }

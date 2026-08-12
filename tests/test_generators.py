@@ -353,6 +353,97 @@ def test_aberration_bfactor_kwarg_overrides_ctf_params_bfactor():
     assert torch.allclose(img_overridden_to_zero, img_no_bfactor)
 
 
+def test_aberration_ctf_model_specimen_absorption_true_matches_no_alpha():
+    """specimen_absorption=True (default) must reproduce the pre-fix
+    behaviour exactly -- amplitude contrast is assumed already baked into
+    the exit wave upstream (true for every scattering_model except "ctf"),
+    so this constructor's alpha must have no effect on the transfer
+    function itself, regardless of its value."""
+    ctf_params = {"dfu": torch.tensor([5000.0]), "cs": torch.tensor([2.7])}
+    tf_alpha_0 = Aberration(16, 2.0, 300.0, aberration_model="ctf", alpha=0.0)
+    tf_alpha_1 = Aberration(16, 2.0, 300.0, aberration_model="ctf", alpha=0.1)
+    assert torch.allclose(
+        tf_alpha_0.transfer_function(ctf_params),
+        tf_alpha_1.transfer_function(ctf_params),
+    )
+
+
+def test_aberration_ctf_model_specimen_absorption_false_applies_amp_contrast():
+    """specimen_absorption=False folds -acos(alpha) into chi -- changes the
+    transfer function even with no explicit ctf_params["phaseshift"], and
+    differs between alpha values (unlike the specimen_absorption=True
+    case above)."""
+    ctf_params = {"dfu": torch.tensor([5000.0]), "cs": torch.tensor([2.7])}
+    tf_alpha_0 = Aberration(
+        16, 2.0, 300.0, aberration_model="ctf", alpha=0.0, specimen_absorption=False
+    )
+    tf_alpha_1 = Aberration(
+        16, 2.0, 300.0, aberration_model="ctf", alpha=0.1, specimen_absorption=False
+    )
+    tf_no_absorption_guard = Aberration(
+        16, 2.0, 300.0, aberration_model="ctf", alpha=0.0
+    )
+    assert not torch.allclose(
+        tf_alpha_0.transfer_function(ctf_params),
+        tf_alpha_1.transfer_function(ctf_params),
+    )
+    assert not torch.allclose(
+        tf_alpha_0.transfer_function(ctf_params),
+        tf_no_absorption_guard.transfer_function(ctf_params),
+    )
+
+
+def test_image_generator_ctf_scattering_model_gets_amp_contrast_by_default(
+    small_volume, ctf_params
+):
+    """BaseImager._init_optics wires specimen_absorption=(scattering_model
+    != "ctf") automatically -- scattering_model="ctf" must pick up
+    amplitude contrast without any explicit opt-in."""
+    kwargs = dict(
+        scattering_potential=small_volume,
+        pixel_size=1.0,
+        quaternions=torch.tensor([[1.0, 0.0, 0.0, 0.0]]),
+        translations=torch.tensor([[0.0, 0.0]]),
+        ctf_params=ctf_params,
+        voltage=300.0,
+        dose_per_angstrom=2.0,
+        scattering_model="ctf",
+        aberration_model="ctf",
+        noise_model=None,
+        ice_model=None,
+        detector_model=None,
+        progressbars=False,
+    )
+    model_alpha_0 = ImageGenerator(alpha=0.0, **kwargs)
+    assert model_alpha_0.aberration.specimen_absorption is False
+    img_alpha_0 = model_alpha_0(torch.tensor([0]))
+    img_alpha_1 = ImageGenerator(alpha=0.1, **kwargs)(torch.tensor([0]))
+    assert not torch.allclose(img_alpha_0, img_alpha_1)
+
+
+def test_image_generator_multislice_scattering_model_keeps_specimen_absorption():
+    """scattering_model="multislice" already applies alpha upstream via
+    scattering.complex_potential -- Aberration's specimen_absorption must
+    stay True (its default) so the amp-contrast offset isn't added again."""
+    model = ImageGenerator(
+        scattering_potential=torch.zeros(8, 8, 8),
+        pixel_size=1.0,
+        quaternions=torch.tensor([[1.0, 0.0, 0.0, 0.0]]),
+        translations=torch.tensor([[0.0, 0.0]]),
+        ctf_params={"dfu": torch.tensor([5000.0]), "cs": torch.tensor([2.7])},
+        voltage=300.0,
+        dose_per_angstrom=2.0,
+        scattering_model="multislice",
+        aberration_model="ctf",
+        noise_model=None,
+        ice_model=None,
+        detector_model=None,
+        alpha=0.1,
+        progressbars=False,
+    )
+    assert model.aberration.specimen_absorption is True
+
+
 def test_aberration_rejects_per_image_ctf_params_as_constructor_kwargs():
     """dfu/cs/etc. genuinely vary per particle -- still not constructor args."""
     with pytest.raises(TypeError, match="dfu"):

@@ -2,6 +2,7 @@ import numpy as np
 import pytest
 import torch
 
+from specter.constants import energy_to_wavelength
 from specter.io import _cryosparc, extract_parameters_from_csfile
 
 
@@ -27,6 +28,7 @@ class _FakeDataset(dict):
                 "ctf/phase_shift_rad": np.zeros(n, dtype=dtype),
                 "ctf/shift_A": np.zeros((n, 2), dtype=dtype),
                 "ctf/trefoil_A": np.zeros((n, 2), dtype=dtype),
+                "ctf/tetra_A": np.zeros((n, 4), dtype=dtype),
                 "alignments3D/alpha": np.ones(n, dtype=dtype),
                 "ctf/anisomag": np.zeros((n, 4), dtype=dtype),
             }
@@ -88,3 +90,76 @@ def test_extract_parameters_n_particles_all() -> None:
     assert rotations.shape == (4, 4)
     assert torch.equal(indices, torch.arange(4))
     assert torch.equal(halfset_labels, torch.tensor([0, 1, 0, 1]))
+
+
+class _TrefoilTetrafoilDataset(_FakeDataset):
+    """Same fixture as _FakeDataset, but with non-zero trefoil_A/tetra_A so
+    the CryoSPARC -> specter unit conversion can be checked numerically."""
+
+    @classmethod
+    def load(cls, csfile_path: str) -> "_FakeDataset":
+        ds = super().load(csfile_path)
+        n = 6
+        dtype = np.float32
+        ds["ctf/trefoil_A"] = np.tile(np.array([500.0, -300.0], dtype=dtype), (n, 1))
+        ds["ctf/tetra_A"] = np.tile(
+            np.array([100.0, -200.0, 50.0, -75.0], dtype=dtype), (n, 1)
+        )
+        return ds
+
+
+def test_trefoil_scaling_matches_cryosparc_formula(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """chi_trefoil = (2*pi/3) * wavelength^2 * trefoil_A -- derived from
+    CryoSPARC's own newctf.py (params_to_coeffs_odd/gen_basis_odd), not the
+    old hardcoded /1000 scale factor."""
+    monkeypatch.setattr(_cryosparc, "Dataset", _TrefoilTetrafoilDataset)
+    (_, _, _, _, _, ctf_params, _, _, _, _) = extract_parameters_from_csfile(
+        "fake.cs", return_class="all"
+    )
+
+    wavelength = energy_to_wavelength(torch.tensor(300.0))
+    expected1 = (2 * torch.pi / 3) * wavelength**2 * 500.0
+    expected2 = (2 * torch.pi / 3) * wavelength**2 * -300.0
+
+    assert torch.allclose(
+        ctf_params["trefoil1"], torch.full((6,), expected1.item()), atol=1e-6
+    )
+    assert torch.allclose(
+        ctf_params["trefoil2"], torch.full((6,), expected2.item()), atol=1e-6
+    )
+
+
+def test_tetrafoil_extraction_matches_cryosparc_formula(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """chi_tetrafoil coefficients derived from CryoSPARC's own newctf.py
+    (params_to_coeffs_even/gen_basis_even): tetra_A[0]/[1] are the n=4 m=+-2
+    secondary-astigmatism terms (prefactor 2*pi*wavelength^3, sign-flipped
+    on index 0), tetra_A[2]/[3] are the true n=4 m=+-4 tetrafoil terms
+    (prefactor pi/2*wavelength^3, sign-flipped on index 3)."""
+    monkeypatch.setattr(_cryosparc, "Dataset", _TrefoilTetrafoilDataset)
+    (_, _, _, _, _, ctf_params, _, _, _, _) = extract_parameters_from_csfile(
+        "fake.cs", return_class="all"
+    )
+
+    wavelength = energy_to_wavelength(torch.tensor(300.0))
+    tetra_A = torch.tensor([100.0, -200.0, 50.0, -75.0])
+    expected1 = -2 * torch.pi * wavelength**3 * tetra_A[0]
+    expected2 = 2 * torch.pi * wavelength**3 * tetra_A[1]
+    expected3 = (torch.pi / 2) * wavelength**3 * tetra_A[2]
+    expected4 = -(torch.pi / 2) * wavelength**3 * tetra_A[3]
+
+    assert torch.allclose(
+        ctf_params["tetrafoil1"], torch.full((6,), expected1.item()), atol=1e-6
+    )
+    assert torch.allclose(
+        ctf_params["tetrafoil2"], torch.full((6,), expected2.item()), atol=1e-6
+    )
+    assert torch.allclose(
+        ctf_params["tetrafoil3"], torch.full((6,), expected3.item()), atol=1e-6
+    )
+    assert torch.allclose(
+        ctf_params["tetrafoil4"], torch.full((6,), expected4.item()), atol=1e-6
+    )

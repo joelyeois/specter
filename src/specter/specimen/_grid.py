@@ -34,6 +34,14 @@ and unphysically dependent on voxel size).
 ``CarbonFilmGenerator``'s hole-edge geometry is also purely analytic (a
 random band-limited function of angle), not a resampled point cloud --
 see its docstring for why that matters for resolution-independence.
+
+References
+----------
+Purnell, C., Heebner, J., Swulius, M. T., Hylton, R., Kabonick, S., Grillo, M.,
+Grigoryev, S., Heberle, F., Waxham, M. N., & Swulius, M. T. (2023). Rapid
+synthesis of cryo-ET data for training deep learning models. bioRxiv
+2023.04.28.538636. https://doi.org/10.1101/2023.04.28.538636
+CTS source: https://github.com/carsonpurnell/cryotomosim_CTS
 """
 
 from __future__ import annotations

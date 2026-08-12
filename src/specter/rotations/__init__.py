@@ -13,6 +13,12 @@ Split across:
 
 Everything is re-exported here so existing `from .rotations import X` /
 `from specter.rotations import X` usage is unaffected by the split.
+
+References
+----------
+Brégier, R. (2021). Deep Regression on Manifolds: A 3D Rotation Case Study.
+2021 International Conference on 3D Vision (3DV). https://arxiv.org/abs/2103.16317
+roma source: https://github.com/naver/roma
 """
 
 from ._random import (

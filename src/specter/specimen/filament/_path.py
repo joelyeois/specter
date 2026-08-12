@@ -10,6 +10,14 @@ from ``[0, flex_deg]`` about a random axis roughly perpendicular to it --
 bounded per-step curvature, unbounded cumulative curvature, the same
 "worm-like chain" flavor CTS used for both its actin and microtubule presets
 (``step=27.3, flex=12`` and ``step=85, flex=3`` respectively).
+
+References
+----------
+Purnell, C., Heebner, J., Swulius, M. T., Hylton, R., Kabonick, S., Grillo, M.,
+Grigoryev, S., Heberle, F., Waxham, M. N., & Swulius, M. T. (2023). Rapid
+synthesis of cryo-ET data for training deep learning models. bioRxiv
+2023.04.28.538636. https://doi.org/10.1101/2023.04.28.538636
+CTS source: https://github.com/carsonpurnell/cryotomosim_CTS
 """
 
 from __future__ import annotations

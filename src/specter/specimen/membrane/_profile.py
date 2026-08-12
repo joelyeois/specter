@@ -445,6 +445,14 @@ def build_analytic_bilayer_profile(
     Returns
     -------
     BilayerProfile
+
+    References
+    ----------
+    Martinez-Sanchez, A., Lamm, L., Jasnin, M., & Phelippeau, H. (2024). Simulating
+    the cellular context in synthetic datasets for cryo-electron tomography. IEEE
+    Transactions on Medical Imaging, 43(11), 3742–3754.
+    https://doi.org/10.1109/TMI.2024.3398401
+    polnet source: https://github.com/anmartinezs/polnet
     """
     if distance_half_range_a is None:
         distance_half_range_a = thickness_a / 2.0 + 6.0 * layer_sigma_a

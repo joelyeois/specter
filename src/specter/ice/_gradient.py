@@ -66,7 +66,8 @@ class GradientSKIcemaker(L.LightningModule):
         load_mdsim_f_radial_avg` expects. If None (default), the target is
         instead computed natively at this instance's own ``(n, dx, nz)`` via
         :func:`~specter.ice._kernels.compute_native_target`, from the bundled
-        LDA-80K (low-density amorphous ice, 80K/0atm) reference frame.
+        LDA-80K (low-density amorphous ice, 80K/0atm) reference frame -- an
+        in-house MD simulation, not from a published dataset.
         Matching ``dx`` between target and training grid matters far more
         than matching absolute box size -- interpolating a fine-``dx``
         target across a coarser training grid is a lossy comparison (the

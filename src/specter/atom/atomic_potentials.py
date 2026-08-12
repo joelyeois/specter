@@ -192,10 +192,11 @@ def load_shtyrov_parameters(filepath: str) -> torch.Tensor:
 
     References
     ----------
-    Lobato, I., & Van Dyck, D. (2014). An accurate parameterization for scattering
-    factors, electron densities and electrostatic potentials for neutral atoms that obey
-    all physical constraints. Acta Crystallographica. Section A, Foundations and
-    Advances, 70(6), 636–649.
+    Shtyrov, A., Wilson, H., Slowik, D., Yamashita, K., Li, J., Wojdyr, M., Chen, S.,
+    McMullan, G., Short, J. M., Russo, C. J., Henderson, R., & Murshudov, G. N. (2026).
+    Measurement of atomic scattering factors by cryoelectron microscopy. Proceedings of
+    the National Academy of Sciences, 123(19), e2528758123.
+    https://doi.org/10.1073/pnas.2528758123
     """
     # parse .cif file
     print("Parsing MMCIF file.")
@@ -512,7 +513,8 @@ def shtyrov_atomic_potential_3d_fourier(
     """
     Compute the 3D atomic potential for a specific element using Shtyrov parameterization.
 
-    Based on Shtyrov 2025 Eq.18.
+    Based on Shtyrov et al. (2026) Eq.18 -- see :func:`load_shtyrov_parameters`'s
+    References section for the full citation.
 
     Note: There is a singularity at r = 0 because the atomic nucleus is essentially
     a point charge on this scale (~1e-5 Å).
@@ -559,7 +561,8 @@ def shtyrov_atomic_potential_3d(
     """
     Compute the 3D atomic potential for a specific element using Shtyrov parameterization.
 
-    Based on Shtyrov 2025 Eq.18.
+    Based on Shtyrov et al. (2026) Eq.18 -- see :func:`load_shtyrov_parameters`'s
+    References section for the full citation.
 
     Note: There is a singularity at r = 0 because the atomic nucleus is essentially
     a point charge on this scale (~1e-5 Å).
@@ -649,7 +652,8 @@ def shtyrov_atomic_potential_3d_fourier_by_species(
     """
     Compute the 3D Fourier-space atomic potential for a bonded species.
 
-    Based on Shtyrov 2025 Eq.18. Same functional form as
+    Based on Shtyrov et al. (2026) Eq.18 -- see :func:`load_shtyrov_parameters`'s
+    References section for the full citation. Same functional form as
     :func:`shtyrov_atomic_potential_3d_fourier`, but keyed by bonded-species
     descriptor (e.g. `"O(HH)"`) instead of atomic number.
 
@@ -689,7 +693,8 @@ def shtyrov_atomic_potential_3d_by_species(
     """
     Compute the 3D real-space atomic potential for a bonded species.
 
-    Based on Shtyrov 2025 Eq.18. Same closed-form Gaussian-sum approach as
+    Based on Shtyrov et al. (2026) Eq.18 -- see :func:`load_shtyrov_parameters`'s
+    References section for the full citation. Same closed-form Gaussian-sum approach as
     :func:`shtyrov_atomic_potential_3d`, but keyed by bonded-species
     descriptor (e.g. `"O(HH)"`) instead of atomic number.
 
@@ -727,7 +732,8 @@ def shtyrov_atomic_potential_3d_by_species(
 def peng_atomic_potential_3d(atomic_number: int, r_xyz: torch.Tensor) -> torch.Tensor:
     """
     Compute the 3D real-space atomic potential using gemmi's built-in
-    standalone-atom electron scattering factors (Peng et al. 1996, `c4322`).
+    standalone-atom electron scattering factors (Peng et al. 1996, `c4322`
+    table -- see References).
 
     This is the same fallback sffit itself uses (`sffit fit.py::do_mmcif`)
     for any bonded species not covered by a fitted Shtyrov parameter table:
@@ -748,6 +754,13 @@ def peng_atomic_potential_3d(atomic_number: int, r_xyz: torch.Tensor) -> torch.T
     -------
     potential : torch.Tensor
         Atomic potential in units of V·Å, same shape as `r_xyz`.
+
+    References
+    ----------
+    Peng, L.-M., Ren, G., Dudarev, S. L., & Whelan, M. J. (1996). Robust
+    parameterization of elastic and absorptive electron atomic scattering
+    factors. Acta Crystallographica Section A, 52(2), 257–276.
+    https://doi.org/10.1107/S0108767395014371
     """
     a0 = 0.529  # Bohr radius, [Å]
     e = 14.4  # electron charge, [V·Å]

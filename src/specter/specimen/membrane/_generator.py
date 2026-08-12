@@ -579,6 +579,14 @@ class MembraneGenerator:
         multiple GPUs). Default None: every species renders on `device`
         above, still concurrently across `render_workers` threads, just not
         spread across multiple physical devices.
+
+    References
+    ----------
+    Martinez-Sanchez, A., Lamm, L., Jasnin, M., & Phelippeau, H. (2024). Simulating
+    the cellular context in synthetic datasets for cryo-electron tomography. IEEE
+    Transactions on Medical Imaging, 43(11), 3742–3754.
+    https://doi.org/10.1109/TMI.2024.3398401
+    polnet source: https://github.com/anmartinezs/polnet
     """
 
     def __init__(

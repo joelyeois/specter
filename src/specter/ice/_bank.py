@@ -514,7 +514,9 @@ class IceBank(L.LightningModule):
         half = tile_extent / 2
         assert (
             self.box_x is not None and self.box_y is not None and self.box_z is not None
-        ), "box_x/box_y/box_z must be set (by generate_big_ice_deltas) before _place_tiles"
+        ), (
+            "box_x/box_y/box_z must be set (by generate_big_ice_deltas) before _place_tiles"
+        )
         all_parts: list[torch.Tensor] = []
         mobile_parts: list[torch.Tensor] = []
         halo_parts: list[torch.Tensor] = []
@@ -1123,9 +1125,9 @@ class IceBank(L.LightningModule):
             See :meth:`specter.ice._energy.MLBOP.compute_energy` for the
             fields returned.
         """
-        assert (
-            self.positions is not None
-        ), "No positions -- call generate_ice_deltas() first"
+        assert self.positions is not None, (
+            "No positions -- call generate_ice_deltas() first"
+        )
         assert (
             self.box_x is not None and self.box_y is not None and self.box_z is not None
         )

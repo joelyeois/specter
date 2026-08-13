@@ -195,9 +195,9 @@ def test_reconstructor_multi_gpu_ddp_matches_single_gpu(tmp_path: Path):
         "rot_final"
     ].norm()
     assert V_relerr < 1e-3, f"V mismatch between single- and multi-GPU: {V_relerr}"
-    assert (
-        rot_relerr < 1e-3
-    ), f"rotations mismatch between single- and multi-GPU: {rot_relerr}"
+    assert rot_relerr < 1e-3, (
+        f"rotations mismatch between single- and multi-GPU: {rot_relerr}"
+    )
 
     # Logged metrics: multi-GPU's rank-0-saved log_norm_loss/log_total_loss
     # should be the *gathered* (mean-across-ranks) value, not just rank 0's

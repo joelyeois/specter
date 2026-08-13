@@ -200,6 +200,6 @@ def test_scattering_vs_iterative_consistency(padded_volume, angle_deg, atol):
     psi_iter = scat_iter.forward(padded_volume.unsqueeze(0), theta_matrix)
 
     assert psi_scat.shape == psi_iter.shape
-    assert torch.allclose(
-        psi_scat, psi_iter, atol=atol
-    ), f"Max diff at {angle_deg}°: {(psi_scat - psi_iter).abs().max().item():.2e}"
+    assert torch.allclose(psi_scat, psi_iter, atol=atol), (
+        f"Max diff at {angle_deg}°: {(psi_scat - psi_iter).abs().max().item():.2e}"
+    )

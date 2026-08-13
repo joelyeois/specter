@@ -173,9 +173,9 @@ def test_anisomag_changes_output(gb_kwargs: dict, anisomag: torch.Tensor) -> Non
     )
     img_iso = gb_iso.forward(torch.tensor([0]))
     img_aniso = gb_aniso.forward(torch.tensor([0]))
-    assert not torch.equal(
-        img_iso, img_aniso
-    ), "Anisotropic magnification should produce a different image than isotropic."
+    assert not torch.equal(img_iso, img_aniso), (
+        "Anisotropic magnification should produce a different image than isotropic."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -391,9 +391,9 @@ def test_reconstructor_training_updates_volume(
     loss.backward()
     opt.step()
 
-    assert not torch.equal(
-        model.V.data, V_init
-    ), "V was not updated after one gradient step"
+    assert not torch.equal(model.V.data, V_init), (
+        "V was not updated after one gradient step"
+    )
 
 
 # ---------------------------------------------------------------------------

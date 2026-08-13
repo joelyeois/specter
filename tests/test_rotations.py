@@ -126,18 +126,18 @@ def test_coordinate_rotation_matches_volume_rotation(angle_deg: float) -> None:
     # error on a single voxel; the volume-mean error is <0.1% (errors cancel).
     # A convention error (wrong R) gives diffs of order 0.5-1.0, so these
     # thresholds are tight enough to catch any real mistake.
-    assert (
-        diff.max().item() < 0.03
-    ), f"angle={angle_deg}°: max voxel diff {diff.max():.4f}"
-    assert (
-        diff.mean().item() < 1e-3
-    ), f"angle={angle_deg}°: mean voxel diff {diff.mean():.6f}"
+    assert diff.max().item() < 0.03, (
+        f"angle={angle_deg}°: max voxel diff {diff.max():.4f}"
+    )
+    assert diff.mean().item() < 1e-3, (
+        f"angle={angle_deg}°: mean voxel diff {diff.mean():.6f}"
+    )
 
     # Total signal must be conserved under rotation.
     ref_mass = vol_orig.sum().item()
-    assert (
-        abs(vol_B.sum().item() - ref_mass) / ref_mass < 0.01
-    ), "rotate_volume did not conserve total mass"
+    assert abs(vol_B.sum().item() - ref_mass) / ref_mass < 0.01, (
+        "rotate_volume did not conserve total mass"
+    )
 
 
 # ---------------------------------------------------------------------------

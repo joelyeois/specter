@@ -1,7 +1,15 @@
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.6.9  # check https://github.com/astral-sh/ruff-pre-commit for latest
+    # Keep in sync with pyproject.toml's dev-group ruff pin: a hook version
+    # older than the one in .venv formats differently, so `ruff format` run
+    # by hand and the commit hook disagree about the same file.
+    rev: v0.14.4
     hooks:
       - id: ruff
         args: [--fix]  # auto-fix lint issues (e.g. import sorting)
       - id: ruff-format  # black-style autoformatter
+
+# mypy is deliberately NOT a hook: it takes ~16s warm (~59s cold) over
+# src/, too slow to pay on every commit for a tree that already type-
+# checks clean. Run `mypy src/` by hand instead (see CLAUDE.md's Testing
+# section).

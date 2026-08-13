@@ -315,9 +315,9 @@ def test_shtyrov_species_with_zero_b_coefficient_is_finite(species):
     species_path = resources.files("specter.atom_data").joinpath("params_cat.json")
     with resources.as_file(species_path) as fpath:
         table = load_shtyrov_species_parameters(str(fpath))
-    assert any(
-        b == 0.0 for b in table[species][:, 1].tolist()
-    ), f"expected {species} to have a b_i=0 term; bundled data may have changed"
+    assert any(b == 0.0 for b in table[species][:, 1].tolist()), (
+        f"expected {species} to have a b_i=0 term; bundled data may have changed"
+    )
 
     r_xyz = radial_grid_3d(20, 0.5, convention="torch")
     potential = shtyrov_atomic_potential_3d_by_species(species, r_xyz, table)
@@ -575,9 +575,9 @@ def test_potential_builder_analytic_robust_to_subvoxel_position():
         coords = torch.tensor([[offset, 0.0, 0.0]])
         vol = pb.forward(coords, method="analytic")
         total = (vol.sum() * dx**3).item()
-        assert total == pytest.approx(
-            expected_total, rel=1e-3
-        ), f"total at offset={offset} is {total}, expected {expected_total}"
+        assert total == pytest.approx(expected_total, rel=1e-3), (
+            f"total at offset={offset} is {total}, expected {expected_total}"
+        )
         peaks.append(vol.max().item())
 
     assert max(peaks) / min(peaks) < 3.0, (
@@ -757,9 +757,9 @@ def test_kirkland_lobato_analytic_no_overflow_for_heavy_elements():
             vol = fn(atomic_numbers, coords, (n, n, n), dx)
             assert torch.isfinite(vol).all(), f"{fn.__name__} Z={z}: non-finite volume"
             vol.sum().backward()
-            assert (
-                coords.grad is not None and torch.isfinite(coords.grad).all()
-            ), f"{fn.__name__} Z={z}: non-finite gradient"
+            assert coords.grad is not None and torch.isfinite(coords.grad).all(), (
+                f"{fn.__name__} Z={z}: non-finite gradient"
+            )
 
 
 def test_potential_builder_shtyrov_peng_only_analytic():

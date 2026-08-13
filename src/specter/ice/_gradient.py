@@ -833,9 +833,9 @@ class GradientSKIcemaker(L.LightningModule):
             centered at the origin with extent ``(nx*Lx, ny*Ly, nz*Lz)`` Å.
         """
         n_tiles = nx * ny * nz
-        assert (
-            len(tile_positions) == n_tiles
-        ), f"Expected {n_tiles} tiles, got {len(tile_positions)}"
+        assert len(tile_positions) == n_tiles, (
+            f"Expected {n_tiles} tiles, got {len(tile_positions)}"
+        )
         Lx, Ly, Lz = tile_box
         assembled: list[torch.Tensor] = []
         for idx, (ix, iy, iz) in enumerate(

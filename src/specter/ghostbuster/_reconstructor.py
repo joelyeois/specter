@@ -744,9 +744,9 @@ class Reconstructor(_BaseReconstructor):
         label: str,
     ) -> None:
         """Compute and save an FSC figure with optional CryoSPARC reference. Silently skips on failure."""
-        assert (
-            self.fsc_ref is not None
-        ), "_save_fsc_figure requires self.fsc_ref to be set"
+        assert self.fsc_ref is not None, (
+            "_save_fsc_figure requires self.fsc_ref to be set"
+        )
         cryosparc_ref = (
             self.cryosparc_ref
             if self.cryosparc_ref is not None and self.fsc_ref is not None

@@ -23,7 +23,7 @@ Example (HPC, multi-GPU):
         --scattering_model multislice \
         --aberration_model holography \
         --noise_model poisson \
-        --coincidence_radius 2.1 \
+        --coincidence_radius 0.8378 \
         --ice_model gd \
         --normalize_particles True \
         --device 0,1,2,3 \

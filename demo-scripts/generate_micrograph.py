@@ -32,7 +32,7 @@ Example (HPC):
         --scattering_model multislice \\
         --aberration_model holography \\
         --noise_model poisson \\
-        --coincidence_radius_min 2.1 \\
+        --coincidence_radius_min 0.8378 \\
         --ice_model gd \\
         --ice_thickness 500 \\
         --chunk_size 8 \\

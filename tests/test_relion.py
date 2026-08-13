@@ -1,3 +1,5 @@
+import math
+
 import pandas as pd
 import pytest
 import roma
@@ -10,6 +12,9 @@ from specter.io import (
     create_particle_starfile_from_model,
     extract_parameters_from_starfile,
 )
+
+# Effective coincidence exclusion radius; see tests/test_generators.py::_CR.
+_CR = 1.8 / math.sqrt(2 * math.pi)
 
 
 def test_create_particle_starfile_writes_bfactor_column(tmp_path) -> None:
@@ -32,7 +37,7 @@ def test_create_particle_starfile_writes_bfactor_column(tmp_path) -> None:
         filename="particles",
         ctf_params=ctf_params,
         dose_per_angstrom=2.0,
-        coincidence_radius=1.8,
+        coincidence_radius=_CR,
         potential_scale=0.75,
         bfactor=42.0,
     )
@@ -40,7 +45,7 @@ def test_create_particle_starfile_writes_bfactor_column(tmp_path) -> None:
     df = starfile.read(tmp_path / "particles.star")
     assert (df["specterBfactor"] == 42.0).all()
     assert (df["specterPotentialScale"] == 0.75).all()
-    assert (df["specterCoincidenceRadius"] == 1.8).all()
+    assert df["specterCoincidenceRadius"].to_numpy() == pytest.approx(_CR)
     assert (df["specterDosePerAngstrom"] == 2.0).all()
 
 
@@ -67,7 +72,7 @@ def test_create_particle_starfile_from_model_matches_model_params(tmp_path) -> N
         noise_model=None,
         scattering_model="multislice",
         alpha=0.1,
-        coincidence_radius=1.8,
+        coincidence_radius=_CR,
         potential_scale=0.75,
         bfactor=42.0,
         verbose=False,
@@ -82,7 +87,7 @@ def test_create_particle_starfile_from_model_matches_model_params(tmp_path) -> N
     df = starfile.read(tmp_path / "particles.star")
     assert (df["specterBfactor"] == 42.0).all()
     assert (df["specterPotentialScale"] == 0.75).all()
-    assert (df["specterCoincidenceRadius"] == 1.8).all()
+    assert df["specterCoincidenceRadius"].to_numpy() == pytest.approx(_CR)
     assert (df["specterDosePerAngstrom"] == 2.0).all()
     # Multislice internally shifts dfu/dfv to the volume's midplane (see
     # _apply_defocus_shift); the saved STAR file must have the original,

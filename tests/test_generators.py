@@ -9,6 +9,7 @@ the corresponding .pt file and re-run.
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 
 import pytest
@@ -23,6 +24,13 @@ from specter.imagegenerator import (
 )
 
 FIXTURE_DIR = Path(__file__).parent / "test_data"
+
+# These fixtures predate `coincidence_radius` being rescaled to mean a true
+# effective exclusion radius (exclusion area pi*r^2, rather than the old
+# grid-cell-indexing convention with area r^2/2). Expressing the old 1.8 via
+# the exact conversion keeps the suppression grid bit-identical, so the
+# fixtures still verify the physics rather than just the new parameterization.
+_CR = 1.8 / math.sqrt(2 * math.pi)
 
 
 def _save_or_compare(name: str, tensor: torch.Tensor) -> None:
@@ -95,7 +103,7 @@ def test_image_generator_regression(small_volume, ctf_params):
         scattering_model="multislice",
         ice_model="random",
         alpha=0.1,
-        coincidence_radius=1.8,
+        coincidence_radius=_CR,
         num_frames=10,
         detector_model="k3_300kv",
         crowd_min_distance=60.0,
@@ -125,7 +133,7 @@ def test_image_generator_from_coordinates_regression(small_coords, ctf_params):
         scattering_model="multislice",
         ice_model="random",
         alpha=0.1,
-        coincidence_radius=1.8,
+        coincidence_radius=_CR,
         num_frames=10,
         crowd_min_distance=40.0,
         verbose=False,
@@ -149,7 +157,7 @@ def test_micrograph_generator_regression(small_volume, ctf_params):
         scattering_model="projection",
         ice_model="random",
         alpha=0.1,
-        coincidence_radius=1.8,
+        coincidence_radius=_CR,
         num_frames=10,
         crowd_min_distance=60.0,
         verbose=False,
@@ -177,7 +185,7 @@ def test_micrograph_generator_accepts_prebuilt_icemaker(small_volume, ctf_params
         scattering_model="projection",
         icemaker=icemaker,
         alpha=0.1,
-        coincidence_radius=1.8,
+        coincidence_radius=_CR,
         num_frames=10,
         verbose=False,
         progressbars=False,
@@ -255,7 +263,7 @@ def test_tilt_series_generator_regression(ctf_params):
         noise_model="poisson",
         scattering_model="projection",
         alpha=0.1,
-        coincidence_radius=1.8,
+        coincidence_radius=_CR,
         num_frames=10,
         tilt_axis="y",
         verbose=False,

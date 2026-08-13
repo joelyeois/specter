@@ -225,8 +225,9 @@ PARTICLE_STACK_HELP: dict[str, str] = {
     "bfactor": "Isotropic B-factor envelope in Angstrom^2.",
     "aberration_model": "Aberration model.",
     "noise_model": "Noise model. Use 'none' for no noise.",
-    "coincidence_radius": "Coincidence radius in pixels: a single value for "
-    "constant radius, or 'low,high' to sample uniformly per particle.",
+    "coincidence_radius": "Effective coincidence exclusion radius in pixels "
+    "(exclusion area = pi*r^2): a single value for constant radius, or "
+    "'low,high' to sample uniformly per particle.",
     "ice_model": "Ice model: 'gd' (samples the pre-generated IceBank "
     "cache), 'random' (cheap, low-realism), or 'none'.",
     "ice_thickness": "Ice thickness in Angstrom. 0 = minimum (particle box size).",
@@ -339,7 +340,7 @@ class MicrographConfig:
     )
     aberration_model: Literal["holography", "ctf"] = "holography"
     noise_model: Literal["poisson", "none"] = "poisson"
-    coincidence_radius_min: float = 1.8  # pixels
+    coincidence_radius_min: float = 0.7181  # pixels (effective exclusion radius)
     coincidence_radius_max: float | None = None  # pixels
     ice_model: Literal["gd", "random", "none"] = "gd"
     ice_thickness: float = 500.0  # Å, 0 = minimum (particle box size)
@@ -419,7 +420,7 @@ class TiltSeriesConfig:
     )
     aberration_model: Literal["holography", "ctf"] = "holography"
     noise_model: Literal["poisson", "none"] = "poisson"
-    coincidence_radius: float = 1.5  # pixels
+    coincidence_radius: float = 0.5984  # pixels (effective exclusion radius)
     ice_model: Literal["gd", "random", "none"] = "gd"
     ice_cache_dir: str | None = None  # defaults to the bundled ice-data/ice_cache
     ice_relax_steps: int = 0  # local MLBOP seam-relaxation steps for ice_model="gd"
@@ -471,7 +472,8 @@ TILT_SERIES_HELP: dict[str, str] = {
     "scattering_model": "Scattering model.",
     "aberration_model": "Aberration model.",
     "noise_model": "Noise model. Use 'none' for no noise.",
-    "coincidence_radius": "Coincidence radius in pixels for direct-detector modelling.",
+    "coincidence_radius": "Effective coincidence exclusion radius in pixels "
+    "(exclusion area = pi*r^2) for direct-detector modelling.",
     "ice_model": "Ice generation algorithm: 'gd' (IceBank cache), 'random' "
     "(cheap RandomIcemaker), or 'none'.",
     "ice_cache_dir": "Directory of cached ice configs for ice_model='gd'. "

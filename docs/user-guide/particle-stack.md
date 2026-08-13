@@ -96,7 +96,7 @@ specter simulate particles \
     --n_particles 5 \
     --dose 40 \
     --ice_model gd \
-    --coincidence_radius 2 \
+    --coincidence_radius 0.8 \
     --potential_scale 0.5 \
     --detector_model none \
     --device cuda:0

@@ -1,4 +1,27 @@
+"""
+Aberration and detector models.
+
+The detector's coincidence-loss model (:meth:`Detector.apply_coincidence`) is
+an original, deliberately simplified spatial simulation -- it is not an
+implementation of any published closed-form theory. For an analytical
+treatment of the same phenomenon (exact mean/variance of recorded counts and
+events versus incoming rate, via Roach's statistical-overlap model), and for
+the DQE/SNR consequences, see the reference below. Note that such closed-form
+per-pixel statistics carry no spatial-correlation information and therefore do
+not by themselves reproduce the low-spatial-frequency dip that coincidence
+loss imprints on a power spectrum.
+
+References
+----------
+Zambon, P. (2024). Modeling the impact of coincidence loss on count rate
+statistics and noise performance in counting detectors for imaging
+applications. Frontiers in Physics, 12, 1408430.
+https://doi.org/10.3389/fphy.2024.1408430
+"""
+
 from __future__ import annotations
+
+import math
 
 import numpy as np
 import torch
@@ -205,82 +228,49 @@ class Detector(L.LightningModule):
         intensity_map: torch.Tensor,
         pixel_size_angstrom: float,
         dose_per_angstrom_sq_per_frame: float,
-        coinc_radius_pixels: float = 1.5,
+        coinc_radius_pixels: float = 0.6,
     ) -> torch.Tensor:
         """
-        Simulates a single frame of a Direct Electron Detector (DED).
+        Simulates a single frame of a Direct Electron Detector (DED), using a
+        randomized square-cell grid to suppress coincident arrivals.
 
         Parameters
         ----------
         intensity_map : torch.Tensor
             2D Tensor (normalized psi^2 from multislice).
         pixel_size_angstrom : float
-            Size of one pixel in Angstroms (e.g., 1.0).
+            Size of one pixel in Angstroms.
         dose_per_angstrom_sq_per_frame : float
-            Physical dose (e/A^2).
+            Physical dose (e/A^2) in this frame.
         coinc_radius_pixels : float, optional
-            Dead-time radius in pixels.
+            Effective coincidence exclusion radius in pixels -- see
+            :meth:`apply_coincidence` for the definition and calibration.
+
+        Notes
+        -----
+        The suppression grid's cell side is ``r * sqrt(pi)`` so that the cell
+        *area* equals ``pi * r**2``, i.e. the area of the exclusion disc of
+        radius ``r``. Since the electron-loss rate depends on the exclusion
+        *area* (not on the cell's shape), this makes ``coinc_radius_pixels``
+        numerically equivalent to the radius of a true pairwise exclusion
+        disc, rather than a shape-specific grid parameter. Verified against an
+        exact O(n^2) pairwise implementation: the fitted effective area of
+        this rule matches ``pi * r**2`` to within 0.4% over r = 1-3 px, and
+        the pairwise rule to within 0.2% -- see
+        ``tests/test_detector_coincidence.py``.
+
+        Resolving exclusion per cell also keeps coincidence *locally bounded*:
+        it cannot chain transitively across the frame the way a pairwise
+        connected-component rule does, which is what keeps the model stable at
+        the high dose rates it was calibrated against.
         """
-        det_h, det_w = intensity_map.shape
         device = intensity_map.device
 
-        # 1. Convert physical dose to expected electrons in this frame
-        dose_per_pixel = dose_per_angstrom_sq_per_frame * (pixel_size_angstrom**2)
-        total_expected_electrons = dose_per_pixel * (det_h * det_w)
+        # Nominal cell side, chosen so cell area == pi*r^2 (see Notes above).
+        cell_size_nominal = coinc_radius_pixels * math.sqrt(math.pi)
 
-        # 2. Poisson number of incident electrons
-        n_e = int(
-            torch.poisson(torch.tensor(total_expected_electrons, device=device)).item()
-        )
-        if n_e <= 0:
-            return torch.zeros_like(intensity_map)
-
-        # 3. Sample landing coordinates from intensity_map distribution
-        prob_dist = intensity_map.reshape(-1)
-        prob_dist = prob_dist / prob_dist.sum()
-        indices = torch.multinomial(prob_dist, n_e, replacement=True)
-
-        iy = (indices // det_w).float()
-        ix = (indices % det_w).float()
-        coords = torch.stack([ix, iy], dim=1)
-        coords += torch.rand((n_e, 2), device=device)
-
-        # 4. Coincidence suppression (greedy, as requested)
-        keep = torch.ones(n_e, dtype=torch.bool, device=device)
-        r_sq = float(coinc_radius_pixels) * float(coinc_radius_pixels)
-        for i in range(n_e):
-            if not keep[i]:
-                continue
-            if i + 1 >= n_e:
-                break
-            d_sq = torch.sum((coords[i + 1 :] - coords[i]) ** 2, dim=1)
-            close = d_sq < r_sq
-            keep[i + 1 :][close] = False
-
-        coords = coords[keep]
-
-        # 5. Bin into detector pixels
-        pixels = torch.zeros_like(intensity_map)
-        ix_f = coords[:, 0].long().clamp(0, det_w - 1)
-        iy_f = coords[:, 1].long().clamp(0, det_h - 1)
-        pixels.index_put_(
-            (iy_f, ix_f),
-            torch.ones_like(ix_f, dtype=intensity_map.dtype),
-            accumulate=True,
-        )
-        return pixels
-
-    def apply_detector_physics_fast(
-        self,
-        intensity_map: torch.Tensor,
-        pixel_size_angstrom: float,
-        dose_per_angstrom_sq_per_frame: float,
-        coinc_radius_pixels: float = 1.5,
-    ) -> torch.Tensor:
-        device = intensity_map.device
-
-        # 0. Pad map to avoid edge artifacts
-        pad = int(np.ceil(coinc_radius_pixels * 2))
+        # 0. Pad map to avoid edge artifacts (a few cell widths)
+        pad = int(np.ceil(cell_size_nominal * 3))
         orig_h, orig_w = intensity_map.shape
         # Use reflect padding to keep intensity levels consistent at the edge
         intensity_map = F.pad(
@@ -323,10 +313,9 @@ class Detector(L.LightningModule):
 
         # 3. Assign electrons to coincidence grid cells
         # Introduce a slight randomization to the cell size to mimic detector variation
-        base_cell_size = coinc_radius_pixels / (2**0.5)
-        cell_size = base_cell_size * (1 + 0.05 * torch.randn(1, device=device)).clamp(
-            0.8, 1.2
-        )
+        cell_size = cell_size_nominal * (
+            1 + 0.05 * torch.randn(1, device=device)
+        ).clamp(0.8, 1.2)
 
         # Random shift to prevent the grid from "locking" onto specific pixels
         shift = (torch.rand(2, device=device) - 0.5) * cell_size
@@ -377,12 +366,44 @@ class Detector(L.LightningModule):
         dose : float
             Total dose for this image in e-/Å².
         coincidence_radius : float
-            Coincidence radius in pixels. If <= 0, plain Poisson noise is applied.
+            Effective coincidence exclusion radius in pixels: within a single
+            readout frame, an arriving electron is lost if it lands inside the
+            exclusion area (``pi * r**2``) of one already recorded. If <= 0,
+            plain Poisson noise is applied with no coincidence loss.
+
+            This is a *physical* radius -- the lateral scale over which one
+            electron's charge cloud renders the detector unable to resolve a
+            second arrival -- so it converts directly to real units by
+            multiplying by the detector's physical pixel pitch.
 
         Returns
         -------
         final_image : torch.Tensor
             Simulated image after dose-fractionated noise and coincidence.
+
+        Notes
+        -----
+        Calibrated against beam-only Falcon 4i micrographs spanning
+        0.15-31.29 e-/px/s: ``coincidence_radius = 2.394`` px (~33.5 um at the
+        4096^2 sensor's 14 um pitch) reproduces the measured detected-electron
+        yield to ~2% RMSE across the full dose range, together with the
+        characteristic low-spatial-frequency dip in the power spectrum.
+
+        This is a deliberately simplified, *locally bounded* model: exclusion
+        is resolved per grid cell, so coincidence cannot chain transitively
+        across the frame. Roach-style statistical-overlap models (see the
+        module docstring's Zambon reference) instead merge any connected chain
+        of overlapping events into one, which is a good description at low
+        flux but percolates into a single frame-spanning cluster at the
+        higher dose rates measured here.
+
+        .. warning::
+           The meaning of this parameter changed: it previously indexed the
+           suppression grid's cell side as ``r / sqrt(2)``, making the
+           effective exclusion area ``r**2 / 2`` rather than ``pi * r**2``.
+           Values from before that change must be divided by
+           ``sqrt(2 * pi) ~= 2.5066`` to preserve behaviour (the old
+           Falcon 4i calibration of 6.0 px corresponds to 2.394 px here).
         """
         if self.noise_model != "poisson":
             return img
@@ -413,7 +434,7 @@ class Detector(L.LightningModule):
             transient=True,
             disable=not (self.progressbars),
         ):
-            final_image += self.apply_detector_physics_fast(
+            final_image += self.apply_detector_physics(
                 intensity_map,
                 self.pixel_size,
                 dose_effective / n_frames,

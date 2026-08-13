@@ -37,8 +37,8 @@ n_micrographs = 1
 scattering_model = "multislice"  # multislice | firstborn | projection | ctf
 aberration_model = "holography"  # holography | ctf
 noise_model = "poisson"          # poisson | none
-coincidence_radius_min = 1.8     # pixels
-# coincidence_radius_max = 3.0    # pixels, uncomment to randomize per micrograph
+coincidence_radius_min = 0.7181  # pixels (effective exclusion radius)
+# coincidence_radius_max = 1.1968 # pixels, uncomment to randomize per micrograph
 ice_model = "gd"                 # gd | random | none
 ice_thickness = 500.0            # Å, 0 = minimum (particle box size)
 # ice_cache_dir = "ice-data/ice_cache"  # defaults to the bundled cache

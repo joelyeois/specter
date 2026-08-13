@@ -6,6 +6,7 @@ import lightning as L
 import torch
 
 from specter.detectors import (
+    dqe0_for_detector,
     falcon4i_200kv,
     falcon4i_300kv,
     k3_200kv,
@@ -326,6 +327,7 @@ class BaseImager(L.LightningModule):
             aberration_model=self.aberration_model,
             noise_model=self.noise_model,
             mtf=self.detector_mtf,
+            dqe0=dqe0_for_detector(self.detector_model),
             num_frames=self.num_frames,
             progressbars=self.progressbars,
         )

@@ -52,11 +52,30 @@ class Detector(L.LightningModule):
         (no noise applied).
     mtf : torch.Tensor, optional
         Modulation transfer function in Fourier space to apply to images.
-        Default is None (no MTF applied).
+        Must be normalised so ``MTF(0) == 1``; it is a pure blur and conserves
+        total counts. Default is None (no MTF applied).
+    dqe0 : float, optional
+        Zero-frequency detective quantum efficiency, i.e. the fraction of
+        incident electrons the detector records at all. Scales the expected
+        electron count, so it reduces the mean *and* the shot noise
+        consistently (thinning a Poisson process leaves a Poisson process).
+        Default 1.0 (an ideal counter: every electron is recorded).
+
+        Applied to the signal in :meth:`image`, so it takes effect regardless
+        of ``noise_model`` -- it is a property of detection, not of noise.
+        Use :func:`specter.detectors.dqe0_for_detector` to get the published
+        value for a named detector.
     num_frames : int, optional
         Number of frames for dose-fractionated noise.
     progressbars : bool, optional
         Whether to show progress bars. Default True.
+
+    Notes
+    -----
+    ``mtf`` and ``dqe0`` are the two halves of a measured DQE curve and should
+    be taken from the same detector: ``dqe0 = DQE(0)`` and
+    ``MTF(k) = sqrt(DQE(k)/DQE(0))``. Setting one without the other silently
+    mis-models the detector.
     """
 
     def __init__(
@@ -65,14 +84,18 @@ class Detector(L.LightningModule):
         aberration_model: str = "holography",
         noise_model: str | None = None,
         mtf: torch.Tensor | None = None,
+        dqe0: float = 1.0,
         num_frames: int | None = None,
         progressbars: bool = True,
     ):
         super().__init__()
+        if not 0.0 < dqe0 <= 1.0:
+            raise ValueError(f"dqe0 must be in (0, 1], got {dqe0}")
         self.pixel_size = pixel_size
         self.aberration_model = aberration_model
         self.noise_model = noise_model
         self.register_buffer("mtf", mtf)
+        self.dqe0 = dqe0
         self.num_frames = num_frames
         self.progressbars = progressbars
 
@@ -94,8 +117,17 @@ class Detector(L.LightningModule):
         images : torch.Tensor
             Detector image. For holography model, returns intensity (squared
             magnitude). For CTF model, returns dose-scaled image.
+
+        Notes
+        -----
+        ``dqe0`` is folded into the dose here rather than applied downstream:
+        an electron that is never detected cannot contribute to the image, be
+        blurred by the MTF, or block a neighbour via coincidence loss. Scaling
+        the expected count is exactly equivalent to thinning the arrival
+        process, so the shot noise stays correct once ``torch.poisson`` is
+        applied later.
         """
-        dose_per_pixel = dose * self.pixel_size**2  # (B,)
+        dose_per_pixel = dose * self.pixel_size**2 * self.dqe0  # (B,)
         if self.aberration_model == "holography":
             images = dose_per_pixel[:, None, None] * torch.abs(aberrated_exitwave) ** 2
         elif self.aberration_model == "ctf":

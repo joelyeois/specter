@@ -132,3 +132,73 @@ def test_larger_radius_loses_more_electrons() -> None:
         _grid_survival(n0, r, SIZE, range(N_SEEDS)) for r in (0.5, 1.0, 2.0, 3.0)
     ]
     assert survivals == sorted(survivals, reverse=True), survivals
+
+
+# ---------------------------------------------------------------------------
+# Detector response: MTF (blur) vs DQE(0) (counting efficiency)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "preset",
+    ["k3_200kv", "k3_300kv", "falcon4i_200kv", "falcon4i_300kv", "perfect_detector"],
+)
+def test_mtf_is_normalised_at_dc(preset: str) -> None:
+    """
+    Every bundled MTF must be 1 at zero frequency.
+
+    An MTF describes blur, which redistributes signal without destroying it.
+    Detection efficiency is a separate effect carried by ``dqe0``. The Falcon
+    presets are derived from published DQE and previously had DC = sqrt(DQE(0))
+    ~ 0.96, which silently scaled counts through what should be a pure filter.
+    """
+    from specter import detectors
+
+    mtf = getattr(detectors, preset)(n=128, dx=1.0, device="cpu")
+    assert float(mtf.flatten()[0]) == pytest.approx(1.0, abs=1e-5)
+    assert float(mtf.max()) == pytest.approx(1.0, abs=1e-5)
+
+
+def test_mtf_conserves_total_counts() -> None:
+    """Applying an MTF must not change the number of electrons, only where."""
+    from specter.detectors import falcon4i_300kv
+    from specter.fft import fft2, ifft2
+
+    mtf = falcon4i_300kv(n=256, dx=1.0, device="cpu")
+    torch.manual_seed(0)
+    img = torch.poisson(torch.full((256, 256), 20.0)).double()
+    blurred = torch.real(ifft2(fft2(img) * mtf))
+
+    assert blurred.sum().item() == pytest.approx(img.sum().item(), rel=1e-6)
+    # ...but it must actually blur, or the test is vacuous.
+    assert blurred.std().item() < img.std().item()
+
+
+def test_dqe0_scales_detected_counts() -> None:
+    """
+    dqe0 must scale recorded electrons by exactly that factor, and must apply
+    with noise disabled -- it is a property of detection, not of noise.
+    """
+    exitwave = torch.ones(1, 64, 64, dtype=torch.complex64)
+    dose = torch.tensor([10.0])
+    cr = torch.zeros(1)
+
+    ideal = Detector(pixel_size=1.0).forward(exitwave, dose, cr)
+    lossy = Detector(pixel_size=1.0, dqe0=0.92).forward(exitwave, dose, cr)
+
+    assert lossy.sum().item() == pytest.approx(0.92 * ideal.sum().item(), rel=1e-6)
+
+
+def test_dqe0_rejects_out_of_range() -> None:
+    for bad in (0.0, -0.1, 1.5):
+        with pytest.raises(ValueError, match="dqe0"):
+            Detector(pixel_size=1.0, dqe0=bad)
+
+
+def test_named_detector_carries_its_dqe0() -> None:
+    """The DQE(0) and MTF halves must travel together with the detector name."""
+    from specter.detectors import dqe0_for_detector
+
+    assert dqe0_for_detector("falcon4i_300kv") == 0.92
+    assert dqe0_for_detector(None) == 1.0
+    assert dqe0_for_detector("not_a_detector") == 1.0

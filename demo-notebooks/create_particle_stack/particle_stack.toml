@@ -6,7 +6,7 @@ pixel_size = 1.0     # Å
 
 [microscope]
 voltage = 300.0       # kV
-dose = "20"          # e⁻/Å², used as a fixed dose (this notebook doesn't randomize per particle)
+dose = 20.0          # e⁻/Å², used as a fixed dose (this notebook doesn't randomize per particle)
 cs = 2.0             # mm
 alpha = 0.1          # unitless, amplitude contrast ratio
 
@@ -14,7 +14,7 @@ alpha = 0.1          # unitless, amplitude contrast ratio
 bfactor = 0.0        # Å²
 
 [sampling]
-defocus = "5000,15000"   # Å; single value, or "low,high" to sample per particle
+defocus = [5000.0, 15000.0]   # Å; single value, or [low, high] to sample per particle
 shift = 2.0  # Å
 
 [dataset]
@@ -26,7 +26,7 @@ aberration_model = "holography"
 noise_model = "poisson"
 ice_model = "gd"
 detector_model = "none"
-coincidence_radius = "1.8"  # pixels
+coincidence_radius = 1.8  # pixels
 
 [ice]
 ice_thickness = 0.0       # Å
@@ -34,4 +34,4 @@ ice_thickness = 0.0       # Å
 
 [compute]
 device = "cuda:1"  # adjust to an available device on your machine, e.g. "cuda:0" or "cpu"
-batchsize = 5      # reduce if out of memory.
+batchsize = "auto" # or an int to pin it; "auto" fits the batch to free memory.

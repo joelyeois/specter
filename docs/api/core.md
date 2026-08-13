@@ -30,6 +30,10 @@ Standalone top-level modules that are not grouped into a subpackage.
 
 ::: specter.config
 
+## specter.memory
+
+::: specter.memory
+
 ## specter.arrays
 
 ::: specter.arrays

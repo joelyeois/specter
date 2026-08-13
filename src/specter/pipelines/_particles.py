@@ -21,6 +21,11 @@ from specter.ice import resolve_icemaker
 from specter.image import normalize_particles
 from specter.imagegenerator import ImageGenerator
 from specter.io import create_particle_starfile, extract_parameters_from_csfile
+from specter.memory import (
+    available_memory_bytes,
+    estimate_peak_bytes,
+    recommend_batchsize,
+)
 from specter.pdb import PDB
 from specter.potential import PotentialBuilder
 from specter.progress import track
@@ -153,6 +158,10 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
         tilty = _uniform_sample(config.tilty, n)
         trefoil1 = _uniform_sample(config.trefoil1, n)
         trefoil2 = _uniform_sample(config.trefoil2, n)
+        tetrafoil1 = _uniform_sample(config.tetrafoil1, n)
+        tetrafoil2 = _uniform_sample(config.tetrafoil2, n)
+        tetrafoil3 = _uniform_sample(config.tetrafoil3, n)
+        tetrafoil4 = _uniform_sample(config.tetrafoil4, n)
         ctf_params = {
             "cs": torch.tensor([cs_angstrom] * n),
             "dfu": defocus_A,
@@ -163,6 +172,10 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
             "tilty": tilty,
             "trefoil1": trefoil1,
             "trefoil2": trefoil2,
+            "tetrafoil1": tetrafoil1,
+            "tetrafoil2": tetrafoil2,
+            "tetrafoil3": tetrafoil3,
+            "tetrafoil4": tetrafoil4,
         }
 
         anisomag_matrix = (
@@ -278,6 +291,39 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
     if config.save_clean_exitwaves:
         model.save_clean_exitwaves = True  # type: ignore[assignment]
 
+    # --- Batch size ---
+    # "auto" sizes the batch to the memory actually free on the target device
+    # right now, from the box geometry the model was just built with -- see
+    # specter.memory for the measured peak-memory model behind it.
+    if config.batchsize == "auto":
+        if mode == "multi":
+            assert isinstance(device_target, list)
+            # Every rank builds an identically-sized batch, so size to
+            # whichever GPU in the pool has the least room.
+            sizing_device = min(
+                (f"cuda:{i}" for i in device_target), key=available_memory_bytes
+            )
+        else:
+            sizing_device = str(device_target)
+        batchsize = recommend_batchsize(
+            config.num_pixels, model.nz, model.pad_nxy, sizing_device, n_particles=n
+        )
+        if is_main:
+            peak_gib = (
+                estimate_peak_bytes(
+                    batchsize, config.num_pixels, model.nz, model.pad_nxy
+                )
+                / 1024**3
+            )
+            free_gib = available_memory_bytes(sizing_device) / 1024**3
+            _console.print(
+                f"  batchsize='auto' -> {batchsize} particle(s) per pass "
+                f"(~{peak_gib:.1f} GiB estimated peak, {free_gib:.1f} GiB free "
+                f"on {sizing_device})"
+            )
+    else:
+        batchsize = int(config.batchsize)
+
     # --- Generating images ---
     if mode == "multi":
         assert isinstance(device_target, list)
@@ -286,7 +332,7 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
         images, exitwaves, clean_exitwaves = _generate_multi(
             model,
             n,
-            config.batchsize,
+            batchsize,
             device_target,
             config.output_dir,
             collect_exitwaves=config.save_exitwaves,
@@ -301,7 +347,7 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
         images, exitwaves, clean_exitwaves = _generate_single(
             model,
             n,
-            config.batchsize,
+            batchsize,
             track,
             collect_exitwaves=config.save_exitwaves,
             collect_clean_exitwaves=config.save_clean_exitwaves,

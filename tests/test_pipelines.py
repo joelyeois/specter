@@ -86,3 +86,63 @@ def test_run_particle_stack_from_csfile(tmp_path: Path) -> None:
     assert df["rlnAmplitudeContrast"].iloc[0] == _ALPHA
     assert df["rlnDefocusU"].iloc[0] == _DFU_A
     assert df["rlnDefocusV"].iloc[0] == _DFV_A
+
+
+def test_run_particle_stack_applies_tetrafoil(tmp_path: Path) -> None:
+    """config.tetrafoil1-4 reach the CTF (see _particles.py's ctf_params).
+
+    tetrafoil3 is a k^4 cos(4*theta) phase term in Angstrom^4 -- at k = 0.25
+    1/Angstrom, 256 Angstrom^4 is ~1 radian, so a value this size has to
+    visibly change the images relative to the same run with tetrafoil off.
+    """
+    common = dict(
+        pdb_code="6bdf",
+        num_pixels=64,
+        pixel_size=2.0,
+        n_particles=2,
+        seed=1234,
+        scattering_model="projection",
+        ice_model="none",
+        detector_model="none",
+        noise_model="none",
+        normalize_particles=False,
+        device="cpu",
+        batchsize=2,
+        output_dir=str(tmp_path),
+    )
+    run_particle_stack(ParticleStackConfig(**common, filename="no_tetrafoil"))
+    run_particle_stack(
+        ParticleStackConfig(**common, filename="with_tetrafoil", tetrafoil3=2000.0)
+    )
+
+    with mrcfile.open(tmp_path / "no_tetrafoil.mrcs") as mrc:
+        off = mrc.data.copy()
+    with mrcfile.open(tmp_path / "with_tetrafoil.mrcs") as mrc:
+        on = mrc.data.copy()
+    assert not np.allclose(off, on)
+
+
+def test_run_particle_stack_auto_batchsize(tmp_path: Path) -> None:
+    """batchsize="auto" (the default) sizes itself and runs to completion.
+
+    On CPU with a 32-pixel box the recommendation is memory-unconstrained, so
+    this pins the clamp instead: never more than n_particles.
+    """
+    config = ParticleStackConfig(
+        pdb_code="6bdf",
+        num_pixels=32,
+        pixel_size=4.0,
+        n_particles=3,
+        seed=11,
+        scattering_model="projection",
+        ice_model="none",
+        detector_model="none",
+        device="cpu",
+        output_dir=str(tmp_path),
+        filename="auto_batch",
+    )
+    assert config.batchsize == "auto"
+    run_particle_stack(config)
+
+    with mrcfile.open(tmp_path / "auto_batch.mrcs") as mrc:
+        assert mrc.data.shape == (3, 32, 32)

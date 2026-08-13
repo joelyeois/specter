@@ -77,9 +77,22 @@ def default_pdb_cache_dir() -> str:
     return os.path.join(SPECTER_DATA_DIR, "pdb")
 
 
-def parse_scalar_or_range(value: str) -> tuple[float, float]:
+#: A field that is either one number (constant for every particle) or a
+#: two-element range sampled uniformly per particle. In TOML, write these as
+#: plain numbers -- ``dose = 20`` or ``defocus = [5000, 15000]`` -- so config
+#: files never mix quoted and unquoted numbers. The string forms (``"20"``,
+#: ``"5000,15000"``) remain valid: CLI flags can only ever carry strings, and
+#: older configs still parse. See :func:`parse_scalar_or_range`.
+#:
+#: ``str`` is deliberately first in the union: `cli/_click_options.py` types a
+#: union-valued flag from its first member, and only ``str`` accepts both the
+#: ``8000`` and ``5000,15000`` spellings on a command line.
+ScalarOrRange = str | float | int | list[float]
+
+
+def parse_scalar_or_range(value: ScalarOrRange) -> tuple[float, float]:
     """
-    Parse a "value" or "low,high" string into a (low, high) range.
+    Parse a scalar or a two-element range into a (low, high) range.
 
     A bare scalar becomes a zero-width range (``low == high``), so callers
     can always uniformly sample between the two bounds without special-
@@ -87,9 +100,11 @@ def parse_scalar_or_range(value: str) -> tuple[float, float]:
 
     Parameters
     ----------
-    value : str
-        Either a single number (e.g. ``"20"``) or two comma-separated
-        numbers (e.g. ``"5000,15000"``).
+    value : str or float or int or list of float
+        A single number (e.g. ``20`` or ``"20"``), or a low/high pair as
+        either a two-element sequence (e.g. ``[5000, 15000]``, the form a
+        TOML config should use) or a comma-separated string
+        (e.g. ``"5000,15000"``, the form a CLI flag has to use).
 
     Returns
     -------
@@ -99,15 +114,20 @@ def parse_scalar_or_range(value: str) -> tuple[float, float]:
     Raises
     ------
     ValueError
-        If ``value`` isn't one or two comma-separated numbers.
+        If ``value`` isn't one or two numbers.
     """
-    parts = [p.strip() for p in value.split(",")]
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return float(value), float(value)
+    if isinstance(value, (list, tuple)):
+        parts: list[Any] = list(value)
+    else:
+        parts = [p.strip() for p in str(value).split(",")]
     if len(parts) == 1:
         v = float(parts[0])
         return v, v
     if len(parts) == 2:
         return float(parts[0]), float(parts[1])
-    raise ValueError(f"Expected 'value' or 'low,high', got {value!r}")
+    raise ValueError(f"Expected a scalar or a [low, high] pair, got {value!r}")
 
 
 @dataclass
@@ -124,10 +144,12 @@ class ParticleStackConfig:
     `extract_parameters_from_csfile` and take precedence over the
     corresponding fields below, which are unused in that mode.
 
-    `dose`, `defocus`, `coincidence_radius`, and `potential_scale` each take
-    either a single value (e.g. ``"20"``, constant for every particle) or a
-    ``"low,high"`` range (e.g. ``"5000,15000"``, sampled uniformly per
-    particle) -- see :func:`parse_scalar_or_range`.
+    `dose`, `defocus`, `coincidence_radius`, `potential_scale` and the
+    aberration-richness fields each take either a single number (e.g. ``20``,
+    constant for every particle) or a ``[low, high]`` pair (e.g.
+    ``[5000, 15000]``, sampled uniformly per particle). Comma-separated
+    strings (``"5000,15000"``) are still accepted, since that's the only
+    spelling a CLI flag can carry -- see :func:`parse_scalar_or_range`.
     """
 
     # --- Structure & potential (basic) ---
@@ -138,12 +160,12 @@ class ParticleStackConfig:
 
     # --- Microscope (basic) ---
     voltage: float = 300.0  # kV
-    dose: str = "20"  # e⁻/Å²
+    dose: ScalarOrRange = 20.0  # e⁻/Å²
     cs: float = 2.0  # mm
     alpha: float = 0.1  # unitless, amplitude contrast ratio
 
     # --- Sampling (basic) ---
-    defocus: str = "5000,15000"  # Å
+    defocus: ScalarOrRange = field(default_factory=lambda: [5000.0, 15000.0])  # Å
     shift: float = 2.0  # Å, max in-plane shift (uniform ±shift)
     n_particles: int = 20
 
@@ -162,7 +184,11 @@ class ParticleStackConfig:
 
     # --- Compute (basic) ---
     device: str = "cpu"
-    batchsize: int = 5
+    # "auto" (the default) sizes the batch to the memory free on `device` at
+    # run time, from the box geometry -- see specter.memory. An int pins it,
+    # which is what a benchmark or a shared-GPU run wants; nothing about the
+    # physics or the output depends on this, only speed and peak memory.
+    batchsize: int | Literal["auto"] = "auto"
 
     # --- Output (basic) ---
     output_dir: str = field(default_factory=lambda: default_output_dir("particles"))
@@ -184,13 +210,13 @@ class ParticleStackConfig:
     bfactor: float | None = None  # Å²
     aberration_model: Literal["holography", "ctf"] = "holography"
     noise_model: Literal["poisson", "none"] = "poisson"
-    coincidence_radius: str = "0"  # pixels
+    coincidence_radius: ScalarOrRange = 0.0  # pixels
     ice_model: Literal["gd", "random", "none"] = "gd"
     ice_thickness: float = 0.0  # Å, 0 = minimum (particle box size)
     ice_cache_dir: str | None = None  # defaults to the bundled ice-data/ice_cache
     crowd_min_distance: float | None = None  # Å
     crowd_max_distance_z: float | None = None  # Å
-    potential_scale: str = "1"  # unitless
+    potential_scale: ScalarOrRange = 1.0  # unitless
     pad_fft: bool = True
 
     # --- Advanced: potential building ---
@@ -227,13 +253,22 @@ class ParticleStackConfig:
     seed: int | None = None
 
     # --- Advanced: aberration richness for synthetic (non-.cs-driven) generation ---
-    astigmatism: str = "0"  # Å, magnitude of dfu - dfv
-    astigmatism_angle: str = "0,180"  # degrees, dfang
-    phaseshift: str = "0"  # radians
-    tiltx: str = "0"  # radians
-    tilty: str = "0"  # radians
-    trefoil1: str = "0"  # Å^3
-    trefoil2: str = "0"  # Å^3
+    astigmatism: ScalarOrRange = 0.0  # Å, magnitude of dfu - dfv
+    astigmatism_angle: ScalarOrRange = field(
+        default_factory=lambda: [0.0, 180.0]
+    )  # degrees, dfang
+    phaseshift: ScalarOrRange = 0.0  # radians
+    tiltx: ScalarOrRange = 0.0  # radians
+    tilty: ScalarOrRange = 0.0  # radians
+    trefoil1: ScalarOrRange = 0.0  # Å^3, coefficient of k^3 sin(3θ)
+    trefoil2: ScalarOrRange = 0.0  # Å^3, coefficient of k^3 cos(3θ)
+    # 4th-order, non-rotationally-symmetric terms -- 1/2 are secondary
+    # astigmatism (n=4, m=±2), 3/4 are true 4-fold tetrafoil (n=4, m=±4);
+    # see aberrations._functions.tetrafoil.
+    tetrafoil1: ScalarOrRange = 0.0  # Å^4, coefficient of k^4 cos(2θ)
+    tetrafoil2: ScalarOrRange = 0.0  # Å^4, coefficient of k^4 sin(2θ)
+    tetrafoil3: ScalarOrRange = 0.0  # Å^4, coefficient of k^4 cos(4θ)
+    tetrafoil4: ScalarOrRange = 0.0  # Å^4, coefficient of k^4 sin(4θ)
 
     # --- Advanced: anisotropic magnification ---
     # [[m00, m01], [m10, m11]], identity (no correction) by default. One fixed
@@ -256,11 +291,13 @@ PARTICLE_STACK_HELP: dict[str, str] = {
     "pixel_size": "Pixel size in Angstrom.",
     "voltage": "Electron beam accelerating voltage in kV.",
     "dose": "Dose in e-/A^2: a single value (e.g. 20) for constant dose per "
-    "particle, or 'low,high' (e.g. 20,60) to sample uniformly per particle.",
+    "particle, or 'low,high' (e.g. 20,60) to sample uniformly per particle "
+    "(in a TOML config, write the range as [20, 60]).",
     "cs": "Spherical aberration in mm (1-3 mm typical).",
     "alpha": "Amplitude contrast ratio.",
     "defocus": "Defocus in Angstrom: a single value (e.g. 8000) for constant "
-    "defocus, or 'low,high' (e.g. 5000,15000) to sample uniformly per particle.",
+    "defocus, or 'low,high' (e.g. 5000,15000) to sample uniformly per particle "
+    "(in a TOML config, write the range as [5000, 15000]).",
     "shift": "Max in-plane shift in Angstrom (uniform +/-shift).",
     "n_particles": "Number of particles to simulate.",
     "scattering_model": "Scattering model.",
@@ -271,7 +308,9 @@ PARTICLE_STACK_HELP: dict[str, str] = {
     "magnitude and phase.",
     "device": "Device to use: cpu | cuda | cuda:0 | 0,1,2,3. "
     "Comma-separated integers trigger multi-GPU Lightning DDP.",
-    "batchsize": "Number of particles per forward pass.",
+    "batchsize": "Number of particles per forward pass. Unset (or 'auto' in "
+    "a TOML config, which is the default) sizes the batch to the memory free "
+    "on --device at run time; see specter.memory.recommend_batchsize.",
     "output_dir": "Directory to save .mrcs and .star files.",
     "filename": "Base name for output files (no extension).",
     "pdb_savefolder": "Folder to cache downloaded PDB files.",
@@ -291,7 +330,7 @@ PARTICLE_STACK_HELP: dict[str, str] = {
     "noise_model": "Noise model. Use 'none' for no noise.",
     "coincidence_radius": "Effective coincidence exclusion radius in pixels "
     "(exclusion area = pi*r^2): a single value for constant radius, or "
-    "'low,high' to sample uniformly per particle.",
+    "'low,high' ([low, high] in TOML) to sample uniformly per particle.",
     "ice_model": "Ice model: 'gd' (samples the pre-generated IceBank "
     "cache), 'random' (cheap, low-realism), or 'none'.",
     "ice_thickness": "Ice thickness in Angstrom. 0 = minimum (particle box size).",
@@ -302,7 +341,7 @@ PARTICLE_STACK_HELP: dict[str, str] = {
     "crowd_max_distance_z": "Maximum z-distance between crowded particles in Angstrom.",
     "potential_scale": "Potential scale factor (unitless, values < 1 "
     "approximate thicker ice): a single value for constant scale, or "
-    "'low,high' to sample uniformly per particle.",
+    "'low,high' ([low, high] in TOML) to sample uniformly per particle.",
     "pad_fft": "Pad the volume for FFT to avoid edge artifacts.",
     "potential_parameterization": "Atomic potential model used to build the "
     "structure's scattering potential.",
@@ -341,17 +380,28 @@ PARTICLE_STACK_HELP: dict[str, str] = {
     "crowding (bimodal density along z instead of uniform).",
     "seed": "RNG seed for pose/CTF/dose sampling. Auto-generated and logged if unset.",
     "astigmatism": "Astigmatism magnitude (dfu - dfv) in Angstrom: a single "
-    "value for constant, or 'low,high' to sample uniformly per particle.",
+    "value for constant, or 'low,high' ([low, high] in TOML) to sample "
+    "uniformly per particle.",
     "astigmatism_angle": "Astigmatism angle in degrees: a single value or "
-    "'low,high' range. Irrelevant when astigmatism is 0.",
+    "'low,high' ([low, high] in TOML) range. Irrelevant when astigmatism is 0.",
     "phaseshift": "Phase shift in radians (e.g. from a Volta phase plate): a "
-    "single value or 'low,high' range.",
-    "tiltx": "Beam tilt (x) in radians: a single value or 'low,high' range.",
-    "tilty": "Beam tilt (y) in radians: a single value or 'low,high' range.",
+    "single value or 'low,high' ([low, high] in TOML) range.",
+    "tiltx": "Beam tilt (x) in radians: a single value or 'low,high' "
+    "([low, high] in TOML) range.",
+    "tilty": "Beam tilt (y) in radians: a single value or 'low,high' "
+    "([low, high] in TOML) range.",
     "trefoil1": "First trefoil (3-fold astigmatism) component in Angstrom^3: a "
-    "single value or 'low,high' range.",
+    "single value or 'low,high' ([low, high] in TOML) range.",
     "trefoil2": "Second trefoil component in Angstrom^3: a single value or "
-    "'low,high' range.",
+    "'low,high' ([low, high] in TOML) range.",
+    "tetrafoil1": "Secondary astigmatism, k^4 cos(2*theta) coefficient in "
+    "Angstrom^4: a single value or 'low,high' ([low, high] in TOML) range.",
+    "tetrafoil2": "Secondary astigmatism, k^4 sin(2*theta) coefficient in "
+    "Angstrom^4: a single value or 'low,high' ([low, high] in TOML) range.",
+    "tetrafoil3": "Tetrafoil (4-fold astigmatism), k^4 cos(4*theta) coefficient "
+    "in Angstrom^4: a single value or 'low,high' ([low, high] in TOML) range.",
+    "tetrafoil4": "Tetrafoil (4-fold astigmatism), k^4 sin(4*theta) coefficient "
+    "in Angstrom^4: a single value or 'low,high' ([low, high] in TOML) range.",
     "anisomag_m00": "Anisotropic magnification matrix element [0,0]. Identity "
     "(1.0) means no correction.",
     "anisomag_m01": "Anisotropic magnification matrix element [0,1]. Identity "
@@ -651,7 +701,7 @@ class TomogramConfig:
     # {"shape_backend": "spherical_harmonics", "sh_axes_a": [300.0, 300.0,
     # 300.0], "sh_amplitude": 0.15, "bilayer_thickness_a": 30.0} -- PLUS
     # three keys not real MembraneGenerator kwargs, popped before that call:
-    #   - "n_instances" (int, default 1): expands this one entry into that
+    #   - "n_copies" (int, default 1): expands this one entry into that
     #     many independent instances sharing the same template, each its
     #     own seed (config.seed + i, restarting at i=0 per entry -- editing/
     #     adding another [[membrane]] entry never perturbs an earlier
@@ -664,7 +714,7 @@ class TomogramConfig:
     #     omitted-position instance (see MembraneTomogramGenerator's own
     #     docstring) -- an instance that doesn't fit is dropped, not
     #     retried. Give it explicitly for manual placement instead (then
-    #     n_instances must be 1).
+    #     n_copies must be 1).
     #   - "target_shape_zyx" = [Z, Y, X] voxels. Default omitted (None):
     #     MembraneGenerator auto-sizes a small local working grid from the
     #     organelle's own size (see its own docstring) instead of every
@@ -676,8 +726,12 @@ class TomogramConfig:
     # this dict (shape_backend one of "spherical_harmonics" (default) or
     # "swept_spline").
     membrane: list[dict[str, Any]] = field(default_factory=list)
-    # Each {"pdb_source": <code or path>, "frequency": 1, "parameterization":
+    # Each {"pdb_source": <code or path>, "n_copies": 1, "parameterization":
     # "shtyrov"}. In TOML, provide as [[membrane_transmembrane_specs]] tables.
+    # "n_copies" is per membrane instance, and is a request rather than a
+    # guarantee -- MembraneGenerator.place_transmembrane warns and places
+    # fewer if the surface can't fit that many at
+    # membrane_min_transmembrane_spacing_a.
     # Applies across ALL membrane instances (not per-instance in v1). Only
     # meaningful when `membrane` is set (no bilayer to embed into otherwise).
     membrane_transmembrane_specs: list[dict[str, Any]] = field(default_factory=list)
@@ -725,7 +779,7 @@ class TomogramConfig:
     grid: list[dict[str, Any]] = field(default_factory=list)
 
     # --- Gold fiducial beads (optional) ---
-    # One dict per bead population, {"radius": <Angstrom>, "count": 1}.
+    # One dict per bead population, {"radius": <Angstrom>, "n_copies": 1}.
     # "radius" is required. Placed via the same RSA packing used for
     # membranes/targets/filler, avoiding the membrane shell and any
     # already-placed filaments -- NOT region-gated to cytosol/lumen (see
@@ -772,7 +826,7 @@ class TomogramConfig:
     accumulator_device: str | None = None
     # How many PDB species render/fetch concurrently within a single
     # tomogram: membrane_transmembrane_specs (rendered once, shared across
-    # every [[membrane]] entry/n_instances copy, membrane mode only) and
+    # every [[membrane]] entry/n_copies copy, membrane mode only) and
     # targets/filler (cytosol/lumen protein-fill, rendered + PDB-fetched
     # once per tomogram, always) -- see MembraneGenerator/
     # MembraneTomogramGenerator's own render_workers docstrings. Default 1:
@@ -847,15 +901,15 @@ TOMOGRAM_HELP: dict[str, str] = {
     "[[membrane]] tables, one per composited TEMPLATE) -- optional, empty "
     "by default (no membrane at all; the whole tomogram is then one "
     "cytosol region). e.g. {'shape_backend': 'spherical_harmonics', "
-    "'n_instances': 3}. See MembraneGenerator's own docstring for the full "
-    "per-backend parameter set; plus 'n_instances' (int, default 1, "
+    "'n_copies': 3}. See MembraneGenerator's own docstring for the full "
+    "per-backend parameter set; plus 'n_copies' (int, default 1, "
     "expands one entry into that many independently-seeded instances), "
     "'position_xyz' (physical Angstrom offset from the tomogram center, "
     "default omitted = collision-rejecting random placement), and "
     "'target_shape_zyx' (default omitted = auto-sized per instance).",
     "membrane_transmembrane_specs": "Transmembrane protein species (TOML-"
     "only, [[membrane_transmembrane_specs]] tables), each {'pdb_source': "
-    "<code or path>, 'frequency': 1, 'parameterization': 'shtyrov'}. Only "
+    "<code or path>, 'n_copies': 1, 'parameterization': 'shtyrov'}. Only "
     "meaningful when [[membrane]] is set, applies across all instances.",
     "membrane_region_density_threshold": "Passed through to "
     "MembraneTomogramGenerator's own region_density_threshold.",
@@ -884,7 +938,7 @@ TOMOGRAM_HELP: dict[str, str] = {
     "placed; not carbon-aware for placement (see MembraneTomogramGenerator's "
     "own docstring). Empty (default): no carbon film.",
     "beads": "Gold fiducial bead populations to pack (TOML-only, [[beads]] "
-    "tables), each {'radius': <Angstrom>, 'count': 1}. Placed via the same "
+    "tables), each {'radius': <Angstrom>, 'n_copies': 1}. Placed via the same "
     "RSA packing as membranes/targets/filler, avoiding the membrane shell "
     "and already-placed filaments -- not region-gated to cytosol/lumen.",
     "write_picks": "Write one copick-style .ndjson pick file per species "
@@ -925,7 +979,7 @@ TOMOGRAM_HELP: dict[str, str] = {
     "one tomogram (membrane_transmembrane_specs and targets/filler each "
     "get their own concurrent build pass). Default 1 (serial, original "
     "behaviour) -- raise for tomograms with several species, especially "
-    "with n_instances>1 [[membrane]] entries (all instances of one entry "
+    "with n_copies>1 [[membrane]] entries (all instances of one entry "
     "share one render pass). Set to 'auto' (TOML/Python config only -- the "
     "--render_workers CLI flag stays integer-only) to pick min(n_species, "
     "8) per pool automatically, the measured sweet spot from a full "

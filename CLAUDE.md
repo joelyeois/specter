@@ -196,6 +196,7 @@ src/specter/                  # Main source package
   detectors.py                # Detector MTF and noise models
   aretomo3.py                 # AreTomo3 .aln tilt-geometry → quaternions, for TiltSeriesGenerator
   constants.py                # Physical constants (rest_mass_energy, hc, energy_to_wavelength; CODATA via scipy.constants)
+  memory.py                   # Peak-memory model + recommend_batchsize/resolve_batchsize for batchsize="auto"
   rotations/                  # Quaternion-based 3D rotations (built on the `roma` library)
     _rotation.py               # roma-wrapped translate_coordinates, rotate_coordinates
     _random.py                 # roma-wrapped random_quaternion/random_rotvec/random_rotation_matrix, rotations_angular_difference

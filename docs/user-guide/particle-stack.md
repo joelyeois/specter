@@ -51,21 +51,23 @@ building method, and so on — lives under "Advanced" in both the TOML and
 ## Per-particle sampling ranges
 
 `dose`, `defocus`, `coincidence_radius`, `potential_scale`, `astigmatism`,
-and `astigmatism_angle` each take either a single value or a `"low,high"`
-string, sampled uniformly per particle:
+and `astigmatism_angle` each take either a single number (constant for every
+particle) or a `[low, high]` pair, sampled uniformly per particle:
 
 ```toml
 [sampling]
-defocus = "5000,15000"   # Å, sampled per particle
+defocus = [5000.0, 15000.0]   # Å, sampled per particle
 ```
 
 ```toml
 [microscope]
-dose = "20"               # e⁻/Å², constant for every particle
+dose = 20.0               # e⁻/Å², constant for every particle
 ```
 
-This is the main gotcha when hand-editing a config: these fields are
-strings, not floats/ints, even for a single fixed value.
+On the command line the same fields take a comma-separated string, since a
+flag can only carry one token — `--defocus 5000,15000`. That spelling is also
+still accepted in a TOML file, so configs written before the numeric form
+keep working.
 
 ## Output: .mrcs + .star
 
@@ -141,11 +143,38 @@ Set `save_exitwaves = true` (post-detector-free signal) or
 usual output — useful for debugging the forward model or comparing signal
 before detector effects are applied, without re-running the whole pipeline.
 
+## Batch size
+
+`batchsize` is how many particles go through the forward model at once. It
+affects speed and peak memory only — never the images. The default is:
+
+```toml
+[compute]
+batchsize = "auto"
+```
+
+which measures the memory actually free on `device` at run time and picks the
+largest batch predicted to fit, given the FFT-padded volume the box size
+implies (a 256-pixel box with `pad_fft = true` holds 512×512×256 volumes, not
+256³). The chosen value is printed at the start of generation:
+
+```
+batchsize='auto' -> 3 particle(s) per pass (~31.7 GiB estimated peak, 43.1 GiB free on cuda:1)
+```
+
+Set an integer instead to pin it — worth doing when benchmarking, when
+sharing a GPU with a job that will grow after specter has taken its reading,
+or on CPU under a Slurm `--mem` limit (the CPU reading is the host's, not the
+cgroup's). The estimate is deliberately conservative and is documented, with
+its measured basis, in `specter.memory`.
+
 ## Multi-GPU
 
 `device` accepts a comma-separated list of GPU indices (e.g. `"0,1,2,3"`) to
 split particle generation across multiple GPUs via Lightning's DDP
-launcher; a single index (`"cuda:0"`) or `"cpu"` runs on one device.
+launcher; a single index (`"cuda:0"`) or `"cpu"` runs on one device. With
+`batchsize = "auto"`, every rank builds the same-sized batch, sized to
+whichever GPU in the pool has the least free memory.
 
 ## Using it from Python instead of the CLI
 

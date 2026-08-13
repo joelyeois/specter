@@ -30,7 +30,7 @@ pixel_size = 1.0              # Å
 
 [microscope]
 voltage = 300.0                # kV
-dose = "20"                    # e⁻/Å²; single value, or "low,high" to sample per particle
+dose = 20.0                    # e⁻/Å²; single value, or [low, high] to sample per particle
 cs = 2.0                       # mm
 alpha = 0.1                    # unitless, amplitude contrast ratio
 

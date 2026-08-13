@@ -16,7 +16,7 @@ assembly = true
 num_pixels = 256
 
 [microscope]
-dose = "53"                    # e⁻/Å², from EMDB Experiment tab
+dose = 53.0                    # e⁻/Å², from EMDB Experiment tab
 # num_frames = 53                # frames, uncomment to override default (int(dose) if None)
 
 [envelopes]
@@ -35,13 +35,13 @@ n_particles = 10                 # number of particles to load from the .cs file
 scattering_model = "multislice"  # multislice | firstborn | projection | ctf
 aberration_model = "holography"  # holography | ctf
 noise_model = "poisson"          # poisson | none
-coincidence_radius = "2.0"       # pixels
+coincidence_radius = 2.0         # pixels
 ice_model = "gd"                 # gd | random | none
 ice_thickness = 0.0              # Å, 0 = minimum (particle box size)
 # ice_cache_dir = "ice-data/ice_cache"  # defaults to the bundled cache
 # crowd_min_distance = 100.0      # Å, uncomment to crowd particles; defaults to pdb.max_diameter
 # crowd_max_distance_z = 50.0     # Å
-# potential_scale = "0.5"         # unitless, uncomment to scale the potential before scattering
+# potential_scale = 0.5           # unitless, uncomment to scale the potential before scattering
 pad_fft = true
 detector_model = "none"          # none | perfect | k3_300kv | k3_200kv
 
@@ -50,4 +50,4 @@ normalize_particles = true
 
 [compute]
 device = "cuda:0"                # cpu | cuda | cuda:0
-batchsize = 5
+batchsize = "auto"               # or an int to pin it

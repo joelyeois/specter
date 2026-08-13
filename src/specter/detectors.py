@@ -70,10 +70,25 @@ def _falcon4i_mtf(
     return1d: bool,
     dqe_values: list[float],
 ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
-    """Shared implementation for Falcon 4i MTF functions."""
+    """
+    Shared implementation for Falcon 4i MTF functions.
+
+    The published data are DQE, not MTF. Under a white-noise approximation
+    ``DQE(k) = MTF(k)**2``, so the *shape* is recovered as
+    ``MTF(k) = sqrt(DQE(k) / DQE(0))`` -- normalised by the zero-frequency
+    value so that ``MTF(0) == 1``, as an MTF must be.
+
+    Normalising matters: an MTF is a pure blur and conserves total counts.
+    The zero-frequency efficiency ``DQE(0)`` is a *separate* physical effect
+    (electrons that never register at all) and is applied as a counting
+    efficiency via ``Detector(dqe0=...)``, not folded in here. Folding it in
+    would both scale counts by ``sqrt(DQE(0))`` instead of ``DQE(0)`` and give
+    the wrong shot-noise statistics -- see :func:`dqe0_for_detector`.
+    """
     k_nyquist = 1 / 2 / dx
     k_points = torch.tensor([0.0, 0.5, 1.0], dtype=torch.float32) * k_nyquist
-    mtf_data = torch.sqrt(torch.tensor(dqe_values, dtype=torch.float32))
+    dqe = torch.tensor(dqe_values, dtype=torch.float32)
+    mtf_data = torch.sqrt(dqe / dqe[0])
 
     # Quadratic interpolation via scipy (torchinterp1d does not support quadratic)
     interp = scipy_interp1d(
@@ -335,3 +350,60 @@ def falcon4i_200kv(
     https://www.thermofisher.com/sg/en/home/electron-microscopy/products/accessories-em/falcon-detector.html
     """
     return _falcon4i_mtf(n, dx, device, return1d, [0.91, 0.62, 0.33])
+
+
+# Zero-frequency detective quantum efficiency, DQE(0), per detector model.
+#
+# This is the *counting efficiency*: the fraction of incident electrons that
+# register at all. For a detector that records each electron independently with
+# probability p, thinning a Poisson process leaves a Poisson process of mean
+# p*N, so DQE(0) = p exactly. It is applied by scaling the expected electron
+# count (see ``Detector(dqe0=...)``), which reproduces both the reduced mean and
+# the correct shot noise -- unlike a multiplicative filter, which gets the
+# variance wrong.
+#
+# Kept separate from the MTF because they are two halves of one measured curve:
+# the MTF carries the frequency dependence (normalised to 1 at DC, conserving
+# counts) and DQE(0) carries the overall efficiency.
+#
+# Only entries with a traceable published source are listed. Models absent here
+# default to 1.0 (an ideal counter), which is optimistic -- real direct
+# detectors sit around 0.5-0.95 at 300 kV.
+#
+# IMPORTANT: these must be *low-dose-rate* values. Published DQE(0) falls with
+# dose rate precisely because of coincidence loss, which specter models
+# separately; using a high-flux figure here would count that loss twice. The
+# Falcon 4i value is consistent with the low-flux limit measured from beam-only
+# micrographs (fitted zero-dose intercept 0.926 vs 0.92 published).
+DQE0: dict[str, float] = {
+    "falcon4i_300kv": 0.92,
+    "falcon4i_200kv": 0.91,
+    "perfect": 1.0,
+}
+
+
+def dqe0_for_detector(detector_model: str | None) -> float:
+    """
+    Return the zero-frequency DQE (counting efficiency) for a detector model.
+
+    Parameters
+    ----------
+    detector_model : str or None
+        Detector model name, e.g. ``"falcon4i_300kv"``. ``None`` or an unknown
+        name returns 1.0.
+
+    Returns
+    -------
+    float
+        DQE(0) in (0, 1]. 1.0 means every incident electron is counted.
+
+    Notes
+    -----
+    The K3 entries deliberately have no value: their bundled response is a
+    measured MTF (already normalised to 1 at DC) with no accompanying DQE(0)
+    figure in the same datasheet, so assuming one would be inventing physics.
+    They therefore behave as ideal counters until a sourced value is added.
+    """
+    if detector_model is None:
+        return 1.0
+    return DQE0.get(detector_model, 1.0)

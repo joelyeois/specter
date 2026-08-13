@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+import pytest
+
 from specter.config import (
     PDB_CACHE_ENV_VAR,
     REPO_ROOT,
@@ -12,6 +14,7 @@ from specter.config import (
     TomogramConfig,
     apply_overrides,
     load_config,
+    parse_scalar_or_range,
 )
 
 
@@ -45,7 +48,68 @@ def test_load_config_fills_defaults_for_missing_fields(tmp_path: Path) -> None:
     assert config.num_pixels == 256
     assert config.pixel_size == 1.0
     assert config.scattering_model == "multislice"
-    assert config.dose == "20"
+    assert config.dose == 20.0
+
+
+def test_parse_scalar_or_range_accepts_numbers_lists_and_strings() -> None:
+    """Numbers/lists (the TOML spelling) and strings (the CLI spelling) agree."""
+    assert parse_scalar_or_range(20) == (20.0, 20.0)
+    assert parse_scalar_or_range(20.0) == (20.0, 20.0)
+    assert parse_scalar_or_range("20") == (20.0, 20.0)
+    assert parse_scalar_or_range([5000, 15000]) == (5000.0, 15000.0)
+    assert parse_scalar_or_range((5000.0, 15000.0)) == (5000.0, 15000.0)
+    assert parse_scalar_or_range("5000,15000") == (5000.0, 15000.0)
+
+
+def test_parse_scalar_or_range_rejects_more_than_two_values() -> None:
+    with pytest.raises(ValueError):
+        parse_scalar_or_range([1.0, 2.0, 3.0])
+    with pytest.raises(ValueError):
+        parse_scalar_or_range("1,2,3")
+
+
+def test_load_config_scalar_or_range_fields_accept_numeric_toml(
+    tmp_path: Path,
+) -> None:
+    """Sampling fields read as plain TOML numbers/arrays, no quoting needed."""
+    path = _write_toml(
+        tmp_path,
+        """
+        [potential]
+        pdb_code = "6bdf"
+
+        [microscope]
+        dose = 40
+
+        [sampling]
+        defocus = [8000.0, 12000.0]
+        """,
+    )
+    config = load_config(path)
+    assert parse_scalar_or_range(config.dose) == (40.0, 40.0)
+    assert parse_scalar_or_range(config.defocus) == (8000.0, 12000.0)
+
+
+def test_load_config_scalar_or_range_fields_still_accept_legacy_strings(
+    tmp_path: Path,
+) -> None:
+    """Configs written before the numeric spelling keep working unchanged."""
+    path = _write_toml(
+        tmp_path,
+        """
+        [potential]
+        pdb_code = "6bdf"
+
+        [microscope]
+        dose = "40"
+
+        [sampling]
+        defocus = "8000,12000"
+        """,
+    )
+    config = load_config(path)
+    assert parse_scalar_or_range(config.dose) == (40.0, 40.0)
+    assert parse_scalar_or_range(config.defocus) == (8000.0, 12000.0)
 
 
 def test_load_config_keeps_relative_pdb_savefolder_verbatim(
@@ -156,13 +220,13 @@ def test_particle_stack_config_advanced_field_defaults() -> None:
     assert config.crowd_move_to_cpu is False
     assert config.water_air_interface is False
     assert config.seed is None
-    assert config.astigmatism == "0"
-    assert config.astigmatism_angle == "0,180"
-    assert config.phaseshift == "0"
-    assert config.tiltx == "0"
-    assert config.tilty == "0"
-    assert config.trefoil1 == "0"
-    assert config.trefoil2 == "0"
+    assert config.astigmatism == 0.0
+    assert config.astigmatism_angle == [0.0, 180.0]
+    assert config.phaseshift == 0.0
+    assert config.tiltx == 0.0
+    assert config.tilty == 0.0
+    assert config.trefoil1 == 0.0
+    assert config.trefoil2 == 0.0
     assert (
         config.anisomag_m00,
         config.anisomag_m01,
@@ -183,7 +247,7 @@ def test_particle_toml_loads_advanced_fields() -> None:
     config = load_config(path)
     assert config.potential_parameterization == "shtyrov"
     assert config.ice_parameterization == "shtyrov"
-    assert config.astigmatism == "0"
+    assert config.astigmatism == 0.0
     assert config.anisomag_m11 == 1.0
 
 

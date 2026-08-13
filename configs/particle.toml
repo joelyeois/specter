@@ -10,12 +10,12 @@ pixel_size = 1.0              # Å
 
 [microscope]
 voltage = 300.0                # kV
-dose = "20"                    # e⁻/Å²; single value, or "low,high" to sample per particle
+dose = 20.0                    # e⁻/Å²; single value, or [low, high] to sample per particle
 cs = 2.0                       # mm
 alpha = 0.1                    # unitless, amplitude contrast ratio
 
 [sampling]
-defocus = "5000,15000"          # Å; single value, or "low,high" to sample per particle
+defocus = [5000.0, 15000.0]     # Å; single value, or [low, high] to sample per particle
 shift = 2.0                    # Å
 n_particles = 20
 
@@ -30,7 +30,8 @@ save_clean_exitwaves = false
 
 [compute]
 device = "cpu"                   # cpu | cuda | cuda:0 | 0,1,2,3 (multi-GPU)
-batchsize = 5
+batchsize = "auto"               # particles per forward pass; "auto" fits it to the free
+                                 # memory on `device`, or set an integer to pin it
 
 [output]
 output_dir = "specter-data/particles"
@@ -38,7 +39,7 @@ filename = "particles"
 
 # --- Advanced: rarely touched, but available for tweaking ---
 [advanced]
-pdb_savefolder = "specter-data/pdb"  # relative to your working directory (run from the repo root)
+pdb_savefolder = "specter-data/pdb"  # relative to your working directory
 # cs_path = "path/to/particles.cs"  # uncomment to drive generation from a CryoSPARC .cs file
 # num_frames = 20                # frames, uncomment to override default (int(dose) if None)
 # convergence_angle = 1.0       # mrad, uncomment to enable the Cs envelope
@@ -50,13 +51,13 @@ dose_envelope = false
 # bfactor = 50.0                # Å², uncomment to enable a B-factor envelope
 aberration_model = "holography"  # holography | ctf
 noise_model = "poisson"          # poisson | none
-coincidence_radius = "0"         # pixels; single value, or "low,high" to sample per particle
+coincidence_radius = 0.0         # pixels; single value, or [low, high] to sample per particle
 ice_model = "gd"                 # gd | random | none
 ice_thickness = 0.0              # Å, 0 = minimum (particle box size)
 # ice_cache_dir = "ice-data/ice_cache"  # defaults to the bundled cache
 # crowd_min_distance = 100.0      # Å, uncomment to crowd particles; defaults to pdb.max_diameter
 # crowd_max_distance_z = 50.0     # Å
-potential_scale = "1"            # unitless; single value, or "low,high" (values < 1 approximate thicker ice)
+potential_scale = 1.0            # unitless; single value, or [low, high] (values < 1 approximate thicker ice)
 pad_fft = true
 
 # potential building
@@ -91,13 +92,17 @@ water_air_interface = false
 # seed = 20260731                # RNG seed for pose/CTF/dose sampling; auto-generated and logged if unset
 
 # aberration richness for synthetic (non-.cs-driven) generation
-astigmatism = "0"                # Å, magnitude of dfu - dfv; single value or "low,high"
-astigmatism_angle = "0,180"      # degrees, dfang; irrelevant when astigmatism is 0
-phaseshift = "0"                 # radians
-tiltx = "0"                      # radians
-tilty = "0"                      # radians
-trefoil1 = "0"                   # Å^3
-trefoil2 = "0"                   # Å^3
+astigmatism = 0.0                # Å, magnitude of dfu - dfv; single value or [low, high]
+astigmatism_angle = [0.0, 180.0] # degrees, dfang; irrelevant when astigmatism is 0
+phaseshift = 0.0                 # radians
+tiltx = 0.0                      # radians
+tilty = 0.0                      # radians
+trefoil1 = 0.0                   # Å^3, k^3 sin(3θ)
+trefoil2 = 0.0                   # Å^3, k^3 cos(3θ)
+tetrafoil1 = 0.0                 # Å^4, k^4 cos(2θ)  -- secondary astigmatism
+tetrafoil2 = 0.0                 # Å^4, k^4 sin(2θ)  -- secondary astigmatism
+tetrafoil3 = 0.0                 # Å^4, k^4 cos(4θ)  -- 4-fold tetrafoil
+tetrafoil4 = 0.0                 # Å^4, k^4 sin(4θ)  -- 4-fold tetrafoil
 
 # anisotropic magnification -- identity (no correction) by default
 anisomag_m00 = 1.0

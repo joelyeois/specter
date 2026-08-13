@@ -31,17 +31,17 @@ filler_from_pei2016 = true
 shape_backend = "spherical_harmonics"
 bilayer_thickness_a = 30.0
 max_output_voxels = 12_000_000_000
-n_instances = 3
+n_copies = 3
 
 [[membrane]]
 shape_backend = "swept_spline"
 bilayer_thickness_a = 30.0
 max_output_voxels = 12_000_000_000
-n_instances = 3
+n_copies = 3
 
 [[membrane_transmembrane_specs]]
 pdb_source = "1C3W"  # bacteriorhodopsin
-frequency = 10
+n_copies = 10        # per membrane instance; a request, not a guarantee
 
 [membrane_settings]
 membrane_region_density_threshold = 0.05
@@ -68,7 +68,7 @@ parameterization = "shtyrov"
 # Uncomment to add:
 # [[beads]]
 # radius = 100.0
-# count = 20
+# n_copies = 20
 
 [specimen]
 target_shape = [128, 256, 256]      # (Z, Y, X) voxels -- small/fast; raise for denser results

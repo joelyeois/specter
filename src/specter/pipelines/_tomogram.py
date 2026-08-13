@@ -304,7 +304,10 @@ def build_tomogram_generator(config: TomogramConfig) -> MembraneTomogramGenerato
     transmembrane_specs = [
         TransmembraneSpec(
             pdb_source=d["pdb_source"],
-            frequency=int(d.get("frequency", 1)),
+            # TOML says n_copies (one count spelling across every entry
+            # type); TransmembraneSpec's own field stays `frequency` since
+            # it doubles as the weight in the per-site species draw.
+            frequency=int(d.get("n_copies", 1)),
             parameterization=d.get("parameterization", "shtyrov"),
         )
         for d in config.membrane_transmembrane_specs
@@ -314,7 +317,7 @@ def build_tomogram_generator(config: TomogramConfig) -> MembraneTomogramGenerato
         filament_specs.append(ACTIN_SPEC)
 
     # Pre-render every transmembrane species' template ONCE here, shared
-    # across every [[membrane]] entry AND every one of its n_instances
+    # across every [[membrane]] entry AND every one of its n_copies
     # copies below -- otherwise each instance's own MembraneGenerator would
     # redundantly rebuild the same handful of species from scratch (see
     # render_transmembrane_template's own docstring). Rendering itself can
@@ -349,16 +352,16 @@ def build_tomogram_generator(config: TomogramConfig) -> MembraneTomogramGenerato
         # across multiple dataclasses.replace(...) calls in a --n_tomograms>1
         # run (see run_build_tomogram).
         instance_kwargs = dict(entry)
-        n_instances = int(instance_kwargs.pop("n_instances", 1))
+        n_copies = int(instance_kwargs.pop("n_copies", 1))
 
         position_xyz_raw = instance_kwargs.pop("position_xyz", None)
-        if n_instances > 1 and position_xyz_raw is not None:
+        if n_copies > 1 and position_xyz_raw is not None:
             raise ValueError(
                 "run_build_tomogram: a [[membrane]] entry can't combine "
-                f"n_instances={n_instances} with an explicit position_xyz -- "
+                f"n_copies={n_copies} with an explicit position_xyz -- "
                 "every copy would want the same spot. Omit position_xyz "
                 "(each instance is placed automatically, collision-checked "
-                "against the others) or use n_instances=1 for manual "
+                "against the others) or use n_copies=1 for manual "
                 "placement."
             )
         # None (not (0,0,0)) by default -- MembraneTomogramGenerator resolves
@@ -385,7 +388,7 @@ def build_tomogram_generator(config: TomogramConfig) -> MembraneTomogramGenerato
             instance_kwargs, target_shape_zyx, config
         )
 
-        for i in range(n_instances):
+        for i in range(n_copies):
             # Restarts from config.seed at i=0 for EVERY entry (not a
             # running counter across entries) -- editing/adding another
             # [[membrane]] entry then never perturbs an earlier entry's own
@@ -412,7 +415,7 @@ def build_tomogram_generator(config: TomogramConfig) -> MembraneTomogramGenerato
     # len(config.grid) > 1 is already rejected in run_build_tomogram.
     grid_spec = GridSpec(**config.grid[0]) if config.grid else None
     bead_specs = [
-        TomogramBeadSpec(radius=float(d["radius"]), count=int(d.get("count", 1)))
+        TomogramBeadSpec(radius=float(d["radius"]), count=int(d.get("n_copies", 1)))
         for d in config.beads
     ]
 

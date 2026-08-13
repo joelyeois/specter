@@ -2,9 +2,7 @@
 # Full field docs: docs/user-guide/build-tomogram.md
 # (or run `specter build tomogram --help`).
 #
-# Layout: run settings first (geometry, output, compute -- the fields you
-# actually retune between runs), then specimen contents (what goes in the
-# volume). Every flag on the CLI overrides the matching field below.
+# Every flag on the CLI overrides the matching field below.
 
 
 # =============================================================================
@@ -17,7 +15,7 @@ v_size = 5.0                        # A/voxel
 clip_axes = [true, true, true]      # (z, y, x) -- True lets instances poke past that wall
 filler_occupancy_fraction = 1.0     # above 0.5 is beyond RSA's theoretical max packing
 gap_angstrom = 5.0                  # minimum clearance between placed spheres, A
-pdb_savefolder = "specter-data/pdb"         # relative to your working directory (run from the repo root)
+pdb_savefolder = "specter-data/pdb"         # relative to your working directory
 # seed = 11                         # uncomment for reproducible packing
 
 
@@ -92,27 +90,23 @@ filler_from_pei2016 = true
 shape_backend = "spherical_harmonics"
 bilayer_thickness_a = 30.0
 sh_axes_range_a = [150.0, 1600.0]   # SEMI-axes, A -- a vesicle's diameter is
-                                    # roughly twice these. Keep below the slab
-                                    # thickness or instances get dropped as
-                                    # non-fitting and the field grid coarsens
-max_output_voxels = 12_000_000_000  # safety cap on the working field grid
-n_instances = 3
+                                    # roughly twice these.
+n_copies = 3
 
 [[membrane]]
 shape_backend = "swept_spline"
 bilayer_thickness_a = 30.0
-swept_total_length_range_a = [1500.0, 2400.0]
-swept_tube_radius_range_a = [150.0, 400.0]
-max_output_voxels = 12_000_000_000  # safety cap on the working field grid
-n_instances = 3
+swept_total_length_range_a = [1500.0, 2400.0] # path contour length, A
+swept_tube_radius_range_a = [150.0, 400.0] # tube radius, A
+n_copies = 3
 
 # Proteins embedded in the bilayer, one table per species.
 [[membrane_transmembrane_specs]]
 pdb_source = "1C3W"  # bacteriorhodopsin
-frequency = 1
+n_copies = 40        # per membrane instance; a request, not a guarantee
 
 [membrane_settings]
-membrane_region_density_threshold = 0.05
+# membrane_region_density_threshold = 0.05
 membrane_min_transmembrane_spacing_a = 40.0
 parameterization = "shtyrov"
 
@@ -142,4 +136,4 @@ parameterization = "shtyrov"
 # Uncomment to add:
 # [[beads]]
 # radius = 100.0
-# count = 20
+# n_copies = 20

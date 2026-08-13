@@ -194,7 +194,7 @@ def render_transmembrane_template(
 
     Pure/stateless (no `MembraneGenerator` instance involved) so a caller
     driving several `MembraneGenerator`s that all share the same
-    `transmembrane_specs` -- e.g. `n_instances` copies of one `[[membrane]]`
+    `transmembrane_specs` -- e.g. `n_copies` copies of one `[[membrane]]`
     entry in `specter build tomogram` -- can call this ONCE per species and
     pass the result via `TransmembraneSpec.template`, instead of letting
     each instance's own `MembraneGenerator._build_template` rebuild the same

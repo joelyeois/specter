@@ -112,7 +112,7 @@ def _write_membrane_test_config(
         f"""
 [[membrane_transmembrane_specs]]
 pdb_source = "{_SMALL_FIXTURE}"
-frequency = 1
+n_copies = 1
 """
         if include_transmembrane
         else ""

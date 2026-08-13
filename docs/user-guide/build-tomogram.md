@@ -44,11 +44,11 @@ membranes, filaments, exact-count targets, ratio-based filler); run
 - **Membranes** — `[[membrane]]` entries: `shape_backend`
   (`spherical_harmonics` or `swept_spline`), size ranges
   (`sh_axes_range_a`/`swept_total_length_range_a`/etc., omit for realistic
-  auto-sizing), and `n_instances` for multiple independently-placed copies
+  auto-sizing), and `n_copies` for multiple independently-placed copies
   of one template.
 - **Filaments** — `actin` (quick built-in F-actin preset) or hand-written
   `[[filaments]]` entries for other species (e.g. microtubules).
-- **Gold fiducial beads** — `[[beads]]` entries (`radius`, `count`), one per
+- **Gold fiducial beads** — `[[beads]]` entries (`radius`, `n_copies`), one per
   bead radius population. Placed avoiding the membrane shell and already-
   placed filaments; not region-gated to cytosol/lumen.
 - **Carbon support film** — at most one `[[grid]]` table

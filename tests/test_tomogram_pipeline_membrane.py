@@ -1,6 +1,6 @@
 """Tests for run_build_tomogram's membrane-mode config -> MembraneInstance
 wiring (specter.pipelines.build_tomogram_generator) --
-specifically the n_instances/position_xyz/target_shape_zyx defaulting logic,
+specifically the n_copies/position_xyz/target_shape_zyx defaulting logic,
 not the (expensive, already covered by tests/test_tomogram_generator.py)
 actual generation. No PDB files need to exist for these: protein_specs'
 pdb_source strings are only resolved inside MembraneTomogramGenerator.
@@ -8,11 +8,15 @@ generate(), which none of these tests call."""
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 import torch
 
 from specter.config import TomogramConfig
 from specter.pipelines import build_tomogram_generator
+
+_SMALL_FIXTURE = Path(__file__).parent.parent / "specter-data" / "pdb" / "1mbo.cif"
 
 _BASE_KWARGS = dict(
     target_shape=[64, 64, 64],
@@ -56,9 +60,9 @@ def test_membrane_entry_explicit_position_and_target_shape_zyx_are_honored():
     assert instance.generator.target_shape_zyx == (20, 20, 20)
 
 
-def test_n_instances_expands_into_independent_seeded_instances():
+def test_n_copies_expands_into_independent_seeded_instances():
     config = TomogramConfig(
-        membrane=[{"shape_backend": "spherical_harmonics", "n_instances": 3}],
+        membrane=[{"shape_backend": "spherical_harmonics", "n_copies": 3}],
         seed=100,
         **_BASE_KWARGS,
     )
@@ -69,11 +73,11 @@ def test_n_instances_expands_into_independent_seeded_instances():
     assert all(mi.position_xyz is None for mi in gen.membrane_instances)
 
 
-def test_n_instances_restarts_per_entry_not_running_across_entries():
+def test_n_copies_restarts_per_entry_not_running_across_entries():
     config = TomogramConfig(
         membrane=[
-            {"shape_backend": "spherical_harmonics", "n_instances": 2},
-            {"shape_backend": "swept_spline", "n_instances": 2},
+            {"shape_backend": "spherical_harmonics", "n_copies": 2},
+            {"shape_backend": "swept_spline", "n_copies": 2},
         ],
         seed=5,
         **_BASE_KWARGS,
@@ -85,26 +89,26 @@ def test_n_instances_restarts_per_entry_not_running_across_entries():
     assert seeds == [5, 6, 5, 6]
 
 
-def test_n_instances_greater_than_one_with_explicit_position_xyz_raises():
+def test_n_copies_greater_than_one_with_explicit_position_xyz_raises():
     config = TomogramConfig(
         membrane=[
             {
                 "shape_backend": "spherical_harmonics",
-                "n_instances": 2,
+                "n_copies": 2,
                 "position_xyz": [0.0, 0.0, 0.0],
             }
         ],
         **_BASE_KWARGS,
     )
-    with pytest.raises(ValueError, match="n_instances"):
+    with pytest.raises(ValueError, match="n_copies"):
         build_tomogram_generator(config)
 
 
 def test_membrane_config_entry_dict_never_mutated():
-    entry = {"shape_backend": "spherical_harmonics", "n_instances": 2}
+    entry = {"shape_backend": "spherical_harmonics", "n_copies": 2}
     config = TomogramConfig(membrane=[entry], seed=0, **_BASE_KWARGS)
     build_tomogram_generator(config)
-    assert entry == {"shape_backend": "spherical_harmonics", "n_instances": 2}
+    assert entry == {"shape_backend": "spherical_harmonics", "n_copies": 2}
 
 
 def test_render_workers_and_devices_reach_membrane_tomogram_generator():
@@ -114,7 +118,7 @@ def test_render_workers_and_devices_reach_membrane_tomogram_generator():
     # regardless of whether GPU N is actually present, so this doesn't
     # need real multi-GPU hardware to test the wiring.
     config = TomogramConfig(
-        membrane=[{"shape_backend": "spherical_harmonics", "n_instances": 2}],
+        membrane=[{"shape_backend": "spherical_harmonics", "n_copies": 2}],
         render_workers=4,
         device="0,1",
         **_BASE_KWARGS,
@@ -187,3 +191,42 @@ def test_no_filaments_or_actin_leaves_filament_specs_empty():
     )
     gen = build_tomogram_generator(config)
     assert gen.filament_specs == []
+
+
+# `n_copies` is the one count spelling across every config entry type. The
+# two specs below still store it under their own pre-existing field names
+# (TransmembraneSpec.frequency, which doubles as the species-draw weight;
+# TomogramBeadSpec.count), so these check the translation at the config
+# boundary specifically -- a typo'd .get() key would silently fall back to
+# the default of 1 rather than raising.
+@pytest.mark.parametrize(
+    ("spec_dict", "expected"),
+    [({"n_copies": 7}, 7), ({}, 1)],
+    ids=["explicit", "omitted-defaults-to-1"],
+)
+def test_transmembrane_n_copies_maps_onto_spec_frequency(spec_dict, expected):
+    # A local fixture path, not a PDB code: build_tomogram_generator renders
+    # transmembrane templates eagerly, so a code would download here.
+    config = TomogramConfig(
+        membrane=[{"shape_backend": "spherical_harmonics"}],
+        membrane_transmembrane_specs=[{"pdb_source": str(_SMALL_FIXTURE), **spec_dict}],
+        **_BASE_KWARGS,
+    )
+    gen = build_tomogram_generator(config)
+    specs = gen.membrane_instances[0].generator.transmembrane_specs
+    assert [spec.frequency for spec in specs] == [expected]
+
+
+@pytest.mark.parametrize(
+    ("spec_dict", "expected"),
+    [({"n_copies": 20}, 20), ({}, 1)],
+    ids=["explicit", "omitted-defaults-to-1"],
+)
+def test_bead_n_copies_maps_onto_spec_count(spec_dict, expected):
+    config = TomogramConfig(
+        membrane=[{"shape_backend": "spherical_harmonics"}],
+        beads=[{"radius": 100.0, **spec_dict}],
+        **_BASE_KWARGS,
+    )
+    gen = build_tomogram_generator(config)
+    assert [(spec.radius, spec.count) for spec in gen.bead_specs] == [(100.0, expected)]

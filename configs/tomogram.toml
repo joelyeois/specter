@@ -1,6 +1,55 @@
 # Canonical default config for `specter build tomogram`.
 # Full field docs: docs/user-guide/build-tomogram.md
 # (or run `specter build tomogram --help`).
+#
+# Layout: run settings first (geometry, output, compute -- the fields you
+# actually retune between runs), then specimen contents (what goes in the
+# volume). Every flag on the CLI overrides the matching field below.
+
+
+# =============================================================================
+# GEOMETRY & PACKING
+# =============================================================================
+
+[specimen]
+target_shape = [200, 1200, 1200]    # (Z, Y, X) voxels
+v_size = 5.0                        # A/voxel
+clip_axes = [true, true, true]      # (z, y, x) -- True lets instances poke past that wall
+filler_occupancy_fraction = 1.0     # above 0.5 is beyond RSA's theoretical max packing
+gap_angstrom = 5.0                  # minimum clearance between placed spheres, A
+pdb_savefolder = "specter-data/pdb"         # relative to your working directory (run from the repo root)
+# seed = 11                         # uncomment for reproducible packing
+
+
+# =============================================================================
+# OUTPUT
+# =============================================================================
+
+[output]
+output_dir = "specter-data/tomograms"
+filename = "tomogram"
+
+[picks]
+write_picks = true
+annotation_version = "1.0"
+write_segmentation = true
+
+
+# =============================================================================
+# COMPUTE
+# =============================================================================
+
+[compute]
+device = "cuda"                     # cpu | cuda | cuda:0 | 0,1,2 | auto
+accumulator_device = "auto"
+render_workers = "auto"
+chunk_size = 64
+
+
+# =============================================================================
+# CONTENTS -- TARGET SPECIES
+# Exact-count, placed first, written to picks as ground truth.
+# =============================================================================
 
 [targets]
 targets = [
@@ -12,6 +61,13 @@ targets = [
     { pdb_source = "6N4V", n_copies = 15 },  # virus-like particle
 ]
 
+
+# =============================================================================
+# CONTENTS -- FILLER SPECIES
+# Ratio-weighted background crowding, placed after targets, around them.
+# Hand-listed species and the bundled reference tables are additive.
+# =============================================================================
+
 [filler]
 filler = [
     { pdb_source = "1fa2", location = "lumen" },  # beta amylase, as an example lumen filler
@@ -21,13 +77,25 @@ filler_from_pei2016 = true
 # filler_from_cryoetsim = true       # Stojanovska et al. 2025 CryoETSim table
 # filler_table_categories = ["distractors", "nucleosomes"]  # cryoetsim only
 # filler_table_max_mw_kda = 300.0
+# Raising the mass floor lifts achieved occupancy: tiny species consume the
+# placement slots RSA jams on while adding little volume.
 # filler_table_min_mw_kda = 20.0
+
+
+# =============================================================================
+# CONTENTS -- MEMBRANES
+# One [[membrane]] table per population. Omit them all for a membrane-free
+# volume; the whole box is then one cytosol region.
+# =============================================================================
 
 [[membrane]]
 shape_backend = "spherical_harmonics"
 bilayer_thickness_a = 30.0
-sh_axes_range_a = [150.0, 1600.0]
-max_output_voxels = 12_000_000_000
+sh_axes_range_a = [150.0, 1600.0]   # SEMI-axes, A -- a vesicle's diameter is
+                                    # roughly twice these. Keep below the slab
+                                    # thickness or instances get dropped as
+                                    # non-fitting and the field grid coarsens
+max_output_voxels = 12_000_000_000  # safety cap on the working field grid
 n_instances = 3
 
 [[membrane]]
@@ -35,9 +103,10 @@ shape_backend = "swept_spline"
 bilayer_thickness_a = 30.0
 swept_total_length_range_a = [1500.0, 2400.0]
 swept_tube_radius_range_a = [150.0, 400.0]
-max_output_voxels = 12_000_000_000
+max_output_voxels = 12_000_000_000  # safety cap on the working field grid
 n_instances = 3
 
+# Proteins embedded in the bilayer, one table per species.
 [[membrane_transmembrane_specs]]
 pdb_source = "1C3W"  # bacteriorhodopsin
 frequency = 1
@@ -46,6 +115,12 @@ frequency = 1
 membrane_region_density_threshold = 0.05
 membrane_min_transmembrane_spacing_a = 40.0
 parameterization = "shtyrov"
+
+
+# =============================================================================
+# CONTENTS -- OPTIONAL EXTRAS
+# All three are off by default. Uncomment a block to enable it.
+# =============================================================================
 
 # Filaments -- optional. Either hand-write [[filaments]] entries (FilamentSpec
 # kwargs) or set `actin = true` for the built-in ACTIN_SPEC preset. Uncomment to add:
@@ -68,27 +143,3 @@ parameterization = "shtyrov"
 # [[beads]]
 # radius = 100.0
 # count = 20
-
-[specimen]
-target_shape = [500, 3000, 3000]    # (Z, Y, X) voxels
-v_size = 2.0                        # A/voxel
-filler_occupancy_fraction = 0.5
-gap_angstrom = 5.0                  # minimum clearance between placed spheres, A
-pdb_savefolder = "pdb-data"         # resolved relative to the repo root
-# seed = 11                         # uncomment for reproducible packing
-clip_axes = [true, true, true]      # (z, y, x) -- True lets instances poke past that wall
-
-[picks]
-write_picks = true
-annotation_version = "1.0"
-write_segmentation = true
-
-[compute]
-device = "cuda"                     # cpu | cuda | cuda:0 | 0,1,2 | auto
-accumulator_device = "auto"
-render_workers = "auto"
-chunk_size = 64
-
-[output]
-output_dir = "./output/"
-filename = "tomogram"

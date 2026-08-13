@@ -21,7 +21,7 @@ specter simulate particles \
     --pdb_code 6bdf \
     --n_particles 200 \
     --device cuda:0 \
-    --output_dir ./output/
+    --output_dir specter-data/particles
 ```
 
 `configs/particle.toml` is the canonical starting point — copy it and edit
@@ -31,7 +31,7 @@ TOML/CLI field reference.
 ## What you'll usually tune
 
 - **Structure & Potential** — `pdb_code` (fetched and cached under
-  `pdb-data/`), `assembly` (biological assembly vs. asymmetric unit),
+  `specter-data/pdb/`), `assembly` (biological assembly vs. asymmetric unit),
   `num_pixels`/`pixel_size` for the simulation box.
 - **Microscope** — `voltage`, `dose`, `cs`, `alpha` (amplitude contrast).
 - **Sampling** — `defocus`, `shift` (max in-plane shift), `n_particles`.

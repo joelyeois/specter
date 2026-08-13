@@ -25,7 +25,7 @@ specter build tomogram \
     --config configs/tomogram.toml \
     --v_size 5.0 \
     --device cuda:0 \
-    --output_dir ./output/
+    --output_dir specter-data/tomograms
 ```
 
 `configs/tomogram.toml` is the canonical starting point — copy it and edit

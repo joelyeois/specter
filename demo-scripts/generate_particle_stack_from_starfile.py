@@ -41,6 +41,7 @@ import time
 
 from rich.console import Console
 from rich.rule import Rule
+from specter.config import default_output_dir, default_pdb_cache_dir
 
 _console = Console()
 
@@ -74,7 +75,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--pdb_savefolder",
         type=str,
-        default="../pdb-data/",
+        default=default_pdb_cache_dir(),
         help="Folder to cache downloaded PDB files.",
     )
     parser.add_argument(
@@ -265,7 +266,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output_dir",
         type=str,
-        default="./output/",
+        default=default_output_dir("particles"),
         help="Directory to save .mrcs and .star files.",
     )
     parser.add_argument(

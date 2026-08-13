@@ -23,13 +23,15 @@ if TYPE_CHECKING:
     from Bio.PDB.Structure import Structure
 
 from .atom import atom_number
-from .config import REPO_ROOT
+from .config import default_pdb_cache_dir
 
-# Anchored to the specter package's own location (repo_root/pdb-data), not a
-# plain "../pdb-data/" relative path -- that broke as soon as a caller's own
-# cwd wasn't exactly one level below the repo root (e.g. a notebook launched
-# from anywhere else), see REPO_ROOT's own comment in config.py.
-DEFAULT_PDB_SAVEFOLDER = str(REPO_ROOT / "pdb-data")
+# `specter-data/pdb`, relative to the caller's cwd -- one rule shared
+# with every other path in a specter config, rather than this one field being
+# special. Previously anchored to REPO_ROOT, which only resolves to the repo
+# for an editable install and would land inside the virtualenv for a wheel
+# install. Set $SPECTER_PDB_CACHE to an absolute path to share one cache
+# across working directories. See `default_pdb_cache_dir` in config.py.
+DEFAULT_PDB_SAVEFOLDER = default_pdb_cache_dir()
 
 # Suppress only PDBConstructionWarnings
 warnings.simplefilter("ignore", PDBConstructionWarning)
@@ -57,9 +59,9 @@ class PDB:
             Whether to fetch the biological assembly when using a PDB ID.
             Default is True.
         savefolder : str, optional
-            Folder to store downloaded PDB/mmCIF files. Default is the
-            specter repo's own `pdb-data/` (anchored to the package's own
-            location via `REPO_ROOT`, not the caller's cwd).
+            Folder to store downloaded PDB/mmCIF files. Default is
+            `specter-data/pdb`, relative to the caller's cwd -- see
+            `config.default_pdb_cache_dir`.
         origin : tuple[float, float, float] or None, optional
             Custom origin to subtract from coordinates. If None, coordinates
             are centered on their geometric center. If a tuple, that point is

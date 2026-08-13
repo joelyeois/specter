@@ -7,8 +7,10 @@ from pathlib import Path
 import mrcfile
 import numpy as np
 
-_SMALL_FIXTURE = Path(__file__).parent.parent / "pdb-data" / "1mbo.cif"
-_LARGE_FIXTURE = Path(__file__).parent.parent / "pdb-data" / "1bxn-assembly1.cif"
+_SMALL_FIXTURE = Path(__file__).parent.parent / "specter-data" / "pdb" / "1mbo.cif"
+_LARGE_FIXTURE = (
+    Path(__file__).parent.parent / "specter-data" / "pdb" / "1bxn-assembly1.cif"
+)
 
 
 def _write_test_config(path: Path, output_dir: Path) -> None:

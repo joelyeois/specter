@@ -15,7 +15,7 @@ from specter.pdb import PDB
 # (_chem_comp_bond), the carboxyl/amide flag override, and inter-residue
 # metal-coordination bonds (_struct_conn), all without needing an external
 # CCP4 Monomer Library.
-_FIXTURE = Path(__file__).parent.parent / "pdb-data" / "1mbo.cif"
+_FIXTURE = Path(__file__).parent.parent / "specter-data" / "pdb" / "1mbo.cif"
 
 
 @pytest.fixture(scope="module")

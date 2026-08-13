@@ -27,8 +27,10 @@ from specter.specimen.tomogram import (
     TomogramProteinSpec,
 )
 
-_SMALL_FIXTURE = Path(__file__).parent.parent / "pdb-data" / "1mbo.cif"
-_LARGE_FIXTURE = Path(__file__).parent.parent / "pdb-data" / "1bxn-assembly1.cif"
+_SMALL_FIXTURE = Path(__file__).parent.parent / "specter-data" / "pdb" / "1mbo.cif"
+_LARGE_FIXTURE = (
+    Path(__file__).parent.parent / "specter-data" / "pdb" / "1bxn-assembly1.cif"
+)
 
 _TARGET_SHAPE_ZYX = (64, 64, 64)
 _V_SIZE = 8.0
@@ -62,7 +64,7 @@ def test_membrane_tomogram_generator_places_both_locations_correctly():
         ],
         occupancy_fraction=0.1,
         gap_angstrom=5.0,
-        pdb_cache_dir="pdb-data/",
+        pdb_cache_dir="specter-data/pdb/",
         seed=0,
     )
     volume = gen.generate()
@@ -107,7 +109,7 @@ def test_membrane_tomogram_generator_instance_labels_match_placements():
         ],
         occupancy_fraction=0.05,
         gap_angstrom=5.0,
-        pdb_cache_dir="pdb-data/",
+        pdb_cache_dir="specter-data/pdb/",
         seed=0,
     )
     gen.generate()
@@ -152,7 +154,7 @@ def test_membrane_tomogram_generator_warns_when_lumen_species_has_no_region():
             TomogramProteinSpec(pdb_source=str(_SMALL_FIXTURE), location="lumen")
         ],
         occupancy_fraction=0.1,
-        pdb_cache_dir="pdb-data/",
+        pdb_cache_dir="specter-data/pdb/",
         seed=0,
     )
     with pytest.warns(UserWarning, match="no 'lumen' region"):
@@ -221,7 +223,7 @@ def test_membrane_tomogram_generator_composites_two_non_overlapping_instances():
         ],
         occupancy_fraction=0.05,
         gap_angstrom=5.0,
-        pdb_cache_dir="pdb-data/",
+        pdb_cache_dir="specter-data/pdb/",
         seed=0,
     )
     volume = gen.generate()
@@ -261,7 +263,7 @@ def test_membrane_tomogram_generator_auto_places_non_colliding_instances():
             TomogramProteinSpec(pdb_source=str(_LARGE_FIXTURE), location="cytosol")
         ],
         occupancy_fraction=0.05,
-        pdb_cache_dir="pdb-data/",
+        pdb_cache_dir="specter-data/pdb/",
         seed=0,
     )
     with warnings.catch_warnings(record=True) as w:
@@ -298,7 +300,7 @@ def test_membrane_tomogram_generator_drops_instances_that_dont_fit():
             TomogramProteinSpec(pdb_source=str(_LARGE_FIXTURE), location="cytosol")
         ],
         occupancy_fraction=0.05,
-        pdb_cache_dir="pdb-data/",
+        pdb_cache_dir="specter-data/pdb/",
         seed=0,
     )
     with pytest.warns(UserWarning, match="did not fit without colliding"):
@@ -328,7 +330,7 @@ def test_membrane_tomogram_generator_overlapping_instances_first_write_wins():
         v_size=_V_SIZE,
         protein_specs=[TomogramProteinSpec(pdb_source=str(_SMALL_FIXTURE))],
         occupancy_fraction=0.05,
-        pdb_cache_dir="pdb-data/",
+        pdb_cache_dir="specter-data/pdb/",
         seed=0,
     )
     with pytest.warns(UserWarning, match="overlaps a voxel"):
@@ -362,7 +364,7 @@ def test_membrane_tomogram_generator_transmembrane_reflects_position_offset():
         v_size=_V_SIZE,
         protein_specs=[TomogramProteinSpec(pdb_source=str(_SMALL_FIXTURE))],
         occupancy_fraction=0.05,
-        pdb_cache_dir="pdb-data/",
+        pdb_cache_dir="specter-data/pdb/",
         seed=0,
     )
     gen_origin.generate()
@@ -378,7 +380,7 @@ def test_membrane_tomogram_generator_transmembrane_reflects_position_offset():
         v_size=_V_SIZE,
         protein_specs=[TomogramProteinSpec(pdb_source=str(_SMALL_FIXTURE))],
         occupancy_fraction=0.05,
-        pdb_cache_dir="pdb-data/",
+        pdb_cache_dir="specter-data/pdb/",
         seed=0,
     )
     gen_offset.generate()
@@ -429,7 +431,7 @@ def test_membrane_tomogram_generator_export_picks(tmp_path):
         ],
         occupancy_fraction=0.1,
         gap_angstrom=5.0,
-        pdb_cache_dir="pdb-data/",
+        pdb_cache_dir="specter-data/pdb/",
         seed=0,
     )
     gen.generate()
@@ -488,7 +490,7 @@ def test_membrane_tomogram_generator_places_filaments():
         ],
         occupancy_fraction=0.05,
         gap_angstrom=5.0,
-        pdb_cache_dir="pdb-data/",
+        pdb_cache_dir="specter-data/pdb/",
         seed=0,
     )
     volume = gen.generate()
@@ -517,7 +519,7 @@ def test_membrane_tomogram_generator_no_filament_specs_places_nothing():
             TomogramProteinSpec(pdb_source=str(_SMALL_FIXTURE), location="cytosol")
         ],
         occupancy_fraction=0.05,
-        pdb_cache_dir="pdb-data/",
+        pdb_cache_dir="specter-data/pdb/",
         seed=0,
     )
     gen.generate()
@@ -544,7 +546,7 @@ def test_membrane_tomogram_generator_export_picks_includes_filaments(tmp_path):
             )
         ],
         occupancy_fraction=0.05,
-        pdb_cache_dir="pdb-data/",
+        pdb_cache_dir="specter-data/pdb/",
         seed=0,
     )
     gen.generate()
@@ -670,7 +672,7 @@ def test_membrane_tomogram_generator_bead_specs_excluded_from_protein_packing():
         protein_specs=[TomogramProteinSpec(pdb_source=str(_SMALL_FIXTURE))],
         bead_specs=[TomogramBeadSpec(radius=30.0, count=3)],
         occupancy_fraction=0.05,
-        pdb_cache_dir="pdb-data/",
+        pdb_cache_dir="specter-data/pdb/",
         seed=0,
     )
     gen.generate()

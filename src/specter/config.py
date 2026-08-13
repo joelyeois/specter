@@ -14,6 +14,68 @@ import specter
 # demo-notebooks/particle_stack/, and Jupyter cells have no __file__ at all).
 REPO_ROOT = Path(specter.__file__).resolve().parents[2]
 
+#: Environment variable overriding where downloaded PDB/mmCIF files are cached,
+#: mirroring how HF_HOME/TORCH_HOME work for those libraries.
+PDB_CACHE_ENV_VAR = "SPECTER_PDB_CACHE"
+
+
+#: Everything specter writes into a working directory lives under this one
+#: folder, so a run leaves a single recognisable directory behind rather than
+#: scattering caches and results at top level.
+SPECTER_DATA_DIR = "specter-data"
+
+
+def default_output_dir(artifact: str) -> str:
+    """
+    Default output location for one kind of simulated data.
+
+    Each config class writes to a folder named for what it produces
+    (`particles`, `micrographs`, `tiltseries`, `tomograms`) rather than a
+    shared `output/`, so two different commands run in the same working
+    directory don't pile their results into one folder -- and so the folder
+    name alone says what is inside, without having to remember which command
+    made it.
+
+    Parameters
+    ----------
+    artifact : str
+        Plural name of the artifact produced, e.g. ``"tomograms"``.
+
+    Returns
+    -------
+    str
+        ``specter-data/<artifact>``, relative to the current working
+        directory like every other path in a specter config.
+    """
+    return os.path.join(SPECTER_DATA_DIR, artifact)
+
+
+def default_pdb_cache_dir() -> str:
+    """
+    Default location for the downloaded-structure cache.
+
+    Deliberately NOT anchored to `REPO_ROOT`: that only resolves to the repo
+    for an editable install from a checkout. Installed as a wheel,
+    `specter/__init__.py` lives in `site-packages/specter/`, so `parents[2]`
+    would be the virtualenv's `lib/` directory and the cache would be written
+    inside the venv.
+
+    Relative, and therefore resolved against the current working directory --
+    the same rule every other path in a specter config follows, so there is
+    exactly one thing to remember: specter writes into `./specter-data/`. The
+    tradeoff is that running from two different directories gives two caches;
+    set `$SPECTER_PDB_CACHE` to an absolute path to share one between them.
+
+    Returns
+    -------
+    str
+        `$SPECTER_PDB_CACHE` when set, else `specter-data/pdb`.
+    """
+    override = os.environ.get(PDB_CACHE_ENV_VAR)
+    if override:
+        return override
+    return os.path.join(SPECTER_DATA_DIR, "pdb")
+
 
 def parse_scalar_or_range(value: str) -> tuple[float, float]:
     """
@@ -103,11 +165,13 @@ class ParticleStackConfig:
     batchsize: int = 5
 
     # --- Output (basic) ---
-    output_dir: str = "./output/"
+    output_dir: str = field(default_factory=lambda: default_output_dir("particles"))
     filename: str = "particles"
 
     # --- Advanced ---
-    pdb_savefolder: str = "pdb-data"  # resolved against REPO_ROOT if relative
+    # Relative to the current working directory, like any other CLI path
+    # argument -- see default_pdb_cache_dir for the unset case.
+    pdb_savefolder: str = field(default_factory=default_pdb_cache_dir)
     # if set, poses/CTF/pixel_size/voltage/alpha come from here
     cs_path: str | None = None
     num_frames: int | None = None
@@ -306,7 +370,9 @@ class MicrographConfig:
     # --- PDB / potential ---
     pdb_code: str
     assembly: bool = True
-    pdb_savefolder: str = "pdb-data"  # resolved against REPO_ROOT if relative
+    # Relative to the current working directory, like any other CLI path
+    # argument -- see default_pdb_cache_dir for the unset case.
+    pdb_savefolder: str = field(default_factory=default_pdb_cache_dir)
     num_pixels: int = 256
     pixel_size: float = 1.0  # Å
     micrograph_size: int = 4096
@@ -363,7 +429,7 @@ class MicrographConfig:
     device: str = "cpu"
 
     # --- Output ---
-    output_dir: str = "./output/"
+    output_dir: str = field(default_factory=lambda: default_output_dir("micrographs"))
     filename: str = "micrographs"
 
 
@@ -435,7 +501,7 @@ class TiltSeriesConfig:
     device: str = "cpu"
 
     # --- Output ---
-    output_dir: str = "./output/"
+    output_dir: str = field(default_factory=lambda: default_output_dir("tiltseries"))
     filename: str = "tilt_series"
 
 
@@ -571,7 +637,9 @@ class TomogramConfig:
     # rejected outright -- e.g. for a tomogram whose xy field of view is a
     # crop of a larger cellular region.
     clip_axes: list[bool] = field(default_factory=lambda: [False, False, False])
-    pdb_savefolder: str = "pdb-data"  # resolved against REPO_ROOT if relative
+    # Relative to the current working directory, like any other CLI path
+    # argument -- see default_pdb_cache_dir for the unset case.
+    pdb_savefolder: str = field(default_factory=default_pdb_cache_dir)
     seed: int | None = None
 
     # --- Organic membrane (optional) ---
@@ -729,7 +797,7 @@ class TomogramConfig:
     chunk_size: int | None = None
 
     # --- Output ---
-    output_dir: str = "./output/"
+    output_dir: str = field(default_factory=lambda: default_output_dir("tomograms"))
     filename: str = "tomogram"
 
 
@@ -924,13 +992,11 @@ def load_config(
         if isinstance(value, dict):
             flat.update(value)
     flat.update({k: v for k, v in raw.items() if not isinstance(v, dict)})
-    config = config_cls(**flat)
-    # Not every config dataclass has pdb_savefolder (e.g. TiltSeriesConfig,
-    # the imaging-only half of the cryo-ET pipeline, has no PDB fetching of
-    # its own) -- resolve it against REPO_ROOT only when present.
-    if hasattr(config, "pdb_savefolder") and not os.path.isabs(config.pdb_savefolder):
-        config.pdb_savefolder = str(REPO_ROOT / config.pdb_savefolder)
-    return config
+    # Paths are deliberately NOT rewritten here: a relative path a user wrote
+    # in a TOML (or passed on the CLI) is resolved against the current working
+    # directory, like every other CLI tool's path argument. Only an omitted
+    # pdb_savefolder gets a computed default -- see default_pdb_cache_dir.
+    return config_cls(**flat)
 
 
 def apply_overrides(config: ConfigT, overrides: dict) -> ConfigT:

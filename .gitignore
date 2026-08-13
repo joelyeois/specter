@@ -1,3 +1,6 @@
+# Everything specter writes into a working directory lives here
+# (leading slash anchors it to the repo root)
+/specter-data/
 pdb-data/
 cache/
 manuscript/

@@ -113,7 +113,7 @@ def test_build_templates_concurrently_round_robins_devices():
 
 def test_build_pdb_cache_concurrently_serial():
     cache = build_pdb_cache_concurrently(
-        pdb_sources=["1mbo"], pdb_cache_dir="pdb-data", max_workers=1
+        pdb_sources=["1mbo"], pdb_cache_dir="specter-data/pdb", max_workers=1
     )
     assert set(cache) == {"1mbo"}
     assert cache["1mbo"].coordinates.shape[0] > 0
@@ -128,7 +128,9 @@ def test_build_pdb_cache_concurrently_below_threshold_skips_process_pool(monkeyp
 
     monkeypatch.setattr(parallel_render_module, "ProcessPoolExecutor", _boom)
     cache = build_pdb_cache_concurrently(
-        pdb_sources=["1mbo", "1fa2", "1a6m"], pdb_cache_dir="pdb-data", max_workers=8
+        pdb_sources=["1mbo", "1fa2", "1a6m"],
+        pdb_cache_dir="specter-data/pdb",
+        max_workers=8,
     )
     assert set(cache) == {"1mbo", "1fa2", "1a6m"}
 
@@ -140,10 +142,10 @@ def test_build_pdb_cache_concurrently_parallel_matches_serial():
     n = parallel_render_module._MIN_SOURCES_FOR_PROCESS_POOL + 2
     sources = [d["code"] for d in CRYOETSIM_PARTICLE_TABLE[:n]]
     serial = build_pdb_cache_concurrently(
-        pdb_sources=sources, pdb_cache_dir="pdb-data", max_workers=1
+        pdb_sources=sources, pdb_cache_dir="specter-data/pdb", max_workers=1
     )
     parallel = build_pdb_cache_concurrently(
-        pdb_sources=sources, pdb_cache_dir="pdb-data", max_workers=4
+        pdb_sources=sources, pdb_cache_dir="specter-data/pdb", max_workers=4
     )
     assert set(parallel) == set(serial) == set(sources)
     for source in sources:
@@ -163,7 +165,7 @@ def test_build_pdb_cache_concurrently_deduplicates_sources():
     sources = [d["code"] for d in CRYOETSIM_PARTICLE_TABLE[:n]]
     cache = build_pdb_cache_concurrently(
         pdb_sources=sources + sources[:3],  # duplicate a few sources
-        pdb_cache_dir="pdb-data",
+        pdb_cache_dir="specter-data/pdb",
         max_workers=4,
     )
     assert set(cache) == set(sources)

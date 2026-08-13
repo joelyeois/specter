@@ -26,5 +26,5 @@ filler_occupancy_fraction = 0.0
 seed = 11
 
 [output]
-output_dir = "./output/"
+output_dir = "specter-data/tomograms"
 filename = "tilt_series_specimen"

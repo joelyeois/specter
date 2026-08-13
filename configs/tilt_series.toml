@@ -66,5 +66,5 @@ save_exitwaves = false
 device = "cpu"                     # cpu | cuda | cuda:0
 
 [output]
-output_dir = "./output/"
+output_dir = "specter-data/tiltseries"
 filename = "tilt_series"

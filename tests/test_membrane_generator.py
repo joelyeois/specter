@@ -206,13 +206,13 @@ def test_build_template_uses_analytic_method_matching_membrane_profile():
     from specter.specimen.packing import estimate_protein_box_size
 
     gen = MembraneGenerator(
-        pdb_cache_dir="pdb-data/",
+        pdb_cache_dir="specter-data/pdb/",
         **_SMALL_KWARGS,
     )
     spec = TransmembraneSpec("1C3W", parameterization="shtyrov")
     template = gen._build_template(spec)
 
-    pdb = PDB("1C3W", savefolder="pdb-data/", verbose=False)
+    pdb = PDB("1C3W", savefolder="specter-data/pdb/", verbose=False)
     coordinates = align_principal_axis_to_z(pdb.coordinates)
     coordinates = align_transmembrane_depth(coordinates, None)
     n = estimate_protein_box_size(pdb.max_diameter, gen.v_size)
@@ -303,7 +303,7 @@ def test_spherical_harmonics_backend_is_seed_reproducible():
 
 
 def test_spherical_harmonics_backend_supports_transmembrane_placement():
-    pdb_path = Path(__file__).parent.parent / "pdb-data" / "1mbo.cif"
+    pdb_path = Path(__file__).parent.parent / "specter-data" / "pdb" / "1mbo.cif"
     if not pdb_path.exists():
         pytest.skip("bundled PDB fixture missing")
     gen = MembraneGenerator(
@@ -370,7 +370,7 @@ def test_swept_spline_backend_is_seed_reproducible():
 
 
 def test_swept_spline_backend_supports_transmembrane_placement():
-    pdb_path = Path(__file__).parent.parent / "pdb-data" / "1mbo.cif"
+    pdb_path = Path(__file__).parent.parent / "specter-data" / "pdb" / "1mbo.cif"
     if not pdb_path.exists():
         pytest.skip("bundled PDB fixture missing")
     gen = MembraneGenerator(
@@ -771,7 +771,7 @@ def test_swept_spline_beading_warning_uses_mean_radius_not_local_minimum():
 def test_place_transmembrane_warns_on_partial_or_zero_placement():
     """Pre-existing gap: place_transmembrane silently returned fewer (or
     zero) placements than requested with no warning at all. Fixed."""
-    pdb_path = Path(__file__).parent.parent / "pdb-data" / "1mbo.cif"
+    pdb_path = Path(__file__).parent.parent / "specter-data" / "pdb" / "1mbo.cif"
     if not pdb_path.exists():
         pytest.skip("bundled PDB fixture missing")
     gen = MembraneGenerator(

@@ -4,7 +4,7 @@ import subprocess as proc
 import sys
 from pathlib import Path
 
-_FIXTURE_PDB = str(Path(__file__).parent.parent / "pdb-data" / "1mbo.cif")
+_FIXTURE_PDB = str(Path(__file__).parent.parent / "specter-data" / "pdb" / "1mbo.cif")
 
 
 def _run_particles_cli(output_dir: Path, n_particles: int = 2) -> proc.CompletedProcess:

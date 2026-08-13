@@ -5,7 +5,7 @@
 [potential]
 pdb_code = "6bdf"
 assembly = true
-pdb_savefolder = "pdb-data"  # resolved relative to the repo root
+pdb_savefolder = "specter-data/pdb"  # relative to your working directory (run from the repo root)
 num_pixels = 256
 pixel_size = 1.0              # Å
 micrograph_size = 4096        # pixels, square
@@ -60,5 +60,5 @@ save_clean_exitwaves = false
 device = "cpu"                   # cpu | cuda | cuda:0
 
 [output]
-output_dir = "./output/"
+output_dir = "specter-data/micrographs"
 filename = "micrographs"

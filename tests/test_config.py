@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from specter.config import (
+    PDB_CACHE_ENV_VAR,
     REPO_ROOT,
+    MicrographConfig,
     ParticleStackConfig,
     TiltSeriesConfig,
+    TomogramConfig,
     apply_overrides,
     load_config,
 )
@@ -44,14 +48,48 @@ def test_load_config_fills_defaults_for_missing_fields(tmp_path: Path) -> None:
     assert config.dose == "20"
 
 
-def test_load_config_resolves_relative_pdb_savefolder_to_repo_root(
+def test_load_config_keeps_relative_pdb_savefolder_verbatim(
     tmp_path: Path,
 ) -> None:
+    """A path the user wrote is theirs -- resolved against cwd, not rewritten."""
     path = _write_toml(
         tmp_path, '[potential]\npdb_code = "6bdf"\npdb_savefolder = "my-cache"\n'
     )
     config = load_config(path)
-    assert config.pdb_savefolder == str(REPO_ROOT / "my-cache")
+    assert config.pdb_savefolder == "my-cache"
+
+
+def test_omitted_paths_default_under_one_specter_data_dir() -> None:
+    """One rule: everything specter writes lands under ./specter-data/.
+
+    Both defaults are relative, so neither depends on REPO_ROOT -- which
+    only resolves to the repo for an editable install and would point
+    inside the virtualenv for a wheel install.
+    """
+    config = ParticleStackConfig(pdb_code="6bdf")
+    assert config.pdb_savefolder == os.path.join("specter-data", "pdb")
+    assert config.output_dir == os.path.join("specter-data", "particles")
+    assert not os.path.isabs(config.pdb_savefolder)
+    assert not os.path.isabs(config.output_dir)
+
+
+def test_each_config_outputs_to_its_own_artifact_folder() -> None:
+    """Folder name says what is inside, so two commands run in the same
+    working directory don't pile results into a shared `output/`."""
+    assert ParticleStackConfig(pdb_code="6bdf").output_dir == os.path.join(
+        "specter-data", "particles"
+    )
+    assert MicrographConfig(pdb_code="6bdf").output_dir == os.path.join(
+        "specter-data", "micrographs"
+    )
+    assert TiltSeriesConfig().output_dir == os.path.join("specter-data", "tiltseries")
+    assert TomogramConfig().output_dir == os.path.join("specter-data", "tomograms")
+
+
+def test_pdb_cache_env_var_overrides_default(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv(PDB_CACHE_ENV_VAR, str(tmp_path / "elsewhere"))
+    config = ParticleStackConfig(pdb_code="6bdf")
+    assert config.pdb_savefolder == str(tmp_path / "elsewhere")
 
 
 def test_load_config_preserves_absolute_pdb_savefolder(tmp_path: Path) -> None:

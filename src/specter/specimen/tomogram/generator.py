@@ -1455,6 +1455,29 @@ class MembraneTomogramGenerator:
                     _filler_pack_start,
                     disable=not self.progressbars,
                 )
+                if accepted_idx.numel() == 0:
+                    # A non-empty region that still fits nothing is silent
+                    # otherwise: no picks file appears for the species and
+                    # nothing says why. The usual cause is a compartment
+                    # that is large enough to exist but not to hold the
+                    # species once gap_angstrom is added -- so report the
+                    # clearance actually available against the clearance
+                    # needed, which is what the caller has to act on.
+                    largest = float(species_radii.max())
+                    available = float(exclusion_field[region_mask_field].max())
+                    warnings.warn(
+                        f"MembraneTomogramGenerator: placed 0 filler "
+                        f"instances in '{location}'. The region exists "
+                        f"({region_voxels:,} voxels) but its largest "
+                        f"clearance from the boundary is "
+                        f"{available:.1f} A, against the "
+                        f"{largest + self.gap_angstrom:.1f} A a placement "
+                        f"needs (species radius {largest:.1f} A + "
+                        f"gap_angstrom {self.gap_angstrom:.1f} A). Enlarge "
+                        "the compartment, reduce gap_angstrom, or declare a "
+                        "smaller species for this region.",
+                        stacklevel=2,
+                    )
                 accepted_species_idx = pool_species_idx[accepted_idx]
 
                 _filler_render_start = time.perf_counter()

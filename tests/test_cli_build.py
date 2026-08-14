@@ -97,17 +97,23 @@ def _write_membrane_test_config(
     path: Path, output_dir: Path, *, include_lumen: bool, include_transmembrane: bool
 ) -> None:
     # Same tuned scale as tests/test_tomogram_generator.py's own
-    # _MEMBRANE_KWARGS: a spherical_harmonics ellipsoid enclosing a lumen
-    # big enough to actually hold 1mbo. Lumen and transmembrane specs are
-    # kept in SEPARATE tests (not combined here) -- verified directly that
-    # the two cases need DIFFERENT sh_axes_a: 70A reliably encloses a lumen
-    # at this seed/box but reliably finds zero transmembrane sites for 1mbo
-    # (Newton-projection surface search exhausts max_attempts against too-
-    # tight a curvature); 100A reliably places one transmembrane site but
-    # reliably encloses zero lumen at this same seed. Stacking both
-    # requirements in one config would make this test flaky for a reason
-    # that has nothing to do with what it's meant to check.
-    sh_radius_a = 100.0 if include_transmembrane else 70.0
+    # A spherical_harmonics ellipsoid whose lumen comfortably holds 1mbo.
+    # The radius is load-bearing and was measured, not guessed: 1mbo packs
+    # at max_diameter/2 = 31.4 A and gap_angstrom=5 on top, so a placement
+    # needs 36.4 A of clearance from the shell. Lumen voxels clearing that
+    # bar, by radius (v_size=8, seed=0):
+    #
+    #   70 A ->     3 of   705 lumen voxels   (RSA reliably finds none)
+    #   90 A ->   177 of 3,756
+    #  110 A ->   924 of 7,286                (used here)
+    #  130 A -> 2,641 of 12,605
+    #
+    # 70 A was the previous value and is why this test failed: a viable
+    # site existed, but at 0.4% of the region RSA never sampled one. 110 A
+    # leaves ~300x that margin while still fitting the box with room to
+    # spare, and (measured) also places transmembrane sites reliably, so
+    # both smoke tests can share one geometry.
+    sh_radius_a = 110.0
     transmembrane_block = (
         f"""
 [[membrane_transmembrane_specs]]

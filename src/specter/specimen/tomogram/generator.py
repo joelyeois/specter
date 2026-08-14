@@ -55,11 +55,12 @@ generator (``cryotomosim.py``, ``_cts_membrane.py``, ``_cts_placement.py``),
 deleted once this generator reached feature parity with it (carbon
 film/gold beads were the last two gaps -- see git history for that
 generator if the CTS algorithm itself is ever needed as a reference
-again). This generator DOES still reuse ``.._grid``
-(``CarbonFilmGenerator``/``BeadGenerator``) for the carbon film/gold bead
-physics below -- that module is generic bulk-material potential code with
-no CTS-specific placement logic of its own (see its own module docstring),
-so it outlived the deleted generator rather than going with it.
+again). This generator DOES still reuse ``.._carbon``
+(``CarbonFilmGenerator``) and ``.._grid`` (``BeadGenerator``) for the
+carbon film/gold bead physics below -- those modules are generic
+bulk-material potential code with no CTS-specific placement logic of their
+own (see each module's own docstring), so they outlived the deleted
+generator rather than going with it.
 ``_cts_membrane.py`` did NOT similarly outlive it: its only other consumer
 was ``specimen.membrane``'s own deprecated ``shape_backend="alpha_shape"``,
 removed in the same cleanup -- see git history if either is ever needed as
@@ -169,7 +170,8 @@ from ...crowding import insert_particles_into_micrograph
 from ...pdb import DEFAULT_PDB_SAVEFOLDER, PDB
 from ...potential import PotentialBuilder
 from ...rotations import build_affine_matrix, random_rotation_matrix, rotate_volume
-from .._grid import BeadGenerator, CarbonFilmGenerator, GridSpec, edge_hole_center
+from .._carbon import CarbonFilmGenerator, GridSpec, edge_hole_center
+from .._grid import BeadGenerator
 from .._parallel_render import (
     build_pdb_cache_concurrently,
     build_templates_concurrently,
@@ -1652,7 +1654,10 @@ class MembraneTomogramGenerator:
         grid_spec = self.grid_spec
         assert grid_spec is not None
         carbon_gen = CarbonFilmGenerator(
-            v_size=v_size, parameterization=self.parameterization, seed=self.seed
+            v_size=v_size,
+            parameterization=self.parameterization,
+            seed=self.seed,
+            device=volume.device,
         )
         grid_rng = np.random.default_rng(self.seed)
         edge_fraction = grid_spec.edge_fraction
@@ -1672,7 +1677,6 @@ class MembraneTomogramGenerator:
             hole_radius=grid_spec.hole_radius,
             hole_center=hole_center,
             edge_roughness=grid_spec.edge_roughness,
-            edge_grain_size=grid_spec.edge_grain_size,
         )
         return volume + film.density.to(volume.device)
 

@@ -144,6 +144,7 @@ Pose/shift/defocus refinement (`lr_R`/`lr_T`/`lr_defocus` on `Reconstructor`/`To
 
 - `cli/` — the `specter` command (entry point `specter.cli._cli:main`), built on `click`/`rich-click`. Exposes `specter simulate particles`, `specter simulate tiltseries`, `specter build tomogram`. Each subcommand (`simulate.py`, `build.py`) loads a TOML config via `config.py`'s dataclasses (`ParticleStackConfig`, `TiltSeriesConfig`, `TomogramConfig`) with `load_config()`, applies only the flags the user actually passed via `_click_options.py`'s `build_config_options()`/`collect_overrides()` (unset flags never clobber the TOML), then calls into `pipelines/`. This is unrelated to the older `specter-jobs` entry point (`jobs/_cli.py`), a separate job-database CLI.
 - `pipelines/` — `run_particle_stack()`, `run_tilt_series()`, `run_build_tomogram()`: the actual end-to-end implementations behind the `cli/` commands, kept separate so `cli/` stays a thin argument-parsing layer. `_common.py` holds logic shared across all three.
+- **Output layout**: everything specter writes lands under `./specter-data/`, relative to the current working directory — `specter-data/{pdb,particles,micrographs,tiltseries,tomograms}`. Path resolution is one rule with no special cases: an explicit path (TOML or CLI) is used verbatim and resolves relative to the cwd; an omitted `output_dir`/`pdb_savefolder` falls back to `config.py`'s `default_output_dir(artifact)` / `default_pdb_cache_dir()`, both cwd-relative (not repo-root-anchored — that only resolves correctly for an editable install). `$SPECTER_PDB_CACHE` overrides the PDB cache location to an absolute path if you want one cache shared across working directories. `.gitignore` uses `/specter-data/` with a leading slash so the pattern doesn't also match `src/specter/`.
 
 ## Repository Structure
 
@@ -188,8 +189,11 @@ src/specter/                  # Main source package
     tomogram/, filament/, membrane/, packing/  # newer subpackages (tomogram/specimen assembly, filament placement,
                               # organic membranes, sphere/tetris packing algorithms); also from_volume.py at the
                               # top level — still in flux, deliberately not detailed here
-    _grid.py                  # CarbonFilmGenerator/BeadGenerator — carbon support film + gold fiducial bead physics
-                              # for specimen.tomogram.MembraneTomogramGenerator (`specter build tomogram`)
+    _grid.py                  # BeadGenerator — gold fiducial bead physics, for specimen.tomogram.MembraneTomogramGenerator
+                              # (`specter build tomogram`); also the shared bulk-material density/potential helpers _carbon.py uses
+    _carbon.py                 # CarbonFilmGenerator/GridSpec — carbon support film: alpha-shape rim geometry (from-scratch
+                              # CTS gen_carbon.m port, dev/gen_carbon_replica.py) + MIP-calibrated flat deposition (dev/validate_carbon_mip.py)
+    _carbon_delaunay.py        # Torch-free Delaunay/circumsphere worker for _carbon.py's blocked (spawn-context) alpha-complex build
   potential.py                # Scattering potential builder
   scattering.py               # Wave propagation (multislice, rytov, firstborn, projection)
   microscope.py               # Aberration and detector models
@@ -258,6 +262,7 @@ ice-data/                     # Pre-computed ice data (do not modify)
 - Atomic potentials are parameterised; the Kirkland model is the default and most validated.
 - Coincidence loss is modelled for direct electron detectors — do not remove this when simulating K3 detector outputs.
 - CTF sign conventions follow the standard cryo-EM convention (defocus positive = underfocus).
+- Detector MTF and DQE(0) are separate physical effects and must stay separate: bundled detector MTFs are derived from published DQE curves, so the shape is normalised as `sqrt(DQE(k)/DQE(0))` (`detectors.py`), and the zero-frequency counting efficiency is applied separately via `Detector(dqe0=...)` by scaling expected electron counts. Folding `DQE(0)` into the MTF instead would scale counts by `sqrt(DQE(0))` rather than `DQE(0)` and give the wrong shot-noise statistics.
 - `IceBank` tiles volumes larger than a single cached config in **coordinate space**: it draws multiple independently rotated/translated crops (`_place_tiles`), places them side by side, and heals the tile boundaries with a short local MLBOP relaxation (`_relax_seams`) rather than voxel-space blending — do not replace this with a plain repeat/tile or hard-edge concatenation, which would leave visible seams (and, unrelaxed, measurably unfavorable energy at the boundaries). Relaxation cost is bounded to a halo band around each seam (`_place_tiles`'s `halo_margin`; only halo atoms are fed to the energy model, the untouched bulk is reattached unchanged), and is off by default — `generate_big_ice`/`generate_big_ice_deltas`'s `relax_steps` (exposed as `ice_relax_steps` on `TiltSeriesGenerator`/`ImageGenerator`/`MicrographGenerator`/`ParticleStackConfig`) defaults to 0. `generate_big_ice` is also memory-bounded for very large volumes. `tile_volume_from_blocks_blended()` (in `arrays.py`) is a separate, still-used utility for **voxel-space** tiling — overlap-add with random roll/flip/rotation augmentation per tile — used by `MDSimDump`/`ExtXYZDump` to assemble MD trajectory frames into larger volumes, not by `IceBank`. `RandomIcemaker`/`GradientSKIcemaker` only produce single unique blocks (`generate_ice`); they don't assemble large volumes themselves.
 - Ice structure is driven by `GradientSKIcemaker` (optimised against pre-computed S(k)/MLBOP targets in `ice-data/`) and cached via `IceBank`; `RandomIcemaker` is a fast, low-fidelity fallback for quick tests.
 

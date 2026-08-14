@@ -5,7 +5,8 @@ from .cytosolic_filler import (
     build_filler_pool_specs,
 )
 from .from_volume import load_specimen_volume
-from ._grid import BeadSpec, GridSpec
+from ._grid import BeadSpec
+from ._carbon import GridSpec
 from .filament import ACTIN_SPEC, MICROTUBULE_SPEC, FilamentInstance, FilamentSpec
 from .membrane import (
     MembraneGenerator,

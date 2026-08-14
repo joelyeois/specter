@@ -769,7 +769,7 @@ class TomogramConfig:
     # --- Carbon support film (optional, single film) ---
     # Zero or one [[grid]] table, mapping onto
     # specter.specimen.GridSpec's own kwargs (thickness, hole_radius,
-    # edge_fraction, edge_side, edge_roughness, edge_grain_size) -- e.g.
+    # edge_fraction, edge_side, edge_roughness) -- e.g.
     # {"hole_radius": 6000.0, "edge_fraction": [0.02, 0.05]}. Painted
     # directly into the volume before anything else is placed; placement
     # (membranes/targets/filler) is NOT carbon-aware (a documented,
@@ -933,8 +933,8 @@ TOMOGRAM_HELP: dict[str, str] = {
     "species (e.g. microtubules), use [[filaments]] instead.",
     "grid": "Zero or one [[grid]] table (TOML-only) describing a carbon "
     "support film, mapping onto specter.specimen.GridSpec kwargs "
-    "(thickness, hole_radius, edge_fraction, edge_side, edge_roughness, "
-    "edge_grain_size). Painted into the volume before anything else is "
+    "(thickness, hole_radius, edge_fraction, edge_side, edge_roughness). "
+    "Painted into the volume before anything else is "
     "placed; not carbon-aware for placement (see MembraneTomogramGenerator's "
     "own docstring). Empty (default): no carbon film.",
     "beads": "Gold fiducial bead populations to pack (TOML-only, [[beads]] "

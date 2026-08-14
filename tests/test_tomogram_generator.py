@@ -17,7 +17,7 @@ from pathlib import Path
 import pytest
 import torch
 
-from specter.specimen._grid import GridSpec
+from specter.specimen._carbon import GridSpec
 from specter.specimen.filament import FilamentSpec
 from specter.specimen.membrane import MembraneGenerator, TransmembraneSpec
 from specter.specimen.tomogram import (

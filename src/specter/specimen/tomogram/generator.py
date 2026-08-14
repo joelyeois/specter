@@ -400,6 +400,96 @@ def _downsample_mask_maxpool(
     return pooled > 0
 
 
+def _diagnose_zero_placements(
+    region_mask_field: torch.Tensor,
+    exclusion_field: torch.Tensor,
+    field_v_size: float,
+    box: tuple[float, float, float],
+    radius: float,
+    gap: float,
+    clip_axes: tuple[bool, bool, bool],
+) -> tuple[int, float]:
+    """
+    Diagnose a 0-accepted `pack_hard_spheres_3d` call: how many field voxels
+    are ACTUALLY viable for a sphere of this radius, and what the largest
+    real clearance among them is.
+
+    Exists because `exclusion_field[region_mask_field].max()` alone --
+    clearance from the shell/exclusion source, ignoring the box wall -- can
+    dramatically overstate how much room exists: it was reporting a
+    misleadingly large number (found directly: 166 A "available", 72 A
+    "needed", read as ample room) for a case with genuinely ZERO viable
+    positions, because the voxels far enough from the shell were ALL too
+    close to the box wall for this radius. `pack_hard_spheres_3d` itself
+    already enforces the box-wall constraint (see its own `required_margin`
+    check) -- this replicates just enough of that same logic, honoring
+    `clip_axes`, to report a number a caller can actually act on instead of
+    one that sends them looking in the wrong place.
+
+    Parameters
+    ----------
+    region_mask_field : torch.Tensor
+        Boolean, shape ``(Z, Y, X)`` -- same grid `exclusion_field` is on.
+    exclusion_field : torch.Tensor
+        Physical clearance to the nearest forbidden voxel, Angstrom, same
+        shape as `region_mask_field`.
+    field_v_size : float
+        Voxel size of both fields, Angstrom.
+    box : tuple of float
+        ``(D, H, W)`` box extents in Angstrom (z, y, x) -- same convention
+        `pack_hard_spheres_3d` takes.
+    radius : float
+        Sphere radius being diagnosed, Angstrom.
+    gap : float
+        Extra required clearance beyond touching, Angstrom.
+    clip_axes : tuple of bool
+        ``(z, y, x)`` -- True means only the CENTER needs to stay in-bounds
+        on that axis (matching `pack_hard_spheres_3d`'s own parameter).
+
+    Returns
+    -------
+    viable_voxels : int
+        Voxels satisfying region membership, clearance, AND box containment
+        all at once -- the true count `pack_hard_spheres_3d` was sampling
+        from. Can be 0 even when `region_mask_field` and the raw clearance
+        check both look generous.
+    best_clearance_a : float
+        The largest clearance among voxels that are at least IN the region
+        and box-valid for this radius (ignoring the clearance requirement
+        itself) -- 0.0 if no such voxel exists at all. Lets the warning
+        report "this is the most room this species could ever get here",
+        distinct from `exclusion_field`'s unconstrained max.
+    """
+    nz, ny, nx = region_mask_field.shape
+    zz, yy, xx = torch.meshgrid(
+        torch.arange(nz), torch.arange(ny), torch.arange(nx), indexing="ij"
+    )
+    extent = torch.tensor([nx, ny, nz], dtype=torch.float32) * field_v_size
+    origin = -0.5 * extent
+    center_x = origin[0] + (xx.float() + 0.5) * field_v_size
+    center_y = origin[1] + (yy.float() + 0.5) * field_v_size
+    center_z = origin[2] + (zz.float() + 0.5) * field_v_size
+
+    half_x, half_y, half_z = box[2] / 2, box[1] / 2, box[0] / 2
+    margin_x = 0.0 if clip_axes[2] else radius
+    margin_y = 0.0 if clip_axes[1] else radius
+    margin_z = 0.0 if clip_axes[0] else radius
+    within_box = (
+        (center_x.abs() + margin_x <= half_x)
+        & (center_y.abs() + margin_y <= half_y)
+        & (center_z.abs() + margin_z <= half_z)
+    )
+
+    box_valid_region = region_mask_field & within_box
+    best_clearance_a = (
+        float(exclusion_field[box_valid_region].max())
+        if bool(box_valid_region.any())
+        else 0.0
+    )
+    viable = box_valid_region & (exclusion_field >= radius + gap)
+    return int(viable.sum()), best_clearance_a
+
+
 # Bytes/voxel for each accumulator tensor (volume: float32, instance_labels
 # + membrane_labels: int32 -- all 4 bytes/voxel, so this is just a
 # multiplier for how many of these coexist at once).
@@ -1458,26 +1548,65 @@ class MembraneTomogramGenerator:
                 if accepted_idx.numel() == 0:
                     # A non-empty region that still fits nothing is silent
                     # otherwise: no picks file appears for the species and
-                    # nothing says why. The usual cause is a compartment
-                    # that is large enough to exist but not to hold the
-                    # species once gap_angstrom is added -- so report the
-                    # clearance actually available against the clearance
-                    # needed, which is what the caller has to act on.
+                    # nothing says why. The naive diagnostic here used to be
+                    # exclusion_field[region_mask_field].max() -- clearance
+                    # from the shell alone, ignoring the box wall -- which
+                    # can dramatically overstate the room available (found
+                    # directly: reported ~166 A "available" for a case with
+                    # ZERO truly viable positions, because everywhere far
+                    # enough from the shell was also too close to the box
+                    # wall for this radius). _diagnose_zero_placements
+                    # applies the SAME box-containment check
+                    # pack_hard_spheres_3d itself uses, so the number
+                    # reported is one a caller can actually act on.
                     largest = float(species_radii.max())
-                    available = float(exclusion_field[region_mask_field].max())
-                    warnings.warn(
-                        f"MembraneTomogramGenerator: placed 0 filler "
-                        f"instances in '{location}'. The region exists "
-                        f"({region_voxels:,} voxels) but its largest "
-                        f"clearance from the boundary is "
-                        f"{available:.1f} A, against the "
-                        f"{largest + self.gap_angstrom:.1f} A a placement "
-                        f"needs (species radius {largest:.1f} A + "
-                        f"gap_angstrom {self.gap_angstrom:.1f} A). Enlarge "
-                        "the compartment, reduce gap_angstrom, or declare a "
-                        "smaller species for this region.",
-                        stacklevel=2,
+                    needed = largest + self.gap_angstrom
+                    viable_voxels, best_clearance = _diagnose_zero_placements(
+                        region_mask_field,
+                        exclusion_field,
+                        field_v_size,
+                        box,
+                        largest,
+                        self.gap_angstrom,
+                        self.clip_axes,
                     )
+                    if viable_voxels > 0:
+                        # Geometrically possible, just unlucky within
+                        # max_passes/stall_patience -- a real placement
+                        # exists (rare with the "open region" stall_patience
+                        # default; see _TIGHT_REGION_FRACTION_THRESHOLD).
+                        warnings.warn(
+                            f"MembraneTomogramGenerator: placed 0 filler "
+                            f"instances in '{location}' despite "
+                            f"{viable_voxels:,} geometrically viable "
+                            f"position(s) existing -- an unlucky draw, not "
+                            "an impossible one. Increase region_max_passes, "
+                            "or accept the occasional miss for a region "
+                            "this tight.",
+                            stacklevel=2,
+                        )
+                    else:
+                        # No position exists AT ALL that both clears
+                        # gap_angstrom from the boundary and keeps the full
+                        # sphere inside the box -- best_clearance is the
+                        # most room a box-valid position ever gets, so it's
+                        # always < needed here (0.0 if the region has no
+                        # box-valid position regardless of clearance).
+                        warnings.warn(
+                            f"MembraneTomogramGenerator: placed 0 filler "
+                            f"instances in '{location}' -- no position "
+                            "exists that is both far enough from the "
+                            "boundary/shell AND keeps the whole sphere "
+                            f"inside the box. Best available clearance at a "
+                            f"box-valid position is {best_clearance:.1f} A, "
+                            f"against the {needed:.1f} A this species needs "
+                            f"(radius {largest:.1f} A + gap_angstrom "
+                            f"{self.gap_angstrom:.1f} A), out of "
+                            f"{region_voxels:,} region voxels total. "
+                            "Enlarge the compartment, reduce gap_angstrom, "
+                            "or declare a smaller species for this region.",
+                            stacklevel=2,
+                        )
                 accepted_species_idx = pool_species_idx[accepted_idx]
 
                 _filler_render_start = time.perf_counter()

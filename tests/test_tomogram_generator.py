@@ -703,3 +703,163 @@ def test_membrane_tomogram_generator_export_picks_includes_beads(tmp_path):
     rows = [json.loads(line) for line in lines]
     assert all(row["type"] == "point" for row in rows)
     assert all("xyz_rotation_matrix" not in row for row in rows)
+
+
+def test_diagnose_zero_placements_reports_box_constraint_not_just_clearance():
+    """Regression test: exclusion_field[mask].max() alone -- clearance from
+    the shell/obstacle, ignoring the box wall -- can dramatically overstate
+    how much room a species actually has. Found directly on a real run: it
+    reported ~166 A "available" against a 72 A requirement (reading as ample
+    room) for a case with ZERO truly viable positions, because every voxel
+    far enough from the shell was also too close to the box wall for that
+    radius. _diagnose_zero_placements has to catch this by construction.
+
+    Synthetic geometry, chosen so the two failure modes are unambiguous:
+    a 100x100x100 A box (field_v_size=10, shape (10,10,10)), sampling_mask
+    True everywhere, exclusion_field large (200 A) EVERYWHERE except a thin
+    disc near the box center where it's also large but the region is
+    entirely masked out -- simpler: split the box into two halves along x.
+    """
+    from specter.specimen.tomogram.generator import _diagnose_zero_placements
+
+    field_v_size = 10.0
+    shape = (10, 10, 10)  # 100x100x100 A box
+    box = (100.0, 100.0, 100.0)
+
+    # Case 1: clearance is huge everywhere, but the radius is big enough
+    # that NO position keeps the whole sphere inside a 100 A box (needs
+    # radius <= 50 A). No box-valid position exists at all, regardless of
+    # clearance -- best_clearance must be exactly 0.0, viable must be 0.
+    mask = torch.ones(shape, dtype=torch.bool)
+    huge_clearance = torch.full(shape, 200.0)
+    viable, best = _diagnose_zero_placements(
+        mask,
+        huge_clearance,
+        field_v_size,
+        box,
+        radius=60.0,
+        gap=0.0,
+        clip_axes=(False, False, False),
+    )
+    assert viable == 0
+    assert best == 0.0
+
+    # Case 2: radius small enough to fit inside the box on every voxel (5 A
+    # radius needs |center| <= 45 A; the outermost voxel center is at
+    # exactly 45 A), and clearance is uniformly huge -- every voxel should
+    # be viable, best_clearance == 200.0 exactly (not some smaller number
+    # from an over-restrictive box check).
+    viable, best = _diagnose_zero_placements(
+        mask,
+        huge_clearance,
+        field_v_size,
+        box,
+        radius=5.0,
+        gap=0.0,
+        clip_axes=(False, False, False),
+    )
+    assert viable == shape[0] * shape[1] * shape[2]
+    assert best == 200.0
+
+    # Case 3: the real bug pattern -- clearance is huge (200 A) ONLY in the
+    # single outermost voxel layer (index 0 or 9 on any axis: at radius=10,
+    # box-valid requires |center| <= 40 A, which excludes exactly that
+    # layer -- centers at +-45 A) and small (5 A, below what a 10 A-radius
+    # sphere with no gap needs) everywhere else. The two conditions never
+    # overlap, so viable must be 0 -- but best_clearance among the box-valid
+    # (inner) voxels must be the SMALL number (5.0), not the misleadingly
+    # large one from the box-invalid shell, proving this isn't just
+    # "clearance.max() within mask" in disguise.
+    idx = torch.arange(10)
+    is_outer_layer = (
+        (idx.view(10, 1, 1).expand(shape) == 0)
+        | (idx.view(10, 1, 1).expand(shape) == 9)
+        | (idx.view(1, 10, 1).expand(shape) == 0)
+        | (idx.view(1, 10, 1).expand(shape) == 9)
+        | (idx.view(1, 1, 10).expand(shape) == 0)
+        | (idx.view(1, 1, 10).expand(shape) == 9)
+    )
+    clearance = torch.where(is_outer_layer, torch.tensor(200.0), torch.tensor(5.0))
+    viable, best = _diagnose_zero_placements(
+        mask,
+        clearance,
+        field_v_size,
+        box,
+        radius=10.0,
+        gap=0.0,
+        clip_axes=(False, False, False),
+    )
+    assert viable == 0
+    assert best == 5.0
+
+
+def test_diagnose_zero_placements_honors_clip_axes():
+    """A clippable axis only needs the CENTER in-bounds, not the full
+    sphere -- matching pack_hard_spheres_3d's own clip_axes semantics.
+    Same box as above; a 60 A-radius sphere is box-invalid on every axis
+    when clip_axes is all False (case 1 above), but valid once every axis
+    is marked clippable."""
+    from specter.specimen.tomogram.generator import _diagnose_zero_placements
+
+    shape = (10, 10, 10)
+    box = (100.0, 100.0, 100.0)
+    mask = torch.ones(shape, dtype=torch.bool)
+    huge_clearance = torch.full(shape, 200.0)
+
+    viable, best = _diagnose_zero_placements(
+        mask,
+        huge_clearance,
+        10.0,
+        box,
+        radius=60.0,
+        gap=0.0,
+        clip_axes=(True, True, True),
+    )
+    assert viable == shape[0] * shape[1] * shape[2]
+    assert best == 200.0
+
+
+def test_membrane_tomogram_zero_placement_warning_distinguishes_unlucky_from_impossible():
+    """End-to-end regression test for the fix: a genuinely too-tight-for-
+    the-box species must be reported as impossible (not "ample room
+    available"), and a genuinely-possible-but-unlucky one must be reported
+    as unlucky (not "impossible"). Both scenarios were verified by hand
+    against the real geometry before writing this test.
+    """
+    from specter.specimen.membrane import MembraneGenerator
+    from specter.specimen.tomogram import MembraneInstance
+
+    # Impossible case: 4 membranes competing for a small 240 A box: only
+    # some fit, and the surviving membrane's shell leaves no position that
+    # is both far enough from the shell AND fully inside the box for the
+    # ~67 A-radius filler species.
+    small_shape_zyx = (30, 30, 30)
+    kwargs = dict(
+        _MEMBRANE_KWARGS, target_shape_zyx=small_shape_zyx, sh_axes_a=(70.0, 70.0, 70.0)
+    )
+    instances = [
+        MembraneInstance(generator=MembraneGenerator(seed=i, **kwargs))
+        for i in range(4)
+    ]
+    gen = MembraneTomogramGenerator(
+        membrane_instances=instances,
+        target_shape_zyx=small_shape_zyx,
+        v_size=_V_SIZE,
+        protein_specs=[
+            TomogramProteinSpec(pdb_source=str(_LARGE_FIXTURE), location="cytosol")
+        ],
+        occupancy_fraction=0.05,
+        pdb_cache_dir="specter-data/pdb/",
+        seed=0,
+    )
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        gen.generate()
+    zero_warnings = [x for x in w if "placed 0 filler instances" in str(x.message)]
+    assert len(zero_warnings) == 1
+    message = str(zero_warnings[0].message)
+    assert "no position exists" in message
+    assert "unlucky" not in message
+    # The old bug: reporting exclusion_field.max() (166 A here) as if it
+    # were achievable, which it never book-keeps against the box wall.
+    assert "166" not in message

@@ -67,15 +67,23 @@ removed in the same cleanup -- see git history if either is ever needed as
 a reference again.
 
 Carbon film (``grid_spec``) is painted directly into the shared canvas
-before anything else is placed -- matching the deleted CTS-derived
-generator's own ordering and its same documented limitation: obstacle-
-aware placement (membrane/protein packing, below) has no notion of the
-film, so placed content could in principle land on top of it. Not a
-practical concern at the real Quantifoil hole scale ``GridSpec``'s own
-defaults use (a FOV this generator targets almost always sits entirely
-inside one hole, with at most a thin edge strip of carbon at one border --
-see ``GridSpec.hole_radius``'s own docstring), so this is left unfixed
-here exactly as it was in the CTS port.
+before anything else is placed, then everything placed afterward avoids
+it -- membrane auto-placement and filaments here, and (via
+``classify_membrane_regions`` reading carbon's own high density as
+"shell", the same bucket a real membrane bilayer occupies) beads and
+cytosol/lumen protein fill below. Membrane instances given an explicit
+``position_xyz`` (never collision-checked against anything else either,
+e.g. other membrane instances) are the one case with no upfront placement
+check against carbon -- but rather than compositing straight through it
+regardless, whatever part of that instance's own rendered density would
+land on carbon gets clipped (zeroed) right before it's merged into the
+shared canvas, so both the composited volume and that instance's own
+ground-truth shell label consistently exclude it (see the `to_composite`
+loop below). Filament placement itself has no obstacle-avoiding random
+walk (a bigger algorithmic change than clipping density post-hoc), so a
+monomer instance landing inside the film is simply dropped after the
+fact (see ``_stamp_filaments``) rather than steered around it -- the one
+remaining case unhandled here.
 
 Gold fiducial beads (``bead_specs``) are scattered via the same RSA
 backend (``pack_hard_spheres_3d``) used for membrane instances and protein
@@ -1039,6 +1047,34 @@ class MembraneTomogramGenerator:
         _membrane_phase_start = phase_start(
             "Membranes", disable=not self.progressbars or not self.membrane_instances
         )
+
+        # Carbon film (if any) is generated first, even before membrane
+        # instance positions are solved -- so membrane auto-placement here,
+        # and filament placement further below (`_stamp_filaments`), can
+        # both be made carbon-aware: nothing should end up placed inside
+        # the carbon film itself. `carbon_mask` captures ONLY the carbon
+        # footprint (nothing else has been painted into `volume` yet at
+        # this point); membrane instances are then composited into the
+        # same `volume` via max-merge below, and `classify_membrane_regions`
+        # runs once against the full composite afterward -- carbon stays
+        # part of it there too (it reads as "shell", same as membrane,
+        # which is what already keeps beads/cytosol/lumen protein fill off
+        # of it, see `_stamp_beads`/the cytosol/lumen loop below).
+        volume = torch.zeros(
+            target_shape, dtype=torch.float32, device=self.accumulator_device
+        )
+        carbon_mask: torch.Tensor | None = None
+        if self.grid_spec is not None:
+            _grid_phase_start = phase_start(
+                "Carbon film", disable=not self.progressbars
+            )
+            with status(
+                "Generating carbon support film", disable=not self.progressbars
+            ):
+                volume = self._stamp_carbon_film(volume, target_shape, v_size)
+            carbon_mask = volume > 0
+            phase_done("Carbon film", _grid_phase_start, disable=not self.progressbars)
+
         auto_instances = [
             mi for mi in self.membrane_instances if mi.position_xyz is None
         ]
@@ -1049,6 +1085,27 @@ class MembraneTomogramGenerator:
             radii = torch.tensor(
                 [_instance_bounding_radius(mi.generator) for mi in auto_instances]
             )
+            # Explicitly-positioned instances (to_composite, above) are NOT
+            # checked against carbon either -- same existing gap as their
+            # not being checked against each other (see this block's own
+            # comment below); only auto-placement (this RSA solve) can
+            # actually avoid it.
+            if carbon_mask is not None:
+                field_v_size, field_shape, field_factor = _resolve_exclusion_field_grid(
+                    target_shape, v_size
+                )
+                allowed = (~carbon_mask).cpu()
+                allowed_field = (
+                    _downsample_mask_maxpool(allowed, field_factor, field_shape)
+                    if field_factor > 1
+                    else allowed
+                )
+                exclusion_field = (
+                    torch.from_numpy(
+                        ndimage.distance_transform_edt(allowed_field.numpy())
+                    ).float()
+                    * field_v_size
+                )
             with status(
                 f"Placing {len(auto_instances)} membrane instance(s)",
                 disable=not self.progressbars,
@@ -1060,14 +1117,20 @@ class MembraneTomogramGenerator:
                     seed=self.seed,
                     device="cpu",  # see self.device's own docstring
                     clip_axes=self.clip_axes,
+                    exclusion_distance_field=(
+                        exclusion_field if carbon_mask is not None else None
+                    ),
+                    field_v_size=field_v_size if carbon_mask is not None else None,
+                    sampling_mask=(allowed_field if carbon_mask is not None else None),
                 )
             n_dropped = len(auto_instances) - accepted_idx.numel()
             if n_dropped:
                 warnings.warn(
                     f"MembraneTomogramGenerator: {n_dropped}/{len(auto_instances)} "
                     "membrane instances with automatic (position_xyz=None) "
-                    "placement did not fit without colliding and were dropped "
-                    "(never generated).",
+                    "placement did not fit without colliding (with each other, "
+                    "the box walls, or the carbon film, if any) and were "
+                    "dropped (never generated).",
                     stacklevel=2,
                 )
             for k, orig_idx in enumerate(accepted_idx.tolist()):
@@ -1080,18 +1143,6 @@ class MembraneTomogramGenerator:
         # shared canvas (max-merge) before any region classification --
         # classify_membrane_regions needs the full composite, not
         # per-instance pieces.
-        volume = torch.zeros(
-            target_shape, dtype=torch.float32, device=self.accumulator_device
-        )
-        if self.grid_spec is not None:
-            _grid_phase_start = phase_start(
-                "Carbon film", disable=not self.progressbars
-            )
-            with status(
-                "Generating carbon support film", disable=not self.progressbars
-            ):
-                volume = self._stamp_carbon_film(volume, target_shape, v_size)
-            phase_done("Carbon film", _grid_phase_start, disable=not self.progressbars)
         self.transmembrane_placements = []
         instance_shell_masks: list[tuple[MembraneInstance, torch.Tensor]] = []
         membrane_progress = TqdmProgress(
@@ -1127,10 +1178,99 @@ class MembraneTomogramGenerator:
                 offset = torch.tensor(mi.position_xyz, dtype=torch.float32)
                 for tp in tm_placements:
                     tp.center_xyz = tp.center_xyz + offset
-                self.transmembrane_placements.extend(tm_placements)
 
                 local_volume = mi.generator.volume
                 assert local_volume is not None
+                if carbon_mask is not None:
+                    # Auto-placed instances shouldn't reach here at all
+                    # (their bounding sphere was already kept clear of
+                    # carbon by the RSA exclusion field above), so this is
+                    # a no-op for them in practice -- it's what actually
+                    # protects explicitly-positioned instances (never
+                    # collision-checked against anything, carbon included,
+                    # see this loop's own leading comment), and is a real
+                    # safety net either way if an irregular organelle's
+                    # true shape extends past its own bounding-sphere
+                    # approximation. Zeroes local_volume wherever it would
+                    # land on carbon, BEFORE both compositing into `volume`
+                    # and the shell_mask/ground-truth labeling below, so
+                    # both consistently reflect the clip -- reuses the same
+                    # index math `_insert_volume_max` itself uses, rather
+                    # than duplicating it.
+                    center_zyx = _position_to_center_index(
+                        mi.position_xyz, tuple(volume.shape), v_size
+                    )
+                    bounds = clip_insert_bounds(
+                        center_zyx, local_volume.shape, volume.shape
+                    )
+                    if bounds is not None:
+                        dst, src = bounds
+                        forbidden = carbon_mask[dst].to(local_volume.device)
+                        if forbidden.any():
+                            warnings.warn(
+                                "MembraneTomogramGenerator: clipped part of a "
+                                "membrane instance (explicit position_xyz or an "
+                                "irregular shape exceeding its own bounding-"
+                                "sphere estimate) that overlapped the carbon "
+                                "film.",
+                                stacklevel=2,
+                            )
+                            local_volume[src] = local_volume[src] * (~forbidden).to(
+                                local_volume.dtype
+                            )
+
+                    # `place_transmembrane` (above) already baked these
+                    # placements' own density into local_volume before this
+                    # point, so a placement whose center lands on carbon
+                    # just had its density zeroed by the clip above too --
+                    # this only fixes the separate ground-truth bookkeeping
+                    # list (self.transmembrane_placements, what export_picks
+                    # writes out), which would otherwise still claim a
+                    # particle sits somewhere with no actual density left.
+                    # Checked by center point, not full rendered footprint
+                    # (same granularity already used for filament monomers
+                    # in _stamp_filaments) -- a placement whose center is
+                    # just outside carbon but whose template partially
+                    # overlapped it keeps its (partially clipped) entry,
+                    # matching how e.g. bead/protein exclusion is also
+                    # voxel-level, not footprint-exact.
+                    if tm_placements:
+                        shape_zyx = tuple(volume.shape)
+                        z_c, y_c, x_c = (s // 2 for s in shape_zyx)
+                        centers = torch.stack([tp.center_xyz for tp in tm_placements])
+                        iz = (
+                            (z_c + torch.round(centers[:, 2] / v_size))
+                            .long()
+                            .clamp(0, shape_zyx[0] - 1)
+                        )
+                        iy = (
+                            (y_c + torch.round(centers[:, 1] / v_size))
+                            .long()
+                            .clamp(0, shape_zyx[1] - 1)
+                        )
+                        ix = (
+                            (x_c + torch.round(centers[:, 0] / v_size))
+                            .long()
+                            .clamp(0, shape_zyx[2] - 1)
+                        )
+                        in_carbon = carbon_mask.cpu()[iz, iy, ix]
+                        n_dropped_tm = int(in_carbon.sum())
+                        if n_dropped_tm:
+                            warnings.warn(
+                                f"MembraneTomogramGenerator: dropped "
+                                f"{n_dropped_tm} transmembrane protein "
+                                "placement(s) clipped by the carbon film "
+                                "(density already removed above; this drops "
+                                "their now-stale ground-truth pick entries "
+                                "too).",
+                                stacklevel=2,
+                            )
+                            tm_placements = [
+                                tp
+                                for tp, drop in zip(tm_placements, in_carbon.tolist())
+                                if not drop
+                            ]
+                self.transmembrane_placements.extend(tm_placements)
                 volume = _insert_volume_max(
                     volume, local_volume, mi.position_xyz, v_size
                 )
@@ -1249,7 +1389,7 @@ class MembraneTomogramGenerator:
                 disable=not self.progressbars,
             ):
                 volume, instance_labels, next_instance_id = self._stamp_filaments(
-                    volume, instance_labels, next_instance_id, v_size
+                    volume, instance_labels, next_instance_id, v_size, carbon_mask
                 )
             phase_done(
                 f"Filaments ({len(self.filament_instances)} monomer instance(s))",
@@ -1811,6 +1951,7 @@ class MembraneTomogramGenerator:
         instance_labels: torch.Tensor,
         next_instance_id: int,
         v_size: float,
+        carbon_mask: torch.Tensor | None,
     ) -> tuple[torch.Tensor, torch.Tensor, int]:
         """Place and render every `filament_specs` species, continuing
         `instance_labels`'s own instance-id counter from wherever the
@@ -1825,6 +1966,16 @@ class MembraneTomogramGenerator:
         filament_instances` keeps each `FilamentInstance`'s original
         corner-relative `position_xyz` untouched, since that's the
         convention `export_picks` itself writes out directly.
+
+        `place_filaments` itself has no obstacle awareness (a genuine
+        collision-avoiding random walk is a bigger algorithmic change than
+        this needs -- see module docstring): individual monomer instances
+        that land inside `carbon_mask`, if given, are dropped here after
+        the fact instead, the same "truncated at render/insert time"
+        treatment already applied to monomers that wander outside the
+        volume entirely (see `place_filaments`'s own docstring). A dropped
+        monomer mid-path just leaves a gap in that filament, not a
+        redirected walk around the film.
         """
         target_shape = self.target_shape_zyx
         extent_xyz = torch.tensor(target_shape[::-1], dtype=torch.float32) * v_size
@@ -1833,6 +1984,27 @@ class MembraneTomogramGenerator:
         if self.seed is not None:
             rng.manual_seed(self.seed)
         instances = place_filaments(self.filament_specs, target_shape, v_size, rng)
+
+        if carbon_mask is not None and instances:
+            nz, ny, nx = target_shape
+            pos = torch.stack([inst.position_xyz for inst in instances])  # (N,3) x,y,z
+            ix = (pos[:, 0] / v_size).long().clamp(0, nx - 1)
+            iy = (pos[:, 1] / v_size).long().clamp(0, ny - 1)
+            iz = (pos[:, 2] / v_size).long().clamp(0, nz - 1)
+            in_carbon = carbon_mask.cpu()[iz, iy, ix]
+            n_dropped = int(in_carbon.sum())
+            if n_dropped:
+                warnings.warn(
+                    f"MembraneTomogramGenerator: dropped {n_dropped} filament "
+                    "monomer instance(s) that landed inside the carbon film.",
+                    stacklevel=2,
+                )
+                instances = [
+                    inst
+                    for inst, drop in zip(instances, in_carbon.tolist())
+                    if not drop
+                ]
+
         self.filament_instances = instances
         if not instances:
             return volume, instance_labels, next_instance_id

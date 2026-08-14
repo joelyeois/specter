@@ -36,9 +36,8 @@ uv pip install -e .
 
 ## Choosing a CUDA version
 
-Nothing in specter depends on a particular CUDA release. The two CUDA-flavoured
-pins in `pyproject.toml` are just the combination this project is developed
-against, and both are meant to be edited if your machine needs a different one:
+The two CUDA-flavoured pins in `pyproject.toml` aren't fixed requirements —
+edit both to match your driver:
 
 ```toml
 # 1. which PyTorch build uv resolves
@@ -83,11 +82,9 @@ newer minimum `torch`; `cu126` wheels start at torch 2.6, for instance.
     only, not `uv sync`, so it's an alternative to editing the pin rather than
     a replacement for it.
 
-If the CuPy wheel ends up mismatched to your driver, it fails safely rather
-than breaking the run: the `spherical_harmonics` membrane backend warns once
-and falls back to `scipy`'s CPU distance transform. A mismatched **PyTorch**
-build does not degrade — it fails at CUDA init — so that one is worth getting
-right.
+A mismatched CuPy wheel fails safely: the `spherical_harmonics` membrane
+backend warns once and falls back to `scipy`'s CPU distance transform. A
+mismatched **PyTorch** build fails at CUDA init instead of degrading.
 
 Installing with pip instead of uv bypasses `[tool.uv.index]` entirely (it is a
 uv-specific setting) and gives you PyPI's default PyTorch build; use
@@ -99,15 +96,13 @@ uv-specific setting) and gives you PyPI's default PyTorch build; use
 
 !!! note "GPU distance transforms"
 
-    CuPy-backed GPU distance transforms for the `spherical_harmonics`
-    membrane backend used to live behind a `gpu-edt` extra. They are now a
-    core dependency, installed by a plain `uv sync` -- there is nothing to
-    opt into.
+    CuPy is a core dependency, so `spherical_harmonics` membrane backend GPU
+    distance transforms are installed by a plain `uv sync`.
 
-    On macOS there are no `cupy-cuda12x` wheels, so CuPy isn't installed
-    there and the backend falls back to `scipy`'s CPU distance transform
-    (~3x slower field generation, plus a one-time warning). The same
-    fallback covers a machine with no CUDA device available at runtime.
+    On macOS there are no `cupy-cuda12x` wheels, so CuPy isn't installed and
+    the backend falls back to `scipy`'s CPU distance transform (~3x slower
+    field generation, plus a one-time warning). The same fallback covers a
+    machine with no CUDA device available at runtime.
 
 ## Installing with conda/pip instead
 

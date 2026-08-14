@@ -244,7 +244,7 @@ def test_max_field_voxels_coarsens_and_warns_instead_of_exploding_memory():
         max_field_voxels=1000,
         seed=0,
     )
-    with pytest.warns(UserWarning, match="coarsened field_spacing_a"):
+    with pytest.warns(UserWarning, match="coarsening the working field grid"):
         volume = gen.generate()
 
     assert volume.shape == (32, 32, 32)
@@ -821,7 +821,7 @@ def test_signed_distance_transform_cpu_matches_scipy_directly():
 def test_signed_distance_transform_gpu_matches_cpu_when_cupy_available():
     if not torch.cuda.is_available():
         pytest.skip("CUDA not available")
-    pytest.importorskip("cupy", reason="optional gpu-edt extra not installed")
+    pytest.importorskip("cupy", reason="cupy not installed (macOS, or partial env)")
 
     inside = _synthetic_inside_mask()
     spacing_a = 3.0
@@ -833,11 +833,13 @@ def test_signed_distance_transform_gpu_matches_cpu_when_cupy_available():
 
 
 def test_signed_distance_transform_falls_back_to_cpu_without_cupy(monkeypatch):
-    # Regression test: the optional GPU path (cupyx.scipy.ndimage.
+    # Regression test: the GPU path (cupyx.scipy.ndimage.
     # distance_transform_edt) must degrade gracefully -- not crash -- when
-    # 'cupy' isn't installed, since it's an optional extra
-    # (`specter[gpu-edt]`), not a core dependency. Requires an actual CUDA
-    # device since the GPU path is only ever attempted for device="cuda".
+    # 'cupy' isn't importable. cupy IS a core dependency now, but only off
+    # macOS (no cupy-cuda12x wheels there, see pyproject.toml), so this
+    # fallback is still a supported configuration rather than a legacy one.
+    # Requires an actual CUDA device since the GPU path is only ever
+    # attempted for device="cuda".
     if not torch.cuda.is_available():
         pytest.skip("CUDA not available")
 
@@ -854,7 +856,80 @@ def test_signed_distance_transform_falls_back_to_cpu_without_cupy(monkeypatch):
 
     inside = _synthetic_inside_mask()
     spacing_a = 3.0
-    with pytest.warns(UserWarning, match="cupy' dependency isn't installed"):
+    with pytest.warns(UserWarning, match="'cupy' isn't importable"):
+        phi = _signed_distance_transform(inside, spacing_a, device="cuda")
+
+    dist_out = ndimage.distance_transform_edt(~inside, sampling=spacing_a)
+    dist_in = ndimage.distance_transform_edt(inside, sampling=spacing_a)
+    expected = torch.as_tensor(dist_out - dist_in, dtype=torch.float32)
+
+    assert phi.device.type == "cuda"
+    assert torch.equal(phi.cpu(), expected)
+
+
+def test_field_voxel_budget_matches_its_documented_derivation():
+    """`_MAX_FIELD_VOXELS` is a measured budget divided by a measured cost,
+    not a hand-picked number -- so it must stay consistent with the constants
+    it is derived from (see this module's own comment block for the sweep).
+
+    The cap has to satisfy the tightest of the three measured costs: VRAM on
+    the cupy path, and host RSS on either path. Only the scipy-path RSS
+    figure is a module constant (the other two live in the comment table), so
+    that one is checked directly and the rest are checked as headroom.
+    """
+    from specter.specimen.membrane._generator import (
+        _FIELD_BYTES_PER_VOXEL,
+        _FIELD_RAM_BUDGET_BYTES,
+        _FIELD_VRAM_BUDGET_BYTES,
+        _FIELD_VRAM_BYTES_PER_VOXEL,
+        _MAX_FIELD_VOXELS,
+    )
+
+    # scipy path: host RSS is what binds, and the cap is set right at it
+    # (rounded to a round number), so allow 10% of rounding slack.
+    scipy_cap = _FIELD_RAM_BUDGET_BYTES / _FIELD_BYTES_PER_VOXEL
+    assert _MAX_FIELD_VOXELS <= scipy_cap * 1.1
+
+    # cupy path: VRAM must have real headroom at the cap, or an 8 GB card
+    # (the machine this budget is written for) wouldn't hold it.
+    assert _MAX_FIELD_VOXELS * _FIELD_VRAM_BYTES_PER_VOXEL <= _FIELD_VRAM_BUDGET_BYTES
+
+
+def test_field_voxel_budget_fits_a_modest_machine():
+    """The point of the budget: one field generation must not need a
+    workstation. Guards against the cap drifting back up to a value that
+    silently assumes 27 GB of RAM, as the previous 200M default did.
+    """
+    from specter.specimen.membrane._generator import (
+        _FIELD_BYTES_PER_VOXEL,
+        _MAX_FIELD_VOXELS,
+    )
+
+    peak_gib = _MAX_FIELD_VOXELS * _FIELD_BYTES_PER_VOXEL / 1024**3
+    assert peak_gib <= 14.0, f"one field generation would need {peak_gib:.1f} GiB"
+
+
+def test_signed_distance_transform_falls_back_when_gpu_transform_raises(monkeypatch):
+    """A CuPy failure at RUN time (out of VRAM, driver/runtime mismatch that
+    only shows up on kernel launch) must fall back to scipy, not abort the
+    build. Now that cupy is a core dependency rather than an opt-in extra,
+    every CUDA user reaches this code path, so its "never raises" contract has
+    to hold past the import/is_available guards too.
+    """
+    if not torch.cuda.is_available():
+        pytest.skip("CUDA not available")
+    pytest.importorskip("cupy", reason="cupy not installed (macOS, or partial env)")
+
+    from cupyx.scipy import ndimage as cundimage
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("simulated: out of memory on device")
+
+    monkeypatch.setattr(cundimage, "distance_transform_edt", boom)
+
+    inside = _synthetic_inside_mask()
+    spacing_a = 3.0
+    with pytest.warns(UserWarning, match="GPU distance transform.*failed"):
         phi = _signed_distance_transform(inside, spacing_a, device="cuda")
 
     dist_out = ndimage.distance_transform_edt(~inside, sampling=spacing_a)

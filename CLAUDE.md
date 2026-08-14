@@ -276,6 +276,7 @@ ice-data/                     # Pre-computed ice data (do not modify)
 | `mrcfile`, `starfile`, `eerfile` | Cryo-EM file formats; `starfile` backs RELION `.star` I/O in `io/_relion.py` |
 | `roma` | Quaternion/rotation math (`rotations/`) |
 | `vesin-torch` | Pairwise neighbor search for the MLBOP ice energy (`ice/_energy.py`), replaces the old ASE-based path |
+| `cupy-cuda12x` | GPU exact Euclidean distance transform for the `spherical_harmonics` membrane backend (`specimen/membrane/_field.py`); core dep on Linux/Windows, absent on macOS where scipy's CPU path takes over |
 | `click`, `rich-click` | The `specter` CLI (`cli/` package) |
 | `ruff`, `mypy` | Code quality |
 

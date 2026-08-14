@@ -9,6 +9,19 @@ dependencies = [
     "biotite>=1.4.0",
     "click>=8.4.2",
     "cryosparc-tools>=5.0",
+    # GPU distance transforms for the spherical_harmonics membrane backend
+    # (specter.specimen.membrane) -- ~3x faster field generation end-to-end,
+    # and the path the membrane memory budgets are calibrated for. Marked
+    # off darwin because cupy-cuda12x publishes Linux and Windows wheels
+    # only; specter still runs there, falling back to scipy's CPU transform
+    # exactly as it does when no CUDA device is present at runtime.
+    #
+    # CUDA 11 users: swap this for "cupy-cuda11x" and change the PyTorch
+    # index below to match. Nothing in specter needs a specific CUDA
+    # release -- see docs/installation.md, "Choosing a CUDA version". A
+    # mismatch here is not fatal: the GPU transform warns once and falls
+    # back to scipy (see specimen/membrane/_field.py).
+    "cupy-cuda12x>=13.0; sys_platform != 'darwin'",
     "eerfile>=0.0.4",
     "gemmi>=0.7.3",
     "h5py>=3.14.0",
@@ -40,9 +53,6 @@ docs = [
     "mkdocstrings[python]>=0.30",
     "mkdocs-material>=9.6",  # fallback renderer for ReadTheDocs' native mkdocs builder
 ]
-gpu-edt = [
-    "cupy-cuda12x>=13.0",
-]
 
 [dependency-groups]
 dev = [
@@ -64,6 +74,13 @@ dev = [
 [tool.uv]
 package = true
 
+# The CUDA build of PyTorch to resolve. cu121 is what this project is
+# developed against, not a requirement of the code -- edit the URL (and the
+# cupy-cuda12x pin above, together) for a different CUDA release; see
+# docs/installation.md, "Choosing a CUDA version", for the version table.
+# Note CUDA minor-version compatibility means any 12.x driver runs these
+# wheels, so this usually only needs changing for CUDA 11, ROCm or CPU-only.
+# uv-specific: a pip install ignores this and takes PyPI's default build.
 [[tool.uv.index]]
 name = "pytorch-cu121"
 url = "https://download.pytorch.org/whl/cu121"

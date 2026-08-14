@@ -129,11 +129,11 @@ per-instance rendering cost:
 
 ![Same field of view rendered at v_size = 10, 5, and 2 Å/voxel — a sum Z projection of each output volume, showing the same membrane and densely crowded protein layout at increasing voxel resolution.](../assets/images/tomogram-benchmark-projections.png){ width="900" style="display:block;margin:1.2em auto;" }
 
-| `v_size` (Å/voxel) | Shape (Z, Y, X voxels) | Wall time | GPU peak (allocated) | RAM peak |
+| `v_size` (Å/voxel) | Shape (Z, Y, X voxels) | Wall time | GPU peak | RAM peak |
 |---|---|---|---|---|
-| 10 | 150 × 600 × 600 | 118 s | 3.40 GB | 12.81 GB |
-| 5  | 300 × 1200 × 1200 | 94 s | 9.94 GB | 6.13 GB |
-| 2  | 750 × 3000 × 3000 (~6.75B voxels) | 344 s (5m 44s) | 6.51 GB | 154.04 GB |
+| 10 | 150 × 600 × 600 | 114 s | 5.08 GB | 12.64 GB |
+| 5  | 300 × 1200 × 1200 | 91 s | 11.62 GB | 5.95 GB |
+| 2  | 750 × 3000 × 3000 (~6.75B voxels) | 351 s (5m 51s) | 10.10 GB | 153.86 GB |
 
 The numbers don't move in a clean monotonic line at 10→5 Å — wall time and
 RAM both bounce around within roughly a factor of 2, since at this scale
@@ -144,21 +144,37 @@ That RAM spike is `accumulator_device="auto"` doing exactly what [Compute &
 scaling flags](#compute-scaling-flags) above says it does — at ~6.75
 billion voxels the density volume alone is ~27 GB, comfortably past half
 of this GPU's free VRAM, so the shared canvas tensors get pushed to system
-RAM instead of failing with a CUDA OOM. That's also why **GPU peak
-actually drops** from 5 Å (9.94 GB) to 2 Å (6.51 GB): the single biggest
+RAM instead of failing with a CUDA OOM. That's also why **GPU peak barely
+grows** from 5 Å to 2 Å despite a 15× bigger canvas: the single biggest
 consumer (the canvas) has moved off the GPU entirely, leaving only
-per-instance rendering buffers behind. Take the exact numbers with a grain
+per-instance rendering buffers and the membrane distance transform behind.
+Take the exact numbers with a grain
 of salt — one run on one machine, not a statistically averaged sweep — but
 the *shape* (noisy at coarse resolution, a sharp RAM/time step once the
 canvas stops fitting in VRAM) is the useful, likely-to-generalize part.
 
-**Hardware**: single NVIDIA L40 (46 GB VRAM, `device="cuda:3"`,
-`accumulator_device="auto"`, `render_workers="auto"`, `chunk_size=64`), on
-a host with an AMD EPYC 7763 64-Core Processor (128 threads) and 503 GB
-system RAM. Wall time is the `run_build_tomogram()` call only (a one-time
-CUDA context init immediately before it is excluded, since it's a constant
-~1-2s regardless of resolution); GPU peak is
-`torch.cuda.max_memory_allocated()`; RAM peak is `/usr/bin/time -v`'s
+At 2 Å you will also see a warning that the membrane is being generated on
+a coarser grid and upsampled. That is deliberate: resolving the bilayer
+directly at this voxel size would need ~125M working-grid voxels, past the
+memory one field generation is allowed to cost, so it builds at ~100M and
+upsamples instead. The membrane's physical size and position are preserved
+exactly — only its bilayer sub-structure is resolved less crisply. The
+budget behind that switch is fixed (identical on every machine, so the same
+config produces the same specimen anywhere) and sized so one field
+generation fits an 8 GB card and a 16 GB host; it is not something you
+configure. If you want a crisper membrane, use a coarser `v_size` or a
+smaller field of view.
+
+**Hardware**: single NVIDIA L40 (46 GB VRAM, one idle card selected via
+`SPECTER_BENCHMARK_DEVICE`, `accumulator_device="auto"`,
+`render_workers="auto"`, `chunk_size=64`), with CuPy 14.1 (a core
+dependency, see [Installation](../installation.md)), on a host with an AMD EPYC 7763 64-Core Processor (128
+threads) and 503 GB system RAM. Wall time is the `run_build_tomogram()`
+call only (a one-time CUDA context init immediately before it is excluded,
+since it's a constant ~1-2s regardless of resolution); GPU peak is
+`torch.cuda.max_memory_allocated()` **plus** CuPy's own pool (the membrane
+distance transform allocates outside torch's allocator, so torch's counter
+alone understates it by 1.7-3.6 GB here); RAM peak is `/usr/bin/time -v`'s
 "Maximum resident set size" for the whole process, each resolution run in
 its own fresh subprocess so peaks don't carry over between runs. Picks and
 segmentation output were disabled for these runs specifically (at

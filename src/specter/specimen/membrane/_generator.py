@@ -89,6 +89,65 @@ def _draw_uniform(rng: torch.Generator, low: float, high: float) -> float:
 _UPSAMPLE_CHUNK_VOXELS = 100_000_000
 
 
+# How much memory one membrane field generation may cost, and the measured
+# per-working-grid-voxel costs it converts through. Deliberately sized against
+# a MODEST machine rather than the one this was developed on: the previous
+# 200M-voxel budget implied ~27 GB of resident memory for a single field,
+# which quietly required a workstation.
+#
+# The dominant cost is `_field._signed_distance_transform` -- two exact
+# Euclidean distance transforms over the working grid. It has two paths, and
+# they spend memory in different places, so the budget has to satisfy both:
+#
+#   * with cupy (a core dependency on Linux/Windows), the transforms run on
+#     the GPU: ~37 B/voxel of VRAM, plus ~96 B/voxel of host RSS that doesn't
+#     go away (the boolean interior mask and grid coordinates are built with
+#     numpy on the CPU either way)
+#   * without it -- macOS, where no cupy-cuda12x wheels exist, or no CUDA
+#     device at runtime -- scipy runs both transforms on the CPU in float64:
+#     ~134 B/voxel of host RSS, no VRAM
+#
+# Measured as peak RSS above baseline (and, on the GPU path, as a
+# mem_get_info free-memory delta, which unlike torch.cuda.max_memory_allocated
+# also sees cupy's separate pool), one grid per process since RSS is a
+# process high-water mark:
+#
+#   ===========  =========  =========  =========  ==========  ==========
+#   grid voxels  VRAM B/vx  RSS B/vx   RSS B/vx   time (gpu)  time (cpu)
+#                (cupy)     (cupy)     (scipy)
+#   ===========  =========  =========  =========  ==========  ==========
+#   13.5M        40.4       97.5       134        2.7 s       5.5 s
+#   32M          38.6       96.5       134        5.0 s       13.7 s
+#   62.5M        37.4       96.3       134        9.6 s       26.0 s
+#   108M         36.8       96.2       134        14.9 s      46.1 s
+#   ===========  =========  =========  =========  ==========  ==========
+#
+# (The docstring this replaces claimed "~14x a single array's own size"; the
+# real figure is 33.5x a float32 array on the scipy path, 24x on the cupy one.)
+#
+# Budgets: 6 GiB of VRAM, so an 8 GB card is enough, and 12 GiB of host RAM,
+# so a 16 GB machine is. Converting each cost through its own budget gives
+# 174M (VRAM), 134M (RSS, cupy) and 96M (RSS, scipy) -- the cap is one
+# constant for everyone (a memory-dependent cap would make the same config
+# produce differently-resolved membranes on different machines), so it takes
+# the tightest: ~100M.
+_FIELD_VRAM_BUDGET_BYTES = 6 * 1024**3
+_FIELD_RAM_BUDGET_BYTES = 12 * 1024**3
+_FIELD_VRAM_BYTES_PER_VOXEL = 37  # cupy path only
+_FIELD_BYTES_PER_VOXEL = 134  # host RSS, scipy fallback (96 with cupy)
+
+#: Working-grid voxel ceiling for field generation: past this, `generate()`
+#: builds on a coarser grid and upsamples (see `MembraneGenerator`'s
+#: `max_field_voxels`). At 100M that is ~3.7 GB VRAM + ~9.6 GB RSS and ~15 s
+#: with cupy, or ~13.4 GB RSS and ~43 s on the scipy fallback. The cap
+#: satisfies BOTH paths, so a macOS run resolves membranes identically.
+#:
+#: Internal on purpose -- a user tunes the physical parameters (`v_size`,
+#: field of view, organelle size), never a voxel budget, which is a property
+#: of the machine rather than of the specimen.
+_MAX_FIELD_VOXELS = 100_000_000
+
+
 def _chunked_upsample_density(
     coarse_volume: torch.Tensor,
     gen_v_size: float,
@@ -529,18 +588,27 @@ class MembraneGenerator:
         plain `F.grid_sample` hit a hard CUDA kernel "invalid
         configuration argument" past ~2^31 total elements, confirmed
         directly, regardless of available memory; chunking sidesteps it).
-        This decouples the EXPENSIVE part (dense field generation, ~14x a
-        single array's own size in peak memory, confirmed directly) from
-        the requested output resolution: a large, fine-`v_size` organelle
-        that would otherwise need hundreds of GB to generate directly can
-        instead generate cheaply at this budget and upsample for close to
-        just the final array's own size (each upsample chunk is a small,
-        bounded point-sampling call -- see `_UPSAMPLE_CHUNK_VOXELS`). The
+        This decouples the EXPENSIVE part (dense field generation, a
+        measured 134 bytes of resident memory per working-grid voxel --
+        33.5x a float32 array of the same shape, since the signed distance
+        transform holds two float64 EDT outputs plus scipy's internals; see
+        `_FIELD_BYTES_PER_VOXEL`) from the requested output resolution: a
+        large, fine-`v_size` organelle that would otherwise need hundreds of
+        GB to generate directly can instead generate cheaply at this budget
+        and upsample for close to just the final array's own size (each
+        upsample chunk is a small, bounded point-sampling call -- see
+        `_UPSAMPLE_CHUNK_VOXELS`). The
         organelle's PHYSICAL size is preserved exactly -- only its
         resolved sub-structure crispness is traded away, same as the
         field-coarsening tradeoff above. See `max_output_voxels` for the
         separate, much larger ceiling on the upsampled FINAL array itself.
-        Default 200_000_000 (~800 MB at float32 per array).
+
+        Default `_MAX_FIELD_VOXELS` (100M voxels): an internal
+        tuning parameter, not a user-facing knob -- it encodes how much
+        memory one field generation may cost on a modest machine, which is a
+        property of the hardware, not of the specimen. Tune the physical
+        parameters (`v_size`, field of view, organelle size) instead; this
+        argument exists so tests can force the coarsening path cheaply.
     max_output_voxels : int, optional
         Hard ceiling on `target_shape_zyx`'s own total voxel count -- i.e.
         on the size of the single dense array `generate()` must ultimately
@@ -621,7 +689,7 @@ class MembraneGenerator:
         transmembrane_specs: list[TransmembraneSpec] | None = None,
         transmembrane_occupancy_fraction: float = 0.05,
         pdb_cache_dir: str = DEFAULT_PDB_SAVEFOLDER,
-        max_field_voxels: int = 200_000_000,
+        max_field_voxels: int = _MAX_FIELD_VOXELS,
         max_output_voxels: int = 4_000_000_000,
         device: str | torch.device = "cpu",
         seed: int | None = None,
@@ -869,15 +937,18 @@ class MembraneGenerator:
             self._gen_v_size = v_size / gen_scale
             self._needs_upsample = True
             warnings.warn(
-                f"MembraneGenerator: target_shape_zyx={self.target_shape_zyx!r} "
-                f"({n_out_voxels:,} voxels) at v_size={v_size:.2f} A exceeds "
-                f"max_field_voxels ({max_field_voxels:,}) -- generating on a "
-                f"coarser {self._gen_shape_zyx!r} grid at "
+                f"MembraneGenerator: generating the membrane on a coarser "
+                f"grid and upsampling. target_shape_zyx="
+                f"{self.target_shape_zyx!r} ({n_out_voxels:,} voxels) at "
+                f"v_size={v_size:.2f} A would cost about "
+                f"{n_out_voxels * _FIELD_BYTES_PER_VOXEL / 1024**3:.1f} GB to "
+                f"generate directly, past the "
+                f"{max_field_voxels * _FIELD_BYTES_PER_VOXEL / 1024**3:.1f} GB "
+                f"budget -- generating {self._gen_shape_zyx!r} at "
                 f"{self._gen_v_size:.2f} A/voxel instead, then upsampling "
-                "(trilinear) to the full requested resolution. The bilayer's "
-                "own sub-structure will be resolved less crisply than at full "
-                "resolution; raise max_field_voxels if you have the memory to "
-                "spare.",
+                "(trilinear) to the full requested resolution. The membrane's "
+                "physical size and position are preserved exactly; only its "
+                "bilayer sub-structure is resolved less crisply.",
                 stacklevel=2,
             )
         else:
@@ -1016,14 +1087,17 @@ class MembraneGenerator:
                 int(torch.ceil(extent_a[0] / field_spacing_a)),
             )
             warnings.warn(
-                f"MembraneGenerator: the working field grid at the resolution "
-                f"needed to fully resolve the bilayer ({n_field_voxels:,} voxels) "
-                f"exceeds max_field_voxels ({self.max_field_voxels:,}) -- "
-                f"coarsened field_spacing_a to {field_spacing_a:.2f} A "
-                f"({field_shape_zyx[2]}x{field_shape_zyx[1]}x{field_shape_zyx[0]} "
-                "voxels). The bilayer's own sub-structure will be resolved less "
-                "crisply than at full resolution; raise max_field_voxels if you "
-                "have the memory to spare.",
+                f"MembraneGenerator: coarsening the working field grid. Fully "
+                f"resolving the bilayer would need {n_field_voxels:,} voxels "
+                f"(about "
+                f"{n_field_voxels * _FIELD_BYTES_PER_VOXEL / 1024**3:.1f} GB), "
+                f"past the "
+                f"{self.max_field_voxels * _FIELD_BYTES_PER_VOXEL / 1024**3:.1f}"
+                f" GB budget -- using field_spacing_a={field_spacing_a:.2f} A "
+                f"({field_shape_zyx[2]}x{field_shape_zyx[1]}x{field_shape_zyx[0]}"
+                " voxels) instead. The membrane's physical size and position "
+                "are preserved exactly; only its bilayer sub-structure is "
+                "resolved less crisply.",
                 stacklevel=2,
             )
         if self.shape_backend == "spherical_harmonics":

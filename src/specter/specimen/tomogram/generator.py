@@ -323,9 +323,20 @@ def _build_sphere_exclusion_field(
 # of how sparse the actual "forbidden" voxels are (confirmed directly:
 # ~12 minutes and tens of GB of resident memory for one rebuild on a
 # 4.5-billion-voxel box, with only ~90 small spheres actually occupied).
-# 200_000_000 matches MembraneGenerator's own max_field_voxels default --
-# same "how big a grid is worth paying for" budget, applied here to a
-# different generator.
+#
+# Sized against the same 12 GiB host-RAM budget as MembraneGenerator's own
+# _MAX_FIELD_VOXELS, but converted through this path's OWN measured cost
+# rather than inheriting that one's voxel count: a single scipy EDT here
+# (float64 out -> float32 tensor, plus the bool mask) instead of the field
+# generator's two-plus-internals, and no cupy path. Measured at a flat 49
+# bytes/voxel of peak RSS above baseline (16M/54M/128M/202M-voxel boxes with
+# ~90 sparse obstacles: 49.0 at every size, 22 s at 202M).
+#
+# 12 GiB / 49 B = 263M, so the pre-existing 200M is already inside budget
+# (~9.8 GB) and is left alone -- the budget is a ceiling, not a target, and
+# raising it would only make packing slower for no accuracy the placements
+# actually need. Internal on purpose, same as the membrane budget: it
+# describes the machine, not the specimen.
 _MAX_EXCLUSION_FIELD_VOXELS = 200_000_000
 
 

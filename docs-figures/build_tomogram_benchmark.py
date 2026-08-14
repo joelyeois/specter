@@ -49,6 +49,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -60,7 +61,10 @@ OUT_DIR = Path("docs/assets/images")
 # blew through this user's home-directory (NFS) disk quota during testing,
 # even after cleaning up between runs. /scratch has no such quota.
 SCRATCH_DIR = Path("/scratch/loh/joel/tomogram_benchmark_scratch")
-DEVICE = "cuda:3"  # idle GPU at benchmark time, see build-tomogram.md's hardware note
+# Which GPU to benchmark on. All four cards on the reference host are
+# identical L40s, so any idle one reproduces the published numbers -- pick
+# whichever is free rather than hardcoding a card someone else may be using.
+DEVICE = os.environ.get("SPECTER_BENCHMARK_DEVICE", "cuda:3")
 
 PHYSICAL_FOV_A = (1500.0, 6000.0, 6000.0)  # (Z, Y, X) A -- production scale
 
@@ -110,6 +114,15 @@ def _run_worker(v_size: float, out_mrc: Path, result_json: Path) -> None:
     run_build_tomogram(cfg)
     elapsed_s = time.perf_counter() - start
     gpu_peak_bytes = torch.cuda.max_memory_allocated(DEVICE)
+    # The membrane distance transform (CuPy-backed) runs
+    # in cupy's OWN allocator pool, which torch's counter cannot see -- add
+    # what that pool reserved so the reported GPU peak isn't an undercount.
+    try:
+        import cupy
+
+        cupy_pool_bytes = int(cupy.get_default_memory_pool().total_bytes())
+    except ImportError:
+        cupy_pool_bytes = 0
 
     result_json.write_text(
         json.dumps(
@@ -119,6 +132,7 @@ def _run_worker(v_size: float, out_mrc: Path, result_json: Path) -> None:
                 "n_voxels": shape_zyx[0] * shape_zyx[1] * shape_zyx[2],
                 "elapsed_s": elapsed_s,
                 "gpu_peak_bytes": gpu_peak_bytes,
+                "cupy_pool_bytes": cupy_pool_bytes,
             }
         )
     )
@@ -178,6 +192,7 @@ def main() -> None:
         print(
             f"  shape={result['shape_zyx']} time={result['elapsed_s']:.1f}s "
             f"gpu_peak={result['gpu_peak_bytes'] / 1e9:.2f} GB "
+            f"(+{result.get('cupy_pool_bytes', 0) / 1e9:.2f} GB cupy) "
             f"ram_peak={result['peak_rss_kb'] / 1e6:.2f} GB"
         )
         results.append(result)
@@ -192,7 +207,8 @@ def main() -> None:
         shape_str = "x".join(str(s) for s in r["shape_zyx"])
         print(
             f"| {r['v_size']:g} | {shape_str} | {r['elapsed_s']:.0f} s | "
-            f"{r['gpu_peak_bytes'] / 1e9:.2f} GB | {r['peak_rss_kb'] / 1e6:.2f} GB |"
+            f"{(r['gpu_peak_bytes'] + r.get('cupy_pool_bytes', 0)) / 1e9:.2f} GB | "
+            f"{r['peak_rss_kb'] / 1e6:.2f} GB |"
         )
 
 

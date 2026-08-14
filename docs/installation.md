@@ -34,19 +34,80 @@ uv pip install -e .
         │ simulate           Simulate cryo-EM/cryo-ET data                             │
         ╰──────────────────────────────────────────────────────────────────────────────╯
 
+## Choosing a CUDA version
+
+Nothing in specter depends on a particular CUDA release. The two CUDA-flavoured
+pins in `pyproject.toml` are just the combination this project is developed
+against, and both are meant to be edited if your machine needs a different one:
+
+```toml
+# 1. which PyTorch build uv resolves
+[[tool.uv.index]]
+name = "pytorch-cu121"
+url = "https://download.pytorch.org/whl/cu121"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu121" }
+
+# 2. which CuPy wheel provides the GPU distance transform
+dependencies = [
+    "cupy-cuda12x>=13.0; sys_platform != 'darwin'",
+]
+```
+
+Change both together, to the row matching the CUDA version your driver
+supports (`nvidia-smi` reports it top-right):
+
+| Your CUDA | PyTorch index URL | CuPy package |
+|---|---|---|
+| 11.8 | `https://download.pytorch.org/whl/cu118` | `cupy-cuda11x` |
+| 12.1 (default) | `https://download.pytorch.org/whl/cu121` | `cupy-cuda12x` |
+| 12.4 | `https://download.pytorch.org/whl/cu124` | `cupy-cuda12x` |
+| 12.6+ | `https://download.pytorch.org/whl/cu126` | `cupy-cuda12x` |
+| none (CPU only) | `https://download.pytorch.org/whl/cpu` | remove the line |
+
+Rename the index in both places if you like — `name` is arbitrary, it just has
+to match what `[tool.uv.sources]` points at. Newer CUDA builds may also imply a
+newer minimum `torch`; `cu126` wheels start at torch 2.6, for instance.
+
+!!! tip "You may not need to change the PyTorch pin at all"
+
+    CUDA has minor-version compatibility: any 12.x build runs on a driver that
+    supports 12.0 (≥ 525.60.13 on Linux). So a 12.4 or 12.8 driver runs the
+    default cu121 wheels fine — the pin only needs changing for CUDA 11, for
+    ROCm/CPU-only, or when you specifically want a newer runtime.
+
+    `uv pip install --torch-backend auto` detects your driver and picks the
+    matching PyTorch build automatically. It works on uv's `pip` interface
+    only, not `uv sync`, so it's an alternative to editing the pin rather than
+    a replacement for it.
+
+If the CuPy wheel ends up mismatched to your driver, it fails safely rather
+than breaking the run: the `spherical_harmonics` membrane backend warns once
+and falls back to `scipy`'s CPU distance transform. A mismatched **PyTorch**
+build does not degrade — it fails at CUDA init — so that one is worth getting
+right.
+
+Installing with pip instead of uv bypasses `[tool.uv.index]` entirely (it is a
+uv-specific setting) and gives you PyPI's default PyTorch build; use
+`pip install torch --index-url <url from the table>` to choose explicitly.
+
 ## Optional extras
 
 - `docs` -- build these docs locally (`uv sync --extra docs`).
-- `gpu-edt` -- GPU-accelerated (CuPy-backed) distance transforms for the
-  `spherical_harmonics` membrane shape backend
-  (`specter.specimen.membrane`). Purely a speed optimization: falls back
-  automatically to CPU (`scipy`) when not installed, or when no CUDA
-  device is available at runtime, so it's safe to skip. Requires a CUDA
-  12.x GPU (matching the CUDA 12.1 build `torch` itself is pinned to).
 
-    ```bash
-    uv sync --extra gpu-edt
-    ```
+!!! note "GPU distance transforms"
+
+    CuPy-backed GPU distance transforms for the `spherical_harmonics`
+    membrane backend used to live behind a `gpu-edt` extra. They are now a
+    core dependency, installed by a plain `uv sync` -- there is nothing to
+    opt into.
+
+    On macOS there are no `cupy-cuda12x` wheels, so CuPy isn't installed
+    there and the backend falls back to `scipy`'s CPU distance transform
+    (~3x slower field generation, plus a one-time warning). The same
+    fallback covers a machine with no CUDA device available at runtime.
 
 ## Installing with conda/pip instead
 
@@ -63,7 +124,6 @@ To install the optional extras (see above) via pip instead of `uv sync`:
 
 ```bash
 pip install -e ".[docs]"      # build docs locally
-pip install -e ".[gpu-edt]"   # GPU-accelerated distance transforms
 ```
 
 ## Next steps

@@ -315,17 +315,19 @@ def _signed_distance_transform(
     distance_transform_edt` has no GPU path, so it runs on CPU regardless
     of `device`.
 
-    When `device` is CUDA, this instead tries `cupyx.scipy.ndimage.
+    When `device` is CUDA, this instead uses `cupyx.scipy.ndimage.
     distance_transform_edt` -- an exact GPU port of the same PBA+
     algorithm family scipy itself uses (verified bit-identical against
-    scipy on a synthetic mask here, not an approximation), via the
-    optional ``cupy`` dependency (`uv sync --extra gpu-edt` / `pip install
-    specter[gpu-edt]`). Measured 20-700x faster for this call (fresh-
-    process-first-call vs. steady-state-in-process, respectively) on a
-    300**3 mask. Falls back to the scipy CPU path -- with a one-time
-    warning, since it's actionable -- whenever the GPU path isn't usable:
-    `cupy` isn't installed, or is installed but no CUDA device is actually
-    available to it.
+    scipy on a synthetic mask here, not an approximation). Measured
+    20-700x faster for this call (fresh-process-first-call vs.
+    steady-state-in-process, respectively) on a 300**3 mask, and ~3x
+    end-to-end for field generation as a whole.
+
+    `cupy` is a core dependency, so this is the normal path -- except on
+    macOS, where `cupy-cuda12x` ships no wheels (see pyproject.toml). Falls
+    back to the scipy CPU path -- with a one-time warning -- whenever the
+    GPU path isn't usable: `cupy` isn't importable, or is installed but no
+    CUDA device is actually available to it.
 
     Other GPU distance-transform routes were considered and rejected: the
     pure-PyTorch options either only implement an approximate transform
@@ -378,12 +380,13 @@ def _try_gpu_signed_distance_transform(
         from cupyx.scipy import ndimage as cundimage
     except ImportError:
         warnings.warn(
-            "_signed_distance_transform: device is CUDA but the optional "
-            "'cupy' dependency isn't installed -- falling back to scipy's "
-            "CPU distance transform, the dominant cost in membrane field "
-            "generation. Install it with `uv sync --extra gpu-edt` (or "
-            "`pip install specter[gpu-edt]`) for a GPU-accelerated exact "
-            "Euclidean distance transform.",
+            "_signed_distance_transform: device is CUDA but 'cupy' isn't "
+            "importable -- falling back to scipy's CPU distance transform, "
+            "the dominant cost in membrane field generation (~3x slower "
+            "end-to-end, and ~134 vs ~96 bytes of RAM per working-grid "
+            "voxel). cupy is a core dependency, so this normally means "
+            "either a macOS install (no cupy-cuda12x wheels exist) or a "
+            "broken/partial environment -- `uv sync` should restore it.",
             stacklevel=3,
         )
         return None
@@ -397,13 +400,35 @@ def _try_gpu_signed_distance_transform(
         )
         return None
 
+    # Everything past the two guards above can still fail at RUN time, and a
+    # failure here must not take the whole specimen build down when a correct,
+    # if slower, CPU path is sitting right there: the transforms can hit
+    # `cupy.cuda.memory.OutOfMemoryError` (this field is the single largest
+    # GPU allocation a membrane makes -- ~3.7 GB at `_MAX_FIELD_VOXELS`, which
+    # a small card may not have free even though it "has CUDA"), or a
+    # `CUDARuntimeError` that only surfaces on kernel launch or JIT compile
+    # rather than on the driver query `is_available()` does. Broad on purpose:
+    # this function's contract is "never raises", and the original error is
+    # carried in the warning rather than swallowed.
     device_index = torch.device(device).index or 0
-    with cupy.cuda.Device(device_index):
-        inside_gpu = cupy.asarray(inside)
-        dist_out = cundimage.distance_transform_edt(~inside_gpu, sampling=spacing_a)
-        dist_in = cundimage.distance_transform_edt(inside_gpu, sampling=spacing_a)
-        phi_gpu = (dist_out - dist_in).astype(cupy.float32)
-    return torch.from_dlpack(phi_gpu)
+    try:
+        with cupy.cuda.Device(device_index):
+            inside_gpu = cupy.asarray(inside)
+            dist_out = cundimage.distance_transform_edt(~inside_gpu, sampling=spacing_a)
+            dist_in = cundimage.distance_transform_edt(inside_gpu, sampling=spacing_a)
+            phi_gpu = (dist_out - dist_in).astype(cupy.float32)
+        return torch.from_dlpack(phi_gpu)
+    except Exception as exc:
+        warnings.warn(
+            "_signed_distance_transform: the CuPy GPU distance transform "
+            f"failed on {device} ({type(exc).__name__}: {exc}) -- falling "
+            "back to scipy's CPU transform, which gives an identical result "
+            "more slowly. Common causes are insufficient free VRAM for a "
+            f"{inside.size:,}-voxel working grid, or a CUDA driver too old "
+            "for the bundled runtime.",
+            stacklevel=3,
+        )
+        return None
 
 
 __all__ = [

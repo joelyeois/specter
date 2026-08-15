@@ -71,6 +71,13 @@ def energy_to_wavelength(voltage_kv: float) -> float:
 
 When modifying physics-critical code, validate against known physical quantities (e.g. wavelength at 300 kV ≈ 1.969 pm) before committing.
 
+## Git
+
+- **Commit and push straight to `main`.** Do not create a feature branch, and do not open a pull request, unless explicitly asked to. This is a single-maintainer repo; the default "branch first when on the default branch" behaviour just adds a merge-and-delete round trip for no benefit here.
+- Still commit and push only when asked — this overrides *where* work lands, not *whether* to push it.
+- Commit only the files belonging to the task at hand. This working tree often carries unrelated in-flight edits; use explicit pathspecs (`git commit -- <paths>`) rather than `git commit -a`.
+- Pre-commit runs `ruff format` and can rewrite staged files, aborting the commit. Re-stage the reformatted files and commit again.
+
 ## Superpowers working files
 
 `.superpowers/` at the repo root (gitignored) is where Claude Code's superpowers

@@ -176,7 +176,7 @@ class TiltSeriesGenerator(MicrographGenerator):
         Axis around which the sample tilts ('x' or 'y'). Default 'x'.
     coincidence_radius : float or torch.Tensor, optional
         Coincidence radius in pixels. Default 0.0.
-    num_frames : int, optional
+    n_frames : int, optional
         Number of detector frames to simulate. Default None.
     bfactor : float or torch.Tensor or None, optional
         Isotropic B-factor envelope in Å² applied in the microscope transfer
@@ -240,7 +240,7 @@ class TiltSeriesGenerator(MicrographGenerator):
         z_taper_width: int = 0,
         tilt_axis: str = "x",
         coincidence_radius: float | torch.Tensor = 0.0,
-        num_frames: int | None = None,
+        n_frames: int | None = None,
         bfactor: float | torch.Tensor | None = None,
         convergence_angle: float | None = None,
         cc: float | None = None,
@@ -419,7 +419,7 @@ class TiltSeriesGenerator(MicrographGenerator):
             verbose=verbose,
             slice_batch_size=slice_batch_size,
             coincidence_radius=coincidence_radius,
-            num_frames=num_frames,
+            n_frames=n_frames,
             bfactor=bfactor,
             convergence_angle=convergence_angle,
             cc=cc,
@@ -578,13 +578,13 @@ class TiltSeriesGenerator(MicrographGenerator):
         exitwaves = []
         clean_images = []
         B = len(idx) if isinstance(idx, torch.Tensor) else 1
-        n_frames = len(self.quaternions)
+        n_tilts = len(self.quaternions)
 
         scale = self.potential_scale[idx].reshape(-1, 1, 1, 1).to(self.vol.device)
         vol_scaled = self.vol * scale
 
         for i in track(
-            range(n_frames),
+            range(n_tilts),
             description="Generating tilt series.",
             disable=not self.progressbars,
         ):

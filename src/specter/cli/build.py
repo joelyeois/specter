@@ -24,7 +24,7 @@ CONTEXT_SETTINGS = {"help_option_names": ["-h", "--help"]}
 _TOMOGRAM_GROUPS: list[tuple[str, list[str]]] = [
     (
         "Specimen",
-        ["target_shape", "v_size", "filler_occupancy_fraction", "gap_angstrom"],
+        ["target_shape", "voxel_size", "filler_occupancy_fraction", "gap"],
     ),
     (
         "Filler tables",
@@ -33,6 +33,7 @@ _TOMOGRAM_GROUPS: list[tuple[str, list[str]]] = [
             "filler_from_cryoetsim",
             "filler_table_max_mw_kda",
             "filler_table_min_mw_kda",
+            "target_parameterization",
         ],
     ),
     (
@@ -40,8 +41,7 @@ _TOMOGRAM_GROUPS: list[tuple[str, list[str]]] = [
         [
             "membrane_region_density_threshold",
             "membrane_region_max_passes",
-            "membrane_min_transmembrane_spacing_a",
-            "parameterization",
+            "membrane_min_transmembrane_spacing",
         ],
     ),
     ("Filaments", ["actin"]),
@@ -49,7 +49,10 @@ _TOMOGRAM_GROUPS: list[tuple[str, list[str]]] = [
         "Picks & segmentation",
         ["write_picks", "annotation_version", "write_segmentation"],
     ),
-    ("Compute", ["device", "accumulator_device", "render_workers", "chunk_size"]),
+    (
+        "Compute",
+        ["device", "accumulator_device", "render_workers", "render_chunk_size"],
+    ),
     ("Output", ["output_dir", "filename"]),
     ("Advanced", ["pdb_savefolder", "seed"]),
 ]

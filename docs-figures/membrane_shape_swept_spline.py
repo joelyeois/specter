@@ -189,12 +189,12 @@ def figure_flexibility_sweep() -> None:
     fig, axes = plt.subplots(1, len(configs), figsize=(3.4 * len(configs), 3.6))
     for ax, flexibility in zip(axes, configs):
         gen = MembraneGenerator(
-            target_shape_zyx=SHAPE_ZYX,
-            v_size=SPACING_A,
+            target_shape=SHAPE_ZYX,
+            voxel_size=SPACING_A,
             shape_backend="swept_spline",
-            swept_total_length_a=TOTAL_LENGTH_A,
+            swept_total_length=TOTAL_LENGTH_A,
             swept_step_length_a=STEP_LENGTH_A,
-            swept_tube_radius_a=TUBE_RADIUS_A,
+            swept_tube_radius=TUBE_RADIUS_A,
             swept_flexibility=flexibility,
             n_lipids_per_leaflet=1,
             seed=SEED,
@@ -320,12 +320,12 @@ def figure_radius_variation() -> None:
     )
     for ax, (label, rv) in zip(axes, configs):
         gen = MembraneGenerator(
-            target_shape_zyx=SHAPE_ZYX,
-            v_size=SPACING_A,
+            target_shape=SHAPE_ZYX,
+            voxel_size=SPACING_A,
             shape_backend="swept_spline",
-            swept_total_length_a=TOTAL_LENGTH_A,
+            swept_total_length=TOTAL_LENGTH_A,
             swept_step_length_a=STEP_LENGTH_A,
-            swept_tube_radius_a=TUBE_RADIUS_A,
+            swept_tube_radius=TUBE_RADIUS_A,
             swept_flexibility=FLEXIBILITY,
             swept_radius_variation=rv,
             n_lipids_per_leaflet=1,

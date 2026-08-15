@@ -23,7 +23,7 @@ specter build tomogram --config configs/tomogram.toml
 ```bash
 specter build tomogram \
     --config configs/tomogram.toml \
-    --v_size 5.0 \
+    --voxel_size 5.0 \
     --device cuda:0 \
     --output_dir specter-data/tomograms
 ```
@@ -35,7 +35,7 @@ membranes, filaments, exact-count targets, ratio-based filler); run
 
 ## What you'll usually tune
 
-- **Box size** — `target_shape` (Z, Y, X voxels) and `v_size` (Å/voxel).
+- **Box size** — `target_shape` (Z, Y, X voxels) and `voxel_size` (Å/voxel).
 - **Protein species** — `[[targets]]` (exact `n_copies` each, always
   exported to picks) and `[[filler]]`/`filler_from_pei2016`/
   `filler_from_cryoetsim` (packed around targets up to
@@ -43,15 +43,17 @@ membranes, filaments, exact-count targets, ratio-based filler); run
   [Placement order & regions](#placement-order-regions) below.
 - **Membranes** — `[[membrane]]` entries: `shape_backend`
   (`spherical_harmonics` or `swept_spline`), size ranges
-  (`sh_axes_range_a`/`swept_total_length_range_a`/etc., omit for realistic
+  (`sh_axes_range`/`swept_total_length_range`/etc., omit for realistic
   auto-sizing), and `n_copies` for multiple independently-placed copies
   of one template.
 - **Filaments** — `actin` (quick built-in F-actin preset) or hand-written
   `[[filaments]]` entries for other species (e.g. microtubules).
 - **Gold fiducial beads** — `[[beads]]` entries (`radius`, `n_copies`), one per
-  bead radius population. Placed avoiding the membrane shell and already-
-  placed filaments; not region-gated to cytosol/lumen.
-- **Carbon support film** — at most one `[[grid]]` table
+  population; `radius` takes a single number or a `[low, high]` pair drawn per
+  bead. Placed avoiding the membrane shell and already-placed filaments; not
+  region-gated to cytosol/lumen. All beads are written to one `gold-bead` pick
+  file regardless of size.
+- **Carbon support film** — at most one `[[carbon_film]]` table
   (`hole_radius`/`edge_fraction`/`edge_side`/etc.). Painted into the volume
   before anything else is placed.
 
@@ -89,7 +91,7 @@ both are additive and can be combined with each other and with hand-written
 For anything past a small smoke-test box, rendering dozens of species and
 packing hundreds of filler instances can be slow or OOM — which is why
 `configs/tomogram.toml` already sets `render_workers = "auto"`,
-`accumulator_device = "auto"`, and `chunk_size = 64`. Most runs can just
+`accumulator_device = "auto"`, and `render_chunk_size = 64`. Most runs can just
 keep those `"auto"` defaults rather than hand-tuning:
 
 - **`device`** — `cpu | cuda | cuda:0 | 0,1,2 | auto`. A comma-separated
@@ -106,15 +108,15 @@ keep those `"auto"` defaults rather than hand-tuning:
   decoupled from `device` (which stays the compute device regardless).
   `"auto"` estimates the canvas' memory footprint and falls back to CPU
   RAM if it wouldn't fit half of `device`'s free VRAM — useful once a
-  large field of view at fine `v_size` needs tens of GB.
-- **`chunk_size`** — instances rotated per GPU batch for a single species.
+  large field of view at fine `voxel_size` needs tens of GB.
+- **`render_chunk_size`** — instances rotated per GPU batch for a single species.
   Only matters once a filler species' instance count reaches the hundreds
   (a single unchunked batch has been measured at 8+ GB); leave unset for
   small runs.
 
 ## Benchmarks: resolution vs. time and memory
 
-To give a concrete feel for how `v_size` trades off against runtime and
+To give a concrete feel for how `voxel_size` trades off against runtime and
 memory, a specimen was built at `configs/tomogram.toml`'s own
 **production-scale field of view** (1500 × 6000 × 6000 Å) at three voxel
 sizes, so only the voxel grid resolution changes between runs, not the
@@ -124,12 +126,12 @@ physical amount of specimen content. The specimen itself: one
 same filler approach as the canonical config) — a single hand-picked
 filler species was tried first and rejected, since at this box size it
 packed ~109,000 instances of that one small species to hit occupancy,
-both unrepresentative of real configs and, at v_size=2, dominated by
+both unrepresentative of real configs and, at voxel_size=2, dominated by
 per-instance rendering cost:
 
-![Same field of view rendered at v_size = 10, 5, and 2 Å/voxel — a sum Z projection of each output volume, showing the same membrane and densely crowded protein layout at increasing voxel resolution.](../assets/images/tomogram-benchmark-projections.png){ width="900" style="display:block;margin:1.2em auto;" }
+![Same field of view rendered at voxel_size = 10, 5, and 2 Å/voxel — a sum Z projection of each output volume, showing the same membrane and densely crowded protein layout at increasing voxel resolution.](../assets/images/tomogram-benchmark-projections.png){ width="900" style="display:block;margin:1.2em auto;" }
 
-| `v_size` (Å/voxel) | Shape (Z, Y, X voxels) | Wall time | GPU peak | RAM peak |
+| `voxel_size` (Å/voxel) | Shape (Z, Y, X voxels) | Wall time | GPU peak | RAM peak |
 |---|---|---|---|---|
 | 10 | 150 × 600 × 600 | 114 s | 5.08 GB | 12.64 GB |
 | 5  | 300 × 1200 × 1200 | 91 s | 11.62 GB | 5.95 GB |
@@ -162,12 +164,12 @@ exactly — only its bilayer sub-structure is resolved less crisply. The
 budget behind that switch is fixed (identical on every machine, so the same
 config produces the same specimen anywhere) and sized so one field
 generation fits an 8 GB card and a 16 GB host; it is not something you
-configure. If you want a crisper membrane, use a coarser `v_size` or a
+configure. If you want a crisper membrane, use a coarser `voxel_size` or a
 smaller field of view.
 
 **Hardware**: single NVIDIA L40 (46 GB VRAM, one idle card selected via
 `SPECTER_BENCHMARK_DEVICE`, `accumulator_device="auto"`,
-`render_workers="auto"`, `chunk_size=64`), with CuPy 14.1 (a core
+`render_workers="auto"`, `render_chunk_size=64`), with CuPy 14.1 (a core
 dependency, see [Installation](../installation.md)), on a host with an AMD EPYC 7763 64-Core Processor (128
 threads) and 503 GB system RAM. Wall time is the `run_build_tomogram()`
 call only (a one-time CUDA context init immediately before it is excluded,
@@ -178,7 +180,7 @@ alone understates it by 1.7-3.6 GB here); RAM peak is `/usr/bin/time -v`'s
 "Maximum resident set size" for the whole process, each resolution run in
 its own fresh subprocess so peaks don't carry over between runs. Picks and
 segmentation output were disabled for these runs specifically (at
-v_size=2, those label volumes alone would add ~40 GB of writes on top of
+voxel_size=2, those label volumes alone would add ~40 GB of writes on top of
 the ~27 GB density volume — real runs at this scale should budget disk
 space accordingly). Reproduce with
 [`docs-figures/build_tomogram_benchmark.py`](https://github.com/joelyeois/specter/blob/main/docs-figures/build_tomogram_benchmark.py)

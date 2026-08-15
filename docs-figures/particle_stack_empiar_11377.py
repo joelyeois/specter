@@ -71,7 +71,7 @@ def _generate_specter_particles(device: str) -> torch.Tensor:
     with tempfile.TemporaryDirectory() as tmp:
         config = ParticleStackConfig(
             pdb_code=PDB_CODE,
-            num_pixels=NUM_PIXELS,
+            n_pixels=NUM_PIXELS,
             cs_path=str(DATA_DIR / "empiar-11377-passthrough-5particles.cs"),
             n_particles=5,
             dose=DOSE,

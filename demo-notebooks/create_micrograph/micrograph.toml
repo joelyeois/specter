@@ -1,20 +1,19 @@
 [potential]
 pdb_code = "6bdf"
 assembly = true
-num_pixels = 256
+n_pixels = 256
 pixel_size = 0.83       # Å
 micrograph_size = 2048  # pixels, square
 
 [microscope]
 voltage = 300.0     # kV
-dose_min = 20.0     # e⁻/Å², used as a fixed dose (this notebook doesn't randomize per micrograph)
-num_frames = 50      # frames, usually ~1-2 e⁻/Å²/frame
+dose = 20.0         # e⁻/Å², used as a fixed dose (this notebook doesn't randomize per micrograph)
+n_frames = 50      # frames, usually ~1-2 e⁻/Å²/frame
 cs = 2.0               # mm
 alpha = 0.1              # unitless, amplitude contrast ratio
 
 [defocus]
-defocus_min = 5000.0    # Å
-defocus_max = 15000.0   # Å
+defocus = [5000.0, 15000.0]    # Å
 
 [dataset]
 n_micrographs = 1
@@ -30,8 +29,8 @@ ice_model = "gd"              # tiled from a pre-baked cache: scales to large mi
                                # 2048x2048 micrograph_size). "random" is fast/cheap and still a
                                # good choice for smaller micrographs.
 detector_model = "none"
-coincidence_radius_min = 1.8  # pixels
-chunk_size = 8                # slice chunk size for specimen generation; lower if GPU memory is limited
+coincidence_radius = 1.8      # pixels
+specimen_chunk_size = 8                # slice chunk size for specimen generation; lower if GPU memory is limited
 
 [ice]
 ice_thickness = 500.0    # Å

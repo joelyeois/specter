@@ -19,13 +19,13 @@ def _half_space_exclusion_field(
     box: tuple[float, float, float], n: int
 ) -> tuple[torch.Tensor, float]:
     """Forbid the negative-x half of a cubic `box`, return (distance_field,
-    field_v_size). box is (D, H, W) = (z, y, x); field shape is (z, y, x)."""
+    field_voxel_size). box is (D, H, W) = (z, y, x); field shape is (z, y, x)."""
     assert box[0] == box[1] == box[2], "cubic box assumed for this helper"
-    field_v_size = box[2] / n
+    field_voxel_size = box[2] / n
     forbidden = np.zeros((n, n, n), dtype=bool)
     forbidden[:, :, : n // 2] = True  # x < 0
-    dist = ndimage.distance_transform_edt(~forbidden) * field_v_size
-    return torch.from_numpy(dist).float(), field_v_size
+    dist = ndimage.distance_transform_edt(~forbidden) * field_voxel_size
+    return torch.from_numpy(dist).float(), field_voxel_size
 
 
 def test_exclusion_distance_field_none_is_unchanged_behavior():
@@ -39,7 +39,7 @@ def test_exclusion_distance_field_none_is_unchanged_behavior():
         seed=0,
         device="cpu",
         exclusion_distance_field=None,
-        field_v_size=None,
+        field_voxel_size=None,
     )
     assert torch.equal(coords_a, coords_b)
     assert torch.equal(idx_a, idx_b)
@@ -50,7 +50,7 @@ def test_exclusion_distance_field_confines_placements_to_allowed_half():
     radii = torch.full((60,), 10.0)
     gap = 2.0
     # fine enough field resolution to keep interpolation bleed well under gap
-    field, field_v_size = _half_space_exclusion_field(box, n=100)
+    field, field_voxel_size = _half_space_exclusion_field(box, n=100)
 
     coords, idx = pack_hard_spheres_3d(
         radii,
@@ -59,7 +59,7 @@ def test_exclusion_distance_field_confines_placements_to_allowed_half():
         seed=0,
         device="cpu",
         exclusion_distance_field=field,
-        field_v_size=field_v_size,
+        field_voxel_size=field_voxel_size,
     )
     assert coords.shape[0] > 0
     r = radii[idx]
@@ -79,7 +79,7 @@ def test_exclusion_distance_field_requires_both_or_neither_param():
     assert raised
 
     try:
-        pack_hard_spheres_3d(radii, box, field_v_size=10.0)
+        pack_hard_spheres_3d(radii, box, field_voxel_size=10.0)
         raised = False
     except ValueError:
         raised = True
@@ -90,9 +90,9 @@ def test_exclusion_distance_field_fully_forbidden_places_nothing():
     box = (100.0, 100.0, 100.0)
     radii = torch.full((20,), 10.0)
     n = 20
-    field_v_size = box[0] / n
+    field_voxel_size = box[0] / n
     forbidden = np.ones((n, n, n), dtype=bool)
-    dist = ndimage.distance_transform_edt(~forbidden) * field_v_size  # all zero
+    dist = ndimage.distance_transform_edt(~forbidden) * field_voxel_size  # all zero
     field = torch.from_numpy(dist).float()
 
     coords, idx = pack_hard_spheres_3d(
@@ -102,7 +102,7 @@ def test_exclusion_distance_field_fully_forbidden_places_nothing():
         seed=0,
         device="cpu",
         exclusion_distance_field=field,
-        field_v_size=field_v_size,
+        field_voxel_size=field_voxel_size,
     )
     assert coords.shape[0] == 0
 
@@ -121,13 +121,13 @@ def test_sampling_mask_finds_a_needle_in_haystack_region_that_uniform_sampling_m
     box = (2000.0, 2000.0, 2000.0)
     radii = torch.tensor([30.0])
     gap = 2.0
-    field_v_size = 10.0
+    field_voxel_size = 10.0
     n = 200
     pocket = torch.zeros(n, n, n, dtype=torch.bool)
     pocket[95:105, 95:105, 95:105] = True  # 100A cube near the box center
     dist = (
         torch.from_numpy(ndimage.distance_transform_edt(pocket.numpy())).float()
-        * field_v_size
+        * field_voxel_size
     )
 
     coords_uniform, _ = pack_hard_spheres_3d(
@@ -137,7 +137,7 @@ def test_sampling_mask_finds_a_needle_in_haystack_region_that_uniform_sampling_m
         seed=0,
         device="cpu",
         exclusion_distance_field=dist,
-        field_v_size=field_v_size,
+        field_voxel_size=field_voxel_size,
         max_passes=100,
         stall_patience=100,
     )
@@ -148,7 +148,7 @@ def test_sampling_mask_finds_a_needle_in_haystack_region_that_uniform_sampling_m
         seed=0,
         device="cpu",
         exclusion_distance_field=dist,
-        field_v_size=field_v_size,
+        field_voxel_size=field_voxel_size,
         sampling_mask=pocket,
         max_passes=100,
         stall_patience=100,
@@ -162,7 +162,7 @@ def test_sampling_mask_raises_on_all_false_mask():
     radii = torch.full((5,), 10.0)
     mask = torch.zeros(10, 10, 10, dtype=torch.bool)
     try:
-        pack_hard_spheres_3d(radii, box, field_v_size=10.0, sampling_mask=mask)
+        pack_hard_spheres_3d(radii, box, field_voxel_size=10.0, sampling_mask=mask)
         raised = False
     except ValueError:
         raised = True

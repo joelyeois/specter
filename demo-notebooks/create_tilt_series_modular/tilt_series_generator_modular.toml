@@ -1,17 +1,17 @@
 # Imaging half of the two-stage cryo-ET pipeline this notebook walks
 # through stage by stage: tomogram.toml (this folder) builds the specimen
 # volume, this file supplies the imaging parameters used below.
-# target_v_size is overwritten by the notebook right after loading (synced
-# from tomogram.toml's own v_size, see its "Voxel size sync" cell) -- the
+# voxel_size is overwritten by the notebook right after loading (synced
+# from tomogram.toml's own voxel_size, see its "Voxel size sync" cell) -- the
 # value below is never actually used, just a placeholder.
 
 [specimen]
-target_v_size = 10.0   # Å/voxel -- overwritten by the notebook, see above
+voxel_size = 10.0   # Å/voxel -- overwritten by the notebook, see above
 
 [microscope]
 voltage = 300.0
 dose_per_tilt = 3.0
-num_frames = 10
+n_frames = 10
 cs = 2.0
 alpha = 0.1
 

@@ -132,7 +132,7 @@ def _number_density_per_a3(density_g_cm3: float, molar_mass: float) -> float:
 
 
 def _mean_inner_potential(
-    v_size: float,
+    voxel_size: float,
     number_density: float,
     atomic_number: int,
     parameterization: str,
@@ -145,7 +145,7 @@ def _mean_inner_potential(
     -- the volume integral of a single atom's real-space potential equals
     its k=0 Fourier component, so this is the same physics
     ``potential.PotentialBuilder`` uses per-atom, just summed to a bulk
-    mean instead of kept per-position. Independent of `v_size` (verified:
+    mean instead of kept per-position. Independent of `voxel_size` (verified:
     the integral is stable across voxel size since it's a physical,
     grid-independent quantity), unlike injecting a raw atom count.
     """
@@ -156,12 +156,12 @@ def _mean_inner_potential(
             "use 'kirkland' or 'lobato' instead."
         )
     kernel = build_atomic_potential_kernel(
-        v_size,
+        voxel_size,
         parameterization,
         atomic_number=atomic_number,
         shtyrov_species=shtyrov_species or "O(HH)",
     )
-    atom_potential_integral = kernel.sum().item() * v_size**3  # V*Angstrom^3
+    atom_potential_integral = kernel.sum().item() * voxel_size**3  # V*Angstrom^3
     return number_density * atom_potential_integral
 
 
@@ -289,14 +289,14 @@ class BeadInstance:
         a faceted or roughened bead too.
     radius : float
         Bead radius, Angstrom.
-    v_size : float
+    voxel_size : float
         Voxel size, Angstrom.
     """
 
     density: torch.Tensor
     mask: torch.Tensor
     radius: float
-    v_size: float
+    voxel_size: float
 
 
 class BeadGenerator:
@@ -323,7 +323,7 @@ class BeadGenerator:
 
     Parameters
     ----------
-    v_size : float
+    voxel_size : float
         Voxel size, Angstrom.
     parameterization : str, optional
         Atomic-potential parameterization used to compute gold's per-atom
@@ -377,7 +377,7 @@ class BeadGenerator:
 
     def __init__(
         self,
-        v_size: float,
+        voxel_size: float,
         parameterization: str = "kirkland",
         roughness: ScalarOrRange = 0.12,
     ):
@@ -386,7 +386,7 @@ class BeadGenerator:
             raise ValueError(f"roughness must be >= 0, got {roughness!r}")
         if self.roughness_range[1] < self.roughness_range[0]:
             raise ValueError(f"roughness range must be [low, high], got {roughness!r}")
-        self.v_size = v_size
+        self.voxel_size = voxel_size
         self.number_density = _number_density_per_a3(
             GOLD_DENSITY_G_CM3, GOLD_MOLAR_MASS
         )
@@ -395,14 +395,14 @@ class BeadGenerator:
         # _mean_inner_potential return exactly that integral (same trick
         # as ._carbon).
         self.atom_potential_integral = _mean_inner_potential(
-            v_size,
+            voxel_size,
             1.0,
             atomic_number=79,
             parameterization=parameterization,
         )
         self.mean_inner_potential = self.number_density * self.atom_potential_integral
         self._kernel = build_atomic_potential_kernel(
-            v_size, parameterization, atomic_number=79
+            voxel_size, parameterization, atomic_number=79
         )
 
     def _random_orientation(self, generator: torch.Generator | None) -> torch.Tensor:
@@ -485,18 +485,18 @@ class BeadGenerator:
         # centre by a further +1.5 voxels, leaving the bead off-centre and
         # clipped on three faces.)
         pad = 1 + self._kernel.shape[0] // 2
-        half = int(np.ceil(shape.half_extent / self.v_size)) + pad
+        half = int(np.ceil(shape.half_extent / self.voxel_size)) + pad
         n = 2 * half + 1
 
         idx = torch.arange(n, dtype=torch.float32) - half
         zz, yy, xx = torch.meshgrid(idx, idx, idx, indexing="ij")
-        centres = torch.stack([xx, yy, zz], dim=-1).reshape(-1, 3) * self.v_size
+        centres = torch.stack([xx, yy, zz], dim=-1).reshape(-1, 3) * self.voxel_size
         mask = shape.contains(centres).reshape(n, n, n)
 
         atoms = raw_lattice[shape.contains(raw_lattice)]
-        deltas = soft_voxelize_coordinates(atoms, (n, n, n), self.v_size)
+        deltas = soft_voxelize_coordinates(atoms, (n, n, n), self.voxel_size)
         density = spatial_convolve3d_same(deltas[None], self._kernel)[0]
 
         return BeadInstance(
-            density=density, mask=mask, radius=radius, v_size=self.v_size
+            density=density, mask=mask, radius=radius, voxel_size=self.voxel_size
         )

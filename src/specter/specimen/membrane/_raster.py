@@ -47,7 +47,7 @@ def _gaussian_blur3d(volume: torch.Tensor, sigma_vox: float) -> torch.Tensor:
 def rasterize_membrane_density(
     field: MembraneField,
     profile: BilayerProfile,
-    target_shape_zyx: tuple[int, int, int],
+    target_shape: tuple[int, int, int],
     target_spacing_a: float,
     target_origin_xyz: torch.Tensor | None = None,
     antialias_sigma_a: float | None = None,
@@ -65,7 +65,7 @@ def rasterize_membrane_density(
     profile : BilayerProfile
         Calibrated bilayer potential profile (see
         :func:`~specter.specimen.membrane._profile.compute_bilayer_profile`).
-    target_shape_zyx : tuple of int
+    target_shape : tuple of int
         Output grid shape.
     target_spacing_a : float
         Output voxel size, Angstrom.
@@ -85,7 +85,7 @@ def rasterize_membrane_density(
     Returns
     -------
     torch.Tensor
-        Density volume, shape ``target_shape_zyx``.
+        Density volume, shape ``target_shape``.
     """
     density_fine = profile(field.phi)
 
@@ -104,7 +104,7 @@ def rasterize_membrane_density(
     if target_origin_xyz is None:
         extent = (
             torch.tensor(
-                [target_shape_zyx[2], target_shape_zyx[1], target_shape_zyx[0]],
+                [target_shape[2], target_shape[1], target_shape[0]],
                 dtype=torch.float32,
             )
             * target_spacing_a
@@ -112,7 +112,7 @@ def rasterize_membrane_density(
         target_origin_xyz = -0.5 * extent
 
     points_xyz = _grid_points_xyz(
-        target_shape_zyx, target_spacing_a, target_origin_xyz, field.phi.device
+        target_shape, target_spacing_a, target_origin_xyz, field.phi.device
     )
     return filtered_field.sample(points_xyz)
 

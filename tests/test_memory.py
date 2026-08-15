@@ -30,7 +30,7 @@ def test_estimate_peak_grows_linearly_with_batchsize() -> None:
 
 def test_estimate_peak_tracks_the_padded_box_not_num_pixels() -> None:
     """Turning off pad_fft quarters the per-particle term (pad_nxy^2), which
-    is the whole reason a user can't guess this number from num_pixels."""
+    is the whole reason a user can't guess this number from n_pixels."""
     padded = estimate_peak_bytes(4, _NXY, _NXY, 2 * _NXY)
     unpadded = estimate_peak_bytes(4, _NXY, _NXY, _NXY)
     overhead = estimate_peak_bytes(0, _NXY, _NXY, _NXY)

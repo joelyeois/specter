@@ -1,7 +1,7 @@
 [potential]
 pdb_code = "6bdf"
 assembly = true
-num_pixels = 256
+n_pixels = 256
 pixel_size = 1.0     # Å
 
 [microscope]

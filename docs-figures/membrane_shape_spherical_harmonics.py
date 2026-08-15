@@ -426,10 +426,10 @@ def figure_parameter_sweep() -> None:
     fig, axes = plt.subplots(1, len(configs), figsize=(2.2 * len(configs), 2.6))
     for ax, (label, cfg) in zip(axes, configs):
         gen = MembraneGenerator(
-            target_shape_zyx=SHAPE_ZYX,
-            v_size=SPACING_A,
+            target_shape=SHAPE_ZYX,
+            voxel_size=SPACING_A,
             shape_backend="spherical_harmonics",
-            sh_axes_a=SH_AXES_A,
+            sh_axes=SH_AXES_A,
             n_lipids_per_leaflet=1,
             seed=SEED,
             **cfg,
@@ -449,7 +449,7 @@ def figure_parameter_sweep() -> None:
 
 
 def figure_axes_sweep() -> None:
-    """sh_axes_a sweep: isotropic vs. elongated vs. flattened organelles.
+    """sh_axes sweep: isotropic vs. elongated vs. flattened organelles.
 
     Uses a larger working grid than SHAPE_ZYX/SPACING_A: the elongated
     (220, 120, 120) config's long semi-axis, inflated by up to
@@ -465,12 +465,12 @@ def figure_axes_sweep() -> None:
         ("flattened (90,150,150)", (90.0, 150.0, 150.0)),
     ]
     fig, axes = plt.subplots(1, len(configs), figsize=(3.2 * len(configs), 3.4))
-    for ax, (label, sh_axes_a) in zip(axes, configs):
+    for ax, (label, sh_axes) in zip(axes, configs):
         gen = MembraneGenerator(
-            target_shape_zyx=shape_zyx,
-            v_size=spacing_a,
+            target_shape=shape_zyx,
+            voxel_size=spacing_a,
             shape_backend="spherical_harmonics",
-            sh_axes_a=sh_axes_a,
+            sh_axes=sh_axes,
             sh_amplitude=SH_AMPLITUDE,
             sh_max_degree=SH_MAX_DEGREE,
             n_lipids_per_leaflet=1,

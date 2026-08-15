@@ -66,7 +66,7 @@ was ``specimen.membrane``'s own deprecated ``shape_backend="alpha_shape"``,
 removed in the same cleanup -- see git history if either is ever needed as
 a reference again.
 
-Carbon film (``grid_spec``) is painted directly into the shared canvas
+Carbon film (``carbon_film_spec``) is painted directly into the shared canvas
 before anything else is placed, then everything placed afterward avoids
 it -- membrane auto-placement and filaments here, and (via
 ``classify_membrane_regions`` reading carbon's own high density as
@@ -111,7 +111,7 @@ separate vesicles, whether from one instance or several) without any
 special-casing.
 
 Each instance renders on its OWN local working grid -- typically much
-smaller than the shared canvas (`MembraneGenerator`'s own `target_shape_zyx`
+smaller than the shared canvas (`MembraneGenerator`'s own `target_shape`
 auto-sizes from the organelle's size when omitted; see that class's own
 docstring) -- then `clip_insert_bounds`-based compositing crops/places it
 into the shared canvas at `position_xyz`, the same mechanism already used
@@ -179,7 +179,7 @@ from ...crowding import insert_particles_into_micrograph
 from ...pdb import DEFAULT_PDB_SAVEFOLDER, PDB
 from ...potential import PotentialBuilder
 from ...rotations import build_affine_matrix, random_rotation_matrix, rotate_volume
-from .._carbon import CarbonFilmGenerator, GridSpec, edge_hole_center
+from .._carbon import CarbonFilmGenerator, CarbonFilmSpec, edge_hole_center
 from .._grid import BeadGenerator
 from .._parallel_render import (
     build_pdb_cache_concurrently,
@@ -249,7 +249,7 @@ def _insert_instance_labels(
 def _position_to_center_index(
     position_xyz: tuple[float, float, float],
     shape_zyx: tuple[int, ...],
-    v_size: float,
+    voxel_size: float,
 ) -> tuple[int, int, int]:
     """Physical (x, y, z) offset from a volume's own center -> absolute
     (z, y, x) voxel index of that offset -- the center-relative convention
@@ -266,9 +266,9 @@ def _position_to_center_index(
     )
     px, py, pz = position_xyz
     return (
-        z_center + int(round(pz / v_size)),
-        y_center + int(round(py / v_size)),
-        x_center + int(round(px / v_size)),
+        z_center + int(round(pz / voxel_size)),
+        y_center + int(round(py / voxel_size)),
+        x_center + int(round(px / voxel_size)),
     )
 
 
@@ -276,7 +276,7 @@ def _insert_volume_max(
     volume: torch.Tensor,
     local: torch.Tensor,
     position_xyz: tuple[float, float, float],
-    v_size: float,
+    voxel_size: float,
 ) -> torch.Tensor:
     """Max-merge `local` (same center-relative convention as `volume`,
     i.e. physical (0,0,0) at its own center) into `volume`, shifted by
@@ -286,7 +286,9 @@ def _insert_volume_max(
     is the shared, potentially large accumulator (see
     MembraneTomogramGenerator's own `accumulator_device` docstring),
     `local` is one membrane instance's own (much smaller) working grid."""
-    center_zyx = _position_to_center_index(position_xyz, tuple(volume.shape), v_size)
+    center_zyx = _position_to_center_index(
+        position_xyz, tuple(volume.shape), voxel_size
+    )
     bounds = clip_insert_bounds(center_zyx, local.shape, volume.shape)
     if bounds is None:
         return volume
@@ -299,7 +301,7 @@ def _build_sphere_exclusion_field(
     coords_xyz: torch.Tensor,
     radii: torch.Tensor,
     target_shape: tuple[int, int, int],
-    v_size: float,
+    voxel_size: float,
 ) -> torch.Tensor:
     """Rasterize already-placed spheres into a boolean occupied grid and
     return its Euclidean distance transform, ready to combine (elementwise
@@ -313,8 +315,8 @@ def _build_sphere_exclusion_field(
     coords_np = coords_xyz.cpu().numpy()
     radii_np = radii.cpu().numpy()
     for (x, y, z), r in zip(coords_np, radii_np):
-        vz, vy, vx = cz + z / v_size, cy + y / v_size, cx + x / v_size
-        r_vox = r / v_size
+        vz, vy, vx = cz + z / voxel_size, cy + y / voxel_size, cx + x / voxel_size
+        r_vox = r / voxel_size
         z0, z1 = max(0, int(np.floor(vz - r_vox))), min(Z, int(np.ceil(vz + r_vox)) + 1)
         y0, y1 = max(0, int(np.floor(vy - r_vox))), min(Y, int(np.ceil(vy + r_vox)) + 1)
         x0, x1 = max(0, int(np.floor(vx - r_vox))), min(X, int(np.ceil(vx + r_vox)) + 1)
@@ -324,7 +326,7 @@ def _build_sphere_exclusion_field(
         dist2 = (zz - vz) ** 2 + (yy - vy) ** 2 + (xx - vx) ** 2
         occupied[z0:z1, y0:y1, x0:x1] |= dist2 <= r_vox**2
 
-    field = ndimage.distance_transform_edt(~occupied, sampling=(v_size,) * 3)
+    field = ndimage.distance_transform_edt(~occupied, sampling=(voxel_size,) * 3)
     return torch.from_numpy(field).float()
 
 
@@ -352,27 +354,27 @@ _MAX_EXCLUSION_FIELD_VOXELS = 200_000_000
 
 
 def _resolve_exclusion_field_grid(
-    target_shape: tuple[int, int, int], v_size: float
+    target_shape: tuple[int, int, int], voxel_size: float
 ) -> tuple[float, tuple[int, int, int], int]:
     """
-    Coarsen ``(v_size, target_shape)`` for exclusion-field construction if
+    Coarsen ``(voxel_size, target_shape)`` for exclusion-field construction if
     the box exceeds ``_MAX_EXCLUSION_FIELD_VOXELS`` voxels.
 
     Safe to do because ``pack_hard_spheres_3d``'s own
-    ``exclusion_distance_field``/``field_v_size`` mechanism is already
+    ``exclusion_distance_field``/``field_voxel_size`` mechanism is already
     documented to support (and trilinearly sample) a coarser grid than the
     box's own placement precision -- gap/radii here are tens of Angstrom,
-    while ``v_size`` can be a small fraction of one; that docstring's own
-    empirical finding ("a couple of Angstrom of bleed at field_v_size=5
-    for gap=2, vanishing by field_v_size=2") already characterizes exactly
+    while ``voxel_size`` can be a small fraction of one; that docstring's own
+    empirical finding ("a couple of Angstrom of bleed at field_voxel_size=5
+    for gap=2, vanishing by field_voxel_size=2") already characterizes exactly
     this tradeoff. This just exploits a capability that was always
-    available but never used before now (``field_v_size`` was always
-    passed equal to ``v_size``).
+    available but never used before now (``field_voxel_size`` was always
+    passed equal to ``voxel_size``).
 
     Returns
     -------
-    field_v_size : float
-        Coarsened voxel size, Angstrom (equals ``v_size`` if no
+    field_voxel_size : float
+        Coarsened voxel size, Angstrom (equals ``voxel_size`` if no
         coarsening was needed).
     field_shape : tuple of int
         Coarsened grid shape, ``ceil(target_shape / factor)`` per axis.
@@ -381,10 +383,10 @@ def _resolve_exclusion_field_grid(
     """
     n = target_shape[0] * target_shape[1] * target_shape[2]
     if n <= _MAX_EXCLUSION_FIELD_VOXELS:
-        return v_size, target_shape, 1
+        return voxel_size, target_shape, 1
     factor = max(1, math.ceil((n / _MAX_EXCLUSION_FIELD_VOXELS) ** (1.0 / 3.0)))
     field_shape = tuple(math.ceil(s / factor) for s in target_shape)
-    return v_size * factor, field_shape, factor
+    return voxel_size * factor, field_shape, factor
 
 
 def _downsample_mask_maxpool(
@@ -414,7 +416,7 @@ def _downsample_mask_maxpool(
 def _diagnose_zero_placements(
     region_mask_field: torch.Tensor,
     exclusion_field: torch.Tensor,
-    field_v_size: float,
+    field_voxel_size: float,
     box: tuple[float, float, float],
     radius: float,
     gap: float,
@@ -444,7 +446,7 @@ def _diagnose_zero_placements(
     exclusion_field : torch.Tensor
         Physical clearance to the nearest forbidden voxel, Angstrom, same
         shape as `region_mask_field`.
-    field_v_size : float
+    field_voxel_size : float
         Voxel size of both fields, Angstrom.
     box : tuple of float
         ``(D, H, W)`` box extents in Angstrom (z, y, x) -- same convention
@@ -486,12 +488,13 @@ def _diagnose_zero_placements(
         indexing="ij",
     )
     extent = (
-        torch.tensor([nx, ny, nz], dtype=torch.float32, device=device) * field_v_size
+        torch.tensor([nx, ny, nz], dtype=torch.float32, device=device)
+        * field_voxel_size
     )
     origin = -0.5 * extent
-    center_x = origin[0] + (xx.float() + 0.5) * field_v_size
-    center_y = origin[1] + (yy.float() + 0.5) * field_v_size
-    center_z = origin[2] + (zz.float() + 0.5) * field_v_size
+    center_x = origin[0] + (xx.float() + 0.5) * field_voxel_size
+    center_y = origin[1] + (yy.float() + 0.5) * field_voxel_size
+    center_z = origin[2] + (zz.float() + 0.5) * field_voxel_size
 
     half_x, half_y, half_z = box[2] / 2, box[1] / 2, box[0] / 2
     margin_x = 0.0 if clip_axes[2] else radius
@@ -529,11 +532,11 @@ _ACCUMULATOR_GPU_BUDGET_FRACTION = 0.5
 
 def recommend_accumulator_device(
     device: str | torch.device,
-    target_shape_zyx: tuple[int, int, int],
+    target_shape: tuple[int, int, int],
 ) -> torch.device:
     """
     Suggest an `accumulator_device`: `device` itself if the canvas
-    (`target_shape_zyx`'s voxel count x `_ACCUMULATOR_N_TENSORS` same-
+    (`target_shape`'s voxel count x `_ACCUMULATOR_N_TENSORS` same-
     sized tensors) fits within `_ACCUMULATOR_GPU_BUDGET_FRACTION` of that
     device's currently free memory, "cpu" otherwise. Trivially "cpu"
     whenever `device` isn't CUDA (or CUDA isn't available at all) --
@@ -545,7 +548,7 @@ def recommend_accumulator_device(
         The generator's own compute device (rendering/rotation/field
         generation) -- NOT necessarily the same as the returned
         accumulator device once this recommends "cpu".
-    target_shape_zyx : tuple of int
+    target_shape : tuple of int
         (Z, Y, X) voxels -- the shape every accumulator tensor will be.
 
     Returns
@@ -555,7 +558,7 @@ def recommend_accumulator_device(
     device_t = torch.device(device)
     if device_t.type != "cuda" or not torch.cuda.is_available():
         return torch.device("cpu")
-    n_voxels = target_shape_zyx[0] * target_shape_zyx[1] * target_shape_zyx[2]
+    n_voxels = target_shape[0] * target_shape[1] * target_shape[2]
     estimated_bytes = n_voxels * _ACCUMULATOR_BYTES_PER_VOXEL * _ACCUMULATOR_N_TENSORS
     free_bytes, _total_bytes = torch.cuda.mem_get_info(device_t)
     if estimated_bytes > _ACCUMULATOR_GPU_BUDGET_FRACTION * free_bytes:
@@ -566,7 +569,7 @@ def recommend_accumulator_device(
 def resolve_accumulator_device(
     device: str | torch.device,
     accumulator_device: str | torch.device | Literal["auto"] | None,
-    target_shape_zyx: tuple[int, int, int],
+    target_shape: tuple[int, int, int],
 ) -> torch.device:
     """
     Normalize an `accumulator_device` config value -- `None` matches
@@ -577,7 +580,7 @@ def resolve_accumulator_device(
     if accumulator_device is None:
         return torch.device(device)
     if accumulator_device == "auto":
-        return recommend_accumulator_device(device, target_shape_zyx)
+        return recommend_accumulator_device(device, target_shape)
     return torch.device(accumulator_device)
 
 
@@ -591,8 +594,8 @@ def _instance_bounding_radius(generator: MembraneGenerator) -> float:
     MembraneGenerator's own auto-sizing uses), so treating the FULL
     contour length as if straight overestimates, not underestimates."""
     if generator.shape_backend == "spherical_harmonics":
-        return max(generator.sh_axes_a)
-    return 0.5 * generator.swept_total_length_a + generator.swept_tube_radius_a
+        return max(generator.sh_axes)
+    return 0.5 * generator.swept_total_length + generator.swept_tube_radius
 
 
 def _insert_shell_label(
@@ -600,7 +603,7 @@ def _insert_shell_label(
     shell_mask: torch.Tensor,
     instance_id: int,
     position_xyz: tuple[float, float, float],
-    v_size: float,
+    voxel_size: float,
 ) -> tuple[torch.Tensor, bool]:
     """Stamp `instance_id` into `labels` wherever `shell_mask` (same
     center-relative convention, see `_insert_volume_max`) is True, shifted
@@ -620,7 +623,9 @@ def _insert_shell_label(
     `shell_mask` is moved to `labels`' own device (not the other way
     around) -- see `_insert_volume_max`'s own docstring for why.
     """
-    center_zyx = _position_to_center_index(position_xyz, tuple(labels.shape), v_size)
+    center_zyx = _position_to_center_index(
+        position_xyz, tuple(labels.shape), voxel_size
+    )
     bounds = clip_insert_bounds(center_zyx, shell_mask.shape, labels.shape)
     if bounds is None:
         return labels, False
@@ -753,7 +758,7 @@ class MembraneInstance:
         generator -- any `shape_backend`, independent per instance. Always
         centered at physical (0,0,0) (`MembraneGenerator`'s own
         convention), then shifted into place via `position_xyz` at
-        composite time -- its own `target_shape_zyx` need NOT match the
+        composite time -- its own `target_shape` need NOT match the
         owning `MembraneTomogramGenerator`'s (typically shouldn't: leave it
         `None` for a small, auto-sized local grid, see `MembraneGenerator`'s
         own docstring).
@@ -799,14 +804,14 @@ class MembraneTomogramGenerator:
         are used as-is and not duplicated here. May be EMPTY (no membranes
         at all -- `generate()` then treats the whole tomogram as one
         cytosol region, no lumen; see module docstring). Every instance's
-        own `generator.v_size` must match `v_size` below (raises
+        own `generator.voxel_size` must match `voxel_size` below (raises
         `ValueError` naming the offending index otherwise).
-    target_shape_zyx : tuple of int
+    target_shape : tuple of int
         Shared tomogram canvas shape, `(Z, Y, X)` voxels -- every instance
         composites into this same grid.
-    v_size : float
+    voxel_size : float
         Shared voxel size, Angstrom -- must match every instance's own
-        `generator.v_size`.
+        `generator.voxel_size`.
     protein_specs : list of TomogramProteinSpec
         Cytosolic/lumen species to pack, exact-count (`n_copies`) and/or
         ratio-weighted (`ratio`). May be EMPTY (membranes/filaments with no
@@ -819,7 +824,7 @@ class MembraneTomogramGenerator:
         against the membrane shell or each other, but DOES get avoided by
         the `protein_specs` packing stage that follows it (see module
         docstring). Default None (no filaments).
-    grid_spec : GridSpec, optional
+    carbon_film_spec : CarbonFilmSpec, optional
         Carbon support film to paint into the shared canvas before
         anything else is placed (see module docstring). Default None (no
         film -- pure ice, the original behaviour).
@@ -836,13 +841,13 @@ class MembraneTomogramGenerator:
         `draw_species_pool`), applied independently per region -- e.g. 0.2
         for `"lumen"` species targets 20% of the LUMEN's own volume, not
         20% of the whole tomogram. Default 0.2.
-    gap_angstrom : float, optional
+    gap : float, optional
         Minimum clearance between placed spheres' surfaces, between a
         placed sphere and the membrane shell, AND between auto-placed
         membrane instances' own bounding spheres (all three reuse this one
         value). Default 5.0.
     clip_axes : tuple of bool, optional
-        (z, y, x), matching `target_shape_zyx`'s axis order -- passed
+        (z, y, x), matching `target_shape`'s axis order -- passed
         straight through to every `pack_hard_spheres_3d` call here (auto-
         placed membrane instances AND cytosol/lumen protein packing). True
         on an axis lets a placed instance's center stay in-bounds while its
@@ -859,7 +864,7 @@ class MembraneTomogramGenerator:
         packing. Default 300, higher than `pack_hard_spheres_3d`'s own
         default 200 since a tight region (e.g. a small vesicle lumen) can
         need more attempts before a geometrically valid spot turns up.
-    min_transmembrane_spacing_a : float, optional
+    min_transmembrane_spacing : float, optional
         Passed to `MembraneGenerator.place_transmembrane`. Default 40.0.
     pdb_cache_dir : str, optional
         Directory for downloaded PDB/mmCIF files. Default is
@@ -904,7 +909,7 @@ class MembraneTomogramGenerator:
         compute device for rendering/rotation regardless). Default None:
         same as `device`, identical to the original one-device behaviour.
         "auto" resolves via `recommend_accumulator_device` -- estimates
-        the canvas' own memory footprint from `target_shape_zyx` and
+        the canvas' own memory footprint from `target_shape` and
         falls back to "cpu" if it would exceed half of `device`'s
         CURRENTLY FREE memory (conservative on purpose: rendering/
         rotation on `device` need real memory too, at the same time).
@@ -923,7 +928,7 @@ class MembraneTomogramGenerator:
         Per-instance integer label volume for the membrane SHELL itself --
         `membrane_labels == i+1` is instance `i`'s own shell (first-write-
         wins where instances overlap, see `_insert_shell_label`), shape
-        `target_shape_zyx`, dtype int32. Set after `generate()` runs.
+        `target_shape`, dtype int32. Set after `generate()` runs.
     transmembrane_placements : list of TransmembranePlacement
         From every instance's own `MembraneGenerator.place_transmembrane`,
         with `center_xyz` offset into shared-tomogram coordinates by that
@@ -935,7 +940,7 @@ class MembraneTomogramGenerator:
         instances AND, when `filament_specs` is non-empty, filament monomer
         instances too (a continuation of the same instance-id counter, not
         a separate label space -- see module docstring), shape
-        `target_shape_zyx`, dtype int32. Set after `generate()` runs.
+        `target_shape`, dtype int32. Set after `generate()` runs.
     filament_instances : list of FilamentInstance
         Every placed filament monomer, from `specimen.filament.
         place_filaments` (`position_xyz` in the same corner-relative,
@@ -951,19 +956,19 @@ class MembraneTomogramGenerator:
     def __init__(
         self,
         membrane_instances: list[MembraneInstance],
-        target_shape_zyx: tuple[int, int, int],
-        v_size: float,
+        target_shape: tuple[int, int, int],
+        voxel_size: float,
         protein_specs: list[TomogramProteinSpec],
         filament_specs: list[FilamentSpec] | None = None,
-        grid_spec: GridSpec | None = None,
+        carbon_film_spec: CarbonFilmSpec | None = None,
         bead_specs: list[TomogramBeadSpec] | None = None,
         bead_roughness: ScalarOrRange = 0.12,
         occupancy_fraction: float = 0.2,
-        gap_angstrom: float = 5.0,
+        gap: float = 5.0,
         clip_axes: tuple[bool, bool, bool] = (False, False, False),
         region_density_threshold: float | None = None,
         region_max_passes: int = 300,
-        min_transmembrane_spacing_a: float = 40.0,
+        min_transmembrane_spacing: float = 40.0,
         pdb_cache_dir: str = DEFAULT_PDB_SAVEFOLDER,
         parameterization: str = "shtyrov",
         seed: int | None = None,
@@ -979,36 +984,36 @@ class MembraneTomogramGenerator:
             and not membrane_instances
             and not filament_specs
             and not bead_specs
-            and grid_spec is None
+            and carbon_film_spec is None
         ):
             raise ValueError(
                 "MembraneTomogramGenerator: at least one of "
                 "membrane_instances, protein_specs, filament_specs, "
-                "bead_specs, or grid_spec must be non-empty/set -- an empty "
+                "bead_specs, or carbon_film_spec must be non-empty/set -- an empty "
                 "tomogram has nothing to generate."
             )
         for i, mi in enumerate(membrane_instances):
-            if mi.generator.v_size != v_size:
+            if mi.generator.voxel_size != voxel_size:
                 raise ValueError(
                     f"MembraneTomogramGenerator: membrane_instances[{i}]'s own "
-                    f"v_size ({mi.generator.v_size}) does not match the shared "
-                    f"v_size ({v_size}) -- every instance must render on the "
+                    f"voxel_size ({mi.generator.voxel_size}) does not match the shared "
+                    f"voxel_size ({voxel_size}) -- every instance must render on the "
                     "same voxel grid to be compositable."
                 )
         self.membrane_instances = membrane_instances
-        self.target_shape_zyx = target_shape_zyx
-        self.v_size = v_size
+        self.target_shape = target_shape
+        self.voxel_size = voxel_size
         self.protein_specs = protein_specs
         self.filament_specs = filament_specs or []
-        self.grid_spec = grid_spec
+        self.carbon_film_spec = carbon_film_spec
         self.bead_specs = bead_specs or []
         self.bead_roughness = bead_roughness
         self.occupancy_fraction = occupancy_fraction
-        self.gap_angstrom = gap_angstrom
+        self.gap = gap
         self.clip_axes = clip_axes
         self.region_density_threshold = region_density_threshold
         self.region_max_passes = region_max_passes
-        self.min_transmembrane_spacing_a = min_transmembrane_spacing_a
+        self.min_transmembrane_spacing = min_transmembrane_spacing
         self.pdb_cache_dir = pdb_cache_dir
         self.parameterization = parameterization
         self.seed = seed
@@ -1035,7 +1040,7 @@ class MembraneTomogramGenerator:
         # accumulator's device internally, so this is safe regardless of
         # where `device` itself points.
         self.accumulator_device = resolve_accumulator_device(
-            device, accumulator_device, target_shape_zyx
+            device, accumulator_device, target_shape
         )
 
         self.regions: dict[str, torch.Tensor] | None = None
@@ -1053,19 +1058,19 @@ class MembraneTomogramGenerator:
         Returns
         -------
         torch.Tensor
-            Shape `target_shape_zyx`, dtype float32.
+            Shape `target_shape`, dtype float32.
         """
         if self.seed is not None:
             torch.manual_seed(
                 self.seed
             )  # random_rotation_matrix has no generator= param
 
-        v_size = self.v_size
-        target_shape = self.target_shape_zyx
+        voxel_size = self.voxel_size
+        target_shape = self.target_shape
         box = (
-            target_shape[0] * v_size,
-            target_shape[1] * v_size,
-            target_shape[2] * v_size,
+            target_shape[0] * voxel_size,
+            target_shape[1] * voxel_size,
+            target_shape[2] * voxel_size,
         )
 
         # Resolve any omitted position_xyz via collision-rejecting random
@@ -1097,14 +1102,14 @@ class MembraneTomogramGenerator:
             target_shape, dtype=torch.float32, device=self.accumulator_device
         )
         carbon_mask: torch.Tensor | None = None
-        if self.grid_spec is not None:
+        if self.carbon_film_spec is not None:
             _grid_phase_start = phase_start(
                 "Carbon film", disable=not self.progressbars
             )
             with status(
                 "Generating carbon support film", disable=not self.progressbars
             ):
-                volume = self._stamp_carbon_film(volume, target_shape, v_size)
+                volume = self._stamp_carbon_film(volume, target_shape, voxel_size)
             carbon_mask = volume > 0
             phase_done("Carbon film", _grid_phase_start, disable=not self.progressbars)
 
@@ -1124,8 +1129,8 @@ class MembraneTomogramGenerator:
             # comment below); only auto-placement (this RSA solve) can
             # actually avoid it.
             if carbon_mask is not None:
-                field_v_size, field_shape, field_factor = _resolve_exclusion_field_grid(
-                    target_shape, v_size
+                field_voxel_size, field_shape, field_factor = (
+                    _resolve_exclusion_field_grid(target_shape, voxel_size)
                 )
                 allowed = (~carbon_mask).cpu()
                 allowed_field = (
@@ -1137,7 +1142,7 @@ class MembraneTomogramGenerator:
                     torch.from_numpy(
                         ndimage.distance_transform_edt(allowed_field.numpy())
                     ).float()
-                    * field_v_size
+                    * field_voxel_size
                 )
             with status(
                 f"Placing {len(auto_instances)} membrane instance(s)",
@@ -1146,14 +1151,16 @@ class MembraneTomogramGenerator:
                 coords, accepted_idx = pack_hard_spheres_3d(
                     radii,
                     box,
-                    gap=self.gap_angstrom,
+                    gap=self.gap,
                     seed=self.seed,
                     device="cpu",  # see self.device's own docstring
                     clip_axes=self.clip_axes,
                     exclusion_distance_field=(
                         exclusion_field if carbon_mask is not None else None
                     ),
-                    field_v_size=field_v_size if carbon_mask is not None else None,
+                    field_voxel_size=field_voxel_size
+                    if carbon_mask is not None
+                    else None,
                     sampling_mask=(allowed_field if carbon_mask is not None else None),
                 )
             n_dropped = len(auto_instances) - accepted_idx.numel()
@@ -1200,13 +1207,13 @@ class MembraneTomogramGenerator:
                         "actually drew (clipped_at_boundary=True on its "
                         "MembraneGenerator) -- skipped rather than compositing a "
                         "visibly truncated shape. Increase that instance's own "
-                        "target_shape_zyx/v_size, or omit target_shape_zyx "
+                        "target_shape/voxel_size, or omit target_shape "
                         "entirely for auto-sizing.",
                         stacklevel=2,
                     )
                     continue
                 tm_placements = mi.generator.place_transmembrane(
-                    min_spacing_a=self.min_transmembrane_spacing_a
+                    min_spacing_a=self.min_transmembrane_spacing
                 )
                 offset = torch.tensor(mi.position_xyz, dtype=torch.float32)
                 for tp in tm_placements:
@@ -1231,7 +1238,7 @@ class MembraneTomogramGenerator:
                     # index math `_insert_volume_max` itself uses, rather
                     # than duplicating it.
                     center_zyx = _position_to_center_index(
-                        mi.position_xyz, tuple(volume.shape), v_size
+                        mi.position_xyz, tuple(volume.shape), voxel_size
                     )
                     bounds = clip_insert_bounds(
                         center_zyx, local_volume.shape, volume.shape
@@ -1272,17 +1279,17 @@ class MembraneTomogramGenerator:
                         z_c, y_c, x_c = (s // 2 for s in shape_zyx)
                         centers = torch.stack([tp.center_xyz for tp in tm_placements])
                         iz = (
-                            (z_c + torch.round(centers[:, 2] / v_size))
+                            (z_c + torch.round(centers[:, 2] / voxel_size))
                             .long()
                             .clamp(0, shape_zyx[0] - 1)
                         )
                         iy = (
-                            (y_c + torch.round(centers[:, 1] / v_size))
+                            (y_c + torch.round(centers[:, 1] / voxel_size))
                             .long()
                             .clamp(0, shape_zyx[1] - 1)
                         )
                         ix = (
-                            (x_c + torch.round(centers[:, 0] / v_size))
+                            (x_c + torch.round(centers[:, 0] / voxel_size))
                             .long()
                             .clamp(0, shape_zyx[2] - 1)
                         )
@@ -1305,7 +1312,7 @@ class MembraneTomogramGenerator:
                             ]
                 self.transmembrane_placements.extend(tm_placements)
                 volume = _insert_volume_max(
-                    volume, local_volume, mi.position_xyz, v_size
+                    volume, local_volume, mi.position_xyz, voxel_size
                 )
                 # Per-instance shell mask, computed and stashed as a bool
                 # (~4x smaller than float32, and ~4-8x smaller again than
@@ -1375,7 +1382,7 @@ class MembraneTomogramGenerator:
         for instance_id, (mi, shell_mask) in enumerate(instance_shell_masks, start=1):
             assert mi.position_xyz is not None  # see identical assert above
             membrane_labels, overlap = _insert_shell_label(
-                membrane_labels, shell_mask, instance_id, mi.position_xyz, v_size
+                membrane_labels, shell_mask, instance_id, mi.position_xyz, voxel_size
             )
             if overlap:
                 warnings.warn(
@@ -1422,7 +1429,7 @@ class MembraneTomogramGenerator:
                 disable=not self.progressbars,
             ):
                 volume, instance_labels, next_instance_id = self._stamp_filaments(
-                    volume, instance_labels, next_instance_id, v_size, carbon_mask
+                    volume, instance_labels, next_instance_id, voxel_size, carbon_mask
                 )
             phase_done(
                 f"Filaments ({len(self.filament_instances)} monomer instance(s))",
@@ -1444,7 +1451,7 @@ class MembraneTomogramGenerator:
                 "Gold fiducial beads", disable=not self.progressbars
             )
             volume, instance_labels, next_instance_id = self._stamp_beads(
-                volume, instance_labels, next_instance_id, v_size, obstacle_mask
+                volume, instance_labels, next_instance_id, voxel_size, obstacle_mask
             )
             phase_done(
                 f"Gold fiducial beads ({len(self.bead_instances)} placed)",
@@ -1518,7 +1525,7 @@ class MembraneTomogramGenerator:
                     stacklevel=2,
                 )
                 continue
-            region_volume_a3 = region_voxels * v_size**3
+            region_volume_a3 = region_voxels * voxel_size**3
             region_fraction = region_voxels / (
                 target_shape[0] * target_shape[1] * target_shape[2]
             )
@@ -1536,14 +1543,14 @@ class MembraneTomogramGenerator:
                     )
                 pdbs_by_source[spec.pdb_source] = pdb_cache[spec.pdb_source]
 
-            # field_v_size/field_shape: the grid exclusion_field/
+            # field_voxel_size/field_shape: the grid exclusion_field/
             # region_mask_field/sampling_mask below are built and sampled
-            # at -- coarser than v_size at production scale, see
+            # at -- coarser than voxel_size at production scale, see
             # _resolve_exclusion_field_grid's own docstring for why this
             # is safe. exact_specs/ratio_specs' pack_hard_spheres_3d calls
-            # pass field_v_size (not v_size) accordingly.
-            field_v_size, field_shape, field_factor = _resolve_exclusion_field_grid(
-                target_shape, v_size
+            # pass field_voxel_size (not voxel_size) accordingly.
+            field_voxel_size, field_shape, field_factor = _resolve_exclusion_field_grid(
+                target_shape, voxel_size
             )
             region_mask_field = (
                 _downsample_mask_maxpool(region_mask, field_factor, field_shape)
@@ -1563,7 +1570,7 @@ class MembraneTomogramGenerator:
                 torch.from_numpy(
                     ndimage.distance_transform_edt(region_mask_field.cpu().numpy())
                 ).float()
-                * field_v_size
+                * field_voxel_size
             )
 
             exact_specs = [s for s in specs_here if s.n_copies is not None]
@@ -1597,11 +1604,11 @@ class MembraneTomogramGenerator:
                     coords, accepted_idx = pack_hard_spheres_3d(
                         exact_radii,
                         box,
-                        gap=self.gap_angstrom,
+                        gap=self.gap,
                         seed=self.seed,
                         device="cpu",  # see self.device's own docstring
                         exclusion_distance_field=exclusion_field,
-                        field_v_size=field_v_size,
+                        field_voxel_size=field_voxel_size,
                         sampling_mask=region_mask_field,
                         max_passes=self.region_max_passes,
                         stall_patience=region_stall_patience,
@@ -1635,7 +1642,7 @@ class MembraneTomogramGenerator:
                     instance_labels,
                     next_instance_id,
                     location,
-                    v_size,
+                    voxel_size,
                     role="target",
                 )
                 phase_done(
@@ -1652,7 +1659,7 @@ class MembraneTomogramGenerator:
                     # silent, severe per-pass performance regression, not
                     # just a style choice.
                     exact_exclusion_field = _build_sphere_exclusion_field(
-                        coords, placed_radii, field_shape, field_v_size
+                        coords, placed_radii, field_shape, field_voxel_size
                     )
                     exclusion_field = torch.minimum(
                         exclusion_field, exact_exclusion_field
@@ -1691,11 +1698,11 @@ class MembraneTomogramGenerator:
                     coords, accepted_idx = pack_hard_spheres_3d(
                         pool_radii,
                         box,
-                        gap=self.gap_angstrom,
+                        gap=self.gap,
                         seed=self.seed,
                         device="cpu",  # see self.device's own docstring
                         exclusion_distance_field=exclusion_field,
-                        field_v_size=field_v_size,
+                        field_voxel_size=field_voxel_size,
                         sampling_mask=region_mask_field,
                         max_passes=self.region_max_passes,
                         # A TIGHT region (small fraction of the box, e.g. a
@@ -1735,14 +1742,14 @@ class MembraneTomogramGenerator:
                     # pack_hard_spheres_3d itself uses, so the number
                     # reported is one a caller can actually act on.
                     largest = float(species_radii.max())
-                    needed = largest + self.gap_angstrom
+                    needed = largest + self.gap
                     viable_voxels, best_clearance = _diagnose_zero_placements(
                         region_mask_field,
                         exclusion_field,
-                        field_v_size,
+                        field_voxel_size,
                         box,
                         largest,
-                        self.gap_angstrom,
+                        self.gap,
                         self.clip_axes,
                     )
                     if viable_voxels > 0:
@@ -1762,7 +1769,7 @@ class MembraneTomogramGenerator:
                         )
                     else:
                         # No position exists AT ALL that both clears
-                        # gap_angstrom from the boundary and keeps the full
+                        # gap from the boundary and keeps the full
                         # sphere inside the box -- best_clearance is the
                         # most room a box-valid position ever gets, so it's
                         # always < needed here (0.0 if the region has no
@@ -1775,10 +1782,10 @@ class MembraneTomogramGenerator:
                             f"inside the box. Best available clearance at a "
                             f"box-valid position is {best_clearance:.1f} A, "
                             f"against the {needed:.1f} A this species needs "
-                            f"(radius {largest:.1f} A + gap_angstrom "
-                            f"{self.gap_angstrom:.1f} A), out of "
+                            f"(radius {largest:.1f} A + gap "
+                            f"{self.gap:.1f} A), out of "
                             f"{region_voxels:,} region voxels total. "
-                            "Enlarge the compartment, reduce gap_angstrom, "
+                            "Enlarge the compartment, reduce gap, "
                             "or declare a smaller species for this region.",
                             stacklevel=2,
                         )
@@ -1794,7 +1801,7 @@ class MembraneTomogramGenerator:
                     instance_labels,
                     next_instance_id,
                     location,
-                    v_size,
+                    voxel_size,
                     role="filler",
                 )
                 phase_done(
@@ -1816,40 +1823,40 @@ class MembraneTomogramGenerator:
         self,
         volume: torch.Tensor,
         target_shape: tuple[int, int, int],
-        v_size: float,
+        voxel_size: float,
     ) -> torch.Tensor:
-        """Paint `self.grid_spec`'s carbon support film directly into
+        """Paint `self.carbon_film_spec`'s carbon support film directly into
         `volume` (a plain add -- there's nothing else occupying `volume`
         yet at this point in `generate()`, so max-merge vs. add makes no
         difference here). See module docstring for why placement isn't
         made carbon-aware (a documented, CTS-parity limitation, not new
         here)."""
-        grid_spec = self.grid_spec
-        assert grid_spec is not None
+        carbon_film_spec = self.carbon_film_spec
+        assert carbon_film_spec is not None
         carbon_gen = CarbonFilmGenerator(
-            v_size=v_size,
+            voxel_size=voxel_size,
             parameterization=self.parameterization,
             seed=self.seed,
             device=volume.device,
         )
         grid_rng = np.random.default_rng(self.seed)
-        edge_fraction = grid_spec.edge_fraction
+        edge_fraction = carbon_film_spec.edge_fraction
         if isinstance(edge_fraction, tuple):
             edge_fraction = grid_rng.uniform(*edge_fraction)
         hole_center = edge_hole_center(
             target_shape=target_shape,
-            v_size=v_size,
-            hole_radius=grid_spec.hole_radius,
+            voxel_size=voxel_size,
+            hole_radius=carbon_film_spec.hole_radius,
             edge_fraction=edge_fraction,
-            side=grid_spec.edge_side,
+            side=carbon_film_spec.edge_side,
             rng=grid_rng,
         )
         film = carbon_gen.generate(
             target_shape=target_shape,
-            thickness=grid_spec.thickness,
-            hole_radius=grid_spec.hole_radius,
+            thickness=carbon_film_spec.thickness,
+            hole_radius=carbon_film_spec.hole_radius,
             hole_center=hole_center,
-            edge_roughness=grid_spec.edge_roughness,
+            edge_roughness=carbon_film_spec.edge_roughness,
         )
         return volume + film.density.to(volume.device)
 
@@ -1858,7 +1865,7 @@ class MembraneTomogramGenerator:
         volume: torch.Tensor,
         instance_labels: torch.Tensor,
         next_instance_id: int,
-        v_size: float,
+        voxel_size: float,
         obstacle_mask: torch.Tensor | None,
     ) -> tuple[torch.Tensor, torch.Tensor, int]:
         """
@@ -1875,11 +1882,11 @@ class MembraneTomogramGenerator:
         if any). NOT region-gated to cytosol/lumen -- fiducials sit in the
         ice itself, see `TomogramBeadSpec`'s own docstring.
         """
-        target_shape = self.target_shape_zyx
+        target_shape = self.target_shape
         box = (
-            target_shape[0] * v_size,
-            target_shape[1] * v_size,
-            target_shape[2] * v_size,
+            target_shape[0] * voxel_size,
+            target_shape[1] * voxel_size,
+            target_shape[2] * voxel_size,
         )
 
         # self.regions is always set by this point in generate() (region
@@ -1891,8 +1898,8 @@ class MembraneTomogramGenerator:
             forbidden = forbidden | obstacle_mask.cpu()
         allowed = ~forbidden
 
-        field_v_size, field_shape, field_factor = _resolve_exclusion_field_grid(
-            target_shape, v_size
+        field_voxel_size, field_shape, field_factor = _resolve_exclusion_field_grid(
+            target_shape, voxel_size
         )
         allowed_field = (
             _downsample_mask_maxpool(allowed, field_factor, field_shape)
@@ -1903,7 +1910,7 @@ class MembraneTomogramGenerator:
             torch.from_numpy(
                 ndimage.distance_transform_edt(allowed_field.numpy())
             ).float()
-            * field_v_size
+            * field_voxel_size
         )
 
         # Radii are drawn here, before packing, so each bead's own size is
@@ -1928,11 +1935,11 @@ class MembraneTomogramGenerator:
             coords, accepted_idx = pack_hard_spheres_3d(
                 radii,
                 box,
-                gap=self.gap_angstrom,
+                gap=self.gap,
                 seed=self.seed,
                 device="cpu",  # see self.device's own docstring
                 exclusion_distance_field=exclusion_field,
-                field_v_size=field_v_size,
+                field_voxel_size=field_voxel_size,
                 sampling_mask=allowed_field,
                 max_passes=self.region_max_passes,
                 clip_axes=self.clip_axes,
@@ -1951,7 +1958,7 @@ class MembraneTomogramGenerator:
 
         accepted_radii = radii[accepted_idx]
 
-        bead_gen = BeadGenerator(v_size=v_size, roughness=self.bead_roughness)
+        bead_gen = BeadGenerator(voxel_size=voxel_size, roughness=self.bead_roughness)
         instance_ids = torch.arange(
             next_instance_id, next_instance_id + n_placed, dtype=torch.int32
         )
@@ -1965,7 +1972,7 @@ class MembraneTomogramGenerator:
             volume = insert_particles_into_micrograph(
                 bead.density.to(volume.device).unsqueeze(0),
                 coords[i : i + 1],
-                pixel_size=v_size,
+                pixel_size=voxel_size,
                 micrograph=volume,
             )
             # Label from the bead's geometry, not from `density > 0`: the
@@ -1976,7 +1983,10 @@ class MembraneTomogramGenerator:
                 instance_ids[i]
             )
             instance_labels = _insert_instance_labels(
-                binarized, coords[i : i + 1], pixel_size=v_size, labels=instance_labels
+                binarized,
+                coords[i : i + 1],
+                pixel_size=voxel_size,
+                labels=instance_labels,
             )
 
         for i in range(n_placed):
@@ -1995,7 +2005,7 @@ class MembraneTomogramGenerator:
         volume: torch.Tensor,
         instance_labels: torch.Tensor,
         next_instance_id: int,
-        v_size: float,
+        voxel_size: float,
         carbon_mask: torch.Tensor | None,
     ) -> tuple[torch.Tensor, torch.Tensor, int]:
         """Place and render every `filament_specs` species, continuing
@@ -2022,20 +2032,20 @@ class MembraneTomogramGenerator:
         monomer mid-path just leaves a gap in that filament, not a
         redirected walk around the film.
         """
-        target_shape = self.target_shape_zyx
-        extent_xyz = torch.tensor(target_shape[::-1], dtype=torch.float32) * v_size
+        target_shape = self.target_shape
+        extent_xyz = torch.tensor(target_shape[::-1], dtype=torch.float32) * voxel_size
 
         rng = torch.Generator()
         if self.seed is not None:
             rng.manual_seed(self.seed)
-        instances = place_filaments(self.filament_specs, target_shape, v_size, rng)
+        instances = place_filaments(self.filament_specs, target_shape, voxel_size, rng)
 
         if carbon_mask is not None and instances:
             nz, ny, nx = target_shape
             pos = torch.stack([inst.position_xyz for inst in instances])  # (N,3) x,y,z
-            ix = (pos[:, 0] / v_size).long().clamp(0, nx - 1)
-            iy = (pos[:, 1] / v_size).long().clamp(0, ny - 1)
-            iz = (pos[:, 2] / v_size).long().clamp(0, nz - 1)
+            ix = (pos[:, 0] / voxel_size).long().clamp(0, nx - 1)
+            iy = (pos[:, 1] / voxel_size).long().clamp(0, ny - 1)
+            iz = (pos[:, 2] / voxel_size).long().clamp(0, nz - 1)
             in_carbon = carbon_mask.cpu()[iz, iy, ix]
             n_dropped = int(in_carbon.sum())
             if n_dropped:
@@ -2066,10 +2076,10 @@ class MembraneTomogramGenerator:
                     code, savefolder=self.pdb_cache_dir, verbose=False
                 )
             pdb = pdb_cache[code]
-            n = estimate_protein_box_size(pdb.max_diameter, v_size)
+            n = estimate_protein_box_size(pdb.max_diameter, voxel_size)
             builder = PotentialBuilder(
                 n_xyz=n,
-                dx=v_size,
+                dx=voxel_size,
                 atomic_numbers=pdb.atomic_numbers,
                 progressbars=False,
                 parameterization=self.parameterization,
@@ -2115,7 +2125,7 @@ class MembraneTomogramGenerator:
                 volume = insert_particles_into_micrograph(
                     rotated,
                     positions_centered[start:end],
-                    pixel_size=v_size,
+                    pixel_size=voxel_size,
                     micrograph=volume,
                 )
                 binarized = (rotated > label_threshold).to(torch.int32) * instance_ids[
@@ -2124,7 +2134,7 @@ class MembraneTomogramGenerator:
                 instance_labels = _insert_instance_labels(
                     binarized,
                     positions_centered[start:end],
-                    pixel_size=v_size,
+                    pixel_size=voxel_size,
                     labels=instance_labels,
                 )
 
@@ -2201,11 +2211,12 @@ class MembraneTomogramGenerator:
             target/filler `(species_id, location)` collision, to avoid
             overwriting the target's own file). Default False.
         include_beads : bool, optional
-            If True (default), also write one pick file per gold fiducial
-            bead radius, suffixed ``-bead`` (species name
-            ``f"bead_{radius:g}"``). Always written as plain ``"point"``
-            regardless of `oriented` -- a solid sphere has no meaningful
-            per-instance orientation.
+            If True (default), also write every gold fiducial to a single
+            ``gold-bead`` pick file, regardless of radius or which
+            `bead_specs` population it came from -- nothing downstream
+            distinguishes bead sizes. Always written as plain ``"point"``
+            regardless of `oriented`: a bead has no meaningful
+            per-instance orientation for picking purposes.
 
         Returns
         -------
@@ -2222,14 +2233,14 @@ class MembraneTomogramGenerator:
         output_dir.mkdir(parents=True, exist_ok=True)
         written: dict[str, Path] = {}
 
-        target_shape = self.target_shape_zyx
-        v_size = self.v_size
+        target_shape = self.target_shape
+        voxel_size = self.voxel_size
         extent_xyz = (
             torch.tensor(
                 [target_shape[2], target_shape[1], target_shape[0]],
                 dtype=torch.float32,
             )
-            * v_size
+            * voxel_size
         )
         point_type = "orientedPoint" if oriented else "point"
 
@@ -2313,33 +2324,33 @@ class MembraneTomogramGenerator:
                 written[key] = path
 
         if include_beads and self.bead_instances:
-            by_radius: dict[float, list[BeadPlacement]] = {}
-            for bead in self.bead_instances:
-                by_radius.setdefault(bead.radius, []).append(bead)
-            for radius, beads in by_radius.items():
-                key = f"bead_{radius:g}-bead"
-                path = output_dir / f"{key}-{annotation_version}_point.ndjson"
-                with open(path, "w") as f:
-                    for bead in beads:
-                        corner_xyz = bead.position_xyz + extent_xyz / 2
-                        x, y, z = (float(v) for v in corner_xyz)
-                        f.write(
-                            json.dumps(
-                                {"type": "point", "location": {"x": x, "y": y, "z": z}}
-                            )
-                            + "\n"
+            # Every fiducial goes in one file regardless of radius or
+            # population: nothing downstream distinguishes bead sizes, and
+            # under a [low, high] radius each instance has a unique size,
+            # so grouping by radius would write one file per bead.
+            key = "gold-bead"
+            path = output_dir / f"{key}-{annotation_version}_point.ndjson"
+            with open(path, "w") as f:
+                for bead in self.bead_instances:
+                    corner_xyz = bead.position_xyz + extent_xyz / 2
+                    x, y, z = (float(v) for v in corner_xyz)
+                    f.write(
+                        json.dumps(
+                            {"type": "point", "location": {"x": x, "y": y, "z": z}}
                         )
-                written[key] = path
+                        + "\n"
+                    )
+            written[key] = path
 
         return written
 
     def _build_species_template(
-        self, pdb: PDB, v_size: float, device: torch.device
+        self, pdb: PDB, voxel_size: float, device: torch.device
     ) -> torch.Tensor:
-        n = estimate_protein_box_size(pdb.max_diameter, v_size)
+        n = estimate_protein_box_size(pdb.max_diameter, voxel_size)
         builder = PotentialBuilder(
             n_xyz=n,
-            dx=v_size,
+            dx=voxel_size,
             atomic_numbers=pdb.atomic_numbers,
             progressbars=False,
             parameterization=self.parameterization,
@@ -2356,7 +2367,7 @@ class MembraneTomogramGenerator:
         instance_labels: torch.Tensor,
         next_instance_id: int,
         location: str,
-        v_size: float,
+        voxel_size: float,
         role: Literal["target", "filler"] = "target",
     ) -> tuple[torch.Tensor, torch.Tensor, int]:
         active_species_i = [
@@ -2382,7 +2393,7 @@ class MembraneTomogramGenerator:
             templates = build_templates_concurrently(
                 keys=active_species_i,
                 build_one=lambda species_i, device: self._build_species_template(
-                    pdbs[species_i], v_size, device
+                    pdbs[species_i], voxel_size, device
                 ),
                 devices=self.render_devices,
                 max_workers=self.render_workers,
@@ -2443,7 +2454,7 @@ class MembraneTomogramGenerator:
                     volume = insert_particles_into_micrograph(
                         rotated,
                         species_coords[start:end],
-                        pixel_size=v_size,
+                        pixel_size=voxel_size,
                         micrograph=volume,
                     )
                     binarized = (rotated > label_threshold).to(
@@ -2452,7 +2463,7 @@ class MembraneTomogramGenerator:
                     instance_labels = _insert_instance_labels(
                         binarized,
                         species_coords[start:end],
-                        pixel_size=v_size,
+                        pixel_size=voxel_size,
                         labels=instance_labels,
                     )
 

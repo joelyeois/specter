@@ -11,10 +11,10 @@
 
 [specimen]
 target_shape = [200, 1200, 1200]    # (Z, Y, X) voxels
-v_size = 5.0                        # A/voxel
+voxel_size = 5.0                        # A/voxel
 clip_axes = [true, true, true]      # (z, y, x) -- True lets instances poke past that wall
 filler_occupancy_fraction = 1.0     # above 0.5 is beyond RSA's theoretical max packing
-gap_angstrom = 5.0                  # minimum clearance between placed spheres, A
+gap = 5.0                  # minimum clearance between placed spheres, A
 pdb_savefolder = "specter-data/pdb"         # relative to your working directory
 # seed = 11                         # uncomment for reproducible packing
 
@@ -41,7 +41,7 @@ write_segmentation = true
 device = "cuda"                     # cpu | cuda | cuda:0 | 0,1,2 | auto
 accumulator_device = "auto"
 render_workers = "auto"
-chunk_size = 64
+render_chunk_size = 64
 
 
 # =============================================================================
@@ -79,6 +79,10 @@ filler_from_pei2016 = true
 # placement slots RSA jams on while adding little volume.
 # filler_table_min_mw_kda = 20.0
 
+# Atomic scattering-factor parameterization for the targets/filler protein-fill
+# step specifically (applies regardless of whether any [[membrane]] is set).
+target_parameterization = "shtyrov"
+
 
 # =============================================================================
 # CONTENTS -- MEMBRANES
@@ -88,16 +92,16 @@ filler_from_pei2016 = true
 
 [[membrane]]
 shape_backend = "spherical_harmonics"
-bilayer_thickness_a = 30.0
-sh_axes_range_a = [150.0, 1600.0]   # SEMI-axes, A -- a vesicle's diameter is
+bilayer_thickness = 30.0
+sh_axes_range = [150.0, 1600.0]   # SEMI-axes, A -- a vesicle's diameter is
                                     # roughly twice these.
 n_copies = 3
 
 [[membrane]]
 shape_backend = "swept_spline"
-bilayer_thickness_a = 30.0
-swept_total_length_range_a = [1500.0, 2400.0] # path contour length, A
-swept_tube_radius_range_a = [150.0, 400.0] # tube radius, A
+bilayer_thickness = 30.0
+swept_total_length_range = [1500.0, 2400.0] # path contour length, A
+swept_tube_radius_range = [150.0, 400.0] # tube radius, A
 n_copies = 3
 
 # Proteins embedded in the bilayer, one table per species.
@@ -107,33 +111,43 @@ n_copies = 40        # per membrane instance; a request, not a guarantee
 
 [membrane_settings]
 # membrane_region_density_threshold = 0.05
-membrane_min_transmembrane_spacing_a = 40.0
-parameterization = "shtyrov"
+membrane_min_transmembrane_spacing = 40.0
 
 
 # =============================================================================
-# CONTENTS -- OPTIONAL EXTRAS
-# All three are off by default. Uncomment a block to enable it.
+# CONTENTS -- FILAMENTS, CARBON FILM, GOLD FIDUCIALS
+# All three are ON here, since a real tomogram usually has all of them.
+# Delete or comment out a block to leave that feature out.
 # =============================================================================
 
-# Filaments -- optional. Either hand-write [[filaments]] entries (FilamentSpec
-# kwargs) or set `actin = true` for the built-in ACTIN_SPEC preset. Uncomment to add:
-# [[filaments]]
-# code = "1J6Z"          # F-actin monomer
-# step = 27.3            # axial rise per monomer, A
-# flex_deg = 12.0        # max per-step path curvature, degrees
-# twist_deg = 166.15     # helical twist per monomer, degrees
-# n_filaments = 20
-# n_monomers = [20, 60]
+# Filaments. Either hand-write [[filaments]] entries (FilamentSpec kwargs), as
+# below, or set `actin = true` for the built-in ACTIN_SPEC preset.
+[[filaments]]
+code = "1J6Z"          # F-actin monomer
+step = 27.3            # axial rise per monomer, A
+flex_deg = 12.0        # max per-step path curvature, degrees
+twist_deg = 166.15     # helical twist per monomer, degrees
+n_copies = 20
+n_monomers = [20, 60]
 
-# Carbon support film -- optional, at most one [[grid]] table. Uncomment to add:
-# [[grid]]
-# hole_radius = 6000.0          # A (0.6 micron, Quantifoil R1.2/1.3)
-# edge_fraction = [0.02, 0.05]
-# edge_side = "random"          # "left" | "right" | "top" | "bottom" | "random"
+# Carbon support film -- at most one [[carbon_film]] table. With hole_radius set to
+# roughly the box width, only a sliver of film intrudes at one edge, which is
+# what a tomogram near a hole edge actually looks like. Costs ~9 s at the box
+# size above.
+[[carbon_film]]
+hole_radius = 6000.0          # A (0.6 micron, Quantifoil R1.2/1.3)
+edge_fraction = [0.02, 0.05]
+edge_side = "random"          # "left" | "right" | "top" | "bottom" | "random"
 
-# Gold fiducial beads -- optional, one [[beads]] table per radius population.
-# Uncomment to add:
-# [[beads]]
-# radius = 100.0
-# n_copies = 20
+# Gold fiducial beads -- one [[beads]] table per population. `radius` takes a
+# single number or a [low, high] pair drawn per bead; real colloidal gold is
+# not monodisperse, so a range is the more faithful default.
+[[beads]]
+radius = [80.0, 120.0]        # A -- i.e. 16-24 nm diameter
+n_copies = 20
+
+[bead_settings]
+# How irregular each fiducial's boundary is, as an RMS fraction of its radius.
+# One number, or a [low, high] pair drawn per bead so the population mixes
+# near-round and misshapen particles. 0.0 gives clean spheres.
+bead_roughness = [0.0, 0.2]

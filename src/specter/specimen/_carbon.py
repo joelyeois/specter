@@ -14,7 +14,7 @@ islands, overhangs, or bays -- topologically a perfect disk). It was a
 deliberate, reasoned departure from an even earlier point-cloud/alpha-shape
 implementation, for real concerns (see that removed docstring): a
 fixed-point-count cloud degrades to sparse speckle as `target_shape`/
-`v_size` grow, and a handful of smooth analytic modes can't reach genuine
+`voxel_size` grow, and a handful of smooth analytic modes can't reach genuine
 per-pixel jaggedness. This implementation restores the alpha-shape
 approach but fixes both: point count now scales with a real physical seed
 *density* (`_SEED_VOLUME_PER_POINT`, atoms/A^3-like, not a fixed count), so
@@ -303,7 +303,7 @@ def _sample_in_tets(
 
 def _seed_points(
     target_shape: tuple[int, int, int],
-    v_size: float,
+    voxel_size: float,
     thickness: float,
     hole_radius: float,
     hole_center: tuple[float, float],
@@ -333,7 +333,7 @@ def _seed_points(
     ----------
     target_shape : tuple of int
         (nz, ny, nx) grid shape, matching `CarbonFilmGenerator.generate`.
-    v_size : float
+    voxel_size : float
         Voxel size, Angstrom.
     thickness : float
         Film thickness, Angstrom.
@@ -354,7 +354,7 @@ def _seed_points(
         (0, 0, 0) is the volume's center).
     """
     nz, ny, nx = target_shape
-    lx, ly = nx * v_size, ny * v_size
+    lx, ly = nx * voxel_size, ny * voxel_size
     filmsize = np.array([lx + 2 * _LATERAL_PAD, ly + 2 * _LATERAL_PAD, thickness])
 
     n_seed = int(round(np.prod(filmsize) / _SEED_VOLUME_PER_POINT))
@@ -373,8 +373,8 @@ def _seed_points(
 def _deposit_splat(
     coords: torch.Tensor,
     weight: float,
-    shape_px: tuple[int, int, int],
-    v_size: float,
+    target_shape: tuple[int, int, int],
+    voxel_size: float,
 ) -> torch.Tensor:
     """
     Trilinear splat of a MIP-calibrated flat weight (see module docstring).
@@ -386,7 +386,7 @@ def _deposit_splat(
     center), matching ``specter.potential``'s convention and the rest of
     this generator.
 
-    `weight` should be ``atom_potential_integral / v_size**3`` --
+    `weight` should be ``atom_potential_integral / voxel_size**3`` --
     depositing a single atom's real, physical potential integral (Volts *
     Angstrom^3, resolution-independent -- see `_mean_inner_potential`)
     uniformly over one voxel's volume. By the mean-field relation for a
@@ -403,9 +403,9 @@ def _deposit_splat(
         (N, 3) atom coordinates, Angstrom, centered-origin.
     weight : float
         Per-atom deposited value, Volts.
-    shape_px : tuple of int
+    target_shape : tuple of int
         (nz, ny, nx) output grid size.
-    v_size : float
+    voxel_size : float
         Voxel size, Angstrom.
 
     Returns
@@ -413,14 +413,16 @@ def _deposit_splat(
     torch.Tensor
         (nz, ny, nx) volume, Volts.
     """
-    nz, ny, nx = shape_px
+    nz, ny, nx = target_shape
     device = coords.device
     out = torch.zeros(nz * ny * nx, dtype=torch.float32, device=device)
 
     center = torch.tensor(
         [nx / 2.0, ny / 2.0, nz / 2.0], dtype=coords.dtype, device=device
     )
-    g = coords / v_size + center - 0.5  # voxel centers at (i + 0.5) * v_size - center
+    g = (
+        coords / voxel_size + center - 0.5
+    )  # voxel centers at (i + 0.5) * voxel_size - center
     g0 = torch.floor(g)
     f = g - g0
     g0 = g0.long()
@@ -474,7 +476,7 @@ class CarbonFilmGenerator:
 
     Parameters
     ----------
-    v_size : float
+    voxel_size : float
         Voxel size, Angstrom.
     parameterization : str, optional
         Atomic-potential parameterization used to compute carbon's per-atom
@@ -490,12 +492,12 @@ class CarbonFilmGenerator:
 
     def __init__(
         self,
-        v_size: float,
+        voxel_size: float,
         parameterization: str = "kirkland",
         seed: int | None = None,
         device: torch.device | str | None = None,
     ):
-        self.v_size = v_size
+        self.voxel_size = voxel_size
         self.device = (
             torch.device(device)
             if device is not None
@@ -512,7 +514,7 @@ class CarbonFilmGenerator:
         # _mean_inner_potential's own docstring); passing number_density=1.0
         # returns this integral directly rather than a density-scaled MIP.
         self.atom_potential_integral = _mean_inner_potential(
-            v_size,
+            voxel_size,
             1.0,
             atomic_number=6,
             parameterization=parameterization,
@@ -573,7 +575,7 @@ class CarbonFilmGenerator:
         """
         points = _seed_points(
             target_shape,
-            self.v_size,
+            self.voxel_size,
             thickness,
             hole_radius,
             hole_center,
@@ -582,7 +584,7 @@ class CarbonFilmGenerator:
         )
         if points.shape[0] < 4:
             raise ValueError(
-                "hole_radius too large relative to target_shape/v_size: "
+                "hole_radius too large relative to target_shape/voxel_size: "
                 "the entire film footprint falls inside the cut-out hole"
             )
 
@@ -592,22 +594,22 @@ class CarbonFilmGenerator:
             raise ValueError(
                 "no carbon atoms placed -- alpha-shape film volume is zero "
                 "relative to the placed density; the seed cloud may be too "
-                "sparse for target_shape/v_size (increase hole_radius/"
+                "sparse for target_shape/voxel_size (increase hole_radius/"
                 "edge_fraction, or check for a degenerate target_shape)"
             )
 
-        weight = self.atom_potential_integral / self.v_size**3
+        weight = self.atom_potential_integral / self.voxel_size**3
         density = torch.zeros(target_shape, dtype=torch.float32, device=self.device)
         for start in range(0, n_atoms, _SAMPLE_CHUNK):
             m = min(_SAMPLE_CHUNK, n_atoms - start)
             coords = _sample_in_tets(shape, m, self.gen)
-            density += _deposit_splat(coords, weight, target_shape, self.v_size)
+            density += _deposit_splat(coords, weight, target_shape, self.voxel_size)
         return CarbonFilmInstance(density=density)
 
 
 def edge_hole_center(
     target_shape: tuple[int, int, int],
-    v_size: float,
+    voxel_size: float,
     hole_radius: float,
     edge_fraction: float = 0.1,
     side: str = "random",
@@ -638,7 +640,7 @@ def edge_hole_center(
     ----------
     target_shape : tuple of int
         (nz, ny, nx) grid shape the film will be generated at.
-    v_size : float
+    voxel_size : float
         Voxel size, Angstrom.
     hole_radius : float
         The real, physical hole radius that will be passed to
@@ -671,7 +673,7 @@ def edge_hole_center(
             ["left", "right", "top", "bottom"]
         )
     nz, ny, nx = target_shape
-    half_x, half_y = nx * v_size / 2, ny * v_size / 2
+    half_x, half_y = nx * voxel_size / 2, ny * voxel_size / 2
     if side == "right":
         edge = half_x * (1 - 2 * edge_fraction)
         return edge - hole_radius, 0.0
@@ -690,7 +692,7 @@ def edge_hole_center(
 
 
 @dataclass
-class GridSpec:
+class CarbonFilmSpec:
     """
     Carbon support film, forwarded to ``CarbonFilmGenerator.generate``.
 
@@ -711,13 +713,17 @@ class GridSpec:
         high-resolution collection (see that constant's comment for the
         source), deliberately much larger than a typical `target_shape`
         field of view.
-    edge_fraction : float or tuple of float, optional
+    edge_fraction : float or sequence of float, optional
         Fraction (0-1) of the frame that ends up carbon, entering from
         `edge_side`. Either a fixed value, or a ``(low, high)`` range to
         draw uniformly at random each ``generate()`` call (using the same
         seed as everything else here) -- real images don't all happen to
         catch exactly the same amount of a hole's edge. Default
-        ``(0.02, 0.05)``.
+        ``(0.02, 0.05)``. A two-element list is normalised to a tuple:
+        TOML has no tuple type, so a ``[[carbon_film]]`` table's
+        ``edge_fraction = [0.02, 0.05]`` arrives here as a list, and
+        consumers branch on ``isinstance(..., tuple)`` to tell a range
+        from a fixed value.
     edge_side : str, optional
         Which frame edge the carbon intrudes from: ``'left'``,
         ``'right'``, ``'top'``, ``'bottom'``, or ``'random'`` (default).
@@ -731,3 +737,18 @@ class GridSpec:
     edge_fraction: float | tuple[float, float] = (0.02, 0.05)
     edge_side: str = "random"
     edge_roughness: float = 60.0
+
+    def __post_init__(self) -> None:
+        if isinstance(self.edge_fraction, (list, tuple)):
+            if len(self.edge_fraction) != 2:
+                raise ValueError(
+                    "CarbonFilmSpec: edge_fraction range must be [low, high], got "
+                    f"{self.edge_fraction!r}"
+                )
+            lo, hi = (float(v) for v in self.edge_fraction)
+            if hi < lo:
+                raise ValueError(
+                    f"CarbonFilmSpec: edge_fraction must be [low, high], got "
+                    f"{self.edge_fraction!r}"
+                )
+            self.edge_fraction = (lo, hi)

@@ -6,7 +6,7 @@ from .cytosolic_filler import (
 )
 from .from_volume import load_specimen_volume
 from ._grid import BeadSpec
-from ._carbon import GridSpec
+from ._carbon import CarbonFilmSpec
 from .filament import ACTIN_SPEC, MICROTUBULE_SPEC, FilamentInstance, FilamentSpec
 from .membrane import (
     MembraneGenerator,
@@ -30,7 +30,7 @@ __all__ = [
     "build_filler_pool_specs",
     "load_specimen_volume",
     "BeadSpec",
-    "GridSpec",
+    "CarbonFilmSpec",
     "MembraneGenerator",
     "TransmembranePlacement",
     "TransmembraneSpec",

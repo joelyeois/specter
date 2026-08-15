@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 import tomllib
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import Any, Literal, TypeVar, overload
 
@@ -89,6 +89,11 @@ def default_pdb_cache_dir() -> str:
 #: ``8000`` and ``5000,15000`` spellings on a command line.
 ScalarOrRange = str | float | int | list[float]
 
+#: TOML keys that have been renamed, mapped to their current spelling. Used
+#: only to turn `load_config`'s "unknown field" error into one that says what
+#: to write instead.
+RENAMED_CONFIG_KEYS = {"grid": "carbon_film"}
+
 
 def parse_scalar_or_range(value: ScalarOrRange) -> tuple[float, float]:
     """
@@ -155,7 +160,7 @@ class ParticleStackConfig:
     # --- Structure & potential (basic) ---
     pdb_code: str
     assembly: bool = True
-    num_pixels: int = 256
+    n_pixels: int = 256
     pixel_size: float = 1.0  # Å
 
     # --- Microscope (basic) ---
@@ -200,7 +205,7 @@ class ParticleStackConfig:
     pdb_savefolder: str = field(default_factory=default_pdb_cache_dir)
     # if set, poses/CTF/pixel_size/voltage/alpha come from here
     cs_path: str | None = None
-    num_frames: int | None = None
+    n_frames: int | None = None
     convergence_angle: float | None = None  # mrad
     cc: float | None = None  # mm
     energy_spread: float = 0.7  # eV (FWHM)
@@ -287,7 +292,7 @@ class ParticleStackConfig:
 PARTICLE_STACK_HELP: dict[str, str] = {
     "pdb_code": "PDB accession code or path to a local .cif/.pdb file.",
     "assembly": "Fetch the biological assembly.",
-    "num_pixels": "Number of pixels per axis for the 3-D potential box.",
+    "n_pixels": "Number of pixels per axis for the 3-D potential box.",
     "pixel_size": "Pixel size in Angstrom.",
     "voltage": "Electron beam accelerating voltage in kV.",
     "dose": "Dose in e-/A^2: a single value (e.g. 20) for constant dose per "
@@ -316,7 +321,7 @@ PARTICLE_STACK_HELP: dict[str, str] = {
     "pdb_savefolder": "Folder to cache downloaded PDB files.",
     "cs_path": "Path to a CryoSPARC .cs file to drive generation from real "
     "pixel_size/voltage/alpha/poses/CTF instead of random sampling.",
-    "num_frames": "Number of movie frames. Defaults to int(dose) if not set.",
+    "n_frames": "Number of movie frames. Defaults to int(dose) if not set.",
     "convergence_angle": "Beam convergence semi-angle in mrad, for the Cs "
     "(spatial coherence) envelope.",
     "cc": "Chromatic aberration coefficient in mm, for the Cc (temporal "
@@ -415,7 +420,16 @@ PARTICLE_STACK_HELP: dict[str, str] = {
 
 @dataclass
 class MicrographConfig:
-    """Parameters for micrograph generation, loaded from a TOML config file."""
+    """Parameters for micrograph generation, loaded from a TOML config file.
+
+    `dose`, `defocus`, `coincidence_radius`, and `potential_scale` each take
+    either a single number (e.g. ``20``, constant for every micrograph) or a
+    ``[low, high]`` pair (e.g. ``[5000, 15000]``, sampled uniformly per
+    micrograph) -- the same scalar-or-range convention as
+    `ParticleStackConfig`/`TiltSeriesConfig`. Comma-separated strings
+    (``"5000,15000"``) are still accepted, since that's the only spelling a
+    CLI flag can carry -- see :func:`parse_scalar_or_range`.
+    """
 
     # --- PDB / potential ---
     pdb_code: str
@@ -423,15 +437,14 @@ class MicrographConfig:
     # Relative to the current working directory, like any other CLI path
     # argument -- see default_pdb_cache_dir for the unset case.
     pdb_savefolder: str = field(default_factory=default_pdb_cache_dir)
-    num_pixels: int = 256
+    n_pixels: int = 256
     pixel_size: float = 1.0  # Å
     micrograph_size: int = 4096
 
     # --- Microscope / physics ---
     voltage: float = 300.0  # kV
-    dose_min: float = 20.0  # e⁻/Å²
-    dose_max: float | None = None  # e⁻/Å²
-    num_frames: int | None = None
+    dose: ScalarOrRange = 20.0  # e⁻/Å²
+    n_frames: int | None = None
     cs: float = 2.0  # mm
     alpha: float = 0.1  # unitless, amplitude contrast ratio
 
@@ -444,8 +457,7 @@ class MicrographConfig:
     dose_envelope: bool = False
 
     # --- Defocus ---
-    defocus_min: float = 5000.0  # Å
-    defocus_max: float = 15000.0  # Å
+    defocus: ScalarOrRange = field(default_factory=lambda: [5000.0, 15000.0])  # Å
 
     # --- Dataset size ---
     n_micrographs: int = 1
@@ -456,18 +468,16 @@ class MicrographConfig:
     )
     aberration_model: Literal["holography", "ctf"] = "holography"
     noise_model: Literal["poisson", "none"] = "poisson"
-    coincidence_radius_min: float = 0.7181  # pixels (effective exclusion radius)
-    coincidence_radius_max: float | None = None  # pixels
+    coincidence_radius: ScalarOrRange = 0.7181  # pixels (effective exclusion radius)
     ice_model: Literal["gd", "random", "none"] = "gd"
     ice_thickness: float = 500.0  # Å, 0 = minimum (particle box size)
     ice_cache_dir: str | None = None  # defaults to the bundled ice-data/ice_cache
     crowd_min_distance: float | None = None  # Å
     crowd_max_distance_z: float | None = None  # Å
     water_air_interface: bool = True
-    potential_scale_min: float = 1.0  # unitless
-    potential_scale_max: float | None = None  # unitless
+    potential_scale: ScalarOrRange = 1.0  # unitless
     pad_fft: bool = False
-    chunk_size: int | None = None
+    specimen_chunk_size: int | None = None
     detector_model: Literal["none", "perfect", "k3_300kv", "k3_200kv"] = "none"
 
     # --- Post-processing ---
@@ -502,14 +512,14 @@ class TiltSeriesConfig:
 
     # --- Microscope / physics ---
     # Å/voxel of the loaded volume -- must match whatever produced it (e.g.
-    # `TomogramConfig.v_size`), not auto-detected from the file itself.
-    target_v_size: float = 5.0
+    # `TomogramConfig.voxel_size`), not auto-detected from the file itself.
+    voxel_size: float = 5.0
     micrograph_size: int | None = (
         None  # pixels, square; defaults to the loaded volume's own XY extent
     )
     voltage: float = 300.0  # kV
     dose_per_tilt: float = 3.0  # e⁻/Å², per tilt angle
-    num_frames: int = 10  # movie frames per tilt
+    n_frames: int = 10  # movie frames per tilt
     cs: float = 2.0  # mm
     alpha: float = 0.1  # unitless, amplitude contrast ratio
 
@@ -563,13 +573,13 @@ TILT_SERIES_HELP: dict[str, str] = {
     "volume_path": "Path to a pre-built (Z, Y, X) scattering-potential volume "
     "(.mrc/.mrcs/.pt), already in scattering-potential units -- e.g. `specter "
     "build tomogram`'s own output. Required.",
-    "target_v_size": "Voxel size of the loaded volume, in Angstrom -- must "
+    "voxel_size": "Voxel size of the loaded volume, in Angstrom -- must "
     "match whatever produced it.",
     "micrograph_size": "Output tilt-image size in pixels (square). Defaults "
     "to the XY dimension of the specimen volume.",
     "voltage": "Electron beam accelerating voltage in kV.",
     "dose_per_tilt": "Dose per tilt angle in e-/A^2.",
-    "num_frames": "Number of movie frames per tilt.",
+    "n_frames": "Number of movie frames per tilt.",
     "cs": "Spherical aberration in mm (1-3 mm typical).",
     "alpha": "Amplitude contrast ratio.",
     "convergence_angle": "Beam convergence semi-angle in mrad, for the Cs "
@@ -669,7 +679,7 @@ class TomogramConfig:
     target_shape: list[int] = field(
         default_factory=lambda: [128, 256, 256]
     )  # (Z, Y, X) voxels
-    v_size: float = 5.0  # Å/voxel
+    voxel_size: float = 5.0  # Å/voxel
     # Target packing density for `ratio`-mode filler species, as a bare-
     # sphere fraction of EACH REGION's own volume it's placed in (the whole
     # box when `membrane` is empty, since then "cytosol" IS the whole box --
@@ -680,7 +690,7 @@ class TomogramConfig:
     # sparser filler layer, or if a small region (e.g. a tight vesicle
     # lumen) makes the candidate pool this implies impractically large.
     filler_occupancy_fraction: float = 0.5
-    gap_angstrom: float = 5.0  # minimum clearance between placed spheres
+    gap: float = 5.0  # minimum clearance between placed spheres
     # (z, y, x), matching target_shape's axis order. True on an axis lets a
     # placed instance's center stay in-bounds while its body pokes past
     # that wall (truncated naturally at render time) instead of being
@@ -698,8 +708,8 @@ class TomogramConfig:
     # MembraneInstance). Empty (default): no membrane at all -- the whole
     # tomogram is then one cytosol region. Keys are passed as **kwargs
     # straight into specter.specimen.membrane.MembraneGenerator -- e.g.
-    # {"shape_backend": "spherical_harmonics", "sh_axes_a": [300.0, 300.0,
-    # 300.0], "sh_amplitude": 0.15, "bilayer_thickness_a": 30.0} -- PLUS
+    # {"shape_backend": "spherical_harmonics", "sh_axes": [300.0, 300.0,
+    # 300.0], "sh_amplitude": 0.15, "bilayer_thickness": 30.0} -- PLUS
     # three keys not real MembraneGenerator kwargs, popped before that call:
     #   - "n_copies" (int, default 1): expands this one entry into that
     #     many independent instances sharing the same template, each its
@@ -715,14 +725,14 @@ class TomogramConfig:
     #     docstring) -- an instance that doesn't fit is dropped, not
     #     retried. Give it explicitly for manual placement instead (then
     #     n_copies must be 1).
-    #   - "target_shape_zyx" = [Z, Y, X] voxels. Default omitted (None):
+    #   - "target_shape" = [Z, Y, X] voxels. Default omitted (None):
     #     MembraneGenerator auto-sizes a small local working grid from the
     #     organelle's own size (see its own docstring) instead of every
     #     instance rendering on a grid the size of the WHOLE tomogram
     #     canvas. Give it explicitly only if this instance genuinely needs
     #     a specific working-grid size.
-    # v_size/seed/device/pdb_cache_dir still come from this config's own
-    # v_size/seed/device/pdb_savefolder fields for every instance, not from
+    # voxel_size/seed/device/pdb_cache_dir still come from this config's own
+    # voxel_size/seed/device/pdb_savefolder fields for every instance, not from
     # this dict (shape_backend one of "spherical_harmonics" (default) or
     # "swept_spline").
     membrane: list[dict[str, Any]] = field(default_factory=list)
@@ -731,26 +741,29 @@ class TomogramConfig:
     # "n_copies" is per membrane instance, and is a request rather than a
     # guarantee -- MembraneGenerator.place_transmembrane warns and places
     # fewer if the surface can't fit that many at
-    # membrane_min_transmembrane_spacing_a.
+    # membrane_min_transmembrane_spacing.
     # Applies across ALL membrane instances (not per-instance in v1). Only
     # meaningful when `membrane` is set (no bilayer to embed into otherwise).
     membrane_transmembrane_specs: list[dict[str, Any]] = field(default_factory=list)
     membrane_region_density_threshold: float | None = None
     membrane_region_max_passes: int = 300
-    membrane_min_transmembrane_spacing_a: float = 40.0
+    membrane_min_transmembrane_spacing: float = 40.0
     # Atomic scattering-factor parameterization for the targets/filler
-    # protein-fill step (MembraneTomogramGenerator's own `parameterization`,
-    # distinct from each MembraneGenerator instance's own "parameterization"
-    # key inside its [[membrane]] dict, if set there -- that one's for the
-    # bilayer/transmembrane step specifically). A top-level field rather
-    # than read from membrane[0] since it applies regardless of whether
-    # membrane is even set.
-    parameterization: str = "shtyrov"
+    # protein-fill step (MembraneTomogramGenerator's own `parameterization`
+    # constructor kwarg, distinct from each MembraneGenerator instance's own
+    # "parameterization" key inside its [[membrane]] dict, if set there --
+    # that one's for the bilayer/transmembrane step specifically). A
+    # top-level field rather than read from membrane[0] since it applies
+    # regardless of whether membrane is even set. Named target_parameterization
+    # (not bare parameterization) to keep it distinct from
+    # potential_parameterization/ice_parameterization on the particle-stack
+    # side of the codebase.
+    target_parameterization: str = "shtyrov"
 
     # --- Filaments (optional, additive on top of membranes if present) ---
     # One dict per filament species, mapping straight onto
     # specter.specimen.filament.FilamentSpec's own kwargs, e.g.
-    # {"code": "1TUB", "step": 85.0, "flex_deg": 3.0, "n_filaments": 4}.
+    # {"code": "1TUB", "step": 85.0, "flex_deg": 3.0, "n_copies": 4}.
     # Placed via specter.specimen.filament.place_filaments -- specter-native
     # random-walk placement, with no region-gating and no collision
     # avoidance against the membrane shell or each other, but DOES get
@@ -761,14 +774,14 @@ class TomogramConfig:
     # Convenience toggle: also place the bundled ACTIN_SPEC preset (real
     # F-actin helical repeat -- step/twist from Holmes/Egelman) without
     # hand-writing a [[filaments]] entry. Additive to filaments above (both
-    # may be set at once). ACTIN_SPEC's own n_filaments default (1) applies
+    # may be set at once). ACTIN_SPEC's own n_copies default (1) applies
     # here too -- for more instances or other filament species (e.g.
     # microtubules, MICROTUBULE_SPEC), use [[filaments]] instead.
     actin: bool = False
 
     # --- Carbon support film (optional, single film) ---
-    # Zero or one [[grid]] table, mapping onto
-    # specter.specimen.GridSpec's own kwargs (thickness, hole_radius,
+    # Zero or one [[carbon_film]] table, mapping onto
+    # specter.specimen.CarbonFilmSpec's own kwargs (thickness, hole_radius,
     # edge_fraction, edge_side, edge_roughness) -- e.g.
     # {"hole_radius": 6000.0, "edge_fraction": [0.02, 0.05]}. Painted
     # directly into the volume before anything else is placed; placement
@@ -776,7 +789,7 @@ class TomogramConfig:
     # CTS-parity limitation -- see MembraneTomogramGenerator's own
     # docstring). More than one entry raises. Empty (default): no carbon
     # film, pure ice.
-    grid: list[dict[str, Any]] = field(default_factory=list)
+    carbon_film: list[dict[str, Any]] = field(default_factory=list)
 
     # --- Gold fiducial beads (optional) ---
     # One dict per bead population, {"radius": <Angstrom>, "n_copies": 1,
@@ -820,13 +833,13 @@ class TomogramConfig:
     # compute device for rendering/rotation/field-generation regardless).
     # None (default): same as `device` -- one device for everything, the
     # original behaviour. "auto": estimate the canvas' own memory
-    # footprint from target_shape/v_size and fall back to "cpu" if it
+    # footprint from target_shape/voxel_size and fall back to "cpu" if it
     # would exceed half of `device`'s currently free memory (see
     # MembraneTomogramGenerator.recommend_accumulator_device's own
     # docstring). Explicit "cpu" always works regardless of that
     # estimate, keeping `device`="cuda" (fast rendering/rotation) while
     # letting the canvas itself be sized by system RAM instead of GPU
-    # VRAM -- e.g. a large field of view at fine v_size can need tens of
+    # VRAM -- e.g. a large field of view at fine voxel_size can need tens of
     # GB, past any single GPU's VRAM but often fine in system RAM on a
     # workstation/cluster node. Rotation/rendering speed is unaffected
     # either way; the only added cost is moving each already-small
@@ -845,18 +858,20 @@ class TomogramConfig:
     # docstring); recommended over hand-picking a number.
     render_workers: int | Literal["auto"] = 1
     # Instances rotated per GPU batch, per species, in the targets/filler
-    # protein-fill stage (MembraneTomogramGenerator's own chunk_size --
-    # rotate_volume batches ALL of a species' accepted instances into one
-    # call when this is None, the original behaviour). Fine at small
-    # scale, but a species with hundreds of instances (a real filler
-    # species count at production target_shape/occupancy_fraction) can
+    # protein-fill stage (MembraneTomogramGenerator's own chunk_size
+    # constructor kwarg -- rotate_volume batches ALL of a species' accepted
+    # instances into one call when this is None, the original behaviour).
+    # Fine at small scale, but a species with hundreds of instances (a real
+    # filler species count at production target_shape/occupancy_fraction) can
     # then need many GB for one rotation call alone -- confirmed directly:
     # an 8.7 GB single allocation from one such batch, on top of whatever
     # else was already resident, was what actually tipped a production-
     # scale run into a CUDA OOM. None (default) preserves the original,
     # small-scale-safe behaviour; set e.g. 32-64 once a config's species
-    # counts get into the hundreds.
-    chunk_size: int | None = None
+    # counts get into the hundreds. Named render_chunk_size (not bare
+    # chunk_size) to keep it distinct from MicrographConfig's own
+    # specimen_chunk_size, a different chunking knob entirely.
+    render_chunk_size: int | None = None
 
     # --- Output ---
     output_dir: str = field(default_factory=lambda: default_output_dir("tomograms"))
@@ -890,7 +905,7 @@ TOMOGRAM_HELP: dict[str, str] = {
     "filler_table_min_mw_kda": "Only used with filler_from_pei2016/"
     "filler_from_cryoetsim: exclude species below this mass, kDa.",
     "target_shape": "Output specimen volume shape in voxels (Z, Y, X).",
-    "v_size": "Voxel size in Angstrom.",
+    "voxel_size": "Voxel size in Angstrom.",
     "filler_occupancy_fraction": "Target packing density for filler "
     "species, as a bare-sphere fraction of EACH REGION's own volume it's "
     "placed in (the whole box when [[membrane]] is empty -- 'cytosol' is "
@@ -899,7 +914,7 @@ TOMOGRAM_HELP: dict[str, str] = {
     "simply packs until it jams rather than needing this hand-tuned. Lower "
     "it for a sparser filler layer, or if a small region (e.g. a tight "
     "vesicle lumen) makes the implied candidate pool impractically large.",
-    "gap_angstrom": "Minimum clearance between placed spheres' surfaces, in Angstrom.",
+    "gap": "Minimum clearance between placed spheres' surfaces, in Angstrom.",
     "clip_axes": "(z, y, x) -- True on an axis lets a placed instance's "
     "body extend past that wall (truncated at render time) instead of "
     "being rejected outright. TOML-only (list[bool]).",
@@ -914,7 +929,7 @@ TOMOGRAM_HELP: dict[str, str] = {
     "expands one entry into that many independently-seeded instances), "
     "'position_xyz' (physical Angstrom offset from the tomogram center, "
     "default omitted = collision-rejecting random placement), and "
-    "'target_shape_zyx' (default omitted = auto-sized per instance).",
+    "'target_shape' (default omitted = auto-sized per instance).",
     "membrane_transmembrane_specs": "Transmembrane protein species (TOML-"
     "only, [[membrane_transmembrane_specs]] tables), each {'pdb_source': "
     "<code or path>, 'n_copies': 1, 'parameterization': 'shtyrov'}. Only "
@@ -923,15 +938,15 @@ TOMOGRAM_HELP: dict[str, str] = {
     "MembraneTomogramGenerator's own region_density_threshold.",
     "membrane_region_max_passes": "Passed through to "
     "MembraneTomogramGenerator's own region_max_passes.",
-    "membrane_min_transmembrane_spacing_a": "Minimum center-to-center "
+    "membrane_min_transmembrane_spacing": "Minimum center-to-center "
     "spacing between placed transmembrane proteins, Angstrom. Only "
     "meaningful when [[membrane]] is set.",
-    "parameterization": "Atomic scattering-factor parameterization for "
-    "the targets/filler protein-fill step.",
+    "target_parameterization": "Atomic scattering-factor parameterization "
+    "for the targets/filler protein-fill step.",
     "filaments": "Filament species to scatter through the tomogram (TOML-"
     "only, [[filaments]] tables), each mapping onto "
     "specter.specimen.filament.FilamentSpec kwargs, e.g. {'code': '1TUB', "
-    "'step': 85.0, 'flex_deg': 3.0, 'n_filaments': 4}. Placed right after "
+    "'step': 85.0, 'flex_deg': 3.0, 'n_copies': 4}. Placed right after "
     "membranes, before targets/filler -- no region-gating, no collision "
     "avoidance against the membrane shell or each other, but targets/"
     "filler DO avoid already-placed filaments.",
@@ -939,8 +954,8 @@ TOMOGRAM_HELP: dict[str, str] = {
     "(real F-actin helical repeat) without writing a [[filaments]] entry. "
     "Additive to filaments above. For more instances or other filament "
     "species (e.g. microtubules), use [[filaments]] instead.",
-    "grid": "Zero or one [[grid]] table (TOML-only) describing a carbon "
-    "support film, mapping onto specter.specimen.GridSpec kwargs "
+    "carbon_film": "Zero or one [[carbon_film]] table (TOML-only) describing a carbon "
+    "support film, mapping onto specter.specimen.CarbonFilmSpec kwargs "
     "(thickness, hole_radius, edge_fraction, edge_side, edge_roughness). "
     "Painted into the volume before anything else is "
     "placed; not carbon-aware for placement (see MembraneTomogramGenerator's "
@@ -985,7 +1000,7 @@ TOMOGRAM_HELP: dict[str, str] = {
     "currently free memory. Explicit 'cpu' always keeps 'device'='cuda' "
     "for fast rendering/rotation while letting the canvas itself be sized "
     "by system RAM instead of GPU VRAM -- useful for a large field of "
-    "view at fine v_size whose canvas alone would exceed any single "
+    "view at fine voxel_size whose canvas alone would exceed any single "
     "GPU's VRAM. Rotation/rendering speed is unaffected either way; only "
     "each already-small rotated chunk crosses devices, never the canvas "
     "itself.",
@@ -1002,7 +1017,7 @@ TOMOGRAM_HELP: dict[str, str] = {
     "robins across device's GPU pool when device is set to a "
     "comma-separated list or 'auto' (see device above); device choice was "
     "measured to barely matter at the recommended worker count.",
-    "chunk_size": "Instances rotated per GPU batch, per species, when "
+    "render_chunk_size": "Instances rotated per GPU batch, per species, when "
     "rendering targets/filler. None (default) rotates all of a species' "
     "accepted instances in one batched call -- fine at small scale, but a "
     "species with hundreds of instances can then need many GB for that "
@@ -1060,6 +1075,22 @@ def load_config(
         if isinstance(value, dict):
             flat.update(value)
     flat.update({k: v for k, v in raw.items() if not isinstance(v, dict)})
+    unknown = sorted(set(flat) - {f.name for f in fields(config_cls)})
+    if unknown:
+        # Without this, a stale or mistyped table surfaces as a bare
+        # "__init__() got an unexpected keyword argument", which names the
+        # key but says nothing about what to write instead.
+        detail = ", ".join(
+            f"{key!r} (renamed to {RENAMED_CONFIG_KEYS[key]!r})"
+            if key in RENAMED_CONFIG_KEYS
+            else repr(key)
+            for key in unknown
+        )
+        raise ValueError(
+            f"{path}: unknown {config_cls.__name__} field(s): {detail}. "
+            "Run the matching `specter` command with --help for the "
+            "supported fields."
+        )
     # Paths are deliberately NOT rewritten here: a relative path a user wrote
     # in a TOML (or passed on the CLI) is resolved against the current working
     # directory, like every other CLI tool's path argument. Only an omitted

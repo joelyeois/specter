@@ -13,9 +13,9 @@ from specter.specimen.membrane._generator import (
 )
 
 _SMALL_KWARGS = dict(
-    target_shape_zyx=(32, 32, 32),
-    v_size=6.0,
-    sh_axes_a=(50.0, 50.0, 50.0),
+    target_shape=(32, 32, 32),
+    voxel_size=6.0,
+    sh_axes=(50.0, 50.0, 50.0),
     sh_amplitude=0.15,
     n_lipids_per_leaflet=6,
 )
@@ -25,7 +25,7 @@ def test_generate_produces_correct_shape_with_membrane_density():
     gen = MembraneGenerator(seed=0, **_SMALL_KWARGS)
     volume = gen.generate()
 
-    assert volume.shape == _SMALL_KWARGS["target_shape_zyx"]
+    assert volume.shape == _SMALL_KWARGS["target_shape"]
     assert torch.isfinite(volume).all()
     assert volume.max() > 0
     assert gen.field is not None
@@ -215,10 +215,10 @@ def test_build_template_uses_analytic_method_matching_membrane_profile():
     pdb = PDB("1C3W", savefolder="specter-data/pdb/", verbose=False)
     coordinates = align_principal_axis_to_z(pdb.coordinates)
     coordinates = align_transmembrane_depth(coordinates, None)
-    n = estimate_protein_box_size(pdb.max_diameter, gen.v_size)
+    n = estimate_protein_box_size(pdb.max_diameter, gen.voxel_size)
     builder = PotentialBuilder(
         n_xyz=n,
-        dx=gen.v_size,
+        dx=gen.voxel_size,
         atomic_numbers=pdb.atomic_numbers,
         progressbars=False,
         parameterization="shtyrov",
@@ -230,15 +230,15 @@ def test_build_template_uses_analytic_method_matching_membrane_profile():
 
 def test_max_field_voxels_coarsens_and_warns_instead_of_exploding_memory():
     """Regression test for a real production-scale finding: the naive
-    field spacing heuristic, applied uniformly to a large target_shape_zyx,
+    field spacing heuristic, applied uniformly to a large target_shape,
     produced a ~1.1 billion voxel working grid (50+ GB resident across the
     several such arrays field generation allocates) for a real
     (200, 600, 600)-voxel/10A tomogram. A tiny max_field_voxels here forces
     the same coarsening path at a scale cheap enough to test quickly."""
     gen = MembraneGenerator(
-        target_shape_zyx=(32, 32, 32),
-        v_size=6.0,
-        sh_axes_a=(50.0, 50.0, 50.0),
+        target_shape=(32, 32, 32),
+        voxel_size=6.0,
+        sh_axes=(50.0, 50.0, 50.0),
         sh_amplitude=0.15,
         n_lipids_per_leaflet=6,
         max_field_voxels=1000,
@@ -266,15 +266,15 @@ def test_max_field_voxels_default_does_not_warn_at_small_scale():
 def test_shape_backend_rejects_unknown_value():
     with pytest.raises(ValueError, match="shape_backend"):
         MembraneGenerator(
-            target_shape_zyx=(32, 32, 32), v_size=6.0, shape_backend="not_a_backend"
+            target_shape=(32, 32, 32), voxel_size=6.0, shape_backend="not_a_backend"
         )
 
 
 _SH_KWARGS = dict(
-    target_shape_zyx=(80, 80, 80),
-    v_size=4.0,
+    target_shape=(80, 80, 80),
+    voxel_size=4.0,
     shape_backend="spherical_harmonics",
-    sh_axes_a=(60.0, 60.0, 60.0),
+    sh_axes=(60.0, 60.0, 60.0),
     sh_max_degree=8,
     n_lipids_per_leaflet=6,
 )
@@ -287,7 +287,7 @@ def test_spherical_harmonics_backend_produces_correct_shape_with_membrane_densit
     gen = MembraneGenerator(seed=0, **_SH_KWARGS)
     volume = gen.generate()
 
-    assert volume.shape == _SH_KWARGS["target_shape_zyx"]
+    assert volume.shape == _SH_KWARGS["target_shape"]
     assert torch.isfinite(volume).all()
     assert volume.max() > 0
     assert gen.field is not None
@@ -317,17 +317,17 @@ def test_spherical_harmonics_backend_supports_transmembrane_placement():
 
 
 def test_spherical_harmonics_backend_warns_when_axes_too_small_for_reliable_resolution():
-    """Regression test for a real finding: sh_axes_a too small relative to
+    """Regression test for a real finding: sh_axes too small relative to
     the working grid's spacing makes sample_surface_sites' Newton
     projection unreliable, previously silently finding zero transmembrane
     sites with no warning at all -- this backend derives phi from
     distance_transform_edt on a boolean mask, so the same Eikonal/grid-
     resolution reasoning applies."""
     gen = MembraneGenerator(
-        target_shape_zyx=(80, 80, 80),
-        v_size=4.0,
+        target_shape=(80, 80, 80),
+        voxel_size=4.0,
         shape_backend="spherical_harmonics",
-        sh_axes_a=(18.0, 18.0, 18.0),  # ~6.4 voxels/radius, below the
+        sh_axes=(18.0, 18.0, 18.0),  # ~6.4 voxels/radius, below the
         # verified-reliable floor (_MIN_RELIABLE_VOXELS_PER_RADIUS)
         n_lipids_per_leaflet=6,
         seed=0,
@@ -337,12 +337,12 @@ def test_spherical_harmonics_backend_warns_when_axes_too_small_for_reliable_reso
 
 
 _SWEPT_SPLINE_KWARGS = dict(
-    target_shape_zyx=(90, 90, 90),
-    v_size=4.0,
+    target_shape=(90, 90, 90),
+    voxel_size=4.0,
     shape_backend="swept_spline",
-    swept_total_length_a=300.0,
+    swept_total_length=300.0,
     swept_step_length_a=15.0,
-    swept_tube_radius_a=25.0,
+    swept_tube_radius=25.0,
     n_lipids_per_leaflet=6,
 )
 
@@ -354,7 +354,7 @@ def test_swept_spline_backend_produces_correct_shape_with_membrane_density():
     gen = MembraneGenerator(seed=0, **_SWEPT_SPLINE_KWARGS)
     volume = gen.generate()
 
-    assert volume.shape == _SWEPT_SPLINE_KWARGS["target_shape_zyx"]
+    assert volume.shape == _SWEPT_SPLINE_KWARGS["target_shape"]
     assert torch.isfinite(volume).all()
     assert volume.max() > 0
     assert gen.field is not None
@@ -384,7 +384,7 @@ def test_swept_spline_backend_supports_transmembrane_placement():
 
 
 def test_spherical_harmonics_zero_amplitude_isotropic_matches_sphere_sdf():
-    """sh_amplitude=0.0 with isotropic sh_axes_a collapses to a plain sphere
+    """sh_amplitude=0.0 with isotropic sh_axes collapses to a plain sphere
     -- phi should match the analytic sphere SDF to within the EDT grid's own
     discretization (one voxel), mirroring
     test_single_source_field_matches_sphere_sdf's tolerance/style for
@@ -398,7 +398,7 @@ def test_spherical_harmonics_zero_amplitude_isotropic_matches_sphere_sdf():
     field = generate_membrane_field_spherical_harmonics(
         shape_zyx=(80, 80, 80),
         spacing_a=spacing_a,
-        sh_axes_a=(radius_a, radius_a, radius_a),
+        sh_axes=(radius_a, radius_a, radius_a),
         sh_amplitude=0.0,
         seed=0,
     )
@@ -411,7 +411,7 @@ def test_spherical_harmonics_zero_amplitude_isotropic_matches_sphere_sdf():
 
 
 def test_spherical_harmonics_zero_amplitude_anisotropic_matches_ellipsoid_surface():
-    """sh_amplitude=0.0 with anisotropic sh_axes_a collapses to a plain
+    """sh_amplitude=0.0 with anisotropic sh_axes collapses to a plain
     ellipsoid -- points on the implicit surface (x/ax)^2+(y/ay)^2+(z/az)^2=1
     should sample near phi=0."""
     from specter.specimen.membrane._field_spherical_harmonics import (
@@ -423,7 +423,7 @@ def test_spherical_harmonics_zero_amplitude_anisotropic_matches_ellipsoid_surfac
     field = generate_membrane_field_spherical_harmonics(
         shape_zyx=(60, 40, 40),
         spacing_a=spacing_a,
-        sh_axes_a=axes,
+        sh_axes=axes,
         sh_amplitude=0.0,
         seed=0,
     )
@@ -775,10 +775,10 @@ def test_place_transmembrane_warns_on_partial_or_zero_placement():
     if not pdb_path.exists():
         pytest.skip("bundled PDB fixture missing")
     gen = MembraneGenerator(
-        target_shape_zyx=(80, 80, 80),
-        v_size=4.0,
+        target_shape=(80, 80, 80),
+        voxel_size=4.0,
         shape_backend="spherical_harmonics",
-        sh_axes_a=(18.0, 18.0, 18.0),
+        sh_axes=(18.0, 18.0, 18.0),
         n_lipids_per_leaflet=6,
         # frequency=8 (not e.g. 3): verified directly this many requested
         # sites reliably falls short at this resolution/spacing (a lower

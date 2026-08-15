@@ -50,7 +50,7 @@ Algorithm
    larger voxel counts, since the angular synthesis cost is now fixed
    regardless of how many voxels read from it).
 3. For every working-grid point, transform into a unit-sphere frame scaled by
-   the organelle's physical semi-axes ``sh_axes_a`` (anisotropic axes give
+   the organelle's physical semi-axes ``sh_axes`` (anisotropic axes give
    elongated/flattened organelles), and test -- using the interpolated
    perturbation from step 2 -- whether the point's own radius in that frame
    is less than the harmonic-perturbed surface radius at the point's own
@@ -61,7 +61,7 @@ Algorithm
    respecting (``|grad(phi)| ~= 1``) signed distance field -- never an
    analytic-but-approximate radial-residual SDF, whose error grows with the
    surface's local slope and would distort the physically-calibrated
-   ``bilayer_thickness_a`` precisely in the high-frequency, biologically
+   ``bilayer_thickness`` precisely in the high-frequency, biologically
    interesting regions.
 
 No mesh is ever constructed.
@@ -339,7 +339,7 @@ def generate_membrane_field_spherical_harmonics(
     shape_zyx: tuple[int, int, int],
     spacing_a: float,
     sh_max_degree: int = 8,
-    sh_axes_a: tuple[float, float, float] = (300.0, 300.0, 300.0),
+    sh_axes: tuple[float, float, float] = (300.0, 300.0, 300.0),
     sh_amplitude: float = 0.15,
     sh_spectrum_power: float = 2.0,
     device: str | torch.device = "cpu",
@@ -363,7 +363,7 @@ def generate_membrane_field_spherical_harmonics(
         Highest spherical-harmonic degree included in the random surface
         perturbation. Higher values add finer surface detail (see
         ``_sample_sh_coefficients``). Default 8.
-    sh_axes_a : tuple of float, optional
+    sh_axes : tuple of float, optional
         Physical semi-axes ``(a_x, a_y, a_z)`` of the base ellipsoid,
         Angstrom -- isotropic (equal) axes give a roughly spherical
         organelle, anisotropic axes give an elongated/flattened one (e.g.
@@ -427,7 +427,7 @@ def generate_membrane_field_spherical_harmonics(
     points_xyz = _grid_points_xyz(shape_zyx, spacing_a, origin_xyz, device="cpu")
     query = points_xyz.reshape(-1, 3).numpy()
 
-    axes = np.asarray(sh_axes_a, dtype=np.float64)
+    axes = np.asarray(sh_axes, dtype=np.float64)
     p_prime = query / axes
     r_prime = np.linalg.norm(p_prime, axis=-1)
     r_safe = np.clip(r_prime, 1e-12, None)
@@ -452,17 +452,17 @@ def generate_membrane_field_spherical_harmonics(
     # GPU-accelerated (optionally) rather than always scipy.
     phi = _signed_distance_transform(inside, spacing_a, device)
 
-    voxels_per_radius = min(sh_axes_a) / spacing_a
+    voxels_per_radius = min(sh_axes) / spacing_a
     if voxels_per_radius < _MIN_RELIABLE_VOXELS_PER_RADIUS:
         warnings.warn(
-            f"generate_membrane_field_spherical_harmonics: min(sh_axes_a) "
-            f"({min(sh_axes_a):.1f} A) is only {voxels_per_radius:.1f} "
+            f"generate_membrane_field_spherical_harmonics: min(sh_axes) "
+            f"({min(sh_axes):.1f} A) is only {voxels_per_radius:.1f} "
             f"working-grid voxels at spacing_a={spacing_a:.2f} A -- below the "
             f"{_MIN_RELIABLE_VOXELS_PER_RADIUS:.0f} voxels/radius verified reliable "
             "for sample_surface_sites' Newton-projection surface sampling. "
             "Transmembrane placement may silently find zero sites at this "
-            "resolution. Increase sh_axes_a, or decrease spacing_a (e.g. a "
-            "smaller v_size on the owning MembraneGenerator), to raise this "
+            "resolution. Increase sh_axes, or decrease spacing_a (e.g. a "
+            "smaller voxel_size on the owning MembraneGenerator), to raise this "
             "ratio.",
             stacklevel=2,
         )
@@ -482,7 +482,7 @@ def generate_membrane_field_spherical_harmonics(
             "hard-clipped by shape_zyx rather than tapering to zero inside it "
             "(same failure mode the other shape backends' own boundary checks "
             "guard against). Increase shape_zyx (or the owning MembraneGenerator's "
-            "target_shape_zyx/v_size), or reduce sh_axes_a/sh_amplitude.",
+            "target_shape/voxel_size), or reduce sh_axes/sh_amplitude.",
             stacklevel=2,
         )
 

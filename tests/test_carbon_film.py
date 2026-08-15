@@ -2,7 +2,7 @@
 Unit tests for specter.specimen._carbon (CarbonFilmGenerator), the
 alpha-shape-geometry/MIP-calibrated-splat replacement for the earlier
 analytic-boundary carbon film generator. Broader integration coverage
-(via MembraneTomogramGenerator's grid_spec) lives in
+(via MembraneTomogramGenerator's carbon_film_spec) lives in
 test_tomogram_generator.py; these focus on the physics this module adds:
 real per-atom density calibration reproducing carbon's literature mean
 inner potential (MIP), and reproducibility.
@@ -39,7 +39,9 @@ def _bulk_film(seed: int = 0, thickness: float = 150.0) -> torch.Tensor:
     bulk slab, no rim, so its occupied region is a clean density/MIP
     measurement (still has real alpha-shape surface roughness top/bottom,
     unlike the old generator)."""
-    gen = CarbonFilmGenerator(v_size=_V_SIZE, parameterization="kirkland", seed=seed)
+    gen = CarbonFilmGenerator(
+        voxel_size=_V_SIZE, parameterization="kirkland", seed=seed
+    )
     film = gen.generate(
         _TARGET_SHAPE_ZYX,
         thickness=thickness,
@@ -71,7 +73,7 @@ def test_carbon_film_generator_matches_its_own_calibration_target():
     density/atom potential integral), not just the literature range --
     catches a miscalibrated weight/density even if it happened to still
     land in [_MIP_LO, _MIP_HI]."""
-    gen = CarbonFilmGenerator(v_size=_V_SIZE, parameterization="kirkland", seed=1)
+    gen = CarbonFilmGenerator(voxel_size=_V_SIZE, parameterization="kirkland", seed=1)
     film = gen.generate(
         _TARGET_SHAPE_ZYX,
         thickness=_BULK_THICKNESS,
@@ -102,3 +104,53 @@ def test_carbon_film_generator_different_seeds_differ():
     a = _bulk_film(seed=1)
     b = _bulk_film(seed=2)
     assert not torch.allclose(a, b, atol=1e-3)
+
+
+def test_carbon_film_spec_normalises_a_list_edge_fraction_range():
+    """TOML has no tuple type, so a `[[carbon_film]]` table's
+    `edge_fraction = [0.02, 0.05]` arrives as a list -- and every consumer
+    branches on `isinstance(..., tuple)` to tell a range from a fixed
+    value. Un-normalised, the list fell through that check and reached
+    `edge_hole_center` as-is, raising `TypeError: unsupported operand
+    type(s) for -: 'int' and 'list'`. Latent until the canonical config
+    turned the carbon film on."""
+    import pytest
+
+    from specter.specimen._carbon import CarbonFilmSpec
+
+    assert CarbonFilmSpec(edge_fraction=[0.02, 0.05]).edge_fraction == (0.02, 0.05)
+    assert isinstance(CarbonFilmSpec(edge_fraction=[0.02, 0.05]).edge_fraction, tuple)
+    # A fixed value stays a plain float, so consumers still see "not a range".
+    assert CarbonFilmSpec(edge_fraction=0.03).edge_fraction == 0.03
+
+    with pytest.raises(ValueError, match=r"edge_fraction must be \[low, high\]"):
+        CarbonFilmSpec(edge_fraction=[0.05, 0.02])
+    with pytest.raises(ValueError, match=r"edge_fraction range must be \[low, high\]"):
+        CarbonFilmSpec(edge_fraction=[0.1])
+
+
+def test_canonical_tomogram_config_builds_its_carbon_and_bead_specs():
+    """The shipped configs/tomogram.toml enables filaments, carbon and
+    beads; check the blocks it ships actually translate into valid specs
+    rather than only parsing as TOML."""
+    from pathlib import Path
+
+    from specter.config import TomogramConfig, load_config
+    from specter.specimen import CarbonFilmSpec, TomogramBeadSpec
+
+    path = Path(__file__).parent.parent / "configs" / "tomogram.toml"
+    if not path.exists():
+        import pytest
+
+        pytest.skip("canonical config missing")
+
+    config = load_config(str(path), TomogramConfig)
+    assert config.beads and config.carbon_film and config.filaments
+
+    grid = CarbonFilmSpec(**config.carbon_film[0])
+    assert isinstance(grid.edge_fraction, tuple)
+
+    bead = TomogramBeadSpec(
+        radius=config.beads[0]["radius"], count=config.beads[0]["n_copies"]
+    )
+    assert bead.radius_range[1] > bead.radius_range[0]

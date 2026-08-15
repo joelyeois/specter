@@ -23,9 +23,9 @@ targets = [
 
 [specimen]
 target_shape = [24, 32, 32]
-v_size = 10.0
+voxel_size = 10.0
 filler_occupancy_fraction = 0.0
-gap_angstrom = 5.0
+gap = 5.0
 seed = 0
 
 [output]
@@ -73,7 +73,7 @@ def test_cli_build_tomogram_help_smoke() -> None:
     )
     assert result.returncode == 0
     assert "--filler_occupancy_fraction" in result.stdout
-    assert "--gap_angstrom" in result.stdout
+    assert "--gap" in result.stdout
     assert "--n_tomograms" in result.stdout
 
 
@@ -99,9 +99,9 @@ def _write_membrane_test_config(
     # Same tuned scale as tests/test_tomogram_generator.py's own
     # A spherical_harmonics ellipsoid whose lumen comfortably holds 1mbo.
     # The radius is load-bearing and was measured, not guessed: 1mbo packs
-    # at max_diameter/2 = 31.4 A and gap_angstrom=5 on top, so a placement
+    # at max_diameter/2 = 31.4 A and gap=5 on top, so a placement
     # needs 36.4 A of clearance from the shell. Lumen voxels clearing that
-    # bar, by radius (v_size=8, seed=0):
+    # bar, by radius (voxel_size=8, seed=0):
     #
     #   70 A ->     3 of   705 lumen voxels   (RSA reliably finds none)
     #   90 A ->   177 of 3,756
@@ -135,7 +135,7 @@ location = "lumen"
     path.write_text(
         f"""
 [[membrane]]
-sh_axes_a = [{sh_radius_a}, {sh_radius_a}, {sh_radius_a}]
+sh_axes = [{sh_radius_a}, {sh_radius_a}, {sh_radius_a}]
 sh_amplitude = 0.15
 n_lipids_per_leaflet = 6
 {transmembrane_block}
@@ -148,8 +148,8 @@ filler_occupancy_fraction = 0.1
 
 [specimen]
 target_shape = [64, 64, 64]
-v_size = 8.0
-gap_angstrom = 5.0
+voxel_size = 8.0
+gap = 5.0
 seed = 0
 
 [output]
@@ -223,15 +223,15 @@ def test_cli_build_tomogram_membrane_multi_instance_smoke(tmp_path: Path) -> Non
     config_path.write_text(
         f"""
 [[membrane]]
-sh_axes_a = [55.0, 55.0, 55.0]
+sh_axes = [55.0, 55.0, 55.0]
 sh_amplitude = 0.15
 n_lipids_per_leaflet = 6
 position_xyz = [-150.0, 0.0, 0.0]
 
 [[membrane]]
 shape_backend = "swept_spline"
-swept_total_length_a = 150.0
-swept_tube_radius_a = 35.0
+swept_total_length = 150.0
+swept_tube_radius = 35.0
 n_lipids_per_leaflet = 6
 position_xyz = [150.0, 0.0, 0.0]
 
@@ -243,8 +243,8 @@ filler_occupancy_fraction = 0.05
 
 [specimen]
 target_shape = [80, 80, 80]
-v_size = 8.0
-gap_angstrom = 5.0
+voxel_size = 8.0
+gap = 5.0
 seed = 0
 
 [output]
@@ -323,9 +323,9 @@ targets = [
 
 [specimen]
 target_shape = [8, 8, 8]
-v_size = 2.0
+voxel_size = 2.0
 filler_occupancy_fraction = 0.0
-gap_angstrom = 5.0
+gap = 5.0
 seed = 0
 
 [output]

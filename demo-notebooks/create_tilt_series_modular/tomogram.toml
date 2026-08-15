@@ -3,7 +3,7 @@
 # load_config("tomogram.toml", TomogramConfig). Full field docs:
 # docs/user-guide/build-tomogram.md (or `specter build tomogram --help`).
 # The notebook itself only syncs tilt_series_generator_modular.toml's
-# target_v_size to this file's own v_size below -- everything else about the
+# voxel_size to this file's own voxel_size below -- everything else about the
 # specimen is edited here, not in the notebook.
 
 [targets]
@@ -22,6 +22,7 @@ filler = [
 ]
 
 filler_from_pei2016 = true
+target_parameterization = "shtyrov"
 
 # No explicit size range here (unlike configs/tomogram.toml's production-scale
 # entries) -- omitting it lets each instance auto-cap its own draw to a
@@ -29,13 +30,13 @@ filler_from_pei2016 = true
 # _cap_membrane_auto_size_ranges in specter.pipelines._tomogram).
 [[membrane]]
 shape_backend = "spherical_harmonics"
-bilayer_thickness_a = 30.0
+bilayer_thickness = 30.0
 max_output_voxels = 12_000_000_000
 n_copies = 3
 
 [[membrane]]
 shape_backend = "swept_spline"
-bilayer_thickness_a = 30.0
+bilayer_thickness = 30.0
 max_output_voxels = 12_000_000_000
 n_copies = 3
 
@@ -45,8 +46,7 @@ n_copies = 10        # per membrane instance; a request, not a guarantee
 
 [membrane_settings]
 membrane_region_density_threshold = 0.05
-membrane_min_transmembrane_spacing_a = 40.0
-parameterization = "shtyrov"
+membrane_min_transmembrane_spacing = 40.0
 
 # Filaments -- optional. Either hand-write [[filaments]] entries (FilamentSpec
 # kwargs) or set `actin = true` for the built-in ACTIN_SPEC preset. Uncomment to add:
@@ -55,11 +55,11 @@ parameterization = "shtyrov"
 # step = 27.3            # axial rise per monomer, A
 # flex_deg = 12.0        # max per-step path curvature, degrees
 # twist_deg = 166.15     # helical twist per monomer, degrees
-# n_filaments = 20
+# n_copies = 20
 # n_monomers = [20, 60]
 
-# Carbon support film -- optional, at most one [[grid]] table. Uncomment to add:
-# [[grid]]
+# Carbon support film -- optional, at most one [[carbon_film]] table. Uncomment to add:
+# [[carbon_film]]
 # hole_radius = 6000.0          # A (0.6 micron, Quantifoil R1.2/1.3)
 # edge_fraction = [0.02, 0.05]  # fraction of the frame that ends up carbon
 # edge_side = "random"          # "left" | "right" | "top" | "bottom" | "random"
@@ -72,9 +72,9 @@ parameterization = "shtyrov"
 
 [specimen]
 target_shape = [128, 256, 256]      # (Z, Y, X) voxels -- small/fast; raise for denser results
-v_size = 10.0                        # A/voxel -- notebook syncs tilt_series_generator_modular.toml's target_v_size to this
+voxel_size = 10.0                        # A/voxel -- notebook syncs tilt_series_generator_modular.toml's voxel_size to this
 filler_occupancy_fraction = 0.5
-gap_angstrom = 5.0                  # minimum clearance between placed spheres, A
+gap = 5.0                  # minimum clearance between placed spheres, A
 pdb_savefolder = "specter-data/pdb"  # relative to your working directory
 # seed = 11                         # uncomment for reproducible packing
 clip_axes = [true, true, true]      # (z, y, x) -- True lets instances poke past that wall
@@ -88,7 +88,7 @@ write_segmentation = true
 device = "cuda"                     # cpu | cuda | cuda:0 | 0,1,2 | auto
 accumulator_device = "auto"
 render_workers = "auto"
-chunk_size = 64
+render_chunk_size = 64
 
 [output]
 output_dir = "specter-data/tomograms"

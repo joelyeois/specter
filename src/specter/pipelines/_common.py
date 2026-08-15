@@ -246,13 +246,13 @@ def _save_exitwave_pair(
     output_dir: str,
     filename: str,
     pad_fft: bool,
-    num_pixels: int,
+    n_pixels: int,
 ) -> None:
     """Save an exit-wave tensor's magnitude and phase as separate .mrcs files."""
     import mrcfile
 
     if pad_fft:
-        ew = _crop_center(ew, num_pixels)
+        ew = _crop_center(ew, n_pixels)
     os.makedirs(output_dir, exist_ok=True)
     mag_path = os.path.join(output_dir, f"{filename}_{suffix}_magnitude.mrcs")
     phase_path = os.path.join(output_dir, f"{filename}_{suffix}_phase.mrcs")

@@ -42,15 +42,15 @@ import torch.nn.functional as F
 ATOM_KERNEL_HALF_WIDTH_A = 2.5
 
 
-def estimate_protein_box_size(max_diameter: float, v_size: float) -> int:
+def estimate_protein_box_size(max_diameter: float, voxel_size: float) -> int:
     """
     Grid size (voxels, per axis) for a molecule with the given max diameter
-    (Angstrom, from ``PDB.max_diameter``) at voxel size ``v_size``.
+    (Angstrom, from ``PDB.max_diameter``) at voxel size ``voxel_size``.
 
     Parameters
     ----------
     max_diameter : float
-    v_size : float
+    voxel_size : float
 
     Returns
     -------
@@ -58,7 +58,7 @@ def estimate_protein_box_size(max_diameter: float, v_size: float) -> int:
         Even grid size in voxels.
     """
     margin_a = 2 * ATOM_KERNEL_HALF_WIDTH_A
-    n = int(np.ceil((max_diameter + 2 * margin_a) / v_size))
+    n = int(np.ceil((max_diameter + 2 * margin_a) / voxel_size))
     n += n % 2
     return n
 
@@ -141,7 +141,7 @@ def pack_hard_spheres_3d(
     stall_patience: int = 15,
     clip_axes: tuple[bool, bool, bool] = (False, False, False),
     exclusion_distance_field: torch.Tensor | None = None,
-    field_v_size: float | None = None,
+    field_voxel_size: float | None = None,
     sampling_mask: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """
@@ -219,7 +219,7 @@ def pack_hard_spheres_3d(
         thickness boundary particles should not cross.
     exclusion_distance_field : torch.Tensor, optional
         Physical distance (Angstrom) to the nearest FORBIDDEN voxel, shape
-        ``(Z, Y, X)``, on a box-centered grid at `field_v_size` spacing
+        ``(Z, Y, X)``, on a box-centered grid at `field_voxel_size` spacing
         (same centering convention `.membrane._raster.rasterize_membrane_
         density` uses by default -- e.g. build this via ``scipy.ndimage.
         distance_transform_edt`` on the complement of a boolean "forbidden"
@@ -234,14 +234,14 @@ def pack_hard_spheres_3d(
         mask (union) before taking the distance transform. Default None
         (no exclusion). Points outside the field's own extent sample the
         nearest boundary value (clamped, not wrapped).
-    field_v_size : float, optional
+    field_voxel_size : float, optional
         Voxel size of `exclusion_distance_field`/`sampling_mask`, Angstrom
         (the two share one grid). Required if either is given. Trilinear
         interpolation of a coarse `exclusion_distance_field` lets a
         candidate's sampled distance run a little past the true
         (exact-voxel) value near a boundary -- confirmed a couple of
-        Angstrom of bleed at `field_v_size=5` for `gap=2`, vanishing by
-        `field_v_size=2`; keep this fine relative to `gap` (or pad the
+        Angstrom of bleed at `field_voxel_size=5` for `gap=2`, vanishing by
+        `field_voxel_size=2`; keep this fine relative to `gap` (or pad the
         forbidden mask by a voxel or two before taking its distance
         transform) if a hard guarantee matters more than exact `gap`
         fidelity at the boundary.
@@ -279,9 +279,9 @@ def pack_hard_spheres_3d(
     has_field_consumer = (
         exclusion_distance_field is not None or sampling_mask is not None
     )
-    if has_field_consumer != (field_v_size is not None):
+    if has_field_consumer != (field_voxel_size is not None):
         raise ValueError(
-            "field_v_size is required together with (and only with) "
+            "field_voxel_size is required together with (and only with) "
             "exclusion_distance_field and/or sampling_mask"
         )
     if (
@@ -301,11 +301,11 @@ def pack_hard_spheres_3d(
             raise ValueError("sampling_mask has no True voxels")
         extent = (
             torch.tensor([nx, ny, nz], dtype=torch.float32, device=device)
-            * field_v_size
+            * field_voxel_size
         )
         origin = -0.5 * extent
         idx_xyz = voxel_idx_zyx[:, [2, 1, 0]].to(device=device, dtype=torch.float32)
-        mask_voxel_positions_xyz = origin + (idx_xyz + 0.5) * field_v_size
+        mask_voxel_positions_xyz = origin + (idx_xyz + 0.5) * field_voxel_size
 
     def _half_extents_xyz(box: tuple[float, float, float]) -> torch.Tensor:
         D, H, W = box
@@ -321,14 +321,14 @@ def pack_hard_spheres_3d(
         convention as `MembraneField._normalized_grid`, kept independent
         (not imported) so `specimen/packing` stays uncoupled from
         `specimen/membrane`."""
-        assert exclusion_distance_field is not None and field_v_size is not None
+        assert exclusion_distance_field is not None and field_voxel_size is not None
         nz, ny, nx = exclusion_distance_field.shape
         extent = (
             torch.tensor([nx, ny, nz], dtype=points_xyz.dtype, device=device)
-            * field_v_size
+            * field_voxel_size
         )
         origin = -0.5 * extent
-        idx = (points_xyz - origin) / field_v_size
+        idx = (points_xyz - origin) / field_voxel_size
         norm = (
             2.0
             * (idx + 0.5)
@@ -357,7 +357,7 @@ def pack_hard_spheres_3d(
                 break
             cand_radii = radii[remaining]
             if mask_voxel_positions_xyz is not None:
-                assert field_v_size is not None
+                assert field_voxel_size is not None
                 chosen = torch.randint(
                     0,
                     mask_voxel_positions_xyz.shape[0],
@@ -367,7 +367,7 @@ def pack_hard_spheres_3d(
                 )
                 jitter = (
                     torch.rand(remaining.numel(), 3, generator=gen, device=device) - 0.5
-                ) * field_v_size
+                ) * field_voxel_size
                 cand = mask_voxel_positions_xyz[chosen] + jitter
             else:
                 cand = (

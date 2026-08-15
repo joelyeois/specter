@@ -29,7 +29,7 @@ def test_rasterize_at_matching_resolution_reproduces_profile_of_phi():
     density = rasterize_membrane_density(
         field,
         profile,
-        target_shape_zyx=shape,
+        target_shape=shape,
         target_spacing_a=spacing_a,
         target_origin_xyz=origin,
     )
@@ -52,7 +52,7 @@ def test_rasterize_coarser_output_blurs_rather_than_distorts_peak_separation():
     density_coarse = rasterize_membrane_density(
         field,
         profile,
-        target_shape_zyx=coarse_shape,
+        target_shape=coarse_shape,
         target_spacing_a=coarse_spacing,
         target_origin_xyz=origin,
     )
@@ -79,7 +79,7 @@ def test_rasterize_output_shape_matches_request():
 
     out_shape = (7, 9, 11)
     density = rasterize_membrane_density(
-        field, profile, target_shape_zyx=out_shape, target_spacing_a=6.0
+        field, profile, target_shape=out_shape, target_spacing_a=6.0
     )
     assert density.shape == out_shape
 
@@ -98,11 +98,11 @@ def test_rasterize_end_to_end_with_real_field_and_calibrated_profile():
         n_lipids_per_leaflet=6, jitter_a=2.0, seed=0
     )
     profile = compute_bilayer_profile(
-        atomic_numbers, coordinates, v_size=2.0, parameterization="shtyrov"
+        atomic_numbers, coordinates, voxel_size=2.0, parameterization="shtyrov"
     )
 
     density = rasterize_membrane_density(
-        field, profile, target_shape_zyx=(20, 20, 20), target_spacing_a=8.0
+        field, profile, target_shape=(20, 20, 20), target_spacing_a=8.0
     )
     assert density.shape == (20, 20, 20)
     assert torch.isfinite(density).all()

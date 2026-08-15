@@ -1,6 +1,6 @@
 """Tests for run_build_tomogram's membrane-mode config -> MembraneInstance
 wiring (specter.pipelines.build_tomogram_generator) --
-specifically the n_copies/position_xyz/target_shape_zyx defaulting logic,
+specifically the n_copies/position_xyz/target_shape defaulting logic,
 not the (expensive, already covered by tests/test_tomogram_generator.py)
 actual generation. No PDB files need to exist for these: protein_specs'
 pdb_source strings are only resolved inside MembraneTomogramGenerator.
@@ -20,7 +20,7 @@ _SMALL_FIXTURE = Path(__file__).parent.parent / "specter-data" / "pdb" / "1mbo.c
 
 _BASE_KWARGS = dict(
     target_shape=[64, 64, 64],
-    v_size=8.0,
+    voxel_size=8.0,
     filler=[{"pdb_source": "1mbo"}],
 )
 
@@ -34,12 +34,12 @@ def test_membrane_entry_defaults_to_auto_size_and_auto_position():
     assert len(gen.membrane_instances) == 1
     instance = gen.membrane_instances[0]
     assert instance.position_xyz is None
-    # target_shape_zyx=None was passed through to MembraneGenerator, which
+    # target_shape=None was passed through to MembraneGenerator, which
     # then auto-sized its OWN (concrete, non-None) working grid -- distinct
     # from (and, for a single small organelle, much smaller than) the shared
     # tomogram canvas in _BASE_KWARGS.
-    assert instance.generator.target_shape_zyx is not None
-    assert instance.generator.target_shape_zyx != tuple(_BASE_KWARGS["target_shape"])
+    assert instance.generator.target_shape is not None
+    assert instance.generator.target_shape != tuple(_BASE_KWARGS["target_shape"])
 
 
 def test_membrane_entry_explicit_position_and_target_shape_zyx_are_honored():
@@ -47,9 +47,9 @@ def test_membrane_entry_explicit_position_and_target_shape_zyx_are_honored():
         membrane=[
             {
                 "shape_backend": "spherical_harmonics",
-                "sh_axes_a": [50.0, 50.0, 50.0],
+                "sh_axes": [50.0, 50.0, 50.0],
                 "position_xyz": [10.0, -5.0, 0.0],
-                "target_shape_zyx": [20, 20, 20],
+                "target_shape": [20, 20, 20],
             }
         ],
         **_BASE_KWARGS,
@@ -57,7 +57,7 @@ def test_membrane_entry_explicit_position_and_target_shape_zyx_are_honored():
     gen = build_tomogram_generator(config)
     instance = gen.membrane_instances[0]
     assert instance.position_xyz == (10.0, -5.0, 0.0)
-    assert instance.generator.target_shape_zyx == (20, 20, 20)
+    assert instance.generator.target_shape == (20, 20, 20)
 
 
 def test_n_copies_expands_into_independent_seeded_instances():
@@ -147,7 +147,7 @@ def test_render_workers_default_is_serial():
 def test_filaments_config_builds_filament_specs():
     config = TomogramConfig(
         membrane=[{"shape_backend": "spherical_harmonics"}],
-        filaments=[{"code": "1TUB", "step": 85.0, "flex_deg": 3.0, "n_filaments": 4}],
+        filaments=[{"code": "1TUB", "step": 85.0, "flex_deg": 3.0, "n_copies": 4}],
         **_BASE_KWARGS,
     )
     gen = build_tomogram_generator(config)
@@ -156,7 +156,7 @@ def test_filaments_config_builds_filament_specs():
     assert spec.code == "1TUB"
     assert spec.step == 85.0
     assert spec.flex_deg == 3.0
-    assert spec.n_filaments == 4
+    assert spec.n_copies == 4
 
 
 def test_actin_flag_appends_actin_spec():

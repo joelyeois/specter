@@ -71,7 +71,7 @@ class BaseImager(L.LightningModule):
     coincidence_radius : float or torch.Tensor, optional
         Coincidence radius in pixels. Scalar or 1-D tensor of length n.
         Default 0.0.
-    num_frames : int, optional
+    n_frames : int, optional
         Number of detector frames to simulate. Default None (single frame).
     potential_scale : float or torch.Tensor, optional
         Multiplier applied to the scattering potential before propagation.
@@ -134,7 +134,7 @@ class BaseImager(L.LightningModule):
         progressbars: bool = True,
         verbose: bool = True,
         coincidence_radius: float | torch.Tensor = 0.0,
-        num_frames: int | None = None,
+        n_frames: int | None = None,
         potential_scale: float | torch.Tensor = 1.0,
         bfactor: float | torch.Tensor | None = None,
         convergence_angle: float | None = None,
@@ -165,7 +165,7 @@ class BaseImager(L.LightningModule):
         self.nz = nz
         self.pad_nxy = pad_nxy if pad_nxy is not None else nxy
         self.detector_model = detector_model
-        self.num_frames = num_frames
+        self.n_frames = n_frames
         self.convergence_angle = convergence_angle
         self.cc = cc
         self.energy_spread = energy_spread
@@ -328,7 +328,7 @@ class BaseImager(L.LightningModule):
             noise_model=self.noise_model,
             mtf=self.detector_mtf,
             dqe0=dqe0_for_detector(self.detector_model),
-            num_frames=self.num_frames,
+            n_frames=self.n_frames,
             progressbars=self.progressbars,
         )
 

@@ -16,9 +16,9 @@
 
 [specimen]
 # volume_path = "path/to/specimen.mrc"   # uncomment to hardcode instead
-target_v_size = 2.0                # Å/voxel -- MUST match whatever built
+voxel_size = 2.0                # Å/voxel -- MUST match whatever built
                                     # the volume (configs/tomogram.toml's
-                                    # own v_size, by default)
+                                    # own voxel_size, by default)
 
 [microscope]
 # micrograph_size = 3000            # pixels, square; defaults (commented
@@ -26,7 +26,7 @@ target_v_size = 2.0                # Å/voxel -- MUST match whatever built
                                      # extent
 voltage = 300.0                     # kV
 dose_per_tilt = 3.0                # e⁻/Å², per tilt angle
-num_frames = 10                    # movie frames per tilt
+n_frames = 10                    # movie frames per tilt
 cs = 2.0                           # mm
 alpha = 0.1                        # unitless, amplitude contrast ratio
 

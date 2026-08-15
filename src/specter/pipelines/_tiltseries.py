@@ -68,7 +68,7 @@ def run_tilt_series(config: TiltSeriesConfig) -> None:
 
     # --- Building TiltSeriesGenerator ---
     _section("Building TiltSeriesGenerator")
-    dx = config.target_v_size
+    dx = config.voxel_size
     micrograph_size = (
         config.micrograph_size
         if config.micrograph_size is not None
@@ -112,7 +112,7 @@ def run_tilt_series(config: TiltSeriesConfig) -> None:
         pad_fft=config.pad_fft,
         tilt_axis=config.tilt_axis,
         coincidence_radius=config.coincidence_radius,
-        num_frames=config.num_frames,
+        n_frames=config.n_frames,
         convergence_angle=config.convergence_angle,
         cc=cc_angstrom,
         energy_spread=config.energy_spread,

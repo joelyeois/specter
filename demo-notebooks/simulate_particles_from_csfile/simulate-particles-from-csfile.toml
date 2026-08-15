@@ -13,11 +13,11 @@ cs_path = "/scratch/loh/joel/cryosparc_tutorial/CS-cryosparc-tutorial/J35/J35_pa
 [potential]
 pdb_code = "6bdf"
 assembly = true
-num_pixels = 256
+n_pixels = 256
 
 [microscope]
 dose = 53.0                    # e⁻/Å², from EMDB Experiment tab
-# num_frames = 53                # frames, uncomment to override default (int(dose) if None)
+# n_frames = 53                # frames, uncomment to override default (int(dose) if None)
 
 [envelopes]
 # convergence_angle = 1.0       # mrad, uncomment to enable the Cs envelope

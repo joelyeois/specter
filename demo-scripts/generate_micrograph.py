@@ -20,22 +20,21 @@ Example (HPC):
         --config configs/micrograph.toml \\
         --pdb_code 6bdf \\
         --n_micrographs 10 \\
-        --num_pixels 256 \\
+        --n_pixels 256 \\
         --pixel_size 1.056 \\
         --micrograph_size 4096 \\
         --voltage 300 \\
-        --dose_min 53 \\
-        --defocus_min 5000 \\
-        --defocus_max 15000 \\
+        --dose 53 \\
+        --defocus 5000,15000 \\
         --cs 2.7 \\
         --alpha 0.07 \\
         --scattering_model multislice \\
         --aberration_model holography \\
         --noise_model poisson \\
-        --coincidence_radius_min 0.8378 \\
+        --coincidence_radius 0.8378 \\
         --ice_model gd \\
         --ice_thickness 500 \\
-        --chunk_size 8 \\
+        --specimen_chunk_size 8 \\
         --normalize_micrographs True \\
         --device cuda:0 \\
         --output_dir ./output/ \\
@@ -88,7 +87,7 @@ def parse_args() -> argparse.Namespace:
         help="Folder to cache downloaded PDB files. Overrides --config.",
     )
     parser.add_argument(
-        "--num_pixels",
+        "--n_pixels",
         type=int,
         default=argparse.SUPPRESS,
         help="Particle box size in pixels (used to build the scattering potential). Overrides --config.",
@@ -114,19 +113,15 @@ def parse_args() -> argparse.Namespace:
         help="Electron beam accelerating voltage in kV. Overrides --config.",
     )
     parser.add_argument(
-        "--dose_min",
-        type=float,
+        "--dose",
+        type=str,
         default=argparse.SUPPRESS,
-        help="Minimum dose in e⁻/Å². Used as fixed dose if --dose_max is not set. Overrides --config.",
+        help="Dose in e⁻/Å²: a single value (e.g. 20) for constant dose per "
+        "micrograph, or 'low,high' (e.g. 20,60) to sample uniformly per "
+        "micrograph. Overrides --config.",
     )
     parser.add_argument(
-        "--dose_max",
-        type=float,
-        default=argparse.SUPPRESS,
-        help="Maximum dose in e⁻/Å². If set, dose is sampled uniformly per micrograph. Overrides --config.",
-    )
-    parser.add_argument(
-        "--num_frames",
+        "--n_frames",
         type=int,
         default=argparse.SUPPRESS,
         help="Number of frames. Defaults to int(dose) if not set. Overrides --config.",
@@ -185,16 +180,12 @@ def parse_args() -> argparse.Namespace:
 
     # --- Defocus ---
     parser.add_argument(
-        "--defocus_min",
-        type=float,
+        "--defocus",
+        type=str,
         default=argparse.SUPPRESS,
-        help="Minimum defocus in Ångstrom. Overrides --config.",
-    )
-    parser.add_argument(
-        "--defocus_max",
-        type=float,
-        default=argparse.SUPPRESS,
-        help="Maximum defocus in Ångstrom. Overrides --config.",
+        help="Defocus in Ångstrom: a single value for constant defocus, or "
+        "'low,high' (e.g. 5000,15000) to sample uniformly per micrograph. "
+        "Overrides --config.",
     )
 
     # --- Dataset size ---
@@ -228,28 +219,20 @@ def parse_args() -> argparse.Namespace:
         help="Noise model. Use 'none' for no noise. Overrides --config.",
     )
     parser.add_argument(
-        "--coincidence_radius_min",
-        type=float,
+        "--coincidence_radius",
+        type=str,
         default=argparse.SUPPRESS,
-        help="Minimum coincidence radius in pixels. Used as fixed value if --coincidence_radius_max is not set. Overrides --config.",
+        help="Coincidence radius in pixels: a single value for a fixed "
+        "radius, or 'low,high' to sample uniformly per micrograph. "
+        "Overrides --config.",
     )
     parser.add_argument(
-        "--coincidence_radius_max",
-        type=float,
+        "--potential_scale",
+        type=str,
         default=argparse.SUPPRESS,
-        help="Maximum coincidence radius in pixels. If set, sampled uniformly per micrograph. Overrides --config.",
-    )
-    parser.add_argument(
-        "--potential_scale_min",
-        type=float,
-        default=argparse.SUPPRESS,
-        help="Minimum potential scale factor. Used as fixed value if --potential_scale_max is not set. Overrides --config.",
-    )
-    parser.add_argument(
-        "--potential_scale_max",
-        type=float,
-        default=argparse.SUPPRESS,
-        help="Maximum potential scale factor. If set, sampled uniformly per micrograph. Values < 1 approximate thicker ice. Overrides --config.",
+        help="Potential scale factor: a single value, or 'low,high' to "
+        "sample uniformly per micrograph. Values < 1 approximate thicker "
+        "ice. Overrides --config.",
     )
     parser.add_argument(
         "--ice_model",
@@ -299,7 +282,7 @@ def parse_args() -> argparse.Namespace:
         help="Pad volume for FFT to avoid edge artifacts. Overrides --config.",
     )
     parser.add_argument(
-        "--chunk_size",
+        "--specimen_chunk_size",
         type=int,
         default=argparse.SUPPRESS,
         help="Slice chunk size for specimen generation. Set if GPU memory is limited (e.g. 8). Overrides --config.",
@@ -381,7 +364,12 @@ def main() -> None:
     import torch
 
     import specter
-    from specter.config import apply_overrides, load_config, MicrographConfig
+    from specter.config import (
+        apply_overrides,
+        load_config,
+        MicrographConfig,
+        parse_scalar_or_range,
+    )
     from specter.io import create_micrograph_starfile
     from specter.ice import IceBank
     from specter.imagegenerator import MicrographGenerator
@@ -405,7 +393,7 @@ def main() -> None:
 
     cs_angstrom = config.cs * 1e7
 
-    pb = PotentialBuilder(config.num_pixels, config.pixel_size, pdb.atomic_numbers).to(
+    pb = PotentialBuilder(config.n_pixels, config.pixel_size, pdb.atomic_numbers).to(
         "cpu"
     )
     with torch.no_grad():
@@ -425,35 +413,20 @@ def main() -> None:
     )
 
     # Sample all per-micrograph parameters upfront
-    defocus_A = (
-        torch.rand(n) * (config.defocus_max - config.defocus_min) + config.defocus_min
-    )
+    defocus_low, defocus_high = parse_scalar_or_range(config.defocus)
+    defocus_A = torch.rand(n) * (defocus_high - defocus_low) + defocus_low
 
-    dose_max = config.dose_max if config.dose_max is not None else config.dose_min
-    dose = torch.rand(n) * (dose_max - config.dose_min) + config.dose_min
+    dose_low, dose_high = parse_scalar_or_range(config.dose)
+    dose = torch.rand(n) * (dose_high - dose_low) + dose_low
 
-    cr_max = (
-        config.coincidence_radius_max
-        if config.coincidence_radius_max is not None
-        else config.coincidence_radius_min
-    )
-    coincidence_radius = (
-        torch.rand(n) * (cr_max - config.coincidence_radius_min)
-        + config.coincidence_radius_min
-    )
+    cr_low, cr_high = parse_scalar_or_range(config.coincidence_radius)
+    coincidence_radius = torch.rand(n) * (cr_high - cr_low) + cr_low
 
-    ps_max = (
-        config.potential_scale_max
-        if config.potential_scale_max is not None
-        else config.potential_scale_min
-    )
-    potential_scale = (
-        torch.rand(n) * (ps_max - config.potential_scale_min)
-        + config.potential_scale_min
-    )
+    ps_low, ps_high = parse_scalar_or_range(config.potential_scale)
+    potential_scale = torch.rand(n) * (ps_high - ps_low) + ps_low
 
-    num_frames = (
-        config.num_frames if config.num_frames is not None else int(dose.mean().item())
+    n_frames = (
+        config.n_frames if config.n_frames is not None else int(dose.mean().item())
     )
     ctf_params = {
         "cs": torch.tensor([cs_angstrom] * n),
@@ -471,7 +444,7 @@ def main() -> None:
 
         # RandomIcemaker has no tiling support (unlike IceBank), so its own
         # fixed (n, nz) must exactly match the micrograph volume it gets
-        # blended into: n=config.micrograph_size (not config.num_pixels,
+        # blended into: n=config.micrograph_size (not config.n_pixels,
         # the separate, usually much smaller, particle-potential
         # resolution), and nz computed the same way MicrographGenerator
         # itself derives it from ice_thickness -- Z is generally much
@@ -504,13 +477,13 @@ def main() -> None:
         crowd_max_distance_z=config.crowd_max_distance_z,
         water_air_interface=config.water_air_interface,
         pad_fft=config.pad_fft,
-        chunk_size=config.chunk_size,
+        chunk_size=config.specimen_chunk_size,
         move_to_cpu=True,
         detector_model=detector_model,
         verbose=False,
         progressbars=False,
         coincidence_radius=coincidence_radius,
-        num_frames=num_frames,
+        n_frames=n_frames,
         potential_scale=potential_scale,
         save_clean_exitwaves=config.save_clean_exitwaves,
         convergence_angle=config.convergence_angle,

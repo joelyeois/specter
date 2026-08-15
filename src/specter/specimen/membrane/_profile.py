@@ -223,7 +223,7 @@ class BilayerProfile:
 def compute_bilayer_profile(
     atomic_numbers: torch.Tensor,
     coordinates: torch.Tensor,
-    v_size: float = 2.0,
+    voxel_size: float = 2.0,
     parameterization: str = "shtyrov",
     lateral_core_fraction: float = 0.6,
     device: str | torch.device = "cpu",
@@ -237,7 +237,7 @@ def compute_bilayer_profile(
         From :func:`build_reference_lipid_patch`.
     coordinates : torch.Tensor
         From :func:`build_reference_lipid_patch`.
-    v_size : float, optional
+    voxel_size : float, optional
         Voxel size for the one-time atomic render, Angstrom. Default 2.0.
     parameterization : str, optional
         ``PotentialBuilder`` parameterization. Default "shtyrov".
@@ -257,12 +257,12 @@ def compute_bilayer_profile(
     extent = (coordinates.max(dim=0).values - coordinates.min(dim=0).values).tolist()
     margin_a = 2 * ATOM_KERNEL_HALF_WIDTH_A
     n_xyz = tuple(
-        int(math.ceil((e + 2 * margin_a) / v_size)) // 2 * 2 + 2 for e in extent
+        int(math.ceil((e + 2 * margin_a) / voxel_size)) // 2 * 2 + 2 for e in extent
     )
 
     builder = PotentialBuilder(
         n_xyz=n_xyz,
-        dx=v_size,
+        dx=voxel_size,
         atomic_numbers=atomic_numbers,
         progressbars=False,
         parameterization=parameterization,
@@ -281,14 +281,14 @@ def compute_bilayer_profile(
 
     core = volume[:, y_mask][:, :, x_mask]
     psi = core.mean(dim=(1, 2))
-    distance_a = z_idx.to(dtype=psi.dtype) * v_size
+    distance_a = z_idx.to(dtype=psi.dtype) * voxel_size
 
     return BilayerProfile(distance_a=distance_a, psi=psi)
 
 
 def _isolated_atom_peak_potential(
     atomic_number: int,
-    v_size: float,
+    voxel_size: float,
     parameterization: str,
     device: str | torch.device,
 ) -> float:
@@ -296,10 +296,10 @@ def _isolated_atom_peak_potential(
     -- the calibration reference `estimate_bilayer_peak_amplitude` uses.
     Same `PotentialBuilder` atomic-form-factor physics as everything else
     in this module, just with nothing else nearby to average against."""
-    n = int(math.ceil(2 * ATOM_KERNEL_HALF_WIDTH_A / v_size)) // 2 * 2 + 2
+    n = int(math.ceil(2 * ATOM_KERNEL_HALF_WIDTH_A / voxel_size)) // 2 * 2 + 2
     builder = PotentialBuilder(
         n_xyz=(n, n, n),
-        dx=v_size,
+        dx=voxel_size,
         atomic_numbers=torch.tensor([atomic_number], device=device),
         progressbars=False,
         parameterization=parameterization,
@@ -311,7 +311,7 @@ def _isolated_atom_peak_potential(
 def estimate_bilayer_peak_amplitude(
     atomic_numbers: torch.Tensor,
     coordinates: torch.Tensor,
-    v_size: float = 2.0,
+    voxel_size: float = 2.0,
     parameterization: str = "shtyrov",
     device: str | torch.device = "cpu",
 ) -> float:
@@ -362,7 +362,7 @@ def estimate_bilayer_peak_amplitude(
         Unused; accepted for call-site symmetry with
         :func:`compute_bilayer_profile` (both are built together by
         :func:`build_reference_lipid_patch`).
-    v_size, parameterization, device
+    voxel_size, parameterization, device
         Forwarded to the single-atom :class:`~specter.potential.PotentialBuilder`
         render.
 
@@ -373,7 +373,7 @@ def estimate_bilayer_peak_amplitude(
     del coordinates  # unused, see docstring
     unique_z = atomic_numbers.unique().tolist()
     return max(
-        _isolated_atom_peak_potential(z, v_size, parameterization, device)
+        _isolated_atom_peak_potential(z, voxel_size, parameterization, device)
         for z in unique_z
     )
 

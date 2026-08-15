@@ -29,7 +29,7 @@ def test_mean_inner_potential_is_physical_and_resolution_independent() -> None:
     """Gold's MIP lands in the literature range and does not depend on
     voxel size -- the property that motivated replacing CTS's raw
     atom-count intensity."""
-    mips = [BeadGenerator(v_size=v).mean_inner_potential for v in (6.0, 10.0, 20.0)]
+    mips = [BeadGenerator(voxel_size=v).mean_inner_potential for v in (6.0, 10.0, 20.0)]
     for mip in mips:
         assert _MIP_LO < mip < _MIP_HI, f"gold MIP out of range: {mip} V"
     assert max(mips) - min(mips) < 0.05 * np.mean(mips)
@@ -39,7 +39,7 @@ def test_atomic_fill_preserves_mean_density() -> None:
     """The lattice texture is variation about the right value, not a
     rescaling: the mean density over the bead's interior must recover the
     bulk MIP."""
-    gen = BeadGenerator(v_size=_V_SIZE)
+    gen = BeadGenerator(voxel_size=_V_SIZE)
     bead = gen.generate(radius=_RADIUS)
 
     # Interior only -- rim voxels are partly outside the boundary and so
@@ -56,7 +56,7 @@ def test_fill_carries_lattice_texture_not_uniform_density() -> None:
     variation must be far below the Poisson level a random gas would give
     (1/sqrt(atoms per voxel)) -- that gap is the whole reason the
     Poisson-gas fill was dropped."""
-    gen = BeadGenerator(v_size=_V_SIZE)
+    gen = BeadGenerator(voxel_size=_V_SIZE)
     bead = gen.generate(radius=_RADIUS)
     interior = bead.density[_erode(bead.mask)]
 
@@ -69,7 +69,7 @@ def test_fill_carries_lattice_texture_not_uniform_density() -> None:
 def test_beads_are_independent_realisations() -> None:
     """Two beads of the same radius must not share texture, or every
     fiducial in a tomogram would be a copy of the same one."""
-    gen = BeadGenerator(v_size=_V_SIZE)
+    gen = BeadGenerator(voxel_size=_V_SIZE)
     a = gen.generate(radius=_RADIUS).density
     b = gen.generate(radius=_RADIUS).density
     assert not torch.allclose(a, b)
@@ -83,9 +83,9 @@ def test_reproducible_under_global_seed() -> None:
     not of the bead code). Measured at ~5e-7 relative on 64 threads;
     single-threaded it is bitwise identical."""
     specter.seed(1234)
-    a = BeadGenerator(v_size=_V_SIZE).generate(radius=_RADIUS).density
+    a = BeadGenerator(voxel_size=_V_SIZE).generate(radius=_RADIUS).density
     specter.seed(1234)
-    b = BeadGenerator(v_size=_V_SIZE).generate(radius=_RADIUS).density
+    b = BeadGenerator(voxel_size=_V_SIZE).generate(radius=_RADIUS).density
     assert torch.allclose(a, b, rtol=0, atol=1e-5 * a.max())
 
 
@@ -103,7 +103,7 @@ def test_mask_is_centred_and_unclipped() -> None:
     """Geometry is separate from the fill: the mask is centred with
     padding on every face (CTS's was offset by 1.5 voxels and clipped on
     three), and volume-matched to the nominal sphere."""
-    gen = BeadGenerator(v_size=_V_SIZE)
+    gen = BeadGenerator(voxel_size=_V_SIZE)
     specter.seed(0)
     bead = gen.generate(radius=_RADIUS)
     mask = bead.mask
@@ -136,7 +136,7 @@ def test_density_stays_within_a_kernel_width_of_the_boundary() -> None:
     a voxel diagonal, never further."""
     from specter.specimen._grid import _BeadShape
 
-    gen = BeadGenerator(v_size=_V_SIZE)
+    gen = BeadGenerator(voxel_size=_V_SIZE)
     specter.seed(0)
     bead = gen.generate(radius=_RADIUS)
 
@@ -166,7 +166,7 @@ def test_volume_matched_at_every_roughness(roughness) -> None:
     fiducial's signal."""
     radius = 50.0
     specter.seed(0)
-    gen = BeadGenerator(v_size=_V_SIZE, roughness=roughness)
+    gen = BeadGenerator(voxel_size=_V_SIZE, roughness=roughness)
     bead = gen.generate(radius=radius)
 
     nominal = (4 / 3) * np.pi * radius**3 * gen.mean_inner_potential
@@ -182,7 +182,7 @@ def test_mask_follows_the_irregular_boundary() -> None:
 
     def mismatch_vs_equal_volume_sphere(roughness: float) -> float:
         specter.seed(0)
-        bead = BeadGenerator(v_size=2.0, roughness=roughness).generate(radius=50.0)
+        bead = BeadGenerator(voxel_size=2.0, roughness=roughness).generate(radius=50.0)
         mask = bead.mask
         # Radius of the sphere holding the same number of voxels.
         r_eq = (3.0 * mask.sum().item() / (4.0 * np.pi)) ** (1.0 / 3.0)
@@ -202,7 +202,7 @@ def test_each_bead_gets_a_fresh_crystal_orientation() -> None:
     """Consecutive fiducials must not share a lattice direction, or every
     bead in a tomogram shows its fringes running the same way. The
     orientation must also be uniform over SO(3), not clustered."""
-    gen = BeadGenerator(v_size=_V_SIZE)
+    gen = BeadGenerator(voxel_size=_V_SIZE)
     specter.seed(0)
     axes = torch.stack([gen._random_orientation(None)[:, 0] for _ in range(300)])
 
@@ -221,7 +221,7 @@ def test_explicit_generator_controls_the_whole_bead() -> None:
     jitter and shape. `roma.random_rotmat` takes no generator, so using it
     would leave the crystal orientation reading the global RNG -- silently
     unreproducible under an explicit generator."""
-    gen = BeadGenerator(v_size=_V_SIZE)
+    gen = BeadGenerator(voxel_size=_V_SIZE)
 
     specter.seed(111)
     a = gen.generate(radius=40.0, generator=torch.Generator().manual_seed(7)).density
@@ -260,9 +260,9 @@ def test_lumpiness_is_isotropic() -> None:
 
 def test_rejects_bad_roughness() -> None:
     with pytest.raises(ValueError, match="roughness must be >= 0"):
-        BeadGenerator(v_size=_V_SIZE, roughness=-0.1)
+        BeadGenerator(voxel_size=_V_SIZE, roughness=-0.1)
     with pytest.raises(ValueError, match=r"roughness range must be \[low, high\]"):
-        BeadGenerator(v_size=_V_SIZE, roughness=[0.2, 0.05])
+        BeadGenerator(voxel_size=_V_SIZE, roughness=[0.2, 0.05])
 
 
 def test_roughness_range_varies_lumpiness_between_beads() -> None:
@@ -273,7 +273,7 @@ def test_roughness_range_varies_lumpiness_between_beads() -> None:
 
     def mismatches(roughness) -> torch.Tensor:
         specter.seed(0)
-        gen = BeadGenerator(v_size=4.0, roughness=roughness)
+        gen = BeadGenerator(voxel_size=4.0, roughness=roughness)
         out = []
         for _ in range(8):
             mask = gen.generate(radius=50.0).mask

@@ -25,7 +25,7 @@ CONTEXT_SETTINGS = {"help_option_names": ["-h", "--help"]}
 _PARTICLE_STACK_GROUPS: list[tuple[str, list[str]]] = [
     (
         "Structure & Potential",
-        ["pdb_code", "assembly", "num_pixels", "pixel_size"],
+        ["pdb_code", "assembly", "n_pixels", "pixel_size"],
     ),
     (
         "Microscope",
@@ -50,7 +50,7 @@ _PARTICLE_STACK_GROUPS: list[tuple[str, list[str]]] = [
         [
             "pdb_savefolder",
             "cs_path",
-            "num_frames",
+            "n_frames",
             "convergence_angle",
             "cc",
             "energy_spread",
@@ -114,10 +114,10 @@ _PARTICLE_STACK_GROUPS: list[tuple[str, list[str]]] = [
 # run_tilt_series`) -- specimen BUILDING is `specter build tomogram`'s job
 # (a separate command/config entirely), not this one's.
 _TILT_SERIES_GROUPS: list[tuple[str, list[str]]] = [
-    ("Specimen", ["volume_path", "target_v_size"]),
+    ("Specimen", ["volume_path", "voxel_size"]),
     (
         "Microscope",
-        ["voltage", "dose_per_tilt", "num_frames", "cs", "alpha"],
+        ["voltage", "dose_per_tilt", "n_frames", "cs", "alpha"],
     ),
     ("Defocus", ["defocus"]),
     (

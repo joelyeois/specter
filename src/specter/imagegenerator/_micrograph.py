@@ -111,7 +111,7 @@ class MicrographGenerator(BaseImager):
         Emit debug-level log messages. Default True.
     coincidence_radius : float or torch.Tensor, optional
         Coincidence radius in pixels. Default 0.0.
-    num_frames : int, optional
+    n_frames : int, optional
         Number of detector frames to simulate. Default None.
     potential_scale : float or torch.Tensor, optional
         Multiplier applied to the potential before scattering. Default 1.0.
@@ -172,7 +172,7 @@ class MicrographGenerator(BaseImager):
         progressbars: bool = True,
         verbose: bool = True,
         coincidence_radius: float | torch.Tensor = 0.0,
-        num_frames: int | None = None,
+        n_frames: int | None = None,
         potential_scale: float | torch.Tensor = 1.0,
         save_clean_exitwaves: bool = False,
         bfactor: float | torch.Tensor | None = None,
@@ -225,7 +225,7 @@ class MicrographGenerator(BaseImager):
             progressbars=progressbars,
             verbose=verbose,
             coincidence_radius=coincidence_radius,
-            num_frames=num_frames,
+            n_frames=n_frames,
             potential_scale=potential_scale,
             bfactor=bfactor,
             convergence_angle=convergence_angle,

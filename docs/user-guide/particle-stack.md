@@ -32,7 +32,7 @@ TOML/CLI field reference.
 
 - **Structure & Potential** — `pdb_code` (fetched and cached under
   `specter-data/pdb/`), `assembly` (biological assembly vs. asymmetric unit),
-  `num_pixels`/`pixel_size` for the simulation box.
+  `n_pixels`/`pixel_size` for the simulation box.
 - **Microscope** — `voltage`, `dose`, `cs`, `alpha` (amplitude contrast).
 - **Sampling** — `defocus`, `shift` (max in-plane shift), `n_particles`.
 - **Models** — `scattering_model` (`multislice` is the accurate default;
@@ -93,7 +93,7 @@ experimental dataset particle-for-particle:
 ```bash
 specter simulate particles \
     --pdb_code 8b0x \
-    --num_pixels 512 \
+    --n_pixels 512 \
     --cs_path docs-figures/data/empiar-11377-passthrough-5particles.cs \
     --n_particles 5 \
     --dose 40 \

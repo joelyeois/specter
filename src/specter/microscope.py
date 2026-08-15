@@ -65,7 +65,7 @@ class Detector(L.LightningModule):
         of ``noise_model`` -- it is a property of detection, not of noise.
         Use :func:`specter.detectors.dqe0_for_detector` to get the published
         value for a named detector.
-    num_frames : int, optional
+    n_frames : int, optional
         Number of frames for dose-fractionated noise.
     progressbars : bool, optional
         Whether to show progress bars. Default True.
@@ -85,7 +85,7 @@ class Detector(L.LightningModule):
         noise_model: str | None = None,
         mtf: torch.Tensor | None = None,
         dqe0: float = 1.0,
-        num_frames: int | None = None,
+        n_frames: int | None = None,
         progressbars: bool = True,
     ):
         super().__init__()
@@ -96,7 +96,7 @@ class Detector(L.LightningModule):
         self.noise_model = noise_model
         self.register_buffer("mtf", mtf)
         self.dqe0 = dqe0
-        self.num_frames = num_frames
+        self.n_frames = n_frames
         self.progressbars = progressbars
 
     def image(
@@ -443,12 +443,12 @@ class Detector(L.LightningModule):
         if coincidence_radius <= 0.0:
             return torch.poisson(torch.clamp(img, min=0.0))
 
-        if self.num_frames is None:
+        if self.n_frames is None:
             raise ValueError(
-                "num_frames must be set on the Detector to apply dose-fractionated "
+                "n_frames must be set on the Detector to apply dose-fractionated "
                 "coincidence loss (coincidence_radius > 0)."
             )
-        n_frames = self.num_frames
+        n_frames = self.n_frames
         intensity_map = img / img.sum()
 
         # Use img.sum() to derive the effective dose so that the radius>0 path

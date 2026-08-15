@@ -39,7 +39,7 @@ class FilamentSpec:
         Helical twist per monomer, degrees, accumulated along the filament.
         Default 0 (no twist -- a single, untwisted strand, e.g. a
         microtubule protofilament).
-    n_filaments : int, optional
+    n_copies : int, optional
         Number of independent filament instances of this species to place.
         Default 1.
     n_monomers : int or tuple of int, optional
@@ -52,7 +52,7 @@ class FilamentSpec:
     step: float
     flex_deg: float
     twist_deg: float = 0.0
-    n_filaments: int = 1
+    n_copies: int = 1
     n_monomers: int | tuple[int, int] = (10, 30)
 
 
@@ -99,7 +99,7 @@ def _monomer_count(
 def place_filaments(
     specs: list[FilamentSpec],
     target_shape: tuple[int, int, int],
-    target_v_size: float,
+    voxel_size: float,
     generator: torch.Generator | None = None,
 ) -> list[FilamentInstance]:
     """
@@ -113,7 +113,7 @@ def place_filaments(
     specs : list of FilamentSpec
     target_shape : tuple of int
         Specimen volume shape (Z, Y, X), voxels.
-    target_v_size : float
+    voxel_size : float
         Voxel size, Angstrom.
     generator : torch.Generator, optional
         Random generator for start positions, initial directions, and all
@@ -123,11 +123,11 @@ def place_filaments(
     -------
     list of FilamentInstance
     """
-    extent_xyz = torch.tensor(target_shape[::-1], dtype=torch.float32) * target_v_size
+    extent_xyz = torch.tensor(target_shape[::-1], dtype=torch.float32) * voxel_size
 
     instances: list[FilamentInstance] = []
     for spec in specs:
-        for filament_id in range(spec.n_filaments):
+        for filament_id in range(spec.n_copies):
             n = _monomer_count(spec.n_monomers, generator)
             origin_xyz = torch.rand(3, generator=generator) * extent_xyz
             positions = generate_filament_path(

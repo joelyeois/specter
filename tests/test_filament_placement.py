@@ -115,11 +115,9 @@ def test_filament_orientations_twist_rotates_about_tangent():
 
 
 def test_place_filaments_fixed_monomer_count():
-    specs = [
-        FilamentSpec(code="X", step=10.0, flex_deg=5.0, n_filaments=3, n_monomers=6)
-    ]
+    specs = [FilamentSpec(code="X", step=10.0, flex_deg=5.0, n_copies=3, n_monomers=6)]
     instances = place_filaments(
-        specs, target_shape=(64, 64, 64), target_v_size=5.0, generator=_seeded(7)
+        specs, target_shape=(64, 64, 64), voxel_size=5.0, generator=_seeded(7)
     )
     assert len(instances) == 3 * 6
     assert {inst.filament_id for inst in instances} == {0, 1, 2}
@@ -133,12 +131,10 @@ def test_place_filaments_fixed_monomer_count():
 
 def test_place_filaments_monomer_count_range():
     specs = [
-        FilamentSpec(
-            code="X", step=10.0, flex_deg=5.0, n_filaments=20, n_monomers=(2, 4)
-        )
+        FilamentSpec(code="X", step=10.0, flex_deg=5.0, n_copies=20, n_monomers=(2, 4))
     ]
     instances = place_filaments(
-        specs, target_shape=(64, 64, 64), target_v_size=5.0, generator=_seeded(8)
+        specs, target_shape=(64, 64, 64), voxel_size=5.0, generator=_seeded(8)
     )
     counts = {}
     for inst in instances:
@@ -148,11 +144,11 @@ def test_place_filaments_monomer_count_range():
 
 def test_place_filaments_multiple_species():
     specs = [
-        FilamentSpec(code="A", step=10.0, flex_deg=5.0, n_filaments=1, n_monomers=3),
-        FilamentSpec(code="B", step=20.0, flex_deg=5.0, n_filaments=1, n_monomers=4),
+        FilamentSpec(code="A", step=10.0, flex_deg=5.0, n_copies=1, n_monomers=3),
+        FilamentSpec(code="B", step=20.0, flex_deg=5.0, n_copies=1, n_monomers=4),
     ]
     instances = place_filaments(
-        specs, target_shape=(64, 64, 64), target_v_size=5.0, generator=_seeded(9)
+        specs, target_shape=(64, 64, 64), voxel_size=5.0, generator=_seeded(9)
     )
     assert sum(1 for inst in instances if inst.code == "A") == 3
     assert sum(1 for inst in instances if inst.code == "B") == 4
@@ -160,9 +156,7 @@ def test_place_filaments_multiple_species():
 
 def test_place_filaments_reproducible_with_seeded_generator():
     specs = [
-        FilamentSpec(
-            code="X", step=27.3, flex_deg=12.0, n_filaments=2, n_monomers=(5, 9)
-        )
+        FilamentSpec(code="X", step=27.3, flex_deg=12.0, n_copies=2, n_monomers=(5, 9))
     ]
     a = place_filaments(specs, (64, 64, 64), 5.0, generator=_seeded(11))
     b = place_filaments(specs, (64, 64, 64), 5.0, generator=_seeded(11))
@@ -174,12 +168,10 @@ def test_place_filaments_reproducible_with_seeded_generator():
 
 def test_place_filaments_start_within_volume_extent():
     target_shape = (50, 40, 30)  # (Z, Y, X)
-    v_size = 4.0
-    specs = [
-        FilamentSpec(code="X", step=5.0, flex_deg=5.0, n_filaments=25, n_monomers=1)
-    ]
-    instances = place_filaments(specs, target_shape, v_size, generator=_seeded(12))
-    extent_xyz = torch.tensor(target_shape[::-1], dtype=torch.float32) * v_size
+    voxel_size = 4.0
+    specs = [FilamentSpec(code="X", step=5.0, flex_deg=5.0, n_copies=25, n_monomers=1)]
+    instances = place_filaments(specs, target_shape, voxel_size, generator=_seeded(12))
+    extent_xyz = torch.tensor(target_shape[::-1], dtype=torch.float32) * voxel_size
     for inst in instances:
         assert bool((inst.position_xyz >= 0).all())
         assert bool((inst.position_xyz <= extent_xyz).all())

@@ -17,7 +17,7 @@ from pathlib import Path
 import pytest
 import torch
 
-from specter.specimen._carbon import GridSpec
+from specter.specimen._carbon import CarbonFilmSpec
 from specter.specimen.filament import FilamentSpec
 from specter.specimen.membrane import MembraneGenerator, TransmembraneSpec
 from specter.specimen.tomogram import (
@@ -40,9 +40,9 @@ _V_SIZE = 8.0
 # ~31.4A radius (verified directly; smaller configs leave no room for even
 # one instance).
 _MEMBRANE_KWARGS = dict(
-    target_shape_zyx=_TARGET_SHAPE_ZYX,
-    v_size=_V_SIZE,
-    sh_axes_a=(70.0, 70.0, 70.0),
+    target_shape=_TARGET_SHAPE_ZYX,
+    voxel_size=_V_SIZE,
+    sh_axes=(70.0, 70.0, 70.0),
     sh_amplitude=0.15,
     n_lipids_per_leaflet=6,
 )
@@ -56,14 +56,14 @@ def test_membrane_tomogram_generator_places_both_locations_correctly():
     mgen = MembraneGenerator(seed=0, **_MEMBRANE_KWARGS)
     gen = MembraneTomogramGenerator(
         membrane_instances=[MembraneInstance(generator=mgen)],
-        target_shape_zyx=_TARGET_SHAPE_ZYX,
-        v_size=_V_SIZE,
+        target_shape=_TARGET_SHAPE_ZYX,
+        voxel_size=_V_SIZE,
         protein_specs=[
             TomogramProteinSpec(pdb_source=str(_SMALL_FIXTURE), location="lumen"),
             TomogramProteinSpec(pdb_source=str(_LARGE_FIXTURE), location="cytosol"),
         ],
         occupancy_fraction=0.1,
-        gap_angstrom=5.0,
+        gap=5.0,
         pdb_cache_dir="specter-data/pdb/",
         seed=0,
     )
@@ -80,12 +80,12 @@ def test_membrane_tomogram_generator_places_both_locations_correctly():
     assert len(by_location.get("cytosol", [])) > 0
     assert len(by_location.get("lumen", [])) > 0
 
-    v_size = _V_SIZE
+    voxel_size = _V_SIZE
     shape_zyx = _TARGET_SHAPE_ZYX
     center_zyx = torch.tensor([shape_zyx[0] / 2, shape_zyx[1] / 2, shape_zyx[2] / 2])
 
     def _voxel_index(position_xyz: torch.Tensor) -> tuple[int, int, int]:
-        idx_xyz = (position_xyz / v_size) + center_zyx[[2, 1, 0]]
+        idx_xyz = (position_xyz / voxel_size) + center_zyx[[2, 1, 0]]
         ix, iy, iz = idx_xyz.round().long().tolist()
         return iz, iy, ix
 
@@ -102,13 +102,13 @@ def test_membrane_tomogram_generator_instance_labels_match_placements():
     mgen = MembraneGenerator(seed=0, **_MEMBRANE_KWARGS)
     gen = MembraneTomogramGenerator(
         membrane_instances=[MembraneInstance(generator=mgen)],
-        target_shape_zyx=_TARGET_SHAPE_ZYX,
-        v_size=_V_SIZE,
+        target_shape=_TARGET_SHAPE_ZYX,
+        voxel_size=_V_SIZE,
         protein_specs=[
             TomogramProteinSpec(pdb_source=str(_SMALL_FIXTURE), location="cytosol")
         ],
         occupancy_fraction=0.05,
-        gap_angstrom=5.0,
+        gap=5.0,
         pdb_cache_dir="specter-data/pdb/",
         seed=0,
     )
@@ -127,18 +127,18 @@ def test_membrane_tomogram_generator_instance_labels_match_placements():
 @pytest.mark.skipif(not _SMALL_FIXTURE.exists(), reason="bundled PDB fixture missing")
 def test_membrane_tomogram_generator_warns_when_lumen_species_has_no_region():
     # Degenerate membrane config unlikely to enclose any lumen at all --
-    # bilayer_thickness_a far exceeds the vesicle's own radius, so the two
+    # bilayer_thickness far exceeds the vesicle's own radius, so the two
     # leaflet offset surfaces invert/overlap through the whole interior
     # instead of leaving a hollow enclosed cavity; the point of this test
     # is the degenerate-geometry warning path, not backend choice.
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", UserWarning)
         mgen = MembraneGenerator(
-            target_shape_zyx=(24, 24, 24),
-            v_size=8.0,
+            target_shape=(24, 24, 24),
+            voxel_size=8.0,
             shape_backend="spherical_harmonics",
-            sh_axes_a=(20.0, 20.0, 20.0),
-            bilayer_thickness_a=150.0,  # >> sh_axes_a -> no hollow lumen
+            sh_axes=(20.0, 20.0, 20.0),
+            bilayer_thickness=150.0,  # >> sh_axes -> no hollow lumen
             n_lipids_per_leaflet=6,
             seed=0,
         )
@@ -148,8 +148,8 @@ def test_membrane_tomogram_generator_warns_when_lumen_species_has_no_region():
         membrane_instances=[
             MembraneInstance(generator=mgen, position_xyz=(0.0, 0.0, 0.0))
         ],
-        target_shape_zyx=(24, 24, 24),
-        v_size=8.0,
+        target_shape=(24, 24, 24),
+        voxel_size=8.0,
         protein_specs=[
             TomogramProteinSpec(pdb_source=str(_SMALL_FIXTURE), location="lumen")
         ],
@@ -169,8 +169,8 @@ def test_membrane_tomogram_generator_allows_empty_protein_specs():
     mgen = MembraneGenerator(seed=0, **_MEMBRANE_KWARGS)
     gen = MembraneTomogramGenerator(
         membrane_instances=[MembraneInstance(generator=mgen)],
-        target_shape_zyx=_TARGET_SHAPE_ZYX,
-        v_size=_V_SIZE,
+        target_shape=_TARGET_SHAPE_ZYX,
+        voxel_size=_V_SIZE,
         protein_specs=[],
     )
     volume = gen.generate()
@@ -182,19 +182,19 @@ def test_membrane_tomogram_generator_rejects_all_empty():
     with pytest.raises(ValueError, match="at least one"):
         MembraneTomogramGenerator(
             membrane_instances=[],
-            target_shape_zyx=_TARGET_SHAPE_ZYX,
-            v_size=_V_SIZE,
+            target_shape=_TARGET_SHAPE_ZYX,
+            voxel_size=_V_SIZE,
             protein_specs=[],
         )
 
 
-def test_membrane_tomogram_generator_rejects_mismatched_v_size():
-    mgen = MembraneGenerator(target_shape_zyx=_TARGET_SHAPE_ZYX, v_size=4.0, seed=0)
+def test_membrane_tomogram_generator_rejects_mismatched_voxel_size():
+    mgen = MembraneGenerator(target_shape=_TARGET_SHAPE_ZYX, voxel_size=4.0, seed=0)
     with pytest.raises(ValueError, match=r"membrane_instances\[0\]"):
         MembraneTomogramGenerator(
             membrane_instances=[MembraneInstance(generator=mgen)],
-            target_shape_zyx=_TARGET_SHAPE_ZYX,
-            v_size=_V_SIZE,
+            target_shape=_TARGET_SHAPE_ZYX,
+            voxel_size=_V_SIZE,
             protein_specs=[TomogramProteinSpec(pdb_source=str(_SMALL_FIXTURE))],
         )
 
@@ -208,7 +208,7 @@ def test_membrane_tomogram_generator_composites_two_non_overlapping_instances():
     offsets used here fit with margin, isolating this test from the
     unrelated boundary-clipping warning a tighter box would also trigger."""
     big_shape_zyx = (100, 100, 100)
-    kwargs = dict(_MEMBRANE_KWARGS, target_shape_zyx=big_shape_zyx)
+    kwargs = dict(_MEMBRANE_KWARGS, target_shape=big_shape_zyx)
     mgen_a = MembraneGenerator(seed=0, **kwargs)
     mgen_b = MembraneGenerator(seed=1, **kwargs)
     gen = MembraneTomogramGenerator(
@@ -216,13 +216,13 @@ def test_membrane_tomogram_generator_composites_two_non_overlapping_instances():
             MembraneInstance(generator=mgen_a, position_xyz=(-200.0, 0.0, 0.0)),
             MembraneInstance(generator=mgen_b, position_xyz=(200.0, 0.0, 0.0)),
         ],
-        target_shape_zyx=big_shape_zyx,
-        v_size=_V_SIZE,
+        target_shape=big_shape_zyx,
+        voxel_size=_V_SIZE,
         protein_specs=[
             TomogramProteinSpec(pdb_source=str(_LARGE_FIXTURE), location="cytosol")
         ],
         occupancy_fraction=0.05,
-        gap_angstrom=5.0,
+        gap=5.0,
         pdb_cache_dir="specter-data/pdb/",
         seed=0,
     )
@@ -249,7 +249,7 @@ def test_membrane_tomogram_generator_auto_places_non_colliding_instances():
     position_xyz mutated in place to the resolved coordinates (inspectable
     after generate())."""
     big_shape_zyx = (140, 140, 140)
-    kwargs = dict(_MEMBRANE_KWARGS, target_shape_zyx=big_shape_zyx)
+    kwargs = dict(_MEMBRANE_KWARGS, target_shape=big_shape_zyx)
     mgen_a = MembraneGenerator(seed=0, **kwargs)
     mgen_b = MembraneGenerator(seed=1, **kwargs)
     instance_a = MembraneInstance(generator=mgen_a)
@@ -257,8 +257,8 @@ def test_membrane_tomogram_generator_auto_places_non_colliding_instances():
     assert instance_a.position_xyz is None
     gen = MembraneTomogramGenerator(
         membrane_instances=[instance_a, instance_b],
-        target_shape_zyx=big_shape_zyx,
-        v_size=_V_SIZE,
+        target_shape=big_shape_zyx,
+        voxel_size=_V_SIZE,
         protein_specs=[
             TomogramProteinSpec(pdb_source=str(_LARGE_FIXTURE), location="cytosol")
         ],
@@ -286,7 +286,7 @@ def test_membrane_tomogram_generator_drops_instances_that_dont_fit():
     rejection happens before generation, not after."""
     small_shape_zyx = (30, 30, 30)  # 30*8 = 240 A per axis
     kwargs = dict(
-        _MEMBRANE_KWARGS, target_shape_zyx=small_shape_zyx, sh_axes_a=(70.0, 70.0, 70.0)
+        _MEMBRANE_KWARGS, target_shape=small_shape_zyx, sh_axes=(70.0, 70.0, 70.0)
     )
     instances = [
         MembraneInstance(generator=MembraneGenerator(seed=i, **kwargs))
@@ -294,8 +294,8 @@ def test_membrane_tomogram_generator_drops_instances_that_dont_fit():
     ]
     gen = MembraneTomogramGenerator(
         membrane_instances=instances,
-        target_shape_zyx=small_shape_zyx,
-        v_size=_V_SIZE,
+        target_shape=small_shape_zyx,
+        voxel_size=_V_SIZE,
         protein_specs=[
             TomogramProteinSpec(pdb_source=str(_LARGE_FIXTURE), location="cytosol")
         ],
@@ -326,8 +326,8 @@ def test_membrane_tomogram_generator_overlapping_instances_first_write_wins():
             MembraneInstance(generator=mgen_a, position_xyz=(0.0, 0.0, 0.0)),
             MembraneInstance(generator=mgen_b, position_xyz=(0.0, 0.0, 0.0)),
         ],
-        target_shape_zyx=_TARGET_SHAPE_ZYX,
-        v_size=_V_SIZE,
+        target_shape=_TARGET_SHAPE_ZYX,
+        voxel_size=_V_SIZE,
         protein_specs=[TomogramProteinSpec(pdb_source=str(_SMALL_FIXTURE))],
         occupancy_fraction=0.05,
         pdb_cache_dir="specter-data/pdb/",
@@ -360,8 +360,8 @@ def test_membrane_tomogram_generator_transmembrane_reflects_position_offset():
         membrane_instances=[
             MembraneInstance(generator=mgen_origin, position_xyz=(0.0, 0.0, 0.0))
         ],
-        target_shape_zyx=_TARGET_SHAPE_ZYX,
-        v_size=_V_SIZE,
+        target_shape=_TARGET_SHAPE_ZYX,
+        voxel_size=_V_SIZE,
         protein_specs=[TomogramProteinSpec(pdb_source=str(_SMALL_FIXTURE))],
         occupancy_fraction=0.05,
         pdb_cache_dir="specter-data/pdb/",
@@ -376,8 +376,8 @@ def test_membrane_tomogram_generator_transmembrane_reflects_position_offset():
         membrane_instances=[
             MembraneInstance(generator=mgen_offset, position_xyz=offset)
         ],
-        target_shape_zyx=_TARGET_SHAPE_ZYX,
-        v_size=_V_SIZE,
+        target_shape=_TARGET_SHAPE_ZYX,
+        voxel_size=_V_SIZE,
         protein_specs=[TomogramProteinSpec(pdb_source=str(_SMALL_FIXTURE))],
         occupancy_fraction=0.05,
         pdb_cache_dir="specter-data/pdb/",
@@ -404,7 +404,7 @@ def test_membrane_tomogram_generator_export_picks(tmp_path):
     """export_picks: coordinate conversion (corner-relative, not centered)
     against a known placement, and transmembrane species get their own
     suffixed file distinct from cytosol/lumen files."""
-    # A bigger sh_axes_a than _MEMBRANE_KWARGS' own (100A vs 70A radius) --
+    # A bigger sh_axes than _MEMBRANE_KWARGS' own (100A vs 70A radius) --
     # verified directly: 70A reliably finds zero transmembrane sites for
     # 1mbo at this seed/box (Newton-projection surface search exhausts
     # max_attempts against too-tight a curvature), 100A reliably finds one.
@@ -412,9 +412,9 @@ def test_membrane_tomogram_generator_export_picks(tmp_path):
     # unlike _MEMBRANE_KWARGS's own tuning target there's no competing
     # constraint pulling toward a smaller radius.
     mgen = MembraneGenerator(
-        target_shape_zyx=_TARGET_SHAPE_ZYX,
-        v_size=_V_SIZE,
-        sh_axes_a=(100.0, 100.0, 100.0),
+        target_shape=_TARGET_SHAPE_ZYX,
+        voxel_size=_V_SIZE,
+        sh_axes=(100.0, 100.0, 100.0),
         sh_amplitude=0.15,
         n_lipids_per_leaflet=6,
         transmembrane_specs=[
@@ -424,13 +424,13 @@ def test_membrane_tomogram_generator_export_picks(tmp_path):
     )
     gen = MembraneTomogramGenerator(
         membrane_instances=[MembraneInstance(generator=mgen)],
-        target_shape_zyx=_TARGET_SHAPE_ZYX,
-        v_size=_V_SIZE,
+        target_shape=_TARGET_SHAPE_ZYX,
+        voxel_size=_V_SIZE,
         protein_specs=[
             TomogramProteinSpec(pdb_source=str(_LARGE_FIXTURE), location="cytosol"),
         ],
         occupancy_fraction=0.1,
-        gap_angstrom=5.0,
+        gap=5.0,
         pdb_cache_dir="specter-data/pdb/",
         seed=0,
     )
@@ -445,11 +445,11 @@ def test_membrane_tomogram_generator_export_picks(tmp_path):
     assert written[cytosol_key].name.endswith("-2.0_orientedpoint.ndjson")
     assert written[transmembrane_key].exists()
 
-    v_size = _V_SIZE
+    voxel_size = _V_SIZE
     shape_zyx = _TARGET_SHAPE_ZYX
     extent_xyz = (
         torch.tensor([shape_zyx[2], shape_zyx[1], shape_zyx[0]], dtype=torch.float32)
-        * v_size
+        * voxel_size
     )
 
     placed = gen.placements[0]
@@ -474,8 +474,8 @@ def test_membrane_tomogram_generator_places_filaments():
     mgen = MembraneGenerator(seed=0, **_MEMBRANE_KWARGS)
     gen = MembraneTomogramGenerator(
         membrane_instances=[MembraneInstance(generator=mgen)],
-        target_shape_zyx=_TARGET_SHAPE_ZYX,
-        v_size=_V_SIZE,
+        target_shape=_TARGET_SHAPE_ZYX,
+        voxel_size=_V_SIZE,
         protein_specs=[
             TomogramProteinSpec(pdb_source=str(_SMALL_FIXTURE), location="cytosol")
         ],
@@ -484,12 +484,12 @@ def test_membrane_tomogram_generator_places_filaments():
                 code=str(_SMALL_FIXTURE),
                 step=30.0,
                 flex_deg=8.0,
-                n_filaments=2,
+                n_copies=2,
                 n_monomers=4,
             )
         ],
         occupancy_fraction=0.05,
-        gap_angstrom=5.0,
+        gap=5.0,
         pdb_cache_dir="specter-data/pdb/",
         seed=0,
     )
@@ -513,8 +513,8 @@ def test_membrane_tomogram_generator_no_filament_specs_places_nothing():
     mgen = MembraneGenerator(seed=0, **_MEMBRANE_KWARGS)
     gen = MembraneTomogramGenerator(
         membrane_instances=[MembraneInstance(generator=mgen)],
-        target_shape_zyx=_TARGET_SHAPE_ZYX,
-        v_size=_V_SIZE,
+        target_shape=_TARGET_SHAPE_ZYX,
+        voxel_size=_V_SIZE,
         protein_specs=[
             TomogramProteinSpec(pdb_source=str(_SMALL_FIXTURE), location="cytosol")
         ],
@@ -531,8 +531,8 @@ def test_membrane_tomogram_generator_export_picks_includes_filaments(tmp_path):
     mgen = MembraneGenerator(seed=0, **_MEMBRANE_KWARGS)
     gen = MembraneTomogramGenerator(
         membrane_instances=[MembraneInstance(generator=mgen)],
-        target_shape_zyx=_TARGET_SHAPE_ZYX,
-        v_size=_V_SIZE,
+        target_shape=_TARGET_SHAPE_ZYX,
+        voxel_size=_V_SIZE,
         protein_specs=[
             TomogramProteinSpec(pdb_source=str(_SMALL_FIXTURE), location="cytosol")
         ],
@@ -541,7 +541,7 @@ def test_membrane_tomogram_generator_export_picks_includes_filaments(tmp_path):
                 code=str(_SMALL_FIXTURE),
                 step=30.0,
                 flex_deg=8.0,
-                n_filaments=1,
+                n_copies=1,
                 n_monomers=3,
             )
         ],
@@ -563,11 +563,11 @@ def test_membrane_tomogram_generator_export_picks_includes_filaments(tmp_path):
     # corner-relative [0, extent) frame -- no `+ extent_xyz / 2` shift, see
     # export_picks' own docstring -- so every coordinate should land within
     # the volume's physical extent.
-    v_size = _V_SIZE
+    voxel_size = _V_SIZE
     shape_zyx = _TARGET_SHAPE_ZYX
     extent_xyz = (
         torch.tensor([shape_zyx[2], shape_zyx[1], shape_zyx[0]], dtype=torch.float32)
-        * v_size
+        * voxel_size
     )
     for row in rows:
         for axis, extent in zip("xyz", extent_xyz.tolist()):
@@ -575,12 +575,12 @@ def test_membrane_tomogram_generator_export_picks_includes_filaments(tmp_path):
 
 
 # ---------------------------------------------------------------------
-# Carbon support film (grid_spec) / gold fiducial beads (bead_specs)
+# Carbon support film (carbon_film_spec) / gold fiducial beads (bead_specs)
 # ---------------------------------------------------------------------
 
 
-def test_membrane_tomogram_generator_grid_spec_paints_carbon_film():
-    """A grid_spec-only tomogram (no membrane/protein/filament) is valid --
+def test_membrane_tomogram_generator_carbon_film_spec_paints_carbon_film():
+    """A carbon_film_spec-only tomogram (no membrane/protein/filament) is valid --
     the carbon film should occupy part of the volume (not all of it, since
     hole_radius/edge_fraction are chosen here to leave a real hole) at
     carbon's real mean inner potential ballpark (~9-13 V, see
@@ -588,10 +588,12 @@ def test_membrane_tomogram_generator_grid_spec_paints_carbon_film():
     exactly zero."""
     gen = MembraneTomogramGenerator(
         membrane_instances=[],
-        target_shape_zyx=_TARGET_SHAPE_ZYX,
-        v_size=_V_SIZE,
+        target_shape=_TARGET_SHAPE_ZYX,
+        voxel_size=_V_SIZE,
         protein_specs=[],
-        grid_spec=GridSpec(hole_radius=150.0, edge_fraction=0.5, edge_side="left"),
+        carbon_film_spec=CarbonFilmSpec(
+            hole_radius=150.0, edge_fraction=0.5, edge_side="left"
+        ),
         seed=0,
     )
     volume = gen.generate()
@@ -603,19 +605,19 @@ def test_membrane_tomogram_generator_grid_spec_paints_carbon_film():
     assert (volume[~occupied] == 0).all()
 
 
-def test_membrane_tomogram_generator_grid_spec_rejects_multiple_entries():
-    """MembraneTomogramGenerator itself takes a single grid_spec (not a
-    list) -- the "at most one [[grid]] table" constraint is enforced one
+def test_membrane_tomogram_generator_carbon_film_spec_rejects_multiple_entries():
+    """MembraneTomogramGenerator itself takes a single carbon_film_spec (not a
+    list) -- the "at most one [[carbon_film]] table" constraint is enforced one
     layer up, in run_build_tomogram/config.py, not here."""
     gen = MembraneTomogramGenerator(
         membrane_instances=[],
-        target_shape_zyx=_TARGET_SHAPE_ZYX,
-        v_size=_V_SIZE,
+        target_shape=_TARGET_SHAPE_ZYX,
+        voxel_size=_V_SIZE,
         protein_specs=[],
-        grid_spec=GridSpec(),
+        carbon_film_spec=CarbonFilmSpec(),
         seed=0,
     )
-    assert gen.grid_spec is not None
+    assert gen.carbon_film_spec is not None
 
 
 @pytest.mark.skipif(not _SMALL_FIXTURE.exists(), reason="bundled PDB fixture missing")
@@ -623,8 +625,8 @@ def test_membrane_tomogram_generator_bead_specs_avoid_membrane_shell():
     mgen = MembraneGenerator(seed=0, **_MEMBRANE_KWARGS)
     gen = MembraneTomogramGenerator(
         membrane_instances=[MembraneInstance(generator=mgen)],
-        target_shape_zyx=_TARGET_SHAPE_ZYX,
-        v_size=_V_SIZE,
+        target_shape=_TARGET_SHAPE_ZYX,
+        voxel_size=_V_SIZE,
         protein_specs=[],
         bead_specs=[TomogramBeadSpec(radius=15.0, count=10)],
         seed=1,
@@ -633,11 +635,11 @@ def test_membrane_tomogram_generator_bead_specs_avoid_membrane_shell():
 
     assert len(gen.bead_instances) > 0
     shell = gen.regions["shell"]
-    v_size = _V_SIZE
+    voxel_size = _V_SIZE
     shape_zyx = _TARGET_SHAPE_ZYX
     center_zyx = torch.tensor([shape_zyx[0] / 2, shape_zyx[1] / 2, shape_zyx[2] / 2])
     for bead in gen.bead_instances:
-        idx_xyz = (bead.position_xyz / v_size) + center_zyx[[2, 1, 0]]
+        idx_xyz = (bead.position_xyz / voxel_size) + center_zyx[[2, 1, 0]]
         ix, iy, iz = idx_xyz.round().long().tolist()
         assert not bool(shell[iz, iy, ix])
 
@@ -649,8 +651,8 @@ def test_membrane_tomogram_generator_bead_radius_range_varies_sizes():
     it."""
     gen = MembraneTomogramGenerator(
         membrane_instances=[],
-        target_shape_zyx=_TARGET_SHAPE_ZYX,
-        v_size=_V_SIZE,
+        target_shape=_TARGET_SHAPE_ZYX,
+        voxel_size=_V_SIZE,
         protein_specs=[],
         bead_specs=[TomogramBeadSpec(radius=[14.0, 26.0], count=12)],
         seed=0,
@@ -677,8 +679,8 @@ def test_membrane_tomogram_generator_bead_specs_only_is_valid():
     needed to define cytosol/lumen regions."""
     gen = MembraneTomogramGenerator(
         membrane_instances=[],
-        target_shape_zyx=_TARGET_SHAPE_ZYX,
-        v_size=_V_SIZE,
+        target_shape=_TARGET_SHAPE_ZYX,
+        voxel_size=_V_SIZE,
         protein_specs=[],
         bead_specs=[TomogramBeadSpec(radius=10.0, count=5)],
         seed=0,
@@ -696,8 +698,8 @@ def test_membrane_tomogram_generator_bead_specs_excluded_from_protein_packing():
     radius."""
     gen = MembraneTomogramGenerator(
         membrane_instances=[],
-        target_shape_zyx=_TARGET_SHAPE_ZYX,
-        v_size=_V_SIZE,
+        target_shape=_TARGET_SHAPE_ZYX,
+        voxel_size=_V_SIZE,
         protein_specs=[TomogramProteinSpec(pdb_source=str(_SMALL_FIXTURE))],
         bead_specs=[TomogramBeadSpec(radius=30.0, count=3)],
         occupancy_fraction=0.05,
@@ -717,8 +719,8 @@ def test_membrane_tomogram_generator_bead_specs_excluded_from_protein_packing():
 def test_membrane_tomogram_generator_export_picks_includes_beads(tmp_path):
     gen = MembraneTomogramGenerator(
         membrane_instances=[],
-        target_shape_zyx=_TARGET_SHAPE_ZYX,
-        v_size=_V_SIZE,
+        target_shape=_TARGET_SHAPE_ZYX,
+        voxel_size=_V_SIZE,
         protein_specs=[],
         bead_specs=[TomogramBeadSpec(radius=20.0, count=2)],
         seed=0,
@@ -744,14 +746,14 @@ def test_diagnose_zero_placements_reports_box_constraint_not_just_clearance():
     radius. _diagnose_zero_placements has to catch this by construction.
 
     Synthetic geometry, chosen so the two failure modes are unambiguous:
-    a 100x100x100 A box (field_v_size=10, shape (10,10,10)), sampling_mask
+    a 100x100x100 A box (field_voxel_size=10, shape (10,10,10)), sampling_mask
     True everywhere, exclusion_field large (200 A) EVERYWHERE except a thin
     disc near the box center where it's also large but the region is
     entirely masked out -- simpler: split the box into two halves along x.
     """
     from specter.specimen.tomogram.generator import _diagnose_zero_placements
 
-    field_v_size = 10.0
+    field_voxel_size = 10.0
     shape = (10, 10, 10)  # 100x100x100 A box
     box = (100.0, 100.0, 100.0)
 
@@ -764,7 +766,7 @@ def test_diagnose_zero_placements_reports_box_constraint_not_just_clearance():
     viable, best = _diagnose_zero_placements(
         mask,
         huge_clearance,
-        field_v_size,
+        field_voxel_size,
         box,
         radius=60.0,
         gap=0.0,
@@ -781,7 +783,7 @@ def test_diagnose_zero_placements_reports_box_constraint_not_just_clearance():
     viable, best = _diagnose_zero_placements(
         mask,
         huge_clearance,
-        field_v_size,
+        field_voxel_size,
         box,
         radius=5.0,
         gap=0.0,
@@ -812,7 +814,7 @@ def test_diagnose_zero_placements_reports_box_constraint_not_just_clearance():
     viable, best = _diagnose_zero_placements(
         mask,
         clearance,
-        field_v_size,
+        field_voxel_size,
         box,
         radius=10.0,
         gap=0.0,
@@ -864,7 +866,7 @@ def test_membrane_tomogram_zero_placement_warning_distinguishes_unlucky_from_imp
     # ~67 A-radius filler species.
     small_shape_zyx = (30, 30, 30)
     kwargs = dict(
-        _MEMBRANE_KWARGS, target_shape_zyx=small_shape_zyx, sh_axes_a=(70.0, 70.0, 70.0)
+        _MEMBRANE_KWARGS, target_shape=small_shape_zyx, sh_axes=(70.0, 70.0, 70.0)
     )
     instances = [
         MembraneInstance(generator=MembraneGenerator(seed=i, **kwargs))
@@ -872,8 +874,8 @@ def test_membrane_tomogram_zero_placement_warning_distinguishes_unlucky_from_imp
     ]
     gen = MembraneTomogramGenerator(
         membrane_instances=instances,
-        target_shape_zyx=small_shape_zyx,
-        v_size=_V_SIZE,
+        target_shape=small_shape_zyx,
+        voxel_size=_V_SIZE,
         protein_specs=[
             TomogramProteinSpec(pdb_source=str(_LARGE_FIXTURE), location="cytosol")
         ],
@@ -892,3 +894,32 @@ def test_membrane_tomogram_zero_placement_warning_distinguishes_unlucky_from_imp
     # The old bug: reporting exclusion_field.max() (166 A here) as if it
     # were achievable, which it never book-keeps against the box wall.
     assert "166" not in message
+
+
+def test_all_beads_go_in_one_pick_file(tmp_path):
+    """Every fiducial lands in a single `gold-bead` file, whatever its
+    radius or population. Grouping by radius (the earlier behaviour) wrote
+    one file per bead under a [low, high] radius, since every instance
+    then has a unique size."""
+    gen = MembraneTomogramGenerator(
+        membrane_instances=[],
+        target_shape=_TARGET_SHAPE_ZYX,
+        voxel_size=_V_SIZE,
+        protein_specs=[],
+        bead_specs=[
+            TomogramBeadSpec(radius=[14.0, 26.0], count=6),
+            TomogramBeadSpec(radius=30.0, count=2),
+        ],
+        seed=0,
+    )
+    gen.generate()
+    written = gen.export_picks(str(tmp_path))
+
+    bead_keys = sorted(k for k in written if k.endswith("-bead"))
+    assert bead_keys == ["gold-bead"], bead_keys
+
+    # Both populations' beads are in that one file.
+    with open(written["gold-bead"]) as f:
+        rows = [line for line in f if line.strip()]
+    assert len(rows) == len(gen.bead_instances)
+    assert len({b.radius for b in gen.bead_instances}) > 1, "test needs mixed sizes"

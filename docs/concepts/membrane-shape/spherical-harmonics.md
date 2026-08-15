@@ -76,7 +76,7 @@ the same broad shape.
 ## Radius function to solid
 
 For every voxel: transform its position into a frame scaled by the
-organelle's semi-axes `sh_axes_a`, giving a local radius \(|p'|\) and
+organelle's semi-axes `sh_axes`, giving a local radius \(|p'|\) and
 direction \((\theta, \phi)\). The voxel is inside if
 
 \[
@@ -127,7 +127,7 @@ wall time.
 | Parameter | Meaning | Default |
 |---|---|---|
 | `sh_max_degree` | Highest harmonic degree \(L\) | 8 |
-| `sh_axes_a` | Physical semi-axes \((a_x, a_y, a_z)\), Å | `(300, 300, 300)` |
+| `sh_axes` | Physical semi-axes \((a_x, a_y, a_z)\), Å | `(300, 300, 300)` |
 | `sh_amplitude` | RMS fractional radius perturbation \(a\) | 0.15 |
 | `sh_spectrum_power` | Exponent \(p\) in \(\mathrm{Var}(c_{lm}) \propto [l(l+1)]^{-p}\) | 2.0 |
 
@@ -139,7 +139,7 @@ concavity artifacts.
 
 ![Isotropic, elongated, and flattened base ellipsoids, same random perturbation.](../../assets/images/membrane-sh-axes-sweep.png){ width="700"  style="display:block;margin:1.2em auto;" }
 
-`sh_axes_a` sets the base ellipsoid the perturbation rides on.
+`sh_axes` sets the base ellipsoid the perturbation rides on.
 
 ## Limitations
 

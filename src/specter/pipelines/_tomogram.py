@@ -7,7 +7,7 @@ membrane (`config.membrane`, `specter.specimen.MembraneGenerator` per
 instance), optional scattered filament species (`config.filaments`/
 `config.actin`, `specter.specimen.filament.place_filaments`), optional gold
 fiducial beads (`config.beads`) and an optional carbon support film
-(`config.grid`), and densely packed protein species (`config.targets`/
+(`config.carbon_film`), and densely packed protein species (`config.targets`/
 `config.filler`, region-gated to `location: "cytosol"|"lumen"` when a
 membrane is present -- otherwise the whole volume is one cytosol region).
 Generation order is carbon film, then membranes, then filaments, then
@@ -37,7 +37,7 @@ from specter.specimen import (
     CRYOETSIM_PARTICLE_TABLE,
     PEI2016_CROWDING_TABLE,
     FilamentSpec,
-    GridSpec,
+    CarbonFilmSpec,
     MembraneGenerator,
     MembraneInstance,
     MembraneTomogramGenerator,
@@ -70,7 +70,7 @@ def run_build_tomogram(config: TomogramConfig, n_tomograms: int = 1) -> None:
         Python. ``config.targets``, ``config.filler``,
         ``config.filler_from_pei2016``, ``config.filler_from_cryoetsim``,
         ``config.membrane``, ``config.filaments``, ``config.actin``,
-        ``config.grid``, and ``config.beads`` can't all be empty/False --
+        ``config.carbon_film``, and ``config.beads`` can't all be empty/False --
         at least one species source is required.
     n_tomograms : int, optional
         Number of independent tomograms to generate, default 1. Each one
@@ -93,22 +93,23 @@ def run_build_tomogram(config: TomogramConfig, n_tomograms: int = 1) -> None:
         or config.membrane
         or config.filaments
         or config.actin
-        or config.grid
+        or config.carbon_film
         or config.beads
     )
     if not has_species_source:
         raise ValueError(
             "run_build_tomogram: config.targets, config.filler, "
             "config.filler_from_pei2016, config.filler_from_cryoetsim, "
-            "config.membrane, config.filaments, config.actin, config.grid, "
+            "config.membrane, config.filaments, config.actin, config.carbon_film, "
             "and config.beads can't all be empty/False -- at least one "
             "species source is required."
         )
-    if len(config.grid) > 1:
+    if len(config.carbon_film) > 1:
         raise ValueError(
-            f"run_build_tomogram: config.grid has {len(config.grid)} entries "
+            f"run_build_tomogram: config.carbon_film has "
+            f"{len(config.carbon_film)} entries "
             "-- there is only one carbon film per tomogram, at most one "
-            "[[grid]] table is allowed."
+            "[[carbon_film]] table is allowed."
         )
     for i in range(n_tomograms):
         run_config = config
@@ -143,8 +144,8 @@ def _protein_specs_from_dicts(
     return specs
 
 
-# MembraneGenerator's own default size-draw ranges (sh_axes_range_a,
-# swept_total_length_range_a, swept_tube_radius_range_a) -- duplicated
+# MembraneGenerator's own default size-draw ranges (sh_axes_range,
+# swept_total_length_range, swept_tube_radius_range) -- duplicated
 # here rather than imported, matching this codebase's established
 # zero-cross-generator-coupling convention. Used only as the UPPER bound to
 # cap against below; the biology-motivated LOWER bounds are never shrunk.
@@ -153,7 +154,7 @@ _SWEPT_TOTAL_LENGTH_RANGE_A = (1500.0, 2500.0)
 _SWEPT_TUBE_RADIUS_RANGE_A = (150.0, 400.0)
 
 # Fraction of the tomogram box's own LIMITING axis extent an auto-sized
-# (target_shape_zyx=None), auto-placed (position_xyz=None) [[membrane]]
+# (target_shape=None), auto-placed (position_xyz=None) [[membrane]]
 # instance's DIAMETER (2x bounding radius) is allowed to reach. "Limiting"
 # = the smallest extent among NON-clippable axes (pack_hard_spheres_3d
 # requires the FULL sphere to fit there -- see config.clip_axes), or, if
@@ -168,7 +169,7 @@ _SWEPT_TUBE_RADIUS_RANGE_A = (150.0, 400.0)
 # also made clippable) can end up drawing an organelle whose bounding
 # sphere literally cannot fit that axis at all -- confirmed directly:
 # swept_spline's default range alone can reach a diameter of ~3300 A, far
-# exceeding a 2000 A Z-extent even before accounting for gap_angstrom or
+# exceeding a 2000 A Z-extent even before accounting for gap or
 # multiple co-existing instances.
 #
 # 0.75 is close to the true ceiling for a NON-clippable limiting axis, not
@@ -176,7 +177,7 @@ _SWEPT_TUBE_RADIUS_RANGE_A = (150.0, 400.0)
 # regardless of this fraction there: at exactly 1.0 an instance's center
 # would have exactly ONE valid position on that axis (dead center, zero
 # slack), which pack_hard_spheres_3d's random sampling essentially never
-# finds and gap_angstrom alone would already violate. Multiple co-existing
+# finds and gap alone would already violate. Multiple co-existing
 # instances need even more slack than one. For the all-clippable fallback
 # (limiting axis = largest, no hard ceiling exists at all), 0.75 is just
 # reused as a reasonable default rather than re-deriving a second number.
@@ -187,12 +188,12 @@ _MEMBRANE_AUTO_SIZE_BOX_FRACTION = 0.75
 
 def _cap_membrane_auto_size_ranges(
     instance_kwargs: dict,
-    target_shape_zyx: tuple[int, int, int] | None,
+    target_shape: tuple[int, int, int] | None,
     config: TomogramConfig,
 ) -> dict:
     """
     Return `instance_kwargs` with a size-range override added, IF this
-    entry's own (already-resolved) `target_shape_zyx` is None AND every
+    entry's own (already-resolved) `target_shape` is None AND every
     size-controlling key for its `shape_backend` is unset in
     `instance_kwargs` -- i.e. only when nothing already constrains how
     big the auto-drawn organelle can get. An entry that sets ANY of those
@@ -202,13 +203,15 @@ def _cap_membrane_auto_size_ranges(
     Caps the draw so DIAMETER (2x bounding radius) never exceeds
     `_MEMBRANE_AUTO_SIZE_BOX_FRACTION` of the tomogram box's own LIMITING
     axis extent (see that constant's own comment for exactly what that
-    means and why), computed from `config.target_shape`/`config.v_size`/
+    means and why), computed from `config.target_shape`/`config.voxel_size`/
     `config.clip_axes`.
     """
-    if target_shape_zyx is not None:
+    if target_shape is not None:
         return instance_kwargs
     shape_backend = instance_kwargs.get("shape_backend", "spherical_harmonics")
-    box_extent_a = tuple(s * config.v_size for s in config.target_shape)  # (Z, Y, X)
+    box_extent_a = tuple(
+        s * config.voxel_size for s in config.target_shape
+    )  # (Z, Y, X)
     non_clippable_extents_a = [
         extent
         for extent, clippable in zip(box_extent_a, config.clip_axes)
@@ -220,20 +223,20 @@ def _cap_membrane_auto_size_ranges(
     max_reach_a = 0.5 * _MEMBRANE_AUTO_SIZE_BOX_FRACTION * limiting_extent_a
 
     if shape_backend == "spherical_harmonics":
-        if "sh_axes_a" in instance_kwargs or "sh_axes_range_a" in instance_kwargs:
+        if "sh_axes" in instance_kwargs or "sh_axes_range" in instance_kwargs:
             return instance_kwargs
         lo, hi = _SH_AXES_RANGE_A
         capped_hi = min(hi, max_reach_a)
         instance_kwargs = dict(instance_kwargs)
-        instance_kwargs["sh_axes_range_a"] = (min(lo, capped_hi), capped_hi)
+        instance_kwargs["sh_axes_range"] = (min(lo, capped_hi), capped_hi)
     elif shape_backend == "swept_spline":
         if any(
             k in instance_kwargs
             for k in (
-                "swept_total_length_a",
-                "swept_total_length_range_a",
-                "swept_tube_radius_a",
-                "swept_tube_radius_range_a",
+                "swept_total_length",
+                "swept_total_length_range",
+                "swept_tube_radius",
+                "swept_tube_radius_range",
             )
         ):
             return instance_kwargs
@@ -243,11 +246,11 @@ def _cap_membrane_auto_size_ranges(
         if worst_case_reach_a > max_reach_a:
             scale = max_reach_a / worst_case_reach_a
             instance_kwargs = dict(instance_kwargs)
-            instance_kwargs["swept_total_length_range_a"] = (
+            instance_kwargs["swept_total_length_range"] = (
                 total_lo * scale,
                 total_hi * scale,
             )
-            instance_kwargs["swept_tube_radius_range_a"] = (
+            instance_kwargs["swept_tube_radius_range"] = (
                 tube_lo * scale,
                 tube_hi * scale,
             )
@@ -334,7 +337,7 @@ def build_tomogram_generator(config: TomogramConfig) -> MembraneTomogramGenerato
         built = build_templates_concurrently(
             keys=list(range(len(transmembrane_specs))),
             build_one=lambda i, device: render_transmembrane_template(
-                transmembrane_specs[i], config.v_size, config.pdb_savefolder, device
+                transmembrane_specs[i], config.voxel_size, config.pdb_savefolder, device
             ),
             devices=devices,
             max_workers=workers,
@@ -376,16 +379,16 @@ def build_tomogram_generator(config: TomogramConfig) -> MembraneTomogramGenerato
         # omitted (see its own docstring), instead of every instance
         # rendering on a working grid the size of the WHOLE tomogram
         # canvas, the old behaviour. A [[membrane]] entry can still request
-        # a specific target_shape_zyx explicitly (e.g. to match a scale
+        # a specific target_shape explicitly (e.g. to match a scale
         # requirement of its own), popped here rather than left for
         # MembraneGenerator's **kwargs since it needs a tuple() cast like
         # config.target_shape gets below.
-        target_shape_zyx_raw = instance_kwargs.pop("target_shape_zyx", None)
-        target_shape_zyx = (
+        target_shape_zyx_raw = instance_kwargs.pop("target_shape", None)
+        target_shape = (
             tuple(target_shape_zyx_raw) if target_shape_zyx_raw is not None else None
         )
         instance_kwargs = _cap_membrane_auto_size_ranges(
-            instance_kwargs, target_shape_zyx, config
+            instance_kwargs, target_shape, config
         )
 
         for i in range(n_copies):
@@ -400,8 +403,8 @@ def build_tomogram_generator(config: TomogramConfig) -> MembraneTomogramGenerato
             # reproducibility-mode consideration.
             instance_seed = None if config.seed is None else config.seed + i
             mgen = MembraneGenerator(
-                target_shape_zyx=target_shape_zyx,  # type: ignore[arg-type]
-                v_size=config.v_size,
+                target_shape=target_shape,  # type: ignore[arg-type]
+                voxel_size=config.voxel_size,
                 transmembrane_specs=list(transmembrane_specs),
                 pdb_cache_dir=config.pdb_savefolder,
                 device=device,
@@ -412,8 +415,10 @@ def build_tomogram_generator(config: TomogramConfig) -> MembraneTomogramGenerato
                 MembraneInstance(generator=mgen, position_xyz=position_xyz)  # type: ignore[arg-type]
             )
 
-    # len(config.grid) > 1 is already rejected in run_build_tomogram.
-    grid_spec = GridSpec(**config.grid[0]) if config.grid else None
+    # len(config.carbon_film) > 1 is already rejected in run_build_tomogram.
+    carbon_film_spec = (
+        CarbonFilmSpec(**config.carbon_film[0]) if config.carbon_film else None
+    )
     bead_specs = [
         TomogramBeadSpec(
             radius=d["radius"],
@@ -424,27 +429,27 @@ def build_tomogram_generator(config: TomogramConfig) -> MembraneTomogramGenerato
 
     return MembraneTomogramGenerator(
         membrane_instances=membrane_instances,
-        target_shape_zyx=tuple(config.target_shape),  # type: ignore[arg-type]
-        v_size=config.v_size,
+        target_shape=tuple(config.target_shape),  # type: ignore[arg-type]
+        voxel_size=config.voxel_size,
         protein_specs=protein_specs,
         filament_specs=filament_specs,
-        grid_spec=grid_spec,
+        carbon_film_spec=carbon_film_spec,
         bead_specs=bead_specs,
         bead_roughness=config.bead_roughness,
         occupancy_fraction=config.filler_occupancy_fraction,
-        gap_angstrom=config.gap_angstrom,
+        gap=config.gap,
         clip_axes=tuple(config.clip_axes),  # type: ignore[arg-type]
         region_density_threshold=config.membrane_region_density_threshold,
         region_max_passes=config.membrane_region_max_passes,
-        min_transmembrane_spacing_a=config.membrane_min_transmembrane_spacing_a,
+        min_transmembrane_spacing=config.membrane_min_transmembrane_spacing,
         pdb_cache_dir=config.pdb_savefolder,
-        parameterization=config.parameterization,
+        parameterization=config.target_parameterization,
         seed=config.seed,
         device=device,
         accumulator_device=config.accumulator_device,
         render_workers=config.render_workers,
         render_devices=render_devices,  # type: ignore[arg-type]
-        chunk_size=config.chunk_size,
+        chunk_size=config.render_chunk_size,
     )
 
 
@@ -454,16 +459,16 @@ def _run_single_tomogram(config: TomogramConfig) -> None:
 
     _section("Building specimen volume")
     # Printed right after the header, before any actual work -- target_shape/
-    # v_size are already fully resolved from config at this point, so
+    # voxel_size are already fully resolved from config at this point, so
     # there's no reason to make a caller wait for generation to finish
     # just to confirm they're building the size they meant to. Doubles as
     # a sanity check: if this looks wrong, no need to wait out the rest
     # of the run to find out.
     target_shape = tuple(config.target_shape)
-    size_angstrom = tuple(s * config.v_size for s in target_shape)
+    size_angstrom = tuple(s * config.voxel_size for s in target_shape)
     _console.print(
         f"[bold]Volume:[/bold] {target_shape} voxels (Z, Y, X) @ "
-        f"{config.v_size:.2f} A/voxel = {size_angstrom[0]:.0f} x "
+        f"{config.voxel_size:.2f} A/voxel = {size_angstrom[0]:.0f} x "
         f"{size_angstrom[1]:.0f} x {size_angstrom[2]:.0f} A"
     )
 
@@ -477,7 +482,7 @@ def _run_single_tomogram(config: TomogramConfig) -> None:
             f"  Filaments: {len(gen.filament_instances)} "
             f"monomer instance(s) placed ({len(gen.filament_specs)} species)"
         )
-    if gen.grid_spec is not None:
+    if gen.carbon_film_spec is not None:
         _console.print("  Carbon film: generated")
     if gen.bead_specs:
         n_requested = sum(spec.count for spec in gen.bead_specs)
@@ -504,7 +509,7 @@ def _run_single_tomogram(config: TomogramConfig) -> None:
     mrc_path = os.path.join(config.output_dir, config.filename + ".mrc")
     with mrcfile.new(mrc_path, overwrite=True) as mrc:
         mrc.set_data(volume.cpu().numpy().astype("float32"))
-        mrc.voxel_size = config.v_size
+        mrc.voxel_size = config.voxel_size
     _console.print(f"  [green]✓[/green] {mrc_path}")
 
     if config.write_picks:
@@ -528,7 +533,7 @@ def _run_single_tomogram(config: TomogramConfig) -> None:
             path = os.path.join(config.output_dir, config.filename + suffix)
             with mrcfile.new(path, overwrite=True) as mrc:
                 mrc.set_data(labels.cpu().numpy().astype(dtype))
-                mrc.voxel_size = config.v_size
+                mrc.voxel_size = config.voxel_size
             _console.print(f"  [green]✓[/green] {path}")
 
         assert gen.instance_labels is not None

@@ -30,7 +30,7 @@ def test_load_config_flattens_tables(tmp_path: Path) -> None:
         """
         [potential]
         pdb_code = "6bdf"
-        num_pixels = 128
+        n_pixels = 128
 
         [microscope]
         voltage = 200.0
@@ -38,14 +38,14 @@ def test_load_config_flattens_tables(tmp_path: Path) -> None:
     )
     config = load_config(path)
     assert config.pdb_code == "6bdf"
-    assert config.num_pixels == 128
+    assert config.n_pixels == 128
     assert config.voltage == 200.0
 
 
 def test_load_config_fills_defaults_for_missing_fields(tmp_path: Path) -> None:
     path = _write_toml(tmp_path, '[potential]\npdb_code = "6bdf"\n')
     config = load_config(path)
-    assert config.num_pixels == 256
+    assert config.n_pixels == 256
     assert config.pixel_size == 1.0
     assert config.scattering_model == "multislice"
     assert config.dose == 20.0
@@ -190,7 +190,7 @@ def test_particle_toml_loads_and_matches_expected_values() -> None:
     path = str(REPO_ROOT / "configs" / "particle.toml")
     config = load_config(path)
     assert config.pdb_code == "6bdf"
-    assert config.num_pixels == 256
+    assert config.n_pixels == 256
     assert config.pixel_size == 1.0
     assert config.scattering_model == "multislice"
     assert config.device == "cpu"
@@ -256,7 +256,7 @@ def test_load_config_tilt_series_parses_scalar_fields(tmp_path: Path) -> None:
         tmp_path,
         """
         [specimen]
-        target_v_size = 5.0
+        voxel_size = 5.0
 
         [tilt_geometry]
         n_tilts = 21
@@ -264,7 +264,7 @@ def test_load_config_tilt_series_parses_scalar_fields(tmp_path: Path) -> None:
         """,
     )
     config = load_config(path, TiltSeriesConfig)
-    assert config.target_v_size == 5.0
+    assert config.voxel_size == 5.0
     assert config.n_tilts == 21
     assert config.tilt_axis == "x"
 
@@ -272,7 +272,7 @@ def test_load_config_tilt_series_parses_scalar_fields(tmp_path: Path) -> None:
 def test_load_config_tilt_series_fills_defaults_for_missing_fields(
     tmp_path: Path,
 ) -> None:
-    path = _write_toml(tmp_path, "[specimen]\ntarget_v_size = 5.0\n")
+    path = _write_toml(tmp_path, "[specimen]\nvoxel_size = 5.0\n")
     config = load_config(path, TiltSeriesConfig)
     assert config.volume_path == ""
     assert config.n_tilts == 61
@@ -289,7 +289,7 @@ def test_tilt_series_config_constructs_with_no_args() -> None:
 def test_tilt_series_toml_loads_and_matches_expected_values() -> None:
     path = str(REPO_ROOT / "configs" / "tilt_series.toml")
     config = load_config(path, TiltSeriesConfig)
-    assert config.target_v_size == 2.0
+    assert config.voxel_size == 2.0
     assert config.n_tilts == 61
     assert config.scattering_model == "multislice"
     assert config.device == "cpu"
@@ -310,3 +310,22 @@ def test_tilt_series_toml_volume_path_round_trip(tmp_path: Path) -> None:
     config = load_config(path, TiltSeriesConfig)
     assert config.volume_path == "path/to/specimen.mrc"
     assert config.n_tilts == 5
+
+
+def test_load_config_names_unknown_fields_and_renames(tmp_path):
+    """A stale or mistyped table used to surface as a bare
+    `TypeError: __init__() got an unexpected keyword argument`, which names
+    the key but not what to write instead. `[[grid]]` in particular shipped
+    commented-out in the canonical config before it became
+    `[[carbon_film]]`, so a copied-and-uncommented block hits this."""
+    from specter.config import TomogramConfig, load_config
+
+    stale = tmp_path / "stale.toml"
+    stale.write_text("[[grid]]\nhole_radius = 6000.0\n")
+    with pytest.raises(ValueError, match=r"renamed to 'carbon_film'"):
+        load_config(str(stale), TomogramConfig)
+
+    typo = tmp_path / "typo.toml"
+    typo.write_text("[specimen]\nv_siz = 5.0\n")
+    with pytest.raises(ValueError, match="unknown TomogramConfig field"):
+        load_config(str(typo), TomogramConfig)

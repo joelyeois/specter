@@ -107,7 +107,7 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
     # just be wasted, redundant compute.
     if is_main:
         pb = PotentialBuilder(
-            config.num_pixels,
+            config.n_pixels,
             pixel_size,
             pdb.atomic_numbers,
             parameterization=config.potential_parameterization,
@@ -121,7 +121,7 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
         with torch.no_grad():
             V = pb(pdb.coordinates, method=config.potential_method).clone()
     else:
-        V = torch.zeros(config.num_pixels, config.num_pixels, config.num_pixels)
+        V = torch.zeros(config.n_pixels, config.n_pixels, config.n_pixels)
 
     # --- Sampling poses, defocus, and translations ---
     if is_main:
@@ -216,8 +216,8 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
         if config.crowd_min_distance is not None
         else pdb.max_diameter
     )
-    num_frames = (
-        config.num_frames if config.num_frames is not None else int(dose.mean().item())
+    n_frames = (
+        config.n_frames if config.n_frames is not None else int(dose.mean().item())
     )
     cc_angstrom = config.cc * 1e7 if config.cc is not None else None
 
@@ -227,11 +227,11 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
     # (cache_dir=...) just loads small pre-generated coordinate files from
     # disk, cheap enough that every DDP rank can construct it independently
     # (no rank-0-builds-then-broadcasts dance needed, unlike V above).
-    ice_nz = compute_nz(config.num_pixels, config.ice_thickness, pixel_size)
+    ice_nz = compute_nz(config.n_pixels, config.ice_thickness, pixel_size)
     icemaker = resolve_icemaker(
         ice_model,
         pixel_size,
-        config.num_pixels,
+        config.n_pixels,
         ice_nz,
         ice_cache_dir=config.ice_cache_dir,
         parameterization=config.ice_parameterization,
@@ -277,7 +277,7 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
         detector_model=detector_model,
         verbose=False,
         coincidence_radius=coincidence_radius,
-        num_frames=num_frames,
+        n_frames=n_frames,
         potential_scale=potential_scale,
         convergence_angle=config.convergence_angle,
         cc=cc_angstrom,
@@ -306,13 +306,11 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
         else:
             sizing_device = str(device_target)
         batchsize = recommend_batchsize(
-            config.num_pixels, model.nz, model.pad_nxy, sizing_device, n_particles=n
+            config.n_pixels, model.nz, model.pad_nxy, sizing_device, n_particles=n
         )
         if is_main:
             peak_gib = (
-                estimate_peak_bytes(
-                    batchsize, config.num_pixels, model.nz, model.pad_nxy
-                )
+                estimate_peak_bytes(batchsize, config.n_pixels, model.nz, model.pad_nxy)
                 / 1024**3
             )
             free_gib = available_memory_bytes(sizing_device) / 1024**3
@@ -388,7 +386,7 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
                 config.output_dir,
                 config.filename,
                 config.pad_fft,
-                config.num_pixels,
+                config.n_pixels,
             )
 
         if clean_exitwaves is not None:
@@ -399,7 +397,7 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
                 config.output_dir,
                 config.filename,
                 config.pad_fft,
-                config.num_pixels,
+                config.n_pixels,
             )
 
     elapsed = time.perf_counter() - t_start

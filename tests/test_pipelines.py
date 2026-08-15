@@ -61,7 +61,7 @@ def test_run_particle_stack_from_csfile(tmp_path: Path) -> None:
 
     config = ParticleStackConfig(
         pdb_code="6bdf",
-        num_pixels=64,
+        n_pixels=64,
         cs_path=str(cs_path),
         n_particles=5,
         scattering_model="projection",
@@ -97,7 +97,7 @@ def test_run_particle_stack_applies_tetrafoil(tmp_path: Path) -> None:
     """
     common = dict(
         pdb_code="6bdf",
-        num_pixels=64,
+        n_pixels=64,
         pixel_size=2.0,
         n_particles=2,
         seed=1234,
@@ -130,7 +130,7 @@ def test_run_particle_stack_auto_batchsize(tmp_path: Path) -> None:
     """
     config = ParticleStackConfig(
         pdb_code="6bdf",
-        num_pixels=32,
+        n_pixels=32,
         pixel_size=4.0,
         n_particles=3,
         seed=11,

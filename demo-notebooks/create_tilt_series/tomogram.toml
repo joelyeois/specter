@@ -1,5 +1,5 @@
 # Small/fast specimen so this notebook's specimen-building step finishes in
-# a couple of minutes. Scale target_shape/v_size/n_copies up for production
+# a couple of minutes. Scale target_shape/voxel_size/n_copies up for production
 # runs -- see configs/tomogram.toml for full/canonical defaults.
 
 [targets]
@@ -14,14 +14,14 @@ targets = [
 
 [[membrane]]
 shape_backend = "spherical_harmonics"
-sh_axes_a = [80.0, 80.0, 80.0]
+sh_axes = [80.0, 80.0, 80.0]
 
 [specimen]
 # generic cytosolic filler; off by default so this notebook finishes
 # quickly. Uncomment to enable:
 # filler_from_pei2016 = true
 target_shape = [64, 160, 160]   # (Z, Y, X) voxels -- modest, finishes quickly
-v_size = 5.0                    # Å/voxel
+voxel_size = 5.0                    # Å/voxel
 filler_occupancy_fraction = 0.0
 seed = 11
 

@@ -1,15 +1,15 @@
 # Imaging half of the two-stage cryo-ET pipeline this notebook walks
 # through: tomogram.toml (this folder) builds the specimen volume, this
-# file simulates the tilted acquisition from it. target_v_size below MUST
-# match tomogram.toml's own v_size.
+# file simulates the tilted acquisition from it. voxel_size below MUST
+# match tomogram.toml's own voxel_size.
 
 [specimen]
-target_v_size = 5.0   # Å/voxel -- must match tomogram.toml's v_size
+voxel_size = 5.0   # Å/voxel -- must match tomogram.toml's voxel_size
 
 [microscope]
 voltage = 300.0
 dose_per_tilt = 3.0
-num_frames = 10
+n_frames = 10
 cs = 2.0
 alpha = 0.1
 

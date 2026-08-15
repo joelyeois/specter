@@ -62,7 +62,7 @@ def test_compute_bilayer_profile_has_headgroup_peak_and_decays_outside():
     profile = compute_bilayer_profile(
         atomic_numbers,
         coordinates,
-        v_size=2.0,
+        voxel_size=2.0,
         parameterization="shtyrov",
     )
 
@@ -93,7 +93,7 @@ def test_compute_bilayer_profile_phosphate_peak_dominates_glycerol_shoulder():
         n_lipids_per_leaflet=120, area_per_lipid_a2=65.0, jitter_a=2.5, seed=0
     )
     profile = compute_bilayer_profile(
-        atomic_numbers, coordinates, v_size=1.0, parameterization="shtyrov"
+        atomic_numbers, coordinates, voxel_size=1.0, parameterization="shtyrov"
     )
 
     phosphate_peak = profile(torch.linspace(18.0, 21.0, 10)).max()
@@ -110,15 +110,15 @@ def test_compute_bilayer_profile_no_competing_peak_in_chain_region():
     second, nearly phosphate-height hump around +-8A, rather than a single
     smoothly-declining shoulder. A real bilayer electron-density profile
     reads as two dominant peaks (headgroups) with clearly weaker material
-    in between, not four peaks of similar height. Checked at v_size=2.0,
+    in between, not four peaks of similar height. Checked at voxel_size=2.0,
     compute_bilayer_profile's own default and what MembraneGenerator
-    actually uses (the v_size=1.0 test above only ever exercised a finer
+    actually uses (the voxel_size=1.0 test above only ever exercised a finer
     resolution than production use)."""
     atomic_numbers, coordinates = build_reference_lipid_patch(
         n_lipids_per_leaflet=200, area_per_lipid_a2=65.0, jitter_a=2.5, seed=0
     )
     profile = compute_bilayer_profile(
-        atomic_numbers, coordinates, v_size=2.0, parameterization="shtyrov"
+        atomic_numbers, coordinates, voxel_size=2.0, parameterization="shtyrov"
     )
 
     phosphate_peak = profile(torch.linspace(18.0, 21.0, 10)).max()
@@ -162,11 +162,11 @@ def test_estimate_bilayer_peak_amplitude_matches_raw_isolated_atom_peak():
     # Raw isolated-atom peak, computed independently (not by calling the
     # function under test) -- phosphorus, the heaviest/dominant species in
     # the default lipid template.
-    v_size = 2.0
-    n = int(2 * ATOM_KERNEL_HALF_WIDTH_A / v_size) // 2 * 2 + 2
+    voxel_size = 2.0
+    n = int(2 * ATOM_KERNEL_HALF_WIDTH_A / voxel_size) // 2 * 2 + 2
     builder = PotentialBuilder(
         n_xyz=(n, n, n),
-        dx=v_size,
+        dx=voxel_size,
         atomic_numbers=atom_number(["P"]),
         progressbars=False,
         parameterization="shtyrov",

@@ -25,7 +25,7 @@ this:
 [potential]
 pdb_code = "6bdf"
 assembly = true
-num_pixels = 256
+n_pixels = 256
 pixel_size = 1.0              # Å
 
 [microscope]
@@ -97,7 +97,7 @@ shape_backend = "spherical_harmonics"   # omit [[membrane]] entirely for no memb
 
 [specimen]
 target_shape = [128, 256, 256]    # (Z, Y, X) voxels
-v_size = 5.0                       # Å/voxel
+voxel_size = 5.0                       # Å/voxel
 filler_occupancy_fraction = 0.5    # bare-sphere volume fraction budget for filler, per region
 
 # ... see the full file: configs/tomogram.toml

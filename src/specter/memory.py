@@ -6,7 +6,7 @@ Memory-aware batch sizing for the particle-stack forward model.
 it changes nothing about the physics -- but picking it well needs three
 numbers a user has no reason to know: how many working copies of the padded
 volume the multislice pipeline holds at peak, how big the padded volume
-actually is (which is *not* `num_pixels**3`), and how much of the device is
+actually is (which is *not* `n_pixels**3`), and how much of the device is
 free right now. `recommend_batchsize` computes all three.
 
 Peak-memory model
@@ -21,11 +21,11 @@ unpadded template volume::
 
 Constants were fit to measured `torch.cuda.max_memory_allocated` for real
 `run_particle_stack` runs on an NVIDIA L40 (multislice + IceBank ice +
-`pad_fft=True`, the default path), sweeping `num_pixels` over 128/192/256/384
+`pad_fft=True`, the default path), sweeping `n_pixels` over 128/192/256/384
 and `batchsize` over 1/2/4/8:
 
 ===========  ====  ============  =============
-num_pixels      B  measured GiB  predicted GiB
+n_pixels      B  measured GiB  predicted GiB
 ===========  ====  ============  =============
 128             1          0.49           0.55
 128             8          1.20           1.49
@@ -99,7 +99,7 @@ def estimate_peak_bytes(batchsize: int, nxy: int, nz: int, pad_nxy: int) -> int:
     batchsize : int
         Particles per forward pass.
     nxy : int
-        Unpadded box size in pixels (``config.num_pixels``).
+        Unpadded box size in pixels (``config.n_pixels``).
     nz : int
         Number of Z slices, from :func:`specter.arrays.compute_nz`.
     pad_nxy : int

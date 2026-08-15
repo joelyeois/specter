@@ -18,7 +18,7 @@ Example (HPC, multi-GPU):
         --cs_path /scratch/loh/joel/J35/J35_passthrough_particles.cs \
         --pdb_code 6bdf \
         --n_particles 1000 \
-        --num_pixels 256 \
+        --n_pixels 256 \
         --dose 53 \
         --scattering_model multislice \
         --aberration_model holography \
@@ -77,7 +77,7 @@ def parse_args() -> argparse.Namespace:
         help="Folder to cache downloaded PDB files.",
     )
     parser.add_argument(
-        "--num_pixels",
+        "--n_pixels",
         type=int,
         default=256,
         help="Number of pixels per axis for the 3-D potential box.",
@@ -91,7 +91,7 @@ def parse_args() -> argparse.Namespace:
         help="Electron dose in e⁻/Å². Check the EMDB Experiment tab for this value. (required)",
     )
     parser.add_argument(
-        "--num_frames",
+        "--n_frames",
         type=int,
         default=None,
         help="Number of frames. Defaults to int(dose) if not set.",
@@ -551,7 +551,7 @@ def main() -> None:
 
     pdb = PDB(args.pdb_code, assembly=args.assembly, savefolder=args.pdb_savefolder)
 
-    pb = PotentialBuilder(args.num_pixels, pixel_size.item(), pdb.atomic_numbers).to(
+    pb = PotentialBuilder(args.n_pixels, pixel_size.item(), pdb.atomic_numbers).to(
         "cpu"
     )
     with torch.no_grad():
@@ -573,7 +573,7 @@ def main() -> None:
         if args.crowd_min_distance is not None
         else pdb.max_diameter
     )
-    num_frames = args.num_frames if args.num_frames is not None else int(args.dose)
+    n_frames = args.n_frames if args.n_frames is not None else int(args.dose)
 
     cc_angstrom = args.cc * 1e7 if args.cc is not None else None
 
@@ -583,11 +583,11 @@ def main() -> None:
     # IceBank(cache_dir=...) just loads small pre-generated coordinate files
     # from disk, cheap enough that every DDP rank can construct it
     # independently (no rank-0-builds-then-broadcasts dance needed).
-    ice_nz = compute_nz(args.num_pixels, args.ice_thickness, pixel_size.item())
+    ice_nz = compute_nz(args.n_pixels, args.ice_thickness, pixel_size.item())
     icemaker = resolve_icemaker(
         ice_model,
         pixel_size.item(),
-        args.num_pixels,
+        args.n_pixels,
         ice_nz,
         ice_cache_dir=args.ice_cache_dir,
     )
@@ -621,7 +621,7 @@ def main() -> None:
         detector_model=detector_model,
         verbose=False,
         coincidence_radius=args.coincidence_radius,
-        num_frames=num_frames,
+        n_frames=n_frames,
         convergence_angle=args.convergence_angle,
         cc=cc_angstrom,
         energy_spread=args.energy_spread,
@@ -700,7 +700,7 @@ def main() -> None:
 
         def _save_exitwave_pair(ew, suffix: str) -> None:
             if args.pad_fft:
-                ew = _crop_center(ew, args.num_pixels)
+                ew = _crop_center(ew, args.n_pixels)
             os.makedirs(args.output_dir, exist_ok=True)
             mag_path = os.path.join(
                 args.output_dir, f"{args.filename}_{suffix}_magnitude.mrcs"

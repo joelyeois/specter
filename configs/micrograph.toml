@@ -6,15 +6,14 @@
 pdb_code = "6bdf"
 assembly = true
 pdb_savefolder = "specter-data/pdb"  # relative to your working directory (run from the repo root)
-num_pixels = 256
+n_pixels = 256
 pixel_size = 1.0              # Å
 micrograph_size = 4096        # pixels, square
 
 [microscope]
 voltage = 300.0                # kV
-dose_min = 20.0                # e⁻/Å²
-# dose_max = 60.0               # e⁻/Å², uncomment to randomize dose per micrograph
-# num_frames = 20                # frames, uncomment to override default (int(dose_min) if None)
+dose = 20.0                    # e⁻/Å²; single value, or [low, high] to sample per micrograph
+# n_frames = 20                # frames, uncomment to override default (int(dose) if None)
 cs = 2.0                       # mm
 alpha = 0.1                    # unitless, amplitude contrast ratio
 
@@ -27,8 +26,7 @@ deltaI_I = 0.01e-6               # unitless (ΔI/I)
 dose_envelope = false
 
 [defocus]
-defocus_min = 5000.0            # Å
-defocus_max = 15000.0           # Å
+defocus = [5000.0, 15000.0]     # Å; single value, or [low, high] to sample per micrograph
 
 [dataset]
 n_micrographs = 1
@@ -37,18 +35,16 @@ n_micrographs = 1
 scattering_model = "multislice"  # multislice | firstborn | projection | ctf
 aberration_model = "holography"  # holography | ctf
 noise_model = "poisson"          # poisson | none
-coincidence_radius_min = 0.7181  # pixels (effective exclusion radius)
-# coincidence_radius_max = 1.1968 # pixels, uncomment to randomize per micrograph
+coincidence_radius = 0.7181      # pixels (effective exclusion radius); single value, or [low, high]
 ice_model = "gd"                 # gd | random | none
 ice_thickness = 500.0            # Å, 0 = minimum (particle box size)
 # ice_cache_dir = "ice-data/ice_cache"  # defaults to the bundled cache
 # crowd_min_distance = 100.0      # Å, uncomment to crowd particles; defaults to pdb.max_diameter
 # crowd_max_distance_z = 50.0     # Å
 water_air_interface = true
-potential_scale_min = 1.0        # unitless
-# potential_scale_max = 1.0       # unitless, values < 1 approximate thicker ice
+potential_scale = 1.0            # unitless; single value, or [low, high] (values < 1 approximate thicker ice)
 pad_fft = false
-# chunk_size = 8                  # uncomment to chunk specimen generation if GPU memory is limited
+# specimen_chunk_size = 8                  # uncomment to chunk specimen generation if GPU memory is limited
 detector_model = "none"          # none | perfect | k3_300kv | k3_200kv
 
 [postprocessing]

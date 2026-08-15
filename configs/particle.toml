@@ -5,7 +5,7 @@
 [potential]
 pdb_code = "6bdf"
 assembly = true
-num_pixels = 256
+n_pixels = 256
 pixel_size = 1.0              # Å
 
 [microscope]
@@ -41,7 +41,7 @@ filename = "particles"
 [advanced]
 pdb_savefolder = "specter-data/pdb"  # relative to your working directory
 # cs_path = "path/to/particles.cs"  # uncomment to drive generation from a CryoSPARC .cs file
-# num_frames = 20                # frames, uncomment to override default (int(dose) if None)
+# n_frames = 20                # frames, uncomment to override default (int(dose) if None)
 # convergence_angle = 1.0       # mrad, uncomment to enable the Cs envelope
 # cc = 2.0                      # mm, uncomment to enable the Cc envelope
 energy_spread = 0.7            # eV (FWHM)

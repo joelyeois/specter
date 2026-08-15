@@ -114,7 +114,7 @@ def test_grid_matches_exact_pairwise_rule(radius: float) -> None:
 def test_zero_radius_disables_coincidence_loss() -> None:
     """r <= 0 must fall through to plain Poisson noise, losing no electrons."""
     detector = Detector(
-        pixel_size=1.0, noise_model="poisson", num_frames=4, progressbars=False
+        pixel_size=1.0, noise_model="poisson", n_frames=4, progressbars=False
     )
     img = torch.full((64, 64), 5.0)
 

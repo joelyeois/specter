@@ -471,10 +471,22 @@ def _diagnose_zero_placements(
         distinct from `exclusion_field`'s unconstrained max.
     """
     nz, ny, nx = region_mask_field.shape
+    # exclusion_field is deliberately CPU-resident at the call site (see its
+    # own comment there); region_mask_field can be on a different device
+    # (self.device) since it's just a downsampled view of a GPU-resident
+    # region classification. This diagnostic only runs on a zero-placement
+    # cold path, so a one-time device copy here is fine.
+    device = exclusion_field.device
+    region_mask_field = region_mask_field.to(device)
     zz, yy, xx = torch.meshgrid(
-        torch.arange(nz), torch.arange(ny), torch.arange(nx), indexing="ij"
+        torch.arange(nz, device=device),
+        torch.arange(ny, device=device),
+        torch.arange(nx, device=device),
+        indexing="ij",
     )
-    extent = torch.tensor([nx, ny, nz], dtype=torch.float32) * field_v_size
+    extent = (
+        torch.tensor([nx, ny, nz], dtype=torch.float32, device=device) * field_v_size
+    )
     origin = -0.5 * extent
     center_x = origin[0] + (xx.float() + 0.5) * field_v_size
     center_y = origin[1] + (yy.float() + 0.5) * field_v_size

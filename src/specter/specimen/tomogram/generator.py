@@ -173,6 +173,7 @@ import torch
 import torch.nn.functional as F
 from scipy import ndimage
 
+from ...config import ScalarOrRange, parse_scalar_or_range
 from ...arrays import clip_insert_bounds
 from ...crowding import insert_particles_into_micrograph
 from ...pdb import DEFAULT_PDB_SAVEFOLDER, PDB
@@ -691,8 +692,11 @@ class TomogramPlacement:
 @dataclass
 class TomogramBeadSpec:
     """
-    One gold fiducial bead population to place -- solid spheres at gold's
-    real mean inner potential (see `.._grid.BeadGenerator`), scattered at
+    One gold fiducial bead population to place -- built from real fcc gold
+    atoms at bulk number density, so each bead carries lattice texture
+    rather than being a uniform ball, and averages to gold's real mean
+    inner potential (see `.._grid.BeadGenerator`). Every instance is an
+    independent realisation, with its own crystal orientation. Scattered at
     an unrestricted ("any") location: fiducials sit in the ice itself, not
     a specific cytosol/lumen compartment, so there's no `location` field
     here the way `TomogramProteinSpec` has one. Placement still avoids the
@@ -701,18 +705,28 @@ class TomogramBeadSpec:
 
     Attributes
     ----------
-    radius : float
-        Bead radius, Angstrom.
+    radius : float or [low, high]
+        Bead radius, Angstrom. A ``[low, high]`` pair draws a fresh radius
+        uniformly per instance -- real colloidal gold is not monodisperse
+        (a "10 nm" prep typically spans roughly 8.5-11.5 nm). Radii are
+        drawn *before* packing, so the placement's collision test uses each
+        bead's own size. Same scalar-or-range spelling as
+        `config.ParticleStackConfig`'s `dose`/`defocus`.
     count : int, optional
         Number of instances to place. Default 1.
     """
 
-    radius: float
+    radius: ScalarOrRange
     count: int = 1
 
     def __post_init__(self) -> None:
-        if self.radius <= 0:
+        self.radius_range = parse_scalar_or_range(self.radius)
+        if self.radius_range[0] <= 0:
             raise ValueError(f"TomogramBeadSpec: radius must be > 0, got {self.radius}")
+        if self.radius_range[1] < self.radius_range[0]:
+            raise ValueError(
+                f"TomogramBeadSpec: radius range must be [low, high], got {self.radius}"
+            )
         if self.count <= 0:
             raise ValueError(f"TomogramBeadSpec: count must be > 0, got {self.count}")
 
@@ -812,6 +826,11 @@ class MembraneTomogramGenerator:
     bead_specs : list of TomogramBeadSpec, optional
         Gold fiducial bead populations to scatter (see module docstring
         and `TomogramBeadSpec`). Default None (no beads).
+    bead_roughness : float or [low, high], optional
+        How irregular each fiducial's boundary is, as an RMS fraction of
+        its radius -- see `.._grid.BeadGenerator`. A ``[low, high]`` pair
+        draws per bead, mixing near-round and misshapen particles. Default
+        0.12.
     occupancy_fraction : float, optional
         Target packing density (see `pack_hard_spheres_3d`/
         `draw_species_pool`), applied independently per region -- e.g. 0.2
@@ -938,6 +957,7 @@ class MembraneTomogramGenerator:
         filament_specs: list[FilamentSpec] | None = None,
         grid_spec: GridSpec | None = None,
         bead_specs: list[TomogramBeadSpec] | None = None,
+        bead_roughness: ScalarOrRange = 0.12,
         occupancy_fraction: float = 0.2,
         gap_angstrom: float = 5.0,
         clip_axes: tuple[bool, bool, bool] = (False, False, False),
@@ -982,6 +1002,7 @@ class MembraneTomogramGenerator:
         self.filament_specs = filament_specs or []
         self.grid_spec = grid_spec
         self.bead_specs = bead_specs or []
+        self.bead_roughness = bead_roughness
         self.occupancy_fraction = occupancy_fraction
         self.gap_angstrom = gap_angstrom
         self.clip_axes = clip_axes
@@ -1885,8 +1906,20 @@ class MembraneTomogramGenerator:
             * field_v_size
         )
 
+        # Radii are drawn here, before packing, so each bead's own size is
+        # what the collision test reserves room for.
+        rng = torch.Generator().manual_seed(
+            0 if self.seed is None else int(self.seed) + 991
+        )
         radii = torch.cat(
-            [torch.full((spec.count,), spec.radius) for spec in self.bead_specs]
+            [
+                torch.full((spec.count,), spec.radius_range[0])
+                if spec.radius_range[1] <= spec.radius_range[0]
+                else spec.radius_range[0]
+                + (spec.radius_range[1] - spec.radius_range[0])
+                * torch.rand(spec.count, generator=rng)
+                for spec in self.bead_specs
+            ]
         )
         with status(
             f"Packing {int(radii.numel())} gold fiducial bead(s)",
@@ -1918,32 +1951,32 @@ class MembraneTomogramGenerator:
 
         accepted_radii = radii[accepted_idx]
 
-        bead_gen = BeadGenerator(v_size=v_size)
+        bead_gen = BeadGenerator(v_size=v_size, roughness=self.bead_roughness)
         instance_ids = torch.arange(
             next_instance_id, next_instance_id + n_placed, dtype=torch.int32
         )
         next_instance_id += n_placed
 
-        for unique_radius in sorted(set(accepted_radii.tolist())):
-            mask = accepted_radii == unique_radius
-            bead = bead_gen.generate(radius=unique_radius)
-            density = bead.density.to(volume.device)
-            bead_coords = coords[mask]
-            bead_instance_ids = instance_ids[mask]
-
-            n = int(mask.sum())
-            template = density.unsqueeze(0).expand(n, *density.shape)
+        # One bead at a time: each is an independent realisation (its own
+        # grain, orientation and -- under radius_cv -- its own size), so
+        # there is no shared template to batch over.
+        for i in range(n_placed):
+            bead = bead_gen.generate(radius=float(accepted_radii[i]))
             volume = insert_particles_into_micrograph(
-                template,
-                bead_coords,
+                bead.density.to(volume.device).unsqueeze(0),
+                coords[i : i + 1],
                 pixel_size=v_size,
                 micrograph=volume,
             )
-            binarized = (template > 0).to(torch.int32) * bead_instance_ids.to(
-                volume.device
-            ).view(-1, 1, 1, 1)
+            # Label from the bead's geometry, not from `density > 0`: the
+            # stochastic fill leaves empty voxels inside the boundary,
+            # which a density threshold would carve out of the
+            # segmentation.
+            binarized = bead.mask.to(volume.device).unsqueeze(0).to(torch.int32) * int(
+                instance_ids[i]
+            )
             instance_labels = _insert_instance_labels(
-                binarized, bead_coords, pixel_size=v_size, labels=instance_labels
+                binarized, coords[i : i + 1], pixel_size=v_size, labels=instance_labels
             )
 
         for i in range(n_placed):

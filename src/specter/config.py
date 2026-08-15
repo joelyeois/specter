@@ -779,13 +779,21 @@ class TomogramConfig:
     grid: list[dict[str, Any]] = field(default_factory=list)
 
     # --- Gold fiducial beads (optional) ---
-    # One dict per bead population, {"radius": <Angstrom>, "n_copies": 1}.
-    # "radius" is required. Placed via the same RSA packing used for
-    # membranes/targets/filler, avoiding the membrane shell and any
-    # already-placed filaments -- NOT region-gated to cytosol/lumen (see
-    # specter.specimen.TomogramBeadSpec's own docstring). In TOML, provide
-    # as [[beads]] tables.
+    # One dict per bead population, {"radius": <Angstrom>, "n_copies": 1,
+    # "radius_cv": 0.0}. "radius" is required; "radius_cv" gives the
+    # population size dispersity real colloidal gold has (see
+    # specter.specimen.TomogramBeadSpec). Placed via the same RSA packing
+    # used for membranes/targets/filler, avoiding the membrane shell and
+    # any already-placed filaments -- NOT region-gated to cytosol/lumen
+    # (see TomogramBeadSpec's own docstring). In TOML, provide as [[beads]]
+    # tables.
     beads: list[dict[str, Any]] = field(default_factory=list)
+
+    # How irregular each fiducial's boundary is, as an RMS fraction of its
+    # radius -- see specter.specimen._grid's BeadGenerator. Either one
+    # number or a [low, high] pair drawn per bead. 0.0 gives clean
+    # spheres.
+    bead_roughness: ScalarOrRange = 0.12
 
     # --- Ground-truth picks & segmentation ---
     write_picks: bool = True
@@ -938,9 +946,15 @@ TOMOGRAM_HELP: dict[str, str] = {
     "placed; not carbon-aware for placement (see MembraneTomogramGenerator's "
     "own docstring). Empty (default): no carbon film.",
     "beads": "Gold fiducial bead populations to pack (TOML-only, [[beads]] "
-    "tables), each {'radius': <Angstrom>, 'n_copies': 1}. Placed via the same "
+    "tables), each {'radius': <Angstrom or [low, high]>, 'n_copies': 1}. "
+    "A [low, high] radius draws a fresh size per bead, giving the population "
+    "the dispersity real colloidal gold has. Placed via the same "
     "RSA packing as membranes/targets/filler, avoiding the membrane shell "
     "and already-placed filaments -- not region-gated to cytosol/lumen.",
+    "bead_roughness": "How irregular each gold fiducial's boundary is, as an "
+    "RMS fraction of its radius. One number, or a [low, high] pair drawn per "
+    "bead so a population mixes near-round and misshapen particles. 0.0 gives "
+    "clean spheres; 0.12-0.20 reads as genuinely irregular.",
     "write_picks": "Write one copick-style .ndjson pick file per species "
     "alongside the volume. Filler species (declared via 'ratio', not "
     "'n_copies') are included by default -- see TomogramProteinSpec's own "

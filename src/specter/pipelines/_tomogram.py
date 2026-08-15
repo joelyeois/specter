@@ -415,7 +415,10 @@ def build_tomogram_generator(config: TomogramConfig) -> MembraneTomogramGenerato
     # len(config.grid) > 1 is already rejected in run_build_tomogram.
     grid_spec = GridSpec(**config.grid[0]) if config.grid else None
     bead_specs = [
-        TomogramBeadSpec(radius=float(d["radius"]), count=int(d.get("n_copies", 1)))
+        TomogramBeadSpec(
+            radius=d["radius"],
+            count=int(d.get("n_copies", 1)),
+        )
         for d in config.beads
     ]
 
@@ -427,6 +430,7 @@ def build_tomogram_generator(config: TomogramConfig) -> MembraneTomogramGenerato
         filament_specs=filament_specs,
         grid_spec=grid_spec,
         bead_specs=bead_specs,
+        bead_roughness=config.bead_roughness,
         occupancy_fraction=config.filler_occupancy_fraction,
         gap_angstrom=config.gap_angstrom,
         clip_axes=tuple(config.clip_axes),  # type: ignore[arg-type]

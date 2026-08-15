@@ -642,6 +642,35 @@ def test_membrane_tomogram_generator_bead_specs_avoid_membrane_shell():
         assert not bool(shell[iz, iy, ix])
 
 
+def test_membrane_tomogram_generator_bead_radius_range_varies_sizes():
+    """A [low, high] radius gives a bead population the size dispersity
+    real colloidal gold has. Radii are drawn before packing, so each
+    recorded instance carries its own size and the collision test used
+    it."""
+    gen = MembraneTomogramGenerator(
+        membrane_instances=[],
+        target_shape_zyx=_TARGET_SHAPE_ZYX,
+        v_size=_V_SIZE,
+        protein_specs=[],
+        bead_specs=[TomogramBeadSpec(radius=[14.0, 26.0], count=12)],
+        seed=0,
+    )
+    gen.generate()
+
+    radii = torch.tensor([b.radius for b in gen.bead_instances])
+    assert radii.numel() >= 5
+    assert radii.std() > 0.05 * radii.mean(), "radii are still monodisperse"
+    assert radii.min() >= 14.0 and radii.max() <= 26.0, "drawn outside the range"
+    assert abs(radii.mean().item() / 20.0 - 1.0) < 0.25
+
+
+def test_bead_spec_rejects_bad_radius():
+    with pytest.raises(ValueError, match="radius must be > 0"):
+        TomogramBeadSpec(radius=-1.0)
+    with pytest.raises(ValueError, match=r"radius range must be \[low, high\]"):
+        TomogramBeadSpec(radius=[60.0, 40.0])
+
+
 def test_membrane_tomogram_generator_bead_specs_only_is_valid():
     """A bead_specs-only tomogram (no membrane/protein/filament/grid) is
     valid -- beads are unrestricted ("any" location) so no membrane is

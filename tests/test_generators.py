@@ -864,3 +864,105 @@ def test_tilt_series_generator_pad_fft_changes_output_under_tilt(ctf_params):
     _, exitwaves_base, _ = gen_base.generate_tilt_series(torch.tensor([0]))
     _, exitwaves_pad, _ = gen_pad.generate_tilt_series(torch.tensor([0]))
     assert not torch.allclose(exitwaves_base, exitwaves_pad)
+
+
+def test_tilt_series_generator_vol_is_never_a_registered_buffer(ctf_params):
+    """`vol` must never be in the module's buffer registry -- otherwise a
+    later `.to(device)` on the whole module (the CLI pipelines' pattern)
+    would unconditionally drag it onto the compute device regardless of
+    whether it fits, before `generate_tilt_series` gets a say. Pure
+    bookkeeping check, doesn't need CUDA."""
+    vol = torch.zeros(1, 16, 48, 48)
+    vol[0, 5:11, 20:28, 20:28] = 50.0
+    gen = TiltSeriesGenerator(
+        vol=vol,
+        micrograph_size=32,
+        pixel_size=2.0,
+        ctf_params=ctf_params,
+        voltage=300.0,
+        dose_per_angstrom=2.0,
+        angles=torch.tensor([30.0]),
+        verbose=False,
+        progressbars=False,
+    )
+    assert "vol" not in dict(gen.named_buffers())
+    assert gen.vol.device.type == "cpu"
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA")
+def test_tilt_series_generator_auto_places_vol_that_fits(ctf_params):
+    """A volume that comfortably fits should end up on the compute device
+    automatically on first use -- no flag needed for the common case."""
+    vol = torch.zeros(1, 16, 48, 48)
+    vol[0, 5:11, 20:28, 20:28] = 50.0
+    gen = TiltSeriesGenerator(
+        vol=vol,
+        micrograph_size=32,
+        pixel_size=2.0,
+        ctf_params=ctf_params,
+        voltage=300.0,
+        dose_per_angstrom=2.0,
+        angles=torch.tensor([30.0]),
+        scattering_model="multislice",
+        verbose=False,
+        progressbars=False,
+    ).to("cuda")
+    # .to("cuda") alone must not have moved it -- only generate_tilt_series decides.
+    assert gen.vol.device.type == "cpu"
+
+    _, exitwaves, _ = gen.generate_tilt_series(torch.tensor([0]))
+    assert gen.vol.device.type == "cuda"
+    assert torch.isfinite(exitwaves).all()
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA")
+def test_tilt_series_generator_falls_back_to_windowed_when_vol_does_not_fit(
+    ctf_params, monkeypatch
+):
+    """When moving `vol` to the compute device raises OOM, generation must
+    still succeed by falling back to CPU-resident windowed fetches, matching
+    the direct-GPU result. Simulates OOM deterministically (rather than
+    requiring an actually huge volume) by intercepting `.to()` calls on this
+    specific tensor."""
+    vol = torch.zeros(1, 16, 48, 48)
+    vol[0, 5:11, 20:28, 20:28] = 50.0
+    kwargs = dict(
+        micrograph_size=32,
+        pixel_size=2.0,
+        ctf_params=ctf_params,
+        voltage=300.0,
+        dose_per_angstrom=2.0,
+        angles=torch.tensor([30.0]),
+        scattering_model="multislice",
+        noise_model=None,
+        tilt_axis="y",
+        verbose=False,
+        progressbars=False,
+    )
+
+    gen_gpu = TiltSeriesGenerator(vol=vol.clone(), **kwargs).to("cuda")
+    _, exitwaves_gpu, _ = gen_gpu.generate_tilt_series(torch.tensor([0]))
+
+    gen_streamed = TiltSeriesGenerator(vol=vol.clone(), **kwargs).to("cuda")
+    assert gen_streamed.vol.device.type == "cpu"
+
+    original_to = torch.Tensor.to
+
+    def fake_to(tensor_self, *args, **kw):
+        if tensor_self is gen_streamed.vol:
+            raise torch.cuda.OutOfMemoryError("simulated OOM for test")
+        return original_to(tensor_self, *args, **kw)
+
+    monkeypatch.setattr(torch.Tensor, "to", fake_to)
+
+    torch.cuda.reset_peak_memory_stats()
+    _, exitwaves_streamed, _ = gen_streamed.generate_tilt_series(torch.tensor([0]))
+    peak_bytes = torch.cuda.max_memory_allocated()
+
+    assert gen_streamed.vol.device.type == "cpu"  # fallback kept it on CPU
+    assert torch.allclose(exitwaves_gpu.cpu(), exitwaves_streamed.cpu(), atol=1e-3)
+    # the whole volume (16*48*48*4 bytes) would be ~147KB here -- tiny either
+    # way, but the point is this must not scale with volume size, so just
+    # sanity-check it's in the same ballpark as the windowed block, not
+    # blown up by some accidental full-volume copy.
+    assert peak_bytes < 50_000_000

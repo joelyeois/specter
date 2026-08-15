@@ -33,7 +33,15 @@ class TiltSeriesGenerator(MicrographGenerator):
         own size and voxel size, masked to voxels with little existing
         scattering potential -- see ``ice_model`` below) before any of this
         class's own tilt-coverage/taper padding is applied, so that padding
-        still sees, and extends, the ice-filled volume.
+        still sees, and extends, the ice-filled volume. Unlike this class's
+        other tensors, ``vol`` is never moved by ``.to(device)`` -- it stays
+        wherever it started (typically CPU) until the first
+        :meth:`generate_tilt_series` call, which tries moving it to the
+        compute device and transparently falls back to leaving it on CPU
+        (streaming small, geometry-bounded blocks per Z-chunk instead of
+        holding the whole volume in GPU memory) if it doesn't fit. This is
+        automatic -- there's no flag to set for a volume too large for the
+        GPU, and no penalty for one that comfortably fits.
     micrograph_size : int or tuple[int, int]
         Output image size in pixels (must be square).
     pixel_size : float
@@ -114,8 +122,6 @@ class TiltSeriesGenerator(MicrographGenerator):
         converged), independent of volume size or multislice step count. Default 16.
     chunk_size : int, optional
         Chunk size for ``MicrographSpecimenGenerator`` (unused here but passed to parent).
-    move_to_cpu : bool, optional
-        Move volume to CPU after setup. Default False (tries GPU first).
     detector_model : str, optional
         Detector MTF model ('k3_300kv', 'k3_200kv', 'perfect', None).
     progressbars : bool, optional
@@ -223,7 +229,6 @@ class TiltSeriesGenerator(MicrographGenerator):
         pad_fft: bool = False,
         fft_pad_margin: int = 16,
         chunk_size: int | None = None,
-        move_to_cpu: bool = False,
         detector_model: str | None = None,
         progressbars: bool = True,
         verbose: bool = True,
@@ -409,7 +414,6 @@ class TiltSeriesGenerator(MicrographGenerator):
             # padding only (see below), entirely independent of the parent's.
             pad_fft=False,
             chunk_size=chunk_size,
-            move_to_cpu=move_to_cpu,
             detector_model=detector_model,
             progressbars=progressbars,
             verbose=verbose,
@@ -427,7 +431,24 @@ class TiltSeriesGenerator(MicrographGenerator):
             lpp_params=lpp_params,
             **kwargs,
         )
-        # self.register_buffer("vol", vol)
+        # MicrographGenerator.__init__ (just above) registered self.vol as a
+        # buffer, which would otherwise be dragged onto the compute device by
+        # any later `.to(device)` call on this module (e.g. the CLI pipelines'
+        # `TiltSeriesGenerator(...).to(device_target)` pattern) -- forcing the
+        # whole volume into GPU memory unconditionally, whether or not it fits.
+        # Un-registering it here means it simply stays wherever it already was
+        # (typically CPU, e.g. straight from `torch.load`/`mrcfile`) until
+        # `generate_tilt_series` below decides what to do with it: try moving
+        # it to the compute device (fast -- IterativeScattering's rotated-slice
+        # fetch runs directly against it), falling back to leaving it on CPU
+        # and streaming small windowed blocks per Z-chunk instead (slower per
+        # step, but with a GPU memory footprint set by the query geometry, not
+        # by the volume's size -- see dev/tilt series/windowed_streaming_*.py)
+        # if it doesn't fit. No flag needed: this is automatic and safe at any
+        # volume size, so there's nothing for a caller to get wrong.
+        vol_value = self.vol
+        del self._buffers["vol"]
+        self.vol = vol_value
 
         self.slice_batch_size = slice_batch_size
         # pad_fft=True (multislice only) gives the per-slice FFT-based Fresnel
@@ -507,6 +528,30 @@ class TiltSeriesGenerator(MicrographGenerator):
     # Forward methods                                                      #
     # ------------------------------------------------------------------ #
 
+    def _ensure_vol_placed(self) -> None:
+        """
+        Try moving ``self.vol`` onto the compute device once; fall back to
+        leaving it on CPU (streaming small windowed blocks per Z-chunk via
+        ``VolumeRotator.sample_rotated_slices``' ``device`` param instead --
+        see this class's docstring for ``vol``) if it doesn't fit. A no-op on
+        every call after the first, once ``self.vol`` is settled on some
+        device.
+        """
+        if self.vol.device == self.device:
+            return
+        try:
+            self.vol = self.vol.to(self.device)
+        except torch.cuda.OutOfMemoryError:
+            torch.cuda.empty_cache()
+            if self.verbose:
+                gb = self.vol.numel() * self.vol.element_size() / 1e9
+                print(
+                    f"[TiltSeriesGenerator] vol ({gb:.1f} GB) does not fit on "
+                    f"{self.device}; keeping it on CPU and streaming windowed "
+                    "per-chunk fetches instead (slower per step, bounded GPU "
+                    "memory regardless of volume size)."
+                )
+
     def generate_tilt_series(
         self, idx: int | torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -527,6 +572,7 @@ class TiltSeriesGenerator(MicrographGenerator):
         clean_images : torch.Tensor
             ``|detector_waves|²`` before noise, shape (B, N_tilts, Y, X).
         """
+        self._ensure_vol_placed()
 
         tilt_series = []
         exitwaves = []

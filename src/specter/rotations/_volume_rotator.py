@@ -81,6 +81,96 @@ def _prepare_volume_for_grid_sample(V: torch.Tensor, batch_size: int) -> torch.T
         return V
 
 
+def _windowed_grid_sample(
+    V: torch.Tensor,
+    grid: torch.Tensor,
+    nz: int,
+    ny: int,
+    nx: int,
+    align_corners: bool,
+    padding_mode: str,
+    device: torch.device,
+    margin: int,
+) -> torch.Tensor:
+    """
+    Interpolate `grid` against `V` without moving the whole of `V` to `device`.
+
+    `grid` (already fully computed, normalized sample coordinates into `V`,
+    shape (B, K, ny_roi, nx_roi, 3)) is a rigid rotation of an axis-aligned
+    box, so it is itself a rotated ("slanted") box in `V`'s coordinate frame
+    -- not axis-aligned, so it can't be sliced directly. Instead this takes
+    the smallest axis-aligned bounding box that CONTAINS it (padded by
+    `margin` px so bilinear's 1px neighbor footprint never reaches the
+    block's own artificial edge), transfers only that small block to
+    `device`, and runs grid_sample there. Wherever the box is clipped to
+    V's true edges (rather than the query's own extent), padding_mode's
+    behaviour is reproduced exactly, since the block's edge then coincides
+    with the real volume edge. See dev/tilt series/windowed_streaming_
+    prototype.py (and the geometry figure in that investigation) for the
+    derivation and validation this was lifted from.
+
+    Parameters
+    ----------
+    V : torch.Tensor
+        (Z,Y,X) / (B,Z,Y,X) / (B,1,Z,Y,X), on any device (typically CPU).
+    grid : torch.Tensor
+        Normalized grid_sample-convention coordinates into `V`, shape
+        (B, K, ny_roi, nx_roi, 3), on `V`'s device.
+    margin : int
+        Extra padding (px) around the query's exact pixel-space bounding
+        box. 2 is generous headroom for bilinear interpolation; validated
+        exact (vs. a full-volume-on-GPU reference) to ~1e-4 absolute error
+        (float32 round-off from the extra normalize/renormalize step).
+
+    Returns
+    -------
+    torch.Tensor
+        (B, K, ny_roi, nx_roi), on `device`.
+    """
+
+    def unnorm(g: torch.Tensor, size: int) -> torch.Tensor:
+        return (g + 1) * (size - 1) / 2 if align_corners else ((g + 1) * size - 1) / 2
+
+    x_pix = unnorm(grid[..., 0], nx)
+    y_pix = unnorm(grid[..., 1], ny)
+    z_pix = unnorm(grid[..., 2], nz)
+
+    x0, x1 = int(x_pix.min().floor()) - margin, int(x_pix.max().ceil()) + margin + 1
+    y0, y1 = int(y_pix.min().floor()) - margin, int(y_pix.max().ceil()) + margin + 1
+    z0, z1 = int(z_pix.min().floor()) - margin, int(z_pix.max().ceil()) + margin + 1
+    x0c, x1c = max(x0, 0), min(x1, nx)
+    y0c, y1c = max(y0, 0), min(y1, ny)
+    z0c, z1c = max(z0, 0), min(z1, nz)
+
+    B, K, ny_roi, nx_roi = grid.shape[:4]
+    if x1c <= x0c or y1c <= y0c or z1c <= z0c:
+        # Every query point in this batch falls outside V entirely (e.g. an
+        # extreme-tilt Z-chunk at the sweep's edge) -- padding_mode="zeros"
+        # semantics, the only mode this degenerate case can reach exactly.
+        return torch.zeros(B, K, ny_roi, nx_roi, device=device, dtype=V.dtype)
+
+    block = V[..., z0c:z1c, y0c:y1c, x0c:x1c].to(device, non_blocking=True)
+    bz, by, bx = block.shape[-3:]
+
+    def renorm(pix: torch.Tensor, offset: int, size: int) -> torch.Tensor:
+        local = pix - offset
+        return (
+            (2 * local / (size - 1) - 1)
+            if align_corners
+            else ((2 * local + 1) / size - 1)
+        )
+
+    grid_local = torch.stack(
+        [renorm(x_pix, x0c, bx), renorm(y_pix, y0c, by), renorm(z_pix, z0c, bz)], dim=-1
+    ).to(device)
+
+    V_in = _prepare_volume_for_grid_sample(block, B)
+    slices_roi = F.grid_sample(
+        V_in, grid_local, align_corners=align_corners, padding_mode=padding_mode
+    )
+    return slices_roi[:, 0]
+
+
 class VolumeRotator(L.LightningModule):
     """
     3D volume rotator with cached base grid and RELION / PyTorch center conventions.
@@ -185,15 +275,6 @@ class VolumeRotator(L.LightningModule):
 
         if init_base_grid:
             self._build_base_grid()
-
-        # -------------------------------
-        # Precompute XY grid for slice sampling
-        # -------------------------------
-        y = torch.arange(ny)
-        x = torch.arange(nx)
-        yy, xx = torch.meshgrid(y, x, indexing="ij")
-        xy_grid = torch.stack([xx, yy], dim=-1).float()  # (Y, X, 2)
-        self.register_buffer("xy_grid", xy_grid)  # buffer, reused for all slice calls
 
     # ------------------------------------------------------------------
     # Core grid construction
@@ -358,6 +439,8 @@ class VolumeRotator(L.LightningModule):
         roi_center: tuple[int, int] | None = None,
         roi_size: tuple[int, int] | None = None,
         padding_mode: str | None = None,
+        device: str | torch.device | None = None,
+        window_margin: int = 2,
     ) -> torch.Tensor:
         """
         Sample multiple Z-slices from a rotated volume, restricted to a ROI in XY.
@@ -366,9 +449,12 @@ class VolumeRotator(L.LightningModule):
         Parameters
         ----------
         V : (Z,Y,X) torch.Tensor
-            Input 3D volume.
+            Input 3D volume. May live on a different device than `device`
+            below (e.g. CPU, to avoid holding a huge volume in GPU memory)
+            -- see `device`.
         theta : (B,3,4) torch.Tensor
-            Affine rotation matrix.
+            Affine rotation matrix. May be on any device; internally moved
+            to `V`'s device for the (cheap) grid construction.
         slice_indices : (K,) or list or int
             One or more slice indices along Z of the rotated volume, relative to the center.
         roi_center : tuple (cy, cx)
@@ -379,26 +465,50 @@ class VolumeRotator(L.LightningModule):
             Defaults to full volume size.
         padding_mode : str
             Passed to grid_sample. Defaults to self.padding_mode.
+        device : str or torch.device, optional
+            Device the returned slices should live on. Defaults to `V`'s own
+            device (original behaviour: grid_sample runs directly against
+            `V` wherever it is). When given and different from `V`'s device,
+            the interpolation itself still runs on `device` -- but rather
+            than transferring the whole of `V` there first, only the small
+            axis-aligned bounding box the rotated query actually touches is
+            sliced out of `V` and transferred (see `_windowed_grid_sample`).
+            This keeps `device` memory bounded by the query's own geometry
+            (ROI size x `slice_indices` extent), never by `V`'s total size --
+            validated flat at ~25-30MB from a 66MB volume up to a 67GB one,
+            vs. a whole-volume transfer's memory scaling linearly with `V`
+            and eventually OOMing (see dev/tilt series/windowed_streaming_
+            scaling.py). Use this whenever `V` is deliberately kept off the
+            compute device -- e.g. `TiltSeriesGenerator` falls back to this
+            automatically (see its `_ensure_vol_placed`) when its volume
+            doesn't fit on the GPU alongside a `.to(device)` call.
+        window_margin : int, optional
+            Only used when `device` triggers the windowed path above: extra
+            padding (px) around the query's exact pixel-space bounding box,
+            for bilinear interpolation's 1px neighbor footprint. Default 2.
 
         Returns
         -------
         slices_roi : (B, K, ny_roi, nx_roi) torch.Tensor
-            Interpolated 2D slices of the rotated volume, cropped to ROI.
+            Interpolated 2D slices of the rotated volume, cropped to ROI, on
+            `device` (or `V`'s own device if `device` is None).
         """
         if padding_mode is None:
             padding_mode = self.padding_mode
 
         ny, nx = self.ny, self.nx
         B = theta.shape[0]
-        dtype, device = V.dtype, V.device
+        dtype = V.dtype
+        theta = theta.to(V.device)
+        target_device = torch.device(device) if device is not None else V.device
 
-        slice_indices = _normalize_slice_indices(slice_indices, device)
+        slice_indices = _normalize_slice_indices(slice_indices, V.device)
         K = slice_indices.shape[0]
         roi_center, roi_size = _resolve_roi(roi_center, roi_size, ny, nx)
         ny_roi, nx_roi = roi_size
 
         points_pix = _build_roi_query_points(
-            slice_indices, roi_center, roi_size, ny, nx, device, dtype
+            slice_indices, roi_center, roi_size, ny, nx, V.device, dtype
         )  # (K, ny_roi, nx_roi, 3)
         points_pix_flat = (
             points_pix.unsqueeze(0).expand(B, -1, -1, -1, -1).reshape(B, -1, 3)
@@ -409,11 +519,11 @@ class VolumeRotator(L.LightningModule):
         # -------------------------------
         R = theta[..., :3]  # (B, 3, 3)
         t = theta[..., 3]  # (B, 3) normalized
-        scale = self._isotropic_scale(device, dtype)
+        scale = self._isotropic_scale(V.device, dtype)
 
         if self.origin == "relion":
             # Normalize points to [-1, 1] relative to V center
-            points_norm = points_pix_flat / scale + self.center
+            points_norm = points_pix_flat / scale + self.center.to(V.device, dtype)
         else:
             # PyTorch center convention
             points_norm = points_pix_flat / scale
@@ -424,10 +534,21 @@ class VolumeRotator(L.LightningModule):
         # -------------------------------
         # Sample volume
         # -------------------------------
-        V_in = _prepare_volume_for_grid_sample(V, B)
+        if target_device == V.device:
+            V_in = _prepare_volume_for_grid_sample(V, B)
+            slices_roi = F.grid_sample(
+                V_in, grid, align_corners=self.align_corners, padding_mode=padding_mode
+            )
+            return slices_roi[:, 0]  # (B, K, ny_roi, nx_roi)
 
-        slices_roi = F.grid_sample(
-            V_in, grid, align_corners=self.align_corners, padding_mode=padding_mode
+        return _windowed_grid_sample(
+            V,
+            grid,
+            self.nz,
+            ny,
+            nx,
+            self.align_corners,
+            padding_mode,
+            target_device,
+            window_margin,
         )
-
-        return slices_roi[:, 0]  # (B, K, ny_roi, nx_roi)

@@ -727,13 +727,20 @@ class IterativeScattering(L.LightningModule):
             return out
         assert rotator is not None
         slice_indices = slice_positions.float() - (nz_new - 1) / 2
+        # device= lets sample_rotated_slices interpolate directly on `device`
+        # via a small windowed transfer when V lives elsewhere -- e.g. when
+        # TiltSeriesGenerator's vol didn't fit on the compute device and
+        # stayed on CPU (see its `_ensure_vol_placed`). See its docstring.
+        # When V and device already match, this is exactly the original
+        # direct grid_sample, unchanged.
         return rotator.sample_rotated_slices(
             V,
             theta_matrix,
             slice_indices=slice_indices,
             roi_size=(size, size),
             padding_mode=self.roi_padding_mode,
-        ).to(device)
+            device=device,
+        )
 
     def _iter_slices(
         self,

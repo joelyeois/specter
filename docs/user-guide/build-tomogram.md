@@ -218,8 +218,13 @@ CLI calls — build a `TomogramConfig` directly in Python (or load one with
 
 - [`configs/tomogram.toml`](https://github.com/joelyeois/specter/tree/main/configs) —
   the canonical, heavily-commented example config.
-- [Specimens](../concepts/specimens.md) — how cryo-ET specimen assembly
-  differs from single-particle.
+- [Cryo-ET specimen assembly](../concepts/cryoet-specimen/index.md) — what
+  each component is and how the pieces are composited, with a page per
+  component ([membranes](../concepts/cryoet-specimen/bilayer.md),
+  [filaments](../concepts/cryoet-specimen/filaments.md),
+  [beads](../concepts/cryoet-specimen/beads.md),
+  [carbon film](../concepts/cryoet-specimen/carbon-film.md),
+  [regions & packing](../concepts/cryoet-specimen/packing.md)).
 - [Membrane shape](../concepts/membrane-shape/index.md) — the
   `spherical_harmonics`/`swept_spline` geometry backends.
 - [Generate a tilt series](tilt-series.md) — imaging the volume this page

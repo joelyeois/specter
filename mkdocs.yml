@@ -78,10 +78,16 @@ nav:
           - Single-particle:
               - Pose & crowding: concepts/pose-crowding.md
           - Cryo-ET:
+              - Overview: concepts/cryoet-specimen/index.md
               - Membrane shape:
                   - Overview: concepts/membrane-shape/index.md
                   - Spherical harmonics: concepts/membrane-shape/spherical-harmonics.md
                   - Swept spline: concepts/membrane-shape/swept-spline.md
+              - Bilayer & transmembrane proteins: concepts/cryoet-specimen/bilayer.md
+              - Filaments: concepts/cryoet-specimen/filaments.md
+              - Gold fiducial beads: concepts/cryoet-specimen/beads.md
+              - Carbon support film: concepts/cryoet-specimen/carbon-film.md
+              - Regions & protein packing: concepts/cryoet-specimen/packing.md
       - Forward simulation:
           - Overview: concepts/forward-simulation.md
           - Scattering:

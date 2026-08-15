@@ -24,9 +24,13 @@ What's specific to each path:
 - **Single-particle**: [pose & crowding](pose-crowding.md) -- the
   quaternion/translation pose sampled per particle, and Poisson-disk
   crowding of many particles into a micrograph.
-- **Cryo-ET**: [membrane shape](membrane-shape/index.md) (and, in the
-  broader `specter.specimen` package, filament and protein placement) --
-  the geometry needed to populate a tomogram-scale volume realistically.
+- **Cryo-ET**: [specimen assembly](cryoet-specimen/index.md) -- the carbon
+  film, membranes ([shape](membrane-shape/index.md) and
+  [bilayer](cryoet-specimen/bilayer.md)),
+  [filaments](cryoet-specimen/filaments.md),
+  [gold fiducials](cryoet-specimen/beads.md), and the
+  [region-gated packing](cryoet-specimen/packing.md) that crowds proteins
+  into what's left.
 
 Once a specimen volume exists, everything downstream -- propagating the
 electron wave through it and forming an image -- is exactly the same
@@ -37,6 +41,7 @@ simulation](forward-simulation.md).
     `specter.potential.PotentialBuilder` and `specter.ice` are shared by
     both pipelines. Single-particle specimen assembly lives in
     `specter.imagegenerator` and `specter.specimen.single_particle`;
-    cryo-ET specimen assembly lives in `specter.specimen` (`cryoet.py`,
-    `tomogram/`, `membrane/`, `filament/`, `packing/` -- under heavy
-    active development, see that package directly for the current state).
+    cryo-ET specimen assembly lives in `specter.specimen` (`tomogram/`,
+    `membrane/`, `filament/`, `packing/`, `_carbon.py`, `_grid.py` --
+    under active development, see that package directly for the current
+    state).

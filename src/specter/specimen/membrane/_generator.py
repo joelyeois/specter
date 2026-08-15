@@ -932,7 +932,7 @@ class MembraneGenerator:
                 max(1, round(self.target_shape[1] * gen_scale)),
                 max(1, round(self.target_shape[2] * gen_scale)),
             )
-            self._gen_v_size = voxel_size / gen_scale
+            self._gen_voxel_size = voxel_size / gen_scale
             self._needs_upsample = True
             warnings.warn(
                 f"MembraneGenerator: generating the membrane on a coarser "
@@ -943,7 +943,7 @@ class MembraneGenerator:
                 f"generate directly, past the "
                 f"{max_field_voxels * _FIELD_BYTES_PER_VOXEL / 1024**3:.1f} GB "
                 f"budget -- generating {self._gen_shape_zyx!r} at "
-                f"{self._gen_v_size:.2f} A/voxel instead, then upsampling "
+                f"{self._gen_voxel_size:.2f} A/voxel instead, then upsampling "
                 "(trilinear) to the full requested resolution. The membrane's "
                 "physical size and position are preserved exactly; only its "
                 "bilayer sub-structure is resolved less crisply.",
@@ -951,7 +951,7 @@ class MembraneGenerator:
             )
         else:
             self._gen_shape_zyx = self.target_shape
-            self._gen_v_size = voxel_size
+            self._gen_voxel_size = voxel_size
             self._needs_upsample = False
         self.voxel_size = voxel_size
         self.max_output_voxels = max_output_voxels
@@ -1055,14 +1055,14 @@ class MembraneGenerator:
         # hardcoded thickness, so this stays correct if the profile's
         # template is retuned later.
         half_extent_a = float(self.profile.distance_a.abs().max())
-        # Keyed to _gen_v_size (the resolution generate() actually renders
+        # Keyed to _gen_voxel_size (the resolution generate() actually renders
         # at), not the fine self.voxel_size the output ends up at post-
         # upsample -- resolving the field finer than the raster it feeds
         # would buy nothing once generation-resolution decoupling is
         # already coarsening that raster (see max_field_voxels' own
         # docstring). Equal to self.voxel_size whenever decoupling didn't
         # trigger, matching the pre-decoupling behaviour exactly.
-        field_spacing_a = min(self._gen_v_size, half_extent_a / 8)
+        field_spacing_a = min(self._gen_voxel_size, half_extent_a / 8)
 
         nz, ny, nx = self.target_shape
         extent_a = torch.tensor([nx, ny, nz], dtype=torch.float32) * self.voxel_size
@@ -1133,18 +1133,18 @@ class MembraneGenerator:
             self.field,
             self.profile,
             target_shape=self._gen_shape_zyx,
-            target_spacing_a=self._gen_v_size,
+            target_spacing_a=self._gen_voxel_size,
             target_origin_xyz=self._origin_xyz,
         )
         if self._needs_upsample:
-            # _gen_shape_zyx/_gen_v_size cover the SAME physical extent as
+            # _gen_shape_zyx/_gen_voxel_size cover the SAME physical extent as
             # target_shape/voxel_size, anchored at the same origin (see
             # __init__) -- see _chunked_upsample_density's own docstring
             # for why this goes through MembraneField.sample() in chunks
             # rather than a single F.interpolate call.
             self.volume = _chunked_upsample_density(
                 self.volume,
-                self._gen_v_size,
+                self._gen_voxel_size,
                 self._origin_xyz,
                 self.target_shape,
                 self.voxel_size,

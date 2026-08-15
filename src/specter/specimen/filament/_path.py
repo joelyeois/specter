@@ -60,6 +60,7 @@ def generate_filament_path(
     flex_deg: float,
     origin_xyz: torch.Tensor | None = None,
     generator: torch.Generator | None = None,
+    direction_xyz: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """
     Generate one filament's monomer-center positions via a persistent random
@@ -83,6 +84,11 @@ def generate_filament_path(
     generator : torch.Generator, optional
         Random generator for the initial direction and all per-step turns.
         Default None (uses torch's global RNG).
+    direction_xyz : torch.Tensor, optional
+        Initial direction, shape ``(3,)`` (normalized internally). Default
+        None: drawn uniformly at random. Used by microtubule placement,
+        which picks the direction itself so it can reject orientations that
+        would leave a thin slab (see ``_tube.place_microtubules``).
 
     Returns
     -------
@@ -95,7 +101,10 @@ def generate_filament_path(
 
     flex_rad = math.radians(flex_deg)
     pos = torch.zeros(3) if origin_xyz is None else origin_xyz.clone()
-    direction = _random_unit_vector(generator)
+    if direction_xyz is None:
+        direction = _random_unit_vector(generator)
+    else:
+        direction = direction_xyz / direction_xyz.norm().clamp_min(1e-8)
 
     positions = torch.empty((n_monomers, 3))
     for i in range(n_monomers):

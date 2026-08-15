@@ -115,8 +115,8 @@ membrane_min_transmembrane_spacing = 40.0
 
 
 # =============================================================================
-# CONTENTS -- FILAMENTS, CARBON FILM, GOLD FIDUCIALS
-# All three are ON here, since a real tomogram usually has all of them.
+# CONTENTS -- FILAMENTS, MICROTUBULES, CARBON FILM, GOLD FIDUCIALS
+# All are ON here, since a real tomogram usually has all of them.
 # Delete or comment out a block to leave that feature out.
 # =============================================================================
 
@@ -129,6 +129,17 @@ flex_deg = 12.0        # max per-step path curvature, degrees
 twist_deg = 166.15     # helical twist per monomer, degrees
 n_copies = 20
 n_monomers = [20, 60]
+
+# Microtubules. Real 13-protofilament tubes (lumen, A-lattice seam, tubulin
+# dimer wall) -- NOT a [[filaments]] entry, which would give a single
+# protofilament. `code` defaults to a dimer extracted from a deposited
+# microtubule reconstruction, fetched and cached on first use; `length`
+# defaults to the volume diagonal so a microtubule crosses the field.
+[[microtubules]]
+n_copies = 2
+n_protofilaments = 13   # 13 is the canonical in-cell lattice
+# length = 6000.0       # A; omit to span the volume diagonal
+# bend_radius = 30000.0 # A; omit for a straight, thermally bent tube
 
 # Carbon support film -- at most one [[carbon_film]] table. With hole_radius set to
 # roughly the box width, only a sliver of film intrudes at one edge, which is

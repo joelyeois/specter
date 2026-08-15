@@ -27,7 +27,7 @@ from specter.crowding import insert_particles_into_micrograph
 from specter.pdb import PDB
 from specter.potential import PotentialBuilder
 from specter.rotations import build_affine_matrix, rotate_volume
-from specter.specimen.filament import ACTIN_SPEC, MICROTUBULE_SPEC, FilamentSpec
+from specter.specimen.filament import ACTIN_SPEC, PROTOFILAMENT_SPEC, FilamentSpec
 from specter.specimen.filament._path import generate_filament_path
 from specter.specimen.filament._placement import (
     _rotation_aligning,
@@ -222,7 +222,7 @@ def figure_presets() -> None:
     voxel_size = 4.0
     specs = [
         ("F-actin (1J6Z)", ACTIN_SPEC),
-        ("Microtubule protofilament (1TUB)", MICROTUBULE_SPEC),
+        ("Microtubule protofilament (1TUB)", PROTOFILAMENT_SPEC),
     ]
     shape = (40, 200, 480)
     fig, axes = plt.subplots(len(specs), 1, figsize=(9.0, 4.2))

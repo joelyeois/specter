@@ -11,9 +11,12 @@ rigid copies of a single rendered template, so a 60-monomer F-actin
 filament costs one `PotentialBuilder` render plus 60 rotations — not 60
 renders.
 
-Two presets ship: `ACTIN_SPEC` (F-actin) and `MICROTUBULE_SPEC` (a single
-microtubule protofilament). Anything else is a hand-written
-`FilamentSpec`.
+Two presets ship: `ACTIN_SPEC` (F-actin) and `PROTOFILAMENT_SPEC` (a single
+microtubule protofilament). Anything else is a hand-written `FilamentSpec`.
+
+For an actual microtubule — 13 protofilaments closed into a tube, with a
+lumen and an A-lattice seam — see [Microtubules](microtubules.md). This page
+covers single strands only.
 </div>
 
 </div>
@@ -89,15 +92,16 @@ projection picks up the crossover pattern a real F-actin filament shows.
 | Preset | `code` | `step` (Å) | `flex_deg` | `twist_deg` | `n_monomers` |
 |---|---|---|---|---|---|
 | `ACTIN_SPEC` | 1J6Z (G-actin) | 27.3 | 12.0 | 166.15 | (20, 60) |
-| `MICROTUBULE_SPEC` | 1TUB (αβ-tubulin dimer) | 85.0 | 3.0 | 0.0 | (10, 30) |
+| `PROTOFILAMENT_SPEC` | 1TUB (αβ-tubulin dimer) | 85.0 | 3.0 | 0.0 | (10, 30) |
 
 `step` and `twist_deg` are real measured values (F-actin's helical repeat
 from Holmes/Egelman; tubulin's 85 Å dimer repeat). `flex_deg` is CTS's own
 tuned value in both cases, not a persistence-length measurement.
 `twist_deg = 0` for the protofilament is correct: a single protofilament
 doesn't itself twist. Its 13-protofilament tube geometry and small
-supertwist are out of scope — `MICROTUBULE_SPEC` gives you one
-protofilament, not a microtubule.
+supertwist are out of scope here — `PROTOFILAMENT_SPEC` gives you one
+protofilament. For the real tube, use
+[`MicrotubuleSpec`](microtubules.md).
 
 ## Placement
 
@@ -135,7 +139,8 @@ the `ACTIN_SPEC` preset — see
 
 - **No branching.** Each filament is a single path; Y-junctions and
   networks aren't representable.
-- **No real microtubule.** One protofilament only, as above.
+- **One protofilament only**, as above — real microtubules are
+  [their own component](microtubules.md).
 - **No collision avoidance during the walk.** Adding one is a genuinely
   bigger algorithmic change than dropping monomers after the fact, and
   hasn't been done.

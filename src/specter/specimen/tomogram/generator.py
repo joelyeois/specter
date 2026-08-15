@@ -187,7 +187,14 @@ from .._parallel_render import (
     resolve_render_devices,
     resolve_render_workers,
 )
-from ..filament import FilamentInstance, FilamentSpec, place_filaments
+from ..filament import (
+    FilamentInstance,
+    FilamentSpec,
+    MicrotubuleInstance,
+    MicrotubuleSpec,
+    place_filaments,
+    place_microtubules,
+)
 from ..membrane import MembraneGenerator, TransmembranePlacement
 from ..membrane._placement import align_principal_axis_to_z
 from ..packing import draw_species_pool, estimate_protein_box_size, pack_hard_spheres_3d
@@ -820,9 +827,18 @@ class TomogramSpecimenGenerator:
         Cytosolic/lumen species to pack, exact-count (`n_copies`) and/or
         ratio-weighted (`ratio`). May be EMPTY (membranes/filaments with no
         packed protein population).
+    microtubule_specs : list of MicrotubuleSpec, optional
+        Microtubule species to scatter through the tomogram via
+        `specimen.filament.place_microtubules` -- whole 13-protofilament
+        tubes (lumen, A-lattice seam and all), each rendered as many rigid
+        copies of one alpha-beta tubulin dimer. Placement shares filaments'
+        limitations below (no region-gating, no collision avoidance), and
+        the tubes are likewise avoided by targets/filler afterwards. Unlike
+        filaments, every dimer of one tube shares a single instance-label
+        id, so a microtubule is one object in the segmentation.
     filament_specs : list of FilamentSpec, optional
         Filament species (e.g. `specimen.filament.ACTIN_SPEC`/
-        `MICROTUBULE_SPEC`) to scatter through the tomogram via
+        `PROTOFILAMENT_SPEC`) to scatter through the tomogram via
         `specimen.filament.place_filaments` -- specter-native random-walk
         placement, with no region-gating and no collision avoidance
         against the membrane shell or each other, but DOES get avoided by
@@ -952,6 +968,13 @@ class TomogramSpecimenGenerator:
         center-relative convention `instance_labels`/`volume` use
         internally, see `_stamp_filaments`). Set after `generate()` runs
         (empty if `filament_specs` was empty/None).
+    microtubule_instances : list of MicrotubuleInstance
+        Every placed microtubule (axis polyline + lattice), set after
+        `generate()` runs (empty if `microtubule_specs` was empty/None).
+    microtubule_dimer_instances : list of FilamentInstance
+        The individual tubulin dimer copies those microtubules were
+        rendered from -- kept separate from `filament_instances` so the two
+        species types stay distinguishable in ground truth.
     bead_instances : list of BeadPlacement
         Every placed gold fiducial bead, set after `generate()` runs
         (empty if `bead_specs` was empty/None).
@@ -964,6 +987,7 @@ class TomogramSpecimenGenerator:
         voxel_size: float,
         protein_specs: list[TomogramProteinSpec],
         filament_specs: list[FilamentSpec] | None = None,
+        microtubule_specs: list[MicrotubuleSpec] | None = None,
         carbon_film_spec: CarbonFilmSpec | None = None,
         bead_specs: list[TomogramBeadSpec] | None = None,
         bead_roughness: ScalarOrRange = 0.12,
@@ -987,13 +1011,15 @@ class TomogramSpecimenGenerator:
             not protein_specs
             and not membrane_instances
             and not filament_specs
+            and not microtubule_specs
             and not bead_specs
             and carbon_film_spec is None
         ):
             raise ValueError(
                 "TomogramSpecimenGenerator: at least one of "
                 "membrane_instances, protein_specs, filament_specs, "
-                "bead_specs, or carbon_film_spec must be non-empty/set -- an empty "
+                "microtubule_specs, bead_specs, or carbon_film_spec must be "
+                "non-empty/set -- an empty "
                 "tomogram has nothing to generate."
             )
         for i, mi in enumerate(membrane_instances):
@@ -1009,6 +1035,7 @@ class TomogramSpecimenGenerator:
         self.voxel_size = voxel_size
         self.protein_specs = protein_specs
         self.filament_specs = filament_specs or []
+        self.microtubule_specs = microtubule_specs or []
         self.carbon_film_spec = carbon_film_spec
         self.bead_specs = bead_specs or []
         self.bead_roughness = bead_roughness
@@ -1053,6 +1080,8 @@ class TomogramSpecimenGenerator:
         self.placements: list[TomogramPlacement] = []
         self.instance_labels: torch.Tensor | None = None
         self.filament_instances: list[FilamentInstance] = []
+        self.microtubule_instances: list[MicrotubuleInstance] = []
+        self.microtubule_dimer_instances: list[FilamentInstance] = []
         self.bead_instances: list[BeadPlacement] = []
 
     def generate(self) -> torch.Tensor:
@@ -1424,23 +1453,54 @@ class TomogramSpecimenGenerator:
         # folded into the per-region exclusion field/sampling_mask below,
         # the same mechanism already used to keep packed spheres clear of
         # the membrane shell.
-        if self.filament_specs:
+        if self.filament_specs or self.microtubule_specs:
             _filament_phase_start = phase_start(
                 "Filaments", disable=not self.progressbars
             )
-            with status(
-                f"Placing {len(self.filament_specs)} filament species",
-                disable=not self.progressbars,
-            ):
-                volume, instance_labels, next_instance_id = self._stamp_filaments(
-                    volume, instance_labels, next_instance_id, voxel_size, carbon_mask
-                )
+            if self.filament_specs:
+                with status(
+                    f"Placing {len(self.filament_specs)} filament species",
+                    disable=not self.progressbars,
+                ):
+                    volume, instance_labels, next_instance_id = self._stamp_filaments(
+                        volume,
+                        instance_labels,
+                        next_instance_id,
+                        voxel_size,
+                        carbon_mask,
+                    )
+            else:
+                self.filament_instances = []
+            if self.microtubule_specs:
+                with status(
+                    f"Placing {len(self.microtubule_specs)} microtubule species",
+                    disable=not self.progressbars,
+                ):
+                    volume, instance_labels, next_instance_id = (
+                        self._stamp_microtubules(
+                            volume,
+                            instance_labels,
+                            next_instance_id,
+                            voxel_size,
+                            carbon_mask,
+                        )
+                    )
             phase_done(
-                f"Filaments ({len(self.filament_instances)} monomer instance(s))",
+                f"Filaments ({len(self.filament_instances)} monomer instance(s), "
+                f"{len(self.microtubule_instances)} microtubule(s))",
                 _filament_phase_start,
                 disable=not self.progressbars,
             )
             obstacle_mask = instance_labels > 0
+            if self.microtubule_instances:
+                # A microtubule's lumen is EMPTY but not accessible: it is
+                # sealed by the tube wall. Occupied-voxel exclusion alone
+                # would happily pack cytosolic protein inside it, which is
+                # exactly what lumenal particles are not (microtubule inner
+                # proteins are explicitly out of scope -- see `_lattice`).
+                obstacle_mask = obstacle_mask | self._microtubule_lumen_mask(
+                    voxel_size, obstacle_mask.device
+                )
         else:
             self.filament_instances = []
             obstacle_mask = None
@@ -2037,40 +2097,193 @@ class TomogramSpecimenGenerator:
         redirected walk around the film.
         """
         target_shape = self.target_shape
-        extent_xyz = torch.tensor(target_shape[::-1], dtype=torch.float32) * voxel_size
 
         rng = torch.Generator()
         if self.seed is not None:
             rng.manual_seed(self.seed)
         instances = place_filaments(self.filament_specs, target_shape, voxel_size, rng)
-
-        if carbon_mask is not None and instances:
-            nz, ny, nx = target_shape
-            pos = torch.stack([inst.position_xyz for inst in instances])  # (N,3) x,y,z
-            ix = (pos[:, 0] / voxel_size).long().clamp(0, nx - 1)
-            iy = (pos[:, 1] / voxel_size).long().clamp(0, ny - 1)
-            iz = (pos[:, 2] / voxel_size).long().clamp(0, nz - 1)
-            in_carbon = carbon_mask.cpu()[iz, iy, ix]
-            n_dropped = int(in_carbon.sum())
-            if n_dropped:
-                warnings.warn(
-                    f"TomogramSpecimenGenerator: dropped {n_dropped} filament "
-                    "monomer instance(s) that landed inside the carbon film.",
-                    stacklevel=2,
-                )
-                instances = [
-                    inst
-                    for inst, drop in zip(instances, in_carbon.tolist())
-                    if not drop
-                ]
+        instances = self._drop_instances_in_carbon(
+            instances, carbon_mask, voxel_size, "filament monomer"
+        )
 
         self.filament_instances = instances
         if not instances:
             return volume, instance_labels, next_instance_id
+        return self._render_filament_instances(
+            volume, instance_labels, next_instance_id, voxel_size, instances
+        )
 
-        by_code: dict[str, list[FilamentInstance]] = {}
-        for inst in instances:
-            by_code.setdefault(inst.code, []).append(inst)
+    def _drop_instances_in_carbon(
+        self,
+        instances: list[FilamentInstance],
+        carbon_mask: torch.Tensor | None,
+        voxel_size: float,
+        what: str,
+    ) -> list[FilamentInstance]:
+        """Drop copies whose centre lands inside the carbon film.
+
+        Shared by filament and microtubule stamping -- neither placer is
+        obstacle-aware, so this is the same "reject after the fact" pass
+        described in `_stamp_filaments`.
+        """
+        if carbon_mask is None or not instances:
+            return instances
+
+        nz, ny, nx = self.target_shape
+        pos = torch.stack([inst.position_xyz for inst in instances])  # (N,3) x,y,z
+        ix = (pos[:, 0] / voxel_size).long().clamp(0, nx - 1)
+        iy = (pos[:, 1] / voxel_size).long().clamp(0, ny - 1)
+        iz = (pos[:, 2] / voxel_size).long().clamp(0, nz - 1)
+        in_carbon = carbon_mask.cpu()[iz, iy, ix]
+        n_dropped = int(in_carbon.sum())
+        if n_dropped:
+            warnings.warn(
+                f"TomogramSpecimenGenerator: dropped {n_dropped} {what} "
+                "instance(s) that landed inside the carbon film.",
+                stacklevel=2,
+            )
+            instances = [
+                inst for inst, drop in zip(instances, in_carbon.tolist()) if not drop
+            ]
+        return instances
+
+    def _stamp_microtubules(
+        self,
+        volume: torch.Tensor,
+        instance_labels: torch.Tensor,
+        next_instance_id: int,
+        voxel_size: float,
+        carbon_mask: torch.Tensor | None,
+    ) -> tuple[torch.Tensor, torch.Tensor, int]:
+        """Place and render every `microtubule_specs` species.
+
+        A microtubule reaches the renderer as many rigid copies of one
+        alpha-beta tubulin dimer -- the same `FilamentInstance` form
+        filaments use -- so this shares `_render_filament_instances`
+        wholesale. The one difference is instance labelling: every dimer of
+        one tube gets the SAME instance id, so segmentation ground truth
+        marks microtubules as objects rather than as ~950 loose dimers.
+        """
+        rng = torch.Generator()
+        if self.seed is not None:
+            # Offset from the filament seed so two species with the same
+            # spec don't land on identical paths.
+            rng.manual_seed(self.seed + 1)
+        instances, tubes = place_microtubules(
+            self.microtubule_specs,
+            self.target_shape,
+            voxel_size,
+            generator=rng,
+            pdb_cache_dir=self.pdb_cache_dir,
+        )
+        instances = self._drop_instances_in_carbon(
+            instances, carbon_mask, voxel_size, "microtubule dimer"
+        )
+
+        self.microtubule_instances = tubes
+        self.microtubule_dimer_instances = instances
+        if not instances:
+            return volume, instance_labels, next_instance_id
+
+        # One instance id per tube: `filament_id` already identifies it.
+        tube_ids = sorted({inst.filament_id for inst in instances})
+        id_of_tube = {
+            tube_id: next_instance_id + i for i, tube_id in enumerate(tube_ids)
+        }
+        instance_ids = torch.tensor(
+            [id_of_tube[inst.filament_id] for inst in instances], dtype=torch.int32
+        )
+        return self._render_filament_instances(
+            volume,
+            instance_labels,
+            next_instance_id + len(tube_ids),
+            voxel_size,
+            instances,
+            instance_ids=instance_ids,
+            align_to_z=False,
+        )
+
+    def _microtubule_lumen_mask(
+        self, voxel_size: float, device: torch.device
+    ) -> torch.Tensor:
+        """Voxels enclosed by a placed microtubule's wall, lumen included.
+
+        Built by stamping a disc of the tube's own radius at every ring of
+        every axis polyline. Consecutive rings are one dimer repeat apart
+        (82 A) while the radius is ~111 A, so the stamped spheres overlap
+        and seal the tube along its whole length without needing a real
+        distance transform over the full canvas.
+        """
+        nz, ny, nx = self.target_shape
+        mask = torch.zeros((nz, ny, nx), dtype=torch.bool, device=device)
+
+        for tube in self.microtubule_instances:
+            radius_vox = tube.lattice.radius / voxel_size
+            reach = int(math.ceil(radius_vox))
+            for point in tube.axis_xyz:
+                cx, cy, cz = (float(v) / voxel_size for v in point)
+                ix0, ix1 = max(0, int(cx) - reach), min(nx, int(cx) + reach + 1)
+                iy0, iy1 = max(0, int(cy) - reach), min(ny, int(cy) + reach + 1)
+                iz0, iz1 = max(0, int(cz) - reach), min(nz, int(cz) + reach + 1)
+                if ix0 >= ix1 or iy0 >= iy1 or iz0 >= iz1:
+                    continue
+                zz, yy, xx = torch.meshgrid(
+                    torch.arange(iz0, iz1, device=device, dtype=torch.float32),
+                    torch.arange(iy0, iy1, device=device, dtype=torch.float32),
+                    torch.arange(ix0, ix1, device=device, dtype=torch.float32),
+                    indexing="ij",
+                )
+                inside = (
+                    (xx - cx) ** 2 + (yy - cy) ** 2 + (zz - cz) ** 2
+                ) <= radius_vox**2
+                mask[iz0:iz1, iy0:iy1, ix0:ix1] |= inside
+        return mask
+
+    def _render_filament_instances(
+        self,
+        volume: torch.Tensor,
+        instance_labels: torch.Tensor,
+        next_instance_id: int,
+        voxel_size: float,
+        instances: list[FilamentInstance],
+        instance_ids: torch.Tensor | None = None,
+        align_to_z: bool = True,
+    ) -> tuple[torch.Tensor, torch.Tensor, int]:
+        """Render placed monomer/dimer copies: one template per species,
+        rotated and inserted once per instance.
+
+        Parameters
+        ----------
+        instance_ids : torch.Tensor, optional
+            Per-instance segmentation ids, shape ``(len(instances),)``.
+            Default None: number them sequentially from
+            ``next_instance_id``, which is then advanced. Microtubule
+            stamping passes explicit ids so a whole tube shares one.
+        align_to_z : bool, optional
+            Pre-rotate the template's longest principal axis onto ``+Z``.
+            Default True, as filament monomers need. Microtubules pass
+            False: their dimer template is already in the microtubule frame
+            (`_tubulin.extract_mt_dimer`), where the roll about ``+Z``
+            carries the radial orientation that principal-axis alignment
+            has no way to know about and would be free to destroy.
+        """
+        extent_xyz = (
+            torch.tensor(self.target_shape[::-1], dtype=torch.float32) * voxel_size
+        )
+
+        if instance_ids is None:
+            ids = torch.arange(
+                next_instance_id,
+                next_instance_id + len(instances),
+                dtype=torch.int32,
+            )
+            next_instance_id += len(instances)
+        else:
+            ids = instance_ids.to(torch.int32)
+
+        by_code: dict[str, list[tuple[FilamentInstance, int]]] = {}
+        for inst, inst_id in zip(instances, ids.tolist()):
+            by_code.setdefault(inst.code, []).append((inst, inst_id))
 
         pdb_cache: dict[str, PDB] = {}
         templates: dict[str, torch.Tensor] = {}
@@ -2088,16 +2301,21 @@ class TomogramSpecimenGenerator:
                 progressbars=False,
                 parameterization=self.parameterization,
             ).to(self.device)
-            aligned_coordinates = align_principal_axis_to_z(pdb.coordinates)
-            templates[code] = builder.forward(
-                aligned_coordinates, method="analytic"
-            ).to(self.device)
+            coordinates = (
+                align_principal_axis_to_z(pdb.coordinates)
+                if align_to_z
+                else pdb.coordinates
+            )
+            templates[code] = builder.forward(coordinates, method="analytic").to(
+                self.device
+            )
 
         offset = (extent_xyz / 2).to(self.device)
-        for code, insts in by_code.items():
+        for code, entries in by_code.items():
             template = templates[code]
             label_threshold = _INSTANCE_LABEL_REL_THRESHOLD * float(template.max())
 
+            insts = [inst for inst, _ in entries]
             n_instances = len(insts)
             positions_centered = (
                 torch.stack([inst.position_xyz for inst in insts]).to(self.device)
@@ -2106,13 +2324,11 @@ class TomogramSpecimenGenerator:
             R = torch.stack([inst.rotation_matrix for inst in insts]).to(self.device)
             theta = build_affine_matrix(R)
 
-            instance_ids = torch.arange(
-                next_instance_id,
-                next_instance_id + n_instances,
+            instance_ids = torch.tensor(
+                [inst_id for _, inst_id in entries],
                 dtype=torch.int32,
                 device=self.device,
             )
-            next_instance_id += n_instances
 
             step = self.chunk_size or n_instances
             for start in range(0, n_instances, step):
@@ -2151,6 +2367,7 @@ class TomogramSpecimenGenerator:
         oriented: bool = True,
         include_transmembrane: bool = True,
         include_filaments: bool = True,
+        include_microtubules: bool = True,
         include_filler: bool = True,
         include_beads: bool = True,
     ) -> dict[str, Path]:
@@ -2209,6 +2426,13 @@ class TomogramSpecimenGenerator:
             used here (see `_stamp_filaments`), so -- unlike
             placements/transmembrane above -- it's written directly, with
             no `+ extent_xyz / 2` conversion.
+        include_microtubules : bool, optional
+            If True (default), also write one pick file per microtubule
+            species, suffixed ``-microtubule``: one entry per TUBE, whose
+            ``path`` is the axis polyline, not one entry per dimer. A tube
+            is a ~950-dimer object, and a pick file listing every dimer is
+            rarely what a consumer wants; the per-dimer copies remain in
+            `microtubule_dimer_instances` for anyone who does.
         include_filler : bool, optional
             If True, also write pick files for `role == "filler"`
             cytosol/lumen placements (suffixed ``-filler`` on a
@@ -2325,6 +2549,42 @@ class TomogramSpecimenGenerator:
                                 inst.rotation_matrix.numpy().tolist()
                             )
                         f.write(json.dumps(row) + "\n")
+                written[key] = path
+
+        if include_microtubules and self.microtubule_instances:
+            by_tube_code: dict[str, list[MicrotubuleInstance]] = {}
+            for tube in self.microtubule_instances:
+                by_tube_code.setdefault(tube.code, []).append(tube)
+            for code, tubes in by_tube_code.items():
+                key = f"{Path(code).stem}-microtubule"
+                path = output_dir / f"{key}-{annotation_version}_path.ndjson"
+                with open(path, "w") as f:
+                    for tube in tubes:
+                        axis = tube.axis_xyz
+                        centre = axis.mean(dim=0)
+                        f.write(
+                            json.dumps(
+                                {
+                                    "type": "path",
+                                    "location": {
+                                        "x": float(centre[0]),
+                                        "y": float(centre[1]),
+                                        "z": float(centre[2]),
+                                    },
+                                    "path": [
+                                        {
+                                            "x": float(p[0]),
+                                            "y": float(p[1]),
+                                            "z": float(p[2]),
+                                        }
+                                        for p in axis
+                                    ],
+                                    "radius": tube.lattice.radius,
+                                    "n_protofilaments": (tube.lattice.n_protofilaments),
+                                }
+                            )
+                            + "\n"
+                        )
                 written[key] = path
 
         if include_beads and self.bead_instances:

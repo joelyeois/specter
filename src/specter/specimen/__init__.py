@@ -7,7 +7,17 @@ from .cytosolic_filler import (
 from .from_volume import load_specimen_volume
 from ._grid import BeadSpec
 from ._carbon import CarbonFilmSpec
-from .filament import ACTIN_SPEC, MICROTUBULE_SPEC, FilamentInstance, FilamentSpec
+from .filament import (
+    ACTIN_SPEC,
+    PROTOFILAMENT_SPEC,
+    FilamentInstance,
+    FilamentSpec,
+    MicrotubuleInstance,
+    MicrotubuleSpec,
+    TubeLattice,
+    place_microtubules,
+    solve_tube_lattice,
+)
 from .membrane import (
     MembraneGenerator,
     TransmembranePlacement,
@@ -42,7 +52,12 @@ __all__ = [
     "BeadPlacement",
     "TomogramBeadSpec",
     "ACTIN_SPEC",
-    "MICROTUBULE_SPEC",
+    "PROTOFILAMENT_SPEC",
     "FilamentInstance",
     "FilamentSpec",
+    "MicrotubuleInstance",
+    "MicrotubuleSpec",
+    "TubeLattice",
+    "place_microtubules",
+    "solve_tube_lattice",
 ]

@@ -85,6 +85,7 @@ nav:
                   - Swept spline: concepts/membrane-shape/swept-spline.md
               - Bilayer & transmembrane proteins: concepts/cryoet-specimen/bilayer.md
               - Filaments: concepts/cryoet-specimen/filaments.md
+              - Microtubules: concepts/cryoet-specimen/microtubules.md
               - Gold fiducial beads: concepts/cryoet-specimen/beads.md
               - Carbon support film: concepts/cryoet-specimen/carbon-film.md
               - Regions & protein packing: concepts/cryoet-specimen/packing.md

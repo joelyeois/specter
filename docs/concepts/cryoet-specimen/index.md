@@ -30,7 +30,8 @@ combination is valid.
 | [Carbon support film](carbon-film.md) | A holey-grid film with a rough, genuinely 3D rim | `specimen._carbon` |
 | [Membrane shape](../membrane-shape/index.md) | Organelle geometry — vesicles or wandering tubes | `specimen.membrane._field_*` |
 | [Bilayer & transmembrane proteins](bilayer.md) | Turning that geometry into calibrated potential, and embedding proteins in it | `specimen.membrane._profile`, `._raster`, `._placement` |
-| [Filaments](filaments.md) | Random-walk polymers (F-actin, microtubule protofilaments) | `specimen.filament` |
+| [Filaments](filaments.md) | Random-walk polymers (F-actin, single protofilaments) | `specimen.filament` |
+| [Microtubules](microtubules.md) | Closed 13-protofilament tubes, lumen and A-lattice seam | `specimen.filament` |
 | [Gold fiducial beads](beads.md) | Real fcc gold at real bulk density | `specimen._grid` |
 | [Regions & protein packing](packing.md) | Cytosol/lumen classification, RSA hard-sphere placement, crowding tables | `specimen.packing`, `specimen.tomogram._regions`, `specimen.cytosolic_filler` |
 
@@ -45,7 +46,7 @@ Generation is strictly sequential, and each stage is only aware of the
 stages before it:
 
 ```
-carbon film → membranes → filaments → gold beads → targets → filler
+carbon film → membranes → filaments/microtubules → gold beads → targets → filler
 ```
 
 Nothing is re-placed once accepted. When a candidate position doesn't
@@ -62,8 +63,9 @@ What each stage actually avoids:
 | Membranes (auto-placed) | Carbon, other auto-placed membranes | Explicitly-positioned membranes |
 | Membranes (explicit `position_xyz`) | — (density overlapping carbon is clipped instead) | Everything else |
 | Filaments | Carbon (monomers landing in it are dropped) | Membrane shell, other filaments |
-| Gold beads | Membrane shell, carbon, filaments, other beads | Nothing (not region-gated — fiducials sit in the ice) |
-| Targets | Membrane shell, carbon, filaments, beads; restricted to their `location` region | — |
+| Microtubules | Carbon (dimers landing in it are dropped) | Membrane shell, filaments, other microtubules |
+| Gold beads | Membrane shell, carbon, filaments/microtubules, other beads | Nothing (not region-gated — fiducials sit in the ice) |
+| Targets | Membrane shell, carbon, filaments/microtubules, beads; restricted to their `location` region | — |
 | Filler | All of the above, plus already-placed targets | — |
 
 Two consequences worth knowing before you read a rendered volume:

@@ -119,3 +119,8 @@ specter = ["atom_data/*.txt"]
 specter = "specter.cli._cli:main"
 specter-jobs = "specter.jobs._cli:main"
 
+
+[tool.pytest.ini_options]
+markers = [
+    "network: needs internet access (fetches structures from RCSB)",
+]

@@ -57,13 +57,20 @@ class FilamentSpec:
 
 
 #: Tubulin alpha-beta dimer (PDB 1TUB, electron crystallography) repeated
-#: along a single protofilament. step=85 A is the real tubulin-dimer axial
-#: repeat; flex=3 deg is CTS's own tuned value for a protofilament's gentle
-#: curvature. twist=0: a single protofilament doesn't itself twist (the
-#: microtubule's ~13-protofilament tube geometry, and its small supertwist,
-#: are out of scope here -- see the module docstring in
-#: ``specimen/filament/``).
-MICROTUBULE_SPEC = FilamentSpec(
+#: along a **single protofilament** -- not a microtubule. step=85 A is the
+#: real tubulin-dimer axial repeat; flex=3 deg is CTS's own tuned value for
+#: a protofilament's gentle curvature. twist=0: a single protofilament
+#: doesn't itself twist.
+#:
+#: For an actual microtubule -- 13 protofilaments closed into a tube, with
+#: the lumen and the A-lattice seam -- use `MicrotubuleSpec` and
+#: `place_microtubules` (``_lattice``/``_tube``). This preset remains for
+#: the free protofilaments that do occur, e.g. at depolymerising ends.
+#:
+#: (Named MICROTUBULE_SPEC before real microtubules existed in specter;
+#: renamed rather than reused, so that an existing config asking for
+#: MICROTUBULE_SPEC fails loudly instead of silently changing meaning.)
+PROTOFILAMENT_SPEC = FilamentSpec(
     code="1TUB", step=85.0, flex_deg=3.0, twist_deg=0.0, n_monomers=(10, 30)
 )
 
@@ -78,13 +85,20 @@ ACTIN_SPEC = FilamentSpec(
 
 @dataclass
 class FilamentInstance:
-    """One placed monomer copy, for rendering and ground-truth bookkeeping."""
+    """One placed monomer copy, for rendering and ground-truth bookkeeping.
+
+    Microtubules (``_tube.place_microtubules``) reuse this type so that the
+    tomogram generator's existing filament stamping renders them unchanged;
+    for those, `filament_id` identifies the tube and `protofilament_index`
+    says which of its protofilaments the copy belongs to.
+    """
 
     code: str
     filament_id: int
     monomer_index: int
     position_xyz: torch.Tensor  # (3,), physical Angstrom
     rotation_matrix: torch.Tensor  # (3, 3)
+    protofilament_index: int | None = None
 
 
 def _monomer_count(

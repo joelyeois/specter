@@ -193,7 +193,16 @@ src/specter/                  # Main source package
                               # partial/illustrative only; read the package directly rather than trusting this list.
     single_particle.py        # MicrographSpecimenGenerator — populates a volume with template potentials + crowding + ice
     cytosolic_filler.py       # PEI2016_CROWDING_TABLE + CRYOETSIM_PARTICLE_TABLE + build_filler_pool_specs() — generic cytosolic background reference tables
-    tomogram/, filament/, membrane/, packing/  # newer subpackages (tomogram/specimen assembly, filament placement,
+    filament/                 # single-strand filaments (_path/_placement/_generator: F-actin,
+                              # PROTOFILAMENT_SPEC) AND real microtubules (_lattice: surface-lattice
+                              # geometry with constants measured off deposited MT reconstructions;
+                              # _tube: whole-tube placement returning FilamentInstances so the
+                              # tomogram generator's filament stamping renders them unchanged;
+                              # _tubulin: extracts an ab-tubulin dimer from 3JAL in the MT frame,
+                              # +Z = protofilament axis / +X = radially outward; _frames:
+                              # parallel-transport frames, required so a bent tube's protofilaments
+                              # don't shear apart). No supertwist -- deliberate, see _lattice's docstring.
+    tomogram/, membrane/, packing/  # newer subpackages (tomogram/specimen assembly,
                               # organic membranes, sphere/tetris packing algorithms); also from_volume.py at the
                               # top level — still in flux, deliberately not detailed here
     _grid.py                  # BeadGenerator — gold fiducial bead physics, for specimen.tomogram.TomogramSpecimenGenerator

@@ -775,9 +775,24 @@ class TomogramConfig:
     # F-actin helical repeat -- step/twist from Holmes/Egelman) without
     # hand-writing a [[filaments]] entry. Additive to filaments above (both
     # may be set at once). ACTIN_SPEC's own n_copies default (1) applies
-    # here too -- for more instances or other filament species (e.g.
-    # microtubules, MICROTUBULE_SPEC), use [[filaments]] instead.
+    # here too -- for more instances or other single-strand species, use
+    # [[filaments]] instead. Microtubules are NOT a filament species: they
+    # are whole tubes, see [[microtubules]] below.
     actin: bool = False
+
+    # --- Microtubules (optional, additive on top of filaments/membranes) ---
+    # One dict per microtubule species, mapping straight onto
+    # specter.specimen.filament.MicrotubuleSpec's own kwargs, e.g.
+    # {"n_copies": 2, "n_protofilaments": 13, "bend_radius": 3e4}. Real
+    # 13-protofilament tubes (lumen, A-lattice seam, tubulin dimer wall),
+    # not the single protofilament PROTOFILAMENT_SPEC gives. Placed in the
+    # same phase as filaments -- no region-gating, no collision avoidance,
+    # but avoided by targets/filler afterwards. `code` defaults to a dimer
+    # extracted from a deposited microtubule reconstruction (fetched and
+    # cached on first use); `length` defaults to the volume diagonal so a
+    # microtubule crosses the field. In TOML, provide as [[microtubules]]
+    # tables.
+    microtubules: list[dict[str, Any]] = field(default_factory=list)
 
     # --- Carbon support film (optional, single film) ---
     # Zero or one [[carbon_film]] table, mapping onto
@@ -952,8 +967,16 @@ TOMOGRAM_HELP: dict[str, str] = {
     "filler DO avoid already-placed filaments.",
     "actin": "Convenience toggle: also place the bundled ACTIN_SPEC preset "
     "(real F-actin helical repeat) without writing a [[filaments]] entry. "
-    "Additive to filaments above. For more instances or other filament "
-    "species (e.g. microtubules), use [[filaments]] instead.",
+    "Additive to filaments above. For more instances or other single-strand "
+    "species, use [[filaments]]; for microtubules use [[microtubules]].",
+    "microtubules": "Microtubule species to scatter through the tomogram "
+    "(TOML-only, [[microtubules]] tables), each mapping onto "
+    "specter.specimen.filament.MicrotubuleSpec kwargs, e.g. {'n_copies': 2, "
+    "'n_protofilaments': 13, 'bend_radius': 30000.0}. Real 13-protofilament "
+    "tubes with a lumen and an A-lattice seam -- not the single protofilament "
+    "[[filaments]] with a tubulin dimer would give. Placed alongside "
+    "filaments: no region-gating, no collision avoidance, but targets/filler "
+    "DO avoid them.",
     "carbon_film": "Zero or one [[carbon_film]] table (TOML-only) describing a carbon "
     "support film, mapping onto specter.specimen.CarbonFilmSpec kwargs "
     "(thickness, hole_radius, edge_fraction, edge_side, edge_roughness). "

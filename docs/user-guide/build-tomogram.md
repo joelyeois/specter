@@ -47,10 +47,15 @@ membranes, filaments, exact-count targets, ratio-based filler); run
   auto-sizing), and `n_copies` for multiple independently-placed copies
   of one template.
 - **Filaments** — `actin` (quick built-in F-actin preset) or hand-written
-  `[[filaments]]` entries for other species (e.g. microtubules).
+  `[[filaments]]` entries for other single-strand species.
+- **Microtubules** — `[[microtubules]]` entries: real 13-protofilament tubes
+  with a lumen and an A-lattice seam (`n_protofilaments`, `n_copies`,
+  `length`, `bend_radius`). Not a filament species — a `[[filaments]]` entry
+  with a tubulin dimer would give a single protofilament, not a tube.
 - **Gold fiducial beads** — `[[beads]]` entries (`radius`, `n_copies`), one per
   population; `radius` takes a single number or a `[low, high]` pair drawn per
-  bead. Placed avoiding the membrane shell and already-placed filaments; not
+  bead. Placed avoiding the membrane shell and already-placed
+  filaments/microtubules; not
   region-gated to cytosol/lumen. All beads are written to one `gold-bead` pick
   file regardless of size.
 - **Carbon support film** — at most one `[[carbon_film]]` table

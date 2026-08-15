@@ -230,3 +230,34 @@ def test_bead_n_copies_maps_onto_spec_count(spec_dict, expected):
     )
     gen = build_tomogram_generator(config)
     assert [(spec.radius, spec.count) for spec in gen.bead_specs] == [(100.0, expected)]
+
+
+def test_microtubules_config_reaches_the_generator():
+    config = TomogramConfig(
+        microtubules=[{"n_copies": 3, "n_protofilaments": 14}],
+        **_BASE_KWARGS,
+    )
+    gen = build_tomogram_generator(config)
+    assert len(gen.microtubule_specs) == 1
+    spec = gen.microtubule_specs[0]
+    assert spec.n_copies == 3
+    assert spec.n_protofilaments == 14
+    # A microtubule is not a filament species -- the two lists stay separate.
+    assert gen.filament_specs == []
+
+
+def test_microtubules_alone_satisfy_the_species_source_check():
+    """`[[microtubules]]` is a species source in its own right: a tomogram
+    of nothing but microtubules must build, not raise."""
+    from specter.pipelines._tomogram import run_build_tomogram
+
+    config = TomogramConfig(
+        target_shape=[64, 64, 64],
+        voxel_size=8.0,
+        microtubules=[{"n_copies": 1}],
+    )
+    # Reaching the generator at all is the assertion; this would have
+    # raised ValueError("...can't all be empty/False...") before.
+    gen = build_tomogram_generator(config)
+    assert len(gen.microtubule_specs) == 1
+    assert callable(run_build_tomogram)

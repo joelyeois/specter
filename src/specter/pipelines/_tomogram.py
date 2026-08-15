@@ -37,6 +37,7 @@ from specter.specimen import (
     CRYOETSIM_PARTICLE_TABLE,
     PEI2016_CROWDING_TABLE,
     FilamentSpec,
+    MicrotubuleSpec,
     CarbonFilmSpec,
     MembraneGenerator,
     MembraneInstance,
@@ -116,6 +117,7 @@ def run_build_tomogram(config: TomogramConfig, n_tomograms: int = 1) -> None:
         or config.membrane
         or config.filaments
         or config.actin
+        or config.microtubules
         or config.carbon_film
         or config.beads
     )
@@ -123,8 +125,9 @@ def run_build_tomogram(config: TomogramConfig, n_tomograms: int = 1) -> None:
         raise ValueError(
             "run_build_tomogram: config.targets, config.filler, "
             "config.filler_from_pei2016, config.filler_from_cryoetsim, "
-            "config.membrane, config.filaments, config.actin, config.carbon_film, "
-            "and config.beads can't all be empty/False -- at least one "
+            "config.membrane, config.filaments, config.actin, "
+            "config.microtubules, config.carbon_film, and config.beads can't "
+            "all be empty/False -- at least one "
             "species source is required."
         )
     if len(config.carbon_film) > 1:
@@ -341,6 +344,7 @@ def build_tomogram_generator(config: TomogramConfig) -> TomogramSpecimenGenerato
     filament_specs = [FilamentSpec(**d) for d in config.filaments]
     if config.actin:
         filament_specs.append(ACTIN_SPEC)
+    microtubule_specs = [MicrotubuleSpec(**d) for d in config.microtubules]
 
     # Pre-render every transmembrane species' template ONCE here, shared
     # across every [[membrane]] entry AND every one of its n_copies
@@ -456,6 +460,7 @@ def build_tomogram_generator(config: TomogramConfig) -> TomogramSpecimenGenerato
         voxel_size=config.voxel_size,
         protein_specs=protein_specs,
         filament_specs=filament_specs,
+        microtubule_specs=microtubule_specs,
         carbon_film_spec=carbon_film_spec,
         bead_specs=bead_specs,
         bead_roughness=config.bead_roughness,
@@ -504,6 +509,11 @@ def _run_single_tomogram(config: TomogramConfig) -> None:
         _console.print(
             f"  Filaments: {len(gen.filament_instances)} "
             f"monomer instance(s) placed ({len(gen.filament_specs)} species)"
+        )
+    if gen.microtubule_specs:
+        _console.print(
+            f"  Microtubules: {len(gen.microtubule_instances)} tube(s), "
+            f"{len(gen.microtubule_dimer_instances)} dimer instance(s) placed"
         )
     if gen.carbon_film_spec is not None:
         _console.print("  Carbon film: generated")

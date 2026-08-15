@@ -128,10 +128,10 @@ def figure_hero() -> None:
 
     fig, ax = plt.subplots(figsize=(5, 5))
     # Clipped at a high percentile: a handful of crossing points where two
-    # filaments overlap in projection are several times brighter than a
+    # filaments overlap in projection carry several times the density of a
     # single strand and would otherwise set the whole scale.
     ax.imshow(
-        projection, cmap="magma", origin="lower", vmax=np.percentile(projection, 99.7)
+        projection, cmap="gray_r", origin="lower", vmax=np.percentile(projection, 99.7)
     )
     ax.axis("off")
     plt.tight_layout(pad=0)
@@ -203,7 +203,7 @@ def figure_twist() -> None:
             ACTIN_SPEC.code, positions, rotations, voxel_size, shape
         )
         ax.imshow(
-            volume.sum(dim=0).numpy(), cmap="magma", origin="lower", aspect="auto"
+            volume.sum(dim=0).numpy(), cmap="gray_r", origin="lower", aspect="auto"
         )
         ax.set_title(f"twist_deg = {twist_deg:g}", fontsize=11)
         ax.axis("off")
@@ -235,7 +235,7 @@ def figure_presets() -> None:
         rotations = filament_orientations(positions, spec.twist_deg)
         volume = _render_segment(spec.code, positions, rotations, voxel_size, shape)
         ax.imshow(
-            volume.sum(dim=0).numpy(), cmap="magma", origin="lower", aspect="auto"
+            volume.sum(dim=0).numpy(), cmap="gray_r", origin="lower", aspect="auto"
         )
         ax.set_title(
             f"{title} -- step {spec.step:g} A, flex {spec.flex_deg:g} deg", fontsize=11

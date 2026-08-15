@@ -108,7 +108,7 @@ def figure_lattice() -> None:
         bead = gen.generate(RADIUS_A, _generator(SEED))
         mid = bead.density.shape[0] // 2
         sl = bead.density[mid].numpy()
-        im = ax.imshow(sl, cmap="inferno", origin="lower")
+        im = ax.imshow(sl, cmap="gray_r", origin="lower")
         ax.set_title(
             f"{voxel_size:g} A/voxel  (peak {sl.max():.0f} V)",
             fontsize=11,

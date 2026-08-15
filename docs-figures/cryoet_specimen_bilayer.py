@@ -200,7 +200,7 @@ def figure_transmembrane() -> None:
     mid = volume.shape[0] // 2
     ax = fig.add_subplot(1, 2, 2)
     ax.imshow(
-        volume[mid - 4 : mid + 4].sum(dim=0).numpy(), cmap="magma", origin="lower"
+        volume[mid - 4 : mid + 4].sum(dim=0).numpy(), cmap="gray_r", origin="lower"
     )
     ax.set_title("rendered slab (1C3W in the bilayer)", fontsize=11)
     ax.axis("off")

@@ -62,7 +62,7 @@ def figure_hero() -> None:
     alpha shape produces."""
     density = _film()
     fig, ax = plt.subplots(figsize=(5, 5))
-    ax.imshow(density.sum(axis=0), cmap="bone", origin="lower")
+    ax.imshow(density.sum(axis=0), cmap="gray_r", origin="lower")
     ax.axis("off")
     plt.tight_layout(pad=0)
     path = f"{OUT_DIR}/cryoet-carbon-hero.png"
@@ -119,7 +119,9 @@ def figure_hole_geometry() -> None:
     for i, edge_fraction in enumerate([0.1, 0.25, 0.4]):
         ax = fig.add_subplot(1, 4, i + 2)
         ax.imshow(
-            _film(edge_fraction=edge_fraction).sum(axis=0), cmap="bone", origin="lower"
+            _film(edge_fraction=edge_fraction).sum(axis=0),
+            cmap="gray_r",
+            origin="lower",
         )
         ax.set_title(f"edge_fraction = {edge_fraction}", fontsize=10)
         ax.axis("off")
@@ -140,7 +142,7 @@ def figure_roughness() -> None:
     for ax, edge_roughness in zip(axes, values):
         density = _film(edge_fraction=0.25, edge_roughness=edge_roughness)
         projection = density.sum(axis=0)
-        ax.imshow(projection[:150, :], cmap="bone", origin="lower", aspect="auto")
+        ax.imshow(projection[:150, :], cmap="gray_r", origin="lower", aspect="auto")
         ax.set_title(f"edge_roughness = {edge_roughness:g} A", fontsize=11)
         ax.axis("off")
     plt.tight_layout()
@@ -162,7 +164,7 @@ def figure_slices() -> None:
 
     fig, axes = plt.subplots(1, len(picks), figsize=(3.4 * len(picks), 3.2))
     for ax, z in zip(axes, picks):
-        ax.imshow(density[z][:150, :] > 0, cmap="bone", origin="lower", aspect="auto")
+        ax.imshow(density[z][:150, :] > 0, cmap="gray_r", origin="lower", aspect="auto")
         ax.set_title(f"z slice {z} of {nz}", fontsize=11)
         ax.axis("off")
     plt.tight_layout()

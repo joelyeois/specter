@@ -343,7 +343,7 @@ def figure_inside_test(ref: dict) -> None:
     z_mid = SHAPE_ZYX[0] // 2
     sl = ref["inside"][z_mid]
     fig, ax = plt.subplots(figsize=(4.4, 4.4))
-    ax.imshow(sl, cmap="gray", origin="lower")
+    ax.imshow(sl, cmap="gray_r", origin="lower")
     ax.set_title("step 3: is |p'| < R_surface(θ, φ) ?", fontsize=11)
     ax.axis("off")
     plt.tight_layout()

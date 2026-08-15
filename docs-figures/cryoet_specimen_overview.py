@@ -157,7 +157,7 @@ def figure_hero(volume: torch.Tensor) -> None:
     fig, ax = plt.subplots(figsize=(6.4, 6.4))
     ax.imshow(
         projection,
-        cmap="magma",
+        cmap="gray_r",
         origin="lower",
         vmax=np.percentile(projection, 99.5),
     )

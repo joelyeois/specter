@@ -172,7 +172,7 @@ def figure_beading(ref: dict) -> None:
         phi, spacing_a, origin_xyz = _straight_chain_phi(step_length_a)
         z_mid = phi.shape[0] // 2
         sl = phi[z_mid] < 0
-        ax.imshow(sl, cmap="gray", origin="lower", aspect="equal")
+        ax.imshow(sl, cmap="gray_r", origin="lower", aspect="equal")
         ax.set_title(title, fontsize=10)
         ax.axis("off")
     plt.tight_layout()
@@ -201,7 +201,7 @@ def figure_flexibility_sweep() -> None:
         )
         gen.generate()
         mip = (gen.field.phi < 0).numpy().max(axis=0)
-        ax.imshow(mip, cmap="gray", origin="lower")
+        ax.imshow(mip, cmap="gray_r", origin="lower")
         default_tag = "  (default)" if flexibility == FLEXIBILITY else ""
         ax.set_title(f"flexibility={flexibility:g}{default_tag}", fontsize=10)
         ax.axis("off")

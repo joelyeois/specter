@@ -222,7 +222,7 @@ def _figure_projections(results: list[dict]) -> None:
 
     fig, axes = plt.subplots(1, len(results), figsize=(4.2 * len(results), 4.6))
     for ax, r in zip(axes, results):
-        ax.imshow(r["projection"], cmap="gray", origin="lower")
+        ax.imshow(r["projection"], cmap="gray_r", origin="lower")
         ax.set_title(
             f"voxel_size = {r['voxel_size']:g} Å\n{'x'.join(map(str, r['shape_zyx']))} voxels",
             fontsize=10,

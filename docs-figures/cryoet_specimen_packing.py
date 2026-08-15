@@ -103,7 +103,8 @@ def figure_regions_hero() -> None:
         [p.instance_id for p in gen.placements if p.location == "lumen"]
     )
     slab_labels = labels[z0:z1]
-    painted = np.zeros(density.shape + (3,), dtype=float)
+    # White background, matching the inverted-grey density panel beside it.
+    painted = np.ones(density.shape + (3,), dtype=float)
     shell_2d = shell[z0:z1].any(dim=0).numpy()
     protein_2d = (slab_labels > 0).any(dim=0).numpy()
     lumen_2d = torch.isin(slab_labels, lumen_ids).any(dim=0).numpy()
@@ -115,7 +116,7 @@ def figure_regions_hero() -> None:
         painted[mask] = matplotlib.colors.to_rgb(color)
 
     fig, axes = plt.subplots(1, 2, figsize=(9.6, 5.0))
-    axes[0].imshow(density, cmap="magma", origin="lower")
+    axes[0].imshow(density, cmap="gray_r", origin="lower")
     axes[0].set_title("density (24-voxel slab, summed)", fontsize=11)
     axes[1].imshow(painted, origin="lower")
     axes[1].set_title("ground-truth labels", fontsize=11)

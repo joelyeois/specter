@@ -225,3 +225,118 @@ def test_cli_tiltseries_requires_volume_path(tmp_path: Path) -> None:
     result = proc.run(args, capture_output=True, encoding="utf-8")
     assert result.returncode != 0
     assert "volume_path" in result.stderr
+
+
+def test_cli_tiltseries_tomogram_config_chains_build_and_simulate(
+    tmp_path: Path,
+) -> None:
+    """--tomogram_config should build the specimen volume first (`specter
+    build tomogram`), then image it -- both the intermediate .mrc and the
+    final .mrcs/.star should land on disk from one `simulate tiltseries`
+    call."""
+    if not _FIXTURE_PDB or not Path(_FIXTURE_PDB).exists():
+        import pytest
+
+        pytest.skip("bundled PDB fixture missing")
+
+    tomo_dir = tmp_path / "tomo"
+    tilt_dir = tmp_path / "tilt"
+    tomogram_config_path = tmp_path / "tomogram.toml"
+    tomogram_config_path.write_text(
+        f"""
+[[targets]]
+pdb_source = "{_FIXTURE_PDB}"
+n_copies = 1
+
+[specimen]
+target_shape = [24, 48, 48]
+voxel_size = 12.0
+
+[output]
+output_dir = "{tomo_dir}"
+filename = "chained_tomogram"
+
+[picks]
+write_picks = false
+write_segmentation = false
+"""
+    )
+
+    args = [
+        sys.executable,
+        "-m",
+        "specter.cli._cli",
+        "simulate",
+        "tiltseries",
+        "--tomogram_config",
+        str(tomogram_config_path),
+        "--voxel_size",
+        "12.0",
+        "--n_tilts",
+        "3",
+        "--n_frames",
+        "1",
+        "--ice_model",
+        "none",
+        "--noise_model",
+        "none",
+        "--detector_model",
+        "none",
+        "--scattering_model",
+        "ctf",
+        "--device",
+        "cpu",
+        "--output_dir",
+        str(tilt_dir),
+        "--filename",
+        "chained_tilts",
+    ]
+    result = proc.run(args, capture_output=True, encoding="utf-8")
+    assert result.returncode == 0, result.stderr
+    assert (tomo_dir / "chained_tomogram.mrc").exists()
+    assert (tilt_dir / "chained_tilts.mrcs").exists()
+    assert (tilt_dir / "chained_tilts.star").exists()
+
+
+def test_cli_tiltseries_tomogram_config_and_volume_path_conflict(
+    tmp_path: Path,
+) -> None:
+    """--tomogram_config and --volume_path are mutually exclusive specimen
+    sources -- passing both should fail loudly rather than silently pick one."""
+    import torch
+
+    volume_path = tmp_path / "volume.pt"
+    torch.save(torch.rand(16, 24, 24) * 0.01, volume_path)
+
+    tomogram_config_path = tmp_path / "tomogram.toml"
+    tomogram_config_path.write_text(
+        """
+[[targets]]
+pdb_source = "1mbo"
+n_copies = 1
+
+[specimen]
+target_shape = [24, 24, 24]
+voxel_size = 12.0
+"""
+    )
+
+    args = [
+        sys.executable,
+        "-m",
+        "specter.cli._cli",
+        "simulate",
+        "tiltseries",
+        "--tomogram_config",
+        str(tomogram_config_path),
+        "--volume_path",
+        str(volume_path),
+        "--device",
+        "cpu",
+        "--output_dir",
+        str(tmp_path),
+    ]
+    result = proc.run(args, capture_output=True, encoding="utf-8")
+    assert result.returncode != 0
+    assert "tomogram_config" in result.stderr
+    assert "volume_path" in result.stderr

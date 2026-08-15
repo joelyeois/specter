@@ -74,7 +74,7 @@ def test_full_ctf_params_dict_matches_old_aberration():
 
 
 def test_minimal_ctf_params_dict_matches_old_aberration():
-    """Just dfu + cs -- matches how generate_tilt_series.py's minimal path
+    """Just dfu + cs -- matches how run_tilt_series's minimal path
     constructs ctf_params (no astigmatism/beam-tilt/trefoil/phase-plate
     terms at all)."""
     exitwave = _exitwave(2, seed=1)

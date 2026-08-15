@@ -9,6 +9,7 @@ writes a `.mrc` volume this pipeline then loads directly.
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 import os
 import time
@@ -16,7 +17,7 @@ import time
 import torch
 
 import specter
-from specter.config import TiltSeriesConfig
+from specter.config import TiltSeriesConfig, TomogramConfig
 from specter.imagegenerator import TiltSeriesGenerator
 from specter.io import create_micrograph_starfile
 from specter.specimen import load_specimen_volume
@@ -28,9 +29,12 @@ from ._common import (
     _save_exitwave_pair,
     _section,
 )
+from ._tomogram import run_build_tomogram, tomogram_output_path
 
 
-def run_tilt_series(config: TiltSeriesConfig) -> None:
+def run_tilt_series(
+    config: TiltSeriesConfig, *, tomogram_config: TomogramConfig | None = None
+) -> None:
     """
     Load a specimen volume, simulate a cryo-ET tilt series, and save it as
     ``.mrcs`` + ``.star``.
@@ -41,13 +45,39 @@ def run_tilt_series(config: TiltSeriesConfig) -> None:
         Fully-resolved run configuration, e.g. from
         :func:`specter.config.load_config`, or constructed directly in
         Python. ``config.volume_path`` must be set -- e.g. the output of
-        `specter build tomogram`.
+        `specter build tomogram` -- unless ``tomogram_config`` is given.
+    tomogram_config : TomogramConfig, optional
+        If given, build this specimen volume first (`run_build_tomogram`)
+        and use its output as this run's specimen -- chaining `specter
+        build tomogram` + `specter simulate tiltseries` in one call.
+        ``config.volume_path`` must be unset in this case (the two
+        specimen sources are mutually exclusive). Always builds exactly
+        one tomogram (`run_build_tomogram`'s ``n_tomograms=1`` default,
+        not exposed here) -- for several tomograms, call
+        `run_build_tomogram(tomogram_config, n_tomograms=N)` yourself and
+        loop `run_tilt_series(config=..., ...)` over each resulting
+        ``volume_path`` instead.
     """
+    if tomogram_config is not None:
+        if config.volume_path:
+            raise ValueError(
+                "run_tilt_series: tomogram_config and config.volume_path "
+                "can't both be set -- pass exactly one specimen source: "
+                "tomogram_config to build a fresh volume first, or "
+                "config.volume_path to reuse an already-built one."
+            )
+        _section("Building specimen volume (tomogram_config)")
+        run_build_tomogram(tomogram_config)
+        config = dataclasses.replace(
+            config, volume_path=tomogram_output_path(tomogram_config)
+        )
+
     if not config.volume_path:
         raise ValueError(
             "run_tilt_series: config.volume_path must be set to a "
             "pre-built specimen volume -- build one first with `specter "
-            "build tomogram`."
+            "build tomogram`, or pass tomogram_config to build one as "
+            "part of this call."
         )
 
     specter.set_verbosity(logging.INFO)

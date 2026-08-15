@@ -57,6 +57,29 @@ from specter.specimen._parallel_render import (
 from ._common import _console, _format_elapsed, _section
 
 
+def tomogram_output_path(config: TomogramConfig) -> str:
+    """
+    The ``.mrc`` path `run_build_tomogram` writes for a given config.
+
+    Deterministic from ``config.output_dir``/``config.filename`` alone, so
+    callers that chain straight into `specter simulate tiltseries` (e.g.
+    ``run_tilt_series(..., tomogram_config=...)``) can compute it without
+    re-deriving the naming convention themselves.
+
+    Parameters
+    ----------
+    config : TomogramConfig
+        Fully-resolved run configuration.
+
+    Returns
+    -------
+    str
+        Path to the ``.mrc`` file this config's `run_build_tomogram` call
+        writes (or would write, for ``n_tomograms=1``).
+    """
+    return os.path.join(config.output_dir, config.filename + ".mrc")
+
+
 def run_build_tomogram(config: TomogramConfig, n_tomograms: int = 1) -> None:
     """
     Build one or more specimen tomogram volumes and save each as ``.mrc``
@@ -506,7 +529,7 @@ def _run_single_tomogram(config: TomogramConfig) -> None:
     import mrcfile
 
     os.makedirs(config.output_dir, exist_ok=True)
-    mrc_path = os.path.join(config.output_dir, config.filename + ".mrc")
+    mrc_path = tomogram_output_path(config)
     with mrcfile.new(mrc_path, overwrite=True) as mrc:
         mrc.set_data(volume.cpu().numpy().astype("float32"))
         mrc.voxel_size = config.voxel_size

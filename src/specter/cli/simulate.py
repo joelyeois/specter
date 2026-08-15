@@ -9,6 +9,7 @@ from specter.config import (
     TILT_SERIES_HELP,
     ParticleStackConfig,
     TiltSeriesConfig,
+    TomogramConfig,
     apply_overrides,
     load_config,
 )
@@ -212,17 +213,25 @@ def _build_particles_command() -> click.RichCommand:
     )
 
 
-def _tiltseries_callback(config: str, **_overrides_raw: object) -> None:
+def _tiltseries_callback(
+    config: str, tomogram_config: str | None, **_overrides_raw: object
+) -> None:
     """Handle `specter simulate tiltseries`."""
     from specter.pipelines import run_tilt_series
 
     ctx = click.get_current_context()
     assert ctx is not None
-    overrides = collect_overrides(ctx, exclude={"config"})
+    overrides = collect_overrides(ctx, exclude={"config", "tomogram_config"})
 
     cfg = load_config(config, TiltSeriesConfig)
     apply_overrides(cfg, overrides)
-    run_tilt_series(cfg)
+
+    tomogram_cfg = (
+        load_config(tomogram_config, TomogramConfig)
+        if tomogram_config is not None
+        else None
+    )
+    run_tilt_series(cfg, tomogram_config=tomogram_cfg)
 
 
 def _build_tiltseries_command() -> click.RichCommand:
@@ -234,6 +243,22 @@ def _build_tiltseries_command() -> click.RichCommand:
             show_default=True,
             help="TOML config file. Always loaded first, before any flags below "
             "are applied.",
+            panel="Config",
+        ),
+        click.RichOption(
+            ["--tomogram_config"],
+            type=str,
+            default=None,
+            help="Optional TOML config for `specter build tomogram` "
+            "(TomogramConfig). If given, that specimen volume is built "
+            "first and its output used as this run's specimen -- chains "
+            "`specter build tomogram` + `specter simulate tiltseries` in "
+            "one command. Mutually exclusive with --volume_path/--config's "
+            "volume_path. Always builds exactly one tomogram -- "
+            "`--n_tomograms` isn't a TomogramConfig field and isn't "
+            "settable here; for several tomograms, run `specter build "
+            "tomogram --n_tomograms N` yourself and call `simulate "
+            "tiltseries --volume_path ...` once per output volume instead.",
             panel="Config",
         ),
         *build_config_options(
@@ -250,7 +275,9 @@ def _build_tiltseries_command() -> click.RichCommand:
         help="Simulate a cryo-ET tilt series from a pre-built specimen volume "
         "(--volume_path) and save it as .mrcs + .star. A TOML config "
         "(--config) is always loaded first -- every flag below is optional "
-        "and, if given, overrides one field of it.",
+        "and, if given, overrides one field of it. Pass --tomogram_config "
+        "instead of --volume_path to build the specimen volume first "
+        "(`specter build tomogram`) and image it in the same command.",
     )
 
 

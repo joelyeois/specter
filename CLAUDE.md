@@ -243,14 +243,16 @@ demo-notebooks/               # User-facing, always kept working
                                 # (plus standalone notebooks with no paired TOML, e.g.
                                 # generate-and-reconstruct.ipynb, coordinates-to-images.ipynb,
                                 # compare-atomic-potentials-with-kirkland.ipynb)
-demo-scripts/                 # Ready-to-run command-line scripts (generate_micrograph.py, generate_tilt_series.py,
+demo-scripts/                 # Ready-to-run command-line scripts (generate_micrograph.py,
                               # generate_particle_stack_from_csfile.py, generate_particle_stack_from_starfile.py,
                               # ghostbuster_reconstruct.py) — plain particle-stack generation now lives in the
-                              # `specter simulate particles` CLI instead of a demo-script
+                              # `specter simulate particles` CLI instead of a demo-script, and tilt-series
+                              # generation likewise lives in `specter build tomogram` + `specter simulate
+                              # tiltseries` instead of a demo-script
 configs/                      # TOML config files consumed by demo-scripts/ and the `specter` CLI (flat, not nested)
   particle.toml                # canonical defaults for `specter simulate particles`
   micrograph.toml              # canonical defaults for generate_micrograph.py
-  tilt_series.toml             # canonical defaults for generate_tilt_series.py / `specter simulate tiltseries`
+  tilt_series.toml             # canonical defaults for `specter simulate tiltseries`
   tomogram.toml                 # canonical defaults for `specter build tomogram`
 dev/                           # Prototyping and experimentation (not required to be clean; gitignored, never pushed)
 docs-figures/                  # Tracked scripts that regenerate docs/assets/images/ figures for Concepts pages —

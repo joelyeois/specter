@@ -3,7 +3,7 @@ Filament placement: random walks of monomer positions/orientations scattered
 through a specimen volume, one call per set of like filaments (a "species").
 
 Pure geometry only -- no PDB fetching, no potential rendering. A caller
-(``MembraneTomogramGenerator._stamp_filaments``) fetches each spec's
+(``TomogramSpecimenGenerator._stamp_filaments``) fetches each spec's
 monomer structure, builds one potential template per species, then
 rotates/inserts a copy at every ``FilamentInstance`` this module returns --
 the same division of labor its protein stamping already uses (geometry

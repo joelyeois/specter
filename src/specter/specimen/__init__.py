@@ -17,7 +17,7 @@ from .membrane import (
 from .tomogram import (
     BeadPlacement,
     MembraneInstance,
-    MembraneTomogramGenerator,
+    TomogramSpecimenGenerator,
     TomogramBeadSpec,
     TomogramPlacement,
     TomogramProteinSpec,
@@ -36,7 +36,7 @@ __all__ = [
     "TransmembraneSpec",
     "render_transmembrane_template",
     "MembraneInstance",
-    "MembraneTomogramGenerator",
+    "TomogramSpecimenGenerator",
     "TomogramPlacement",
     "TomogramProteinSpec",
     "BeadPlacement",

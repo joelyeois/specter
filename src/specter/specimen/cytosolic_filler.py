@@ -4,7 +4,7 @@ filling the "everything else" background of a specimen (crowding
 below/around whatever specific species you're annotating as targets).
 
 Two independent, additive tables, both adapted by the same function --
-`build_filler_pool_specs` -- to `MembraneTomogramGenerator`'s
+`build_filler_pool_specs` -- to `TomogramSpecimenGenerator`'s
 (`specter build tomogram`) flat ``{"pdb_source"}`` filler_specs format.
 `specter build tomogram`'s `filler_from_pei2016`/`filler_from_cryoetsim`
 both route through this one function regardless of which table they pull
@@ -1239,7 +1239,7 @@ def build_filler_pool_specs(
 ) -> list[dict]:
     """
     Filter a filler reference table down to a mass range and/or category,
-    and adapt it to `MembraneTomogramGenerator`'s (`specter build
+    and adapt it to `TomogramSpecimenGenerator`'s (`specter build
     tomogram`) flat ``{"pdb_source": ...}`` filler_specs shape -- one
     entry per selected species, weighted implicitly equally (via
     `TomogramProteinSpec.ratio`'s own default) unless a caller overrides

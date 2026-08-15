@@ -66,7 +66,7 @@ Generation always proceeds carbon film → membranes → filaments → gold
 fiducial beads → protein fill; each stage avoids the placements of the ones
 before it (the carbon film is the one exception — placement is not carbon-
 aware, matching the CryoTomoSim algorithm this feature was ported from; see
-`MembraneTomogramGenerator`'s own docstring). Within the protein-fill stage,
+`TomogramSpecimenGenerator`'s own docstring). Within the protein-fill stage,
 species are placed in two priority tiers, independently per region:
 
 1. **`[[targets]]`** — placed first, each at an exact `n_copies` instance

@@ -12,7 +12,7 @@ Everything shares one centered-origin physical coordinate frame: physical
 used throughout ``_field``/``_raster``. This generator does not place a
 membrane instance off-center within a larger tomogram itself -- that
 compositing step (offsetting, collision-rejecting random placement)
-belongs to ``specter.specimen.tomogram.MembraneTomogramGenerator``, the
+belongs to ``specter.specimen.tomogram.TomogramSpecimenGenerator``, the
 same way the other specimen generators in this package are used standalone
 before being composited.
 """
@@ -1009,7 +1009,7 @@ class MembraneGenerator:
         interior touched the working grid's edge -- an unphysical flat-cut
         truncation, not a subtle issue -- rather than only firing a
         warning. Callers compositing many instances (e.g.
-        ``MembraneTomogramGenerator``) check this to drop a visibly-clipped
+        ``TomogramSpecimenGenerator``) check this to drop a visibly-clipped
         instance instead of compositing it.
 
         Returns
@@ -1160,7 +1160,7 @@ class MembraneGenerator:
         Must be called after :meth:`generate`. Species are chosen per site
         by weighted random draw (weights = ``frequency``), the same
         weighted-selection idea `specimen.tomogram.
-        MembraneTomogramGenerator`'s own ratio-mode filler species use
+        TomogramSpecimenGenerator`'s own ratio-mode filler species use
         (there via `draw_species_pool`).
 
         Parameters

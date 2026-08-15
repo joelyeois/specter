@@ -19,7 +19,7 @@ class MicrographSpecimenGenerator(L.LightningModule):
     one template, and amorphous ice.
 
     Single-species only, unlike `specter.specimen.tomogram.
-    MembraneTomogramGenerator` (the `specter build tomogram` backend), which
+    TomogramSpecimenGenerator` (the `specter build tomogram` backend), which
     places any number of distinct species. The two also differ in what their
     placement step actually optimizes for, matching their different end
     goals:
@@ -33,7 +33,7 @@ class MicrographSpecimenGenerator(L.LightningModule):
       `~specter.crowding.filter_by_z_density`), since a plausible
       through-ice distribution matters for particle-picking-style
       benchmarking.
-    - `MembraneTomogramGenerator`'s protein placement (RSA hard-sphere
+    - `TomogramSpecimenGenerator`'s protein placement (RSA hard-sphere
       packing) instead optimizes purely for DENSITY -- packing each region
       (cytosol/lumen) as densely as `occupancy_fraction` allows, uniformly
       throughout it. There is no equivalent distributional shaping there

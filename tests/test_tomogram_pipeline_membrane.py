@@ -3,7 +3,7 @@ wiring (specter.pipelines.build_tomogram_generator) --
 specifically the n_copies/position_xyz/target_shape defaulting logic,
 not the (expensive, already covered by tests/test_tomogram_generator.py)
 actual generation. No PDB files need to exist for these: protein_specs'
-pdb_source strings are only resolved inside MembraneTomogramGenerator.
+pdb_source strings are only resolved inside TomogramSpecimenGenerator.
 generate(), which none of these tests call."""
 
 from __future__ import annotations

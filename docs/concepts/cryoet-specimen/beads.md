@@ -20,7 +20,7 @@ inside an irregular, volume-matched boundary.
 
 !!! info "Source"
     `specter.specimen._grid` (`BeadGenerator`, `_BeadShape`), placed by
-    `MembraneTomogramGenerator._stamp_beads`. Figures are produced by
+    `TomogramSpecimenGenerator._stamp_beads`. Figures are produced by
     `docs-figures/cryoet_specimen_beads.py`.
 
 ## Getting to volts

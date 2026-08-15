@@ -2,7 +2,7 @@
 Unit tests for specter.specimen._carbon (CarbonFilmGenerator), the
 alpha-shape-geometry/MIP-calibrated-splat replacement for the earlier
 analytic-boundary carbon film generator. Broader integration coverage
-(via MembraneTomogramGenerator's carbon_film_spec) lives in
+(via TomogramSpecimenGenerator's carbon_film_spec) lives in
 test_tomogram_generator.py; these focus on the physics this module adds:
 real per-atom density calibration reproducing carbon's literature mean
 inner potential (MIP), and reproducibility.

@@ -77,7 +77,7 @@ class MembraneField:
         backend's own boundary-clip warning already fires on, surfaced here
         as a plain checkable flag (rather than requiring a caller to sniff
         warning text) so a higher-level caller (e.g.
-        ``MembraneTomogramGenerator``) can programmatically skip compositing
+        ``TomogramSpecimenGenerator``) can programmatically skip compositing
         a visibly-truncated instance. Default ``False``.
     """
 

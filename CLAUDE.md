@@ -196,7 +196,7 @@ src/specter/                  # Main source package
     tomogram/, filament/, membrane/, packing/  # newer subpackages (tomogram/specimen assembly, filament placement,
                               # organic membranes, sphere/tetris packing algorithms); also from_volume.py at the
                               # top level — still in flux, deliberately not detailed here
-    _grid.py                  # BeadGenerator — gold fiducial bead physics, for specimen.tomogram.MembraneTomogramGenerator
+    _grid.py                  # BeadGenerator — gold fiducial bead physics, for specimen.tomogram.TomogramSpecimenGenerator
                               # (`specter build tomogram`); also the shared bulk-material density/potential helpers _carbon.py uses
     _carbon.py                 # CarbonFilmGenerator/GridSpec — carbon support film: alpha-shape rim geometry (from-scratch
                               # CTS gen_carbon.m port, dev/gen_carbon_replica.py) + MIP-calibrated flat deposition (dev/validate_carbon_mip.py)

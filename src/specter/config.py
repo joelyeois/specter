@@ -501,7 +501,7 @@ class TiltSeriesConfig:
     (multislice scattering, CTF, dose, detector, noise) -- this is the
     imaging half of the cryo-ET pipeline only. For the specimen-building
     half, see `specter build tomogram` (`TomogramConfig`/
-    `specter.specimen.tomogram.MembraneTomogramGenerator`), which writes a
+    `specter.specimen.tomogram.TomogramSpecimenGenerator`), which writes a
     `.mrc` volume that `volume_path` below then loads directly.
     """
 
@@ -622,13 +622,13 @@ class TomogramConfig:
     """Parameters for tomogram specimen generation, loaded from a TOML
     config file.
 
-    Drives `specter.specimen.tomogram.MembraneTomogramGenerator`, the ONE
+    Drives `specter.specimen.tomogram.TomogramSpecimenGenerator`, the ONE
     generator behind `specter build tomogram` -- an optional composited
     organic membrane (`membrane`), optional scattered filament species
     (`filaments`/`actin`), and densely packed protein species
     (`targets`/`filler`, region-gated to `location: "cytosol"|"lumen"` when
     a membrane is present, otherwise everywhere is "cytosol" -- see
-    `MembraneTomogramGenerator`'s own module docstring). Generation order
+    `TomogramSpecimenGenerator`'s own module docstring). Generation order
     is membranes, then filaments, then protein fill; each stage avoids the
     previous ones' placements. Renders every placed instance's real
     scattering potential (always Shtyrov-parameterized, `PotentialBuilder`'s
@@ -683,7 +683,7 @@ class TomogramConfig:
     # Target packing density for `ratio`-mode filler species, as a bare-
     # sphere fraction of EACH REGION's own volume it's placed in (the whole
     # box when `membrane` is empty, since then "cytosol" IS the whole box --
-    # see MembraneTomogramGenerator's own occupancy_fraction docstring).
+    # see TomogramSpecimenGenerator's own occupancy_fraction docstring).
     # Deliberately high by default -- RSA self-limits at its own physical
     # jamming ceiling rather than erroring, so filler simply packs until it
     # jams rather than needing this hand-tuned. Lower it for a deliberately
@@ -721,7 +721,7 @@ class TomogramConfig:
     #   - "position_xyz" = [x, y, z] (physical Angstrom offset from the
     #     tomogram's own center). Default omitted (None): resolved via
     #     collision-rejecting random placement against every other
-    #     omitted-position instance (see MembraneTomogramGenerator's own
+    #     omitted-position instance (see TomogramSpecimenGenerator's own
     #     docstring) -- an instance that doesn't fit is dropped, not
     #     retried. Give it explicitly for manual placement instead (then
     #     n_copies must be 1).
@@ -749,7 +749,7 @@ class TomogramConfig:
     membrane_region_max_passes: int = 300
     membrane_min_transmembrane_spacing: float = 40.0
     # Atomic scattering-factor parameterization for the targets/filler
-    # protein-fill step (MembraneTomogramGenerator's own `parameterization`
+    # protein-fill step (TomogramSpecimenGenerator's own `parameterization`
     # constructor kwarg, distinct from each MembraneGenerator instance's own
     # "parameterization" key inside its [[membrane]] dict, if set there --
     # that one's for the bilayer/transmembrane step specifically). A
@@ -768,7 +768,7 @@ class TomogramConfig:
     # random-walk placement, with no region-gating and no collision
     # avoidance against the membrane shell or each other, but DOES get
     # avoided by targets/filler packing (placed right after membranes,
-    # before protein fill -- see MembraneTomogramGenerator's own
+    # before protein fill -- see TomogramSpecimenGenerator's own
     # docstring). In TOML, provide as [[filaments]] tables.
     filaments: list[dict[str, Any]] = field(default_factory=list)
     # Convenience toggle: also place the bundled ACTIN_SPEC preset (real
@@ -786,7 +786,7 @@ class TomogramConfig:
     # {"hole_radius": 6000.0, "edge_fraction": [0.02, 0.05]}. Painted
     # directly into the volume before anything else is placed; placement
     # (membranes/targets/filler) is NOT carbon-aware (a documented,
-    # CTS-parity limitation -- see MembraneTomogramGenerator's own
+    # CTS-parity limitation -- see TomogramSpecimenGenerator's own
     # docstring). More than one entry raises. Empty (default): no carbon
     # film, pure ice.
     carbon_film: list[dict[str, Any]] = field(default_factory=list)
@@ -835,7 +835,7 @@ class TomogramConfig:
     # original behaviour. "auto": estimate the canvas' own memory
     # footprint from target_shape/voxel_size and fall back to "cpu" if it
     # would exceed half of `device`'s currently free memory (see
-    # MembraneTomogramGenerator.recommend_accumulator_device's own
+    # TomogramSpecimenGenerator.recommend_accumulator_device's own
     # docstring). Explicit "cpu" always works regardless of that
     # estimate, keeping `device`="cuda" (fast rendering/rotation) while
     # letting the canvas itself be sized by system RAM instead of GPU
@@ -850,7 +850,7 @@ class TomogramConfig:
     # every [[membrane]] entry/n_copies copy, membrane mode only) and
     # targets/filler (cytosol/lumen protein-fill, rendered + PDB-fetched
     # once per tomogram, always) -- see MembraneGenerator/
-    # MembraneTomogramGenerator's own render_workers docstrings. Default 1:
+    # TomogramSpecimenGenerator's own render_workers docstrings. Default 1:
     # fully serial, identical to the original behaviour. "auto" resolves
     # per-pool via specter.specimen._parallel_render.
     # recommend_render_workers -- min(n_species, 8), the measured sweet spot
@@ -858,7 +858,7 @@ class TomogramConfig:
     # docstring); recommended over hand-picking a number.
     render_workers: int | Literal["auto"] = 1
     # Instances rotated per GPU batch, per species, in the targets/filler
-    # protein-fill stage (MembraneTomogramGenerator's own chunk_size
+    # protein-fill stage (TomogramSpecimenGenerator's own chunk_size
     # constructor kwarg -- rotate_volume batches ALL of a species' accepted
     # instances into one call when this is None, the original behaviour).
     # Fine at small scale, but a species with hundreds of instances (a real
@@ -935,9 +935,9 @@ TOMOGRAM_HELP: dict[str, str] = {
     "<code or path>, 'n_copies': 1, 'parameterization': 'shtyrov'}. Only "
     "meaningful when [[membrane]] is set, applies across all instances.",
     "membrane_region_density_threshold": "Passed through to "
-    "MembraneTomogramGenerator's own region_density_threshold.",
+    "TomogramSpecimenGenerator's own region_density_threshold.",
     "membrane_region_max_passes": "Passed through to "
-    "MembraneTomogramGenerator's own region_max_passes.",
+    "TomogramSpecimenGenerator's own region_max_passes.",
     "membrane_min_transmembrane_spacing": "Minimum center-to-center "
     "spacing between placed transmembrane proteins, Angstrom. Only "
     "meaningful when [[membrane]] is set.",
@@ -958,7 +958,7 @@ TOMOGRAM_HELP: dict[str, str] = {
     "support film, mapping onto specter.specimen.CarbonFilmSpec kwargs "
     "(thickness, hole_radius, edge_fraction, edge_side, edge_roughness). "
     "Painted into the volume before anything else is "
-    "placed; not carbon-aware for placement (see MembraneTomogramGenerator's "
+    "placed; not carbon-aware for placement (see TomogramSpecimenGenerator's "
     "own docstring). Empty (default): no carbon film.",
     "beads": "Gold fiducial bead populations to pack (TOML-only, [[beads]] "
     "tables), each {'radius': <Angstrom or [low, high]>, 'n_copies': 1}. "
@@ -984,7 +984,7 @@ TOMOGRAM_HELP: dict[str, str] = {
     "{filename}_membrane_labels.mrc and {filename}_regions.mrc "
     "(0=cytosol/1=shell/2=lumen) are added when [[membrane]] is set.",
     "device": "cpu | cuda | cuda:0 | 0,1,2 | auto. Drives the whole "
-    "MembraneGenerator/MembraneTomogramGenerator pipeline (shape field, "
+    "MembraneGenerator/TomogramSpecimenGenerator pipeline (shape field, "
     "bilayer profile, rasterization, transmembrane/targets/filler "
     "PotentialBuilder rendering) -- packing itself always runs on CPU "
     "regardless (vesin's neighbor list is both slower and OOM-prone on "

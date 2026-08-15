@@ -1,7 +1,7 @@
 """
 Generate the figures for docs/concepts/cryoet-specimen/index.md, the
 overview of `specter build tomogram`'s specimen assembly
-(``specter.specimen.tomogram.MembraneTomogramGenerator``).
+(``specter.specimen.tomogram.TomogramSpecimenGenerator``).
 
 Runs the real generator once with every component switched on -- carbon
 film, membranes with transmembrane proteins, filaments, gold fiducial
@@ -31,7 +31,7 @@ from specter.specimen.filament import ACTIN_SPEC, FilamentSpec
 from specter.specimen.membrane import MembraneGenerator, TransmembraneSpec
 from specter.specimen.tomogram import (
     MembraneInstance,
-    MembraneTomogramGenerator,
+    TomogramSpecimenGenerator,
     TomogramBeadSpec,
     TomogramProteinSpec,
 )
@@ -75,12 +75,12 @@ def _membrane_instances() -> list[MembraneInstance]:
     ]
 
 
-def build() -> tuple[MembraneTomogramGenerator, torch.Tensor]:
+def build() -> tuple[TomogramSpecimenGenerator, torch.Tensor]:
     filler = [
         TomogramProteinSpec(entry["pdb_source"], location="cytosol", ratio=1.0)
         for entry in build_filler_pool_specs(PEI2016_CROWDING_TABLE, min_mw_kda=100.0)
     ]
-    gen = MembraneTomogramGenerator(
+    gen = TomogramSpecimenGenerator(
         membrane_instances=_membrane_instances(),
         target_shape=SHAPE_ZYX,
         voxel_size=VOXEL_SIZE,
@@ -119,7 +119,7 @@ def build() -> tuple[MembraneTomogramGenerator, torch.Tensor]:
     return gen, volume
 
 
-def _component_masks(gen: MembraneTomogramGenerator) -> dict[str, np.ndarray]:
+def _component_masks(gen: TomogramSpecimenGenerator) -> dict[str, np.ndarray]:
     """Split the run's own ground truth into one 3D boolean mask per
     component. Instance ids are handed out in placement order -- filaments
     first, then beads, then cytosol/lumen proteins -- so the protein and
@@ -169,7 +169,7 @@ def figure_hero(volume: torch.Tensor) -> None:
     print(f"saved {path}")
 
 
-def figure_components(gen: MembraneTomogramGenerator) -> None:
+def figure_components(gen: TomogramSpecimenGenerator) -> None:
     """The same specimen, painted by component from the run's own
     ground-truth label volumes -- nothing here is inferred from the
     density."""
@@ -215,7 +215,7 @@ def figure_components(gen: MembraneTomogramGenerator) -> None:
     print(f"saved {path}")
 
 
-def figure_ground_truth(gen: MembraneTomogramGenerator) -> None:
+def figure_ground_truth(gen: TomogramSpecimenGenerator) -> None:
     """What a run writes out alongside the density: the region map, the
     per-instance membrane labels, and the per-instance protein labels."""
     z = SHAPE_ZYX[0] // 2

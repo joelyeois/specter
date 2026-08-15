@@ -1,5 +1,5 @@
 """
-Smoke tests for MembraneTomogramGenerator (specter.specimen.tomogram) --
+Smoke tests for TomogramSpecimenGenerator (specter.specimen.tomogram) --
 the pipeline combining one or more MembraneGenerator instances (composited)
 with region-gated (cytosol/lumen) dense protein packing. Uses locally-cached
 PDB fixtures (no network fetch). Membrane/box parameters here are
@@ -22,7 +22,7 @@ from specter.specimen.filament import FilamentSpec
 from specter.specimen.membrane import MembraneGenerator, TransmembraneSpec
 from specter.specimen.tomogram import (
     MembraneInstance,
-    MembraneTomogramGenerator,
+    TomogramSpecimenGenerator,
     TomogramBeadSpec,
     TomogramProteinSpec,
 )
@@ -52,9 +52,9 @@ _MEMBRANE_KWARGS = dict(
     not (_SMALL_FIXTURE.exists() and _LARGE_FIXTURE.exists()),
     reason="bundled PDB fixtures missing",
 )
-def test_membrane_tomogram_generator_places_both_locations_correctly():
+def test_tomogram_specimen_generator_places_both_locations_correctly():
     mgen = MembraneGenerator(seed=0, **_MEMBRANE_KWARGS)
-    gen = MembraneTomogramGenerator(
+    gen = TomogramSpecimenGenerator(
         membrane_instances=[MembraneInstance(generator=mgen)],
         target_shape=_TARGET_SHAPE_ZYX,
         voxel_size=_V_SIZE,
@@ -98,9 +98,9 @@ def test_membrane_tomogram_generator_places_both_locations_correctly():
 
 
 @pytest.mark.skipif(not _SMALL_FIXTURE.exists(), reason="bundled PDB fixture missing")
-def test_membrane_tomogram_generator_instance_labels_match_placements():
+def test_tomogram_specimen_generator_instance_labels_match_placements():
     mgen = MembraneGenerator(seed=0, **_MEMBRANE_KWARGS)
-    gen = MembraneTomogramGenerator(
+    gen = TomogramSpecimenGenerator(
         membrane_instances=[MembraneInstance(generator=mgen)],
         target_shape=_TARGET_SHAPE_ZYX,
         voxel_size=_V_SIZE,
@@ -125,7 +125,7 @@ def test_membrane_tomogram_generator_instance_labels_match_placements():
 
 
 @pytest.mark.skipif(not _SMALL_FIXTURE.exists(), reason="bundled PDB fixture missing")
-def test_membrane_tomogram_generator_warns_when_lumen_species_has_no_region():
+def test_tomogram_specimen_generator_warns_when_lumen_species_has_no_region():
     # Degenerate membrane config unlikely to enclose any lumen at all --
     # bilayer_thickness far exceeds the vesicle's own radius, so the two
     # leaflet offset surfaces invert/overlap through the whole interior
@@ -142,7 +142,7 @@ def test_membrane_tomogram_generator_warns_when_lumen_species_has_no_region():
             n_lipids_per_leaflet=6,
             seed=0,
         )
-    gen = MembraneTomogramGenerator(
+    gen = TomogramSpecimenGenerator(
         # Explicit position_xyz for determinism -- the actual thing under
         # test is the "no lumen region" warning path, not placement itself.
         membrane_instances=[
@@ -162,12 +162,12 @@ def test_membrane_tomogram_generator_warns_when_lumen_species_has_no_region():
     assert len(gen.placements) == 0
 
 
-def test_membrane_tomogram_generator_allows_empty_protein_specs():
+def test_tomogram_specimen_generator_allows_empty_protein_specs():
     """A membrane-only tomogram (no packed protein population) is valid --
     protein_specs may be empty as long as membrane_instances/filament_specs
     isn't."""
     mgen = MembraneGenerator(seed=0, **_MEMBRANE_KWARGS)
-    gen = MembraneTomogramGenerator(
+    gen = TomogramSpecimenGenerator(
         membrane_instances=[MembraneInstance(generator=mgen)],
         target_shape=_TARGET_SHAPE_ZYX,
         voxel_size=_V_SIZE,
@@ -178,9 +178,9 @@ def test_membrane_tomogram_generator_allows_empty_protein_specs():
     assert gen.placements == []
 
 
-def test_membrane_tomogram_generator_rejects_all_empty():
+def test_tomogram_specimen_generator_rejects_all_empty():
     with pytest.raises(ValueError, match="at least one"):
-        MembraneTomogramGenerator(
+        TomogramSpecimenGenerator(
             membrane_instances=[],
             target_shape=_TARGET_SHAPE_ZYX,
             voxel_size=_V_SIZE,
@@ -188,10 +188,10 @@ def test_membrane_tomogram_generator_rejects_all_empty():
         )
 
 
-def test_membrane_tomogram_generator_rejects_mismatched_voxel_size():
+def test_tomogram_specimen_generator_rejects_mismatched_voxel_size():
     mgen = MembraneGenerator(target_shape=_TARGET_SHAPE_ZYX, voxel_size=4.0, seed=0)
     with pytest.raises(ValueError, match=r"membrane_instances\[0\]"):
-        MembraneTomogramGenerator(
+        TomogramSpecimenGenerator(
             membrane_instances=[MembraneInstance(generator=mgen)],
             target_shape=_TARGET_SHAPE_ZYX,
             voxel_size=_V_SIZE,
@@ -200,7 +200,7 @@ def test_membrane_tomogram_generator_rejects_mismatched_voxel_size():
 
 
 @pytest.mark.skipif(not _LARGE_FIXTURE.exists(), reason="bundled PDB fixture missing")
-def test_membrane_tomogram_generator_composites_two_non_overlapping_instances():
+def test_tomogram_specimen_generator_composites_two_non_overlapping_instances():
     """Two instances at distinct, well-separated position_xyz -- composited
     density nonzero near both, membrane_labels has exactly 2 distinct
     nonzero IDs, each spatially localized near its own instance. Uses a
@@ -211,7 +211,7 @@ def test_membrane_tomogram_generator_composites_two_non_overlapping_instances():
     kwargs = dict(_MEMBRANE_KWARGS, target_shape=big_shape_zyx)
     mgen_a = MembraneGenerator(seed=0, **kwargs)
     mgen_b = MembraneGenerator(seed=1, **kwargs)
-    gen = MembraneTomogramGenerator(
+    gen = TomogramSpecimenGenerator(
         membrane_instances=[
             MembraneInstance(generator=mgen_a, position_xyz=(-200.0, 0.0, 0.0)),
             MembraneInstance(generator=mgen_b, position_xyz=(200.0, 0.0, 0.0)),
@@ -242,7 +242,7 @@ def test_membrane_tomogram_generator_composites_two_non_overlapping_instances():
     assert (id2_x >= big_shape_zyx[2] // 2).float().mean() > 0.8
 
 
-def test_membrane_tomogram_generator_auto_places_non_colliding_instances():
+def test_tomogram_specimen_generator_auto_places_non_colliding_instances():
     """Two instances with position_xyz left at its default (None) in a box
     generously sized for both -- both should be accepted (no "dropped"
     warning), get distinct, non-overlapping labels, and have their own
@@ -255,7 +255,7 @@ def test_membrane_tomogram_generator_auto_places_non_colliding_instances():
     instance_a = MembraneInstance(generator=mgen_a)
     instance_b = MembraneInstance(generator=mgen_b)
     assert instance_a.position_xyz is None
-    gen = MembraneTomogramGenerator(
+    gen = TomogramSpecimenGenerator(
         membrane_instances=[instance_a, instance_b],
         target_shape=big_shape_zyx,
         voxel_size=_V_SIZE,
@@ -279,7 +279,7 @@ def test_membrane_tomogram_generator_auto_places_non_colliding_instances():
     assert set(torch.unique(labels).tolist()) - {0} == {1, 2}
 
 
-def test_membrane_tomogram_generator_drops_instances_that_dont_fit():
+def test_tomogram_specimen_generator_drops_instances_that_dont_fit():
     """Several instances, deliberately too many/too-large for a small box
     -- some must be dropped (warned about), and a dropped instance's own
     generator is never .generate()-called (self.field stays None) since
@@ -292,7 +292,7 @@ def test_membrane_tomogram_generator_drops_instances_that_dont_fit():
         MembraneInstance(generator=MembraneGenerator(seed=i, **kwargs))
         for i in range(4)
     ]
-    gen = MembraneTomogramGenerator(
+    gen = TomogramSpecimenGenerator(
         membrane_instances=instances,
         target_shape=small_shape_zyx,
         voxel_size=_V_SIZE,
@@ -313,7 +313,7 @@ def test_membrane_tomogram_generator_drops_instances_that_dont_fit():
             assert mi.generator.field is None
 
 
-def test_membrane_tomogram_generator_overlapping_instances_first_write_wins():
+def test_tomogram_specimen_generator_overlapping_instances_first_write_wins():
     """Two fully-overlapping instances (both explicitly at the origin --
     position_xyz now defaults to None/auto-placed, so this test pins both
     to (0,0,0) explicitly to keep testing overlap detection specifically,
@@ -321,7 +321,7 @@ def test_membrane_tomogram_generator_overlapping_instances_first_write_wins():
     1 in the overlap region (first-write-wins, deterministic)."""
     mgen_a = MembraneGenerator(seed=0, **_MEMBRANE_KWARGS)
     mgen_b = MembraneGenerator(seed=0, **_MEMBRANE_KWARGS)
-    gen = MembraneTomogramGenerator(
+    gen = TomogramSpecimenGenerator(
         membrane_instances=[
             MembraneInstance(generator=mgen_a, position_xyz=(0.0, 0.0, 0.0)),
             MembraneInstance(generator=mgen_b, position_xyz=(0.0, 0.0, 0.0)),
@@ -346,7 +346,7 @@ def test_membrane_tomogram_generator_overlapping_instances_first_write_wins():
 
 
 @pytest.mark.skipif(not _SMALL_FIXTURE.exists(), reason="bundled PDB fixture missing")
-def test_membrane_tomogram_generator_transmembrane_reflects_position_offset():
+def test_tomogram_specimen_generator_transmembrane_reflects_position_offset():
     offset = (100.0, -50.0, 25.0)
     kwargs = dict(_MEMBRANE_KWARGS)
     transmembrane_specs = [
@@ -356,7 +356,7 @@ def test_membrane_tomogram_generator_transmembrane_reflects_position_offset():
     mgen_origin = MembraneGenerator(
         transmembrane_specs=transmembrane_specs, seed=0, **kwargs
     )
-    gen_origin = MembraneTomogramGenerator(
+    gen_origin = TomogramSpecimenGenerator(
         membrane_instances=[
             MembraneInstance(generator=mgen_origin, position_xyz=(0.0, 0.0, 0.0))
         ],
@@ -372,7 +372,7 @@ def test_membrane_tomogram_generator_transmembrane_reflects_position_offset():
     mgen_offset = MembraneGenerator(
         transmembrane_specs=transmembrane_specs, seed=0, **kwargs
     )
-    gen_offset = MembraneTomogramGenerator(
+    gen_offset = TomogramSpecimenGenerator(
         membrane_instances=[
             MembraneInstance(generator=mgen_offset, position_xyz=offset)
         ],
@@ -400,7 +400,7 @@ def test_membrane_tomogram_generator_transmembrane_reflects_position_offset():
     not (_SMALL_FIXTURE.exists() and _LARGE_FIXTURE.exists()),
     reason="bundled PDB fixtures missing",
 )
-def test_membrane_tomogram_generator_export_picks(tmp_path):
+def test_tomogram_specimen_generator_export_picks(tmp_path):
     """export_picks: coordinate conversion (corner-relative, not centered)
     against a known placement, and transmembrane species get their own
     suffixed file distinct from cytosol/lumen files."""
@@ -422,7 +422,7 @@ def test_membrane_tomogram_generator_export_picks(tmp_path):
         ],
         seed=0,
     )
-    gen = MembraneTomogramGenerator(
+    gen = TomogramSpecimenGenerator(
         membrane_instances=[MembraneInstance(generator=mgen)],
         target_shape=_TARGET_SHAPE_ZYX,
         voxel_size=_V_SIZE,
@@ -467,12 +467,12 @@ def test_membrane_tomogram_generator_export_picks(tmp_path):
 
 
 @pytest.mark.skipif(not _SMALL_FIXTURE.exists(), reason="bundled PDB fixture missing")
-def test_membrane_tomogram_generator_places_filaments():
+def test_tomogram_specimen_generator_places_filaments():
     """filament_specs scatters monomer instances independently of the
     membrane/protein packing above, continuing instance_labels' own
     instance-id counter (see _stamp_filaments)."""
     mgen = MembraneGenerator(seed=0, **_MEMBRANE_KWARGS)
-    gen = MembraneTomogramGenerator(
+    gen = TomogramSpecimenGenerator(
         membrane_instances=[MembraneInstance(generator=mgen)],
         target_shape=_TARGET_SHAPE_ZYX,
         voxel_size=_V_SIZE,
@@ -509,9 +509,9 @@ def test_membrane_tomogram_generator_places_filaments():
     assert len(present_ids) > len(protein_ids)
 
 
-def test_membrane_tomogram_generator_no_filament_specs_places_nothing():
+def test_tomogram_specimen_generator_no_filament_specs_places_nothing():
     mgen = MembraneGenerator(seed=0, **_MEMBRANE_KWARGS)
-    gen = MembraneTomogramGenerator(
+    gen = TomogramSpecimenGenerator(
         membrane_instances=[MembraneInstance(generator=mgen)],
         target_shape=_TARGET_SHAPE_ZYX,
         voxel_size=_V_SIZE,
@@ -527,9 +527,9 @@ def test_membrane_tomogram_generator_no_filament_specs_places_nothing():
 
 
 @pytest.mark.skipif(not _SMALL_FIXTURE.exists(), reason="bundled PDB fixture missing")
-def test_membrane_tomogram_generator_export_picks_includes_filaments(tmp_path):
+def test_tomogram_specimen_generator_export_picks_includes_filaments(tmp_path):
     mgen = MembraneGenerator(seed=0, **_MEMBRANE_KWARGS)
-    gen = MembraneTomogramGenerator(
+    gen = TomogramSpecimenGenerator(
         membrane_instances=[MembraneInstance(generator=mgen)],
         target_shape=_TARGET_SHAPE_ZYX,
         voxel_size=_V_SIZE,
@@ -579,14 +579,14 @@ def test_membrane_tomogram_generator_export_picks_includes_filaments(tmp_path):
 # ---------------------------------------------------------------------
 
 
-def test_membrane_tomogram_generator_carbon_film_spec_paints_carbon_film():
+def test_tomogram_specimen_generator_carbon_film_spec_paints_carbon_film():
     """A carbon_film_spec-only tomogram (no membrane/protein/filament) is valid --
     the carbon film should occupy part of the volume (not all of it, since
     hole_radius/edge_fraction are chosen here to leave a real hole) at
     carbon's real mean inner potential ballpark (~9-13 V, see
     specter.specimen._grid's own module docstring), and leave the rest at
     exactly zero."""
-    gen = MembraneTomogramGenerator(
+    gen = TomogramSpecimenGenerator(
         membrane_instances=[],
         target_shape=_TARGET_SHAPE_ZYX,
         voxel_size=_V_SIZE,
@@ -605,11 +605,11 @@ def test_membrane_tomogram_generator_carbon_film_spec_paints_carbon_film():
     assert (volume[~occupied] == 0).all()
 
 
-def test_membrane_tomogram_generator_carbon_film_spec_rejects_multiple_entries():
-    """MembraneTomogramGenerator itself takes a single carbon_film_spec (not a
+def test_tomogram_specimen_generator_carbon_film_spec_rejects_multiple_entries():
+    """TomogramSpecimenGenerator itself takes a single carbon_film_spec (not a
     list) -- the "at most one [[carbon_film]] table" constraint is enforced one
     layer up, in run_build_tomogram/config.py, not here."""
-    gen = MembraneTomogramGenerator(
+    gen = TomogramSpecimenGenerator(
         membrane_instances=[],
         target_shape=_TARGET_SHAPE_ZYX,
         voxel_size=_V_SIZE,
@@ -621,9 +621,9 @@ def test_membrane_tomogram_generator_carbon_film_spec_rejects_multiple_entries()
 
 
 @pytest.mark.skipif(not _SMALL_FIXTURE.exists(), reason="bundled PDB fixture missing")
-def test_membrane_tomogram_generator_bead_specs_avoid_membrane_shell():
+def test_tomogram_specimen_generator_bead_specs_avoid_membrane_shell():
     mgen = MembraneGenerator(seed=0, **_MEMBRANE_KWARGS)
-    gen = MembraneTomogramGenerator(
+    gen = TomogramSpecimenGenerator(
         membrane_instances=[MembraneInstance(generator=mgen)],
         target_shape=_TARGET_SHAPE_ZYX,
         voxel_size=_V_SIZE,
@@ -644,12 +644,12 @@ def test_membrane_tomogram_generator_bead_specs_avoid_membrane_shell():
         assert not bool(shell[iz, iy, ix])
 
 
-def test_membrane_tomogram_generator_bead_radius_range_varies_sizes():
+def test_tomogram_specimen_generator_bead_radius_range_varies_sizes():
     """A [low, high] radius gives a bead population the size dispersity
     real colloidal gold has. Radii are drawn before packing, so each
     recorded instance carries its own size and the collision test used
     it."""
-    gen = MembraneTomogramGenerator(
+    gen = TomogramSpecimenGenerator(
         membrane_instances=[],
         target_shape=_TARGET_SHAPE_ZYX,
         voxel_size=_V_SIZE,
@@ -673,11 +673,11 @@ def test_bead_spec_rejects_bad_radius():
         TomogramBeadSpec(radius=[60.0, 40.0])
 
 
-def test_membrane_tomogram_generator_bead_specs_only_is_valid():
+def test_tomogram_specimen_generator_bead_specs_only_is_valid():
     """A bead_specs-only tomogram (no membrane/protein/filament/grid) is
     valid -- beads are unrestricted ("any" location) so no membrane is
     needed to define cytosol/lumen regions."""
-    gen = MembraneTomogramGenerator(
+    gen = TomogramSpecimenGenerator(
         membrane_instances=[],
         target_shape=_TARGET_SHAPE_ZYX,
         voxel_size=_V_SIZE,
@@ -692,11 +692,11 @@ def test_membrane_tomogram_generator_bead_specs_only_is_valid():
     assert int(gen.instance_labels.max()) == len(gen.bead_instances)
 
 
-def test_membrane_tomogram_generator_bead_specs_excluded_from_protein_packing():
+def test_tomogram_specimen_generator_bead_specs_excluded_from_protein_packing():
     """Beads placed before cytosol/lumen protein packing should be avoided
     by it -- no placed protein's center should land inside a bead's own
     radius."""
-    gen = MembraneTomogramGenerator(
+    gen = TomogramSpecimenGenerator(
         membrane_instances=[],
         target_shape=_TARGET_SHAPE_ZYX,
         voxel_size=_V_SIZE,
@@ -716,8 +716,8 @@ def test_membrane_tomogram_generator_bead_specs_excluded_from_protein_packing():
             assert dist > bead.radius
 
 
-def test_membrane_tomogram_generator_export_picks_includes_beads(tmp_path):
-    gen = MembraneTomogramGenerator(
+def test_tomogram_specimen_generator_export_picks_includes_beads(tmp_path):
+    gen = TomogramSpecimenGenerator(
         membrane_instances=[],
         target_shape=_TARGET_SHAPE_ZYX,
         voxel_size=_V_SIZE,
@@ -872,7 +872,7 @@ def test_membrane_tomogram_zero_placement_warning_distinguishes_unlucky_from_imp
         MembraneInstance(generator=MembraneGenerator(seed=i, **kwargs))
         for i in range(4)
     ]
-    gen = MembraneTomogramGenerator(
+    gen = TomogramSpecimenGenerator(
         membrane_instances=instances,
         target_shape=small_shape_zyx,
         voxel_size=_V_SIZE,
@@ -901,7 +901,7 @@ def test_all_beads_go_in_one_pick_file(tmp_path):
     radius or population. Grouping by radius (the earlier behaviour) wrote
     one file per bead under a [low, high] radius, since every instance
     then has a unique size."""
-    gen = MembraneTomogramGenerator(
+    gen = TomogramSpecimenGenerator(
         membrane_instances=[],
         target_shape=_TARGET_SHAPE_ZYX,
         voxel_size=_V_SIZE,

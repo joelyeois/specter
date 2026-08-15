@@ -7,7 +7,7 @@ explains region classification and the RSA hard-sphere packing behind
 
 Calls the shipped `pack_hard_spheres_3d`/`draw_species_pool`/
 `classify_membrane_regions` and, for the hero, a real
-`MembraneTomogramGenerator` run, rather than reimplementing any of the
+`TomogramSpecimenGenerator` run, rather than reimplementing any of the
 placement logic.
 
 Run with: uv run python docs-figures/cryoet_specimen_packing.py
@@ -32,7 +32,7 @@ from specter.specimen.membrane import MembraneGenerator
 from specter.specimen.packing import draw_species_pool, pack_hard_spheres_3d
 from specter.specimen.tomogram import (
     MembraneInstance,
-    MembraneTomogramGenerator,
+    TomogramSpecimenGenerator,
     TomogramProteinSpec,
 )
 from specter.specimen.tomogram.generator import _build_sphere_exclusion_field
@@ -77,7 +77,7 @@ def figure_regions_hero() -> None:
     the same slab painted by where each placed instance was allowed to go
     -- the cytosol species never enters a vesicle, the lumen species never
     leaves one, and neither ever overlaps the bilayer shell."""
-    gen = MembraneTomogramGenerator(
+    gen = TomogramSpecimenGenerator(
         membrane_instances=_membrane_instances(),
         target_shape=SHAPE_ZYX,
         voxel_size=VOXEL_SIZE,

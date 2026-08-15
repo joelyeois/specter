@@ -109,7 +109,7 @@ def test_exclusion_distance_field_fully_forbidden_places_nothing():
 
 def test_sampling_mask_finds_a_needle_in_haystack_region_that_uniform_sampling_misses():
     """Regression test for the real failure this parameter fixes (found
-    while building specimen.tomogram.MembraneTomogramGenerator: packing
+    while building specimen.tomogram.TomogramSpecimenGenerator: packing
     into a small vesicle lumen placed 0/1 candidates because the valid
     region was ~0.008% of the box). Here: a 100A cube pocket, centered well
     inside a much larger box, with a small enough margin that only its

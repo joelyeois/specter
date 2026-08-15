@@ -3,7 +3,7 @@ Gold fiducial bead generation -- a from-scratch port of CryoTomoSim (CTS)'s
 ``gen_beads.m``. No dependency on polnet or VTK.
 
 Generic, self-contained physics (no CTS-specific placement logic). Used by
-``specimen.tomogram.MembraneTomogramGenerator`` (the generator behind
+``specimen.tomogram.TomogramSpecimenGenerator`` (the generator behind
 `specter build tomogram`) -- see its own module docstring. Originally
 shared with ``specimen.cryotomosim``'s now-deleted CTS-replica generator;
 kept as its own module rather than folded into ``tomogram/generator.py``

@@ -1,5 +1,5 @@
 """
-MembraneTomogramGenerator: assembles a full specimen tomogram from an
+TomogramSpecimenGenerator: assembles a full specimen tomogram from an
 optional organic membrane -- transmembrane proteins on the bilayer, plus
 densely packed cytosolic and vesicle-lumen protein populations, region-
 gated against the membrane's own geometry so a "lumen" species can only
@@ -220,7 +220,7 @@ def _insert_instance_labels(
     """Stamp per-instance integer labels into a shared label volume.
     `binarized`/`positions` are moved to `labels`' own device (not the
     other way around) -- `labels` is the shared, potentially large
-    accumulator (see MembraneTomogramGenerator's own `accumulator_device`
+    accumulator (see TomogramSpecimenGenerator's own `accumulator_device`
     docstring), `binarized` is one small per-chunk rotated result."""
     device = labels.device
     binarized = binarized.to(device)
@@ -284,7 +284,7 @@ def _insert_volume_max(
     different convention than `clip_insert_bounds`. `local` is
     moved to `volume`'s own device (not the other way around) -- `volume`
     is the shared, potentially large accumulator (see
-    MembraneTomogramGenerator's own `accumulator_device` docstring),
+    TomogramSpecimenGenerator's own `accumulator_device` docstring),
     `local` is one membrane instance's own (much smaller) working grid."""
     center_zyx = _position_to_center_index(
         position_xyz, tuple(volume.shape), voxel_size
@@ -706,7 +706,7 @@ class TomogramBeadSpec:
     a specific cytosol/lumen compartment, so there's no `location` field
     here the way `TomogramProteinSpec` has one. Placement still avoids the
     membrane shell and any already-placed filaments/other bead populations
-    (see `MembraneTomogramGenerator._stamp_beads`).
+    (see `TomogramSpecimenGenerator._stamp_beads`).
 
     Attributes
     ----------
@@ -759,7 +759,7 @@ class MembraneInstance:
         centered at physical (0,0,0) (`MembraneGenerator`'s own
         convention), then shifted into place via `position_xyz` at
         composite time -- its own `target_shape` need NOT match the
-        owning `MembraneTomogramGenerator`'s (typically shouldn't: leave it
+        owning `TomogramSpecimenGenerator`'s (typically shouldn't: leave it
         `None` for a small, auto-sized local grid, see `MembraneGenerator`'s
         own docstring).
     position_xyz : tuple of float, optional
@@ -778,10 +778,14 @@ class MembraneInstance:
     position_xyz: tuple[float, float, float] | None = None
 
 
-class MembraneTomogramGenerator:
+class TomogramSpecimenGenerator:
     """
-    Assemble a tomogram from a pre-configured membrane plus densely packed
-    cytosolic and vesicle-lumen protein populations.
+    Assemble a specimen tomogram from any combination of pre-configured
+    membranes, filaments, carbon film, gold fiducials, and densely packed
+    cytosolic/vesicle-lumen protein populations -- every one of those is
+    optional (see the module docstring), so this is the single generator
+    behind `specter build tomogram` for membrane and membrane-free
+    specimens alike.
 
     Places any number of distinct species (see `protein_specs` below),
     purely for DENSITY -- each region (cytosol/lumen) is packed as densely
@@ -987,7 +991,7 @@ class MembraneTomogramGenerator:
             and carbon_film_spec is None
         ):
             raise ValueError(
-                "MembraneTomogramGenerator: at least one of "
+                "TomogramSpecimenGenerator: at least one of "
                 "membrane_instances, protein_specs, filament_specs, "
                 "bead_specs, or carbon_film_spec must be non-empty/set -- an empty "
                 "tomogram has nothing to generate."
@@ -995,7 +999,7 @@ class MembraneTomogramGenerator:
         for i, mi in enumerate(membrane_instances):
             if mi.generator.voxel_size != voxel_size:
                 raise ValueError(
-                    f"MembraneTomogramGenerator: membrane_instances[{i}]'s own "
+                    f"TomogramSpecimenGenerator: membrane_instances[{i}]'s own "
                     f"voxel_size ({mi.generator.voxel_size}) does not match the shared "
                     f"voxel_size ({voxel_size}) -- every instance must render on the "
                     "same voxel grid to be compositable."
@@ -1166,7 +1170,7 @@ class MembraneTomogramGenerator:
             n_dropped = len(auto_instances) - accepted_idx.numel()
             if n_dropped:
                 warnings.warn(
-                    f"MembraneTomogramGenerator: {n_dropped}/{len(auto_instances)} "
+                    f"TomogramSpecimenGenerator: {n_dropped}/{len(auto_instances)} "
                     "membrane instances with automatic (position_xyz=None) "
                     "placement did not fit without colliding (with each other, "
                     "the box walls, or the carbon film, if any) and were "
@@ -1202,7 +1206,7 @@ class MembraneTomogramGenerator:
                 progress.update(membrane_task, advance=1)
                 if mi.generator.clipped_at_boundary:
                     warnings.warn(
-                        "MembraneTomogramGenerator: a membrane instance's own "
+                        "TomogramSpecimenGenerator: a membrane instance's own "
                         "working grid was too small for the organelle size it "
                         "actually drew (clipped_at_boundary=True on its "
                         "MembraneGenerator) -- skipped rather than compositing a "
@@ -1248,7 +1252,7 @@ class MembraneTomogramGenerator:
                         forbidden = carbon_mask[dst].to(local_volume.device)
                         if forbidden.any():
                             warnings.warn(
-                                "MembraneTomogramGenerator: clipped part of a "
+                                "TomogramSpecimenGenerator: clipped part of a "
                                 "membrane instance (explicit position_xyz or an "
                                 "irregular shape exceeding its own bounding-"
                                 "sphere estimate) that overlapped the carbon "
@@ -1297,7 +1301,7 @@ class MembraneTomogramGenerator:
                         n_dropped_tm = int(in_carbon.sum())
                         if n_dropped_tm:
                             warnings.warn(
-                                f"MembraneTomogramGenerator: dropped "
+                                f"TomogramSpecimenGenerator: dropped "
                                 f"{n_dropped_tm} transmembrane protein "
                                 "placement(s) clipped by the carbon film "
                                 "(density already removed above; this drops "
@@ -1386,7 +1390,7 @@ class MembraneTomogramGenerator:
             )
             if overlap:
                 warnings.warn(
-                    f"MembraneTomogramGenerator: membrane instance {instance_id} "
+                    f"TomogramSpecimenGenerator: membrane instance {instance_id} "
                     "(1-indexed, in membrane_instances order) overlaps a voxel "
                     "already claimed by an earlier instance in membrane_labels "
                     "-- the earlier instance's label wins there (first-write-"
@@ -1517,7 +1521,7 @@ class MembraneTomogramGenerator:
             region_voxels = int(region_mask.sum())
             if region_voxels == 0:
                 warnings.warn(
-                    f"MembraneTomogramGenerator: no '{location}' region found "
+                    f"TomogramSpecimenGenerator: no '{location}' region found "
                     f"(0 voxels, after excluding already-placed filaments) -- "
                     f"{len(specs_here)} species declared for it will not be "
                     "placed. For 'lumen', this means the membrane has no "
@@ -1623,7 +1627,7 @@ class MembraneTomogramGenerator:
                 n_placed = int(accepted_idx.numel())
                 if n_placed < n_requested:
                     warnings.warn(
-                        f"MembraneTomogramGenerator: only {n_placed}/"
+                        f"TomogramSpecimenGenerator: only {n_placed}/"
                         f"{n_requested} exact-count instances fit in the "
                         f"'{location}' region without colliding -- it may be "
                         "too small or too crowded for the requested "
@@ -1758,7 +1762,7 @@ class MembraneTomogramGenerator:
                         # exists (rare with the "open region" stall_patience
                         # default; see _TIGHT_REGION_FRACTION_THRESHOLD).
                         warnings.warn(
-                            f"MembraneTomogramGenerator: placed 0 filler "
+                            f"TomogramSpecimenGenerator: placed 0 filler "
                             f"instances in '{location}' despite "
                             f"{viable_voxels:,} geometrically viable "
                             f"position(s) existing -- an unlucky draw, not "
@@ -1775,7 +1779,7 @@ class MembraneTomogramGenerator:
                         # always < needed here (0.0 if the region has no
                         # box-valid position regardless of clearance).
                         warnings.warn(
-                            f"MembraneTomogramGenerator: placed 0 filler "
+                            f"TomogramSpecimenGenerator: placed 0 filler "
                             f"instances in '{location}' -- no position "
                             "exists that is both far enough from the "
                             "boundary/shell AND keeps the whole sphere "
@@ -1948,7 +1952,7 @@ class MembraneTomogramGenerator:
         n_placed = int(accepted_idx.numel())
         if n_placed < n_requested:
             warnings.warn(
-                f"MembraneTomogramGenerator: only {n_placed}/{n_requested} "
+                f"TomogramSpecimenGenerator: only {n_placed}/{n_requested} "
                 "gold fiducial beads fit without colliding with the "
                 "membrane shell/already-placed filaments.",
                 stacklevel=2,
@@ -2050,7 +2054,7 @@ class MembraneTomogramGenerator:
             n_dropped = int(in_carbon.sum())
             if n_dropped:
                 warnings.warn(
-                    f"MembraneTomogramGenerator: dropped {n_dropped} filament "
+                    f"TomogramSpecimenGenerator: dropped {n_dropped} filament "
                     "monomer instance(s) that landed inside the carbon film.",
                     stacklevel=2,
                 )
@@ -2377,7 +2381,7 @@ class MembraneTomogramGenerator:
         ]
         # Build every active species' potential template up front (optionally
         # concurrently across self.render_workers threads/self.render_devices
-        # -- see MembraneTomogramGenerator's own render_workers docstring),
+        # -- see TomogramSpecimenGenerator's own render_workers docstring),
         # then run the rotate/insert loop below exactly as before. That loop
         # mutates volume/instance_labels/next_instance_id in place across
         # iterations and is comparatively cheap (batched GPU tensor ops), so

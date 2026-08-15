@@ -20,7 +20,7 @@ microtubule protofilament). Anything else is a hand-written
 
 !!! info "Source"
     `specter.specimen.filament` (`_path`, `_placement`, `_generator`),
-    stamped by `MembraneTomogramGenerator._stamp_filaments`. Figures are
+    stamped by `TomogramSpecimenGenerator._stamp_filaments`. Figures are
     produced by `docs-figures/cryoet_specimen_filaments.py`, which calls
     the same functions the real code path does.
 

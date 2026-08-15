@@ -5,7 +5,7 @@ explains the filament component of `specter build tomogram`
 
 Calls the same functions the real code path uses
 (`generate_filament_path`, `filament_orientations`, `place_filaments`, and
-`MembraneTomogramGenerator` itself for the hero) rather than
+`TomogramSpecimenGenerator` itself for the hero) rather than
 reimplementing the geometry, so the figures cannot silently drift from
 what's actually shipped.
 
@@ -35,7 +35,7 @@ from specter.specimen.filament._placement import (
 )
 from specter.specimen.membrane._placement import align_principal_axis_to_z
 from specter.specimen.packing import estimate_protein_box_size
-from specter.specimen.tomogram import MembraneTomogramGenerator
+from specter.specimen.tomogram import TomogramSpecimenGenerator
 
 OUT_DIR = "docs/assets/images"
 PDB_CACHE = "specter-data/pdb"
@@ -68,7 +68,7 @@ def _render_segment(
     target_shape: tuple[int, int, int],
 ) -> torch.Tensor:
     """Render one filament's monomers into a box, exactly the way
-    ``MembraneTomogramGenerator._stamp_filaments`` does it: one
+    ``TomogramSpecimenGenerator._stamp_filaments`` does it: one
     `PotentialBuilder` template per species, its longest principal axis
     pre-aligned to +Z, then one `rotate_volume`d copy inserted per
     monomer.
@@ -101,9 +101,9 @@ def _render_segment(
 
 def figure_hero() -> None:
     """Page-top hero: a filaments-only specimen built by the real
-    `MembraneTomogramGenerator`, summed along Z."""
+    `TomogramSpecimenGenerator`, summed along Z."""
     voxel_size = 5.0
-    gen = MembraneTomogramGenerator(
+    gen = TomogramSpecimenGenerator(
         membrane_instances=[],
         target_shape=(60, 340, 340),
         voxel_size=voxel_size,

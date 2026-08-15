@@ -1,7 +1,7 @@
 """
 Unit tests for specter.specimen._grid (BeadGenerator), the gold fiducial
 bead generator descended from CTS's ``gen_beads.m``. Placement-level
-coverage (via MembraneTomogramGenerator's bead_specs) lives in
+coverage (via TomogramSpecimenGenerator's bead_specs) lives in
 test_tomogram_generator.py; these focus on the physics this module adds:
 real mean-inner-potential calibration surviving the atomic fill, the
 lattice texture, boundary geometry, and reproducibility.

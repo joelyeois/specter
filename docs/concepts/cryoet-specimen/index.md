@@ -5,7 +5,7 @@
 ![A simulated cryo-ET specimen, summed along Z: crowded cytosolic protein, three vesicles, actin filaments, gold fiducial beads, and a carbon film edge along the bottom.](../../assets/images/cryoet-tomogram-hero.png){ width="420" }
 
 <div markdown>
-`MembraneTomogramGenerator` is the single specimen generator behind
+`TomogramSpecimenGenerator` is the single specimen generator behind
 [`specter build tomogram`](../../user-guide/build-tomogram.md). It
 composites a cryo-ET-scale potential volume out of six independent
 components, then hands back a density volume plus the ground-truth labels

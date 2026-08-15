@@ -6,7 +6,7 @@ vectorized across candidates, fast (sub-second to a few seconds at a few
 thousand instances), capped by RSA's known jamming limit (~28-41%
 depending on species-size diversity, well below random-close-packing).
 This is the backend behind `specter build tomogram`
-(`specimen.tomogram.MembraneTomogramGenerator`).
+(`specimen.tomogram.TomogramSpecimenGenerator`).
 
 Benchmarked in ``dev/packing_algorithms.py`` against several other
 candidates (naive/voxel-grid RSA, Lubachevsky-Stillinger, a CellPACK-style
@@ -19,7 +19,7 @@ implementation is the one winner promoted here (began as
 were themselves promoted into this package at one point
 (``pack_hard_spheres_3d_dense``, `specimen.packing.tetris`) but never
 gained a real caller beyond their own generators, which were themselves
-superseded by `MembraneTomogramGenerator`; both were removed rather than
+superseded by `TomogramSpecimenGenerator`; both were removed rather than
 carried along unused -- see git history if either is ever needed as a
 reference again.
 """

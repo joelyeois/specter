@@ -1,7 +1,7 @@
 """Tomogram specimen-building pipeline: `TomogramConfig` in, .mrc + copick
 .ndjson picks out.
 
-Drives `specter.specimen.tomogram.MembraneTomogramGenerator` -- the ONE
+Drives `specter.specimen.tomogram.TomogramSpecimenGenerator` -- the ONE
 generator behind `specter build tomogram`. An optional composited organic
 membrane (`config.membrane`, `specter.specimen.MembraneGenerator` per
 instance), optional scattered filament species (`config.filaments`/
@@ -12,7 +12,7 @@ fiducial beads (`config.beads`) and an optional carbon support film
 membrane is present -- otherwise the whole volume is one cytosol region).
 Generation order is carbon film, then membranes, then filaments, then
 beads, then protein fill; each stage avoids the previous ones' placements
-(see `MembraneTomogramGenerator`'s own module docstring).
+(see `TomogramSpecimenGenerator`'s own module docstring).
 
 Any combination of membrane/filaments/beads/grid/targets/filler is valid
 as long as at least one is non-empty -- there's no separate non-membrane
@@ -40,7 +40,7 @@ from specter.specimen import (
     CarbonFilmSpec,
     MembraneGenerator,
     MembraneInstance,
-    MembraneTomogramGenerator,
+    TomogramSpecimenGenerator,
     TomogramBeadSpec,
     TomogramProteinSpec,
     TransmembraneSpec,
@@ -100,7 +100,7 @@ def run_build_tomogram(config: TomogramConfig, n_tomograms: int = 1) -> None:
         beyond the first is written into its own numbered subdirectory of
         ``config.output_dir`` (``0001/``, ``0002/``, ...) so outputs don't
         collide -- pick files in particular are named after the species,
-        not ``config.filename`` (see `MembraneTomogramGenerator.
+        not ``config.filename`` (see `TomogramSpecimenGenerator.
         export_picks`), so a shared flat output_dir would silently
         overwrite them across tomograms. If ``config.seed`` is set, each
         tomogram also gets its own seed (``config.seed``, ``config.seed +
@@ -280,9 +280,9 @@ def _cap_membrane_auto_size_ranges(
     return instance_kwargs
 
 
-def build_tomogram_generator(config: TomogramConfig) -> MembraneTomogramGenerator:
+def build_tomogram_generator(config: TomogramConfig) -> TomogramSpecimenGenerator:
     """
-    Build a `MembraneTomogramGenerator` from a `TomogramConfig`, without
+    Build a `TomogramSpecimenGenerator` from a `TomogramConfig`, without
     calling `.generate()` or writing anything to disk.
 
     This is the same config-to-generator translation `run_build_tomogram`
@@ -299,7 +299,7 @@ def build_tomogram_generator(config: TomogramConfig) -> MembraneTomogramGenerato
 
     Returns
     -------
-    MembraneTomogramGenerator
+    TomogramSpecimenGenerator
         Not yet `.generate()`-called.
     """
     device, render_devices = parse_device_pool(config.device)
@@ -390,7 +390,7 @@ def build_tomogram_generator(config: TomogramConfig) -> MembraneTomogramGenerato
                 "against the others) or use n_copies=1 for manual "
                 "placement."
             )
-        # None (not (0,0,0)) by default -- MembraneTomogramGenerator resolves
+        # None (not (0,0,0)) by default -- TomogramSpecimenGenerator resolves
         # an omitted position_xyz via collision-rejecting random placement
         # (see its own docstring); forcing every unspecified instance to the
         # literal origin, the old behaviour, defeats that entirely once more
@@ -450,7 +450,7 @@ def build_tomogram_generator(config: TomogramConfig) -> MembraneTomogramGenerato
         for d in config.beads
     ]
 
-    return MembraneTomogramGenerator(
+    return TomogramSpecimenGenerator(
         membrane_instances=membrane_instances,
         target_shape=tuple(config.target_shape),  # type: ignore[arg-type]
         voxel_size=config.voxel_size,

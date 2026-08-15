@@ -923,3 +923,63 @@ def test_all_beads_go_in_one_pick_file(tmp_path):
         rows = [line for line in f if line.strip()]
     assert len(rows) == len(gen.bead_instances)
     assert len({b.radius for b in gen.bead_instances}) > 1, "test needs mixed sizes"
+
+
+@pytest.mark.parametrize(
+    "parameterization, expect_typed",
+    [("shtyrov", True), ("kirkland", False)],
+)
+def test_shtyrov_templates_are_typed_by_bonded_species(parameterization, expect_typed):
+    """Shtyrov fits scattering factors per BONDED SPECIES, so the generator
+    must hand `PotentialBuilder` the bond topology -- otherwise every atom
+    silently falls back to per-element Peng factors and the parameterization
+    is Shtyrov in name only.
+
+    The other parameterizations are per-element by construction, so they
+    must NOT pay for the gemmi topology pass.
+    """
+    import specter.potential as potential_module
+
+    captured: list[tuple[int, int | None]] = []
+    original = potential_module.PotentialBuilder.__init__
+
+    def spy(self, *args, **kwargs):
+        species = kwargs.get("atom_species")
+        captured.append(
+            (
+                len(kwargs.get("atomic_numbers", [])),
+                None if species is None else sum(s is not None for s in species),
+            )
+        )
+        return original(self, *args, **kwargs)
+
+    potential_module.PotentialBuilder.__init__ = spy
+    try:
+        gen = TomogramSpecimenGenerator(
+            membrane_instances=[],
+            target_shape=_TARGET_SHAPE_ZYX,
+            voxel_size=_V_SIZE,
+            protein_specs=[
+                TomogramProteinSpec(pdb_source=str(_SMALL_FIXTURE), location="cytosol")
+            ],
+            parameterization=parameterization,
+            seed=0,
+        )
+        gen.generate()
+    finally:
+        potential_module.PotentialBuilder.__init__ = original
+
+    assert captured, "no template was rendered -- test would be vacuous"
+    for n_atoms, n_typed in captured:
+        if expect_typed:
+            assert n_typed is not None, "shtyrov rendered without bond topology"
+            # Not every atom types, by design: 1mbo carries 324 waters whose
+            # hydrogens are not modelled (so an isolated O has no bonded
+            # neighbours), plus heme and a bound O2. Those fall back to Peng
+            # per-element factors individually, which is the intended
+            # degradation -- the bulk of the protein is what must be typed.
+            assert n_typed > 0.5 * n_atoms, f"only {n_typed}/{n_atoms} atoms typed"
+        else:
+            assert n_typed is None, (
+                f"{parameterization} paid for a topology pass it cannot use"
+            )

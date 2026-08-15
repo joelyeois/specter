@@ -197,6 +197,11 @@ def test_build_template_uses_analytic_method_matching_membrane_profile():
     # -- an unintended cross-method contrast mismatch between membrane and
     # protein, not a deliberate physical difference. Verify the template
     # builder now actually calls PotentialBuilder with method="analytic".
+    #
+    # The reference below also mirrors the bonded-species path: under
+    # parameterization="shtyrov" the shipped builder types atoms via
+    # compute_atom_species, and comparing against an untyped reference would
+    # measure that (~4% relative RMS) rather than the method it is testing.
     from specter.pdb import PDB
     from specter.potential import PotentialBuilder
     from specter.specimen.membrane._placement import (
@@ -212,7 +217,12 @@ def test_build_template_uses_analytic_method_matching_membrane_profile():
     spec = TransmembraneSpec("1C3W", parameterization="shtyrov")
     template = gen._build_template(spec)
 
-    pdb = PDB("1C3W", savefolder="specter-data/pdb/", verbose=False)
+    pdb = PDB(
+        "1C3W",
+        savefolder="specter-data/pdb/",
+        verbose=False,
+        compute_atom_species=True,
+    )
     coordinates = align_principal_axis_to_z(pdb.coordinates)
     coordinates = align_transmembrane_depth(coordinates, None)
     n = estimate_protein_box_size(pdb.max_diameter, gen.voxel_size)
@@ -222,6 +232,7 @@ def test_build_template_uses_analytic_method_matching_membrane_profile():
         atomic_numbers=pdb.atomic_numbers,
         progressbars=False,
         parameterization="shtyrov",
+        atom_species=pdb.atom_species,
     )
     expected = builder.forward(coordinates, method="analytic")
 

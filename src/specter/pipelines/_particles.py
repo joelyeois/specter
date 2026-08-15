@@ -75,8 +75,20 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
     # --- Building 3D scattering potential ---
     if is_main:
         _section("Building 3D scattering potential")
+    # Shtyrov fits scattering factors per bonded species, so derive the
+    # bond topology from the structure unless the config supplies its own
+    # atom_species list. Other parameterizations are per-element and would
+    # only pay the extra gemmi pass for nothing.
+    _derive_atom_species = (
+        config.potential_parameterization == "shtyrov"
+        and config.atom_species is None
+        and config.mmcif_filepath is None
+    )
     pdb = PDB(
-        config.pdb_code, assembly=config.assembly, savefolder=config.pdb_savefolder
+        config.pdb_code,
+        assembly=config.assembly,
+        savefolder=config.pdb_savefolder,
+        compute_atom_species=_derive_atom_species,
     )
 
     # pixel_size/voltage/alpha come from the .cs file when cs_path is set --
@@ -113,7 +125,7 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
             parameterization=config.potential_parameterization,
             conv_backend=config.conv_backend,
             mmcif_filepath=config.mmcif_filepath,
-            atom_species=config.atom_species,
+            atom_species=config.atom_species or pdb.atom_species,
             shtyrov_params_path=config.shtyrov_params_path,
             rcut=config.rcut,
             periodic=config.periodic,

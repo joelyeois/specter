@@ -277,7 +277,15 @@ def render_transmembrane_template(
     torch.Tensor
         Density template, shape ``(Z, Y, X)``, on `device`.
     """
-    pdb = PDB(spec.pdb_source, savefolder=pdb_cache_dir, verbose=False)
+    pdb = PDB(
+        spec.pdb_source,
+        savefolder=pdb_cache_dir,
+        verbose=False,
+        # Shtyrov fits scattering factors per bonded species, so it needs the
+        # bond topology to beat plain per-element factors; the other
+        # parameterizations are per-element by construction.
+        compute_atom_species=spec.parameterization == "shtyrov",
+    )
     coordinates = align_principal_axis_to_z(pdb.coordinates)
     coordinates = align_transmembrane_depth(coordinates, spec.tm_span_mask)
     n = estimate_protein_box_size(pdb.max_diameter, voxel_size)
@@ -287,6 +295,9 @@ def render_transmembrane_template(
         atomic_numbers=pdb.atomic_numbers,
         progressbars=False,
         parameterization=spec.parameterization,
+        # align_principal_axis_to_z/align_transmembrane_depth only rotate and
+        # translate, so species stay in step with coordinates.
+        atom_species=pdb.atom_species,
     ).to(device)
     # "analytic" (PotentialBuilder's own documented default), not "3d" --
     # confirmed empirically the two methods integrate to the same total

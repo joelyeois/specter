@@ -267,7 +267,7 @@ def build_templates_concurrently(
         return results
 
 
-def _fetch_one_pdb(args: tuple[str, str]) -> "PDB":
+def _fetch_one_pdb(args: tuple[str, str, bool]) -> "PDB":
     """
     Worker target for `build_pdb_cache_concurrently` -- a plain top-level
     function, not a closure/lambda, because `ProcessPoolExecutor` pickles
@@ -279,8 +279,13 @@ def _fetch_one_pdb(args: tuple[str, str]) -> "PDB":
     """
     from ..pdb import PDB
 
-    pdb_source, pdb_cache_dir = args
-    return PDB(pdb_source, savefolder=pdb_cache_dir, verbose=False)
+    pdb_source, pdb_cache_dir, compute_atom_species = args
+    return PDB(
+        pdb_source,
+        savefolder=pdb_cache_dir,
+        verbose=False,
+        compute_atom_species=compute_atom_species,
+    )
 
 
 def build_pdb_cache_concurrently(
@@ -288,6 +293,7 @@ def build_pdb_cache_concurrently(
     pdb_cache_dir: str,
     max_workers: int,
     on_result: Callable[[str], None] | None = None,
+    compute_atom_species: bool = False,
 ) -> dict[str, "PDB"]:
     """
     Fetch/parse multiple PDB sources concurrently across OS PROCESSES (not
@@ -344,14 +350,21 @@ def build_pdb_cache_concurrently(
 
         results = {}
         for source in unique_sources:
-            results[source] = PDB(source, savefolder=pdb_cache_dir, verbose=False)
+            results[source] = PDB(
+                source,
+                savefolder=pdb_cache_dir,
+                verbose=False,
+                compute_atom_species=compute_atom_species,
+            )
             if on_result is not None:
                 on_result(source)
         return results
     ctx = multiprocessing.get_context("spawn")
     with ProcessPoolExecutor(max_workers=max_workers, mp_context=ctx) as pool:
         futures = {
-            pool.submit(_fetch_one_pdb, (source, pdb_cache_dir)): source
+            pool.submit(
+                _fetch_one_pdb, (source, pdb_cache_dir, compute_atom_species)
+            ): source
             for source in unique_sources
         }
         results = {}

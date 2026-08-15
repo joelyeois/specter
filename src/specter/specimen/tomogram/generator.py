@@ -203,6 +203,24 @@ from ...progress import TqdmProgress, phase_done, phase_start, status
 
 _INSTANCE_LABEL_REL_THRESHOLD = 0.01
 
+
+def _wants_atom_species(parameterization: str) -> bool:
+    """Whether to spend a gemmi bond-topology pass on a structure.
+
+    The Shtyrov parameterization fits scattering factors per BONDED SPECIES
+    (e.g. ``"C(HHHC)"``), so it can only do better than plain per-element
+    factors when the bond topology is actually available. Computing it
+    roughly doubles per-structure parse time and is wasted for Kirkland/
+    Lobato, which are per-element by construction.
+
+    Structures with no resolvable topology (legacy PDB format, isolated
+    ions) degrade on their own: `PDB.get_atom_species` returns None for
+    those atoms and `PotentialBuilder` falls back to Peng per-element
+    factors for exactly them.
+    """
+    return parameterization == "shtyrov"
+
+
 # A region covering at least this fraction of the whole tomogram box (e.g.
 # a large cytosol with no membrane, or with just one small organelle in a
 # big box) behaves like an open box for RSA packing purposes -- it
@@ -1557,6 +1575,7 @@ class TomogramSpecimenGenerator:
                     pdb_sources=unique_sources,
                     pdb_cache_dir=self.pdb_cache_dir,
                     max_workers=self.render_workers,
+                    compute_atom_species=_wants_atom_species(self.parameterization),
                     on_result=lambda source: progress.update(
                         fetch_task, advance=1, description=f"Fetched {source}"
                     ),
@@ -1603,7 +1622,10 @@ class TomogramSpecimenGenerator:
             for spec in specs_here:
                 if spec.pdb_source not in pdb_cache:
                     pdb_cache[spec.pdb_source] = PDB(
-                        spec.pdb_source, savefolder=self.pdb_cache_dir, verbose=False
+                        spec.pdb_source,
+                        savefolder=self.pdb_cache_dir,
+                        verbose=False,
+                        compute_atom_species=_wants_atom_species(self.parameterization),
                     )
                 pdbs_by_source[spec.pdb_source] = pdb_cache[spec.pdb_source]
 
@@ -2290,7 +2312,10 @@ class TomogramSpecimenGenerator:
         for code in by_code:
             if code not in pdb_cache:
                 pdb_cache[code] = PDB(
-                    code, savefolder=self.pdb_cache_dir, verbose=False
+                    code,
+                    savefolder=self.pdb_cache_dir,
+                    verbose=False,
+                    compute_atom_species=_wants_atom_species(self.parameterization),
                 )
             pdb = pdb_cache[code]
             n = estimate_protein_box_size(pdb.max_diameter, voxel_size)
@@ -2300,6 +2325,8 @@ class TomogramSpecimenGenerator:
                 atomic_numbers=pdb.atomic_numbers,
                 progressbars=False,
                 parameterization=self.parameterization,
+                # Rotation-only, so species stay aligned with coordinates.
+                atom_species=pdb.atom_species,
             ).to(self.device)
             coordinates = (
                 align_principal_axis_to_z(pdb.coordinates)
@@ -2618,6 +2645,7 @@ class TomogramSpecimenGenerator:
             atomic_numbers=pdb.atomic_numbers,
             progressbars=False,
             parameterization=self.parameterization,
+            atom_species=pdb.atom_species,
         ).to(device)
         return builder.forward(pdb.coordinates, method="analytic").to(self.device)
 

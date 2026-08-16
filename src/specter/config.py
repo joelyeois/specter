@@ -143,11 +143,13 @@ class ParticleStackConfig:
     `specter.cli.simulate`'s panel layout): the first block is what most runs
     actually tune; everything under "Advanced" exists but is rarely touched.
 
-    Set `cs_path` to drive generation from a CryoSPARC .cs file instead of
-    randomly-sampled poses/CTF: `pixel_size`, `voltage`, `alpha`, defocus, and
-    shifts are then read from the .cs file at run time via
-    `extract_parameters_from_csfile` and take precedence over the
-    corresponding fields below, which are unused in that mode.
+    Set `cs_path` (CryoSPARC .cs) or `star_path` (RELION .star) to drive
+    generation from a real dataset instead of randomly-sampled poses/CTF:
+    `pixel_size`, `voltage`, `alpha`, defocus, and shifts are then read from
+    that file at run time via `extract_parameters_from_csfile` /
+    `extract_parameters_from_starfile` and take precedence over the
+    corresponding fields below, which are unused in that mode. The two are
+    mutually exclusive.
 
     `dose`, `defocus`, `coincidence_radius`, `potential_scale` and the
     aberration-richness fields each take either a single number (e.g. ``20``,
@@ -203,8 +205,9 @@ class ParticleStackConfig:
     # Relative to the current working directory, like any other CLI path
     # argument -- see default_pdb_cache_dir for the unset case.
     pdb_savefolder: str = field(default_factory=default_pdb_cache_dir)
-    # if set, poses/CTF/pixel_size/voltage/alpha come from here
+    # if set, poses/CTF/pixel_size/voltage/alpha come from here (pick one)
     cs_path: str | None = None
+    star_path: str | None = None
     n_frames: int | None = None
     convergence_angle: float | None = None  # mrad
     cc: float | None = None  # mm
@@ -321,6 +324,9 @@ PARTICLE_STACK_HELP: dict[str, str] = {
     "pdb_savefolder": "Folder to cache downloaded PDB files.",
     "cs_path": "Path to a CryoSPARC .cs file to drive generation from real "
     "pixel_size/voltage/alpha/poses/CTF instead of random sampling.",
+    "star_path": "Path to a RELION .star file to drive generation from real "
+    "pixel_size/voltage/alpha/poses/CTF instead of random sampling. Mutually "
+    "exclusive with --cs_path.",
     "n_frames": "Number of movie frames. Defaults to int(dose) if not set.",
     "convergence_angle": "Beam convergence semi-angle in mrad, for the Cs "
     "(spatial coherence) envelope.",

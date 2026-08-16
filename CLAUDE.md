@@ -234,7 +234,7 @@ src/specter/                  # Main source package
     _cryosparc.py               # extract_parameters_from_csfile() — reads CryoSPARC .cs files
     _relion.py                   # RELION .star read/write: extract_parameters_from_starfile(), create_particle_starfile[_from_model](), create_micrograph_starfile()
     _common.py                   # _select_particles() — shared per-particle mask/truncate helper for both backends
-  config.py                   # ParticleStackConfig/MicrographConfig/TiltSeriesConfig/TomogramConfig dataclasses + load_config()/apply_overrides() for TOML-driven runs (shared by demo-scripts/ and cli/)
+  config.py                   # ParticleStackConfig/MicrographConfig/TiltSeriesConfig/TomogramConfig dataclasses + load_config()/apply_overrides() for TOML-driven runs (shared by cli/ and direct Python callers)
   plots.py                    # Plotting helpers
   progress.py                 # Progress bar management (ProgressManager)
   random_seed.py              # Global seed control (exported as specter.seed)
@@ -252,13 +252,13 @@ demo-notebooks/               # User-facing, always kept working
                                 # (plus standalone notebooks with no paired TOML, e.g.
                                 # generate-and-reconstruct.ipynb, coordinates-to-images.ipynb,
                                 # compare-atomic-potentials-with-kirkland.ipynb)
-demo-scripts/                 # Ready-to-run command-line scripts (generate_particle_stack_from_csfile.py,
-                              # generate_particle_stack_from_starfile.py, ghostbuster_reconstruct.py) — plain
-                              # particle-stack generation now lives in the `specter simulate particles` CLI
-                              # instead of a demo-script, plain micrograph generation likewise lives in
-                              # `specter simulate micrograph`, and tilt-series generation likewise lives in
-                              # `specter build tomogram` + `specter simulate tiltseries` instead of a demo-script
-configs/                      # TOML config files consumed by demo-scripts/ and the `specter` CLI (flat, not nested)
+demo-scripts/                 # Ready-to-run command-line scripts (ghostbuster_reconstruct.py only, now that
+                              # reconstruction is the one workflow with no CLI subcommand). Every generation
+                              # workflow lives in the `specter` CLI instead: particle stacks (synthetic OR
+                              # driven from a real .cs/.star via cs_path/star_path) in `specter simulate
+                              # particles`, micrographs in `specter simulate micrograph`, and tilt series in
+                              # `specter build tomogram` + `specter simulate tiltseries`
+configs/                      # TOML config files consumed by the `specter` CLI (flat, not nested)
   particle.toml                # canonical defaults for `specter simulate particles`
   micrograph.toml              # canonical defaults for `specter simulate micrograph`
   tilt_series.toml             # canonical defaults for `specter simulate tiltseries`

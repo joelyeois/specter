@@ -53,6 +53,7 @@ _PARTICLE_STACK_GROUPS: list[tuple[str, list[str]]] = [
         [
             "pdb_savefolder",
             "cs_path",
+            "star_path",
             "n_frames",
             "convergence_angle",
             "cc",

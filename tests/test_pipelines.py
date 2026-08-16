@@ -4,6 +4,8 @@ from pathlib import Path
 
 import mrcfile
 import numpy as np
+import pandas as pd
+import pytest
 import starfile
 from cryosparc.dataset import Dataset
 
@@ -86,6 +88,88 @@ def test_run_particle_stack_from_csfile(tmp_path: Path) -> None:
     assert df["rlnAmplitudeContrast"].iloc[0] == _ALPHA
     assert df["rlnDefocusU"].iloc[0] == _DFU_A
     assert df["rlnDefocusV"].iloc[0] == _DFV_A
+
+
+def _write_minimal_starfile(path: Path, n: int) -> None:
+    """A single-block RELION .star with every column _load_starfile_parameters reads."""
+    starfile.write(
+        pd.DataFrame(
+            {
+                "rlnVoltage": np.full(n, _VOLTAGE_KV),
+                "rlnImagePixelSize": np.full(n, _PIXEL_SIZE_A),
+                "rlnAmplitudeContrast": np.full(n, _ALPHA),
+                "rlnSphericalAberration": np.full(n, _CS_MM),
+                "rlnDefocusU": np.full(n, _DFU_A),
+                "rlnDefocusV": np.full(n, _DFV_A),
+                "rlnDefocusAngle": np.zeros(n),
+                "rlnPhaseShift": np.zeros(n),
+                "rlnAngleRot": np.zeros(n),
+                "rlnAngleTilt": np.zeros(n),
+                "rlnAnglePsi": np.zeros(n),
+                "rlnOriginXAngst": np.zeros(n),
+                "rlnOriginYAngst": np.zeros(n),
+            }
+        ),
+        path,
+        overwrite=True,
+    )
+
+
+def test_run_particle_stack_from_starfile(tmp_path: Path) -> None:
+    """star_path is the RELION counterpart of cs_path -- same code path in
+    src/specter/pipelines/_particles.py, fed by
+    `extract_parameters_from_starfile` instead, which returns the same
+    10-tuple.
+    """
+    star_path = tmp_path / "minimal.star"
+    _write_minimal_starfile(star_path, n=5)
+
+    config = ParticleStackConfig(
+        pdb_code="6bdf",
+        n_pixels=64,
+        star_path=str(star_path),
+        n_particles=5,
+        scattering_model="projection",
+        ice_model="none",
+        detector_model="none",
+        device="cpu",
+        batchsize=5,
+        output_dir=str(tmp_path),
+        filename="star_particles",
+    )
+    run_particle_stack(config)
+
+    with mrcfile.open(tmp_path / "star_particles.mrcs") as mrc:
+        assert mrc.data.shape == (5, 64, 64)
+
+    df = starfile.read(tmp_path / "star_particles.star")
+    assert len(df) == 5
+    # These come from the input .star file, not ParticleStackConfig's defaults.
+    assert df["rlnVoltage"].iloc[0] == _VOLTAGE_KV
+    assert df["rlnSphericalAberration"].iloc[0] == _CS_MM
+    assert abs(df["rlnImagePixelSize"].iloc[0] - _PIXEL_SIZE_A) < 1e-4
+    assert df["rlnAmplitudeContrast"].iloc[0] == _ALPHA
+    assert df["rlnDefocusU"].iloc[0] == _DFU_A
+    assert df["rlnDefocusV"].iloc[0] == _DFV_A
+
+
+def test_run_particle_stack_rejects_both_cs_and_star_path(tmp_path: Path) -> None:
+    """The two dataset sources are mutually exclusive -- silently preferring
+    one would make the ignored flag look like it had been applied.
+    """
+    cs_path = tmp_path / "minimal.cs"
+    _write_minimal_csfile(cs_path, n=5)
+    star_path = tmp_path / "minimal.star"
+    _write_minimal_starfile(star_path, n=5)
+
+    config = ParticleStackConfig(
+        pdb_code="6bdf",
+        cs_path=str(cs_path),
+        star_path=str(star_path),
+        output_dir=str(tmp_path),
+    )
+    with pytest.raises(ValueError, match="can't both be set"):
+        run_particle_stack(config)
 
 
 def test_run_particle_stack_applies_tetrafoil(tmp_path: Path) -> None:

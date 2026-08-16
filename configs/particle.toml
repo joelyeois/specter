@@ -41,6 +41,7 @@ filename = "particles"
 [advanced]
 pdb_savefolder = "specter-data/pdb"  # relative to your working directory
 # cs_path = "path/to/particles.cs"  # uncomment to drive generation from a CryoSPARC .cs file
+# star_path = "path/to/particles.star"  # ... or from a RELION .star file (mutually exclusive with cs_path)
 # n_frames = 20                # frames, uncomment to override default (int(dose) if None)
 # convergence_angle = 1.0       # mrad, uncomment to enable the Cs envelope
 # cc = 2.0                      # mm, uncomment to enable the Cc envelope

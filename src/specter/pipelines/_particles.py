@@ -20,7 +20,11 @@ from specter.config import ParticleStackConfig
 from specter.ice import resolve_icemaker
 from specter.image import normalize_particles
 from specter.imagegenerator import ImageGenerator
-from specter.io import create_particle_starfile, extract_parameters_from_csfile
+from specter.io import (
+    create_particle_starfile,
+    extract_parameters_from_csfile,
+    extract_parameters_from_starfile,
+)
 from specter.memory import (
     available_memory_bytes,
     estimate_peak_bytes,
@@ -54,8 +58,16 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
         :func:`specter.config.load_config`, or constructed directly in
         Python. Poses, defocus, dose, coincidence radius, and potential
         scale are all randomly sampled per particle from the ranges given
-        in ``config``.
+        in ``config``, unless ``config.cs_path``/``config.star_path`` points
+        at a real dataset to take poses and CTF from instead.
     """
+    if config.cs_path is not None and config.star_path is not None:
+        raise ValueError(
+            "run_particle_stack: cs_path and star_path can't both be set -- "
+            "pass exactly one dataset to take poses/CTF from, or neither to "
+            "sample them synthetically."
+        )
+
     specter.set_verbosity(logging.INFO)
 
     mode, device_target = _parse_device(config.device)
@@ -91,24 +103,32 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
         compute_atom_species=_derive_atom_species,
     )
 
-    # pixel_size/voltage/alpha come from the .cs file when cs_path is set --
-    # extract once, up front, since PotentialBuilder below needs the resolved
-    # pixel_size (matches ImageGeneratorFromCoordinates' notebook counterpart).
-    cs_particles = None
+    # pixel_size/voltage/alpha come from the dataset when cs_path/star_path is
+    # set -- extract once, up front, since PotentialBuilder below needs the
+    # resolved pixel_size (matches ImageGeneratorFromCoordinates' notebook
+    # counterpart). Both extractors return the same 10-tuple, so everything
+    # downstream is agnostic to which file format it came from.
+    dataset_particles = None
     if config.cs_path is not None:
-        cs_particles = extract_parameters_from_csfile(
+        dataset_particles = extract_parameters_from_csfile(
             config.cs_path, n_particles=config.n_particles
         )
-        pixel_size = cs_particles[1].item()
-        voltage = cs_particles[0].item()
-        alpha = cs_particles[2].item()
+    elif config.star_path is not None:
+        dataset_particles = extract_parameters_from_starfile(
+            config.star_path, n_particles=config.n_particles
+        )
+
+    if dataset_particles is not None:
+        pixel_size = dataset_particles[1].item()
+        voltage = dataset_particles[0].item()
+        alpha = dataset_particles[2].item()
     else:
         pixel_size = config.pixel_size
         voltage = config.voltage
         alpha = config.alpha
 
     # Convert cs from mm -> Angstrom (1 mm = 1e7 Angstrom); unused when
-    # cs_path is set, since Cs then comes per-particle from the .cs file.
+    # cs_path/star_path is set, since Cs then comes per-particle from the file.
     cs_angstrom = config.cs * 1e7
 
     # Only the main process (always global rank 0 for this single-node launcher)
@@ -139,10 +159,11 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
     if is_main:
         _section("Sampling poses, defocus, and translations")
 
-    if cs_particles is not None:
-        # Poses/CTF/translations/anisomag come straight from the .cs file --
-        # dose, coincidence radius, and potential scale still aren't part of
-        # a CryoSPARC passthrough .cs, so those three are still sampled below.
+    if dataset_particles is not None:
+        # Poses/CTF/translations/anisomag come straight from the dataset --
+        # dose, coincidence radius, and potential scale aren't recorded in
+        # either a CryoSPARC passthrough .cs or a RELION .star, so those three
+        # are still sampled below.
         (
             _,
             _,
@@ -154,7 +175,7 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
             anisomag,
             _indices,
             _split,
-        ) = cs_particles
+        ) = dataset_particles
         n = quats.shape[0]
     else:
         n = config.n_particles

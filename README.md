@@ -40,6 +40,8 @@ reconstruction, and job management — lives in the docs:
 
 **[joelyeois.github.io/specter](https://joelyeois.github.io/specter/)**
 
-Ready-to-run CLI scripts are in `demo-scripts/`; interactive notebooks are
-in `demo-notebooks/`.
+Simulation is driven by the `specter` command (`specter simulate particles`,
+`micrograph`, `tiltseries`, `specter build tomogram`); interactive notebooks
+are in `demo-notebooks/`, and `demo-scripts/` holds the few workflows that
+aren't CLI subcommands yet.
 

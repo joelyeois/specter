@@ -104,6 +104,11 @@ specter simulate particles \
     --device cuda:0
 ```
 
+Pass `--star_path particles.star` instead of `--cs_path` to drive the same
+code path from a RELION `.star` file — both the single-block layout specter
+itself writes and the RELION 3.1+ two-block (`optics` + `particles`) layout
+are read. The two flags are mutually exclusive.
+
 `docs-figures/data/empiar-11377-passthrough-5particles.cs` is a 5-row slice
 of a real passthrough `.cs` file from
 [EMPIAR-11377](https://www.ebi.ac.uk/empiar/EMPIAR-11377/), a translating

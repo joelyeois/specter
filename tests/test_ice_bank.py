@@ -356,8 +356,9 @@ def test_blend_ice_into_volume_random_icemaker_noncubic_nxy_nz():
     """
     blend_ice_into_volume's docstring states that a RandomIcemaker's own
     fixed (n, dx, nz) "must already match V" -- it has no tiling support,
-    unlike IceBank. Regression test for a real bug found in
-    demo-scripts/generate_micrograph.py and the matching notebook: both
+    unlike IceBank. Regression test for a real bug found in the micrograph
+    pipeline (then demo-scripts/generate_micrograph.py, now
+    specter.pipelines.run_micrograph) and the matching notebook: both
     constructed RandomIcemaker with n=config.n_pixels (the separate,
     usually much smaller, particle-potential resolution) instead of
     n=config.micrograph_size, and relied on RandomIcemaker's nz defaulting

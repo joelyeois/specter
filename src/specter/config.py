@@ -474,7 +474,7 @@ class MicrographConfig:
     )
     aberration_model: Literal["holography", "ctf"] = "holography"
     noise_model: Literal["poisson", "none"] = "poisson"
-    coincidence_radius: ScalarOrRange = 0.7181  # pixels (effective exclusion radius)
+    coincidence_radius: ScalarOrRange = 0.0  # pixels; 0 = plain Poisson
     ice_model: Literal["gd", "random", "none"] = "gd"
     ice_thickness: float = 500.0  # Å, 0 = minimum (particle box size)
     ice_cache_dir: str | None = None  # defaults to the bundled ice-data/ice_cache

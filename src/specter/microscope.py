@@ -449,14 +449,26 @@ class Detector(L.LightningModule):
                 "coincidence loss (coincidence_radius > 0)."
             )
         n_frames = self.n_frames
-        intensity_map = img / img.sum()
 
-        # Use img.sum() to derive the effective dose so that the radius>0 path
+        # Clamp before normalizing, matching the coincidence_radius<=0 branch
+        # above -- otherwise any negative pixel survives the division below.
+        img = torch.clamp(img, min=0.0)
+        img_sum = img.sum()
+        if img_sum <= 0.0:
+            # No expected electrons anywhere (e.g. an all-zero specimen
+            # volume -- can happen with scattering_model="ctf", which has no
+            # vacuum baseline, unlike multislice's exp(i*sigma*dz*V) == 1 at
+            # V=0). img / img_sum would be 0/0 = NaN here; the physically
+            # correct output for zero expected signal is a blank frame.
+            return torch.zeros_like(img)
+        intensity_map = img / img_sum
+
+        # Use img_sum to derive the effective dose so that the radius>0 path
         # agrees with torch.poisson(img) at radius=0: both correctly account
         # for real electron absorption from alpha (imaginary potential), and
         # B-factor attenuation is treated consistently across both paths.
         dose_effective = (
-            img.sum() / (self.pixel_size**2 * img.shape[0] * img.shape[1])
+            img_sum / (self.pixel_size**2 * img.shape[0] * img.shape[1])
         ).item()
 
         final_image = torch.zeros_like(img)

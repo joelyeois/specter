@@ -125,6 +125,31 @@ def test_zero_radius_disables_coincidence_loss() -> None:
     assert out.mean().item() == pytest.approx(img.mean().item(), rel=0.05)
 
 
+def test_positive_radius_all_zero_image_returns_blank_frame() -> None:
+    """
+    Regression test: an all-zero image with coincidence_radius > 0 used to
+    compute ``intensity_map = img / img.sum()`` with no guard for
+    ``img.sum() == 0``, i.e. ``0/0 = NaN`` -- which torch.poisson then
+    rejected with "invalid Poisson rate, expected rate to be non-negative"
+    (NaN fails the same >=0 check a genuine negative rate would). An
+    all-zero image is a real, reachable case: e.g. scattering_model="ctf"
+    has no vacuum baseline (unlike multislice's exp(i*sigma*dz*V) == 1 at
+    V=0), so an entirely empty specimen volume (e.g. a rare zero-particle-
+    placement draw from crowding) produces an exactly-zero image. The
+    physically correct output for zero expected signal is a blank frame,
+    not an exception.
+    """
+    detector = Detector(
+        pixel_size=1.0, noise_model="poisson", n_frames=4, progressbars=False
+    )
+    img = torch.zeros((64, 64))
+
+    out = detector.apply_coincidence(img.clone(), dose=1.0, coincidence_radius=0.7181)
+
+    assert torch.isfinite(out).all()
+    assert (out == 0).all()
+
+
 def test_larger_radius_loses_more_electrons() -> None:
     """Monotonicity: a bigger exclusion disc must suppress strictly more."""
     n0 = N0

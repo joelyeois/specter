@@ -15,6 +15,7 @@ from specter.config import (
     TomogramConfig,
     apply_overrides,
     load_config,
+    validate_config,
     parse_scalar_or_range,
 )
 
@@ -390,3 +391,104 @@ def test_shipped_particle_config_leaves_ice_parameterization_unset() -> None:
     """configs/particle.toml must not pin it, or the following above is dead."""
     config = load_config(str(REPO_ROOT / "configs" / "particle.toml"))
     assert config.ice_parameterization is None
+
+
+# --- validation -----------------------------------------------------------
+# Every one of these used to reach the simulation. The numeric ones surfaced
+# ~10 s later as ZeroDivisionError / "tensor with negative dimension" /
+# "cannot convert float NaN to integer", naming nothing the user typed; the
+# rest ran to completion and produced a plausible-looking, meaningless result.
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("n_pixels", 0),
+        ("n_pixels", -32),
+        ("pixel_size", 0.0),
+        ("pixel_size", -1.0),
+        ("n_particles", 0),
+        ("n_particles", -5),
+        ("voltage", 0.0),
+        ("voltage", -300.0),
+        ("dose", 0.0),
+        ("dose", -20.0),
+        ("alpha", -0.1),
+        ("alpha", 1.5),
+        ("cs", -2.0),
+        ("ice_thickness", -100.0),
+        ("batchsize", 0),
+        ("batchsize", -4),
+    ],
+)
+def test_validate_rejects_impossible_values(field: str, value: object) -> None:
+    config = ParticleStackConfig(pdb_code="6bdf")
+    setattr(config, field, value)
+    with pytest.raises(ValueError, match=field):
+        validate_config(config)
+
+
+@pytest.mark.parametrize("field,value", [("dose", "60,20"), ("defocus", "15000,5000")])
+def test_validate_rejects_reversed_ranges(field: str, value: str) -> None:
+    """`--dose 60,20` sampled between 60 and 20, silently giving nothing like
+    the intended range."""
+    config = ParticleStackConfig(pdb_code="6bdf")
+    setattr(config, field, value)
+    with pytest.raises(ValueError, match="reversed"):
+        validate_config(config)
+
+
+def test_validate_rejects_invalid_literal_from_toml(tmp_path: Path) -> None:
+    """
+    Click validates a --flag against its Choice; a TOML file bypasses that.
+
+    Nothing enforces a `Literal` at runtime, so `scattering_model = "banana"`
+    in a config file used to sail through to the simulator.
+    """
+    path = _write_toml(
+        tmp_path,
+        """
+        [models]
+        pdb_code = "6bdf"
+        scattering_model = "banana"
+        """,
+    )
+    config = load_config(path)
+    with pytest.raises(ValueError, match="scattering_model"):
+        validate_config(config)
+
+
+def test_validate_rejects_missing_input_files(tmp_path: Path) -> None:
+    config = ParticleStackConfig(pdb_code="6bdf")
+    config.cs_path = str(tmp_path / "nope.cs")
+    with pytest.raises(ValueError, match="cs_path"):
+        validate_config(config)
+
+
+def test_validate_accepts_list_valued_fields() -> None:
+    """
+    Scalar bounds must skip fields holding a pair or a list of specs.
+
+    bead_roughness is "one number, or a [low, high] pair", and `[0.0, 0.2] < 0`
+    is a TypeError rather than a check -- which is exactly how the first
+    version of this validation failed.
+    """
+    config = TomogramConfig()
+    config.bead_roughness = [0.0, 0.2]
+    validate_config(config)
+
+    config.bead_roughness = [-0.5, 0.2]
+    with pytest.raises(ValueError, match="bead_roughness"):
+        validate_config(config)
+
+
+def test_validate_accepts_every_shipped_config() -> None:
+    """The configs specter ships must themselves pass validation."""
+    for name, cls in (
+        ("particle.toml", ParticleStackConfig),
+        ("micrograph.toml", MicrographConfig),
+        ("tilt_series.toml", TiltSeriesConfig),
+        ("tomogram.toml", TomogramConfig),
+    ):
+        config = load_config(str(REPO_ROOT / "configs" / name), cls)
+        validate_config(config)

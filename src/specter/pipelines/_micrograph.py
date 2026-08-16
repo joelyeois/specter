@@ -24,7 +24,7 @@ import torch
 
 import specter
 from specter.arrays import compute_nz
-from specter.config import MicrographConfig
+from specter.config import MicrographConfig, validate_config
 from specter.ice import resolve_icemaker
 from specter.imagegenerator import MicrographGenerator
 from specter.io import create_micrograph_starfile
@@ -55,6 +55,8 @@ def run_micrograph(config: MicrographConfig) -> None:
         Python. Defocus, dose, coincidence radius, and potential scale are
         randomly sampled per micrograph from the ranges given in ``config``.
     """
+    validate_config(config)
+
     specter.set_verbosity(logging.INFO)
     t_start = time.perf_counter()
 

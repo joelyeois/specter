@@ -31,7 +31,7 @@ import time
 
 import torch
 
-from specter.config import TomogramConfig
+from specter.config import TomogramConfig, validate_config
 from specter.specimen import (
     ACTIN_SPEC,
     CRYOETSIM_PARTICLE_TABLE,
@@ -109,6 +109,15 @@ def run_build_tomogram(config: TomogramConfig, n_tomograms: int = 1) -> None:
         is ``None``, each call simply draws from wherever the global RNG
         state already is, which likewise differs run to run.
     """
+    # n_tomograms is a call argument rather than a config field, so
+    # validate_config never sees it.
+    if n_tomograms <= 0:
+        raise ValueError(
+            f"n_tomograms={n_tomograms} is invalid: must be greater than 0."
+        )
+
+    validate_config(config)
+
     has_species_source = bool(
         config.targets
         or config.filler

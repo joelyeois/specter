@@ -320,7 +320,7 @@ MICROGRAPH = CommandSpec(
     config_path="configs/micrograph.toml",
 )
 
-# Built once by `specter build tomogram` with dev/cli_qa/qa_tomogram.toml.
+# Built once by `specter build tomogram` with qa/qa_tomogram.toml.
 # `specter simulate tiltseries` needs a specimen volume to image. Built once by
 # `qa/sweep.py tomogram` (or by hand from qa_tomogram.toml) and left where the
 # tomogram sweep writes it; $SPECTER_QA_VOLUME overrides.
@@ -404,7 +404,7 @@ TILTSERIES = CommandSpec(
 
 _TOMOGRAM_BASELINE = [
     "--config",
-    "dev/cli_qa/qa_tomogram.toml",
+    "qa/qa_tomogram.toml",
     "--n_tomograms",
     "1",
     "--voxel_size",
@@ -464,7 +464,7 @@ TOMOGRAM = CommandSpec(
     ],
     timeout=3600.0,
     config_cls=TomogramConfig,
-    config_path="dev/cli_qa/qa_tomogram.toml",
+    config_path="qa/qa_tomogram.toml",
 )
 
 SPECS = {s.key: s for s in (PARTICLES, MICROGRAPH, TILTSERIES, TOMOGRAM)}

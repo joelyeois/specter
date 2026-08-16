@@ -115,9 +115,9 @@ mirroring the particles pipeline (fixed seed used, else generated and logged).
 ## Reproducing
 
 ```bash
-python dev/cli_qa/sweep.py particles --workers 24
-python dev/cli_qa/sweep.py all
+python qa/sweep.py particles --workers 24
+python qa/sweep.py all
 ```
 
 Runs are single-threaded so the baseline is bit-reproducible; parallelism comes
-from running many at once. Results land in `dev/cli_qa/results/<command>.json`.
+from running many at once. Results land in `qa/results/<command>.json`.

@@ -16,7 +16,7 @@ import torch
 import specter
 from specter import rotations
 from specter.arrays import compute_nz
-from specter.config import ParticleStackConfig
+from specter.config import ParticleStackConfig, validate_config
 from specter.ice import resolve_icemaker
 from specter.image import normalize_particles
 from specter.imagegenerator import ImageGenerator
@@ -67,6 +67,8 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
             "pass exactly one dataset to take poses/CTF from, or neither to "
             "sample them synthetically."
         )
+
+    validate_config(config)
 
     specter.set_verbosity(logging.INFO)
 

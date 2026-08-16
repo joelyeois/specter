@@ -17,7 +17,7 @@ import time
 import torch
 
 import specter
-from specter.config import TiltSeriesConfig, TomogramConfig
+from specter.config import TiltSeriesConfig, TomogramConfig, validate_config
 from specter.imagegenerator import TiltSeriesGenerator
 from specter.io import create_micrograph_starfile
 from specter.specimen import load_specimen_volume
@@ -79,6 +79,8 @@ def run_tilt_series(
             "build tomogram`, or pass tomogram_config to build one as "
             "part of this call."
         )
+
+    validate_config(config)
 
     specter.set_verbosity(logging.INFO)
     mode, device_target = _parse_device(config.device)

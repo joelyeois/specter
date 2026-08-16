@@ -17,9 +17,11 @@ from specter.atom import (
 from specter.potential import (
     GemmiPotentialBuilder,
     PotentialBuilder,
+    build_atomic_potential_kernel,
     build_potential_volume_analytic_scatter_kirkland,
     build_potential_volume_analytic_scatter_lobato,
     build_potential_volume_fftconvolve_3d,
+    potential_from_deltas,
     recommended_rcut,
 )
 
@@ -919,3 +921,72 @@ def test_potential_builder_analytic_rejects_periodic():
     # '3d' should still work fine with periodic=True.
     vol = pb.forward(coords, method="3d")
     assert torch.isfinite(vol).all()
+
+
+@pytest.mark.parametrize("parameterization", ["kirkland", "lobato"])
+def test_potential_builder_kernels_match_standalone_builder(parameterization):
+    """
+    PotentialBuilder's per-element kernels are the standalone helper's output.
+
+    The ice and gold-bead generators call `build_atomic_potential_kernel`
+    directly for their single fixed species, while PotentialBuilder assembles
+    a stack of them for a structure. Both used to construct the kernel with
+    their own copy of the supersample -> sample -> bin recipe; this pins them
+    to one implementation so they cannot silently diverge again.
+    """
+    atomic_numbers = torch.tensor([6, 7, 8, 16])
+    pb = PotentialBuilder(
+        32, 1.0, atomic_numbers, parameterization=parameterization, progressbars=False
+    )
+    for i, z in enumerate(pb.unique_elements.tolist()):
+        direct = build_atomic_potential_kernel(
+            1.0, parameterization=parameterization, atomic_number=int(z)
+        )
+        assert torch.equal(pb.atomic_potentials_3d[i], direct), (
+            f"{parameterization} Z={int(z)} kernel differs between "
+            "PotentialBuilder and build_atomic_potential_kernel"
+        )
+
+
+def test_build_atomic_potential_kernel_rejects_unknown_parameterization():
+    with pytest.raises(ValueError, match="Unknown parameterization"):
+        build_atomic_potential_kernel(1.0, parameterization="nonesuch")
+
+
+@pytest.mark.parametrize("dx", [1.0, 1.5])
+def test_conv_backends_agree_including_even_kernels(dx):
+    """
+    'fftconvolve' and 'conv3d' must produce the same potential.
+
+    conv3d used to be F.conv3d(padding="same"), which pads asymmetrically
+    relative to fftconvolve's centered crop whenever the kernel has an even
+    number of voxels -- shifting the potential half a voxel off the
+    coordinates it was built from. dx=1.5 gives a 4-voxel kernel and used to
+    disagree by ~3.5 (against a signal max of ~4.3); dx=1.0 gives a 5-voxel
+    kernel and always agreed. Even kernels occur for 20 of the 36 pixel sizes
+    between 0.5 and 4.0 A, so this is the common case, not the exotic one.
+    """
+    torch.manual_seed(0)
+    atomic_numbers = torch.tensor([6, 7, 8, 8, 7, 6])
+    coords = (torch.rand(6, 3) - 0.5) * 20
+
+    out = {}
+    for backend in ("fftconvolve", "conv3d"):
+        pb = PotentialBuilder(
+            24,
+            dx,
+            atomic_numbers,
+            parameterization="kirkland",
+            conv_backend=backend,
+            progressbars=False,
+        )
+        out[backend] = pb(coords, method="3d")
+
+    torch.testing.assert_close(out["fftconvolve"], out["conv3d"], atol=1e-4, rtol=1e-4)
+
+
+def test_potential_from_deltas_rejects_unknown_backend():
+    with pytest.raises(ValueError, match="Unknown backend"):
+        potential_from_deltas(
+            torch.zeros(1, 4, 4, 4), torch.ones(3, 3, 3), backend="nope"
+        )

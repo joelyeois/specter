@@ -11,8 +11,8 @@ from ..fft import fft3, fftconvolve
 from ..progress import ProgressManager, track
 from ._energy import MLBOP
 from ._helpers import ndensity_of_amorphous_ice
+from ..potential import build_atomic_potential_kernel
 from ._kernels import (
-    build_atomic_potential_kernel,
     compute_native_target,
     ice_kspace_radial_grid,
     interpolate_target_kernel,

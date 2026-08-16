@@ -36,7 +36,7 @@ from .atom import (
     shtyrov_atomic_potential_3d_by_species,
     yukawa_shell_average,
 )
-from .fft import fftconvolve
+from .fft import fftconvolve, spatial_convolve3d_same
 
 
 def compute_supersampling_parameters(
@@ -767,6 +767,148 @@ def recommended_rcut(
     )
 
 
+def potential_from_deltas(
+    deltas: torch.Tensor,
+    kernel: torch.Tensor,
+    backend: str = "fftconvolve",
+) -> torch.Tensor:
+    """
+    Convolve soft-voxelized atom deltas with an atomic potential kernel.
+
+    The second half of the voxelize-then-convolve recipe, shared by
+    :meth:`PotentialBuilder.forward` (``method='3d'``, once per element) and
+    :meth:`specter.ice.IceBank.generate_big_ice` (once, for its single water
+    kernel) so both assemble a potential the same way by construction.
+
+    Parameters
+    ----------
+    deltas : torch.Tensor
+        Soft-voxelized occupancy, shape (B, Z, Y, X) or (Z, Y, X).
+    kernel : torch.Tensor
+        Atomic potential kernel, shape (kz, ky, kx) -- see
+        :func:`build_atomic_potential_kernel`.
+    backend : str, optional
+        ``'fftconvolve'`` (default) transforms the whole volume; ``'conv3d'``
+        convolves directly, at a cost that scales with the kernel rather than
+        the volume, which wins for the small kernels used here. The two agree
+        exactly -- :func:`specter.fft.spatial_convolve3d_same` reproduces
+        ``fftconvolve``'s centered-crop convention, including for
+        even-sized kernels.
+
+    Returns
+    -------
+    torch.Tensor
+        Potential contribution, same shape as `deltas`.
+    """
+    squeeze_back = deltas.dim() == 3
+    if squeeze_back:
+        deltas = deltas[None]
+
+    if backend == "fftconvolve":
+        out = torch.stack(
+            [fftconvolve(deltas[b], kernel, mode="same") for b in range(len(deltas))]
+        )
+    elif backend == "conv3d":
+        # Deliberately not F.conv3d(padding="same"): for an even-sized kernel
+        # that pads asymmetrically relative to fftconvolve's centered crop,
+        # shifting the potential half a voxel off the coordinates it was built
+        # from. Even kernels are not exotic -- they occur for 20 of the 36
+        # pixel sizes between 0.5 and 4.0 A, including 1.0-1.7 A.
+        out = spatial_convolve3d_same(deltas, kernel)
+    else:
+        raise ValueError(
+            f"Unknown backend '{backend}'. Choose 'fftconvolve' or 'conv3d'."
+        )
+
+    return out[0] if squeeze_back else out
+
+
+def build_atomic_potential_kernel(
+    dx: float,
+    parameterization: str = "kirkland",
+    atomic_number: int = 8,
+    shtyrov_species: str = "O(HH)",
+    species_table: dict | None = None,
+    *,
+    sR: torch.Tensor | None = None,
+    avgpool3d: torch.nn.Module | None = None,
+    ssf: int | None = None,
+) -> torch.Tensor:
+    """
+    Build the real-space potential kernel for a single element or bonded species.
+
+    This is the one place a scattering-potential kernel gets sampled and
+    binned down to the target grid. :class:`PotentialBuilder` calls it once
+    per element/species when assembling a structure's kernel stack, and the
+    ice and gold-bead generators call it for their single fixed species --
+    so every kernel in specter comes from the same code by construction
+    rather than by convention.
+
+    Parameters
+    ----------
+    dx : float
+        Voxel size in Å. Ignored when `sR`/`avgpool3d`/`ssf` are supplied.
+    parameterization : str, optional
+        ``'kirkland'`` (default), ``'lobato'``, ``'peng'``, or ``'shtyrov'``.
+        ``'peng'`` is the per-element fallback used for atoms with no
+        matching Shtyrov bonded species.
+    atomic_number : int, optional
+        Atomic number, used by every branch except ``'shtyrov'``. Default 8
+        (oxygen), the ice use case this was originally written for.
+    shtyrov_species : str, optional
+        Bonded species key (Shtyrov parameterizes bonded species, not bare
+        atomic numbers). Default ``"O(HH)"`` (water oxygen).
+    species_table : dict, optional
+        Pre-loaded Shtyrov species parameters. Loaded from the bundled
+        ``params_cat.json`` if omitted -- pass one to honour a custom
+        ``shtyrov_params_path``, or just to avoid re-reading the file per
+        species.
+    sR : torch.Tensor, optional
+        Pre-computed super-sampled radial grid. Supply it (with `avgpool3d`
+        and `ssf`) to reuse a caller's own grid instead of rebuilding one
+        per call -- what `PotentialBuilder` does, since it holds `sR_3d` as
+        a registered buffer and shares it across every element.
+    avgpool3d : torch.nn.Module, optional
+        Pooling layer that bins the super-sampled kernel down to `dx`.
+    ssf : int, optional
+        Super-sampling factor; pooling is skipped when it is 1.
+
+    Returns
+    -------
+    torch.Tensor
+        Potential kernel volume, downsampled to the target grid.
+    """
+    if sR is None or avgpool3d is None or ssf is None:
+        ssn, ssdx, ssf = compute_supersampling_parameters(dx)
+        # torch convention avoids the singularity at the origin
+        sR = radial_grid_3d(ssn, ssdx, convention="torch")
+        avgpool3d = torch.nn.AvgPool3d(ssf, stride=ssf)
+
+    if parameterization == "kirkland":
+        pot = kirkland_atomic_potential_3d(atomic_number, sR)
+    elif parameterization == "lobato":
+        pot = lobato_atomic_potential_3d(atomic_number, sR)
+    elif parameterization == "peng":
+        pot = peng_atomic_potential_3d(atomic_number, sR)
+    elif parameterization == "shtyrov":
+        if species_table is None:
+            species_path = resources.files("specter.atom_data").joinpath(
+                "params_cat.json"
+            )
+            with resources.as_file(species_path) as fpath:
+                species_table = load_shtyrov_species_parameters(str(fpath))
+        pot = shtyrov_atomic_potential_3d_by_species(shtyrov_species, sR, species_table)
+    else:
+        raise ValueError(
+            f"Unknown parameterization '{parameterization}'. "
+            "Choose 'kirkland', 'lobato', 'peng', or 'shtyrov'."
+        )
+
+    if ssf != 1:
+        pot = avgpool3d(pot[None, None]).squeeze(0).squeeze(0)
+    return pot
+
+
 class PotentialBuilder(L.LightningModule):
     """
     Module for building 3D electrostatic potential volumes from atomic coordinates.
@@ -997,24 +1139,28 @@ class PotentialBuilder(L.LightningModule):
             )
 
         for i, elem in enumerate(self.unique_elements):
-            if self.parameterization == "kirkland":
-                pot = kirkland_atomic_potential_3d(int(elem), self.sR_3d)
-            elif self.parameterization == "lobato":
-                pot = lobato_atomic_potential_3d(int(elem), self.sR_3d)
-            elif self.parameterization == "shtyrov":
+            if self.parameterization == "shtyrov":
+                # Legacy numeric-scat_id path, keyed off the mmCIF rather
+                # than a bonded-species descriptor -- the only kernel specter
+                # builds that `build_atomic_potential_kernel` does not cover.
+                # The modern species-grouped path is
+                # `_get_3d_shtyrov_species_potentials` above.
                 if self.mmcif_filepath is None:
                     raise ValueError("mmcif_filepath must be specified.")
                 pot = shtyrov_atomic_potential_3d(
                     int(elem), self.sR_3d, self.mmcif_filepath
                 )
+                if self.ssf != 1:
+                    pot = self.avgpool3d(pot[None, None]).squeeze(0).squeeze(0)
             else:
-                raise ValueError(
-                    f"Unknown parameterization '{self.parameterization}'. "
-                    "Choose 'kirkland', 'lobato', or 'shtyrov'."
+                pot = build_atomic_potential_kernel(
+                    self.dx,
+                    parameterization=self.parameterization,
+                    atomic_number=int(elem),
+                    sR=self.sR_3d,
+                    avgpool3d=self.avgpool3d,
+                    ssf=self.ssf,
                 )
-
-            if self.ssf != 1:
-                pot = self.avgpool3d(pot[None, None]).squeeze(0).squeeze(0)
 
             self.atomic_potentials_3d[i] = pot
 
@@ -1072,15 +1218,25 @@ class PotentialBuilder(L.LightningModule):
         for i, (kind, key) in enumerate(self.shtyrov_groups):
             if kind == "species":
                 assert isinstance(key, str)
-                pot = shtyrov_atomic_potential_3d_by_species(
-                    key, self.sR_3d, species_table
+                pot = build_atomic_potential_kernel(
+                    self.dx,
+                    parameterization="shtyrov",
+                    shtyrov_species=key,
+                    species_table=species_table,
+                    sR=self.sR_3d,
+                    avgpool3d=self.avgpool3d,
+                    ssf=self.ssf,
                 )
             else:
                 assert isinstance(key, int)
-                pot = peng_atomic_potential_3d(key, self.sR_3d)
-
-            if self.ssf != 1:
-                pot = self.avgpool3d(pot[None, None]).squeeze(0).squeeze(0)
+                pot = build_atomic_potential_kernel(
+                    self.dx,
+                    parameterization="peng",
+                    atomic_number=key,
+                    sR=self.sR_3d,
+                    avgpool3d=self.avgpool3d,
+                    ssf=self.ssf,
+                )
 
             self.atomic_potentials_3d[i] = pot
 
@@ -1379,21 +1535,9 @@ class PotentialBuilder(L.LightningModule):
                         voxel_size=self.dx,
                         periodic=self.periodic,
                     )
-                    if conv_backend == "fftconvolve":
-                        for b in range(B):
-                            potential_volume[b] += fftconvolve(
-                                temp_vol[b], self.atomic_potentials_3d[i], mode="same"
-                            )
-                    elif conv_backend == "conv3d":
-                        vol_b = temp_vol.unsqueeze(1)  # (B,1,nz,ny,nx)
-                        kernel = self.atomic_potentials_3d[i].unsqueeze(0).unsqueeze(0)
-                        convolved = F.conv3d(vol_b, kernel, padding="same")
-                        potential_volume += convolved.squeeze(1)
-                    else:
-                        raise ValueError(
-                            f"Unknown conv_backend '{conv_backend}'. "
-                            "Choose 'fftconvolve' or 'conv3d'."
-                        )
+                    potential_volume += potential_from_deltas(
+                        temp_vol, self.atomic_potentials_3d[i], backend=conv_backend
+                    )
                 else:
                     raise ValueError(f"Unknown method '{method}'. Choose '2d' or '3d'.")
 

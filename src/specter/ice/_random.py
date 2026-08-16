@@ -9,7 +9,7 @@ from ..arrays import soft_voxelize_coordinates
 from ..fft import fftconvolve
 from ._energy import MLBOP
 from ._helpers import ndensity_of_amorphous_ice
-from ._kernels import build_atomic_potential_kernel
+from ..potential import build_atomic_potential_kernel
 
 
 class RandomIcemaker(L.LightningModule):

@@ -6,29 +6,31 @@ individual icemaker classes — see the individual docstrings below for what
 each one replaces. Keeping them here as pure functions means every algorithm
 class builds these kernels the same way, by construction, instead of by
 convention.
+
+The same argument applied one level up moved the atomic potential kernel
+itself out of this module:
+:func:`specter.potential.build_atomic_potential_kernel` is now the single
+implementation shared by the icemakers, the gold-bead generator, and
+:class:`specter.potential.PotentialBuilder`. It is re-exported here so
+``from specter.ice._kernels import build_atomic_potential_kernel`` keeps
+working.
 """
 
 from __future__ import annotations
 
 import os
-from importlib import resources
 
 import torch
 from torchinterp1d import interp1d
 
-from .. import potential
 from ..arrays import (
-    radial_grid_3d,
     radial_profile_3d,
     soft_voxelize_coordinates,
 )
-from ..atom import (
-    kirkland_atomic_potential_3d,
-    load_shtyrov_species_parameters,
-    lobato_atomic_potential_3d,
-    shtyrov_atomic_potential_3d_by_species,
-)
 from ..fft import fft3
+from ..potential import build_atomic_potential_kernel
+
+__all__ = ["build_atomic_potential_kernel"]
 
 # Grid the bundled (and any custom) mdsim radial-average target files are
 # computed on. Not user-configurable: it describes the fixed grid a target
@@ -278,60 +280,3 @@ def interpolate_target_kernel(
     kernel = interp.reshape(nz, n, n) * (n_ice_molecules**0.5)
     kernel[nz // 2, n // 2, n // 2] = n_ice_molecules
     return kernel
-
-
-def build_atomic_potential_kernel(
-    dx: float,
-    parameterization: str = "kirkland",
-    atomic_number: int = 8,
-    shtyrov_species: str = "O(HH)",
-) -> torch.Tensor:
-    """
-    Build the real-space atomic potential kernel for a single atom/bonded
-    species. Defaults to a water molecule (oxygen), the ice use case this
-    was originally written for.
-
-    Parameters
-    ----------
-    dx : float
-        Voxel size in Å.
-    parameterization : str, optional
-        ``'kirkland'`` (default), ``'lobato'``, or ``'shtyrov'``.
-    atomic_number : int, optional
-        Atomic number, used by the ``'kirkland'``/``'lobato'`` branches.
-        Default 8 (oxygen).
-    shtyrov_species : str, optional
-        Bonded species key into ``params_cat.json``, used only by the
-        ``'shtyrov'`` branch (shtyrov parameterizes bonded species, not bare
-        atomic numbers). Default ``"O(HH)"`` (water oxygen).
-
-    Returns
-    -------
-    torch.Tensor
-        Potential kernel volume, downsampled to the target grid.
-    """
-    ssn, ssdx, ssf = potential.compute_supersampling_parameters(dx)
-    # set original convention to torch to avoid singularity at origin.
-    sR = radial_grid_3d(ssn, ssdx, convention="torch")
-
-    # for binning super-sampled grids to main volume grid.
-    avgpool3d = torch.nn.AvgPool3d(ssf, stride=ssf)
-
-    if parameterization == "kirkland":
-        pot = kirkland_atomic_potential_3d(atomic_number, sR)
-    elif parameterization == "lobato":
-        pot = lobato_atomic_potential_3d(atomic_number, sR)
-    elif parameterization == "shtyrov":
-        species_path = resources.files("specter.atom_data").joinpath("params_cat.json")
-        with resources.as_file(species_path) as fpath:
-            species_params = load_shtyrov_species_parameters(str(fpath))
-        pot = shtyrov_atomic_potential_3d_by_species(
-            shtyrov_species, sR, species_params
-        )
-    else:
-        raise ValueError(
-            f"Unknown parameterization '{parameterization}'. "
-            "Choose 'kirkland', 'lobato', or 'shtyrov'."
-        )
-
-    return avgpool3d(pot[None, None]).squeeze()

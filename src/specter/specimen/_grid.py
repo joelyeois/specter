@@ -68,7 +68,7 @@ import torch
 from ..arrays import soft_voxelize_coordinates
 from ..config import ScalarOrRange, parse_scalar_or_range
 from ..fft import spatial_convolve3d_same
-from ..ice._kernels import build_atomic_potential_kernel
+from ..potential import build_atomic_potential_kernel
 from .membrane._field_spherical_harmonics import (
     _interpolate_angular_grid,
     _sample_sh_coefficients,

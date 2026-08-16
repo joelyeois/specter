@@ -493,6 +493,70 @@ class MicrographConfig:
     filename: str = "micrographs"
 
 
+# Human-readable per-field descriptions for MicrographConfig, used to build
+# `specter simulate micrograph --help` (see specter/cli/_click_options.py). Kept
+# here, next to the dataclass, so adding/renaming a field and its help text happen
+# in the same place.
+MICROGRAPH_HELP: dict[str, str] = {
+    "pdb_code": "PDB accession code or path to a local .cif/.pdb file.",
+    "assembly": "Fetch the biological assembly.",
+    "pdb_savefolder": "Folder to cache downloaded PDB files.",
+    "n_pixels": "Number of pixels per axis for the 3-D particle potential box.",
+    "pixel_size": "Pixel size in Angstrom.",
+    "micrograph_size": "Micrograph size in pixels (square).",
+    "voltage": "Electron beam accelerating voltage in kV.",
+    "dose": "Dose in e-/A^2: a single value (e.g. 20) for constant dose per "
+    "micrograph, or 'low,high' (e.g. 20,60) to sample uniformly per micrograph "
+    "(in a TOML config, write the range as [20, 60]).",
+    "n_frames": "Number of movie frames. Defaults to int(dose) if not set.",
+    "cs": "Spherical aberration in mm (1-3 mm typical).",
+    "alpha": "Amplitude contrast ratio.",
+    "convergence_angle": "Beam convergence semi-angle in mrad, for the Cs "
+    "(spatial coherence) envelope.",
+    "cc": "Chromatic aberration coefficient in mm, for the Cc (temporal "
+    "coherence) envelope.",
+    "energy_spread": "FWHM of the beam energy spread in eV, used by the Cc envelope.",
+    "deltaV_V": "Relative high-voltage instability, used by the Cc envelope.",
+    "deltaI_I": "Relative objective-lens current instability, used by the Cc envelope.",
+    "dose_envelope": "Apply the Grant & Grigorieff (2015) cumulative-dose envelope.",
+    "defocus": "Defocus in Angstrom: a single value (e.g. 8000) for constant "
+    "defocus, or 'low,high' (e.g. 5000,15000) to sample uniformly per micrograph "
+    "(in a TOML config, write the range as [5000, 15000]).",
+    "n_micrographs": "Number of micrographs to simulate.",
+    "scattering_model": "Scattering model.",
+    "aberration_model": "Aberration model.",
+    "noise_model": "Noise model. Use 'none' for no noise.",
+    "coincidence_radius": "Effective coincidence exclusion radius in pixels "
+    "(exclusion area = pi*r^2): a single value for constant radius, or "
+    "'low,high' ([low, high] in TOML) to sample uniformly per micrograph.",
+    "ice_model": "Ice model: 'gd' (samples the pre-generated IceBank cache), "
+    "'random' (cheap, low-realism), or 'none'.",
+    "ice_thickness": "Ice thickness in Angstrom. 0 = minimum (particle box size).",
+    "ice_cache_dir": "Directory of cached ice configs for ice_model='gd'. "
+    "Defaults to the bundled ice-data/ice_cache.",
+    "crowd_min_distance": "Minimum distance between crowded particles in "
+    "Angstrom. Defaults to the structure's max diameter; set to 0 to disable "
+    "crowding.",
+    "crowd_max_distance_z": "Maximum z-distance between crowded particles in Angstrom.",
+    "water_air_interface": "Model a water-air interface when placing ice/"
+    "crowding (bimodal density along z instead of uniform).",
+    "potential_scale": "Potential scale factor (unitless, values < 1 "
+    "approximate thicker ice): a single value for constant scale, or "
+    "'low,high' ([low, high] in TOML) to sample uniformly per micrograph.",
+    "pad_fft": "Pad the volume for FFT to avoid edge artifacts.",
+    "specimen_chunk_size": "Slice chunk size for specimen generation. Lower "
+    "if GPU memory is limited.",
+    "detector_model": "Detector model.",
+    "normalize_micrographs": "Normalize micrographs to zero mean and unit std.",
+    "save_exitwaves": "Save exit wave magnitude and phase as separate .mrcs files.",
+    "save_clean_exitwaves": "Save clean (particle-only, no ice) exit wave "
+    "magnitude and phase.",
+    "device": "Device to use: cpu | cuda | cuda:0.",
+    "output_dir": "Directory to save .mrcs and .star files.",
+    "filename": "Base name for output files (no extension).",
+}
+
+
 @dataclass
 class TiltSeriesConfig:
     """Parameters for cryoET tilt-series generation, loaded from a TOML config file.

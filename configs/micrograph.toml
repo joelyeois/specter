@@ -1,6 +1,6 @@
-# Canonical default config for demo-scripts/generate_micrograph.py.
+# Canonical default config for `specter simulate micrograph`.
 # Any field can be overridden on the command line, e.g.:
-#   python demo-scripts/generate_micrograph.py --config configs/micrograph.toml --n_micrographs 10
+#   specter simulate micrograph --config configs/micrograph.toml --n_micrographs 10
 
 [potential]
 pdb_code = "6bdf"

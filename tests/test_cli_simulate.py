@@ -145,6 +145,81 @@ def test_cli_particles_falcon4i_detector_model_reachable(tmp_path: Path) -> None
     assert (tmp_path / "particles.mrcs").exists()
 
 
+def _run_micrograph_cli(
+    output_dir: Path, n_micrographs: int = 1
+) -> proc.CompletedProcess:
+    args = [
+        sys.executable,
+        "-m",
+        "specter.cli._cli",
+        "simulate",
+        "micrograph",
+        "--pdb_code",
+        _FIXTURE_PDB,
+        "--n_micrographs",
+        str(n_micrographs),
+        "--n_pixels",
+        "32",
+        "--micrograph_size",
+        "64",
+        "--scattering_model",
+        "ctf",
+        "--ice_model",
+        "none",
+        "--detector_model",
+        "none",
+        # scattering_model="ctf" is a fast, linear (not intensity-guaranteed-
+        # non-negative) approximation, unlike multislice's |exitwave|^2 --
+        # combined with unseeded random defocus sampling, some draws produce
+        # local negative "intensity" that crashes torch.poisson. Not a bug
+        # introduced by this CLI (same MicrographGenerator/Detector path the
+        # old demo-script exercised); noise isn't needed for a shape-only
+        # smoke test, so disable it here rather than flaking on rare draws.
+        "--noise_model",
+        "none",
+        "--device",
+        "cpu",
+        "--output_dir",
+        str(output_dir),
+        "--filename",
+        "micrographs",
+    ]
+    return proc.run(args, capture_output=True, encoding="utf-8")
+
+
+def test_cli_micrograph_smoke(tmp_path: Path) -> None:
+    result = _run_micrograph_cli(tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert (tmp_path / "micrographs.mrcs").exists()
+    assert (tmp_path / "micrographs.star").exists()
+
+    import mrcfile
+
+    with mrcfile.open(tmp_path / "micrographs.mrcs") as mrc:
+        assert mrc.data.shape == (1, 64, 64)
+
+
+def test_cli_micrograph_help_smoke() -> None:
+    result = proc.run(
+        [sys.executable, "-m", "specter.cli._cli", "simulate", "micrograph", "--help"],
+        capture_output=True,
+        encoding="utf-8",
+    )
+    assert result.returncode == 0
+    assert "--pdb_code" in result.stdout
+    assert "--micrograph_size" in result.stdout
+
+
+def test_cli_micrograph_n_micrographs_override(tmp_path: Path) -> None:
+    """--n_micrographs overrides the loaded TOML config's value end to end."""
+    result = _run_micrograph_cli(tmp_path, n_micrographs=2)
+    assert result.returncode == 0, result.stderr
+    import mrcfile
+
+    with mrcfile.open(tmp_path / "micrographs.mrcs") as mrc:
+        assert mrc.data.shape[0] == 2
+
+
 def test_cli_tiltseries_smoke(tmp_path: Path) -> None:
     """`specter simulate tiltseries --volume_path ...` loads a pre-built
     volume from disk and runs the imaging pipeline end to end."""

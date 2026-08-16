@@ -149,8 +149,8 @@ Pose/shift/defocus refinement (`lr_R`/`lr_T`/`lr_defocus` on `Reconstructor`/`To
 
 ### CLI & pipelines
 
-- `cli/` — the `specter` command (entry point `specter.cli._cli:main`), built on `click`/`rich-click`. Exposes `specter simulate particles`, `specter simulate tiltseries`, `specter build tomogram`. Each subcommand (`simulate.py`, `build.py`) loads a TOML config via `config.py`'s dataclasses (`ParticleStackConfig`, `TiltSeriesConfig`, `TomogramConfig`) with `load_config()`, applies only the flags the user actually passed via `_click_options.py`'s `build_config_options()`/`collect_overrides()` (unset flags never clobber the TOML), then calls into `pipelines/`. This is unrelated to the older `specter-jobs` entry point (`jobs/_cli.py`), a separate job-database CLI.
-- `pipelines/` — `run_particle_stack()`, `run_tilt_series()`, `run_build_tomogram()`: the actual end-to-end implementations behind the `cli/` commands, kept separate so `cli/` stays a thin argument-parsing layer. `_common.py` holds logic shared across all three.
+- `cli/` — the `specter` command (entry point `specter.cli._cli:main`), built on `click`/`rich-click`. Exposes `specter simulate particles`, `specter simulate micrograph`, `specter simulate tiltseries`, `specter build tomogram`. Each subcommand (`simulate.py`, `build.py`) loads a TOML config via `config.py`'s dataclasses (`ParticleStackConfig`, `MicrographConfig`, `TiltSeriesConfig`, `TomogramConfig`) with `load_config()`, applies only the flags the user actually passed via `_click_options.py`'s `build_config_options()`/`collect_overrides()` (unset flags never clobber the TOML), then calls into `pipelines/`. `specter simulate micrograph` is single-device only (no multi-GPU DDP, unlike particles/tiltseries) — each micrograph needs its own freshly regenerated ice/crowding specimen between forward passes, and a single micrograph is already the GPU-memory-bound unit of work at `micrograph_size` resolution, so there's no batching to shard across devices. This is unrelated to the older `specter-jobs` entry point (`jobs/_cli.py`), a separate job-database CLI.
+- `pipelines/` — `run_particle_stack()`, `run_micrograph()`, `run_tilt_series()`, `run_build_tomogram()`: the actual end-to-end implementations behind the `cli/` commands, kept separate so `cli/` stays a thin argument-parsing layer. `_common.py` holds logic shared across them (device parsing, scalar-or-range sampling, exit-wave saving, etc.); `run_micrograph` doesn't use `_common.py`'s multi-GPU DDP dispatch, since it doesn't apply here (see `cli/` above).
 - **Output layout**: everything specter writes lands under `./specter-data/`, relative to the current working directory — `specter-data/{pdb,particles,micrographs,tiltseries,tomograms}`. Path resolution is one rule with no special cases: an explicit path (TOML or CLI) is used verbatim and resolves relative to the cwd; an omitted `output_dir`/`pdb_savefolder` falls back to `config.py`'s `default_output_dir(artifact)` / `default_pdb_cache_dir()`, both cwd-relative (not repo-root-anchored — that only resolves correctly for an editable install). `$SPECTER_PDB_CACHE` overrides the PDB cache location to an absolute path if you want one cache shared across working directories. `.gitignore` uses `/specter-data/` with a leading slash so the pattern doesn't also match `src/specter/`.
 
 ## Repository Structure
@@ -188,7 +188,7 @@ src/specter/                  # Main source package
     _database.py              # JobDatabase storage
     _cli.py                   # CLI interface
   cli/                        # `specter` CLI (specter simulate ..., specter build ...) — see "CLI & pipelines" below
-  pipelines/                  # run_particle_stack/run_tilt_series/run_build_tomogram — see "CLI & pipelines" below
+  pipelines/                  # run_particle_stack/run_micrograph/run_tilt_series/run_build_tomogram — see "CLI & pipelines" below
   specimen/                   # Volume assembly (package) — under heavy active development, structure below is
                               # partial/illustrative only; read the package directly rather than trusting this list.
     single_particle.py        # MicrographSpecimenGenerator — populates a volume with template potentials + crowding + ice
@@ -252,15 +252,15 @@ demo-notebooks/               # User-facing, always kept working
                                 # (plus standalone notebooks with no paired TOML, e.g.
                                 # generate-and-reconstruct.ipynb, coordinates-to-images.ipynb,
                                 # compare-atomic-potentials-with-kirkland.ipynb)
-demo-scripts/                 # Ready-to-run command-line scripts (generate_micrograph.py,
-                              # generate_particle_stack_from_csfile.py, generate_particle_stack_from_starfile.py,
-                              # ghostbuster_reconstruct.py) — plain particle-stack generation now lives in the
-                              # `specter simulate particles` CLI instead of a demo-script, and tilt-series
-                              # generation likewise lives in `specter build tomogram` + `specter simulate
-                              # tiltseries` instead of a demo-script
+demo-scripts/                 # Ready-to-run command-line scripts (generate_particle_stack_from_csfile.py,
+                              # generate_particle_stack_from_starfile.py, ghostbuster_reconstruct.py) — plain
+                              # particle-stack generation now lives in the `specter simulate particles` CLI
+                              # instead of a demo-script, plain micrograph generation likewise lives in
+                              # `specter simulate micrograph`, and tilt-series generation likewise lives in
+                              # `specter build tomogram` + `specter simulate tiltseries` instead of a demo-script
 configs/                      # TOML config files consumed by demo-scripts/ and the `specter` CLI (flat, not nested)
   particle.toml                # canonical defaults for `specter simulate particles`
-  micrograph.toml              # canonical defaults for generate_micrograph.py
+  micrograph.toml              # canonical defaults for `specter simulate micrograph`
   tilt_series.toml             # canonical defaults for `specter simulate tiltseries`
   tomogram.toml                 # canonical defaults for `specter build tomogram`
 dev/                           # Prototyping and experimentation (not required to be clean; gitignored, never pushed)

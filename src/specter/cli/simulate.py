@@ -5,8 +5,10 @@ from __future__ import annotations
 import rich_click as click
 
 from specter.config import (
+    MICROGRAPH_HELP,
     PARTICLE_STACK_HELP,
     TILT_SERIES_HELP,
+    MicrographConfig,
     ParticleStackConfig,
     TiltSeriesConfig,
     TomogramConfig,
@@ -155,10 +157,66 @@ _TILT_SERIES_GROUPS: list[tuple[str, list[str]]] = [
 ]
 
 
+# (panel title, field names) for `specter simulate micrograph` -- same
+# basic-first-advanced-last convention as `_PARTICLE_STACK_GROUPS`, mirroring
+# `MicrographConfig`'s own field ordering.
+_MICROGRAPH_GROUPS: list[tuple[str, list[str]]] = [
+    (
+        "Specimen",
+        ["pdb_code", "assembly", "n_pixels", "pixel_size", "micrograph_size"],
+    ),
+    (
+        "Microscope",
+        ["voltage", "dose", "cs", "alpha"],
+    ),
+    ("Defocus", ["defocus"]),
+    ("Dataset", ["n_micrographs"]),
+    (
+        "Models",
+        ["scattering_model", "aberration_model", "noise_model", "detector_model"],
+    ),
+    (
+        "Post-processing",
+        ["normalize_micrographs", "save_exitwaves", "save_clean_exitwaves"],
+    ),
+    ("Compute", ["device"]),
+    ("Output", ["output_dir", "filename"]),
+    (
+        "Advanced",
+        [
+            "pdb_savefolder",
+            "n_frames",
+            "convergence_angle",
+            "cc",
+            "energy_spread",
+            "deltaV_V",
+            "deltaI_I",
+            "dose_envelope",
+            "coincidence_radius",
+            "ice_model",
+            "ice_thickness",
+            "ice_cache_dir",
+            "crowd_min_distance",
+            "crowd_max_distance_z",
+            "water_air_interface",
+            "potential_scale",
+            "pad_fft",
+            "specimen_chunk_size",
+        ],
+    ),
+]
+
+
 def _default_particle_config_path() -> str:
     from specter.config import REPO_ROOT
 
     return str(REPO_ROOT / "configs" / "particle.toml")
+
+
+def _default_micrograph_config_path() -> str:
+    from specter.config import REPO_ROOT
+
+    return str(REPO_ROOT / "configs" / "micrograph.toml")
 
 
 def _default_tiltseries_config_path() -> str:
@@ -210,6 +268,49 @@ def _build_particles_command() -> click.RichCommand:
         help="Simulate a cryo-EM particle stack and save it as .mrcs + .star. "
         "A TOML config (--config) is always loaded first -- every flag below "
         "is optional and, if given, overrides one field of it.",
+    )
+
+
+def _micrograph_callback(config: str, **_overrides_raw: object) -> None:
+    """Handle `specter simulate micrograph`."""
+    from specter.pipelines import run_micrograph
+
+    ctx = click.get_current_context()
+    assert ctx is not None
+    overrides = collect_overrides(ctx, exclude={"config"})
+
+    cfg = load_config(config, MicrographConfig)
+    apply_overrides(cfg, overrides)
+    run_micrograph(cfg)
+
+
+def _build_micrograph_command() -> click.RichCommand:
+    params: list[click.Parameter] = [
+        click.RichOption(
+            ["--config"],
+            type=str,
+            default=_default_micrograph_config_path(),
+            show_default=True,
+            help="TOML config file. Always loaded first, before any flags below "
+            "are applied.",
+            panel="Config",
+        ),
+        *build_config_options(
+            MicrographConfig,
+            field_help=MICROGRAPH_HELP,
+            field_panels=_field_panels(_MICROGRAPH_GROUPS),
+        ),
+    ]
+    return click.RichCommand(
+        name="micrograph",
+        params=params,
+        callback=_micrograph_callback,
+        context_settings=CONTEXT_SETTINGS,
+        help="Simulate one or more cryo-EM micrographs and save them as .mrcs + "
+        ".star. A TOML config (--config) is always loaded first -- every flag "
+        "below is optional and, if given, overrides one field of it. Each "
+        "micrograph gets an independently regenerated ice/crowding specimen; "
+        "single-device only.",
     )
 
 
@@ -289,5 +390,6 @@ def build_simulate_group() -> click.RichGroup:
         context_settings=CONTEXT_SETTINGS,
     )
     group.add_command(_build_particles_command())
+    group.add_command(_build_micrograph_command())
     group.add_command(_build_tiltseries_command())
     return group

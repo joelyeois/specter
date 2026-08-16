@@ -616,7 +616,7 @@ class TiltSeriesConfig:
     )
     aberration_model: Literal["holography", "ctf"] = "holography"
     noise_model: Literal["poisson", "none"] = "poisson"
-    coincidence_radius: float = 0.5984  # pixels (effective exclusion radius)
+    coincidence_radius: float = 0.0  # pixels; 0 = plain Poisson
     ice_model: Literal["gd", "random", "none"] = "gd"
     ice_cache_dir: str | None = None  # defaults to the bundled ice-data/ice_cache
     ice_relax_steps: int = 0  # local MLBOP seam-relaxation steps for ice_model="gd"

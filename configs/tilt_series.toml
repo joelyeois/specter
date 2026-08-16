@@ -51,7 +51,7 @@ tilt_axis = "y"                    # x | y
 scattering_model = "multislice"    # multislice | firstborn | projection | ctf
 aberration_model = "holography"    # holography | ctf
 noise_model = "poisson"            # poisson | none
-coincidence_radius = 0.5984        # pixels (effective exclusion radius)
+coincidence_radius = 0.0           # pixels; 0 = plain Poisson, no coincidence loss
 ice_model = "gd"                   # gd | random | none
 # ice_cache_dir = "ice-data/ice_cache"  # defaults to the bundled cache
 ice_relax_steps = 0                # local MLBOP seam-relaxation steps for ice_model="gd"

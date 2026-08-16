@@ -65,7 +65,8 @@ pad_fft = true
 
 # potential building
 potential_parameterization = "shtyrov"   # shtyrov | kirkland | lobato
-potential_method = "analytic"            # analytic | 2d | 3d
+potential_method = "analytic"            # analytic | 2d | 3d -- applies to the
+                                 # structure's own potential; ice is built separately
 # rcut = 6.0                     # Å, auto-detected per-structure if unset
 conv_backend = "fftconvolve"     # unused for potential_method="analytic"
 periodic = false                 # wrap atom density across the box faces when voxelizing. Keep
@@ -84,7 +85,10 @@ ews_curvature_sign = "positive"  # negative | positive, matches CryoSPARC's conv
 rotate_mode = "real"             # real | fourier
 
 # ice
-ice_parameterization = "shtyrov"  # kirkland | lobato | shtyrov
+# ice_parameterization = "shtyrov"  # kirkland | lobato | shtyrov; unset, the ice
+                                 # follows potential_parameterization above, so the
+                                 # structure and the ice around it are modelled the
+                                 # same way. Set it only to deliberately differ.
 ice_relax_steps = 0               # local MLBOP seam-relaxation steps, only used when ice_model="gd" tiles multiple cached blocks
 
 # crowding

@@ -199,8 +199,9 @@ def test_particle_toml_loads_and_matches_expected_values() -> None:
 
 def test_particle_stack_config_advanced_field_defaults() -> None:
     """Defaults for the newly-exposed 'Advanced' fields should reproduce
-    today's previously-hardcoded behavior (or, for ice_parameterization, the
-    deliberately-changed shtyrov default -- see config.py's docstring)."""
+    today's previously-hardcoded behavior (ice_parameterization is None, which
+    resolves to potential_parameterization -- see
+    test_ice_parameterization_defaults_to_following_the_structure)."""
     config = ParticleStackConfig(pdb_code="6bdf")
     assert config.potential_parameterization == "shtyrov"
     assert config.potential_method == "analytic"
@@ -211,7 +212,7 @@ def test_particle_stack_config_advanced_field_defaults() -> None:
     assert config.ews_curvature_sign == "positive"
     assert config.klim is None
     assert config.rotate_mode == "real"
-    assert config.ice_parameterization == "shtyrov"
+    assert config.ice_parameterization is None  # follows potential_parameterization
     assert config.ice_relax_steps == 0
     assert config.crowd_chunk_size == 1
     assert config.crowd_max_distance_xy is None
@@ -247,7 +248,7 @@ def test_particle_toml_loads_advanced_fields() -> None:
     path = str(REPO_ROOT / "configs" / "particle.toml")
     config = load_config(path)
     assert config.potential_parameterization == "shtyrov"
-    assert config.ice_parameterization == "shtyrov"
+    assert config.ice_parameterization is None  # follows potential_parameterization
     assert config.astigmatism == 0.0
     assert config.anisomag_m11 == 1.0
 
@@ -359,3 +360,33 @@ def test_seed_is_configurable(config_cls: type) -> None:
     """Every generation command needs a seed to be reproducible at all."""
     assert "seed" in {f.name for f in dataclasses.fields(config_cls)}
     assert config_cls.seed is None
+
+
+def test_ice_parameterization_defaults_to_following_the_structure() -> None:
+    """
+    Unset, the ice is modelled the same way as the structure it surrounds.
+
+    The two potentials are summed into one volume, so a shtyrov protein sitting
+    in kirkland ice is a choice worth making deliberately rather than
+    inheriting from two independent defaults.
+    """
+    config = ParticleStackConfig(pdb_code="1abc")
+    assert config.ice_parameterization is None
+
+    for parameterization in ("shtyrov", "kirkland", "lobato"):
+        config.potential_parameterization = parameterization  # type: ignore[assignment]
+        resolved = config.ice_parameterization or config.potential_parameterization
+        assert resolved == parameterization
+
+    # An explicit value still wins, so deliberately differing stays possible.
+    config.potential_parameterization = "shtyrov"  # type: ignore[assignment]
+    config.ice_parameterization = "kirkland"  # type: ignore[assignment]
+    assert (
+        config.ice_parameterization or config.potential_parameterization
+    ) == "kirkland"
+
+
+def test_shipped_particle_config_leaves_ice_parameterization_unset() -> None:
+    """configs/particle.toml must not pin it, or the following above is dead."""
+    config = load_config(str(REPO_ROOT / "configs" / "particle.toml"))
+    assert config.ice_parameterization is None

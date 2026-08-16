@@ -245,7 +245,9 @@ class ParticleStackConfig:
     rotate_mode: Literal["real", "fourier"] = "real"
 
     # --- Advanced: ice ---
-    ice_parameterization: Literal["kirkland", "lobato", "shtyrov"] = "shtyrov"
+    # None follows potential_parameterization -- see run_particle_stack. Set it
+    # only to deliberately parameterize the ice differently from the structure.
+    ice_parameterization: Literal["kirkland", "lobato", "shtyrov"] | None = None
     ice_relax_steps: int = 0
 
     # --- Advanced: crowding ---
@@ -327,7 +329,9 @@ PARTICLE_STACK_HELP: dict[str, str] = {
     "star_path": "Path to a RELION .star file to drive generation from real "
     "pixel_size/voltage/alpha/poses/CTF instead of random sampling. Mutually "
     "exclusive with --cs_path.",
-    "n_frames": "Number of movie frames. Defaults to int(dose) if not set.",
+    "n_frames": "Number of movie frames. Defaults to int(dose) if not set. "
+    "Only affects the image when coincidence_radius > 0, which is what "
+    "splits the dose into frames; ignored otherwise.",
     "convergence_angle": "Beam convergence semi-angle in mrad, for the Cs "
     "(spatial coherence) envelope.",
     "cc": "Chromatic aberration coefficient in mm, for the Cc (temporal "
@@ -356,14 +360,18 @@ PARTICLE_STACK_HELP: dict[str, str] = {
     "pad_fft": "Pad the volume for FFT to avoid edge artifacts.",
     "potential_parameterization": "Atomic potential model used to build the "
     "structure's scattering potential.",
-    "potential_method": "Voxelization method: 'analytic' (per-atom closed-form, "
-    "no splat/FFT), '2d' (soft XY, hard Z), or '3d' (trilinear).",
+    "potential_method": "Voxelization method for the structure's own "
+    "potential: 'analytic' (per-atom closed-form, no splat/FFT), '2d' "
+    "(soft XY, hard Z), or '3d' (trilinear). Ice is built by its own "
+    "path and is unaffected by this.",
     "rcut": "Cutoff radius in Angstrom for the atomic potential kernel. "
     "Auto-detected per-structure if unset.",
     "conv_backend": "Convolution backend for potential building. Unused for "
     "potential_method='analytic'.",
-    "periodic": "Use periodic boundary conditions when voxelizing coordinates "
-    "into the potential. Forces potential_method='3d'.",
+    "periodic": "Wrap atom density across the box faces when voxelizing. "
+    "Keep false for a particle -- a protein is a finite object, so wrapping "
+    "smears its edge density onto the opposite face. Requires "
+    "potential_method='3d'; 'analytic' and '2d' raise.",
     "shtyrov_params_path": "Override the bundled Shtyrov parameter table.",
     "mmcif_filepath": "Explicit mmCIF source for bond-typing, if pdb_code alone "
     "is ambiguous.",
@@ -372,8 +380,10 @@ PARTICLE_STACK_HELP: dict[str, str] = {
     "klim": "Reciprocal-space cutoff in 1/Angstrom. Unset uses the full Nyquist range.",
     "rotate_mode": "Volume rotation method: 'real' (trilinear interpolation) or "
     "'fourier' (no boundary artifacts).",
-    "ice_parameterization": "Atomic potential model used for the ice volume "
-    "specifically (independent of potential_parameterization).",
+    "ice_parameterization": "Atomic potential model for the ice "
+    "specifically. Unset, it follows potential_parameterization, so the "
+    "ice and the structure it surrounds are modelled the same way; set it "
+    "only to deliberately differ.",
     "ice_relax_steps": "Local MLBOP seam-relaxation steps, only used when "
     "ice_model='gd' tiles multiple cached blocks.",
     "crowd_chunk_size": "Crowding volumes rotated per GPU batch. Raise for "
@@ -517,7 +527,9 @@ MICROGRAPH_HELP: dict[str, str] = {
     "dose": "Dose in e-/A^2: a single value (e.g. 20) for constant dose per "
     "micrograph, or 'low,high' (e.g. 20,60) to sample uniformly per micrograph "
     "(in a TOML config, write the range as [20, 60]).",
-    "n_frames": "Number of movie frames. Defaults to int(dose) if not set.",
+    "n_frames": "Number of movie frames. Defaults to int(dose) if not set. "
+    "Only affects the image when coincidence_radius > 0, which is what "
+    "splits the dose into frames; ignored otherwise.",
     "cs": "Spherical aberration in mm (1-3 mm typical).",
     "alpha": "Amplitude contrast ratio.",
     "convergence_angle": "Beam convergence semi-angle in mrad, for the Cs "
@@ -656,7 +668,9 @@ TILT_SERIES_HELP: dict[str, str] = {
     "to the XY dimension of the specimen volume.",
     "voltage": "Electron beam accelerating voltage in kV.",
     "dose_per_tilt": "Dose per tilt angle in e-/A^2.",
-    "n_frames": "Number of movie frames per tilt.",
+    "n_frames": "Number of movie frames per tilt. Only affects the image "
+    "when coincidence_radius > 0, which is what splits the dose into "
+    "frames; ignored otherwise.",
     "cs": "Spherical aberration in mm (1-3 mm typical).",
     "alpha": "Amplitude contrast ratio.",
     "convergence_angle": "Beam convergence semi-angle in mrad, for the Cs "

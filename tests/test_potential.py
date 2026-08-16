@@ -990,3 +990,32 @@ def test_potential_from_deltas_rejects_unknown_backend():
         potential_from_deltas(
             torch.zeros(1, 4, 4, 4), torch.ones(3, 3, 3), backend="nope"
         )
+
+
+@pytest.mark.parametrize("dx", [1.0, 1.5])
+def test_2d_and_3d_methods_agree_on_density_position(dx):
+    """
+    method='2d' must place density at the same in-plane position as '3d'.
+
+    '2d' is a projection approximation, so the two differ in value -- but not
+    in *where* the density sits. Its convolution used to be
+    F.conv2d(padding="same"), which pads asymmetrically for an even-sized
+    kernel, offsetting the whole projected potential half a voxel from the
+    coordinates it was built from. dx=1.5 gives a 4-voxel kernel and used to
+    land a full pixel off by this measure; dx=1.0 gives 5 voxels and always
+    agreed.
+    """
+    torch.manual_seed(0)
+    atomic_numbers = torch.tensor([6, 7, 8, 8, 7, 6])
+    coords = (torch.rand(6, 3) - 0.5) * 20
+    pb = PotentialBuilder(
+        24, dx, atomic_numbers, parameterization="kirkland", progressbars=False
+    )
+
+    proj_2d = pb(coords, method="2d").sum(0)
+    proj_3d = pb(coords, method="3d").sum(0)
+
+    def centroid(m):
+        return torch.nonzero(m > 0.5 * m.max()).float().mean(0)
+
+    assert torch.allclose(centroid(proj_2d), centroid(proj_3d), atol=1e-6)

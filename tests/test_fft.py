@@ -2,9 +2,14 @@
 Tests for specter.fft.
 """
 
+import pytest
 import torch
 
-from specter.fft import fftconvolve, spatial_convolve3d_same
+from specter.fft import (
+    fftconvolve,
+    spatial_convolve2d_same,
+    spatial_convolve3d_same,
+)
 
 
 def test_spatial_convolve3d_same_matches_fftconvolve_odd_kernel():
@@ -59,3 +64,26 @@ def test_spatial_convolve3d_same_accepts_unbatched_kernel_dim():
     fft = fftconvolve(volume, kernel, mode="same", axes=(-3, -2, -1))
 
     assert torch.allclose(direct, fft, atol=1e-4)
+
+
+@pytest.mark.parametrize("ky", [3, 4, 5, 6])
+def test_spatial_convolve2d_same_matches_fftconvolve(ky):
+    """
+    The 2D direct convolution must reproduce fftconvolve exactly.
+
+    F.conv2d(padding="same"), which this replaced, pads asymmetrically for an
+    even-sized kernel and computes cross-correlation rather than convolution.
+    Both discrepancies matter here, so the kernel is deliberately asymmetric:
+    a radially symmetric one (like an atomic potential) would hide the missing
+    flip and expose only the padding.
+    """
+    torch.manual_seed(0)
+    images = torch.rand(3, 20, 22)
+    kernel = torch.rand(ky, ky + 1)
+
+    expected = torch.stack(
+        [fftconvolve(images[b], kernel, mode="same") for b in range(len(images))]
+    )
+    torch.testing.assert_close(
+        spatial_convolve2d_same(images, kernel), expected, atol=1e-5, rtol=1e-5
+    )

@@ -351,6 +351,60 @@ def spatial_convolve3d_same(
     return out
 
 
+def spatial_convolve2d_same(
+    images: torch.Tensor,
+    kernel: torch.Tensor,
+) -> torch.Tensor:
+    """
+    Direct (non-FFT) 'same'-mode 2D convolution of a batch of images with a
+    single shared kernel, matching ``fftconvolve(images, kernel, mode="same",
+    axes=(-2, -1))`` exactly -- including its centered-crop convention for
+    even-sized kernel axes (see :func:`_centered`).
+
+    The 2D twin of :func:`spatial_convolve3d_same`, and the reason it exists
+    is the same: ``F.conv2d(..., padding="same")`` pads *asymmetrically* when
+    a kernel axis is even, which offsets the result half a pixel relative to
+    the centered convention every other potential path in specter uses. Even
+    kernels are the common case, not the exotic one -- 20 of the 36 pixel
+    sizes between 0.5 and 4.0 Å produce one (see
+    :func:`specter.potential.compute_supersampling_parameters`).
+
+    No chunking counterpart to :func:`spatial_convolve3d_same`'s is needed:
+    the 2D path convolves single ``(ny, nx)`` slices, which stay far below
+    the cuDNN spatial-size limit that motivates chunking in 3D.
+
+    ``conv2d`` computes cross-correlation (no kernel flip), so the kernel is
+    flipped here to recover true convolution. Atomic potential kernels are
+    radially symmetric, making the flip a no-op for them, but this is a
+    general-purpose convolution and should behave like one.
+
+    Parameters
+    ----------
+    images : torch.Tensor
+        Shape (B, Y, X).
+    kernel : torch.Tensor
+        Shape (Y', X') or (1, Y', X'); applied to every image in the batch.
+
+    Returns
+    -------
+    torch.Tensor
+        Convolved images, shape (B, Y, X).
+    """
+    if kernel.ndim == 3:
+        kernel = kernel.squeeze(0)
+    ky, kx = kernel.shape
+    weight = (
+        kernel.flip([0, 1])
+        .to(device=images.device, dtype=images.dtype)
+        .unsqueeze(0)
+        .unsqueeze(0)
+    )
+    full = F.conv2d(images.unsqueeze(1), weight, padding=(ky - 1, kx - 1)).squeeze(1)
+    y0, x0 = (ky - 1) // 2, (kx - 1) // 2
+    y, x = images.shape[-2:]
+    return full[:, y0 : y0 + y, x0 : x0 + x]
+
+
 def _freq_domain_conv(
     in1: torch.Tensor,
     in2: torch.Tensor,

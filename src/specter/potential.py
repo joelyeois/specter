@@ -10,7 +10,6 @@ import gemmi
 import lightning as L
 import numpy as np
 import torch
-import torch.nn.functional as F
 
 from .progress import TqdmProgress, track
 
@@ -36,7 +35,7 @@ from .atom import (
     shtyrov_atomic_potential_3d_by_species,
     yukawa_shell_average,
 )
-from .fft import fftconvolve, spatial_convolve3d_same
+from .fft import fftconvolve, spatial_convolve2d_same, spatial_convolve3d_same
 
 
 def compute_supersampling_parameters(
@@ -226,10 +225,7 @@ def build_potential_volume_fftconvolve_2d(
         if ssf != 1:
             pot = avgpool2d(pot[None, None]).squeeze(0).squeeze(0)
 
-        temp_vol_b = temp_vol.unsqueeze(1)  # (nz, 1, ny, nx)
-        pot_b = pot.unsqueeze(0).unsqueeze(0)  # (1, 1, ky, kx)
-        convolved = F.conv2d(temp_vol_b, pot_b, padding="same")
-        potential_volume += convolved.squeeze(1)  # (nz, ny, nx)
+        potential_volume += spatial_convolve2d_same(temp_vol, pot)  # (nz, ny, nx)
     return potential_volume, sR
 
 
@@ -1521,9 +1517,10 @@ class PotentialBuilder(L.LightningModule):
                         grid_shape=(self.nz, self.ny, self.nx),
                         voxel_size=self.dx,
                     )
-                    temp_vol_flat = temp_vol.reshape(-1, 1, self.ny, self.nx)
-                    pot_b = self.atomic_potentials_2d[i].unsqueeze(0).unsqueeze(0)
-                    convolved_flat = F.conv2d(temp_vol_flat, pot_b, padding="same")
+                    convolved_flat = spatial_convolve2d_same(
+                        temp_vol.reshape(-1, self.ny, self.nx),
+                        self.atomic_potentials_2d[i],
+                    )
                     potential_volume += convolved_flat.reshape(
                         B, self.nz, self.ny, self.nx
                     )

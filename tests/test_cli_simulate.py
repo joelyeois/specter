@@ -415,3 +415,20 @@ voxel_size = 12.0
     assert result.returncode != 0
     assert "tomogram_config" in result.stderr
     assert "volume_path" in result.stderr
+
+
+def test_cli_particles_single_particle(tmp_path: Path) -> None:
+    """
+    n_particles=1 must work -- the most natural first thing a user tries.
+
+    random_quaternion squeezes the batch axis at n == 1, so the pipeline used
+    to hand roma a length-1 vector instead of a quaternion and crash with an
+    IndexError before writing anything.
+    """
+    result = _run_particles_cli(tmp_path, n_particles=1)
+    assert result.returncode == 0, result.stderr
+
+    import mrcfile
+
+    with mrcfile.open(str(tmp_path / "particles.mrcs"), permissive=True) as mrc:
+        assert mrc.data.shape[0] == 1

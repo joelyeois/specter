@@ -37,6 +37,26 @@ DEFAULT_PDB_SAVEFOLDER = default_pdb_cache_dir()
 warnings.simplefilter("ignore", PDBConstructionWarning)
 
 
+# (chain, residue number, insertion code, atom name)
+_AtomKey = tuple[str, int, str, str]
+
+
+def _atom_key(
+    chain: "gemmi.Chain", residue: "gemmi.Residue", atom: "gemmi.Atom"
+) -> _AtomKey:
+    """
+    Identify one atom uniquely within a gemmi model.
+
+    The insertion code is part of the identity, not decoration: an entry like
+    3DY4 numbers whole stretches of residues `10`, `10A`, `10B`, ... , so a key
+    without it collapses thousands of genuinely distinct atoms onto each other.
+    `get_atom_species` treats a repeated key as an alternate conformer to be
+    dropped, so those atoms went missing and the returned species list no
+    longer lined up with `atomic_numbers`.
+    """
+    return (chain.name, residue.seqid.num or 0, residue.seqid.icode, atom.name)
+
+
 class PDB:
     def __init__(
         self,
@@ -125,6 +145,27 @@ class PDB:
         self.atom_species: list[str | None] | None = None
         if compute_atom_species:
             self.atom_species = PDB.get_atom_species(self.filepath, verbose=verbose)
+            # Coordinates come from Biopython and species from gemmi, so the
+            # two lists are only meaningful zipped together. Catch any residual
+            # disagreement here, where the structure can be named, rather than
+            # letting it surface as an opaque mask/tensor shape error deep in
+            # PotentialBuilder. A multi-model file trips this: Biopython walks
+            # every model, gemmi types only the first.
+            if len(self.atom_species) != self.atomic_numbers.shape[0]:
+                n_models = len(list(self.structure))
+                raise ValueError(
+                    f"{self.filepath}: bonded-species typing produced "
+                    f"{len(self.atom_species)} entries for "
+                    f"{self.atomic_numbers.shape[0]} atoms"
+                    + (
+                        f" -- the file holds {n_models} models, and only the "
+                        "first can be typed. Extract a single model, or use "
+                        "potential_parameterization='kirkland'/'lobato'."
+                        if n_models > 1
+                        else ". Use potential_parameterization="
+                        "'kirkland'/'lobato' for this structure."
+                    )
+                )
 
         # center coordinates
         if origin is None:
@@ -419,18 +460,40 @@ class PDB:
 
         # First pass: complete the model (adds hydrogens as dummy,
         # zero-occupancy atoms if the monomer library has geometry for
-        # them — a no-op without one), mirroring sffit's from_gemmi().
-        topo = gemmi.prepare_topology(
-            st, monlib, h_change=gemmi.HydrogenChange.ReAdd, warnings=warnings_sink
-        )
-        for m in topo.find_missing_atoms(including_hydrogen=True):
-            mon = monlib.monomers[m.res_id.name]
-            monat = mon.find_atom(m.atom_name)
-            atom = gemmi.Atom()
-            atom.occ = 0.0
-            atom.element = monat.el
-            atom.name = m.atom_name
-            st[0].find_cra(m).residue.add_atom(atom)
+        # them), mirroring sffit's from_gemmi().
+        #
+        # This only runs with a real monomer library. `HydrogenChange.ReAdd`
+        # *removes* every existing hydrogen before re-adding it from library
+        # geometry, so without a library to re-add from it is not a no-op: it
+        # strips the file's own hydrogens outright (22FX loses 4968 atoms),
+        # leaving fewer species than there are atoms in `atomic_numbers`.
+        #
+        # The added atoms are tracked by identity rather than recognised by
+        # their zero occupancy later: deposited structures may legitimately
+        # contain zero-occupancy atoms (1FA2 has 208 of them), and dropping
+        # those as "dummies" would misalign the two lists the same way.
+        added_keys: set[_AtomKey] = set()
+        if len(monlib.monomers):
+            topo = gemmi.prepare_topology(
+                st, monlib, h_change=gemmi.HydrogenChange.ReAdd, warnings=warnings_sink
+            )
+            for m in topo.find_missing_atoms(including_hydrogen=True):
+                # A residue the library has no entry for (including the
+                # blank-named components some entries carry) can't be
+                # completed; its atoms keep whatever bonds the file provides.
+                if m.res_id.name not in monlib.monomers:
+                    continue
+                mon = monlib.monomers[m.res_id.name]
+                monat = mon.find_atom(m.atom_name)
+                if monat is None:
+                    continue
+                atom = gemmi.Atom()
+                atom.occ = 0.0
+                atom.element = monat.el
+                atom.name = m.atom_name
+                cra = st[0].find_cra(m)
+                added_keys.add(_atom_key(cra.chain, cra.residue, atom))
+                cra.residue.add_atom(atom)
 
         # Second pass: final bond graph, now including any added atoms.
         topo = gemmi.prepare_topology(
@@ -443,13 +506,10 @@ class PDB:
         # a methyl carbon's three separate hydrogen neighbors are each
         # counted (not collapsed into one "H").
         identity = {
-            cra.atom: (cra.chain.name, cra.residue.seqid.num or 0, cra.atom.name)
-            for cra in st[0].all()
+            cra.atom: _atom_key(cra.chain, cra.residue, cra.atom) for cra in st[0].all()
         }
         element_of = {key: atom.element.name for atom, key in identity.items()}
-        neighbor_keys: dict[tuple[str, int, str], set[tuple[str, int, str]]] = (
-            defaultdict(set)
-        )
+        neighbor_keys: dict[_AtomKey, set[_AtomKey]] = defaultdict(set)
         for bond in topo.bonds:
             a, b = bond.atoms
             ka, kb = identity[a], identity[b]
@@ -458,12 +518,12 @@ class PDB:
 
         species: list[str | None] = []
         n_matched = 0
-        seen: set[tuple[str, int, str]] = set()
+        seen: set[_AtomKey] = set()
         for cra in st[0].all():
-            if cra.atom.occ == 0.0:
+            key = _atom_key(cra.chain, cra.residue, cra.atom)
+            if key in added_keys:
                 # dummy atom added only to inform its neighbors' typing
                 continue
-            key = (cra.chain.name, cra.residue.seqid.num or 0, cra.atom.name)
             if key in seen:
                 # alternate conformer of an atom already typed (gemmi's
                 # `all()` visits every altloc; Biopython/get_atoms_and_

@@ -58,6 +58,13 @@ def run_micrograph(config: MicrographConfig) -> None:
     specter.set_verbosity(logging.INFO)
     t_start = time.perf_counter()
 
+    if config.seed is not None:
+        specter.seed(config.seed)
+    else:
+        generated_seed = int(torch.randint(0, 2**31 - 1, (1,)).item())
+        specter.seed(generated_seed)
+        _console.print(f"[dim]No seed given -- using seed={generated_seed}[/dim]")
+
     # --- Building 3D scattering potential ---
     _section("Building 3D scattering potential")
     pdb = PDB(

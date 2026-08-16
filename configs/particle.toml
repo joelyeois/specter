@@ -31,7 +31,9 @@ save_clean_exitwaves = false
 [compute]
 device = "cpu"                   # cpu | cuda | cuda:0 | 0,1,2,3 (multi-GPU)
 batchsize = "auto"               # particles per forward pass; "auto" fits it to the free
-                                 # memory on `device`, or set an integer to pin it
+                                 # memory on `device` at run time -- pin an integer if you set
+                                 # a seed, since batching decides which random draw reaches
+                                 # which particle (a seeded run rejects "auto")
 
 [output]
 output_dir = "specter-data/particles"
@@ -66,7 +68,12 @@ potential_parameterization = "shtyrov"   # shtyrov | kirkland | lobato
 potential_method = "analytic"            # analytic | 2d | 3d
 # rcut = 6.0                     # Å, auto-detected per-structure if unset
 conv_backend = "fftconvolve"     # unused for potential_method="analytic"
-periodic = false                 # forces potential_method="3d" if true
+periodic = false                 # wrap atom density across the box faces when voxelizing. Keep
+                                 # false for a particle: a protein is a finite object, so wrapping
+                                 # would smear its edge density onto the opposite face. Only for
+                                 # coordinates that really are periodic, fed through PotentialBuilder
+                                 # yourself -- the built-in ice path does its own wrapping and never
+                                 # uses this. Requires potential_method="3d"; "analytic"/"2d" raise.
 # atom_species = ["C.3", "N.ar"]  # per-atom bonded species; auto-detected from PDB bonds if unset
 # shtyrov_params_path = "path/to/params.json"  # override the bundled Shtyrov parameter table
 # mmcif_filepath = "path/to/structure.cif"     # explicit mmCIF source for bond-typing
@@ -90,7 +97,8 @@ crowd_move_to_cpu = false
 water_air_interface = false
 
 # reproducibility
-# seed = 20260731                # RNG seed for pose/CTF/dose sampling; auto-generated and logged if unset
+# seed = 20260731                # RNG seed for pose/CTF/dose sampling; auto-generated and logged if
+                                 # unset. Requires an integer `batchsize` above, not "auto".
 
 # aberration richness for synthetic (non-.cs-driven) generation
 astigmatism = 0.0                # Å, magnitude of dfu - dfv; single value or [low, high]

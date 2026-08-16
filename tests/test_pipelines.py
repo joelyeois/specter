@@ -217,7 +217,6 @@ def test_run_particle_stack_auto_batchsize(tmp_path: Path) -> None:
         n_pixels=32,
         pixel_size=4.0,
         n_particles=3,
-        seed=11,
         scattering_model="projection",
         ice_model="none",
         detector_model="none",
@@ -230,3 +229,24 @@ def test_run_particle_stack_auto_batchsize(tmp_path: Path) -> None:
 
     with mrcfile.open(tmp_path / "auto_batch.mrcs") as mrc:
         assert mrc.data.shape == (3, 32, 32)
+
+
+def test_run_particle_stack_rejects_seed_with_auto_batchsize(tmp_path: Path) -> None:
+    """
+    A seeded run must not silently accept batchsize="auto".
+
+    Batching decides which random draw (ice crop, Poisson noise) reaches which
+    particle, and "auto" is sized to the memory free on the device at run time
+    -- so the same seed would give a different stack on a different machine.
+    """
+    config = ParticleStackConfig(
+        pdb_code="6bdf",
+        n_pixels=32,
+        n_particles=2,
+        seed=11,
+        device="cpu",
+        output_dir=str(tmp_path),
+    )
+    assert config.batchsize == "auto"
+    with pytest.raises(ValueError, match="batchsize"):
+        run_particle_stack(config)

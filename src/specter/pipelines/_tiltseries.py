@@ -91,6 +91,13 @@ def run_tilt_series(
 
     t_start = time.perf_counter()
 
+    if config.seed is not None:
+        specter.seed(config.seed)
+    else:
+        generated_seed = int(torch.randint(0, 2**31 - 1, (1,)).item())
+        specter.seed(generated_seed)
+        _console.print(f"[dim]No seed given -- using seed={generated_seed}[/dim]")
+
     # --- Loading specimen volume ---
     _section(f"Loading specimen volume from {config.volume_path}")
     volume = load_specimen_volume(config.volume_path)

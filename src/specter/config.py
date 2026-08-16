@@ -494,6 +494,9 @@ class MicrographConfig:
     # --- Compute ---
     device: str = "cpu"
 
+    # --- Reproducibility ---
+    seed: int | None = None
+
     # --- Output ---
     output_dir: str = field(default_factory=lambda: default_output_dir("micrographs"))
     filename: str = "micrographs"
@@ -558,6 +561,7 @@ MICROGRAPH_HELP: dict[str, str] = {
     "save_clean_exitwaves": "Save clean (particle-only, no ice) exit wave "
     "magnitude and phase.",
     "device": "Device to use: cpu | cuda | cuda:0.",
+    "seed": "RNG seed for ice, crowding, pose and noise sampling. Auto-generated and logged if unset.",
     "output_dir": "Directory to save .mrcs and .star files.",
     "filename": "Base name for output files (no extension).",
 }
@@ -630,6 +634,9 @@ class TiltSeriesConfig:
     # --- Compute ---
     device: str = "cpu"
 
+    # --- Reproducibility ---
+    seed: int | None = None
+
     # --- Output ---
     output_dir: str = field(default_factory=lambda: default_output_dir("tiltseries"))
     filename: str = "tilt_series"
@@ -682,6 +689,7 @@ TILT_SERIES_HELP: dict[str, str] = {
     "normalize_tilt_series": "Normalize each tilt image to zero mean and unit std.",
     "save_exitwaves": "Save exit wave magnitude and phase as separate .mrcs files.",
     "device": "Device to use: cpu | cuda | cuda:0.",
+    "seed": "RNG seed for ice, crowding, pose and noise sampling. Auto-generated and logged if unset.",
     "output_dir": "Directory to save output files.",
     "filename": "Base name for output files (no extension).",
 }
@@ -1207,6 +1215,16 @@ def apply_overrides(config: ConfigT, overrides: dict) -> ConfigT:
     ParticleStackConfig | MicrographConfig
         The same `config` instance, mutated.
     """
+    valid = {f.name for f in fields(config)}
+    unknown = sorted(set(overrides) - valid)
+    if unknown:
+        # A blind setattr would happily attach an override under a name no
+        # field reads, so the flag would parse, be accepted, and do nothing.
+        raise ValueError(
+            f"apply_overrides: no such field on {type(config).__name__}: "
+            f"{', '.join(repr(k) for k in unknown)}. Valid fields: "
+            f"{', '.join(sorted(valid))}."
+        )
     for key, value in overrides.items():
         setattr(config, key, value)
     return config

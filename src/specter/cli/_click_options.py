@@ -116,7 +116,12 @@ def build_config_options(
                 f"'{config_cls.__name__}.{f.name}'."
             )
 
-        options.append(click.RichOption([f"--{f.name}"], **kwargs))
+        # The bare `f.name` decl pins the parameter name to the dataclass
+        # field exactly. Without it Click derives the name from the flag by
+        # lowercasing, so a mixed-case field (deltaV_V, deltaI_I) would come
+        # back from `collect_overrides` as "deltav_v" and never match the
+        # field it is meant to override.
+        options.append(click.RichOption([f"--{f.name}", f.name], **kwargs))
 
     return options
 

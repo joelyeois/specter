@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import os
 from pathlib import Path
 
@@ -329,3 +330,32 @@ def test_load_config_names_unknown_fields_and_renames(tmp_path):
     typo.write_text("[specimen]\nv_siz = 5.0\n")
     with pytest.raises(ValueError, match="unknown TomogramConfig field"):
         load_config(str(typo), TomogramConfig)
+
+
+def test_apply_overrides_rejects_unknown_field() -> None:
+    """A misnamed override must fail loudly, not attach a field nothing reads."""
+    config = ParticleStackConfig(pdb_code="1abc")
+    with pytest.raises(ValueError, match="no such field"):
+        apply_overrides(config, {"deltav_v": 1e-5})
+
+
+def test_build_config_options_preserves_mixed_case_field_names() -> None:
+    """
+    Click must not lowercase a mixed-case field into a name no field matches.
+
+    `--deltaV_V` used to arrive as "deltav_v", so apply_overrides set an
+    attribute nothing reads and the flag silently did nothing.
+    """
+    from specter.cli._click_options import build_config_options
+
+    names = {opt.name for opt in build_config_options(ParticleStackConfig)}
+    assert "deltaV_V" in names
+    assert "deltaI_I" in names
+    assert "deltav_v" not in names
+
+
+@pytest.mark.parametrize("config_cls", [MicrographConfig, TiltSeriesConfig])
+def test_seed_is_configurable(config_cls: type) -> None:
+    """Every generation command needs a seed to be reproducible at all."""
+    assert "seed" in {f.name for f in dataclasses.fields(config_cls)}
+    assert config_cls.seed is None

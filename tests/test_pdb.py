@@ -142,3 +142,68 @@ def test_species_aligns_with_atomic_numbers():
     assert pdb.atom_species is not None
     assert len(pdb.atom_species) == pdb.atomic_numbers.shape[0]
     assert len(pdb.atom_species) == pdb.coordinates.shape[0]
+
+
+# Beta-amylase: 208 of its deposited atoms carry occupancy 0.0, which is also
+# the marker get_atom_species stamps on the dummy hydrogens it adds while
+# building the bond graph. Typing once dropped the deposited ones too, so
+# atom_species came back 208 entries short of atomic_numbers and the Shtyrov
+# potential path died on the length mismatch.
+_ZERO_OCC_FIXTURE = (
+    Path(__file__).parent.parent / "specter-data" / "pdb" / "1fa2-assembly1.cif"
+)
+
+
+@pytest.mark.skipif(
+    not _ZERO_OCC_FIXTURE.exists(), reason="1fa2 not in the local PDB cache"
+)
+def test_zero_occupancy_atoms_are_still_typed():
+    """Deposited zero-occupancy atoms are not mistaken for added dummy atoms."""
+    import gemmi
+
+    st = gemmi.read_structure(str(_ZERO_OCC_FIXTURE))
+    st.setup_entities()
+    assert sum(1 for cra in st[0].all() if cra.atom.occ == 0.0) > 0, (
+        "fixture no longer has zero-occupancy atoms; pick another structure"
+    )
+
+    pdb = PDB(str(_ZERO_OCC_FIXTURE), verbose=False, compute_atom_species=True)
+    assert pdb.atom_species is not None
+    assert len(pdb.atom_species) == pdb.atomic_numbers.shape[0]
+
+
+# Each of these once returned an atom_species list of the wrong length, which
+# surfaced far downstream as an opaque IndexError inside the Shtyrov potential
+# builder (`shape of the mask [N] does not match the indexed tensor [M]`) --
+# and shtyrov is the default parameterization, so these structures could not be
+# rendered at all. One entry per distinct root cause:
+#   3DY4  residues numbered 10, 10A, 10B... -- the atom key ignored the
+#         insertion code, so distinct atoms collided and were dropped as
+#         though they were alternate conformers.
+#   7a4m  carries explicit hydrogens -- HydrogenChange.ReAdd strips every
+#         existing H before re-adding it from monomer-library geometry, so
+#         without a library the strip happened and the re-add did not.
+_ALIGNMENT_FIXTURES = ["3DY4-assembly1.cif", "7a4m.cif"]
+
+
+@pytest.mark.parametrize("name", _ALIGNMENT_FIXTURES)
+def test_atom_species_aligns_for_awkward_structures(name):
+    """atom_species stays index-aligned with atomic_numbers, element for element."""
+    from specter.atom.atom import atom_symbol
+
+    path = Path(__file__).parent.parent / "specter-data" / "pdb" / name
+    if not path.exists():
+        pytest.skip(f"{name} not in the local PDB cache")
+
+    pdb = PDB(str(path), verbose=False, compute_atom_species=True)
+    assert pdb.atom_species is not None
+    assert len(pdb.atom_species) == pdb.atomic_numbers.shape[0]
+
+    # Equal lengths alone would still pass if the two lists were shifted
+    # relative to each other, so check the elements agree entry by entry.
+    mismatched = [
+        i
+        for i, (z, s) in enumerate(zip(pdb.atomic_numbers.tolist(), pdb.atom_species))
+        if s is not None and str(atom_symbol(int(z))).upper() != s.split("(")[0].upper()
+    ]
+    assert not mismatched, f"{len(mismatched)} atoms typed as the wrong element"

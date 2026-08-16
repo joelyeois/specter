@@ -77,6 +77,24 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
     is_main = "LOCAL_RANK" not in os.environ
 
     if config.seed is not None:
+        # Stochastic stages (ice crop selection, Poisson noise) draw from the
+        # global RNG stream inside each forward pass, so the batch boundaries
+        # decide which draw lands on which particle -- change the batch size
+        # and the same seed gives a different stack. That is harmless when the
+        # batch size is pinned, but `batchsize="auto"` is sized to whatever
+        # memory happens to be free on the device at run time, so it can differ
+        # between machines, GPUs, or two runs on a busy node. Rather than
+        # quietly hand back an unreproducible stack, refuse the combination.
+        if config.batchsize == "auto":
+            raise ValueError(
+                "seed is set but batchsize='auto': 'auto' sizes the batch to "
+                "the memory free on the device at run time, and batching "
+                "changes which random draw reaches which particle, so the "
+                "same seed would not reproduce the same stack on another "
+                "machine. Pin an integer batchsize (e.g. batchsize=32, or "
+                "--batchsize 32) to make the run reproducible, or drop the "
+                "seed to accept a non-reproducible run."
+            )
         specter.seed(config.seed)
     else:
         generated_seed = int(torch.randint(0, 2**31 - 1, (1,)).item())
@@ -180,7 +198,11 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
     else:
         n = config.n_particles
 
-        quats = rotations.random_quaternion(n)
+        # random_quaternion squeezes the batch axis at n == 1, returning (4,)
+        # rather than (1, 4) -- indexing that per-particle later yields a
+        # length-1 vector and roma rejects it. Same guard as CrowdingSimulator
+        # and TomogramSpecimenGenerator apply to random_rotation_matrix.
+        quats = rotations.random_quaternion(n).reshape(n, 4)
 
         defocus_A = _uniform_sample(config.defocus, n)
         astigmatism_magnitude = _uniform_sample(config.astigmatism, n)

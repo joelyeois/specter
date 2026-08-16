@@ -23,9 +23,9 @@ spatial frequency \(k\), Å⁻¹) is tabulated numerically from relativistic
 Hartree-Fock calculations, not available in closed form. To use it inside
 a differentiable simulator, SPECTER relies on published analytic fits that
 express \(f_e(k)\) as a small sum of terms with known inverse Fourier
-transforms -- so the same handful of fitted coefficients gives both the
-Fourier-space transfer factor and a real-space potential kernel, for every
-element up to Z=103. The three parameterizations below differ only in
+transforms. The same handful of fitted coefficients therefore gives both
+the Fourier-space transfer factor and a real-space potential kernel, for
+every element up to Z=103. The three parameterizations below differ only in
 which elementary functions they sum:
 
 | Parameterization | Fourier-space term | Real-space term |
@@ -37,8 +37,8 @@ which elementary functions they sum:
 ## Kirkland: Lorentzian + Gaussian sum
 
 Kirkland's fit (`load_kirkland_parameters`, `kirkland_atomic_potential_*`)
-uses three Lorentzian terms plus three Gaussian terms in Fourier space --
-12 parameters \((a_i, b_i, c_i, d_i)\) per element:
+uses three Lorentzian terms plus three Gaussian terms in Fourier space:
+12 parameters \((a_i, b_i, c_i, d_i)\) per element.
 
 \[
 f_e(k) = \sum_{i=1}^{3} \frac{a_i}{k^2 + b_i} \;+\; \sum_{i=1}^{3} c_i\, e^{-d_i k^2}
@@ -74,10 +74,10 @@ V_{\mathrm{2D}}(r) = 4\pi^2 a_0 e \sum_{i=1}^{3} a_i\, K_0\!\big(2\pi r \sqrt{b_
 
 The figure below decomposes gold's (Z=79) fitted potential into its
 individual Lorentzian and Gaussian terms. The Lorentzian terms dominate
-entirely -- their coefficients are one to two orders of magnitude larger
-than the Gaussians' -- and carry the near-singular behavior close to
-\(r=0\) (physically expected: an atomic nucleus is a point charge at this
-scale). The Gaussian terms only matter as a small, smooth correction
+entirely: their coefficients are one to two orders of magnitude larger
+than the Gaussians', and they carry the near-singular behavior close to
+\(r=0\) (physically expected, since an atomic nucleus is a point charge at
+this scale). The Gaussian terms only matter as a small, smooth correction
 across the whole range.
 
 ![Kirkland's fit for gold, decomposed into its 3 Lorentzian and 3 Gaussian terms.](../assets/images/atomic-potential-lorentzian-gaussian-terms-kirkland.png){ width="700" }
@@ -93,7 +93,7 @@ f_e(k) = \sum_{i=1}^{5} a_i\, \frac{2 + b_i k^2}{(1 + b_i k^2)^2}
 \]
 
 (`lobato_atomic_potential_3d_fourier`, Lobato Eq. 56.) This rational form's
-real-space inverse transform has no elementary closed form -- it comes out
+real-space inverse transform has no elementary closed form. It comes out
 in terms of the modified Bessel functions \(K_0\) and \(K_1\)
 (`lobato_atomic_potential_3d`, Lobato Eq. 15):
 
@@ -104,7 +104,7 @@ V(r) = \frac{\pi^2}{\kappa} \sum_{i=1}^{5} \frac{a_i}{b_i^{3/2}}
 \]
 
 `ice/_kernels.py` and `PotentialBuilder` treat Kirkland and Lobato as
-interchangeable, equally-validated element-indexed parameterizations --
+interchangeable, equally-validated element-indexed parameterizations;
 `atomic-potential-parameterization-comparison.png` below confirms they
 agree closely in practice.
 
@@ -116,8 +116,8 @@ most atoms sit in covalent or hydrogen-bonded environments (the oxygen in
 a water molecule, a carbon in a peptide backbone) whose local electron
 density differs measurably from an isolated atom's. Shtyrov et al. (2026)
 take a different approach entirely: rather than computing scattering
-factors ab initio, they infer them empirically -- via a Bayesian
-approach -- directly from high-resolution cryo-EM electrostatic-potential
+factors ab initio, they infer them empirically, via a Bayesian approach,
+directly from high-resolution cryo-EM electrostatic-potential
 maps (catalase reconstructions plus a broader public training set), then
 fit a pure five-term Gaussian sum per *bonded species descriptor* (e.g.
 `"O(HH)"`, `"C(HHHC)"`, as produced by `PDB.get_atom_species`) rather than
@@ -137,23 +137,23 @@ V(r) = 2\pi e\, a_0 \sum_{i=1}^{5} a_i \left(\frac{4\pi}{b_i}\right)^{3/2} e^{-4
 \]
 
 Atoms whose bonded species isn't in the bundled table fall back to
-`peng_atomic_potential_3d` -- gemmi's built-in per-element independent-atom
-scattering factors (Peng et al. 1996), evaluated with this same closed
-form, so it combines coherently (same units, same functional form) with
-matched-species Shtyrov kernels in one potential volume. `PotentialBuilder`
+`peng_atomic_potential_3d`, gemmi's built-in per-element independent-atom
+scattering factors (Peng et al. 1996). This is evaluated with the same
+closed form, so it combines coherently (same units, same functional form)
+with matched-species Shtyrov kernels in one potential volume. `PotentialBuilder`
 and `MicrographSpecimenGenerator`/`TomogramSpecimenGenerator` default to
 `parameterization="shtyrov"` for this reason.
 
 ![Kirkland, Lobato, and Peng's independent-atom-model potentials for carbon, overlaid.](../assets/images/atomic-potential-parameterization-comparison.png){ width="600" }
 
-Kirkland and Lobato -- both fit directly to the same tabulated bare-carbon
-scattering factors -- agree to within 0.1% everywhere in this plot. Peng's
+Kirkland and Lobato, both fit directly to the same tabulated bare-carbon
+scattering factors, agree to within 0.1% everywhere in this plot. Peng's
 independently-fit model tracks both closely for \(r \gtrsim 0.05\) Å (within
 a few %, briefly overshooting by ~15-20% around \(r\approx0.08\)-0.1 Å), but
-undershoots by more than 2x at \(r = 0.02\) Å -- well inside where any real
-bonding environment would matter, and consistent with it being a coarser,
-independently-fit reference used only as a per-element fallback for bonded
-species missing from the Shtyrov table.
+undershoots by more than 2x at \(r = 0.02\) Å, well inside where any real
+bonding environment would matter. This is consistent with it being a
+coarser, independently-fit reference used only as a per-element fallback
+for bonded species missing from the Shtyrov table.
 
 ## From a single atom to a potential volume
 
@@ -163,7 +163,7 @@ voxel grid two ways:
 
 - **Supersample-then-pool** (`compute_supersampling_parameters`,
   `build_potential_volume_fftconvolve_3d`/`_2d`): each element's kernel is
-  sampled on a finely-spaced grid (0.1 Å by default -- fine enough to
+  sampled on a finely-spaced grid (0.1 Å by default, fine enough to
   resolve the near-\(r=0\) peak), then average-pooled down to the main
   volume's voxel size. Atom positions are splatted onto the main grid with
   `soft_voxelize_coordinates` (trilinear, differentiable) and FFT-convolved
@@ -177,7 +177,7 @@ voxel grid two ways:
   coefficients without grouping atoms by shared element.
 
 Both give the exact voxel *average* of the potential rather than a point
-sample at the nearest grid point -- the underlying potential is sharply
+sample at the nearest grid point. The underlying potential is sharply
 peaked at the atom center, so a point sample would swing wildly with
 sub-voxel atom position.
 
@@ -188,9 +188,9 @@ examples in Kirkland Ch. 5, for the standard five-element test row (C, Si,
 Cu, Au, U). `demo-notebooks/compare-atomic-potentials-with-kirkland.ipynb`
 walks through the same four steps as `docs-figures/atomic_potentials.py`:
 
-1. **3D atomic potential vs. radius** (Kirkland Fig. 5.4) --
+1. **3D atomic potential vs. radius** (Kirkland Fig. 5.4):
    `kirkland_atomic_potential_3d` evaluated on a radial grid.
-2. **2D projected potential vs. radius** (Kirkland Fig. 5.5) --
+2. **2D projected potential vs. radius** (Kirkland Fig. 5.5):
    `kirkland_atomic_potential_2d`.
 3. **Transmission function** \(t(x,y) = e^{i\sigma V_{\mathrm{2D}}(x,y)}\)
    for all five atoms placed in a row (Kirkland Fig. 5.11), where
@@ -209,7 +209,7 @@ walks through the same four steps as `docs-figures/atomic_potentials.py`:
 </div>
 
 The line scan below places SPECTER's own output directly above a scan of
-Kirkland's Fig. 5.13 for comparison -- the dip depth and width at every
+Kirkland's Fig. 5.13 for comparison. The dip depth and width at every
 element match to within plotting resolution.
 
 ![SPECTER's bright-field line scan through C, Si, Cu, Au and U, compared against Kirkland's Fig. 5.13.](../assets/images/coherent-bright-field-linescan-kirkland.png){ width="600" }

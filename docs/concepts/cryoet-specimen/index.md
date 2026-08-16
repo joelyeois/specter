@@ -28,7 +28,7 @@ combination is valid.
 | Component | What it is | Module |
 |---|---|---|
 | [Carbon support film](carbon-film.md) | A holey-grid film with a rough, genuinely 3D rim | `specimen._carbon` |
-| [Membrane shape](../membrane-shape/index.md) | Organelle geometry — vesicles or wandering tubes | `specimen.membrane._field_*` |
+| [Membrane shape](../membrane-shape/index.md) | Organelle geometry: vesicles or wandering tubes | `specimen.membrane._field_*` |
 | [Bilayer & transmembrane proteins](bilayer.md) | Turning that geometry into calibrated potential, and embedding proteins in it | `specimen.membrane._profile`, `._raster`, `._placement` |
 | [Filaments](filaments.md) | Random-walk polymers (F-actin, single protofilaments) | `specimen.filament` |
 | [Microtubules](microtubules.md) | Closed 13-protofilament tubes, lumen and A-lattice seam | `specimen.filament` |
@@ -36,8 +36,8 @@ combination is valid.
 | [Regions & protein packing](packing.md) | Cytosol/lumen classification, RSA hard-sphere placement, crowding tables | `specimen.packing`, `specimen.tomogram._regions`, `specimen.cytosolic_filler` |
 
 Amorphous ice is **not** one of them. A `specter build tomogram` volume is
-the specimen alone; ice is added downstream, when the volume is imaged —
-see [Ice structure](../ice.md) and
+the specimen alone; ice is added downstream, when the volume is imaged.
+See [Ice structure](../ice.md) and
 [Generate a tilt series](../../user-guide/tilt-series.md).
 
 ## Assembly order
@@ -50,7 +50,7 @@ carbon film → membranes → filaments/microtubules → gold beads → targets 
 ```
 
 Nothing is re-placed once accepted. When a candidate position doesn't
-work, it is rejected and the generator moves on rather than backtracking —
+work, it is rejected and the generator moves on rather than backtracking,
 the same "reject and move on" philosophy throughout this module. That is
 why the order matters: it is exactly the order of decreasing placement
 freedom.
@@ -64,7 +64,7 @@ What each stage actually avoids:
 | Membranes (explicit `position_xyz`) | — (density overlapping carbon is clipped instead) | Everything else |
 | Filaments | Carbon (monomers landing in it are dropped) | Membrane shell, other filaments |
 | Microtubules | Carbon (dimers landing in it are dropped) | Membrane shell, filaments, other microtubules |
-| Gold beads | Membrane shell, carbon, filaments/microtubules, other beads | Nothing (not region-gated — fiducials sit in the ice) |
+| Gold beads | Membrane shell, carbon, filaments/microtubules, other beads | Nothing (not region-gated: fiducials sit in the ice) |
 | Targets | Membrane shell, carbon, filaments/microtubules, beads; restricted to their `location` region | — |
 | Filler | All of the above, plus already-placed targets | — |
 
@@ -87,16 +87,16 @@ segmenting the density afterward.
 
 ## Regions
 
-Once every membrane has been composited, the volume is classified —
-**once**, on the composite — into three disjoint regions: `shell` (bilayer
-material), `lumen` (any enclosed compartment), and `cytosol` (everything
-reachable from the volume's own boundary). Protein species declare which
-of the latter two they belong to, and are packed only there.
+Once every membrane has been composited, the volume is classified once, on
+the composite, into three disjoint regions: `shell` (bilayer material),
+`lumen` (any enclosed compartment), and `cytosol` (everything reachable
+from the volume's own boundary). Protein species declare which of the
+latter two they belong to, and are packed only there.
 
 This is topology, not geometry: it works for one vesicle, several disjoint
 ones, or none at all without special-casing. The carbon film lands in
-`shell` too — it is dense material that nothing should be packed into,
-which is exactly what `shell` means to the packing stage. See
+`shell` too, since it is dense material that nothing should be packed
+into, which is exactly what `shell` means to the packing stage. See
 [Regions & protein packing](packing.md).
 
 ## Ground truth
@@ -107,13 +107,13 @@ training data:
 
 ![Region map, per-instance membrane labels, and per-instance protein/filament/bead labels, all from the same mid-Z slice.](../../assets/images/cryoet-tomogram-ground-truth.png){ width="900" style="display:block;margin:1.2em auto;" }
 
-- `regions` — `0` cytosol, `1` shell, `2` lumen.
-- `membrane_labels` — which membrane instance a shell voxel belongs to.
+- `regions`: `0` cytosol, `1` shell, `2` lumen.
+- `membrane_labels`: which membrane instance a shell voxel belongs to.
   Where two instances overlap, first write wins.
-- `instance_labels` — one id per placed filament monomer, bead, target and
+- `instance_labels`: one id per placed filament monomer, bead, target and
   filler instance, handed out in that order. This is a single id space,
   not one per category.
-- Picks — copick-style `.ndjson` per species, positions and orientations.
+- Picks: copick-style `.ndjson` per species, positions and orientations.
   Targets are exported by default; filler is not.
 
 Membranes deliberately have no picks entry: a surface has no single
@@ -124,8 +124,8 @@ natural "position" the way a protein does, so `membrane_labels` and
 
 - **Transmembrane proteins get no per-instance voxel labels.** Their
   density is correctly present in the volume, and their placements are
-  recorded, but they don't appear in `instance_labels` — a documented gap,
-  not an oversight.
+  recorded, but they don't appear in `instance_labels`. This is a
+  documented gap, not an oversight.
 - **Collision tests are bounding spheres against distance fields**, not
   exact voxel overlap. A placed protein's true, non-spherical shape can
   still graze a filament or the bilayer very close to the boundary.
@@ -139,7 +139,7 @@ natural "position" the way a protein does, so `membrane_labels` and
 
 This generator is a clean-room second approach relative to
 [CryoTomoSim](https://github.com/carsonpurnell/cryotomosim_CTS) (CTS), not
-a port of its placement or membrane algorithms — an earlier CTS-replica
+a port of its placement or membrane algorithms. An earlier CTS-replica
 generator existed alongside it and was deleted once this one reached
 feature parity. Two components *are* descended from CTS directly, both
 generic bulk-material physics with no placement logic of their own: the

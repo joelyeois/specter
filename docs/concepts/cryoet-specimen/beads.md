@@ -11,8 +11,8 @@ from bulk material physics instead: gold's bulk mass density → number
 density → per-atom potential integral, using specter's own atomic
 potential parameterizations.
 
-Each bead is then built from **real fcc gold atoms** — randomly oriented,
-Debye-Waller jittered, splatted through the atomic potential kernel —
+Each bead is then built from **real fcc gold atoms**, randomly oriented,
+Debye-Waller jittered, and splatted through the atomic potential kernel,
 inside an irregular, volume-matched boundary.
 </div>
 
@@ -35,19 +35,19 @@ n = \frac{\rho\,N_A}{M}
 
 with \(\rho = 19.3\ \text{g/cm}^3\) and \(M = 196.97\ \text{g/mol}\) for
 gold. The volume integral of one atom's real-space potential is its
-\(k = 0\) Fourier component — the same physics `PotentialBuilder` uses per
-atom, just summed to a bulk mean instead of kept per position. It is
-resolution-independent, which matters: CTS's own approach injected a raw
-atom count, which is dimensionally inconsistent with V·Å-unit output and
-unphysically dependent on voxel size.
+\(k = 0\) Fourier component, the same physics `PotentialBuilder` uses per
+atom, just summed to a bulk mean instead of kept per position. This makes
+the calibration resolution-independent: injecting a raw atom count instead
+would be dimensionally inconsistent with V·Å-unit output and unphysically
+dependent on voxel size.
 
 ![Left, integrated potential across roughness values, normalised to the nominal sphere. Right, gold's mean inner potential by three independent routes.](../../assets/images/cryoet-bead-calibration.png){ width="900" style="display:block;margin:1.2em auto;" }
 
-The right panel is worth reading as a consistency check rather than a
-result. Bulk mass density and the fcc lattice's own number density
+The right panel functions as a consistency check rather than a result.
+Bulk mass density and the fcc lattice's own number density
 (\(4/a^3\) with \(a = 4.0782\) Å) are unrelated routes to the same
 material, and they agree to 0.2%. The rendered bead's interior mean lands
-on the same value, ≈29 V — the literature ballpark for gold.
+on the same value, ≈29 V, the literature ballpark for gold.
 
 ## Atoms, not a gas
 
@@ -61,22 +61,21 @@ kernel:
 Each bead draws its own crystal orientation uniformly over SO(3), so no
 two fiducials show their fringes running the same way.
 
-An earlier `fill="gas"` option reproduced CTS's model — atoms scattered
-uniformly at bulk number density and binned into voxels — and was removed
-rather than kept as a knob. A Poisson gas carries per-voxel shot noise a
-crystalline solid does not have (~10% of the projected signal at a 5 Å
-voxel against ~3% for the lattice, rising to ~22% at 2 Å) and collapses
-each atom's whole potential integral into a single voxel. There was no
-voxel size at which it was more accurate.
+A uniform gas of atoms, scattered at bulk number density and binned into
+voxels, is not offered as an alternative fill. A Poisson gas carries
+per-voxel shot noise a crystalline solid does not have (~10% of the
+projected signal at a 5 Å voxel against ~3% for the lattice, rising to
+~22% at 2 Å) and collapses each atom's whole potential integral into a
+single voxel. There is no voxel size at which it would be more accurate.
 
 ## The boundary
 
 Commercial cryo-ET fiducials are citrate-reduced colloidal gold:
 multiply-twinned, irregular particles. Neither of the obvious idealisations
-describes them — an exact sphere is not a shape gold forms, and fcc gold's
-equilibrium truncated octahedron describes an annealed single crystal. Both
-were offered at one point and both were removed; a Wulff solid in
-particular gave a population no shape variety at all, only pose variety.
+describes them well: an exact sphere is not a shape gold forms, and fcc
+gold's equilibrium truncated octahedron (a Wulff solid) describes an
+annealed single crystal, and gives a population no shape variety at all,
+only pose variety.
 
 What ships instead is a band-limited spherical-harmonic modulation of the
 radius, reusing the [membrane backend's](../membrane-shape/spherical-harmonics.md)
@@ -90,7 +89,7 @@ s = \frac{r_{\text{nominal}}}{\bigl\langle (1 + a f)^3 \bigr\rangle^{1/3}}
 
 \(f\) has zero mean and unit RMS over the sphere by Parseval, and \(a\) is
 `roughness`. The scale factor \(s\) **volume-matches** every realisation to
-a sphere of the nominal radius — which is what the left panel of the
+a sphere of the nominal radius, which is what the left panel of the
 calibration figure above shows: total integrated potential, and therefore
 projected signal, never depends on how lumpy a particular bead came out.
 
@@ -106,7 +105,7 @@ lumps at ~30° of arc, roughly a quarter of the bead across, which is the
 scale colloidal gold irregularity actually shows. The flat spectrum is a
 deliberate departure from the membrane backend's \(\propto \ell^{-2}\)
 default: that encodes the Helfrich thermal bending spectrum of a lipid
-bilayer, which has no analogue in a metal nanoparticle — a bead's
+bilayer, which has no analogue in a metal nanoparticle. A bead's
 irregularity comes from growth and twinning, not bending modes. Neither is
 known well enough to fit, so exposing them would only invite tuning an
 uncalibrated model until an image looked right. `roughness` stays exposed
@@ -125,7 +124,7 @@ They are **not** region-gated. A fiducial sits in the ice, not in a
 cytosol or lumen compartment, so `TomogramBeadSpec` has no `location`
 field the way a protein spec does.
 
-`radius` accepts a `[low, high]` pair, drawn fresh per instance — real
+`radius` accepts a `[low, high]` pair, drawn fresh per instance, since real
 colloidal gold is not monodisperse (a "10 nm" prep typically spans roughly
 8.5–11.5 nm). Radii are drawn *before* packing, so each bead's collision
 test uses its own size. `bead_roughness` takes a range the same way: with
@@ -145,7 +144,7 @@ size.
 | `bead_roughness` | RMS radius modulation as a fraction of radius; scalar or `[low, high]` | 0.12 |
 | `parameterization` | Atomic potential model for gold: `kirkland` or `lobato` | `kirkland` |
 
-`shtyrov` is not available here — the bundled species table has no
+`shtyrov` is not available here: the bundled species table has no
 unbonded elemental gold entry.
 
 Fixed by the material rather than exposed: `GOLD_FCC_A` (4.0782 Å),

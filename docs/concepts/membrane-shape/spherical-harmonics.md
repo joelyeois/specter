@@ -65,7 +65,7 @@ Coefficients are rescaled so \(\sum_{l,m} c_{lm}^2 = 1\). Since the
 \(Y_l^m\) are orthonormal,
 [Parseval's theorem](https://en.wikipedia.org/wiki/Parseval%27s_theorem)
 fixes the perturbation's RMS to exactly \(1\) regardless of
-`sh_max_degree`/`sh_spectrum_power` -- `sh_amplitude` alone sets the overall
+`sh_max_degree`/`sh_spectrum_power`. `sh_amplitude` alone sets the overall
 scale.
 
 ![The same random coefficients, with the harmonic sum truncated at increasing degree L.](../../assets/images/membrane-sh-degree-buildup.png){ width="900"  style="display:block;margin:1.2em auto;" }
@@ -118,8 +118,8 @@ per voxel.
 
 ![A small coarse synthesis grid next to the bilinearly interpolated field it stands in for.](../../assets/images/membrane-sh-angular-grid-interp.png){ width="800"  style="display:block;margin:1.2em auto;" }
 
-Interpolation error is ~0.17% of the perturbation's RMS -- well below the
-distance-transform's own discretization noise -- for a 30-150x reduction in
+Interpolation error is ~0.17% of the perturbation's RMS, well below the
+distance-transform's own discretization noise, for a 30-150x reduction in
 wall time.
 
 ## Parameters
@@ -150,7 +150,7 @@ concavity artifacts.
   sampling for protein placement may silently find zero sites; the
   generator warns explicitly when this happens.
 - **The SDF has voxel-scale texture**, visible as a faint ripple under
-  raking light (see the hero image) -- an expected consequence of computing
+  raking light (see the hero image), an expected consequence of computing
   distance to the nearest boundary voxel rather than the continuous
   surface. It's below the scale that affects the bilayer profile.
 

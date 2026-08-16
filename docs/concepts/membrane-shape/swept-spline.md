@@ -33,7 +33,7 @@ d_i = \frac{(1-f)\,d_{i-1} + f\,u_i}{\lVert(1-f)\,d_{i-1} + f\,u_i\rVert}
 gently-curving paths; \(f\) near 1 gives a tightly wandering one.
 
 The raw walk is recentered (bounding-box midpoint to the origin) and
-smoothed along path order with a 1D Gaussian filter -- not spatial
+smoothed along path order with a 1D Gaussian filter, not spatial
 smoothing, since a sinuous path can curl close to itself and spatial
 smoothing would then average together points that are near in space but far
 apart along the path.
@@ -55,7 +55,7 @@ h = \mathrm{clamp}\!\left(\tfrac12 + \tfrac{b-a}{2k},\ 0,\ 1\right), \qquad
 where \(a, b\) are two spheres' signed distances and \(k\) is
 `blend_sharpness_a`. Because this comes directly from an analytic blend of
 exact sphere SDFs, the result already satisfies the Eikonal property
-(\(|\nabla\phi| \approx 1\)) -- no separate distance-transform step is
+(\(|\nabla\phi| \approx 1\)), so no separate distance-transform step is
 needed here, unlike the EDT-derived backends.
 
 Spacing consecutive spheres (`step_length_a`) too far apart relative to
@@ -70,7 +70,7 @@ per-sphere radius instead: Gaussian noise, one value per path point,
 smoothed along path order (`radius_variation_sigma_points`) and applied
 multiplicatively, the same amplitude-normalized-perturbation pattern the
 [spherical harmonics](spherical-harmonics.md) backend uses for its own
-random radius function --
+random radius function:
 
 \[
 r_i = \texttt{tube\_radius\_a} \cdot \max(1 + a\,n_i,\ 0.25)
@@ -79,19 +79,19 @@ r_i = \texttt{tube\_radius\_a} \cdot \max(1 + a\,n_i,\ 0.25)
 with \(n_i\) the smoothed, unit-RMS noise and \(a\) = `radius_variation`.
 Not a second persistent random walk like the path direction: direction
 lives on a bounded sphere, so a persistent walk there just wanders in
-place, but radius is unbounded -- an actual random walk in radius would
+place, but radius is unbounded, and an actual random walk in radius would
 drift over a long path. Smoothed noise stays anchored to `tube_radius_a`
 regardless of path length.
 
 ![Same random path, constant vs. varying radius.](../../assets/images/membrane-swept-radius-variation.png){ width="800" style="display:block;margin:1.2em auto;" }
 
-Both tubes above come from the same seed -- path sampling happens before
+Both tubes above come from the same seed. Path sampling happens before
 the radius draw, so the underlying wander is identical; only the caliber
 differs.
 
 This changes what the beading check means, too: with `radius_variation >
 0`, the local radius will occasionally dip below `step_length_a` wherever
-the noise is low. That's intentional -- since the noise is smooth and
+the noise is low. That's intentional: since the noise is smooth and
 non-periodic, those dips land at irregular, uncorrelated points along the
 tube, reading as sparse varicosities rather than the mechanically-repeating
 beading pattern the check exists to catch. The check therefore compares
@@ -117,7 +117,7 @@ unchanged.
 ![Mid-surface contour at a tight concave bend, before and after cap_curvature.](../../assets/images/membrane-swept-curvature-capping.png){ width="420" style="display:block;margin:1.2em auto;" }
 
 The concave corner fills in slightly (surface pulled outward) and the
-adjacent convex bulge is pulled inward -- both reduce local curvature.
+adjacent convex bulge is pulled inward; both reduce local curvature.
 
 ## Parameters at a glance
 
@@ -135,7 +135,7 @@ adjacent convex bulge is pulled inward -- both reduce local curvature.
 ![Flexibility swept from a nearly straight rod to a tightly wandering, near-self-touching walk.](../../assets/images/membrane-swept-flexibility-sweep.png){ width="900" style="display:block;margin:1.2em auto;" }
 
 `flexibility=0.15`: 0.05 is nearly a straight rod, 0.35 produces a sharp,
-near-self-touching bend -- a good stress case, not a good default; 0.15
+near-self-touching bend (a good stress case, not a good default); 0.15
 gives a gently organic, clearly non-straight tube with no beading at the
 other defaults.
 
@@ -146,7 +146,7 @@ other defaults.
 - **Beading if mis-tuned.** `step_length_a` must stay well under
   `2 * tube_radius_a`; the generator warns when it doesn't.
 - **`cap_curvature` is an approximate proxy**, not exact mean curvature
-  flow -- an extreme enough bend can still leave a thin margin between
+  flow. An extreme enough bend can still leave a thin margin between
   leaflets even after relaxation.
 
 ## References

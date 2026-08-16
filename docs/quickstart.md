@@ -13,8 +13,8 @@ This downloads the structure, builds the scattering potential, applies CTF
 and detector effects, and writes a `.mrcs` / `.star` file pair.
 
 An example config lives in
-[`configs/`](https://github.com/joelyeois/specter/tree/main/configs) —
-copy `configs/particle.toml` and edit it for your own runs. It looks like
+[`configs/`](https://github.com/joelyeois/specter/tree/main/configs).
+Copy `configs/particle.toml` and edit it for your own runs. It looks like
 this:
 
 ```toml
@@ -61,7 +61,7 @@ micrographs, cryo-ET tilt series), see
 The `specter build tomogram` CLI composites a specimen volume from any
 combination of: one or more organic membranes, filament species (e.g.
 F-actin), and densely packed protein species (region-gated to
-cytosol/lumen when a membrane is present) — saving a `.mrc` volume plus
+cytosol/lumen when a membrane is present). It saves a `.mrc` volume plus
 copick-style `.ndjson` ground-truth picks and, by default, segmentation
 label volumes:
 
@@ -74,10 +74,10 @@ Protein species are placed in two priority stages within their region:
 truth, always exported to picks), then `[filler]` second, packed around
 the already-placed targets to crowd out the rest of that region (excluded
 from picks by default). Generation order overall is membranes, then
-filaments, then this protein fill — each stage avoids the previous ones'
+filaments, then this protein fill; each stage avoids the previous ones'
 placements. An example config lives in
-[`configs/tomogram.toml`](https://github.com/joelyeois/specter/tree/main/configs) —
-copy it and edit for your own runs. It looks like this:
+[`configs/tomogram.toml`](https://github.com/joelyeois/specter/tree/main/configs).
+Copy it and edit for your own runs. It looks like this:
 
 ```toml
 # Canonical default config for `specter build tomogram`.
@@ -111,8 +111,8 @@ and the compute/scaling flags for larger runs.
 ## Job management
 
 Generation runs can be recorded under a project name in a local job
-database. Inspect past runs with the `specter-jobs` CLI (installed
-automatically with the package) — see [Manage jobs](user-guide/jobs.md):
+database. Inspect past runs with the `specter-jobs` CLI, installed
+automatically with the package; see [Manage jobs](user-guide/jobs.md):
 
 ```bash
 specter-jobs list --project my-project

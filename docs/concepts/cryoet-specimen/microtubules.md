@@ -9,12 +9,12 @@
 A microtubule is a closed tube of 13 protofilaments, each a stack of
 αβ-tubulin dimers, wrapped so that the lateral tubulin–tubulin bonds form a
 3-start helix. `specter build tomogram` builds one as many rigid copies of a
-single tubulin dimer — the same machinery
+single tubulin dimer, the same machinery
 [filaments](filaments.md) use, so a microtubule costs one
 `PotentialBuilder` render plus one rotation per dimer.
 
 This is distinct from `PROTOFILAMENT_SPEC`, which gives a **single**
-protofilament — one strand, no tube, no lumen, no seam.
+protofilament: one strand, no tube, no lumen, no seam.
 
 !!! info "Source"
     `specter.specimen.filament` (`_lattice`, `_frames`, `_tube`, `_tubulin`),
@@ -42,7 +42,7 @@ axial stagger between adjacent protofilaments' registers.
 ### The seam is not a special case
 
 Walking once around the tube accumulates \(N s = n_\mathrm{start} r\) of
-axial offset — three monomers, i.e. **1.5 dimers**. Since the repeating unit
+axial offset: three monomers, i.e. **1.5 dimers**. Since the repeating unit
 is the dimer, protofilament 0 as predicted by 13 lateral bonds sits half a
 dimer away from where protofilament 0 actually is. That half-dimer is one
 monomer, so an α ends up against a β: the A-lattice **seam**, with the other
@@ -79,7 +79,7 @@ protofilaments essentially parallel to the tube axis at every \(N\).
 !!! warning "No supertwist"
     Non-13-protofilament microtubules do supertwist slightly, and specter
     does not model it. The residual implied by deposited helical parameters
-    is ~0.1°, and those parameters are not precise enough to pin it down —
+    is ~0.1°, and those parameters are not precise enough to pin it down:
     two 14-protofilament entries report 25.7° vs 25.75° per subunit, which
     alone moves the implied skew by ~0.15°. Modelling it properly needs
     direct moiré-period measurements as a source, not PDB metadata.
@@ -88,8 +88,8 @@ protofilaments essentially parallel to the tube axis at every \(N\).
 
 The wall only comes out right if **two** of the dimer's axes are pinned: its
 protofilament axis, and the face that points radially outwards.
-`align_principal_axis_to_z` — used for filament monomers and membrane
-proteins — fixes only the first, leaving the roll about it arbitrary.
+`align_principal_axis_to_z` (used for filament monomers and membrane
+proteins) fixes only the first, leaving the roll about it arbitrary.
 
 Rather than calibrate that roll, specter takes it from a structure that
 already has it. Deposited microtubule reconstructions are solved in the
@@ -110,8 +110,8 @@ default.
 
 The rendered wall peaks at the predicted protofilament radius and the lumen
 is empty. Its full width at half maximum is a little broader than a real
-microtubule's — the tubulin dimer is a real structure with a soft rendered
-edge, not a shell of zero thickness.
+microtubule's, since the tubulin dimer is a real structure with a soft
+rendered edge, not a shell of zero thickness.
 
 ## Bending
 
@@ -133,7 +133,7 @@ tomogram field.
 
 The strongly curved microtubules in real cellular tomograms are
 mechanically buckled, not thermally bent. Reach for **`bend_radius`** for
-those — raising the flex angle instead produces a wiggly, tangled tube,
+those: raising the flex angle instead produces a wiggly, tangled tube,
 which is a different object.
 
 Bending does not strain the lattice: no stretched outer wall, no compressed
@@ -146,7 +146,7 @@ what a voxel grid resolves.
 Each ring's protofilaments sit at fixed azimuths around the axis, so any
 roll drift between consecutive path points would shear them relative to one
 another. `parallel_transport_frames` carries one reference normal along the
-path, removing only the component each new tangent invalidates — the minimum
+path, removing only the component each new tangent invalidates: the minimum
 rotation that stays orthogonal, so no spurious twist accumulates. This is
 why microtubules cannot reuse `filament_orientations`, which leaves the roll
 about the tangent unconstrained.
@@ -166,7 +166,7 @@ specimen rather than a tilt-angle parameter.
 Otherwise placement inherits filaments' limitations: microtubules are not
 region-gated, and do not avoid one another, the membrane shell, or the
 carbon film (dimers landing in carbon are dropped afterwards, leaving a
-gap). They *are* avoided by everything placed after them — beads and the
+gap). They *are* avoided by everything placed after them: beads and the
 whole protein-fill stage read placed microtubule voxels as obstacles.
 
 ### Ground truth
@@ -189,7 +189,7 @@ available in `microtubule_dimer_instances`.
 | `bend_radius` | Radius of curvature, Å | `None` (thermal walk) |
 | `confine_to_slab` | Reject steeply tilted directions | `True` |
 
-In a TOML config these are `[[microtubules]]` tables — see
+In a TOML config these are `[[microtubules]]` tables; see
 [Build a tomogram specimen](../../user-guide/build-tomogram.md).
 
 ```toml
@@ -201,12 +201,12 @@ bend_radius = 30000.0    # 3 µm; omit for a straight, thermally bent tube
 
 ## Limitations
 
-- **No MIPs.** The lumen is empty — no microtubule inner proteins, no
+- **No MIPs.** The lumen is empty: no microtubule inner proteins, no
   lumenal particles.
 - **No MAPs or motors.** No kinesin/dynein decoration, no tau, no tip
   structures (flared or ram's-horn ends).
 - **No supertwist**, as above.
-- **No lattice defects** other than the seam — no protofilament-number
+- **No lattice defects** other than the seam: no protofilament-number
   transitions partway along a tube.
 - **No collision avoidance**, inherited from filament placement.
 

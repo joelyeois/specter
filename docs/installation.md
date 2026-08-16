@@ -36,8 +36,8 @@ uv pip install -e .
 
 ## Choosing a CUDA version
 
-The two CUDA-flavoured pins in `pyproject.toml` aren't fixed requirements —
-edit both to match your driver:
+The two CUDA-flavoured pins in `pyproject.toml` aren't fixed requirements.
+Edit both to match your driver:
 
 ```toml
 # 1. which PyTorch build uv resolves
@@ -66,7 +66,7 @@ supports (`nvidia-smi` reports it top-right):
 | 12.6+ | `https://download.pytorch.org/whl/cu126` | `cupy-cuda12x` |
 | none (CPU only) | `https://download.pytorch.org/whl/cpu` | remove the line |
 
-Rename the index in both places if you like — `name` is arbitrary, it just has
+Renaming the index in both places is fine; `name` is arbitrary, it just has
 to match what `[tool.uv.sources]` points at. Newer CUDA builds may also imply a
 newer minimum `torch`; `cu126` wheels start at torch 2.6, for instance.
 
@@ -74,7 +74,7 @@ newer minimum `torch`; `cu126` wheels start at torch 2.6, for instance.
 
     CUDA has minor-version compatibility: any 12.x build runs on a driver that
     supports 12.0 (≥ 525.60.13 on Linux). So a 12.4 or 12.8 driver runs the
-    default cu121 wheels fine — the pin only needs changing for CUDA 11, for
+    default cu121 wheels fine. The pin only needs changing for CUDA 11, for
     ROCm/CPU-only, or when you specifically want a newer runtime.
 
     `uv pip install --torch-backend auto` detects your driver and picks the
@@ -92,7 +92,7 @@ uv-specific setting) and gives you PyPI's default PyTorch build; use
 
 ## Optional extras
 
-- `docs` -- build these docs locally (`uv sync --extra docs`).
+- `docs`: build these docs locally (`uv sync --extra docs`).
 
 !!! note "GPU distance transforms"
 

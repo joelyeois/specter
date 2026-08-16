@@ -64,7 +64,7 @@ what SPECTER is for.
 
     Poses can come from a real experiment. Reading a CryoSPARC `.cs`
     file gives simulated data with the same poses, defoci and optics as
-    a real dataset — with ground truth attached.
+    a real dataset, with ground truth attached throughout.
 
 -   :material-wave:{ .lg .middle } **Propagation**
 

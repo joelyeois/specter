@@ -129,7 +129,7 @@ the protein-fill stage both treat placed filament voxels as obstacles.
 | `n_monomers` | Monomers per instance; an int, or a `(min, max)` drawn per instance | (10, 30) |
 
 In a TOML config these are `[[filaments]]` tables, or `actin = true` for
-the `ACTIN_SPEC` preset — see
+the `ACTIN_SPEC` preset; see
 [Build a tomogram specimen](../../user-guide/build-tomogram.md).
 
 ## Limitations

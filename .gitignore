@@ -45,3 +45,6 @@ site/
 .codex
 .claude/
 .superpowers/
+
+# CLI QA sweep run artifacts (the harness itself is tracked, see qa/README.md)
+qa/results/

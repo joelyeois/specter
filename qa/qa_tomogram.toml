@@ -1,0 +1,79 @@
+# Shrunk `specter build tomogram` config for the CLI QA sweep.
+#
+# Same feature surface as configs/tomogram.toml (targets, filler, membrane,
+# transmembrane proteins, filaments, microtubules, carbon film, beads) but at a
+# box size and copy count that runs in seconds, and using only PDB codes already
+# cached under specter-data/pdb so no sweep run hits the network.
+#
+# filler_from_pei2016 is OFF here on purpose: the baseline must be a run that
+# works, so that turning the reference tables on becomes a *finding* attributable
+# to that flag rather than a failure that blocks the whole sweep.
+
+[specimen]
+target_shape = [48, 192, 192]
+voxel_size = 12.0
+clip_axes = [true, true, true]
+filler_occupancy_fraction = 0.05
+gap = 5.0
+pdb_savefolder = "specter-data/pdb"
+seed = 11
+
+[output]
+output_dir = "specter-data/tomograms"
+filename = "tomogram"
+
+[picks]
+write_picks = true
+annotation_version = "1.0"
+write_segmentation = true
+
+[compute]
+device = "cpu"
+accumulator_device = "cpu"
+render_workers = 1
+render_chunk_size = 64
+
+[targets]
+targets = [
+    { pdb_source = "1fa2", n_copies = 4 },
+    { pdb_source = "1bxn", n_copies = 4 },
+]
+
+[filler]
+filler = [
+    { pdb_source = "1a6m", location = "cytosol" },
+]
+filler_from_pei2016 = false
+target_parameterization = "shtyrov"
+
+[[membrane]]
+shape_backend = "spherical_harmonics"
+bilayer_thickness = 30.0
+sh_axes_range = [200.0, 400.0]
+n_copies = 1
+
+[[membrane_transmembrane_specs]]
+pdb_source = "1C3W"
+n_copies = 4
+
+[membrane_settings]
+membrane_min_transmembrane_spacing = 40.0
+
+[[filaments]]
+code = "1J6Z"
+step = 27.3
+flex_deg = 12.0
+twist_deg = 166.15
+n_copies = 2
+n_monomers = [10, 20]
+
+[[microtubules]]
+n_copies = 1
+n_protofilaments = 13
+
+[[beads]]
+radius = [80.0, 120.0]
+n_copies = 4
+
+[bead_settings]
+bead_roughness = [0.0, 0.2]

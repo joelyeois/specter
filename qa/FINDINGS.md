@@ -100,17 +100,43 @@ mirroring the particles pipeline (fixed seed used, else generated and logged).
   Ice handles periodicity itself either way, so the "analytic can't do
   periodic" restriction is a `PotentialBuilder` limit, not a physics one.
 
-## Known gaps in this pass
+## Phase 2 — bad input (`qa/garbage.py`)
 
-- `--assembly` is unverified: every cached structure has an identical asymmetric
-  unit and biological assembly, so distinguishing them needs a network fetch.
-- `--membrane_min_transmembrane_spacing` showed no effect at 4 transmembrane
-  copies — too few for the constraint to bind. Needs a denser test, not yet a
-  finding either way.
-- `filler_table_min/max_mw_kda` are only meaningful with a reference table
-  enabled; the QA config keeps them off so the baseline is a run that works.
-- `device`, path handling, and `.cs`/`.star`-driven runs are deliberately
-  deferred to later phases.
+Does a value that cannot mean anything fail *usefully*? Before: of 24 such
+values on `simulate particles`, **9 ran to completion** and produced a
+plausible-looking, meaningless stack (negative dose, negative voltage, alpha of
+1.5, a defocus range given high-then-low), and **13 died ~10 s in** with
+`ZeroDivisionError` / "tensor with negative dimension" / "cannot convert float
+NaN to integer", naming nothing the user typed.
+
+After `validate_config()`: **46 of 46 rejected across all four commands**, each
+naming the field, its value and the requirement, within the process's own
+~11 s import floor. It also closed a gap Phase 1 found — Click validates a
+`--flag` against its `Choice`, but a TOML file bypasses that, and nothing
+enforced a `Literal` at runtime.
+
+## Phase 3 — the paths phases 1 and 2 skipped (`qa/phase3.py`)
+
+10 of 10 pass: `--device cuda`/`cuda:0`/`0,1` (multi-GPU DDP writes all 8
+particles), `batchsize="auto"` sizing itself against real GPU memory,
+`output_dir` created when missing, spaces in paths, re-runs overwriting in
+place, a relative `output_dir` resolving against the cwd, and
+`--cs_path`/`--star_path` through the CLI.
+
+`--assembly` is **verified** (network): 1BXN's biological assembly and its
+asymmetric unit produce different structures. It cannot be tested offline —
+every cached structure has AU == assembly.
+
+## Resolved: the three findings Phase 1 left open
+
+All three were artifacts of the Phase 1 baseline being too sparse, not no-ops:
+
+- `membrane_min_transmembrane_spacing` binds once the membrane is crowded —
+  at 60 transmembrane copies, spacing 40 vs 120 changes 28.6% of voxels. At
+  the 4 copies Phase 1 used, the constraint never bound.
+- `filler_table_min_mw_kda` 20 → 250 cuts the population from 27 species to
+  19, and `filler_table_max_mw_kda` 100 leaves 9. Phase 1 had the reference
+  tables switched off, so there was nothing for the cutoffs to cut.
 
 ## Reproducing
 

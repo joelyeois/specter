@@ -202,6 +202,10 @@ stay on `"legacy"`. `torch_ctf` also exposes a laser-phase-plate model
   2nd Edition. Springer.
 - Penczek, P. A. (2010). Image Restoration in Cryo-Electron Microscopy.
   *Methods in Enzymology*, 482, 35-72.
+- Yeo, J., & Loh, N. D. (2026). Pursuing the physics of cryo-EM image
+  formation. In *Current Approaches to Cryo-Electron Microscopy*,
+  *Progress in Molecular Biology and Translational Science*. Elsevier.
+  [doi:10.1016/bs.pmbts.2026.05.001](https://doi.org/10.1016/bs.pmbts.2026.05.001)
 - Grant, T., & Grigorieff, N. (2015). Measuring the optimal exposure for
   single particle cryo-EM using a 2.6 Å reconstruction of rotavirus VP6.
   *eLife*, 4, e06980. [doi:10.7554/eLife.06980](https://doi.org/10.7554/eLife.06980)

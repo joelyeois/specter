@@ -108,6 +108,10 @@ frames per exposure.
 
 ## References
 
+- Yeo, J., & Loh, N. D. (2026). Pursuing the physics of cryo-EM image
+  formation. In *Current Approaches to Cryo-Electron Microscopy*,
+  *Progress in Molecular Biology and Translational Science*. Elsevier.
+  [doi:10.1016/bs.pmbts.2026.05.001](https://doi.org/10.1016/bs.pmbts.2026.05.001)
 - Zambon, P. (2024). Modeling the impact of coincidence loss on count
   rate statistics and noise performance in counting detectors for imaging
   applications. *Frontiers in Physics*, 12, 1408430.

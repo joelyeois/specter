@@ -1,6 +1,203 @@
 # Aberrations
 
-!!! info "Work in progress"
-    Will cover the transfer function χ(k), its defocus/astigmatism,
-    spherical aberration, trefoil and beam-tilt terms, and the
-    B-factor/spatial/temporal/dose envelopes.
+The second stage of [forward simulation](forward-simulation.md) applies
+the microscope's optical transfer function to the exit wave produced by
+[scattering](scattering/index.md): defocus, spherical aberration,
+astigmatism, higher-order aberration terms, and the envelope functions
+that set a practical information limit. `Aberration` builds the total
+wavefront aberration phase \(\chi(k)\) term by term from a per-image
+`ctf_params` dict, following the conventions of Kirkland and Penczek.
+
+!!! info "Source"
+    `specter.aberrations._functions` (per-term \(\chi(k)\) contributions),
+    `_aberration.Aberration` (composes them into a transfer function), and
+    `_envelopes` (the multiplicative amplitude envelopes). Figures are
+    produced by `docs-figures/aberrations.py`, which calls
+    `Aberration.transfer_function` and the `_envelopes` functions
+    directly.
+
+## The transfer function
+
+`Aberration` applies a single complex-valued transfer function in Fourier
+space,
+
+\[
+\psi_{\mathrm{aberrated}} = \mathcal{F}^{-1}\!\big[\mathcal{F}[\psi]\cdot T(k)\big],
+\qquad
+T(k) = \exp(-i\chi(k))
+\]
+
+where \(\chi(k)\) is the sum of whichever terms are present in the
+`ctf_params` dict passed to `forward()` -- a key's absence means that
+term contributes nothing, so a caller only pays for (and only needs to
+supply) the aberrations relevant to their use case. Every term below is a
+pure function of a frequency-grid tensor and physical parameters, defined
+in `aberrations/_functions.py`, with no dependence on any class state
+other than the precomputed \(k\)-grid.
+
+### Defocus and astigmatism
+
+\[
+\chi_{\mathrm{defocus}} = -\pi\lambda k^2 \cdot
+\tfrac{1}{2}\Big[d_u + d_v + (d_v - d_u)\cos\big(2(\theta + \phi)\big)\Big]
+\]
+
+\(d_u\), \(d_v\) are the defocus along two orthogonal axes (Angstrom,
+positive = underfocus, the standard cryo-EM convention) and \(\phi\)
+(`dfang`) is the astigmatism angle in degrees, converted to radians
+internally. Isotropic defocus is the special case \(d_u = d_v\), where
+the \(\cos\) term vanishes and \(\chi\) depends only on \(|k|\).
+`dfv` defaults to `dfu` when omitted, so a caller wanting purely isotropic
+defocus only ever needs to supply `dfu`.
+
+### Spherical aberration
+
+\[
+\chi_{\mathrm{cs}} = \tfrac{\pi}{2}\lambda^3 k^4 C_s
+\]
+
+the \(k^4\) term responsible for the CTF's envelope-like falloff at high
+resolution even before any explicit envelope is applied, and for coupling
+to defocus in the Scherzer-condition optimum.
+
+### Higher-order, non-rotationally-symmetric terms
+
+Beam tilt, trefoil (3-fold astigmatism), and tetrafoil (a combination of
+4-fold astigmatism, \(n{=}4,\ m{=}{\pm}2\), and true 4-fold tetrafoil,
+\(n{=}4,\ m{=}{\pm}4\); spherical aberration itself is the \(m{=}0\)
+member of the same \(n{=}4\) family and is handled separately by
+`fn.cs`) break the purely radial symmetry defocus and Cs share:
+
+\[
+\chi_{\mathrm{tilt}} = -2\pi\lambda^2 C_s k^2\big(\sin\phi_y\, k_y + \sin\phi_x\, k_x\big)
+\]
+\[
+\chi_{\mathrm{trefoil}} = t_1 k^3 \sin(3\theta) + t_2 k^3 \cos(3\theta)
+\]
+\[
+\chi_{\mathrm{tetrafoil}} = q_1 k^4\cos(2\theta) + q_2 k^4\sin(2\theta) + q_3 k^4\cos(4\theta) + q_4 k^4\sin(4\theta)
+\]
+
+The figure below isolates each rotationally-asymmetric term against
+isotropic defocus, plotting \(\mathrm{Im}[T(k)]\) (the phase-contrast
+transfer, i.e. what makes a Thon ring pattern in a power spectrum) over
+the full 2D frequency plane:
+
+![Im[T(k)] over the 2D frequency plane for isotropic defocus, astigmatism, trefoil, and tetrafoil, each isolated.](../assets/images/aberrations-modes-2d.png){ width="900" style="display:block;margin:1.2em auto;" }
+
+Isotropic defocus gives concentric rings; astigmatism stretches them into
+ellipses (its cross section along `dfang` and perpendicular to it are
+`dfu` and `dfv` respectively); trefoil folds the pattern into a
+threefold, and tetrafoil a fourfold, lobed shape. All three break the
+assumption -- valid for defocus and Cs alone -- that the CTF depends only
+on \(|k|\).
+
+### Phase shift and amplitude contrast
+
+A constant phase offset, e.g. from a Volta phase plate, enters as
+\(\chi_{\mathrm{phaseshift}} = -\phi_0\). For `aberration_model="ctf"`
+with `specimen_absorption=False` (see below), amplitude contrast is also
+represented here rather than in the exit wave itself, as
+\(-\arccos(\alpha)\) added to \(\phi_0\) -- matching CryoSPARC's
+convention (`phase_shift - arccos(amp_contrast)`).
+
+### The isotropic 1D curve
+
+Putting defocus and Cs together at typical 300 kV single-particle values
+(2 µm defocus, 2.7 mm \(C_s\)) gives the familiar oscillating CTF curve:
+
+![Re[T(k)] and Im[T(k)] vs. spatial frequency, at 2 um defocus and 2.7 mm Cs, 300 kV. Dotted lines mark the first several zero crossings of Im[T(k)].](../assets/images/aberrations-ctf-1d.png){ width="700" }
+
+\(\mathrm{Im}[T(k)] = -\sin\chi(k)\) is the phase-contrast transfer
+function: its zero crossings are the spatial frequencies at which a
+power spectrum's Thon rings pass through zero, and the frequency spacing
+between crossings decreases with \(k\) because \(\chi(k)\) is quadratic
+in \(k\) near \(k=0\) (defocus-dominated) and quartic further out
+(\(C_s\)-dominated).
+
+## `holography` vs. `ctf` aberration models
+
+`aberration_model` controls two things: how the phaseshift term folds in
+amplitude contrast (above), and how `forward()`'s output is interpreted.
+`"holography"` (the default) returns the complex aberrated exit wave
+unchanged, matching every `scattering_model` except `"ctf"`, which
+returns a real-valued exit wave with no absorptive component of its own
+-- amplitude contrast has nowhere else to live, so it is folded into
+\(\chi\) via `specimen_absorption=False`. `"ctf"` instead takes the real
+part of the aberrated field, matching `Scattering.ctf`'s projected
+potential input. `specimen_absorption=True` (default) assumes amplitude
+contrast is already baked into the exit wave upstream, via
+`scattering.complex_potential`, so applying it again here would double
+count it -- this is why `BaseImager._init_optics` sets
+`specimen_absorption=self.scattering_model != "ctf"` rather than a fixed
+value.
+
+## Envelopes
+
+Four independent multiplicative amplitude envelopes can be layered onto
+the transfer function, each damping high-resolution signal for a
+different physical reason (`aberrations/_envelopes.py`, ported from
+teamtomo's `torch_fourier_filter.envelopes`):
+
+| Envelope | Physical cause | Parameter |
+|---|---|---|
+| B-factor | Specimen/detector-side blurring, lumped into one empirical Gaussian | `bfactor` (Å²) |
+| Spatial coherence | Finite beam convergence semi-angle | `convergence_angle` (mrad) |
+| Temporal coherence | Chromatic aberration from energy spread, HT and lens-current instability | `cc` (Å), `energy_spread`, `deltaV_V`, `deltaI_I` |
+| Dose | Cumulative radiation damage (Grant & Grigorieff 2015) | `dose_envelope=True`, per-image `dose` |
+
+\[
+E_B = e^{-B k^2/4}, \qquad
+E_{C_s} = \exp\!\Big[-\big(\tfrac{\pi\,\alpha_c}{\lambda}\big)^2\big(C_s\lambda^3 k^3 + \lambda\, \bar{d}\, k\big)^2\Big], \qquad
+E_{C_c} = \exp\!\Big[-\tfrac12\big(\pi\lambda\, \Delta f\, k^2\big)^2\Big]
+\]
+
+where \(\alpha_c\) is the convergence semi-angle, \(\bar d\) the mean
+defocus, and \(\Delta f = C_c\sqrt{(\Delta E/U)^2 + (\Delta V/V)^2 + (2\Delta I/I)^2}\)
+the effective focus spread from energy spread and HT/lens instabilities.
+The dose envelope instead follows Grant & Grigorieff's empirically fitted
+critical-dose curve and is exactly 1 below their fitted \(c=2.81\)
+e⁻/Å² threshold.
+
+![Left: the four envelopes in isolation, plus their product (B x Cs x Cc). Right: the same isotropic CTF curve from above, with and without the combined B/Cs/Cc envelope applied.](../assets/images/aberrations-envelopes.png){ width="900" style="display:block;margin:1.2em auto;" }
+
+Each envelope sets a different practical resolution limit, and the
+combined envelope (their product) is what ultimately damps the CTF's
+outer oscillations to near zero -- the "information limit" a real
+micrograph's Thon rings fade out at, well inside the detector's Nyquist
+frequency, even for a perfectly-focused, aberration-free instrument.
+
+`bfactor` is the one term with a constructor-level convenience:
+`Aberration(..., bfactor=...)` overrides any `"bfactor"` key already in
+`ctf_params`, since it is usually a single calibration value shared
+across a whole batch rather than a genuinely per-particle quantity (the
+same convenience `dose_per_angstrom` gets one level up, on
+`BaseImager`). Every other `ctf_params` key listed above is per-image and
+therefore only ever set through the dict, never as a constructor
+argument -- `Aberration.__init__` raises `TypeError` if one is passed by
+mistake.
+
+## `aberration_backend`: `"legacy"` vs. `"torch_ctf"`
+
+`BaseImager.aberration_backend` selects which engine actually computes
+the transfer function above: `"legacy"` (default) is `Aberration` as
+described on this page; `"torch_ctf"` swaps in
+`ctf.LegacyAberrationAdapter`, a torch-ctf-backed implementation verified
+term-by-term against `"legacy"` and against a real multi-particle
+CryoSPARC `.cs` file (`tests/test_ctf_legacy_adapter.py`). Both share the
+same `forward(exitwave, ctf_params)` call signature, so no other code
+needs to know which is in use. `torch_ctf` is opt-in and has no mapping
+for the `tetrafoil1`-`tetrafoil4` terms above -- they are silently
+ignored under that backend, so a config that relies on tetrafoil should
+stay on `"legacy"`. `torch_ctf` also exposes a laser-phase-plate model
+(`lpp_params`) that `"legacy"` has no equivalent for.
+
+## References
+
+- Kirkland, E. J. (2010). *Advanced Computing in Electron Microscopy*,
+  2nd Edition. Springer.
+- Penczek, P. A. (2010). Image Restoration in Cryo-Electron Microscopy.
+  *Methods in Enzymology*, 482, 35-72.
+- Grant, T., & Grigorieff, N. (2015). Measuring the optimal exposure for
+  single particle cryo-EM using a 2.6 Å reconstruction of rotavirus VP6.
+  *eLife*, 4, e06980. [doi:10.7554/eLife.06980](https://doi.org/10.7554/eLife.06980)

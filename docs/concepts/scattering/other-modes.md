@@ -235,6 +235,48 @@ back toward zero well before 320 Å regardless of `alpha` -- the \(a^2\)
 artifact reasserts itself once the specimen is thick enough for it to
 dominate again.
 
+## Does this depend on using ice?
+
+Every figure so far uses an amorphous `RandomIcemaker` slab -- diffuse,
+roughly homogeneous density. Real single-particle targets are the
+opposite: sparse, sharply peaked atomic density with large empty gaps.
+Repeating the sweep on a real protein potential (myoglobin, PDB `1mbo`,
+1601 atoms, built via the same `PotentialBuilder` path
+`run_particle_stack` uses, principal axis aligned to Z, 76 Å full depth)
+checks whether that matters:
+
+![Same error / mean-intensity / correlation sweep as above, run on a real protein instead of an ice slab.](../../assets/images/scattering-protein-comparison.png){ width="900" style="display:block;margin:1.2em auto;" }
+
+The pattern-fidelity result (right panel) reproduces exactly: `rytov`
+stays at correlation 1.000 throughout, while `firstborn` and `kinematic`
+collapse from \({\approx}0.9\) at the thinnest slice tested down to
+\({\approx}0\) by the protein's full depth -- the \(a\)-vs-\(b\) mixing
+argument in [Where the linearization
+breaks down](#where-the-linearization-breaks-down) doesn't depend on the
+specimen being ice; it only needs a predominantly-phase specimen, which
+a protein is too.
+
+The error ordering (left panel) does *not* reproduce as dramatically,
+and the reason is the same bias/residual decomposition from [Accuracy
+vs. thickness](#accuracy-vs-thickness) landing in the *other* regime this
+time. At the protein's full 76 Å depth, `firstborn`'s bias is only
+\(|b| \approx 0.0028\) (a 0.28% mean-intensity shift -- this protein
+never accumulates the kind of phase the 320 Å ice slab did) while its
+residual spread is \(\mathrm{std}(d) \approx 0.0093\), so
+\(|b|/\mathrm{std}(d) \approx 0.3\): the *opposite* of ice's \(5.2\) at
+320 Å. `firstborn`'s error is therefore no longer bias-dominated here --
+it genuinely reflects the (real) pattern mismatch -- and `projection`'s
+error, still exactly \(\mathrm{std}(d)_{\mathrm{ref}}\) (its bias is 0 at
+every thickness regardless of specimen), is only \({\approx}2.6\times\)
+smaller than `firstborn`'s rather than \({\approx}10\times\). The
+dramatic gap on the ice-slab plot was specific to that slab having
+accumulated enough phase for `firstborn`'s bias to swamp its own
+residual; it is not a general property of `projection` being a
+particularly strong approximation, or of `firstborn` being uniquely bad
+at small scale. `rytov` remains 2-3 orders of magnitude more accurate
+than every other approximate mode at every thickness tested, on both
+specimen types.
+
 ## References
 
 - Kirkland, E. J. (2010). *Advanced Computing in Electron Microscopy*, 2nd

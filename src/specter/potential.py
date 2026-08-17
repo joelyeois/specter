@@ -1236,6 +1236,31 @@ class PotentialBuilder(L.LightningModule):
 
             self.atomic_potentials_3d[i] = pot
 
+    def _cached_analytic_coefs(self) -> tuple[torch.Tensor, torch.Tensor] | None:
+        """
+        Return the cached analytic coefficients, migrated if the module has moved.
+
+        The cache is a plain attribute rather than a registered buffer, since it
+        is built lazily on first use and its size depends on the structure. That
+        keeps it invisible to ``nn.Module.to()``, so a builder first used on CPU
+        and then moved to GPU would otherwise return CPU coefficients and fail
+        mid-``forward`` with a device mismatch. Callers that rebuild the
+        potential every forward pass (``ImageGeneratorFromCoordinates``) hit this
+        on every GPU run.
+
+        Returns
+        -------
+        tuple of torch.Tensor, or None
+            The cached ``(a_coefs, b_coefs)`` on the module's current device, or
+            None if nothing has been cached yet.
+        """
+        if self._analytic_coefs is None:
+            return None
+        a_coefs, b_coefs = self._analytic_coefs
+        if a_coefs.device != self.device:
+            self._analytic_coefs = (a_coefs.to(self.device), b_coefs.to(self.device))
+        return self._analytic_coefs
+
     def _get_analytic_atom_coefficients(self) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Build (and cache) per-atom Gaussian coefficients for `forward(method="analytic")`.
@@ -1263,8 +1288,9 @@ class PotentialBuilder(L.LightningModule):
         a_coefs, b_coefs : torch.Tensor
             Per-atom Gaussian coefficients, shape (N, 5) each.
         """
-        if self._analytic_coefs is not None:
-            return self._analytic_coefs
+        cached = self._cached_analytic_coefs()
+        if cached is not None:
+            return cached
 
         assert self.atom_species is not None
         params_path = self.shtyrov_params_path
@@ -1341,8 +1367,9 @@ class PotentialBuilder(L.LightningModule):
         a_coefs, b_coefs : torch.Tensor
             Per-atom Gaussian coefficients, shape (N, 5) each.
         """
-        if self._analytic_coefs is not None:
-            return self._analytic_coefs
+        cached = self._cached_analytic_coefs()
+        if cached is not None:
+            return cached
 
         atomic_numbers = self.atomic_numbers.to(self.device)
         unique_z, group_ids_t = torch.unique(atomic_numbers, return_inverse=True)

@@ -1019,3 +1019,34 @@ def test_2d_and_3d_methods_agree_on_density_position(dx):
         return torch.nonzero(m > 0.5 * m.max()).float().mean(0)
 
     assert torch.allclose(centroid(proj_2d), centroid(proj_3d), atol=1e-6)
+
+
+# ---------------------------------------------------------------------------
+# The lazily-built analytic coefficient cache must follow the module's device
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA")
+def test_analytic_coefs_cache_follows_device():
+    """
+    A builder used on CPU and then moved to GPU must keep working.
+
+    `_analytic_coefs` is a plain attribute, not a registered buffer, so
+    `nn.Module.to()` cannot migrate it. Without an explicit device check the
+    second call returns CPU coefficients and dies inside `forward`. Anything
+    that rebuilds the potential every forward pass -- notably
+    `ImageGeneratorFromCoordinates` -- hits this on every GPU run.
+    """
+    torch.manual_seed(0)
+    coords = torch.randn(50, 3) * 5.0
+    atomic_numbers = torch.full((50,), 6, dtype=torch.long)
+
+    builder = PotentialBuilder(32, 2.0, atomic_numbers, progressbars=False)
+    on_cpu = builder(coords)
+    assert builder._analytic_coefs is not None  # populated by the first call
+
+    builder = builder.to("cuda")
+    on_gpu = builder(coords.to("cuda"))
+
+    assert builder._analytic_coefs[0].device.type == "cuda"
+    assert torch.allclose(on_cpu, on_gpu.cpu(), atol=1e-4)

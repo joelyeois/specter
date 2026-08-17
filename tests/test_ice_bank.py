@@ -10,6 +10,9 @@ from specter.ice import GradientSKIcemaker, IceBank, RandomIcemaker
 from specter.ice._bank import (
     blend_ice_into_volume,
     build_ice_cache,
+    build_one_ice_config,
+    decode_positions,
+    encode_positions,
     random_rotation_matrix,
 )
 from specter.ice import ice_config_filename
@@ -374,6 +377,91 @@ def test_build_ice_cache_names_configs_by_seed(tmp_path):
         ice_config_filename(seed) for seed in range(4)
     ]
     assert len(IceBank(str(tmp_path), progressbars=False)) == 4
+
+
+def test_fixed_point_encoding_round_trips_within_half_a_grid_step():
+    """encode/decode_positions must be accurate to half the grid spacing, and
+    that spacing must be uniform across the box -- the whole point of
+    fixed-point over float16, whose precision degrades with distance from the
+    origin (0.0625 A across the outer octave of a 256 A cell)."""
+    box_L = 256.0
+    torch.manual_seed(0)
+    pos = (torch.rand(200_000, 3) - 0.5) * box_L
+
+    decoded = decode_positions(encode_positions(pos, box_L), box_L)
+    spacing = box_L / 2 / 32767
+    err = (decoded - pos).abs()
+    assert err.max() <= spacing / 2 * 1.001  # allow float32 decode rounding
+    assert decoded.dtype == torch.float32
+
+    # Uniform, not magnitude-dependent: the worst error near the box face is
+    # no worse than near the centre. float16 fails this by ~8x.
+    r = pos.abs().max(dim=1).values
+    inner = err[r < box_L / 8].max()
+    outer = err[r > box_L / 2 * 0.9].max()
+    assert outer <= inner * 1.5, f"inner {inner:.2e} vs outer {outer:.2e}"
+
+    # And it beats raw float16 storage, the format it replaced.
+    f16_err = (pos.half().float() - pos).abs().max()
+    assert err.max() < f16_err / 8
+
+
+def test_icebank_reads_both_coordinate_encodings(tmp_path):
+    """A cache directory may hold configs written before the fixed-point
+    encoding existed (the bundled ice-data/ice_cache) alongside newer ones.
+    IceBank must serve both, keyed on `coord_encoding` rather than dtype."""
+    n, dx = 8, 1.0
+    torch.manual_seed(0)
+    gd = GradientSKIcemaker(n=n, dx=dx, progressbars=False)
+    gd.init_random()
+    gd.optimize(n_steps=2, record_every=2, tol=None)
+    pos, box_L = gd.positions, n * dx
+
+    # Old format: raw float16, no coord_encoding key.
+    torch.save(
+        {"positions": pos.half(), "box_L": box_L, "n": n, "dx": dx},
+        tmp_path / "config_000.pt",
+    )
+    # New format: fixed-point indices, tagged.
+    torch.save(
+        {
+            "positions": encode_positions(pos, box_L),
+            "box_L": box_L,
+            "n": n,
+            "dx": dx,
+            "coord_encoding": "int16_fixed",
+        },
+        tmp_path / "config_001.pt",
+    )
+
+    cache = IceBank(str(tmp_path), progressbars=False)
+    assert len(cache) == 2
+    for config in cache._configs:
+        assert config["positions"].dtype == torch.float32
+        assert config["positions"].abs().max() <= box_L / 2 * 1.001
+    # The fixed-point entry decodes closer to the original than the float16 one.
+    err_f16 = (cache._configs[0]["positions"] - pos).abs().max()
+    err_fixed = (cache._configs[1]["positions"] - pos).abs().max()
+    assert err_fixed < err_f16
+
+    assert cache.generate_ice(n=n, dx=dx, batchsize=1).shape == (1, n, n, n)
+
+
+def test_build_one_ice_config_writes_fixed_point_coordinates(tmp_path):
+    """Newly generated configs use the fixed-point encoding and say so, so
+    _load_config doesn't have to guess."""
+    path = tmp_path / "config_000.pt"
+    build_one_ice_config(
+        str(path), n=8, dx=1.0, n_steps=2, device="cpu", progressbars=False
+    )
+
+    raw = torch.load(path, weights_only=False)
+    assert raw["positions"].dtype == torch.int16
+    assert raw["coord_encoding"] == "int16_fixed"
+    # Timing metadata is recorded for cost estimation, under the same keys the
+    # bundled library uses.
+    assert raw["wall_time"] > 0
+    assert raw["n_steps_actual"] == 2
 
 
 def test_blend_ice_into_volume_random_icemaker_noncubic_nxy_nz():

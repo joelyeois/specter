@@ -28,6 +28,81 @@ from ..potential import build_atomic_potential_kernel, potential_from_deltas
 from ._random import RandomIcemaker
 
 
+#: Largest magnitude a signed 16-bit fixed-point coordinate index takes. One
+#: short of `int16`'s true minimum (-32768), so the mapping stays symmetric
+#: about zero and the box centre lands exactly on index 0.
+_FIXED_POINT_SCALE = 32767
+
+#: Value of a config's ``coord_encoding`` key when its positions are stored as
+#: :func:`encode_positions`' fixed-point indices. Absent from a config file
+#: means the older raw-float16 storage, which :meth:`IceBank._load_config`
+#: still reads -- the bundled ``ice-data/ice_cache`` predates this key.
+FIXED_POINT_ENCODING = "int16_fixed"
+
+
+def encode_positions(positions: torch.Tensor, box_L: float) -> torch.Tensor:
+    """
+    Quantize coordinates to signed 16-bit fixed-point indices for storage.
+
+    Coordinates are bounded (wrapped into ``[-box_L/2, box_L/2)``), which is
+    the precondition fixed-point needs and floating point cannot exploit.
+    Storing them as raw ``float16`` instead spends 5 of 16 bits on an exponent
+    covering a dynamic range these values never use, and leaves *relative*
+    precision on an absolute quantity: the spacing between representable
+    ``float16`` values grows with distance from the origin, reaching 0.0625 A
+    across the outer octave of a 256 A cell -- where, since volume grows as
+    r^3, half of all coordinates sit. This maps the box onto a uniform grid
+    instead, so every coordinate gets the same ``box_L / (2 * 32767)``
+    resolution (0.0039 A at ``box_L=256``) for the same two bytes.
+
+    Measured on a converged 256 A config: raw ``float16`` storage costs 0.0137
+    A RMS of coordinate accuracy and inflates the config's S(k) loss ~3800x
+    (1.2e-4 -> 0.456), while this encoding costs 0.0011 A and ~13x (-> 0.0016).
+    The rendered consequence of that difference is small -- 3.7% vs 0.3%
+    relative RMS on the potential, both far below shot noise at any realistic
+    dose -- so this is about not discarding the S(k) fidelity the optimiser
+    exists to produce, rather than about visible image quality.
+
+    ``int16`` rather than ``uint16``: ``torch.save`` cannot serialize
+    ``torch.uint16`` as of torch 2.5.1 (``KeyError: 'dtype torch.uint16 is
+    not recognized'``). A symmetric signed map has identical resolution.
+
+    Parameters
+    ----------
+    positions : torch.Tensor
+        Coordinates in Angstrom, shape (N, 3), within ``[-box_L/2, box_L/2]``.
+    box_L : float
+        Cubic cell side length in Angstrom.
+
+    Returns
+    -------
+    torch.Tensor
+        ``int16`` grid indices, same shape. Decode with
+        :func:`decode_positions`.
+    """
+    scaled = positions.double() / (box_L / 2) * _FIXED_POINT_SCALE
+    return scaled.round().clamp(-_FIXED_POINT_SCALE, _FIXED_POINT_SCALE).to(torch.int16)
+
+
+def decode_positions(indices: torch.Tensor, box_L: float) -> torch.Tensor:
+    """
+    Reconstruct float32 coordinates from :func:`encode_positions`' indices.
+
+    Parameters
+    ----------
+    indices : torch.Tensor
+        ``int16`` grid indices, shape (N, 3).
+    box_L : float
+        Cubic cell side length in Angstrom, from the config's ``box_L`` key.
+
+    Returns
+    -------
+    torch.Tensor
+        Coordinates in Angstrom, float32.
+    """
+    return (indices.double() / _FIXED_POINT_SCALE * (box_L / 2)).float()
+
+
 def default_ice_cache_dir() -> str:
     """
     Path to the bundled ice cache (``ice-data/ice_cache``), shipped in the
@@ -194,7 +269,16 @@ class IceBank(L.LightningModule):
 
     def _load_config(self, path: str) -> dict:
         data = torch.load(path, weights_only=False)
-        data["positions"] = data["positions"].float()  # upcast from on-disk float16
+        # Two on-disk coordinate formats, distinguished by an explicit key
+        # rather than by dtype: fixed-point indices (see `encode_positions`)
+        # for anything generated since that encoding landed, raw floats for
+        # everything before it -- including the bundled `ice-data/ice_cache`,
+        # which must keep loading unchanged. Sniffing `int16` instead of
+        # reading the key would misread any future raw-integer format.
+        if data.get("coord_encoding") == FIXED_POINT_ENCODING:
+            data["positions"] = decode_positions(data["positions"], data["box_L"])
+        else:
+            data["positions"] = data["positions"].float()  # upcast from float16
         return data
 
     def _get_kernel(self, dx: float) -> torch.Tensor:
@@ -1063,12 +1147,20 @@ def build_one_ice_config(
     Returns
     -------
     dict
-        The saved metadata, without ``positions``: ``box_L``, ``n``,
-        ``dx``, ``seed``, ``n_steps``, ``stopped_early``, ``energy``,
-        ``sk_loss``, ``recipe``. ``sk_loss`` is measured on the float16
-        coordinates as stored, so it describes the file rather than the
-        optimiser's in-memory state -- see the comment at its computation
-        for why neither alternative is trustworthy.
+        The saved metadata, without ``positions``: ``box_L``, ``n``, ``dx``,
+        ``seed``, ``coord_encoding``, ``n_steps``, ``n_steps_actual``,
+        ``wall_time``, ``stopped_early``, ``energy``, ``sk_loss``, ``recipe``.
+        ``sk_loss`` is measured on the coordinates as they will be read back
+        (encoded then decoded), so it describes the file rather than the
+        optimiser's in-memory state -- see the comment at its computation for
+        why neither alternative is trustworthy.
+
+    Notes
+    -----
+    Coordinates are written as fixed-point indices via
+    :func:`encode_positions`, not as raw floats. Configs predating that
+    encoding (the bundled ``ice-data/ice_cache``) stay readable; see
+    :meth:`IceBank._load_config`.
     """
     from ._gradient import GradientSKIcemaker
 
@@ -1094,9 +1186,9 @@ def build_one_ice_config(
     energy = gd.mlbop_energy()
     assert gd.positions is not None
 
-    # Measure S(k) fidelity on the float16 coordinates that are actually
-    # written, not on the float32 ones held in memory, and not from
-    # `history["sk_loss"]`. Both alternatives misreport:
+    # Measure S(k) fidelity on the coordinates as they will be READ BACK --
+    # encoded, then decoded -- rather than on the float32 ones held in memory,
+    # and never from `history["sk_loss"]`. Both alternatives misreport:
     #
     # - `history` records at `step % record_every == 0` plus one final entry
     #   only when tol/patience triggers, so at `record_every=n_steps` a run
@@ -1104,24 +1196,29 @@ def build_one_ice_config(
     #   pre-optimisation value of the random initialisation. The bundled
     #   `ice-data/ice_cache` carries that artifact: its ten budget-exhausting
     #   configs all record ~5e4, which is simply what a fresh random init
-    #   scores at this size, while their stored coordinates score ~0.4-2.0
-    #   like every other config in the library.
-    # - float16 storage at box_L=256 has a resolution of 0.125 A near the box
-    #   edge, which by itself costs three to four orders of magnitude of S(k)
-    #   loss (measured: a converged config recording 1.3e-4 in float32 scores
-    #   0.42 once quantized). A number describing coordinates nobody can load
-    #   is not a useful quality record.
-    positions = gd.positions.clone().half()
+    #   scores at this size, while their stored coordinates score ~0.4-2.0.
+    # - Storage quantization is not negligible in this metric even at the
+    #   fixed-point resolution used here (~13x on S(k) loss; the raw float16
+    #   this replaced cost ~3800x -- see `encode_positions`). A number
+    #   describing coordinates nobody can load back is not a quality record.
+    box_L = n * dx
+    positions = encode_positions(gd.positions, box_L)
     with torch.no_grad():
         sk_loss, _ = gd._sk_loss(
-            positions.to(gd.device).float(), rep_strength=0.0, mlbop_strength=0.0
+            decode_positions(positions, box_L).to(gd.device),
+            rep_strength=0.0,
+            mlbop_strength=0.0,
         )
 
     metadata = {
-        "box_L": n * dx,
+        "box_L": box_L,
         "n": n,
         "dx": dx,
         "seed": seed,
+        # How `positions` is stored, read by `IceBank._load_config`. Explicit
+        # rather than inferred from dtype so a future encoding can be added
+        # without either format having to guess about the other.
+        "coord_encoding": FIXED_POINT_ENCODING,
         "n_steps": n_steps,
         # Number of outer L-BFGS steps actually taken, and the seconds they
         # took. Recorded under the same keys the bundled ice-data/ice_cache

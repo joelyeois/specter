@@ -65,31 +65,39 @@ it. Run `specter build ice --help` for the full list.
 ## Cost
 
 Generating a configuration is expensive, and how expensive depends steeply on
-the cell size. Measured on one NVIDIA L40 at `dx = 1.0`, over 40 optimisation
-steps per size (`docs-figures/ice_cache_timing.py`):
+the cell size. Measured on one NVIDIA L40 at `dx = 1.0` over complete runs
+(`docs-figures/ice_cache_timing.py`):
 
-| `--n` | cell | water beads | s/step | peak VRAM | 600 steps |
-|------:|-----:|------------:|-------:|----------:|----------:|
-| 64  | 64 Å  | 8,237   | 0.147 | 0.13 GiB  | 1 min  |
-| 96  | 96 Å  | 27,800  | 0.183 | 0.49 GiB  | 2 min  |
-| 128 | 128 Å | 65,897  | 0.292 | 1.06 GiB  | 3 min  |
-| 192 | 192 Å | 222,403 | 0.812 | 4.54 GiB  | 8 min  |
-| 256 | 256 Å | 527,178 | 2.242 | 10.77 GiB | 22 min |
+| `--n` | cell | water beads | s/step | peak allocated | **peak reserved** | 600 steps |
+|------:|-----:|------------:|-------:|---------------:|------------------:|----------:|
+| 64  | 64 Å  | 8,237   | 0.153 | 0.17 GiB  | 0.21 GiB      | 2 min  |
+| 96  | 96 Å  | 27,800  | 0.181 | 0.45 GiB  | 0.54 GiB      | 2 min  |
+| 128 | 128 Å | 65,897  | 0.277 | 1.06 GiB  | 1.18 GiB      | 3 min  |
+| 192 | 192 Å | 222,403 | 0.810 | 8.66 GiB  | 11.92 GiB     | 8 min  |
+| 256 | 256 Å | 527,178 | 2.183 | 16.82 GiB | **40.17 GiB** | 22 min |
 
-Doubling the cell from 128 to 256 voxels costs 7.7× the time and 10× the
-memory, and the trend steepens with size: bead count grows as $n^3$, and the
-FFT-based $S(k)$ loss over those beads grows faster still. The right-hand
-column extrapolates a full `--n_steps 600` budget and is an upper bound, since
-a run stops as soon as its loss plateaus. Across the bundled library that
-happened at 407–600 steps.
+**Size a GPU against the reserved column.** Reserved is what the process
+actually holds from the driver and what a new allocation fails against; at
+$n = 256$ it is 2.4× the allocated figure. Memory is also the steeper of the
+two costs: going from $n = 128$ to $n = 256$ multiplies time by 7.9 but
+reserved memory by 34. Bead count grows as $n^3$, and the ML-BOP three-body
+term over those beads grows faster still, since local coordination tightens
+as the structure converges.
+
+That last point makes *when* you measure matter. Peak memory rises through a
+run while cost per step falls, so a short sample understates memory and
+overstates time at once. These figures come from complete runs for that
+reason. The right-hand column extrapolates a full `--n_steps 600` budget and
+is an upper bound, since a run stops as soon as its loss plateaus.
 
 Absolute times are hardware-specific; re-run the script above rather than
 trusting these numbers on different silicon. The scaling with `n` is the part
 that transfers.
 
-For a real-world reference point, the 20-configuration bundled library was
-generated at `n = 256` in **about 4 hours of wall clock for its first 18
-configurations, two at a time on two GPUs**, at ~1220 s per configuration.
+For a real-world reference point, the 20-configuration bundled library cost
+**6.65 GPU-hours** at `n = 256`, a median of 1300 s per configuration at
+2.19 s/step. That per-step figure matches the table above and the independent
+benchmark, so it is the number to scale from when budgeting a run.
 
 ### Managing the cost
 
@@ -98,8 +106,10 @@ Three properties of the command exist to make a multi-hour run practical:
 - **Configurations shard across devices.** `--device 0,1,2,3` runs one worker
   process per GPU, each taking a disjoint slice, so four GPUs finish a library
   roughly four times faster. `--device auto` uses every visible GPU. Size the
-  pool against the peak-VRAM column: one configuration per GPU at a time, so
-  `n = 256` needs ~11 GiB free on each device in the pool.
+  pool against the reserved column: one configuration per GPU at a time, so
+  `n = 256` needs roughly 40 GiB free on **each** device in the pool, which in
+  practice means a 48 GiB-class card per worker and no room for a second
+  configuration alongside it.
 - **Runs resume.** A configuration whose file already exists is skipped, so
   re-running the same command after an interruption generates only what is
   missing. Pass `--overwrite True` to regenerate regardless.

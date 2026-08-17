@@ -151,11 +151,16 @@ def figure_klim_bandlimit(V: torch.Tensor) -> None:
     print(f"wrote {path}")
 
 
-def _accuracy_sweep(V: torch.Tensor) -> tuple[list[float], dict[str, list[float]]]:
-    """Relative L1 error in exit-wave intensity vs. multislice, per model,
-    as a function of slab thickness."""
+def _accuracy_sweep(
+    V: torch.Tensor,
+) -> tuple[list[float], dict[str, list[float]], dict[str, list[float]]]:
+    """Relative L1 error in exit-wave intensity vs. multislice, and mean
+    intensity (energy conservation -- should stay 1.0, since the exit wave
+    is unit-modulus before absorption), per model, as a function of slab
+    thickness."""
     thickness_A = []
     errors: dict[str, list[float]] = {m: [] for m in APPROX_MODELS}
+    means: dict[str, list[float]] = {m: [] for m in APPROX_MODELS}
 
     for nz in THICKNESS_STEPS_NZ:
         V_slice = V[:, :nz].contiguous()
@@ -180,8 +185,9 @@ def _accuracy_sweep(V: torch.Tensor) -> tuple[list[float], dict[str, list[float]
                 torch.abs(intensity - ref_intensity).mean() / ref_intensity.mean()
             ).item()
             errors[model].append(rel_err)
+            means[model].append(intensity.mean().item())
 
-    return thickness_A, errors
+    return thickness_A, errors, means
 
 
 def figure_accuracy_vs_thickness(
@@ -226,12 +232,85 @@ def figure_accuracy_vs_thickness(
     )
 
 
+def figure_mean_intensity_vs_thickness(
+    thickness_A: list[float], means: dict[str, list[float]]
+) -> None:
+    """Mean exit-wave intensity vs. thickness, per model. A properly
+    normalized exit wave conserves total intensity (mean |psi|^2 == 1,
+    before absorption/alpha); this figure exposes which approximations
+    actually preserve that, and which quietly stop conserving energy as
+    the specimen thickens -- the real breakdown of the linearized
+    single-scattering models, which the relative-error figure above
+    reports as "error" without saying *why*."""
+    palette = dict(zip(APPROX_MODELS, _deep_palette(len(APPROX_MODELS))))
+    fig, ax = plt.subplots(figsize=(6.5, 4.5), dpi=200)
+    ax.axhline(1.0, color="black", linewidth=1.0, label="multislice (reference)")
+    for model in APPROX_MODELS:
+        ax.plot(
+            thickness_A,
+            means[model],
+            color=palette[model],
+            marker="o",
+            markersize=4,
+            label=model,
+        )
+    ax.set_xlabel("Specimen thickness (Å)")
+    ax.set_ylabel("Mean exit-wave intensity ⟨|ψ|²⟩")
+    ax.set_title("Energy conservation vs. thickness", fontsize=10)
+    ax.grid(True, alpha=0.3)
+    ax.legend(fontsize=9)
+    fig.tight_layout()
+    path = OUT_DIR / "scattering-mean-intensity-vs-thickness.png"
+    fig.savefig(path)
+    plt.close(fig)
+    print(f"wrote {path}")
+
+
+def figure_mode_intensity_maps(V: torch.Tensor) -> None:
+    """Exit-wave intensity maps at full slab thickness, side by side, for
+    multislice (reference), rytov, firstborn, and projection -- the direct
+    visual counterpart to the mean-intensity and relative-error figures.
+    Shows *what* each approximation actually produces, not just a scalar
+    error against the reference."""
+    nz = THICKNESS_STEPS_NZ[-1]
+    V_slice = V[:, :nz].contiguous()
+    models = ["multislice", "rytov", "firstborn", "projection"]
+
+    fig, axes = plt.subplots(1, len(models), figsize=(3.2 * len(models), 3.4), dpi=180)
+    for ax, model in zip(axes, models):
+        kwargs = {"nz": nz} if model in ("firstborn", "kinematic", "rytov") else {}
+        scat = Scattering(
+            NXY,
+            PIXEL_SIZE,
+            VOLTAGE,
+            scattering_model=model,
+            progressbars=False,
+            **kwargs,
+        ).to(DEVICE)
+        intensity = torch.abs(scat(V_slice)) ** 2
+        ax.imshow(intensity[0].cpu().numpy(), cmap="gray_r", vmin=0.8, vmax=1.7)
+        ax.set_title(
+            f"{model}\nmean={intensity.mean().item():.3f}, "
+            f"std={intensity.std().item():.3f}",
+            fontsize=9,
+        )
+        ax.axis("off")
+    fig.suptitle(f"Exit-wave intensity at {nz * PIXEL_SIZE:g} Å, per model", y=1.05)
+    fig.tight_layout()
+    path = OUT_DIR / "scattering-mode-intensity-maps.png"
+    fig.savefig(path, bbox_inches="tight")
+    plt.close(fig)
+    print(f"wrote {path}")
+
+
 def main() -> None:
     V = _ice_slab()
     figure_multislice_trace(V)
     figure_klim_bandlimit(V)
-    thickness_A, errors = _accuracy_sweep(V)
+    thickness_A, errors, means = _accuracy_sweep(V)
     figure_accuracy_vs_thickness(thickness_A, errors)
+    figure_mean_intensity_vs_thickness(thickness_A, means)
+    figure_mode_intensity_maps(V)
 
 
 if __name__ == "__main__":

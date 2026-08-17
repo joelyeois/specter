@@ -63,7 +63,13 @@ ice thickness), Rytov's error stays one to two orders of magnitude below
 matters: even though Rytov shares first Born's linear-in-slices structure,
 exponentiating the accumulated phase rather than adding \(1\) to it (as
 `firstborn` does) keeps the *amplitude* of \(\psi\) correctly normalized
-at every thickness, rather than only to first order.
+at every thickness, rather than only to first order. Rytov's own mean
+intensity stays pinned to 1.0 (energy-conserving) at every thickness
+tested, just like `multislice`'s -- unlike `firstborn`/`kinematic`, whose
+mean intensity drifts substantially at large thickness. `projection`'s
+placement on this plot is a separate, more subtle story of its own; see
+[Other propagation modes](other-modes.md#accuracy-vs-thickness) before
+reading too much into it.
 
 ## References
 

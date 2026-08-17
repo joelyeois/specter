@@ -64,23 +64,55 @@ kV, `multislice` as the reference):
 
 ![Relative error in exit-wave intensity vs. multislice, as a function of ice thickness, for first Born, kinematic, and projection (highlighted) against Rytov (faint, for context).](../../assets/images/scattering-accuracy-vs-thickness-other-modes.png){ width="600" }
 
-Two things stand out. First, `firstborn` and `kinematic` track each other
-almost exactly across the whole range — confirming that, at these
-thicknesses, the additive slice combination they share dominates their
-error, over the linearization difference between them. Second,
-`projection` is *more* accurate than either, despite being the only mode
-here that discards Fresnel propagation entirely. The likely reason is
-normalization: projection's exit wave is a genuine unit-modulus phase
-factor, \(|\psi| = 1\) everywhere (before absorption), at any thickness,
-because it never leaves the exponential form. `firstborn` and `kinematic`
-both build \(\psi\) as \(1 + (\text{something})\), which is not
-unit-modulus by construction, and the resulting normalization error grows
-with the total integrated potential faster than the propagation physics
-projection is missing costs it, at least over the thickness range
-measured here. This is specific to intensity error at these mild
-thicknesses and pixel size; it is not a general claim that projection is
-"more physically complete" than the other linearizations, since it is the
-only one of the three with no Fresnel diffraction model at all.
+Read at face value, this says `projection` beats `firstborn` and
+`kinematic` on intensity error, despite being the only mode here with no
+Fresnel diffraction model at all -- which would be a strange result,
+since `projection` has strictly less physics than either. It is not what
+it looks like. The next two figures show what is actually happening.
+
+![Mean exit-wave intensity vs. thickness, per model. A properly normalized exit wave conserves total intensity (multislice and projection stay pinned to 1.0); firstborn and kinematic drift up to +39% by 320 A.](../../assets/images/scattering-mean-intensity-vs-thickness.png){ width="600" }
+
+![Exit-wave intensity maps at 320 A, side by side. multislice and rytov show fine, correlated speckle; firstborn is a different, coarser pattern riding on a strongly biased mean; projection is exactly flat.](../../assets/images/scattering-mode-intensity-maps.png){ width="900" style="display:block;margin:1.2em auto;" }
+
+Two real things are happening, and they point in the same misleading
+direction on the error plot:
+
+- **`firstborn` and `kinematic` stop conserving energy.** A correctly
+  normalized exit wave has \(\langle|\psi|^2\rangle = 1\) at every
+  thickness (true for `multislice`, `rytov`, and trivially for
+  `projection`). `firstborn` and `kinematic` build \(\psi\) as
+  \(1 + (\text{something})\) rather than through the exponential form
+  the others share, and by 320 Å that "something" is no longer a small
+  correction: mean intensity has drifted to \({\approx}1.39\), a ${\approx}$39%
+  bias with no counterpart in the true physics. The intensity map above
+  confirms this isn't just a scale error either -- `firstborn`'s pattern
+  is visibly different in character from `multislice`'s (coarser,
+  blobbier), and numerically the two are essentially uncorrelated at this
+  thickness. This is the textbook breakdown of the first Born
+  approximation once the specimen is no longer thin: it is a real failure
+  of these two modes, not an artifact of the comparison.
+- **`projection` cannot be measured wrong by this metric, because it has
+  no signal at all.** With `alpha=0` (no absorption), `projection`'s exit
+  wave is \(\exp(i\sigma\Delta z \sum_z V_z)\) -- a pure phase factor, so
+  \(|\psi|=1\) *exactly*, at every pixel, at every thickness. Its
+  intensity map is perfectly flat (std \(\approx 10^{-7}\), floating-point
+  noise). The relative-error metric above is therefore just measuring how
+  far `multislice`'s own true contrast is from flat, which stays small
+  (std \(0.045\) at 320 Å) over this thickness/pixel-size range. A method
+  that always predicts "no contrast" scores well against a target that is
+  itself close to flat -- not because it captured any thickness-dependent
+  structure, but because there was not yet much structure to miss.
+
+So the error curve's ordering is real, but the reason is not "projection
+approximates thickness effects well." It is that `firstborn`/`kinematic`
+have a genuine, worsening energy-conservation failure at this thickness,
+while `projection`'s zero-information prediction happens to have a
+smaller error than that failure, purely because the true signal is still
+small. None of this makes `projection` a good general substitute for
+`multislice`: it is blind to depth by construction and will read as
+"accurate" on this metric right up until the specimen develops enough
+real contrast to expose it, which a thicker or more strongly scattering
+specimen than this one would do easily.
 
 ## References
 

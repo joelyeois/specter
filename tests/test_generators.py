@@ -13,6 +13,7 @@ import math
 from pathlib import Path
 
 import pytest
+import roma
 import torch
 
 from specter.aberrations import Aberration
@@ -966,3 +967,103 @@ def test_tilt_series_generator_falls_back_to_windowed_when_vol_does_not_fit(
     # sanity-check it's in the same ballpark as the windowed block, not
     # blown up by some accidental full-volume copy.
     assert peak_bytes < 50_000_000
+
+
+# ---------------------------------------------------------------------------
+# Translations must be applied in Angstrom, not in grid-normalized units
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("shift_angstrom", [8.0, -6.0])
+def test_from_coordinates_translation_is_in_angstrom(
+    small_coords, ctf_params, shift_angstrom
+):
+    """
+    A requested shift must move the atoms by that many Angstrom.
+
+    `translations_angstrom_to_torch` normalizes to grid_sample's [-1, 1]
+    convention, which is meaningless for atom positions: routing the
+    translation through it shrank every shift by a factor of n * pixel_size / 2.
+    """
+    coords, atomic_numbers = small_coords
+    gen = ImageGeneratorFromCoordinates(
+        coordinates=coords,
+        atomic_numbers=atomic_numbers,
+        nxy=32,
+        pixel_size=2.0,
+        quaternions=torch.tensor([[1.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.0, 0.0]]),
+        translations=torch.tensor([[0.0, 0.0], [shift_angstrom, 0.0]]),
+        ctf_params=ctf_params,
+        voltage=300.0,
+        dose_per_angstrom=2.0,
+        noise_model=None,
+        scattering_model="projection",
+        ice_model=None,
+        verbose=False,
+    )
+
+    identity = torch.tensor([[1.0, 0.0, 0.0, 0.0]])
+    unshifted = gen.rotate(identity, torch.tensor([[0.0, 0.0]]))
+    shifted = gen.rotate(identity, torch.tensor([[shift_angstrom, 0.0]]))
+
+    # Translations are subtracted, and act along x only.
+    delta = (shifted - unshifted).squeeze(0)
+    expected = torch.tensor([-shift_angstrom, 0.0, 0.0])
+    assert torch.allclose(delta, expected.expand_as(delta), atol=1e-5)
+
+
+def test_from_coordinates_and_volume_paths_agree(small_coords, ctf_params):
+    """
+    The two generators must place a particle identically for the same pose.
+
+    `ImageGeneratorFromCoordinates.rotate` transforms atoms; `ImageGenerator.
+    rotate` transforms a prebuilt map through `build_affine_matrix`. They are
+    separate implementations of one convention, and only this comparison
+    exercises both public methods: the unit-level consistency test in
+    `test_rotations.py` reimplements the coordinate transform inline, so it
+    cannot see a regression inside either `rotate()`.
+    """
+    coords, atomic_numbers = small_coords
+    n, voxel_size, sigma = 32, 1.0, 2.0
+
+    axis = torch.arange(n, dtype=torch.float32) - n // 2
+    zz, yy, xx = torch.meshgrid(axis, axis, axis, indexing="ij")
+
+    def voxelize(points: torch.Tensor) -> torch.Tensor:
+        vol = torch.zeros(n, n, n)
+        for p in points:
+            r2 = (
+                (xx - p[0] / voxel_size) ** 2
+                + (yy - p[1] / voxel_size) ** 2
+                + (zz - p[2] / voxel_size) ** 2
+            )
+            vol += torch.exp(-r2 / (2 * sigma**2))
+        return vol
+
+    quaternion = roma.random_unitquat(1)
+    translation = torch.tensor([[4.0, -2.5]])
+    common = dict(
+        pixel_size=voxel_size,
+        quaternions=quaternion,
+        translations=translation,
+        ctf_params=ctf_params,
+        voltage=300.0,
+        dose_per_angstrom=2.0,
+        noise_model=None,
+        scattering_model="projection",
+        ice_model=None,
+        verbose=False,
+    )
+
+    from_coords = ImageGeneratorFromCoordinates(
+        coordinates=coords, atomic_numbers=atomic_numbers, nxy=n, **common
+    )
+    from_volume = ImageGenerator(scattering_potential=voxelize(coords), **common)
+
+    vol_a = voxelize(from_coords.rotate(quaternion, translation).squeeze(0))
+    vol_b = from_volume.rotate(quaternion, translation)[0]
+
+    peak = vol_a.max()
+    diff = (vol_a - vol_b).abs()
+    assert diff.max() < 0.05 * peak
+    assert diff.mean() < 0.002 * peak

@@ -188,7 +188,7 @@ class ImageGeneratorFromCoordinates(ParticleGeneratorBase):
     ice_cache_dir : str, optional
         Directory of cached ice configs for ``ice_model='gd'`` (see
         :func:`specter.ice.build_ice_cache`). Defaults to the bundled
-        ``ice-data/ice_cache``. Ignored for other ``ice_model`` values or
+        ``ice_data/ice_cache``. Ignored for other ``ice_model`` values or
         when ``icemaker`` is provided.
     icemaker : IceBank or RandomIcemaker, optional
         A pre-built icemaker instance to reuse across multiple
@@ -426,10 +426,20 @@ class ImageGeneratorFromCoordinates(ParticleGeneratorBase):
         Returns
         -------
         r_coordinates : torch.Tensor
-            Rotated and translated coordinates.
+            Rotated and translated coordinates, in Å.
+
+        Notes
+        -----
+        The translation is applied directly in Å, after the rotation, so it acts
+        in the lab frame and is subtracted -- the same origin-offset semantics
+        :class:`ImageGenerator`'s volume path gets from
+        :func:`~specter.rotations.build_affine_matrix`. It is deliberately *not*
+        routed through
+        :func:`~specter.rotations.translations_angstrom_to_torch`, which
+        normalizes to ``grid_sample``'s [-1, 1] convention and only makes sense
+        for an affine grid, not for atom positions.
         """
         R = roma.unitquat_to_rotmat(Q).transpose(-2, -1)  # inverse rotation
-        T = rotations.translations_angstrom_to_torch(T, self.nxy, self.pixel_size)
         N = self.coordinates.shape[0]
         if R.ndim == 2:
             rotated = self.coordinates @ R.T
@@ -514,7 +524,7 @@ class ImageGenerator(ParticleGeneratorBase):
     ice_cache_dir : str, optional
         Directory of cached ice configs for ``ice_model='gd'`` (see
         :func:`specter.ice.build_ice_cache`). Defaults to the bundled
-        ``ice-data/ice_cache``. Ignored for other ``ice_model`` values or
+        ``ice_data/ice_cache``. Ignored for other ``ice_model`` values or
         when ``icemaker`` is provided.
     icemaker : IceBank or RandomIcemaker, optional
         A pre-built icemaker instance to reuse across multiple

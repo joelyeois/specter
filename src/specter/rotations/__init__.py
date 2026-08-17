@@ -29,9 +29,12 @@ from ._random import (
 )
 from ._rotation import rotate_coordinates, translate_coordinates
 from ._volume import (
+    apply_fourier_translation,
     build_affine_matrix,
+    fourier_origin_displacement,
     rotate_volume,
     rotate_volume_fourier,
+    split_affine_translation,
     translations_angstrom_to_torch,
 )
 from ._volume_rotator import VolumeRotator
@@ -51,6 +54,9 @@ __all__ = [
     "rotations_angular_difference",
     "rotate_volume",
     "rotate_volume_fourier",
+    "split_affine_translation",
+    "apply_fourier_translation",
+    "fourier_origin_displacement",
     "translations_angstrom_to_torch",
     "build_affine_matrix",
     "VolumeRotator",

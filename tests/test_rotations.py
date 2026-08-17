@@ -10,7 +10,11 @@ from specter.rotations import (
     _prepare_volume_for_grid_sample,
     _resolve_roi,
     build_affine_matrix,
+    random_rotation_matrix,
     rotate_volume,
+    rotate_volume_fourier,
+    split_affine_translation,
+    translations_angstrom_to_torch,
 )
 
 
@@ -243,3 +247,247 @@ def test_prepare_volume_for_grid_sample_normalizes_all_ndim_variants() -> None:
     assert out_3d.shape == out_4d.shape == out_5d.shape == (B, 1, 4, 5, 6)
     assert torch.equal(out_3d, out_4d)
     assert torch.equal(out_4d, out_5d)
+
+
+# ---------------------------------------------------------------------------
+# Fourier-space rotation: translations must be phase ramps, not resampling
+# ---------------------------------------------------------------------------
+
+
+def _peak_offset(a: torch.Tensor, b: torch.Tensor) -> list[int]:
+    """
+    Integer (x, y, z) voxel offset of `b` relative to `a`.
+
+    Located by the peak of the circular cross-correlation, which measures where
+    the density actually moved. A whole-box centroid would not: the Fourier path
+    shifts circularly while the real-space path pads at the border, so the two
+    treat wrapped background differently even when the density agrees.
+    """
+    corr = torch.fft.ifftn(torch.fft.fftn(b) * torch.fft.fftn(a).conj()).real
+    peak = torch.unravel_index(corr.argmax(), corr.shape)  # (z, y, x)
+    offset = [
+        int(i) if int(i) <= n // 2 else int(i) - n for i, n in zip(peak, corr.shape)
+    ]
+    return [offset[2], offset[1], offset[0]]  # -> (x, y, z)
+
+
+def test_fourier_translation_is_exact() -> None:
+    """
+    A pure translation must move the density, and must do so exactly.
+
+    Applying the affine's translation column by resampling the spectrum
+    modulates the volume instead of shifting it, leaving the density in place
+    and driving it negative. The phase ramp is exact for an integer-voxel
+    shift, so `torch.roll` is ground truth here.
+    """
+    vol = _gaussian_volume(_COORDS, _GRID, _VOXEL_SIZE)
+    shift_angstrom = 4.0
+    T = translations_angstrom_to_torch(
+        torch.tensor([[shift_angstrom, 0.0]]), _N, _VOXEL_SIZE
+    )
+    theta = build_affine_matrix(torch.eye(3).unsqueeze(0), T)
+
+    # Translations are subtracted, so a +4 A translation shifts by -4 voxels.
+    expected = torch.roll(vol, shifts=-int(shift_angstrom / _VOXEL_SIZE), dims=2)
+
+    rotator = VolumeRotator(_N, _N, _N, mode="fourier")
+    out = rotator(vol, theta)[0]
+
+    assert torch.allclose(out, expected, atol=1e-4)
+    assert out.min() > -1e-4  # no modulation-induced sign flips
+
+
+@pytest.mark.parametrize("angle_deg", [90.0, 45.0, 30.0])
+def test_fourier_rotation_with_translation_matches_real(angle_deg: float) -> None:
+    """
+    Both rotation modes must displace the density by the same amount.
+
+    The translation is subtracted and acts in the lab frame, so a (+4, -3) A
+    translation moves the density by (-4, +3) voxels whatever the rotation is.
+    """
+    vol = _gaussian_volume(_COORDS, _GRID, _VOXEL_SIZE)
+    R = _rot_z(angle_deg).unsqueeze(0)
+    T = translations_angstrom_to_torch(torch.tensor([[4.0, -3.0]]), _N, _VOXEL_SIZE)
+
+    for mode in ("real", "fourier"):
+        rotator = VolumeRotator(_N, _N, _N, mode=mode)
+        rotated = rotator(vol, build_affine_matrix(R, torch.zeros(1, 3)))[0]
+        shifted = rotator(vol, build_affine_matrix(R, T))[0]
+        assert _peak_offset(rotated, shifted) == [-4, 3, 0]
+
+
+def test_rotate_volume_fourier_applies_translation() -> None:
+    """The standalone function shares the phase-ramp path with VolumeRotator."""
+    vol = _gaussian_volume(_COORDS, _GRID, _VOXEL_SIZE)
+    T = translations_angstrom_to_torch(torch.tensor([[4.0, 0.0]]), _N, _VOXEL_SIZE)
+    theta = build_affine_matrix(_rot_z(90.0).unsqueeze(0), T)
+
+    out = rotate_volume_fourier(vol, theta)[0]
+    reference = VolumeRotator(_N, _N, _N, mode="fourier")(vol, theta)[0]
+
+    assert torch.allclose(out, reference, atol=1e-5)
+
+
+def test_split_affine_translation_leaves_rotation_untouched() -> None:
+    """Splitting must zero the translation column and preserve the rotation."""
+    R = _rot_z(37.0).unsqueeze(0)
+    T = translations_angstrom_to_torch(torch.tensor([[4.0, -3.0]]), _N, _VOXEL_SIZE)
+    theta = build_affine_matrix(R, T)
+
+    theta_rot, displacement = split_affine_translation(theta)
+
+    assert torch.equal(theta_rot[..., :3], theta[..., :3])
+    assert torch.all(theta_rot[..., 3] == 0)
+    # displacement is -R^-1 T', and build_affine_matrix set T' = R T, so it is -T
+    assert torch.allclose(displacement, -T, atol=1e-6)
+
+
+# ---------------------------------------------------------------------------
+# Fourier-space rotation: origin conventions
+# ---------------------------------------------------------------------------
+
+
+def test_fourier_origin_center_matches_real() -> None:
+    """
+    `origin="center"` must reproduce the real-space result.
+
+    A 180 degree rotation is exact under both interpolation schemes, so any
+    discrepancy here is the half-voxel origin offset rather than interpolation.
+    The volume must be compact and well inside a roomy box: the Fourier path
+    shifts circularly while the real path pads, and density reaching the edge
+    would swamp the half-voxel effect under test.
+    """
+    n = 64
+    coords = torch.tensor([[8.0, 0.0, 0.0], [-3.0, 5.0, 4.0], [0.0, -6.0, -4.0]])
+    vol = _gaussian_volume(coords, (n, n, n), _VOXEL_SIZE, sigma_voxels=2.0)
+    T = translations_angstrom_to_torch(torch.tensor([[2.0, -1.0]]), n, _VOXEL_SIZE)
+    theta = build_affine_matrix(_rot_z(180.0).unsqueeze(0), T)
+
+    for origin in ("relion", "center"):
+        real = rotate_volume(vol, theta, origin=origin)[0]
+        fourier = rotate_volume_fourier(vol, theta, origin=origin)[0]
+        rotator = VolumeRotator(n, n, n, origin=origin, mode="fourier")
+        assert torch.allclose(real, fourier, atol=1e-3)
+        assert torch.allclose(rotator(vol, theta)[0], fourier, atol=1e-5)
+
+    # The correction must actually do something: without it the two origins
+    # would be identical, and a 180 degree rotation displaces them by 2 * 0.5 px.
+    relion = rotate_volume_fourier(vol, theta, origin="relion")[0]
+    center = rotate_volume_fourier(vol, theta, origin="center")[0]
+    assert _peak_offset(relion, center) == [-1, -1, 0]
+
+
+def test_fourier_origin_conventions_coincide_for_odd_volumes() -> None:
+    """`n // 2` equals `(n - 1) / 2` for odd n, so the correction must vanish."""
+    m = 33
+    coords = torch.tensor([[5.0, 0.0, 0.0], [0.0, -4.0, 3.0]])
+    vol = _gaussian_volume(coords, (m, m, m), _VOXEL_SIZE)
+    T = translations_angstrom_to_torch(torch.tensor([[3.0, -2.0]]), m, _VOXEL_SIZE)
+    theta = build_affine_matrix(_rot_z(37.0).unsqueeze(0), T)
+
+    relion = rotate_volume_fourier(vol, theta, origin="relion")
+    center = rotate_volume_fourier(vol, theta, origin="center")
+    assert torch.equal(relion, center)
+
+
+def test_fourier_origin_center_rejects_non_cubic() -> None:
+    """The origin correction mixes axes, so a non-cubic box must be refused."""
+    vol = torch.zeros(16, 16, 32)
+    theta = build_affine_matrix(_rot_z(90.0).unsqueeze(0))
+    with pytest.raises(ValueError, match="cubic"):
+        rotate_volume_fourier(vol, theta, origin="center")
+
+
+# ---------------------------------------------------------------------------
+# Real vs Fourier under a combined 3D rotation and translation
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("seed", [0, 1, 2])
+def test_rotation_plus_translation_matches_analytic_truth(seed: int) -> None:
+    """
+    Both rotation modes must reproduce an analytically known transform.
+
+    Isotropic Gaussians are unchanged in shape by a rotation, so transforming
+    their centres gives an exact reference volume: a feature at `p` moves to
+    `R^-1 p - T`. Both modes are compared against that rather than only against
+    each other, which would pass even if they shared a systematic error.
+    """
+    torch.manual_seed(seed)
+    n = 48
+    sigma = 2.5
+    z = torch.arange(n, dtype=torch.float32) - n // 2
+    grid = torch.stack(torch.meshgrid(z, z, z, indexing="ij")[::-1], dim=-1)
+
+    amplitudes = torch.tensor([1.0, 0.6, 0.8])
+    centres = torch.tensor([[6.0, 0.0, 0.0], [-2.4, 4.2, 3.0], [0.0, -4.8, -3.6]])
+
+    def build(cs: torch.Tensor) -> torch.Tensor:
+        vol = torch.zeros(n, n, n)
+        for amp, c in zip(amplitudes, cs):
+            vol += amp * torch.exp(-((grid - c) ** 2).sum(-1) / (2 * sigma**2))
+        return vol
+
+    vol = build(centres)
+    peak = vol.max()
+
+    R = random_rotation_matrix(1)
+    shift_angstrom = torch.rand(1, 2) * 6.0 - 3.0
+    T = translations_angstrom_to_torch(shift_angstrom, n, _VOXEL_SIZE)
+    theta = build_affine_matrix(R.unsqueeze(0), T)
+
+    shift = torch.cat([shift_angstrom[0], torch.zeros(1)])
+    truth = build(torch.stack([R.T @ p - shift for p in centres]))
+
+    real = rotate_volume(vol, theta)[0]
+    fourier = rotate_volume_fourier(vol, theta)[0]
+
+    # Interpolation error, measured at ~4% (real) and ~3% (Fourier) of peak for
+    # this object; see the Fourier mode's accuracy note in `apply_fourier_
+    # translation` for why the Fourier figure grows with distance from centre.
+    assert (real - truth).abs().max() < 0.10 * peak
+    assert (fourier - truth).abs().max() < 0.10 * peak
+    assert (real - fourier).abs().max() < 0.15 * peak
+
+
+# ---------------------------------------------------------------------------
+# Coordinates vs map, under a batch of general 3D rotations AND translations
+# ---------------------------------------------------------------------------
+
+
+def test_coordinate_affine_matches_volume_affine_batched() -> None:
+    """
+    Transforming coordinates must match transforming the map, for full affines.
+
+    `test_coordinate_rotation_matches_volume_rotation` covers rotation about Z
+    with no translation. This extends it to a batch of general 3D rotations each
+    paired with its own translation, which is what a real pose batch looks like:
+    a wrong axis order, a missing pre-rotation of T, or a units slip in the
+    translation all survive the rotation-only, single-axis case.
+    """
+    torch.manual_seed(3)
+    n_poses = 3
+    vol = _gaussian_volume(_COORDS, _GRID, _VOXEL_SIZE)
+    peak = vol.max()
+
+    R = random_rotation_matrix(n_poses)  # (n_poses, 3, 3)
+    shift_angstrom = torch.rand(n_poses, 2) * 6.0 - 3.0
+    theta = build_affine_matrix(
+        R, translations_angstrom_to_torch(shift_angstrom, _N, _VOXEL_SIZE)
+    )
+
+    # One call transforms the whole batch of maps.
+    volumes = rotate_volume(vol, theta)
+    assert volumes.shape == (n_poses, _N, _N, _N)
+
+    for i in range(n_poses):
+        # Coordinates take the same transform: p -> R^-1 p - T, with T in A.
+        shift = torch.cat([shift_angstrom[i], torch.zeros(1)])
+        coords = _COORDS @ R[i] - shift
+        from_coords = _gaussian_volume(coords, _GRID, _VOXEL_SIZE)
+
+        diff = (from_coords - volumes[i]).abs()
+        # Interpolation asymmetry between splatting and grid_sample is ~2% of
+        # peak on isolated voxels; a convention error is of order 50-100%.
+        assert diff.max() < 0.05 * peak
+        assert diff.mean() < 0.002 * peak

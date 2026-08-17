@@ -7,6 +7,11 @@ import torch
 import torch.nn.functional as F
 
 from ..fft import fft3, ifft3
+from ._volume import (
+    apply_fourier_translation,
+    fourier_origin_displacement,
+    split_affine_translation,
+)
 
 
 def _normalize_slice_indices(
@@ -273,6 +278,26 @@ class VolumeRotator(L.LightningModule):
             )
         self.register_buffer("center", center.view(1, 1, 3))
 
+        # The spectrum's DC term always lands at n // 2 under fftshift, so the
+        # Fourier path rotates about the RELION centre whatever `origin` is.
+        if self.align_corners:
+            center_dc = torch.tensor(
+                [
+                    2 * (nx // 2) / (nx - 1) - 1,
+                    2 * (ny // 2) / (ny - 1) - 1,
+                    2 * (nz // 2) / (nz - 1) - 1,
+                ]
+            )
+        else:
+            center_dc = torch.tensor(
+                [
+                    2 * (nx // 2 + 0.5) / nx - 1,
+                    2 * (ny // 2 + 0.5) / ny - 1,
+                    2 * (nz // 2 + 0.5) / nz - 1,
+                ]
+            )
+        self.register_buffer("center_dc", center_dc.view(1, 1, 3))
+
         if init_base_grid:
             self._build_base_grid()
 
@@ -305,6 +330,7 @@ class VolumeRotator(L.LightningModule):
         R: torch.Tensor,
         t: torch.Tensor,
         scale: torch.Tensor,
+        origin: str | None = None,
     ) -> torch.Tensor:
         """
         Apply the isotropic rotate-and-translate transform to normalized
@@ -332,10 +358,10 @@ class VolumeRotator(L.LightningModule):
         torch.Tensor
             Rotated normalized sampling coordinates, shape (B, N, 3).
         """
-        if self.origin == "relion":
-            grid = (grid - self.center) * scale
+        if (origin or self.origin) == "relion":
+            grid = (grid - self.center_dc) * scale
             grid = grid @ R.transpose(1, 2)
-            grid = (grid / scale) + self.center
+            grid = (grid / scale) + self.center_dc
             grid = grid + t.unsqueeze(1)
         else:
             grid = grid * scale
@@ -343,7 +369,9 @@ class VolumeRotator(L.LightningModule):
             grid = (grid / scale) + t.unsqueeze(1)
         return grid
 
-    def _build_grid(self, theta: torch.Tensor) -> torch.Tensor:
+    def _build_grid(
+        self, theta: torch.Tensor, origin: str | None = None
+    ) -> torch.Tensor:
         """
         Build a sampling grid from cached base grid and affine parameters.
 
@@ -360,7 +388,7 @@ class VolumeRotator(L.LightningModule):
         grid = grid.view(B, -1, 3)
 
         scale = self._isotropic_scale(theta.device, theta.dtype)
-        grid = self._rotate_normalized_grid(grid, R, t, scale)
+        grid = self._rotate_normalized_grid(grid, R, t, scale, origin=origin)
 
         grid = grid.view(B, self.nz, self.ny, self.nx, 3)
         return grid
@@ -368,15 +396,19 @@ class VolumeRotator(L.LightningModule):
     # ------------------------------------------------------------------
     # Real-space rotation
     # ------------------------------------------------------------------
-    def rotate_real(self, V: torch.Tensor, theta: torch.Tensor) -> torch.Tensor:
+    def rotate_real(
+        self, V: torch.Tensor, theta: torch.Tensor, origin: str | None = None
+    ) -> torch.Tensor:
         """
         Rotate a volume in real space.
         V: (Z, Y, X)
         theta: (B, 3, 4)
+        origin: overrides self.origin for this call; used by `rotate_fourier`,
+            whose spectrum must always be rotated about the DC term.
         Returns: (B, Z, Y, X)
         """
         B = theta.shape[0]
-        grid = self._build_grid(theta)
+        grid = self._build_grid(theta, origin=origin)
 
         V = V.unsqueeze(0).unsqueeze(1)  # (1, 1, Z, Y, X)
         V = V.expand(B, 1, self.nz, self.ny, self.nx)
@@ -396,13 +428,26 @@ class VolumeRotator(L.LightningModule):
     def rotate_fourier(self, V: torch.Tensor, theta: torch.Tensor) -> torch.Tensor:
         """
         Rotate a volume in Fourier space via real/imag decomposition.
+
+        Any translation carried by `theta` is applied as a phase ramp rather than
+        by resampling the spectrum, which would modulate the density instead of
+        moving it. `self.origin` is folded into the same ramp: the rotation itself
+        is always centred on the spectrum's DC term at ``n // 2``.
         """
         V_f = fft3(V, shift=True)  # complex, (Z, Y, X)
 
-        V_f_rot_real = self.rotate_real(V_f.real, theta)
-        V_f_rot_imag = self.rotate_real(V_f.imag, theta)
+        theta_rot, displacement = split_affine_translation(theta)
+        if self.origin == "center":
+            displacement = displacement + fourier_origin_displacement(
+                theta, self.nz, self.ny, self.nx
+            )
 
-        V_f_rot = torch.complex(V_f_rot_real, V_f_rot_imag)
+        V_f_rot_real = self.rotate_real(V_f.real, theta_rot, origin="relion")
+        V_f_rot_imag = self.rotate_real(V_f.imag, theta_rot, origin="relion")
+
+        V_f_rot = apply_fourier_translation(
+            torch.complex(V_f_rot_real, V_f_rot_imag), displacement
+        )
         V_rot = ifft3(V_f_rot, shift=True)
 
         return V_rot.real  # (B, Z, Y, X)

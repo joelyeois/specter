@@ -85,8 +85,10 @@ def rotate_volume(
         Concatenates a 3x3 rotation matrix and a 3x1 translation vector.
     origin : str, optional
         Convention for the index of the origin of rotation. "relion" defines the
-        origin to be at [nz//2, ny//2, nx//2], whereas "center" sets it to
-        [(nz + 1) / 2, (ny + 1) / 2, (nx + 1) / 2]. Default "relion".
+        origin to be at [nz//2, ny//2, nx//2], whereas "center" sets it to the
+        grid's geometric centre, [(nz - 1) / 2, (ny - 1) / 2, (nx - 1) / 2]. The
+        two differ by half a voxel per axis for even-sized volumes and coincide
+        for odd-sized ones. Default "relion".
     padding_mode : str, optional
         Padding mode for grid_sample. Default "border".
 
@@ -113,6 +115,148 @@ def rotate_volume(
     return V_.squeeze(1)  # B x Z x Y x X
 
 
+def split_affine_translation(theta: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    """
+    Split an affine into a translation-free affine and its real-space displacement.
+
+    A translation cannot be applied by resampling Fourier coefficients: shifting
+    the samples of a spectrum modulates the density rather than moving it. Fourier
+    rotation paths therefore strip the translation out, rotate, and reapply the
+    displacement as a phase ramp (see :func:`apply_fourier_translation`).
+
+    Parameters
+    ----------
+    theta : torch.Tensor
+        Batch of affine matrices, shape (B, 3, 4), as built by
+        :func:`build_affine_matrix`.
+
+    Returns
+    -------
+    theta_rot : torch.Tensor
+        The same affines with a zero translation column, shape (B, 3, 4).
+    displacement : torch.Tensor
+        Real-space displacement the translation column encodes, shape (B, 3), in
+        normalized coordinates and (x, y, z) order.
+
+    Notes
+    -----
+    ``rotate_volume`` samples the input at ``R x + T'``, which transforms the
+    density by ``R^-1`` and then displaces it by ``-R^-1 T'``. The rotation part
+    is assumed orthonormal, so ``R^-1`` is evaluated as ``R^T``.
+    """
+    R = theta[..., :3]
+    T = theta[..., 3]
+    theta_rot = torch.concat([R, torch.zeros_like(T).unsqueeze(-1)], dim=-1)
+    displacement = -torch.einsum("bji,bj->bi", R, T)
+    return theta_rot, displacement
+
+
+def fourier_origin_displacement(
+    theta: torch.Tensor, nz: int, ny: int, nx: int
+) -> torch.Tensor:
+    """
+    Displacement converting a DC-centred rotation into one about the grid centre.
+
+    A Fourier-space rotation is always centred on the spectrum's DC coefficient,
+    which ``fft3(V, shift=True)`` places at index ``n // 2``: the ``origin="relion"``
+    convention. Rotating about a different point ``c`` is the same rotation followed
+    by a rigid displacement of ``(I - R^-1)(c - c0)``, so ``origin="center"`` costs
+    one extra term in the phase ramp rather than a second resampling.
+
+    Parameters
+    ----------
+    theta : torch.Tensor
+        Batch of affine matrices, shape (B, 3, 4).
+    nz, ny, nx : int
+        Volume dimensions. Must be equal; see Raises.
+
+    Returns
+    -------
+    displacement : torch.Tensor
+        Displacement in normalized coordinates, shape (B, 3), (x, y, z) order,
+        ready to be added to :func:`split_affine_translation`'s displacement.
+
+    Raises
+    ------
+    ValueError
+        If the volume is not cubic. The correction is computed in voxel units,
+        since ``(I - R^-1)`` mixes axes and normalized coordinates scale
+        differently per axis. A non-cubic box would also need `rotate_volume`'s
+        anisotropic rescaling, which only its ``origin="relion"`` path performs.
+
+    Notes
+    -----
+    ``origin="center"`` sits at ``(n - 1) / 2`` and ``origin="relion"`` at
+    ``n // 2``, so the two differ by half a voxel per axis for even-sized volumes
+    and coincide exactly for odd-sized ones, where this returns zero.
+    """
+    if not (nz == ny == nx):
+        raise ValueError(
+            "origin='center' is only supported for cubic volumes in Fourier space, "
+            f"got (nz, ny, nx) = ({nz}, {ny}, {nx}). Use origin='relion', or rotate "
+            "in real space."
+        )
+
+    R = theta[..., :3]
+    offset = -0.5 if nz % 2 == 0 else 0.0
+    delta = torch.full(
+        (theta.shape[0], 3), offset, device=theta.device, dtype=theta.dtype
+    )
+    # (I - R^-1) delta, in voxels, then converted to normalized coordinates.
+    displacement_voxels = delta - torch.einsum("bji,bj->bi", R, delta)
+    return displacement_voxels * 2.0 / nz
+
+
+def apply_fourier_translation(
+    V_f: torch.Tensor, displacement: torch.Tensor
+) -> torch.Tensor:
+    """
+    Displace a volume by multiplying its spectrum with a phase ramp.
+
+    Parameters
+    ----------
+    V_f : torch.Tensor
+        Batch of fftshifted complex spectra, shape (B, Z, Y, X).
+    displacement : torch.Tensor
+        Displacement in normalized coordinates, shape (B, 3), (x, y, z) order, as
+        returned by :func:`split_affine_translation`.
+
+    Returns
+    -------
+    V_f_shifted : torch.Tensor
+        Spectra multiplied by ``exp(-2*pi*i*f.d)``, shape (B, Z, Y, X).
+
+    Notes
+    -----
+    A phase ramp is exact to floating-point precision, including for sub-voxel
+    displacements, where the real-space path interpolates. It is also circular:
+    density leaving one face reappears at the opposite one, whereas
+    :func:`rotate_volume` pads according to `padding_mode`. The two agree wherever
+    the density is compact and away from the box edges.
+    """
+    if not torch.any(displacement != 0):
+        return V_f
+
+    _, nz, ny, nx = V_f.shape
+    real_dtype = V_f.real.dtype
+
+    def ramp(n: int, d_norm: torch.Tensor) -> torch.Tensor:
+        # Normalized coordinates span [-1, 1] across n samples, so one normalized
+        # unit is n/2 voxels.
+        d = d_norm.to(real_dtype) * n / 2
+        f = torch.fft.fftshift(
+            torch.fft.fftfreq(n, device=V_f.device, dtype=real_dtype)
+        )
+        return torch.exp(-2j * torch.pi * f[None, :] * d[:, None])
+
+    return (
+        V_f
+        * ramp(nz, displacement[:, 2])[:, :, None, None]
+        * ramp(ny, displacement[:, 1])[:, None, :, None]
+        * ramp(nx, displacement[:, 0])[:, None, None, :]
+    )
+
+
 def rotate_volume_fourier(
     V: torch.Tensor,
     theta: torch.Tensor,
@@ -124,7 +268,9 @@ def rotate_volume_fourier(
     Rotate a 3D volume by interpolating in Fourier space.
 
     Transforms to Fourier space, rotates real and imaginary parts separately
-    using :func:`rotate_volume`, then transforms back.
+    using :func:`rotate_volume`, then transforms back. Any translation carried by
+    `theta` is applied as a phase ramp rather than by resampling, which would
+    modulate the density instead of moving it.
 
     Parameters
     ----------
@@ -133,7 +279,11 @@ def rotate_volume_fourier(
     theta : torch.Tensor
         Batch of affine matrices, shape (B, 3, 4).
     origin : str, optional
-        Rotation origin convention ('relion' or 'center'). Default is 'relion'.
+        Rotation origin convention ('relion' or 'center'). The spectrum is
+        fftshifted, placing its DC term at ``n // 2``, so the rotation itself is
+        always centred there; 'center' is reached by folding the half-voxel offset
+        into the phase ramp (see :func:`fourier_origin_displacement`, which
+        restricts it to cubic volumes). Default is 'relion'.
     padding_mode : str, optional
         Padding mode for grid sampling. Default is 'border'.
     align_corners : bool, optional
@@ -144,17 +294,34 @@ def rotate_volume_fourier(
     V_rot : torch.Tensor
         Rotated volume, shape (B, Z, Y, X).
     """
+    if origin not in ("relion", "center"):
+        raise ValueError(f"Unknown origin: {origin}. Must be 'relion' or 'center'.")
+
     # Fourier domain
     V_f = fft3(V, shift=True)  # Z x X x Y
 
+    theta_rot, displacement = split_affine_translation(theta)
+    if origin == "center":
+        displacement = displacement + fourier_origin_displacement(theta, *V.shape)
+
     # rotate real and imag parts
     V_f_rot_real = rotate_volume(
-        V_f.real, theta, origin="relion", padding_mode="border", align_corners=False
+        V_f.real,
+        theta_rot,
+        origin="relion",
+        padding_mode=padding_mode,
+        align_corners=align_corners,
     )
     V_f_rot_imag = rotate_volume(
-        V_f.imag, theta, origin="relion", padding_mode="border", align_corners=False
+        V_f.imag,
+        theta_rot,
+        origin="relion",
+        padding_mode=padding_mode,
+        align_corners=align_corners,
     )
-    V_f_rot = torch.complex(V_f_rot_real, V_f_rot_imag)
+    V_f_rot = apply_fourier_translation(
+        torch.complex(V_f_rot_real, V_f_rot_imag), displacement
+    )
     V_rot = ifft3(V_f_rot, shift=True)
     return V_rot.real  # B x Z x X x Y
 
@@ -195,9 +362,14 @@ def build_affine_matrix(R: torch.Tensor, T: torch.Tensor | None = None) -> torch
     """
     Build a batch of Torch affine matrices (N, 3, 4) from rotation matrices and translations.
 
-    CryoSPARC performs shifts before rotations. The affine matrix performs rotations
-    before shifts, so the translation vector is pre-rotated:
-    T_i' = sum_j R_ij * T_j
+    The translation vector is pre-rotated, T_i' = sum_j R_ij * T_j, so that the
+    shift acts in the lab frame rather than in the particle's own frame.
+    ``grid_sample`` samples the input at ``R x + T'``, which transforms the density
+    by ``R^-1`` followed by ``-R^-1 T'``; setting ``T' = R T`` makes the net
+    displacement ``-T`` for any rotation. This matches RELION/CryoSPARC's origin
+    offsets, which are image-plane shifts applied after the projection direction is
+    fixed. Passing ``T`` through unrotated would instead shift the particle before
+    the rotation.
 
     Parameters
     ----------

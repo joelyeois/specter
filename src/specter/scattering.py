@@ -1052,10 +1052,9 @@ class IterativeScattering(L.LightningModule):
         """
         Compute exit wave using a fully-parallel Rytov approximation.
 
-        Unlike ``rytov`` (which still loops slice-by-slice), this method
-        exploits the linearity of the Rytov sum to process all slices in
-        batched FFT operations, with optional gradient checkpointing to
-        bound memory.
+        Mathematically identical to ``rytov``, but restructured for
+        throughput and bounded memory -- see "When to use this over
+        ``rytov``" below.
 
         The exit wave is:
 
@@ -1066,8 +1065,30 @@ class IterativeScattering(L.LightningModule):
                 \\right]
             \\right)
 
-        Because the exponent is a *sum* over independent slices, the
-        computation parallelises trivially across the Z dimension.
+        Because the exponent is a *sum* over independent slices -- unlike
+        multislice's ``psi_i = t_i * psi_{i-1}``, no slice's contribution
+        depends on any other slice's result -- the computation
+        parallelises trivially across the Z dimension.
+
+        When to use this over ``rytov``
+        --------------------------------
+        ``rytov`` computes the exact same sum, but as a Python loop over
+        slices, one small FFT pair per slice, with no way to bound
+        backward's memory: every slice's activations are retained for
+        gradients regardless of how many slices there are. That's fine
+        for a handful of slices (e.g. an untilted or mildly tilted single
+        particle). It stops being fine for a tilted cryo-ET volume, where
+        ``nz_new`` can reach the hundreds to low thousands: this method
+        batches those slices into a handful of large, vectorized FFT
+        calls instead of many small sequential ones (faster forward
+        pass, independent of gradients), and ``checkpoint_chunks`` lets
+        backward's memory scale with chunk size instead of ``nz_new``.
+        Both benefits come from the same independence-across-slices
+        property that makes multislice's true recursion unable to use
+        this approach at all -- multislice's ``checkpoint_chunks``
+        exists for the memory side of this same problem, but has no
+        batching counterpart to reach for, since its slices are not
+        independent.
 
         Parameters
         ----------

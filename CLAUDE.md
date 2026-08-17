@@ -160,9 +160,11 @@ Pose/shift/defocus refinement (`lr_R`/`lr_T`/`lr_defocus` on `Reconstructor`/`To
 
 ### CLI & pipelines
 
-- `cli/` — the `specter` command (entry point `specter.cli._cli:main`), built on `click`/`rich-click`. Exposes `specter simulate particles`, `specter simulate micrograph`, `specter simulate tiltseries`, `specter build tomogram`. Each subcommand (`simulate.py`, `build.py`) loads a TOML config via `config.py`'s dataclasses (`ParticleStackConfig`, `MicrographConfig`, `TiltSeriesConfig`, `TomogramConfig`) with `load_config()`, applies only the flags the user actually passed via `_click_options.py`'s `build_config_options()`/`collect_overrides()` (unset flags never clobber the TOML), then calls into `pipelines/`. `specter simulate micrograph` is single-device only (no multi-GPU DDP, unlike particles/tiltseries) — each micrograph needs its own freshly regenerated ice/crowding specimen between forward passes, and a single micrograph is already the GPU-memory-bound unit of work at `micrograph_size` resolution, so there's no batching to shard across devices. This is unrelated to the older `specter-jobs` entry point (`jobs/_cli.py`), a separate job-database CLI.
-- `pipelines/` — `run_particle_stack()`, `run_micrograph()`, `run_tilt_series()`, `run_build_tomogram()`: the actual end-to-end implementations behind the `cli/` commands, kept separate so `cli/` stays a thin argument-parsing layer. `_common.py` holds logic shared across them (device parsing, scalar-or-range sampling, exit-wave saving, etc.); `run_micrograph` doesn't use `_common.py`'s multi-GPU DDP dispatch, since it doesn't apply here (see `cli/` above).
-- **Output layout**: everything specter writes lands under `./specter-data/`, relative to the current working directory — `specter-data/{pdb,particles,micrographs,tiltseries,tomograms}`. Path resolution is one rule with no special cases: an explicit path (TOML or CLI) is used verbatim and resolves relative to the cwd; an omitted `output_dir`/`pdb_savefolder` falls back to `config.py`'s `default_output_dir(artifact)` / `default_pdb_cache_dir()`, both cwd-relative (not repo-root-anchored — that only resolves correctly for an editable install). `$SPECTER_PDB_CACHE` overrides the PDB cache location to an absolute path if you want one cache shared across working directories. `.gitignore` uses `/specter-data/` with a leading slash so the pattern doesn't also match `src/specter/`.
+- `cli/` — the `specter` command (entry point `specter.cli._cli:main`), built on `click`/`rich-click`. Exposes `specter simulate particles`, `specter simulate micrograph`, `specter simulate tiltseries`, `specter build tomogram`, `specter build ice`. Each subcommand (`simulate.py`, `build.py`) loads a TOML config via `config.py`'s dataclasses (`ParticleStackConfig`, `MicrographConfig`, `TiltSeriesConfig`, `TomogramConfig`, `IceCacheConfig`) with `load_config()`, applies only the flags the user actually passed via `_click_options.py`'s `build_config_options()`/`collect_overrides()` (unset flags never clobber the TOML), then calls into `pipelines/`. `specter simulate micrograph` is single-device only (no multi-GPU DDP, unlike particles/tiltseries) — each micrograph needs its own freshly regenerated ice/crowding specimen between forward passes, and a single micrograph is already the GPU-memory-bound unit of work at `micrograph_size` resolution, so there's no batching to shard across devices. This is unrelated to the older `specter-jobs` entry point (`jobs/_cli.py`), a separate job-database CLI.
+- `pipelines/` — `run_particle_stack()`, `run_micrograph()`, `run_tilt_series()`, `run_build_tomogram()`, `run_build_ice_cache()`: the actual end-to-end implementations behind the `cli/` commands, kept separate so `cli/` stays a thin argument-parsing layer. `_common.py` holds logic shared across them (device parsing, scalar-or-range sampling, exit-wave saving, etc.); `run_micrograph` doesn't use `_common.py`'s multi-GPU DDP dispatch, since it doesn't apply here (see `cli/` above).
+- **Multi-GPU comes in two flavours**, and `_common.py` has one device parser for each. `_parse_device` feeds Lightning DDP (particles/tiltseries: one job, sharded batches). `_parse_device_pool` feeds pipelines that own their own sharding of whole independent work units across devices — currently only `run_build_ice_cache`, which spawns one worker process per device, each generating a disjoint slice of the requested ice configs. Both accept `"0,1,2"`; only the pool parser accepts `"auto"`.
+- `specter build ice` (`pipelines/_ice.py`) generates a *replacement* `IceBank` library, for users needing ice at a pixel size or cell size the bundled `ice-data/ice_cache` doesn't cover. It never writes into `ice-data/` (off-limits, shipped); output goes to `specter-data/ice`, which a simulation config then points `ice_cache_dir` at. Configs are named after their seed (`ice_config_filename`), not their batch position — that is what makes resume (skip files already present) and extension (re-run at a higher `seed_start`) both correct. The optimisation recipe itself is deliberately not exposed as config: `mlbop_target=-0.413` eV/atom and `mlbop_strength=0.5` are measured/validated properties of the phase of ice being reproduced, and a library mixing recipes would have `IceBank` drawing from several phases interchangeably.
+- **Output layout**: everything specter writes lands under `./specter-data/`, relative to the current working directory — `specter-data/{pdb,particles,micrographs,tiltseries,tomograms,ice}`. Path resolution is one rule with no special cases: an explicit path (TOML or CLI) is used verbatim and resolves relative to the cwd; an omitted `output_dir`/`pdb_savefolder` falls back to `config.py`'s `default_output_dir(artifact)` / `default_pdb_cache_dir()`, both cwd-relative (not repo-root-anchored — that only resolves correctly for an editable install). `$SPECTER_PDB_CACHE` overrides the PDB cache location to an absolute path if you want one cache shared across working directories. `.gitignore` uses `/specter-data/` with a leading slash so the pattern doesn't also match `src/specter/`.
 
 ## Repository Structure
 
@@ -189,7 +191,7 @@ src/specter/                  # Main source package
   ice/                        # Amorphous ice generation
     _random.py                # RandomIcemaker
     _gradient.py              # GradientSKIcemaker
-    _bank.py                  # IceBank (cache) + build_ice_cache()
+    _bank.py                  # IceBank (cache) + build_one_ice_config()/build_ice_cache()
     _energy.py                # MLBOP coarse-grained water potential (structural diagnostic; neighbor search via vesin-torch, not ASE)
     _kernels.py               # Shared physics-kernel construction (atomic potential, S(k) target)
     _mdsim.py                 # MDSimDump/ExtXYZDump (legacy MD trajectory ingestion)
@@ -199,7 +201,7 @@ src/specter/                  # Main source package
     _database.py              # JobDatabase storage
     _cli.py                   # CLI interface
   cli/                        # `specter` CLI (specter simulate ..., specter build ...) — see "CLI & pipelines" below
-  pipelines/                  # run_particle_stack/run_micrograph/run_tilt_series/run_build_tomogram — see "CLI & pipelines" below
+  pipelines/                  # run_particle_stack/run_micrograph/run_tilt_series/run_build_tomogram/run_build_ice_cache — see "CLI & pipelines" below
   specimen/                   # Volume assembly (package) — under heavy active development, structure below is
                               # partial/illustrative only; read the package directly rather than trusting this list.
     single_particle.py        # MicrographSpecimenGenerator — populates a volume with template potentials + crowding + ice
@@ -245,7 +247,7 @@ src/specter/                  # Main source package
     _cryosparc.py               # extract_parameters_from_csfile() — reads CryoSPARC .cs files
     _relion.py                   # RELION .star read/write: extract_parameters_from_starfile(), create_particle_starfile[_from_model](), create_micrograph_starfile()
     _common.py                   # _select_particles() — shared per-particle mask/truncate helper for both backends
-  config.py                   # ParticleStackConfig/MicrographConfig/TiltSeriesConfig/TomogramConfig dataclasses + load_config()/apply_overrides() for TOML-driven runs (shared by cli/ and direct Python callers)
+  config.py                   # ParticleStackConfig/MicrographConfig/TiltSeriesConfig/TomogramConfig/IceCacheConfig dataclasses + load_config()/apply_overrides() for TOML-driven runs (shared by cli/ and direct Python callers)
   plots.py                    # Plotting helpers
   progress.py                 # Progress bar management (ProgressManager)
   random_seed.py              # Global seed control (exported as specter.seed)
@@ -274,12 +276,16 @@ configs/                      # TOML config files consumed by the `specter` CLI 
   micrograph.toml              # canonical defaults for `specter simulate micrograph`
   tilt_series.toml             # canonical defaults for `specter simulate tiltseries`
   tomogram.toml                 # canonical defaults for `specter build tomogram`
+  ice.toml                      # canonical defaults for `specter build ice`
 dev/                           # Prototyping and experimentation (not required to be clean; gitignored, never pushed)
 docs-figures/                  # Tracked scripts that regenerate docs/assets/images/ figures for Concepts pages —
                               # one script per concept page (e.g. membrane_shape.py -> concepts/membrane-shape.md's
                               # figures). Kept separate from demo-scripts/ (runnable end-user pipeline examples) and
                               # dev/ (gitignored scratch) since these are doc tooling that must stay reachable on
-                              # GitHub for anyone regenerating a figure after an algorithm change.
+                              # GitHub for anyone regenerating a figure after an algorithm change. Also holds scripts
+                              # that regenerate a docs *table* rather than an image (ice_cache_timing.py ->
+                              # user-guide/ice-cache.md's cost table) — same rationale: hardware-specific numbers in
+                              # prose need a reachable script to re-measure them on new silicon.
 pdb-data/                     # PDB structure files
 ice-data/                     # Pre-computed ice data (do not modify)
 ```

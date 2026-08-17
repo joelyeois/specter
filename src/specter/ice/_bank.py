@@ -11,6 +11,7 @@ from __future__ import annotations
 import glob
 import math
 import os
+import time
 from typing import Optional
 
 import lightning as L
@@ -988,6 +989,171 @@ class IceBank(L.LightningModule):
         return fig1, fig2
 
 
+def ice_config_filename(seed: int) -> str:
+    """
+    Filename a cached ice config generated with ``seed`` is stored under.
+
+    Named after the seed rather than a position in the generation batch so
+    that extending an existing cache is safe: a second run started at a
+    higher ``seed_start`` writes new files instead of overwriting the
+    earlier run's, and re-running an identical request is idempotent (it
+    reproduces the same seeds, hence the same filenames). For the usual
+    ``seed_start=0`` this is the same ``config_000.pt``, ``config_001.pt``,
+    ... sequence the bundled ``ice-data/ice_cache`` uses.
+
+    Parameters
+    ----------
+    seed : int
+        Seed the config was generated with.
+
+    Returns
+    -------
+    str
+        Bare filename, e.g. ``"config_007.pt"``.
+    """
+    return f"config_{seed:03d}.pt"
+
+
+def build_one_ice_config(
+    save_path: str,
+    n: int = 256,
+    dx: float = 1.0,
+    n_steps: int = 600,
+    seed: int = 0,
+    device: str | torch.device = "cuda",
+    progressbars: bool = True,
+) -> dict:
+    """
+    Generate a single ice coordinate config and save it (float16) to
+    ``save_path``.
+
+    One unit of work for :func:`build_ice_cache` and for ``specter build
+    ice``, which differ only in how they schedule these calls. A fresh
+    :class:`GradientSKIcemaker` run under the standard MLBOP recipe
+    (``rep_strength=0, mlbop_strength=0.5, mlbop_target=-0.413``,
+    ``tol=1e-4``/``patience=10``). That recipe is deliberately not
+    parameterised: ``mlbop_target=-0.413`` is a measured property of real
+    LDA-80K MD ice rather than a preference, and configs generated under
+    different recipes are different phases of ice that
+    :class:`IceBank` would then draw from interchangeably.
+
+    Parameters
+    ----------
+    save_path : str
+        Full path of the ``.pt`` file to write. Its parent directory must
+        already exist.
+    n : int, optional
+        Number of voxels along each side (box size = ``n * dx``). Cubic
+        only: :class:`IceBank` stores one scalar ``box_L`` per config and
+        filters candidate configs against it, so a non-cubic source cell
+        has no representation. Default 256.
+    dx : float, optional
+        Voxel size in Å. Default 1.0.
+    n_steps : int, optional
+        L-BFGS step ceiling (an upper bound -- ``tol``/``patience`` still
+        stop a plateaued run early). Default 600.
+    seed : int, optional
+        Global torch seed set before initialisation, making this config
+        reproducible. Default 0.
+    device : str or torch.device, optional
+        Computation device. Default ``"cuda"``.
+    progressbars : bool, optional
+        Whether to show a progress bar over optimisation steps. Default True.
+
+    Returns
+    -------
+    dict
+        The saved metadata, without ``positions``: ``box_L``, ``n``,
+        ``dx``, ``seed``, ``n_steps``, ``stopped_early``, ``energy``,
+        ``sk_loss``, ``recipe``. ``sk_loss`` is measured on the float16
+        coordinates as stored, so it describes the file rather than the
+        optimiser's in-memory state -- see the comment at its computation
+        for why neither alternative is trustworthy.
+    """
+    from ._gradient import GradientSKIcemaker
+
+    # The standard recipe, bound to names so the values actually optimised
+    # with and the values recorded in the saved metadata below cannot drift
+    # apart.
+    rep_strength, mlbop_strength, mlbop_target = 0.0, 0.5, -0.413
+    tol, patience = 1e-4, 10
+
+    started = time.perf_counter()
+    torch.manual_seed(seed)
+    gd = GradientSKIcemaker(n=n, dx=dx, device=device, progressbars=progressbars)
+    gd.init_random()
+    history = gd.optimize(
+        n_steps=n_steps,
+        record_every=n_steps,
+        rep_strength=rep_strength,
+        mlbop_strength=mlbop_strength,
+        mlbop_target=mlbop_target,
+        tol=tol,
+        patience=patience,
+    )
+    energy = gd.mlbop_energy()
+    assert gd.positions is not None
+
+    # Measure S(k) fidelity on the float16 coordinates that are actually
+    # written, not on the float32 ones held in memory, and not from
+    # `history["sk_loss"]`. Both alternatives misreport:
+    #
+    # - `history` records at `step % record_every == 0` plus one final entry
+    #   only when tol/patience triggers, so at `record_every=n_steps` a run
+    #   that uses its whole budget has exactly ONE record -- step 0, the
+    #   pre-optimisation value of the random initialisation. The bundled
+    #   `ice-data/ice_cache` carries that artifact: its ten budget-exhausting
+    #   configs all record ~5e4, which is simply what a fresh random init
+    #   scores at this size, while their stored coordinates score ~0.4-2.0
+    #   like every other config in the library.
+    # - float16 storage at box_L=256 has a resolution of 0.125 A near the box
+    #   edge, which by itself costs three to four orders of magnitude of S(k)
+    #   loss (measured: a converged config recording 1.3e-4 in float32 scores
+    #   0.42 once quantized). A number describing coordinates nobody can load
+    #   is not a useful quality record.
+    positions = gd.positions.clone().half()
+    with torch.no_grad():
+        sk_loss, _ = gd._sk_loss(
+            positions.to(gd.device).float(), rep_strength=0.0, mlbop_strength=0.0
+        )
+
+    metadata = {
+        "box_L": n * dx,
+        "n": n,
+        "dx": dx,
+        "seed": seed,
+        "n_steps": n_steps,
+        # Number of outer L-BFGS steps actually taken, and the seconds they
+        # took. Recorded under the same keys the bundled ice-data/ice_cache
+        # uses, so cost per step stays derivable per config -- that ratio,
+        # not wall time alone, is what transfers to other hardware and cell
+        # sizes. Taken from `history["step"]` only when tol/patience fired,
+        # since that is the sole case where a final entry is appended; a run
+        # that used its whole budget has just the step-0 record (the same
+        # recording quirk that makes `history["sk_loss"]` untrustworthy
+        # above), and by definition took all `n_steps` of it.
+        "n_steps_actual": (
+            history["step"][-1] + 1 if history["stopped_early"] else n_steps
+        ),
+        "wall_time": time.perf_counter() - started,
+        "stopped_early": history["stopped_early"],
+        "energy": energy,
+        "sk_loss": sk_loss.item(),
+        # Stored per config, under the same key the bundled ice-data/ice_cache
+        # entries use: a cache directory can hold configs from several runs,
+        # and which recipe produced one determines which phase of ice it is.
+        "recipe": {
+            "rep_strength": rep_strength,
+            "mlbop_strength": mlbop_strength,
+            "mlbop_target": mlbop_target,
+            "tol": tol,
+            "patience": patience,
+        },
+    }
+    torch.save({"positions": positions, **metadata}, save_path)
+    return metadata
+
+
 def build_ice_cache(
     cache_dir: str,
     num_configs: int,
@@ -1002,26 +1168,19 @@ def build_ice_cache(
     Generate ``num_configs`` independent ice coordinate configs and save
     them (float16) to ``cache_dir`` for later use with :class:`IceBank`.
 
-    Each config is a fresh :class:`GradientSKIcemaker` run under its
-    default MLBOP recipe (``rep_strength=0, mlbop_strength=0.5,
-    mlbop_target=-0.413``, ``tol=1e-4``/``patience=10``), one file per
-    config. This is the expensive, one-time cost the whole point of
-    :class:`IceBank` is to amortize -- expect on the order of tens of
-    minutes per config at production scale (``n=256, dx=1.0``), so this is
-    meant to be run once (or occasionally, to extend/refresh the library),
-    not per-session.
+    One file per config, via :func:`build_one_ice_config`. This is the
+    expensive, one-time cost the whole point of :class:`IceBank` is to
+    amortize -- expect on the order of tens of minutes per config at
+    production scale (``n=256, dx=1.0``), so this is meant to be run once
+    (or occasionally, to extend/refresh the library), not per-session.
 
     This function runs all ``num_configs`` sequentially, on a single
-    device, in one process. The bundled ``ice-data/ice_cache`` (20 configs
-    at ``n=256, dx=1.0``) was instead produced with
-    ``dev/ice/generate_ice_cache_worker.py``, which builds one config per
-    subprocess invocation -- letting configs run in parallel across
-    multiple GPUs, and letting a single config's transient failure (e.g. a
-    GPU OOM from other processes sharing the device) be retried in
-    isolation without losing the rest of the batch. Prefer that script over
-    this function for another large, production-scale generation run;
-    reach for this function for smaller/one-off library extensions where
-    that operational overhead isn't worth it.
+    device, in one process, and overwrites any config already present for
+    the same seed. Prefer ``specter build ice`` (equivalently
+    :func:`specter.pipelines.run_build_ice_cache`) for a large generation
+    run: it shards configs across several GPUs, skips configs the cache
+    already has so an interrupted run resumes, and records a manifest of
+    the convergence quality actually achieved.
 
     ``n_steps=600`` (vs. the class-level default of 400): S(k) gains taper
     by ~200-300 steps at this scale, but ``E_per_atom`` keeps improving out
@@ -1033,12 +1192,12 @@ def build_ice_cache(
     Parameters
     ----------
     cache_dir : str
-        Directory to write ``config_NNN.pt`` files to. Created if it
-        doesn't exist.
+        Directory to write config files to (named by
+        :func:`ice_config_filename`). Created if it doesn't exist.
     num_configs : int
         Number of independent configs to generate.
     n : int, optional
-        Number of voxels along x and y (box size = ``n * dx``). Default 256.
+        Number of voxels along each side (box size = ``n * dx``). Default 256.
     dx : float, optional
         Voxel size in Å. Default 1.0.
     n_steps : int, optional
@@ -1051,33 +1210,17 @@ def build_ice_cache(
     progressbars : bool, optional
         Whether to show progress bars during generation. Default True.
     """
-    from ._gradient import GradientSKIcemaker
-
     os.makedirs(cache_dir, exist_ok=True)
     for i in range(num_configs):
         seed = seed_start + i
-        torch.manual_seed(seed)
-        gd = GradientSKIcemaker(n=n, dx=dx, device=device, progressbars=progressbars)
-        gd.init_random()
-        history = gd.optimize(
-            n_steps=n_steps, record_every=n_steps, tol=1e-4, patience=10
-        )
-        energy = gd.mlbop_energy()
-        assert gd.positions is not None
-
-        torch.save(
-            {
-                "positions": gd.positions.clone().half(),
-                "box_L": n * dx,
-                "n": n,
-                "dx": dx,
-                "seed": seed,
-                "n_steps": n_steps,
-                "stopped_early": history["stopped_early"],
-                "energy": energy,
-                "sk_loss": history["sk_loss"][-1],
-            },
-            os.path.join(cache_dir, f"config_{i:03d}.pt"),
+        build_one_ice_config(
+            os.path.join(cache_dir, ice_config_filename(seed)),
+            n=n,
+            dx=dx,
+            n_steps=n_steps,
+            seed=seed,
+            device=device,
+            progressbars=progressbars,
         )
 
 

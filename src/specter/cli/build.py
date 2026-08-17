@@ -5,7 +5,9 @@ from __future__ import annotations
 import rich_click as click
 
 from specter.config import (
+    ICE_CACHE_HELP,
     TOMOGRAM_HELP,
+    IceCacheConfig,
     TomogramConfig,
     apply_overrides,
     load_config,
@@ -57,11 +59,24 @@ _TOMOGRAM_GROUPS: list[tuple[str, list[str]]] = [
     ("Advanced", ["pdb_savefolder", "seed"]),
 ]
 
+_ICE_GROUPS: list[tuple[str, list[str]]] = [
+    ("Library", ["num_configs", "n", "dx", "seed_start"]),
+    ("Optimisation", ["n_steps"]),
+    ("Compute", ["device"]),
+    ("Output", ["output_dir", "overwrite", "diagnostics"]),
+]
+
 
 def _default_tomogram_config_path() -> str:
     from specter.config import REPO_ROOT
 
     return str(REPO_ROOT / "configs" / "tomogram.toml")
+
+
+def _default_ice_config_path() -> str:
+    from specter.config import REPO_ROOT
+
+    return str(REPO_ROOT / "configs" / "ice.toml")
 
 
 def _field_panels(groups: list[tuple[str, list[str]]]) -> dict[str, str]:
@@ -132,12 +147,64 @@ def _build_tomogram_command() -> click.RichCommand:
     )
 
 
+def _ice_callback(config: str, **_overrides_raw: object) -> None:
+    """Handle `specter build ice`."""
+    from specter.pipelines import run_build_ice_cache
+
+    ctx = click.get_current_context()
+    assert ctx is not None
+    overrides = collect_overrides(ctx, exclude={"config"})
+
+    cfg = load_config(config, IceCacheConfig)
+    apply_overrides(cfg, overrides)
+    run_build_ice_cache(cfg)
+
+
+def _build_ice_command() -> click.RichCommand:
+    params: list[click.Parameter] = [
+        click.RichOption(
+            ["--config"],
+            type=str,
+            default=_default_ice_config_path(),
+            show_default=True,
+            help="TOML config file. Always loaded first, before any flags below "
+            "are applied.",
+            panel="Config",
+        ),
+        *build_config_options(
+            IceCacheConfig,
+            field_help=ICE_CACHE_HELP,
+            field_panels=_field_panels(_ICE_GROUPS),
+        ),
+    ]
+    return click.RichCommand(
+        name="ice",
+        params=params,
+        callback=_ice_callback,
+        context_settings=CONTEXT_SETTINGS,
+        help="Generate a library of amorphous-ice configurations for "
+        "`IceBank` to draw from, as an alternative to the one bundled with "
+        "specter. Useful when simulations need ice at a pixel size or in a "
+        "volume larger than the bundled library covers (256 A cells at 1 "
+        "A/voxel), or simply more independent configurations. Each one is a "
+        "full GradientSKIcemaker optimisation against the S(k) and ML-BOP "
+        "energy of real amorphous ice, costing tens of minutes at "
+        "production scale -- pass several GPUs to --device to shard them, "
+        "and re-run the same command to resume an interrupted run. Point a "
+        "simulation config's ice_cache_dir at the output directory to use "
+        "the result. A TOML config (--config) is always loaded first -- "
+        "every flag below is optional and, if given, overrides one field of "
+        "it.",
+    )
+
+
 def build_build_group() -> click.RichGroup:
     """Build the `build` command group and its subcommands."""
     group = click.RichGroup(
         name="build",
-        help="Build specimen volumes",
+        help="Build specimen volumes and reusable assets",
         context_settings=CONTEXT_SETTINGS,
     )
     group.add_command(_build_tomogram_command())
+    group.add_command(_build_ice_command())
     return group

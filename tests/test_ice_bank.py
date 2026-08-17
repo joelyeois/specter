@@ -12,6 +12,7 @@ from specter.ice._bank import (
     build_ice_cache,
     random_rotation_matrix,
 )
+from specter.ice import ice_config_filename
 from specter.ice._helpers import ndensity_of_amorphous_ice
 
 
@@ -325,9 +326,9 @@ def test_icebank_generate_big_ice_request_fitting_single_tile(tmp_path):
 
 def test_build_ice_cache_writes_loadable_configs(tmp_path):
     """Smoke test: build_ice_cache() is a slower, single-process alternative
-    to dev/ice/generate_ice_cache_worker.py (see its own docstring) for
-    generating cache entries -- check its output round-trips through
-    IceBank at a tiny, fast scale, not that it converges well."""
+    to `specter build ice` (see its own docstring) for generating cache
+    entries -- check its output round-trips through IceBank at a tiny, fast
+    scale, not that it converges well."""
     torch.manual_seed(0)
     build_ice_cache(
         str(tmp_path),
@@ -350,6 +351,29 @@ def test_build_ice_cache_writes_loadable_configs(tmp_path):
     ice = cache.generate_ice(n=8, dx=1.0, batchsize=1)
     assert ice.shape == (1, 8, 8, 8)
     assert torch.isfinite(ice).all()
+
+
+def test_build_ice_cache_names_configs_by_seed(tmp_path):
+    """Cache entries are named after the seed that generated them, not their
+    position in the batch, so a second run at a higher seed_start EXTENDS a
+    library instead of overwriting the first run's configs."""
+    build_ice_cache(
+        str(tmp_path), num_configs=2, n=8, n_steps=2, device="cpu", progressbars=False
+    )
+    build_ice_cache(
+        str(tmp_path),
+        num_configs=2,
+        n=8,
+        n_steps=2,
+        device="cpu",
+        seed_start=2,
+        progressbars=False,
+    )
+
+    assert sorted(p.name for p in tmp_path.glob("*.pt")) == [
+        ice_config_filename(seed) for seed in range(4)
+    ]
+    assert len(IceBank(str(tmp_path), progressbars=False)) == 4
 
 
 def test_blend_ice_into_volume_random_icemaker_noncubic_nxy_nz():

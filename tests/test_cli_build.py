@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import subprocess as proc
 import sys
 from pathlib import Path
@@ -351,3 +352,101 @@ def test_cli_build_tomogram_write_picks_override(tmp_path: Path) -> None:
     assert result.returncode == 0, result.stderr
     assert (tmp_path / "test_tomogram.mrc").exists()
     assert list(tmp_path.glob("*.ndjson")) == []
+
+
+def _run_ice_cli(output_dir: Path, *extra_args: str) -> proc.CompletedProcess:
+    """Generate a tiny ice library. n=8/n_steps=3 is far too small to converge
+    -- these tests check the CLI's scheduling, resume and bookkeeping, not the
+    physics (tests/test_ice_bank.py covers that)."""
+    args = [
+        sys.executable,
+        "-m",
+        "specter.cli._cli",
+        "build",
+        "ice",
+        "--n",
+        "8",
+        "--dx",
+        "1.0",
+        "--n_steps",
+        "3",
+        "--device",
+        "cpu",
+        "--output_dir",
+        str(output_dir),
+        *extra_args,
+    ]
+    return proc.run(args, capture_output=True, encoding="utf-8")
+
+
+def test_cli_build_ice_smoke(tmp_path: Path) -> None:
+    result = _run_ice_cli(tmp_path, "--num_configs", "2")
+    assert result.returncode == 0, result.stderr
+
+    assert sorted(p.name for p in tmp_path.glob("*.pt")) == [
+        "config_000.pt",
+        "config_001.pt",
+    ]
+
+    manifest = json.loads((tmp_path / "manifest.json").read_text())
+    assert [c["seed"] for c in manifest["configs"]] == [0, 1]
+    for entry in manifest["configs"]:
+        # Geometry and recipe are read back from each config's own metadata,
+        # not assumed from the run, so a directory holding configs from
+        # several runs describes each of them correctly.
+        assert entry["n"] == 8
+        assert entry["n_steps"] == 3
+        assert entry["recipe"]["mlbop_target"] == -0.413
+        assert entry["sk_loss"] is not None
+
+    # The whole point of the output: an IceBank can serve crops from it.
+    from specter.ice import IceBank
+
+    bank = IceBank(str(tmp_path), progressbars=False)
+    assert len(bank) == 2
+    assert bank.generate_ice(n=8, dx=1.0, batchsize=1).shape == (1, 8, 8, 8)
+
+
+def test_cli_build_ice_resumes_and_extends(tmp_path: Path) -> None:
+    """Re-running an identical request regenerates nothing (so an interrupted
+    multi-hour run resumes), and a later seed_start adds to the library
+    instead of overwriting it."""
+    assert _run_ice_cli(tmp_path, "--num_configs", "2").returncode == 0
+    first_mtimes = {p.name: p.stat().st_mtime_ns for p in tmp_path.glob("*.pt")}
+
+    result = _run_ice_cli(tmp_path, "--num_configs", "2")
+    assert result.returncode == 0, result.stderr
+    assert "Skipping 2 config(s)" in result.stdout
+    assert {p.name: p.stat().st_mtime_ns for p in tmp_path.glob("*.pt")} == first_mtimes
+
+    result = _run_ice_cli(tmp_path, "--num_configs", "2", "--seed_start", "2")
+    assert result.returncode == 0, result.stderr
+    assert sorted(p.name for p in tmp_path.glob("*.pt")) == [
+        "config_000.pt",
+        "config_001.pt",
+        "config_002.pt",
+        "config_003.pt",
+    ]
+    manifest = json.loads((tmp_path / "manifest.json").read_text())
+    assert [c["seed"] for c in manifest["configs"]] == [0, 1, 2, 3]
+
+
+def test_cli_build_ice_shards_across_devices(tmp_path: Path) -> None:
+    """A multi-device --device runs one worker process per device. Two "cpu"
+    entries stand in for two GPUs: this exercises the spawn/join/exit-code
+    path itself, which is what differs from the single-device path."""
+    result = _run_ice_cli(tmp_path, "--num_configs", "4", "--device", "cpu,cpu")
+    assert result.returncode == 0, result.stderr
+    assert len(list(tmp_path.glob("*.pt"))) == 4
+
+
+def test_cli_build_ice_help_smoke() -> None:
+    result = proc.run(
+        [sys.executable, "-m", "specter.cli._cli", "build", "ice", "--help"],
+        capture_output=True,
+        encoding="utf-8",
+    )
+    assert result.returncode == 0
+    assert "--num_configs" in result.stdout
+    assert "--seed_start" in result.stdout
+    assert "--device" in result.stdout

@@ -78,6 +78,45 @@ def _parse_device(device_str: str) -> tuple[str, str | list[int]]:
     return "single", device_str
 
 
+def _parse_device_pool(device_str: str) -> list[str]:
+    """
+    Parse a ``--device`` string into a list of devices to shard work across.
+
+    The counterpart to :func:`_parse_device` for pipelines that split whole
+    independent units of work across devices themselves (one worker process
+    per device, as ``specter build ice`` does) rather than handing a
+    multi-GPU job to Lightning's DDP. Both accept the same spellings; this
+    one additionally accepts ``"auto"``, and returns device strings rather
+    than a DDP dispatch mode plus bare GPU ids.
+
+    Parameters
+    ----------
+    device_str : str
+        One of ``"cpu"``, ``"cuda"``, ``"cuda:N"``, a bare integer ``"N"``,
+        a comma-separated list of integers (``"0,1,2,3"``), or ``"auto"``
+        for every visible GPU (falling back to ``"cpu"`` when there are
+        none).
+
+    Returns
+    -------
+    list[str]
+        Always at least one entry.
+
+    Examples
+    --------
+    "cpu"     -> ["cpu"]
+    "cuda"    -> ["cuda"]
+    "0"       -> ["cuda:0"]
+    "0,1,2"   -> ["cuda:0", "cuda:1", "cuda:2"]
+    "auto"    -> ["cuda:0", ..., "cuda:N-1"], or ["cpu"] with no GPUs
+    """
+    if device_str == "auto":
+        n_gpus = torch.cuda.device_count()
+        return [f"cuda:{i}" for i in range(n_gpus)] if n_gpus else ["cpu"]
+    parts = [p.strip() for p in device_str.split(",")]
+    return [f"cuda:{p}" if p.isdigit() else p for p in parts]
+
+
 def _generate_single(
     model: Any,
     n: int,

@@ -203,3 +203,38 @@ def test_scattering_vs_iterative_consistency(padded_volume, angle_deg, atol):
     assert torch.allclose(psi_scat, psi_iter, atol=atol), (
         f"Max diff at {angle_deg}°: {(psi_scat - psi_iter).abs().max().item():.2e}"
     )
+
+
+def test_klim_bandlimit_keeps_low_frequencies(dummy_volume):
+    """``klim`` must zero content *above* the cutoff and leave content
+    *below* it untouched -- Kirkland's antialiasing bandlimit, not its
+    inverse. Regression test for a fftshift/native-FFT convention mismatch
+    between ``disk2d`` (centered at N//2) and the unshifted spectrum
+    ``Scattering.multislice`` actually multiplies it into."""
+    nxy = 64
+    pixel_size = 1.0
+    klim = 0.5
+    scat = Scattering(
+        nxy=nxy,
+        pixel_size=pixel_size,
+        voltage=300.0,
+        scattering_model="multislice",
+        klim=klim,
+        progressbars=False,
+    )
+    psi = scat(dummy_volume)
+
+    k = torch.fft.fftfreq(nxy, pixel_size)
+    kxx, kyy = torch.meshgrid(k, k, indexing="ij")
+    k_mag = torch.sqrt(kxx**2 + kyy**2)
+    k_nyquist = 1.0 / (2.0 * pixel_size)
+
+    spectrum = torch.fft.fft2(psi[0])
+    below_cutoff = spectrum[k_mag <= klim * k_nyquist]
+    above_cutoff = spectrum[k_mag > klim * k_nyquist]
+
+    # Masked every slice through 32 FFT/IFFT round trips, so the "zeroed"
+    # region carries float32 round-off rather than being exactly 0 -- still
+    # several orders of magnitude below the surviving low-frequency content.
+    assert torch.abs(above_cutoff).max() < 1e-3 * torch.abs(below_cutoff).max()
+    assert torch.abs(below_cutoff).max() > 1e-6

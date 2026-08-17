@@ -6,7 +6,7 @@ import lightning as L
 from torch.utils.checkpoint import checkpoint as _gradient_checkpoint
 from .progress import track
 
-from .arrays import center_crop, disk2d
+from .arrays import center_crop
 from .constants import energy_to_wavelength, interaction_parameter
 from .fft import fft2, ifft2
 from .rotations import VolumeRotator, build_affine_matrix
@@ -151,10 +151,15 @@ class Scattering(L.LightningModule):
             self.register_buffer("F_real", F.real)
             self.register_buffer("F_imag", F.imag)
 
-        # Kirkland bandlimit
+        # Kirkland bandlimit. Built directly against k (already in the same
+        # native/unshifted FFT frequency order F is in, DC at index 0) --
+        # not via disk2d(), whose disk is centered at index N//2 (fftshift
+        # convention) and would keep the Nyquist corner while masking out
+        # DC if multiplied straight into an unshifted spectrum.
         self.klim = klim
         if klim is not None:
-            kmask = disk2d(nxy, int(nxy * klim))[None, ...]
+            k_nyquist = 1.0 / (2.0 * pixel_size)
+            kmask = (k <= klim * k_nyquist).to(torch.float32)[None, ...]
             self.register_buffer("kmask", kmask)
         else:
             self.kmask = 1
@@ -513,10 +518,12 @@ class IterativeScattering(L.LightningModule):
         k = torch.sqrt(kxx**2 + kyy**2)
         self.register_buffer("k2", k**2)
 
-        # Kirkland bandlimit
+        # Kirkland bandlimit -- see the note in Scattering.__init__: built
+        # directly against k (native/unshifted FFT order), not disk2d().
         self.klim = klim
         if klim is not None:
-            kmask = disk2d(nxy, int(nxy * klim))[None, ...]
+            k_nyquist = 1.0 / (2.0 * pixel_size)
+            kmask = (k <= klim * k_nyquist).to(torch.float32)[None, ...]
             self.register_buffer("kmask", kmask)
         else:
             self.kmask = 1
@@ -537,9 +544,8 @@ class IterativeScattering(L.LightningModule):
             self.register_buffer("F_step_padded_real", F_step_p.real)
             self.register_buffer("F_step_padded_imag", F_step_p.imag)
             if klim is not None:
-                kmask_p = disk2d(self.padded_nxy, int(self.padded_nxy * klim))[
-                    None, ...
-                ]
+                k_nyquist = 1.0 / (2.0 * pixel_size)
+                kmask_p = (k_p <= klim * k_nyquist).to(torch.float32)[None, ...]
                 self.register_buffer("kmask_padded", kmask_p)
             else:
                 self.kmask_padded = 1

@@ -101,7 +101,11 @@ def _falcon4i_mtf(
     mtf = torch.from_numpy(interp(k_rad.cpu().numpy())).to(device).reshape(n, n)
 
     if return1d:
-        return k_rad[n // 2 :, n // 2], mtf[n // 2 :, n // 2]
+        # k is native/unshifted FFT order (DC at index 0), so the radial cut
+        # from DC out to Nyquist along one axis is k_rad[:n // 2, 0] -- not
+        # k_rad[n // 2:, n // 2], which starts at index n // 2 (the Nyquist
+        # bin, not DC) and so returns frequencies >= Nyquist only.
+        return k_rad[: n // 2, 0], mtf[: n // 2, 0]
     return mtf
 
 

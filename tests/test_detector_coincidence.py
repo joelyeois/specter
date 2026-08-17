@@ -199,6 +199,30 @@ def test_mtf_conserves_total_counts() -> None:
     assert blurred.std().item() < img.std().item()
 
 
+@pytest.mark.parametrize("preset", ["falcon4i_200kv", "falcon4i_300kv"])
+def test_falcon4i_return1d_matches_2d_radial_profile(preset: str) -> None:
+    """``return1d=True``'s k_data must run from 0 (DC) up to ~Nyquist, and
+    its mtf values must match the 2D MTF sampled along the same radial cut.
+
+    Regression test: the slice used to previously be ``k_rad[n // 2:, n //
+    2]``, which -- since k is native/unshifted FFT order (DC at index 0,
+    not index n // 2) -- selected frequencies >= Nyquist only, the wrong
+    half of the array entirely.
+    """
+    from specter import detectors
+
+    n, dx = 128, 1.0
+    fn = getattr(detectors, preset)
+    k_1d, mtf_1d = fn(n=n, dx=dx, device="cpu", return1d=True)
+    mtf_2d = fn(n=n, dx=dx, device="cpu", return1d=False)
+
+    k_nyquist = 1 / (2 * dx)
+    assert float(k_1d[0]) == pytest.approx(0.0, abs=1e-6)
+    assert float(k_1d.max()) < k_nyquist
+    assert torch.all(torch.diff(k_1d) > 0)  # monotonically increasing
+    assert torch.allclose(mtf_1d, mtf_2d[: n // 2, 0], atol=1e-5)
+
+
 def test_dqe0_scales_detected_counts() -> None:
     """
     dqe0 must scale recorded electrons by exactly that factor, and must apply

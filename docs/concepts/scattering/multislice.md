@@ -48,10 +48,12 @@ and returns \(\psi_{n_z-1}\) after all \(n_z\) slices.
 
 The figure below traces this recursion through a real potential volume: a
 320 Å-thick `RandomIcemaker` vitreous-ice slab (2 Å pixels, 300 kV),
-showing the exit-wave intensity \(|\psi|^2\) after 1, 40, 80, 120, and all
-160 slices.
+showing the exit-wave contrast \(\big||\psi|^2 - 1\big|\) -- the deviation
+of the intensity from its unit incident-wave baseline, which is what
+actually varies pixel to pixel here -- after 1, 40, 80, 120, and all 160
+slices.
 
-![Exit-wave intensity through the multislice recursion, at five depths through a 320 Å ice slab.](../../assets/images/multislice-recursion-trace.png){ width="900" style="display:block;margin:1.2em auto;" }
+![Exit-wave contrast (the deviation of intensity from its unit baseline) through the multislice recursion, at five depths through a 320 Å ice slab. White = no deviation from the unit baseline; darker = larger deviation, in either direction.](../../assets/images/multislice-recursion-trace.png){ width="900" style="display:block;margin:1.2em auto;" }
 
 After a single slice the intensity is uniform: a thin phase object barely
 perturbs \(|\psi|^2\), since a pure phase factor \(e^{i\phi}\) has unit

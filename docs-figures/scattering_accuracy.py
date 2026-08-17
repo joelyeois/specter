@@ -87,12 +87,25 @@ def figure_multislice_trace(V: torch.Tensor) -> None:
             frames[i + 1] = torch.abs(exitwave[0]) ** 2
 
     fig, axes = plt.subplots(1, len(frames), figsize=(3.0 * len(frames), 3.2), dpi=180)
-    vmax = max(f.max().item() for f in frames.values())
-    for ax, (depth, frame) in zip(axes, frames.items()):
-        ax.imshow(frame.cpu().numpy(), cmap="gray_r", vmin=0, vmax=vmax)
+    # |psi|^2 is a weak perturbation that fluctuates symmetrically around a
+    # unit incident baseline (a thin phase object barely changes intensity)
+    # -- both brighter and darker specks appear as the recursion progresses.
+    # Plotting the deviation magnitude |frame - 1| instead of raw |psi|^2
+    # puts that baseline exactly at 0 (white, under gray_r), with departures
+    # in *either* direction darkening it, rather than raw intensity sitting
+    # mid-scale and reading as a flat, hard-to-read gray. A shared vmax
+    # across panels (rather than autoscaling each independently) keeps the
+    # comparison honest: the thin/early panels correctly stay close to flat
+    # white, and only the deepest panel shows strong dark speckle.
+    deviations = {depth: (frame - 1.0).abs() for depth, frame in frames.items()}
+    vmax = max(d.max().item() for d in deviations.values())
+    for ax, (depth, deviation) in zip(axes, deviations.items()):
+        ax.imshow(deviation.cpu().numpy(), cmap="gray_r", vmin=0, vmax=vmax)
         ax.set_title(f"{depth} / {nz} slices\n({depth * PIXEL_SIZE:g} Å)", fontsize=9)
         ax.axis("off")
-    fig.suptitle("Exit-wave intensity |ψ|² through the multislice recursion", y=1.03)
+    fig.suptitle(
+        "Exit-wave contrast ||ψ|² − 1| through the multislice recursion", y=1.03
+    )
     fig.tight_layout()
     path = OUT_DIR / "multislice-recursion-trace.png"
     fig.savefig(path, bbox_inches="tight")

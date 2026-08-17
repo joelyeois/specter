@@ -4,9 +4,9 @@ overview of `specter build tomogram`'s specimen assembly
 (``specter.specimen.tomogram.TomogramSpecimenGenerator``).
 
 Runs the real generator once with every component switched on -- carbon
-film, membranes with transmembrane proteins, filaments, gold fiducial
-beads, exact-count targets and ratio-weighted filler -- and draws every
-figure from that single run's own outputs (`volume`, `regions`,
+film, membranes with transmembrane proteins, filaments, microtubules, gold
+fiducial beads, exact-count targets and ratio-weighted filler -- and draws
+every figure from that single run's own outputs (`volume`, `regions`,
 `membrane_labels`, `instance_labels`, `placements`, `bead_instances`).
 
 Run with: uv run python docs-figures/cryoet_specimen_overview.py
@@ -27,7 +27,7 @@ from specter.specimen.cytosolic_filler import (
     PEI2016_CROWDING_TABLE,
     build_filler_pool_specs,
 )
-from specter.specimen.filament import ACTIN_SPEC, FilamentSpec
+from specter.specimen.filament import ACTIN_SPEC, FilamentSpec, MicrotubuleSpec
 from specter.specimen.membrane import MembraneGenerator, TransmembraneSpec
 from specter.specimen.tomogram import (
     MembraneInstance,
@@ -47,6 +47,7 @@ SHAPE_ZYX = (110, 440, 440)  # 880 x 3520 x 3520 Angstrom
 CARBON_COLOR = "#8c8c8c"
 MEMBRANE_COLOR = "#0f7373"
 FILAMENT_COLOR = "#c0392b"
+MICROTUBULE_COLOR = "#4C72B0"
 BEAD_COLOR = "#b8860b"
 TARGET_COLOR = "#d98218"
 FILLER_COLOR = "#6b4fa0"
@@ -100,6 +101,18 @@ def build() -> tuple[TomogramSpecimenGenerator, torch.Tensor]:
                 n_monomers=(40, 90),
             )
         ],
+        microtubule_specs=[
+            MicrotubuleSpec(
+                n_copies=2,
+                # length=None spans the volume's own diagonal, so each tube
+                # crosses the whole field of view rather than appearing as
+                # a stub. bend_radius=3e4 (3 um) gives the smooth,
+                # mechanically-constrained curvature real microtubules show
+                # in cellular tomograms, instead of the near-straight
+                # default thermal walk.
+                bend_radius=3.0e4,
+            )
+        ],
         carbon_film_spec=CarbonFilmSpec(
             thickness=150.0, edge_fraction=0.08, edge_side="bottom"
         ),
@@ -121,14 +134,21 @@ def build() -> tuple[TomogramSpecimenGenerator, torch.Tensor]:
 
 def _component_masks(gen: TomogramSpecimenGenerator) -> dict[str, np.ndarray]:
     """Split the run's own ground truth into one 3D boolean mask per
-    component. Instance ids are handed out in placement order -- filaments
-    first, then beads, then cytosol/lumen proteins -- so the protein and
-    bead ids the generator reports back are enough to identify every
-    remaining labelled voxel as filament."""
+    component. Instance ids are handed out in placement order -- filament
+    monomers first (one id each), then microtubules (one id per tube), then
+    beads, then cytosol/lumen proteins -- so the protein and bead ids the
+    generator reports back, plus the filament/microtubule instance counts,
+    are enough to identify every remaining labelled voxel."""
     labels = gen.instance_labels.cpu()
     membrane = gen.membrane_labels.cpu() > 0
     shell = gen.regions["shell"].cpu()
 
+    n_filament_ids = len(gen.filament_instances)
+    n_microtubule_ids = len(gen.microtubule_instances)
+    filament_ids = torch.arange(1, 1 + n_filament_ids)
+    microtubule_ids = torch.arange(
+        1 + n_filament_ids, 1 + n_filament_ids + n_microtubule_ids
+    )
     bead_ids = torch.tensor([b.instance_id for b in gen.bead_instances])
     target_ids = torch.tensor(
         [p.instance_id for p in gen.placements if p.role == "target"]
@@ -136,7 +156,6 @@ def _component_masks(gen: TomogramSpecimenGenerator) -> dict[str, np.ndarray]:
     filler_ids = torch.tensor(
         [p.instance_id for p in gen.placements if p.role == "filler"]
     )
-    protein_or_bead = torch.isin(labels, torch.cat([bead_ids, target_ids, filler_ids]))
 
     return {
         # Carbon reads as "shell" to the region classifier, the same bucket
@@ -144,7 +163,8 @@ def _component_masks(gen: TomogramSpecimenGenerator) -> dict[str, np.ndarray]:
         # labelled membrane instance is film.
         "carbon film": (shell & ~membrane).numpy(),
         "membrane": membrane.numpy(),
-        "filament": ((labels > 0) & ~protein_or_bead).numpy(),
+        "filament": torch.isin(labels, filament_ids).numpy(),
+        "microtubule": torch.isin(labels, microtubule_ids).numpy(),
         "gold bead": torch.isin(labels, bead_ids).numpy(),
         "target protein": torch.isin(labels, target_ids).numpy(),
         "filler protein": torch.isin(labels, filler_ids).numpy(),
@@ -179,6 +199,7 @@ def figure_components(gen: TomogramSpecimenGenerator) -> None:
         "filler protein": FILLER_COLOR,
         "target protein": TARGET_COLOR,
         "filament": FILAMENT_COLOR,
+        "microtubule": MICROTUBULE_COLOR,
         "membrane": MEMBRANE_COLOR,
         "gold bead": BEAD_COLOR,
     }
@@ -257,6 +278,7 @@ if __name__ == "__main__":
     print(
         f"{len(generator.placements)} protein instances, "
         f"{len(generator.filament_instances)} filament monomers, "
+        f"{len(generator.microtubule_instances)} microtubules, "
         f"{len(generator.bead_instances)} beads"
     )
     figure_hero(volume)

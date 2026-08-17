@@ -2,7 +2,7 @@
 
 <div class="grid" markdown>
 
-![A simulated cryo-ET specimen, summed along Z: crowded cytosolic protein, three vesicles, actin filaments, gold fiducial beads, and a carbon film edge along the bottom.](../../assets/images/cryoet-tomogram-hero.png){ width="420" }
+![A simulated cryo-ET specimen, summed along Z: crowded cytosolic protein, three vesicles, actin filaments, two long flexible microtubules crossing the field of view, gold fiducial beads, and a carbon film edge along the bottom.](../../assets/images/cryoet-tomogram-hero.png){ width="420" }
 
 <div markdown>
 `TomogramSpecimenGenerator` is the single specimen generator behind
@@ -81,6 +81,13 @@ Two consequences worth knowing before you read a rendered volume:
   that filament rather than steering around the obstacle.
 
 ![The same specimen as the hero image, a thin mid-Z slab, painted by component from the run's own ground-truth label volumes.](../../assets/images/cryoet-tomogram-components.png){ width="620" style="display:block;margin:1.2em auto;" }
+
+The two microtubules use `MicrotubuleSpec`'s default `length=None`, which
+spans the volume's own diagonal so each tube crosses the whole field of
+view rather than appearing as a stub, and `bend_radius=3.0e4` (3 µm), which
+gives the smooth, mechanically-constrained curvature real microtubules show
+in cellular tomograms instead of the near-straight default thermal walk.
+See [Microtubules](microtubules.md).
 
 Every colour above comes from a label volume the generator wrote, not from
 segmenting the density afterward.

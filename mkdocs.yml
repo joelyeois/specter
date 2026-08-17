@@ -74,7 +74,6 @@ nav:
   - Concepts:
       - Overview: concepts/index.md
       - Pipeline overview: concepts/pipeline-overview.md
-      - Conventions: concepts/conventions.md
       - Specimens:
           - Overview: concepts/specimens.md
           - Atomic potentials: concepts/atomic-potentials.md

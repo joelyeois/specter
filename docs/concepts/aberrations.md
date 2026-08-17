@@ -50,10 +50,6 @@ the \(\cos\) term vanishes and \(\chi\) depends only on \(|k|\).
 `dfv` defaults to `dfu` when omitted, so a caller wanting purely isotropic
 defocus only ever needs to supply `dfu`.
 
-The plane these values are measured from depends on the scattering model,
-and a propagated exit wave requires a midplane correction; see
-[Conventions](conventions.md#the-defocus-reference-plane).
-
 ### Spherical aberration
 
 \[

@@ -6,6 +6,7 @@ guide play for those projects. For task-oriented, CLI-driven how-tos
 instead, see the [User Guide](../user-guide/particle-stack.md).
 
 - [Pipeline overview](pipeline-overview.md)
+- [Conventions](conventions.md)
 - Specimens
     - [Overview](specimens.md)
     - [Atomic potentials](atomic-potentials.md)

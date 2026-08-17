@@ -182,6 +182,38 @@ small. None of this makes `projection` a good general substitute for
 real contrast to expose it, which a thicker or more strongly scattering
 specimen than this one would do easily.
 
+## Is this specific to a pure phase object (α=0)?
+
+Every figure on this page uses `alpha=0`, chosen deliberately to isolate
+the failure mode in [Where the linearization
+breaks down](#where-the-linearization-breaks-down) without a second
+effect layered on top. Real specimens absorb a little (`alpha` typically
+0.07-0.1), so it's worth checking whether that changes the picture.
+
+![Relative error and pattern correlation for firstborn and projection, at alpha=0 (solid) vs. a typical alpha=0.1 (dashed), across the same thickness sweep.](../../assets/images/scattering-alpha-robustness-check.png){ width="900" style="display:block;margin:1.2em auto;" }
+
+It doesn't change the ranking, and it clarifies *why* `projection` does
+as well as it does. Adding absorption barely moves either model's
+relative error (left panel: the solid and dashed curve for each model
+nearly overlap) -- `firstborn` is, if anything, marginally worse with
+`alpha` included, since the same \(a\)-vs-\(b\) mixing problem now also
+folds the modest genuine absorption signal into the same spurious
+channel.
+
+The correlation panel (right) is more interesting. At the thinnest
+specimens, absorption dominates the true signal almost completely, and
+*both* models track it well (correlation \({\approx}1\)) -- not because
+`firstborn`'s approximation got better, but because the true pattern is
+now simple enough (nearly linear in the projected potential) that even a
+biased, mixed-up prediction happens to point the right way. As thickness
+grows, `projection`'s correlation stays healthy (0.82-0.97 throughout
+this sweep): mass-thickness/amplitude contrast is a real, well-behaved
+signal that a simple projected-potential model genuinely captures, not
+merely "nothing there to get wrong." `firstborn`'s correlation collapses
+back toward zero well before 320 Å regardless of `alpha` -- the \(a^2\)
+artifact reasserts itself once the specimen is thick enough for it to
+dominate again.
+
 ## References
 
 - Kirkland, E. J. (2010). *Advanced Computing in Electron Microscopy*, 2nd

@@ -401,7 +401,7 @@ def build_potential_volume_analytic_scatter(
     Returns
     -------
     potential_volume : torch.Tensor
-        Potential volume, shape `grid_shape`, in units of V·Å.
+        Potential volume, shape `grid_shape`, in units of V.
     """
     a0 = 0.529  # Bohr radius, [Å]
     e = 14.4  # electron charge, [V·Å]
@@ -507,7 +507,7 @@ def build_potential_volume_analytic_scatter_kirkland(
     Returns
     -------
     potential_volume : torch.Tensor
-        Potential volume, shape `grid_shape`, in units of V·Å.
+        Potential volume, shape `grid_shape`, in units of V.
     """
     device = coords.device
     dtype = coords.dtype
@@ -582,7 +582,7 @@ def build_potential_volume_analytic_scatter_lobato(
     Returns
     -------
     potential_volume : torch.Tensor
-        Potential volume, shape `grid_shape`, in units of V·Å.
+        Potential volume, shape `grid_shape`, in units of V.
     """
     device = coords.device
     dtype = coords.dtype
@@ -1875,7 +1875,7 @@ class GemmiPotentialBuilder:
         Returns
         -------
         potential : torch.Tensor
-            Electrostatic potential volume in Volt-Ångströms, shape (nz, ny, nx).
+            Electrostatic potential volume in Volts, shape (nz, ny, nx).
 
         Notes
         -----

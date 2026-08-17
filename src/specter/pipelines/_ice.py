@@ -76,6 +76,18 @@ def _build_shard(
             progressbars=not quiet,
         )
         _report_config(metadata, device, time.time() - started)
+        # Return the finished config's cached blocks to the driver before
+        # starting the next one. Live tensors do not accumulate across
+        # configs (measured: allocation is flat over repeated calls), but a
+        # single config's peak is large and grows as it converges -- near
+        # 40 GiB at n=256 -- so the allocator ends each config holding a
+        # correspondingly large, fragmented pool. A 20-config run on a 44 GiB
+        # card ran out of memory at config 17 requesting 4.91 GiB while
+        # nominally holding 38 GiB, and the same config succeeded
+        # immediately in a fresh process. Releasing between configs costs one
+        # cudaFree/cudaMalloc cycle against tens of minutes of compute.
+        if torch.device(device).type == "cuda":
+            torch.cuda.empty_cache()
 
 
 def _report_config(metadata: dict, device: str, elapsed: float) -> None:
@@ -86,14 +98,13 @@ def _report_config(metadata: dict, device: str, elapsed: float) -> None:
     verdict attached, because neither has a calibrated threshold:
 
     - `sk_loss` is measured on the coordinates as stored, so its scale
-      depends on the box size and the storage encoding rather than on
-      convergence alone. Configs written with the current fixed-point
-      encoding land near 1e-3; the bundled `ice_data/ice_cache`, written
-      under the older raw-float16 storage, lands between 0.4 and 2.0.
+      depends on the box size and the storage encoding as well as on
+      convergence. At n=256, dx=1.0 the bundled `ice_data/ice_cache` spans
+      4e-4 to 0.02 under the current fixed-point encoding.
     - `E_per_atom` is not a distance from `mlbop_target` either: that
       target is one weighted term in a combined loss, not a value the
-      optimisation is expected to reach. Every bundled config sits near
-      -0.10 eV/atom against a -0.413 target.
+      optimisation is expected to reach. Bundled configs sit near -0.11
+      eV/atom against a -0.413 target.
 
     `stopped_early` is the one reliable signal here, and it answers a
     narrow question: whether the loss plateaued within the step budget or
@@ -279,7 +290,7 @@ def run_build_ice_cache(config: IceCacheConfig) -> None:
         _console.print(
             f"S(k) loss across the library: {min(losses):.4g} - {max(losses):.4g} "
             f"(median {sorted(losses)[len(losses) // 2]:.4g}). For reference, the "
-            "bundled ice_data/ice_cache spans 0.41 - 1.97 at n=256, dx=1.0."
+            "bundled ice_data/ice_cache spans 0.0004 - 0.021 at n=256, dx=1.0."
         )
 
     if config.diagnostics:

@@ -125,9 +125,8 @@ that can be quoted in isolation:
 - The $S(k)$ loss is measured on the coordinates **as they will be read
   back**, so it includes the cost of storing them (see
   [Coordinate storage](#coordinate-storage)) and is a property of the file
-  rather than of convergence alone. Newly generated configurations land
-  around $10^{-3}$; the bundled library, written under the older float16
-  encoding, measures between 0.41 and 1.97.
+  rather than of convergence alone. At $n = 256$, $dx = 1.0$ the bundled
+  library spans $4\times10^{-4}$ to $0.02$, median $3\times10^{-3}$.
 - The ML-BOP energy per atom is a structural diagnostic. It is not a
   distance from the $-0.413$ eV/atom figure in each configuration's
   `recipe`: that value is one weighted term in the combined loss, not a
@@ -158,7 +157,7 @@ sit in that octave. Measured on one converged 256 Å configuration:
 | stored as | coordinate RMS error | $S(k)$ loss | rendered potential, rel. RMS |
 |---|---|---|---|
 | float32 (never written) | — | 1.2e-4 | — |
-| float16 (bundled library) | 0.0137 Å | 0.456 | 3.7% |
+| float16 (previous encoding) | 0.0137 Å | 0.456 | 3.7% |
 | fixed-point (current) | 0.0011 Å | 0.0016 | 0.3% |
 
 The rendered difference is well below shot noise at any realistic dose — the
@@ -168,10 +167,14 @@ problem. It is that raw `float16` discarded most of the $S(k)$ fidelity each
 configuration spends ~20 minutes earning, in the one quantity the generator
 exists to reproduce, at no saving in file size.
 
-`IceBank` reads both encodings, keyed on a `coord_encoding` field, so the
-bundled library keeps loading unchanged. Existing configurations cannot be
-upgraded in place: their float32 coordinates were discarded when they were
-written, so only regeneration recovers the difference.
+`IceBank` reads both encodings, keyed on a `coord_encoding` field, so a
+library written before this change keeps loading. Such configurations cannot
+be upgraded in place, since their float32 coordinates were discarded when
+they were written; only regeneration recovers the difference. The bundled
+library was accordingly regenerated from the same seeds under the same
+recipe, which left its energy distribution and convergence behaviour
+statistically unchanged (median $-0.113$ vs $-0.108$ eV/atom, 9 of 20 vs 10
+of 20 plateauing) while improving stored $S(k)$ fidelity by roughly 250x.
 
 `--diagnostics True` additionally saves energy and $S(k)$ figures for the
 whole library, equivalent to calling `IceBank.plot_diagnostics`.

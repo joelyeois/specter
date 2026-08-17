@@ -129,6 +129,11 @@ specter = [
     "atom_data/*.json",
     "ice_data/*.pt",
     "ice_data/ice_cache/*.pt",
+    # Provenance for the shipped library: seeds, recipe, per-config
+    # convergence and timings. Regenerable from the .pt files themselves,
+    # but shipping it means an installed specter can report what its ice is
+    # without re-deriving it.
+    "ice_data/ice_cache/manifest.json",
 ]
 
 [project.scripts]

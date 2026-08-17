@@ -1117,7 +1117,7 @@ def build_one_ice_config(
     progressbars: bool = True,
 ) -> dict:
     """
-    Generate a single ice coordinate config and save it (float16) to
+    Generate a single ice coordinate config and save it (fixed-point) to
     ``save_path``.
 
     One unit of work for :func:`build_ice_cache` and for ``specter build
@@ -1272,7 +1272,7 @@ def build_ice_cache(
 ) -> None:
     """
     Generate ``num_configs`` independent ice coordinate configs and save
-    them (float16) to ``cache_dir`` for later use with :class:`IceBank`.
+    them (fixed-point) to ``cache_dir`` for later use with :class:`IceBank`.
 
     One file per config, via :func:`build_one_ice_config`. This is the
     expensive, one-time cost the whole point of :class:`IceBank` is to

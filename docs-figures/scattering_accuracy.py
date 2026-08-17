@@ -52,7 +52,6 @@ VOLTAGE = 300.0
 THICKNESS_STEPS_NZ = [4, 8, 16, 24, 32, 48, 64, 96, 128, 160]
 
 APPROX_MODELS = ["rytov", "firstborn", "kinematic", "projection"]
-ALPHA_TEST = 0.1  # typical amplitude-contrast value (Scattering docstring: 0.07-0.1)
 
 
 def _ice_slab() -> torch.Tensor:
@@ -420,114 +419,6 @@ def figure_theta_real_imag_split(V: torch.Tensor) -> None:
     print(f"wrote {path}")
 
 
-def figure_alpha_robustness_check(V: torch.Tensor) -> None:
-    """Repeats the relative-error and pattern-correlation comparison for
-    `firstborn` and `projection` at alpha=0 (pure phase object, used
-    everywhere else on this page to isolate the phase/amplitude mixing
-    failure cleanly) against a typical amplitude-contrast value
-    (alpha=0.1), to check the alpha=0 story isn't an artifact of that
-    specific, deliberately extreme choice."""
-    palette = _deep_palette(2)
-    models = {"firstborn": palette[0], "projection": palette[1]}
-    thickness_A = []
-    relerr: dict[str, dict[float, list[float]]] = {
-        m: {0.0: [], ALPHA_TEST: []} for m in models
-    }
-    corr: dict[str, dict[float, list[float]]] = {
-        m: {0.0: [], ALPHA_TEST: []} for m in models
-    }
-
-    for nz in THICKNESS_STEPS_NZ:
-        V_slice = V[:, :nz].contiguous()
-        thickness_A.append(nz * PIXEL_SIZE)
-        for alpha in (0.0, ALPHA_TEST):
-            ref_scat = Scattering(
-                NXY,
-                PIXEL_SIZE,
-                VOLTAGE,
-                scattering_model="multislice",
-                progressbars=False,
-                alpha=alpha,
-            ).to(DEVICE)
-            ref_intensity = torch.abs(ref_scat(V_slice)) ** 2
-            ref_c = (ref_intensity - ref_intensity.mean()).flatten()
-
-            for model in models:
-                scat = Scattering(
-                    NXY,
-                    PIXEL_SIZE,
-                    VOLTAGE,
-                    scattering_model=model,
-                    nz=nz,
-                    progressbars=False,
-                    alpha=alpha,
-                ).to(DEVICE)
-                intensity = torch.abs(scat(V_slice)) ** 2
-                relerr[model][alpha].append(
-                    (
-                        torch.abs(intensity - ref_intensity).mean()
-                        / ref_intensity.mean()
-                    ).item()
-                )
-                ic = (intensity - intensity.mean()).flatten()
-                c = (
-                    torch.corrcoef(torch.stack([ic, ref_c]))[0, 1].item()
-                    if ic.std() > 0
-                    else float("nan")
-                )
-                corr[model][alpha].append(c)
-
-    fig, (ax_err, ax_corr) = plt.subplots(1, 2, figsize=(11, 4.5), dpi=190)
-    for model, color in models.items():
-        ax_err.semilogy(
-            thickness_A,
-            relerr[model][0.0],
-            color=color,
-            linestyle="-",
-            label=f"{model}, α=0",
-        )
-        ax_err.semilogy(
-            thickness_A,
-            relerr[model][ALPHA_TEST],
-            color=color,
-            linestyle="--",
-            label=f"{model}, α={ALPHA_TEST:g}",
-        )
-        ax_corr.plot(
-            thickness_A,
-            corr[model][0.0],
-            color=color,
-            linestyle="-",
-            label=f"{model}, α=0",
-        )
-        ax_corr.plot(
-            thickness_A,
-            corr[model][ALPHA_TEST],
-            color=color,
-            linestyle="--",
-            label=f"{model}, α={ALPHA_TEST:g}",
-        )
-    ax_err.set_xlabel("Specimen thickness (Å)")
-    ax_err.set_ylabel("Relative error in |ψ|² vs. multislice")
-    ax_err.set_title("Error: α=0 vs. α=0.1", fontsize=10)
-    ax_err.legend(fontsize=8)
-    ax_err.grid(True, alpha=0.3)
-
-    ax_corr.axhline(0.0, color="gray", linewidth=0.8)
-    ax_corr.set_xlabel("Specimen thickness (Å)")
-    ax_corr.set_ylabel("Correlation with multislice's true pattern")
-    ax_corr.set_ylim(-1.05, 1.05)
-    ax_corr.set_title("Pattern correlation: α=0 vs. α=0.1", fontsize=10)
-    ax_corr.legend(fontsize=8)
-    ax_corr.grid(True, alpha=0.3)
-
-    fig.tight_layout()
-    path = OUT_DIR / "scattering-alpha-robustness-check.png"
-    fig.savefig(path)
-    plt.close(fig)
-    print(f"wrote {path}")
-
-
 def main() -> None:
     V = _ice_slab()
     figure_multislice_trace(V)
@@ -538,7 +429,6 @@ def main() -> None:
     figure_mode_intensity_maps(V)
     figure_pattern_correlation_vs_thickness(V)
     figure_theta_real_imag_split(V)
-    figure_alpha_robustness_check(V)
 
 
 if __name__ == "__main__":

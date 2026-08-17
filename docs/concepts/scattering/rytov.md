@@ -67,9 +67,8 @@ at every thickness, rather than only to first order. Rytov's own mean
 intensity stays pinned to 1.0 (energy-conserving) at every thickness
 tested, just like `multislice`'s -- unlike `firstborn`/`kinematic`, whose
 mean intensity drifts substantially at large thickness. `projection`'s
-placement on this plot is a separate, more subtle story of its own; see
-[Other propagation modes](other-modes.md#accuracy-vs-thickness) before
-reading too much into it.
+placement on this plot has a separate explanation; see [Other
+propagation modes](other-modes.md#accuracy-vs-thickness).
 
 ## References
 

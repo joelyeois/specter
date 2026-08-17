@@ -125,62 +125,83 @@ intensity model — see [Detector](../detector.md) and
 
 ## Accuracy vs. thickness
 
-Using the same thickness sweep as [Rytov's accuracy
-figure](rytov.md#accuracy-vs-thickness) (a `RandomIcemaker` ice slab, 300
-kV, `multislice` as the reference):
+The metric plotted below (`docs-figures/scattering_accuracy.py`'s
+`_accuracy_sweep`) is the mean absolute error in exit-wave intensity
+against `multislice`, normalized by `multislice`'s own mean intensity:
+
+\[
+E \;=\; \frac{\big\langle\,\lvert I_{\mathrm{model}} - I_{\mathrm{multislice}}\rvert\,\big\rangle}{\langle I_{\mathrm{multislice}}\rangle},
+\qquad I = |\psi|^2,
+\]
+
+the average taken over every pixel of the image, using the same
+`RandomIcemaker` ice slab, 300 kV, sweep as [Rytov's accuracy
+figure](rytov.md#accuracy-vs-thickness):
 
 ![Relative error in exit-wave intensity vs. multislice, as a function of ice thickness, for first Born, kinematic, and projection (highlighted) against Rytov (faint, for context).](../../assets/images/scattering-accuracy-vs-thickness-other-modes.png){ width="600" }
 
 Read at face value, this says `projection` beats `firstborn` and
-`kinematic` on intensity error, despite being the only mode here with no
-Fresnel diffraction model at all -- which would be a strange result,
-since `projection` has strictly less physics than either. It is not what
-it looks like. The next two figures show what is actually happening.
+`kinematic`, despite being the only mode here with no Fresnel diffraction
+model at all. It is not measuring what it looks like it's measuring.
+Split the difference field into a constant bias plus a zero-mean
+residual, \(I_{\mathrm{model}} - I_{\mathrm{multislice}} = b + d(x,y)\)
+with \(b = \langle I_{\mathrm{model}}\rangle - \langle
+I_{\mathrm{multislice}}\rangle\) the mean-intensity bias from the figure
+below. Whenever \(|b|\) dominates \(d\)'s spread, \(E \approx |b|\)
+(a near-exact identity, not an approximation, once \(|b| \gg
+\mathrm{std}(d)\)); whenever \(b=0\) exactly, \(E \approx
+\mathrm{std}(d)\sqrt{2/\pi}\) for a roughly Gaussian residual -- just a
+measure of how far the *reference* is from flat. Both limits are
+realized here, for different models:
+
+| Thickness | Model | \(E\) (measured) | \(\lvert b\rvert\) | \(\mathrm{std}(d)\) | \(\lvert b\rvert / \mathrm{std}(d)\) |
+|---|---|---|---|---|---|
+| 32 Å  | `firstborn`  | 0.0042 | 0.0042 | 0.0027 | 1.5 |
+| 32 Å  | `projection` | 0.0013 | 0.0000 | 0.0017 | 0.0 |
+| 128 Å | `firstborn`  | 0.0618 | 0.0618 | 0.0199 | 3.1 |
+| 128 Å | `projection` | 0.0104 | 0.0000 | 0.0131 | 0.0 |
+| 320 Å | `firstborn`  | 0.3866 | 0.3866 | 0.0744 | 5.2 |
+| 320 Å | `projection` | 0.0359 | 0.0000 | 0.0452 | 0.0 |
+
+For `firstborn` (and `kinematic`), \(E\) equals \(|b|\) to at least three
+decimal places at every thickness tested, and the ratio \(|b|/\mathrm{std}(d)\)
+only grows with thickness (1.5 -> 5.2). So this figure is, for these two
+models, essentially a rescaled replot of the mean-intensity figure right
+below -- the pattern-correlation collapse from [Where the linearization
+breaks down](#where-the-linearization-breaks-down) is real, but it barely
+registers *in this specific metric*, because the bias alone already
+saturates it.
 
 ![Mean exit-wave intensity vs. thickness, per model. A properly normalized exit wave conserves total intensity (multislice and projection stay pinned to 1.0); firstborn and kinematic drift up to +39% by 320 A.](../../assets/images/scattering-mean-intensity-vs-thickness.png){ width="600" }
 
+For `projection`, \(b=0\) *exactly* at every thickness: with `alpha=0`,
+`projection`'s exit wave \(\exp(i\sigma\Delta z\sum_z V_z)\) is a pure
+phase factor, so \(|\psi|=1\) at every pixel and \(\langle
+I_{\mathrm{projection}}\rangle = 1 = \langle I_{\mathrm{multislice}}
+\rangle\) identically. \(E\) therefore reduces to \(\langle
+|I_{\mathrm{multislice}} - 1|\rangle\), matching the Gaussian-residual
+estimate \(\mathrm{std}(d)\sqrt{2/\pi}\) closely (e.g. \(0.0452 \times
+0.798 \approx 0.0361\) vs. the measured 0.0359 at 320 Å).
+`projection` contributes *nothing* of its own to this number -- it is
+purely a measurement of how far `multislice`'s own true contrast is
+from flat, which stays small over this thickness/pixel-size range.
+
 ![Exit-wave intensity maps at 320 A, side by side. multislice and rytov show fine, correlated speckle; firstborn is a different, coarser pattern riding on a strongly biased mean; projection is exactly flat.](../../assets/images/scattering-mode-intensity-maps.png){ width="900" style="display:block;margin:1.2em auto;" }
 
-Two real things are happening, and they point in the same misleading
-direction on the error plot:
-
-- **`firstborn` and `kinematic` never actually track the true pattern,
-  and additionally stop conserving energy as thickness grows.** A
-  correctly normalized exit wave has \(\langle|\psi|^2\rangle = 1\) at
-  every thickness (true for `multislice`, `rytov`, and trivially for
-  `projection`). By 320 Å, `firstborn`'s mean intensity has drifted to
-  \({\approx}1.39\), a \({\approx}39\%\) bias with no counterpart in the
-  true physics. That bias grows with thickness, but the more fundamental
-  problem doesn't wait for it: `firstborn`'s intensity *pattern* is
-  already essentially uncorrelated with `multislice`'s at the thinnest
-  specimen tested, not only at 320 Å -- see [Where the linearization
-  breaks down](#where-the-linearization-breaks-down) for why linearizing
-  before squaring is the culprit, independent of how thick the specimen
-  is. This is the textbook breakdown of the first Born approximation
-  once amplitude and phase get mixed by squaring: a real failure of
-  these two modes, not an artifact of the comparison.
-- **`projection` cannot be measured wrong by this metric, because it has
-  no signal at all.** With `alpha=0` (no absorption), `projection`'s exit
-  wave is \(\exp(i\sigma\Delta z \sum_z V_z)\) -- a pure phase factor, so
-  \(|\psi|=1\) *exactly*, at every pixel, at every thickness. Its
-  intensity map is perfectly flat (std \(\approx 10^{-7}\), floating-point
-  noise). The relative-error metric above is therefore just measuring how
-  far `multislice`'s own true contrast is from flat, which stays small
-  (std \(0.045\) at 320 Å) over this thickness/pixel-size range. A method
-  that always predicts "no contrast" scores well against a target that is
-  itself close to flat -- not because it captured any thickness-dependent
-  structure, but because there was not yet much structure to miss.
-
-So the error curve's ordering is real, but the reason is not "projection
-approximates thickness effects well." It is that `firstborn`/`kinematic`
-have a genuine, worsening energy-conservation failure at this thickness,
-while `projection`'s zero-information prediction happens to have a
-smaller error than that failure, purely because the true signal is still
-small. None of this makes `projection` a good general substitute for
-`multislice`: it is blind to depth by construction and will read as
-"accurate" on this metric right up until the specimen develops enough
-real contrast to expose it, which a thicker or more strongly scattering
-specimen than this one would do easily.
+So the plotted ordering is real, but it compares two unrelated
+quantities that happen to share units: `firstborn`'s self-inflicted bias
+against `multislice`'s own (still modest, at this thickness and pixel
+size) true contrast. Neither curve actually tests "how well does this
+model track `multislice`'s *spatial pattern*" -- that is a different
+question, answered by the [pattern-correlation
+figure](#where-the-linearization-breaks-down) above: `firstborn` and
+`kinematic` do not track that pattern at any thickness tested here,
+`projection` has none of its own to compare (at `alpha=0`), and only
+`rytov` does. None of this makes `projection` a good general substitute
+for `multislice`; it is blind to spatial structure by construction and
+will read as "accurate" on this particular metric for exactly as long as
+the true signal stays small enough for its bias-free flatness to win by
+default.
 
 ## Is this specific to a pure phase object (α=0)?
 

@@ -1,0 +1,7 @@
+/* Inline code inside table cells (e.g. a "Model"/"Parameter" column of
+   `code`-formatted names) must not word-wrap mid-token -- table-layout:auto
+   otherwise lets the browser hyphenate/break a long identifier like
+   `multislice` inside a narrow first column. */
+.md-typeset table code {
+  white-space: nowrap;
+}

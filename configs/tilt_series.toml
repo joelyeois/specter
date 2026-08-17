@@ -53,7 +53,7 @@ aberration_model = "holography"    # holography | ctf
 noise_model = "poisson"            # poisson | none
 coincidence_radius = 0.0           # pixels; 0 = plain Poisson, no coincidence loss
 ice_model = "gd"                   # gd | random | none
-# ice_cache_dir = "ice-data/ice_cache"  # defaults to the bundled cache
+# ice_cache_dir = "specter-data/ice"   # defaults to the cache bundled in the package
 ice_relax_steps = 0                # local MLBOP seam-relaxation steps for ice_model="gd"
 pad_fft = false
 detector_model = "none"            # none | perfect | k3_300kv | k3_200kv

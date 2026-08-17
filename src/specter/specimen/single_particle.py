@@ -63,7 +63,7 @@ class MicrographSpecimenGenerator(L.LightningModule):
     ice_cache_dir : str, optional
         Directory of cached ice configs for ``ice_model='gd'`` (see
         :func:`specter.ice.build_ice_cache`). Defaults to the bundled
-        ``ice-data/ice_cache``. Ignored for other ``ice_model`` values or
+        ``ice_data/ice_cache``. Ignored for other ``ice_model`` values or
         when ``icemaker`` is provided.
     icemaker : IceBank or RandomIcemaker, optional
         A pre-built icemaker instance to reuse across multiple

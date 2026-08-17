@@ -14,7 +14,8 @@ configurations are optimised once and stored, and a simulation draws a
 randomly rotated, randomly translated crop from one of them in single-digit
 milliseconds.
 
-SPECTER ships such a library in `ice-data/ice_cache` — 20 independent
+SPECTER ships such a library inside the package, at
+`specter/ice_data/ice_cache` — 20 independent
 configurations, each a 256 Å periodic cell sampled at 1 Å/voxel. Every
 simulation uses it by default, and most users never need another one.
 
@@ -111,8 +112,8 @@ Every configuration records its own `wall_time` and `n_steps_actual`, both
 collected into `manifest.json`, so cost per step stays recoverable from a
 finished library without re-measuring it.
 
-The output directory is never `ice-data/ice_cache`, which ships with the
-repository and must not be modified.
+The output directory is never the bundled `specter/ice_data/ice_cache`, which
+ships with the package and must not be modified.
 
 ## Checking what was generated
 

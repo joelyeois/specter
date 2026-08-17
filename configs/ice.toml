@@ -7,7 +7,7 @@
 # This command is expensive by design: each configuration is a full
 # GradientSKIcemaker optimisation, tens of minutes at the geometry below.
 # Specter already ships a library (20 configurations, 256 A cells at
-# 1 A/voxel) in ice-data/ice_cache, which every simulation uses by default --
+# 1 A/voxel) in ice_data/ice_cache, which every simulation uses by default --
 # generate your own only when you need a different cell size or voxel size,
 # or more independent configurations than the bundled library holds.
 
@@ -51,7 +51,7 @@ device = "auto"    # cpu | cuda | cuda:0 | 0,1,2,3 | auto (every visible GPU)
 # =============================================================================
 # OUTPUT
 # Point a simulation config's `ice_cache_dir` at this directory to use the
-# result. Never write into ice-data/ice_cache -- that library ships with the
+# result. Never write into ice_data/ice_cache -- that library ships with the
 # repository.
 # =============================================================================
 

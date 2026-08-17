@@ -85,11 +85,11 @@ def _report_config(metadata: dict, device: str, elapsed: float) -> None:
     Both numbers are reported as plain measurements, with no pass/fail
     verdict attached, because neither has a calibrated threshold:
 
-    - `sk_loss` is measured on the stored float16 coordinates, and its
-      scale depends on the box size and on that storage precision rather
-      than on convergence alone. Across the bundled `ice-data/ice_cache`,
-      every config lands between 0.4 and 2.0 by this measure, converged or
-      not.
+    - `sk_loss` is measured on the coordinates as stored, so its scale
+      depends on the box size and the storage encoding rather than on
+      convergence alone. Configs written with the current fixed-point
+      encoding land near 1e-3; the bundled `ice_data/ice_cache`, written
+      under the older raw-float16 storage, lands between 0.4 and 2.0.
     - `E_per_atom` is not a distance from `mlbop_target` either: that
       target is one weighted term in a combined loss, not a value the
       optimisation is expected to reach. Every bundled config sits near
@@ -183,7 +183,7 @@ def run_build_ice_cache(config: IceCacheConfig) -> None:
     Writes ``config_NNN.pt`` files plus a ``manifest.json`` into
     ``config.output_dir``. Point any simulation config's ``ice_cache_dir``
     at that directory to sample ice from this library instead of the
-    bundled ``ice-data/ice_cache``.
+    bundled ``ice_data/ice_cache``.
 
     This is expensive by construction -- on the order of tens of minutes
     per configuration at the default ``n=256, dx=1.0`` -- since it runs the
@@ -279,7 +279,7 @@ def run_build_ice_cache(config: IceCacheConfig) -> None:
         _console.print(
             f"S(k) loss across the library: {min(losses):.4g} - {max(losses):.4g} "
             f"(median {sorted(losses)[len(losses) // 2]:.4g}). For reference, the "
-            "bundled ice-data/ice_cache spans 0.41 - 1.97 at n=256, dx=1.0."
+            "bundled ice_data/ice_cache spans 0.41 - 1.97 at n=256, dx=1.0."
         )
 
     if config.diagnostics:

@@ -113,7 +113,23 @@ ignore_missing_imports = true
 include-package-data = true
 
 [tool.setuptools.package-data]
-specter = ["atom_data/*.txt"]
+# Data files that must ship in a wheel, not just resolve from a checkout.
+# atom_data holds *.json as well as *.txt -- params_cat.json backs the default
+# Shtyrov parameterization (see potential.py), so a *.txt-only glob would leave
+# an installed specter unable to build its default potentials.
+# ice_data holds the bundled IceBank library plus the MD reference frame every
+# GradientSKIcemaker run needs for its default S(k) target; ~62 MB, which is
+# under 1% of an install whose torch/nvidia/cupy dependencies already come to
+# several GB. Deliberately NOT here: ice-data/ at the repository root still
+# holds two 32 MB legacy MDSimDump inputs that no code path reads (notebooks
+# only), and shipping them would push the wheel past PyPI's 100 MB per-file
+# limit for no benefit.
+specter = [
+    "atom_data/*.txt",
+    "atom_data/*.json",
+    "ice_data/*.pt",
+    "ice_data/ice_cache/*.pt",
+]
 
 [project.scripts]
 specter = "specter.cli._cli:main"

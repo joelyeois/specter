@@ -231,7 +231,7 @@ class ParticleStackConfig:
     coincidence_radius: ScalarOrRange = 0.0  # pixels
     ice_model: Literal["gd", "random", "none"] = "gd"
     ice_thickness: float = 0.0  # Å, 0 = minimum (particle box size)
-    ice_cache_dir: str | None = None  # defaults to the bundled ice-data/ice_cache
+    ice_cache_dir: str | None = None  # defaults to the bundled ice_data/ice_cache
     crowd_min_distance: float | None = None  # Å
     crowd_max_distance_z: float | None = None  # Å
     potential_scale: ScalarOrRange = 1.0  # unitless
@@ -360,7 +360,7 @@ PARTICLE_STACK_HELP: dict[str, str] = {
     "cache), 'random' (cheap, low-realism), or 'none'.",
     "ice_thickness": "Ice thickness in Angstrom. 0 = minimum (particle box size).",
     "ice_cache_dir": "Directory of cached ice configs for ice_model='gd'. "
-    "Defaults to the bundled ice-data/ice_cache.",
+    "Defaults to the bundled ice_data/ice_cache.",
     "crowd_min_distance": "Minimum distance between crowded particles in "
     "Angstrom. Unset disables crowding.",
     "crowd_max_distance_z": "Maximum z-distance between crowded particles in Angstrom.",
@@ -497,7 +497,7 @@ class MicrographConfig:
     coincidence_radius: ScalarOrRange = 0.0  # pixels; 0 = plain Poisson
     ice_model: Literal["gd", "random", "none"] = "gd"
     ice_thickness: float = 500.0  # Å, 0 = minimum (particle box size)
-    ice_cache_dir: str | None = None  # defaults to the bundled ice-data/ice_cache
+    ice_cache_dir: str | None = None  # defaults to the bundled ice_data/ice_cache
     crowd_min_distance: float | None = None  # Å
     crowd_max_distance_z: float | None = None  # Å
     water_air_interface: bool = True
@@ -564,7 +564,7 @@ MICROGRAPH_HELP: dict[str, str] = {
     "'random' (cheap, low-realism), or 'none'.",
     "ice_thickness": "Ice thickness in Angstrom. 0 = minimum (particle box size).",
     "ice_cache_dir": "Directory of cached ice configs for ice_model='gd'. "
-    "Defaults to the bundled ice-data/ice_cache.",
+    "Defaults to the bundled ice_data/ice_cache.",
     "crowd_min_distance": "Minimum distance between crowded particles in "
     "Angstrom. Defaults to the structure's max diameter; set to 0 to disable "
     "crowding.",
@@ -644,7 +644,7 @@ class TiltSeriesConfig:
     noise_model: Literal["poisson", "none"] = "poisson"
     coincidence_radius: float = 0.0  # pixels; 0 = plain Poisson
     ice_model: Literal["gd", "random", "none"] = "gd"
-    ice_cache_dir: str | None = None  # defaults to the bundled ice-data/ice_cache
+    ice_cache_dir: str | None = None  # defaults to the bundled ice_data/ice_cache
     ice_relax_steps: int = 0  # local MLBOP seam-relaxation steps for ice_model="gd"
     pad_fft: bool = False
     detector_model: Literal["none", "perfect", "k3_300kv", "k3_200kv"] = "none"
@@ -704,7 +704,7 @@ TILT_SERIES_HELP: dict[str, str] = {
     "ice_model": "Ice generation algorithm: 'gd' (IceBank cache), 'random' "
     "(cheap RandomIcemaker), or 'none'.",
     "ice_cache_dir": "Directory of cached ice configs for ice_model='gd'. "
-    "Defaults to the bundled ice-data/ice_cache.",
+    "Defaults to the bundled ice_data/ice_cache.",
     "ice_relax_steps": "Local MLBOP relaxation steps used to heal ice tile "
     "seams (ice_model='gd' only).",
     "pad_fft": "Pad volume for FFT to avoid multislice edge-wraparound "
@@ -1162,7 +1162,7 @@ class IceCacheConfig:
     configuration and saves the converged coordinates. The result is a
     directory of `config_NNN.pt` files an `IceBank` can draw crops from --
     point any simulation config's `ice_cache_dir` at it to use these instead
-    of the bundled `ice-data/ice_cache`.
+    of the bundled `ice_data/ice_cache`.
 
     Only the sampling geometry, the convergence budget, and the scheduling
     are configurable. The optimisation recipe itself (S(k) target, MLBOP
@@ -1232,7 +1232,7 @@ ICE_CACHE_HELP: dict[str, str] = {
     "faster.",
     "output_dir": "Directory to write config_NNN.pt files and manifest.json "
     "to. Point a simulation config's ice_cache_dir at it to use the result. "
-    "Never the bundled ice-data/ice_cache, which ships with the repository.",
+    "Never the bundled ice_data/ice_cache, which ships with the repository.",
     "overwrite": "Regenerate configurations already present in output_dir "
     "instead of skipping them. Skipping is what lets an interrupted run "
     "resume where it left off.",

@@ -18,8 +18,6 @@ working.
 
 from __future__ import annotations
 
-import os
-
 import torch
 from torchinterp1d import interp1d
 
@@ -28,6 +26,7 @@ from ..arrays import (
     soft_voxelize_coordinates,
 )
 from ..fft import fft3
+from ..ice_data import bundled_ice_data
 from ..potential import build_atomic_potential_kernel
 
 __all__ = ["build_atomic_potential_kernel"]
@@ -61,7 +60,8 @@ def load_mdsim_f_radial_avg(
         Path to a precomputed radial-average |F(k)| target ``.pt`` file, in the
         same format as the bundled default (a 1D tensor indexed by k-bin on the
         fixed ``MDSIM_N`` x ``MDSIM_N`` x ``MDSIM_N``, ``MDSIM_DX`` grid). If
-        None, uses the bundled ``ice-data/mdsim_f_radial_avg_400x400x400_0.25A.pt``.
+        None, uses the bundled
+        ``specter/ice_data/mdsim_f_radial_avg_400x400x400_0.25A.pt``.
 
     Returns
     -------
@@ -71,10 +71,8 @@ def load_mdsim_f_radial_avg(
         Radial-average |F(k)| (stores sqrt(S(k))).
     """
     if saved_data_path is None:
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        root_dir = os.path.dirname(os.path.dirname(os.path.dirname(current_dir)))
-        saved_data_path = os.path.join(
-            root_dir, "ice-data", "mdsim_f_radial_avg_400x400x400_0.25A.pt"
+        saved_data_path = str(
+            bundled_ice_data("mdsim_f_radial_avg_400x400x400_0.25A.pt")
         )
     mdsim_f_radial_avg = torch.load(saved_data_path, weights_only=True)
     mdsim_dk = 1 / MDSIM_N / MDSIM_DX
@@ -128,7 +126,7 @@ def compute_native_target(
     reference_coords_path : str, optional
         Path to a pre-extracted single-frame coordinate tensor (shape
         ``(N, 3)``, centered, full simulation box). Defaults to the bundled
-        ``ice-data/lda_80k_frame799_full_coords.pt`` (frame 799 of the
+        ``specter/ice_data/lda_80k_frame799_full_coords.pt`` (frame 799 of the
         LDA-80K trajectory -- single-frame vs. 790-frame-averaged targets
         were validated to give statistically indistinguishable downstream
         training results, so a single frame is used for speed).
@@ -143,11 +141,7 @@ def compute_native_target(
     """
     nz = n if nz is None else nz
     if reference_coords_path is None:
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        root_dir = os.path.dirname(os.path.dirname(os.path.dirname(current_dir)))
-        reference_coords_path = os.path.join(
-            root_dir, "ice-data", "lda_80k_frame799_full_coords.pt"
-        )
+        reference_coords_path = str(bundled_ice_data("lda_80k_frame799_full_coords.pt"))
 
     if reference_coords_path not in _REFERENCE_COORDS_CACHE:
         _REFERENCE_COORDS_CACHE[reference_coords_path] = torch.load(

@@ -74,7 +74,7 @@ in `specter simulate tiltseries --help`.
 - **Ice**: `ice_model`: `"gd"` (default, `IceBank`'s cached
   `GradientSKIcemaker` configs, realistic and effectively free at this
   cache size), `"random"` (cheap, low-fidelity `RandomIcemaker`), or `"none"`
-  (no ice). `ice_cache_dir` overrides the bundled `ice-data/ice_cache`;
+  (no ice). `ice_cache_dir` overrides the bundled `specter/ice_data/ice_cache`;
   `ice_relax_steps` runs local MLBOP seam relaxation for `"gd"` (0 by
   default). See [Ice structure](../concepts/ice.md).
 - **`coincidence_radius`**: effective coincidence-loss exclusion radius in

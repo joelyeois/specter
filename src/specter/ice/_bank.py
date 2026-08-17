@@ -22,6 +22,7 @@ from ..arrays import (
     soft_voxelize_coordinates,
     soft_voxelize_coordinates_into,
 )
+from ..ice_data import ICE_CACHE_DIRNAME, bundled_ice_data
 from ..progress import track
 from ._energy import MLBOP
 from ..potential import build_atomic_potential_kernel, potential_from_deltas
@@ -36,7 +37,7 @@ _FIXED_POINT_SCALE = 32767
 #: Value of a config's ``coord_encoding`` key when its positions are stored as
 #: :func:`encode_positions`' fixed-point indices. Absent from a config file
 #: means the older raw-float16 storage, which :meth:`IceBank._load_config`
-#: still reads -- the bundled ``ice-data/ice_cache`` predates this key.
+#: still reads -- the bundled ``ice_data/ice_cache`` predates this key.
 FIXED_POINT_ENCODING = "int16_fixed"
 
 
@@ -105,14 +106,22 @@ def decode_positions(indices: torch.Tensor, box_L: float) -> torch.Tensor:
 
 def default_ice_cache_dir() -> str:
     """
-    Path to the bundled ice cache (``ice-data/ice_cache``), shipped in the
-    repository so a standard user never needs to run
-    :class:`GradientSKIcemaker` themselves -- see :func:`build_ice_cache`
-    for how it was produced.
+    Path to the bundled ice cache, so a standard user never needs to run
+    :class:`GradientSKIcemaker` themselves -- see :func:`build_ice_cache` for
+    how it was produced.
+
+    Resolved through :mod:`importlib.resources` (see
+    :func:`specter.ice_data.bundled_ice_data`), which is why the library lives
+    at ``src/specter/ice_data/ice_cache`` rather than at the repository root:
+    the data ships with the package and is found the same way regardless of
+    install layout.
+
+    Returns
+    -------
+    str
+        Absolute path to the bundled ``ice_cache`` directory.
     """
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    root_dir = os.path.dirname(os.path.dirname(os.path.dirname(current_dir)))
-    return os.path.join(root_dir, "ice-data", "ice_cache")
+    return str(bundled_ice_data(ICE_CACHE_DIRNAME))
 
 
 def random_rotation_matrix(generator: torch.Generator | None = None) -> torch.Tensor:
@@ -193,7 +202,7 @@ class IceBank(L.LightningModule):
         Directory containing cached config ``.pt`` files (see
         :func:`build_ice_cache`). Every ``*.pt`` file in this directory is
         treated as a cache entry. Defaults to the bundled
-        ``ice-data/ice_cache`` shipped with the repository.
+        ``ice_data/ice_cache`` shipped with the repository.
     device : str or torch.device, optional
         Computation device. Default is ``"cpu"``.
     parameterization : str, optional
@@ -272,7 +281,7 @@ class IceBank(L.LightningModule):
         # Two on-disk coordinate formats, distinguished by an explicit key
         # rather than by dtype: fixed-point indices (see `encode_positions`)
         # for anything generated since that encoding landed, raw floats for
-        # everything before it -- including the bundled `ice-data/ice_cache`,
+        # everything before it -- including the bundled `ice_data/ice_cache`,
         # which must keep loading unchanged. Sniffing `int16` instead of
         # reading the key would misread any future raw-integer format.
         if data.get("coord_encoding") == FIXED_POINT_ENCODING:
@@ -1083,7 +1092,7 @@ def ice_config_filename(seed: int) -> str:
     earlier run's, and re-running an identical request is idempotent (it
     reproduces the same seeds, hence the same filenames). For the usual
     ``seed_start=0`` this is the same ``config_000.pt``, ``config_001.pt``,
-    ... sequence the bundled ``ice-data/ice_cache`` uses.
+    ... sequence the bundled ``ice_data/ice_cache`` uses.
 
     Parameters
     ----------
@@ -1159,7 +1168,7 @@ def build_one_ice_config(
     -----
     Coordinates are written as fixed-point indices via
     :func:`encode_positions`, not as raw floats. Configs predating that
-    encoding (the bundled ``ice-data/ice_cache``) stay readable; see
+    encoding (the bundled ``ice_data/ice_cache``) stay readable; see
     :meth:`IceBank._load_config`.
     """
     from ._gradient import GradientSKIcemaker
@@ -1194,7 +1203,7 @@ def build_one_ice_config(
     #   only when tol/patience triggers, so at `record_every=n_steps` a run
     #   that uses its whole budget has exactly ONE record -- step 0, the
     #   pre-optimisation value of the random initialisation. The bundled
-    #   `ice-data/ice_cache` carries that artifact: its ten budget-exhausting
+    #   `ice_data/ice_cache` carries that artifact: its ten budget-exhausting
     #   configs all record ~5e4, which is simply what a fresh random init
     #   scores at this size, while their stored coordinates score ~0.4-2.0.
     # - Storage quantization is not negligible in this metric even at the
@@ -1221,7 +1230,7 @@ def build_one_ice_config(
         "coord_encoding": FIXED_POINT_ENCODING,
         "n_steps": n_steps,
         # Number of outer L-BFGS steps actually taken, and the seconds they
-        # took. Recorded under the same keys the bundled ice-data/ice_cache
+        # took. Recorded under the same keys the bundled ice_data/ice_cache
         # uses, so cost per step stays derivable per config -- that ratio,
         # not wall time alone, is what transfers to other hardware and cell
         # sizes. Taken from `history["step"]` only when tol/patience fired,
@@ -1236,7 +1245,7 @@ def build_one_ice_config(
         "stopped_early": history["stopped_early"],
         "energy": energy,
         "sk_loss": sk_loss.item(),
-        # Stored per config, under the same key the bundled ice-data/ice_cache
+        # Stored per config, under the same key the bundled ice_data/ice_cache
         # entries use: a cache directory can hold configs from several runs,
         # and which recipe produced one determines which phase of ice it is.
         "recipe": {

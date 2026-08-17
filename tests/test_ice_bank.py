@@ -10,6 +10,7 @@ from specter.ice import GradientSKIcemaker, IceBank, RandomIcemaker
 from specter.ice._bank import (
     blend_ice_into_volume,
     build_ice_cache,
+    default_ice_cache_dir,
     build_one_ice_config,
     decode_positions,
     encode_positions,
@@ -488,3 +489,61 @@ def test_blend_ice_into_volume_random_icemaker_noncubic_nxy_nz():
     result = blend_ice_into_volume(V, icemaker, pixel_size=1.0)
     assert result.shape == (1, nz, nxy, nxy)
     assert torch.isfinite(result).all()
+
+
+def test_bundled_ice_data_resolves_inside_the_package():
+    """The bundled cache and MD reference data must be found through the
+    import system, not by walking up from __file__ to a repository root.
+
+    Regression guard for a real packaging bug: the data used to live at
+    `<repo>/ice-data/` and be located as dirname(dirname(dirname(__file__))),
+    which resolves to the repo root only for an editable install from a
+    checkout. Installed as a wheel it pointed inside the virtualenv's lib/,
+    so `ice_model="gd"` AND GradientSKIcemaker's default S(k) target were
+    both unreachable."""
+    from pathlib import Path
+
+    import specter
+    from specter.ice_data import bundled_ice_data
+
+    package_root = Path(specter.__file__).parent
+
+    cache = Path(default_ice_cache_dir())
+    assert cache.is_dir()
+    assert package_root in cache.parents, (
+        f"{cache} is outside the installed package at {package_root} -- it will "
+        "not be found in a wheel install"
+    )
+    assert sorted(cache.glob("*.pt")), "bundled cache has no configs"
+
+    # Every file GradientSKIcemaker needs by default, likewise inside the package.
+    for name in (
+        "lda_80k_frame799_full_coords.pt",
+        "mdsim_f_radial_avg_400x400x400_0.25A.pt",
+    ):
+        path = bundled_ice_data(name)
+        assert path.is_file(), f"{name} missing from specter.ice_data"
+        assert package_root in path.parents
+
+
+def test_bundled_data_is_declared_as_package_data():
+    """Being inside the package is necessary but not sufficient -- setuptools
+    only copies data files matched by [tool.setuptools.package-data], so a
+    missing glob ships a wheel whose data silently isn't there."""
+    import tomllib
+    from pathlib import Path
+
+    pyproject = Path(__file__).parent.parent / "pyproject.toml"
+    if not pyproject.is_file():  # installed without the source tree
+        pytest.skip("pyproject.toml not available")
+    globs = tomllib.loads(pyproject.read_text())["tool"]["setuptools"]["package-data"][
+        "specter"
+    ]
+
+    for required in (
+        "ice_data/*.pt",
+        "ice_data/ice_cache/*.pt",
+        "atom_data/*.txt",
+        "atom_data/*.json",  # params_cat.json backs the default shtyrov path
+    ):
+        assert required in globs, f"{required} missing from package-data"

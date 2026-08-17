@@ -34,6 +34,7 @@ import matplotlib.pyplot as plt
 import torch
 
 from specter.arrays import radial_profile_2d
+from specter.fft import fft2, ifft2
 from specter.ice import RandomIcemaker
 from specter.plots import _deep_palette
 from specter.scattering import Scattering
@@ -71,8 +72,6 @@ def figure_multislice_trace(V: torch.Tensor) -> None:
         DEVICE
     )
     F = scat.F_real + 1j * scat.F_imag
-    from specter.fft import fft2, ifft2
-
     V_flipped = torch.flip(V, dims=(1,))  # ews_curvature_sign="negative" default
     nz = V.shape[1]
     checkpoints = sorted({1, nz // 4, nz // 2, (3 * nz) // 4, nz})
@@ -303,6 +302,123 @@ def figure_mode_intensity_maps(V: torch.Tensor) -> None:
     print(f"wrote {path}")
 
 
+def _rytov_theta(V_slice: torch.Tensor, nz: int) -> torch.Tensor:
+    """The complex quantity Theta = sigma*dz*sum_z[F_z * V_z] such that
+    rytov's exit wave is exp(i*Theta) and firstborn's is 1 + i*Theta --
+    i.e. firstborn is the linearization of rytov in this exact variable.
+    Re(Theta) is the ordinary (propagation-independent-at-low-k) projected
+    phase; Im(Theta) is what genuinely drives |exp(i*Theta))|^2 = exp(-2*
+    Im(Theta)), the true intensity. Recomputed directly (not read off
+    Scattering.rytov's output) so both real and imaginary parts are
+    available -- Scattering only returns the already-exponentiated wave."""
+    scat = Scattering(
+        NXY, PIXEL_SIZE, VOLTAGE, scattering_model="rytov", nz=nz, progressbars=False
+    ).to(DEVICE)
+    F = scat.F_real + 1j * scat.F_imag
+    V_flipped = torch.flip(V_slice, dims=(1,))
+    E = ifft2(fft2(V_flipped) * F).sum(dim=1)[0]
+    return scat.sigma * scat.pixel_size * E
+
+
+def figure_pattern_correlation_vs_thickness(V: torch.Tensor) -> None:
+    """Correlation of each model's exit-wave intensity fluctuation with
+    multislice's true fluctuation pattern, vs. thickness. `projection` is
+    excluded: its intensity has exactly zero variance (see other-modes.md),
+    so a correlation coefficient against it is undefined. Unlike the
+    mean-intensity bias (which grows smoothly from thickness zero),
+    firstborn/kinematic's *pattern* correlation is already near zero at
+    the thinnest slab tested -- this figure is what motivates
+    `_rytov_theta`'s Re/Im decomposition in the docs page."""
+    palette = dict(zip(APPROX_MODELS, _deep_palette(len(APPROX_MODELS))))
+    models = ["rytov", "firstborn", "kinematic"]
+    thickness_A = []
+    correlations: dict[str, list[float]] = {m: [] for m in models}
+
+    for nz in THICKNESS_STEPS_NZ:
+        V_slice = V[:, :nz].contiguous()
+        thickness_A.append(nz * PIXEL_SIZE)
+        ref_scat = Scattering(
+            NXY, PIXEL_SIZE, VOLTAGE, scattering_model="multislice", progressbars=False
+        ).to(DEVICE)
+        ref_intensity = torch.abs(ref_scat(V_slice)) ** 2
+        ref_c = (ref_intensity - ref_intensity.mean()).flatten()
+
+        for model in models:
+            scat = Scattering(
+                NXY,
+                PIXEL_SIZE,
+                VOLTAGE,
+                scattering_model=model,
+                nz=nz,
+                progressbars=False,
+            ).to(DEVICE)
+            intensity = torch.abs(scat(V_slice)) ** 2
+            ic = (intensity - intensity.mean()).flatten()
+            corr = torch.corrcoef(torch.stack([ic, ref_c]))[0, 1].item()
+            correlations[model].append(corr)
+
+    fig, ax = plt.subplots(figsize=(6.5, 4.5), dpi=200)
+    ax.axhline(0.0, color="gray", linewidth=0.8)
+    for model in models:
+        ax.plot(
+            thickness_A,
+            correlations[model],
+            color=palette[model],
+            marker="o",
+            markersize=4,
+            label=model,
+        )
+    ax.set_xlabel("Specimen thickness (Å)")
+    ax.set_ylabel("Correlation with multislice's true intensity pattern")
+    ax.set_ylim(-1.05, 1.05)
+    ax.set_title("Spatial pattern fidelity vs. thickness", fontsize=10)
+    ax.grid(True, alpha=0.3)
+    ax.legend(fontsize=9)
+    fig.tight_layout()
+    path = OUT_DIR / "scattering-pattern-correlation-vs-thickness.png"
+    fig.savefig(path)
+    plt.close(fig)
+    print(f"wrote {path}")
+
+
+def figure_theta_real_imag_split(V: torch.Tensor) -> None:
+    """Std. dev. of Re(Theta) and Im(Theta) vs. thickness. Theta is the
+    complex quantity common to both rytov (exp(i*Theta)) and firstborn
+    (1 + i*Theta) -- see `_rytov_theta`. Re(Theta) (ordinary projected
+    phase) dominates Im(Theta) (the part that actually sets true
+    intensity) at every thickness tested here, which is why firstborn's
+    |1+i*Theta|^2 = 1 - 2*Im(Theta) + |Theta|^2 is swamped by the spurious
+    Re(Theta)^2 term with no counterpart in the true |exp(i*Theta)|^2 =
+    exp(-2*Im(Theta))."""
+    palette = _deep_palette(2)
+    thickness_A = []
+    std_re, std_im = [], []
+    for nz in THICKNESS_STEPS_NZ:
+        V_slice = V[:, :nz].contiguous()
+        thickness_A.append(nz * PIXEL_SIZE)
+        theta = _rytov_theta(V_slice, nz)
+        std_re.append(theta.real.std().item())
+        std_im.append(theta.imag.std().item())
+
+    fig, ax = plt.subplots(figsize=(6.5, 4.5), dpi=200)
+    ax.plot(
+        thickness_A, std_re, color=palette[0], marker="o", markersize=4, label="Re(Θ)"
+    )
+    ax.plot(
+        thickness_A, std_im, color=palette[1], marker="o", markersize=4, label="Im(Θ)"
+    )
+    ax.set_xlabel("Specimen thickness (Å)")
+    ax.set_ylabel("Standard deviation")
+    ax.set_title("Re(Θ) vs. Im(Θ): phase dominates absorption", fontsize=10)
+    ax.grid(True, alpha=0.3)
+    ax.legend(fontsize=9)
+    fig.tight_layout()
+    path = OUT_DIR / "scattering-theta-real-imag-split.png"
+    fig.savefig(path)
+    plt.close(fig)
+    print(f"wrote {path}")
+
+
 def main() -> None:
     V = _ice_slab()
     figure_multislice_trace(V)
@@ -311,6 +427,8 @@ def main() -> None:
     figure_accuracy_vs_thickness(thickness_A, errors)
     figure_mean_intensity_vs_thickness(thickness_A, means)
     figure_mode_intensity_maps(V)
+    figure_pattern_correlation_vs_thickness(V)
+    figure_theta_real_imag_split(V)
 
 
 if __name__ == "__main__":

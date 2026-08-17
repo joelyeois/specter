@@ -41,6 +41,45 @@ thicknesses in the sweep below, the two track each other closely: keeping
 the per-slice amplitude exact matters less than the additive (rather than
 multiplicative) combination shared by both.
 
+## Where the linearization breaks down
+
+For any real \(\theta\), \(|1+i\theta|^2 = 1+\theta^2\) exactly -- not an
+approximation, just algebra. So whenever `firstborn` truncates
+\(\exp(i\theta) \approx 1+i\theta\), squaring that truncated amplitude
+doesn't just lose accuracy smoothly; it manufactures a spurious extra
+intensity of exactly \(\theta^2\) that the true, bounded
+\(|\exp(i\theta)|^2 = 1\) never has. Averaged over an image, this predicts
+
+\[
+\langle|\psi_{\mathrm{firstborn}}|^2\rangle - 1 \;\approx\; \langle\theta^2\rangle,
+\qquad \theta = \sigma\Delta z\sum_z V_z
+\]
+
+the specimen's *total* (projected) phase shift -- because Fresnel
+propagation is a pure phase filter per spatial frequency and therefore
+preserves total power, so propagating each slice's contribution before
+summing (as `firstborn` does) redistributes contrast spatially but barely
+changes \(\langle\theta^2\rangle\) itself. This is confirmed numerically
+for the ice slab in the figures below: at 320 Å, \(\theta\) has mean
+0.62 rad and standard deviation 0.06 rad across the image, giving
+\(\langle\theta^2\rangle \approx 0.387\) -- matching the measured +38.7%
+mean-intensity bias to three significant figures.
+
+The practical takeaway is that the breakdown threshold is
+\(\theta \sim O(1)\) **radian**, not \(2\pi\): nothing here is about the
+phase wrapping around a full cycle. \(\langle\theta^2\rangle\) is already
+a 6% bias by \(\theta \approx 0.25\) rad, and by the time \(\theta\)
+approaches 1 radian -- one-sixth of a full \(2\pi\) turn -- the linear
+approximation is already off by \({\approx}100\%\). In this ice slab,
+\(\theta\) never exceeds 0.9 rad anywhere in the image, and `firstborn`
+is already wrong by nearly 40% on average; a specimen would never need to
+accumulate anywhere near a full \(2\pi\) cycle of phase to break this
+approximation. [Kinematic](#kinematic) inherits essentially the same
+\(\theta^2\) excess: its per-slice amplitude is exact, but slices are
+still combined by addition rather than multiplication, and that additive
+combination -- not the per-slice linearization -- is what this section's
+argument actually depends on.
+
 ## Projection
 
 The thin-specimen limit: sum the potential over Z first, then apply a
@@ -80,17 +119,18 @@ direction on the error plot:
 - **`firstborn` and `kinematic` stop conserving energy.** A correctly
   normalized exit wave has \(\langle|\psi|^2\rangle = 1\) at every
   thickness (true for `multislice`, `rytov`, and trivially for
-  `projection`). `firstborn` and `kinematic` build \(\psi\) as
-  \(1 + (\text{something})\) rather than through the exponential form
-  the others share, and by 320 Å that "something" is no longer a small
-  correction: mean intensity has drifted to \({\approx}1.39\), a ${\approx}$39%
-  bias with no counterpart in the true physics. The intensity map above
-  confirms this isn't just a scale error either -- `firstborn`'s pattern
-  is visibly different in character from `multislice`'s (coarser,
-  blobbier), and numerically the two are essentially uncorrelated at this
-  thickness. This is the textbook breakdown of the first Born
-  approximation once the specimen is no longer thin: it is a real failure
-  of these two modes, not an artifact of the comparison.
+  `projection`). By 320 Å, `firstborn`'s mean intensity has drifted to
+  \({\approx}1.39\), a \({\approx}39\%\) bias with no counterpart in the
+  true physics -- the direct consequence of truncating
+  \(\exp(i\theta)\approx 1+i\theta\), worked out quantitatively in [Where
+  the linearization breaks down](#where-the-linearization-breaks-down).
+  The intensity map above confirms this isn't just a scale error either
+  -- `firstborn`'s pattern is visibly different in character from
+  `multislice`'s (coarser, blobbier), and numerically the two are
+  essentially uncorrelated at this thickness. This is the textbook
+  breakdown of the first Born approximation once the specimen is no
+  longer thin: it is a real failure of these two modes, not an artifact
+  of the comparison.
 - **`projection` cannot be measured wrong by this metric, because it has
   no signal at all.** With `alpha=0` (no absorption), `projection`'s exit
   wave is \(\exp(i\sigma\Delta z \sum_z V_z)\) -- a pure phase factor, so

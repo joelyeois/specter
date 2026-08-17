@@ -38,12 +38,15 @@ independent of any other slice's contribution before the final
 exponentiation, so it parallelizes: `IterativeScattering.parallel_rytov`
 computes every slice's contribution as one batched FFT pair rather than
 `nz_new` sequential ones, with optional chunked gradient checkpointing to
-bound memory. This is the practical reason Rytov is attractive inside an
-iterative reconstruction loop like `Ghostbuster`, where the propagation
-model is evaluated, and backpropagated through, on every training step:
-a fully parallel forward pass is both faster and (via checkpointing)
-cheaper to hold gradients for than replaying a sequential recursion
-hundreds to a thousand slices deep.
+bound memory. This is what would make Rytov attractive inside an
+iterative, tilt-aware reconstruction loop -- a fully parallel forward
+pass is both faster and (via checkpointing) cheaper to hold gradients
+for than replaying a sequential recursion hundreds to a thousand slices
+deep -- but it is not yet wired into one: `parallel_rytov` is
+correctness- and gradient-tested (`tests/test_scattering.py`) but not
+called from any pipeline, config, or reconstructor class, and
+`TomogramReconstructor` (the one class that uses `IterativeScattering`
+at all) still defaults to `scattering_model="multislice"`.
 
 ## Accuracy vs. thickness
 

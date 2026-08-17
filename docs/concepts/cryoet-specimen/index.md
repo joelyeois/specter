@@ -50,8 +50,7 @@ carbon film → membranes → filaments/microtubules → gold beads → targets 
 ```
 
 Nothing is re-placed once accepted. When a candidate position doesn't
-work, it is rejected and the generator moves on rather than backtracking,
-the same "reject and move on" philosophy throughout this module. That is
+work, it is rejected and the generator moves on rather than backtracking. That is
 why the order matters: it is exactly the order of decreasing placement
 freedom.
 
@@ -80,19 +79,9 @@ Two consequences worth knowing before you read a rendered volume:
   into the film loses the monomers that land inside it, leaving a gap in
   that filament rather than steering around the obstacle.
 
-![The same specimen as the hero image, a thin mid-Z slab, painted by component from the run's own ground-truth label volumes.](../../assets/images/cryoet-tomogram-components.png){ width="620" style="display:block;margin:1.2em auto;" }
-
-The two microtubules use `MicrotubuleSpec`'s default `length=None`, which
-spans the volume's own diagonal so each tube crosses the whole field of
-view rather than appearing as a stub, and `bend_radius=3.0e4` (3 µm), which
-gives the smooth, mechanically-constrained curvature real microtubules show
-in cellular tomograms instead of the near-straight default thermal walk.
-See [Microtubules](microtubules.md).
-
-Every colour above comes from a label volume the generator wrote, not from
-segmenting the density afterward.
-
 ## Regions
+
+![The same specimen as the hero image, a thin mid-Z slab, painted by component from the run's own ground-truth label volumes.](../../assets/images/cryoet-tomogram-components.png){ width="620" style="display:block;margin:1.2em auto;" }
 
 Once every membrane has been composited, the volume is classified once, on
 the composite, into three disjoint regions: `shell` (bilayer material),
@@ -118,10 +107,9 @@ training data:
 - `membrane_labels`: which membrane instance a shell voxel belongs to.
   Where two instances overlap, first write wins.
 - `instance_labels`: one id per placed filament monomer, bead, target and
-  filler instance, handed out in that order. This is a single id space,
-  not one per category.
+  filler instance.
 - Picks: copick-style `.ndjson` per species, positions and orientations.
-  Targets are exported by default; filler is not.
+  Targets are exported by default; filler particles are not.
 
 Membranes deliberately have no picks entry: a surface has no single
 natural "position" the way a protein does, so `membrane_labels` and
@@ -144,17 +132,15 @@ natural "position" the way a protein does, so `membrane_labels` and
 
 ## Provenance
 
-This generator is a clean-room second approach relative to
-[CryoTomoSim](https://github.com/carsonpurnell/cryotomosim_CTS) (CTS), not
-a port of its placement or membrane algorithms. An earlier CTS-replica
-generator existed alongside it and was deleted once this one reached
-feature parity. Two components *are* descended from CTS directly, both
-generic bulk-material physics with no placement logic of their own: the
-[gold beads](beads.md) (`gen_beads.m`) and the
-[carbon film](carbon-film.md) (`gen_carbon.m`/`carbonshape`). The
-[transmembrane placement](bilayer.md) construction is shared with
-[polnet](https://github.com/anmartinezs/polnet), as is the bilayer's
-two-Gaussian profile.
+`TomogramSpecimenGenerator` is inspired by both
+[CryoTomoSim](https://github.com/carsonpurnell/cryotomosim_CTS) (CTS),
+and [Polnet](https://github.com/anmartinezs/polnet). Two components
+are descended from CTS directly — both generic bulk-material
+simulations with no placement logic of their own: the [gold
+beads](beads.md) (`gen_beads.m`) and the [carbon film](carbon-film.md)
+(`gen_carbon.m`/`carbonshape`). The [transmembrane
+placement](bilayer.md) construction is adapted from Polnet, as is the
+bilayer's two-Gaussian profile.
 
 ## References
 

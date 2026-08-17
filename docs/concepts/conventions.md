@@ -95,10 +95,21 @@ vectors and RELION Euler angles map in without inversion.
 
 **Translations follow RELION's origin-offset semantics.** They are
 subtracted, not added: a translation of \((+10, 0)\) Å moves a feature at
-\(x = +10\) Å to the box centre. They are applied *before* rotation,
-matching CryoSPARC. Because a torch affine matrix rotates before
-shifting, `build_affine_matrix` pre-rotates the translation vector to
-compensate.
+\(x = +10\) Å to the box centre. The shift acts in the image plane,
+*after* the rotation, which is the same frame RELION and CryoSPARC define
+their origin offsets in, where the shift is a phase ramp applied to an
+already-extracted central slice rather than a displacement of the 3D
+reference.
+
+Expressing an image-plane shift as a single 3D affine is what requires
+`build_affine_matrix` to pre-rotate the translation vector.
+`grid_sample` samples the input volume at \(R\mathbf{x} + T'\), which
+transforms the density by \(R^{-1}\) and then by \(-R^{-1}T'\). Setting
+\(T' = RT\) makes the net displacement \(-T\) in the lab frame,
+independent of the rotation. Applying \(T\) unrotated would instead shift
+the particle in its own frame before the rotation. Because \(T\) always
+carries a zero \(z\) component, translating the volume and translating
+its projection are equivalent.
 
 **The rotation origin is RELION's, not the geometric centre.** Volumes
 rotate about index \([n_z/\!/2,\, n_y/\!/2,\, n_x/\!/2]\) by default
@@ -115,6 +126,56 @@ Conversion into `specter`'s representation:
 | CryoSPARC `.cs` | `alignments3D/shift` (px) | scaled to Å, `ctf/shift_A` subtracted |
 | RELION `.star` | `rlnAngleRot/Tilt/Psi` (degrees) | `roma.euler_to_unitquat("ZYZ", degrees=True)` |
 | RELION `.star` | `rlnOriginX/YAngst` | used as-is |
+
+## Applying a pose: real space or Fourier space
+
+A pose is applied to a volume by one of two interchangeable methods, selected
+by `rotate_mode` on `ImageGenerator`, `Reconstructor`, `Ghostbuster` and
+`ParticleStackConfig`. Both express the same convention, and both start from
+the same affine built above; they differ only in where the interpolation
+happens.
+
+`"real"`, the default, resamples the density with `grid_sample`, applying the
+rotation and the translation together in one trilinear pass. `"fourier"`
+transforms the volume, rotates the spectrum's real and imaginary parts, and
+applies the translation as a phase ramp \(\exp(-2\pi i\,\mathbf{f}\cdot
+\mathbf{d})\) before transforming back.
+
+Two consequences follow from that split. The translation is **exact** under
+`"fourier"`, since a phase ramp is not an interpolation, and it is exact for
+sub-voxel shifts as well. It is also **circular**: density leaving one face
+reappears at the opposite one, where `"real"` pads according to
+`padding_mode`.
+
+Rotation accuracy is the reverse of what the name suggests. The Fourier path
+interpolates the *spectrum* trilinearly, and an object far from the box centre
+has a rapidly oscillating phase that linear interpolation cannot follow, so its
+error grows with distance from the centre while the real-space error stays
+flat. Measured against an analytic ground truth, as a fraction of peak density:
+
+| Distance from box centre | `"real"` | `"fourier"` |
+|---|---|---|
+| 1 voxel | 0.043 | 0.005 |
+| 3 voxels | 0.035 | 0.011 |
+| 6 voxels | 0.042 | 0.034 |
+| 11 voxels | 0.045 | 0.096 |
+
+`"fourier"` is therefore the more accurate choice for a compact particle
+centred in a roomy box, and the less accurate one for a crowded or off-centre
+specimen, or for any volume whose density reaches the box edge. It costs two
+FFTs and two resampling passes rather than one.
+
+One path selects `"fourier"` by default: `apply_symmetry`, which
+`Reconstructor` calls to enforce a point group on the reconstructed volume.
+Symmetry operations are pure rotations about a centred volume, which is the
+regime where the Fourier path is most accurate and where its circular shift
+never applies.
+
+Rotation origin follows the same `"relion"` / `"center"` choice described
+above. In Fourier space the rotation is necessarily centred on the spectrum's
+DC term, which `fft3(..., shift=True)` places at `n // 2`; `"center"` is
+reached by folding the half-voxel offset into the same phase ramp, and is
+supported for cubic volumes only.
 
 ## Optical sign conventions
 

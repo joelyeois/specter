@@ -189,8 +189,8 @@ _SWEPT_TOTAL_LENGTH_RANGE_A = (1500.0, 2500.0)
 _SWEPT_TUBE_RADIUS_RANGE_A = (150.0, 400.0)
 
 # Fraction of the tomogram box's own LIMITING axis extent an auto-sized
-# (target_shape=None), auto-placed (position_xyz=None) [[membrane]]
-# instance's DIAMETER (2x bounding radius) is allowed to reach. "Limiting"
+# (target_shape=None) [[membrane]] instance's DIAMETER (2x bounding
+# radius) is allowed to reach. "Limiting"
 # = the smallest extent among NON-clippable axes (pack_hard_spheres_3d
 # requires the FULL sphere to fit there -- see config.clip_axes), or, if
 # every axis is clippable (nothing requires a full fit anywhere), the
@@ -393,23 +393,6 @@ def build_tomogram_generator(config: TomogramConfig) -> TomogramSpecimenGenerato
         instance_kwargs = dict(entry)
         n_copies = int(instance_kwargs.pop("n_copies", 1))
 
-        position_xyz_raw = instance_kwargs.pop("position_xyz", None)
-        if n_copies > 1 and position_xyz_raw is not None:
-            raise ValueError(
-                "run_build_tomogram: a [[membrane]] entry can't combine "
-                f"n_copies={n_copies} with an explicit position_xyz -- "
-                "every copy would want the same spot. Omit position_xyz "
-                "(each instance is placed automatically, collision-checked "
-                "against the others) or use n_copies=1 for manual "
-                "placement."
-            )
-        # None (not (0,0,0)) by default -- TomogramSpecimenGenerator resolves
-        # an omitted position_xyz via collision-rejecting random placement
-        # (see its own docstring); forcing every unspecified instance to the
-        # literal origin, the old behaviour, defeats that entirely once more
-        # than one instance is in play.
-        position_xyz = tuple(position_xyz_raw) if position_xyz_raw is not None else None
-
         # None (not config.target_shape) by default -- MembraneGenerator
         # auto-sizes a small working grid from the organelle's own size when
         # omitted (see its own docstring), instead of every instance
@@ -447,9 +430,7 @@ def build_tomogram_generator(config: TomogramConfig) -> TomogramSpecimenGenerato
                 seed=instance_seed,
                 **instance_kwargs,
             )
-            membrane_instances.append(
-                MembraneInstance(generator=mgen, position_xyz=position_xyz)  # type: ignore[arg-type]
-            )
+            membrane_instances.append(MembraneInstance(generator=mgen))
 
     # len(config.carbon_film) > 1 is already rejected in run_build_tomogram.
     carbon_film_spec = (

@@ -1,6 +1,6 @@
 """Tests for run_build_tomogram's membrane-mode config -> MembraneInstance
 wiring (specter.pipelines.build_tomogram_generator) --
-specifically the n_copies/position_xyz/target_shape defaulting logic,
+specifically the n_copies/target_shape defaulting logic,
 not the (expensive, already covered by tests/test_tomogram_generator.py)
 actual generation. No PDB files need to exist for these: protein_specs'
 pdb_source strings are only resolved inside TomogramSpecimenGenerator.
@@ -42,13 +42,12 @@ def test_membrane_entry_defaults_to_auto_size_and_auto_position():
     assert instance.generator.target_shape != tuple(_BASE_KWARGS["target_shape"])
 
 
-def test_membrane_entry_explicit_position_and_target_shape_zyx_are_honored():
+def test_membrane_entry_explicit_target_shape_zyx_is_honored():
     config = TomogramConfig(
         membrane=[
             {
                 "shape_backend": "spherical_harmonics",
                 "sh_axes": [50.0, 50.0, 50.0],
-                "position_xyz": [10.0, -5.0, 0.0],
                 "target_shape": [20, 20, 20],
             }
         ],
@@ -56,7 +55,6 @@ def test_membrane_entry_explicit_position_and_target_shape_zyx_are_honored():
     )
     gen = build_tomogram_generator(config)
     instance = gen.membrane_instances[0]
-    assert instance.position_xyz == (10.0, -5.0, 0.0)
     assert instance.generator.target_shape == (20, 20, 20)
 
 
@@ -87,21 +85,6 @@ def test_n_copies_restarts_per_entry_not_running_across_entries():
     # Second entry's seeds restart at config.seed, not continue from the
     # first entry's last seed (which would give [5, 6, 7, 8]).
     assert seeds == [5, 6, 5, 6]
-
-
-def test_n_copies_greater_than_one_with_explicit_position_xyz_raises():
-    config = TomogramConfig(
-        membrane=[
-            {
-                "shape_backend": "spherical_harmonics",
-                "n_copies": 2,
-                "position_xyz": [0.0, 0.0, 0.0],
-            }
-        ],
-        **_BASE_KWARGS,
-    )
-    with pytest.raises(ValueError, match="n_copies"):
-        build_tomogram_generator(config)
 
 
 def test_membrane_config_entry_dict_never_mutated():

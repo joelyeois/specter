@@ -54,7 +54,6 @@ FILLER_COLOR = "#6b4fa0"
 
 
 def _membrane_instances() -> list[MembraneInstance]:
-    positions = [(-950.0, -800.0, 0.0), (700.0, 450.0, 0.0), (-250.0, 1050.0, 0.0)]
     return [
         MembraneInstance(
             generator=MembraneGenerator(
@@ -70,9 +69,8 @@ def _membrane_instances() -> list[MembraneInstance]:
                 device=DEVICE,
                 seed=SEED + i,
             ),
-            position_xyz=position,
         )
-        for i, position in enumerate(positions)
+        for i in range(3)
     ]
 
 

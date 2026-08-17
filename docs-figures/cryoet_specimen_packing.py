@@ -46,12 +46,11 @@ CYTOSOL_COLOR = "#d98218"
 LUMEN_COLOR = "#6b4fa0"
 SEED = 5
 
-# Three vesicles, placed by hand rather than auto-packed, purely so the
-# figure is reproducible and all three sit at mid-Z where a single slab
-# projection catches their lumens.
+# Three vesicles, collision-rejecting auto-placed (seeded for
+# reproducibility). The density/label slab used below is derived from
+# where they actually landed, rather than assumed to be mid-Z.
 VOXEL_SIZE = 6.0
 SHAPE_ZYX = (120, 300, 300)
-MEMBRANE_POSITIONS = [(-520.0, -430.0, 0.0), (430.0, 300.0, 0.0), (-120.0, 620.0, 0.0)]
 
 
 def _membrane_instances() -> list[MembraneInstance]:
@@ -66,9 +65,8 @@ def _membrane_instances() -> list[MembraneInstance]:
                 device=DEVICE,
                 seed=SEED + i,
             ),
-            position_xyz=position,
         )
-        for i, position in enumerate(MEMBRANE_POSITIONS)
+        for i in range(3)
     ]
 
 
@@ -89,14 +87,25 @@ def figure_regions_hero() -> None:
         pdb_cache_dir=PDB_CACHE,
         seed=SEED,
         device=DEVICE,
-        clip_axes=(False, True, True),
+        # All-False (not just Z): a membrane instance clipped against an
+        # X/Y wall has its shell broken there, which can disconnect its
+        # lumen from being an enclosed compartment at all -- this figure's
+        # whole point is showing an intact lumen, so every instance must
+        # fit fully inside the box on every axis.
+        clip_axes=(False, False, False),
         progressbars=False,
     )
     volume = gen.generate().cpu()
     labels = gen.instance_labels.cpu()
     shell = gen.regions["shell"].cpu()
+    membrane = gen.membrane_labels.cpu()
 
-    z0, z1 = SHAPE_ZYX[0] // 2 - 12, SHAPE_ZYX[0] // 2 + 12
+    # Slab spanning wherever the (auto-placed) vesicles actually landed in
+    # Z, rather than an assumed mid-Z window -- a thin slab still catches
+    # their lumens as cross-sections rather than collapsing each vesicle
+    # into a filled disk under a full-depth projection.
+    z_present = torch.nonzero((membrane > 0).any(dim=2).any(dim=1)).flatten()
+    z0, z1 = int(z_present.min()), int(z_present.max()) + 1
     density = volume[z0:z1].sum(dim=0).numpy()
 
     lumen_ids = torch.tensor(

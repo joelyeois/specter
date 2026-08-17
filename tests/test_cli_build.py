@@ -217,8 +217,8 @@ def test_cli_build_tomogram_membrane_and_targets_combined(tmp_path: Path) -> Non
 
 
 def test_cli_build_tomogram_membrane_multi_instance_smoke(tmp_path: Path) -> None:
-    """Two [[membrane]] entries at distinct position_xyz -- composited into
-    one tomogram, both membrane instances' worth of cytosol picks and a
+    """Two [[membrane]] entries, collision-checked auto-placed -- composited
+    into one tomogram, both membrane instances' worth of cytosol picks and a
     _membrane_labels.mrc with 2 distinct instance IDs appear."""
     config_path = tmp_path / "multi_membrane_tomogram.toml"
     config_path.write_text(
@@ -227,14 +227,12 @@ def test_cli_build_tomogram_membrane_multi_instance_smoke(tmp_path: Path) -> Non
 sh_axes = [55.0, 55.0, 55.0]
 sh_amplitude = 0.15
 n_lipids_per_leaflet = 6
-position_xyz = [-150.0, 0.0, 0.0]
 
 [[membrane]]
 shape_backend = "swept_spline"
 swept_total_length = 150.0
 swept_tube_radius = 35.0
 n_lipids_per_leaflet = 6
-position_xyz = [150.0, 0.0, 0.0]
 
 [[filler]]
 pdb_source = "{_LARGE_FIXTURE}"

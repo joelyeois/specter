@@ -133,7 +133,7 @@ def _build_tomogram_command() -> click.RichCommand:
         context_settings=CONTEXT_SETTINGS,
         help="Build a specimen tomogram from any combination of: one or "
         "more composited organic membranes (--config's TOML [[membrane]] "
-        "entries, each its own shape_backend and position_xyz), filament "
+        "entries, each its own shape_backend), filament "
         "species scattered through it (--actin or [[filaments]]), and "
         "densely packed protein species (--config's [targets]/[filler] "
         "tables, region-gated to cytosol/lumen when a membrane is present). "

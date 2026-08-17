@@ -817,16 +817,11 @@ class TomogramConfig:
     #     many independent instances sharing the same template, each its
     #     own seed (config.seed + i, restarting at i=0 per entry -- editing/
     #     adding another [[membrane]] entry never perturbs an earlier
-    #     entry's own instances). Can't be combined with an explicit
-    #     "position_xyz" in the same entry (every copy would want the same
-    #     spot) -- raises if both are given.
-    #   - "position_xyz" = [x, y, z] (physical Angstrom offset from the
-    #     tomogram's own center). Default omitted (None): resolved via
-    #     collision-rejecting random placement against every other
-    #     omitted-position instance (see TomogramSpecimenGenerator's own
-    #     docstring) -- an instance that doesn't fit is dropped, not
-    #     retried. Give it explicitly for manual placement instead (then
-    #     n_copies must be 1).
+    #     entry's own instances). Every instance's position is resolved via
+    #     collision-rejecting random placement against every other instance
+    #     (see TomogramSpecimenGenerator's own docstring) -- an instance
+    #     that doesn't fit is dropped, not retried. There is no manual-
+    #     placement override.
     #   - "target_shape" = [Z, Y, X] voxels. Default omitted (None):
     #     MembraneGenerator auto-sizes a small local working grid from the
     #     organelle's own size (see its own docstring) instead of every
@@ -1042,11 +1037,10 @@ TOMOGRAM_HELP: dict[str, str] = {
     "by default (no membrane at all; the whole tomogram is then one "
     "cytosol region). e.g. {'shape_backend': 'spherical_harmonics', "
     "'n_copies': 3}. See MembraneGenerator's own docstring for the full "
-    "per-backend parameter set; plus 'n_copies' (int, default 1, "
-    "expands one entry into that many independently-seeded instances), "
-    "'position_xyz' (physical Angstrom offset from the tomogram center, "
-    "default omitted = collision-rejecting random placement), and "
-    "'target_shape' (default omitted = auto-sized per instance).",
+    "per-backend parameter set; plus 'n_copies' (int, default 1, expands "
+    "one entry into that many independently-seeded instances, each "
+    "collision-rejecting-random-placed) and 'target_shape' (default "
+    "omitted = auto-sized per instance).",
     "membrane_transmembrane_specs": "Transmembrane protein species (TOML-"
     "only, [[membrane_transmembrane_specs]] tables), each {'pdb_source': "
     "<code or path>, 'n_copies': 1, 'parameterization': 'shtyrov'}. Only "

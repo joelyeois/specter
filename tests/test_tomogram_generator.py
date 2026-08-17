@@ -143,11 +143,10 @@ def test_tomogram_specimen_generator_warns_when_lumen_species_has_no_region():
             seed=0,
         )
     gen = TomogramSpecimenGenerator(
-        # Explicit position_xyz for determinism -- the actual thing under
+        # Single instance -- auto-placement is deterministic under a fixed
+        # seed with nothing to collide against; the actual thing under
         # test is the "no lumen region" warning path, not placement itself.
-        membrane_instances=[
-            MembraneInstance(generator=mgen, position_xyz=(0.0, 0.0, 0.0))
-        ],
+        membrane_instances=[MembraneInstance(generator=mgen)],
         target_shape=(24, 24, 24),
         voxel_size=8.0,
         protein_specs=[
@@ -201,21 +200,22 @@ def test_tomogram_specimen_generator_rejects_mismatched_voxel_size():
 
 @pytest.mark.skipif(not _LARGE_FIXTURE.exists(), reason="bundled PDB fixture missing")
 def test_tomogram_specimen_generator_composites_two_non_overlapping_instances():
-    """Two instances at distinct, well-separated position_xyz -- composited
-    density nonzero near both, membrane_labels has exactly 2 distinct
-    nonzero IDs, each spatially localized near its own instance. Uses a
-    bigger box than _MEMBRANE_KWARGS' own (100^3 vs 64^3) so the +-200A
-    offsets used here fit with margin, isolating this test from the
-    unrelated boundary-clipping warning a tighter box would also trigger."""
+    """Two collision-checked auto-placed instances -- composited density
+    nonzero near both, membrane_labels has exactly 2 distinct nonzero IDs,
+    each spatially localized near its own RESOLVED position_xyz (verifies
+    `_insert_shell_label` places the shell at the physically correct
+    offset, not just that two disjoint ID sets exist). Uses a bigger box
+    than _MEMBRANE_KWARGS' own (100^3 vs 64^3) so both instances fit with
+    margin, isolating this test from the unrelated boundary-clipping
+    warning a tighter box would also trigger."""
     big_shape_zyx = (100, 100, 100)
     kwargs = dict(_MEMBRANE_KWARGS, target_shape=big_shape_zyx)
     mgen_a = MembraneGenerator(seed=0, **kwargs)
     mgen_b = MembraneGenerator(seed=1, **kwargs)
+    instance_a = MembraneInstance(generator=mgen_a)
+    instance_b = MembraneInstance(generator=mgen_b)
     gen = TomogramSpecimenGenerator(
-        membrane_instances=[
-            MembraneInstance(generator=mgen_a, position_xyz=(-200.0, 0.0, 0.0)),
-            MembraneInstance(generator=mgen_b, position_xyz=(200.0, 0.0, 0.0)),
-        ],
+        membrane_instances=[instance_a, instance_b],
         target_shape=big_shape_zyx,
         voxel_size=_V_SIZE,
         protein_specs=[
@@ -235,11 +235,19 @@ def test_tomogram_specimen_generator_composites_two_non_overlapping_instances():
     assert unique_ids == {1, 2}
 
     # Each instance's own label should be spatially concentrated near its
-    # own position_xyz (left half vs right half of the X axis).
-    id1_x = (labels == 1).nonzero()[:, 2]
-    id2_x = (labels == 2).nonzero()[:, 2]
-    assert (id1_x < big_shape_zyx[2] // 2).float().mean() > 0.8
-    assert (id2_x >= big_shape_zyx[2] // 2).float().mean() > 0.8
+    # own resolved position_xyz -- compare voxel-index centroid (converted
+    # back to a physical xyz offset from the tomogram's own center) against
+    # it, loose tolerance since the rendered shape is a perturbed ellipsoid,
+    # not a perfect sphere.
+    center_idx_zyx = torch.tensor(big_shape_zyx, dtype=torch.float32) / 2
+    for instance_id, mi in [(1, instance_a), (2, instance_b)]:
+        assert mi.position_xyz is not None
+        voxel_idx_zyx = (labels == instance_id).nonzero().float()
+        centroid_offset_xyz = (voxel_idx_zyx.mean(dim=0) - center_idx_zyx).flip(
+            0
+        ) * _V_SIZE
+        expected_xyz = torch.tensor(mi.position_xyz)
+        assert (centroid_offset_xyz - expected_xyz).norm() < 40.0
 
 
 def test_tomogram_specimen_generator_auto_places_non_colliding_instances():
@@ -313,53 +321,50 @@ def test_tomogram_specimen_generator_drops_instances_that_dont_fit():
             assert mi.generator.field is None
 
 
-def test_tomogram_specimen_generator_overlapping_instances_first_write_wins():
-    """Two fully-overlapping instances (both explicitly at the origin --
-    position_xyz now defaults to None/auto-placed, so this test pins both
-    to (0,0,0) explicitly to keep testing overlap detection specifically,
-    not auto-placement) -- warns on overlap, membrane_labels shows only ID
-    1 in the overlap region (first-write-wins, deterministic)."""
-    mgen_a = MembraneGenerator(seed=0, **_MEMBRANE_KWARGS)
-    mgen_b = MembraneGenerator(seed=0, **_MEMBRANE_KWARGS)
-    gen = TomogramSpecimenGenerator(
-        membrane_instances=[
-            MembraneInstance(generator=mgen_a, position_xyz=(0.0, 0.0, 0.0)),
-            MembraneInstance(generator=mgen_b, position_xyz=(0.0, 0.0, 0.0)),
-        ],
-        target_shape=_TARGET_SHAPE_ZYX,
-        voxel_size=_V_SIZE,
-        protein_specs=[TomogramProteinSpec(pdb_source=str(_SMALL_FIXTURE))],
-        occupancy_fraction=0.05,
-        pdb_cache_dir="specter-data/pdb/",
-        seed=0,
-    )
-    with pytest.warns(UserWarning, match="overlaps a voxel"):
-        gen.generate()
+def test_insert_shell_label_overlap_first_write_wins():
+    """Two shell masks stamped at the same physical position overlap fully
+    -- `_insert_shell_label` reports the overlap and membrane_labels shows
+    only the first instance's ID there (first-write-wins, deterministic).
 
-    labels = gen.membrane_labels
-    assert labels is not None
-    # Identical seed/shape -> identical shell masks -> full overlap ->
-    # instance 2 should contribute NOTHING (every voxel it would claim was
-    # already claimed by instance 1).
-    assert 2 not in set(torch.unique(labels).tolist())
-    assert 1 in set(torch.unique(labels).tolist())
+    With placement now always collision-checked (see
+    TomogramSpecimenGenerator.generate()), forcing two ACCEPTED instances
+    into full physical overlap isn't reachable through the public API any
+    more -- the underlying compositing function still needs covering,
+    since an irregular shape extending past its own bounding-sphere
+    estimate can still produce this, so this exercises it directly."""
+    from specter.specimen.tomogram.generator import _insert_shell_label
+
+    shape_zyx = (16, 16, 16)
+    labels = torch.zeros(shape_zyx, dtype=torch.int32)
+    shell_mask = torch.zeros(shape_zyx, dtype=torch.bool)
+    shell_mask[6:10, 6:10, 6:10] = True
+
+    labels, overlap1 = _insert_shell_label(labels, shell_mask, 1, (0.0, 0.0, 0.0), 8.0)
+    assert not overlap1
+    labels, overlap2 = _insert_shell_label(labels, shell_mask, 2, (0.0, 0.0, 0.0), 8.0)
+    assert overlap2
+
+    unique_ids = set(torch.unique(labels).tolist())
+    assert 2 not in unique_ids
+    assert 1 in unique_ids
 
 
 @pytest.mark.skipif(not _SMALL_FIXTURE.exists(), reason="bundled PDB fixture missing")
 def test_tomogram_specimen_generator_transmembrane_reflects_position_offset():
-    offset = (100.0, -50.0, 25.0)
+    """Composited transmembrane placements equal the same MembraneGenerator
+    config's own LOCAL (un-composited) placements, shifted by the
+    instance's resolved (auto-placed) position_xyz -- verifies the offset
+    is applied correctly at composite time, independent of where
+    auto-placement actually put the instance."""
     kwargs = dict(_MEMBRANE_KWARGS)
     transmembrane_specs = [
         TransmembraneSpec(pdb_source=str(_SMALL_FIXTURE), frequency=2)
     ]
 
-    mgen_origin = MembraneGenerator(
-        transmembrane_specs=transmembrane_specs, seed=0, **kwargs
-    )
-    gen_origin = TomogramSpecimenGenerator(
-        membrane_instances=[
-            MembraneInstance(generator=mgen_origin, position_xyz=(0.0, 0.0, 0.0))
-        ],
+    mgen = MembraneGenerator(transmembrane_specs=transmembrane_specs, seed=0, **kwargs)
+    instance = MembraneInstance(generator=mgen)
+    gen = TomogramSpecimenGenerator(
+        membrane_instances=[instance],
         target_shape=_TARGET_SHAPE_ZYX,
         voxel_size=_V_SIZE,
         protein_specs=[TomogramProteinSpec(pdb_source=str(_SMALL_FIXTURE))],
@@ -367,33 +372,24 @@ def test_tomogram_specimen_generator_transmembrane_reflects_position_offset():
         pdb_cache_dir="specter-data/pdb/",
         seed=0,
     )
-    gen_origin.generate()
+    gen.generate()
+    assert instance.position_xyz is not None
+    assert len(gen.transmembrane_placements) > 0
 
-    mgen_offset = MembraneGenerator(
+    # Independently regenerate the SAME membrane config (identical seed),
+    # in isolation this time, to recover its local un-composited placements.
+    mgen_local = MembraneGenerator(
         transmembrane_specs=transmembrane_specs, seed=0, **kwargs
     )
-    gen_offset = TomogramSpecimenGenerator(
-        membrane_instances=[
-            MembraneInstance(generator=mgen_offset, position_xyz=offset)
-        ],
-        target_shape=_TARGET_SHAPE_ZYX,
-        voxel_size=_V_SIZE,
-        protein_specs=[TomogramProteinSpec(pdb_source=str(_SMALL_FIXTURE))],
-        occupancy_fraction=0.05,
-        pdb_cache_dir="specter-data/pdb/",
-        seed=0,
+    mgen_local.generate()
+    local_placements = mgen_local.place_transmembrane(
+        min_spacing_a=gen.min_transmembrane_spacing
     )
-    gen_offset.generate()
+    assert len(local_placements) == len(gen.transmembrane_placements)
 
-    assert len(gen_origin.transmembrane_placements) > 0
-    assert len(gen_offset.transmembrane_placements) == len(
-        gen_origin.transmembrane_placements
-    )
-    offset_t = torch.tensor(offset)
-    for tp_origin, tp_offset in zip(
-        gen_origin.transmembrane_placements, gen_offset.transmembrane_placements
-    ):
-        assert torch.allclose(tp_offset.center_xyz, tp_origin.center_xyz + offset_t)
+    offset_t = torch.tensor(instance.position_xyz)
+    for tp_local, tp_composited in zip(local_placements, gen.transmembrane_placements):
+        assert torch.allclose(tp_composited.center_xyz, tp_local.center_xyz + offset_t)
 
 
 @pytest.mark.skipif(

@@ -108,14 +108,14 @@ lands at ≈8.4 V, matching a real per-atom-physics measurement of 8.56 ±
 
 The film is painted first, into an empty canvas. Downstream:
 
-- **Membranes and filaments** are placed carbon-aware. Auto-placed
-  membranes avoid it outright; filament monomers landing inside it are
-  dropped after the fact (see [Filaments](filaments.md)).
-- **A membrane with an explicit `position_xyz`** is not checked against
-  it. Rather than compositing straight through, the part of that
-  instance's rendered density that would land on carbon is zeroed just
-  before merging, so the volume and that instance's own shell label
-  exclude it consistently.
+- **Membranes and filaments** are placed carbon-aware. Membranes avoid it
+  outright via collision-rejecting placement (a bounding-sphere
+  approximation, so an irregular organelle's true rendered shape can
+  still graze it -- whatever part of an instance's density would land on
+  carbon regardless is zeroed just before merging, as a safety net, so
+  the volume and that instance's own shell label exclude it
+  consistently); filament monomers landing inside it are dropped after
+  the fact (see [Filaments](filaments.md)).
 - **Beads and protein fill** avoid it for free: the region classifier
   reads carbon's high density as `shell`, the same bucket a bilayer
   occupies, and nothing is packed into `shell`.

@@ -68,18 +68,18 @@ a reference again.
 
 Carbon film (``carbon_film_spec``) is painted directly into the shared canvas
 before anything else is placed, then everything placed afterward avoids
-it -- membrane auto-placement and filaments here, and (via
+it -- membrane placement and filaments here, and (via
 ``classify_membrane_regions`` reading carbon's own high density as
 "shell", the same bucket a real membrane bilayer occupies) beads and
-cytosol/lumen protein fill below. Membrane instances given an explicit
-``position_xyz`` (never collision-checked against anything else either,
-e.g. other membrane instances) are the one case with no upfront placement
-check against carbon -- but rather than compositing straight through it
-regardless, whatever part of that instance's own rendered density would
-land on carbon gets clipped (zeroed) right before it's merged into the
-shared canvas, so both the composited volume and that instance's own
-ground-truth shell label consistently exclude it (see the `to_composite`
-loop below). Filament placement itself has no obstacle-avoiding random
+cytosol/lumen protein fill below. Membrane placement itself only avoids
+carbon via a bounding-sphere-vs-distance-field approximation (the same
+kind used everywhere else in this module), so an irregular organelle's
+true rendered shape can still graze it; whatever part of an instance's
+own rendered density would land on carbon regardless gets clipped
+(zeroed) right before it's merged into the shared canvas, as a safety
+net, so both the composited volume and that instance's own ground-truth
+shell label consistently exclude it (see the `to_composite` loop below).
+Filament placement itself has no obstacle-avoiding random
 walk (a bigger algorithmic change than clipping density post-hoc), so a
 monomer instance landing inside the film is simply dropped after the
 fact (see ``_stamp_filaments``) rather than steered around it -- the one
@@ -100,8 +100,8 @@ placement.
 
 Supports MULTIPLE independently-configured membrane instances
 (:class:`MembraneInstance`, each with its own `MembraneGenerator` --
-potentially a different `shape_backend` per instance -- and physical
-`position_xyz` offset) composited into one shared tomogram volume:
+potentially a different `shape_backend` per instance) composited into
+one shared tomogram volume:
 generate each instance in its own centered local frame (unmodified
 `MembraneGenerator`, no changes needed there), max-merge the resulting
 density volumes into the shared canvas, then classify shell/lumen/cytosol
@@ -121,13 +121,14 @@ same-shape `local`); it just wasn't exercised until `MembraneGenerator`
 gained auto-sizing, since giving every instance a hand-picked box the size
 of the whole tomogram was the only practical option before that.
 
-`position_xyz` is optional per instance: when omitted, `generate()` resolves
-it via `pack_hard_spheres_3d` (the same RSA backend used for cytosol/lumen
+Every instance's `position_xyz` is resolved by `generate()` via
+`pack_hard_spheres_3d` (the same RSA backend used for cytosol/lumen
 protein packing below), treating each instance as a bounding sphere -- an
-instance that doesn't fit without colliding (with another auto-placed
-instance; NOT currently checked against explicitly-`position_xyz`'d ones,
-a known v1 gap) is dropped rather than retried at a new position, matching
-this module's "reject and move on" philosophy elsewhere. An instance whose
+instance that doesn't fit without colliding (with another membrane
+instance, the box walls, or the carbon film) is dropped rather than
+retried at a new position, matching this module's "reject and move on"
+philosophy elsewhere. There is no manual-placement override; every
+instance goes through the same collision check. An instance whose
 own `clipped_at_boundary` ends up `True` after `generate()` (its local grid
 was too small for what actually got drawn) is also dropped, with its own
 warning -- caught even though the bounding-sphere check above already tries
@@ -164,7 +165,7 @@ import json
 import math
 import time
 import warnings
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
@@ -636,8 +637,10 @@ def _insert_shell_label(
     earlier instance is never overwritten (unlike `_insert_instance_labels`
     above, which is last-write-wins -- harmless there since placed protein
     instances never spatially overlap by construction, but membrane
-    instances in v1 have no automatic overlap avoidance, so which instance
-    "wins" a genuine overlap must be a deliberate, deterministic choice).
+    instances are only collision-checked as bounding spheres, so an
+    irregular shape extending past its own bounding-sphere estimate can
+    still overlap another instance -- which instance "wins" that overlap
+    must be a deliberate, deterministic choice).
 
     Returns
     -------
@@ -789,18 +792,15 @@ class MembraneInstance:
         own docstring).
     position_xyz : tuple of float, optional
         Physical (x, y, z) offset from the shared tomogram's own center,
-        Angstrom. Default `None`: resolved automatically by `generate()`
-        via collision-rejecting random placement (see this module's own
-        docstring) -- an instance that doesn't fit gets dropped, and
-        `position_xyz` is set here (mutated in place) for whichever
-        instances are accepted, so it's inspectable afterward. Pass an
-        explicit value to place (and exclude from collision-avoidance
-        against other auto-placed instances -- a known v1 gap, see module
-        docstring) a specific instance manually instead.
+        Angstrom. Not settable at construction time -- resolved by
+        `generate()` via collision-rejecting random placement (see this
+        module's own docstring) -- an instance that doesn't fit gets
+        dropped, and `position_xyz` is set here (mutated in place) for
+        whichever instances are accepted, so it's inspectable afterward.
     """
 
     generator: MembraneGenerator
-    position_xyz: tuple[float, float, float] | None = None
+    position_xyz: tuple[float, float, float] | None = field(default=None, init=False)
 
 
 class TomogramSpecimenGenerator:
@@ -1164,21 +1164,14 @@ class TomogramSpecimenGenerator:
             carbon_mask = volume > 0
             phase_done("Carbon film", _grid_phase_start, disable=not self.progressbars)
 
-        auto_instances = [
-            mi for mi in self.membrane_instances if mi.position_xyz is None
-        ]
-        to_composite = [
-            mi for mi in self.membrane_instances if mi.position_xyz is not None
-        ]
-        if auto_instances:
+        to_composite: list[MembraneInstance] = []
+        if self.membrane_instances:
             radii = torch.tensor(
-                [_instance_bounding_radius(mi.generator) for mi in auto_instances]
+                [
+                    _instance_bounding_radius(mi.generator)
+                    for mi in self.membrane_instances
+                ]
             )
-            # Explicitly-positioned instances (to_composite, above) are NOT
-            # checked against carbon either -- same existing gap as their
-            # not being checked against each other (see this block's own
-            # comment below); only auto-placement (this RSA solve) can
-            # actually avoid it.
             if carbon_mask is not None:
                 field_voxel_size, field_shape, field_factor = (
                     _resolve_exclusion_field_grid(target_shape, voxel_size)
@@ -1196,7 +1189,7 @@ class TomogramSpecimenGenerator:
                     * field_voxel_size
                 )
             with status(
-                f"Placing {len(auto_instances)} membrane instance(s)",
+                f"Placing {len(self.membrane_instances)} membrane instance(s)",
                 disable=not self.progressbars,
             ):
                 coords, accepted_idx = pack_hard_spheres_3d(
@@ -1214,18 +1207,18 @@ class TomogramSpecimenGenerator:
                     else None,
                     sampling_mask=(allowed_field if carbon_mask is not None else None),
                 )
-            n_dropped = len(auto_instances) - accepted_idx.numel()
+            n_dropped = len(self.membrane_instances) - accepted_idx.numel()
             if n_dropped:
                 warnings.warn(
-                    f"TomogramSpecimenGenerator: {n_dropped}/{len(auto_instances)} "
-                    "membrane instances with automatic (position_xyz=None) "
-                    "placement did not fit without colliding (with each other, "
-                    "the box walls, or the carbon film, if any) and were "
-                    "dropped (never generated).",
+                    f"TomogramSpecimenGenerator: {n_dropped}/"
+                    f"{len(self.membrane_instances)} membrane instances did not "
+                    "fit without colliding (with each other, the box walls, or "
+                    "the carbon film, if any) and were dropped (never "
+                    "generated).",
                     stacklevel=2,
                 )
             for k, orig_idx in enumerate(accepted_idx.tolist()):
-                mi = auto_instances[orig_idx]
+                mi = self.membrane_instances[orig_idx]
                 mi.position_xyz = tuple(coords[k].tolist())
                 to_composite.append(mi)
 
@@ -1245,9 +1238,8 @@ class TomogramSpecimenGenerator:
             )
             for mi in to_composite:
                 # Every mi here has a concrete position_xyz by construction:
-                # to_composite starts as the explicitly-positioned instances,
-                # then only accepted (position_xyz just set above) auto_instances
-                # are appended to it.
+                # to_composite only ever collects accepted instances, whose
+                # position_xyz was just set above.
                 assert mi.position_xyz is not None
                 mi.generator.generate()
                 progress.update(membrane_task, advance=1)
@@ -1273,16 +1265,13 @@ class TomogramSpecimenGenerator:
                 local_volume = mi.generator.volume
                 assert local_volume is not None
                 if carbon_mask is not None:
-                    # Auto-placed instances shouldn't reach here at all
-                    # (their bounding sphere was already kept clear of
-                    # carbon by the RSA exclusion field above), so this is
-                    # a no-op for them in practice -- it's what actually
-                    # protects explicitly-positioned instances (never
-                    # collision-checked against anything, carbon included,
-                    # see this loop's own leading comment), and is a real
-                    # safety net either way if an irregular organelle's
-                    # true shape extends past its own bounding-sphere
-                    # approximation. Zeroes local_volume wherever it would
+                    # Placed instances shouldn't reach here at all in the
+                    # common case (their bounding sphere was already kept
+                    # clear of carbon by the RSA exclusion field above), so
+                    # this is normally a no-op -- it's a safety net for an
+                    # irregular organelle whose true rendered shape extends
+                    # past its own bounding-sphere approximation. Zeroes
+                    # local_volume wherever it would
                     # land on carbon, BEFORE both compositing into `volume`
                     # and the shell_mask/ground-truth labeling below, so
                     # both consistently reflect the clip -- reuses the same
@@ -1300,10 +1289,9 @@ class TomogramSpecimenGenerator:
                         if forbidden.any():
                             warnings.warn(
                                 "TomogramSpecimenGenerator: clipped part of a "
-                                "membrane instance (explicit position_xyz or an "
-                                "irregular shape exceeding its own bounding-"
-                                "sphere estimate) that overlapped the carbon "
-                                "film.",
+                                "membrane instance (an irregular shape "
+                                "exceeding its own bounding-sphere estimate) "
+                                "that overlapped the carbon film.",
                                 stacklevel=2,
                             )
                             local_volume[src] = local_volume[src] * (~forbidden).to(
@@ -1441,7 +1429,10 @@ class TomogramSpecimenGenerator:
                     "(1-indexed, in membrane_instances order) overlaps a voxel "
                     "already claimed by an earlier instance in membrane_labels "
                     "-- the earlier instance's label wins there (first-write-"
-                    "wins). Adjust position_xyz if this overlap wasn't intended.",
+                    "wins). This can happen even with collision-checked "
+                    "placement, since the RSA solve treats each instance as a "
+                    "bounding sphere while an irregular organelle's true "
+                    "rendered shape can extend past that estimate.",
                     stacklevel=2,
                 )
         self.membrane_labels = membrane_labels

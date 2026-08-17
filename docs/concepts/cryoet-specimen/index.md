@@ -59,8 +59,7 @@ What each stage actually avoids:
 | Stage | Avoids | Doesn't avoid |
 |---|---|---|
 | Carbon film | — (painted first, into an empty canvas) | — |
-| Membranes (auto-placed) | Carbon, other auto-placed membranes | Explicitly-positioned membranes |
-| Membranes (explicit `position_xyz`) | — (density overlapping carbon is clipped instead) | Everything else |
+| Membranes | Carbon, other membranes | — |
 | Filaments | Carbon (monomers landing in it are dropped) | Membrane shell, other filaments |
 | Microtubules | Carbon (dimers landing in it are dropped) | Membrane shell, filaments, other microtubules |
 | Gold beads | Membrane shell, carbon, filaments/microtubules, other beads | Nothing (not region-gated: fiducials sit in the ice) |
@@ -71,10 +70,12 @@ Two consequences worth knowing before you read a rendered volume:
 
 - **The carbon film is not placement-aware in reverse.** It is painted
   first and everything else works around it, matching the CryoTomoSim
-  algorithm this feature was ported from. A membrane you positioned by
-  hand inside the film doesn't move; the part of its density that would
-  land on carbon is zeroed just before compositing, so the volume and that
-  instance's own shell label stay consistent with each other.
+  algorithm this feature was ported from. Membrane collision-avoidance
+  against it is a bounding-sphere approximation, so an irregular
+  organelle's true rendered shape can still graze it; whatever part of its
+  density would land on carbon is zeroed just before compositing, so the
+  volume and that instance's own shell label stay consistent with each
+  other.
 - **Filaments have no obstacle-avoiding random walk.** A walk that runs
   into the film loses the monomers that land inside it, leaving a gap in
   that filament rather than steering around the obstacle.
@@ -127,8 +128,6 @@ natural "position" the way a protein does, so `membrane_labels` and
 - **RSA jams well below close packing.** `filler_occupancy_fraction` is a
   budget, not a promise; see [the packing page](packing.md) for where the
   ceiling actually sits.
-- **An explicitly-positioned membrane is checked against nothing.** Give
-  two of them the same position and they will overlap.
 
 ## Provenance
 

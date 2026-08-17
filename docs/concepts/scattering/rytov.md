@@ -72,7 +72,11 @@ propagation modes](other-modes.md#accuracy-vs-thickness).
 
 ## References
 
+- Yeo, J., & Loh, N. D. (2026). Pursuing the physics of cryo-EM image
+  formation. In *Current Approaches to Cryo-Electron Microscopy*,
+  *Progress in Molecular Biology and Translational Science*. Elsevier.
+  [doi:10.1016/bs.pmbts.2026.05.001](https://doi.org/10.1016/bs.pmbts.2026.05.001)
+  -- derives the Rytov approximation as specialized to slice-wise
+  electron propagation, the form implemented here.
 - Rytov approximation: standard in coherent wave optics; see e.g. J. W.
-  Goodman, *Introduction to Fourier Optics*, for the general derivation
-  this specter implementation specializes to slice-wise electron
-  propagation.
+  Goodman, *Introduction to Fourier Optics*, for the general derivation.

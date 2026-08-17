@@ -307,7 +307,7 @@ def kirkland_atomic_potential_3d(
     Returns
     -------
     potential : torch.Tensor
-        Atomic potential in units of V·Å, same shape as r_xyz.
+        Atomic potential in units of V, same shape as r_xyz.
     """
     device = r_xyz.device
     a0 = 0.529  # Bohr radius, [Å]
@@ -346,13 +346,15 @@ def kirkland_atomic_potential_3d_fourier(
     atomic_number : int
         Atomic number, Hydrogen has number 1.
     k_xyz : torch.Tensor
-        Distances from the atomic core in units of Å. k^2 = kx^2 + ky^2 + kz^2.
+        Spatial frequencies in units of 1/Å. k^2 = kx^2 + ky^2 + kz^2.
         Assume equally spaced grid along kx and ky, i.e. dkx = dky.
 
     Returns
     -------
     potential : torch.Tensor
-        Atomic potential in Fourier space in units of 1/V·Å, same shape as r_xyz.
+        Electron scattering factor in units of Å, same shape as k_xyz.
+        Multiply by c1 = 2*pi*e*a0 = 47.9 V·Å² to obtain the Fourier-space
+        potential in V·Å³, as `PotentialBuilder` does.
     """
     device = k_xyz.device
 
@@ -437,7 +439,7 @@ def lobato_atomic_potential_3d(atomic_number: int, r_xyz: torch.Tensor) -> torch
     Returns
     -------
     potential : torch.Tensor
-        Atomic potential in units of V·Å, same shape as r_xyz.
+        Atomic potential in units of V, same shape as r_xyz.
     """
     device = r_xyz.device
     vac_perm = 1 / 4 / torch.pi
@@ -481,13 +483,15 @@ def lobato_atomic_potential_3d_fourier(
     atomic_number : int
         Atomic number, Hydrogen has number 1.
     k_xyz : torch.Tensor
-        Distances from the atomic core in units of Å. k^2 = kx^2 + ky^2 + kz^2.
+        Spatial frequencies in units of 1/Å. k^2 = kx^2 + ky^2 + kz^2.
         Assume equally spaced grid along kx and ky, i.e. dkx = dky.
 
     Returns
     -------
     potential : torch.Tensor
-        Atomic potential in Fourier space in units of 1/V·Å, same shape as r_xyz.
+        Electron scattering factor in units of Å, same shape as k_xyz.
+        Multiply by c1 = 2*pi*e*a0 = 47.9 V·Å² to obtain the Fourier-space
+        potential in V·Å³, as `PotentialBuilder` does.
     """
     device = k_xyz.device
 
@@ -524,15 +528,17 @@ def shtyrov_atomic_potential_3d_fourier(
     atomic_number : int
         Atomic number, Hydrogen has number 1.
     k_xyz : torch.Tensor
-        Distances from the atomic core in units of Å. r^2 = x^2 + y^2 + z^2.
-        Assume equally spaced grid along x and y, i.e. dx = dy.
+        Spatial frequencies in units of 1/Å. k^2 = kx^2 + ky^2 + kz^2.
+        Assume equally spaced grid along kx and ky, i.e. dkx = dky.
     filepath : str
         Path to the Shtyrov parameter file (MMCIF).
 
     Returns
     -------
     potential : torch.Tensor
-        Atomic potential in units of V·Å, same shape as r_xyz.
+        Electron scattering factor in units of Å, same shape as k_xyz.
+        Multiply by c1 = 2*pi*e*a0 = 47.9 V·Å² to obtain the Fourier-space
+        potential in V·Å³, as `PotentialBuilder` does.
     """
     device = k_xyz.device
 
@@ -581,7 +587,7 @@ def shtyrov_atomic_potential_3d(
     Returns
     -------
     potential : torch.Tensor
-        Atomic potential in units of V·Å, same shape as r_xyz.
+        Atomic potential in units of V, same shape as r_xyz.
     """
     a0 = 0.529  # Bohr radius, [Å]
     e = 14.4  # electron charge, [V·Å]
@@ -671,7 +677,7 @@ def shtyrov_atomic_potential_3d_fourier_by_species(
     Returns
     -------
     potential : torch.Tensor
-        Atomic potential in Fourier space, same shape as `k_xyz`.
+        Electron scattering factor in units of Å, same shape as `k_xyz`.
     """
     device = k_xyz.device
     P = params[species].to(device)  # shape (5, 2)
@@ -712,7 +718,7 @@ def shtyrov_atomic_potential_3d_by_species(
     Returns
     -------
     potential : torch.Tensor
-        Atomic potential in units of V·Å, same shape as `r_xyz`.
+        Atomic potential in units of V, same shape as `r_xyz`.
     """
     a0 = 0.529  # Bohr radius, [Å]
     e = 14.4  # electron charge, [V·Å]
@@ -753,7 +759,7 @@ def peng_atomic_potential_3d(atomic_number: int, r_xyz: torch.Tensor) -> torch.T
     Returns
     -------
     potential : torch.Tensor
-        Atomic potential in units of V·Å, same shape as `r_xyz`.
+        Atomic potential in units of V, same shape as `r_xyz`.
 
     References
     ----------

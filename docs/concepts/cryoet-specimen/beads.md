@@ -38,8 +38,8 @@ gold. The volume integral of one atom's real-space potential is its
 \(k = 0\) Fourier component, the same physics `PotentialBuilder` uses per
 atom, just summed to a bulk mean instead of kept per position. This makes
 the calibration resolution-independent: injecting a raw atom count instead
-would be dimensionally inconsistent with V·Å-unit output and unphysically
-dependent on voxel size.
+would be dimensionally inconsistent with the V-unit output and
+unphysically dependent on voxel size.
 
 ![Left, integrated potential across roughness values, normalised to the nominal sphere. Right, gold's mean inner potential by three independent routes.](../../assets/images/cryoet-bead-calibration.png){ width="900" style="display:block;margin:1.2em auto;" }
 

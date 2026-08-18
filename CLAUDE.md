@@ -287,6 +287,13 @@ docs-figures/                  # Tracked scripts that regenerate docs/assets/ima
                               # that regenerate a docs *table* rather than an image (ice_cache_timing.py ->
                               # user-guide/ice-cache.md's cost table) — same rationale: hardware-specific numbers in
                               # prose need a reachable script to re-measure them on new silicon.
+tools/cli-qa/                  # Tracked pre-release QA sweep for the `specter` CLI (renamed from qa/). Runs the real
+                              # CLI in subprocesses and fingerprints artifacts, asking what tests/test_cli_*.py cannot:
+                              # does each flag actually change the output, and does a nonsense value fail fast and
+                              # legibly? Run it by hand before a release — it is deliberately NOT in CI, since a full
+                              # sweep is minutes of real simulation. sweep.py checks that every CLI flag has a spec.py
+                              # entry, so a newly added flag surfaces as a coverage failure; see its README for the
+                              # phases and FINDINGS.md for what they caught. Run artifacts go to a gitignored results/.
 pdb-data/                     # PDB structure files
 ice-data/                     # Two 32 MB legacy MDSimDump inputs, notebook-only, NOT packaged (do not modify)
 ```

@@ -1028,15 +1028,15 @@ def radial_profile_2d(
         return radialprofile
 
 
-def ball3d(N: int, d: float) -> torch.Tensor:
+def ball3d(n: int, d: float) -> torch.Tensor:
     """
     Generates a 3D tensor with a filled-in ball,
     centered at the DC index corresponding to fftshift.
 
     Parameters
     ----------
-    N : int
-        Size of the 3D tensor (N x N x N).
+    n : int
+        Size of the 3D tensor (n x n x n).
     d : float
         Diameter of the ball.
 
@@ -1045,12 +1045,12 @@ def ball3d(N: int, d: float) -> torch.Tensor:
     ball : torch.Tensor
         3D tensor with ones inside the ball, zeros outside.
     """
-    x = torch.arange(N)
-    y = torch.arange(N)
-    z = torch.arange(N)
+    x = torch.arange(n)
+    y = torch.arange(n)
+    z = torch.arange(n)
     X, Y, Z = torch.meshgrid(x, y, z, indexing="ij")
 
-    center = N // 2  # aligns with DC after fftshift
+    center = n // 2  # aligns with DC after fftshift
     r2 = (X - center) ** 2 + (Y - center) ** 2 + (Z - center) ** 2
 
     radius = d / 2
@@ -1058,29 +1058,29 @@ def ball3d(N: int, d: float) -> torch.Tensor:
     return ball
 
 
-def disk2d(N: int, d: float) -> torch.Tensor:
+def disk2d(n: int, d: float) -> torch.Tensor:
     """
     Generate a 2D binary mask of a filled disk.
 
-    Creates an NxN tensor with 1s inside a centered disk of diameter d
-    and 0s outside. Origin is at index N//2 (consistent with fftshift convention).
+    Creates an n x n tensor with 1s inside a centered disk of diameter d
+    and 0s outside. Origin is at index n//2 (consistent with fftshift convention).
 
     Parameters
     ----------
-    N : int
-        Size of the output grid in pixels (N x N).
+    n : int
+        Size of the output grid in pixels (n x n).
     d : float
         Diameter of the disk in pixels.
 
     Returns
     -------
     disk : torch.Tensor
-        Binary mask with shape (N, N). Values are 1.0 inside the disk
+        Binary mask with shape (n, n). Values are 1.0 inside the disk
         and 0.0 outside.
     """
-    x = torch.arange(N)
+    x = torch.arange(n)
     X, Y = torch.meshgrid(x, x, indexing="ij")
-    center = N // 2
+    center = n // 2
     r2 = (X - center) ** 2 + (Y - center) ** 2
     disk = (r2 <= (d / 2) ** 2).float()
     return disk
@@ -1221,13 +1221,13 @@ def downsample(
     return images_bin
 
 
-def centered_pad(X: torch.Tensor, target_shape: Sequence[int]) -> torch.Tensor:
+def centered_pad(data: torch.Tensor, target_shape: Sequence[int]) -> torch.Tensor:
     """
     Pad a tensor to a target shape, symmetrically.
 
     Parameters
     ----------
-    X : torch.Tensor
+    data : torch.Tensor
         Input tensor.
     target_shape : Sequence of int
         Target shape for padding.
@@ -1238,30 +1238,30 @@ def centered_pad(X: torch.Tensor, target_shape: Sequence[int]) -> torch.Tensor:
         Padded tensor.
     """
     pad = []
-    for size, tgt in zip(reversed(X.shape), reversed(target_shape)):
+    for size, tgt in zip(reversed(data.shape), reversed(target_shape)):
         diff = tgt - size
         pad.extend([diff // 2, diff - diff // 2])
-    return F.pad(X, pad)
+    return F.pad(data, pad)
 
 
 def pad_to_common_shape(
-    A: torch.Tensor, B: torch.Tensor
+    data_a: torch.Tensor, data_b: torch.Tensor
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Pad two tensors to a common shape.
 
     Parameters
     ----------
-    A, B : torch.Tensor
+    data_a, data_b : torch.Tensor
         Input tensors.
 
     Returns
     -------
-    padded_A, padded_B : torch.Tensor
+    padded_a, padded_b : torch.Tensor
         Padded tensors.
     """
-    target = [max(a, b) for a, b in zip(A.shape, B.shape)]
-    return centered_pad(A, target), centered_pad(B, target)
+    target = [max(a, b) for a, b in zip(data_a.shape, data_b.shape)]
+    return centered_pad(data_a, target), centered_pad(data_b, target)
 
 
 def compute_nz(base_nz: int, ice_thickness: float | None, pixel_size: float) -> int:
@@ -1291,7 +1291,7 @@ def compute_nz(base_nz: int, ice_thickness: float | None, pixel_size: float) -> 
 
 
 def pad_volume(
-    V: torch.Tensor,
+    volume: torch.Tensor,
     nxy: int,
     nz: int,
     ice_thickness: float | None,
@@ -1307,7 +1307,7 @@ def pad_volume(
 
     Parameters
     ----------
-    V : torch.Tensor
+    volume : torch.Tensor
         Volume of shape (B, Z, Y, X).
     nxy : int
         Unpadded image size in pixels.
@@ -1322,23 +1322,23 @@ def pad_volume(
 
     Returns
     -------
-    V : torch.Tensor
+    volume : torch.Tensor
         Padded volume.
     """
     if ice_thickness is not None:
         zpad_px = nz - nxy
-        V = F.pad(
-            V,
-            (0, 0, 0, 0, zpad_px // 2, nz - zpad_px // 2 - V.shape[1]),
+        volume = F.pad(
+            volume,
+            (0, 0, 0, 0, zpad_px // 2, nz - zpad_px // 2 - volume.shape[1]),
             mode="constant",
         )
     if pad_fft:
-        V = F.pad(
-            V,
+        volume = F.pad(
+            volume,
             (nxy // 2, nxy // 2, nxy // 2, nxy // 2, 0, 0),
             mode=xy_pad_mode,
         )
-    return V
+    return volume
 
 
 def radial_symmetrize(
@@ -1562,14 +1562,16 @@ def clip_insert_bounds(
 
 
 def center_crop(
-    x: torch.Tensor, size: int | tuple[int, ...], dim: int | Sequence[int] | None = None
+    data: torch.Tensor,
+    size: int | tuple[int, ...],
+    dim: int | Sequence[int] | None = None,
 ) -> torch.Tensor:
     """
     Center crop a tensor along the specified axes (supports negative axes).
 
     Parameters
     ----------
-    x : torch.Tensor
+    data : torch.Tensor
         Input tensor of arbitrary shape
     size : int or tuple of int
         Desired crop size. If int, all axes in `dim` use the same size.
@@ -1584,11 +1586,11 @@ def center_crop(
     """
     # default to all dimensions if not specified
     if dim is None:
-        dim = list(range(x.ndim))
+        dim = list(range(data.ndim))
     # normalize dim to list
     elif isinstance(dim, int):
         dim = [dim]
-    dim = [d + x.ndim if d < 0 else d for d in dim]  # handle negative axes
+    dim = [d + data.ndim if d < 0 else d for d in dim]  # handle negative axes
 
     # normalize size to list
     if isinstance(size, int):
@@ -1600,15 +1602,15 @@ def center_crop(
             )
         crop_size = list(size)
 
-    slices = [slice(None)] * x.ndim  # default: keep all elements
+    slices = [slice(None)] * data.ndim  # default: keep all elements
     for d, cs in zip(dim, crop_size):
-        L = x.shape[d]
+        L = data.shape[d]
         if cs > L:
             raise ValueError(f"Crop size {cs} is larger than axis {d} length {L}")
         start = (L - cs) // 2
         slices[d] = slice(start, start + cs)
 
-    return x[tuple(slices)]
+    return data[tuple(slices)]
 
 
 def tile_volume_from_blocks(

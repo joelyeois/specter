@@ -155,7 +155,7 @@ class Scattering(L.LightningModule):
 
         # Kirkland bandlimit. Built directly against k (already in the same
         # native/unshifted FFT frequency order F is in, DC at index 0) --
-        # not via disk2d(), whose disk is centered at index N//2 (fftshift
+        # not via disk2d(), whose disk is centered at index n//2 (fftshift
         # convention) and would keep the Nyquist corner while masking out
         # DC if multiplied straight into an unshifted spectrum.
         self.klim = klim

@@ -100,7 +100,7 @@ mirroring the particles pipeline (fixed seed used, else generated and logged).
   Ice handles periodicity itself either way, so the "analytic can't do
   periodic" restriction is a `PotentialBuilder` limit, not a physics one.
 
-## Phase 2 — bad input (`qa/garbage.py`)
+## Phase 2 — bad input (`tools/cli-qa/garbage.py`)
 
 Does a value that cannot mean anything fail *usefully*? Before: of 24 such
 values on `simulate particles`, **9 ran to completion** and produced a
@@ -115,7 +115,7 @@ naming the field, its value and the requirement, within the process's own
 `--flag` against its `Choice`, but a TOML file bypasses that, and nothing
 enforced a `Literal` at runtime.
 
-## Phase 3 — the paths phases 1 and 2 skipped (`qa/phase3.py`)
+## Phase 3 — the paths phases 1 and 2 skipped (`tools/cli-qa/phase3.py`)
 
 10 of 10 pass: `--device cuda`/`cuda:0`/`0,1` (multi-GPU DDP writes all 8
 particles), `batchsize="auto"` sizing itself against real GPU memory,
@@ -141,9 +141,9 @@ All three were artifacts of the Phase 1 baseline being too sparse, not no-ops:
 ## Reproducing
 
 ```bash
-python qa/sweep.py particles --workers 24
-python qa/sweep.py all
+python tools/cli-qa/sweep.py particles --workers 24
+python tools/cli-qa/sweep.py all
 ```
 
 Runs are single-threaded so the baseline is bit-reproducible; parallelism comes
-from running many at once. Results land in `qa/results/<command>.json`.
+from running many at once. Results land in `tools/cli-qa/results/<command>.json`.

@@ -16,8 +16,8 @@ wrong. Those are reported as UNCLEAR. Only the final error line counts as
 
 Usage
 -----
-    python qa/garbage.py particles
-    python qa/garbage.py all
+    python tools/cli-qa/garbage.py particles
+    python tools/cli-qa/garbage.py all
 """
 
 from __future__ import annotations

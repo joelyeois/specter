@@ -2,13 +2,13 @@
 
 Usage
 -----
-    python qa/sweep.py particles [--workers 12] [--only ice_model]
-    python qa/sweep.py all
+    python tools/cli-qa/sweep.py particles [--workers 12] [--only ice_model]
+    python tools/cli-qa/sweep.py all
 
 For each command it runs the baseline twice (a determinism check -- if two
 identical seeded invocations disagree, every later comparison is noise), then
 one run per flag perturbation, and classifies each against its expectation.
-Results land in qa/results/<key>.json plus a markdown report.
+Results land in tools/cli-qa/results/<key>.json plus a markdown report.
 """
 
 from __future__ import annotations

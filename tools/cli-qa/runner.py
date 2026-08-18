@@ -17,9 +17,9 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
-# The project venv if there is one (so a plain `python qa/sweep.py` still
+# The project venv if there is one (so a plain `python tools/cli-qa/sweep.py` still
 # exercises the installed specter), else whatever interpreter is running us.
 _VENV_PYTHON = REPO_ROOT / ".venv" / "bin" / "python"
 PYTHON = str(_VENV_PYTHON) if _VENV_PYTHON.exists() else sys.executable

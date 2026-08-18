@@ -17,8 +17,8 @@ hits on day one:
 
 Usage
 -----
-    python qa/phase3.py                # everything available
-    python qa/phase3.py --skip-network
+    python tools/cli-qa/phase3.py                # everything available
+    python tools/cli-qa/phase3.py --skip-network
 """
 
 from __future__ import annotations

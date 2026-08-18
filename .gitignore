@@ -46,5 +46,5 @@ site/
 .claude/
 .superpowers/
 
-# CLI QA sweep run artifacts (the harness itself is tracked, see qa/README.md)
-qa/results/
+# CLI QA sweep run artifacts (the harness itself is tracked, see tools/cli-qa/README.md)
+tools/cli-qa/results/

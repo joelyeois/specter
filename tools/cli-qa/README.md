@@ -11,12 +11,12 @@ reproducing a result, not a personal prototype.
 ## Running
 
 ```bash
-python qa/sweep.py particles              # one command
-python qa/sweep.py all --workers 24       # everything
-python qa/sweep.py particles --only dose  # one flag, while debugging
+python tools/cli-qa/sweep.py particles              # one command
+python tools/cli-qa/sweep.py all --workers 24       # everything
+python tools/cli-qa/sweep.py particles --only dose  # one flag, while debugging
 ```
 
-Results land in `qa/results/<command>.json` (gitignored — they are run
+Results land in `tools/cli-qa/results/<command>.json` (gitignored — they are run
 artifacts, and the fingerprints are machine-specific).
 
 Runs are **single-threaded on purpose**: ice insertion accumulates atom

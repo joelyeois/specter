@@ -637,7 +637,7 @@ class GradientSKIcemaker(L.LightningModule):
         rep_strength: float = 0.0,
         mlbop_strength: float = 0.5,
         mlbop_target: float | None = -0.413,
-        init_positions=None,
+        init_positions: torch.Tensor | None = None,
         tol: Optional[float] = 1e-4,
         patience: int = 10,
     ) -> torch.Tensor:

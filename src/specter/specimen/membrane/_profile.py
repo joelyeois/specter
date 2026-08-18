@@ -122,10 +122,10 @@ def build_reference_lipid_patch(
         sampling noise, even though it is consistently the taller feature
         once averaged over enough lipids.
     area_per_lipid_a2 : float, optional
-        Lateral area per lipid, Angstrom^2, used to size the patch. Default
+        Lateral area per lipid, Å², used to size the patch. Default
         65.0 (a typical fluid-phase PC value).
     jitter_a : float, optional
-        Standard deviation of per-atom positional jitter, Angstrom, standing
+        Standard deviation of per-atom positional jitter, Å, standing
         in for conformational/thermal disorder. Default 2.5.
     seed : int, optional
         Random seed. Default None.
@@ -137,7 +137,7 @@ def build_reference_lipid_patch(
     atomic_numbers : torch.Tensor
         Shape ``(N,)``.
     coordinates : torch.Tensor
-        Shape ``(N, 3)``, ``(x, y, z)`` Angstrom, centered at the bilayer
+        Shape ``(N, 3)``, ``(x, y, z)`` Å, centered at the bilayer
         mid-plane (``z=0``) and patch center (``x=y=0``).
     """
     generator = torch.Generator(device="cpu")
@@ -193,7 +193,7 @@ class BilayerProfile:
     Parameters
     ----------
     distance_a : torch.Tensor
-        Sorted ascending signed distances, shape ``(N,)``, Angstrom.
+        Sorted ascending signed distances, shape ``(N,)``, Å.
     psi : torch.Tensor
         Laterally-averaged potential at each distance, shape ``(N,)``.
     """
@@ -208,7 +208,7 @@ class BilayerProfile:
         Parameters
         ----------
         d : torch.Tensor
-            Signed distance from the bilayer mid-plane, Angstrom, any shape.
+            Signed distance from the bilayer mid-plane, Å, any shape.
 
         Returns
         -------
@@ -238,7 +238,7 @@ def compute_bilayer_profile(
     coordinates : torch.Tensor
         From :func:`build_reference_lipid_patch`.
     voxel_size : float, optional
-        Voxel size for the one-time atomic render, Angstrom. Default 2.0.
+        Voxel size for the one-time atomic render, Å. Default 2.0.
     parameterization : str, optional
         ``PotentialBuilder`` parameterization. Default "shtyrov".
     lateral_core_fraction : float, optional
@@ -417,13 +417,13 @@ def build_analytic_bilayer_profile(
     ----------
     thickness_a : float, optional
         Phosphate-to-phosphate (outer leaflet peak to inner leaflet peak)
-        spacing, Angstrom. Default 30.0 -- midpoint of `polnet`'s own
+        spacing, Å. Default 30.0 -- midpoint of `polnet`'s own
         `MB_THICK_RG` default range (25.0, 35.0); matched to polnet
         directly rather than to the old atomic model's own headgroup
         z-offsets (38.0), which sat above polnet's entire range and read
         as visibly too widely spaced.
     layer_sigma_a : float, optional
-        Gaussian width of each leaflet peak, Angstrom -- matches `polnet`'s
+        Gaussian width of each leaflet peak, Å -- matches `polnet`'s
         own `MB_LAYER_S_RG` parameter. Default 1.25, the midpoint of
         polnet's own default range (0.5, 2.0).
     amplitude : float, optional
@@ -431,7 +431,7 @@ def build_analytic_bilayer_profile(
         to calibrate against real scattering-potential units rather than an
         arbitrary constant. Default 1.0 (uncalibrated).
     distance_half_range_a : float, optional
-        Half-width of the returned lookup table's domain, Angstrom. Default
+        Half-width of the returned lookup table's domain, Å. Default
         ``thickness_a / 2 + 6 * layer_sigma_a`` (comfortably past both
         peaks' Gaussian tails). Values beyond this range are clamped to the
         table's edge (near-zero) by `BilayerProfile.__call__`.

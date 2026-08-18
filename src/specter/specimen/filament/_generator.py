@@ -31,7 +31,7 @@ class FilamentSpec:
         PDB ID (fetched from RCSB) or local file path for the monomer
         structure repeated along the filament.
     step : float
-        Axial rise per monomer, Angstrom.
+        Axial rise per monomer, Å.
     flex_deg : float
         Maximum per-step path curvature, degrees (see
         ``generate_filament_path``).
@@ -96,7 +96,7 @@ class FilamentInstance:
     code: str
     filament_id: int
     monomer_index: int
-    position_xyz: torch.Tensor  # (3,), physical Angstrom
+    position_xyz: torch.Tensor  # (3,), physical Å
     rotation_matrix: torch.Tensor  # (3, 3)
     protofilament_index: int | None = None
 
@@ -128,7 +128,7 @@ def place_filaments(
     target_shape : tuple of int
         Specimen volume shape (Z, Y, X), voxels.
     voxel_size : float
-        Voxel size, Angstrom.
+        Voxel size, Å.
     generator : torch.Generator, optional
         Random generator for start positions, initial directions, and all
         per-step turns. Default None (uses torch's global RNG).

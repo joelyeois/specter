@@ -336,7 +336,7 @@ class TqdmProgress:
         advance: float = 0,
         description: str | None = None,
         **kwargs: Any,
-    ):
+    ) -> None:
         if task_id in self.tasks:
             pbar, _ = self.tasks[task_id]
             if description:
@@ -344,5 +344,5 @@ class TqdmProgress:
             if advance:
                 pbar.update(advance)
 
-    def reset(self):
+    def reset(self) -> None:
         self.__exit__(None, None, None)

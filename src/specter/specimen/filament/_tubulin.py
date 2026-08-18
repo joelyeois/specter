@@ -361,7 +361,7 @@ def measure_source_lattice(
     dict
         ``radius``, ``lateral_spacing``, ``monomer_rise`` and
         ``n_protofilaments`` (inferred from the azimuthal step between
-        adjacent protofilaments), all in Angstrom where applicable.
+        adjacent protofilaments), all in Å where applicable.
     """
     if savefolder is None:
         from ...config import default_pdb_cache_dir

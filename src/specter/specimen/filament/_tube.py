@@ -267,7 +267,7 @@ def place_microtubules(
     target_shape : tuple of int
         Specimen volume shape ``(Z, Y, X)``, voxels.
     voxel_size : float
-        Voxel size, Angstrom.
+        Voxel size, Å.
     generator : torch.Generator, optional
         Random generator for centres, directions and path turns.
     pdb_cache_dir : str, optional

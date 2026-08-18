@@ -259,7 +259,7 @@ class Detector(L.LightningModule):
     def apply_detector_physics(
         self,
         intensity_map: torch.Tensor,
-        pixel_size_angstrom: float,
+        pixel_size: float,
         dose_per_angstrom_sq_per_frame: float,
         coinc_radius_pixels: float = 0.6,
     ) -> torch.Tensor:
@@ -271,8 +271,8 @@ class Detector(L.LightningModule):
         ----------
         intensity_map : torch.Tensor
             2D Tensor (normalized psi^2 from multislice).
-        pixel_size_angstrom : float
-            Size of one pixel in Angstroms.
+        pixel_size : float
+            Size of one pixel in Å.
         dose_per_angstrom_sq_per_frame : float
             Physical dose in this single frame, in e⁻/Å² (the image total
             divided by ``n_frames``).
@@ -317,7 +317,7 @@ class Detector(L.LightningModule):
         # 1. Convert physical dose to expected electron count
         # Use original (unpadded) dimensions: Poisson-per-pixel sampling means
         # padded pixels inflate the per-pixel lambda in the original region.
-        dose_per_pixel = dose_per_angstrom_sq_per_frame * (pixel_size_angstrom**2)
+        dose_per_pixel = dose_per_angstrom_sq_per_frame * (pixel_size**2)
         total_expected = dose_per_pixel * orig_h * orig_w
 
         # 2. Sample landing positions from intensity map + sub-pixel jitter

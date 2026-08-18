@@ -33,10 +33,10 @@ hot path — call it manually on coordinates you want to inspect.
 
 UNITS
 -----
-A and B are in eV, lambda1/lambda2 are in Angstrom^-1, R/D are in
-Angstrom, and c/d/cos_theta0/n/beta are dimensionless. Consequently
+A and B are in eV, lambda1/lambda2 are in Å^-1, R/D are in
+Å, and c/d/cos_theta0/n/beta are dimensionless. Consequently
 :meth:`MLBOP.compute_energy` returns energies in eV, provided atomic
-positions are supplied in Angstrom.
+positions are supplied in Å.
 
 BACKEND
 -------
@@ -71,10 +71,10 @@ import vesin_torch
 ML_BOP_PARAMS: dict[str, float] = {
     "A": 1684.301476,  # eV, repulsive prefactor
     "B": 473.621419,  # eV, attractive prefactor
-    "lambda1": 2.750522,  # Angstrom^-1, repulsive decay length^-1
-    "lambda2": 2.199640,  # Angstrom^-1, attractive decay length^-1
-    "R": 3.282761,  # Angstrom, cutoff midpoint
-    "D": 0.270511,  # Angstrom, cutoff half-width
+    "lambda1": 2.750522,  # Å^-1, repulsive decay length^-1
+    "lambda2": 2.199640,  # Å^-1, attractive decay length^-1
+    "R": 3.282761,  # Å, cutoff midpoint
+    "D": 0.270511,  # Å, cutoff half-width
     "beta": 1e-06,  # dimensionless, bond-order prefactor
     "n": 0.770018,  # dimensionless, bond-order exponent
     "c": 77638.534354,  # dimensionless, angular function parameter
@@ -284,7 +284,7 @@ class MLBOP:
         Parameters
         ----------
         positions : torch.Tensor
-            Bead positions in Angstrom, shape ``(N, 3)``, on ``self.device``.
+            Bead positions in Å, shape ``(N, 3)``, on ``self.device``.
             May require grad.
         box_size : float, tuple[float, float, float], or torch.Tensor
             Periodic cell. A single float is broadcast to a cubic

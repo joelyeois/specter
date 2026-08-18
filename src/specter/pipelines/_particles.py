@@ -145,7 +145,7 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
         voltage = config.voltage
         alpha = config.alpha
 
-    # Convert cs from mm -> Angstrom (1 mm = 1e7 Angstrom); unused when
+    # Convert cs from mm -> Å (1 mm = 1e7 Å); unused when
     # cs_path/star_path is set, since Cs then comes per-particle from the file.
     cs_angstrom = config.cs * 1e7
 

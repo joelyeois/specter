@@ -35,7 +35,7 @@ class TransferFunction(nn.Module):
     n_pixels : int
         Exit wave side length in pixels.
     pixel_size : float
-        Pixel size in Angstrom.
+        Pixel size in Å.
     aberration_model : {"holography", "ctf"}, optional
         ``"holography"`` returns the full complex aberrated wave;
         ``"ctf"`` returns its real part. Both use the *complex* torch-ctf
@@ -56,14 +56,14 @@ class TransferFunction(nn.Module):
         Set False only when the exit wave came from a potential with no
         absorption applied upstream (e.g. alpha=0 was used everywhere).
     bfactor : float | torch.Tensor, optional
-        Isotropic B-factor envelope in Angstrom^2. None (default) disables
+        Isotropic B-factor envelope in Å². None (default) disables
         it.
     convergence_angle : float, optional
         Beam convergence semi-angle in milliradians, used for the Cs
         (spatial coherence) envelope. None (default) disables it. Matches
         ``aberrations.Aberration``'s constructor-level convenience exactly.
     cc : float, optional
-        Chromatic aberration coefficient in Angstrom, used for the Cc
+        Chromatic aberration coefficient in Å, used for the Cc
         (temporal coherence) envelope. None (default) disables it.
     energy_spread : float, optional
         FWHM of the beam energy spread in eV, used by the Cc envelope.
@@ -226,18 +226,18 @@ class TransferFunction(nn.Module):
             kwargs.get("even_zernike_coeffs"),
             kwargs.get("odd_zernike_coeffs"),
         ]
-        batch_size = None
+        batchsize = None
         for zdict in zernike_dicts:
             if not zdict:
                 continue
             for coeff in zdict.values():
                 if coeff.numel() > 1:
-                    batch_size = coeff.numel()
-        if batch_size is None:
+                    batchsize = coeff.numel()
+        if batchsize is None:
             return fn(**kwargs, **extra_kwargs, return_complex_ctf=True)
 
         per_particle_outputs = []
-        for i in range(batch_size):
+        for i in range(batchsize):
             # Slice to a length-1 leading dim (not a bare 0-d scalar):
             # calculate_ctf_2d's internal `"... -> ... 1 1"` reshape only
             # *prepends* a new leading batch dim when the input already has
@@ -247,9 +247,9 @@ class TransferFunction(nn.Module):
             # no batch dim at all), while a (1,)-shaped input reshapes to
             # (1, 1, 1), which outranks (H, W) and correctly broadcasts to
             # (1, H, W). Concatenating per-particle (H, W) outputs along
-            # dim=0 silently produces a wrong (batch_size * H, W) shape;
+            # dim=0 silently produces a wrong (batchsize * H, W) shape;
             # keeping a (1, H, W) output per particle is what makes
-            # concatenation reproduce the true (batch_size, H, W) shape.
+            # concatenation reproduce the true (batchsize, H, W) shape.
             particle_kwargs = dict(kwargs)
             for key in ("even_zernike_coeffs", "odd_zernike_coeffs"):
                 if kwargs.get(key):
@@ -295,7 +295,7 @@ class TransferFunction(nn.Module):
             if torch.any(bfactor != 0):
                 transfer = transfer * b_envelope(self.k2, bfactor)
 
-        # Cs/Cc/dose envelopes: aberrations._envelopes expects Angstrom
+        # Cs/Cc/dose envelopes: aberrations._envelopes expects Å
         # throughout, but CTFParameters' defocus/spherical_aberration are
         # in torch-ctf's own units (micrometers/mm) -- converted here, at
         # the point of use, rather than changing CTFParameters' units.

@@ -14,7 +14,7 @@ footprint) and only then interpolated onto the output grid. Naively
 point-sampling the fine density directly (skip the filter) reproduces a
 concrete, previously observed failure mode -- the bilayer's real, physical
 peak-to-peak leaflet separation is fixed, but sparse point-sampling of its
-few-Angstrom-wide features aliases into what looks like a growing or
+few-Å-wide features aliases into what looks like a growing or
 distorted gap as voxel size increases, with no physical meaning. Filtering
 first makes coarser voxel sizes correctly show the two leaflets blurring
 together, which is the real, expected behavior as resolution drops.
@@ -68,14 +68,14 @@ def rasterize_membrane_density(
     target_shape : tuple of int
         Output grid shape.
     target_spacing_a : float
-        Output voxel size, Angstrom.
+        Output voxel size, Å.
     target_origin_xyz : torch.Tensor, optional
         Physical ``(x, y, z)`` location of output grid index ``(0, 0, 0)``,
-        Angstrom. Default centers the output grid on the physical origin,
+        Å. Default centers the output grid on the physical origin,
         matching ``field``'s own centered-origin convention.
     antialias_sigma_a : float, optional
         Gaussian blur sigma applied to the fine density before resampling,
-        Angstrom. Default ``0.5 * target_spacing_a`` whenever the output is
+        Å. Default ``0.5 * target_spacing_a`` whenever the output is
         coarser than ``field``'s own working spacing (a conservative
         approximation of a box filter matched to the output voxel
         footprint -- see module docstring), 0 otherwise (no anti-aliasing

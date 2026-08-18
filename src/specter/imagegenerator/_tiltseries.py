@@ -129,7 +129,7 @@ class TiltSeriesGenerator(MicrographGenerator):
         Show progress bars. Default True.
     verbose : bool, optional
         Emit debug-level log messages. Default True.
-    slice_batch_size : int, optional
+    slice_batchsize : int, optional
         Number of Z slices propagated together. Default 1.
     pad_volume : bool, optional
         Automatically pad volume in XY when it is too small for the requested
@@ -186,7 +186,7 @@ class TiltSeriesGenerator(MicrographGenerator):
         Beam convergence semi-angle in milliradians, used for the Cs
         (spatial coherence) envelope. Default None (envelope disabled).
     cc : float, optional
-        Chromatic aberration coefficient in Angstrom, used for the Cc
+        Chromatic aberration coefficient in Å, used for the Cc
         (temporal coherence) envelope. Default None (envelope disabled).
     energy_spread : float, optional
         FWHM of the beam energy spread in eV, used by the Cc envelope.
@@ -233,7 +233,7 @@ class TiltSeriesGenerator(MicrographGenerator):
         detector_model: str | None = None,
         progressbars: bool = True,
         verbose: bool = True,
-        slice_batch_size: int = 1,
+        slice_batchsize: int = 1,
         pad_volume: bool = True,
         edge_margin: int = 8,
         z_edge_margin: int = 0,
@@ -418,7 +418,7 @@ class TiltSeriesGenerator(MicrographGenerator):
             detector_model=detector_model,
             progressbars=progressbars,
             verbose=verbose,
-            slice_batch_size=slice_batch_size,
+            slice_batchsize=slice_batchsize,
             coincidence_radius=coincidence_radius,
             n_frames=n_frames,
             bfactor=bfactor,
@@ -451,7 +451,7 @@ class TiltSeriesGenerator(MicrographGenerator):
         del self._buffers["vol"]
         self.vol = vol_value
 
-        self.slice_batch_size = slice_batch_size
+        self.slice_batchsize = slice_batchsize
         # pad_fft=True (multislice only) gives the per-slice FFT-based Fresnel
         # propagation extra canvas headroom for the *entire* nz_new-step recursion,
         # padding once before the loop and cropping back to self.nxy once at the end
@@ -601,7 +601,7 @@ class TiltSeriesGenerator(MicrographGenerator):
             theta_matrix = rotations.build_affine_matrix(R_mat, T_torch)
 
             exitwave = self.iterative_scattering(
-                vol_scaled, theta_matrix, slice_batch_size=self.slice_batch_size
+                vol_scaled, theta_matrix, slice_batchsize=self.slice_batchsize
             )
 
             ctf_batch = self._ctf_batch(idx)

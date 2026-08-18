@@ -75,7 +75,7 @@ class Aberration(L.LightningModule):
         Beam convergence semi-angle in milliradians, used for the Cs
         (spatial coherence) envelope. Default is None (envelope disabled).
     cc: float, optional
-        Chromatic aberration coefficient in Angstrom, used for the Cc
+        Chromatic aberration coefficient in Å, used for the Cc
         (temporal coherence) envelope. Default is None (envelope
         disabled).
     energy_spread: float, optional

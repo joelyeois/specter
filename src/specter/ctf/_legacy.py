@@ -1,4 +1,4 @@
-"""Compatibility bridge from specter's legacy, Angstrom-based ctf_params
+"""Compatibility bridge from specter's legacy, Å-based ctf_params
 dict convention (``aberrations.Aberration``, ``BaseImager._ctf_batch()``)
 to the new torch-ctf-backed :class:`~specter.ctf.CTFParameters`.
 
@@ -18,7 +18,7 @@ natural match for its own separate section in a TOML config, rather than
 being nested inside the per-particle CTF parameter dict.
 
 Every unit conversion and Zernike-coefficient mapping here (dfu/dfv
-Angstrom -> defocus/astigmatism micrometers, cs Angstrom -> mm, phaseshift
+Å -> defocus/astigmatism micrometers, cs Å -> mm, phaseshift
 radians -> degrees, trefoil1/trefoil2 -> Z33c/Z33s, tiltx/tilty ->
 Z31c/Z31s) is exactly what's verified term-by-term against
 ``aberrations.Aberration`` in tests/test_ctf_transfer.py, including
@@ -27,8 +27,8 @@ introduced here, this module only wires that already-validated conversion
 into the legacy dict-based calling convention.
 
 TODO (unit convention): the ``ctf_params`` dict handled here mirrors
-CryoSPARC's own parameterization (dfu/dfv/cs in Angstrom, tiltx/tilty/
-phaseshift in radians, trefoil in Angstrom^3) -- it is not torch-ctf's
+CryoSPARC's own parameterization (dfu/dfv/cs in Å, tiltx/tilty/
+phaseshift in radians, trefoil in Å³) -- it is not torch-ctf's
 native convention (defocus in um, Cs in mm, angles in degrees,
 dimensionless Zernike coefficients normalized by the grid's rho_max, see
 ``_units.zernike_rho_max``). Someone coming from RELION, or who already
@@ -61,7 +61,7 @@ def ctf_params_dict_to_parameters(
     voltage: float,
     lpp_params: dict[str, float] | None = None,
 ) -> CTFParameters:
-    """Convert a legacy Angstrom/radian-based ``ctf_params`` dict (the
+    """Convert a legacy Å/radian-based ``ctf_params`` dict (the
     ``aberrations.Aberration`` / ``BaseImager._ctf_batch()`` convention)
     into a :class:`CTFParameters`.
 
@@ -80,7 +80,7 @@ def ctf_params_dict_to_parameters(
         one, since in practice it's always the same constant value across
         every particle anyway).
     pixel_size : float
-        Pixel size in Angstrom.
+        Pixel size in Å.
     image_shape : tuple[int, int]
         Shape of the 2D image the CTF is being computed for -- needed for
         the trefoil/beam-tilt Zernike-coefficient rescale (see

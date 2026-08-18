@@ -13,12 +13,12 @@ Notes
 -----
 Units follow torch-ctf's own convention throughout -- defocus/astigmatism
 in micrometers, voltage in kV, spherical_aberration in millimeters,
-phase_shift in degrees, pixel_size in Angstrom, amplitude_contrast as a
+phase_shift in degrees, pixel_size in Å, amplitude_contrast as a
 [0, 1] fraction. This is *not* the same convention as specter's older
 ``ctf_params`` dict (``aberrations.Aberration``), which takes dfu/dfv/cs
-directly in Angstrom. Callers migrating an existing Angstrom-based dict
-must convert explicitly (dfu/dfv Angstrom -> micrometers: divide by 1e4;
-cs Angstrom -> mm: divide by 1e7) -- no implicit conversion happens here.
+directly in Å. Callers migrating an existing Å-based dict
+must convert explicitly (dfu/dfv Å -> micrometers: divide by 1e4;
+cs Å -> mm: divide by 1e7) -- no implicit conversion happens here.
 """
 
 from __future__ import annotations
@@ -338,7 +338,7 @@ class CTFParameters(nn.Module):
         Parameters
         ----------
         pixel_size : float
-            Pixel size in Angstrom.
+            Pixel size in Å.
         image_shape : tuple[int, int]
             Shape of the 2D image the CTF is being computed for.
         idx : torch.Tensor | slice | int | None, optional

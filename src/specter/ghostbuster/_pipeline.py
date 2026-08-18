@@ -104,7 +104,7 @@ class Ghostbuster:
     lr_D : float, optional
         Learning rate for defocus offset.
     defocus_offset : float, optional
-        Initial defocus offset in Ångströms added to all particles' dfu and dfv.
+        Initial defocus offset in Å added to all particles' dfu and dfv.
     bfactor : float, optional
         Isotropic B-factor envelope in Å² applied in the microscope transfer
         function, damping high-resolution signal. None or 0.0 means no
@@ -117,7 +117,7 @@ class Ghostbuster:
         schedulers. Default 0.1.
     epochs : int
         Number of training epochs.
-    batch_size : int
+    batchsize : int
         Dataloader batch size.
     scattering_model : str
         Wave propagation model (``"multislice"``, ``"rytov"``, ``"firstborn"``,
@@ -202,7 +202,7 @@ class Ghostbuster:
         ] = "LambdaLR",
         lr_decay: float = 0.1,
         epochs: int = 5,
-        batch_size: int = 3,
+        batchsize: int = 3,
         scattering_model: str = "rytov",
         aberration_model: str = "holography",
         aberration_backend: Literal["legacy", "torch_ctf"] = "legacy",
@@ -269,7 +269,7 @@ class Ghostbuster:
         self.scheduler = scheduler
         self.lr_decay = lr_decay
         self.epochs = epochs
-        self.batch_size = batch_size
+        self.batchsize = batchsize
         self.scattering_model = scattering_model
         self.aberration_model = aberration_model
         self.aberration_backend = aberration_backend
@@ -365,7 +365,7 @@ class Ghostbuster:
         images: torch.Tensor,
         voxel_size: float,
         scattering_model: str,
-        batch_size: int,
+        batchsize: int,
     ) -> tuple["Reconstructor", torch.utils.data.DataLoader]:
         from ..arrays import ball3d
 
@@ -376,7 +376,7 @@ class Ghostbuster:
         idx = torch.arange(len(images))
         dataset = torch.utils.data.TensorDataset(images, idx)
         loader = torch.utils.data.DataLoader(
-            dataset, batch_size=batch_size, shuffle=True, num_workers=self.num_workers
+            dataset, batch_size=batchsize, shuffle=True, num_workers=self.num_workers
         )
 
         model = Reconstructor(
@@ -453,13 +453,13 @@ class Ghostbuster:
         print(
             f"Starting reconstruction: {len(self._images)} particles  |  box {_box}³  |  "
             f"{self.scattering_model}  |  {self.epochs} epochs  |  "
-            f"batch {self.batch_size}  |  {_device_str}"
+            f"batch {self.batchsize}  |  {_device_str}"
         )
         model, loader = self._build_reconstructor_and_loader(
             self._images,
             self._voxel_size,
             self.scattering_model,
-            self.batch_size,
+            self.batchsize,
         )
 
         trainer = build_trainer(use_gpu, device, self.epochs, self.precision, callbacks)
@@ -509,7 +509,7 @@ class Ghostbuster:
             images_binned,
             voxel_size_binned,
             self.scattering_model,
-            self.batch_size,
+            self.batchsize,
         )
 
         use_gpu = torch.cuda.is_available()

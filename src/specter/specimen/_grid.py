@@ -29,8 +29,8 @@ is built from real fcc gold atoms (randomly oriented, Debye-Waller
 jittered) splatted through the atomic potential kernel, the same way
 ``potential.PotentialBuilder`` renders a protein. That is correct at any
 voxel size, whereas binning a Poisson gas carries shot noise a crystalline
-solid does not have (~10% of the projected signal at a 5 Angstrom voxel,
-~22% at 2 Angstrom) and collapses each atom's whole potential integral
+solid does not have (~10% of the projected signal at a 5 Å voxel,
+~22% at 2 Å) and collapses each atom's whole potential integral
 into a single voxel.
 
 The boundary is an irregular quasi-sphere -- a band-limited spherical-
@@ -77,14 +77,14 @@ from .membrane._field_spherical_harmonics import (
 
 AVOGADRO = 6.02214076e23  # 1/mol
 
-# fcc lattice constant for gold, Angstrom. 4 atoms per conventional cell
-# gives 4/a**3 = 0.0591 atoms/Angstrom^3, matching to 0.2% the number
+# fcc lattice constant for gold, Å. 4 atoms per conventional cell
+# gives 4/a**3 = 0.0591 atoms/Å³, matching to 0.2% the number
 # density `_number_density_per_a3` derives independently from bulk mass
 # density -- two unrelated routes to the same material.
 GOLD_FCC_A = 4.0782
 
-# RMS thermal displacement per Cartesian direction, Angstrom, from
-# B ~ 0.6 Angstrom^2 for Au near room temperature (u = sqrt(B/(8 pi^2))).
+# RMS thermal displacement per Cartesian direction, Å, from
+# B ~ 0.6 Å² for Au near room temperature (u = sqrt(B/(8 pi^2))).
 # A literature-typical value, not a measurement on any particular
 # specimen; it sets how much the lattice fringes are smeared.
 # A material constant, so it is a constant here rather than a
@@ -126,8 +126,8 @@ GOLD_MOLAR_MASS = 196.97
 
 
 def _number_density_per_a3(density_g_cm3: float, molar_mass: float) -> float:
-    """Atoms per cubic Angstrom, from bulk mass density and molar mass."""
-    density_g_a3 = density_g_cm3 * 1e-24  # g/cm^3 -> g/Angstrom^3
+    """Atoms per cubic Å, from bulk mass density and molar mass."""
+    density_g_a3 = density_g_cm3 * 1e-24  # g/cm^3 -> g/Å³
     return (density_g_a3 / molar_mass) * AVOGADRO
 
 
@@ -161,7 +161,7 @@ def _mean_inner_potential(
         atomic_number=atomic_number,
         shtyrov_species=shtyrov_species or "O(HH)",
     )
-    atom_potential_integral = kernel.sum().item() * voxel_size**3  # V*Angstrom^3
+    atom_potential_integral = kernel.sum().item() * voxel_size**3  # V*Å³
     return number_density * atom_potential_integral
 
 
@@ -260,7 +260,7 @@ class BeadSpec:
     Attributes
     ----------
     radii : list of float
-        One bead radius (Angstrom) per requested bead population.
+        One bead radius (Å) per requested bead population.
     count_per_radius : int, optional
         Number of copies to place per radius. Default 1.
     """
@@ -288,9 +288,9 @@ class BeadInstance:
         `shape` the generator was built with, so it stays consistent with
         a faceted or roughened bead too.
     radius : float
-        Bead radius, Angstrom.
+        Bead radius, Å.
     voxel_size : float
-        Voxel size, Angstrom.
+        Voxel size, Å.
     """
 
     density: torch.Tensor
@@ -324,7 +324,7 @@ class BeadGenerator:
     Parameters
     ----------
     voxel_size : float
-        Voxel size, Angstrom.
+        Voxel size, Å.
     parameterization : str, optional
         Atomic-potential parameterization used to compute gold's per-atom
         potential integral: ``'kirkland'`` (default) or ``'lobato'``.
@@ -361,8 +361,8 @@ class BeadGenerator:
     ``fill='gas'`` reproduced CTS's own model: atoms scattered uniformly
     at the bulk number density and binned into voxels. It is a Poisson
     gas, so per-voxel occupancy carries shot noise a crystalline solid
-    does not have -- ~10% of the projected signal at a 5 Angstrom voxel
-    against ~3% for the lattice, rising to ~22% at 2 Angstrom -- and it
+    does not have -- ~10% of the projected signal at a 5 Å voxel
+    against ~3% for the lattice, rising to ~22% at 2 Å -- and it
     collapses each atom's whole potential integral into one voxel. There
     was no voxel size at which it was more accurate.
 
@@ -390,7 +390,7 @@ class BeadGenerator:
         self.number_density = _number_density_per_a3(
             GOLD_DENSITY_G_CM3, GOLD_MOLAR_MASS
         )
-        # Per-atom potential integral (V*Angstrom^3), resolution-
+        # Per-atom potential integral (V*Å³), resolution-
         # independent: passing number_density=1.0 makes
         # _mean_inner_potential return exactly that integral (same trick
         # as ._carbon).
@@ -450,7 +450,7 @@ class BeadGenerator:
         Parameters
         ----------
         radius : float
-            Nominal bead radius, Angstrom. The irregular boundary is
+            Nominal bead radius, Å. The irregular boundary is
             volume-matched to a sphere of this radius.
         generator : torch.Generator, optional
             RNG for the crystal orientation, lattice jitter and shape

@@ -58,7 +58,7 @@ def parse_args() -> argparse.Namespace:
 
     # --- Training hyperparameters ---
     parser.add_argument("--epochs", type=int, default=5)
-    parser.add_argument("--batch_size", type=int, default=3)
+    parser.add_argument("--batchsize", type=int, default=3)
     parser.add_argument("--lr", type=float, default=0.1)
     parser.add_argument("--lr_r", type=float, default=None)
     parser.add_argument("--lr_t", type=float, default=None)
@@ -153,7 +153,7 @@ def main() -> None:
                 scheduler=args.scheduler,
                 lr_decay=args.lr_decay,
                 epochs=args.epochs,
-                batch_size=args.batch_size,
+                batchsize=args.batchsize,
                 scattering_model=args.scattering_model,
                 aberration_model=args.aberration_model,
                 symmetry=args.symmetry,

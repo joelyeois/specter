@@ -98,21 +98,21 @@ def _load_csfile_parameters(
     beamshift_A = torch.as_tensor(dataset["ctf/shift_A"])
     translations_A -= beamshift_A
 
-    # extract trefoil. CryoSPARC's ctf/trefoil_A is a raw Angstrom-scale
+    # extract trefoil. CryoSPARC's ctf/trefoil_A is a raw Å-scale
     # coefficient; specter's trefoil1/trefoil2 (see
     # aberrations._functions.trefoil) are the direct k^3-domain phase
-    # coefficients in Angstrom^3, related by chi_trefoil =
+    # coefficients in Å³, related by chi_trefoil =
     # (2*pi/3)*wavelength^2*trefoil_A -- see newctf.py's
     # params_to_coeffs_odd/gen_basis_odd for the CryoSPARC-side derivation.
     trefoil_A = torch.as_tensor(dataset["ctf/trefoil_A"])
     trefoil1 = (2 * torch.pi / 3) * wavelength_A**2 * trefoil_A[:, 0]
     trefoil2 = (2 * torch.pi / 3) * wavelength_A**2 * trefoil_A[:, 1]
 
-    # extract tetrafoil. CryoSPARC's ctf/tetra_A holds 4 raw Angstrom-scale
+    # extract tetrafoil. CryoSPARC's ctf/tetra_A holds 4 raw Å-scale
     # coefficients spanning secondary astigmatism (n=4, m=+-2) and true
     # tetrafoil (n=4, m=+-4); specter's tetrafoil1-4 (see
     # aberrations._functions.tetrafoil) are the direct k^4-domain phase
-    # coefficients in Angstrom^4. See newctf.py's
+    # coefficients in Å⁴. See newctf.py's
     # params_to_coeffs_even/gen_basis_even for the CryoSPARC-side
     # derivation of these prefactors (including the sign/index mapping).
     tetra_A = torch.as_tensor(dataset["ctf/tetra_A"])
@@ -204,13 +204,13 @@ def extract_parameters_from_csfile(
     voltage_kv : torch.Tensor
         Voltage in kV.
     pixel_size : torch.Tensor
-        Pixel sizes in Ångstrom.
+        Pixel sizes in Å.
     alpha : torch.Tensor
         Amplitude contrast ratio.
     rotations : torch.Tensor
         Quaternions with shape (N, 4) or rotation vectors.
     translations_A : torch.Tensor
-        xy-translations in Ångstrom with shape (N, 2).
+        xy-translations in Å with shape (N, 2).
     ctf_params : torch.Tensor
         CTF parameters with shape (N, 7). Parameters are (Cs, dfu, dfv, dfang, tiltx, tilty, phaseshift).
     scale : torch.Tensor

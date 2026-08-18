@@ -47,20 +47,20 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
-#: Axial rise per tubulin **monomer** along a protofilament, Angstrom.
+#: Axial rise per tubulin **monomer** along a protofilament, Å.
 #: Measured 40.9 A (3JAL, GMPCPP) and 41.4 A (6DPU, GDP).
 MONOMER_RISE = 41.0
 
-#: Axial repeat of the alpha-beta **dimer**, i.e. the stamped unit, Angstrom.
+#: Axial repeat of the alpha-beta **dimer**, i.e. the stamped unit, Å.
 DIMER_REPEAT = 2 * MONOMER_RISE
 
-#: Centre-to-centre spacing between adjacent protofilaments, Angstrom.
+#: Centre-to-centre spacing between adjacent protofilaments, Å.
 #: Measured 53.8 A (3JAL) and 53.3 A (6DPU) -- near-constant across
 #: protofilament number, which is why the tube radius simply follows the
 #: circumference.
 LATERAL_SPACING = 53.5
 
-#: Flexural persistence length of a microtubule, Angstrom (1 mm). Measured
+#: Flexural persistence length of a microtubule, Å (1 mm). Measured
 #: values span roughly 1-5 mm depending on nucleotide state, taxol and the
 #: measurement method; the low end is used here so that thermal bending is
 #: not under-stated. Used only to derive the path's per-step flex angle --
@@ -79,11 +79,11 @@ class TubeLattice:
     n_start : int
         Number of lateral-bond helix starts (3 for a real microtubule).
     radius : float
-        Radius of the protofilament centres from the tube axis, Angstrom.
+        Radius of the protofilament centres from the tube axis, Å.
     stagger : float
-        Axial offset between adjacent protofilaments' registers, Angstrom.
+        Axial offset between adjacent protofilaments' registers, Å.
     dimer_repeat : float
-        Axial repeat of the stamped alpha-beta dimer, Angstrom.
+        Axial repeat of the stamped alpha-beta dimer, Å.
     """
 
     n_protofilaments: int
@@ -94,7 +94,7 @@ class TubeLattice:
 
     @property
     def seam_offset(self) -> float:
-        """Register mismatch across the seam, Angstrom.
+        """Register mismatch across the seam, Å.
 
         Walking all the way around the tube accumulates
         ``n_protofilaments * stagger = n_start * MONOMER_RISE`` of axial
@@ -179,9 +179,9 @@ def thermal_flex_deg(
     Parameters
     ----------
     step : float, optional
-        Contour length per path step, Angstrom. Default `DIMER_REPEAT`.
+        Contour length per path step, Å. Default `DIMER_REPEAT`.
     persistence_length : float, optional
-        Persistence length, Angstrom. Default `PERSISTENCE_LENGTH` (1 mm).
+        Persistence length, Å. Default `PERSISTENCE_LENGTH` (1 mm).
 
     Returns
     -------
@@ -217,11 +217,11 @@ class MicrotubuleSpec:
     n_copies : int, optional
         Independent microtubules of this species. Default 1.
     length : float or None, optional
-        Contour length, Angstrom. Default None: span the volume's diagonal,
+        Contour length, Å. Default None: span the volume's diagonal,
         so the microtubule crosses the field the way real ones do instead
         of appearing as a stub.
     bend_radius : float or None, optional
-        Radius of curvature, Angstrom. Default None: a thermal random walk
+        Radius of curvature, Å. Default None: a thermal random walk
         at `thermal_flex_deg`, which is nearly straight. Set a value (e.g.
         3e4 for 3 um) for the smooth, strongly curved microtubules seen in
         cellular tomograms, which are mechanically constrained rather than

@@ -8,7 +8,7 @@ logger = logging.getLogger("specter")
 logger.addHandler(logging.NullHandler())
 
 
-def set_verbosity(level):
+def set_verbosity(level: int | str) -> None:
     """
     Set the logging verbosity for specter.
 

@@ -103,7 +103,7 @@ class MicrographGenerator(BaseImager):
         Default True.
     detector_model : str, optional
         Detector MTF model ('k3_300kv', 'k3_200kv', 'perfect', None).
-    slice_batch_size : int, optional
+    slice_batchsize : int, optional
         Number of Z slices propagated together in ``IterativeScattering``.
         Default 1.
     progressbars : bool, optional
@@ -126,7 +126,7 @@ class MicrographGenerator(BaseImager):
         Beam convergence semi-angle in milliradians, used for the Cs
         (spatial coherence) envelope. Default None (envelope disabled).
     cc : float, optional
-        Chromatic aberration coefficient in Angstrom, used for the Cc
+        Chromatic aberration coefficient in Å, used for the Cc
         (temporal coherence) envelope. Default None (envelope disabled).
     energy_spread : float, optional
         FWHM of the beam energy spread in eV, used by the Cc envelope.
@@ -169,7 +169,7 @@ class MicrographGenerator(BaseImager):
         chunk_size: int | None = None,
         move_to_cpu: bool = True,
         detector_model: str | None = None,
-        slice_batch_size: int = 1,
+        slice_batchsize: int = 1,
         progressbars: bool = True,
         verbose: bool = True,
         coincidence_radius: float | torch.Tensor = 0.0,
@@ -255,7 +255,7 @@ class MicrographGenerator(BaseImager):
         )
 
         self._init_optics()
-        self.slice_batch_size = slice_batch_size
+        self.slice_batchsize = slice_batchsize
         self.iterative_scattering = IterativeScattering(
             self.pad_nxy,
             self.pixel_size,
@@ -353,9 +353,9 @@ class MicrographGenerator(BaseImager):
         """
         if not hasattr(self, "vol"):
             self._generate_vol()
-        batch_size = len(idx) if isinstance(idx, torch.Tensor) else 1
+        batchsize = len(idx) if isinstance(idx, torch.Tensor) else 1
         with status("Transferring volume to GPU", disable=not self.progressbars):
-            V = self.vol.to(self.device).expand(batch_size, -1, -1, -1)
+            V = self.vol.to(self.device).expand(batchsize, -1, -1, -1)
         V = pad_volume(V, self.nxy, self.nz, None, self.pad_fft, xy_pad_mode="reflect")
         scale = self.potential_scale[idx].reshape(-1, 1, 1, 1).to(V.device)
         V = V * scale
@@ -366,18 +366,18 @@ class MicrographGenerator(BaseImager):
             and hasattr(self.specimen_gen, "clean_V")
         ):
             V_clean = self.specimen_gen.clean_V.to(self.device).expand(
-                batch_size, -1, -1, -1
+                batchsize, -1, -1, -1
             )
             V_clean = pad_volume(
                 V_clean, self.nxy, self.nz, None, self.pad_fft, xy_pad_mode="reflect"
             )
             V_clean = V_clean * scale
             self.clean_exitwaves = self.iterative_scattering(
-                V_clean, pose=0, slice_batch_size=self.slice_batch_size
+                V_clean, pose=0, slice_batchsize=self.slice_batchsize
             )
 
         self.exitwaves = self.iterative_scattering(
-            V, pose=0, slice_batch_size=self.slice_batch_size
+            V, pose=0, slice_batchsize=self.slice_batchsize
         )
 
         self.detector_waves = self.aberration(self.exitwaves, self._ctf_batch(idx))

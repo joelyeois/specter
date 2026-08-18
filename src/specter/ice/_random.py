@@ -17,7 +17,7 @@ class RandomIcemaker(L.LightningModule):
     Creates ice through random molecule placement.
 
     Calculates the number of ice molecules based on amorphous ice density,
-    randomly places them as continuous Angstrom coordinates, soft-voxelizes
+    randomly places them as continuous Å coordinates, soft-voxelizes
     onto the grid, then convolves with a scattering kernel.
 
     Two-stage pipeline (mirrors :class:`GradientSKIcemaker`):
@@ -31,7 +31,7 @@ class RandomIcemaker(L.LightningModule):
     Parameters
     ----------
     dx : float
-        Pixel size in angstroms.
+        Pixel size in Å.
     n : int
         Number of pixels in xy-axis. Assumes a square field-of-view.
     nz : int, optional
@@ -86,7 +86,7 @@ class RandomIcemaker(L.LightningModule):
         Draw molecule positions uniformly at random.
 
         Positions are stored in ``self.positions`` as a float tensor of shape
-        ``(n_ice_molecules, 3)`` with columns ``(x, y, z)`` in Angstroms,
+        ``(n_ice_molecules, 3)`` with columns ``(x, y, z)`` in Å,
         centered at the origin: ``x ∈ [-box_x/2, box_x/2]``, etc.
         """
         pos = torch.rand(self.n_ice_molecules, 3)

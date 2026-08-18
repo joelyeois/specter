@@ -71,7 +71,7 @@ def generate_filament_path(
     n_monomers : int
         Number of monomer positions to generate.
     step : float
-        Axial rise per monomer, Angstrom (the distance advanced along the
+        Axial rise per monomer, Å (the distance advanced along the
         current direction at each step).
     flex_deg : float
         Maximum per-step direction change, degrees. Each step's turn angle

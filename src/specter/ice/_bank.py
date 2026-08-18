@@ -71,9 +71,9 @@ def encode_positions(positions: torch.Tensor, box_L: float) -> torch.Tensor:
     Parameters
     ----------
     positions : torch.Tensor
-        Coordinates in Angstrom, shape (N, 3), within ``[-box_L/2, box_L/2]``.
+        Coordinates in Å, shape (N, 3), within ``[-box_L/2, box_L/2]``.
     box_L : float
-        Cubic cell side length in Angstrom.
+        Cubic cell side length in Å.
 
     Returns
     -------
@@ -94,12 +94,12 @@ def decode_positions(indices: torch.Tensor, box_L: float) -> torch.Tensor:
     indices : torch.Tensor
         ``int16`` grid indices, shape (N, 3).
     box_L : float
-        Cubic cell side length in Angstrom, from the config's ``box_L`` key.
+        Cubic cell side length in Å, from the config's ``box_L`` key.
 
     Returns
     -------
     torch.Tensor
-        Coordinates in Angstrom, float32.
+        Coordinates in Å, float32.
     """
     return (indices.double() / _FIXED_POINT_SCALE * (box_L / 2)).float()
 
@@ -653,7 +653,7 @@ class IceBank(L.LightningModule):
                 # requested box) overhangs on every axis. _scatter_splat's
                 # periodic=True is an *unconditional* index % grid_shape, which
                 # doesn't distinguish "just past by a fencepost voxel" from
-                # "hundreds of Angstrom outside" -- the latter previously got
+                # "hundreds of Å outside" -- the latter previously got
                 # wrapped back in from arbitrary far positions instead of being
                 # dropped, silently inflating ice density by up to
                 # (tile_extent / requested box)^3 (measured ~5.6x for a 256 A

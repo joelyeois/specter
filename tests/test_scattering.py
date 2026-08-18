@@ -35,8 +35,8 @@ def test_iterative_scattering_batch_size(dummy_volume):
     R = roma.rotvec_to_rotmat(torch.tensor([[0.0, 0.1, 0.0]])).to(dummy_volume.device)
     theta_matrix = build_affine_matrix(R)
 
-    psi1 = scat_iter.forward(dummy_volume, theta_matrix, slice_batch_size=1)
-    psi4 = scat_iter.forward(dummy_volume, theta_matrix, slice_batch_size=4)
+    psi1 = scat_iter.forward(dummy_volume, theta_matrix, slice_batchsize=1)
+    psi4 = scat_iter.forward(dummy_volume, theta_matrix, slice_batchsize=4)
 
     assert torch.allclose(psi1, psi4, atol=1e-5)
 
@@ -48,8 +48,8 @@ def test_iterative_scattering_batch_size(dummy_volume):
         progressbars=False,
     )
 
-    psi1_rytov = scat_iter_rytov.rytov(dummy_volume, theta_matrix, slice_batch_size=1)
-    psi4_rytov = scat_iter_rytov.rytov(dummy_volume, theta_matrix, slice_batch_size=4)
+    psi1_rytov = scat_iter_rytov.rytov(dummy_volume, theta_matrix, slice_batchsize=1)
+    psi4_rytov = scat_iter_rytov.rytov(dummy_volume, theta_matrix, slice_batchsize=4)
 
     assert torch.allclose(psi1_rytov, psi4_rytov, atol=1e-5)
 
@@ -124,7 +124,7 @@ def test_parallel_rytov_checkpointing_backprops(dummy_volume):
 
 @pytest.mark.parametrize("scattering_model", ["firstborn", "kinematic", "ctf"])
 def test_iterative_models_consistent_across_batch_size(dummy_volume, scattering_model):
-    """firstborn/kinematic/ctf must be invariant to the slice_batch_size chunking."""
+    """firstborn/kinematic/ctf must be invariant to the slice_batchsize chunking."""
     scat_iter = IterativeScattering(
         nxy=64,
         pixel_size=1.0,
@@ -136,8 +136,8 @@ def test_iterative_models_consistent_across_batch_size(dummy_volume, scattering_
     theta_matrix = build_affine_matrix(R)
 
     method = getattr(scat_iter, scattering_model)
-    psi1 = method(dummy_volume, theta_matrix, slice_batch_size=1)
-    psi4 = method(dummy_volume, theta_matrix, slice_batch_size=4)
+    psi1 = method(dummy_volume, theta_matrix, slice_batchsize=1)
+    psi4 = method(dummy_volume, theta_matrix, slice_batchsize=4)
 
     assert torch.allclose(psi1, psi4, atol=1e-5)
 

@@ -212,13 +212,13 @@ def extract_parameters_from_starfile(
     voltage_kv : torch.Tensor
         Voltage in kV.
     pixel_size : torch.Tensor
-        Pixel size in Ångstrom.
+        Pixel size in Å.
     alpha : torch.Tensor
         Amplitude contrast ratio.
     rotations : torch.Tensor
         Quaternions with shape (N, 4) or rotation vectors.
     translations_A : torch.Tensor
-        xy-translations in Ångstrom with shape (N, 2).
+        xy-translations in Å with shape (N, 2).
     ctf_params : dict[str, torch.Tensor]
         CTF parameters keyed by name (``cs``, ``dfu``, ``dfv``, ``dfang``,
         ``phaseshift``, plus ``tiltx``/``tilty`` if present in the file).
@@ -314,7 +314,7 @@ def create_particle_starfile(
         Pose information per particle. Can be quaternions (N,4), matrices (N,3,3),
         or rotation vectors (N,3). Default is None.
     translations : torch.Tensor or np.ndarray, optional
-        Translations per particle (x, y) in Ångstrom. Default is None.
+        Translations per particle (x, y) in Å. Default is None.
     alpha : float, optional
         Amplitude contrast ratio. Default is 0.1.
     folderpath : str, optional
@@ -322,7 +322,7 @@ def create_particle_starfile(
     voltage : float, optional
         Electron beam accelerating voltage in kV. Required.
     dx : float, optional
-        Pixel size in Ångstrom. Required.
+        Pixel size in Å. Required.
     filename : str, optional
         Name of the output starfile and mrcfile (without extension). Default is "particles".
     ctf_params : torch.Tensor or dict[str, torch.Tensor], optional
@@ -504,7 +504,7 @@ def create_micrograph_starfile(
     voltage : float
         Electron beam accelerating voltage in kV.
     pixel_size : float
-        Pixel size in Ångstrom.
+        Pixel size in Å.
     alpha : float
         Amplitude contrast ratio.
     ctf_params : dict

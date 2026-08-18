@@ -5,7 +5,7 @@ dependence on a class instance. Each function returns a real-valued,
 multiplicative amplitude attenuation (an "envelope") in the range (0, 1]
 that can be multiplied into a transfer function. Math ported from
 teamtomo's torch_fourier_filter.envelopes, adapted to specter's existing
-unit conventions (wavelength/cs/defocus/cc in Angstrom, angles in mrad).
+unit conventions (wavelength/cs/defocus/cc in Å, angles in mrad).
 
 Notes
 -----
@@ -26,9 +26,9 @@ def b_envelope(k2: torch.Tensor, bfactor: torch.Tensor) -> torch.Tensor:
     Parameters
     ----------
     k2 : torch.Tensor
-        Squared frequency magnitude grid, in 1/Angstrom^2.
+        Squared frequency magnitude grid, in 1/Å².
     bfactor : torch.Tensor
-        B-factor (temperature factor), in Angstrom^2.
+        B-factor (temperature factor), in Å².
 
     Returns
     -------
@@ -51,13 +51,13 @@ def cs_envelope(
     Parameters
     ----------
     k : torch.Tensor
-        Frequency magnitude grid, in 1/Angstrom.
+        Frequency magnitude grid, in 1/Å.
     wavelength : float
-        Electron wavelength, in Angstrom.
+        Electron wavelength, in Å.
     cs : torch.Tensor
-        Spherical aberration coefficient, in Angstrom.
+        Spherical aberration coefficient, in Å.
     defocus : torch.Tensor
-        Defocus, in Angstrom.
+        Defocus, in Å.
     convergence_angle : float
         Beam convergence semi-angle, in milliradians.
 
@@ -88,11 +88,11 @@ def cc_envelope(
     Parameters
     ----------
     k2 : torch.Tensor
-        Squared frequency magnitude grid, in 1/Angstrom^2.
+        Squared frequency magnitude grid, in 1/Å².
     wavelength : float
-        Electron wavelength, in Angstrom.
+        Electron wavelength, in Å.
     cc : float
-        Chromatic aberration coefficient, in Angstrom.
+        Chromatic aberration coefficient, in Å.
     voltage : float
         Accelerating voltage, in Volts.
     energy_spread : float
@@ -126,7 +126,7 @@ def dose_envelope(
     Parameters
     ----------
     k : torch.Tensor
-        Frequency magnitude grid, in 1/Angstrom.
+        Frequency magnitude grid, in 1/Å.
     dose : torch.Tensor
         Cumulative electron dose (fluence), in e⁻/Å².
     a : float, optional

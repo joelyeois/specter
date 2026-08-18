@@ -139,7 +139,7 @@ def _sample_wandering_path(
     n_points : int
         Number of path points (``>= 2``).
     step_length_a : float
-        Distance between consecutive points, Angstrom.
+        Distance between consecutive points, Å.
     flexibility : float
         In ``(0, 1]``. At each step, the new direction is
         ``normalize((1 - flexibility) * previous_direction + flexibility *
@@ -151,7 +151,7 @@ def _sample_wandering_path(
     -------
     np.ndarray
         Shape ``(n_points, 3)``, physical ``(x, y, z)`` path points,
-        Angstrom, NOT yet recentered or smoothed.
+        Å, NOT yet recentered or smoothed.
     """
     direction = rng.normal(size=3)
     direction /= np.linalg.norm(direction)
@@ -191,17 +191,17 @@ def generate_membrane_field_swept_spline(
     shape_zyx : tuple of int
         Working grid shape, ``(Z, Y, X)``.
     spacing_a : float
-        Working grid voxel spacing, Angstrom.
+        Working grid voxel spacing, Å.
     total_length_a : float, optional
         Approximate path CONTOUR length (not bounding-box extent -- a
         wandering path's bounding box is typically much smaller than its
-        contour length), Angstrom. Default 500.0.
+        contour length), Å. Default 500.0.
     step_length_a : float, optional
         Distance between consecutive blended sphere source centers along
-        the path, Angstrom. Must stay well under ``2 * tube_radius_a`` (see
+        the path, Å. Must stay well under ``2 * tube_radius_a`` (see
         module docstring's beading-risk warning). Default 15.0.
     tube_radius_a : float, optional
-        Tube radius, Angstrom. Default 25.0.
+        Tube radius, Å. Default 25.0.
     flexibility : float, optional
         In ``(0, 1]`` -- see ``_sample_wandering_path``. Default 0.15,
         picked from a direct visual sweep (0.05/0.15/0.35, see ``dev/
@@ -230,14 +230,14 @@ def generate_membrane_field_swept_spline(
         organic-looking swells instead. Only affects the field when
         `radius_variation > 0`.
     blend_sharpness_a : float, optional
-        Smooth-min blend radius, Angstrom (see
+        Smooth-min blend radius, Å (see
         :func:`~specter.specimen.membrane._field.blend_field`). Default
         ``0.5 * tube_radius_a`` -- a default tuned for a handful of sparse,
         independent blobs would under-blend a dense chain of sources into
         visible beading, so this module computes its own instead.
     path_smoothing_sigma_points : float, optional
         ``scipy.ndimage.gaussian_filter1d`` sigma, in PATH POINTS (not
-        Angstrom or voxels) -- see module docstring for why this is
+        Å or voxels) -- see module docstring for why this is
         order-aware rather than spatial. Default 1.5.
     curvature_iterations : int, optional
         Curvature-capping relaxation steps (see

@@ -86,7 +86,7 @@ The field lives on its own fine working grid; the output volume usually
 does not. Resampling between them is where a real, previously observed
 failure mode lives.
 
-![The same membrane field rasterized at 4, 8 and 12 Angstrom voxels, point-sampled on top and anti-aliased below, along a line through the vesicle wall.](../../assets/images/cryoet-bilayer-antialias.png){ width="900" style="display:block;margin:1.2em auto;" }
+![The same membrane field rasterized at 4, 8 and 12 Å voxels, point-sampled on top and anti-aliased below, along a line through the vesicle wall.](../../assets/images/cryoet-bilayer-antialias.png){ width="900" style="display:block;margin:1.2em auto;" }
 
 Point-sampling the fine density directly (top row) keeps the two leaflets
 sharp and full height at *every* voxel size. The peaks just land wherever

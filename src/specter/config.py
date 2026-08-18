@@ -309,7 +309,7 @@ PARTICLE_STACK_HELP: dict[str, str] = {
     "n_pixels": "Number of pixels per axis for the 3-D potential box.",
     "pixel_size": "Pixel size in Angstrom.",
     "voltage": "Electron beam accelerating voltage in kV.",
-    "dose": "Total dose per particle in e⁻/Å²: a single value (e.g. 20) for a "
+    "dose": "Total dose per particle in e-/Angstrom^2: a single value (e.g. 20) for a "
     "constant dose per particle, or 'low,high' (e.g. 20,60) to sample uniformly per particle "
     "(in a TOML config, write the range as [20, 60]).",
     "cs": "Spherical aberration in mm (1-3 mm typical).",
@@ -531,7 +531,7 @@ MICROGRAPH_HELP: dict[str, str] = {
     "pixel_size": "Pixel size in Angstrom.",
     "micrograph_size": "Micrograph size in pixels (square).",
     "voltage": "Electron beam accelerating voltage in kV.",
-    "dose": "Total dose per micrograph in e⁻/Å²: a single value (e.g. 20) for a "
+    "dose": "Total dose per micrograph in e-/Angstrom^2: a single value (e.g. 20) for a "
     "constant dose per micrograph, or 'low,high' (e.g. 20,60) to sample uniformly per micrograph "
     "(in a TOML config, write the range as [20, 60]).",
     "n_frames": "Number of movie frames. Defaults to int(dose) if not set. "
@@ -674,7 +674,7 @@ TILT_SERIES_HELP: dict[str, str] = {
     "micrograph_size": "Output tilt-image size in pixels (square). Defaults "
     "to the XY dimension of the specimen volume.",
     "voltage": "Electron beam accelerating voltage in kV.",
-    "dose_per_tilt": "Total dose for each tilt image in e⁻/Å².",
+    "dose_per_tilt": "Total dose for each tilt image in e-/Angstrom^2.",
     "n_frames": "Number of movie frames per tilt. Only affects the image "
     "when coincidence_radius > 0, which is what splits the dose into "
     "frames; ignored otherwise.",
@@ -901,7 +901,7 @@ class TomogramConfig:
     carbon_film: list[dict[str, Any]] = field(default_factory=list)
 
     # --- Gold fiducial beads (optional) ---
-    # One dict per bead population, {"radius": <Angstrom>, "n_copies": 1,
+    # One dict per bead population, {"radius": <Å>, "n_copies": 1,
     # "radius_cv": 0.0}. "radius" is required; "radius_cv" gives the
     # population size dispersity real colloidal gold has (see
     # specter.specimen.TomogramBeadSpec). Placed via the same RSA packing
@@ -1170,7 +1170,7 @@ class IceCacheConfig:
     # configs already gives a large space of distinct crops.
     num_configs: int = 8
     # Voxels along each side of the (cubic) periodic cell; the cell measures
-    # n * dx Angstrom. Cubic only -- IceBank stores one scalar box_L per config
+    # n * dx Å. Cubic only -- IceBank stores one scalar box_L per config
     # and filters candidates against it, so a non-cubic cell is unrepresentable.
     n: int = 256
     dx: float = 1.0  # A/voxel

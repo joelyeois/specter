@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from typing import Any
 
 import matplotlib.axes
 import matplotlib.figure
@@ -101,7 +102,7 @@ try:
             self.every_n_steps = every_n_steps
             self._display_handle = None
 
-        def _plot_volume(self, pl_module, title):
+        def _plot_volume(self, pl_module: L.LightningModule, title: str) -> None:
             vol = pl_module.V.data.detach().cpu().float()
             fig, axes = plt.subplots(
                 1, 3, dpi=200, constrained_layout=True, figsize=(8, 3.6)
@@ -117,7 +118,14 @@ try:
                 self._display_handle.update(fig)
             plt.close(fig)
 
-        def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):
+        def on_train_batch_end(
+            self,
+            trainer: L.Trainer,
+            pl_module: L.LightningModule,
+            outputs: Any,
+            batch: Any,
+            batch_idx: int,
+        ) -> None:
             # Rank-0-only under multi-GPU (DDP): pl_module.V is already
             # identical across replicas (DDP gradient all-reduce every
             # step), so every rank would otherwise plot/display redundantly.
@@ -132,7 +140,13 @@ try:
             )
             self._plot_volume(pl_module, title=f"Step {trainer.global_step} / {total}")
 
-        def on_train_batch_start(self, trainer, pl_module, batch, batch_idx):
+        def on_train_batch_start(
+            self,
+            trainer: L.Trainer,
+            pl_module: L.LightningModule,
+            batch: Any,
+            batch_idx: int,
+        ) -> None:
             if not trainer.is_global_zero:
                 return
             # Plot after the previous epoch's symmetry has been applied
@@ -147,7 +161,9 @@ try:
                     title=f"Epoch {trainer.current_epoch} (Step {trainer.global_step} / {total})",
                 )
 
-        def on_train_end(self, trainer, pl_module):
+        def on_train_end(
+            self, trainer: L.Trainer, pl_module: L.LightningModule
+        ) -> None:
             if not trainer.is_global_zero:
                 return
             # Plot the final epoch after symmetry
@@ -300,9 +316,9 @@ def plot_particle_stack(
     images : torch.Tensor
         Stack of images, shape (N, H, W).
     pixel_size : float
-        Pixel size in Angstroms.
+        Pixel size in Å.
     defocus_values : torch.Tensor or None, optional
-        Defocus values in Angstroms, shape (N,). Default is None.
+        Defocus values in Å, shape (N,). Default is None.
     max_images : int, optional
         Maximum number of images to display. Default is 5.
     """
@@ -892,11 +908,11 @@ try:
         btn_prev = widgets.Button(description="◀", layout=widgets.Layout(width="50px"))
         btn_next = widgets.Button(description="▶", layout=widgets.Layout(width="50px"))
 
-        def on_prev_clicked(btn) -> None:
+        def on_prev_clicked(btn: widgets.Button) -> None:
             if slider.value > 0:
                 slider.value -= 1
 
-        def on_next_clicked(btn) -> None:
+        def on_next_clicked(btn: widgets.Button) -> None:
             if slider.value < len(all_epochs) - 1:
                 slider.value += 1
 

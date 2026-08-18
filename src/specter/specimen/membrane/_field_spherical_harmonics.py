@@ -57,7 +57,7 @@ Algorithm
    direction.
 4. Feed the resulting boolean solid mask through
    ``scipy.ndimage.distance_transform_edt`` (via ``_signed_distance_
-   transform``) to get a real, physical-Angstrom, Eikonal-
+   transform``) to get a real, physical-Å, Eikonal-
    respecting (``|grad(phi)| ~= 1``) signed distance field -- never an
    analytic-but-approximate radial-residual SDF, whose error grows with the
    surface's local slope and would distort the physically-calibrated
@@ -357,7 +357,7 @@ def generate_membrane_field_spherical_harmonics(
         membrane instance's bounding box with margin, matching the other
         backends' own convention.
     spacing_a : float
-        Working grid voxel spacing, Angstrom. Independent of any downstream
+        Working grid voxel spacing, Å. Independent of any downstream
         output voxel size.
     sh_max_degree : int, optional
         Highest spherical-harmonic degree included in the random surface
@@ -365,7 +365,7 @@ def generate_membrane_field_spherical_harmonics(
         ``_sample_sh_coefficients``). Default 8.
     sh_axes : tuple of float, optional
         Physical semi-axes ``(a_x, a_y, a_z)`` of the base ellipsoid,
-        Angstrom -- isotropic (equal) axes give a roughly spherical
+        Å -- isotropic (equal) axes give a roughly spherical
         organelle, anisotropic axes give an elongated/flattened one (e.g.
         a stretched mitochondrion). Default ``(300.0, 300.0, 300.0)``.
     sh_amplitude : float, optional

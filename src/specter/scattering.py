@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Callable, Iterator
+
 
 import torch
 import lightning as L
@@ -68,7 +70,7 @@ class Scattering(L.LightningModule):
         nxy : int
             Number of pixels in x and y dimensions, (nxy, nxy).
         pixel_size : float
-            Pixel size in Ångströms. Assumes dz equals pixel_size.
+            Pixel size in Å. Assumes dz equals pixel_size.
         voltage : float
             Electron beam accelerating voltage in kV. Typical values are 100,
             120, 200, or 300 kV.
@@ -752,17 +754,17 @@ class IterativeScattering(L.LightningModule):
         self,
         V: torch.Tensor,
         theta_matrix: torch.Tensor,
-        slice_batch_size: int,
+        slice_batchsize: int,
         description: str,
         roi_size: int | None = None,
-    ):
+    ) -> Iterator[tuple[int, int, torch.Tensor]]:
         """
         Yield ``(i, nz_new, slice_sample)`` for each Z-slice of a (possibly
         rotated) volume, in EWS processing order.
 
         For the identity transform, each slice is fetched individually
         (cheap direct indexing). Otherwise slices are fetched in
-        ``slice_batch_size``-sized batches via `_fetch_volume_slices` and
+        ``slice_batchsize``-sized batches via `_fetch_volume_slices` and
         cached, trading memory for fewer `sample_rotated_slices` calls.
 
         Parameters
@@ -808,8 +810,8 @@ class IterativeScattering(L.LightningModule):
                     roi_size=roi_size,
                 )[:, 0]
             else:
-                if i % slice_batch_size == 0:
-                    batch_end = min(i + slice_batch_size, nz_new)
+                if i % slice_batchsize == 0:
+                    batch_end = min(i + slice_batchsize, nz_new)
                     slices_block = self._fetch_volume_slices(
                         V,
                         indices[i:batch_end],
@@ -823,7 +825,7 @@ class IterativeScattering(L.LightningModule):
                         roi_size=roi_size,
                     )
                 assert slices_block is not None
-                slice_sample = slices_block[:, i % slice_batch_size]
+                slice_sample = slices_block[:, i % slice_batchsize]
 
             yield i, nz_new, slice_sample
 
@@ -831,7 +833,7 @@ class IterativeScattering(L.LightningModule):
         self,
         V: torch.Tensor,
         theta_matrix: torch.Tensor,
-        slice_batch_size: int = 1,
+        slice_batchsize: int = 1,
         checkpoint_chunks: int | None = None,
     ) -> torch.Tensor:
         """
@@ -843,7 +845,7 @@ class IterativeScattering(L.LightningModule):
             Input 3D potential volume, shape ``(B, Z, Y, X)``.
         theta_matrix : torch.Tensor
             Affine rotation matrices, shape ``(B, 3, 4)``.
-        slice_batch_size : int
+        slice_batchsize : int
             Number of slices to sample from V in one ``sample_rotated_slices``
             call. Larger values trade memory for fewer kernel launches.
         checkpoint_chunks : int or None
@@ -876,7 +878,7 @@ class IterativeScattering(L.LightningModule):
             for i, _, slice_sample in self._iter_slices(
                 V,
                 theta_matrix,
-                slice_batch_size,
+                slice_batchsize,
                 "Multislice (Iterative)",
                 roi_size=roi_size,
             ):
@@ -923,7 +925,7 @@ class IterativeScattering(L.LightningModule):
                     cy: int,
                     cx: int,
                     roi: int | None,
-                ):
+                ) -> Callable[[torch.Tensor, torch.Tensor], torch.Tensor]:
                     def _chunk(exitwave: torch.Tensor, V: torch.Tensor) -> torch.Tensor:
                         ew = exitwave
                         dev = ew.device
@@ -959,7 +961,7 @@ class IterativeScattering(L.LightningModule):
         return exitwave
 
     def projection(
-        self, V: torch.Tensor, theta_matrix: torch.Tensor, slice_batch_size: int = 1
+        self, V: torch.Tensor, theta_matrix: torch.Tensor, slice_batchsize: int = 1
     ) -> torch.Tensor:
         """
         Compute exit wave using iterative projection approximation on a transformed volume.
@@ -997,8 +999,8 @@ class IterativeScattering(L.LightningModule):
                     device,
                 )[:, 0]
             else:
-                if i % slice_batch_size == 0:
-                    batch_end = min(i + slice_batch_size, nz_new)
+                if i % slice_batchsize == 0:
+                    batch_end = min(i + slice_batchsize, nz_new)
                     slices_block = self._fetch_volume_slices(
                         V,
                         indices[i:batch_end],
@@ -1011,14 +1013,14 @@ class IterativeScattering(L.LightningModule):
                         device,
                     )
                 assert slices_block is not None
-                total_potential += slices_block[:, i % slice_batch_size]
+                total_potential += slices_block[:, i % slice_batchsize]
 
         total_complex = complex_potential(total_potential, alpha=self.alpha)
         exitwave = torch.exp(1j * self.sigma * self.pixel_size * total_complex)
         return exitwave
 
     def rytov(
-        self, V: torch.Tensor, theta_matrix: torch.Tensor, slice_batch_size: int = 1
+        self, V: torch.Tensor, theta_matrix: torch.Tensor, slice_batchsize: int = 1
     ) -> torch.Tensor:
         """
         Compute exit wave using iterative Rytov approximation on a transformed volume.
@@ -1031,7 +1033,7 @@ class IterativeScattering(L.LightningModule):
         )
 
         for i, nz_new, slice_sample in self._iter_slices(
-            V, theta_matrix, slice_batch_size, "Rytov (Iterative)"
+            V, theta_matrix, slice_batchsize, "Rytov (Iterative)"
         ):
             slice_complex = complex_potential(slice_sample, alpha=self.alpha)
             # Propagate transmission of slice i to exit plane
@@ -1154,7 +1156,16 @@ class IterativeScattering(L.LightningModule):
             _cy, _cx = y_start, x_start
             _cnz = nz_new
 
-            def _make_chunk(ci, dist, cid, crot, ctheta, cy, cx, cnz):
+            def _make_chunk(
+                ci: torch.Tensor,
+                dist: torch.Tensor,
+                cid: bool,
+                crot: VolumeRotator | None,
+                ctheta: torch.Tensor,
+                cy: int,
+                cx: int,
+                cnz: int,
+            ) -> Callable[[torch.Tensor, torch.Tensor], torch.Tensor]:
                 def _chunk(phase_sum: torch.Tensor, V: torch.Tensor) -> torch.Tensor:
                     dev = phase_sum.device
                     slices = self._fetch_volume_slices(
@@ -1199,7 +1210,7 @@ class IterativeScattering(L.LightningModule):
         return torch.exp(phase_sum)
 
     def firstborn(
-        self, V: torch.Tensor, theta_matrix: torch.Tensor, slice_batch_size: int = 1
+        self, V: torch.Tensor, theta_matrix: torch.Tensor, slice_batchsize: int = 1
     ) -> torch.Tensor:
         """
         Compute exit wave using iterative first Born approximation on a transformed volume.
@@ -1212,7 +1223,7 @@ class IterativeScattering(L.LightningModule):
         )
 
         for i, nz_new, slice_sample in self._iter_slices(
-            V, theta_matrix, slice_batch_size, "First Born (Iterative)"
+            V, theta_matrix, slice_batchsize, "First Born (Iterative)"
         ):
             slice_complex = complex_potential(slice_sample, alpha=self.alpha)
             F_i = self._get_propagator(float(nz_new - i))
@@ -1222,7 +1233,7 @@ class IterativeScattering(L.LightningModule):
         return exitwave
 
     def kinematic(
-        self, V: torch.Tensor, theta_matrix: torch.Tensor, slice_batch_size: int = 1
+        self, V: torch.Tensor, theta_matrix: torch.Tensor, slice_batchsize: int = 1
     ) -> torch.Tensor:
         """
         Compute exit wave using iterative kinematic scattering approximation.
@@ -1238,7 +1249,7 @@ class IterativeScattering(L.LightningModule):
         )
 
         for i, nz_new, slice_sample in self._iter_slices(
-            V, theta_matrix, slice_batch_size, "Kinematic (Iterative)"
+            V, theta_matrix, slice_batchsize, "Kinematic (Iterative)"
         ):
             slice_complex = complex_potential(slice_sample, alpha=self.alpha)
             t = torch.exp(1j * self.sigma * self.pixel_size * slice_complex) - 1
@@ -1249,7 +1260,7 @@ class IterativeScattering(L.LightningModule):
         return exitwave
 
     def ctf(
-        self, V: torch.Tensor, theta_matrix: torch.Tensor, slice_batch_size: int = 1
+        self, V: torch.Tensor, theta_matrix: torch.Tensor, slice_batchsize: int = 1
     ) -> torch.Tensor:
         """
         Compute iterative projected potential (for CTF) with transformed sampling.
@@ -1286,8 +1297,8 @@ class IterativeScattering(L.LightningModule):
                     device,
                 )[:, 0]
             else:
-                if i % slice_batch_size == 0:
-                    batch_end = min(i + slice_batch_size, nz_new)
+                if i % slice_batchsize == 0:
+                    batch_end = min(i + slice_batchsize, nz_new)
                     slices_block = self._fetch_volume_slices(
                         V,
                         indices[i:batch_end],
@@ -1300,7 +1311,7 @@ class IterativeScattering(L.LightningModule):
                         device,
                     )
                 assert slices_block is not None
-                total_potential += slices_block[:, i % slice_batch_size]
+                total_potential += slices_block[:, i % slice_batchsize]
 
         return 2 * self.sigma * self.pixel_size * total_potential
 
@@ -1308,7 +1319,7 @@ class IterativeScattering(L.LightningModule):
         self,
         V: torch.Tensor,
         pose: float | torch.Tensor,
-        slice_batch_size: int = 1,
+        slice_batchsize: int = 1,
         checkpoint_chunks: int | None = None,
     ) -> torch.Tensor:
         """
@@ -1321,7 +1332,7 @@ class IterativeScattering(L.LightningModule):
         pose : float or torch.Tensor
             If float, interpreted as tilt angle in degrees around X.
             If torch.Tensor, interpreted as affine matrix (B, 3, 4).
-        slice_batch_size : int
+        slice_batchsize : int
             Number of slices to batch for sampling.
         """
         if isinstance(pose, (int, float)) or (
@@ -1347,19 +1358,19 @@ class IterativeScattering(L.LightningModule):
             theta_matrix = pose.to(V.device)
 
         if self.scattering_model == "ctf":
-            return self.ctf(V, theta_matrix, slice_batch_size)
+            return self.ctf(V, theta_matrix, slice_batchsize)
 
         if self.scattering_model == "multislice":
-            return self.multislice(V, theta_matrix, slice_batch_size, checkpoint_chunks)
+            return self.multislice(V, theta_matrix, slice_batchsize, checkpoint_chunks)
         elif self.scattering_model == "rytov_parallel":
             return self.parallel_rytov(V, theta_matrix, checkpoint_chunks)
         elif self.scattering_model == "rytov":
-            return self.rytov(V, theta_matrix, slice_batch_size)
+            return self.rytov(V, theta_matrix, slice_batchsize)
         elif self.scattering_model == "projection":
-            return self.projection(V, theta_matrix, slice_batch_size)
+            return self.projection(V, theta_matrix, slice_batchsize)
         elif self.scattering_model == "firstborn":
-            return self.firstborn(V, theta_matrix, slice_batch_size)
+            return self.firstborn(V, theta_matrix, slice_batchsize)
         elif self.scattering_model == "kinematic":
-            return self.kinematic(V, theta_matrix, slice_batch_size)
+            return self.kinematic(V, theta_matrix, slice_batchsize)
         else:
             raise ValueError(f"Unknown scattering model: {self.scattering_model}")

@@ -21,7 +21,7 @@ simulation uses it by default, and most users never need another one.
 
 ## When to generate your own
 
-A cached configuration is a set of continuous coordinates in Ångström, not a
+A cached configuration is a set of continuous coordinates in Å, not a
 voxel grid, and `IceBank` builds the voxelization kernel for whatever `dx` a
 request asks for. So the voxel size is *not* fixed by the cache: the bundled
 library serves requests at 0.5, 1.0 or 2.0 Å/voxel alike. Two things do

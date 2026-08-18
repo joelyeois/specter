@@ -45,7 +45,7 @@ ATOM_KERNEL_HALF_WIDTH_A = 2.5
 def estimate_protein_box_size(max_diameter: float, voxel_size: float) -> int:
     """
     Grid size (voxels, per axis) for a molecule with the given max diameter
-    (Angstrom, from ``PDB.max_diameter``) at voxel size ``voxel_size``.
+    (Å, from ``PDB.max_diameter``) at voxel size ``voxel_size``.
 
     Parameters
     ----------
@@ -82,14 +82,14 @@ def draw_species_pool(
     Parameters
     ----------
     species_radii : torch.Tensor, shape (S,)
-        Real physical radius of each species, Angstrom.
+        Real physical radius of each species, Å.
     species_ratios : torch.Tensor, shape (S,)
         Relative abundance weight per species. Only ratios between entries
         matter, not the absolute values.
     occupancy_fraction : float
         Target combined bare-sphere volume, as a fraction of `box_volume`.
     box_volume : float
-        Angstrom^3.
+        Å³.
     seed : int, optional
         Random seed.
 
@@ -181,15 +181,15 @@ def pack_hard_spheres_3d(
     Parameters
     ----------
     radii : torch.Tensor, shape (N,)
-        Requested sphere radius per candidate instance, Angstrom. Order is
+        Requested sphere radius per candidate instance, Å. Order is
         irrelevant (spheres are internally grouped and processed
         largest-first regardless of input order).
     box : tuple of float
-        (D, H, W) box extents in Angstrom (z, y, x), centered at the
+        (D, H, W) box extents in Å (z, y, x), centered at the
         origin -- same convention as
         :func:`specter.coords.poisson_disk_neighbors_3d`.
     gap : float, optional
-        Extra clearance between sphere surfaces, Angstrom, beyond simple
+        Extra clearance between sphere surfaces, Å, beyond simple
         touching. Default 0.0.
     seed : int, optional
         Random seed.
@@ -218,7 +218,7 @@ def pack_hard_spheres_3d(
         fine to be truncated) but whose z extent is a real specimen-
         thickness boundary particles should not cross.
     exclusion_distance_field : torch.Tensor, optional
-        Physical distance (Angstrom) to the nearest FORBIDDEN voxel, shape
+        Physical distance (Å) to the nearest FORBIDDEN voxel, shape
         ``(Z, Y, X)``, on a box-centered grid at `field_voxel_size` spacing
         (same centering convention `.membrane._raster.rasterize_membrane_
         density` uses by default -- e.g. build this via ``scipy.ndimage.
@@ -235,12 +235,12 @@ def pack_hard_spheres_3d(
         (no exclusion). Points outside the field's own extent sample the
         nearest boundary value (clamped, not wrapped).
     field_voxel_size : float, optional
-        Voxel size of `exclusion_distance_field`/`sampling_mask`, Angstrom
+        Voxel size of `exclusion_distance_field`/`sampling_mask`, Å
         (the two share one grid). Required if either is given. Trilinear
         interpolation of a coarse `exclusion_distance_field` lets a
         candidate's sampled distance run a little past the true
         (exact-voxel) value near a boundary -- confirmed a couple of
-        Angstrom of bleed at `field_voxel_size=5` for `gap=2`, vanishing by
+        Å of bleed at `field_voxel_size=5` for `gap=2`, vanishing by
         `field_voxel_size=2`; keep this fine relative to `gap` (or pad the
         forbidden mask by a voxel or two before taking its distance
         transform) if a hard guarantee matters more than exact `gap`
@@ -267,7 +267,7 @@ def pack_hard_spheres_3d(
     Returns
     -------
     coords : torch.Tensor, shape (M, 3)
-        Accepted sphere centers (x, y, z), Angstrom, box-centered. M <= N.
+        Accepted sphere centers (x, y, z), Å, box-centered. M <= N.
     accepted_idx : torch.Tensor, shape (M,)
         Indices into `radii` for the spheres that were successfully
         placed, in the order accepted (not input order) -- use this to

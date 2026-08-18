@@ -118,7 +118,7 @@ def filter_by_z_density(
     peak_amplitude: float = 1.0,
     baseline: float = 0.1,
     curve_points: int = 200,
-):
+) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Filter points based on a two-Gaussian z-density profile with peaks at the
     top and bottom of the z-range.

@@ -85,7 +85,7 @@ CARBON_SHTYROV_SPECIES = "C(CCC)"
 # lower, 30,000-40,000x magnification). Radius = diameter / 2. Source:
 # https://www.emsdiasum.com/docs/technical/datasheet/quantifoil ,
 # https://www.quantifoil.com/products/quantifoil/quantifoil-circular-holes
-QUANTIFOIL_R1_2_HOLE_RADIUS = 6000.0  # Angstrom (0.6 micron)
+QUANTIFOIL_R1_2_HOLE_RADIUS = 6000.0  # Å (0.6 micron)
 
 # --- CTS gen_carbon.m/carbonshape-derived geometry constants ---------------
 # Validated faithful port in dev/gen_carbon_replica.py against the original
@@ -183,9 +183,9 @@ def _alpha_shape(points: np.ndarray, alpha: float, device: torch.device) -> _Alp
     Parameters
     ----------
     points : np.ndarray
-        (N, 3) point cloud in Angstrom.
+        (N, 3) point cloud in Å.
     alpha : float
-        Alpha radius in Angstrom.
+        Alpha radius in Å.
     device : torch.device
         Device for the volume computation.
 
@@ -260,7 +260,7 @@ def _sample_in_tets(
     Returns
     -------
     torch.Tensor
-        (n, 3) coordinates in Angstrom.
+        (n, 3) coordinates in Å.
     """
     device = shape.volumes.device
     cdf = torch.cumsum(shape.volumes.double(), 0)
@@ -334,15 +334,15 @@ def _seed_points(
     target_shape : tuple of int
         (nz, ny, nx) grid shape, matching `CarbonFilmGenerator.generate`.
     voxel_size : float
-        Voxel size, Angstrom.
+        Voxel size, Å.
     thickness : float
-        Film thickness, Angstrom.
+        Film thickness, Å.
     hole_radius : float
-        Hole radius, Angstrom.
+        Hole radius, Å.
     hole_center : tuple of float
-        (x, y) hole center, Angstrom, relative to the volume's center.
+        (x, y) hole center, Å, relative to the volume's center.
     edge_roughness : float
-        Jitter magnitude scale, Angstrom -- see
+        Jitter magnitude scale, Å -- see
         `CarbonFilmGenerator.generate`'s docstring.
     rng : np.random.Generator
         Source of randomness.
@@ -388,7 +388,7 @@ def _deposit_splat(
 
     `weight` should be ``atom_potential_integral / voxel_size**3`` --
     depositing a single atom's real, physical potential integral (Volts *
-    Angstrom^3, resolution-independent -- see `_mean_inner_potential`)
+    Å³, resolution-independent -- see `_mean_inner_potential`)
     uniformly over one voxel's volume. By the mean-field relation for a
     homogeneous random point-source gas (V0 = density * per-atom potential
     integral), this reproduces the correct bulk mean inner potential (MIP)
@@ -400,13 +400,13 @@ def _deposit_splat(
     Parameters
     ----------
     coords : torch.Tensor
-        (N, 3) atom coordinates, Angstrom, centered-origin.
+        (N, 3) atom coordinates, Å, centered-origin.
     weight : float
         Per-atom deposited value, Volts.
     target_shape : tuple of int
         (nz, ny, nx) output grid size.
     voxel_size : float
-        Voxel size, Angstrom.
+        Voxel size, Å.
 
     Returns
     -------
@@ -477,7 +477,7 @@ class CarbonFilmGenerator:
     Parameters
     ----------
     voxel_size : float
-        Voxel size, Angstrom.
+        Voxel size, Å.
     parameterization : str, optional
         Atomic-potential parameterization used to compute carbon's per-atom
         potential integral: ``'kirkland'`` (default), ``'lobato'``, or
@@ -536,9 +536,9 @@ class CarbonFilmGenerator:
         target_shape : tuple of int
             Output grid shape (nz, ny, nx).
         thickness : float, optional
-            Film thickness, Angstrom. Default 150.
+            Film thickness, Å. Default 150.
         hole_radius : float, optional
-            Radius of the circular hole cut through the film, Angstrom.
+            Radius of the circular hole cut through the film, Å.
             Default `QUANTIFOIL_R1_2_HOLE_RADIUS` (6000 A / 0.6 micron,
             half of Quantifoil R1.2/1.3's 1.2 micron hole diameter -- the
             real, fixed manufacturing spec for the standard grid used for
@@ -552,7 +552,7 @@ class CarbonFilmGenerator:
             inside the volume instead of nowhere near it -- `edge_hole_center`
             solves for exactly that.
         edge_roughness : float, optional
-            Rim jitter magnitude, Angstrom -- each seed point near the hole
+            Rim jitter magnitude, Å -- each seed point near the hole
             boundary is displaced by an isotropic 3D vector with magnitude
             drawn uniformly in ``[0, edge_roughness]`` before the alpha
             shape is built (see `_seed_points`). Default 60 (CTS's own
@@ -562,7 +562,7 @@ class CarbonFilmGenerator:
             dev/gen_carbon_replica.py).
         hole_center : tuple of float, optional
             (x, y) offset of the hole's center relative to the volume's
-            center, Angstrom. Default (0, 0) -- hole centered on the
+            center, Å. Default (0, 0) -- hole centered on the
             volume, so the whole hole boundary sits inside the frame if
             `hole_radius` is comparable to the FOV. See `edge_hole_center`
             for computing a `hole_center` that instead shows only a thin
@@ -641,11 +641,11 @@ def edge_hole_center(
     target_shape : tuple of int
         (nz, ny, nx) grid shape the film will be generated at.
     voxel_size : float
-        Voxel size, Angstrom.
+        Voxel size, Å.
     hole_radius : float
         The real, physical hole radius that will be passed to
         ``CarbonFilmGenerator.generate`` alongside the returned center,
-        Angstrom -- e.g. ``QUANTIFOIL_R1_2_HOLE_RADIUS``, the real,
+        Å -- e.g. ``QUANTIFOIL_R1_2_HOLE_RADIUS``, the real,
         fixed spec for the standard Quantifoil grid (see that constant's
         comment). Large relative to `target_shape` both for realism and
         so the boundary crossing the frame reads as close to a straight
@@ -705,9 +705,9 @@ class CarbonFilmSpec:
     Attributes
     ----------
     thickness : float, optional
-        Film thickness, Angstrom. Default 150.
+        Film thickness, Å. Default 150.
     hole_radius : float, optional
-        Real physical hole radius, Angstrom. Default
+        Real physical hole radius, Å. Default
         ``QUANTIFOIL_R1_2_HOLE_RADIUS`` (6000 A / 0.6 micron) -- the fixed
         real-product spec for Quantifoil R1.2/1.3, the standard grid for
         high-resolution collection (see that constant's comment for the
@@ -728,7 +728,7 @@ class CarbonFilmSpec:
         Which frame edge the carbon intrudes from: ``'left'``,
         ``'right'``, ``'top'``, ``'bottom'``, or ``'random'`` (default).
     edge_roughness : float, optional
-        Rim jitter magnitude, Angstrom -- see
+        Rim jitter magnitude, Å -- see
         ``CarbonFilmGenerator.generate``'s own docstring. Default 60.
     """
 

@@ -173,14 +173,14 @@ def _chunked_upsample_density(
         Density raster on the coarse generation grid, shape matching
         `coarse_volume.shape`, spacing `gen_voxel_size`.
     gen_voxel_size : float
-        Coarse grid's voxel size, Angstrom.
+        Coarse grid's voxel size, Å.
     origin_xyz : torch.Tensor
         Physical `(x, y, z)` location of index `(0, 0, 0)`, shared by both
         the coarse and fine grids (same physical extent, see caller).
     target_shape : tuple of int
         Fine output grid shape.
     voxel_size : float
-        Fine grid's voxel size, Angstrom.
+        Fine grid's voxel size, Å.
 
     Returns
     -------
@@ -266,7 +266,7 @@ def render_transmembrane_template(
         Species to render (``spec.template``, if set, is ignored here --
         callers that already have a template have no reason to call this).
     voxel_size : float
-        Output voxel size, Angstrom.
+        Output voxel size, Å.
     pdb_cache_dir : str
         Passed to `PDB` for fetching/caching `spec.pdb_source`.
     device : str or torch.device
@@ -336,7 +336,7 @@ class MembraneGenerator:
         clipped shape from a mismatched box. See `MembraneField.
         clipped_at_boundary` for the last-resort check this backs up.
     voxel_size : float, optional
-        Output voxel size, Angstrom. Also used to render transmembrane
+        Output voxel size, Å. Also used to render transmembrane
         protein templates, so their scale matches the membrane's. Default
         5.0.
     shape_backend : {"spherical_harmonics", "swept_spline"}, optional
@@ -370,14 +370,14 @@ class MembraneGenerator:
         `"spherical_harmonics"` backend only. Default 8.
     sh_axes : tuple of float, optional
         Physical semi-axes `(a_x, a_y, a_z)` of the base ellipsoid,
-        Angstrom -- isotropic axes give a roughly spherical organelle,
+        Å -- isotropic axes give a roughly spherical organelle,
         anisotropic axes give an elongated/flattened one. Default `None`:
         each axis is drawn independently, uniformly, from `sh_axes_range`
         (mild natural anisotropy for free) using a `seed`-derived generator
         independent of the shape's own randomness. `"spherical_harmonics"`
         backend only.
     sh_axes_range : tuple of float, optional
-        `(low, high)` semi-axis draw range, Angstrom, used only when
+        `(low, high)` semi-axis draw range, Å, used only when
         `sh_axes` is `None`. Default `(150.0, 450.0)` -- real vesicle/
         small-organelle scale (radius): synaptic vesicles run ~25-60 nm
         diameter, general/endosomal vesicles up to ~100-300 nm diameter in
@@ -396,12 +396,12 @@ class MembraneGenerator:
         Helfrich (1973) thermal bending-mode spectrum of a lipid bilayer at
         equilibrium. `"spherical_harmonics"` backend only. Default 2.0.
     swept_total_length : float, optional
-        Approximate path CONTOUR length (not bounding-box extent), Angstrom.
+        Approximate path CONTOUR length (not bounding-box extent), Å.
         See `generate_membrane_field_swept_spline`'s own docstring. Default
         `None`: drawn uniformly from `swept_total_length_range`.
         `"swept_spline"` backend only.
     swept_total_length_range : tuple of float, optional
-        `(low, high)` contour-length draw range, Angstrom, used only when
+        `(low, high)` contour-length draw range, Å, used only when
         `swept_total_length` is `None`. Default `(1500.0, 2500.0)` --
         sized to keep a good length:radius aspect ratio (still reads as a
         tube, not a blob) even at `swept_tube_radius_range`'s own upper
@@ -416,7 +416,7 @@ class MembraneGenerator:
         backend only.
     swept_step_length_a : float, optional
         Distance between consecutive blended sphere source centers along
-        the path, Angstrom -- must stay well under `2 * swept_tube_radius` or
+        the path, Å -- must stay well under `2 * swept_tube_radius` or
         the tube shows visible beading (warned about proactively). Default
         `None`: `0.5 * swept_tube_radius` (using whatever value that
         resolves to), which stays safely under the beading threshold
@@ -424,10 +424,10 @@ class MembraneGenerator:
         default tuned for one specific radius. `"swept_spline"` backend
         only.
     swept_tube_radius : float, optional
-        Tube radius, Angstrom. Default `None`: drawn uniformly from
+        Tube radius, Å. Default `None`: drawn uniformly from
         `swept_tube_radius_range`. `"swept_spline"` backend only.
     swept_tube_radius_range : tuple of float, optional
-        `(low, high)` tube-radius draw range, Angstrom, used only when
+        `(low, high)` tube-radius draw range, Å, used only when
         `swept_tube_radius` is `None`. Default `(150.0, 400.0)` (30-80 nm
         diameter) -- real ER tubule scale: EM measurements of neuronal ER
         tubules run ~20 nm diameter (thin), general ER tubules up to ~88 nm
@@ -465,7 +465,7 @@ class MembraneGenerator:
         `swept_radius_variation > 0`. `"swept_spline"` backend only.
         Default 2.0.
     swept_blend_sharpness_a : float, optional
-        Smooth-min blend radius, Angstrom. Default (`None`) is
+        Smooth-min blend radius, Å. Default (`None`) is
         `0.5 * swept_tube_radius` -- a default tuned for a handful of
         sparse, independent blobs would under-blend a dense chain of
         sources into visible beading, so this is a separate default.
@@ -500,7 +500,7 @@ class MembraneGenerator:
         Default "shtyrov".
     bilayer_thickness : float, optional
         Phosphate-to-phosphate (outer-leaflet-peak to inner-leaflet-peak)
-        spacing, Angstrom, for the analytic two-Gaussian-peak bilayer
+        spacing, Å, for the analytic two-Gaussian-peak bilayer
         profile (:func:`~specter.specimen.membrane._profile.
         build_analytic_bilayer_profile` -- matches real cryo-EM bilayer
         micrographs' two-line "railroad track" appearance directly, rather
@@ -512,7 +512,7 @@ class MembraneGenerator:
         rather than cross-checked against polnet specifically, sat above
         polnet's entire range and visibly read as too widely spaced).
     bilayer_layer_sigma_a : float, optional
-        Gaussian width of each leaflet peak, Angstrom -- matches `polnet`'s
+        Gaussian width of each leaflet peak, Å -- matches `polnet`'s
         own `MB_LAYER_S_RG` parameter. Default 1.25, the midpoint of
         polnet's own default range (0.5, 2.0) (an earlier default of 2.0
         sat at that range's blurriest end, not a representative value).
@@ -1178,7 +1178,7 @@ class MembraneGenerator:
         ----------
         min_spacing_a : float, optional
             Minimum center-to-center spacing between placed sites,
-            Angstrom. Default 40.0.
+            Å. Default 40.0.
         max_attempts : int, optional
             Passed to
             :func:`~specter.specimen.membrane._placement.sample_surface_sites`.

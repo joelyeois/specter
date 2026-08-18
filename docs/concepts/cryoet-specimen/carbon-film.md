@@ -61,7 +61,7 @@ Because the jitter is large relative to the seed spacing, points shuffle
 past their neighbours, and the alpha complex turns that into a boundary
 that is correlated at the seed scale and topologically nontrivial:
 
-![Rim detail at edge_roughness 0, 60 and 150 Angstrom.](../../assets/images/cryoet-carbon-roughness.png){ width="900" style="display:block;margin:1.2em auto;" }
+![Rim detail at edge_roughness 0, 60 and 150 Å.](../../assets/images/cryoet-carbon-roughness.png){ width="900" style="display:block;margin:1.2em auto;" }
 
 At the shipped default of 60 Å, the boundary's radial standard deviation
 comes out to roughly a third of that, ~20 Å. Even `edge_roughness = 0` is

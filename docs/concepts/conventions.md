@@ -81,7 +81,7 @@ offset.
 ## Poses
 
 Rotations are unit quaternions in `roma`'s scalar-last \((x, y, z, w)\)
-ordering. Translations are in Ångström.
+ordering. Translations are in Å.
 
 **A quaternion \(Q\) rotates the density by \(R(Q)^{-1}\).** A feature at
 \(+x\) subjected to a \(+90^\circ\) rotation about \(z\) lands at \(-y\).

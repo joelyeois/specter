@@ -19,7 +19,7 @@ here, ``generate_membrane_field`` (isotropically-scattered sources, i.e. a
 ``shape_backend="metaball"`` it backed; see git history if either is ever
 needed as a reference again.
 
-All lengths are physical (Angstrom); the working grid's voxel spacing is a
+All lengths are physical (Å); the working grid's voxel spacing is a
 parameter independent of any downstream output voxel size, so shape fidelity
 does not depend on the resolution the caller ultimately rasterizes at.
 
@@ -48,9 +48,9 @@ class SphereSource:
     Parameters
     ----------
     center_xyz : torch.Tensor
-        Physical center, shape ``(3,)``, Angstrom.
+        Physical center, shape ``(3,)``, Å.
     radius : float
-        Sphere radius, Angstrom.
+        Sphere radius, Å.
     """
 
     center_xyz: torch.Tensor
@@ -68,9 +68,9 @@ class MembraneField:
         Signed field, shape ``(Z, Y, X)``. Negative inside the membrane
         solid, positive outside, zero at the mid-surface.
     spacing_a : float
-        Isotropic voxel spacing of ``phi``, Angstrom.
+        Isotropic voxel spacing of ``phi``, Å.
     origin_xyz : torch.Tensor
-        Physical ``(x, y, z)`` location of grid index ``(0, 0, 0)``, Angstrom.
+        Physical ``(x, y, z)`` location of grid index ``(0, 0, 0)``, Å.
     clipped_at_boundary : bool, optional
         Whether the organelle's solid interior touched the working grid's
         own boundary during construction -- the same condition each shape
@@ -93,7 +93,7 @@ class MembraneField:
         Parameters
         ----------
         points_xyz : torch.Tensor
-            Physical ``(x, y, z)`` points, shape ``(..., 3)``, Angstrom.
+            Physical ``(x, y, z)`` points, shape ``(..., 3)``, Å.
 
         Returns
         -------
@@ -120,9 +120,9 @@ class MembraneField:
         Parameters
         ----------
         points_xyz : torch.Tensor
-            Physical ``(x, y, z)`` points, shape ``(..., 3)``, Angstrom.
+            Physical ``(x, y, z)`` points, shape ``(..., 3)``, Å.
         eps_a : float, optional
-            Finite-difference step, Angstrom. Default ``0.5 * spacing_a``.
+            Finite-difference step, Å. Default ``0.5 * spacing_a``.
 
         Returns
         -------
@@ -178,9 +178,9 @@ def blend_field(
     ----------
     sources : list of SphereSource
     points_xyz : torch.Tensor
-        Physical ``(x, y, z)`` points, shape ``(..., 3)``, Angstrom.
+        Physical ``(x, y, z)`` points, shape ``(..., 3)``, Å.
     k : float
-        Smooth-min blend radius, Angstrom. ``k <= 0`` gives a hard (sharp)
+        Smooth-min blend radius, Å. ``k <= 0`` gives a hard (sharp)
         union.
 
     Returns
@@ -248,7 +248,7 @@ def cap_curvature(
     phi : torch.Tensor
         Signed field, shape ``(Z, Y, X)``.
     spacing_a : float
-        Voxel spacing of ``phi``, Angstrom.
+        Voxel spacing of ``phi``, Å.
     iterations : int
         Number of relaxation steps.
     step_fraction : float, optional
@@ -303,7 +303,7 @@ def _signed_distance_transform(
     inside: np.ndarray, spacing_a: float, device: str | torch.device
 ) -> torch.Tensor:
     """
-    Physical-Angstrom signed distance field from a boolean solid mask,
+    Physical-Å signed distance field from a boolean solid mask,
     matching :class:`MembraneField`'s own ``phi`` contract (negative
     inside, positive outside, zero at the surface): ``dist_out - dist_in``
     from two exact Euclidean distance transforms.
@@ -344,9 +344,9 @@ def _signed_distance_transform(
     inside : np.ndarray
         Boolean solid-interior mask.
     spacing_a : float
-        Working grid voxel spacing, Angstrom -- passed to
+        Working grid voxel spacing, Å -- passed to
         ``distance_transform_edt``'s `sampling` kwarg so the result is
-        physical Angstrom, not voxel units.
+        physical Å, not voxel units.
     device : str or torch.device
         Device for the returned tensor; also selects whether the GPU path
         is attempted at all (only when its `.type == "cuda"`).

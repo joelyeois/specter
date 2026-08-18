@@ -155,7 +155,9 @@ def poisson_disk_neighbors_3d(
     # function did) silently admits points closer than min_distance.
     neighbor_reach = int(np.ceil(min_distance / cell_size))
 
-    def point_to_grid(p):
+    def point_to_grid(
+        p: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         # p = (x, y, z)
         zi = ((p[2] - z_min) / cell_size).long().clamp(0, grid_shape[0] - 1)
         yi = ((p[1] - y_min) / cell_size).long().clamp(0, grid_shape[1] - 1)

@@ -74,7 +74,7 @@ def sample_surface_sites(
     n_sites : int
         Target number of sites.
     min_spacing_a : float
-        Minimum center-to-center spacing between accepted sites, Angstrom.
+        Minimum center-to-center spacing between accepted sites, Å.
     max_attempts : int, optional
         Maximum candidate draws before giving up. Default ``20 * n_sites``.
     projection_iterations : int, optional

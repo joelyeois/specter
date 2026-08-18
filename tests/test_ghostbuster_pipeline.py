@@ -136,7 +136,7 @@ def test_ghostbuster_test_run_executes(mrc_file: Path) -> None:
         dose_per_angstrom=2.0,
         scattering_model="projection",
         lr=0.1,
-        batch_size=2,
+        batchsize=2,
     )
     model = gb.test_run(bin_factor=2)
     assert isinstance(model, Reconstructor)
@@ -152,7 +152,7 @@ def test_ghostbuster_run_executes(mrc_file: Path) -> None:
         scattering_model="projection",
         lr=0.1,
         epochs=1,
-        batch_size=2,
+        batchsize=2,
     )
     model = gb.run()
     assert isinstance(model, Reconstructor)
@@ -222,7 +222,7 @@ def test_tomogram_ghostbuster_angles_path(
         scattering_model="projection",
         lr=0.1,
         epochs=1,
-        batch_size=3,
+        batchsize=3,
     )
     assert tgb._quaternions.shape == (3, 4)
     model = tgb.run()

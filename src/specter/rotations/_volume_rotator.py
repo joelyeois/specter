@@ -76,10 +76,10 @@ def _build_roi_query_points(
     return torch.stack([x_pix, y_pix, z_pix], dim=-1)  # (K, ny_roi, nx_roi, 3)
 
 
-def _prepare_volume_for_grid_sample(V: torch.Tensor, batch_size: int) -> torch.Tensor:
+def _prepare_volume_for_grid_sample(V: torch.Tensor, batchsize: int) -> torch.Tensor:
     """Normalize a (Z,Y,X) / (B,Z,Y,X) / (B,1,Z,Y,X) volume to (B,1,Z,Y,X)."""
     if V.ndim == 3:
-        return V.unsqueeze(0).unsqueeze(0).expand(batch_size, -1, -1, -1, -1)
+        return V.unsqueeze(0).unsqueeze(0).expand(batchsize, -1, -1, -1, -1)
     elif V.ndim == 4:  # (B, Z, Y, X)
         return V.unsqueeze(1)
     else:  # (B, 1, Z, Y, X)

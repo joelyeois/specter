@@ -42,7 +42,7 @@ other than the precomputed \(k\)-grid.
 \tfrac{1}{2}\Big[d_u + d_v + (d_v - d_u)\cos\big(2(\theta + \phi)\big)\Big]
 \]
 
-\(d_u\), \(d_v\) are the defocus along two orthogonal axes (Angstrom,
+\(d_u\), \(d_v\) are the defocus along two orthogonal axes (Å,
 positive = underfocus, the standard cryo-EM convention) and \(\phi\)
 (`dfang`) is the astigmatism angle in degrees, converted to radians
 internally. Isotropic defocus is the special case \(d_u = d_v\), where

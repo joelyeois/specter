@@ -501,7 +501,7 @@ def fourier_shell_correlation(
     vol1, vol2 : torch.Tensor
         Real-space 3D volumes of shape (N, N, N).
     pixelsize : float, optional
-        Pixel size in Angstroms (or consistent units). Default is 1.
+        Pixel size in Å (or consistent units). Default is 1.
     res_cutoff : float | None, optional
         High-resolution cutoff. Frequencies beyond 1/res_cutoff are zeroed.
     randomise_phases_beyond : float | None, optional

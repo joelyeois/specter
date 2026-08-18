@@ -26,11 +26,11 @@ def cs(k: torch.Tensor, wavelength: float, cs: torch.Tensor) -> torch.Tensor:
     Parameters
     ----------
     k : torch.Tensor
-        Frequency magnitude grid, in 1/Angstrom.
+        Frequency magnitude grid, in 1/Å.
     wavelength : float
-        Electron wavelength, in Angstrom.
+        Electron wavelength, in Å.
     cs : torch.Tensor
-        Spherical aberration coefficient, in Angstrom.
+        Spherical aberration coefficient, in Å.
 
     Returns
     -------
@@ -54,15 +54,15 @@ def defocus(
     Parameters
     ----------
     k2 : torch.Tensor
-        Squared frequency magnitude grid, in 1/Angstrom^2.
+        Squared frequency magnitude grid, in 1/Å².
     radian : torch.Tensor
         Frequency angle grid, in radians.
     wavelength : float
-        Electron wavelength, in Angstrom.
+        Electron wavelength, in Å.
     dfu : torch.Tensor
-        Defocus along first axis, in Angstrom.
+        Defocus along first axis, in Å.
     dfv : torch.Tensor
-        Defocus along second axis, in Angstrom.
+        Defocus along second axis, in Å.
     dfang : torch.Tensor
         Astigmatism angle, in degrees.
 
@@ -91,16 +91,16 @@ def beamtilt(
     Parameters
     ----------
     k2 : torch.Tensor
-        Squared frequency magnitude grid, in 1/Angstrom^2.
+        Squared frequency magnitude grid, in 1/Å².
     KY : torch.Tensor
-        Frequency grid component along the first (row/y) axis, in 1/Angstrom.
+        Frequency grid component along the first (row/y) axis, in 1/Å.
     KX : torch.Tensor
         Frequency grid component along the second (column/x) axis, in
-        1/Angstrom.
+        1/Å.
     wavelength : float
-        Electron wavelength, in Angstrom.
+        Electron wavelength, in Å.
     cs : torch.Tensor
-        Spherical aberration coefficient, in Angstrom.
+        Spherical aberration coefficient, in Å.
     tiltx : torch.Tensor
         Beam tilt in x direction, in radians.
     tilty : torch.Tensor
@@ -127,7 +127,7 @@ def trefoil(
     Parameters
     ----------
     k : torch.Tensor
-        Frequency magnitude grid, in 1/Angstrom.
+        Frequency magnitude grid, in 1/Å.
     radian : torch.Tensor
         Frequency angle grid, in radians.
     trefoil1 : torch.Tensor
@@ -165,7 +165,7 @@ def tetrafoil(
     Parameters
     ----------
     k : torch.Tensor
-        Frequency magnitude grid, in 1/Angstrom.
+        Frequency magnitude grid, in 1/Å.
     radian : torch.Tensor
         Frequency angle grid, in radians.
     tetrafoil1 : torch.Tensor
@@ -207,7 +207,7 @@ def phaseshift(
     phaseshift : torch.Tensor
         Phase shift value in radians.
     k : torch.Tensor
-        Frequency magnitude grid, in 1/Angstrom. Used only for its shape.
+        Frequency magnitude grid, in 1/Å. Used only for its shape.
     n_pixels : int
         Number of pixels along each axis of the grid.
     aberration_model : str
@@ -256,7 +256,7 @@ def defocus_midplane_shift(nz: int, pixel_size: float) -> float:
     nz : int
         Number of Z slices in the (possibly padded) simulation volume.
     pixel_size : float
-        Voxel size in Å.
+        Pixel size in Å.
 
     Returns
     -------

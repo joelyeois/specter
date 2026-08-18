@@ -88,7 +88,7 @@ class TomogramReconstructor(_BaseReconstructor):
         Decay coefficient for the reciprocal-sqrt LR schedule.  Default ``0.1``.
     kmask : torch.Tensor, optional
         3-D Fourier-space mask applied to V after every gradient update.
-    slice_batch_size : int
+    slice_batchsize : int
         Z-slice chunk size passed to ``IterativeScattering``.  Reduce for large
         volumes to stay within GPU memory.  Default ``1``.
     checkpoint_chunks : int or None
@@ -132,7 +132,7 @@ class TomogramReconstructor(_BaseReconstructor):
         ] = "LambdaLR",
         lr_decay: float = 0.1,
         kmask: torch.Tensor | None = None,
-        slice_batch_size: int = 1,
+        slice_batchsize: int = 1,
         checkpoint_chunks: int | None = None,
         run_dir: str | Path | None = None,
     ) -> None:
@@ -162,7 +162,7 @@ class TomogramReconstructor(_BaseReconstructor):
         self.taper_width = taper_width
         self.z_taper_width = z_taper_width
         self.use_fov_mask = use_fov_mask
-        self.slice_batch_size = slice_batch_size
+        self.slice_batchsize = slice_batchsize
         self.checkpoint_chunks = checkpoint_chunks
 
         # Logging
@@ -314,7 +314,7 @@ class TomogramReconstructor(_BaseReconstructor):
         exitwave = self.iterative_scattering(
             V_batched,
             theta_matrix,
-            slice_batch_size=self.slice_batch_size,
+            slice_batchsize=self.slice_batchsize,
             checkpoint_chunks=self.checkpoint_chunks,
         )
 

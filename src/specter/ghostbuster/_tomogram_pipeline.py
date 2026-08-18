@@ -65,7 +65,7 @@ class TomogramGhostbuster:
         L1 regularisation weight on V.
     epochs : int
         Training epochs.  Default 5.
-    batch_size : int
+    batchsize : int
         Tilt images per optimisation step.  Default 1 (one tilt per step).
     scattering_model : str
         Wave propagation model.  Default ``"multislice"``.
@@ -92,7 +92,7 @@ class TomogramGhostbuster:
         Mask MSE loss to the real-FOV region per tilt.  Default ``True``.
     scheduler : str
         LR scheduler.  Default ``"LambdaLR"``.
-    slice_batch_size : int
+    slice_batchsize : int
         Z-slice chunk size for ``IterativeScattering``.  Default 1.
     num_workers : int
         DataLoader worker processes.  Default 0.
@@ -118,7 +118,7 @@ class TomogramGhostbuster:
         lr: float | None = None,
         sparsity: float | None = None,
         epochs: int = 5,
-        batch_size: int = 1,
+        batchsize: int = 1,
         scattering_model: str = "multislice",
         aberration_model: str = "holography",
         aberration_backend: Literal["legacy", "torch_ctf"] = "legacy",
@@ -134,7 +134,7 @@ class TomogramGhostbuster:
             "CosineAnnealingWarmRestarts",
             "MultiplicativeLR",
         ] = "LambdaLR",
-        slice_batch_size: int = 1,
+        slice_batchsize: int = 1,
         num_workers: int = 0,
         precision: str = "16-mixed",
         run_dir: str | Path | None = None,
@@ -168,7 +168,7 @@ class TomogramGhostbuster:
         self.lr = lr
         self.sparsity = sparsity
         self.epochs = epochs
-        self.batch_size = batch_size
+        self.batchsize = batchsize
         self.scattering_model = scattering_model
         self.aberration_model = aberration_model
         self.aberration_backend = aberration_backend
@@ -180,7 +180,7 @@ class TomogramGhostbuster:
         self.use_fov_mask = use_fov_mask
         self.tilt_axis = tilt_axis
         self.scheduler = scheduler
-        self.slice_batch_size = slice_batch_size
+        self.slice_batchsize = slice_batchsize
         self.num_workers = num_workers
         self.precision = precision
         self.run_dir = Path(run_dir) if run_dir is not None else None
@@ -255,14 +255,14 @@ class TomogramGhostbuster:
         volume_init: torch.Tensor,
         voxel_size: float,
         scattering_model: str,
-        batch_size: int,
+        batchsize: int,
     ) -> tuple["TomogramReconstructor", torch.utils.data.DataLoader]:
         n_tilts = images.shape[0]
         idx = torch.arange(n_tilts)
         dataset = torch.utils.data.TensorDataset(images, idx)
         loader = torch.utils.data.DataLoader(
             dataset,
-            batch_size=batch_size,
+            batch_size=batchsize,
             shuffle=True,
             num_workers=self.num_workers,
         )
@@ -286,7 +286,7 @@ class TomogramGhostbuster:
             klim=self.klim,
             alpha=self.alpha,
             scheduler=self.scheduler,
-            slice_batch_size=self.slice_batch_size,
+            slice_batchsize=self.slice_batchsize,
             run_dir=self.run_dir,
         )
         return model, loader
@@ -323,14 +323,14 @@ class TomogramGhostbuster:
         print(
             f"Starting reconstruction: {n_tilts} tilts  |  "
             f"volume {nz}×{nxy}×{nxy}  |  {self.scattering_model}  |  "
-            f"{self.epochs} epochs  |  batch {self.batch_size}  |  {_device_str}"
+            f"{self.epochs} epochs  |  batch {self.batchsize}  |  {_device_str}"
         )
         model, loader = self._build_reconstructor_and_loader(
             self._images,
             self._volume_init,
             self._voxel_size,
             self.scattering_model,
-            self.batch_size,
+            self.batchsize,
         )
         trainer = build_trainer(use_gpu, device, self.epochs, self.precision, callbacks)
         trainer.fit(model, loader)
@@ -390,7 +390,7 @@ class TomogramGhostbuster:
             V_b,
             voxel_size_binned,
             self.scattering_model,
-            self.batch_size,
+            self.batchsize,
         )
         use_gpu = torch.cuda.is_available()
         trainer = build_trainer(use_gpu, device, 1, "32", callbacks)

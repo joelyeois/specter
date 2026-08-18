@@ -389,9 +389,9 @@ def _resolve_exclusion_field_grid(
     Safe to do because ``pack_hard_spheres_3d``'s own
     ``exclusion_distance_field``/``field_voxel_size`` mechanism is already
     documented to support (and trilinearly sample) a coarser grid than the
-    box's own placement precision -- gap/radii here are tens of Angstrom,
+    box's own placement precision -- gap/radii here are tens of Å,
     while ``voxel_size`` can be a small fraction of one; that docstring's own
-    empirical finding ("a couple of Angstrom of bleed at field_voxel_size=5
+    empirical finding ("a couple of Å of bleed at field_voxel_size=5
     for gap=2, vanishing by field_voxel_size=2") already characterizes exactly
     this tradeoff. This just exploits a capability that was always
     available but never used before now (``field_voxel_size`` was always
@@ -400,7 +400,7 @@ def _resolve_exclusion_field_grid(
     Returns
     -------
     field_voxel_size : float
-        Coarsened voxel size, Angstrom (equals ``voxel_size`` if no
+        Coarsened voxel size, Å (equals ``voxel_size`` if no
         coarsening was needed).
     field_shape : tuple of int
         Coarsened grid shape, ``ceil(target_shape / factor)`` per axis.
@@ -470,17 +470,17 @@ def _diagnose_zero_placements(
     region_mask_field : torch.Tensor
         Boolean, shape ``(Z, Y, X)`` -- same grid `exclusion_field` is on.
     exclusion_field : torch.Tensor
-        Physical clearance to the nearest forbidden voxel, Angstrom, same
+        Physical clearance to the nearest forbidden voxel, Å, same
         shape as `region_mask_field`.
     field_voxel_size : float
-        Voxel size of both fields, Angstrom.
+        Voxel size of both fields, Å.
     box : tuple of float
-        ``(D, H, W)`` box extents in Angstrom (z, y, x) -- same convention
+        ``(D, H, W)`` box extents in Å (z, y, x) -- same convention
         `pack_hard_spheres_3d` takes.
     radius : float
-        Sphere radius being diagnosed, Angstrom.
+        Sphere radius being diagnosed, Å.
     gap : float
-        Extra required clearance beyond touching, Angstrom.
+        Extra required clearance beyond touching, Å.
     clip_axes : tuple of bool
         ``(z, y, x)`` -- True means only the CENTER needs to stay in-bounds
         on that axis (matching `pack_hard_spheres_3d`'s own parameter).
@@ -739,7 +739,7 @@ class TomogramBeadSpec:
     Attributes
     ----------
     radius : float or [low, high]
-        Bead radius, Angstrom. A ``[low, high]`` pair draws a fresh radius
+        Bead radius, Å. A ``[low, high]`` pair draws a fresh radius
         uniformly per instance -- real colloidal gold is not monodisperse
         (a "10 nm" prep typically spans roughly 8.5-11.5 nm). Radii are
         drawn *before* packing, so the placement's collision test uses each
@@ -792,7 +792,7 @@ class MembraneInstance:
         own docstring).
     position_xyz : tuple of float, optional
         Physical (x, y, z) offset from the shared tomogram's own center,
-        Angstrom. Not settable at construction time -- resolved by
+        Å. Not settable at construction time -- resolved by
         `generate()` via collision-rejecting random placement (see this
         module's own docstring) -- an instance that doesn't fit gets
         dropped, and `position_xyz` is set here (mutated in place) for
@@ -839,7 +839,7 @@ class TomogramSpecimenGenerator:
         Shared tomogram canvas shape, `(Z, Y, X)` voxels -- every instance
         composites into this same grid.
     voxel_size : float
-        Shared voxel size, Angstrom -- must match every instance's own
+        Shared voxel size, Å -- must match every instance's own
         `generator.voxel_size`.
     protein_specs : list of TomogramProteinSpec
         Cytosolic/lumen species to pack, exact-count (`n_copies`) and/or

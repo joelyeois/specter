@@ -525,7 +525,7 @@ class VolumeRotator(L.LightningModule):
             and eventually OOMing (see dev/tilt series/windowed_streaming_
             scaling.py). Use this whenever `V` is deliberately kept off the
             compute device -- e.g. `TiltSeriesGenerator` falls back to this
-            automatically (see its `_ensure_vol_placed`) when its volume
+            automatically (see its `_ensure_volume_placed`) when its volume
             doesn't fit on the GPU alongside a `.to(device)` call.
         window_margin : int, optional
             Only used when `device` triggers the windowed path above: extra

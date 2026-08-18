@@ -682,9 +682,9 @@ class Reconstructor(_BaseReconstructor):
             return
         suffix = self._metrics_path_suffix()
         v = self.V.detach().cpu().float()
-        vol_path = self._run_dir / f"vol{suffix}.mrc"
-        save_volume_mrc(vol_path, v, self.voxel_size)
-        print(f"Saved final volume → {vol_path}")
+        volume_path = self._run_dir / f"vol{suffix}.mrc"
+        save_volume_mrc(volume_path, v, self.voxel_size)
+        print(f"Saved final volume → {volume_path}")
 
         if self.fsc_ref is not None:
             self._save_fsc_figure(

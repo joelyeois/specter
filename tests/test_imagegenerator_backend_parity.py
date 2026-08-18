@@ -18,9 +18,9 @@ from specter.imagegenerator import (
 
 @pytest.fixture
 def small_volume():
-    vol = torch.zeros(32, 32, 32)
-    vol[12:20, 12:20, 12:20] = 50.0
-    return vol
+    volume = torch.zeros(32, 32, 32)
+    volume[12:20, 12:20, 12:20] = 50.0
+    return volume
 
 
 @pytest.fixture
@@ -218,17 +218,17 @@ def test_micrograph_generator_matches_across_backends(
 
 
 def test_tilt_series_generator_matches_across_backends(realistic_ctf_params):
-    """Same vol/angles/tilt_axis='y'/projection-model setup as
+    """Same volume/angles/tilt_axis='y'/projection-model setup as
     test_generators.py::test_tilt_series_generator_regression, with
     nonzero realistic_ctf_params instead of that test's all-zero fixture."""
-    vol = torch.zeros(1, 16, 48, 48)
-    vol[0, 5:11, 20:28, 20:28] = 50.0
+    volume = torch.zeros(1, 16, 48, 48)
+    volume[0, 5:11, 20:28, 20:28] = 50.0
     angles = torch.tensor([-10.0, 0.0, 10.0])
 
     def build(backend):
         torch.manual_seed(0)
         gen = TiltSeriesGenerator(
-            vol=vol.clone(),
+            volume=volume.clone(),
             micrograph_size=32,
             pixel_size=2.0,
             ctf_params=realistic_ctf_params,

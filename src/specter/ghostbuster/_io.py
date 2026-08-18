@@ -100,7 +100,7 @@ def save_fsc_figure(
             fsc_mask.detach().to(device) if isinstance(fsc_mask, torch.Tensor) else None
         )
 
-        vols = [v]
+        volumes = [v]
         labels = [label]
 
         if cryosparc_ref is not None:
@@ -109,11 +109,11 @@ def save_fsc_figure(
                 if isinstance(cryosparc_ref, torch.Tensor)
                 else cryosparc_ref
             )
-            vols.append(cs_ref_dev)
+            volumes.append(cs_ref_dev)
             labels.append("CryoSPARC")
 
         fig = plot_map_to_model_fsc(
-            vols,
+            volumes,
             fsc_ref_dev,
             voxel_size=voxel_size,
             mask=fsc_mask_dev,

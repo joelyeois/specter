@@ -37,9 +37,9 @@ SCHEDULERS = [
 @pytest.fixture
 def small_volume() -> torch.Tensor:
     """3D volume (8, 8, 8) with a box phantom."""
-    vol = torch.zeros(8, 8, 8)
-    vol[2:6, 2:6, 2:6] = 50.0
-    return vol
+    volume = torch.zeros(8, 8, 8)
+    volume[2:6, 2:6, 2:6] = 50.0
+    return volume
 
 
 @pytest.fixture

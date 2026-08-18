@@ -17,7 +17,7 @@ class MicrographGenerator(BaseImager):
     """
     Generates large micrographs by processing a full specimen volume.
 
-    The volume is either supplied directly (``vol``) or assembled internally
+    The volume is either supplied directly (``volume``) or assembled internally
     via ``MicrographSpecimenGenerator`` from a ``scattering_potential`` template with
     optional crowding and ice.  Scattering is performed slice-by-slice using
     ``IterativeScattering``.
@@ -26,7 +26,7 @@ class MicrographGenerator(BaseImager):
     ----------
     scattering_potential : torch.Tensor or None
         Template potential (Z, Y, X) used by ``MicrographSpecimenGenerator`` to build
-        the specimen volume.  Must be ``None`` when ``vol`` is provided.
+        the specimen volume.  Must be ``None`` when ``volume`` is provided.
     micrograph_size : int or tuple[int, int]
         Output image size in pixels (must be square).
     pixel_size : float
@@ -38,18 +38,18 @@ class MicrographGenerator(BaseImager):
     dose_per_angstrom : float or torch.Tensor
         Total electron dose (fluence) per micrograph in e⁻/Å². Scalar, or a
         1-D tensor of length n giving a separate dose for each micrograph.
-    vol : torch.Tensor, optional
+    volume : torch.Tensor, optional
         Pre-assembled specimen volume of shape (1, Z, Y, X) -- e.g. the
         output of
         :func:`~specter.pipelines.build_tomogram_generator`/`specter build
         tomogram`.  When provided,
         ``scattering_potential`` and crowding parameters are ignored, but
         ``ice_model``/``icemaker`` are still honored: if either is set, ice
-        is generated to match ``vol``'s own size and voxel size and blended
-        in wherever ``vol`` has little existing scattering potential (same
+        is generated to match ``volume``'s own size and voxel size and blended
+        in wherever ``volume`` has little existing scattering potential (same
         masking rule as ``ImageGenerator``'s ``solvate()``), once, at
         construction time. ``ice_thickness`` is ignored in this path since
-        the volume's Z extent is fixed by ``vol`` itself.
+        the volume's Z extent is fixed by ``volume`` itself.
     anisomag : torch.Tensor, optional
         Anisotropic magnification matrices, shape (n, 2, 2).
     ice_model : str, optional
@@ -57,11 +57,11 @@ class MicrographGenerator(BaseImager):
         :class:`~specter.ice.IceBank` cache) or ``'random'`` (instant, cheap
         :class:`~specter.ice.RandomIcemaker` placement). Used by
         ``MicrographSpecimenGenerator`` when ``scattering_potential`` is given, or
-        blended directly into ``vol`` when ``vol`` is given (see above).
+        blended directly into ``volume`` when ``volume`` is given (see above).
         Ignored when ``icemaker`` is provided.
     ice_thickness : float, optional
         Ice thickness in Å passed to ``MicrographSpecimenGenerator``. Ignored when
-        ``vol`` is given.
+        ``volume`` is given.
     ice_cache_dir : str, optional
         Directory of cached ice configs for ``ice_model='gd'`` (see
         :func:`specter.ice.build_ice_cache`). Defaults to the bundled
@@ -71,8 +71,8 @@ class MicrographGenerator(BaseImager):
         A pre-built icemaker instance to reuse across multiple generator
         instances. When supplied, ``ice_model`` and ``ice_cache_dir`` are
         both ignored. Honored both when ``scattering_potential`` is given
-        (forwarded to ``MicrographSpecimenGenerator``) and when ``vol`` is given
-        (blended directly into ``vol``, see above).
+        (forwarded to ``MicrographSpecimenGenerator``) and when ``volume`` is given
+        (blended directly into ``volume``, see above).
     ice_relax_steps : int, optional
         Forwarded to :meth:`~specter.ice.IceBank.generate_big_ice` when
         ``ice_model='gd'`` (or an ``IceBank`` ``icemaker``): number of local
@@ -150,7 +150,7 @@ class MicrographGenerator(BaseImager):
         ctf_params: dict[str, Any],
         voltage: float,
         dose_per_angstrom: float | torch.Tensor,
-        vol: torch.Tensor | None = None,
+        volume: torch.Tensor | None = None,
         anisomag: torch.Tensor | None = None,
         ice_model: str | None = None,
         ice_thickness: float | None = None,
@@ -200,14 +200,16 @@ class MicrographGenerator(BaseImager):
         self.pad_fft = pad_fft
         self.pad_nxy = nxy + (nxy // 2) * 2 if pad_fft else nxy
 
-        if vol is not None:
-            self.nz = vol.shape[1]
+        if volume is not None:
+            self.nz = volume.shape[1]
         elif scattering_potential is not None:
             self.nz = compute_nz(
                 scattering_potential.shape[0], ice_thickness, pixel_size
             )
         else:
-            raise ValueError("Either 'vol' or 'scattering_potential' must be provided.")
+            raise ValueError(
+                "Either 'volume' or 'scattering_potential' must be provided."
+            )
         self.ice_thickness = self.nz * pixel_size
 
         super().__init__(
@@ -268,26 +270,26 @@ class MicrographGenerator(BaseImager):
 
         self.save_clean_exitwaves = save_clean_exitwaves
 
-        if vol is not None:
-            vol_icemaker = resolve_icemaker(
+        if volume is not None:
+            volume_icemaker = resolve_icemaker(
                 ice_model,
                 pixel_size,
-                nxy=vol.shape[-1],
-                nz=vol.shape[-3],
+                nxy=volume.shape[-1],
+                nz=volume.shape[-3],
                 ice_cache_dir=ice_cache_dir,
                 icemaker=icemaker,
             )
-            if vol_icemaker is not None:
+            if volume_icemaker is not None:
                 if self.verbose:
                     logger.info(f"Adding ice to volume using {ice_model} model")
                 with (
                     torch.no_grad(),
                     status("Tiling ice volume", disable=not self.progressbars),
                 ):
-                    vol = blend_ice_into_volume(
-                        vol, vol_icemaker, pixel_size, relax_steps=ice_relax_steps
+                    volume = blend_ice_into_volume(
+                        volume, volume_icemaker, pixel_size, relax_steps=ice_relax_steps
                     )
-            self.register_buffer("vol", vol)
+            self.register_buffer("volume", volume)
         else:
             self.specimen_gen = MicrographSpecimenGenerator(
                 pixel_size=pixel_size,
@@ -308,14 +310,14 @@ class MicrographGenerator(BaseImager):
                 save_clean_exitwaves=save_clean_exitwaves,
             )
 
-    def _generate_vol(self) -> None:
+    def _generate_volume(self) -> None:
         if self.verbose:
             logger.info(
                 "Generating specimen volume (this may take a while for large micrographs)"
             )
-        self.vol = self.specimen_gen.generate()
+        self.volume = self.specimen_gen.generate()
         if self.move_to_cpu:
-            self.vol = self.vol.cpu()
+            self.volume = self.volume.cpu()
 
     def regenerate_specimen(self) -> None:
         """
@@ -327,15 +329,15 @@ class MicrographGenerator(BaseImager):
         Raises
         ------
         RuntimeError
-            If the model was constructed with a pre-built ``vol`` (no
+            If the model was constructed with a pre-built ``volume`` (no
             ``specimen_gen`` available).
         """
         if not hasattr(self, "specimen_gen"):
             raise RuntimeError(
                 "regenerate_specimen() requires the model to have been constructed "
-                "with a scattering_potential, not a pre-built vol."
+                "with a scattering_potential, not a pre-built volume."
             )
-        self._generate_vol()
+        self._generate_volume()
 
     def forward(self, idx: int | torch.Tensor) -> torch.Tensor:
         """
@@ -351,11 +353,11 @@ class MicrographGenerator(BaseImager):
         images : torch.Tensor
             Simulated micrographs.
         """
-        if not hasattr(self, "vol"):
-            self._generate_vol()
+        if not hasattr(self, "volume"):
+            self._generate_volume()
         batchsize = len(idx) if isinstance(idx, torch.Tensor) else 1
         with status("Transferring volume to GPU", disable=not self.progressbars):
-            V = self.vol.to(self.device).expand(batchsize, -1, -1, -1)
+            V = self.volume.to(self.device).expand(batchsize, -1, -1, -1)
         V = pad_volume(V, self.nxy, self.nz, None, self.pad_fft, xy_pad_mode="reflect")
         scale = self.potential_scale[idx].reshape(-1, 1, 1, 1).to(V.device)
         V = V * scale

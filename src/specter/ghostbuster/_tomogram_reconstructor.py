@@ -512,6 +512,6 @@ class TomogramReconstructor(_BaseReconstructor):
         if self._run_dir is None or not self.trainer.is_global_zero:
             return
         v = self.V.detach().cpu().float()
-        vol_path = self._run_dir / "vol.mrc"
-        save_volume_mrc(vol_path, v, self.voxel_size)
-        print(f"Saved final volume → {vol_path}")
+        volume_path = self._run_dir / "vol.mrc"
+        save_volume_mrc(volume_path, v, self.voxel_size)
+        print(f"Saved final volume → {volume_path}")

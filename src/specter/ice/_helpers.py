@@ -109,8 +109,8 @@ def volume_of_ice(
     """
     nx, ny, nz = n_xyz
     dx, dy, dz = d_xyz
-    total_vol = nx * ny * nz * dx * dy * dz
-    n_molecules = int(ndensity_of_amorphous_ice * total_vol)
+    total_volume = nx * ny * nz * dx * dy * dz
+    n_molecules = int(ndensity_of_amorphous_ice * total_volume)
 
     x_ice = (torch.rand(n_molecules) - 0.5) * dx * nx
     y_ice = (torch.rand(n_molecules) - 0.5) * dy * ny

@@ -66,9 +66,9 @@ def _save_or_compare(name: str, tensor: torch.Tensor) -> None:
 @pytest.fixture
 def small_volume() -> torch.Tensor:
     """3D volume (16, 16, 16) with a box phantom."""
-    vol = torch.zeros(16, 16, 16)
-    vol[4:12, 4:12, 4:12] = 50.0
-    return vol
+    volume = torch.zeros(16, 16, 16)
+    volume[4:12, 4:12, 4:12] = 50.0
+    return volume
 
 
 @pytest.fixture

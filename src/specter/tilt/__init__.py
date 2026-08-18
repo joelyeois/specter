@@ -26,7 +26,7 @@ from ._geometry import (
     estimate_required_nxy,
     infer_max_tilt_from_inputs,
     nz_tilt_for_pose,
-    pad_vol_xy_for_tilt,
+    pad_volume_xy_for_tilt,
     shift_ctf_defocus_for_tilt,
 )
 
@@ -37,7 +37,7 @@ __all__ = [
     "estimate_required_nxy",
     "infer_max_tilt_from_inputs",
     "nz_tilt_for_pose",
-    "pad_vol_xy_for_tilt",
+    "pad_volume_xy_for_tilt",
     "shift_ctf_defocus_for_tilt",
     "read_aretomo3_aln",
     "read_aretomo3_global_shifts",

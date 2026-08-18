@@ -438,7 +438,7 @@ def test_potential_builder_analytic_matches_gemmi_multi_atom(tmp_path):
             atom_species=atom_species,
             progressbars=False,
         )
-    vol_ours = pb.forward(coords, method="analytic")
+    volume_ours = pb.forward(coords, method="analytic")
 
     scat_coeffs = []
     for sp, z in zip(atom_species, atomic_numbers.tolist()):
@@ -457,13 +457,15 @@ def test_potential_builder_analytic_matches_gemmi_multi_atom(tmp_path):
     _write_multi_atom_shtyrov_mmcif(mmcif_path, elements, coords.tolist(), scat_coeffs)
 
     gpb = GemmiPotentialBuilder(n_xyz=n, dx=dx, b_factor=0.0)
-    vol_gemmi = gpb.build_potential_from_custom_mmcif(mmcif_path)
+    volume_gemmi = gpb.build_potential_from_custom_mmcif(mmcif_path)
 
-    corr = torch.corrcoef(torch.stack([vol_ours.flatten(), vol_gemmi.flatten()]))[0, 1]
+    corr = torch.corrcoef(torch.stack([volume_ours.flatten(), volume_gemmi.flatten()]))[
+        0, 1
+    ]
     assert corr.item() > 0.97, f"correlation too low: {corr.item()}"
 
-    total_ours = (vol_ours.sum() * dx**3).item()
-    total_gemmi = (vol_gemmi.sum() * dx**3).item()
+    total_ours = (volume_ours.sum() * dx**3).item()
+    total_gemmi = (volume_gemmi.sum() * dx**3).item()
     assert abs(total_ours - total_gemmi) / abs(total_gemmi) < 0.1, (
         f"total integrated potential differs too much: ours={total_ours}, "
         f"gemmi={total_gemmi}"
@@ -534,9 +536,9 @@ def test_potential_builder_analytic_handles_out_of_bounds_atom():
         atom_species=atom_species,
         progressbars=False,
     )
-    vol = pb.forward(coords, method="analytic")
-    assert torch.isfinite(vol).all()
-    assert vol.sum() > 0
+    volume = pb.forward(coords, method="analytic")
+    assert torch.isfinite(volume).all()
+    assert volume.sum() > 0
 
 
 def test_potential_builder_analytic_robust_to_subvoxel_position():
@@ -575,12 +577,12 @@ def test_potential_builder_analytic_robust_to_subvoxel_position():
     peaks = []
     for offset in [0.0, 0.1, 0.25, 0.5]:
         coords = torch.tensor([[offset, 0.0, 0.0]])
-        vol = pb.forward(coords, method="analytic")
-        total = (vol.sum() * dx**3).item()
+        volume = pb.forward(coords, method="analytic")
+        total = (volume.sum() * dx**3).item()
         assert total == pytest.approx(expected_total, rel=1e-3), (
             f"total at offset={offset} is {total}, expected {expected_total}"
         )
-        peaks.append(vol.max().item())
+        peaks.append(volume.max().item())
 
     assert max(peaks) / min(peaks) < 3.0, (
         f"peak varies by {max(peaks) / min(peaks):.1f}x across sub-voxel "
@@ -615,17 +617,19 @@ def test_potential_builder_analytic_matches_3d_splat(parameterization):
     pb = PotentialBuilder(
         n, dx, atomic_numbers, parameterization=parameterization, progressbars=False
     )
-    vol_analytic = pb.forward(coords, method="analytic")
-    vol_3d = pb.forward(coords, method="3d")
+    volume_analytic = pb.forward(coords, method="analytic")
+    volume_3d = pb.forward(coords, method="3d")
 
-    total_analytic = (vol_analytic.sum() * dx**3).item()
-    total_3d = (vol_3d.sum() * dx**3).item()
+    total_analytic = (volume_analytic.sum() * dx**3).item()
+    total_3d = (volume_3d.sum() * dx**3).item()
     assert abs(total_analytic - total_3d) / abs(total_3d) < 0.1, (
         f"total integrated potential differs too much: analytic={total_analytic}, "
         f"3d={total_3d}"
     )
 
-    corr = torch.corrcoef(torch.stack([vol_analytic.flatten(), vol_3d.flatten()]))[0, 1]
+    corr = torch.corrcoef(
+        torch.stack([volume_analytic.flatten(), volume_3d.flatten()])
+    )[0, 1]
     assert corr.item() > 0.9, f"correlation too low: {corr.item()}"
 
 
@@ -688,9 +692,9 @@ def test_potential_builder_analytic_handles_out_of_bounds_atom_kl(parameterizati
     pb = PotentialBuilder(
         16, 1.0, atomic_numbers, parameterization=parameterization, progressbars=False
     )
-    vol = pb.forward(coords, method="analytic")
-    assert torch.isfinite(vol).all()
-    assert vol.sum() > 0
+    volume = pb.forward(coords, method="analytic")
+    assert torch.isfinite(volume).all()
+    assert volume.sum() > 0
 
 
 @pytest.mark.parametrize("parameterization", ["kirkland", "lobato"])
@@ -716,10 +720,10 @@ def test_potential_builder_analytic_robust_to_subvoxel_position_kl(parameterizat
     totals, peaks = [], []
     for offset in [0.0, 0.1, 0.25, 0.5]:
         coords = torch.tensor([[offset, 0.0, 0.0]])
-        vol = pb.forward(coords, method="analytic")
-        assert torch.isfinite(vol).all()
-        totals.append((vol.sum() * dx**3).item())
-        peaks.append(vol.max().item())
+        volume = pb.forward(coords, method="analytic")
+        assert torch.isfinite(volume).all()
+        totals.append((volume.sum() * dx**3).item())
+        peaks.append(volume.max().item())
 
     total_spread = (max(totals) - min(totals)) / (sum(totals) / len(totals))
     assert total_spread < 0.2, (
@@ -756,9 +760,11 @@ def test_kirkland_lobato_analytic_no_overflow_for_heavy_elements():
             build_potential_volume_analytic_scatter_lobato,
         ):
             coords = torch.tensor([[0.3, 0.1, -0.2]], requires_grad=True)
-            vol = fn(atomic_numbers, coords, (n, n, n), dx)
-            assert torch.isfinite(vol).all(), f"{fn.__name__} Z={z}: non-finite volume"
-            vol.sum().backward()
+            volume = fn(atomic_numbers, coords, (n, n, n), dx)
+            assert torch.isfinite(volume).all(), (
+                f"{fn.__name__} Z={z}: non-finite volume"
+            )
+            volume.sum().backward()
             assert coords.grad is not None and torch.isfinite(coords.grad).all(), (
                 f"{fn.__name__} Z={z}: non-finite gradient"
             )
@@ -780,7 +786,7 @@ def test_potential_builder_shtyrov_peng_only_analytic():
     pb_none = PotentialBuilder(
         n, dx, atomic_numbers, parameterization="shtyrov", progressbars=False
     )
-    vol_none = pb_none.forward(coords, method="analytic")
+    volume_none = pb_none.forward(coords, method="analytic")
 
     with pytest.warns(UserWarning, match="falling back"):
         pb_list = PotentialBuilder(
@@ -791,10 +797,10 @@ def test_potential_builder_shtyrov_peng_only_analytic():
             atom_species=[None] * len(atomic_numbers),
             progressbars=False,
         )
-    vol_list = pb_list.forward(coords, method="analytic")
+    volume_list = pb_list.forward(coords, method="analytic")
 
-    assert torch.isfinite(vol_none).all()
-    assert torch.allclose(vol_none, vol_list)
+    assert torch.isfinite(volume_none).all()
+    assert torch.allclose(volume_none, volume_list)
 
 
 @pytest.mark.parametrize("parameterization", ["kirkland", "lobato"])
@@ -900,9 +906,9 @@ def test_potential_builder_defaults_to_shtyrov_analytic():
         warnings.simplefilter("error")
         pb = PotentialBuilder(16, 1.0, atomic_numbers, progressbars=False)
         assert pb.parameterization == "shtyrov"
-        vol = pb.forward(coords)  # no explicit method
-    assert torch.isfinite(vol).all()
-    assert vol.sum() > 0
+        volume = pb.forward(coords)  # no explicit method
+    assert torch.isfinite(volume).all()
+    assert volume.sum() > 0
 
 
 def test_potential_builder_analytic_rejects_periodic():
@@ -919,8 +925,8 @@ def test_potential_builder_analytic_rejects_periodic():
     with pytest.raises(ValueError, match="periodic"):
         pb.forward(coords, method="analytic")
     # '3d' should still work fine with periodic=True.
-    vol = pb.forward(coords, method="3d")
-    assert torch.isfinite(vol).all()
+    volume = pb.forward(coords, method="3d")
+    assert torch.isfinite(volume).all()
 
 
 @pytest.mark.parametrize("parameterization", ["kirkland", "lobato"])

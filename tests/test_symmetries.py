@@ -113,13 +113,13 @@ def test_unknown_symmetry_raises() -> None:
 
 
 def test_apply_symmetry_c1_is_identity() -> None:
-    vol = torch.rand(8, 8, 8)
-    vol_sym = apply_symmetry(vol, "C1", method="real")
-    assert torch.allclose(vol_sym, vol, atol=1e-5)
+    volume = torch.rand(8, 8, 8)
+    volume_sym = apply_symmetry(volume, "C1", method="real")
+    assert torch.allclose(volume_sym, volume, atol=1e-5)
 
 
 def test_apply_symmetry_batchsize_matches_unbatched() -> None:
-    vol = torch.rand(8, 8, 8)
-    unbatched = apply_symmetry(vol, "C4", batchsize=None, method="real")
-    batched = apply_symmetry(vol, "C4", batchsize=2, method="real")
+    volume = torch.rand(8, 8, 8)
+    unbatched = apply_symmetry(volume, "C4", batchsize=None, method="real")
+    batched = apply_symmetry(volume, "C4", batchsize=2, method="real")
     assert torch.allclose(unbatched, batched, atol=1e-5)

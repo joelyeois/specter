@@ -239,7 +239,7 @@ class CrowdWithDuplicates(L.LightningModule):
         Coordinates of generated duplicates after Poisson-disk sampling.
     theta : torch.Tensor
         Affine rotation matrices for each duplicate.
-    vols : torch.Tensor
+    volumes : torch.Tensor
         Rotated duplicates ready for insertion into a micrograph.
     N : int
         Number of duplicates generated.
@@ -344,13 +344,13 @@ class CrowdWithDuplicates(L.LightningModule):
         Rotate the original volume according to the affine matrices `self.theta`.
 
         If `chunk_size` is specified, volumes are rotated in batches for memory efficiency.
-        The rotated volumes are stored in `self.vols`.
+        The rotated volumes are stored in `self.volumes`.
         """
         if self.chunk_size is not None:
             if self.move_to_cpu:
-                self.vols = torch.empty((self.N,) + self.V.shape)
+                self.volumes = torch.empty((self.N,) + self.V.shape)
             else:
-                self.vols = torch.empty((self.N,) + self.V.shape, device=self.device)
+                self.volumes = torch.empty((self.N,) + self.V.shape, device=self.device)
 
             for start in track(
                 range(0, self.N, self.chunk_size),
@@ -360,25 +360,25 @@ class CrowdWithDuplicates(L.LightningModule):
             ):
                 end = min(start + self.chunk_size, self.N)
                 if self.move_to_cpu:
-                    self.vols[start:end] = rotations.rotate_volume(
+                    self.volumes[start:end] = rotations.rotate_volume(
                         self.V,
                         self.theta[start:end].to(self.V.device),
                         padding_mode="zeros",
                     ).cpu()
                 else:
-                    self.vols[start:end] = rotations.rotate_volume(
+                    self.volumes[start:end] = rotations.rotate_volume(
                         self.V,
                         self.theta[start:end].to(self.V.device),
                         padding_mode="zeros",
                     )
         else:
-            self.vols = rotations.rotate_volume(
+            self.volumes = rotations.rotate_volume(
                 self.V, self.theta.to(self.V.device), padding_mode="zeros"
             )
 
     def insert_volumes(self) -> torch.Tensor:
         """
-        Insert the rotated volumes (`self.vols`) into a 3D micrograph according to `self.coords`.
+        Insert the rotated volumes (`self.volumes`) into a 3D micrograph according to `self.coords`.
 
         Returns
         -------
@@ -386,7 +386,7 @@ class CrowdWithDuplicates(L.LightningModule):
             Micrograph of shape (nz_out, nxy_out, nxy_out) containing all duplicates.
         """
         micro = insert_particles_into_micrograph(
-            self.vols,
+            self.volumes,
             self.coords,
             pixel_size=self.dx,
             micro_shape=(self.nz_out, self.nxy_out, self.nxy_out),
@@ -424,15 +424,15 @@ class CrowdWithDuplicates(L.LightningModule):
                 disable=not self.progressbars,
             ):
                 end = min(start + self.chunk_size, self.N)
-                vols = rotations.rotate_volume(
+                volumes = rotations.rotate_volume(
                     self.V,
                     self.theta[start:end].to(self.V.device),
                     padding_mode="zeros",
                 )
                 if self.move_to_cpu:
-                    vols = vols.cpu()
+                    volumes = volumes.cpu()
                 micrograph = insert_particles_into_micrograph(
-                    vols,
+                    volumes,
                     self.coords[start:end],
                     pixel_size=self.dx,
                     micrograph=micrograph,

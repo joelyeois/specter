@@ -204,9 +204,9 @@ def test_job_create_tensor_summary(tmp_path: Path) -> None:
             self.volume = volume
             self.lr = lr
 
-    vol = torch.zeros(32, 32, 32)
+    volume = torch.zeros(32, 32, 32)
     with Job("dummy", project="p", base_dir=tmp_path) as job:
-        job.create(_WithTensor, vol)
+        job.create(_WithTensor, volume)
     data = json.loads((job.dir / "job.json").read_text())
     assert data["params"]["volume"] == {
         "__type__": "Tensor",

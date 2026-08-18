@@ -52,17 +52,17 @@ def _save_or_compare(name: str, tensor: torch.Tensor) -> None:
 @pytest.fixture
 def small_volume():
     """3D cubic volume (32, 32, 32) with a simple phantom."""
-    vol = torch.zeros(32, 32, 32)
-    vol[12:20, 12:20, 12:20] = 50.0
-    return vol
+    volume = torch.zeros(32, 32, 32)
+    volume[12:20, 12:20, 12:20] = 50.0
+    return volume
 
 
 @pytest.fixture
 def small_volume_4d():
     """4D cubic volume (1, 32, 32, 32) as returned by MicrographSpecimenGenerator."""
-    vol = torch.zeros(1, 32, 32, 32)
-    vol[0, 12:20, 12:20, 12:20] = 50.0
-    return vol
+    volume = torch.zeros(1, 32, 32, 32)
+    volume[0, 12:20, 12:20, 12:20] = 50.0
+    return volume
 
 
 @pytest.fixture
@@ -196,15 +196,17 @@ def test_micrograph_generator_accepts_prebuilt_icemaker(small_volume, ctf_params
     assert images.shape == (1, 32, 32)
 
 
-def test_micrograph_generator_blends_ice_into_prebuilt_vol(small_volume_4d, ctf_params):
-    """MicrographGenerator(vol=..., ice_model=...) blends ice into vol at construction,
-    matching its size/voxel size, only where vol had little existing potential."""
+def test_micrograph_generator_blends_ice_into_prebuilt_volume(
+    small_volume_4d, ctf_params
+):
+    """MicrographGenerator(volume=..., ice_model=...) blends ice into volume at construction,
+    matching its size/voxel size, only where volume had little existing potential."""
     torch.manual_seed(0)
-    original_vol = small_volume_4d.clone()
+    original_volume = small_volume_4d.clone()
 
     gen = MicrographGenerator(
         scattering_potential=None,
-        vol=small_volume_4d.clone(),
+        volume=small_volume_4d.clone(),
         micrograph_size=32,
         pixel_size=2.0,
         ctf_params=ctf_params,
@@ -215,26 +217,26 @@ def test_micrograph_generator_blends_ice_into_prebuilt_vol(small_volume_4d, ctf_
         progressbars=False,
     )
 
-    # Same shape as the input vol -- ice fills the existing volume, doesn't grow it.
-    assert gen.vol.shape == original_vol.shape
+    # Same shape as the input volume -- ice fills the existing volume, doesn't grow it.
+    assert gen.volume.shape == original_volume.shape
     # Particle region (originally high potential, above the ice mask threshold) is
     # untouched.
     assert torch.equal(
-        gen.vol[0, 12:20, 12:20, 12:20], original_vol[0, 12:20, 12:20, 12:20]
+        gen.volume[0, 12:20, 12:20, 12:20], original_volume[0, 12:20, 12:20, 12:20]
     )
     # Elsewhere (originally near-zero potential), ice has been added.
-    assert not torch.equal(gen.vol, original_vol)
-    assert gen.vol[0, 0, 0, 0] > 0
+    assert not torch.equal(gen.volume, original_volume)
+    assert gen.volume[0, 0, 0, 0] > 0
 
 
-def test_micrograph_generator_vol_without_ice_model_is_unchanged(
+def test_micrograph_generator_volume_without_ice_model_is_unchanged(
     small_volume_4d, ctf_params
 ):
-    """vol= with no ice_model/icemaker is registered as-is (no ice added)."""
-    original_vol = small_volume_4d.clone()
+    """volume= with no ice_model/icemaker is registered as-is (no ice added)."""
+    original_volume = small_volume_4d.clone()
     gen = MicrographGenerator(
         scattering_potential=None,
-        vol=small_volume_4d.clone(),
+        volume=small_volume_4d.clone(),
         micrograph_size=32,
         pixel_size=2.0,
         ctf_params=ctf_params,
@@ -243,18 +245,18 @@ def test_micrograph_generator_vol_without_ice_model_is_unchanged(
         verbose=False,
         progressbars=False,
     )
-    assert torch.equal(gen.vol, original_vol)
+    assert torch.equal(gen.volume, original_volume)
 
 
 def test_tilt_series_generator_regression(ctf_params):
     """TiltSeriesGenerator: 3-angle tilt series, coincidence loss, tilt_axis='y'."""
-    vol = torch.zeros(1, 16, 48, 48)
-    vol[0, 5:11, 20:28, 20:28] = 50.0
+    volume = torch.zeros(1, 16, 48, 48)
+    volume[0, 5:11, 20:28, 20:28] = 50.0
     angles = torch.tensor([-10.0, 0.0, 10.0])
 
     torch.manual_seed(0)
     gen = TiltSeriesGenerator(
-        vol=vol,
+        volume=volume,
         micrograph_size=32,
         pixel_size=2.0,
         ctf_params=ctf_params,
@@ -275,16 +277,16 @@ def test_tilt_series_generator_regression(ctf_params):
     _save_or_compare("tilt_series_generator", tilt_series.cpu())
 
 
-def test_tilt_series_generator_blends_ice_into_vol(ctf_params):
-    """TiltSeriesGenerator(vol=..., ice_model=...) blends ice into vol, matching its
+def test_tilt_series_generator_blends_ice_into_volume(ctf_params):
+    """TiltSeriesGenerator(volume=..., ice_model=...) blends ice into volume, matching its
     size/voxel size, before the class's own tilt-coverage padding is applied."""
     torch.manual_seed(0)
-    vol = torch.zeros(1, 16, 48, 48)
-    vol[0, 5:11, 20:28, 20:28] = 50.0
-    original_vol = vol.clone()
+    volume = torch.zeros(1, 16, 48, 48)
+    volume[0, 5:11, 20:28, 20:28] = 50.0
+    original_volume = volume.clone()
 
     gen = TiltSeriesGenerator(
-        vol=vol.clone(),
+        volume=volume.clone(),
         micrograph_size=32,
         pixel_size=2.0,
         ctf_params=ctf_params,
@@ -298,16 +300,16 @@ def test_tilt_series_generator_blends_ice_into_vol(ctf_params):
     )
 
     # No tilt-coverage padding triggered at this geometry (available_nxy already
-    # meets target_nxy), so gen.vol's shape matches the raw input exactly.
-    assert gen.vol.shape == original_vol.shape
+    # meets target_nxy), so gen.volume's shape matches the raw input exactly.
+    assert gen.volume.shape == original_volume.shape
     # Particle region (originally high potential, above the ice mask threshold) is
     # untouched.
     assert torch.equal(
-        gen.vol[0, 5:11, 20:28, 20:28], original_vol[0, 5:11, 20:28, 20:28]
+        gen.volume[0, 5:11, 20:28, 20:28], original_volume[0, 5:11, 20:28, 20:28]
     )
     # Elsewhere (originally near-zero potential), ice has been added.
-    assert not torch.equal(gen.vol, original_vol)
-    assert gen.vol[0, 0, 0, 0] > 0
+    assert not torch.equal(gen.volume, original_volume)
+    assert gen.volume[0, 0, 0, 0] > 0
 
 
 def test_bfactor_damps_transfer_function():
@@ -571,12 +573,12 @@ def test_micrograph_generator_plumbs_envelope_params(small_volume, ctf_params):
 
 def test_tilt_series_generator_plumbs_envelope_params(ctf_params):
     """TiltSeriesGenerator forwards Cs/Cc/dose envelope params to its Aberration submodule."""
-    vol = torch.zeros(1, 16, 48, 48)
-    vol[0, 5:11, 20:28, 20:28] = 50.0
+    volume = torch.zeros(1, 16, 48, 48)
+    volume[0, 5:11, 20:28, 20:28] = 50.0
     angles = torch.tensor([-10.0, 0.0, 10.0])
 
     gen = TiltSeriesGenerator(
-        vol=vol,
+        volume=volume,
         micrograph_size=32,
         pixel_size=2.0,
         ctf_params=ctf_params,
@@ -662,7 +664,7 @@ def test_micrograph_generator_potential_scale_changes_output(small_volume, ctf_p
     """
     kwargs = dict(
         scattering_potential=None,
-        vol=small_volume.unsqueeze(0),
+        volume=small_volume.unsqueeze(0),
         micrograph_size=32,
         pixel_size=2.0,
         ctf_params=ctf_params,
@@ -685,11 +687,11 @@ def test_micrograph_generator_potential_scale_changes_output(small_volume, ctf_p
 
 def test_tilt_series_generator_potential_scale_changes_output(ctf_params):
     """Same regression guard as above, for TiltSeriesGenerator.generate_tilt_series()."""
-    vol = torch.zeros(1, 16, 48, 48)
-    vol[0, 5:11, 20:28, 20:28] = 50.0
+    volume = torch.zeros(1, 16, 48, 48)
+    volume[0, 5:11, 20:28, 20:28] = 50.0
     angles = torch.tensor([-10.0, 0.0, 10.0])
     kwargs = dict(
-        vol=vol,
+        volume=volume,
         micrograph_size=32,
         pixel_size=2.0,
         ctf_params=ctf_params,
@@ -756,11 +758,11 @@ def test_tilt_series_generator_edge_margin_pads_beyond_geometric_minimum(ctf_par
     (which only fades pixels beyond required_nxy that are provably never sampled --
     verified to have zero effect on output, see dev/tilt series/ investigation).
     """
-    vol = torch.zeros(1, 16, 48, 48)
-    vol[0, 5:11, 20:28, 20:28] = 50.0
+    volume = torch.zeros(1, 16, 48, 48)
+    volume[0, 5:11, 20:28, 20:28] = 50.0
     angles = torch.tensor([45.0])
     kwargs = dict(
-        vol=vol,
+        volume=volume,
         micrograph_size=32,
         pixel_size=2.0,
         ctf_params=ctf_params,
@@ -777,7 +779,7 @@ def test_tilt_series_generator_edge_margin_pads_beyond_geometric_minimum(ctf_par
     gen_no_margin = TiltSeriesGenerator(**kwargs, edge_margin=0)
     gen_default = TiltSeriesGenerator(**kwargs)  # edge_margin=8 by default
 
-    assert gen_default.vol.shape[-1] == gen_no_margin.vol.shape[-1] + 2 * 8
+    assert gen_default.volume.shape[-1] == gen_no_margin.volume.shape[-1] + 2 * 8
 
     tilt_series_no_margin, _, _ = gen_no_margin.generate_tilt_series(torch.tensor([0]))
     tilt_series_default, _, _ = gen_default.generate_tilt_series(torch.tensor([0]))
@@ -810,10 +812,10 @@ def test_tilt_series_generator_pad_fft_multislice_shapes_match(ctf_params):
     -- a RuntimeError shape mismatch. 0deg is included below specifically to guard
     against regressing that.
     """
-    vol = torch.zeros(1, 16, 48, 48)
-    vol[0, 5:11, 20:28, 20:28] = 50.0
+    volume = torch.zeros(1, 16, 48, 48)
+    volume[0, 5:11, 20:28, 20:28] = 50.0
     kwargs = dict(
-        vol=vol,
+        volume=volume,
         micrograph_size=32,
         pixel_size=2.0,
         ctf_params=ctf_params,
@@ -844,10 +846,10 @@ def test_tilt_series_generator_pad_fft_changes_output_under_tilt(ctf_params):
     45deg (where the artifact it fixes is actually present), while leaving 0deg
     numerically close to unchanged (no tilt-induced wraparound to fix there).
     """
-    vol = torch.zeros(1, 16, 48, 48)
-    vol[0, 5:11, 20:28, 20:28] = 50.0
+    volume = torch.zeros(1, 16, 48, 48)
+    volume[0, 5:11, 20:28, 20:28] = 50.0
     kwargs = dict(
-        vol=vol,
+        volume=volume,
         micrograph_size=32,
         pixel_size=2.0,
         ctf_params=ctf_params,
@@ -867,16 +869,16 @@ def test_tilt_series_generator_pad_fft_changes_output_under_tilt(ctf_params):
     assert not torch.allclose(exitwaves_base, exitwaves_pad)
 
 
-def test_tilt_series_generator_vol_is_never_a_registered_buffer(ctf_params):
-    """`vol` must never be in the module's buffer registry -- otherwise a
+def test_tilt_series_generator_volume_is_never_a_registered_buffer(ctf_params):
+    """`volume` must never be in the module's buffer registry -- otherwise a
     later `.to(device)` on the whole module (the CLI pipelines' pattern)
     would unconditionally drag it onto the compute device regardless of
     whether it fits, before `generate_tilt_series` gets a say. Pure
     bookkeeping check, doesn't need CUDA."""
-    vol = torch.zeros(1, 16, 48, 48)
-    vol[0, 5:11, 20:28, 20:28] = 50.0
+    volume = torch.zeros(1, 16, 48, 48)
+    volume[0, 5:11, 20:28, 20:28] = 50.0
     gen = TiltSeriesGenerator(
-        vol=vol,
+        volume=volume,
         micrograph_size=32,
         pixel_size=2.0,
         ctf_params=ctf_params,
@@ -886,18 +888,18 @@ def test_tilt_series_generator_vol_is_never_a_registered_buffer(ctf_params):
         verbose=False,
         progressbars=False,
     )
-    assert "vol" not in dict(gen.named_buffers())
-    assert gen.vol.device.type == "cpu"
+    assert "volume" not in dict(gen.named_buffers())
+    assert gen.volume.device.type == "cpu"
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA")
-def test_tilt_series_generator_auto_places_vol_that_fits(ctf_params):
+def test_tilt_series_generator_auto_places_volume_that_fits(ctf_params):
     """A volume that comfortably fits should end up on the compute device
     automatically on first use -- no flag needed for the common case."""
-    vol = torch.zeros(1, 16, 48, 48)
-    vol[0, 5:11, 20:28, 20:28] = 50.0
+    volume = torch.zeros(1, 16, 48, 48)
+    volume[0, 5:11, 20:28, 20:28] = 50.0
     gen = TiltSeriesGenerator(
-        vol=vol,
+        volume=volume,
         micrograph_size=32,
         pixel_size=2.0,
         ctf_params=ctf_params,
@@ -909,24 +911,24 @@ def test_tilt_series_generator_auto_places_vol_that_fits(ctf_params):
         progressbars=False,
     ).to("cuda")
     # .to("cuda") alone must not have moved it -- only generate_tilt_series decides.
-    assert gen.vol.device.type == "cpu"
+    assert gen.volume.device.type == "cpu"
 
     _, exitwaves, _ = gen.generate_tilt_series(torch.tensor([0]))
-    assert gen.vol.device.type == "cuda"
+    assert gen.volume.device.type == "cuda"
     assert torch.isfinite(exitwaves).all()
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA")
-def test_tilt_series_generator_falls_back_to_windowed_when_vol_does_not_fit(
+def test_tilt_series_generator_falls_back_to_windowed_when_volume_does_not_fit(
     ctf_params, monkeypatch
 ):
-    """When moving `vol` to the compute device raises OOM, generation must
+    """When moving `volume` to the compute device raises OOM, generation must
     still succeed by falling back to CPU-resident windowed fetches, matching
     the direct-GPU result. Simulates OOM deterministically (rather than
     requiring an actually huge volume) by intercepting `.to()` calls on this
     specific tensor."""
-    vol = torch.zeros(1, 16, 48, 48)
-    vol[0, 5:11, 20:28, 20:28] = 50.0
+    volume = torch.zeros(1, 16, 48, 48)
+    volume[0, 5:11, 20:28, 20:28] = 50.0
     kwargs = dict(
         micrograph_size=32,
         pixel_size=2.0,
@@ -941,16 +943,16 @@ def test_tilt_series_generator_falls_back_to_windowed_when_vol_does_not_fit(
         progressbars=False,
     )
 
-    gen_gpu = TiltSeriesGenerator(vol=vol.clone(), **kwargs).to("cuda")
+    gen_gpu = TiltSeriesGenerator(volume=volume.clone(), **kwargs).to("cuda")
     _, exitwaves_gpu, _ = gen_gpu.generate_tilt_series(torch.tensor([0]))
 
-    gen_streamed = TiltSeriesGenerator(vol=vol.clone(), **kwargs).to("cuda")
-    assert gen_streamed.vol.device.type == "cpu"
+    gen_streamed = TiltSeriesGenerator(volume=volume.clone(), **kwargs).to("cuda")
+    assert gen_streamed.volume.device.type == "cpu"
 
     original_to = torch.Tensor.to
 
     def fake_to(tensor_self, *args, **kw):
-        if tensor_self is gen_streamed.vol:
+        if tensor_self is gen_streamed.volume:
             raise torch.cuda.OutOfMemoryError("simulated OOM for test")
         return original_to(tensor_self, *args, **kw)
 
@@ -960,7 +962,7 @@ def test_tilt_series_generator_falls_back_to_windowed_when_vol_does_not_fit(
     _, exitwaves_streamed, _ = gen_streamed.generate_tilt_series(torch.tensor([0]))
     peak_bytes = torch.cuda.max_memory_allocated()
 
-    assert gen_streamed.vol.device.type == "cpu"  # fallback kept it on CPU
+    assert gen_streamed.volume.device.type == "cpu"  # fallback kept it on CPU
     assert torch.allclose(exitwaves_gpu.cpu(), exitwaves_streamed.cpu(), atol=1e-3)
     # the whole volume (16*48*48*4 bytes) would be ~147KB here -- tiny either
     # way, but the point is this must not scale with volume size, so just
@@ -1030,15 +1032,15 @@ def test_from_coordinates_and_volume_paths_agree(small_coords, ctf_params):
     zz, yy, xx = torch.meshgrid(axis, axis, axis, indexing="ij")
 
     def voxelize(points: torch.Tensor) -> torch.Tensor:
-        vol = torch.zeros(n, n, n)
+        volume = torch.zeros(n, n, n)
         for p in points:
             r2 = (
                 (xx - p[0] / voxel_size) ** 2
                 + (yy - p[1] / voxel_size) ** 2
                 + (zz - p[2] / voxel_size) ** 2
             )
-            vol += torch.exp(-r2 / (2 * sigma**2))
-        return vol
+            volume += torch.exp(-r2 / (2 * sigma**2))
+        return volume
 
     quaternion = roma.random_unitquat(1)
     translation = torch.tensor([[4.0, -2.5]])
@@ -1060,10 +1062,10 @@ def test_from_coordinates_and_volume_paths_agree(small_coords, ctf_params):
     )
     from_volume = ImageGenerator(scattering_potential=voxelize(coords), **common)
 
-    vol_a = voxelize(from_coords.rotate(quaternion, translation).squeeze(0))
-    vol_b = from_volume.rotate(quaternion, translation)[0]
+    volume_a = voxelize(from_coords.rotate(quaternion, translation).squeeze(0))
+    volume_b = from_volume.rotate(quaternion, translation)[0]
 
-    peak = vol_a.max()
-    diff = (vol_a - vol_b).abs()
+    peak = volume_a.max()
+    diff = (volume_a - volume_b).abs()
     assert diff.max() < 0.05 * peak
     assert diff.mean() < 0.002 * peak

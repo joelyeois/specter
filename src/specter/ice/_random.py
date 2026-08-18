@@ -66,8 +66,8 @@ class RandomIcemaker(L.LightningModule):
 
         self.dv = dx**3
         self.nv = n**2 * self.nz
-        self.total_vol = self.nv * self.dv
-        self.n_ice_molecules = int(ndensity_of_amorphous_ice * self.total_vol)
+        self.total_volume = self.nv * self.dv
+        self.n_ice_molecules = int(ndensity_of_amorphous_ice * self.total_volume)
         self.register_buffer(
             "ice_kernel",
             build_atomic_potential_kernel(self.dx, self.parameterization),

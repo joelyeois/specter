@@ -110,10 +110,10 @@ class ParticleGeneratorBase(BaseImager):
                 logger.info("Adding crowding molecules to volume")
             with torch.no_grad():
                 for i in range(len(V)):
-                    vols = self.crowd()
-                    if not isinstance(vols, float):
-                        self.vols = vols.detach().cpu()
-                    V[i] += vols
+                    volumes = self.crowd()
+                    if not isinstance(volumes, float):
+                        self.volumes = volumes.detach().cpu()
+                    V[i] += volumes
 
         scale = self.potential_scale[idx].reshape(-1, 1, 1, 1)
         V = V * scale
@@ -669,8 +669,8 @@ class ImageGenerator(ParticleGeneratorBase):
         self.ice_relax_steps = ice_relax_steps
         self.pad_nxy = nxy + (nxy // 2) * 2 if pad_fft else nxy
 
-        vol_nz = scattering_potential.shape[0]
-        self.nz = compute_nz(vol_nz, ice_thickness, pixel_size)
+        volume_nz = scattering_potential.shape[0]
+        self.nz = compute_nz(volume_nz, ice_thickness, pixel_size)
 
         super().__init__(
             pixel_size=pixel_size,

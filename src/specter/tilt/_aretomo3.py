@@ -59,7 +59,7 @@ def tilt_to_quaternions(
     >>> result = read_aretomo3_aln("TS_001.aln", pixel_size=1.35)
     >>> quats = tilt_to_quaternions(result["tilt_angles"], result["tilt_axis"][0].item())
     >>> tsg = TiltSeriesGenerator(
-    ...     vol=vol,
+    ...     volume=volume,
     ...     quaternions=quats,
     ...     translations=result["translations"],
     ...     ...
@@ -110,7 +110,7 @@ def read_aretomo3_aln(
     --------
     >>> quats, translations = read_aretomo3_aln("TS_001.aln", pixel_size=1.35)
     >>> tsg = TiltSeriesGenerator(
-    ...     vol=vol,
+    ...     volume=volume,
     ...     quaternions=quats,
     ...     translations=translations,
     ...     ...
@@ -215,7 +215,7 @@ def read_aretomo3_global_shifts(
     --------
     >>> result = read_aretomo3_global_shifts("TS_001_AT_GL.csv")
     >>> tsg = TiltSeriesGenerator(
-    ...     vol=vol,
+    ...     volume=volume,
     ...     angles=result["tilt_angles"],
     ...     translations=result["translations"],
     ...     ...

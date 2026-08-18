@@ -11,7 +11,7 @@ Usage:
         --cs_file /path/to/particles.cs \\
         --fsc_ref /path/to/reference.mrc \\
         --fsc_mask /path/to/mask.mrc \\
-        --cryosparc_ref /path/to/cryosparc_vol.mrc \\
+        --cryosparc_ref /path/to/cryosparc_volume.mrc \\
         --dose_per_angstrom 22.5 \\
         --symmetry I1 \\
         --return_class 1

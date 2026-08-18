@@ -24,17 +24,17 @@ class TiltSeriesGenerator(MicrographGenerator):
 
     Parameters
     ----------
-    vol : torch.Tensor
+    volume : torch.Tensor
         Pre-assembled specimen volume of shape (1, Z, Y, X) -- e.g. the
         output of
         :func:`~specter.pipelines.build_tomogram_generator`/`specter build
         tomogram`. If ``ice_model``
-        or ``icemaker`` is given, ice is blended into ``vol`` (matching its
+        or ``icemaker`` is given, ice is blended into ``volume`` (matching its
         own size and voxel size, masked to voxels with little existing
         scattering potential -- see ``ice_model`` below) before any of this
         class's own tilt-coverage/taper padding is applied, so that padding
         still sees, and extends, the ice-filled volume. Unlike this class's
-        other tensors, ``vol`` is never moved by ``.to(device)`` -- it stays
+        other tensors, ``volume`` is never moved by ``.to(device)`` -- it stays
         wherever it started (typically CPU) until the first
         :meth:`generate_tilt_series` call, which tries moving it to the
         compute device and transparently falls back to leaving it on CPU
@@ -65,8 +65,8 @@ class TiltSeriesGenerator(MicrographGenerator):
     anisomag : torch.Tensor, optional
         Anisotropic magnification matrices, shape (n, 2, 2).
     ice_model : str, optional
-        Ice generation algorithm used to blend ice into ``vol`` (see
-        ``vol`` above): ``'gd'`` (samples from the pre-generated
+        Ice generation algorithm used to blend ice into ``volume`` (see
+        ``volume`` above): ``'gd'`` (samples from the pre-generated
         :class:`~specter.ice.IceBank` cache) or ``'random'`` (instant,
         cheap :class:`~specter.ice.RandomIcemaker` placement). ``None``
         (default) or ``'none'`` adds no ice. Ignored when ``icemaker`` is
@@ -77,7 +77,7 @@ class TiltSeriesGenerator(MicrographGenerator):
         ``ice_data/ice_cache``. Ignored for other ``ice_model`` values or
         when ``icemaker`` is provided.
     icemaker : IceBank or RandomIcemaker, optional
-        A pre-built icemaker instance to blend into ``vol`` directly. When
+        A pre-built icemaker instance to blend into ``volume`` directly. When
         supplied, ``ice_model`` and ``ice_cache_dir`` are both ignored.
     ice_relax_steps : int, optional
         Forwarded to :meth:`~specter.ice.IceBank.generate_big_ice` when
@@ -208,7 +208,7 @@ class TiltSeriesGenerator(MicrographGenerator):
 
     def __init__(
         self,
-        vol: torch.Tensor,
+        volume: torch.Tensor,
         micrograph_size: int | tuple[int, int],
         pixel_size: float,
         ctf_params: dict[str, Any],
@@ -253,18 +253,18 @@ class TiltSeriesGenerator(MicrographGenerator):
         lpp_params: dict[str, float] | None = None,
         **kwargs: Any,
     ):
-        if vol is None:
-            raise ValueError("'vol' must be provided for TiltSeriesGenerator.")
+        if volume is None:
+            raise ValueError("'volume' must be provided for TiltSeriesGenerator.")
 
-        vol_icemaker = resolve_icemaker(
+        volume_icemaker = resolve_icemaker(
             ice_model,
             pixel_size,
-            nxy=vol.shape[-1],
-            nz=vol.shape[-3],
+            nxy=volume.shape[-1],
+            nz=volume.shape[-3],
             ice_cache_dir=ice_cache_dir,
             icemaker=icemaker,
         )
-        if vol_icemaker is not None:
+        if volume_icemaker is not None:
             # Blend ice into the raw input volume before any of this class's own
             # tilt-coverage/z-vacuum/taper padding below, so that padding still
             # operates on (and, for the reflect-padded XY margin, naturally
@@ -276,8 +276,8 @@ class TiltSeriesGenerator(MicrographGenerator):
                     f"[TiltSeriesGenerator] Adding ice to volume using {ice_model} model"
                 )
             with torch.no_grad(), status("Tiling ice volume", disable=not progressbars):
-                vol = blend_ice_into_volume(
-                    vol, vol_icemaker, pixel_size, relax_steps=ice_relax_steps
+                volume = blend_ice_into_volume(
+                    volume, volume_icemaker, pixel_size, relax_steps=ice_relax_steps
                 )
 
         if isinstance(micrograph_size, int):
@@ -299,8 +299,8 @@ class TiltSeriesGenerator(MicrographGenerator):
             angles=angles, quaternions=quaternions
         )
 
-        nz_input = int(vol.shape[-3])
-        available_nxy = int(min(vol.shape[-2], vol.shape[-1]))
+        nz_input = int(volume.shape[-3])
+        available_nxy = int(min(volume.shape[-2], volume.shape[-1]))
         required_nxy = tilt_geometry.estimate_required_nxy(
             desired_nxy=desired_nxy,
             nz=nz_input,
@@ -327,11 +327,13 @@ class TiltSeriesGenerator(MicrographGenerator):
 
         if available_nxy < target_nxy:
             if pad_volume:
-                vol = tilt_geometry.pad_vol_xy_for_tilt(vol, target_nxy, available_nxy)
+                volume = tilt_geometry.pad_volume_xy_for_tilt(
+                    volume, target_nxy, available_nxy
+                )
                 msg = (
                     "[TiltSeriesGenerator] Volume XY too small for requested tilt coverage"
                     + (" and taper" if taper_width > 0 else "")
-                    + f"; padded (reflect) from {available_nxy} to {vol.shape[-1]} px in XY.\n"
+                    + f"; padded (reflect) from {available_nxy} to {volume.shape[-1]} px in XY.\n"
                     f"  micrograph_size={desired_nxy}, requested_max_tilt={self.max_tilt_angle_deg:.2f} deg, "
                     f"required_volume_nxy>={required_nxy}, edge_margin={edge_margin} "
                     f"(-> required_nxy_padded>={required_nxy_padded})"
@@ -343,7 +345,7 @@ class TiltSeriesGenerator(MicrographGenerator):
                 print(
                     "[TiltSeriesGenerator] Input volume XY may be too small for requested tilt "
                     "coverage; proceeding anyway (pad_volume=False).\n"
-                    f"  micrograph_size={desired_nxy}, volume_shape={tuple(vol.shape)}, "
+                    f"  micrograph_size={desired_nxy}, volume_shape={tuple(volume.shape)}, "
                     f"requested_max_tilt={self.max_tilt_angle_deg:.2f} deg,\n"
                     f"  required_volume_nxy>={required_nxy}, current_volume_nxy={available_nxy}, \n"
                     f"  max_allowed_tilt_with_current_volume\u2248{self.max_allowed_tilt_deg_for_volume:.2f} deg,\n"
@@ -364,8 +366,8 @@ class TiltSeriesGenerator(MicrographGenerator):
             # (correct), then taper across the new seam (z_taper_width, right below) so the
             # transition is gradual rather than a cliff -- mirroring how a real ice/vacuum
             # interface isn't a mathematical step function either.
-            vol = F.pad(
-                vol,
+            volume = F.pad(
+                volume,
                 (0, 0, 0, 0, z_edge_margin, z_edge_margin),
                 mode="constant",
                 value=0.0,
@@ -376,8 +378,8 @@ class TiltSeriesGenerator(MicrographGenerator):
             )
 
         if taper_width > 0 or z_taper_width > 0:
-            vol = tilt_geometry.apply_volume_cosine_taper(
-                vol, taper_xy=int(taper_width), taper_z=int(z_taper_width)
+            volume = tilt_geometry.apply_volume_cosine_taper(
+                volume, taper_xy=int(taper_width), taper_z=int(z_taper_width)
             )
             if taper_width > 0:
                 print(
@@ -397,7 +399,7 @@ class TiltSeriesGenerator(MicrographGenerator):
             ctf_params=ctf_params,
             voltage=voltage,
             dose_per_angstrom=dose_per_angstrom,
-            vol=vol,
+            volume=volume,
             anisomag=anisomag,
             scattering_model=scattering_model,
             aberration_model=aberration_model,
@@ -432,7 +434,7 @@ class TiltSeriesGenerator(MicrographGenerator):
             lpp_params=lpp_params,
             **kwargs,
         )
-        # MicrographGenerator.__init__ (just above) registered self.vol as a
+        # MicrographGenerator.__init__ (just above) registered self.volume as a
         # buffer, which would otherwise be dragged onto the compute device by
         # any later `.to(device)` call on this module (e.g. the CLI pipelines'
         # `TiltSeriesGenerator(...).to(device_target)` pattern) -- forcing the
@@ -447,9 +449,9 @@ class TiltSeriesGenerator(MicrographGenerator):
         # by the volume's size -- see dev/tilt series/windowed_streaming_*.py)
         # if it doesn't fit. No flag needed: this is automatic and safe at any
         # volume size, so there's nothing for a caller to get wrong.
-        vol_value = self.vol
-        del self._buffers["vol"]
-        self.vol = vol_value
+        volume_value = self.volume
+        del self._buffers["volume"]
+        self.volume = volume_value
 
         self.slice_batchsize = slice_batchsize
         # pad_fft=True (multislice only) gives the per-slice FFT-based Fresnel
@@ -529,25 +531,25 @@ class TiltSeriesGenerator(MicrographGenerator):
     # Forward methods                                                      #
     # ------------------------------------------------------------------ #
 
-    def _ensure_vol_placed(self) -> None:
+    def _ensure_volume_placed(self) -> None:
         """
-        Try moving ``self.vol`` onto the compute device once; fall back to
+        Try moving ``self.volume`` onto the compute device once; fall back to
         leaving it on CPU (streaming small windowed blocks per Z-chunk via
         ``VolumeRotator.sample_rotated_slices``' ``device`` param instead --
-        see this class's docstring for ``vol``) if it doesn't fit. A no-op on
-        every call after the first, once ``self.vol`` is settled on some
+        see this class's docstring for ``volume``) if it doesn't fit. A no-op on
+        every call after the first, once ``self.volume`` is settled on some
         device.
         """
-        if self.vol.device == self.device:
+        if self.volume.device == self.device:
             return
         try:
-            self.vol = self.vol.to(self.device)
+            self.volume = self.volume.to(self.device)
         except torch.cuda.OutOfMemoryError:
             torch.cuda.empty_cache()
             if self.verbose:
-                gb = self.vol.numel() * self.vol.element_size() / 1e9
+                gb = self.volume.numel() * self.volume.element_size() / 1e9
                 print(
-                    f"[TiltSeriesGenerator] vol ({gb:.1f} GB) does not fit on "
+                    f"[TiltSeriesGenerator] volume ({gb:.1f} GB) does not fit on "
                     f"{self.device}; keeping it on CPU and streaming windowed "
                     "per-chunk fetches instead (slower per step, bounded GPU "
                     "memory regardless of volume size)."
@@ -573,7 +575,7 @@ class TiltSeriesGenerator(MicrographGenerator):
         clean_images : torch.Tensor
             ``|detector_waves|²`` before noise, shape (B, N_tilts, Y, X).
         """
-        self._ensure_vol_placed()
+        self._ensure_volume_placed()
 
         tilt_series = []
         exitwaves = []
@@ -581,8 +583,8 @@ class TiltSeriesGenerator(MicrographGenerator):
         B = len(idx) if isinstance(idx, torch.Tensor) else 1
         n_tilts = len(self.quaternions)
 
-        scale = self.potential_scale[idx].reshape(-1, 1, 1, 1).to(self.vol.device)
-        vol_scaled = self.vol * scale
+        scale = self.potential_scale[idx].reshape(-1, 1, 1, 1).to(self.volume.device)
+        volume_scaled = self.volume * scale
 
         for i in track(
             range(n_tilts),
@@ -596,19 +598,19 @@ class TiltSeriesGenerator(MicrographGenerator):
             if R_mat.ndim == 2:
                 R_mat = R_mat.unsqueeze(0)
             T_torch = rotations.translations_angstrom_to_torch(
-                T, self.vol.shape[-1], self.pixel_size
+                T, self.volume.shape[-1], self.pixel_size
             )
             theta_matrix = rotations.build_affine_matrix(R_mat, T_torch)
 
             exitwave = self.iterative_scattering(
-                vol_scaled, theta_matrix, slice_batchsize=self.slice_batchsize
+                volume_scaled, theta_matrix, slice_batchsize=self.slice_batchsize
             )
 
             ctf_batch = self._ctf_batch(idx)
             if self.scattering_model not in ["projection", "ctf"]:
                 ctf_batch = tilt_geometry.shift_ctf_defocus_for_tilt(
                     ctf_batch,
-                    tuple(self.vol.shape),
+                    tuple(self.volume.shape),
                     theta_matrix,
                     self.nz,
                     self.pixel_size,

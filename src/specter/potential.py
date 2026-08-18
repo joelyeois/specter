@@ -148,7 +148,7 @@ def build_potential_volume_fftconvolve_3d(
         atomic_indices = torch.squeeze(torch.argwhere(atomic_numbers == elem))
 
         # soft_voxelize_coordinates is differentiable w.r.t. coordinates
-        temp_vol = soft_voxelize_coordinates(
+        temp_volume = soft_voxelize_coordinates(
             centered_coords[atomic_indices].reshape(-1, 3),
             grid_shape=(nz, ny, nx),
             voxel_size=dx,
@@ -158,7 +158,7 @@ def build_potential_volume_fftconvolve_3d(
 
         if ssf != 1:
             pot = avgpool3d(pot[None, None]).squeeze(0).squeeze(0)
-        potential_volume += fftconvolve(temp_vol, pot, mode="same")
+        potential_volume += fftconvolve(temp_volume, pot, mode="same")
     return potential_volume, sR
 
 
@@ -213,7 +213,7 @@ def build_potential_volume_fftconvolve_2d(
         atomic_indices = torch.squeeze(torch.argwhere(atomic_numbers == elem))
 
         # soft_voxelize_xy_coordinates is differentiable w.r.t. coordinates
-        temp_vol = soft_voxelize_xy_coordinates(
+        temp_volume = soft_voxelize_xy_coordinates(
             centered_coords[atomic_indices].reshape(-1, 3),
             grid_shape=(nz, ny, nx),
             voxel_size=dx,
@@ -224,7 +224,7 @@ def build_potential_volume_fftconvolve_2d(
         if ssf != 1:
             pot = avgpool2d(pot[None, None]).squeeze(0).squeeze(0)
 
-        potential_volume += spatial_convolve2d_same(temp_vol, pot)  # (nz, ny, nx)
+        potential_volume += spatial_convolve2d_same(temp_volume, pot)  # (nz, ny, nx)
     return potential_volume, sR
 
 
@@ -1511,13 +1511,13 @@ class PotentialBuilder(L.LightningModule):
                             "periodic=True is not supported with method='2d'. "
                             "Use method='3d'."
                         )
-                    temp_vol = soft_voxelize_xy_coordinates(
+                    temp_volume = soft_voxelize_xy_coordinates(
                         coords_elem,
                         grid_shape=(self.nz, self.ny, self.nx),
                         voxel_size=self.dx,
                     )
                     convolved_flat = spatial_convolve2d_same(
-                        temp_vol.reshape(-1, self.ny, self.nx),
+                        temp_volume.reshape(-1, self.ny, self.nx),
                         self.atomic_potentials_2d[i],
                     )
                     potential_volume += convolved_flat.reshape(
@@ -1525,14 +1525,14 @@ class PotentialBuilder(L.LightningModule):
                     )
 
                 elif method == "3d":
-                    temp_vol = soft_voxelize_coordinates(
+                    temp_volume = soft_voxelize_coordinates(
                         coords_elem,
                         grid_shape=(self.nz, self.ny, self.nx),
                         voxel_size=self.dx,
                         periodic=self.periodic,
                     )
                     potential_volume += potential_from_deltas(
-                        temp_vol, self.atomic_potentials_3d[i], backend=conv_backend
+                        temp_volume, self.atomic_potentials_3d[i], backend=conv_backend
                     )
                 else:
                     raise ValueError(f"Unknown method '{method}'. Choose '2d' or '3d'.")
@@ -1894,8 +1894,10 @@ class GemmiPotentialBuilder:
         translated_coordinates = atom_coordinates + self.translate_to_center
 
         if n_processes is None:
-            vol = self._build_single_potential((translated_coordinates, atomic_numbers))
-            return self.c1 * vol
+            volume = self._build_single_potential(
+                (translated_coordinates, atomic_numbers)
+            )
+            return self.c1 * volume
 
         chunks_coords = torch.split(translated_coordinates, n_processes)
         chunks_elements = torch.split(atomic_numbers, n_processes)

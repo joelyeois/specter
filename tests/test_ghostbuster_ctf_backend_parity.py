@@ -28,9 +28,9 @@ _LPP_PARAMS = dict(
 
 @pytest.fixture
 def small_volume() -> torch.Tensor:
-    vol = torch.zeros(16, 16, 16)
-    vol[4:12, 4:12, 4:12] = 50.0
-    return vol
+    volume = torch.zeros(16, 16, 16)
+    volume[4:12, 4:12, 4:12] = 50.0
+    return volume
 
 
 @pytest.fixture

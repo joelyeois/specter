@@ -737,8 +737,8 @@ class IterativeScattering(L.LightningModule):
         slice_indices = slice_positions.float() - (nz_new - 1) / 2
         # device= lets sample_rotated_slices interpolate directly on `device`
         # via a small windowed transfer when V lives elsewhere -- e.g. when
-        # TiltSeriesGenerator's vol didn't fit on the compute device and
-        # stayed on CPU (see its `_ensure_vol_placed`). See its docstring.
+        # TiltSeriesGenerator's volume didn't fit on the compute device and
+        # stayed on CPU (see its `_ensure_volume_placed`). See its docstring.
         # When V and device already match, this is exactly the original
         # direct grid_sample, unchanged.
         return rotator.sample_rotated_slices(

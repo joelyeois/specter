@@ -1164,7 +1164,7 @@ def get_rotation_matrices(sym: str, return_affine: bool = True) -> torch.Tensor:
 
 
 def apply_symmetry(
-    vol: torch.Tensor,
+    volume: torch.Tensor,
     sym_ops: torch.Tensor | str,
     batchsize: int | None = None,
     method: Literal["fourier", "real"] = "fourier",
@@ -1174,7 +1174,7 @@ def apply_symmetry(
 
     Parameters
     ----------
-    vol : torch.Tensor
+    volume : torch.Tensor
         Volume of shape (Z, Y, X).
     sym_ops : torch.Tensor or str
         Either a tensor of shape (n_sym, 3, 4) affine matrices, or a symmetry
@@ -1187,7 +1187,7 @@ def apply_symmetry(
 
     Returns
     -------
-    vol_sym : torch.Tensor
+    volume_sym : torch.Tensor
         Symmetrized volume, same shape as input.
     """
 
@@ -1197,19 +1197,19 @@ def apply_symmetry(
             sym_ops, return_affine=True
         )  # returns tensor n_sym x 3 x 3
 
-    sym_ops = sym_ops.to(vol.device, dtype=vol.dtype)
+    sym_ops = sym_ops.to(volume.device, dtype=volume.dtype)
     n_sym = len(sym_ops)
 
     rotate_fn = rotate_volume_fourier if method == "fourier" else rotate_volume
 
     if batchsize is None:
-        vols = rotate_fn(vol, sym_ops)
-        return vols.mean(dim=0)
+        volumes = rotate_fn(volume, sym_ops)
+        return volumes.mean(dim=0)
 
     # Batched summation
-    vols_sum = torch.zeros_like(vol)
+    volumes_sum = torch.zeros_like(volume)
     for i in range(0, n_sym, batchsize):
         batch_ops = sym_ops[i : i + batchsize]
-        vols_sum += rotate_fn(vol, batch_ops).sum(dim=0)
+        volumes_sum += rotate_fn(volume, batch_ops).sum(dim=0)
 
-    return vols_sum / n_sym
+    return volumes_sum / n_sym

@@ -265,7 +265,7 @@ def grid_3d(
     torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor
 ]:
     """Constructs the xyz coordinate arrays and meshgrids. Meshgrid indexing yields
-    vol[z_i, y_i, x_i] convention which matches cryo-EM software.
+    volume[z_i, y_i, x_i] convention which matches cryo-EM software.
 
     The coordinate grid convention only matters if the number of pixels is even.
 
@@ -1781,12 +1781,12 @@ def tile_volume_from_blocks_blended(
                     acc[i : i + S, j : j + S, k : k + S] += blk * window3d
                     wsum[i : i + S, j : j + S, k : k + S] += window3d
 
-        vol = acc / wsum.clamp_min(1e-8)
-        vol = vol[:A, :B, :C]
+        volume = acc / wsum.clamp_min(1e-8)
+        volume = volume[:A, :B, :C]
 
         if conserve_sum:
-            vol = vol * (target_sum / vol.sum().clamp_min(1e-8))
+            volume = volume * (target_sum / volume.sum().clamp_min(1e-8))
 
-        batch_volumes.append(vol)
+        batch_volumes.append(volume)
 
     return torch.stack(batch_volumes, dim=0)

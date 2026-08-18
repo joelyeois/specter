@@ -486,8 +486,8 @@ def _centered(
 
 
 def fourier_shell_correlation(
-    vol1: torch.Tensor,
-    vol2: torch.Tensor,
+    volume1: torch.Tensor,
+    volume2: torch.Tensor,
     pixelsize: float = 1.0,
     res_cutoff: float | None = None,
     randomise_phases_beyond: float | None = None,
@@ -498,7 +498,7 @@ def fourier_shell_correlation(
 
     Parameters
     ----------
-    vol1, vol2 : torch.Tensor
+    volume1, volume2 : torch.Tensor
         Real-space 3D volumes of shape (N, N, N).
     pixelsize : float, optional
         Pixel size in Å (or consistent units). Default is 1.
@@ -521,11 +521,11 @@ def fourier_shell_correlation(
     # Lazy import to avoid circular dependency (arrays imports fft)
     from .arrays import radial_profile_3d
 
-    n = vol1.shape[0]
-    device = vol1.device
+    n = volume1.shape[0]
+    device = volume1.device
 
-    vol1_f = fft3(vol1, shift=True)
-    vol2_f = fft3(vol2, shift=True)
+    volume1_f = fft3(volume1, shift=True)
+    volume2_f = fft3(volume2, shift=True)
 
     # Apply resolution cutoff and/or phase randomisation if requested.
     # k-grid is fftshifted to match the shifted FFT output (DC at center).
@@ -536,26 +536,26 @@ def fourier_shell_correlation(
 
         if res_cutoff is not None:
             mask = k_mag > (1.0 / res_cutoff)
-            vol1_f = vol1_f.clone()
-            vol2_f = vol2_f.clone()
-            vol1_f[mask] = 0.0
-            vol2_f[mask] = 0.0
+            volume1_f = volume1_f.clone()
+            volume2_f = volume2_f.clone()
+            volume1_f[mask] = 0.0
+            volume2_f[mask] = 0.0
 
         if randomise_phases_beyond is not None:
             rand_mask = k_mag > (1.0 / randomise_phases_beyond)
             rand_phase1 = torch.rand(n, n, n, device=device) * (2 * torch.pi)
             rand_phase2 = torch.rand(n, n, n, device=device) * (2 * torch.pi)
-            phase1 = torch.angle(vol1_f)
-            phase2 = torch.angle(vol2_f)
+            phase1 = torch.angle(volume1_f)
+            phase2 = torch.angle(volume2_f)
             phase1[rand_mask] = rand_phase1[rand_mask]
             phase2[rand_mask] = rand_phase2[rand_mask]
-            vol1_f = vol1_f.abs() * torch.exp(1j * phase1)
-            vol2_f = vol2_f.abs() * torch.exp(1j * phase2)
+            volume1_f = volume1_f.abs() * torch.exp(1j * phase1)
+            volume2_f = volume2_f.abs() * torch.exp(1j * phase2)
 
     # Cross-spectrum F1 * conj(F2) and power spectra.
-    cross = vol1_f * vol2_f.conj()
-    norm1 = vol1_f.real**2 + vol1_f.imag**2  # |F1|^2, avoids sqrt in .abs()
-    norm2 = vol2_f.real**2 + vol2_f.imag**2
+    cross = volume1_f * volume2_f.conj()
+    norm1 = volume1_f.real**2 + volume1_f.imag**2  # |F1|^2, avoids sqrt in .abs()
+    norm2 = volume2_f.real**2 + volume2_f.imag**2
 
     # Radial averages — DC is at (n//2, n//2, n//2), matching the default center.
     cross_r = radial_profile_3d(cross.real)

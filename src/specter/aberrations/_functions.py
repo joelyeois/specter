@@ -11,7 +11,7 @@ Notes
 .. [1] E. J. Kirkland, Advanced Computing in Electron Microscopy (Springer
    US, Boston, MA, 2010).
 .. [2] P. A. Penczek, "Image Restoration in Cryo-Electron Microscopy" in
-   Methods in Enzymology (Academic Press Inc., 2010) vol. 482, pp. 35-72.
+   Methods in Enzymology (Academic Press Inc., 2010) volume. 482, pp. 35-72.
 """
 
 from __future__ import annotations

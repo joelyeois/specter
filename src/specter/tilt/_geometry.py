@@ -55,43 +55,43 @@ def infer_max_tilt_from_inputs(
     return 0.0
 
 
-def pad_vol_xy_for_tilt(
-    vol: torch.Tensor, required_nxy: int, available_nxy: int
+def pad_volume_xy_for_tilt(
+    volume: torch.Tensor, required_nxy: int, available_nxy: int
 ) -> torch.Tensor:
     """
-    Pad ``vol`` symmetrically in XY using reflect mode to reach ``required_nxy``.
+    Pad ``volume`` symmetrically in XY using reflect mode to reach ``required_nxy``.
 
     Parameters
     ----------
-    vol : torch.Tensor
+    volume : torch.Tensor
         Volume of shape (..., Z, Y, X).
     required_nxy : int
         Target XY size after padding.
     available_nxy : int
-        Current XY extent of ``vol``.
+        Current XY extent of ``volume``.
 
     Returns
     -------
-    vol : torch.Tensor
+    volume : torch.Tensor
         Reflect-padded volume.
     """
     pad_each_side = (required_nxy - available_nxy + 1) // 2
     return F.pad(
-        vol,
+        volume,
         (pad_each_side, pad_each_side, pad_each_side, pad_each_side, 0, 0),
         mode="reflect",
     )
 
 
 def apply_volume_cosine_taper(
-    vol: torch.Tensor, taper_xy: int = 0, taper_z: int = 0
+    volume: torch.Tensor, taper_xy: int = 0, taper_z: int = 0
 ) -> torch.Tensor:
     """
     Apply a cosine taper to the XY and/or Z edges of a volume.
 
     Parameters
     ----------
-    vol : torch.Tensor
+    volume : torch.Tensor
         Volume of shape (..., Z, Y, X).
     taper_xy : int
         Taper width in XY pixels. 0 to skip.
@@ -100,14 +100,14 @@ def apply_volume_cosine_taper(
 
     Returns
     -------
-    vol : torch.Tensor
+    volume : torch.Tensor
         Volume with taper applied.
     """
     if taper_xy <= 0 and taper_z <= 0:
-        return vol
+        return volume
 
-    nz, ny, nx = vol.shape[-3], vol.shape[-2], vol.shape[-1]
-    device, dtype = vol.device, vol.dtype
+    nz, ny, nx = volume.shape[-3], volume.shape[-2], volume.shape[-1]
+    device, dtype = volume.device, volume.dtype
     mask = torch.ones(1, device=device, dtype=dtype)
 
     if taper_xy > 0:
@@ -119,14 +119,14 @@ def apply_volume_cosine_taper(
         win_z = cosine_taper_window(nz, taper_z, device, dtype)
         mask = win_z[:, None, None] * mask if mask.ndim == 2 else win_z[:, None, None]
 
-    return vol * mask
+    return volume * mask
 
 
-def nz_tilt_for_pose(vol_shape: tuple[int, ...], theta_matrix: torch.Tensor) -> int:
+def nz_tilt_for_pose(volume_shape: tuple[int, ...], theta_matrix: torch.Tensor) -> int:
     """
     Number of Z slices needed to fully cover a volume once rotated by ``theta_matrix``.
 
-    A pure function of ``vol_shape`` and the pose -- shared by
+    A pure function of ``volume_shape`` and the pose -- shared by
     :class:`~specter.imagegenerator.TiltSeriesGenerator` (forward model) and
     :class:`~specter.ghostbuster.TomogramReconstructor` (inverse problem),
     both of which need it to compute the multislice propagation depth and
@@ -134,7 +134,7 @@ def nz_tilt_for_pose(vol_shape: tuple[int, ...], theta_matrix: torch.Tensor) -> 
 
     Parameters
     ----------
-    vol_shape : tuple of int
+    volume_shape : tuple of int
         Volume shape ``(B, Z, Y, X)``. Only the extents matter, not the data.
     theta_matrix : torch.Tensor
         Affine transformation matrix of shape (B, 3, 4) or (B, 4, 4).
@@ -144,7 +144,7 @@ def nz_tilt_for_pose(vol_shape: tuple[int, ...], theta_matrix: torch.Tensor) -> 
     nz_new : int
         Number of slices.
     """
-    _, Z, Y, X = vol_shape
+    _, Z, Y, X = volume_shape
     device, dtype = theta_matrix.device, theta_matrix.dtype
     R = theta_matrix[:, :3, :3]
 
@@ -174,7 +174,7 @@ def nz_tilt_for_pose(vol_shape: tuple[int, ...], theta_matrix: torch.Tensor) -> 
 
 def shift_ctf_defocus_for_tilt(
     ctf_params: dict[str, torch.Tensor],
-    vol_shape: tuple[int, ...],
+    volume_shape: tuple[int, ...],
     theta_matrix: torch.Tensor,
     nz: int,
     pixel_size: float,
@@ -183,7 +183,7 @@ def shift_ctf_defocus_for_tilt(
     Shift ``dfu``/``dfv`` to account for the extra Z depth multislice propagates
     through at this tilt.
 
-    Multislice propagates ``nz_tilt_for_pose(vol_shape, theta_matrix)`` slices
+    Multislice propagates ``nz_tilt_for_pose(volume_shape, theta_matrix)`` slices
     instead of the untilted ``nz``, shifting the effective specimen centre by
     ``(nz_new - nz) * pixel_size / 2``. Returns a new dict; ``ctf_params``
     itself is left untouched.
@@ -192,7 +192,7 @@ def shift_ctf_defocus_for_tilt(
     ----------
     ctf_params : dict[str, torch.Tensor]
         Per-tilt CTF parameters for this tilt (batch dimension already sliced).
-    vol_shape : tuple of int
+    volume_shape : tuple of int
         Volume shape ``(B, Z, Y, X)`` passed to the propagator.
     theta_matrix : torch.Tensor
         Affine transformation matrix of shape (B, 3, 4) or (B, 4, 4).
@@ -206,7 +206,7 @@ def shift_ctf_defocus_for_tilt(
     dict[str, torch.Tensor]
         ``ctf_params`` with ``dfu``/``dfv`` (if present) shifted.
     """
-    nz_new = nz_tilt_for_pose(vol_shape, theta_matrix)
+    nz_new = nz_tilt_for_pose(volume_shape, theta_matrix)
     z_offset = (nz_new - nz) * pixel_size / 2.0
     shifted = dict(ctf_params)
     if "dfu" in shifted:

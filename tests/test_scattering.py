@@ -144,9 +144,9 @@ def test_iterative_models_consistent_across_batch_size(dummy_volume, scattering_
 
 @pytest.fixture
 def dummy_volume() -> torch.Tensor:
-    vol = torch.zeros(1, 32, 64, 64)
-    vol[0, 12:20, 24:40, 24:40] = 1.0
-    return vol
+    volume = torch.zeros(1, 32, 64, 64)
+    volume[0, 12:20, 24:40, 24:40] = 1.0
+    return volume
 
 
 @pytest.fixture
@@ -157,9 +157,9 @@ def padded_volume():
     boundary contribute nothing, making Scattering and IterativeScattering
     numerically comparable at arbitrary tilt angles.
     """
-    vol = torch.zeros(64, 64, 64)
-    vol[24:40, 24:40, 24:40] = 1.0
-    return vol
+    volume = torch.zeros(64, 64, 64)
+    volume[24:40, 24:40, 24:40] = 1.0
+    return volume
 
 
 @pytest.mark.parametrize(
@@ -194,8 +194,8 @@ def test_scattering_vs_iterative_consistency(padded_volume, angle_deg, atol):
     scat = Scattering(**kwargs)
     scat_iter = IterativeScattering(**kwargs)
 
-    vol_rotated = rotate_volume(padded_volume, theta_matrix, padding_mode="zeros")
-    psi_scat = scat.forward(vol_rotated)
+    volume_rotated = rotate_volume(padded_volume, theta_matrix, padding_mode="zeros")
+    psi_scat = scat.forward(volume_rotated)
 
     psi_iter = scat_iter.forward(padded_volume.unsqueeze(0), theta_matrix)
 

@@ -51,7 +51,6 @@ dependencies = [
 docs = [
     "zensical>=0.0.51",
     "mkdocstrings[python]>=0.30",
-    "mkdocs-material>=9.6",  # fallback renderer for ReadTheDocs' native mkdocs builder
 ]
 
 [dependency-groups]

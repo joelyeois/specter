@@ -26,7 +26,7 @@ uv pip install -e .          # the package itself, not just its dependencies
 uv run --with jupyter jupyter lab
 ```
 
-See the [installation guide](https://joelyeois.github.io/specter/installation.html)
+See the [installation guide](https://joelyeois.github.io/specter/installation/)
 for the conda/pip alternative, GPU notes, and troubleshooting an install
 outside a git checkout.
 

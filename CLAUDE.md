@@ -322,4 +322,4 @@ ice-data/                     # Two 32 MB legacy MDSimDump inputs, notebook-only
 | `click`, `rich-click` | The `specter` CLI (`cli/` package) |
 | `ruff`, `mypy` | Code quality |
 
-`ase` is an optional `dev`-group dependency only (not a runtime dependency); `seaborn` has been dropped entirely (`plots.py` hardcodes its "deep" palette instead).
+`ase` and `seaborn` are `dev`-group dependencies only, not runtime dependencies. `seaborn` is no longer a dependency of the package itself (`plots.py` hardcodes its "deep" palette instead), but it stays in the dev group because it is used for development plotting — do not remove it.

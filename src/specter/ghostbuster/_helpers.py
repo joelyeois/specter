@@ -88,7 +88,7 @@ def _preprocess_particle_images(
     images : torch.Tensor
         Raw particle stack as read from the .mrc/.mrcs file.
     dose_per_angstrom : float
-        Electron dose in e⁻/Å².
+        Total electron dose (fluence) per image in e⁻/Å².
     voxel_size : float
         Voxel size in Å.
 

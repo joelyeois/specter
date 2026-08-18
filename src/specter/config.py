@@ -674,7 +674,7 @@ TILT_SERIES_HELP: dict[str, str] = {
     "micrograph_size": "Output tilt-image size in pixels (square). Defaults "
     "to the XY dimension of the specimen volume.",
     "voltage": "Electron beam accelerating voltage in kV.",
-    "dose_per_tilt": "Dose per tilt angle in e-/A^2.",
+    "dose_per_tilt": "Total dose for each tilt image in e⁻/Å².",
     "n_frames": "Number of movie frames per tilt. Only affects the image "
     "when coincidence_radius > 0, which is what splits the dose into "
     "frames; ignored otherwise.",

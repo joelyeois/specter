@@ -212,7 +212,7 @@ class Aberration(L.LightningModule):
             - 'trefoil1'/'trefoil2' : Trefoil aberration
             - 'tetrafoil1'/'tetrafoil2'/'tetrafoil3'/'tetrafoil4' : Tetrafoil
             - 'bfactor' : Isotropic B-factor envelope in Å²
-            - 'dose' : Cumulative electron dose in e-/Angstrom^2, used by
+            - 'dose' : Cumulative electron dose (fluence) in e⁻/Å², used by
               the dose envelope when ``dose_envelope=True``
 
         Returns

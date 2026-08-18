@@ -331,7 +331,8 @@ def create_particle_starfile(
         (rad)], or a dict keyed by parameter name (e.g. as returned by
         :meth:`~specter.imagegenerator.BaseImager.ctf_params_dict`).
     dose_per_angstrom : torch.Tensor or float, optional
-        Dose per particle in e⁻/Å². Saved as ``specterDosePerAngstrom``.
+        Total electron dose (fluence) per particle image in e⁻/Å². Saved as
+        ``specterDosePerAngstrom``.
     coincidence_radius : torch.Tensor or float, optional
         Coincidence radius per particle in pixels. Saved as ``specterCoincidenceRadius``.
     potential_scale : torch.Tensor or float, optional
@@ -514,7 +515,8 @@ def create_micrograph_starfile(
     filename : str, optional
         Base name for the output files (no extension). Default is "micrographs".
     dose_per_angstrom : torch.Tensor or float, optional
-        Dose per micrograph in e⁻/Å². Saved as ``specterDosePerAngstrom``.
+        Total electron dose (fluence) per micrograph in e⁻/Å². Saved as
+        ``specterDosePerAngstrom``.
     coincidence_radius : torch.Tensor or float, optional
         Coincidence radius per micrograph in pixels. Saved as ``specterCoincidenceRadius``.
     potential_scale : torch.Tensor or float, optional

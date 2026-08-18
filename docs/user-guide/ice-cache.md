@@ -172,7 +172,7 @@ sit in that octave. Measured on one converged 256 Å configuration:
 
 The rendered difference is well below shot noise at any realistic dose — the
 float16 encoding perturbs the projected phase by 2.9 mrad against a
-158 mrad noise floor at 40 e/Å$^2$ — so this was never a visible image-quality
+158 mrad noise floor at 40 e⁻/Å² — so this was never a visible image-quality
 problem. It is that raw `float16` discarded most of the $S(k)$ fidelity each
 configuration spends ~20 minutes earning, in the one quantity the generator
 exists to reproduce, at no saving in file size.

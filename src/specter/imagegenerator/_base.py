@@ -45,7 +45,8 @@ class BaseImager(L.LightningModule):
     voltage : float
         Electron beam accelerating voltage in kV.
     dose_per_angstrom : float or torch.Tensor
-        Electron dose per Å². Scalar or 1-D tensor of length n.
+        Total electron dose (fluence) per image in e⁻/Å². Scalar, or a 1-D
+        tensor of length n giving a separate dose for each image.
     nxy : int
         Unpadded image size in pixels.
     nz : int

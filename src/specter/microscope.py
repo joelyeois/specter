@@ -110,7 +110,8 @@ class Detector(L.LightningModule):
         aberrated_exitwave : torch.Tensor
             Aberrated exit wave from microscope aberration module, shape (B, Y, X).
         dose : torch.Tensor
-            Dose per image in e-/Å², shape (B,). Used for CTF model scaling.
+            Total dose per image in e⁻/Å², shape (B,). Used for CTF model
+            scaling.
 
         Returns
         -------
@@ -206,7 +207,7 @@ class Detector(L.LightningModule):
         aberrated_exitwave : torch.Tensor
             Aberrated exit wave from microscope aberration module.
         dose : torch.Tensor
-            Dose per image in e-/Å², shape (B,).
+            Total dose per image in e⁻/Å², shape (B,).
         coincidence_radius : torch.Tensor
             Coincidence radius per image in pixels, shape (B,).
         anisomag : torch.Tensor, optional
@@ -273,7 +274,8 @@ class Detector(L.LightningModule):
         pixel_size_angstrom : float
             Size of one pixel in Angstroms.
         dose_per_angstrom_sq_per_frame : float
-            Physical dose (e/A^2) in this frame.
+            Physical dose in this single frame, in e⁻/Å² (the image total
+            divided by ``n_frames``).
         coinc_radius_pixels : float, optional
             Effective coincidence exclusion radius in pixels -- see
             :meth:`apply_coincidence` for the definition and calibration.
@@ -396,7 +398,7 @@ class Detector(L.LightningModule):
         img : torch.Tensor
             Total-dose image, shape (H, W).
         dose : float
-            Total dose for this image in e-/Å².
+            Total dose for this image in e⁻/Å².
         coincidence_radius : float
             Effective coincidence exclusion radius in pixels: within a single
             readout frame, an arriving electron is lost if it lands inside the

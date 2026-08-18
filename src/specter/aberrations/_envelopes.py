@@ -128,7 +128,7 @@ def dose_envelope(
     k : torch.Tensor
         Frequency magnitude grid, in 1/Angstrom.
     dose : torch.Tensor
-        Cumulative electron dose (fluence), in e-/Angstrom^2.
+        Cumulative electron dose (fluence), in e⁻/Å².
     a : float, optional
         Fitted parameter from Grant & Grigorieff (2015). Default 0.245.
     b : float, optional

@@ -58,7 +58,7 @@ class Reconstructor(_BaseReconstructor):
     voltage : float
         Electron beam accelerating voltage in kV.
     dose_per_angstrom : float
-        Electron dose in e⁻/Å².
+        Total electron dose (fluence) per image in e⁻/Å².
     lr : float, optional
         Learning rate for volume V. None disables V optimisation.
     lr_R : float, optional

@@ -196,7 +196,7 @@ class CTFParameters(nn.Module):
         produces NaN, not a no-op. Use a small nonzero value (e.g. 1e-4) or
         omit ``lpp_params`` entirely instead.
     dose : float | torch.Tensor, optional
-        Cumulative electron dose in e-/Angstrom^2, for
+        Cumulative electron dose (fluence) in e⁻/Å², for
         :class:`~specter.ctf.TransferFunction`'s dose envelope (Grant &
         Grigorieff 2015). Not a torch-ctf argument at all -- like
         ``aberrations.Aberration``, dose describes a specific exposure, not

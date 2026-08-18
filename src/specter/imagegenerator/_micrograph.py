@@ -36,7 +36,8 @@ class MicrographGenerator(BaseImager):
     voltage : float
         Electron beam accelerating voltage in kV.
     dose_per_angstrom : float or torch.Tensor
-        Electron dose per Å². Scalar or 1-D tensor of length n.
+        Total electron dose (fluence) per micrograph in e⁻/Å². Scalar, or a
+        1-D tensor of length n giving a separate dose for each micrograph.
     vol : torch.Tensor, optional
         Pre-assembled specimen volume of shape (1, Z, Y, X) -- e.g. the
         output of

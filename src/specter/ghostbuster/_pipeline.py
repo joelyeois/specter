@@ -94,7 +94,7 @@ class Ghostbuster:
     mrc_file : str or Path
         Path to the particle stack ``.mrc``/``.mrcs`` file.
     dose_per_angstrom : float
-        Electron dose in e⁻/Å².
+        Total electron dose (fluence) per image in e⁻/Å².
     lr : float, optional
         Learning rate for the volume. ``None`` disables volume optimisation.
     lr_R : float, optional

@@ -31,7 +31,6 @@ from .atom import (
     lobato_atomic_potential_3d,
     peng_atomic_potential_3d,
     plain_exp_shell_average,
-    shtyrov_atomic_potential_3d,
     shtyrov_atomic_potential_3d_by_species,
     yukawa_shell_average,
 )
@@ -929,9 +928,6 @@ class PotentialBuilder(L.LightningModule):
         `atom_species` below).
     conv_backend : str, optional
         Convolution backend: 'fftconvolve' or 'conv3d'. Default is 'fftconvolve'.
-    mmcif_filepath : str, optional
-        Path to a numeric-`scat_id`-keyed mmCIF Shtyrov parameter file.
-        Only used when `atom_species` is not given. Default is None.
     atom_species : sequence of str or None, optional
         Per-atom bonded-species descriptors (e.g. `"O(HH)"`, `"C(HHHC)"`,
         as produced by `specter.pdb.PDB.get_atom_species`), same length
@@ -979,7 +975,6 @@ class PotentialBuilder(L.LightningModule):
         progressbars: bool = True,
         parameterization: str = "shtyrov",
         conv_backend: str = "fftconvolve",
-        mmcif_filepath: str | None = None,
         atom_species: Sequence[str | None] | None = None,
         shtyrov_params_path: str | None = None,
         rcut: float | None = None,
@@ -994,7 +989,6 @@ class PotentialBuilder(L.LightningModule):
         self.dx = dx
         self.progressbars = progressbars
         self.conv_backend = conv_backend
-        self.mmcif_filepath = mmcif_filepath
         # Captured before atom_species may get normalized from None to
         # [None]*N below (see get_3d_atomic_potentials) -- used to silence
         # the "fell back to Peng" warning when the user never provided
@@ -1101,24 +1095,16 @@ class PotentialBuilder(L.LightningModule):
         Potentials are supersampled and downsampled to main grid resolution.
         Results are stored in `self.atomic_potentials_3d`.
         Supports Kirkland, Lobato, and Shtyrov parameterizations. When
-        `parameterization='shtyrov'` and `self.atom_species` is given,
-        kernels are grouped by bonded-species descriptor instead of by
-        element (see `_get_3d_shtyrov_species_potentials`). If
-        `atom_species` is None and no `mmcif_filepath` was given either (so
-        the legacy numeric-`scat_id`-keyed path has nothing to use), falls
-        back to treating every atom as unmatched -- i.e. plain per-element
-        Peng `c4322` factors for all atoms, same as passing
-        `atom_species=[None] * len(atomic_numbers)` explicitly. A given
-        `mmcif_filepath` (legacy path) is left untouched.
+        `parameterization='shtyrov'`, kernels are always grouped by
+        bonded-species descriptor instead of by element (see
+        `_get_3d_shtyrov_species_potentials`) -- if `self.atom_species` is
+        None, it is treated as `[None] * len(atomic_numbers)`, i.e. every
+        atom falls back to plain per-element Peng `c4322` factors.
         """
-        if (
-            self.parameterization == "shtyrov"
-            and self.atom_species is None
-            and self.mmcif_filepath is None
-        ):
+        if self.parameterization == "shtyrov" and self.atom_species is None:
             self.atom_species = [None] * len(self.atomic_numbers)
 
-        if self.parameterization == "shtyrov" and self.atom_species is not None:
+        if self.parameterization == "shtyrov":
             self._get_3d_shtyrov_species_potentials()
             return
 
@@ -1135,28 +1121,14 @@ class PotentialBuilder(L.LightningModule):
             )
 
         for i, elem in enumerate(self.unique_elements):
-            if self.parameterization == "shtyrov":
-                # Legacy numeric-scat_id path, keyed off the mmCIF rather
-                # than a bonded-species descriptor -- the only kernel specter
-                # builds that `build_atomic_potential_kernel` does not cover.
-                # The modern species-grouped path is
-                # `_get_3d_shtyrov_species_potentials` above.
-                if self.mmcif_filepath is None:
-                    raise ValueError("mmcif_filepath must be specified.")
-                pot = shtyrov_atomic_potential_3d(
-                    int(elem), self.sR_3d, self.mmcif_filepath
-                )
-                if self.ssf != 1:
-                    pot = self.avgpool3d(pot[None, None]).squeeze(0).squeeze(0)
-            else:
-                pot = build_atomic_potential_kernel(
-                    self.dx,
-                    parameterization=self.parameterization,
-                    atomic_number=int(elem),
-                    sR=self.sR_3d,
-                    avgpool3d=self.avgpool3d,
-                    ssf=self.ssf,
-                )
+            pot = build_atomic_potential_kernel(
+                self.dx,
+                parameterization=self.parameterization,
+                atomic_number=int(elem),
+                sR=self.sR_3d,
+                avgpool3d=self.avgpool3d,
+                ssf=self.ssf,
+            )
 
             self.atomic_potentials_3d[i] = pot
 

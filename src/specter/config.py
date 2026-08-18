@@ -247,7 +247,6 @@ class ParticleStackConfig:
     # unset. Sized to the structure's atom count -- config-only, not a CLI flag.
     atom_species: list[str] | None = None
     shtyrov_params_path: str | None = None
-    mmcif_filepath: str | None = None
 
     # --- Advanced: scattering ---
     ews_curvature_sign: Literal["negative", "positive"] = "positive"
@@ -310,8 +309,8 @@ PARTICLE_STACK_HELP: dict[str, str] = {
     "n_pixels": "Number of pixels per axis for the 3-D potential box.",
     "pixel_size": "Pixel size in Angstrom.",
     "voltage": "Electron beam accelerating voltage in kV.",
-    "dose": "Dose in e-/A^2: a single value (e.g. 20) for constant dose per "
-    "particle, or 'low,high' (e.g. 20,60) to sample uniformly per particle "
+    "dose": "Total dose per particle in e⁻/Å²: a single value (e.g. 20) for a "
+    "constant dose per particle, or 'low,high' (e.g. 20,60) to sample uniformly per particle "
     "(in a TOML config, write the range as [20, 60]).",
     "cs": "Spherical aberration in mm (1-3 mm typical).",
     "alpha": "Amplitude contrast ratio.",
@@ -383,8 +382,6 @@ PARTICLE_STACK_HELP: dict[str, str] = {
     "smears its edge density onto the opposite face. Requires "
     "potential_method='3d'; 'analytic' and '2d' raise.",
     "shtyrov_params_path": "Override the bundled Shtyrov parameter table.",
-    "mmcif_filepath": "Explicit mmCIF source for bond-typing, if pdb_code alone "
-    "is ambiguous.",
     "ews_curvature_sign": "Ewald sphere curvature sign, matching CryoSPARC's "
     "convention.",
     "klim": "Reciprocal-space cutoff in 1/Angstrom. Unset uses the full Nyquist range.",
@@ -534,8 +531,8 @@ MICROGRAPH_HELP: dict[str, str] = {
     "pixel_size": "Pixel size in Angstrom.",
     "micrograph_size": "Micrograph size in pixels (square).",
     "voltage": "Electron beam accelerating voltage in kV.",
-    "dose": "Dose in e-/A^2: a single value (e.g. 20) for constant dose per "
-    "micrograph, or 'low,high' (e.g. 20,60) to sample uniformly per micrograph "
+    "dose": "Total dose per micrograph in e⁻/Å²: a single value (e.g. 20) for a "
+    "constant dose per micrograph, or 'low,high' (e.g. 20,60) to sample uniformly per micrograph "
     "(in a TOML config, write the range as [20, 60]).",
     "n_frames": "Number of movie frames. Defaults to int(dose) if not set. "
     "Only affects the image when coincidence_radius > 0, which is what "

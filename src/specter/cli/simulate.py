@@ -78,7 +78,6 @@ _PARTICLE_STACK_GROUPS: list[tuple[str, list[str]]] = [
             "conv_backend",
             "periodic",
             "shtyrov_params_path",
-            "mmcif_filepath",
             "ews_curvature_sign",
             "klim",
             "rotate_mode",

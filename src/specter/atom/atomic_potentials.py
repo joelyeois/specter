@@ -558,59 +558,6 @@ def shtyrov_atomic_potential_3d_fourier(
     return s1
 
 
-def shtyrov_atomic_potential_3d(
-    atomic_number: int,
-    r_xyz: torch.Tensor,
-    filepath: str,
-    voltage: float = 300,
-) -> torch.Tensor:
-    """
-    Compute the 3D atomic potential for a specific element using Shtyrov parameterization.
-
-    Based on Shtyrov et al. (2026) Eq.18 -- see :func:`load_shtyrov_parameters`'s
-    References section for the full citation.
-
-    Note: There is a singularity at r = 0 because the atomic nucleus is essentially
-    a point charge on this scale (~1e-5 Å).
-
-    Parameters
-    ----------
-    atomic_number : int
-        Atomic number, Hydrogen has number 1.
-    r_xyz : torch.Tensor
-        3D grid of radial distances.
-    filepath : str
-        Path to the Shtyrov parameter file.
-    voltage : float, optional
-        Beam accelerating voltage in kV. Default 300.
-
-    Returns
-    -------
-    potential : torch.Tensor
-        Atomic potential in units of V, same shape as r_xyz.
-    """
-    a0 = 0.529  # Bohr radius, [Å]
-    e = 14.4  # electron charge, [V·Å]
-    c1 = 2 * torch.pi * e * a0
-
-    shtyrov_params = load_shtyrov_parameters(filepath)  # shape (N, 5, 2)
-    P = shtyrov_params[atomic_number].to(r_xyz.device)  # shape (5, 2)
-    a = P[:, 0].unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)  # shape (5,1,1,1)
-    b = P[:, 1].unsqueeze(-1).unsqueeze(-1).unsqueeze(-1).clamp(min=MIN_GAUSSIAN_B)
-
-    r2 = (r_xyz**2).unsqueeze(0)  # shape (1, Nx, Ny, Nz)
-
-    # Closed-form 3D inverse Fourier transform of a sum of a_i*exp(-b_i*k^2/4)
-    # Gaussians — same functional form Kirkland/Lobato use for their Gaussian
-    # terms, evaluated directly with no FFT/grid dependence (unlike an FFT
-    # route, this needs no periodic box large enough to resolve the
-    # slowest-decaying terms without aliasing).
-    s1 = c1 * torch.sum(
-        a * (4 * torch.pi / b) ** 1.5 * torch.exp(-(torch.pi**2) * r2 / b * 4), 0
-    )
-    return s1
-
-
 @lru_cache(maxsize=4)
 def load_shtyrov_species_parameters(json_filepath: str) -> dict[str, torch.Tensor]:
     """
@@ -700,9 +647,9 @@ def shtyrov_atomic_potential_3d_by_species(
     Compute the 3D real-space atomic potential for a bonded species.
 
     Based on Shtyrov et al. (2026) Eq.18 -- see :func:`load_shtyrov_parameters`'s
-    References section for the full citation. Same closed-form Gaussian-sum approach as
-    :func:`shtyrov_atomic_potential_3d`, but keyed by bonded-species
-    descriptor (e.g. `"O(HH)"`) instead of atomic number.
+    References section for the full citation. Closed-form Gaussian-sum
+    approach, keyed by bonded-species descriptor (e.g. `"O(HH)"`) instead of
+    atomic number.
 
     Parameters
     ----------

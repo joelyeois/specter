@@ -46,7 +46,6 @@ NOT_USER_FACING = {
     "ice_parameterization",
     "shtyrov_params_path",
     "conv_backend",
-    "mmcif_filepath",
 }
 
 

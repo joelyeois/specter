@@ -112,9 +112,7 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
     # atom_species list. Other parameterizations are per-element and would
     # only pay the extra gemmi pass for nothing.
     _derive_atom_species = (
-        config.potential_parameterization == "shtyrov"
-        and config.atom_species is None
-        and config.mmcif_filepath is None
+        config.potential_parameterization == "shtyrov" and config.atom_species is None
     )
     pdb = PDB(
         config.pdb_code,
@@ -164,7 +162,6 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
             pdb.atomic_numbers,
             parameterization=config.potential_parameterization,
             conv_backend=config.conv_backend,
-            mmcif_filepath=config.mmcif_filepath,
             atom_species=config.atom_species or pdb.atom_species,
             shtyrov_params_path=config.shtyrov_params_path,
             rcut=config.rcut,

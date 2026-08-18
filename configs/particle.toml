@@ -77,7 +77,6 @@ periodic = false                 # wrap atom density across the box faces when v
                                  # uses this. Requires potential_method="3d"; "analytic"/"2d" raise.
 # atom_species = ["C.3", "N.ar"]  # per-atom bonded species; auto-detected from PDB bonds if unset
 # shtyrov_params_path = "path/to/params.json"  # override the bundled Shtyrov parameter table
-# mmcif_filepath = "path/to/structure.cif"     # explicit mmCIF source for bond-typing
 
 # scattering
 ews_curvature_sign = "positive"  # negative | positive, matches CryoSPARC's convention

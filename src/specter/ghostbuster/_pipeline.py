@@ -10,7 +10,7 @@ import torch.utils.data
 
 from ._helpers import _preprocess_particle_images
 from ._reconstructor import Reconstructor
-from ._run_helpers import build_trainer
+from ._run_helpers import build_trainer, resolve_device
 
 
 def compare_runs(
@@ -424,7 +424,7 @@ class Ghostbuster:
 
     def run(
         self,
-        device: int | Sequence[int] = 0,
+        device: int | Sequence[int] | str = 0,
         callbacks: list[Any] | None = None,
     ) -> "Reconstructor":
         """
@@ -432,13 +432,15 @@ class Ghostbuster:
 
         Parameters
         ----------
-        device : int or sequence of int
+        device : int or sequence of int or {"cpu"}
             GPU index, or a sequence of GPU indices (e.g. ``[0, 1]``) to train
             across multiple GPUs via Lightning DDP (``strategy="ddp"``).
             Gradients (for the volume, and for rotations/translations/defocus
             when pose refinement is enabled) are synchronised every step via
             DDP's all-reduce, so the returned model is identical whichever
-            rank produced it. Ignored when CUDA is unavailable.
+            rank produced it. Pass ``"cpu"`` to force CPU
+            training; any other value uses the GPU when CUDA is
+            available and falls back to the CPU when it is not.
         callbacks : list, optional
             Additional Lightning callbacks passed to the ``Trainer``.
 
@@ -448,7 +450,7 @@ class Ghostbuster:
             The trained model. Access the volume via ``model.V.detach()``.
         """
         _box = self._images.shape[-1]
-        use_gpu = torch.cuda.is_available()
+        use_gpu, device = resolve_device(device)
         _device_str = f"GPU {device}" if use_gpu else "CPU"
         print(
             f"Starting reconstruction: {len(self._images)} particles  |  box {_box}³  |  "
@@ -469,7 +471,7 @@ class Ghostbuster:
     def test_run(
         self,
         bin_factor: int = 8,
-        device: int | Sequence[int] = 0,
+        device: int | Sequence[int] | str = 0,
         callbacks: list[Any] | None = None,
     ) -> "Reconstructor":
         """
@@ -486,10 +488,10 @@ class Ghostbuster:
         bin_factor : int
             Spatial downsampling factor applied to images and voxel size.
             Default 8.
-        device : int or sequence of int
+        device : int or sequence of int or {"cpu"}
             GPU index, or a sequence of GPU indices (e.g. ``[0, 1]``) to run
-            across multiple GPUs via Lightning DDP. Ignored when CUDA is
-            unavailable.
+            across multiple GPUs via Lightning DDP, or ``"cpu"`` to force
+            CPU training.
         callbacks : list, optional
             Additional Lightning callbacks passed to the ``Trainer``.
 
@@ -512,7 +514,7 @@ class Ghostbuster:
             self.batchsize,
         )
 
-        use_gpu = torch.cuda.is_available()
+        use_gpu, device = resolve_device(device)
         trainer = build_trainer(use_gpu, device, 1, "32", callbacks)
         trainer.fit(model, loader)
 

@@ -34,14 +34,15 @@ outside a git checkout.
 
 ## Usage
 
-Full usage documentation — every demo script's CLI reference, the TOML
+Full usage documentation — the `specter` CLI reference, the TOML
 config system, the physics pipeline, ice generation, Ghostbuster
 reconstruction, and job management — lives in the docs:
 
 **[joelyeois.github.io/specter](https://joelyeois.github.io/specter/)**
 
 Simulation is driven by the `specter` command (`specter simulate particles`,
-`micrograph`, `tiltseries`, `specter build tomogram`); interactive notebooks
-are in `demo-notebooks/`, and `demo-scripts/` holds the few workflows that
-aren't CLI subcommands yet.
+`micrograph`, `tiltseries`, `specter build tomogram`, `specter build ice`),
+and reconstruction by `specter reconstruct particle`, also spelled
+`specter ghostbuster particle`. Interactive notebooks are in
+`demo-notebooks/`.
 

@@ -1,6 +1,7 @@
 from ._ice import run_build_ice_cache
 from ._micrograph import run_micrograph
 from ._particles import run_particle_stack
+from ._reconstruct import run_reconstruction
 from ._tiltseries import run_tilt_series
 from ._tomogram import (
     build_tomogram_generator,
@@ -12,6 +13,7 @@ __all__ = [
     "run_build_ice_cache",
     "run_micrograph",
     "run_particle_stack",
+    "run_reconstruction",
     "run_tilt_series",
     "run_build_tomogram",
     "build_tomogram_generator",

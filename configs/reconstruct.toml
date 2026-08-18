@@ -1,0 +1,146 @@
+# Canonical default config for `specter reconstruct particle`.
+# Full field docs: docs/user-guide/reconstruction.md
+# (or run `specter reconstruct particle --help`).
+#
+# Every flag on the CLI overrides the matching field below.
+#
+# Unlike the `specter simulate` commands, this one has no runnable default:
+# the three fields under [data] name a real dataset, and the paths below are
+# placeholders. Point them at your own .cs file and particle stack, or pass
+# --cs_file/--mrc_file/--dose_per_angstrom on the command line.
+
+
+# =============================================================================
+# DATA
+# Poses, CTF parameters and per-particle scale come from the CryoSPARC .cs
+# file; the .mrc/.mrcs stack is indexed by it. dose_per_angstrom sets the
+# Poisson statistics the loss is weighted by, so it has to be the dataset's
+# real fluence, not a nominal one.
+# =============================================================================
+
+[data]
+cs_file = "path/to/particles.cs"
+mrc_file = "path/to/particles.mrc"
+dose_per_angstrom = 40.0
+return_class = "all"   # "0" | "1" select a halfset and name the outputs
+                       # vol_A.mrc / vol_B.mrc; run both into one project/
+                       # job_id for a gold-standard pair
+# num_particles = 10000  # reconstruct only the first N, instead of all
+
+
+# =============================================================================
+# OPTIMISATION
+# =============================================================================
+
+[optimisation]
+epochs = 5
+batchsize = 3
+lr = 0.1               # volume learning rate; unset to freeze the volume
+scheduler = "LambdaLR"
+lr_decay = 0.1         # LambdaLR only: multiplier = 1 / (1 + lr_decay * sqrt(step))
+
+
+# =============================================================================
+# SYMMETRY
+# Omit `symmetry` for C1. Lower symmetry_batchsize if applying the operators
+# runs out of memory on a large box.
+# =============================================================================
+
+[symmetry]
+# symmetry = "I1"
+symmetry_mode = "fourier"
+# symmetry_batchsize = 3
+
+
+# =============================================================================
+# SANITY CHECK
+# One epoch on binned images: every file path, .cs field and physics setting
+# is exercised at a fraction of the cost. Run this before a multi-hour job.
+# =============================================================================
+
+[sanity_check]
+test_run = false
+bin_factor = 8
+
+
+# =============================================================================
+# COMPUTE
+# =============================================================================
+
+[compute]
+device = "cuda"        # cpu | cuda | cuda:1 | 0,1 (trains across both via DDP)
+precision = "16-mixed" # forced to 32 on CPU
+num_workers = 8
+
+
+# =============================================================================
+# OUTPUT
+# Outputs land in output_dir/run_name/. Setting `project` under [job] instead
+# routes the run through specter.jobs, which numbers the directory and records
+# a parameter snapshot.
+# =============================================================================
+
+[output]
+output_dir = "specter-data/reconstructions"
+run_name = "reconstruction"
+
+
+# =============================================================================
+# JOB TRACKING (opt-in)
+# With `project` set, the run directory becomes
+# <job_base_dir>/<project>/J00N/, and a job.json records every parameter, the
+# git commit and the run's status. Pinning `job_id` resumes into an existing
+# directory, which is how the two halfset runs of a pair share one job.
+# =============================================================================
+
+[job]
+# project = "empiar-10202"
+# job_id = "J001"
+# job_base_dir = "specter-data/reconstructions"   # defaults to output_dir
+
+
+# =============================================================================
+# REFERENCE MAPS
+# Reporting only -- these are never optimised against. cryosparc_ref is only
+# plotted when fsc_ref is given too.
+# =============================================================================
+
+[reference]
+# fsc_ref = "path/to/reference.mrc"
+# fsc_mask = "path/to/mask.mrc"
+# cryosparc_ref = "path/to/cryosparc_volume.mrc"
+use_2d_mask = false
+
+
+# =============================================================================
+# REFINEMENT (UNVERIFIED)
+# Rotation, translation and defocus refinement are wired in, but no test
+# checks the recovered values against ground truth. Treat a run with these
+# set as an experiment rather than a result.
+# =============================================================================
+
+[refinement]
+# lr_R = 1e-4
+# lr_T = 1e-2
+# lr_D = 1e2
+defocus_offset = 0.0   # Angstrom, added to every particle's dfu/dfv
+
+
+# =============================================================================
+# ADVANCED
+# The forward model itself. scattering_model defaults to rytov rather than the
+# simulator's multislice: the model runs once per particle per step, and rytov
+# is the cheapest one that still carries Ewald-sphere curvature.
+# =============================================================================
+
+[advanced]
+scattering_model = "rytov"
+aberration_model = "holography"
+aberration_backend = "legacy"
+ews_curvature_sign = "negative"   # matches CryoSPARC
+rotate_mode = "real"
+learn_noise_model = false
+use_ncc = false
+# bfactor = 100.0    # Angstrom^2 envelope damping high-resolution signal
+# klim = 0.2         # 1/Angstrom hard cutoff
+# sparsity = 1e-4    # L1 weight on the volume

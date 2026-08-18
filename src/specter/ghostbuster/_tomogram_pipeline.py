@@ -9,7 +9,7 @@ import torch
 import torch.nn as nn
 import torch.utils.data
 
-from ._run_helpers import build_trainer
+from ._run_helpers import build_trainer, resolve_device
 from ._tomogram_reconstructor import TomogramReconstructor
 
 
@@ -293,7 +293,7 @@ class TomogramGhostbuster:
 
     def run(
         self,
-        device: int | Sequence[int] = 0,
+        device: int | Sequence[int] | str = 0,
         callbacks: list[Any] | None = None,
     ) -> "TomogramReconstructor":
         """
@@ -302,12 +302,14 @@ class TomogramGhostbuster:
 
         Parameters
         ----------
-        device : int or sequence of int
+        device : int or sequence of int or {"cpu"}
             GPU index, or a sequence of GPU indices (e.g. ``[0, 1]``) to
             train across multiple GPUs via Lightning DDP. A single tomogram's
             tilt series is usually small (tens of tilts), so the benefit of
             splitting it across GPUs is more limited than for particle-stack
-            reconstruction. Ignored when CUDA is unavailable.
+            reconstruction. Pass ``"cpu"`` to force CPU
+            training; any other value uses the GPU when CUDA is
+            available and falls back to the CPU when it is not.
         callbacks : list, optional
             Additional Lightning callbacks.
 
@@ -318,7 +320,7 @@ class TomogramGhostbuster:
         """
         n_tilts = len(self._images)
         nz, nxy = self._volume_init.shape[0], self._volume_init.shape[-1]
-        use_gpu = torch.cuda.is_available()
+        use_gpu, device = resolve_device(device)
         _device_str = f"GPU {device}" if use_gpu else "CPU"
         print(
             f"Starting reconstruction: {n_tilts} tilts  |  "
@@ -339,7 +341,7 @@ class TomogramGhostbuster:
     def test_run(
         self,
         bin_factor: int = 4,
-        device: int | Sequence[int] = 0,
+        device: int | Sequence[int] | str = 0,
         callbacks: list[Any] | None = None,
     ) -> "TomogramReconstructor":
         """
@@ -354,10 +356,10 @@ class TomogramGhostbuster:
         ----------
         bin_factor : int
             Spatial downsampling factor.  Default 4.
-        device : int or sequence of int
+        device : int or sequence of int or {"cpu"}
             GPU index, or a sequence of GPU indices (e.g. ``[0, 1]``) to run
-            across multiple GPUs via Lightning DDP. Ignored when CUDA is
-            unavailable.
+            across multiple GPUs via Lightning DDP, or ``"cpu"`` to force
+            CPU training.
         callbacks : list, optional
             Additional Lightning callbacks.
 
@@ -392,7 +394,7 @@ class TomogramGhostbuster:
             self.scattering_model,
             self.batchsize,
         )
-        use_gpu = torch.cuda.is_available()
+        use_gpu, device = resolve_device(device)
         trainer = build_trainer(use_gpu, device, 1, "32", callbacks)
         trainer.fit(model, loader)
         v = model.V.detach()

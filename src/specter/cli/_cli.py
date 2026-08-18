@@ -5,6 +5,7 @@ from __future__ import annotations
 import rich_click as click
 
 from .build import build_build_group
+from .reconstruct import build_reconstruct_group
 from .simulate import CONTEXT_SETTINGS, build_simulate_group
 
 
@@ -15,6 +16,12 @@ def cli() -> None:
 
 cli.add_command(build_simulate_group())
 cli.add_command(build_build_group())
+cli.add_command(build_reconstruct_group())
+# The same group under the name the solver goes by everywhere else, so
+# `specter ghostbuster particle` and `specter reconstruct particle` are one
+# command. See build_reconstruct_group for why it is an alias inside `specter`
+# rather than a `ghostbuster` console script of its own.
+cli.add_command(build_reconstruct_group(name="ghostbuster"))
 
 
 def main() -> None:

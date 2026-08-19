@@ -33,4 +33,3 @@ instead, see the [User Guide](../user-guide/particle-stack.md).
         - [Other propagation modes](scattering/other-modes.md)
     - [Aberrations](aberrations.md)
     - [Detector](detector.md)
-- [Reconstruction math](reconstruction-math.md) *(work in progress)*

@@ -8,8 +8,8 @@
 <strong>S</strong>cattering & <strong>P</strong>ropagation of <strong>E</strong>lectrons in
 <strong>C</strong>ryo-EM: <strong>T</strong>win <strong>E</strong>mulator &
 <strong>R</strong>econstruction. A physics-based simulator for cryo-EM and cryo-ET,
-built to produce images that match experimental data, and to reconstruct
-3D maps with the same forward model.
+built to produce images that match experimental data as closely as
+possible.
 
 <p align="center" markdown>
   ![A simulated cryo-ET specimen](assets/images/cryoet-tomogram-hero.png){ width="560" }
@@ -60,13 +60,6 @@ built to produce images that match experimental data, and to reconstruct
     settings.
 
     [:octicons-arrow-right-24: Manage jobs](user-guide/jobs.md)
-
--   :material-backup-restore:{ .lg .middle } **Forward and inverse**
-
-    The same forward model that generates images also drives
-    reconstruction, for single particles and for tilt series.
-
-    [:octicons-arrow-right-24: Reconstruction math](concepts/reconstruction-math.md)
 
 </div>
 
@@ -135,13 +128,6 @@ Every workflow below is a `specter` subcommand driven by a TOML config.
 
     [:octicons-arrow-right-24: Using the ice cache](user-guide/ice-cache.md)
 
--   :material-backup-restore:{ .lg .middle } **Reconstruction**
-
-    `specter reconstruct particle` — a 3D map from experimental images
-    and their imaging parameters.
-
-    [:octicons-arrow-right-24: Reconstruct a volume](user-guide/reconstruction.md)
-
 </div>
 
 Any config field can be overridden on the command line; see
@@ -197,11 +183,11 @@ as tracked jobs; see [Manage jobs](user-guide/jobs.md).
 
     [:octicons-arrow-right-24: specter.imagegenerator](api/imagegenerator.md)
 
--   :material-cube-scan:{ .lg .middle } **Reconstruction**
+-   :material-cube-scan:{ .lg .middle } **Specimens**
 
-    `Ghostbuster`, `Reconstructor`, and their tomogram counterparts.
+    Membranes, filaments, microtubules, beads and packing.
 
-    [:octicons-arrow-right-24: specter.ghostbuster](api/ghostbuster.md)
+    [:octicons-arrow-right-24: specter.specimen](api/specimen.md)
 
 -   :material-pipe:{ .lg .middle } **Pipelines**
 

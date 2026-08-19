@@ -140,14 +140,18 @@ def main() -> None:
     _add_base_dir(p_list)
 
     p_show = sub.add_parser("show", help="Show full details for a job")
-    p_show.add_argument("project")
     p_show.add_argument("job_id")
+    p_show.add_argument(
+        "--project", default=None, help="Project name (omit for a no-project job)"
+    )
     _add_base_dir(p_show)
 
     p_diff = sub.add_parser("diff", help="Diff params of two jobs")
-    p_diff.add_argument("project")
     p_diff.add_argument("job_id_a")
     p_diff.add_argument("job_id_b")
+    p_diff.add_argument(
+        "--project", default=None, help="Project name (omit for a no-project job)"
+    )
     _add_base_dir(p_diff)
 
     args = parser.parse_args()

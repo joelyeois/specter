@@ -130,13 +130,21 @@ class Job:
     one continuous sequence per project, shared across every job_type in it
     -- see :func:`_next_job_id`.
 
+    ``project=None`` drops the project segment entirely, giving
+    ``base_dir/job_type/J0NN`` -- the implicit default project (e.g. "the
+    directory you're standing in", for callers that resolve ``base_dir``
+    that way), rather than a job belonging to no project at all. A named
+    ``project`` is for splitting one ``base_dir`` into several, e.g. one
+    shared scratch directory used across unrelated structures.
+
     Parameters
     ----------
     job_type : str
         Names the subfolder a job's output lands in, e.g. ``"ghostbuster"``,
         ``"tilt-series"``. Also recorded in ``job.json`` as ``"type"``.
-    project : str
-        Groups related jobs under a shared folder.
+    project : str, optional
+        Groups related jobs under a shared folder. ``None`` skips the
+        project segment (see above).
     base_dir : str or Path, optional
         Root directory for all job folders. If not given, falls back to
         the session default set via :func:`base_directory`, then the
@@ -147,7 +155,7 @@ class Job:
     def __init__(
         self,
         job_type: str,
-        project: str,
+        project: str | None,
         base_dir: str | Path | None = None,
         job_id: str | None = None,
     ) -> None:
@@ -171,7 +179,9 @@ class Job:
         return self._dir
 
     def __enter__(self) -> Job:
-        project_dir = self._base_dir / self._project
+        project_dir = (
+            self._base_dir if self._project is None else self._base_dir / self._project
+        )
         job_type_dir = project_dir / self._job_type
         job_type_dir.mkdir(parents=True, exist_ok=True)
 

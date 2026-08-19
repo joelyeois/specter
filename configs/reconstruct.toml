@@ -75,38 +75,28 @@ num_workers = 8
 
 
 # =============================================================================
-# OUTPUT
-# Outputs land in output_dir/run_name/. Setting `project` under [job] instead
-# routes the run through specter.jobs, which numbers the directory and records
-# a parameter snapshot.
-# =============================================================================
-
-[output]
-output_dir = "specter-data/reconstructions"
-run_name = "reconstruction"
-
-
-# =============================================================================
-# JOB TRACKING (opt-in)
-# With `project` set, the run directory becomes
-# <job_base_dir>/<project>/reconstructions/J00N/ -- project comes right after
-# job_base_dir, ahead of the reconstructions/ job-type subfolder, so a
+# OUTPUT & JOB TRACKING
+# Every run is numbered and tracked -- there's no untracked mode, the way
+# neither RELION nor CryoSPARC has one. The directory is
+# <job_base_dir>/[project/]reconstructions/J00N/ -- project comes right
+# after job_base_dir, ahead of the reconstructions/ job-type subfolder, so a
 # project's whole history can eventually live in one place as other
-# pipelines gain project tracking too. Numbering (J001, J002, ...) is shared
-# across job types within a project, not restarted per type. A job.json
-# records every parameter, the git commit and the run's status (including
-# resolution_gold_standard, once computed). Without `project`, a
-# gold-standard run still writes both halfsets and
-# fsc_gold_standard.png/.json into one output_dir/run_name/ -- `project`
-# only adds numbering and a queryable history, it isn't required for the two
-# halfsets to share a directory. Pinning `job_id` resumes into an existing
-# directory, e.g. for a manual halfset="A" then halfset="B" pair.
+# pipelines gain project tracking too. `project` is optional, not required:
+# leaving it unset doesn't mean untracked, it just drops the project-name
+# segment, using job_base_dir's implicit default project. Numbering (J001,
+# J002, ...) is shared across job types within a project, not restarted per
+# type. A job.json always records every parameter, the git commit and the
+# run's status (including resolution_gold_standard, once computed). Pinning
+# `job_id` resumes into an existing directory, e.g. for a manual
+# halfset="A" then halfset="B" pair.
 # =============================================================================
 
 [job]
-# project = "empiar-10202"
+# project = "empiar-10202"   # optional: splits one job_base_dir into named projects
 # job_id = "J001"
-# job_base_dir = "specter-data"   # defaults to SPECTER_DATA_DIR
+# job_base_dir = "specter-data"   # defaults to the project root found by
+                                 # walking up from cwd for an existing
+                                 # specter-data/, like git finds .git
 
 
 # =============================================================================

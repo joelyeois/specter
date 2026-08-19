@@ -14,6 +14,7 @@ from specter.config import (
     TiltSeriesConfig,
     TomogramConfig,
     apply_overrides,
+    find_specter_project_root,
     load_config,
     validate_config,
     parse_scalar_or_range,
@@ -137,6 +138,46 @@ def test_omitted_paths_default_under_one_specter_data_dir() -> None:
     assert config.output_dir == os.path.join("specter-data", "particles")
     assert not os.path.isabs(config.pdb_savefolder)
     assert not os.path.isabs(config.output_dir)
+
+
+def test_find_specter_project_root_uses_cwd_when_nothing_found(tmp_path: Path) -> None:
+    """A fresh directory with no specter-data/ anywhere above it becomes the
+    root of a new one -- like `git init` creating a fresh repo at cwd."""
+    fresh = tmp_path / "fresh"
+    fresh.mkdir()
+    assert find_specter_project_root(fresh) == fresh.resolve()
+
+
+def test_find_specter_project_root_finds_specter_data_at_start(tmp_path: Path) -> None:
+    (tmp_path / "specter-data").mkdir()
+    assert find_specter_project_root(tmp_path) == tmp_path.resolve()
+
+
+def test_find_specter_project_root_walks_up_from_subdirectory(tmp_path: Path) -> None:
+    """Running from inside an already-initialised project's subdirectory
+    still resolves to the project root, not a stray new tree -- the whole
+    point of the git-style search."""
+    (tmp_path / "specter-data").mkdir()
+    subdir = tmp_path / "notebooks" / "nested"
+    subdir.mkdir(parents=True)
+    assert find_specter_project_root(subdir) == tmp_path.resolve()
+
+
+def test_find_specter_project_root_prefers_nearest_ancestor(tmp_path: Path) -> None:
+    """Two specter-data/ trees, one nested inside the other's subtree --
+    the nearer one wins, since that's the one actually enclosing cwd."""
+    (tmp_path / "specter-data").mkdir()
+    inner = tmp_path / "other-project"
+    (inner / "specter-data").mkdir(parents=True)
+    assert find_specter_project_root(inner) == inner.resolve()
+
+
+def test_find_specter_project_root_defaults_to_cwd(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "specter-data").mkdir()
+    monkeypatch.chdir(tmp_path)
+    assert find_specter_project_root() == tmp_path.resolve()
 
 
 def test_each_config_outputs_to_its_own_artifact_folder() -> None:

@@ -14,15 +14,22 @@ turn that class into a command:
   or `"cpu"`. `_parse_device` already draws exactly that distinction for the
   simulation pipelines, so this reuses it rather than inventing a second
   spelling.
-- **A run directory.** Untracked runs land in `output_dir/run_name/`,
-  following the same cwd-relative rule as every other specter output. Setting
-  `project` instead routes the run through `specter.jobs`, landing in
-  `job_base_dir/project/reconstructions/J00N/` -- project comes right after
-  `job_base_dir`, ahead of the `reconstructions` job-type subfolder, since
-  users group their own work by project first. Numbering (`J001`, `J002`,
-  ...) is one continuous sequence per project, shared across every job type
-  in it, not restarted per type. Records a parameter snapshot with the git
-  commit, and can resume into a pinned `job_id`.
+- **A run directory.** Every run is numbered and tracked through
+  `specter.jobs` -- there is no untracked mode, the way neither RELION nor
+  CryoSPARC has one. The directory is `job_base_dir/[project/]reconstructions/J00N/`
+  -- project comes right after `job_base_dir`, ahead of the
+  `reconstructions` job-type subfolder, since users group their own work by
+  project first. `project` is optional, not required: omitting it drops
+  just the project-name segment, using `job_base_dir`'s implicit default
+  project rather than skipping tracking. `job_base_dir` itself defaults to
+  the project root found by walking up from cwd for an existing
+  `specter-data/` (`find_specter_project_root`, the same way `git` finds
+  the nearest `.git`), so running from a subdirectory of an
+  already-initialised project lands in the same project rather than
+  starting a second, disconnected tree. Numbering (`J001`, `J002`, ...) is
+  one continuous sequence per project, shared across every job type in it,
+  not restarted per type. Records a parameter snapshot with the git commit,
+  and can resume into a pinned `job_id`.
 - **Gold-standard dispatch.** `halfset="gold"` (the default) reconstructs
   halfsets A and B and computes the halfmap FSC between them, instead of a
   single run. The two halves run as separate worker processes -- in
@@ -40,13 +47,17 @@ from __future__ import annotations
 
 import dataclasses
 import itertools
-import json
 import multiprocessing
 import time
 from pathlib import Path
 from typing import Any, Literal, cast
 
-from specter.config import SPECTER_DATA_DIR, ReconstructionConfig, validate_config
+from specter.config import (
+    SPECTER_DATA_DIR,
+    ReconstructionConfig,
+    find_specter_project_root,
+    validate_config,
+)
 
 from ._common import (
     _console,
@@ -63,8 +74,6 @@ _NON_GHOSTBUSTER_FIELDS = frozenset(
         "test_run",
         "bin_factor",
         "device",
-        "output_dir",
-        "run_name",
         "project",
         "job_id",
         "job_base_dir",
@@ -128,38 +137,6 @@ def _reconstruct_device(device_str: str) -> int | list[int] | str:
     return int(index) if index else 0
 
 
-def _write_resolved_config(config: ReconstructionConfig, run_dir: Path) -> None:
-    """
-    Record the settings an untracked run was launched with, next to its outputs.
-
-    Only called when ``config.project is None``. Tracked runs don't need
-    this: `job.json` already records the full config (either via `job.log`
-    in `_run_gold_standard`, or via `job.create`'s Ghostbuster-argument
-    introspection plus the orchestration fields logged alongside it in
-    `run_reconstruction`) -- writing it again here would just be a second
-    copy of the same content. Untracked runs have no `job.json` at all, so
-    this is their only "how do I reproduce this" record.
-
-    The reconstructor writes its own ``params.json`` too, but that covers
-    only what reaches the `Reconstructor` -- not the device, the run layout,
-    or whether this was a binned test run. This records the whole config.
-
-    Parameters
-    ----------
-    config : ReconstructionConfig
-        The run configuration, after CLI overrides have been applied.
-    run_dir : Path
-        The run directory, which must already exist. The file is suffixed by
-        halfset (``_A``/``_B``) exactly as the reconstructor's own outputs
-        are, so two halfset runs sharing one job directory don't overwrite
-        each other's record.
-    """
-    suffix = {"A": "_A", "B": "_B", "all": ""}[config.halfset]
-    (run_dir / f"reconstruct_config{suffix}.json").write_text(
-        json.dumps(dataclasses.asdict(config), indent=2, default=str)
-    )
-
-
 def run_reconstruction(config: ReconstructionConfig) -> None:
     """
     Reconstruct a 3D volume from a CryoSPARC particle stack.
@@ -176,6 +153,8 @@ def run_reconstruction(config: ReconstructionConfig) -> None:
     directory this function chooses. Nothing is returned: the trained model
     is only meaningful alongside those files.
     """
+    import specter.jobs as jobs
+
     validate_config(config)
     start = time.time()
 
@@ -186,37 +165,24 @@ def run_reconstruction(config: ReconstructionConfig) -> None:
         f"{config.epochs} epochs"
     )
 
+    # Every run is tracked -- resolved once, here, regardless of which
+    # branch below actually opens the Job(s).
+    root = config.job_base_dir or str(find_specter_project_root() / SPECTER_DATA_DIR)
+    jobs.base_directory(root)
+
     if config.halfset == "gold":
         run_dir = _run_gold_standard(config)
-    elif config.project is None:
-        run_dir = Path(config.output_dir) / config.run_name
-        run_dir.mkdir(parents=True, exist_ok=True)
-        _run_single_halfset(config, run_dir)
     else:
         from specter.ghostbuster import Ghostbuster
-        import specter.jobs as jobs
 
-        jobs.base_directory(config.job_base_dir or SPECTER_DATA_DIR)
         with jobs.Job("reconstructions", config.project, job_id=config.job_id) as job:
             # job.create logs every Ghostbuster constructor argument into
-            # job.json and injects run_dir, so the Ghostbuster is built the
-            # same way here as in the untracked branch, minus the explicit
-            # run_dir. That introspection can't see fields Ghostbuster never
-            # receives (test_run, device, ...), so log those separately --
-            # between the two, job.json ends up with the full config, same
-            # as _write_resolved_config would have given an untracked run,
-            # without a second reconstruct_config.json copy of it.
+            # job.json and injects run_dir. That introspection can't see
+            # fields Ghostbuster never receives (test_run, device, ...), so
+            # log those separately -- between the two, job.json ends up
+            # with the full config.
             job.log(
-                {
-                    f: getattr(config, f)
-                    for f in (
-                        "test_run",
-                        "bin_factor",
-                        "device",
-                        "output_dir",
-                        "run_name",
-                    )
-                }
+                {f: getattr(config, f) for f in ("test_run", "bin_factor", "device")}
             )
             kwargs = _ghostbuster_kwargs(config)
             device = _reconstruct_device(config.device)
@@ -242,16 +208,16 @@ def _run_single_halfset(config: ReconstructionConfig, run_dir: Path) -> None:
     Run one halfset reconstruction into an already-resolved run directory.
 
     Module-level (not a closure) so `multiprocessing`'s ``spawn`` context can
-    pickle it when called from `_run_both_halfsets`. Used both for a plain
-    untracked single-halfset run and for each gold-standard worker -- neither
-    case touches `specter.jobs`, since the caller has already decided where
-    output goes.
+    pickle it when called from `_run_both_halfsets`. Only ever called for a
+    gold-standard worker -- it doesn't touch `specter.jobs` itself, since
+    `_run_gold_standard` has already opened the one shared `Job` and handed
+    down its directory.
 
     Parameters
     ----------
     config : ReconstructionConfig
-        Run configuration with ``halfset`` set to ``"A"``, ``"B"``, or
-        ``"all"`` -- never ``"gold"``.
+        Run configuration with ``halfset`` set to ``"A"`` or ``"B"`` --
+        never ``"gold"``.
     run_dir : Path
         Directory to write into. Must already exist.
     """
@@ -259,11 +225,6 @@ def _run_single_halfset(config: ReconstructionConfig, run_dir: Path) -> None:
 
     device = _reconstruct_device(config.device)
     kwargs = _ghostbuster_kwargs(config)
-    if config.project is None:
-        # Tracked runs (project set) already get the full config recorded
-        # in job.json, by the caller -- see _write_resolved_config's
-        # docstring.
-        _write_resolved_config(config, run_dir)
     _fit(Ghostbuster(run_dir=run_dir, **kwargs), config, device)
 
 
@@ -370,12 +331,11 @@ def _run_gold_standard(config: ReconstructionConfig) -> Path:
     """
     Reconstruct both halfsets, then compute and persist the halfmap FSC.
 
-    The run directory (and, when ``project`` is set, the job itself) is
-    resolved exactly once, here, before either halfset worker starts --
-    letting each worker resolve it independently would race on
-    `specter.jobs.Job`'s auto-numbering (see the module docstring). Workers
-    never open their own `Job`; they only ever write into the path this
-    function hands them.
+    The job is opened exactly once, here, before either halfset worker
+    starts -- letting each worker open its own `Job` independently would
+    race on `specter.jobs.Job`'s auto-numbering (see the module docstring).
+    Workers never open their own `Job`; they only ever write into the path
+    this function hands them.
 
     Parameters
     ----------
@@ -387,23 +347,13 @@ def _run_gold_standard(config: ReconstructionConfig) -> Path:
     Path
         The run directory both halfsets and the FSC plot were written into.
     """
-    if config.project is None:
-        run_dir = Path(config.output_dir) / config.run_name
-        run_dir.mkdir(parents=True, exist_ok=True)
+    import specter.jobs as jobs
+
+    with jobs.Job("reconstructions", config.project, job_id=config.job_id) as job:
+        job.log(dataclasses.asdict(config))
+        run_dir = job.dir
         _run_both_halfsets(config, run_dir)
         resolution = _compute_and_save_gold_standard_fsc(run_dir)
-        (run_dir / "fsc_gold_standard.json").write_text(
-            json.dumps({"resolution_gold_standard": resolution}, indent=2)
-        )
-    else:
-        import specter.jobs as jobs
-
-        jobs.base_directory(config.job_base_dir or SPECTER_DATA_DIR)
-        with jobs.Job("reconstructions", config.project, job_id=config.job_id) as job:
-            job.log(dataclasses.asdict(config))
-            run_dir = job.dir
-            _run_both_halfsets(config, run_dir)
-            resolution = _compute_and_save_gold_standard_fsc(run_dir)
-            job.log({"resolution_gold_standard": resolution})
+        job.log({"resolution_gold_standard": resolution})
 
     return run_dir

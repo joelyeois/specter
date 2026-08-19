@@ -35,6 +35,41 @@ PDB_CACHE_ENV_VAR = "SPECTER_PDB_CACHE"
 SPECTER_DATA_DIR = "specter-data"
 
 
+def find_specter_project_root(start: str | Path | None = None) -> Path:
+    """
+    Find the directory a specter project is rooted at, the way ``git``
+    resolves the nearest ancestor containing ``.git``.
+
+    Walks up from ``start`` looking for an existing ``specter-data/``. This
+    is what makes running a tracked command (e.g. ``specter reconstruct``)
+    from a *subdirectory* of an already-initialised project still land in
+    the same project, instead of quietly starting a second, disconnected
+    ``specter-data/`` tree right where you happened to be standing -- and,
+    with it, job numbering (``J001``, ``J002``, ...) that starts over from
+    scratch instead of continuing the real sequence.
+
+    Parameters
+    ----------
+    start : str or Path, optional
+        Directory to start searching from. Defaults to the current working
+        directory.
+
+    Returns
+    -------
+    Path
+        The nearest ancestor directory containing ``specter-data/``, if one
+        exists. Otherwise ``start`` itself, resolved to an absolute path --
+        a directory with no ``specter-data/`` anywhere above it becomes the
+        root of a new one, the same way ``git init`` creates a fresh repo
+        at cwd rather than erroring when no ``.git`` is found.
+    """
+    current = Path(start if start is not None else os.getcwd()).resolve()
+    for candidate in (current, *current.parents):
+        if (candidate / SPECTER_DATA_DIR).is_dir():
+            return candidate
+    return current
+
+
 def default_output_dir(artifact: str) -> str:
     """
     Default output location for one kind of simulated data.
@@ -1301,30 +1336,31 @@ class ReconstructionConfig:
     precision: str = "16-mixed"
     num_workers: int = 8
 
-    # --- Output ---
-    # Outputs land in output_dir/run_name/: vol{_A,_B}.mrc, params.json, an
-    # epochs/ subdirectory of per-epoch volumes and FSC plots. Their names are
-    # fixed by Reconstructor, so run_name names the directory, not the files.
-    output_dir: str = field(
-        default_factory=lambda: default_output_dir("reconstructions")
-    )
-    run_name: str = "reconstruction"
-
-    # --- Job tracking (opt-in) ---
-    # Setting `project` routes output through `specter.jobs` instead: the run
-    # directory becomes job_base_dir/project/reconstructions/<job_id>/,
-    # numbered J001, J002, ... (shared across every job type in the project,
-    # not just reconstructions) and a job.json records the full parameter
-    # set, git commit and status. That is what makes two halfset runs
-    # (halfset "A" then "B") shareable into one job directory, and what lets
-    # a batch script pin a job_id up front and resume into it.
+    # --- Output & job tracking ---
+    # Every run is numbered and routed through `specter.jobs`: the directory
+    # becomes job_base_dir/[project/]reconstructions/<job_id>/, numbered
+    # J001, J002, ... (shared across every job type in the project, not just
+    # reconstructions), with a job.json recording the full parameter set,
+    # git commit and status. That is what makes two halfset runs (halfset
+    # "A" then "B") shareable into one job directory, and what lets a batch
+    # script pin a job_id up front and resume into it.
+    #
+    # `project` is optional, not required: leaving it unset doesn't mean
+    # "untracked" -- it drops just the project-name segment
+    # (job_base_dir/reconstructions/<job_id>/), the implicit default project
+    # for whatever job_base_dir resolves to. Pass `--project` to split one
+    # job_base_dir into several named projects, e.g. one shared scratch
+    # directory used across unrelated structures.
     project: str | None = None
     job_id: str | None = None
-    # Defaults to SPECTER_DATA_DIR ("specter-data"), so `--project foo` alone
-    # works and everything still lands under specter-data/ -- project comes
-    # right after it, ahead of the reconstructions/ job-type subfolder, so a
-    # project's whole history (every pipeline, not just reconstruction) can
-    # eventually live in one place.
+    # Defaults to the project root discovered by walking up from cwd looking
+    # for an existing specter-data/ (find_specter_project_root() --
+    # find_specter_project_root()/specter-data), the same way `git` resolves
+    # the nearest ancestor containing .git -- so running from a subdirectory
+    # of an already-initialised project still lands in the same project,
+    # rather than starting a second, disconnected specter-data/ tree (and
+    # job numbering restarting from J001) right where you happened to be
+    # standing.
     job_base_dir: str | None = None
 
     # --- Reference maps (FSC logging only, never optimised against) ---
@@ -1433,21 +1469,20 @@ RECONSTRUCTION_HELP: dict[str, str] = {
     "precision": "Lightning trainer precision, e.g. 16-mixed or 32. Forced "
     "to 32 on CPU.",
     "num_workers": "Dataloader worker processes.",
-    "output_dir": "Directory the run directory is created in.",
-    "run_name": "Name of the run's own directory inside --output_dir. Names "
-    "the directory, not the files: volume.mrc, params.json and epochs/ are "
-    "named by the reconstructor.",
-    "project": "Route output through specter.jobs instead of "
-    "--output_dir/--run_name: the run lands in "
-    "<job_base_dir>/<project>/reconstructions/J00N/ with a job.json "
-    "recording every parameter, the git commit and the run's status. Omit "
-    "for an untracked run.",
+    "project": "Name for a group of jobs, e.g. one structure's worth of "
+    "runs. Optional: omitting it doesn't mean untracked -- every run is "
+    "numbered and gets a job.json regardless -- it just drops the "
+    "project-name segment, using job_base_dir's implicit default project "
+    "instead of a named one. Pass this to split one job_base_dir into "
+    "several, e.g. one shared scratch directory used across structures.",
     "job_id": "Pin the job directory (e.g. J001) rather than auto-assigning "
-    "the next one: resumes into it if it exists, creates it otherwise. "
-    "Requires --project. This is how two halfset runs share one job.",
-    "job_base_dir": "Root directory for job folders. Defaults to "
-    "specter-data/, so --project alone gives "
-    "specter-data/<project>/reconstructions/J00N/.",
+    "the next one: resumes into it if it exists, creates it otherwise. This "
+    "is how two halfset runs share one job.",
+    "job_base_dir": "Root directory for job folders. Defaults to the "
+    "project root found by walking up from cwd looking for an existing "
+    "specter-data/, the same way git finds the nearest .git -- so running "
+    "from a subdirectory of an already-initialised project lands in the "
+    "same project.",
 }
 
 
@@ -1817,19 +1852,6 @@ def validate_config(config: Any) -> None:
         "fsc_mask",
         "cryosparc_ref",
     )
-
-    # A job id names a directory inside a project, so on its own it has
-    # nothing to identify -- and the run would silently fall back to the
-    # untracked output_dir/run_name layout instead.
-    if getattr(config, "job_id", None) is not None and (
-        getattr(config, "project", None) is None
-    ):
-        _fail(
-            "job_id",
-            config.job_id,
-            "names a directory inside a project, so it needs project set "
-            "too; drop it to write to output_dir/run_name instead",
-        )
 
     min_tilt = getattr(config, "min_tilt_angle", None)
     max_tilt = getattr(config, "max_tilt_angle", None)

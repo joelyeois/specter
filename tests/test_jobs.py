@@ -71,6 +71,26 @@ def test_job_id_shared_across_job_types_in_one_project(tmp_path: Path) -> None:
     assert job3.dir.parent.name == "particles"
 
 
+def test_job_project_none_drops_project_segment(tmp_path: Path) -> None:
+    """project=None isn't "untracked" -- it's base_dir/job_type/J0NN, the
+    implicit default project for whatever base_dir resolves to, skipping
+    just the project-name segment."""
+    with Job("reconstructions", project=None, base_dir=tmp_path) as job:
+        assert job.dir == tmp_path / "reconstructions" / "J001"
+    data = json.loads((job.dir / "job.json").read_text())
+    assert data["project"] is None
+
+
+def test_job_id_shared_across_types_with_no_project(tmp_path: Path) -> None:
+    """The same shared-numbering guarantee holds with project=None too."""
+    with Job("particles", project=None, base_dir=tmp_path) as job1:
+        pass
+    with Job("reconstructions", project=None, base_dir=tmp_path) as job2:
+        pass
+    assert job1.dir.name == "J001"
+    assert job2.dir.name == "J002"
+
+
 def test_resolve_base_dir_from_arg(tmp_path: Path) -> None:
     assert _resolve_base_dir(tmp_path) == tmp_path
 
@@ -358,6 +378,15 @@ def test_database_get_missing_raises(tmp_path: Path) -> None:
         db.get("proj-a", "J999")
 
 
+def test_database_get_no_project(tmp_path: Path) -> None:
+    with Job("ghostbuster", project=None, base_dir=tmp_path) as job:
+        job.log({"lr": 0.1})
+    db = JobDatabase(base_dir=tmp_path)
+    entry = db.get(None, job.dir.name)
+    assert entry["project"] is None
+    assert entry["params"]["lr"] == 0.1
+
+
 def test_database_diff_changed_keys(tmp_path: Path) -> None:
     _make_job(tmp_path, "proj-a", "ghostbuster", {"lr": 0.1, "symmetry": "I1"})
     _make_job(tmp_path, "proj-a", "ghostbuster", {"lr": 0.05, "symmetry": "I1"})
@@ -408,8 +437,9 @@ def test_cli_show_smoke(tmp_path: Path) -> None:
             "-m",
             "specter.jobs._cli",
             "show",
-            "my-project",
             "J001",
+            "--project",
+            "my-project",
             "--base-dir",
             str(tmp_path),
         ],
@@ -418,6 +448,27 @@ def test_cli_show_smoke(tmp_path: Path) -> None:
     )
     assert result.returncode == 0
     assert "J001" in result.stdout
+
+
+def test_cli_show_smoke_no_project(tmp_path: Path) -> None:
+    """--project is omittable, for a job created without one."""
+    with Job("ghostbuster", project=None, base_dir=tmp_path) as job:
+        job.log({"lr": 0.1})
+    result = proc.run(
+        [
+            sys.executable,
+            "-m",
+            "specter.jobs._cli",
+            "show",
+            job.dir.name,
+            "--base-dir",
+            str(tmp_path),
+        ],
+        capture_output=True,
+        encoding="utf-8",
+    )
+    assert result.returncode == 0
+    assert job.dir.name in result.stdout
 
 
 def test_cli_diff_smoke(tmp_path: Path) -> None:
@@ -429,9 +480,10 @@ def test_cli_diff_smoke(tmp_path: Path) -> None:
             "-m",
             "specter.jobs._cli",
             "diff",
-            "my-project",
             "J001",
             "J002",
+            "--project",
+            "my-project",
             "--base-dir",
             str(tmp_path),
         ],

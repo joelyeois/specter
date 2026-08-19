@@ -127,8 +127,13 @@ def real_particle_data(tmp_path: Path) -> tuple[Path, Path]:
     return cs_file, mrc_file
 
 
-def _config(cs_file: Path, mrc_file: Path, output_dir: Path) -> ReconstructionConfig:
-    """A config small and cheap enough to fit on CPU inside a test."""
+def _config(cs_file: Path, mrc_file: Path, job_base_dir: Path) -> ReconstructionConfig:
+    """A config small and cheap enough to fit on CPU inside a test.
+
+    ``job_base_dir`` keeps every run's job.json under tmp_path -- every run
+    is tracked now, there's no untracked output_dir to scope a test to
+    instead.
+    """
     return ReconstructionConfig(
         cs_file=str(cs_file),
         mrc_file=str(mrc_file),
@@ -138,7 +143,7 @@ def _config(cs_file: Path, mrc_file: Path, output_dir: Path) -> ReconstructionCo
         batchsize=2,
         device="cpu",
         num_workers=0,
-        output_dir=str(output_dir),
+        job_base_dir=str(job_base_dir),
     )
 
 
@@ -191,14 +196,22 @@ def test_reconstruct_device(device_str: str, expected: int | list[int] | str) ->
     assert _reconstruct_device(device_str) == expected
 
 
-def test_job_id_without_project_is_rejected(
+def test_job_id_without_project_pins_under_implicit_default_project(
     particle_data: tuple[Path, Path], tmp_path: Path
 ) -> None:
+    """job_id without project is valid: it pins a number directly under
+    job_base_dir's implicit default project, not a named one -- omitting
+    `project` never meant "untracked"."""
     cs_file, mrc_file = particle_data
-    config = _config(cs_file, mrc_file, tmp_path / "out")
-    config.job_id = "J001"
-    with pytest.raises(ValueError, match="job_id.*needs project"):
-        run_reconstruction(config)
+    job_base_dir = tmp_path / "out"
+    config = _config(cs_file, mrc_file, job_base_dir)
+    config.job_id = "J005"
+    config.halfset = "all"
+
+    run_reconstruction(config)
+
+    job_dir = job_base_dir / "reconstructions" / "J005"
+    assert (job_dir / "job.json").exists()
 
 
 def test_missing_input_file_fails_before_any_work(tmp_path: Path) -> None:
@@ -216,25 +229,28 @@ def test_missing_input_file_fails_before_any_work(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_run_reconstruction_writes_a_run_directory(
+def test_run_reconstruction_writes_a_numbered_job_directory(
     particle_data: tuple[Path, Path], tmp_path: Path
 ) -> None:
+    """Leaving project unset doesn't mean untracked: it's still numbered,
+    just under job_base_dir's implicit default project (no project-name
+    segment) instead of a named one."""
     cs_file, mrc_file = particle_data
-    output_dir = tmp_path / "out"
-    config = _config(cs_file, mrc_file, output_dir)
-    config.run_name = "my_run"
+    job_base_dir = tmp_path / "out"
+    config = _config(cs_file, mrc_file, job_base_dir)
     config.halfset = "all"  # single-run path; gold-standard is covered separately
 
     run_reconstruction(config)
 
-    run_dir = output_dir / "my_run"
-    assert (run_dir / "volume.mrc").exists()
-    assert (run_dir / "params.json").exists()
+    job_dir = job_base_dir / "reconstructions" / "J001"
+    assert (job_dir / "volume.mrc").exists()
+    assert (job_dir / "params.json").exists()
 
-    recorded = json.loads((run_dir / "reconstruct_config.json").read_text())
-    assert recorded["dose_per_angstrom"] == 40.0
-    assert recorded["device"] == "cpu"
-    assert recorded["test_run"] is True
+    job = json.loads((job_dir / "job.json").read_text())
+    assert job["project"] is None
+    assert job["params"]["dose_per_angstrom"] == 40.0
+    assert job["params"]["device"] == "cpu"
+    assert job["params"]["test_run"] is True
 
 
 def test_run_reconstruction_halfsets_share_one_job(
@@ -247,17 +263,16 @@ def test_run_reconstruction_halfsets_share_one_job(
     directory instead of failing the identical-settings check.
     """
     cs_file, mrc_file = particle_data
-    output_dir = tmp_path / "out"
+    job_base_dir = tmp_path / "out"
 
     for halfset in ("A", "B"):
-        config = _config(cs_file, mrc_file, output_dir)
+        config = _config(cs_file, mrc_file, job_base_dir)
         config.project = "test-project"
         config.job_id = "J001"
-        config.job_base_dir = str(output_dir)  # keep the job dir under tmp_path
         config.halfset = halfset  # type: ignore[assignment]
         run_reconstruction(config)
 
-    job_dir = output_dir / "test-project" / "reconstructions" / "J001"
+    job_dir = job_base_dir / "test-project" / "reconstructions" / "J001"
     assert (job_dir / "volume_A.mrc").exists()
     assert (job_dir / "volume_B.mrc").exists()
     # job.json already has the full config; a tracked run no longer writes
@@ -282,24 +297,24 @@ def test_run_reconstruction_gold_standard_default(
 
     Needs `real_particle_data`, not the monkeypatched `particle_data` --
     gold-standard mode spawns a real subprocess per halfset, which doesn't
-    inherit a pytest monkeypatch.
+    inherit a pytest monkeypatch. Leaving `project` unset too doesn't mean
+    untracked -- there's no such mode -- just no project-name segment.
     """
     cs_file, mrc_file = real_particle_data
-    output_dir = tmp_path / "out"
-    config = _config(cs_file, mrc_file, output_dir)
+    job_base_dir = tmp_path / "out"
+    config = _config(cs_file, mrc_file, job_base_dir)
     assert config.halfset == "gold"  # exactly what's under test: no override
 
     run_reconstruction(config)
 
-    run_dir = output_dir / "reconstruction"
-    assert (run_dir / "volume_A.mrc").exists()
-    assert (run_dir / "volume_B.mrc").exists()
-    assert (run_dir / "reconstruct_config_A.json").exists()
-    assert (run_dir / "reconstruct_config_B.json").exists()
-    assert (run_dir / "fsc_gold_standard.png").exists()
+    job_dir = job_base_dir / "reconstructions" / "J001"
+    assert (job_dir / "volume_A.mrc").exists()
+    assert (job_dir / "volume_B.mrc").exists()
+    assert (job_dir / "fsc_gold_standard.png").exists()
 
-    fsc_record = json.loads((run_dir / "fsc_gold_standard.json").read_text())
-    assert "resolution_gold_standard" in fsc_record
+    job = json.loads((job_dir / "job.json").read_text())
+    assert job["project"] is None
+    assert "resolution_gold_standard" in job["params"]
 
 
 def test_run_reconstruction_gold_standard_tracked(
@@ -307,14 +322,13 @@ def test_run_reconstruction_gold_standard_tracked(
 ) -> None:
     """Gold-standard with --project logs the resolution into job.json."""
     cs_file, mrc_file = real_particle_data
-    output_dir = tmp_path / "out"
-    config = _config(cs_file, mrc_file, output_dir)
+    job_base_dir = tmp_path / "out"
+    config = _config(cs_file, mrc_file, job_base_dir)
     config.project = "test-project"
-    config.job_base_dir = str(output_dir)  # keep the job dir under tmp_path
 
     run_reconstruction(config)
 
-    job_dir = output_dir / "test-project" / "reconstructions" / "J001"
+    job_dir = job_base_dir / "test-project" / "reconstructions" / "J001"
     assert (job_dir / "volume_A.mrc").exists()
     assert (job_dir / "volume_B.mrc").exists()
     assert (job_dir / "fsc_gold_standard.png").exists()

@@ -47,14 +47,15 @@ class JobDatabase:
                 continue
         return results
 
-    def get(self, project: str, job_id: str) -> dict[str, Any]:
+    def get(self, project: str | None, job_id: str) -> dict[str, Any]:
         """
         Return a single job record by project and ID.
 
         Parameters
         ----------
-        project : str
-            Project folder name.
+        project : str, optional
+            Project folder name. ``None`` for a job created without one
+            (living directly under ``base_dir``, not a named project).
         job_id : str
             Job ID, e.g. ``"J001"``. Unique per project (shared across every
             job_type in it -- see `Job`), so the caller doesn't need to name
@@ -70,7 +71,7 @@ class JobDatabase:
         FileNotFoundError
             If no job with this id exists anywhere under the project.
         """
-        project_dir = self._base_dir / project
+        project_dir = self._base_dir if project is None else self._base_dir / project
         matches = sorted(project_dir.glob(f"*/{job_id}/job.json"))
         if not matches:
             raise FileNotFoundError(
@@ -79,15 +80,15 @@ class JobDatabase:
         return json.loads(matches[0].read_text())
 
     def diff(
-        self, project: str, job_id_a: str, job_id_b: str
+        self, project: str | None, job_id_a: str, job_id_b: str
     ) -> dict[str, tuple[Any, Any]]:
         """
         Compare the ``params`` dicts of two jobs.
 
         Parameters
         ----------
-        project : str
-            Project folder name.
+        project : str, optional
+            Project folder name. ``None`` for jobs created without one.
         job_id_a : str
             First job ID.
         job_id_b : str

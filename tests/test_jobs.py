@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess as proc
 import sys
 from pathlib import Path
@@ -12,6 +13,7 @@ import torch
 
 from specter.jobs._job import Job, _resolve_base_dir
 from specter.jobs._database import JobDatabase
+from specter.jobs._cli import _short_params
 
 
 def test_job_creates_folder(tmp_path: Path) -> None:
@@ -410,6 +412,23 @@ def test_database_diff_missing_key(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
+def test_short_params_default_shows_first_four_scalars() -> None:
+    params = {"a": 1, "b": 2, "c": 3, "d": 4, "e": 5}
+    assert _short_params(params) == "a=1  b=2  c=3  d=4"
+
+
+def test_short_params_keys_overrides_default_order() -> None:
+    """A result logged after training (e.g. e=5, added last) is still
+    shown when explicitly asked for, even though it'd be cut by the
+    default first-4 behaviour."""
+    params = {"a": 1, "b": 2, "c": 3, "d": 4, "e": 5}
+    assert _short_params(params, keys=["e", "a"]) == "e=5  a=1"
+
+
+def test_short_params_keys_missing_key_shows_dash() -> None:
+    assert _short_params({"a": 1}, keys=["a", "missing"]) == "a=1  missing=-"
+
+
 def test_cli_list_smoke(tmp_path: Path) -> None:
     _make_job(tmp_path, "my-project", "ghostbuster", {"lr": 0.1, "symmetry": "I1"})
     result = proc.run(
@@ -426,6 +445,35 @@ def test_cli_list_smoke(tmp_path: Path) -> None:
     )
     assert result.returncode == 0
     assert "my-project" in result.stdout
+
+
+def test_cli_list_show_smoke(tmp_path: Path) -> None:
+    """--show picks specific columns, e.g. a result field the default
+    first-4 cut would otherwise miss."""
+    _make_job(
+        tmp_path,
+        "my-project",
+        "ghostbuster",
+        {"a": 1, "b": 2, "c": 3, "d": 4, "resolution_gold_standard": "3.2 A"},
+    )
+    result = proc.run(
+        [
+            sys.executable,
+            "-m",
+            "specter.jobs._cli",
+            "list",
+            "--show",
+            "resolution_gold_standard",
+            "--base-dir",
+            str(tmp_path),
+        ],
+        capture_output=True,
+        encoding="utf-8",
+        env={**os.environ, "COLUMNS": "300"},  # wide enough that nothing wraps
+    )
+    assert result.returncode == 0
+    assert "resolution_gold_standard" in result.stdout
+    assert "3.2 A" in result.stdout
     assert "J001" in result.stdout
 
 

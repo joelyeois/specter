@@ -1,7 +1,7 @@
 """
 Tests for the end-to-end pipeline classes in ghostbuster.py: Ghostbuster
-(CryoSPARC .cs/.mrc loading + preprocessing), TomogramGhostbuster (tilt-series
-loading), and compare_runs. None of these had any test coverage prior to this
+(CryoSPARC .cs/.mrc loading + preprocessing) and TomogramGhostbuster
+(tilt-series loading). None of these had any test coverage prior to this
 file — only Reconstructor's forward/loss behaviour was tested.
 
 CryoSPARC .cs loading is exercised via a fake `Dataset.load` (same pattern as
@@ -11,7 +11,6 @@ scattering/CTF math downstream is real.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import mrcfile
@@ -24,7 +23,6 @@ from specter.ghostbuster import (
     Reconstructor,
     TomogramGhostbuster,
     TomogramReconstructor,
-    compare_runs,
 )
 from specter.io import _cryosparc
 
@@ -163,33 +161,6 @@ def test_ghostbuster_run_executes(mrc_file: Path) -> None:
 # ---------------------------------------------------------------------------
 # compare_runs
 # ---------------------------------------------------------------------------
-
-
-def test_compare_runs_prints_summary_table(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """compare_runs prints one row per run directory with the requested columns."""
-    for name, params in [
-        ("run1", {"scattering_model": "projection", "lr": 0.1}),
-        ("run2", {"scattering_model": "multislice", "lr": 0.05}),
-    ]:
-        run_dir = tmp_path / name
-        run_dir.mkdir()
-        (run_dir / "params.json").write_text(json.dumps(params))
-
-    compare_runs(base_dir=tmp_path, show_params=["scattering_model", "lr"])
-    out = capsys.readouterr().out
-    assert "run1" in out and "run2" in out
-    assert "projection" in out and "multislice" in out
-
-
-def test_compare_runs_reports_no_runs_found(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """An empty base_dir prints a 'no runs found' message instead of a table."""
-    compare_runs(base_dir=tmp_path)
-    out = capsys.readouterr().out
-    assert "No runs found" in out
 
 
 # ---------------------------------------------------------------------------

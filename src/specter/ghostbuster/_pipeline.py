@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any, Literal, Sequence
 
@@ -11,46 +10,6 @@ import torch.utils.data
 from ._helpers import _preprocess_particle_images
 from ._reconstructor import Reconstructor
 from ._run_helpers import build_trainer, resolve_device
-
-
-def compare_runs(
-    base_dir: str | Path = "output/runs",
-    show_params: list[str] | None = None,
-) -> None:
-    """
-    Print a summary table of all saved Ghostbuster runs.
-
-    Parameters
-    ----------
-    base_dir : str or Path
-        Root directory containing run subdirectories.
-    show_params : list of str, optional
-        Parameter keys to display as columns. Defaults to
-        ``["scattering_model", "lr", "rotate_mode", "use_nps", "niter"]``.
-    """
-    if show_params is None:
-        show_params = ["scattering_model", "lr", "rotate_mode", "use_nps", "niter"]
-
-    seen: set[Path] = set()
-    runs = sorted(
-        p
-        for p in Path(base_dir).glob("*/params*.json")
-        if not (p.parent in seen or seen.add(p.parent))  # type: ignore[func-returns-value]
-    )
-    if not runs:
-        print(f"No runs found in {base_dir}.")
-        return
-
-    col_w = 20
-    header = f"{'run':<45}" + "".join(f"  {k:<{col_w}}" for k in show_params)
-    print(header)
-    print("-" * len(header))
-    for p in runs:
-        d = json.loads(p.read_text())
-        row = f"{p.parent.name:<45}" + "".join(
-            f"  {str(d.get(k, '—')):<{col_w}}" for k in show_params
-        )
-        print(row)
 
 
 class Ghostbuster:

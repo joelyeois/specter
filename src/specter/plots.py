@@ -545,14 +545,15 @@ def plot_halfmap_fsc(
     mask: torch.Tensor | None = None,
     labels: list[str] | None = None,
     show: bool = True,
-) -> matplotlib.figure.Figure | None:
+) -> tuple[matplotlib.figure.Figure | None, list[str]]:
     """
     Compute and plot half-map Fourier Shell Correlations.
 
     Each volume in volumes_A is correlated against the corresponding volume in volumes_B.
     When ``mask`` is provided, both an unmasked and a masked FSC are computed for
-    each volume pair. The resolution at FSC = 0.5 is interpolated from each curve
-    and appended to its legend label.
+    each volume pair. The (unmasked) resolution at the gold-standard FSC = 0.143
+    threshold is interpolated from each curve, appended to its legend label, and
+    returned alongside the figure.
 
     Parameters
     ----------
@@ -576,10 +577,14 @@ def plot_halfmap_fsc(
 
     Returns
     -------
-    matplotlib.figure.Figure or None
+    fig : matplotlib.figure.Figure or None
         ``None`` when ``show=True`` (figure is displayed and closed).
         The figure object when ``show=False``; caller is responsible for
         closing it.
+    resolutions : list of str
+        Unmasked resolution at the FSC=0.143 crossing for each volume pair,
+        e.g. ``"3.201 Å"`` or ``">Nyquist"`` if the curve never drops below
+        0.143 within the Nyquist limit. Same order as ``labels``.
 
     Raises
     ------
@@ -632,6 +637,7 @@ def plot_halfmap_fsc(
     palette = _deep_palette(max(n_volumes, 1))
 
     fig, ax = plt.subplots(figsize=(7, 4.5), dpi=150)
+    resolutions: list[str] = []
 
     for i, (volume_a, volume_b, label) in enumerate(
         zip(volume_list_A, volume_list_B, labels)
@@ -641,13 +647,15 @@ def plot_halfmap_fsc(
         volume_b_f = volume_b.float()
 
         k, fsc = fourier_shell_correlation(volume_a_f, volume_b_f, pixelsize=voxel_size)
+        resolution = _res_at_half(k, fsc)
+        resolutions.append(resolution)
         ax.plot(
             k.cpu(),
             fsc.cpu(),
             color=color,
             ls="-",
             lw=1.8,
-            label=f"{label} ({_res_at_half(k, fsc)})",
+            label=f"{label} ({resolution})",
         )
 
         if mask is not None:
@@ -686,8 +694,8 @@ def plot_halfmap_fsc(
     if show:
         plt.show()
         plt.close(fig)
-        return None
-    return fig
+        return None, resolutions
+    return fig, resolutions
 
 
 def _extract_epoch_number(filename: str) -> int | None:

@@ -21,7 +21,7 @@ CONTEXT_SETTINGS = {"help_option_names": ["-h", "--help"]}
 _RECONSTRUCT_PARTICLE_GROUPS: list[tuple[str, list[str]]] = [
     (
         "Data",
-        ["cs_file", "mrc_file", "dose_per_angstrom", "return_class", "num_particles"],
+        ["cs_file", "mrc_file", "dose_per_angstrom", "halfset", "num_particles"],
     ),
     ("Optimisation", ["epochs", "batchsize", "lr", "scheduler", "lr_decay"]),
     ("Symmetry", ["symmetry", "symmetry_mode", "symmetry_batchsize"]),

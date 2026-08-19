@@ -22,9 +22,10 @@
 cs_file = "path/to/particles.cs"
 mrc_file = "path/to/particles.mrc"
 dose_per_angstrom = 40.0
-return_class = "all"   # "0" | "1" select a halfset and name the outputs
-                       # vol_A.mrc / vol_B.mrc; run both into one project/
-                       # job_id for a gold-standard pair
+halfset = "gold"       # "gold" (default) reconstructs A and B and computes the
+                       # halfmap FSC between them; "A" | "B" reconstructs just
+                       # that half (e.g. a quick test); "all" ignores the split
+                       # and reconstructs every particle as one volume
 # num_particles = 10000  # reconstruct only the first N, instead of all
 
 
@@ -89,8 +90,12 @@ run_name = "reconstruction"
 # JOB TRACKING (opt-in)
 # With `project` set, the run directory becomes
 # <job_base_dir>/<project>/J00N/, and a job.json records every parameter, the
-# git commit and the run's status. Pinning `job_id` resumes into an existing
-# directory, which is how the two halfset runs of a pair share one job.
+# git commit and the run's status (including resolution_gold_standard, once
+# computed). Without `project`, a gold-standard run still writes both
+# halfsets and fsc_gold_standard.png/.json into one output_dir/run_name/ --
+# `project` only adds numbering and a queryable history, it isn't required
+# for the two halfsets to share a directory. Pinning `job_id` resumes into an
+# existing directory, e.g. for a manual halfset="A" then halfset="B" pair.
 # =============================================================================
 
 [job]

@@ -152,7 +152,7 @@ def test_real_csfile_particles_match_across_backends_end_to_end(small_volume):
         anisomag,
         indices,
         split,
-    ) = extract_parameters_from_csfile(CS_PATH, return_class="all", n_particles=5)
+    ) = extract_parameters_from_csfile(CS_PATH, halfset="all", n_particles=5)
 
     def build(backend):
         torch.manual_seed(0)

@@ -182,7 +182,7 @@ def _load_starfile_parameters(
 
 def extract_parameters_from_starfile(
     starfile_path: str,
-    return_class: Literal["1", "2", "all"] = "all",
+    halfset: Literal["A", "B", "all"] = "all",
     rotation_representation: Literal["quaternion", "rotvec"] = "quaternion",
     n_particles: int | None = None,
 ) -> tuple:
@@ -198,14 +198,14 @@ def extract_parameters_from_starfile(
     ----------
     starfile_path : str
         Path of the .star file.
-    return_class : str, optional
-        Which RELION half-set to return, matching the raw values of
-        ``rlnRandomSubset`` ('1' or '2'), or 'all'. Default is 'all'.
+    halfset : str, optional
+        Which gold-standard half-set to return, from ``rlnRandomSubset``
+        (raw values 1 and 2). Options are 'A', 'B', or 'all'. Default is 'all'.
     rotation_representation : str, optional
         Representation of rotations. 'quaternion' or 'rotvec'. Default is 'quaternion'.
     n_particles : int, optional
         If given, only the first ``n_particles`` particles (after filtering by
-        ``return_class``) are returned. Default is None (return all).
+        ``halfset``) are returned. Default is None (return all).
 
     Returns
     -------
@@ -231,8 +231,8 @@ def extract_parameters_from_starfile(
         Indices of the extracted particles from the file.
     halfset_labels : torch.Tensor or None
         1-D integer tensor of length ``N`` with the raw ``rlnRandomSubset``
-        values (1 or 2). Only returned when ``return_class == "all"``;
-        ``None`` otherwise.
+        values (1 or 2) -- 1 corresponds to halfset 'A', 2 to halfset 'B'.
+        Only returned when ``halfset == "all"``; ``None`` otherwise.
     """
     (
         voltage_kv,
@@ -248,16 +248,16 @@ def extract_parameters_from_starfile(
 
     n_total = len(rotations)
 
-    if return_class == "all":
+    if halfset == "all":
         mask = torch.ones(n_total, dtype=torch.bool)
         indices = torch.arange(n_total)
         halfset_labels: torch.Tensor | None = split
     else:
         if split is None:
             raise ValueError(
-                "STAR file has no 'rlnRandomSubset' column; cannot filter by return_class."
+                "STAR file has no 'rlnRandomSubset' column; cannot filter by halfset."
             )
-        mask = split == int(return_class)
+        mask = split == {"A": 1, "B": 2}[halfset]
         indices = torch.squeeze(torch.nonzero(mask))
         halfset_labels = None
 

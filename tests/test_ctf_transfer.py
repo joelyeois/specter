@@ -1112,7 +1112,7 @@ def test_first_five_particles_of_real_csfile_match_old_aberration():
         anisomag,
         indices,
         split,
-    ) = extract_parameters_from_csfile(_REAL_CS_FILE, return_class="all", n_particles=5)
+    ) = extract_parameters_from_csfile(_REAL_CS_FILE, halfset="all", n_particles=5)
 
     n_pixels = 256
     voltage = float(voltage_kv)

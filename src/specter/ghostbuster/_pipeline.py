@@ -58,9 +58,9 @@ class Ghostbuster:
     End-to-end reconstruction pipeline for cryo-EM/cryo-ET.
 
     .. note::
-        ``return_class`` and ``cryosparc_ref`` are excluded from the job
+        ``halfset`` and ``cryosparc_ref`` are excluded from the job
         parameter log (see :attr:`_job_log_exclude`) because they differ
-        between halfsets. ``return_class`` encodes halfset identity in the
+        between halfsets. ``halfset`` encodes halfset identity in the
         output filenames (``volume_A.mrc`` / ``volume_B.mrc``), and ``cryosparc_ref``
         points to the corresponding halfset reference. Both halfset runs must
         use identical settings for every other parameter.
@@ -174,14 +174,14 @@ class Ghostbuster:
         Dataloader worker processes.
     num_particles : int, optional
         Use only the first ``num_particles`` particles. Defaults to all.
-    return_class : {"0", "1", "all"}
-        Particle class to extract from the ``.cs`` file.
+    halfset : {"A", "B", "all"}
+        Gold-standard half-set to extract from the ``.cs`` file.
     run_dir : str or Path, optional
         Directory for all job outputs. Injected automatically by
         :meth:`~specter.jobs.Job.create` when used inside a ``Job`` context.
     """
 
-    _job_log_exclude: tuple[str, ...] = ("return_class", "cryosparc_ref")
+    _job_log_exclude: tuple[str, ...] = ("halfset", "cryosparc_ref")
 
     def __init__(
         self,
@@ -224,11 +224,10 @@ class Ghostbuster:
         precision: str = "16-mixed",
         num_workers: int = 0,
         num_particles: int | None = None,
-        return_class: Literal["0", "1", "all"] = "all",
+        halfset: Literal["A", "B", "all"] = "all",
         run_dir: str | Path | None = None,
     ) -> None:
-        _halfset_map: dict[str, str | None] = {"0": "A", "1": "B", "all": None}
-        self.halfset_label: str | None = _halfset_map[return_class]
+        self.halfset_label: str | None = halfset if halfset != "all" else None
 
         (
             voltage,
@@ -240,7 +239,7 @@ class Ghostbuster:
             scale,
             anisomag,
             indices,
-        ) = self._load_particle_parameters(cs_file, return_class, num_particles)
+        ) = self._load_particle_parameters(cs_file, halfset, num_particles)
         images = self._load_particle_images(mrc_file, indices)
 
         voxel_size = float(
@@ -297,7 +296,7 @@ class Ghostbuster:
     @staticmethod
     def _load_particle_parameters(
         cs_file: str | Path,
-        return_class: Literal["0", "1", "all"],
+        halfset: Literal["A", "B", "all"],
         num_particles: int | None,
     ) -> tuple[
         torch.Tensor,
@@ -326,7 +325,7 @@ class Ghostbuster:
             indices,
             _split,
         ) = extract_parameters_from_csfile(
-            str(cs_file), return_class=return_class, n_particles=num_particles
+            str(cs_file), halfset=halfset, n_particles=num_particles
         )
         n_loaded = len(rotations)
         voltage_val = float(voltage.item() if hasattr(voltage, "item") else voltage)

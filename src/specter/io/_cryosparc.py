@@ -179,7 +179,7 @@ def _load_csfile_parameters(
 
 def extract_parameters_from_csfile(
     csfile_path: str,
-    return_class: Literal["0", "1", "all"] = "all",
+    halfset: Literal["A", "B", "all"] = "all",
     rotation_representation: Literal["quaternion", "rotvec"] = "quaternion",
     n_particles: int | None = None,
 ) -> tuple:
@@ -190,14 +190,14 @@ def extract_parameters_from_csfile(
     ----------
     csfile_path : str
         Path of the .cs file.
-    return_class : str, optional
-        Specifies which particle class to return. Options are '0', '1', or 'all'.
-        Default is 'all'.
+    halfset : str, optional
+        Which gold-standard half-set to return, from ``alignments3D/split``
+        (raw values 0 and 1). Options are 'A', 'B', or 'all'. Default is 'all'.
     rotation_representation : str, optional
         Representation of rotations. 'quaternion' or 'rotvec'. Default is 'quaternion'.
     n_particles : int, optional
         If given, only the first ``n_particles`` particles (after filtering by
-        ``return_class``) are returned. Default is None (return all).
+        ``halfset``) are returned. Default is None (return all).
 
     Returns
     -------
@@ -220,10 +220,9 @@ def extract_parameters_from_csfile(
     indices : torch.Tensor
         Indices of the extracted particles from the dataset.
     halfset_labels : torch.Tensor or None
-        1-D integer tensor of length ``N`` with values ``0`` or ``1`` from
-        ``alignments3D/split``, ready to pass as ``halfset_labels`` to
-        :func:`~specter.ghostbuster.run_halfsets`.
-        Only returned when ``return_class == "all"``; ``None`` otherwise.
+        1-D integer tensor of length ``N`` with the raw ``alignments3D/split``
+        values (0 or 1) -- 0 corresponds to halfset 'A', 1 to halfset 'B'.
+        Only returned when ``halfset == "all"``; ``None`` otherwise.
     """
     (
         voltage_kv,
@@ -237,12 +236,12 @@ def extract_parameters_from_csfile(
         split,
     ) = _load_csfile_parameters(csfile_path, rotation_representation)
 
-    if return_class == "all":
+    if halfset == "all":
         mask = torch.ones_like(split, dtype=torch.bool)
         indices = torch.arange(len(split))
         halfset_labels: torch.Tensor | None = split
-    else:  # "0" or "1"
-        mask = split == int(return_class)
+    else:  # "A" or "B"
+        mask = split == {"A": 0, "B": 1}[halfset]
         indices = torch.squeeze(torch.nonzero(mask))
         halfset_labels = None
 

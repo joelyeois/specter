@@ -111,19 +111,19 @@ def test_ghostbuster_loads_and_preprocesses_images(mrc_file: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    "return_class,expected_label",
-    [("0", "A"), ("1", "B"), ("all", None)],
+    "halfset,expected_label",
+    [("A", "A"), ("B", "B"), ("all", None)],
 )
 def test_ghostbuster_halfset_label_mapping(
-    mrc_file: Path, return_class: str, expected_label: str | None
+    mrc_file: Path, halfset: str, expected_label: str | None
 ) -> None:
-    """return_class maps to halfset_label as documented: '0'->A, '1'->B, 'all'->None."""
+    """halfset maps to halfset_label as documented: 'A'->A, 'B'->B, 'all'->None."""
     gb = Ghostbuster(
         cs_file="fake.cs",
         mrc_file=str(mrc_file),
         dose_per_angstrom=2.0,
         scattering_model="projection",
-        return_class=return_class,
+        halfset=halfset,
     )
     assert gb.halfset_label == expected_label
 

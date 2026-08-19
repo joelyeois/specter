@@ -52,7 +52,7 @@ def test_extract_parameters_all_particles() -> None:
         anisomag,
         indices,
         halfset_labels,
-    ) = extract_parameters_from_csfile("fake.cs", return_class="all")
+    ) = extract_parameters_from_csfile("fake.cs", halfset="all")
 
     assert rotations.shape == (6, 4)
     assert translations_A.shape == (6, 2)
@@ -63,7 +63,7 @@ def test_extract_parameters_all_particles() -> None:
 
 def test_extract_parameters_by_class() -> None:
     (_, _, _, rotations, _, ctf_params, _, _, indices, halfset_labels) = (
-        extract_parameters_from_csfile("fake.cs", return_class="1")
+        extract_parameters_from_csfile("fake.cs", halfset="B")
     )
 
     assert rotations.shape == (3, 4)
@@ -74,7 +74,7 @@ def test_extract_parameters_by_class() -> None:
 
 def test_extract_parameters_n_particles_truncates_after_class_filter() -> None:
     (_, _, _, rotations, _, ctf_params, _, _, indices, _) = (
-        extract_parameters_from_csfile("fake.cs", return_class="1", n_particles=2)
+        extract_parameters_from_csfile("fake.cs", halfset="B", n_particles=2)
     )
 
     assert rotations.shape == (2, 4)
@@ -84,7 +84,7 @@ def test_extract_parameters_n_particles_truncates_after_class_filter() -> None:
 
 def test_extract_parameters_n_particles_all() -> None:
     (_, _, _, rotations, _, _, _, _, indices, halfset_labels) = (
-        extract_parameters_from_csfile("fake.cs", return_class="all", n_particles=4)
+        extract_parameters_from_csfile("fake.cs", halfset="all", n_particles=4)
     )
 
     assert rotations.shape == (4, 4)
@@ -116,7 +116,7 @@ def test_trefoil_scaling_matches_cryosparc_formula(
     old hardcoded /1000 scale factor."""
     monkeypatch.setattr(_cryosparc, "Dataset", _TrefoilTetrafoilDataset)
     (_, _, _, _, _, ctf_params, _, _, _, _) = extract_parameters_from_csfile(
-        "fake.cs", return_class="all"
+        "fake.cs", halfset="all"
     )
 
     wavelength = energy_to_wavelength(torch.tensor(300.0))
@@ -141,7 +141,7 @@ def test_tetrafoil_extraction_matches_cryosparc_formula(
     (prefactor pi/2*wavelength^3, sign-flipped on index 3)."""
     monkeypatch.setattr(_cryosparc, "Dataset", _TrefoilTetrafoilDataset)
     (_, _, _, _, _, ctf_params, _, _, _, _) = extract_parameters_from_csfile(
-        "fake.cs", return_class="all"
+        "fake.cs", halfset="all"
     )
 
     wavelength = energy_to_wavelength(torch.tensor(300.0))

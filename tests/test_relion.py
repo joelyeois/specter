@@ -175,7 +175,7 @@ def test_extract_parameters_from_starfile_single_block(tmp_path) -> None:
     assert torch.equal(halfset_labels, torch.tensor([1, 2, 1, 2]))
 
 
-def test_extract_parameters_from_starfile_return_class_filters_halfset(
+def test_extract_parameters_from_starfile_halfset_filters_particles(
     tmp_path,
 ) -> None:
     df = _single_block_star_df()
@@ -183,7 +183,7 @@ def test_extract_parameters_from_starfile_return_class_filters_halfset(
     starfile.write(df, star_path, overwrite=True)
 
     (_, _, _, rotations, _, ctf_params, _, _, indices, halfset_labels) = (
-        extract_parameters_from_starfile(str(star_path), return_class="2")
+        extract_parameters_from_starfile(str(star_path), halfset="B")
     )
 
     assert rotations.shape == (2, 4)

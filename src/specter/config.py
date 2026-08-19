@@ -1258,9 +1258,12 @@ class ReconstructionConfig:
     # Total fluence per image, e-/A^2. Sets the Poisson statistics the loss is
     # weighted by, so it has to be the real value for the dataset.
     dose_per_angstrom: float
-    # Which CryoSPARC class to reconstruct. "0"/"1" select a halfset (and name
-    # the outputs vol_A.mrc / vol_B.mrc); "all" uses every particle.
-    return_class: Literal["0", "1", "all"] = "all"
+    # Which gold-standard half-set to reconstruct. "gold" (the default)
+    # reconstructs A and B and computes the halfmap FSC between them; "A"/"B"
+    # select a single halfset (and name the outputs vol_A.mrc / vol_B.mrc),
+    # useful for a quick test of one half; "all" uses every particle in one
+    # single-volume run, ignoring the split entirely.
+    halfset: Literal["A", "B", "all", "gold"] = "gold"
     # Reconstruct only the first N particles. Useful for a quick run before
     # committing to the full stack; None uses all of them.
     num_particles: int | None = None
@@ -1311,7 +1314,7 @@ class ReconstructionConfig:
     # Setting `project` routes output through `specter.jobs` instead: the run
     # directory becomes job_base_dir/project/<job_id>/, numbered J001, J002,
     # ... and a job.json records the full parameter set, git commit and
-    # status. That is what makes two halfset runs (return_class "0" then "1")
+    # status. That is what makes two halfset runs (halfset "A" then "B")
     # shareable into one job directory, and what lets a batch script pin a
     # job_id up front and resume into it.
     project: str | None = None
@@ -1365,10 +1368,10 @@ RECONSTRUCTION_HELP: dict[str, str] = {
     "dose_per_angstrom": "Total fluence per image in e-/Angstrom^2. Sets the "
     "Poisson statistics the loss is weighted by, so it must be the dataset's "
     "real value.",
-    "return_class": "Which CryoSPARC class to reconstruct. 0 and 1 select a "
-    "halfset and name the outputs volume_A.mrc / volume_B.mrc; all uses every "
-    "particle. Run 0 and 1 into one --project/--job_id for a gold-standard "
-    "pair.",
+    "halfset": "Which gold-standard half-set to reconstruct. gold (the "
+    "default) reconstructs A and B and computes the halfmap FSC between "
+    "them; A or B alone reconstructs just that half, e.g. for a quick test; "
+    "all uses every particle in one single-volume run, ignoring the split.",
     "num_particles": "Reconstruct only the first N particles instead of the "
     "whole stack.",
     "fsc_ref": "Reference volume (.mrc) for map-to-model FSC logging. Never "

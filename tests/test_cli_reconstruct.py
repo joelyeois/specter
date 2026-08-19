@@ -81,6 +81,52 @@ def particle_data(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path
     return cs_file, mrc_file
 
 
+@pytest.fixture
+def real_particle_data(tmp_path: Path) -> tuple[Path, Path]:
+    """A genuine .cs file on disk (not monkeypatched) and a tiny particle stack.
+
+    `multiprocessing`'s ``spawn`` context starts a fresh interpreter that
+    doesn't inherit `particle_data`'s monkeypatch on `_cryosparc.Dataset` --
+    gold-standard mode spawns exactly that kind of subprocess per halfset, so
+    it needs a real, loadable file instead.
+    """
+    from cryosparc.dataset import Dataset
+
+    n = _N_PARTICLES
+    dtype = np.float32
+    rng = np.random.default_rng(0)
+    dataset = Dataset(
+        allocate={
+            "alignments3D/shift": rng.normal(size=(n, 2)).astype(dtype),
+            "alignments3D/psize_A": np.full(n, 1.5, dtype=dtype),
+            "ctf/cs_mm": np.full(n, 2.7, dtype=dtype),
+            "ctf/df_angle_rad": rng.normal(size=n).astype(dtype),
+            "ctf/df1_A": (rng.normal(size=n) + 10000).astype(dtype),
+            "ctf/df2_A": (rng.normal(size=n) + 10000).astype(dtype),
+            "ctf/amp_contrast": np.full(n, 0.1, dtype=dtype),
+            "ctf/accel_kv": np.full(n, 300.0, dtype=dtype),
+            "alignments3D/pose": rng.normal(size=(n, 3)).astype(dtype),
+            "alignments3D/split": np.array([0, 1, 0, 1]),
+            "ctf/tilt_A": np.zeros((n, 2), dtype=dtype),
+            "ctf/phase_shift_rad": np.zeros(n, dtype=dtype),
+            "ctf/shift_A": np.zeros((n, 2), dtype=dtype),
+            "ctf/trefoil_A": np.zeros((n, 2), dtype=dtype),
+            "ctf/tetra_A": np.zeros((n, 4), dtype=dtype),
+            "alignments3D/alpha": np.ones(n, dtype=dtype),
+            "ctf/anisomag": np.zeros((n, 4), dtype=dtype),
+        }
+    )
+    cs_file = tmp_path / "particles.cs"
+    dataset.save(str(cs_file))
+
+    mrc_file = tmp_path / "particles.mrc"
+    images = rng.normal(size=(n, _BOX, _BOX)).astype(np.float32)
+    with mrcfile.new(str(mrc_file), overwrite=True) as mrc:
+        mrc.set_data(images)
+
+    return cs_file, mrc_file
+
+
 def _config(cs_file: Path, mrc_file: Path, output_dir: Path) -> ReconstructionConfig:
     """A config small and cheap enough to fit on CPU inside a test."""
     return ReconstructionConfig(
@@ -177,6 +223,7 @@ def test_run_reconstruction_writes_a_run_directory(
     output_dir = tmp_path / "out"
     config = _config(cs_file, mrc_file, output_dir)
     config.run_name = "my_run"
+    config.halfset = "all"  # single-run path; gold-standard is covered separately
 
     run_reconstruction(config)
 
@@ -195,18 +242,18 @@ def test_run_reconstruction_halfsets_share_one_job(
 ) -> None:
     """The A/B workflow: two runs into one pinned job, side by side.
 
-    This is what the jobs branch exists for -- `return_class` is excluded
+    This is what the jobs branch exists for -- `halfset` is excluded
     from the job parameter log, so the second run resumes into the same
     directory instead of failing the identical-settings check.
     """
     cs_file, mrc_file = particle_data
     output_dir = tmp_path / "out"
 
-    for return_class in ("0", "1"):
+    for halfset in ("A", "B"):
         config = _config(cs_file, mrc_file, output_dir)
         config.project = "test-project"
         config.job_id = "J001"
-        config.return_class = return_class  # type: ignore[assignment]
+        config.halfset = halfset  # type: ignore[assignment]
         run_reconstruction(config)
 
     job_dir = output_dir / "test-project" / "J001"
@@ -218,6 +265,54 @@ def test_run_reconstruction_halfsets_share_one_job(
     job = json.loads((job_dir / "job.json").read_text())
     assert job["status"] == "complete"
     assert job["params"]["dose_per_angstrom"] == 40.0
+
+
+def test_run_reconstruction_gold_standard_default(
+    real_particle_data: tuple[Path, Path], tmp_path: Path
+) -> None:
+    """Leaving halfset unset defaults to gold-standard: both halves, then FSC.
+
+    Needs `real_particle_data`, not the monkeypatched `particle_data` --
+    gold-standard mode spawns a real subprocess per halfset, which doesn't
+    inherit a pytest monkeypatch.
+    """
+    cs_file, mrc_file = real_particle_data
+    output_dir = tmp_path / "out"
+    config = _config(cs_file, mrc_file, output_dir)
+    assert config.halfset == "gold"  # exactly what's under test: no override
+
+    run_reconstruction(config)
+
+    run_dir = output_dir / "reconstruction"
+    assert (run_dir / "volume_A.mrc").exists()
+    assert (run_dir / "volume_B.mrc").exists()
+    assert (run_dir / "reconstruct_config_A.json").exists()
+    assert (run_dir / "reconstruct_config_B.json").exists()
+    assert (run_dir / "fsc_gold_standard.png").exists()
+
+    fsc_record = json.loads((run_dir / "fsc_gold_standard.json").read_text())
+    assert "resolution_gold_standard" in fsc_record
+
+
+def test_run_reconstruction_gold_standard_tracked(
+    real_particle_data: tuple[Path, Path], tmp_path: Path
+) -> None:
+    """Gold-standard with --project logs the resolution into job.json."""
+    cs_file, mrc_file = real_particle_data
+    output_dir = tmp_path / "out"
+    config = _config(cs_file, mrc_file, output_dir)
+    config.project = "test-project"
+
+    run_reconstruction(config)
+
+    job_dir = output_dir / "test-project" / "J001"
+    assert (job_dir / "volume_A.mrc").exists()
+    assert (job_dir / "volume_B.mrc").exists()
+    assert (job_dir / "fsc_gold_standard.png").exists()
+
+    job = json.loads((job_dir / "job.json").read_text())
+    assert job["status"] == "complete"
+    assert "resolution_gold_standard" in job["params"]
 
 
 # ---------------------------------------------------------------------------

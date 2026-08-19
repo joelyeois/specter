@@ -227,7 +227,7 @@ def test_real_csfile_particles_match_old_aberration_end_to_end():
         anisomag,
         indices,
         split,
-    ) = extract_parameters_from_csfile(CS_PATH, return_class="all", n_particles=20)
+    ) = extract_parameters_from_csfile(CS_PATH, halfset="all", n_particles=20)
 
     n_pixels = 128
     voltage = float(voltage_kv)

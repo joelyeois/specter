@@ -55,17 +55,25 @@ from specter.specimen._parallel_render import (
     resolve_render_workers,
 )
 
-from ._common import _console, _format_elapsed, _section
+from ._common import (
+    _console,
+    _deterministic_tracked_path,
+    _format_elapsed,
+    _section,
+    _tracked_output_dir,
+)
 
 
 def tomogram_output_path(config: TomogramConfig) -> str:
     """
     The ``.mrc`` path `run_build_tomogram` writes for a given config.
 
-    Deterministic from ``config.output_dir``/``config.filename`` alone, so
-    callers that chain straight into `specter simulate tiltseries` (e.g.
+    Deterministic from ``config.output_dir``/``config.filename`` (or, if
+    tracked, ``job_base_dir``/``project``/``job_id``) alone, so callers
+    that chain straight into `specter simulate tiltseries` (e.g.
     ``run_tilt_series(..., tomogram_config=...)``) can compute it without
-    re-deriving the naming convention themselves.
+    re-deriving the naming convention themselves, or waiting for
+    `run_build_tomogram` to hand anything back.
 
     Parameters
     ----------
@@ -77,8 +85,27 @@ def tomogram_output_path(config: TomogramConfig) -> str:
     str
         Path to the ``.mrc`` file this config's `run_build_tomogram` call
         writes (or would write, for ``n_tomograms=1``).
+
+    Raises
+    ------
+    ValueError
+        If ``config`` is tracked (``project`` or ``job_id`` set) but
+        ``job_id`` itself is unpinned -- an auto-assigned id isn't knowable
+        ahead of the run, which this function deliberately never queries
+        the filesystem to find out. Pin ``job_id`` explicitly to call this
+        before the run happens, e.g. for tomogram_config chaining.
     """
-    return os.path.join(config.output_dir, config.filename + ".mrc")
+    if config.project is None and config.job_id is None:
+        output_dir = config.output_dir
+    elif config.job_id is None:
+        raise ValueError(
+            "tomogram_output_path: config.job_id must be pinned explicitly "
+            "when project is set -- an auto-assigned id can't be known "
+            "before the run actually happens."
+        )
+    else:
+        output_dir = _deterministic_tracked_path(config, "tomograms")
+    return os.path.join(output_dir, config.filename + ".mrc")
 
 
 def run_build_tomogram(config: TomogramConfig, n_tomograms: int = 1) -> None:
@@ -146,16 +173,27 @@ def run_build_tomogram(config: TomogramConfig, n_tomograms: int = 1) -> None:
             "-- there is only one carbon film per tomogram, at most one "
             "[[carbon_film]] table is allowed."
         )
-    for i in range(n_tomograms):
-        run_config = config
-        if n_tomograms > 1:
-            _section(f"Tomogram {i + 1}/{n_tomograms}")
+    with _tracked_output_dir(config, "tomograms") as base_output_dir:
+        for i in range(n_tomograms):
+            if n_tomograms > 1:
+                _section(f"Tomogram {i + 1}/{n_tomograms}")
+            # Tracking (if any) is resolved once, above, into base_output_dir --
+            # run_config always gets a plain, already-resolved output_dir and
+            # cleared tracking fields, so _run_single_tomogram/tomogram_output_path
+            # never need to know whether this call was tracked.
             run_config = dataclasses.replace(
                 config,
-                output_dir=os.path.join(config.output_dir, f"{i + 1:04d}"),
+                output_dir=(
+                    base_output_dir
+                    if n_tomograms == 1
+                    else os.path.join(base_output_dir, f"{i + 1:04d}")
+                ),
+                project=None,
+                job_id=None,
+                job_base_dir=None,
                 seed=None if config.seed is None else config.seed + i,
             )
-        _run_single_tomogram(run_config)
+            _run_single_tomogram(run_config)
 
 
 def _protein_specs_from_dicts(

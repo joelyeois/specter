@@ -27,6 +27,76 @@ from specter.config import (
 _console = Console()
 
 
+def _deterministic_tracked_path(config: Any, job_type: str) -> str:
+    """
+    Compute a tracked job's directory as a pure string join -- no
+    filesystem access, no `specter.jobs.Job` involved.
+
+    ``job_base_dir/[project/]job_type/job_id``, matching exactly what
+    `specter.jobs.Job` itself would resolve to. Requires ``config.job_id``
+    to already be set (see `_tracked_output_dir`'s docstring for why: this
+    exists specifically for callers -- a non-main DDP rank, or a pipeline
+    computing where a *sibling* pipeline's tracked output will land --
+    that need to agree on the path without opening a real `Job`
+    themselves).
+
+    Parameters
+    ----------
+    config : Any
+        A pipeline config with ``project``/``job_id``/``job_base_dir``
+        fields, ``job_id`` set.
+    job_type : str
+        Job-type folder name, e.g. ``"tomograms"``.
+
+    Returns
+    -------
+    str
+        The directory a `Job` with this config would resolve to.
+    """
+    root = config.job_base_dir or str(find_specter_project_root() / SPECTER_DATA_DIR)
+    parts = [root]
+    if config.project is not None:
+        parts.append(config.project)
+    parts.extend([job_type, config.job_id])
+    return os.path.join(*parts)
+
+
+def _reserve_next_job_id(project: str | None, job_base_dir: str) -> str:
+    """
+    Compute (but don't create) the next free job id for a project -- the
+    same read-only scan `specter.jobs.Job` itself does when auto-numbering.
+
+    For a caller that needs to pin an id *before* a chained sub-call opens
+    the real `Job` (e.g. `run_tilt_series` cascading tracking into a
+    `tomogram_config` it's about to pass to `run_build_tomogram`), so both
+    the sub-call and this caller's own later `_deterministic_tracked_path`
+    computation agree on the same directory without the sub-call needing
+    to hand anything back. Same narrow scan-then-create race window as
+    `Job`'s own auto-numbering -- already accepted there, not a new risk
+    introduced here.
+
+    Parameters
+    ----------
+    project : str, optional
+        Project name, or ``None`` for the implicit default project.
+    job_base_dir : str
+        Root directory jobs are created under.
+
+    Returns
+    -------
+    str
+        The job id the next `Job(...)` opened for this project would get.
+    """
+    from pathlib import Path
+
+    from specter.jobs._job import _next_job_id
+
+    project_dir = (
+        Path(job_base_dir) if project is None else Path(job_base_dir) / project
+    )
+    return _next_job_id(project_dir)
+
+
 @contextmanager
 def _tracked_output_dir(
     config: Any, job_type: str, is_main: bool = True
@@ -74,20 +144,15 @@ def _tracked_output_dir(
         yield config.output_dir
         return
 
-    root = config.job_base_dir or str(find_specter_project_root() / SPECTER_DATA_DIR)
-
     if not is_main:
-        parts = [root]
-        if config.project is not None:
-            parts.append(config.project)
-        parts.extend([job_type, config.job_id])
-        yield os.path.join(*parts)
+        yield _deterministic_tracked_path(config, job_type)
         return
 
     import dataclasses
 
     import specter.jobs as jobs
 
+    root = config.job_base_dir or str(find_specter_project_root() / SPECTER_DATA_DIR)
     jobs.base_directory(root)
     with jobs.Job(job_type, config.project, job_id=config.job_id) as job:
         job.log(dataclasses.asdict(config))

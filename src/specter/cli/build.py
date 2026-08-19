@@ -56,6 +56,7 @@ _TOMOGRAM_GROUPS: list[tuple[str, list[str]]] = [
         ["device", "accumulator_device", "render_workers", "render_chunk_size"],
     ),
     ("Output", ["output_dir", "filename"]),
+    ("Job tracking", ["project", "job_id", "job_base_dir"]),
     ("Advanced", ["pdb_savefolder", "seed"]),
 ]
 

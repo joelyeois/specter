@@ -17,7 +17,13 @@ import time
 import torch
 
 import specter
-from specter.config import TiltSeriesConfig, TomogramConfig, validate_config
+from specter.config import (
+    SPECTER_DATA_DIR,
+    TiltSeriesConfig,
+    TomogramConfig,
+    find_specter_project_root,
+    validate_config,
+)
 from specter.imagegenerator import TiltSeriesGenerator
 from specter.io import create_micrograph_starfile
 from specter.specimen import load_specimen_volume
@@ -26,6 +32,7 @@ from ._common import (
     _console,
     _format_elapsed,
     _parse_device,
+    _reserve_next_job_id,
     _save_exitwave_pair,
     _section,
     _tracked_output_dir,
@@ -58,6 +65,17 @@ def run_tilt_series(
         `run_build_tomogram(tomogram_config, n_tomograms=N)` yourself and
         loop `run_tilt_series(config=..., ...)` over each resulting
         ``volume_path`` instead.
+
+        If this run is tracked (``config.project``/``job_id`` set) and
+        ``tomogram_config`` wasn't independently configured for tracking,
+        ``tomogram_config``'s project and job_base_dir are set to match --
+        one tracked chained call then produces two separate jobs, one
+        "tomograms" and one "tiltseries", under the same project, linked
+        implicitly by this run's ``volume_path`` pointing into the
+        tomogram job's directory. Give ``tomogram_config`` its own
+        ``project``/``job_id`` explicitly to opt out of this (e.g. to
+        reuse one tracked tomogram build across several tiltseries runs in
+        a different project).
     """
     if tomogram_config is not None:
         if config.volume_path:
@@ -67,6 +85,42 @@ def run_tilt_series(
                 "tomogram_config to build a fresh volume first, or "
                 "config.volume_path to reuse an already-built one."
             )
+
+        # Cascade project (+ job_base_dir) from the outer run, but only if
+        # tomogram_config wasn't independently configured for tracking at
+        # all -- an explicit tomogram_config.project must never be
+        # silently overridden.
+        if (
+            tomogram_config.project is None
+            and tomogram_config.job_id is None
+            and (config.project is not None or config.job_id is not None)
+        ):
+            tomogram_config = dataclasses.replace(
+                tomogram_config,
+                project=config.project,
+                job_base_dir=tomogram_config.job_base_dir or config.job_base_dir,
+            )
+
+        # Whichever way tracking ended up on for tomogram_config -- cascaded
+        # above, or the caller's own explicit project -- an unpinned job_id
+        # can't be known ahead of time by tomogram_output_path below, which
+        # runs *after* run_build_tomogram returns using this same config
+        # object. Reserve one now so both agree on the same path without
+        # either function handing anything back to the other -- the same
+        # can't-coordinate-after-the-fact problem multi-GPU DDP has (see
+        # _tracked_output_dir), just between two pipeline calls instead of
+        # two processes.
+        if (
+            tomogram_config.project is not None or tomogram_config.job_id is not None
+        ) and tomogram_config.job_id is None:
+            root = tomogram_config.job_base_dir or str(
+                find_specter_project_root() / SPECTER_DATA_DIR
+            )
+            job_id = _reserve_next_job_id(tomogram_config.project, root)
+            tomogram_config = dataclasses.replace(
+                tomogram_config, job_id=job_id, job_base_dir=root
+            )
+
         _section("Building specimen volume (tomogram_config)")
         run_build_tomogram(tomogram_config)
         config = dataclasses.replace(

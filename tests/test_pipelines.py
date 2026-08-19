@@ -10,8 +10,19 @@ import pytest
 import starfile
 from cryosparc.dataset import Dataset
 
-from specter.config import MicrographConfig, ParticleStackConfig, TiltSeriesConfig
-from specter.pipelines import run_micrograph, run_particle_stack, run_tilt_series
+from specter.config import (
+    MicrographConfig,
+    ParticleStackConfig,
+    TiltSeriesConfig,
+    TomogramConfig,
+)
+from specter.pipelines import (
+    run_build_tomogram,
+    run_micrograph,
+    run_particle_stack,
+    run_tilt_series,
+)
+from specter.pipelines._tomogram import tomogram_output_path
 
 # Every field _load_csfile_parameters (specter.io._cryosparc) reads off a
 # CryoSPARC passthrough .cs -- fabricated here so the test needs no real
@@ -330,3 +341,113 @@ def test_run_tilt_series_tracked_by_project(tmp_path: Path) -> None:
         assert mrc.data.shape == (3, 48, 48)
     job = json.loads((job_dir / "job.json").read_text())
     assert job["status"] == "complete"
+
+
+def _minimal_tomogram_config(**overrides) -> TomogramConfig:
+    defaults = dict(
+        target_shape=[24, 48, 48],
+        voxel_size=12.0,
+        targets=[{"pdb_source": "6bdf", "n_copies": 1}],
+        device="cpu",
+        write_picks=False,
+        write_segmentation=False,
+    )
+    defaults.update(overrides)
+    return TomogramConfig(**defaults)
+
+
+def test_run_build_tomogram_tracked_by_project(tmp_path: Path) -> None:
+    config = _minimal_tomogram_config(project="apoferritin", job_base_dir=str(tmp_path))
+    run_build_tomogram(config)
+
+    job_dir = tmp_path / "apoferritin" / "tomograms" / "J001"
+    assert (job_dir / "tomogram.mrc").exists()
+    job = json.loads((job_dir / "job.json").read_text())
+    assert job["status"] == "complete"
+
+
+def test_tomogram_output_path_tracked_requires_pinned_job_id() -> None:
+    config = _minimal_tomogram_config(project="apoferritin")
+    with pytest.raises(ValueError, match="job_id"):
+        tomogram_output_path(config)
+
+
+def test_tomogram_output_path_tracked_with_pinned_job_id(tmp_path: Path) -> None:
+    config = _minimal_tomogram_config(
+        project="apoferritin", job_id="J005", job_base_dir=str(tmp_path)
+    )
+    assert tomogram_output_path(config) == str(
+        tmp_path / "apoferritin" / "tomograms" / "J005" / "tomogram.mrc"
+    )
+
+
+def test_run_tilt_series_chained_tomogram_config_creates_two_separate_jobs(
+    tmp_path: Path,
+) -> None:
+    """A tracked run with tomogram_config produces two separate, same-project
+    jobs (one "tomograms", one "tiltseries"), linked implicitly by
+    volume_path -- not one merged job, and not one tracked + one flat."""
+    tomogram_config = _minimal_tomogram_config()
+    assert tomogram_config.project is None  # not independently configured
+
+    config = TiltSeriesConfig(
+        voxel_size=12.0,
+        micrograph_size=48,
+        min_tilt_angle=-5,
+        max_tilt_angle=5,
+        n_tilts=3,
+        n_frames=1,
+        ice_model="none",
+        noise_model="none",
+        detector_model="none",
+        scattering_model="ctf",
+        device="cpu",
+        project="apoferritin",
+        job_base_dir=str(tmp_path),
+    )
+    run_tilt_series(config, tomogram_config=tomogram_config)
+
+    tomo_dir = tmp_path / "apoferritin" / "tomograms" / "J001"
+    tilt_dir = tmp_path / "apoferritin" / "tiltseries" / "J002"
+    assert (tomo_dir / "tomogram.mrc").exists()
+    assert (tilt_dir / "tilt_series.mrcs").exists()
+
+    tomo_job = json.loads((tomo_dir / "job.json").read_text())
+    tilt_job = json.loads((tilt_dir / "job.json").read_text())
+    assert tomo_job["status"] == "complete"
+    assert tilt_job["status"] == "complete"
+    # The link: the tiltseries job's own recorded volume_path points
+    # straight into the tomogram job's directory.
+    assert tilt_job["params"]["volume_path"] == str(tomo_dir / "tomogram.mrc")
+
+
+def test_run_tilt_series_chained_tomogram_config_respects_explicit_tracking(
+    tmp_path: Path,
+) -> None:
+    """If tomogram_config already has its own project, cascading doesn't
+    override it -- e.g. reusing one tracked tomogram build across several
+    tiltseries runs in a different project."""
+    tomogram_config = _minimal_tomogram_config(
+        project="shared-tomograms", job_base_dir=str(tmp_path)
+    )
+    config = TiltSeriesConfig(
+        voxel_size=12.0,
+        micrograph_size=48,
+        min_tilt_angle=-5,
+        max_tilt_angle=5,
+        n_tilts=3,
+        n_frames=1,
+        ice_model="none",
+        noise_model="none",
+        detector_model="none",
+        scattering_model="ctf",
+        device="cpu",
+        project="this-run",
+        job_base_dir=str(tmp_path),
+    )
+    run_tilt_series(config, tomogram_config=tomogram_config)
+
+    assert (
+        tmp_path / "shared-tomograms" / "tomograms" / "J001" / "tomogram.mrc"
+    ).exists()
+    assert (tmp_path / "this-run" / "tiltseries" / "J001" / "tilt_series.mrcs").exists()

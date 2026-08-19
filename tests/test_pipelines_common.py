@@ -1,8 +1,10 @@
-"""Tests for `specter.pipelines._common`'s `_tracked_output_dir` -- the
-job-tracking wrapper shared by run_particle_stack/run_micrograph/
-run_tilt_series. A minimal stand-in config (not ParticleStackConfig) keeps
-these fast and focused on the wrapper's own branching, independent of any
-real pipeline's setup cost.
+"""Tests for `specter.pipelines._common`'s job-tracking helpers --
+_tracked_output_dir (shared by run_particle_stack/run_micrograph/
+run_tilt_series/run_build_tomogram) and _reserve_next_job_id (used to
+cascade tracking through run_tilt_series's tomogram_config chaining). A
+minimal stand-in config (not ParticleStackConfig) keeps these fast and
+focused on the wrapper's own branching, independent of any real pipeline's
+setup cost.
 """
 
 from __future__ import annotations
@@ -14,7 +16,8 @@ from pathlib import Path
 
 import pytest
 
-from specter.pipelines._common import _tracked_output_dir
+from specter.jobs import Job
+from specter.pipelines._common import _reserve_next_job_id, _tracked_output_dir
 
 
 @dataclasses.dataclass
@@ -98,3 +101,19 @@ def test_tracked_records_failure_status(tmp_path: Path) -> None:
     job = json.loads((Path(output_dir) / "job.json").read_text())
     assert job["status"] == "failed"
     assert job["error"] == "boom"
+
+
+def test_reserve_next_job_id_matches_what_job_itself_would_assign(
+    tmp_path: Path,
+) -> None:
+    assert _reserve_next_job_id("apoferritin", str(tmp_path)) == "J001"
+
+    with Job("tomograms", project="apoferritin", base_dir=tmp_path):
+        pass
+    assert _reserve_next_job_id("apoferritin", str(tmp_path)) == "J002"
+
+
+def test_reserve_next_job_id_no_project(tmp_path: Path) -> None:
+    with Job("particles", project=None, base_dir=tmp_path):
+        pass
+    assert _reserve_next_job_id(None, str(tmp_path)) == "J002"

@@ -27,6 +27,21 @@ pdb_savefolder = "specter-data/pdb"         # relative to your working directory
 output_dir = "specter-data/tomograms"
 filename = "tomogram"
 
+# Job tracking (opt-in) -- set project or job_id to route output through
+# specter.jobs instead of output_dir/filename above: the directory becomes
+# job_base_dir/[project/]tomograms/J00N/, numbered, with a job.json
+# recording every parameter, the git commit and the run's status. Neither
+# is required -- leaving both unset keeps the flat behavior above exactly.
+# When chained via --tomogram_config on `specter simulate tiltseries`,
+# leaving this unset while tracking the tiltseries run cascades that
+# project here automatically -- two separate, linked jobs from one call.
+[job]
+# project = "my-project"
+# job_id = "J001"
+# job_base_dir = "specter-data"   # defaults to the project root found by
+                                 # walking up from cwd for an existing
+                                 # specter-data/, like git finds .git
+
 [picks]
 write_picks = true
 annotation_version = "1.0"

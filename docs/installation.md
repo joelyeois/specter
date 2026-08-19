@@ -134,7 +134,13 @@ cd monomers && git sparse-checkout set a c d g h i l m n p s t v w y
 ```
 
 `$CLIBD_MON` is the variable CCP4 already uses, so an existing CCP4 install
-needs no extra setup. It can also be passed explicitly:
+needs no extra setup. It is the only place SPECTER looks: there is no config or
+CLI equivalent, since the library is an installation detail rather than a
+per-simulation choice, and the Monomer Library documents this variable as the
+way to point at it. `~` and `$VAR` in the path are expanded, and a path that
+does not exist fails immediately rather than silently degrading to Peng.
+
+Python callers can still override it per structure:
 
 ```python
 from specter.pdb import PDB

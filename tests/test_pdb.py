@@ -393,3 +393,29 @@ def test_readd_hydrogens_auto_follows_the_file():
     # 7a4m carries its own: "auto" should behave like False and keep them.
     assert counts(_H_FIXTURE, "auto") == counts(_H_FIXTURE, False)
     assert counts(_H_FIXTURE, "auto") != counts(_H_FIXTURE, True)
+
+
+def test_monomer_library_path_expands_and_reports_clearly(tmp_path, monkeypatch):
+    """A '~' or '$VAR' path is expanded; a wrong one names itself and its source.
+
+    gemmi does no shell expansion, so "~/monomers" -- the natural thing to put
+    in a TOML -- used to reach read_monomer_lib verbatim and fail with a bare
+    FileNotFoundError naming a path the user never wrote.
+    """
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("MONLIB_ROOT", str(tmp_path))
+
+    # neither of these exists, so the error tells us which path was resolved
+    for given, source in [
+        ("~/monomers", "monomer_library_path"),
+        ("$MONLIB_ROOT/monomers", "monomer_library_path"),
+    ]:
+        with pytest.raises(FileNotFoundError) as exc:
+            PDB._build_typed_model(str(_FIXTURE), given, False)
+        assert str(tmp_path / "monomers") in str(exc.value), str(exc.value)
+        assert source in str(exc.value)
+
+    # a stale $CLIBD_MON is named as such rather than blamed on the argument
+    monkeypatch.setenv("CLIBD_MON", str(tmp_path / "gone"))
+    with pytest.raises(FileNotFoundError, match=r"\$CLIBD_MON"):
+        PDB._build_typed_model(str(_FIXTURE), None, False)

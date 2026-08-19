@@ -518,6 +518,20 @@ class PDB:
             )
 
         monlib_path = monomer_library_path or os.environ.get("CLIBD_MON")
+        if monlib_path:
+            # gemmi does no shell expansion, so a perfectly natural
+            # "~/monomers" in a TOML would otherwise reach it verbatim and
+            # fail deep inside read_monomer_lib with a bare FileNotFoundError
+            # naming a path the user never wrote.
+            monlib_path = os.path.expanduser(os.path.expandvars(monlib_path))
+            if not os.path.isdir(monlib_path):
+                raise FileNotFoundError(
+                    f"Monomer library not found at {monlib_path!r} (from "
+                    + ("monomer_library_path" if monomer_library_path else "$CLIBD_MON")
+                    + "). Point it at a clone of "
+                    "https://github.com/MonomerLibrary/monomers, or unset it "
+                    "to run without hydrogen typing."
+                )
 
         st = gemmi.read_structure(filepath)
         st.setup_entities()

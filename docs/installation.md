@@ -153,9 +153,44 @@ pdb = PDB("1a6m", compute_atom_species=True,
     position is chemically ambiguous — a rotatable hydroxyl, or both tautomer
     hydrogens of a histidine — are excluded rather than rendered.
 
-    Structures that already carry hydrogens have them replaced by the
-    library's ideal positions, which is what the underlying `sffit` reference
-    implementation does.
+    Structures that already carry hydrogens keep them where they were
+    deposited; only a structure with none has them added. See
+    `readd_hydrogens` below to override.
+
+### Hydrogen coordinates
+
+A species descriptor is built from the bond graph, not from coordinates, so
+the fitted factors apply whichever positions a hydrogen occupies. What
+`readd_hydrogens` controls is only whether hydrogen *density* is added, and
+from ideal or deposited geometry.
+
+The default, `"auto"`, follows the file: hydrogens a structure already carries
+are left exactly where they are, and hydrogens are added only to a structure
+that has none. Deposited positions are information the file provides, so
+nothing is gained by moving them.
+
+| | atoms | H | typed |
+|---|---:|---:|---:|
+| **1A6M** — no deposited H, no library | 1,445 | 0 | 56% |
+| 1A6M — `"auto"` (adds them) | 2,668 | 1,223 | 99.6% |
+| **7a4m** — deposited H, `"auto"` (keeps them) | 2,862 | 1,341 | 99.4% |
+| 7a4m — `readd_hydrogens=True` (replaces them) | 2,848 | 1,327 | 99.9% |
+
+The two explicit settings remain available:
+
+```python
+PDB("7a4m", compute_atom_species=True, readd_hydrogens=True)   # ideal geometry
+PDB("1a6m", compute_atom_species=True, readd_hydrogens=False)  # add none
+```
+
+`True` always re-adds from ideal geometry, matching `sffit`'s default and so
+the configuration the factors were fitted in. `False` never re-adds: hydrogens
+the file lacks become zero-occupancy atoms that inform their neighbours'
+species without being rendered, which on 1A6M lifts typing from 56% to 99.2%
+while leaving the atom set untouched at 1,445.
+
+A partially hydrogenated structure counts as carrying them, so `"auto"` keeps
+what is there rather than replacing the lot; pass `True` to complete it.
 
 ## Installing with conda/pip instead
 

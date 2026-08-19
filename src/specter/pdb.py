@@ -67,6 +67,7 @@ class PDB:
         verbose: bool = True,
         compute_atom_species: bool = False,
         monomer_library_path: str | None = None,
+        readd_hydrogens: bool | str = "auto",
     ) -> None:
         """
         Create a PDB object from either a PDB ID or a local file path.
@@ -108,6 +109,32 @@ class PDB:
             species (`"C(HHHC)"`, `"O(HH)"`) resolve instead of falling back
             to per-element Peng. Without a library the file's own atoms are
             used unchanged, which is the historical behaviour.
+        readd_hydrogens : {"auto", True, False}, optional
+            Whether to replace existing hydrogens with the monomer library's
+            ideal geometry. Only meaningful when a library resolves.
+
+            ``"auto"`` (default) keeps the hydrogens a structure already
+            carries and adds them only when it carries none. Deposited
+            hydrogen positions are information the file provides, so there is
+            no reason to move them; a structure with none still gets the
+            typing and density that make the Shtyrov species resolvable.
+
+            ``True`` always re-adds from ideal geometry, matching `sffit`'s
+            default and so the configuration the scattering factors were
+            fitted in. ``False`` never re-adds: existing hydrogens stay put,
+            and hydrogens the file lacks become zero-occupancy atoms that
+            inform their neighbours' species without being rendered, which
+            improves typing without changing the atom set at all.
+
+            Typing improves under every setting -- a species descriptor is
+            built from the bond graph, not from positions, so the fitted
+            factors apply whichever coordinates are used. What differs is only
+            whether hydrogen density is added, and from ideal or deposited
+            geometry.
+
+            A partially hydrogenated structure is treated as carrying them, so
+            ``"auto"`` keeps what is there rather than replacing the lot;
+            pass ``True`` explicitly to complete it from ideal geometry.
 
         Attributes
         ----------
@@ -155,7 +182,10 @@ class PDB:
         used_library = False
         if compute_atom_species:
             znum, pos, species, used_library = PDB._build_typed_model(
-                self.filepath, monomer_library_path, verbose=verbose
+                self.filepath,
+                monomer_library_path,
+                verbose=verbose,
+                readd_hydrogens=readd_hydrogens,
             )
             self.atom_species = species
             if used_library:
@@ -425,6 +455,7 @@ class PDB:
         filepath: str,
         monomer_library_path: str | None = None,
         verbose: bool = True,
+        readd_hydrogens: bool | str = "auto",
     ) -> tuple[list[int], list[list[float]], list[str | None], bool]:
         """
         Build the topology-completed model and type every atom in one pass.
@@ -534,6 +565,17 @@ class PDB:
         # model is just the file's own atoms.
         used_library = bool(len(monlib.monomers))
 
+        # "auto": keep hydrogens a structure already carries, add them when it
+        # carries none. Deposited hydrogens are information the file provides,
+        # and there is no reason to move them -- the species descriptor comes
+        # from the bond graph, so the fitted factors apply either way.
+        if readd_hydrogens == "auto":
+            readd_hydrogens = not any(
+                cra.atom.element.atomic_number == 1 for cra in st[0].all()
+            )
+        else:
+            readd_hydrogens = bool(readd_hydrogens)
+
         # Drop explicit metal-coordination links, as sffit does before typing,
         # but only when a library is in use -- which is the only configuration
         # sffit supports. The library's HEM component defines the four
@@ -563,10 +605,22 @@ class PDB:
 
         added_keys: set[_AtomKey] = set()
         if used_library:
+            # sffit couples these two: with ReAdd, gemmi has already placed the
+            # hydrogens, so only missing *heavy* atoms are backfilled. With
+            # NoChange the file's own hydrogens are kept and the ones it lacks
+            # are backfilled as zero-occupancy dummies -- present for typing,
+            # never rendered.
             topo = gemmi.prepare_topology(
-                st, monlib, h_change=gemmi.HydrogenChange.ReAdd, warnings=warnings_sink
+                st,
+                monlib,
+                h_change=(
+                    gemmi.HydrogenChange.ReAdd
+                    if readd_hydrogens
+                    else gemmi.HydrogenChange.NoChange
+                ),
+                warnings=warnings_sink,
             )
-            for m in topo.find_missing_atoms(including_hydrogen=True):
+            for m in topo.find_missing_atoms(including_hydrogen=not readd_hydrogens):
                 # A residue the library has no entry for (including the
                 # blank-named components some entries carry) can't be
                 # completed; its atoms keep whatever bonds the file provides.

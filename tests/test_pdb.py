@@ -302,3 +302,94 @@ def test_metal_links_dropped_with_library():
     assert used, "library did not load"
     iron = [s for s in species if s is not None and s.startswith("Fe(")]
     assert iron == ["Fe(NNNN)"], iron
+
+
+# 7a4m carries its own hydrogens, so it distinguishes the two modes: ReAdd
+# replaces them with the library's ideal geometry, NoChange keeps them where
+# they were deposited.
+_H_FIXTURE = Path(__file__).parent.parent / "specter-data" / "pdb" / "7a4m.cif"
+
+
+@pytest.mark.skipif(_monomer_library() is None, reason="no monomer library available")
+@pytest.mark.skipif(not _H_FIXTURE.exists(), reason="7a4m not in the local PDB cache")
+def test_readd_hydrogens_false_keeps_deposited_coordinates():
+    """readd_hydrogens=False leaves a file's own hydrogens where they were."""
+    import gemmi
+
+    st = gemmi.read_structure(str(_H_FIXTURE))
+    st.setup_entities()
+    deposited = {
+        (round(c.atom.pos.x, 3), round(c.atom.pos.y, 3), round(c.atom.pos.z, 3))
+        for c in st[0].all()
+        if c.atom.element.name == "H"
+    }
+    assert deposited, "fixture no longer carries hydrogens"
+
+    def h_coords(readd):
+        znum, pos, _, used = PDB._build_typed_model(
+            str(_H_FIXTURE), _monomer_library(), False, readd_hydrogens=readd
+        )
+        assert used
+        return {
+            (round(x, 3), round(y, 3), round(z, 3))
+            for (x, y, z), n in zip(pos, znum)
+            if n == 1
+        }
+
+    kept = h_coords(False)
+    ideal = h_coords(True)
+
+    # Keeping them means most land exactly on the deposited positions...
+    assert len(kept & deposited) / len(kept) > 0.9
+    # ...while re-adding them from ideal geometry moves nearly all of them.
+    assert len(ideal & deposited) / len(ideal) < 0.5
+
+
+@pytest.mark.skipif(_monomer_library() is None, reason="no monomer library available")
+def test_readd_hydrogens_false_types_without_adding_density():
+    """On a hydrogen-free structure, readd_hydrogens=False types but adds no atoms.
+
+    The species descriptor comes from the bond graph, not from coordinates, so
+    hydrogens added purely as zero-occupancy dummies still resolve their
+    neighbours' species while contributing no density.
+    """
+    import json
+    from importlib import resources
+
+    path = resources.files("specter.atom_data").joinpath("params_cat.json")
+    with resources.as_file(path) as fpath:
+        table = set(json.loads(Path(fpath).read_text()))
+
+    def coverage(mon, readd):
+        znum, _, species, _ = PDB._build_typed_model(
+            str(_FIXTURE), mon, False, readd_hydrogens=readd
+        )
+        hit = sum(1 for s in species if s in table)
+        return len(znum), sum(1 for z in znum if z == 1), hit / len(znum)
+
+    n_plain, h_plain, cov_plain = coverage(None, True)
+    n_typed, h_typed, cov_typed = coverage(_monomer_library(), False)
+
+    assert (n_typed, h_typed) == (n_plain, h_plain), "density changed"
+    assert cov_typed > cov_plain + 0.3, (cov_plain, cov_typed)
+
+
+@pytest.mark.skipif(_monomer_library() is None, reason="no monomer library available")
+@pytest.mark.skipif(not _H_FIXTURE.exists(), reason="7a4m not in the local PDB cache")
+def test_readd_hydrogens_auto_follows_the_file():
+    """ "auto" keeps deposited hydrogens, and adds them only when there are none."""
+    mon = _monomer_library()
+
+    def counts(cif, mode):
+        znum, _, _, _ = PDB._build_typed_model(
+            str(cif), mon, False, readd_hydrogens=mode
+        )
+        return len(znum), sum(1 for z in znum if z == 1)
+
+    # 1mbo carries no hydrogens: "auto" should behave like True and add them.
+    assert counts(_FIXTURE, "auto") == counts(_FIXTURE, True)
+    assert counts(_FIXTURE, "auto")[1] > 0
+
+    # 7a4m carries its own: "auto" should behave like False and keep them.
+    assert counts(_H_FIXTURE, "auto") == counts(_H_FIXTURE, False)
+    assert counts(_H_FIXTURE, "auto") != counts(_H_FIXTURE, True)

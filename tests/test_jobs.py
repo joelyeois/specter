@@ -53,6 +53,12 @@ def test_resolve_base_dir_from_arg(tmp_path: Path) -> None:
 def test_resolve_base_dir_from_env(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    import specter.jobs._job as _job_module
+
+    # The session base dir outranks the environment variable, so clear it:
+    # any earlier test that ran a pipeline (which calls jobs.base_directory)
+    # leaves it set process-wide.
+    monkeypatch.setattr(_job_module, "_SESSION_BASE_DIR", None)
     monkeypatch.setenv("SPECTER_JOBS_DIR", str(tmp_path))
     assert _resolve_base_dir(None) == tmp_path
 

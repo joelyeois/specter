@@ -533,3 +533,62 @@ def test_validate_accepts_every_shipped_config() -> None:
     ):
         config = load_config(str(REPO_ROOT / "configs" / name), cls)
         validate_config(config)
+
+
+# readd_hydrogens is `bool | Literal["auto"]` so a TOML can use the natural
+# `true`/`false` as well as "auto". The union flattens to bool for the CLI flag,
+# the same way batchsize's `int | Literal["auto"]` flattens to int.
+@pytest.mark.parametrize(
+    "written,expected", [('"auto"', "auto"), ("true", True), ("false", False)]
+)
+def test_readd_hydrogens_accepts_auto_and_booleans(tmp_path, written, expected):
+    from specter.config import ParticleStackConfig, load_config
+
+    cfg_file = tmp_path / "c.toml"
+    cfg_file.write_text(
+        f'[potential]\npdb_code = "1a6m"\nreadd_hydrogens = {written}\n'
+    )
+    cfg = load_config(str(cfg_file), ParticleStackConfig)
+    assert cfg.readd_hydrogens == expected
+
+
+@pytest.mark.parametrize("pipeline", ["particles", "micrograph"])
+def test_hydrogen_settings_reach_pdb(monkeypatch, pipeline):
+    """Both pipelines forward readd_hydrogens into PDB.
+
+    The library location itself comes from $CLIBD_MON -- the mechanism the
+    Monomer Library documents -- rather than a second config field saying the
+    same thing.
+    """
+    import specter.pipelines._micrograph as micrograph_module
+    import specter.pipelines._particles as particles_module
+    from specter.config import MicrographConfig, ParticleStackConfig
+
+    mod, cls, run = (
+        (particles_module, ParticleStackConfig, "run_particle_stack")
+        if pipeline == "particles"
+        else (micrograph_module, MicrographConfig, "run_micrograph")
+    )
+    seen: dict = {}
+
+    class _Stop(Exception):
+        pass
+
+    def _spy(*args, **kwargs):
+        seen.update(kwargs)
+        raise _Stop
+
+    monkeypatch.setattr(mod, "PDB", _spy)
+    cfg = cls(
+        pdb_code=str(
+            Path(__file__).parent.parent / "specter-data" / "pdb" / "1mbo.cif"
+        ),
+        readd_hydrogens=False,
+    )
+    with pytest.raises(_Stop):
+        getattr(mod, run)(cfg)
+
+    assert seen["readd_hydrogens"] is False
+    assert "monomer_library_path" not in seen, (
+        "library location should come from $CLIBD_MON, not a config field"
+    )

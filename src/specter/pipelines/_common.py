@@ -10,15 +10,88 @@ from __future__ import annotations
 
 import glob
 import os
-from typing import Any, Sequence
+from contextlib import contextmanager
+from typing import Any, Iterator, Sequence
 
 import torch
 from rich.console import Console
 from rich.rule import Rule
 
-from specter.config import ScalarOrRange, parse_scalar_or_range
+from specter.config import (
+    SPECTER_DATA_DIR,
+    ScalarOrRange,
+    find_specter_project_root,
+    parse_scalar_or_range,
+)
 
 _console = Console()
+
+
+@contextmanager
+def _tracked_output_dir(
+    config: Any, job_type: str, is_main: bool = True
+) -> Iterator[str]:
+    """
+    Resolve where a run's output goes, opening a job.json record if the
+    caller opted in via ``project`` or ``job_id``.
+
+    Untracked (the default -- ``project`` and ``job_id`` both unset):
+    yields ``config.output_dir`` unchanged, no `specter.jobs.Job` involved.
+
+    Tracked: yields the job directory (``job_base_dir/[project/]job_type/J0NN``).
+    Only ``is_main`` actually opens the `Job` -- creating the directory,
+    writing ``job.json``, recording status on exit. Multi-GPU DDP dispatch
+    re-executes a pipeline's whole top-level code once per rank (see
+    `run_particle_stack`'s own ``is_main`` handling), so a non-main rank
+    must be able to compute the *same* path without touching the
+    filesystem or racing another rank to auto-assign a job id.
+    ``validate_config`` requires an explicit ``job_id`` whenever tracking
+    is combined with multi-GPU for exactly this reason -- the branch below
+    is then a pure, deterministic string join, safe for every rank to
+    compute independently and agree on, instead of each one calling
+    :class:`~specter.jobs.Job` (and racing to auto-number) itself.
+
+    Parameters
+    ----------
+    config : Any
+        A pipeline config with ``output_dir``/``project``/``job_id``/
+        ``job_base_dir`` fields (``ParticleStackConfig``,
+        ``MicrographConfig``, or ``TiltSeriesConfig``).
+    job_type : str
+        Job-type folder name, e.g. ``"particles"`` -- matches the artifact
+        vocabulary `default_output_dir` already uses.
+    is_main : bool
+        Whether this process should open the `Job` itself. Pipelines with
+        no multi-process dispatch (micrograph, tilt series) never need to
+        pass this; it defaults to always opening it.
+
+    Yields
+    ------
+    str
+        The directory to write output into.
+    """
+    if config.project is None and config.job_id is None:
+        yield config.output_dir
+        return
+
+    root = config.job_base_dir or str(find_specter_project_root() / SPECTER_DATA_DIR)
+
+    if not is_main:
+        parts = [root]
+        if config.project is not None:
+            parts.append(config.project)
+        parts.extend([job_type, config.job_id])
+        yield os.path.join(*parts)
+        return
+
+    import dataclasses
+
+    import specter.jobs as jobs
+
+    jobs.base_directory(root)
+    with jobs.Job(job_type, config.project, job_id=config.job_id) as job:
+        job.log(dataclasses.asdict(config))
+        yield str(job.dir)
 
 
 def _uniform_sample(value: ScalarOrRange, n: int) -> torch.Tensor:

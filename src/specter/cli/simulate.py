@@ -48,6 +48,7 @@ _PARTICLE_STACK_GROUPS: list[tuple[str, list[str]]] = [
     ),
     ("Compute", ["device", "batchsize"]),
     ("Output", ["output_dir", "filename"]),
+    ("Job tracking", ["project", "job_id", "job_base_dir"]),
     (
         "Advanced",
         [
@@ -137,6 +138,7 @@ _TILT_SERIES_GROUPS: list[tuple[str, list[str]]] = [
     ),
     ("Compute", ["device"]),
     ("Output", ["output_dir", "filename"]),
+    ("Job tracking", ["project", "job_id", "job_base_dir"]),
     (
         "Advanced",
         [
@@ -181,6 +183,7 @@ _MICROGRAPH_GROUPS: list[tuple[str, list[str]]] = [
     ),
     ("Compute", ["device"]),
     ("Output", ["output_dir", "filename"]),
+    ("Job tracking", ["project", "job_id", "job_base_dir"]),
     (
         "Advanced",
         [

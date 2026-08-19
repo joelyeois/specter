@@ -39,6 +39,18 @@ batchsize = "auto"               # particles per forward pass; "auto" fits it to
 output_dir = "specter-data/particles"
 filename = "particles"
 
+# Job tracking (opt-in) -- set project or job_id to route output through
+# specter.jobs instead of output_dir/filename above: the directory becomes
+# job_base_dir/[project/]particles/J00N/, numbered, with a job.json
+# recording every parameter, the git commit and the run's status. Neither
+# is required -- leaving both unset keeps the flat behavior above exactly.
+[job]
+# project = "my-project"
+# job_id = "J001"
+# job_base_dir = "specter-data"   # defaults to the project root found by
+                                 # walking up from cwd for an existing
+                                 # specter-data/, like git finds .git
+
 # --- Advanced: rarely touched, but available for tweaking ---
 [advanced]
 pdb_savefolder = "specter-data/pdb"  # relative to your working directory
@@ -77,6 +89,17 @@ periodic = false                 # wrap atom density across the box faces when v
                                  # uses this. Requires potential_method="3d"; "analytic"/"2d" raise.
 # atom_species = ["C.3", "N.ar"]  # per-atom bonded species; auto-detected from PDB bonds if unset
 # shtyrov_params_path = "path/to/params.json"  # override the bundled Shtyrov parameter table
+
+# Shtyrov types atoms by their bonded neighbours, and 20 of its 42 species name a
+# hydrogen -- which depositions omit. Install the Monomer Library and point
+# $CLIBD_MON at it to supply them; without it ~44% of a protein falls back to
+# per-element Peng. See docs/installation.md.
+#
+# The default, "auto", needs no setting: it keeps hydrogens the file already
+# carries and adds them only when it has none. Set it only to override that --
+# true always re-adds from ideal geometry, false adds no hydrogen density
+# (hydrogens still inform atom typing either way).
+# readd_hydrogens = "auto"       # auto | true | false
 
 # scattering
 ews_curvature_sign = "positive"  # negative | positive, matches CryoSPARC's convention

@@ -28,6 +28,7 @@ from ._common import (
     _parse_device,
     _save_exitwave_pair,
     _section,
+    _tracked_output_dir,
 )
 from ._tomogram import run_build_tomogram, tomogram_output_path
 
@@ -179,41 +180,42 @@ def run_tilt_series(
     _section("Saving")
     import mrcfile
 
-    os.makedirs(config.output_dir, exist_ok=True)
+    with _tracked_output_dir(config, "tiltseries") as output_dir:
+        os.makedirs(output_dir, exist_ok=True)
 
-    mrcs_path = os.path.join(config.output_dir, config.filename + ".mrcs")
-    with mrcfile.new(mrcs_path, overwrite=True) as mrc:
-        mrc.set_data(images.numpy().astype("float32"))
-    _console.print(f"  [green]✓[/green] {mrcs_path}")
+        mrcs_path = os.path.join(output_dir, config.filename + ".mrcs")
+        with mrcfile.new(mrcs_path, overwrite=True) as mrc:
+            mrc.set_data(images.numpy().astype("float32"))
+        _console.print(f"  [green]✓[/green] {mrcs_path}")
 
-    ctf_params_broadcast = {
-        "cs": torch.full((config.n_tilts,), cs_angstrom),
-        "dfu": torch.full((config.n_tilts,), config.defocus),
-    }
-    create_micrograph_starfile(
-        n=config.n_tilts,
-        voltage=config.voltage,
-        pixel_size=dx,
-        alpha=config.alpha,
-        ctf_params=ctf_params_broadcast,
-        folderpath=config.output_dir,
-        filename=config.filename,
-        dose_per_angstrom=config.dose_per_tilt,
-        coincidence_radius=config.coincidence_radius,
-        tilt_angles=angles,
-    )
-
-    if config.save_exitwaves:
-        ew_prefix = "exitwave" if ice_model is not None else "clean_exitwave"
-        _section(f"Saving {ew_prefix.replace('_', ' ')}")
-        _save_exitwave_pair(
-            exitwaves,
-            ew_prefix,
-            config.output_dir,
-            config.filename,
-            config.pad_fft,
-            micrograph_size,
+        ctf_params_broadcast = {
+            "cs": torch.full((config.n_tilts,), cs_angstrom),
+            "dfu": torch.full((config.n_tilts,), config.defocus),
+        }
+        create_micrograph_starfile(
+            n=config.n_tilts,
+            voltage=config.voltage,
+            pixel_size=dx,
+            alpha=config.alpha,
+            ctf_params=ctf_params_broadcast,
+            folderpath=output_dir,
+            filename=config.filename,
+            dose_per_angstrom=config.dose_per_tilt,
+            coincidence_radius=config.coincidence_radius,
+            tilt_angles=angles,
         )
+
+        if config.save_exitwaves:
+            ew_prefix = "exitwave" if ice_model is not None else "clean_exitwave"
+            _section(f"Saving {ew_prefix.replace('_', ' ')}")
+            _save_exitwave_pair(
+                exitwaves,
+                ew_prefix,
+                output_dir,
+                config.filename,
+                config.pad_fft,
+                micrograph_size,
+            )
 
     elapsed = time.perf_counter() - t_start
     _console.print(f"\n[bold]Total time:[/bold] {_format_elapsed(elapsed)}")

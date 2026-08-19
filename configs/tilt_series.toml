@@ -68,3 +68,15 @@ device = "cpu"                     # cpu | cuda | cuda:0
 [output]
 output_dir = "specter-data/tiltseries"
 filename = "tilt_series"
+
+# Job tracking (opt-in) -- set project or job_id to route output through
+# specter.jobs instead of output_dir/filename above: the directory becomes
+# job_base_dir/[project/]tiltseries/J00N/, numbered, with a job.json
+# recording every parameter, the git commit and the run's status. Neither
+# is required -- leaving both unset keeps the flat behavior above exactly.
+[job]
+# project = "my-project"
+# job_id = "J001"
+# job_base_dir = "specter-data"   # defaults to the project root found by
+                                 # walking up from cwd for an existing
+                                 # specter-data/, like git finds .git

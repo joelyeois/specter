@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import mrcfile
@@ -9,8 +10,8 @@ import pytest
 import starfile
 from cryosparc.dataset import Dataset
 
-from specter.config import ParticleStackConfig
-from specter.pipelines import run_particle_stack
+from specter.config import MicrographConfig, ParticleStackConfig, TiltSeriesConfig
+from specter.pipelines import run_micrograph, run_particle_stack, run_tilt_series
 
 # Every field _load_csfile_parameters (specter.io._cryosparc) reads off a
 # CryoSPARC passthrough .cs -- fabricated here so the test needs no real
@@ -250,3 +251,82 @@ def test_run_particle_stack_rejects_seed_with_auto_batchsize(tmp_path: Path) -> 
     assert config.batchsize == "auto"
     with pytest.raises(ValueError, match="batchsize"):
         run_particle_stack(config)
+
+
+def test_run_particle_stack_tracked_by_project(tmp_path: Path) -> None:
+    """--project routes output through specter.jobs instead of output_dir/
+    filename -- opt-in, unlike reconstruction's always-on tracking."""
+    config = ParticleStackConfig(
+        pdb_code="6bdf",
+        n_pixels=32,
+        n_particles=2,
+        scattering_model="projection",
+        ice_model="none",
+        detector_model="none",
+        device="cpu",
+        batchsize=2,
+        project="apoferritin",
+        job_base_dir=str(tmp_path),
+    )
+    run_particle_stack(config)
+
+    job_dir = tmp_path / "apoferritin" / "particles" / "J001"
+    assert (job_dir / "particles.mrcs").exists()
+    assert (job_dir / "particles.star").exists()
+
+    job = json.loads((job_dir / "job.json").read_text())
+    assert job["status"] == "complete"
+    assert job["params"]["n_particles"] == 2
+
+
+def test_run_micrograph_tracked_by_project(tmp_path: Path) -> None:
+    config = MicrographConfig(
+        pdb_code="6bdf",
+        n_pixels=32,
+        micrograph_size=64,
+        n_micrographs=1,
+        scattering_model="ctf",
+        ice_model="none",
+        detector_model="none",
+        noise_model="none",
+        device="cpu",
+        project="apoferritin",
+        job_base_dir=str(tmp_path),
+    )
+    run_micrograph(config)
+
+    job_dir = tmp_path / "apoferritin" / "micrographs" / "J001"
+    with mrcfile.open(job_dir / "micrographs.mrcs") as mrc:
+        assert mrc.data.shape == (1, 64, 64)
+    job = json.loads((job_dir / "job.json").read_text())
+    assert job["status"] == "complete"
+
+
+def test_run_tilt_series_tracked_by_project(tmp_path: Path) -> None:
+    import torch
+
+    volume_path = tmp_path / "volume.pt"
+    torch.save(torch.rand(32, 48, 48) * 0.01, volume_path)
+
+    config = TiltSeriesConfig(
+        volume_path=str(volume_path),
+        voxel_size=4.0,
+        micrograph_size=48,
+        min_tilt_angle=-5,
+        max_tilt_angle=5,
+        n_tilts=3,
+        n_frames=1,
+        ice_model="none",
+        detector_model="none",
+        scattering_model="ctf",
+        device="cpu",
+        project="apoferritin",
+        job_base_dir=str(tmp_path),
+    )
+    run_tilt_series(config)
+
+    job_dir = tmp_path / "apoferritin" / "tiltseries" / "J001"
+    with mrcfile.open(job_dir / "tilt_series.mrcs") as mrc:
+        assert mrc.data.shape == (3, 48, 48)
+    job = json.loads((job_dir / "job.json").read_text())
+    assert job["status"] == "complete"

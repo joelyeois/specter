@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import os
+import sys
 import time
 
 import torch
@@ -42,6 +43,7 @@ from ._common import (
     _parse_device,
     _save_exitwave_pair,
     _section,
+    _tracked_output_dir,
     _uniform_sample,
 )
 
@@ -119,6 +121,7 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
         assembly=config.assembly,
         savefolder=config.pdb_savefolder,
         compute_atom_species=_derive_atom_species,
+        readd_hydrogens=config.readd_hydrogens,
     )
 
     # pixel_size/voltage/alpha come from the dataset when cs_path/star_path is
@@ -384,82 +387,103 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
         batchsize = int(config.batchsize)
 
     # --- Generating images ---
-    if mode == "multi":
-        assert isinstance(device_target, list)
-        if is_main:
-            _section(f"Initializing multi-GPU on devices {device_target}")
-        images, exitwaves, clean_exitwaves = _generate_multi(
-            model,
-            n,
-            batchsize,
-            device_target,
-            config.output_dir,
-            collect_exitwaves=config.save_exitwaves,
-            collect_clean_exitwaves=config.save_clean_exitwaves,
-        )
-        if images is None:
-            return  # worker rank -- rank 0 handles saving
-    else:
-        if is_main:
-            _section(f"Generating images on {device_target}")
-        model = model.to(device_target)
-        images, exitwaves, clean_exitwaves = _generate_single(
-            model,
-            n,
-            batchsize,
-            track,
-            collect_exitwaves=config.save_exitwaves,
-            collect_clean_exitwaves=config.save_clean_exitwaves,
-        )
-
-    # --- Post-processing ---
-    if is_main:
-        _section("Post-processing")
-    if config.normalize_particles:
-        particles, _means, _stds = normalize_particles(images)
-        particles = -particles
-    else:
-        particles = images
-
-    if is_main:
-        _section("Saving .mrcs + .star")
-    create_particle_starfile(
-        particles,
-        rotations=quats,
-        translations=translations,
-        ctf_params=ctf_params,
-        dx=pixel_size,
-        voltage=voltage,
-        alpha=alpha,
-        filename=config.filename,
-        folderpath=config.output_dir,
-        dose_per_angstrom=dose,
-        coincidence_radius=coincidence_radius,
-        potential_scale=potential_scale,
-    )
-
-    if is_main:
-        if exitwaves is not None:
-            _section("Saving exit waves")
-            _save_exitwave_pair(
-                exitwaves,
-                "exitwave",
-                config.output_dir,
-                config.filename,
-                config.pad_fft,
-                config.n_pixels,
+    # Resolved once, here, before any DDP dispatch -- both this process and
+    # any DDP workers _generate_multi spawns below independently reach this
+    # same point (see run_particle_stack's own is_main handling), so
+    # _tracked_output_dir's is_main split matters here: only is_main opens
+    # a real Job (mkdir/job.json/status), workers just compute the same
+    # path as a deterministic string join. Kept open (manually, not via
+    # `with`, so the ~80 lines below don't need re-indenting under one
+    # block) until the run finishes or fails.
+    _output_dir_cm = _tracked_output_dir(config, "particles", is_main=is_main)
+    output_dir = _output_dir_cm.__enter__()
+    try:
+        if mode == "multi":
+            assert isinstance(device_target, list)
+            if is_main:
+                _section(f"Initializing multi-GPU on devices {device_target}")
+            images, exitwaves, clean_exitwaves = _generate_multi(
+                model,
+                n,
+                batchsize,
+                device_target,
+                output_dir,
+                collect_exitwaves=config.save_exitwaves,
+                collect_clean_exitwaves=config.save_clean_exitwaves,
+            )
+            if images is None:
+                return  # worker rank -- rank 0 handles saving
+        else:
+            if is_main:
+                _section(f"Generating images on {device_target}")
+            model = model.to(device_target)
+            images, exitwaves, clean_exitwaves = _generate_single(
+                model,
+                n,
+                batchsize,
+                track,
+                collect_exitwaves=config.save_exitwaves,
+                collect_clean_exitwaves=config.save_clean_exitwaves,
             )
 
-        if clean_exitwaves is not None:
-            _section("Saving clean exit waves")
-            _save_exitwave_pair(
-                clean_exitwaves,
-                "clean_exitwave",
-                config.output_dir,
-                config.filename,
-                config.pad_fft,
-                config.n_pixels,
-            )
+        # --- Post-processing ---
+        if is_main:
+            _section("Post-processing")
+        if config.normalize_particles:
+            particles, _means, _stds = normalize_particles(images)
+            particles = -particles
+        else:
+            particles = images
+
+        if is_main:
+            _section("Saving .mrcs + .star")
+        create_particle_starfile(
+            particles,
+            rotations=quats,
+            translations=translations,
+            ctf_params=ctf_params,
+            dx=pixel_size,
+            voltage=voltage,
+            alpha=alpha,
+            filename=config.filename,
+            folderpath=output_dir,
+            dose_per_angstrom=dose,
+            coincidence_radius=coincidence_radius,
+            potential_scale=potential_scale,
+        )
+
+        if is_main:
+            if exitwaves is not None:
+                _section("Saving exit waves")
+                _save_exitwave_pair(
+                    exitwaves,
+                    "exitwave",
+                    output_dir,
+                    config.filename,
+                    config.pad_fft,
+                    config.n_pixels,
+                )
+
+            if clean_exitwaves is not None:
+                _section("Saving clean exit waves")
+                _save_exitwave_pair(
+                    clean_exitwaves,
+                    "clean_exitwave",
+                    output_dir,
+                    config.filename,
+                    config.pad_fft,
+                    config.n_pixels,
+                )
+    except BaseException:
+        # Only meaningful for is_main (a worker's context manager never
+        # opened a real Job, so this just re-raises cleanly for it) --
+        # marks the job "failed" instead of leaving it stuck at "running".
+        _output_dir_cm.__exit__(*sys.exc_info())
+        raise
+    else:
+        # Not reached by a worker rank's early `return` above, so this
+        # (and the Job it may close) only ever runs for is_main.
+        _output_dir_cm.__exit__(None, None, None)
 
     elapsed = time.perf_counter() - t_start
     _console.print(f"\n[bold]Total time:[/bold] {_format_elapsed(elapsed)}")

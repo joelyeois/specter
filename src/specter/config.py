@@ -246,6 +246,22 @@ class ParticleStackConfig:
     output_dir: str = field(default_factory=lambda: default_output_dir("particles"))
     filename: str = "particles"
 
+    # --- Job tracking (opt-in) ---
+    # Setting `project` or `job_id` routes output through `specter.jobs`
+    # instead of the flat output_dir/filename layout above: the directory
+    # becomes job_base_dir/[project/]particles/J00N/, numbered and with a
+    # job.json recording the full parameter set, git commit and status.
+    # Neither is required -- leaving both unset keeps today's exact flat
+    # behavior. Unlike `specter reconstruct particle`, which is always
+    # tracked, this command runs far more often and more casually (quick
+    # sanity checks, notebooks, CI), so tracking stays opt-in here.
+    project: str | None = None
+    job_id: str | None = None
+    # Defaults to the project root found by walking up from cwd for an
+    # existing specter-data/ (find_specter_project_root), the same way git
+    # finds the nearest .git.
+    job_base_dir: str | None = None
+
     # --- Advanced ---
     # Relative to the current working directory, like any other CLI path
     # argument -- see default_pdb_cache_dir for the unset case.
@@ -282,6 +298,11 @@ class ParticleStackConfig:
     # unset. Sized to the structure's atom count -- config-only, not a CLI flag.
     atom_species: list[str] | None = None
     shtyrov_params_path: str | None = None
+    # bool | Literal["auto"] so TOML can write the natural `true`/`false` as
+    # well as "auto"; the CLI flag flattens to bool (same as batchsize's
+    # int | Literal["auto"]), so "auto" is config-only there -- it is the
+    # default, so a flag for it would only ever undo an explicit setting.
+    readd_hydrogens: bool | Literal["auto"] = "auto"
 
     # --- Advanced: scattering ---
     ews_curvature_sign: Literal["negative", "positive"] = "positive"
@@ -367,6 +388,19 @@ PARTICLE_STACK_HELP: dict[str, str] = {
     "on --device at run time; see specter.memory.recommend_batchsize.",
     "output_dir": "Directory to save .mrcs and .star files.",
     "filename": "Base name for output files (no extension).",
+    "project": "Optional: route output through specter.jobs instead of "
+    "--output_dir/--filename. Not required for tracking -- job_id alone "
+    "also triggers it. The run lands in "
+    "<job_base_dir>/[<project>/]particles/J00N/ with a job.json recording "
+    "every parameter, the git commit and the run's status.",
+    "job_id": "Pin the job directory (e.g. J001) rather than auto-assigning "
+    "the next one: resumes into it if it exists, creates it otherwise. "
+    "Required (not just recommended) when combining tracking with "
+    "multi-GPU device strings -- auto-numbering needs one process to "
+    "decide, but multi-GPU dispatch re-runs this pipeline once per rank.",
+    "job_base_dir": "Root directory for job folders. Defaults to the "
+    "project root found by walking up from cwd looking for an existing "
+    "specter-data/, the same way git finds the nearest .git.",
     "pdb_savefolder": "Folder to cache downloaded PDB files.",
     "cs_path": "Path to a CryoSPARC .cs file to drive generation from real "
     "pixel_size/voltage/alpha/poses/CTF instead of random sampling.",
@@ -417,6 +451,11 @@ PARTICLE_STACK_HELP: dict[str, str] = {
     "smears its edge density onto the opposite face. Requires "
     "potential_method='3d'; 'analytic' and '2d' raise.",
     "shtyrov_params_path": "Override the bundled Shtyrov parameter table.",
+    "readd_hydrogens": "Whether to replace a structure's own hydrogens with "
+    "the monomer library's ideal geometry: 'auto' (default) keeps hydrogens "
+    "the file already carries and adds them only when it has none, 'true' "
+    "always re-adds, 'false' never adds hydrogen density (they still inform "
+    "atom typing). Only meaningful when a monomer library is available.",
     "ews_curvature_sign": "Ewald sphere curvature sign, matching CryoSPARC's "
     "convention.",
     "klim": "Reciprocal-space cutoff in 1/Angstrom. Unset uses the full Nyquist range.",
@@ -498,6 +537,10 @@ class MicrographConfig:
     n_pixels: int = 256
     pixel_size: float = 1.0  # Å
     micrograph_size: int = 4096
+    # This path has no potential_parameterization field, so PotentialBuilder's
+    # shtyrov default always applies and atoms are always typed -- see
+    # run_micrograph, so this always takes effect.
+    readd_hydrogens: bool | Literal["auto"] = "auto"
 
     # --- Microscope / physics ---
     voltage: float = 300.0  # kV
@@ -553,6 +596,20 @@ class MicrographConfig:
     output_dir: str = field(default_factory=lambda: default_output_dir("micrographs"))
     filename: str = "micrographs"
 
+    # --- Job tracking (opt-in) ---
+    # Setting `project` or `job_id` routes output through `specter.jobs`
+    # instead of the flat output_dir/filename layout above: the directory
+    # becomes job_base_dir/[project/]micrographs/J00N/, numbered and with
+    # a job.json recording the full parameter set, git commit and status.
+    # Neither is required -- leaving both unset keeps today's exact flat
+    # behavior.
+    project: str | None = None
+    job_id: str | None = None
+    # Defaults to the project root found by walking up from cwd for an
+    # existing specter-data/ (find_specter_project_root), the same way git
+    # finds the nearest .git.
+    job_base_dir: str | None = None
+
 
 # Human-readable per-field descriptions for MicrographConfig, used to build
 # `specter simulate micrograph --help` (see specter/cli/_click_options.py). Kept
@@ -565,6 +622,11 @@ MICROGRAPH_HELP: dict[str, str] = {
     "n_pixels": "Number of pixels per axis for the 3-D particle potential box.",
     "pixel_size": "Pixel size in Angstrom.",
     "micrograph_size": "Micrograph size in pixels (square).",
+    "readd_hydrogens": "Whether to replace a structure's own hydrogens with "
+    "the monomer library's ideal geometry: 'auto' (default) keeps hydrogens "
+    "the file already carries and adds them only when it has none, true "
+    "always re-adds, false never adds hydrogen density (they still inform "
+    "atom typing). Only meaningful when a monomer library is available.",
     "voltage": "Electron beam accelerating voltage in kV.",
     "dose": "Total dose per micrograph in e-/Angstrom^2: a single value (e.g. 20) for a "
     "constant dose per micrograph, or 'low,high' (e.g. 20,60) to sample uniformly per micrograph "
@@ -618,6 +680,16 @@ MICROGRAPH_HELP: dict[str, str] = {
     "seed": "RNG seed for ice, crowding, pose and noise sampling. Auto-generated and logged if unset.",
     "output_dir": "Directory to save .mrcs and .star files.",
     "filename": "Base name for output files (no extension).",
+    "project": "Optional: route output through specter.jobs instead of "
+    "--output_dir/--filename. Not required for tracking -- job_id alone "
+    "also triggers it. The run lands in "
+    "<job_base_dir>/[<project>/]micrographs/J00N/ with a job.json "
+    "recording every parameter, the git commit and the run's status.",
+    "job_id": "Pin the job directory (e.g. J001) rather than auto-assigning "
+    "the next one: resumes into it if it exists, creates it otherwise.",
+    "job_base_dir": "Root directory for job folders. Defaults to the "
+    "project root found by walking up from cwd looking for an existing "
+    "specter-data/, the same way git finds the nearest .git.",
 }
 
 
@@ -695,6 +767,20 @@ class TiltSeriesConfig:
     output_dir: str = field(default_factory=lambda: default_output_dir("tiltseries"))
     filename: str = "tilt_series"
 
+    # --- Job tracking (opt-in) ---
+    # Setting `project` or `job_id` routes output through `specter.jobs`
+    # instead of the flat output_dir/filename layout above: the directory
+    # becomes job_base_dir/[project/]tiltseries/J00N/, numbered and with a
+    # job.json recording the full parameter set, git commit and status.
+    # Neither is required -- leaving both unset keeps today's exact flat
+    # behavior.
+    project: str | None = None
+    job_id: str | None = None
+    # Defaults to the project root found by walking up from cwd for an
+    # existing specter-data/ (find_specter_project_root), the same way git
+    # finds the nearest .git.
+    job_base_dir: str | None = None
+
 
 # Human-readable per-field descriptions for TiltSeriesConfig, used to build
 # `specter simulate tiltseries --help` (see specter/cli/_click_options.py).
@@ -748,6 +834,16 @@ TILT_SERIES_HELP: dict[str, str] = {
     "seed": "RNG seed for ice, crowding, pose and noise sampling. Auto-generated and logged if unset.",
     "output_dir": "Directory to save output files.",
     "filename": "Base name for output files (no extension).",
+    "project": "Optional: route output through specter.jobs instead of "
+    "--output_dir/--filename. Not required for tracking -- job_id alone "
+    "also triggers it. The run lands in "
+    "<job_base_dir>/[<project>/]tiltseries/J00N/ with a job.json "
+    "recording every parameter, the git commit and the run's status.",
+    "job_id": "Pin the job directory (e.g. J001) rather than auto-assigning "
+    "the next one: resumes into it if it exists, creates it otherwise.",
+    "job_base_dir": "Root directory for job folders. Defaults to the "
+    "project root found by walking up from cwd looking for an existing "
+    "specter-data/, the same way git finds the nearest .git.",
 }
 
 
@@ -1852,6 +1948,32 @@ def validate_config(config: Any) -> None:
         "fsc_mask",
         "cryosparc_ref",
     )
+
+    # Multi-GPU dispatch (ParticleStackConfig only -- tiltseries/micrograph
+    # are single-device) re-executes the whole pipeline once per rank (see
+    # pipelines._common._tracked_output_dir's docstring), so auto-assigning
+    # a job_id would mean every rank racing to scan the directory
+    # independently. Require it pinned explicitly whenever tracking and
+    # multi-GPU combine, so every rank's independent config-parse agrees on
+    # the same path as a pure string join, without touching the filesystem.
+    device = getattr(config, "device", None)
+    tracked = getattr(config, "project", None) is not None or (
+        getattr(config, "job_id", None) is not None
+    )
+    if (
+        device is not None
+        and "," in str(device)
+        and tracked
+        and getattr(config, "job_id", None) is None
+    ):
+        _fail(
+            "job_id",
+            None,
+            "must be pinned explicitly when combining project tracking "
+            'with a multi-GPU device string (e.g. "0,1"): auto-assigning '
+            "a job_id needs one process to decide, but multi-GPU dispatch "
+            "re-runs this pipeline once per rank independently",
+        )
 
     min_tilt = getattr(config, "min_tilt_angle", None)
     max_tilt = getattr(config, "max_tilt_angle", None)

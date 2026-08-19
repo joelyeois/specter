@@ -37,6 +37,7 @@ from ._common import (
     _format_elapsed,
     _save_exitwave_pair,
     _section,
+    _tracked_output_dir,
     _uniform_sample,
 )
 
@@ -80,6 +81,7 @@ def run_micrograph(config: MicrographConfig) -> None:
         assembly=config.assembly,
         savefolder=config.pdb_savefolder,
         compute_atom_species=True,
+        readd_hydrogens=config.readd_hydrogens,
     )
 
     cs_angstrom = config.cs * 1e7
@@ -216,46 +218,47 @@ def run_micrograph(config: MicrographConfig) -> None:
     _section("Saving .mrcs + .star")
     import mrcfile
 
-    os.makedirs(config.output_dir, exist_ok=True)
-    mrcs_path = os.path.join(config.output_dir, config.filename + ".mrcs")
-    with mrcfile.new(mrcs_path, overwrite=True) as mrc:
-        mrc.set_data(images_t.numpy().astype("float32"))
-    _console.print(f"  [green]✓[/green] {mrcs_path}")
+    with _tracked_output_dir(config, "micrographs") as output_dir:
+        os.makedirs(output_dir, exist_ok=True)
+        mrcs_path = os.path.join(output_dir, config.filename + ".mrcs")
+        with mrcfile.new(mrcs_path, overwrite=True) as mrc:
+            mrc.set_data(images_t.numpy().astype("float32"))
+        _console.print(f"  [green]✓[/green] {mrcs_path}")
 
-    create_micrograph_starfile(
-        n,
-        voltage=config.voltage,
-        pixel_size=config.pixel_size,
-        alpha=config.alpha,
-        ctf_params=ctf_params,
-        folderpath=config.output_dir,
-        filename=config.filename,
-        dose_per_angstrom=dose,
-        coincidence_radius=coincidence_radius,
-        potential_scale=potential_scale,
-    )
-
-    if exitwaves_t is not None:
-        _section("Saving exit waves")
-        _save_exitwave_pair(
-            exitwaves_t,
-            "exitwave",
-            config.output_dir,
-            config.filename,
-            config.pad_fft,
-            config.micrograph_size,
+        create_micrograph_starfile(
+            n,
+            voltage=config.voltage,
+            pixel_size=config.pixel_size,
+            alpha=config.alpha,
+            ctf_params=ctf_params,
+            folderpath=output_dir,
+            filename=config.filename,
+            dose_per_angstrom=dose,
+            coincidence_radius=coincidence_radius,
+            potential_scale=potential_scale,
         )
 
-    if clean_exitwaves_t is not None:
-        _section("Saving clean exit waves")
-        _save_exitwave_pair(
-            clean_exitwaves_t,
-            "clean_exitwave",
-            config.output_dir,
-            config.filename,
-            config.pad_fft,
-            config.micrograph_size,
-        )
+        if exitwaves_t is not None:
+            _section("Saving exit waves")
+            _save_exitwave_pair(
+                exitwaves_t,
+                "exitwave",
+                output_dir,
+                config.filename,
+                config.pad_fft,
+                config.micrograph_size,
+            )
+
+        if clean_exitwaves_t is not None:
+            _section("Saving clean exit waves")
+            _save_exitwave_pair(
+                clean_exitwaves_t,
+                "clean_exitwave",
+                output_dir,
+                config.filename,
+                config.pad_fft,
+                config.micrograph_size,
+            )
 
     elapsed = time.perf_counter() - t_start
     _console.print(f"\n[bold]Total time:[/bold] {_format_elapsed(elapsed)}")

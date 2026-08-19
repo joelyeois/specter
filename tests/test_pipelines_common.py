@@ -1,0 +1,100 @@
+"""Tests for `specter.pipelines._common`'s `_tracked_output_dir` -- the
+job-tracking wrapper shared by run_particle_stack/run_micrograph/
+run_tilt_series. A minimal stand-in config (not ParticleStackConfig) keeps
+these fast and focused on the wrapper's own branching, independent of any
+real pipeline's setup cost.
+"""
+
+from __future__ import annotations
+
+import dataclasses
+import json
+import os
+from pathlib import Path
+
+import pytest
+
+from specter.pipelines._common import _tracked_output_dir
+
+
+@dataclasses.dataclass
+class _Config:
+    output_dir: str = "flat/output"
+    project: str | None = None
+    job_id: str | None = None
+    job_base_dir: str | None = None
+    dummy_field: int = 1
+
+
+def test_untracked_yields_output_dir_unchanged(tmp_path: Path) -> None:
+    config = _Config(output_dir=str(tmp_path / "flat"))
+    with _tracked_output_dir(config, "particles") as output_dir:
+        assert output_dir == config.output_dir
+    # No Job side effects: nothing created besides what the caller itself makes.
+    assert not (tmp_path / "particles").exists()
+
+
+def test_tracked_by_project_opens_a_job(tmp_path: Path) -> None:
+    config = _Config(project="apoferritin", job_base_dir=str(tmp_path))
+    with _tracked_output_dir(config, "particles") as output_dir:
+        assert output_dir == str(tmp_path / "apoferritin" / "particles" / "J001")
+        assert Path(output_dir).is_dir()
+    job = json.loads((Path(output_dir) / "job.json").read_text())
+    assert job["status"] == "complete"
+    assert job["params"]["dummy_field"] == 1
+
+
+def test_tracked_by_job_id_alone_opens_a_job(tmp_path: Path) -> None:
+    """project isn't required for tracking to trigger -- job_id alone does too."""
+    config = _Config(job_id="J005", job_base_dir=str(tmp_path))
+    with _tracked_output_dir(config, "particles") as output_dir:
+        assert output_dir == str(tmp_path / "particles" / "J005")
+    assert (Path(output_dir) / "job.json").exists()
+
+
+def test_tracked_job_base_dir_defaults_to_project_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "specter-data").mkdir()
+    monkeypatch.chdir(tmp_path)
+    config = _Config(project="p")  # job_base_dir left unset
+    with _tracked_output_dir(config, "particles") as output_dir:
+        assert output_dir == str(tmp_path / "specter-data" / "p" / "particles" / "J001")
+
+
+def test_not_is_main_computes_same_path_without_touching_filesystem(
+    tmp_path: Path,
+) -> None:
+    """A non-main DDP rank must agree on the exact path is_main resolves,
+    without creating anything itself -- job_id is required here in real
+    pipelines (see validate_config) precisely so this is a pure string
+    join, safe to compute redundantly and independently."""
+    config = _Config(project="apoferritin", job_id="J003", job_base_dir=str(tmp_path))
+    with _tracked_output_dir(config, "particles", is_main=True) as main_dir:
+        pass
+    with _tracked_output_dir(config, "particles", is_main=False) as worker_dir:
+        assert worker_dir == main_dir
+
+    # The worker's entry didn't create anything new on its own -- only
+    # is_main's Job() call above did.
+    assert set(os.listdir(tmp_path / "apoferritin" / "particles")) == {"J003"}
+
+
+def test_not_is_main_without_project_computes_job_type_dir_directly(
+    tmp_path: Path,
+) -> None:
+    config = _Config(job_id="J007", job_base_dir=str(tmp_path))
+    with _tracked_output_dir(config, "particles", is_main=False) as output_dir:
+        assert output_dir == str(tmp_path / "particles" / "J007")
+    # is_main=False never touches the filesystem at all.
+    assert not (tmp_path / "particles").exists()
+
+
+def test_tracked_records_failure_status(tmp_path: Path) -> None:
+    config = _Config(project="p", job_base_dir=str(tmp_path))
+    with pytest.raises(ValueError, match="boom"):
+        with _tracked_output_dir(config, "particles") as output_dir:
+            raise ValueError("boom")
+    job = json.loads((Path(output_dir) / "job.json").read_text())
+    assert job["status"] == "failed"
+    assert job["error"] == "boom"

@@ -36,7 +36,7 @@ def base_directory(path: str | Path) -> None:
     >>> import specter.jobs as jobs
     >>> jobs.base_directory("/scratch/user/cryo-runs")
     >>> with jobs.Job("ghostbuster", "apoferritin") as job:
-    ...     print(job.dir)   # /scratch/user/cryo-runs/apoferritin/J001
+    ...     print(job.dir)   # /scratch/user/cryo-runs/apoferritin/ghostbuster/J001
     """
     global _SESSION_BASE_DIR
     _SESSION_BASE_DIR = Path(path)
@@ -79,10 +79,17 @@ def _get_specter_version() -> str:
 
 
 def _next_job_id(project_dir: Path) -> str:
-    existing = sorted(project_dir.glob("J[0-9][0-9][0-9]"))
+    """Next free J0NN, scanned across every job-type subfolder under
+    project_dir -- so numbering is one continuous sequence per project
+    (J001 a reconstruction, J002 a particle stack, J003 another
+    reconstruction, ...) rather than restarting at J001 per job type.
+    ``max`` by parsed integer, not lexicographic sort: job-type folder names
+    sort alphabetically, which does not track job-id order.
+    """
+    existing = list(project_dir.glob("*/J[0-9][0-9][0-9]"))
     if not existing:
         return "J001"
-    last = int(existing[-1].name[1:])
+    last = max(int(p.name[1:]) for p in existing)
     if last >= 999:
         raise RuntimeError("Job ID overflow: project has 999 jobs. Use a new project.")
     return f"J{last + 1:03d}"
@@ -115,10 +122,19 @@ class Job:
     Context manager that creates a unique output folder for a SPECTER job and
     records a parameter snapshot alongside the outputs.
 
+    The folder is ``base_dir/project/job_type/J0NN`` -- project comes right
+    after ``base_dir`` (not job_type) because users group their own work by
+    project first, and job_type second: everything for "apoferritin" should
+    sit together, with reconstructions/particle-stacks/etc. as subfolders
+    within it, not the reverse. Job numbering (``J001``, ``J002``, ...) is
+    one continuous sequence per project, shared across every job_type in it
+    -- see :func:`_next_job_id`.
+
     Parameters
     ----------
     job_type : str
-        Free-form label, e.g. ``"ghostbuster"``, ``"tilt-series"``.
+        Names the subfolder a job's output lands in, e.g. ``"ghostbuster"``,
+        ``"tilt-series"``. Also recorded in ``job.json`` as ``"type"``.
     project : str
         Groups related jobs under a shared folder.
     base_dir : str or Path, optional
@@ -156,11 +172,12 @@ class Job:
 
     def __enter__(self) -> Job:
         project_dir = self._base_dir / self._project
-        project_dir.mkdir(parents=True, exist_ok=True)
+        job_type_dir = project_dir / self._job_type
+        job_type_dir.mkdir(parents=True, exist_ok=True)
 
         if self._resume_job_id is not None:
             self._job_id = self._resume_job_id
-            self._dir = project_dir / self._job_id
+            self._dir = job_type_dir / self._job_id
             job_json = self._dir / "job.json"
             if job_json.exists():
                 existing = json.loads(job_json.read_text())
@@ -174,8 +191,11 @@ class Job:
                 self._dir.mkdir(parents=True, exist_ok=True)
                 self._created_at = datetime.now(timezone.utc).isoformat()
         else:
+            # Scans project_dir (every job_type subfolder within it), not
+            # job_type_dir -- numbering is shared across job types in a
+            # project, not restarted per job type.
             self._job_id = _next_job_id(project_dir)
-            self._dir = project_dir / self._job_id
+            self._dir = job_type_dir / self._job_id
             self._dir.mkdir()
             self._created_at = datetime.now(timezone.utc).isoformat()
 

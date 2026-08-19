@@ -56,7 +56,9 @@ class JobDatabase:
         project : str
             Project folder name.
         job_id : str
-            Job ID, e.g. ``"J001"``.
+            Job ID, e.g. ``"J001"``. Unique per project (shared across every
+            job_type in it -- see `Job`), so the caller doesn't need to name
+            the job_type subfolder it happens to live in.
 
         Returns
         -------
@@ -66,12 +68,15 @@ class JobDatabase:
         Raises
         ------
         FileNotFoundError
-            If the job folder or ``job.json`` does not exist.
+            If no job with this id exists anywhere under the project.
         """
-        path = self._base_dir / project / job_id / "job.json"
-        if not path.exists():
-            raise FileNotFoundError(f"No job found at {path}")
-        return json.loads(path.read_text())
+        project_dir = self._base_dir / project
+        matches = sorted(project_dir.glob(f"*/{job_id}/job.json"))
+        if not matches:
+            raise FileNotFoundError(
+                f"No job {job_id!r} found under {project_dir} (searched every job-type subfolder)"
+            )
+        return json.loads(matches[0].read_text())
 
     def diff(
         self, project: str, job_id_a: str, job_id_b: str

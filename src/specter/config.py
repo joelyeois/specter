@@ -1312,15 +1312,19 @@ class ReconstructionConfig:
 
     # --- Job tracking (opt-in) ---
     # Setting `project` routes output through `specter.jobs` instead: the run
-    # directory becomes job_base_dir/project/<job_id>/, numbered J001, J002,
-    # ... and a job.json records the full parameter set, git commit and
-    # status. That is what makes two halfset runs (halfset "A" then "B")
-    # shareable into one job directory, and what lets a batch script pin a
-    # job_id up front and resume into it.
+    # directory becomes job_base_dir/project/reconstructions/<job_id>/,
+    # numbered J001, J002, ... (shared across every job type in the project,
+    # not just reconstructions) and a job.json records the full parameter
+    # set, git commit and status. That is what makes two halfset runs
+    # (halfset "A" then "B") shareable into one job directory, and what lets
+    # a batch script pin a job_id up front and resume into it.
     project: str | None = None
     job_id: str | None = None
-    # Defaults to output_dir, so `--project foo` alone works and everything
-    # still lands under specter-data/reconstructions/.
+    # Defaults to SPECTER_DATA_DIR ("specter-data"), so `--project foo` alone
+    # works and everything still lands under specter-data/ -- project comes
+    # right after it, ahead of the reconstructions/ job-type subfolder, so a
+    # project's whole history (every pipeline, not just reconstruction) can
+    # eventually live in one place.
     job_base_dir: str | None = None
 
     # --- Reference maps (FSC logging only, never optimised against) ---
@@ -1435,15 +1439,15 @@ RECONSTRUCTION_HELP: dict[str, str] = {
     "named by the reconstructor.",
     "project": "Route output through specter.jobs instead of "
     "--output_dir/--run_name: the run lands in "
-    "<job_base_dir>/<project>/J00N/ with a job.json recording every "
-    "parameter, the git commit and the run's status. Omit for an untracked "
-    "run.",
+    "<job_base_dir>/<project>/reconstructions/J00N/ with a job.json "
+    "recording every parameter, the git commit and the run's status. Omit "
+    "for an untracked run.",
     "job_id": "Pin the job directory (e.g. J001) rather than auto-assigning "
     "the next one: resumes into it if it exists, creates it otherwise. "
     "Requires --project. This is how two halfset runs share one job.",
     "job_base_dir": "Root directory for job folders. Defaults to "
-    "--output_dir, so --project alone keeps everything under "
-    "specter-data/reconstructions/.",
+    "specter-data/, so --project alone gives "
+    "specter-data/<project>/reconstructions/J00N/.",
 }
 
 

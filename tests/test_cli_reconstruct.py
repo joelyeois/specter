@@ -253,10 +253,11 @@ def test_run_reconstruction_halfsets_share_one_job(
         config = _config(cs_file, mrc_file, output_dir)
         config.project = "test-project"
         config.job_id = "J001"
+        config.job_base_dir = str(output_dir)  # keep the job dir under tmp_path
         config.halfset = halfset  # type: ignore[assignment]
         run_reconstruction(config)
 
-    job_dir = output_dir / "test-project" / "J001"
+    job_dir = output_dir / "test-project" / "reconstructions" / "J001"
     assert (job_dir / "volume_A.mrc").exists()
     assert (job_dir / "volume_B.mrc").exists()
     assert (job_dir / "reconstruct_config_A.json").exists()
@@ -302,10 +303,11 @@ def test_run_reconstruction_gold_standard_tracked(
     output_dir = tmp_path / "out"
     config = _config(cs_file, mrc_file, output_dir)
     config.project = "test-project"
+    config.job_base_dir = str(output_dir)  # keep the job dir under tmp_path
 
     run_reconstruction(config)
 
-    job_dir = output_dir / "test-project" / "J001"
+    job_dir = output_dir / "test-project" / "reconstructions" / "J001"
     assert (job_dir / "volume_A.mrc").exists()
     assert (job_dir / "volume_B.mrc").exists()
     assert (job_dir / "fsc_gold_standard.png").exists()

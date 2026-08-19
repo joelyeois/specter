@@ -16,8 +16,12 @@ turn that class into a command:
   spelling.
 - **A run directory.** Untracked runs land in `output_dir/run_name/`,
   following the same cwd-relative rule as every other specter output. Setting
-  `project` instead routes the run through `specter.jobs`, which numbers the
-  directory (`J001`, `J002`, ...), records a parameter snapshot with the git
+  `project` instead routes the run through `specter.jobs`, landing in
+  `job_base_dir/project/reconstructions/J00N/` -- project comes right after
+  `job_base_dir`, ahead of the `reconstructions` job-type subfolder, since
+  users group their own work by project first. Numbering (`J001`, `J002`,
+  ...) is one continuous sequence per project, shared across every job type
+  in it, not restarted per type. Records a parameter snapshot with the git
   commit, and can resume into a pinned `job_id`.
 - **Gold-standard dispatch.** `halfset="gold"` (the default) reconstructs
   halfsets A and B and computes the halfmap FSC between them, instead of a
@@ -42,7 +46,7 @@ import time
 from pathlib import Path
 from typing import Any, Literal, cast
 
-from specter.config import ReconstructionConfig, validate_config
+from specter.config import SPECTER_DATA_DIR, ReconstructionConfig, validate_config
 
 from ._common import (
     _console,
@@ -185,8 +189,8 @@ def run_reconstruction(config: ReconstructionConfig) -> None:
         from specter.ghostbuster import Ghostbuster
         import specter.jobs as jobs
 
-        jobs.base_directory(config.job_base_dir or config.output_dir)
-        with jobs.Job("ghostbuster", config.project, job_id=config.job_id) as job:
+        jobs.base_directory(config.job_base_dir or SPECTER_DATA_DIR)
+        with jobs.Job("reconstructions", config.project, job_id=config.job_id) as job:
             _write_resolved_config(config, job.dir)
             # job.create logs every constructor argument into job.json and
             # injects run_dir, so the Ghostbuster is built the same way here
@@ -367,8 +371,8 @@ def _run_gold_standard(config: ReconstructionConfig) -> Path:
     else:
         import specter.jobs as jobs
 
-        jobs.base_directory(config.job_base_dir or config.output_dir)
-        with jobs.Job("ghostbuster", config.project, job_id=config.job_id) as job:
+        jobs.base_directory(config.job_base_dir or SPECTER_DATA_DIR)
+        with jobs.Job("reconstructions", config.project, job_id=config.job_id) as job:
             job.log(dataclasses.asdict(config))
             run_dir = job.dir
             _run_both_halfsets(config, run_dir)

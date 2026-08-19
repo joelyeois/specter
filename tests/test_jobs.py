@@ -46,6 +46,31 @@ def test_job_ids_scoped_per_project(tmp_path: Path) -> None:
     assert job_b.dir.name == "J001"
 
 
+def test_job_dir_places_project_before_job_type(tmp_path: Path) -> None:
+    """base_dir/project/job_type/J0NN -- project first, so a project's whole
+    output can eventually live in one place regardless of which pipeline
+    produced each job."""
+    with Job("reconstructions", project="apoferritin", base_dir=tmp_path) as job:
+        assert job.dir == tmp_path / "apoferritin" / "reconstructions" / "J001"
+
+
+def test_job_id_shared_across_job_types_in_one_project(tmp_path: Path) -> None:
+    """Numbering is one continuous sequence per project, not restarted per
+    job_type -- so two different pipelines sharing a project don't both
+    independently claim J001."""
+    with Job("particles", project="p", base_dir=tmp_path) as job1:
+        pass
+    with Job("reconstructions", project="p", base_dir=tmp_path) as job2:
+        pass
+    with Job("particles", project="p", base_dir=tmp_path) as job3:
+        pass
+    assert job1.dir.name == "J001"
+    assert job2.dir.name == "J002"
+    assert job3.dir.name == "J003"
+    assert job2.dir.parent.name == "reconstructions"
+    assert job3.dir.parent.name == "particles"
+
+
 def test_resolve_base_dir_from_arg(tmp_path: Path) -> None:
     assert _resolve_base_dir(tmp_path) == tmp_path
 
@@ -449,15 +474,17 @@ def test_job_explicit_id_creates_when_missing(tmp_path: Path) -> None:
     with Job("ghostbuster", project="p", base_dir=tmp_path, job_id="J099") as job:
         assert job.dir.name == "J099"
         assert (job.dir / "job.json").exists()
-    data = json.loads((tmp_path / "p" / "J099" / "job.json").read_text())
+    data = json.loads(
+        (tmp_path / "p" / "ghostbuster" / "J099" / "job.json").read_text()
+    )
     assert data["status"] == "complete"
 
 
 def test_job_explicit_id_creates_when_dir_preexists_empty(tmp_path: Path) -> None:
     # Mirrors a shell script pre-creating the job folder with `mkdir -p` before
     # job.json exists.
-    (tmp_path / "p").mkdir(parents=True)
-    (tmp_path / "p" / "J001").mkdir()
+    (tmp_path / "p" / "ghostbuster").mkdir(parents=True)
+    (tmp_path / "p" / "ghostbuster" / "J001").mkdir()
     with Job("ghostbuster", project="p", base_dir=tmp_path, job_id="J001") as job:
         assert job.dir.name == "J001"
         assert (job.dir / "job.json").exists()

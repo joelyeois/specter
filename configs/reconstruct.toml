@@ -89,19 +89,24 @@ run_name = "reconstruction"
 # =============================================================================
 # JOB TRACKING (opt-in)
 # With `project` set, the run directory becomes
-# <job_base_dir>/<project>/J00N/, and a job.json records every parameter, the
-# git commit and the run's status (including resolution_gold_standard, once
-# computed). Without `project`, a gold-standard run still writes both
-# halfsets and fsc_gold_standard.png/.json into one output_dir/run_name/ --
-# `project` only adds numbering and a queryable history, it isn't required
-# for the two halfsets to share a directory. Pinning `job_id` resumes into an
-# existing directory, e.g. for a manual halfset="A" then halfset="B" pair.
+# <job_base_dir>/<project>/reconstructions/J00N/ -- project comes right after
+# job_base_dir, ahead of the reconstructions/ job-type subfolder, so a
+# project's whole history can eventually live in one place as other
+# pipelines gain project tracking too. Numbering (J001, J002, ...) is shared
+# across job types within a project, not restarted per type. A job.json
+# records every parameter, the git commit and the run's status (including
+# resolution_gold_standard, once computed). Without `project`, a
+# gold-standard run still writes both halfsets and
+# fsc_gold_standard.png/.json into one output_dir/run_name/ -- `project`
+# only adds numbering and a queryable history, it isn't required for the two
+# halfsets to share a directory. Pinning `job_id` resumes into an existing
+# directory, e.g. for a manual halfset="A" then halfset="B" pair.
 # =============================================================================
 
 [job]
 # project = "empiar-10202"
 # job_id = "J001"
-# job_base_dir = "specter-data/reconstructions"   # defaults to output_dir
+# job_base_dir = "specter-data"   # defaults to SPECTER_DATA_DIR
 
 
 # =============================================================================

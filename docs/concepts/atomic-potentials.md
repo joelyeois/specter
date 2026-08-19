@@ -144,6 +144,19 @@ with matched-species Shtyrov kernels in one potential volume. `PotentialBuilder`
 and `MicrographSpecimenGenerator`/`TomogramSpecimenGenerator` default to
 `parameterization="shtyrov"` for this reason.
 
+How often that fallback fires depends on hydrogen. Twenty of the forty-two
+tabulated species name a hydrogen neighbour, and a species descriptor is built
+from the atoms actually present in the model, so a methyl carbon in a
+structure without hydrogens is described as `C(C)` rather than `C(HHHC)` and
+matches nothing. Deposited structures rarely carry hydrogens, and supplying
+them requires a Monomer Library (see
+[Installation](../installation.md#monomer-library-for-shtyrov-scattering-factors)).
+Without one, around 44% of a protein's atoms fall back to Peng — measured on
+myoglobin, where coverage rises from 56% to 99% once a library is available.
+The atoms that still resolve are those whose neighbours are all heavy:
+carbonyl and carboxyl carbons and oxygens, aromatic ring junctions, proline's
+nitrogen, disulfides, and the nucleic-acid phosphate backbone.
+
 ![Kirkland, Lobato, and Peng's independent-atom-model potentials for carbon, overlaid.](../assets/images/atomic-potential-parameterization-comparison.png){ width="600" }
 
 Kirkland and Lobato, both fit directly to the same tabulated bare-carbon

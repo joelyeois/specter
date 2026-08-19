@@ -113,8 +113,13 @@ def test_carboxyl_oxygen_flag(species):
 
 def test_heme_iron_coordination(species):
     """
-    Heme Fe should show up bonded to porphyrin N atoms (+ His/O2 axial
-    ligands), confirming _struct_conn metal-coordination bonds are picked up.
+    Heme Fe shows up bonded to porphyrin N atoms (+ His/O2 axial ligands),
+    confirming _struct_conn metal-coordination bonds are picked up.
+
+    This is the no-monomer-library path, where those links are kept: without a
+    library the porphyrin Fe-N bonds are not fully defined by the file's own
+    _chem_comp_bond, so dropping the links would leave Fe(NNN) here and Fe(N)
+    for 1A6M. See test_metal_links_dropped_with_library for the other path.
     """
     sp = _atom_species_by_name(species, _FIXTURE, "HEM", 155, "FE")
     assert sp is not None
@@ -207,3 +212,93 @@ def test_atom_species_aligns_for_awkward_structures(name):
         if s is not None and str(atom_symbol(int(z))).upper() != s.split("(")[0].upper()
     ]
     assert not mismatched, f"{len(mismatched)} atoms typed as the wrong element"
+
+
+# A monomer library is what supplies the hydrogens a deposited structure omits,
+# and without it every H-containing Shtyrov species ("C(HHHC)", "O(HH)") misses
+# the table and falls back to per-element Peng. Typing then covers ~56% of a
+# protein's atoms instead of ~99%. These tests need a real library, so they are
+# skipped wherever one is not configured.
+def _monomer_library() -> str | None:
+    from os import environ
+
+    env = environ.get("CLIBD_MON")
+    if env and Path(env).is_dir():
+        return env
+    bundled = Path.home() / "sffit" / "monomers"
+    return str(bundled) if bundled.is_dir() else None
+
+
+@pytest.mark.skipif(_monomer_library() is None, reason="no monomer library available")
+def test_monomer_library_adds_hydrogens_and_stays_aligned():
+    """With a library, all three arrays come from the H-completed model."""
+    monlib = _monomer_library()
+
+    plain = PDB(str(_FIXTURE), verbose=False, compute_atom_species=True)
+    assert (plain.atomic_numbers == 1).sum().item() == 0, (
+        "fixture already carries hydrogens; pick one without them"
+    )
+
+    completed = PDB(
+        str(_FIXTURE),
+        verbose=False,
+        compute_atom_species=True,
+        monomer_library_path=monlib,
+    )
+    n_h = (completed.atomic_numbers == 1).sum().item()
+    assert n_h > 0, "library did not add any hydrogens"
+
+    # The three arrays are taken from one iteration, so they cannot disagree.
+    assert len(completed.atom_species) == completed.atomic_numbers.shape[0]
+    assert completed.coordinates.shape[0] == completed.atomic_numbers.shape[0]
+    assert completed.atomic_numbers.shape[0] > plain.atomic_numbers.shape[0]
+
+
+@pytest.mark.skipif(_monomer_library() is None, reason="no monomer library available")
+def test_ambiguous_hydrogens_are_not_rendered():
+    """Zero-occupancy H (rotatable -OH, His tautomers) must not reach the model.
+
+    PotentialBuilder applies no occupancy weighting, so keeping them would
+    render both tautomer hydrogens of every histidine. sffit selects ";q>0"
+    for the same reason.
+    """
+    import gemmi
+
+    monlib = _monomer_library()
+    st = gemmi.read_structure(str(_FIXTURE))
+    st.setup_entities()
+    lib = gemmi.read_monomer_lib(monlib, st[0].get_all_residue_names())
+    gemmi.prepare_topology(st, lib, h_change=gemmi.HydrogenChange.ReAdd)
+    n_zero = sum(1 for cra in st[0].all() if cra.atom.occ == 0.0)
+    assert n_zero > 0, "fixture no longer exercises the ambiguous-hydrogen path"
+
+    completed = PDB(
+        str(_FIXTURE),
+        verbose=False,
+        compute_atom_species=True,
+        monomer_library_path=monlib,
+    )
+    n_kept = completed.atomic_numbers.shape[0]
+    n_all = sum(1 for _ in st[0].all())
+    assert n_kept <= n_all - n_zero, (
+        f"{n_all - n_zero - n_kept} ambiguous hydrogens were not excluded"
+    )
+
+
+@pytest.mark.skipif(_monomer_library() is None, reason="no monomer library available")
+def test_metal_links_dropped_with_library():
+    """With a library, the heme iron types as Fe(NNNN) -- an entry in the table.
+
+    sffit deletes ConnectionType.MetalC before typing, so the iron keeps only
+    the four porphyrin nitrogens its HEM component defines rather than also
+    picking up the axial His/O2 ligands. Keeping them gives Fe(NNNNNO...),
+    which no fitted table contains, so the iron would fall back to Peng.
+    """
+    from specter.pdb import PDB as _PDB
+
+    _, _, species, used = _PDB._build_typed_model(
+        str(_FIXTURE), _monomer_library(), False
+    )
+    assert used, "library did not load"
+    iron = [s for s in species if s is not None and s.startswith("Fe(")]
+    assert iron == ["Fe(NNNN)"], iron

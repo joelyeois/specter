@@ -26,9 +26,21 @@ uv pip install -e .          # the package itself, not just its dependencies
 uv run --with jupyter jupyter lab
 ```
 
+The default `shtyrov` scattering-factor parameterization types atoms by their
+bonded neighbours, so it needs hydrogens that deposited structures do not
+carry. Install the
+[Monomer Library](https://github.com/MonomerLibrary/monomers) and point
+`$CLIBD_MON` at it to supply them — without it roughly 44% of a protein's
+atoms fall back to per-element factors:
+
+```bash
+git clone https://github.com/MonomerLibrary/monomers.git
+export CLIBD_MON=/path/to/monomers
+```
+
 See the [installation guide](https://joelyeois.github.io/specter/installation/)
-for the conda/pip alternative, GPU notes, and troubleshooting an install
-outside a git checkout.
+for the conda/pip alternative, GPU notes, the Monomer Library in full, and
+troubleshooting an install outside a git checkout.
 
 ---
 

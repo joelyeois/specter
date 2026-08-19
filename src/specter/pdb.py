@@ -66,6 +66,7 @@ class PDB:
         origin: tuple[float, float, float] | None = None,
         verbose: bool = True,
         compute_atom_species: bool = False,
+        monomer_library_path: str | None = None,
     ) -> None:
         """
         Create a PDB object from either a PDB ID or a local file path.
@@ -96,6 +97,17 @@ class PDB:
             e.g. for the Shtyrov potential parameterization). Requires an
             mmCIF source and re-parses it via gemmi, so it is opt-in.
             Default is False.
+        monomer_library_path : str, optional
+            Path to a Monomer Library (https://github.com/MonomerLibrary/
+            monomers), falling back to `$CLIBD_MON`. Only consulted when
+            `compute_atom_species=True`. When one resolves, gemmi completes
+            the model with the hydrogens the library defines, and
+            `atomic_numbers`/`coordinates`/`atom_species` are then all taken
+            from that completed model -- so a typical hydrogen-free
+            deposition roughly doubles in atom count, and H-containing
+            species (`"C(HHHC)"`, `"O(HH)"`) resolve instead of falling back
+            to per-element Peng. Without a library the file's own atoms are
+            used unchanged, which is the historical behaviour.
 
         Attributes
         ----------
@@ -132,25 +144,45 @@ class PDB:
                 f"Invalid pdb_source: '{pdb_source}'. Must be a 4-character PDB ID or a valid file path."
             )
 
-        # get pdb structure
-        self.structure = PDB.get_pdb_structure(self.filepath)
-        """Bio.PDB.Structure.Structure: Parsed PDB structure object."""
-
-        # get atomic elements and coordinates
-        self.atomic_numbers, self.coordinates = PDB.get_atoms_and_coordinates(
-            self.structure, verbose=verbose
-        )
+        # Biopython parses lazily via the `structure` property: when a monomer
+        # library completes the model below, its atom list supersedes
+        # Biopython's entirely and parsing the file twice would be pure waste
+        # (20 s of the 30 s a 532k-atom assembly used to take).
+        self._structure: "Structure | None" = None
 
         # bonded-neighbor species descriptors (e.g. for Shtyrov potentials)
         self.atom_species: list[str | None] | None = None
+        used_library = False
         if compute_atom_species:
-            self.atom_species = PDB.get_atom_species(self.filepath, verbose=verbose)
-            # Coordinates come from Biopython and species from gemmi, so the
-            # two lists are only meaningful zipped together. Catch any residual
-            # disagreement here, where the structure can be named, rather than
-            # letting it surface as an opaque mask/tensor shape error deep in
-            # PotentialBuilder. A multi-model file trips this: Biopython walks
-            # every model, gemmi types only the first.
+            znum, pos, species, used_library = PDB._build_typed_model(
+                self.filepath, monomer_library_path, verbose=verbose
+            )
+            self.atom_species = species
+            if used_library:
+                # The library completed the model with hydrogens gemmi placed
+                # from ideal geometry, so Biopython's atom list -- parsed from
+                # the file, which has none -- no longer describes the same
+                # molecule. Take all three arrays from the completed model
+                # instead, the way sffit does, so they align by construction
+                # rather than by comparison. This is what makes H-containing
+                # species resolvable at all; see `monomer_library_path`.
+                self.atomic_numbers = torch.tensor(znum, dtype=torch.long)
+                self.coordinates = torch.tensor(pos, dtype=torch.float32)
+
+        if not used_library:
+            # get atomic elements and coordinates
+            self.atomic_numbers, self.coordinates = PDB.get_atoms_and_coordinates(
+                self.structure, verbose=verbose
+            )
+
+        if compute_atom_species and not used_library:
+            # Without a library the two parsers should still agree atom for
+            # atom. Catch any residual disagreement here, where the structure
+            # can be named, rather than letting it surface as an opaque
+            # mask/tensor shape error deep in PotentialBuilder. A multi-model
+            # file trips this: Biopython walks every model, gemmi types only
+            # the first. With a library the two arrays come from one pass, so
+            # there is nothing to reconcile.
             if len(self.atom_species) != self.atomic_numbers.shape[0]:
                 n_models = len(list(self.structure))
                 raise ValueError(
@@ -178,6 +210,19 @@ class PDB:
         # estimate max diameter
         self.max_diameter = PDB.estimate_max_diameter(self.coordinates)
         """float: Maximum diameter of the structure based on convex hull."""
+
+    @property
+    def structure(self) -> "Structure":
+        """
+        Bio.PDB.Structure.Structure: the parsed structure, read on first use.
+
+        Parsed lazily because the monomer-library path never needs it: gemmi
+        supplies the atom list there, and eagerly parsing the same file with
+        Biopython as well doubled the cost of building a large assembly.
+        """
+        if self._structure is None:
+            self._structure = PDB.get_pdb_structure(self.filepath)
+        return self._structure
 
     @staticmethod
     def fetch_pdb_file(
@@ -376,13 +421,17 @@ class PDB:
         return elements, coords
 
     @staticmethod
-    def get_atom_species(
+    def _build_typed_model(
         filepath: str,
         monomer_library_path: str | None = None,
         verbose: bool = True,
-    ) -> list[str | None]:
+    ) -> tuple[list[int], list[list[float]], list[str | None], bool]:
         """
-        Determine each atom's bonded-neighbor species descriptor.
+        Build the topology-completed model and type every atom in one pass.
+
+        Returns each atom's element, position and bonded-neighbor species
+        descriptor from the *same* gemmi model, so the three stay aligned by
+        construction. :meth:`get_atom_species` returns only the descriptors.
 
         Mirrors the atom-typing approach used by `sffit
         <https://github.com/as2875/sffit>`_ to fit bonded-species electron
@@ -429,7 +478,13 @@ class PDB:
                 stacklevel=2,
             )
             structure = PDB.get_pdb_structure(filepath)
-            return [None for _ in structure.get_atoms()]
+            znum_t, pos_t = PDB.get_atoms_and_coordinates(structure, verbose=False)
+            return (
+                znum_t.tolist(),
+                pos_t.tolist(),
+                [None] * int(znum_t.shape[0]),
+                False,
+            )
 
         monlib_path = monomer_library_path or os.environ.get("CLIBD_MON")
 
@@ -446,11 +501,14 @@ class PDB:
                 monlib = gemmi.MonLib()
         else:
             warnings.warn(
-                "CLIBD_MON is not set; falling back to gemmi's built-in "
-                "chemical-component definitions. Bond topology for standard "
-                "residues is still derived from the file itself, but "
-                "hydrogens cannot be added, so H-containing Shtyrov species "
-                "(e.g. 'O(HH)', 'C(HHHC)') will not be resolved.",
+                "No monomer library configured (set $CLIBD_MON or pass "
+                "monomer_library_path). gemmi ships no component definitions "
+                "of its own, so the topology is built from the file's own "
+                "bonds alone and no hydrogens can be added: H-containing "
+                "Shtyrov species (e.g. 'O(HH)', 'C(HHHC)') will not resolve, "
+                "and those atoms fall back to per-element Peng -- around 44% "
+                "of a hydrogen-free protein. Install the Monomer Library "
+                "(https://github.com/MonomerLibrary/monomers) to type them.",
                 RuntimeWarning,
                 stacklevel=2,
             )
@@ -472,8 +530,39 @@ class PDB:
         # their zero occupancy later: deposited structures may legitimately
         # contain zero-occupancy atoms (1FA2 has 208 of them), and dropping
         # those as "dummies" would misalign the two lists the same way.
+        # A library is what supplies hydrogens; without one the completed
+        # model is just the file's own atoms.
+        used_library = bool(len(monlib.monomers))
+
+        # Drop explicit metal-coordination links, as sffit does before typing,
+        # but only when a library is in use -- which is the only configuration
+        # sffit supports. The library's HEM component defines the four
+        # porphyrin Fe-N bonds itself, so removing the _struct_conn links
+        # leaves Fe(NNNN), the 4-coordinate entry the table provides, instead
+        # of Fe(NNNNNOO), which no table contains. Without a library those
+        # internal bonds come only from the file's own (incomplete)
+        # _chem_comp_bond, and removing the links strips what was compensating:
+        # 1mbo degrades to Fe(NNN) and 1A6M to Fe(N).
+        #
+        # Deliberately NOT adopted from sffit's from_gemmi: `expand_ncs`, since
+        # specter fetches biological assemblies from RCSB and would
+        # double-expand them; and keeping alternate conformers, since
+        # PotentialBuilder applies no occupancy weighting and would render both
+        # at full strength.
+        if used_library:
+            for i in reversed(range(len(st.connections))):
+                if st.connections[i].type is gemmi.ConnectionType.MetalC:
+                    del st.connections[i]
+
+        # prepare_topology rewrites each connection's link_id as a side effect,
+        # so keep the list to restore before the second pass (sffit does the
+        # same). Snapshotted *after* the metal links are dropped: taking it
+        # earlier would restore them for the second pass, which is the one
+        # that builds the bond graph the typing actually reads.
+        conlist = gemmi.ConnectionList(st.connections)
+
         added_keys: set[_AtomKey] = set()
-        if len(monlib.monomers):
+        if used_library:
             topo = gemmi.prepare_topology(
                 st, monlib, h_change=gemmi.HydrogenChange.ReAdd, warnings=warnings_sink
             )
@@ -496,6 +585,7 @@ class PDB:
                 cra.residue.add_atom(atom)
 
         # Second pass: final bond graph, now including any added atoms.
+        st.connections = conlist
         topo = gemmi.prepare_topology(
             st, monlib, h_change=gemmi.HydrogenChange.NoChange, warnings=warnings_sink
         )
@@ -517,6 +607,8 @@ class PDB:
             neighbor_keys[kb].add(ka)
 
         species: list[str | None] = []
+        atomic_numbers: list[int] = []
+        positions: list[list[float]] = []
         n_matched = 0
         seen: set[_AtomKey] = set()
         for cra in st[0].all():
@@ -532,7 +624,19 @@ class PDB:
                 # atomic_numbers/coordinates — bonding topology doesn't
                 # differ between altlocs of the same atom in practice).
                 continue
+            if used_library and cra.atom.occ == 0.0:
+                # gemmi zero-occupancies the hydrogens whose presence or
+                # position is ambiguous -- a rotatable Ser/Thr/Tyr hydroxyl H,
+                # or both tautomer hydrogens of a histidine, only one of which
+                # is really there. sffit drops these from its fit (it selects
+                # ";q>0") and so must we: PotentialBuilder has no occupancy
+                # weighting, so keeping them would render every His
+                # doubly protonated. They still inform their neighbours'
+                # descriptors, since the bond graph above spans every atom.
+                continue
             seen.add(key)
+            atomic_numbers.append(cra.atom.element.atomic_number)
+            positions.append([cra.atom.pos.x, cra.atom.pos.y, cra.atom.pos.z])
             neighbors = neighbor_keys.get(key)
             if not neighbors:
                 species.append(None)
@@ -555,6 +659,29 @@ class PDB:
         if verbose:
             print(f"[get_atom_species] {n_matched}/{len(species)} atoms typed")
 
+        return atomic_numbers, positions, species, used_library
+
+    @staticmethod
+    def get_atom_species(
+        filepath: str,
+        monomer_library_path: str | None = None,
+        verbose: bool = True,
+    ) -> list[str | None]:
+        """
+        Determine each atom's bonded-neighbor species descriptor.
+
+        Thin wrapper over :meth:`_build_typed_model`, which documents the
+        typing rules and the monomer-library behaviour.
+
+        Returns
+        -------
+        species : list of str or None
+            One entry per atom, in the same order as the model this was
+            derived from. ``None`` where no neighbors could be determined.
+        """
+        _, _, species, _ = PDB._build_typed_model(
+            filepath, monomer_library_path, verbose
+        )
         return species
 
     @staticmethod

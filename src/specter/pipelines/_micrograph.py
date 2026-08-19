@@ -69,15 +69,27 @@ def run_micrograph(config: MicrographConfig) -> None:
 
     # --- Building 3D scattering potential ---
     _section("Building 3D scattering potential")
+    # PotentialBuilder defaults to the Shtyrov parameterization, which fits
+    # scattering factors per bonded species -- without atom_species every atom
+    # silently falls back to per-element Peng, so derive the topology here as
+    # run_particle_stack does. This path has no potential_parameterization
+    # config field, so the default always applies and the typing is always
+    # worth its one-off gemmi pass.
     pdb = PDB(
-        config.pdb_code, assembly=config.assembly, savefolder=config.pdb_savefolder
+        config.pdb_code,
+        assembly=config.assembly,
+        savefolder=config.pdb_savefolder,
+        compute_atom_species=True,
     )
 
     cs_angstrom = config.cs * 1e7
 
-    pb = PotentialBuilder(config.n_pixels, config.pixel_size, pdb.atomic_numbers).to(
-        "cpu"
-    )
+    pb = PotentialBuilder(
+        config.n_pixels,
+        config.pixel_size,
+        pdb.atomic_numbers,
+        atom_species=pdb.atom_species,
+    ).to("cpu")
     with torch.no_grad():
         V = pb(pdb.coordinates).clone()
 

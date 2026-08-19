@@ -104,6 +104,59 @@ uv-specific setting) and gives you PyPI's default PyTorch build; use
     field generation, plus a one-time warning). The same fallback covers a
     machine with no CUDA device available at runtime.
 
+## Monomer Library (for Shtyrov scattering factors)
+
+The default `shtyrov` parameterization fits scattering factors per *bonded
+species* — `C(HHHC)` for a methyl carbon, `O(HH)` for a water oxygen — rather
+than per element, so an atom is typed by what it is bonded to. Twenty of the
+forty-two tabulated species contain hydrogen.
+
+Deposited structures almost never include hydrogens, since they are not
+resolved at typical resolution. Supplying them is the job of the
+[Monomer Library](https://github.com/MonomerLibrary/monomers), the same
+chemical-component dictionary REFMAC and Coot use. It is not bundled with
+SPECTER: it is roughly 1.5 GB, and separately licensed.
+
+Without it, every H-containing species fails to match and those atoms fall
+back to per-element Peng factors — about **44% of a hydrogen-free protein**,
+measured on myoglobin. SPECTER still runs, and warns once per structure.
+
+```bash
+git clone https://github.com/MonomerLibrary/monomers.git
+export CLIBD_MON=/path/to/monomers      # add to ~/.bashrc to persist
+```
+
+A partial clone is enough if disk is tight:
+
+```bash
+git clone --filter=blob:none --sparse https://github.com/MonomerLibrary/monomers.git
+cd monomers && git sparse-checkout set a c d g h i l m n p s t v w y
+```
+
+`$CLIBD_MON` is the variable CCP4 already uses, so an existing CCP4 install
+needs no extra setup. It can also be passed explicitly:
+
+```python
+from specter.pdb import PDB
+
+pdb = PDB("1a6m", compute_atom_species=True,
+          monomer_library_path="/path/to/monomers")
+```
+
+!!! note "What changes when a library is present"
+
+    Hydrogens are added from the library's ideal geometry, and coordinates,
+    elements and species are then all taken from that completed model. A
+    hydrogen-free deposition therefore roughly **doubles in atom count**
+    (myoglobin: 1,445 → 2,668), typing coverage rises from ~56% to ~99%, and
+    the rendered potential changes by 20-30% relative RMS. Hydrogens whose
+    position is chemically ambiguous — a rotatable hydroxyl, or both tautomer
+    hydrogens of a histidine — are excluded rather than rendered.
+
+    Structures that already carry hydrogens have them replaced by the
+    library's ideal positions, which is what the underlying `sffit` reference
+    implementation does.
+
 ## Installing with conda/pip instead
 
 ```bash

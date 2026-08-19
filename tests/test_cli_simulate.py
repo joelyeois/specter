@@ -4,6 +4,8 @@ import subprocess as proc
 import sys
 from pathlib import Path
 
+import pytest
+
 _FIXTURE_PDB = str(Path(__file__).parent.parent / "specter-data" / "pdb" / "1mbo.cif")
 
 
@@ -432,3 +434,48 @@ def test_cli_particles_single_particle(tmp_path: Path) -> None:
 
     with mrcfile.open(str(tmp_path / "particles.mrcs"), permissive=True) as mrc:
         assert mrc.data.shape[0] == 1
+
+
+# PotentialBuilder defaults to the Shtyrov parameterization, which is per
+# bonded species -- passing it no atom_species makes every atom fall back to
+# per-element Peng, silently. run_micrograph did exactly that, so the
+# micrograph path got no benefit from Shtyrov at all while run_particle_stack
+# did. This asserts the wiring rather than the pixels: it captures what
+# PotentialBuilder is actually constructed with, then aborts the run.
+def test_run_micrograph_types_atoms_for_shtyrov(monkeypatch, tmp_path: Path) -> None:
+    import specter.pipelines._micrograph as micrograph_module
+    from specter.config import MicrographConfig
+
+    captured: dict = {}
+
+    class _Sentinel(Exception):
+        pass
+
+    real_builder = micrograph_module.PotentialBuilder
+
+    def _spy(*args, **kwargs):
+        captured["atom_species"] = kwargs.get("atom_species")
+        captured["n_atoms"] = len(args[2]) if len(args) > 2 else None
+        raise _Sentinel
+
+    monkeypatch.setattr(micrograph_module, "PotentialBuilder", _spy)
+
+    config = MicrographConfig(
+        pdb_code=_FIXTURE_PDB,
+        n_pixels=32,
+        micrograph_size=64,
+        n_micrographs=1,
+        ice_model="none",
+        device="cpu",
+        output_dir=str(tmp_path),
+    )
+    with pytest.raises(_Sentinel):
+        micrograph_module.run_micrograph(config)
+
+    assert captured["atom_species"] is not None, (
+        "run_micrograph built a Shtyrov PotentialBuilder without atom_species, "
+        "so every atom would fall back to per-element Peng"
+    )
+    assert len(captured["atom_species"]) == captured["n_atoms"]
+    assert any(s is not None for s in captured["atom_species"])
+    assert real_builder is not _spy

@@ -682,7 +682,7 @@ class Reconstructor(_BaseReconstructor):
             return
         suffix = self._metrics_path_suffix()
         v = self.V.detach().cpu().float()
-        volume_path = self._run_dir / f"vol{suffix}.mrc"
+        volume_path = self._run_dir / f"volume{suffix}.mrc"
         save_volume_mrc(volume_path, v, self.voxel_size)
         print(f"Saved final volume → {volume_path}")
 
@@ -731,7 +731,7 @@ class Reconstructor(_BaseReconstructor):
         if self._run_dir is None:
             return
         save_plot3d_preview(
-            self._run_dir / "epochs" / f"vol_{epoch:03d}{suffix}.png",
+            self._run_dir / "epochs" / f"volume_{epoch:03d}{suffix}.png",
             v,
             title=f"Epoch {epoch}{suffix}",
         )

@@ -1366,7 +1366,7 @@ RECONSTRUCTION_HELP: dict[str, str] = {
     "Poisson statistics the loss is weighted by, so it must be the dataset's "
     "real value.",
     "return_class": "Which CryoSPARC class to reconstruct. 0 and 1 select a "
-    "halfset and name the outputs vol_A.mrc / vol_B.mrc; all uses every "
+    "halfset and name the outputs volume_A.mrc / volume_B.mrc; all uses every "
     "particle. Run 0 and 1 into one --project/--job_id for a gold-standard "
     "pair.",
     "num_particles": "Reconstruct only the first N particles instead of the "
@@ -1428,7 +1428,7 @@ RECONSTRUCTION_HELP: dict[str, str] = {
     "num_workers": "Dataloader worker processes.",
     "output_dir": "Directory the run directory is created in.",
     "run_name": "Name of the run's own directory inside --output_dir. Names "
-    "the directory, not the files: vol.mrc, params.json and epochs/ are "
+    "the directory, not the files: volume.mrc, params.json and epochs/ are "
     "named by the reconstructor.",
     "project": "Route output through specter.jobs instead of "
     "--output_dir/--run_name: the run lands in "

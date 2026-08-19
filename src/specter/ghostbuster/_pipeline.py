@@ -61,7 +61,7 @@ class Ghostbuster:
         ``return_class`` and ``cryosparc_ref`` are excluded from the job
         parameter log (see :attr:`_job_log_exclude`) because they differ
         between halfsets. ``return_class`` encodes halfset identity in the
-        output filenames (``vol_A.mrc`` / ``vol_B.mrc``), and ``cryosparc_ref``
+        output filenames (``volume_A.mrc`` / ``volume_B.mrc``), and ``cryosparc_ref``
         points to the corresponding halfset reference. Both halfset runs must
         use identical settings for every other parameter.
 

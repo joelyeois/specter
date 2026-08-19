@@ -697,14 +697,14 @@ def _extract_epoch_number(filename: str) -> int | None:
     Parameters
     ----------
     filename : str
-        Filename like "fsc_001_B.png" or "vol_042_A.png"
+        Filename like "fsc_001_B.png" or "volume_042_A.png"
 
     Returns
     -------
     int or None
         Epoch number if matched, None otherwise.
     """
-    match = re.search(r"(?:fsc|vol)_(\d+)(?:_[A-Z])?", filename)
+    match = re.search(r"(?:fsc|volume)_(\d+)(?:_[A-Z])?", filename)
     return int(match.group(1)) if match else None
 
 
@@ -777,7 +777,7 @@ def _discover_volume_images(job_folder: str | Path) -> list[tuple[int, Path]]:
 
     # Find volume files
     volume_files = []
-    for volume_file in sorted(epochs_dir.glob("vol_*.png")):
+    for volume_file in sorted(epochs_dir.glob("volume_*.png")):
         epoch = _extract_epoch_number(volume_file.name)
         if epoch is not None:
             volume_files.append((epoch, volume_file))

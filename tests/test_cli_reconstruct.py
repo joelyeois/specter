@@ -181,7 +181,7 @@ def test_run_reconstruction_writes_a_run_directory(
     run_reconstruction(config)
 
     run_dir = output_dir / "my_run"
-    assert (run_dir / "vol.mrc").exists()
+    assert (run_dir / "volume.mrc").exists()
     assert (run_dir / "params.json").exists()
 
     recorded = json.loads((run_dir / "reconstruct_config.json").read_text())
@@ -210,8 +210,8 @@ def test_run_reconstruction_halfsets_share_one_job(
         run_reconstruction(config)
 
     job_dir = output_dir / "test-project" / "J001"
-    assert (job_dir / "vol_A.mrc").exists()
-    assert (job_dir / "vol_B.mrc").exists()
+    assert (job_dir / "volume_A.mrc").exists()
+    assert (job_dir / "volume_B.mrc").exists()
     assert (job_dir / "reconstruct_config_A.json").exists()
     assert (job_dir / "reconstruct_config_B.json").exists()
 

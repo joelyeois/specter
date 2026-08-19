@@ -243,7 +243,7 @@ def test_run_dir_writes_expected_artifacts(tmp_path: Path, tr_kwargs: dict) -> N
 
     assert (tmp_path / "params.json").exists()
     assert (tmp_path / "metrics.json").exists()
-    assert (tmp_path / "vol.mrc").exists()
+    assert (tmp_path / "volume.mrc").exists()
     assert (tmp_path / "kmask.pt").exists()
     assert (tmp_path / "epochs" / "001.mrc").exists()
     assert (tmp_path / "epochs" / "002.mrc").exists()

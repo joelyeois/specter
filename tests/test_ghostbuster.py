@@ -610,12 +610,12 @@ def test_run_dir_writes_expected_artifacts(
 
     assert (tmp_path / "params_A.json").exists()
     assert (tmp_path / "metrics_A.json").exists()
-    assert (tmp_path / "vol_A.mrc").exists()
+    assert (tmp_path / "volume_A.mrc").exists()
     assert (tmp_path / "kmask.pt").exists()
     assert (tmp_path / "fsc_A.png").exists()
     assert (tmp_path / "epochs" / "001_A.mrc").exists()
     assert (tmp_path / "epochs" / "002_A.mrc").exists()
-    assert (tmp_path / "epochs" / "vol_001_A.png").exists()
+    assert (tmp_path / "epochs" / "volume_001_A.png").exists()
     assert (tmp_path / "epochs" / "fsc_001_A.png").exists()
 
     metrics = json.loads((tmp_path / "metrics_A.json").read_text())

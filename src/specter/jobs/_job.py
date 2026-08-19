@@ -264,7 +264,11 @@ class Job:
 
         In resume mode (``job_id`` was passed at construction), the incoming params
         (after exclusion) are validated against the stored params. A ``ValueError``
-        is raised if they differ, preventing accidental halfset mismatches.
+        is raised if they differ, preventing accidental halfset mismatches. Only
+        keys this call's own introspection produces are checked -- other keys
+        already in ``params`` (e.g. from an earlier :meth:`log` call) are left
+        alone, since they were never something this constructor could agree or
+        disagree with in the first place.
 
         Parameters
         ----------
@@ -297,9 +301,13 @@ class Job:
         }
 
         if self._is_resume:
+            # Only keys `serialized` actually has -- not the union with
+            # self._params, which may hold unrelated keys from an earlier
+            # log() call that this constructor's introspection never
+            # produces and so could never agree with.
             mismatches = {
                 k: (self._params.get(k), serialized.get(k))
-                for k in set(self._params) | set(serialized)
+                for k in serialized
                 if self._params.get(k) != serialized.get(k)
             }
             if mismatches:

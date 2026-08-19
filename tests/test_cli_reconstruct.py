@@ -260,12 +260,19 @@ def test_run_reconstruction_halfsets_share_one_job(
     job_dir = output_dir / "test-project" / "reconstructions" / "J001"
     assert (job_dir / "volume_A.mrc").exists()
     assert (job_dir / "volume_B.mrc").exists()
-    assert (job_dir / "reconstruct_config_A.json").exists()
-    assert (job_dir / "reconstruct_config_B.json").exists()
+    # job.json already has the full config; a tracked run no longer writes
+    # a redundant reconstruct_config_{A,B}.json copy of the same thing.
+    assert not (job_dir / "reconstruct_config_A.json").exists()
+    assert not (job_dir / "reconstruct_config_B.json").exists()
 
     job = json.loads((job_dir / "job.json").read_text())
     assert job["status"] == "complete"
     assert job["params"]["dose_per_angstrom"] == 40.0
+    # Fields job.create's Ghostbuster-argument introspection can't see on its
+    # own (test_run isn't a Ghostbuster constructor arg) still land in
+    # job.json, logged separately by run_reconstruction.
+    assert job["params"]["test_run"] is True
+    assert job["params"]["device"] == "cpu"
 
 
 def test_run_reconstruction_gold_standard_default(
@@ -311,6 +318,9 @@ def test_run_reconstruction_gold_standard_tracked(
     assert (job_dir / "volume_A.mrc").exists()
     assert (job_dir / "volume_B.mrc").exists()
     assert (job_dir / "fsc_gold_standard.png").exists()
+    # job.json already has the full config; no redundant sidecar copy.
+    assert not (job_dir / "reconstruct_config_A.json").exists()
+    assert not (job_dir / "reconstruct_config_B.json").exists()
 
     job = json.loads((job_dir / "job.json").read_text())
     assert job["status"] == "complete"

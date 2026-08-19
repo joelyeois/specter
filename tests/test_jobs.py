@@ -545,3 +545,20 @@ def test_job_resume_excluded_param_difference_not_checked(tmp_path: Path) -> Non
     # Different secret — should not raise because secret is excluded
     with Job("dummy", project="p", base_dir=tmp_path, job_id="J001") as job:
         job.create(_ExcludeClass, "hello", secret="password2")
+
+
+def test_job_resume_create_ignores_extra_logged_keys(tmp_path: Path) -> None:
+    """A key added via log() that create()'s introspection never produces
+    (e.g. an orchestration field the constructor doesn't take) must not read
+    as a permanent mismatch on every future create() -- it was never
+    something this constructor's params could agree or disagree with."""
+    with Job("dummy", project="p", base_dir=tmp_path) as job:
+        job.log({"device": "cpu"})
+        job.create(_DummyClass, "hello", value=3.14)
+
+    # device isn't a _DummyClass constructor arg, so create()'s own
+    # introspection never sees it -- resuming must not raise over it.
+    with Job("dummy", project="p", base_dir=tmp_path, job_id="J001") as job:
+        job.create(_DummyClass, "hello", value=3.14)
+    data = json.loads((job.dir / "job.json").read_text())
+    assert data["params"]["device"] == "cpu"

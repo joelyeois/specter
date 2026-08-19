@@ -130,12 +130,19 @@ def _reconstruct_device(device_str: str) -> int | list[int] | str:
 
 def _write_resolved_config(config: ReconstructionConfig, run_dir: Path) -> None:
     """
-    Record the settings a run was launched with, next to its outputs.
+    Record the settings an untracked run was launched with, next to its outputs.
 
-    The reconstructor writes its own ``params.json``, but that covers only
-    what reaches the `Reconstructor` -- not the device, the run layout, or
-    whether this was a binned test run. This records the whole config, so a
-    finished run directory says how to reproduce itself.
+    Only called when ``config.project is None``. Tracked runs don't need
+    this: `job.json` already records the full config (either via `job.log`
+    in `_run_gold_standard`, or via `job.create`'s Ghostbuster-argument
+    introspection plus the orchestration fields logged alongside it in
+    `run_reconstruction`) -- writing it again here would just be a second
+    copy of the same content. Untracked runs have no `job.json` at all, so
+    this is their only "how do I reproduce this" record.
+
+    The reconstructor writes its own ``params.json`` too, but that covers
+    only what reaches the `Reconstructor` -- not the device, the run layout,
+    or whether this was a binned test run. This records the whole config.
 
     Parameters
     ----------
@@ -191,10 +198,26 @@ def run_reconstruction(config: ReconstructionConfig) -> None:
 
         jobs.base_directory(config.job_base_dir or SPECTER_DATA_DIR)
         with jobs.Job("reconstructions", config.project, job_id=config.job_id) as job:
-            _write_resolved_config(config, job.dir)
-            # job.create logs every constructor argument into job.json and
-            # injects run_dir, so the Ghostbuster is built the same way here
-            # as in the untracked branch, minus the explicit run_dir.
+            # job.create logs every Ghostbuster constructor argument into
+            # job.json and injects run_dir, so the Ghostbuster is built the
+            # same way here as in the untracked branch, minus the explicit
+            # run_dir. That introspection can't see fields Ghostbuster never
+            # receives (test_run, device, ...), so log those separately --
+            # between the two, job.json ends up with the full config, same
+            # as _write_resolved_config would have given an untracked run,
+            # without a second reconstruct_config.json copy of it.
+            job.log(
+                {
+                    f: getattr(config, f)
+                    for f in (
+                        "test_run",
+                        "bin_factor",
+                        "device",
+                        "output_dir",
+                        "run_name",
+                    )
+                }
+            )
             kwargs = _ghostbuster_kwargs(config)
             device = _reconstruct_device(config.device)
             _fit(job.create(Ghostbuster, **kwargs), config, device)
@@ -236,7 +259,11 @@ def _run_single_halfset(config: ReconstructionConfig, run_dir: Path) -> None:
 
     device = _reconstruct_device(config.device)
     kwargs = _ghostbuster_kwargs(config)
-    _write_resolved_config(config, run_dir)
+    if config.project is None:
+        # Tracked runs (project set) already get the full config recorded
+        # in job.json, by the caller -- see _write_resolved_config's
+        # docstring.
+        _write_resolved_config(config, run_dir)
     _fit(Ghostbuster(run_dir=run_dir, **kwargs), config, device)
 
 

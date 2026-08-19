@@ -29,14 +29,6 @@ possible.
 
     [:octicons-arrow-right-24: Ice structure](concepts/ice.md)
 
--   :material-wave:{ .lg .middle } **Multislice propagation**
-
-    The default propagates the wave slice by slice through the specimen,
-    so thickness and multiple scattering are represented rather than
-    assumed away.
-
-    [:octicons-arrow-right-24: Scattering](concepts/scattering/index.md)
-
 -   :material-camera-iris:{ .lg .middle } **Per-electron detector**
 
     Individual electrons are placed and merged when they land too close
@@ -45,21 +37,19 @@ possible.
 
     [:octicons-arrow-right-24: Detector](concepts/detector.md)
 
--   :material-content-duplicate:{ .lg .middle } **Dataset twins**
+-   :material-check-decagram:{ .lg .middle } **Validated against experiment**
 
-    Reading a CryoSPARC `.cs` or RELION `.star` file gives simulated data
-    with the same poses, defoci and optics as a real dataset, with ground
-    truth attached throughout.
+    Simulated particles pooled with real EMPIAR-11377 particles and run
+    through a single CryoSPARC 2D classification job sort into the same
+    classes, in roughly the same proportion, across nearly all 50 classes.
 
-    [:octicons-arrow-right-24: Dataset twin](user-guide/dataset-twin.md)
+    [:octicons-arrow-right-24: See the comparison](user-guide/particle-stack.md#example-matching-empiar-11377)
 
--   :material-history:{ .lg .middle } **Recorded provenance**
+-   :material-swap-horizontal:{ .lg .middle } **One model, both directions**
 
-    Every job stores its complete effective configuration, the package
-    version and the git commit, and refuses to resume under changed
-    settings.
-
-    [:octicons-arrow-right-24: Manage jobs](user-guide/jobs.md)
+    The forward model that generates images is the same model that drives
+    reconstruction, so a change to the physics applies in both directions
+    rather than to a simulator alone.
 
 </div>
 

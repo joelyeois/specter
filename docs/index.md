@@ -5,10 +5,72 @@
   ![SPECTER logo](assets/logo-dark.png#only-dark){ width="220" }
 </p>
 
-**Scattering & Propagation of Electrons in Cryo-EM: Twin Emulator & Reconstruction**
+<strong>S</strong>cattering & <strong>P</strong>ropagation of <strong>E</strong>lectrons in
+<strong>C</strong>ryo-EM: <strong>T</strong>win <strong>E</strong>mulator &
+<strong>R</strong>econstruction. A physics-based simulator for cryo-EM and cryo-ET,
+built to produce images that match experimental data, and to reconstruct
+3D maps with the same forward model.
 
-Physics-based cryo-EM simulation, built to match experimental data as
-closely as possible.
+<p align="center" markdown>
+  ![A simulated cryo-ET specimen](assets/images/cryoet-tomogram-hero.png){ width="560" }
+</p>
+
+---
+
+## Why SPECTER?
+
+<div class="grid cards" markdown>
+
+-   :material-snowflake:{ .lg .middle } **Structured ice**
+
+    Ice comes from configurations optimised against a measured structure
+    factor and a coarse-grained water potential, not from water molecules
+    placed at random to the right bulk density.
+
+    [:octicons-arrow-right-24: Ice structure](concepts/ice.md)
+
+-   :material-wave:{ .lg .middle } **Multislice propagation**
+
+    The default propagates the wave slice by slice through the specimen,
+    so thickness and multiple scattering are represented rather than
+    assumed away.
+
+    [:octicons-arrow-right-24: Scattering](concepts/scattering/index.md)
+
+-   :material-camera-iris:{ .lg .middle } **Per-electron detector**
+
+    Individual electrons are placed and merged when they land too close
+    together, reproducing the low-frequency suppression that real
+    counting detectors show.
+
+    [:octicons-arrow-right-24: Detector](concepts/detector.md)
+
+-   :material-content-duplicate:{ .lg .middle } **Dataset twins**
+
+    Reading a CryoSPARC `.cs` or RELION `.star` file gives simulated data
+    with the same poses, defoci and optics as a real dataset, with ground
+    truth attached throughout.
+
+    [:octicons-arrow-right-24: Dataset twin](user-guide/dataset-twin.md)
+
+-   :material-history:{ .lg .middle } **Recorded provenance**
+
+    Every job stores its complete effective configuration, the package
+    version and the git commit, and refuses to resume under changed
+    settings.
+
+    [:octicons-arrow-right-24: Manage jobs](user-guide/jobs.md)
+
+-   :material-backup-restore:{ .lg .middle } **Forward and inverse**
+
+    The same forward model that generates images also drives
+    reconstruction, for single particles and for tilt series.
+
+    [:octicons-arrow-right-24: Reconstruction math](concepts/reconstruction-math.md)
+
+</div>
+
+---
 
 ## Get started
 
@@ -16,70 +78,141 @@ closely as possible.
 
 -   :material-download:{ .lg .middle } **Installation**
 
-    ---
-
     Set up SPECTER with `uv` and confirm it works with a small CPU run.
 
-    [:octicons-arrow-right-24: Installation](installation.md)
+    [:octicons-arrow-right-24: Install](installation.md)
 
 -   :material-rocket-launch:{ .lg .middle } **Quickstart**
 
-    ---
-
     Simulate a particle stack from a PDB code in one command.
 
-    [:octicons-arrow-right-24: Quickstart](quickstart.md)
+    [:octicons-arrow-right-24: Get started](quickstart.md)
 
 </div>
 
-## What makes this package different
+---
 
-These are the properties that follow from reading the source, not a
-competitive comparison. Each is unusual on its own; together they define
-what SPECTER is for.
+## Guides
+
+### CLI
+
+Every workflow below is a `specter` subcommand driven by a TOML config.
 
 <div class="grid cards" markdown>
 
--   :material-snowflake:{ .lg .middle } **Ice**
+-   :material-grid:{ .lg .middle } **Particle stack**
 
-    ---
+    `specter simulate particles` — a stack of single-particle images from
+    a PDB code, with poses, defocus and dose sampled per particle.
 
-    Water is structured, not scattered. Ice comes from configurations
-    optimised against a measured structure factor and a coarse-grained
-    water potential, not randomly placed molecules at the right bulk
-    density. See [Ice structure](concepts/ice.md).
+    [:octicons-arrow-right-24: Generate a particle stack](user-guide/particle-stack.md)
 
--   :material-camera-iris:{ .lg .middle } **Detector**
+-   :material-image-filter-hdr:{ .lg .middle } **Micrograph**
 
-    ---
+    `specter simulate micrograph` — a full field of view with many
+    particles, crowding and ice.
 
-    Coincidence loss is simulated per electron. Individual electrons are
-    placed and then merged when they land too close together,
-    reproducing the low-frequency suppression that real counting
-    detectors show.
+    [:octicons-arrow-right-24: Generate a micrograph](user-guide/micrograph.md)
 
--   :material-content-duplicate:{ .lg .middle } **Dataset twins**
+-   :material-angle-acute:{ .lg .middle } **Tilt series**
 
-    ---
+    `specter simulate tiltseries` — a cryo-ET tilt series through a
+    specimen volume, with dose accumulation across tilts.
 
-    Poses can come from a real experiment. Reading a CryoSPARC `.cs`
-    file gives simulated data with the same poses, defoci and optics as
-    a real dataset, with ground truth attached throughout.
+    [:octicons-arrow-right-24: Generate a tilt series](user-guide/tilt-series.md)
 
--   :material-wave:{ .lg .middle } **Propagation**
+-   :material-cube-outline:{ .lg .middle } **Tomogram specimen**
 
-    ---
+    `specter build tomogram` — membranes, filaments, microtubules,
+    fiducial beads and a carbon film, packed into one volume.
 
-    Multislice, not just a CTF multiply. The default propagates the
-    wave slice by slice through the specimen, so thickness and multiple
-    scattering are represented rather than assumed away.
+    [:octicons-arrow-right-24: Build a tomogram specimen](user-guide/build-tomogram.md)
 
--   :material-history:{ .lg .middle } **Provenance**
+-   :material-snowflake-variant:{ .lg .middle } **Ice cache**
 
-    ---
+    `specter build ice` — a replacement `IceBank` library at a pixel size
+    the bundled cache does not cover.
 
-    Runs record themselves. Every job stores its complete effective
-    configuration, the package version and the git commit, and refuses
-    to resume under changed settings. See [Manage jobs](user-guide/jobs.md).
+    [:octicons-arrow-right-24: Using the ice cache](user-guide/ice-cache.md)
+
+-   :material-backup-restore:{ .lg .middle } **Reconstruction**
+
+    `specter reconstruct particle` — a 3D map from experimental images
+    and their imaging parameters.
+
+    [:octicons-arrow-right-24: Reconstruct a volume](user-guide/reconstruction.md)
 
 </div>
+
+Any config field can be overridden on the command line; see
+[Configure a run](user-guide/configuration.md). Runs can record themselves
+as tracked jobs; see [Manage jobs](user-guide/jobs.md).
+
+### Concepts
+
+<div class="grid cards" markdown>
+
+-   :material-sitemap:{ .lg .middle } **Pipeline overview**
+
+    How potential, specimen, scattering, aberration and detector compose
+    into one forward model.
+
+    [:octicons-arrow-right-24: Read more](concepts/pipeline-overview.md)
+
+-   :material-molecule:{ .lg .middle } **Specimens**
+
+    Atomic potentials, ice, crowding, and the cryo-ET specimen
+    components.
+
+    [:octicons-arrow-right-24: Read more](concepts/specimens.md)
+
+-   :material-waves:{ .lg .middle } **Forward simulation**
+
+    Propagation modes, aberrations and envelopes, and detector physics.
+
+    [:octicons-arrow-right-24: Read more](concepts/forward-simulation.md)
+
+-   :material-compass-outline:{ .lg .middle } **Conventions**
+
+    Axis order, rotation sense, units, and CTF sign conventions used
+    throughout.
+
+    [:octicons-arrow-right-24: Read more](concepts/conventions.md)
+
+</div>
+
+### Python API
+
+<div class="grid cards" markdown>
+
+-   :octicons-code-24:{ .lg .middle } **API overview**
+
+    Generated from docstrings, one page per subpackage.
+
+    [:octicons-arrow-right-24: Read more](api/index.md)
+
+-   :material-camera:{ .lg .middle } **Image generation**
+
+    `ImageGenerator`, `MicrographGenerator`, `TiltSeriesGenerator`.
+
+    [:octicons-arrow-right-24: specter.imagegenerator](api/imagegenerator.md)
+
+-   :material-cube-scan:{ .lg .middle } **Reconstruction**
+
+    `Ghostbuster`, `Reconstructor`, and their tomogram counterparts.
+
+    [:octicons-arrow-right-24: specter.ghostbuster](api/ghostbuster.md)
+
+-   :material-pipe:{ .lg .middle } **Pipelines**
+
+    The end-to-end functions the CLI calls, usable directly from Python.
+
+    [:octicons-arrow-right-24: specter.pipelines](api/pipelines.md)
+
+</div>
+
+---
+
+## Getting help
+
+Open an issue on the [GitHub repository](https://github.com/joelyeois/specter).

@@ -22,14 +22,6 @@ running occupancy grid.
     `specter.specimen.cytosolic_filler`. Figures are produced by
     `docs-figures/cryoet_specimen_packing.py`.
 
-!!! warning "Partially out of date"
-    `packing_backend` now defaults to `"shape"`, which collides real
-    rotated footprints against an occupancy grid. The sections below on
-    the RSA jamming ceiling and the exclusion distance field describe
-    `packing_backend="sphere"`, which remains available and is still what
-    places gold fiducials and membrane instances. Their figures and
-    measured numbers have not been regenerated for the shape backend.
-
 ## Regions from topology, not geometry
 
 A membrane field's sign only distinguishes lipid-solid from
@@ -84,10 +76,69 @@ ribosomes after filling the box to jamming with filler and you will not
 get 25. Ratios only compare *within* a region: two locations are packed
 independently, so a cytosol ratio and a lumen ratio have no relationship.
 
-## RSA hard-sphere packing
+## Two collision geometries
 
-Placement is Random Sequential Addition, fully vectorized across
-candidates. Spheres are placed **largest-radius-first, in stages**: one
+Placement is Random Sequential Addition either way. What differs is the
+body being collided, and it changes the achievable density by more than
+any other single choice in the generator.
+
+`packing_backend="shape"`, the default, rasterizes each species into a
+binary footprint, rotates it, and tests it against a running occupancy
+grid. Nothing is approximated away: a placement is rejected if any voxel
+of the rotated molecule meets a voxel already taken.
+
+`packing_backend="sphere"` collides one circumscribing sphere per
+instance, of radius `PDB.max_diameter / 2`. It is faster, and it is the
+right geometry for the two things in a tomogram that genuinely are
+spheres or have no footprint yet: gold fiducials, and membrane instances
+placed by bounding radius before their bilayer is generated. For proteins
+it is a poor fit. Measured over 180 cached species, a molecule's 6.8 Å
+envelope fills only ~0.178 of its own bounding sphere, so an elongated or
+concave molecule reserves several times the room it occupies.
+
+The cost of that difference is the whole point:
+
+| | sphere | shape |
+|---|---|---|
+| Macromolecule volume fraction | 0.031 | **0.197** |
+| As concentration | 41 mg/mL | **266 mg/mL** |
+| Instances placed (5 Å production box) | 8,128 | 19,426 |
+
+Crowded cytoplasm is 200–320 mg/mL, so the sphere backend cannot reach a
+physiological specimen at any setting: `occupancy_fraction` is a
+sphere-volume budget, and RSA jams long before the real volume fraction
+gets there. For reference, CryoTomoSim's own output weighs 0.240 by the
+same measure, and it also collides real shapes rather than spheres.
+
+Shape packing costs roughly 4× the packing time for that density. The
+extra is packing, not rendering: rendering is dominated by per-species
+template construction and barely moves with instance count.
+
+### Packing coarser than you render
+
+`packing_voxel_size` runs collision on a coarser grid than the render.
+The collision grid, not the render, is what makes a fine `voxel_size`
+expensive: at 1 Å over a production field of view the occupancy grid alone
+is 36 GB, and the rotation cache 20 GB for a single 243 Å species. Left
+unset this engages automatically once the grid would exceed roughly a
+billion voxels, so ordinary boxes are untouched and a fine `voxel_size`
+degrades to coarser collision instead of failing outright.
+
+Footprints are built at the render voxel size and max-pooled down, not
+rasterized at the coarse size directly. The distinction matters: a mask
+rasterized coarsely marks only voxels containing an atom centre, and at
+2 Å the 1.9 Å van der Waals pad rounds to no dilation at all, so instances
+pack about 2 Å closer than heavy-atom contact allows. Measured against a
+native 1 Å pack, pooling to 2 Å reaches volume fraction 0.264 versus 0.269
+with no overlapping voxels, 8.8× faster; the same run with coarsely
+rasterized masks reads a denser 0.348, but that density is under-sized
+collision geometry rather than better packing.
+
+## RSA sphere packing
+
+The sphere backend's placement is Random Sequential Addition, fully
+vectorized across candidates. Spheres are placed
+**largest-radius-first, in stages**: one
 stage per unique radius, carrying accepted spheres forward. Within a
 stage, every remaining candidate gets one trial position per pass;
 positions are generated and conflict-checked simultaneously through a
@@ -111,7 +162,9 @@ radius, as above; that is geometry, not a scheduling failure.
 ### Where the ceiling is
 
 RSA has a hard jamming limit well below random close packing, and
-`occupancy_fraction` is therefore a **budget, not a promise**:
+`occupancy_fraction` is therefore a **budget, not a promise**. The
+measurements in this section are bare-sphere occupancy under
+`packing_backend="sphere"`:
 
 ![Achieved bare-sphere occupancy against requested occupancy_fraction, for a monodisperse and a polydisperse pool.](../../assets/images/cryoet-packing-rsa-limit.png){ width="620" style="display:block;margin:1.2em auto;" }
 
@@ -132,6 +185,12 @@ tomogram scale, and it has no obstacle-avoidance mechanism, so RSA's lower
 ceiling, reached in seconds, is the actual target.
 
 ## One field for obstacles and regions
+
+This is the sphere backend's mechanism. The shape backend needs no
+distance field: membranes, filaments, carbon and placed instances are
+already volumes, so they are stamped straight into the occupancy grid it
+collides against, and a region is restricted by seeding that grid as
+occupied everywhere outside it.
 
 Both "stay out of the membrane" and "stay inside the lumen" are handled by
 the same input: a field giving the physical distance to the nearest
@@ -225,9 +284,16 @@ your own list breaks nothing downstream.
   `MicrographSpecimenGenerator` does offer an air-water-interface
   adsorption bias; this generator has no equivalent. Its realism comes
   from region gating against real membrane geometry instead.)
-- **Coarse-field bleed.** For very large boxes the exclusion field is
-  built on a coarsened grid, and trilinear sampling near a boundary lets a
-  candidate's distance run a couple of Å past the exact value.
+- **Coarse-field bleed** (sphere backend). For very large boxes the
+  exclusion field is built on a coarsened grid, and trilinear sampling
+  near a boundary lets a candidate's distance run a couple of Å past the
+  exact value.
+- **Contact, not interpenetration.** Instances may touch but never
+  overlap. Real proteins' surface loops and hydration shells do
+  interdigitate slightly, and CryoTomoSim models that with a softer
+  overlap test. Reproducing it was measured to need only ~2% tolerance,
+  and rejected: it makes instance labels ambiguous at exactly the contacts
+  a picker is trained on.
 - **Jamming, not equilibrium.** RSA densities are not thermodynamically
   meaningful; they are the outcome of an irreversible deposition process.
 

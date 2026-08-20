@@ -33,7 +33,7 @@ combination is valid.
 | [Filaments](filaments.md) | Random-walk polymers (F-actin, single protofilaments) | `specimen.filament` |
 | [Microtubules](microtubules.md) | Closed 13-protofilament tubes, lumen and A-lattice seam | `specimen.filament` |
 | [Gold fiducial beads](beads.md) | Real fcc gold at real bulk density | `specimen._grid` |
-| [Regions & protein packing](packing.md) | Cytosol/lumen classification, RSA hard-sphere placement, crowding tables | `specimen.packing`, `specimen.tomogram._regions`, `specimen.cytosolic_filler` |
+| [Regions & protein packing](packing.md) | Cytosol/lumen classification, shape- and sphere-based RSA placement, crowding tables | `specimen.packing`, `specimen.tomogram._regions`, `specimen.cytosolic_filler` |
 
 Amorphous ice is **not** one of them. A `specter build tomogram` volume is
 the specimen alone; ice is added downstream, when the volume is imaged.
@@ -122,9 +122,14 @@ natural "position" the way a protein does, so `membrane_labels` and
   density is correctly present in the volume, and their placements are
   recorded, but they don't appear in `instance_labels`. This is a
   documented gap, not an oversight.
-- **Collision tests are bounding spheres against distance fields**, not
-  exact voxel overlap. A placed protein's true, non-spherical shape can
-  still graze a filament or the bilayer very close to the boundary.
+- **Collision is voxel-quantized.** Protein placement tests each
+  molecule's real rotated footprint against an occupancy grid, so a
+  molecule is resolved only to the packing voxel size. Gold fiducials and
+  membrane instances are still placed as bounding spheres, which is exact
+  for a bead and approximate for a membrane.
+- **Instances contact but never overlap.** Real surface loops and
+  hydration shells interdigitate slightly; that is deliberately not
+  modelled, since it would make instance labels ambiguous at contacts.
 - **RSA jams well below close packing.** `filler_occupancy_fraction` is a
   budget, not a promise; see [the packing page](packing.md) for where the
   ceiling actually sits.

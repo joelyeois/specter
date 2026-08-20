@@ -224,7 +224,7 @@ src/specter/                  # Main source package
                               # parallel-transport frames, required so a bent tube's protofilaments
                               # don't shear apart). No supertwist -- deliberate, see _lattice's docstring.
     tomogram/, membrane/, packing/  # newer subpackages (tomogram/specimen assembly,
-                              # organic membranes, sphere/tetris packing algorithms); also from_volume.py at the
+                              # organic membranes, shape/sphere packing algorithms); also from_volume.py at the
                               # top level — still in flux, deliberately not detailed here
     _grid.py                  # BeadGenerator — gold fiducial bead physics, for specimen.tomogram.TomogramSpecimenGenerator
                               # (`specter build tomogram`); also the shared bulk-material density/potential helpers _carbon.py uses

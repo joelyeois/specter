@@ -198,7 +198,13 @@ from ..filament import (
 )
 from ..membrane import MembraneGenerator, TransmembranePlacement
 from ..membrane._placement import align_principal_axis_to_z
-from ..packing import draw_species_pool, estimate_protein_box_size, pack_hard_spheres_3d
+from ..packing import (
+    build_species_mask,
+    draw_species_pool,
+    estimate_protein_box_size,
+    pack_hard_spheres_3d,
+    pack_shapes_3d,
+)
 from ._regions import classify_membrane_regions
 from ...progress import TqdmProgress, phase_done, phase_start, status
 
@@ -884,6 +890,33 @@ class TomogramSpecimenGenerator:
         placed sphere and the membrane shell, AND between auto-placed
         membrane instances' own bounding spheres (all three reuse this one
         value). Default 5.0.
+    packing_backend : {"sphere", "shape"}, optional
+        Collision geometry for protein packing.
+
+        ``"sphere"`` (default) collides one circumscribing sphere per
+        instance via `..packing.pack_hard_spheres_3d`. Cheap, but a
+        molecule's envelope is only ~0.178 of its own bounding sphere, so
+        achieved macromolecule volume fraction saturates near 0.09 --
+        roughly a third of crowded cytoplasm, and `occupancy_fraction` is
+        a *sphere-volume* target rather than a real one.
+
+        ``"shape"`` collides the real rotated footprint against a running
+        occupancy grid via `..packing.pack_shapes_3d`, which is what
+        CryoTomoSim does. Reaches 0.241 on a matched benchmark against
+        CryoTomoSim's own 0.240, i.e. physiological crowding. Costs more
+        wall time (see `packing_max_retries`) and ignores
+        `exclusion_distance_field`-based region handling in favour of the
+        occupancy grid, which subsumes it.
+    n_orientations : int, optional
+        Size of the per-species rotation cache used by
+        ``packing_backend="shape"``. Rotating per attempt instead of
+        indexing a cache is what dominates a naive implementation's cost
+        (profiled at 6.8 A: 3.27 ms to rotate vs 0.08 ms to collision-test).
+        Default 256.
+    packing_max_retries : int, optional
+        Trial positions per instance for ``packing_backend="shape"``. The
+        dominant density/speed knob -- see `..packing.pack_shapes_3d`'s own
+        table. Default 600 (CryoTomoSim parity).
     clip_axes : tuple of bool, optional
         (z, y, x), matching `target_shape`'s axis order -- passed
         straight through to every `pack_hard_spheres_3d` call here (auto-
@@ -1017,6 +1050,9 @@ class TomogramSpecimenGenerator:
         bead_roughness: ScalarOrRange = 0.12,
         occupancy_fraction: float = 0.2,
         gap: float = 5.0,
+        packing_backend: Literal["sphere", "shape"] = "sphere",
+        n_orientations: int = 256,
+        packing_max_retries: int = 600,
         clip_axes: tuple[bool, bool, bool] = (False, False, False),
         region_density_threshold: float | None = None,
         region_max_passes: int = 300,
@@ -1066,6 +1102,9 @@ class TomogramSpecimenGenerator:
         self.bead_roughness = bead_roughness
         self.occupancy_fraction = occupancy_fraction
         self.gap = gap
+        self.packing_backend = packing_backend
+        self.n_orientations = n_orientations
+        self.packing_max_retries = packing_max_retries
         self.clip_axes = clip_axes
         self.region_density_threshold = region_density_threshold
         self.region_max_passes = region_max_passes
@@ -1105,6 +1144,10 @@ class TomogramSpecimenGenerator:
         self.transmembrane_placements: list[TransmembranePlacement] = []
         self.placements: list[TomogramPlacement] = []
         self.instance_labels: torch.Tensor | None = None
+        # Rasterized footprints for packing_backend="shape", keyed by
+        # (PDB identity, voxel_size, gap) -- a species reappearing across
+        # regions rasterizes once.
+        self._mask_cache: dict[tuple, torch.Tensor] = {}
         self.filament_instances: list[FilamentInstance] = []
         self.microtubule_instances: list[MicrotubuleInstance] = []
         self.microtubule_dimer_instances: list[FilamentInstance] = []
@@ -1660,6 +1703,13 @@ class TomogramSpecimenGenerator:
                 * field_voxel_size
             )
 
+            # packing_backend="shape" works from one running occupancy grid
+            # instead of exclusion_field/region_mask_field: True means "an
+            # instance may not go here", so it starts as the complement of
+            # the region (which already has obstacles removed above) and
+            # accumulates every instance placed below.
+            occupancy = ~region_mask
+
             exact_specs = [s for s in specs_here if s.n_copies is not None]
             ratio_specs = [s for s in specs_here if s.n_copies is None]
 
@@ -1683,24 +1733,39 @@ class TomogramSpecimenGenerator:
                     ]
                 )
                 _exact_pack_start = time.perf_counter()
+                exact_rotations: torch.Tensor | None = None
                 with status(
                     f"Packing {int(exact_radii.numel())} target instance(s) "
                     f"({location})",
                     disable=not self.progressbars,
                 ):
-                    coords, accepted_idx = pack_hard_spheres_3d(
-                        exact_radii,
-                        box,
-                        gap=self.gap,
-                        seed=self.seed,
-                        device="cpu",  # see self.device's own docstring
-                        exclusion_distance_field=exclusion_field,
-                        field_voxel_size=field_voxel_size,
-                        sampling_mask=region_mask_field,
-                        max_passes=self.region_max_passes,
-                        stall_patience=region_stall_patience,
-                        clip_axes=self.clip_axes,
-                    )
+                    if self.packing_backend == "shape":
+                        (
+                            coords,
+                            exact_rotations,
+                            accepted_idx,
+                            occupancy,
+                        ) = self._pack_shapes(
+                            exact_pdbs,
+                            exact_species_map,
+                            target_shape,
+                            voxel_size,
+                            occupancy,
+                        )
+                    else:
+                        coords, accepted_idx = pack_hard_spheres_3d(
+                            exact_radii,
+                            box,
+                            gap=self.gap,
+                            seed=self.seed,
+                            device="cpu",  # see self.device's own docstring
+                            exclusion_distance_field=exclusion_field,
+                            field_voxel_size=field_voxel_size,
+                            sampling_mask=region_mask_field,
+                            max_passes=self.region_max_passes,
+                            stall_patience=region_stall_patience,
+                            clip_axes=self.clip_axes,
+                        )
                 phase_done(
                     f"  Target packing ({location})",
                     _exact_pack_start,
@@ -1731,6 +1796,7 @@ class TomogramSpecimenGenerator:
                     location,
                     voxel_size,
                     role="target",
+                    rotations=exact_rotations,
                 )
                 phase_done(
                     f"  Target rendering ({location})",
@@ -1738,7 +1804,10 @@ class TomogramSpecimenGenerator:
                     disable=not self.progressbars,
                 )
 
-                if coords.numel():
+                # The shape backend already recorded these instances in
+                # `occupancy`; the sphere backend needs the equivalent baked
+                # into its distance field instead.
+                if coords.numel() and self.packing_backend != "shape":
                     _rebuild_start = time.perf_counter()
                     placed_radii = exact_radii[accepted_idx]
                     # Also kept on CPU -- see exclusion_field's own comment
@@ -1769,52 +1838,96 @@ class TomogramSpecimenGenerator:
                 )
                 species_ratios = torch.tensor([s.ratio for s in ratio_specs])
 
+                # Under packing_backend="shape" an instance occupies its own
+                # footprint, not a bounding sphere, so the pool has to be
+                # measured the same way -- sizing it by sphere volume
+                # under-supplies a shape packer ~5.6x and it runs out of
+                # candidates long before the region fills (see
+                # draw_species_pool's own species_volumes docstring).
+                pool_volumes: torch.Tensor | None = None
+                if self.packing_backend == "shape":
+                    pool_volumes = torch.tensor(
+                        [
+                            float(self._species_mask(pdb, voxel_size).sum())
+                            * voxel_size**3
+                            for pdb in ratio_pdbs
+                        ]
+                    )
+
                 pool_radii, pool_species_idx = draw_species_pool(
                     species_radii,
                     species_ratios,
                     self.occupancy_fraction,
                     region_volume_a3,
                     seed=self.seed,
+                    species_volumes=pool_volumes,
                 )
 
                 _filler_pack_start = time.perf_counter()
+                filler_rotations: torch.Tensor | None = None
                 with status(
                     f"Packing filler instances ({location})",
                     disable=not self.progressbars,
                 ):
-                    coords, accepted_idx = pack_hard_spheres_3d(
-                        pool_radii,
-                        box,
-                        gap=self.gap,
-                        seed=self.seed,
-                        device="cpu",  # see self.device's own docstring
-                        exclusion_distance_field=exclusion_field,
-                        field_voxel_size=field_voxel_size,
-                        sampling_mask=region_mask_field,
-                        max_passes=self.region_max_passes,
-                        # A TIGHT region (small fraction of the box, e.g. a
-                        # vesicle lumen) can need many more consecutive
-                        # misses than a "box is saturated" heuristic expects
-                        # before finding a geometrically valid spot (see
-                        # pack_hard_spheres_3d's own sampling_mask
-                        # docstring) -- region_stall_patience exhausts
-                        # region_max_passes there instead of bailing out
-                        # early. An OPEN region (e.g. cytosol with no
-                        # membrane, or with only a small organelle) instead
-                        # gets pack_hard_spheres_3d's own fast default --
-                        # it saturates quickly, so patiently retrying after
-                        # that just burns time for near-zero extra density
-                        # (see _TIGHT_REGION_FRACTION_THRESHOLD's own comment
-                        # for a benchmark).
-                        stall_patience=region_stall_patience,
-                        clip_axes=self.clip_axes,
-                    )
+                    if self.packing_backend == "shape":
+                        (
+                            coords,
+                            filler_rotations,
+                            accepted_idx,
+                            occupancy,
+                        ) = self._pack_shapes(
+                            ratio_pdbs,
+                            pool_species_idx,
+                            target_shape,
+                            voxel_size,
+                            occupancy,
+                        )
+                    else:
+                        coords, accepted_idx = pack_hard_spheres_3d(
+                            pool_radii,
+                            box,
+                            gap=self.gap,
+                            seed=self.seed,
+                            device="cpu",  # see self.device's own docstring
+                            exclusion_distance_field=exclusion_field,
+                            field_voxel_size=field_voxel_size,
+                            sampling_mask=region_mask_field,
+                            max_passes=self.region_max_passes,
+                            # A TIGHT region (small fraction of the box, e.g.
+                            # a vesicle lumen) can need many more consecutive
+                            # misses than a "box is saturated" heuristic
+                            # expects before finding a geometrically valid
+                            # spot (see pack_hard_spheres_3d's own
+                            # sampling_mask docstring) --
+                            # region_stall_patience exhausts
+                            # region_max_passes there instead of bailing out
+                            # early. An OPEN region (e.g. cytosol with no
+                            # membrane, or with only a small organelle)
+                            # instead gets pack_hard_spheres_3d's own fast
+                            # default -- it saturates quickly, so patiently
+                            # retrying after that just burns time for
+                            # near-zero extra density (see
+                            # _TIGHT_REGION_FRACTION_THRESHOLD's own comment
+                            # for a benchmark).
+                            stall_patience=region_stall_patience,
+                            clip_axes=self.clip_axes,
+                        )
                 phase_done(
                     f"  Filler packing ({location})",
                     _filler_pack_start,
                     disable=not self.progressbars,
                 )
-                if accepted_idx.numel() == 0:
+                if accepted_idx.numel() == 0 and self.packing_backend == "shape":
+                    warnings.warn(
+                        f"TomogramSpecimenGenerator: placed 0 filler "
+                        f"instances in '{location}' -- no rotated footprint "
+                        f"fit anywhere in the region's "
+                        f"{region_voxels:,} free voxels. Enlarge the "
+                        "compartment, reduce gap, or declare a smaller "
+                        "species for this region.",
+                        stacklevel=2,
+                    )
+                elif accepted_idx.numel() == 0:
                     # A non-empty region that still fits nothing is silent
                     # otherwise: no picks file appears for the species and
                     # nothing says why. The naive diagnostic here used to be
@@ -1890,6 +2003,7 @@ class TomogramSpecimenGenerator:
                     location,
                     voxel_size,
                     role="filler",
+                    rotations=filler_rotations,
                 )
                 phase_done(
                     f"  Filler rendering ({location})",
@@ -2637,6 +2751,75 @@ class TomogramSpecimenGenerator:
 
         return written
 
+    def _species_mask(self, pdb: PDB, voxel_size: float) -> torch.Tensor:
+        """
+        This species' rotated-footprint mask for ``packing_backend="shape"``,
+        rasterized once per (structure, voxel size, gap) and reused across
+        regions and across the pool-sizing/packing steps.
+        """
+        key = (id(pdb), voxel_size, self.gap)
+        if key not in self._mask_cache:
+            self._mask_cache[key] = build_species_mask(
+                pdb.coordinates, voxel_size, gap=self.gap
+            )
+        return self._mask_cache[key]
+
+    def _pack_shapes(
+        self,
+        pdbs: list[PDB],
+        species_idx: torch.Tensor,
+        target_shape: tuple[int, int, int],
+        voxel_size: float,
+        occupancy: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Pack via `..packing.pack_shapes_3d` (exact rotated footprints against
+        a running occupancy grid), the `packing_backend="shape"` path.
+
+        Region restriction and obstacle avoidance both arrive already folded
+        into `occupancy` (True = forbidden), so no exclusion distance field
+        or sampling mask is needed here -- see `..packing._shape`'s module
+        docstring.
+
+        Parameters
+        ----------
+        pdbs : list of PDB
+            One per species, indexed by `species_idx`.
+        species_idx : torch.Tensor
+            Species index per candidate instance, shape (N,).
+        target_shape : tuple of int
+        voxel_size : float
+        occupancy : torch.Tensor
+            Boolean (Z, Y, X), True where an instance may not go.
+
+        Returns
+        -------
+        coords : torch.Tensor
+            Accepted centers (x, y, z), A, box-centered, shape (M, 3).
+        rotations : torch.Tensor
+            Orientation each instance was accepted at, shape (M, 3, 3). Must
+            be reused at render time.
+        accepted_idx : torch.Tensor
+            Indices into `species_idx`, shape (M,).
+        occupancy : torch.Tensor
+            Updated occupancy grid, to carry into the next packing stage.
+        """
+        masks = [self._species_mask(pdb, voxel_size) for pdb in pdbs]
+        region_mask = ~occupancy
+        return pack_shapes_3d(
+            masks,
+            species_idx,
+            target_shape,
+            voxel_size,
+            occupancy=occupancy,
+            region_mask=region_mask,
+            n_orientations=self.n_orientations,
+            max_retries=self.packing_max_retries,
+            seed=self.seed,
+            device=self.device,
+            clip_axes=self.clip_axes,
+        )
+
     def _build_species_template(
         self, pdb: PDB, voxel_size: float, device: torch.device
     ) -> torch.Tensor:
@@ -2663,6 +2846,7 @@ class TomogramSpecimenGenerator:
         location: str,
         voxel_size: float,
         role: Literal["target", "filler"] = "target",
+        rotations: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor, int]:
         active_species_i = [
             species_i
@@ -2722,7 +2906,15 @@ class TomogramSpecimenGenerator:
                         f"{location}, {role})"
                     ),
                 )
-                R = random_rotation_matrix(n_instances, device=self.device)
+                if rotations is not None:
+                    # Shape-based packing already committed to an
+                    # orientation per instance -- that rotation IS part of
+                    # the collision result, so re-drawing here would render
+                    # a volume that does not match the geometry the packer
+                    # actually tested (overlaps, and picks that miss).
+                    R = rotations[mask].to(self.device)
+                else:
+                    R = random_rotation_matrix(n_instances, device=self.device)
                 if R.dim() == 2:
                     R = R.unsqueeze(0)
                 theta = build_affine_matrix(R)

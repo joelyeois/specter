@@ -1,3 +1,5 @@
+from ._multisphere import fit_multisphere, pack_multisphere_3d
+from ._shape import build_species_mask, pack_shapes_3d
 from .algorithms import (
     draw_species_pool,
     estimate_protein_box_size,
@@ -5,7 +7,11 @@ from .algorithms import (
 )
 
 __all__ = [
+    "build_species_mask",
     "draw_species_pool",
     "estimate_protein_box_size",
+    "fit_multisphere",
     "pack_hard_spheres_3d",
+    "pack_multisphere_3d",
+    "pack_shapes_3d",
 ]

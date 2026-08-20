@@ -69,12 +69,13 @@ def draw_species_pool(
     occupancy_fraction: float,
     box_volume: float,
     seed: int | None = None,
+    species_volumes: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Draw a candidate instance pool (one row per sphere to attempt placing)
-    whose combined bare-sphere volume reaches ``occupancy_fraction *
-    box_volume``, species drawn with probability proportional to
-    `species_ratios` (matching how
+    whose combined volume reaches ``occupancy_fraction * box_volume``,
+    species drawn with probability proportional to `species_ratios`
+    (matching how
     `specter.specimen.cytosolic_filler.PEI2016_CROWDING_TABLE`'s
     `occurrence_freq` is meant to be used as a relative-abundance weight,
     not an absolute one).
@@ -87,11 +88,24 @@ def draw_species_pool(
         Relative abundance weight per species. Only ratios between entries
         matter, not the absolute values.
     occupancy_fraction : float
-        Target combined bare-sphere volume, as a fraction of `box_volume`.
+        Target combined volume, as a fraction of `box_volume`. Measured in
+        bare-sphere volume by default, or in `species_volumes` if given.
     box_volume : float
         Å³.
     seed : int, optional
         Random seed.
+    species_volumes : torch.Tensor, shape (S,), optional
+        Real occupied volume per species, Å³, used instead of the bare
+        sphere ``4/3 pi r^3`` when accumulating toward the target.
+
+        Required for `pack_shapes_3d`, whose candidates occupy their actual
+        molecular footprint rather than a bounding sphere. A molecule's
+        envelope is only ~0.178 of that sphere, so sizing a shape packer's
+        pool the default way under-supplies it by roughly 5.6x -- the packer
+        then exhausts its candidates well before the box is full, and
+        reports a density that reflects the pool rather than its own
+        geometry. Default None (bare-sphere volume, correct for
+        `pack_hard_spheres_3d`).
 
     Returns
     -------
@@ -121,7 +135,10 @@ def draw_species_pool(
         r = float(species_radii[k])
         radii_list.append(r)
         species_list.append(k)
-        accumulated += (4.0 / 3.0) * torch.pi * r**3
+        if species_volumes is None:
+            accumulated += (4.0 / 3.0) * torch.pi * r**3
+        else:
+            accumulated += float(species_volumes[k])
 
     radii = torch.tensor(radii_list)
     species_idx = torch.tensor(species_list, dtype=torch.long)

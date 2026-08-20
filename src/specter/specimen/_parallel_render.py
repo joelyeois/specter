@@ -279,12 +279,13 @@ def _fetch_one_pdb(args: tuple[str, str, bool]) -> "PDB":
     """
     from ..pdb import PDB
 
-    pdb_source, pdb_cache_dir, compute_atom_species = args
+    pdb_source, pdb_cache_dir, compute_atom_species, readd_hydrogens = args
     return PDB(
         pdb_source,
         savefolder=pdb_cache_dir,
         verbose=False,
         compute_atom_species=compute_atom_species,
+        readd_hydrogens=readd_hydrogens,
     )
 
 
@@ -294,6 +295,7 @@ def build_pdb_cache_concurrently(
     max_workers: int,
     on_result: Callable[[str], None] | None = None,
     compute_atom_species: bool = False,
+    readd_hydrogens: bool | str = "auto",
 ) -> dict[str, "PDB"]:
     """
     Fetch/parse multiple PDB sources concurrently across OS PROCESSES (not
@@ -355,6 +357,7 @@ def build_pdb_cache_concurrently(
                 savefolder=pdb_cache_dir,
                 verbose=False,
                 compute_atom_species=compute_atom_species,
+                readd_hydrogens=readd_hydrogens,
             )
             if on_result is not None:
                 on_result(source)
@@ -363,7 +366,8 @@ def build_pdb_cache_concurrently(
     with ProcessPoolExecutor(max_workers=max_workers, mp_context=ctx) as pool:
         futures = {
             pool.submit(
-                _fetch_one_pdb, (source, pdb_cache_dir, compute_atom_species)
+                _fetch_one_pdb,
+                (source, pdb_cache_dir, compute_atom_species, readd_hydrogens),
             ): source
             for source in unique_sources
         }

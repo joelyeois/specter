@@ -411,7 +411,11 @@ def build_tomogram_generator(config: TomogramConfig) -> TomogramSpecimenGenerato
         built = build_templates_concurrently(
             keys=list(range(len(transmembrane_specs))),
             build_one=lambda i, device: render_transmembrane_template(
-                transmembrane_specs[i], config.voxel_size, config.pdb_savefolder, device
+                transmembrane_specs[i],
+                config.voxel_size,
+                config.pdb_savefolder,
+                device,
+                readd_hydrogens=config.readd_hydrogens,
             ),
             devices=devices,
             max_workers=workers,
@@ -464,6 +468,7 @@ def build_tomogram_generator(config: TomogramConfig) -> TomogramSpecimenGenerato
                 voxel_size=config.voxel_size,
                 transmembrane_specs=list(transmembrane_specs),
                 pdb_cache_dir=config.pdb_savefolder,
+                readd_hydrogens=config.readd_hydrogens,
                 device=device,
                 seed=instance_seed,
                 **instance_kwargs,
@@ -500,6 +505,7 @@ def build_tomogram_generator(config: TomogramConfig) -> TomogramSpecimenGenerato
         min_transmembrane_spacing=config.membrane_min_transmembrane_spacing,
         pdb_cache_dir=config.pdb_savefolder,
         parameterization=config.target_parameterization,
+        readd_hydrogens=config.readd_hydrogens,
         seed=config.seed,
         device=device,
         accumulator_device=config.accumulator_device,

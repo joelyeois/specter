@@ -984,6 +984,10 @@ class TomogramConfig:
     # potential_parameterization/ice_parameterization on the particle-stack
     # side of the codebase.
     target_parameterization: str = "shtyrov"
+    # Forwarded to every PDB built for this tomogram. Only takes effect for
+    # target_parameterization="shtyrov" (the only one that types atoms) and
+    # only when a Monomer Library is available via $CLIBD_MON.
+    readd_hydrogens: bool | Literal["auto"] = "auto"
 
     # --- Filaments (optional, additive on top of membranes if present) ---
     # One dict per filament species, mapping straight onto
@@ -1201,6 +1205,11 @@ TOMOGRAM_HELP: dict[str, str] = {
     "meaningful when [[membrane]] is set.",
     "target_parameterization": "Atomic scattering-factor parameterization "
     "for the targets/filler protein-fill step.",
+    "readd_hydrogens": "Whether to replace a structure's own hydrogens with "
+    "the monomer library's ideal geometry: 'auto' (default) keeps hydrogens "
+    "the file already carries and adds them only when it has none, true "
+    "always re-adds, false never adds hydrogen density (they still inform "
+    "atom typing). Needs a Monomer Library on $CLIBD_MON to have any effect.",
     "filaments": "Filament species to scatter through the tomogram (TOML-"
     "only, [[filaments]] tables), each mapping onto "
     "specter.specimen.filament.FilamentSpec kwargs, e.g. {'code': '1TUB', "

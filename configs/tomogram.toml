@@ -98,6 +98,15 @@ filler_from_pei2016 = true
 # step specifically (applies regardless of whether any [[membrane]] is set).
 target_parameterization = "shtyrov"
 
+# Shtyrov types atoms by their bonded neighbours, and 20 of its 42 species name a
+# hydrogen -- which depositions omit. Install the Monomer Library and point
+# $CLIBD_MON at it to supply them; without it ~44% of a protein falls back to
+# per-element Peng. See docs/installation.md.
+#
+# The default, "auto", needs no setting: it keeps hydrogens the file already
+# carries and adds them only when it has none.
+# readd_hydrogens = "auto"     # auto | true | false
+
 
 # =============================================================================
 # CONTENTS -- MEMBRANES

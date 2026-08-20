@@ -213,3 +213,44 @@ def test_resolve_render_devices_resolves_auto():
         ]
     else:
         assert devices == [torch.device("cpu")]
+
+
+# readd_hydrogens has to survive the process boundary: the PDB cache is built
+# in spawned workers, which get a fresh interpreter and only the arguments
+# packed into the task tuple. $CLIBD_MON reaches them through the inherited
+# environment, the flag through the tuple -- both are checked here, on the
+# serial and pooled branches, since they build their PDBs by different code.
+def _monomer_library() -> str | None:
+    import os
+    from pathlib import Path
+
+    env = os.environ.get("CLIBD_MON")
+    if env and Path(env).is_dir():
+        return env
+    bundled = Path.home() / "sffit" / "monomers"
+    return str(bundled) if bundled.is_dir() else None
+
+
+@pytest.mark.skipif(_monomer_library() is None, reason="no monomer library available")
+@pytest.mark.parametrize("max_workers", [1, 2], ids=["serial", "process-pool"])
+def test_build_pdb_cache_forwards_readd_hydrogens(monkeypatch, max_workers):
+    from pathlib import Path
+
+    from specter.specimen._parallel_render import build_pdb_cache_concurrently
+
+    monkeypatch.setenv("CLIBD_MON", _monomer_library())
+    cif = str(Path(__file__).parent.parent / "specter-data" / "pdb" / "1mbo.cif")
+
+    def n_hydrogens(readd):
+        cache = build_pdb_cache_concurrently(
+            pdb_sources=[cif],
+            pdb_cache_dir=str(Path(cif).parent),
+            max_workers=max_workers,
+            compute_atom_species=True,
+            readd_hydrogens=readd,
+        )
+        return int((cache[cif].atomic_numbers == 1).sum())
+
+    # 1mbo carries no hydrogens, so True adds them and False must not.
+    assert n_hydrogens(True) > 0
+    assert n_hydrogens(False) == 0

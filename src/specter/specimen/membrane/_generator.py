@@ -247,6 +247,7 @@ def render_transmembrane_template(
     voxel_size: float,
     pdb_cache_dir: str,
     device: str | torch.device,
+    readd_hydrogens: bool | str = "auto",
 ) -> torch.Tensor:
     """
     Build one transmembrane species' potential template from its PDB source.
@@ -271,6 +272,9 @@ def render_transmembrane_template(
         Passed to `PDB` for fetching/caching `spec.pdb_source`.
     device : str or torch.device
         Device to build the `PotentialBuilder` (and run its `forward`) on.
+    readd_hydrogens : {"auto", True, False}, optional
+        Forwarded to `PDB`; see `specter.pdb.PDB`. Only meaningful for
+        `spec.parameterization == "shtyrov"` with a Monomer Library available.
 
     Returns
     -------
@@ -285,6 +289,7 @@ def render_transmembrane_template(
         # bond topology to beat plain per-element factors; the other
         # parameterizations are per-element by construction.
         compute_atom_species=spec.parameterization == "shtyrov",
+        readd_hydrogens=readd_hydrogens,
     )
     coordinates = align_principal_axis_to_z(pdb.coordinates)
     coordinates = align_transmembrane_depth(coordinates, spec.tm_span_mask)
@@ -700,6 +705,7 @@ class MembraneGenerator:
         transmembrane_specs: list[TransmembraneSpec] | None = None,
         transmembrane_occupancy_fraction: float = 0.05,
         pdb_cache_dir: str = DEFAULT_PDB_SAVEFOLDER,
+        readd_hydrogens: bool | str = "auto",
         max_field_voxels: int = _MAX_FIELD_VOXELS,
         max_output_voxels: int = 4_000_000_000,
         device: str | torch.device = "cpu",
@@ -994,6 +1000,7 @@ class MembraneGenerator:
         self.transmembrane_specs = transmembrane_specs or []
         self.transmembrane_occupancy_fraction = transmembrane_occupancy_fraction
         self.pdb_cache_dir = pdb_cache_dir
+        self.readd_hydrogens = readd_hydrogens
         self.max_field_voxels = max_field_voxels
         self.device = torch.device(device)
         self.seed = seed
@@ -1298,7 +1305,11 @@ class MembraneGenerator:
 
         build_device = self.device if device is None else device
         return render_transmembrane_template(
-            spec, self.voxel_size, self.pdb_cache_dir, build_device
+            spec,
+            self.voxel_size,
+            self.pdb_cache_dir,
+            build_device,
+            readd_hydrogens=self.readd_hydrogens,
         ).to(self.device)
 
     def _physical_to_voxel_index(self, site_xyz: torch.Tensor) -> torch.Tensor:

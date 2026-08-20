@@ -911,6 +911,12 @@ class TomogramSpecimenGenerator:
     parameterization : str, optional
         Atomic scattering-factor parameterization for `PotentialBuilder`.
         Default "shtyrov", matching `PotentialBuilder`'s own default.
+    readd_hydrogens : {"auto", True, False}, optional
+        Forwarded to every `PDB` built here; see `specter.pdb.PDB`. Only
+        takes effect for `parameterization="shtyrov"`, which is the only one
+        that types atoms, and only when a Monomer Library is available via
+        `$CLIBD_MON`. Default "auto": keep the hydrogens a structure carries,
+        add them only when it has none.
     seed : int, optional
         Random seed.
     device : str or torch.device, optional
@@ -1017,6 +1023,7 @@ class TomogramSpecimenGenerator:
         min_transmembrane_spacing: float = 40.0,
         pdb_cache_dir: str = DEFAULT_PDB_SAVEFOLDER,
         parameterization: str = "shtyrov",
+        readd_hydrogens: bool | str = "auto",
         seed: int | None = None,
         device: str | torch.device = "cpu",
         chunk_size: int | None = None,
@@ -1065,6 +1072,7 @@ class TomogramSpecimenGenerator:
         self.min_transmembrane_spacing = min_transmembrane_spacing
         self.pdb_cache_dir = pdb_cache_dir
         self.parameterization = parameterization
+        self.readd_hydrogens = readd_hydrogens
         self.seed = seed
         self.device = device
         self.chunk_size = chunk_size
@@ -1567,6 +1575,7 @@ class TomogramSpecimenGenerator:
                     pdb_cache_dir=self.pdb_cache_dir,
                     max_workers=self.render_workers,
                     compute_atom_species=_wants_atom_species(self.parameterization),
+                    readd_hydrogens=self.readd_hydrogens,
                     on_result=lambda source: progress.update(
                         fetch_task, advance=1, description=f"Fetched {source}"
                     ),
@@ -1617,6 +1626,7 @@ class TomogramSpecimenGenerator:
                         savefolder=self.pdb_cache_dir,
                         verbose=False,
                         compute_atom_species=_wants_atom_species(self.parameterization),
+                        readd_hydrogens=self.readd_hydrogens,
                     )
                 pdbs_by_source[spec.pdb_source] = pdb_cache[spec.pdb_source]
 
@@ -2307,6 +2317,7 @@ class TomogramSpecimenGenerator:
                     savefolder=self.pdb_cache_dir,
                     verbose=False,
                     compute_atom_species=_wants_atom_species(self.parameterization),
+                    readd_hydrogens=self.readd_hydrogens,
                 )
             pdb = pdb_cache[code]
             n = estimate_protein_box_size(pdb.max_diameter, voxel_size)

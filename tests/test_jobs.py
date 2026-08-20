@@ -100,12 +100,6 @@ def test_resolve_base_dir_from_arg(tmp_path: Path) -> None:
 def test_resolve_base_dir_from_env(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import specter.jobs._job as _job_module
-
-    # The session base dir outranks the environment variable, so clear it:
-    # any earlier test that ran a pipeline (which calls jobs.base_directory)
-    # leaves it set process-wide.
-    monkeypatch.setattr(_job_module, "_SESSION_BASE_DIR", None)
     monkeypatch.setenv("SPECTER_JOBS_DIR", str(tmp_path))
     assert _resolve_base_dir(None) == tmp_path
 
@@ -662,3 +656,38 @@ def test_job_resume_create_ignores_extra_logged_keys(tmp_path: Path) -> None:
         job.create(_DummyClass, "hello", value=3.14)
     data = json.loads((job.dir / "job.json").read_text())
     assert data["params"]["device"] == "cpu"
+
+
+def test_pipelines_do_not_leak_the_session_base_dir(tmp_path, monkeypatch):
+    """Running a tracked pipeline must not set the process-global base dir.
+
+    `jobs.base_directory()` is the notebook-facing session setter. Pipelines
+    used to call it to hand their root a few frames down and never restored
+    it, so afterwards every bare `Job()` in the same interpreter -- a second
+    pipeline, a notebook cell, the next test -- silently inherited that run's
+    root instead of $SPECTER_JOBS_DIR. They pass `base_dir=` explicitly now.
+    """
+    import specter.jobs as jobs
+    import specter.jobs._job as _job_module
+    from specter.pipelines._common import _tracked_output_dir
+
+    monkeypatch.setattr(_job_module, "_SESSION_BASE_DIR", None)
+
+    import dataclasses as _dc
+
+    @_dc.dataclass
+    class _Config:
+        project: str = "leak-check"
+        job_id: str | None = None
+        job_base_dir: str = str(tmp_path)
+        output_dir: str = str(tmp_path / "unused")
+
+    with _tracked_output_dir(_Config(), "particles") as run_dir:
+        assert Path(run_dir).exists()
+
+    assert _job_module._SESSION_BASE_DIR is None, (
+        "a pipeline set the session base dir and left it set"
+    )
+    # and the job really did land under the root it was given
+    assert str(tmp_path) in run_dir
+    assert jobs.base_directory is not None  # still exported for notebook use

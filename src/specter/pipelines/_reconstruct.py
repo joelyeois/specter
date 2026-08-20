@@ -166,16 +166,21 @@ def run_reconstruction(config: ReconstructionConfig) -> None:
     )
 
     # Every run is tracked -- resolved once, here, regardless of which
-    # branch below actually opens the Job(s).
+    # branch below actually opens the Job(s), and passed down explicitly.
+    # jobs.base_directory() would be shorter but writes a process-global that
+    # nothing restores, leaking this run's root into every later bare Job()
+    # in the same interpreter; it is the notebook-facing session setter, not
+    # a channel for library code.
     root = config.job_base_dir or str(find_specter_project_root() / SPECTER_DATA_DIR)
-    jobs.base_directory(root)
 
     if config.halfset == "gold":
-        run_dir = _run_gold_standard(config)
+        run_dir = _run_gold_standard(config, base_dir=root)
     else:
         from specter.ghostbuster import Ghostbuster
 
-        with jobs.Job("reconstructions", config.project, job_id=config.job_id) as job:
+        with jobs.Job(
+            "reconstructions", config.project, job_id=config.job_id, base_dir=root
+        ) as job:
             # job.create logs every Ghostbuster constructor argument into
             # job.json and injects run_dir. That introspection can't see
             # fields Ghostbuster never receives (test_run, device, ...), so
@@ -327,7 +332,7 @@ def _compute_and_save_gold_standard_fsc(run_dir: Path) -> str:
     return resolutions[0]
 
 
-def _run_gold_standard(config: ReconstructionConfig) -> Path:
+def _run_gold_standard(config: ReconstructionConfig, base_dir: str) -> Path:
     """
     Reconstruct both halfsets, then compute and persist the halfmap FSC.
 
@@ -349,7 +354,9 @@ def _run_gold_standard(config: ReconstructionConfig) -> Path:
     """
     import specter.jobs as jobs
 
-    with jobs.Job("reconstructions", config.project, job_id=config.job_id) as job:
+    with jobs.Job(
+        "reconstructions", config.project, job_id=config.job_id, base_dir=base_dir
+    ) as job:
         job.log(dataclasses.asdict(config))
         run_dir = job.dir
         _run_both_halfsets(config, run_dir)

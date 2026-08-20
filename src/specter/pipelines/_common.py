@@ -153,8 +153,13 @@ def _tracked_output_dir(
     import specter.jobs as jobs
 
     root = config.job_base_dir or str(find_specter_project_root() / SPECTER_DATA_DIR)
-    jobs.base_directory(root)
-    with jobs.Job(job_type, config.project, job_id=config.job_id) as job:
+    # Passed rather than set via jobs.base_directory(): that writes a
+    # process-global which nothing here restores, so every later bare Job()
+    # in the same interpreter -- a notebook, a second pipeline, the next test
+    # -- would silently inherit this run's root instead of $SPECTER_JOBS_DIR.
+    # base_directory() is the notebook-facing session setter, not a channel
+    # for library code to move an argument a few frames down.
+    with jobs.Job(job_type, config.project, job_id=config.job_id, base_dir=root) as job:
         job.log(dataclasses.asdict(config))
         yield str(job.dir)
 

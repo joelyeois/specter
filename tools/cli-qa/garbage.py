@@ -119,7 +119,6 @@ CASES: dict[str, list[Case]] = {
         Case("voxel_size", "-12", "negative voxel size"),
         Case("n_tomograms", "0", "asking for no tomograms"),
         Case("n_tomograms", "-2", "negative tomogram count"),
-        Case("gap", "-50", "negative clearance between placed instances"),
         Case("filler_occupancy_fraction", "-0.1", "negative occupancy"),
     ],
 }

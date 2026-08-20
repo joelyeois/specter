@@ -11,7 +11,10 @@ particles and mislabel every pick.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
+import pytest
 import torch
 
 from specter.rotations._volume import build_affine_matrix, rotate_volume
@@ -247,3 +250,44 @@ def test_pack_shapes_3d_accepts_a_coarser_grid_than_the_render():
     half = torch.tensor([box_a[2] / 2, box_a[1] / 2, box_a[0] / 2])
     assert bool((pos.abs() <= half).all()), "positions must stay inside the box"
     assert rot.shape == (accepted.numel(), 3, 3)
+
+
+def test_generator_coarse_packing_survives_both_placement_stages():
+    """
+    Regression: `packing_voxel_size` coarsens the occupancy grid, and the
+    generator packs TWICE per region (exact-count targets, then ratio
+    filler), threading the grid between them. Coarsening inside each stage
+    instead of once per region downsampled the second stage's input a
+    second time and blew an internal shape assert -- but only when the
+    factor exceeded 1, which no direct pack_shapes_3d test exercises.
+    """
+    from specter.specimen.tomogram.generator import (
+        TomogramProteinSpec,
+        TomogramSpecimenGenerator,
+    )
+
+    fixture = Path(__file__).parent.parent / "specter-data" / "pdb" / "1mbo.cif"
+    if not fixture.exists():
+        pytest.skip("bundled PDB fixture missing")
+
+    gen = TomogramSpecimenGenerator(
+        membrane_instances=[],
+        target_shape=(48, 96, 96),
+        voxel_size=4.0,
+        protein_specs=[
+            # one exact-count target AND one ratio filler, so both stages run
+            TomogramProteinSpec(
+                pdb_source=str(fixture), n_copies=2, location="cytosol"
+            ),
+            TomogramProteinSpec(pdb_source=str(fixture), location="cytosol"),
+        ],
+        occupancy_fraction=0.05,
+        packing_backend="shape",
+        packing_voxel_size=12.0,  # factor 3
+        clip_axes=(True, True, True),
+        seed=0,
+        progressbars=False,
+    )
+    vol = gen.generate()
+    assert vol.shape == (48, 96, 96)
+    assert len(gen.placements) > 0

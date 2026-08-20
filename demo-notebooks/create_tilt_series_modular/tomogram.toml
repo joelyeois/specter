@@ -74,7 +74,6 @@ membrane_min_transmembrane_spacing = 40.0
 target_shape = [128, 256, 256]      # (Z, Y, X) voxels -- small/fast; raise for denser results
 voxel_size = 10.0                        # A/voxel -- notebook syncs tilt_series_generator_modular.toml's voxel_size to this
 filler_occupancy_fraction = 0.5
-gap = 5.0                  # minimum clearance between placed spheres, A
 pdb_savefolder = "specter-data/pdb"  # relative to your working directory
 # seed = 11                         # uncomment for reproducible packing
 clip_axes = [true, true, true]      # (z, y, x) -- True lets instances poke past that wall

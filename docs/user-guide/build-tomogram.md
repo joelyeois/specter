@@ -138,9 +138,9 @@ per-instance rendering cost:
 
 | `voxel_size` (Å/voxel) | Shape (Z, Y, X voxels) | Wall time | GPU peak | RAM peak |
 |---|---|---|---|---|
-| 10 | 150 × 600 × 600 | 114 s | 5.08 GB | 12.64 GB |
-| 5  | 300 × 1200 × 1200 | 91 s | 11.62 GB | 5.95 GB |
-| 2  | 750 × 3000 × 3000 (~6.75B voxels) | 351 s (5m 51s) | 10.10 GB | 153.86 GB |
+| 10 | 150 × 600 × 600 | 236 s | 3.70 GB | 12.63 GB |
+| 5  | 300 × 1200 × 1200 | 201 s | 11.62 GB | 6.13 GB |
+| 2  | 750 × 3000 × 3000 (~6.75B voxels) | 621 s (10m 21s) | 9.29 GB | 154.02 GB |
 
 The numbers don't move in a clean monotonic line at 10→5 Å: wall time and
 RAM both bounce around within roughly a factor of 2, since at this scale
@@ -160,6 +160,22 @@ of salt (one run on one machine, not a statistically averaged sweep), but
 the *shape* (noisy at coarse resolution, a sharp RAM/time step once the
 canvas stops fitting in VRAM) is the useful, likely-to-generalize part.
 
+Wall time is roughly double what this benchmark measured before
+`packing_backend` defaulted to `"shape"`. That is the backend working, not
+a regression. Colliding real molecular footprints rather than bounding
+spheres fits several times more protein into the same box, and every
+additional instance must then be rendered. The previous bounding-sphere
+numbers (114, 91 and 351 s) were faster because the specimen they produced
+was roughly a third as dense as crowded cytoplasm.
+
+At 2 Å the collision grid would reach ~6.75 billion voxels, past the budget
+`packing_voxel_size` enforces, so packing runs on a 4 Å grid while
+rendering stays at 2 Å. This is automatic and needs no configuration. It
+costs some packing density, since a coarser grid represents each molecule
+slightly more crudely, and it is what allows a fine `voxel_size` to remain
+tractable at all: colliding natively at 1 Å over this field of view would
+require a 36 GB occupancy grid.
+
 At 2 Å you will also see a warning that the membrane is being generated on
 a coarser grid and upsampled. That is deliberate: resolving the bilayer
 directly at this voxel size would need ~125M working-grid voxels, past the
@@ -173,7 +189,8 @@ configure. If you want a crisper membrane, use a coarser `voxel_size` or a
 smaller field of view.
 
 **Hardware**: single NVIDIA L40 (46 GB VRAM, one idle card selected via
-`SPECTER_BENCHMARK_DEVICE`, `accumulator_device="auto"`,
+`SPECTER_BENCHMARK_DEVICE` — `cuda:1` for this run, with other cards on the
+host under unrelated load, `accumulator_device="auto"`,
 `render_workers="auto"`, `render_chunk_size=64`), with CuPy 14.1 (a core
 dependency, see [Installation](../installation.md)), on a host with an AMD EPYC 7763 64-Core Processor (128
 threads) and 503 GB system RAM. Wall time is the `run_build_tomogram()`

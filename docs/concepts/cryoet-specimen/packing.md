@@ -10,8 +10,9 @@ answers two questions per species: *where is this allowed to be*, and
 *how many fit*.
 
 The first is topology: classifying the volume into cytosol, lumen and
-shell. The second is Random Sequential Addition of hard spheres, obstacle-
-and region-aware through a single distance-field mechanism.
+shell. The second is Random Sequential Addition, obstacle- and
+region-aware, colliding each molecule's real rotated footprint against a
+running occupancy grid.
 </div>
 
 </div>
@@ -20,6 +21,14 @@ and region-aware through a single distance-field mechanism.
     `specter.specimen.tomogram._regions`, `specter.specimen.packing`,
     `specter.specimen.cytosolic_filler`. Figures are produced by
     `docs-figures/cryoet_specimen_packing.py`.
+
+!!! warning "Partially out of date"
+    `packing_backend` now defaults to `"shape"`, which collides real
+    rotated footprints against an occupancy grid. The sections below on
+    the RSA jamming ceiling and the exclusion distance field describe
+    `packing_backend="sphere"`, which remains available and is still what
+    places gold fiducials and membrane instances. Their figures and
+    measured numbers have not been regenerated for the shape backend.
 
 ## Regions from topology, not geometry
 
@@ -195,17 +204,21 @@ your own list breaks nothing downstream.
 | `location` | `cytosol` or `lumen`, per species | `cytosol` |
 | `n_copies` | Exact instance count (target mode) | — |
 | `ratio` | Relative abundance among filler species in the same region | 1.0 |
-| `occupancy_fraction` | Bare-sphere volume budget, per region | 0.2 (`1.0` in the shipped TOML) |
-| `gap` | Minimum surface-to-surface clearance, Å | 5.0 |
+| `occupancy_fraction` | Candidate-pool volume budget, per region | 0.2 (`1.0` in the shipped TOML) |
+| `packing_backend` | `shape` (real footprints) or `sphere` (bounding spheres) | `shape` |
+| `packing_voxel_size` | Collide on a coarser grid than the render | auto |
 | `clip_axes` | Per axis (z, y, x): may an instance's body poke past that wall? | all `False` |
 | `region_max_passes` | Pass/stall budget for a tight region | 300 |
 | `region_density_threshold` | Shell threshold for classification | 5% of peak |
 
 ## Limitations
 
-- **Spheres, not shapes.** Collision tests use each species' bounding
-  sphere, so a long or concave molecule reserves more room than it
-  occupies, and two of them can graze at the boundary.
+- **Voxel-quantized collision.** The shape backend collides footprints
+  rasterized on the packing grid, so a molecule is resolved only to that
+  voxel size. Under `packing_backend="sphere"` the collision body is
+  instead each species' bounding sphere, which reserves far more room than
+  an elongated or concave molecule occupies and caps achievable density
+  around a third of crowded cytoplasm.
 - **No spatial structure within a region.** Placement is uniform
   throughout a region; there is no clustering, no gradient, no
   surface affinity. (The single-particle path's

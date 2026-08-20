@@ -426,7 +426,6 @@ TOMOGRAM = CommandSpec(
         Flag("filler_table_max_mw_kda", "300.0"),
         Flag("filler_table_min_mw_kda", "80.0"),
         Flag("filler_occupancy_fraction", "0.02"),
-        Flag("gap", "50.0"),
         Flag("membrane_region_density_threshold", "0.3"),
         Flag("membrane_region_max_passes", "2"),
         Flag("membrane_min_transmembrane_spacing", "80.0"),

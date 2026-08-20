@@ -1756,7 +1756,12 @@ class TomogramSpecimenGenerator:
             # instance may not go here", so it starts as the complement of
             # the region (which already has obstacles removed above) and
             # accumulates every instance placed below.
+            pack_voxel, pack_shape, pack_factor = self._packing_grid(
+                target_shape, voxel_size
+            )
             occupancy = ~region_mask
+            if pack_factor > 1:
+                occupancy = _downsample_mask_maxpool(occupancy, pack_factor, pack_shape)
 
             exact_specs = [s for s in specs_here if s.n_copies is not None]
             ratio_specs = [s for s in specs_here if s.n_copies is None]
@@ -1796,8 +1801,9 @@ class TomogramSpecimenGenerator:
                         ) = self._pack_shapes(
                             exact_pdbs,
                             exact_species_map,
-                            target_shape,
-                            voxel_size,
+                            pack_shape,
+                            pack_voxel,
+                            pack_factor,
                             occupancy,
                         )
                     else:
@@ -1926,8 +1932,9 @@ class TomogramSpecimenGenerator:
                         ) = self._pack_shapes(
                             ratio_pdbs,
                             pool_species_idx,
-                            target_shape,
-                            voxel_size,
+                            pack_shape,
+                            pack_voxel,
+                            pack_factor,
                             occupancy,
                         )
                     else:
@@ -2837,8 +2844,9 @@ class TomogramSpecimenGenerator:
         self,
         pdbs: list[PDB],
         species_idx: torch.Tensor,
-        target_shape: tuple[int, int, int],
-        voxel_size: float,
+        pack_shape: tuple[int, int, int],
+        pack_voxel: float,
+        factor: int,
         occupancy: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """
@@ -2856,10 +2864,15 @@ class TomogramSpecimenGenerator:
             One per species, indexed by `species_idx`.
         species_idx : torch.Tensor
             Species index per candidate instance, shape (N,).
-        target_shape : tuple of int
-        voxel_size : float
+        pack_shape : tuple of int
+            Collision grid shape, from `_packing_grid`.
+        pack_voxel : float
+            Collision grid voxel size, A.
+        factor : int
+            ``pack_voxel / voxel_size``; 1 when packing at render resolution.
         occupancy : torch.Tensor
-            Boolean (Z, Y, X), True where an instance may not go.
+            Boolean, shape `pack_shape`, True where an instance may not go.
+            Already at packing resolution.
 
         Returns
         -------
@@ -2873,10 +2886,11 @@ class TomogramSpecimenGenerator:
         occupancy : torch.Tensor
             Updated occupancy grid, to carry into the next packing stage.
         """
-        pack_voxel, pack_shape, factor = self._packing_grid(target_shape, voxel_size)
-        masks = [self._species_mask(pdb, voxel_size, factor) for pdb in pdbs]
-        if factor > 1:
-            occupancy = _downsample_mask_maxpool(occupancy, factor, pack_shape)
+        # `occupancy` arrives ALREADY at packing resolution -- it is resolved
+        # once per region and threaded through both the target and filler
+        # stages, so coarsening it here would coarsen the second stage's
+        # input a second time.
+        masks = [self._species_mask(pdb, pack_voxel / factor, factor) for pdb in pdbs]
         region_mask = ~occupancy
         return pack_shapes_3d(
             masks,

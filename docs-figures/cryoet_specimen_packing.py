@@ -29,7 +29,13 @@ from specter.specimen.cytosolic_filler import (
     PEI2016_CROWDING_TABLE,
 )
 from specter.specimen.membrane import MembraneGenerator
-from specter.specimen.packing import draw_species_pool, pack_hard_spheres_3d
+from specter.pdb import PDB
+from specter.specimen.packing import (
+    build_species_mask,
+    draw_species_pool,
+    pack_hard_spheres_3d,
+    pack_shapes_3d,
+)
 from specter.specimen.tomogram import (
     MembraneInstance,
     TomogramSpecimenGenerator,
@@ -202,6 +208,91 @@ def figure_rsa_limit() -> None:
     print(f"saved {path}")
 
 
+def figure_backends() -> None:
+    """The choice that dominates achievable density: what each backend
+    collides. Real species, one box, sweeping the requested budget. Volume
+    fraction is measured as placed molecular mass over box volume, the
+    same quantity crowding concentrations are quoted in, so the
+    physiological band and CryoTomoSim's own output can sit on the same
+    axis."""
+    codes = ["1S3X", "1TUB", "1A1S", "1MBO", "1C3W", "1FA2"]
+    voxel, box_a = 5.0, (400.0, 400.0, 400.0)
+    grid = tuple(int(round(b / voxel)) for b in box_a)
+    box_volume = float(np.prod(box_a))
+    da_per_a3 = 1.35e-24 / 1.66054e-24
+    mass_per_z = {6: 12.011, 7: 14.007, 8: 15.999, 15: 30.974, 16: 32.06}
+    implicit_h = {6: 1.3, 7: 1.1, 8: 0.2, 16: 0.6}
+
+    pdbs, masses, radii = [], [], []
+    for code in codes:
+        pdb = PDB(code, savefolder=PDB_CACHE, verbose=False)
+        z = pdb.atomic_numbers.numpy().astype(int)
+        masses.append(
+            sum(
+                int((z == k).sum()) * (mass_per_z[k] + implicit_h.get(k, 0) * 1.008)
+                for k in np.unique(z)
+                if k in mass_per_z
+            )
+        )
+        radii.append(float(pdb.max_diameter) / 2.0)
+        pdbs.append(pdb)
+
+    masks = [build_species_mask(p.coordinates, voxel, gap=0.0) for p in pdbs]
+    mask_volumes = torch.tensor([float(m.sum()) * voxel**3 for m in masks])
+    radii_t, ratios = torch.tensor(radii), torch.ones(len(pdbs))
+    requested = [0.05, 0.1, 0.2, 0.35, 0.5, 0.75, 1.0]
+
+    def volume_fraction(species_of_accepted) -> float:
+        placed = float(sum(masses[int(i)] for i in species_of_accepted))
+        return placed / box_volume / da_per_a3
+
+    sphere, shape = [], []
+    for fraction in requested:
+        pool_r, pool_s = draw_species_pool(
+            radii_t, ratios, fraction, box_volume, seed=SEED
+        )
+        _, accepted = pack_hard_spheres_3d(pool_r, box_a, gap=0.0, seed=SEED)
+        sphere.append(volume_fraction(pool_s[accepted]))
+
+        _, pool_s2 = draw_species_pool(
+            radii_t,
+            ratios,
+            fraction,
+            box_volume,
+            seed=SEED,
+            species_volumes=mask_volumes,
+        )
+        _, _, accepted2, _ = pack_shapes_3d(
+            masks, pool_s2, grid, voxel, seed=SEED, n_orientations=128
+        )
+        shape.append(volume_fraction(pool_s2[accepted2]))
+
+    fig, ax = plt.subplots(figsize=(6.4, 4.2))
+    ax.axhspan(0.20, 0.30, color="0.88", zorder=0)
+    ax.text(0.035, 0.252, "crowded cytoplasm", fontsize=8, color="0.35")
+    ax.axhline(0.240, ls=":", lw=1.2, color="0.45")
+    ax.text(0.60, 0.213, "CryoTomoSim (0.240)", fontsize=8, color="0.45")
+    ax.plot(requested, shape, "o-", color=SHELL_COLOR, label='packing_backend="shape"')
+    ax.plot(
+        requested, sphere, "o-", color=CYTOSOL_COLOR, label='packing_backend="sphere"'
+    )
+    ax.set_xlabel("occupancy_fraction (requested)")
+    ax.set_ylabel("achieved macromolecule volume fraction")
+    ax.set_xlim(0, 1.02)
+    ax.set_ylim(0, max(0.32, max(shape) * 1.15))
+    ax.legend(fontsize=9, loc="lower right")
+    ax.set_title(
+        "What gets collided sets the ceiling\n"
+        "six species at 5 A; absolute values move with the species mix",
+        fontsize=10,
+    )
+    plt.tight_layout()
+    path = f"{OUT_DIR}/cryoet-packing-backends.png"
+    plt.savefig(path, dpi=180)
+    plt.close(fig)
+    print(f"saved {path}")
+
+
 def figure_staging() -> None:
     """Placement runs largest-radius-first, in stages. Acceptance rate
     still falls with radius -- a big sphere has more potential conflict
@@ -353,6 +444,7 @@ def figure_filler_tables() -> None:
 
 if __name__ == "__main__":
     figure_rsa_limit()
+    figure_backends()
     figure_staging()
     figure_filler_tables()
     figure_exclusion_field()

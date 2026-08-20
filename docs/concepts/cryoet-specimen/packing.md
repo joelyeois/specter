@@ -98,11 +98,18 @@ concave molecule reserves several times the room it occupies.
 
 The cost of that difference is the whole point:
 
+![Achieved macromolecule volume fraction against requested occupancy_fraction, for the shape and sphere backends, with the physiological crowding band and CryoTomoSim's own density marked.](../../assets/images/cryoet-packing-backends.png){ width="620" style="display:block;margin:1.2em auto;" }
+
 | | sphere | shape |
 |---|---|---|
 | Macromolecule volume fraction | 0.031 | **0.197** |
 | As concentration | 41 mg/mL | **266 mg/mL** |
 | Instances placed (5 Å production box) | 8,128 | 19,426 |
+
+The table measures the 121-species CRYOETSIM filler set at 6.8 Å; the
+figure sweeps six species at 5 Å. Absolute values move with the species
+mix and the voxel size, so read the separation between the curves rather
+than either number in isolation.
 
 Crowded cytoplasm is 200–320 mg/mL, so the sphere backend cannot reach a
 physiological specimen at any setting: `occupancy_fraction` is a

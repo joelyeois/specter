@@ -385,6 +385,18 @@ def _build_sphere_exclusion_field(
 # describes the machine, not the specimen.
 _MAX_EXCLUSION_FIELD_VOXELS = 200_000_000
 
+# Voxel budget for packing_backend="shape"'s own occupancy grid, above which
+# `packing_voxel_size=None` coarsens the collision grid automatically. One
+# byte per voxel, so this is a ~1 GB host allocation.
+#
+# Deliberately well above _MAX_EXCLUSION_FIELD_VOXELS: a 200x1200x1200 box at
+# 5 A is 288M voxels and must NOT trigger, since coarsening it would cost
+# density on a configuration that already fits comfortably. What this is for
+# is the regime where packing natively is not merely slow but impossible --
+# a 1 A production box needs a 36 GB occupancy grid and a 20 GB rotation
+# cache for a single 243 A species.
+_MAX_PACKING_GRID_VOXELS = 1_000_000_000
+
 
 def _resolve_exclusion_field_grid(
     target_shape: tuple[int, int, int], voxel_size: float
@@ -886,24 +898,19 @@ class TomogramSpecimenGenerator:
         `draw_species_pool`), applied independently per region -- e.g. 0.2
         for `"lumen"` species targets 20% of the LUMEN's own volume, not
         20% of the whole tomogram. Default 0.2.
-    gap : float, optional
-        Minimum clearance between placed spheres' surfaces, between a
-        placed sphere and the membrane shell, AND between auto-placed
-        membrane instances' own bounding spheres (all three reuse this one
-        value). Default 5.0.
-    packing_backend : {"sphere", "shape"}, optional
-        Collision geometry for protein packing.
+    packing_backend : {"shape", "sphere"}, optional
+        Collision geometry for protein packing. Default ``"shape"``.
 
-        ``"sphere"`` (default) collides one circumscribing sphere per
+        ``"sphere"`` collides one circumscribing sphere per
         instance via `..packing.pack_hard_spheres_3d`. Cheap, but a
         molecule's envelope is only ~0.178 of its own bounding sphere, so
         achieved macromolecule volume fraction saturates near 0.09 --
         roughly a third of crowded cytoplasm, and `occupancy_fraction` is
         a *sphere-volume* target rather than a real one.
 
-        ``"shape"`` collides the real rotated footprint against a running
-        occupancy grid via `..packing.pack_shapes_3d`, which is what
-        CryoTomoSim does. Reaches 0.241 on a matched benchmark against
+        ``"shape"`` (default) collides the real rotated footprint against a
+        running occupancy grid via `..packing.pack_shapes_3d`, which is what
+        CryoTomoSim does. Note it interacts with `gap`: see there. Reaches 0.241 on a matched benchmark against
         CryoTomoSim's own 0.240, i.e. physiological crowding. Costs more
         wall time (see `packing_max_retries`) and ignores
         `exclusion_distance_field`-based region handling in favour of the
@@ -921,8 +928,16 @@ class TomogramSpecimenGenerator:
         Default 1500.
     packing_voxel_size : float, optional
         Run ``packing_backend="shape"``'s collision on a COARSER grid than
-        the render, an integer multiple of `voxel_size`. Default None (pack
-        at `voxel_size`).
+        the render, an integer multiple of `voxel_size`.
+
+        Default None = automatic: pack at `voxel_size` until the grid would
+        exceed `_MAX_PACKING_GRID_VOXELS`, then coarsen by the smallest
+        integer factor that fits, mirroring what
+        `_resolve_exclusion_field_grid` already does for the sphere
+        backend. The budget sits high enough that ordinary boxes (a
+        200x1200x1200 grid at 5 A) never trigger it; it exists so a fine
+        `voxel_size` degrades to coarser collision instead of failing
+        outright. Pass a value to control it explicitly.
 
         The collision grid, not the render, is what makes a fine
         `voxel_size` expensive: a 1 A occupancy grid for a
@@ -1072,8 +1087,7 @@ class TomogramSpecimenGenerator:
         bead_specs: list[TomogramBeadSpec] | None = None,
         bead_roughness: ScalarOrRange = 0.12,
         occupancy_fraction: float = 0.2,
-        gap: float = 5.0,
-        packing_backend: Literal["sphere", "shape"] = "sphere",
+        packing_backend: Literal["shape", "sphere"] = "shape",
         n_orientations: int = 256,
         packing_max_retries: int = 1500,
         packing_voxel_size: float | None = None,
@@ -1125,7 +1139,16 @@ class TomogramSpecimenGenerator:
         self.bead_specs = bead_specs or []
         self.bead_roughness = bead_roughness
         self.occupancy_fraction = occupancy_fraction
-        self.gap = gap
+        # Not a constructor argument: there is no physical basis for a
+        # minimum clearance between macromolecules in crowded cytoplasm --
+        # they contact each other, and CryoTomoSim uses none either. Under
+        # packing_backend="shape" a nonzero value is also quantized to whole
+        # voxels, so a nominal 5 A became a full voxel shell in every
+        # direction and cost ~30% of the achievable density (volume fraction
+        # 0.197 -> 0.138 on a 121-species filler set at 6.8 A). Gold beads
+        # and membrane instances share this value and are content with 0:
+        # their bounding spheres merely become tangent.
+        self.gap = 0.0
         self.packing_backend = packing_backend
         self.n_orientations = n_orientations
         self.packing_max_retries = packing_max_retries
@@ -1948,8 +1971,8 @@ class TomogramSpecimenGenerator:
                         f"instances in '{location}' -- no rotated footprint "
                         f"fit anywhere in the region's "
                         f"{region_voxels:,} free voxels. Enlarge the "
-                        "compartment, reduce gap, or declare a smaller "
-                        "species for this region.",
+                        "compartment, or declare a smaller species for "
+                        "this region.",
                         stacklevel=2,
                     )
                 elif accepted_idx.numel() == 0:
@@ -2780,9 +2803,15 @@ class TomogramSpecimenGenerator:
         self, target_shape: tuple[int, int, int], voxel_size: float
     ) -> tuple[float, tuple[int, int, int], int]:
         """Coarse collision grid for `packing_voxel_size`: (voxel, shape, factor)."""
-        if not self.packing_voxel_size or self.packing_voxel_size <= voxel_size:
+        if self.packing_voxel_size is None:
+            n = target_shape[0] * target_shape[1] * target_shape[2]
+            if n <= _MAX_PACKING_GRID_VOXELS:
+                return voxel_size, target_shape, 1
+            factor = max(1, math.ceil((n / _MAX_PACKING_GRID_VOXELS) ** (1.0 / 3.0)))
+        elif self.packing_voxel_size <= voxel_size:
             return voxel_size, target_shape, 1
-        factor = max(1, int(round(self.packing_voxel_size / voxel_size)))
+        else:
+            factor = max(1, int(round(self.packing_voxel_size / voxel_size)))
         shape = tuple(-(-n // factor) for n in target_shape)
         return voxel_size * factor, shape, factor  # type: ignore[return-value]
 

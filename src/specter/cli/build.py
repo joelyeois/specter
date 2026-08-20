@@ -26,7 +26,7 @@ CONTEXT_SETTINGS = {"help_option_names": ["-h", "--help"]}
 _TOMOGRAM_GROUPS: list[tuple[str, list[str]]] = [
     (
         "Specimen",
-        ["target_shape", "voxel_size", "filler_occupancy_fraction", "gap"],
+        ["target_shape", "voxel_size", "filler_occupancy_fraction"],
     ),
     (
         "Filler tables",

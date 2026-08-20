@@ -63,7 +63,6 @@ def test_tomogram_specimen_generator_places_both_locations_correctly():
             TomogramProteinSpec(pdb_source=str(_LARGE_FIXTURE), location="cytosol"),
         ],
         occupancy_fraction=0.1,
-        gap=5.0,
         pdb_cache_dir="specter-data/pdb/",
         seed=0,
     )
@@ -108,7 +107,6 @@ def test_tomogram_specimen_generator_instance_labels_match_placements():
             TomogramProteinSpec(pdb_source=str(_SMALL_FIXTURE), location="cytosol")
         ],
         occupancy_fraction=0.05,
-        gap=5.0,
         pdb_cache_dir="specter-data/pdb/",
         seed=0,
     )
@@ -222,7 +220,6 @@ def test_tomogram_specimen_generator_composites_two_non_overlapping_instances():
             TomogramProteinSpec(pdb_source=str(_LARGE_FIXTURE), location="cytosol")
         ],
         occupancy_fraction=0.05,
-        gap=5.0,
         pdb_cache_dir="specter-data/pdb/",
         seed=0,
     )
@@ -426,7 +423,6 @@ def test_tomogram_specimen_generator_export_picks(tmp_path):
             TomogramProteinSpec(pdb_source=str(_LARGE_FIXTURE), location="cytosol"),
         ],
         occupancy_fraction=0.1,
-        gap=5.0,
         pdb_cache_dir="specter-data/pdb/",
         seed=0,
     )
@@ -485,7 +481,6 @@ def test_tomogram_specimen_generator_places_filaments():
             )
         ],
         occupancy_fraction=0.05,
-        gap=5.0,
         pdb_cache_dir="specter-data/pdb/",
         seed=0,
     )
@@ -876,6 +871,11 @@ def test_membrane_tomogram_zero_placement_warning_distinguishes_unlucky_from_imp
             TomogramProteinSpec(pdb_source=str(_LARGE_FIXTURE), location="cytosol")
         ],
         occupancy_fraction=0.05,
+        # _diagnose_zero_placements is sphere-backend machinery: it reasons
+        # about a bounding radius against an exclusion distance field, which
+        # the shape backend has neither of. Pin the backend rather than let
+        # this follow the default.
+        packing_backend="sphere",
         pdb_cache_dir="specter-data/pdb/",
         seed=0,
     )

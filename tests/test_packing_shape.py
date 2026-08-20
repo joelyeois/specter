@@ -1,6 +1,6 @@
 """
-Tests for the shape-aware packing backends
-(`specter.specimen.packing._shape`, `._multisphere`).
+Tests for the shape-aware packing backend
+(`specter.specimen.packing._shape`).
 
 The property that matters most here is that a packer's *output* describes
 the geometry it actually tested: `pack_shapes_3d` commits to an orientation
@@ -18,8 +18,6 @@ from specter.rotations._volume import build_affine_matrix, rotate_volume
 from specter.specimen.packing import (
     build_species_mask,
     coarsen_mask,
-    fit_multisphere,
-    pack_multisphere_3d,
     pack_shapes_3d,
 )
 
@@ -193,46 +191,6 @@ def test_shape_packing_beats_bounding_sphere_for_an_elongated_species():
         f"shape packing placed {accepted_shape.numel()}, "
         f"sphere packing {accepted_sphere.numel()}"
     )
-
-
-def test_fit_multisphere_covers_every_atom():
-    coords = _rod()
-    offsets, radii = fit_multisphere(coords, 8, seed=0)
-    assert offsets.shape[0] == radii.shape[0] <= 8
-    d = torch.cdist(coords, offsets)
-    assert bool((d <= radii.unsqueeze(0) + 1e-4).any(dim=1).all()), (
-        "the union of fitted spheres must enclose every atom"
-    )
-
-
-def test_pack_multisphere_3d_places_nothing_overlapping():
-    coords = _blob()
-    offsets, radii = fit_multisphere(coords, 8, seed=0)
-    n = 40
-    box = (200.0, 200.0, 200.0)
-
-    pos, rot, accepted = pack_multisphere_3d(
-        [offsets],
-        [radii],
-        torch.zeros(n, dtype=torch.long),
-        box,
-        gap=0.0,
-        seed=0,
-        max_passes=200,
-        stall_patience=20,
-    )
-    assert accepted.numel() > 0
-
-    world, rr, inst = [], [], []
-    for i in range(accepted.numel()):
-        world.append((rot[i] @ offsets.T).T + pos[i])
-        rr.append(radii)
-        inst.append(torch.full((offsets.shape[0],), i))
-    xyz, rad, owner = torch.cat(world), torch.cat(rr), torch.cat(inst)
-    d = torch.cdist(xyz, xyz)
-    contact = rad[:, None] + rad[None, :]
-    clash = (d < contact - 1e-3) & (owner[:, None] != owner[None, :])
-    assert int(clash.sum()) == 0
 
 
 def test_coarsen_mask_contains_the_fine_mask():

@@ -26,7 +26,6 @@ targets = [
 target_shape = [24, 32, 32]
 voxel_size = 10.0
 filler_occupancy_fraction = 0.0
-gap = 5.0
 seed = 0
 
 [output]
@@ -74,7 +73,6 @@ def test_cli_build_tomogram_help_smoke() -> None:
     )
     assert result.returncode == 0
     assert "--filler_occupancy_fraction" in result.stdout
-    assert "--gap" in result.stdout
     assert "--n_tomograms" in result.stdout
 
 
@@ -150,7 +148,6 @@ filler_occupancy_fraction = 0.1
 [specimen]
 target_shape = [64, 64, 64]
 voxel_size = 8.0
-gap = 5.0
 seed = 0
 
 [output]
@@ -243,7 +240,6 @@ filler_occupancy_fraction = 0.05
 [specimen]
 target_shape = [80, 80, 80]
 voxel_size = 8.0
-gap = 5.0
 seed = 0
 
 [output]
@@ -324,7 +320,6 @@ targets = [
 target_shape = [8, 8, 8]
 voxel_size = 2.0
 filler_occupancy_fraction = 0.0
-gap = 5.0
 seed = 0
 
 [output]

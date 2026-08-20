@@ -14,7 +14,10 @@ target_shape = [200, 1200, 1200]    # (Z, Y, X) voxels
 voxel_size = 5.0                        # A/voxel
 clip_axes = [true, true, true]      # (z, y, x) -- True lets instances poke past that wall
 filler_occupancy_fraction = 1.0     # above 0.5 is beyond RSA's theoretical max packing
-gap = 5.0                  # minimum clearance between placed spheres, A
+# packing_backend = "shape"      # default; "sphere" is faster but ~3x less dense
+# packing_voxel_size = 2.0       # collide on a coarser grid than the render
+# There is no `gap`: macromolecules in crowded cytoplasm contact each other,
+# so placed instances are only required not to overlap.
 pdb_savefolder = "specter-data/pdb"         # relative to your working directory
 # seed = 11                         # uncomment for reproducible packing
 

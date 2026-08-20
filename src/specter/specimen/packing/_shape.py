@@ -37,6 +37,15 @@ import torch
 from ...rotations._random import random_rotation_matrix
 from ...rotations._volume import build_affine_matrix, rotate_volume
 
+# Above this allowed-fraction, draw centers uniformly from the whole grid
+# and let the occupancy test reject the rest, instead of enumerating the
+# allowed voxels into a multi-GB index array. See its use below.
+_DENSE_REGION_FRACTION = 0.30
+
+# Rotation-cache chunking budget, in template voxels per batch. Caps the
+# transient (batch, D, H, W) float32 `rotate_volume` allocates; see its use.
+_ROTATE_CHUNK_VOXELS = 64_000_000
+
 
 def build_species_mask(
     coordinates: torch.Tensor,
@@ -72,6 +81,14 @@ def build_species_mask(
 
         CryoTomoSim itself uses no gap at all: its overlap test is pure
         contact.
+
+        Must be >= 0. Collision here is strictly hard: two placed instances
+        never share a voxel. CryoTomoSim's own Otsu overlap test is softer
+        (only each particle's core blocks a placement, so sparse outer
+        shells interpenetrate), which is deliberately not reproduced --
+        matching it was measured to need only ~2% overlap tolerance, and
+        buying that density costs a single owner per voxel in the instance
+        labels, which are picker ground truth.
     atom_radius : float, optional
         Van der Waals radius assigned to each atom, A. Default 1.9,
         matching CryoTomoSim's own average-organic-atom radius.
@@ -86,7 +103,11 @@ def build_species_mask(
 
     coords = coordinates.detach().cpu().numpy().astype(np.float64)
     pad = atom_radius + gap
-    half_extent = np.abs(coords).max(axis=0) + pad + voxel_size
+    # Size the box for the atoms plus the outward growth, never less: a
+    # nonsensical negative pad must still not clip atoms near the edge. The
+    # +voxel_size keeps a background voxel of margin on every side, which
+    # the distance transform below needs something to measure against.
+    half_extent = np.abs(coords).max(axis=0) + max(pad, 0.0) + voxel_size
     n_half = np.ceil(half_extent / voxel_size).astype(int)
     shape = 2 * n_half + 1  # odd -> origin is the center voxel
 
@@ -110,6 +131,77 @@ def build_species_mask(
         mask = dist <= pad
 
     return torch.from_numpy(np.ascontiguousarray(mask))
+
+
+def coarsen_mask(mask: torch.Tensor, factor: int) -> torch.Tensor:
+    """
+    Max-pool a footprint mask down by an integer factor.
+
+    A coarse voxel is set if ANY fine voxel inside it is set, so the fine
+    shape is contained in the coarse one. That containment is what makes
+    packing on a coarse grid safe for a fine render: two instances whose
+    coarse masks are disjoint occupy disjoint coarse voxels, hence disjoint
+    fine voxels, so a hard-collision guarantee established coarsely still
+    holds at full resolution.
+
+    Rasterizing atoms directly at the coarse voxel size does NOT give that.
+    A coarse mask built that way is only "voxels containing an atom
+    center", and an atom near a voxel boundary has its van der Waals radius
+    spilling into an unmarked neighbour -- measured at 0.02% of footprint
+    voxels overlapping when packing at 5 A and rendering at 1 A (0.07% at
+    2.5 A). Recovering the guarantee by dilating the coarse mask instead
+    costs a full coarse voxel and 42% of the placements; this costs only
+    partial-voxel rounding.
+
+    Parameters
+    ----------
+    mask : torch.Tensor
+        Boolean mask at the FINE voxel size.
+    factor : int
+        Integer ratio ``packing_voxel_size / voxel_size``.
+
+    Returns
+    -------
+    torch.Tensor
+        Boolean mask coarsened by `factor`, odd-sized on every axis so the
+        molecule origin stays at the center voxel.
+    """
+    import torch.nn.functional as F
+
+    if factor <= 1:
+        return mask
+
+    # Pad so the molecule origin lands in the CENTER coarse voxel, and the
+    # coarse result is odd-sized. Padding only at the end (the obvious
+    # thing) shifts the origin off-center by up to half a coarse voxel,
+    # which would offset every coarse-packed position from where the fine
+    # render draws it.
+    pads: list[int] = []
+    shape_out: list[int] = []
+    for s_ax in mask.shape:
+        origin = (s_ax - 1) // 2
+        c = -(-s_ax // factor)
+        if c % 2 == 0:
+            c += 1
+        while True:
+            origin_padded = (c - 1) // 2 * factor + (factor - 1) // 2
+            before = origin_padded - origin
+            after = c * factor - s_ax - before
+            if before >= 0 and after >= 0:
+                break
+            c += 2
+        pads.append((before, after))
+        shape_out.append(c)
+
+    # F.pad takes the last axis first: (x_before, x_after, y_..., z_...)
+    flat: list[int] = []
+    for before, after in reversed(pads):
+        flat.extend((before, after))
+    padded = F.pad(mask[None, None].to(torch.float32), flat)
+
+    pooled = F.max_pool3d(padded, kernel_size=factor, stride=factor)[0, 0] > 0
+    assert tuple(pooled.shape) == tuple(shape_out), (pooled.shape, shape_out)
+    return pooled
 
 
 def _rotation_cache(
@@ -151,7 +243,20 @@ def _rotation_cache(
         R = R.unsqueeze(0)
     theta = build_affine_matrix(R.to(device))
     vol = mask.to(device=device, dtype=torch.float32)
-    rot = rotate_volume(vol, theta, padding_mode="zeros") > 0.5
+    # Rotate in chunks. `rotate_volume` materializes (batch, D, H, W) as
+    # float32, and D grows as (molecule diameter / voxel_size) * sqrt(3):
+    # for a 243 A species that is 0.7 GB at 5 A but 5.4 GB at 2.5 A and
+    # 81 GB at 1 A, so a single-shot call OOMs at fine voxel sizes for no
+    # reason. Peak scales with `chunk` instead of `n_orientations`.
+    chunk = max(
+        1, min(n_orientations, int(_ROTATE_CHUNK_VOXELS // max(vol.numel(), 1)))
+    )
+    parts = [
+        rotate_volume(vol, theta[i : i + chunk], padding_mode="zeros") > 0.5
+        for i in range(0, n_orientations, chunk)
+    ]
+    rot = torch.cat(parts) if len(parts) > 1 else parts[0]
+    del parts
 
     # Trim bounds from any-reductions rather than `np.nonzero`, which
     # materializes an index array per True voxel. Worth ~2x on the trim step
@@ -206,8 +311,8 @@ def pack_shapes_3d(
     occupancy: torch.Tensor | None = None,
     region_mask: torch.Tensor | None = None,
     n_orientations: int = 256,
-    max_retries: int = 600,
-    stall_patience: int = 100_000,
+    max_retries: int = 1500,
+    stall_patience: int = 5_000,
     seed: int | None = None,
     device: str | torch.device = "cpu",
     clip_axes: tuple[bool, bool, bool] = (False, False, False),
@@ -253,16 +358,63 @@ def pack_shapes_3d(
         1500           0.251             176 s
         =============  ================  ==========
 
-        Default 600, the point where achieved density reaches parity with
-        CryoTomoSim. Lower it to trade density for speed; there is no
-        correctness consequence either way, only how full the box gets.
+        Default 1500, paired with `stall_patience`'s 5000. The two are
+        complementary, not alternatives: `max_retries` raises a stage's
+        attempt CEILING (a stage holds a finite candidate pool, so its total
+        budget is roughly n_candidates * max_retries), while
+        `stall_patience` cuts that budget short once the species has
+        saturated. Raising one and lowering the other beats tuning either:
+
+        ===========  =======  =====  =========
+        max_retries  stall    vf     wall time
+        ===========  =======  =====  =========
+        600          off      0.198  30.0 s
+        1500         off      0.207  73.4 s
+        600          5000     0.196  13.6 s
+        1500         5000     0.199  14.2 s
+        ===========  =======  =====  =========
+
+        The last row is both faster and slightly denser than the first, so
+        there is no speed/density trade to make between them.
     stall_patience : int, optional
         Abandon a species stage after this many consecutive failed
-        instances. Default 100000, i.e. effectively off -- with an
-        oversupplied candidate pool the cheap early-exit heuristic
-        `pack_hard_spheres_3d` wants is counterproductive here, since a
-        failed instance says nothing about whether the next (possibly much
-        smaller) one fits.
+        ATTEMPTS. Default 5000.
+
+        ==============  ========  =========  =========
+        stall_patience  vf        wall time  vs unbounded
+        ==============  ========  =========  =========
+        unbounded       0.197     30.2 s     --
+        20000           0.195     27.5 s     1.1x
+        5000            0.195     15.0 s     2.0x
+        2000            0.190      7.9 s     3.8x
+        ==============  ========  =========  =========
+
+        Note the density loss is a shift in COMPOSITION, not simply fewer
+        particles: cutting a large species' stage short frees space that
+        later, smaller species take, so 2000 places more instances than
+        unbounded while reaching lower volume fraction.
+
+        A FIXED count beats scaling it with the stage's candidate count,
+        which was tried and rejected: ``20 * candidates`` resolves to ~48000
+        at production scale, and paired with `max_retries` that raises the
+        total attempt budget ABOVE no-limit-at-600, so the whole build ran
+        8% slower (898 s) than the 832 s it was meant to improve on.
+
+        Counted in attempts, not failed instances, which bounds the wasted
+        work directly: a failed *instance* costs `max_retries` attempts, so
+        an instance-counted patience of P allows P * max_retries doomed
+        collision tests per species. A realistic run supplies far more
+        candidates than fit -- `occupancy_fraction=1.0` on a 288M-voxel box
+        drew ~63,000 candidates of which ~15,000 fit -- and with no early
+        exit the other ~48,000 each burned all 600 retries, ~29 million
+        doomed tests and the dominant cost of the whole build.
+
+        A stage is a single species, so every candidate in it is the same
+        size and consecutive misses genuinely mean that species has
+        saturated. (An earlier version of this docstring argued the
+        opposite, that a failure says nothing about the next candidate;
+        that is true across species but not within a stage, which is the
+        only thing this counter spans.)
     seed : int, optional
     device : str or torch.device, optional
         Device for the rotation cache only; the RSA loop is numpy on the
@@ -294,9 +446,21 @@ def pack_shapes_3d(
     if region_mask is None:
         allowed = None
     else:
-        allowed = np.stack(np.nonzero(region_mask.detach().cpu().numpy()), axis=1)
-        if allowed.shape[0] == 0:
+        rm = region_mask.detach().cpu().numpy()
+        n_allowed = int(rm.sum())
+        if n_allowed == 0:
             raise ValueError("region_mask has no True voxels")
+        if n_allowed / rm.size >= _DENSE_REGION_FRACTION:
+            # Enumerating the allowed voxels costs an (N, 3) int64 array --
+            # 6.3 GB and ~8 s for the cytosol of a 288M-voxel box, per call.
+            # When the region is most of the box that buys nothing: a
+            # uniform draw lands inside it almost every time, and anything
+            # outside is already marked occupied (callers seed `occupancy`
+            # with the region's complement), so the collision test rejects
+            # it for free.
+            allowed = None
+        else:
+            allowed = np.stack(np.nonzero(rm), axis=1)
 
     species_idx_np = species_idx.detach().cpu().numpy()
     footprints = np.array([int(m.sum()) for m in species_masks])
@@ -332,8 +496,12 @@ def pack_shapes_3d(
         oris = zs = ys = xs = picks = None
         stall = 0
         for row in rows:
-            done = False
+            if stall >= stall_patience:
+                break
             for _ in range(max_retries):
+                if stall >= stall_patience:
+                    break
+                stall += 1
                 if buf_i >= _BATCH:
                     oris = rng.integers(0, n_cache, _BATCH)
                     if allowed is None:
@@ -354,7 +522,7 @@ def pack_shapes_3d(
                 buf_i += 1
 
                 # Exact early reject: only valid when this orientation's own
-                # center voxel is solid (see _rotation_cache's centre_solid).
+                # center voxel is solid (see _rotation_cache's centre_solid)
                 if centre_solid[oi] and occ[cz, cy, cx]:
                     continue
 
@@ -386,14 +554,8 @@ def pack_shapes_3d(
                 out_pos.append((cz, cy, cx))
                 out_rot.append(R_np[oi])
                 out_row.append(int(row))
-                done = True
-                break
-            if done:
                 stall = 0
-            else:
-                stall += 1
-                if stall >= stall_patience:
-                    break
+                break
 
     if not out_pos:
         return (

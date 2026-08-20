@@ -200,6 +200,7 @@ from ..membrane import MembraneGenerator, TransmembranePlacement
 from ..membrane._placement import align_principal_axis_to_z
 from ..packing import (
     build_species_mask,
+    coarsen_mask,
     draw_species_pool,
     estimate_protein_box_size,
     pack_hard_spheres_3d,
@@ -915,8 +916,30 @@ class TomogramSpecimenGenerator:
         Default 256.
     packing_max_retries : int, optional
         Trial positions per instance for ``packing_backend="shape"``. The
-        dominant density/speed knob -- see `..packing.pack_shapes_3d`'s own
-        table. Default 600 (CryoTomoSim parity).
+        dominant density/speed knob, paired with that function's
+        `stall_patience` -- see `..packing.pack_shapes_3d`'s own table.
+        Default 1500.
+    packing_voxel_size : float, optional
+        Run ``packing_backend="shape"``'s collision on a COARSER grid than
+        the render, an integer multiple of `voxel_size`. Default None (pack
+        at `voxel_size`).
+
+        The collision grid, not the render, is what makes a fine
+        `voxel_size` expensive: a 1 A occupancy grid for a
+        1000x6000x6000 A box is 36 GB and the rotation cache is 20 GB for a
+        243 A species, against 0.29 GB and 0.18 GB at 5 A. Rendering stays
+        at `voxel_size` either way, since `..packing.pack_shapes_3d` returns
+        positions in Angstrom rather than grid indices.
+
+        Footprints are built at `voxel_size` and max-pooled down (see
+        `..packing.coarsen_mask`), NOT rasterized directly at the coarse
+        size -- a direct coarse mask omits the van der Waals shell entirely
+        (a 1.9 A pad rounds to zero dilation at 2 A), so instances pack
+        ~2 A closer than van der Waals contact allows and the extra density
+        is an artifact. Measured at 2 A pooled against a native 1 A pack:
+        volume fraction 0.264 vs 0.269, zero overlapping voxels, 8.8x
+        faster. The same comparison with direct coarse masks reads 0.348 --
+        denser, but with instances interpenetrating.
     clip_axes : tuple of bool, optional
         (z, y, x), matching `target_shape`'s axis order -- passed
         straight through to every `pack_hard_spheres_3d` call here (auto-
@@ -1052,7 +1075,8 @@ class TomogramSpecimenGenerator:
         gap: float = 5.0,
         packing_backend: Literal["sphere", "shape"] = "sphere",
         n_orientations: int = 256,
-        packing_max_retries: int = 600,
+        packing_max_retries: int = 1500,
+        packing_voxel_size: float | None = None,
         clip_axes: tuple[bool, bool, bool] = (False, False, False),
         region_density_threshold: float | None = None,
         region_max_passes: int = 300,
@@ -1105,6 +1129,7 @@ class TomogramSpecimenGenerator:
         self.packing_backend = packing_backend
         self.n_orientations = n_orientations
         self.packing_max_retries = packing_max_retries
+        self.packing_voxel_size = packing_voxel_size
         self.clip_axes = clip_axes
         self.region_density_threshold = region_density_threshold
         self.region_max_passes = region_max_passes
@@ -2751,17 +2776,32 @@ class TomogramSpecimenGenerator:
 
         return written
 
-    def _species_mask(self, pdb: PDB, voxel_size: float) -> torch.Tensor:
+    def _packing_grid(
+        self, target_shape: tuple[int, int, int], voxel_size: float
+    ) -> tuple[float, tuple[int, int, int], int]:
+        """Coarse collision grid for `packing_voxel_size`: (voxel, shape, factor)."""
+        if not self.packing_voxel_size or self.packing_voxel_size <= voxel_size:
+            return voxel_size, target_shape, 1
+        factor = max(1, int(round(self.packing_voxel_size / voxel_size)))
+        shape = tuple(-(-n // factor) for n in target_shape)
+        return voxel_size * factor, shape, factor  # type: ignore[return-value]
+
+    def _species_mask(
+        self, pdb: PDB, voxel_size: float, factor: int = 1
+    ) -> torch.Tensor:
         """
-        This species' rotated-footprint mask for ``packing_backend="shape"``,
-        rasterized once per (structure, voxel size, gap) and reused across
+        This species' footprint mask for ``packing_backend="shape"``, built
+        once per (structure, voxel size, gap, factor) and reused across
         regions and across the pool-sizing/packing steps.
+
+        Always rasterized at `voxel_size` and max-pooled down when `factor`
+        > 1, never rasterized at the coarse size directly -- see
+        `packing_voxel_size` for why that distinction matters.
         """
-        key = (id(pdb), voxel_size, self.gap)
+        key = (id(pdb), voxel_size, self.gap, factor)
         if key not in self._mask_cache:
-            self._mask_cache[key] = build_species_mask(
-                pdb.coordinates, voxel_size, gap=self.gap
-            )
+            fine = build_species_mask(pdb.coordinates, voxel_size, gap=self.gap)
+            self._mask_cache[key] = coarsen_mask(fine, factor) if factor > 1 else fine
         return self._mask_cache[key]
 
     def _pack_shapes(
@@ -2804,13 +2844,16 @@ class TomogramSpecimenGenerator:
         occupancy : torch.Tensor
             Updated occupancy grid, to carry into the next packing stage.
         """
-        masks = [self._species_mask(pdb, voxel_size) for pdb in pdbs]
+        pack_voxel, pack_shape, factor = self._packing_grid(target_shape, voxel_size)
+        masks = [self._species_mask(pdb, voxel_size, factor) for pdb in pdbs]
+        if factor > 1:
+            occupancy = _downsample_mask_maxpool(occupancy, factor, pack_shape)
         region_mask = ~occupancy
         return pack_shapes_3d(
             masks,
             species_idx,
-            target_shape,
-            voxel_size,
+            pack_shape,
+            pack_voxel,
             occupancy=occupancy,
             region_mask=region_mask,
             n_orientations=self.n_orientations,

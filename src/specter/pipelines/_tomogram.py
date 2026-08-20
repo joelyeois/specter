@@ -499,6 +499,8 @@ def build_tomogram_generator(config: TomogramConfig) -> TomogramSpecimenGenerato
         bead_roughness=config.bead_roughness,
         occupancy_fraction=config.filler_occupancy_fraction,
         gap=config.gap,
+        packing_backend=config.packing_backend,  # type: ignore[arg-type]
+        packing_max_retries=config.packing_max_retries,
         clip_axes=tuple(config.clip_axes),  # type: ignore[arg-type]
         region_density_threshold=config.membrane_region_density_threshold,
         region_max_passes=config.membrane_region_max_passes,

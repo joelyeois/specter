@@ -921,6 +921,12 @@ class TomogramConfig:
     # lumen) makes the candidate pool this implies impractically large.
     filler_occupancy_fraction: float = 0.5
     gap: float = 5.0  # minimum clearance between placed spheres
+    # Collision geometry for protein packing: "sphere" collides one
+    # circumscribing sphere per instance, "shape" collides the real rotated
+    # footprint against a running occupancy grid (what CryoTomoSim does).
+    # See TomogramSpecimenGenerator's own packing_backend docstring.
+    packing_backend: str = "sphere"
+    packing_max_retries: int = 1500
     # (z, y, x), matching target_shape's axis order. True on an axis lets a
     # placed instance's center stay in-bounds while its body pokes past
     # that wall (truncated naturally at render time) instead of being
@@ -1169,6 +1175,14 @@ TOMOGRAM_HELP: dict[str, str] = {
     "filler_from_cryoetsim: exclude species below this mass, kDa.",
     "target_shape": "Output specimen volume shape in voxels (Z, Y, X).",
     "voxel_size": "Voxel size in Angstrom.",
+    "packing_backend": "Protein collision geometry: 'sphere' (one "
+    "circumscribing sphere per instance) or 'shape' (the real rotated "
+    "footprint against an occupancy grid). 'shape' reaches several times "
+    "the density; 'sphere' saturates around 0.03-0.09 volume fraction.",
+    "packing_max_retries": "Trial positions per instance for "
+    "packing_backend='shape'. Sets a packing stage's attempt ceiling; "
+    "pairs with the packer's own stall_patience, which cuts that budget "
+    "short once a species saturates.",
     "filler_occupancy_fraction": "Target packing density for filler "
     "species, as a bare-sphere fraction of EACH REGION's own volume it's "
     "placed in (the whole box when [[membrane]] is empty -- 'cytosol' is "

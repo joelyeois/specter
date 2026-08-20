@@ -17,6 +17,7 @@ import torch
 from specter.rotations._volume import build_affine_matrix, rotate_volume
 from specter.specimen.packing import (
     build_species_mask,
+    coarsen_mask,
     fit_multisphere,
     pack_multisphere_3d,
     pack_shapes_3d,
@@ -232,3 +233,59 @@ def test_pack_multisphere_3d_places_nothing_overlapping():
     contact = rad[:, None] + rad[None, :]
     clash = (d < contact - 1e-3) & (owner[:, None] != owner[None, :])
     assert int(clash.sum()) == 0
+
+
+def test_coarsen_mask_contains_the_fine_mask():
+    """
+    The containment property that makes coarse-grid packing safe for a
+    fine render: every fine voxel must fall inside a set coarse voxel.
+    """
+    coords = _blob(n_atoms=2000, radius=30.0)
+    fine = build_species_mask(coords, 1.0, gap=0.0)
+    coarse = coarsen_mask(fine, 2)
+
+    assert all(s % 2 == 1 for s in coarse.shape), "origin must stay centered"
+    # Every set fine voxel maps into a set coarse voxel.
+    fine_idx = fine.nonzero()
+    fh = torch.tensor(fine.shape) // 2
+    ch = torch.tensor(coarse.shape) // 2
+    mapped = ((fine_idx - fh).to(torch.float64) / 2).floor().long() + ch
+    inside = ((mapped >= 0) & (mapped < torch.tensor(coarse.shape))).all(dim=1)
+    mapped = mapped[inside]
+    assert bool(coarse[mapped[:, 0], mapped[:, 1], mapped[:, 2]].all()), (
+        "a fine voxel landed outside the coarsened mask"
+    )
+
+
+def test_coarsen_mask_is_a_noop_below_factor_two():
+    m = build_species_mask(_blob(), 2.0, gap=0.0)
+    assert coarsen_mask(m, 1) is m
+
+
+def test_pack_shapes_3d_accepts_a_coarser_grid_than_the_render():
+    """
+    Packing on a coarse grid must still return positions in ANGSTROM on the
+    shared physical box, so a caller can render them at any resolution.
+    """
+    coords = _blob(n_atoms=2000, radius=30.0)
+    fine_voxel, factor = 1.0, 4
+    fine = build_species_mask(coords, fine_voxel, gap=0.0)
+    coarse = coarsen_mask(fine, factor)
+
+    box_a = (160.0, 320.0, 320.0)
+    coarse_grid = tuple(int(round(b / (fine_voxel * factor))) for b in box_a)
+
+    pos, rot, accepted, _ = pack_shapes_3d(
+        [coarse],
+        torch.zeros(40, dtype=torch.long),
+        coarse_grid,
+        fine_voxel * factor,
+        seed=0,
+        n_orientations=16,
+        max_retries=40,
+    )
+    assert accepted.numel() > 0
+    # Positions are physical and box-centered, independent of packing grid.
+    half = torch.tensor([box_a[2] / 2, box_a[1] / 2, box_a[0] / 2])
+    assert bool((pos.abs() <= half).all()), "positions must stay inside the box"
+    assert rot.shape == (accepted.numel(), 3, 3)

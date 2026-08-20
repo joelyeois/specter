@@ -138,15 +138,15 @@ per-instance rendering cost:
 
 | `voxel_size` (Å/voxel) | Shape (Z, Y, X voxels) | Wall time | GPU peak | RAM peak |
 |---|---|---|---|---|
-| 10 | 150 × 600 × 600 | 236 s | 3.70 GB | 12.63 GB |
-| 5  | 300 × 1200 × 1200 | 201 s | 11.62 GB | 6.13 GB |
-| 2  | 750 × 3000 × 3000 (~6.75B voxels) | 621 s (10m 21s) | 9.29 GB | 154.02 GB |
+| 10 | 150 × 600 × 600 | 218 s | 3.70 GB | 12.61 GB |
+| 5  | 300 × 1200 × 1200 | 124 s | 11.62 GB | 6.13 GB |
+| 2  | 750 × 3000 × 3000 (~6.75B voxels) | 502 s (8m 22s) | 9.29 GB | 154.07 GB |
 
 The numbers don't move in a clean monotonic line at 10→5 Å: wall time and
 RAM both bounce around within roughly a factor of 2, since at this scale
 species fetch/render/packing overhead (fixed per-run, not per-voxel)
 dominates over the canvas itself. What's unambiguous is the step change at
-2 Å: wall time roughly triples versus 5 Å, and RAM jumps to **154 GB**.
+2 Å: wall time quadruples versus 5 Å, and RAM jumps to **154 GB**.
 That RAM spike is `accumulator_device="auto"` doing exactly what [Compute &
 scaling flags](#compute-scaling-flags) above says it does: at ~6.75
 billion voxels the density volume alone is ~27 GB, comfortably past half
@@ -160,23 +160,21 @@ of salt (one run on one machine, not a statistically averaged sweep), but
 the *shape* (noisy at coarse resolution, a sharp RAM/time step once the
 canvas stops fitting in VRAM) is the useful, likely-to-generalize part.
 
-Wall time is roughly double what this benchmark measured before
-`packing_backend` defaulted to `"shape"`. That is the backend working, not
-a regression: the previous bounding-sphere numbers (114, 91 and 351 s)
-were faster because the specimen they produced was roughly a third as
-dense as crowded cytoplasm.
+Shape-based collision is close to free at this scale. Running the 5 Å
+configuration back to back on both backends, wall time is 117 s under
+`"shape"` against 116 s under `"sphere"`, for 19,426 placed instances
+against 8,128. Filler packing accounts for 28 s and 25 s of those totals
+respectively, and rendering for ~27 s in both, since rendering is
+dominated by per-species template construction and barely moves with
+instance count.
 
-The extra time is packing, not rendering. Measured on the 5 Å row, filler
-packing rises from 24 s to 104 s while rendering holds at ~27 s in both
-cases, despite the shape backend placing 19,426 instances against the
-sphere backend's 8,128. Rendering is dominated by per-species template
-construction, which does not scale with instance count. The packing cost
-is two factors multiplied: 2.4x the instances, and 1.8x the cost per
-instance (5.4 ms against 3.0 ms), the latter because the shape backend
-tests each attempt against a voxel grid serially where the sphere backend
-resolves a whole pass at once through a neighbour list, and because
-reaching this density means most attempts happen near jamming, where the
-acceptance rate has collapsed.
+It was not always close. The shape backend's collision loop first cost
+104 s on this configuration, four times the sphere backend's. Nearly all
+of that was the reject path: at realistic density RSA rejects ~99.8% of
+attempts, and each rejection tested a candidate's entire footprint. The
+loop now rejects on a sparse sample of footprint voxels first, which is
+exact rather than approximate, and only a candidate that survives it pays
+for the full comparison.
 
 At 2 Å the collision grid would reach ~6.75 billion voxels, past the budget
 `packing_voxel_size` enforces, so packing runs on a 4 Å grid while

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import rich_click as click
 
+from specter.jobs._cli import build_jobs_group
+
 from .build import build_build_group
 from .reconstruct import build_reconstruct_group
 from .simulate import CONTEXT_SETTINGS, build_simulate_group
@@ -22,6 +24,7 @@ cli.add_command(build_reconstruct_group())
 # command. See build_reconstruct_group for why it is an alias inside `specter`
 # rather than a `ghostbuster` console script of its own.
 cli.add_command(build_reconstruct_group(name="ghostbuster"))
+cli.add_command(build_jobs_group())
 
 
 def main() -> None:

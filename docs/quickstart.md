@@ -111,13 +111,13 @@ and the compute/scaling flags for larger runs.
 ## Job management
 
 Generation runs can be recorded under a project name in a local job
-database. Inspect past runs with the `specter-jobs` CLI, installed
-automatically with the package; see [Manage jobs](user-guide/jobs.md):
+database. Inspect past runs with `specter jobs`; see
+[Manage jobs](user-guide/jobs.md):
 
 ```bash
-specter-jobs list --project my-project
-specter-jobs show <job_id>
-specter-jobs diff <job_id_1> <job_id_2>
+specter jobs list --project my-project
+specter jobs show <job_id>
+specter jobs diff <job_id_1> <job_id_2>
 ```
 
 See `demo-notebooks/` for interactive worked examples, including

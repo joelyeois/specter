@@ -162,11 +162,21 @@ canvas stops fitting in VRAM) is the useful, likely-to-generalize part.
 
 Wall time is roughly double what this benchmark measured before
 `packing_backend` defaulted to `"shape"`. That is the backend working, not
-a regression. Colliding real molecular footprints rather than bounding
-spheres fits several times more protein into the same box, and every
-additional instance must then be rendered. The previous bounding-sphere
-numbers (114, 91 and 351 s) were faster because the specimen they produced
-was roughly a third as dense as crowded cytoplasm.
+a regression: the previous bounding-sphere numbers (114, 91 and 351 s)
+were faster because the specimen they produced was roughly a third as
+dense as crowded cytoplasm.
+
+The extra time is packing, not rendering. Measured on the 5 Å row, filler
+packing rises from 24 s to 104 s while rendering holds at ~27 s in both
+cases, despite the shape backend placing 19,426 instances against the
+sphere backend's 8,128. Rendering is dominated by per-species template
+construction, which does not scale with instance count. The packing cost
+is two factors multiplied: 2.4x the instances, and 1.8x the cost per
+instance (5.4 ms against 3.0 ms), the latter because the shape backend
+tests each attempt against a voxel grid serially where the sphere backend
+resolves a whole pass at once through a neighbour list, and because
+reaching this density means most attempts happen near jamming, where the
+acceptance rate has collapsed.
 
 At 2 Å the collision grid would reach ~6.75 billion voxels, past the budget
 `packing_voxel_size` enforces, so packing runs on a 4 Å grid while

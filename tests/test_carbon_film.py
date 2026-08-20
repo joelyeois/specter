@@ -14,9 +14,10 @@ import torch
 
 from specter.specimen._carbon import CarbonFilmGenerator
 
-# Literature mean inner potential range for amorphous carbon, V -- see
-# dev/validate_carbon_mip.py for the derivation this module's placed
-# density (_PLACED_DENSITY_FRACTION) was calibrated against.
+# Literature mean inner potential range for amorphous carbon, V -- this
+# module's placed density (_PLACED_DENSITY_FRACTION) was calibrated
+# against real per-atom scattering physics to reproduce it, see
+# _carbon.py's module docstring.
 _MIP_LO, _MIP_HI = 7.0, 10.0
 
 _TARGET_SHAPE_ZYX = (120, 120, 120)
@@ -54,8 +55,8 @@ def _bulk_film(seed: int = 0, thickness: float = 150.0) -> torch.Tensor:
 def test_carbon_film_generator_bulk_mip_in_literature_range():
     """A thick, bulk (hole-free) film's mean occupied potential should
     land in amorphous carbon's real literature MIP range, not an
-    arbitrary constant -- the physics dev/validate_carbon_mip.py
-    calibrated _PLACED_DENSITY_FRACTION against."""
+    arbitrary constant -- the real per-atom scattering physics
+    _PLACED_DENSITY_FRACTION was calibrated against."""
     density = _bulk_film(thickness=_BULK_THICKNESS)
     occupied = density > 0
 

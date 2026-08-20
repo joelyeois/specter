@@ -24,12 +24,10 @@ spacing, genuinely 3D, can pinch off islands and form overhangs) rather
 than from independent per-angle noise.
 
 Faithfully ported from a literal, unabridged translation of CTS's MATLAB
-source (validated cell-by-cell against github.com/carsonpurnell/
-cryotomosim_CTS) in ``dev/gen_carbon_replica.py`` -- see that file's own
-module docstring for the full derivation, and ``dev/validate_carbon_mip.py``
-for how deposition was calibrated (below). Two things are deliberately
-*not* carried over from that from-scratch reference, both by design
-decisions specific to production use:
+source, validated cell-by-cell against github.com/carsonpurnell/
+cryotomosim_CTS. Deposition calibration is described below. Two things
+are deliberately *not* carried over from that from-scratch reference,
+both by design decisions specific to production use:
 
 - Hole placement here is a caller-supplied `hole_center` (typically from
   `edge_hole_center`, a deterministic solve for a specific edge_fraction/
@@ -41,9 +39,9 @@ decisions specific to production use:
   concerned hole placement, so it's kept as-is rather than replaced with
   CTS's own weaker mechanism.
 - Deposition uses a MIP-calibrated flat weight (`_deposit_splat`), not
-  real per-atom scattering physics (`dev/gen_carbon_replica.py`'s
-  `use_physics=True` path, ~40x more expensive at equal atom count):
-  the film is a support artifact that nothing downstream resolves
+  real per-atom scattering physics (prototyped separately and measured
+  at ~40x more expensive at equal atom count): the film is a support
+  artifact that nothing downstream resolves
   atomically, so the extra cost buys nothing here. `_deposit_splat`'s
   weight is calibrated so the *bulk* result is physically correct anyway
   (matches the real-physics path's mean inner potential (MIP) to within
@@ -88,9 +86,8 @@ CARBON_SHTYROV_SPECIES = "C(CCC)"
 QUANTIFOIL_R1_2_HOLE_RADIUS = 6000.0  # Å (0.6 micron)
 
 # --- CTS gen_carbon.m/carbonshape-derived geometry constants ---------------
-# Validated faithful port in dev/gen_carbon_replica.py against the original
-# CTS source; see that file for the derivation these were carried over
-# from verbatim.
+# Validated faithful port against the original CTS source
+# (github.com/carsonpurnell/cryotomosim_CTS); carried over verbatim.
 _SEED_VOLUME_PER_POINT = 18000.0  # A^3/seed point; CTS's own comment: "just looks nice and is fast, not evaluated or hypothesis-driven"
 _ALPHA = 40.0  # alphaShape radius, A
 _LATERAL_PAD = 50.0  # A, seed-cloud padding beyond the frame (CTS's own `pad`) -- avoids the rough rim clipping visibly at the volume's own lateral edges
@@ -98,17 +95,16 @@ _LATERAL_PAD = 50.0  # A, seed-cloud padding beyond the frame (CTS's own `pad`) 
 # Placed number density, as a fraction of bulk (rho = 2.0 g/cm^3, 12
 # g/mol): full bulk density overshoots the real literature mean inner
 # potential (MIP) of amorphous carbon (7.8-9.1 V) because the independent-
-# atom model has no bonding correction -- calibrated in
-# dev/validate_carbon_mip.py by measuring MIP at several density fractions
-# against specter's own real per-atom carbon potential (0.7x bulk ->
-# 8.56 +/- 1.4 V).
+# atom model has no bonding correction -- calibrated by measuring MIP at
+# several density fractions against specter's own real per-atom carbon
+# potential (0.7x bulk -> 8.56 +/- 1.4 V).
 _PLACED_DENSITY_FRACTION = 0.7
 
 # Below this point count, a single global Delaunay triangulation is faster
 # than paying multiprocess pool startup cost; above it, splitting into
 # blocks (see `_alpha_shape`) wins substantially (measured ~9x with a real
-# CUDA context already held in the parent process, at ~1M points -- see
-# dev/gen_carbon_replica.py's own benchmarking). Point count scales with
+# CUDA context already held in the parent process, at ~1M points).
+# Point count scales with
 # film volume, so in practice this threshold separates small (e.g.
 # test-scale) fields from real production ones.
 _BLOCKED_DELAUNAY_THRESHOLD = 300_000
@@ -132,8 +128,8 @@ def _canonical(tets: torch.Tensor) -> torch.Tensor:
 
     Sorts each tet's vertices, then lexsorts the rows via four stable
     argsorts -- makes the single-shot and blocked `_alpha_shape` paths
-    return bit-identical tetrahedra (verified in dev/gen_carbon_replica.py),
-    which in turn makes atom sampling (`_sample_in_tets`) bit-identical
+    return bit-identical tetrahedra, which in turn makes atom sampling
+    (`_sample_in_tets`) bit-identical
     between them for a given seed.
     """
     t, _ = torch.sort(tets, dim=1)
@@ -178,7 +174,7 @@ def _alpha_shape(points: np.ndarray, alpha: float, device: torch.device) -> _Alp
     Assigning each tetrahedron to the block containing its circumcenter
     partitions the accepted set with no duplicates and no misses, so the
     union is the global alpha complex -- verified bit-identical to the
-    single-shot path in dev/gen_carbon_replica.py.
+    single-shot path.
 
     Parameters
     ----------
@@ -313,9 +309,10 @@ def _seed_points(
     """
     Jittered seed point cloud for the alpha-shape rim.
 
-    Adapted from CTS's ``carbonshape`` (see `dev/gen_carbon_replica.py` for
-    the literal MATLAB port this was derived from) -- differs only in that
-    `hole_center` is a caller-supplied argument rather than computed here
+    Adapted from CTS's ``carbonshape`` (the literal MATLAB port this was
+    derived from was validated cell-by-cell against the original source,
+    see module docstring) -- differs only in that `hole_center` is a
+    caller-supplied argument rather than computed here
     from CTS's own semi-random offset formula (see module docstring).
 
     Points are seeded uniformly across `target_shape`'s lateral footprint
@@ -392,10 +389,9 @@ def _deposit_splat(
     uniformly over one voxel's volume. By the mean-field relation for a
     homogeneous random point-source gas (V0 = density * per-atom potential
     integral), this reproduces the correct bulk mean inner potential (MIP)
-    at any placed density -- verified numerically pix-independent in
-    dev/gen_carbon_replica.py (8.42-8.44 V at pix=1/10/20 A for the same
-    density, matching a real per-atom-physics measurement of 8.56 V to
-    within noise).
+    at any placed density -- verified numerically pix-independent
+    (8.42-8.44 V at pix=1/10/20 A for the same density, matching a real
+    per-atom-physics measurement of 8.56 V to within noise).
 
     Parameters
     ----------
@@ -558,8 +554,7 @@ class CarbonFilmGenerator:
             shape is built (see `_seed_points`). Default 60 (CTS's own
             ``carbonshape`` default, ``JITTER_MAX``); the resulting
             boundary's radial standard deviation comes out to roughly a
-            third of this (~20 A at the default, measured in
-            dev/gen_carbon_replica.py).
+            third of this (~20 A at the default).
         hole_center : tuple of float, optional
             (x, y) offset of the hole's center relative to the volume's
             center, Å. Default (0, 0) -- hole centered on the

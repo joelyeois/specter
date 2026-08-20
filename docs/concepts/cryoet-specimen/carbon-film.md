@@ -90,8 +90,8 @@ scattering calculation. The weight is
 potential integral spread over one voxel's volume, so by the mean-field
 relation \(V_0 = n \int V_{\text{atom}}\), the bulk result is correct at
 any placed density and any voxel size. What it lacks is per-atom radial
-structure, which nothing downstream resolves in a support film anyway. The
-real per-atom physics path exists (in `dev/gen_carbon_replica.py`) and is
+structure, which nothing downstream resolves in a support film anyway. A
+real per-atom physics path was prototyped separately and measured at
 ~40× more expensive at equal atom count for no difference in the bulk
 answer.
 

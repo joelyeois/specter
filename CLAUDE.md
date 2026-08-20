@@ -229,7 +229,7 @@ src/specter/                  # Main source package
     _grid.py                  # BeadGenerator — gold fiducial bead physics, for specimen.tomogram.TomogramSpecimenGenerator
                               # (`specter build tomogram`); also the shared bulk-material density/potential helpers _carbon.py uses
     _carbon.py                 # CarbonFilmGenerator/GridSpec — carbon support film: alpha-shape rim geometry (from-scratch
-                              # CTS gen_carbon.m port, dev/gen_carbon_replica.py) + MIP-calibrated flat deposition (dev/validate_carbon_mip.py)
+                              # CTS gen_carbon.m port) + MIP-calibrated flat deposition
     _carbon_delaunay.py        # Torch-free Delaunay/circumsphere worker for _carbon.py's blocked (spawn-context) alpha-complex build
   potential.py                # Scattering potential builder
   scattering.py               # Wave propagation (multislice, rytov, firstborn, projection)

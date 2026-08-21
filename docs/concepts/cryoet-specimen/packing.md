@@ -189,11 +189,20 @@ because small spheres fit into gaps the large ones leave. Under the sphere
 backend, raising `filler_occupancy_fraction` past ~0.5 does nothing but
 grow the candidate pool.
 
-The shape backend jams too, but later: its curve in [Two collision
-geometries](#two-collision-geometries) is still rising at 1.0, because a
-footprint leaves gaps a bounding sphere never could. Either way the knob
-is a budget rather than a target. Set it high, let the packing jam, and
-the density is whatever the geometry allows without hand-tuning.
+The shape backend jams too, and polydispersity raises its ceiling the same
+way, measured in macromolecule volume fraction on real molecules:
+
+![Achieved macromolecule volume fraction against requested occupancy_fraction under the shape backend, for a single species and a five-species mix.](../../assets/images/cryoet-packing-shape-jamming.png){ width="600" style="display:block;margin:1.2em auto;" }
+
+A single species saturates near 0.185 and stays there. A five-species mix
+is still climbing at 1.0, into the physiological band, because a footprint
+leaves gaps a bounding sphere never could and smaller species take them.
+Either way the knob is a budget rather than a target. Set it high, let the
+packing jam, and the density is whatever the geometry allows without
+hand-tuning.
+
+If you want more from a reference table, that is also the lever: a mix
+beats raising the budget on a narrow one.
 
 If you want *more* achieved occupancy from a reference table, raise the
 mass floor rather than the budget: tiny species consume placement slots
@@ -206,14 +215,20 @@ ceiling, reached in seconds, is the actual target.
 
 ## One field for obstacles and regions
 
-This is the sphere backend's mechanism. The shape backend needs no
-distance field: membranes, filaments, carbon and placed instances are
-already volumes, so they are stamped straight into the occupancy grid it
-collides against, and a region is restricted by seeding that grid as
-occupied everywhere outside it.
+The shape backend needs no distance field. Membranes, filaments, carbon
+and placed instances are already volumes, so they are stamped straight
+into the one boolean grid it collides against, and a region is restricted
+by seeding that grid as occupied everywhere outside it:
 
-Both "stay out of the membrane" and "stay inside the lumen" are handled by
-the same input: a field giving the physical distance to the nearest
+![Three panels of one z-slice: the region complement alone, then with a membrane and filament stamped in, then with every packed protein added.](../../assets/images/cryoet-packing-occupancy-grid.png){ width="900" style="display:block;margin:1.2em auto;" }
+
+A candidate is rejected if its rotated footprint meets any set voxel, so
+obstacle avoidance, region restriction and instance-instance collision are
+the same test rather than three mechanisms.
+
+The sphere backend cannot do that, since it has no footprint to test. It
+uses a distance field instead, and both "stay out of the membrane" and
+"stay inside the lumen" are handled by the same input: a field giving the physical distance to the nearest
 **forbidden** voxel. A candidate is rejected unless the field, sampled at
 its centre, exceeds `radius + gap`, i.e. unless its whole sphere clears
 the forbidden set.

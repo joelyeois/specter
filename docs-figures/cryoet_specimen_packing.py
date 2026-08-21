@@ -293,6 +293,164 @@ def figure_backends() -> None:
     print(f"saved {path}")
 
 
+def figure_shape_jamming() -> None:
+    """The shape backend jams too, and polydispersity still raises the
+    ceiling -- the same mechanism the sphere curve shows, measured in
+    macromolecule volume fraction on real molecules rather than in
+    bare-sphere occupancy on synthetic radii."""
+    voxel, box_a = 4.0, (280.0, 280.0, 280.0)
+    grid = tuple(int(round(b / voxel)) for b in box_a)
+    box_volume = float(np.prod(box_a))
+    da_per_a3 = 1.35e-24 / 1.66054e-24
+    mass_per_z = {6: 12.011, 7: 14.007, 8: 15.999, 15: 30.974, 16: 32.06}
+    implicit_h = {6: 1.3, 7: 1.1, 8: 0.2, 16: 0.6}
+
+    def load(codes):
+        pdbs, masses = [], []
+        for code in codes:
+            pdb = PDB(code, savefolder=PDB_CACHE, verbose=False)
+            z = pdb.atomic_numbers.numpy().astype(int)
+            masses.append(
+                sum(
+                    int((z == k).sum()) * (mass_per_z[k] + implicit_h.get(k, 0) * 1.008)
+                    for k in np.unique(z)
+                    if k in mass_per_z
+                )
+            )
+            pdbs.append(pdb)
+        return pdbs, masses
+
+    pools = {
+        "monodisperse (1MBO only)": ["1MBO"],
+        "polydisperse (5 species)": ["1C3W", "1MBO", "1S3X", "1TUB", "1A1S"],
+    }
+    requested = [0.05, 0.1, 0.2, 0.35, 0.5, 0.75, 1.0]
+
+    curves = {}
+    for label, codes in pools.items():
+        pdbs, masses = load(codes)
+        masks = [build_species_mask(p.coordinates, voxel, gap=0.0) for p in pdbs]
+        volumes = torch.tensor([float(m.sum()) * voxel**3 for m in masks])
+        radii = torch.tensor([float(p.max_diameter) / 2.0 for p in pdbs])
+        ratios = torch.ones(len(pdbs))
+        achieved = []
+        for fraction in requested:
+            _, pool_s = draw_species_pool(
+                radii,
+                ratios,
+                fraction,
+                box_volume,
+                seed=SEED,
+                species_volumes=volumes,
+            )
+            _, _, accepted, _ = pack_shapes_3d(
+                masks, pool_s, grid, voxel, seed=SEED, n_orientations=128
+            )
+            placed = float(sum(masses[int(i)] for i in pool_s[accepted]))
+            achieved.append(placed / box_volume / da_per_a3)
+        curves[label] = achieved
+
+    fig, ax = plt.subplots(figsize=(6.0, 4.0))
+    for (label, achieved), color in zip(curves.items(), [CYTOSOL_COLOR, SHELL_COLOR]):
+        ax.plot(requested, achieved, "o-", color=color, label=label)
+    ax.axhspan(0.20, 0.30, color="0.88", zorder=0)
+    ax.text(0.035, 0.283, "crowded cytoplasm", fontsize=8, color="0.35")
+    ax.set_xlabel("occupancy_fraction (requested)")
+    ax.set_ylabel("achieved macromolecule volume fraction")
+    ax.set_xlim(0, 1.02)
+    ax.legend(fontsize=9, loc="lower right")
+    ax.set_title("Shape packing saturates later, and higher", fontsize=11)
+    plt.tight_layout()
+    path = f"{OUT_DIR}/cryoet-packing-shape-jamming.png"
+    plt.savefig(path, dpi=180)
+    plt.close(fig)
+    print(f"saved {path}")
+
+
+def figure_occupancy_grid() -> None:
+    """The shape backend's answer to obstacles and regions: one boolean
+    grid. Everything forbidden is stamped into it -- the region's own
+    complement, the membrane, and every instance already placed -- and a
+    candidate is rejected if its rotated footprint meets any set voxel. No
+    distance field is involved."""
+    from specter.specimen.filament import FilamentSpec
+
+    # Filaments earn their place here: with only a membrane, the shell is
+    # already outside the cytosol region, so "stamp the obstacles in" would
+    # be a step that visibly does nothing.
+    filaments = [
+        FilamentSpec(
+            code="1J6Z",
+            step=27.3,
+            flex_deg=12.0,
+            twist_deg=166.15,
+            n_copies=6,
+            n_monomers=(30, 50),
+        ),
+    ]
+    common = dict(
+        target_shape=SHAPE_ZYX,
+        voxel_size=VOXEL_SIZE,
+        filament_specs=filaments,
+        packing_backend="shape",
+        pdb_cache_dir=PDB_CACHE,
+        seed=SEED,
+        device=DEVICE,
+        progressbars=False,
+    )
+
+    # Two runs at one seed: the obstacles alone, then the same specimen
+    # with protein fill. Deriving the obstacles by subtracting labels from
+    # the full run does not work -- an instance label is thresholded at 1%
+    # of its template's peak, so a placed protein's soft tail falls outside
+    # its own label and would be counted as an obstacle.
+    obstacles_only = TomogramSpecimenGenerator(
+        membrane_instances=_membrane_instances()[:1], protein_specs=[], **common
+    )
+    obstacle_volume = np.asarray(obstacles_only.generate().cpu())
+    # Relative threshold, not > 0: the membrane field carries a small
+    # nonzero value across its own bounding box, which a bare > 0 renders
+    # as a square slab.
+    obstacles = obstacle_volume > 0.01 * obstacle_volume.max()
+    cytosol = np.asarray(obstacles_only.regions["cytosol"].cpu(), dtype=bool)
+
+    full = TomogramSpecimenGenerator(
+        membrane_instances=_membrane_instances()[:1],
+        protein_specs=[TomogramProteinSpec(pdb_source="1MBO", location="cytosol")],
+        occupancy_fraction=0.35,
+        **common,
+    )
+    full.generate()
+    labels = (full.instance_labels > 0).cpu().numpy()
+    assert np.array_equal(
+        cytosol, np.asarray(full.regions["cytosol"].cpu(), dtype=bool)
+    ), "the two runs must share a specimen for the panels to compose"
+
+    z = SHAPE_ZYX[0] // 2
+    panels = [
+        (~cytosol, "seeded: the region's own complement"),
+        (~cytosol | obstacles, "+ membrane and filaments stamped in"),
+        (~cytosol | obstacles | labels, "+ every protein placed"),
+    ]
+    cmap = ListedColormap(["white", SHELL_COLOR])
+    fig, axes = plt.subplots(1, 3, figsize=(10.5, 3.7))
+    for ax, (panel, title) in zip(axes, panels):
+        ax.imshow(panel[z], cmap=cmap, interpolation="nearest")
+        ax.set_title(title, fontsize=9)
+        ax.set_xticks([])
+        ax.set_yticks([])
+    fig.suptitle(
+        "One occupancy grid, no distance field: a candidate is rejected if "
+        "its footprint meets any set voxel",
+        fontsize=10,
+    )
+    plt.tight_layout()
+    path = f"{OUT_DIR}/cryoet-packing-occupancy-grid.png"
+    plt.savefig(path, dpi=180)
+    plt.close(fig)
+    print(f"saved {path}")
+
+
 def figure_staging() -> None:
     """Placement runs largest-radius-first, in stages. Acceptance rate
     still falls with radius -- a big sphere has more potential conflict
@@ -445,6 +603,8 @@ def figure_filler_tables() -> None:
 if __name__ == "__main__":
     figure_rsa_limit()
     figure_backends()
+    figure_shape_jamming()
+    figure_occupancy_grid()
     figure_staging()
     figure_filler_tables()
     figure_exclusion_field()

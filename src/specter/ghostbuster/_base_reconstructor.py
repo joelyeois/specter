@@ -6,6 +6,7 @@ from typing import Any, cast
 
 import lightning as L
 import torch
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 from ._helpers import _apply_kmask_inplace, _build_epoch_metrics, _log_current_lr
 
@@ -100,6 +101,39 @@ class _BaseReconstructor(L.LightningModule):
     def _metrics_path_suffix(self) -> str:
         """Filename suffix for saved metrics. Override for e.g. halfset labelling."""
         return ""
+
+    def _optimizers_list(self) -> list[Any]:
+        """Normalise ``self.optimizers()`` (Lightning returns one or a list) to a list."""
+        opts = self.optimizers()
+        if not isinstance(opts, (list, tuple)):
+            opts = [opts]
+        return list(opts)
+
+    def _step_schedulers(self) -> None:
+        """
+        Step every LR scheduler once, for manual optimisation.
+
+        No-op under automatic optimisation or when no scheduler is
+        configured (``self.lr is None``). ``ReduceLROnPlateau`` needs a
+        metric argument this single-step call can't supply, but
+        ``_build_lr_scheduler`` never constructs one -- encountering one
+        here would mean a caller bug, not a normal runtime condition.
+        """
+        if self.automatic_optimization:
+            return
+        sch = self.lr_schedulers()
+        if not sch:
+            return
+        if not isinstance(sch, (list, tuple)):
+            sch = [sch]
+        for s in sch:
+            if isinstance(s, ReduceLROnPlateau):
+                raise TypeError(
+                    "ReduceLROnPlateau is not supported by this manual "
+                    "scheduler step loop; _build_lr_scheduler never "
+                    "constructs one."
+                )
+            s.step()
 
     def _gather_for_logging(self, value: torch.Tensor) -> torch.Tensor:
         """

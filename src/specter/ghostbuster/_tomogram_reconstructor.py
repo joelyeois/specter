@@ -9,7 +9,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.optim import AdamW
-from torch.optim.lr_scheduler import LRScheduler, ReduceLROnPlateau
+from torch.optim.lr_scheduler import LRScheduler
 
 from .. import rotations
 from .. import tilt as tilt_geometry
@@ -406,9 +406,7 @@ class TomogramReconstructor(_BaseReconstructor):
         """
         obs_images, tilt_indices = batch
 
-        opts = self.optimizers()
-        if not isinstance(opts, (list, tuple)):
-            opts = [opts]
+        opts = self._optimizers_list()
         for opt in opts:
             opt.zero_grad()
 
@@ -440,19 +438,7 @@ class TomogramReconstructor(_BaseReconstructor):
         for opt in opts:
             opt.step()
 
-        if not self.automatic_optimization:
-            sch = self.lr_schedulers()
-            if sch:
-                if not isinstance(sch, (list, tuple)):
-                    sch = [sch]
-                for s in sch:
-                    if isinstance(s, ReduceLROnPlateau):
-                        raise TypeError(
-                            "ReduceLROnPlateau is not supported by this manual "
-                            "scheduler step loop; _build_lr_scheduler never "
-                            "constructs one."
-                        )
-                    s.step()
+        self._step_schedulers()
 
         self.log_dict(
             {"train_loss": loss},

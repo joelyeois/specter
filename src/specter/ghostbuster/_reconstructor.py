@@ -9,7 +9,7 @@ import roma
 import torch
 import torch.nn as nn
 from torch.optim import AdamW
-from torch.optim.lr_scheduler import LRScheduler, ReduceLROnPlateau
+from torch.optim.lr_scheduler import LRScheduler
 
 from .. import rotations
 from ..imagegenerator import ImageGenerator
@@ -600,9 +600,7 @@ class Reconstructor(_BaseReconstructor):
         torch.Tensor
             Scalar loss for the current batch.
         """
-        opts = self.optimizers()
-        if not isinstance(opts, (list, tuple)):
-            opts = [opts]
+        opts = self._optimizers_list()
 
         loss, _, _ = self._common_step(batch, batch_idx)
         self.log_dict(
@@ -619,20 +617,7 @@ class Reconstructor(_BaseReconstructor):
         for opt in opts:
             opt.step()
 
-        # manual optimization
-        if not self.automatic_optimization:
-            sch = self.lr_schedulers()
-            if sch:
-                if not isinstance(sch, (list, tuple)):
-                    sch = [sch]
-                for s in sch:
-                    if isinstance(s, ReduceLROnPlateau):
-                        raise TypeError(
-                            "ReduceLROnPlateau is not supported by this manual "
-                            "scheduler step loop; _build_lr_scheduler never "
-                            "constructs one."
-                        )
-                    s.step()
+        self._step_schedulers()
         return loss
 
     def _metrics_path_suffix(self) -> str:

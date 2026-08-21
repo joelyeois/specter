@@ -1,0 +1,198 @@
+"""Symmetry-group rotation matrices and rotational symmetry averaging."""
+
+from __future__ import annotations
+
+from typing import Literal
+
+import roma
+import torch
+
+from ..rotations import rotate_volume, rotate_volume_fourier
+from ._matrices import (
+    _icosahedral_i1_matrices,
+    _icosahedral_i2_matrices,
+    _icosahedral_i_matrices,
+    _octahedral_matrices,
+    _tetrahedral_matrices,
+)
+
+
+def _cyclic_matrices(n: int) -> torch.Tensor:
+    """
+    Rotation matrices for Cn (n-fold cyclic) symmetry about the z-axis.
+
+    Parameters
+    ----------
+    n : int
+        Cyclic order.
+
+    Returns
+    -------
+    torch.Tensor
+        Rotation matrices, shape (n, 3, 3).
+    """
+    axis = torch.tensor([0.0, 0.0, 1.0])
+    angles = torch.linspace(0, 360, n + 1)[:-1] / 180 * torch.pi
+    return roma.rotvec_to_rotmat(angles.unsqueeze(-1) * axis.unsqueeze(0))
+
+
+def _dihedral_matrices(n: int) -> torch.Tensor:
+    """
+    Rotation matrices for Dn (n-fold dihedral) symmetry: Cn about the z-axis,
+    each combined with a 180-degree rotation about the y-axis.
+
+    Parameters
+    ----------
+    n : int
+        Dihedral order.
+
+    Returns
+    -------
+    torch.Tensor
+        Rotation matrices, shape (2n, 3, 3).
+    """
+    axis_z = torch.tensor([0.0, 0.0, 1.0])
+    axis_y = torch.tensor([0.0, 1.0, 0.0])
+    y_flip = roma.rotvec_to_rotmat(torch.pi * axis_y)
+
+    angles = torch.linspace(0, 360, n + 1)[:-1] / 180 * torch.pi
+    matrices = []
+    for ang in angles:
+        z_rot = roma.rotvec_to_rotmat(ang * axis_z)
+        matrices.append(z_rot)
+        matrices.append(z_rot @ y_flip)
+    return torch.stack(matrices)
+
+
+def _matrices_to_affine(matrices: torch.Tensor) -> torch.Tensor:
+    """
+    Pad (N, 3, 3) rotation matrices into (N, 3, 4) affine matrices (zero translation).
+    """
+    affine = torch.zeros(len(matrices), 3, 4)
+    affine[:, :, :-1] = matrices
+    return affine
+
+
+def get_rotation_matrices(sym: str, return_affine: bool = True) -> torch.Tensor:
+    """
+    Get rotation matrices for crystallographic and icosahedral symmetry groups.
+    Returns rotation matrices for applying point group symmetry operations
+    commonly used in cryo-EM for symmetric particle reconstructions.
+
+    Parameters
+    ----------
+    sym : str
+        Symmetry group designation. Supported symmetries:
+        - 'Cn': Cyclic symmetry with n-fold rotational axis (e.g., 'C2', 'C3')
+        - 'Dn': Dihedral symmetry with n-fold axis + perpendicular 2-fold axes
+        - 'T': Tetrahedral symmetry (12 operations)
+        - 'I', 'I1', 'I2': Icosahedral symmetry (60 operations, different conventions)
+        - 'O': Octahedral symmetry
+
+        Case-insensitive.
+    return_affine : bool, optional
+        If True, returns 4x4 affine transformation matrices.
+        If False, returns 3x3 rotation matrices. Default is True.
+
+    Returns
+    -------
+    matrices : torch.Tensor
+        Rotation matrices with shape (N, 3, 3) or (N, 4, 4) where N is the
+        number of symmetry operations in the group.
+
+    Notes
+    -----
+    Rotation matrices are constructed following standard crystallographic
+    conventions. For cyclic groups, rotations are around the Z-axis.
+    For dihedral groups, additional 180° rotations are around the Y-axis.
+
+    The icosahedral symmetry groups (I, I1, I2) follow different centering
+    conventions used by various cryo-EM software packages.
+
+    Examples
+    --------
+    >>> import torch
+    >>> from specter.symmetries import get_rotation_matrices
+    >>> # Get C3 symmetry (3-fold cyclic)
+    >>> matrices_c3 = get_rotation_matrices('C3', return_affine=False)
+    >>> matrices_c3.shape
+    torch.Size([3, 3, 3])
+    >>> # Get D2 symmetry (2-fold dihedral)
+    >>> matrices_d2 = get_rotation_matrices('D2', return_affine=False)
+    >>> matrices_d2.shape
+    torch.Size([4, 3, 3])
+    """
+    sym = sym.upper()
+
+    if sym[0] == "D":
+        matrices = _dihedral_matrices(int(sym[1:]))
+    elif sym[0] == "C":
+        matrices = _cyclic_matrices(int(sym[1:]))
+    elif sym == "T":
+        matrices = _tetrahedral_matrices()
+    elif sym == "I":
+        matrices = _icosahedral_i_matrices()
+    elif sym == "I1":
+        matrices = _icosahedral_i1_matrices()
+    elif sym == "I2":
+        matrices = _icosahedral_i2_matrices()
+    elif sym == "O":
+        matrices = _octahedral_matrices()
+    else:
+        raise ValueError(
+            f"Unknown symmetry '{sym}'. Supported: Cn, Dn, T, O, I, I1, I2."
+        )
+
+    return _matrices_to_affine(matrices) if return_affine else matrices
+
+
+def apply_symmetry(
+    volume: torch.Tensor,
+    sym_ops: torch.Tensor | str,
+    batchsize: int | None = None,
+    method: Literal["fourier", "real"] = "fourier",
+) -> torch.Tensor:
+    """
+    Apply rotational symmetry to a volume.
+
+    Parameters
+    ----------
+    volume : torch.Tensor
+        Volume of shape (Z, Y, X).
+    sym_ops : torch.Tensor or str
+        Either a tensor of shape (n_sym, 3, 4) affine matrices, or a symmetry
+        label string (e.g. 'C3', 'D2', 'I', 'O', 'T').
+    batchsize : int, optional
+        Number of symmetry operations to apply per batch. If None, applies all
+        at once. Default is None.
+    method : str, optional
+        Rotation method: 'fourier' or 'real'. Default is 'fourier'.
+
+    Returns
+    -------
+    volume_sym : torch.Tensor
+        Symmetrized volume, same shape as input.
+    """
+
+    # If sym_ops is a string, fetch rotation matrices
+    if isinstance(sym_ops, str):
+        sym_ops = get_rotation_matrices(
+            sym_ops, return_affine=True
+        )  # returns tensor n_sym x 3 x 3
+
+    sym_ops = sym_ops.to(volume.device, dtype=volume.dtype)
+    n_sym = len(sym_ops)
+
+    rotate_fn = rotate_volume_fourier if method == "fourier" else rotate_volume
+
+    if batchsize is None:
+        volumes = rotate_fn(volume, sym_ops)
+        return volumes.mean(dim=0)
+
+    # Batched summation
+    volumes_sum = torch.zeros_like(volume)
+    for i in range(0, n_sym, batchsize):
+        batch_ops = sym_ops[i : i + batchsize]
+        volumes_sum += rotate_fn(volume, batch_ops).sum(dim=0)
+
+    return volumes_sum / n_sym

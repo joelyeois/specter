@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 import lightning as L
 import torch
@@ -11,11 +11,15 @@ from .progress import track
 
 from . import rotations
 
+if TYPE_CHECKING:
+    from .ice import IceProfile
+
 __all__ = [
     "poisson_disk_neighbors",
     "poisson_disk_neighbors_3d",
     "insert_particles_into_micrograph",
     "filter_by_z_density",
+    "filter_by_local_z_density",
     "CrowdWithDuplicates",
 ]
 
@@ -111,6 +115,86 @@ def insert_particles_into_micrograph(
     return micrograph
 
 
+def filter_by_local_z_density(
+    pts: torch.Tensor,
+    z_bot: torch.Tensor,
+    z_top: torch.Tensor,
+    sigma_frac: float = 0.05,
+    peak_amplitude: float = 1.0,
+    baseline: float = 0.1,
+    curve_points: int = 200,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """
+    Filter points against a two-Gaussian z-density profile whose peaks sit on
+    each point's *own* ice surfaces.
+
+    The general form of :func:`filter_by_z_density`, which places both peaks at
+    a single global ``±z_length / 2``. Under an
+    :class:`~specter.ice.IceProfile` the surfaces move with (x, y), so a global
+    pair of peaks would put adsorbed particles at the mean surface rather than
+    the local one -- in the thin regions of a wedge, outside the ice entirely.
+
+    Parameters
+    ----------
+    pts : torch.Tensor
+        Particle coordinates with shape (N, 3) containing (x, y, z) positions.
+    z_bot : torch.Tensor
+        Lower ice surface at each point's (x, y), shape (N,), in Å.
+    z_top : torch.Tensor
+        Upper ice surface at each point's (x, y), shape (N,), in Å.
+    sigma_frac : float, optional
+        Gaussian width as a fraction of the local thickness. Default is 0.05.
+    peak_amplitude : float, optional
+        Amplitude of Gaussian peaks at surfaces. Default is 1.0.
+    baseline : float, optional
+        Minimum probability in the bulk region. Default is 0.1.
+    curve_points : int, optional
+        Number of points for returning the probability curve along z.
+        Default is 200.
+
+    Returns
+    -------
+    pts_filtered : torch.Tensor
+        Filtered points with shape (M, 3) where M <= N.
+    z_distribution : torch.Tensor
+        Probability density curve along z-axis with shape (curve_points,),
+        evaluated at the mean surfaces.
+
+    Notes
+    -----
+    The probability distribution is: P(z) = baseline + amplitude * (G1 + G2)
+    where G1 and G2 are Gaussians centered at each point's own ``z_bot`` and
+    ``z_top``.
+    """
+    if len(pts) == 0:
+        return pts, torch.zeros(curve_points)
+
+    thickness = (z_top - z_bot).clamp(min=1e-6)
+    sigma = (sigma_frac * thickness).clamp(min=1e-6)
+    z_pts = pts[:, 2]
+
+    g1 = torch.exp(-0.5 * ((z_pts - z_bot) / sigma) ** 2)
+    g2 = torch.exp(-0.5 * ((z_pts - z_top) / sigma) ** 2)
+
+    probs = baseline + peak_amplitude * (g1 + g2)
+    probs = (probs / probs.max()).clamp(0.0, 1.0)
+
+    mask = torch.rand(len(z_pts)) < probs
+    pts_filtered = pts[mask]
+
+    # Curve along z, reported at the mean surfaces: with a profile there is no
+    # single z-axis every point shares.
+    z_min, z_max = float(z_bot.mean()), float(z_top.mean())
+    sigma_curve = sigma_frac * (z_max - z_min)
+    z_curve = torch.linspace(z_min, z_max, curve_points)
+    g1_curve = torch.exp(-0.5 * ((z_curve - z_min) / sigma_curve) ** 2)
+    g2_curve = torch.exp(-0.5 * ((z_curve - z_max) / sigma_curve) ** 2)
+    p_curve = baseline + peak_amplitude * (g1_curve + g2_curve)
+    z_distribution = (p_curve / p_curve.max()).clamp(0.0, 1.0)
+
+    return pts_filtered, z_distribution
+
+
 def filter_by_z_density(
     pts: torch.Tensor,
     z_length: float,
@@ -125,6 +209,9 @@ def filter_by_z_density(
 
     Simulates particle distribution at ice-water interface where particles
     preferentially accumulate at top and bottom surfaces.
+
+    A flat-slab wrapper around :func:`filter_by_local_z_density`, which takes
+    the surfaces per point rather than as a single global pair.
 
     Parameters
     ----------
@@ -154,37 +241,18 @@ def filter_by_z_density(
     The probability distribution is: P(z) = baseline + amplitude * (G1 + G2)
     where G1 and G2 are Gaussians centered at z_min and z_max respectively.
     """
-    z_min, z_max = -z_length / 2, z_length / 2
-    sigma = sigma_frac * z_length
-
     if len(pts) == 0:
-        z_curve = torch.linspace(z_min, z_max, curve_points)
         return pts, torch.zeros(curve_points)
-
-    # compute z for each point
-    z_pts = pts[:, 2]
-
-    # Gaussian peaks at top and bottom
-    g1 = torch.exp(-0.5 * ((z_pts - z_min) / sigma) ** 2)
-    g2 = torch.exp(-0.5 * ((z_pts - z_max) / sigma) ** 2)
-
-    # acceptance probability for each point
-    probs_filtered = baseline + peak_amplitude * (g1 + g2)
-    probs_filtered = (probs_filtered / probs_filtered.max()).clamp(0.0, 1.0)
-
-    # filter points randomly
-    mask = torch.rand(len(z_pts)) < probs_filtered
-    pts_filtered = pts[mask]
-    probs_filtered = probs_filtered[mask]
-
-    # create probability curve along z
-    z_curve = torch.linspace(z_min, z_max, curve_points)
-    g1_curve = torch.exp(-0.5 * ((z_curve - z_min) / sigma) ** 2)
-    g2_curve = torch.exp(-0.5 * ((z_curve - z_max) / sigma) ** 2)
-    p_curve = baseline + peak_amplitude * (g1_curve + g2_curve)
-    z_distribution = (p_curve / p_curve.max()).clamp(0.0, 1.0)
-
-    return pts_filtered, z_distribution
+    ones = torch.ones(len(pts), dtype=pts.dtype, device=pts.device)
+    return filter_by_local_z_density(
+        pts,
+        -z_length / 2 * ones,
+        z_length / 2 * ones,
+        sigma_frac=sigma_frac,
+        peak_amplitude=peak_amplitude,
+        baseline=baseline,
+        curve_points=curve_points,
+    )
 
 
 class CrowdWithDuplicates(L.LightningModule):
@@ -232,6 +300,17 @@ class CrowdWithDuplicates(L.LightningModule):
     water_air_interface : bool, optional
         If True, applies a bimodal distribution along z-coordinates. Mimics the
         particle adsorption in cryo-EM ice-water interface.
+    ice_profile : IceProfile, optional
+        Laterally varying ice geometry. When given, '3d' placement is gated on
+        each candidate's own column: a placement whose particle would poke out
+        of the local slab is rejected, and ``water_air_interface`` adsorbs to
+        the local surfaces via
+        :func:`~specter.crowding.filter_by_local_z_density` rather than to a
+        single global pair. Default None (a slab filling ``max_distance_z``,
+        as before).
+    particle_radius : float, optional
+        Half-height in Å used for that fit test. Defaults to
+        ``min_distance / 2``. Ignored when ``ice_profile`` is None.
 
     Attributes
     ----------
@@ -261,6 +340,8 @@ class CrowdWithDuplicates(L.LightningModule):
         move_to_cpu: bool = False,
         progressbars: bool = True,
         water_air_interface: bool = False,
+        ice_profile: "IceProfile | None" = None,
+        particle_radius: float | None = None,
     ):
         super().__init__()
 
@@ -275,6 +356,13 @@ class CrowdWithDuplicates(L.LightningModule):
         self.move_to_cpu = move_to_cpu
         self.progressbars = progressbars
         self.water_air_interface = water_air_interface
+        self.ice_profile = ice_profile
+        # min_distance is the caller's own estimate of how much room one
+        # particle needs -- `MicrographSpecimenGenerator`'s callers pass
+        # `pdb.max_diameter` -- so half of it is the particle's radius.
+        self.particle_radius = (
+            particle_radius if particle_radius is not None else min_distance / 2
+        )
 
         if nz_out is None:
             nz_out = self.n
@@ -315,7 +403,22 @@ class CrowdWithDuplicates(L.LightningModule):
                 box=(self.max_distance_z, self.max_distance_xy, self.max_distance_xy),
                 seed=self.seed,
             )
-            if self.water_air_interface:
+            if self.ice_profile is not None:
+                # Reject anything that would poke out of its OWN column's slab.
+                # `max_distance_z` spans the whole profile, so without this the
+                # thin regions get particles sitting in vacuum.
+                z_bot, z_top = self.ice_profile.surfaces_at(
+                    coords[:, :2], self.nxy_out, self.dx
+                )
+                fits = (coords[:, 2] - self.particle_radius >= z_bot) & (
+                    coords[:, 2] + self.particle_radius <= z_top
+                )
+                coords, z_bot, z_top = coords[fits], z_bot[fits], z_top[fits]
+                if self.water_air_interface:
+                    coords, self.z_distribution = filter_by_local_z_density(
+                        coords, z_bot, z_top
+                    )
+            elif self.water_air_interface:
                 coords, self.z_distribution = filter_by_z_density(
                     coords, self.max_distance_z
                 )

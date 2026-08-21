@@ -4,7 +4,13 @@ import torch
 import lightning as L
 
 from ..crowding import CrowdWithDuplicates
-from ..ice import IceBank, RandomIcemaker, blend_ice_into_volume, resolve_icemaker
+from ..ice import (
+    IceBank,
+    IceProfile,
+    RandomIcemaker,
+    blend_ice_into_volume,
+    resolve_icemaker,
+)
 from ..progress import status
 
 
@@ -70,7 +76,15 @@ class MicrographSpecimenGenerator(L.LightningModule):
         ``MicrographSpecimenGenerator`` instances. When supplied, ``ice_model`` and
         ``ice_cache_dir`` are both ignored.
     ice_thickness : float, optional
-        Thickness of the ice layer in Å.
+        Thickness of the ice layer in Å. Ignored when ``ice_profile`` is given,
+        which carries its own thickness.
+    ice_profile : IceProfile, optional
+        Laterally varying ice thickness (wedge, meniscus, tilted slab). Ice is
+        confined to the profile instead of filling the box, and particle
+        placement is gated on each column's own slab. The caller is
+        responsible for having sized ``nz`` from
+        :meth:`~specter.ice.IceProfile.required_nz`. Default None: a uniform
+        slab filling the box.
     ice_relax_steps : int, optional
         Forwarded to :meth:`~specter.ice.IceBank.generate_big_ice` when
         ``ice_model='gd'`` (or an ``IceBank`` ``icemaker``): number of local
@@ -94,6 +108,7 @@ class MicrographSpecimenGenerator(L.LightningModule):
         crowd_max_distance_z: float | None = None,
         ice_model: str | None = None,
         ice_thickness: float | None = None,
+        ice_profile: IceProfile | None = None,
         ice_cache_dir: str | None = None,
         icemaker: IceBank | RandomIcemaker | None = None,
         ice_relax_steps: int = 0,
@@ -112,6 +127,7 @@ class MicrographSpecimenGenerator(L.LightningModule):
         self.crowd_max_distance_z = crowd_max_distance_z
         self.ice_model = ice_model
         self.ice_thickness = ice_thickness
+        self.ice_profile = ice_profile
         self.ice_relax_steps = ice_relax_steps
         self.water_air_interface = water_air_interface
         self.progressbars = progressbars
@@ -138,6 +154,7 @@ class MicrographSpecimenGenerator(L.LightningModule):
                 chunk_size=chunk_size,
                 water_air_interface=water_air_interface,
                 move_to_cpu=move_to_cpu,
+                ice_profile=ice_profile,
             )
         else:
             self.crowd = None
@@ -189,6 +206,7 @@ class MicrographSpecimenGenerator(L.LightningModule):
                         self.icemaker,
                         self.pixel_size,
                         relax_steps=self.ice_relax_steps,
+                        profile=self.ice_profile,
                     )
 
         return V

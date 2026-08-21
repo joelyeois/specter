@@ -23,6 +23,7 @@ from ._helpers import (
     water_molecule_coordinates,
 )
 from ._mdsim import ExtXYZDump, MDSimDump
+from ._profile import IceProfile, IceProfileMode
 from ._random import RandomIcemaker
 
 __all__ = [
@@ -31,6 +32,8 @@ __all__ = [
     "MDSimDump",
     "RandomIcemaker",
     "IceBank",
+    "IceProfile",
+    "IceProfileMode",
     "blend_ice_into_volume",
     "build_ice_cache",
     "build_one_ice_config",

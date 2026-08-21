@@ -12,7 +12,7 @@ import glob
 import math
 import os
 import time
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 import lightning as L
 import matplotlib.figure
@@ -27,6 +27,9 @@ from ..progress import track
 from ._energy import MLBOP
 from ..potential import build_atomic_potential_kernel, potential_from_deltas
 from ._random import RandomIcemaker
+
+if TYPE_CHECKING:
+    from ._profile import IceProfile
 
 
 #: Largest magnitude a signed 16-bit fixed-point coordinate index takes. One
@@ -1338,13 +1341,16 @@ def resolve_icemaker(
     ice_cache_dir: str | None = None,
     icemaker: "IceBank | RandomIcemaker | None" = None,
     parameterization: str = "kirkland",
+    progressbars: bool = True,
 ) -> "IceBank | RandomIcemaker | None":
     """
     Resolve the ``ice_model``/``icemaker``/``ice_cache_dir`` kwargs shared
     across :class:`~specter.specimen.MicrographSpecimenGenerator`,
-    :class:`~specter.imagegenerator.MicrographGenerator`, and
-    :class:`~specter.imagegenerator.TiltSeriesGenerator` into a concrete
-    icemaker instance (or ``None`` if ice is disabled).
+    :class:`~specter.imagegenerator.MicrographGenerator`,
+    :class:`~specter.imagegenerator.TiltSeriesGenerator`,
+    :class:`~specter.imagegenerator.ImageGenerator`, and
+    :class:`~specter.imagegenerator.ImageGeneratorFromCoordinates` into a
+    concrete icemaker instance (or ``None`` if ice is disabled).
 
     Parameters
     ----------
@@ -1366,6 +1372,9 @@ def resolve_icemaker(
         Atomic potential parameterization for a freshly-built icemaker's
         kernel: ``'kirkland'``, ``'lobato'``, or ``'shtyrov'``. Default
         ``'kirkland'``. Ignored when ``icemaker`` is given.
+    progressbars : bool, optional
+        Forwarded to a freshly-built icemaker's own ``progressbars``.
+        Default True. Ignored when ``icemaker`` is given.
 
     Returns
     -------
@@ -1376,10 +1385,18 @@ def resolve_icemaker(
     if ice_model is None or ice_model == "none":
         return None
     if ice_model == "gd":
-        return IceBank(cache_dir=ice_cache_dir, parameterization=parameterization)
+        return IceBank(
+            cache_dir=ice_cache_dir,
+            parameterization=parameterization,
+            progressbars=progressbars,
+        )
     if ice_model == "random":
         return RandomIcemaker(
-            dx=pixel_size, n=nxy, nz=nz, parameterization=parameterization
+            dx=pixel_size,
+            n=nxy,
+            nz=nz,
+            parameterization=parameterization,
+            progressbars=progressbars,
         )
     raise ValueError(
         f"Unknown ice_model '{ice_model}'. Choose 'gd', 'random', or 'none'."
@@ -1392,7 +1409,7 @@ def ice_blend_mask(V: torch.Tensor, threshold: float = 0.05) -> torch.Tensor:
 
     Shared masking rule for every ice-blending entry point in specter (this
     module's :func:`blend_ice_into_volume` and
-    :meth:`~specter.imagegenerator._generator.ParticleGeneratorBase.solvate`):
+    :meth:`~specter.imagegenerator._particle_base.ParticleGeneratorBase.solvate`):
     a voxel is eligible when its value is below ``threshold * V.max()``.
 
     Parameters
@@ -1417,6 +1434,7 @@ def blend_ice_into_volume(
     pixel_size: float,
     threshold: float = 0.05,
     relax_steps: int = 0,
+    profile: "IceProfile | None" = None,
 ) -> torch.Tensor:
     """
     Add ice into a scattering-potential volume, masked to voxels with little
@@ -1446,6 +1464,13 @@ def blend_ice_into_volume(
         ``RandomIcemaker``, which has no tile seams to relax). Default 0,
         matching every higher-level caller (``ImageGenerator``,
         ``MicrographGenerator``, ``TiltSeriesGenerator``, ...).
+    profile : IceProfile, optional
+        Laterally varying thickness. Ice is still generated at ``V``'s full
+        ``(nz, nxy, nxy)`` extent and then confined to the profile by
+        :meth:`~specter.ice.IceProfile.window`, so the caller is responsible
+        for having sized ``V`` deep enough (see
+        :meth:`~specter.ice.IceProfile.required_nz`). Default None: ice fills
+        the box, as it always has.
 
     Returns
     -------
@@ -1459,5 +1484,15 @@ def blend_ice_into_volume(
         ).to(V.device)
     else:
         ice = icemaker.generate_ice(batchsize=batchsize).to(V.device)
+    if profile is not None:
+        # Chunked in z so the (nz, nxy, nxy) window never exists in full
+        # alongside the ice volume it multiplies -- at micrograph_size both are
+        # gigabytes. The chunk holds ~64 MB of float32.
+        chunk = max(1, 2**24 // (nxy * nxy))
+        for start in range(0, nz, chunk):
+            sl = slice(start, min(start + chunk, nz))
+            ice[:, sl] *= profile.window(
+                nz, nxy, pixel_size, z_slice=sl, device=ice.device
+            )[None]
     mask = ice_blend_mask(V, threshold).to(V.dtype)
     return V + ice * mask

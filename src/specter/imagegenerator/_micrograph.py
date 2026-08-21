@@ -7,7 +7,13 @@ import torch
 from specter import logger
 
 from ._base import BaseImager, compute_nz, pad_volume
-from ..ice import IceBank, RandomIcemaker, blend_ice_into_volume, resolve_icemaker
+from ..ice import (
+    IceBank,
+    IceProfile,
+    RandomIcemaker,
+    blend_ice_into_volume,
+    resolve_icemaker,
+)
 from ..progress import status
 from ..scattering import IterativeScattering
 from ..specimen import MicrographSpecimenGenerator
@@ -61,7 +67,21 @@ class MicrographGenerator(BaseImager):
         Ignored when ``icemaker`` is provided.
     ice_thickness : float, optional
         Ice thickness in Å passed to ``MicrographSpecimenGenerator``. Ignored when
-        ``volume`` is given.
+        ``volume`` is given, or when ``ice_profile`` is given.
+    ice_profile : IceProfile, optional
+        Laterally varying ice thickness -- a wedge, a meniscus, or a tilted
+        slab -- replacing the uniform slab ``ice_thickness`` describes. Sets
+        ``nz`` from its thickest column via
+        :meth:`~specter.ice.IceProfile.required_nz`, confines the ice to the
+        profile, gates particle placement on each column's own slab, and
+        references defocus to the specimen's entry face rather than the box's
+        (see :meth:`~specter.ice.IceProfile.entry_face_shift`).
+
+        Note that multislice runs one full-plane FFT per slice whether or not
+        the slice holds anything, so a profile costs what its *thickest*
+        column costs over the whole field. Honored on the ``volume`` path too,
+        where it confines the blended-in ice but cannot change ``volume``'s own
+        Z extent. Default None.
     ice_cache_dir : str, optional
         Directory of cached ice configs for ``ice_model='gd'`` (see
         :func:`specter.ice.build_ice_cache`). Defaults to the bundled
@@ -154,6 +174,7 @@ class MicrographGenerator(BaseImager):
         anisomag: torch.Tensor | None = None,
         ice_model: str | None = None,
         ice_thickness: float | None = None,
+        ice_profile: IceProfile | None = None,
         ice_cache_dir: str | None = None,
         icemaker: IceBank | RandomIcemaker | None = None,
         ice_relax_steps: int = 0,
@@ -200,17 +221,28 @@ class MicrographGenerator(BaseImager):
         self.pad_fft = pad_fft
         self.pad_nxy = nxy + (nxy // 2) * 2 if pad_fft else nxy
 
+        self.ice_profile = ice_profile
+
         if volume is not None:
             self.nz = volume.shape[1]
         elif scattering_potential is not None:
-            self.nz = compute_nz(
-                scattering_potential.shape[0], ice_thickness, pixel_size
+            base_nz = scattering_potential.shape[0]
+            self.nz = (
+                ice_profile.required_nz(nxy, pixel_size, base_nz)
+                if ice_profile is not None
+                else compute_nz(base_nz, ice_thickness, pixel_size)
             )
         else:
             raise ValueError(
                 "Either 'volume' or 'scattering_potential' must be provided."
             )
-        self.ice_thickness = self.nz * pixel_size
+        # Ice thickness, not box depth: the two are the same only when the ice
+        # fills the box, which a profile breaks.
+        self.ice_thickness = (
+            float(ice_profile.thickness(nxy, pixel_size).mean())
+            if ice_profile is not None
+            else self.nz * pixel_size
+        )
 
         super().__init__(
             pixel_size=pixel_size,
@@ -253,7 +285,12 @@ class MicrographGenerator(BaseImager):
         )
 
         self._apply_defocus_shift(
-            shift_required=scattering_model not in ["projection", "ctf"]
+            shift_required=scattering_model not in ["projection", "ctf"],
+            shift=(
+                ice_profile.entry_face_shift(self.nxy, pixel_size)
+                if ice_profile is not None
+                else None
+            ),
         )
 
         self._init_optics()
@@ -287,7 +324,11 @@ class MicrographGenerator(BaseImager):
                     status("Tiling ice volume", disable=not self.progressbars),
                 ):
                     volume = blend_ice_into_volume(
-                        volume, volume_icemaker, pixel_size, relax_steps=ice_relax_steps
+                        volume,
+                        volume_icemaker,
+                        pixel_size,
+                        relax_steps=ice_relax_steps,
+                        profile=ice_profile,
                     )
             self.register_buffer("volume", volume)
         else:
@@ -300,6 +341,7 @@ class MicrographGenerator(BaseImager):
                 crowd_max_distance_z=crowd_max_distance_z,
                 ice_model=ice_model,
                 ice_thickness=ice_thickness,
+                ice_profile=ice_profile,
                 ice_cache_dir=ice_cache_dir,
                 icemaker=icemaker,
                 ice_relax_steps=ice_relax_steps,

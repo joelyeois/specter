@@ -258,7 +258,9 @@ class BaseImager(L.LightningModule):
         else:
             self.detector_mtf = None
 
-    def _apply_defocus_shift(self, shift_required: bool = True) -> None:
+    def _apply_defocus_shift(
+        self, shift_required: bool = True, shift: float | None = None
+    ) -> None:
         """
         Shift ``dfu`` and ``dfv`` to account for the volume's Z extent.
 
@@ -268,10 +270,26 @@ class BaseImager(L.LightningModule):
         needed for projection or CTF-only models). See
         :func:`~specter.aberrations.defocus_midplane_shift` for the public,
         standalone version of this correction.
+
+        Parameters
+        ----------
+        shift_required : bool, optional
+            Whether the scattering model has a Z extent to offset from.
+            Default True.
+        shift : float, optional
+            Distance in Å from the volume's midplane to the *specimen's* entry
+            face. Defaults to :func:`~specter.aberrations.defocus_midplane_shift`,
+            i.e. the *box's* entry face -- correct whenever the specimen fills
+            the box, which is every case except an
+            :class:`~specter.ice.IceProfile`. A caller that pads the box beyond
+            the specimen must pass
+            :meth:`~specter.ice.IceProfile.entry_face_shift` instead, or the
+            defocus silently picks up the padding (see that method).
         """
-        shift = (
-            defocus_midplane_shift(self.nz, self.pixel_size) if shift_required else 0.0
-        )
+        if not shift_required:
+            shift = 0.0
+        elif shift is None:
+            shift = defocus_midplane_shift(self.nz, self.pixel_size)
         self._defocus_shift_A = shift
         if shift:
             if hasattr(self, "dfu"):

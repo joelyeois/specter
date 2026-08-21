@@ -291,3 +291,128 @@ def test_generator_coarse_packing_survives_both_placement_stages():
     vol = gen.generate()
     assert vol.shape == (48, 96, 96)
     assert len(gen.placements) > 0
+
+
+def _stamp_fine(masks_fine, coords, rots, species, grid, voxel):
+    """Rasterize placements at FINE resolution; return per-voxel hit count."""
+    acc = np.zeros(grid, dtype=np.int16)
+    origin = -0.5 * np.array(grid)[::-1] * voxel
+    for i in range(len(coords)):
+        m = masks_fine[int(species[i])].to(torch.float32)
+        theta = build_affine_matrix(rots[i].unsqueeze(0))
+        rm = (rotate_volume(m, theta, padding_mode="zeros")[0] > 0.5).numpy()
+        nzi = np.nonzero(rm)
+        if len(nzi[0]) == 0:
+            continue
+        sl = tuple(slice(int(a.min()), int(a.max()) + 1) for a in nzi)
+        fp = rm[sl]
+        centre = np.round((coords[i].numpy() - origin) / voxel - 0.5).astype(int)[::-1]
+        loc = centre - np.array(fp.shape) // 2
+        lo = np.maximum(loc, 0)
+        hi = np.minimum(loc + np.array(fp.shape), np.array(grid))
+        if np.any(hi <= lo):
+            continue
+        slo = lo - loc
+        shi = slo + (hi - lo)
+        acc[lo[0] : hi[0], lo[1] : hi[1], lo[2] : hi[2]] += fp[
+            slo[0] : shi[0], slo[1] : shi[1], slo[2] : shi[2]
+        ]
+    return acc
+
+
+def test_coarse_packing_leaves_no_overlap_at_render_resolution():
+    """
+    End-to-end smoke test: pack on a coarse grid, render at the fine one,
+    and no two instances share a voxel.
+
+    This does NOT by itself demonstrate why the ordering in
+    `_rotation_cache` matters -- the wrong order leaks on the order of one
+    voxel in 10^5, which a pack this size will usually not surface. The
+    guarantee itself is tested directly in
+    `test_rotation_cache_pools_after_rotating`.
+    """
+    fine_voxel, factor = 1.0, 4
+    coords_atoms = _blob(n_atoms=3000, radius=14.0)
+    fine = build_species_mask(coords_atoms, fine_voxel, gap=0.0)
+
+    fine_grid = (96, 192, 192)
+    coarse_grid = tuple(-(-n // factor) for n in fine_grid)
+
+    coords, rots, accepted, _ = pack_shapes_3d(
+        [fine],
+        torch.zeros(400, dtype=torch.long),
+        coarse_grid,
+        fine_voxel * factor,
+        pool_factor=factor,
+        seed=0,
+        n_orientations=64,
+        max_retries=200,
+    )
+    assert accepted.numel() > 20, f"only {accepted.numel()} placed; test is vacuous"
+
+    hits = _stamp_fine(
+        [fine],
+        coords,
+        rots,
+        torch.zeros(len(coords), dtype=torch.long),
+        fine_grid,
+        fine_voxel,
+    )
+    assert int((hits > 1).sum()) == 0, (
+        f"{int((hits > 1).sum())} voxels covered twice at render resolution"
+    )
+
+
+def test_rotation_cache_pools_after_rotating():
+    """
+    The invariant behind coarse packing: a cached coarse footprint is the
+    fine rotation POOLED, not the pooled mask rotated.
+
+    Testing it directly rather than through a pack, because the two orders
+    differ rarely enough that a random pack is not a reliable detector of
+    the difference. Only the first order contains the shape that will
+    actually be rendered, so only it makes a coarse-grid collision
+    guarantee hold at render resolution.
+    """
+    from specter.specimen.packing._shape import _rotation_cache
+
+    factor, n_or = 4, 24
+    fine = build_species_mask(_blob(n_atoms=3000, radius=14.0), 1.0, gap=0.0)
+    cache, _, _, _, R = _rotation_cache(fine, n_or, "cpu", 0, pool_factor=factor)
+
+    def pool(x):
+        return (
+            torch.nn.functional.max_pool3d(
+                x[None, None].to(torch.float32),
+                kernel_size=factor,
+                stride=factor,
+                ceil_mode=True,
+            )[0, 0]
+            > 0
+        )
+
+    coarse_first = coarsen_mask(fine, factor)
+    differed = 0
+    for i in range(n_or):
+        theta = build_affine_matrix(R[i : i + 1])
+        rotate_then_pool = pool(
+            rotate_volume(fine.to(torch.float32), theta, padding_mode="zeros")[0] > 0.5
+        )
+        # The cache must be exactly this, up to the trim of empty margins.
+        assert int(rotate_then_pool.sum()) == int(cache[i].sum()), (
+            f"orientation {i}: cache holds {int(cache[i].sum())} voxels, "
+            f"rotate-then-pool gives {int(rotate_then_pool.sum())}"
+        )
+        pool_then_rotate = (
+            rotate_volume(coarse_first.to(torch.float32), theta, padding_mode="zeros")[
+                0
+            ]
+            > 0.5
+        )
+        if int(pool_then_rotate.sum()) != int(rotate_then_pool.sum()):
+            differed += 1
+
+    assert differed > 0, (
+        "the two orders produced identical footprints for every orientation, "
+        "so this test cannot tell them apart and the invariant is untested"
+    )

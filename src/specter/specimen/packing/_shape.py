@@ -34,6 +34,8 @@ from __future__ import annotations
 import numpy as np
 import torch
 
+import torch.nn.functional as F
+
 from ...rotations._random import random_rotation_matrix
 from ...rotations._volume import build_affine_matrix, rotate_volume
 
@@ -213,9 +215,19 @@ def _rotation_cache(
     n_orientations: int,
     device: torch.device | str,
     seed: int | None,
+    pool_factor: int = 1,
 ) -> tuple[list[np.ndarray], list[tuple], list[bool], list[np.ndarray], torch.Tensor]:
     """
     Rotate `mask` into `n_orientations` orientations, once.
+
+    With `pool_factor` > 1 the mask is rotated at ITS OWN (fine) resolution
+    and each orientation is then max-pooled down to the packing grid. The
+    order matters and is the whole point: pooling first and rotating the
+    coarse result does not contain the rotated fine shape, because rotation
+    interpolates, so a hard-collision guarantee established on the coarse
+    grid would not survive being rendered at fine resolution. Rotating
+    first keeps containment per orientation, which is what makes coarse
+    packing exact rather than merely close.
 
     Also returns each orientation's shape and half-shape as plain Python
     ints, and whether its own center voxel is solid. Both exist purely to
@@ -263,10 +275,22 @@ def _rotation_cache(
     chunk = max(
         1, min(n_orientations, int(_ROTATE_CHUNK_VOXELS // max(vol.numel(), 1)))
     )
-    parts = [
-        rotate_volume(vol, theta[i : i + chunk], padding_mode="zeros") > 0.5
-        for i in range(0, n_orientations, chunk)
-    ]
+    parts = []
+    for i in range(0, n_orientations, chunk):
+        piece = rotate_volume(vol, theta[i : i + chunk], padding_mode="zeros") > 0.5
+        if pool_factor > 1:
+            # Pool inside the chunk loop so the fine rotation is transient
+            # and only the coarse result is retained.
+            piece = (
+                F.max_pool3d(
+                    piece[:, None].to(torch.float32),
+                    kernel_size=pool_factor,
+                    stride=pool_factor,
+                    ceil_mode=True,
+                )[:, 0]
+                > 0
+            )
+        parts.append(piece)
     rot = torch.cat(parts) if len(parts) > 1 else parts[0]
     del parts
 
@@ -334,6 +358,7 @@ def pack_shapes_3d(
     seed: int | None = None,
     device: str | torch.device = "cpu",
     clip_axes: tuple[bool, bool, bool] = (False, False, False),
+    pool_factor: int = 1,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Pack rigid molecular shapes into a voxel grid via Random Sequential
@@ -440,6 +465,14 @@ def pack_shapes_3d(
     clip_axes : tuple of bool, optional
         (z, y, x). True lets a footprint extend past that wall (it is
         truncated); False requires it to fit entirely.
+    pool_factor : int, optional
+        Collide on a grid `pool_factor` times coarser than `species_masks`
+        are rasterized at. `species_masks` are then at
+        ``voxel_size / pool_factor``, and each orientation is rotated at
+        that resolution before being pooled onto the packing grid -- see
+        `_rotation_cache`, where the order of those two operations is what
+        makes the guarantee hold at render resolution. Default 1 (masks are
+        already at the packing grid's own voxel size).
 
     Returns
     -------
@@ -507,7 +540,7 @@ def pack_shapes_3d(
         if rows.size == 0:
             continue
         cache, geom, centre_solid, probes, R = _rotation_cache(
-            species_masks[int(s)], n_orientations, device, seed
+            species_masks[int(s)], n_orientations, device, seed, pool_factor
         )
         # Probe indices -> flat offsets, which needs the grid's own strides
         # and so cannot be precomputed inside the cache.

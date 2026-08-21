@@ -213,6 +213,9 @@ class PDB:
             # file trips this: Biopython walks every model, gemmi types only
             # the first. With a library the two arrays come from one pass, so
             # there is nothing to reconcile.
+            assert self.atom_species is not None, (
+                "compute_atom_species=True always sets self.atom_species above"
+            )
             if len(self.atom_species) != self.atomic_numbers.shape[0]:
                 n_models = len(list(self.structure))
                 raise ValueError(

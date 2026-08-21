@@ -180,7 +180,7 @@ def coarsen_mask(mask: torch.Tensor, factor: int) -> torch.Tensor:
     # thing) shifts the origin off-center by up to half a coarse voxel,
     # which would offset every coarse-packed position from where the fine
     # render draws it.
-    pads: list[int] = []
+    pads: list[tuple[int, int]] = []
     shape_out: list[int] = []
     for s_ax in mask.shape:
         origin = (s_ax - 1) // 2
@@ -539,12 +539,18 @@ def pack_shapes_3d(
                     else:
                         picks = allowed[rng.integers(0, allowed.shape[0], _BATCH)]
                     buf_i = 0
+                # buf_i starts at _BATCH, so the refill above always runs
+                # before this first indexes oris/zs/ys/xs/picks -- these are
+                # never None here.
+                assert oris is not None
                 oi = int(oris[buf_i])
                 if allowed is None:
+                    assert zs is not None and ys is not None and xs is not None
                     cz = int(zs[buf_i])
                     cy = int(ys[buf_i])
                     cx = int(xs[buf_i])
                 else:
+                    assert picks is not None
                     p = picks[buf_i]
                     cz, cy, cx = int(p[0]), int(p[1]), int(p[2])
                 buf_i += 1

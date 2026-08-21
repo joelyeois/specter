@@ -267,7 +267,7 @@ def build_templates_concurrently(
         return results
 
 
-def _fetch_one_pdb(args: tuple[str, str, bool]) -> "PDB":
+def _fetch_one_pdb(args: tuple[str, str, bool, bool | str]) -> "PDB":
     """
     Worker target for `build_pdb_cache_concurrently` -- a plain top-level
     function, not a closure/lambda, because `ProcessPoolExecutor` pickles

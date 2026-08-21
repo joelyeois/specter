@@ -84,8 +84,9 @@ any other single choice in the generator.
 
 `packing_backend="shape"`, the default, rasterizes each species into a
 binary footprint, rotates it, and tests it against a running occupancy
-grid. Nothing is approximated away: a placement is rejected if any voxel
-of the rotated molecule meets a voxel already taken.
+grid. A placement is rejected if any voxel of the rotated molecule meets a
+voxel already taken, so the collision body is the molecule's own shape,
+resolved to the packing voxel size.
 
 `packing_backend="sphere"` collides one circumscribing sphere per
 instance, of radius `PDB.max_diameter / 2`. It is faster, and it is the
@@ -117,9 +118,16 @@ sphere-volume budget, and RSA jams long before the real volume fraction
 gets there. For reference, CryoTomoSim's own output weighs 0.240 by the
 same measure, and it also collides real shapes rather than spheres.
 
-Shape packing costs roughly 4× the packing time for that density. The
-extra is packing, not rendering: rendering is dominated by per-species
-template construction and barely moves with instance count.
+That density is close to free. Running one 5 Å configuration back to back
+on both backends, wall time is 117 s under `"shape"` against 116 s under
+`"sphere"`, of which collision accounts for 28 s and 25 s. Shape collision
+did cost four times the sphere backend's at first: at realistic density
+RSA rejects ~99.8% of attempts, and each rejection compared a candidate's
+whole footprint against the grid. It now rejects on a sparse sample of
+footprint voxels first, which is exact rather than approximate, since a
+sampled voxel is a footprint voxel and finding it occupied is a genuine
+clash. Only a candidate that survives the sample pays for the full
+comparison.
 
 ### Packing coarser than you render
 
@@ -177,10 +185,15 @@ measurements in this section are bare-sphere occupancy under
 
 Requested and achieved track each other up to ~0.2 and then part company.
 A monodisperse pool saturates near 0.28; a polydisperse one reaches ~0.41,
-because small spheres fit into gaps the large ones leave. Raising
-`filler_occupancy_fraction` past ~0.5 does nothing but grow the candidate
-pool. In practice this is a feature: set it high, let the packing jam,
-and the density is whatever the geometry allows without hand-tuning.
+because small spheres fit into gaps the large ones leave. Under the sphere
+backend, raising `filler_occupancy_fraction` past ~0.5 does nothing but
+grow the candidate pool.
+
+The shape backend jams too, but later: its curve in [Two collision
+geometries](#two-collision-geometries) is still rising at 1.0, because a
+footprint leaves gaps a bounding sphere never could. Either way the knob
+is a budget rather than a target. Set it high, let the packing jam, and
+the density is whatever the geometry allows without hand-tuning.
 
 If you want *more* achieved occupancy from a reference table, raise the
 mass floor rather than the budget: tiny species consume placement slots
@@ -273,6 +286,7 @@ your own list breaks nothing downstream.
 | `occupancy_fraction` | Candidate-pool volume budget, per region | 0.2 (`1.0` in the shipped TOML) |
 | `packing_backend` | `shape` (real footprints) or `sphere` (bounding spheres) | `shape` |
 | `packing_voxel_size` | Collide on a coarser grid than the render | auto |
+| `packing_max_retries` | Trial positions per instance, shape backend | 1500 |
 | `clip_axes` | Per axis (z, y, x): may an instance's body poke past that wall? | all `False` |
 | `region_max_passes` | Pass/stall budget for a tight region | 300 |
 | `region_density_threshold` | Shell threshold for classification | 5% of peak |

@@ -126,6 +126,31 @@ def build_config_options(
     return options
 
 
+def default_config_path(basename: str) -> str:
+    """
+    Path to a canonical default TOML config file under the repo's ``configs/``.
+
+    Parameters
+    ----------
+    basename : str
+        Config file name without its ``.toml`` suffix, e.g. ``"particle"`` or
+        ``"tilt_series"``.
+
+    Returns
+    -------
+    str
+        Absolute path to ``configs/<basename>.toml``.
+    """
+    from specter.config import REPO_ROOT
+
+    return str(REPO_ROOT / "configs" / f"{basename}.toml")
+
+
+def field_panels(groups: list[tuple[str, list[str]]]) -> dict[str, str]:
+    """Field name -> rich-click panel title, derived from a (title, field names) list."""
+    return {name: title for title, names in groups for name in names}
+
+
 def collect_overrides(ctx: click.Context, exclude: set[str]) -> dict[str, Any]:
     """
     Collect only the CLI parameters a caller explicitly passed on the command line.

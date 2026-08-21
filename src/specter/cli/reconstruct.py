@@ -11,7 +11,12 @@ from specter.config import (
     load_config,
 )
 
-from ._click_options import build_config_options, collect_overrides
+from ._click_options import (
+    build_config_options,
+    collect_overrides,
+    default_config_path,
+    field_panels,
+)
 
 CONTEXT_SETTINGS = {"help_option_names": ["-h", "--help"]}
 
@@ -51,17 +56,6 @@ _RECONSTRUCT_PARTICLE_GROUPS: list[tuple[str, list[str]]] = [
 ]
 
 
-def _default_reconstruct_config_path() -> str:
-    from specter.config import REPO_ROOT
-
-    return str(REPO_ROOT / "configs" / "reconstruct.toml")
-
-
-def _field_panels(groups: list[tuple[str, list[str]]]) -> dict[str, str]:
-    """Field name -> rich-click panel title, derived from a (title, field names) list."""
-    return {name: title for title, names in groups for name in names}
-
-
 def _particle_callback(config: str, **_overrides_raw: object) -> None:
     """Handle `specter reconstruct particle`."""
     from specter.pipelines import run_reconstruction
@@ -80,7 +74,7 @@ def _reconstruct_particle_command() -> click.RichCommand:
         click.RichOption(
             ["--config"],
             type=str,
-            default=_default_reconstruct_config_path(),
+            default=default_config_path("reconstruct"),
             show_default=True,
             help="TOML config file. Always loaded first, before any flags below "
             "are applied.",
@@ -89,7 +83,7 @@ def _reconstruct_particle_command() -> click.RichCommand:
         *build_config_options(
             ReconstructionConfig,
             field_help=RECONSTRUCTION_HELP,
-            field_panels=_field_panels(_RECONSTRUCT_PARTICLE_GROUPS),
+            field_panels=field_panels(_RECONSTRUCT_PARTICLE_GROUPS),
         ),
     ]
     return click.RichCommand(

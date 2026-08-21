@@ -16,7 +16,12 @@ from specter.config import (
     load_config,
 )
 
-from ._click_options import build_config_options, collect_overrides
+from ._click_options import (
+    build_config_options,
+    collect_overrides,
+    default_config_path,
+    field_panels,
+)
 
 CONTEXT_SETTINGS = {"help_option_names": ["-h", "--help"]}
 
@@ -210,29 +215,6 @@ _MICROGRAPH_GROUPS: list[tuple[str, list[str]]] = [
 ]
 
 
-def _default_particle_config_path() -> str:
-    from specter.config import REPO_ROOT
-
-    return str(REPO_ROOT / "configs" / "particle.toml")
-
-
-def _default_micrograph_config_path() -> str:
-    from specter.config import REPO_ROOT
-
-    return str(REPO_ROOT / "configs" / "micrograph.toml")
-
-
-def _default_tiltseries_config_path() -> str:
-    from specter.config import REPO_ROOT
-
-    return str(REPO_ROOT / "configs" / "tilt_series.toml")
-
-
-def _field_panels(groups: list[tuple[str, list[str]]]) -> dict[str, str]:
-    """Field name -> rich-click panel title, derived from a (title, field names) list."""
-    return {name: title for title, names in groups for name in names}
-
-
 def _particles_callback(config: str, **_overrides_raw: object) -> None:
     """Handle `specter simulate particles`."""
     from specter.pipelines import run_particle_stack
@@ -251,7 +233,7 @@ def _build_particles_command() -> click.RichCommand:
         click.RichOption(
             ["--config"],
             type=str,
-            default=_default_particle_config_path(),
+            default=default_config_path("particle"),
             show_default=True,
             help="TOML config file. Always loaded first, before any flags below "
             "are applied.",
@@ -260,7 +242,7 @@ def _build_particles_command() -> click.RichCommand:
         *build_config_options(
             ParticleStackConfig,
             field_help=PARTICLE_STACK_HELP,
-            field_panels=_field_panels(_PARTICLE_STACK_GROUPS),
+            field_panels=field_panels(_PARTICLE_STACK_GROUPS),
         ),
     ]
     return click.RichCommand(
@@ -292,7 +274,7 @@ def _build_micrograph_command() -> click.RichCommand:
         click.RichOption(
             ["--config"],
             type=str,
-            default=_default_micrograph_config_path(),
+            default=default_config_path("micrograph"),
             show_default=True,
             help="TOML config file. Always loaded first, before any flags below "
             "are applied.",
@@ -301,7 +283,7 @@ def _build_micrograph_command() -> click.RichCommand:
         *build_config_options(
             MicrographConfig,
             field_help=MICROGRAPH_HELP,
-            field_panels=_field_panels(_MICROGRAPH_GROUPS),
+            field_panels=field_panels(_MICROGRAPH_GROUPS),
         ),
     ]
     return click.RichCommand(
@@ -343,7 +325,7 @@ def _build_tiltseries_command() -> click.RichCommand:
         click.RichOption(
             ["--config"],
             type=str,
-            default=_default_tiltseries_config_path(),
+            default=default_config_path("tilt_series"),
             show_default=True,
             help="TOML config file. Always loaded first, before any flags below "
             "are applied.",
@@ -368,7 +350,7 @@ def _build_tiltseries_command() -> click.RichCommand:
         *build_config_options(
             TiltSeriesConfig,
             field_help=TILT_SERIES_HELP,
-            field_panels=_field_panels(_TILT_SERIES_GROUPS),
+            field_panels=field_panels(_TILT_SERIES_GROUPS),
         ),
     ]
     return click.RichCommand(

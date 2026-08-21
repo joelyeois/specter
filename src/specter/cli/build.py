@@ -13,7 +13,12 @@ from specter.config import (
     load_config,
 )
 
-from ._click_options import build_config_options, collect_overrides
+from ._click_options import (
+    build_config_options,
+    collect_overrides,
+    default_config_path,
+    field_panels,
+)
 
 CONTEXT_SETTINGS = {"help_option_names": ["-h", "--help"]}
 
@@ -68,23 +73,6 @@ _ICE_GROUPS: list[tuple[str, list[str]]] = [
 ]
 
 
-def _default_tomogram_config_path() -> str:
-    from specter.config import REPO_ROOT
-
-    return str(REPO_ROOT / "configs" / "tomogram.toml")
-
-
-def _default_ice_config_path() -> str:
-    from specter.config import REPO_ROOT
-
-    return str(REPO_ROOT / "configs" / "ice.toml")
-
-
-def _field_panels(groups: list[tuple[str, list[str]]]) -> dict[str, str]:
-    """Field name -> rich-click panel title, derived from a (title, field names) list."""
-    return {name: title for title, names in groups for name in names}
-
-
 def _tomogram_callback(config: str, n_tomograms: int, **_overrides_raw: object) -> None:
     """Handle `specter build tomogram`."""
     from specter.pipelines import run_build_tomogram
@@ -103,7 +91,7 @@ def _build_tomogram_command() -> click.RichCommand:
         click.RichOption(
             ["--config"],
             type=str,
-            default=_default_tomogram_config_path(),
+            default=default_config_path("tomogram"),
             show_default=True,
             help="TOML config file. Always loaded first, before any flags below "
             "are applied.",
@@ -124,7 +112,7 @@ def _build_tomogram_command() -> click.RichCommand:
         *build_config_options(
             TomogramConfig,
             field_help=TOMOGRAM_HELP,
-            field_panels=_field_panels(_TOMOGRAM_GROUPS),
+            field_panels=field_panels(_TOMOGRAM_GROUPS),
         ),
     ]
     return click.RichCommand(
@@ -166,7 +154,7 @@ def _build_ice_command() -> click.RichCommand:
         click.RichOption(
             ["--config"],
             type=str,
-            default=_default_ice_config_path(),
+            default=default_config_path("ice"),
             show_default=True,
             help="TOML config file. Always loaded first, before any flags below "
             "are applied.",
@@ -175,7 +163,7 @@ def _build_ice_command() -> click.RichCommand:
         *build_config_options(
             IceCacheConfig,
             field_help=ICE_CACHE_HELP,
-            field_panels=_field_panels(_ICE_GROUPS),
+            field_panels=field_panels(_ICE_GROUPS),
         ),
     ]
     return click.RichCommand(

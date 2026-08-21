@@ -210,6 +210,8 @@ def validate_config(config: Any) -> None:
         "seed_start",
         "cs",
         "ice_thickness",
+        "ice_hole_radius",
+        "ice_rim_thickness",
         "shift",
         "bfactor",
         "ice_relax_steps",
@@ -241,7 +243,7 @@ def validate_config(config: Any) -> None:
     _require_range(config, "filler_occupancy_fraction", 0.0, 1.0)
     _require_range(config, "membrane_region_density_threshold", 0.0, 1.0)
 
-    _require_positive_ordered(config, "dose", "potential_scale")
+    _require_positive_ordered(config, "dose", "potential_scale", "ice_thickness_range")
     _require_non_negative_ordered(
         config, "defocus", "coincidence_radius", "astigmatism", "bead_roughness"
     )

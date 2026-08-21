@@ -9,9 +9,11 @@ import torch
 
 from specter.aberrations import defocus_midplane_shift
 from specter.arrays import compute_nz
+from specter.config import MicrographConfig, validate_config
 from specter.crowding import filter_by_local_z_density, filter_by_z_density
 from specter.ice import IceBank, IceProfile, blend_ice_into_volume
 from specter.imagegenerator import MicrographGenerator
+from specter.pipelines._micrograph import build_ice_profile
 
 
 # ----------------------------------------------------------------------
@@ -329,6 +331,72 @@ def test_blend_with_a_profile_leaves_vacuum_above_the_thin_end():
     top = out[0, 0]
     assert float(top[:, :4].abs().mean()) < 1e-3
     assert float(top[:, -4:].abs().mean()) > 1e-3
+
+
+# ----------------------------------------------------------------------
+# Config -> profile
+# ----------------------------------------------------------------------
+
+
+def _cfg(**kwargs) -> MicrographConfig:
+    return MicrographConfig(pdb_code="1bxn", **kwargs)
+
+
+def test_default_config_builds_no_profile():
+    """The default must stay on the untouched no-profile code path."""
+    assert build_ice_profile(_cfg()) is None
+    assert build_ice_profile(_cfg(ice_profile="flat")) is None
+
+
+def test_tilt_alone_builds_a_profile():
+    prof = build_ice_profile(_cfg(ice_tilt=0.2))
+    assert prof is not None
+    assert prof.mode == "flat"
+    assert prof.tilt == 0.2
+
+
+def test_config_builds_a_wedge():
+    prof = build_ice_profile(
+        _cfg(
+            ice_profile="wedge",
+            ice_thickness_range=[250.0, 900.0],
+            ice_profile_angle=45.0,
+        )
+    )
+    assert prof is not None
+    assert prof.mode == "wedge"
+    assert prof.thickness_range == (250.0, 900.0)
+    assert prof.angle == 45.0
+
+
+def test_config_accepts_the_cli_string_spelling():
+    """A CLI flag can only carry a string, so 'min,max' must parse."""
+    prof = build_ice_profile(_cfg(ice_profile="wedge", ice_thickness_range="250,900"))
+    assert prof is not None
+    assert prof.thickness_range == (250.0, 900.0)
+
+
+def test_config_builds_a_meniscus_with_an_offset_hole():
+    prof = build_ice_profile(
+        _cfg(
+            ice_profile="meniscus",
+            ice_thickness=300.0,
+            ice_rim_thickness=1600.0,
+            ice_hole_radius=2500.0,
+            ice_hole_offset="4500,0",
+        )
+    )
+    assert prof is not None
+    assert prof.mode == "meniscus"
+    assert prof.mean_thickness == 300.0
+    assert prof.rim_thickness == 1600.0
+    assert prof.hole_offset == (4500.0, 0.0)
+
+
+def test_reversed_thickness_range_is_rejected_by_validation():
+    cfg = _cfg(ice_profile="wedge", ice_thickness_range=[900.0, 250.0])
+    with pytest.raises(ValueError, match="ice_thickness_range"):
+        validate_config(cfg)
 
 
 def _blob_template(n: int = 16) -> torch.Tensor:

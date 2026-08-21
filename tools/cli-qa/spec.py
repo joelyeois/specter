@@ -83,6 +83,10 @@ class CommandSpec:
 
 # Contexts reused by several flags.
 CROWD = ["--crowd_min_distance", "100.0"]
+# The meniscus params only bite once the mode selects them, and only when the
+# hole is small enough that a micrograph-sized field sees real curvature -- at
+# the default 6000 A radius a 200 nm field is nearly flat.
+MENISCUS = ["--ice_profile", "meniscus", "--ice_hole_radius", "3000.0"]
 DETECTOR = ["--detector_model", "k3_300kv"]
 CC_ON = ["--cc", "2.0"]
 
@@ -291,6 +295,22 @@ MICROGRAPH = CommandSpec(
         Flag("ice_model", "random"),
         Flag("ice_model", "none"),
         Flag("ice_thickness", "300.0"),
+        Flag("ice_profile", "wedge", context=["--ice_thickness_range", "200,700"]),
+        Flag("ice_profile", "meniscus", context=MENISCUS),
+        Flag(
+            "ice_thickness_range",
+            "200,700",
+            context=["--ice_profile", "wedge"],
+        ),
+        Flag(
+            "ice_profile_angle",
+            "90.0",
+            context=["--ice_profile", "wedge", "--ice_thickness_range", "200,700"],
+        ),
+        Flag("ice_hole_radius", "3000.0", context=MENISCUS),
+        Flag("ice_rim_thickness", "1200.0", context=MENISCUS),
+        Flag("ice_hole_offset", "2000,0", context=MENISCUS),
+        Flag("ice_tilt", "0.2"),
         Flag("crowd_min_distance", "100.0"),
         Flag("crowd_max_distance_z", "50.0", context=CROWD),
         Flag("water_air_interface", "true"),

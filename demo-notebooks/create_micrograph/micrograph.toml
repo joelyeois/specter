@@ -34,6 +34,13 @@ specimen_chunk_size = 8                # slice chunk size for specimen generatio
 
 [ice]
 ice_thickness = 500.0    # Å
+# Lateral thickness profile. "flat" (the default) is the uniform slab this
+# notebook has always simulated. Uncomment the two lines below for a wedge:
+# the box is then sized by the thickest column, so a 250-900 Å ramp costs
+# what a uniform 900 Å slab costs over the whole field.
+ice_profile = "flat"     # flat | wedge | meniscus
+# ice_thickness_range = [250.0, 900.0]   # Å, wedge only; overrides ice_thickness
+# ice_profile_angle = 0.0                # degrees, ramp direction
 # ice_cache_dir = "../../ice-data/ice_cache"  # defaults to the bundled cache
 
 [compute]

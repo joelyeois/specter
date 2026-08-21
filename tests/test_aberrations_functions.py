@@ -257,3 +257,58 @@ def test_phaseshift_holography_zeroes_dc():
     assert result[0, 0, 0] == 0
     # Nyquist pixel (index n_pixels // 2) is unaffected.
     assert result[0, n_pixels // 2, n_pixels // 2] == -0.5
+
+
+def test_defocus_increases_with_z():
+    """
+    Pins the sign of the depth-to-defocus relation, which nothing in an image
+    reveals but a per-particle defocus export depends on.
+
+    The same scatterer at two depths differs by exactly the propagation
+    distance between them, so a blob 192 A below the midplane must match the
+    same blob at the midplane imaged at ``dfu - 192``. That fixes
+    ``df_i = df_ref + z_i``: defocus increases with z, and the entry face is
+    the high-defocus end -- which is why ``defocus_midplane_shift`` is
+    subtracted rather than added.
+    """
+    import torch
+
+    from specter.imagegenerator import MicrographGenerator
+
+    nxy, nz, px = 64, 128, 2.0
+    dfu, centre = 10000.0, nz // 2
+    k_low = centre - 48
+    delta = (centre - k_low) * px  # 96 A below the midplane
+
+    def image(k: int, defocus: float) -> torch.Tensor:
+        V = torch.zeros(1, nz, nxy, nxy)
+        c = nxy // 2
+        V[0, k - 2 : k + 3, c - 4 : c + 5, c - 4 : c + 5] = 50.0
+        model = MicrographGenerator(
+            None,
+            nxy,
+            px,
+            {"cs": torch.tensor([2.7e7]), "dfu": torch.tensor([defocus])},
+            300.0,
+            torch.tensor([100.0]),
+            volume=V,
+            ice_model=None,
+            scattering_model="multislice",
+            noise_model=None,
+            alpha=0.1,
+            verbose=False,
+            progressbars=False,
+        )
+        with torch.no_grad():
+            return model(torch.tensor([0]))[0].detach()
+
+    def rms(a: torch.Tensor, b: torch.Tensor) -> float:
+        return float(((a - b) ** 2).mean().sqrt())
+
+    ref = image(k_low, dfu)
+    matched = rms(ref, image(centre, dfu - delta))
+    wrong_sign = rms(ref, image(centre, dfu + delta))
+    unshifted = rms(ref, image(centre, dfu))
+
+    assert matched < 0.05 * unshifted
+    assert matched < 0.05 * wrong_sign

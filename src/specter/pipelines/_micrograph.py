@@ -24,8 +24,8 @@ import torch
 
 import specter
 from specter.arrays import compute_nz
-from specter.config import MicrographConfig, validate_config
-from specter.ice import resolve_icemaker
+from specter.config import MicrographConfig, parse_scalar_or_range, validate_config
+from specter.ice import IceProfile, resolve_icemaker
 from specter.imagegenerator import MicrographGenerator
 from specter.io import create_micrograph_starfile
 from specter.pdb import PDB
@@ -40,6 +40,46 @@ from ._common import (
     _tracked_output_dir,
     _uniform_sample,
 )
+
+
+def build_ice_profile(config: MicrographConfig) -> IceProfile | None:
+    """
+    Assemble an :class:`~specter.ice.IceProfile` from a config's flat fields.
+
+    Returns ``None`` for the default flat, untilted case so the no-profile
+    code path stays exactly as it was: a flat :class:`IceProfile` tapers both
+    faces over ``softness`` and is therefore not bit-identical to a slab that
+    simply fills its box.
+
+    Parameters
+    ----------
+    config : MicrographConfig
+        Run configuration. Reads ``ice_profile``, ``ice_thickness``,
+        ``ice_thickness_range``, ``ice_profile_angle``, ``ice_hole_radius``,
+        ``ice_rim_thickness``, ``ice_hole_offset`` and ``ice_tilt``.
+
+    Returns
+    -------
+    IceProfile or None
+    """
+    if config.ice_profile == "flat" and config.ice_tilt == 0.0:
+        return None
+
+    thickness_range = (
+        parse_scalar_or_range(config.ice_thickness_range)
+        if config.ice_thickness_range is not None
+        else None
+    )
+    return IceProfile(
+        mode=config.ice_profile,
+        mean_thickness=config.ice_thickness,
+        thickness_range=thickness_range,
+        angle=config.ice_profile_angle,
+        hole_radius=config.ice_hole_radius,
+        rim_thickness=config.ice_rim_thickness,
+        hole_offset=parse_scalar_or_range(config.ice_hole_offset),
+        tilt=config.ice_tilt,
+    )
 
 
 def run_micrograph(config: MicrographConfig) -> None:
@@ -131,7 +171,12 @@ def run_micrograph(config: MicrographConfig) -> None:
     # smaller, particle-potential resolution): a RandomIcemaker has no tiling
     # support (unlike IceBank), so its own fixed (n, nz) must exactly match
     # the micrograph volume it gets blended into.
-    ice_nz = compute_nz(V.shape[0], config.ice_thickness, config.pixel_size)
+    ice_profile = build_ice_profile(config)
+    ice_nz = (
+        ice_profile.required_nz(config.micrograph_size, config.pixel_size, V.shape[0])
+        if ice_profile is not None
+        else compute_nz(V.shape[0], config.ice_thickness, config.pixel_size)
+    )
     icemaker = resolve_icemaker(
         ice_model,
         config.pixel_size,
@@ -154,6 +199,7 @@ def run_micrograph(config: MicrographConfig) -> None:
         dose,
         icemaker=icemaker,
         ice_thickness=config.ice_thickness,
+        ice_profile=ice_profile,
         scattering_model=config.scattering_model,
         aberration_model=config.aberration_model,
         noise_model=noise_model,

@@ -66,6 +66,16 @@ class MicrographConfig:
     coincidence_radius: ScalarOrRange = 0.0  # pixels; 0 = plain Poisson
     ice_model: Literal["gd", "random", "none"] = "gd"
     ice_thickness: float = 500.0  # Å, 0 = minimum (particle box size)
+    # --- Ice profile (specter.ice.IceProfile) ---
+    # "flat" reproduces a bare `ice_thickness` slab exactly and is the default,
+    # so none of the fields below do anything until `ice_profile` is changed.
+    ice_profile: Literal["flat", "wedge", "meniscus"] = "flat"
+    ice_thickness_range: ScalarOrRange | None = None  # Å, wedge: [min, max]
+    ice_profile_angle: float = 0.0  # degrees, wedge ramp direction
+    ice_hole_radius: float = 6000.0  # Å, meniscus (1.2 µm hole)
+    ice_rim_thickness: float = 1500.0  # Å, meniscus thickness at the rim
+    ice_hole_offset: ScalarOrRange = 0.0  # Å, meniscus: hole centre as [x, y]
+    ice_tilt: float = 0.0  # Å of z per Å laterally, slab mid-plane slope
     ice_cache_dir: str | None = None  # defaults to the bundled ice_data/ice_cache
     crowd_min_distance: float | None = None  # Å
     crowd_max_distance_z: float | None = None  # Å
@@ -150,7 +160,33 @@ MICROGRAPH_HELP: dict[str, str] = {
     "'low,high' ([low, high] in TOML) to sample uniformly per micrograph.",
     "ice_model": "Ice model: 'gd' (samples the pre-generated IceBank cache), "
     "'random' (cheap, low-realism), or 'none'.",
-    "ice_thickness": "Ice thickness in Angstrom. 0 = minimum (particle box size).",
+    "ice_thickness": "Ice thickness in Angstrom. 0 = minimum (particle box size). "
+    "For ice_profile='wedge' without a range this is the thickness at the "
+    "centre of the field; for 'meniscus' it is the thickness at the hole centre.",
+    "ice_profile": "Lateral ice thickness profile. 'flat' is a uniform slab "
+    "(the default, identical to previous behaviour). 'wedge' ramps linearly "
+    "across the field; 'meniscus' is the radial film in a foil hole, with the "
+    "field placed anywhere in it via ice_hole_offset. Note that the volume is "
+    "sized by the THICKEST column and multislice costs one full-plane FFT per "
+    "slice regardless of what it holds, so a profile costs what its thickest "
+    "column costs over the whole field.",
+    "ice_thickness_range": "ice_profile='wedge' only: thickness in Angstrom "
+    "across the field's full width, as 'min,max' (e.g. 250,900; in TOML write "
+    "[250, 900]). Overrides ice_thickness.",
+    "ice_profile_angle": "ice_profile='wedge' only: direction of the thickness "
+    "ramp in degrees from the +x axis.",
+    "ice_hole_radius": "ice_profile='meniscus' only: foil hole radius in "
+    "Angstrom (a 1.2 um hole is 6000).",
+    "ice_rim_thickness": "ice_profile='meniscus' only: ice thickness in "
+    "Angstrom at the hole rim.",
+    "ice_hole_offset": "ice_profile='meniscus' only: position of the hole's "
+    "centre in field coordinates as 'x,y' in Angstrom ([x, y] in TOML). A "
+    "micrograph is a small patch of a hole, so this is what decides whether "
+    "it looks flat, wedged, or strongly curved.",
+    "ice_tilt": "Slope of the ice slab's mid-plane, in Angstrom of z per "
+    "Angstrom laterally. Moves both surfaces together, leaving thickness "
+    "unchanged -- a tilted specimen rather than a varying one. Applies to "
+    "every ice_profile mode.",
     "ice_cache_dir": "Directory of cached ice configs for ice_model='gd'. "
     "Defaults to the bundled ice_data/ice_cache.",
     "crowd_min_distance": "Minimum distance between crowded particles in "

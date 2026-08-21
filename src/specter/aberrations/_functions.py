@@ -251,6 +251,21 @@ def defocus_midplane_shift(nz: int, pixel_size: float) -> float:
     Not needed for the ``'projection'``/``'ctf'`` scattering models, which
     have no Z extent to offset from.
 
+    The sign follows from which end of the volume the beam enters. Defocus
+    *increases* with z, so for a particle at centred coordinate ``z_i`` (the
+    convention :func:`specter.crowding.insert_particles_into_micrograph`
+    uses) the effective defocus is ``df_ref + z_i``, where ``df_ref`` is the
+    defocus at ``z = 0``. Equivalently, the entry face at ``+nz *
+    pixel_size / 2`` is the high-defocus end, which is why this shift is
+    *subtracted* to reach the midplane. Measured, not assumed: a scatterer
+    placed 192 A below the midplane produces an image matching the same
+    scatterer at the midplane imaged at ``dfu - 192`` to within an RMS of
+    8e-4, against 1.6 for the unshifted comparison. Pinned by
+    ``tests/test_aberrations_functions.py::test_defocus_increases_with_z``.
+
+    That relation is what a per-particle defocus column in a STAR/`.cs`
+    export has to use, and a sign error in it is invisible in the images.
+
     Parameters
     ----------
     nz : int

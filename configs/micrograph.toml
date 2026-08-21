@@ -47,6 +47,17 @@ noise_model = "poisson"          # poisson | none
 coincidence_radius = 0.0         # pixels; 0 = plain Poisson, no coincidence loss; single value, or [low, high]
 ice_model = "gd"                 # gd | random | none
 ice_thickness = 500.0            # Å, 0 = minimum (particle box size)
+# Lateral ice thickness profile. "flat" (the default) is a uniform slab.
+# The volume is sized by the THICKEST column and multislice costs one
+# full-plane FFT per slice regardless of what it holds, so a profile costs
+# what its thickest column costs over the whole field.
+ice_profile = "flat"             # flat | wedge | meniscus
+# ice_thickness_range = [250.0, 900.0]  # Å, wedge only; overrides ice_thickness
+# ice_profile_angle = 0.0        # degrees, wedge ramp direction
+# ice_hole_radius = 6000.0       # Å, meniscus only (a 1.2 µm hole)
+# ice_rim_thickness = 1500.0     # Å, meniscus thickness at the rim
+# ice_hole_offset = [4500.0, 0.0]  # Å, meniscus: hole centre in field coords
+# ice_tilt = 0.0                 # Å of z per Å laterally; tilts the slab without changing thickness
 # ice_cache_dir = "specter-data/ice"   # defaults to the cache bundled in the package
 # crowd_min_distance = 100.0      # Å, uncomment to crowd particles; defaults to pdb.max_diameter
 # crowd_max_distance_z = 50.0     # Å

@@ -198,7 +198,6 @@ from ..membrane import TransmembranePlacement
 from ..membrane._placement import align_principal_axis_to_z
 from ..packing import (
     build_species_mask,
-    coarsen_mask,
     draw_species_pool,
     estimate_protein_box_size,
     pack_hard_spheres_3d,
@@ -357,15 +356,19 @@ class TomogramSpecimenGenerator:
         at `voxel_size` either way, since `..packing.pack_shapes_3d` returns
         positions in Angstrom rather than grid indices.
 
-        Footprints are built at `voxel_size` and max-pooled down (see
-        `..packing.coarsen_mask`), NOT rasterized directly at the coarse
-        size -- a direct coarse mask omits the van der Waals shell entirely
-        (a 1.9 A pad rounds to zero dilation at 2 A), so instances pack
-        ~2 A closer than van der Waals contact allows and the extra density
-        is an artifact. Measured at 2 A pooled against a native 1 A pack:
-        volume fraction 0.264 vs 0.269, zero overlapping voxels, 8.8x
-        faster. The same comparison with direct coarse masks reads 0.348 --
-        denser, but with instances interpenetrating.
+        Footprints are built at `voxel_size`, and each ROTATED orientation
+        is max-pooled onto the coarse grid inside the packer, never
+        rasterized at the coarse size directly. Both halves of that matter.
+        A directly rasterized coarse mask omits the van der Waals shell
+        entirely (a 1.9 A pad rounds to zero dilation at 2 A), so instances
+        pack ~2 A closer than van der Waals contact allows and the extra
+        density is an artifact. Pooling before rotating rather than after
+        loses containment, since rotation interpolates, leaving the
+        collision guarantee approximate at render resolution -- see
+        `..packing._shape._rotation_cache`. Measured at 2 A against a
+        native 1 A pack: volume fraction 0.264 vs 0.269, zero overlapping
+        voxels, 8.8x faster; the same comparison with direct coarse masks
+        reads a denser 0.348, with instances interpenetrating.
     clip_axes : tuple of bool, optional
         (z, y, x), matching `target_shape`'s axis order -- passed
         straight through to every `pack_hard_spheres_3d` call here (auto-
@@ -2233,22 +2236,21 @@ class TomogramSpecimenGenerator:
         shape = tuple(-(-n // factor) for n in target_shape)
         return voxel_size * factor, shape, factor  # type: ignore[return-value]
 
-    def _species_mask(
-        self, pdb: PDB, voxel_size: float, factor: int = 1
-    ) -> torch.Tensor:
+    def _species_mask(self, pdb: PDB, voxel_size: float) -> torch.Tensor:
         """
         This species' footprint mask for ``packing_backend="shape"``, built
-        once per (structure, voxel size, gap, factor) and reused across
-        regions and across the pool-sizing/packing steps.
+        once per (structure, voxel size, gap) and reused across regions and
+        across the pool-sizing/packing steps.
 
-        Always rasterized at `voxel_size` and max-pooled down when `factor`
-        > 1, never rasterized at the coarse size directly -- see
-        `packing_voxel_size` for why that distinction matters.
+        Always at the RENDER voxel size. Coarsening for a coarser packing
+        grid happens per rotated orientation inside the packer, not here --
+        see `packing_voxel_size`.
         """
-        key = (id(pdb), voxel_size, self.gap, factor)
+        key = (id(pdb), voxel_size, self.gap)
         if key not in self._mask_cache:
-            fine = build_species_mask(pdb.coordinates, voxel_size, gap=self.gap)
-            self._mask_cache[key] = coarsen_mask(fine, factor) if factor > 1 else fine
+            self._mask_cache[key] = build_species_mask(
+                pdb.coordinates, voxel_size, gap=self.gap
+            )
         return self._mask_cache[key]
 
     def _pack_shapes(
@@ -2301,7 +2303,11 @@ class TomogramSpecimenGenerator:
         # once per region and threaded through both the target and filler
         # stages, so coarsening it here would coarsen the second stage's
         # input a second time.
-        masks = [self._species_mask(pdb, pack_voxel / factor, factor) for pdb in pdbs]
+        # Fine masks, with the factor handed to the packer: it rotates each
+        # at this resolution and pools the result onto the packing grid.
+        # Pooling here instead loses containment under rotation -- see
+        # `..packing._shape._rotation_cache`.
+        masks = [self._species_mask(pdb, pack_voxel / factor) for pdb in pdbs]
         region_mask = ~occupancy
         return pack_shapes_3d(
             masks,
@@ -2311,6 +2317,7 @@ class TomogramSpecimenGenerator:
             occupancy=occupancy,
             region_mask=region_mask,
             n_orientations=self.n_orientations,
+            pool_factor=factor,
             max_retries=self.packing_max_retries,
             seed=self.seed,
             device=self.device,

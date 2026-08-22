@@ -13,7 +13,13 @@
 target_shape = [200, 1200, 1200]    # (Z, Y, X) voxels
 voxel_size = 5.0                        # A/voxel
 clip_axes = [true, true, true]      # (z, y, x) -- True lets instances poke past that wall
-filler_occupancy_fraction = 1.0     # above 0.5 is beyond RSA's theoretical max packing
+filler_occupancy_fraction = 1.0
+# Sizes the CANDIDATE POOL, not the achieved density, and it is measured in
+# whatever the backend collides: real footprint volume under the default
+# "shape", bounding-sphere volume under "sphere". The same number therefore
+# means different pools on each, so comparing backends at one setting
+# compares pool sizes rather than geometry. 1.0 is not wasted here -- shape
+# packing is still gaining density at that budget.
 # packing_backend = "shape"      # default; "sphere" is faster but ~3x less dense
 # packing_voxel_size = 2.0       # collide on a coarser grid than the render
 # There is no `gap`: macromolecules in crowded cytoplasm contact each other,

@@ -112,6 +112,15 @@ figure sweeps six species at 5 Å. Absolute values move with the species
 mix and the voxel size, so read the separation between the curves rather
 than either number in isolation.
 
+One trap when reproducing this. `occupancy_fraction` sizes the candidate
+pool in whatever the backend collides: real footprint volume under
+`"shape"`, bounding-sphere volume under `"sphere"`. A bounding sphere is
+~5.6x a molecule's envelope, so the same setting hands the sphere backend
+a much smaller pool in real terms. Comparing the two at one value measures
+pool sizes rather than geometry, and will make whichever backend was
+under-supplied look worse than it is. The curves above are drawn from
+pools sized separately for each.
+
 Crowded cytoplasm is 200–320 mg/mL, so the sphere backend cannot reach a
 physiological specimen at any setting: `occupancy_fraction` is a
 sphere-volume budget, and RSA jams long before the real volume fraction
@@ -298,7 +307,7 @@ your own list breaks nothing downstream.
 | `location` | `cytosol` or `lumen`, per species | `cytosol` |
 | `n_copies` | Exact instance count (target mode) | — |
 | `ratio` | Relative abundance among filler species in the same region | 1.0 |
-| `occupancy_fraction` | Candidate-pool volume budget, per region | 0.2 (`1.0` in the shipped TOML) |
+| `occupancy_fraction` | Candidate-pool volume budget, per region, measured in whatever the backend collides | 0.2 (`1.0` in the shipped TOML) |
 | `packing_backend` | `shape` (real footprints) or `sphere` (bounding spheres) | `shape` |
 | `packing_voxel_size` | Collide on a coarser grid than the render | auto |
 | `packing_max_retries` | Trial positions per instance, shape backend | 1500 |

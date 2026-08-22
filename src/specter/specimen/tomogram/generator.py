@@ -1306,12 +1306,22 @@ class TomogramSpecimenGenerator:
                 )
                 species_ratios = torch.tensor([s.ratio for s in ratio_specs])
 
-                # Under packing_backend="shape" an instance occupies its own
-                # footprint, not a bounding sphere, so the pool has to be
-                # measured the same way -- sizing it by sphere volume
-                # under-supplies a shape packer ~5.6x and it runs out of
-                # candidates long before the region fills (see
-                # draw_species_pool's own species_volumes docstring).
+                # Measured in whatever the backend collides: real footprint
+                # volume for "shape", bounding-sphere volume (draw_species_
+                # pool's own default) for "sphere". So `occupancy_fraction`
+                # does NOT mean the same thing on both, which is a wart --
+                # comparing the backends at one value compares pool sizes
+                # rather than geometry, and the packing docs say so.
+                #
+                # Unifying it on footprint volume was tried and reverted. It
+                # hands the sphere backend a ~5.6x larger pool, and that
+                # backend resolves a whole pass at once through an
+                # independent-set step: more candidates per pass mostly
+                # conflict with each other, so a fixed max_passes budget
+                # turns the larger pool into FEWER placements. Measured at
+                # 10 A on the benchmark specimen, occupancy fell 0.202 ->
+                # 0.183 and wall time rose 224 s -> 258 s. The shape backend,
+                # which tries candidates serially, has no such behaviour.
                 pool_volumes: torch.Tensor | None = None
                 if self.packing_backend == "shape":
                     pool_volumes = torch.tensor(

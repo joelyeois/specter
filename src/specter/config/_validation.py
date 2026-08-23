@@ -16,6 +16,7 @@ from typing import (
     get_type_hints,
 )
 
+from ._reconstruction import parse_cryosparc_ref
 from ._scalar_range import parse_scalar_or_range
 
 # ---------------------------------------------------------------------------
@@ -129,6 +130,40 @@ def _require_existing_file(config: Any, *fields: str) -> None:
             continue
         if not Path(str(value)).is_file():
             _fail(name, value, "no such file")
+
+
+def _require_valid_cryosparc_ref(config: Any) -> None:
+    """
+    ``cryosparc_ref`` names one existing file, or a ``"<A>,<B>"`` pair of them.
+
+    Handled separately from `_require_existing_file` because of the pair
+    form, which supplies a per-halfset reference. That is what a
+    ``halfset="gold"`` run needs -- it reconstructs both halves from one
+    config, so a single reference would put CryoSPARC's half-map A on both
+    halves' FSC figures. A pair is meaningless for ``halfset="all"``, which
+    reconstructs one volume from every particle rather than a halfset pair.
+    """
+    value = getattr(config, "cryosparc_ref", None)
+    if value is None:
+        return
+
+    refs = parse_cryosparc_ref(value)
+    if len(refs) > 2 or not all(refs):
+        _fail(
+            "cryosparc_ref",
+            value,
+            'must be a path, or a comma-separated "<A>,<B>" pair of them',
+        )
+    if len(refs) == 2 and getattr(config, "halfset", None) == "all":
+        _fail(
+            "cryosparc_ref",
+            value,
+            'must be a single path when halfset="all", which reconstructs one '
+            "volume from every particle rather than one per halfset",
+        )
+    for ref in refs:
+        if not Path(ref).is_file():
+            _fail("cryosparc_ref", ref, "no such file")
 
 
 def _require_valid_literals(config: Any) -> None:
@@ -260,8 +295,8 @@ def validate_config(config: Any) -> None:
         "mrc_file",
         "fsc_ref",
         "fsc_mask",
-        "cryosparc_ref",
     )
+    _require_valid_cryosparc_ref(config)
 
     # Multi-GPU dispatch (ParticleStackConfig only -- tiltseries/micrograph
     # are single-device) re-executes the whole pipeline once per rank (see

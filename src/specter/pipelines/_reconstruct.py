@@ -55,6 +55,7 @@ from typing import Any, Literal, cast
 from specter.config import (
     SPECTER_DATA_DIR,
     ReconstructionConfig,
+    cryosparc_ref_for_halfset,
     find_specter_project_root,
     validate_config,
 )
@@ -93,15 +94,23 @@ def _ghostbuster_kwargs(config: ReconstructionConfig) -> dict[str, Any]:
     Returns
     -------
     dict
-        Every field that names a `Ghostbuster` argument, verbatim. `run_dir`
-        is deliberately absent: the caller supplies it, either directly or
-        via `specter.jobs.Job.create`.
+        Every field that names a `Ghostbuster` argument, verbatim, except
+        `cryosparc_ref`: a ``"<A>,<B>"`` pair is collapsed to the reference
+        for this config's halfset, since `Ghostbuster` takes one volume.
+        `run_dir` is deliberately absent: the caller supplies it, either
+        directly or via `specter.jobs.Job.create`.
     """
-    return {
+    kwargs = {
         f.name: getattr(config, f.name)
         for f in dataclasses.fields(config)
         if f.name not in _NON_GHOSTBUSTER_FIELDS
     }
+    # Idempotent for a single path, so this is also correct for the gold
+    # workers, whose configs already name one halfset each.
+    kwargs["cryosparc_ref"] = cryosparc_ref_for_halfset(
+        config.cryosparc_ref, config.halfset
+    )
+    return kwargs
 
 
 def _reconstruct_device(device_str: str) -> int | list[int] | str:

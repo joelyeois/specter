@@ -34,7 +34,7 @@ class ReconstructionConfig:
     dose_per_angstrom: float
     # Which gold-standard half-set to reconstruct. "gold" (the default)
     # reconstructs A and B and computes the halfmap FSC between them; "A"/"B"
-    # select a single halfset (and name the outputs vol_A.mrc / vol_B.mrc),
+    # select a single halfset (and name the outputs volume_A.mrc / volume_B.mrc),
     # useful for a quick test of one half; "all" uses every particle in one
     # single-volume run, ignoring the split entirely.
     halfset: Literal["A", "B", "all", "gold"] = "gold"
@@ -105,6 +105,11 @@ class ReconstructionConfig:
     # --- Reference maps (FSC logging only, never optimised against) ---
     fsc_ref: str | None = None
     fsc_mask: str | None = None
+    # One path, used for whichever halfset runs, or a comma-separated
+    # "<A>,<B>" pair naming one reference per halfset. The pair is what a
+    # halfset="gold" run wants: it reconstructs both halves, and each should
+    # be compared against CryoSPARC's matching half-map rather than both
+    # against the same one. See `cryosparc_ref_for_halfset`.
     cryosparc_ref: str | None = None
     # Rotate fsc_mask per particle, project it to 2D, and weight the
     # image-domain loss by it.
@@ -158,7 +163,9 @@ RECONSTRUCTION_HELP: dict[str, str] = {
     "fsc_mask": "Mask volume (.mrc) applied before the FSC is computed.",
     "cryosparc_ref": "CryoSPARC's own reconstruction (.mrc), plotted "
     "alongside --fsc_ref for comparison. Only used when --fsc_ref is given "
-    "too.",
+    "too. Accepts a comma-separated '<A>,<B>' pair to compare each halfset "
+    "against CryoSPARC's matching half-map, which is what --halfset gold "
+    "wants; a single path is used for whichever halfset runs.",
     "use_2d_mask": "Rotate --fsc_mask per particle, project it to 2D, and "
     "weight the image-domain loss by it.",
     "scattering_model": "Wave propagation model used by the forward pass. "
@@ -223,3 +230,54 @@ RECONSTRUCTION_HELP: dict[str, str] = {
     "from a subdirectory of an already-initialised project lands in the "
     "same project.",
 }
+
+
+def parse_cryosparc_ref(cryosparc_ref: str | None) -> list[str]:
+    """
+    Split a ``cryosparc_ref`` into its component paths.
+
+    Parameters
+    ----------
+    cryosparc_ref : str or None
+        One path, or a comma-separated ``"<A>,<B>"`` pair of them.
+
+    Returns
+    -------
+    list of str
+        Empty when nothing was given, otherwise the comma-separated parts
+        with surrounding whitespace stripped. The shape is not validated
+        here -- `specter.config.validate_config` rejects anything that is
+        not one or two non-empty paths.
+    """
+    if cryosparc_ref is None:
+        return []
+    return [part.strip() for part in str(cryosparc_ref).split(",")]
+
+
+def cryosparc_ref_for_halfset(cryosparc_ref: str | None, halfset: str) -> str | None:
+    """
+    The CryoSPARC reference a single halfset reconstruction should use.
+
+    A ``halfset="gold"`` run reconstructs both halves from one config, so the
+    pair form is the only way to give each half its own reference -- without
+    it both halves would be plotted against CryoSPARC's half-map A, which
+    silently mislabels the overlay on half B's FSC figure.
+
+    Parameters
+    ----------
+    cryosparc_ref : str or None
+        One path, used for whichever halfset runs, or a comma-separated
+        ``"<A>,<B>"`` pair naming one reference per halfset.
+    halfset : str
+        The halfset being reconstructed, as spelled by
+        `ReconstructionConfig.halfset`.
+
+    Returns
+    -------
+    str or None
+        The reference for ``halfset``, or None if none was given.
+    """
+    refs = parse_cryosparc_ref(cryosparc_ref)
+    if not refs:
+        return None
+    return refs[1] if halfset == "B" and len(refs) == 2 else refs[0]

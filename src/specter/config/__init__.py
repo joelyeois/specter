@@ -19,7 +19,12 @@ from ._paths import (
     default_pdb_cache_dir,
     find_specter_project_root,
 )
-from ._reconstruction import RECONSTRUCTION_HELP, ReconstructionConfig
+from ._reconstruction import (
+    RECONSTRUCTION_HELP,
+    ReconstructionConfig,
+    cryosparc_ref_for_halfset,
+    parse_cryosparc_ref,
+)
 from ._scalar_range import ScalarOrRange, parse_scalar_or_range
 from ._tiltseries import TILT_SERIES_HELP, TiltSeriesConfig
 from ._tomogram import TOMOGRAM_HELP, TomogramConfig
@@ -45,10 +50,12 @@ __all__ = [
     "TiltSeriesConfig",
     "TomogramConfig",
     "apply_overrides",
+    "cryosparc_ref_for_halfset",
     "default_output_dir",
     "default_pdb_cache_dir",
     "find_specter_project_root",
     "load_config",
+    "parse_cryosparc_ref",
     "parse_scalar_or_range",
     "validate_config",
 ]

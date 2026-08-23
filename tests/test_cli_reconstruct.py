@@ -20,7 +20,11 @@ import mrcfile
 import numpy as np
 import pytest
 
-from specter.config import ReconstructionConfig
+from specter.config import (
+    ReconstructionConfig,
+    cryosparc_ref_for_halfset,
+    validate_config,
+)
 from specter.ghostbuster import Ghostbuster
 from specter.io import _cryosparc
 from specter.pipelines._reconstruct import (
@@ -180,6 +184,99 @@ def test_every_config_field_is_forwarded_or_deliberately_held_back() -> None:
     config = ReconstructionConfig(cs_file="a.cs", mrc_file="b.mrc", dose_per_angstrom=1)
     all_fields = {f.name for f in fields(config)}
     assert all_fields == set(_ghostbuster_kwargs(config)) | _NON_GHOSTBUSTER_FIELDS
+
+
+# ---------------------------------------------------------------------------
+# Per-halfset CryoSPARC reference
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("cryosparc_ref", "halfset", "expected"),
+    [
+        (None, "A", None),
+        (None, "gold", None),
+        # A single path is shared by whichever halfset runs.
+        ("a.mrc", "A", "a.mrc"),
+        ("a.mrc", "B", "a.mrc"),
+        ("a.mrc", "all", "a.mrc"),
+        # A pair gives each halfset its own.
+        ("a.mrc,b.mrc", "A", "a.mrc"),
+        ("a.mrc,b.mrc", "B", "b.mrc"),
+        (" a.mrc , b.mrc ", "B", "b.mrc"),
+    ],
+)
+def test_cryosparc_ref_for_halfset(
+    cryosparc_ref: str | None, halfset: str, expected: str | None
+) -> None:
+    assert cryosparc_ref_for_halfset(cryosparc_ref, halfset) == expected
+
+
+def test_gold_halfset_b_gets_its_own_cryosparc_reference() -> None:
+    """Halfset B is compared against CryoSPARC's half-map B, not half-map A.
+
+    `halfset="gold"` reconstructs both halves from one config, so without the
+    pair form both would be plotted against whichever single reference was
+    given -- silently mislabelling half B's FSC overlay as "CryoSPARC" while
+    showing CryoSPARC's *other* half. The gold workers reach `Ghostbuster`
+    through `_ghostbuster_kwargs` with `halfset` already narrowed to A or B,
+    which is where the pair is resolved.
+    """
+    config = ReconstructionConfig(
+        cs_file="a.cs",
+        mrc_file="b.mrc",
+        dose_per_angstrom=1,
+        cryosparc_ref="half_A.mrc,half_B.mrc",
+    )
+
+    config.halfset = "A"
+    assert _ghostbuster_kwargs(config)["cryosparc_ref"] == "half_A.mrc"
+
+    config.halfset = "B"
+    assert _ghostbuster_kwargs(config)["cryosparc_ref"] == "half_B.mrc"
+
+
+def test_cryosparc_ref_pair_validates_both_halves(
+    particle_data: tuple[Path, Path], tmp_path: Path
+) -> None:
+    """Both halves of a pair are checked for existence, not just the first."""
+    cs_file, mrc_file = particle_data
+    config = _config(cs_file, mrc_file, tmp_path / "out")
+    real = tmp_path / "ref_A.mrc"
+    real.write_bytes(b"")
+
+    config.cryosparc_ref = f"{real},{tmp_path / 'nope_B.mrc'}"
+    with pytest.raises(ValueError, match="nope_B.mrc.*no such file"):
+        validate_config(config)
+
+    config.cryosparc_ref = f"{real},{real}"
+    validate_config(config)
+
+
+def test_cryosparc_ref_rejects_malformed_and_meaningless_pairs(
+    particle_data: tuple[Path, Path], tmp_path: Path
+) -> None:
+    """Three paths is never meaningful, and a pair is meaningless for "all"."""
+    cs_file, mrc_file = particle_data
+    config = _config(cs_file, mrc_file, tmp_path / "out")
+    real = tmp_path / "ref_A.mrc"
+    real.write_bytes(b"")
+
+    config.cryosparc_ref = f"{real},{real},{real}"
+    with pytest.raises(ValueError, match="pair"):
+        validate_config(config)
+
+    config.cryosparc_ref = f"{real},"
+    with pytest.raises(ValueError, match="pair"):
+        validate_config(config)
+
+    # "all" is one volume from every particle, so there is no second half to
+    # reference -- a pair there means the user expected a split that isn't
+    # happening.
+    config.cryosparc_ref = f"{real},{real}"
+    config.halfset = "all"
+    with pytest.raises(ValueError, match='halfset="all"'):
+        validate_config(config)
 
 
 @pytest.mark.parametrize(

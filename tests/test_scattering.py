@@ -342,3 +342,105 @@ def test_multislice_accepts_volume_off_compute_device():
     out = scat.multislice(V_cpu)
     assert out.device.type == "cuda"
     assert torch.equal(out, scat.multislice(V_cpu.cuda()))
+
+
+# ---------------------------------------------------------------------------
+# Fourier-space slice summation: rytov/firstborn/kinematic sum over z BEFORE
+# the inverse FFT (one inverse FFT instead of nz). The inverse FFT is linear so
+# this is the same quantity, but reassociating a float sum changes rounding --
+# unlike the multislice chunking above, these are allclose, not torch.equal.
+# ---------------------------------------------------------------------------
+
+
+def _rytov_sum_after_reference(scat, V):
+    """Pre-change rytov: nz inverse FFTs, then sum."""
+    F = scat.F_real + 1j * scat.F_imag
+    if scat.ews_curvature_sign == "negative":
+        V = torch.flip(V, dims=(1,))
+    scattered = torch.fft.ifft2(
+        torch.fft.fft2(1j * scat.sigma * scat.pixel_size * V, dim=(-1, -2))
+        * F[None, ...],
+        dim=(-1, -2),
+    )
+    return torch.exp(torch.sum(scattered, dim=1))
+
+
+def _firstborn_sum_after_reference(scat, V):
+    """Pre-change firstborn: nz inverse FFTs, then sum."""
+    F = scat.F_real + 1j * scat.F_imag
+    if scat.ews_curvature_sign == "negative":
+        V = torch.flip(V, dims=(1,))
+    ew = torch.fft.ifft2(
+        scat.sigma * scat.pixel_size * torch.fft.fft2(V, dim=(-1, -2)) * F[None, ...],
+        dim=(-1, -2),
+    )
+    return 1 + 1j * torch.sum(ew, 1)
+
+
+def _kinematic_sum_after_reference(scat, V):
+    """Pre-change kinematic: nz inverse FFTs, then sum."""
+    F = scat.F_real + 1j * scat.F_imag
+    if scat.ews_curvature_sign == "negative":
+        V = torch.flip(V, dims=(1,))
+    t = torch.exp(1j * scat.sigma * scat.pixel_size * V) - 1
+    return 1 + torch.sum(
+        torch.fft.ifft2(torch.fft.fft2(t, dim=(-1, -2)) * F[None, ...], dim=(-1, -2)),
+        1,
+    )
+
+
+_SUM_AFTER_REFERENCES = {
+    "rytov": _rytov_sum_after_reference,
+    "firstborn": _firstborn_sum_after_reference,
+    "kinematic": _kinematic_sum_after_reference,
+}
+
+
+@pytest.mark.parametrize("model", ["rytov", "firstborn", "kinematic"])
+@pytest.mark.parametrize("sign", ["negative", "positive"])
+def test_fourier_space_summation_matches_sum_after_ifft(model, sign):
+    """Summing before the inverse FFT gives the same exit wave as summing after."""
+    n, nz = 32, 16
+    scat = Scattering(
+        nxy=n,
+        pixel_size=1.0,
+        voltage=300.0,
+        scattering_model=model,
+        alpha=0.07,
+        ews_curvature_sign=sign,
+        nz=nz,
+        progressbars=False,
+    )
+    torch.manual_seed(0)
+    V = complex_potential(torch.rand(2, nz, n, n) * 4.0, alpha=0.07)
+
+    got = getattr(scat, model)(V)
+    want = _SUM_AFTER_REFERENCES[model](scat, V)
+    # float32 reassociation only -- eps is ~1.2e-7, exp() in rytov amplifies it
+    assert torch.allclose(got, want, rtol=1e-5, atol=1e-6)
+
+
+@pytest.mark.parametrize("model", ["rytov", "firstborn", "kinematic"])
+def test_fourier_space_summation_gradients_match(model):
+    """Gradients w.r.t. the potential are unchanged by the reassociation."""
+    n, nz = 32, 16
+    scat = Scattering(
+        nxy=n,
+        pixel_size=1.0,
+        voltage=300.0,
+        scattering_model=model,
+        alpha=0.07,
+        nz=nz,
+        progressbars=False,
+    )
+    torch.manual_seed(0)
+    V = torch.rand(2, nz, n, n) * 4.0
+
+    def grad_of(fn):
+        v = V.clone().requires_grad_(True)
+        fn(complex_potential(v, alpha=0.07)).real.sum().backward()
+        return v.grad
+
+    got = grad_of(getattr(scat, model))
+    want = grad_of(lambda x: _SUM_AFTER_REFERENCES[model](scat, x))
+    assert torch.allclose(got, want, rtol=1e-4, atol=1e-7)

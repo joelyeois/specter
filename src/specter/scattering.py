@@ -274,8 +274,15 @@ class Scattering(L.LightningModule):
         if self.ews_curvature_sign == "negative":
             V = torch.flip(V, dims=(1,))
 
-        scattered = ifft2(fft2(1j * self.sigma * self.pixel_size * V) * F[None, ...])
-        exitwave = torch.exp(torch.sum(scattered, dim=1))
+        # Sum over slices in Fourier space, then take a single inverse FFT.
+        # The inverse FFT is linear, so it commutes with the sum over z: this
+        # is the same quantity as summing nz inverse-transformed planes, but
+        # costs one inverse FFT instead of nz. See the note in
+        # IterativeScattering.parallel_rytov, which does the same.
+        scattered_k = (fft2(1j * self.sigma * self.pixel_size * V) * F[None, ...]).sum(
+            dim=1
+        )
+        exitwave = torch.exp(ifft2(scattered_k))
         return exitwave  # (B x X x Y)
 
     def firstborn(self, V: torch.Tensor) -> torch.Tensor:
@@ -307,8 +314,9 @@ class Scattering(L.LightningModule):
 
         V_f = fft2(V)
         exitwave_f = self.sigma * self.pixel_size * V_f * F[None, ...]
-        exitwave = ifft2(exitwave_f)
-        exitwave = torch.sum(exitwave, 1)  # sum along Z
+        # Sum along Z in Fourier space -- one inverse FFT instead of nz. The
+        # inverse FFT is linear, so it commutes with the sum (see rytov).
+        exitwave = ifft2(torch.sum(exitwave_f, 1))
         exitwave = 1 + 1j * exitwave
         return exitwave
 
@@ -347,8 +355,9 @@ class Scattering(L.LightningModule):
             V = torch.flip(V, dims=(1,))
 
         t = torch.exp(1j * self.sigma * self.pixel_size * V) - 1
-        exitwave = ifft2(fft2(t) * F[None, ...])
-        exitwave = 1 + torch.sum(exitwave, 1)
+        # Sum along Z in Fourier space -- one inverse FFT instead of nz. The
+        # inverse FFT is linear, so it commutes with the sum (see rytov).
+        exitwave = 1 + ifft2(torch.sum(fft2(t) * F[None, ...], 1))
         return exitwave
 
     def projection(self, V: torch.Tensor) -> torch.Tensor:

@@ -238,3 +238,107 @@ def test_klim_bandlimit_keeps_low_frequencies(dummy_volume):
     # several orders of magnitude below the surviving low-frequency content.
     assert torch.abs(above_cutoff).max() < 1e-3 * torch.abs(below_cutoff).max()
     assert torch.abs(below_cutoff).max() > 1e-6
+
+
+# ---------------------------------------------------------------------------
+# Multislice chunking: the chunked/unbind form of the slice loop must stay
+# bitwise identical to the plain per-slice form it replaced. Asserted with
+# torch.equal rather than allclose -- the restructuring only changes kernel
+# launch granularity, never per-element arithmetic, so any drift at all is a
+# regression rather than tolerable round-off.
+# ---------------------------------------------------------------------------
+
+
+def _multislice_per_slice_reference(scat, V):
+    """The pre-chunking implementation of Scattering.multislice, verbatim."""
+    F = scat.F_real + 1j * scat.F_imag
+    if scat.ews_curvature_sign == "negative":
+        V = torch.flip(V, dims=(1,))
+    exitwave = None
+    for i in range(V.size(1)):
+        t = torch.exp(1j * scat.sigma * scat.pixel_size * V[:, i].to(scat.device))
+        wv = t if exitwave is None else t * exitwave
+        exitwave = torch.fft.ifft2(
+            torch.fft.fft2(wv, dim=(-1, -2)) * F * scat.kmask, dim=(-1, -2)
+        )
+    return exitwave
+
+
+@pytest.mark.parametrize(
+    "alpha, klim, sign, nz",
+    [
+        (0.07, None, "negative", 16),
+        (0.0, None, "negative", 16),
+        (0.07, 0.66, "negative", 16),
+        (0.07, None, "positive", 16),
+        (0.07, None, "negative", 13),  # nz not divisible by the chunk size
+    ],
+)
+def test_multislice_matches_per_slice_reference(alpha, klim, sign, nz):
+    """Chunked multislice is bitwise identical to the per-slice form."""
+    n = 32
+    scat = Scattering(
+        nxy=n,
+        pixel_size=1.0,
+        voltage=300.0,
+        scattering_model="multislice",
+        alpha=alpha,
+        klim=klim,
+        ews_curvature_sign=sign,
+        nz=nz,
+        progressbars=False,
+    )
+    torch.manual_seed(0)
+    V = torch.rand(2, nz, n, n) * 4.0
+
+    got = scat.multislice(complex_potential(V, alpha=alpha))
+    want = _multislice_per_slice_reference(scat, complex_potential(V, alpha=alpha))
+    assert torch.equal(got, want)
+
+
+def test_multislice_gradients_match_per_slice_reference():
+    """Gradients w.r.t. the potential are bitwise identical too."""
+    n, nz = 32, 16
+    scat = Scattering(
+        nxy=n,
+        pixel_size=1.0,
+        voltage=300.0,
+        scattering_model="multislice",
+        alpha=0.07,
+        nz=nz,
+        progressbars=False,
+    )
+    torch.manual_seed(0)
+    V = torch.rand(2, nz, n, n) * 4.0
+
+    def grad_of(fn):
+        v = V.clone().requires_grad_(True)
+        fn(scat, complex_potential(v, alpha=0.07)).real.sum().backward()
+        return v.grad
+
+    assert torch.equal(
+        grad_of(lambda s, x: s.multislice(x)),
+        grad_of(_multislice_per_slice_reference),
+    )
+
+
+def test_multislice_accepts_volume_off_compute_device():
+    """A volume on a different device than the module still streams through."""
+    if not torch.cuda.is_available():
+        pytest.skip("requires CUDA to have two distinct devices")
+    n, nz = 32, 16
+    scat = Scattering(
+        nxy=n,
+        pixel_size=1.0,
+        voltage=300.0,
+        scattering_model="multislice",
+        alpha=0.07,
+        nz=nz,
+        progressbars=False,
+    ).to("cuda")
+    torch.manual_seed(0)
+    V_cpu = complex_potential(torch.rand(1, nz, n, n) * 4.0, alpha=0.07)
+
+    out = scat.multislice(V_cpu)
+    assert out.device.type == "cuda"
+    assert torch.equal(out, scat.multislice(V_cpu.cuda()))

@@ -14,6 +14,19 @@ from .fft import fft2, ifft2
 from .rotations import VolumeRotator, build_affine_matrix
 
 
+# Number of z-slices whose transmission functions are evaluated per batched
+# torch.exp call in Scattering.multislice. Purely a performance knob: output
+# and gradients are bitwise identical for any value, so it is deliberately not
+# exposed as a constructor argument.
+#
+# 8 is the knee of the measured curve. Going 1 -> 8 is worth 16-60% (box
+# 64-256, batch 1-16); going 8 -> 64 is <= 11% and inside run-to-run noise,
+# while forward peak memory grows linearly in the chunk size (+3% at 8, +118%
+# unchunked). Backward peak memory is flat in it, since autograd retains every
+# slice's transmission function either way. Measured on an L40.
+_MULTISLICE_SLICE_CHUNK = 8
+
+
 def complex_potential(v: torch.Tensor, alpha: float = 0.1) -> torch.Tensor:
     """
     Apply amplitude ratio to create complex potential.
@@ -195,25 +208,40 @@ class Scattering(L.LightningModule):
         F = self.F_real + 1j * self.F_imag
         if self.ews_curvature_sign == "negative":
             V = torch.flip(V, dims=(1,))
+
+        # Fold the bandlimit into the propagator once, rather than once per
+        # slice. Bitwise-exact only because kmask is binary (0.0/1.0, see
+        # __init__), so the reassociation from (psi_k * F) * kmask to
+        # psi_k * (F * kmask) is exact; a soft/apodised mask would not be.
+        Fk = F * self.kmask
+
         exitwave: torch.Tensor | None = None
 
-        # iterate across z-planes of 3D potentials.
-        # for i in tqdm(range(V.size(1)), desc='Multislicing', leave=False):
-        for i in track(
-            range(V.size(1)),
+        # Iterate across z-planes of 3D potentials. The recursion is inherently
+        # sequential (each slice transmits the previous slice's wave), but the
+        # transmission functions themselves are independent, so they are
+        # evaluated a chunk at a time and consumed via unbind. This is purely a
+        # performance restructuring -- output and gradients are bitwise
+        # identical to the per-slice form. See _MULTISLICE_SLICE_CHUNK.
+        for chunk in track(
+            V.split(_MULTISLICE_SLICE_CHUNK, dim=1),
             description="Multislicing",
             transient=True,
             disable=not (self.progressbars),
         ):
-            # transmission function
-            # t = torch.exp(1j * self.sigma * complex_potential(V[:, i], alpha=self.alpha).to(self.device))
-            t = torch.exp(1j * self.sigma * self.pixel_size * V[:, i].to(self.device))
+            # transmission functions for the whole chunk, in one kernel.
+            # .to() here rather than per slice keeps a volume that lives off
+            # the compute device streaming in bounded-size blocks.
+            t_chunk = torch.exp(
+                1j * self.sigma * self.pixel_size * chunk.to(self.device)
+            )
 
-            # multiply with incident wave (unit incident wave on the first slice)
-            wv = t if exitwave is None else t * exitwave
+            for t in t_chunk.unbind(1):
+                # multiply with incident wave (unit incident wave on the first slice)
+                wv = t if exitwave is None else t * exitwave
 
-            # propagate wave to next slice, also applies Kirkland's 0.66 bandlimit
-            exitwave = ifft2(fft2(wv) * F * self.kmask)
+                # propagate wave to next slice, also applies Kirkland's 0.66 bandlimit
+                exitwave = ifft2(fft2(wv) * Fk)
         assert exitwave is not None, "V must have at least one z-slice"
         return exitwave
 

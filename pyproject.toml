@@ -65,6 +65,7 @@ dev = [
     "pre-commit>=4.3.0",
     "pytest>=9.0.2",
     "pytest-cov>=7.0.0",
+    "pytest-xdist>=3.8.0",
     "rich>=14.2.0",
     "ruff>=0.14.4",
     "seaborn>=0.13.2",
@@ -141,6 +142,17 @@ specter = "specter.cli._cli:main"
 
 
 [tool.pytest.ini_options]
+# Run parallel by default: a bare `pytest tests/` is ~19 min serial and ~3 min
+# here. `worksteal` rather than the default `load` scheduler because this suite
+# is very unevenly weighted -- a handful of tomogram/CLI tests dominate, and
+# handing out work up front leaves workers idle behind a straggler (5:28 -> 3:13
+# for the same CPU time). 32 workers pairs with the 4 threads/worker that
+# tests/conftest.py sets, to match this host's 128 cores; both are host-specific
+# tuning, so lower them together on a smaller machine.
+#
+# Use `-n 0` to disable, which is what you want for `--pdb`, `-s`, or any single
+# test -- the 32 worker startups cost more than a short test does.
+addopts = "-n 32 --dist worksteal"
 markers = [
     "network: needs internet access (fetches structures from RCSB)",
 ]

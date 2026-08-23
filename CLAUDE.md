@@ -103,14 +103,19 @@ content only — do not put specs or planning docs there.
 - Run tests with:
 
 ```bash
-python -m pytest tests/ -v
-python -m pytest tests/test_generators.py::test_image_generator -v  # single test
+python -m pytest tests/                    # full suite, parallel by default (~3 min)
+python -m pytest tests/test_generators.py::test_image_generator -v -n 0  # single test
 python -m pytest tests/ --cov=src/specter  # with coverage
 ruff check src/ tests/                     # lint
 ruff format src/ tests/                    # format
 mypy src/                                  # type-check
 ```
 
+- **The suite runs in parallel by default** (~3 min, down from ~19 min serial). `pyproject.toml`'s `addopts` sets `-n 32 --dist worksteal`; `tests/conftest.py` pairs that with 4 intra-op threads per worker, matching this host's 128 cores. Both numbers are host-specific tuning — lower them together on a smaller machine.
+- **Use `-n 0` for a single test, `-s`, or `--pdb`.** 32 worker startups cost ~6 s, which dwarfs a short test (2.9 s serial vs 9.0 s parallel), and xdist swallows `-s` output and breaks interactive debugging.
+- Two non-obvious things make the speedup work, so don't "simplify" either away:
+  - **`worksteal`, not the default `load` scheduler.** The suite is very unevenly weighted (a few tomogram/CLI tests dominate), so handing out work up front strands workers behind a straggler: 5:28 → 3:13 for identical CPU time.
+  - **The thread cap is conditional on being under xdist.** torch sizes its pool from the whole machine, so uncapped workers each grab every core — `-n 32` uncapped is ~16.8 min, barely better than serial, burning ~105,000 s of CPU. But capping *unconditionally* would make a serial run about twice as slow, since it genuinely benefits from intra-op parallelism when alone. See the conftest docstring for the measurements.
 - GPU tests should gracefully skip or fall back to CPU when CUDA is unavailable.
 - Do not mock physics calculations — test with real (small) inputs to catch numerical regressions.
 - Regression tests in `tests/test_generators.py` use a **save-or-compare** pattern: on first run they save a golden `.pt` file under `tests/test_data/`; subsequent runs compare against it. Delete the fixture file and re-run to regenerate after intentional output changes.

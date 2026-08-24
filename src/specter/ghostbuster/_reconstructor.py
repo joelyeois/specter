@@ -14,6 +14,11 @@ from torch.optim.lr_scheduler import LRScheduler
 
 from .. import rotations
 from ..imagegenerator import ImageGenerator
+from ..plots import (
+    HALFMAP_FSC_THRESHOLD,
+    MAP_TO_MODEL_FSC_THRESHOLD,
+    resolution_between,
+)
 from ..symmetries import apply_symmetry, get_rotation_matrices
 from ._base_reconstructor import _BaseReconstructor
 from ._helpers import _build_lr_scheduler
@@ -716,7 +721,89 @@ class Reconstructor(_BaseReconstructor):
                 self._run_dir / "epochs" / f"fsc_{epoch:03d}{suffix}.png",
                 label=f"epoch {epoch}{suffix}",
             )
+        self._save_epoch_map_to_model_resolutions(v, suffix, epoch)
         self._save_epoch_halfmap_fsc(epoch)
+
+    def _mask_for(self, volume: torch.Tensor) -> torch.Tensor | None:
+        """
+        ``fsc_mask`` as a tensor, when it is one and matches ``volume``'s shape.
+
+        Two ways there is no usable mask, neither of them an error.
+        `_load_fsc_and_refs` substitutes the scalar ``1`` for an omitted mask
+        so the loss-weighting path can multiply unconditionally -- that is not
+        a mask to report a masked resolution against. And a ``test_run`` bins
+        the volume (``bin_factor``) without binning the mask, so the shapes
+        genuinely disagree; a sanity-check run must not die computing a
+        diagnostic, which is the whole point of running one first.
+
+        Parameters
+        ----------
+        volume : torch.Tensor
+            The volume the mask would be applied to.
+
+        Returns
+        -------
+        torch.Tensor or None
+            The mask, or None when there isn't a usable one.
+        """
+        mask = self.fsc_mask
+        if not isinstance(mask, torch.Tensor):
+            return None
+        if tuple(mask.shape) != tuple(volume.shape):
+            return None
+        return mask
+
+    def _save_epoch_map_to_model_resolutions(
+        self, v: torch.Tensor, suffix: str, epoch: int
+    ) -> None:
+        """
+        Record this epoch's map-to-model resolution, masked and unmasked.
+
+        Skipped entirely without ``fsc_ref`` -- map-to-model is a comparison
+        against a known reference, so with no reference there is nothing to
+        report. The masked entry is additionally skipped without ``fsc_mask``.
+        Neither is an error: a run with no reference maps is a perfectly
+        ordinary run, it just has no map-to-model resolution to log.
+
+        Parameters
+        ----------
+        v : torch.Tensor
+            This epoch's volume, shape ``(Z, Y, X)``.
+        suffix : str
+            Halfset filename suffix, e.g. ``"_A"``.
+        epoch : int
+            One-based epoch number just completed.
+        """
+        if self._run_dir is None or self.fsc_ref is None:
+            return
+        if tuple(self.fsc_ref.shape) != tuple(v.shape):
+            # Same binning mismatch _mask_for guards against: a test_run's
+            # volume is smaller than the reference it was given.
+            return
+
+        mask = self._mask_for(v)
+        record: dict[str, Any] = {"epoch": epoch, "halfset": self._halfset_label}
+        try:
+            record["resolution_map_to_model"] = resolution_between(
+                v, self.fsc_ref, self.voxel_size, MAP_TO_MODEL_FSC_THRESHOLD
+            )
+            record["resolution_map_to_model_masked"] = (
+                resolution_between(
+                    v,
+                    self.fsc_ref,
+                    self.voxel_size,
+                    MAP_TO_MODEL_FSC_THRESHOLD,
+                    mask=mask,
+                )
+                if mask is not None
+                else None
+            )
+        except Exception as exc:
+            print(f"[ghostbuster] map-to-model resolution skipped: {exc}")
+            return
+
+        path = self._run_dir / "epochs" / f"fsc_{epoch:03d}{suffix}.json"
+        path.write_text(json.dumps(record, indent=2))
 
     def _save_epoch_halfmap_fsc(self, epoch: int) -> None:
         """
@@ -765,12 +852,30 @@ class Reconstructor(_BaseReconstructor):
             volume_a, volume_b = (
                 (own, sib) if self._halfset_label == "A" else (sib, own)
             )
-            resolution = save_halfmap_fsc_figure(
+            save_halfmap_fsc_figure(
                 epochs_dir / f"fsc_halfmap_{epoch:03d}.png",
                 volume_a,
                 volume_b,
                 self.voxel_size,
                 fsc_mask=self.fsc_mask,
+            )
+            # Computed rather than taken from the figure: plot_halfmap_fsc
+            # returns the unmasked resolution even when it draws a masked
+            # curve, so the masked number has to come from its own call.
+            mask = self._mask_for(volume_a)
+            resolution = resolution_between(
+                volume_a, volume_b, self.voxel_size, HALFMAP_FSC_THRESHOLD
+            )
+            masked = (
+                resolution_between(
+                    volume_a,
+                    volume_b,
+                    self.voxel_size,
+                    HALFMAP_FSC_THRESHOLD,
+                    mask=mask,
+                )
+                if mask is not None
+                else None
             )
             os.write(
                 fd,
@@ -778,13 +883,22 @@ class Reconstructor(_BaseReconstructor):
                     {
                         "epoch": epoch,
                         "resolution_gold_standard": resolution,
+                        "resolution_gold_standard_masked": masked,
                         "computed_by_halfset": self._halfset_label,
                     },
                     indent=2,
                 ).encode(),
             )
-            if resolution is not None:
-                print(f"Epoch {epoch} gold-standard resolution: {resolution}")
+            print(
+                f"Epoch {epoch} gold-standard resolution: {resolution}"
+                + (f"  (masked {masked})" if masked is not None else "")
+            )
+        except Exception as exc:
+            # A diagnostic must never take the run down with it -- the same
+            # rule save_fsc_figure follows. Drop the claim so the empty record
+            # isn't mistaken for a computed one.
+            print(f"[ghostbuster] per-epoch half-map FSC skipped: {exc}")
+            record_path.unlink(missing_ok=True)
         finally:
             os.close(fd)
 

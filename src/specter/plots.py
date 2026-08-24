@@ -463,6 +463,49 @@ def fsc_resolution(
     return ">Nyquist"
 
 
+def resolution_between(
+    volume_a: torch.Tensor,
+    volume_b: torch.Tensor,
+    voxel_size: float,
+    threshold: float,
+    mask: torch.Tensor | None = None,
+) -> str:
+    """
+    Resolution at an FSC threshold between two volumes, optionally masked.
+
+    The numeric counterpart to `plot_map_to_model_fsc`/`plot_halfmap_fsc`,
+    for callers that want to record a resolution rather than draw one. Those
+    two return only the *unmasked* resolution even when given a mask, so a
+    masked figure and a masked number cannot come from the same call.
+
+    Parameters
+    ----------
+    volume_a, volume_b : torch.Tensor
+        Volumes to correlate, shape ``(Z, Y, X)``. Two half-sets for a
+        gold-standard resolution, or a reconstruction and its reference for
+        map-to-model.
+    voxel_size : float
+        Voxel size in Å.
+    threshold : float
+        `HALFMAP_FSC_THRESHOLD` for two half-sets, `MAP_TO_MODEL_FSC_THRESHOLD`
+        against a known reference.
+    mask : torch.Tensor, optional
+        Applied to both volumes before correlation. None correlates them as-is.
+
+    Returns
+    -------
+    str
+        Resolution formatted as ``"1.397 Å"``, or ``">Nyquist"``.
+    """
+    a = volume_a.detach().cpu().float()
+    b = volume_b.detach().cpu().float()
+    if mask is not None:
+        m = mask.detach().cpu().float()
+        a, b = a * m, b * m
+    k, fsc = fourier_shell_correlation(a, b, pixelsize=voxel_size)
+    return fsc_resolution(k, fsc, threshold, k_max=1.0 / (2.0 * voxel_size))
+
+
 def plot_map_to_model_fsc(
     volumes: torch.Tensor | list[torch.Tensor],
     reference: torch.Tensor,

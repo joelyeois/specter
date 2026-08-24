@@ -445,6 +445,115 @@ def test_gold_standard_writes_per_epoch_halfmap_fsc(
         assert (epochs / f"fsc_halfmap_{entry['epoch']:03d}.png").exists()
 
 
+def _fsc_fixtures(tmp_path: Path) -> tuple[Path, Path]:
+    """A reference volume and a mask, sized to match the binned test run."""
+    rng = np.random.default_rng(1)
+    ref = tmp_path / "ref.mrc"
+    mask = tmp_path / "mask.mrc"
+    with mrcfile.new(str(ref), overwrite=True) as m:
+        m.set_data(rng.normal(size=(_BOX, _BOX, _BOX)).astype(np.float32))
+    with mrcfile.new(str(mask), overwrite=True) as m:
+        m.set_data((rng.random((_BOX, _BOX, _BOX)) > 0.3).astype(np.float32))
+    return ref, mask
+
+
+def test_all_four_resolutions_recorded_when_refs_given(
+    real_particle_data: tuple[Path, Path], tmp_path: Path
+) -> None:
+    """With a reference and a mask, every resolution is recorded.
+
+    Four numbers: map-to-model and gold-standard half-map, each masked and
+    unmasked. The masked ones cannot be read off the figures -- both plot
+    helpers return the *unmasked* resolution even when drawing a masked
+    curve -- so they come from their own `resolution_between` calls.
+    """
+    cs_file, mrc_file = real_particle_data
+    ref, mask = _fsc_fixtures(tmp_path)
+    job_base_dir = tmp_path / "out"
+    config = _config(cs_file, mrc_file, job_base_dir)
+    config.fsc_ref = str(ref)
+    config.fsc_mask = str(mask)
+    # Not a test_run: that bins the volume without binning the reference or
+    # mask, so the masked numbers would be skipped by design (see _mask_for).
+    config.test_run = False
+    config.epochs = 1
+
+    run_reconstruction(config)
+
+    epochs = job_base_dir / "reconstructions" / "J001" / "epochs"
+
+    half = [
+        json.loads(p.read_text()) for p in sorted(epochs.glob("fsc_halfmap_*.json"))
+    ]
+    assert half
+    for entry in half:
+        assert entry["resolution_gold_standard"]
+        assert entry["resolution_gold_standard_masked"]
+
+    m2m = [json.loads(p.read_text()) for p in sorted(epochs.glob("fsc_0*_[AB].json"))]
+    assert m2m, sorted(p.name for p in epochs.iterdir())
+    for entry in m2m:
+        assert entry["resolution_map_to_model"]
+        assert entry["resolution_map_to_model_masked"]
+
+
+def test_no_mask_and_no_reference_degrades_instead_of_failing(
+    real_particle_data: tuple[Path, Path], tmp_path: Path
+) -> None:
+    """A run with neither reference maps nor a mask still succeeds.
+
+    The half-map FSC needs no ground truth at all -- it correlates halfset A
+    against halfset B -- so it is still recorded. Map-to-model needs a
+    reference and is simply absent. Nothing raises: `fsc_ref=None` and no
+    mask is an ordinary run, not a misconfiguration.
+    """
+    cs_file, mrc_file = real_particle_data
+    job_base_dir = tmp_path / "out"
+    config = _config(cs_file, mrc_file, job_base_dir)
+    assert config.fsc_ref is None and config.fsc_mask is None
+
+    run_reconstruction(config)
+
+    job_dir = job_base_dir / "reconstructions" / "J001"
+    assert (job_dir / "volume_A.mrc").exists()
+
+    epochs = job_dir / "epochs"
+    half = [
+        json.loads(p.read_text()) for p in sorted(epochs.glob("fsc_halfmap_*.json"))
+    ]
+    assert half, "half-map FSC needs no reference and should still be recorded"
+    for entry in half:
+        assert entry["resolution_gold_standard"]
+        # No mask supplied, so no masked number -- recorded as null, not absent.
+        assert entry["resolution_gold_standard_masked"] is None
+
+    assert not list(epochs.glob("fsc_0*_[AB].json")), "no reference => no map-to-model"
+
+
+def test_reference_without_mask_records_only_unmasked(
+    real_particle_data: tuple[Path, Path], tmp_path: Path
+) -> None:
+    """A reference but no mask: unmasked numbers only, still no failure."""
+    cs_file, mrc_file = real_particle_data
+    ref, _ = _fsc_fixtures(tmp_path)
+    job_base_dir = tmp_path / "out"
+    config = _config(cs_file, mrc_file, job_base_dir)
+    config.fsc_ref = str(ref)
+    # Full-size run: a test_run bins the volume below the reference, which
+    # _mask_for/the fsc_ref shape guard would skip for a different reason.
+    config.test_run = False
+    config.epochs = 1
+
+    run_reconstruction(config)
+
+    epochs = job_base_dir / "reconstructions" / "J001" / "epochs"
+    m2m = [json.loads(p.read_text()) for p in sorted(epochs.glob("fsc_0*_[AB].json"))]
+    assert m2m
+    for entry in m2m:
+        assert entry["resolution_map_to_model"]
+        assert entry["resolution_map_to_model_masked"] is None
+
+
 def test_run_reconstruction_gold_standard_tracked(
     real_particle_data: tuple[Path, Path], tmp_path: Path
 ) -> None:

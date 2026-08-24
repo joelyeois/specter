@@ -276,8 +276,19 @@ def _bright_field_simulation() -> tuple[
 
 
 TEXTBOOK_SCAN_CROP = (153, 17, 807, 534)
-TRANSMISSION_SCAN_CROP_REAL = (134, 16, 723, 212)
-TRANSMISSION_SCAN_CROP_IMAG = (134, 284, 723, 480)
+# These two crops start below the scan's own printed "C Si Cu Au U" labels
+# (row 16+26 / 284+26, skipping the top spine and the text band beneath it),
+# not at the spine like the other scans -- see figure_transmission_function_
+# comparison for why: those labels are only 14px tall natively, too small to
+# survive being shared with SPECTER's own larger vector labels at any one
+# box size. Real matplotlib text is drawn over the resulting blank strip
+# instead, at the same position/fontsize as SPECTER's panel.
+TRANSMISSION_SCAN_CROP_REAL = (134, 42, 723, 212)
+TRANSMISSION_SCAN_CROP_IMAG = (134, 310, 723, 480)
+# Data-coordinate y value the crop's new top row corresponds to (the label
+# band it replaces spans the rest of the way up to each panel's real ylim).
+TRANSMISSION_CROP_YTOP_REAL = 1.2 * (1 - 26 / 196)
+TRANSMISSION_CROP_YTOP_IMAG = 1.0 * (1 - 26 / 196)
 IMAGE_SCAN_CROP = (146, 10, 664, 529)
 
 
@@ -293,15 +304,13 @@ def figure_transmission_function_comparison() -> None:
     book_img = mpimg.imread(TRANSMISSION_SCAN)
     real_crop = _crop(book_img, TRANSMISSION_SCAN_CROP_REAL)
     imag_crop = _crop(book_img, TRANSMISSION_SCAN_CROP_IMAG)
-    box_aspect = real_crop.shape[0] / real_crop.shape[1]  # same for both crops
+    # The panel's own box shape comes from the *full* spine box (0 to each
+    # panel's ylim), not the content-only crop above (which excludes the
+    # label band, and so is shorter) -- box_aspect must match ax_*_ours'
+    # actual shape, independent of how much of the box the image fills.
+    box_aspect = 196 / 589
 
-    # Sized close to the scan crop's own native resolution (589x196 px) at
-    # 200 dpi, rather than the 4.6in used elsewhere: stretching a low-res
-    # scan up to match a much bigger SPECTER panel blurs its already-small
-    # printed labels, which then degrades further once the site's own
-    # display width downscales the whole figure -- shrinking the box here
-    # keeps the two panels' text comparably legible instead.
-    box_w, box_h = 3.0, 3.0 * box_aspect
+    box_w, box_h = 4.6, 4.6 * box_aspect
     (
         fig,
         (
@@ -319,7 +328,11 @@ def figure_transmission_function_comparison() -> None:
     ax_real_ours.set_title("SPECTER")
     ax_real_ours.grid(True, alpha=0.4)
 
-    ax_real_book.imshow(real_crop, extent=(0, 50, 0, 1.2), aspect="auto")
+    ax_real_book.imshow(
+        real_crop, extent=(0, 50, 0, TRANSMISSION_CROP_YTOP_REAL), aspect="auto"
+    )
+    for loc, el in zip(element_locations, ELEMENTS):
+        ax_real_book.text(loc, 1.12, el, ha="center")
     ax_real_book.set_xlim(0, 50)
     ax_real_book.set_ylim(0, 1.2)
     ax_real_book.set_title("Kirkland (2010), Fig. 5.11")
@@ -333,7 +346,11 @@ def figure_transmission_function_comparison() -> None:
     ax_imag_ours.set_ylabel("Imag. part")
     ax_imag_ours.grid(True, alpha=0.4)
 
-    ax_imag_book.imshow(imag_crop, extent=(0, 50, 0, 1.0), aspect="auto")
+    ax_imag_book.imshow(
+        imag_crop, extent=(0, 50, 0, TRANSMISSION_CROP_YTOP_IMAG), aspect="auto"
+    )
+    for loc, el in zip(element_locations, ELEMENTS):
+        ax_imag_book.text(loc, 0.93, el, ha="center")
     ax_imag_book.set_xlim(0, 50)
     ax_imag_book.set_ylim(0, 1.0)
     ax_imag_book.set_xlabel("position x (Å)")

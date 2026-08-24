@@ -165,9 +165,12 @@ class _BaseReconstructor(L.LightningModule):
         return gathered.mean()
 
     def _save_metrics(
-        self, include_loss_std: bool = False, include_lr_min: bool = False
-    ) -> None:
-        """Save training metrics (loss, lr) to JSON.
+        self,
+        include_loss_std: bool = False,
+        include_lr_min: bool = False,
+        write: bool = True,
+    ) -> dict[str, Any] | None:
+        """Build training metrics (loss, lr) and, by default, save them to JSON.
 
         Rank-0-only under multi-GPU (DDP) to avoid every replica racing to
         write the same file. ``log_total_loss``/``log_norm_loss`` are
@@ -178,16 +181,21 @@ class _BaseReconstructor(L.LightningModule):
         the already-synced volume ``V``, identical on every rank already.
         ``log_lrs`` likewise needs none -- the learning rate is a
         deterministic function of step count, not of data.
+
+        Parameters
+        ----------
+        write : bool
+            Write ``metrics<suffix>.json`` to ``self._run_dir``. ``Reconstructor``
+            passes ``False`` and folds the returned dict into a single
+            ``job.json`` instead, rather than one metrics file per halfset.
         """
         if (
             self._run_dir is None
             or not self.log_total_loss
             or not self.trainer.is_global_zero
         ):
-            return
+            return None
 
-        suffix = self._metrics_path_suffix()
-        metrics_path = self._run_dir / f"metrics{suffix}.json"
         meta = _build_epoch_metrics(
             self.log_total_loss,
             self.log_norm_loss,
@@ -197,5 +205,11 @@ class _BaseReconstructor(L.LightningModule):
             include_loss_std=include_loss_std,
             include_lr_min=include_lr_min,
         )
+        if not write:
+            return meta
+
+        suffix = self._metrics_path_suffix()
+        metrics_path = self._run_dir / f"metrics{suffix}.json"
         metrics_path.write_text(json.dumps(meta, indent=2))
         print(f"Saved metrics → {metrics_path}")
+        return meta

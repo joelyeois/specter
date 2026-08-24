@@ -13,7 +13,6 @@ identity. Delete the corresponding .pt file and re-run to regenerate.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import lightning as L
@@ -608,8 +607,10 @@ def test_run_dir_writes_expected_artifacts(
     )
     _fit_one_epoch(model, images, max_epochs=2)
 
-    assert (tmp_path / "params_A.json").exists()
-    assert (tmp_path / "metrics_A.json").exists()
+    # No params_A.json/metrics_A.json of their own: a caller (here, the
+    # pipeline layer) folds results_summary() into one job.json instead, so
+    # two halfset workers never need to share a file while training.
+    assert not list(tmp_path.glob("*.json"))
     assert (tmp_path / "volume_A.mrc").exists()
     assert (tmp_path / "kmask.pt").exists()
     assert (tmp_path / "fsc_A.png").exists()
@@ -618,7 +619,9 @@ def test_run_dir_writes_expected_artifacts(
     assert (tmp_path / "epochs" / "volume_001_A.png").exists()
     assert (tmp_path / "epochs" / "fsc_001_A.png").exists()
 
-    metrics = json.loads((tmp_path / "metrics_A.json").read_text())
+    summary = model.results_summary()
+    assert "saved_arrays" in summary  # from on_fit_start's hparams
+    metrics = summary["metrics"]
     assert metrics["total_batches"] == 2  # 1 batch/epoch x 2 epochs
     assert {"epoch_01", "epoch_02"} <= set(metrics["epochs"])
 

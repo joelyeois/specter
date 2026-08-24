@@ -252,14 +252,19 @@ class Job:
         Merge additional key-value pairs into the recorded parameters.
 
         Use for pre-processing values computed outside the class constructor,
-        e.g. dataset paths, number of particles, dose scaling factors.
+        e.g. dataset paths, number of particles, dose scaling factors, or a
+        trained model's own results (e.g. ``Reconstructor.results_summary()``).
 
         Parameters
         ----------
         params : dict
-            JSON-serializable key-value pairs to record.
+            Key-value pairs to record. Need not be JSON-serializable already --
+            run through the same recursive conversion `create` applies to
+            constructor arguments (tensors become a shape/dtype summary,
+            anything else unrecognised becomes ``repr()``), so a caller does
+            not have to pre-serialize values itself.
         """
-        self._params.update(params)
+        self._params.update(_serialize_value(params))
         self._write_json("running")
 
     def create(self, cls: type, *args: Any, **kwargs: Any) -> Any:

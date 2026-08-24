@@ -47,8 +47,8 @@ from __future__ import annotations
 
 import dataclasses
 import itertools
-import json
 import multiprocessing
+import queue
 import time
 from pathlib import Path
 from typing import Any, Literal, cast
@@ -158,10 +158,14 @@ def run_reconstruction(config: ReconstructionConfig) -> None:
 
     Notes
     -----
-    Outputs (the reconstructed volume, per-epoch volumes, FSC plots and a
-    parameter log) are written by the `Reconstructor` itself into the run
-    directory this function chooses. Nothing is returned: the trained model
-    is only meaningful alongside those files.
+    Outputs (the reconstructed volume, per-epoch volumes, FSC plots) are
+    written by the `Reconstructor` itself into the run directory this
+    function chooses. Everything else -- hyperparameters not already in
+    `config`, loss/lr history, and per-epoch resolutions -- comes back via
+    `Reconstructor.results_summary()` and is folded into the single
+    `job.json` this function's `Job` writes, rather than its own file.
+    Nothing is returned: the trained model is only meaningful alongside
+    those files.
     """
     import specter.jobs as jobs
 
@@ -201,7 +205,9 @@ def run_reconstruction(config: ReconstructionConfig) -> None:
             )
             kwargs = _ghostbuster_kwargs(config)
             device = _reconstruct_device(config.device)
-            _fit(job.create(Ghostbuster, **kwargs), config, device)
+            model = _fit(job.create(Ghostbuster, **kwargs), config, device)
+            if model is not None:
+                job.log({"results": model.results_summary()})
             run_dir = job.dir
 
     _section("Done")
@@ -210,15 +216,24 @@ def run_reconstruction(config: ReconstructionConfig) -> None:
 
 def _fit(
     ghostbuster: Any, config: ReconstructionConfig, device: int | list[int] | str
-) -> None:
-    """Run either the full fit or the binned single-epoch sanity check."""
+) -> Any:
+    """Run either the full fit or the binned single-epoch sanity check.
+
+    Returns the trained `Reconstructor` (both `Ghostbuster.run` and
+    `.test_run` already return it) -- `None` only if the run itself never
+    calls into Lightning, which does not currently happen but would leave a
+    caller checking ``model is not None`` correctly no-op instead of crashing.
+    """
     if config.test_run:
-        ghostbuster.test_run(bin_factor=config.bin_factor, device=device)
-    else:
-        ghostbuster.run(device=device)
+        return ghostbuster.test_run(bin_factor=config.bin_factor, device=device)
+    return ghostbuster.run(device=device)
 
 
-def _run_single_halfset(config: ReconstructionConfig, run_dir: Path) -> None:
+def _run_single_halfset(
+    config: ReconstructionConfig,
+    run_dir: Path,
+    result_queue: multiprocessing.Queue[tuple[str, dict[str, Any]]],
+) -> None:
     """
     Run one halfset reconstruction into an already-resolved run directory.
 
@@ -235,15 +250,74 @@ def _run_single_halfset(config: ReconstructionConfig, run_dir: Path) -> None:
         never ``"gold"``.
     run_dir : Path
         Directory to write into. Must already exist.
+    result_queue : multiprocessing.Queue
+        This worker's ``(halfset, results_summary())`` is put here for the
+        orchestrator to collect -- the only channel back to it, since a
+        spawned `Process`'s return value is otherwise discarded and this run
+        directory is typically on NFS, where a shared results file would need
+        `flock` to write safely and `flock` hangs there instead of
+        serialising writers.
     """
     from specter.ghostbuster import Ghostbuster
 
     device = _reconstruct_device(config.device)
     kwargs = _ghostbuster_kwargs(config)
-    _fit(Ghostbuster(run_dir=run_dir, **kwargs), config, device)
+    model = _fit(Ghostbuster(run_dir=run_dir, **kwargs), config, device)
+    assert config.halfset in ("A", "B")
+    result_queue.put(
+        (config.halfset, model.results_summary() if model is not None else {})
+    )
 
 
-def _run_both_halfsets(config: ReconstructionConfig, run_dir: Path) -> None:
+def _collect_halfset_result(
+    proc: Any,
+    result_queue: multiprocessing.Queue[tuple[str, dict[str, Any]]],
+    poll_seconds: float = 2.0,
+) -> tuple[str, dict[str, Any]] | None:
+    """
+    Wait for ``proc`` to put its result, or for it to exit without one.
+
+    Polls rather than a single blocking ``get()``: a worker that crashes
+    before reaching ``result_queue.put`` (an exception inside `_fit`, an
+    OOM kill, ...) would otherwise leave a blocking ``get()`` waiting
+    forever, since nothing is ever going to arrive. This only has to not
+    block past that -- the caller's ``p.join()`` + exitcode check is what
+    actually reports the failure, once this returns.
+
+    Parameters
+    ----------
+    proc : multiprocessing.Process
+        The worker to wait on.
+    result_queue : multiprocessing.Queue
+        Queue the worker puts its ``(halfset, results_summary)`` on.
+    poll_seconds : float
+        How long each ``get()`` waits before checking whether ``proc`` has
+        exited. A real run is hours long, so this only bounds how quickly a
+        *crash* is noticed, not the happy path.
+
+    Returns
+    -------
+    tuple or None
+        ``(halfset, results_summary)``, or ``None`` if the worker exited
+        without ever putting one.
+    """
+    while True:
+        try:
+            return result_queue.get(timeout=poll_seconds)
+        except queue.Empty:
+            if proc.is_alive():
+                continue
+            # The result may have landed in the gap between the liveness
+            # check above and here; one last non-blocking look before giving up.
+            try:
+                return result_queue.get_nowait()
+            except queue.Empty:
+                return None
+
+
+def _run_both_halfsets(
+    config: ReconstructionConfig, run_dir: Path
+) -> dict[str, dict[str, Any]]:
     """
     Reconstruct halfsets A and B as separate worker processes.
 
@@ -256,6 +330,13 @@ def _run_both_halfsets(config: ReconstructionConfig, run_dir: Path) -> None:
     GPU's memory risks an OOM crash partway through a multi-hour run. Extra
     devices beyond the first two are unused -- there are only two halfsets.
 
+    Each worker's result is retrieved from the shared `Queue` (via
+    `_collect_halfset_result`) before this function joins it, not after: a
+    `Process` that has put a large-enough item on a `Queue` can block on exit
+    until a reader drains the pipe, so joining first can deadlock. Draining
+    first is also what keeps the single-device branch genuinely sequential --
+    each iteration waits on its own worker before starting the next.
+
     Parameters
     ----------
     config : ReconstructionConfig
@@ -264,6 +345,11 @@ def _run_both_halfsets(config: ReconstructionConfig, run_dir: Path) -> None:
     run_dir : Path
         Shared directory both halfsets write into. Must already exist.
 
+    Returns
+    -------
+    dict
+        ``{"A": results_summary_A, "B": results_summary_B}``.
+
     Raises
     ------
     RuntimeError
@@ -271,6 +357,7 @@ def _run_both_halfsets(config: ReconstructionConfig, run_dir: Path) -> None:
     """
     devices = _parse_device_pool(config.device)
     ctx = multiprocessing.get_context("spawn")
+    result_queue: multiprocessing.Queue[tuple[str, dict[str, Any]]] = ctx.Queue()
     halfsets: tuple[Literal["A"], Literal["B"]] = ("A", "B")
     half_configs = [
         dataclasses.replace(
@@ -279,13 +366,20 @@ def _run_both_halfsets(config: ReconstructionConfig, run_dir: Path) -> None:
         for halfset, device in zip(halfsets, itertools.cycle(devices))
     ]
 
+    results: dict[str, dict[str, Any]] = {}
     if len(devices) >= 2:
         procs = [
-            ctx.Process(target=_run_single_halfset, args=(half_config, run_dir))
+            ctx.Process(
+                target=_run_single_halfset, args=(half_config, run_dir, result_queue)
+            )
             for half_config in half_configs
         ]
         for p in procs:
             p.start()
+        for p in procs:
+            result = _collect_halfset_result(p, result_queue)
+            if result is not None:
+                results[result[0]] = result[1]
         for p in procs:
             p.join()
         if any(p.exitcode for p in procs):
@@ -294,14 +388,21 @@ def _run_both_halfsets(config: ReconstructionConfig, run_dir: Path) -> None:
             )
     else:
         for half_config in half_configs:
-            p = ctx.Process(target=_run_single_halfset, args=(half_config, run_dir))
+            p = ctx.Process(
+                target=_run_single_halfset, args=(half_config, run_dir, result_queue)
+            )
             p.start()
+            result = _collect_halfset_result(p, result_queue)
+            if result is not None:
+                results[result[0]] = result[1]
             p.join()
             if p.exitcode:
                 raise RuntimeError(
                     f"halfset {half_config.halfset} reconstruction failed -- "
                     "see output above"
                 )
+
+    return results
 
 
 def _compute_and_save_gold_standard_fsc(run_dir: Path) -> str:
@@ -342,40 +443,6 @@ def _compute_and_save_gold_standard_fsc(run_dir: Path) -> str:
     return resolutions[0]
 
 
-def _consolidate_resolutions(run_dir: Path, final: str) -> None:
-    """
-    Merge both halfsets' per-epoch resolutions into one ``resolutions.json``.
-
-    Each halfset worker accumulates its resolutions in memory and flushes them
-    into its own ``metrics_<A|B>.json`` on exit, because they run as separate
-    processes and a run directory is typically on NFS, where ``flock`` hangs
-    rather than serialising writers. Consolidation therefore happens here,
-    after both have exited and there is a single writer again, so the run ends
-    with one file holding every resolution rather than one file per epoch.
-
-    Parameters
-    ----------
-    run_dir : Path
-        The shared run directory both halfsets wrote into.
-    final : str
-        The end-of-run gold-standard resolution, from the final volumes.
-    """
-    epochs: list[dict[str, Any]] = []
-    for metrics_path in sorted(run_dir.glob("metrics_[AB].json")):
-        try:
-            epochs.extend(json.loads(metrics_path.read_text()).get("resolutions", []))
-        except (OSError, json.JSONDecodeError) as exc:
-            print(f"[specter] could not read {metrics_path.name}: {exc}")
-
-    epochs.sort(key=lambda e: (e.get("epoch", 0), e.get("halfset") or ""))
-    (run_dir / "resolutions.json").write_text(
-        json.dumps(
-            {"resolution_gold_standard": final, "epochs": epochs},
-            indent=2,
-        )
-    )
-
-
 def _run_gold_standard(config: ReconstructionConfig, base_dir: str) -> Path:
     """
     Reconstruct both halfsets, then compute and persist the halfmap FSC.
@@ -384,7 +451,9 @@ def _run_gold_standard(config: ReconstructionConfig, base_dir: str) -> Path:
     starts -- letting each worker open its own `Job` independently would
     race on `specter.jobs.Job`'s auto-numbering (see the module docstring).
     Workers never open their own `Job`; they only ever write into the path
-    this function hands them.
+    this function hands them, and report their results back through
+    `_run_both_halfsets`' `Queue` rather than a file of their own, so this
+    is also the only place gold-standard results ever reach `job.json`.
 
     Parameters
     ----------
@@ -403,9 +472,27 @@ def _run_gold_standard(config: ReconstructionConfig, base_dir: str) -> Path:
     ) as job:
         job.log(dataclasses.asdict(config))
         run_dir = job.dir
-        _run_both_halfsets(config, run_dir)
+        halfset_results = _run_both_halfsets(config, run_dir)
         resolution = _compute_and_save_gold_standard_fsc(run_dir)
-        job.log({"resolution_gold_standard": resolution})
-        _consolidate_resolutions(run_dir, final=resolution)
+        # halfset_results["A"/"B"]["resolutions"] is each worker's own
+        # per-epoch entries -- map-to-model from both, plus half-map from
+        # whichever one happened to finish each epoch second (see
+        # `Reconstructor._record_halfmap_resolutions`). Merging and sorting
+        # them here is what makes "every resolution for epoch N" a single
+        # lookup instead of a per-reader concatenation.
+        epochs = sorted(
+            (
+                entry
+                for summary in halfset_results.values()
+                for entry in summary.get("resolutions", [])
+            ),
+            key=lambda e: (e.get("epoch", 0), e.get("halfset") or ""),
+        )
+        job.log(
+            {
+                "resolution_gold_standard": resolution,
+                "results": {**halfset_results, "epochs": epochs},
+            }
+        )
 
     return run_dir

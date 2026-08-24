@@ -15,6 +15,7 @@ import subprocess as proc
 import sys
 from dataclasses import fields
 from pathlib import Path
+from typing import Any
 
 import mrcfile
 import numpy as np
@@ -341,11 +342,16 @@ def test_run_reconstruction_writes_a_numbered_job_directory(
 
     job_dir = job_base_dir / "reconstructions" / "J001"
     assert (job_dir / "volume.mrc").exists()
-    assert (job_dir / "params.json").exists()
+    # No params.json/metrics.json of its own -- job.json is the only JSON.
+    assert [p.name for p in job_dir.glob("*.json")] == ["job.json"]
 
     job = json.loads((job_dir / "job.json").read_text())
     assert job["project"] is None
     assert job["params"]["dose_per_angstrom"] == 40.0
+    # results_summary()'s hparams (voxel_size etc.) and metrics, folded in
+    # rather than written to their own file.
+    assert job["params"]["results"]["voxel_size"]
+    assert job["params"]["results"]["metrics"]
     assert job["params"]["device"] == "cpu"
     assert job["params"]["test_run"] is True
 
@@ -414,17 +420,23 @@ def test_run_reconstruction_gold_standard_default(
     assert "resolution_gold_standard" in job["params"]
 
 
-def test_gold_standard_writes_one_resolutions_file(
+def _job_params(job_dir: Path) -> dict[str, Any]:
+    return json.loads((job_dir / "job.json").read_text())["params"]
+
+
+def test_gold_standard_writes_no_json_but_job_json(
     real_particle_data: tuple[Path, Path], tmp_path: Path
 ) -> None:
-    """Every epoch's half-map FSC lands in one ``resolutions.json``.
+    """Every resolution lands in job.json -- no per-halfset or per-epoch file.
 
     The two halfsets reconstruct in separate worker processes, so neither
     holds the other's volume and neither can compute a half-map FSC alone.
     Whichever finishes an epoch second reads its sibling's volume off the
-    shared run directory and computes the pair, accumulating in memory;
-    both flush into their own metrics file, and the orchestrator merges
-    them once. One results file, not one per epoch.
+    shared run directory and computes the pair, accumulating in memory
+    rather than writing anything -- each worker reports back to the
+    orchestrator through a `multiprocessing.Queue`, once, when it exits, and
+    the orchestrator folds both into the one `job.json` its `Job` already
+    owns. ``job.json`` is the only JSON this run produces.
     """
     cs_file, mrc_file = real_particle_data
     job_base_dir = tmp_path / "out"
@@ -433,8 +445,12 @@ def test_gold_standard_writes_one_resolutions_file(
     run_reconstruction(config)
 
     job_dir = job_base_dir / "reconstructions" / "J001"
-    results = json.loads((job_dir / "resolutions.json").read_text())
-    assert results["resolution_gold_standard"]
+    assert [p.name for p in job_dir.glob("*.json")] == ["job.json"]
+    assert not list((job_dir / "epochs").glob("*.json"))
+
+    results = _job_params(job_dir)["results"]
+    assert results["A"]["metrics"]
+    assert results["B"]["metrics"]
 
     epochs = results["epochs"]
     assert epochs, "no per-epoch resolutions recorded"
@@ -442,9 +458,6 @@ def test_gold_standard_writes_one_resolutions_file(
         assert entry["resolution_gold_standard"]
         assert entry["computed_by_halfset"] in ("A", "B")
         assert (job_dir / "epochs" / f"fsc_halfmap_{entry['epoch']:03d}.png").exists()
-
-    # The per-epoch JSON fragments this replaced must not come back.
-    assert not list((job_dir / "epochs").glob("*.json"))
 
 
 def _fsc_fixtures(tmp_path: Path) -> tuple[Path, Path]:
@@ -482,10 +495,8 @@ def test_all_four_resolutions_recorded_when_refs_given(
 
     run_reconstruction(config)
 
-    results = json.loads(
-        (job_base_dir / "reconstructions" / "J001" / "resolutions.json").read_text()
-    )
-    entries = results["epochs"]
+    job_dir = job_base_dir / "reconstructions" / "J001"
+    entries = _job_params(job_dir)["results"]["epochs"]
 
     half = [e for e in entries if "resolution_gold_standard" in e]
     assert half, entries
@@ -520,7 +531,7 @@ def test_no_mask_and_no_reference_degrades_instead_of_failing(
     job_dir = job_base_dir / "reconstructions" / "J001"
     assert (job_dir / "volume_A.mrc").exists()
 
-    entries = json.loads((job_dir / "resolutions.json").read_text())["epochs"]
+    entries = _job_params(job_dir)["results"]["epochs"]
     half = [e for e in entries if "resolution_gold_standard" in e]
     assert half, "half-map FSC needs no reference and should still be recorded"
     for entry in half:
@@ -549,10 +560,9 @@ def test_reference_without_mask_records_only_unmasked(
 
     run_reconstruction(config)
 
-    results = json.loads(
-        (job_base_dir / "reconstructions" / "J001" / "resolutions.json").read_text()
-    )
-    m2m = [e for e in results["epochs"] if "resolution_map_to_model" in e]
+    job_dir = job_base_dir / "reconstructions" / "J001"
+    entries = _job_params(job_dir)["results"]["epochs"]
+    m2m = [e for e in entries if "resolution_map_to_model" in e]
     assert m2m
     for entry in m2m:
         assert entry["resolution_map_to_model"]

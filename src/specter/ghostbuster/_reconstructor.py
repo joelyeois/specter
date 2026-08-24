@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import os
 from pathlib import Path
 from typing import Any, Literal
@@ -191,11 +190,15 @@ class Reconstructor(_BaseReconstructor):
         )
         self._run_dir: Path | None = Path(run_dir) if run_dir is not None else None
         self._halfset_label: str | None = halfset_label
-        #: Per-epoch FSC resolutions, accumulated in memory and flushed into this
-        #: worker's own metrics file. Kept in memory rather than written per
-        #: epoch because the two halfset workers are separate processes and this
-        #: run directory is NFS, where flock does not work (it hangs).
+        #: Per-epoch FSC resolutions, accumulated in memory rather than written
+        #: to their own file per epoch -- see `results_summary`.
         self._epoch_resolutions: list[dict[str, Any]] = []
+        #: Hyperparameters and array-save metadata from `on_fit_start`,
+        #: accumulated rather than written to their own `params<suffix>.json`.
+        self._extra_params: dict[str, Any] = {}
+        #: Loss/lr history from `on_fit_end`, accumulated rather than written
+        #: to its own `metrics<suffix>.json`.
+        self._final_metrics: dict[str, Any] | None = None
 
         self._setup_optimization_state(
             lr, lr_R, lr_T, lr_D, sparsity, lr_decay, scheduler
@@ -641,10 +644,14 @@ class Reconstructor(_BaseReconstructor):
         return f"_{self._halfset_label}" if self._halfset_label is not None else ""
 
     def on_fit_start(self) -> None:
-        """Create the run directory and write metadata.
+        """Create the run directory and record metadata in memory.
 
         Rank-0-only under multi-GPU (DDP): every replica would otherwise
-        race to create/write the same files.
+        race to create/write the same files. The hyperparameters here are not
+        written to disk on their own -- ``results_summary()`` folds them into
+        the single ``job.json`` a caller writes once this worker has exited
+        (see that method's docstring for why: two halfset workers cannot
+        safely share one file while training).
         """
         if self._run_dir is None or not self.trainer.is_global_zero:
             return
@@ -658,14 +665,9 @@ class Reconstructor(_BaseReconstructor):
                 torch.save(tensor.detach().cpu(), self._run_dir / f"{name}.pt")
                 saved_arrays.append(name)
 
-        meta: dict[str, Any] = {}
-        meta.update(dict(self.hparams))
+        self._extra_params.update(dict(self.hparams))
         if saved_arrays:
-            meta["saved_arrays"] = saved_arrays
-        suffix = self._metrics_path_suffix()
-        (self._run_dir / f"params{suffix}.json").write_text(
-            json.dumps(meta, indent=2, default=str)
-        )
+            self._extra_params["saved_arrays"] = saved_arrays
         print(f"Run directory: {self._run_dir}")
 
     def on_fit_end(self) -> None:
@@ -676,9 +678,12 @@ class Reconstructor(_BaseReconstructor):
         all-reduce every step), so every rank would otherwise race to write
         the same output files.
         """
-        # Save metrics first (before v is computed, so they capture all epochs)
-        self._save_metrics(include_loss_std=True, include_lr_min=True)
-        self._flush_resolutions_into_metrics()
+        # Build metrics first (before v is computed, so they capture all
+        # epochs). write=False: kept in memory for results_summary() rather
+        # than written to its own metrics<suffix>.json -- see that method.
+        self._final_metrics = self._save_metrics(
+            include_loss_std=True, include_lr_min=True, write=False
+        )
 
         if self._run_dir is None or not self.trainer.is_global_zero:
             return
@@ -730,26 +735,38 @@ class Reconstructor(_BaseReconstructor):
         self._record_map_to_model_resolutions(v, epoch)
         self._record_halfmap_resolutions(epoch)
 
-    def _flush_resolutions_into_metrics(self) -> None:
+    def results_summary(self) -> dict[str, Any]:
         """
-        Write the accumulated per-epoch resolutions into this worker's metrics file.
+        Everything a caller should fold into ``job.json`` after this run.
 
-        ``metrics<suffix>.json`` already exists and has exactly one writer --
-        this process -- so appending here needs no coordination. That matters:
-        a run directory is typically on NFS, where ``flock`` does not work
-        (it hangs), so two halfset workers cannot safely share one file while
-        training. `specter.pipelines._reconstruct` consolidates both workers'
-        metrics into a single ``resolutions.json`` once they have exited.
+        `on_fit_start`/`on_fit_end` accumulate hyperparameters, final metrics
+        and per-epoch resolutions in memory instead of writing
+        ``params<suffix>.json``/``metrics<suffix>.json`` per halfset. The
+        reason is a run directory is typically on NFS, where ``flock`` does
+        not serialise concurrent writers -- it hangs -- so two halfset worker
+        processes cannot safely share one file while training. Rather than
+        work around that with one small file per epoch (the previous
+        approach), each worker holds its own results in memory and a caller
+        collects them once training has finished, when there is a single
+        writer again: `specter.pipelines._reconstruct._run_single_halfset`
+        sends this back to the orchestrator via a multiprocessing `Queue` for
+        a gold-standard run; `run_reconstruction` reads it directly off the
+        returned model for a single-halfset run, since that path never leaves
+        the calling process.
+
+        Returns
+        -------
+        dict
+            JSON-serializable. Hyperparameters and ``saved_arrays`` at the top
+            level, plus ``"metrics"`` (loss/lr history) and ``"resolutions"``
+            (per-epoch FSC entries) where available.
         """
-        if self._run_dir is None or not self._epoch_resolutions:
-            return
-        path = self._run_dir / f"metrics{self._metrics_path_suffix()}.json"
-        try:
-            meta = json.loads(path.read_text()) if path.is_file() else {}
-            meta["resolutions"] = self._epoch_resolutions
-            path.write_text(json.dumps(meta, indent=2, default=str))
-        except Exception as exc:
-            print(f"[ghostbuster] could not record resolutions: {exc}")
+        summary: dict[str, Any] = dict(self._extra_params)
+        if self._final_metrics is not None:
+            summary["metrics"] = self._final_metrics
+        if self._epoch_resolutions:
+            summary["resolutions"] = self._epoch_resolutions
+        return summary
 
     def _mask_for(self, volume: torch.Tensor) -> torch.Tensor | None:
         """

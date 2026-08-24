@@ -7,9 +7,48 @@ import torch
 
 from specter.fft import (
     fftconvolve,
+    fourier_shell_correlation,
     spatial_convolve2d_same,
     spatial_convolve3d_same,
 )
+
+
+def test_fsc_of_a_volume_with_itself_is_one():
+    torch.manual_seed(0)
+    volume = torch.randn(16, 16, 16)
+    k, fsc = fourier_shell_correlation(volume, volume, pixelsize=1.0)
+
+    assert k.shape == fsc.shape
+    assert torch.allclose(fsc, torch.ones_like(fsc), atol=1e-5)
+
+
+def test_fsc_frequency_axis_is_physical():
+    """Shell spacing is 1/(N * pixelsize), and shells run past Nyquist out to
+    the corners of the Fourier cube (sqrt(3) * Nyquist)."""
+    n, pixelsize = 16, 2.0
+    volume = torch.randn(n, n, n)
+    k, _ = fourier_shell_correlation(volume, volume, pixelsize=pixelsize)
+
+    assert k[0] == 0.0
+    assert k[1] == pytest.approx(1.0 / (n * pixelsize))
+    nyquist = 1.0 / (2.0 * pixelsize)
+    assert k[-1] == pytest.approx(3.0**0.5 * nyquist, rel=0.05)
+
+
+def test_fsc_rejects_non_cubic_volumes():
+    """Shells are binned by voxel-index radius, which only matches physical
+    frequency for a cubic box. A non-cubic volume must raise rather than
+    return a silently wrong k axis."""
+    a = torch.randn(8, 12, 16)
+    with pytest.raises(ValueError, match="cubic"):
+        fourier_shell_correlation(a, a, pixelsize=1.0)
+
+
+def test_fsc_rejects_mismatched_shapes():
+    with pytest.raises(ValueError, match="same shape"):
+        fourier_shell_correlation(
+            torch.randn(8, 8, 8), torch.randn(16, 16, 16), pixelsize=1.0
+        )
 
 
 def test_spatial_convolve3d_same_matches_fftconvolve_odd_kernel():

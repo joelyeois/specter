@@ -560,10 +560,11 @@ def plot_map_to_model_fsc(
     if labels is None:
         labels = [f"vol {i}" for i in range(n_volumes)]
 
-    def _res_at_half(k_arr: torch.Tensor, fsc_arr: torch.Tensor) -> str:
-        return fsc_resolution(k_arr, fsc_arr, MAP_TO_MODEL_FSC_THRESHOLD)
-
     nyquist = 1.0 / (2.0 * voxel_size)
+
+    def _res_at_half(k_arr: torch.Tensor, fsc_arr: torch.Tensor) -> str:
+        return fsc_resolution(k_arr, fsc_arr, MAP_TO_MODEL_FSC_THRESHOLD, k_max=nyquist)
+
     palette = _deep_palette(max(n_volumes, 1))
 
     fig, ax = plt.subplots(figsize=(7, 4.5), dpi=150)

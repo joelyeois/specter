@@ -514,12 +514,35 @@ def fourier_shell_correlation(
     Returns
     -------
     k : torch.Tensor
-        Spatial frequency axis (units: 1/pixelsize).
+        Spatial frequency axis (units: 1/pixelsize). Shells run out to the
+        *corners* of the Fourier cube, so the axis extends past Nyquist by a
+        factor of sqrt(3); those trailing shells are sampled from the corner
+        directions alone. Pass ``k_max=1/(2*pixelsize)`` to `plots.fsc_resolution`
+        to keep a crossing in that aliased tail out of a reported resolution.
     fsc : torch.Tensor
         FSC curve, one value per Fourier shell.
+
+    Raises
+    ------
+    ValueError
+        If the volumes differ in shape, or are not cubic. Shells are binned by
+        voxel-index radius, which coincides with physical frequency only when
+        every axis has the same length; a non-cubic volume would otherwise
+        return a silently wrong ``k`` axis.
     """
     # Lazy import to avoid circular dependency (arrays imports fft)
     from .arrays import radial_profile_3d
+
+    if volume1.shape != volume2.shape:
+        raise ValueError(
+            f"Volumes must have the same shape, got {tuple(volume1.shape)} "
+            f"and {tuple(volume2.shape)}."
+        )
+    if volume1.ndim != 3 or len(set(volume1.shape)) != 1:
+        raise ValueError(
+            "fourier_shell_correlation requires cubic (N, N, N) volumes, got "
+            f"{tuple(volume1.shape)}."
+        )
 
     n = volume1.shape[0]
     device = volume1.device

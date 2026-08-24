@@ -41,6 +41,9 @@ anything else with it. Both quantities are evaluated once per `Scattering`
 instance and reused for every slice and every particle.
 
 ![Wavelength and interaction parameter vs. accelerating voltage, with the standard 100/200/300 kV checkpoints marked.](../../assets/images/scattering-sigma-wavelength-vs-voltage.png){ width="600" }
+///caption
+Wavelength and interaction parameter vs. accelerating voltage, with the standard 100/200/300 kV checkpoints marked.
+///
 
 300 kV gives \(\lambda = 1.9687\) pm, matching the standard textbook
 checkpoint (1.969 pm) used elsewhere in this documentation to validate

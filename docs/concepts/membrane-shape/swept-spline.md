@@ -1,6 +1,9 @@
 # Membrane shape: swept spline
 
 ![A random wandering tube, rendered as a shaded 3D isosurface.](../../assets/images/membrane-swept-hero.png){ width="620" style="display:block;margin:1.2em auto;" }
+///caption
+A random wandering tube, rendered as a shaded 3D isosurface.
+///
 
 `MembraneGenerator` builds elongated, wandering tubes
 (`shape_backend="swept_spline"`) by sweeping a sphere along a smooth random
@@ -33,6 +36,9 @@ smoothing would then average together points that are near in space but far
 apart along the path.
 
 ![Raw random walk next to the recentered, path-order-smoothed version used for sphere placement.](../../assets/images/membrane-swept-path.png){ width="700" style="display:block;margin:1.2em auto;" }
+///caption
+Raw random walk next to the recentered, path-order-smoothed version used for sphere placement.
+///
 
 ## Sweeping a tube
 
@@ -56,6 +62,9 @@ Spacing consecutive spheres (`step_length_a`) too far apart relative to
 `tube_radius_a` produces visible beading instead of a continuous tube:
 
 ![Longitudinal slice through a straight chain of spheres: smooth fusion vs. visible beading.](../../assets/images/membrane-swept-beading.png){ width="700" style="display:block;margin:1.2em auto;" }
+///caption
+Longitudinal slice through a straight chain of spheres: smooth fusion vs. visible beading.
+///
 
 ## Varying the radius
 
@@ -78,6 +87,9 @@ drift over a long path. Smoothed noise stays anchored to `tube_radius_a`
 regardless of path length.
 
 ![Same random path, constant vs. varying radius.](../../assets/images/membrane-swept-radius-variation.png){ width="800" style="display:block;margin:1.2em auto;" }
+///caption
+Same random path, constant vs. varying radius.
+///
 
 Both tubes above come from the same seed. Path sampling happens before
 the radius draw, so the underlying wander is identical; only the caliber
@@ -109,6 +121,9 @@ damping sharp features fastest while leaving already-smooth regions largely
 unchanged.
 
 ![Mid-surface contour at a tight concave bend, before and after cap_curvature.](../../assets/images/membrane-swept-curvature-capping.png){ width="420" style="display:block;margin:1.2em auto;" }
+///caption
+Mid-surface contour at a tight concave bend, before and after cap_curvature.
+///
 
 The concave corner fills in slightly (surface pulled outward) and the
 adjacent convex bulge is pulled inward; both reduce local curvature.
@@ -127,6 +142,9 @@ adjacent convex bulge is pulled inward; both reduce local curvature.
 | `curvature_iterations` | Number of Laplacian relaxation steps | 15 |
 
 ![Flexibility swept from a nearly straight rod to a tightly wandering, near-self-touching walk.](../../assets/images/membrane-swept-flexibility-sweep.png){ width="900" style="display:block;margin:1.2em auto;" }
+///caption
+Flexibility swept from a nearly straight rod to a tightly wandering, near-self-touching walk.
+///
 
 `flexibility=0.15`: 0.05 is nearly a straight rod, 0.35 produces a sharp,
 near-self-touching bend (a good stress case, not a good default); 0.15

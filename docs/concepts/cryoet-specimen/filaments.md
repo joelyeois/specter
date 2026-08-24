@@ -1,6 +1,9 @@
 # Filaments
 
 ![A filaments-only specimen: fourteen actin filaments scattered through the box, summed along Z.](../../assets/images/cryoet-filament-hero.png){ width="620" style="display:block;margin:1.2em auto;" }
+///caption
+A filaments-only specimen: fourteen actin filaments scattered through the box, summed along Z.
+///
 
 A filament species consists of a single monomer structure, replicated along
 a random walk. Each monomer instance is represented as a rigid-transformed
@@ -39,6 +42,9 @@ Curvature is bounded *per step* and unbounded *cumulatively*: the
 worm-like-chain regime.
 
 ![Filament paths at four flex_deg values, all with the same monomer count and axial rise, drawn at a common scale.](../../assets/images/cryoet-filament-flex-sweep.png){ width="900" style="display:block;margin:1.2em auto;" }
+///caption
+Filament paths at four flex_deg values, all with the same monomer count and axial rise, drawn at a common scale.
+///
 
 All four paths shown have identical contour length; only the tangling
 differs. This is what makes `flex_deg` the persistence knob: increasing it
@@ -70,6 +76,9 @@ axis** points along \(+Z\). This is an approximation; see
 `twist_deg` is what separates a helical polymer from a plain stack:
 
 ![The same straight monomer chain rendered with twist_deg = 0 and with F-actin's real 166.15 degrees per monomer.](../../assets/images/cryoet-filament-twist.png){ width="900" style="display:block;margin:1.2em auto;" }
+///caption
+The same straight monomer chain rendered with twist_deg = 0 and with F-actin's real 166.15 degrees per monomer.
+///
 
 Without twist every monomer presents the same face and the strand reads as
 a uniform ridge. With F-actin's measured 166.15° per subunit, the
@@ -78,6 +87,9 @@ projection picks up the crossover pattern a real F-actin filament shows.
 ## Presets
 
 ![F-actin and a microtubule protofilament rendered at the same scale.](../../assets/images/cryoet-filament-presets.png){ width="900" style="display:block;margin:1.2em auto;" }
+///caption
+F-actin and a microtubule protofilament rendered at the same scale.
+///
 
 | Preset | `code` | `step` (Å) | `flex_deg` | `twist_deg` | `n_monomers` |
 |---|---|---|---|---|---|

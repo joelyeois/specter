@@ -59,6 +59,9 @@ model's relative error in exit-wave intensity \(|\psi|^2\) against
 `multislice` as the reference:
 
 ![Relative error in exit-wave intensity vs. multislice, as a function of ice thickness, for Rytov (highlighted) against the other three approximate modes (faint, for context).](../../assets/images/scattering-accuracy-vs-thickness-rytov.png){ width="600" }
+///caption
+Relative error in exit-wave intensity vs. multislice, as a function of ice thickness, for Rytov (highlighted) against the other three approximate modes (faint, for context).
+///
 
 Across this thickness range (up to 320 Å, spanning typical single-particle
 ice thickness), Rytov's error stays one to two orders of magnitude below

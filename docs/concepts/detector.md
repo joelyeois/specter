@@ -37,6 +37,9 @@ pixels, never destroy it, which is what `Detector.add_mtf`'s Fourier-space
 multiply implements.
 
 ![MTF vs. spatial frequency for every bundled detector model.](../assets/images/detector-mtf-overlay.png){ width="600" }
+///caption
+MTF vs. spatial frequency for every bundled detector model.
+///
 
 The K3 curves come directly from Gatan's published MTF datasheets. The
 Falcon 4i curves are derived instead from three published DQE points (0,
@@ -61,6 +64,9 @@ reduced signal *and* the correct (reduced) shot noise; folding
 \(\sqrt{\mathrm{DQE}(0)}\) and give the wrong noise statistics entirely.
 
 ![DQE(0) per detector model.](../assets/images/detector-dqe0-bar.png){ width="500" }
+///caption
+DQE(0) per detector model.
+///
 
 Only Falcon 4i has a traceable low-dose-rate published value; K3's
 datasheet publishes an MTF with no accompanying DQE(0) figure, so it
@@ -87,6 +93,9 @@ exclusion area matches an exact pairwise disc calculation to within
 0.4%.
 
 ![Left: detected/incident electron ratio vs. incident dose, at the Falcon 4i-calibrated coincidence radius. Right: radially averaged noise power spectrum with and without coincidence loss, at a fixed dose, both normalized to their own high-frequency plateau.](../assets/images/detector-coincidence-loss.png){ width="900" style="display:block;margin:1.2em auto;" }
+///caption
+Left: detected/incident electron ratio vs. incident dose, at the Falcon 4i-calibrated coincidence radius. Right: radially averaged noise power spectrum with and without coincidence loss, at a fixed dose, both normalized to their own high-frequency plateau.
+///
 
 Two consequences of the same mechanism. On the left, detected efficiency
 falls steeply with incident dose rate -- more electrons arriving in the

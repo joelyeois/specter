@@ -1,6 +1,9 @@
 # Cryo-ET specimen assembly
 
 ![A simulated cryo-ET specimen, summed along Z: crowded cytosolic protein, three vesicles, actin filaments, two long flexible microtubules crossing the field of view, gold fiducial beads, and a carbon film edge along the bottom.](../../assets/images/cryoet-tomogram-hero.png){ width="700" style="display:block;margin:1.2em auto;" }
+///caption
+A simulated cryo-ET specimen, summed along Z: crowded cytosolic protein, three vesicles, actin filaments, two long flexible microtubules crossing the field of view, gold fiducial beads, and a carbon film edge along the bottom.
+///
 
 `TomogramSpecimenGenerator` is the single specimen generator behind
 [`specter build tomogram`](../../user-guide/build-tomogram.md). It
@@ -77,6 +80,9 @@ Two consequences worth knowing before you read a rendered volume:
 ## Regions
 
 ![The same specimen as the hero image, a thin mid-Z slab, painted by component from the run's own ground-truth label volumes.](../../assets/images/cryoet-tomogram-components.png){ width="620" style="display:block;margin:1.2em auto;" }
+///caption
+The same specimen as the hero image, a thin mid-Z slab, painted by component from the run's own ground-truth label volumes.
+///
 
 Once every membrane has been composited, the volume is classified once, on
 the composite, into three disjoint regions: `shell` (bilayer material),
@@ -97,6 +103,9 @@ the label volumes below are what make a generated tomogram usable as
 training data:
 
 ![Region map, per-instance membrane labels, and per-instance protein/filament/bead labels, all from the same mid-Z slice.](../../assets/images/cryoet-tomogram-ground-truth.png){ width="900" style="display:block;margin:1.2em auto;" }
+///caption
+Region map, per-instance membrane labels, and per-instance protein/filament/bead labels, all from the same mid-Z slice.
+///
 
 - `regions`: `0` cytosol, `1` shell, `2` lumen.
 - `membrane_labels`: which membrane instance a shell voxel belongs to.

@@ -135,6 +135,9 @@ both unrepresentative of real configs and, at voxel_size=2, dominated by
 per-instance rendering cost:
 
 ![Same field of view rendered at voxel_size = 10, 5, and 2 Å/voxel: a sum Z projection of each output volume, showing the same membrane and densely crowded protein layout at increasing voxel resolution.](../assets/images/tomogram-benchmark-projections.png){ width="900" style="display:block;margin:1.2em auto;" }
+///caption
+Same field of view rendered at voxel_size = 10, 5, and 2 Å/voxel: a sum Z projection of each output volume, showing the same membrane and densely crowded protein layout at increasing voxel resolution.
+///
 
 | `voxel_size` (Å/voxel) | Shape (Z, Y, X voxels) | Wall time | GPU peak | RAM peak |
 |---|---|---|---|---|

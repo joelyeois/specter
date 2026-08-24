@@ -119,6 +119,9 @@ matching real particle images
 (`docs-figures/data/empiar-11377-real-5particles.mrcs`) gives:
 
 ![Five SPECTER-simulated particles (top row) next to the five real EMPIAR-11377 particles their poses/CTF were taken from (bottom row).](../assets/images/particle-stack-empiar-11377-comparison.png){ width="900" style="display:block;margin:1.2em auto;" }
+///caption
+Five SPECTER-simulated particles (top row) next to the five real EMPIAR-11377 particles their poses/CTF were taken from (bottom row).
+///
 
 That's a qualitative check on 5 particles. The stronger, quantitative check
 comes from CryoSPARC itself: 2000 real EMPIAR-11377 particles and 2000
@@ -130,6 +133,9 @@ they're mixed with, in roughly the same proportion per class. That is
 what happens across nearly all 50 classes:
 
 ![Per-class particle counts from a CryoSPARC 2D Classification job run on a pooled real+simulated EMPIAR-11377 stack, split by source.](../assets/images/particle-stack-empiar-11377-2d-classes.png){ width="900" style="display:block;margin:1.2em auto;" }
+///caption
+Per-class particle counts from a CryoSPARC 2D Classification job run on a pooled real+simulated EMPIAR-11377 stack, split by source.
+///
 
 This second figure isn't reproducible from the repo alone: it requires
 actually running CryoSPARC. But the per-particle class assignments behind

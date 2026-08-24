@@ -1,6 +1,9 @@
 # Carbon support film
 
 ![A carbon film summed along Z: a strip of film intruding from the bottom edge of the frame, with a rough, granular rim.](../../assets/images/cryoet-carbon-hero.png){ width="620" style="display:block;margin:1.2em auto;" }
+///caption
+A carbon film summed along Z: a strip of film intruding from the bottom edge of the frame, with a rough, granular rim.
+///
 
 The support film is a roughly planar slab of amorphous carbon with a
 circular hole cut through it. It is painted into the canvas before
@@ -27,6 +30,9 @@ entirely on the carbon, or catching one hole's edge near a frame border.
 A small hole fully contained in the frame is not a thing you see.
 
 ![Left: three hole circles drawn to scale against the field of view. Right: the resulting film at three edge_fraction values.](../../assets/images/cryoet-carbon-hole-geometry.png){ width="900" style="display:block;margin:1.2em auto;" }
+///caption
+Left: three hole circles drawn to scale against the field of view. Right: the resulting film at three edge_fraction values.
+///
 
 Hand-placing that means solving for where a huge circle's boundary has to
 sit so that a strip of a specific width lands at a specific frame edge.
@@ -56,6 +62,9 @@ past their neighbours, and the alpha complex turns that into a boundary
 that is correlated at the seed scale and topologically nontrivial:
 
 ![Rim detail at edge_roughness 0, 60 and 150 Å.](../../assets/images/cryoet-carbon-roughness.png){ width="900" style="display:block;margin:1.2em auto;" }
+///caption
+Rim detail at edge_roughness 0, 60 and 150 Å.
+///
 
 At the shipped default of 60 Å, the boundary's radial standard deviation
 comes out to roughly a third of that, ~20 Å. Even `edge_roughness = 0` is
@@ -66,6 +75,9 @@ Being a genuine 3D construction rather than a per-angle function of the
 outline, the boundary is different at different heights in the slab:
 
 ![Three z-slices through the same film, showing different boundaries, detached islands and overhanging lips.](../../assets/images/cryoet-carbon-slices.png){ width="900" style="display:block;margin:1.2em auto;" }
+///caption
+Three z-slices through the same film, showing different boundaries, detached islands and overhanging lips.
+///
 
 A simpler analytic construction, jittering a circle's radius per angle and
 interpolating, cannot produce this: it gives flat top and bottom faces, a
@@ -90,6 +102,9 @@ real per-atom physics path was prototyped separately and measured at
 answer.
 
 ![Left: mean inner potential at three placed-density fractions against the literature range for amorphous carbon. Right: the rendered film's own voxel histogram.](../../assets/images/cryoet-carbon-calibration.png){ width="900" style="display:block;margin:1.2em auto;" }
+///caption
+Left: mean inner potential at three placed-density fractions against the literature range for amorphous carbon. Right: the rendered film's own voxel histogram.
+///
 
 Atoms are placed at **0.7× bulk number density**, not bulk. That is a
 calibration, not a fudge factor for appearance: the independent-atom model

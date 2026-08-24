@@ -69,8 +69,14 @@ in the real part, and only the higher-frequency content that genuinely
 diffracts leaks into \(b\).
 
 ![Standard deviation of Re(Θ) and Im(Θ) vs. thickness, for a RandomIcemaker ice slab. Re(Θ) dominates Im(Θ) at every thickness tested -- by roughly 50x at the thinnest slab and still 2.6x at the thickest.](../../assets/images/scattering-theta-real-imag-split.png){ width="600" }
+///caption
+Standard deviation of Re(Θ) and Im(Θ) vs. thickness, for a RandomIcemaker ice slab. Re(Θ) dominates Im(Θ) at every thickness tested -- by roughly 50x at the thinnest slab and still 2.6x at the thickest.
+///
 
 ![Correlation of each mode's intensity pattern with multislice's true pattern, vs. thickness. rytov stays at 1.000 throughout; firstborn and kinematic sit near zero across the entire range, including the thinnest specimen tested.](../../assets/images/scattering-pattern-correlation-vs-thickness.png){ width="600" }
+///caption
+Correlation of each mode's intensity pattern with multislice's true pattern, vs. thickness. rytov stays at 1.000 throughout; firstborn and kinematic sit near zero across the entire range, including the thinnest specimen tested.
+///
 
 `firstborn`'s intensity fluctuation is dominated by the spurious \(a^2\)
 term rather than the physically correct \(-2b\) term at every thickness
@@ -116,6 +122,9 @@ using the same `RandomIcemaker` ice slab, 300 kV, sweep as [Rytov's
 accuracy figure](rytov.md#accuracy-vs-thickness):
 
 ![Relative error in exit-wave intensity vs. multislice, as a function of ice thickness, for first Born, kinematic, and projection (highlighted) against Rytov (faint, for context).](../../assets/images/scattering-accuracy-vs-thickness-other-modes.png){ width="600" }
+///caption
+Relative error in exit-wave intensity vs. multislice, as a function of ice thickness, for first Born, kinematic, and projection (highlighted) against Rytov (faint, for context).
+///
 
 `projection` scores lower than `firstborn`/`kinematic` here, but not
 because it approximates thickness effects well. Writing
@@ -131,8 +140,14 @@ construction at `alpha=0`), so its \(E\) instead measures only how far
 `multislice`'s own true contrast is from flat.
 
 ![Mean exit-wave intensity vs. thickness, per model. A properly normalized exit wave conserves total intensity (multislice and projection stay pinned to 1.0); firstborn and kinematic drift up to +39% by 320 A.](../../assets/images/scattering-mean-intensity-vs-thickness.png){ width="600" }
+///caption
+Mean exit-wave intensity vs. thickness, per model. A properly normalized exit wave conserves total intensity (multislice and projection stay pinned to 1.0); firstborn and kinematic drift up to +39% by 320 A.
+///
 
 ![Exit-wave intensity maps at 320 A, side by side. multislice and rytov show fine, correlated speckle; firstborn is a different, coarser pattern riding on a strongly biased mean; projection is exactly flat.](../../assets/images/scattering-mode-intensity-maps.png){ width="900" style="display:block;margin:1.2em auto;" }
+///caption
+Exit-wave intensity maps at 320 A, side by side. multislice and rytov show fine, correlated speckle; firstborn is a different, coarser pattern riding on a strongly biased mean; projection is exactly flat.
+///
 
 Neither curve tests spatial pattern fidelity -- that's the [pattern
 correlation figure](#where-the-linearization-breaks-down) above, where

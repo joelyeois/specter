@@ -81,6 +81,9 @@ this scale). The Gaussian terms only matter as a small, smooth correction
 across the whole range.
 
 ![Kirkland's fit for gold, decomposed into its 3 Lorentzian and 3 Gaussian terms.](../assets/images/atomic-potential-lorentzian-gaussian-terms-kirkland.png){ width="700" }
+///caption
+Kirkland's fit for gold, decomposed into its 3 Lorentzian and 3 Gaussian terms.
+///
 
 ## Lobato: a rational Fourier form
 
@@ -158,6 +161,9 @@ carbonyl and carboxyl carbons and oxygens, aromatic ring junctions, proline's
 nitrogen, disulfides, and the nucleic-acid phosphate backbone.
 
 ![Kirkland, Lobato, and Peng's independent-atom-model potentials for carbon, overlaid.](../assets/images/atomic-potential-parameterization-comparison.png){ width="600" }
+///caption
+Kirkland, Lobato, and Peng's independent-atom-model potentials for carbon, overlaid.
+///
 
 Kirkland and Lobato, both fit directly to the same tabulated bare-carbon
 scattering factors, agree to within 0.1% everywhere in this plot. Peng's
@@ -249,14 +255,23 @@ walks through the same four steps as `docs-figures/atomic_potentials.py`:
    scan through the atom centers (Kirkland Fig. 5.13).
 
 ![3D atomic potential against radius, per element.](../assets/images/atomic-potential-3d-kirkland.png){ width="600" }
+///caption
+3D atomic potential against radius, per element.
+///
 
 ![The same potentials projected to 2D, as used by the faster projection path.](../assets/images/projected-atomic-potential-2d-kirkland.png){ width="600" }
+///caption
+The same potentials projected to 2D, as used by the faster projection path.
+///
 
 The line scan below places SPECTER's own output directly above a scan of
 Kirkland's Fig. 5.13 for comparison. The dip depth and width at every
 element match to within plotting resolution.
 
 ![SPECTER's bright-field line scan through C, Si, Cu, Au and U, compared against Kirkland's Fig. 5.13.](../assets/images/coherent-bright-field-linescan-kirkland.png){ width="600" }
+///caption
+SPECTER's bright-field line scan through C, Si, Cu, Au and U, compared against Kirkland's Fig. 5.13.
+///
 
 ## References
 

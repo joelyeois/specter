@@ -54,6 +54,9 @@ actually varies pixel to pixel here -- after 1, 40, 80, 120, and all 160
 slices.
 
 ![Exit-wave contrast (the deviation of intensity from its unit baseline) through the multislice recursion, at five depths through a 320 Å ice slab. White = no deviation from the unit baseline; darker = larger deviation, in either direction.](../../assets/images/multislice-recursion-trace.png){ width="900" style="display:block;margin:1.2em auto;" }
+///caption
+Exit-wave contrast (the deviation of intensity from its unit baseline) through the multislice recursion, at five depths through a 320 Å ice slab. White = no deviation from the unit baseline; darker = larger deviation, in either direction.
+///
 
 After a single slice the intensity is uniform: a thin phase object barely
 perturbs \(|\psi|^2\), since a pure phase factor \(e^{i\phi}\) has unit
@@ -78,6 +81,9 @@ step (`self.kmask`), sacrificing some legitimate high-frequency signal to
 prevent it aliasing back in as low-frequency noise:
 
 ![Radial power spectrum of the exit wave with and without klim=0.66, at the full 320 Å slab thickness.](../../assets/images/multislice-klim-bandlimit.png){ width="600" }
+///caption
+Radial power spectrum of the exit wave with and without klim=0.66, at the full 320 Å slab thickness.
+///
 
 Content below the `klim`-scaled cutoff is untouched (the two curves
 overlap); content above it is suppressed by roughly ten orders of

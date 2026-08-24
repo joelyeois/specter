@@ -1,6 +1,9 @@
 # Gold fiducial beads
 
 ![A single bead's boundary at the default roughness: an irregular quasi-sphere, shaded.](../../assets/images/cryoet-bead-hero.png){ width="620" style="display:block;margin:1.2em auto;" }
+///caption
+A single bead's boundary at the default roughness: an irregular quasi-sphere, shaded.
+///
 
 Fiducial beads are the one component with no PDB behind them. There is no
 atomic structure to hand `PotentialBuilder`, so the density has to come
@@ -36,6 +39,9 @@ would be dimensionally inconsistent with the V-unit output and
 unphysically dependent on voxel size.
 
 ![Left, integrated potential across roughness values, normalised to the nominal sphere. Right, gold's mean inner potential by three independent routes.](../../assets/images/cryoet-bead-calibration.png){ width="900" style="display:block;margin:1.2em auto;" }
+///caption
+Left, integrated potential across roughness values, normalised to the nominal sphere. Right, gold's mean inner potential by three independent routes.
+///
 
 The right panel functions as a consistency check rather than a result.
 Bulk mass density and the fcc lattice's own number density
@@ -51,6 +57,9 @@ Debye-Waller jitter (\(u_{\text{RMS}} = 0.087\) Å, from \(B \approx 0.6\)
 kernel:
 
 ![A bead's central slice at 1 Å/voxel, resolving lattice fringes, and at 5 Å/voxel, where it reads as a solid slab.](../../assets/images/cryoet-bead-lattice.png){ width="900" style="display:block;margin:1.2em auto;" }
+///caption
+A bead's central slice at 1 Å/voxel, resolving lattice fringes, and at 5 Å/voxel, where it reads as a solid slab.
+///
 
 Each bead draws its own crystal orientation uniformly over SO(3), so no
 two fiducials show their fringes running the same way.
@@ -88,6 +97,9 @@ calibration figure above shows: total integrated potential, and therefore
 projected signal, never depends on how lumpy a particular bead came out.
 
 ![Bead boundaries at roughness 0, 0.06, 0.12 and 0.24, all volume-matched to the same nominal radius.](../../assets/images/cryoet-bead-roughness-sweep.png){ width="900" style="display:block;margin:1.2em auto;" }
+///caption
+Bead boundaries at roughness 0, 0.06, 0.12 and 0.24, all volume-matched to the same nominal radius.
+///
 
 Below about 0.06 a bead is visually indistinguishable from a sphere while
 still costing the harmonic machinery; 0.12–0.20 reads as a genuinely

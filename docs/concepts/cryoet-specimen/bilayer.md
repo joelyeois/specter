@@ -1,6 +1,9 @@
 # Bilayer profile & transmembrane proteins
 
 ![A vesicle's sampled transmembrane sites with their surface normals, and the rendered slab with bacteriorhodopsin embedded in the bilayer.](../../assets/images/cryoet-bilayer-transmembrane.png){ width="880" style="display:block;margin:1.2em auto;" }
+///caption
+A vesicle's sampled transmembrane sites with their surface normals, and the rendered slab with bacteriorhodopsin embedded in the bilayer.
+///
 
 [Membrane shape](../membrane-shape/index.md) produces a signed field
 \(\phi\): the geometry. This page covers everything between that field
@@ -34,6 +37,9 @@ distance anyway, a Gaussian at each leaflet's offset *is* the
 cross-section of a thin shell blurred by \(\sigma\).
 
 ![Left, the atomic lipid patch's own profile against the shipped analytic profile. Right, the effect of bilayer_thickness and layer_sigma_a.](../../assets/images/cryoet-bilayer-profile.png){ width="900" style="display:block;margin:1.2em auto;" }
+///caption
+Left, the atomic lipid patch's own profile against the shipped analytic profile. Right, the effect of bilayer_thickness and layer_sigma_a.
+///
 
 The alternative, deriving the profile's *shape* by building a schematic
 atomic lipid patch, jittering it and rendering it, is still in the
@@ -81,6 +87,9 @@ does not. Resampling between them is where a real, previously observed
 failure mode lives.
 
 ![The same membrane field rasterized at 4, 8 and 12 Å voxels, point-sampled on top and anti-aliased below, along a line through the vesicle wall.](../../assets/images/cryoet-bilayer-antialias.png){ width="900" style="display:block;margin:1.2em auto;" }
+///caption
+The same membrane field rasterized at 4, 8 and 12 Å voxels, point-sampled on top and anti-aliased below, along a line through the vesicle wall.
+///
 
 Point-sampling the fine density directly (top row) keeps the two leaflets
 sharp and full height at *every* voxel size. The peaks just land wherever

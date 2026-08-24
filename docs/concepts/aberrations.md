@@ -88,6 +88,9 @@ transfer, i.e. what makes a Thon ring pattern in a power spectrum) over
 the full 2D frequency plane:
 
 ![Im[T(k)] over the 2D frequency plane for isotropic defocus, astigmatism, trefoil, and tetrafoil, each isolated.](../assets/images/aberrations-modes-2d.png){ width="900" style="display:block;margin:1.2em auto;" }
+///caption
+Im[T(k)] over the 2D frequency plane for isotropic defocus, astigmatism, trefoil, and tetrafoil, each isolated.
+///
 
 Isotropic defocus gives concentric rings; astigmatism stretches them into
 ellipses (its cross section along `dfang` and perpendicular to it are
@@ -111,6 +114,9 @@ Putting defocus and Cs together at typical 300 kV single-particle values
 (2 µm defocus, 2.7 mm \(C_s\)) gives the familiar oscillating CTF curve:
 
 ![Re[T(k)] and Im[T(k)] vs. spatial frequency, at 2 um defocus and 2.7 mm Cs, 300 kV. Dotted lines mark the first several zero crossings of Im[T(k)].](../assets/images/aberrations-ctf-1d.png){ width="700" }
+///caption
+Re[T(k)] and Im[T(k)] vs. spatial frequency, at 2 um defocus and 2.7 mm Cs, 300 kV. Dotted lines mark the first several zero crossings of Im[T(k)].
+///
 
 \(\mathrm{Im}[T(k)] = -\sin\chi(k)\) is the phase-contrast transfer
 function: its zero crossings are the spatial frequencies at which a
@@ -164,6 +170,9 @@ critical-dose curve and is exactly 1 below their fitted \(c=2.81\)
 e⁻/Å² threshold.
 
 ![Left: the four envelopes in isolation, plus their product (B x Cs x Cc). Right: the same isotropic CTF curve from above, with and without the combined B/Cs/Cc envelope applied.](../assets/images/aberrations-envelopes.png){ width="900" style="display:block;margin:1.2em auto;" }
+///caption
+Left: the four envelopes in isolation, plus their product (B x Cs x Cc). Right: the same isotropic CTF curve from above, with and without the combined B/Cs/Cc envelope applied.
+///
 
 Each envelope sets a different practical resolution limit, and the
 combined envelope (their product) is what ultimately damps the CTF's

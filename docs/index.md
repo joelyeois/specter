@@ -7,12 +7,14 @@
 
 <strong>S</strong>cattering & <strong>P</strong>ropagation of <strong>E</strong>lectrons in
 <strong>C</strong>ryo-EM: <strong>T</strong>win <strong>E</strong>mulator &
-<strong>R</strong>econstruction. A physics-based simulator for cryo-EM and cryo-ET,
-built to produce images that match experimental data as closely as
-possible.
+<strong>R</strong>econstruction. A differentiable digital twin for cryo-EM and
+cryo-ET.
 
 <p align="center" markdown>
   ![A simulated cryo-ET specimen](assets/images/cryoet-tomogram-hero.png){ width="560" }
+  ///caption
+  A simulated cryo-ET specimen
+  ///
 </p>
 
 ---

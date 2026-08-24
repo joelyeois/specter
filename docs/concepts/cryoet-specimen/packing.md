@@ -1,6 +1,9 @@
 # Regions & protein packing
 
 ![A region-gated run: density on the left, ground-truth labels on the right, showing a cytosol species outside every vesicle and a lumen species only inside them.](../../assets/images/cryoet-packing-hero.png){ width="900" style="display:block;margin:1.2em auto;" }
+///caption
+A region-gated run: density on the left, ground-truth labels on the right, showing a cytosol species outside every vesicle and a lumen species only inside them.
+///
 
 Protein fill is the last and densest stage of specimen assembly. It
 answers two questions per species: *where is this allowed to be*, and
@@ -94,6 +97,9 @@ concave molecule reserves several times the room it occupies.
 The cost of that difference is the whole point:
 
 ![Achieved macromolecule volume fraction against requested occupancy_fraction, for the shape and sphere backends, with the physiological crowding band and CryoTomoSim's own density marked.](../../assets/images/cryoet-packing-backends.png){ width="620" style="display:block;margin:1.2em auto;" }
+///caption
+Achieved macromolecule volume fraction against requested occupancy_fraction, for the shape and sphere backends, with the physiological crowding band and CryoTomoSim's own density marked.
+///
 
 | | sphere | shape |
 |---|---|---|
@@ -170,6 +176,9 @@ is ~90× faster than a naive one-at-a-time RSA loop at a few thousand
 spheres, while still accepting ~99% as many.
 
 ![Left, drawn versus accepted instances per species radius. Right, acceptance rate by radius.](../../assets/images/cryoet-packing-staging.png){ width="900" style="display:block;margin:1.2em auto;" }
+///caption
+Left, drawn versus accepted instances per species radius. Right, acceptance rate by radius.
+///
 
 Staging by size matters because a large sphere has more potential conflict
 partners than a small one at any given density. Mixing all sizes into one
@@ -185,6 +194,9 @@ measurements in this section are bare-sphere occupancy under
 `packing_backend="sphere"`:
 
 ![Achieved bare-sphere occupancy against requested occupancy_fraction, for a monodisperse and a polydisperse pool.](../../assets/images/cryoet-packing-rsa-limit.png){ width="620" style="display:block;margin:1.2em auto;" }
+///caption
+Achieved bare-sphere occupancy against requested occupancy_fraction, for a monodisperse and a polydisperse pool.
+///
 
 Requested and achieved track each other up to ~0.2 and then part company.
 A monodisperse pool saturates near 0.28; a polydisperse one reaches ~0.41,
@@ -196,6 +208,9 @@ The shape backend jams too, and polydispersity raises its ceiling the same
 way, measured in macromolecule volume fraction on real molecules:
 
 ![Achieved macromolecule volume fraction against requested occupancy_fraction under the shape backend, for a single species and a five-species mix.](../../assets/images/cryoet-packing-shape-jamming.png){ width="600" style="display:block;margin:1.2em auto;" }
+///caption
+Achieved macromolecule volume fraction against requested occupancy_fraction under the shape backend, for a single species and a five-species mix.
+///
 
 A single species saturates near 0.185 and stays there. A five-species mix
 is still climbing at 1.0, into the physiological band, because a footprint
@@ -224,6 +239,9 @@ into the one boolean grid it collides against, and a region is restricted
 by seeding that grid as occupied everywhere outside it:
 
 ![Three panels of one z-slice: the region complement alone, then with a membrane and filament stamped in, then with every packed protein added.](../../assets/images/cryoet-packing-occupancy-grid.png){ width="900" style="display:block;margin:1.2em auto;" }
+///caption
+Three panels of one z-slice: the region complement alone, then with a membrane and filament stamped in, then with every packed protein added.
+///
 
 A candidate is rejected if its rotated footprint meets any set voxel, so
 obstacle avoidance, region restriction and instance-instance collision are
@@ -237,6 +255,9 @@ its centre, exceeds `radius + gap`, i.e. unless its whole sphere clears
 the forbidden set.
 
 ![The shell distance field, the field from already-placed spheres, and their elementwise minimum, with rejected centres shaded.](../../assets/images/cryoet-packing-exclusion-field.png){ width="900" style="display:block;margin:1.2em auto;" }
+///caption
+The shell distance field, the field from already-placed spheres, and their elementwise minimum, with rejected centres shaded.
+///
 
 A caller wanting both obstacle avoidance and region restriction unions the
 masks before taking the distance transform, which is the elementwise
@@ -276,6 +297,9 @@ Two bundled tables save you hand-listing background species. Both are
 additive, with each other, and with your own `[[filler]]` entries.
 
 ![Left, PEI2016 species by mass and relative abundance. Right, the mass coverage of both bundled tables.](../../assets/images/cryoet-packing-filler-tables.png){ width="900" style="display:block;margin:1.2em auto;" }
+///caption
+Left, PEI2016 species by mass and relative abundance. Right, the mass coverage of both bundled tables.
+///
 
 - **`PEI2016_CROWDING_TABLE`**: 20 species from Pei et al. (2016),
   transcribed from that paper's supplementary Table S1, carrying its own

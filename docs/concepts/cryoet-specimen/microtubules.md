@@ -3,6 +3,9 @@
 <div class="grid" markdown>
 
 ![A rendered microtubule: projection along z, and a cross-section perpendicular to the tube showing 13 protofilaments around an empty lumen.](../../assets/images/cryoet-microtubule-hero.png){ width="900" style="grid-column: 1 / -1;" }
+///caption
+A rendered microtubule: projection along z, and a cross-section perpendicular to the tube showing 13 protofilaments around an empty lumen.
+///
 
 </div>
 
@@ -38,6 +41,9 @@ lateral spacing between protofilaments, \(r\) the monomer rise and \(s\) the
 axial stagger between adjacent protofilaments' registers.
 
 ![The 13-protofilament cross-section, and the unrolled lattice showing the stagger and the seam.](../../assets/images/cryoet-microtubule-lattice.png){ width="900" style="display:block;margin:1.2em auto;" }
+///caption
+The 13-protofilament cross-section, and the unrolled lattice showing the stagger and the seam.
+///
 
 ### The seam is not a special case
 
@@ -54,6 +60,9 @@ Nothing in the code special-cases it. Because the stagger is derived from
 ## Protofilament number
 
 ![Rendered cross-sections at 11, 13 and 14 protofilaments, and radius versus protofilament number against deposited structures.](../../assets/images/cryoet-microtubule-protofilaments.png){ width="900" style="display:block;margin:1.2em auto;" }
+///caption
+Rendered cross-sections at 11, 13 and 14 protofilaments, and radius versus protofilament number against deposited structures.
+///
 
 `n_protofilaments` changes the radius, since the same lateral spacing has to
 fit around a longer circumference. The right-hand panel is the model checked
@@ -107,6 +116,9 @@ lattices, so their dimer sits at the wrong radius for the 13-protofilament
 default.
 
 ![Radial density profile of the rendered tube.](../../assets/images/cryoet-microtubule-wall.png){ width="760" style="display:block;margin:1.2em auto;" }
+///caption
+Radial density profile of the rendered tube.
+///
 
 The rendered wall peaks at the predicted protofilament radius and the lumen
 is empty. Its full width at half maximum is a little broader than a real
@@ -116,6 +128,9 @@ rendered edge, not a shell of zero thickness.
 ## Bending
 
 ![Thermal versus mechanical bending, both drawn at true scale with the real tube width.](../../assets/images/cryoet-microtubule-bending.png){ width="900" style="display:block;margin:1.2em auto;" }
+///caption
+Thermal versus mechanical bending, both drawn at true scale with the real tube width.
+///
 
 A microtubule's axis follows the same persistent random walk filaments use,
 carried by [parallel-transport frames](#framing) so the protofilaments do

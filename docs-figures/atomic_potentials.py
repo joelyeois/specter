@@ -8,12 +8,12 @@ Two groups of figures:
    (C, Si, Cu, Au, U) -- the same computation as
    demo-notebooks/compare-atomic-potentials-with-kirkland.ipynb, factored
    out here so the docs site gets a clean PNG instead of a notebook
-   screenshot. ``atomic-potential-3d-kirkland.png`` and
-   ``projected-atomic-potential-2d-kirkland.png`` are SPECTER's own
-   output; ``transmission-function-linescan-kirkland.png``,
-   ``coherent-bright-field-image-kirkland.png`` and
-   ``coherent-bright-field-linescan-kirkland.png`` each place SPECTER's
-   own output next to a scan of the textbook figure it reproduces
+   screenshot. Each of the five (``atomic-potential-3d-kirkland.png``,
+   ``projected-atomic-potential-2d-kirkland.png``,
+   ``transmission-function-linescan-kirkland.png``,
+   ``coherent-bright-field-image-kirkland.png``,
+   ``coherent-bright-field-linescan-kirkland.png``) places SPECTER's own
+   output next to a scan of the textbook figure it reproduces
    (images/*.png, already in the repo) for direct visual comparison.
 2. New figures explaining the parameterizations themselves: the
    Lorentzian + Gaussian term decomposition behind Kirkland's fit, and an
@@ -50,6 +50,8 @@ from specter.plots import _deep_palette
 REPO_ROOT = Path(__file__).resolve().parent.parent
 OUT_DIR = REPO_ROOT / "docs" / "assets" / "images"
 SCAN_DIR = REPO_ROOT / "images"
+POTENTIAL_3D_SCAN = SCAN_DIR / "atomic-potential-3d-kirkland.png"
+POTENTIAL_2D_SCAN = SCAN_DIR / "projected-atomic-potential-2d-kirkland.png"
 TEXTBOOK_SCAN = SCAN_DIR / "coherent-bright-field-linescan-kirkland.png"
 TRANSMISSION_SCAN = SCAN_DIR / "line-scan-transmission-kirkland.png"
 IMAGE_SCAN = SCAN_DIR / "coherent-bright-field-kirkland.png"
@@ -107,44 +109,94 @@ def _matched_grid(
     return fig, axes
 
 
-def figure_3d_potential() -> None:
-    """Kirkland Fig. 5.4: 3D atomic potential vs. radius, per element."""
+def _crop(img: torch.Tensor, box: tuple[int, int, int, int]) -> torch.Tensor:
+    """Trim a scan down to just its spine frame -- no axis ticks/number
+    labels, no printed figure caption. Real matplotlib ticks/labels are
+    drawn on top instead, on the same data range as the original scan, so
+    SPECTER's panel and the scan share one consistent typography and axes
+    boxes that match exactly rather than just approximately (an inset crop,
+    imshow'd with aspect="auto" into an identically-sized box, does not by
+    itself make the *spine* sizes match -- the spine sits inset from the
+    crop edges by however much tick-label margin the crop still carries)."""
+    left, top, right, bottom = box
+    return img[top:bottom, left:right]
+
+
+POTENTIAL_3D_SCAN_CROP = (188, 24, 660, 396)
+POTENTIAL_2D_SCAN_CROP = (209, 17, 669, 381)
+
+
+def figure_3d_potential_comparison() -> None:
+    """SPECTER's own 3D atomic potential next to the scanned textbook figure
+    (Fig. 5.4)."""
     n = 200
     x, R = _radial_grid_3d(n)
-    fig, ax = plt.subplots(figsize=(6, 4.5), dpi=200)
+
+    book_img = mpimg.imread(POTENTIAL_3D_SCAN)
+    book_img = _crop(book_img, POTENTIAL_3D_SCAN_CROP)
+    box_aspect = book_img.shape[0] / book_img.shape[1]
+
+    # Sized close to the scan crop's own native resolution (472x372 px) at
+    # 200 dpi -- see figure_transmission_function_comparison for why a
+    # smaller, near-native box avoids blurring the scan's printed labels.
+    box_w, box_h = 2.5, 2.5 * box_aspect
+    fig, ((ax_ours, ax_book),) = _matched_grid(1, 2, box_w, box_h)
+
     for color, el, z in zip(PALETTE, ELEMENTS, ATOMIC_NUMBERS):
         pot3d = kirkland_atomic_potential_3d(z, R)
-        ax.plot(
+        ax_ours.plot(
             x[n // 2 :], pot3d[n // 2, n // 2, n // 2 :] / 1e3, color=color, label=el
         )
-    ax.set_xlabel("Radius (Angstroms)")
-    ax.set_ylabel("Atomic potential (kV)")
-    ax.set_xlim(0, 0.5)
-    ax.set_ylim(0, 20)
-    ax.grid(True, alpha=0.4)
-    ax.legend()
-    fig.tight_layout()
+    ax_ours.set_xlabel("Radius (Å)")
+    ax_ours.set_ylabel("Atomic potential (kV)")
+    ax_ours.set_xlim(0, 0.5)
+    ax_ours.set_ylim(0, 20)
+    ax_ours.grid(True, alpha=0.4)
+    ax_ours.legend(fontsize=7)
+    ax_ours.set_title("SPECTER")
+
+    ax_book.imshow(book_img, extent=(0, 0.5, 0, 20), aspect="auto")
+    ax_book.set_xlim(0, 0.5)
+    ax_book.set_ylim(0, 20)
+    ax_book.set_xlabel("Radius (Å)")
+    ax_book.set_title("Kirkland (2010), Fig. 5.4")
+
     path = OUT_DIR / "atomic-potential-3d-kirkland.png"
     fig.savefig(path)
     plt.close(fig)
     print(f"wrote {path}")
 
 
-def figure_2d_potential() -> None:
-    """Kirkland Fig. 5.5: 2D projected atomic potential vs. radius."""
+def figure_2d_potential_comparison() -> None:
+    """SPECTER's own 2D projected atomic potential next to the scanned
+    textbook figure (Fig. 5.5)."""
     n = 800
     x, R_xy = _radial_grid_2d(n)
-    fig, ax = plt.subplots(figsize=(6, 4.5), dpi=200)
+
+    book_img = mpimg.imread(POTENTIAL_2D_SCAN)
+    book_img = _crop(book_img, POTENTIAL_2D_SCAN_CROP)
+    box_aspect = book_img.shape[0] / book_img.shape[1]
+
+    box_w, box_h = 2.5, 2.5 * box_aspect
+    fig, ((ax_ours, ax_book),) = _matched_grid(1, 2, box_w, box_h)
+
     for color, el, z in zip(PALETTE, ELEMENTS, ATOMIC_NUMBERS):
         pot2d = kirkland_atomic_potential_2d(z, R_xy)
-        ax.plot(x[n // 2 :], pot2d[n // 2, n // 2 :], color=color, label=el)
-    ax.set_xlabel("Radius (Angstroms)")
-    ax.set_ylabel("Projected atomic potential (V·Å)")
-    ax.set_xlim(0, 0.5)
-    ax.set_ylim(0, 5000)
-    ax.grid(True, alpha=0.4)
-    ax.legend()
-    fig.tight_layout()
+        ax_ours.plot(x[n // 2 :], pot2d[n // 2, n // 2 :], color=color, label=el)
+    ax_ours.set_xlabel("Radius (Å)")
+    ax_ours.set_ylabel("Projected atomic potential (V·Å)")
+    ax_ours.set_xlim(0, 0.5)
+    ax_ours.set_ylim(0, 5000)
+    ax_ours.grid(True, alpha=0.4)
+    ax_ours.legend(fontsize=7)
+    ax_ours.set_title("SPECTER")
+
+    ax_book.imshow(book_img, extent=(0, 0.5, 0, 5000), aspect="auto")
+    ax_book.set_xlim(0, 0.5)
+    ax_book.set_ylim(0, 5000)
+    ax_book.set_xlabel("Radius (Å)")
+    ax_book.set_title("Kirkland (2010), Fig. 5.5")
+
     path = OUT_DIR / "projected-atomic-potential-2d-kirkland.png"
     fig.savefig(path)
     plt.close(fig)
@@ -223,24 +275,10 @@ def _bright_field_simulation() -> tuple[
     return x, y, transmission, image
 
 
-# Pixel boxes (left, top, right, bottom) trimming each scan down to just its
-# spine frame(s) -- no axis ticks/number labels, no printed figure caption.
-# Real matplotlib ticks/labels are drawn on top instead (below), on the same
-# data range as the original scan, so SPECTER's panel and the scan share one
-# consistent typography and axes boxes that match exactly rather than just
-# approximately (an inset crop, imshow'd with aspect="auto" into an
-# identically-sized box, does not by itself make the *spine* sizes match --
-# the spine sits inset from the crop edges by however much tick-label margin
-# the crop still carries).
 TEXTBOOK_SCAN_CROP = (153, 17, 807, 534)
 TRANSMISSION_SCAN_CROP_REAL = (134, 16, 723, 212)
 TRANSMISSION_SCAN_CROP_IMAG = (134, 284, 723, 480)
 IMAGE_SCAN_CROP = (146, 10, 664, 529)
-
-
-def _crop(img: torch.Tensor, box: tuple[int, int, int, int]) -> torch.Tensor:
-    left, top, right, bottom = box
-    return img[top:bottom, left:right]
 
 
 def figure_transmission_function_comparison() -> None:
@@ -464,8 +502,8 @@ def figure_parameterization_comparison() -> None:
 
 
 def main() -> None:
-    figure_3d_potential()
-    figure_2d_potential()
+    figure_3d_potential_comparison()
+    figure_2d_potential_comparison()
     figure_transmission_function_comparison()
     figure_bright_field_image_comparison()
     figure_bright_field_linescan_comparison()

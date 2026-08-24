@@ -254,19 +254,22 @@ walks through the same four steps as `docs-figures/atomic_potentials.py`:
    (\(C_s=1.3\) mm, \(\Delta f=700\) Å, 10.37 mrad aperture), and its line
    scan through the atom centers (Kirkland Fig. 5.13).
 
-![3D atomic potential against radius, per element.](../assets/images/atomic-potential-3d-kirkland.png){ width="600" }
-///caption
-3D atomic potential against radius, per element.
-///
-
-![The same potentials projected to 2D, as used by the faster projection path.](../assets/images/projected-atomic-potential-2d-kirkland.png){ width="600" }
-///caption
-The same potentials projected to 2D, as used by the faster projection path.
-///
-
 Each figure below places SPECTER's own output beside a scan of the
 corresponding textbook figure, at a matching size, for direct visual
 comparison.
+
+![SPECTER's 3D atomic potential against radius, per element, compared against Kirkland's Fig. 5.4.](../assets/images/atomic-potential-3d-kirkland.png){ width="900" style="display:block;margin:1.2em auto;" }
+///caption
+SPECTER's 3D atomic potential against radius, per element, compared against Kirkland's Fig. 5.4.
+///
+
+The same potentials projected to 2D, as used by the faster projection
+path:
+
+![SPECTER's 2D projected atomic potential against radius, per element, compared against Kirkland's Fig. 5.5.](../assets/images/projected-atomic-potential-2d-kirkland.png){ width="900" style="display:block;margin:1.2em auto;" }
+///caption
+SPECTER's 2D projected atomic potential against radius, per element, compared against Kirkland's Fig. 5.5.
+///
 
 The transmission function's real part shows the expected near-\(1.0\)
 background with a sharp dip at each atom center, deepening with atomic

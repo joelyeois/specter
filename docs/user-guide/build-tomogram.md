@@ -87,9 +87,11 @@ per region:
 only matters when a `[[membrane]]` is present. Without one, the whole box
 is "cytosol." `filler_from_pei2016`/`filler_from_cryoetsim` pull from
 bundled reference tables (Pei et al. 2016 generic crowding, and the
-CryoETSim dataset table respectively) instead of hand-listing PDB codes;
-both are additive and can be combined with each other and with hand-written
-`[[filler]]` entries.
+CryoETSim dataset table respectively — see
+[Regions & protein packing](../concepts/cryoet-specimen/packing.md#references)
+for both citations) instead of hand-listing PDB codes; both are additive
+and can be combined with each other and with hand-written `[[filler]]`
+entries.
 
 ## Compute & scaling flags
 

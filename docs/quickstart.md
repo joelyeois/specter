@@ -50,8 +50,9 @@ specter simulate particles \
 ```
 
 See [Configure a run](user-guide/configuration.md) for the complete field
-reference. For the other three workflows (a CryoSPARC dataset twin, full
-micrographs, cryo-ET tilt series), see
+reference. For the other three workflows (a
+[CryoSPARC](https://cryosparc.com/) dataset twin, full micrographs,
+cryo-ET tilt series), see
 [Generate a particle stack](user-guide/particle-stack.md),
 [Generate a micrograph](user-guide/micrograph.md), and
 [Generate a tilt series](user-guide/tilt-series.md).

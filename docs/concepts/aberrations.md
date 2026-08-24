@@ -147,7 +147,8 @@ value.
 Four independent multiplicative amplitude envelopes can be layered onto
 the transfer function, each damping high-resolution signal for a
 different physical reason (`aberrations/_envelopes.py`, ported from
-teamtomo's `torch_fourier_filter.envelopes`):
+[teamtomo](https://github.com/teamtomo)'s
+[`torch_fourier_filter.envelopes`](https://github.com/teamtomo/torch-fourier-filter)):
 
 | Envelope | Physical cause | Parameter |
 |---|---|---|
@@ -195,9 +196,9 @@ mistake.
 `BaseImager.aberration_backend` selects which engine actually computes
 the transfer function above: `"legacy"` (default) is `Aberration` as
 described on this page; `"torch_ctf"` swaps in
-`ctf.LegacyAberrationAdapter`, a torch-ctf-backed implementation verified
-term-by-term against `"legacy"` and against a real multi-particle
-CryoSPARC `.cs` file (`tests/test_ctf_legacy_adapter.py`). Both share the
+`ctf.LegacyAberrationAdapter`, a [torch-ctf](https://github.com/teamtomo/torch-ctf)-backed
+implementation verified term-by-term against `"legacy"` and against a
+real multi-particle CryoSPARC `.cs` file (`tests/test_ctf_legacy_adapter.py`). Both share the
 same `forward(exitwave, ctf_params)` call signature, so no other code
 needs to know which is in use. `torch_ctf` is opt-in and has no mapping
 for the `tetrafoil1`-`tetrafoil4` terms above -- they are silently

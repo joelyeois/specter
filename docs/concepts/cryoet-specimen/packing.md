@@ -124,8 +124,9 @@ pools sized separately for each.
 Crowded cytoplasm is 200–320 mg/mL, so the sphere backend cannot reach a
 physiological specimen at any setting: `occupancy_fraction` is a
 sphere-volume budget, and RSA jams long before the real volume fraction
-gets there. For reference, CryoTomoSim's own output weighs 0.240 by the
-same measure, and it also collides real shapes rather than spheres.
+gets there. For reference, [CryoTomoSim](https://github.com/carsonpurnell/cryotomosim_CTS)'s
+own output weighs 0.240 by the same measure, and it also collides real
+shapes rather than spheres.
 
 That density is close to free. Running one 5 Å configuration back to back
 on both backends, wall time is 117 s under `"shape"` against 116 s under
@@ -307,7 +308,8 @@ Left, PEI2016 species by mass and relative abundance. Right, the mass coverage o
   obsoleted by the PDB in 2014 and dropped rather than repointed, since it
   would only have duplicated a ribosome-class size range.)
 - **`CRYOETSIM_PARTICLE_TABLE`**: broader and categorised, so you can
-  select e.g. only distractors or only nucleosomes.
+  select e.g. only distractors or only nucleosomes. Transcribed from the
+  CryoETSim dataset's species table (Stojanovska et al. 2025).
 
 Both route through `build_filler_pool_specs`, which filters by mass range,
 category or code and adapts either table to the flat filler spec format.
@@ -365,5 +367,12 @@ your own list breaks nothing downstream.
 - Pei, L., Xu, M., Frazier, Z., & Alber, F. (2016). Simulating cryo
   electron tomograms of crowded cell cytoplasm for assessment of automated
   particle picking. *BMC Bioinformatics* 17(1), 405.
+- Stojanovska, F., Sanchez, R. M., Jensen, R. K., Mahamid, J., Kreshuk, A.,
+  & Zaugg, J. B. (2025). CryoSiam: self-supervised representation learning
+  for automated analysis of cryo-electron tomograms. *bioRxiv*
+  2025.11.11.687379. https://doi.org/10.1101/2025.11.11.687379
+- Purnell, C., et al. (2023). Rapid synthesis of cryo-ET data for training
+  deep learning models. *bioRxiv* 2023.04.28.538636.
+  [CTS source](https://github.com/carsonpurnell/cryotomosim_CTS).
 - [vesin](https://github.com/Luthaf/vesin): the neighbour list behind the
   vectorized conflict check.

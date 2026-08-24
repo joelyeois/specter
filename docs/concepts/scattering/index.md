@@ -73,7 +73,7 @@ modes](other-modes.md#accuracy-vs-thickness) for the measured error curves.
 ## Two conventions shared by every model
 
 **Ewald sphere curvature sign.** Before propagation, `ews_curvature_sign`
-(`"negative"` by default, `"positive"` to match CryoSPARC) determines
+(`"negative"` by default, `"positive"` to match [CryoSPARC](https://cryosparc.com/)) determines
 whether the volume's Z-slices are traversed front-to-back or
 back-to-front (`torch.flip(V, dims=(1,))`). This matters because
 multislice, Rytov, and first Born all propagate each slice's contribution

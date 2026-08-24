@@ -73,7 +73,7 @@ against the two deposited reconstructions its constants were measured from.
 Measured off deposited microtubule reconstructions
 (`measure_source_lattice`), not taken from a textbook:
 
-| | 3JAL (13 pf) | 6DPU (14 pf) | across N |
+| | [3JAL](https://www.rcsb.org/structure/3JAL) (13 pf) | [6DPU](https://www.rcsb.org/structure/6DPU) (14 pf) | across N |
 |---|---|---|---|
 | radius of pf centres | 111.1 Å | 118.5 Å | scales with N |
 | lateral spacing | 53.8 Å | 53.3 Å | ~constant |
@@ -111,9 +111,10 @@ outwards. It caches the result next to the downloaded structure.
 
 The default source is **3JAL**, a 13-protofilament GMPCPP-microtubule; its
 two bound EB3 chains are dropped during extraction. The commoner
-kinesin-decorated microtubule structures (6DPU, 3JAT) are 14-protofilament
-lattices, so their dimer sits at the wrong radius for the 13-protofilament
-default.
+kinesin-decorated microtubule structures
+([6DPU](https://www.rcsb.org/structure/6DPU),
+[3JAT](https://www.rcsb.org/structure/3JAT)) are 14-protofilament lattices,
+so their dimer sits at the wrong radius for the 13-protofilament default.
 
 ![Radial density profile of the rendered tube.](../../assets/images/cryoet-microtubule-wall.png){ width="760" style="display:block;margin:1.2em auto;" }
 ///caption

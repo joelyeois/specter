@@ -41,8 +41,10 @@ multiply implements.
 MTF vs. spatial frequency for every bundled detector model.
 ///
 
-The K3 curves come directly from Gatan's published MTF datasheets. The
-Falcon 4i curves are derived instead from three published DQE points (0,
+The K3 curves come directly from [Gatan](https://www.gatan.com/)'s
+published MTF datasheets. The Falcon 4i (a
+[Thermo Fisher Scientific](https://www.thermofisher.com/) detector) curves
+are derived instead from three published DQE points (0,
 0.5, and 1x Nyquist) under the white-noise approximation
 \(\mathrm{DQE}(k) \approx \mathrm{MTF}(k)^2\), so the *shape* is
 recovered as \(\mathrm{MTF}(k) = \sqrt{\mathrm{DQE}(k)/\mathrm{DQE}(0)}\)

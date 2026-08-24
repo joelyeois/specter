@@ -180,3 +180,4 @@ Defaults for \(t\) and \(\sigma\) are polnet's own midpoints (its
   [polnet source](https://github.com/anmartinezs/polnet).
 - Purnell, C., et al. (2023). Rapid synthesis of cryo-ET data for training
   deep learning models. *bioRxiv* 2023.04.28.538636.
+  [CTS source](https://github.com/carsonpurnell/cryotomosim_CTS).

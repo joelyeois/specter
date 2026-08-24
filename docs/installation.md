@@ -114,8 +114,9 @@ forty-two tabulated species contain hydrogen.
 Deposited structures almost never include hydrogens, since they are not
 resolved at typical resolution. Supplying them is the job of the
 [Monomer Library](https://github.com/MonomerLibrary/monomers), the same
-chemical-component dictionary REFMAC and Coot use. It is not bundled with
-SPECTER: it is roughly 1.5 GB, and separately licensed.
+chemical-component dictionary [REFMAC](https://www.ccp4.ac.uk/html/refmac5.html)
+and [Coot](https://www2.mrc-lmb.cam.ac.uk/personal/pemsley/coot/) use. It is
+not bundled with SPECTER: it is roughly 1.5 GB, and separately licensed.
 
 Without it, every H-containing species fails to match and those atoms fall
 back to per-element Peng factors — about **44% of a hydrogen-free protein**,
@@ -133,8 +134,8 @@ git clone --filter=blob:none --sparse https://github.com/MonomerLibrary/monomers
 cd monomers && git sparse-checkout set a c d g h i l m n p s t v w y
 ```
 
-`$CLIBD_MON` is the variable CCP4 already uses, so an existing CCP4 install
-needs no extra setup. It is the only place SPECTER looks: there is no config or
+`$CLIBD_MON` is the variable [CCP4](https://www.ccp4.ac.uk/) already uses,
+so an existing CCP4 install needs no extra setup. It is the only place SPECTER looks: there is no config or
 CLI equivalent, since the library is an installation detail rather than a
 per-simulation choice, and the Monomer Library documents this variable as the
 way to point at it. `~` and `$VAR` in the path are expanded, and a path that

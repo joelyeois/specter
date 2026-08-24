@@ -149,7 +149,8 @@ only describe an idealized, evenly-spaced series about an exactly
 horizontal or vertical axis. Real acquisitions have a tilt axis at some
 arbitrary angle and (after alignment) per-tilt shifts. `specter.tilt`
 (`read_aretomo3_aln`/`read_aretomo3_xf`/`read_aretomo3_global_shifts`,
-`tilt_to_quaternions`) parses AreTomo3's `.aln`/`.xf`/global-shifts output
+`tilt_to_quaternions`) parses [AreTomo3](https://github.com/czimaginginstitute/AreTomo3)'s
+`.aln`/`.xf`/global-shifts output
 into quaternions/translations for exactly this case. This is a Python-API
 feature only: `TiltSeriesGenerator` accepts `quaternions=` as an
 alternative to `angles=`, but `TiltSeriesConfig`/the CLI does not currently
@@ -177,3 +178,8 @@ wrapper around it.
   [Aberrations](../concepts/aberrations.md),
   [Detector](../concepts/detector.md): the physics behind each stage.
 - [Ice structure](../concepts/ice.md): the `ice_model` options.
+- Zheng, S., Wolff, G., Greenan, G., Chen, Z., Faas, F. G. A., Bárcena, M.,
+  Koster, A. J., Cheng, Y., & Agard, D. A. (2022). AreTomo: An integrated
+  software package for automated marker-free, motion-corrected cryo-electron
+  tomographic alignment and reconstruction. *Journal of Structural Biology:
+  X*, 6, 100068. [doi:10.1016/j.yjsbx.2022.100068](https://doi.org/10.1016/j.yjsbx.2022.100068)

@@ -99,7 +99,7 @@ therefore left to the caller.
 used elsewhere in this documentation) reverses the Z-slice traversal
 order (`torch.flip(V, dims=(1,))`) before the recursion starts, so that
 the face nearer the detector is transmitted through last. `"positive"`
-matches CryoSPARC's own convention instead. This choice only matters
+matches [CryoSPARC](https://cryosparc.com/)'s own convention instead. This choice only matters
 because each slice propagates a different net distance to the exit
 plane; a projection-only model has no such asymmetry, since summing a
 volume's slices is commutative regardless of traversal order.

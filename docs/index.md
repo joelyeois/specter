@@ -40,8 +40,9 @@ A simulated cryo-ET specimen
 -   :material-check-decagram:{ .lg .middle } **Validated against experiment**
 
     Simulated particles pooled with real EMPIAR-11377 particles and run
-    through a single CryoSPARC 2D classification job sort into the same
-    classes, in roughly the same proportion, across nearly all 50 classes.
+    through a single [CryoSPARC](https://cryosparc.com/) 2D classification
+    job sort into the same classes, in roughly the same proportion, across
+    nearly all 50 classes.
 
     [:octicons-arrow-right-24: See the comparison](user-guide/particle-stack.md#example-matching-empiar-11377)
 

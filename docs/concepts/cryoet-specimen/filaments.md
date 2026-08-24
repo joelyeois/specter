@@ -159,6 +159,10 @@ the `ACTIN_SPEC` preset; see
 
 ## References
 
+- Holmes, K. C., Popp, D., Gebhard, W., & Kabsch, W. (1990). Atomic model
+  of the actin filament. *Nature*, 347(6288), 44–49.
+- Egelman, E. H., Francis, N., & DeRosier, D. J. (1982). F-actin is a helix
+  with a random variable twist. *Nature*, 298(5870), 131–135.
 - Purnell, C., et al. (2023). Rapid synthesis of cryo-ET data for training
   deep learning models. *bioRxiv* 2023.04.28.538636.
   [CTS source](https://github.com/carsonpurnell/cryotomosim_CTS).

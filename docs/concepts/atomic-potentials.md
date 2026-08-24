@@ -140,8 +140,8 @@ V(r) = 2\pi e\, a_0 \sum_{i=1}^{5} a_i \left(\frac{4\pi}{b_i}\right)^{3/2} e^{-4
 \]
 
 Atoms whose bonded species isn't in the bundled table fall back to
-`peng_atomic_potential_3d`, gemmi's built-in per-element independent-atom
-scattering factors (Peng et al. 1996). This is evaluated with the same
+`peng_atomic_potential_3d`, [gemmi](https://gemmi.readthedocs.io/)'s
+built-in per-element independent-atom scattering factors (Peng et al. 1996). This is evaluated with the same
 closed form, so it combines coherently (same units, same functional form)
 with matched-species Shtyrov kernels in one potential volume. `PotentialBuilder`
 and `MicrographSpecimenGenerator`/`TomogramSpecimenGenerator` default to

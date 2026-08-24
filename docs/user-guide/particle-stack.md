@@ -3,7 +3,8 @@
 `specter simulate particles` builds a physics-based cryo-EM particle stack
 from a single PDB/mmCIF structure: it samples a scattering potential,
 applies pose/CTF/dose sampling, propagates through the forward model
-(multislice by default), and writes a `.mrcs` + RELION `.star` file pair.
+(multislice by default), and writes a `.mrcs` +
+[RELION](https://relion.readthedocs.io/) `.star` file pair.
 It's the fastest way to get simulated data out of SPECTER.
 
 ## Basic usage
@@ -85,7 +86,8 @@ read it with [`starfile`](https://github.com/teamtomo/starfile) /
 ## Example: matching EMPIAR-11377
 
 As a check against real data, the config below drives
-`specter simulate particles` from a real CryoSPARC passthrough `.cs` file
+`specter simulate particles` from a real [CryoSPARC](https://cryosparc.com/)
+passthrough `.cs` file
 instead of randomly-sampled poses. Pixel size, voltage, alpha, pose, and
 CTF are read straight from the `.cs` file via `cs_path`, matching a real
 experimental dataset particle-for-particle:

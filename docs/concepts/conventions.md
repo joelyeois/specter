@@ -39,7 +39,7 @@ without conversion at the boundary.
 
 The mixed degrees/radians row is the one to watch: within a single
 `ctf_params` dict, `dfang` is in degrees while `phaseshift`, `tiltx`, and
-`tilty` are in radians. This matches CryoSPARC, whose `.cs` files store
+`tilty` are in radians. This matches [CryoSPARC](https://cryosparc.com/), whose `.cs` files store
 `ctf/df_angle_rad` in radians and are converted to degrees on the way in
 by `io/_cryosparc.py`.
 
@@ -321,3 +321,6 @@ of floating-point reduction order.
   estimation from electron micrographs. *Journal of Structural Biology*
   **192**(2), 216–221.
   [doi:10.1016/j.jsb.2015.08.008](https://doi.org/10.1016/j.jsb.2015.08.008)
+- Zhang, K. (2016). Gctf: Real-time CTF determination and correction.
+  *Journal of Structural Biology* **193**(1), 1–12.
+  [doi:10.1016/j.jsb.2015.11.003](https://doi.org/10.1016/j.jsb.2015.11.003)

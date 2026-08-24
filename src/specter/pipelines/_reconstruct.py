@@ -47,6 +47,7 @@ from __future__ import annotations
 
 import dataclasses
 import itertools
+import json
 import multiprocessing
 import time
 from pathlib import Path
@@ -341,6 +342,40 @@ def _compute_and_save_gold_standard_fsc(run_dir: Path) -> str:
     return resolutions[0]
 
 
+def _consolidate_resolutions(run_dir: Path, final: str) -> None:
+    """
+    Merge both halfsets' per-epoch resolutions into one ``resolutions.json``.
+
+    Each halfset worker accumulates its resolutions in memory and flushes them
+    into its own ``metrics_<A|B>.json`` on exit, because they run as separate
+    processes and a run directory is typically on NFS, where ``flock`` hangs
+    rather than serialising writers. Consolidation therefore happens here,
+    after both have exited and there is a single writer again, so the run ends
+    with one file holding every resolution rather than one file per epoch.
+
+    Parameters
+    ----------
+    run_dir : Path
+        The shared run directory both halfsets wrote into.
+    final : str
+        The end-of-run gold-standard resolution, from the final volumes.
+    """
+    epochs: list[dict[str, Any]] = []
+    for metrics_path in sorted(run_dir.glob("metrics_[AB].json")):
+        try:
+            epochs.extend(json.loads(metrics_path.read_text()).get("resolutions", []))
+        except (OSError, json.JSONDecodeError) as exc:
+            print(f"[specter] could not read {metrics_path.name}: {exc}")
+
+    epochs.sort(key=lambda e: (e.get("epoch", 0), e.get("halfset") or ""))
+    (run_dir / "resolutions.json").write_text(
+        json.dumps(
+            {"resolution_gold_standard": final, "epochs": epochs},
+            indent=2,
+        )
+    )
+
+
 def _run_gold_standard(config: ReconstructionConfig, base_dir: str) -> Path:
     """
     Reconstruct both halfsets, then compute and persist the halfmap FSC.
@@ -371,5 +406,6 @@ def _run_gold_standard(config: ReconstructionConfig, base_dir: str) -> Path:
         _run_both_halfsets(config, run_dir)
         resolution = _compute_and_save_gold_standard_fsc(run_dir)
         job.log({"resolution_gold_standard": resolution})
+        _consolidate_resolutions(run_dir, final=resolution)
 
     return run_dir

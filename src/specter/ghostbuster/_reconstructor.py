@@ -191,6 +191,11 @@ class Reconstructor(_BaseReconstructor):
         )
         self._run_dir: Path | None = Path(run_dir) if run_dir is not None else None
         self._halfset_label: str | None = halfset_label
+        #: Per-epoch FSC resolutions, accumulated in memory and flushed into this
+        #: worker's own metrics file. Kept in memory rather than written per
+        #: epoch because the two halfset workers are separate processes and this
+        #: run directory is NFS, where flock does not work (it hangs).
+        self._epoch_resolutions: list[dict[str, Any]] = []
 
         self._setup_optimization_state(
             lr, lr_R, lr_T, lr_D, sparsity, lr_decay, scheduler
@@ -673,6 +678,7 @@ class Reconstructor(_BaseReconstructor):
         """
         # Save metrics first (before v is computed, so they capture all epochs)
         self._save_metrics(include_loss_std=True, include_lr_min=True)
+        self._flush_resolutions_into_metrics()
 
         if self._run_dir is None or not self.trainer.is_global_zero:
             return
@@ -721,8 +727,29 @@ class Reconstructor(_BaseReconstructor):
                 self._run_dir / "epochs" / f"fsc_{epoch:03d}{suffix}.png",
                 label=f"epoch {epoch}{suffix}",
             )
-        self._save_epoch_map_to_model_resolutions(v, suffix, epoch)
-        self._save_epoch_halfmap_fsc(epoch)
+        self._record_map_to_model_resolutions(v, epoch)
+        self._record_halfmap_resolutions(epoch)
+
+    def _flush_resolutions_into_metrics(self) -> None:
+        """
+        Write the accumulated per-epoch resolutions into this worker's metrics file.
+
+        ``metrics<suffix>.json`` already exists and has exactly one writer --
+        this process -- so appending here needs no coordination. That matters:
+        a run directory is typically on NFS, where ``flock`` does not work
+        (it hangs), so two halfset workers cannot safely share one file while
+        training. `specter.pipelines._reconstruct` consolidates both workers'
+        metrics into a single ``resolutions.json`` once they have exited.
+        """
+        if self._run_dir is None or not self._epoch_resolutions:
+            return
+        path = self._run_dir / f"metrics{self._metrics_path_suffix()}.json"
+        try:
+            meta = json.loads(path.read_text()) if path.is_file() else {}
+            meta["resolutions"] = self._epoch_resolutions
+            path.write_text(json.dumps(meta, indent=2, default=str))
+        except Exception as exc:
+            print(f"[ghostbuster] could not record resolutions: {exc}")
 
     def _mask_for(self, volume: torch.Tensor) -> torch.Tensor | None:
         """
@@ -753,9 +780,7 @@ class Reconstructor(_BaseReconstructor):
             return None
         return mask
 
-    def _save_epoch_map_to_model_resolutions(
-        self, v: torch.Tensor, suffix: str, epoch: int
-    ) -> None:
+    def _record_map_to_model_resolutions(self, v: torch.Tensor, epoch: int) -> None:
         """
         Record this epoch's map-to-model resolution, masked and unmasked.
 
@@ -769,8 +794,6 @@ class Reconstructor(_BaseReconstructor):
         ----------
         v : torch.Tensor
             This epoch's volume, shape ``(Z, Y, X)``.
-        suffix : str
-            Halfset filename suffix, e.g. ``"_A"``.
         epoch : int
             One-based epoch number just completed.
         """
@@ -802,10 +825,9 @@ class Reconstructor(_BaseReconstructor):
             print(f"[ghostbuster] map-to-model resolution skipped: {exc}")
             return
 
-        path = self._run_dir / "epochs" / f"fsc_{epoch:03d}{suffix}.json"
-        path.write_text(json.dumps(record, indent=2))
+        self._epoch_resolutions.append(record)
 
-    def _save_epoch_halfmap_fsc(self, epoch: int) -> None:
+    def _record_halfmap_resolutions(self, epoch: int) -> None:
         """
         Save this epoch's gold-standard half-map FSC, once both halves exist.
 
@@ -837,9 +859,11 @@ class Reconstructor(_BaseReconstructor):
         if not sibling_path.is_file():
             return
 
-        record_path = epochs_dir / f"fsc_halfmap_{epoch:03d}.json"
+        # Claim the epoch by creating the figure exclusively. Using the artifact
+        # itself as the claim avoids a marker file; matplotlib overwrites it below.
+        figure_path = epochs_dir / f"fsc_halfmap_{epoch:03d}.png"
         try:
-            fd = os.open(record_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.close(os.open(figure_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
         except FileExistsError:
             return
 
@@ -853,7 +877,7 @@ class Reconstructor(_BaseReconstructor):
                 (own, sib) if self._halfset_label == "A" else (sib, own)
             )
             save_halfmap_fsc_figure(
-                epochs_dir / f"fsc_halfmap_{epoch:03d}.png",
+                figure_path,
                 volume_a,
                 volume_b,
                 self.voxel_size,
@@ -877,17 +901,13 @@ class Reconstructor(_BaseReconstructor):
                 if mask is not None
                 else None
             )
-            os.write(
-                fd,
-                json.dumps(
-                    {
-                        "epoch": epoch,
-                        "resolution_gold_standard": resolution,
-                        "resolution_gold_standard_masked": masked,
-                        "computed_by_halfset": self._halfset_label,
-                    },
-                    indent=2,
-                ).encode(),
+            self._epoch_resolutions.append(
+                {
+                    "epoch": epoch,
+                    "resolution_gold_standard": resolution,
+                    "resolution_gold_standard_masked": masked,
+                    "computed_by_halfset": self._halfset_label,
+                }
             )
             print(
                 f"Epoch {epoch} gold-standard resolution: {resolution}"
@@ -898,9 +918,7 @@ class Reconstructor(_BaseReconstructor):
             # rule save_fsc_figure follows. Drop the claim so the empty record
             # isn't mistaken for a computed one.
             print(f"[ghostbuster] per-epoch half-map FSC skipped: {exc}")
-            record_path.unlink(missing_ok=True)
-        finally:
-            os.close(fd)
+            figure_path.unlink(missing_ok=True)
 
     def _save_plot3d(self, v: torch.Tensor, suffix: str, epoch: int) -> None:
         """Save a plot3d preview of the current volume. Silently skips on failure."""

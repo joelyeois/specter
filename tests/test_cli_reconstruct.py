@@ -414,16 +414,17 @@ def test_run_reconstruction_gold_standard_default(
     assert "resolution_gold_standard" in job["params"]
 
 
-def test_gold_standard_writes_per_epoch_halfmap_fsc(
+def test_gold_standard_writes_one_resolutions_file(
     real_particle_data: tuple[Path, Path], tmp_path: Path
 ) -> None:
-    """Every epoch gets a half-map FSC, not just the end of the run.
+    """Every epoch's half-map FSC lands in one ``resolutions.json``.
 
     The two halfsets reconstruct in separate worker processes, so neither
     holds the other's volume and neither can compute a half-map FSC alone.
     Whichever finishes an epoch second reads its sibling's volume off the
-    shared run directory and computes the pair. Before this, the
-    gold-standard resolution appeared exactly once, after both had exited.
+    shared run directory and computes the pair, accumulating in memory;
+    both flush into their own metrics file, and the orchestrator merges
+    them once. One results file, not one per epoch.
     """
     cs_file, mrc_file = real_particle_data
     job_base_dir = tmp_path / "out"
@@ -431,18 +432,19 @@ def test_gold_standard_writes_per_epoch_halfmap_fsc(
 
     run_reconstruction(config)
 
-    epochs = job_base_dir / "reconstructions" / "J001" / "epochs"
-    records = sorted(epochs.glob("fsc_halfmap_*.json"))
-    assert records, (
-        f"no per-epoch half-map FSC in {sorted(p.name for p in epochs.iterdir())}"
-    )
+    job_dir = job_base_dir / "reconstructions" / "J001"
+    results = json.loads((job_dir / "resolutions.json").read_text())
+    assert results["resolution_gold_standard"]
 
-    for record in records:
-        entry = json.loads(record.read_text())
-        # Exactly one worker may claim an epoch, so the record names which.
-        assert entry["computed_by_halfset"] in ("A", "B")
+    epochs = results["epochs"]
+    assert epochs, "no per-epoch resolutions recorded"
+    for entry in epochs:
         assert entry["resolution_gold_standard"]
-        assert (epochs / f"fsc_halfmap_{entry['epoch']:03d}.png").exists()
+        assert entry["computed_by_halfset"] in ("A", "B")
+        assert (job_dir / "epochs" / f"fsc_halfmap_{entry['epoch']:03d}.png").exists()
+
+    # The per-epoch JSON fragments this replaced must not come back.
+    assert not list((job_dir / "epochs").glob("*.json"))
 
 
 def _fsc_fixtures(tmp_path: Path) -> tuple[Path, Path]:
@@ -480,18 +482,19 @@ def test_all_four_resolutions_recorded_when_refs_given(
 
     run_reconstruction(config)
 
-    epochs = job_base_dir / "reconstructions" / "J001" / "epochs"
+    results = json.loads(
+        (job_base_dir / "reconstructions" / "J001" / "resolutions.json").read_text()
+    )
+    entries = results["epochs"]
 
-    half = [
-        json.loads(p.read_text()) for p in sorted(epochs.glob("fsc_halfmap_*.json"))
-    ]
-    assert half
+    half = [e for e in entries if "resolution_gold_standard" in e]
+    assert half, entries
     for entry in half:
         assert entry["resolution_gold_standard"]
         assert entry["resolution_gold_standard_masked"]
 
-    m2m = [json.loads(p.read_text()) for p in sorted(epochs.glob("fsc_0*_[AB].json"))]
-    assert m2m, sorted(p.name for p in epochs.iterdir())
+    m2m = [e for e in entries if "resolution_map_to_model" in e]
+    assert m2m, entries
     for entry in m2m:
         assert entry["resolution_map_to_model"]
         assert entry["resolution_map_to_model_masked"]
@@ -517,17 +520,17 @@ def test_no_mask_and_no_reference_degrades_instead_of_failing(
     job_dir = job_base_dir / "reconstructions" / "J001"
     assert (job_dir / "volume_A.mrc").exists()
 
-    epochs = job_dir / "epochs"
-    half = [
-        json.loads(p.read_text()) for p in sorted(epochs.glob("fsc_halfmap_*.json"))
-    ]
+    entries = json.loads((job_dir / "resolutions.json").read_text())["epochs"]
+    half = [e for e in entries if "resolution_gold_standard" in e]
     assert half, "half-map FSC needs no reference and should still be recorded"
     for entry in half:
         assert entry["resolution_gold_standard"]
         # No mask supplied, so no masked number -- recorded as null, not absent.
         assert entry["resolution_gold_standard_masked"] is None
 
-    assert not list(epochs.glob("fsc_0*_[AB].json")), "no reference => no map-to-model"
+    assert not [e for e in entries if "resolution_map_to_model" in e], (
+        "no reference => no map-to-model"
+    )
 
 
 def test_reference_without_mask_records_only_unmasked(
@@ -546,8 +549,10 @@ def test_reference_without_mask_records_only_unmasked(
 
     run_reconstruction(config)
 
-    epochs = job_base_dir / "reconstructions" / "J001" / "epochs"
-    m2m = [json.loads(p.read_text()) for p in sorted(epochs.glob("fsc_0*_[AB].json"))]
+    results = json.loads(
+        (job_base_dir / "reconstructions" / "J001" / "resolutions.json").read_text()
+    )
+    m2m = [e for e in results["epochs"] if "resolution_map_to_model" in e]
     assert m2m
     for entry in m2m:
         assert entry["resolution_map_to_model"]

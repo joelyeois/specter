@@ -55,6 +55,56 @@ def save_plot3d_preview(path: Path, v: torch.Tensor, title: str) -> None:
         print(f"[ghostbuster] plot3d preview skipped: {exc}")
 
 
+def save_halfmap_fsc_figure(
+    path: Path,
+    volume_a: torch.Tensor,
+    volume_b: torch.Tensor,
+    voxel_size: float,
+    fsc_mask: torch.Tensor | float | None = None,
+) -> str | None:
+    """
+    Compute and save a gold-standard half-map FSC figure. Silently skips on failure.
+
+    Parameters
+    ----------
+    path : Path
+        Output image path.
+    volume_a, volume_b : torch.Tensor
+        The two half-set volumes, shape ``(Z, Y, X)``.
+    voxel_size : float
+        Voxel size in Å.
+    fsc_mask : torch.Tensor or float, optional
+        Mask applied before the FSC is computed.
+
+    Returns
+    -------
+    str or None
+        Resolution at the FSC = 0.143 crossing (e.g. ``"1.397 Å"``), or None
+        if the figure could not be produced.
+    """
+    try:
+        import matplotlib.pyplot as plt
+
+        from ..plots import plot_halfmap_fsc
+
+        mask = fsc_mask if isinstance(fsc_mask, torch.Tensor) else None
+        fig, resolutions = plot_halfmap_fsc(
+            [volume_a.float()],
+            [volume_b.float()],
+            voxel_size=voxel_size,
+            mask=mask,
+            labels=["gold-standard"],
+            show=False,
+        )
+        assert fig is not None
+        fig.savefig(path, bbox_inches="tight")
+        plt.close(fig)
+        return resolutions[0]
+    except Exception as exc:
+        print(f"[ghostbuster] half-map FSC plot skipped: {exc}")
+        return None
+
+
 def save_fsc_figure(
     path: Path,
     v: torch.Tensor,

@@ -411,6 +411,58 @@ def plot_particle_stack(
     plt.show()
 
 
+#: Gold-standard half-map FSC threshold (two independent half-set reconstructions).
+HALFMAP_FSC_THRESHOLD = 0.143
+#: Map-to-model FSC threshold (a reconstruction against a known reference).
+MAP_TO_MODEL_FSC_THRESHOLD = 0.5
+
+
+def fsc_resolution(
+    k: torch.Tensor,
+    fsc: torch.Tensor,
+    threshold: float,
+    k_max: float | None = None,
+) -> str:
+    """
+    Resolution at the last FSC threshold crossing, linearly interpolated.
+
+    The *last* crossing rather than the first: a noisy FSC can dip below the
+    threshold and recover, and the conservative reading is the highest
+    frequency beyond which it stays below.
+
+    Parameters
+    ----------
+    k : torch.Tensor
+        Spatial frequencies (1/Å), one per shell.
+    fsc : torch.Tensor
+        FSC value per shell, same length as ``k``.
+    threshold : float
+        Crossing to interpolate -- `HALFMAP_FSC_THRESHOLD` for two half-sets,
+        `MAP_TO_MODEL_FSC_THRESHOLD` against a known reference.
+    k_max : float, optional
+        Ignore shells above this frequency (pass the Nyquist frequency to stop
+        a crossing in the aliased tail from being reported as a resolution).
+
+    Returns
+    -------
+    str
+        Resolution formatted as ``"1.397 Å"``, or ``">Nyquist"`` when the FSC
+        never crosses the threshold.
+    """
+    kf = k.cpu().float()
+    ff = fsc.cpu().float()
+    last_k_cross: torch.Tensor | None = None
+    for i in range(len(ff) - 1):
+        if k_max is not None and kf[i] > k_max:
+            break
+        if ff[i] >= threshold > ff[i + 1]:
+            t = (threshold - ff[i]) / (ff[i + 1] - ff[i])
+            last_k_cross = kf[i] + t * (kf[i + 1] - kf[i])
+    if last_k_cross is not None:
+        return f"{1.0 / last_k_cross.item():.3f} Å"
+    return ">Nyquist"
+
+
 def plot_map_to_model_fsc(
     volumes: torch.Tensor | list[torch.Tensor],
     reference: torch.Tensor,
@@ -466,17 +518,7 @@ def plot_map_to_model_fsc(
         labels = [f"vol {i}" for i in range(n_volumes)]
 
     def _res_at_half(k_arr: torch.Tensor, fsc_arr: torch.Tensor) -> str:
-        """Linearly interpolate the resolution (Å) at the last FSC=0.5 crossing."""
-        kf = k_arr.cpu().float()
-        ff = fsc_arr.cpu().float()
-        last_k_cross: torch.Tensor | None = None
-        for i in range(len(ff) - 1):
-            if ff[i] >= 0.5 > ff[i + 1]:
-                t = (0.5 - ff[i]) / (ff[i + 1] - ff[i])
-                last_k_cross = kf[i] + t * (kf[i + 1] - kf[i])
-        if last_k_cross is not None:
-            return f"{1.0 / last_k_cross.item():.3f} Å"
-        return ">Nyquist"
+        return fsc_resolution(k_arr, fsc_arr, MAP_TO_MODEL_FSC_THRESHOLD)
 
     nyquist = 1.0 / (2.0 * voxel_size)
     palette = _deep_palette(max(n_volumes, 1))
@@ -620,19 +662,7 @@ def plot_halfmap_fsc(
     nyquist = 1.0 / (2.0 * voxel_size)
 
     def _res_at_half(k_arr: torch.Tensor, fsc_arr: torch.Tensor) -> str:
-        """Linearly interpolate the resolution (Å) at the last FSC=0.143 crossing up to Nyquist."""
-        kf = k_arr.cpu().float()
-        ff = fsc_arr.cpu().float()
-        last_k_cross: torch.Tensor | None = None
-        for i in range(len(ff) - 1):
-            if kf[i] > nyquist:
-                break
-            if ff[i] >= 0.143 > ff[i + 1]:
-                t = (0.143 - ff[i]) / (ff[i + 1] - ff[i])
-                last_k_cross = kf[i] + t * (kf[i + 1] - kf[i])
-        if last_k_cross is not None:
-            return f"{1.0 / last_k_cross.item():.3f} Å"
-        return ">Nyquist"
+        return fsc_resolution(k_arr, fsc_arr, HALFMAP_FSC_THRESHOLD, k_max=nyquist)
 
     palette = _deep_palette(max(n_volumes, 1))
 

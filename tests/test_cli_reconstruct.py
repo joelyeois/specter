@@ -414,6 +414,37 @@ def test_run_reconstruction_gold_standard_default(
     assert "resolution_gold_standard" in job["params"]
 
 
+def test_gold_standard_writes_per_epoch_halfmap_fsc(
+    real_particle_data: tuple[Path, Path], tmp_path: Path
+) -> None:
+    """Every epoch gets a half-map FSC, not just the end of the run.
+
+    The two halfsets reconstruct in separate worker processes, so neither
+    holds the other's volume and neither can compute a half-map FSC alone.
+    Whichever finishes an epoch second reads its sibling's volume off the
+    shared run directory and computes the pair. Before this, the
+    gold-standard resolution appeared exactly once, after both had exited.
+    """
+    cs_file, mrc_file = real_particle_data
+    job_base_dir = tmp_path / "out"
+    config = _config(cs_file, mrc_file, job_base_dir)
+
+    run_reconstruction(config)
+
+    epochs = job_base_dir / "reconstructions" / "J001" / "epochs"
+    records = sorted(epochs.glob("fsc_halfmap_*.json"))
+    assert records, (
+        f"no per-epoch half-map FSC in {sorted(p.name for p in epochs.iterdir())}"
+    )
+
+    for record in records:
+        entry = json.loads(record.read_text())
+        # Exactly one worker may claim an epoch, so the record names which.
+        assert entry["computed_by_halfset"] in ("A", "B")
+        assert entry["resolution_gold_standard"]
+        assert (epochs / f"fsc_halfmap_{entry['epoch']:03d}.png").exists()
+
+
 def test_run_reconstruction_gold_standard_tracked(
     real_particle_data: tuple[Path, Path], tmp_path: Path
 ) -> None:

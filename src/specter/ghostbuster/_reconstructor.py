@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any, Literal
 
@@ -16,12 +17,17 @@ from ..imagegenerator import ImageGenerator
 from ..symmetries import apply_symmetry, get_rotation_matrices
 from ._base_reconstructor import _BaseReconstructor
 from ._helpers import _build_lr_scheduler
-from ._io import save_fsc_figure, save_plot3d_preview, save_volume_mrc
+from ._io import (
+    save_fsc_figure,
+    save_halfmap_fsc_figure,
+    save_plot3d_preview,
+    save_volume_mrc,
+)
 from ._losses import (
     mse_loss,
     ncc_loss,
-    nps_weighted_loss,
     noise_weighted_loss,
+    nps_weighted_loss,
     update_sigma2,
 )
 
@@ -710,6 +716,77 @@ class Reconstructor(_BaseReconstructor):
                 self._run_dir / "epochs" / f"fsc_{epoch:03d}{suffix}.png",
                 label=f"epoch {epoch}{suffix}",
             )
+        self._save_epoch_halfmap_fsc(epoch)
+
+    def _save_epoch_halfmap_fsc(self, epoch: int) -> None:
+        """
+        Save this epoch's gold-standard half-map FSC, once both halves exist.
+
+        A ``halfset="gold"`` run reconstructs A and B in two *separate* worker
+        processes (see `specter.pipelines._reconstruct`), so neither holds the
+        other's volume in memory and neither can compute a half-map FSC on its
+        own -- which is why, before this, the gold-standard resolution only
+        appeared once, after both workers had exited. Both workers do write
+        ``epochs/<NNN>_<A|B>.mrc`` into the one shared run directory, so
+        whichever finishes epoch N *second* finds its sibling's volume already
+        on disk and computes the pair. The one that finishes first finds
+        nothing and returns immediately.
+
+        The write is claimed with ``O_CREAT | O_EXCL``, so if both workers
+        somehow observe each other's volume they cannot both compute it: the
+        loser of the race sees the file exists and skips.
+
+        Parameters
+        ----------
+        epoch : int
+            One-based epoch number just completed.
+        """
+        if self._run_dir is None or self._halfset_label not in ("A", "B"):
+            return
+
+        sibling = "B" if self._halfset_label == "A" else "A"
+        epochs_dir = self._run_dir / "epochs"
+        sibling_path = epochs_dir / f"{epoch:03d}_{sibling}.mrc"
+        if not sibling_path.is_file():
+            return
+
+        record_path = epochs_dir / f"fsc_halfmap_{epoch:03d}.json"
+        try:
+            fd = os.open(record_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError:
+            return
+
+        try:
+            own_path = epochs_dir / f"{epoch:03d}_{self._halfset_label}.mrc"
+            own = torch.as_tensor(mrcfile.read(str(own_path)).copy())
+            sib = torch.as_tensor(mrcfile.read(str(sibling_path)).copy())
+            # Keep A first regardless of which worker got here second. The FSC
+            # is symmetric, so this is for the figure's labelling, not the number.
+            volume_a, volume_b = (
+                (own, sib) if self._halfset_label == "A" else (sib, own)
+            )
+            resolution = save_halfmap_fsc_figure(
+                epochs_dir / f"fsc_halfmap_{epoch:03d}.png",
+                volume_a,
+                volume_b,
+                self.voxel_size,
+                fsc_mask=self.fsc_mask,
+            )
+            os.write(
+                fd,
+                json.dumps(
+                    {
+                        "epoch": epoch,
+                        "resolution_gold_standard": resolution,
+                        "computed_by_halfset": self._halfset_label,
+                    },
+                    indent=2,
+                ).encode(),
+            )
+            if resolution is not None:
+                print(f"Epoch {epoch} gold-standard resolution: {resolution}")
+        finally:
+            os.close(fd)
 
     def _save_plot3d(self, v: torch.Tensor, suffix: str, epoch: int) -> None:
         """Save a plot3d preview of the current volume. Silently skips on failure."""

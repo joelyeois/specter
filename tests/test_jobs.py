@@ -691,3 +691,60 @@ def test_pipelines_do_not_leak_the_session_base_dir(tmp_path, monkeypatch):
     # and the job really did land under the root it was given
     assert str(tmp_path) in run_dir
     assert jobs.base_directory is not None  # still exported for notebook use
+
+
+def test_serialize_value_keeps_scalar_tensor_values() -> None:
+    """A 0-dim tensor is a scalar hyperparameter; record the number.
+
+    Summarising it as shape/dtype would write `{"shape": [], "dtype":
+    "float32"}` into job.json and discard the one thing a reader wants.
+    """
+    import torch
+
+    from specter.jobs._job import _serialize_value
+
+    assert _serialize_value(torch.tensor(0.5)) == 0.5
+    assert _serialize_value(torch.tensor(3)) == 3
+    # Anything with a shape keeps the summary, so a volume never lands in
+    # job.json as a nested list.
+    assert _serialize_value(torch.zeros(256, 256)) == {
+        "__type__": "Tensor",
+        "shape": [256, 256],
+        "dtype": "float32",
+    }
+
+
+def test_serialize_value_leaves_no_tensors_anywhere() -> None:
+    """The invariant the gold-standard worker's queue depends on.
+
+    `Reconstructor.results_summary()` can hold a tensor (defocus_offset),
+    and torch reduces a tensor for IPC by passing a file descriptor the
+    sending process must outlive. The worker exits right after put(), so a
+    surviving tensor makes the orchestrator's get() race the worker's exit
+    and intermittently raise ConnectionResetError. Nothing tensor-shaped may
+    come out of this function.
+    """
+    import torch
+
+    from specter.jobs._job import _serialize_value
+
+    payload = _serialize_value(
+        {
+            "defocus_offset": torch.tensor(0.0),
+            "metrics": {"loss": [torch.tensor(1.0), 2.0]},
+            "resolutions": [{"masked": torch.tensor(8.5)}],
+            "nested": ([torch.zeros(3)], {"deep": torch.tensor(1)}),
+        }
+    )
+
+    def _tensors(obj):
+        if isinstance(obj, torch.Tensor):
+            return [obj]
+        if isinstance(obj, dict):
+            return [t for v in obj.values() for t in _tensors(v)]
+        if isinstance(obj, (list, tuple)):
+            return [t for v in obj for t in _tensors(v)]
+        return []
+
+    assert _tensors(payload) == []
+    json.dumps(payload)  # must not raise

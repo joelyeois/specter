@@ -268,14 +268,25 @@ def _run_single_halfset(
         serialising writers.
     """
     from specter.ghostbuster import Ghostbuster
+    from specter.jobs._job import _serialize_value
 
     device = _reconstruct_device(config.device)
     kwargs = _ghostbuster_kwargs(config)
     model = _fit(Ghostbuster(run_dir=run_dir, **kwargs), config, device)
     assert config.halfset in ("A", "B")
-    result_queue.put(
-        (config.halfset, model.results_summary() if model is not None else {})
-    )
+    # Serialized before it crosses the queue, never after. results_summary()
+    # can contain a tensor (defocus_offset is a 0-dim one), and torch reduces
+    # a tensor for IPC by passing a file descriptor over a socket that the
+    # *sender* must outlive. This worker exits immediately after put(), so if
+    # the orchestrator has not detached the fd by then the socket closes and it
+    # sees `ConnectionResetError: [Errno 104]` from recv_handle -- load-
+    # dependent, which is why it surfaced as an intermittent failure in a
+    # different test on each parallel run. Converting to plain Python first
+    # means only ordinary picklable data is ever sent. `Job.log` applies the
+    # same conversion, and it is idempotent, so both halfset paths record
+    # identical job.json values.
+    summary = _serialize_value(model.results_summary()) if model is not None else {}
+    result_queue.put((config.halfset, summary))
 
 
 def _collect_halfset_result(

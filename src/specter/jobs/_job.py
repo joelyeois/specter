@@ -105,6 +105,13 @@ def _serialize_value(v: Any) -> Any:
         import torch
 
         if isinstance(v, torch.Tensor):
+            # A 0-dim tensor is a scalar hyperparameter (e.g. defocus_offset),
+            # so record the value. Summarising it as shape/dtype would say
+            # `{"shape": [], "dtype": "float32"}` and throw the number away --
+            # the one thing a reader of job.json wants. Anything larger keeps
+            # the summary, so a 256^3 volume never lands in job.json as a list.
+            if v.ndim == 0:
+                return v.item()
             return {
                 "__type__": "Tensor",
                 "shape": list(v.shape),

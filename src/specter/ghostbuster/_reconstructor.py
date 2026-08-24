@@ -757,9 +757,18 @@ class Reconstructor(_BaseReconstructor):
         Returns
         -------
         dict
-            JSON-serializable. Hyperparameters and ``saved_arrays`` at the top
-            level, plus ``"metrics"`` (loss/lr history) and ``"resolutions"``
-            (per-epoch FSC entries) where available.
+            Hyperparameters and ``saved_arrays`` at the top level, plus
+            ``"metrics"`` (loss/lr history) and ``"resolutions"`` (per-epoch
+            FSC entries) where available.
+
+            **Not JSON-serializable as-is**: a hyperparameter may be a tensor
+            (``defocus_offset`` is a 0-dim one), so a caller must pass this
+            through `specter.jobs._job._serialize_value` before writing it or
+            sending it between processes. `specter.jobs.Job.log` does that
+            itself; the gold-standard worker has to do it explicitly, because
+            pickling a tensor onto a `multiprocessing.Queue` hands over a file
+            descriptor the sending process must outlive -- see
+            `specter.pipelines._reconstruct._run_single_halfset`.
         """
         summary: dict[str, Any] = dict(self._extra_params)
         if self._final_metrics is not None:

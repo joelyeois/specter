@@ -10,12 +10,10 @@
 <strong>R</strong>econstruction. A differentiable digital twin for cryo-EM and
 cryo-ET.
 
-<p align="center" markdown>
-  ![A simulated cryo-ET specimen](assets/images/cryoet-tomogram-hero.png){ width="560" }
-  ///caption
-  A simulated cryo-ET specimen
-  ///
-</p>
+![A simulated cryo-ET specimen](assets/images/cryoet-tomogram-hero.png){ width="560" style="display:block;margin:1.2em auto;" }
+///caption
+A simulated cryo-ET specimen
+///
 
 ---
 

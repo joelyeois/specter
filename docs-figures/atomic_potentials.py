@@ -321,7 +321,7 @@ def figure_transmission_function_comparison() -> None:
 
     ax_real_ours.plot(x, real_part, color=PALETTE[0])
     for loc, el in zip(element_locations, ELEMENTS):
-        ax_real_ours.text(loc, 1.12, el, ha="center")
+        ax_real_ours.text(loc, 1.08, el, ha="center")
     ax_real_ours.set_xlim(0, 50)
     ax_real_ours.set_ylim(0, 1.2)
     ax_real_ours.set_ylabel("Real part")
@@ -332,14 +332,14 @@ def figure_transmission_function_comparison() -> None:
         real_crop, extent=(0, 50, 0, TRANSMISSION_CROP_YTOP_REAL), aspect="auto"
     )
     for loc, el in zip(element_locations, ELEMENTS):
-        ax_real_book.text(loc, 1.12, el, ha="center")
+        ax_real_book.text(loc, 1.08, el, ha="center")
     ax_real_book.set_xlim(0, 50)
     ax_real_book.set_ylim(0, 1.2)
     ax_real_book.set_title("Kirkland (2010), Fig. 5.11")
 
     ax_imag_ours.plot(x, imag_part, color=PALETTE[0])
     for loc, el in zip(element_locations, ELEMENTS):
-        ax_imag_ours.text(loc, 0.93, el, ha="center")
+        ax_imag_ours.text(loc, 0.90, el, ha="center")
     ax_imag_ours.set_xlim(0, 50)
     ax_imag_ours.set_ylim(0, 1.0)
     ax_imag_ours.set_xlabel("position x (Å)")
@@ -350,7 +350,7 @@ def figure_transmission_function_comparison() -> None:
         imag_crop, extent=(0, 50, 0, TRANSMISSION_CROP_YTOP_IMAG), aspect="auto"
     )
     for loc, el in zip(element_locations, ELEMENTS):
-        ax_imag_book.text(loc, 0.93, el, ha="center")
+        ax_imag_book.text(loc, 0.90, el, ha="center")
     ax_imag_book.set_xlim(0, 50)
     ax_imag_book.set_ylim(0, 1.0)
     ax_imag_book.set_xlabel("position x (Å)")

@@ -166,14 +166,31 @@ def _bright_field_linescan() -> tuple[torch.Tensor, torch.Tensor]:
     return x, image[n // 2, :]
 
 
+# Pixel box (left, top, right, bottom) trimming TEXTBOOK_SCAN down to just its
+# axes -- the raw scan also carries the printed "Fig. 5.13 ..." caption below
+# the plot, which docs/concepts/atomic-potentials.md already restates in its
+# own figcaption, and which would otherwise inflate the panel's box_aspect
+# relative to SPECTER's own (caption-free) panel.
+TEXTBOOK_SCAN_CROP = (78, 5, 822, 587)
+
+
 def figure_bright_field_linescan_comparison() -> None:
     """SPECTER's own linescan next to the scanned textbook figure (Fig. 5.13)."""
     x, linescan = _bright_field_linescan()
     element_locations = [5, 15, 25, 35, 45]
 
+    book_img = mpimg.imread(TEXTBOOK_SCAN)
+    left, top, right, bottom = TEXTBOOK_SCAN_CROP
+    book_img = book_img[top:bottom, left:right]
+    book_h, book_w = book_img.shape[:2]
+    box_aspect = (
+        book_h / book_w
+    )  # height / width, matplotlib's set_box_aspect convention
+
     fig, (ax_ours, ax_book) = plt.subplots(
-        2, 1, figsize=(7, 8), dpi=200, constrained_layout=True
+        1, 2, figsize=(11, 5.5 * box_aspect), dpi=200, constrained_layout=True
     )
+    ax_ours.set_box_aspect(box_aspect)
     ax_ours.plot(x, linescan, color=PALETTE[0])
     for loc, el in zip(element_locations, ELEMENTS):
         ax_ours.text(loc, 1.05, el, ha="center")
@@ -184,7 +201,8 @@ def figure_bright_field_linescan_comparison() -> None:
     ax_ours.set_title("SPECTER")
     ax_ours.grid(True, alpha=0.4)
 
-    ax_book.imshow(mpimg.imread(TEXTBOOK_SCAN))
+    ax_book.imshow(book_img, aspect="auto")
+    ax_book.set_box_aspect(box_aspect)
     ax_book.set_axis_off()
     ax_book.set_title("Kirkland (2010), Fig. 5.13")
 

@@ -264,11 +264,11 @@ walks through the same four steps as `docs-figures/atomic_potentials.py`:
 The same potentials projected to 2D, as used by the faster projection path.
 ///
 
-The line scan below places SPECTER's own output directly above a scan of
+The line scan below places SPECTER's own output beside a scan of
 Kirkland's Fig. 5.13 for comparison. The dip depth and width at every
 element match to within plotting resolution.
 
-![SPECTER's bright-field line scan through C, Si, Cu, Au and U, compared against Kirkland's Fig. 5.13.](../assets/images/coherent-bright-field-linescan-kirkland.png){ width="600" }
+![SPECTER's bright-field line scan through C, Si, Cu, Au and U, compared against Kirkland's Fig. 5.13.](../assets/images/coherent-bright-field-linescan-kirkland.png){ width="900" style="display:block;margin:1.2em auto;" }
 ///caption
 SPECTER's bright-field line scan through C, Si, Cu, Au and U, compared against Kirkland's Fig. 5.13.
 ///

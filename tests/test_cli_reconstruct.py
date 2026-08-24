@@ -424,6 +424,45 @@ def _job_params(job_dir: Path) -> dict[str, Any]:
     return json.loads((job_dir / "job.json").read_text())["params"]
 
 
+def test_manual_two_pass_halfsets_both_survive_in_job_json(
+    particle_data: tuple[Path, Path], tmp_path: Path
+) -> None:
+    """halfset "A" then halfset "B" into the same job_id, as two separate
+    `run_reconstruction` calls, must not have the second call's `job.log`
+    overwrite the first's results.
+
+    This is the manual alternative to `halfset="gold"` (CLAUDE.md: "this is
+    how a manual halfset='A' then halfset='B' pair shares one [job]"). Both
+    calls run in-process (no subprocess -- that's only `halfset="gold"`), so
+    the monkeypatched `particle_data` fixture is fine here, unlike the
+    gold-standard tests. Before `_merge_halfset_results`, `job.log`'s plain
+    `dict.update` meant halfset B's `job.log({"results": ...})` replaced the
+    whole `results` value, discarding halfset A's metrics entirely even
+    though `volume_A.mrc` was still sitting on disk right next to it.
+    """
+    cs_file, mrc_file = particle_data
+    job_base_dir = tmp_path / "out"
+
+    config_a = _config(cs_file, mrc_file, job_base_dir)
+    config_a.halfset = "A"
+    config_a.job_id = "J005"
+    run_reconstruction(config_a)
+
+    config_b = _config(cs_file, mrc_file, job_base_dir)
+    config_b.halfset = "B"
+    config_b.job_id = "J005"
+    run_reconstruction(config_b)
+
+    job_dir = job_base_dir / "reconstructions" / "J005"
+    assert (job_dir / "volume_A.mrc").exists()
+    assert (job_dir / "volume_B.mrc").exists()
+
+    results = _job_params(job_dir)["results"]
+    assert set(results) == {"A", "B", "epochs"}
+    assert results["A"]["metrics"], "halfset A's own results were discarded"
+    assert results["B"]["metrics"]
+
+
 def test_gold_standard_writes_no_json_but_job_json(
     real_particle_data: tuple[Path, Path], tmp_path: Path
 ) -> None:

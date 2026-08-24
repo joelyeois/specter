@@ -178,6 +178,21 @@ class Job:
             )
         return self._dir
 
+    @property
+    def params(self) -> dict[str, Any]:
+        """
+        The parameters recorded so far -- everything ``job.json``'s ``params``
+        key currently holds, including whatever a resumed job already had on
+        disk before this process started.
+
+        A shallow copy: mutating the returned dict does not change what
+        `log` merges from next. Read this before calling `log` with a key
+        that should be merged rather than replaced -- `log`'s own merge is a
+        plain `dict.update`, so passing ``{"results": new}`` always replaces
+        the whole `"results"` value, never merges into it.
+        """
+        return dict(self._params)
+
     def __enter__(self) -> Job:
         project_dir = (
             self._base_dir if self._project is None else self._base_dir / self._project

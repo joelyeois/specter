@@ -207,7 +207,17 @@ def run_reconstruction(config: ReconstructionConfig) -> None:
             device = _reconstruct_device(config.device)
             model = _fit(job.create(Ghostbuster, **kwargs), config, device)
             if model is not None:
-                job.log({"results": model.results_summary()})
+                summary = model.results_summary()
+                if config.halfset in ("A", "B"):
+                    # A manual two-pass gold-standard run shares one job_id
+                    # across two separate invocations -- nest by halfset and
+                    # fold in whatever the other pass already recorded,
+                    # rather than overwrite it. "all" has no counterpart
+                    # pass, so it keeps the flat shape.
+                    summary = _merge_halfset_results(
+                        job.params.get("results", {}), {config.halfset: summary}
+                    )
+                job.log({"results": summary})
             run_dir = job.dir
 
     _section("Done")
@@ -443,6 +453,60 @@ def _compute_and_save_gold_standard_fsc(run_dir: Path) -> str:
     return resolutions[0]
 
 
+def _merge_halfset_results(
+    existing: dict[str, Any], new_results: dict[str, dict[str, Any]]
+) -> dict[str, Any]:
+    """
+    Merge freshly-reported halfset summaries into an existing ``results`` dict.
+
+    ``results`` nests one entry per halfset label (``"A"``/``"B"``) plus a
+    merged, chronologically-sorted ``"epochs"`` list built from every halfset
+    present -- map-to-model resolutions from both halves, half-map
+    resolutions from whichever half happened to compute them (see
+    `Reconstructor._record_halfmap_resolutions`).
+
+    ``existing`` is what makes the manual two-pass workflow correct:
+    ``halfset="A"`` then ``halfset="B"`` into the same ``job_id``, as two
+    separate process invocations. Without folding in what the first pass
+    already recorded, the second pass's ``job.log`` would silently replace
+    it -- `Job.log`'s own merge is a plain ``dict.update``, not a recursive
+    one, so ``job.log({"results": {"B": ...}})`` on its own would overwrite
+    the whole ``"results"`` value, discarding halfset A's entry entirely
+    even though its files are still on disk. `_run_gold_standard` has no
+    such prior state to fold in (its `Job` is freshly opened), but calls
+    this the same way for one shape shared by both paths.
+
+    Parameters
+    ----------
+    existing : dict
+        Whatever ``results`` already held (``job.params.get("results", {})``);
+        ``{}`` for a fresh job.
+    new_results : dict
+        ``{halfset_label: results_summary()}`` for the halfset(s) reported in
+        this call -- both at once for gold-standard, one at a time for a
+        manual two-pass run.
+
+    Returns
+    -------
+    dict
+        Every previously known halfset entry, updated or extended with
+        ``new_results``, plus a freshly rebuilt ``"epochs"`` list.
+    """
+    merged = {k: v for k, v in existing.items() if k != "epochs"}
+    merged.update(new_results)
+    epochs = sorted(
+        (
+            entry
+            for label, summary in merged.items()
+            if label in ("A", "B")
+            for entry in summary.get("resolutions", [])
+        ),
+        key=lambda e: (e.get("epoch", 0), e.get("halfset") or ""),
+    )
+    merged["epochs"] = epochs
+    return merged
+
+
 def _run_gold_standard(config: ReconstructionConfig, base_dir: str) -> Path:
     """
     Reconstruct both halfsets, then compute and persist the halfmap FSC.
@@ -474,25 +538,7 @@ def _run_gold_standard(config: ReconstructionConfig, base_dir: str) -> Path:
         run_dir = job.dir
         halfset_results = _run_both_halfsets(config, run_dir)
         resolution = _compute_and_save_gold_standard_fsc(run_dir)
-        # halfset_results["A"/"B"]["resolutions"] is each worker's own
-        # per-epoch entries -- map-to-model from both, plus half-map from
-        # whichever one happened to finish each epoch second (see
-        # `Reconstructor._record_halfmap_resolutions`). Merging and sorting
-        # them here is what makes "every resolution for epoch N" a single
-        # lookup instead of a per-reader concatenation.
-        epochs = sorted(
-            (
-                entry
-                for summary in halfset_results.values()
-                for entry in summary.get("resolutions", [])
-            ),
-            key=lambda e: (e.get("epoch", 0), e.get("halfset") or ""),
-        )
-        job.log(
-            {
-                "resolution_gold_standard": resolution,
-                "results": {**halfset_results, "epochs": epochs},
-            }
-        )
+        results = _merge_halfset_results(job.params.get("results", {}), halfset_results)
+        job.log({"resolution_gold_standard": resolution, "results": results})
 
     return run_dir

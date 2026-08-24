@@ -100,10 +100,12 @@ def figure_multislice_trace(V: torch.Tensor) -> None:
     vmax = max(d.max().item() for d in deviations.values())
     for ax, (depth, deviation) in zip(axes, deviations.items()):
         ax.imshow(deviation.cpu().numpy(), cmap="gray_r", vmin=0, vmax=vmax)
-        ax.set_title(f"{depth} / {nz} slices\n({depth * PIXEL_SIZE:g} Å)", fontsize=9)
+        ax.set_title(f"{depth} / {nz} slices\n({depth * PIXEL_SIZE:g} Å)", fontsize=14)
         ax.axis("off")
     fig.suptitle(
-        "Exit-wave contrast ||ψ|² − 1| through the multislice recursion", y=1.03
+        "Exit-wave contrast ||ψ|² − 1| through the multislice recursion",
+        y=1.03,
+        fontsize=16,
     )
     fig.tight_layout()
     path = OUT_DIR / "multislice-recursion-trace.png"
@@ -291,10 +293,12 @@ def figure_mode_intensity_maps(V: torch.Tensor) -> None:
         ax.set_title(
             f"{model}\nmean={intensity.mean().item():.3f}, "
             f"std={intensity.std().item():.3f}",
-            fontsize=9,
+            fontsize=12,
         )
         ax.axis("off")
-    fig.suptitle(f"Exit-wave intensity at {nz * PIXEL_SIZE:g} Å, per model", y=1.05)
+    fig.suptitle(
+        f"Exit-wave intensity at {nz * PIXEL_SIZE:g} Å, per model", y=1.05, fontsize=14
+    )
     fig.tight_layout()
     path = OUT_DIR / "scattering-mode-intensity-maps.png"
     fig.savefig(path, bbox_inches="tight")

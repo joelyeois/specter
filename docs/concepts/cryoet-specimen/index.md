@@ -1,10 +1,7 @@
 # Cryo-ET specimen assembly
 
-<div class="grid" markdown>
+![A simulated cryo-ET specimen, summed along Z: crowded cytosolic protein, three vesicles, actin filaments, two long flexible microtubules crossing the field of view, gold fiducial beads, and a carbon film edge along the bottom.](../../assets/images/cryoet-tomogram-hero.png){ width="700" style="display:block;margin:1.2em auto;" }
 
-![A simulated cryo-ET specimen, summed along Z: crowded cytosolic protein, three vesicles, actin filaments, two long flexible microtubules crossing the field of view, gold fiducial beads, and a carbon film edge along the bottom.](../../assets/images/cryoet-tomogram-hero.png){ width="420" }
-
-<div markdown>
 `TomogramSpecimenGenerator` is the single specimen generator behind
 [`specter build tomogram`](../../user-guide/build-tomogram.md). It
 composites a cryo-ET-scale potential volume out of six independent
@@ -13,9 +10,6 @@ that describe it.
 
 Every component is optional. A run needs at least one of them; any
 combination is valid.
-</div>
-
-</div>
 
 !!! info "Source"
     `specter.specimen.tomogram.generator`, plus the per-component modules

@@ -1,19 +1,13 @@
 # Membrane shape: swept spline
 
-<div class="grid" markdown>
+![A random wandering tube, rendered as a shaded 3D isosurface.](../../assets/images/membrane-swept-hero.png){ width="620" style="display:block;margin:1.2em auto;" }
 
-![A random wandering tube, rendered as a shaded 3D isosurface.](../../assets/images/membrane-swept-hero.png){ width="420" }
-
-<div markdown>
 `MembraneGenerator` builds elongated, wandering tubes
 (`shape_backend="swept_spline"`) by sweeping a sphere along a smooth random
 path. This is the complement to the
 [spherical harmonics](spherical-harmonics.md) backend: a tube that curls
 back near itself is crossed more than once by rays from any single center,
 so it can't be star-convex.
-</div>
-
-</div>
 
 !!! info "Source"
     Walks through `specter.specimen.membrane._field_swept_spline`. Figures

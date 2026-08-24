@@ -1,10 +1,7 @@
 # Gold fiducial beads
 
-<div class="grid" markdown>
+![A single bead's boundary at the default roughness: an irregular quasi-sphere, shaded.](../../assets/images/cryoet-bead-hero.png){ width="620" style="display:block;margin:1.2em auto;" }
 
-![A single bead's boundary at the default roughness: an irregular quasi-sphere, shaded.](../../assets/images/cryoet-bead-hero.png){ width="380" }
-
-<div markdown>
 Fiducial beads are the one component with no PDB behind them. There is no
 atomic structure to hand `PotentialBuilder`, so the density has to come
 from bulk material physics instead: gold's bulk mass density → number
@@ -14,9 +11,6 @@ potential parameterizations.
 Each bead is then built from **real fcc gold atoms**, randomly oriented,
 Debye-Waller jittered, and splatted through the atomic potential kernel,
 inside an irregular, volume-matched boundary.
-</div>
-
-</div>
 
 !!! info "Source"
     `specter.specimen._grid` (`BeadGenerator`, `_BeadShape`), placed by

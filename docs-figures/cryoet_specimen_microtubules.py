@@ -364,11 +364,12 @@ def fig_protofilament_number() -> None:
         extent = np.array([-1, 1, -1, 1]) * half_width
         ax.imshow(cross.T, cmap="gray_r", origin="lower", extent=extent)
         ax.set_title(
-            f"{n_pf} protofilaments\nR = {tube.lattice.radius:.0f} Å", fontsize=10
+            f"{n_pf} protofilaments\nR = {tube.lattice.radius:.0f} Å", fontsize=15
         )
-        ax.set_xlabel("x (Å)")
+        ax.set_xlabel("x (Å)", fontsize=13)
         ax.set_xticks([-150, 0, 150])
         ax.set_yticks([-150, 0, 150])
+        ax.tick_params(labelsize=12)
 
     ax = axes[3]
     ns = list(range(10, 17))
@@ -389,7 +390,7 @@ def fig_protofilament_number() -> None:
         ax.annotate(
             source,
             (n_pf, measured["radius"]),
-            fontsize=9,
+            fontsize=13,
             color=SEAM_COLOR,
             textcoords="offset points",
             xytext=(8, -12),
@@ -400,7 +401,11 @@ def fig_protofilament_number() -> None:
         ylabel="radius of pf centres (Å)",
         title="radius vs protofilament number",
     )
-    ax.legend(fontsize=8)
+    ax.xaxis.label.set_fontsize(13)
+    ax.yaxis.label.set_fontsize(13)
+    ax.title.set_fontsize(15)
+    ax.tick_params(labelsize=12)
+    ax.legend(fontsize=12)
 
     fig.tight_layout()
     fig.savefig(f"{OUT_DIR}/cryoet-microtubule-protofilaments.png", dpi=150)

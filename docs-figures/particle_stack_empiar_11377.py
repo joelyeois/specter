@@ -138,11 +138,18 @@ def _figure_2d_classes() -> None:
         color=color_sim,
         label="SPECTER",
     )
-    ax.set_xticks(xpos)
-    ax.set_xticklabels(order, fontsize=6)
-    ax.set_xlabel("CryoSPARC 2D class (sorted by total particle count, descending)")
-    ax.set_ylabel("particle count")
-    ax.legend(loc="upper right")
+    # All 50 class IDs don't fit legibly in the plot width regardless of font
+    # size -- they're arbitrary CryoSPARC labels, not information the reader
+    # needs per-bar. Thinning to every 5th tick leaves the descending-count
+    # pattern intact while keeping what remains actually readable.
+    ax.set_xticks(xpos[::5])
+    ax.set_xticklabels(order[::5], fontsize=11)
+    ax.set_xlabel(
+        "CryoSPARC 2D class (sorted by total particle count, descending)", fontsize=12
+    )
+    ax.set_ylabel("particle count", fontsize=12)
+    ax.tick_params(axis="y", labelsize=11)
+    ax.legend(loc="upper right", fontsize=12)
     fig.tight_layout()
     path = OUT_DIR / "particle-stack-empiar-11377-2d-classes.png"
     fig.savefig(path, dpi=200)

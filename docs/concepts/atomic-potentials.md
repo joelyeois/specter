@@ -248,13 +248,9 @@ walks through the same four steps as `docs-figures/atomic_potentials.py`:
    (\(C_s=1.3\) mm, \(\Delta f=700\) Å, 10.37 mrad aperture), and its line
    scan through the atom centers (Kirkland Fig. 5.13).
 
-<div class="grid" markdown>
+![3D atomic potential against radius, per element.](../assets/images/atomic-potential-3d-kirkland.png){ width="600" }
 
-![3D atomic potential against radius, per element.](../assets/images/atomic-potential-3d-kirkland.png){ width="340" }
-
-![The same potentials projected to 2D, as used by the faster projection path.](../assets/images/projected-atomic-potential-2d-kirkland.png){ width="340" }
-
-</div>
+![The same potentials projected to 2D, as used by the faster projection path.](../assets/images/projected-atomic-potential-2d-kirkland.png){ width="600" }
 
 The line scan below places SPECTER's own output directly above a scan of
 Kirkland's Fig. 5.13 for comparison. The dip depth and width at every

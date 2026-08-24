@@ -1,10 +1,7 @@
 # Carbon support film
 
-<div class="grid" markdown>
+![A carbon film summed along Z: a strip of film intruding from the bottom edge of the frame, with a rough, granular rim.](../../assets/images/cryoet-carbon-hero.png){ width="620" style="display:block;margin:1.2em auto;" }
 
-![A carbon film summed along Z: a strip of film intruding from the bottom edge of the frame, with a rough, granular rim.](../../assets/images/cryoet-carbon-hero.png){ width="400" }
-
-<div markdown>
 The support film is a roughly planar slab of amorphous carbon with a
 circular hole cut through it. It is painted into the canvas before
 anything else, and everything placed afterwards works around it.
@@ -13,9 +10,6 @@ Its geometry is an **alpha shape** over a jittered 3D point cloud, not an
 analytic boundary. This is what gives it a rim that differs from
 z-slice to z-slice, with islands and overhangs, rather than a swept 2D
 outline.
-</div>
-
-</div>
 
 !!! info "Source"
     `specter.specimen._carbon` (`CarbonFilmGenerator`, `edge_hole_center`),

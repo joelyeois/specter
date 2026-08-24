@@ -1,17 +1,11 @@
 # Membrane shape: spherical harmonics
 
-<div class="grid" markdown>
+![A random spherical-harmonic-perturbed organelle, rendered as a shaded 3D isosurface.](../../assets/images/membrane-sh-hero.png){ width="750" style="display:block;margin:1.2em auto;" }
 
-![A random spherical-harmonic-perturbed organelle, rendered as a shaded 3D isosurface.](../../assets/images/membrane-sh-hero.png){ width="420" }
-
-<div markdown>
 `MembraneGenerator` builds vesicles, nuclei, and mitochondria by perturbing
 an ellipsoid with a random spherical-harmonic expansion
 (`shape_backend="spherical_harmonics"`, the default). This page covers how
 that shape is constructed.
-</div>
-
-</div>
 
 !!! info "Source"
     Walks through `specter.specimen.membrane._field_spherical_harmonics`.

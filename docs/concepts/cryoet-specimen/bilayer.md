@@ -1,18 +1,12 @@
 # Bilayer profile & transmembrane proteins
 
-<div class="grid" markdown>
+![A vesicle's sampled transmembrane sites with their surface normals, and the rendered slab with bacteriorhodopsin embedded in the bilayer.](../../assets/images/cryoet-bilayer-transmembrane.png){ width="880" style="display:block;margin:1.2em auto;" }
 
-![A vesicle's sampled transmembrane sites with their surface normals, and the rendered slab with bacteriorhodopsin embedded in the bilayer.](../../assets/images/cryoet-bilayer-transmembrane.png){ width="440" }
-
-<div markdown>
 [Membrane shape](../membrane-shape/index.md) produces a signed field
 \(\phi\): the geometry. This page covers everything between that field
 and a rendered volume: the 1D potential profile \(\psi(d)\) that turns
 distance-from-the-mid-plane into volts, the anti-aliased resampling onto
 the output grid, and how proteins get embedded in the resulting bilayer.
-</div>
-
-</div>
 
 !!! info "Source"
     `specter.specimen.membrane._profile`, `._raster`, `._placement`.

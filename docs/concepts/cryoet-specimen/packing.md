@@ -1,10 +1,7 @@
 # Regions & protein packing
 
-<div class="grid" markdown>
+![A region-gated run: density on the left, ground-truth labels on the right, showing a cytosol species outside every vesicle and a lumen species only inside them.](../../assets/images/cryoet-packing-hero.png){ width="900" style="display:block;margin:1.2em auto;" }
 
-![A region-gated run: density on the left, ground-truth labels on the right, showing a cytosol species outside every vesicle and a lumen species only inside them.](../../assets/images/cryoet-packing-hero.png){ width="440" }
-
-<div markdown>
 Protein fill is the last and densest stage of specimen assembly. It
 answers two questions per species: *where is this allowed to be*, and
 *how many fit*.
@@ -13,9 +10,6 @@ The first is topology: classifying the volume into cytosol, lumen and
 shell. The second is Random Sequential Addition, obstacle- and
 region-aware, colliding each molecule's real rotated footprint against a
 running occupancy grid.
-</div>
-
-</div>
 
 !!! info "Source"
     `specter.specimen.tomogram._regions`, `specter.specimen.packing`,

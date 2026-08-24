@@ -1,10 +1,7 @@
 # Filaments
 
-<div class="grid" markdown>
+![A filaments-only specimen: fourteen actin filaments scattered through the box, summed along Z.](../../assets/images/cryoet-filament-hero.png){ width="620" style="display:block;margin:1.2em auto;" }
 
-![A filaments-only specimen: fourteen actin filaments scattered through the box, summed along Z.](../../assets/images/cryoet-filament-hero.png){ width="420" }
-
-<div markdown>
 A filament species consists of a single monomer structure, replicated along
 a random walk. Each monomer instance is represented as a rigid-transformed
 copy of one rendered template. A 60-monomer F-actin filament therefore
@@ -18,9 +15,6 @@ This page addresses single-strand filaments only. The complete microtubule,
 comprising thirteen protofilaments arranged into a closed tube with a lumen
 and an A-lattice seam, is treated separately; see
 [Microtubules](microtubules.md).
-</div>
-
-</div>
 
 !!! info "Source"
     `specter.specimen.filament` (`_path`, `_placement`, `_generator`),

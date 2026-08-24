@@ -264,9 +264,35 @@ walks through the same four steps as `docs-figures/atomic_potentials.py`:
 The same potentials projected to 2D, as used by the faster projection path.
 ///
 
-The line scan below places SPECTER's own output beside a scan of
-Kirkland's Fig. 5.13 for comparison. The dip depth and width at every
-element match to within plotting resolution.
+Each figure below places SPECTER's own output beside a scan of the
+corresponding textbook figure, at a matching size, for direct visual
+comparison.
+
+The transmission function's real part shows the expected near-\(1.0\)
+background with a sharp dip at each atom center, deepening with atomic
+number; the imaginary part shows a peak of the same shape, isolated
+against a zero background since a bare atom absorbs nothing outside its
+own potential.
+
+![SPECTER's transmission function through C, Si, Cu, Au and U, compared against Kirkland's Fig. 5.11.](../assets/images/transmission-function-linescan-kirkland.png){ width="900" style="display:block;margin:1.2em auto;" }
+///caption
+SPECTER's transmission function through C, Si, Cu, Au and U, compared against Kirkland's Fig. 5.11.
+///
+
+The coherent bright-field image is the Fresnel diffraction pattern of
+that transmission function under the Scherzer-condition CTF above:
+concentric rings around each atom, growing more pronounced with atomic
+number. Both panels below share the same grayscale scale, 0.72 (black) to
+1.03 (white), the range Kirkland's own caption states.
+
+![SPECTER's coherent bright-field image of C, Si, Cu, Au and U, compared against Kirkland's Fig. 5.12.](../assets/images/coherent-bright-field-image-kirkland.png){ width="900" style="display:block;margin:1.2em auto;" }
+///caption
+SPECTER's coherent bright-field image of C, Si, Cu, Au and U, compared against Kirkland's Fig. 5.12.
+///
+
+The line scan below is a horizontal slice through that image, through the
+atom centers. The dip depth and width at every element match to within
+plotting resolution.
 
 ![SPECTER's bright-field line scan through C, Si, Cu, Au and U, compared against Kirkland's Fig. 5.13.](../assets/images/coherent-bright-field-linescan-kirkland.png){ width="900" style="display:block;margin:1.2em auto;" }
 ///caption

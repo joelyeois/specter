@@ -87,7 +87,7 @@ per region:
 only matters when a `[[membrane]]` is present. Without one, the whole box
 is "cytosol." `filler_from_pei2016`/`filler_from_cryoetsim` pull from
 bundled reference tables (Pei et al. 2016 generic crowding, and the
-CryoETSim dataset table respectively — see
+CryoETSim dataset table respectively; see
 [Regions & protein packing](../concepts/cryoet-specimen/packing.md#references)
 for both citations) instead of hand-listing PDB codes; both are additive
 and can be combined with each other and with hand-written `[[filler]]`
@@ -202,7 +202,7 @@ configure. If you want a crisper membrane, use a coarser `voxel_size` or a
 smaller field of view.
 
 **Hardware**: single NVIDIA L40 (46 GB VRAM, one idle card selected via
-`SPECTER_BENCHMARK_DEVICE` — `cuda:1` for this run, with other cards on the
+`SPECTER_BENCHMARK_DEVICE` (`cuda:1` for this run), with other cards on the
 host under unrelated load, `accumulator_device="auto"`,
 `render_workers="auto"`, `render_chunk_size=64`), with CuPy 14.1 (a core
 dependency, see [Installation](../installation.md)), on a host with an AMD EPYC 7763 64-Core Processor (128

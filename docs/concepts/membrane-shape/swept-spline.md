@@ -10,7 +10,7 @@ A random wandering tube, rendered as a shaded 3D isosurface.
 path. This is the complement to the
 [spherical harmonics](spherical-harmonics.md) backend: a tube that curls
 back near itself is crossed more than once by rays from any single center,
-so it can't be star-convex.
+so it cannot be star-convex.
 
 !!! info "Source"
     Walks through `specter.specimen.membrane._field_swept_spline`. Figures
@@ -68,7 +68,7 @@ Longitudinal slice through a straight chain of spheres: smooth fusion vs. visibl
 
 ## Varying the radius
 
-`tube_radius_a` doesn't have to be constant. `radius_variation` draws a
+`tube_radius_a` does not have to be constant. `radius_variation` draws a
 per-sphere radius instead: Gaussian noise, one value per path point,
 smoothed along path order (`radius_variation_sigma_points`) and applied
 multiplicatively, the same amplitude-normalized-perturbation pattern the
@@ -154,9 +154,9 @@ other defaults.
 ## Limitations
 
 - **No branching.** The path is a single line; Y-junctions or networked
-  tubule topology aren't representable.
+  tubule topology are not representable.
 - **Beading if mis-tuned.** `step_length_a` must stay well under
-  `2 * tube_radius_a`; the generator warns when it doesn't.
+  `2 * tube_radius_a`; the generator warns when it does not.
 - **`cap_curvature` is an approximate proxy**, not exact mean curvature
   flow. An extreme enough bend can still leave a thin margin between
   leaflets even after relaxation.

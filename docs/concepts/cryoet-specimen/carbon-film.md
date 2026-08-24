@@ -27,15 +27,16 @@ single-particle and cryo-ET collection) has 1.2 µm holes, so a **6000 Å
 radius**. That is far larger than any single tomogram's field of view. The
 realistic cases are therefore: entirely inside a hole (no carbon at all),
 entirely on the carbon, or catching one hole's edge near a frame border.
-A small hole fully contained in the frame is not a thing you see.
+A small hole fully contained within the frame does not occur in
+practice.
 
 ![Left: three hole circles drawn to scale against the field of view. Right: the resulting film at three edge_fraction values.](../../assets/images/cryoet-carbon-hole-geometry.png){ width="900" style="display:block;margin:1.2em auto;" }
 ///caption
 Left: three hole circles drawn to scale against the field of view. Right: the resulting film at three edge_fraction values.
 ///
 
-Hand-placing that means solving for where a huge circle's boundary has to
-sit so that a strip of a specific width lands at a specific frame edge.
+Placing that by hand means solving for where a huge circle's boundary has
+to sit so that a strip of a specific width lands at a specific frame edge.
 `edge_hole_center` does that solve: give it `edge_fraction` (the fraction
 of the frame that ends up carbon) and `edge_side`, and it returns the
 `hole_center` to pass alongside the real `hole_radius`. At real Quantifoil
@@ -43,13 +44,13 @@ scale the boundary crossing the frame then reads as close to a straight
 edge, which is what it looks like in real data.
 
 `edge_fraction` also accepts a `(low, high)` range, drawn per run: real
-images don't all happen to catch the same amount of a hole's edge. The
+images do not all happen to catch the same amount of a hole's edge. The
 shipped default is `(0.02, 0.05)`.
 
 ## The rim
 
 Points are seeded uniformly across the frame's footprint (plus a 50 Å pad,
-so the rough boundary doesn't clip visibly at the frame's own edge) and
+so the rough boundary does not clip visibly at the frame's own edge) and
 through the film's thickness, at a fixed physical seed **density**:
 `_SEED_VOLUME_PER_POINT` = 18000 Å³/point, about 26 Å mean spacing. Points
 inside the hole radius are dropped, and every survivor is then displaced by
@@ -71,8 +72,8 @@ comes out to roughly a third of that, ~20 Å. Even `edge_roughness = 0` is
 not a clean circle: the seeds are a Poisson cloud, so the alpha shape is
 already ragged at the seed spacing.
 
-Being a genuine 3D construction rather than a per-angle function of the
-outline, the boundary is different at different heights in the slab:
+The boundary is a genuine 3D construction rather than a per-angle
+function of the outline, so it differs at different heights in the slab:
 
 ![Three z-slices through the same film, showing different boundaries, detached islands and overhanging lips.](../../assets/images/cryoet-carbon-slices.png){ width="900" style="display:block;margin:1.2em auto;" }
 ///caption
@@ -117,14 +118,14 @@ lands at ≈8.4 V, matching a real per-atom-physics measurement of 8.56 ±
 
 The film is painted first, into an empty canvas. Downstream:
 
-- **Membranes and filaments** are placed carbon-aware. Membranes avoid it
-  outright via collision-rejecting placement (a bounding-sphere
-  approximation, so an irregular organelle's true rendered shape can
-  still graze it -- whatever part of an instance's density would land on
-  carbon regardless is zeroed just before merging, as a safety net, so
-  the volume and that instance's own shell label exclude it
-  consistently); filament monomers landing inside it are dropped after
-  the fact (see [Filaments](filaments.md)).
+- **Membranes and filaments** are placed carbon-aware. Membrane placement
+  rejects candidates using a bounding-sphere approximation, so an
+  irregular organelle's true rendered shape can still graze the film in
+  practice. As a safety net, whatever part of an instance's density would
+  land on carbon anyway is zeroed just before merging, so the volume and
+  that instance's own shell label exclude it consistently. Filament
+  monomers landing inside it are dropped after the fact (see
+  [Filaments](filaments.md)).
 - **Beads and protein fill** avoid it for free: the region classifier
   reads carbon's high density as `shell`, the same bucket a bilayer
   occupies, and nothing is packed into `shell`.

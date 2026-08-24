@@ -1,6 +1,128 @@
 # Configure a run
 
-!!! info "Work in progress"
-    Will cover the TOML config file format, CLI override precedence, and
-    the shipped `configs/particle.toml` / `configs/micrograph.toml`
-    defaults.
+Every `specter` simulate/build/reconstruct command is driven by two layers
+that stack in a fixed order: a TOML config file, loaded first, and any CLI
+flags passed on the command line, which override individual fields of it.
+Nothing else participates. There is no environment-variable layer and no
+implicit merging of multiple config files.
+
+## TOML config files
+
+A config file is a flat set of fields, grouped into tables for readability
+only. `specter simulate particles`, for instance, reads a
+`ParticleStackConfig`, whose fields are grouped in `configs/particle.toml`
+under `[potential]`, `[microscope]`, `[sampling]`, `[models]`,
+`[postprocessing]`, `[compute]`, and `[output]`. The table names are not
+meaningful to the loader: every table is flattened into one namespace before
+the fields are validated, so `[potential]`'s `pdb_source` and
+`[microscope]`'s `voltage` end up as siblings on the same dataclass. Writing
+a field under the wrong table heading, or with no table at all, works
+identically to writing it under the "correct" one.
+
+Six commands each have their own config dataclass and canonical TOML:
+
+| Command | Config dataclass | Canonical TOML |
+|---|---|---|
+| `specter simulate particles` | `ParticleStackConfig` | `configs/particle.toml` |
+| `specter simulate micrograph` | `MicrographConfig` | `configs/micrograph.toml` |
+| `specter simulate tiltseries` | `TiltSeriesConfig` | `configs/tilt_series.toml` |
+| `specter build tomogram` | `TomogramConfig` | `configs/tomogram.toml` |
+| `specter build ice` | `IceCacheConfig` | `configs/ice.toml` |
+| `specter reconstruct particle` | `ReconstructionConfig` | `configs/reconstruct.toml` |
+
+Every field a command accepts, along with its default and a one-line
+description, is documented in that command's `--help` output and in the
+comments of its canonical TOML. This page covers how the two layers combine,
+not a field-by-field listing.
+
+`--config` itself always has a default: each command falls back to its own
+canonical TOML in `configs/` when `--config` is omitted, so `specter
+simulate particles` with no arguments at all is a complete, runnable command.
+Copy the canonical file and edit it for a real run rather than starting from
+an empty TOML; every field left out of your copy still gets a sane default
+from the dataclass itself.
+
+An unrecognised field in a TOML file is a load-time error naming the bad
+key, not a silently ignored typo. A handful of fields have been renamed
+since they were introduced; if a key was renamed rather than removed, the
+error names the current spelling directly.
+
+## CLI overrides
+
+Every field on a config dataclass gets a matching `--field_name` flag,
+generated automatically rather than hand-written per command, so the two
+never drift apart. Two things follow from that:
+
+- **A flag's real default is `None`, not the dataclass default shown next to
+  it in `--help`.** `specter` needs to distinguish "the caller explicitly
+  passed `--dose 20`" from "the caller didn't mention dose at all," and
+  Click can only do that by comparing an option's value against its
+  parameter source. If the flag's default were the dataclass's own default,
+  a config setting `dose = 40` would be silently clobbered back to 20 by a
+  flag the caller never typed. What `--help` prints under `[default: ...]`
+  is the TOML/dataclass default shown for reference, not the value the flag
+  actually takes when omitted.
+- **Only flags a caller actually types are applied.** `apply_overrides`
+  receives just the subset of parameters Click's `ParameterSource` reports
+  as `COMMANDLINE`, and writes them onto the config loaded from TOML in a
+  second pass. A field present in your TOML and never mentioned on the
+  command line keeps the TOML's value untouched.
+
+So the effective value of any field, in order, is: the CLI flag if you typed
+it, else the TOML file's value if it sets that field, else the dataclass's
+own default. There is no fourth source and no field-by-field opt-out of this
+order.
+
+`list[...]`-typed fields (for example a tomogram's `[[targets]]` or
+`[[filler]]` tables) are TOML/Python-only: no single CLI token can represent
+a list of tables, so these fields have no matching flag and can only be set
+in the config file or from Python.
+
+```bash
+# TOML alone
+specter simulate particles --config configs/particle.toml
+
+# TOML, then two fields overridden from the command line
+specter simulate particles \
+    --config configs/particle.toml \
+    --pdb_source 6bdf \
+    --n_particles 200
+```
+
+### Per-particle sampling fields on the command line
+
+A handful of fields (`dose`, `defocus`, `coincidence_radius`,
+`potential_scale`, `astigmatism`, `astigmatism_angle`, depending on the
+command) accept either a constant or a `[low, high]` range sampled per
+particle/micrograph/tomogram. In TOML this is naturally a list:
+`defocus = [5000.0, 15000.0]`. A CLI flag can only carry one token, so the
+same range is written as a comma-separated string instead:
+`--defocus 5000,15000`. That comma-separated spelling is also accepted
+inside a TOML file, so a config written before the list form existed keeps
+working unchanged.
+
+## Validating a config from Python
+
+Loading a TOML file and applying CLI-style overrides are both plain
+functions in `specter.config`, independent of Click and usable from a
+notebook or script:
+
+```python
+from specter.config import ParticleStackConfig, load_config, apply_overrides
+
+config = load_config("configs/particle.toml", ParticleStackConfig)
+apply_overrides(config, {"n_particles": 200, "device": "cuda:0"})
+```
+
+`apply_overrides` rejects a key that doesn't name a real field outright,
+rather than attaching it under an attribute nothing reads, which is what a
+bare `setattr` would do.
+
+## See also
+
+- [Manage jobs](jobs.md): how `output_dir`, `project`, and `job_id` route a
+  run's output, independent of the rest of this page's TOML/CLI mechanics.
+- The individual command pages ([particle stack](particle-stack.md),
+  [micrograph](micrograph.md), [tilt series](tilt-series.md), [build a
+  tomogram](build-tomogram.md), [reconstruction](reconstruction.md), [ice
+  cache](ice-cache.md)) for what each config's fields actually control.

@@ -61,16 +61,16 @@ magnitude at all; only the imaginary part (\(b\), the part Fresnel
 propagation converts into a genuine amplitude change) affects
 \(|\psi|\). Squaring a truncated sum mixes \(a\) and \(b\) together, and
 the resulting \(a^2\) term has no physical counterpart. For any
-predominantly-phase specimen -- ice, protein, or any other weakly
-absorptive material -- \(a\) dominates \(b\): at low spatial frequency
+predominantly-phase specimen (ice, protein, or any other weakly
+absorptive material), \(a\) dominates \(b\): at low spatial frequency
 the Fresnel propagator is close to a real, unit-magnitude filter
 (\(F_z(k)\approx 1\) as \(k\to0\)), so most of \(\Theta\)'s power lands
 in the real part, and only the higher-frequency content that genuinely
 diffracts leaks into \(b\).
 
-![Standard deviation of Re(Θ) and Im(Θ) vs. thickness, for a RandomIcemaker ice slab. Re(Θ) dominates Im(Θ) at every thickness tested -- by roughly 50x at the thinnest slab and still 2.6x at the thickest.](../../assets/images/scattering-theta-real-imag-split.png){ width="600" }
+![Standard deviation of Re(Θ) and Im(Θ) vs. thickness, for a RandomIcemaker ice slab. Re(Θ) dominates Im(Θ) at every thickness tested, by roughly 50x at the thinnest slab and still 2.6x at the thickest.](../../assets/images/scattering-theta-real-imag-split.png){ width="600" }
 ///caption
-Standard deviation of Re(Θ) and Im(Θ) vs. thickness, for a RandomIcemaker ice slab. Re(Θ) dominates Im(Θ) at every thickness tested -- by roughly 50x at the thinnest slab and still 2.6x at the thickest.
+Standard deviation of Re(Θ) and Im(Θ) vs. thickness, for a RandomIcemaker ice slab. Re(Θ) dominates Im(Θ) at every thickness tested, by roughly 50x at the thinnest slab and still 2.6x at the thickest.
 ///
 
 ![Correlation of each mode's intensity pattern with multislice's true pattern, vs. thickness. rytov stays at 1.000 throughout; firstborn and kinematic sit near zero across the entire range, including the thinnest specimen tested.](../../assets/images/scattering-pattern-correlation-vs-thickness.png){ width="600" }
@@ -80,7 +80,7 @@ Correlation of each mode's intensity pattern with multislice's true pattern, vs.
 
 `firstborn`'s intensity fluctuation is dominated by the spurious \(a^2\)
 term rather than the physically correct \(-2b\) term at every thickness
-tested here, including the thinnest -- its pattern correlation with
+tested here, including the thinnest. Its pattern correlation with
 `multislice` never exceeds \({\approx}0.02\) and briefly goes negative.
 This is not specific to `RandomIcemaker` ice; the same collapse (from
 \({\approx}0.9\) at the thinnest slice to \({\approx}0\) at full depth)
@@ -104,8 +104,8 @@ single transmission function with no propagation step at all,
 This is also what `scattering_model="ctf"` returns as a real-valued
 projected potential (`2\sigma\Delta z \sum_z V_z`, without the complex
 exponential), for use with `aberration_model="ctf"`'s separate CTF-based
-intensity model — see [Detector](../detector.md) and
-[Aberrations](../aberrations.md).
+intensity model (see [Detector](../detector.md) and
+[Aberrations](../aberrations.md)).
 
 ## Accuracy vs. thickness
 
@@ -133,7 +133,7 @@ because it approximates thickness effects well. Writing
 I_{\mathrm{multislice}}\rangle\) the mean-intensity bias: for
 `firstborn`/`kinematic`, \(|b|\) dominates \(d\)'s spread at every ice
 thickness tested (by a factor of 1.5 at 32 Å, growing to 5.2 at 320 Å),
-so \(E \approx |b|\) almost exactly -- this figure is essentially a
+so \(E \approx |b|\) almost exactly. This figure is essentially a
 rescaled replot of the mean-intensity bias below. `projection`'s bias is
 exactly 0 at every thickness (its exit wave is unit-modulus by
 construction at `alpha=0`), so its \(E\) instead measures only how far
@@ -149,7 +149,7 @@ Mean exit-wave intensity vs. thickness, per model. A properly normalized exit wa
 Exit-wave intensity maps at 320 A, side by side. multislice and rytov show fine, correlated speckle; firstborn is a different, coarser pattern riding on a strongly biased mean; projection is exactly flat.
 ///
 
-Neither curve tests spatial pattern fidelity -- that's the [pattern
+Neither curve tests spatial pattern fidelity; that is the [pattern
 correlation figure](#where-the-linearization-breaks-down) above, where
 only `rytov` tracks the truth. `projection` is not a good general
 substitute for `multislice`: it carries no spatial structure by
@@ -159,10 +159,9 @@ flatness to win by default. That crossover point is specimen-dependent:
 the bias-driven gap between `projection` and `firstborn` on this ice
 slab (roughly 10x at 320 Å) shrinks to roughly 3x for a real
 single-particle protein at typical imaging depths (tens of Å), where
-accumulated phase -- and therefore `firstborn`'s bias -- is much
-smaller. `rytov` remains 2-3 orders of magnitude more accurate than
-every other approximate mode at every thickness tested, on both
-specimen types.
+accumulated phase, and therefore `firstborn`'s bias, is much smaller.
+`rytov` remains 2-3 orders of magnitude more accurate than every other
+approximate mode at every thickness tested, on both specimen types.
 
 ## References
 

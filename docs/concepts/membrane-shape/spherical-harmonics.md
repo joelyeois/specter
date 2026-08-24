@@ -124,7 +124,7 @@ zero at the surface.
 Evaluating the harmonic sum at every voxel's own direction is expensive
 (~70s at a 10M-voxel grid). Since the perturbation is
 [band-limited](https://en.wikipedia.org/wiki/Bandlimiting) to degree
-\(L\), it's instead synthesized once on a small \((n_\theta, n_\phi)\) grid
+\(L\), it is instead synthesized once on a small \((n_\theta, n_\phi)\) grid
 and [bilinearly interpolated](https://en.wikipedia.org/wiki/Bilinear_interpolation)
 per voxel.
 

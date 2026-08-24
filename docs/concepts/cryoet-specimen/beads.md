@@ -123,9 +123,9 @@ EM of a real bead prep.
 Beads are packed with the
 [sphere RSA backend](packing.md#rsa-sphere-packing), right after
 filaments. A bead is genuinely a sphere, so unlike proteins (which default
-to shape-based collision) nothing is approximated by treating it as one. They avoid the membrane shell, the carbon film, and
-already-placed filaments and beads; the protein-fill stage that follows
-then avoids them.
+to shape-based collision) nothing is approximated by treating it as one.
+Beads avoid the membrane shell, the carbon film, and already-placed
+filaments and beads; the protein-fill stage that follows then avoids them.
 
 They are **not** region-gated. A fiducial sits in the ice, not in a
 cytosol or lumen compartment, so `TomogramBeadSpec` has no `location`

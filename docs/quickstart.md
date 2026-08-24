@@ -109,10 +109,26 @@ The resulting `.mrc` is directly usable as `specter simulate tiltseries`'s
 for the full flag reference, including placement priority, region gating,
 and the compute/scaling flags for larger runs.
 
+## Reconstruct a volume
+
+`specter reconstruct particle` runs the inverse problem: it fits the same
+forward model used above to a real CryoSPARC particle stack and recovers
+a 3D volume. Unlike the config above, `configs/reconstruct.toml` has no
+runnable default; point it at a real `.cs` file and particle stack first:
+
+```bash
+specter reconstruct particle --config configs/reconstruct.toml --test_run
+```
+
+`--test_run` fits one epoch on binned images so a config mistake surfaces
+in seconds rather than after a multi-hour run. See
+[Reconstruct a volume](user-guide/reconstruction.md) for the gold-standard
+workflow and the full flag reference.
+
 ## Job management
 
-Generation runs can be recorded under a project name in a local job
-database. Inspect past runs with `specter jobs`; see
+Generation and reconstruction runs can be recorded under a project name in
+a local job database. Inspect past runs with `specter jobs`; see
 [Manage jobs](user-guide/jobs.md):
 
 ```bash
@@ -121,9 +137,14 @@ specter jobs show <job_id>
 specter jobs diff <job_id_1> <job_id_2>
 ```
 
+Structures fetched by accession code (`pdb_source = "6bdf"`, above) are
+cached at `~/.cache/specter/pdb` and shared across every project on the
+machine. `specter cache info` reports what is stored, and `specter cache
+clean` clears it; see [Manage the PDB cache](user-guide/cache.md).
+
 See `demo-notebooks/` for interactive worked examples, including
 micrograph and tilt-series generation (`create_micrograph/`,
-`tilt-series-generator.ipynb`). For an example of composing the forward
-model's individual modules by hand (e.g. to swap in a custom aberration
-model) instead of going through `ImageGenerator`, see
-`modular_pipeline/`.
+`create_tilt_series/`). For an example of composing the forward model's
+individual modules by hand (e.g. to swap in a custom aberration model)
+instead of going through `ImageGenerator`, see
+`create_particle_stack_modular/` and `create_tilt_series_modular/`.

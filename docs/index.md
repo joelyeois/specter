@@ -119,11 +119,20 @@ Every workflow below is a `specter` subcommand driven by a TOML config.
 
     [:octicons-arrow-right-24: Using the ice cache](user-guide/ice-cache.md)
 
+-   :material-cube-send:{ .lg .middle } **Reconstruction**
+
+    `specter reconstruct particle` — fit the same forward model to a
+    CryoSPARC particle stack and recover a 3D volume.
+
+    [:octicons-arrow-right-24: Reconstruct a volume](user-guide/reconstruction.md)
+
 </div>
 
 Any config field can be overridden on the command line; see
 [Configure a run](user-guide/configuration.md). Runs can record themselves
-as tracked jobs; see [Manage jobs](user-guide/jobs.md).
+as tracked jobs; see [Manage jobs](user-guide/jobs.md). Structures fetched
+by accession code are cached locally and shared across projects; see
+[Manage the PDB cache](user-guide/cache.md).
 
 ### Concepts
 

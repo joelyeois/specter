@@ -162,7 +162,7 @@ TiltSeriesGenerator         – generates a tilt series
 - `_tomogram_pipeline.py` — `TomogramGhostbuster`: end-to-end tomogram pipeline, mirrors `Ghostbuster`'s `run`/`test_run` API.
 - `_helpers.py` — shared helpers (LR scheduler construction, k-space masking, image preprocessing) used by both reconstructors.
 
-Pose/shift/defocus refinement (`lr_R`/`lr_T`/`lr_defocus` on `Reconstructor`/`TomogramReconstructor`) is wired in but still **unverified** for correctness — no test currently checks recovered rotations/translations/defocus against ground truth. The `--lr_R`/`--lr_T`/`--lr_D` CLI flags say so in their help text; the public reconstruction docs (`docs/user-guide/reconstruction.md`) are just a "work in progress" stub pending publication, so beyond that the status isn't documented anywhere outside this file and the code itself.
+Pose/shift/defocus refinement (`lr_R`/`lr_T`/`lr_defocus` on `Reconstructor`/`TomogramReconstructor`) is wired in but still **unverified** for correctness — no test currently checks recovered rotations/translations/defocus against ground truth. The `--lr_R`/`--lr_T`/`--lr_D` CLI flags say so in their help text; so does the `## Limitations` section of the public reconstruction docs (`docs/user-guide/reconstruction.md`).
 
 `Ghostbuster`/`TomogramGhostbuster`'s `run`/`test_run` take `device` as a GPU index, a list of them (DDP), or the string `"cpu"`. That last spelling is the only way to force CPU training: `_run_helpers.py`'s `resolve_device` otherwise decides from `torch.cuda.is_available()` alone, so on a GPU machine every other value targets the GPU.
 

@@ -11,8 +11,8 @@ A rendered microtubule: projection along z, and a cross-section perpendicular to
 
 A microtubule is a closed tube of 13 protofilaments, each a stack of
 αβ-tubulin dimers, wrapped so that the lateral tubulin–tubulin bonds form a
-3-start helix. `specter build tomogram` builds one as many rigid copies of a
-single tubulin dimer, the same machinery
+3-start helix. `specter build tomogram` builds a microtubule as many
+rigid copies of a single tubulin dimer, the same machinery
 [filaments](filaments.md) use, so a microtubule costs one
 `PotentialBuilder` render plus one rotation per dimer.
 
@@ -49,10 +49,10 @@ The 13-protofilament cross-section, and the unrolled lattice showing the stagger
 
 Walking once around the tube accumulates \(N s = n_\mathrm{start} r\) of
 axial offset: three monomers, i.e. **1.5 dimers**. Since the repeating unit
-is the dimer, protofilament 0 as predicted by 13 lateral bonds sits half a
-dimer away from where protofilament 0 actually is. That half-dimer is one
-monomer, so an α ends up against a β: the A-lattice **seam**, with the other
-twelve junctions B-lattice.
+is the dimer, following 13 lateral bonds back around to protofilament 0
+lands half a dimer away from where protofilament 0 actually starts. That
+half-dimer is one monomer, so an α ends up against a β: the A-lattice
+**seam**, with the other twelve junctions B-lattice.
 
 Nothing in the code special-cases it. Because the stagger is derived from
 \(N\), the same arithmetic produces a seam at every protofilament number.
@@ -148,8 +148,8 @@ nearly straight: it wanders about half its own diameter over a whole
 tomogram field.
 
 The strongly curved microtubules in real cellular tomograms are
-mechanically buckled, not thermally bent. Reach for **`bend_radius`** for
-those: raising the flex angle instead produces a wiggly, tangled tube,
+mechanically buckled, not thermally bent. Use **`bend_radius`** for
+those instead: raising the flex angle produces a wiggly, tangled tube,
 which is a different object.
 
 Bending does not strain the lattice: no stretched outer wall, no compressed

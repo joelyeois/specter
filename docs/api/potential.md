@@ -1,0 +1,3 @@
+# specter.potential
+
+::: specter.potential

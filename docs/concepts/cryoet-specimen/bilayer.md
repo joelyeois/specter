@@ -48,7 +48,7 @@ what ships. It is more physically motivated and considerably more
 fragile: keeping the acyl-chain region featureless relative to the
 phosphate peaks means fighting per-cluster jitter scales against emergent
 Gaussian-sum interference, with no guarantee a different lipid count or
-seed doesn't reintroduce a competing hump between the leaflets. Because
+seed does not reintroduce a competing hump between the leaflets. Because
 \(\sigma\) is far smaller than the leaflet separation, the two-Gaussian
 construction cannot do that, by construction, not by tuning.
 
@@ -65,7 +65,7 @@ same volume.
 Calibrating instead from the *laterally averaged* peak of the full
 rendered lipid patch would be wrong: measured directly, that dilutes the
 true single-atom peak by ~20× (97.5 → 4.8 V), with no physical
-justification, since a real bilayer's phosphate atoms don't scatter more
+justification, since a real bilayer's phosphate atoms do not scatter more
 weakly than the same atom in a protein.
 
 A general principle recurs here: **the smoothness real cryo-ET membranes
@@ -166,7 +166,7 @@ Defaults for \(t\) and \(\sigma\) are polnet's own midpoints (its
 - **No lipid composition.** One profile per membrane instance, with no
   notion of rafts, cholesterol, or local thickness variation.
 - **Transmembrane instances get no voxel labels.** Their density is in the
-  volume and their placements are recorded, but they don't appear in
+  volume and their placements are recorded, but they do not appear in
   `instance_labels`.
 - **Depth alignment defaults to the full z-extent** when no `tm_span_mask`
   is given, which is wrong for a protein with a large soluble domain on

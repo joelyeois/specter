@@ -11,10 +11,12 @@ wavefront aberration phase \(\chi(k)\) term by term from a per-image
 !!! info "Source"
     `specter.aberrations._functions` (per-term \(\chi(k)\) contributions),
     `_aberration.Aberration` (composes them into a transfer function), and
-    `_envelopes` (the multiplicative amplitude envelopes). Figures are
-    produced by `docs-figures/aberrations.py`, which calls
-    `Aberration.transfer_function` and the `_envelopes` functions
-    directly.
+    `_envelopes` (the multiplicative amplitude envelopes). The opt-in
+    `torch_ctf` backend covered below lives in `specter.ctf`
+    (`_legacy.LegacyAberrationAdapter`, `_parameters.CTFParameters`,
+    `_transfer.TransferFunction`). Figures are produced by
+    `docs-figures/aberrations.py`, which calls `Aberration.transfer_function`
+    and the `_envelopes` functions directly.
 
 ## The transfer function
 
@@ -28,7 +30,7 @@ T(k) = \exp(-i\chi(k))
 \]
 
 where \(\chi(k)\) is the sum of whichever terms are present in the
-`ctf_params` dict passed to `forward()` -- a key's absence means that
+`ctf_params` dict passed to `forward()`. A key's absence means that
 term contributes nothing, so a caller only pays for (and only needs to
 supply) the aberrations relevant to their use case. Every term below is a
 pure function of a frequency-grid tensor and physical parameters, defined
@@ -96,7 +98,7 @@ Isotropic defocus gives concentric rings; astigmatism stretches them into
 ellipses (its cross section along `dfang` and perpendicular to it are
 `dfu` and `dfv` respectively); trefoil folds the pattern into a
 threefold, and tetrafoil a fourfold, lobed shape. All three break the
-assumption -- valid for defocus and Cs alone -- that the CTF depends only
+assumption (valid for defocus and Cs alone) that the CTF depends only
 on \(|k|\).
 
 ### Phase shift and amplitude contrast
@@ -105,7 +107,7 @@ A constant phase offset, e.g. from a Volta phase plate, enters as
 \(\chi_{\mathrm{phaseshift}} = -\phi_0\). For `aberration_model="ctf"`
 with `specimen_absorption=False` (see below), amplitude contrast is also
 represented here rather than in the exit wave itself, as
-\(-\arccos(\alpha)\) added to \(\phi_0\) -- matching CryoSPARC's
+\(-\arccos(\alpha)\) added to \(\phi_0\), matching CryoSPARC's
 convention (`phase_shift - arccos(amp_contrast)`).
 
 ### The isotropic 1D curve
@@ -131,14 +133,14 @@ in \(k\) near \(k=0\) (defocus-dominated) and quartic further out
 amplitude contrast (above), and how `forward()`'s output is interpreted.
 `"holography"` (the default) returns the complex aberrated exit wave
 unchanged, matching every `scattering_model` except `"ctf"`, which
-returns a real-valued exit wave with no absorptive component of its own
--- amplitude contrast has nowhere else to live, so it is folded into
+returns a real-valued exit wave with no absorptive component of its own.
+Amplitude contrast has nowhere else to live, so it is folded into
 \(\chi\) via `specimen_absorption=False`. `"ctf"` instead takes the real
 part of the aberrated field, matching `Scattering.ctf`'s projected
 potential input. `specimen_absorption=True` (default) assumes amplitude
 contrast is already baked into the exit wave upstream, via
 `scattering.complex_potential`, so applying it again here would double
-count it -- this is why `BaseImager._init_optics` sets
+count it. This is why `BaseImager._init_optics` sets
 `specimen_absorption=self.scattering_model != "ctf"` rather than a fixed
 value.
 
@@ -177,7 +179,7 @@ Left: the four envelopes in isolation, plus their product (B x Cs x Cc). Right: 
 
 Each envelope sets a different practical resolution limit, and the
 combined envelope (their product) is what ultimately damps the CTF's
-outer oscillations to near zero -- the "information limit" a real
+outer oscillations to near zero: the "information limit" a real
 micrograph's Thon rings fade out at, well inside the detector's Nyquist
 frequency, even for a perfectly-focused, aberration-free instrument.
 
@@ -188,7 +190,7 @@ across a whole batch rather than a genuinely per-particle quantity (the
 same convenience `dose_per_angstrom` gets one level up, on
 `BaseImager`). Every other `ctf_params` key listed above is per-image and
 therefore only ever set through the dict, never as a constructor
-argument -- `Aberration.__init__` raises `TypeError` if one is passed by
+argument. `Aberration.__init__` raises `TypeError` if one is passed by
 mistake.
 
 ## `aberration_backend`: `"legacy"` vs. `"torch_ctf"`
@@ -200,11 +202,33 @@ described on this page; `"torch_ctf"` swaps in
 implementation verified term-by-term against `"legacy"` and against a
 real multi-particle CryoSPARC `.cs` file (`tests/test_ctf_legacy_adapter.py`). Both share the
 same `forward(exitwave, ctf_params)` call signature, so no other code
-needs to know which is in use. `torch_ctf` is opt-in and has no mapping
-for the `tetrafoil1`-`tetrafoil4` terms above -- they are silently
-ignored under that backend, so a config that relies on tetrafoil should
-stay on `"legacy"`. `torch_ctf` also exposes a laser-phase-plate model
-(`lpp_params`) that `"legacy"` has no equivalent for.
+needs to know which is in use, and both apply the same B-factor/Cs/Cc/dose
+envelopes described above.
+
+`LegacyAberrationAdapter` still takes the same CryoSPARC-convention
+`ctf_params` dict as `"legacy"` and converts it internally to
+`CTFParameters`, the parameter container `TransferFunction` (this
+backend's `Aberration` equivalent) actually consumes. `CTFParameters`'
+own units differ from that dict (defocus in micrometers, spherical
+aberration in millimeters, angles in degrees, Zernike coefficients
+dimensionless) and there is no converter from RELION's convention; see
+[Limitations](#limitations). Full API detail for both classes is in
+[specter.ctf](../api/ctf.md).
+
+`torch_ctf` also exposes a laser-phase-plate model (`lpp_params`), a
+`LegacyAberrationAdapter` constructor argument rather than a `ctf_params`
+key, since it describes one shared instrument configuration rather than a
+per-particle quantity; `"legacy"` has no equivalent.
+
+## Limitations
+
+- **`torch_ctf` drops tetrafoil.** `LegacyAberrationAdapter` has no
+  `tetrafoil1`-`tetrafoil4` mapping; a config relying on those terms
+  should stay on `aberration_backend="legacy"`.
+- **`torch_ctf` has no native-units entry point.** A caller with
+  parameters already in torch-ctf's own units, or in RELION's convention,
+  can only reach `CTFParameters` by constructing it directly; there is no
+  `LegacyAberrationAdapter`-style wrapper for those conventions yet.
 
 ## References
 

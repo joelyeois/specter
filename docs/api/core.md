@@ -2,10 +2,6 @@
 
 Standalone top-level modules that are not grouped into a subpackage.
 
-## specter.potential
-
-::: specter.potential
-
 ## specter.scattering
 
 ::: specter.scattering

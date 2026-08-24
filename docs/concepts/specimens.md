@@ -19,7 +19,7 @@ Both draw on the same two shared building blocks:
 - **[Ice structure](ice.md)**: both pipelines draw amorphous ice from the
   same `IceBank` cache.
 
-What's specific to each path:
+What is specific to each path:
 
 - **Single-particle**: [pose & crowding](pose-crowding.md), the
   quaternion/translation pose sampled per particle, and Poisson-disk
@@ -30,11 +30,11 @@ What's specific to each path:
   [filaments](cryoet-specimen/filaments.md),
   [gold fiducials](cryoet-specimen/beads.md), and the
   [region-gated packing](cryoet-specimen/packing.md) that crowds proteins
-  into what's left.
+  into what is left.
 
-Once a specimen volume exists, everything downstream, propagating the
-electron wave through it and forming an image, is exactly the same
-physics regardless of which path built it. See [Forward
+Once a specimen volume exists, everything downstream is exactly the same
+physics regardless of which path built it: propagating the electron wave
+through the volume and forming an image. See [Forward
 simulation](forward-simulation.md).
 
 !!! info "Source"

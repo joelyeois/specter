@@ -47,9 +47,9 @@ published MTF datasheets. The Falcon 4i (a
 are derived instead from three published DQE points (0,
 0.5, and 1x Nyquist) under the white-noise approximation
 \(\mathrm{DQE}(k) \approx \mathrm{MTF}(k)^2\), so the *shape* is
-recovered as \(\mathrm{MTF}(k) = \sqrt{\mathrm{DQE}(k)/\mathrm{DQE}(0)}\)
--- normalized by the zero-frequency value so it comes out as a proper
-MTF -- with quadratic interpolation between the three points. `"perfect"`
+recovered as \(\mathrm{MTF}(k) = \sqrt{\mathrm{DQE}(k)/\mathrm{DQE}(0)}\),
+normalized by the zero-frequency value so it comes out as a proper MTF,
+with quadratic interpolation between the three points. `"perfect"`
 is the ideal pixel-integration limit, \(\mathrm{sinc}(\pi k / 2 k_{Nyq})\),
 limited only by the finite pixel aperture.
 
@@ -75,7 +75,7 @@ datasheet publishes an MTF with no accompanying DQE(0) figure, so it
 defaults to 1.0 (an ideal counter) rather than guessing. These values
 must specifically be *low-dose-rate* DQE(0): published DQE falls with
 dose rate largely because of coincidence loss, which specter already
-models separately (below) -- using a high-flux figure here would count
+models separately (below). Using a high-flux figure here would count
 that loss twice.
 
 ## Coincidence loss
@@ -100,7 +100,7 @@ Left: detected/incident electron ratio vs. incident dose, at the Falcon 4i-calib
 ///
 
 Two consequences of the same mechanism. On the left, detected efficiency
-falls steeply with incident dose rate -- more electrons arriving in the
+falls steeply with incident dose rate: more electrons arriving in the
 same frame means more of them land within an already-occupied cell.
 `coincidence_radius = 2.394` px is calibrated against real Falcon 4i
 beam-only micrographs spanning 0.15-31.29 e⁻/px/s, reproducing the
@@ -109,8 +109,8 @@ mechanism itself imprints a low-spatial-frequency dip in the noise power
 spectrum relative to plain Poisson: an electron's presence briefly
 excludes its own neighborhood, which suppresses variance at scales larger
 than the exclusion radius while leaving the high-frequency (per-pixel)
-noise floor essentially untouched -- exactly the signature reported for
-real DED coincidence loss.
+noise floor essentially untouched. That is exactly the signature reported
+for real DED coincidence loss.
 
 `n_frames` controls dose fractionation: the total dose is split across
 `n_frames` independent applications of the coincidence model rather than
@@ -126,10 +126,10 @@ frames per exposure.
 - Zambon, P. (2024). Modeling the impact of coincidence loss on count
   rate statistics and noise performance in counting detectors for imaging
   applications. *Frontiers in Physics*, 12, 1408430.
-  [doi:10.3389/fphy.2024.1408430](https://doi.org/10.3389/fphy.2024.1408430)
-  -- closed-form treatment of the same phenomenon (Roach's
-  statistical-overlap model) `Detector.apply_coincidence`'s spatial
-  simulation is not itself an implementation of; useful for the DQE/SNR
-  consequences of coincidence loss at the per-pixel statistics level,
-  though closed-form per-pixel statistics alone do not reproduce the
-  spatially correlated low-frequency power-spectrum dip shown above.
+  [doi:10.3389/fphy.2024.1408430](https://doi.org/10.3389/fphy.2024.1408430).
+  This is a closed-form treatment of the same phenomenon (Roach's
+  statistical-overlap model), which `Detector.apply_coincidence`'s
+  spatial simulation does not itself implement. It is useful for the
+  DQE/SNR consequences of coincidence loss at the per-pixel statistics
+  level, though closed-form per-pixel statistics alone do not reproduce
+  the spatially correlated low-frequency power-spectrum dip shown above.

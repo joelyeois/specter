@@ -69,8 +69,10 @@ nav:
       - Build a tomogram specimen: user-guide/build-tomogram.md
       - Generate a CryoSPARC dataset twin: user-guide/dataset-twin.md
       - Using the ice cache: user-guide/ice-cache.md
+      - Reconstruct a volume: user-guide/reconstruction.md
       - Configure a run: user-guide/configuration.md
       - Manage jobs: user-guide/jobs.md
+      - Manage the PDB cache: user-guide/cache.md
   - Concepts:
       - Overview: concepts/index.md
       - Pipeline overview: concepts/pipeline-overview.md
@@ -108,11 +110,14 @@ nav:
       - specter.aberrations: api/aberrations.md
       - specter.atom: api/atom.md
       - specter.cli: api/cli.md
+      - specter.ctf: api/ctf.md
+      - specter.ghostbuster: api/ghostbuster.md
       - specter.ice: api/ice.md
       - specter.imagegenerator: api/imagegenerator.md
       - specter.io: api/io.md
       - specter.jobs: api/jobs.md
       - specter.pipelines: api/pipelines.md
+      - specter.potential: api/potential.md
       - specter.rotations: api/rotations.md
       - specter.specimen: api/specimen.md
       - specter.tilt: api/tilt.md

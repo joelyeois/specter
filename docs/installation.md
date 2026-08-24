@@ -31,12 +31,16 @@ uv pip install -e .
         │ --help  -h  Show this message and exit.                                      │
         ╰──────────────────────────────────────────────────────────────────────────────╯
         ╭─ Commands ───────────────────────────────────────────────────────────────────╮
-        │ simulate           Simulate cryo-EM/cryo-ET data                             │
+        │ build        Build specimen volumes and reusable assets                      │
+        │ cache        Inspect and clear the cache of downloaded PDB/mmCIF structures. │
+        │ jobs         Inspect and compare tracked SPECTER jobs.                       │
+        │ reconstruct  Reconstruct 3D volumes from experimental images                 │
+        │ simulate     Simulate cryo-EM/cryo-ET data                                   │
         ╰──────────────────────────────────────────────────────────────────────────────╯
 
 ## Choosing a CUDA version
 
-The two CUDA-flavoured pins in `pyproject.toml` aren't fixed requirements.
+The two CUDA-flavoured pins in `pyproject.toml` are not fixed requirements.
 Edit both to match your driver:
 
 ```toml
@@ -79,8 +83,8 @@ newer minimum `torch`; `cu126` wheels start at torch 2.6, for instance.
 
     `uv pip install --torch-backend auto` detects your driver and picks the
     matching PyTorch build automatically. It works on uv's `pip` interface
-    only, not `uv sync`, so it's an alternative to editing the pin rather than
-    a replacement for it.
+    only, not `uv sync`, so it is an alternative to editing the pin rather
+    than a replacement for it.
 
 A mismatched CuPy wheel fails safely: the `spherical_harmonics` membrane
 backend warns once and falls back to `scipy`'s CPU distance transform. A
@@ -99,7 +103,7 @@ uv-specific setting) and gives you PyPI's default PyTorch build; use
     CuPy is a core dependency, so `spherical_harmonics` membrane backend GPU
     distance transforms are installed by a plain `uv sync`.
 
-    On macOS there are no `cupy-cuda12x` wheels, so CuPy isn't installed and
+    On macOS there are no `cupy-cuda12x` wheels, so CuPy is not installed and
     the backend falls back to `scipy`'s CPU distance transform (~3x slower
     field generation, plus a one-time warning). The same fallback covers a
     machine with no CUDA device available at runtime.
@@ -107,9 +111,9 @@ uv-specific setting) and gives you PyPI's default PyTorch build; use
 ## Monomer Library (for Shtyrov scattering factors)
 
 The default `shtyrov` parameterization fits scattering factors per *bonded
-species* — `C(HHHC)` for a methyl carbon, `O(HH)` for a water oxygen — rather
-than per element, so an atom is typed by what it is bonded to. Twenty of the
-forty-two tabulated species contain hydrogen.
+species* rather than per element, so an atom is typed by what it is bonded
+to: a methyl carbon reads `C(HHHC)`, a water oxygen reads `O(HH)`. Twenty
+of the forty-two tabulated species contain hydrogen.
 
 Deposited structures almost never include hydrogens, since they are not
 resolved at typical resolution. Supplying them is the job of the
@@ -119,8 +123,9 @@ and [Coot](https://www2.mrc-lmb.cam.ac.uk/personal/pemsley/coot/) use. It is
 not bundled with SPECTER: it is roughly 1.5 GB, and separately licensed.
 
 Without it, every H-containing species fails to match and those atoms fall
-back to per-element Peng factors — about **44% of a hydrogen-free protein**,
-measured on myoglobin. SPECTER still runs, and warns once per structure.
+back to per-element Peng factors. Measured on myoglobin, that is about
+**44% of a hydrogen-free protein**. SPECTER still runs, and warns once
+per structure.
 
 ```bash
 git clone https://github.com/MonomerLibrary/monomers.git
@@ -157,8 +162,8 @@ pdb = PDB("1a6m", compute_atom_species=True,
     hydrogen-free deposition therefore roughly **doubles in atom count**
     (myoglobin: 1,445 → 2,668), typing coverage rises from ~56% to ~99%, and
     the rendered potential changes by 20-30% relative RMS. Hydrogens whose
-    position is chemically ambiguous — a rotatable hydroxyl, or both tautomer
-    hydrogens of a histidine — are excluded rather than rendered.
+    position is chemically ambiguous (a rotatable hydroxyl, or both tautomer
+    hydrogens of a histidine) are excluded rather than rendered.
 
     Structures that already carry hydrogens keep them where they were
     deposited; only a structure with none has them added. See

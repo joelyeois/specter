@@ -154,7 +154,7 @@ structure without hydrogens is described as `C(C)` rather than `C(HHHC)` and
 matches nothing. Deposited structures rarely carry hydrogens, and supplying
 them requires a Monomer Library (see
 [Installation](../installation.md#monomer-library-for-shtyrov-scattering-factors)).
-Without one, around 44% of a protein's atoms fall back to Peng — measured on
+Without one, around 44% of a protein's atoms fall back to Peng, measured on
 myoglobin, where coverage rises from 56% to 99% once a library is available.
 The atoms that still resolve are those whose neighbours are all heavy:
 carbonyl and carboxyl carbons and oxygens, aromatic ring junctions, proline's
@@ -222,18 +222,33 @@ voxel grid two ways:
   volume's voxel size. Atom positions are splatted onto the main grid with
   `soft_voxelize_coordinates` (trilinear, differentiable) and FFT-convolved
   with the pooled kernel, once per unique element.
-- **Analytic scatter-add** (`build_potential_volume_analytic_scatter`,
-  the default for `parameterization="shtyrov"`): rather than supersampling
-  and pooling, each atom's Gaussian terms are analytically integrated
+- **Analytic scatter-add** (`method="analytic"`, `PotentialBuilder`'s
+  default regardless of parameterization): rather than supersampling and
+  pooling, each atom's Gaussian terms are analytically integrated
   (closed-form, via `erf`) over every voxel they overlap in a small local
-  window, then scatter-added into the volume. This needs no FFT, no
-  precomputed kernel, and supports genuinely per-atom (per-bonded-species)
-  coefficients without grouping atoms by shared element.
+  window, then scatter-added into the volume. This needs no FFT and no
+  precomputed kernel, dispatching on `parameterization` to
+  `build_potential_volume_analytic_scatter_kirkland`/`_lobato`, or, for
+  Shtyrov, to `build_potential_volume_analytic_scatter` on each atom's
+  per-bonded-species coefficients (falling back to per-element Peng where
+  a species doesn't resolve). It is also dramatically faster than
+  supersample-then-pool at typical atom counts and fully differentiable
+  with respect to atom coordinates; `method="3d"` remains the only option
+  under `periodic=True`, which the analytic path does not implement.
 
 Both give the exact voxel *average* of the potential rather than a point
 sample at the nearest grid point. The underlying potential is sharply
 peaked at the atom center, so a point sample would swing wildly with
 sub-voxel atom position.
+
+The analytic path also needs a cutoff radius `rcut` beyond which an atom's
+contribution is treated as negligible. Left unset, `PotentialBuilder`
+picks one automatically via `recommended_rcut`: a per-element (or, for
+Shtyrov, per-bonded-species) lookup table of the minimum radius that
+captures at least 99.5% of an atom's integrated potential, maximized over
+every element or species actually present in the structure. Light-element
+structures (H, C, N, O) need only ~2-2.5 Å; heavier or more diffuse
+elements such as K or Na need ~5 Å.
 
 ## Worked example: reproducing Kirkland's textbook figures
 

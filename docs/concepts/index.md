@@ -10,9 +10,9 @@ instead, see the [User Guide](../user-guide/particle-stack.md).
 - Specimens
     - [Overview](specimens.md)
     - [Atomic potentials](atomic-potentials.md)
-    - [Ice structure](ice.md) *(work in progress)*
+    - [Ice structure](ice.md)
     - Single-particle
-        - [Pose & crowding](pose-crowding.md) *(work in progress)*
+        - [Pose & crowding](pose-crowding.md)
     - Cryo-ET
         - [Overview](cryoet-specimen/index.md)
         - Membrane shape

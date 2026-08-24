@@ -46,10 +46,10 @@ stages before it:
 carbon film → membranes → filaments/microtubules → gold beads → targets → filler
 ```
 
-Nothing is re-placed once accepted. When a candidate position doesn't
-work, it is rejected and the generator moves on rather than backtracking. That is
-why the order matters: it is exactly the order of decreasing placement
-freedom.
+Nothing is re-placed once accepted. When a candidate position does not
+work, it is rejected and the generator moves on rather than backtracking.
+That is why the order matters: each stage runs with less placement
+freedom than the one before it.
 
 What each stage actually avoids:
 
@@ -63,11 +63,10 @@ What each stage actually avoids:
 | Targets | Membrane shell, carbon, filaments/microtubules, beads; restricted to their `location` region | — |
 | Filler | All of the above, plus already-placed targets | — |
 
-Two consequences worth knowing before you read a rendered volume:
+Two consequences follow that matter when reading a rendered volume:
 
 - **The carbon film is not placement-aware in reverse.** It is painted
-  first and everything else works around it, matching the CryoTomoSim
-  algorithm this feature was ported from. Membrane collision-avoidance
+  first, and everything else works around it. Membrane collision-avoidance
   against it is a bounding-sphere approximation, so an irregular
   organelle's true rendered shape can still graze it; whatever part of its
   density would land on carbon is zeroed just before compositing, so the
@@ -123,7 +122,7 @@ natural "position" the way a protein does, so `membrane_labels` and
 
 - **Transmembrane proteins get no per-instance voxel labels.** Their
   density is correctly present in the volume, and their placements are
-  recorded, but they don't appear in `instance_labels`. This is a
+  recorded, but they do not appear in `instance_labels`. This is a
   documented gap, not an oversight.
 - **Collision is voxel-quantized.** Protein placement tests each
   molecule's real rotated footprint against an occupancy grid, so a
@@ -141,13 +140,13 @@ natural "position" the way a protein does, so `membrane_labels` and
 
 `TomogramSpecimenGenerator` is inspired by both
 [CryoTomoSim](https://github.com/carsonpurnell/cryotomosim_CTS) (CTS),
-and [Polnet](https://github.com/anmartinezs/polnet). Two components
-are descended from CTS directly — both generic bulk-material
-simulations with no placement logic of their own: the [gold
-beads](beads.md) (`gen_beads.m`) and the [carbon film](carbon-film.md)
-(`gen_carbon.m`/`carbonshape`). The [transmembrane
-placement](bilayer.md) construction is adapted from Polnet, as is the
-bilayer's two-Gaussian profile.
+and [Polnet](https://github.com/anmartinezs/polnet). Two components are
+descended from CTS directly, both generic bulk-material simulations with
+no placement logic of their own: the [gold beads](beads.md)
+(`gen_beads.m`) and the [carbon film](carbon-film.md)
+(`gen_carbon.m`/`carbonshape`). The [transmembrane placement](bilayer.md)
+construction is adapted from Polnet, as is the bilayer's two-Gaussian
+profile.
 
 ## References
 

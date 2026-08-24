@@ -32,21 +32,21 @@ per-slice phase \(\sigma\,\Delta z\,V_z\) is no longer small.
 ## A sum, not a recursion
 
 Multislice's per-slice transmission depends on the *already-propagated*
-wave from every previous slice — `psi_{i} = t_i * psi_{i-1}` — which is
+wave from every previous slice (`psi_{i} = t_i * psi_{i-1}`), which is
 why it must be evaluated sequentially. Rytov's sum over slices is
 independent of any other slice's contribution before the final
 exponentiation, so it parallelizes: `IterativeScattering.parallel_rytov`
 computes every slice's contribution as one batched FFT pair rather than
 `nz_new` sequential ones, with optional chunked gradient checkpointing to
-bound memory. This is what would make Rytov attractive inside an
-iterative, tilt-aware reconstruction loop -- a fully parallel forward
-pass is both faster and (via checkpointing) cheaper to hold gradients
-for than replaying a sequential recursion hundreds to a thousand slices
-deep -- but it is not yet wired into one: `parallel_rytov` is
-correctness- and gradient-tested (`tests/test_scattering.py`) but not
-called from any pipeline, config, or reconstructor class, and
-`TomogramReconstructor` (the one class that uses `IterativeScattering`
-at all) still defaults to `scattering_model="multislice"`.
+bound memory. A fully parallel forward pass is both faster and, via
+checkpointing, cheaper to hold gradients for than replaying a sequential
+recursion hundreds to a thousand slices deep, which is what would make
+Rytov attractive inside an iterative, tilt-aware reconstruction loop. It
+is not yet wired into one, however: `parallel_rytov` is correctness- and
+gradient-tested (`tests/test_scattering.py`) but not called from any
+pipeline, config, or reconstructor class, and `TomogramReconstructor`
+(the one class that uses `IterativeScattering` at all) still defaults to
+`scattering_model="multislice"`.
 
 ## Accuracy vs. thickness
 
@@ -71,18 +71,18 @@ exponentiating the accumulated phase rather than adding \(1\) to it (as
 `firstborn` does) keeps the *amplitude* of \(\psi\) correctly normalized
 at every thickness, rather than only to first order. Rytov's own mean
 intensity stays pinned to 1.0 (energy-conserving) at every thickness
-tested, just like `multislice`'s -- unlike `firstborn`/`kinematic`, whose
-mean intensity drifts substantially at large thickness. `projection`'s
-placement on this plot has a separate explanation; see [Other
-propagation modes](other-modes.md#accuracy-vs-thickness).
+tested, just like `multislice`'s. `firstborn`/`kinematic`, by contrast,
+drift substantially at large thickness. `projection`'s placement on this
+plot has a separate explanation; see [Other propagation
+modes](other-modes.md#accuracy-vs-thickness).
 
 ## References
 
 - Yeo, J., & Loh, N. D. (2026). Pursuing the physics of cryo-EM image
   formation. In *Current Approaches to Cryo-Electron Microscopy*,
   *Progress in Molecular Biology and Translational Science*. Elsevier.
-  [doi:10.1016/bs.pmbts.2026.05.001](https://doi.org/10.1016/bs.pmbts.2026.05.001)
-  -- derives the Rytov approximation as specialized to slice-wise
-  electron propagation, the form implemented here.
+  [doi:10.1016/bs.pmbts.2026.05.001](https://doi.org/10.1016/bs.pmbts.2026.05.001).
+  Derives the Rytov approximation as specialized to slice-wise electron
+  propagation, the form implemented here.
 - Rytov approximation: standard in coherent wave optics; see e.g. J. W.
   Goodman, *Introduction to Fourier Optics*, for the general derivation.

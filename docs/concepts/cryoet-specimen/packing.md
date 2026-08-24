@@ -220,10 +220,7 @@ Either way the knob is a budget rather than a target. Set it high, let the
 packing jam, and the density is whatever the geometry allows without
 hand-tuning.
 
-If you want more from a reference table, that is also the lever: a mix
-beats raising the budget on a narrow one.
-
-If you want *more* achieved occupancy from a reference table, raise the
+If you want more achieved occupancy from a reference table, raise the
 mass floor rather than the budget: tiny species consume placement slots
 RSA jams on while adding almost no volume.
 

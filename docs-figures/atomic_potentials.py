@@ -257,7 +257,13 @@ def figure_transmission_function_comparison() -> None:
     imag_crop = _crop(book_img, TRANSMISSION_SCAN_CROP_IMAG)
     box_aspect = real_crop.shape[0] / real_crop.shape[1]  # same for both crops
 
-    box_w, box_h = 4.6, 4.6 * box_aspect
+    # Sized close to the scan crop's own native resolution (589x196 px) at
+    # 200 dpi, rather than the 4.6in used elsewhere: stretching a low-res
+    # scan up to match a much bigger SPECTER panel blurs its already-small
+    # printed labels, which then degrades further once the site's own
+    # display width downscales the whole figure -- shrinking the box here
+    # keeps the two panels' text comparably legible instead.
+    box_w, box_h = 3.0, 3.0 * box_aspect
     (
         fig,
         (

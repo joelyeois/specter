@@ -167,11 +167,15 @@ def _bright_field_linescan() -> tuple[torch.Tensor, torch.Tensor]:
 
 
 # Pixel box (left, top, right, bottom) trimming TEXTBOOK_SCAN down to just its
-# axes -- the raw scan also carries the printed "Fig. 5.13 ..." caption below
-# the plot, which docs/concepts/atomic-potentials.md already restates in its
-# own figcaption, and which would otherwise inflate the panel's box_aspect
-# relative to SPECTER's own (caption-free) panel.
-TEXTBOOK_SCAN_CROP = (78, 5, 822, 587)
+# spine frame -- no axis ticks/number labels, no "Fig. 5.13 ..." caption below
+# the plot. Real matplotlib ticks/labels are drawn on top instead (below), on
+# the same 0-50 / 0.5-1.1 data range as the original scan, so the two panels
+# share one consistent typography and an axes box that matches SPECTER's
+# panel exactly rather than just approximately (an inset crop, imshow'd with
+# aspect="auto" into an identically-sized box, does not by itself make the
+# *spine* sizes match -- the spine sits inset from the crop edges by however
+# much tick-label margin the crop still carries).
+TEXTBOOK_SCAN_CROP = (153, 17, 807, 534)
 
 
 def figure_bright_field_linescan_comparison() -> None:
@@ -183,14 +187,33 @@ def figure_bright_field_linescan_comparison() -> None:
     left, top, right, bottom = TEXTBOOK_SCAN_CROP
     book_img = book_img[top:bottom, left:right]
     book_h, book_w = book_img.shape[:2]
-    box_aspect = (
-        book_h / book_w
-    )  # height / width, matplotlib's set_box_aspect convention
+    box_aspect = book_h / book_w  # height / width
 
-    fig, (ax_ours, ax_book) = plt.subplots(
-        1, 2, figsize=(11, 5.5 * box_aspect), dpi=200, constrained_layout=True
+    # Both axes get an identical, explicit (in inches) width/height via
+    # add_axes rather than plt.subplots + constrained_layout: a shared
+    # box_aspect alone only matches the two panels' *shape*, since a layout
+    # engine still sizes each axes independently around its own labels/title,
+    # leaving one panel visibly larger than the other despite matching
+    # aspect ratios.
+    box_w, box_h = 4.6, 4.6 * box_aspect
+    left_margin, gap, right_margin = 0.9, 0.6, 0.3
+    bottom_margin, top_margin = 0.6, 0.45
+    fig_w = left_margin + box_w + gap + box_w + right_margin
+    fig_h = bottom_margin + box_h + top_margin
+    fig = plt.figure(figsize=(fig_w, fig_h), dpi=200)
+
+    ax_ours = fig.add_axes(
+        (left_margin / fig_w, bottom_margin / fig_h, box_w / fig_w, box_h / fig_h)
     )
-    ax_ours.set_box_aspect(box_aspect)
+    ax_book = fig.add_axes(
+        (
+            (left_margin + box_w + gap) / fig_w,
+            bottom_margin / fig_h,
+            box_w / fig_w,
+            box_h / fig_h,
+        )
+    )
+
     ax_ours.plot(x, linescan, color=PALETTE[0])
     for loc, el in zip(element_locations, ELEMENTS):
         ax_ours.text(loc, 1.05, el, ha="center")
@@ -201,9 +224,10 @@ def figure_bright_field_linescan_comparison() -> None:
     ax_ours.set_title("SPECTER")
     ax_ours.grid(True, alpha=0.4)
 
-    ax_book.imshow(book_img, aspect="auto")
-    ax_book.set_box_aspect(box_aspect)
-    ax_book.set_axis_off()
+    ax_book.imshow(book_img, extent=(0, 50, 0.5, 1.1), aspect="auto")
+    ax_book.set_xlim(0, 50)
+    ax_book.set_ylim(0.5, 1.1)
+    ax_book.set_xlabel("position x (Å)")
     ax_book.set_title("Kirkland (2010), Fig. 5.13")
 
     path = OUT_DIR / "coherent-bright-field-linescan-kirkland.png"

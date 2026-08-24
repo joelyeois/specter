@@ -791,14 +791,14 @@ def _extract_epoch_number(filename: str) -> int | None:
 
 
 def _discover_fsc_images(
-    job_folder: str | Path, suffix: str | None = None
+    job_dir: str | Path, suffix: str | None = None
 ) -> list[tuple[int, Path]]:
     """
-    Find FSC PNG files in job_folder/epochs/, sorted by epoch number.
+    Find FSC PNG files in job_dir/epochs/, sorted by epoch number.
 
     Parameters
     ----------
-    job_folder : str or Path
+    job_dir : str or Path
         Job folder path.
     suffix : str or None
         If specified, only return files matching this suffix (e.g., "A" for fsc_001_A.png).
@@ -811,10 +811,10 @@ def _discover_fsc_images(
     Raises
     ------
     FileNotFoundError
-        If job_folder/epochs/ does not exist.
+        If job_dir/epochs/ does not exist.
     """
-    job_folder = Path(job_folder)
-    epochs_dir = job_folder / "epochs"
+    job_dir = Path(job_dir)
+    epochs_dir = job_dir / "epochs"
 
     if not epochs_dir.exists():
         raise FileNotFoundError(f"Epochs directory not found: {epochs_dir}")
@@ -832,13 +832,13 @@ def _discover_fsc_images(
     return fsc_files
 
 
-def _discover_volume_images(job_folder: str | Path) -> list[tuple[int, Path]]:
+def _discover_volume_images(job_dir: str | Path) -> list[tuple[int, Path]]:
     """
-    Find volume PNG files in job_folder/epochs/, sorted by epoch number.
+    Find volume PNG files in job_dir/epochs/, sorted by epoch number.
 
     Parameters
     ----------
-    job_folder : str or Path
+    job_dir : str or Path
         Job folder path.
 
     Returns
@@ -849,10 +849,10 @@ def _discover_volume_images(job_folder: str | Path) -> list[tuple[int, Path]]:
     Raises
     ------
     FileNotFoundError
-        If job_folder/epochs/ does not exist.
+        If job_dir/epochs/ does not exist.
     """
-    job_folder = Path(job_folder)
-    epochs_dir = job_folder / "epochs"
+    job_dir = Path(job_dir)
+    epochs_dir = job_dir / "epochs"
 
     if not epochs_dir.exists():
         raise FileNotFoundError(f"Epochs directory not found: {epochs_dir}")
@@ -874,7 +874,7 @@ try:
     from IPython.display import display, Markdown
 
     def visualize_job_epochs(
-        job_folder: str | Path,
+        job_dir: str | Path,
         suffix: str | None = None,
         image_width: int = 8,
     ) -> None:
@@ -887,7 +887,7 @@ try:
 
         Parameters
         ----------
-        job_folder : str or Path
+        job_dir : str or Path
             Path to the job folder (e.g., "~/specter-data/empiar-10202/J002").
         suffix : str, optional
             Filter FSC images by suffix (e.g., "A" shows only fsc_001A.png).
@@ -898,7 +898,7 @@ try:
         Raises
         ------
         FileNotFoundError
-            If job_folder/epochs/ does not exist.
+            If job_dir/epochs/ does not exist.
         ValueError
             If no FSC or volume images are found.
 
@@ -907,26 +907,24 @@ try:
         >>> visualize_job_epochs("~/specter-data/empiar-10202/J002")
         >>> visualize_job_epochs("~/specter-data/empiar-10202/J002", suffix="A")
         """
-        job_folder = Path(job_folder).expanduser()
+        job_dir = Path(job_dir).expanduser()
 
         # Discover images
         try:
-            fsc_files = _discover_fsc_images(job_folder, suffix=suffix)
+            fsc_files = _discover_fsc_images(job_dir, suffix=suffix)
         except FileNotFoundError as e:
             raise FileNotFoundError(str(e)) from e
 
         try:
-            volume_files = _discover_volume_images(job_folder)
+            volume_files = _discover_volume_images(job_dir)
         except FileNotFoundError as e:
             raise FileNotFoundError(str(e)) from e
 
         if not fsc_files:
             suffix_str = f" with suffix '{suffix}'" if suffix else ""
-            raise ValueError(
-                f"No FSC images found{suffix_str} in {job_folder / 'epochs'}"
-            )
+            raise ValueError(f"No FSC images found{suffix_str} in {job_dir / 'epochs'}")
         if not volume_files:
-            raise ValueError(f"No volume images found in {job_folder / 'epochs'}")
+            raise ValueError(f"No volume images found in {job_dir / 'epochs'}")
 
         # Create epoch lists (use max range, show N/A for missing)
         fsc_epochs = {epoch: path for epoch, path in fsc_files}
@@ -1010,7 +1008,7 @@ try:
         btn_next.on_click(on_next_clicked)
 
         # Layout: title, images side-by-side, slider with buttons
-        header = widgets.HTML(f"<h3>Job: {job_folder.name}</h3>")
+        header = widgets.HTML(f"<h3>Job: {job_dir.name}</h3>")
         images_hbox = widgets.HBox([output_fsc, output_volume])
         slider_hbox = widgets.HBox([btn_prev, slider, btn_next])
 
@@ -1023,7 +1021,7 @@ try:
 except ImportError:
 
     def visualize_job_epochs(
-        job_folder: str | Path,
+        job_dir: str | Path,
         suffix: str | None = None,
         image_width: int = 8,
     ) -> None:

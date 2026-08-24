@@ -303,7 +303,7 @@ def test_constants_match_deposited_structures(source, n_pf, tmp_path):
     """Guards the hardcoded constants against the data they came from."""
     from specter.specimen.filament import measure_source_lattice
 
-    measured = measure_source_lattice(source, savefolder=str(tmp_path))
+    measured = measure_source_lattice(source, pdb_cache_dir=str(tmp_path))
     model = solve_tube_lattice(n_pf)
 
     assert round(measured["n_protofilaments"]) == n_pf
@@ -410,7 +410,7 @@ def test_extracted_dimer_is_in_the_microtubule_frame(tmp_path):
     from specter.pdb import PDB
     from specter.specimen.filament import extract_mt_dimer
 
-    path = extract_mt_dimer(savefolder=str(tmp_path))
+    path = extract_mt_dimer(pdb_cache_dir=str(tmp_path))
     pdb = PDB(path, assembly=False, verbose=False)
     coordinates = pdb.coordinates
 

@@ -64,8 +64,8 @@ class _FakeResponse:
         return self._json_data
 
 
-def test_fetch_pdb_file_creates_missing_savefolder(tmp_path, monkeypatch):
-    # Regression test: savefolder is a plain filesystem path (resolved
+def test_fetch_pdb_file_creates_missing_pdb_cache_dir(tmp_path, monkeypatch):
+    # Regression test: pdb_cache_dir is a plain filesystem path (resolved
     # against the caller's own cwd, not the specter repo root), and
     # fetch_pdb_file used to crash with a raw FileNotFoundError from
     # open(file_path, "w") if that directory didn't already exist, rather
@@ -85,7 +85,7 @@ def test_fetch_pdb_file_creates_missing_savefolder(tmp_path, monkeypatch):
     missing_dir = tmp_path / "not" / "yet" / "created"
     assert not missing_dir.exists()
 
-    filepath = PDB.fetch_pdb_file("1abc", savefolder=str(missing_dir), verbose=False)
+    filepath = PDB.fetch_pdb_file("1abc", pdb_cache_dir=str(missing_dir), verbose=False)
 
     assert missing_dir.exists()
     assert Path(filepath).read_text() == fake_cif

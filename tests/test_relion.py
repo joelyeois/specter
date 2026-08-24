@@ -31,7 +31,7 @@ def test_create_particle_starfile_writes_bfactor_column(tmp_path) -> None:
         rotations=torch.tensor([[0.0, 0.0, 0.0, 1.0]] * n),
         translations=torch.zeros(n, 2),
         alpha=0.1,
-        folderpath=str(tmp_path),
+        output_dir=str(tmp_path),
         voltage=300.0,
         dx=1.5,
         filename="particles",
@@ -81,7 +81,7 @@ def test_create_particle_starfile_from_model_matches_model_params(tmp_path) -> N
     particles = model(torch.tensor([0]))
 
     create_particle_starfile_from_model(
-        particles, model, folderpath=str(tmp_path), filename="particles"
+        particles, model, output_dir=str(tmp_path), filename="particles"
     )
 
     df = starfile.read(tmp_path / "particles.star")

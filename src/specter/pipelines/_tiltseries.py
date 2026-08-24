@@ -252,7 +252,7 @@ def run_tilt_series(
             pixel_size=dx,
             alpha=config.alpha,
             ctf_params=ctf_params_broadcast,
-            folderpath=output_dir,
+            output_dir=output_dir,
             filename=config.filename,
             dose_per_angstrom=config.dose_per_tilt,
             coincidence_radius=config.coincidence_radius,

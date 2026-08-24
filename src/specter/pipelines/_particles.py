@@ -119,7 +119,7 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
     pdb = PDB(
         config.pdb_code,
         assembly=config.assembly,
-        savefolder=config.pdb_savefolder,
+        pdb_cache_dir=config.pdb_cache_dir,
         compute_atom_species=_derive_atom_species,
         readd_hydrogens=config.readd_hydrogens,
     )
@@ -446,7 +446,7 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
             voltage=voltage,
             alpha=alpha,
             filename=config.filename,
-            folderpath=output_dir,
+            output_dir=output_dir,
             dose_per_angstrom=dose,
             coincidence_radius=coincidence_radius,
             potential_scale=potential_scale,

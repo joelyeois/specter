@@ -76,7 +76,7 @@ def _render_segment(
     `positions_xyz` is box-centered here (the generator's own internal
     convention after it subtracts `extent/2`).
     """
-    pdb = PDB(code, savefolder=PDB_CACHE, verbose=False)
+    pdb = PDB(code, pdb_cache_dir=PDB_CACHE, verbose=False)
     n = estimate_protein_box_size(pdb.max_diameter, voxel_size)
     builder = PotentialBuilder(
         n_xyz=n,

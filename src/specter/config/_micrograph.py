@@ -27,7 +27,7 @@ class MicrographConfig:
     assembly: bool = True
     # Relative to the current working directory, like any other CLI path
     # argument -- see default_pdb_cache_dir for the unset case.
-    pdb_savefolder: str = field(default_factory=default_pdb_cache_dir)
+    pdb_cache_dir: str = field(default_factory=default_pdb_cache_dir)
     n_pixels: int = 256
     pixel_size: float = 1.0  # Å
     micrograph_size: int = 4096
@@ -122,7 +122,7 @@ class MicrographConfig:
 MICROGRAPH_HELP: dict[str, str] = {
     "pdb_code": "PDB accession code or path to a local .cif/.pdb file.",
     "assembly": "Fetch the biological assembly.",
-    "pdb_savefolder": "Folder to cache downloaded PDB files.",
+    "pdb_cache_dir": "Folder to cache downloaded PDB files.",
     "n_pixels": "Number of pixels per axis for the 3-D particle potential box.",
     "pixel_size": "Pixel size in Angstrom.",
     "micrograph_size": "Micrograph size in pixels (square).",

@@ -27,7 +27,7 @@ from typing import Literal
 import torch
 
 from ...arrays import clip_insert_bounds
-from ...pdb import DEFAULT_PDB_SAVEFOLDER, PDB
+from ...pdb import DEFAULT_PDB_CACHE_DIR, PDB
 from ...potential import PotentialBuilder
 from ...rotations import build_affine_matrix, rotate_volume
 from .._parallel_render import (
@@ -283,7 +283,7 @@ def render_transmembrane_template(
     """
     pdb = PDB(
         spec.pdb_source,
-        savefolder=pdb_cache_dir,
+        pdb_cache_dir=pdb_cache_dir,
         verbose=False,
         # Shtyrov fits scattering factors per bonded species, so it needs the
         # bond topology to beat plain per-element factors; the other
@@ -568,7 +568,7 @@ class MembraneGenerator:
         threshold, not a true van-der-Waals silhouette. Default 0.05.
     pdb_cache_dir : str, optional
         Passed to `PDB` for PDB-backed transmembrane specs. Default is
-        `specter.pdb.DEFAULT_PDB_SAVEFOLDER` (`specter-data/pdb`, relative to
+        `specter.pdb.DEFAULT_PDB_CACHE_DIR` (`specter-data/pdb`, relative to
         the caller's cwd; see `config.default_pdb_cache_dir`).
     max_field_voxels : int, optional
         Safety cap on the working field grid's total voxel count, AND (see
@@ -704,7 +704,7 @@ class MembraneGenerator:
         membrane_scale_range: tuple[float, float] = (0.5, 1.0),
         transmembrane_specs: list[TransmembraneSpec] | None = None,
         transmembrane_occupancy_fraction: float = 0.05,
-        pdb_cache_dir: str = DEFAULT_PDB_SAVEFOLDER,
+        pdb_cache_dir: str = DEFAULT_PDB_CACHE_DIR,
         readd_hydrogens: bool | str = "auto",
         max_field_voxels: int = _MAX_FIELD_VOXELS,
         max_output_voxels: int = 4_000_000_000,

@@ -219,7 +219,7 @@ def test_build_template_uses_analytic_method_matching_membrane_profile():
 
     pdb = PDB(
         "1C3W",
-        savefolder="specter-data/pdb/",
+        pdb_cache_dir="specter-data/pdb/",
         verbose=False,
         compute_atom_species=True,
     )

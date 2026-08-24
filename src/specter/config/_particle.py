@@ -94,7 +94,7 @@ class ParticleStackConfig:
     # --- Advanced ---
     # Relative to the current working directory, like any other CLI path
     # argument -- see default_pdb_cache_dir for the unset case.
-    pdb_savefolder: str = field(default_factory=default_pdb_cache_dir)
+    pdb_cache_dir: str = field(default_factory=default_pdb_cache_dir)
     # if set, poses/CTF/pixel_size/voltage/alpha come from here (pick one)
     cs_path: str | None = None
     star_path: str | None = None
@@ -230,7 +230,7 @@ PARTICLE_STACK_HELP: dict[str, str] = {
     "job_base_dir": "Root directory for job folders. Defaults to the "
     "project root found by walking up from cwd looking for an existing "
     "specter-data/, the same way git finds the nearest .git.",
-    "pdb_savefolder": "Folder to cache downloaded PDB files.",
+    "pdb_cache_dir": "Folder to cache downloaded PDB files.",
     "cs_path": "Path to a CryoSPARC .cs file to drive generation from real "
     "pixel_size/voltage/alpha/poses/CTF instead of random sampling.",
     "star_path": "Path to a RELION .star file to drive generation from real "

@@ -98,7 +98,7 @@ class TomogramConfig:
     clip_axes: list[bool] = field(default_factory=lambda: [False, False, False])
     # Relative to the current working directory, like any other CLI path
     # argument -- see default_pdb_cache_dir for the unset case.
-    pdb_savefolder: str = field(default_factory=default_pdb_cache_dir)
+    pdb_cache_dir: str = field(default_factory=default_pdb_cache_dir)
     seed: int | None = None
 
     # --- Organic membrane (optional) ---
@@ -126,7 +126,7 @@ class TomogramConfig:
     #     canvas. Give it explicitly only if this instance genuinely needs
     #     a specific working-grid size.
     # voxel_size/seed/device/pdb_cache_dir still come from this config's own
-    # voxel_size/seed/device/pdb_savefolder fields for every instance, not from
+    # voxel_size/seed/device/pdb_cache_dir fields for every instance, not from
     # this dict (shape_backend one of "spherical_harmonics" (default) or
     # "swept_spline").
     membrane: list[dict[str, Any]] = field(default_factory=list)
@@ -362,7 +362,7 @@ TOMOGRAM_HELP: dict[str, str] = {
     "clip_axes": "(z, y, x) -- True on an axis lets a placed instance's "
     "body extend past that wall (truncated at render time) instead of "
     "being rejected outright. TOML-only (list[bool]).",
-    "pdb_savefolder": "Folder to cache downloaded PDB files.",
+    "pdb_cache_dir": "Folder to cache downloaded PDB files.",
     "seed": "Random seed.",
     "membrane": "One or more MembraneGenerator kwargs dicts (TOML-only, "
     "[[membrane]] tables, one per composited TEMPLATE) -- optional, empty "

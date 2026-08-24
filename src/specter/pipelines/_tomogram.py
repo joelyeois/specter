@@ -413,7 +413,7 @@ def build_tomogram_generator(config: TomogramConfig) -> TomogramSpecimenGenerato
             build_one=lambda i, device: render_transmembrane_template(
                 transmembrane_specs[i],
                 config.voxel_size,
-                config.pdb_savefolder,
+                config.pdb_cache_dir,
                 device,
                 readd_hydrogens=config.readd_hydrogens,
             ),
@@ -467,7 +467,7 @@ def build_tomogram_generator(config: TomogramConfig) -> TomogramSpecimenGenerato
                 target_shape=target_shape,  # type: ignore[arg-type]
                 voxel_size=config.voxel_size,
                 transmembrane_specs=list(transmembrane_specs),
-                pdb_cache_dir=config.pdb_savefolder,
+                pdb_cache_dir=config.pdb_cache_dir,
                 readd_hydrogens=config.readd_hydrogens,
                 device=device,
                 seed=instance_seed,
@@ -505,7 +505,7 @@ def build_tomogram_generator(config: TomogramConfig) -> TomogramSpecimenGenerato
         region_density_threshold=config.membrane_region_density_threshold,
         region_max_passes=config.membrane_region_max_passes,
         min_transmembrane_spacing=config.membrane_min_transmembrane_spacing,
-        pdb_cache_dir=config.pdb_savefolder,
+        pdb_cache_dir=config.pdb_cache_dir,
         parameterization=config.target_parameterization,
         readd_hydrogens=config.readd_hydrogens,
         seed=config.seed,

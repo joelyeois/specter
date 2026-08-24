@@ -175,7 +175,7 @@ from scipy import ndimage
 from ...config import ScalarOrRange
 from ...arrays import clip_insert_bounds
 from ...crowding import insert_particles_into_micrograph
-from ...pdb import DEFAULT_PDB_SAVEFOLDER, PDB
+from ...pdb import DEFAULT_PDB_CACHE_DIR, PDB
 from ...potential import PotentialBuilder
 from ...rotations import build_affine_matrix, random_rotation_matrix, rotate_volume
 from .._carbon import CarbonFilmGenerator, CarbonFilmSpec, edge_hole_center
@@ -391,7 +391,7 @@ class TomogramSpecimenGenerator:
         Passed to `MembraneGenerator.place_transmembrane`. Default 40.0.
     pdb_cache_dir : str, optional
         Directory for downloaded PDB/mmCIF files. Default is
-        `specter.pdb.DEFAULT_PDB_SAVEFOLDER` (`specter-data/pdb`, relative to
+        `specter.pdb.DEFAULT_PDB_CACHE_DIR` (`specter-data/pdb`, relative to
         the caller's cwd; see `config.default_pdb_cache_dir`).
     parameterization : str, optional
         Atomic scattering-factor parameterization for `PotentialBuilder`.
@@ -509,7 +509,7 @@ class TomogramSpecimenGenerator:
         region_density_threshold: float | None = None,
         region_max_passes: int = 300,
         min_transmembrane_spacing: float = 40.0,
-        pdb_cache_dir: str = DEFAULT_PDB_SAVEFOLDER,
+        pdb_cache_dir: str = DEFAULT_PDB_CACHE_DIR,
         parameterization: str = "shtyrov",
         readd_hydrogens: bool | str = "auto",
         seed: int | None = None,
@@ -1128,7 +1128,7 @@ class TomogramSpecimenGenerator:
                 if spec.pdb_source not in pdb_cache:
                     pdb_cache[spec.pdb_source] = PDB(
                         spec.pdb_source,
-                        savefolder=self.pdb_cache_dir,
+                        pdb_cache_dir=self.pdb_cache_dir,
                         verbose=False,
                         compute_atom_species=_wants_atom_species(self.parameterization),
                         readd_hydrogens=self.readd_hydrogens,
@@ -1907,7 +1907,7 @@ class TomogramSpecimenGenerator:
             if code not in pdb_cache:
                 pdb_cache[code] = PDB(
                     code,
-                    savefolder=self.pdb_cache_dir,
+                    pdb_cache_dir=self.pdb_cache_dir,
                     verbose=False,
                     compute_atom_species=_wants_atom_species(self.parameterization),
                     readd_hydrogens=self.readd_hydrogens,

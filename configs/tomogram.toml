@@ -24,7 +24,7 @@ filler_occupancy_fraction = 1.0
 # packing_voxel_size = 2.0       # collide on a coarser grid than the render
 # There is no `gap`: macromolecules in crowded cytoplasm contact each other,
 # so placed instances are only required not to overlap.
-pdb_savefolder = "specter-data/pdb"         # relative to your working directory
+pdb_cache_dir = "specter-data/pdb"         # relative to your working directory
 # seed = 11                         # uncomment for reproducible packing
 
 

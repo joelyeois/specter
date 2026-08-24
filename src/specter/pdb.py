@@ -31,7 +31,7 @@ from .config import default_pdb_cache_dir
 # for an editable install and would land inside the virtualenv for a wheel
 # install. Set $SPECTER_PDB_CACHE to an absolute path to share one cache
 # across working directories. See `default_pdb_cache_dir` in config.py.
-DEFAULT_PDB_SAVEFOLDER = default_pdb_cache_dir()
+DEFAULT_PDB_CACHE_DIR = default_pdb_cache_dir()
 
 # Suppress only PDBConstructionWarnings
 warnings.simplefilter("ignore", PDBConstructionWarning)
@@ -62,7 +62,7 @@ class PDB:
         self,
         pdb_source: str,
         assembly: bool = True,
-        savefolder: str = DEFAULT_PDB_SAVEFOLDER,
+        pdb_cache_dir: str = DEFAULT_PDB_CACHE_DIR,
         origin: tuple[float, float, float] | None = None,
         verbose: bool = True,
         compute_atom_species: bool = False,
@@ -80,7 +80,7 @@ class PDB:
         assembly : bool, optional
             Whether to fetch the biological assembly when using a PDB ID.
             Default is True.
-        savefolder : str, optional
+        pdb_cache_dir : str, optional
             Folder to store downloaded PDB/mmCIF files. Default is
             `specter-data/pdb`, relative to the caller's cwd -- see
             `config.default_pdb_cache_dir`.
@@ -160,10 +160,13 @@ class PDB:
             # Treat as PDB ID
             self.pdb_id = pdb_source
             self.filepath = PDB.fetch_pdb_file(
-                pdb_source, savefolder=savefolder, assembly=assembly, verbose=verbose
+                pdb_source,
+                pdb_cache_dir=pdb_cache_dir,
+                assembly=assembly,
+                verbose=verbose,
             )
             self.assembly = assembly
-            self.savefolder = savefolder
+            self.pdb_cache_dir = pdb_cache_dir
         elif os.path.isfile(pdb_source):
             self.filepath = pdb_source
         else:
@@ -261,7 +264,7 @@ class PDB:
     def fetch_pdb_file(
         pdb_id: str,
         ext: str = "cif",
-        savefolder: str = DEFAULT_PDB_SAVEFOLDER,
+        pdb_cache_dir: str = DEFAULT_PDB_CACHE_DIR,
         assembly: bool | int = True,
         verbose: bool = True,
     ) -> str:
@@ -274,7 +277,7 @@ class PDB:
             A valid PDB ID.
         ext : str
             File ext ('cif' or 'pdb').
-        savefolder : str
+        pdb_cache_dir : str
             Destination folder.
         assembly : bool or int
             - True  → fetch default biological assembly (assembly 1 if available).
@@ -308,7 +311,7 @@ class PDB:
             raise ValueError("assembly must be True, False, or int")
 
         # Build filepath
-        file_path = os.path.join(savefolder, filename)
+        file_path = os.path.join(pdb_cache_dir, filename)
 
         # Return existing file if available
         if os.path.exists(file_path):
@@ -327,11 +330,11 @@ class PDB:
         with gzip.open(io.BytesIO(r.content), "rt") as f:
             cif_content = f.read()
 
-        # Save to file -- savefolder is just a plain relative-or-absolute
+        # Save to file -- pdb_cache_dir is just a plain relative-or-absolute
         # path (resolved against the current process's cwd, not the
         # specter repo root), so create it on demand rather than crashing
         # with a raw FileNotFoundError if it doesn't exist yet.
-        os.makedirs(savefolder, exist_ok=True)
+        os.makedirs(pdb_cache_dir, exist_ok=True)
         with open(file_path, "w") as f:
             f.write(cif_content)
 

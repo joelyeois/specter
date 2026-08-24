@@ -198,7 +198,7 @@ def _fit_tube_axis(
 
 def extract_mt_dimer(
     source: str = MT_DIMER_SOURCE,
-    savefolder: str | os.PathLike[str] | None = None,
+    pdb_cache_dir: str | os.PathLike[str] | None = None,
     verbose: bool = False,
     overwrite: bool = False,
 ) -> str:
@@ -211,7 +211,7 @@ def extract_mt_dimer(
         PDB ID of a microtubule reconstruction whose asymmetric unit holds
         at least three neighbouring protofilaments. Default
         `MT_DIMER_SOURCE`.
-    savefolder : str or path-like, optional
+    pdb_cache_dir : str or path-like, optional
         Where the source structure and the extracted dimer are cached.
         Default None: specter's usual PDB cache directory.
     verbose : bool, optional
@@ -232,18 +232,18 @@ def extract_mt_dimer(
         If the source has too few protofilaments to fit a tube axis, or no
         alpha/beta pair stacked along one protofilament could be found.
     """
-    if savefolder is None:
+    if pdb_cache_dir is None:
         from ...config import default_pdb_cache_dir
 
-        savefolder = default_pdb_cache_dir()
-    savefolder = str(savefolder)
+        pdb_cache_dir = default_pdb_cache_dir()
+    pdb_cache_dir = str(pdb_cache_dir)
 
-    out_path = os.path.join(savefolder, f"{source}-mtdimer.cif")
+    out_path = os.path.join(pdb_cache_dir, f"{source}-mtdimer.cif")
     if os.path.exists(out_path) and not overwrite:
         return out_path
 
     cif_path = PDB.fetch_pdb_file(
-        source, ext="cif", savefolder=savefolder, assembly=False, verbose=verbose
+        source, ext="cif", pdb_cache_dir=pdb_cache_dir, assembly=False, verbose=verbose
     )
     st = gemmi.read_structure(cif_path)
     st.setup_entities()
@@ -322,7 +322,7 @@ def extract_mt_dimer(
                 atom.pos = gemmi.Position(float(x), float(y), float(z))
     out.setup_entities()
 
-    os.makedirs(savefolder, exist_ok=True)
+    os.makedirs(pdb_cache_dir, exist_ok=True)
     out.make_mmcif_document().write_file(out_path)
 
     if verbose:
@@ -338,7 +338,7 @@ def extract_mt_dimer(
 
 def measure_source_lattice(
     source: str = MT_DIMER_SOURCE,
-    savefolder: str | os.PathLike[str] | None = None,
+    pdb_cache_dir: str | os.PathLike[str] | None = None,
     verbose: bool = False,
 ) -> dict[str, float]:
     """
@@ -351,7 +351,7 @@ def measure_source_lattice(
     ----------
     source : str, optional
         PDB ID of a microtubule reconstruction. Default `MT_DIMER_SOURCE`.
-    savefolder : str or path-like, optional
+    pdb_cache_dir : str or path-like, optional
         PDB cache directory. Default None: specter's usual cache.
     verbose : bool, optional
         Print fetch detail. Default False.
@@ -363,12 +363,16 @@ def measure_source_lattice(
         ``n_protofilaments`` (inferred from the azimuthal step between
         adjacent protofilaments), all in Å where applicable.
     """
-    if savefolder is None:
+    if pdb_cache_dir is None:
         from ...config import default_pdb_cache_dir
 
-        savefolder = default_pdb_cache_dir()
+        pdb_cache_dir = default_pdb_cache_dir()
     cif_path = PDB.fetch_pdb_file(
-        source, ext="cif", savefolder=str(savefolder), assembly=False, verbose=verbose
+        source,
+        ext="cif",
+        pdb_cache_dir=str(pdb_cache_dir),
+        assembly=False,
+        verbose=verbose,
     )
     st = gemmi.read_structure(cif_path)
     st.setup_entities()

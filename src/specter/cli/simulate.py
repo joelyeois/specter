@@ -57,7 +57,7 @@ _PARTICLE_STACK_GROUPS: list[tuple[str, list[str]]] = [
     (
         "Advanced",
         [
-            "pdb_savefolder",
+            "pdb_cache_dir",
             "cs_path",
             "star_path",
             "n_frames",
@@ -192,7 +192,7 @@ _MICROGRAPH_GROUPS: list[tuple[str, list[str]]] = [
     (
         "Advanced",
         [
-            "pdb_savefolder",
+            "pdb_cache_dir",
             "n_frames",
             "convergence_angle",
             "cc",

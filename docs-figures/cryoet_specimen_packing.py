@@ -225,7 +225,7 @@ def figure_backends() -> None:
 
     pdbs, masses, radii = [], [], []
     for code in codes:
-        pdb = PDB(code, savefolder=PDB_CACHE, verbose=False)
+        pdb = PDB(code, pdb_cache_dir=PDB_CACHE, verbose=False)
         z = pdb.atomic_numbers.numpy().astype(int)
         masses.append(
             sum(
@@ -308,7 +308,7 @@ def figure_shape_jamming() -> None:
     def load(codes):
         pdbs, masses = [], []
         for code in codes:
-            pdb = PDB(code, savefolder=PDB_CACHE, verbose=False)
+            pdb = PDB(code, pdb_cache_dir=PDB_CACHE, verbose=False)
             z = pdb.atomic_numbers.numpy().astype(int)
             masses.append(
                 sum(

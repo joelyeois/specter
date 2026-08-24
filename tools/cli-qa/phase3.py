@@ -306,7 +306,7 @@ def check_assembly() -> None:
                 "1",
                 "--device",
                 "cpu",
-                "--pdb_savefolder",
+                "--pdb_cache_dir",
                 str(cache),
                 "--output_dir",
                 str(out),

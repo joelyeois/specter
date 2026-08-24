@@ -657,7 +657,7 @@ class QScore:
     def to_cif(
         self,
         q: torch.Tensor,
-        out_path: str,
+        cif_path: str,
         per_atom: bool = True,
     ) -> None:
         """Write a CIF file with Q-scores stored as B-factors (× 100).
@@ -669,7 +669,7 @@ class QScore:
         ----------
         q : torch.Tensor
             Per-atom Q-scores, shape ``(N,)``.
-        out_path : str
+        cif_path : str
             Path for the output ``.cif`` file.
         per_atom : bool
             If ``True`` (default), each atom gets its own Q-score as
@@ -730,5 +730,5 @@ class QScore:
         structure = builder.get_structure()
         io = MMCIFIO()
         io.set_structure(structure)
-        io.save(out_path)
-        print(f"[QScore] Written: {out_path}  (B-factor = Q-score × 100)")
+        io.save(cif_path)
+        print(f"[QScore] Written: {cif_path}  (B-factor = Q-score × 100)")

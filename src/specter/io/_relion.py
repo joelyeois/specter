@@ -293,7 +293,7 @@ def create_particle_starfile(
     rotations: torch.Tensor | np.ndarray | None = None,
     translations: torch.Tensor | np.ndarray | None = None,
     alpha: float = 0.1,
-    folderpath: str = "",
+    output_dir: str = "",
     voltage: float | None = None,
     dx: float | None = None,
     filename: str = "particles",
@@ -317,7 +317,7 @@ def create_particle_starfile(
         Translations per particle (x, y) in Å. Default is None.
     alpha : float, optional
         Amplitude contrast ratio. Default is 0.1.
-    folderpath : str, optional
+    output_dir : str, optional
         Directory to save MRCS and STAR files. Default is "" (current directory).
     voltage : float, optional
         Electron beam accelerating voltage in kV. Required.
@@ -351,11 +351,11 @@ def create_particle_starfile(
     reads all of these directly from the model that generated ``particles``.
     """
 
-    if folderpath:
-        os.makedirs(folderpath, exist_ok=True)
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
 
     # create projections mrcs file
-    mrcs_path = os.path.join(folderpath, filename + ".mrcs")
+    mrcs_path = os.path.join(output_dir, filename + ".mrcs")
     with mrcfile.new(mrcs_path, overwrite=True) as mrc:
         mrc.set_data(particles.numpy().astype(np.float32))
 
@@ -428,7 +428,7 @@ def create_particle_starfile(
 
     particles_df = pd.DataFrame(data=d)
 
-    star_path = os.path.join(folderpath, filename + ".star")
+    star_path = os.path.join(output_dir, filename + ".star")
     starfile.write(particles_df, star_path, overwrite=True)
     _console.print(f"  [green]✓[/green] {star_path}")
 
@@ -436,7 +436,7 @@ def create_particle_starfile(
 def create_particle_starfile_from_model(
     particles: torch.Tensor,
     model: ParticleGeneratorBase,
-    folderpath: str = "",
+    output_dir: str = "",
     filename: str = "particles",
 ) -> None:
     """
@@ -458,7 +458,7 @@ def create_particle_starfile_from_model(
         The (already-constructed) particle generator used to produce
         ``particles``, e.g. an :class:`~specter.imagegenerator.ImageGenerator`
         or :class:`~specter.imagegenerator.ImageGeneratorFromCoordinates`.
-    folderpath : str, optional
+    output_dir : str, optional
         Directory to save MRCS and STAR files. Default is "" (current directory).
     filename : str, optional
         Name of the output starfile and mrcfile (without extension). Default is "particles".
@@ -468,7 +468,7 @@ def create_particle_starfile_from_model(
         rotations=model.quaternions,
         translations=model.translations,
         alpha=model.alpha,
-        folderpath=folderpath,
+        output_dir=output_dir,
         voltage=model.voltage,
         dx=model.pixel_size,
         filename=filename,
@@ -486,7 +486,7 @@ def create_micrograph_starfile(
     pixel_size: float,
     alpha: float,
     ctf_params: dict,
-    folderpath: str = "",
+    output_dir: str = "",
     filename: str = "micrographs",
     dose_per_angstrom: torch.Tensor | float | None = None,
     coincidence_radius: torch.Tensor | float | None = None,
@@ -510,7 +510,7 @@ def create_micrograph_starfile(
     ctf_params : dict
         CTF parameters, each a 1-D tensor of length n. Expected keys:
         ``cs`` (Å), ``dfu`` (Å), and optionally ``dfv`` (Å), ``dfang`` (deg).
-    folderpath : str, optional
+    output_dir : str, optional
         Directory to save the STAR file. Default is "" (current directory).
     filename : str, optional
         Base name for the output files (no extension). Default is "micrographs".
@@ -531,8 +531,8 @@ def create_micrograph_starfile(
     star_path : str
         Path to the saved STAR file.
     """
-    if folderpath:
-        os.makedirs(folderpath, exist_ok=True)
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
 
     zeros = torch.zeros(n)
     cs_A = ctf_params.get("cs", zeros)
@@ -564,7 +564,7 @@ def create_micrograph_starfile(
 
     df = pd.DataFrame(data=d)
 
-    star_path = os.path.join(folderpath, filename + ".star")
+    star_path = os.path.join(output_dir, filename + ".star")
     starfile.write(df, star_path, overwrite=True)
     _console.print(f"  [green]✓[/green] {star_path}")
     return star_path

@@ -62,7 +62,7 @@ _TOMOGRAM_GROUPS: list[tuple[str, list[str]]] = [
     ),
     ("Output", ["output_dir", "filename"]),
     ("Job tracking", ["project", "job_id", "job_base_dir"]),
-    ("Advanced", ["pdb_savefolder", "seed"]),
+    ("Advanced", ["pdb_cache_dir", "seed"]),
 ]
 
 _ICE_GROUPS: list[tuple[str, list[str]]] = [

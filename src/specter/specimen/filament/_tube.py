@@ -297,7 +297,7 @@ def place_microtubules(
 
     for spec in specs:
         lattice = spec.lattice()
-        code = spec.code or extract_mt_dimer(savefolder=pdb_cache_dir)
+        code = spec.code or extract_mt_dimer(pdb_cache_dir=pdb_cache_dir)
         length = spec.length if spec.length is not None else diagonal
         n_rings = max(2, int(round(length / lattice.dimer_repeat)))
 

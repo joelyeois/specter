@@ -107,7 +107,7 @@ def load_config(
     # Paths are deliberately NOT rewritten here: a relative path a user wrote
     # in a TOML (or passed on the CLI) is resolved against the current working
     # directory, like every other CLI tool's path argument. Only an omitted
-    # pdb_savefolder gets a computed default -- see default_pdb_cache_dir.
+    # pdb_cache_dir gets a computed default -- see default_pdb_cache_dir.
     return config_cls(**flat)
 
 

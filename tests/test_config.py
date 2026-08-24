@@ -115,15 +115,15 @@ def test_load_config_scalar_or_range_fields_still_accept_legacy_strings(
     assert parse_scalar_or_range(config.defocus) == (8000.0, 12000.0)
 
 
-def test_load_config_keeps_relative_pdb_savefolder_verbatim(
+def test_load_config_keeps_relative_pdb_cache_dir_verbatim(
     tmp_path: Path,
 ) -> None:
     """A path the user wrote is theirs -- resolved against cwd, not rewritten."""
     path = _write_toml(
-        tmp_path, '[potential]\npdb_code = "6bdf"\npdb_savefolder = "my-cache"\n'
+        tmp_path, '[potential]\npdb_code = "6bdf"\npdb_cache_dir = "my-cache"\n'
     )
     config = load_config(path)
-    assert config.pdb_savefolder == "my-cache"
+    assert config.pdb_cache_dir == "my-cache"
 
 
 def test_omitted_paths_default_under_one_specter_data_dir() -> None:
@@ -134,9 +134,9 @@ def test_omitted_paths_default_under_one_specter_data_dir() -> None:
     inside the virtualenv for a wheel install.
     """
     config = ParticleStackConfig(pdb_code="6bdf")
-    assert config.pdb_savefolder == os.path.join("specter-data", "pdb")
+    assert config.pdb_cache_dir == os.path.join("specter-data", "pdb")
     assert config.output_dir == os.path.join("specter-data", "particles")
-    assert not os.path.isabs(config.pdb_savefolder)
+    assert not os.path.isabs(config.pdb_cache_dir)
     assert not os.path.isabs(config.output_dir)
 
 
@@ -196,16 +196,16 @@ def test_each_config_outputs_to_its_own_artifact_folder() -> None:
 def test_pdb_cache_env_var_overrides_default(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv(PDB_CACHE_ENV_VAR, str(tmp_path / "elsewhere"))
     config = ParticleStackConfig(pdb_code="6bdf")
-    assert config.pdb_savefolder == str(tmp_path / "elsewhere")
+    assert config.pdb_cache_dir == str(tmp_path / "elsewhere")
 
 
-def test_load_config_preserves_absolute_pdb_savefolder(tmp_path: Path) -> None:
+def test_load_config_preserves_absolute_pdb_cache_dir(tmp_path: Path) -> None:
     absolute = str(tmp_path / "cache")
     path = _write_toml(
-        tmp_path, f'[potential]\npdb_code = "6bdf"\npdb_savefolder = "{absolute}"\n'
+        tmp_path, f'[potential]\npdb_code = "6bdf"\npdb_cache_dir = "{absolute}"\n'
     )
     config = load_config(path)
-    assert config.pdb_savefolder == absolute
+    assert config.pdb_cache_dir == absolute
 
 
 def test_particle_stack_config_requires_pdb_code() -> None:

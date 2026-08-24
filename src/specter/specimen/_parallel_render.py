@@ -282,7 +282,7 @@ def _fetch_one_pdb(args: tuple[str, str, bool, bool | str]) -> "PDB":
     pdb_source, pdb_cache_dir, compute_atom_species, readd_hydrogens = args
     return PDB(
         pdb_source,
-        savefolder=pdb_cache_dir,
+        pdb_cache_dir=pdb_cache_dir,
         verbose=False,
         compute_atom_species=compute_atom_species,
         readd_hydrogens=readd_hydrogens,
@@ -310,7 +310,7 @@ def build_pdb_cache_concurrently(
         returned dict's construction, though dict key order isn't itself
         load-bearing for callers).
     pdb_cache_dir : str
-        Passed through to every `PDB(...)` call as `savefolder`.
+        Passed through to every `PDB(...)` call as `pdb_cache_dir`.
     max_workers : int
         Number of PDB sources fetched/parsed concurrently. ``<= 1``, or
         fewer than `_MIN_SOURCES_FOR_PROCESS_POOL` unique sources, skips
@@ -354,7 +354,7 @@ def build_pdb_cache_concurrently(
         for source in unique_sources:
             results[source] = PDB(
                 source,
-                savefolder=pdb_cache_dir,
+                pdb_cache_dir=pdb_cache_dir,
                 verbose=False,
                 compute_atom_species=compute_atom_species,
                 readd_hydrogens=readd_hydrogens,

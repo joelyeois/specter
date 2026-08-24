@@ -119,7 +119,7 @@ def run_micrograph(config: MicrographConfig) -> None:
     pdb = PDB(
         config.pdb_code,
         assembly=config.assembly,
-        savefolder=config.pdb_savefolder,
+        pdb_cache_dir=config.pdb_cache_dir,
         compute_atom_species=True,
         readd_hydrogens=config.readd_hydrogens,
     )
@@ -277,7 +277,7 @@ def run_micrograph(config: MicrographConfig) -> None:
             pixel_size=config.pixel_size,
             alpha=config.alpha,
             ctf_params=ctf_params,
-            folderpath=output_dir,
+            output_dir=output_dir,
             filename=config.filename,
             dose_per_angstrom=dose,
             coincidence_radius=coincidence_radius,

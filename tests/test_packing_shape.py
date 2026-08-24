@@ -266,7 +266,7 @@ def test_generator_coarse_packing_survives_both_placement_stages():
         TomogramSpecimenGenerator,
     )
 
-    fixture = Path(__file__).parent.parent / "specter-data" / "pdb" / "1mbo.cif"
+    fixture = Path(__file__).parent / "test_data" / "1mbo.cif"
     if not fixture.exists():
         pytest.skip("bundled PDB fixture missing")
 

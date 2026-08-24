@@ -16,7 +16,7 @@ import torch
 from specter.config import TomogramConfig
 from specter.pipelines import build_tomogram_generator
 
-_SMALL_FIXTURE = Path(__file__).parent.parent / "specter-data" / "pdb" / "1mbo.cif"
+_SMALL_FIXTURE = Path(__file__).parent / "test_data" / "1mbo.cif"
 
 _BASE_KWARGS = dict(
     target_shape=[64, 64, 64],

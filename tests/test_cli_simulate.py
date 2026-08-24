@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-_FIXTURE_PDB = str(Path(__file__).parent.parent / "specter-data" / "pdb" / "1mbo.cif")
+_FIXTURE_PDB = str(Path(__file__).parent / "test_data" / "1mbo.cif")
 
 
 def _run_particles_cli(output_dir: Path, n_particles: int = 2) -> proc.CompletedProcess:

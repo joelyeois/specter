@@ -8,14 +8,22 @@ from pathlib import Path
 import pytest
 
 import specter.pdb as pdb_module
+from specter.config import default_pdb_cache_dir
 from specter.pdb import PDB
+
+# Two tiers of fixture. The structures the suite cannot run without are
+# tracked in tests/test_data/. These larger ones only add coverage for
+# awkward depositions, so they are read from the user's own download
+# cache and skipped when absent rather than committed to git -- together
+# they are ~8 MB, against 4.3 MB for everything else combined. Fetch them
+# with e.g. `specter simulate particles --pdb_source 7a4m` to enable.
 
 # Myoglobin (oxy form): standard amino acids, a heme group coordinated by a
 # His side chain and a bound O2 — exercises intra-residue bonds
 # (_chem_comp_bond), the carboxyl/amide flag override, and inter-residue
 # metal-coordination bonds (_struct_conn), all without needing an external
 # CCP4 Monomer Library.
-_FIXTURE = Path(__file__).parent.parent / "specter-data" / "pdb" / "1mbo.cif"
+_FIXTURE = Path(__file__).parent / "test_data" / "1mbo.cif"
 
 
 @pytest.fixture(scope="module")
@@ -154,9 +162,7 @@ def test_species_aligns_with_atomic_numbers():
 # building the bond graph. Typing once dropped the deposited ones too, so
 # atom_species came back 208 entries short of atomic_numbers and the Shtyrov
 # potential path died on the length mismatch.
-_ZERO_OCC_FIXTURE = (
-    Path(__file__).parent.parent / "specter-data" / "pdb" / "1fa2-assembly1.cif"
-)
+_ZERO_OCC_FIXTURE = Path(default_pdb_cache_dir()) / "1fa2-assembly1.cif"
 
 
 @pytest.mark.skipif(
@@ -196,7 +202,7 @@ def test_atom_species_aligns_for_awkward_structures(name):
     """atom_species stays index-aligned with atomic_numbers, element for element."""
     from specter.atom.atom import atom_symbol
 
-    path = Path(__file__).parent.parent / "specter-data" / "pdb" / name
+    path = Path(default_pdb_cache_dir()) / name
     if not path.exists():
         pytest.skip(f"{name} not in the local PDB cache")
 
@@ -307,7 +313,7 @@ def test_metal_links_dropped_with_library():
 # 7a4m carries its own hydrogens, so it distinguishes the two modes: ReAdd
 # replaces them with the library's ideal geometry, NoChange keeps them where
 # they were deposited.
-_H_FIXTURE = Path(__file__).parent.parent / "specter-data" / "pdb" / "7a4m.cif"
+_H_FIXTURE = Path(default_pdb_cache_dir()) / "7a4m.cif"
 
 
 @pytest.mark.skipif(_monomer_library() is None, reason="no monomer library available")

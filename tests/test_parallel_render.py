@@ -3,7 +3,8 @@
 species (processes, build_pdb_cache_concurrently) and render their
 PotentialBuilder templates (threads, build_templates_concurrently). The
 thread-pool tests use dummy build functions (pure/stateless helper); the
-process-pool tests use real, already-cached PDB codes since correctness
+process-pool tests use real PDB codes resolved from the tracked
+fixtures in tests/test_data/ (never the network) since correctness
 there depends on real pickling across a process boundary, which a dummy
 function wouldn't exercise (covered end-to-end otherwise by
 tests/test_tomogram_pipeline_membrane.py and tests/test_membrane_generator.py).
@@ -18,6 +19,9 @@ import threading
 import time
 
 import pytest
+from pathlib import Path
+
+from specter.config import default_pdb_cache_dir
 import torch
 
 import specter.specimen._parallel_render as parallel_render_module
@@ -113,7 +117,9 @@ def test_build_templates_concurrently_round_robins_devices():
 
 def test_build_pdb_cache_concurrently_serial():
     cache = build_pdb_cache_concurrently(
-        pdb_sources=["1mbo"], pdb_cache_dir="specter-data/pdb", max_workers=1
+        pdb_sources=["1mbo"],
+        pdb_cache_dir=str(Path(__file__).parent / "test_data"),
+        max_workers=1,
     )
     assert set(cache) == {"1mbo"}
     assert cache["1mbo"].coordinates.shape[0] > 0
@@ -128,24 +134,50 @@ def test_build_pdb_cache_concurrently_below_threshold_skips_process_pool(monkeyp
 
     monkeypatch.setattr(parallel_render_module, "ProcessPoolExecutor", _boom)
     cache = build_pdb_cache_concurrently(
-        pdb_sources=["1mbo", "1fa2", "1a6m"],
-        pdb_cache_dir="specter-data/pdb",
+        pdb_sources=["1mbo", "1bxn", "1a6m"],
+        pdb_cache_dir=str(Path(__file__).parent / "test_data"),
         max_workers=8,
     )
-    assert set(cache) == {"1mbo", "1fa2", "1a6m"}
+    assert set(cache) == {"1mbo", "1bxn", "1a6m"}
 
 
+_TABLE_SOURCES = [
+    d["code"]
+    for d in CRYOETSIM_PARTICLE_TABLE[
+        : parallel_render_module._MIN_SOURCES_FOR_PROCESS_POOL + 2
+    ]
+]
+
+
+def _table_sources_cached() -> bool:
+    """Whether every above-threshold source is already downloaded.
+
+    These two tests need 27 real structures (~32 MB) to clear
+    `_MIN_SOURCES_FOR_PROCESS_POOL`, which is too much to commit to git, so
+    they are opt-in on a populated cache. Guarding on it keeps a clean clone
+    from silently fetching 32 MB from RCSB in the middle of a test run.
+    """
+    cache = Path(default_pdb_cache_dir())
+    return all((cache / f"{code}-assembly1.cif").is_file() for code in _TABLE_SOURCES)
+
+
+_requires_table_sources = pytest.mark.skipif(
+    not _table_sources_cached(),
+    reason="needs the 27 CRYOETSIM_PARTICLE_TABLE structures in the PDB cache",
+)
+
+
+@_requires_table_sources
 def test_build_pdb_cache_concurrently_parallel_matches_serial():
     # Above _MIN_SOURCES_FOR_PROCESS_POOL, so this genuinely exercises the
     # process-pool path (see the below-threshold test above for the
     # fallback-to-serial case).
-    n = parallel_render_module._MIN_SOURCES_FOR_PROCESS_POOL + 2
-    sources = [d["code"] for d in CRYOETSIM_PARTICLE_TABLE[:n]]
+    sources = _TABLE_SOURCES
     serial = build_pdb_cache_concurrently(
-        pdb_sources=sources, pdb_cache_dir="specter-data/pdb", max_workers=1
+        pdb_sources=sources, pdb_cache_dir=default_pdb_cache_dir(), max_workers=1
     )
     parallel = build_pdb_cache_concurrently(
-        pdb_sources=sources, pdb_cache_dir="specter-data/pdb", max_workers=4
+        pdb_sources=sources, pdb_cache_dir=default_pdb_cache_dir(), max_workers=4
     )
     assert set(parallel) == set(serial) == set(sources)
     for source in sources:
@@ -160,12 +192,12 @@ def test_build_pdb_cache_concurrently_parallel_matches_serial():
         assert torch.allclose(parallel[source].coordinates, serial[source].coordinates)
 
 
+@_requires_table_sources
 def test_build_pdb_cache_concurrently_deduplicates_sources():
-    n = parallel_render_module._MIN_SOURCES_FOR_PROCESS_POOL + 2
-    sources = [d["code"] for d in CRYOETSIM_PARTICLE_TABLE[:n]]
+    sources = _TABLE_SOURCES
     cache = build_pdb_cache_concurrently(
         pdb_sources=sources + sources[:3],  # duplicate a few sources
-        pdb_cache_dir="specter-data/pdb",
+        pdb_cache_dir=default_pdb_cache_dir(),
         max_workers=4,
     )
     assert set(cache) == set(sources)
@@ -239,7 +271,7 @@ def test_build_pdb_cache_forwards_readd_hydrogens(monkeypatch, max_workers):
     from specter.specimen._parallel_render import build_pdb_cache_concurrently
 
     monkeypatch.setenv("CLIBD_MON", _monomer_library())
-    cif = str(Path(__file__).parent.parent / "specter-data" / "pdb" / "1mbo.cif")
+    cif = str(Path(__file__).parent / "test_data" / "1mbo.cif")
 
     def n_hydrogens(readd):
         cache = build_pdb_cache_concurrently(

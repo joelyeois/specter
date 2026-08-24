@@ -656,9 +656,7 @@ def test_hydrogen_settings_reach_pdb(monkeypatch, pipeline):
 
     monkeypatch.setattr(mod, "PDB", _spy)
     cfg = cls(
-        pdb_source=str(
-            Path(__file__).parent.parent / "specter-data" / "pdb" / "1mbo.cif"
-        ),
+        pdb_source=str(Path(__file__).parent / "test_data" / "1mbo.cif"),
         readd_hydrogens=False,
     )
     with pytest.raises(_Stop):

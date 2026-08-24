@@ -1,5 +1,5 @@
 [potential]
-pdb_code = "6bdf"
+pdb_source = "6bdf"
 assembly = true
 n_pixels = 256
 pixel_size = 1.0     # Å

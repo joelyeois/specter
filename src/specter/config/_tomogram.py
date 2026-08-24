@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-from ._paths import default_output_dir, default_pdb_cache_dir
+from ._paths import default_pdb_cache_dir
 from ._scalar_range import ScalarOrRange
 
 
@@ -287,13 +287,18 @@ class TomogramConfig:
     render_chunk_size: int | None = None
 
     # --- Output ---
-    output_dir: str = field(default_factory=lambda: default_output_dir("tomograms"))
+    # One path field, not one per layout: this is the single directory a run
+    # writes under, read as the leaf when untracked and as the root of the
+    # numbered job tree when tracked. `None` rather than a baked-in default
+    # because which default applies is not knowable until tracking is -- see
+    # pipelines._common.resolve_output_dir.
+    output_dir: str | None = None
     filename: str = "tomogram"
 
     # --- Job tracking (opt-in) ---
     # Setting `project` or `job_id` routes output through `specter.jobs`
     # instead of the flat output_dir/filename layout above: the directory
-    # becomes job_base_dir/[project/]tomograms/J00N/, numbered and with a
+    # becomes output_dir/[project/]tomograms/J00N/, numbered and with a
     # job.json recording the full parameter set, git commit and status.
     # Neither is required -- leaving both unset keeps today's exact flat
     # behavior. When chained via `run_tilt_series(..., tomogram_config=...)`,
@@ -304,10 +309,6 @@ class TomogramConfig:
     # tiltseries job's volume_path pointing into this job's directory.
     project: str | None = None
     job_id: str | None = None
-    # Defaults to the project root found by walking up from cwd for an
-    # existing specter-data/ (find_specter_project_root), the same way git
-    # finds the nearest .git.
-    job_base_dir: str | None = None
 
 
 TOMOGRAM_HELP: dict[str, str] = {
@@ -362,7 +363,9 @@ TOMOGRAM_HELP: dict[str, str] = {
     "clip_axes": "(z, y, x) -- True on an axis lets a placed instance's "
     "body extend past that wall (truncated at render time) instead of "
     "being rejected outright. TOML-only (list[bool]).",
-    "pdb_cache_dir": "Folder to cache downloaded PDB files.",
+    "pdb_cache_dir": "Where downloaded PDB/mmCIF structures are cached. An "
+    "input cache shared by every run, not an output location -- job tracking "
+    "does not redirect it.",
     "seed": "Random seed.",
     "membrane": "One or more MembraneGenerator kwargs dicts (TOML-only, "
     "[[membrane]] tables, one per composited TEMPLATE) -- optional, empty "
@@ -478,19 +481,21 @@ TOMOGRAM_HELP: dict[str, str] = {
     "accepted instances in one batched call -- fine at small scale, but a "
     "species with hundreds of instances can then need many GB for that "
     "one call. Set e.g. 32-64 once species counts get into the hundreds.",
-    "output_dir": "Directory to save output files.",
+    "output_dir": "Directory to save output files when untracked. Setting "
+    "--project or --job_id instead makes this the root of the numbered job "
+    "tree, so tracking organises output within the folder you chose rather "
+    "than moving it elsewhere. Unset defaults to specter-data/<artifact> "
+    "untracked, and to the project root found by walking up from cwd for an "
+    "existing specter-data/ when tracked.",
     "filename": "Base name for the output volume (no extension).",
-    "project": "Optional: route output through specter.jobs instead of "
-    "--output_dir/--filename. Not required for tracking -- job_id alone "
-    "also triggers it. The run lands in "
-    "<job_base_dir>/[<project>/]tomograms/J00N/ with a job.json recording "
+    "project": "Optional: number and track this run through specter.jobs. "
+    "Not required for tracking -- job_id alone also triggers it. The run "
+    "lands in "
+    "<output_dir>/[<project>/]tomograms/J00N/ with a job.json recording "
     "every parameter, the git commit and the run's status. When chained "
     "via --tomogram_config on `specter simulate tiltseries`, leaving this "
     "unset while tracking the tiltseries run cascades that project here "
     "automatically.",
     "job_id": "Pin the job directory (e.g. J001) rather than auto-assigning "
     "the next one: resumes into it if it exists, creates it otherwise.",
-    "job_base_dir": "Root directory for job folders. Defaults to the "
-    "project root found by walking up from cwd looking for an existing "
-    "specter-data/, the same way git finds the nearest .git.",
 }

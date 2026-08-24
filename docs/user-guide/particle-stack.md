@@ -19,10 +19,10 @@ specter simulate particles --config configs/particle.toml
 ```bash
 specter simulate particles \
     --config configs/particle.toml \
-    --pdb_code 6bdf \
+    --pdb_source 6bdf \
     --n_particles 200 \
     --device cuda:0 \
-    --output_dir specter-data/particles
+    --output_dir particles
 ```
 
 `configs/particle.toml` is the canonical starting point. Copy it and edit
@@ -31,8 +31,8 @@ TOML/CLI field reference.
 
 ## What you'll usually tune
 
-- **Structure & Potential**: `pdb_code` (fetched and cached under
-  `specter-data/pdb/`), `assembly` (biological assembly vs. asymmetric unit),
+- **Structure & Potential**: `pdb_source` (fetched and cached under
+  `~/.cache/specter/pdb/`), `assembly` (biological assembly vs. asymmetric unit),
   `n_pixels`/`pixel_size` for the simulation box.
 - **Microscope**: `voltage`, `dose`, `cs`, `alpha` (amplitude contrast).
 - **Sampling**: `defocus`, `shift` (max in-plane shift), `n_particles`.
@@ -94,7 +94,7 @@ experimental dataset particle-for-particle:
 
 ```bash
 specter simulate particles \
-    --pdb_code 8b0x \
+    --pdb_source 8b0x \
     --n_pixels 512 \
     --cs_path docs-figures/data/empiar-11377-passthrough-5particles.cs \
     --n_particles 5 \
@@ -127,7 +127,7 @@ Five SPECTER-simulated particles (top row) next to the five real EMPIAR-11377 pa
 
 That's a qualitative check on 5 particles. The stronger, quantitative check
 comes from CryoSPARC itself: 2000 real EMPIAR-11377 particles and 2000
-SPECTER particles (same `pdb_code`/physics parameters, generated in bulk
+SPECTER particles (same `pdb_source`/physics parameters, generated in bulk
 offline) were pooled into one stack and run through a single CryoSPARC 2D
 Classification job. If the simulated particles are physically realistic,
 CryoSPARC should sort them into the same classes as the real particles

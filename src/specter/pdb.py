@@ -25,12 +25,13 @@ if TYPE_CHECKING:
 from .atom import atom_number
 from .config import default_pdb_cache_dir
 
-# `specter-data/pdb`, relative to the caller's cwd -- one rule shared
-# with every other path in a specter config, rather than this one field being
-# special. Previously anchored to REPO_ROOT, which only resolves to the repo
-# for an editable install and would land inside the virtualenv for a wheel
-# install. Set $SPECTER_PDB_CACHE to an absolute path to share one cache
-# across working directories. See `default_pdb_cache_dir` in config.py.
+# A user-level cache (`~/.cache/specter/pdb` by default), NOT a project
+# directory: a structure fetched by accession code is identical for every
+# project, so caching per user downloads it once rather than once per working
+# directory. Set $SPECTER_PDB_CACHE (or $XDG_CACHE_HOME) to relocate it, e.g.
+# onto scratch. Only downloads land here -- a structure passed by path is read
+# where it lies, which is what keeps `specter cache clean` safe. See
+# `default_pdb_cache_dir` in config/_paths.py.
 DEFAULT_PDB_CACHE_DIR = default_pdb_cache_dir()
 
 # Suppress only PDBConstructionWarnings
@@ -151,7 +152,14 @@ class PDB:
             `"C(HHHC)"`), only set when `compute_atom_species=True`.
         """
 
-        # Determine whether pdb_source is a PDB ID or file path
+        # Determine whether pdb_source is a PDB ID or file path. The ID check
+        # comes first deliberately, and the ambiguity it implies is narrower
+        # than it looks: a readable structure file must end in .cif or .pdb
+        # (see _load_structure), so any real one is longer than 4 characters
+        # and reaches the isfile branch regardless. Only a bare, extensionless
+        # 4-character filename collides -- which specter could not parse
+        # anyway -- whereas a user typing a 4-character argument essentially
+        # always means the accession code.
         if (
             isinstance(pdb_source, str)
             and len(pdb_source) == 4

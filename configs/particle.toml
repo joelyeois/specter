@@ -3,7 +3,7 @@
 #   specter simulate particles --config configs/particle.toml --n_particles 3000
 
 [potential]
-pdb_code = "6bdf"
+pdb_source = "6bdf"
 assembly = true
 n_pixels = 256
 pixel_size = 1.0              # Å
@@ -36,24 +36,27 @@ batchsize = "auto"               # particles per forward pass; "auto" fits it to
                                  # which particle (a seeded run rejects "auto")
 
 [output]
-output_dir = "specter-data/particles"
+output_dir = "particles"
 filename = "particles"
 
 # Job tracking (opt-in) -- set project or job_id to route output through
 # specter.jobs instead of output_dir/filename above: the directory becomes
-# job_base_dir/[project/]particles/J00N/, numbered, with a job.json
+# output_dir/[project/]particles/J00N/, numbered, with a job.json
 # recording every parameter, the git commit and the run's status. Neither
 # is required -- leaving both unset keeps the flat behavior above exactly.
 [job]
 # project = "my-project"
 # job_id = "J001"
-# job_base_dir = "specter-data"   # defaults to the project root found by
-                                 # walking up from cwd for an existing
-                                 # specter-data/, like git finds .git
+# Tracked runs read output_dir above as the ROOT of the numbered tree
+# rather than as the folder files land in directly. Leave output_dir
+# unset to default that root to the project root found by walking up
+# from cwd for an existing .specter marker, like git finds .git.
 
 # --- Advanced: rarely touched, but available for tweaking ---
 [advanced]
-pdb_cache_dir = "specter-data/pdb"  # relative to your working directory
+# pdb_cache_dir = "~/.cache/specter/pdb"   # default; set $SPECTER_PDB_CACHE to move it,
+                                           # e.g. onto scratch. Downloads only --
+                                           # your own files are read where they are.
 # cs_path = "path/to/particles.cs"  # uncomment to drive generation from a CryoSPARC .cs file
 # star_path = "path/to/particles.star"  # ... or from a RELION .star file (mutually exclusive with cs_path)
 # n_frames = 20                # frames, uncomment to override default (int(dose) if None)
@@ -69,7 +72,7 @@ noise_model = "poisson"          # poisson | none
 coincidence_radius = 0.0         # pixels; single value, or [low, high] to sample per particle
 ice_model = "gd"                 # gd | random | none
 ice_thickness = 0.0              # Å, 0 = minimum (particle box size)
-# ice_cache_dir = "specter-data/ice"   # defaults to the cache bundled in the package
+# ice_cache_dir = "ice"   # defaults to the cache bundled in the package
 # crowd_min_distance = 100.0      # Å, uncomment to crowd particles; defaults to pdb.max_diameter
 # crowd_max_distance_z = 50.0     # Å
 potential_scale = 1.0            # unitless; single value, or [low, high] (values < 1 approximate thicker ice)

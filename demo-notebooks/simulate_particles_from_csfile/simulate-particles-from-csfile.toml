@@ -11,7 +11,7 @@
 cs_path = "/scratch/loh/joel/cryosparc_tutorial/CS-cryosparc-tutorial/J35/J35_passthrough_particles.cs"
 
 [potential]
-pdb_code = "6bdf"
+pdb_source = "6bdf"
 assembly = true
 n_pixels = 256
 

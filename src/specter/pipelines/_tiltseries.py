@@ -18,10 +18,8 @@ import torch
 
 import specter
 from specter.config import (
-    SPECTER_DATA_DIR,
     TiltSeriesConfig,
     TomogramConfig,
-    find_specter_project_root,
     validate_config,
 )
 from specter.imagegenerator import TiltSeriesGenerator
@@ -36,6 +34,7 @@ from ._common import (
     _save_exitwave_pair,
     _section,
     _tracked_output_dir,
+    resolve_output_dir,
 )
 from ._tomogram import run_build_tomogram, tomogram_output_path
 
@@ -68,7 +67,7 @@ def run_tilt_series(
 
         If this run is tracked (``config.project``/``job_id`` set) and
         ``tomogram_config`` wasn't independently configured for tracking,
-        ``tomogram_config``'s project and job_base_dir are set to match --
+        ``tomogram_config``'s project and output_dir are set to match --
         one tracked chained call then produces two separate jobs, one
         "tomograms" and one "tiltseries", under the same project, linked
         implicitly by this run's ``volume_path`` pointing into the
@@ -86,7 +85,7 @@ def run_tilt_series(
                 "config.volume_path to reuse an already-built one."
             )
 
-        # Cascade project (+ job_base_dir) from the outer run, but only if
+        # Cascade project (+ output_dir) from the outer run, but only if
         # tomogram_config wasn't independently configured for tracking at
         # all -- an explicit tomogram_config.project must never be
         # silently overridden.
@@ -98,7 +97,7 @@ def run_tilt_series(
             tomogram_config = dataclasses.replace(
                 tomogram_config,
                 project=config.project,
-                job_base_dir=tomogram_config.job_base_dir or config.job_base_dir,
+                output_dir=tomogram_config.output_dir or config.output_dir,
             )
 
         # Whichever way tracking ended up on for tomogram_config -- cascaded
@@ -113,12 +112,10 @@ def run_tilt_series(
         if (
             tomogram_config.project is not None or tomogram_config.job_id is not None
         ) and tomogram_config.job_id is None:
-            root = tomogram_config.job_base_dir or str(
-                find_specter_project_root() / SPECTER_DATA_DIR
-            )
+            root = resolve_output_dir(tomogram_config, "tomograms", create=True)
             job_id = _reserve_next_job_id(tomogram_config.project, root)
             tomogram_config = dataclasses.replace(
-                tomogram_config, job_id=job_id, job_base_dir=root
+                tomogram_config, job_id=job_id, output_dir=root
             )
 
         _section("Building specimen volume (tomogram_config)")

@@ -56,7 +56,7 @@ device = "auto"    # cpu | cuda | cuda:0 | 0,1,2,3 | auto (every visible GPU)
 # =============================================================================
 
 [output]
-output_dir = "specter-data/ice"
+output_dir = "ice"
 overwrite = false      # false skips configs already present, so an interrupted
                        # run resumes where it left off
 diagnostics = false    # save energy and S(k) figures for the finished library

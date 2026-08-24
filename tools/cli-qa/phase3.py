@@ -45,7 +45,7 @@ BASE = [
     # Absolute: the relative-output_dir check below runs from a different cwd,
     # where a repo-relative structure path would no longer resolve (and now
     # fails validation, correctly, but for the wrong reason).
-    "--pdb_code",
+    "--pdb_source",
     str(REPO_ROOT / PDB_A),
     "--n_particles",
     "2",
@@ -104,7 +104,7 @@ def check_devices(n_gpus: int) -> None:
         [
             "simulate",
             "particles",
-            "--pdb_code",
+            "--pdb_source",
             PDB_A,
             "--n_particles",
             "4",
@@ -130,7 +130,7 @@ def check_devices(n_gpus: int) -> None:
             [
                 "simulate",
                 "particles",
-                "--pdb_code",
+                "--pdb_source",
                 PDB_A,
                 "--n_particles",
                 "8",
@@ -251,7 +251,7 @@ def check_datasets() -> None:
             [
                 "simulate",
                 "particles",
-                "--pdb_code",
+                "--pdb_source",
                 PDB_A,
                 "--n_pixels",
                 "48",
@@ -292,7 +292,7 @@ def check_assembly() -> None:
             [
                 "simulate",
                 "particles",
-                "--pdb_code",
+                "--pdb_source",
                 "1BXN",
                 "--assembly",
                 value,

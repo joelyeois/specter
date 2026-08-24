@@ -117,7 +117,7 @@ def run_micrograph(config: MicrographConfig) -> None:
     # config field, so the default always applies and the typing is always
     # worth its one-off gemmi pass.
     pdb = PDB(
-        config.pdb_code,
+        config.pdb_source,
         assembly=config.assembly,
         pdb_cache_dir=config.pdb_cache_dir,
         compute_atom_species=True,

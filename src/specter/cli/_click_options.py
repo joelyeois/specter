@@ -100,7 +100,7 @@ def build_config_options(
             kwargs["show_default"] = str(f.default)
         elif f.default_factory is not dataclasses.MISSING:
             kwargs["show_default"] = str(f.default_factory())
-        # else: no dataclass default at all (a required field, e.g. pdb_code)
+        # else: no dataclass default at all (a required field, e.g. pdb_source)
         # -- leave show_default unset, nothing meaningful to display.
 
         if get_origin(ftype) is Literal:

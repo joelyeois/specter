@@ -23,7 +23,7 @@ job is a real-data demonstration, not test coverage):
 - empiar-11377-mixed-2dclasses.csv
     Per-particle 2D-class assignment from a CryoSPARC 2D Classification job
     run on a *mixed* stack of 2000 real EMPIAR-11377 particles + 2000
-    SPECTER-simulated particles (same pdb_code/physics params as this
+    SPECTER-simulated particles (same pdb_source/physics params as this
     script, generated in bulk offline). This one isn't reproducible by
     this script alone -- it requires actually running CryoSPARC -- but
     it's the stronger evidence: if simulated particles are physically
@@ -70,7 +70,7 @@ POTENTIAL_SCALE = "0.5"  # approximates a thicker ice layer than the box
 def _generate_specter_particles(device: str) -> torch.Tensor:
     with tempfile.TemporaryDirectory() as tmp:
         config = ParticleStackConfig(
-            pdb_code=PDB_CODE,
+            pdb_source=PDB_CODE,
             n_pixels=NUM_PIXELS,
             cs_path=str(DATA_DIR / "empiar-11377-passthrough-5particles.cs"),
             n_particles=5,

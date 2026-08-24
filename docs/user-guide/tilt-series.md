@@ -15,13 +15,13 @@ command line as overrides:
 
 ```bash
 specter simulate tiltseries --config configs/tilt_series.toml \
-    --volume_path specter-data/tomograms/tomogram.mrc
+    --volume_path tomograms/tomogram.mrc
 ```
 
 ```bash
 specter simulate tiltseries \
     --config configs/tilt_series.toml \
-    --volume_path specter-data/tomograms/tomogram.mrc \
+    --volume_path tomograms/tomogram.mrc \
     --device cuda:0 \
     --n_tilts 41 \
     --min_tilt_angle -60 --max_tilt_angle 60
@@ -135,10 +135,10 @@ multiple tomograms, or building once and imaging it several ways:
 
 ```bash
 specter build tomogram --config configs/tomogram.toml \
-    --output_dir specter-data/tomograms --filename tomogram
+    --output_dir tomograms --filename tomogram
 
 specter simulate tiltseries --config configs/tilt_series.toml \
-    --volume_path specter-data/tomograms/tomogram.mrc \
+    --volume_path tomograms/tomogram.mrc \
     --device cuda:0
 ```
 

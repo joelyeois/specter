@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Literal
-
-from ._paths import default_output_dir
 
 
 @dataclass
@@ -79,22 +77,23 @@ class TiltSeriesConfig:
     seed: int | None = None
 
     # --- Output ---
-    output_dir: str = field(default_factory=lambda: default_output_dir("tiltseries"))
+    # One path field, not one per layout: this is the single directory a run
+    # writes under, read as the leaf when untracked and as the root of the
+    # numbered job tree when tracked. `None` rather than a baked-in default
+    # because which default applies is not knowable until tracking is -- see
+    # pipelines._common.resolve_output_dir.
+    output_dir: str | None = None
     filename: str = "tilt_series"
 
     # --- Job tracking (opt-in) ---
     # Setting `project` or `job_id` routes output through `specter.jobs`
     # instead of the flat output_dir/filename layout above: the directory
-    # becomes job_base_dir/[project/]tiltseries/J00N/, numbered and with a
+    # becomes output_dir/[project/]tiltseries/J00N/, numbered and with a
     # job.json recording the full parameter set, git commit and status.
     # Neither is required -- leaving both unset keeps today's exact flat
     # behavior.
     project: str | None = None
     job_id: str | None = None
-    # Defaults to the project root found by walking up from cwd for an
-    # existing specter-data/ (find_specter_project_root), the same way git
-    # finds the nearest .git.
-    job_base_dir: str | None = None
 
 
 # Human-readable per-field descriptions for TiltSeriesConfig, used to build
@@ -147,16 +146,13 @@ TILT_SERIES_HELP: dict[str, str] = {
     "save_exitwaves": "Save exit wave magnitude and phase as separate .mrcs files.",
     "device": "Device to use: cpu | cuda | cuda:0.",
     "seed": "RNG seed for ice, crowding, pose and noise sampling. Auto-generated and logged if unset.",
-    "output_dir": "Directory to save output files.",
+    "output_dir": "Directory to save output files when untracked. Setting --project or --job_id instead makes this the root of the numbered job tree, so tracking organises output within the folder you chose rather than moving it elsewhere. Unset defaults to specter-data/<artifact> untracked, and to the project root found by walking up from cwd for an existing specter-data/ when tracked.",
     "filename": "Base name for output files (no extension).",
-    "project": "Optional: route output through specter.jobs instead of "
-    "--output_dir/--filename. Not required for tracking -- job_id alone "
-    "also triggers it. The run lands in "
-    "<job_base_dir>/[<project>/]tiltseries/J00N/ with a job.json "
+    "project": "Optional: number and track this run through specter.jobs. "
+    "Not required for tracking -- job_id alone also triggers it. The run "
+    "lands in "
+    "<output_dir>/[<project>/]tiltseries/J00N/ with a job.json "
     "recording every parameter, the git commit and the run's status.",
     "job_id": "Pin the job directory (e.g. J001) rather than auto-assigning "
     "the next one: resumes into it if it exists, creates it otherwise.",
-    "job_base_dir": "Root directory for job folders. Defaults to the "
-    "project root found by walking up from cwd looking for an existing "
-    "specter-data/, the same way git finds the nearest .git.",
 }

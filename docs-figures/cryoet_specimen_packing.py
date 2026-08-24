@@ -44,7 +44,7 @@ from specter.specimen.tomogram import (
 from specter.specimen.tomogram.generator import _build_sphere_exclusion_field
 
 OUT_DIR = "docs/assets/images"
-PDB_CACHE = "specter-data/pdb"
+PDB_CACHE = "~/.cache/specter/pdb"
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 SHELL_COLOR = "#0f7373"

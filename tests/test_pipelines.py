@@ -74,7 +74,7 @@ def test_run_particle_stack_from_csfile(tmp_path: Path) -> None:
     _write_minimal_csfile(cs_path, n=5)
 
     config = ParticleStackConfig(
-        pdb_code="6bdf",
+        pdb_source="6bdf",
         n_pixels=64,
         cs_path=str(cs_path),
         n_particles=5,
@@ -137,7 +137,7 @@ def test_run_particle_stack_from_starfile(tmp_path: Path) -> None:
     _write_minimal_starfile(star_path, n=5)
 
     config = ParticleStackConfig(
-        pdb_code="6bdf",
+        pdb_source="6bdf",
         n_pixels=64,
         star_path=str(star_path),
         n_particles=5,
@@ -175,7 +175,7 @@ def test_run_particle_stack_rejects_both_cs_and_star_path(tmp_path: Path) -> Non
     _write_minimal_starfile(star_path, n=5)
 
     config = ParticleStackConfig(
-        pdb_code="6bdf",
+        pdb_source="6bdf",
         cs_path=str(cs_path),
         star_path=str(star_path),
         output_dir=str(tmp_path),
@@ -192,7 +192,7 @@ def test_run_particle_stack_applies_tetrafoil(tmp_path: Path) -> None:
     visibly change the images relative to the same run with tetrafoil off.
     """
     common = dict(
-        pdb_code="6bdf",
+        pdb_source="6bdf",
         n_pixels=64,
         pixel_size=2.0,
         n_particles=2,
@@ -225,7 +225,7 @@ def test_run_particle_stack_auto_batchsize(tmp_path: Path) -> None:
     this pins the clamp instead: never more than n_particles.
     """
     config = ParticleStackConfig(
-        pdb_code="6bdf",
+        pdb_source="6bdf",
         n_pixels=32,
         pixel_size=4.0,
         n_particles=3,
@@ -252,7 +252,7 @@ def test_run_particle_stack_rejects_seed_with_auto_batchsize(tmp_path: Path) -> 
     -- so the same seed would give a different stack on a different machine.
     """
     config = ParticleStackConfig(
-        pdb_code="6bdf",
+        pdb_source="6bdf",
         n_pixels=32,
         n_particles=2,
         seed=11,
@@ -268,7 +268,7 @@ def test_run_particle_stack_tracked_by_project(tmp_path: Path) -> None:
     """--project routes output through specter.jobs instead of output_dir/
     filename -- opt-in, unlike reconstruction's always-on tracking."""
     config = ParticleStackConfig(
-        pdb_code="6bdf",
+        pdb_source="6bdf",
         n_pixels=32,
         n_particles=2,
         scattering_model="projection",
@@ -277,7 +277,7 @@ def test_run_particle_stack_tracked_by_project(tmp_path: Path) -> None:
         device="cpu",
         batchsize=2,
         project="apoferritin",
-        job_base_dir=str(tmp_path),
+        output_dir=str(tmp_path),
     )
     run_particle_stack(config)
 
@@ -292,7 +292,7 @@ def test_run_particle_stack_tracked_by_project(tmp_path: Path) -> None:
 
 def test_run_micrograph_tracked_by_project(tmp_path: Path) -> None:
     config = MicrographConfig(
-        pdb_code="6bdf",
+        pdb_source="6bdf",
         n_pixels=32,
         micrograph_size=64,
         n_micrographs=1,
@@ -302,7 +302,7 @@ def test_run_micrograph_tracked_by_project(tmp_path: Path) -> None:
         noise_model="none",
         device="cpu",
         project="apoferritin",
-        job_base_dir=str(tmp_path),
+        output_dir=str(tmp_path),
     )
     run_micrograph(config)
 
@@ -332,7 +332,7 @@ def test_run_tilt_series_tracked_by_project(tmp_path: Path) -> None:
         scattering_model="ctf",
         device="cpu",
         project="apoferritin",
-        job_base_dir=str(tmp_path),
+        output_dir=str(tmp_path),
     )
     run_tilt_series(config)
 
@@ -357,7 +357,7 @@ def _minimal_tomogram_config(**overrides) -> TomogramConfig:
 
 
 def test_run_build_tomogram_tracked_by_project(tmp_path: Path) -> None:
-    config = _minimal_tomogram_config(project="apoferritin", job_base_dir=str(tmp_path))
+    config = _minimal_tomogram_config(project="apoferritin", output_dir=str(tmp_path))
     run_build_tomogram(config)
 
     job_dir = tmp_path / "apoferritin" / "tomograms" / "J001"
@@ -374,7 +374,7 @@ def test_tomogram_output_path_tracked_requires_pinned_job_id() -> None:
 
 def test_tomogram_output_path_tracked_with_pinned_job_id(tmp_path: Path) -> None:
     config = _minimal_tomogram_config(
-        project="apoferritin", job_id="J005", job_base_dir=str(tmp_path)
+        project="apoferritin", job_id="J005", output_dir=str(tmp_path)
     )
     assert tomogram_output_path(config) == str(
         tmp_path / "apoferritin" / "tomograms" / "J005" / "tomogram.mrc"
@@ -403,7 +403,7 @@ def test_run_tilt_series_chained_tomogram_config_creates_two_separate_jobs(
         scattering_model="ctf",
         device="cpu",
         project="apoferritin",
-        job_base_dir=str(tmp_path),
+        output_dir=str(tmp_path),
     )
     run_tilt_series(config, tomogram_config=tomogram_config)
 
@@ -428,7 +428,7 @@ def test_run_tilt_series_chained_tomogram_config_respects_explicit_tracking(
     override it -- e.g. reusing one tracked tomogram build across several
     tiltseries runs in a different project."""
     tomogram_config = _minimal_tomogram_config(
-        project="shared-tomograms", job_base_dir=str(tmp_path)
+        project="shared-tomograms", output_dir=str(tmp_path)
     )
     config = TiltSeriesConfig(
         voxel_size=12.0,
@@ -443,7 +443,7 @@ def test_run_tilt_series_chained_tomogram_config_respects_explicit_tracking(
         scattering_model="ctf",
         device="cpu",
         project="this-run",
-        job_base_dir=str(tmp_path),
+        output_dir=str(tmp_path),
     )
     run_tilt_series(config, tomogram_config=tomogram_config)
 

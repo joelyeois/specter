@@ -419,3 +419,9 @@ def test_monomer_library_path_expands_and_reports_clearly(tmp_path, monkeypatch)
     monkeypatch.setenv("CLIBD_MON", str(tmp_path / "gone"))
     with pytest.raises(FileNotFoundError, match=r"\$CLIBD_MON"):
         PDB._build_typed_model(str(_FIXTURE), None, False)
+
+
+def test_missing_path_still_reports_both_accepted_forms(tmp_path: Path) -> None:
+    """A typo'd path must not be silently treated as an accession code."""
+    with pytest.raises(ValueError, match="4-character PDB ID or a valid file path"):
+        PDB(str(tmp_path / "does_not_exist.cif"), verbose=False)

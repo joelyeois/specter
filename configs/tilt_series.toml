@@ -53,7 +53,7 @@ aberration_model = "holography"    # holography | ctf
 noise_model = "poisson"            # poisson | none
 coincidence_radius = 0.0           # pixels; 0 = plain Poisson, no coincidence loss
 ice_model = "gd"                   # gd | random | none
-# ice_cache_dir = "specter-data/ice"   # defaults to the cache bundled in the package
+# ice_cache_dir = "ice"   # defaults to the cache bundled in the package
 ice_relax_steps = 0                # local MLBOP seam-relaxation steps for ice_model="gd"
 pad_fft = false
 detector_model = "none"            # none | perfect | k3_300kv | k3_200kv
@@ -66,17 +66,18 @@ save_exitwaves = false
 device = "cpu"                     # cpu | cuda | cuda:0
 
 [output]
-output_dir = "specter-data/tiltseries"
+output_dir = "tiltseries"
 filename = "tilt_series"
 
 # Job tracking (opt-in) -- set project or job_id to route output through
 # specter.jobs instead of output_dir/filename above: the directory becomes
-# job_base_dir/[project/]tiltseries/J00N/, numbered, with a job.json
+# output_dir/[project/]tiltseries/J00N/, numbered, with a job.json
 # recording every parameter, the git commit and the run's status. Neither
 # is required -- leaving both unset keeps the flat behavior above exactly.
 [job]
 # project = "my-project"
 # job_id = "J001"
-# job_base_dir = "specter-data"   # defaults to the project root found by
-                                 # walking up from cwd for an existing
-                                 # specter-data/, like git finds .git
+# Tracked runs read output_dir above as the ROOT of the numbered tree
+# rather than as the folder files land in directly. Leave output_dir
+# unset to default that root to the project root found by walking up
+# from cwd for an existing .specter marker, like git finds .git.

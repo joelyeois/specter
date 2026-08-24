@@ -285,10 +285,26 @@ longer electron counts.
 
 ## Files and output
 
-Everything `specter` writes lands under `./specter-data/`, resolved
-relative to the current working directory, in per-artifact subdirectories
-(`pdb`, `particles`, `micrographs`, `tiltseries`, `tomograms`, `ice`).
-See [Configure a run](../user-guide/configuration.md).
+Results are written into per-artifact directories at the top of the working
+directory (`particles`, `micrographs`, `tiltseries`, `tomograms`, `ice`,
+`reconstructions`), resolved relative to the current working directory.
+A run that opts into job tracking instead writes into a numbered job
+directory, `[<project>/]<artifact>/J00N/`. Both are controlled by the one
+`output_dir` field. See [Configure a run](../user-guide/configuration.md).
+
+A `.specter` file marks the root of a project. It is created the first time
+a tracked run needs one, and is located by walking up from the current
+directory the way `git` locates the nearest `.git`, so running from a
+subdirectory continues that project's job numbering rather than starting a
+second, disconnected sequence.
+
+Structures fetched by accession code are cached outside the project, at
+`$SPECTER_PDB_CACHE`, else `$XDG_CACHE_HOME/specter/pdb`, else
+`~/.cache/specter/pdb`, following the convention `torch.hub` and HuggingFace
+use for the same purpose. One download is therefore shared by every project.
+A structure supplied by path is read where it lies and is never copied into
+the cache, which is what makes `specter cache clean` safe: the cache holds
+only files that can be fetched again.
 
 Particle stacks, micrographs, and tilt series are written as float32
 `.mrcs` paired with a `.star` file. **The pixel size is recorded in the

@@ -14,9 +14,10 @@ from ._particle import PARTICLE_STACK_HELP, ParticleStackConfig
 from ._paths import (
     PDB_CACHE_ENV_VAR,
     REPO_ROOT,
-    SPECTER_DATA_DIR,
+    PROJECT_MARKER,
     default_output_dir,
     default_pdb_cache_dir,
+    ensure_project_root,
     find_specter_project_root,
 )
 from ._reconstruction import (
@@ -38,7 +39,7 @@ __all__ = [
     "RECONSTRUCTION_HELP",
     "RENAMED_CONFIG_KEYS",
     "REPO_ROOT",
-    "SPECTER_DATA_DIR",
+    "PROJECT_MARKER",
     "TILT_SERIES_HELP",
     "TOMOGRAM_HELP",
     "ConfigT",
@@ -53,6 +54,7 @@ __all__ = [
     "cryosparc_ref_for_halfset",
     "default_output_dir",
     "default_pdb_cache_dir",
+    "ensure_project_root",
     "find_specter_project_root",
     "load_config",
     "parse_cryosparc_ref",

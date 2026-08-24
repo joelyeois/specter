@@ -679,7 +679,7 @@ def test_pipelines_do_not_leak_the_session_base_dir(tmp_path, monkeypatch):
     class _Config:
         project: str = "leak-check"
         job_id: str | None = None
-        job_base_dir: str = str(tmp_path)
+        output_dir: str = str(tmp_path)
         output_dir: str = str(tmp_path / "unused")
 
     with _tracked_output_dir(_Config(), "particles") as run_dir:

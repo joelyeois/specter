@@ -104,7 +104,7 @@ specter simulate particles \
     --pdb_code 6bdf \
     --n_particles 200 \
     --device cuda:0 \
-    --output_dir specter-data/particles
+    --output_dir particles
 ```
 
 <details>

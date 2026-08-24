@@ -18,8 +18,9 @@ from rich.console import Console
 from rich.rule import Rule
 
 from specter.config import (
-    SPECTER_DATA_DIR,
     ScalarOrRange,
+    default_output_dir,
+    ensure_project_root,
     find_specter_project_root,
     parse_scalar_or_range,
 )
@@ -27,12 +28,72 @@ from specter.config import (
 _console = Console()
 
 
+def is_tracked(config: Any) -> bool:
+    """Whether a config opts into `specter.jobs` tracking (`project` or `job_id` set)."""
+    return config.project is not None or config.job_id is not None
+
+
+def resolve_output_dir(config: Any, job_type: str, *, create: bool = False) -> str:
+    """
+    Resolve ``config.output_dir`` -- the single directory a run writes under.
+
+    There is one output path field, not one per layout, so that a user has
+    exactly one folder to point specter at. What that folder *means* follows
+    from whether the run is tracked, which the user has already decided by
+    setting (or not setting) ``project``/``job_id``:
+
+    ==========  =================  =================
+    output_dir  untracked          tracked
+    ==========  =================  =================
+    unset       ``<job_type>/``    ``<project root>``
+    set         used verbatim      the job tree's root
+    ==========  =================  =================
+
+    Untracked, it is the leaf directory the files land in. Tracked, it is
+    the root a ``[project/]<job_type>/J00N/`` tree grows under, so turning
+    on ``--project`` organises output *within* the folder the user chose
+    rather than relocating it somewhere else.
+
+    The unset defaults differ because the tracked layout supplies its own
+    ``<job_type>`` segment: defaulting both to ``<job_type>/`` would yield
+    ``tomograms/tomograms/J001``. This is also why ``output_dir`` defaults
+    to ``None`` on every config rather than to a baked-in string -- the
+    default is not knowable until tracking is.
+
+    Parameters
+    ----------
+    config : Any
+        A pipeline config with ``output_dir``/``project``/``job_id`` fields.
+    job_type : str
+        Job-type folder name, e.g. ``"tomograms"``. Doubles as the artifact
+        name in the untracked default, which is why the two vocabularies
+        are deliberately the same.
+    create : bool, optional
+        Whether a missing project marker may be created (prompting at a
+        terminal). Default ``False`` keeps this function pure, which is
+        what lets a non-main DDP rank call it to agree on a path without
+        racing its siblings. Only the one process that owns the run passes
+        ``True`` -- see `_tracked_output_dir`.
+
+    Returns
+    -------
+    str
+        The untracked output directory, or the root of the tracked job tree.
+    """
+    if config.output_dir is not None:
+        return str(config.output_dir)
+    if is_tracked(config):
+        root = ensure_project_root() if create else find_specter_project_root()
+        return str(root)
+    return default_output_dir(job_type)
+
+
 def _deterministic_tracked_path(config: Any, job_type: str) -> str:
     """
     Compute a tracked job's directory as a pure string join -- no
     filesystem access, no `specter.jobs.Job` involved.
 
-    ``job_base_dir/[project/]job_type/job_id``, matching exactly what
+    ``output_dir/[project/]job_type/job_id``, matching exactly what
     `specter.jobs.Job` itself would resolve to. Requires ``config.job_id``
     to already be set (see `_tracked_output_dir`'s docstring for why: this
     exists specifically for callers -- a non-main DDP rank, or a pipeline
@@ -43,7 +104,7 @@ def _deterministic_tracked_path(config: Any, job_type: str) -> str:
     Parameters
     ----------
     config : Any
-        A pipeline config with ``project``/``job_id``/``job_base_dir``
+        A pipeline config with ``output_dir``/``project``/``job_id``
         fields, ``job_id`` set.
     job_type : str
         Job-type folder name, e.g. ``"tomograms"``.
@@ -53,15 +114,14 @@ def _deterministic_tracked_path(config: Any, job_type: str) -> str:
     str
         The directory a `Job` with this config would resolve to.
     """
-    root = config.job_base_dir or str(find_specter_project_root() / SPECTER_DATA_DIR)
-    parts = [root]
+    parts = [resolve_output_dir(config, job_type)]
     if config.project is not None:
         parts.append(config.project)
     parts.extend([job_type, config.job_id])
     return os.path.join(*parts)
 
 
-def _reserve_next_job_id(project: str | None, job_base_dir: str) -> str:
+def _reserve_next_job_id(project: str | None, base_dir: str) -> str:
     """
     Compute (but don't create) the next free job id for a project -- the
     same read-only scan `specter.jobs.Job` itself does when auto-numbering.
@@ -79,8 +139,9 @@ def _reserve_next_job_id(project: str | None, job_base_dir: str) -> str:
     ----------
     project : str, optional
         Project name, or ``None`` for the implicit default project.
-    job_base_dir : str
-        Root directory jobs are created under.
+    base_dir : str
+        Root directory jobs are created under, i.e. a resolved
+        ``output_dir`` (see `resolve_output_dir`).
 
     Returns
     -------
@@ -91,9 +152,7 @@ def _reserve_next_job_id(project: str | None, job_base_dir: str) -> str:
 
     from specter.jobs._job import _next_job_id
 
-    project_dir = (
-        Path(job_base_dir) if project is None else Path(job_base_dir) / project
-    )
+    project_dir = Path(base_dir) if project is None else Path(base_dir) / project
     return _next_job_id(project_dir)
 
 
@@ -106,9 +165,13 @@ def _tracked_output_dir(
     caller opted in via ``project`` or ``job_id``.
 
     Untracked (the default -- ``project`` and ``job_id`` both unset):
-    yields ``config.output_dir`` unchanged, no `specter.jobs.Job` involved.
+    yields ``config.output_dir`` itself, no `specter.jobs.Job` involved.
 
-    Tracked: yields the job directory (``job_base_dir/[project/]job_type/J0NN``).
+    Tracked: yields the job directory, ``output_dir/[project/]job_type/J0NN``
+    -- the same ``output_dir`` the untracked case writes straight into,
+    now read as the root of a numbered tree rather than as the leaf. See
+    `resolve_output_dir` for the full table, including what each case
+    falls back to when ``output_dir`` is unset.
     Only ``is_main`` actually opens the `Job` -- creating the directory,
     writing ``job.json``, recording status on exit. Multi-GPU DDP dispatch
     re-executes a pipeline's whole top-level code once per rank (see
@@ -124,9 +187,9 @@ def _tracked_output_dir(
     Parameters
     ----------
     config : Any
-        A pipeline config with ``output_dir``/``project``/``job_id``/
-        ``job_base_dir`` fields (``ParticleStackConfig``,
-        ``MicrographConfig``, or ``TiltSeriesConfig``).
+        A pipeline config with ``output_dir``/``project``/``job_id``
+        fields (``ParticleStackConfig``, ``MicrographConfig``, or
+        ``TiltSeriesConfig``).
     job_type : str
         Job-type folder name, e.g. ``"particles"`` -- matches the artifact
         vocabulary `default_output_dir` already uses.
@@ -140,8 +203,8 @@ def _tracked_output_dir(
     str
         The directory to write output into.
     """
-    if config.project is None and config.job_id is None:
-        yield config.output_dir
+    if not is_tracked(config):
+        yield resolve_output_dir(config, job_type)
         return
 
     if not is_main:
@@ -152,7 +215,10 @@ def _tracked_output_dir(
 
     import specter.jobs as jobs
 
-    root = config.job_base_dir or str(find_specter_project_root() / SPECTER_DATA_DIR)
+    # This branch owns the run (is_main), so it is the one place allowed
+    # to create a missing project marker -- see resolve_output_dir's
+    # `create` argument for why non-main ranks must not.
+    root = resolve_output_dir(config, job_type, create=True)
     # Passed rather than set via jobs.base_directory(): that writes a
     # process-global which nothing here restores, so every later bare Job()
     # in the same interpreter -- a notebook, a second pipeline, the next test

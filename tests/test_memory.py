@@ -109,14 +109,16 @@ def test_resolve_batchsize_passes_ints_through() -> None:
 
 
 def test_particle_stack_config_defaults_to_auto() -> None:
-    assert ParticleStackConfig(pdb_code="6bdf").batchsize == "auto"
+    assert ParticleStackConfig(pdb_source="6bdf").batchsize == "auto"
 
 
 def test_config_batchsize_accepts_auto_and_int(tmp_path: Path) -> None:
     path = tmp_path / "config.toml"
-    path.write_text('[potential]\npdb_code = "6bdf"\n\n[compute]\nbatchsize = "auto"\n')
+    path.write_text(
+        '[potential]\npdb_source = "6bdf"\n\n[compute]\nbatchsize = "auto"\n'
+    )
     assert load_config(str(path)).batchsize == "auto"
-    path.write_text('[potential]\npdb_code = "6bdf"\n\n[compute]\nbatchsize = 3\n')
+    path.write_text('[potential]\npdb_source = "6bdf"\n\n[compute]\nbatchsize = 3\n')
     assert load_config(str(path)).batchsize == 3
 
 

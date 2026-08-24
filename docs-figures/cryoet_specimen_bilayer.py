@@ -31,7 +31,7 @@ from specter.specimen.membrane._profile import (
 from specter.specimen.membrane._raster import rasterize_membrane_density
 
 OUT_DIR = "docs/assets/images"
-PDB_CACHE = "specter-data/pdb"
+PDB_CACHE = "~/.cache/specter/pdb"
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 SEED = 5
 ORANGE = "#d98218"

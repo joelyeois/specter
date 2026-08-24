@@ -77,7 +77,7 @@ class ReconstructionConfig:
 
     # --- Output & job tracking ---
     # Every run is numbered and routed through `specter.jobs`: the directory
-    # becomes job_base_dir/[project/]reconstructions/<job_id>/, numbered
+    # becomes output_dir/[project/]reconstructions/<job_id>/, numbered
     # J001, J002, ... (shared across every job type in the project, not just
     # reconstructions), with a job.json recording the full parameter set,
     # git commit and status. That is what makes two halfset runs (halfset
@@ -86,9 +86,9 @@ class ReconstructionConfig:
     #
     # `project` is optional, not required: leaving it unset doesn't mean
     # "untracked" -- it drops just the project-name segment
-    # (job_base_dir/reconstructions/<job_id>/), the implicit default project
-    # for whatever job_base_dir resolves to. Pass `--project` to split one
-    # job_base_dir into several named projects, e.g. one shared scratch
+    # (output_dir/reconstructions/<job_id>/), the implicit default project
+    # for whatever output_dir resolves to. Pass `--project` to split one
+    # output_dir into several named projects, e.g. one shared scratch
     # directory used across unrelated structures.
     project: str | None = None
     job_id: str | None = None
@@ -100,7 +100,7 @@ class ReconstructionConfig:
     # rather than starting a second, disconnected specter-data/ tree (and
     # job numbering restarting from J001) right where you happened to be
     # standing.
-    job_base_dir: str | None = None
+    output_dir: str | None = None
 
     # --- Reference maps (FSC logging only, never optimised against) ---
     fsc_ref: str | None = None
@@ -218,17 +218,18 @@ RECONSTRUCTION_HELP: dict[str, str] = {
     "project": "Name for a group of jobs, e.g. one structure's worth of "
     "runs. Optional: omitting it doesn't mean untracked -- every run is "
     "numbered and gets a job.json regardless -- it just drops the "
-    "project-name segment, using job_base_dir's implicit default project "
-    "instead of a named one. Pass this to split one job_base_dir into "
+    "project-name segment, using output_dir's implicit default project "
+    "instead of a named one. Pass this to split one output_dir into "
     "several, e.g. one shared scratch directory used across structures.",
     "job_id": "Pin the job directory (e.g. J001) rather than auto-assigning "
     "the next one: resumes into it if it exists, creates it otherwise. This "
     "is how two halfset runs share one job.",
-    "job_base_dir": "Root directory for job folders. Defaults to the "
-    "project root found by walking up from cwd looking for an existing "
-    "specter-data/, the same way git finds the nearest .git -- so running "
-    "from a subdirectory of an already-initialised project lands in the "
-    "same project.",
+    "output_dir": "The one directory this run writes under. Every reconstruction is tracked, so this is always the root of the numbered "
+    "job tree ([<project>/]reconstructions/J00N/), never the leaf the "
+    "files land in directly. Defaults to the project root found by "
+    "walking up from cwd looking for an existing specter-data/, the same "
+    "way git finds the nearest .git -- so running from a subdirectory of "
+    "an already-initialised project lands in the same project.",
 }
 
 

@@ -7,6 +7,7 @@ import rich_click as click
 from specter.jobs._cli import build_jobs_group
 
 from .build import build_build_group
+from .cache import build_cache_group
 from .reconstruct import build_reconstruct_group
 from .simulate import CONTEXT_SETTINGS, build_simulate_group
 
@@ -25,6 +26,7 @@ cli.add_command(build_reconstruct_group())
 # rather than a `ghostbuster` console script of its own.
 cli.add_command(build_reconstruct_group(name="ghostbuster"))
 cli.add_command(build_jobs_group())
+cli.add_command(build_cache_group())
 
 
 def main() -> None:

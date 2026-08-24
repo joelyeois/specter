@@ -1,5 +1,15 @@
-# Everything specter writes into a working directory lives here
-# (leading slash anchors it to the repo root)
+# What specter writes into a working directory (leading slash anchors
+# each to the repo root, so e.g. /particles/ doesn't also match
+# src/specter/particles/). The project marker is tracked deliberately:
+# it is what makes this checkout a specter project.
+/particles/
+/micrographs/
+/tiltseries/
+/tomograms/
+/ice/
+/reconstructions/
+# Pre-2026-08-24 layout. Nothing writes here any more, but existing
+# checkouts still have one and it should stay out of `git status`.
 /specter-data/
 pdb-data/
 cache/

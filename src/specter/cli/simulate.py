@@ -33,7 +33,7 @@ CONTEXT_SETTINGS = {"help_option_names": ["-h", "--help"]}
 _PARTICLE_STACK_GROUPS: list[tuple[str, list[str]]] = [
     (
         "Structure & Potential",
-        ["pdb_code", "assembly", "n_pixels", "pixel_size"],
+        ["pdb_source", "assembly", "n_pixels", "pixel_size"],
     ),
     (
         "Microscope",
@@ -52,8 +52,13 @@ _PARTICLE_STACK_GROUPS: list[tuple[str, list[str]]] = [
         ["normalize_particles", "save_exitwaves", "save_clean_exitwaves"],
     ),
     ("Compute", ["device", "batchsize"]),
-    ("Output", ["output_dir", "filename"]),
-    ("Job tracking", ["project", "job_id", "job_base_dir"]),
+    # One panel, not two: --output_dir and the tracking flags are alternative
+    # answers to the same question, and split across separate panels nothing
+    # showed that setting the latter makes the former a no-op.
+    (
+        "Output & job tracking",
+        ["output_dir", "filename", "project", "job_id"],
+    ),
     (
         "Advanced",
         [
@@ -142,8 +147,10 @@ _TILT_SERIES_GROUPS: list[tuple[str, list[str]]] = [
         ["normalize_tilt_series", "save_exitwaves"],
     ),
     ("Compute", ["device"]),
-    ("Output", ["output_dir", "filename"]),
-    ("Job tracking", ["project", "job_id", "job_base_dir"]),
+    (
+        "Output & job tracking",
+        ["output_dir", "filename", "project", "job_id"],
+    ),
     (
         "Advanced",
         [
@@ -170,7 +177,7 @@ _TILT_SERIES_GROUPS: list[tuple[str, list[str]]] = [
 _MICROGRAPH_GROUPS: list[tuple[str, list[str]]] = [
     (
         "Specimen",
-        ["pdb_code", "assembly", "n_pixels", "pixel_size", "micrograph_size"],
+        ["pdb_source", "assembly", "n_pixels", "pixel_size", "micrograph_size"],
     ),
     (
         "Microscope",
@@ -187,8 +194,10 @@ _MICROGRAPH_GROUPS: list[tuple[str, list[str]]] = [
         ["normalize_micrographs", "save_exitwaves", "save_clean_exitwaves"],
     ),
     ("Compute", ["device"]),
-    ("Output", ["output_dir", "filename"]),
-    ("Job tracking", ["project", "job_id", "job_base_dir"]),
+    (
+        "Output & job tracking",
+        ["output_dir", "filename", "project", "job_id"],
+    ),
     (
         "Advanced",
         [

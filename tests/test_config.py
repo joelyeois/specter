@@ -14,6 +14,8 @@ from specter.config import (
     TiltSeriesConfig,
     TomogramConfig,
     apply_overrides,
+    PROJECT_MARKER,
+    ensure_project_root,
     find_specter_project_root,
     load_config,
     validate_config,
@@ -32,7 +34,7 @@ def test_load_config_flattens_tables(tmp_path: Path) -> None:
         tmp_path,
         """
         [potential]
-        pdb_code = "6bdf"
+        pdb_source = "6bdf"
         n_pixels = 128
 
         [microscope]
@@ -40,13 +42,13 @@ def test_load_config_flattens_tables(tmp_path: Path) -> None:
         """,
     )
     config = load_config(path)
-    assert config.pdb_code == "6bdf"
+    assert config.pdb_source == "6bdf"
     assert config.n_pixels == 128
     assert config.voltage == 200.0
 
 
 def test_load_config_fills_defaults_for_missing_fields(tmp_path: Path) -> None:
-    path = _write_toml(tmp_path, '[potential]\npdb_code = "6bdf"\n')
+    path = _write_toml(tmp_path, '[potential]\npdb_source = "6bdf"\n')
     config = load_config(path)
     assert config.n_pixels == 256
     assert config.pixel_size == 1.0
@@ -79,7 +81,7 @@ def test_load_config_scalar_or_range_fields_accept_numeric_toml(
         tmp_path,
         """
         [potential]
-        pdb_code = "6bdf"
+        pdb_source = "6bdf"
 
         [microscope]
         dose = 40
@@ -101,7 +103,7 @@ def test_load_config_scalar_or_range_fields_still_accept_legacy_strings(
         tmp_path,
         """
         [potential]
-        pdb_code = "6bdf"
+        pdb_source = "6bdf"
 
         [microscope]
         dose = "40"
@@ -120,36 +122,41 @@ def test_load_config_keeps_relative_pdb_cache_dir_verbatim(
 ) -> None:
     """A path the user wrote is theirs -- resolved against cwd, not rewritten."""
     path = _write_toml(
-        tmp_path, '[potential]\npdb_code = "6bdf"\npdb_cache_dir = "my-cache"\n'
+        tmp_path, '[potential]\npdb_source = "6bdf"\npdb_cache_dir = "my-cache"\n'
     )
     config = load_config(path)
     assert config.pdb_cache_dir == "my-cache"
 
 
-def test_omitted_paths_default_under_one_specter_data_dir() -> None:
-    """One rule: everything specter writes lands under ./specter-data/.
+def test_results_are_cwd_relative_and_the_cache_is_not() -> None:
+    """Results are project-local; the download cache deliberately is not.
 
-    Both defaults are relative, so neither depends on REPO_ROOT -- which
-    only resolves to the repo for an editable install and would point
-    inside the virtualenv for a wheel install.
+    The output default stays relative so it never depends on REPO_ROOT,
+    which only resolves to the repo for an editable install and would
+    point inside the virtualenv for a wheel install. The structure cache
+    is the opposite case: an absolute user-level path, so one download is
+    shared by every project instead of re-fetched per working directory.
     """
-    config = ParticleStackConfig(pdb_code="6bdf")
-    assert config.pdb_cache_dir == os.path.join("specter-data", "pdb")
-    assert config.output_dir == os.path.join("specter-data", "particles")
-    assert not os.path.isabs(config.pdb_cache_dir)
-    assert not os.path.isabs(config.output_dir)
+    from specter.pipelines._common import resolve_output_dir
+
+    config = ParticleStackConfig(pdb_source="6bdf")
+    output_dir = resolve_output_dir(config, "particles")
+    assert output_dir == "particles"
+    assert not os.path.isabs(output_dir)
+    assert os.path.isabs(config.pdb_cache_dir)
+    assert config.pdb_cache_dir.endswith(os.path.join("specter", "pdb"))
 
 
 def test_find_specter_project_root_uses_cwd_when_nothing_found(tmp_path: Path) -> None:
-    """A fresh directory with no specter-data/ anywhere above it becomes the
-    root of a new one -- like `git init` creating a fresh repo at cwd."""
+    """A fresh directory with no .specter anywhere above it becomes the
+    root of a new project -- like `git init` creating a repo at cwd."""
     fresh = tmp_path / "fresh"
     fresh.mkdir()
     assert find_specter_project_root(fresh) == fresh.resolve()
 
 
-def test_find_specter_project_root_finds_specter_data_at_start(tmp_path: Path) -> None:
-    (tmp_path / "specter-data").mkdir()
+def test_find_specter_project_root_finds_marker_at_start(tmp_path: Path) -> None:
+    (tmp_path / ".specter").touch()
     assert find_specter_project_root(tmp_path) == tmp_path.resolve()
 
 
@@ -157,58 +164,127 @@ def test_find_specter_project_root_walks_up_from_subdirectory(tmp_path: Path) ->
     """Running from inside an already-initialised project's subdirectory
     still resolves to the project root, not a stray new tree -- the whole
     point of the git-style search."""
-    (tmp_path / "specter-data").mkdir()
+    (tmp_path / ".specter").touch()
     subdir = tmp_path / "notebooks" / "nested"
     subdir.mkdir(parents=True)
     assert find_specter_project_root(subdir) == tmp_path.resolve()
 
 
 def test_find_specter_project_root_prefers_nearest_ancestor(tmp_path: Path) -> None:
-    """Two specter-data/ trees, one nested inside the other's subtree --
-    the nearer one wins, since that's the one actually enclosing cwd."""
-    (tmp_path / "specter-data").mkdir()
+    """Two marked projects, one nested inside the other's subtree -- the
+    nearer one wins, since that's the one actually enclosing cwd."""
+    (tmp_path / ".specter").touch()
     inner = tmp_path / "other-project"
-    (inner / "specter-data").mkdir(parents=True)
+    inner.mkdir(parents=True)
+    (inner / ".specter").touch()
     assert find_specter_project_root(inner) == inner.resolve()
 
 
 def test_find_specter_project_root_defaults_to_cwd(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    (tmp_path / "specter-data").mkdir()
+    (tmp_path / ".specter").touch()
     monkeypatch.chdir(tmp_path)
     assert find_specter_project_root() == tmp_path.resolve()
 
 
 def test_each_config_outputs_to_its_own_artifact_folder() -> None:
     """Folder name says what is inside, so two commands run in the same
-    working directory don't pile results into a shared `output/`."""
-    assert ParticleStackConfig(pdb_code="6bdf").output_dir == os.path.join(
-        "specter-data", "particles"
+    working directory don't pile results into a shared `output/`.
+
+    Asserted through `resolve_output_dir` rather than off the field: the
+    default is deliberately `None` on the dataclass, because which default
+    applies depends on whether the run is tracked.
+    """
+    from specter.pipelines._common import resolve_output_dir
+
+    for config, artifact in (
+        (ParticleStackConfig(pdb_source="6bdf"), "particles"),
+        (MicrographConfig(pdb_source="6bdf"), "micrographs"),
+        (TiltSeriesConfig(), "tiltseries"),
+        (TomogramConfig(), "tomograms"),
+    ):
+        assert config.output_dir is None
+        assert resolve_output_dir(config, artifact) == artifact
+
+
+def test_ensure_project_root_creates_the_marker_non_interactively(
+    tmp_path: Path,
+) -> None:
+    """A batch job or CI run must never block on a confirmation prompt."""
+    root = ensure_project_root(tmp_path, interactive=False)
+    assert root == tmp_path.resolve()
+    assert (tmp_path / PROJECT_MARKER).is_file()
+
+
+def test_ensure_project_root_reuses_an_ancestor_marker(tmp_path: Path) -> None:
+    """Running from a subdirectory joins the existing project rather than
+    marking a second root inside it -- what keeps job numbering continuous."""
+    (tmp_path / PROJECT_MARKER).touch()
+    subdir = tmp_path / "analysis" / "run3"
+    subdir.mkdir(parents=True)
+
+    assert ensure_project_root(subdir, interactive=False) == tmp_path.resolve()
+    assert not (subdir / PROJECT_MARKER).exists()
+
+
+def test_ensure_project_root_declined_raises_rather_than_writing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Answering "no" must not then write the job tree into that directory."""
+    monkeypatch.setattr("builtins.input", lambda _prompt: "n")
+    with pytest.raises(SystemExit):
+        ensure_project_root(tmp_path, interactive=True)
+    assert not (tmp_path / PROJECT_MARKER).exists()
+
+
+def test_find_specter_project_root_never_creates_a_marker(tmp_path: Path) -> None:
+    """The pure lookup is what non-main DDP ranks call, so it must not
+    race its siblings by creating anything."""
+    assert find_specter_project_root(tmp_path) == tmp_path.resolve()
+    assert not (tmp_path / PROJECT_MARKER).exists()
+
+
+def test_pdb_cache_follows_xdg_cache_home(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Honouring XDG is what lets an HPC user move the cache onto scratch
+    for every XDG-aware tool at once, instead of per-tool."""
+    from specter.config import default_pdb_cache_dir
+
+    monkeypatch.delenv(PDB_CACHE_ENV_VAR, raising=False)
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "scratch-cache"))
+    assert default_pdb_cache_dir() == str(
+        tmp_path / "scratch-cache" / "specter" / "pdb"
     )
-    assert MicrographConfig(pdb_code="6bdf").output_dir == os.path.join(
-        "specter-data", "micrographs"
-    )
-    assert TiltSeriesConfig().output_dir == os.path.join("specter-data", "tiltseries")
-    assert TomogramConfig().output_dir == os.path.join("specter-data", "tomograms")
+
+
+def test_specter_pdb_cache_beats_xdg(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "xdg"))
+    monkeypatch.setenv(PDB_CACHE_ENV_VAR, str(tmp_path / "explicit"))
+    from specter.config import default_pdb_cache_dir
+
+    assert default_pdb_cache_dir() == str(tmp_path / "explicit")
 
 
 def test_pdb_cache_env_var_overrides_default(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv(PDB_CACHE_ENV_VAR, str(tmp_path / "elsewhere"))
-    config = ParticleStackConfig(pdb_code="6bdf")
+    config = ParticleStackConfig(pdb_source="6bdf")
     assert config.pdb_cache_dir == str(tmp_path / "elsewhere")
 
 
 def test_load_config_preserves_absolute_pdb_cache_dir(tmp_path: Path) -> None:
     absolute = str(tmp_path / "cache")
     path = _write_toml(
-        tmp_path, f'[potential]\npdb_code = "6bdf"\npdb_cache_dir = "{absolute}"\n'
+        tmp_path, f'[potential]\npdb_source = "6bdf"\npdb_cache_dir = "{absolute}"\n'
     )
     config = load_config(path)
     assert config.pdb_cache_dir == absolute
 
 
-def test_particle_stack_config_requires_pdb_code() -> None:
+def test_particle_stack_config_requires_pdb_source() -> None:
     import pytest
 
     with pytest.raises(TypeError):
@@ -216,7 +292,7 @@ def test_particle_stack_config_requires_pdb_code() -> None:
 
 
 def test_apply_overrides_sets_fields() -> None:
-    config = ParticleStackConfig(pdb_code="6bdf")
+    config = ParticleStackConfig(pdb_source="6bdf")
     result = apply_overrides(config, {"n_particles": 500, "device": "cuda:0"})
     assert result is config
     assert config.n_particles == 500
@@ -224,7 +300,7 @@ def test_apply_overrides_sets_fields() -> None:
 
 
 def test_apply_overrides_with_empty_dict_is_noop() -> None:
-    config = ParticleStackConfig(pdb_code="6bdf")
+    config = ParticleStackConfig(pdb_source="6bdf")
     apply_overrides(config, {})
     assert config.n_particles == 20  # dataclass default, untouched
 
@@ -232,7 +308,7 @@ def test_apply_overrides_with_empty_dict_is_noop() -> None:
 def test_particle_toml_loads_and_matches_expected_values() -> None:
     path = str(REPO_ROOT / "configs" / "particle.toml")
     config = load_config(path)
-    assert config.pdb_code == "6bdf"
+    assert config.pdb_source == "6bdf"
     assert config.n_pixels == 256
     assert config.pixel_size == 1.0
     assert config.scattering_model == "multislice"
@@ -244,7 +320,7 @@ def test_particle_stack_config_advanced_field_defaults() -> None:
     today's previously-hardcoded behavior (ice_parameterization is None, which
     resolves to potential_parameterization -- see
     test_ice_parameterization_defaults_to_following_the_structure)."""
-    config = ParticleStackConfig(pdb_code="6bdf")
+    config = ParticleStackConfig(pdb_source="6bdf")
     assert config.potential_parameterization == "shtyrov"
     assert config.potential_method == "analytic"
     assert config.rcut is None
@@ -280,7 +356,7 @@ def test_particle_stack_config_advanced_field_defaults() -> None:
 
 
 def test_particle_stack_config_falcon4i_is_valid_detector_model() -> None:
-    config = ParticleStackConfig(pdb_code="6bdf", detector_model="falcon4i_300kv")
+    config = ParticleStackConfig(pdb_source="6bdf", detector_model="falcon4i_300kv")
     assert config.detector_model == "falcon4i_300kv"
 
 
@@ -377,7 +453,7 @@ def test_load_config_names_unknown_fields_and_renames(tmp_path):
 
 def test_apply_overrides_rejects_unknown_field() -> None:
     """A misnamed override must fail loudly, not attach a field nothing reads."""
-    config = ParticleStackConfig(pdb_code="1abc")
+    config = ParticleStackConfig(pdb_source="1abc")
     with pytest.raises(ValueError, match="no such field"):
         apply_overrides(config, {"deltav_v": 1e-5})
 
@@ -412,7 +488,7 @@ def test_ice_parameterization_defaults_to_following_the_structure() -> None:
     in kirkland ice is a choice worth making deliberately rather than
     inheriting from two independent defaults.
     """
-    config = ParticleStackConfig(pdb_code="1abc")
+    config = ParticleStackConfig(pdb_source="1abc")
     assert config.ice_parameterization is None
 
     for parameterization in ("shtyrov", "kirkland", "lobato"):
@@ -463,7 +539,7 @@ def test_shipped_particle_config_leaves_ice_parameterization_unset() -> None:
     ],
 )
 def test_validate_rejects_impossible_values(field: str, value: object) -> None:
-    config = ParticleStackConfig(pdb_code="6bdf")
+    config = ParticleStackConfig(pdb_source="6bdf")
     setattr(config, field, value)
     with pytest.raises(ValueError, match=field):
         validate_config(config)
@@ -473,7 +549,7 @@ def test_validate_rejects_impossible_values(field: str, value: object) -> None:
 def test_validate_rejects_reversed_ranges(field: str, value: str) -> None:
     """`--dose 60,20` sampled between 60 and 20, silently giving nothing like
     the intended range."""
-    config = ParticleStackConfig(pdb_code="6bdf")
+    config = ParticleStackConfig(pdb_source="6bdf")
     setattr(config, field, value)
     with pytest.raises(ValueError, match="reversed"):
         validate_config(config)
@@ -490,7 +566,7 @@ def test_validate_rejects_invalid_literal_from_toml(tmp_path: Path) -> None:
         tmp_path,
         """
         [models]
-        pdb_code = "6bdf"
+        pdb_source = "6bdf"
         scattering_model = "banana"
         """,
     )
@@ -500,7 +576,7 @@ def test_validate_rejects_invalid_literal_from_toml(tmp_path: Path) -> None:
 
 
 def test_validate_rejects_missing_input_files(tmp_path: Path) -> None:
-    config = ParticleStackConfig(pdb_code="6bdf")
+    config = ParticleStackConfig(pdb_source="6bdf")
     config.cs_path = str(tmp_path / "nope.cs")
     with pytest.raises(ValueError, match="cs_path"):
         validate_config(config)
@@ -546,7 +622,7 @@ def test_readd_hydrogens_accepts_auto_and_booleans(tmp_path, written, expected):
 
     cfg_file = tmp_path / "c.toml"
     cfg_file.write_text(
-        f'[potential]\npdb_code = "1a6m"\nreadd_hydrogens = {written}\n'
+        f'[potential]\npdb_source = "1a6m"\nreadd_hydrogens = {written}\n'
     )
     cfg = load_config(str(cfg_file), ParticleStackConfig)
     assert cfg.readd_hydrogens == expected
@@ -580,7 +656,7 @@ def test_hydrogen_settings_reach_pdb(monkeypatch, pipeline):
 
     monkeypatch.setattr(mod, "PDB", _spy)
     cfg = cls(
-        pdb_code=str(
+        pdb_source=str(
             Path(__file__).parent.parent / "specter-data" / "pdb" / "1mbo.cif"
         ),
         readd_hydrogens=False,

@@ -38,7 +38,7 @@ from specter.specimen.packing import estimate_protein_box_size
 from specter.specimen.tomogram import TomogramSpecimenGenerator
 
 OUT_DIR = "docs/assets/images"
-PDB_CACHE = "specter-data/pdb"
+PDB_CACHE = "~/.cache/specter/pdb"
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 SEED = 7
 

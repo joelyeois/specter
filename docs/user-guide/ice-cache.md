@@ -51,12 +51,12 @@ specter build ice --num_configs 8 --n 256 --dx 1.0 --device 0,1,2,3
 ```
 
 This writes `config_000.pt` … `config_007.pt` plus a `manifest.json` into
-`specter-data/ice`. Point a simulation at the result with `ice_cache_dir`:
+`ice`. Point a simulation at the result with `ice_cache_dir`:
 
 ```toml
 [ice]
 ice_model = "gd"
-ice_cache_dir = "specter-data/ice"
+ice_cache_dir = "ice"
 ```
 
 Defaults come from `configs/ice.toml`, and every flag overrides one field of

@@ -16,7 +16,7 @@ def _run_particles_cli(output_dir: Path, n_particles: int = 2) -> proc.Completed
         "specter.cli._cli",
         "simulate",
         "particles",
-        "--pdb_code",
+        "--pdb_source",
         _FIXTURE_PDB,
         "--n_particles",
         str(n_particles),
@@ -52,7 +52,7 @@ def test_cli_particles_help_smoke() -> None:
         encoding="utf-8",
     )
     assert result.returncode == 0
-    assert "--pdb_code" in result.stdout
+    assert "--pdb_source" in result.stdout
     assert "--scattering_model" in result.stdout
 
 
@@ -77,7 +77,7 @@ def test_cli_particles_advanced_flags_reach_the_star_file(tmp_path: Path) -> Non
         "specter.cli._cli",
         "simulate",
         "particles",
-        "--pdb_code",
+        "--pdb_source",
         _FIXTURE_PDB,
         "--n_particles",
         "4",
@@ -123,7 +123,7 @@ def test_cli_particles_falcon4i_detector_model_reachable(tmp_path: Path) -> None
         "specter.cli._cli",
         "simulate",
         "particles",
-        "--pdb_code",
+        "--pdb_source",
         _FIXTURE_PDB,
         "--n_particles",
         "2",
@@ -156,7 +156,7 @@ def _run_micrograph_cli(
         "specter.cli._cli",
         "simulate",
         "micrograph",
-        "--pdb_code",
+        "--pdb_source",
         _FIXTURE_PDB,
         "--n_micrographs",
         str(n_micrographs),
@@ -208,7 +208,7 @@ def test_cli_micrograph_help_smoke() -> None:
         encoding="utf-8",
     )
     assert result.returncode == 0
-    assert "--pdb_code" in result.stdout
+    assert "--pdb_source" in result.stdout
     assert "--micrograph_size" in result.stdout
 
 
@@ -461,7 +461,7 @@ def test_run_micrograph_types_atoms_for_shtyrov(monkeypatch, tmp_path: Path) -> 
     monkeypatch.setattr(micrograph_module, "PotentialBuilder", _spy)
 
     config = MicrographConfig(
-        pdb_code=_FIXTURE_PDB,
+        pdb_source=_FIXTURE_PDB,
         n_pixels=32,
         micrograph_size=64,
         n_micrographs=1,

@@ -23,7 +23,7 @@ this:
 #   specter simulate particles --config configs/particle.toml --n_particles 3000
 
 [potential]
-pdb_code = "6bdf"
+pdb_source = "6bdf"
 assembly = true
 n_pixels = 256
 pixel_size = 1.0              # Å
@@ -43,10 +43,10 @@ editing the file:
 ```bash
 specter simulate particles \
     --config configs/particle.toml \
-    --pdb_code 6bdf \
+    --pdb_source 6bdf \
     --n_particles 200 \
     --device cuda:0 \
-    --output_dir specter-data/particles
+    --output_dir particles
 ```
 
 See [Configure a run](user-guide/configuration.md) for the complete field

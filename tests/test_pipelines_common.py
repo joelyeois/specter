@@ -17,16 +17,46 @@ from pathlib import Path
 import pytest
 
 from specter.jobs import Job
-from specter.pipelines._common import _reserve_next_job_id, _tracked_output_dir
+from specter.pipelines._common import (
+    _reserve_next_job_id,
+    _tracked_output_dir,
+    resolve_output_dir,
+)
 
 
 @dataclasses.dataclass
 class _Config:
-    output_dir: str = "flat/output"
+    output_dir: str | None = None
     project: str | None = None
     job_id: str | None = None
-    job_base_dir: str | None = None
     dummy_field: int = 1
+
+
+def test_resolve_output_dir_set_is_used_verbatim_either_way() -> None:
+    """One field, two readings: the leaf untracked, the job-tree root tracked.
+
+    `resolve_output_dir` returns the path itself in both cases -- it is
+    `_tracked_output_dir`/`Job` that appends `[project/]<job_type>/J00N`
+    on top when tracking is on.
+    """
+    assert resolve_output_dir(_Config(output_dir="chosen"), "particles") == "chosen"
+    tracked = _Config(output_dir="chosen", project="p")
+    assert resolve_output_dir(tracked, "particles") == "chosen"
+
+
+def test_resolve_output_dir_unset_defaults_differ_by_tracking(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Unset, the two cases must NOT share a default.
+
+    The tracked layout supplies its own `<job_type>` segment, so defaulting
+    both to `particles/` would yield `particles/particles/J001`.
+    """
+    (tmp_path / ".specter").touch()
+    monkeypatch.chdir(tmp_path)
+
+    assert resolve_output_dir(_Config(), "particles") == "particles"
+    assert resolve_output_dir(_Config(project="p"), "particles") == str(tmp_path)
 
 
 def test_untracked_yields_output_dir_unchanged(tmp_path: Path) -> None:
@@ -38,7 +68,7 @@ def test_untracked_yields_output_dir_unchanged(tmp_path: Path) -> None:
 
 
 def test_tracked_by_project_opens_a_job(tmp_path: Path) -> None:
-    config = _Config(project="apoferritin", job_base_dir=str(tmp_path))
+    config = _Config(project="apoferritin", output_dir=str(tmp_path))
     with _tracked_output_dir(config, "particles") as output_dir:
         assert output_dir == str(tmp_path / "apoferritin" / "particles" / "J001")
         assert Path(output_dir).is_dir()
@@ -49,20 +79,20 @@ def test_tracked_by_project_opens_a_job(tmp_path: Path) -> None:
 
 def test_tracked_by_job_id_alone_opens_a_job(tmp_path: Path) -> None:
     """project isn't required for tracking to trigger -- job_id alone does too."""
-    config = _Config(job_id="J005", job_base_dir=str(tmp_path))
+    config = _Config(job_id="J005", output_dir=str(tmp_path))
     with _tracked_output_dir(config, "particles") as output_dir:
         assert output_dir == str(tmp_path / "particles" / "J005")
     assert (Path(output_dir) / "job.json").exists()
 
 
-def test_tracked_job_base_dir_defaults_to_project_root(
+def test_tracked_output_dir_defaults_to_project_root(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    (tmp_path / "specter-data").mkdir()
+    (tmp_path / ".specter").touch()
     monkeypatch.chdir(tmp_path)
-    config = _Config(project="p")  # job_base_dir left unset
+    config = _Config(project="p")  # output_dir left unset
     with _tracked_output_dir(config, "particles") as output_dir:
-        assert output_dir == str(tmp_path / "specter-data" / "p" / "particles" / "J001")
+        assert output_dir == str(tmp_path / "p" / "particles" / "J001")
 
 
 def test_not_is_main_computes_same_path_without_touching_filesystem(
@@ -72,7 +102,7 @@ def test_not_is_main_computes_same_path_without_touching_filesystem(
     without creating anything itself -- job_id is required here in real
     pipelines (see validate_config) precisely so this is a pure string
     join, safe to compute redundantly and independently."""
-    config = _Config(project="apoferritin", job_id="J003", job_base_dir=str(tmp_path))
+    config = _Config(project="apoferritin", job_id="J003", output_dir=str(tmp_path))
     with _tracked_output_dir(config, "particles", is_main=True) as main_dir:
         pass
     with _tracked_output_dir(config, "particles", is_main=False) as worker_dir:
@@ -86,7 +116,7 @@ def test_not_is_main_computes_same_path_without_touching_filesystem(
 def test_not_is_main_without_project_computes_job_type_dir_directly(
     tmp_path: Path,
 ) -> None:
-    config = _Config(job_id="J007", job_base_dir=str(tmp_path))
+    config = _Config(job_id="J007", output_dir=str(tmp_path))
     with _tracked_output_dir(config, "particles", is_main=False) as output_dir:
         assert output_dir == str(tmp_path / "particles" / "J007")
     # is_main=False never touches the filesystem at all.
@@ -94,7 +124,7 @@ def test_not_is_main_without_project_computes_job_type_dir_directly(
 
 
 def test_tracked_records_failure_status(tmp_path: Path) -> None:
-    config = _Config(project="p", job_base_dir=str(tmp_path))
+    config = _Config(project="p", output_dir=str(tmp_path))
     with pytest.raises(ValueError, match="boom"):
         with _tracked_output_dir(config, "particles") as output_dir:
             raise ValueError("boom")

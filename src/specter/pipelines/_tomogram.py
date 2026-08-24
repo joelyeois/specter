@@ -61,6 +61,7 @@ from ._common import (
     _format_elapsed,
     _section,
     _tracked_output_dir,
+    resolve_output_dir,
 )
 
 
@@ -69,7 +70,7 @@ def tomogram_output_path(config: TomogramConfig) -> str:
     The ``.mrc`` path `run_build_tomogram` writes for a given config.
 
     Deterministic from ``config.output_dir``/``config.filename`` (or, if
-    tracked, ``job_base_dir``/``project``/``job_id``) alone, so callers
+    tracked, ``output_dir``/``project``/``job_id``) alone, so callers
     that chain straight into `specter simulate tiltseries` (e.g.
     ``run_tilt_series(..., tomogram_config=...)``) can compute it without
     re-deriving the naming convention themselves, or waiting for
@@ -96,7 +97,7 @@ def tomogram_output_path(config: TomogramConfig) -> str:
         before the run happens, e.g. for tomogram_config chaining.
     """
     if config.project is None and config.job_id is None:
-        output_dir = config.output_dir
+        output_dir = resolve_output_dir(config, "tomograms")
     elif config.job_id is None:
         raise ValueError(
             "tomogram_output_path: config.job_id must be pinned explicitly "
@@ -190,7 +191,6 @@ def run_build_tomogram(config: TomogramConfig, n_tomograms: int = 1) -> None:
                 ),
                 project=None,
                 job_id=None,
-                job_base_dir=None,
                 seed=None if config.seed is None else config.seed + i,
             )
             _run_single_tomogram(run_config)
@@ -574,7 +574,12 @@ def _run_single_tomogram(config: TomogramConfig) -> None:
     _section("Saving")
     import mrcfile
 
-    os.makedirs(config.output_dir, exist_ok=True)
+    # run_build_tomogram always hands this function an already-resolved,
+    # untracked config, so this is the plain-string leaf directory rather
+    # than a job-tree root -- but the field is Optional on the dataclass,
+    # so resolve it once here instead of asserting at each use below.
+    output_dir = resolve_output_dir(config, "tomograms")
+    os.makedirs(output_dir, exist_ok=True)
     mrc_path = tomogram_output_path(config)
     with mrcfile.new(mrc_path, overwrite=True) as mrc:
         mrc.set_data(volume.cpu().numpy().astype("float32"))
@@ -583,7 +588,7 @@ def _run_single_tomogram(config: TomogramConfig) -> None:
 
     if config.write_picks:
         written = gen.export_picks(
-            config.output_dir, annotation_version=config.annotation_version
+            output_dir, annotation_version=config.annotation_version
         )
         for path in written.values():
             _console.print(f"  [green]✓[/green] {path}")
@@ -599,7 +604,7 @@ def _run_single_tomogram(config: TomogramConfig) -> None:
         # the same on-disk uint16 mode anyway (no true unsigned-8-bit MRC
         # mode exists), so there's no actual size benefit to requesting it.
         def _write_label_mrc(suffix: str, labels: torch.Tensor, dtype: str) -> None:
-            path = os.path.join(config.output_dir, config.filename + suffix)
+            path = os.path.join(output_dir, config.filename + suffix)
             with mrcfile.new(path, overwrite=True) as mrc:
                 mrc.set_data(labels.cpu().numpy().astype(dtype))
                 mrc.voxel_size = config.voxel_size

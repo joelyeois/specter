@@ -76,6 +76,47 @@ def test_cli_build_tomogram_help_smoke() -> None:
     assert "--n_tomograms" in result.stdout
 
 
+def test_cli_build_tomogram_output_dir_becomes_job_root_when_tracked(
+    tmp_path: Path,
+) -> None:
+    """The same --output_dir is the leaf untracked and the job-tree root tracked.
+
+    This is what lets a user point specter at one folder and have --project
+    organise output *within* it, rather than needing a second path flag to
+    say where the numbered tree goes.
+    """
+    config_path = tmp_path / "tomogram.toml"
+    chosen = tmp_path / "chosen"
+    _write_test_config(config_path, chosen)
+
+    result = _run_build_cli(config_path, "--project", "proj")
+    assert result.returncode == 0, result.stderr
+
+    job_dir = chosen / "proj" / "tomograms" / "J001"
+    assert (job_dir / "test_tomogram.mrc").exists()
+    assert (job_dir / "job.json").exists()
+    # Not also written flat into the folder the way an untracked run would.
+    assert not (chosen / "test_tomogram.mrc").exists()
+
+
+def test_cli_build_tomogram_cli_output_dir_overrides_config_when_tracked(
+    tmp_path: Path,
+) -> None:
+    """--output_dir on the command line still beats the TOML's, tracked or not."""
+    config_path = tmp_path / "tomogram.toml"
+    from_toml = tmp_path / "from_toml"
+    _write_test_config(config_path, from_toml)
+    from_cli = tmp_path / "from_cli"
+
+    result = _run_build_cli(
+        config_path, "--project", "proj", "--output_dir", str(from_cli)
+    )
+    assert result.returncode == 0, result.stderr
+
+    assert (from_cli / "proj" / "tomograms" / "J001" / "test_tomogram.mrc").exists()
+    assert not from_toml.exists()
+
+
 def test_cli_build_tomogram_n_tomograms(tmp_path: Path) -> None:
     """--n_tomograms 2 writes two distinct, seed-varied tomograms into their
     own numbered subdirectories instead of overwriting a single output."""

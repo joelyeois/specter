@@ -132,10 +132,10 @@ def real_particle_data(tmp_path: Path) -> tuple[Path, Path]:
     return cs_file, mrc_file
 
 
-def _config(cs_file: Path, mrc_file: Path, job_base_dir: Path) -> ReconstructionConfig:
+def _config(cs_file: Path, mrc_file: Path, output_dir: Path) -> ReconstructionConfig:
     """A config small and cheap enough to fit on CPU inside a test.
 
-    ``job_base_dir`` keeps every run's job.json under tmp_path -- every run
+    ``output_dir`` keeps every run's job.json under tmp_path -- every run
     is tracked now, there's no untracked output_dir to scope a test to
     instead.
     """
@@ -148,7 +148,7 @@ def _config(cs_file: Path, mrc_file: Path, job_base_dir: Path) -> Reconstruction
         batchsize=2,
         device="cpu",
         num_workers=0,
-        job_base_dir=str(job_base_dir),
+        output_dir=str(output_dir),
     )
 
 
@@ -298,17 +298,17 @@ def test_job_id_without_project_pins_under_implicit_default_project(
     particle_data: tuple[Path, Path], tmp_path: Path
 ) -> None:
     """job_id without project is valid: it pins a number directly under
-    job_base_dir's implicit default project, not a named one -- omitting
+    output_dir's implicit default project, not a named one -- omitting
     `project` never meant "untracked"."""
     cs_file, mrc_file = particle_data
-    job_base_dir = tmp_path / "out"
-    config = _config(cs_file, mrc_file, job_base_dir)
+    output_dir = tmp_path / "out"
+    config = _config(cs_file, mrc_file, output_dir)
     config.job_id = "J005"
     config.halfset = "all"
 
     run_reconstruction(config)
 
-    job_dir = job_base_dir / "reconstructions" / "J005"
+    job_dir = output_dir / "reconstructions" / "J005"
     assert (job_dir / "job.json").exists()
 
 
@@ -331,16 +331,16 @@ def test_run_reconstruction_writes_a_numbered_job_directory(
     particle_data: tuple[Path, Path], tmp_path: Path
 ) -> None:
     """Leaving project unset doesn't mean untracked: it's still numbered,
-    just under job_base_dir's implicit default project (no project-name
+    just under output_dir's implicit default project (no project-name
     segment) instead of a named one."""
     cs_file, mrc_file = particle_data
-    job_base_dir = tmp_path / "out"
-    config = _config(cs_file, mrc_file, job_base_dir)
+    output_dir = tmp_path / "out"
+    config = _config(cs_file, mrc_file, output_dir)
     config.halfset = "all"  # single-run path; gold-standard is covered separately
 
     run_reconstruction(config)
 
-    job_dir = job_base_dir / "reconstructions" / "J001"
+    job_dir = output_dir / "reconstructions" / "J001"
     assert (job_dir / "volume.mrc").exists()
     # No params.json/metrics.json of its own -- job.json is the only JSON.
     assert [p.name for p in job_dir.glob("*.json")] == ["job.json"]
@@ -366,16 +366,16 @@ def test_run_reconstruction_halfsets_share_one_job(
     directory instead of failing the identical-settings check.
     """
     cs_file, mrc_file = particle_data
-    job_base_dir = tmp_path / "out"
+    output_dir = tmp_path / "out"
 
     for halfset in ("A", "B"):
-        config = _config(cs_file, mrc_file, job_base_dir)
+        config = _config(cs_file, mrc_file, output_dir)
         config.project = "test-project"
         config.job_id = "J001"
         config.halfset = halfset  # type: ignore[assignment]
         run_reconstruction(config)
 
-    job_dir = job_base_dir / "test-project" / "reconstructions" / "J001"
+    job_dir = output_dir / "test-project" / "reconstructions" / "J001"
     assert (job_dir / "volume_A.mrc").exists()
     assert (job_dir / "volume_B.mrc").exists()
     # job.json already has the full config; a tracked run no longer writes
@@ -404,13 +404,13 @@ def test_run_reconstruction_gold_standard_default(
     untracked -- there's no such mode -- just no project-name segment.
     """
     cs_file, mrc_file = real_particle_data
-    job_base_dir = tmp_path / "out"
-    config = _config(cs_file, mrc_file, job_base_dir)
+    output_dir = tmp_path / "out"
+    config = _config(cs_file, mrc_file, output_dir)
     assert config.halfset == "gold"  # exactly what's under test: no override
 
     run_reconstruction(config)
 
-    job_dir = job_base_dir / "reconstructions" / "J001"
+    job_dir = output_dir / "reconstructions" / "J001"
     assert (job_dir / "volume_A.mrc").exists()
     assert (job_dir / "volume_B.mrc").exists()
     assert (job_dir / "fsc_gold_standard.png").exists()
@@ -441,19 +441,19 @@ def test_manual_two_pass_halfsets_both_survive_in_job_json(
     though `volume_A.mrc` was still sitting on disk right next to it.
     """
     cs_file, mrc_file = particle_data
-    job_base_dir = tmp_path / "out"
+    output_dir = tmp_path / "out"
 
-    config_a = _config(cs_file, mrc_file, job_base_dir)
+    config_a = _config(cs_file, mrc_file, output_dir)
     config_a.halfset = "A"
     config_a.job_id = "J005"
     run_reconstruction(config_a)
 
-    config_b = _config(cs_file, mrc_file, job_base_dir)
+    config_b = _config(cs_file, mrc_file, output_dir)
     config_b.halfset = "B"
     config_b.job_id = "J005"
     run_reconstruction(config_b)
 
-    job_dir = job_base_dir / "reconstructions" / "J005"
+    job_dir = output_dir / "reconstructions" / "J005"
     assert (job_dir / "volume_A.mrc").exists()
     assert (job_dir / "volume_B.mrc").exists()
 
@@ -478,12 +478,12 @@ def test_gold_standard_writes_no_json_but_job_json(
     owns. ``job.json`` is the only JSON this run produces.
     """
     cs_file, mrc_file = real_particle_data
-    job_base_dir = tmp_path / "out"
-    config = _config(cs_file, mrc_file, job_base_dir)
+    output_dir = tmp_path / "out"
+    config = _config(cs_file, mrc_file, output_dir)
 
     run_reconstruction(config)
 
-    job_dir = job_base_dir / "reconstructions" / "J001"
+    job_dir = output_dir / "reconstructions" / "J001"
     assert [p.name for p in job_dir.glob("*.json")] == ["job.json"]
     assert not list((job_dir / "epochs").glob("*.json"))
 
@@ -523,8 +523,8 @@ def test_all_four_resolutions_recorded_when_refs_given(
     """
     cs_file, mrc_file = real_particle_data
     ref, mask = _fsc_fixtures(tmp_path)
-    job_base_dir = tmp_path / "out"
-    config = _config(cs_file, mrc_file, job_base_dir)
+    output_dir = tmp_path / "out"
+    config = _config(cs_file, mrc_file, output_dir)
     config.fsc_ref = str(ref)
     config.fsc_mask = str(mask)
     # Not a test_run: that bins the volume without binning the reference or
@@ -534,7 +534,7 @@ def test_all_four_resolutions_recorded_when_refs_given(
 
     run_reconstruction(config)
 
-    job_dir = job_base_dir / "reconstructions" / "J001"
+    job_dir = output_dir / "reconstructions" / "J001"
     entries = _job_params(job_dir)["results"]["epochs"]
 
     half = [e for e in entries if "resolution_gold_standard" in e]
@@ -561,13 +561,13 @@ def test_no_mask_and_no_reference_degrades_instead_of_failing(
     mask is an ordinary run, not a misconfiguration.
     """
     cs_file, mrc_file = real_particle_data
-    job_base_dir = tmp_path / "out"
-    config = _config(cs_file, mrc_file, job_base_dir)
+    output_dir = tmp_path / "out"
+    config = _config(cs_file, mrc_file, output_dir)
     assert config.fsc_ref is None and config.fsc_mask is None
 
     run_reconstruction(config)
 
-    job_dir = job_base_dir / "reconstructions" / "J001"
+    job_dir = output_dir / "reconstructions" / "J001"
     assert (job_dir / "volume_A.mrc").exists()
 
     entries = _job_params(job_dir)["results"]["epochs"]
@@ -589,8 +589,8 @@ def test_reference_without_mask_records_only_unmasked(
     """A reference but no mask: unmasked numbers only, still no failure."""
     cs_file, mrc_file = real_particle_data
     ref, _ = _fsc_fixtures(tmp_path)
-    job_base_dir = tmp_path / "out"
-    config = _config(cs_file, mrc_file, job_base_dir)
+    output_dir = tmp_path / "out"
+    config = _config(cs_file, mrc_file, output_dir)
     config.fsc_ref = str(ref)
     # Full-size run: a test_run bins the volume below the reference, which
     # _mask_for/the fsc_ref shape guard would skip for a different reason.
@@ -599,7 +599,7 @@ def test_reference_without_mask_records_only_unmasked(
 
     run_reconstruction(config)
 
-    job_dir = job_base_dir / "reconstructions" / "J001"
+    job_dir = output_dir / "reconstructions" / "J001"
     entries = _job_params(job_dir)["results"]["epochs"]
     m2m = [e for e in entries if "resolution_map_to_model" in e]
     assert m2m
@@ -613,13 +613,13 @@ def test_run_reconstruction_gold_standard_tracked(
 ) -> None:
     """Gold-standard with --project logs the resolution into job.json."""
     cs_file, mrc_file = real_particle_data
-    job_base_dir = tmp_path / "out"
-    config = _config(cs_file, mrc_file, job_base_dir)
+    output_dir = tmp_path / "out"
+    config = _config(cs_file, mrc_file, output_dir)
     config.project = "test-project"
 
     run_reconstruction(config)
 
-    job_dir = job_base_dir / "test-project" / "reconstructions" / "J001"
+    job_dir = output_dir / "test-project" / "reconstructions" / "J001"
     assert (job_dir / "volume_A.mrc").exists()
     assert (job_dir / "volume_B.mrc").exists()
     assert (job_dir / "fsc_gold_standard.png").exists()

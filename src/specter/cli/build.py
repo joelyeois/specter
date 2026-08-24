@@ -60,8 +60,13 @@ _TOMOGRAM_GROUPS: list[tuple[str, list[str]]] = [
         "Compute",
         ["device", "accumulator_device", "render_workers", "render_chunk_size"],
     ),
-    ("Output", ["output_dir", "filename"]),
-    ("Job tracking", ["project", "job_id", "job_base_dir"]),
+    # One panel, not two: --output_dir and the tracking flags are alternative
+    # answers to the same question, and split across separate panels nothing
+    # showed that setting the latter makes the former a no-op.
+    (
+        "Output & job tracking",
+        ["output_dir", "filename", "project", "job_id"],
+    ),
     ("Advanced", ["pdb_cache_dir", "seed"]),
 ]
 

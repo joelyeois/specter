@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Literal
 
-from ._paths import default_output_dir, default_pdb_cache_dir
+from ._paths import default_pdb_cache_dir
 from ._scalar_range import ScalarOrRange
 
 
@@ -34,7 +34,7 @@ class ParticleStackConfig:
     """
 
     # --- Structure & potential (basic) ---
-    pdb_code: str
+    pdb_source: str
     assembly: bool = True
     n_pixels: int = 256
     pixel_size: float = 1.0  # Å
@@ -72,13 +72,18 @@ class ParticleStackConfig:
     batchsize: int | Literal["auto"] = "auto"
 
     # --- Output (basic) ---
-    output_dir: str = field(default_factory=lambda: default_output_dir("particles"))
+    # One path field, not one per layout: this is the single directory a run
+    # writes under, read as the leaf when untracked and as the root of the
+    # numbered job tree when tracked. `None` rather than a baked-in default
+    # because which default applies is not knowable until tracking is -- see
+    # pipelines._common.resolve_output_dir.
+    output_dir: str | None = None
     filename: str = "particles"
 
     # --- Job tracking (opt-in) ---
     # Setting `project` or `job_id` routes output through `specter.jobs`
     # instead of the flat output_dir/filename layout above: the directory
-    # becomes job_base_dir/[project/]particles/J00N/, numbered and with a
+    # becomes output_dir/[project/]particles/J00N/, numbered and with a
     # job.json recording the full parameter set, git commit and status.
     # Neither is required -- leaving both unset keeps today's exact flat
     # behavior. Unlike `specter reconstruct particle`, which is always
@@ -86,10 +91,6 @@ class ParticleStackConfig:
     # sanity checks, notebooks, CI), so tracking stays opt-in here.
     project: str | None = None
     job_id: str | None = None
-    # Defaults to the project root found by walking up from cwd for an
-    # existing specter-data/ (find_specter_project_root), the same way git
-    # finds the nearest .git.
-    job_base_dir: str | None = None
 
     # --- Advanced ---
     # Relative to the current working directory, like any other CLI path
@@ -189,7 +190,10 @@ class ParticleStackConfig:
 # here, next to the dataclass, so adding/renaming a field and its help text happen
 # in the same place.
 PARTICLE_STACK_HELP: dict[str, str] = {
-    "pdb_code": "PDB accession code or path to a local .cif/.pdb file.",
+    "pdb_source": "Path to a local .cif/.pdb file, or a 4-character PDB "
+    "accession code to fetch and cache. A local file is read where it "
+    "lies and never copied into the cache; an existing file wins over a "
+    "same-named accession code.",
     "assembly": "Fetch the biological assembly.",
     "n_pixels": "Number of pixels per axis for the 3-D potential box.",
     "pixel_size": "Pixel size in Angstrom.",
@@ -215,22 +219,21 @@ PARTICLE_STACK_HELP: dict[str, str] = {
     "batchsize": "Number of particles per forward pass. Unset (or 'auto' in "
     "a TOML config, which is the default) sizes the batch to the memory free "
     "on --device at run time; see specter.memory.recommend_batchsize.",
-    "output_dir": "Directory to save .mrcs and .star files.",
+    "output_dir": "Directory to save .mrcs and .star files when untracked. Setting --project or --job_id instead makes this the root of the numbered job tree, so tracking organises output within the folder you chose rather than moving it elsewhere. Unset defaults to specter-data/<artifact> untracked, and to the project root found by walking up from cwd for an existing specter-data/ when tracked.",
     "filename": "Base name for output files (no extension).",
-    "project": "Optional: route output through specter.jobs instead of "
-    "--output_dir/--filename. Not required for tracking -- job_id alone "
-    "also triggers it. The run lands in "
-    "<job_base_dir>/[<project>/]particles/J00N/ with a job.json recording "
+    "project": "Optional: number and track this run through specter.jobs. "
+    "Not required for tracking -- job_id alone also triggers it. The run "
+    "lands in "
+    "<output_dir>/[<project>/]particles/J00N/ with a job.json recording "
     "every parameter, the git commit and the run's status.",
     "job_id": "Pin the job directory (e.g. J001) rather than auto-assigning "
     "the next one: resumes into it if it exists, creates it otherwise. "
     "Required (not just recommended) when combining tracking with "
     "multi-GPU device strings -- auto-numbering needs one process to "
     "decide, but multi-GPU dispatch re-runs this pipeline once per rank.",
-    "job_base_dir": "Root directory for job folders. Defaults to the "
-    "project root found by walking up from cwd looking for an existing "
-    "specter-data/, the same way git finds the nearest .git.",
-    "pdb_cache_dir": "Folder to cache downloaded PDB files.",
+    "pdb_cache_dir": "Where downloaded PDB/mmCIF structures are cached. An "
+    "input cache shared by every run, not an output location -- job tracking "
+    "does not redirect it.",
     "cs_path": "Path to a CryoSPARC .cs file to drive generation from real "
     "pixel_size/voltage/alpha/poses/CTF instead of random sampling.",
     "star_path": "Path to a RELION .star file to drive generation from real "

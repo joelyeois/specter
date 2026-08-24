@@ -74,7 +74,9 @@ membrane_min_transmembrane_spacing = 40.0
 target_shape = [128, 256, 256]      # (Z, Y, X) voxels -- small/fast; raise for denser results
 voxel_size = 10.0                        # A/voxel -- notebook syncs tilt_series_generator_modular.toml's voxel_size to this
 filler_occupancy_fraction = 0.5
-pdb_cache_dir = "specter-data/pdb"  # relative to your working directory
+# pdb_cache_dir = "~/.cache/specter/pdb"   # default; set $SPECTER_PDB_CACHE to move it,
+                                           # e.g. onto scratch. Downloads only --
+                                           # your own files are read where they are.
 # seed = 11                         # uncomment for reproducible packing
 clip_axes = [true, true, true]      # (z, y, x) -- True lets instances poke past that wall
 
@@ -90,5 +92,5 @@ render_workers = "auto"
 render_chunk_size = 64
 
 [output]
-output_dir = "specter-data/tomograms"
+output_dir = "tomograms"
 filename = "tomogram"

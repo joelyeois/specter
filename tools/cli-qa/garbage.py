@@ -81,7 +81,11 @@ _RANGES = [
 ]
 
 _PATHS = [
-    Case("pdb_code", "specter-data/pdb/definitely-not-here.cif", "missing structure"),
+    Case(
+        "pdb_source",
+        "~/.cache/specter/pdb/definitely-not-here.cif",
+        "missing structure",
+    ),
     Case("cs_path", "/nonexistent/particles.cs", "missing CryoSPARC file"),
     Case("star_path", "/nonexistent/particles.star", "missing RELION file"),
 ]

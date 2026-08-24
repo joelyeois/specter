@@ -31,8 +31,8 @@ from specter.config import (
 )
 
 # Structures kept local so the sweep never depends on network fetches.
-PDB_A = "specter-data/pdb/1mbo.cif"
-PDB_B = "specter-data/pdb/1A6M.cif"
+PDB_A = "~/.cache/specter/pdb/1mbo.cif"
+PDB_B = "~/.cache/specter/pdb/1A6M.cif"
 
 # --------------------------------------------------------------------------
 # Not exposed to users yet -- deliberately out of scope for this sweep.
@@ -91,7 +91,7 @@ DETECTOR = ["--detector_model", "k3_300kv"]
 CC_ON = ["--cc", "2.0"]
 
 _PARTICLE_BASELINE = [
-    "--pdb_code",
+    "--pdb_source",
     PDB_A,
     "--n_particles",
     "2",
@@ -115,7 +115,7 @@ PARTICLES = CommandSpec(
     config_path="configs/particle.toml",
     flags=[
         # --- structure & potential -------------------------------------
-        Flag("pdb_code", PDB_B),
+        Flag("pdb_source", PDB_B),
         Flag(
             "assembly",
             None,
@@ -239,7 +239,7 @@ PARTICLES = CommandSpec(
 _MICROGRAPH_BASELINE = [
     "--seed",
     "1234",
-    "--pdb_code",
+    "--pdb_source",
     PDB_A,
     "--n_micrographs",
     "1",
@@ -258,7 +258,7 @@ MICROGRAPH = CommandSpec(
     argv=["simulate", "micrograph"],
     baseline=_MICROGRAPH_BASELINE,
     flags=[
-        Flag("pdb_code", PDB_B),
+        Flag("pdb_source", PDB_B),
         Flag(
             "assembly",
             None,

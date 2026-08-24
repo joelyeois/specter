@@ -78,12 +78,12 @@ num_workers = 8
 # OUTPUT & JOB TRACKING
 # Every run is numbered and tracked -- there's no untracked mode, the way
 # neither RELION nor CryoSPARC has one. The directory is
-# <job_base_dir>/[project/]reconstructions/J00N/ -- project comes right
-# after job_base_dir, ahead of the reconstructions/ job-type subfolder, so a
+# <output_dir>/[project/]reconstructions/J00N/ -- project comes right
+# after output_dir, ahead of the reconstructions/ job-type subfolder, so a
 # project's whole history can eventually live in one place as other
 # pipelines gain project tracking too. `project` is optional, not required:
 # leaving it unset doesn't mean untracked, it just drops the project-name
-# segment, using job_base_dir's implicit default project. Numbering (J001,
+# segment, using output_dir's implicit default project. Numbering (J001,
 # J002, ...) is shared across job types within a project, not restarted per
 # type. A job.json always records every parameter, the git commit and the
 # run's status (including resolution_gold_standard, once computed). Pinning
@@ -92,11 +92,12 @@ num_workers = 8
 # =============================================================================
 
 [job]
-# project = "empiar-10202"   # optional: splits one job_base_dir into named projects
+# project = "empiar-10202"   # optional: splits one output_dir into named projects
 # job_id = "J001"
-# job_base_dir = "specter-data"   # defaults to the project root found by
-                                 # walking up from cwd for an existing
-                                 # specter-data/, like git finds .git
+# output_dir = "."   # the ROOT of the numbered job tree (every
+                               # reconstruction is tracked). Defaults to the
+                               # project root found by walking up from cwd for
+                               # an existing .specter marker, like git finds .git
 
 
 # =============================================================================

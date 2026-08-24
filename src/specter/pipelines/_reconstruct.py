@@ -16,12 +16,12 @@ turn that class into a command:
   spelling.
 - **A run directory.** Every run is numbered and tracked through
   `specter.jobs` -- there is no untracked mode, the way neither RELION nor
-  CryoSPARC has one. The directory is `job_base_dir/[project/]reconstructions/J00N/`
-  -- project comes right after `job_base_dir`, ahead of the
+  CryoSPARC has one. The directory is `output_dir/[project/]reconstructions/J00N/`
+  -- project comes right after `output_dir`, ahead of the
   `reconstructions` job-type subfolder, since users group their own work by
   project first. `project` is optional, not required: omitting it drops
-  just the project-name segment, using `job_base_dir`'s implicit default
-  project rather than skipping tracking. `job_base_dir` itself defaults to
+  just the project-name segment, using `output_dir`'s implicit default
+  project rather than skipping tracking. `output_dir` itself defaults to
   the project root found by walking up from cwd for an existing
   `specter-data/` (`find_specter_project_root`, the same way `git` finds
   the nearest `.git`), so running from a subdirectory of an
@@ -54,10 +54,8 @@ from pathlib import Path
 from typing import Any, Literal, cast
 
 from specter.config import (
-    SPECTER_DATA_DIR,
     ReconstructionConfig,
     cryosparc_ref_for_halfset,
-    find_specter_project_root,
     validate_config,
 )
 
@@ -67,6 +65,7 @@ from ._common import (
     _parse_device,
     _parse_device_pool,
     _section,
+    resolve_output_dir,
 )
 
 #: `ReconstructionConfig` fields that configure the run rather than the
@@ -78,7 +77,7 @@ _NON_GHOSTBUSTER_FIELDS = frozenset(
         "device",
         "project",
         "job_id",
-        "job_base_dir",
+        "output_dir",
     }
 )
 
@@ -185,7 +184,7 @@ def run_reconstruction(config: ReconstructionConfig) -> None:
     # nothing restores, leaking this run's root into every later bare Job()
     # in the same interpreter; it is the notebook-facing session setter, not
     # a channel for library code.
-    root = config.job_base_dir or str(find_specter_project_root() / SPECTER_DATA_DIR)
+    root = resolve_output_dir(config, "reconstructions", create=True)
 
     if config.halfset == "gold":
         run_dir = _run_gold_standard(config, base_dir=root)

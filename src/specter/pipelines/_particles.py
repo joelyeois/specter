@@ -117,7 +117,7 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
         config.potential_parameterization == "shtyrov" and config.atom_species is None
     )
     pdb = PDB(
-        config.pdb_code,
+        config.pdb_source,
         assembly=config.assembly,
         pdb_cache_dir=config.pdb_cache_dir,
         compute_atom_species=_derive_atom_species,

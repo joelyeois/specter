@@ -335,9 +335,9 @@ def validate_config(config: Any) -> None:
 
     # A structure given as a path has to exist; a 4-character accession is
     # fetched, so it can only be checked by trying.
-    pdb_code = getattr(config, "pdb_code", None)
-    if pdb_code and (
-        os.sep in str(pdb_code) or str(pdb_code).endswith((".cif", ".pdb"))
+    pdb_source = getattr(config, "pdb_source", None)
+    if pdb_source and (
+        os.sep in str(pdb_source) or str(pdb_source).endswith((".cif", ".pdb"))
     ):
-        if not Path(str(pdb_code)).is_file():
-            _fail("pdb_code", pdb_code, "looks like a path, but no such file")
+        if not Path(str(pdb_source)).is_file():
+            _fail("pdb_source", pdb_source, "looks like a path, but no such file")

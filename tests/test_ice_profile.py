@@ -339,7 +339,7 @@ def test_blend_with_a_profile_leaves_vacuum_above_the_thin_end():
 
 
 def _cfg(**kwargs) -> MicrographConfig:
-    return MicrographConfig(pdb_code="1bxn", **kwargs)
+    return MicrographConfig(pdb_source="1bxn", **kwargs)
 
 
 def test_default_config_builds_no_profile():

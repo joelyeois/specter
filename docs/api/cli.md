@@ -9,5 +9,9 @@
     `specter simulate particles --help`.
 
 ::: specter.cli._cli
+    options:
+      show_root_heading: true
 
 ::: specter.cli.simulate
+    options:
+      show_root_heading: true

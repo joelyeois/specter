@@ -568,8 +568,8 @@ class MembraneGenerator:
         threshold, not a true van-der-Waals silhouette. Default 0.05.
     pdb_cache_dir : str, optional
         Passed to `PDB` for PDB-backed transmembrane specs. Default is
-        `specter.pdb.DEFAULT_PDB_CACHE_DIR` (`specter-data/pdb`, relative to
-        the caller's cwd; see `config.default_pdb_cache_dir`).
+        `$SPECTER_PDB_CACHE`, else `$XDG_CACHE_HOME/specter/pdb`, else
+        `~/.cache/specter/pdb` (see `config.default_pdb_cache_dir`).
     max_field_voxels : int, optional
         Safety cap on the working field grid's total voxel count, AND (see
         `max_output_voxels` below for the distinction) on the resolution

@@ -93,13 +93,12 @@ class ReconstructionConfig:
     project: str | None = None
     job_id: str | None = None
     # Defaults to the project root discovered by walking up from cwd looking
-    # for an existing specter-data/ (find_specter_project_root() --
-    # find_specter_project_root()/specter-data), the same way `git` resolves
-    # the nearest ancestor containing .git -- so running from a subdirectory
-    # of an already-initialised project still lands in the same project,
-    # rather than starting a second, disconnected specter-data/ tree (and
-    # job numbering restarting from J001) right where you happened to be
-    # standing.
+    # for an existing .specter marker (find_specter_project_root()), the
+    # same way `git` resolves the nearest ancestor containing .git -- so
+    # running from a subdirectory of an already-initialised project still
+    # lands in the same project, rather than starting a second,
+    # disconnected job tree (and job numbering restarting from J001) right
+    # where you happened to be standing.
     output_dir: str | None = None
 
     # --- Reference maps (FSC logging only, never optimised against) ---
@@ -227,7 +226,7 @@ RECONSTRUCTION_HELP: dict[str, str] = {
     "output_dir": "The one directory this run writes under. Every reconstruction is tracked, so this is always the root of the numbered "
     "job tree ([<project>/]reconstructions/J00N/), never the leaf the "
     "files land in directly. Defaults to the project root found by "
-    "walking up from cwd looking for an existing specter-data/, the same "
+    "walking up from cwd looking for an existing .specter marker, the same "
     "way git finds the nearest .git -- so running from a subdirectory of "
     "an already-initialised project lands in the same project.",
 }

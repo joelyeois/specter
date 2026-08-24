@@ -205,14 +205,14 @@ class TomogramConfig:
     carbon_film: list[dict[str, Any]] = field(default_factory=list)
 
     # --- Gold fiducial beads (optional) ---
-    # One dict per bead population, {"radius": <Å>, "n_copies": 1,
-    # "radius_cv": 0.0}. "radius" is required; "radius_cv" gives the
-    # population size dispersity real colloidal gold has (see
-    # specter.specimen.TomogramBeadSpec). Placed via the same RSA packing
-    # used for membranes/targets/filler, avoiding the membrane shell and
-    # any already-placed filaments -- NOT region-gated to cytosol/lumen
-    # (see TomogramBeadSpec's own docstring). In TOML, provide as [[beads]]
-    # tables.
+    # One dict per bead population, {"radius": <Angstrom or [low, high]>,
+    # "n_copies": 1}. "radius" is required; a [low, high] pair draws a
+    # fresh radius per instance, giving the population size dispersity
+    # real colloidal gold has (see specter.specimen.TomogramBeadSpec).
+    # Placed via the same RSA packing used for membranes/targets/filler,
+    # avoiding the membrane shell and any already-placed filaments -- NOT
+    # region-gated to cytosol/lumen (see TomogramBeadSpec's own
+    # docstring). In TOML, provide as [[beads]] tables.
     beads: list[dict[str, Any]] = field(default_factory=list)
 
     # How irregular each fiducial's boundary is, as an RMS fraction of its
@@ -484,9 +484,9 @@ TOMOGRAM_HELP: dict[str, str] = {
     "output_dir": "Directory to save output files when untracked. Setting "
     "--project or --job_id instead makes this the root of the numbered job "
     "tree, so tracking organises output within the folder you chose rather "
-    "than moving it elsewhere. Unset defaults to specter-data/<artifact> "
+    "than moving it elsewhere. Unset defaults to <artifact>/ "
     "untracked, and to the project root found by walking up from cwd for an "
-    "existing specter-data/ when tracked.",
+    "existing .specter marker when tracked.",
     "filename": "Base name for the output volume (no extension).",
     "project": "Optional: number and track this run through specter.jobs. "
     "Not required for tracking -- job_id alone also triggers it. The run "

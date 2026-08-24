@@ -83,8 +83,8 @@ class PDB:
             Default is True.
         pdb_cache_dir : str, optional
             Folder to store downloaded PDB/mmCIF files. Default is
-            `specter-data/pdb`, relative to the caller's cwd -- see
-            `config.default_pdb_cache_dir`.
+            `$SPECTER_PDB_CACHE`, else `$XDG_CACHE_HOME/specter/pdb`, else
+            `~/.cache/specter/pdb` -- see `config.default_pdb_cache_dir`.
         origin : tuple[float, float, float] or None, optional
             Custom origin to subtract from coordinates. If None, coordinates
             are centered on their geometric center. If a tuple, that point is

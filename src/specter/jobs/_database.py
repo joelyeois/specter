@@ -14,8 +14,10 @@ class JobDatabase:
     Parameters
     ----------
     base_dir : str or Path, optional
-        Root directory to scan. Defaults to ``~/specter-data/`` or
-        the ``SPECTER_JOBS_DIR`` environment variable.
+        Root directory to scan. Defaults to whatever `jobs.base_directory`
+        last set for this session, else the ``SPECTER_JOBS_DIR``
+        environment variable. Raises if neither is set and no ``base_dir``
+        is given.
     """
 
     def __init__(self, base_dir: str | Path | None = None) -> None:

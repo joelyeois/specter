@@ -23,7 +23,7 @@ turn that class into a command:
   just the project-name segment, using `output_dir`'s implicit default
   project rather than skipping tracking. `output_dir` itself defaults to
   the project root found by walking up from cwd for an existing
-  `specter-data/` (`find_specter_project_root`, the same way `git` finds
+  `.specter` marker (`find_specter_project_root`, the same way `git` finds
   the nearest `.git`), so running from a subdirectory of an
   already-initialised project lands in the same project rather than
   starting a second, disconnected tree. Numbering (`J001`, `J002`, ...) is

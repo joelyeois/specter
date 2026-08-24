@@ -146,7 +146,7 @@ TILT_SERIES_HELP: dict[str, str] = {
     "save_exitwaves": "Save exit wave magnitude and phase as separate .mrcs files.",
     "device": "Device to use: cpu | cuda | cuda:0.",
     "seed": "RNG seed for ice, crowding, pose and noise sampling. Auto-generated and logged if unset.",
-    "output_dir": "Directory to save output files when untracked. Setting --project or --job_id instead makes this the root of the numbered job tree, so tracking organises output within the folder you chose rather than moving it elsewhere. Unset defaults to specter-data/<artifact> untracked, and to the project root found by walking up from cwd for an existing specter-data/ when tracked.",
+    "output_dir": "Directory to save output files when untracked. Setting --project or --job_id instead makes this the root of the numbered job tree, so tracking organises output within the folder you chose rather than moving it elsewhere. Unset defaults to <artifact>/ untracked, and to the project root found by walking up from cwd for an existing .specter marker when tracked.",
     "filename": "Base name for output files (no extension).",
     "project": "Optional: number and track this run through specter.jobs. "
     "Not required for tracking -- job_id alone also triggers it. The run "

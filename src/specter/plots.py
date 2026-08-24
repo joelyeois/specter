@@ -888,7 +888,7 @@ try:
         Parameters
         ----------
         job_dir : str or Path
-            Path to the job folder (e.g., "~/specter-data/empiar-10202/J002").
+            Path to the job folder (e.g., "~/empiar-10202/reconstructions/J002").
         suffix : str, optional
             Filter FSC images by suffix (e.g., "A" shows only fsc_001A.png).
             If None, all FSC images are shown.
@@ -904,8 +904,8 @@ try:
 
         Examples
         --------
-        >>> visualize_job_epochs("~/specter-data/empiar-10202/J002")
-        >>> visualize_job_epochs("~/specter-data/empiar-10202/J002", suffix="A")
+        >>> visualize_job_epochs("~/empiar-10202/reconstructions/J002")
+        >>> visualize_job_epochs("~/empiar-10202/reconstructions/J002", suffix="A")
         """
         job_dir = Path(job_dir).expanduser()
 

@@ -219,7 +219,7 @@ PARTICLE_STACK_HELP: dict[str, str] = {
     "batchsize": "Number of particles per forward pass. Unset (or 'auto' in "
     "a TOML config, which is the default) sizes the batch to the memory free "
     "on --device at run time; see specter.memory.recommend_batchsize.",
-    "output_dir": "Directory to save .mrcs and .star files when untracked. Setting --project or --job_id instead makes this the root of the numbered job tree, so tracking organises output within the folder you chose rather than moving it elsewhere. Unset defaults to specter-data/<artifact> untracked, and to the project root found by walking up from cwd for an existing specter-data/ when tracked.",
+    "output_dir": "Directory to save .mrcs and .star files when untracked. Setting --project or --job_id instead makes this the root of the numbered job tree, so tracking organises output within the folder you chose rather than moving it elsewhere. Unset defaults to <artifact>/ untracked, and to the project root found by walking up from cwd for an existing .specter marker when tracked.",
     "filename": "Base name for output files (no extension).",
     "project": "Optional: number and track this run through specter.jobs. "
     "Not required for tracking -- job_id alone also triggers it. The run "

@@ -391,8 +391,8 @@ class TomogramSpecimenGenerator:
         Passed to `MembraneGenerator.place_transmembrane`. Default 40.0.
     pdb_cache_dir : str, optional
         Directory for downloaded PDB/mmCIF files. Default is
-        `specter.pdb.DEFAULT_PDB_CACHE_DIR` (`specter-data/pdb`, relative to
-        the caller's cwd; see `config.default_pdb_cache_dir`).
+        `$SPECTER_PDB_CACHE`, else `$XDG_CACHE_HOME/specter/pdb`, else
+        `~/.cache/specter/pdb` (see `config.default_pdb_cache_dir`).
     parameterization : str, optional
         Atomic scattering-factor parameterization for `PotentialBuilder`.
         Default "shtyrov", matching `PotentialBuilder`'s own default.

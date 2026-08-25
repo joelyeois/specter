@@ -46,6 +46,7 @@ than needing a per-model table.
 from __future__ import annotations
 
 import math
+import os
 from typing import Literal
 
 import psutil
@@ -83,11 +84,39 @@ _BYTES_PER_ELEMENT = 4
 _CUDA_SAFETY_FRACTION = 0.8
 _CPU_SAFETY_FRACTION = 0.5
 
+#: Extra headroom applied when the CUDA caching allocator is running WITHOUT
+#: expandable segments. The model above is fit against *allocated* bytes, but
+#: what has to fit on the card is what the allocator *reserves*, and with the
+#: default segment allocator those differ: measured on the particle pipeline at
+#: box 256 / pad 512, reserved ran 1.3-1.6x allocated, reaching 1.29x of this
+#: model's own prediction at batch 30 (28.7 GB allocated, 45.9 GB reserved) --
+#: which is how `batchsize="auto"` came to pick a batch that died on its second
+#: forward pass with ~19 GB "reserved but unallocated" going spare.
+#:
+#: `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` mostly closes that gap
+#: (0.86x of prediction at the same batch), and the `specter` CLI sets it -- so
+#: this allowance exists for library callers who have not, and is skipped when
+#: the variable is already set.
+_FRAGMENTATION_HEADROOM = 1.3
+
 #: Ceiling on an auto-chosen batch. Throughput has flattened well before this
 #: (the fixed per-batch overheads are amortized within a few particles), and
 #: the fit above was only measured out to B=8 -- so on a large GPU with a
 #: small box, stop rather than extrapolate.
 MAX_AUTO_BATCHSIZE = 64
+
+
+def _expandable_segments_enabled() -> bool:
+    """
+    Whether the CUDA allocator is configured to use expandable segments.
+
+    Read from the environment rather than from torch, which exposes no query
+    for it. Only ever used to decide how much fragmentation headroom
+    :func:`recommend_batchsize` should leave, so a false negative costs a
+    smaller batch, never a crash.
+    """
+    conf = os.environ.get("PYTORCH_CUDA_ALLOC_CONF", "")
+    return "expandable_segments:true" in conf.lower().replace(" ", "")
 
 
 def estimate_peak_bytes(batchsize: int, nxy: int, nz: int, pad_nxy: int) -> int:
@@ -188,12 +217,11 @@ def recommend_batchsize(
         rather than refusing to start on what is, after all, an estimate.
     """
     free_bytes = available_memory_bytes(device)
-    fraction = (
-        _CUDA_SAFETY_FRACTION
-        if torch.device(device).type == "cuda"
-        else _CPU_SAFETY_FRACTION
-    )
+    is_cuda = torch.device(device).type == "cuda"
+    fraction = _CUDA_SAFETY_FRACTION if is_cuda else _CPU_SAFETY_FRACTION
     budget = free_bytes * fraction
+    if is_cuda and not _expandable_segments_enabled():
+        budget /= _FRAGMENTATION_HEADROOM
 
     per_particle = _PADDED_COPIES_PER_PARTICLE * nz * pad_nxy**2 * _BYTES_PER_ELEMENT
     overhead = estimate_peak_bytes(0, nxy, nz, pad_nxy)

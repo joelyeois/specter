@@ -190,12 +190,19 @@ class MicrographSpecimenGenerator(L.LightningModule):
             with torch.no_grad():
                 V_crowd = self.crowd()
                 if not isinstance(V_crowd, float):
-                    V = V + V_crowd.to(assembly_device)
+                    # Adopted, not added into the zeros above. `crowd()` already
+                    # returns a full canvas, so `V = V + V_crowd` allocated a
+                    # third one to hold a sum whose other operand was all zeros
+                    # -- 33.6 GB each at micrograph_size.
+                    V = V_crowd.to(assembly_device).reshape(V.shape)
+                    del V_crowd
 
-        # Hold a reference to V before ice is added (V + ice creates a new tensor,
-        # so this costs no extra memory).
-        if self.save_clean_exitwaves and self.icemaker is not None:
-            self.clean_V = V
+        # Hold the pre-ice volume for the clean exit wave. This DOES cost a
+        # whole canvas: the blend below writes in place precisely to avoid
+        # allocating one, so there is no new tensor to keep instead.
+        keep_clean = self.save_clean_exitwaves and self.icemaker is not None
+        if keep_clean:
+            self.clean_V = V.clone()
 
         # 2. Add ice
         if self.icemaker is not None:
@@ -207,6 +214,7 @@ class MicrographSpecimenGenerator(L.LightningModule):
                         self.pixel_size,
                         relax_steps=self.ice_relax_steps,
                         profile=self.ice_profile,
+                        inplace=True,
                     )
 
         return V

@@ -547,3 +547,53 @@ def test_bundled_data_is_declared_as_package_data():
         "atom_data/*.json",  # params_cat.json backs the default shtyrov path
     ):
         assert required in globs, f"{required} missing from package-data"
+
+
+def _blend_reference(V, icemaker, threshold=0.05):
+    """
+    The pre-optimisation blend expression, verbatim.
+
+    `V + ice * ice_blend_mask(V, threshold).to(V.dtype)` holds five tensors the
+    size of the whole canvas at once -- V, ice, a float32 mask, the product and
+    the sum. At `micrograph_size` that is 5 x 33.6 GB, and it was most of why a
+    4096-pixel micrograph peaked at 237 GB of RSS. The shipped version masks and
+    multiplies one z-slab at a time and accumulates in place.
+    """
+    from specter.ice._bank import ice_blend_mask
+
+    ice = icemaker.generate_ice(batchsize=V.shape[0]).to(V.device)
+    mask = ice_blend_mask(V, threshold).to(V.dtype)
+    return V + ice * mask
+
+
+@pytest.mark.parametrize("inplace", [False, True])
+@pytest.mark.parametrize("nz,n", [(16, 24), (17, 24), (33, 16)])
+def test_blend_ice_slabwise_matches_whole_volume_expression(nz, n, inplace):
+    """
+    Slab-wise in-place blending reproduces the whole-volume expression exactly.
+
+    Same arithmetic per voxel, so this asserts equality rather than closeness.
+    Non-dividing `nz` is covered because the slab loop's last chunk is short,
+    and the eligibility threshold is global (`threshold * V.max()`) -- computing
+    it per slab instead would be a real physics change that this would catch.
+    """
+    from specter.ice import RandomIcemaker
+    from specter.ice._bank import blend_ice_into_volume
+
+    torch.manual_seed(0)
+    maker = RandomIcemaker(n=n, dx=2.0, nz=nz)
+    torch.manual_seed(1)
+    V0 = torch.rand(1, nz, n, n) * 3.0
+
+    torch.manual_seed(7)
+    want = _blend_reference(V0.clone(), maker)
+
+    torch.manual_seed(7)
+    V = V0.clone()
+    got = blend_ice_into_volume(V, maker, 2.0, inplace=inplace)
+
+    assert torch.equal(got, want)
+    if inplace:
+        assert got.data_ptr() == V.data_ptr(), "inplace must write through to V"
+    else:
+        assert torch.equal(V, V0), "inplace=False must leave the input untouched"

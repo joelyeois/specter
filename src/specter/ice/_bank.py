@@ -917,6 +917,11 @@ class IceBank(L.LightningModule):
         -------
         icecubes : torch.Tensor
             Convolved ice potential volumes, shape (batchsize, nz, n, n).
+
+        Notes
+        -----
+        Clears ``self.current_icedeltas`` before returning -- see the comment at
+        the release. :meth:`generate_ice` keeps its own, much smaller, deltas.
         """
         if device is None:
             device = self.device
@@ -935,9 +940,17 @@ class IceBank(L.LightningModule):
         )
         assert self.current_icedeltas is not None
         kernel = self._get_kernel(dx)
-        return potential_from_deltas(
-            self.current_icedeltas.to(device), kernel.to(device), backend="conv3d"
-        )
+        deltas = self.current_icedeltas.to(device)
+        # Released here, unlike `generate_ice`'s small-volume path, which keeps
+        # it for inspection. This method exists for volumes too large to come
+        # from a single cached config, so the deltas are the same size as the
+        # potential being returned -- 33.6 GB at micrograph_size -- and holding
+        # them on the instance afterwards keeps a whole extra canvas alive for
+        # an attribute nothing reads once the convolution is done.
+        self.current_icedeltas = None
+        potential = potential_from_deltas(deltas, kernel.to(device), backend="conv3d")
+        del deltas
+        return potential
 
     # ------------------------------------------------------------------
     # Diagnostics
@@ -1435,6 +1448,7 @@ def blend_ice_into_volume(
     threshold: float = 0.05,
     relax_steps: int = 0,
     profile: "IceProfile | None" = None,
+    inplace: bool = False,
 ) -> torch.Tensor:
     """
     Add ice into a scattering-potential volume, masked to voxels with little
@@ -1471,17 +1485,36 @@ def blend_ice_into_volume(
         for having sized ``V`` deep enough (see
         :meth:`~specter.ice.IceProfile.required_nz`). Default None: ice fills
         the box, as it always has.
+    inplace : bool, optional
+        Write the result into ``V`` instead of a copy, returning ``V`` itself.
+        Saves one whole canvas -- 33.6 GB at ``micrograph_size`` -- but leaves
+        the caller no pre-ice volume, so only pass this when nothing else holds
+        a reference to ``V`` (``MicrographSpecimenGenerator`` keeps one for
+        ``save_clean_exitwaves``). Default False.
 
     Returns
     -------
     torch.Tensor
         ``V`` with ice added at masked voxels; same shape/dtype/device.
+        ``V`` itself when ``inplace``, a new tensor otherwise.
     """
     batchsize, nz, nxy, _ = V.shape
     if isinstance(icemaker, IceBank):
+        # Built on V's OWN device, not the icemaker's. The ice volume is the
+        # same shape as V, so at micrograph scale it is gigabytes -- a
+        # 500 x 4096 x 4096 canvas is 33.5 GB -- and generating it on the
+        # icemaker's device only to copy it to V's needs both at once. When a
+        # caller has deliberately assembled V off the GPU because it does not
+        # fit there (`MicrographSpecimenGenerator`'s `move_to_cpu`), building
+        # the ice on the GPU anyway defeats that and OOMs.
         ice = icemaker.generate_big_ice(
-            n=nxy, dx=pixel_size, nz=nz, batchsize=batchsize, relax_steps=relax_steps
-        ).to(V.device)
+            n=nxy,
+            dx=pixel_size,
+            nz=nz,
+            batchsize=batchsize,
+            relax_steps=relax_steps,
+            device=V.device,
+        )
     else:
         ice = icemaker.generate_ice(batchsize=batchsize).to(V.device)
     if profile is not None:
@@ -1494,5 +1527,24 @@ def blend_ice_into_volume(
             ice[:, sl] *= profile.window(
                 nz, nxy, pixel_size, z_slice=sl, device=ice.device
             )[None]
-    mask = ice_blend_mask(V, threshold).to(V.dtype)
-    return V + ice * mask
+    # Blended a z-slab at a time, in place into `ice`, then accumulated into
+    # `V`. The obvious spelling, `V + ice * ice_blend_mask(V, threshold).to(
+    # V.dtype)`, holds FIVE tensors the size of the whole canvas at once -- V,
+    # ice, a float32 mask, the product, and the sum -- which at
+    # micrograph_size is 5 x 33.6 GB and is most of why a 4096-pixel micrograph
+    # peaked at 237 GB of RSS. Slabbing bounds the mask and the product to one
+    # slab each, and the two accumulations are in-place, so the peak is V plus
+    # ice plus a slab.
+    #
+    # `V.max()` is taken once up front: it is a reduction over the whole
+    # volume, so computing it per slab would both cost N passes and change the
+    # threshold from a global one to a per-slab one.
+    cutoff = threshold * V.max()
+    out = V if inplace else V.clone()
+    chunk = max(1, 2**24 // (nxy * nxy))
+    for start in range(0, nz, chunk):
+        sl = slice(start, min(start + chunk, nz))
+        ice_slab = ice[:, sl]
+        ice_slab.mul_(out[:, sl].detach() < cutoff)
+        out[:, sl].add_(ice_slab)
+    return out

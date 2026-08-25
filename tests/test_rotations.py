@@ -491,3 +491,92 @@ def test_coordinate_affine_matches_volume_affine_batched() -> None:
         # peak on isolated voxels; a convention error is of order 50-100%.
         assert diff.max() < 0.05 * peak
         assert diff.mean() < 0.002 * peak
+
+
+def _relion_rotation_grid_sixpass(
+    theta: torch.Tensor, nz: int, ny: int, nx: int, align_corners: bool
+) -> torch.Tensor:
+    """
+    The pre-fusion `_relion_rotation_grid`, kept verbatim as the reference.
+
+    Builds a B-replicated identity grid and then centres/scales/rotates/
+    unscales/uncentres/translates it in six separate full-size passes. The
+    shipped version composes all of that into one affine matrix; this exists so
+    that equivalence is asserted against the original arithmetic rather than
+    against the fused version's own restatement of it.
+    """
+    import torch.nn.functional as F
+
+    B = theta.size(0)
+    null_rot = torch.zeros_like(theta)
+    null_rot[:, 0, 0] = 1.0
+    null_rot[:, 1, 1] = 1.0
+    null_rot[:, 2, 2] = 1.0
+    grid = F.affine_grid(null_rot, [B, 1, nz, ny, nx], align_corners=align_corners)
+
+    scale = torch.tensor(
+        [(nx - 1) / 2, (ny - 1) / 2, (nz - 1) / 2],
+        device=theta.device,
+        dtype=theta.dtype,
+    ).view(1, 1, 3)
+
+    cz, cy, cx = nz // 2, ny // 2, nx // 2
+    center = grid[:, cz, cy, cx].unsqueeze(1)
+    grid = grid.view(B, nz * ny * nx, 3)
+    grid = (grid - center) * scale
+    grid = grid.bmm(theta[..., :-1].transpose(1, 2))
+    grid = (grid / scale) + center
+    grid = grid + theta[..., -1].unsqueeze(1)
+    return grid.view(B, nz, ny, nx, 3)
+
+
+@pytest.mark.parametrize("align_corners", [False, True])
+@pytest.mark.parametrize(
+    "shape", [(16, 16, 16), (17, 17, 17), (12, 20, 24), (13, 20, 25)]
+)
+def test_relion_rotation_grid_matches_six_pass_reference(
+    shape: tuple[int, int, int], align_corners: bool
+) -> None:
+    """
+    The fused single-`affine_grid` form reproduces the original six-pass grid.
+
+    Run in float64 so the assertion is about the algebra, not about float32
+    rounding: the two orderings are mathematically identical, and any real
+    discrepancy (a transposed rotation, a wrong even/odd centre, an axis-order
+    slip between (z, y, x) sizes and `affine_grid`'s (x, y, z) output) is many
+    orders of magnitude larger than the 1e-15 this leaves.
+
+    Odd and non-cubic shapes are covered because the RELION origin
+    `[nz//2, ny//2, nx//2]` only coincides with the geometric centre for odd
+    sizes, and the per-axis scale differs once the axes do.
+    """
+    from specter.rotations._volume import _relion_rotation_grid
+
+    torch.manual_seed(0)
+    nz, ny, nx = shape
+    theta = build_affine_matrix(random_rotation_matrix(4)).double()
+    theta[..., -1] = torch.randn(4, 3, dtype=torch.float64) * 0.05
+
+    expected = _relion_rotation_grid_sixpass(theta, nz, ny, nx, align_corners)
+    got = _relion_rotation_grid(theta, nz, ny, nx, align_corners)
+
+    assert got.shape == expected.shape == (4, nz, ny, nx, 3)
+    assert torch.allclose(got, expected, atol=1e-12, rtol=0)
+
+
+def test_rotate_volume_identity_affine_is_a_no_op() -> None:
+    """
+    A pure identity affine must return the volume unchanged.
+
+    Independent of the six-pass reference: it pins the fused grid's *absolute*
+    origin and scale rather than only its agreement with the previous code, so
+    a centre offset that both implementations shared would still be caught.
+    """
+    torch.manual_seed(0)
+    volume = torch.rand(16, 20, 24)
+    theta = build_affine_matrix(torch.eye(3).unsqueeze(0))
+
+    out = rotate_volume(volume, theta)
+
+    assert out.shape == (1, 16, 20, 24)
+    assert torch.allclose(out[0], volume, atol=1e-5)

@@ -7,8 +7,8 @@ A random spherical-harmonic-perturbed organelle, rendered as a shaded 3D isosurf
 
 `MembraneGenerator` builds vesicles, nuclei, and mitochondria by perturbing
 an ellipsoid with a random spherical-harmonic expansion
-(`shape_backend="spherical_harmonics"`, the default). This page covers how
-that shape is constructed.
+(`shape_backend="spherical_harmonics"`, the default). This page explains
+how `MembraneGenerator` builds that shape.
 
 !!! info "Source"
     Walks through `specter.specimen.membrane._field_spherical_harmonics`.
@@ -64,7 +64,7 @@ roughness.
 Var(a_lm) vs. harmonic degree l, for several values of spectrum_power.
 ///
 
-Coefficients are rescaled so \(\sum_{l,m} c_{lm}^2 = 1\). Since the
+SPECTER rescales the coefficients so \(\sum_{l,m} c_{lm}^2 = 1\). Since the
 \(Y_l^m\) are orthonormal,
 [Parseval's theorem](https://en.wikipedia.org/wiki/Parseval%27s_theorem)
 fixes the perturbation's RMS to exactly \(1\) regardless of
@@ -106,9 +106,9 @@ not just inside/outside. SPECTER builds a
 \phi = \mathrm{EDT}(\text{outside}) - \mathrm{EDT}(\text{inside})
 \]
 
-This is used instead of the radial residual \(|p'| - R(\theta,\phi)\): that
-residual's error grows with local slope and would distort the bilayer's
-calibrated thickness at high curvature.
+SPECTER uses \(\phi\) instead of the radial residual
+\(|p'| - R(\theta,\phi)\): that residual's error grows with local slope
+and would distort the bilayer's calibrated thickness at high curvature.
 
 ![Central slice of the final signed distance field, with the zero contour marking the membrane surface, and a 1D linescan showing phi crossing zero there.](../../assets/images/membrane-sh-sdf-slice.png){ width="900"  style="display:block;margin:1.2em auto;" }
 ///caption
@@ -124,8 +124,8 @@ zero at the surface.
 Evaluating the harmonic sum at every voxel's own direction is expensive
 (~70s at a 10M-voxel grid). Since the perturbation is
 [band-limited](https://en.wikipedia.org/wiki/Bandlimiting) to degree
-\(L\), it is instead synthesized once on a small \((n_\theta, n_\phi)\) grid
-and [bilinearly interpolated](https://en.wikipedia.org/wiki/Bilinear_interpolation)
+\(L\), SPECTER instead synthesizes it once on a small \((n_\theta, n_\phi)\)
+grid and [bilinearly interpolates](https://en.wikipedia.org/wiki/Bilinear_interpolation)
 per voxel.
 
 ![A small coarse synthesis grid next to the bilinearly interpolated field it stands in for.](../../assets/images/membrane-sh-angular-grid-interp.png){ width="800"  style="display:block;margin:1.2em auto;" }
@@ -164,12 +164,12 @@ Isotropic, elongated, and flattened base ellipsoids, same random perturbation.
 
 ## Limitations
 
-- **Star-convex only.** Branching tubules, self-occluding folds, or anything
-  where a ray from the center crosses the surface more than once cannot be
-  represented.
+- **Star-convex only.** The method cannot represent branching tubules,
+  self-occluding folds, or anything where a ray from the center crosses
+  the surface more than once.
 - **Grid resolution matters.** Below about 8 voxels per radius, surface
-  sampling for protein placement may silently find zero sites; the
-  generator warns explicitly when this happens.
+  sampling for protein placement can find zero sites with no other
+  symptom; the generator warns when this happens.
 - **The SDF has voxel-scale texture**, visible as a faint ripple under
   raking light (see the hero image), an expected consequence of computing
   distance to the nearest boundary voxel rather than the continuous

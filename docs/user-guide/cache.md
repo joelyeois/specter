@@ -1,13 +1,13 @@
 # Manage the PDB cache
 
-Every SPECTER config that names a structure by accession code -- `pdb_source`
-in a particle, micrograph, or tomogram config -- fetches it from RCSB the
-first time it is needed and keeps the downloaded file for reuse. That cache
-lives outside any project, at `~/.cache/specter/pdb` by default, because a
-structure fetched from RCSB is the same file regardless of which project
-asked for it. Caching it once per user, rather than once per working
-directory, avoids re-downloading the same assembly for every simulation that
-references it.
+Every SPECTER config that names a structure by accession code
+(`pdb_source` in a particle, micrograph, or tomogram config) fetches it
+from RCSB the first time it's needed and keeps the downloaded file for
+reuse. That cache lives outside any project, at `~/.cache/specter/pdb` by
+default, because a structure fetched from RCSB is the same file
+regardless of which project needs it. Caching it once per user, rather
+than once per working directory, saves you from re-downloading the same
+assembly for every simulation that references it.
 
 ## Locating the cache
 
@@ -15,11 +15,11 @@ references it.
 specter cache dir
 ```
 
-prints the resolved cache directory without inspecting its contents. The
-directory is chosen the same way `torch.hub` and HuggingFace resolve their
-own caches:
+prints the resolved cache directory without inspecting its contents.
+`specter` chooses the directory the same way `torch.hub` and HuggingFace
+resolve their own caches:
 
-1. `$SPECTER_PDB_CACHE`, if set -- an explicit override.
+1. `$SPECTER_PDB_CACHE`, if set: an explicit override.
 2. `$XDG_CACHE_HOME/specter/pdb`, if `$XDG_CACHE_HOME` is set.
 3. `~/.cache/specter/pdb`, otherwise.
 
@@ -87,26 +87,27 @@ Nothing to clean -- /home/user/.cache/specter/pdb does not exist.
 ```
 
 This is always safe to run, because the cache holds **only** downloads.
-`pdb_source` accepts either a 4-character PDB/mmCIF accession code or a path
-to a local structure file, and the two are handled differently: an accession
-code is fetched and written into the cache, while a local path is read
-directly from where it sits and is never copied in. Everything the cache
-holds can therefore be re-fetched from RCSB on demand, so clearing it never
-discards anything irreplaceable -- the same guarantee `uv cache clean` and
-`pip cache purge` make about their own caches.
+`pdb_source` accepts either a 4-character PDB/mmCIF accession code or a
+path to a local structure file, and `specter` handles the two
+differently: it fetches an accession code and writes it into the cache,
+while it reads a local path directly from where it sits and never copies
+it in. Everything the cache holds can therefore get re-fetched from RCSB
+on demand, so clearing it never discards anything irreplaceable: the same
+guarantee `uv cache clean` and `pip cache purge` make about their own
+caches.
 
 ## Referencing a structure
 
-`pdb_source` shows up wherever a config names a structure -- particle and
-micrograph configs at the top level, tomogram configs inside `[[targets]]`
-and `[[filler]]` tables:
+`pdb_source` shows up wherever a config names a structure: particle and
+micrograph configs at the top level, tomogram configs inside
+`[[targets]]` and `[[filler]]` tables:
 
 ```toml
 pdb_source = "6qzp"                        # fetched into the cache
 pdb_source = "/data/structures/mystruct.cif"  # read in place, never cached
 ```
 
-Both forms are resolved the same way at every call site, so a config can
-mix accession codes and local files freely -- swapping one target for the
-other from a subdirectory of a colleague's structure library, for instance,
-requires no other change.
+`specter` resolves both forms the same way at every call site, so a
+config can mix accession codes and local files: swap one target for the
+other, say from a subdirectory of a colleague's structure library, and
+nothing else in the config needs to change.

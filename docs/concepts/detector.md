@@ -24,7 +24,7 @@ count per pixel, with a model-dependent formula:
 
 where \(D\) is dose (e⁻/Å²), \(p\) is pixel size, and \(d_0\) is
 `dqe0` (below). The holography model takes the squared magnitude of a
-genuinely complex exit wave; the CTF model instead adds the real-valued
+complex exit wave; the CTF model instead adds the real-valued
 projected-potential transfer function to a unit background, matching the
 weak-phase-object convention `Scattering.ctf` and
 `aberration_model="ctf"` share.
@@ -32,22 +32,21 @@ weak-phase-object convention `Scattering.ctf` and
 ## MTF: a pure blur
 
 Every bundled detector MTF (`specter.detectors`) is normalized so
-\(\mathrm{MTF}(0) = 1\): applying it can only redistribute signal between
-pixels, never destroy it, which is what `Detector.add_mtf`'s Fourier-space
-multiply implements.
+\(\mathrm{MTF}(0) = 1\): `Detector.add_mtf`'s Fourier-space multiply
+can only redistribute signal between pixels, never destroy it.
 
 ![MTF vs. spatial frequency for every bundled detector model.](../assets/images/detector-mtf-overlay.png){ width="600" }
 ///caption
 MTF vs. spatial frequency for every bundled detector model.
 ///
 
-The K3 curves come directly from [Gatan](https://www.gatan.com/)'s
+The K3 curves come from [Gatan](https://www.gatan.com/)'s
 published MTF datasheets. The Falcon 4i (a
 [Thermo Fisher Scientific](https://www.thermofisher.com/) detector) curves
 are derived instead from three published DQE points (0,
 0.5, and 1x Nyquist) under the white-noise approximation
-\(\mathrm{DQE}(k) \approx \mathrm{MTF}(k)^2\), so the *shape* is
-recovered as \(\mathrm{MTF}(k) = \sqrt{\mathrm{DQE}(k)/\mathrm{DQE}(0)}\),
+\(\mathrm{DQE}(k) \approx \mathrm{MTF}(k)^2\), so SPECTER recovers the
+*shape* as \(\mathrm{MTF}(k) = \sqrt{\mathrm{DQE}(k)/\mathrm{DQE}(0)}\),
 normalized by the zero-frequency value so it comes out as a proper MTF,
 with quadratic interpolation between the three points. `"perfect"`
 is the ideal pixel-integration limit, \(\mathrm{sinc}(\pi k / 2 k_{Nyq})\),
@@ -56,14 +55,14 @@ limited only by the finite pixel aperture.
 ## DQE(0): a separate counting efficiency
 
 \(\mathrm{DQE}(0)\), the fraction of incident electrons a detector
-registers *at all*, is a distinct physical effect from the MTF's blur and
-is deliberately kept separate: it is applied by scaling the expected
-electron count (`dqe0` in `Detector.image`, above) rather than folded into
-the MTF. Thinning a Poisson arrival process by a fixed probability leaves
-a Poisson process with the scaled mean, so this reproduces both the
+registers *at all*, is a distinct physical effect from the MTF's blur,
+and stays separate: `Detector.image` applies it by scaling the expected
+electron count (`dqe0`, above) rather than folding it into the MTF.
+Thinning a Poisson arrival process by a fixed probability leaves a
+Poisson process with the scaled mean, so this reproduces both the
 reduced signal *and* the correct (reduced) shot noise; folding
 \(\mathrm{DQE}(0)\) into the MTF instead would scale counts by
-\(\sqrt{\mathrm{DQE}(0)}\) and give the wrong noise statistics entirely.
+\(\sqrt{\mathrm{DQE}(0)}\) and give the wrong noise statistics.
 
 ![DQE(0) per detector model.](../assets/images/detector-dqe0-bar.png){ width="500" }
 ///caption
@@ -73,10 +72,10 @@ DQE(0) per detector model.
 Only Falcon 4i has a traceable low-dose-rate published value; K3's
 datasheet publishes an MTF with no accompanying DQE(0) figure, so it
 defaults to 1.0 (an ideal counter) rather than guessing. These values
-must specifically be *low-dose-rate* DQE(0): published DQE falls with
-dose rate largely because of coincidence loss, which specter already
-models separately (below). Using a high-flux figure here would count
-that loss twice.
+must be *low-dose-rate* DQE(0): published DQE falls with dose rate
+largely because of coincidence loss, which specter already models
+separately (below). Using a high-flux figure here would count that
+loss twice.
 
 ## Coincidence loss
 
@@ -84,12 +83,12 @@ Direct electron detectors lose counts when two electrons arrive close
 enough together, within one readout frame, that the detector cannot
 resolve them as separate events. `Detector.apply_coincidence` models this
 with a randomized square-cell exclusion grid (`apply_detector_physics`):
-electrons are Poisson-sampled per pixel from the (already MTF-blurred,
-dose-scaled) intensity map, jittered to continuous sub-pixel positions,
-assigned to grid cells sized so cell area equals the exclusion disc area
-\(\pi r^2\), and only the first electron landing in each cell per frame
-survives. This is a deliberately simplified, *locally bounded* model
-(exclusion cannot chain transitively across a frame the way a
+it Poisson-samples electrons per pixel from the (already MTF-blurred,
+dose-scaled) intensity map, jitters them to continuous sub-pixel
+positions, assigns them to grid cells sized so cell area equals the
+exclusion disc area \(\pi r^2\), and keeps only the first electron
+landing in each cell per frame. This is a simplified, *locally bounded*
+model (exclusion cannot chain by transitivity across a frame the way a
 connected-component pairwise model would); its fitted effective
 exclusion area matches an exact pairwise disc calculation to within
 0.4%.
@@ -100,19 +99,19 @@ Left: detected/incident electron ratio vs. incident dose, at the Falcon 4i-calib
 ///
 
 Two consequences of the same mechanism. On the left, detected efficiency
-falls steeply with incident dose rate: more electrons arriving in the
-same frame means more of them land within an already-occupied cell.
-`coincidence_radius = 2.394` px is calibrated against real Falcon 4i
+drops fast with incident dose rate: more electrons arriving in the same
+frame means more of them land in an already-occupied cell. SPECTER
+calibrates `coincidence_radius = 2.394` px against real Falcon 4i
 beam-only micrographs spanning 0.15-31.29 e⁻/px/s, reproducing the
 measured detected-electron yield to ~2% RMSE. On the right, the exclusion
 mechanism itself imprints a low-spatial-frequency dip in the noise power
-spectrum relative to plain Poisson: an electron's presence briefly
-excludes its own neighborhood, which suppresses variance at scales larger
-than the exclusion radius while leaving the high-frequency (per-pixel)
-noise floor essentially untouched. That is exactly the signature reported
-for real DED coincidence loss.
+spectrum relative to plain Poisson: an electron's presence excludes its
+own neighborhood for an instant, which suppresses variance at scales
+larger than the exclusion radius while leaving the high-frequency
+(per-pixel) noise floor nearly untouched. That matches the signature
+reported for real DED coincidence loss.
 
-`n_frames` controls dose fractionation: the total dose is split across
+`n_frames` controls dose fractionation: it splits the total dose across
 `n_frames` independent applications of the coincidence model rather than
 one large-dose frame, matching how a real detector reads out multiple
 frames per exposure.

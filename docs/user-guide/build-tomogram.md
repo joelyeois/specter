@@ -13,8 +13,8 @@ imaging half.
 
 ## Basic usage
 
-Every run loads a TOML config first, then applies any flags given on the
-command line as overrides:
+Every run loads a TOML config first, then applies whatever flags you pass
+on the command line as overrides:
 
 ```bash
 specter build tomogram --config configs/tomogram.toml
@@ -50,37 +50,37 @@ membranes, filaments, exact-count targets, ratio-based filler); run
   `[[filaments]]` entries for other single-strand species.
 - **Microtubules**: `[[microtubules]]` entries: real 13-protofilament tubes
   with a lumen and an A-lattice seam (`n_protofilaments`, `n_copies`,
-  `length`, `bend_radius`). Not a filament species: a `[[filaments]]` entry
-  with a tubulin dimer would give a single protofilament, not a tube.
+  `length`, `bend_radius`). These aren't filaments: a `[[filaments]]` entry
+  with a tubulin dimer gives a single protofilament, not a full tube.
 - **Gold fiducial beads**: `[[beads]]` entries (`radius`, `n_copies`), one per
   population; `radius` takes a single number or a `[low, high]` pair drawn per
-  bead. Placed avoiding the membrane shell and already-placed
-  filaments/microtubules; not
-  region-gated to cytosol/lumen. All beads are written to one `gold-bead` pick
+  bead. Beads avoid the membrane shell and already-placed
+  filaments/microtubules, but aren't
+  region-gated to cytosol/lumen. All beads go into one `gold-bead` pick
   file regardless of size.
 - **Carbon support film**: at most one `[[carbon_film]]` table
-  (`hole_radius`/`edge_fraction`/`edge_side`/etc.). Painted into the volume
-  before anything else is placed.
+  (`hole_radius`/`edge_fraction`/`edge_side`/etc.), painted into the volume
+  before anything else.
 
 Everything else (picks/segmentation toggles, compute/scaling knobs, output
 naming) lives under its own panel in `specter build tomogram --help`.
 
 ## Placement order & regions
 
-Generation always proceeds carbon film → membranes → filaments → gold
-fiducial beads → protein fill; each stage avoids the placements of the ones
-before it (the carbon film is the one exception: placement is not
-carbon-aware; see `TomogramSpecimenGenerator`'s own docstring). Within the
-protein-fill stage, species are placed in two priority tiers, independently
+Every run places components in this order: carbon film → membranes →
+filaments → gold fiducial beads → protein fill. Each stage avoids what
+came before it, except the carbon film: its placement isn't carbon-aware
+(see `TomogramSpecimenGenerator`'s own docstring). Within the
+protein-fill stage, species land in two priority tiers, independently
 per region:
 
 1. **`[[targets]]`**: placed first, each at an exact `n_copies` instance
    count. This is the annotated ground truth, always exported to picks.
 2. **`[[filler]]`** (plus `filler_from_pei2016`/`filler_from_cryoetsim`):
-   placed second, packed around the already-placed targets until
-   `filler_occupancy_fraction` (a bare-sphere volume fraction, per region)
-   is reached or the packing jams, whichever comes first, so this rarely
-   needs hand-tuning. Excluded from picks by default (`write_picks` still
+   placed second, packed around the already-placed targets until it
+   reaches `filler_occupancy_fraction` (a bare-sphere volume fraction, per
+   region) or the packing jams, whichever comes first, so you rarely need
+   to hand-tune it. Excluded from picks by default (`write_picks` still
    controls this; see the CLI help for the exact rule).
 
 `location = "cytosol"` (default) or `"lumen"` on a `targets`/`filler` entry
@@ -95,11 +95,11 @@ entries.
 
 ## Compute & scaling flags
 
-For anything past a small smoke-test box, rendering dozens of species and
-packing hundreds of filler instances can be slow or OOM. This is why
+Rendering dozens of species and packing hundreds of filler instances can
+be slow or run out of memory past a small smoke-test box, so
 `configs/tomogram.toml` already sets `render_workers = "auto"`,
-`accumulator_device = "auto"`, and `render_chunk_size = 64`. Most runs can just
-keep those `"auto"` defaults rather than hand-tuning:
+`accumulator_device = "auto"`, and `render_chunk_size = 64`. Keep those
+`"auto"` defaults for most runs rather than hand-tuning them:
 
 - **`device`**: `cpu | cuda | cuda:0 | 0,1,2 | auto`. A comma-separated
   list of GPU indices (or `"auto"`, every visible GPU) pools those GPUs for
@@ -109,8 +109,8 @@ keep those `"auto"` defaults rather than hand-tuning:
 - **`render_workers`**: how many PDB species render/fetch concurrently.
   `"auto"` picks `min(n_species, 8)`, the measured sweet spot from a
   production-scale sweep (TOML/Python config only; the `--render_workers`
-  CLI flag stays integer-only). Device choice was measured to barely
-  matter at this worker count.
+  CLI flag stays integer-only). The sweep found device choice barely
+  matters at this worker count.
 - **`accumulator_device`**: device for the shared canvas tensors,
   decoupled from `device` (which stays the compute device regardless).
   `"auto"` estimates the canvas' memory footprint and falls back to CPU
@@ -118,22 +118,22 @@ keep those `"auto"` defaults rather than hand-tuning:
   large field of view at fine `voxel_size` needs tens of GB.
 - **`render_chunk_size`**: instances rotated per GPU batch for a single species.
   Only matters once a filler species' instance count reaches the hundreds
-  (a single unchunked batch has been measured at 8+ GB); leave unset for
+  (a single unchunked batch can reach 8+ GB); leave unset for
   small runs.
 
 ## Benchmarks: resolution vs. time and memory
 
-To give a concrete feel for how `voxel_size` trades off against runtime and
-memory, a specimen was built at `configs/tomogram.toml`'s own
+To see how `voxel_size` trades off against runtime and memory, this
+benchmark builds a specimen at `configs/tomogram.toml`'s own
 **production-scale field of view** (1500 × 6000 × 6000 Å) at three voxel
 sizes, so only the voxel grid resolution changes between runs, not the
 physical amount of specimen content. The specimen itself: one
 `spherical_harmonics` membrane, target species `1bxn` × 20, and
 `filler_from_pei2016` (20 species sharing a 0.5 occupancy-fraction budget,
 same filler approach as the canonical config). A single hand-picked
-filler species was tried first and rejected, since at this box size it
+filler species came first, then got rejected: at this box size it
 packed ~109,000 instances of that one small species to hit occupancy,
-both unrepresentative of real configs and, at voxel_size=2, dominated by
+unrepresentative of real configs and, at voxel_size=2, dominated by
 per-instance rendering cost:
 
 ![Same field of view rendered at voxel_size = 10, 5, and 2 Å/voxel: a sum Z projection of each output volume, showing the same membrane and densely crowded protein layout at increasing voxel resolution.](../assets/images/tomogram-benchmark-projections.png){ width="900" style="display:block;margin:1.2em auto;" }
@@ -150,8 +150,8 @@ Same field of view rendered at voxel_size = 10, 5, and 2 Å/voxel: a sum Z proje
 The numbers don't move in a clean monotonic line at 10→5 Å: wall time and
 RAM both bounce around within roughly a factor of 2, since at this scale
 species fetch/render/packing overhead (fixed per-run, not per-voxel)
-dominates over the canvas itself. What's unambiguous is the step change at
-2 Å: wall time quadruples versus 5 Å, and RAM jumps to **154 GB**.
+dominates over the canvas itself. The step change at 2 Å is unambiguous:
+wall time quadruples versus 5 Å, and RAM jumps to **154 GB**.
 That RAM spike is `accumulator_device="auto"` doing exactly what [Compute &
 scaling flags](#compute-scaling-flags) above says it does: at ~6.75
 billion voxels the density volume alone is ~27 GB, comfortably past half
@@ -213,9 +213,9 @@ since it's a constant ~1-2s regardless of resolution); GPU peak is
 distance transform allocates outside torch's allocator, so torch's counter
 alone understates it by 1.7-3.6 GB here); RAM peak is `/usr/bin/time -v`'s
 "Maximum resident set size" for the whole process, each resolution run in
-its own fresh subprocess so peaks don't carry over between runs. Picks and
-segmentation output were disabled for these runs specifically (at
-voxel_size=2, those label volumes alone would add ~40 GB of writes on top of
+its own fresh subprocess so peaks don't carry over between runs. These
+benchmark runs turn off picks and segmentation output (at voxel_size=2,
+those label volumes alone would add ~40 GB of writes on top of
 the ~27 GB density volume; real runs at this scale should budget disk
 space accordingly). Reproduce with
 [`docs-figures/build_tomogram_benchmark.py`](https://github.com/joelyeois/specter/blob/main/docs-figures/build_tomogram_benchmark.py)
@@ -232,15 +232,15 @@ Alongside `{filename}.mrc`, by default you get:
   `{filename}_protein_labels.mrc` (always), plus
   `{filename}_membrane_labels.mrc` and `{filename}_regions.mrc`
   (`0=cytosol`/`1=shell`/`2=lumen`) when a `[[membrane]]` is set. This is
-  the intended ground truth for membrane geometry specifically: a
+  the intended ground truth for membrane geometry: a
   membrane surface has no single natural "position" the way a protein
   does, so it isn't represented in the picks files.
 
 ## Multiple tomograms
 
 `--n_tomograms` generates several independent tomograms in one run. Beyond
-the first, each is written into its own numbered subdirectory of
-`output_dir` (`0001/`, `0002/`, ...) and, if `seed`/`--seed` is set, gets
+the first, each lands in its own numbered subdirectory of
+`output_dir` (`0001/`, `0002/`, ...) and, if you set `seed`/`--seed`, gets
 its own incrementing seed, so runs don't collide but stay reproducible.
 
 ## Using it from Python instead of the CLI

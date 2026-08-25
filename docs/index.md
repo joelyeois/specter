@@ -24,33 +24,32 @@ A simulated cryo-ET specimen
 -   :material-snowflake:{ .lg .middle } **Structured ice**
 
     Ice comes from configurations optimised against a measured structure
-    factor and a coarse-grained water potential, not from water molecules
-    placed at random to the right bulk density.
+    factor and a coarse-grained water potential, so the pair correlations
+    match vitreous ice instead of a random fill at the right density.
 
     [:octicons-arrow-right-24: Ice structure](concepts/ice.md)
 
 -   :material-camera-iris:{ .lg .middle } **Per-electron detector**
 
-    Individual electrons are placed and merged when they land too close
-    together, reproducing the low-frequency suppression that real
-    counting detectors show.
+    SPECTER places individual electrons and merges the ones that land too
+    close together, reproducing the low-frequency suppression you see in
+    real counting detectors.
 
     [:octicons-arrow-right-24: Detector](concepts/detector.md)
 
 -   :material-check-decagram:{ .lg .middle } **Validated against experiment**
 
-    Simulated particles pooled with real EMPIAR-11377 particles and run
-    through a single [CryoSPARC](https://cryosparc.com/) 2D classification
-    job sort into the same classes, in roughly the same proportion, across
-    nearly all 50 classes.
+    Pool simulated particles with real EMPIAR-11377 particles and run one
+    [CryoSPARC](https://cryosparc.com/) 2D classification job. They sort
+    into the same classes, in similar proportion, across nearly all 50
+    classes.
 
     [:octicons-arrow-right-24: See the comparison](user-guide/particle-stack.md#example-matching-empiar-11377)
 
 -   :material-swap-horizontal:{ .lg .middle } **One model, both directions**
 
-    The forward model that generates images is the same model that drives
-    reconstruction, so a change to the physics applies in both directions
-    rather than to a simulator alone.
+    The forward model that generates images also drives reconstruction.
+    Change the physics once and both directions follow.
 
 </div>
 
@@ -86,52 +85,52 @@ Every workflow below is a `specter` subcommand driven by a TOML config.
 
 -   :material-grid:{ .lg .middle } **Particle stack**
 
-    `specter simulate particles` — a stack of single-particle images from
-    a PDB code, with poses, defocus and dose sampled per particle.
+    `specter simulate particles` builds a stack of single-particle images
+    from a PDB code, sampling pose, defocus and dose per particle.
 
     [:octicons-arrow-right-24: Generate a particle stack](user-guide/particle-stack.md)
 
 -   :material-image-filter-hdr:{ .lg .middle } **Micrograph**
 
-    `specter simulate micrograph` — a full field of view with many
+    `specter simulate micrograph` fills a full field of view with
     particles, crowding and ice.
 
     [:octicons-arrow-right-24: Generate a micrograph](user-guide/micrograph.md)
 
 -   :material-angle-acute:{ .lg .middle } **Tilt series**
 
-    `specter simulate tiltseries` — a cryo-ET tilt series through a
-    specimen volume, with dose accumulation across tilts.
+    `specter simulate tiltseries` tilts through a specimen volume and
+    accumulates dose across the series.
 
     [:octicons-arrow-right-24: Generate a tilt series](user-guide/tilt-series.md)
 
 -   :material-cube-outline:{ .lg .middle } **Tomogram specimen**
 
-    `specter build tomogram` — membranes, filaments, microtubules,
-    fiducial beads and a carbon film, packed into one volume.
+    `specter build tomogram` packs membranes, filaments, microtubules,
+    fiducial beads and a carbon film into one volume.
 
     [:octicons-arrow-right-24: Build a tomogram specimen](user-guide/build-tomogram.md)
 
 -   :material-snowflake-variant:{ .lg .middle } **Ice cache**
 
-    `specter build ice` — a replacement `IceBank` library at a pixel size
-    the bundled cache does not cover.
+    `specter build ice` builds a replacement `IceBank` library at a pixel
+    size the bundled cache does not cover.
 
     [:octicons-arrow-right-24: Using the ice cache](user-guide/ice-cache.md)
 
 -   :material-cube-send:{ .lg .middle } **Reconstruction**
 
-    `specter reconstruct particle` — fit the same forward model to a
-    CryoSPARC particle stack and recover a 3D volume.
+    `specter reconstruct particle` fits the same forward model to a
+    CryoSPARC particle stack and recovers a 3D volume.
 
     [:octicons-arrow-right-24: Reconstruct a volume](user-guide/reconstruction.md)
 
 </div>
 
-Any config field can be overridden on the command line; see
-[Configure a run](user-guide/configuration.md). Runs can record themselves
-as tracked jobs; see [Manage jobs](user-guide/jobs.md). Structures fetched
-by accession code are cached locally and shared across projects; see
+Override any config field on the command line; see
+[Configure a run](user-guide/configuration.md). Have a run record itself as
+a tracked job; see [Manage jobs](user-guide/jobs.md). SPECTER caches
+structures you fetch by accession code and shares them across projects; see
 [Manage the PDB cache](user-guide/cache.md).
 
 ### Concepts
@@ -140,8 +139,8 @@ by accession code are cached locally and shared across projects; see
 
 -   :material-sitemap:{ .lg .middle } **Pipeline overview**
 
-    How potential, specimen, scattering, aberration and detector compose
-    into one forward model.
+    Potential, specimen, scattering, aberration and detector compose into
+    one forward model.
 
     [:octicons-arrow-right-24: Read more](concepts/pipeline-overview.md)
 
@@ -160,8 +159,7 @@ by accession code are cached locally and shared across projects; see
 
 -   :material-compass-outline:{ .lg .middle } **Conventions**
 
-    Axis order, rotation sense, units, and CTF sign conventions used
-    throughout.
+    Axis order, rotation sense, units and CTF sign conventions.
 
     [:octicons-arrow-right-24: Read more](concepts/conventions.md)
 
@@ -173,7 +171,7 @@ by accession code are cached locally and shared across projects; see
 
 -   :octicons-code-24:{ .lg .middle } **API overview**
 
-    Generated from docstrings, one page per subpackage.
+    One page per subpackage, rendered from the docstrings.
 
     [:octicons-arrow-right-24: Read more](api/index.md)
 
@@ -191,7 +189,7 @@ by accession code are cached locally and shared across projects; see
 
 -   :material-pipe:{ .lg .middle } **Pipelines**
 
-    The end-to-end functions the CLI calls, usable directly from Python.
+    The end-to-end functions the CLI calls. Call them from Python too.
 
     [:octicons-arrow-right-24: specter.pipelines](api/pipelines.md)
 

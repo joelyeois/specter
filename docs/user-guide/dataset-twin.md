@@ -1,14 +1,14 @@
 # Generate a CryoSPARC dataset twin
 
 `specter simulate particles --cs_path <file>.cs` drives generation from a
-real dataset instead of randomly sampling poses and CTF parameters. Pixel
-size, voltage, amplitude contrast, per-particle pose, and per-particle CTF
-are all read straight from the `.cs` file, so the simulated stack shares
-every imaging parameter with the real one it was built from, particle for
-particle. `--star_path <file>.star` does the same from a RELION `.star`
-file (both the single-block layout `specter` itself writes and the RELION
-3.1+ two-block `optics`/`particles` layout). The two flags are mutually
-exclusive.
+real dataset instead of randomly sampling poses and CTF parameters.
+`--cs_path` reads pixel size, voltage, amplitude contrast, per-particle
+pose, and per-particle CTF straight from the `.cs` file, so the simulated
+stack shares every imaging parameter with the real one it was built from,
+particle for particle. `--star_path <file>.star` does the same from a
+RELION `.star` file (both the single-block layout `specter` itself writes
+and the RELION 3.1+ two-block `optics`/`particles` layout). The two flags
+are mutually exclusive.
 
 This is the mechanism behind [Generate a particle
 stack](particle-stack.md#example-matching-empiar-11377)'s small
@@ -19,16 +19,16 @@ scale, and how to check the result against the real data it twins.
 
 A `.cs`/`.star` file carries imaging parameters, not structural identity:
 pose, CTF, pixel size, voltage, and amplitude contrast come from the file,
-but which structure was imaged is not recorded in it. `pdb_source` still
-has to be set explicitly, to whatever PDB/mmCIF accession or local file
-matches the dataset. Get this wrong and every other parameter still loads
-correctly. Only the rendered particle looks wrong.
+but it doesn't record which structure was imaged. `pdb_source` still has
+to be set explicitly, to whatever PDB/mmCIF accession or local file
+matches the dataset. Get `pdb_source` wrong, and every other parameter
+still loads correctly: only the rendered particle looks wrong.
 
 `--n_particles`, combined with either path flag, takes the *first*
-`n_particles` rows of the file rather than a random subset, which is what
-makes a small worked example (five rows, as in the particle-stack guide)
-and a full-dataset twin (every row) the same flag with a different value.
-Omit `--n_particles` entirely to use every particle the file contains.
+`n_particles` rows of the file rather than a random subset. That's why a
+small worked example (five rows, as in the particle-stack guide) and a
+full-dataset twin (every row) are the same flag with a different value.
+Omit `--n_particles` to use every particle the file contains.
 
 ## Running the full workflow
 
@@ -47,15 +47,16 @@ specter simulate particles \
 
 This is the same command as the five-particle example in [Generate a
 particle stack](particle-stack.md#example-matching-empiar-11377), with
-`--n_particles 5` removed so every row in the file is rendered. A dataset
-of any real size benefits from `--device` accepting a comma-separated GPU
-list (see [Multi-GPU](particle-stack.md#multi-gpu)) and from job tracking
-(`--project`, see [Manage jobs](jobs.md)) to keep a multi-thousand-particle
-run's parameters and provenance recorded alongside its output.
+`--n_particles 5` removed so specter renders every row in the file. A
+dataset of any real size benefits from `--device` accepting a
+comma-separated GPU list (see [Multi-GPU](particle-stack.md#multi-gpu)) and
+from job tracking (`--project`, see [Manage jobs](jobs.md)) to record a
+multi-thousand-particle run's parameters and provenance alongside its
+output.
 
-`coincidence_radius` and `potential_scale` are not read from the `.cs`/
-`.star` file. Set them to whatever matches the detector and specimen
-thickness of the dataset being twinned; both default to values with no
+The `.cs`/`.star` file doesn't supply `coincidence_radius` or
+`potential_scale`. Set them to whatever matches the detector and specimen
+thickness of the dataset you're twinning; both default to values with no
 effect (`0.0` and `1.0`) if left unset.
 
 ## Validating the twin

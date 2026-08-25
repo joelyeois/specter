@@ -1,22 +1,22 @@
 # Scattering
 
 Once a [specimen](../specimens.md) potential volume \(V(x,y,z)\) exists,
-the first stage of [forward simulation](../forward-simulation.md) is
-propagating an electron plane wave through it to obtain a complex-valued
-2D exit wave \(\psi(x,y)\) at the specimen's far face. `Scattering`
-(eager, whole-volume) and `IterativeScattering` (on-the-fly slice sampling
-under rotation, used by `TiltSeriesGenerator`) both implement this as one
-of several propagation models, selected by `scattering_model`:
+[forward simulation](../forward-simulation.md) starts by propagating an
+electron plane wave through it to obtain a complex-valued 2D exit wave
+\(\psi(x,y)\) at the specimen's far face. `Scattering` (eager,
+whole-volume) and `IterativeScattering` (on-the-fly slice sampling under
+rotation, used by `TiltSeriesGenerator`) both implement this as one of
+several propagation models, selected by `scattering_model`:
 `"multislice"` (default, most accurate), `"rytov"`, `"firstborn"`,
 `"kinematic"`, and `"projection"`, in roughly decreasing order of physical
-accuracy and increasing order of speed. Every model is built from the same
-two physical quantities.
+accuracy and increasing order of speed. Every model shares the same two
+physical quantities.
 
 !!! info "Source"
-    `specter.scattering.Scattering` / `IterativeScattering`. Figures are
-    produced by `docs-figures/scattering_overview.py` and
-    `docs-figures/scattering_accuracy.py`, which call the same classes
-    the real code path does.
+    `specter.scattering.Scattering` / `IterativeScattering`.
+    `docs-figures/scattering_overview.py` and
+    `docs-figures/scattering_accuracy.py` produce the figures below,
+    calling the same classes the real code path does.
 
 ## Two numbers set the whole propagation problem
 
@@ -35,10 +35,10 @@ interaction parameter (`interaction_parameter`, Kirkland Eq. 5.6):
 \]
 
 where \(m_e c^2 = 511\) keV is the electron rest mass energy. \(\sigma\)
-is what turns a potential (in volts) into a phase (in radians): every
+turns a potential (in volts) into a phase (in radians): every
 propagation model below multiplies \(V\) by \(\sigma\) before doing
-anything else with it. Both quantities are evaluated once per `Scattering`
-instance and reused for every slice and every particle.
+anything else with it. `Scattering` evaluates both quantities once per
+instance and reuses them for every slice and every particle.
 
 ![Wavelength and interaction parameter vs. accelerating voltage, with the standard 100/200/300 kV checkpoints marked.](../../assets/images/scattering-sigma-wavelength-vs-voltage.png){ width="600" }
 ///caption
@@ -74,20 +74,19 @@ modes](other-modes.md#accuracy-vs-thickness) for the measured error curves.
 
 **Ewald sphere curvature sign.** Before propagation, `ews_curvature_sign`
 (`"negative"` by default, `"positive"` to match [CryoSPARC](https://cryosparc.com/)) determines
-whether the volume's Z-slices are traversed front-to-back or
-back-to-front (`torch.flip(V, dims=(1,))`). This matters because
-multislice, Rytov, and first Born all propagate each slice's contribution
-a different net distance to the exit plane, so reversing the traversal
-order changes which face of the specimen accumulates the least
-propagation and which the most.
+whether the volume's Z-slices traverse front-to-back or
+back-to-front (`torch.flip(V, dims=(1,))`). Multislice, Rytov, and first
+Born each propagate a slice's contribution a different net distance to
+the exit plane, so reversing the traversal order changes which face of
+the specimen accumulates the least propagation and which the most.
 
 **Amplitude contrast.** `alpha` (0 by default) sets the fraction of the
 potential treated as absorptive, via `complex_potential`:
-\(V \to V\,(\sqrt{1-\alpha^2} + i\alpha)\). This is applied once, upstream
-of every model except `"ctf"` (a projected-potential-only mode consumed
-directly by the aberration stage; see
-[Aberrations](../aberrations.md)), so a single `alpha` value is shared
-across the whole propagation.
+\(V \to V\,(\sqrt{1-\alpha^2} + i\alpha)\). `complex_potential` applies
+this once, upstream of every model except `"ctf"` (a projected-potential-only
+mode that feeds directly into the aberration stage; see
+[Aberrations](../aberrations.md)), so a single `alpha` value carries
+through the whole propagation.
 
 ## `Scattering` vs. `IterativeScattering`
 

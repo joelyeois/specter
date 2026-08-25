@@ -15,9 +15,9 @@ Every `BaseImager` subclass (`ImageGenerator`, `MicrographGenerator`,
 3. **[Detector](detector.md)**: model the physical detector's MTF, noise,
    and (for direct electron detectors) coincidence loss.
 
-`TiltSeriesGenerator` simply runs this same chain once per tilt angle
-instead of once per particle. The per-image physics doesn't change, only
-how many times and at what geometry it's invoked.
+`TiltSeriesGenerator` runs this same chain once per tilt angle instead of
+once per particle. The per-image physics stays fixed. Only the
+invocation count and geometry change.
 
 !!! info "Source"
     `specter.imagegenerator._base.BaseImager` is the shared base class

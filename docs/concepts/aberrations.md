@@ -29,12 +29,12 @@ space,
 T(k) = \exp(-i\chi(k))
 \]
 
-where \(\chi(k)\) is the sum of whichever terms are present in the
-`ctf_params` dict passed to `forward()`. A key's absence means that
-term contributes nothing, so a caller only pays for (and only needs to
-supply) the aberrations relevant to their use case. Every term below is a
-pure function of a frequency-grid tensor and physical parameters, defined
-in `aberrations/_functions.py`, with no dependence on any class state
+where \(\chi(k)\) is the sum of whichever terms appear in the
+`ctf_params` dict you pass to `forward()`. Leave a key out and that
+term contributes nothing, so you only pay for (and only need to supply)
+the aberrations your use case needs. Every term below is a pure function
+of a frequency-grid tensor and physical parameters, defined in
+`aberrations/_functions.py`, with no dependence on any class state
 other than the precomputed \(k\)-grid.
 
 ### Defocus and astigmatism
@@ -49,8 +49,8 @@ positive = underfocus, the standard cryo-EM convention) and \(\phi\)
 (`dfang`) is the astigmatism angle in degrees, converted to radians
 internally. Isotropic defocus is the special case \(d_u = d_v\), where
 the \(\cos\) term vanishes and \(\chi\) depends only on \(|k|\).
-`dfv` defaults to `dfu` when omitted, so a caller wanting purely isotropic
-defocus only ever needs to supply `dfu`.
+`dfv` defaults to `dfu` when omitted, so if you want isotropic defocus
+with no astigmatism, you only ever need to supply `dfu`.
 
 The plane these values are measured from depends on the scattering model,
 and a propagated exit wave requires a midplane correction; see
@@ -71,8 +71,8 @@ to defocus in the Scherzer-condition optimum.
 Beam tilt, trefoil (3-fold astigmatism), and tetrafoil (a combination of
 4-fold astigmatism, \(n{=}4,\ m{=}{\pm}2\), and true 4-fold tetrafoil,
 \(n{=}4,\ m{=}{\pm}4\); spherical aberration itself is the \(m{=}0\)
-member of the same \(n{=}4\) family and is handled separately by
-`fn.cs`) break the purely radial symmetry defocus and Cs share:
+member of the same \(n{=}4\) family, and `fn.cs` handles it separately)
+break the radial symmetry defocus and Cs share on their own:
 
 \[
 \chi_{\mathrm{tilt}} = -2\pi\lambda^2 C_s k^2\big(\sin\phi_y\, k_y + \sin\phi_x\, k_x\big)
@@ -134,8 +134,8 @@ amplitude contrast (above), and how `forward()`'s output is interpreted.
 `"holography"` (the default) returns the complex aberrated exit wave
 unchanged, matching every `scattering_model` except `"ctf"`, which
 returns a real-valued exit wave with no absorptive component of its own.
-Amplitude contrast has nowhere else to live, so it is folded into
-\(\chi\) via `specimen_absorption=False`. `"ctf"` instead takes the real
+Amplitude contrast has nowhere else to live, so `Aberration` folds it
+into \(\chi\) via `specimen_absorption=False`. `"ctf"` instead takes the real
 part of the aberrated field, matching `Scattering.ctf`'s projected
 potential input. `specimen_absorption=True` (default) assumes amplitude
 contrast is already baked into the exit wave upstream, via
@@ -146,7 +146,7 @@ value.
 
 ## Envelopes
 
-Four independent multiplicative amplitude envelopes can be layered onto
+You can layer four independent multiplicative amplitude envelopes onto
 the transfer function, each damping high-resolution signal for a
 different physical reason (`aberrations/_envelopes.py`, ported from
 [teamtomo](https://github.com/teamtomo)'s
@@ -177,26 +177,25 @@ e⁻/Å² threshold.
 Left: the four envelopes in isolation, plus their product (B x Cs x Cc). Right: the same isotropic CTF curve from above, with and without the combined B/Cs/Cc envelope applied.
 ///
 
-Each envelope sets a different practical resolution limit, and the
-combined envelope (their product) is what ultimately damps the CTF's
-outer oscillations to near zero: the "information limit" a real
-micrograph's Thon rings fade out at, well inside the detector's Nyquist
-frequency, even for a perfectly-focused, aberration-free instrument.
+Each envelope sets a different practical resolution limit. The combined
+envelope (their product) damps the CTF's outer oscillations to near
+zero: the "information limit" a real micrograph's Thon rings fade out
+at, well inside the detector's Nyquist frequency, even for an
+instrument with zero defocus and no aberrations.
 
 `bfactor` is the one term with a constructor-level convenience:
 `Aberration(..., bfactor=...)` overrides any `"bfactor"` key already in
 `ctf_params`, since it is usually a single calibration value shared
-across a whole batch rather than a genuinely per-particle quantity (the
-same convenience `dose_per_angstrom` gets one level up, on
-`BaseImager`). Every other `ctf_params` key listed above is per-image and
-therefore only ever set through the dict, never as a constructor
-argument. `Aberration.__init__` raises `TypeError` if one is passed by
-mistake.
+across a whole batch rather than a per-particle quantity (the same
+convenience `dose_per_angstrom` gets one level up, on `BaseImager`).
+Every other `ctf_params` key listed above is per-image and therefore
+only ever set through the dict, never as a constructor argument.
+`Aberration.__init__` raises `TypeError` if you pass one by mistake.
 
 ## `aberration_backend`: `"legacy"` vs. `"torch_ctf"`
 
-`BaseImager.aberration_backend` selects which engine actually computes
-the transfer function above: `"legacy"` (default) is `Aberration` as
+`BaseImager.aberration_backend` selects which engine computes the
+transfer function above: `"legacy"` (default) is `Aberration` as
 described on this page; `"torch_ctf"` swaps in
 `ctf.LegacyAberrationAdapter`, a [torch-ctf](https://github.com/teamtomo/torch-ctf)-backed
 implementation verified term-by-term against `"legacy"` and against a
@@ -208,7 +207,7 @@ envelopes described above.
 `LegacyAberrationAdapter` still takes the same CryoSPARC-convention
 `ctf_params` dict as `"legacy"` and converts it internally to
 `CTFParameters`, the parameter container `TransferFunction` (this
-backend's `Aberration` equivalent) actually consumes. `CTFParameters`'
+backend's `Aberration` equivalent) consumes. `CTFParameters`'
 own units differ from that dict (defocus in micrometers, spherical
 aberration in millimeters, angles in degrees, Zernike coefficients
 dimensionless) and there is no converter from RELION's convention; see

@@ -37,7 +37,7 @@ alpha = 0.1                    # unitless, amplitude contrast ratio
 # ... see the full file: configs/particle.toml
 ```
 
-Any field in the config can be overridden on the command line without
+You can override any field in the config from the command line without
 editing the file:
 
 ```bash
@@ -70,11 +70,11 @@ label volumes:
 specter build tomogram --config configs/tomogram.toml
 ```
 
-Protein species are placed in two priority stages within their region:
-`[targets]` first, each at an exact instance count (the annotated ground
-truth, always exported to picks), then `[filler]` second, packed around
-the already-placed targets to crowd out the rest of that region (excluded
-from picks by default). Generation order overall is membranes, then
+SPECTER places protein species in two priority stages within their
+region: `[targets]` first, each at an exact instance count (the annotated
+ground truth, always exported to picks), then `[filler]` second, packed
+around the already-placed targets to crowd out the rest of that region
+(excluded from picks by default). Generation order runs membranes, then
 filaments, then this protein fill; each stage avoids the previous ones'
 placements. An example config lives in
 [`configs/tomogram.toml`](https://github.com/joelyeois/specter/tree/main/configs).
@@ -127,7 +127,7 @@ workflow and the full flag reference.
 
 ## Job management
 
-Generation and reconstruction runs can be recorded under a project name in
+You can record generation and reconstruction runs under a project name in
 a local job database. Inspect past runs with `specter jobs`; see
 [Manage jobs](user-guide/jobs.md):
 
@@ -137,10 +137,11 @@ specter jobs show <job_id>
 specter jobs diff <job_id_1> <job_id_2>
 ```
 
-Structures fetched by accession code (`pdb_source = "6bdf"`, above) are
-cached at `~/.cache/specter/pdb` and shared across every project on the
-machine. `specter cache info` reports what is stored, and `specter cache
-clean` clears it; see [Manage the PDB cache](user-guide/cache.md).
+SPECTER caches structures fetched by accession code
+(`pdb_source = "6bdf"`, above) at `~/.cache/specter/pdb` and shares them
+across every project on the machine. `specter cache info` reports what is
+cached, and `specter cache clean` clears it; see
+[Manage the PDB cache](user-guide/cache.md).
 
 See `demo-notebooks/` for interactive worked examples, including
 micrograph and tilt-series generation (`create_micrograph/`,

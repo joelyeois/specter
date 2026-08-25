@@ -7,14 +7,14 @@ slice-to-slice propagation entirely.
 
 !!! info "Source"
     `Scattering.firstborn` / `.kinematic` / `.projection` / `.ctf` and
-    their `IterativeScattering` counterparts. Figures are produced by
-    `docs-figures/scattering_accuracy.py`.
+    their `IterativeScattering` counterparts.
+    `docs-figures/scattering_accuracy.py` produces the figures.
 
 ## First Born
 
-The weak phase object approximation: each slice's transmission function
-\(\exp(i\sigma\Delta z V_z)\) is linearized to its first-order Taylor term
-before being propagated and summed,
+First Born is the weak phase object approximation: it linearizes each
+slice's transmission function \(\exp(i\sigma\Delta z V_z)\) to its
+first-order Taylor term before propagating and summing it,
 
 \[
 \psi = 1 + i\sigma\Delta z \sum_{z} \mathcal{F}^{-1}\!\big[\mathcal{F}[V_z]\cdot F_z\big]
@@ -65,8 +65,8 @@ predominantly-phase specimen (ice, protein, or any other weakly
 absorptive material), \(a\) dominates \(b\): at low spatial frequency
 the Fresnel propagator is close to a real, unit-magnitude filter
 (\(F_z(k)\approx 1\) as \(k\to0\)), so most of \(\Theta\)'s power lands
-in the real part, and only the higher-frequency content that genuinely
-diffracts leaks into \(b\).
+in the real part, and only the higher-frequency content that diffracts
+leaks into \(b\).
 
 ![Standard deviation of Re(Θ) and Im(Θ) vs. thickness, for a RandomIcemaker ice slab. Re(Θ) dominates Im(Θ) at every thickness tested, by roughly 50x at the thinnest slab and still 2.6x at the thickest.](../../assets/images/scattering-theta-real-imag-split.png){ width="600" }
 ///caption
@@ -78,19 +78,19 @@ Standard deviation of Re(Θ) and Im(Θ) vs. thickness, for a RandomIcemaker ice 
 Correlation of each mode's intensity pattern with multislice's true pattern, vs. thickness. rytov stays at 1.000 throughout; firstborn and kinematic sit near zero across the entire range, including the thinnest specimen tested.
 ///
 
-`firstborn`'s intensity fluctuation is dominated by the spurious \(a^2\)
-term rather than the physically correct \(-2b\) term at every thickness
+The spurious \(a^2\) term dominates `firstborn`'s intensity fluctuation
+rather than the physically correct \(-2b\) term, at every thickness
 tested here, including the thinnest. Its pattern correlation with
 `multislice` never exceeds \({\approx}0.02\) and briefly goes negative.
-This is not specific to `RandomIcemaker` ice; the same collapse (from
-\({\approx}0.9\) at the thinnest slice to \({\approx}0\) at full depth)
-reproduces on a real protein potential (myoglobin, PDB `1mbo`). Averaged
-over the whole image, the same \(a^2+b^2 = |\Theta|^2\) excess also
-explains the mean-intensity bias in [Accuracy vs.
+The same collapse is not specific to `RandomIcemaker` ice: it also
+reproduces (from \({\approx}0.9\) at the thinnest slice to \({\approx}0\)
+at full depth) on a real protein potential, myoglobin (PDB `1mbo`).
+Averaged over the whole image, the same \(a^2+b^2 = |\Theta|^2\) excess
+also explains the mean-intensity bias in [Accuracy vs.
 thickness](#accuracy-vs-thickness) below. [Kinematic](#kinematic)
-inherits the same problem for the same structural reason (additive slice
-combination, not multiplicative), not because its per-slice
-linearization is any less exact.
+inherits the same problem for the same structural reason: additive,
+rather than multiplicative, slice combination. Its per-slice
+linearization is not the cause; kinematic keeps that term exact.
 
 ## Projection
 
@@ -133,7 +133,7 @@ because it approximates thickness effects well. Writing
 I_{\mathrm{multislice}}\rangle\) the mean-intensity bias: for
 `firstborn`/`kinematic`, \(|b|\) dominates \(d\)'s spread at every ice
 thickness tested (by a factor of 1.5 at 32 Å, growing to 5.2 at 320 Å),
-so \(E \approx |b|\) almost exactly. This figure is essentially a
+so \(E \approx |b|\) almost exactly. This figure amounts to a
 rescaled replot of the mean-intensity bias below. `projection`'s bias is
 exactly 0 at every thickness (its exit wave is unit-modulus by
 construction at `alpha=0`), so its \(E\) instead measures only how far

@@ -16,9 +16,9 @@ combination is valid.
 
 !!! info "Source"
     `specter.specimen.tomogram.generator`, plus the per-component modules
-    linked below. Figures are produced by
-    `docs-figures/cryoet_specimen_overview.py`, which drives the real
-    generator once and draws every panel from that one run's own outputs.
+    linked below. `docs-figures/cryoet_specimen_overview.py` produces the
+    figures: it drives the real generator once and draws every panel from
+    that one run's own outputs.
 
 ## The components
 
@@ -33,7 +33,7 @@ combination is valid.
 | [Regions & protein packing](packing.md) | Cytosol/lumen classification, shape- and sphere-based RSA placement, crowding tables | `specimen.packing`, `specimen.tomogram._regions`, `specimen.cytosolic_filler` |
 
 Amorphous ice is **not** one of them. A `specter build tomogram` volume is
-the specimen alone; ice is added downstream, when the volume is imaged.
+the specimen alone; you add ice downstream, when you image the volume.
 See [Ice structure](../ice.md) and
 [Generate a tilt series](../../user-guide/tilt-series.md).
 
@@ -46,12 +46,12 @@ stages before it:
 carbon film → membranes → filaments/microtubules → gold beads → targets → filler
 ```
 
-Nothing is re-placed once accepted. When a candidate position does not
-work, it is rejected and the generator moves on rather than backtracking.
-That is why the order matters: each stage runs with less placement
-freedom than the one before it.
+The generator never re-places anything once accepted. If a candidate
+position doesn't work, it rejects the position and moves on rather than
+backtracking. That's why order matters: each stage runs with less
+placement freedom than the one before it.
 
-What each stage actually avoids:
+Each stage checks a different set of obstacles, and skips the rest:
 
 | Stage | Avoids | Doesn't avoid |
 |---|---|---|
@@ -63,15 +63,15 @@ What each stage actually avoids:
 | Targets | Membrane shell, carbon, filaments/microtubules, beads; restricted to their `location` region | — |
 | Filler | All of the above, plus already-placed targets | — |
 
-Two consequences follow that matter when reading a rendered volume:
+Two consequences matter when you read a rendered volume:
 
-- **The carbon film is not placement-aware in reverse.** It is painted
-  first, and everything else works around it. Membrane collision-avoidance
-  against it is a bounding-sphere approximation, so an irregular
-  organelle's true rendered shape can still graze it; whatever part of its
-  density would land on carbon is zeroed just before compositing, so the
-  volume and that instance's own shell label stay consistent with each
-  other.
+- **The carbon film has no placement-awareness in reverse.** The
+  generator paints it first, and everything else works around it.
+  Membrane collision-avoidance against it is a bounding-sphere
+  approximation, so an irregular organelle's true rendered shape can
+  still graze it. The generator zeroes whatever density would land on
+  carbon just before compositing, so the volume and that instance's own
+  shell label stay consistent with each other.
 - **Filaments have no obstacle-avoiding random walk.** A walk that runs
   into the film loses the monomers that land inside it, leaving a gap in
   that filament rather than steering around the obstacle.
@@ -83,23 +83,24 @@ Two consequences follow that matter when reading a rendered volume:
 The same specimen as the hero image, a thin mid-Z slab, painted by component from the run's own ground-truth label volumes.
 ///
 
-Once every membrane has been composited, the volume is classified once, on
-the composite, into three disjoint regions: `shell` (bilayer material),
-`lumen` (any enclosed compartment), and `cytosol` (everything reachable
-from the volume's own boundary). Protein species declare which of the
-latter two they belong to, and are packed only there.
+Once every membrane has been composited, the generator classifies the
+volume once, on the composite, into three disjoint regions: `shell`
+(bilayer material), `lumen` (any enclosed compartment), and `cytosol`
+(everything reachable from the volume's own boundary). Protein species
+declare which of the latter two they belong to; the packer places them
+only there.
 
 This is topology, not geometry: it works for one vesicle, several disjoint
 ones, or none at all without special-casing. The carbon film lands in
 `shell` too, since it is dense material that nothing should be packed
-into, which is exactly what `shell` means to the packing stage. See
+into, which is what `shell` means to the packing stage. See
 [Regions & protein packing](packing.md).
 
 ## Ground truth
 
-A run writes more than a density volume. Every placement is recorded, and
-the label volumes below are what make a generated tomogram usable as
-training data:
+A run writes more than a density volume. The generator records every
+placement, and the label volumes below are what make a generated
+tomogram usable as training data:
 
 ![Region map, per-instance membrane labels, and per-instance protein/filament/bead labels, all from the same mid-Z slice.](../../assets/images/cryoet-tomogram-ground-truth.png){ width="900" style="display:block;margin:1.2em auto;" }
 ///caption
@@ -108,11 +109,11 @@ Region map, per-instance membrane labels, and per-instance protein/filament/bead
 
 - `regions`: `0` cytosol, `1` shell, `2` lumen.
 - `membrane_labels`: which membrane instance a shell voxel belongs to.
-  Where two instances overlap, first write wins.
+  The first write wins where two instances overlap.
 - `instance_labels`: one id per placed filament monomer, bead, target and
   filler instance.
 - Picks: copick-style `.ndjson` per species, positions and orientations.
-  Targets are exported by default; filler particles are not.
+  The generator exports targets by default, but not filler particles.
 
 Membranes deliberately have no picks entry: a surface has no single
 natural "position" the way a protein does, so `membrane_labels` and
@@ -121,32 +122,32 @@ natural "position" the way a protein does, so `membrane_labels` and
 ## Limitations
 
 - **Transmembrane proteins get no per-instance voxel labels.** Their
-  density is correctly present in the volume, and their placements are
-  recorded, but they do not appear in `instance_labels`. This is a
+  density is present in the volume, and the generator records their
+  placements, but they do not appear in `instance_labels`. This is a
   documented gap, not an oversight.
 - **Collision is voxel-quantized.** Protein placement tests each
-  molecule's real rotated footprint against an occupancy grid, so a
-  molecule is resolved only to the packing voxel size. Gold fiducials and
-  membrane instances are still placed as bounding spheres, which is exact
-  for a bead and approximate for a membrane.
+  molecule's real rotated footprint against an occupancy grid, so the
+  grid resolves a molecule's position only to the packing voxel size.
+  The generator still places gold fiducials and membrane instances as
+  bounding spheres, exact for a bead and approximate for a membrane.
 - **Instances contact but never overlap.** Real surface loops and
-  hydration shells interdigitate slightly; that is deliberately not
-  modelled, since it would make instance labels ambiguous at contacts.
+  hydration shells interdigitate slightly; the generator deliberately
+  doesn't model that, since it would make instance labels ambiguous at
+  contacts.
 - **RSA jams well below close packing.** `filler_occupancy_fraction` is a
   budget, not a promise; see [the packing page](packing.md) for where the
-  ceiling actually sits.
+  ceiling sits.
 
 ## Provenance
 
-`TomogramSpecimenGenerator` is inspired by both
-[CryoTomoSim](https://github.com/carsonpurnell/cryotomosim_CTS) (CTS),
-and [Polnet](https://github.com/anmartinezs/polnet). Two components are
-descended from CTS directly, both generic bulk-material simulations with
-no placement logic of their own: the [gold beads](beads.md)
-(`gen_beads.m`) and the [carbon film](carbon-film.md)
-(`gen_carbon.m`/`carbonshape`). The [transmembrane placement](bilayer.md)
-construction is adapted from Polnet, as is the bilayer's two-Gaussian
-profile.
+Both [CryoTomoSim](https://github.com/carsonpurnell/cryotomosim_CTS)
+(CTS) and [Polnet](https://github.com/anmartinezs/polnet) inspired
+`TomogramSpecimenGenerator`. Two components descend directly from CTS,
+both generic bulk-material simulations with no placement logic of their
+own: the [gold beads](beads.md) (`gen_beads.m`) and the
+[carbon film](carbon-film.md) (`gen_carbon.m`/`carbonshape`). specter
+adapts the [transmembrane placement](bilayer.md) construction from
+Polnet, as it does the bilayer's two-Gaussian profile.
 
 ## References
 

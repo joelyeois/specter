@@ -70,29 +70,30 @@ supports (`nvidia-smi` reports it top-right):
 | 12.6+ | `https://download.pytorch.org/whl/cu126` | `cupy-cuda12x` |
 | none (CPU only) | `https://download.pytorch.org/whl/cpu` | remove the line |
 
-Renaming the index in both places is fine; `name` is arbitrary, it just has
+Renaming the index in both places is fine: `name` is arbitrary, it has
 to match what `[tool.uv.sources]` points at. Newer CUDA builds may also imply a
-newer minimum `torch`; `cu126` wheels start at torch 2.6, for instance.
+newer minimum `torch`: `cu126` wheels start at torch 2.6, for instance.
 
 !!! tip "You may not need to change the PyTorch pin at all"
 
     CUDA has minor-version compatibility: any 12.x build runs on a driver that
-    supports 12.0 (≥ 525.60.13 on Linux). So a 12.4 or 12.8 driver runs the
+    supports 12.0 (≥ 525.60.13 on Linux), so a 12.4 or 12.8 driver runs the
     default cu121 wheels fine. The pin only needs changing for CUDA 11, for
-    ROCm/CPU-only, or when you specifically want a newer runtime.
+    ROCm/CPU-only, or when you want a newer runtime.
 
     `uv pip install --torch-backend auto` detects your driver and picks the
-    matching PyTorch build automatically. It works on uv's `pip` interface
-    only, not `uv sync`, so it is an alternative to editing the pin rather
-    than a replacement for it.
+    matching PyTorch build. It works on uv's `pip` interface
+    only, not `uv sync`, so treat it as an alternative to editing the pin
+    rather than a replacement for it.
 
 A mismatched CuPy wheel fails safely: the `spherical_harmonics` membrane
 backend warns once and falls back to `scipy`'s CPU distance transform. A
 mismatched **PyTorch** build fails at CUDA init instead of degrading.
 
-Installing with pip instead of uv bypasses `[tool.uv.index]` entirely (it is a
-uv-specific setting) and gives you PyPI's default PyTorch build; use
-`pip install torch --index-url <url from the table>` to choose explicitly.
+Installing with pip instead of uv bypasses `[tool.uv.index]` (a
+uv-specific setting) and gives you PyPI's default PyTorch build. Use
+`pip install torch --index-url <url from the table>` to pick the build
+yourself.
 
 ## Optional extras
 
@@ -100,10 +101,10 @@ uv-specific setting) and gives you PyPI's default PyTorch build; use
 
 !!! note "GPU distance transforms"
 
-    CuPy is a core dependency, so `spherical_harmonics` membrane backend GPU
-    distance transforms are installed by a plain `uv sync`.
+    CuPy is a core dependency, so a plain `uv sync` installs GPU distance
+    transforms for the `spherical_harmonics` membrane backend too.
 
-    On macOS there are no `cupy-cuda12x` wheels, so CuPy is not installed and
+    On macOS no `cupy-cuda12x` wheels exist, so `uv sync` skips CuPy and
     the backend falls back to `scipy`'s CPU distance transform (~3x slower
     field generation, plus a one-time warning). The same fallback covers a
     machine with no CUDA device available at runtime.
@@ -111,16 +112,17 @@ uv-specific setting) and gives you PyPI's default PyTorch build; use
 ## Monomer Library (for Shtyrov scattering factors)
 
 The default `shtyrov` parameterization fits scattering factors per *bonded
-species* rather than per element, so an atom is typed by what it is bonded
-to: a methyl carbon reads `C(HHHC)`, a water oxygen reads `O(HH)`. Twenty
-of the forty-two tabulated species contain hydrogen.
+species* rather than per element: SPECTER types an atom by what it is
+bonded to, so a methyl carbon reads `C(HHHC)` and a water oxygen reads
+`O(HH)`. Twenty of the forty-two tabulated species contain hydrogen.
 
-Deposited structures almost never include hydrogens, since they are not
-resolved at typical resolution. Supplying them is the job of the
-[Monomer Library](https://github.com/MonomerLibrary/monomers), the same
-chemical-component dictionary [REFMAC](https://www.ccp4.ac.uk/html/refmac5.html)
-and [Coot](https://www2.mrc-lmb.cam.ac.uk/personal/pemsley/coot/) use. It is
-not bundled with SPECTER: it is roughly 1.5 GB, and separately licensed.
+Deposited structures almost never include hydrogens, since typical
+resolution does not resolve them. The
+[Monomer Library](https://github.com/MonomerLibrary/monomers) supplies
+them instead, the same chemical-component dictionary
+[REFMAC](https://www.ccp4.ac.uk/html/refmac5.html) and
+[Coot](https://www2.mrc-lmb.cam.ac.uk/personal/pemsley/coot/) use. SPECTER
+does not bundle it: it runs roughly 1.5 GB, and carries its own license.
 
 Without it, every H-containing species fails to match and those atoms fall
 back to per-element Peng factors. Measured on myoglobin, that is about
@@ -143,8 +145,8 @@ cd monomers && git sparse-checkout set a c d g h i l m n p s t v w y
 so an existing CCP4 install needs no extra setup. It is the only place SPECTER looks: there is no config or
 CLI equivalent, since the library is an installation detail rather than a
 per-simulation choice, and the Monomer Library documents this variable as the
-way to point at it. `~` and `$VAR` in the path are expanded, and a path that
-does not exist fails immediately rather than silently degrading to Peng.
+way to point at it. SPECTER expands `~` and `$VAR` in the path, and a path
+that does not exist fails immediately rather than silently degrading to Peng.
 
 Python callers can still override it per structure:
 
@@ -157,16 +159,16 @@ pdb = PDB("1a6m", compute_atom_species=True,
 
 !!! note "What changes when a library is present"
 
-    Hydrogens are added from the library's ideal geometry, and coordinates,
-    elements and species are then all taken from that completed model. A
+    SPECTER adds hydrogens from the library's ideal geometry, then takes
+    coordinates, elements, and species from that completed model. A
     hydrogen-free deposition therefore roughly **doubles in atom count**
     (myoglobin: 1,445 → 2,668), typing coverage rises from ~56% to ~99%, and
-    the rendered potential changes by 20-30% relative RMS. Hydrogens whose
-    position is chemically ambiguous (a rotatable hydroxyl, or both tautomer
-    hydrogens of a histidine) are excluded rather than rendered.
+    the rendered potential changes by 20-30% relative RMS. SPECTER excludes
+    hydrogens whose position is chemically ambiguous (a rotatable hydroxyl,
+    or both tautomer hydrogens of a histidine) rather than rendering them.
 
     Structures that already carry hydrogens keep them where they were
-    deposited; only a structure with none has them added. See
+    deposited; only a structure with none gets hydrogens added. See
     `readd_hydrogens` to override, below.
 
 For what `readd_hydrogens` controls and how it interacts with typing coverage,
@@ -181,8 +183,8 @@ conda activate specter
 pip install -e .
 ```
 
-`pip install -e .` reads the full dependency list from `pyproject.toml`, so no
-separate requirements file is needed.
+`pip install -e .` reads the full dependency list from `pyproject.toml`, so
+you do not need a separate requirements file.
 
 To install the optional extras (see above) via pip instead of `uv sync`:
 

@@ -2,10 +2,10 @@
 
 Every SPECTER forward simulator, whether it produces a single particle
 image, a full micrograph, or a cryo-ET tilt series, runs the same ordered
-sequence of stages on a 3D potential volume. What differs between the
-three is only what builds that volume and how many times the chain
-repeats per run. This page lays out the sequence once; each stage has its
-own page with the underlying math.
+sequence of stages on a 3D potential volume. The three differ only in
+what builds that volume and how many times the chain repeats per run.
+This page lays out the sequence once; each stage has its own page with
+the underlying math.
 
 !!! info "Source"
     `specter.imagegenerator._base.BaseImager` and
@@ -19,45 +19,48 @@ own page with the underlying math.
 
 1. **Potential.** A 3D electrostatic potential volume \(V(x,y,z)\) either
    arrives pre-built (`ImageGenerator`, `MicrographGenerator` when given
-   `volume`), or is built from atomic coordinates on the fly by
-   `PotentialBuilder` (`ImageGeneratorFromCoordinates`). See
+   `volume`), or `PotentialBuilder` builds it from atomic coordinates on
+   the fly (`ImageGeneratorFromCoordinates`). See
    [Specimens](specimens.md) and [Atomic potentials](atomic-potentials.md).
-2. **Pose.** The volume (or, equivalently, the atomic coordinates before
-   voxelization) is rotated and translated per simulation instance. See
-   [Pose & crowding](pose-crowding.md) for the representation and
+2. **Pose.** SPECTER rotates and translates the volume (or, equivalently,
+   the atomic coordinates before voxelization) per simulation instance.
+   See [Pose & crowding](pose-crowding.md) for the representation and
    [Conventions](conventions.md#poses) for the sign and origin
    conventions.
-3. **Crowding** *(optional)*. Rigid-transformed duplicates of the same
-   volume are Poisson-disk placed around the primary instance and summed
-   in, before ice. See [Pose & crowding](pose-crowding.md#crowding).
-4. **Potential scaling.** Each instance's volume is multiplied by a
+3. **Crowding** *(optional)*. SPECTER Poisson-disk places
+   rigid-transformed duplicates of the same volume around the primary
+   instance and sums them in, before ice. See
+   [Pose & crowding](pose-crowding.md#crowding).
+4. **Potential scaling.** SPECTER multiplies each instance's volume by a
    per-image scalar, `potential_scale`, before propagation. Together with
-   dose, this is what lets a batch mix imaging conditions in one forward
-   pass.
-5. **Ice (solvation)** *(optional)*. An amorphous ice volume is added,
-   blended in only where the specimen's own potential is otherwise zero.
-   See [Ice structure](ice.md).
-6. **Scattering.** The electron wave is propagated through the finished
-   volume to a complex exit wave \(\psi(x,y)\). See
+   dose, `potential_scale` lets a batch mix imaging conditions in one
+   forward pass.
+5. **Ice (solvation)** *(optional)*. SPECTER adds an amorphous ice
+   volume, blending it in only where the specimen's own potential is
+   otherwise zero. See [Ice structure](ice.md).
+6. **Scattering.** `Scattering` propagates the electron wave through the
+   finished volume to a complex exit wave \(\psi(x,y)\). See
    [Scattering](scattering/index.md).
-7. **Aberrations.** The microscope's transfer function (defocus,
-   spherical aberration, astigmatism, and coherence/dose envelopes) is
-   applied to the exit wave. See [Aberrations](aberrations.md).
-8. **Detector.** The detector's MTF, DQE(0), shot noise, and (for direct
-   electron detectors) coincidence loss turn the aberrated wave into
-   expected electron counts per pixel. See [Detector](detector.md).
+7. **Aberrations.** `Aberration` applies the microscope's transfer
+   function (defocus, spherical aberration, astigmatism, and
+   coherence/dose envelopes) to the exit wave. See
+   [Aberrations](aberrations.md).
+8. **Detector.** `Detector` turns the aberrated wave into expected
+   electron counts per pixel, modelling MTF, DQE(0), shot noise, and (for
+   direct electron detectors) coincidence loss. See
+   [Detector](detector.md).
 
-Stages 6 through 8 are exactly [forward simulation](forward-simulation.md)
-proper; stages 1 through 5 are what assembles the volume that forward
-simulation runs on. The split matters because it is also where the
+Stages 6 through 8 are [forward simulation](forward-simulation.md)
+proper; stages 1 through 5 assemble the volume that forward
+simulation runs on. The split also marks where the
 single-particle and cryo-ET pipelines diverge: they build \(V\)
 differently but hand it to the same downstream chain.
 
 ## How the generator classes use it
 
 - **`ImageGeneratorFromCoordinates`** rebuilds \(V\) from atomic
-  coordinates on every `forward()` call: the coordinates are rotated, then
-  voxelized by `PotentialBuilder`. This is the more expensive path per
+  coordinates on every `forward()` call: it rotates the coordinates, then
+  `PotentialBuilder` voxelizes them. This is the more expensive path per
   call, and the one that lets pose refinement backpropagate into atomic
   coordinates (used by `Ghostbuster`'s coordinate-space mode).
 - **`ImageGenerator`** takes one pre-built volume and rotates the *volume*
@@ -85,7 +88,6 @@ differently but hand it to the same downstream chain.
 `Reconstructor` and `TomogramReconstructor` optimize a volume (and
 optionally pose, translation, and defocus) by running this exact forward
 chain on a candidate volume and comparing the result against observed
-images. There is one shared forward model, not a separate one for
-simulation and reconstruction: a change to any stage's physics applies to
-both directions of the problem at once. See
-[Reconstruct a volume](../user-guide/reconstruction.md).
+images. One shared forward model serves both simulation and
+reconstruction: change any stage's physics, and both directions follow.
+See [Reconstruct a volume](../user-guide/reconstruction.md).

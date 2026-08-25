@@ -8,13 +8,13 @@ pipeline default to [`multislice`](multislice.md).
 
 !!! info "Source"
     `Scattering.rytov` / `IterativeScattering.rytov` /
-    `IterativeScattering.parallel_rytov`. Figures are produced by
-    `docs-figures/scattering_accuracy.py`.
+    `IterativeScattering.parallel_rytov`.
+    `docs-figures/scattering_accuracy.py` produces the figures.
 
 ## The exponentiated Born series
 
-Each slice's contribution is Fresnel-propagated to the exit plane and
-accumulated in the phase, then exponentiated once at the end:
+Rytov Fresnel-propagates each slice's contribution to the exit plane,
+accumulates it in the phase, and exponentiates the sum once at the end:
 
 \[
 \psi = \exp\!\left(i\sigma\,\Delta z\sum_{z} \mathcal{F}^{-1}\!\big[\mathcal{F}[V_z]\cdot F_z\big]\right)
@@ -33,7 +33,7 @@ per-slice phase \(\sigma\,\Delta z\,V_z\) is no longer small.
 
 Multislice's per-slice transmission depends on the *already-propagated*
 wave from every previous slice (`psi_{i} = t_i * psi_{i-1}`), which is
-why it must be evaluated sequentially. Rytov's sum over slices is
+why multislice must run sequentially. Rytov's sum over slices is
 independent of any other slice's contribution before the final
 exponentiation, so it parallelizes: `IterativeScattering.parallel_rytov`
 computes every slice's contribution as one batched FFT pair rather than
@@ -41,8 +41,8 @@ computes every slice's contribution as one batched FFT pair rather than
 bound memory. A fully parallel forward pass is both faster and, via
 checkpointing, cheaper to hold gradients for than replaying a sequential
 recursion hundreds to a thousand slices deep, which is what would make
-Rytov attractive inside an iterative, tilt-aware reconstruction loop. It
-is not yet wired into one, however: `parallel_rytov` is correctness- and
+Rytov attractive inside an iterative, tilt-aware reconstruction loop. No
+pipeline wires it in yet, however: `parallel_rytov` is correctness- and
 gradient-tested (`tests/test_scattering.py`) but not called from any
 pipeline, config, or reconstructor class, and `TomogramReconstructor`
 (the one class that uses `IterativeScattering` at all) still defaults to
@@ -66,14 +66,14 @@ Relative error in exit-wave intensity vs. multislice, as a function of ice thick
 Across this thickness range (up to 320 Å, spanning typical single-particle
 ice thickness), Rytov's error stays one to two orders of magnitude below
 `firstborn`, `kinematic`, and `projection`'s. The exponentiated form
-matters: even though Rytov shares first Born's linear-in-slices structure,
-exponentiating the accumulated phase rather than adding \(1\) to it (as
-`firstborn` does) keeps the *amplitude* of \(\psi\) correctly normalized
-at every thickness, rather than only to first order. Rytov's own mean
-intensity stays pinned to 1.0 (energy-conserving) at every thickness
-tested, just like `multislice`'s. `firstborn`/`kinematic`, by contrast,
-drift substantially at large thickness. `projection`'s placement on this
-plot has a separate explanation; see [Other propagation
+makes the difference: even though Rytov shares first Born's linear-in-slices
+structure, exponentiating the accumulated phase rather than adding \(1\)
+to it (as `firstborn` does) keeps the *amplitude* of \(\psi\) correctly
+normalized at every thickness, rather than only to first order. Rytov's
+own mean intensity stays pinned to 1.0 (energy-conserving) at every
+thickness tested, like `multislice`'s. `firstborn`/`kinematic`, by
+contrast, drift substantially at large thickness. `projection`'s
+placement on this plot has a separate explanation; see [Other propagation
 modes](other-modes.md#accuracy-vs-thickness).
 
 ## References

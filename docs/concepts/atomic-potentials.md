@@ -4,10 +4,10 @@ Every SPECTER simulation starts from the electrostatic potential of the
 atoms in the structure: `PotentialBuilder` places a per-element (or
 per-bonded-species) potential kernel at every atom's coordinates to build
 the 3D volume that `Scattering` then propagates the electron wave through.
-This page covers where those single-atom kernels come from, the math
-behind SPECTER's three parameterizations (Kirkland, Lobato, Shtyrov), and
-how the Kirkland ones are validated against the worked examples in
-Kirkland's *Advanced Computing in Electron Microscopy*.
+This page traces those single-atom kernels back to their source, works
+through the math behind SPECTER's three parameterizations (Kirkland,
+Lobato, Shtyrov), and checks the Kirkland ones against the worked
+examples in Kirkland's *Advanced Computing in Electron Microscopy*.
 
 !!! info "Source"
     Walks through `specter.atom.atomic_potentials` and
@@ -18,9 +18,9 @@ Kirkland's *Advanced Computing in Electron Microscopy*.
 
 ## Parameterizing an atom's scattering factor
 
-An isolated atom's electron scattering factor \(f_e(k)\) (as a function of
-spatial frequency \(k\), Å⁻¹) is tabulated numerically from relativistic
-Hartree-Fock calculations, not available in closed form. To use it inside
+An isolated atom's electron scattering factor \(f_e(k)\) (a function of
+spatial frequency \(k\), Å⁻¹) comes from relativistic Hartree-Fock
+calculations as a numerical table, not a closed form. To use it inside
 a differentiable simulator, SPECTER relies on published analytic fits that
 express \(f_e(k)\) as a small sum of terms with known inverse Fourier
 transforms. The same handful of fitted coefficients therefore gives both
@@ -45,7 +45,7 @@ f_e(k) = \sum_{i=1}^{3} \frac{a_i}{k^2 + b_i} \;+\; \sum_{i=1}^{3} c_i\, e^{-d_i
 \]
 
 (`kirkland_atomic_potential_3d_fourier`, Kirkland Eq. C.15.) Each
-Lorentzian term is literally a [Lorentzian
+Lorentzian term is a [Lorentzian
 lineshape](https://en.wikipedia.org/wiki/Cauchy_distribution) in \(|k|\);
 its inverse Fourier transform is a screened Coulomb / [Yukawa
 potential](https://en.wikipedia.org/wiki/Yukawa_potential), the
@@ -73,11 +73,11 @@ V_{\mathrm{2D}}(r) = 4\pi^2 a_0 e \sum_{i=1}^{3} a_i\, K_0\!\big(2\pi r \sqrt{b_
 \]
 
 The figure below decomposes gold's (Z=79) fitted potential into its
-individual Lorentzian and Gaussian terms. The Lorentzian terms dominate
-entirely: their coefficients are one to two orders of magnitude larger
-than the Gaussians', and they carry the near-singular behavior close to
-\(r=0\) (physically expected, since an atomic nucleus is a point charge at
-this scale). The Gaussian terms only matter as a small, smooth correction
+individual Lorentzian and Gaussian terms. The Lorentzian terms dominate:
+their coefficients run one to two orders of magnitude larger than the
+Gaussians', and they carry the near-singular behavior close to \(r=0\)
+(physically expected, since an atomic nucleus is a point charge at this
+scale). The Gaussian terms only matter as a small, smooth correction
 across the whole range.
 
 ![Kirkland's fit for gold, decomposed into its 3 Lorentzian and 3 Gaussian terms.](../assets/images/atomic-potential-lorentzian-gaussian-terms-kirkland.png){ width="700" }
@@ -118,7 +118,7 @@ from relativistic Hartree-Fock atomic structure. At cryo-EM resolutions,
 most atoms sit in covalent or hydrogen-bonded environments (the oxygen in
 a water molecule, a carbon in a peptide backbone) whose local electron
 density differs measurably from an isolated atom's. Shtyrov et al. (2026)
-take a different approach entirely: rather than computing scattering
+take a different approach: rather than computing scattering
 factors ab initio, they infer them empirically, via a Bayesian approach,
 directly from high-resolution cryo-EM electrostatic-potential
 maps (catalase reconstructions plus a broader public training set), then
@@ -141,7 +141,7 @@ V(r) = 2\pi e\, a_0 \sum_{i=1}^{5} a_i \left(\frac{4\pi}{b_i}\right)^{3/2} e^{-4
 
 Atoms whose bonded species isn't in the bundled table fall back to
 `peng_atomic_potential_3d`, [gemmi](https://gemmi.readthedocs.io/)'s
-built-in per-element independent-atom scattering factors (Peng et al. 1996). This is evaluated with the same
+built-in per-element independent-atom scattering factors (Peng et al. 1996). SPECTER evaluates it with the same
 closed form, so it combines coherently (same units, same functional form)
 with matched-species Shtyrov kernels in one potential volume. `PotentialBuilder`
 and `MicrographSpecimenGenerator`/`TomogramSpecimenGenerator` default to
@@ -149,7 +149,7 @@ and `MicrographSpecimenGenerator`/`TomogramSpecimenGenerator` default to
 
 How often that fallback fires depends on hydrogen. Twenty of the forty-two
 tabulated species name a hydrogen neighbour, and a species descriptor is built
-from the atoms actually present in the model, so a methyl carbon in a
+from the atoms present in the model, so a methyl carbon in a
 structure without hydrogens is described as `C(C)` rather than `C(HHHC)` and
 matches nothing. Deposited structures rarely carry hydrogens, and supplying
 them requires a Monomer Library (see
@@ -170,21 +170,21 @@ scattering factors, agree to within 0.1% everywhere in this plot. Peng's
 independently-fit model tracks both closely for \(r \gtrsim 0.05\) Å (within
 a few %, briefly overshooting by ~15-20% around \(r\approx0.08\)-0.1 Å), but
 undershoots by more than 2x at \(r = 0.02\) Å, well inside where any real
-bonding environment would matter. This is consistent with it being a
+bonding environment would matter. That undershoot fits Peng's role as a
 coarser, independently-fit reference used only as a per-element fallback
 for bonded species missing from the Shtyrov table.
 
 ### Hydrogen coordinates
 
 A species descriptor is built from the bond graph, not from coordinates, so
-the fitted factors apply whichever positions a hydrogen occupies. What
-`readd_hydrogens` controls is only whether hydrogen *density* is added, and
-from ideal or deposited geometry.
+the fitted factors apply whichever positions a hydrogen occupies.
+`readd_hydrogens` only controls whether SPECTER adds hydrogen *density*,
+and whether it comes from ideal or deposited geometry.
 
 The default, `"auto"`, follows the file: hydrogens a structure already carries
-are left exactly where they are, and hydrogens are added only to a structure
-that has none. Deposited positions are information the file provides, so
-nothing is gained by moving them.
+stay exactly where they are, and SPECTER adds hydrogens only to a structure
+that has none. Deposited positions are information the file already
+provides, so moving them gains nothing.
 
 | | atoms | H | typed |
 |---|---:|---:|---:|
@@ -216,46 +216,49 @@ coordinate. `PotentialBuilder` turns a full structure's coordinates into a
 voxel grid two ways:
 
 - **Supersample-then-pool** (`compute_supersampling_parameters`,
-  `build_potential_volume_fftconvolve_3d`/`_2d`): each element's kernel is
-  sampled on a finely-spaced grid (0.1 Å by default, fine enough to
-  resolve the near-\(r=0\) peak), then average-pooled down to the main
-  volume's voxel size. Atom positions are splatted onto the main grid with
-  `soft_voxelize_coordinates` (trilinear, differentiable) and FFT-convolved
-  with the pooled kernel, once per unique element.
+  `build_potential_volume_fftconvolve_3d`/`_2d`): `PotentialBuilder` samples
+  each element's kernel on a finely-spaced grid (0.1 Å by default, fine
+  enough to resolve the near-\(r=0\) peak), then average-pools it down to
+  the main volume's voxel size. It splats atom positions onto the main
+  grid with `soft_voxelize_coordinates` (trilinear, differentiable) and
+  FFT-convolves them with the pooled kernel, once per unique element.
 - **Analytic scatter-add** (`method="analytic"`, `PotentialBuilder`'s
   default regardless of parameterization): rather than supersampling and
-  pooling, each atom's Gaussian terms are analytically integrated
-  (closed-form, via `erf`) over every voxel they overlap in a small local
-  window, then scatter-added into the volume. This needs no FFT and no
-  precomputed kernel, dispatching on `parameterization` to
+  pooling, `PotentialBuilder` integrates each atom's Gaussian terms
+  analytically (closed-form, via `erf`) over every voxel they overlap in a
+  small local window, then scatter-adds the result into the volume. This
+  needs no FFT and no precomputed kernel; it dispatches on
+  `parameterization` to
   `build_potential_volume_analytic_scatter_kirkland`/`_lobato`, or, for
   Shtyrov, to `build_potential_volume_analytic_scatter` on each atom's
   per-bonded-species coefficients (falling back to per-element Peng where
-  a species doesn't resolve). It is also dramatically faster than
-  supersample-then-pool at typical atom counts and fully differentiable
-  with respect to atom coordinates; `method="3d"` remains the only option
-  under `periodic=True`, which the analytic path does not implement.
+  a species doesn't resolve). It also runs much faster than
+  supersample-then-pool at typical atom counts and stays fully
+  differentiable with respect to atom coordinates; `method="3d"` remains
+  the only option under `periodic=True`, which the analytic path does not
+  implement.
 
 Both give the exact voxel *average* of the potential rather than a point
-sample at the nearest grid point. The underlying potential is sharply
-peaked at the atom center, so a point sample would swing wildly with
-sub-voxel atom position.
+sample at the nearest grid point. The underlying potential peaks sharply
+at the atom center, so a point sample would bounce around with sub-voxel
+atom position.
 
-The analytic path also needs a cutoff radius `rcut` beyond which an atom's
-contribution is treated as negligible. Left unset, `PotentialBuilder`
+The analytic path also needs a cutoff radius `rcut` beyond which SPECTER
+treats an atom's contribution as negligible. Left unset, `PotentialBuilder`
 picks one automatically via `recommended_rcut`: a per-element (or, for
 Shtyrov, per-bonded-species) lookup table of the minimum radius that
 captures at least 99.5% of an atom's integrated potential, maximized over
-every element or species actually present in the structure. Light-element
+every element or species present in the structure. Light-element
 structures (H, C, N, O) need only ~2-2.5 Å; heavier or more diffuse
 elements such as K or Na need ~5 Å.
 
 ## Worked example: reproducing Kirkland's textbook figures
 
-The atomic potential and imaging code are validated against the worked
-examples in Kirkland Ch. 5, for the standard five-element test row (C, Si,
-Cu, Au, U). `demo-notebooks/compare-atomic-potentials-with-kirkland.ipynb`
-walks through the same four steps as `docs-figures/atomic_potentials.py`:
+SPECTER validates the atomic potential and imaging code against the
+worked examples in Kirkland Ch. 5, using the standard five-element test
+row (C, Si, Cu, Au, U).
+`demo-notebooks/compare-atomic-potentials-with-kirkland.ipynb` walks
+through the same four steps as `docs-figures/atomic_potentials.py`:
 
 1. **3D atomic potential vs. radius** (Kirkland Fig. 5.4):
    `kirkland_atomic_potential_3d` evaluated on a radial grid.

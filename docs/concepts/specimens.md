@@ -2,24 +2,25 @@
 
 Before any imaging physics runs, SPECTER needs a 3D electrostatic
 potential volume \(V(x,y,z)\) to image: the "specimen." Building that
-volume is where the two simulation pipelines genuinely diverge:
+volume is where the two simulation pipelines diverge:
 
-- **Single-particle**: one structure (a PDB/mmCIF, or a pre-built volume)
-  is randomly posed and placed, once per image, typically embedded in a
-  thin slab of amorphous ice.
-- **Cryo-ET**: a much larger volume is populated with many instances,
-  including membranes, filaments, and crowded proteins, placed and packed
-  against each other, then rendered at full resolution.
+- **Single-particle**: SPECTER poses and places one structure (a
+  PDB/mmCIF, or a pre-built volume) at random, once per image, most often
+  embedded in a thin slab of amorphous ice.
+- **Cryo-ET**: SPECTER populates a much larger volume with many
+  instances, including membranes, filaments, and crowded proteins,
+  placing and packing them against each other, then rendering at full
+  resolution.
 
 Both draw on the same two shared building blocks:
 
-- **[Atomic potentials](atomic-potentials.md)**: every atom, in either
-  pipeline, is rendered from the same Kirkland/Lobato/Shtyrov kernels via
-  `PotentialBuilder`.
+- **[Atomic potentials](atomic-potentials.md)**: `PotentialBuilder`
+  renders every atom, in either pipeline, from the same
+  Kirkland/Lobato/Shtyrov kernels.
 - **[Ice structure](ice.md)**: both pipelines draw amorphous ice from the
   same `IceBank` cache.
 
-What is specific to each path:
+Each path also adds its own pieces:
 
 - **Single-particle**: [pose & crowding](pose-crowding.md), the
   quaternion/translation pose sampled per particle, and Poisson-disk
@@ -32,16 +33,16 @@ What is specific to each path:
   [region-gated packing](cryoet-specimen/packing.md) that crowds proteins
   into what is left.
 
-Once a specimen volume exists, everything downstream is exactly the same
+Once a specimen volume exists, everything downstream is the same
 physics regardless of which path built it: propagating the electron wave
 through the volume and forming an image. See [Forward
 simulation](forward-simulation.md).
 
 !!! info "Source"
-    `specter.potential.PotentialBuilder` and `specter.ice` are shared by
-    both pipelines. Single-particle specimen assembly lives in
+    Both pipelines share `specter.potential.PotentialBuilder` and
+    `specter.ice`. Single-particle specimen assembly lives in
     `specter.imagegenerator` and `specter.specimen.single_particle`;
     cryo-ET specimen assembly lives in `specter.specimen` (`tomogram/`,
     `membrane/`, `filament/`, `packing/`, `_carbon.py`, `_grid.py`).
-    This package is under active development; see it directly for the
+    This package is under active development; check it for the
     current state.

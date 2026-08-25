@@ -1,6 +1,6 @@
 # Core modules
 
-Standalone top-level modules that are not grouped into a subpackage.
+Standalone top-level modules, outside any subpackage.
 
 ## specter.scattering
 

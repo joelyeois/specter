@@ -9,18 +9,18 @@ A vesicle's sampled transmembrane sites with their surface normals, and the rend
 \(\phi\): the geometry. This page covers everything between that field
 and a rendered volume: the 1D potential profile \(\psi(d)\) that turns
 distance-from-the-mid-plane into volts, the anti-aliased resampling onto
-the output grid, and how proteins get embedded in the resulting bilayer.
+the output grid, and how proteins embed in the resulting bilayer.
 
 !!! info "Source"
     `specter.specimen.membrane._profile`, `._raster`, `._placement`.
-    Figures are produced by
-    `docs-figures/cryoet_specimen_bilayer.py`.
+    `docs-figures/cryoet_specimen_bilayer.py` produces the figures.
 
 ## From shape to potential
 
 Every membrane voxel's density is \(\psi(\phi(\mathbf{x}))\): a single 1D
-lookup applied to the signed distance field. The atomic-resolution work
-happens once, not everywhere.
+lookup on the signed distance field. The generator does the
+atomic-resolution work once and reuses it everywhere through that
+lookup.
 
 \(\psi(d)\) itself is two Gaussians, one per leaflet:
 
@@ -43,12 +43,12 @@ Left, the atomic lipid patch's own profile against the shipped analytic profile.
 
 The alternative, deriving the profile's *shape* by building a schematic
 atomic lipid patch, jittering it and rendering it, is still in the
-codebase (`compute_bilayer_profile`, the orange curve above) and is not
-what ships. It is more physically motivated and considerably more
-fragile: keeping the acyl-chain region featureless relative to the
-phosphate peaks means fighting per-cluster jitter scales against emergent
+codebase (`compute_bilayer_profile`, the orange curve above), and it is
+not what ships. It is more physically motivated, and more fragile:
+keeping the acyl-chain region featureless relative to the phosphate
+peaks means fighting per-cluster jitter scales against emergent
 Gaussian-sum interference, with no guarantee a different lipid count or
-seed does not reintroduce a competing hump between the leaflets. Because
+seed doesn't reintroduce a competing hump between the leaflets. Because
 \(\sigma\) is far smaller than the leaflet separation, the two-Gaussian
 construction cannot do that, by construction, not by tuning.
 
@@ -56,7 +56,7 @@ construction cannot do that, by construction, not by tuning.
 
 The *shape* is analytic; the *scale* is not. `amplitude` comes from
 rendering each unique atomic species in the reference lipid template as a
-**single isolated atom** and taking the tallest raw peak, typically the
+**single isolated atom** and taking the tallest raw peak, most often the
 phosphate phosphorus. That puts the bilayer in the same units as a
 `PotentialBuilder`-rendered protein template, so a membrane and an
 inserted transmembrane protein sit on a physically consistent scale in the
@@ -70,21 +70,21 @@ weakly than the same atom in a protein.
 
 A general principle recurs here: **the smoothness real cryo-ET membranes
 show comes from the microscope's resolution limits, applied to the ground
-truth after it is built** (CTF, multislice, detector MTF; see
+truth after the generator builds it** (CTF, multislice, detector MTF; see
 [Forward simulation](../forward-simulation.md)), not from pre-averaging
 the ground truth itself.
 
 `membrane_scale_range` then draws a per-instance contrast multiplier and
-folds it into the amplitude *before* the profile is built, rather than
-applying it as a post-hoc multiply on the rendered volume. This keeps
-the compositing occupancy threshold, itself derived from the profile's
-peak, automatically consistent with whatever scale was drawn.
+folds it into the amplitude *before* the generator builds the profile,
+rather than applying it as a post-hoc multiply on the rendered volume.
+This keeps the compositing occupancy threshold, itself derived from the
+profile's peak, consistent with whatever scale was drawn.
 
 ## Anti-aliased rasterization
 
-The field lives on its own fine working grid; the output volume usually
-does not. Resampling between them is where a real, previously observed
-failure mode lives.
+The field lives on its own fine working grid; the output volume is
+often coarser. Resampling between them is where a real, previously
+observed failure mode lives.
 
 ![The same membrane field rasterized at 4, 8 and 12 Å voxels, point-sampled on top and anti-aliased below, along a line through the vesicle wall.](../../assets/images/cryoet-bilayer-antialias.png){ width="900" style="display:block;margin:1.2em auto;" }
 ///caption
@@ -92,8 +92,8 @@ The same membrane field rasterized at 4, 8 and 12 Å voxels, point-sampled on to
 ///
 
 Point-sampling the fine density directly (top row) keeps the two leaflets
-sharp and full height at *every* voxel size. The peaks just land wherever
-the sample grid happens to catch them, so the apparent leaflet separation
+sharp and full height at *every* voxel size. The peaks land wherever the
+sample grid happens to catch them, so the apparent leaflet separation
 wanders with voxel size. The physical peak-to-peak spacing is fixed, so
 that variation is pure aliasing.
 
@@ -106,8 +106,8 @@ bilayer does when you stop resolving it.
 ## Transmembrane placement
 
 Because \(\phi\) is a dense signed field defined everywhere rather than a
-mesh, the local surface normal at any point is just its gradient: exact,
-and available without a mesh or a KD-tree. Placement uses that directly:
+mesh, the local surface normal at any point is its gradient: exact, and
+available without a mesh or a KD-tree. Placement uses that directly:
 
 1. **Project onto the surface.** Newton iteration on the field:
    \(\mathbf{x} \leftarrow \mathbf{x} - \phi(\mathbf{x})\,\nabla\phi(\mathbf{x})\).
@@ -127,18 +127,18 @@ inertia**, not its file z-axis. A deposited structure's native axes are an
 artifact of how it was solved; for a membrane protein with a large
 asymmetric extramembrane domain, that domain's real spatial extent is the
 physically meaningful "sticks out of the membrane" direction. Confirmed
-empirically on a real structure: its principal axis diverged substantially
-from its native z-axis, and depth-centering along the wrong one left the
-extramembrane domain pointing off at an angle. The *sign* of that axis is
-not resolved. With no topology information (cytoplasmic vs. extracellular)
-to break the symmetry, which end becomes \(+z\) is an arbitrary but
-deterministic PCA-sign choice.
+empirically on a real structure: its principal axis diverged far from
+its native z-axis, and depth-centering along the wrong one left the
+extramembrane domain pointing off at an angle. The generator doesn't
+resolve the *sign* of that axis. With no topology information
+(cytoplasmic vs. extracellular) to break the symmetry, which end becomes
+\(+z\) is an arbitrary but deterministic PCA-sign choice.
 
-Species are chosen per site by weighted random draw on `frequency`. The
-requested site count is a request, not a guarantee: if the surface is too
-small for that many well-spaced sites, or the working grid is too coarse
-for reliable surface projection, the generator warns and places what it
-found.
+The generator chooses species per site by weighted random draw on
+`frequency`. The requested site count isn't guaranteed: if the surface is
+too small for that many well-spaced sites, or the working grid is too
+coarse for reliable surface projection, the generator warns and places
+what it found.
 
 ## Parameters at a glance
 
@@ -166,11 +166,11 @@ Defaults for \(t\) and \(\sigma\) are polnet's own midpoints (its
 - **No lipid composition.** One profile per membrane instance, with no
   notion of rafts, cholesterol, or local thickness variation.
 - **Transmembrane instances get no voxel labels.** Their density is in the
-  volume and their placements are recorded, but they do not appear in
-  `instance_labels`.
-- **Depth alignment defaults to the full z-extent** when no `tm_span_mask`
-  is given, which is wrong for a protein with a large soluble domain on
-  one side only.
+  volume, and the generator records their placements, but they do not
+  appear in `instance_labels`.
+- **Depth alignment defaults to the full z-extent** when you don't give a
+  `tm_span_mask`, which is wrong for a protein with a large soluble domain
+  on one side only.
 
 ## References
 

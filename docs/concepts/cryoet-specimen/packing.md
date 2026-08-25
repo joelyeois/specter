@@ -16,8 +16,8 @@ running occupancy grid.
 
 !!! info "Source"
     `specter.specimen.tomogram._regions`, `specter.specimen.packing`,
-    `specter.specimen.cytosolic_filler`. Figures are produced by
-    `docs-figures/cryoet_specimen_packing.py`.
+    `specter.specimen.cytosolic_filler`.
+    `docs-figures/cryoet_specimen_packing.py` produces the figures.
 
 ## Regions from topology, not geometry
 
@@ -26,10 +26,10 @@ not-lipid-solid. It says nothing about which *side* of a closed shell a
 given empty point is on, and that is exactly what a biologist means by
 "in the lumen."
 
-Recovering it needs real topology. The shell's complement is labelled with
+Recovering it needs real topology. You label the shell's complement with
 connected components (full 26-connectivity, so thresholding noise doesn't
-fracture one region into spurious pieces), and whichever component(s)
-touch the volume's own boundary faces are called **cytosol**: by
+fracture one region into spurious pieces), and call whichever
+component(s) touch the volume's own boundary faces **cytosol**: by
 construction that is the one region reachable from outside. Everything
 else non-shell is enclosed, and therefore **lumen**.
 
@@ -49,52 +49,53 @@ generator's internal shape state instead would have needed a branch per
 backend, and would not have handled several disjoint compartments emerging
 from one instance.
 
-It also means the **carbon film lands in `shell`** for free. That is not a
-misclassification: to this stage, "shell" means dense material nothing may
-be packed into, and the film qualifies.
+It also means the **carbon film lands in `shell`** for free. To this
+stage, "shell" means dense material nothing may be packed into, and the
+film qualifies, so the label is correct.
 
-The classification runs **once**, on the composited volume, after every
-membrane instance has been merged.
+The classification runs **once**, on the composited volume, after the
+generator merges every membrane instance.
 
 ## Two priority tiers
 
-Within each region, species are placed in two passes:
+Within each region, the packer places species in two passes:
 
 1. **Targets**: `n_copies` on a spec. An exact instance count, placed
-   first, into a still-mostly-empty region. This is the annotated ground
-   truth and is exported to picks by default.
-2. **Filler**: `ratio` on a spec. Packed around the already-placed
-   targets, with species drawn in proportion to their ratios, until the
-   occupancy budget is reached or the packing jams. Excluded from picks by
-   default.
+   first into a still-mostly-empty region. This is the annotated ground
+   truth, and it lands in picks by default.
+2. **Filler**: `ratio` on a spec. The packer fills in around the
+   already-placed targets, drawing species in proportion to their ratios,
+   until it reaches the occupancy budget or the packing jams. Filler stays
+   out of picks by default.
 
 Targets going first is what makes an exact count meaningful. Ask for 25
 ribosomes after filling the box to jamming with filler and you will not
-get 25. Ratios only compare *within* a region: two locations are packed
-independently, so a cytosol ratio and a lumen ratio have no relationship.
+get 25. Ratios only compare *within* a region: the packer fills two
+locations independently, so a cytosol ratio and a lumen ratio have no
+relationship.
 
 ## Two collision geometries
 
-Placement is Random Sequential Addition either way. What differs is the
-body being collided, and it changes the achievable density by more than
-any other single choice in the generator.
+Placement is Random Sequential Addition either way. The two backends
+differ in the body they collide, and that choice changes achievable
+density more than any other single choice in the generator.
 
 `packing_backend="shape"`, the default, rasterizes each species into a
 binary footprint, rotates it, and tests it against a running occupancy
-grid. A placement is rejected if any voxel of the rotated molecule meets a
+grid. It rejects a placement if any voxel of the rotated molecule meets a
 voxel already taken, so the collision body is the molecule's own shape,
 resolved to the packing voxel size.
 
 `packing_backend="sphere"` collides one circumscribing sphere per
 instance, of radius `PDB.max_diameter / 2`. It is faster, and it is the
-right geometry for the two things in a tomogram that genuinely are
-spheres or have no footprint yet: gold fiducials, and membrane instances
-placed by bounding radius before their bilayer is generated. For proteins
+right geometry for the two things in a tomogram that are spheres or have
+no footprint yet: gold fiducials, and membrane instances placed by
+bounding radius before the generator builds their bilayer. For proteins
 it is a poor fit. Measured over 180 cached species, a molecule's 6.8 Å
 envelope fills only ~0.178 of its own bounding sphere, so an elongated or
 concave molecule reserves several times the room it occupies.
 
-The cost of that difference is the whole point:
+That difference in achieved density is why the backend choice matters:
 
 ![Achieved macromolecule volume fraction against requested occupancy_fraction, for the shape and sphere backends, with the physiological crowding band and CryoTomoSim's own density marked.](../../assets/images/cryoet-packing-backends.png){ width="620" style="display:block;margin:1.2em auto;" }
 ///caption
@@ -117,9 +118,9 @@ pool in whatever the backend collides: real footprint volume under
 `"shape"`, bounding-sphere volume under `"sphere"`. A bounding sphere is
 ~5.6x a molecule's envelope, so the same setting hands the sphere backend
 a much smaller pool in real terms. Comparing the two at one value measures
-pool sizes rather than geometry, and will make whichever backend was
-under-supplied look worse than it is. The curves above are drawn from
-pools sized separately for each.
+pool sizes rather than geometry, and makes whichever backend got the
+smaller pool look worse than it is. The curves above are drawn from pools
+sized separately for each.
 
 Crowded cytoplasm is 200–320 mg/mL, so the sphere backend cannot reach a
 physiological specimen at any setting: `occupancy_fraction` is a
@@ -142,39 +143,40 @@ comparison.
 ### Packing coarser than you render
 
 `packing_voxel_size` runs collision on a coarser grid than the render.
-The collision grid, not the render, is what makes a fine `voxel_size`
-expensive: at 1 Å over a production field of view the occupancy grid alone
-is 36 GB, and the rotation cache 20 GB for a single 243 Å species. Left
-unset this engages automatically once the grid would exceed roughly a
-billion voxels, so ordinary boxes are untouched and a fine `voxel_size`
-degrades to coarser collision instead of failing outright.
+The collision grid drives the cost of a fine `voxel_size`, not the
+render: at 1 Å over a production field of view the occupancy grid alone
+is 36 GB, and the rotation cache adds 20 GB for a single 243 Å species.
+Left unset, this engages automatically once the grid would exceed roughly
+a billion voxels, so ordinary boxes stay untouched and a fine
+`voxel_size` degrades to coarser collision instead of failing outright.
 
-Footprints are built at the render voxel size and max-pooled down, not
-rasterized at the coarse size directly. The distinction matters: a mask
-rasterized coarsely marks only voxels containing an atom centre, and at
-2 Å the 1.9 Å van der Waals pad rounds to no dilation at all, so instances
-pack about 2 Å closer than heavy-atom contact allows. Measured against a
-native 1 Å pack, pooling to 2 Å reaches volume fraction 0.264 versus 0.269
-with no overlapping voxels, 8.8× faster; the same run with coarsely
-rasterized masks reads a denser 0.348, but that density is under-sized
-collision geometry rather than better packing.
+The packer builds footprints at the render voxel size and max-pools them
+down, rather than rasterizing at the coarse size directly. The
+distinction matters: a mask rasterized coarsely marks only voxels
+containing an atom centre, and at 2 Å the 1.9 Å van der Waals pad rounds
+to no dilation at all, so instances pack about 2 Å closer than heavy-atom
+contact allows. Measured against a native 1 Å pack, pooling to 2 Å
+reaches volume fraction 0.264 versus 0.269 with no overlapping voxels,
+8.8× faster; the same run with coarsely rasterized masks reads a denser
+0.348, but that density comes from under-sized collision geometry, not
+better packing.
 
 ## RSA sphere packing
 
 The sphere backend's placement is Random Sequential Addition, fully
-vectorized across candidates. Spheres are placed
+vectorized across candidates. It places spheres
 **largest-radius-first, in stages**: one
 stage per unique radius, carrying accepted spheres forward. Within a
-stage, every remaining candidate gets one trial position per pass;
-positions are generated and conflict-checked simultaneously through a
-`vesin` neighbour list, and candidates conflicting within the same pass
-are resolved by a one-shot "local minimum priority wins" independent-set
-selection rather than a Python loop over pairs.
+stage, every remaining candidate gets one trial position per pass. The
+packer generates and conflict-checks positions simultaneously through a
+`vesin` neighbour list, and resolves candidates that conflict within the
+same pass with a one-shot "local minimum priority wins" independent-set
+selection, rather than a Python loop over pairs.
 
-That last point is what actually buys the speed: resolving many
-candidates' accept/reject decisions per pass, rather than one at a time,
-is ~90× faster than a naive one-at-a-time RSA loop at a few thousand
-spheres, while still accepting ~99% as many.
+That last point buys the speed: resolving many candidates' accept/reject
+decisions per pass, rather than one at a time, runs ~90× faster than a
+naive one-at-a-time RSA loop at a few thousand spheres, while still
+accepting ~99% as many.
 
 ![Left, drawn versus accepted instances per species radius. Right, acceptance rate by radius.](../../assets/images/cryoet-packing-staging.png){ width="900" style="display:block;margin:1.2em auto;" }
 ///caption
@@ -183,9 +185,9 @@ Left, drawn versus accepted instances per species radius. Right, acceptance rate
 
 Staging by size matters because a large sphere has more potential conflict
 partners than a small one at any given density. Mixing all sizes into one
-pool measurably starves the large species; going largest-first gives each
-its crack at the box while it is still open. Acceptance still falls with
-radius, as above; that is geometry, not a scheduling failure.
+pool starves the large species; going largest-first gives each its crack
+at the box while it is still open. Acceptance still falls with radius, as
+above; that is geometry, not a scheduling failure.
 
 ### Where the ceiling is
 
@@ -224,40 +226,40 @@ If you want more achieved occupancy from a reference table, raise the
 mass floor rather than the budget: tiny species consume placement slots
 RSA jams on while adding almost no volume.
 
-A denser periodic force-biased relaxation backend was considered instead
-of RSA. Its per-iteration Python-loop cost runs into hours at production
-tomogram scale, and it has no obstacle-avoidance mechanism, so RSA's lower
-ceiling, reached in seconds, is the actual target.
+RSA won out over a denser periodic force-biased relaxation backend.
+Relaxation's per-iteration Python-loop cost runs into hours at production
+tomogram scale, and it has no obstacle-avoidance mechanism, so RSA's
+lower ceiling, reached in seconds, is the actual target.
 
 ## One field for obstacles and regions
 
 The shape backend needs no distance field. Membranes, filaments, carbon
-and placed instances are already volumes, so they are stamped straight
-into the one boolean grid it collides against, and a region is restricted
-by seeding that grid as occupied everywhere outside it:
+and placed instances are already volumes, so the packer stamps them
+straight into the one boolean grid it collides against. You restrict a
+region by seeding that grid as occupied everywhere outside it:
 
 ![Three panels of one z-slice: the region complement alone, then with a membrane and filament stamped in, then with every packed protein added.](../../assets/images/cryoet-packing-occupancy-grid.png){ width="900" style="display:block;margin:1.2em auto;" }
 ///caption
 Three panels of one z-slice: the region complement alone, then with a membrane and filament stamped in, then with every packed protein added.
 ///
 
-A candidate is rejected if its rotated footprint meets any set voxel, so
-obstacle avoidance, region restriction and instance-instance collision are
-the same test rather than three mechanisms.
+The backend rejects a candidate if its rotated footprint meets any set
+voxel, so obstacle avoidance, region restriction and instance-instance
+collision collapse into one test instead of three mechanisms.
 
 The sphere backend cannot do that, since it has no footprint to test. It
-uses a distance field instead, and both "stay out of the membrane" and
-"stay inside the lumen" are handled by the same input: a field giving the physical distance to the nearest
-**forbidden** voxel. A candidate is rejected unless the field, sampled at
-its centre, exceeds `radius + gap`, i.e. unless its whole sphere clears
-the forbidden set.
+uses a distance field instead: both "stay out of the membrane" and "stay
+inside the lumen" share the same input, a field giving the physical
+distance to the nearest **forbidden** voxel. It rejects a candidate
+unless the field, sampled at its centre, exceeds `radius + gap`, meaning
+its whole sphere clears the forbidden set.
 
 ![The shell distance field, the field from already-placed spheres, and their elementwise minimum, with rejected centres shaded.](../../assets/images/cryoet-packing-exclusion-field.png){ width="900" style="display:block;margin:1.2em auto;" }
 ///caption
 The shell distance field, the field from already-placed spheres, and their elementwise minimum, with rejected centres shaded.
 ///
 
-A caller wanting both obstacle avoidance and region restriction unions the
+If you want both obstacle avoidance and region restriction, you union the
 masks before taking the distance transform, which is the elementwise
 minimum of the two fields (the third panel above). That is how the
 protein-fill stage folds in the membrane shell, the carbon film, placed
@@ -267,32 +269,32 @@ Note the first panel: the valid region includes the vesicle's *interior*.
 The distance field alone cannot tell inside from outside. That is exactly
 what the region masks are for, and why both mechanisms exist.
 
-### Sampling where the region actually is
+### Sampling from the region instead of the box
 
-For a small compartment there is a second, separate problem. Uniform
-box-wide sampling has to blindly get lucky before rejection filtering can
-even engage. In one confirmed case, packing into a small vesicle lumen
-whose valid centre region was 0.008% of the box volume, zero of one
-candidate was placed within the pass budget, purely from the odds of ever
-landing a hit, despite an exactly-computed valid region genuinely
-existing.
+For a small compartment, a second, separate problem shows up. Uniform
+box-wide sampling has to get lucky before rejection filtering can even
+engage. In one confirmed case, packing into a small vesicle lumen whose
+valid centre region was 0.008% of the box volume, the packer placed zero
+of one candidate within the pass budget, from the odds of ever landing a
+hit alone, despite an exactly-computed valid region that did exist.
 
-Passing a `sampling_mask` fixes this by construction: candidates are drawn
-from a random `True` voxel of the allowed region (plus sub-voxel jitter)
-instead of from the whole box.
+Passing a `sampling_mask` fixes this by construction: the packer draws
+candidates from a random `True` voxel of the allowed region (plus
+sub-voxel jitter) instead of from the whole box.
 
 The same tightness drives the pass budget. A region covering at least 25%
 of the box behaves like an open box: it saturates fast, so the default
 `stall_patience` of 15 is enough (verified directly: on a 200×600×600 box
 it packed the same pool to within ~3% of `stall_patience=300`'s density in
-roughly half the wall time). Below that threshold the much larger
-`region_max_passes` (default 300) is used instead, since many consecutive
-misses can separate two valid placements.
+roughly half the wall time). Below that threshold, the packer falls back
+to the much larger `region_max_passes` (default 300), since many
+consecutive misses can separate two valid placements.
 
 ## Filler reference tables
 
-Two bundled tables save you hand-listing background species. Both are
-additive, with each other, and with your own `[[filler]]` entries.
+Two bundled tables save you from hand-listing background species. Both
+stack additively, with each other and with your own `[[filler]]`
+entries.
 
 ![Left, PEI2016 species by mass and relative abundance. Right, the mass coverage of both bundled tables.](../../assets/images/cryoet-packing-filler-tables.png){ width="900" style="display:block;margin:1.2em auto;" }
 ///caption
@@ -301,9 +303,9 @@ Left, PEI2016 species by mass and relative abundance. Right, the mass coverage o
 
 - **`PEI2016_CROWDING_TABLE`**: 20 species from Pei et al. (2016),
   transcribed from that paper's supplementary Table S1, carrying its own
-  relative-abundance weighting. (The paper lists 21; its 2AWB entry was
-  obsoleted by the PDB in 2014 and dropped rather than repointed, since it
-  would only have duplicated a ribosome-class size range.)
+  relative-abundance weighting. (The paper lists 21; the PDB obsoleted its
+  2AWB entry in 2014, and the table drops it rather than repointing it,
+  since it would only have duplicated a ribosome-class size range.)
 - **`CRYOETSIM_PARTICLE_TABLE`**: broader and categorised, so you can
   select e.g. only distractors or only nucleosomes. Transcribed from the
   CryoETSim dataset's species table (Stojanovska et al. 2025).
@@ -335,8 +337,8 @@ your own list breaks nothing downstream.
 ## Limitations
 
 - **Voxel-quantized collision.** The shape backend collides footprints
-  rasterized on the packing grid, so a molecule is resolved only to that
-  voxel size. Under `packing_backend="sphere"` the collision body is
+  rasterized on the packing grid, so the packer resolves a molecule only
+  to that voxel size. Under `packing_backend="sphere"` the collision body is
   instead each species' bounding sphere, which reserves far more room than
   an elongated or concave molecule occupies and caps achievable density
   around a third of crowded cytoplasm.
@@ -347,15 +349,15 @@ your own list breaks nothing downstream.
   adsorption bias; this generator has no equivalent. Its realism comes
   from region gating against real membrane geometry instead.)
 - **Coarse-field bleed** (sphere backend). For very large boxes the
-  exclusion field is built on a coarsened grid, and trilinear sampling
-  near a boundary lets a candidate's distance run a couple of Å past the
-  exact value.
+  packer builds the exclusion field on a coarsened grid, and trilinear
+  sampling near a boundary lets a candidate's distance run a couple of Å
+  past the exact value.
 - **Contact, not interpenetration.** Instances may touch but never
   overlap. Real proteins' surface loops and hydration shells do
   interdigitate slightly, and CryoTomoSim models that with a softer
-  overlap test. Reproducing it was measured to need only ~2% tolerance,
-  and rejected: it makes instance labels ambiguous at exactly the contacts
-  a picker is trained on.
+  overlap test. Testing found reproducing it needs only ~2% tolerance,
+  but the design rejects that approach: it would make instance labels
+  ambiguous at exactly the contacts a picker is trained on.
 - **Jamming, not equilibrium.** RSA densities are not thermodynamically
   meaningful; they are the outcome of an irreversible deposition process.
 

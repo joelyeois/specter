@@ -68,11 +68,11 @@ in `specter simulate tiltseries --help`.
 - **Envelopes**: `convergence_angle` (mrad) and `cc` (mm, chromatic
   aberration coefficient) are both `None`/unset by default, which disables
   the corresponding Cs (spatial-coherence) and Cc (temporal-coherence)
-  envelopes entirely; set either to enable it. `energy_spread`, `deltaV_V`,
+  envelopes; set either to enable it. `energy_spread`, `deltaV_V`,
   `deltaI_I` feed the Cc envelope specifically. `dose_envelope` applies the
   Grant & Grigorieff (2015) cumulative-dose envelope across tilts.
 - **Ice**: `ice_model`: `"gd"` (default, `IceBank`'s cached
-  `GradientSKIcemaker` configs, realistic and effectively free at this
+  `GradientSKIcemaker` configs, realistic and near-free at this
   cache size), `"random"` (cheap, low-fidelity `RandomIcemaker`), or `"none"`
   (no ice). `ice_cache_dir` overrides the bundled `specter/ice_data/ice_cache`;
   `ice_relax_steps` runs local MLBOP seam relaxation for `"gd"` (0 by
@@ -123,8 +123,8 @@ choices come from `--config`/its flags as usual.
 
 `--tomogram_config` always builds exactly **one** tomogram. `n_tomograms`
 is `specter build tomogram`'s own CLI-only flag (not a `TomogramConfig`
-field; a TOML with `n_tomograms` set is rejected outright by `load_config`)
-and isn't settable through this chained path. For several tomograms, use
+field; `load_config` rejects a TOML with `n_tomograms` set outright) and
+isn't settable through this chained path. For several tomograms, use
 the two-command form below with `specter build tomogram --n_tomograms N`
 (writes `output_dir/0001/`, `0002/`, ...; see [Multiple
 tomograms](build-tomogram.md#multiple-tomograms)), then call `specter

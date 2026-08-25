@@ -1,15 +1,14 @@
 # Conventions
 
 This page collects the sign, unit, axis, and pose conventions that
-`specter` follows. It is written for two situations: importing
-experimental metadata into a simulation, and comparing `specter`'s output
-against another package. Both fail silently when a convention is
-mismatched, since a wrong sign or a wrong axis produces a plausible image
-rather than an error.
+`specter` follows. Use it in two situations: importing experimental
+metadata into a simulation, and comparing `specter`'s output against
+another package. Both fail silently if you mismatch a convention: a
+wrong sign or a wrong axis produces a plausible image, not an error.
 
-Definitions that belong to the file formats themselves, such as the
-meaning of RELION's Euler angles or the layout of a STAR file, are not
-repeated here; see
+This page does not repeat definitions that belong to the file formats
+themselves, such as the meaning of RELION's Euler angles or the layout of
+a STAR file; see
 [RELION's conventions page](https://relion.readthedocs.io/en/release-3.1/Reference/Conventions.html).
 
 !!! info "Source"
@@ -39,9 +38,9 @@ without conversion at the boundary.
 
 The mixed degrees/radians row is the one to watch: within a single
 `ctf_params` dict, `dfang` is in degrees while `phaseshift`, `tiltx`, and
-`tilty` are in radians. This matches [CryoSPARC](https://cryosparc.com/), whose `.cs` files store
-`ctf/df_angle_rad` in radians and are converted to degrees on the way in
-by `io/_cryosparc.py`.
+`tilty` are in radians. This matches [CryoSPARC](https://cryosparc.com/):
+its `.cs` files store `ctf/df_angle_rad` in radians, and `io/_cryosparc.py`
+converts it to degrees on the way in.
 
 A second, larger unit distinction separates the two CTF backends. The
 legacy `ctf_params` dict uses the units above. The `torch_ctf` backend's
@@ -55,36 +54,35 @@ millimetres for \(C_s\), and dimensionless Zernike coefficients.
 
 Volumes are `(B, Z, Y, X)` and images are `(B, Y, X)`. \(Z\) is the beam
 direction, the second-to-last axis is \(y\) (rows), and the last axis is
-\(x\) (columns). This is the same order MRC uses on disk, so volumes and
-image stacks are written without transposition.
+\(x\) (columns). This is the same order MRC uses on disk, so writing
+volumes and image stacks needs no transposition.
 
 ## Fourier conventions
 
 **FFTs are unshifted by default.** `specter.fft`'s `fft2`/`ifft2`/`fft3`
 and their inverses return native PyTorch ordering, with the zero
-frequency at index 0, unless `shift=True` is passed. Any mask, envelope,
-or propagator that a caller builds themselves must be constructed in the
-same ordering. A disk centred at index \(N/2\), the `fftshift`
-convention, multiplied into an unshifted spectrum removes the zero
-frequency and retains the Nyquist corners.
+frequency at index 0, unless you pass `shift=True`. Build any mask,
+envelope, or propagator you construct yourself in the same ordering. A
+disk centred at index \(N/2\), the `fftshift` convention, multiplied into
+an unshifted spectrum removes the zero frequency and retains the Nyquist
+corners.
 
-**Frequency grids are in 1/Å.** They are built from
+**Frequency grids are in 1/Å.** `specter` builds them from
 `torch.fft.fftfreq(n, pixel_size)`, so the Nyquist frequency is
 \(1/(2\,\Delta x)\) and no cycles-per-pixel conversion is involved.
 
-**Azimuth is measured from \(+y\).** On the 2D frequency grid, `KY` varies
-along axis 0 and `KX` along axis 1, and the azimuthal angle is
-\(\theta = \operatorname{atan2}(k_x, k_y)\). This is what allows
-`dfang` from a `.cs` or `.star` file to be used directly, with no 90°
-offset.
+**`specter` measures azimuth from \(+y\).** On the 2D frequency grid,
+`KY` varies along axis 0 and `KX` along axis 1, and the azimuthal angle is
+\(\theta = \operatorname{atan2}(k_x, k_y)\). This lets `dfang` from a
+`.cs` or `.star` file work directly, with no 90° offset.
 
 ## Poses
 
 Rotations are unit quaternions in `roma`'s scalar-last \((x, y, z, w)\)
 ordering. Translations are in Å.
 
-**A quaternion \(Q\) rotates the density by \(R(Q)^{-1}\).** A feature at
-\(+x\) subjected to a \(+90^\circ\) rotation about \(z\) lands at \(-y\).
+**A quaternion \(Q\) rotates the density by \(R(Q)^{-1}\).** Rotate a
+feature at \(+x\) by \(+90^\circ\) about \(z\) and it lands at \(-y\).
 The volume path (`ImageGenerator.rotate`, which passes \(R\) to
 `grid_sample`) and the coordinate path
 (`ImageGeneratorFromCoordinates.rotate`, which applies \(R^{\mathsf{T}}\)
@@ -93,15 +91,14 @@ pose, because sampling a volume at \(R\mathbf{x}\) rotates its density by
 \(R^{-1}\). This is the interpretation under which CryoSPARC rotation
 vectors and RELION Euler angles map in without inversion.
 
-**Translations follow RELION's origin-offset semantics.** They are
-subtracted, not added: a translation of \((+10, 0)\) Å moves a feature at
-\(x = +10\) Å to the box centre. The shift acts in the image plane,
-*after* the rotation, which is the same frame RELION and CryoSPARC define
-their origin offsets in, where the shift is a phase ramp applied to an
-already-extracted central slice rather than a displacement of the 3D
-reference.
+**Translations follow RELION's origin-offset semantics.** `specter`
+subtracts them rather than adding them: a translation of \((+10, 0)\) Å
+moves a feature at \(x = +10\) Å to the box centre. The shift acts in the
+image plane, *after* the rotation. This is the same frame RELION and
+CryoSPARC define their origin offsets in: a phase ramp on an
+already-extracted central slice, not a displacement of the 3D reference.
 
-Expressing an image-plane shift as a single 3D affine is what requires
+Expressing an image-plane shift as a single 3D affine requires
 `build_affine_matrix` to pre-rotate the translation vector.
 `grid_sample` samples the input volume at \(R\mathbf{x} + T'\), which
 transforms the density by \(R^{-1}\) and then by \(-R^{-1}T'\). Setting
@@ -129,11 +126,11 @@ Conversion into `specter`'s representation:
 
 ## Applying a pose: real space or Fourier space
 
-A pose is applied to a volume by one of two interchangeable methods, selected
-by `rotate_mode` on `ImageGenerator`, `Reconstructor`, `Ghostbuster` and
-`ParticleStackConfig`. Both express the same convention, and both start from
-the same affine built above; they differ only in where the interpolation
-happens.
+You apply a pose to a volume by one of two interchangeable methods,
+selected via `rotate_mode` on `ImageGenerator`, `Reconstructor`,
+`Ghostbuster`, and `ParticleStackConfig`. Both express the same
+convention, and both start from the same affine built above; they differ
+only in where the interpolation happens.
 
 `"real"`, the default, resamples the density with `grid_sample`, applying the
 rotation and the translation together in one trilinear pass. `"fourier"`
@@ -147,11 +144,12 @@ sub-voxel shifts as well. It is also **circular**: density leaving one face
 reappears at the opposite one, where `"real"` pads according to
 `padding_mode`.
 
-Rotation accuracy is the reverse of what the name suggests. The Fourier path
-interpolates the *spectrum* trilinearly, and an object far from the box centre
-has a rapidly oscillating phase that linear interpolation cannot follow, so its
-error grows with distance from the centre while the real-space error stays
-flat. Measured against an analytic ground truth, as a fraction of peak density:
+Rotation accuracy runs the other way from what the name suggests. The
+Fourier path interpolates the *spectrum* trilinearly, and an object far
+from the box centre has a rapidly oscillating phase that linear
+interpolation cannot follow, so its error grows with distance from the
+centre while the real-space error stays flat. Measured against an
+analytic ground truth, as a fraction of peak density:
 
 | Distance from box centre | `"real"` | `"fourier"` |
 |---|---|---|
@@ -172,10 +170,10 @@ regime where the Fourier path is most accurate and where its circular shift
 never applies.
 
 Rotation origin follows the same `"relion"` / `"center"` choice described
-above. In Fourier space the rotation is necessarily centred on the spectrum's
-DC term, which `fft3(..., shift=True)` places at `n // 2`; `"center"` is
-reached by folding the half-voxel offset into the same phase ramp, and is
-supported for cubic volumes only.
+above. In Fourier space, the rotation necessarily centres on the
+spectrum's DC term, which `fft3(..., shift=True)` places at `n // 2`. You
+reach `"center"` by folding the half-voxel offset into the same phase
+ramp; it works for cubic volumes only.
 
 ## Optical sign conventions
 
@@ -212,34 +210,34 @@ source of confusion when porting an equation. `specter` follows
 Kirkland's form, with \(\chi\) as written above and a transfer function
 \(\exp(-i\chi)\). The 3DEM convention of Heymann et al., which Gctf
 follows, uses \(\gamma = -\chi\). The two describe identical physics with
-mirrored bookkeeping, so an imported expression must be checked as a
-whole rather than term by term.
+mirrored bookkeeping, so check an imported expression as a whole rather
+than term by term.
 
-Two further conventions belong to the propagation stage and are described
-where they act: the Ewald sphere curvature sign (`ews_curvature_sign`)
-and amplitude contrast (`alpha`), both under
+Two further conventions belong to the propagation stage and appear where
+they act: the Ewald sphere curvature sign (`ews_curvature_sign`) and
+amplitude contrast (`alpha`), both under
 [Scattering](scattering/index.md#two-conventions-shared-by-every-model).
 
 ## The defocus reference plane
 
-Defocus values in `.cs` and `.star` files are measured from the
-specimen's entry face. A propagated exit wave does not carry that
-reference. For a specimen of thickness \(T\) the effective defocus is
-centred on the specimen's centre of scattering mass at \(z = T/2\), a
-result established by Balakrishnan et al. and exploited there to recover
-depth from a single shot.
+`.cs` and `.star` files measure defocus values from the specimen's entry
+face. A propagated exit wave does not carry that reference. For a
+specimen of thickness \(T\), the effective defocus centres on the
+specimen's centre of scattering mass at \(z = T/2\), a result
+Balakrishnan et al. established and used there to recover depth from a
+single shot.
 
 `specter` therefore subtracts \(n_z\Delta x/2\) from `dfu` and `dfv`
 before building a transfer function, automatically inside `BaseImager`,
 for every propagating scattering model: `multislice`, `rytov`,
 `firstborn`, and `kinematic`. The `projection` and `ctf` models have no
-\(Z\) extent to offset from and are excluded. Code driving `Scattering`
-and `Aberration` directly must apply the correction itself via
+\(Z\) extent to offset from, so `specter` excludes them. If you drive
+`Scattering` and `Aberration` directly, apply the correction yourself via
 `aberrations.defocus_midplane_shift`, and add it back before exporting
 defocus values to a STAR or `.cs` file.
 
 The correction uses the volume's geometric midplane, which equals the
-centre of scattering mass only when scattering density is distributed
+centre of scattering mass only when scattering density distributes
 uniformly along \(z\). This holds for the usual arrangement of a particle
 centred in an ice-filled box. It does not hold for an axially asymmetric
 specimen, such as a protein positioned near one face of a thick slab,
@@ -252,8 +250,8 @@ amorphous ice returns a mean potential of 4.8 V against a literature mean
 inner potential of approximately 4.5 V. The scattering factors returned
 by the `*_fourier` functions in `atom/atomic_potentials.py` are in Å;
 multiplying by \(c_1 = 2\pi a_0 e = 47.9\) V·Å² converts them to the
-V·Å³ Fourier-space potential, and this factor is applied by
-`PotentialBuilder`. Projected (2D) potentials are in V·Å.
+V·Å³ Fourier-space potential; `PotentialBuilder` applies this factor.
+Projected (2D) potentials are in V·Å.
 
 Detector output is in **expected electron counts per pixel**,
 
@@ -261,56 +259,57 @@ Detector output is in **expected electron counts per pixel**,
 I = D \cdot \Delta x^2 \cdot \mathrm{DQE}(0) \cdot |\psi|^2
 \]
 
-with \(D\) the dose in e⁻/Å². Shot noise is applied as a Poisson draw on
-these counts. The detector MTF is normalised as
-\(\sqrt{\mathrm{DQE}(k)/\mathrm{DQE}(0)}\) so that it acts as a pure
-blur, and \(\mathrm{DQE}(0)\) is applied separately as the counting
-efficiency above; see [Detector](detector.md).
+with \(D\) the dose in e⁻/Å². `specter` applies shot noise as a Poisson
+draw on these counts. It normalises the detector MTF as
+\(\sqrt{\mathrm{DQE}(k)/\mathrm{DQE}(0)}\) so it acts as a pure blur, and
+applies \(\mathrm{DQE}(0)\) separately as the counting efficiency above;
+see [Detector](detector.md).
 
 ## Image polarity
 
 The raw simulated intensity has **protein dark** at underfocus, as in an
 experimental micrograph.
 
-Saved particle stacks are inverted. With `normalize_particles` enabled,
-which is the default for `specter simulate particles`, each particle is
-standardised to zero mean and unit variance and then negated, so protein
-is bright in the output `.mrcs`. This matches the contrast-inverted
-particle stacks produced by RELION extraction and CryoSPARC.
+`specter` inverts saved particle stacks. With `normalize_particles`
+enabled, the default for `specter simulate particles`, `specter`
+standardises each particle to zero mean and unit variance and then
+negates it, so protein appears bright in the output `.mrcs`. This matches
+the contrast-inverted particle stacks that RELION extraction and
+CryoSPARC produce.
 
-Micrographs and tilt series are not inverted. `normalize_micrographs` and
-`normalize_tilt_series` both default to disabled, and when enabled they
-standardise only. After any of these normalisations the values are no
-longer electron counts.
+`specter` does not invert micrographs and tilt series.
+`normalize_micrographs` and `normalize_tilt_series` both default to
+disabled, and when enabled they standardise only. After any of these
+normalisations the values are no longer electron counts.
 
 ## Files and output
 
-Results are written into per-artifact directories at the top of the working
-directory (`particles`, `micrographs`, `tiltseries`, `tomograms`, `ice`,
-`reconstructions`), resolved relative to the current working directory.
-A run that opts into job tracking instead writes into a numbered job
-directory, `[<project>/]<artifact>/J00N/`. Both are controlled by the one
-`output_dir` field. See [Configure a run](../user-guide/configuration.md).
+`specter` writes results into per-artifact directories at the top of the
+working directory (`particles`, `micrographs`, `tiltseries`, `tomograms`,
+`ice`, `reconstructions`), resolved relative to the current working
+directory. A run that opts into job tracking instead writes into a
+numbered job directory, `[<project>/]<artifact>/J00N/`. The one
+`output_dir` field controls both. See [Configure a run](../user-guide/configuration.md).
 
-A `.specter` file marks the root of a project. It is created the first time
-a tracked run needs one, and is located by walking up from the current
-directory the way `git` locates the nearest `.git`, so running from a
-subdirectory continues that project's job numbering rather than starting a
-second, disconnected sequence.
+A `.specter` file marks the root of a project. `specter` creates it the
+first time a tracked run needs one, and locates it by walking up from the
+current directory the way `git` locates the nearest `.git`. Running from
+a subdirectory continues that project's job numbering rather than
+starting a second, disconnected sequence.
 
-Structures fetched by accession code are cached outside the project, at
-`$SPECTER_PDB_CACHE`, else `$XDG_CACHE_HOME/specter/pdb`, else
-`~/.cache/specter/pdb`, following the convention `torch.hub` and HuggingFace
-use for the same purpose. One download is therefore shared by every project.
-A structure supplied by path is read where it lies and is never copied into
-the cache, which is what makes `specter cache clean` safe: the cache holds
-only files that can be fetched again.
+`specter` caches structures you fetch by accession code outside the
+project, at `$SPECTER_PDB_CACHE`, else `$XDG_CACHE_HOME/specter/pdb`,
+else `~/.cache/specter/pdb`, following the convention `torch.hub` and
+HuggingFace use for the same purpose. Every project therefore shares one
+download. `specter` reads a structure you supply by path where it lies
+and never copies it into the cache, which is what makes `specter cache
+clean` safe: the cache holds only files you can fetch again.
 
-Particle stacks, micrographs, and tilt series are written as float32
-`.mrcs` paired with a `.star` file. **The pixel size is recorded in the
-STAR file as `rlnImagePixelSize`, not in the MRC header**, so a consumer
-reading the `.mrcs` alone will find no voxel size. Tomogram volumes,
-written by `specter build tomogram`, do set `voxel_size` in the MRC
+`specter` writes particle stacks, micrographs, and tilt series as float32
+`.mrcs` paired with a `.star` file. **`specter` records the pixel size in
+the STAR file as `rlnImagePixelSize`, not in the MRC header**, so a
+consumer reading the `.mrcs` alone finds no voxel size. Tomogram volumes,
+which `specter build tomogram` writes, do set `voxel_size` in the MRC
 header, since they have no accompanying STAR file.
 
 ## Reproducibility

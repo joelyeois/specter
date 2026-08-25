@@ -62,12 +62,11 @@ its field. `ice_profile` selects among three shapes:
 - **`wedge`**: thickness ramps linearly across the field, from
   `ice_thickness_range`'s low value to its high value, along the direction
   set by `ice_profile_angle`.
-- **`meniscus`**: the radial thickness profile of a real foil hole, with
-  the field of view placed anywhere in it via `ice_hole_offset`. Near the
+- **`meniscus`**: the radial thickness profile of a real foil hole; place
+  the field of view anywhere in it via `ice_hole_offset`. Near the
   hole's centre the film is nearly flat; near the rim it thickens sharply.
   A micrograph is a small patch of a much larger hole, so `ice_hole_offset`
-  is what actually decides whether a given field looks flat, wedged, or
-  strongly curved.
+  decides whether a given field looks flat, wedged, or strongly curved.
 
 ![Ice thickness profiles for the three ice_profile modes over the same field of view: a uniform 500 Å slab (flat), a 250-900 Å ramp (wedge), and the radial thickness of a 1.2 µm foil hole sampled 4500 Å off-centre (meniscus).](../assets/images/micrograph-ice-profiles.png){ width="700" style="display:block;margin:1.2em auto;" }
 ///caption
@@ -75,25 +74,25 @@ Ice thickness profiles for the three `ice_profile` modes over the same field of 
 ///
 
 `ice_tilt` is independent of all three modes: it slopes the ice slab's
-mid-plane while leaving thickness unchanged, which is what a genuinely
-tilted specimen looks like, as opposed to a specimen that is merely thicker
-on one side. `ice_tilt` and `ice_profile` compose, so a tilted meniscus is
-expressible.
+mid-plane while leaving thickness unchanged. That's what a tilted specimen
+looks like, distinct from a wedge, which only changes thickness on one
+side. `ice_tilt` and `ice_profile` compose, so you can express a tilted
+meniscus.
 
-Two costs are worth knowing before enabling a profile:
+Enabling a profile costs you two things:
 
-- **The box is sized by the thickest column, everywhere.** `nz` has to
+- **The thickest column sets the box size, everywhere.** `nz` has to
   hold the deepest part of the film, and multislice runs one full-plane FFT
   per slice regardless of what that slice contains, so a 250-900 Å wedge
   costs the same as a uniform 900 Å slab over the whole field, not the
   250-900 Å average.
-- **Defocus is measured from the specimen's entry face, and that face
+- **SPECTER measures defocus from the specimen's entry face, and that face
   moves.** Under a profile the box contains vacuum above and below the
   film everywhere except its thickest column, so the two surfaces separate
-  from the box boundary. This is handled internally (`IceProfile`'s
-  `entry_face_shift`), not something you need to correct for, but it means
-  a nominal `defocus` value is not applied at the box's geometric centre
-  the way it is for a flat slab.
+  from the box boundary. `IceProfile` handles this automatically through
+  its `entry_face_shift`, so you don't need to correct for it. But it means
+  a nominal `defocus` value doesn't land at the box's geometric centre the
+  way it does for a flat slab.
 
 ## Chunking and memory
 

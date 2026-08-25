@@ -187,7 +187,15 @@ def test_recommend_batchsize_leaves_fragmentation_headroom_on_cuda(
     """
     # Sized so the MEMORY bound is what binds -- large enough to clear the fixed
     # overhead, small enough not to hit MAX_AUTO_BATCHSIZE or the saturation cap.
-    monkeypatch.setattr(memory, "available_memory_bytes", lambda _d: 600 * 10**6)
+    per_particle = (
+        memory._PADDED_COPIES_PER_PARTICLE
+        * _SMALL_GEOM[1]
+        * _SMALL_GEOM[2] ** 2
+        * memory._BYTES_PER_ELEMENT
+    )
+    want = 4
+    free = (estimate_peak_bytes(0, *_SMALL_GEOM) + want * per_particle) / 0.8
+    monkeypatch.setattr(memory, "available_memory_bytes", lambda _d: int(free))
 
     monkeypatch.setenv("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
     with_expandable = recommend_batchsize(*_SMALL_GEOM, "cuda")
@@ -195,7 +203,7 @@ def test_recommend_batchsize_leaves_fragmentation_headroom_on_cuda(
     monkeypatch.setenv("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:False")
     without = recommend_batchsize(*_SMALL_GEOM, "cuda")
 
-    assert 1 < with_expandable < MAX_AUTO_BATCHSIZE, "memory must be the binding bound"
+    assert with_expandable == want, "memory, not a ceiling, must be the binding bound"
     assert without < with_expandable, (
         "the default allocator must get a smaller batch than expandable segments"
     )
@@ -270,9 +278,9 @@ def test_recommend_batchsize_caps_at_gpu_saturation(monkeypatch) -> None:
     big_box = recommend_batchsize(256, 256, 512, "cuda")
     small_box = recommend_batchsize(64, 64, 128, "cuda")
 
-    assert big_box <= 2, "a 67M-voxel-per-particle box must not batch up"
-    assert small_box >= 16, "a small box should still batch"
-    assert small_box <= MAX_AUTO_BATCHSIZE
+    # Measured optima on an L40: 2 at box 256, 8 at box 64.
+    assert big_box == 2, "a 67M-voxel-per-particle box must not batch up"
+    assert small_box == MAX_AUTO_BATCHSIZE, "a small box should batch to the ceiling"
 
 
 def test_saturation_cap_never_returns_zero(monkeypatch) -> None:

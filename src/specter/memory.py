@@ -111,28 +111,28 @@ _FRAGMENTATION_HEADROOM = 1.3
 #: Padded voxels one forward pass may cover before batching stops paying.
 #:
 #: Batching amortizes per-call overhead, but only until a single pass already
-#: saturates the device -- past that it buys nothing and costs memory linearly.
-#: Measured on an L40 across box sizes (dev/perf-bench/bench_batchsize_
-#: throughput.py), per-particle cost against batch size:
+#: saturates the device; past that a larger batch costs memory linearly and
+#: buys nothing. Measured on an L40 (dev/perf-bench/bench_batchsize_
+#: throughput.py, best of 3), per-particle speed against batch size:
 #:
-#:   box  64 (1.05M padded voxels/particle): 2.2-2.5x faster by batch 16-64
-#:   box 128 (8.4M):                         ~1.5x, plateaued by batch 4
-#:   box 256 (67.1M, the default config):    FLAT to batch 16, then 24% SLOWER
-#:                                           at 32 -- for 21x the memory
-#:                                           (1.5 GB at batch 1, 30.8 GB at 32)
+#:   batch:              1     2     4     8    16    32    64
+#:   box  64 (1.05M/ptl)  1.00  1.40  1.76  1.93  1.84  1.91  1.62
+#:   box 128 (8.4M/ptl)   1.00  1.42  1.75  1.88  1.73  1.77  1.62
+#:   box 256 (67.1M/ptl)  1.00  1.04  0.97  1.01  0.96  0.83    --
 #:
-#: So the useful batch is set by work per pass, not by free memory: sizing to
-#: fill the device gets the default config exactly backwards. This budget picks
-#: ~61 at box 64, ~7 at box 128 and 1 at box 256, which tracks the measured
-#: optima. Run-to-run spread on those timings is ~30%, so it is deliberately a
-#: round number in the middle of a broad flat region rather than a tuned one.
-_SATURATION_PADDED_VOXELS = 64_000_000
+#: The 256 box -- the shipped config -- is flat: one particle already saturates
+#: the device, so batching returns nothing and batch 32 is 17% SLOWER for 21x
+#: the memory (1.5 GB at batch 1, 30.8 GB at 32). Smaller boxes gain ~1.9x.
+#:
+#: This budget is what stops the big box from batching up: it allows 2 there,
+#: which is the measured optimum, against 19 and 152 for the 128 and 64 boxes
+#: (both then cut to 8 by MAX_AUTO_BATCHSIZE, also the measured optimum).
+_SATURATION_PADDED_VOXELS = 160_000_000
 
-#: Ceiling on an auto-chosen batch. Throughput has flattened well before this
-#: (the fixed per-batch overheads are amortized within a few particles), and
-#: the fit above was only measured out to B=8 -- so on a large GPU with a
-#: small box, stop rather than extrapolate.
-MAX_AUTO_BATCHSIZE = 64
+#: Ceiling on an auto-chosen batch. The measured optimum is 8 at every box size
+#: above, and by 64 throughput has fallen back ~16% -- so this is the top of the
+#: curve, not a "diminishing returns, could go higher" bound.
+MAX_AUTO_BATCHSIZE = 8
 
 
 def _expandable_segments_enabled() -> bool:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import warnings
 from typing import Any, Literal
 
 import torch
@@ -291,6 +292,7 @@ class MicrographGenerator(BaseImager):
 
         self._init_optics()
         self.slice_batchsize = slice_batchsize
+        self._warned_volume_on_host = False
         self.iterative_scattering = IterativeScattering(
             self.pad_nxy,
             self.pixel_size,
@@ -377,6 +379,51 @@ class MicrographGenerator(BaseImager):
             )
         self._generate_volume()
 
+    def _ensure_volume_placed(self) -> None:
+        """
+        Move ``self.volume`` onto the compute device if it fits; keep it on the
+        host and stream it if not.
+
+        `MicrographSpecimenGenerator` assembles the specimen with
+        ``move_to_cpu=True``, so the volume starts on the host. Uploading it is
+        worth doing when it fits -- the scattering then reads it without a
+        per-slice host transfer -- but at ``micrograph_size`` it often does not:
+        the default config's 500 x 4096 x 4096 canvas is 33.5 GB, and the
+        upload used to be unconditional, which OOM'd the very device
+        ``move_to_cpu`` had just moved the volume off.
+
+        `IterativeScattering.multislice` accepts an off-device volume and
+        streams it a slice at a time, so falling back costs per-slice
+        transfers rather than the run. Mirrors
+        `TiltSeriesGenerator._ensure_volume_placed`, which resolves the same
+        question for the same reason; the warning is a `warnings.warn` rather
+        than that class's `verbose`-gated print because
+        `pipelines/_micrograph.py` constructs this generator with
+        ``verbose=False``, so a print would never reach a CLI user whose run
+        had silently taken the slow path.
+
+        A no-op once the volume has settled on a device.
+        """
+        if self.volume.device == self.device:
+            return
+        try:
+            self.volume = self.volume.to(self.device)
+        except torch.cuda.OutOfMemoryError:
+            torch.cuda.empty_cache()
+            if not self._warned_volume_on_host:
+                self._warned_volume_on_host = True
+                gb = self.volume.numel() * self.volume.element_size() / 1e9
+                warnings.warn(
+                    f"MicrographGenerator: the specimen volume ({gb:.1f} GB) "
+                    f"does not fit on {self.device}; keeping it in host memory "
+                    "and streaming it slice by slice instead. The result is "
+                    "unchanged and GPU memory stays bounded regardless of "
+                    "micrograph_size, but each slice now costs a host-to-device "
+                    "transfer. Reduce micrograph_size or ice_thickness to keep "
+                    "the volume on the device.",
+                    stacklevel=2,
+                )
+
     def forward(self, idx: int | torch.Tensor) -> torch.Tensor:
         """
         Generate micrograph images for the given batch indices.
@@ -394,18 +441,12 @@ class MicrographGenerator(BaseImager):
         if not hasattr(self, "volume"):
             self._generate_volume()
         batchsize = len(idx) if isinstance(idx, torch.Tensor) else 1
-        # Left on whatever device the specimen was assembled on -- which for a
-        # micrograph is the host, since `MicrographSpecimenGenerator` is
-        # constructed with `move_to_cpu=True` precisely because the canvas does
-        # not fit on the GPU (500 x 4096 x 4096 is 33.5 GB at the default
-        # config). `IterativeScattering.multislice` streams an off-device
-        # volume slice by slice, so forcing the whole thing across first
-        # undid that and OOM'd the device it was trying to protect.
+        self._ensure_volume_placed()
         V = self.volume.expand(batchsize, -1, -1, -1)
         V = pad_volume(V, self.nxy, self.nz, None, self.pad_fft, xy_pad_mode="reflect")
         scale = self.potential_scale[idx].reshape(-1, 1, 1, 1).to(V.device)
         # Skipped when every scale is 1 (the default), since `V * scale` is a
-        # second full copy of a volume this size.
+        # second full copy of a volume that may be tens of GB.
         if not bool(torch.all(scale == 1.0)):
             V = V * scale
 

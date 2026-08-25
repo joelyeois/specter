@@ -1070,3 +1070,109 @@ def test_from_coordinates_and_volume_paths_agree(small_coords, ctf_params):
     diff = (volume_a - volume_b).abs()
     assert diff.max() < 0.05 * peak
     assert diff.mean() < 0.002 * peak
+
+
+def test_micrograph_volume_falls_back_to_host_when_it_does_not_fit(
+    small_volume, ctf_params, monkeypatch
+):
+    """
+    A specimen volume too large for the device streams from the host instead.
+
+    `MicrographSpecimenGenerator` assembles with `move_to_cpu=True`, so the
+    volume starts on the host and `forward` uploads it. At `micrograph_size`
+    that upload can exceed the device, and it used to be unconditional -- which
+    OOM'd the very device `move_to_cpu` had just moved the volume off.
+    `IterativeScattering` accepts an off-device volume, so the fallback costs
+    per-slice transfers rather than the run.
+
+    The OOM is injected rather than provoked: reproducing it for real needs a
+    volume larger than whatever GPU the suite happens to run on, and this must
+    also exercise on CPU-only machines.
+    """
+    gen = MicrographGenerator(
+        scattering_potential=small_volume,
+        micrograph_size=32,
+        pixel_size=2.0,
+        ctf_params=ctf_params,
+        voltage=300.0,
+        dose_per_angstrom=2.0,
+        noise_model="none",
+        scattering_model="projection",
+        ice_model="random",
+        alpha=0.1,
+        crowd_min_distance=60.0,
+        verbose=False,
+        progressbars=False,
+    )
+
+    calls = {"n": 0}
+
+    class _VolumeThatWontFit:
+        """Stands in for a volume whose upload exhausts the device."""
+
+        device = torch.device("cpu")
+
+        def numel(self):
+            return 8_400_000_000
+
+        def element_size(self):
+            return 4
+
+        def to(self, *args, **kwargs):
+            calls["n"] += 1
+            raise torch.cuda.OutOfMemoryError("injected")
+
+    stub = _VolumeThatWontFit()
+    gen.__dict__["volume"] = stub
+    # `device` is a read-only Lightning property, so patch it on the class.
+    monkeypatch.setattr(
+        type(gen), "device", property(lambda self: torch.device("cuda:0"))
+    )
+
+    with pytest.warns(UserWarning, match="does not fit"):
+        gen._ensure_volume_placed()
+
+    assert calls["n"] == 1
+    assert gen.volume is stub, "volume must stay on the host after a failed upload"
+
+    # Warned once, not once per micrograph in the run.
+    gen._ensure_volume_placed()
+    assert calls["n"] == 2
+    assert gen._warned_volume_on_host is True
+
+
+def test_micrograph_unit_potential_scale_skips_the_extra_volume_copy(
+    small_volume, ctf_params
+):
+    """
+    `potential_scale=1` must not materialise a second copy of the volume.
+
+    `V * scale` allocates another tensor the size of the whole specimen -- 33.5
+    GB at the default config, which is what pushed a 4096-pixel micrograph over
+    a 44 GB card even though the volume itself fits. Scaling by 1 is the
+    default and is a no-op, so it is skipped; this pins that skipping it does
+    not change the image.
+    """
+
+    def _run(scale):
+        torch.manual_seed(0)
+        gen = MicrographGenerator(
+            scattering_potential=small_volume,
+            micrograph_size=32,
+            pixel_size=2.0,
+            ctf_params=ctf_params,
+            voltage=300.0,
+            dose_per_angstrom=2.0,
+            noise_model="none",
+            scattering_model="projection",
+            ice_model="random",
+            alpha=0.1,
+            crowd_min_distance=60.0,
+            potential_scale=scale,
+            verbose=False,
+            progressbars=False,
+        )
+        torch.manual_seed(0)
+        return gen(torch.tensor([0]))
+
+    assert torch.allclose(_run(1.0), _run(1.0000001), rtol=1e-4, atol=1e-4)

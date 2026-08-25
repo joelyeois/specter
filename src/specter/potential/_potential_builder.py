@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import functools
 import warnings
+from collections.abc import Callable
 from importlib import resources
 from typing import Sequence
 
@@ -34,6 +35,53 @@ from ._builders import (
     potential_from_deltas,
     recommended_rcut,
 )
+
+# Cache of built kernels, keyed by everything one depends on.
+#
+# `build_atomic_potential_kernel`'s result is a pure function of the voxel size,
+# the parameterization, and the element or bonded species: `compute_
+# supersampling_parameters(dx)` fixes `ssn`/`ssdx`/`ssf`, and `sR_3d` and
+# `avgpool3d` follow from those, so `dx` determines every grid argument passed
+# alongside the species.
+#
+# Building them is not cheap -- a CPU `torch.exp` over the supersampled radial
+# grid, per species -- and specimen assembly builds a separate `PotentialBuilder`
+# per species, so the same handful of kernels is rebuilt over and over. Measured
+# on the default `configs/tomogram.toml`: 321 kernel builds, 29 of them distinct,
+# ~11 s of the 14 s cytosol render stage (the actual GPU `forward()` is 0.4 s).
+#
+# Kernels are small (the supersampled kernel binned down to the target grid, a
+# few hundred KB) and the key space is bounded by the species tables, so this is
+# capped rather than evicted; the cap only ever binds if a caller sweeps `dx`.
+_KERNEL_CACHE: dict[tuple, torch.Tensor] = {}
+_KERNEL_CACHE_MAX = 512
+
+
+def _cached_atomic_potential_kernel(
+    cache_key: tuple, build: Callable[[], torch.Tensor]
+) -> torch.Tensor:
+    """
+    Return a cached potential kernel, building it on first request.
+
+    Parameters
+    ----------
+    cache_key : tuple
+        Everything the kernel depends on -- see `_KERNEL_CACHE`.
+    build : callable
+        Zero-argument builder, called only on a miss.
+
+    Returns
+    -------
+    torch.Tensor
+        A fresh copy each call, so a caller mutating the result (or moving it to
+        a device) cannot corrupt the entry for everyone else.
+    """
+    hit = _KERNEL_CACHE.get(cache_key)
+    if hit is None:
+        hit = build()
+        if len(_KERNEL_CACHE) < _KERNEL_CACHE_MAX:
+            _KERNEL_CACHE[cache_key] = hit
+    return hit.clone()
 
 
 class PotentialBuilder(L.LightningModule):
@@ -253,13 +301,17 @@ class PotentialBuilder(L.LightningModule):
             )
 
         for i, elem in enumerate(self.unique_elements):
-            pot = build_atomic_potential_kernel(
-                self.dx,
-                parameterization=self.parameterization,
-                atomic_number=int(elem),
-                sR=self.sR_3d,
-                avgpool3d=self.avgpool3d,
-                ssf=self.ssf,
+            pot = _cached_atomic_potential_kernel(
+                (self.dx, self.parameterization, "element", int(elem)),
+                functools.partial(
+                    build_atomic_potential_kernel,
+                    self.dx,
+                    parameterization=self.parameterization,
+                    atomic_number=int(elem),
+                    sR=self.sR_3d,
+                    avgpool3d=self.avgpool3d,
+                    ssf=self.ssf,
+                ),
             )
 
             self.atomic_potentials_3d[i] = pot
@@ -318,24 +370,32 @@ class PotentialBuilder(L.LightningModule):
         for i, (kind, key) in enumerate(self.shtyrov_groups):
             if kind == "species":
                 assert isinstance(key, str)
-                pot = build_atomic_potential_kernel(
-                    self.dx,
-                    parameterization="shtyrov",
-                    shtyrov_species=key,
-                    species_table=species_table,
-                    sR=self.sR_3d,
-                    avgpool3d=self.avgpool3d,
-                    ssf=self.ssf,
+                pot = _cached_atomic_potential_kernel(
+                    (self.dx, "shtyrov", "species", key, params_path),
+                    functools.partial(
+                        build_atomic_potential_kernel,
+                        self.dx,
+                        parameterization="shtyrov",
+                        shtyrov_species=key,
+                        species_table=species_table,
+                        sR=self.sR_3d,
+                        avgpool3d=self.avgpool3d,
+                        ssf=self.ssf,
+                    ),
                 )
             else:
                 assert isinstance(key, int)
-                pot = build_atomic_potential_kernel(
-                    self.dx,
-                    parameterization="peng",
-                    atomic_number=key,
-                    sR=self.sR_3d,
-                    avgpool3d=self.avgpool3d,
-                    ssf=self.ssf,
+                pot = _cached_atomic_potential_kernel(
+                    (self.dx, "peng", "element", key),
+                    functools.partial(
+                        build_atomic_potential_kernel,
+                        self.dx,
+                        parameterization="peng",
+                        atomic_number=key,
+                        sR=self.sR_3d,
+                        avgpool3d=self.avgpool3d,
+                        ssf=self.ssf,
+                    ),
                 )
 
             self.atomic_potentials_3d[i] = pot

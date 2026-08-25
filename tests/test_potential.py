@@ -1056,3 +1056,83 @@ def test_analytic_coefs_cache_follows_device():
 
     assert builder._analytic_coefs[0].device.type == "cuda"
     assert torch.allclose(on_cpu, on_gpu.cpu(), atol=1e-4)
+
+
+def test_potential_kernel_cache_is_transparent_and_isolated():
+    """
+    Reusing a cached potential kernel is invisible to callers.
+
+    Specimen assembly builds one `PotentialBuilder` per species, so the same few
+    kernels get rebuilt dozens of times -- measured 321 builds of 29 distinct
+    kernels on the default tomogram config. The cache keys on everything a
+    kernel depends on (`dx`, parameterization, element/species), so two builders
+    that agree on those must produce identical stacks.
+
+    Also pins that the cache hands back a COPY: a caller that mutates its own
+    `atomic_potentials_3d` (or moves it to a device) must not corrupt the entry
+    every later builder reads.
+    """
+    import torch
+
+    from specter.potential import PotentialBuilder
+    from specter.potential._potential_builder import _KERNEL_CACHE
+
+    znums = torch.tensor([6, 7, 8, 16] * 10)
+    kwargs = dict(
+        n_xyz=24,
+        dx=2.0,
+        atomic_numbers=znums,
+        progressbars=False,
+        parameterization="kirkland",
+    )
+
+    _KERNEL_CACHE.clear()
+    first = PotentialBuilder(**kwargs)
+    assert len(_KERNEL_CACHE) == 4, "one entry per unique element"
+    cold = first.atomic_potentials_3d.clone()
+
+    second = PotentialBuilder(**kwargs)
+    assert torch.equal(second.atomic_potentials_3d, cold)
+
+    # Mutating a builder's own stack must not reach through to the cache.
+    second.atomic_potentials_3d.zero_()
+    third = PotentialBuilder(**kwargs)
+    assert torch.equal(third.atomic_potentials_3d, cold)
+
+    # A different voxel size is a different kernel, not a cache hit.
+    other = PotentialBuilder(**{**kwargs, "dx": 1.0})
+    assert len(_KERNEL_CACHE) == 8
+    assert not torch.equal(other.atomic_potentials_3d, cold)
+
+
+def test_potential_kernel_cache_separates_parameterizations():
+    """
+    Kernels for the same element under different parameterizations stay distinct.
+
+    The cheapest way to get this cache wrong is to key it on the element alone,
+    which would silently serve Kirkland kernels to a Lobato builder -- a physics
+    error that no shape or dtype check would catch.
+    """
+    import torch
+
+    from specter.potential import PotentialBuilder
+    from specter.potential._potential_builder import _KERNEL_CACHE
+
+    znums = torch.tensor([6, 8])
+    _KERNEL_CACHE.clear()
+    kirkland = PotentialBuilder(
+        n_xyz=24,
+        dx=2.0,
+        atomic_numbers=znums,
+        progressbars=False,
+        parameterization="kirkland",
+    ).atomic_potentials_3d.clone()
+    lobato = PotentialBuilder(
+        n_xyz=24,
+        dx=2.0,
+        atomic_numbers=znums,
+        progressbars=False,
+        parameterization="lobato",
+    ).atomic_potentials_3d.clone()
+
+    assert not torch.allclose(kirkland, lobato)

@@ -63,16 +63,20 @@ nav:
       - Installation: installation.md
       - Quickstart: quickstart.md
   - User Guide:
-      - Generate a particle stack: user-guide/particle-stack.md
-      - Generate a micrograph: user-guide/micrograph.md
-      - Generate a tilt series: user-guide/tilt-series.md
-      - Build a tomogram specimen: user-guide/build-tomogram.md
-      - Generate a CryoSPARC dataset twin: user-guide/dataset-twin.md
-      - Using the ice cache: user-guide/ice-cache.md
-      - Reconstruct a volume: user-guide/reconstruction.md
-      - Configure a run: user-guide/configuration.md
-      - Manage jobs: user-guide/jobs.md
-      - Manage the PDB cache: user-guide/cache.md
+      - Simulate:
+          - Generate a particle stack: user-guide/particle-stack.md
+          - Generate a micrograph: user-guide/micrograph.md
+          - Generate a tilt series: user-guide/tilt-series.md
+          - Generate a CryoSPARC dataset twin: user-guide/dataset-twin.md
+      - Build:
+          - Build a tomogram specimen: user-guide/build-tomogram.md
+          - Using the ice cache: user-guide/ice-cache.md
+      - Reconstruct:
+          - Reconstruct a volume: user-guide/reconstruction.md
+      - Manage runs:
+          - Configure a run: user-guide/configuration.md
+          - Manage jobs: user-guide/jobs.md
+          - Manage the PDB cache: user-guide/cache.md
   - Concepts:
       - Overview: concepts/index.md
       - Pipeline overview: concepts/pipeline-overview.md

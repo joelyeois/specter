@@ -949,3 +949,139 @@ def test_signed_distance_transform_falls_back_when_gpu_transform_raises(monkeypa
 
     assert phi.device.type == "cuda"
     assert torch.equal(phi.cpu(), expected)
+
+
+def _sh_solid_mask_cpu_float64(
+    shape_zyx,
+    spacing_a,
+    origin_xyz,
+    sh_axes,
+    sh_amplitude,
+    sh_max_degree,
+    sh_spectrum_power,
+    seed,
+):
+    """
+    The pre-optimisation SH solid-mask construction, kept verbatim as reference.
+
+    It built a dense (nz*ny*nx, 3) point cloud on the CPU and did every
+    per-voxel operation in float64. The shipped version derives the same mask
+    from three broadcast 1-D coordinate axes on `device` in float32; this
+    exists so that equivalence is asserted against the original arithmetic.
+    """
+    import numpy as np
+
+    from specter.specimen.membrane._field import _grid_points_xyz
+    from specter.specimen.membrane._field_spherical_harmonics import (
+        _angular_grid_resolution,
+        _interpolate_angular_grid,
+        _sample_sh_coefficients,
+        _synthesize_angular_grid,
+    )
+
+    points = _grid_points_xyz(shape_zyx, spacing_a, origin_xyz, device="cpu")
+    query = points.reshape(-1, 3).numpy()
+    axes = np.asarray(sh_axes, dtype=np.float64)
+    p_prime = query / axes
+    r_prime = np.linalg.norm(p_prime, axis=-1)
+    r_safe = np.clip(r_prime, 1e-12, None)
+    theta = np.arccos(np.clip(p_prime[:, 2] / r_safe, -1.0, 1.0))
+    phi_ang = np.arctan2(p_prime[:, 1], p_prime[:, 0])
+
+    rng = np.random.default_rng(seed)
+    coefficients = _sample_sh_coefficients(sh_max_degree, sh_spectrum_power, rng)
+    n_theta, n_phi = _angular_grid_resolution(sh_max_degree)
+    coarse = _synthesize_angular_grid(coefficients, sh_max_degree, n_theta, n_phi)
+    pert = _interpolate_angular_grid(coarse, theta, phi_ang, device="cpu")
+    r_surface = np.clip(1.0 + sh_amplitude * pert, 0.05, None)
+    return torch.as_tensor((r_prime < r_surface).reshape(shape_zyx))
+
+
+@pytest.mark.parametrize("seed", [11, 12, 14])
+def test_sh_field_solid_mask_matches_cpu_float64_reference(seed: int) -> None:
+    """
+    The on-device float32 SH geometry reproduces the CPU float64 solid mask.
+
+    `generate_membrane_field_spherical_harmonics` used to build its per-voxel
+    geometry as a dense point cloud on the CPU in float64, which was the single
+    largest cost in `specter build tomogram`'s membrane phase. It now broadcasts
+    three 1-D coordinate axes on `device` in float32 instead.
+
+    Equality has to be EXACT, not approximate. The mask is a threshold,
+    `r_prime < r_surface`, and in float32 about one voxel in 10^8 lands close
+    enough to tie the other way. Thirteen such voxels in a membrane shell were
+    measured to move the region mask enough that the cytosol filler packing --
+    a random sequential addition -- took a different accept/reject path and
+    re-realized entirely, so a fixed `seed` no longer reproduced a fixed
+    tomogram. Building each axis in float32 before upcasting reproduces NumPy's
+    dtype sequence and with it the reference mask bit for bit; this test is what
+    keeps that property from being optimised away again.
+    """
+    from specter.specimen.membrane._field_spherical_harmonics import (
+        generate_membrane_field_spherical_harmonics,
+    )
+
+    shape = (48, 48, 48)
+    spacing = 8.0
+    axes = (120.0, 170.0, 140.0)
+    extent = torch.tensor([shape[2], shape[1], shape[0]], dtype=torch.float32) * spacing
+    origin = -0.5 * extent
+
+    expected = _sh_solid_mask_cpu_float64(
+        shape, spacing, origin, axes, 0.15, 6, 2.0, seed
+    )
+    field = generate_membrane_field_spherical_harmonics(
+        shape_zyx=shape,
+        spacing_a=spacing,
+        sh_axes=axes,
+        sh_amplitude=0.15,
+        sh_max_degree=6,
+        sh_spectrum_power=2.0,
+        seed=seed,
+        device="cpu",
+    )
+    # phi is negative strictly inside the solid, so its sign recovers the mask.
+    got = field.phi < 0
+
+    n_diff = int((got != expected).sum())
+    assert n_diff == 0, (
+        f"{n_diff} of {expected.numel()} solid-mask voxels differ from the "
+        "CPU float64 reference"
+    )
+
+
+def test_interpolate_angular_grid_returns_tensor_for_tensor_input() -> None:
+    """
+    `_interpolate_angular_grid` returns the array type it was handed.
+
+    The SH field passes torch tensors so a 100M-voxel working grid never leaves
+    the GPU; `specimen/_grid.py`'s bead roughness still passes NumPy. Both call
+    sites are load-bearing, so pin the contract rather than the current caller.
+    """
+    import numpy as np
+
+    from specter.specimen.membrane._field_spherical_harmonics import (
+        _angular_grid_resolution,
+        _interpolate_angular_grid,
+        _sample_sh_coefficients,
+        _synthesize_angular_grid,
+    )
+
+    rng = np.random.default_rng(0)
+    coefficients = _sample_sh_coefficients(6, 2.0, rng)
+    n_theta, n_phi = _angular_grid_resolution(6)
+    coarse = _synthesize_angular_grid(coefficients, 6, n_theta, n_phi)
+
+    theta = rng.uniform(0.0, np.pi, 512)
+    phi = rng.uniform(-np.pi, 3.0 * np.pi, 512)  # spans the wrap on both sides
+
+    from_numpy = _interpolate_angular_grid(coarse, theta, phi, device="cpu")
+    from_torch = _interpolate_angular_grid(
+        coarse, torch.as_tensor(theta), torch.as_tensor(phi), device="cpu"
+    )
+
+    assert isinstance(from_numpy, np.ndarray)
+    assert torch.is_tensor(from_torch)
+    assert torch.allclose(
+        torch.as_tensor(from_numpy, dtype=torch.float32), from_torch, atol=1e-6
+    )

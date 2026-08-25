@@ -47,17 +47,43 @@ if TYPE_CHECKING:
 K = TypeVar("K", bound=Hashable)
 V = TypeVar("V")
 
-# Below this many unique PDB sources, build_pdb_cache_concurrently falls
-# back to serial regardless of max_workers -- process-pool startup (spawn
-# re-imports specter's whole dependency chain, torch/lightning included, in
-# every worker) has a large ~13-15s FIXED cost, independent of how much
-# actual parsing work there is. Measured directly (dev/bench_pdb_loading_
-# overhead.py, max_workers=4): serial-vs-parallel speedup was 0.11x at N=2,
-# 0.29x at N=5, 0.54x at N=10 -- all net LOSSES -- crossing over to 1.12x at
-# N=20 and climbing to ~2.0x by N=100+. This threshold sits a margin above
-# that N=20 crossover (which was only a modest, possibly noise-level win)
-# rather than exactly at it.
-_MIN_SOURCES_FOR_PROCESS_POOL = 25
+# build_pdb_cache_concurrently falls back to serial when the process pool is
+# not predicted to pay for itself. Spawn re-imports specter's whole dependency
+# chain, torch/lightning included, in every worker, and that startup is a fixed
+# cost the parsing has to earn back.
+#
+# This used to be a threshold on the NUMBER of unique sources (25), which is the
+# wrong criterion: the cost being amortized is total parse WORK, and that varies
+# ~40x across the structures a single tomogram config loads (2REC, 1,818 atoms,
+# 0.67s; 6N4V, 236,760 atoms, 26s). A count threshold is wrong in both
+# directions -- it pooled 25 tiny structures that would have been faster serial,
+# and ran 24 large ones serially at a measured 2.8x loss. `configs/tomogram.toml`
+# sat one source above it.
+#
+# Parse cost tracks the structure file's size on disk closely enough to decide
+# on (dev/perf-bench/calibrate_pdb_cost.py, 27 structures spanning 0.26-25.6 MB:
+# r = 0.974), and that size is one os.stat away, known before any parsing.
+_PDB_PARSE_FIXED_S = 0.45
+_PDB_PARSE_S_PER_MB = 0.65
+
+# Measured spawn cost of the pool itself, as the residual between each pool run
+# and its own perfect-scheduling floor, max(longest task, total work / workers)
+# -- 6-8s across N = 2..24 (dev/perf-bench/bench_pool_crossover.py), not the
+# ~13-15s previously assumed. Taking the top of that range keeps the estimate
+# conservative, i.e. biased toward staying serial.
+_POOL_SPAWN_OVERHEAD_S = 8.0
+
+# Used when a source isn't cached yet and its size is therefore unknown. Those
+# are network downloads, which overlap across processes regardless of parse
+# cost, so guessing high is the safe direction.
+_UNKNOWN_SOURCE_MB = 5.0
+
+# The pool has to win by this much before it is worth taking, rather than merely
+# breaking even. The estimator is good enough to rank and to size (r = 0.974)
+# but individual structures land within about a factor of three of it, so a
+# predicted saving of a second or two is noise -- and the downside of guessing
+# wrong is the whole spawn cost, while the upside is that same second.
+_POOL_REQUIRED_MARGIN = 0.75
 
 # Measured sweet spot for build_templates_concurrently's THREAD pool
 # specifically (dev/sweep_render_configs.py, full production-scale sweep,
@@ -267,6 +293,78 @@ def build_templates_concurrently(
         return results
 
 
+def _estimated_parse_seconds(pdb_source: str, pdb_cache_dir: str) -> float:
+    """
+    Predict how long `PDB(pdb_source)` will take, from the file's size on disk.
+
+    Used for two decisions, neither of which needs better than order-of-
+    magnitude accuracy: whether a process pool will pay for its spawn cost at
+    all, and which sources to submit to it first.
+
+    Parameters
+    ----------
+    pdb_source : str
+        A 4-character accession code or a path to a structure file.
+    pdb_cache_dir : str
+        Where downloaded structures are cached, checked for an accession code.
+
+    Returns
+    -------
+    float
+        Estimated seconds. Falls back to `_UNKNOWN_SOURCE_MB`'s worth for a
+        source that isn't on disk yet (an un-fetched accession code), since its
+        real cost is a network download whose size can't be known first.
+    """
+    import os
+
+    candidates = [pdb_source]
+    if pdb_cache_dir:
+        candidates += [
+            os.path.join(pdb_cache_dir, f"{pdb_source}-assembly{n}.cif")
+            for n in range(1, 4)
+        ]
+        candidates += [
+            os.path.join(pdb_cache_dir, f"{pdb_source}{ext}")
+            for ext in (".cif", ".pdb")
+        ]
+    megabytes = _UNKNOWN_SOURCE_MB
+    for path in candidates:
+        try:
+            if os.path.isfile(path):
+                megabytes = os.path.getsize(path) / 1e6
+                break
+        except OSError:
+            continue
+    return _PDB_PARSE_FIXED_S + _PDB_PARSE_S_PER_MB * megabytes
+
+
+def _process_pool_is_worth_it(estimates: list[float], max_workers: int) -> bool:
+    """
+    Decide whether spawning a process pool beats parsing these sources serially.
+
+    Compares the serial total against the pool's best case -- perfect
+    scheduling, so the longest single task or an even split across workers,
+    whichever binds -- plus the pool's own measured spawn cost. Both sides use
+    the same estimator, so a systematic bias in it largely cancels.
+
+    Parameters
+    ----------
+    estimates : list of float
+        Per-source estimated parse seconds, from `_estimated_parse_seconds`.
+    max_workers : int
+        Worker count the pool would be given.
+
+    Returns
+    -------
+    bool
+    """
+    if not estimates or max_workers <= 1:
+        return False
+    serial = sum(estimates)
+    pooled = max(max(estimates), serial / max_workers) + _POOL_SPAWN_OVERHEAD_S
+    return pooled < _POOL_REQUIRED_MARGIN * serial
+
+
 def _fetch_one_pdb(args: tuple[str, str, bool, bool | str]) -> "PDB":
     """
     Worker target for `build_pdb_cache_concurrently` -- a plain top-level
@@ -347,7 +445,10 @@ def build_pdb_cache_concurrently(
     not specific to this function).
     """
     unique_sources = list(dict.fromkeys(pdb_sources))
-    if max_workers <= 1 or len(unique_sources) < _MIN_SOURCES_FOR_PROCESS_POOL:
+    estimates = [
+        _estimated_parse_seconds(source, pdb_cache_dir) for source in unique_sources
+    ]
+    if not _process_pool_is_worth_it(estimates, max_workers):
         from ..pdb import PDB
 
         results = {}
@@ -362,6 +463,20 @@ def build_pdb_cache_concurrently(
             if on_result is not None:
                 on_result(source)
         return results
+
+    # Submit the most expensive structures FIRST (longest-processing-time
+    # first). Callers hand these in sorted alphabetically, which on the default
+    # tomogram config puts the two priciest -- 6N4V and 6QZP, 26s and 18s of a
+    # 90s serial total -- at positions 21 and 22 of 24. Starting the longest
+    # task last makes the makespan (total / workers) + longest instead of
+    # max(total / workers, longest): measured 35.6s -> 31.5s against a 26s floor
+    # set by 6N4V alone.
+    submission_order = [
+        source
+        for _, source in sorted(
+            zip(estimates, unique_sources), key=lambda pair: -pair[0]
+        )
+    ]
     ctx = multiprocessing.get_context("spawn")
     with ProcessPoolExecutor(max_workers=max_workers, mp_context=ctx) as pool:
         futures = {
@@ -369,7 +484,7 @@ def build_pdb_cache_concurrently(
                 _fetch_one_pdb,
                 (source, pdb_cache_dir, compute_atom_species, readd_hydrogens),
             ): source
-            for source in unique_sources
+            for source in submission_order
         }
         results = {}
         for fut in as_completed(futures):

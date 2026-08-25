@@ -126,10 +126,18 @@ def test_build_pdb_cache_concurrently_serial():
 
 
 def test_build_pdb_cache_concurrently_below_threshold_skips_process_pool(monkeypatch):
+    """
+    A handful of small structures is parsed serially, not in a process pool.
+
+    Three test structures are a few seconds of parsing between them, far less
+    than the pool's own measured spawn cost, so paying it would be a net loss --
+    see `_process_pool_is_worth_it`.
+    """
+
     def _boom(*args, **kwargs):
         raise AssertionError(
-            "ProcessPoolExecutor must not be used below "
-            "_MIN_SOURCES_FOR_PROCESS_POOL -- see that constant's own comment"
+            "ProcessPoolExecutor must not be used when the estimated parse "
+            "work cannot repay its spawn cost -- see _process_pool_is_worth_it"
         )
 
     monkeypatch.setattr(parallel_render_module, "ProcessPoolExecutor", _boom)
@@ -141,19 +149,15 @@ def test_build_pdb_cache_concurrently_below_threshold_skips_process_pool(monkeyp
     assert set(cache) == {"1mbo", "1bxn", "1a6m"}
 
 
-_TABLE_SOURCES = [
-    d["code"]
-    for d in CRYOETSIM_PARTICLE_TABLE[
-        : parallel_render_module._MIN_SOURCES_FOR_PROCESS_POOL + 2
-    ]
-]
+# Enough real structures for `_process_pool_is_worth_it` to choose the pool.
+_TABLE_SOURCES = [d["code"] for d in CRYOETSIM_PARTICLE_TABLE[:27]]
 
 
 def _table_sources_cached() -> bool:
     """Whether every above-threshold source is already downloaded.
 
-    These two tests need 27 real structures (~32 MB) to clear
-    `_MIN_SOURCES_FOR_PROCESS_POOL`, which is too much to commit to git, so
+    These two tests need 27 real structures (~32 MB) to make the process pool
+    the chosen path, which is too much to commit to git, so
     they are opt-in on a populated cache. Guarding on it keeps a clean clone
     from silently fetching 32 MB from RCSB in the middle of a test run.
     """
@@ -169,9 +173,9 @@ _requires_table_sources = pytest.mark.skipif(
 
 @_requires_table_sources
 def test_build_pdb_cache_concurrently_parallel_matches_serial():
-    # Above _MIN_SOURCES_FOR_PROCESS_POOL, so this genuinely exercises the
-    # process-pool path (see the below-threshold test above for the
-    # fallback-to-serial case).
+    # Enough estimated parse work to choose the pool, so this genuinely
+    # exercises the process-pool path (see the below-threshold test above for
+    # the fallback-to-serial case).
     sources = _TABLE_SOURCES
     serial = build_pdb_cache_concurrently(
         pdb_sources=sources, pdb_cache_dir=default_pdb_cache_dir(), max_workers=1
@@ -286,3 +290,114 @@ def test_build_pdb_cache_forwards_readd_hydrogens(monkeypatch, max_workers):
     # 1mbo carries no hydrogens, so True adds them and False must not.
     assert n_hydrogens(True) > 0
     assert n_hydrogens(False) == 0
+
+
+def test_estimated_parse_seconds_scales_with_file_size(tmp_path):
+    """
+    The parse-cost estimate reads the structure file's size, not just its name.
+
+    This is what replaced a fixed threshold on the NUMBER of sources: parse cost
+    spans ~40x across the structures one tomogram config loads, so a count says
+    nothing about whether a process pool can repay its spawn cost.
+    """
+    from specter.specimen._parallel_render import _estimated_parse_seconds
+
+    small = tmp_path / "aaaa-assembly1.cif"
+    large = tmp_path / "bbbb-assembly1.cif"
+    small.write_bytes(b"x" * 200_000)
+    large.write_bytes(b"x" * 20_000_000)
+
+    t_small = _estimated_parse_seconds("aaaa", str(tmp_path))
+    t_large = _estimated_parse_seconds("bbbb", str(tmp_path))
+
+    assert t_large > 10 * t_small
+    # An un-cached source has no size to read and must not be estimated at zero,
+    # or a pool of them would always look free.
+    assert _estimated_parse_seconds("zzzz", str(tmp_path)) > 1.0
+
+
+def test_estimated_parse_seconds_accepts_a_direct_path(tmp_path):
+    """A `pdb_source` given as a path is sized directly, not looked up in the cache."""
+    from specter.specimen._parallel_render import _estimated_parse_seconds
+
+    path = tmp_path / "structure.cif"
+    path.write_bytes(b"x" * 10_000_000)
+
+    assert _estimated_parse_seconds(str(path), "") > 6.0
+
+
+def test_process_pool_is_worth_it_matches_measured_crossover():
+    """
+    The serial-vs-pool decision reproduces the measured crossover.
+
+    Reference points from dev/perf-bench/bench_pool_crossover.py, real
+    structures, 8 workers: a net LOSS at an estimated ~24 s of serial work
+    (measured 0.96x), a clear win by ~42 s (measured 1.49x) and ~90 s (2.81x).
+    Pinning both sides matters -- the previous count-based rule got the 90 s
+    case wrong in one direction and would have got a pile of tiny structures
+    wrong in the other.
+    """
+    from specter.specimen._parallel_render import _process_pool_is_worth_it
+
+    # one 26 s structure plus three small ones: not worth a pool
+    assert not _process_pool_is_worth_it([26.0, 0.7, 4.0, 1.4], max_workers=8)
+    # add two more large ones and it is
+    assert _process_pool_is_worth_it([26.0, 0.7, 4.0, 1.4, 18.0, 1.1], max_workers=8)
+    # the default tomogram config's 24 sources
+    assert _process_pool_is_worth_it([26.0, 18.0] + [2.5] * 22, max_workers=8)
+
+    # A single worker can never overlap anything, and an empty list has no work.
+    assert not _process_pool_is_worth_it([26.0] * 50, max_workers=1)
+    assert not _process_pool_is_worth_it([], max_workers=8)
+
+    # Many tiny structures stay serial: 20 x 0.5 s cannot repay the spawn cost.
+    assert not _process_pool_is_worth_it([0.5] * 20, max_workers=8)
+
+
+@_requires_table_sources
+def test_build_pdb_cache_concurrently_submits_expensive_sources_first(monkeypatch):
+    """
+    The pool receives its most expensive sources first.
+
+    Callers pass sources sorted alphabetically, which is uncorrelated with cost
+    and on the default tomogram config puts the two priciest structures near the
+    end. Starting the longest task last adds its whole duration to the makespan
+    rather than overlapping it, worth a measured 35.6s -> 31.5s.
+    """
+    from specter.specimen._parallel_render import _estimated_parse_seconds
+
+    submitted: list[str] = []
+
+    class _RecordingPool:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def submit(self, fn, args):
+            submitted.append(args[0])
+
+            class _Fut:
+                def result(self_inner):
+                    return None
+
+            return _Fut()
+
+    monkeypatch.setattr(parallel_render_module, "ProcessPoolExecutor", _RecordingPool)
+    monkeypatch.setattr(parallel_render_module, "as_completed", lambda futures: [])
+
+    sources = sorted(_TABLE_SOURCES)
+    build_pdb_cache_concurrently(
+        pdb_sources=sources,
+        pdb_cache_dir=default_pdb_cache_dir(),
+        max_workers=8,
+    )
+
+    assert sorted(submitted) == sorted(sources)
+    costs = [_estimated_parse_seconds(s, default_pdb_cache_dir()) for s in submitted]
+    assert costs == sorted(costs, reverse=True)
+    assert submitted != sources, "submission order should not still be alphabetical"

@@ -444,3 +444,108 @@ def test_fourier_space_summation_gradients_match(model):
     got = grad_of(getattr(scat, model))
     want = grad_of(lambda x: _SUM_AFTER_REFERENCES[model](scat, x))
     assert torch.allclose(got, want, rtol=1e-4, atol=1e-7)
+
+
+def _iterative_multislice_unhoisted_reference(scat, V, theta_matrix):
+    """
+    `IterativeScattering.multislice` with the bandlimit applied per slice.
+
+    The shipped loop folds the bandlimit into the propagator once
+    (``Fk = F * kmask``) instead of evaluating ``psi_k * F * kmask`` on every
+    slice. This is the pre-hoist arithmetic, kept verbatim as the reference.
+    """
+    from specter.fft import fft2, ifft2
+
+    if scat.pad_fft:
+        F = scat.F_step_padded_real + 1j * scat.F_step_padded_imag
+        kmask = scat.kmask_padded
+        canvas = scat.padded_nxy
+        roi_size = canvas
+    else:
+        F = scat.F_step_real + 1j * scat.F_step_imag
+        kmask = scat.kmask
+        canvas = scat.nxy
+        roi_size = None
+
+    exitwave = torch.ones(
+        V.shape[0], canvas, canvas, device=scat.device, dtype=torch.complex64
+    )
+    for _, _, slice_sample in scat._iter_slices(
+        V, theta_matrix, 1, "reference", roi_size=roi_size
+    ):
+        slice_complex = complex_potential(slice_sample, alpha=scat.alpha)
+        t = torch.exp(1j * scat.sigma * scat.pixel_size * slice_complex)
+        exitwave = ifft2(fft2(t * exitwave) * F * kmask)
+    return exitwave
+
+
+@pytest.mark.parametrize("klim", [None, 0.66])
+@pytest.mark.parametrize("alpha", [0.0, 0.1])
+def test_iterative_multislice_bandlimit_hoist_is_exact(alpha, klim, pad_fft=False):
+    """
+    Folding the bandlimit into the propagator changes nothing, bit for bit.
+
+    `psi_k * F * kmask` and `psi_k * (F * kmask)` are only interchangeable
+    because `kmask` is binary (0.0/1.0), or the Python int 1 when `klim` is
+    None -- in which case the shipped form also skips a full-size complex
+    multiply by one, per slice. A soft or apodised mask would make the
+    reassociation inexact, so this asserts equality rather than closeness.
+
+    `klim` is parametrized over both spellings for that reason. The padded
+    propagator takes the same code path with a different buffer; what the
+    reassociation needs of it is covered by
+    `test_iterative_scattering_bandlimit_masks_are_binary`.
+    """
+    torch.manual_seed(0)
+    n, nz = 32, 12
+    scat = IterativeScattering(
+        nxy=n,
+        pixel_size=2.0,
+        voltage=300.0,
+        scattering_model="multislice",
+        klim=klim,
+        alpha=alpha,
+        pad_fft=pad_fft,
+        progressbars=False,
+    )
+    V = torch.rand(2, nz, n, n) * 0.5
+
+    angle = torch.tensor(25.0 * np.pi / 180.0)
+    c, s = torch.cos(angle), torch.sin(angle)
+    theta = torch.zeros(2, 3, 4)
+    theta[:, :, :3] = torch.tensor([[c, 0.0, s], [0.0, 1.0, 0.0], [-s, 0.0, c]])
+
+    got = scat.multislice(V, theta, slice_batchsize=1)
+    want = _iterative_multislice_unhoisted_reference(scat, V, theta)
+
+    assert torch.equal(got, want)
+
+
+@pytest.mark.parametrize("pad_fft", [False, True])
+@pytest.mark.parametrize("klim", [None, 0.66])
+def test_iterative_scattering_bandlimit_masks_are_binary(klim, pad_fft):
+    """
+    Every bandlimit mask is binary (or the int 1), which is what makes the hoist exact.
+
+    `multislice` folds the mask into the propagator once rather than applying it
+    per slice. Reassociating `(psi_k * F) * kmask` to `psi_k * (F * kmask)` is
+    bitwise-exact for a 0.0/1.0 mask and NOT exact for a soft or apodised one,
+    so this pins the property the optimisation rests on -- including for the
+    padded propagator, whose own buffer is a separate construction.
+    """
+    scat = IterativeScattering(
+        nxy=32,
+        pixel_size=2.0,
+        voltage=300.0,
+        scattering_model="multislice",
+        klim=klim,
+        pad_fft=pad_fft,
+        progressbars=False,
+    )
+    mask = scat.kmask_padded if pad_fft else scat.kmask
+    if not torch.is_tensor(mask):
+        assert mask == 1
+        return
+    assert torch.equal(mask, (mask > 0).to(mask.dtype)), (
+        "bandlimit mask must be binary for the propagator hoist to stay exact"
+    )

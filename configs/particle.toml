@@ -30,10 +30,16 @@ save_clean_exitwaves = false
 
 [compute]
 device = "cpu"                   # cpu | cuda | cuda:0 | 0,1,2,3 (multi-GPU)
-batchsize = "auto"               # particles per forward pass; "auto" fits it to the free
-                                 # memory on `device` at run time -- pin an integer if you set
-                                 # a seed, since batching decides which random draw reaches
-                                 # which particle (a seeded run rejects "auto")
+batchsize = "auto"               # particles per forward pass. "auto" takes the smaller of what
+                                 # fits in the free memory on `device` and what is worth
+                                 # batching: past the point where one forward pass already
+                                 # saturates the device, a bigger batch costs memory without
+                                 # going faster. At the 256 box above it resolves to 1, which
+                                 # measured as fast as any larger batch and 21x leaner; a
+                                 # smaller box batches up and does get faster.
+                                 # Pin an integer if you set a seed, since batching decides
+                                 # which random draw reaches which particle (a seeded run
+                                 # rejects "auto").
 
 [output]
 output_dir = "particles"

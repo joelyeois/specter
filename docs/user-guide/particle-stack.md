@@ -166,10 +166,19 @@ affects speed and peak memory only, never the images. The default is:
 batchsize = "auto"
 ```
 
-which measures the memory free on `device` at run time and picks the
-largest batch predicted to fit, given the FFT-padded volume the box size
+which takes the smaller of two bounds. The first is what fits: the memory
+free on `device` at run time, against the FFT-padded volume the box size
 implies (a 256-pixel box with `pad_fft = true` holds 512×512×256 volumes, not
-256³). The CLI prints the chosen value at the start of generation:
+256³). The second is what is worth batching. Batching amortises the fixed cost
+of a forward pass, but only until a single pass already saturates the device;
+beyond that point a larger batch consumes memory in proportion to its size
+without reducing the time per particle.
+
+Which bound binds depends on the box. At a 256-pixel box one particle covers
+67 million padded voxels and saturates a current GPU on its own, so `"auto"`
+resolves to 1. At a 64-pixel box a particle covers 1 million, and batching is
+worth roughly a factor of two. The CLI prints the chosen value at the start of
+generation:
 
 ```
 batchsize='auto' -> 3 particle(s) per pass (~31.7 GiB estimated peak, 43.1 GiB free on cuda:1)
@@ -179,7 +188,7 @@ Set an integer instead to pin it, worth doing when benchmarking, when
 sharing a GPU with a job that will grow after SPECTER has taken its reading,
 or on CPU under a Slurm `--mem` limit (the CPU reading is the host's, not the
 cgroup's). The estimate stays deliberately conservative; `specter.memory`
-documents it along with its measured basis.
+documents both bounds along with their measured basis.
 
 ## Multi-GPU
 

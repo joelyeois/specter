@@ -216,8 +216,11 @@ PARTICLE_STACK_HELP: dict[str, str] = {
     "device": "Device to use: cpu | cuda | cuda:0 | 0,1,2,3. "
     "Comma-separated integers trigger multi-GPU Lightning DDP.",
     "batchsize": "Number of particles per forward pass. Unset (or 'auto' in "
-    "a TOML config, which is the default) sizes the batch to the memory free "
-    "on --device at run time; see specter.memory.recommend_batchsize.",
+    "a TOML config, which is the default) takes the smaller of what fits in "
+    "the memory free on --device at run time and what is worth batching -- "
+    "past the point where one forward pass already saturates the device, a "
+    "bigger batch costs memory without going faster. See "
+    "specter.memory.recommend_batchsize.",
     "output_dir": "Directory to save .mrcs and .star files when untracked. Setting --project or --job_id instead makes this the root of the numbered job tree, so tracking organises output within the folder you chose rather than moving it elsewhere. Unset defaults to <artifact>/ untracked, and to the project root found by walking up from cwd for an existing .specter marker when tracked.",
     "filename": "Base name for output files (no extension).",
     "project": "Optional: number and track this run through specter.jobs. "

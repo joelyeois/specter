@@ -9,6 +9,15 @@ volume the multislice pipeline holds at peak, how big the padded volume
 actually is (which is *not* `n_pixels**3`), and how much of the device is
 free right now. `recommend_batchsize` computes all three.
 
+Fitting the device is a bound, not a target
+-------------------------------------------
+A larger batch only pays until one forward pass already saturates the device,
+and at the default config a single particle does: measured on an L40, box 256
+is flat in batch size to 16 and then 24% SLOWER at 32, for 21x the memory.
+Smaller boxes do benefit (2.2-2.5x at box 64). So the batch is capped by work
+per pass -- `_SATURATION_PADDED_VOXELS` -- as well as by memory, and "auto"
+routinely returns far less than would fit.
+
 Peak-memory model
 -----------------
 Peak allocation is linear in the batch size, with the per-particle slope set
@@ -98,6 +107,26 @@ _CPU_SAFETY_FRACTION = 0.5
 #: this allowance exists for library callers who have not, and is skipped when
 #: the variable is already set.
 _FRAGMENTATION_HEADROOM = 1.3
+
+#: Padded voxels one forward pass may cover before batching stops paying.
+#:
+#: Batching amortizes per-call overhead, but only until a single pass already
+#: saturates the device -- past that it buys nothing and costs memory linearly.
+#: Measured on an L40 across box sizes (dev/perf-bench/bench_batchsize_
+#: throughput.py), per-particle cost against batch size:
+#:
+#:   box  64 (1.05M padded voxels/particle): 2.2-2.5x faster by batch 16-64
+#:   box 128 (8.4M):                         ~1.5x, plateaued by batch 4
+#:   box 256 (67.1M, the default config):    FLAT to batch 16, then 24% SLOWER
+#:                                           at 32 -- for 21x the memory
+#:                                           (1.5 GB at batch 1, 30.8 GB at 32)
+#:
+#: So the useful batch is set by work per pass, not by free memory: sizing to
+#: fill the device gets the default config exactly backwards. This budget picks
+#: ~61 at box 64, ~7 at box 128 and 1 at box 256, which tracks the measured
+#: optima. Run-to-run spread on those timings is ~30%, so it is deliberately a
+#: round number in the middle of a broad flat region rather than a tuned one.
+_SATURATION_PADDED_VOXELS = 64_000_000
 
 #: Ceiling on an auto-chosen batch. Throughput has flattened well before this
 #: (the fixed per-batch overheads are amortized within a few particles), and
@@ -227,12 +256,16 @@ def recommend_batchsize(
     overhead = estimate_peak_bytes(0, nxy, nz, pad_nxy)
     batchsize = int(math.floor((budget - overhead) / per_particle))
 
+    # Past saturation a bigger batch is not faster, so this is a ceiling on
+    # useful work, applied alongside the memory bound rather than instead of it.
+    saturation = max(1, _SATURATION_PADDED_VOXELS // (nz * pad_nxy**2))
+
     ceiling = (
         MAX_AUTO_BATCHSIZE
         if n_particles is None
         else min(MAX_AUTO_BATCHSIZE, n_particles)
     )
-    return max(1, min(batchsize, ceiling))
+    return max(1, min(batchsize, saturation, ceiling))
 
 
 def resolve_batchsize(

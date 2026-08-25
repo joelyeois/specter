@@ -107,7 +107,7 @@ specter simulate particles \
 ```
 
 Pass `--star_path particles.star` instead of `--cs_path` to drive the same
-code path from a RELION `.star` file: specter reads both the single-block
+code path from a RELION `.star` file: SPECTER reads both the single-block
 layout it writes itself and the RELION 3.1+ two-block (`optics` +
 `particles`) layout. The two flags are mutually exclusive.
 
@@ -176,7 +176,7 @@ batchsize='auto' -> 3 particle(s) per pass (~31.7 GiB estimated peak, 43.1 GiB f
 ```
 
 Set an integer instead to pin it, worth doing when benchmarking, when
-sharing a GPU with a job that will grow after specter has taken its reading,
+sharing a GPU with a job that will grow after SPECTER has taken its reading,
 or on CPU under a Slurm `--mem` limit (the CPU reading is the host's, not the
 cgroup's). The estimate stays deliberately conservative; `specter.memory`
 documents it along with its measured basis.

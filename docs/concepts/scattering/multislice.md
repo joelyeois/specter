@@ -90,7 +90,7 @@ magnitude. `klim` is `None` by default (no bandlimiting) in every shipped
 config: discarding real high-resolution signal to suppress an aliasing
 artifact that is often negligible at typical pixel sizes and specimen
 thicknesses is a tradeoff that depends on the specimen and resolution, so
-specter leaves the choice to you.
+SPECTER leaves the choice to you.
 
 ## Ewald sphere curvature and the traversal order
 

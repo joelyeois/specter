@@ -90,7 +90,7 @@ protofilaments essentially parallel to the tube axis at every \(N\).
 
 !!! warning "No supertwist"
     Non-13-protofilament microtubules do supertwist slightly, and
-    specter does not model it. The residual implied by deposited
+    SPECTER does not model it. The residual implied by deposited
     helical parameters is ~0.1°, and those parameters aren't precise
     enough to pin it down: two 14-protofilament entries report 25.7°
     vs 25.75° per subunit, which alone moves the implied skew by
@@ -105,7 +105,7 @@ outwards. `align_principal_axis_to_z` (used for filament monomers and
 membrane proteins) fixes only the first, leaving the roll about it
 arbitrary.
 
-Rather than calibrate that roll, specter takes it from a structure that
+Rather than calibrate that roll, SPECTER takes it from a structure that
 already has it. Deposited microtubule reconstructions are solved in the
 microtubule frame, with protofilaments running as columns of monomers
 at constant \((x, y)\), and their asymmetric unit is a small
@@ -178,7 +178,7 @@ unconstrained.
 
 ## Placement
 
-specter centres every microtubule on a uniformly random point and, by
+SPECTER centres every microtubule on a uniformly random point and, by
 default, spans the volume's diagonal, so it crosses the field the way
 real ones do instead of trailing off from an interior point.
 
@@ -190,7 +190,7 @@ consequence of the specimen rather than a tilt-angle parameter.
 
 Otherwise placement inherits filaments' limitations: microtubules
 aren't region-gated, and don't avoid one another, the membrane shell,
-or the carbon film (specter drops dimers landing in carbon afterwards,
+or the carbon film (SPECTER drops dimers landing in carbon afterwards,
 leaving a gap). Everything placed after them *does* avoid them, though:
 beads and the whole protein-fill stage read placed microtubule voxels
 as obstacles.

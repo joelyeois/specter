@@ -47,7 +47,7 @@ specter simulate particles \
 
 This is the same command as the five-particle example in [Generate a
 particle stack](particle-stack.md#example-matching-empiar-11377), with
-`--n_particles 5` removed so specter renders every row in the file. A
+`--n_particles 5` removed so SPECTER renders every row in the file. A
 dataset of any real size benefits from `--device` accepting a
 comma-separated GPU list (see [Multi-GPU](particle-stack.md#multi-gpu)) and
 from job tracking (`--project`, see [Manage jobs](jobs.md)) to record a

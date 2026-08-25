@@ -8,7 +8,7 @@ A single bead's boundary at the default roughness: an irregular quasi-sphere, sh
 Fiducial beads are the one component with no PDB behind them. There is no
 atomic structure to hand `PotentialBuilder`, so the density has to come
 from bulk material physics instead: gold's bulk mass density → number
-density → per-atom potential integral, using specter's own atomic
+density → per-atom potential integral, using SPECTER's own atomic
 potential parameterizations.
 
 The generator builds each bead from **real fcc gold atoms**: randomly
@@ -82,7 +82,7 @@ gold's equilibrium truncated octahedron (a Wulff solid), describing an
 annealed single crystal instead, gives a population no shape variety at
 all, only pose variety.
 
-specter ships a band-limited spherical-harmonic modulation of the radius
+SPECTER ships a band-limited spherical-harmonic modulation of the radius
 instead, reusing the [membrane backend's](../membrane-shape/spherical-harmonics.md)
 own harmonic machinery:
 
@@ -107,7 +107,7 @@ Below about 0.06 a bead is visually indistinguishable from a sphere while
 still costing the harmonic machinery; 0.12–0.20 reads as an irregular
 particle; 0.0 gives a clean sphere.
 
-specter deliberately does **not** expose the band limit
+SPECTER deliberately does **not** expose the band limit
 (\(\ell_{\max} = 6\)) and spectrum (flat, equal power per mode).
 \(\ell_{\max} = 6\) puts
 the finest lumps at ~30° of arc, roughly a quarter of the bead across,

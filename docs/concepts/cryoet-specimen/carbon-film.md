@@ -125,7 +125,7 @@ Downstream:
 - **Membranes and filaments** are placed carbon-aware. Membrane
   placement rejects candidates using a bounding-sphere approximation,
   so an irregular organelle's true rendered shape can still graze the
-  film in practice. As a safety net, specter zeros whatever part of an
+  film in practice. As a safety net, SPECTER zeros whatever part of an
   instance's density would land on carbon anyway, right before merging,
   so the volume and that instance's own shell label exclude it
   consistently. It drops filament monomers landing inside the film
@@ -160,7 +160,7 @@ You get at most one `[[carbon_film]]` table per run.
   carbon: one circular hole in an amorphous slab.
 - **The slab is flat.** Real films buckle and wrinkle; the only z
   structure here is the seed-cloud jitter.
-- **No filament steering.** As above, specter drops monomers inside
+- **No filament steering.** As above, SPECTER drops monomers inside
   the film rather than routing them around it.
 - **Deposition has no per-atom radial structure**, by design.
 

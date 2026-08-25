@@ -10,7 +10,7 @@ along a random walk. Each monomer instance is a rigid-transformed copy
 of one rendered template, so a 60-monomer F-actin filament costs one
 `PotentialBuilder` render and 60 rigid-body rotations.
 
-specter ships two presets: `ACTIN_SPEC`, corresponding to F-actin, and
+SPECTER ships two presets: `ACTIN_SPEC`, corresponding to F-actin, and
 `PROTOFILAMENT_SPEC`, corresponding to a single microtubule
 protofilament. Define custom geometries via a `FilamentSpec`.
 
@@ -68,7 +68,7 @@ symmetry of helical polymers:
 2. **Apply the twist.** Rotate about that same axis by an accumulated
    \(i \cdot \texttt{twist\_deg}\).
 
-specter fixes the canonical \(+Z\) axis during template construction,
+SPECTER fixes the canonical \(+Z\) axis during template construction,
 pre-rotating the monomer's coordinates so its **longest principal
 axis** points along \(+Z\). This is an approximation; see
 [Limitations](#limitations) for a fuller discussion.
@@ -115,7 +115,7 @@ sampling and no obstacle awareness:
 
 - A filament that wanders **outside the volume** gets truncated at
   render time, the same edge behaviour applied to placed particles.
-- specter drops a monomer landing **inside the carbon film** after the
+- SPECTER drops a monomer landing **inside the carbon film** after the
   fact, leaving a gap rather than redirecting the walk.
 - Filaments do **not** avoid the membrane shell or each other, and
   aren't region-gated: a filament can cross a vesicle wall and continue
@@ -146,7 +146,7 @@ the `ACTIN_SPEC` preset; see
 - **One protofilament only.** A full microtubule, with its
   13-protofilament tube geometry, gets
   [its own component](microtubules.md).
-- **No collision avoidance during the walk.** specter doesn't redirect
+- **No collision avoidance during the walk.** SPECTER doesn't redirect
   monomers landing inside another object; it resolves overlaps only
   through the post-hoc dropping described under [Placement](#placement).
 - **The stacking axis is a principal-axis approximation.** The monomer's

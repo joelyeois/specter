@@ -145,7 +145,7 @@ Both [CryoTomoSim](https://github.com/carsonpurnell/cryotomosim_CTS)
 `TomogramSpecimenGenerator`. Two components descend directly from CTS,
 both generic bulk-material simulations with no placement logic of their
 own: the [gold beads](beads.md) (`gen_beads.m`) and the
-[carbon film](carbon-film.md) (`gen_carbon.m`/`carbonshape`). specter
+[carbon film](carbon-film.md) (`gen_carbon.m`/`carbonshape`). SPECTER
 adapts the [transmembrane placement](bilayer.md) construction from
 Polnet, as it does the bilayer's two-Gaussian profile.
 

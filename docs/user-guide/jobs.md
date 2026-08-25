@@ -57,7 +57,7 @@ specter simulate particles --config configs/particle.toml --job_id J001
 
 `--project` groups related jobs under a shared folder and names it.
 `--job_id` pins the specific job directory a run writes into, instead of
-letting specter auto-assign the next free `J0NN`. Passing only
+letting SPECTER auto-assign the next free `J0NN`. Passing only
 `--job_id` still tracks the run: it lands directly under
 `output_dir/<job_type>/<job_id>/`, in the implicit default project (see
 [Directory layout](#directory-layout)). Passing both scopes the pinned id
@@ -310,7 +310,7 @@ project whose `output_dir` was left unset (the `.specter`-discovered
 default), that root is the project root, and `export
 SPECTER_JOBS_DIR=$(pwd)` from anywhere under it works for every
 subsequent `specter jobs` call. For a project run against the shipped
-`configs/particle.toml`, whose `output_dir = "particles"` specter uses
+`configs/particle.toml`, whose `output_dir = "particles"` SPECTER uses
 verbatim even when tracked (see above), `--base-dir particles` is the
 value that matches, not the project root.
 

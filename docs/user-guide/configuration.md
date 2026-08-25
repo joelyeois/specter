@@ -50,7 +50,7 @@ removed, the error names the current spelling directly.
 ## CLI overrides
 
 Every field on a config dataclass gets a matching `--field_name` flag;
-specter generates it automatically rather than hand-writing it per
+SPECTER generates it automatically rather than hand-writing it per
 command, so the two never drift apart. Two things follow from that:
 
 - **A flag's real default is `None`, not the dataclass default shown next

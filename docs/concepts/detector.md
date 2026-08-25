@@ -73,7 +73,7 @@ Only Falcon 4i has a traceable low-dose-rate published value; K3's
 datasheet publishes an MTF with no accompanying DQE(0) figure, so it
 defaults to 1.0 (an ideal counter) rather than guessing. These values
 must be *low-dose-rate* DQE(0): published DQE falls with dose rate
-largely because of coincidence loss, which specter already models
+largely because of coincidence loss, which SPECTER already models
 separately (below). Using a high-flux figure here would count that
 loss twice.
 

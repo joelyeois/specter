@@ -14,6 +14,13 @@ from . import rotations
 if TYPE_CHECKING:
     from .ice import IceProfile
 
+# Template voxels per rotation batch when `CrowdWithDuplicates.chunk_size` is
+# left unset. Bounds the transient `(batch, Z, Y, X, 3)` sampling grid
+# `rotations.rotate_volume` builds; see the constructor for the measurements.
+# Matches `specimen/packing/_shape.py`'s `_ROTATE_CHUNK_VOXELS`, which caps the
+# same allocation for the same reason.
+_ROTATE_CHUNK_VOXELS = 64_000_000
+
 __all__ = [
     "poisson_disk_neighbors",
     "poisson_disk_neighbors_3d",
@@ -291,8 +298,13 @@ class CrowdWithDuplicates(L.LightningModule):
             - 'origin': start at center (0,0,0)
             - 'random': start at a random location within the box
     chunk_size : int, optional
-        Number of volumes to rotate per batch for memory-efficient computation.
-        If None, all volumes are rotated at once.
+        Number of volumes to rotate per batch. Default None sizes the batch to
+        a fixed budget of template voxels, which keeps the transient sampling
+        grid bounded no matter how many duplicates are placed; see
+        `_ROTATE_CHUNK_VOXELS`. Batching costs no wall time (measured flat from
+        1 to 64 at micrograph scale), so raising this only trades memory for
+        nothing -- it is here to be lowered on a small device, or pinned for a
+        run that must reproduce an earlier one exactly.
     move_to_cpu : bool, optional
         If True, intermediate rotated volumes are moved to CPU to save GPU memory.
     progressbars : bool, optional
@@ -352,7 +364,26 @@ class CrowdWithDuplicates(L.LightningModule):
         self.poisson_disc_method = method
         self.n_points = n_points
         self.seed = seed
-        self.chunk_size = chunk_size
+        # `None` sizes the batch to a fixed VOXEL budget rather than rotating
+        # every duplicate at once. Rotating a duplicate costs ~28 bytes per
+        # template voxel (the (B, Z, Y, X, 3) sampling grid plus the resampled
+        # output), so one batch of a micrograph's worth -- 864 duplicates of a
+        # 256^3 template on the default config -- asks for 60 GiB and OOMs any
+        # single GPU. Chunking is free: wall time measured flat at 86.9-88.9 s
+        # across chunk sizes 1 to 64, while peak memory ran 0.55 GB to 30.1 GB.
+        #
+        # A fixed budget rather than a reading of free memory, deliberately.
+        # Chunk size changes the order duplicates are summed into the
+        # accumulator, so it perturbs the output at float-rounding level
+        # (~4e-6 relative, measured) -- sizing it from whatever the device
+        # happened to have free would make a run's output depend on what else
+        # was sharing the GPU. Same reasoning and same budget as
+        # `specimen/packing/_shape.py`'s own `_ROTATE_CHUNK_VOXELS`.
+        self.chunk_size = (
+            chunk_size
+            if chunk_size is not None
+            else max(1, int(_ROTATE_CHUNK_VOXELS // max(V.numel(), 1)))
+        )
         self.move_to_cpu = move_to_cpu
         self.progressbars = progressbars
         self.water_air_interface = water_air_interface
@@ -446,38 +477,29 @@ class CrowdWithDuplicates(L.LightningModule):
         """
         Rotate the original volume according to the affine matrices `self.theta`.
 
-        If `chunk_size` is specified, volumes are rotated in batches for memory efficiency.
-        The rotated volumes are stored in `self.volumes`.
+        Rotated in batches of `chunk_size`; the results are stored in
+        `self.volumes`. Note this materializes all `N` rotated volumes at once,
+        so `forward` uses its own streaming loop instead -- this stays for
+        callers that want the stack itself.
         """
-        if self.chunk_size is not None:
-            if self.move_to_cpu:
-                self.volumes = torch.empty((self.N,) + self.V.shape)
-            else:
-                self.volumes = torch.empty((self.N,) + self.V.shape, device=self.device)
-
-            for start in track(
-                range(0, self.N, self.chunk_size),
-                description="Rotating duplicates",
-                transient=True,
-                disable=not self.progressbars,
-            ):
-                end = min(start + self.chunk_size, self.N)
-                if self.move_to_cpu:
-                    self.volumes[start:end] = rotations.rotate_volume(
-                        self.V,
-                        self.theta[start:end].to(self.V.device),
-                        padding_mode="zeros",
-                    ).cpu()
-                else:
-                    self.volumes[start:end] = rotations.rotate_volume(
-                        self.V,
-                        self.theta[start:end].to(self.V.device),
-                        padding_mode="zeros",
-                    )
+        if self.move_to_cpu:
+            self.volumes = torch.empty((self.N,) + self.V.shape)
         else:
-            self.volumes = rotations.rotate_volume(
-                self.V, self.theta.to(self.V.device), padding_mode="zeros"
+            self.volumes = torch.empty((self.N,) + self.V.shape, device=self.device)
+
+        for start in track(
+            range(0, self.N, self.chunk_size),
+            description="Rotating duplicates",
+            transient=True,
+            disable=not self.progressbars,
+        ):
+            end = min(start + self.chunk_size, self.N)
+            rotated = rotations.rotate_volume(
+                self.V,
+                self.theta[start:end].to(self.V.device),
+                padding_mode="zeros",
             )
+            self.volumes[start:end] = rotated.cpu() if self.move_to_cpu else rotated
 
     def insert_volumes(self) -> torch.Tensor:
         """
@@ -513,31 +535,32 @@ class CrowdWithDuplicates(L.LightningModule):
             return torch.zeros(
                 self.nz_out, self.nxy_out, self.nxy_out, device=self.device
             )
-        if self.chunk_size is None:
-            self.rotate_volumes()
-            micrograph = self.insert_volumes()
-            if self.move_to_cpu:
-                micrograph = micrograph.cpu()
-        else:
-            micrograph = torch.zeros(self.nz_out, self.nxy_out, self.nxy_out)
-            for start in track(
-                range(0, self.N, self.chunk_size),
-                description="Rotating duplicates and insert into micrograph",
-                transient=True,
-                disable=not self.progressbars,
-            ):
-                end = min(start + self.chunk_size, self.N)
-                volumes = rotations.rotate_volume(
-                    self.V,
-                    self.theta[start:end].to(self.V.device),
-                    padding_mode="zeros",
-                )
-                if self.move_to_cpu:
-                    volumes = volumes.cpu()
-                micrograph = insert_particles_into_micrograph(
-                    volumes,
-                    self.coords[start:end],
-                    pixel_size=self.dx,
-                    micrograph=micrograph,
-                )
+        # Rotate and insert a chunk at a time, so neither the sampling grid nor
+        # the stack of rotated duplicates is ever held for all N at once. The
+        # accumulator follows `move_to_cpu`, matching where the rotated volumes
+        # are sent -- at micrograph scale it is far larger than any chunk (a
+        # 500 x 4096 x 4096 canvas is 33 GB) and is what `move_to_cpu` exists
+        # to keep off the device.
+        accumulator_device = torch.device("cpu") if self.move_to_cpu else self.device
+        micrograph = torch.zeros(
+            self.nz_out, self.nxy_out, self.nxy_out, device=accumulator_device
+        )
+        for start in track(
+            range(0, self.N, self.chunk_size),
+            description="Rotating duplicates and insert into micrograph",
+            transient=True,
+            disable=not self.progressbars,
+        ):
+            end = min(start + self.chunk_size, self.N)
+            volumes = rotations.rotate_volume(
+                self.V,
+                self.theta[start:end].to(self.V.device),
+                padding_mode="zeros",
+            )
+            micrograph = insert_particles_into_micrograph(
+                volumes.to(accumulator_device),
+                self.coords[start:end],
+                pixel_size=self.dx,
+                micrograph=micrograph,
+            )
         return micrograph

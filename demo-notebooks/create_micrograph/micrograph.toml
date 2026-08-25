@@ -29,7 +29,8 @@ ice_model = "gd"              # tiled from a pre-baked cache: scales to large mi
                                # good choice for smaller micrographs.
 detector_model = "none"
 coincidence_radius = 1.8      # pixels
-specimen_chunk_size = 8                # slice chunk size for specimen generation; lower if GPU memory is limited
+crowd_chunk_size = 1                   # crowding duplicates rotated per batch; 1 is both the
+                                       # cheapest and the fastest setting, see the user guide
 
 [ice]
 ice_thickness = 500.0    # Å

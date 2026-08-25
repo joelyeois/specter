@@ -95,7 +95,9 @@ class MicrographSpecimenGenerator(L.LightningModule):
     progressbars : bool, optional
         Whether to show progress bars.
     chunk_size : int, optional
-        Chunk size for parallel processing.
+        Crowding duplicate volumes rotated per batch, forwarded to
+        ``CrowdWithDuplicates``. Default 1; see that class for why raising it
+        trades memory for nothing.
     """
 
     def __init__(
@@ -114,7 +116,7 @@ class MicrographSpecimenGenerator(L.LightningModule):
         ice_relax_steps: int = 0,
         water_air_interface: bool = True,
         progressbars: bool = True,
-        chunk_size: int | None = None,
+        chunk_size: int = 1,
         move_to_cpu: bool = True,
         save_clean_exitwaves: bool = False,
     ):

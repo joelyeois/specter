@@ -226,7 +226,7 @@ class TiltSeriesGenerator(MicrographGenerator):
         alpha: float = 0.0,
         pad_fft: bool = False,
         fft_pad_margin: int = 16,
-        chunk_size: int | None = None,
+        chunk_size: int = 1,
         detector_model: str | None = None,
         progressbars: bool = True,
         verbose: bool = True,

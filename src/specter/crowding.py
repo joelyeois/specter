@@ -14,13 +14,6 @@ from . import rotations
 if TYPE_CHECKING:
     from .ice import IceProfile
 
-# Template voxels per rotation batch when `CrowdWithDuplicates.chunk_size` is
-# left unset. Bounds the transient `(batch, Z, Y, X, 3)` sampling grid
-# `rotations.rotate_volume` builds; see the constructor for the measurements.
-# Matches `specimen/packing/_shape.py`'s `_ROTATE_CHUNK_VOXELS`, which caps the
-# same allocation for the same reason.
-_ROTATE_CHUNK_VOXELS = 64_000_000
-
 __all__ = [
     "poisson_disk_neighbors",
     "poisson_disk_neighbors_3d",
@@ -298,13 +291,14 @@ class CrowdWithDuplicates(L.LightningModule):
             - 'origin': start at center (0,0,0)
             - 'random': start at a random location within the box
     chunk_size : int, optional
-        Number of volumes to rotate per batch. Default None sizes the batch to
-        a fixed budget of template voxels, which keeps the transient sampling
-        grid bounded no matter how many duplicates are placed; see
-        `_ROTATE_CHUNK_VOXELS`. Batching costs no wall time (measured flat from
-        1 to 64 at micrograph scale), so raising this only trades memory for
-        nothing -- it is here to be lowered on a small device, or pinned for a
-        run that must reproduce an earlier one exactly.
+        Number of duplicate volumes to rotate per batch. Default 1. Rotating
+        them all at once needs ~28 bytes of transient sampling grid per template
+        voxel per duplicate, which a micrograph cannot afford, and batching them
+        is free in both directions: wall time measured flat from 1 to 64 at
+        micrograph scale while peak memory ran 0.55 GB to 30.1 GB. Raising this
+        therefore only trades memory for nothing, and changes the order
+        duplicates are summed into the accumulator, perturbing the output at
+        float-rounding level.
     move_to_cpu : bool, optional
         If True, intermediate rotated volumes are moved to CPU to save GPU memory.
     progressbars : bool, optional
@@ -348,7 +342,7 @@ class CrowdWithDuplicates(L.LightningModule):
         method: Literal["2d", "3d"] = "3d",
         n_points: int | float = torch.inf,
         seed: Literal["origin", "random"] = "origin",
-        chunk_size: int | None = None,
+        chunk_size: int = 1,
         move_to_cpu: bool = False,
         progressbars: bool = True,
         water_air_interface: bool = False,
@@ -364,26 +358,18 @@ class CrowdWithDuplicates(L.LightningModule):
         self.poisson_disc_method = method
         self.n_points = n_points
         self.seed = seed
-        # `None` sizes the batch to a fixed VOXEL budget rather than rotating
-        # every duplicate at once. Rotating a duplicate costs ~28 bytes per
-        # template voxel (the (B, Z, Y, X, 3) sampling grid plus the resampled
-        # output), so one batch of a micrograph's worth -- 864 duplicates of a
-        # 256^3 template on the default config -- asks for 60 GiB and OOMs any
-        # single GPU. Chunking is free: wall time measured flat at 86.9-88.9 s
-        # across chunk sizes 1 to 64, while peak memory ran 0.55 GB to 30.1 GB.
+        # Rotating a duplicate costs ~28 bytes per template voxel (the
+        # (B, Z, Y, X, 3) sampling grid plus the resampled output), so rotating
+        # them all at once is what a micrograph cannot afford: 864 duplicates of
+        # a 256^3 template asks for 60 GiB in one allocation.
         #
-        # A fixed budget rather than a reading of free memory, deliberately.
-        # Chunk size changes the order duplicates are summed into the
-        # accumulator, so it perturbs the output at float-rounding level
-        # (~4e-6 relative, measured) -- sizing it from whatever the device
-        # happened to have free would make a run's output depend on what else
-        # was sharing the GPU. Same reasoning and same budget as
-        # `specimen/packing/_shape.py`'s own `_ROTATE_CHUNK_VOXELS`.
-        self.chunk_size = (
-            chunk_size
-            if chunk_size is not None
-            else max(1, int(_ROTATE_CHUNK_VOXELS // max(V.numel(), 1)))
-        )
+        # 1 by default because batching these is free in both directions --
+        # measured at micrograph scale, wall time is flat from 1 to 64
+        # (86.9-88.9 s) while peak memory runs 0.55 GB to 30.1 GB. So a larger
+        # value only ever trades memory for nothing. Raising it also perturbs
+        # the output at float-rounding level (~4e-6 relative, measured), since
+        # it changes the order duplicates are summed into the accumulator.
+        self.chunk_size = chunk_size
         self.move_to_cpu = move_to_cpu
         self.progressbars = progressbars
         self.water_air_interface = water_air_interface

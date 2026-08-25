@@ -122,7 +122,9 @@ rotate_mode = "real"             # real | fourier
 ice_relax_steps = 0               # local MLBOP seam-relaxation steps, only used when ice_model="gd" tiles multiple cached blocks
 
 # crowding
-crowd_chunk_size = 1              # crowding volumes rotated per GPU batch; raise for speed if you have RAM to spare
+crowd_chunk_size = 1              # crowding duplicate volumes rotated per batch. 1 is both the
+                                  # cheapest and the fastest setting: wall time is flat in this
+                                  # while peak memory grows linearly with it.
 # crowd_max_distance_xy = 200.0   # Å
 crowd_method = "3d"               # 2d | 3d
 # crowd_n_points = 50             # cap on the number of crowding duplicates

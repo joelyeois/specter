@@ -65,12 +65,10 @@ ice_profile = "flat"             # flat | wedge | meniscus
 water_air_interface = true
 potential_scale = 1.0            # unitless; single value, or [low, high] (values < 1 approximate thicker ice)
 pad_fft = false
-# specimen_chunk_size = 8       # crowding duplicates rotated per batch. Left unset, this is
-                                # sized to a fixed voxel budget, so the sampling grid stays
-                                # bounded however many duplicates the crowding places.
-                                # Batching costs no wall time (measured flat from 1 to 64),
-                                # so set this only to fit a smaller device, or to reproduce
-                                # an earlier run's exact summation order.
+crowd_chunk_size = 1          # crowding duplicate volumes rotated per batch. Rotating them
+                              # all at once is what a micrograph cannot afford; 1 is also the
+                              # fastest setting measured, since wall time is flat in this while
+                              # peak memory grows linearly. Raise only if you have a reason.
 detector_model = "none"          # none | perfect | k3_300kv | k3_200kv
 
 [postprocessing]

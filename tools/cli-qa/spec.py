@@ -321,7 +321,7 @@ MICROGRAPH = CommandSpec(
         Flag("save_clean_exitwaves", "true", expect="artifacts"),
         Flag("seed", "999"),
         Flag(
-            "specimen_chunk_size",
+            "crowd_chunk_size",
             "2",
             expect="unchanged",
             note="performance knob: specimen assembly chunking",

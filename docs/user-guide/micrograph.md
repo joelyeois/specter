@@ -95,13 +95,21 @@ Enabling a profile costs you two things:
 
 ## Chunking and memory
 
-`specimen_chunk_size` limits how many Z-slices of the specimen (ice plus
-crowded particles) are generated at once, trading wall time for peak GPU
-memory. Lower it if specimen generation runs out of memory before scattering
-even starts; leave it unset for a small box or a large GPU. This only
-affects specimen construction. `Scattering`'s own multislice chunking
-(unrelated, and not a `MicrographConfig` field) handles memory during wave
-propagation.
+`crowd_chunk_size` is how many crowding duplicate volumes are rotated in one
+batch. It is not a count of Z-slices: each duplicate is a full copy of the
+particle template, rotated into its own orientation before being stamped into
+the canvas, and rotating one needs a sampling grid three times its size. A
+micrograph places hundreds, so rotating them together is what exhausts a
+device.
+
+The default of 1 is also the fastest setting available. Wall time is flat in
+this parameter at micrograph scale while peak memory grows linearly with it,
+so raising it trades memory for nothing. It also changes the order duplicates
+are summed into the canvas, which perturbs the result at float-rounding level.
+
+This affects specimen construction only. `Scattering`'s own multislice
+chunking, which is unrelated and is not a `MicrographConfig` field, bounds
+memory during wave propagation.
 
 ## Single-device only
 

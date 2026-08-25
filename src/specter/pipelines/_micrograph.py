@@ -208,7 +208,7 @@ def run_micrograph(config: MicrographConfig) -> None:
         crowd_max_distance_z=config.crowd_max_distance_z,
         water_air_interface=config.water_air_interface,
         pad_fft=config.pad_fft,
-        chunk_size=config.specimen_chunk_size,
+        chunk_size=config.crowd_chunk_size,
         move_to_cpu=True,
         detector_model=detector_model,
         verbose=False,

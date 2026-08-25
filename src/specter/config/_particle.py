@@ -145,7 +145,7 @@ class ParticleStackConfig:
     ice_relax_steps: int = 0
 
     # --- Advanced: crowding ---
-    crowd_chunk_size: int | None = 1
+    crowd_chunk_size: int = 1
     crowd_max_distance_xy: float | None = None  # Å
     crowd_method: Literal["2d", "3d"] = "3d"
     crowd_n_points: int | None = None
@@ -300,8 +300,10 @@ PARTICLE_STACK_HELP: dict[str, str] = {
     "only to deliberately differ.",
     "ice_relax_steps": "Local MLBOP seam-relaxation steps, only used when "
     "ice_model='gd' tiles multiple cached blocks.",
-    "crowd_chunk_size": "Crowding volumes rotated per GPU batch. Raise for "
-    "speed if you have RAM to spare; None rotates all at once.",
+    "crowd_chunk_size": "Crowding duplicate volumes rotated per batch. "
+    "Batching them is free in both directions -- wall time is flat in this "
+    "while memory grows linearly -- so raising it trades memory for "
+    "nothing.",
     "crowd_max_distance_xy": "Maximum xy-distance between crowded particles in "
     "Angstrom.",
     "crowd_method": "Poisson-disk sampling dimensionality for crowding particle "

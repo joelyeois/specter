@@ -116,7 +116,9 @@ class MicrographGenerator(BaseImager):
     pad_fft : bool, optional
         Whether to XY-pad the volume for FFT antialiasing. Default False.
     chunk_size : int, optional
-        Chunk size for ``MicrographSpecimenGenerator`` parallel processing.
+        Crowding duplicate volumes rotated per batch, forwarded to
+        ``MicrographSpecimenGenerator``. Default 1, which is both the cheapest
+        and the fastest setting -- see ``CrowdWithDuplicates``.
     move_to_cpu : bool, optional
         Move the assembled volume to CPU after generation to save GPU memory.
         Default True.
@@ -185,7 +187,7 @@ class MicrographGenerator(BaseImager):
         klim: float | None = None,
         alpha: float = 0.0,
         pad_fft: bool = False,
-        chunk_size: int | None = None,
+        chunk_size: int = 1,
         move_to_cpu: bool = True,
         detector_model: str | None = None,
         slice_batchsize: int = 1,

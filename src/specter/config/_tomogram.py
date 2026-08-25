@@ -283,7 +283,7 @@ class TomogramConfig:
     # small-scale-safe behaviour; set e.g. 32-64 once a config's species
     # counts get into the hundreds. Named render_chunk_size (not bare
     # chunk_size) to keep it distinct from MicrographConfig's own
-    # specimen_chunk_size, a different chunking knob entirely.
+    # crowd_chunk_size, a different chunking knob entirely.
     render_chunk_size: int | None = None
 
     # --- Output ---

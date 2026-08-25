@@ -224,7 +224,7 @@ _MICROGRAPH_GROUPS: list[tuple[str, list[str]]] = [
             "water_air_interface",
             "potential_scale",
             "pad_fft",
-            "specimen_chunk_size",
+            "crowd_chunk_size",
         ],
     ),
 ]

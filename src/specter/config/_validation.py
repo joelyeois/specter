@@ -222,7 +222,6 @@ def validate_config(config: Any) -> None:
         "batchsize",
         "n_tilts",
         "voxel_size",
-        "specimen_chunk_size",
         "crowd_chunk_size",
         "crowd_n_points",
         "render_chunk_size",

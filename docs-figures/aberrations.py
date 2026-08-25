@@ -36,7 +36,7 @@ CS = 2.7e7  # Angstrom (2.7 mm), typical Titan Krios spherical aberration
 
 
 def _aberration() -> Aberration:
-    return Aberration(N_PIXELS, PIXEL_SIZE, VOLTAGE, aberration_model="holography")
+    return Aberration(N_PIXELS, PIXEL_SIZE, VOLTAGE, aberration_model="nonlinear")
 
 
 def _radial(field: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
@@ -53,7 +53,7 @@ def figure_ctf_1d() -> None:
     where Thon rings in a power spectrum go through zero. Uses a larger
     grid than the other figures purely for smoother radial-bin spacing
     (1/(N*d)) at high k, where chi(k) oscillates fastest."""
-    ab = Aberration(N_PIXELS_1D, PIXEL_SIZE, VOLTAGE, aberration_model="holography")
+    ab = Aberration(N_PIXELS_1D, PIXEL_SIZE, VOLTAGE, aberration_model="nonlinear")
     tf = ab.transfer_function({"dfu": torch.tensor([DFU]), "cs": torch.tensor([CS])})[0]
     shifted_re, shifted_im = torch.fft.fftshift(tf.real), torch.fft.fftshift(tf.imag)
     k, re = radial_profile_2d(shifted_re, return_r=True)
@@ -214,7 +214,7 @@ def figure_envelopes() -> None:
         n,
         pixel_size,
         VOLTAGE,
-        aberration_model="holography",
+        aberration_model="nonlinear",
         bfactor=bfactor,
         convergence_angle=convergence_angle,
         cc=cc,

@@ -61,11 +61,11 @@ def test_full_ctf_params_dict_matches_old_aberration():
         "trefoil2": torch.tensor([0.2650] * 5),
     }
 
-    old = Aberration(N_PIXELS, PIXEL_SIZE, VOLTAGE, aberration_model="holography")
+    old = Aberration(N_PIXELS, PIXEL_SIZE, VOLTAGE, aberration_model="nonlinear")
     old_out = old(exitwave, ctf_params)
 
     adapter = LegacyAberrationAdapter(
-        N_PIXELS, PIXEL_SIZE, VOLTAGE, aberration_model="holography"
+        N_PIXELS, PIXEL_SIZE, VOLTAGE, aberration_model="nonlinear"
     )
     new_out = adapter(exitwave, ctf_params)
 
@@ -83,10 +83,10 @@ def test_minimal_ctf_params_dict_matches_old_aberration():
         "cs": torch.tensor([2.7e7, 2.7e7]),
     }
 
-    old = Aberration(N_PIXELS, PIXEL_SIZE, VOLTAGE, aberration_model="holography")
+    old = Aberration(N_PIXELS, PIXEL_SIZE, VOLTAGE, aberration_model="nonlinear")
     old_out = old(exitwave, ctf_params)
     adapter = LegacyAberrationAdapter(
-        N_PIXELS, PIXEL_SIZE, VOLTAGE, aberration_model="holography"
+        N_PIXELS, PIXEL_SIZE, VOLTAGE, aberration_model="nonlinear"
     )
     new_out = adapter(exitwave, ctf_params)
 
@@ -97,10 +97,10 @@ def test_empty_ctf_params_dict_matches_old_aberration():
     """No CTF terms at all -- matches BaseImager's ctf_params=None path
     (chi stays identically 0)."""
     exitwave = _exitwave(2, seed=2)
-    old = Aberration(N_PIXELS, PIXEL_SIZE, VOLTAGE, aberration_model="holography")
+    old = Aberration(N_PIXELS, PIXEL_SIZE, VOLTAGE, aberration_model="nonlinear")
     old_out = old(exitwave, {})
     adapter = LegacyAberrationAdapter(
-        N_PIXELS, PIXEL_SIZE, VOLTAGE, aberration_model="holography"
+        N_PIXELS, PIXEL_SIZE, VOLTAGE, aberration_model="nonlinear"
     )
     new_out = adapter(exitwave, {})
 
@@ -114,10 +114,12 @@ def test_ctf_model_matches_old_aberration():
         "cs": torch.tensor([2.7e7, 2.7e7]),
     }
 
-    old = Aberration(N_PIXELS, PIXEL_SIZE, VOLTAGE, aberration_model="ctf", alpha=0.0)
+    old = Aberration(
+        N_PIXELS, PIXEL_SIZE, VOLTAGE, aberration_model="linear", alpha=0.0
+    )
     old_out = old(exitwave, ctf_params)
     adapter = LegacyAberrationAdapter(
-        N_PIXELS, PIXEL_SIZE, VOLTAGE, aberration_model="ctf"
+        N_PIXELS, PIXEL_SIZE, VOLTAGE, aberration_model="linear"
     )
     new_out = adapter(exitwave, ctf_params)
 
@@ -139,11 +141,11 @@ def test_bfactor_matches_old_aberration():
     }
 
     old = Aberration(
-        N_PIXELS, PIXEL_SIZE, VOLTAGE, aberration_model="holography", bfactor=150.0
+        N_PIXELS, PIXEL_SIZE, VOLTAGE, aberration_model="nonlinear", bfactor=150.0
     )
     old_out = old(exitwave, ctf_params)
     adapter = LegacyAberrationAdapter(
-        N_PIXELS, PIXEL_SIZE, VOLTAGE, aberration_model="holography", bfactor=150.0
+        N_PIXELS, PIXEL_SIZE, VOLTAGE, aberration_model="nonlinear", bfactor=150.0
     )
     new_out = adapter(exitwave, ctf_params)
 
@@ -159,11 +161,11 @@ def test_dose_envelope_matches_old_aberration():
     }
 
     old = Aberration(
-        N_PIXELS, PIXEL_SIZE, VOLTAGE, aberration_model="holography", dose_envelope=True
+        N_PIXELS, PIXEL_SIZE, VOLTAGE, aberration_model="nonlinear", dose_envelope=True
     )
     old_out = old(exitwave, ctf_params)
     adapter = LegacyAberrationAdapter(
-        N_PIXELS, PIXEL_SIZE, VOLTAGE, aberration_model="holography", dose_envelope=True
+        N_PIXELS, PIXEL_SIZE, VOLTAGE, aberration_model="nonlinear", dose_envelope=True
     )
     new_out = adapter(exitwave, ctf_params)
 
@@ -181,7 +183,7 @@ def test_convergence_angle_and_cc_envelopes_match_old_aberration():
         N_PIXELS,
         PIXEL_SIZE,
         VOLTAGE,
-        aberration_model="holography",
+        aberration_model="nonlinear",
         convergence_angle=1.0,
         cc=1.4e7,
     )
@@ -190,7 +192,7 @@ def test_convergence_angle_and_cc_envelopes_match_old_aberration():
         N_PIXELS,
         PIXEL_SIZE,
         VOLTAGE,
-        aberration_model="holography",
+        aberration_model="nonlinear",
         convergence_angle=1.0,
         cc=1.4e7,
     )
@@ -234,11 +236,11 @@ def test_real_csfile_particles_match_old_aberration_end_to_end():
     px = float(pixel_size)
     exitwave = _exitwave(20, seed=7, n_pixels=n_pixels)
 
-    old = Aberration(n_pixels, px, voltage, aberration_model="holography")
+    old = Aberration(n_pixels, px, voltage, aberration_model="nonlinear")
     old_out = old(exitwave, ctf_params)
 
     adapter = LegacyAberrationAdapter(
-        n_pixels, px, voltage, aberration_model="holography"
+        n_pixels, px, voltage, aberration_model="nonlinear"
     )
     new_out = adapter(exitwave, ctf_params)
 
@@ -261,7 +263,7 @@ def test_lpp_params_matches_direct_ctfparameters_construction():
         N_PIXELS,
         PIXEL_SIZE,
         VOLTAGE,
-        aberration_model="holography",
+        aberration_model="nonlinear",
         lpp_params=_LPP_KWARGS,
     )
     bridged_out = adapter(exitwave, ctf_params)
@@ -269,7 +271,7 @@ def test_lpp_params_matches_direct_ctfparameters_construction():
     params = CTFParameters(
         defocus=15000.0 / 1e4, spherical_aberration=2.7e7 / 1e7, lpp_params=_LPP_KWARGS
     )
-    tf = TransferFunction(N_PIXELS, PIXEL_SIZE, aberration_model="holography")
+    tf = TransferFunction(N_PIXELS, PIXEL_SIZE, aberration_model="nonlinear")
     direct_out = tf(exitwave, params)
 
     assert torch.allclose(bridged_out, direct_out, atol=1e-6)
@@ -291,7 +293,7 @@ def test_lpp_params_overrides_stale_nonzero_phaseshift():
         N_PIXELS,
         PIXEL_SIZE,
         VOLTAGE,
-        aberration_model="holography",
+        aberration_model="nonlinear",
         lpp_params=_LPP_KWARGS,
     )
     out_without_phaseshift = adapter(exitwave, base_ctf_params)

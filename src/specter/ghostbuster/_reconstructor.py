@@ -94,8 +94,6 @@ class Reconstructor(_BaseReconstructor):
         Symmetry group to enforce (e.g. "C3", "D2"). None disables symmetry.
     scattering_model : str
         Scattering model passed to ImageGenerator. Default is "multislice".
-    aberration_model : str
-        Aberration model passed to ImageGenerator. Default is "holography".
     aberration_backend : {"legacy", "torch_ctf"}, optional
         Which engine computes the CTF/aberration transfer function inside
         the underlying ``ImageGenerator``. ``"legacy"`` (default) uses
@@ -132,7 +130,6 @@ class Reconstructor(_BaseReconstructor):
         defocus_offset: torch.Tensor = torch.tensor(0.0),
         bfactor: float | torch.Tensor | None = None,
         scattering_model: str = "multislice",
-        aberration_model: str = "holography",
         aberration_backend: Literal["legacy", "torch_ctf"] = "legacy",
         lpp_params: dict[str, float] | None = None,
         klim: float | None = None,
@@ -224,7 +221,6 @@ class Reconstructor(_BaseReconstructor):
         # imaging models
         self.ews_curvature_sign = ews_curvature_sign
         self.scattering_model = scattering_model
-        self.aberration_model = aberration_model
         self.aberration_backend = aberration_backend
         self.lpp_params = lpp_params
         self._build_imagegenerator(klim, bfactor)
@@ -399,7 +395,6 @@ class Reconstructor(_BaseReconstructor):
             anisomag=self.anisomag,
             ice_model=None,
             scattering_model=self.scattering_model,
-            aberration_model=self.aberration_model,
             noise_model=None,
             klim=klim,
             ews_curvature_sign=self.ews_curvature_sign,

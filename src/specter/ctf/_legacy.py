@@ -179,6 +179,14 @@ class LegacyAberrationAdapter(nn.Module):
 
     Parameters
     ----------
+    specimen_absorption : bool, optional
+        Forwarded to :class:`TransferFunction` unchanged -- see its own
+        docstring. Default True, matching ``aberrations.Aberration``'s
+        default; a caller building this class directly for
+        ``aberration_model="linear"`` (e.g. matching
+        ``scattering_model="ctf"``) needs to pass False explicitly, the
+        same way :meth:`BaseImager._init_optics` does for the ``"legacy"``
+        backend.
     lpp_params : dict[str, float], optional
         Laser-phase-plate config, in ``CTFParameters``-native units. A
         construction-time argument, like ``bfactor``/``convergence_angle``/
@@ -193,7 +201,8 @@ class LegacyAberrationAdapter(nn.Module):
         n_pixels: int,
         pixel_size: float,
         voltage: float,
-        aberration_model: str = "holography",
+        aberration_model: str = "nonlinear",
+        specimen_absorption: bool = True,
         bfactor: float | torch.Tensor | None = None,
         convergence_angle: float | None = None,
         cc: float | None = None,
@@ -212,6 +221,7 @@ class LegacyAberrationAdapter(nn.Module):
             n_pixels,
             pixel_size,
             aberration_model=aberration_model,
+            specimen_absorption=specimen_absorption,
             bfactor=bfactor,
             convergence_angle=convergence_angle,
             cc=cc,

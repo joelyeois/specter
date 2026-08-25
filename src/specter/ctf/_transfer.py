@@ -36,9 +36,9 @@ class TransferFunction(nn.Module):
         Exit wave side length in pixels.
     pixel_size : float
         Pixel size in Å.
-    aberration_model : {"holography", "ctf"}, optional
-        ``"holography"`` returns the full complex aberrated wave;
-        ``"ctf"`` returns its real part. Both use the *complex* torch-ctf
+    aberration_model : {"nonlinear", "linear"}, optional
+        ``"nonlinear"`` returns the full complex aberrated wave;
+        ``"linear"`` returns its real part. Both use the *complex* torch-ctf
         transfer function (``return_complex_ctf=True``), matching
         ``aberrations.Aberration``'s existing behaviour exactly. Adopting
         torch-ctf's dedicated real ``-sin(chi)`` weak-phase-object formula
@@ -84,7 +84,7 @@ class TransferFunction(nn.Module):
         self,
         n_pixels: int,
         pixel_size: float,
-        aberration_model: str = "holography",
+        aberration_model: str = "nonlinear",
         specimen_absorption: bool = True,
         bfactor: float | torch.Tensor | None = None,
         convergence_angle: float | None = None,
@@ -95,7 +95,7 @@ class TransferFunction(nn.Module):
         dose_envelope: bool = False,
     ) -> None:
         super().__init__()
-        if aberration_model not in ("holography", "ctf"):
+        if aberration_model not in ("nonlinear", "linear"):
             raise ValueError(f"Unknown aberration_model: {aberration_model!r}")
         self.n_pixels = n_pixels
         self.pixel_size = pixel_size
@@ -137,8 +137,8 @@ class TransferFunction(nn.Module):
             kwargs = {**kwargs, "amplitude_contrast": torch.zeros_like(ac)}
         return kwargs
 
-    def _zero_dc_for_holography(self, transfer: torch.Tensor) -> torch.Tensor:
-        """Pin the DC (k=0) transfer-function value to 1+0j for holography mode.
+    def _zero_dc_for_nonlinear(self, transfer: torch.Tensor) -> torch.Tensor:
+        """Pin the DC (k=0) transfer-function value to 1+0j for the nonlinear model.
 
         Every genuinely k-dependent chi term (defocus, astigmatism, Cs,
         trefoil, beam tilt, tetrafoil, ...) is already exactly zero at k=0
@@ -150,7 +150,7 @@ class TransferFunction(nn.Module):
         the scattered signal alone splits into absorption/phase channels --
         neither has anything to say about the unscattered beam).
 
-        In holography mode the full complex wave is preserved, so any
+        In the nonlinear model the full complex wave is preserved, so any
         residual constant term left in chi at k=0 becomes a spatially
         uniform phase multiplying the *entire* real-space output (by the
         Fourier shift property) -- physically inert (no effect on intensity
@@ -158,8 +158,8 @@ class TransferFunction(nn.Module):
         removed for the phase-plate/amplitude-contrast terms to have their
         intended effect. This isn't optional or mode-tunable: it's the same
         DC-pinning aberrations.Aberration's phaseshift() already enforces
-        for "holography" (there, only phase_shift could ever be nonzero at
-        DC; amplitude_contrast was unimplemented). "ctf" mode does *not*
+        for "nonlinear" (there, only phase_shift could ever be nonzero at
+        DC; amplitude_contrast was unimplemented). "linear" mode does *not*
         get this treatment -- taking the real part downstream makes a
         uniform phase directly observable there, matching torch-ctf's own
         convention of never special-casing DC (see
@@ -287,8 +287,8 @@ class TransferFunction(nn.Module):
         kwargs = self._resolve_amplitude_contrast(kwargs)
         transfer = self._call_calculate_ctf_2d(kwargs)
 
-        if self.aberration_model == "holography":
-            transfer = self._zero_dc_for_holography(transfer)
+        if self.aberration_model == "nonlinear":
+            transfer = self._zero_dc_for_nonlinear(transfer)
 
         if self.bfactor is not None:
             bfactor = self.bfactor.view(-1, 1, 1)
@@ -354,12 +354,12 @@ class TransferFunction(nn.Module):
         Returns
         -------
         torch.Tensor
-            Aberrated exit wave. Complex for ``"holography"``, real for
-            ``"ctf"``.
+            Aberrated exit wave. Complex for ``"nonlinear"``, real for
+            ``"linear"``.
         """
         transfer = self.transfer_function(ctf_params, idx=idx)
         aberrated = ifft2(fft2(exitwave) * transfer)
-        return torch.real(aberrated) if self.aberration_model == "ctf" else aberrated
+        return torch.real(aberrated) if self.aberration_model == "linear" else aberrated
 
 
 def _collapse_if_uniform(coeff: torch.Tensor) -> torch.Tensor:

@@ -12,7 +12,7 @@ Do not activate the `superpowers` skill set in this repository — it is too lon
 Generates training data that best matches experimental data. Accurate physics modelling is the top priority. It supports:
 
 - Electron scattering (multislice, iterative)
-- CTF and holography aberration models
+- CTF, defocus, astigmatism, and higher-order aberration models (linear and nonlinear image formation)
 - Amorphous ice simulation
 - Detector effects (MTF, noise, coincidence loss)
 - GPU-accelerated volume rotation and potential calculation

@@ -44,7 +44,6 @@ n_micrographs = 1
 
 [models]
 scattering_model = "multislice"  # multislice | firstborn | projection | ctf
-aberration_model = "holography"  # holography | ctf
 noise_model = "poisson"          # poisson | none
 coincidence_radius = 0.0         # pixels; 0 = plain Poisson, no coincidence loss; single value, or [low, high]
 ice_model = "gd"                 # gd | random | none
@@ -66,7 +65,12 @@ ice_profile = "flat"             # flat | wedge | meniscus
 water_air_interface = true
 potential_scale = 1.0            # unitless; single value, or [low, high] (values < 1 approximate thicker ice)
 pad_fft = false
-# specimen_chunk_size = 8                  # uncomment to chunk specimen generation if GPU memory is limited
+# specimen_chunk_size = 8       # crowding duplicates rotated per batch. Left unset, this is
+                                # sized to a fixed voxel budget, so the sampling grid stays
+                                # bounded however many duplicates the crowding places.
+                                # Batching costs no wall time (measured flat from 1 to 64),
+                                # so set this only to fit a smaller device, or to reproduce
+                                # an earlier run's exact summation order.
 detector_model = "none"          # none | perfect | k3_300kv | k3_200kv
 
 [postprocessing]

@@ -50,7 +50,6 @@ def test_modular_pipeline_matches_image_generator():
         dose,
         ice_model=None,
         scattering_model="multislice",
-        aberration_model="holography",
         noise_model=None,
         ews_curvature_sign="positive",
         pad_fft=True,
@@ -94,12 +93,12 @@ def test_modular_pipeline_matches_image_generator():
     }
 
     aberration = Aberration(
-        pad_nxy, pixel_size, voltage, aberration_model="holography", alpha=0.0
+        pad_nxy, pixel_size, voltage, aberration_model="nonlinear", alpha=0.0
     )
     with torch.no_grad():
         detector_waves = aberration(exitwaves, manual_ctf_params)
 
-    detector = Detector(pixel_size, aberration_model="holography", noise_model=None)
+    detector = Detector(pixel_size, aberration_model="nonlinear", noise_model=None)
     dose_batch = torch.full((2,), dose)
     coincidence_radius = torch.zeros(2)
     with torch.no_grad():

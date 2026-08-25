@@ -61,7 +61,6 @@ class MicrographConfig:
     scattering_model: Literal["multislice", "firstborn", "projection", "ctf"] = (
         "multislice"
     )
-    aberration_model: Literal["holography", "ctf"] = "holography"
     noise_model: Literal["poisson", "none"] = "poisson"
     coincidence_radius: ScalarOrRange = 0.0  # pixels; 0 = plain Poisson
     ice_model: Literal["gd", "random", "none"] = "gd"
@@ -82,7 +81,7 @@ class MicrographConfig:
     water_air_interface: bool = True
     potential_scale: ScalarOrRange = 1.0  # unitless
     pad_fft: bool = False
-    specimen_chunk_size: int | None = None
+    specimen_chunk_size: int | None = None  # None -> sized to a voxel budget
     detector_model: Literal["none", "perfect", "k3_300kv", "k3_200kv"] = "none"
 
     # --- Post-processing ---
@@ -159,7 +158,6 @@ MICROGRAPH_HELP: dict[str, str] = {
     "(in a TOML config, write the range as [5000, 15000]).",
     "n_micrographs": "Number of micrographs to simulate.",
     "scattering_model": "Scattering model.",
-    "aberration_model": "Aberration model.",
     "noise_model": "Noise model. Use 'none' for no noise.",
     "coincidence_radius": "Effective coincidence exclusion radius in pixels "
     "(exclusion area = pi*r^2): a single value for constant radius, or "
@@ -205,8 +203,10 @@ MICROGRAPH_HELP: dict[str, str] = {
     "approximate thicker ice): a single value for constant scale, or "
     "'low,high' ([low, high] in TOML) to sample uniformly per micrograph.",
     "pad_fft": "Pad the volume for FFT to avoid edge artifacts.",
-    "specimen_chunk_size": "Slice chunk size for specimen generation. Lower "
-    "if GPU memory is limited.",
+    "specimen_chunk_size": "Crowding duplicates rotated per batch. Unset "
+    "sizes the batch to a fixed voxel budget, which is what keeps the "
+    "sampling grid bounded however many duplicates are placed; batching "
+    "costs no wall time, so lower this only on a small device.",
     "detector_model": "Detector model.",
     "normalize_micrographs": "Normalize micrographs to zero mean and unit std.",
     "save_exitwaves": "Save exit wave magnitude and phase as separate .mrcs files.",

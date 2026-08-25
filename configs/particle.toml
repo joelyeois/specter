@@ -67,7 +67,6 @@ deltaV_V = 0.06e-6              # unitless (ΔV/V)
 deltaI_I = 0.01e-6               # unitless (ΔI/I)
 dose_envelope = false
 # bfactor = 50.0                # Å², uncomment to enable a B-factor envelope
-aberration_model = "holography"  # holography | ctf
 noise_model = "poisson"          # poisson | none
 coincidence_radius = 0.0         # pixels; single value, or [low, high] to sample per particle
 ice_model = "gd"                 # gd | random | none

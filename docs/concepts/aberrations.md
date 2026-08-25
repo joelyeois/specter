@@ -104,7 +104,7 @@ on \(|k|\).
 ### Phase shift and amplitude contrast
 
 A constant phase offset, e.g. from a Volta phase plate, enters as
-\(\chi_{\mathrm{phaseshift}} = -\phi_0\). For `aberration_model="ctf"`
+\(\chi_{\mathrm{phaseshift}} = -\phi_0\). For `aberration_model="linear"`
 with `specimen_absorption=False` (see below), amplitude contrast is also
 represented here rather than in the exit wave itself, as
 \(-\arccos(\alpha)\) added to \(\phi_0\), matching CryoSPARC's
@@ -127,22 +127,38 @@ between crossings decreases with \(k\) because \(\chi(k)\) is quadratic
 in \(k\) near \(k=0\) (defocus-dominated) and quartic further out
 (\(C_s\)-dominated).
 
-## `holography` vs. `ctf` aberration models
+## `nonlinear` vs. `linear` aberration models
 
 `aberration_model` controls two things: how the phaseshift term folds in
 amplitude contrast (above), and how `forward()`'s output is interpreted.
-`"holography"` (the default) returns the complex aberrated exit wave
+`"nonlinear"` (the default) returns the complex aberrated exit wave
 unchanged, matching every `scattering_model` except `"ctf"`, which
 returns a real-valued exit wave with no absorptive component of its own.
 Amplitude contrast has nowhere else to live, so `Aberration` folds it
-into \(\chi\) via `specimen_absorption=False`. `"ctf"` instead takes the real
-part of the aberrated field, matching `Scattering.ctf`'s projected
-potential input. `specimen_absorption=True` (default) assumes amplitude
+into \(\chi\) via `specimen_absorption=False`. `"linear"` instead takes the
+real part of the aberrated field, matching `Scattering.ctf`'s projected
+potential input -- a weak-phase-object, linear-in-potential image
+formation model, as opposed to `"nonlinear"`'s full wave-optics
+propagation (`image = |exitwave|^2` is nonlinear in the specimen
+potential; `image = 1 + 2 \cdot \mathrm{CTF} \otimes \mathrm{potential}` is
+linear in it). `specimen_absorption=True` (default) assumes amplitude
 contrast is already baked into the exit wave upstream, via
 `scattering.complex_potential`, so applying it again here would double
 count it. This is why `BaseImager._init_optics` sets
 `specimen_absorption=self.scattering_model != "ctf"` rather than a fixed
 value.
+
+`aberration_model` is not an independent, user-facing setting: every
+caller above `Aberration`/`Detector`/`TransferFunction` themselves
+(`ImageGenerator`, `MicrographGenerator`, `TiltSeriesGenerator`,
+`Reconstructor`, `TomogramReconstructor`, and their config/CLI surface)
+derives it from `scattering_model` via
+`aberrations.aberration_model_for_scattering` -- `"linear"` for
+`scattering_model="ctf"`, `"nonlinear"` for every other scattering model.
+The two must agree, since the aberration/detector stage would otherwise
+misinterpret the exit wave it is given; only code building `Aberration`,
+`Detector`, or `TransferFunction` directly still passes
+`aberration_model` explicitly.
 
 ## Envelopes
 

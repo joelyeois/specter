@@ -56,9 +56,8 @@ tomogram`](#chaining-with-specter-build-tomogram) below.
   below, which needs the Python API, not this CLI.
 - **Models**: `scattering_model` (`multislice` default, most accurate;
   `firstborn`/`projection`/`ctf` are cheaper approximations; see
-  [Scattering](../concepts/scattering/index.md)), `aberration_model`
-  (`holography` default or `ctf`), `noise_model` (`poisson` or `none`),
-  `detector_model` (`none`, `perfect`, `k3_300kv`, `k3_200kv`).
+  [Scattering](../concepts/scattering/index.md)), `noise_model` (`poisson`
+  or `none`), `detector_model` (`none`, `perfect`, `k3_300kv`, `k3_200kv`).
 
 Everything else (envelopes, ice, output naming) lives under its own panel
 in `specter simulate tiltseries --help`.

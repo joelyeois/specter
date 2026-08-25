@@ -17,17 +17,17 @@ direct electron detectors, coincidence loss.
 count per pixel, with a model-dependent formula:
 
 \[
-\text{holography:}\quad I = D\cdot p^2\cdot d_0 \cdot |\psi|^2,
+\text{nonlinear:}\quad I = D\cdot p^2\cdot d_0 \cdot |\psi|^2,
 \qquad
-\text{ctf:}\quad I = D\cdot p^2\cdot d_0 \cdot (\psi + 1)
+\text{linear:}\quad I = D\cdot p^2\cdot d_0 \cdot (\psi + 1)
 \]
 
 where \(D\) is dose (e⁻/Å²), \(p\) is pixel size, and \(d_0\) is
-`dqe0` (below). The holography model takes the squared magnitude of a
-complex exit wave; the CTF model instead adds the real-valued
+`dqe0` (below). The nonlinear model takes the squared magnitude of a
+complex exit wave; the linear model instead adds the real-valued
 projected-potential transfer function to a unit background, matching the
 weak-phase-object convention `Scattering.ctf` and
-`aberration_model="ctf"` share.
+`aberration_model="linear"` share.
 
 ## MTF: a pure blur
 

@@ -169,14 +169,14 @@ def test_tetrafoil_four_fold_term_has_four_fold_symmetry():
     assert torch.allclose(result[0], result[1], atol=1e-5)
 
 
-def test_phaseshift_ctf_model_returns_negative_input_unchanged():
+def test_phaseshift_linear_model_returns_negative_input_unchanged():
     phaseshift_val = torch.tensor([0.5])
     k = torch.zeros((1, 4, 4))
-    result = phaseshift(phaseshift_val, k, n_pixels=4, aberration_model="ctf")
+    result = phaseshift(phaseshift_val, k, n_pixels=4, aberration_model="linear")
     assert torch.allclose(result, -phaseshift_val)
 
 
-def test_phaseshift_ctf_model_with_alpha_adds_amp_contrast_offset():
+def test_phaseshift_linear_model_with_alpha_adds_amp_contrast_offset():
     """CryoSPARC convention: chi_c0 = phase_shift - acos(amp_contrast), so
     chi_phaseshift = -phase_shift + acos(amp_contrast) -- matches the
     (2*pi/3)*wavelength^2 trefoil derivation's -1 global sign convention."""
@@ -184,13 +184,13 @@ def test_phaseshift_ctf_model_with_alpha_adds_amp_contrast_offset():
     alpha = torch.tensor(0.1)
     k = torch.zeros((1, 4, 4))
     result = phaseshift(
-        phaseshift_val, k, n_pixels=4, aberration_model="ctf", alpha=alpha
+        phaseshift_val, k, n_pixels=4, aberration_model="linear", alpha=alpha
     )
     expected = -phaseshift_val + math.acos(0.1)
     assert torch.allclose(result, expected)
 
 
-def test_phaseshift_ctf_model_alpha_zero_still_adds_quarter_turn():
+def test_phaseshift_linear_model_alpha_zero_still_adds_quarter_turn():
     """acos(0) = pi/2 exactly -- amplitude contrast defaulting to zero is
     still a real, nonzero phase-quadrature offset in CryoSPARC's
     convention, not a no-op."""
@@ -198,12 +198,12 @@ def test_phaseshift_ctf_model_alpha_zero_still_adds_quarter_turn():
     alpha = torch.tensor(0.0)
     k = torch.zeros((1, 4, 4))
     result = phaseshift(
-        phaseshift_val, k, n_pixels=4, aberration_model="ctf", alpha=alpha
+        phaseshift_val, k, n_pixels=4, aberration_model="linear", alpha=alpha
     )
     assert torch.allclose(result, torch.tensor([math.pi / 2]))
 
 
-def test_phaseshift_ctf_model_alpha_none_matches_no_alpha_arg():
+def test_phaseshift_linear_model_alpha_none_matches_no_alpha_arg():
     """alpha=None (the default) must reproduce the pre-fix behaviour
     exactly -- this is the specimen_absorption=True / non-"ctf"-scattering
     case, where amplitude contrast is already applied upstream via
@@ -211,15 +211,15 @@ def test_phaseshift_ctf_model_alpha_none_matches_no_alpha_arg():
     phaseshift_val = torch.tensor([0.5])
     k = torch.zeros((1, 4, 4))
     with_none = phaseshift(
-        phaseshift_val, k, n_pixels=4, aberration_model="ctf", alpha=None
+        phaseshift_val, k, n_pixels=4, aberration_model="linear", alpha=None
     )
-    without_arg = phaseshift(phaseshift_val, k, n_pixels=4, aberration_model="ctf")
+    without_arg = phaseshift(phaseshift_val, k, n_pixels=4, aberration_model="linear")
     assert torch.allclose(with_none, without_arg)
 
 
-def test_phaseshift_holography_model_ignores_alpha():
-    """alpha is only meaningful for the "ctf" model -- holography mode
-    must ignore it even if passed, since amplitude contrast there is
+def test_phaseshift_nonlinear_model_ignores_alpha():
+    """alpha is only meaningful for the "linear" model -- the nonlinear
+    model must ignore it even if passed, since amplitude contrast there is
     represented in the exit wave's complex/absorptive component instead."""
     phaseshift_val = torch.tensor([0.5])
     k = torch.zeros((1, 4, 4))
@@ -227,25 +227,25 @@ def test_phaseshift_holography_model_ignores_alpha():
         phaseshift_val,
         k,
         n_pixels=4,
-        aberration_model="holography",
+        aberration_model="nonlinear",
         alpha=torch.tensor(0.1),
     )
     without_alpha = phaseshift(
-        phaseshift_val, k, n_pixels=4, aberration_model="holography"
+        phaseshift_val, k, n_pixels=4, aberration_model="nonlinear"
     )
     assert torch.allclose(with_alpha, without_alpha)
 
 
-def test_phaseshift_holography_model_broadcasts_to_grid():
+def test_phaseshift_nonlinear_model_broadcasts_to_grid():
     phaseshift_val = torch.tensor([0.5])
     k = torch.zeros((1, 4, 4))
-    result = phaseshift(phaseshift_val, k, n_pixels=4, aberration_model="holography")
+    result = phaseshift(phaseshift_val, k, n_pixels=4, aberration_model="nonlinear")
     assert result.shape == k.shape
     nonzero = result[result != 0]
     assert torch.allclose(nonzero, torch.full_like(nonzero, -0.5))
 
 
-def test_phaseshift_holography_zeroes_dc():
+def test_phaseshift_nonlinear_zeroes_dc():
     """DC (k=0, index [0, 0] under torch.fft.fftfreq's unshifted ordering)
     must be zeroed for Fourier optics validity; other pixels keep -phaseshift."""
     n_pixels = 8
@@ -253,7 +253,7 @@ def test_phaseshift_holography_zeroes_dc():
     kxx, kyy = torch.meshgrid(kx, kx, indexing="ij")
     k = torch.sqrt(kxx**2 + kyy**2).unsqueeze(0)
     phaseshift_val = torch.tensor([0.5])
-    result = phaseshift(phaseshift_val, k, n_pixels, aberration_model="holography")
+    result = phaseshift(phaseshift_val, k, n_pixels, aberration_model="nonlinear")
     assert result[0, 0, 0] == 0
     # Nyquist pixel (index n_pixels // 2) is unaffected.
     assert result[0, n_pixels // 2, n_pixels // 2] == -0.5

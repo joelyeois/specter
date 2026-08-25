@@ -49,7 +49,6 @@ tilt_axis = "y"                    # x | y
 
 [models]
 scattering_model = "multislice"    # multislice | firstborn | projection | ctf
-aberration_model = "holography"    # holography | ctf
 noise_model = "poisson"            # poisson | none
 coincidence_radius = 0.0           # pixels; 0 = plain Poisson, no coincidence loss
 ice_model = "gd"                   # gd | random | none

@@ -107,7 +107,6 @@ class ParticleStackConfig:
     deltaI_I: float = 0.01e-6  # unitless (ΔI/I)
     dose_envelope: bool = False
     bfactor: float | None = None  # Å²
-    aberration_model: Literal["holography", "ctf"] = "holography"
     noise_model: Literal["poisson", "none"] = "poisson"
     coincidence_radius: ScalarOrRange = 0.0  # pixels
     ice_model: Literal["gd", "random", "none"] = "gd"
@@ -251,7 +250,6 @@ PARTICLE_STACK_HELP: dict[str, str] = {
     "deltaI_I": "Relative objective-lens current instability, used by the Cc envelope.",
     "dose_envelope": "Apply the Grant & Grigorieff (2015) cumulative-dose envelope.",
     "bfactor": "Isotropic B-factor envelope in Angstrom^2.",
-    "aberration_model": "Aberration model.",
     "noise_model": "Noise model. Use 'none' for no noise.",
     "coincidence_radius": "Effective coincidence exclusion radius in pixels "
     "(exclusion area = pi*r^2): a single value for constant radius, or "

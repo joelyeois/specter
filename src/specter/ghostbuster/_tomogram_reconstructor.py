@@ -13,7 +13,7 @@ from torch.optim.lr_scheduler import LRScheduler
 
 from .. import rotations
 from .. import tilt as tilt_geometry
-from ..aberrations import Aberration
+from ..aberrations import Aberration, aberration_model_for_scattering
 from ..ctf import LegacyAberrationAdapter
 from ..scattering import IterativeScattering
 from ._base_reconstructor import _BaseReconstructor
@@ -67,8 +67,6 @@ class TomogramReconstructor(_BaseReconstructor):
         contributions from reflected boundary content.  Default ``True``.
     scattering_model : str
         Wave propagation model.  Default ``"multislice"``.
-    aberration_model : str
-        CTF aberration model.  Default ``"holography"``.
     aberration_backend : {"legacy", "torch_ctf"}, optional
         Which engine computes the CTF/aberration transfer function.
         ``"legacy"`` (default) uses ``aberrations.Aberration``; ``"torch_ctf"``
@@ -119,7 +117,6 @@ class TomogramReconstructor(_BaseReconstructor):
         z_taper_width: int = 0,
         use_fov_mask: bool = True,
         scattering_model: str = "multislice",
-        aberration_model: str = "holography",
         aberration_backend: Literal["legacy", "torch_ctf"] = "legacy",
         lpp_params: dict[str, float] | None = None,
         klim: float | None = None,
@@ -213,6 +210,9 @@ class TomogramReconstructor(_BaseReconstructor):
             alpha=alpha,
         )
         self.aberration_backend = aberration_backend
+        # Derived from scattering_model, not user-configurable independently
+        # -- see aberrations.aberration_model_for_scattering.
+        aberration_model = aberration_model_for_scattering(scattering_model)
         self.aberration: Aberration | LegacyAberrationAdapter
         if aberration_backend == "torch_ctf":
             self.aberration = LegacyAberrationAdapter(
@@ -228,7 +228,7 @@ class TomogramReconstructor(_BaseReconstructor):
                 voxel_size,
                 voltage,
                 aberration_model=aberration_model,
-                alpha=alpha if aberration_model == "ctf" else None,
+                alpha=alpha if aberration_model == "linear" else None,
             )
 
     # ------------------------------------------------------------------ #

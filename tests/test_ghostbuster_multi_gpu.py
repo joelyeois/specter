@@ -72,7 +72,6 @@ def _build_model(problem, lr_R):
         alpha=0.0,
         scale=problem["scale"].clone(),
         scattering_model="rytov",
-        aberration_model="holography",
         lr=0.1,
         lr_R=lr_R,
         symmetry=None,

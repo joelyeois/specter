@@ -69,8 +69,6 @@ class TomogramGhostbuster:
         Tilt images per optimisation step.  Default 1 (one tilt per step).
     scattering_model : str
         Wave propagation model.  Default ``"multislice"``.
-    aberration_model : str
-        CTF aberration model.  Default ``"holography"``.
     aberration_backend : {"legacy", "torch_ctf"}, optional
         Which engine computes the CTF/aberration transfer function.
         ``"legacy"`` (default) uses ``aberrations.Aberration``; ``"torch_ctf"``
@@ -120,7 +118,6 @@ class TomogramGhostbuster:
         epochs: int = 5,
         batchsize: int = 1,
         scattering_model: str = "multislice",
-        aberration_model: str = "holography",
         aberration_backend: Literal["legacy", "torch_ctf"] = "legacy",
         lpp_params: dict[str, float] | None = None,
         klim: float | None = None,
@@ -170,7 +167,6 @@ class TomogramGhostbuster:
         self.epochs = epochs
         self.batchsize = batchsize
         self.scattering_model = scattering_model
-        self.aberration_model = aberration_model
         self.aberration_backend = aberration_backend
         self.lpp_params = lpp_params
         self.klim = klim
@@ -280,7 +276,6 @@ class TomogramGhostbuster:
             z_taper_width=self.z_taper_width,
             use_fov_mask=self.use_fov_mask,
             scattering_model=scattering_model,
-            aberration_model=self.aberration_model,
             aberration_backend=self.aberration_backend,
             lpp_params=self.lpp_params,
             klim=self.klim,

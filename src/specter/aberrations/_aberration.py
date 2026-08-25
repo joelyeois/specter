@@ -49,13 +49,13 @@ class Aberration(L.LightningModule):
     voltage: float
         Accelerating voltage of the electron beam in kV. Typical values are 100/120/200/300 kV.
     aberration_model: str, optional
-        Specifies aberration model to use. Options include 'holography' and 'ctf'.
-        Default is 'holography'.
+        Specifies aberration model to use. Options include 'nonlinear' and 'linear'.
+        Default is 'nonlinear'.
     alpha: float, optional
-        The amplitude contrast ratio to use for the CTF model. Common values
+        The amplitude contrast ratio to use for the linear model. Common values
         are 0.07 and 0.1. Only has an effect on the transfer function when
         ``specimen_absorption=False`` (see below) -- required whenever
-        ``aberration_model="ctf"`` regardless, since :meth:`__init__`
+        ``aberration_model="linear"`` regardless, since :meth:`__init__`
         raises if it's missing, but with the default ``specimen_absorption``
         it's stored and otherwise unused.
     specimen_absorption: bool, optional
@@ -122,7 +122,7 @@ class Aberration(L.LightningModule):
         n_pixels: int,
         pixel_size: float,
         voltage: float,
-        aberration_model: str = "holography",
+        aberration_model: str = "nonlinear",
         alpha: float | None = None,
         specimen_absorption: bool = True,
         convergence_angle: float | None = None,
@@ -186,9 +186,9 @@ class Aberration(L.LightningModule):
                 "bfactor", torch.as_tensor(bfactor, dtype=torch.float32).flatten()
             )
 
-        if aberration_model == "ctf":
+        if aberration_model == "linear":
             if alpha is None:
-                raise Exception("Specify alpha for CTF model.")
+                raise Exception("Specify alpha for the linear model.")
             else:
                 self.alpha = alpha
         self.specimen_absorption = specimen_absorption
@@ -247,7 +247,7 @@ class Aberration(L.LightningModule):
 
         # --- Phaseshift (+ amplitude-contrast offset for the CTF model) ---
         needs_amp_contrast_offset = (
-            self.aberration_model == "ctf" and not self.specimen_absorption
+            self.aberration_model == "linear" and not self.specimen_absorption
         )
         if "phaseshift" in ctf_params or needs_amp_contrast_offset:
             phaseshift = ctf_params.get("phaseshift", self.zero).view(-1, 1, 1)
@@ -336,8 +336,8 @@ class Aberration(L.LightningModule):
         Returns
         -------
         aberrated_exitwave : torch.Tensor
-            Exit wave after aberration. Complex-valued for holography model,
-            real-valued for CTF model (projects to real for intensity imaging).
+            Exit wave after aberration. Complex-valued for the nonlinear model,
+            real-valued for the linear model (projects to real for intensity imaging).
 
         Notes
         -----
@@ -348,9 +348,9 @@ class Aberration(L.LightningModule):
             ctf_params = {**ctf_params, "bfactor": self.bfactor}
         self.tf = self.transfer_function(ctf_params)
         aberrated_exitwaves = ifft2(fft2(exitwave) * self.tf)
-        if self.aberration_model == "ctf":
+        if self.aberration_model == "linear":
             return torch.real(aberrated_exitwaves)
-        elif self.aberration_model == "holography":
+        elif self.aberration_model == "nonlinear":
             return aberrated_exitwaves
         else:
             raise ValueError(f"Unknown aberration_model: {self.aberration_model!r}")

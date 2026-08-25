@@ -45,8 +45,8 @@ class Detector(L.LightningModule):
     pixel_size : float
         Pixel size in Å.
     aberration_model : str, optional
-        Specifies aberration model to use. Options include 'holography' and 'ctf'.
-        Default is 'holography'.
+        Specifies aberration model to use. Options include 'nonlinear' and 'linear'.
+        Default is 'nonlinear'.
     noise_model : str, optional
         Specifies noise model. Currently only 'poisson' available. Default is None
         (no noise applied).
@@ -81,7 +81,7 @@ class Detector(L.LightningModule):
     def __init__(
         self,
         pixel_size: float,
-        aberration_model: str = "holography",
+        aberration_model: str = "nonlinear",
         noise_model: str | None = None,
         mtf: torch.Tensor | None = None,
         dqe0: float = 1.0,
@@ -116,8 +116,9 @@ class Detector(L.LightningModule):
         Returns
         -------
         images : torch.Tensor
-            Detector image. For holography model, returns intensity (squared
-            magnitude). For CTF model, returns dose-scaled image.
+            Detector image. For the nonlinear model, returns intensity
+            (squared magnitude). For the linear model, returns dose-scaled
+            image.
 
         Notes
         -----
@@ -129,9 +130,9 @@ class Detector(L.LightningModule):
         applied later.
         """
         dose_per_pixel = dose * self.pixel_size**2 * self.dqe0  # (B,)
-        if self.aberration_model == "holography":
+        if self.aberration_model == "nonlinear":
             images = dose_per_pixel[:, None, None] * torch.abs(aberrated_exitwave) ** 2
-        elif self.aberration_model == "ctf":
+        elif self.aberration_model == "linear":
             images = dose_per_pixel[:, None, None] * (aberrated_exitwave + 1)
         return images
 

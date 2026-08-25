@@ -103,8 +103,8 @@ single transmission function with no propagation step at all,
 
 This is also what `scattering_model="ctf"` returns as a real-valued
 projected potential (`2\sigma\Delta z \sum_z V_z`, without the complex
-exponential), for use with `aberration_model="ctf"`'s separate CTF-based
-intensity model (see [Detector](../detector.md) and
+exponential), for use with `aberration_model="linear"`'s separate
+CTF-based intensity model (see [Detector](../detector.md) and
 [Aberrations](../aberrations.md)).
 
 ## Accuracy vs. thickness

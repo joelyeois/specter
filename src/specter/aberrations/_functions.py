@@ -200,7 +200,7 @@ def phaseshift(
 ) -> torch.Tensor:
     """
     Calculate phase shift contribution (e.g., from Volta phase plate),
-    plus the amplitude-contrast phase offset for the CTF model.
+    plus the amplitude-contrast phase offset for the linear model.
 
     Parameters
     ----------
@@ -211,14 +211,14 @@ def phaseshift(
     n_pixels : int
         Number of pixels along each axis of the grid.
     aberration_model : str
-        Aberration model in use; 'holography' or 'ctf'.
+        Aberration model in use; 'nonlinear' or 'linear'.
     alpha : torch.Tensor, optional
-        Amplitude contrast ratio. Only meaningful for the 'ctf' model,
+        Amplitude contrast ratio. Only meaningful for the 'linear' model,
         where the exit wave is real-valued and has no complex/absorptive
         component of its own -- amplitude contrast has to be represented
         as this k-independent chi offset instead (``-acos(alpha)``,
         matching CryoSPARC's convention: ``phase_shift - arccos(amp_contrast)``).
-        None (default) omits the term entirely, matching the 'holography'
+        None (default) omits the term entirely, matching the 'nonlinear'
         model (where amplitude contrast is instead baked into the exit
         wave upstream via ``scattering.complex_potential``, so adding it
         again here would double-count it).
@@ -226,12 +226,12 @@ def phaseshift(
     Returns
     -------
     chi_phaseshift : torch.Tensor
-        Phase shift contribution. For holography model, DC component is
+        Phase shift contribution. For the nonlinear model, DC component is
         set to zero to maintain Fourier optics validity.
     """
-    if aberration_model == "ctf" and alpha is not None:
+    if aberration_model == "linear" and alpha is not None:
         phaseshift = phaseshift - torch.acos(alpha)
-    if aberration_model == "holography":
+    if aberration_model == "nonlinear":
         phaseshift = phaseshift * torch.ones_like(k)
         # phaseshift must be zero at DC for Fourier optics
         phaseshift[:, 0, 0] = 0
@@ -279,3 +279,30 @@ def defocus_midplane_shift(nz: int, pixel_size: float) -> float:
         Shift in Å.
     """
     return (nz * pixel_size) / 2
+
+
+def aberration_model_for_scattering(scattering_model: str) -> str:
+    """
+    The ``aberration_model`` implied by a given ``scattering_model``.
+
+    ``"ctf"`` is the only ``scattering_model`` whose exit wave has no
+    complex/absorptive component of its own -- ``Scattering.ctf()`` returns
+    a real-valued projected potential, which needs the ``"linear"``
+    aberration model (real output, weak-phase-object image formation).
+    Every other ``scattering_model`` produces a complex exit wave from full
+    wave-optics propagation, matching ``"nonlinear"``. Not user-configurable
+    independently of ``scattering_model``: the two must agree, or the
+    aberration/detector stage misinterprets the exit wave it's given.
+
+    Parameters
+    ----------
+    scattering_model : str
+        The scattering model in use (``"multislice"``, ``"rytov"``,
+        ``"firstborn"``, ``"projection"``, or ``"ctf"``).
+
+    Returns
+    -------
+    str
+        ``"linear"`` if ``scattering_model == "ctf"``, else ``"nonlinear"``.
+    """
+    return "linear" if scattering_model == "ctf" else "nonlinear"

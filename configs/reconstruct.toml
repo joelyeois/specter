@@ -136,7 +136,6 @@ defocus_offset = 0.0   # Angstrom, added to every particle's dfu/dfv
 
 [advanced]
 scattering_model = "rytov"
-aberration_model = "holography"
 aberration_backend = "legacy"
 ews_curvature_sign = "negative"   # matches CryoSPARC
 rotate_mode = "real"

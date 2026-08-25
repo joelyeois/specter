@@ -322,7 +322,6 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
         ice_relax_steps=config.ice_relax_steps,
         ice_parameterization=ice_parameterization,
         scattering_model=config.scattering_model,
-        aberration_model=config.aberration_model,
         noise_model=noise_model,
         klim=config.klim,
         ews_curvature_sign=config.ews_curvature_sign,

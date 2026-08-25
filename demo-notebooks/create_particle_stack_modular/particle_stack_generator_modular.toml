@@ -22,7 +22,6 @@ n_particles = 4
 
 [models]
 scattering_model = "multislice"
-aberration_model = "holography"
 noise_model = "poisson"
 ice_model = "gd"
 detector_model = "none"

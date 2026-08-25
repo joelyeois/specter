@@ -81,8 +81,6 @@ class Ghostbuster:
     scattering_model : str
         Wave propagation model (``"multislice"``, ``"rytov"``, ``"firstborn"``,
         ``"projection"``).
-    aberration_model : str
-        CTF aberration model passed to ``ImageGenerator``.
     aberration_backend : {"legacy", "torch_ctf"}, optional
         Which engine computes the CTF/aberration transfer function.
         ``"legacy"`` (default) uses ``aberrations.Aberration``; ``"torch_ctf"``
@@ -163,7 +161,6 @@ class Ghostbuster:
         epochs: int = 5,
         batchsize: int = 3,
         scattering_model: str = "rytov",
-        aberration_model: str = "holography",
         aberration_backend: Literal["legacy", "torch_ctf"] = "legacy",
         lpp_params: dict[str, float] | None = None,
         symmetry: str | None = None,
@@ -229,7 +226,6 @@ class Ghostbuster:
         self.epochs = epochs
         self.batchsize = batchsize
         self.scattering_model = scattering_model
-        self.aberration_model = aberration_model
         self.aberration_backend = aberration_backend
         self.lpp_params = lpp_params
         self.symmetry = symmetry
@@ -351,7 +347,6 @@ class Ghostbuster:
             defocus_offset=torch.tensor(self.defocus_offset),
             bfactor=self.bfactor,
             scattering_model=scattering_model,
-            aberration_model=self.aberration_model,
             aberration_backend=self.aberration_backend,
             lpp_params=self.lpp_params,
             lr=self.lr,

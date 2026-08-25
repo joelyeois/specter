@@ -106,8 +106,6 @@ class MicrographGenerator(BaseImager):
         Simulate water-air interface in crowding and ice. Default True.
     scattering_model : str, optional
         Scattering model passed to ``IterativeScattering``. Default 'multislice'.
-    aberration_model : str, optional
-        Aberration model. Default 'holography'.
     noise_model : str, optional
         Noise model. Default 'poisson'.
     klim : float, optional
@@ -182,7 +180,6 @@ class MicrographGenerator(BaseImager):
         crowd_max_distance_z: float | None = None,
         water_air_interface: bool = True,
         scattering_model: str = "multislice",
-        aberration_model: str = "holography",
         noise_model: str | None = "poisson",
         klim: float | None = None,
         alpha: float = 0.0,
@@ -251,7 +248,6 @@ class MicrographGenerator(BaseImager):
             nxy=nxy,
             nz=self.nz,
             pad_nxy=self.pad_nxy,
-            aberration_model=aberration_model,
             noise_model=noise_model,
             alpha=alpha,
             detector_model=detector_model,
@@ -398,11 +394,20 @@ class MicrographGenerator(BaseImager):
         if not hasattr(self, "volume"):
             self._generate_volume()
         batchsize = len(idx) if isinstance(idx, torch.Tensor) else 1
-        with status("Transferring volume to GPU", disable=not self.progressbars):
-            V = self.volume.to(self.device).expand(batchsize, -1, -1, -1)
+        # Left on whatever device the specimen was assembled on -- which for a
+        # micrograph is the host, since `MicrographSpecimenGenerator` is
+        # constructed with `move_to_cpu=True` precisely because the canvas does
+        # not fit on the GPU (500 x 4096 x 4096 is 33.5 GB at the default
+        # config). `IterativeScattering.multislice` streams an off-device
+        # volume slice by slice, so forcing the whole thing across first
+        # undid that and OOM'd the device it was trying to protect.
+        V = self.volume.expand(batchsize, -1, -1, -1)
         V = pad_volume(V, self.nxy, self.nz, None, self.pad_fft, xy_pad_mode="reflect")
         scale = self.potential_scale[idx].reshape(-1, 1, 1, 1).to(V.device)
-        V = V * scale
+        # Skipped when every scale is 1 (the default), since `V * scale` is a
+        # second full copy of a volume this size.
+        if not bool(torch.all(scale == 1.0)):
+            V = V * scale
 
         if (
             self.save_clean_exitwaves

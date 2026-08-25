@@ -201,7 +201,6 @@ def run_micrograph(config: MicrographConfig) -> None:
         ice_thickness=config.ice_thickness,
         ice_profile=ice_profile,
         scattering_model=config.scattering_model,
-        aberration_model=config.aberration_model,
         noise_model=noise_model,
         klim=None,
         alpha=config.alpha,

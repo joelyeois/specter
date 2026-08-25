@@ -33,7 +33,6 @@ n_particles = 10                 # number of particles to load from the .cs file
 
 [models]
 scattering_model = "multislice"  # multislice | firstborn | projection | ctf
-aberration_model = "holography"  # holography | ctf
 noise_model = "poisson"          # poisson | none
 coincidence_radius = 2.0         # pixels
 ice_model = "gd"                 # gd | random | none

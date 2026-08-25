@@ -14,7 +14,11 @@ from specter.detectors import (
     perfect_detector,
 )
 
-from ..aberrations import Aberration, defocus_midplane_shift
+from ..aberrations import (
+    Aberration,
+    aberration_model_for_scattering,
+    defocus_midplane_shift,
+)
 from ..arrays import compute_nz, pad_volume
 from ..ctf import LegacyAberrationAdapter
 from ..microscope import Detector
@@ -53,8 +57,6 @@ class BaseImager(L.LightningModule):
         Number of Z slices in the simulation volume.
     pad_nxy : int, optional
         XY size after FFT padding. Defaults to ``nxy``.
-    aberration_model : str, optional
-        Aberration model ('holography', 'phase_plate'). Default 'holography'.
     noise_model : str, optional
         Noise model ('poisson', 'gaussian', None). Default 'poisson'.
     alpha : float, optional
@@ -126,7 +128,6 @@ class BaseImager(L.LightningModule):
         nxy: int,
         nz: int,
         pad_nxy: int | None = None,
-        aberration_model: str = "holography",
         noise_model: str | None = "poisson",
         alpha: float = 0.0,
         detector_model: str | None = None,
@@ -155,7 +156,6 @@ class BaseImager(L.LightningModule):
             )
         self.pixel_size = pixel_size
         self.voltage = voltage
-        self.aberration_model = aberration_model
         self.noise_model = noise_model
         self.alpha = alpha
         self.aberration_backend = aberration_backend
@@ -302,7 +302,18 @@ class BaseImager(L.LightningModule):
         stored parameters. Which class ``self.aberration`` is depends on
         ``self.aberration_backend`` -- both have the exact same call
         signature (``self.aberration(exitwave, ctf_batch_dict)``), so no
-        other code needs to know or care which one is in use."""
+        other code needs to know or care which one is in use.
+
+        ``self.aberration_model`` is derived from ``self.scattering_model``
+        rather than user-configurable: ``"linear"`` for
+        ``scattering_model="ctf"`` (whose exit wave is a real-valued
+        projected potential), ``"nonlinear"`` for every other
+        ``scattering_model`` (a complex exit wave from full wave-optics
+        propagation). The two must agree or the aberration/detector stage
+        misinterprets the exit wave it's given -- see
+        :func:`~specter.aberrations.aberration_model_for_scattering`.
+        """
+        self.aberration_model = aberration_model_for_scattering(self.scattering_model)
         self.aberration: Aberration | LegacyAberrationAdapter
         if self.aberration_backend == "torch_ctf":
             self.aberration = LegacyAberrationAdapter(
@@ -310,6 +321,9 @@ class BaseImager(L.LightningModule):
                 self.pixel_size,
                 self.voltage,
                 aberration_model=self.aberration_model,
+                # See the "legacy" branch below for why this depends only
+                # on scattering_model, not a fixed value.
+                specimen_absorption=self.scattering_model != "ctf",
                 bfactor=getattr(self, "bfactor", None),
                 convergence_angle=self.convergence_angle,
                 cc=self.cc,

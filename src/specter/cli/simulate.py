@@ -73,7 +73,6 @@ _PARTICLE_STACK_GROUPS: list[tuple[str, list[str]]] = [
             "deltaI_I",
             "dose_envelope",
             "bfactor",
-            "aberration_model",
             "noise_model",
             "coincidence_radius",
             "ice_model",
@@ -140,7 +139,7 @@ _TILT_SERIES_GROUPS: list[tuple[str, list[str]]] = [
     ),
     (
         "Models",
-        ["scattering_model", "aberration_model", "noise_model", "detector_model"],
+        ["scattering_model", "noise_model", "detector_model"],
     ),
     (
         "Post-processing",
@@ -187,7 +186,7 @@ _MICROGRAPH_GROUPS: list[tuple[str, list[str]]] = [
     ("Dataset", ["n_micrographs"]),
     (
         "Models",
-        ["scattering_model", "aberration_model", "noise_model", "detector_model"],
+        ["scattering_model", "noise_model", "detector_model"],
     ),
     (
         "Post-processing",

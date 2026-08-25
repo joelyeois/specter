@@ -24,7 +24,6 @@ tilt_axis = "y"
 
 [models]
 scattering_model = "multislice"
-aberration_model = "holography"
 noise_model = "poisson"
 ice_model = "gd"          # bundled IceBank cache; try "random" for a faster/cheaper placeholder
 ice_relax_steps = 0

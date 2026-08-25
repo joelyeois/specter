@@ -41,9 +41,8 @@ TOML/CLI field reference.
   not per particle), `cs`, `alpha`.
 - **Dataset**: `n_micrographs`, how many independent micrographs to
   generate in one run.
-- **Models**: `scattering_model`, `aberration_model`, `noise_model`,
-  `detector_model`, same choices as [particle
-  generation](particle-stack.md#what-youll-usually-tune).
+- **Models**: `scattering_model`, `noise_model`, `detector_model`, same
+  choices as [particle generation](particle-stack.md#what-youll-usually-tune).
 
 Everything else lives under "Advanced" in both the TOML and
 `specter simulate micrograph --help`.

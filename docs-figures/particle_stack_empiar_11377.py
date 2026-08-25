@@ -76,7 +76,6 @@ def _generate_specter_particles(device: str) -> torch.Tensor:
             n_particles=5,
             dose=DOSE,
             scattering_model="multislice",
-            aberration_model="holography",
             noise_model="poisson",
             ice_model="gd",
             coincidence_radius=COINCIDENCE_RADIUS,

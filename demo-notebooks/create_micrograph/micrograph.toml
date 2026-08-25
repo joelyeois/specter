@@ -20,7 +20,6 @@ n_micrographs = 1
 
 [models]
 scattering_model = "multislice"
-aberration_model = "holography"
 noise_model = "poisson"
 ice_model = "gd"              # tiled from a pre-baked cache: scales to large micrographs at
                                # near-constant memory (unlike "random", which builds one

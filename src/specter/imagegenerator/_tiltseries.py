@@ -90,8 +90,6 @@ class TiltSeriesGenerator(MicrographGenerator):
         production-quality seams. Ignored for ``RandomIcemaker``.
     scattering_model : str, optional
         Scattering model passed to ``IterativeScattering``. Default 'multislice'.
-    aberration_model : str, optional
-        Aberration model. Default 'holography'.
     noise_model : str, optional
         Noise model. Default 'poisson'.
     klim : float, optional
@@ -223,7 +221,6 @@ class TiltSeriesGenerator(MicrographGenerator):
         icemaker: IceBank | RandomIcemaker | None = None,
         ice_relax_steps: int = 0,
         scattering_model: str = "multislice",
-        aberration_model: str = "holography",
         noise_model: str | None = "poisson",
         klim: float | None = None,
         alpha: float = 0.0,
@@ -402,7 +399,6 @@ class TiltSeriesGenerator(MicrographGenerator):
             volume=volume,
             anisomag=anisomag,
             scattering_model=scattering_model,
-            aberration_model=aberration_model,
             noise_model=noise_model,
             klim=klim,
             alpha=alpha,

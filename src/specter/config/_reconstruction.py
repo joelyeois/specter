@@ -132,7 +132,6 @@ class ReconstructionConfig:
     scattering_model: Literal["multislice", "rytov", "firstborn", "projection"] = (
         "rytov"
     )
-    aberration_model: Literal["holography", "ctf"] = "holography"
     aberration_backend: Literal["legacy", "torch_ctf"] = "legacy"
     ews_curvature_sign: Literal["negative", "positive"] = "negative"
     bfactor: float | None = None
@@ -171,7 +170,6 @@ RECONSTRUCTION_HELP: dict[str, str] = {
     "rytov is the default here rather than multislice: the model runs once "
     "per particle per step, and rytov is the cheapest one that still carries "
     "Ewald-sphere curvature.",
-    "aberration_model": "Aberration model applied to the exit wave.",
     "aberration_backend": "Which engine computes the transfer function. "
     "legacy uses aberrations.Aberration; torch_ctf uses the verified "
     "ctf.LegacyAberrationAdapter port.",

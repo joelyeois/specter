@@ -84,8 +84,6 @@ class ImageGeneratorFromCoordinates(ParticleGeneratorBase):
         relaxation). Ignored for ``RandomIcemaker``.
     scattering_model : str, optional
         Scattering model ('multislice', 'projection', 'ctf'). Default 'multislice'.
-    aberration_model : str, optional
-        Aberration model. Default 'holography'.
     noise_model : str, optional
         Noise model. Default 'poisson'.
     klim : float, optional
@@ -154,7 +152,6 @@ class ImageGeneratorFromCoordinates(ParticleGeneratorBase):
         icemaker: IceBank | RandomIcemaker | None = None,
         ice_relax_steps: int = 0,
         scattering_model: str = "multislice",
-        aberration_model: str = "holography",
         noise_model: str | None = "poisson",
         klim: float | None = None,
         ews_curvature_sign: str = "negative",
@@ -195,7 +192,6 @@ class ImageGeneratorFromCoordinates(ParticleGeneratorBase):
             nxy=self.nxy,
             nz=self.nz,
             pad_nxy=self.pad_nxy,
-            aberration_model=aberration_model,
             noise_model=noise_model,
             alpha=alpha,
             detector_model=detector_model,
@@ -416,8 +412,6 @@ class ImageGenerator(ParticleGeneratorBase):
         relaxation). Ignored for ``RandomIcemaker``.
     scattering_model : str, optional
         Scattering model. Default 'multislice'.
-    aberration_model : str, optional
-        Aberration model. Default 'holography'.
     noise_model : str, optional
         Noise model. Default 'poisson'.
     klim : float, optional
@@ -506,7 +500,6 @@ class ImageGenerator(ParticleGeneratorBase):
         icemaker: IceBank | RandomIcemaker | None = None,
         ice_relax_steps: int = 0,
         scattering_model: str = "multislice",
-        aberration_model: str = "holography",
         noise_model: str | None = "poisson",
         klim: float | None = None,
         ews_curvature_sign: str = "negative",
@@ -555,7 +548,6 @@ class ImageGenerator(ParticleGeneratorBase):
             nxy=nxy,
             nz=self.nz,
             pad_nxy=self.pad_nxy,
-            aberration_model=aberration_model,
             noise_model=noise_model,
             alpha=alpha,
             detector_model=detector_model,

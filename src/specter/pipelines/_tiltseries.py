@@ -197,7 +197,6 @@ def run_tilt_series(
         ice_cache_dir=config.ice_cache_dir,
         ice_relax_steps=config.ice_relax_steps,
         scattering_model=config.scattering_model,
-        aberration_model=config.aberration_model,
         noise_model=noise_model,
         alpha=config.alpha,
         pad_fft=config.pad_fft,

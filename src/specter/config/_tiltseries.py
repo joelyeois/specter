@@ -57,7 +57,6 @@ class TiltSeriesConfig:
     scattering_model: Literal["multislice", "firstborn", "projection", "ctf"] = (
         "multislice"
     )
-    aberration_model: Literal["holography", "ctf"] = "holography"
     noise_model: Literal["poisson", "none"] = "poisson"
     coincidence_radius: float = 0.0  # pixels; 0 = plain Poisson
     ice_model: Literal["gd", "random", "none"] = "gd"
@@ -129,7 +128,6 @@ TILT_SERIES_HELP: dict[str, str] = {
     "n_tilts": "Number of tilt angles (evenly spaced from min to max).",
     "tilt_axis": "Tilt axis.",
     "scattering_model": "Scattering model.",
-    "aberration_model": "Aberration model.",
     "noise_model": "Noise model. Use 'none' for no noise.",
     "coincidence_radius": "Effective coincidence exclusion radius in pixels "
     "(exclusion area = pi*r^2) for direct-detector modelling.",

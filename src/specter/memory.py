@@ -55,7 +55,6 @@ than needing a per-model table.
 from __future__ import annotations
 
 import math
-import os
 from typing import Literal
 
 import psutil
@@ -85,28 +84,21 @@ _FIXED_OVERHEAD_BYTES = 350_000_000
 #: float32 -- the dtype the potential/ice volumes are built in.
 _BYTES_PER_ELEMENT = 4
 
-#: Fraction of *currently free* device memory an auto batch may target. GPUs
-#: get the larger share because `mem_get_info` is an exact, instantaneous
-#: reading of the whole device (other processes' usage included); the CPU
-#: number is softer -- `available` counts reclaimable page cache, and the host
-#: is also holding the accumulated output stack and any DataLoader workers.
-_CUDA_SAFETY_FRACTION = 0.8
-_CPU_SAFETY_FRACTION = 0.5
-
-#: Extra headroom applied when the CUDA caching allocator is running WITHOUT
-#: expandable segments. The model above is fit against *allocated* bytes, but
-#: what has to fit on the card is what the allocator *reserves*, and with the
-#: default segment allocator those differ: measured on the particle pipeline at
-#: box 256 / pad 512, reserved ran 1.3-1.6x allocated, reaching 1.29x of this
-#: model's own prediction at batch 30 (28.7 GB allocated, 45.9 GB reserved) --
-#: which is how `batchsize="auto"` came to pick a batch that died on its second
-#: forward pass with ~19 GB "reserved but unallocated" going spare.
+#: Fraction of *currently free* device memory an auto batch may target.
 #:
-#: `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` mostly closes that gap
-#: (0.86x of prediction at the same batch), and the `specter` CLI sets it -- so
-#: this allowance exists for library callers who have not, and is skipped when
-#: the variable is already set.
-_FRAGMENTATION_HEADROOM = 1.3
+#: The CUDA number carries two things. `mem_get_info` is an exact reading of the
+#: whole device, so the margin is not for that -- it is because the model above
+#: is fit against *allocated* bytes while what has to fit is what the caching
+#: allocator *reserves*, and the allocator's reserved footprint was measured at
+#: 1.3-1.6x its allocated one on this pipeline. A batch sized against the
+#: allocated figure alone is the mistake that let `"auto"` pick one which then
+#: OOM'd on its second forward pass with ~19 GB "reserved but unallocated".
+#:
+#: The CPU number is softer for a different reason: `available` counts
+#: reclaimable page cache, and the host is also holding the accumulated output
+#: stack and any DataLoader workers.
+_CUDA_SAFETY_FRACTION = 0.6
+_CPU_SAFETY_FRACTION = 0.5
 
 #: Padded voxels one forward pass may cover before batching stops paying.
 #:
@@ -133,19 +125,6 @@ _SATURATION_PADDED_VOXELS = 160_000_000
 #: above, and by 64 throughput has fallen back ~16% -- so this is the top of the
 #: curve, not a "diminishing returns, could go higher" bound.
 MAX_AUTO_BATCHSIZE = 8
-
-
-def _expandable_segments_enabled() -> bool:
-    """
-    Whether the CUDA allocator is configured to use expandable segments.
-
-    Read from the environment rather than from torch, which exposes no query
-    for it. Only ever used to decide how much fragmentation headroom
-    :func:`recommend_batchsize` should leave, so a false negative costs a
-    smaller batch, never a crash.
-    """
-    conf = os.environ.get("PYTORCH_CUDA_ALLOC_CONF", "")
-    return "expandable_segments:true" in conf.lower().replace(" ", "")
 
 
 def estimate_peak_bytes(batchsize: int, nxy: int, nz: int, pad_nxy: int) -> int:
@@ -246,11 +225,12 @@ def recommend_batchsize(
         rather than refusing to start on what is, after all, an estimate.
     """
     free_bytes = available_memory_bytes(device)
-    is_cuda = torch.device(device).type == "cuda"
-    fraction = _CUDA_SAFETY_FRACTION if is_cuda else _CPU_SAFETY_FRACTION
+    fraction = (
+        _CUDA_SAFETY_FRACTION
+        if torch.device(device).type == "cuda"
+        else _CPU_SAFETY_FRACTION
+    )
     budget = free_bytes * fraction
-    if is_cuda and not _expandable_segments_enabled():
-        budget /= _FRAGMENTATION_HEADROOM
 
     per_particle = _PADDED_COPIES_PER_PARTICLE * nz * pad_nxy**2 * _BYTES_PER_ELEMENT
     overhead = estimate_peak_bytes(0, nxy, nz, pad_nxy)

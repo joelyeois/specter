@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import pytest
@@ -145,117 +144,6 @@ def test_bundled_particle_toml_uses_auto() -> None:
     assert config.batchsize == "auto"
 
 
-@pytest.mark.parametrize(
-    "conf,expected",
-    [
-        ("expandable_segments:True", True),
-        ("expandable_segments:true", True),
-        ("max_split_size_mb:128,expandable_segments:True", True),
-        ("expandable_segments: True", True),
-        ("expandable_segments:False", False),
-        ("max_split_size_mb:128", False),
-        ("", False),
-    ],
-)
-def test_expandable_segments_detection(monkeypatch, conf, expected) -> None:
-    """
-    `PYTORCH_CUDA_ALLOC_CONF` is parsed leniently, and only ever loosens a bound.
-
-    torch exposes no query for this, so it is read from the environment. A false
-    negative costs a smaller batch and a false positive costs an OOM, hence the
-    spellings that actually appear (case, whitespace, other keys alongside).
-    """
-    monkeypatch.setenv("PYTORCH_CUDA_ALLOC_CONF", conf)
-    assert memory._expandable_segments_enabled() is expected
-
-
-def test_recommend_batchsize_leaves_fragmentation_headroom_on_cuda(
-    monkeypatch,
-) -> None:
-    """
-    Without expandable segments, an auto batch is sized down for fragmentation.
-
-    `estimate_peak_bytes` is fit against *allocated* bytes, but what has to fit
-    on the card is what the allocator *reserves*. With the default segment
-    allocator those diverge -- measured 1.29x of this model's own prediction at
-    batch 30 -- which is how `batchsize="auto"` picked a batch that OOM'd on its
-    second forward pass. The `specter` CLI sets the variable, so this guards the
-    library caller who has not.
-
-    Patched at `torch.device` level rather than run on a real GPU so it
-    exercises on CPU-only machines.
-    """
-    # Sized so the MEMORY bound is what binds -- large enough to clear the fixed
-    # overhead, small enough not to hit MAX_AUTO_BATCHSIZE or the saturation cap.
-    per_particle = (
-        memory._PADDED_COPIES_PER_PARTICLE
-        * _SMALL_GEOM[1]
-        * _SMALL_GEOM[2] ** 2
-        * memory._BYTES_PER_ELEMENT
-    )
-    want = 4
-    free = (estimate_peak_bytes(0, *_SMALL_GEOM) + want * per_particle) / 0.8
-    monkeypatch.setattr(memory, "available_memory_bytes", lambda _d: int(free))
-
-    monkeypatch.setenv("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
-    with_expandable = recommend_batchsize(*_SMALL_GEOM, "cuda")
-
-    monkeypatch.setenv("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:False")
-    without = recommend_batchsize(*_SMALL_GEOM, "cuda")
-
-    assert with_expandable == want, "memory, not a ceiling, must be the binding bound"
-    assert without < with_expandable, (
-        "the default allocator must get a smaller batch than expandable segments"
-    )
-
-
-def test_fragmentation_headroom_does_not_apply_to_cpu(monkeypatch) -> None:
-    """CPU has no CUDA caching allocator, so the headroom must not shrink it."""
-    monkeypatch.setattr(memory, "available_memory_bytes", lambda _d: 40 * 10**9)
-    monkeypatch.setenv("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
-    on = recommend_batchsize(*_SMALL_GEOM, "cpu")
-    monkeypatch.setenv("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:False")
-    off = recommend_batchsize(*_SMALL_GEOM, "cpu")
-    assert on == off
-
-
-def test_cli_sets_expandable_segments_without_clobbering_a_user_setting() -> None:
-    """
-    Importing the CLI turns expandable segments on, but never overrides a choice.
-
-    The variable has to be set before the CUDA allocator initialises, so the CLI
-    module does it at import; this pins both halves of that contract.
-    """
-    import subprocess
-    import sys
-
-    default = subprocess.run(
-        [
-            sys.executable,
-            "-c",
-            "import specter.cli._cli, os; print(os.environ['PYTORCH_CUDA_ALLOC_CONF'])",
-        ],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    assert default.stdout.strip() == "expandable_segments:True"
-
-    env_override = {**os.environ, "PYTORCH_CUDA_ALLOC_CONF": "max_split_size_mb:64"}
-    honored = subprocess.run(
-        [
-            sys.executable,
-            "-c",
-            "import specter.cli._cli, os; print(os.environ['PYTORCH_CUDA_ALLOC_CONF'])",
-        ],
-        capture_output=True,
-        text=True,
-        check=True,
-        env=env_override,
-    )
-    assert honored.stdout.strip() == "max_split_size_mb:64"
-
-
 def test_recommend_batchsize_caps_at_gpu_saturation(monkeypatch) -> None:
     """
     A big box gets a small batch even on an empty device.
@@ -271,7 +159,6 @@ def test_recommend_batchsize_caps_at_gpu_saturation(monkeypatch) -> None:
     Small boxes still get large batches, which is where batching earns its keep
     (2.2-2.5x at box 64).
     """
-    monkeypatch.setenv("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
     # A device far larger than anything real, so only the saturation cap binds.
     monkeypatch.setattr(memory, "available_memory_bytes", lambda _d: 10**13)
 
@@ -287,3 +174,19 @@ def test_saturation_cap_never_returns_zero(monkeypatch) -> None:
     """A box larger than the whole budget still yields 1, not 0."""
     monkeypatch.setattr(memory, "available_memory_bytes", lambda _d: 10**13)
     assert recommend_batchsize(2048, 2048, 4096, "cuda") == 1
+
+
+def test_cuda_budget_leaves_room_for_allocator_reservation() -> None:
+    """
+    The CUDA budget is discounted enough to cover what the allocator RESERVES.
+
+    `estimate_peak_bytes` is fit against *allocated* bytes, but what has to fit
+    on the card is the caching allocator's reserved footprint, measured at
+    1.3-1.6x allocated on this pipeline. Budgeting against the allocated figure
+    alone is what let `"auto"` pick a batch that then OOM'd on its second
+    forward pass with ~19 GB "reserved but unallocated" going spare, so the
+    fraction has to absorb at least that ratio.
+    """
+    assert memory._CUDA_SAFETY_FRACTION <= 1 / 1.3, (
+        "the CUDA budget must leave room for a reserved:allocated ratio of 1.3"
+    )

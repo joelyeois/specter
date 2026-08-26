@@ -77,7 +77,8 @@ save_exitwaves = false
 save_clean_exitwaves = false
 
 [compute]
-device = "cpu"                   # cpu | cuda | cuda:0
+device = "cuda"                  # cpu | cuda | cuda:0. "cuda" falls back to the CPU, with a
+                                 # warning, when none is available; "cuda:0" does not.
 
 [output]
 output_dir = "micrographs"

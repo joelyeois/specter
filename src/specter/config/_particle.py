@@ -64,7 +64,7 @@ class ParticleStackConfig:
     save_clean_exitwaves: bool = False
 
     # --- Compute (basic) ---
-    device: str = "cpu"
+    device: str = "cuda"  # falls back to CPU when none is available
     # "auto" (the default) sizes the batch to the memory free on `device` at
     # run time, from the box geometry -- see specter.memory. An int pins it,
     # which is what a benchmark or a shared-GPU run wants; nothing about the

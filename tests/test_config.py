@@ -312,7 +312,7 @@ def test_particle_toml_loads_and_matches_expected_values() -> None:
     assert config.n_pixels == 256
     assert config.pixel_size == 1.0
     assert config.scattering_model == "multislice"
-    assert config.device == "cpu"
+    assert config.device == "cuda"
 
 
 def test_particle_stack_config_advanced_field_defaults() -> None:
@@ -412,7 +412,7 @@ def test_tilt_series_toml_loads_and_matches_expected_values() -> None:
     assert config.voxel_size == 2.0
     assert config.n_tilts == 61
     assert config.scattering_model == "multislice"
-    assert config.device == "cpu"
+    assert config.device == "cuda"
     assert config.volume_path == ""
 
 

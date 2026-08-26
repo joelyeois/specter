@@ -61,6 +61,7 @@ from ._common import (
     _format_elapsed,
     _section,
     _tracked_output_dir,
+    resolve_available_device,
     resolve_output_dir,
 )
 
@@ -352,7 +353,7 @@ def build_tomogram_generator(config: TomogramConfig) -> TomogramSpecimenGenerato
     TomogramSpecimenGenerator
         Not yet `.generate()`-called.
     """
-    device, render_devices = parse_device_pool(config.device)
+    device, render_devices = parse_device_pool(resolve_available_device(config.device))
 
     protein_specs = _protein_specs_from_dicts(
         config.targets

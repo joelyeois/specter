@@ -39,6 +39,7 @@ from ._common import (
     _section,
     _tracked_output_dir,
     _uniform_sample,
+    resolve_available_device,
 )
 
 
@@ -97,6 +98,7 @@ def run_micrograph(config: MicrographConfig) -> None:
         randomly sampled per micrograph from the ranges given in ``config``.
     """
     validate_config(config)
+    device = resolve_available_device(config.device)
 
     specter.set_verbosity(logging.INFO)
     t_start = time.perf_counter()
@@ -185,7 +187,7 @@ def run_micrograph(config: MicrographConfig) -> None:
         ice_cache_dir=config.ice_cache_dir,
     )
     if icemaker is not None:
-        icemaker = icemaker.to(config.device)
+        icemaker = icemaker.to(device)
 
     # Build once -- __init__ generates the first specimen.
     _section("Building specimen and image generator")
@@ -223,12 +225,12 @@ def run_micrograph(config: MicrographConfig) -> None:
         deltaV_V=config.deltaV_V,
         deltaI_I=config.deltaI_I,
         dose_envelope=config.dose_envelope,
-    ).to(config.device)
+    ).to(device)
 
     # --- Generating images ---
     # Regenerate a fresh specimen (ice/crowding) for every micrograph after
     # the first (already built in __init__ above), then apply the i-th CTF.
-    _section(f"Generating {n} micrograph(s) on {config.device}")
+    _section(f"Generating {n} micrograph(s) on {device}")
     images: list[torch.Tensor] = []
     exitwaves: list[torch.Tensor] | None = [] if config.save_exitwaves else None
     clean_exitwaves: list[torch.Tensor] | None = (

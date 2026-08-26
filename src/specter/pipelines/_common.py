@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import glob
 import os
+import warnings
 from contextlib import contextmanager
 from typing import Any, Iterator, Sequence
 
@@ -251,6 +252,43 @@ def _crop_center(t: torch.Tensor, nxy: int) -> torch.Tensor:
     return t[..., cy - half : cy + half + (nxy % 2), cx - half : cx + half + (nxy % 2)]
 
 
+def resolve_available_device(device_str: str) -> str:
+    """
+    Fall back to the CPU when a config asks for CUDA and there is none.
+
+    The simulate/build configs default to ``"cuda"``, which is what a user with
+    a GPU wants and what makes the GPU paths the tested ones. Taken literally on
+    a machine without CUDA, though, torch raises ``RuntimeError: No CUDA GPUs
+    are available`` from somewhere deep in the forward model -- a traceback that
+    says nothing about which setting caused it. A default that cannot run
+    everywhere is not a default, so a CUDA request with no CUDA present
+    degrades to the CPU and says so.
+
+    An explicit device INDEX is left alone. ``"cuda:2"`` or ``"0,1"`` names
+    particular hardware, so silently running somewhere else would be answering a
+    different question than the one asked; those still fail, and should.
+
+    Parameters
+    ----------
+    device_str : str
+        A raw ``device`` config value.
+
+    Returns
+    -------
+    str
+        ``device_str``, or ``"cpu"``.
+    """
+    if device_str != "cuda" or torch.cuda.is_available():
+        return device_str
+    warnings.warn(
+        "device='cuda' but no CUDA device is available; running on the CPU "
+        "instead. Set device='cpu' to silence this, or check that torch was "
+        "installed with CUDA support (torch.cuda.is_available() is False).",
+        stacklevel=3,
+    )
+    return "cpu"
+
+
 def _parse_device(device_str: str) -> tuple[str, str | list[int]]:
     """
     Parse a ``--device`` string into a dispatch mode and device target.
@@ -276,6 +314,7 @@ def _parse_device(device_str: str) -> tuple[str, str | list[int]]:
     "0"       -> ("single", "cuda:0")
     "0,1,2"   -> ("multi",  [0, 1, 2])
     """
+    device_str = resolve_available_device(device_str)
     parts = device_str.split(",")
     if len(parts) > 1:
         try:
@@ -319,6 +358,7 @@ def _parse_device_pool(device_str: str) -> list[str]:
     "0,1,2"   -> ["cuda:0", "cuda:1", "cuda:2"]
     "auto"    -> ["cuda:0", ..., "cuda:N-1"], or ["cpu"] with no GPUs
     """
+    device_str = resolve_available_device(device_str)
     if device_str == "auto":
         n_gpus = torch.cuda.device_count()
         return [f"cuda:{i}" for i in range(n_gpus)] if n_gpus else ["cpu"]

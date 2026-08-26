@@ -70,7 +70,7 @@ class TiltSeriesConfig:
     save_exitwaves: bool = False
 
     # --- Compute ---
-    device: str = "cpu"
+    device: str = "cuda"  # falls back to CPU when none is available
 
     # --- Reproducibility ---
     seed: int | None = None

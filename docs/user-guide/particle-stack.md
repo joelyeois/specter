@@ -192,6 +192,11 @@ documents both bounds along with their measured basis.
 
 ## Multi-GPU
 
+The default is `device = "cuda"`, which uses the GPU when there is one and
+falls back to the CPU, with a warning, when there is not. An explicit index is
+taken literally: `"cuda:0"` or `"0,1"` names particular hardware and fails
+rather than running somewhere else.
+
 `device` accepts a comma-separated list of GPU indices (e.g. `"0,1,2,3"`) to
 split particle generation across multiple GPUs via Lightning's DDP
 launcher; a single index (`"cuda:0"`) or `"cpu"` runs on one device. With

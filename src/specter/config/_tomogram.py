@@ -240,7 +240,7 @@ class TomogramConfig:
     # every visible CUDA GPU. A pooled value's first entry becomes the
     # primary device for everything else (see
     # specter.specimen._parallel_render.parse_device_pool).
-    device: str = "cpu"
+    device: str = "cuda"  # falls back to CPU when none is available
     # Device for the shared canvas tensors (volume/instance_labels/
     # membrane_labels), decoupled from `device` above (which stays the
     # compute device for rendering/rotation/field-generation regardless).

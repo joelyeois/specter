@@ -29,7 +29,9 @@ save_exitwaves = false
 save_clean_exitwaves = false
 
 [compute]
-device = "cpu"                   # cpu | cuda | cuda:0 | 0,1,2,3 (multi-GPU)
+device = "cuda"                  # cpu | cuda | cuda:0 | 0,1,2,3 (multi-GPU). "cuda" falls
+                                 # back to the CPU, with a warning, when none is available;
+                                 # an explicit index like "cuda:0" or "0,1" does not.
 batchsize = "auto"               # particles per forward pass. "auto" takes the smaller of what
                                  # fits in the free memory on `device` and what is worth
                                  # batching: past the point where one forward pass already

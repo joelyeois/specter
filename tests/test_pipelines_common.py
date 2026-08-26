@@ -147,3 +147,91 @@ def test_reserve_next_job_id_no_project(tmp_path: Path) -> None:
     with Job("particles", project=None, base_dir=tmp_path):
         pass
     assert _reserve_next_job_id(None, str(tmp_path)) == "J002"
+
+
+@pytest.mark.parametrize("cuda_present", [True, False])
+def test_bare_cuda_falls_back_to_cpu_only_when_there_is_none(
+    monkeypatch, cuda_present
+) -> None:
+    """
+    `device="cuda"` runs on the CPU, with a warning, on a machine without one.
+
+    Every simulate/build config defaults to `"cuda"`, which is what a user with
+    a GPU wants. Taken literally without one, torch raises `RuntimeError: No
+    CUDA GPUs are available` from inside the forward model -- a traceback that
+    names neither the setting nor the fix. A default that cannot run everywhere
+    is not a default.
+    """
+    import torch
+
+    from specter.pipelines._common import resolve_available_device
+
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: cuda_present)
+
+    if cuda_present:
+        assert resolve_available_device("cuda") == "cuda"
+    else:
+        with pytest.warns(UserWarning, match="no CUDA device is available"):
+            assert resolve_available_device("cuda") == "cpu"
+
+
+@pytest.mark.parametrize("device", ["cuda:0", "cuda:2", "0,1", "0"])
+def test_an_explicit_device_index_is_never_silently_moved(monkeypatch, device) -> None:
+    """
+    Naming particular hardware fails rather than running somewhere else.
+
+    `"cuda"` means "the GPU, if there is one" and may degrade. `"cuda:2"` or
+    `"0,1"` names specific devices, so answering with the CPU would be
+    answering a different question -- those still raise, and should.
+    """
+    import torch
+    import warnings
+
+    from specter.pipelines._common import resolve_available_device
+
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")  # any warning here is a failure
+        assert resolve_available_device(device) == device
+
+
+def test_cpu_is_left_alone_with_no_warning(monkeypatch) -> None:
+    """An explicit CPU request must not warn, GPU present or not."""
+    import torch
+    import warnings
+
+    from specter.pipelines._common import resolve_available_device
+
+    for present in (True, False):
+        monkeypatch.setattr(torch.cuda, "is_available", lambda: present)
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            assert resolve_available_device("cpu") == "cpu"
+
+
+def test_shipped_configs_all_default_to_cuda() -> None:
+    """
+    The four simulate/build configs agree on a device default.
+
+    They did not: `tomogram.toml` shipped `"cuda"` while the other three shipped
+    `"cpu"`, for no reason that survives inspection -- and the `"cuda"` one
+    crashed outright on a CPU-only machine, which is what the fallback above now
+    prevents.
+    """
+    from specter.config import (
+        MicrographConfig,
+        ParticleStackConfig,
+        TiltSeriesConfig,
+        TomogramConfig,
+        load_config,
+    )
+
+    repo_root = Path(__file__).resolve().parent.parent
+    for name, cls in (
+        ("particle", ParticleStackConfig),
+        ("micrograph", MicrographConfig),
+        ("tilt_series", TiltSeriesConfig),
+        ("tomogram", TomogramConfig),
+    ):
+        cfg = load_config(str(repo_root / "configs" / f"{name}.toml"), cls)
+        assert cfg.device == "cuda", f"configs/{name}.toml"

@@ -118,8 +118,11 @@ def test_render_workers_and_devices_reach_membrane_tomogram_generator():
 
 
 def test_render_workers_default_is_serial():
+    # device pinned so this is about render_workers, not about which device the
+    # config defaults to (which is "cuda", resolved against the host at run time).
     config = TomogramConfig(
         membrane=[{"shape_backend": "spherical_harmonics"}],
+        device="cpu",
         **_BASE_KWARGS,
     )
     gen = build_tomogram_generator(config)

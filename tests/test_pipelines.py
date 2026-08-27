@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 import pytest
 import starfile
+import torch
 from cryosparc.dataset import Dataset
 
 from specter.config import (
@@ -451,3 +452,45 @@ def test_run_tilt_series_chained_tomogram_config_respects_explicit_tracking(
         tmp_path / "shared-tomograms" / "tomograms" / "J001" / "tomogram.mrc"
     ).exists()
     assert (tmp_path / "this-run" / "tiltseries" / "J001" / "tilt_series.mrcs").exists()
+
+
+class _FakeGenerator:
+    """Minimal stand-in for _report_devices, which reads only these two."""
+
+    def __init__(self, device, accumulator_device):
+        self.device = device
+        self.accumulator_device = torch.device(accumulator_device)
+
+
+@pytest.mark.parametrize(
+    ("device", "accumulator", "raw", "expected"),
+    [
+        # The common case: one device, nothing to say beyond naming it. In
+        # particular "cuda" (a str, as a caller passes it) against
+        # torch.device("cuda") must read as the SAME device -- comparing the
+        # two directly is always unequal, which made every run claim a split.
+        ("cuda", "cuda", None, "Device: cuda"),
+        ("cuda", "cuda", "auto", "Device: cuda"),
+        ("cpu", "cpu", None, "Device: cpu"),
+        # A split is the exception, so it is what gets reported -- and "auto"
+        # is named as the thing that chose, since the user did not.
+        ("cuda", "cpu", "auto", "Device: cuda, accumulator on cpu (auto)"),
+        ("cuda", "cpu", "cpu", "Device: cuda, accumulator on cpu"),
+        ("cuda", "cuda:2", "cuda:2", "Device: cuda, accumulator on cuda:2"),
+    ],
+)
+def test_report_devices_names_a_split_accumulator(
+    device, accumulator, raw, expected, capsys
+):
+    """
+    A run reports where its canvas landed, but only when that differs.
+
+    `accumulator_device="auto"` decides from *currently free* VRAM, so the
+    same config silently puts the canvas on the GPU or the CPU depending on
+    what else was running. Unreported, the only symptom is a run that is
+    inexplicably slower than the last one.
+    """
+    from specter.pipelines._tomogram import _report_devices
+
+    _report_devices(_FakeGenerator(device, accumulator), raw)
+    assert capsys.readouterr().out.strip() == expected

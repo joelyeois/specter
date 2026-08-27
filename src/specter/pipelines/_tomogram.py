@@ -488,7 +488,7 @@ def build_tomogram_generator(config: TomogramConfig) -> TomogramSpecimenGenerato
         for d in config.beads
     ]
 
-    return TomogramSpecimenGenerator(
+    gen = TomogramSpecimenGenerator(
         membrane_instances=membrane_instances,
         target_shape=tuple(config.target_shape),  # type: ignore[arg-type]
         voxel_size=config.voxel_size,
@@ -516,6 +516,40 @@ def build_tomogram_generator(config: TomogramConfig) -> TomogramSpecimenGenerato
         render_devices=render_devices,  # type: ignore[arg-type]
         chunk_size=config.render_chunk_size,
     )
+    _report_devices(gen, config.accumulator_device)
+    return gen
+
+
+def _report_devices(
+    gen: TomogramSpecimenGenerator,
+    accumulator_device: str | None,
+) -> None:
+    """
+    Print the devices the generator actually resolved to.
+
+    `accumulator_device="auto"` decides from the chosen device's *currently
+    free* VRAM (`recommend_accumulator_device`), so the same config lands the
+    canvas on the GPU or on the CPU depending on what else happened to be
+    running at the time. Reporting it costs one line and makes that decision
+    visible; without it the only symptom is a run that is inexplicably slower
+    than the last one, with nothing in the log to distinguish the two.
+
+    Parameters
+    ----------
+    gen : TomogramSpecimenGenerator
+        Already constructed, so its `device`/`accumulator_device` are resolved.
+    accumulator_device : str or None
+        The config's own raw value, to name "auto" as the thing that chose.
+    """
+    # gen.device is whatever string the caller passed ("cuda"); the resolved
+    # accumulator is always a torch.device, so compare as torch.device or the
+    # two never match and every run claims a split it does not have.
+    compute = torch.device(gen.device)
+    line = f"[bold]Device:[/bold] {compute}"
+    if gen.accumulator_device != compute:
+        why = " (auto)" if accumulator_device == "auto" else ""
+        line += f", accumulator on {gen.accumulator_device}{why}"
+    _console.print(line)
 
 
 def _run_single_tomogram(config: TomogramConfig) -> None:

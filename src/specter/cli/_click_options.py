@@ -10,10 +10,20 @@ import rich_click as click
 from click.core import ParameterSource
 
 
+#: Field name -> the string ``--help`` shows in place of the real default.
+#: For a default computed from the environment, the real value is a machine
+#: -specific absolute path (``/home/<user>/.cache/...``), which is both noisy
+#: and misleading in documentation copied from one machine to another. The
+#: rule it follows is what the reader actually needs.
+DEFAULT_DISPLAY_OVERRIDES: dict[str, str] = {
+    "pdb_cache_dir": "$SPECTER_PDB_CACHE, else ~/.cache/specter/pdb",
+}
+
+
 def build_config_options(
     config_cls: type,
     field_help: dict[str, str] | None = None,
-    field_panels: dict[str, str] | None = None,
+    field_groups: list[tuple[str, list[str]]] | None = None,
 ) -> list[click.RichOption]:
     """
     Build one ``--field-name`` Click option per field of a config dataclass.
@@ -39,21 +49,30 @@ def build_config_options(
         Field name -> help text describing what the flag itself does. Fields
         not present here fall back to a generic "Overrides the 'x' field in
         --config." message.
-    field_panels : dict[str, str], optional
-        Field name -> rich-click panel title, used to group flags into
-        titled, bordered panels in ``--help`` output (``RichOption``'s
-        ``panel=`` kwarg). Fields not present here get no explicit panel and
-        fall back to rich-click's default "Options" panel.
+    field_groups : list of (str, list of str), optional
+        ``(panel title, field names)`` in the order they should appear in
+        ``--help``. Each field's panel comes from the group naming it
+        (``RichOption``'s ``panel=`` kwarg), and the returned options are
+        emitted in this order rather than in dataclass field order. Omit it
+        to emit in field order with no panels at all.
 
     Notes
     -----
+    Emission order is what controls panel order: rich-click renders panels in
+    the order it first sees them in a command's parameter list. Ordering by
+    the dataclass instead would hand panel order to whatever sequence the
+    fields happen to be declared in, which is how a single advanced field
+    declared early (``pdb_cache_dir``, field #3 of `MicrographConfig`) used
+    to drag the whole "Advanced" panel to the top of ``--help``.
+
     Each option's actual ``default`` stays ``None`` regardless of the
     dataclass's own default -- that's what makes "did the caller pass this
     flag" detectable via ``ctx.get_parameter_source``. The dataclass's real
     default is still shown in ``--help`` via ``show_default`` (a literal
     string override, not the value Click would actually use), so users can
     see what a field falls back to without that value ever being applied as
-    a real CLI default.
+    a real CLI default. `DEFAULT_DISPLAY_OVERRIDES` replaces that string for
+    the few fields whose real default is machine-specific.
 
     Returns
     -------
@@ -65,9 +84,15 @@ def build_config_options(
     TypeError
         If a field's type isn't one of ``str``, ``int``, ``float``, ``bool``,
         or ``Literal[...]`` (optionally wrapped in ``| None``).
+    ValueError
+        If ``field_groups`` doesn't name every field that yields an option,
+        or names something that isn't one. Both are silent failures
+        otherwise: an unlisted field falls into rich-click's catch-all
+        "Options" panel next to ``--help``, and a stale name in a group does
+        nothing at all.
     """
     field_help = field_help or {}
-    field_panels = field_panels or {}
+    panels = {name: title for title, names in (field_groups or []) for name in names}
     hints = get_type_hints(config_cls)
     options = []
 
@@ -93,10 +118,12 @@ def build_config_options(
         kwargs: dict[str, Any] = {
             "default": None,
             "help": help_text,
-            "panel": field_panels.get(f.name),
+            "panel": panels.get(f.name),
         }
 
-        if f.default is not dataclasses.MISSING:
+        if f.name in DEFAULT_DISPLAY_OVERRIDES:
+            kwargs["show_default"] = DEFAULT_DISPLAY_OVERRIDES[f.name]
+        elif f.default is not dataclasses.MISSING:
             kwargs["show_default"] = str(f.default)
         elif f.default_factory is not dataclasses.MISSING:
             kwargs["show_default"] = str(f.default_factory())
@@ -123,7 +150,35 @@ def build_config_options(
         # field it is meant to override.
         options.append(click.RichOption([f"--{f.name}", f.name], **kwargs))
 
-    return options
+    if field_groups is None:
+        return options
+
+    by_name = {option.name: option for option in options}
+    ordered = [
+        by_name.pop(name)
+        for _, names in field_groups
+        for name in names
+        if name in by_name
+    ]
+    stale = sorted(
+        name
+        for _, names in field_groups
+        for name in names
+        if name not in {option.name for option in options}
+    )
+    if by_name or stale:
+        problems = []
+        if by_name:
+            problems.append(f"not in any group: {', '.join(sorted(by_name))}")
+        if stale:
+            problems.append(f"grouped but not a settable field: {', '.join(stale)}")
+        raise ValueError(
+            f"build_config_options: {config_cls.__name__} field grouping is "
+            f"incomplete -- {'; '.join(problems)}. Every field that yields a "
+            "flag needs a group, or it lands in rich-click's catch-all "
+            "'Options' panel."
+        )
+    return ordered
 
 
 #: Where a user without a checkout finds the worked example configs. They are
@@ -188,11 +243,6 @@ def config_from_defaults(config_cls: type, overrides: dict[str, Any]) -> Any:
             f"{EXAMPLE_CONFIGS_URL}"
         )
     return config_cls(**{name: overrides[name] for name in required})
-
-
-def field_panels(groups: list[tuple[str, list[str]]]) -> dict[str, str]:
-    """Field name -> rich-click panel title, derived from a (title, field names) list."""
-    return {name: title for title, names in groups for name in names}
 
 
 def collect_overrides(ctx: click.Context, exclude: set[str]) -> dict[str, Any]:

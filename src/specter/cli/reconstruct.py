@@ -16,7 +16,6 @@ from ._click_options import (
     collect_overrides,
     CONFIG_OPTION_HELP,
     config_from_defaults,
-    field_panels,
 )
 
 CONTEXT_SETTINGS = {"help_option_names": ["-h", "--help"]}
@@ -86,7 +85,7 @@ def _reconstruct_particle_command() -> click.RichCommand:
         *build_config_options(
             ReconstructionConfig,
             field_help=RECONSTRUCTION_HELP,
-            field_panels=field_panels(_RECONSTRUCT_PARTICLE_GROUPS),
+            field_groups=_RECONSTRUCT_PARTICLE_GROUPS,
         ),
     ]
     return click.RichCommand(

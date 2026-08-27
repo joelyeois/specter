@@ -18,7 +18,6 @@ from ._click_options import (
     collect_overrides,
     CONFIG_OPTION_HELP,
     config_from_defaults,
-    field_panels,
 )
 
 CONTEXT_SETTINGS = {"help_option_names": ["-h", "--help"]}
@@ -27,12 +26,13 @@ CONTEXT_SETTINGS = {"help_option_names": ["-h", "--help"]}
 # cli/simulate.py's _PARTICLE_STACK_GROUPS/_TILT_SERIES_GROUPS. targets/filler/
 # membrane/membrane_transmembrane_specs/filaments are all list[dict]-typed
 # and skipped entirely by build_config_options (TOML-only) -- not listed
-# here, same treatment as that module's own protein_specs/membrane_specs.
+# here, same treatment as that module's own protein_specs/membrane_specs --
+# nor is `target_shape` (list[int]), for the same reason.
 # "actin" (bool) is the one filaments-related field that IS a real CLI flag.
 _TOMOGRAM_GROUPS: list[tuple[str, list[str]]] = [
     (
         "Specimen",
-        ["target_shape", "voxel_size", "filler_occupancy_fraction"],
+        ["voxel_size", "filler_occupancy_fraction"],
     ),
     (
         "Filler tables",
@@ -68,7 +68,18 @@ _TOMOGRAM_GROUPS: list[tuple[str, list[str]]] = [
         "Output & job tracking",
         ["output_dir", "filename", "project", "job_id"],
     ),
-    ("Advanced", ["pdb_cache_dir", "seed"]),
+    (
+        "Advanced",
+        [
+            "pdb_cache_dir",
+            "readd_hydrogens",
+            "packing_backend",
+            "packing_max_retries",
+            "packing_voxel_size",
+            "bead_roughness",
+            "seed",
+        ],
+    ),
 ]
 
 _ICE_GROUPS: list[tuple[str, list[str]]] = [
@@ -123,7 +134,7 @@ def _build_tomogram_command() -> click.RichCommand:
         *build_config_options(
             TomogramConfig,
             field_help=TOMOGRAM_HELP,
-            field_panels=field_panels(_TOMOGRAM_GROUPS),
+            field_groups=_TOMOGRAM_GROUPS,
         ),
     ]
     return click.RichCommand(
@@ -178,7 +189,7 @@ def _build_ice_command() -> click.RichCommand:
         *build_config_options(
             IceCacheConfig,
             field_help=ICE_CACHE_HELP,
-            field_panels=field_panels(_ICE_GROUPS),
+            field_groups=_ICE_GROUPS,
         ),
     ]
     return click.RichCommand(

@@ -21,7 +21,6 @@ from ._click_options import (
     collect_overrides,
     CONFIG_OPTION_HELP,
     config_from_defaults,
-    field_panels,
 )
 
 CONTEXT_SETTINGS = {"help_option_names": ["-h", "--help"]}
@@ -64,6 +63,7 @@ _PARTICLE_STACK_GROUPS: list[tuple[str, list[str]]] = [
         "Advanced",
         [
             "pdb_cache_dir",
+            "readd_hydrogens",
             "cs_path",
             "star_path",
             "n_frames",
@@ -166,33 +166,44 @@ _TILT_SERIES_GROUPS: list[tuple[str, list[str]]] = [
             "ice_cache_dir",
             "ice_relax_steps",
             "pad_fft",
+            "seed",
         ],
     ),
 ]
 
 
 # (panel title, field names) for `specter simulate micrograph` -- same
-# basic-first-advanced-last convention as `_PARTICLE_STACK_GROUPS`, mirroring
-# `MicrographConfig`'s own field ordering.
+# basic-first-advanced-last convention as `_PARTICLE_STACK_GROUPS`. This list,
+# not `MicrographConfig`'s field order, is what decides the order panels and
+# flags appear in `--help` (see `build_config_options`), and it is the order
+# `configs/micrograph.toml`'s tables deliberately mirror.
+#
+# What a first run has to decide is above "Advanced": what to image and at
+# what sampling, the microscope settings, how many, and where the output
+# goes. `ice_thickness` sits with the specimen because for a micrograph it is
+# a property of the sample being imaged, not a tuning knob -- `ice_model` is
+# the tuning knob, and stays below.
 _MICROGRAPH_GROUPS: list[tuple[str, list[str]]] = [
     (
         "Specimen",
-        ["pdb_source", "assembly", "n_pixels", "pixel_size", "micrograph_size"],
+        [
+            "pdb_source",
+            "assembly",
+            "n_pixels",
+            "pixel_size",
+            "micrograph_size",
+            "ice_thickness",
+        ],
     ),
     (
         "Microscope",
-        ["voltage", "dose", "cs", "alpha"],
+        ["voltage", "dose", "defocus", "cs", "alpha"],
     ),
-    ("Defocus", ["defocus"]),
-    ("Dataset", ["n_micrographs"]),
     (
         "Models",
         ["scattering_model", "noise_model", "detector_model"],
     ),
-    (
-        "Post-processing",
-        ["normalize_micrographs", "save_exitwaves", "save_clean_exitwaves"],
-    ),
+    ("Dataset", ["n_micrographs", "normalize_micrographs"]),
     ("Compute", ["device"]),
     (
         "Output & job tracking",
@@ -201,7 +212,10 @@ _MICROGRAPH_GROUPS: list[tuple[str, list[str]]] = [
     (
         "Advanced",
         [
+            # Structure handling
             "pdb_cache_dir",
+            "readd_hydrogens",
+            # Envelopes
             "n_frames",
             "convergence_angle",
             "cc",
@@ -210,8 +224,8 @@ _MICROGRAPH_GROUPS: list[tuple[str, list[str]]] = [
             "deltaI_I",
             "dose_envelope",
             "coincidence_radius",
+            # Ice model and thickness profile
             "ice_model",
-            "ice_thickness",
             "ice_profile",
             "ice_thickness_range",
             "ice_profile_angle",
@@ -220,12 +234,18 @@ _MICROGRAPH_GROUPS: list[tuple[str, list[str]]] = [
             "ice_hole_offset",
             "ice_tilt",
             "ice_cache_dir",
+            # Crowding
             "crowd_min_distance",
             "crowd_max_distance_z",
+            "crowd_chunk_size",
             "water_air_interface",
+            # Numerics
             "potential_scale",
             "pad_fft",
-            "crowd_chunk_size",
+            # Diagnostics and reproducibility
+            "save_exitwaves",
+            "save_clean_exitwaves",
+            "seed",
         ],
     ),
 ]
@@ -261,7 +281,7 @@ def _build_particles_command() -> click.RichCommand:
         *build_config_options(
             ParticleStackConfig,
             field_help=PARTICLE_STACK_HELP,
-            field_panels=field_panels(_PARTICLE_STACK_GROUPS),
+            field_groups=_PARTICLE_STACK_GROUPS,
         ),
     ]
     return click.RichCommand(
@@ -305,7 +325,7 @@ def _build_micrograph_command() -> click.RichCommand:
         *build_config_options(
             MicrographConfig,
             field_help=MICROGRAPH_HELP,
-            field_panels=field_panels(_MICROGRAPH_GROUPS),
+            field_groups=_MICROGRAPH_GROUPS,
         ),
     ]
     return click.RichCommand(
@@ -375,7 +395,7 @@ def _build_tiltseries_command() -> click.RichCommand:
         *build_config_options(
             TiltSeriesConfig,
             field_help=TILT_SERIES_HELP,
-            field_panels=field_panels(_TILT_SERIES_GROUPS),
+            field_groups=_TILT_SERIES_GROUPS,
         ),
     ]
     return click.RichCommand(

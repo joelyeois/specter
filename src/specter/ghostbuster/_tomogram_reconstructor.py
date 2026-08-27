@@ -13,7 +13,11 @@ from torch.optim.lr_scheduler import LRScheduler
 
 from .. import rotations
 from .. import tilt as tilt_geometry
-from ..aberrations import Aberration, aberration_model_for_scattering
+from ..aberrations import (
+    Aberration,
+    aberration_model_for_scattering,
+    defocus_midplane_shift,
+)
 from ..ctf import LegacyAberrationAdapter
 from ..scattering import IterativeScattering
 from ._base_reconstructor import _BaseReconstructor
@@ -197,6 +201,26 @@ class TomogramReconstructor(_BaseReconstructor):
             self.register_buffer(k, torch.as_tensor(v, dtype=torch.float32))
             self.ctf_params[k] = getattr(self, k)
 
+        # Multislice evaluates the exit wave's phase at the volume's midplane,
+        # but dfu/dfv follow the CryoSPARC/RELION convention of being measured
+        # from the entry face. `TiltSeriesGenerator` gets this correction from
+        # `BaseImager._apply_defocus_shift`; this class does not inherit
+        # `BaseImager`, so without it the inverse images the specimen at a
+        # different defocus than the simulator that produced the data --
+        # nz * voxel_size / 2 Angstrom out, which is 750 A on a 300-slice
+        # tomogram at 5 A/voxel. Skipped for the models with no Z extent to
+        # offset from, matching `_apply_defocus_shift`'s own `shift_required`.
+        self._defocus_shift_A = (
+            0.0
+            if scattering_model in ("projection", "ctf")
+            else defocus_midplane_shift(self.nz, voxel_size)
+        )
+        if self._defocus_shift_A:
+            for name in ("dfu", "dfv"):
+                if hasattr(self, name):
+                    setattr(self, name, getattr(self, name) - self._defocus_shift_A)
+                    self.ctf_params[name] = getattr(self, name)
+
         # Fourier-space mask applied after each gradient step
         self.register_buffer("kmask", kmask)
 
@@ -229,6 +253,10 @@ class TomogramReconstructor(_BaseReconstructor):
                 voltage,
                 aberration_model=aberration_model,
                 alpha=alpha if aberration_model == "linear" else None,
+                # Same derivation as `BaseImager._init_optics`. Left at the
+                # default the amplitude-contrast term is applied on one side of
+                # the forward/inverse pair and not the other.
+                specimen_absorption=scattering_model != "ctf",
             )
 
     # ------------------------------------------------------------------ #

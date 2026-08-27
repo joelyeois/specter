@@ -734,3 +734,55 @@ def test_tomogram_generator_carries_the_monomer_library_path():
         monomer_library_path="/some/monomers",
     )
     assert build_tomogram_generator(cfg).monomer_library_path == "/some/monomers"
+
+
+# ---------------------------------------------------------------------------
+# Physics knobs a generator accepts must be reachable from its config
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "config_cls,generator_name",
+    [
+        ("ParticleStackConfig", "ImageGenerator"),
+        ("MicrographConfig", "MicrographGenerator"),
+        ("TiltSeriesConfig", "TiltSeriesGenerator"),
+    ],
+)
+def test_envelope_knobs_are_reachable_from_every_simulate_config(
+    config_cls: str, generator_name: str
+) -> None:
+    """
+    A knob one command exposes and another hides is drift, not design.
+
+    `bfactor` and `klim` were applied by all three generators but settable only
+    on the particle stack, because each pipeline forwards its config fields by
+    hand and these two were never added to the other two lists. Nothing failed:
+    the knob was simply inert.
+    """
+    import dataclasses
+    import inspect
+
+    import specter.config as config_mod
+    import specter.imagegenerator as gen_mod
+
+    cfg = getattr(config_mod, config_cls)
+    gen = getattr(gen_mod, generator_name)
+    fields = {f.name for f in dataclasses.fields(cfg)}
+    params = set(inspect.signature(gen.__init__).parameters)
+
+    for knob in ("bfactor", "klim"):
+        assert knob in params, f"{generator_name} no longer accepts {knob}"
+        assert knob in fields, f"{config_cls} cannot set {knob}"
+
+
+def test_klim_reaches_the_scattering_bandlimit() -> None:
+    """klim is a fraction of Nyquist, and must survive config -> Scattering."""
+    from specter.scattering import Scattering
+
+    unlimited = Scattering(32, 1.0, 300.0, scattering_model="multislice")
+    limited = Scattering(32, 1.0, 300.0, scattering_model="multislice", klim=0.66)
+    assert unlimited.klim is None
+    assert limited.klim == 0.66
+    # 0.66 of Nyquist keeps strictly fewer frequencies than no limit at all.
+    assert limited.kmask.sum() < limited.kmask.numel()

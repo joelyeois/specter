@@ -200,6 +200,8 @@ def run_tilt_series(
         noise_model=noise_model,
         alpha=config.alpha,
         pad_fft=config.pad_fft,
+        klim=config.klim,
+        bfactor=config.bfactor,
         tilt_axis=config.tilt_axis,
         coincidence_radius=config.coincidence_radius,
         n_frames=config.n_frames,

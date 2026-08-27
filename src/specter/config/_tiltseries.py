@@ -62,6 +62,12 @@ class TiltSeriesConfig:
     ice_model: Literal["gd", "random", "none"] = "gd"
     ice_cache_dir: str | None = None  # defaults to the bundled ice_data/ice_cache
     ice_relax_steps: int = 0  # local MLBOP seam-relaxation steps for ice_model="gd"
+    # Fraction of Nyquist, not 1/A: Scattering masks k <= klim * k_nyquist.
+    # Kirkland recommends 0.66 (2/3) to prevent multislice FFT aliasing, but
+    # that costs real spatial resolution, so the default keeps the full range
+    # and accepts the aliasing. Exposed so a caller can make the other choice.
+    klim: float | None = None  # fraction of Nyquist
+    bfactor: float | None = None  # A^2
     pad_fft: bool = False
     detector_model: Literal["none", "perfect", "k3_300kv", "k3_200kv"] = "none"
 
@@ -137,6 +143,11 @@ TILT_SERIES_HELP: dict[str, str] = {
     "Defaults to the bundled ice_data/ice_cache.",
     "ice_relax_steps": "Local MLBOP relaxation steps used to heal ice tile "
     "seams (ice_model='gd' only).",
+    "klim": "Bandlimit for Kirkland's FFT anti-aliasing, as a fraction of "
+    "Nyquist. Kirkland recommends 0.66 (2/3), which prevents aliasing but "
+    "discards real spatial frequency content above it. Unset (the default) "
+    "keeps the full Nyquist range and accepts the aliasing.",
+    "bfactor": "Isotropic B-factor envelope in Angstrom^2.",
     "pad_fft": "Pad volume for FFT to avoid multislice edge-wraparound "
     "artifacts under tilt.",
     "detector_model": "Detector model.",

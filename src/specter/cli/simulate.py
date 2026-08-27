@@ -162,6 +162,8 @@ _TILT_SERIES_GROUPS: list[tuple[str, list[str]]] = [
             "deltaV_V",
             "deltaI_I",
             "dose_envelope",
+            "bfactor",
+            "klim",
             "coincidence_radius",
             "ice_model",
             "ice_cache_dir",
@@ -225,6 +227,8 @@ _MICROGRAPH_GROUPS: list[tuple[str, list[str]]] = [
             "deltaV_V",
             "deltaI_I",
             "dose_envelope",
+            "bfactor",
+            "klim",
             "coincidence_radius",
             # Ice model and thickness profile
             "ice_model",

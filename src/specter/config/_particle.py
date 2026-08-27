@@ -142,7 +142,11 @@ class ParticleStackConfig:
 
     # --- Advanced: scattering ---
     ews_curvature_sign: Literal["negative", "positive"] = "positive"
-    klim: float | None = None  # 1/Å
+    # Fraction of Nyquist, not 1/A: Scattering masks k <= klim * k_nyquist.
+    # Kirkland recommends 0.66 (2/3) to prevent multislice FFT aliasing, but
+    # that costs real spatial resolution, so the default keeps the full range
+    # and accepts the aliasing. Exposed so a caller can make the other choice.
+    klim: float | None = None  # fraction of Nyquist
     rotate_mode: Literal["real", "fourier"] = "real"
 
     # --- Advanced: ice ---
@@ -303,7 +307,7 @@ PARTICLE_STACK_HELP: dict[str, str] = {
     "hydrogen-free protein falls back to per-element Peng factors.",
     "ews_curvature_sign": "Ewald sphere curvature sign, matching CryoSPARC's "
     "convention.",
-    "klim": "Reciprocal-space cutoff in 1/Angstrom. Unset uses the full Nyquist range.",
+    "klim": "Bandlimit for Kirkland's FFT anti-aliasing, as a fraction of Nyquist. Kirkland recommends 0.66 (2/3), which prevents aliasing but discards real spatial frequency content above it. Unset (the default) keeps the full Nyquist range and accepts the aliasing.",
     "rotate_mode": "Volume rotation method: 'real' (trilinear interpolation) or "
     "'fourier' (no boundary artifacts).",
     "ice_parameterization": "Atomic potential model for the ice "

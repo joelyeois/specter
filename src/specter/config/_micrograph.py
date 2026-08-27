@@ -84,6 +84,12 @@ class MicrographConfig:
     crowd_max_distance_z: float | None = None  # Å
     water_air_interface: bool = True
     potential_scale: ScalarOrRange = 1.0  # unitless
+    # Fraction of Nyquist, not 1/A: Scattering masks k <= klim * k_nyquist.
+    # Kirkland recommends 0.66 (2/3) to prevent multislice FFT aliasing, but
+    # that costs real spatial resolution, so the default keeps the full range
+    # and accepts the aliasing. Exposed so a caller can make the other choice.
+    klim: float | None = None  # fraction of Nyquist
+    bfactor: float | None = None  # A^2
     pad_fft: bool = False
     crowd_chunk_size: int = 1  # duplicates rotated per batch; see crowding.py
     detector_model: Literal["none", "perfect", "k3_300kv", "k3_200kv"] = "none"
@@ -211,6 +217,11 @@ MICROGRAPH_HELP: dict[str, str] = {
     "potential_scale": "Potential scale factor (unitless, values < 1 "
     "approximate thicker ice): a single value for constant scale, or "
     "'low,high' ([low, high] in TOML) to sample uniformly per micrograph.",
+    "klim": "Bandlimit for Kirkland's FFT anti-aliasing, as a fraction of "
+    "Nyquist. Kirkland recommends 0.66 (2/3), which prevents aliasing but "
+    "discards real spatial frequency content above it. Unset (the default) "
+    "keeps the full Nyquist range and accepts the aliasing.",
+    "bfactor": "Isotropic B-factor envelope in Angstrom^2.",
     "pad_fft": "Pad the volume for FFT to avoid edge artifacts.",
     "crowd_chunk_size": "Crowding duplicate volumes rotated per batch. Lowering "
     "it to 1 costs no wall time: at micrograph scale wall time is flat in this "

@@ -41,6 +41,8 @@ from typing import TYPE_CHECKING, Literal, TypeVar
 
 import torch
 
+from ..devices import parse_device
+
 if TYPE_CHECKING:
     from ..pdb import PDB
 
@@ -169,16 +171,10 @@ def parse_device_pool(device: str) -> tuple[str, list[str] | None]:
         `render_devices` argument. None means no pooling: render on
         `primary` alone.
     """
-    if device == "auto":
-        pool = recommend_render_devices()
-        return (pool[0] if pool else "cpu"), pool
-    parts = [p.strip() for p in device.split(",")]
-    if len(parts) > 1:
-        pool = [f"cuda:{p}" if p.isdigit() else p for p in parts]
-        return pool[0], pool
-    if parts[0].isdigit():
-        return f"cuda:{parts[0]}", None
-    return device, None
+    spec = parse_device(device)
+    if spec.is_multi:
+        return spec.primary, list(spec.devices)
+    return spec.primary, None
 
 
 def resolve_render_workers(

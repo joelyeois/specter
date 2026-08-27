@@ -17,6 +17,7 @@ from typing import (
 )
 
 from ._reconstruction import parse_cryosparc_ref
+from ..devices import parse_device
 from ._scalar_range import parse_scalar_or_range
 
 # ---------------------------------------------------------------------------
@@ -297,6 +298,18 @@ def validate_config(config: Any) -> None:
     )
     _require_valid_cryosparc_ref(config)
 
+    # Grammar first, and here rather than in the pipeline: a device string is
+    # otherwise parsed several stages into a run, so a typo surfaced either as
+    # a raw torch error about valid device types or -- on the reconstruction
+    # path, which mapped anything unrecognised to index 0 -- as a silent
+    # cuda:0. Both are cheap to catch at load.
+    device = getattr(config, "device", None)
+    if device is not None:
+        try:
+            parse_device(str(device))
+        except ValueError as exc:
+            _fail("device", device, str(exc).split(". ", 1)[-1].rstrip("."))
+
     # Multi-GPU dispatch (ParticleStackConfig only -- tiltseries/micrograph
     # are single-device) re-executes the whole pipeline once per rank (see
     # pipelines._common._tracked_output_dir's docstring), so auto-assigning
@@ -304,7 +317,6 @@ def validate_config(config: Any) -> None:
     # independently. Require it pinned explicitly whenever tracking and
     # multi-GPU combine, so every rank's independent config-parse agrees on
     # the same path as a pure string join, without touching the filesystem.
-    device = getattr(config, "device", None)
     tracked = getattr(config, "project", None) is not None or (
         getattr(config, "job_id", None) is not None
     )

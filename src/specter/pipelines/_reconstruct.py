@@ -59,12 +59,13 @@ from specter.config import (
     validate_config,
 )
 
+from ..devices import parse_device
 from ._common import (
     _console,
     _format_elapsed,
-    _parse_device,
     _parse_device_pool,
     _section,
+    resolve_available_device,
     resolve_output_dir,
 )
 
@@ -135,15 +136,14 @@ def _reconstruct_device(device_str: str) -> int | list[int] | str:
     "cuda:1" -> 1
     "0,1"    -> [0, 1]
     """
-    mode, target = _parse_device(device_str)
-    if mode == "multi":
-        assert isinstance(target, list)
-        return target
-    assert isinstance(target, str)
-    if target == "cpu":
+    spec = parse_device(resolve_available_device(device_str))
+    if spec.primary == "cpu":
         return "cpu"
-    _, _, index = target.partition(":")
-    return int(index) if index else 0
+    if spec.is_multi and spec.indices:
+        return list(spec.indices)
+    # A bare "cuda" names the backend without pinning a device; Ghostbuster
+    # takes an index, and 0 is the device torch itself defaults to.
+    return spec.indices[0] if spec.indices else 0
 
 
 def run_reconstruction(config: ReconstructionConfig) -> None:

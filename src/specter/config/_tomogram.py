@@ -442,7 +442,7 @@ TOMOGRAM_HELP: dict[str, str] = {
     "does). {filename}_protein_labels.mrc is always written; "
     "{filename}_membrane_labels.mrc and {filename}_regions.mrc "
     "(0=cytosol/1=shell/2=lumen) are added when [[membrane]] is set.",
-    "device": "cpu | cuda | cuda:0 | 0,1,2 | auto. Drives the whole "
+    "device": "cpu | cuda | cuda:0 | 0,1,2. Drives the whole "
     "MembraneGenerator/TomogramSpecimenGenerator pipeline (shape field, "
     "bilayer profile, rasterization, transmembrane/targets/filler "
     "PotentialBuilder rendering) -- packing itself always runs on CPU "

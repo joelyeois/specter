@@ -45,7 +45,9 @@ n_steps = 600
 # =============================================================================
 
 [compute]
-device = "auto"    # cpu | cuda | cuda:0 | 0,1,2,3 | auto (every visible GPU)
+device = "cuda"    # cpu | cuda | cuda:0 | 0,1,2,3
+                   # Name several GPUs to shard the library across them, one
+                   # worker process per device: device = "0,1,2,3"
 
 
 # =============================================================================

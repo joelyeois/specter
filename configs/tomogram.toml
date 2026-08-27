@@ -65,7 +65,7 @@ write_segmentation = true
 # =============================================================================
 
 [compute]
-device = "cuda"                     # cpu | cuda | cuda:0 | 0,1,2 | auto
+device = "cuda"                     # cpu | cuda | cuda:0 | 0,1,2
 accumulator_device = "auto"
 render_workers = "auto"
 render_chunk_size = 64

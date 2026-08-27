@@ -18,6 +18,7 @@ import torch
 from rich.console import Console
 from rich.rule import Rule
 
+from specter.devices import parse_device
 from specter.config import (
     ScalarOrRange,
     default_output_dir,
@@ -314,16 +315,10 @@ def _parse_device(device_str: str) -> tuple[str, str | list[int]]:
     "0"       -> ("single", "cuda:0")
     "0,1,2"   -> ("multi",  [0, 1, 2])
     """
-    device_str = resolve_available_device(device_str)
-    parts = device_str.split(",")
-    if len(parts) > 1:
-        try:
-            return "multi", [int(p.strip()) for p in parts]
-        except ValueError:
-            pass
-    if parts[0].strip().isdigit():
-        return "single", f"cuda:{parts[0].strip()}"
-    return "single", device_str
+    spec = parse_device(resolve_available_device(device_str))
+    if spec.is_multi and spec.indices:
+        return "multi", list(spec.indices)
+    return "single", spec.primary
 
 
 def _parse_device_pool(device_str: str) -> list[str]:
@@ -358,12 +353,7 @@ def _parse_device_pool(device_str: str) -> list[str]:
     "0,1,2"   -> ["cuda:0", "cuda:1", "cuda:2"]
     "auto"    -> ["cuda:0", ..., "cuda:N-1"], or ["cpu"] with no GPUs
     """
-    device_str = resolve_available_device(device_str)
-    if device_str == "auto":
-        n_gpus = torch.cuda.device_count()
-        return [f"cuda:{i}" for i in range(n_gpus)] if n_gpus else ["cpu"]
-    parts = [p.strip() for p in device_str.split(",")]
-    return [f"cuda:{p}" if p.isdigit() else p for p in parts]
+    return list(parse_device(resolve_available_device(device_str)).devices)
 
 
 def _generate_single(

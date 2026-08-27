@@ -50,9 +50,13 @@ class IceCacheConfig:
 
     # --- Compute ---
     # "cpu" | "cuda" | "cuda:0" | a bare GPU index | a comma-separated list of
-    # GPU indices ("0,1,2,3") | "auto" (every visible GPU). Multiple devices
-    # shard whole configs across one worker process per device.
-    device: str = "auto"
+    # GPU indices ("0,1,2,3"). Multiple devices shard whole configs across one
+    # worker process per device, so N GPUs build a library roughly N times
+    # faster -- but they have to be named. There is no "auto": it used to mean
+    # "every visible GPU" here and nowhere else, which made the same word a
+    # crash on `specter simulate particles` and a silent cuda:0 on `specter
+    # reconstruct particle`. See `specter.devices.parse_device`.
+    device: str = "cuda"
 
     # --- Output ---
     output_dir: str = field(default_factory=lambda: default_output_dir("ice"))
@@ -81,10 +85,10 @@ ICE_CACHE_HELP: dict[str, str] = {
     "n_steps": "L-BFGS step ceiling per configuration. An upper bound only "
     "-- a run whose loss plateaus stops early.",
     "device": "cpu | cuda | cuda:0 | a bare GPU index | a comma-separated "
-    "list of GPU indices (0,1,2,3) | auto (every visible GPU, falling back "
-    "to cpu). Several devices shard whole configurations across one worker "
-    "process per device, so N GPUs generate a library roughly N times "
-    "faster.",
+    "list of GPU indices (0,1,2,3). Several devices shard whole "
+    "configurations across one worker process per device, so N GPUs "
+    "generate a library roughly N times faster -- name them explicitly, "
+    "e.g. 0,1,2,3.",
     "output_dir": "Directory to write config_NNN.pt files and manifest.json "
     "to. Point a simulation config's ice_cache_dir at it to use the result. "
     "Never the bundled ice_data/ice_cache, which ships with the repository.",

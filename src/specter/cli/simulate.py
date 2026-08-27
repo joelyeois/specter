@@ -64,6 +64,7 @@ _PARTICLE_STACK_GROUPS: list[tuple[str, list[str]]] = [
         [
             "pdb_cache_dir",
             "readd_hydrogens",
+            "monomer_library_path",
             "cs_path",
             "star_path",
             "n_frames",
@@ -215,6 +216,7 @@ _MICROGRAPH_GROUPS: list[tuple[str, list[str]]] = [
             # Structure handling
             "pdb_cache_dir",
             "readd_hydrogens",
+            "monomer_library_path",
             # Envelopes
             "n_frames",
             "convergence_angle",

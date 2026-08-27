@@ -69,6 +69,13 @@ filename = "micrographs"
 # $CLIBD_MON at it to supply them; without it ~44% of a protein falls back to
 # per-element Peng. See docs/installation.md.
 #
+# The variable is not the only way in: set monomer_library_path below to record
+# the library in this config instead. Prefer that when a run has to be
+# reproducible from its config alone -- unlike pdb_cache_dir, this choice
+# changes the rendered potential, so a config omitting it does not fully
+# describe what it produced. Unset, $CLIBD_MON still applies.
+# monomer_library_path = "~/monomers"
+#
 # The default, "auto", needs no setting: it keeps hydrogens the file already
 # carries and adds them only when it has none.
 # readd_hydrogens = "auto"    # auto | true | false

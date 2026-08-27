@@ -451,6 +451,19 @@ def test_load_config_names_unknown_fields_and_renames(tmp_path):
         load_config(str(typo), TomogramConfig)
 
 
+def test_renamed_specimen_chunk_size_says_what_to_write_instead(tmp_path):
+    """`specimen_chunk_size` shipped uncommented in the canonical micrograph
+    config, so every existing copy of it carries the old spelling. Without an
+    alias entry the rename to `crowd_chunk_size` greets those users with a bare
+    "unknown field", which names the key but not the fix."""
+    from specter.config import MicrographConfig, load_config
+
+    stale = tmp_path / "stale.toml"
+    stale.write_text("[specimen]\nspecimen_chunk_size = 8\n")
+    with pytest.raises(ValueError, match=r"renamed to 'crowd_chunk_size'"):
+        load_config(str(stale), MicrographConfig)
+
+
 def test_apply_overrides_rejects_unknown_field() -> None:
     """A misnamed override must fail loudly, not attach a field nothing reads."""
     config = ParticleStackConfig(pdb_source="1abc")
@@ -630,11 +643,15 @@ def test_readd_hydrogens_accepts_auto_and_booleans(tmp_path, written, expected):
 
 @pytest.mark.parametrize("pipeline", ["particles", "micrograph"])
 def test_hydrogen_settings_reach_pdb(monkeypatch, pipeline):
-    """Both pipelines forward readd_hydrogens into PDB.
+    """Both pipelines forward readd_hydrogens and monomer_library_path into PDB.
 
-    The library location itself comes from $CLIBD_MON -- the mechanism the
-    Monomer Library documents -- rather than a second config field saying the
-    same thing.
+    The library location used to come from $CLIBD_MON alone, on the grounds
+    that a config field would restate the variable the Monomer Library already
+    documents. It is a field as well now, for the reason `pdb_cache_dir` is one
+    despite $SPECTER_PDB_CACHE -- except more so, since the library changes the
+    rendered potential rather than only where downloads land, and a run should
+    be reproducible from its own recorded config. Unset still falls back to
+    $CLIBD_MON, so nothing that relied on the variable changes.
     """
     import specter.pipelines._micrograph as micrograph_module
     import specter.pipelines._particles as particles_module
@@ -658,11 +675,62 @@ def test_hydrogen_settings_reach_pdb(monkeypatch, pipeline):
     cfg = cls(
         pdb_source=str(Path(__file__).parent / "test_data" / "1mbo.cif"),
         readd_hydrogens=False,
+        monomer_library_path="/some/monomers",
     )
     with pytest.raises(_Stop):
         getattr(mod, run)(cfg)
 
     assert seen["readd_hydrogens"] is False
-    assert "monomer_library_path" not in seen, (
-        "library location should come from $CLIBD_MON, not a config field"
+    assert seen["monomer_library_path"] == "/some/monomers"
+
+
+@pytest.mark.parametrize(
+    "cls_name", ["ParticleStackConfig", "MicrographConfig", "TomogramConfig"]
+)
+def test_monomer_library_path_defaults_to_the_env_var(cls_name):
+    """
+    An unset field must not override $CLIBD_MON.
+
+    The field is additive: it names a library for runs that want one recorded
+    in their own config, and stays out of the way otherwise. A default of
+    anything but None would silence the variable for every existing config.
+    """
+    import specter.config as config_module
+
+    cls = getattr(config_module, cls_name)
+    kwargs = {"pdb_source": "1abc"} if cls_name != "TomogramConfig" else {}
+    assert cls(**kwargs).monomer_library_path is None
+
+
+def test_tomogram_generator_carries_the_monomer_library_path():
+    """
+    `specter build tomogram` forwards the field too.
+
+    The spy test above covers the two single-structure pipelines, which call
+    PDB directly. The tomogram path instead hands the value to
+    TomogramSpecimenGenerator, which spreads it across three build sites
+    (the concurrent PDB cache, a per-spec fallback, and filament rendering)
+    plus every MembraneGenerator it constructs -- so what matters here is
+    that the generator received it at all.
+    """
+    from specter.config import TomogramConfig
+    from specter.pipelines import build_tomogram_generator
+
+    # One target, since the generator refuses a specimen with nothing in it.
+    # Construction does not fetch or render, so the local fixture never has
+    # to be read and no network is touched.
+    cfg = TomogramConfig(
+        target_shape=[16, 16, 16],
+        voxel_size=10.0,
+        targets=[
+            {
+                "pdb_source": str(Path(__file__).parent / "test_data" / "1mbo.cif"),
+                "n_copies": 1,
+            }
+        ],
+        filler=[],
+        filler_from_pei2016=False,
+        device="cpu",
+        monomer_library_path="/some/monomers",
     )
+    assert build_tomogram_generator(cfg).monomer_library_path == "/some/monomers"

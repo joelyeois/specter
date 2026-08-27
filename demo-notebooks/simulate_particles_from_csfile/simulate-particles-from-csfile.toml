@@ -15,6 +15,11 @@ pdb_source = "6bdf"
 assembly = true
 n_pixels = 256
 
+# Shtyrov atom typing needs the Monomer Library for its H-containing species;
+# without one ~44% of a protein falls back to per-element Peng. Unset, the
+# $CLIBD_MON variable applies. See docs/installation.md.
+# monomer_library_path = "~/monomers"
+
 [microscope]
 dose = 53.0                    # e⁻/Å², from EMDB Experiment tab
 # n_frames = 53                # frames, uncomment to override default (int(dose) if None)

@@ -132,6 +132,13 @@ class ParticleStackConfig:
     # int | Literal["auto"]), so "auto" is config-only there -- it is the
     # default, so a flag for it would only ever undo an explicit setting.
     readd_hydrogens: bool | Literal["auto"] = "auto"
+    # Unset falls back to $CLIBD_MON, so the CCP4 variable still works and
+    # nothing needs setting per config. This exists because the library
+    # changes the RESULT (79% -> 100% typed on 1mbo; 20-30% relative RMS on
+    # the rendered potential), and a run should be reproducible from its own
+    # recorded config rather than from an environment nobody wrote down --
+    # the same reason pdb_cache_dir is a field despite $SPECTER_PDB_CACHE.
+    monomer_library_path: str | None = None
 
     # --- Advanced: scattering ---
     ews_curvature_sign: Literal["negative", "positive"] = "positive"
@@ -289,6 +296,11 @@ PARTICLE_STACK_HELP: dict[str, str] = {
     "the file already carries and adds them only when it has none, 'true' "
     "always re-adds, 'false' never adds hydrogen density (they still inform "
     "atom typing). Only meaningful when a monomer library is available.",
+    "monomer_library_path": "Path to a Monomer Library "
+    "(https://github.com/MonomerLibrary/monomers), which completes a "
+    "structure's bond topology and hydrogens so Shtyrov species resolve. "
+    "Unset falls back to $CLIBD_MON. Without one, around 44% of a "
+    "hydrogen-free protein falls back to per-element Peng factors.",
     "ews_curvature_sign": "Ewald sphere curvature sign, matching CryoSPARC's "
     "convention.",
     "klim": "Reciprocal-space cutoff in 1/Angstrom. Unset uses the full Nyquist range.",
@@ -300,10 +312,9 @@ PARTICLE_STACK_HELP: dict[str, str] = {
     "only to deliberately differ.",
     "ice_relax_steps": "Local MLBOP seam-relaxation steps, only used when "
     "ice_model='gd' tiles multiple cached blocks.",
-    "crowd_chunk_size": "Crowding duplicate volumes rotated per batch. "
-    "Batching them is free in both directions -- wall time is flat in this "
-    "while memory grows linearly -- so raising it trades memory for "
-    "nothing.",
+    "crowd_chunk_size": "Crowding duplicate volumes rotated per batch. Lowering "
+    "it to 1 costs no wall time: wall time is flat in this while peak memory "
+    "grows linearly with it, so raising it above the default buys nothing.",
     "crowd_max_distance_xy": "Maximum xy-distance between crowded particles in "
     "Angstrom.",
     "crowd_method": "Poisson-disk sampling dimensionality for crowding particle "

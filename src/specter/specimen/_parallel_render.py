@@ -154,9 +154,9 @@ def parse_device_pool(device: str) -> tuple[str, list[str] | None]:
     A comma-separated list of GPU indices (`"0,1,2"`) pools those GPUs for
     per-species rendering, with the first as the primary device for
     everything else (membrane/filament generation, rotation, accumulator
-    sizing). `"auto"` pools every visible CUDA GPU (see
-    `recommend_render_devices`), falling back to `"cpu"` if none are
-    visible.
+    sizing). Shares `specter.devices.parse_device` with every other
+    consumer of a `device` setting, so the accepted spellings cannot drift
+    from theirs.
 
     Parameters
     ----------
@@ -361,7 +361,7 @@ def _process_pool_is_worth_it(estimates: list[float], max_workers: int) -> bool:
     return pooled < _POOL_REQUIRED_MARGIN * serial
 
 
-def _fetch_one_pdb(args: tuple[str, str, bool, bool | str]) -> "PDB":
+def _fetch_one_pdb(args: tuple[str, str, bool, bool | str, str | None]) -> "PDB":
     """
     Worker target for `build_pdb_cache_concurrently` -- a plain top-level
     function, not a closure/lambda, because `ProcessPoolExecutor` pickles
@@ -379,13 +379,20 @@ def _fetch_one_pdb(args: tuple[str, str, bool, bool | str]) -> "PDB":
     # environment-level fact is reported once per worker.
     suppress_monomer_library_warning()
 
-    pdb_source, pdb_cache_dir, compute_atom_species, readd_hydrogens = args
+    (
+        pdb_source,
+        pdb_cache_dir,
+        compute_atom_species,
+        readd_hydrogens,
+        monomer_library_path,
+    ) = args
     return PDB(
         pdb_source,
         pdb_cache_dir=pdb_cache_dir,
         verbose=False,
         compute_atom_species=compute_atom_species,
         readd_hydrogens=readd_hydrogens,
+        monomer_library_path=monomer_library_path,
     )
 
 
@@ -396,6 +403,7 @@ def build_pdb_cache_concurrently(
     on_result: Callable[[str], None] | None = None,
     compute_atom_species: bool = False,
     readd_hydrogens: bool | str = "auto",
+    monomer_library_path: str | None = None,
 ) -> dict[str, "PDB"]:
     """
     Fetch/parse multiple PDB sources concurrently across OS PROCESSES (not
@@ -461,6 +469,7 @@ def build_pdb_cache_concurrently(
                 verbose=False,
                 compute_atom_species=compute_atom_species,
                 readd_hydrogens=readd_hydrogens,
+                monomer_library_path=monomer_library_path,
             )
             if on_result is not None:
                 on_result(source)
@@ -485,14 +494,20 @@ def build_pdb_cache_concurrently(
         # the only place it can come from.
         from ..pdb import _warn_missing_monomer_library, _resolve_monomer_library_path
 
-        if _resolve_monomer_library_path() is None:
+        if _resolve_monomer_library_path(monomer_library_path) is None:
             _warn_missing_monomer_library()
     ctx = multiprocessing.get_context("spawn")
     with ProcessPoolExecutor(max_workers=max_workers, mp_context=ctx) as pool:
         futures = {
             pool.submit(
                 _fetch_one_pdb,
-                (source, pdb_cache_dir, compute_atom_species, readd_hydrogens),
+                (
+                    source,
+                    pdb_cache_dir,
+                    compute_atom_species,
+                    readd_hydrogens,
+                    monomer_library_path,
+                ),
             ): source
             for source in submission_order
         }

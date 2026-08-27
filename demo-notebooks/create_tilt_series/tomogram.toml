@@ -12,6 +12,11 @@ targets = [
     { pdb_source = "1FA2", n_copies = 1 },  # beta-amylase
 ]
 
+# Shtyrov atom typing needs the Monomer Library for its H-containing species;
+# without one ~44% of a protein falls back to per-element Peng. Unset, the
+# $CLIBD_MON variable applies. See docs/installation.md.
+# monomer_library_path = "~/monomers"
+
 [[membrane]]
 shape_backend = "spherical_harmonics"
 sh_axes = [80.0, 80.0, 80.0]

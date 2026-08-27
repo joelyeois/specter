@@ -6,6 +6,21 @@
 # voxel_size to this file's own voxel_size below -- everything else about the
 # specimen is edited here, not in the notebook.
 
+
+[specimen]
+target_shape = [128, 256, 256]      # (Z, Y, X) voxels -- small/fast; raise for denser results
+voxel_size = 10.0                        # A/voxel -- notebook syncs tilt_series_generator_modular.toml's voxel_size to this
+clip_axes = [true, true, true]      # (z, y, x) -- True lets instances poke past that wall
+filler_occupancy_fraction = 1.0
+# packing_backend = "shape"      # default; "sphere" is faster but ~3x less dense
+# packing_voxel_size = 2.0       # collide on a coarser grid than the render
+# There is no `gap`: macromolecules in crowded cytoplasm contact each other,
+# so placed instances are only required not to overlap.
+# pdb_cache_dir = "~/.cache/specter/pdb"   # default; set $SPECTER_PDB_CACHE to move it,
+                                           # e.g. onto scratch. Downloads only --
+                                           # your own files are read where they are.
+# seed = 11                         # uncomment for reproducible packing
+
 [targets]
 targets = [
     { pdb_source = "7VD8", n_copies = 15 },  # apoferritin
@@ -15,6 +30,11 @@ targets = [
     { pdb_source = "7B75", n_copies = 15 },  # thyroglobulin
     { pdb_source = "6N4V", n_copies = 15 },  # virus-like particle
 ]
+
+# Shtyrov atom typing needs the Monomer Library for its H-containing species;
+# without one ~44% of a protein falls back to per-element Peng. Unset, the
+# $CLIBD_MON variable applies. See docs/installation.md.
+# monomer_library_path = "~/monomers"
 
 [filler]
 filler = [
@@ -31,13 +51,15 @@ target_parameterization = "shtyrov"
 [[membrane]]
 shape_backend = "spherical_harmonics"
 bilayer_thickness = 30.0
-max_output_voxels = 12_000_000_000
+sh_axes_range = [150.0, 1600.0]   # SEMI-axes, A -- a vesicle's diameter is
+                                    # roughly twice these.
 n_copies = 3
 
 [[membrane]]
 shape_backend = "swept_spline"
 bilayer_thickness = 30.0
-max_output_voxels = 12_000_000_000
+swept_total_length_range = [1500.0, 2400.0] # path contour length, A
+swept_tube_radius_range = [150.0, 400.0] # tube radius, A
 n_copies = 3
 
 [[membrane_transmembrane_specs]]
@@ -50,35 +72,43 @@ membrane_min_transmembrane_spacing = 40.0
 
 # Filaments -- optional. Either hand-write [[filaments]] entries (FilamentSpec
 # kwargs) or set `actin = true` for the built-in ACTIN_SPEC preset. Uncomment to add:
-# [[filaments]]
-# code = "1J6Z"          # F-actin monomer
-# step = 27.3            # axial rise per monomer, A
-# flex_deg = 12.0        # max per-step path curvature, degrees
-# twist_deg = 166.15     # helical twist per monomer, degrees
-# n_copies = 20
-# n_monomers = [20, 60]
+[[filaments]]
+code = "1J6Z"          # F-actin monomer
+step = 27.3            # axial rise per monomer, A
+flex_deg = 12.0        # max per-step path curvature, degrees
+twist_deg = 166.15     # helical twist per monomer, degrees
+n_copies = 20
+n_monomers = [20, 60]
+
+# Microtubules. Real 13-protofilament tubes (lumen, A-lattice seam, tubulin
+# dimer wall) -- NOT a [[filaments]] entry, which would give a single
+# protofilament. `code` defaults to a dimer extracted from a deposited
+# microtubule reconstruction, fetched and cached on first use; `length`
+# defaults to the volume diagonal so a microtubule crosses the field.
+[[microtubules]]
+n_copies = 2
+n_protofilaments = 13   # 13 is the canonical in-cell lattice
+# length = 6000.0       # A; omit to span the volume diagonal
+# bend_radius = 30000.0 # A; omit for a straight, thermally bent tube
 
 # Carbon support film -- optional, at most one [[carbon_film]] table. Uncomment to add:
-# [[carbon_film]]
-# hole_radius = 6000.0          # A (0.6 micron, Quantifoil R1.2/1.3)
-# edge_fraction = [0.02, 0.05]  # fraction of the frame that ends up carbon
-# edge_side = "random"          # "left" | "right" | "top" | "bottom" | "random"
+[[carbon_film]]
+hole_radius = 6000.0          # A (0.6 micron, Quantifoil R1.2/1.3)
+edge_fraction = [0.02, 0.05]  # fraction of the frame that ends up carbon
+edge_side = "random"          # "left" | "right" | "top" | "bottom" | "random"
 
-# Gold fiducial beads -- optional, one [[beads]] table per radius population.
-# Uncomment to add:
-# [[beads]]
-# radius = 100.0
-# n_copies = 20
+# Gold fiducial beads -- one [[beads]] table per population. `radius` takes a
+# single number or a [low, high] pair drawn per bead; real colloidal gold is
+# not monodisperse, so a range is the more faithful default.
+[[beads]]
+radius = [80.0, 120.0]        # A -- i.e. 16-24 nm diameter
+n_copies = 5
 
-[specimen]
-target_shape = [128, 256, 256]      # (Z, Y, X) voxels -- small/fast; raise for denser results
-voxel_size = 10.0                        # A/voxel -- notebook syncs tilt_series_generator_modular.toml's voxel_size to this
-filler_occupancy_fraction = 0.5
-# pdb_cache_dir = "~/.cache/specter/pdb"   # default; set $SPECTER_PDB_CACHE to move it,
-                                           # e.g. onto scratch. Downloads only --
-                                           # your own files are read where they are.
-# seed = 11                         # uncomment for reproducible packing
-clip_axes = [true, true, true]      # (z, y, x) -- True lets instances poke past that wall
+[bead_settings]
+# How irregular each fiducial's boundary is, as an RMS fraction of its radius.
+# One number, or a [low, high] pair drawn per bead so the population mixes
+# near-round and misshapen particles. 0.0 gives clean spheres.
+bead_roughness = [0.0, 0.2]
 
 [picks]
 write_picks = true
@@ -90,7 +120,3 @@ device = "cuda"                     # cpu | cuda | cuda:0 | 0,1,2 | auto
 accumulator_device = "auto"
 render_workers = "auto"
 render_chunk_size = 64
-
-[output]
-output_dir = "tomograms"
-filename = "tomogram"

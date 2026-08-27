@@ -157,6 +157,10 @@ class TomogramConfig:
     # target_parameterization="shtyrov" (the only one that types atoms) and
     # only when a Monomer Library is available via $CLIBD_MON.
     readd_hydrogens: bool | Literal["auto"] = "auto"
+    # Unset falls back to $CLIBD_MON. A field as well as a variable because
+    # the library changes the rendered potential, so a run should be
+    # reproducible from its own config -- see ParticleStackConfig's own note.
+    monomer_library_path: str | None = None
 
     # --- Filaments (optional, additive on top of membranes if present) ---
     # One dict per filament species, mapping straight onto
@@ -394,6 +398,11 @@ TOMOGRAM_HELP: dict[str, str] = {
     "the file already carries and adds them only when it has none, true "
     "always re-adds, false never adds hydrogen density (they still inform "
     "atom typing). Needs a Monomer Library on $CLIBD_MON to have any effect.",
+    "monomer_library_path": "Path to a Monomer Library "
+    "(https://github.com/MonomerLibrary/monomers), which completes a "
+    "structure's bond topology and hydrogens so Shtyrov species resolve. "
+    "Unset falls back to $CLIBD_MON. Without one, around 44% of a "
+    "hydrogen-free protein falls back to per-element Peng factors.",
     "filaments": "Filament species to scatter through the tomogram (TOML-"
     "only, [[filaments]] tables), each mapping onto "
     "specter.specimen.filament.FilamentSpec kwargs, e.g. {'code': '1TUB', "

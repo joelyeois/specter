@@ -16,7 +16,10 @@ from ._tomogram import TomogramConfig
 #: TOML keys that have been renamed, mapped to their current spelling. Used
 #: only to turn `load_config`'s "unknown field" error into one that says what
 #: to write instead.
-RENAMED_CONFIG_KEYS = {"grid": "carbon_film"}
+RENAMED_CONFIG_KEYS = {
+    "grid": "carbon_film",
+    "specimen_chunk_size": "crowd_chunk_size",
+}
 
 
 ConfigT = TypeVar(

@@ -4,6 +4,11 @@ assembly = true
 n_pixels = 256
 pixel_size = 1.0     # Å
 
+# Shtyrov atom typing needs the Monomer Library for its H-containing species;
+# without one ~44% of a protein falls back to per-element Peng. Unset, the
+# $CLIBD_MON variable applies. See docs/installation.md.
+# monomer_library_path = "~/monomers"
+
 [microscope]
 voltage = 300.0       # kV
 dose = 20.0          # e⁻/Å²

@@ -396,6 +396,9 @@ class TomogramSpecimenGenerator:
     parameterization : str, optional
         Atomic scattering-factor parameterization for `PotentialBuilder`.
         Default "shtyrov", matching `PotentialBuilder`'s own default.
+    monomer_library_path : str, optional
+        Forwarded to every `PDB` built here; see `specter.pdb.PDB`. Unset
+        falls back to `$CLIBD_MON`.
     readd_hydrogens : {"auto", True, False}, optional
         Forwarded to every `PDB` built here; see `specter.pdb.PDB`. Only
         takes effect for `parameterization="shtyrov"`, which is the only one
@@ -512,6 +515,7 @@ class TomogramSpecimenGenerator:
         pdb_cache_dir: str = DEFAULT_PDB_CACHE_DIR,
         parameterization: str = "shtyrov",
         readd_hydrogens: bool | str = "auto",
+        monomer_library_path: str | None = None,
         seed: int | None = None,
         device: str | torch.device = "cpu",
         chunk_size: int | None = None,
@@ -574,6 +578,7 @@ class TomogramSpecimenGenerator:
         self.pdb_cache_dir = pdb_cache_dir
         self.parameterization = parameterization
         self.readd_hydrogens = readd_hydrogens
+        self.monomer_library_path = monomer_library_path
         self.seed = seed
         self.device = device
         self.chunk_size = chunk_size
@@ -1081,6 +1086,7 @@ class TomogramSpecimenGenerator:
                     max_workers=self.render_workers,
                     compute_atom_species=_wants_atom_species(self.parameterization),
                     readd_hydrogens=self.readd_hydrogens,
+                    monomer_library_path=self.monomer_library_path,
                     on_result=lambda source: progress.update(
                         fetch_task, advance=1, description=f"Fetched {source}"
                     ),
@@ -1132,6 +1138,7 @@ class TomogramSpecimenGenerator:
                         verbose=False,
                         compute_atom_species=_wants_atom_species(self.parameterization),
                         readd_hydrogens=self.readd_hydrogens,
+                        monomer_library_path=self.monomer_library_path,
                     )
                 pdbs_by_source[spec.pdb_source] = pdb_cache[spec.pdb_source]
 
@@ -1911,6 +1918,7 @@ class TomogramSpecimenGenerator:
                     verbose=False,
                     compute_atom_species=_wants_atom_species(self.parameterization),
                     readd_hydrogens=self.readd_hydrogens,
+                    monomer_library_path=self.monomer_library_path,
                 )
             pdb = pdb_cache[code]
             n = estimate_protein_box_size(pdb.max_diameter, voxel_size)

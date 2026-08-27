@@ -124,6 +124,7 @@ def run_micrograph(config: MicrographConfig) -> None:
         pdb_cache_dir=config.pdb_cache_dir,
         compute_atom_species=True,
         readd_hydrogens=config.readd_hydrogens,
+        monomer_library_path=config.monomer_library_path,
     )
 
     cs_angstrom = config.cs * 1e7

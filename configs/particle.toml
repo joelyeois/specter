@@ -36,8 +36,8 @@ batchsize = "auto"               # particles per forward pass. "auto" takes the 
                                  # fits in the free memory on `device` and what is worth
                                  # batching: past the point where one forward pass already
                                  # saturates the device, a bigger batch costs memory without
-                                 # going faster. At the 256 box above it resolves to 1, which
-                                 # measured as fast as any larger batch and 21x leaner; a
+                                 # going faster. At the 256 box above it resolves to 2, which
+                                 # measured as fast as any larger batch and far leaner; a
                                  # smaller box batches up and does get faster.
                                  # Pin an integer if you set a seed, since batching decides
                                  # which random draw reaches which particle (a seeded run
@@ -104,6 +104,13 @@ periodic = false                 # wrap atom density across the box faces when v
 # hydrogen -- which depositions omit. Install the Monomer Library and point
 # $CLIBD_MON at it to supply them; without it ~44% of a protein falls back to
 # per-element Peng. See docs/installation.md.
+#
+# The variable is not the only way in: set monomer_library_path below to record
+# the library in this config instead. Prefer that when a run has to be
+# reproducible from its config alone -- unlike pdb_cache_dir, this choice
+# changes the rendered potential, so a config omitting it does not fully
+# describe what it produced. Unset, $CLIBD_MON still applies.
+# monomer_library_path = "~/monomers"
 #
 # The default, "auto", needs no setting: it keeps hydrogens the file already
 # carries and adds them only when it has none. Set it only to override that --

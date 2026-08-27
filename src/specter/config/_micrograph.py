@@ -35,6 +35,10 @@ class MicrographConfig:
     # shtyrov default always applies and atoms are always typed -- see
     # run_micrograph, so this always takes effect.
     readd_hydrogens: bool | Literal["auto"] = "auto"
+    # Unset falls back to $CLIBD_MON. A field as well as a variable because
+    # the library changes the rendered potential, so a run should be
+    # reproducible from its own config -- see ParticleStackConfig's own note.
+    monomer_library_path: str | None = None
 
     # --- Microscope / physics ---
     voltage: float = 300.0  # kV
@@ -136,6 +140,11 @@ MICROGRAPH_HELP: dict[str, str] = {
     "the file already carries and adds them only when it has none, true "
     "always re-adds, false never adds hydrogen density (they still inform "
     "atom typing). Only meaningful when a monomer library is available.",
+    "monomer_library_path": "Path to a Monomer Library "
+    "(https://github.com/MonomerLibrary/monomers), which completes a "
+    "structure's bond topology and hydrogens so Shtyrov species resolve. "
+    "Unset falls back to $CLIBD_MON. Without one, around 44% of a "
+    "hydrogen-free protein falls back to per-element Peng factors.",
     "voltage": "Electron beam accelerating voltage in kV.",
     "dose": "Total dose per micrograph in e-/Angstrom^2: a single value (e.g. 20) for a "
     "constant dose per micrograph, or 'low,high' (e.g. 20,60) to sample uniformly per micrograph "
@@ -203,10 +212,10 @@ MICROGRAPH_HELP: dict[str, str] = {
     "approximate thicker ice): a single value for constant scale, or "
     "'low,high' ([low, high] in TOML) to sample uniformly per micrograph.",
     "pad_fft": "Pad the volume for FFT to avoid edge artifacts.",
-    "crowd_chunk_size": "Crowding duplicate volumes rotated per batch. "
-    "Batching them is free in both directions -- wall time is flat in this "
-    "at micrograph scale while memory grows linearly -- so raising it only "
-    "trades memory for nothing.",
+    "crowd_chunk_size": "Crowding duplicate volumes rotated per batch. Lowering "
+    "it to 1 costs no wall time: at micrograph scale wall time is flat in this "
+    "while peak memory grows linearly with it, so raising it above the default "
+    "buys nothing.",
     "detector_model": "Detector model.",
     "normalize_micrographs": "Normalize micrographs to zero mean and unit std.",
     "save_exitwaves": "Save exit wave magnitude and phase as separate .mrcs files.",

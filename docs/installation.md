@@ -127,7 +127,7 @@ does not bundle it: it runs roughly 1.5 GB, and carries its own license.
 Without it, every H-containing species fails to match and those atoms fall
 back to per-element Peng factors. Measured on myoglobin, that is about
 **44% of a hydrogen-free protein**. SPECTER still runs, and warns once
-per structure.
+per process.
 
 ```bash
 git clone https://github.com/MonomerLibrary/monomers.git
@@ -142,11 +142,42 @@ cd monomers && git sparse-checkout set a c d g h i l m n p s t v w y
 ```
 
 `$CLIBD_MON` is the variable [CCP4](https://www.ccp4.ac.uk/) already uses,
-so an existing CCP4 install needs no extra setup. It is the only place SPECTER looks: there is no config or
-CLI equivalent, since the library is an installation detail rather than a
-per-simulation choice, and the Monomer Library documents this variable as the
-way to point at it. SPECTER expands `~` and `$VAR` in the path, and a path
-that does not exist fails immediately rather than silently degrading to Peng.
+so an existing CCP4 install needs no extra setup. SPECTER expands `~` and
+`$VAR` in the path, and a path that does not exist fails immediately rather
+than silently degrading to Peng.
+
+The variable does not have to be exported globally. It can be set for a
+single command:
+
+```bash
+CLIBD_MON=~/monomers specter build tomogram --config configs/tomogram.toml
+```
+
+or, in a notebook, from any cell before the structures are read (the path is
+resolved per call, not at import):
+
+```python
+import os
+os.environ["CLIBD_MON"] = os.path.expanduser("~/monomers")
+```
+
+A run can also name the library in its own config, which is what to prefer
+when the result needs to be reproducible from the config alone: unlike
+`pdb_cache_dir`, this choice changes the rendered potential, so a config that
+omits it does not fully describe what it produced.
+
+```toml
+monomer_library_path = "~/monomers"
+```
+
+```bash
+specter build tomogram --config configs/tomogram.toml --monomer_library_path ~/monomers
+```
+
+`monomer_library_path` is available on `specter simulate particles`,
+`specter simulate micrograph` and `specter build tomogram`. It takes
+precedence over `$CLIBD_MON`; left unset, the variable still applies, so
+nothing that already relies on it needs changing.
 
 Python callers can still override it per structure:
 

@@ -9,6 +9,11 @@ pixel_size = 0.83       # Å
 micrograph_size = 2048  # pixels, square
 ice_thickness = 500.0   # Å
 
+# Shtyrov atom typing needs the Monomer Library for its H-containing species;
+# without one ~44% of a protein falls back to per-element Peng. Unset, the
+# $CLIBD_MON variable applies. See docs/installation.md.
+# monomer_library_path = "~/monomers"
+
 [microscope]
 voltage = 300.0     # kV
 dose = 20.0         # e⁻/Å², used as a fixed dose (this notebook doesn't randomize per micrograph)

@@ -122,6 +122,7 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
         pdb_cache_dir=config.pdb_cache_dir,
         compute_atom_species=_derive_atom_species,
         readd_hydrogens=config.readd_hydrogens,
+        monomer_library_path=config.monomer_library_path,
     )
 
     # pixel_size/voltage/alpha come from the dataset when cs_path/star_path is

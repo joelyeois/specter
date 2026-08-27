@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import functools
+import logging
 import warnings
 from collections.abc import Callable
 from importlib import resources
@@ -35,6 +36,22 @@ from ._builders import (
     potential_from_deltas,
     recommended_rcut,
 )
+
+logger = logging.getLogger(__name__)
+
+# Whether this process has already warned that some atoms fall back to
+# per-element Peng factors. Every structure rendered under
+# `parameterization="shtyrov"` without complete typing hits this, and a run
+# renders one builder per species, so a 27-species tomogram reported the same
+# fact 54 times: once per species from each of the two paths below, which
+# derive it independently for the same builder.
+#
+# The counts differ per structure but the finding and its remedy do not, so
+# the warning is a process-level one and the per-structure counts are DEBUG
+# log records instead. DEBUG rather than INFO deliberately: a caller that has
+# set INFO (e.g. to follow a tomogram's section timings) is asking for
+# progress, not for a line per rendered species.
+_peng_fallback_warned = False
 
 # Cache of built kernels, keyed by everything one depends on.
 #
@@ -175,6 +192,11 @@ class PotentialBuilder(L.LightningModule):
         # species typing at all (the common default case), while still
         # warning when they explicitly gave species and some didn't match.
         self._atom_species_explicitly_given = atom_species is not None
+        # Both the voxelized-kernel and the analytic coefficient path derive
+        # the Peng fallback from this builder's own atom set, so without this
+        # each builder reported the same fact twice (see
+        # _report_peng_fallback).
+        self._peng_fallback_reported = False
         self.atom_species = atom_species
         self.shtyrov_params_path = shtyrov_params_path
         self.rcut = (
@@ -316,6 +338,49 @@ class PotentialBuilder(L.LightningModule):
 
             self.atomic_potentials_3d[i] = pot
 
+    def _report_peng_fallback(self, n_atoms: int, elements: Sequence[str]) -> None:
+        """
+        Report atoms that fell back to per-element Peng scattering factors.
+
+        Warns at most once per process and logs the per-structure counts at
+        DEBUG; see `_peng_fallback_warned` for why. Also collapses this
+        builder's two independent discoveries of the same fact -- the
+        voxelized-kernel and analytic coefficient paths each derive it from
+        the same atom set -- into one record.
+
+        Parameters
+        ----------
+        n_atoms : int
+            How many of this structure's atoms fell back.
+        elements : sequence of str
+            Element symbols those atoms belong to.
+        """
+        if self._peng_fallback_reported:
+            return
+        self._peng_fallback_reported = True
+
+        logger.debug(
+            "%d atom(s) had no matching Shtyrov species (elements: %s); "
+            "falling back to gemmi's built-in Peng et al. scattering factors "
+            "for those atoms.",
+            n_atoms,
+            list(elements),
+        )
+
+        global _peng_fallback_warned
+        if _peng_fallback_warned:
+            return
+        _peng_fallback_warned = True
+        warnings.warn(
+            "Some atoms had no matching Shtyrov species and fall back to "
+            "gemmi's built-in Peng et al. scattering factors. The usual cause "
+            "is incomplete bond typing, most often a missing Monomer Library "
+            "(see PDB's monomer_library_path). Reported once per process; for "
+            "per-structure atom counts and elements, call "
+            "specter.set_verbosity(logging.DEBUG).",
+            stacklevel=3,
+        )
+
     def _get_3d_shtyrov_species_potentials(self) -> None:
         """
         Build 3D Shtyrov kernels grouped by bonded-species descriptor.
@@ -349,12 +414,9 @@ class PotentialBuilder(L.LightningModule):
         )
 
         if fallback_elements and self._atom_species_explicitly_given:
-            warnings.warn(
-                f"{int(unmatched_mask.sum())} atom(s) had no matching Shtyrov "
-                f"species (elements: {[str(atom_symbol(z)) for z in fallback_elements]}); "
-                "falling back to gemmi's built-in Peng et al. scattering "
-                "factors for those atoms.",
-                stacklevel=2,
+            self._report_peng_fallback(
+                int(unmatched_mask.sum()),
+                [str(atom_symbol(z)) for z in fallback_elements],
             )
 
         self.shtyrov_groups = [("species", s) for s in matched] + [
@@ -505,12 +567,7 @@ class PotentialBuilder(L.LightningModule):
         b_coefs = b_table[group_ids_t].to(self.device)
 
         if fallback_elements and self._atom_species_explicitly_given:
-            warnings.warn(
-                f"{n_fallback} atom(s) had no matching Shtyrov species "
-                f"(elements: {sorted(fallback_elements)}); falling back to "
-                "gemmi's built-in Peng et al. scattering factors for those atoms.",
-                stacklevel=2,
-            )
+            self._report_peng_fallback(n_fallback, sorted(fallback_elements))
 
         self._analytic_coefs = (a_coefs, b_coefs)
         return self._analytic_coefs

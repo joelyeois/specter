@@ -3,6 +3,7 @@ Tests for PDB parsing, in particular bonded-species atom typing.
 """
 
 import gzip
+import warnings
 from pathlib import Path
 
 import pytest
@@ -425,6 +426,52 @@ def test_monomer_library_path_expands_and_reports_clearly(tmp_path, monkeypatch)
     monkeypatch.setenv("CLIBD_MON", str(tmp_path / "gone"))
     with pytest.raises(FileNotFoundError, match=r"\$CLIBD_MON"):
         PDB._build_typed_model(str(_FIXTURE), None, False)
+
+
+def test_missing_monomer_library_reported_once_per_process(monkeypatch):
+    """
+    The missing-library warning is a property of the environment, so a run
+    typing many structures reports it once, not once per structure.
+
+    A tomogram loading 27 species emitted 27 copies of a ~90-word warning.
+    Python's own once-per-location dedup does not cover the two places this
+    actually showed up -- IPython clears `__warningregistry__` between cells,
+    and each spawned PDB worker starts with fresh module state -- so the
+    suppression has to be specter's own, and cannot be tested by relying on
+    the default warning filter.
+    """
+    monkeypatch.delenv("CLIBD_MON", raising=False)
+    monkeypatch.setattr(pdb_module, "_monomer_library_warned", False)
+
+    with pytest.warns(RuntimeWarning, match="No monomer library configured"):
+        PDB._build_typed_model(str(_FIXTURE), None, verbose=False)
+
+    # "always" defeats the interpreter's own dedup, so anything caught here is
+    # specter emitting a second copy rather than the filter letting one through.
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        for _ in range(3):
+            PDB._build_typed_model(str(_FIXTURE), None, verbose=False)
+    assert [w for w in caught if "No monomer library" in str(w.message)] == []
+
+
+def test_monomer_library_warning_can_be_suppressed_for_workers(monkeypatch):
+    """
+    A spawned worker stays silent so its parent can report on its behalf.
+
+    `_parallel_render._fetch_one_pdb` calls this: without it each of the
+    (up to 8) worker processes rediscovers the same missing library and
+    reports it independently, which is where the duplicate warnings a
+    tomogram run printed actually came from.
+    """
+    monkeypatch.delenv("CLIBD_MON", raising=False)
+    monkeypatch.setattr(pdb_module, "_monomer_library_warned", False)
+    pdb_module.suppress_monomer_library_warning()
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        PDB._build_typed_model(str(_FIXTURE), None, verbose=False)
+    assert [w for w in caught if "No monomer library" in str(w.message)] == []
 
 
 def test_missing_path_still_reports_both_accepted_forms(tmp_path: Path) -> None:

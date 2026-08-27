@@ -375,7 +375,13 @@ def _fetch_one_pdb(args: tuple[str, str, bool, bool | str]) -> "PDB":
     drags in) on every caller of the thread-based helpers above, most of
     which never touch PDB fetching at all.
     """
-    from ..pdb import PDB
+    from ..pdb import PDB, suppress_monomer_library_warning
+
+    # The parent already reported a missing monomer library once, on every
+    # worker's behalf (see build_pdb_cache_concurrently). Each spawned worker
+    # starts with fresh module state, so without this the same
+    # environment-level fact is reported once per worker.
+    suppress_monomer_library_warning()
 
     pdb_source, pdb_cache_dir, compute_atom_species, readd_hydrogens = args
     return PDB(
@@ -477,6 +483,14 @@ def build_pdb_cache_concurrently(
             zip(estimates, unique_sources), key=lambda pair: -pair[0]
         )
     ]
+    if compute_atom_species:
+        # Report it here, once, rather than letting each worker discover it:
+        # the workers are silenced (see _fetch_one_pdb) precisely so this is
+        # the only place it can come from.
+        from ..pdb import _warn_missing_monomer_library, _resolve_monomer_library_path
+
+        if _resolve_monomer_library_path() is None:
+            _warn_missing_monomer_library()
     ctx = multiprocessing.get_context("spawn")
     with ProcessPoolExecutor(max_workers=max_workers, mp_context=ctx) as pool:
         futures = {

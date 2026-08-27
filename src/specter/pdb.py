@@ -38,6 +38,91 @@ DEFAULT_PDB_CACHE_DIR = default_pdb_cache_dir()
 warnings.simplefilter("ignore", PDBConstructionWarning)
 
 
+# Whether this process has already reported that no monomer library is
+# configured. The condition is a property of the environment, not of any one
+# structure, so a tomogram loading 27 species has nothing to say 27 times.
+# Python's own once-per-location dedup does not cover it: IPython clears
+# `__warningregistry__` between notebook cells, and every worker spawned by
+# `specimen/_parallel_render.py` starts with fresh module state, so the same
+# environment-level fact was reported once per worker per cell.
+_monomer_library_warned = False
+
+
+def _resolve_monomer_library_path(
+    monomer_library_path: str | None = None,
+) -> str | None:
+    """
+    Resolve the Monomer Library directory to type Shtyrov species against.
+
+    Parameters
+    ----------
+    monomer_library_path : str, optional
+        An explicit path; falls back to `$CLIBD_MON` when not given.
+
+    Returns
+    -------
+    str or None
+        An existing directory, or None if neither source names one.
+
+    Raises
+    ------
+    FileNotFoundError
+        If a path is configured but is not a directory.
+    """
+    monlib_path = monomer_library_path or os.environ.get("CLIBD_MON")
+    if not monlib_path:
+        return None
+    # gemmi does no shell expansion, so a perfectly natural "~/monomers" in a
+    # TOML would otherwise reach it verbatim and fail deep inside
+    # read_monomer_lib with a bare FileNotFoundError naming a path the user
+    # never wrote.
+    monlib_path = os.path.expanduser(os.path.expandvars(monlib_path))
+    if not os.path.isdir(monlib_path):
+        raise FileNotFoundError(
+            f"Monomer library not found at {monlib_path!r} (from "
+            + ("monomer_library_path" if monomer_library_path else "$CLIBD_MON")
+            + "). Point it at a clone of "
+            "https://github.com/MonomerLibrary/monomers, or unset it "
+            "to run without hydrogen typing."
+        )
+    return monlib_path
+
+
+def _warn_missing_monomer_library() -> None:
+    """
+    Report that Shtyrov typing is running without a monomer library, at most
+    once per process. See `_monomer_library_warned`.
+    """
+    global _monomer_library_warned
+    if _monomer_library_warned:
+        return
+    _monomer_library_warned = True
+    warnings.warn(
+        "No monomer library configured (set $CLIBD_MON or pass "
+        "monomer_library_path). gemmi ships no component definitions "
+        "of its own, so the topology is built from the file's own "
+        "bonds alone and no hydrogens can be added: H-containing "
+        "Shtyrov species (e.g. 'O(HH)', 'C(HHHC)') will not resolve, "
+        "and those atoms fall back to per-element Peng -- around 44% "
+        "of a hydrogen-free protein. Install the Monomer Library "
+        "(https://github.com/MonomerLibrary/monomers) to type them.",
+        RuntimeWarning,
+        stacklevel=3,
+    )
+
+
+def suppress_monomer_library_warning() -> None:
+    """
+    Mark the missing-monomer-library warning as already reported, so this
+    process stays silent about it.
+
+    For worker processes whose parent has already reported it on their
+    behalf; see `_monomer_library_warned`.
+    """
+    global _monomer_library_warned
+    _monomer_library_warned = True
+
+
 # (chain, residue number, insertion code, atom name)
 _AtomKey = tuple[str, int, str, str]
 
@@ -531,21 +616,7 @@ class PDB:
                 False,
             )
 
-        monlib_path = monomer_library_path or os.environ.get("CLIBD_MON")
-        if monlib_path:
-            # gemmi does no shell expansion, so a perfectly natural
-            # "~/monomers" in a TOML would otherwise reach it verbatim and
-            # fail deep inside read_monomer_lib with a bare FileNotFoundError
-            # naming a path the user never wrote.
-            monlib_path = os.path.expanduser(os.path.expandvars(monlib_path))
-            if not os.path.isdir(monlib_path):
-                raise FileNotFoundError(
-                    f"Monomer library not found at {monlib_path!r} (from "
-                    + ("monomer_library_path" if monomer_library_path else "$CLIBD_MON")
-                    + "). Point it at a clone of "
-                    "https://github.com/MonomerLibrary/monomers, or unset it "
-                    "to run without hydrogen typing."
-                )
+        monlib_path = _resolve_monomer_library_path(monomer_library_path)
 
         st = gemmi.read_structure(filepath)
         st.setup_entities()
@@ -559,18 +630,7 @@ class PDB:
                 warnings.warn(str(err), RuntimeWarning, stacklevel=2)
                 monlib = gemmi.MonLib()
         else:
-            warnings.warn(
-                "No monomer library configured (set $CLIBD_MON or pass "
-                "monomer_library_path). gemmi ships no component definitions "
-                "of its own, so the topology is built from the file's own "
-                "bonds alone and no hydrogens can be added: H-containing "
-                "Shtyrov species (e.g. 'O(HH)', 'C(HHHC)') will not resolve, "
-                "and those atoms fall back to per-element Peng -- around 44% "
-                "of a hydrogen-free protein. Install the Monomer Library "
-                "(https://github.com/MonomerLibrary/monomers) to type them.",
-                RuntimeWarning,
-                stacklevel=2,
-            )
+            _warn_missing_monomer_library()
             monlib = gemmi.MonLib()
 
         warnings_sink = sys.stderr if verbose else io.StringIO()

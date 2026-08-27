@@ -2,6 +2,7 @@
 Tests for potential volume construction.
 """
 
+import logging
 import warnings
 from importlib import resources
 
@@ -103,7 +104,7 @@ def test_potential_builder_shtyrov_species_smoke():
     # deliberately unmatched to exercise the fallback path.
     atom_species = ["O(HH)", "C(unmatched)", None]
 
-    with pytest.warns(UserWarning, match="falling back"):
+    with pytest.warns(UserWarning, match="fall back to"):
         pb = PotentialBuilder(
             32,
             1.0,
@@ -429,7 +430,7 @@ def test_potential_builder_analytic_matches_gemmi_multi_atom(tmp_path):
     )
     coords = coords - coords.mean(dim=0, keepdim=True)
 
-    with pytest.warns(UserWarning, match="falling back"):
+    with pytest.warns(UserWarning, match="fall back to"):
         pb = PotentialBuilder(
             n,
             dx,
@@ -788,7 +789,7 @@ def test_potential_builder_shtyrov_peng_only_analytic():
     )
     volume_none = pb_none.forward(coords, method="analytic")
 
-    with pytest.warns(UserWarning, match="falling back"):
+    with pytest.warns(UserWarning, match="fall back to"):
         pb_list = PotentialBuilder(
             n,
             dx,
@@ -1136,3 +1137,71 @@ def test_potential_kernel_cache_separates_parameterizations():
     ).atomic_potentials_3d.clone()
 
     assert not torch.allclose(kirkland, lobato)
+
+
+def _shtyrov_builder_with_fallback():
+    """A PotentialBuilder whose atoms all miss the Shtyrov species table."""
+    return PotentialBuilder(
+        16,
+        1.0,
+        torch.tensor([6, 7], dtype=torch.long),
+        parameterization="shtyrov",
+        atom_species=["C(unmatched)", "N(unmatched)"],
+        progressbars=False,
+    )
+
+
+def test_peng_fallback_reported_once_per_builder():
+    """
+    One builder reports its Peng fallback once, not once per code path.
+
+    The voxelized-kernel path (_get_3d_shtyrov_species_potentials) and the
+    analytic-coefficient path (_get_analytic_atom_coefficients) each derive
+    the fallback from the same builder's same atom set, and a default
+    shtyrov+analytic render runs both -- so every rendered species used to
+    produce an identical pair of warnings.
+    """
+    with pytest.warns(UserWarning, match="fall back to") as caught:
+        pb = _shtyrov_builder_with_fallback()
+        pb.forward(torch.tensor([[0.0, 0.0, 0.0], [3.0, 0.0, 0.0]]))
+    assert len([w for w in caught if "fall back to" in str(w.message)]) == 1
+
+
+def test_peng_fallback_warns_once_per_process_across_builders():
+    """
+    A run rendering many species reports the fallback once, not per species.
+
+    A 27-species tomogram emitted 54 of these. The counts differ per
+    structure but the finding and its remedy do not, so the per-structure
+    detail moves to a DEBUG log record and the warning is process-level.
+    """
+    with pytest.warns(UserWarning, match="fall back to"):
+        _shtyrov_builder_with_fallback()
+
+    # "always" defeats the interpreter's own dedup, which keys on the message
+    # text and so would not have collapsed these anyway (each names its own
+    # atom count). Anything caught here is a genuine second warning.
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        for _ in range(3):
+            _shtyrov_builder_with_fallback()
+    assert [w for w in caught if "fall back to" in str(w.message)] == []
+
+
+def test_peng_fallback_detail_still_available_at_debug(caplog):
+    """
+    Suppressing the repeats must not lose the per-structure counts.
+
+    They are logged at DEBUG rather than INFO on purpose: a caller who set
+    INFO to follow a tomogram's section timings is asking for progress, not
+    for a line per rendered species.
+    """
+    with caplog.at_level(logging.DEBUG, logger="specter.potential._potential_builder"):
+        with pytest.warns(UserWarning, match="fall back to"):
+            _shtyrov_builder_with_fallback()
+
+    detail = [r for r in caplog.records if "no matching Shtyrov species" in r.message]
+    assert len(detail) == 1
+    assert detail[0].levelno == logging.DEBUG
+    assert "2 atom(s)" in detail[0].getMessage()
+    assert "'C'" in detail[0].getMessage() and "'N'" in detail[0].getMessage()

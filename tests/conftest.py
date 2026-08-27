@@ -1,11 +1,14 @@
 """Shared pytest configuration for the specter test suite.
 
-The only thing configured here is intra-op thread limiting under
-``pytest-xdist``. See :func:`_limit_threads_under_xdist` for why it is
-conditional rather than unconditional.
+Two things are configured here: intra-op thread limiting under
+``pytest-xdist`` (see :func:`_limit_threads_under_xdist` for why it is
+conditional rather than unconditional), and per-test resetting of the
+warn-once flags (see :func:`reset_warn_once_flags`).
 """
 
 import os
+
+import pytest
 
 # Threads per xdist worker. Tuned against the ``-n 32`` in pyproject.toml's
 # addopts: 32 x 4 = 128, this host's core count. Measured on the full suite,
@@ -45,3 +48,28 @@ def _limit_threads_under_xdist() -> None:
 
 
 _limit_threads_under_xdist()
+
+
+@pytest.fixture(autouse=True)
+def reset_warn_once_flags():
+    """
+    Clear specter's warn-once flags before each test.
+
+    Two warnings are suppressed after their first occurrence in a process --
+    the missing-monomer-library one (`specter.pdb`) and the Peng-fallback one
+    (`specter.potential._potential_builder`) -- because both report an
+    environment- or run-level fact that a job rendering many structures would
+    otherwise repeat dozens of times.
+
+    Process-level state is test-order-dependent state: whichever test happens
+    to run first consumes the single warning, and a `pytest.warns` in any
+    later test in the same xdist worker fails for a reason that has nothing
+    to do with the code under test. Resetting per test makes each one see a
+    fresh process, which is what it is actually asserting about.
+    """
+    import specter.pdb as pdb_module
+    import specter.potential._potential_builder as potential_builder_module
+
+    pdb_module._monomer_library_warned = False
+    potential_builder_module._peng_fallback_warned = False
+    yield

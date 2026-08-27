@@ -253,7 +253,7 @@ def _crop_center(t: torch.Tensor, nxy: int) -> torch.Tensor:
     return t[..., cy - half : cy + half + (nxy % 2), cx - half : cx + half + (nxy % 2)]
 
 
-def resolve_available_device(device_str: str) -> str:
+def resolve_available_device(device_str: str, stacklevel: int = 2) -> str:
     """
     Fall back to the CPU when a config asks for CUDA and there is none.
 
@@ -273,6 +273,13 @@ def resolve_available_device(device_str: str) -> str:
     ----------
     device_str : str
         A raw ``device`` config value.
+    stacklevel : int, optional
+        Frames to skip when attributing the fallback warning. Default 2, which
+        blames the caller -- right for a pipeline calling this directly. A
+        caller that is itself a helper (``_parse_device`` and
+        ``_parse_device_pool``, one hop further from the user) passes 3, so the
+        warning points at the pipeline either way rather than at whichever
+        parser happened to be in between.
 
     Returns
     -------
@@ -285,7 +292,7 @@ def resolve_available_device(device_str: str) -> str:
         "device='cuda' but no CUDA device is available; running on the CPU "
         "instead. Set device='cpu' to silence this, or check that torch was "
         "installed with CUDA support (torch.cuda.is_available() is False).",
-        stacklevel=3,
+        stacklevel=stacklevel,
     )
     return "cpu"
 
@@ -315,7 +322,10 @@ def _parse_device(device_str: str) -> tuple[str, str | list[int]]:
     "0"       -> ("single", "cuda:0")
     "0,1,2"   -> ("multi",  [0, 1, 2])
     """
-    spec = parse_device(resolve_available_device(device_str))
+    spec = parse_device(resolve_available_device(device_str, stacklevel=3))
+    # DDP dispatch needs bare GPU indices, so a pool that is not all indexed
+    # GPUs (``"cpu,cpu"``, a bare ``"cuda,cuda"``) has nothing to shard across
+    # and runs single-device, as it did before this shared a parser.
     if spec.is_multi and spec.indices:
         return "multi", list(spec.indices)
     return "single", spec.primary
@@ -328,17 +338,17 @@ def _parse_device_pool(device_str: str) -> list[str]:
     The counterpart to :func:`_parse_device` for pipelines that split whole
     independent units of work across devices themselves (one worker process
     per device, as ``specter build ice`` does) rather than handing a
-    multi-GPU job to Lightning's DDP. Both accept the same spellings; this
-    one additionally accepts ``"auto"``, and returns device strings rather
-    than a DDP dispatch mode plus bare GPU ids.
+    multi-GPU job to Lightning's DDP. Both accept exactly the same spellings --
+    they share :func:`specter.devices.parse_device` -- and differ only in
+    shape: this one returns device strings rather than a DDP dispatch mode
+    plus bare GPU ids.
 
     Parameters
     ----------
     device_str : str
         One of ``"cpu"``, ``"cuda"``, ``"cuda:N"``, a bare integer ``"N"``,
-        a comma-separated list of integers (``"0,1,2,3"``), or ``"auto"``
-        for every visible GPU (falling back to ``"cpu"`` when there are
-        none).
+        or a comma-separated list of indices (``"0,1,2,3"``). There is no
+        ``"auto"``; see :func:`specter.devices.parse_device`.
 
     Returns
     -------
@@ -351,9 +361,10 @@ def _parse_device_pool(device_str: str) -> list[str]:
     "cuda"    -> ["cuda"]
     "0"       -> ["cuda:0"]
     "0,1,2"   -> ["cuda:0", "cuda:1", "cuda:2"]
-    "auto"    -> ["cuda:0", ..., "cuda:N-1"], or ["cpu"] with no GPUs
     """
-    return list(parse_device(resolve_available_device(device_str)).devices)
+    return list(
+        parse_device(resolve_available_device(device_str, stacklevel=3)).devices
+    )
 
 
 def _generate_single(

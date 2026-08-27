@@ -875,3 +875,125 @@ def test_compute_loss_nps_weight_branch_differs_from_mse(
     loss_nps = Reconstructor(**base, nps_weight=nps)._compute_loss(out, images, idx)
     assert torch.isfinite(loss_nps)
     assert not torch.allclose(loss_mse, loss_nps)
+
+
+# ---------------------------------------------------------------------------
+# Refined-parameter binding
+#
+# `Reconstructor` owns the refined parameters; `ImageGenerator` renders from
+# them. The handoff used to rely on the two holding the same tensor object,
+# which `torch.nn.Module._apply` is free to break: it swaps a Parameter's
+# `.data` in place but replaces a buffer with a fresh `.to()` copy. On a GPU
+# that left the generator rendering values frozen at device-move time.
+# ---------------------------------------------------------------------------
+
+
+def _binding_kwargs(small_volume: torch.Tensor, ctf: dict) -> dict:
+    return dict(
+        V=small_volume,
+        voxel_size=2.0,
+        quaternions=torch.tensor([[1.0, 0.0, 0.0, 0.0]]),
+        translations=torch.tensor([[0.0, 0.0]]),
+        ctf_params=ctf,
+        voltage=300.0,
+        dose_per_angstrom=2.0,
+        alpha=0.1,
+        scattering_model="multislice",
+        lr=1e-2,
+        lr_R=1e-3,
+        lr_T=1e-3,
+        lr_D=1e-3,
+    )
+
+
+@pytest.mark.parametrize(
+    "device",
+    [
+        "cpu",
+        pytest.param(
+            "cuda:0",
+            marks=pytest.mark.skipif(
+                not torch.cuda.is_available(), reason="needs CUDA"
+            ),
+        ),
+    ],
+)
+def test_refined_parameters_are_live_in_the_generator(
+    small_volume: torch.Tensor, full_ctf_params: dict[str, torch.Tensor], device: str
+) -> None:
+    """An optimiser step on a refined parameter is visible to the forward model."""
+    gb = Reconstructor(**_binding_kwargs(small_volume, full_ctf_params)).to(device)
+    gen = gb.imagegenerator
+
+    with torch.no_grad():
+        gb.translations.add_(torch.tensor([[5.0, 5.0]], device=device))
+        gb.rotations.add_(torch.tensor([[0.0, 0.1, 0.0, 0.0]], device=device))
+        gb.V.add_(1.0)
+    gb._bind_refined_parameters()
+
+    assert torch.equal(gen.translations.detach(), gb.translations.detach())
+    assert torch.equal(gen.quaternions.detach(), gb.rotations.detach())
+    assert torch.equal(gen.V.detach(), gb.V.detach())
+
+
+@pytest.mark.parametrize(
+    "device",
+    [
+        "cpu",
+        pytest.param(
+            "cuda:0",
+            marks=pytest.mark.skipif(
+                not torch.cuda.is_available(), reason="needs CUDA"
+            ),
+        ),
+    ],
+)
+def test_every_refined_parameter_receives_a_gradient(
+    small_volume: torch.Tensor, full_ctf_params: dict[str, torch.Tensor], device: str
+) -> None:
+    """lr/lr_R/lr_T/lr_D each put a live leaf in the autograd graph."""
+    gb = Reconstructor(**_binding_kwargs(small_volume, full_ctf_params)).to(device)
+    n = small_volume.shape[-1]
+    idx = torch.tensor([0], device=device)
+    observed = torch.rand(1, n, n, device=device)
+
+    loss, _, _ = gb._common_step((observed, idx), 0)
+    loss.backward()
+
+    for name in ("V", "rotations", "translations", "defocus_offset"):
+        grad = getattr(gb, name).grad
+        assert grad is not None, f"{name} received no gradient"
+        assert torch.isfinite(grad).all(), f"{name} gradient is not finite"
+        assert grad.abs().sum() > 0, f"{name} gradient is identically zero"
+
+
+def test_defocus_offset_changes_the_rendered_image(
+    small_volume: torch.Tensor, full_ctf_params: dict[str, torch.Tensor]
+) -> None:
+    """defocus_offset is re-applied per forward, not folded in once at construction."""
+    gb = Reconstructor(**_binding_kwargs(small_volume, full_ctf_params))
+    idx = torch.tensor([0])
+
+    torch.manual_seed(0)
+    before = gb.forward(idx)
+    with torch.no_grad():
+        gb.defocus_offset.add_(5000.0)
+    gb._bind_refined_parameters()
+    torch.manual_seed(0)
+    after = gb.forward(idx)
+
+    assert not torch.allclose(before, after)
+
+
+def test_binding_leaves_the_constructed_defocus_unchanged(
+    small_volume: torch.Tensor, full_ctf_params: dict[str, torch.Tensor]
+) -> None:
+    """Re-binding an untouched model reproduces the defocus it was built with."""
+    gb = Reconstructor(**_binding_kwargs(small_volume, full_ctf_params))
+    dfu = gb.imagegenerator.dfu.detach().clone()
+    dfv = gb.imagegenerator.dfv.detach().clone()
+
+    gb._bind_refined_parameters()
+
+    assert torch.allclose(gb.imagegenerator.dfu.detach(), dfu)
+    assert torch.allclose(gb.imagegenerator.dfv.detach(), dfv)

@@ -224,6 +224,7 @@ class Reconstructor(_BaseReconstructor):
         self.aberration_backend = aberration_backend
         self.lpp_params = lpp_params
         self._build_imagegenerator(klim, bfactor)
+        self._bind_refined_parameters()
 
     def _setup_optimization_state(
         self,
@@ -337,10 +338,21 @@ class Reconstructor(_BaseReconstructor):
     ) -> None:
         """Register per-particle CTF parameter buffers and the defocus offset."""
         self.ctf_params = {}
+        self._defocus_names: list[str] = []
         for k, v in ctf_params.items():
             v_adjusted = v + defocus_offset if k in ("dfu", "dfv") else v
             self.register_buffer(k, v_adjusted)
             self.ctf_params[k] = getattr(self, k)
+            if k in ("dfu", "dfv"):
+                # The un-offset value, normalised the way BaseImager normalises
+                # its own CTF buffers, so :meth:`_bind_refined_parameters` can
+                # rebuild the effective defocus from the *current* offset rather
+                # than the one this model happened to be constructed with.
+                base = torch.as_tensor(v)
+                if base.ndim == 0:
+                    base = base.unsqueeze(0)
+                self.register_buffer(f"_{k}_base", base.clone(), persistent=False)
+                self._defocus_names.append(k)
         if lr_D is None:
             self.register_buffer("defocus_offset", defocus_offset)
         else:
@@ -404,6 +416,48 @@ class Reconstructor(_BaseReconstructor):
             aberration_backend=self.aberration_backend,
             lpp_params=self.lpp_params,
         )
+
+    def _bind_refined_parameters(self) -> None:
+        """
+        Publish this module's refined parameters to the image generator.
+
+        `Reconstructor` owns the refined parameters; `ImageGenerator` renders
+        from them. Binding them by shared tensor identity is not durable:
+        `torch.nn.Module._apply` swaps a `Parameter`'s ``.data`` in place but
+        replaces a buffer with a fresh ``.to()`` copy, so a device move leaves
+        the generator holding a snapshot. Gradients still reach the parameter
+        through that copy, which is why the breakage is silent -- the optimiser
+        steps, and the forward model keeps rendering the values it was moved
+        with. On the CPU ``.to()`` is a no-op and identity survives, so this
+        only ever failed where training actually happens.
+
+        ``dfu``/``dfv`` are rebuilt rather than aliased, since the quantity the
+        generator needs is derived: the base defocus plus the current
+        ``defocus_offset``, less whatever midplane shift
+        :meth:`~specter.imagegenerator.BaseImager._apply_defocus_shift` applied.
+        Recomputing it here is what puts ``defocus_offset`` in the autograd
+        graph at all -- folded in once at construction, it is a constant.
+
+        Idempotent, and cheap enough to call every step.
+        """
+        gen = getattr(self, "imagegenerator", None)
+        if gen is None:
+            return
+
+        gen.V = self.V
+        gen.quaternions = self.rotations
+        gen.translations = self.translations
+
+        shift = getattr(gen, "_defocus_shift_A", 0.0) or 0.0
+        for name in getattr(self, "_defocus_names", []):
+            base = getattr(self, f"_{name}_base")
+            setattr(gen, name, base + self.defocus_offset - shift)
+
+    def _apply(self, *args: Any, **kwargs: Any) -> Any:
+        """Re-bind refined parameters after any device or dtype transform."""
+        module = super()._apply(*args, **kwargs)
+        module._bind_refined_parameters()
+        return module
 
     def forward(self, idx: torch.Tensor | int | slice) -> torch.Tensor:
         """
@@ -585,11 +639,7 @@ class Reconstructor(_BaseReconstructor):
     def _common_step(
         self, batch: tuple[torch.Tensor, torch.Tensor], batch_idx: int
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        # Link parameters to simulator to ensure autograd graph connectivity
-        if hasattr(self.imagegenerator, "V"):
-            self.imagegenerator.V = self.V
-        if hasattr(self.imagegenerator, "quaternions"):
-            self.imagegenerator.quaternions = self.rotations
+        self._bind_refined_parameters()
 
         images, idx = batch
         out = self.forward(idx)

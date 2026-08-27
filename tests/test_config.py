@@ -409,7 +409,7 @@ def test_tilt_series_config_constructs_with_no_args() -> None:
 def test_tilt_series_toml_loads_and_matches_expected_values() -> None:
     path = str(REPO_ROOT / "configs" / "tilt_series.toml")
     config = load_config(path, TiltSeriesConfig)
-    assert config.voxel_size == 2.0
+    assert config.voxel_size == 5.0
     assert config.n_tilts == 61
     assert config.scattering_model == "multislice"
     assert config.device == "cuda"

@@ -16,7 +16,8 @@ from specter.config import (
 from ._click_options import (
     build_config_options,
     collect_overrides,
-    default_config_path,
+    CONFIG_OPTION_HELP,
+    config_from_defaults,
     field_panels,
 )
 
@@ -78,7 +79,9 @@ _ICE_GROUPS: list[tuple[str, list[str]]] = [
 ]
 
 
-def _tomogram_callback(config: str, n_tomograms: int, **_overrides_raw: object) -> None:
+def _tomogram_callback(
+    config: str | None, n_tomograms: int, **_overrides_raw: object
+) -> None:
     """Handle `specter build tomogram`."""
     from specter.pipelines import run_build_tomogram
 
@@ -86,7 +89,11 @@ def _tomogram_callback(config: str, n_tomograms: int, **_overrides_raw: object) 
     assert ctx is not None
     overrides = collect_overrides(ctx, exclude={"config", "n_tomograms"})
 
-    cfg = load_config(config, TomogramConfig)
+    cfg = (
+        load_config(config, TomogramConfig)
+        if config is not None
+        else config_from_defaults(TomogramConfig, overrides)
+    )
     apply_overrides(cfg, overrides)
     run_build_tomogram(cfg, n_tomograms=n_tomograms)
 
@@ -96,10 +103,9 @@ def _build_tomogram_command() -> click.RichCommand:
         click.RichOption(
             ["--config"],
             type=str,
-            default=default_config_path("tomogram"),
-            show_default=True,
-            help="TOML config file. Always loaded first, before any flags below "
-            "are applied.",
+            default=None,
+            show_default=False,
+            help=CONFIG_OPTION_HELP,
             panel="Config",
         ),
         click.RichOption(
@@ -136,12 +142,13 @@ def _build_tomogram_command() -> click.RichCommand:
         "as .mrc (usable as `specter simulate tiltseries`'s --volume_path) "
         "plus copick-style .ndjson picks and, by default, segmentation "
         "label volumes (--write_segmentation). A TOML config (--config) is "
-        "always loaded first -- every flag below is optional and, if "
+        "loaded first when given, otherwise every setting takes its "
+        "built-in default -- every flag below is optional and, if "
         "given, overrides one field of it.",
     )
 
 
-def _ice_callback(config: str, **_overrides_raw: object) -> None:
+def _ice_callback(config: str | None, **_overrides_raw: object) -> None:
     """Handle `specter build ice`."""
     from specter.pipelines import run_build_ice_cache
 
@@ -149,7 +156,11 @@ def _ice_callback(config: str, **_overrides_raw: object) -> None:
     assert ctx is not None
     overrides = collect_overrides(ctx, exclude={"config"})
 
-    cfg = load_config(config, IceCacheConfig)
+    cfg = (
+        load_config(config, IceCacheConfig)
+        if config is not None
+        else config_from_defaults(IceCacheConfig, overrides)
+    )
     apply_overrides(cfg, overrides)
     run_build_ice_cache(cfg)
 
@@ -159,10 +170,9 @@ def _build_ice_command() -> click.RichCommand:
         click.RichOption(
             ["--config"],
             type=str,
-            default=default_config_path("ice"),
-            show_default=True,
-            help="TOML config file. Always loaded first, before any flags below "
-            "are applied.",
+            default=None,
+            show_default=False,
+            help=CONFIG_OPTION_HELP,
             panel="Config",
         ),
         *build_config_options(
@@ -186,7 +196,7 @@ def _build_ice_command() -> click.RichCommand:
         "production scale -- pass several GPUs to --device to shard them, "
         "and re-run the same command to resume an interrupted run. Point a "
         "simulation config's ice_cache_dir at the output directory to use "
-        "the result. A TOML config (--config) is always loaded first -- "
+        "the result. A TOML config (--config) is loaded first when given, otherwise every setting takes its built-in default -- "
         "every flag below is optional and, if given, overrides one field of "
         "it.",
     )

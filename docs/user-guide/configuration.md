@@ -6,6 +6,26 @@ flags you pass on the command line, which override individual fields of
 it. Nothing else participates: no environment-variable layer, no implicit
 merging of multiple config files.
 
+`--config` is optional. Omit it and every field takes the default declared
+on its config dataclass, which is where the defaults live; a TOML file only
+ever overrides them. The exception is a field with no default, which names
+an input the run is about rather than a setting it has an opinion on. Those
+must be passed as flags, and the error names them when they are missing.
+
+The example configs are **not installed with the package.** They live in the
+repository at
+[`configs/`](https://github.com/joelyeois/specter/tree/main/configs), one per
+subcommand, and every `configs/...` path below refers to them. Clone the
+repository to get them all, or download a single file:
+
+```bash
+curl -O https://raw.githubusercontent.com/joelyeois/specter/main/configs/particle.toml
+```
+
+Keep a downloaded config and the installed version in step. Field names change
+between releases, and a config naming a field that no longer exists is rejected
+by name rather than ignored.
+
 ## TOML config files
 
 A config file is a flat set of fields, grouped into tables for
@@ -21,7 +41,7 @@ works the same as writing it under the "correct" one.
 
 Six commands each have their own config dataclass and canonical TOML:
 
-| Command | Config dataclass | Canonical TOML |
+| Command | Config dataclass | Example TOML |
 |---|---|---|
 | `specter simulate particles` | `ParticleStackConfig` | `configs/particle.toml` |
 | `specter simulate micrograph` | `MicrographConfig` | `configs/micrograph.toml` |

@@ -19,7 +19,8 @@ from specter.config import (
 from ._click_options import (
     build_config_options,
     collect_overrides,
-    default_config_path,
+    CONFIG_OPTION_HELP,
+    config_from_defaults,
     field_panels,
 )
 
@@ -230,7 +231,7 @@ _MICROGRAPH_GROUPS: list[tuple[str, list[str]]] = [
 ]
 
 
-def _particles_callback(config: str, **_overrides_raw: object) -> None:
+def _particles_callback(config: str | None, **_overrides_raw: object) -> None:
     """Handle `specter simulate particles`."""
     from specter.pipelines import run_particle_stack
 
@@ -238,7 +239,11 @@ def _particles_callback(config: str, **_overrides_raw: object) -> None:
     assert ctx is not None
     overrides = collect_overrides(ctx, exclude={"config"})
 
-    cfg = load_config(config, ParticleStackConfig)
+    cfg = (
+        load_config(config, ParticleStackConfig)
+        if config is not None
+        else config_from_defaults(ParticleStackConfig, overrides)
+    )
     apply_overrides(cfg, overrides)
     run_particle_stack(cfg)
 
@@ -248,10 +253,9 @@ def _build_particles_command() -> click.RichCommand:
         click.RichOption(
             ["--config"],
             type=str,
-            default=default_config_path("particle"),
-            show_default=True,
-            help="TOML config file. Always loaded first, before any flags below "
-            "are applied.",
+            default=None,
+            show_default=False,
+            help=CONFIG_OPTION_HELP,
             panel="Config",
         ),
         *build_config_options(
@@ -266,12 +270,12 @@ def _build_particles_command() -> click.RichCommand:
         callback=_particles_callback,
         context_settings=CONTEXT_SETTINGS,
         help="Simulate a cryo-EM particle stack and save it as .mrcs + .star. "
-        "A TOML config (--config) is always loaded first -- every flag below "
+        "A TOML config (--config) is loaded first when given, otherwise every setting takes its built-in default -- every flag below "
         "is optional and, if given, overrides one field of it.",
     )
 
 
-def _micrograph_callback(config: str, **_overrides_raw: object) -> None:
+def _micrograph_callback(config: str | None, **_overrides_raw: object) -> None:
     """Handle `specter simulate micrograph`."""
     from specter.pipelines import run_micrograph
 
@@ -279,7 +283,11 @@ def _micrograph_callback(config: str, **_overrides_raw: object) -> None:
     assert ctx is not None
     overrides = collect_overrides(ctx, exclude={"config"})
 
-    cfg = load_config(config, MicrographConfig)
+    cfg = (
+        load_config(config, MicrographConfig)
+        if config is not None
+        else config_from_defaults(MicrographConfig, overrides)
+    )
     apply_overrides(cfg, overrides)
     run_micrograph(cfg)
 
@@ -289,10 +297,9 @@ def _build_micrograph_command() -> click.RichCommand:
         click.RichOption(
             ["--config"],
             type=str,
-            default=default_config_path("micrograph"),
-            show_default=True,
-            help="TOML config file. Always loaded first, before any flags below "
-            "are applied.",
+            default=None,
+            show_default=False,
+            help=CONFIG_OPTION_HELP,
             panel="Config",
         ),
         *build_config_options(
@@ -307,7 +314,7 @@ def _build_micrograph_command() -> click.RichCommand:
         callback=_micrograph_callback,
         context_settings=CONTEXT_SETTINGS,
         help="Simulate one or more cryo-EM micrographs and save them as .mrcs + "
-        ".star. A TOML config (--config) is always loaded first -- every flag "
+        ".star. A TOML config (--config) is loaded first when given, otherwise every setting takes its built-in default -- every flag "
         "below is optional and, if given, overrides one field of it. Each "
         "micrograph gets an independently regenerated ice/crowding specimen; "
         "single-device only.",
@@ -315,7 +322,7 @@ def _build_micrograph_command() -> click.RichCommand:
 
 
 def _tiltseries_callback(
-    config: str, tomogram_config: str | None, **_overrides_raw: object
+    config: str | None, tomogram_config: str | None, **_overrides_raw: object
 ) -> None:
     """Handle `specter simulate tiltseries`."""
     from specter.pipelines import run_tilt_series
@@ -324,7 +331,11 @@ def _tiltseries_callback(
     assert ctx is not None
     overrides = collect_overrides(ctx, exclude={"config", "tomogram_config"})
 
-    cfg = load_config(config, TiltSeriesConfig)
+    cfg = (
+        load_config(config, TiltSeriesConfig)
+        if config is not None
+        else config_from_defaults(TiltSeriesConfig, overrides)
+    )
     apply_overrides(cfg, overrides)
 
     tomogram_cfg = (
@@ -340,10 +351,9 @@ def _build_tiltseries_command() -> click.RichCommand:
         click.RichOption(
             ["--config"],
             type=str,
-            default=default_config_path("tilt_series"),
-            show_default=True,
-            help="TOML config file. Always loaded first, before any flags below "
-            "are applied.",
+            default=None,
+            show_default=False,
+            help=CONFIG_OPTION_HELP,
             panel="Config",
         ),
         click.RichOption(
@@ -375,8 +385,9 @@ def _build_tiltseries_command() -> click.RichCommand:
         context_settings=CONTEXT_SETTINGS,
         help="Simulate a cryo-ET tilt series from a pre-built specimen volume "
         "(--volume_path) and save it as .mrcs + .star. A TOML config "
-        "(--config) is always loaded first -- every flag below is optional "
-        "and, if given, overrides one field of it. Pass --tomogram_config "
+        "(--config) is loaded first when given, otherwise every setting takes "
+        "its built-in default -- every flag below is optional and, if given, "
+        "overrides one field of it. Pass --tomogram_config "
         "instead of --volume_path to build the specimen volume first "
         "(`specter build tomogram`) and image it in the same command.",
     )

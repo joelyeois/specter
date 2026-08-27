@@ -3,24 +3,52 @@
 ## Simulate a particle stack
 
 The `specter simulate particles` CLI is the quickest way to produce a
-simulated cryo-EM particle stack, driven by a TOML config file:
+simulated cryo-EM particle stack. Every setting carries a built-in default,
+so the only thing you must supply is the structure to simulate:
 
 ```bash
-specter simulate particles --config configs/particle.toml
+specter simulate particles --pdb_source 6bdf
 ```
 
 This downloads the structure, builds the scattering potential, applies CTF
 and detector effects, and writes a `.mrcs` / `.star` file pair.
 
-An example config lives in
+### Where the example configs live
+
+Once a run has more than a few settings, a TOML config is easier to keep
+than a line of flags:
+
+```bash
+specter simulate particles --config particle.toml
+```
+
+`--config` is optional. Given one, SPECTER loads its values first, and any
+flag passed alongside it overrides a single field. Given none, every field
+takes its built-in default, and only a field that has no default (here,
+`--pdb_source`) has to be supplied.
+
+**The example configs are not installed with the package.** They live in the
+repository, one per subcommand, at
 [`configs/`](https://github.com/joelyeois/specter/tree/main/configs).
-Copy `configs/particle.toml` and edit it for your own runs. It looks like
-this:
+Download the one you want:
+
+```bash
+curl -O https://raw.githubusercontent.com/joelyeois/specter/main/configs/particle.toml
+```
+
+If you cloned the repository rather than installing from a wheel, they are
+already in `configs/`.
+
+Keep the config and the installed version in step. Field names change
+between releases, and a config naming a field that no longer exists is
+rejected by name rather than ignored.
+
+`configs/particle.toml` looks like this:
 
 ```toml
 # Canonical default config for `specter simulate particles`.
 # Any field can be overridden on the command line, e.g.:
-#   specter simulate particles --config configs/particle.toml --n_particles 3000
+#   specter simulate particles --config particle.toml --n_particles 3000
 
 [potential]
 pdb_source = "6bdf"
@@ -42,7 +70,7 @@ editing the file:
 
 ```bash
 specter simulate particles \
-    --config configs/particle.toml \
+    --config particle.toml \
     --pdb_source 6bdf \
     --n_particles 200 \
     --device cuda:0 \
@@ -67,7 +95,18 @@ copick-style `.ndjson` ground-truth picks and, by default, segmentation
 label volumes:
 
 ```bash
-specter build tomogram --config configs/tomogram.toml
+specter build tomogram --config tomogram.toml
+```
+
+Unlike the particle stack above, this one genuinely needs its config. The
+specimen contents (`[targets]`, `[filler]`, `[[membrane]]`, filaments,
+microtubules, beads) default to empty, so `specter build tomogram` with no
+config renders an empty box. Download
+[`configs/tomogram.toml`](https://github.com/joelyeois/specter/tree/main/configs)
+for a worked scene to edit:
+
+```bash
+curl -O https://raw.githubusercontent.com/joelyeois/specter/main/configs/tomogram.toml
 ```
 
 SPECTER places protein species in two priority stages within their
@@ -76,9 +115,7 @@ ground truth, always exported to picks), then `[filler]` second, packed
 around the already-placed targets to crowd out the rest of that region
 (excluded from picks by default). Generation order runs membranes, then
 filaments, then this protein fill; each stage avoids the previous ones'
-placements. An example config lives in
-[`configs/tomogram.toml`](https://github.com/joelyeois/specter/tree/main/configs).
-Copy it and edit for your own runs. It looks like this:
+placements. `configs/tomogram.toml` looks like this:
 
 ```toml
 # Canonical default config for `specter build tomogram`.
@@ -97,7 +134,7 @@ filler = [
 shape_backend = "spherical_harmonics"   # omit [[membrane]] entirely for no membranes
 
 [specimen]
-target_shape = [128, 256, 256]    # (Z, Y, X) voxels
+target_shape = [300, 1200, 1200]  # (Z, Y, X) voxels
 voxel_size = 5.0                       # Å/voxel
 filler_occupancy_fraction = 0.5    # bare-sphere volume fraction budget for filler, per region
 
@@ -117,7 +154,7 @@ a 3D volume. Unlike the config above, `configs/reconstruct.toml` has no
 runnable default; point it at a real `.cs` file and particle stack first:
 
 ```bash
-specter reconstruct particle --config configs/reconstruct.toml --test_run
+specter reconstruct particle --config reconstruct.toml --test_run
 ```
 
 `--test_run` fits one epoch on binned images so a config mistake surfaces

@@ -126,24 +126,68 @@ def build_config_options(
     return options
 
 
-def default_config_path(basename: str) -> str:
+#: Where a user without a checkout finds the worked example configs. They are
+#: deliberately not shipped in the wheel: they restate defaults the dataclasses
+#: already hold, and a config fetched from a different version than the one
+#: installed fails `load_config`'s unknown-key check.
+EXAMPLE_CONFIGS_URL = "https://github.com/joelyeois/specter/tree/main/configs"
+
+CONFIG_OPTION_HELP = (
+    "TOML config file, loaded before any flag below is applied. Optional: "
+    "without it every setting takes its built-in default, so only settings "
+    f"that have none must be passed as flags. Worked examples: {EXAMPLE_CONFIGS_URL}"
+)
+
+
+def config_from_defaults(config_cls: type, overrides: dict[str, Any]) -> Any:
     """
-    Path to a canonical default TOML config file under the repo's ``configs/``.
+    Build a config from the dataclass defaults, for a run that names no TOML.
+
+    ``--config`` is optional because the dataclasses are the single source of
+    truth for every default; a TOML file that only restated them would be a
+    second copy free to drift. What a dataclass cannot supply is a field with
+    no default -- an input the run is *about*, like which structure to
+    simulate -- so those become required flags in this mode.
+
+    Deliberately not anchored to a packaged default file. ``configs/`` is not
+    in the wheel, so resolving a default path against the source tree only
+    works for an editable install from a checkout (see `EXAMPLE_CONFIGS_URL`).
 
     Parameters
     ----------
-    basename : str
-        Config file name without its ``.toml`` suffix, e.g. ``"particle"`` or
-        ``"tilt_series"``.
+    config_cls : type
+        The config dataclass to build.
+    overrides : dict
+        Field name -> value for the flags the caller actually passed, from
+        :func:`collect_overrides`.
 
     Returns
     -------
-    str
-        Absolute path to ``configs/<basename>.toml``.
-    """
-    from specter.config import REPO_ROOT
+    object
+        An instance of ``config_cls``.
 
-    return str(REPO_ROOT / "configs" / f"{basename}.toml")
+    Raises
+    ------
+    click.UsageError
+        If a field with no default was not supplied as a flag.
+    """
+    required = [
+        f.name
+        for f in dataclasses.fields(config_cls)
+        if f.default is dataclasses.MISSING and f.default_factory is dataclasses.MISSING
+    ]
+    missing = [name for name in required if name not in overrides]
+    if missing:
+        flags = ", ".join(f"--{name}" for name in missing)
+        plural = "s" if len(missing) > 1 else ""
+        raise click.UsageError(
+            f"No --config was given, so every setting comes from its built-in "
+            f"default -- but {flags} ha{'ve' if plural else 's'} none. Pass "
+            f"{flags}, or point --config at a TOML file that sets "
+            f"{'them' if plural else 'it'}. Worked example configs: "
+            f"{EXAMPLE_CONFIGS_URL}"
+        )
+    return config_cls(**{name: overrides[name] for name in required})
 
 
 def field_panels(groups: list[tuple[str, list[str]]]) -> dict[str, str]:

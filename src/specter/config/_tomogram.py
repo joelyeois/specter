@@ -69,7 +69,7 @@ class TomogramConfig:
     filler_table_max_mw_kda: float | None = None
     filler_table_min_mw_kda: float | None = None
     target_shape: list[int] = field(
-        default_factory=lambda: [128, 256, 256]
+        default_factory=lambda: [300, 1200, 1200]
     )  # (Z, Y, X) voxels
     voxel_size: float = 5.0  # Å/voxel
     # Target packing density for `ratio`-mode filler species, as a bare-

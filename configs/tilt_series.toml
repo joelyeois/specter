@@ -16,7 +16,7 @@
 
 [specimen]
 # volume_path = "path/to/specimen.mrc"   # uncomment to hardcode instead
-voxel_size = 2.0                # Å/voxel -- MUST match whatever built
+voxel_size = 5.0                # Å/voxel -- MUST match whatever built
                                     # the volume (configs/tomogram.toml's
                                     # own voxel_size, by default)
 

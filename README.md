@@ -88,24 +88,39 @@ troubleshooting an install outside a git checkout.
 ## Usage
 
 The `specter simulate particles` CLI is the quickest way to produce a
-simulated cryo-EM particle stack, driven by a TOML config file:
+simulated cryo-EM particle stack. Every setting carries a built-in default,
+so the only thing you must supply is the structure to simulate:
 
 ```bash
-specter simulate particles --config configs/particle.toml
+specter simulate particles --pdb_source 6bdf
 ```
 
 This downloads the structure, builds the scattering potential, applies CTF
-and detector effects, and writes a `.mrcs` / `.star` file pair. Any config
-field can be overridden on the command line without editing the file:
+and detector effects, and writes a `.mrcs` / `.star` file pair. A TOML
+config carries the settings once there are more of them than fit on a line,
+and any field in it can still be overridden on the command line:
 
 ```bash
 specter simulate particles \
-    --config configs/particle.toml \
-    --pdb_code 6bdf \
+    --config particle.toml \
+    --pdb_source 6bdf \
     --n_particles 200 \
     --device cuda:0 \
     --output_dir particles
 ```
+
+**The example configs are not installed with the package.** They live in this
+repository, one per subcommand, under
+[`configs/`](https://github.com/joelyeois/specter/tree/main/configs). Clone
+the repository, or download the one you want:
+
+```bash
+curl -O https://raw.githubusercontent.com/joelyeois/specter/main/configs/particle.toml
+```
+
+Keep the config and the installed version in step: field names change between
+releases, and a config naming a field that no longer exists is rejected by
+name rather than ignored.
 
 <details>
 <summary>What <code>configs/particle.toml</code> looks like</summary>
@@ -113,10 +128,10 @@ specter simulate particles \
 ```toml
 # Canonical default config for `specter simulate particles`.
 # Any field can be overridden on the command line, e.g.:
-#   specter simulate particles --config configs/particle.toml --n_particles 3000
+#   specter simulate particles --config particle.toml --n_particles 3000
 
 [potential]
-pdb_code = "6bdf"
+pdb_source = "6bdf"
 assembly = true
 n_pixels = 256
 pixel_size = 1.0              # Å
@@ -158,8 +173,9 @@ and reconstruction by `specter reconstruct particle`, also spelled
 | `specter reconstruct particle` (alias: `specter ghostbuster particle`) | Reconstruct a 3D map from a particle stack, jointly refining pose, translation, and defocus. |
 | `specter jobs list/show/diff` | Inspect and compare parameters and provenance across past runs. |
 
-Every subcommand takes `--config path/to.toml`; any field in that TOML can
-also be set directly on the command line. See
+Every subcommand takes an optional `--config path/to.toml`; any field in that
+TOML can also be set directly on the command line, and any field left unset
+takes its built-in default. See
 [Configure a run](https://joelyeois.github.io/specter/user-guide/configuration/).
 
 ---
@@ -186,7 +202,7 @@ src/specter/        # main package: physics simulator + Ghostbuster reconstructi
   cli/               # the `specter` command
   pipelines/         # end-to-end functions behind each CLI subcommand
 demo-notebooks/      # interactive, always-working usage examples
-configs/             # canonical TOML configs for each CLI subcommand
+configs/             # worked example TOML configs (not shipped in the wheel)
 docs/                # Concepts, user guide, and API reference (Read the Docs)
 tests/               # pytest suite
 ```

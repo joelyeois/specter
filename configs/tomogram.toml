@@ -10,7 +10,7 @@
 # =============================================================================
 
 [specimen]
-target_shape = [200, 1200, 1200]    # (Z, Y, X) voxels
+target_shape = [300, 1200, 1200]    # (Z, Y, X) voxels
 voxel_size = 5.0                        # A/voxel
 clip_axes = [true, true, true]      # (z, y, x) -- True lets instances poke past that wall
 filler_occupancy_fraction = 1.0

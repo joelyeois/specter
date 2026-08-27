@@ -14,7 +14,8 @@ from specter.config import (
 from ._click_options import (
     build_config_options,
     collect_overrides,
-    default_config_path,
+    CONFIG_OPTION_HELP,
+    config_from_defaults,
     field_panels,
 )
 
@@ -55,7 +56,7 @@ _RECONSTRUCT_PARTICLE_GROUPS: list[tuple[str, list[str]]] = [
 ]
 
 
-def _particle_callback(config: str, **_overrides_raw: object) -> None:
+def _particle_callback(config: str | None, **_overrides_raw: object) -> None:
     """Handle `specter reconstruct particle`."""
     from specter.pipelines import run_reconstruction
 
@@ -63,7 +64,11 @@ def _particle_callback(config: str, **_overrides_raw: object) -> None:
     assert ctx is not None
     overrides = collect_overrides(ctx, exclude={"config"})
 
-    cfg = load_config(config, ReconstructionConfig)
+    cfg = (
+        load_config(config, ReconstructionConfig)
+        if config is not None
+        else config_from_defaults(ReconstructionConfig, overrides)
+    )
     apply_overrides(cfg, overrides)
     run_reconstruction(cfg)
 
@@ -73,10 +78,9 @@ def _reconstruct_particle_command() -> click.RichCommand:
         click.RichOption(
             ["--config"],
             type=str,
-            default=default_config_path("reconstruct"),
-            show_default=True,
-            help="TOML config file. Always loaded first, before any flags below "
-            "are applied.",
+            default=None,
+            show_default=False,
+            help=CONFIG_OPTION_HELP,
             panel="Config",
         ),
         *build_config_options(
@@ -99,7 +103,7 @@ def _reconstruct_particle_command() -> click.RichCommand:
         "epoch on binned images and exercises every path and parameter for a "
         "fraction of the cost. Pose, translation and defocus refinement "
         "(--lr_R/--lr_T/--lr_D) are wired in but unverified against ground "
-        "truth. A TOML config (--config) is always loaded first -- every "
+        "truth. A TOML config (--config) is loaded first when given, otherwise every setting takes its built-in default -- every "
         "flag below is optional and, if given, overrides one field of it.",
     )
 

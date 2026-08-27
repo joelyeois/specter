@@ -35,7 +35,3 @@ pad_fft = true  # fixes multislice edge-wraparound artifacts at this wider tilt 
 
 [compute]
 device = "cuda:0"  # adjust to an available device on your machine, e.g. "cuda:0" or "cpu"
-
-[output]
-output_dir = "tiltseries"
-filename = "tilt_series_modular"

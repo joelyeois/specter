@@ -150,14 +150,15 @@ def test_recommend_batchsize_caps_at_gpu_saturation(monkeypatch) -> None:
 
     Batching amortizes per-call overhead only until one forward pass already
     saturates the device. Measured on an L40: at the default config's box 256
-    (67.1M padded voxels per particle) throughput is flat to batch 16 and 24%
+    (67.1M padded voxels per particle) throughput is flat to batch 16 and 17%
     *worse* at 32, while memory grows linearly -- 1.5 GB at batch 1 against
     30.8 GB at 32. Sizing purely to free memory therefore spends twenty times
     the memory for nothing, which is also what made `auto` pick a batch that
     OOM'd.
 
     Small boxes still get large batches, which is where batching earns its keep
-    (2.2-2.5x at box 64).
+    (~1.9x at box 64). The full per-batch table is in `specter.memory`, at
+    `_SATURATION_PADDED_VOXELS`.
     """
     # A device far larger than anything real, so only the saturation cap binds.
     monkeypatch.setattr(memory, "available_memory_bytes", lambda _d: 10**13)

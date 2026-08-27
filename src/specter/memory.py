@@ -13,10 +13,13 @@ Fitting the device is a bound, not a target
 -------------------------------------------
 A larger batch only pays until one forward pass already saturates the device,
 and at the default config a single particle does: measured on an L40, box 256
-is flat in batch size to 16 and then 24% SLOWER at 32, for 21x the memory.
-Smaller boxes do benefit (2.2-2.5x at box 64). So the batch is capped by work
+is flat in batch size to 16 and then 17% SLOWER at 32, for 21x the memory.
+Smaller boxes do benefit (~1.9x at box 64). So the batch is capped by work
 per pass -- `_SATURATION_PADDED_VOXELS` -- as well as by memory, and "auto"
-routinely returns far less than would fit.
+routinely returns far less than would fit. The per-batch figures behind both
+numbers are tabulated at `_SATURATION_PADDED_VOXELS`; quote them from there
+rather than restating them, so there is one place to correct after a
+re-measurement.
 
 Peak-memory model
 -----------------
@@ -197,11 +200,25 @@ def recommend_batchsize(
     n_particles: int | None = None,
 ) -> int:
     """
-    Largest batch size expected to fit in the free memory on `device`.
+    Largest batch size worth running on `device`, given the free memory there.
 
-    Inverts :func:`estimate_peak_bytes` against a safety-discounted reading
-    of free memory, then clamps into ``[1, min(n_particles,
+    The smaller of two bounds, not a memory calculation alone:
+
+    - *What fits.* :func:`estimate_peak_bytes` inverted against a
+      safety-discounted reading of free memory (`_CUDA_SAFETY_FRACTION` /
+      `_CPU_SAFETY_FRACTION`).
+    - *What is worth batching.* `_SATURATION_PADDED_VOXELS` divided by the
+      padded voxels one particle covers. Past the point where a single
+      forward pass already saturates the device, a larger batch costs memory
+      in proportion to its size and returns nothing.
+
+    The result is then clamped into ``[1, min(n_particles,
     MAX_AUTO_BATCHSIZE)]``.
+
+    Which bound binds depends on the box, and at the shipped particle config
+    it is the saturation one: a 256-pixel box with ``pad_fft`` covers 67M
+    padded voxels per particle and yields 2 on any device, well under what
+    would fit. Small boxes reach `MAX_AUTO_BATCHSIZE` instead.
 
     Parameters
     ----------

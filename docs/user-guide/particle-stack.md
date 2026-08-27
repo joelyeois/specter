@@ -176,13 +176,17 @@ without reducing the time per particle.
 
 Which bound binds depends on the box. At a 256-pixel box one particle covers
 67 million padded voxels and saturates a current GPU on its own, so `"auto"`
-resolves to 1. At a 64-pixel box a particle covers 1 million, and batching is
+resolves to 2. At a 64-pixel box a particle covers 1 million, and batching is
 worth roughly a factor of two. The CLI prints the chosen value at the start of
 generation:
 
 ```
-batchsize='auto' -> 3 particle(s) per pass (~31.7 GiB estimated peak, 43.1 GiB free on cuda:1)
+batchsize='auto' -> 2 particle(s) per pass (~3.2 GiB estimated peak, 42.5 GiB free on cuda:0)
 ```
+
+The estimated peak there is a small fraction of what is free, which is the
+saturation bound binding rather than the memory one: the run is not short of
+memory, a larger batch simply would not go faster.
 
 Set an integer instead to pin it, worth doing when benchmarking, when
 sharing a GPU with a job that will grow after SPECTER has taken its reading,

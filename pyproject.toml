@@ -40,7 +40,12 @@ dependencies = [
     "scipy>=1.16.2",
     "starfile>=0.5.13",
     "torch>=2.5.0",
-    "torch-ctf>=0.5.2",
+    # Upper bound is load-bearing, not caution: ctf/_legacy.py multiplies the
+    # Zernike terms by rho_max**3 to undo torch-ctf 0.5.2's normalize_rho=True
+    # default. That default changed upstream after 0.5.2, so a newer release
+    # would double-correct and silently break trefoil and beam tilt. Lift this
+    # and delete the workaround together, never separately.
+    "torch-ctf>=0.5.2,<0.6",
     "torch-grid-utils>=0.5.2",
     "torchinterp1d>=1.1",
     "tqdm>=4.67.1",

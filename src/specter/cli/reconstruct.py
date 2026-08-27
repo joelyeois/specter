@@ -42,7 +42,6 @@ _RECONSTRUCT_PARTICLE_GROUPS: list[tuple[str, list[str]]] = [
         "Advanced",
         [
             "scattering_model",
-            "aberration_backend",
             "ews_curvature_sign",
             "bfactor",
             "klim",

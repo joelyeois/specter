@@ -210,9 +210,18 @@ only ever set through the dict, never as a constructor argument.
 
 ## `aberration_backend`: `"legacy"` vs. `"torch_ctf"`
 
+!!! note "Not a configurable option"
+
+    `"torch_ctf"` is a second implementation under development, intended to
+    replace `"legacy"` once it is complete. It is reachable only from the
+    Python API: there is no TOML field and no CLI flag, and every SPECTER
+    command uses `"legacy"`. This section describes where the work stands,
+    not a choice you are being offered.
+
 `BaseImager.aberration_backend` selects which engine computes the
-transfer function above: `"legacy"` (default) is `Aberration` as
-described on this page; `"torch_ctf"` swaps in
+transfer function above: `"legacy"` (the default, and the only setting
+SPECTER itself uses) is `Aberration` as described on this page;
+`"torch_ctf"` swaps in
 `ctf.LegacyAberrationAdapter`, a [torch-ctf](https://github.com/teamtomo/torch-ctf)-backed
 implementation verified term-by-term against `"legacy"` and against a
 real multi-particle CryoSPARC `.cs` file (`tests/test_ctf_legacy_adapter.py`). Both share the
@@ -237,9 +246,12 @@ per-particle quantity; `"legacy"` has no equivalent.
 
 ## Limitations
 
-- **`torch_ctf` drops tetrafoil.** `LegacyAberrationAdapter` has no
-  `tetrafoil1`-`tetrafoil4` mapping; a config relying on those terms
-  should stay on `aberration_backend="legacy"`.
+- **`torch_ctf` cannot express tetrafoil.** `LegacyAberrationAdapter` has no
+  `tetrafoil1`-`tetrafoil4` mapping. Passing a nonzero one raises
+  `NotImplementedError` naming the terms, rather than dropping them: a
+  CryoSPARC `.cs` file carries tetrafoil, and silently ignoring it would give
+  a plausible image at the wrong transfer function. A zero-valued term is
+  accepted, since it has no effect either way.
 - **`torch_ctf` has no native-units entry point.** A caller with
   parameters already in torch-ctf's own units, or in RELION's convention,
   can only reach `CTFParameters` by constructing it directly; there is no

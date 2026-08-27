@@ -300,3 +300,46 @@ def test_lpp_params_overrides_stale_nonzero_phaseshift():
     out_with_stale_phaseshift = adapter(exitwave, ctf_params_with_stale_phaseshift)
 
     assert torch.allclose(out_without_phaseshift, out_with_stale_phaseshift, atol=1e-6)
+
+
+# ---------------------------------------------------------------------------
+# Unsupported-parameter contract
+#
+# `torch_ctf` is an incomplete second implementation, kept for a migration off
+# `"legacy"` rather than offered as a choice. What it cannot express it must
+# refuse: a CryoSPARC .cs file carries tetrafoil, and ignoring it would give a
+# plausible image at the wrong transfer function.
+# ---------------------------------------------------------------------------
+
+
+def test_every_aberration_term_is_classified_by_the_adapter() -> None:
+    """A term added to Aberration must be mapped here or declared unsupported."""
+    from specter.aberrations._aberration import _CTF_PARAM_NAMES
+    from specter.ctf._legacy import _SUPPORTED_CTF_PARAMS, _UNSUPPORTED_CTF_PARAMS
+
+    assert not (_SUPPORTED_CTF_PARAMS & _UNSUPPORTED_CTF_PARAMS)
+    assert _SUPPORTED_CTF_PARAMS | _UNSUPPORTED_CTF_PARAMS == set(_CTF_PARAM_NAMES), (
+        "a ctf_params term is neither mapped nor declared unsupported, so "
+        "torch_ctf would silently ignore it"
+    )
+
+
+def test_unsupported_terms_raise_only_when_nonzero() -> None:
+    """A zero-valued term has no effect either way, so it is accepted."""
+    from specter.ctf._legacy import (
+        _UNSUPPORTED_CTF_PARAMS,
+        ctf_params_dict_to_parameters,
+    )
+
+    base = {
+        "dfu": torch.tensor([10000.0]),
+        "dfv": torch.tensor([10000.0]),
+        "dfang": torch.tensor([0.0]),
+        "cs": torch.tensor([2.7e7]),
+    }
+    kwargs = dict(pixel_size=1.0, image_shape=(32, 32), voltage=300.0)
+
+    for name in sorted(_UNSUPPORTED_CTF_PARAMS):
+        ctf_params_dict_to_parameters({**base, name: torch.tensor([0.0])}, **kwargs)
+        with pytest.raises(NotImplementedError, match=name):
+            ctf_params_dict_to_parameters({**base, name: torch.tensor([1e6])}, **kwargs)

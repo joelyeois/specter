@@ -54,6 +54,42 @@ from ._transfer import TransferFunction
 from ._units import zernike_rho_max
 
 
+#: Keys `aberrations.Aberration` accepts that this adapter has no mapping for.
+#: Checked rather than ignored: a CryoSPARC `.cs` file carries tetrafoil terms
+#: (see `io/_cryosparc.py`), so dropping one silently yields a plausible image
+#: at the wrong transfer function -- a reconstruction still converges, just to
+#: the wrong answer. Raising instead makes the gap a fact a caller can act on,
+#: and gives the migration off `"legacy"` a mechanical definition of done: this
+#: set is empty when the backend is complete.
+#:
+#: Tested against `Aberration._CTF_PARAM_NAMES` in
+#: `tests/test_ctf_legacy_adapter.py`, so a term added there without a mapping
+#: here surfaces as a failing test rather than as silence.
+#: Keys this adapter does map. Declared rather than inferred so that
+#: ``_SUPPORTED_CTF_PARAMS | _UNSUPPORTED_CTF_PARAMS`` can be asserted equal to
+#: `aberrations.Aberration`'s own term list: a term added there then belongs to
+#: exactly one of these two sets, and forgetting to classify it fails a test
+#: instead of being quietly ignored at runtime.
+_SUPPORTED_CTF_PARAMS = frozenset(
+    {
+        "dfu",
+        "dfv",
+        "dfang",
+        "cs",
+        "phaseshift",
+        "tiltx",
+        "tilty",
+        "trefoil1",
+        "trefoil2",
+        "dose",
+    }
+)
+
+_UNSUPPORTED_CTF_PARAMS = frozenset(
+    {"tetrafoil1", "tetrafoil2", "tetrafoil3", "tetrafoil4"}
+)
+
+
 def ctf_params_dict_to_parameters(
     ctf_params: dict[str, Any],
     pixel_size: float,
@@ -105,6 +141,20 @@ def ctf_params_dict_to_parameters(
     -------
     CTFParameters
     """
+    unsupported = sorted(
+        name
+        for name in _UNSUPPORTED_CTF_PARAMS
+        if name in ctf_params and _nonzero(ctf_params[name])
+    )
+    if unsupported:
+        raise NotImplementedError(
+            f"aberration_backend='torch_ctf' cannot express {', '.join(unsupported)}: "
+            "LegacyAberrationAdapter has no mapping for these terms. Use "
+            "aberration_backend='legacy' (the default), whose Aberration "
+            "implements them, or set them to zero. A zero-valued term is "
+            "accepted, since it has no effect either way."
+        )
+
     dfu = ctf_params.get("dfu")
     dfv = ctf_params.get("dfv", dfu)
     dfang = ctf_params.get("dfang", 0.0)

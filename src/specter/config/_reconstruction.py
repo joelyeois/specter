@@ -132,7 +132,6 @@ class ReconstructionConfig:
     scattering_model: Literal["multislice", "rytov", "firstborn", "projection"] = (
         "rytov"
     )
-    aberration_backend: Literal["legacy", "torch_ctf"] = "legacy"
     ews_curvature_sign: Literal["negative", "positive"] = "negative"
     bfactor: float | None = None
     # Hard frequency cutoff (1/A) applied to the simulated images.
@@ -170,9 +169,6 @@ RECONSTRUCTION_HELP: dict[str, str] = {
     "rytov is the default here rather than multislice: the model runs once "
     "per particle per step, and rytov is the cheapest one that still carries "
     "Ewald-sphere curvature.",
-    "aberration_backend": "Which engine computes the transfer function. "
-    "legacy uses aberrations.Aberration; torch_ctf uses the verified "
-    "ctf.LegacyAberrationAdapter port.",
     "ews_curvature_sign": "Sign convention for Ewald-sphere curvature. "
     "negative matches CryoSPARC.",
     "bfactor": "Isotropic B-factor envelope in Angstrom^2 damping "

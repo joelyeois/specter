@@ -4,7 +4,6 @@ from typing import Any, Literal, Sequence
 
 import roma
 import torch
-import torch.nn.functional as F
 from ..progress import status, track
 
 from .. import rotations
@@ -28,7 +27,13 @@ class TiltSeriesGenerator(MicrographGenerator):
         Pre-assembled specimen volume of shape (1, Z, Y, X) -- e.g. the
         output of
         :func:`~specter.pipelines.build_tomogram_generator`/`specter build
-        tomogram`. If ``ice_model``
+        tomogram`. Its Z extent is taken to *be* the specimen's thickness, not
+        a box the specimen sits somewhere inside: the defocus correction
+        measures from the volume's midplane to its Z face
+        (:func:`~specter.aberrations.defocus_midplane_shift`), so vacuum padded
+        on in Z would be read as specimen and shift the simulated defocus by
+        half its thickness. Pass the specimen at its true Z extent and let this
+        class do any padding it needs. If ``ice_model``
         or ``icemaker`` is given, ice is blended into ``volume`` (matching its
         own size and voxel size, masked to voxels with little existing
         scattering potential -- see ``ice_model`` below) before any of this
@@ -158,19 +163,10 @@ class TiltSeriesGenerator(MicrographGenerator):
         effect on the result and exists only to avoid a literal hard edge at the
         outermost boundary of the padded array itself. Default 0.
     z_taper_width : int, optional
-        Cosine taper width in Z pixels at the top and bottom of the volume. Applied
-        after ``z_edge_margin``'s zero-padding (if any), so a nonzero value here
-        smooths the transition into that new zero region rather than merely dimming
-        the sample's own edge slices. Default 0.
-    z_edge_margin : int, optional
-        Zero-pads this many pixels onto each Z edge before any tapering. Unlike XY (a
-        cryo-ET sample continues laterally past any crop -- see ``edge_margin``), Z
-        really is bounded by vacuum above/below the ice, so zero is the physically
-        correct fill here -- but a hard step to zero is still a discontinuity that
-        produces the same kind of tilt-induced Fourier artifact XY does (tilting mixes
-        X and Z), so pair this with ``z_taper_width`` to smooth the transition rather
-        than leaving a cliff. Matters most when ``pad_fft=True`` inflates the working
-        canvas well beyond what ``edge_margin`` alone covers. Default 0 (off).
+        Cosine taper width in Z pixels at the top and bottom of the volume. Fades
+        the sample's own outermost slices, so it trades a little signal for a
+        smoother ice/vacuum transition: tilting mixes X and Z, which turns a hard
+        Z edge into an in-plane discontinuity the propagator sees. Default 0.
     tilt_axis : str, optional
         Axis around which the sample tilts ('x' or 'y'). Default 'x'.
     coincidence_radius : float or torch.Tensor, optional
@@ -233,7 +229,6 @@ class TiltSeriesGenerator(MicrographGenerator):
         slice_batchsize: int = 1,
         pad_volume: bool = True,
         edge_margin: int = 8,
-        z_edge_margin: int = 0,
         taper_width: int = 0,
         z_taper_width: int = 0,
         tilt_axis: str = "x",
@@ -263,11 +258,9 @@ class TiltSeriesGenerator(MicrographGenerator):
         )
         if volume_icemaker is not None:
             # Blend ice into the raw input volume before any of this class's own
-            # tilt-coverage/z-vacuum/taper padding below, so that padding still
-            # operates on (and, for the reflect-padded XY margin, naturally
-            # extends) the ice-filled volume, and the z_edge_margin/taper
-            # regions -- which are meant to be real vacuum, not ice -- stay
-            # untouched.
+            # tilt-coverage/taper padding below, so that padding still operates
+            # on (and, for the reflect-padded XY margin, naturally extends) the
+            # ice-filled volume.
             if verbose:
                 print(
                     f"[TiltSeriesGenerator] Adding ice to volume using {ice_model} model"
@@ -348,31 +341,6 @@ class TiltSeriesGenerator(MicrographGenerator):
                     f"  max_allowed_tilt_with_current_volume\u2248{self.max_allowed_tilt_deg_for_volume:.2f} deg,\n"
                     f"  max_allowed_nxy\u2248{self.max_allowed_nxy}."
                 )
-
-        if z_edge_margin > 0:
-            # Unlike XY (where the sample genuinely continues past our crop -- reflect is
-            # correct) or edge_margin (a small interpolation-slack margin), Z really is
-            # bounded by vacuum above/below the ice: zero-fill is the *physically correct*
-            # answer here, not an approximation. But "correct value" and "safe to use
-            # abruptly" are different things -- multislice's FFT-based propagation doesn't
-            # care whether a discontinuity is physically justified, only that it's a
-            # discontinuity. A hard step from real ice/protein density to exactly zero,
-            # right at the true Z boundary, still produces the same class of artifact once
-            # the sample is tilted (rotation mixes X and Z, so this Z-edge shows up in the
-            # tilted image just like the XY boundary did). So: extend with real zeros
-            # (correct), then taper across the new seam (z_taper_width, right below) so the
-            # transition is gradual rather than a cliff -- mirroring how a real ice/vacuum
-            # interface isn't a mathematical step function either.
-            volume = F.pad(
-                volume,
-                (0, 0, 0, 0, z_edge_margin, z_edge_margin),
-                mode="constant",
-                value=0.0,
-            )
-            print(
-                f"[TiltSeriesGenerator] Zero-padded {z_edge_margin} px at each Z edge "
-                f"(physically correct vacuum above/below the sample)."
-            )
 
         if taper_width > 0 or z_taper_width > 0:
             volume = tilt_geometry.apply_volume_cosine_taper(

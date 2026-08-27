@@ -123,7 +123,7 @@ class GradientSKIcemaker(L.LightningModule):
         f_kernel = interpolate_target_kernel(
             K, mdsim_radial_k, mdsim_f_radial_avg, self.n_molecules
         ).float()
-        self.register_buffer("f_target", f_kernel)
+        self.register_buffer("f_target", f_kernel, persistent=False)
 
         self.dk: float = 1 / self.n / self.dx
         self.f_target_radial: torch.Tensor = radial_profile_3d(f_kernel.cpu())
@@ -143,13 +143,15 @@ class GradientSKIcemaker(L.LightningModule):
         r_bins = (K / self.dk).round().long().flatten()
         n_rbins = int(r_bins.max().item()) + 1
         bin_count = torch.bincount(r_bins, minlength=n_rbins).float().clamp(min=1)
-        self.register_buffer("_r_bins", r_bins)
-        self.register_buffer("_bin_count", bin_count)
+        self.register_buffer("_r_bins", r_bins, persistent=False)
+        self.register_buffer("_bin_count", bin_count, persistent=False)
         self._n_rbins: int = n_rbins
         target_bin_sum = torch.bincount(
             r_bins, weights=f_kernel.flatten(), minlength=n_rbins
         )
-        self.register_buffer("_f_target_rad_1d", target_bin_sum / bin_count)
+        self.register_buffer(
+            "_f_target_rad_1d", target_bin_sum / bin_count, persistent=False
+        )
 
         # Repulsion kernel in FFT convention (r=0 at [0,0,0]).
         # rep_kernel[i,j,k] = 1 if the wrapped displacement (i,j,k) is within
@@ -166,7 +168,9 @@ class GradientSKIcemaker(L.LightningModule):
         R_ker = torch.sqrt(ZZ**2 + YY**2 + XX**2)
         rep_kernel = (R_ker < r_min_vox).float()
         rep_kernel[0, 0, 0] = 0.0  # exclude self-contribution
-        self.register_buffer("_rep_kernel_rfft", torch.fft.rfftn(rep_kernel))
+        self.register_buffer(
+            "_rep_kernel_rfft", torch.fft.rfftn(rep_kernel), persistent=False
+        )
 
         self.positions: Optional[torch.Tensor] = None
 

@@ -138,8 +138,8 @@ class Scattering(L.LightningModule):
             F = torch.exp(1j * torch.pi * self.wavelength * pixel_size * k**2)
 
             # self.register_buffer("F", F)
-            self.register_buffer("F_real", F.real)
-            self.register_buffer("F_imag", F.imag)
+            self.register_buffer("F_real", F.real, persistent=False)
+            self.register_buffer("F_imag", F.imag, persistent=False)
 
         # Fresnel transfer function for first Born
         if scattering_model in ("firstborn", "rytov", "kinematic"):
@@ -163,8 +163,8 @@ class Scattering(L.LightningModule):
                 F_slices.append(f)
             F = torch.stack(F_slices)
             # self.register_buffer("F", F)
-            self.register_buffer("F_real", F.real)
-            self.register_buffer("F_imag", F.imag)
+            self.register_buffer("F_real", F.real, persistent=False)
+            self.register_buffer("F_imag", F.imag, persistent=False)
 
         # Kirkland bandlimit. Built directly against k (already in the same
         # native/unshifted FFT frequency order F is in, DC at index 0) --
@@ -175,7 +175,7 @@ class Scattering(L.LightningModule):
         if klim is not None:
             k_nyquist = 1.0 / (2.0 * pixel_size)
             kmask = (k <= klim * k_nyquist).to(torch.float32)[None, ...]
-            self.register_buffer("kmask", kmask)
+            self.register_buffer("kmask", kmask, persistent=False)
         else:
             self.kmask = 1
 
@@ -555,7 +555,7 @@ class IterativeScattering(L.LightningModule):
         kx = torch.fft.fftfreq(nxy, pixel_size)
         kxx, kyy = torch.meshgrid(kx, kx, indexing="ij")
         k = torch.sqrt(kxx**2 + kyy**2)
-        self.register_buffer("k2", k**2)
+        self.register_buffer("k2", k**2, persistent=False)
 
         # Kirkland bandlimit -- see the note in Scattering.__init__: built
         # directly against k (native/unshifted FFT order), not disk2d().
@@ -563,14 +563,14 @@ class IterativeScattering(L.LightningModule):
         if klim is not None:
             k_nyquist = 1.0 / (2.0 * pixel_size)
             kmask = (k <= klim * k_nyquist).to(torch.float32)[None, ...]
-            self.register_buffer("kmask", kmask)
+            self.register_buffer("kmask", kmask, persistent=False)
         else:
             self.kmask = 1
 
         # Precompute single-step Fresnel propagator if using multislice
         F_step = torch.exp(1j * torch.pi * self.wavelength * pixel_size * k**2)
-        self.register_buffer("F_step_real", F_step.real)
-        self.register_buffer("F_step_imag", F_step.imag)
+        self.register_buffer("F_step_real", F_step.real, persistent=False)
+        self.register_buffer("F_step_imag", F_step.imag, persistent=False)
 
         # Second propagator/bandlimit at the padded canvas size, used only when
         # pad_fft=True (see multislice()).
@@ -580,12 +580,12 @@ class IterativeScattering(L.LightningModule):
             kxx_p, kyy_p = torch.meshgrid(kx_p, kx_p, indexing="ij")
             k_p = torch.sqrt(kxx_p**2 + kyy_p**2)
             F_step_p = torch.exp(1j * torch.pi * self.wavelength * pixel_size * k_p**2)
-            self.register_buffer("F_step_padded_real", F_step_p.real)
-            self.register_buffer("F_step_padded_imag", F_step_p.imag)
+            self.register_buffer("F_step_padded_real", F_step_p.real, persistent=False)
+            self.register_buffer("F_step_padded_imag", F_step_p.imag, persistent=False)
             if klim is not None:
                 k_nyquist = 1.0 / (2.0 * pixel_size)
                 kmask_p = (k_p <= klim * k_nyquist).to(torch.float32)[None, ...]
-                self.register_buffer("kmask_padded", kmask_p)
+                self.register_buffer("kmask_padded", kmask_p, persistent=False)
             else:
                 self.kmask_padded = 1
 

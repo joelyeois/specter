@@ -94,7 +94,7 @@ class Detector(L.LightningModule):
         self.pixel_size = pixel_size
         self.aberration_model = aberration_model
         self.noise_model = noise_model
-        self.register_buffer("mtf", mtf)
+        self.register_buffer("mtf", mtf, persistent=False)
         self.dqe0 = dqe0
         self.n_frames = n_frames
         self.progressbars = progressbars

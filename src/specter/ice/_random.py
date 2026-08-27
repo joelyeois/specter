@@ -71,6 +71,7 @@ class RandomIcemaker(L.LightningModule):
         self.register_buffer(
             "ice_kernel",
             build_atomic_potential_kernel(self.dx, self.parameterization),
+            persistent=False,
         )
 
         self.progressbars = progressbars

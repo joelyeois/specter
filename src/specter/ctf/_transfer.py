@@ -110,8 +110,8 @@ class TransferFunction(nn.Module):
 
         _, _, KX, KY = kgrid_2d(n_pixels, pixel_size)
         k2 = (KX**2 + KY**2).unsqueeze(0)
-        self.register_buffer("k2", k2)
-        self.register_buffer("k", torch.sqrt(k2))
+        self.register_buffer("k2", k2, persistent=False)
+        self.register_buffer("k", torch.sqrt(k2), persistent=False)
 
         if bfactor is None:
             self.bfactor: torch.Tensor | None = None

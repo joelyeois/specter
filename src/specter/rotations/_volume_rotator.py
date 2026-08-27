@@ -276,7 +276,7 @@ class VolumeRotator(L.LightningModule):
                     2 * (cz + 0.5) / nz - 1,
                 ]
             )
-        self.register_buffer("center", center.view(1, 1, 3))
+        self.register_buffer("center", center.view(1, 1, 3), persistent=False)
 
         # The spectrum's DC term always lands at n // 2 under fftshift, so the
         # Fourier path rotates about the RELION centre whatever `origin` is.
@@ -296,7 +296,7 @@ class VolumeRotator(L.LightningModule):
                     2 * (nz // 2 + 0.5) / nz - 1,
                 ]
             )
-        self.register_buffer("center_dc", center_dc.view(1, 1, 3))
+        self.register_buffer("center_dc", center_dc.view(1, 1, 3), persistent=False)
 
         if init_base_grid:
             self._build_base_grid()
@@ -312,7 +312,7 @@ class VolumeRotator(L.LightningModule):
         base_grid = F.affine_grid(
             eye, [1, 1, self.nz, self.ny, self.nx], align_corners=self.align_corners
         )
-        self.register_buffer("base_grid", base_grid)
+        self.register_buffer("base_grid", base_grid, persistent=False)
 
     def _isotropic_scale(
         self, device: str | torch.device, dtype: torch.dtype

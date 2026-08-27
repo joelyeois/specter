@@ -271,7 +271,7 @@ class Reconstructor(_BaseReconstructor):
         self.symmetry_mode = symmetry_mode
         if symmetry is not None:
             sym_rot_matrices = get_rotation_matrices(symmetry)
-            self.register_buffer("sym_rot_matrices", sym_rot_matrices)
+            self.register_buffer("sym_rot_matrices", sym_rot_matrices, persistent=False)
         self.use_cpu_for_symmetry = use_cpu_for_symmetry
 
     def _setup_masks(

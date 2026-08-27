@@ -1176,3 +1176,54 @@ def test_micrograph_unit_potential_scale_skips_the_extra_volume_copy(
         return gen(torch.tensor([0]))
 
     assert torch.allclose(_run(1.0), _run(1.0000001), rtol=1e-4, atol=1e-4)
+
+
+# ---------------------------------------------------------------------------
+# state_dict round-trip
+#
+# `Aberration` builds its frequency grids with `torch.meshgrid`, which returns
+# stride-0 broadcast views. Registered as persistent buffers, those cannot be
+# restored: `load_state_dict` copies into a buffer in place, and writing
+# through a stride whose elements alias one address is refused. They are pure
+# functions of the constructor arguments, so they are not persisted at all.
+# ---------------------------------------------------------------------------
+
+
+def _plain_generator(volume, ctf_params):
+    """A minimal ImageGenerator: no ice, no noise, no detector."""
+    return ImageGenerator(
+        scattering_potential=volume,
+        pixel_size=2.0,
+        quaternions=torch.tensor([[1.0, 0.0, 0.0, 0.0]]),
+        translations=torch.tensor([[0.0, 0.0]]),
+        ctf_params=ctf_params,
+        voltage=300.0,
+        dose_per_angstrom=2.0,
+        scattering_model="multislice",
+        alpha=0.1,
+        verbose=False,
+        progressbars=False,
+    )
+
+
+def test_aberration_frequency_grids_are_not_persisted(small_volume, ctf_params):
+    """Derived frequency grids follow the module across devices without being state."""
+    gen = _plain_generator(small_volume, ctf_params)
+    buffers = gen.aberration._buffers
+    persisted = set(gen.aberration.state_dict())
+    for name in ("k", "k2", "radian", "KY", "KX"):
+        assert name in buffers, f"{name} must stay a buffer so it follows the device"
+        assert name not in persisted, f"{name} is derived and must not be persisted"
+
+
+def test_image_generator_state_dict_round_trips(small_volume, ctf_params):
+    """A model's own state_dict loads back into an identical model."""
+    source = _plain_generator(small_volume, ctf_params)
+    target = _plain_generator(small_volume, ctf_params)
+    target.load_state_dict(source.state_dict(), strict=True)
+
+    torch.manual_seed(0)
+    expected = source.forward(torch.tensor([0]))
+    torch.manual_seed(0)
+    actual = target.forward(torch.tensor([0]))
+    assert torch.allclose(expected, actual)

@@ -190,8 +190,8 @@ class PotentialBuilder(L.LightningModule):
         self.ssn, self.ssdx, self.ssf = compute_supersampling_parameters(dx)
         sR_2d = radial_grid_2d(self.ssn, self.ssdx, convention="torch")
         sR_3d = radial_grid_3d(self.ssn, self.ssdx, convention="torch")
-        self.register_buffer("sR_2d", sR_2d)
-        self.register_buffer("sR_3d", sR_3d)
+        self.register_buffer("sR_2d", sR_2d, persistent=False)
+        self.register_buffer("sR_3d", sR_3d, persistent=False)
 
         self.atomic_numbers = atomic_numbers
         self.unique_elements = torch.unique(atomic_numbers)

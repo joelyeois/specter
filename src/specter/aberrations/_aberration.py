@@ -163,11 +163,20 @@ class Aberration(L.LightningModule):
         KY, KX = torch.meshgrid(kx, kx, indexing="ij")
         k2 = KX**2 + KY**2
         radian = torch.arctan2(KX, KY)
-        self.register_buffer("k", torch.sqrt(k2).unsqueeze(0))
-        self.register_buffer("radian", radian.unsqueeze(0))
-        self.register_buffer("k2", k2.unsqueeze(0))
-        self.register_buffer("KY", KY)
-        self.register_buffer("KX", KX)
+        # Buffers so they follow the module across devices, but non-persistent:
+        # every one is a pure function of n_pixels, pixel_size and voltage, all
+        # of which __init__ already has, so checkpointing them stores nothing a
+        # reconstruction could not rebuild. KY/KX additionally *cannot* be
+        # persisted -- torch.meshgrid returns stride-0 broadcast views, and
+        # load_state_dict restores a buffer with an in-place copy_, which
+        # refuses to write through a stride whose elements alias one address.
+        # A CPU state_dict round-trip raised on them; on the GPU .to() had
+        # already materialised the view, so it only ever failed on the CPU.
+        self.register_buffer("k", torch.sqrt(k2).unsqueeze(0), persistent=False)
+        self.register_buffer("radian", radian.unsqueeze(0), persistent=False)
+        self.register_buffer("k2", k2.unsqueeze(0), persistent=False)
+        self.register_buffer("KY", KY, persistent=False)
+        self.register_buffer("KX", KX, persistent=False)
 
         # dummy tensor for non-existent aberration terms
         self.register_buffer("zero", torch.tensor(0.0))

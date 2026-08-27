@@ -352,13 +352,15 @@ class ImageGeneratorFromCoordinates(ParticleGeneratorBase):
         if V.ndim == 3:
             V = V.unsqueeze(0)
 
+        # "constant" -- see ImageGenerator.__getitem__ for why a single-particle
+        # box zero-pads its protein channel while MicrographGenerator reflects.
         V = pad_volume(
             V,
             self.nxy,
             self.nz,
             self.ice_thickness,
             self.pad_fft,
-            xy_pad_mode="reflect",
+            xy_pad_mode="constant",
         )
         return self.process_volume(V, idx)
 
@@ -683,23 +685,25 @@ class ImageGenerator(ParticleGeneratorBase):
             logger.info("Rotating volume")
         V = self.rotate(self.quaternions[idx], self.translations[idx])
 
-        # "reflect", matching every other pad_volume call site (the
-        # from-coordinates path above, and MicrographGenerator). Padding does
-        # not move the specimen's edge, it decides what lies beyond it, and
-        # the crop at the end returns the original field -- so whatever fills
-        # the margin leaks back into roughly the outer `wavelength * defocus *
-        # k_max` pixels. `pad_volume`'s "constant" default puts vacuum there,
-        # which is an ice/vacuum cliff at the box edge rather than the
-        # statistically correct continuation of a box that ice fills (the
-        # default, ice_model="gd"). Measured against "reflect" at 256 px: the
-        # two differ by 1.4% of image std in the outer 8 px at 8000 A defocus,
-        # rising to 6.5% and reaching 64 px deep with 900 A ice at 15000 A.
+        # This pads the PROTEIN channel only. Ice fills the margin by its own
+        # route (`solvate` reflect-pads it separately) and crowding is built
+        # straight at the padded size, so the margin is never vacuum overall
+        # and the choice here is only about what lies beyond the particle.
+        #
+        # "constant", i.e. no protein beyond the box. "reflect" would mirror
+        # the target particle into the margin, putting deterministic copies of
+        # it just outside the box, mirror-symmetric about each edge and
+        # correlated with the particle being imaged. Real neighbours sit at
+        # random positions and orientations, which is what `crowd` models.
+        # MicrographGenerator reflects instead, and should: its volume is a
+        # whole specimen field, so mirroring continues a statistically similar
+        # one. A single-particle box is not that problem.
         V = pad_volume(
             V,
             self.nxy,
             self.nz,
             self.ice_thickness,
             self.pad_fft,
-            xy_pad_mode="reflect",
+            xy_pad_mode="constant",
         )
         return self.process_volume(V, idx)

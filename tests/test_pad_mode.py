@@ -1,17 +1,23 @@
 """
-Every generator pads its potential with "reflect", not `pad_volume`'s default.
+Every generator states its XY pad mode explicitly, and states the right one.
 
 `pad_volume`'s ``xy_pad_mode`` defaults to "constant" because it is a generic
-array helper, but no imaging path wants vacuum in the margin. Padding does not
-move the specimen's edge, it decides what lies beyond it, and the crop at the
-end returns the original field, so whatever fills the margin leaks back into
-roughly the outer ``wavelength * defocus * k_max`` pixels. "constant" puts an
-ice/vacuum cliff there; "reflect" continues the specimen with matching
-statistics.
+array helper. Relying on that default is what let `ImageGenerator` and
+`ImageGeneratorFromCoordinates` -- the same job, one class apart -- disagree
+silently, so every call site here names its mode even when it matches.
 
-`ImageGenerator` was the one call site that omitted the argument while the
-other three passed it, which is exactly the kind of drift a per-call-site
-convention invites -- hence the AST check rather than a comment.
+The two modes are not a style choice, and the split is not by module:
+
+- **Single-particle boxes zero-pad the protein channel.** "reflect" would
+  mirror the target particle into the margin, placing deterministic copies of
+  it just outside the box, correlated with the particle being imaged. Real
+  neighbours sit at random positions and orientations, which is what `crowd`
+  models. Note this pads the protein only: `solvate` reflect-pads the ice
+  separately and crowding is generated at the padded size, so the margin is
+  never vacuum overall.
+- **`MicrographGenerator` reflects.** Its volume is a whole specimen field, so
+  mirroring continues a statistically similar one rather than inventing
+  correlated copies of a single target.
 """
 
 from __future__ import annotations
@@ -26,7 +32,12 @@ import specter.imagegenerator._generator as generator_module
 from specter.imagegenerator import ImageGenerator
 
 PACKAGE = Path(generator_module.__file__).parent
-MODULES = sorted(PACKAGE.glob("*.py"))
+
+#: module file name -> the xy_pad_mode every pad_volume call in it must name.
+EXPECTED_MODE = {
+    "_generator.py": "constant",  # ImageGenerator, ImageGeneratorFromCoordinates
+    "_micrograph.py": "reflect",  # MicrographGenerator
+}
 
 
 def _pad_volume_calls(path: Path) -> list[ast.Call]:
@@ -40,23 +51,32 @@ def _pad_volume_calls(path: Path) -> list[ast.Call]:
     ]
 
 
-@pytest.mark.parametrize("path", MODULES, ids=lambda p: p.name)
-def test_every_pad_volume_call_asks_for_reflect(path: Path) -> None:
-    calls = _pad_volume_calls(path)
-    if not calls:
-        pytest.skip(f"{path.name} does not call pad_volume")
+@pytest.mark.parametrize("name,expected", sorted(EXPECTED_MODE.items()))
+def test_pad_volume_calls_name_the_expected_mode(name: str, expected: str) -> None:
+    calls = _pad_volume_calls(PACKAGE / name)
+    assert calls, f"{name} no longer calls pad_volume -- update EXPECTED_MODE"
     for call in calls:
         modes = [k.value for k in call.keywords if k.arg == "xy_pad_mode"]
         assert modes, (
-            f"{path.name}:{call.lineno} calls pad_volume without xy_pad_mode, "
-            "so it silently gets the generic 'constant' (vacuum) default."
+            f"{name}:{call.lineno} calls pad_volume without xy_pad_mode, so it "
+            "inherits the generic default instead of stating a choice."
         )
-        assert isinstance(modes[0], ast.Constant) and modes[0].value == "reflect", (
-            f"{path.name}:{call.lineno} pads with {modes[0]!r}, expected 'reflect'."
+        assert isinstance(modes[0], ast.Constant) and modes[0].value == expected, (
+            f"{name}:{call.lineno} pads with {modes[0].value!r}, expected {expected!r}."
         )
 
 
-def test_image_generator_actually_pads_with_reflect() -> None:
+def test_no_unlisted_module_pads() -> None:
+    """A new generator must make the same decision deliberately."""
+    unlisted = sorted(
+        p.name
+        for p in PACKAGE.glob("*.py")
+        if p.name not in EXPECTED_MODE and _pad_volume_calls(p)
+    )
+    assert not unlisted, f"pad_volume called in unlisted module(s): {unlisted}"
+
+
+def test_image_generator_actually_pads_with_constant() -> None:
     """The AST check alone would pass if the call became unreachable."""
     seen: list[str] = []
     original = generator_module.pad_volume
@@ -92,4 +112,4 @@ def test_image_generator_actually_pads_with_reflect() -> None:
     finally:
         generator_module.pad_volume = original
 
-    assert seen == ["reflect"]
+    assert seen == ["constant"]

@@ -68,7 +68,10 @@ def test_modular_pipeline_matches_image_generator():
     T = rotations.translations_angstrom_to_torch(translations, nxy, pixel_size)
     theta = rotations.build_affine_matrix(R, T)
     V = rotator(V0.clone(), theta)
-    V = pad_volume(V, nxy, nz, None, True)
+    # xy_pad_mode must match ImageGenerator's own call, not pad_volume's
+    # "constant" default -- this composition is only a reference for the
+    # generator if it pads the same way.
+    V = pad_volume(V, nxy, nz, None, True, xy_pad_mode="reflect")
 
     scattering = Scattering(
         pad_nxy,

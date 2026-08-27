@@ -78,7 +78,7 @@ looks like, distinct from a wedge, which only changes thickness on one
 side. `ice_tilt` and `ice_profile` compose, so you can express a tilted
 meniscus.
 
-Enabling a profile costs you two things:
+Enabling a profile costs you three things:
 
 - **The thickest column sets the box size, everywhere.** `nz` has to
   hold the deepest part of the film, and multislice runs one full-plane FFT
@@ -92,6 +92,27 @@ Enabling a profile costs you two things:
   its `entry_face_shift`, so you don't need to correct for it. But it means
   a nominal `defocus` value doesn't land at the box's geometric centre the
   way it does for a flat slab.
+- **A `wedge` needs `pad_fft = true`.** Multislice propagates by FFT, so
+  the field is implicitly periodic and the wave leaving one edge re-enters
+  at the opposite one. A flat slab tiles seamlessly, because ice at one
+  edge is statistically identical to ice at the other. A wedge does not:
+  its periodic extension has a thickness step equal to the full span of
+  `ice_thickness_range`, and signal crossing that step carries thick-ice
+  contrast into the thin edge and vice versa.
+
+In a 250-900 Å wedge at 8000 Å defocus, the outer eighth of the field on each
+side reaches 1.6 times the contrast of the interior. Padding removes that and
+leaves the interior unchanged. The reach of the effect is the defocus
+delocalization \(\lambda\,\Delta f\,k_\mathrm{max}\), which is why it grows
+with defocus: roughly 10 px at 1000 Å, 79 px at 8000 Å and 148 px at 15000 Å
+for 1 Å pixels. Padding quadruples the propagation memory, so enable it for a
+wedge rather than leaving it on by default.
+
+A `meniscus` usually does not need it. The artifact scales with the thickness
+difference between *opposite edges* of the field, not with how much the
+thickness varies inside it. A hole centred on the field is symmetric and steps
+by nothing, and even the 4500 Å offset used above steps by only 128 Å, which is
+not measurable. Lateral variation on its own is harmless.
 
 ## Chunking and memory
 

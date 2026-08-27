@@ -683,5 +683,23 @@ class ImageGenerator(ParticleGeneratorBase):
             logger.info("Rotating volume")
         V = self.rotate(self.quaternions[idx], self.translations[idx])
 
-        V = pad_volume(V, self.nxy, self.nz, self.ice_thickness, self.pad_fft)
+        # "reflect", matching every other pad_volume call site (the
+        # from-coordinates path above, and MicrographGenerator). Padding does
+        # not move the specimen's edge, it decides what lies beyond it, and
+        # the crop at the end returns the original field -- so whatever fills
+        # the margin leaks back into roughly the outer `wavelength * defocus *
+        # k_max` pixels. `pad_volume`'s "constant" default puts vacuum there,
+        # which is an ice/vacuum cliff at the box edge rather than the
+        # statistically correct continuation of a box that ice fills (the
+        # default, ice_model="gd"). Measured against "reflect" at 256 px: the
+        # two differ by 1.4% of image std in the outer 8 px at 8000 A defocus,
+        # rising to 6.5% and reaching 64 px deep with 900 A ice at 15000 A.
+        V = pad_volume(
+            V,
+            self.nxy,
+            self.nz,
+            self.ice_thickness,
+            self.pad_fft,
+            xy_pad_mode="reflect",
+        )
         return self.process_volume(V, idx)

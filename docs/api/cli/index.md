@@ -1,4 +1,4 @@
-# specter.cli
+# Command line
 
 `specter` is the command-line entry point to everything in this package. Every
 subcommand loads a TOML config, applies the flags you passed on top of it, and
@@ -33,17 +33,3 @@ usually-correct default.
 ## Every command
 
 --8<-- "docs-includes/cli-index.md"
-
-## Python API
-
-The functions below construct the command objects documented in this section.
-They are of interest when embedding the CLI or adding a subcommand, not when
-running one.
-
-::: specter.cli._cli
-    options:
-      show_root_heading: true
-
-::: specter.cli.simulate
-    options:
-      show_root_heading: true

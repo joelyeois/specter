@@ -136,7 +136,9 @@ filename = "tomogram"
 # of biomolecules, so bulk materials are outside its domain.
 scattering_factors = "shtyrov"        # targets, filler, filaments, microtubules,
                                       # transmembrane proteins
-bulk_scattering_factors = "kirkland"  # the carbon film and gold beads
+bulk_scattering_factors = "kirkland"  # the carbon film and gold beads. No ice
+                                      # here: a tomogram is a dry specimen, and
+                                      # `simulate tiltseries` blends the ice in
 
 # --- Protein packing ---
 # packing_backend = "shape"      # default; "sphere" is faster but ~3x less dense

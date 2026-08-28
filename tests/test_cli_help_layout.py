@@ -47,6 +47,44 @@ GROUPED_CONFIGS = [
     (ReconstructionConfig, _RECONSTRUCT_PARTICLE_GROUPS),
 ]
 
+#: Canonical config -> (its CLI group list, the tables it is expected to
+#: declare, in order). Every canonical config is organised the same way as
+#: the `--help` of the command it drives, so a user reading one already knows
+#: where to look in the other.
+CANONICAL_CONFIGS: dict[str, tuple[list, list[str]]] = {
+    "particle.toml": (
+        _PARTICLE_STACK_GROUPS,
+        ["potential", "microscope", "sampling", "models"]
+        + ["postprocessing", "compute", "output", "job", "advanced"],
+    ),
+    "micrograph.toml": (
+        _MICROGRAPH_GROUPS,
+        ["specimen", "microscope", "models", "dataset"]
+        + ["compute", "output", "job", "advanced"],
+    ),
+    "tilt_series.toml": (
+        _TILT_SERIES_GROUPS,
+        ["specimen", "microscope", "defocus", "tilt_geometry", "models"]
+        + ["postprocessing", "compute", "output", "job", "advanced"],
+    ),
+    # The specimen's contents are arrays of tables with no command-line
+    # spelling and so no panel of their own; they sit where their generation
+    # stage runs, between the Specimen and Picks panels' tables.
+    "tomogram.toml": (
+        _TOMOGRAM_GROUPS,
+        ["specimen", "targets", "filler", "membrane"]
+        + ["membrane_transmembrane_specs", "membrane_settings"]
+        + ["filaments", "microtubules", "carbon_film", "beads"]
+        + ["picks", "compute", "output", "job", "advanced"],
+    ),
+    "ice.toml": (_ICE_GROUPS, ["library", "optimisation", "compute", "output"]),
+    "reconstruct.toml": (
+        _RECONSTRUCT_PARTICLE_GROUPS,
+        ["data", "optimisation", "symmetry", "sanity_check", "compute"]
+        + ["job", "reference", "refinement", "advanced"],
+    ),
+}
+
 
 @pytest.mark.parametrize(
     "config_cls,groups", GROUPED_CONFIGS, ids=lambda x: getattr(x, "__name__", "")
@@ -71,70 +109,52 @@ def test_advanced_panel_is_last(config_cls: type, groups: list) -> None:
     assert titles[-1] == "Advanced"
 
 
-def test_micrograph_toml_tables_mirror_help_panels() -> None:
-    """The canonical config is organised the same way as --help, so a user
-    reading one already knows where to look in the other."""
-    with open(CONFIGS_DIR / "micrograph.toml", "rb") as f:
-        tables = list(tomllib.load(f))
-    expected = ["specimen", "microscope", "models", "dataset", "compute", "output"]
-    assert tables == expected + ["job", "advanced"]
-    assert [title for title, _ in _MICROGRAPH_GROUPS] == [
-        "Specimen",
-        "Microscope",
-        "Models",
-        "Dataset",
-        "Compute",
-        "Output & job tracking",
-        "Advanced",
-    ]
+@pytest.mark.parametrize("filename", CANONICAL_CONFIGS)
+def test_toml_tables_mirror_help_panels(filename: str) -> None:
+    """A canonical config declares the tables it is expected to, in order."""
+    groups, expected = CANONICAL_CONFIGS[filename]
+    with open(CONFIGS_DIR / filename, "rb") as f:
+        assert list(tomllib.load(f)) == expected
 
 
-def test_tomogram_toml_tables_mirror_help_panels() -> None:
-    """Same rule for `build tomogram`. Its specimen contents are arrays of
-    tables with no command-line spelling and so no panel; they sit where
-    their generation stage runs, between the Specimen and Picks panels."""
-    with open(CONFIGS_DIR / "tomogram.toml", "rb") as f:
-        tables = list(tomllib.load(f))
-    assert tables == [
-        "specimen",
-        "targets",
-        "filler",
-        "membrane",
-        "membrane_transmembrane_specs",
-        "membrane_settings",
-        "filaments",
-        "microtubules",
-        "carbon_film",
-        "beads",
-        "picks",
-        "compute",
-        "output",
-        "job",
-        "advanced",
-    ]
-    assert [title for title, _ in _TOMOGRAM_GROUPS] == [
-        "Specimen",
-        "Filler tables",
-        "Membrane",
-        "Filaments",
-        "Picks & segmentation",
-        "Compute",
-        "Output & job tracking",
-        "Advanced",
-    ]
+@pytest.mark.parametrize("filename", CANONICAL_CONFIGS)
+def test_toml_table_order_follows_panel_order(filename: str) -> None:
+    """The rule behind the expected table lists above, checked against the
+    group lists rather than against another hand-written constant: a table
+    holds fields from at most one panel, and the tables run in the order
+    --help prints those panels. A table setting no flag-bearing field at all
+    (an array of tables like [[membrane]], or one whose every line is
+    commented out) names no panel and is skipped."""
+    groups, _ = CANONICAL_CONFIGS[filename]
+    panel_of = {name: title for title, names in groups for name in names}
+    with open(CONFIGS_DIR / filename, "rb") as f:
+        raw = tomllib.load(f)
+
+    sequence = []
+    for table, contents in raw.items():
+        if not isinstance(contents, dict):
+            continue
+        panels = {panel_of[key] for key in contents if key in panel_of}
+        assert len(panels) <= 1, (
+            f"{filename}: [{table}] mixes fields from panels {sorted(panels)}, "
+            "so it mirrors no single one"
+        )
+        sequence += panels
+
+    remaining = iter(title for title, _ in groups)
+    assert all(panel in remaining for panel in sequence), (
+        f"{filename}: tables run {sequence}, which is not in --help's panel "
+        f"order {[title for title, _ in groups]}"
+    )
 
 
-@pytest.mark.parametrize(
-    "filename,groups",
-    [("micrograph.toml", _MICROGRAPH_GROUPS), ("tomogram.toml", _TOMOGRAM_GROUPS)],
-)
-def test_advanced_table_holds_exactly_the_advanced_panel(
-    filename: str, groups: list
-) -> None:
+@pytest.mark.parametrize("filename", CANONICAL_CONFIGS)
+def test_advanced_table_holds_exactly_the_advanced_panel(filename: str) -> None:
     """What [advanced] promises is that everything above it is a decision a
     first run makes, so a field belongs in that table if and only if --help
     puts it in the Advanced panel. Only fields the config actually sets are
     checked: a commented-out line takes its default either way."""
+    groups, _ = CANONICAL_CONFIGS[filename]
     with open(CONFIGS_DIR / filename, "rb") as f:
         raw = tomllib.load(f)
     advanced = {

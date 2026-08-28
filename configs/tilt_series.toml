@@ -13,6 +13,12 @@
 # (pointing at whatever `specter build tomogram` just wrote) rather than
 # hardcoded in this file -- e.g.:
 #   specter simulate tiltseries --volume_path output/tomogram.mrc
+#
+# The tables below appear in the same order as the panels in
+# `specter simulate tiltseries --help`, ending with [advanced]. Everything a
+# first run has to decide is above that table; everything below it has a
+# default that is usually right. Table names are organisation only -- the
+# loader flattens them into one namespace before validating fields.
 
 [specimen]
 # volume_path = "path/to/specimen.mrc"   # uncomment to hardcode instead
@@ -21,22 +27,11 @@ voxel_size = 5.0                # Å/voxel -- MUST match whatever built
                                     # own voxel_size, by default)
 
 [microscope]
-# micrograph_size = 3000            # pixels, square; defaults (commented
-                                     # out) to the loaded volume's own XY
-                                     # extent
 voltage = 300.0                     # kV
 dose_per_tilt = 3.0                # e⁻/Å², per tilt angle
 n_frames = 10                    # movie frames per tilt
 cs = 2.0                           # mm
 alpha = 0.1                        # unitless, amplitude contrast ratio
-
-[envelopes]
-# convergence_angle = 1.0          # mrad, uncomment to enable the Cs envelope
-# cc = 2.0                         # mm, uncomment to enable the Cc envelope
-energy_spread = 0.7                # eV (FWHM)
-deltaV_V = 0.06e-6                 # unitless (ΔV/V)
-deltaI_I = 0.01e-6                 # unitless (ΔI/I)
-dose_envelope = false
 
 [defocus]
 defocus = 22000.0                  # Å (positive = underfocus)
@@ -50,11 +45,6 @@ tilt_axis = "y"                    # x | y
 [models]
 scattering_model = "multislice"    # multislice | firstborn | projection | ctf
 noise_model = "poisson"            # poisson | none
-coincidence_radius = 0.0           # pixels; 0 = plain Poisson, no coincidence loss
-ice_model = "gd"                   # gd | random | none
-# ice_cache_dir = "ice"   # defaults to the cache bundled in the package
-ice_relax_steps = 0                # local MLBOP seam-relaxation steps for ice_model="gd"
-pad_fft = false
 detector_model = "none"            # none | perfect | k3_300kv | k3_200kv
 
 [postprocessing]
@@ -81,3 +71,33 @@ filename = "tilt_series"
 # rather than as the folder files land in directly. Leave output_dir
 # unset to default that root to the project root found by walking up
 # from cwd for an existing .specter marker, like git finds .git.
+
+# --------------------------------------------------------------------------
+# Advanced. Mirrors the --help panel of the same name: a commented-out line
+# means the field keeps its TiltSeriesConfig default.
+# --------------------------------------------------------------------------
+[advanced]
+
+# --- Field of view ---
+# micrograph_size = 3000         # pixels, square; defaults to the loaded
+                                 # volume's own XY extent
+
+# --- Envelopes and dose fractionation ---
+# convergence_angle = 1.0        # mrad, uncomment to enable the Cs envelope
+# cc = 2.0                       # mm, uncomment to enable the Cc envelope
+energy_spread = 0.7                # eV (FWHM)
+deltaV_V = 0.06e-6                 # unitless (ΔV/V)
+deltaI_I = 0.01e-6                 # unitless (ΔI/I)
+dose_envelope = false
+coincidence_radius = 0.0           # pixels; 0 = plain Poisson, no coincidence loss
+
+# --- Ice model ---
+ice_model = "gd"                   # gd | random | none
+# ice_cache_dir = "ice"            # defaults to the cache bundled in the package
+ice_relax_steps = 0                # local MLBOP seam-relaxation steps for ice_model="gd"
+
+# --- Numerics ---
+pad_fft = false
+
+# --- Reproducibility ---
+# seed = 0                       # RNG seed; auto-generated and logged if unset

@@ -25,11 +25,7 @@ tilt_axis = "y"
 [models]
 scattering_model = "multislice"
 noise_model = "poisson"
-ice_model = "gd"          # bundled IceBank cache; try "random" for a faster/cheaper placeholder
-ice_relax_steps = 0
 detector_model = "none"
-coincidence_radius = 0
-pad_fft = true  # fixes multislice edge-wraparound artifacts at this wide tilt range
 
 [compute]
 device = "cuda:0"  # adjust to an available device on your machine, e.g. "cuda:0" or "cpu"
@@ -37,3 +33,11 @@ device = "cuda:0"  # adjust to an available device on your machine, e.g. "cuda:0
 [output]
 output_dir = "tiltseries"
 filename = "tilt_series"
+
+# Advanced, as in configs/tilt_series.toml: everything above is a decision
+# this run makes, everything here has a default that is usually right.
+[advanced]
+coincidence_radius = 0
+ice_model = "gd"          # bundled IceBank cache; try "random" for a faster/cheaper placeholder
+ice_relax_steps = 0
+pad_fft = true  # fixes multislice edge-wraparound artifacts at this wide tilt range

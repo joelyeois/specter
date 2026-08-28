@@ -99,7 +99,7 @@ A gold-standard run writes, into its job directory:
 - `fsc_gold_standard.png`: the final half-map FSC, written once both
   halves finish.
 - `epochs/fsc_halfmap_<NNN>.png`: the half-map FSC recomputed after
-  *every* epoch, not only at the end. Whichever worker finishes an epoch
+  *every* epoch, not once at the end. Whichever worker finishes an epoch
   second finds its sibling's volume already on disk and computes the pair;
   the one that finishes first has nothing to compare against yet and skips.
 - `epochs/fsc_<NNN>_A.png` / `epochs/fsc_<NNN>_B.png`: per-epoch

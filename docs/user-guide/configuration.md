@@ -146,7 +146,7 @@ bare `setattr` would do.
 ## See also
 
 - [Manage jobs](jobs.md): how `output_dir`, `project`, and `job_id` route a
-  run's output, independent of the rest of this page's TOML/CLI mechanics.
+  run's output, independent of this page's TOML/CLI mechanics.
 - The individual command pages ([particle stack](particle-stack.md),
   [micrograph](micrograph.md), [tilt series](tilt-series.md), [build a
   tomogram](build-tomogram.md), [reconstruction](reconstruction.md), [ice

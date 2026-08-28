@@ -96,8 +96,8 @@ Central slice of the raw boolean inside/outside test, before any distance transf
 
 ## Solid to signed distance field
 
-Protein placement and bilayer rasterization need distance to the surface,
-not just inside/outside. SPECTER builds a
+Protein placement and bilayer rasterization need the distance to the
+surface, which an inside/outside test does not give. SPECTER builds a
 [signed distance field](https://en.wikipedia.org/wiki/Signed_distance_function)
 \(\phi\) (negative inside, positive outside, zero at the surface) via two
 [Euclidean distance transforms](https://en.wikipedia.org/wiki/Distance_transform):

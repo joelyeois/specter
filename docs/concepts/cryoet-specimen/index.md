@@ -24,7 +24,7 @@ combination is valid.
 
 | Component | What it is | Module |
 |---|---|---|
-| [Carbon support film](carbon-film.md) | A holey-grid film with a rough, genuinely 3D rim | `specimen._carbon` |
+| [Carbon support film](carbon-film.md) | A holey-grid film with a rough 3D rim | `specimen._carbon` |
 | [Membrane shape](../membrane-shape/index.md) | Organelle geometry: vesicles or wandering tubes | `specimen.membrane._field_*` |
 | [Bilayer & transmembrane proteins](bilayer.md) | Turning that geometry into calibrated potential, and embedding proteins in it | `specimen.membrane._profile`, `._raster`, `._placement` |
 | [Filaments](filaments.md) | Random-walk polymers (F-actin, single protofilaments) | `specimen.filament` |

@@ -147,7 +147,7 @@ with matched-species Shtyrov kernels in one potential volume. `PotentialBuilder`
 and `MicrographSpecimenGenerator`/`TomogramSpecimenGenerator` default to
 `parameterization="shtyrov"` for this reason.
 
-How often that fallback fires depends on hydrogen. Twenty of the forty-two
+Hydrogen decides how often that fallback fires. Twenty of the forty-two
 tabulated species name a hydrogen neighbour, and a species descriptor is built
 from the atoms present in the model, so a methyl carbon in a
 structure without hydrogens is described as `C(C)` rather than `C(HHHC)` and

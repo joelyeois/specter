@@ -61,9 +61,9 @@ effect (`0.0` and `1.0`) if left unset.
 
 ## Validating the twin
 
-Because every imaging parameter matches, a twin dataset should look like
-the real one, not just plausible in isolation. Two checks, in increasing
-order of rigor:
+Because every imaging parameter matches, a twin dataset should reproduce
+the real one rather than resemble a plausible one. Two checks, in
+increasing order of rigor:
 
 **Visual comparison.** Render the same particles the real stack contains
 and compare side by side. [Generate a particle

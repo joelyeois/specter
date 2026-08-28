@@ -99,7 +99,7 @@ label volumes:
 specter build tomogram --config tomogram.toml
 ```
 
-Unlike the particle stack above, this one genuinely needs its config. The
+Unlike the particle stack above, this one needs its config. The
 specimen contents (`[targets]`, `[filler]`, `[[membrane]]`, filaments,
 microtubules, beads) default to empty, so `specter build tomogram` with no
 config renders an empty box. Download

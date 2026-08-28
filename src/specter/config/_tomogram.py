@@ -363,7 +363,7 @@ TOMOGRAM_HELP: dict[str, str] = {
     "placed in (the whole box when [[membrane]] is empty -- 'cytosol' is "
     "then the whole box). Deliberately high by default -- RSA self-limits "
     "at its own physical jamming ceiling rather than erroring, so filler "
-    "simply packs until it jams rather than needing this hand-tuned. Lower "
+    "packs until it jams rather than needing this hand-tuned. Lower "
     "it for a sparser filler layer, or if a small region (e.g. a tight "
     "vesicle lumen) makes the implied candidate pool impractically large.",
     "clip_axes": "(z, y, x) -- True on an axis lets a placed instance's "
@@ -443,7 +443,7 @@ TOMOGRAM_HELP: dict[str, str] = {
     "bead_roughness": "How irregular each gold fiducial's boundary is, as an "
     "RMS fraction of its radius. One number, or a [low, high] pair drawn per "
     "bead so a population mixes near-round and misshapen particles. 0.0 gives "
-    "clean spheres; 0.12-0.20 reads as genuinely irregular.",
+    "clean spheres; 0.12-0.20 reads as an irregular particle.",
     "write_picks": "Write one copick-style .ndjson pick file per species "
     "alongside the volume. Filler species (declared via 'ratio', not "
     "'n_copies') are included by default -- see TomogramProteinSpec's own "

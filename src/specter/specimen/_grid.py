@@ -341,7 +341,7 @@ class BeadGenerator:
 
         Below ~0.06 a bead is visually indistinguishable from a sphere
         while still costing the harmonic machinery; 0.12-0.20 is where it
-        reads as a genuinely irregular particle; 0.0 gives a clean sphere.
+        reads as an irregular particle; 0.0 gives a clean sphere.
         The only exposed knob on the roughness model, since its amplitude
         is the one property you could plausibly measure off EM of a real
         bead prep -- the band limit and spectrum are fixed at

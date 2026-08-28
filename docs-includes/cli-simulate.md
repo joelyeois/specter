@@ -92,7 +92,7 @@ specter simulate particles [OPTIONS]
 | `--output_dir` | `TEXT` | _none_ | Directory to save .mrcs and .star files when untracked. Setting --project or --job_id instead makes this the root of the numbered job tree, so tracking organises output within the folder you chose rather than moving it elsewhere. Unset defaults to &lt;artifact&gt;/ untracked, and to the project root found by walking up from cwd for an existing .specter marker when tracked. |
 | `--filename` | `TEXT` | `particles` | Base name for output files (no extension). |
 | `--project` | `TEXT` | _none_ | Optional: number and track this run through specter.jobs. Not required for tracking -- job_id alone also triggers it. The run lands in &lt;output_dir&gt;/[&lt;project&gt;/]particles/J00N/ with a job.json recording every parameter, the git commit and the run's status. |
-| `--job_id` | `TEXT` | _none_ | Pin the job directory (e.g. J001) rather than auto-assigning the next one: resumes into it if it exists, creates it otherwise. Required (not just recommended) when combining tracking with multi-GPU device strings -- auto-numbering needs one process to decide, but multi-GPU dispatch re-runs this pipeline once per rank. |
+| `--job_id` | `TEXT` | _none_ | Pin the job directory (e.g. J001) rather than auto-assigning the next one: resumes into it if it exists, creates it otherwise. Mandatory when combining tracking with multi-GPU device strings -- auto-numbering needs one process to decide, but multi-GPU dispatch re-runs this pipeline once per rank. |
 
 **Advanced**{ #specter-simulate-particles-advanced }
 

@@ -202,7 +202,7 @@ def _build_ice_command() -> click.RichCommand:
         "`IceBank` to draw from, as an alternative to the one bundled with "
         "specter. Useful when simulations need ice at a pixel size or in a "
         "volume larger than the bundled library covers (256 A cells at 1 "
-        "A/voxel), or simply more independent configurations. Each one is a "
+        "A/voxel), or more independent configurations. Each one is a "
         "full GradientSKIcemaker optimisation against the S(k) and ML-BOP "
         "energy of real amorphous ice, costing tens of minutes at "
         "production scale -- pass several GPUs to --device to shard them, "

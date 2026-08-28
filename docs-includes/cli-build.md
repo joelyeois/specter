@@ -33,7 +33,7 @@ specter build tomogram [OPTIONS]
 | Flag | Type | Default | Description |
 | --- | --- | --- | --- |
 | `--voxel_size` | `FLOAT` | `5.0` | Voxel size in Angstrom. |
-| `--filler_occupancy_fraction` | `FLOAT` | `0.5` | Target packing density for filler species, as a bare-sphere fraction of EACH REGION's own volume it's placed in (the whole box when [[membrane]] is empty -- 'cytosol' is then the whole box). Deliberately high by default -- RSA self-limits at its own physical jamming ceiling rather than erroring, so filler simply packs until it jams rather than needing this hand-tuned. Lower it for a sparser filler layer, or if a small region (e.g. a tight vesicle lumen) makes the implied candidate pool impractically large. |
+| `--filler_occupancy_fraction` | `FLOAT` | `0.5` | Target packing density for filler species, as a bare-sphere fraction of EACH REGION's own volume it's placed in (the whole box when [[membrane]] is empty -- 'cytosol' is then the whole box). Deliberately high by default -- RSA self-limits at its own physical jamming ceiling rather than erroring, so filler packs until it jams rather than needing this hand-tuned. Lower it for a sparser filler layer, or if a small region (e.g. a tight vesicle lumen) makes the implied candidate pool impractically large. |
 
 **Filler tables**{ #specter-build-tomogram-filler-tables }
 
@@ -95,12 +95,12 @@ specter build tomogram [OPTIONS]
 | `--packing_backend` | `TEXT` | `shape` | Protein collision geometry: 'shape' (default, the real rotated footprint against an occupancy grid) or 'sphere' (one circumscribing sphere per instance). 'shape' reaches several times the density; 'sphere' saturates around 0.03-0.09 volume fraction, but is faster. |
 | `--packing_max_retries` | `INTEGER` | `1500` | Trial positions per instance for packing_backend='shape'. Sets a packing stage's attempt ceiling; pairs with the packer's own stall_patience, which cuts that budget short once a species saturates. |
 | `--packing_voxel_size` | `FLOAT` | _none_ | Run packing_backend='shape' collision on a coarser grid than the render, an integer multiple of voxel_size. Unset = automatic, which only coarsens once the packing grid would be too large to hold; ordinary boxes are unaffected. |
-| `--bead_roughness` | `TEXT` | `0.12` | How irregular each gold fiducial's boundary is, as an RMS fraction of its radius. One number, or a [low, high] pair drawn per bead so a population mixes near-round and misshapen particles. 0.0 gives clean spheres; 0.12-0.20 reads as genuinely irregular. |
+| `--bead_roughness` | `TEXT` | `0.12` | How irregular each gold fiducial's boundary is, as an RMS fraction of its radius. One number, or a [low, high] pair drawn per bead so a population mixes near-round and misshapen particles. 0.0 gives clean spheres; 0.12-0.20 reads as an irregular particle. |
 | `--seed` | `INTEGER` | _none_ | Random seed. |
 
 ## `specter build ice` { #specter-build-ice }
 
-Generate a library of amorphous-ice configurations for `IceBank` to draw from, as an alternative to the one bundled with specter. Useful when simulations need ice at a pixel size or in a volume larger than the bundled library covers (256 A cells at 1 A/voxel), or simply more independent configurations. Each one is a full GradientSKIcemaker optimisation against the S(k) and ML-BOP energy of real amorphous ice, costing tens of minutes at production scale -- pass several GPUs to --device to shard them, and re-run the same command to resume an interrupted run. Point a simulation config's ice_cache_dir at the output directory to use the result. A TOML config (--config) is loaded first when given, otherwise every setting takes its built-in default -- every flag below is optional and, if given, overrides one field of it.
+Generate a library of amorphous-ice configurations for `IceBank` to draw from, as an alternative to the one bundled with specter. Useful when simulations need ice at a pixel size or in a volume larger than the bundled library covers (256 A cells at 1 A/voxel), or more independent configurations. Each one is a full GradientSKIcemaker optimisation against the S(k) and ML-BOP energy of real amorphous ice, costing tens of minutes at production scale -- pass several GPUs to --device to shard them, and re-run the same command to resume an interrupted run. Point a simulation config's ice_cache_dir at the output directory to use the result. A TOML config (--config) is loaded first when given, otherwise every setting takes its built-in default -- every flag below is optional and, if given, overrides one field of it.
 
 ```text
 specter build ice [OPTIONS]

@@ -241,7 +241,7 @@ PARTICLE_STACK_HELP: dict[str, str] = {
     "every parameter, the git commit and the run's status.",
     "job_id": "Pin the job directory (e.g. J001) rather than auto-assigning "
     "the next one: resumes into it if it exists, creates it otherwise. "
-    "Required (not just recommended) when combining tracking with "
+    "Mandatory when combining tracking with "
     "multi-GPU device strings -- auto-numbering needs one process to "
     "decide, but multi-GPU dispatch re-runs this pipeline once per rank.",
     "pdb_cache_dir": "Where downloaded PDB/mmCIF structures are cached. An "

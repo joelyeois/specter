@@ -85,8 +85,8 @@ Measured off deposited microtubule reconstructions
 
 The last row is the one that matters. The stagger isn't a fixed
 property of the lateral bond: a lattice with a different protofilament
-number accommodates it by sliding the lateral bond, which keeps
-protofilaments essentially parallel to the tube axis at every \(N\).
+number accommodates it by sliding the lateral bond, which keeps the
+protofilaments close to parallel with the tube axis at every \(N\).
 
 !!! warning "No supertwist"
     Non-13-protofilament microtubules do supertwist slightly, and

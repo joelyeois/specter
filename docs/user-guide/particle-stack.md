@@ -148,7 +148,7 @@ running CryoSPARC. But `docs-figures/data/empiar-11377-mixed-2dclasses.csv`
 holds the per-particle class assignments behind it, committed to the repo.
 [`docs-figures/particle_stack_empiar_11377.py`](https://github.com/joelyeois/specter/blob/main/docs-figures/particle_stack_empiar_11377.py)
 regenerates both figures. For the full 2000-particle `.cs`-driven workflow
-(not just the 5-row demo slice), see [Generate a CryoSPARC dataset
+rather than the 5-row demo slice, see [Generate a CryoSPARC dataset
 twin](dataset-twin.md).
 
 ## Inspecting the forward model (exit waves)
@@ -178,7 +178,7 @@ of a forward pass, but only until a single pass already saturates the device;
 beyond that point a larger batch consumes memory in proportion to its size
 without reducing the time per particle.
 
-Which bound binds depends on the box. At a 256-pixel box one particle covers
+The box size decides which bound binds. At a 256-pixel box one particle covers
 67 million padded voxels and saturates a current GPU on its own, so `"auto"`
 resolves to 2. At a 64-pixel box a particle covers 1 million, and batching is
 worth roughly a factor of two. The CLI prints the chosen value at the start of
@@ -190,7 +190,7 @@ batchsize='auto' -> 2 particle(s) per pass (~3.2 GiB estimated peak, 42.5 GiB fr
 
 The estimated peak there is a small fraction of what is free, which is the
 saturation bound binding rather than the memory one: the run is not short of
-memory, a larger batch simply would not go faster.
+memory, a larger batch would not go faster.
 
 Set an integer instead to pin it, worth doing when benchmarking, when
 sharing a GPU with a job that will grow after SPECTER has taken its reading,
@@ -201,9 +201,9 @@ documents both bounds along with their measured basis.
 ## Multi-GPU
 
 The default is `device = "cuda"`, which uses the GPU when there is one and
-falls back to the CPU, with a warning, when there is not. An explicit index is
-taken literally: `"cuda:0"` or `"0,1"` names particular hardware and fails
-rather than running somewhere else.
+falls back to the CPU, with a warning, when there is not. An explicit index
+names particular hardware: `"cuda:0"` or `"0,1"` fails rather than running
+somewhere else.
 
 `device` accepts a comma-separated list of GPU indices (e.g. `"0,1,2,3"`) to
 split particle generation across multiple GPUs via Lightning's DDP

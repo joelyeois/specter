@@ -1,35 +1,24 @@
-# Canonical default config for `specter simulate tiltseries` and the
-# create_tilt_series demo notebooks, loaded via
-# specter.config.load_config("...", TiltSeriesConfig).
-#
-# This is the IMAGING half of the two-stage cryo-ET pipeline only:
-#   1. `specter build tomogram` (configs/tomogram.toml) builds a specimen
-#      volume and writes it to disk as a .mrc file.
-#   2. This config loads that volume (volume_path) and simulates the
-#      tilted acquisition (multislice scattering, CTF, dose, detector,
-#      noise, ice).
-#
-# volume_path is left unset here since it's normally set programmatically
-# (pointing at whatever `specter build tomogram` just wrote) rather than
-# hardcoded in this file -- e.g.:
-#   specter simulate tiltseries --volume_path output/tomogram.mrc
-#
-# The tables below appear in the same order as the panels in
-# `specter simulate tiltseries --help`, ending with [advanced]. Everything a
-# first run has to decide is above that table; everything below it has a
-# default that is usually right. Table names are organisation only -- the
-# loader flattens them into one namespace before validating fields.
+# Canonical default config for `specter simulate tiltseries`.
+# Any field can be overridden on the command line, e.g.:
+#   specter simulate tiltseries --config configs/tilt_series.toml --n_tilts 41
+
+# Full field docs: docs/user-guide/tilt-series.md.
+
+# This is the IMAGING half of the two-stage cryo-ET pipeline: `specter build
+# tomogram` (configs/tomogram.toml) writes a specimen volume, and this config
+# loads it (volume_path) and simulates the tilted acquisition. volume_path is
+# left unset since it normally points at whatever the build step just wrote:
+#   specter simulate tiltseries --volume_path tomograms/tomogram.mrc
 
 [specimen]
 # volume_path = "path/to/specimen.mrc"   # uncomment to hardcode instead
-voxel_size = 5.0                # Å/voxel -- MUST match whatever built
-                                    # the volume (configs/tomogram.toml's
-                                    # own voxel_size, by default)
+voxel_size = 5.0                   # Å/voxel -- MUST match whatever built the volume
+                                   # (configs/tomogram.toml's own voxel_size, by default)
 
 [microscope]
-voltage = 300.0                     # kV
+voltage = 300.0                    # kV
 dose_per_tilt = 3.0                # e⁻/Å², per tilt angle
-n_frames = 10                    # movie frames per tilt
+n_frames = 10                      # movie frames per tilt
 cs = 2.0                           # mm
 alpha = 0.1                        # unitless, amplitude contrast ratio
 
@@ -52,18 +41,13 @@ normalize_tilt_series = false
 save_exitwaves = false
 
 [compute]
-device = "cuda"                    # cpu | cuda | cuda:0. "cuda" falls back to the CPU, with
-                                   # a warning, when none is available; "cuda:0" does not.
+device = "cuda"                    # cpu | cuda | cuda:0 -- "cuda" falls back to the CPU with
+                                   # a warning when none is available; "cuda:0" does not
 
 [output]
 output_dir = "tiltseries"
 filename = "tilt_series"
 
-# Job tracking (opt-in) -- set project or job_id to route output through
-# specter.jobs instead of output_dir/filename above: the directory becomes
-# output_dir/[project/]tiltseries/J00N/, numbered, with a job.json
-# recording every parameter, the git commit and the run's status. Neither
-# is required -- leaving both unset keeps the flat behavior above exactly.
 [job]
 # project = "my-project"
 # job_id = "J001"
@@ -72,15 +56,10 @@ filename = "tilt_series"
 # unset to default that root to the project root found by walking up
 # from cwd for an existing .specter marker, like git finds .git.
 
-# --------------------------------------------------------------------------
-# Advanced. Mirrors the --help panel of the same name: a commented-out line
-# means the field keeps its TiltSeriesConfig default.
-# --------------------------------------------------------------------------
 [advanced]
 
 # --- Field of view ---
-# micrograph_size = 3000         # pixels, square; defaults to the loaded
-                                 # volume's own XY extent
+# micrograph_size = 3000         # pixels, square; defaults to the loaded volume's XY extent
 
 # --- Envelopes and dose fractionation ---
 # convergence_angle = 1.0        # mrad, uncomment to enable the Cs envelope
@@ -91,10 +70,10 @@ deltaI_I = 0.01e-6                 # unitless (ΔI/I)
 dose_envelope = false
 coincidence_radius = 0.0           # pixels; 0 = plain Poisson, no coincidence loss
 
-# --- Ice model ---
+# --- Ice ---
 ice_model = "gd"                   # gd | random | none
 # ice_cache_dir = "ice"            # defaults to the cache bundled in the package
-ice_relax_steps = 0                # local MLBOP seam-relaxation steps for ice_model="gd"
+ice_relax_steps = 0                # local MLBOP seam-relaxation steps, ice_model="gd" only
 
 # --- Numerics ---
 pad_fft = false

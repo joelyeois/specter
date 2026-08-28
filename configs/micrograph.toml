@@ -1,12 +1,8 @@
 # Canonical default config for `specter simulate micrograph`.
 # Any field can be overridden on the command line, e.g.:
 #   specter simulate micrograph --config configs/micrograph.toml --n_micrographs 10
-#
-# The tables below appear in the same order as the panels in
-# `specter simulate micrograph --help`, ending with [advanced]. Everything a
-# first run has to decide is above that table; everything below it has a
-# default that is usually right. Table names are organisation only -- the
-# loader flattens them into one namespace before validating fields.
+
+# Full field docs: docs/user-guide/micrograph.md.
 
 [specimen]
 pdb_source = "6bdf"
@@ -33,18 +29,13 @@ n_micrographs = 1
 normalize_micrographs = false
 
 [compute]
-device = "cuda"                  # cpu | cuda | cuda:0. "cuda" falls back to the CPU, with a
-                                 # warning, when none is available; "cuda:0" does not.
+device = "cuda"                  # cpu | cuda | cuda:0 -- "cuda" falls back to the CPU with
+                                 # a warning when none is available; "cuda:0" does not
 
 [output]
 output_dir = "micrographs"
 filename = "micrographs"
 
-# Job tracking (opt-in) -- set project or job_id to route output through
-# specter.jobs instead of output_dir/filename above: the directory becomes
-# output_dir/[project/]micrographs/J00N/, numbered, with a job.json
-# recording every parameter, the git commit and the run's status. Neither
-# is required -- leaving both unset keeps the flat behavior above exactly.
 [job]
 # project = "my-project"
 # job_id = "J001"
@@ -53,31 +44,13 @@ filename = "micrographs"
 # unset to default that root to the project root found by walking up
 # from cwd for an existing .specter marker, like git finds .git.
 
-# --------------------------------------------------------------------------
-# Advanced. Mirrors the --help panel of the same name: a commented-out line
-# means the field keeps its MicrographConfig default.
-# --------------------------------------------------------------------------
 [advanced]
 
 # --- Structure handling ---
 # pdb_cache_dir = "~/.cache/specter/pdb"   # default; set $SPECTER_PDB_CACHE to move it,
-                                           # e.g. onto scratch. Downloads only --
-                                           # your own files are read where they are.
-#
-# Shtyrov types atoms by their bonded neighbours, and 20 of its 42 species name a
-# hydrogen -- which depositions omit. Install the Monomer Library and point
-# $CLIBD_MON at it to supply them; without it ~44% of a protein falls back to
-# per-element Peng. See docs/installation.md.
-#
-# The variable is not the only way in: set monomer_library_path below to record
-# the library in this config instead. Prefer that when a run has to be
-# reproducible from its config alone -- unlike pdb_cache_dir, this choice
-# changes the rendered potential, so a config omitting it does not fully
-# describe what it produced. Unset, $CLIBD_MON still applies.
-# monomer_library_path = "~/monomers"
-#
+# monomer_library_path = "~/monomers" #  point to Monomer library or set at $CLIBD_MON
 # The default, "auto", needs no setting: it keeps hydrogens the file already
-# carries and adds them only when it has none.
+# carries and adds them only when it has none
 # readd_hydrogens = "auto"    # auto | true | false
 
 # --- Envelopes and dose fractionation ---
@@ -88,14 +61,13 @@ energy_spread = 0.7            # eV (FWHM)
 deltaV_V = 0.06e-6             # unitless (ΔV/V)
 deltaI_I = 0.01e-6             # unitless (ΔI/I)
 dose_envelope = false
-coincidence_radius = 0.0       # pixels; 0 = plain Poisson, no coincidence loss; single value, or [low, high]
+coincidence_radius = 0.0       # pixels; 0 = plain Poisson, no coincidence loss; single value or [low, high]
 
 # --- Ice model and thickness profile ---
+# The volume is sized by the THICKEST column and multislice costs one full-plane
+# FFT per slice regardless of what it holds, so a profile costs what its
+# thickest column costs over the whole field.
 ice_model = "gd"                 # gd | random | none
-# Lateral ice thickness profile. "flat" (the default) is a uniform slab.
-# The volume is sized by the THICKEST column and multislice costs one
-# full-plane FFT per slice regardless of what it holds, so a profile costs
-# what its thickest column costs over the whole field.
 ice_profile = "flat"             # flat | wedge | meniscus
 # ice_thickness_range = [250.0, 900.0]  # Å, wedge only; overrides ice_thickness
 # ice_profile_angle = 0.0        # degrees, wedge ramp direction
@@ -108,14 +80,13 @@ ice_profile = "flat"             # flat | wedge | meniscus
 # --- Crowding ---
 # crowd_min_distance = 100.0     # Å, uncomment to crowd particles; defaults to pdb.max_diameter
 # crowd_max_distance_z = 50.0    # Å
-crowd_chunk_size = 1          # crowding duplicate volumes rotated per batch. Rotating them
-                              # all at once is what a micrograph cannot afford; 1 is also the
-                              # fastest setting measured, since wall time is flat in this while
-                              # peak memory grows linearly. Raise only if you have a reason.
+crowd_chunk_size = 1             # duplicate volumes rotated per batch; rotating them all at
+                                 # once is what a micrograph cannot afford, and 1 is also the
+                                 # fastest measured -- peak memory grows linearly with it
 water_air_interface = true
 
 # --- Numerics ---
-potential_scale = 1.0            # unitless; single value, or [low, high] (values < 1 approximate thicker ice)
+potential_scale = 1.0            # unitless; single value, or [low, high] (< 1 approximates thicker ice)
 pad_fft = false
 
 # --- Diagnostics and reproducibility ---

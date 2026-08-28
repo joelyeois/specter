@@ -1,37 +1,25 @@
 # Canonical default config for `specter reconstruct particle`.
-# Full field docs: docs/user-guide/reconstruction.md
-# (or run `specter reconstruct particle --help`).
-#
-# Every flag on the CLI overrides the matching field below.
-#
-# Unlike the `specter simulate` commands, this one has no runnable default:
-# the three fields under [data] name a real dataset, and the paths below are
-# placeholders. Point them at your own .cs file and particle stack, or pass
-# --cs_file/--mrc_file/--dose_per_angstrom on the command line.
+# Any field can be overridden on the command line, e.g.:
+#   specter reconstruct particle --config configs/reconstruct.toml --epochs 20
 
+# Full field docs: docs/user-guide/reconstruction.md.
 
-# =============================================================================
-# DATA
-# Poses, CTF parameters and per-particle scale come from the CryoSPARC .cs
-# file; the .mrc/.mrcs stack is indexed by it. dose_per_angstrom sets the
-# Poisson statistics the loss is weighted by, so it has to be the dataset's
-# real fluence, not a nominal one.
-# =============================================================================
+# Unlike the `specter simulate` commands, this one has no runnable default: the
+# paths under [data] are placeholders naming a real dataset. Point them at your
+# own .cs file and particle stack, or pass --cs_file/--mrc_file/
+# --dose_per_angstrom on the command line.
 
+# Poses, CTF parameters and per-particle scale come from the CryoSPARC .cs file;
+# the .mrc/.mrcs stack is indexed by it.
 [data]
 cs_file = "path/to/particles.cs"
 mrc_file = "path/to/particles.mrc"
-dose_per_angstrom = 40.0
-halfset = "gold"       # "gold" (default) reconstructs A and B and computes the
-                       # halfmap FSC between them; "A" | "B" reconstructs just
-                       # that half (e.g. a quick test); "all" ignores the split
-                       # and reconstructs every particle as one volume
-# num_particles = 10000  # reconstruct only the first N, instead of all
-
-
-# =============================================================================
-# OPTIMISATION
-# =============================================================================
+dose_per_angstrom = 40.0   # the dataset's real fluence, not a nominal one: it sets the
+                           # Poisson statistics the loss is weighted by
+halfset = "gold"           # "gold" reconstructs A and B and computes the halfmap FSC
+                           # between them; "A" | "B" reconstructs just that half;
+                           # "all" ignores the split and reconstructs one volume
+# num_particles = 10000    # reconstruct only the first N, instead of all
 
 [optimisation]
 epochs = 5
@@ -40,102 +28,59 @@ lr = 0.1               # volume learning rate; unset to freeze the volume
 scheduler = "LambdaLR"
 lr_decay = 0.1         # LambdaLR only: multiplier = 1 / (1 + lr_decay * sqrt(step))
 
-
-# =============================================================================
-# SYMMETRY
 # Omit `symmetry` for C1. Lower symmetry_batchsize if applying the operators
 # runs out of memory on a large box.
-# =============================================================================
-
 [symmetry]
 # symmetry = "I1"
 symmetry_mode = "fourier"
 # symmetry_batchsize = 3
 
-
-# =============================================================================
-# SANITY CHECK
-# One epoch on binned images: every file path, .cs field and physics setting
-# is exercised at a fraction of the cost. Run this before a multi-hour job.
-# =============================================================================
-
+# One epoch on binned images: every file path, .cs field and physics setting is
+# exercised at a fraction of the cost. Run this before a multi-hour job.
 [sanity_check]
 test_run = false
 bin_factor = 8
-
-
-# =============================================================================
-# COMPUTE
-# =============================================================================
 
 [compute]
 device = "cuda"        # cpu | cuda | cuda:1 | 0,1 (trains across both via DDP)
 precision = "16-mixed" # forced to 32 on CPU
 num_workers = 8
 
-
-# =============================================================================
-# OUTPUT & JOB TRACKING
-# Every run is numbered and tracked -- there's no untracked mode, the way
+# Every run is numbered and tracked -- there is no untracked mode, the way
 # neither RELION nor CryoSPARC has one. The directory is
-# <output_dir>/[project/]reconstructions/J00N/ -- project comes right
-# after output_dir, ahead of the reconstructions/ job-type subfolder, so a
-# project's whole history can eventually live in one place as other
-# pipelines gain project tracking too. `project` is optional, not required:
-# leaving it unset doesn't mean untracked, it just drops the project-name
-# segment, using output_dir's implicit default project. Numbering (J001,
-# J002, ...) is shared across job types within a project, not restarted per
-# type. A job.json always records every parameter, the git commit and the
-# run's status (including resolution_gold_standard, once computed). Pinning
-# `job_id` resumes into an existing directory, e.g. for a manual
-# halfset="A" then halfset="B" pair.
-# =============================================================================
-
+# <output_dir>/[project/]reconstructions/J00N/, with a job.json recording every
+# parameter, the git commit and the run's status. Numbering is shared across job
+# types within a project. Pinning `job_id` resumes into an existing directory,
+# e.g. for a manual halfset="A" then halfset="B" pair.
 [job]
 # project = "empiar-10202"   # optional: splits one output_dir into named projects
 # job_id = "J001"
-# output_dir = "."   # the ROOT of the numbered job tree (every
-                               # reconstruction is tracked). Defaults to the
-                               # project root found by walking up from cwd for
-                               # an existing .specter marker, like git finds .git
+# output_dir = "."           # the ROOT of the numbered job tree. Defaults to the project
+                             # root found by walking up from cwd for an existing .specter
+                             # marker, like git finds .git.
 
-
-# =============================================================================
-# REFERENCE MAPS
 # Reporting only -- these are never optimised against. cryosparc_ref is only
-# plotted when fsc_ref is given too.
-# =============================================================================
-
+# plotted when fsc_ref is given too, and takes a comma-separated "<A>,<B>" pair
+# for a gold-standard run.
 [reference]
 # fsc_ref = "path/to/reference.mrc"
 # fsc_mask = "path/to/mask.mrc"
 # cryosparc_ref = "path/to/cryosparc_volume.mrc"
 use_2d_mask = false
 
-
-# =============================================================================
-# REFINEMENT (UNVERIFIED)
-# Rotation, translation and defocus refinement are wired in, but no test
-# checks the recovered values against ground truth. Treat a run with these
-# set as an experiment rather than a result.
-# =============================================================================
-
+# Rotation, translation and defocus refinement are wired in, but no test checks
+# the recovered values against ground truth. Treat a run with these set as an
+# experiment rather than a result.
 [refinement]
 # lr_R = 1e-4
 # lr_T = 1e-2
 # lr_D = 1e2
 defocus_offset = 0.0   # Angstrom, added to every particle's dfu/dfv
 
-
-# =============================================================================
-# ADVANCED
-# The forward model itself. scattering_model defaults to rytov rather than the
-# simulator's multislice: the model runs once per particle per step, and rytov
-# is the cheapest one that still carries Ewald-sphere curvature.
-# =============================================================================
-
 [advanced]
-scattering_model = "rytov"
+scattering_model = "rytov"        # defaults to rytov rather than the simulator's multislice:
+                                  # the model runs once per particle per step, and rytov is the
+                                  # cheapest one that still carries Ewald-sphere curvature
 ews_curvature_sign = "negative"   # matches CryoSPARC
 rotate_mode = "real"
 learn_noise_model = false

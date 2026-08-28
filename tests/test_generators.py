@@ -1261,3 +1261,46 @@ def test_both_generators_forward_ice_parameterization(
     )
     assert from_coords.icemaker.parameterization == "lobato"
     assert from_volume.icemaker.parameterization == "lobato"
+
+
+def test_sibling_generators_agree_on_their_shared_ice_defaults(
+    small_coords, small_volume, ctf_params
+):
+    """The two image generators must not drift apart unnoticed.
+
+    Each regression fixture below pins a generator against its OWN past and
+    never against its sibling, so the pair can diverge with the suite green
+    -- which is exactly what happened: ImageGenerator honoured
+    ice_parameterization while ImageGeneratorFromCoordinates ignored it, and
+    the two fixtures were being generated with different ice for months.
+
+    Comparing the resolved icemakers rather than the images keeps this cheap
+    and specific: it fails on the settings that drifted, not on a pixel
+    difference that could come from anywhere.
+    """
+    coords, atomic_numbers = small_coords
+    common = dict(
+        nxy=16,
+        pixel_size=2.0,
+        quaternions=torch.tensor([[1.0, 0.0, 0.0, 0.0]]),
+        translations=torch.tensor([[0.0, 0.0]]),
+        ctf_params=ctf_params,
+        voltage=300.0,
+        dose_per_angstrom=2.0,
+        ice_model="random",
+        verbose=False,
+    )
+    from_coords = ImageGeneratorFromCoordinates(
+        coordinates=coords, atomic_numbers=atomic_numbers, **common
+    )
+    from_volume = ImageGenerator(
+        scattering_potential=small_volume,
+        **{k: v for k, v in common.items() if k != "nxy"},
+    )
+
+    # Neither was told, so both must land on the same default.
+    assert (
+        from_coords.icemaker.parameterization == from_volume.icemaker.parameterization
+    )
+    # ... and that default is the bulk-material one, not PotentialBuilder's.
+    assert from_coords.icemaker.parameterization == "kirkland"

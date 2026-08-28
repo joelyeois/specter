@@ -114,6 +114,7 @@ class MicrographSpecimenGenerator(L.LightningModule):
         ice_cache_dir: str | None = None,
         icemaker: IceBank | RandomIcemaker | None = None,
         ice_relax_steps: int = 0,
+        ice_parameterization: str = "kirkland",
         water_air_interface: bool = True,
         progressbars: bool = True,
         chunk_size: int = 1,
@@ -168,6 +169,7 @@ class MicrographSpecimenGenerator(L.LightningModule):
             nz=nz,
             ice_cache_dir=ice_cache_dir,
             icemaker=icemaker,
+            parameterization=ice_parameterization,
         )
         if icemaker is not None:
             self.ice_model = icemaker.method

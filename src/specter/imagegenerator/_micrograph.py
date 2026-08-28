@@ -177,6 +177,7 @@ class MicrographGenerator(BaseImager):
         ice_thickness: float | None = None,
         ice_profile: IceProfile | None = None,
         ice_cache_dir: str | None = None,
+        ice_parameterization: str = "kirkland",
         icemaker: IceBank | RandomIcemaker | None = None,
         ice_relax_steps: int = 0,
         crowd_min_distance: float | None = None,
@@ -315,6 +316,7 @@ class MicrographGenerator(BaseImager):
                 nz=volume.shape[-3],
                 ice_cache_dir=ice_cache_dir,
                 icemaker=icemaker,
+                parameterization=ice_parameterization,
             )
             if volume_icemaker is not None:
                 if self.verbose:

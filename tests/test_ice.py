@@ -453,3 +453,40 @@ def test_bulk_materials_use_kirkland_not_shtyrov():
     # ... and the shtyrov proxy is exactly what that guards against.
     shtyrov_carbon = CarbonFilmGenerator(voxel_size=2.0, parameterization="shtyrov")
     assert shtyrov_carbon.mean_inner_potential > carbon.mean_inner_potential
+
+
+def test_every_resolve_icemaker_call_forwards_a_parameterization():
+    """No call site may silently inherit resolve_icemaker's default.
+
+    This defect occurred five separate times: run_micrograph,
+    ImageGeneratorFromCoordinates, TiltSeriesGenerator, MicrographGenerator
+    and MicrographSpecimenGenerator each built an icemaker without saying
+    which scattering factors to use, so each silently took whatever the
+    library default happened to be. Two of them were invisible until that
+    default changed, and one had the two image generators rendering ice
+    differently from each other while the suite stayed green.
+
+    Source-level rather than behavioural on purpose: the failure is a missing
+    argument at a call site, so the call sites are what to check. A caller
+    that genuinely wants the default must still say so explicitly.
+    """
+    import ast
+    from pathlib import Path
+
+    src = Path(__file__).resolve().parent.parent / "src" / "specter"
+    offenders = []
+    for path in src.rglob("*.py"):
+        tree = ast.parse(path.read_text())
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            fn = node.func
+            name = fn.id if isinstance(fn, ast.Name) else getattr(fn, "attr", None)
+            if name != "resolve_icemaker":
+                continue
+            if not any(k.arg == "parameterization" for k in node.keywords):
+                offenders.append(f"{path.relative_to(src)}:{node.lineno}")
+
+    assert not offenders, (
+        "resolve_icemaker called without parameterization= at: " + ", ".join(offenders)
+    )

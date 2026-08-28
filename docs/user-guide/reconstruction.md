@@ -57,8 +57,9 @@ specter reconstruct particle --config configs/reconstruct.toml --test_run
 `--test_run` fits one epoch on `--bin_factor`-binned images (default 8) and
 stops. It touches every `.cs` field, every physics setting, and the output
 layout a full run would, so a config mistake surfaces in seconds instead of
-after a multi-hour job. Run `specter reconstruct particle --help` for the
-full field-by-field reference.
+after a multi-hour job. The
+[command reference](../api/cli.md#specter-reconstruct-particle) documents
+every field.
 
 ## The gold-standard workflow
 

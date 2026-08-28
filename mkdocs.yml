@@ -110,10 +110,10 @@ nav:
           - Detector: concepts/detector.md
   - Reference:
       - Overview: api/index.md
+      - Command line (specter.cli): api/cli.md
       - specter: api/specter.md
       - specter.aberrations: api/aberrations.md
       - specter.atom: api/atom.md
-      - specter.cli: api/cli.md
       - specter.ctf: api/ctf.md
       - specter.ghostbuster: api/ghostbuster.md
       - specter.ice: api/ice.md

@@ -28,8 +28,9 @@ specter simulate tiltseries \
 ```
 
 `configs/tilt_series.toml` is the canonical starting point. Copy it and
-edit for your own runs; run `specter simulate tiltseries --help` for the
-full field-by-field reference. `volume_path` has no default and is the one
+edit for your own runs; the
+[command reference](../api/cli.md#specter-simulate-tiltseries) documents
+every field. `volume_path` has no default and is the one
 field you always need to supply, either in the TOML, via `--volume_path`
 (pointing at whatever `specter build tomogram` already wrote), or by
 passing `--tomogram_config` instead to build it as part of this same
@@ -60,7 +61,7 @@ tomogram`](#chaining-with-specter-build-tomogram) below.
   or `none`), `detector_model` (`none`, `perfect`, `k3_300kv`, `k3_200kv`).
 
 Everything else (envelopes, ice, output naming) lives under its own panel
-in `specter simulate tiltseries --help`.
+in the [command reference](../api/cli.md#specter-simulate-tiltseries).
 
 ## Advanced: envelopes, ice, and edge handling
 
@@ -116,8 +117,9 @@ specter simulate tiltseries --config configs/tilt_series.toml \
 `--tomogram_config` and `--volume_path`/`config.volume_path` are mutually
 exclusive; passing both raises an error rather than silently picking one.
 Species/membrane/filament choices still come from the tomogram TOML (edit
-it directly, or run `specter build tomogram --help` for its own per-field
-flags, which aren't reachable through `simulate tiltseries`); imaging
+it directly, or see
+[`specter build tomogram`](../api/cli.md#specter-build-tomogram) for its own
+per-field flags, which aren't reachable through `simulate tiltseries`); imaging
 choices come from `--config`/its flags as usual.
 
 `--tomogram_config` always builds exactly **one** tomogram. `n_tomograms`

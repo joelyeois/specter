@@ -45,8 +45,9 @@ TOML/CLI field reference.
 - **Models**: `scattering_model`, `noise_model`, `detector_model`, same
   choices as [particle generation](particle-stack.md#what-youll-usually-tune).
 
-Everything else lives under "Advanced" in both the TOML and
-`specter simulate micrograph --help`.
+Everything else lives under
+["Advanced"](../api/cli.md#specter-simulate-micrograph-advanced) in both the
+TOML and the command reference.
 
 ## Ice thickness profiles
 

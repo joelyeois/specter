@@ -385,7 +385,7 @@ def test_amplitude_contrast_real_ctf_equals_constant_Q():
 
 def test_amplitude_contrast_complex_transfer_matches_specters_absorptive_potential_constant():
     """The complex transfer function should equal sqrt(1-Q^2) + iQ everywhere
-    -- exactly specter's own scattering.complex_potential's `c = sqrt(1-a^2)
+    -- exactly specter's own potential.apply_amplitude_contrast's `c = sqrt(1-a^2)
     + i*a` scalar. This is the concrete numeric confirmation of the
     equivalence derived earlier: amplitude contrast applied via an
     absorptive specimen potential and amplitude contrast applied as a CTF

@@ -343,7 +343,7 @@ class BaseImager(L.LightningModule):
                 # scattering_model="ctf" is the only mode whose exit wave has
                 # no complex/absorptive component of its own (Scattering.ctf()
                 # returns a real projection; every other scattering_model
-                # applies alpha upstream via scattering.complex_potential) --
+                # applies alpha upstream via potential.apply_amplitude_contrast) --
                 # so it's the only case where amplitude contrast needs to be
                 # folded into the transfer function itself.
                 specimen_absorption=self.scattering_model != "ctf",

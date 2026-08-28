@@ -160,7 +160,7 @@ class CTFParameters(nn.Module):
         Amplitude contrast fraction, in [0, 1]. Default 0.0 -- deliberately
         *not* the conventional ~0.07-0.1, because by default specter's own
         multislice/projection scattering already applies amplitude
-        contrast at the specimen level via ``scattering.complex_potential``
+        contrast at the specimen level via ``potential.apply_amplitude_contrast``
         (see ``TransferFunction``'s ``specimen_absorption`` flag); a
         nonzero default here would silently double-count it for anyone
         using this class through :class:`TransferFunction` unchanged.

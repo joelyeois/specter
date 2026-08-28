@@ -10,6 +10,7 @@ from .progress import track
 
 from .arrays import center_crop
 from .constants import energy_to_wavelength, interaction_parameter
+from .potential import apply_amplitude_contrast
 from .fft import fft2, ifft2
 from .rotations import VolumeRotator, build_affine_matrix
 
@@ -25,39 +26,6 @@ from .rotations import VolumeRotator, build_affine_matrix
 # unchunked). Backward peak memory is flat in it, since autograd retains every
 # slice's transmission function either way. Measured on an L40.
 _MULTISLICE_SLICE_CHUNK = 8
-
-
-def complex_potential(v: torch.Tensor, alpha: float = 0.1) -> torch.Tensor:
-    """
-    Apply amplitude ratio to create complex potential.
-
-    Converts real-valued potential to complex potential using amplitude
-    contrast ratio α, following weak phase object approximation with
-    absorption.
-
-    Parameters
-    ----------
-    v : torch.Tensor
-        Real-valued scattering potential.
-    alpha : float, optional
-        Amplitude contrast ratio. Typical values are 0.07-0.1.
-        Default is 0.1.
-
-    Returns
-    -------
-    complex_v : torch.Tensor
-        Complex-valued potential with real part scaled by sqrt(1-α²)
-        and imaginary part scaled by α.
-
-    Notes
-    -----
-    The complex potential is given by:
-    V = v * (sqrt(1-α²) + i*α)
-    """
-    if alpha == 0.0:
-        return v
-    c = (1 - alpha**2) ** 0.5 + 1j * alpha
-    return v * c
 
 
 class Scattering(L.LightningModule):
@@ -435,19 +403,19 @@ class Scattering(L.LightningModule):
             Batch of 2D exitwaves / projected potentials.
         """
         if self.scattering_model == "multislice":
-            V = complex_potential(V, alpha=self.alpha)
+            V = apply_amplitude_contrast(V, alpha=self.alpha)
             return self.multislice(V)
         elif self.scattering_model == "rytov":
-            V = complex_potential(V, alpha=self.alpha)
+            V = apply_amplitude_contrast(V, alpha=self.alpha)
             return self.rytov(V)
         elif self.scattering_model == "projection":
-            V = complex_potential(V, alpha=self.alpha)
+            V = apply_amplitude_contrast(V, alpha=self.alpha)
             return self.projection(V)
         elif self.scattering_model == "firstborn":
-            V = complex_potential(V, alpha=self.alpha)
+            V = apply_amplitude_contrast(V, alpha=self.alpha)
             return self.firstborn(V)
         elif self.scattering_model == "kinematic":
-            V = complex_potential(V, alpha=self.alpha)
+            V = apply_amplitude_contrast(V, alpha=self.alpha)
             return self.kinematic(V)
         elif self.scattering_model == "ctf":
             return self.ctf(V)
@@ -928,7 +896,7 @@ class IterativeScattering(L.LightningModule):
                 "Multislice (Iterative)",
                 roi_size=roi_size,
             ):
-                slice_complex = complex_potential(slice_sample, alpha=self.alpha)
+                slice_complex = apply_amplitude_contrast(slice_sample, alpha=self.alpha)
                 t = torch.exp(1j * self.sigma * self.pixel_size * slice_complex)
                 exitwave = ifft2(fft2(t * exitwave) * Fk)
         else:
@@ -987,7 +955,7 @@ class IterativeScattering(L.LightningModule):
                                 dev,
                                 roi_size=roi,
                             )[:, 0]
-                            sc = complex_potential(s, alpha=_alpha)
+                            sc = apply_amplitude_contrast(s, alpha=_alpha)
                             t = torch.exp(1j * _sigma * _pixel_size * sc)
                             ew = ifft2(fft2(t * ew) * _Fk)
                         return ew
@@ -1060,7 +1028,7 @@ class IterativeScattering(L.LightningModule):
                 assert slices_block is not None
                 total_potential += slices_block[:, i % slice_batchsize]
 
-        total_complex = complex_potential(total_potential, alpha=self.alpha)
+        total_complex = apply_amplitude_contrast(total_potential, alpha=self.alpha)
         exitwave = torch.exp(1j * self.sigma * self.pixel_size * total_complex)
         return exitwave
 
@@ -1080,7 +1048,7 @@ class IterativeScattering(L.LightningModule):
         for i, nz_new, slice_sample in self._iter_slices(
             V, theta_matrix, slice_batchsize, "Rytov (Iterative)"
         ):
-            slice_complex = complex_potential(slice_sample, alpha=self.alpha)
+            slice_complex = apply_amplitude_contrast(slice_sample, alpha=self.alpha)
             # Propagate transmission of slice i to exit plane
             # Distance is nz_new - i
             F_i = self._get_propagator(float(nz_new - i))
@@ -1217,7 +1185,7 @@ class IterativeScattering(L.LightningModule):
                         V, ci, cid, crot, ctheta, cnz, cy, cx, dev
                     )
                     # (B, K, nxy, nxy) real → complex potential
-                    slices_c = complex_potential(slices, alpha=_alpha)
+                    slices_c = apply_amplitude_contrast(slices, alpha=_alpha)
                     # Fresnel kernels for this chunk — recomputed each time
                     # (cheap, no learnable params)
                     d = dist.to(dev)
@@ -1270,7 +1238,7 @@ class IterativeScattering(L.LightningModule):
         for i, nz_new, slice_sample in self._iter_slices(
             V, theta_matrix, slice_batchsize, "First Born (Iterative)"
         ):
-            slice_complex = complex_potential(slice_sample, alpha=self.alpha)
+            slice_complex = apply_amplitude_contrast(slice_sample, alpha=self.alpha)
             F_i = self._get_propagator(float(nz_new - i))
             total_scattered += ifft2(fft2(slice_complex) * F_i)
 
@@ -1296,7 +1264,7 @@ class IterativeScattering(L.LightningModule):
         for i, nz_new, slice_sample in self._iter_slices(
             V, theta_matrix, slice_batchsize, "Kinematic (Iterative)"
         ):
-            slice_complex = complex_potential(slice_sample, alpha=self.alpha)
+            slice_complex = apply_amplitude_contrast(slice_sample, alpha=self.alpha)
             t = torch.exp(1j * self.sigma * self.pixel_size * slice_complex) - 1
             F_i = self._get_propagator(float(nz_new - i))
             total_scattered += ifft2(fft2(t) * F_i)

@@ -433,7 +433,7 @@ def test_image_generator_ctf_scattering_model_gets_amp_contrast_by_default(
 
 def test_image_generator_multislice_scattering_model_keeps_specimen_absorption():
     """scattering_model="multislice" already applies alpha upstream via
-    scattering.complex_potential -- Aberration's specimen_absorption must
+    potential.apply_amplitude_contrast -- Aberration's specimen_absorption must
     stay True (its default) so the amp-contrast offset isn't added again.
     aberration_model is derived from scattering_model (not independently
     settable), so this also confirms multislice -> "nonlinear"."""

@@ -220,7 +220,7 @@ def phaseshift(
         matching CryoSPARC's convention: ``phase_shift - arccos(amp_contrast)``).
         None (default) omits the term entirely, matching the 'nonlinear'
         model (where amplitude contrast is instead baked into the exit
-        wave upstream via ``scattering.complex_potential``, so adding it
+        wave upstream via ``potential.apply_amplitude_contrast``, so adding it
         again here would double-count it).
 
     Returns

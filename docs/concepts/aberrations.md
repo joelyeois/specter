@@ -143,7 +143,7 @@ propagation (`image = |exitwave|^2` is nonlinear in the specimen
 potential; `image = 1 + 2 \cdot \mathrm{CTF} \otimes \mathrm{potential}` is
 linear in it). `specimen_absorption=True` (default) assumes amplitude
 contrast is already baked into the exit wave upstream, via
-`scattering.complex_potential`, so applying it again here would double
+`potential.apply_amplitude_contrast`, so applying it again here would double
 count it. This is why `BaseImager._init_optics` sets
 `specimen_absorption=self.scattering_model != "ctf"` rather than a fixed
 value.

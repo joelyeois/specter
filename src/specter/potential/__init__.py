@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from ._absorption import apply_amplitude_contrast
 from ._builders import (
     build_atomic_potential_kernel,
     build_potential_volume_analytic_scatter,
@@ -17,6 +18,7 @@ from ._gemmi_builder import GemmiPotentialBuilder
 from ._potential_builder import PotentialBuilder
 
 __all__ = [
+    "apply_amplitude_contrast",
     "GemmiPotentialBuilder",
     "PotentialBuilder",
     "build_atomic_potential_kernel",

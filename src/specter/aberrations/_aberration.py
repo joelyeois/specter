@@ -60,7 +60,7 @@ class Aberration(L.LightningModule):
         it's stored and otherwise unused.
     specimen_absorption: bool, optional
         If True (default), amplitude contrast is assumed to already be
-        baked into the exit wave via ``scattering.complex_potential``
+        baked into the exit wave via ``potential.apply_amplitude_contrast``
         upstream (true for every ``scattering_model`` except ``"ctf"``,
         which yields a real-valued, non-absorptive exit wave with nowhere
         else to represent it) -- so ``alpha`` is accepted but not applied

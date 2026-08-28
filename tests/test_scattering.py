@@ -4,17 +4,17 @@ import roma
 import torch
 
 from specter.rotations import build_affine_matrix, rotate_volume
+from specter.potential import apply_amplitude_contrast
 from specter.scattering import (
     IterativeScattering,
     Scattering,
-    complex_potential,
 )
 
 
-def test_complex_potential():
+def test_apply_amplitude_contrast():
     v = torch.ones(4, 4)
     alpha = 0.1
-    cv = complex_potential(v, alpha=alpha)
+    cv = apply_amplitude_contrast(v, alpha=alpha)
 
     expected_real = np.sqrt(0.99)
     assert torch.allclose(
@@ -291,8 +291,10 @@ def test_multislice_matches_per_slice_reference(alpha, klim, sign, nz):
     torch.manual_seed(0)
     V = torch.rand(2, nz, n, n) * 4.0
 
-    got = scat.multislice(complex_potential(V, alpha=alpha))
-    want = _multislice_per_slice_reference(scat, complex_potential(V, alpha=alpha))
+    got = scat.multislice(apply_amplitude_contrast(V, alpha=alpha))
+    want = _multislice_per_slice_reference(
+        scat, apply_amplitude_contrast(V, alpha=alpha)
+    )
     assert torch.equal(got, want)
 
 
@@ -313,7 +315,7 @@ def test_multislice_gradients_match_per_slice_reference():
 
     def grad_of(fn):
         v = V.clone().requires_grad_(True)
-        fn(scat, complex_potential(v, alpha=0.07)).real.sum().backward()
+        fn(scat, apply_amplitude_contrast(v, alpha=0.07)).real.sum().backward()
         return v.grad
 
     assert torch.equal(
@@ -337,7 +339,7 @@ def test_multislice_accepts_volume_off_compute_device():
         progressbars=False,
     ).to("cuda")
     torch.manual_seed(0)
-    V_cpu = complex_potential(torch.rand(1, nz, n, n) * 4.0, alpha=0.07)
+    V_cpu = apply_amplitude_contrast(torch.rand(1, nz, n, n) * 4.0, alpha=0.07)
 
     out = scat.multislice(V_cpu)
     assert out.device.type == "cuda"
@@ -412,7 +414,7 @@ def test_fourier_space_summation_matches_sum_after_ifft(model, sign):
         progressbars=False,
     )
     torch.manual_seed(0)
-    V = complex_potential(torch.rand(2, nz, n, n) * 4.0, alpha=0.07)
+    V = apply_amplitude_contrast(torch.rand(2, nz, n, n) * 4.0, alpha=0.07)
 
     got = getattr(scat, model)(V)
     want = _SUM_AFTER_REFERENCES[model](scat, V)
@@ -438,7 +440,7 @@ def test_fourier_space_summation_gradients_match(model):
 
     def grad_of(fn):
         v = V.clone().requires_grad_(True)
-        fn(complex_potential(v, alpha=0.07)).real.sum().backward()
+        fn(apply_amplitude_contrast(v, alpha=0.07)).real.sum().backward()
         return v.grad
 
     got = grad_of(getattr(scat, model))
@@ -473,7 +475,7 @@ def _iterative_multislice_unhoisted_reference(scat, V, theta_matrix):
     for _, _, slice_sample in scat._iter_slices(
         V, theta_matrix, 1, "reference", roi_size=roi_size
     ):
-        slice_complex = complex_potential(slice_sample, alpha=scat.alpha)
+        slice_complex = apply_amplitude_contrast(slice_sample, alpha=scat.alpha)
         t = torch.exp(1j * scat.sigma * scat.pixel_size * slice_complex)
         exitwave = ifft2(fft2(t * exitwave) * F * kmask)
     return exitwave

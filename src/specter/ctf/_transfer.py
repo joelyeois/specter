@@ -47,7 +47,7 @@ class TransferFunction(nn.Module):
         testable like-for-like replacement first.
     specimen_absorption : bool, optional
         If True (default), amplitude contrast is assumed to already be
-        baked into the exit wave via ``scattering.complex_potential``
+        baked into the exit wave via ``potential.apply_amplitude_contrast``
         (specter's default: alpha=0.1) *before* this transfer function is
         ever applied. Any nonzero ``ctf_params.amplitude_contrast`` is
         therefore zeroed here (with a warning) to avoid double-counting
@@ -127,7 +127,7 @@ class TransferFunction(nn.Module):
             warnings.warn(
                 "specimen_absorption=True but ctf_params.amplitude_contrast "
                 "is nonzero -- amplitude contrast is assumed to already be "
-                "baked into the exit wave via scattering.complex_potential, "
+                "baked into the exit wave via potential.apply_amplitude_contrast, "
                 "so this term is being zeroed here to avoid double-counting "
                 "it at both the specimen and lens stages. Pass "
                 "specimen_absorption=False if that assumption is wrong for "

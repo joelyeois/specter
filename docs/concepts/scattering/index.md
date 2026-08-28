@@ -81,8 +81,8 @@ the exit plane, so reversing the traversal order changes which face of
 the specimen accumulates the least propagation and which the most.
 
 **Amplitude contrast.** `alpha` (0 by default) sets the fraction of the
-potential treated as absorptive, via `complex_potential`:
-\(V \to V\,(\sqrt{1-\alpha^2} + i\alpha)\). `complex_potential` applies
+potential treated as absorptive, via `potential.apply_amplitude_contrast`:
+\(V \to V\,(\sqrt{1-\alpha^2} + i\alpha)\). `potential.apply_amplitude_contrast` applies
 this once, upstream of every model except `"ctf"` (a projected-potential-only
 mode that feeds directly into the aberration stage; see
 [Aberrations](../aberrations.md)), so a single `alpha` value carries

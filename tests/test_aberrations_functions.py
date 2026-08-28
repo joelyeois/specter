@@ -207,7 +207,7 @@ def test_phaseshift_linear_model_alpha_none_matches_no_alpha_arg():
     """alpha=None (the default) must reproduce the pre-fix behaviour
     exactly -- this is the specimen_absorption=True / non-"ctf"-scattering
     case, where amplitude contrast is already applied upstream via
-    scattering.complex_potential and must not be double-counted here."""
+    potential.apply_amplitude_contrast and must not be double-counted here."""
     phaseshift_val = torch.tensor([0.5])
     k = torch.zeros((1, 4, 4))
     with_none = phaseshift(

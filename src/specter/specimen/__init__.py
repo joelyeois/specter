@@ -19,6 +19,9 @@ from .filament import (
     solve_tube_lattice,
 )
 from .membrane import (
+    DEFAULT_SH_AXES_RANGE_A,
+    DEFAULT_SWEPT_TOTAL_LENGTH_RANGE_A,
+    DEFAULT_SWEPT_TUBE_RADIUS_RANGE_A,
     MembraneGenerator,
     TransmembranePlacement,
     TransmembraneSpec,
@@ -41,6 +44,9 @@ __all__ = [
     "load_specimen_volume",
     "BeadSpec",
     "CarbonFilmSpec",
+    "DEFAULT_SH_AXES_RANGE_A",
+    "DEFAULT_SWEPT_TOTAL_LENGTH_RANGE_A",
+    "DEFAULT_SWEPT_TUBE_RADIUS_RANGE_A",
     "MembraneGenerator",
     "TransmembranePlacement",
     "TransmembraneSpec",

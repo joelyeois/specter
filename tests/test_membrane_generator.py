@@ -1025,3 +1025,101 @@ def test_interpolate_angular_grid_returns_tensor_for_tensor_input() -> None:
     assert torch.allclose(
         torch.as_tensor(from_numpy, dtype=torch.float32), from_torch, atol=1e-6
     )
+
+
+# ---------------------------------------------------------------------------
+# One place answers "how big is this organelle"
+# ---------------------------------------------------------------------------
+
+
+def test_bounding_radius_matches_each_backend_formula() -> None:
+    """The measurement itself, pinned so a refactor cannot quietly change it."""
+    from specter.specimen.membrane import membrane_bounding_radius
+
+    assert membrane_bounding_radius(
+        "spherical_harmonics", sh_axes=(100.0, 250.0, 180.0)
+    ) == pytest.approx(250.0)
+    assert membrane_bounding_radius(
+        "swept_spline", swept_total_length=2000.0, swept_tube_radius=300.0
+    ) == pytest.approx(1300.0)
+
+
+def test_bounding_radius_rejects_an_unknown_backend() -> None:
+    """A new backend must be added here, not silently take another's formula."""
+    from specter.specimen.membrane import membrane_bounding_radius
+
+    with pytest.raises(ValueError, match="Unknown shape_backend"):
+        membrane_bounding_radius("helicoid", sh_axes=(1.0, 1.0, 1.0))
+
+
+def test_bounding_radius_requires_the_arguments_its_backend_needs() -> None:
+    """Silently defaulting a missing size would understate the reach."""
+    from specter.specimen.membrane import membrane_bounding_radius
+
+    with pytest.raises(ValueError, match="sh_axes"):
+        membrane_bounding_radius("spherical_harmonics")
+    with pytest.raises(ValueError, match="swept_total_length"):
+        membrane_bounding_radius("swept_spline", swept_tube_radius=300.0)
+
+
+def test_collision_radius_and_generator_sizing_agree() -> None:
+    """
+    The tomogram placer and the generator's own auto-sizing must measure the
+    same organelle the same way.
+
+    They used to hold separate copies of the branch, so a third shape backend
+    would have meant finding both -- and two that disagreed would place
+    instances using one reach while sizing the grid for another.
+    """
+    from specter.specimen.membrane import MembraneGenerator, membrane_bounding_radius
+    from specter.specimen.tomogram._helpers import _instance_bounding_radius
+
+    for kwargs in (
+        {"shape_backend": "spherical_harmonics", "sh_axes": (150.0, 200.0, 175.0)},
+        {
+            "shape_backend": "swept_spline",
+            "swept_total_length": 1800.0,
+            "swept_tube_radius": 250.0,
+        },
+    ):
+        generator = MembraneGenerator(voxel_size=10.0, **kwargs)
+        assert _instance_bounding_radius(generator) == pytest.approx(
+            membrane_bounding_radius(
+                generator.shape_backend,
+                sh_axes=generator.sh_axes,
+                swept_total_length=generator.swept_total_length,
+                swept_tube_radius=generator.swept_tube_radius,
+            )
+        )
+
+
+def test_generator_and_pipeline_share_one_set_of_default_ranges() -> None:
+    """
+    The auto-size cap must draw from the same defaults the generator would.
+
+    `pipelines._tomogram` caps a fully-auto membrane against the tomogram box,
+    and needs a lower bound to write a complete range with. It used to retype
+    `MembraneGenerator`'s, so changing a default in one place left the other
+    capping against a stale value -- with nothing failing, and only for a
+    membrane whose size the user had left entirely unspecified.
+    """
+    import inspect
+
+    import specter.pipelines._tomogram as tomogram_pipeline
+    from specter.specimen import (
+        DEFAULT_SH_AXES_RANGE_A,
+        DEFAULT_SWEPT_TOTAL_LENGTH_RANGE_A,
+        DEFAULT_SWEPT_TUBE_RADIUS_RANGE_A,
+        MembraneGenerator,
+    )
+
+    params = inspect.signature(MembraneGenerator.__init__).parameters
+    for name, constant in (
+        ("sh_axes_range", DEFAULT_SH_AXES_RANGE_A),
+        ("swept_total_length_range", DEFAULT_SWEPT_TOTAL_LENGTH_RANGE_A),
+        ("swept_tube_radius_range", DEFAULT_SWEPT_TUBE_RADIUS_RANGE_A),
+    ):
+        assert params[name].default is constant, (
+            f"MembraneGenerator.{name}'s default is no longer the shared constant"
+        )
+    assert tomogram_pipeline.DEFAULT_SH_AXES_RANGE_A is DEFAULT_SH_AXES_RANGE_A

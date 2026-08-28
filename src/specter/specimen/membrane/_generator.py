@@ -36,6 +36,12 @@ from .._parallel_render import (
     resolve_render_workers,
 )
 from ..packing import estimate_protein_box_size
+from ._extent import (
+    DEFAULT_SH_AXES_RANGE_A,
+    DEFAULT_SWEPT_TOTAL_LENGTH_RANGE_A,
+    DEFAULT_SWEPT_TUBE_RADIUS_RANGE_A,
+    membrane_bounding_radius,
+)
 from ._field import MembraneField, _grid_points_xyz
 from ._field_spherical_harmonics import generate_membrane_field_spherical_harmonics
 from ._field_swept_spline import generate_membrane_field_swept_spline
@@ -685,14 +691,18 @@ class MembraneGenerator:
         shape_backend: str = "spherical_harmonics",
         sh_max_degree: int = 8,
         sh_axes: tuple[float, float, float] | None = None,
-        sh_axes_range: tuple[float, float] = (150.0, 450.0),
+        sh_axes_range: tuple[float, float] = DEFAULT_SH_AXES_RANGE_A,
         sh_amplitude: float = 0.15,
         sh_spectrum_power: float = 2.0,
         swept_total_length: float | None = None,
-        swept_total_length_range: tuple[float, float] = (1500.0, 2500.0),
+        swept_total_length_range: tuple[
+            float, float
+        ] = DEFAULT_SWEPT_TOTAL_LENGTH_RANGE_A,
         swept_step_length_a: float | None = None,
         swept_tube_radius: float | None = None,
-        swept_tube_radius_range: tuple[float, float] = (150.0, 400.0),
+        swept_tube_radius_range: tuple[
+            float, float
+        ] = DEFAULT_SWEPT_TUBE_RADIUS_RANGE_A,
         swept_flexibility: float | None = None,
         swept_flexibility_range: tuple[float, float] = (0.08, 0.25),
         swept_radius_variation: float | None = None,
@@ -806,12 +816,15 @@ class MembraneGenerator:
         # backend's own boundary warning are the last-resort safety net,
         # not the primary defense).
         if target_shape is None:
-            if shape_backend == "spherical_harmonics":
-                safe_half_extent_a = max(sh_axes) / _SIZE_MARGIN_FRACTION
-            else:
-                safe_half_extent_a = (
-                    0.5 * swept_total_length + swept_tube_radius
-                ) / _SIZE_MARGIN_FRACTION
+            safe_half_extent_a = (
+                membrane_bounding_radius(
+                    shape_backend,
+                    sh_axes=sh_axes,
+                    swept_total_length=swept_total_length,
+                    swept_tube_radius=swept_tube_radius,
+                )
+                / _SIZE_MARGIN_FRACTION
+            )
             n = max(1, math.ceil(2.0 * safe_half_extent_a / voxel_size))
             # This OUTPUT canvas (what becomes self.volume) is a SEPARATE
             # concern from the internal working field max_field_voxels
@@ -901,7 +914,11 @@ class MembraneGenerator:
                     )
                     sh_axes = clamped
             else:
-                reach = 0.5 * swept_total_length + swept_tube_radius
+                reach = membrane_bounding_radius(
+                    shape_backend,
+                    swept_total_length=swept_total_length,
+                    swept_tube_radius=swept_tube_radius,
+                )
                 if reach > safe_half_extent_a:
                     scale = safe_half_extent_a / reach
                     new_total_length_a = swept_total_length * scale

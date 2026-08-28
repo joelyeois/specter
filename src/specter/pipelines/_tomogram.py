@@ -39,6 +39,9 @@ from specter.specimen import (
     FilamentSpec,
     MicrotubuleSpec,
     CarbonFilmSpec,
+    DEFAULT_SH_AXES_RANGE_A,
+    DEFAULT_SWEPT_TOTAL_LENGTH_RANGE_A,
+    DEFAULT_SWEPT_TUBE_RADIUS_RANGE_A,
     MembraneGenerator,
     MembraneInstance,
     TomogramSpecimenGenerator,
@@ -218,14 +221,14 @@ def _protein_specs_from_dicts(
     return specs
 
 
-# MembraneGenerator's own default size-draw ranges (sh_axes_range,
-# swept_total_length_range, swept_tube_radius_range) -- duplicated
-# here rather than imported, matching this codebase's established
-# zero-cross-generator-coupling convention. Used only as the UPPER bound to
-# cap against below; the biology-motivated LOWER bounds are never shrunk.
-_SH_AXES_RANGE_A = (150.0, 450.0)
-_SWEPT_TOTAL_LENGTH_RANGE_A = (1500.0, 2500.0)
-_SWEPT_TUBE_RADIUS_RANGE_A = (150.0, 400.0)
+# MembraneGenerator's own default size-draw ranges, read rather than retyped:
+# two copies could drift with nothing failing, and only for a membrane whose
+# size the user left entirely unspecified -- the quietest possible way to be
+# wrong. Not the zero-cross-generator-coupling convention the earlier copy
+# cited: that is about generators importing each other, and this module
+# already imports MembraneGenerator to construct it. Used only as the UPPER
+# bound to cap against below; the biology-motivated LOWER bounds are never
+# shrunk.
 
 # Fraction of the tomogram box's own LIMITING axis extent an auto-sized
 # (target_shape=None) [[membrane]] instance's DIAMETER (2x bounding
@@ -299,7 +302,7 @@ def _cap_membrane_auto_size_ranges(
     if shape_backend == "spherical_harmonics":
         if "sh_axes" in instance_kwargs or "sh_axes_range" in instance_kwargs:
             return instance_kwargs
-        lo, hi = _SH_AXES_RANGE_A
+        lo, hi = DEFAULT_SH_AXES_RANGE_A
         capped_hi = min(hi, max_reach_a)
         instance_kwargs = dict(instance_kwargs)
         instance_kwargs["sh_axes_range"] = (min(lo, capped_hi), capped_hi)
@@ -314,8 +317,8 @@ def _cap_membrane_auto_size_ranges(
             )
         ):
             return instance_kwargs
-        total_lo, total_hi = _SWEPT_TOTAL_LENGTH_RANGE_A
-        tube_lo, tube_hi = _SWEPT_TUBE_RADIUS_RANGE_A
+        total_lo, total_hi = DEFAULT_SWEPT_TOTAL_LENGTH_RANGE_A
+        tube_lo, tube_hi = DEFAULT_SWEPT_TUBE_RADIUS_RANGE_A
         worst_case_reach_a = 0.5 * total_hi + tube_hi
         if worst_case_reach_a > max_reach_a:
             scale = max_reach_a / worst_case_reach_a
@@ -385,7 +388,7 @@ def build_tomogram_generator(config: TomogramConfig) -> TomogramSpecimenGenerato
             # type); TransmembraneSpec's own field stays `frequency` since
             # it doubles as the weight in the per-site species draw.
             frequency=int(d.get("n_copies", 1)),
-            parameterization=d.get("parameterization", "shtyrov"),
+            parameterization=d.get("parameterization", config.scattering_factors),
         )
         for d in config.membrane_transmembrane_specs
     ]
@@ -454,6 +457,13 @@ def build_tomogram_generator(config: TomogramConfig) -> TomogramSpecimenGenerato
             instance_kwargs, target_shape, config
         )
 
+        # One tomogram, one set of scattering factors: the bilayer is summed
+        # into the same volume as the proteins packed around it, so modelling
+        # the two with different factors is a choice to make deliberately, not
+        # to inherit from MembraneGenerator's own default. setdefault, so a
+        # [[membrane]] table that names its own parameterization still wins.
+        instance_kwargs.setdefault("parameterization", config.scattering_factors)
+
         for i in range(n_copies):
             # Restarts from config.seed at i=0 for EVERY entry (not a
             # running counter across entries) -- editing/adding another
@@ -509,7 +519,7 @@ def build_tomogram_generator(config: TomogramConfig) -> TomogramSpecimenGenerato
         region_max_passes=config.membrane_region_max_passes,
         min_transmembrane_spacing=config.membrane_min_transmembrane_spacing,
         pdb_cache_dir=config.pdb_cache_dir,
-        parameterization=config.target_parameterization,
+        parameterization=config.scattering_factors,
         readd_hydrogens=config.readd_hydrogens,
         monomer_library_path=config.monomer_library_path,
         seed=config.seed,

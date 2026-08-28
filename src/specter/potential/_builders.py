@@ -815,7 +815,7 @@ def build_atomic_potential_kernel(
     dx: float,
     parameterization: str = "kirkland",
     atomic_number: int = 8,
-    shtyrov_species: str = "O(HH)",
+    shtyrov_species: str | None = None,
     species_table: dict | None = None,
     *,
     sR: torch.Tensor | None = None,
@@ -843,9 +843,16 @@ def build_atomic_potential_kernel(
     atomic_number : int, optional
         Atomic number, used by every branch except ``'shtyrov'``. Default 8
         (oxygen), the ice use case this was originally written for.
-    shtyrov_species : str, optional
+    shtyrov_species : str or None, optional
         Bonded species key (Shtyrov parameterizes bonded species, not bare
-        atomic numbers). Default ``"O(HH)"`` (water oxygen).
+        atomic numbers), e.g. ``"O(HH)"`` for water oxygen. ``None`` (the
+        default) means the caller has no species to type, and under
+        ``'shtyrov'`` falls back to per-element Peng at `atomic_number` --
+        the same rule :class:`PotentialBuilder` applies per atom, so a bulk
+        material (gold, with no elemental Shtyrov entry) and a structure
+        atom with an unmatched species resolve identically. Pass the species
+        explicitly whenever one exists; there is no default species, because
+        a wrong one is a silently wrong kernel.
     species_table : dict, optional
         Pre-loaded Shtyrov species parameters. Loaded from the bundled
         ``params_cat.json`` if omitted -- pass one to honour a custom
@@ -878,6 +885,14 @@ def build_atomic_potential_kernel(
         pot = lobato_atomic_potential_3d(atomic_number, sR)
     elif parameterization == "peng":
         pot = peng_atomic_potential_3d(atomic_number, sR)
+    elif parameterization == "shtyrov" and shtyrov_species is None:
+        # No species to type: same fallback PotentialBuilder applies to an
+        # atom whose species misses the table (see its shtyrov_groups
+        # "element" branch). Safe only because it uses the caller's own
+        # atomic_number -- which is exactly why this cannot be a fallback
+        # for a species that was supplied but unmatched, where this
+        # function has no way to know the right element.
+        pot = peng_atomic_potential_3d(atomic_number, sR)
     elif parameterization == "shtyrov":
         if species_table is None:
             species_path = resources.files("specter.atom_data").joinpath(
@@ -885,6 +900,7 @@ def build_atomic_potential_kernel(
             )
             with resources.as_file(species_path) as fpath:
                 species_table = load_shtyrov_species_parameters(str(fpath))
+        assert shtyrov_species is not None  # narrowed by the branch above
         pot = shtyrov_atomic_potential_3d_by_species(shtyrov_species, sR, species_table)
     else:
         raise ValueError(

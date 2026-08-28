@@ -136,7 +136,7 @@ def _mean_inner_potential(
     number_density: float,
     atomic_number: int,
     parameterization: str,
-    shtyrov_species: str = "",
+    shtyrov_species: str | None = None,
 ) -> float:
     """
     Mean inner potential (volts) of a homogeneous bulk material.
@@ -149,17 +149,15 @@ def _mean_inner_potential(
     the integral is stable across voxel size since it's a physical,
     grid-independent quantity), unlike injecting a raw atom count.
     """
-    if parameterization == "shtyrov" and not shtyrov_species:
-        raise ValueError(
-            "shtyrov parameterization requires a bonded species (there is "
-            "no unbonded elemental entry in the bundled species table); "
-            "use 'kirkland' or 'lobato' instead."
-        )
+    # No species means no species: build_atomic_potential_kernel falls back
+    # to per-element Peng at `atomic_number`, the same way PotentialBuilder
+    # does for an atom it cannot type. Substituting a default species here
+    # would render one element with another's kernel.
     kernel = build_atomic_potential_kernel(
         voxel_size,
         parameterization,
         atomic_number=atomic_number,
-        shtyrov_species=shtyrov_species or "O(HH)",
+        shtyrov_species=shtyrov_species,
     )
     atom_potential_integral = kernel.sum().item() * voxel_size**3  # V*Å³
     return number_density * atom_potential_integral
@@ -327,9 +325,11 @@ class BeadGenerator:
         Voxel size, Å.
     parameterization : str, optional
         Atomic-potential parameterization used to compute gold's per-atom
-        potential integral: ``'kirkland'`` (default) or ``'lobato'``.
-        ``'shtyrov'`` is not supported here (no unbonded elemental gold
-        entry in the bundled species table).
+        potential integral: ``'kirkland'`` (default), ``'lobato'`` or
+        ``'peng'``. ``'shtyrov'`` resolves to ``'peng'`` -- there is no
+        elemental gold in the bundled species tables and a fiducial has no
+        bonds to type, so it takes the same per-element fallback a structure
+        atom does, applied by `build_atomic_potential_kernel` itself.
     roughness : float or [low, high], optional
         RMS radius modulation, as a fraction of the radius. Default 0.12.
         A ``[low, high]`` pair draws a fresh value uniformly per bead, so

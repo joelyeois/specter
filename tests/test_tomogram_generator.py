@@ -18,6 +18,7 @@ import pytest
 import torch
 
 from specter.specimen._carbon import CarbonFilmSpec
+from specter.specimen._grid import BeadGenerator
 from specter.specimen.filament import FilamentSpec
 from specter.specimen.membrane import MembraneGenerator, TransmembraneSpec
 from specter.specimen.tomogram import (
@@ -945,3 +946,51 @@ def test_shtyrov_templates_are_typed_by_bonded_species(parameterization, expect_
             assert n_typed is None, (
                 f"{parameterization} paid for a topology pass it cannot use"
             )
+
+
+def test_bead_parameterization_follows_the_tomogram_except_under_shtyrov():
+    """A tomogram's parameterization governs every component it renders,
+    but gold cannot follow Shtyrov -- it fits per bonded species and has no
+    elemental gold -- so a fiducial falls back to per-element Peng, as
+    PotentialBuilder does for an untypeable protein atom."""
+    from specter.potential import build_atomic_potential_kernel
+
+    # The rule lives in the shared kernel builder, so it is the same rule
+    # PotentialBuilder applies per atom: a species-less shtyrov request
+    # becomes per-element Peng at the caller's own atomic_number.
+    gold_shtyrov = build_atomic_potential_kernel(
+        _V_SIZE, "shtyrov", atomic_number=79, shtyrov_species=None
+    )
+    gold_peng = build_atomic_potential_kernel(_V_SIZE, "peng", atomic_number=79)
+    assert torch.equal(gold_shtyrov, gold_peng)
+    # A material that DOES have a species keeps Shtyrov rather than
+    # falling back -- carbon's C(CCC), which is in the bundled table.
+    carbon_shtyrov = build_atomic_potential_kernel(
+        _V_SIZE, "shtyrov", atomic_number=6, shtyrov_species="C(CCC)"
+    )
+    carbon_peng = build_atomic_potential_kernel(_V_SIZE, "peng", atomic_number=6)
+    assert not torch.equal(carbon_shtyrov, carbon_peng)
+
+    # Gold declares no species, so a bead lands on Peng for every caller,
+    # not just the tomogram generator.
+    bead = BeadGenerator(voxel_size=_V_SIZE, parameterization="shtyrov")
+    peng = BeadGenerator(voxel_size=_V_SIZE, parameterization="peng")
+    assert bead.mean_inner_potential == peng.mean_inner_potential
+
+
+def test_shtyrov_tomogram_still_renders_its_gold_fiducials():
+    """The end of that path: a shtyrov tomogram containing beads generates
+    real gold density rather than raising."""
+    gen = TomogramSpecimenGenerator(
+        membrane_instances=[],
+        target_shape=_TARGET_SHAPE_ZYX,
+        voxel_size=_V_SIZE,
+        protein_specs=[],
+        bead_specs=[TomogramBeadSpec(radius=10.0, count=3)],
+        parameterization="shtyrov",
+        seed=0,
+    )
+    volume = gen.generate()
+    assert len(gen.bead_instances) > 0
+    # Gold is dense: the beads must have deposited real potential, not zeros.
+    assert float(volume.max()) > 0.0

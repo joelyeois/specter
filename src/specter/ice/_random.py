@@ -9,7 +9,7 @@ from ..arrays import soft_voxelize_coordinates
 from ..fft import fftconvolve
 from ._energy import MLBOP
 from ._helpers import ndensity_of_amorphous_ice
-from ..potential import build_atomic_potential_kernel
+from ._kernels import build_water_kernel
 
 
 class RandomIcemaker(L.LightningModule):
@@ -70,7 +70,7 @@ class RandomIcemaker(L.LightningModule):
         self.n_ice_molecules = int(ndensity_of_amorphous_ice * self.total_volume)
         self.register_buffer(
             "ice_kernel",
-            build_atomic_potential_kernel(self.dx, self.parameterization),
+            build_water_kernel(self.dx, self.parameterization),
             persistent=False,
         )
 

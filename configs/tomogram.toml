@@ -1,24 +1,14 @@
 # Canonical default config for `specter build tomogram`.
 # Any field can be overridden on the command line, e.g.:
 #   specter build tomogram --config configs/tomogram.toml --n_tomograms 4
-#
-# The tables below appear in the same order as the panels in
-# `specter build tomogram --help`, ending with [advanced]. Everything a first
-# run has to decide is above that table; everything below it has a default
-# that is usually right. Table names are organisation only -- the loader
-# flattens them into one namespace before validating fields.
-#
-# The specimen's contents are arrays of tables ([[membrane]], [[filaments]],
-# [[beads]], ...) with no command-line spelling, so they live only here.
+
 # Full field docs: docs/user-guide/build-tomogram.md.
 
 [specimen]
 target_shape = [300, 1200, 1200]    # (Z, Y, X) voxels
 voxel_size = 5.0                    # A/voxel
 clip_axes = [true, true, true]      # (z, y, x) -- True lets instances poke past that wall
-filler_occupancy_fraction = 1.0
-# There is no `gap`: macromolecules in crowded cytoplasm contact each other,
-# so placed instances are only required not to overlap.
+filler_occupancy_fraction = 1.0     # a ceiling, not a target: packing stops when it jams
 
 # Target species: exact-count, placed first, written to picks as ground truth.
 [targets]
@@ -39,18 +29,17 @@ filler = [
     { pdb_source = "1fa2", location = "lumen" },  # beta amylase, as an example lumen filler
 ]
 
+# 20 generic cytosolic proteins, weighted by the abundances published with
+# them: Pei et al. 2016, BMC Bioinformatics 17:405.
 filler_from_pei2016 = true
-# filler_from_cryoetsim = true       # Stojanovska et al. 2025 CryoETSim table
+# 161 species from the CryoETSim reference set, Stojanovska et al. 2025.
+# filler_from_cryoetsim = true
 # filler_table_categories = ["distractors", "nucleosomes"]  # cryoetsim only
 # filler_table_max_mw_kda = 300.0
 # Raising the mass floor lifts achieved occupancy: tiny species consume the
 # placement slots RSA jams on while adding little volume.
 # filler_table_min_mw_kda = 20.0
 
-# Atomic scattering-factor parameterization for the targets/filler protein-fill
-# step specifically (applies regardless of whether any [[membrane]] is set).
-# See [advanced] for the hydrogens Shtyrov typing needs.
-target_parameterization = "shtyrov"
 
 # Membranes. One [[membrane]] table per population. Omit them all for a
 # membrane-free volume; the whole box is then one cytosol region.
@@ -76,14 +65,7 @@ n_copies = 40        # per membrane instance; a request, not a guarantee
 [membrane_settings]
 # membrane_region_density_threshold = 0.05
 # membrane_region_max_passes = 300
-membrane_min_transmembrane_spacing = 40.0
-
-# --------------------------------------------------------------------------
-# Filaments, microtubules, carbon film and gold fiducials. All are ON here,
-# since a real tomogram usually has all of them. Delete or comment out a
-# block to leave that feature out. Only the --actin preset toggle has a
-# command-line spelling; the rest are TOML-only.
-# --------------------------------------------------------------------------
+membrane_min_transmembrane_spacing = 40.0  # center-to-center, A
 
 # Filaments. Either hand-write [[filaments]] entries (FilamentSpec kwargs), as
 # below, or set `actin = true` for the built-in ACTIN_SPEC preset.
@@ -96,23 +78,17 @@ n_copies = 20
 n_monomers = [20, 60]
 
 # Microtubules. Real 13-protofilament tubes (lumen, A-lattice seam, tubulin
-# dimer wall) -- NOT a [[filaments]] entry, which would give a single
-# protofilament. `code` defaults to a dimer extracted from a deposited
-# microtubule reconstruction, fetched and cached on first use; `length`
-# defaults to the volume diagonal so a microtubule crosses the field.
+# dimer wall)
 [[microtubules]]
 n_copies = 2
 n_protofilaments = 13   # 13 is the canonical in-cell lattice
 # length = 6000.0       # A; omit to span the volume diagonal
 # bend_radius = 30000.0 # A; omit for a straight, thermally bent tube
 
-# Carbon support film -- at most one [[carbon_film]] table. With hole_radius set to
-# roughly the box width, only a sliver of film intrudes at one edge, which is
-# what a tomogram near a hole edge actually looks like. Costs ~9 s at the box
-# size above.
+# Carbon support film -- at most one [[carbon_film]] table.
 [[carbon_film]]
 hole_radius = 6000.0          # A (0.6 micron, Quantifoil R1.2/1.3)
-edge_fraction = [0.02, 0.05]
+edge_fraction = [0.02, 0.05]  # how far the film intrudes, as a fraction of the frame
 edge_side = "random"          # "left" | "right" | "top" | "bottom" | "random"
 
 # Gold fiducial beads -- one [[beads]] table per population. `radius` takes a
@@ -124,28 +100,21 @@ radius = [80.0, 120.0]        # A -- i.e. 16-24 nm diameter
 n_copies = 20
 
 [picks]
-write_picks = true
-annotation_version = "1.0"
-write_segmentation = true
+write_picks = true            # one copick-style .ndjson per species
+annotation_version = "1.0"    # version string in the pick filenames
+write_segmentation = true     # per-instance integer label volumes, as .mrc
 
 [compute]
 device = "cuda"                     # cpu | cuda | cuda:0 | 0,1,2
-accumulator_device = "auto"
-render_workers = "auto"
-render_chunk_size = 64
+accumulator_device = "auto"         # where the canvas lives; "auto" spills it to CPU
+                                    # when it would crowd out `device`
+render_workers = "auto"             # species rendered concurrently; "auto" is min(n_species, 8)
+render_chunk_size = 64              # instances rotated per GPU batch, per species
 
 [output]
 output_dir = "tomograms"
 filename = "tomogram"
 
-# Job tracking (opt-in) -- set project or job_id to route output through
-# specter.jobs instead of output_dir/filename above: the directory becomes
-# output_dir/[project/]tomograms/J00N/, numbered, with a job.json
-# recording every parameter, the git commit and the run's status. Neither
-# is required -- leaving both unset keeps the flat behavior above exactly.
-# When chained via --tomogram_config on `specter simulate tiltseries`,
-# leaving this unset while tracking the tiltseries run cascades that
-# project here automatically -- two separate, linked jobs from one call.
 [job]
 # project = "my-project"
 # job_id = "J001"
@@ -154,31 +123,14 @@ filename = "tomogram"
 # unset to default that root to the project root found by walking up
 # from cwd for an existing .specter marker, like git finds .git.
 
-# --------------------------------------------------------------------------
-# Advanced. Mirrors the --help panel of the same name: a commented-out line
-# means the field keeps its TomogramConfig default.
-# --------------------------------------------------------------------------
 [advanced]
 
 # --- Structure handling ---
 # pdb_cache_dir = "~/.cache/specter/pdb"   # default; set $SPECTER_PDB_CACHE to move it,
-                                           # e.g. onto scratch. Downloads only --
-                                           # your own files are read where they are.
-#
-# Shtyrov types atoms by their bonded neighbours, and 20 of its 42 species name a
-# hydrogen -- which depositions omit. Install the Monomer Library and point
-# $CLIBD_MON at it to supply them; without it ~44% of a protein falls back to
-# per-element Peng. See docs/installation.md.
-#
-# The variable is not the only way in: set monomer_library_path below to record
-# the library in this config instead. Prefer that when a run has to be
-# reproducible from its config alone -- unlike pdb_cache_dir, this choice
-# changes the rendered potential, so a config omitting it does not fully
-# describe what it produced. Unset, $CLIBD_MON still applies.
-# monomer_library_path = "~/monomers"
-#
+# monomer_library_path = "~/monomers" #  point to Monomer library or set at $CLIBD_MON
 # The default, "auto", needs no setting: it keeps hydrogens the file already
-# carries and adds them only when it has none.
+# carries and adds them only when it has none
+scattering_factors = "shtyrov"    # shtyrov | kirkland | lobato
 # readd_hydrogens = "auto"     # auto | true | false
 
 # --- Protein packing ---

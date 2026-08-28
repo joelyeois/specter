@@ -405,7 +405,7 @@ def test_seed_is_configurable(config_cls: type) -> None:
     assert config_cls.seed is None
 
 
-def test_ice_parameterization_defaults_to_following_the_structure() -> None:
+def test_ice_scattering_factors_default_to_following_the_structure() -> None:
     """
     Unset, the ice is modelled the same way as the structure it surrounds.
 
@@ -414,19 +414,17 @@ def test_ice_parameterization_defaults_to_following_the_structure() -> None:
     inheriting from two independent defaults.
     """
     config = ParticleStackConfig(pdb_source="1abc")
-    assert config.ice_parameterization is None
+    assert config.ice_scattering_factors is None
 
-    for parameterization in ("shtyrov", "kirkland", "lobato"):
-        config.potential_parameterization = parameterization  # type: ignore[assignment]
-        resolved = config.ice_parameterization or config.potential_parameterization
-        assert resolved == parameterization
+    for factors in ("shtyrov", "kirkland", "lobato"):
+        config.scattering_factors = factors  # type: ignore[assignment]
+        resolved = config.ice_scattering_factors or config.scattering_factors
+        assert resolved == factors
 
     # An explicit value still wins, so deliberately differing stays possible.
-    config.potential_parameterization = "shtyrov"  # type: ignore[assignment]
-    config.ice_parameterization = "kirkland"  # type: ignore[assignment]
-    assert (
-        config.ice_parameterization or config.potential_parameterization
-    ) == "kirkland"
+    config.scattering_factors = "shtyrov"  # type: ignore[assignment]
+    config.ice_scattering_factors = "kirkland"  # type: ignore[assignment]
+    assert (config.ice_scattering_factors or config.scattering_factors) == "kirkland"
 
 
 # --- validation -----------------------------------------------------------

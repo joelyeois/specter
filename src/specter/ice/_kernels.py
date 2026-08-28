@@ -18,6 +18,8 @@ working.
 
 from __future__ import annotations
 
+import math
+
 import torch
 from torchinterp1d import interp1d
 
@@ -29,7 +31,99 @@ from ..fft import fft3
 from ..ice_data import bundled_ice_data
 from ..potential import build_atomic_potential_kernel
 
-__all__ = ["build_atomic_potential_kernel"]
+__all__ = ["build_atomic_potential_kernel", "build_water_kernel"]
+
+# Geometry of a water molecule, used to place its hydrogens' scattering
+# density. Only the O-H distance matters here: the icemakers orient every
+# molecule at random, so the HOH angle drops out of the orientation average
+# (both hydrogens sit on the same sphere regardless of it).
+WATER_OH_DISTANCE = 0.9572  # A
+
+
+def _smear_onto_shell(kernel: torch.Tensor, dx: float, radius: float) -> torch.Tensor:
+    """
+    Spread `kernel` uniformly over a spherical shell of `radius`.
+
+    The k-space form factor of a uniform spherical shell is
+    ``sinc(2*pi*k*radius)``, so the smear is a single multiply in Fourier
+    space. It moves density outward without creating or destroying any: the
+    k=0 component (and hence the volume integral) is untouched.
+    """
+    n = kernel.shape[0]
+    f = torch.fft.fftfreq(n, d=dx)
+    kz, ky, kx = torch.meshgrid(f, f, f, indexing="ij")
+    x = 2.0 * math.pi * torch.sqrt(kz**2 + ky**2 + kx**2) * radius
+    # sinc(0) = 1; torch.sinc takes x/pi, so spell the limit out directly.
+    shell = torch.where(x.abs() < 1e-8, torch.ones_like(x), torch.sin(x) / x)
+    spectrum = torch.fft.fftn(torch.fft.ifftshift(kernel))
+    return torch.fft.fftshift(torch.fft.ifftn(spectrum * shell).real)
+
+
+def build_water_kernel(dx: float, parameterization: str = "shtyrov") -> torch.Tensor:
+    """
+    Potential kernel for one whole water molecule, as a single site.
+
+    The icemakers are coarse-grained: they place one position per water
+    molecule, not three atoms, so the kernel convolved with those positions
+    has to carry the whole molecule. Rendering only the oxygen -- what
+    specter did before -- drops the two hydrogens entirely, and for
+    ELECTRON scattering that is not a small omission. Hydrogen's scattering
+    factor is disproportionately large at low k (Mott-Bethe: f_e goes as
+    (Z - f_x)/k^2, so a diffuse one-electron atom is far from negligible),
+    and two of them make up 43% of a water molecule at k=0, falling to ~26%
+    at 1.5 A. Measured against amorphous ice's mean inner potential:
+
+    ==========================  ========  ==========================
+    model                       MIP       vs. measured 4.15 V
+    ==========================  ========  ==========================
+    oxygen only (before)        2.08 V    -50%
+    this kernel                 3.67 V    -12%
+    ==========================  ========  ==========================
+
+    (Angert et al. 1996; reported values span roughly 3.5-4.9 V.)
+
+    The hydrogens are placed on a **spherical shell** at
+    `WATER_OH_DISTANCE`, not at the oxygen's own position. Both choices give
+    the identical MIP, since a volume integral does not care where density
+    sits, but they differ at every nonzero frequency: molecules are randomly
+    oriented, so a hydrogen's contribution decoheres as
+    ``sinc(2*pi*k*d)``, and collapsing it to r=0 pins that factor at 1
+    forever. Rendering apoferritin in ice at 1 A/px, the collapsed version
+    carries ~1.9x the ice power past 5 A all the way to Nyquist, where the
+    shell correctly returns to unity -- spurious high-frequency ice texture
+    in the band the CTF transfers best. The correction is a single Fourier
+    multiply, so there is no reason to take the cheaper approximation.
+
+    Hydrogen resolves through the ordinary fallback rather than a special
+    case: the bundled Shtyrov tables have ``O(HH)`` but no ``H(O)`` (only
+    ``H(C)``/``H(N)``), so passing no species yields per-element Peng for
+    the hydrogens while Kirkland/Lobato use their own H entry.
+
+    Parameters
+    ----------
+    dx : float
+        Voxel size in Angstrom.
+    parameterization : str, optional
+        Atomic scattering-factor parameterization for the oxygen. Default
+        ``'shtyrov'``, which types it as the water species ``O(HH)``.
+
+    Returns
+    -------
+    torch.Tensor
+        Potential kernel for one water molecule, same shape and grid as
+        :func:`specter.potential.build_atomic_potential_kernel` returns.
+    """
+    oxygen = build_atomic_potential_kernel(
+        dx,
+        parameterization,
+        atomic_number=8,
+        shtyrov_species="O(HH)" if parameterization == "shtyrov" else None,
+    )
+    hydrogen = build_atomic_potential_kernel(
+        dx, parameterization, atomic_number=1, shtyrov_species=None
+    )
+    return oxygen + 2.0 * _smear_onto_shell(hydrogen, dx, WATER_OH_DISTANCE)
+
 
 # Grid the bundled (and any custom) mdsim radial-average target files are
 # computed on. Not user-configurable: it describes the fixed grid a target

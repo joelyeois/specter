@@ -247,3 +247,38 @@ def test_microtubules_alone_satisfy_the_species_source_check():
     gen = build_tomogram_generator(config)
     assert len(gen.microtubule_specs) == 1
     assert callable(run_build_tomogram)
+
+
+def test_scattering_factors_reach_every_renderer_in_the_tomogram():
+    """One tomogram, one set of scattering factors.
+
+    Everything placed is summed into the same volume, so the bilayer and
+    the transmembrane proteins have to follow the same parameterization as
+    the packed proteins rather than MembraneGenerator's own default.
+    """
+    config = TomogramConfig(
+        scattering_factors="lobato",
+        membrane=[{"shape_backend": "swept_spline"}],
+        membrane_transmembrane_specs=[{"pdb_source": "1mbo"}],
+        **_BASE_KWARGS,
+    )
+    gen = build_tomogram_generator(config)
+    membrane = gen.membrane_instances[0].generator
+
+    assert gen.parameterization == "lobato"
+    assert membrane.parameterization == "lobato"
+    assert [s.parameterization for s in membrane.transmembrane_specs] == ["lobato"]
+
+
+def test_membrane_entry_may_override_the_tomogram_scattering_factors():
+    """The global setting is a default, not a lock: a [[membrane]] table
+    naming its own parameterization still wins for that population."""
+    config = TomogramConfig(
+        scattering_factors="kirkland",
+        membrane=[{"shape_backend": "swept_spline", "parameterization": "lobato"}],
+        **_BASE_KWARGS,
+    )
+    gen = build_tomogram_generator(config)
+
+    assert gen.parameterization == "kirkland"
+    assert gen.membrane_instances[0].generator.parameterization == "lobato"

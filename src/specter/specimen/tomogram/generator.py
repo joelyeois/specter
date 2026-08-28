@@ -1645,7 +1645,11 @@ class TomogramSpecimenGenerator:
 
         accepted_radii = radii[accepted_idx]
 
-        bead_gen = BeadGenerator(voxel_size=voxel_size, roughness=self.bead_roughness)
+        bead_gen = BeadGenerator(
+            voxel_size=voxel_size,
+            parameterization=self.parameterization,
+            roughness=self.bead_roughness,
+        )
         instance_ids = torch.arange(
             next_instance_id, next_instance_id + n_placed, dtype=torch.int32
         )

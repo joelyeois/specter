@@ -112,17 +112,16 @@ def run_micrograph(config: MicrographConfig) -> None:
 
     # --- Building 3D scattering potential ---
     _section("Building 3D scattering potential")
-    # PotentialBuilder defaults to the Shtyrov parameterization, which fits
-    # scattering factors per bonded species -- without atom_species every atom
-    # silently falls back to per-element Peng, so derive the topology here as
-    # run_particle_stack does. This path has no potential_parameterization
-    # config field, so the default always applies and the typing is always
-    # worth its one-off gemmi pass.
+    # Shtyrov fits scattering factors per bonded species, so derive the bond
+    # topology from the structure -- without atom_species every atom silently
+    # falls back to per-element Peng. The other parameterizations are
+    # per-element and would only pay the extra gemmi pass for nothing.
+    _derive_atom_species = config.scattering_factors == "shtyrov"
     pdb = PDB(
         config.pdb_source,
         assembly=config.assembly,
         pdb_cache_dir=config.pdb_cache_dir,
-        compute_atom_species=True,
+        compute_atom_species=_derive_atom_species,
         readd_hydrogens=config.readd_hydrogens,
         monomer_library_path=config.monomer_library_path,
     )
@@ -133,6 +132,7 @@ def run_micrograph(config: MicrographConfig) -> None:
         config.n_pixels,
         config.pixel_size,
         pdb.atomic_numbers,
+        parameterization=config.scattering_factors,
         atom_species=pdb.atom_species,
     ).to("cpu")
     with torch.no_grad():
@@ -180,12 +180,16 @@ def run_micrograph(config: MicrographConfig) -> None:
         if ice_profile is not None
         else compute_nz(V.shape[0], config.ice_thickness, config.pixel_size)
     )
+    # Unset, the ice follows the structure's own scattering factors: the two
+    # are summed into one volume, so modelling the protein with one set and
+    # the ice around it with another is a choice worth making deliberately.
     icemaker = resolve_icemaker(
         ice_model,
         config.pixel_size,
         config.micrograph_size,
         ice_nz,
         ice_cache_dir=config.ice_cache_dir,
+        parameterization=(config.ice_scattering_factors or config.scattering_factors),
     )
     if icemaker is not None:
         icemaker = icemaker.to(device)

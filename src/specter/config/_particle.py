@@ -118,7 +118,7 @@ class ParticleStackConfig:
     pad_fft: bool = True
 
     # --- Advanced: potential building ---
-    potential_parameterization: Literal["shtyrov", "kirkland", "lobato"] = "shtyrov"
+    scattering_factors: Literal["shtyrov", "kirkland", "lobato"] = "shtyrov"
     potential_method: Literal["analytic", "2d", "3d"] = "analytic"
     rcut: float | None = None  # Å, auto-detected per-structure if unset
     conv_backend: str = "fftconvolve"
@@ -150,9 +150,9 @@ class ParticleStackConfig:
     rotate_mode: Literal["real", "fourier"] = "real"
 
     # --- Advanced: ice ---
-    # None follows potential_parameterization -- see run_particle_stack. Set it
-    # only to deliberately parameterize the ice differently from the structure.
-    ice_parameterization: Literal["kirkland", "lobato", "shtyrov"] | None = None
+    # None follows scattering_factors -- see run_particle_stack. Set it only to
+    # deliberately model the ice differently from the structure.
+    ice_scattering_factors: Literal["kirkland", "lobato", "shtyrov"] | None = None
     ice_relax_steps: int = 0
 
     # --- Advanced: crowding ---
@@ -280,8 +280,8 @@ PARTICLE_STACK_HELP: dict[str, str] = {
     "approximate thicker ice): a single value for constant scale, or "
     "'low,high' ([low, high] in TOML) to sample uniformly per particle.",
     "pad_fft": "Pad the volume for FFT to avoid edge artifacts.",
-    "potential_parameterization": "Atomic potential model used to build the "
-    "structure's scattering potential.",
+    "scattering_factors": "Atomic scattering-factor parameterization used to "
+    "build the structure's scattering potential.",
     "potential_method": "Voxelization method for the structure's own "
     "potential: 'analytic' (per-atom closed-form, no splat/FFT), '2d' "
     "(soft XY, hard Z), or '3d' (trilinear). Ice is built by its own "
@@ -310,8 +310,8 @@ PARTICLE_STACK_HELP: dict[str, str] = {
     "klim": "Bandlimit for Kirkland's FFT anti-aliasing, as a fraction of Nyquist. Kirkland recommends 0.66 (2/3), which prevents aliasing but discards real spatial frequency content above it. Unset (the default) keeps the full Nyquist range and accepts the aliasing.",
     "rotate_mode": "Volume rotation method: 'real' (trilinear interpolation) or "
     "'fourier' (no boundary artifacts).",
-    "ice_parameterization": "Atomic potential model for the ice "
-    "specifically. Unset, it follows potential_parameterization, so the "
+    "ice_scattering_factors": "Atomic scattering-factor parameterization for "
+    "the ice specifically. Unset, it follows scattering_factors, so the "
     "ice and the structure it surrounds are modelled the same way; set it "
     "only to deliberately differ.",
     "ice_relax_steps": "Local MLBOP seam-relaxation steps, only used when "

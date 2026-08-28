@@ -25,7 +25,8 @@ from ..arrays import (
 from ..ice_data import ICE_CACHE_DIRNAME, bundled_ice_data
 from ..progress import track
 from ._energy import MLBOP
-from ..potential import build_atomic_potential_kernel, potential_from_deltas
+from ..potential import potential_from_deltas
+from ._kernels import build_water_kernel
 from ._random import RandomIcemaker
 
 if TYPE_CHECKING:
@@ -295,9 +296,7 @@ class IceBank(L.LightningModule):
 
     def _get_kernel(self, dx: float) -> torch.Tensor:
         if dx not in self._kernel_cache:
-            self._kernel_cache[dx] = build_atomic_potential_kernel(
-                dx, self.parameterization
-            )
+            self._kernel_cache[dx] = build_water_kernel(dx, self.parameterization)
         return self._kernel_cache[dx]
 
     def _get_source_pos(self, config: dict) -> torch.Tensor:

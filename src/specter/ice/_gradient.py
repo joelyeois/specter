@@ -11,7 +11,7 @@ from ..fft import fft3, fftconvolve
 from ..progress import ProgressManager, track
 from ._energy import MLBOP
 from ._helpers import ndensity_of_amorphous_ice
-from ..potential import build_atomic_potential_kernel
+from ._kernels import build_water_kernel
 from ._kernels import (
     compute_native_target,
     ice_kspace_radial_grid,
@@ -103,7 +103,7 @@ class GradientSKIcemaker(L.LightningModule):
         self.box_x = self.n * self.dx
         self.box_y = self.n * self.dx
         self.box_z = self.nz * self.dx
-        self._ice_kernel: torch.Tensor = build_atomic_potential_kernel(
+        self._ice_kernel: torch.Tensor = build_water_kernel(
             self.dx, self.parameterization
         )
 

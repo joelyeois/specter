@@ -28,7 +28,7 @@ filler = [
     { pdb_source = "1a6m", location = "cytosol" },
 ]
 filler_from_pei2016 = false
-target_parameterization = "shtyrov"
+scattering_factors = "shtyrov"
 
 [[membrane]]
 shape_backend = "spherical_harmonics"

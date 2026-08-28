@@ -94,7 +94,7 @@ _PARTICLE_STACK_GROUPS: list[tuple[str, list[str]]] = [
             "crowd_max_distance_z",
             "potential_scale",
             "pad_fft",
-            "potential_parameterization",
+            "scattering_factors",
             "potential_method",
             "rcut",
             "conv_backend",
@@ -103,7 +103,7 @@ _PARTICLE_STACK_GROUPS: list[tuple[str, list[str]]] = [
             "ews_curvature_sign",
             "klim",
             "rotate_mode",
-            "ice_parameterization",
+            "ice_scattering_factors",
             "ice_relax_steps",
             "crowd_chunk_size",
             "crowd_max_distance_xy",
@@ -227,6 +227,7 @@ _MICROGRAPH_GROUPS: list[tuple[str, list[str]]] = [
         [
             # Structure handling
             "pdb_cache_dir",
+            "scattering_factors",
             "readd_hydrogens",
             "monomer_library_path",
             # Envelopes
@@ -242,6 +243,7 @@ _MICROGRAPH_GROUPS: list[tuple[str, list[str]]] = [
             "coincidence_radius",
             # Ice model and thickness profile
             "ice_model",
+            "ice_scattering_factors",
             "ice_profile",
             "ice_thickness_range",
             "ice_profile_angle",

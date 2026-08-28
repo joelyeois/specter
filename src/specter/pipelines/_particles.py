@@ -114,7 +114,7 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
     # atom_species list. Other parameterizations are per-element and would
     # only pay the extra gemmi pass for nothing.
     _derive_atom_species = (
-        config.potential_parameterization == "shtyrov" and config.atom_species is None
+        config.scattering_factors == "shtyrov" and config.atom_species is None
     )
     pdb = PDB(
         config.pdb_source,
@@ -164,7 +164,7 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
             config.n_pixels,
             pixel_size,
             pdb.atomic_numbers,
-            parameterization=config.potential_parameterization,
+            parameterization=config.scattering_factors,
             conv_backend=config.conv_backend,
             atom_species=config.atom_species or pdb.atom_species,
             shtyrov_params_path=config.shtyrov_params_path,
@@ -290,9 +290,7 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
     # summed into one volume, so modelling the protein with one set of
     # scattering factors and the ice around it with another is a choice worth
     # making deliberately rather than inheriting from a default.
-    ice_parameterization = (
-        config.ice_parameterization or config.potential_parameterization
-    )
+    ice_parameterization = config.ice_scattering_factors or config.scattering_factors
     icemaker = resolve_icemaker(
         ice_model,
         pixel_size,

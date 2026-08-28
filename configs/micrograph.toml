@@ -47,6 +47,7 @@ filename = "micrographs"
 [advanced]
 
 # --- Structure handling ---
+scattering_factors = "shtyrov"   # shtyrov | kirkland | lobato
 # pdb_cache_dir = "~/.cache/specter/pdb"   # default; set $SPECTER_PDB_CACHE to move it,
 # monomer_library_path = "~/monomers" #  point to Monomer library or set at $CLIBD_MON
 # The default, "auto", needs no setting: it keeps hydrogens the file already
@@ -68,6 +69,9 @@ coincidence_radius = 0.0       # pixels; 0 = plain Poisson, no coincidence loss;
 # FFT per slice regardless of what it holds, so a profile costs what its
 # thickest column costs over the whole field.
 ice_model = "gd"                 # gd | random | none
+# ice_scattering_factors = "shtyrov"  # shtyrov | kirkland | lobato; unset, the ice follows
+                                 # scattering_factors above, so structure and ice are
+                                 # modelled the same way
 ice_profile = "flat"             # flat | wedge | meniscus
 # ice_thickness_range = [250.0, 900.0]  # Å, wedge only; overrides ice_thickness
 # ice_profile_angle = 0.0        # degrees, wedge ramp direction

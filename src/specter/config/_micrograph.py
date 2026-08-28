@@ -31,9 +31,13 @@ class MicrographConfig:
     n_pixels: int = 256
     pixel_size: float = 1.0  # Å
     micrograph_size: int = 4096
-    # This path has no potential_parameterization field, so PotentialBuilder's
-    # shtyrov default always applies and atoms are always typed -- see
-    # run_micrograph, so this always takes effect.
+    scattering_factors: Literal["shtyrov", "kirkland", "lobato"] = "shtyrov"
+    # None follows scattering_factors -- see run_micrograph, and
+    # ParticleStackConfig's own field for why the two are worth keeping
+    # separable. Set it only to model the ice differently from the structure.
+    ice_scattering_factors: Literal["kirkland", "lobato", "shtyrov"] | None = None
+    # Only takes effect for scattering_factors="shtyrov" (the only one that
+    # types atoms) and only when a Monomer Library is available.
     readd_hydrogens: bool | Literal["auto"] = "auto"
     # Unset falls back to $CLIBD_MON. A field as well as a variable because
     # the library changes the rendered potential, so a run should be
@@ -141,6 +145,12 @@ MICROGRAPH_HELP: dict[str, str] = {
     "n_pixels": "Number of pixels per axis for the 3-D particle potential box.",
     "pixel_size": "Pixel size in Angstrom.",
     "micrograph_size": "Micrograph size in pixels (square).",
+    "scattering_factors": "Atomic scattering-factor parameterization used to "
+    "build the structure's scattering potential.",
+    "ice_scattering_factors": "Atomic scattering-factor parameterization for "
+    "the ice specifically. Unset, it follows scattering_factors, so the ice "
+    "and the structure it surrounds are modelled the same way; set it only to "
+    "deliberately differ.",
     "readd_hydrogens": "Whether to replace a structure's own hydrogens with "
     "the monomer library's ideal geometry: 'auto' (default) keeps hydrogens "
     "the file already carries and adds them only when it has none, true "

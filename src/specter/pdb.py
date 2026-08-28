@@ -321,9 +321,9 @@ class PDB:
                     + (
                         f" -- the file holds {n_models} models, and only the "
                         "first can be typed. Extract a single model, or use "
-                        "potential_parameterization='kirkland'/'lobato'."
+                        "scattering_factors='kirkland'/'lobato'."
                         if n_models > 1
-                        else ". Use potential_parameterization="
+                        else ". Use scattering_factors="
                         "'kirkland'/'lobato' for this structure."
                     )
                 )

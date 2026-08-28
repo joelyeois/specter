@@ -43,7 +43,7 @@ PDB_B = "~/.cache/specter/pdb/1A6M.cif"
 NOT_USER_FACING = {
     "ice_cache_dir",
     "ice_relax_steps",
-    "ice_parameterization",
+    "ice_scattering_factors",
     "shtyrov_params_path",
     "conv_backend",
 }
@@ -125,8 +125,8 @@ PARTICLES = CommandSpec(
         ),
         Flag("n_pixels", "64"),
         Flag("pixel_size", "4.0"),
-        Flag("potential_parameterization", "kirkland"),
-        Flag("potential_parameterization", "lobato"),
+        Flag("scattering_factors", "kirkland"),
+        Flag("scattering_factors", "lobato"),
         Flag("potential_method", "2d"),
         Flag("potential_method", "3d"),
         Flag(
@@ -268,6 +268,8 @@ MICROGRAPH = CommandSpec(
         Flag("n_pixels", "64"),
         Flag("pixel_size", "4.0"),
         Flag("micrograph_size", "160"),
+        Flag("scattering_factors", "kirkland"),
+        Flag("scattering_factors", "lobato"),
         Flag("voltage", "200.0"),
         Flag("dose", "40.0"),
         Flag(
@@ -446,7 +448,7 @@ TOMOGRAM = CommandSpec(
         Flag("membrane_region_density_threshold", "0.3"),
         Flag("membrane_region_max_passes", "2"),
         Flag("membrane_min_transmembrane_spacing", "80.0"),
-        Flag("target_parameterization", "kirkland"),
+        Flag("scattering_factors", "kirkland"),
         Flag("actin", "true"),
         Flag("bead_roughness", "0.3"),
         Flag("write_picks", "false", expect="artifacts"),

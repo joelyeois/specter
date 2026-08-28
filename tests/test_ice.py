@@ -355,3 +355,58 @@ def test_randomicemaker_mlbop_energy():
 
     assert set(result) == _MLBOP_KEYS
     assert torch.isfinite(torch.tensor(result["E_total"]))
+
+
+def test_water_kernel_reproduces_the_measured_ice_mean_inner_potential():
+    """Amorphous ice has a measured MIP, so the kernel is checkable.
+
+    Reported values span roughly 3.5-4.9 V (4.15 V, Angert et al. 1996). An
+    oxygen-only kernel -- what specter rendered before -- misses the two
+    hydrogens and lands near 2 V, half the real value, because hydrogen's
+    ELECTRON scattering factor is disproportionately large at low k.
+    """
+    from specter.ice._helpers import ndensity_of_amorphous_ice
+    from specter.ice._kernels import build_water_kernel
+
+    for parameterization in ("shtyrov", "kirkland", "lobato"):
+        kernel = build_water_kernel(1.0, parameterization)
+        mip = ndensity_of_amorphous_ice * kernel.sum().item()
+        assert 3.5 < mip < 4.9, f"{parameterization} ice MIP is {mip:.2f} V"
+
+
+def test_water_kernel_shell_moves_hydrogen_without_creating_it():
+    """The shell placement is a rearrangement, not an addition.
+
+    Hydrogens sit on a sphere at the O-H distance rather than on top of the
+    oxygen. That is invisible to the volume integral (so the MIP above is
+    unchanged by it) but not to any nonzero frequency, which is the whole
+    reason for doing it -- see build_water_kernel's own docstring.
+    """
+    from specter.ice._kernels import (
+        WATER_OH_DISTANCE,
+        _smear_onto_shell,
+        build_atomic_potential_kernel,
+        build_water_kernel,
+    )
+
+    dx = 0.5
+    hydrogen = build_atomic_potential_kernel(dx, "peng", atomic_number=1)
+    smeared = _smear_onto_shell(hydrogen, dx, WATER_OH_DISTANCE)
+    assert smeared.sum().item() == pytest.approx(hydrogen.sum().item(), rel=1e-5)
+
+    # ... and it really is spread outward: the shell puts weight at the O-H
+    # distance that a centred hydrogen has already decayed away from.
+    n = hydrogen.shape[0]
+    c = n // 2
+    at_bond = int(round(WATER_OH_DISTANCE / dx))
+    assert smeared[c, c, c + at_bond] > hydrogen[c, c, c + at_bond]
+    assert smeared[c, c, c] < hydrogen[c, c, c]
+
+    # The whole molecule is the oxygen plus exactly two of those hydrogens.
+    oxygen = build_atomic_potential_kernel(
+        dx, "shtyrov", atomic_number=8, shtyrov_species="O(HH)"
+    )
+    water = build_water_kernel(dx, "shtyrov")
+    assert water.sum().item() == pytest.approx(
+        (oxygen.sum() + 2 * hydrogen.sum()).item(), rel=1e-5
+    )

@@ -8,7 +8,7 @@ perturb), `sweep.py` (orchestration + classification).
 Excluded as not-user-facing yet: the `torch_ctf` backend (no CLI flag exists at
 all — Python API only) and fresh ice-cube generation (`GradientSKIcemaker` /
 `build_ice_cache` have no CLI path). Also skipped: `ice_cache_dir`,
-`ice_relax_steps`, `ice_parameterization`, `shtyrov_params_path`, `conv_backend`,
+`ice_relax_steps`, `ice_scattering_factors`, `shtyrov_params_path`, `conv_backend`,
 `mmcif_filepath`.
 
 ## Result
@@ -26,7 +26,8 @@ all — Python API only) and fresh ice-cube generation (`GradientSKIcemaker` /
 
 `get_atom_species` returned a species list of the wrong length, surfacing as
 `IndexError: shape of the mask [N] does not match the indexed tensor [M]` inside
-`PotentialBuilder`. Since `potential_parameterization = "shtyrov"` is the
+`PotentialBuilder`. Since `scattering_factors = "shtyrov"` (then spelled
+`potential_parameterization`) is the
 default, affected structures could not be rendered at all — and
 `filler_from_pei2016 = true` in `configs/tomogram.toml` pulls one in, so the
 shipped default config failed outright.

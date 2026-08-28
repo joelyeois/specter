@@ -36,7 +36,7 @@ filler = [
 ]
 
 filler_from_pei2016 = true
-target_parameterization = "shtyrov"
+scattering_factors = "shtyrov"
 
 # No explicit size range here (unlike configs/tomogram.toml's production-scale
 # entries) -- omitting it lets each instance auto-cap its own draw to a

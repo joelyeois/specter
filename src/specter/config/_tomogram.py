@@ -142,19 +142,21 @@ class TomogramConfig:
     membrane_region_density_threshold: float | None = None
     membrane_region_max_passes: int = 300
     membrane_min_transmembrane_spacing: float = 40.0
-    # Atomic scattering-factor parameterization for the targets/filler
-    # protein-fill step (TomogramSpecimenGenerator's own `parameterization`
-    # constructor kwarg, distinct from each MembraneGenerator instance's own
-    # "parameterization" key inside its [[membrane]] dict, if set there --
-    # that one's for the bilayer/transmembrane step specifically). A
-    # top-level field rather than read from membrane[0] since it applies
-    # regardless of whether membrane is even set. Named target_parameterization
-    # (not bare parameterization) to keep it distinct from
-    # potential_parameterization/ice_parameterization on the particle-stack
-    # side of the codebase.
-    target_parameterization: str = "shtyrov"
+    # The parameterization for EVERYTHING this command renders from atoms:
+    # targets, filler, filaments, microtubules, the carbon film, the bilayer
+    # and its transmembrane proteins. Everything placed lands in one summed
+    # volume, so modelling parts of it with different scattering factors is a
+    # choice to make deliberately -- a [[membrane]] table naming its own
+    # "parameterization" still overrides this for that population (see
+    # run_build_tomogram), but nothing does so by default. The single
+    # exception is gold fiducials: Shtyrov fits per bonded species and has no
+    # elemental gold, so beads fall back to Peng, the same per-element
+    # fallback PotentialBuilder uses (see TomogramSpecimenGenerator._stamp_beads). Spelled the same as
+    # ParticleStackConfig.scattering_factors -- one config vocabulary across
+    # commands, distinct from the internal `parameterization=` kwarg it feeds.
+    scattering_factors: str = "shtyrov"
     # Forwarded to every PDB built for this tomogram. Only takes effect for
-    # target_parameterization="shtyrov" (the only one that types atoms) and
+    # scattering_factors="shtyrov" (the only one that types atoms) and
     # only when a Monomer Library is available via $CLIBD_MON.
     readd_hydrogens: bool | Literal["auto"] = "auto"
     # Unset falls back to $CLIBD_MON. A field as well as a variable because
@@ -391,8 +393,12 @@ TOMOGRAM_HELP: dict[str, str] = {
     "membrane_min_transmembrane_spacing": "Minimum center-to-center "
     "spacing between placed transmembrane proteins, Angstrom. Only "
     "meaningful when [[membrane]] is set.",
-    "target_parameterization": "Atomic scattering-factor parameterization "
-    "for the targets/filler protein-fill step.",
+    "scattering_factors": "Atomic scattering-factor parameterization for "
+    "everything rendered from atoms: targets, filler, filaments, "
+    "microtubules, carbon film, bilayer and transmembrane proteins. A "
+    "[[membrane]] table naming its own 'parameterization' overrides this for "
+    "that population. Gold fiducials fall back to Peng under 'shtyrov', "
+    "which has no elemental gold.",
     "readd_hydrogens": "Whether to replace a structure's own hydrogens with "
     "the monomer library's ideal geometry: 'auto' (default) keeps hydrogens "
     "the file already carries and adds them only when it has none, true "

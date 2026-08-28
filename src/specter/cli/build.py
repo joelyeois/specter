@@ -41,7 +41,7 @@ _TOMOGRAM_GROUPS: list[tuple[str, list[str]]] = [
             "filler_from_cryoetsim",
             "filler_table_max_mw_kda",
             "filler_table_min_mw_kda",
-            "target_parameterization",
+            "scattering_factors",
         ],
     ),
     (

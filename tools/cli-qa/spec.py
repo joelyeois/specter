@@ -43,7 +43,7 @@ PDB_B = "~/.cache/specter/pdb/1A6M.cif"
 NOT_USER_FACING = {
     "ice_cache_dir",
     "ice_relax_steps",
-    "ice_scattering_factors",
+    "bulk_scattering_factors",
     "shtyrov_params_path",
     "conv_backend",
 }

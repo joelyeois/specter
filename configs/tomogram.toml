@@ -131,6 +131,11 @@ filename = "tomogram"
 # The default, "auto", needs no setting: it keeps hydrogens the file already
 # carries and adds them only when it has none
 scattering_factors = "shtyrov"    # shtyrov | kirkland | lobato
+
+# The carbon film and gold beads, which are bulk materials rather than
+# biomolecules: Shtyrov is fitted for the latter, so they are parameterized
+# separately and per-element.
+bulk_scattering_factors = "kirkland"  # kirkland | lobato | shtyrov
 # readd_hydrogens = "auto"     # auto | true | false
 
 # --- Protein packing ---

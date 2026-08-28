@@ -186,7 +186,7 @@ def run_micrograph(config: MicrographConfig) -> None:
         config.micrograph_size,
         ice_nz,
         ice_cache_dir=config.ice_cache_dir,
-        parameterization=config.ice_scattering_factors,
+        parameterization=config.bulk_scattering_factors,
     )
     if icemaker is not None:
         icemaker = icemaker.to(device)

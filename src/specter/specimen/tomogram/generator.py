@@ -514,6 +514,7 @@ class TomogramSpecimenGenerator:
         min_transmembrane_spacing: float = 40.0,
         pdb_cache_dir: str = DEFAULT_PDB_CACHE_DIR,
         parameterization: str = "shtyrov",
+        bulk_parameterization: str = "kirkland",
         readd_hydrogens: bool | str = "auto",
         monomer_library_path: str | None = None,
         seed: int | None = None,
@@ -577,6 +578,7 @@ class TomogramSpecimenGenerator:
         self.min_transmembrane_spacing = min_transmembrane_spacing
         self.pdb_cache_dir = pdb_cache_dir
         self.parameterization = parameterization
+        self.bulk_parameterization = bulk_parameterization
         self.readd_hydrogens = readd_hydrogens
         self.monomer_library_path = monomer_library_path
         self.seed = seed
@@ -1520,13 +1522,13 @@ class TomogramSpecimenGenerator:
         here)."""
         carbon_film_spec = self.carbon_film_spec
         assert carbon_film_spec is not None
-        # Bulk carbon keeps CarbonFilmGenerator's own kirkland default rather
-        # than inheriting this specimen's parameterization: Shtyrov is fitted
-        # for biomolecules, and its "C(CCC)" proxy puts amorphous carbon 43%
-        # above the holography value per unit density, where Kirkland, Lobato
-        # and Peng agree with each other to 0.5%.
+        # Bulk carbon takes `bulk_parameterization`, NOT this specimen's
+        # `parameterization`: Shtyrov is fitted for biomolecules, and its
+        # "C(CCC)" proxy puts amorphous carbon 43% above the holography value
+        # per unit density, where Kirkland, Lobato and Peng agree to 0.5%.
         carbon_gen = CarbonFilmGenerator(
             voxel_size=voxel_size,
+            parameterization=self.bulk_parameterization,
             seed=self.seed,
             device=volume.device,
         )
@@ -1649,10 +1651,11 @@ class TomogramSpecimenGenerator:
 
         accepted_radii = radii[accepted_idx]
 
-        # Gold likewise keeps BeadGenerator's kirkland default -- it is a bulk
-        # metal, and the Shtyrov tables have no elemental gold at all.
+        # Gold likewise takes `bulk_parameterization` -- it is a bulk metal,
+        # and the Shtyrov tables have no elemental gold at all.
         bead_gen = BeadGenerator(
             voxel_size=voxel_size,
+            parameterization=self.bulk_parameterization,
             roughness=self.bead_roughness,
         )
         instance_ids = torch.arange(

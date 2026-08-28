@@ -42,6 +42,7 @@ _TOMOGRAM_GROUPS: list[tuple[str, list[str]]] = [
             "filler_table_max_mw_kda",
             "filler_table_min_mw_kda",
             "scattering_factors",
+            "bulk_scattering_factors",
         ],
     ),
     (

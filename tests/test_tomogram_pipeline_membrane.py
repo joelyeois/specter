@@ -282,3 +282,22 @@ def test_membrane_entry_may_override_the_tomogram_scattering_factors():
 
     assert gen.parameterization == "kirkland"
     assert gen.membrane_instances[0].generator.parameterization == "lobato"
+
+
+def test_bulk_scattering_factors_reach_carbon_and_gold():
+    """Bulk materials are parameterized separately from the biomolecules.
+
+    Shtyrov is fitted for biomolecules, so the carbon film and the gold
+    fiducials take `bulk_scattering_factors` rather than the specimen's own
+    `scattering_factors` -- and changing one must not move the other.
+    """
+    config = TomogramConfig(
+        scattering_factors="shtyrov",
+        bulk_scattering_factors="lobato",
+        carbon_film=[{"hole_radius": 4000.0}],
+        beads=[{"radius": 80.0, "n_copies": 1}],
+        **_BASE_KWARGS,
+    )
+    gen = build_tomogram_generator(config)
+    assert gen.parameterization == "shtyrov"
+    assert gen.bulk_parameterization == "lobato"

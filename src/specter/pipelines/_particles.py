@@ -286,7 +286,7 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
     # disk, cheap enough that every DDP rank can construct it independently
     # (no rank-0-builds-then-broadcasts dance needed, unlike V above).
     ice_nz = compute_nz(config.n_pixels, config.ice_thickness, pixel_size)
-    ice_parameterization = config.ice_scattering_factors
+    ice_parameterization = config.bulk_scattering_factors
     icemaker = resolve_icemaker(
         ice_model,
         pixel_size,

@@ -520,6 +520,7 @@ def build_tomogram_generator(config: TomogramConfig) -> TomogramSpecimenGenerato
         min_transmembrane_spacing=config.membrane_min_transmembrane_spacing,
         pdb_cache_dir=config.pdb_cache_dir,
         parameterization=config.scattering_factors,
+        bulk_parameterization=config.bulk_scattering_factors,
         readd_hydrogens=config.readd_hydrogens,
         monomer_library_path=config.monomer_library_path,
         seed=config.seed,

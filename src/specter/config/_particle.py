@@ -150,12 +150,13 @@ class ParticleStackConfig:
     rotate_mode: Literal["real", "fourier"] = "real"
 
     # --- Advanced: ice ---
-    # Ice is a bulk material, not a biomolecule, so it does NOT follow
-    # scattering_factors: Shtyrov fits bonded species of biomolecules over
-    # 0.011-0.62 1/A, and a mean inner potential is a k=0 quantity that
-    # extrapolates below that range. Kirkland/Lobato/Peng are per-element and
-    # valid at k=0, and agree there -- see ice._kernels.build_water_kernel.
-    ice_scattering_factors: Literal["kirkland", "lobato", "shtyrov"] = "kirkland"
+    # Everything specter renders that is NOT a biomolecule: the ice.
+    # Kept separate from `scattering_factors` on purpose -- Shtyrov fits bonded
+    # species of biomolecules over 0.011-0.62 1/A, so bulk materials are out of
+    # its domain and a mean inner potential (a k=0 quantity) extrapolates below
+    # the fitted range. Kirkland/Lobato/Peng are per-element, valid at k=0, and
+    # agree there. See ice._kernels.build_water_kernel for the measurements.
+    bulk_scattering_factors: Literal["kirkland", "lobato", "shtyrov"] = "kirkland"
     ice_relax_steps: int = 0
 
     # --- Advanced: crowding ---
@@ -313,11 +314,7 @@ PARTICLE_STACK_HELP: dict[str, str] = {
     "klim": "Bandlimit for Kirkland's FFT anti-aliasing, as a fraction of Nyquist. Kirkland recommends 0.66 (2/3), which prevents aliasing but discards real spatial frequency content above it. Unset (the default) keeps the full Nyquist range and accepts the aliasing.",
     "rotate_mode": "Volume rotation method: 'real' (trilinear interpolation) or "
     "'fourier' (no boundary artifacts).",
-    "ice_scattering_factors": "Atomic scattering-factor parameterization for "
-    "the ice specifically. Defaults to kirkland rather than following "
-    "scattering_factors: ice is a bulk material, outside the biomolecular "
-    "domain Shtyrov is fitted for, and Kirkland reproduces ice's measured "
-    "mean inner potential closely.",
+    "bulk_scattering_factors": "Atomic scattering-factor parameterization for the ice -- everything rendered that is not a biomolecule. Deliberately separate from scattering_factors: Shtyrov is fitted for biomolecules, and these materials are outside that domain.",
     "ice_relax_steps": "Local MLBOP seam-relaxation steps, only used when "
     "ice_model='gd' tiles multiple cached blocks.",
     "crowd_chunk_size": "Crowding duplicate volumes rotated per batch. Lowering "

@@ -32,12 +32,13 @@ class MicrographConfig:
     pixel_size: float = 1.0  # Å
     micrograph_size: int = 4096
     scattering_factors: Literal["shtyrov", "kirkland", "lobato"] = "shtyrov"
-    # Ice is a bulk material, not a biomolecule, so it does NOT follow
-    # scattering_factors: Shtyrov fits bonded species of biomolecules over
-    # 0.011-0.62 1/A, and a mean inner potential is a k=0 quantity that
-    # extrapolates below that range. Kirkland/Lobato/Peng are per-element and
-    # valid at k=0, and agree there -- see ice._kernels.build_water_kernel.
-    ice_scattering_factors: Literal["kirkland", "lobato", "shtyrov"] = "kirkland"
+    # Everything specter renders that is NOT a biomolecule: the ice.
+    # Kept separate from `scattering_factors` on purpose -- Shtyrov fits bonded
+    # species of biomolecules over 0.011-0.62 1/A, so bulk materials are out of
+    # its domain and a mean inner potential (a k=0 quantity) extrapolates below
+    # the fitted range. Kirkland/Lobato/Peng are per-element, valid at k=0, and
+    # agree there. See ice._kernels.build_water_kernel for the measurements.
+    bulk_scattering_factors: Literal["kirkland", "lobato", "shtyrov"] = "kirkland"
     # Only takes effect for scattering_factors="shtyrov" (the only one that
     # types atoms) and only when a Monomer Library is available.
     readd_hydrogens: bool | Literal["auto"] = "auto"
@@ -149,10 +150,7 @@ MICROGRAPH_HELP: dict[str, str] = {
     "micrograph_size": "Micrograph size in pixels (square).",
     "scattering_factors": "Atomic scattering-factor parameterization used to "
     "build the structure's scattering potential.",
-    "ice_scattering_factors": "Atomic scattering-factor parameterization for "
-    "the ice specifically. Defaults to kirkland rather than following "
-    "scattering_factors: ice is a bulk material, outside the biomolecular "
-    "domain Shtyrov is fitted for.",
+    "bulk_scattering_factors": "Atomic scattering-factor parameterization for the ice -- everything rendered that is not a biomolecule. Deliberately separate from scattering_factors: Shtyrov is fitted for biomolecules, and these materials are outside that domain.",
     "readd_hydrogens": "Whether to replace a structure's own hydrogens with "
     "the monomer library's ideal geometry: 'auto' (default) keeps hydrogens "
     "the file already carries and adds them only when it has none, true "

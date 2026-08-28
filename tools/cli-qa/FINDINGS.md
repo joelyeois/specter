@@ -8,7 +8,7 @@ perturb), `sweep.py` (orchestration + classification).
 Excluded as not-user-facing yet: the `torch_ctf` backend (no CLI flag exists at
 all — Python API only) and fresh ice-cube generation (`GradientSKIcemaker` /
 `build_ice_cache` have no CLI path). Also skipped: `ice_cache_dir`,
-`ice_relax_steps`, `ice_scattering_factors`, `shtyrov_params_path`, `conv_backend`,
+`ice_relax_steps`, `bulk_scattering_factors`, `shtyrov_params_path`, `conv_backend`,
 `mmcif_filepath`.
 
 ## Result

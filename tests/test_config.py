@@ -405,7 +405,7 @@ def test_seed_is_configurable(config_cls: type) -> None:
     assert config_cls.seed is None
 
 
-def test_ice_does_not_follow_the_structure_scattering_factors() -> None:
+def test_bulk_materials_do_not_follow_the_structure_scattering_factors() -> None:
     """
     Ice is a bulk material, so it is parameterized independently.
 
@@ -418,14 +418,14 @@ def test_ice_does_not_follow_the_structure_scattering_factors() -> None:
     """
     config = ParticleStackConfig(pdb_source="1abc")
     assert config.scattering_factors == "shtyrov"
-    assert config.ice_scattering_factors == "kirkland"
+    assert config.bulk_scattering_factors == "kirkland"
 
     for factors in ("shtyrov", "kirkland", "lobato"):
         config.scattering_factors = factors  # type: ignore[assignment]
-        assert config.ice_scattering_factors == "kirkland"
+        assert config.bulk_scattering_factors == "kirkland"
 
     # Same on the micrograph side -- one vocabulary across commands.
-    assert MicrographConfig(pdb_source="1abc").ice_scattering_factors == "kirkland"
+    assert MicrographConfig(pdb_source="1abc").bulk_scattering_factors == "kirkland"
 
 
 # --- validation -----------------------------------------------------------

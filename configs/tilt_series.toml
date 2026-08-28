@@ -74,6 +74,8 @@ coincidence_radius = 0.0           # pixels; 0 = plain Poisson, no coincidence l
 ice_model = "gd"                   # gd | random | none
 # ice_cache_dir = "ice"            # defaults to the cache bundled in the package
 ice_relax_steps = 0                # local MLBOP seam-relaxation steps, ice_model="gd" only
+bulk_scattering_factors = "kirkland"  # kirkland | lobato | shtyrov; the ice and any
+                                   # other non-biomolecular material
 
 # --- Numerics ---
 pad_fft = false

@@ -100,10 +100,9 @@ pad_fft = true
 # --- Ice ---
 ice_model = "gd"                 # gd | random | none
 # ice_cache_dir = "ice"          # defaults to the cache bundled in the package
-bulk_scattering_factors = "kirkland"  # kirkland | lobato | shtyrov. Governs the ice
-                                 # and every other non-biomolecular material. Deliberately
-                                 # not scattering_factors above: Shtyrov is fitted for
-                                 # biomolecules, so bulk materials are outside its domain
+bulk_scattering_factors = "kirkland"  # the ice, and any other non-biomolecular
+                                 # material. Deliberately not scattering_factors:
+                                 # Shtyrov is fitted for biomolecules
 ice_relax_steps = 0              # local MLBOP seam-relaxation steps, only used when
                                  # ice_model="gd" tiles multiple cached blocks
 

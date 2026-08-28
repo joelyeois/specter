@@ -130,13 +130,13 @@ filename = "tomogram"
 # monomer_library_path = "~/monomers" #  point to Monomer library or set at $CLIBD_MON
 # The default, "auto", needs no setting: it keeps hydrogens the file already
 # carries and adds them only when it has none
-scattering_factors = "shtyrov"    # shtyrov | kirkland | lobato
-
-# The carbon film and gold beads, which are bulk materials rather than
-# biomolecules: Shtyrov is fitted for the latter, so they are parameterized
-# separately and per-element.
-bulk_scattering_factors = "kirkland"  # kirkland | lobato | shtyrov
 # readd_hydrogens = "auto"     # auto | true | false
+
+# Two settings, biomolecules and everything else. Shtyrov fits bonded species
+# of biomolecules, so bulk materials are outside its domain.
+scattering_factors = "shtyrov"        # targets, filler, filaments, microtubules,
+                                      # transmembrane proteins
+bulk_scattering_factors = "kirkland"  # the carbon film and gold beads
 
 # --- Protein packing ---
 # packing_backend = "shape"      # default; "sphere" is faster but ~3x less dense

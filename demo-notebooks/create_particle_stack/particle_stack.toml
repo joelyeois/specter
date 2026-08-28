@@ -1,13 +1,13 @@
-[potential]
+# Tables in the same order as the panels of `specter simulate particles
+# --help`, ending in [advanced] -- as in configs/particle.toml, whose
+# canonical defaults this trims down for the notebook.
+
+[specimen]
 pdb_source = "6bdf"
 assembly = true
 n_pixels = 256
 pixel_size = 1.0     # Å
-
-# Shtyrov atom typing needs the Monomer Library for its H-containing species;
-# without one ~44% of a protein falls back to per-element Peng. Unset, the
-# $CLIBD_MON variable applies. See docs/installation.md.
-# monomer_library_path = "~/monomers"
+ice_thickness = 0.0       # Å
 
 [microscope]
 voltage = 300.0       # kV
@@ -15,27 +15,28 @@ dose = 20.0          # e⁻/Å², used as a fixed dose (this notebook doesn't ra
 cs = 2.0             # mm
 alpha = 0.1          # unitless, amplitude contrast ratio
 
-[envelopes]
-bfactor = 0.0        # Å²
-
 [sampling]
 defocus = [5000.0, 15000.0]   # Å; single value, or [low, high] to sample per particle
 shift = 2.0  # Å
-
-[dataset]
 n_particles = 20
 
 [models]
 scattering_model = "multislice"
 noise_model = "poisson"
-ice_model = "gd"
 detector_model = "none"
-coincidence_radius = 1.8  # pixels
-
-[ice]
-ice_thickness = 0.0       # Å
-# ice_cache_dir = "../../ice-data/ice_cache"  # defaults to the bundled cache
 
 [compute]
 device = "cuda:1"  # adjust to an available device on your machine, e.g. "cuda:0" or "cpu"
 batchsize = "auto" # or an int to pin it; "auto" fits the batch to free memory.
+
+# Advanced: everything above is a decision this run makes, everything here
+# has a default that is usually right.
+[advanced]
+# Shtyrov atom typing needs the Monomer Library for its H-containing species;
+# without one ~44% of a protein falls back to per-element Peng. Unset, the
+# $CLIBD_MON variable applies. See docs/installation.md.
+# monomer_library_path = "~/monomers"
+bfactor = 0.0        # Å²
+coincidence_radius = 1.8  # pixels
+ice_model = "gd"
+# ice_cache_dir = "../../ice-data/ice_cache"  # defaults to the bundled cache

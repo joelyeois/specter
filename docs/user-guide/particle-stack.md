@@ -31,14 +31,17 @@ TOML/CLI field reference.
 
 ## What you'll usually tune
 
-- **Structure & Potential**: `pdb_source` (fetched and cached under
+- **Data source**: `cs_path` or `star_path`, to take poses and per-particle
+  CTF from an existing CryoSPARC or RELION dataset instead of synthesizing
+  them. Leave both unset for a synthetic stack.
+- **Specimen**: `pdb_source` (fetched and cached under
   `~/.cache/specter/pdb/`), `assembly` (biological assembly vs. asymmetric unit),
-  `n_pixels`/`pixel_size` for the simulation box.
+  `n_pixels`/`pixel_size` for the simulation box, `ice_thickness`.
 - **Microscope**: `voltage`, `dose`, `cs`, `alpha` (amplitude contrast).
 - **Sampling**: `defocus`, `shift` (max in-plane shift), `n_particles`.
 - **Models**: `scattering_model` (`multislice` is the accurate default;
-  `firstborn`/`projection` trade accuracy for speed), `detector_model`
-  (`none` skips detector effects; `k3_300kv`/`k3_200kv`/
+  `firstborn`/`projection` trade accuracy for speed), `noise_model`,
+  `detector_model` (`none` skips detector effects; `k3_300kv`/`k3_200kv`/
   `falcon4i_*` apply a real detector's MTF/noise).
 - **Post-processing**: `normalize_particles`, and `save_exitwaves` /
   `save_clean_exitwaves` if you want the pre-detector signal too (see

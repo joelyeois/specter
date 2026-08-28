@@ -3,7 +3,9 @@
 # Same feature surface as configs/tomogram.toml (targets, filler, membrane,
 # transmembrane proteins, filaments, microtubules, carbon film, beads) but at a
 # box size and copy count that runs in seconds, and using only PDB codes already
-# cached under ~/.cache/specter/pdb so no sweep run hits the network.
+# cached under ~/.cache/specter/pdb so no sweep run hits the network. Tables
+# follow that file's order too: the panels of `specter build tomogram --help`,
+# ending in [advanced].
 #
 # filler_from_pei2016 is OFF here on purpose: the baseline must be a run that
 # works, so that turning the reference tables on becomes a *finding* attributable
@@ -14,23 +16,6 @@ target_shape = [48, 192, 192]
 voxel_size = 12.0
 clip_axes = [true, true, true]
 filler_occupancy_fraction = 0.05
-pdb_cache_dir = "~/.cache/specter/pdb"
-seed = 11
-
-[output]
-output_dir = "tomograms"
-filename = "tomogram"
-
-[picks]
-write_picks = true
-annotation_version = "1.0"
-write_segmentation = true
-
-[compute]
-device = "cpu"
-accumulator_device = "cpu"
-render_workers = 1
-render_chunk_size = 64
 
 [targets]
 targets = [
@@ -74,5 +59,22 @@ n_protofilaments = 13
 radius = [80.0, 120.0]
 n_copies = 4
 
-[bead_settings]
+[picks]
+write_picks = true
+annotation_version = "1.0"
+write_segmentation = true
+
+[compute]
+device = "cpu"
+accumulator_device = "cpu"
+render_workers = 1
+render_chunk_size = 64
+
+[output]
+output_dir = "tomograms"
+filename = "tomogram"
+
+[advanced]
+pdb_cache_dir = "~/.cache/specter/pdb"
 bead_roughness = [0.0, 0.2]
+seed = 11

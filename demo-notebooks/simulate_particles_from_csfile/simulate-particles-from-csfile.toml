@@ -6,47 +6,28 @@
 # defocus, or shift -- extract_parameters_from_csfile() reads all of those
 # straight from the .cs file at run time and overrides the (unused)
 # ParticleStackConfig defaults for those fields.
+#
+# Tables in the same order as the panels of `specter simulate particles
+# --help`, ending in [advanced].
 
-[cryosparc]
+[data]
 cs_path = "/scratch/loh/joel/cryosparc_tutorial/CS-cryosparc-tutorial/J35/J35_passthrough_particles.cs"
 
-[potential]
+[specimen]
 pdb_source = "6bdf"
 assembly = true
 n_pixels = 256
-
-# Shtyrov atom typing needs the Monomer Library for its H-containing species;
-# without one ~44% of a protein falls back to per-element Peng. Unset, the
-# $CLIBD_MON variable applies. See docs/installation.md.
-# monomer_library_path = "~/monomers"
+ice_thickness = 0.0              # Å, 0 = minimum (particle box size)
 
 [microscope]
 dose = 53.0                    # e⁻/Å², from EMDB Experiment tab
-# n_frames = 53                # frames, uncomment to override default (int(dose) if None)
 
-[envelopes]
-# convergence_angle = 1.0       # mrad, uncomment to enable the Cs envelope
-# cc = 2.0                      # mm, uncomment to enable the Cc envelope
-energy_spread = 0.7            # eV (FWHM)
-deltaV_V = 0.06e-6              # unitless (ΔV/V)
-deltaI_I = 0.01e-6               # unitless (ΔI/I)
-dose_envelope = false
-bfactor = 200.0                 # Å²
-
-[dataset]
+[sampling]
 n_particles = 10                 # number of particles to load from the .cs file
 
 [models]
 scattering_model = "multislice"  # multislice | firstborn | projection | ctf
 noise_model = "poisson"          # poisson | none
-coincidence_radius = 2.0         # pixels
-ice_model = "gd"                 # gd | random | none
-ice_thickness = 0.0              # Å, 0 = minimum (particle box size)
-# ice_cache_dir = "ice-data/ice_cache"  # defaults to the bundled cache
-# crowd_min_distance = 100.0      # Å, uncomment to crowd particles; defaults to pdb.max_diameter
-# crowd_max_distance_z = 50.0     # Å
-# potential_scale = 0.5           # unitless, uncomment to scale the potential before scattering
-pad_fft = true
 detector_model = "none"          # none | perfect | k3_300kv | k3_200kv
 
 [postprocessing]
@@ -55,3 +36,35 @@ normalize_particles = true
 [compute]
 device = "cuda:0"                # cpu | cuda | cuda:0
 batchsize = "auto"               # or an int to pin it
+
+# --------------------------------------------------------------------------
+# Advanced. Mirrors the --help panel of the same name: a commented-out line
+# means the field keeps its ParticleStackConfig default.
+# --------------------------------------------------------------------------
+[advanced]
+
+# Shtyrov atom typing needs the Monomer Library for its H-containing species;
+# without one ~44% of a protein falls back to per-element Peng. Unset, the
+# $CLIBD_MON variable applies. See docs/installation.md.
+# monomer_library_path = "~/monomers"
+
+# --- Envelopes and dose fractionation ---
+# n_frames = 53                  # frames, uncomment to override default (int(dose) if None)
+# convergence_angle = 1.0        # mrad, uncomment to enable the Cs envelope
+# cc = 2.0                       # mm, uncomment to enable the Cc envelope
+energy_spread = 0.7            # eV (FWHM)
+deltaV_V = 0.06e-6              # unitless (ΔV/V)
+deltaI_I = 0.01e-6               # unitless (ΔI/I)
+dose_envelope = false
+bfactor = 200.0                 # Å²
+coincidence_radius = 2.0         # pixels
+
+# --- Ice and crowding ---
+ice_model = "gd"                 # gd | random | none
+# ice_cache_dir = "ice-data/ice_cache"  # defaults to the bundled cache
+# crowd_min_distance = 100.0      # Å, uncomment to crowd particles; defaults to pdb.max_diameter
+# crowd_max_distance_z = 50.0     # Å
+
+# --- Numerics ---
+# potential_scale = 0.5           # unitless, uncomment to scale the potential before scattering
+pad_fft = true

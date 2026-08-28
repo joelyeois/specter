@@ -31,8 +31,9 @@ TOML/CLI field reference.
 
 ## What you'll usually tune
 
-- **Structure & Potential**: `pdb_source`, `assembly`, `n_pixels` (the 3D
-  particle potential box), `pixel_size`.
+- **Specimen**: `pdb_source`, `assembly`, `n_pixels` (the 3D particle
+  potential box), `pixel_size`, `ice_thickness`, and `micrograph_size`
+  below.
 - **Field of view**: `micrograph_size`, the output image size in pixels
   (square), independent of `n_pixels`. A single particle's potential is
   built at `n_pixels`, then many copies are placed across a

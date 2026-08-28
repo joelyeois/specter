@@ -1,12 +1,26 @@
 # Canonical default config for `specter simulate particles`.
 # Any field can be overridden on the command line, e.g.:
 #   specter simulate particles --config configs/particle.toml --n_particles 3000
+#
+# The tables below appear in the same order as the panels in
+# `specter simulate particles --help`, ending with [advanced]. Everything a
+# first run has to decide is above that table; everything below it has a
+# default that is usually right. Table names are organisation only -- the
+# loader flattens them into one namespace before validating fields.
 
-[potential]
+# Where the particles come from. Left unset, the run synthesizes them and
+# everything below applies as written; given a file, the poses and
+# per-particle CTF come from it instead.
+[data]
+# cs_path = "path/to/particles.cs"      # a CryoSPARC .cs file
+# star_path = "path/to/particles.star"  # ... or a RELION .star file (mutually exclusive)
+
+[specimen]
 pdb_source = "6bdf"
 assembly = true
 n_pixels = 256
 pixel_size = 1.0              # Å
+ice_thickness = 0.0           # Å, 0 = minimum (particle box size)
 
 [microscope]
 voltage = 300.0                # kV
@@ -21,6 +35,7 @@ n_particles = 20
 
 [models]
 scattering_model = "multislice"  # multislice | firstborn | projection | ctf
+noise_model = "poisson"          # poisson | none
 detector_model = "none"          # none | perfect | k3_300kv | k3_200kv
 
 [postprocessing]
@@ -60,13 +75,14 @@ filename = "particles"
 # unset to default that root to the project root found by walking up
 # from cwd for an existing .specter marker, like git finds .git.
 
-# --- Advanced: rarely touched, but available for tweaking ---
+# --------------------------------------------------------------------------
+# Advanced. Mirrors the --help panel of the same name: a commented-out line
+# means the field keeps its ParticleStackConfig default.
+# --------------------------------------------------------------------------
 [advanced]
 # pdb_cache_dir = "~/.cache/specter/pdb"   # default; set $SPECTER_PDB_CACHE to move it,
                                            # e.g. onto scratch. Downloads only --
                                            # your own files are read where they are.
-# cs_path = "path/to/particles.cs"  # uncomment to drive generation from a CryoSPARC .cs file
-# star_path = "path/to/particles.star"  # ... or from a RELION .star file (mutually exclusive with cs_path)
 # n_frames = 20                # frames, uncomment to override default (int(dose) if None)
 # convergence_angle = 1.0       # mrad, uncomment to enable the Cs envelope
 # cc = 2.0                      # mm, uncomment to enable the Cc envelope
@@ -75,10 +91,8 @@ deltaV_V = 0.06e-6              # unitless (ΔV/V)
 deltaI_I = 0.01e-6               # unitless (ΔI/I)
 dose_envelope = false
 # bfactor = 50.0                # Å², uncomment to enable a B-factor envelope
-noise_model = "poisson"          # poisson | none
 coincidence_radius = 0.0         # pixels; single value, or [low, high] to sample per particle
 ice_model = "gd"                 # gd | random | none
-ice_thickness = 0.0              # Å, 0 = minimum (particle box size)
 # ice_cache_dir = "ice"   # defaults to the cache bundled in the package
 # crowd_min_distance = 100.0      # Å, uncomment to crowd particles; defaults to pdb.max_diameter
 # crowd_max_distance_z = 50.0     # Å

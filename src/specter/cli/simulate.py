@@ -30,10 +30,24 @@ CONTEXT_SETTINGS = {"help_option_names": ["-h", "--help"]}
 # everything a user is unlikely to need to touch (mirrors the field ordering
 # in ParticleStackConfig itself -- rich-click panels render in first-seen
 # order, so that ordering is what controls panel order here too).
+#
+# A field means the same thing to every command that takes it, so it sits in
+# the same panel in each: "Specimen" (not "Structure & Potential") for what is
+# being imaged, with `ice_thickness` among it as a property of the sample
+# rather than a tuning knob, and `noise_model` beside the other two model
+# choices. All three disagreed with `simulate micrograph`/`tiltseries` until
+# 2026-08-28.
 _PARTICLE_STACK_GROUPS: list[tuple[str, list[str]]] = [
+    # First, because it is the first question: unset, the run synthesizes its
+    # own particles, and everything below applies as written. Given a file,
+    # the poses and per-particle CTF come from it instead.
     (
-        "Structure & Potential",
-        ["pdb_source", "assembly", "n_pixels", "pixel_size"],
+        "Data source",
+        ["cs_path", "star_path"],
+    ),
+    (
+        "Specimen",
+        ["pdb_source", "assembly", "n_pixels", "pixel_size", "ice_thickness"],
     ),
     (
         "Microscope",
@@ -45,7 +59,7 @@ _PARTICLE_STACK_GROUPS: list[tuple[str, list[str]]] = [
     ),
     (
         "Models",
-        ["scattering_model", "detector_model"],
+        ["scattering_model", "noise_model", "detector_model"],
     ),
     (
         "Post-processing",
@@ -65,8 +79,6 @@ _PARTICLE_STACK_GROUPS: list[tuple[str, list[str]]] = [
             "pdb_cache_dir",
             "readd_hydrogens",
             "monomer_library_path",
-            "cs_path",
-            "star_path",
             "n_frames",
             "convergence_angle",
             "cc",
@@ -75,10 +87,8 @@ _PARTICLE_STACK_GROUPS: list[tuple[str, list[str]]] = [
             "deltaI_I",
             "dose_envelope",
             "bfactor",
-            "noise_model",
             "coincidence_radius",
             "ice_model",
-            "ice_thickness",
             "ice_cache_dir",
             "crowd_min_distance",
             "crowd_max_distance_z",

@@ -50,11 +50,12 @@ rejected by name rather than ignored.
 # Any field can be overridden on the command line, e.g.:
 #   specter simulate particles --config particle.toml --n_particles 3000
 
-[potential]
+[specimen]
 pdb_source = "6bdf"
 assembly = true
 n_pixels = 256
 pixel_size = 1.0              # Å
+ice_thickness = 0.0           # Å, 0 = minimum (particle box size)
 
 [microscope]
 voltage = 300.0                # kV

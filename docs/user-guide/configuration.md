@@ -31,13 +31,18 @@ by name rather than ignored.
 A config file is a flat set of fields, grouped into tables for
 readability only. `specter simulate particles`, for instance, reads a
 `ParticleStackConfig`, whose fields sit in `configs/particle.toml` under
-`[potential]`, `[microscope]`, `[sampling]`, `[models]`,
-`[postprocessing]`, `[compute]`, and `[output]`. The table names carry no
-meaning for the loader: it flattens every table into one namespace before
-validating the fields, so `[potential]`'s `pdb_source` and
-`[microscope]`'s `voltage` end up as siblings on the same dataclass.
+`[data]`, `[specimen]`, `[microscope]`, `[sampling]`, `[models]`,
+`[postprocessing]`, `[compute]`, `[output]`, and `[advanced]`. The table
+names carry no meaning for the loader: it flattens every table into one
+namespace before validating the fields, so `[specimen]`'s `pdb_source`
+and `[microscope]`'s `voltage` end up as siblings on the same dataclass.
 Writing a field under the wrong table heading, or with no table at all,
 works the same as writing it under the "correct" one.
+
+Each canonical config nonetheless orders its tables to match the panels
+of the command's `--help`, ending in `[advanced]`: what a first run has
+to decide is above that table, and what has a default that is usually
+right is below it. Copies you edit are free to depart from that.
 
 Six commands each have their own config dataclass and canonical TOML:
 

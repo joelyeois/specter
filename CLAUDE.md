@@ -119,6 +119,7 @@ mypy src/                                  # type-check
 - GPU tests should gracefully skip or fall back to CPU when CUDA is unavailable.
 - Do not mock physics calculations — test with real (small) inputs to catch numerical regressions.
 - Regression tests in `tests/test_generators.py` use a **save-or-compare** pattern: on first run they save a golden `.pt` file under `tests/test_data/`; subsequent runs compare against it. Delete the fixture file and re-run to regenerate after intentional output changes.
+- **Do not test what a shipped TOML config says.** No assertion should read `configs/*.toml` (or a demo-notebook TOML) to check its table names, table order, which table a field sits in, or that a field ships a particular value. A canonical config is curated documentation, not behaviour: a test over it turns an ordinary edit to the file into a test failure while catching nothing a user could hit. Test the code the config feeds instead — the spec constructor, the resolver, the fallback. Every such test was removed in 2b1736f, including three that predated the rule (`test_canonical_tomogram_config_builds_its_carbon_and_bead_specs`, `test_shipped_configs_all_default_to_cuda`, `test_bundled_particle_toml_uses_auto`); the bugs they stood in for are all reachable directly, and are covered that way. `tests/test_cli_help_layout.py` is the shape that survives: it inspects the `_*_GROUPS` lists and `build_config_options`' output and never opens a TOML file.
 
 ## Off-Limits Files
 
@@ -297,7 +298,15 @@ demo-notebooks/               # User-facing, always kept working
                               # tilt series in `specter build tomogram` + `specter simulate tiltseries`;
                               # reconstruction in `specter reconstruct particle`. Do not reintroduce the
                               # directory for a workflow that could be a subcommand instead.)
-configs/                      # TOML config files consumed by the `specter` CLI (flat, not nested)
+configs/                      # TOML config files consumed by the `specter` CLI (flat, not nested).
+                              # Every one orders its tables like its command's --help panels, ending in an
+                              # [advanced] table: what a first run has to decide is above it, what has a
+                              # usually-right default is below. A table mirrors at most one panel; arrays of
+                              # tables ([[membrane]], [[filaments]], ...) have no flag and so no panel, and sit
+                              # where their generation stage runs. Panel order comes from cli/'s _*_GROUPS lists,
+                              # the single source of truth for both grouping and --help emission order. The
+                              # convention lives in each file's header comment and is deliberately not enforced
+                              # by a test (see Testing).
   particle.toml                # canonical defaults for `specter simulate particles`
   micrograph.toml              # canonical defaults for `specter simulate micrograph`
   tilt_series.toml             # canonical defaults for `specter simulate tiltseries`

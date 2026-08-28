@@ -49,7 +49,7 @@ TOML/CLI field reference.
 
 Everything else (ice model, crowding, aberration richness, potential
 building method, and so on) lives under
-["Advanced"](../api/cli.md#specter-simulate-particles-advanced) in both the
+["Advanced"](../api/cli/simulate.md#specter-simulate-particles-advanced) in both the
 TOML and the command reference; [Configure a run](configuration.md)
 documents it field-by-field.
 

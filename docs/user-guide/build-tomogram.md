@@ -31,7 +31,7 @@ specter build tomogram \
 `configs/tomogram.toml` is the canonical starting point. Copy it and edit
 for your own runs. It demonstrates every feature at once (composited
 membranes, filaments, exact-count targets, ratio-based filler); the
-[command reference](../api/cli.md#specter-build-tomogram) documents every
+[command reference](../api/cli/build.md#specter-build-tomogram) documents every
 field.
 
 ## What you'll usually tune
@@ -65,7 +65,7 @@ field.
 
 Everything else (picks/segmentation toggles, compute/scaling knobs, output
 naming) lives under its own panel in the
-[command reference](../api/cli.md#specter-build-tomogram).
+[command reference](../api/cli/build.md#specter-build-tomogram).
 
 ## Placement order & regions
 

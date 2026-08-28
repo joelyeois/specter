@@ -58,7 +58,7 @@ specter reconstruct particle --config configs/reconstruct.toml --test_run
 stops. It touches every `.cs` field, every physics setting, and the output
 layout a full run would, so a config mistake surfaces in seconds instead of
 after a multi-hour job. The
-[command reference](../api/cli.md#specter-reconstruct-particle) documents
+[command reference](../api/cli/reconstruct.md#specter-reconstruct-particle) documents
 every field.
 
 ## The gold-standard workflow

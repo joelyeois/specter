@@ -46,7 +46,7 @@ TOML/CLI field reference.
   choices as [particle generation](particle-stack.md#what-youll-usually-tune).
 
 Everything else lives under
-["Advanced"](../api/cli.md#specter-simulate-micrograph-advanced) in both the
+["Advanced"](../api/cli/simulate.md#specter-simulate-micrograph-advanced) in both the
 TOML and the command reference.
 
 ## Ice thickness profiles

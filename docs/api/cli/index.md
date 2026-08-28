@@ -3,12 +3,13 @@
 `specter` is the command-line entry point to everything in this package. Every
 subcommand loads a TOML config, applies the flags you passed on top of it, and
 calls into `specter.pipelines`; the flags and the config fields are the same
-set of settings under two spellings, so anything below can be written either
-way. [Configure a run](../user-guide/configuration.md) covers the config file
-itself, and the [User Guide](../user-guide/particle-stack.md) walks through
-each command on a real task.
+set of settings under two spellings, so anything in the reference can be
+written either way. [Configure a run](../../user-guide/configuration.md) covers
+the config file itself, and the
+[User Guide](../../user-guide/particle-stack.md) walks through each command on
+a real task.
 
-Three rules apply throughout the reference below.
+Three rules apply throughout the reference.
 
 **A flag you do not pass is not applied.** Options default to nothing rather
 than to the value in the Default column, which is what lets a flag override one
@@ -29,13 +30,15 @@ order the matching file in `configs/` declares its TOML tables. A panel called
 `Advanced` is last in every command and holds the settings with a
 usually-correct default.
 
---8<-- "docs-includes/cli-reference.md"
+## Every command
+
+--8<-- "docs-includes/cli-index.md"
 
 ## Python API
 
-The functions below construct the command objects documented above. They are
-of interest when embedding the CLI or adding a subcommand, not when running
-one.
+The functions below construct the command objects documented in this section.
+They are of interest when embedding the CLI or adding a subcommand, not when
+running one.
 
 ::: specter.cli._cli
     options:

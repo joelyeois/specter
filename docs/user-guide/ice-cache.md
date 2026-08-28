@@ -56,7 +56,7 @@ ice_cache_dir = "ice"
 ```
 
 Defaults come from `configs/ice.toml`, and every flag overrides one field of
-it. The [command reference](../api/cli.md#specter-build-ice) lists them all.
+it. The [command reference](../api/cli/build.md#specter-build-ice) lists them all.
 
 ## Cost
 

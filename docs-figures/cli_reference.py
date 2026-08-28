@@ -375,50 +375,139 @@ def render_command(path: tuple[str, ...], cmd: click.Command, level: int) -> lis
     return out
 
 
-def render() -> str:
+def page_name(group: str) -> str:
     """
-    Render the whole command reference.
+    Name the page a top-level command group is documented on.
+
+    Parameters
+    ----------
+    group : str
+        A top-level group name, e.g. ``"build"``.
 
     Returns
     -------
     str
-        The full Markdown fragment written to ``docs-includes/cli-reference.md``.
+        The file name under ``docs/api/cli/``, e.g. ``build.md``.
+    """
+    return f"{group}.md"
+
+
+def render_group(group: str, cmd: click.Command) -> str:
+    """
+    Render one top-level command group's page fragment.
+
+    Parameters
+    ----------
+    group : str
+        The group's name, e.g. ``"reconstruct"``.
+    cmd : click.Command
+        The group itself.
+
+    Returns
+    -------
+    str
+        Markdown for the group and every command under it, plus a pointer
+        section for any alias of the group. Aliases live on their target's
+        page so that the link between them does not cross a page boundary.
     """
     out = [HEADER]
 
-    for path, cmd in walk(cli, ("specter",)):
-        # Skip the root: `docs/api/cli.md`'s own prose introduces the CLI, and
-        # a second top-level section repeating it would only add a heading.
-        if len(path) == 1:
-            continue
+    for path, sub in walk(cmd, ("specter", group)):
+        out += render_command(path, sub, level=len(path) - 1)
 
-        target = ALIASES.get(path[1])
-        if target is not None:
-            if len(path) > 2:
-                continue
-            alias_path = (path[0], target)
-            out += [
-                f"## `{' '.join(path)}` {{ #{anchor(path)} }}",
-                "",
-                f"A second name for [`{' '.join(alias_path)}`]"
-                f"(#{anchor(alias_path)}), with the same subcommands and flags. "
-                "The solver is called Ghostbuster throughout the Python API and "
-                "the user guide, so it answers to that name here too.",
-                "",
-            ]
+    for alias, target in ALIASES.items():
+        if target != group:
             continue
-
-        out += render_command(path, cmd, level=len(path))
+        alias_path = ("specter", alias)
+        target_path = ("specter", target)
+        out += [
+            f"## `{' '.join(alias_path)}` {{ #{anchor(alias_path)} }}",
+            "",
+            f"A second name for [`{' '.join(target_path)}`]"
+            f"(#{anchor(target_path)}), with the same subcommands and flags. "
+            "The solver is called Ghostbuster throughout the Python API and "
+            "the user guide, so it answers to that name here too.",
+            "",
+        ]
 
     return "\n".join(out).rstrip() + "\n"
 
 
+def render_index() -> str:
+    """
+    Render the table of every command, for the reference's landing page.
+
+    Returns
+    -------
+    str
+        A Markdown table linking each command to its section on its group's
+        page. Generated rather than hand-written so that a new command appears
+        here without anyone remembering to add it.
+    """
+    out = [HEADER, "| Command | Description |", "| --- | --- |"]
+
+    for group, cmd in groups():
+        page = page_name(group)
+        out.append(
+            f"| [`specter {group}`]({page}#{anchor(('specter', group))}) "
+            f"| {cell(cmd.get_short_help_str(limit=200))} |"
+        )
+        if not isinstance(cmd, click.Group):
+            continue
+        for name, sub in cmd.commands.items():
+            path = ("specter", group, name)
+            out.append(
+                f"| [`specter {group} {name}`]({page}#{anchor(path)}) "
+                f"| {cell(sub.get_short_help_str(limit=200))} |"
+            )
+
+    for alias, target in ALIASES.items():
+        out.append(
+            f"| [`specter {alias}`]({page_name(target)}#{anchor(('specter', alias))}) "
+            f"| A second name for `specter {target}`. |"
+        )
+
+    return "\n".join(out).rstrip() + "\n"
+
+
+def groups() -> list[tuple[str, click.Command]]:
+    """
+    List the top-level command groups that get a page of their own.
+
+    Returns
+    -------
+    list of (str, click.Command)
+        ``(name, group)`` in the order `cli` registers them. Aliases are left
+        out: they are rendered onto their target's page instead of getting a
+        page that would duplicate every flag.
+    """
+    return [(name, cmd) for name, cmd in cli.commands.items() if name not in ALIASES]
+
+
+def render_pages() -> dict[str, str]:
+    """
+    Render every fragment the documentation includes.
+
+    Returns
+    -------
+    dict of str to str
+        File name under ``docs-includes/`` -> its contents. One fragment per
+        top-level group, plus ``cli-index.md`` for the landing page. Split by
+        group rather than by command so that the three `simulate` commands,
+        which share most of their flags, stay searchable in one place.
+    """
+    pages = {f"cli-{group}.md": render_group(group, cmd) for group, cmd in groups()}
+    pages["cli-index.md"] = render_index()
+    return pages
+
+
 def main() -> None:
-    """Write the rendered reference to ``docs-includes/cli-reference.md``."""
-    dest = Path(__file__).resolve().parent.parent / "docs-includes" / "cli-reference.md"
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    dest.write_text(render())
-    print(f"wrote {dest}")
+    """Write every rendered fragment to ``docs-includes/``."""
+    dest_dir = Path(__file__).resolve().parent.parent / "docs-includes"
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    for name, content in render_pages().items():
+        (dest_dir / name).write_text(content)
+        print(f"wrote {dest_dir / name}")
 
 
 if __name__ == "__main__":

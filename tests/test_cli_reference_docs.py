@@ -9,7 +9,7 @@ from types import ModuleType
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 GENERATOR = REPO_ROOT / "docs-figures" / "cli_reference.py"
-REFERENCE = REPO_ROOT / "docs-includes" / "cli-reference.md"
+INCLUDES = REPO_ROOT / "docs-includes"
 
 
 def _load_generator() -> ModuleType:
@@ -33,18 +33,24 @@ def _load_generator() -> ModuleType:
 
 def test_generated_cli_reference_is_up_to_date() -> None:
     """
-    The committed reference is what the generator produces from today's CLI.
+    The committed fragments are what the generator produces from today's CLI.
 
-    This is the guard that makes the page trustworthy: without it, adding a
-    flag or editing a help string leaves `docs/api/cli.md` describing a CLI
-    that no longer exists, and nothing says so. Regenerating is the fix, not
-    editing the Markdown.
+    This is the guard that makes the pages trustworthy: without it, adding a
+    flag or editing a help string leaves `docs/api/cli/` describing a CLI that
+    no longer exists, and nothing says so. Regenerating is the fix, not editing
+    the Markdown.
+
+    Checked as a whole rather than one file at a time so that a command moving
+    between groups, which deletes one fragment's section and adds it to
+    another, cannot pass by leaving a stale file behind.
     """
-    expected = _load_generator().render()
-    actual = REFERENCE.read_text()
+    expected = _load_generator().render_pages()
+    actual = {path.name: path.read_text() for path in INCLUDES.glob("cli-*.md")}
 
-    assert actual == expected, (
-        f"{REFERENCE.relative_to(REPO_ROOT)} is out of date with the `specter` "
-        "CLI. Regenerate it with:\n\n"
-        "    python docs-figures/cli_reference.py\n"
+    hint = (
+        "docs-includes/ is out of date with the `specter` CLI. Regenerate it "
+        "with:\n\n    python docs-figures/cli_reference.py\n"
     )
+    assert actual.keys() == expected.keys(), hint
+    for name in sorted(expected):
+        assert actual[name] == expected[name], f"{name}: {hint}"

@@ -152,10 +152,14 @@ regardless of size.
 | `radius` | Nominal bead radius, Å; scalar or `[low, high]` per instance | — |
 | `count` (`n_copies` in TOML) | Instances in this population | 1 |
 | `bead_roughness` | RMS radius modulation as a fraction of radius; scalar or `[low, high]` | 0.12 |
-| `parameterization` | Atomic potential model for gold: `kirkland` or `lobato` | `kirkland` |
+| `parameterization` | Atomic potential model for gold: `kirkland`, `lobato` or `peng` | `kirkland` |
 
-`shtyrov` is not available here: the bundled species table has no
-unbonded elemental gold entry.
+`shtyrov` resolves to `peng` rather than being rejected. Shtyrov fits
+scattering factors per bonded species, the bundled tables contain no
+elemental gold, and a fiducial has no bonds to type in any case, so gold
+takes the same per-element fallback a structure atom does when its species
+misses the table. In a tomogram the beads follow `bulk_scattering_factors`
+rather than `scattering_factors`, alongside the carbon film.
 
 Fixed by the material rather than exposed: `GOLD_FCC_A` (4.0782 Å),
 `GOLD_U_RMS` (0.087 Å), `GOLD_DENSITY_G_CM3` (19.3), and the roughness

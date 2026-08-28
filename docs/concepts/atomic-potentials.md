@@ -209,6 +209,33 @@ set untouched at 1,445.
 A partially hydrogenated structure counts as carrying them, so `"auto"` keeps
 what is there rather than replacing the lot; pass `True` to complete it.
 
+## Which parameterization applies to what
+
+Shtyrov is fitted for biomolecules, and its tabulated species run over
+0.011--0.62 Å⁻¹. A mean inner potential is a k=0 quantity, so evaluating one
+from those fits extrapolates below the data they were fitted to. This is
+visible in the tables themselves: `H(C)`'s tabulated values are negative
+across the low-frequency end and cross zero near 0.2 Å⁻¹.
+
+SPECTER therefore parameterizes bulk materials separately from biomolecules,
+under two configuration fields:
+
+| Field | Governs | Default |
+|---|---|---|
+| `scattering_factors` | Anything with bond topology: targets, filler, filaments, microtubules, transmembrane proteins | `shtyrov` |
+| `bulk_scattering_factors` | Ice, the carbon film, gold fiducials | `kirkland` |
+
+Measured against electron holography, the split is justified rather than
+stylistic. Amorphous ice at SPECTER's number density is expected near 4.21 V,
+scaled from liquid water's 4.48 ± 0.19 V; Kirkland gives 4.55 V and the
+Shtyrov water species 3.67 V. For amorphous carbon, Kirkland, Lobato and Peng
+agree with each other to 0.5%, while the `C(CCC)` proxy sits around 40% above
+all three per unit density against a measured 5.19 V per g/cm³.
+
+A membrane's bilayer is unaffected by either field: it is built from bare
+lipid coordinates with no bond topology, so every atom takes the Peng
+fallback described above.
+
 ## From a single atom to a potential volume
 
 The formulas above give one atom's potential on a continuous radial
@@ -341,3 +368,12 @@ SPECTER's bright-field line scan through C, Si, Cu, Au and U, compared against K
   parameterization of elastic and absorptive electron atomic scattering
   factors. *Acta Crystallographica Section A*, 52(2), 257-276. (gemmi's
   `c4322` table, used as SPECTER's per-element fallback.)
+- Yesibolati, M. N., Laganá, S., Sun, H., Beleggia, M., Kathmann, S. M.,
+  Kasama, T., & Mølhave, K. (2020). Mean inner potential of liquid water.
+  *Physical Review Letters*, 124(6), 065502.
+  [doi:10.1103/PhysRevLett.124.065502](https://doi.org/10.1103/PhysRevLett.124.065502)
+- Wanner, M., Bach, D., Gerthsen, D., Werner, R., & Tesche, B. (2006).
+  Electron holography of thin amorphous carbon films: measurement of the mean
+  inner potential and a thickness-independent phase shift. *Ultramicroscopy*,
+  106(4-5), 341-345.
+  [doi:10.1016/j.ultramic.2005.10.005](https://doi.org/10.1016/j.ultramic.2005.10.005)

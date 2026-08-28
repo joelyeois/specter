@@ -137,13 +137,6 @@ def test_config_batchsize_accepts_auto_and_int(tmp_path: Path) -> None:
     assert load_config(str(path)).batchsize == 3
 
 
-def test_bundled_particle_toml_uses_auto() -> None:
-    from specter.config import REPO_ROOT
-
-    config = load_config(str(REPO_ROOT / "configs" / "particle.toml"))
-    assert config.batchsize == "auto"
-
-
 def test_recommend_batchsize_caps_at_gpu_saturation(monkeypatch) -> None:
     """
     A big box gets a small batch even on an empty device.

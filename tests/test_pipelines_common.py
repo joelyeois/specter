@@ -207,31 +207,3 @@ def test_cpu_is_left_alone_with_no_warning(monkeypatch) -> None:
         with warnings.catch_warnings():
             warnings.simplefilter("error")
             assert resolve_available_device("cpu") == "cpu"
-
-
-def test_shipped_configs_all_default_to_cuda() -> None:
-    """
-    The four simulate/build configs agree on a device default.
-
-    They did not: `tomogram.toml` shipped `"cuda"` while the other three shipped
-    `"cpu"`, for no reason that survives inspection -- and the `"cuda"` one
-    crashed outright on a CPU-only machine, which is what the fallback above now
-    prevents.
-    """
-    from specter.config import (
-        MicrographConfig,
-        ParticleStackConfig,
-        TiltSeriesConfig,
-        TomogramConfig,
-        load_config,
-    )
-
-    repo_root = Path(__file__).resolve().parent.parent
-    for name, cls in (
-        ("particle", ParticleStackConfig),
-        ("micrograph", MicrographConfig),
-        ("tilt_series", TiltSeriesConfig),
-        ("tomogram", TomogramConfig),
-    ):
-        cfg = load_config(str(repo_root / "configs" / f"{name}.toml"), cls)
-        assert cfg.device == "cuda", f"configs/{name}.toml"

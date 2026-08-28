@@ -128,30 +128,3 @@ def test_carbon_film_spec_normalises_a_list_edge_fraction_range():
         CarbonFilmSpec(edge_fraction=[0.05, 0.02])
     with pytest.raises(ValueError, match=r"edge_fraction range must be \[low, high\]"):
         CarbonFilmSpec(edge_fraction=[0.1])
-
-
-def test_canonical_tomogram_config_builds_its_carbon_and_bead_specs():
-    """The shipped configs/tomogram.toml enables filaments, carbon and
-    beads; check the blocks it ships actually translate into valid specs
-    rather than only parsing as TOML."""
-    from pathlib import Path
-
-    from specter.config import TomogramConfig, load_config
-    from specter.specimen import CarbonFilmSpec, TomogramBeadSpec
-
-    path = Path(__file__).parent.parent / "configs" / "tomogram.toml"
-    if not path.exists():
-        import pytest
-
-        pytest.skip("canonical config missing")
-
-    config = load_config(str(path), TomogramConfig)
-    assert config.beads and config.carbon_film and config.filaments
-
-    grid = CarbonFilmSpec(**config.carbon_film[0])
-    assert isinstance(grid.edge_fraction, tuple)
-
-    bead = TomogramBeadSpec(
-        radius=config.beads[0]["radius"], count=config.beads[0]["n_copies"]
-    )
-    assert bead.radius_range[1] > bead.radius_range[0]

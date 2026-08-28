@@ -56,8 +56,12 @@ class GradientSKIcemaker(L.LightningModule):
     device : str or torch.device
         Computation device.
     parameterization : str, optional
-        Atomic potential parameterization for the ice kernel: ``'kirkland'``,
-        ``'lobato'``, or ``'shtyrov'``. Default ``'kirkland'``.
+        Atomic scattering-factor parameterization for the ice kernel:
+        ``'kirkland'``, ``'lobato'``, or ``'shtyrov'``. Default
+        ``'shtyrov'``, matching `PotentialBuilder`'s own default, so ice and
+        the structure it surrounds are modelled the same way unless a caller
+        deliberately differs. Hydrogen has no Shtyrov species and takes the
+        per-element Peng fallback either way -- see `build_water_kernel`.
     progressbars : bool, optional
         Whether to show progress bars. Default is True.
     mdsim_target_path : str, optional
@@ -88,7 +92,7 @@ class GradientSKIcemaker(L.LightningModule):
         nz: Optional[int] = None,
         min_distance: float = 2.0,
         device: str | torch.device = "cpu",
-        parameterization: str = "kirkland",
+        parameterization: str = "shtyrov",
         progressbars: bool = True,
         mdsim_target_path: str | None = None,
     ) -> None:

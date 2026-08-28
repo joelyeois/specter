@@ -82,6 +82,11 @@ class ImageGeneratorFromCoordinates(ParticleGeneratorBase):
         ``ice_model='gd'`` (or an ``IceBank`` ``icemaker``): number of local
         MLBOP relaxation steps used to heal tile seams. Default 0 (no
         relaxation). Ignored for ``RandomIcemaker``.
+    ice_parameterization : str, optional
+        Atomic scattering-factor parameterization for the ice kernel.
+        Default 'shtyrov', matching this class's own potential-building
+        default so the structure and the ice around it are modelled the same
+        way. Ignored when ``icemaker`` is provided.
     scattering_model : str, optional
         Scattering model ('multislice', 'projection', 'ctf'). Default 'multislice'.
     noise_model : str, optional
@@ -151,6 +156,7 @@ class ImageGeneratorFromCoordinates(ParticleGeneratorBase):
         ice_cache_dir: str | None = None,
         icemaker: IceBank | RandomIcemaker | None = None,
         ice_relax_steps: int = 0,
+        ice_parameterization: str = "shtyrov",
         scattering_model: str = "multislice",
         noise_model: str | None = "poisson",
         klim: float | None = None,
@@ -274,6 +280,7 @@ class ImageGeneratorFromCoordinates(ParticleGeneratorBase):
                 chunk_size=crowd_chunk_size,
             )
 
+        self.ice_parameterization = ice_parameterization
         self.icemaker: IceBank | RandomIcemaker | None = resolve_icemaker(
             self.ice_model,
             pixel_size,
@@ -281,6 +288,7 @@ class ImageGeneratorFromCoordinates(ParticleGeneratorBase):
             self.nz,
             ice_cache_dir=ice_cache_dir,
             icemaker=icemaker,
+            parameterization=self.ice_parameterization,
         )
         if icemaker is not None:
             self.ice_model = icemaker.method

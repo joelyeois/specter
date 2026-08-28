@@ -37,8 +37,12 @@ class RandomIcemaker(L.LightningModule):
     nz : int, optional
         Number of pixels along z. If None, defaults to ``n``.
     parameterization : str, optional
-        Atomic potential parameterization for the ice kernel: ``'kirkland'``,
-        ``'lobato'``, or ``'shtyrov'``. Default ``'kirkland'``.
+        Atomic scattering-factor parameterization for the ice kernel:
+        ``'kirkland'``, ``'lobato'``, or ``'shtyrov'``. Default
+        ``'shtyrov'``, matching `PotentialBuilder`'s own default, so ice and
+        the structure it surrounds are modelled the same way unless a caller
+        deliberately differs. Hydrogen has no Shtyrov species and takes the
+        per-element Peng fallback either way -- see `build_water_kernel`.
     progressbars : bool, optional
         Whether to show progress bars. Default is True.
     """
@@ -50,7 +54,7 @@ class RandomIcemaker(L.LightningModule):
         dx: float,
         n: int,
         nz: int | None = None,
-        parameterization: str = "kirkland",
+        parameterization: str = "shtyrov",
         progressbars: bool = True,
     ):
         super().__init__()
@@ -157,7 +161,7 @@ class RandomIcemaker(L.LightningModule):
         Generate ice potential volumes.
 
         Runs :meth:`generate_ice_deltas` then convolves each volume with the
-        Kirkland oxygen potential kernel. ``self.positions`` holds the last
+        whole-water-molecule kernel (`build_water_kernel`). ``self.positions`` holds the last
         batch's coordinates; ``self.current_icedeltas`` holds the pre-convolution
         grids.
 

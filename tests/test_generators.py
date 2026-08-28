@@ -1227,3 +1227,37 @@ def test_image_generator_state_dict_round_trips(small_volume, ctf_params):
     torch.manual_seed(0)
     actual = target.forward(torch.tensor([0]))
     assert torch.allclose(expected, actual)
+
+
+def test_both_generators_forward_ice_parameterization(
+    small_coords, small_volume, ctf_params
+):
+    """Ice is modelled the way the caller asked, in either generator.
+
+    ImageGeneratorFromCoordinates used to take no ice_parameterization at
+    all, so its ice silently fell back to resolve_icemaker's own default
+    while its ImageGenerator sibling honoured the setting -- the two
+    regression fixtures below were being generated with different ice.
+    """
+    coords, atomic_numbers = small_coords
+    common = dict(
+        nxy=16,
+        pixel_size=2.0,
+        quaternions=torch.tensor([[1.0, 0.0, 0.0, 0.0]]),
+        translations=torch.tensor([[0.0, 0.0]]),
+        ctf_params=ctf_params,
+        voltage=300.0,
+        dose_per_angstrom=2.0,
+        ice_model="random",
+        ice_parameterization="lobato",
+        verbose=False,
+    )
+    from_coords = ImageGeneratorFromCoordinates(
+        coordinates=coords, atomic_numbers=atomic_numbers, **common
+    )
+    from_volume = ImageGenerator(
+        scattering_potential=small_volume,
+        **{k: v for k, v in common.items() if k != "nxy"},
+    )
+    assert from_coords.icemaker.parameterization == "lobato"
+    assert from_volume.icemaker.parameterization == "lobato"

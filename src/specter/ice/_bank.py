@@ -210,8 +210,9 @@ class IceBank(L.LightningModule):
     device : str or torch.device, optional
         Computation device. Default is ``"cpu"``.
     parameterization : str, optional
-        Atomic potential parameterization for the ice kernel: ``'kirkland'``,
-        ``'lobato'``, or ``'shtyrov'``. Default ``'kirkland'``. Note this only
+        Atomic scattering-factor parameterization for the ice kernel:
+        ``'kirkland'``, ``'lobato'``, or ``'shtyrov'``. Default ``'shtyrov'``,
+        matching `PotentialBuilder`'s own default. Note this only
         affects the kernel used to voxelize a crop's coordinates -- it does
         not change which cached configs (already-optimized coordinate sets)
         are drawn from.
@@ -230,7 +231,7 @@ class IceBank(L.LightningModule):
         self,
         cache_dir: str | None = None,
         device: str | torch.device = "cpu",
-        parameterization: str = "kirkland",
+        parameterization: str = "shtyrov",
         progressbars: bool = True,
     ) -> None:
         super().__init__()
@@ -1352,7 +1353,7 @@ def resolve_icemaker(
     nz: int,
     ice_cache_dir: str | None = None,
     icemaker: "IceBank | RandomIcemaker | None" = None,
-    parameterization: str = "kirkland",
+    parameterization: str = "shtyrov",
     progressbars: bool = True,
 ) -> "IceBank | RandomIcemaker | None":
     """
@@ -1383,7 +1384,7 @@ def resolve_icemaker(
     parameterization : str, optional
         Atomic potential parameterization for a freshly-built icemaker's
         kernel: ``'kirkland'``, ``'lobato'``, or ``'shtyrov'``. Default
-        ``'kirkland'``. Ignored when ``icemaker`` is given.
+        ``'shtyrov'``. Ignored when ``icemaker`` is given.
     progressbars : bool, optional
         Forwarded to a freshly-built icemaker's own ``progressbars``.
         Default True. Ignored when ``icemaker`` is given.

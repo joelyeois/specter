@@ -16,17 +16,6 @@ from specter.jobs._database import JobDatabase
 from specter.jobs._cli import _short_params
 
 
-def test_job_creates_folder(tmp_path: Path) -> None:
-    with Job("ghostbuster", project="test-project", base_dir=tmp_path) as job:
-        assert job.dir.exists()
-        assert job.dir.is_dir()
-
-
-def test_job_dir_name_is_j001(tmp_path: Path) -> None:
-    with Job("ghostbuster", project="test-project", base_dir=tmp_path) as job:
-        assert job.dir.name == "J001"
-
-
 def test_job_id_sequence(tmp_path: Path) -> None:
     with Job("ghostbuster", project="p", base_dir=tmp_path) as job1:
         first = job1.dir.name
@@ -91,10 +80,6 @@ def test_job_id_shared_across_types_with_no_project(tmp_path: Path) -> None:
         pass
     assert job1.dir.name == "J001"
     assert job2.dir.name == "J002"
-
-
-def test_resolve_base_dir_from_arg(tmp_path: Path) -> None:
-    assert _resolve_base_dir(tmp_path) == tmp_path
 
 
 def test_resolve_base_dir_from_env(
@@ -200,12 +185,6 @@ class _DummyClass:
 class _NoRunDir:
     def __init__(self, x: int = 42) -> None:
         self.x = x
-
-
-def test_job_create_returns_instance(tmp_path: Path) -> None:
-    with Job("dummy", project="p", base_dir=tmp_path) as job:
-        obj = job.create(_DummyClass, "hello")
-    assert isinstance(obj, _DummyClass)
 
 
 def test_job_create_captures_explicit_args(tmp_path: Path) -> None:

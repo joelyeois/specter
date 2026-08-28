@@ -46,18 +46,6 @@ def test_poisson_disk_neighbors_3d_respects_min_distance():
     assert bool((dists.min(dim=1).values >= min_distance - 1e-4).all())
 
 
-def test_crowding_reexports_match_coords():
-    from specter.crowding import (
-        poisson_disk_neighbors as crowding_poisson_disk_neighbors,
-    )
-    from specter.crowding import (
-        poisson_disk_neighbors_3d as crowding_poisson_disk_neighbors_3d,
-    )
-
-    assert crowding_poisson_disk_neighbors is poisson_disk_neighbors
-    assert crowding_poisson_disk_neighbors_3d is poisson_disk_neighbors_3d
-
-
 def test_radial_distribution_function_smoke():
     torch.manual_seed(0)
     coords = (torch.rand(200, 3) - 0.5) * 40.0

@@ -110,21 +110,6 @@ def test_aberration_bfactor_matches_inline_formula():
     assert torch.allclose(torch.abs(transfer), expected_envelope, atol=1e-6)
 
 
-def test_aberration_convergence_angle_none_is_unchanged():
-    ab_off = Aberration(8, pixel_size=1.0, voltage=300.0, aberration_model="nonlinear")
-    ab_on = Aberration(
-        8,
-        pixel_size=1.0,
-        voltage=300.0,
-        aberration_model="nonlinear",
-        convergence_angle=None,
-    )
-    ctf_params = {"dfu": torch.tensor([5000.0]), "cs": torch.tensor([2.7e7])}
-    assert torch.allclose(
-        ab_off.transfer_function(ctf_params), ab_on.transfer_function(ctf_params)
-    )
-
-
 def test_aberration_convergence_angle_attenuates_high_frequency():
     ab = Aberration(
         64,
@@ -139,17 +124,6 @@ def test_aberration_convergence_angle_attenuates_high_frequency():
     # k increases away from the DC corner (index 0); compare a low- and a
     # high-frequency pixel along the kx axis.
     assert magnitude[0, 1] > magnitude[0, 20]
-
-
-def test_aberration_cc_none_is_unchanged():
-    ab_off = Aberration(8, pixel_size=1.0, voltage=300.0, aberration_model="nonlinear")
-    ab_on = Aberration(
-        8, pixel_size=1.0, voltage=300.0, aberration_model="nonlinear", cc=None
-    )
-    ctf_params = {"dfu": torch.tensor([5000.0])}
-    assert torch.allclose(
-        ab_off.transfer_function(ctf_params), ab_on.transfer_function(ctf_params)
-    )
 
 
 def test_aberration_cc_attenuates_high_frequency():

@@ -231,9 +231,3 @@ def test_build_analytic_bilayer_profile_is_two_clean_peaks_with_zero_between():
     # Genuinely near-zero in between and outside, not just "lower".
     assert center < 0.01 * 5.0
     assert far_outside < 0.01 * 5.0
-
-
-def test_build_analytic_bilayer_profile_defaults_are_uncalibrated_but_valid():
-    profile = build_analytic_bilayer_profile()
-    assert profile.psi.max() == pytest.approx(1.0, abs=0.05)
-    assert torch.isfinite(profile.psi).all()

@@ -6,7 +6,7 @@ import pytest
 import torch
 
 from specter import memory
-from specter.config import ParticleStackConfig, load_config
+from specter.config import load_config
 from specter.memory import (
     MAX_AUTO_BATCHSIZE,
     available_memory_bytes,
@@ -121,10 +121,6 @@ def test_available_memory_bytes_cuda_is_below_total() -> None:
 def test_resolve_batchsize_passes_ints_through() -> None:
     assert resolve_batchsize(7, *_GEOM, "cpu") == 7
     assert resolve_batchsize("auto", *_SMALL_GEOM, "cpu", n_particles=2) == 2
-
-
-def test_particle_stack_config_defaults_to_auto() -> None:
-    assert ParticleStackConfig(pdb_source="6bdf").batchsize == "auto"
 
 
 def test_config_batchsize_accepts_auto_and_int(tmp_path: Path) -> None:

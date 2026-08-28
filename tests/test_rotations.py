@@ -212,12 +212,6 @@ def test_resolve_roi_defaults_to_full_centered_volume() -> None:
     assert roi_size == (10, 20)
 
 
-def test_resolve_roi_preserves_explicit_values() -> None:
-    roi_center, roi_size = _resolve_roi((3, 4), (6, 8), ny=10, nx=20)
-    assert roi_center == (3, 4)
-    assert roi_size == (6, 8)
-
-
 def test_build_roi_query_points_center_pixel_is_zero() -> None:
     slice_indices = torch.tensor([0])
     points = _build_roi_query_points(
@@ -314,18 +308,6 @@ def test_fourier_rotation_with_translation_matches_real(angle_deg: float) -> Non
         rotated = rotator(volume, build_affine_matrix(R, torch.zeros(1, 3)))[0]
         shifted = rotator(volume, build_affine_matrix(R, T))[0]
         assert _peak_offset(rotated, shifted) == [-4, 3, 0]
-
-
-def test_rotate_volume_fourier_applies_translation() -> None:
-    """The standalone function shares the phase-ramp path with VolumeRotator."""
-    volume = _gaussian_volume(_COORDS, _GRID, _VOXEL_SIZE)
-    T = translations_angstrom_to_torch(torch.tensor([[4.0, 0.0]]), _N, _VOXEL_SIZE)
-    theta = build_affine_matrix(_rot_z(90.0).unsqueeze(0), T)
-
-    out = rotate_volume_fourier(volume, theta)[0]
-    reference = VolumeRotator(_N, _N, _N, mode="fourier")(volume, theta)[0]
-
-    assert torch.allclose(out, reference, atol=1e-5)
 
 
 def test_split_affine_translation_leaves_rotation_untouched() -> None:

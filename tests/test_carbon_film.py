@@ -128,3 +128,21 @@ def test_carbon_film_spec_normalises_a_list_edge_fraction_range():
         CarbonFilmSpec(edge_fraction=[0.05, 0.02])
     with pytest.raises(ValueError, match=r"edge_fraction range must be \[low, high\]"):
         CarbonFilmSpec(edge_fraction=[0.1])
+
+
+def test_run_build_tomogram_rejects_more_than_one_carbon_film():
+    """A tomogram has one carbon film, so `config.carbon_film` holding two
+    entries is a config error rather than a silently-dropped second table.
+    `TomogramSpecimenGenerator` cannot catch it -- it takes a single
+    `carbon_film_spec`, not a list -- so the check lives one layer up in
+    `run_build_tomogram`, and until now nothing exercised it."""
+    import pytest
+
+    from specter.config import TomogramConfig
+    from specter.pipelines import run_build_tomogram
+
+    config = TomogramConfig(
+        carbon_film=[{"hole_radius": 6000.0}, {"hole_radius": 3000.0}],
+    )
+    with pytest.raises(ValueError, match="at most one"):
+        run_build_tomogram(config)

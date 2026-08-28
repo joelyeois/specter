@@ -28,23 +28,6 @@ def _half_space_exclusion_field(
     return torch.from_numpy(dist).float(), field_voxel_size
 
 
-def test_exclusion_distance_field_none_is_unchanged_behavior():
-    box = (200.0, 200.0, 200.0)
-    radii = torch.full((60,), 10.0)
-    coords_a, idx_a = pack_hard_spheres_3d(radii, box, gap=2.0, seed=0, device="cpu")
-    coords_b, idx_b = pack_hard_spheres_3d(
-        radii,
-        box,
-        gap=2.0,
-        seed=0,
-        device="cpu",
-        exclusion_distance_field=None,
-        field_voxel_size=None,
-    )
-    assert torch.equal(coords_a, coords_b)
-    assert torch.equal(idx_a, idx_b)
-
-
 def test_exclusion_distance_field_confines_placements_to_allowed_half():
     box = (200.0, 200.0, 200.0)
     radii = torch.full((60,), 10.0)

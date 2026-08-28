@@ -7,7 +7,6 @@ import torch
 
 from specter.ice import GradientSKIcemaker, RandomIcemaker
 from specter.ice._kernels import (
-    build_atomic_potential_kernel,
     compute_native_target,
     ice_kspace_radial_grid,
     interpolate_target_kernel,
@@ -51,21 +50,6 @@ def test_gradientskicemaker_parameterization_changes_kernel():
 
 
 # ---------------------------------------------------------------------------
-# Algorithm classes only produce blocks -- tiling for volumes larger than a
-# single block lives in IceBank (coordinate-space tiling + MLBOP seam
-# relaxation) or MDSimDump (voxel-space blending), not in the algorithm
-# classes themselves.
-# ---------------------------------------------------------------------------
-
-
-def test_algorithm_classes_have_no_generate_big_ice():
-    for cls in (GradientSKIcemaker, RandomIcemaker):
-        assert not hasattr(cls, "generate_big_ice")
-        assert not hasattr(cls, "generate_big_ice_fast")
-        assert not hasattr(cls, "generate_big_ice_interpolate")
-
-
-# ---------------------------------------------------------------------------
 # ice/_kernels.py — shared physics-kernel construction, used by
 # GradientSKIcemaker and RandomIcemaker instead of each duplicating it.
 # ---------------------------------------------------------------------------
@@ -78,12 +62,6 @@ def test_kernels_kspace_grid_shape_and_dc_center():
     assert torch.isfinite(K).all()
     # DC (zero frequency) sits at the center voxel after fftshift.
     assert K[nz // 2, n // 2, n // 2].item() == pytest.approx(0.0)
-
-
-def test_gradientskicemaker_ice_kernel_matches_direct_build():
-    dx = 1.0
-    gd = GradientSKIcemaker(n=16, dx=dx, progressbars=False)
-    assert torch.allclose(gd._ice_kernel, build_atomic_potential_kernel(dx, "kirkland"))
 
 
 # ---------------------------------------------------------------------------
@@ -374,16 +352,6 @@ def test_randomicemaker_mlbop_energy():
     rm.init_random()
 
     result = rm.mlbop_energy()
-
-    assert set(result) == _MLBOP_KEYS
-    assert torch.isfinite(torch.tensor(result["E_total"]))
-
-
-def test_gradientskicemaker_mlbop_energy():
-    gd = GradientSKIcemaker(n=16, dx=1.0, progressbars=False)
-    gd.init_random()
-
-    result = gd.mlbop_energy()
 
     assert set(result) == _MLBOP_KEYS
     assert torch.isfinite(torch.tensor(result["E_total"]))

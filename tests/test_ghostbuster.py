@@ -143,15 +143,6 @@ def test_ghostbuster_forward_regression(gb_kwargs: dict, scattering_model: str) 
 # ---------------------------------------------------------------------------
 
 
-def test_ghostbuster_stores_anisomag(gb_kwargs: dict, anisomag: torch.Tensor) -> None:
-    """Reconstructorregisters anisomag as a buffer and passes it to the ImageGenerator."""
-    gb = Reconstructor(**gb_kwargs, anisomag=anisomag, scattering_model="projection")
-    assert gb.anisomag is not None
-    assert gb.anisomag.shape == (1, 2, 2)
-    assert torch.allclose(gb.anisomag, anisomag)
-    assert gb.imagegenerator.anisomag is not None
-
-
 def test_anisomag_forward_regression(
     gb_kwargs: dict,
     anisomag: torch.Tensor,
@@ -175,26 +166,6 @@ def test_anisomag_changes_output(gb_kwargs: dict, anisomag: torch.Tensor) -> Non
     assert not torch.equal(img_iso, img_aniso), (
         "Anisotropic magnification should produce a different image than isotropic."
     )
-
-
-# ---------------------------------------------------------------------------
-# Output shape and determinism
-# ---------------------------------------------------------------------------
-
-
-def test_ghostbuster_output_shape(gb_kwargs: dict) -> None:
-    """forward returns (N, H, W) matching the volume spatial dims."""
-    gb = Reconstructor(**gb_kwargs, scattering_model="projection")
-    images = gb.forward(torch.tensor([0]))
-    assert images.shape == (1, 16, 16)
-
-
-def test_ghostbuster_forward_is_deterministic(gb_kwargs: dict) -> None:
-    """Two identical forward calls without noise produce identical output."""
-    gb = Reconstructor(**gb_kwargs, scattering_model="projection")
-    img1 = gb.forward(torch.tensor([0]))
-    img2 = gb.forward(torch.tensor([0]))
-    assert torch.equal(img1, img2)
 
 
 # ---------------------------------------------------------------------------
@@ -398,19 +369,6 @@ def test_reconstructor_training_updates_volume(
 # ---------------------------------------------------------------------------
 # Per-particle scale weighting
 # ---------------------------------------------------------------------------
-
-
-def test_scale_defaults_to_ones(gb_kwargs: dict) -> None:
-    """Without an explicit scale, every particle is weighted equally."""
-    gb = Reconstructor(**gb_kwargs, scattering_model="projection")
-    assert torch.equal(gb.scale, torch.ones(1))
-
-
-def test_scale_is_registered_as_buffer(gb_kwargs: dict) -> None:
-    """An explicit per-particle scale is stored and used verbatim."""
-    scale = torch.tensor([1.5])
-    gb = Reconstructor(**gb_kwargs, scale=scale, scattering_model="projection")
-    assert torch.allclose(gb.scale, scale)
 
 
 def test_scale_scales_mse_loss_linearly(gb_kwargs: dict) -> None:

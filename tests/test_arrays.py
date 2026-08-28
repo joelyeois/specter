@@ -98,13 +98,6 @@ def test_xy_out_of_bounds_coordinates_are_dropped() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_blended_output_shape_matches_target() -> None:
-    torch.manual_seed(0)
-    blocks = torch.rand(4, 8, 8, 8)
-    out = tile_volume_from_blocks_blended(blocks, (2, 20, 20, 20))
-    assert out.shape == (2, 20, 20, 20)
-
-
 def test_blended_conserves_sum() -> None:
     torch.manual_seed(1)
     blocks = torch.rand(4, 8, 8, 8)

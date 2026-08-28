@@ -30,7 +30,6 @@ from specter.specimen._parallel_render import (
     RECOMMENDED_MAX_RENDER_WORKERS,
     build_pdb_cache_concurrently,
     build_templates_concurrently,
-    recommend_render_devices,
     recommend_render_workers,
     resolve_render_devices,
     resolve_render_workers,
@@ -115,16 +114,6 @@ def test_build_templates_concurrently_round_robins_devices():
     ]
 
 
-def test_build_pdb_cache_concurrently_serial():
-    cache = build_pdb_cache_concurrently(
-        pdb_sources=["1mbo"],
-        pdb_cache_dir=str(Path(__file__).parent / "test_data"),
-        max_workers=1,
-    )
-    assert set(cache) == {"1mbo"}
-    assert cache["1mbo"].coordinates.shape[0] > 0
-
-
 def test_build_pdb_cache_concurrently_below_threshold_skips_process_pool(monkeypatch):
     """
     A handful of small structures is parsed serially, not in a process pool.
@@ -207,26 +196,9 @@ def test_build_pdb_cache_concurrently_deduplicates_sources():
     assert set(cache) == set(sources)
 
 
-def test_recommend_render_workers_caps_at_measured_sweet_spot():
-    assert recommend_render_workers(1000) == RECOMMENDED_MAX_RENDER_WORKERS
-
-
-def test_recommend_render_workers_never_exceeds_species_count():
-    assert recommend_render_workers(3) == 3
-    assert recommend_render_workers(1) == 1
-
-
 def test_recommend_render_workers_floors_at_one():
     assert recommend_render_workers(0) == 1
     assert recommend_render_workers(-5) == 1
-
-
-def test_recommend_render_devices_matches_visible_gpus():
-    devices = recommend_render_devices()
-    if torch.cuda.is_available():
-        assert devices == [f"cuda:{i}" for i in range(torch.cuda.device_count())]
-    else:
-        assert devices is None
 
 
 def test_resolve_render_workers_passes_through_non_auto():

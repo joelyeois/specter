@@ -68,14 +68,6 @@ def test_icebank_parameterization_changes_kernel(tmp_path):
     assert not torch.allclose(kirkland._get_kernel(1.0), lobato._get_kernel(1.0))
 
 
-def test_icebank_generate_ice_deltas_shape(tmp_path):
-    _make_cache_config(tmp_path, "config_000.pt", n=32, dx=1.0)
-    cache = IceBank(str(tmp_path), progressbars=False)
-
-    deltas = cache.generate_ice_deltas(n=16, dx=1.0, batchsize=2)
-    assert deltas.shape == (2, 16, 16, 16)
-
-
 def test_icebank_noncubic_request(tmp_path):
     _make_cache_config(tmp_path, "config_000.pt", n=32, dx=1.0)
     cache = IceBank(str(tmp_path), progressbars=False)

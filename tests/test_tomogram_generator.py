@@ -498,23 +498,6 @@ def test_tomogram_specimen_generator_places_filaments():
     assert len(present_ids) > len(protein_ids)
 
 
-def test_tomogram_specimen_generator_no_filament_specs_places_nothing():
-    mgen = MembraneGenerator(seed=0, **_MEMBRANE_KWARGS)
-    gen = TomogramSpecimenGenerator(
-        membrane_instances=[MembraneInstance(generator=mgen)],
-        target_shape=_TARGET_SHAPE_ZYX,
-        voxel_size=_V_SIZE,
-        protein_specs=[
-            TomogramProteinSpec(pdb_source=str(_SMALL_FIXTURE), location="cytosol")
-        ],
-        occupancy_fraction=0.05,
-        pdb_cache_dir=str(Path(__file__).parent / "test_data"),
-        seed=0,
-    )
-    gen.generate()
-    assert gen.filament_instances == []
-
-
 @pytest.mark.skipif(not _SMALL_FIXTURE.exists(), reason="bundled PDB fixture missing")
 def test_tomogram_specimen_generator_export_picks_includes_filaments(tmp_path):
     mgen = MembraneGenerator(seed=0, **_MEMBRANE_KWARGS)
@@ -592,21 +575,6 @@ def test_tomogram_specimen_generator_carbon_film_spec_paints_carbon_film():
     assert 0.0 < occupied.float().mean().item() < 1.0
     assert 5.0 < volume.max().item() < 20.0
     assert (volume[~occupied] == 0).all()
-
-
-def test_tomogram_specimen_generator_carbon_film_spec_rejects_multiple_entries():
-    """TomogramSpecimenGenerator itself takes a single carbon_film_spec (not a
-    list) -- the "at most one [[carbon_film]] table" constraint is enforced one
-    layer up, in run_build_tomogram/config.py, not here."""
-    gen = TomogramSpecimenGenerator(
-        membrane_instances=[],
-        target_shape=_TARGET_SHAPE_ZYX,
-        voxel_size=_V_SIZE,
-        protein_specs=[],
-        carbon_film_spec=CarbonFilmSpec(),
-        seed=0,
-    )
-    assert gen.carbon_film_spec is not None
 
 
 @pytest.mark.skipif(not _SMALL_FIXTURE.exists(), reason="bundled PDB fixture missing")

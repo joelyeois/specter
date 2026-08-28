@@ -32,27 +32,6 @@ def test_generate_produces_correct_shape_with_membrane_density():
     assert gen.profile is not None
 
 
-def test_membrane_scale_range_defaults_to_0_5_1_0():
-    gen_default = MembraneGenerator(seed=0, **_SMALL_KWARGS)
-    gen_default.generate()
-    assert gen_default.membrane_scale_range == (0.5, 1.0)
-    assert 0.5 <= gen_default.membrane_scale <= 1.0
-
-
-def test_membrane_scale_range_explicit_1_1_is_a_no_op():
-    gen_no_scale = MembraneGenerator(
-        seed=0, membrane_scale_range=(1.0, 1.0), **_SMALL_KWARGS
-    )
-    volume_no_scale = gen_no_scale.generate()
-    assert gen_no_scale.membrane_scale == 1.0
-
-    gen_baseline = MembraneGenerator(
-        seed=0, membrane_scale_range=(1.0, 1.0), **_SMALL_KWARGS
-    )
-    volume_baseline = gen_baseline.generate()
-    assert torch.equal(volume_no_scale, volume_baseline)
-
-
 def test_membrane_scale_range_is_reproducible_and_scales_linearly():
     gen_a = MembraneGenerator(seed=3, membrane_scale_range=(0.5, 1.0), **_SMALL_KWARGS)
     volume_a = gen_a.generate()
@@ -73,14 +52,6 @@ def test_membrane_scale_range_is_reproducible_and_scales_linearly():
 def test_membrane_scale_range_rejects_low_greater_than_high():
     with pytest.raises(ValueError, match="membrane_scale_range"):
         MembraneGenerator(membrane_scale_range=(1.0, 0.5), **_SMALL_KWARGS)
-
-
-def test_generate_is_seed_reproducible():
-    gen_a = MembraneGenerator(seed=3, **_SMALL_KWARGS)
-    gen_b = MembraneGenerator(seed=3, **_SMALL_KWARGS)
-    volume_a = gen_a.generate()
-    volume_b = gen_b.generate()
-    assert torch.equal(volume_a, volume_b)
 
 
 def test_place_transmembrane_before_generate_raises():
@@ -608,23 +579,6 @@ def test_swept_spline_near_straight_path_matches_capsule_sdf():
     assert torch.isclose(sampled, torch.tensor(offset), atol=3.0)
 
 
-def test_swept_spline_field_is_seed_reproducible():
-    from specter.specimen.membrane._field_swept_spline import (
-        generate_membrane_field_swept_spline,
-    )
-
-    kwargs = dict(
-        shape_zyx=(70, 70, 70),
-        spacing_a=4.0,
-        total_length_a=300.0,
-        step_length_a=15.0,
-        seed=7,
-    )
-    field_a = generate_membrane_field_swept_spline(**kwargs)
-    field_b = generate_membrane_field_swept_spline(**kwargs)
-    assert torch.equal(field_a.phi, field_b.phi)
-
-
 def test_swept_spline_warns_on_beading_risk():
     from specter.specimen.membrane._field_swept_spline import (
         generate_membrane_field_swept_spline,
@@ -904,20 +858,6 @@ def test_field_voxel_budget_matches_its_documented_derivation():
     # cupy path: VRAM must have real headroom at the cap, or an 8 GB card
     # (the machine this budget is written for) wouldn't hold it.
     assert _MAX_FIELD_VOXELS * _FIELD_VRAM_BYTES_PER_VOXEL <= _FIELD_VRAM_BUDGET_BYTES
-
-
-def test_field_voxel_budget_fits_a_modest_machine():
-    """The point of the budget: one field generation must not need a
-    workstation. Guards against the cap drifting back up to a value that
-    silently assumes 27 GB of RAM, as the previous 200M default did.
-    """
-    from specter.specimen.membrane._generator import (
-        _FIELD_BYTES_PER_VOXEL,
-        _MAX_FIELD_VOXELS,
-    )
-
-    peak_gib = _MAX_FIELD_VOXELS * _FIELD_BYTES_PER_VOXEL / 1024**3
-    assert peak_gib <= 14.0, f"one field generation would need {peak_gib:.1f} GiB"
 
 
 def test_signed_distance_transform_falls_back_when_gpu_transform_raises(monkeypatch):

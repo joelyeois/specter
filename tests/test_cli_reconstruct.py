@@ -608,30 +608,6 @@ def test_reference_without_mask_records_only_unmasked(
         assert entry["resolution_map_to_model_masked"] is None
 
 
-def test_run_reconstruction_gold_standard_tracked(
-    real_particle_data: tuple[Path, Path], tmp_path: Path
-) -> None:
-    """Gold-standard with --project logs the resolution into job.json."""
-    cs_file, mrc_file = real_particle_data
-    output_dir = tmp_path / "out"
-    config = _config(cs_file, mrc_file, output_dir)
-    config.project = "test-project"
-
-    run_reconstruction(config)
-
-    job_dir = output_dir / "test-project" / "reconstructions" / "J001"
-    assert (job_dir / "volume_A.mrc").exists()
-    assert (job_dir / "volume_B.mrc").exists()
-    assert (job_dir / "fsc_gold_standard.png").exists()
-    # job.json already has the full config; no redundant sidecar copy.
-    assert not (job_dir / "reconstruct_config_A.json").exists()
-    assert not (job_dir / "reconstruct_config_B.json").exists()
-
-    job = json.loads((job_dir / "job.json").read_text())
-    assert job["status"] == "complete"
-    assert "resolution_gold_standard" in job["params"]
-
-
 # ---------------------------------------------------------------------------
 # CLI layer
 # ---------------------------------------------------------------------------

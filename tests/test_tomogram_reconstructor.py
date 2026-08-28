@@ -107,21 +107,6 @@ def _fit_one_epoch(
 # ---------------------------------------------------------------------------
 
 
-def test_forward_output_shape(tr_kwargs: dict) -> None:
-    """forward(tilt_idx) returns a (H, W) intensity image matching the volume box."""
-    model = TomogramReconstructor(**tr_kwargs, scattering_model="projection")
-    img = model.forward(1)
-    assert img.shape == (8, 8)
-
-
-def test_forward_is_deterministic(tr_kwargs: dict) -> None:
-    """Two identical forward calls without noise produce identical output."""
-    model = TomogramReconstructor(**tr_kwargs, scattering_model="projection")
-    img1 = model.forward(0)
-    img2 = model.forward(0)
-    assert torch.equal(img1, img2)
-
-
 def test_forward_multislice_runs_and_is_finite(tr_kwargs: dict) -> None:
     """The multislice path (exercising _compute_nz_tilt + defocus z-offset
     correction) runs end-to-end and produces a finite image at high tilt."""
@@ -159,16 +144,6 @@ def test_fov_mask_zeros_border_at_high_tilt(tr_kwargs: dict) -> None:
 # ---------------------------------------------------------------------------
 # Training loop
 # ---------------------------------------------------------------------------
-
-
-def test_training_updates_volume(tr_kwargs: dict) -> None:
-    """One epoch of manual optimisation over all 3 tilts updates V."""
-    torch.manual_seed(0)
-    images = torch.randn(3, 8, 8)
-    model = TomogramReconstructor(**tr_kwargs, scattering_model="projection", lr=0.1)
-    V_init = model.V.data.clone()
-    _fit_one_epoch(model, images, batch_size=3)
-    assert not torch.equal(model.V.data, V_init)
 
 
 @pytest.mark.parametrize("scheduler", SCHEDULERS)

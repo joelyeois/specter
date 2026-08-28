@@ -180,16 +180,13 @@ def run_micrograph(config: MicrographConfig) -> None:
         if ice_profile is not None
         else compute_nz(V.shape[0], config.ice_thickness, config.pixel_size)
     )
-    # Unset, the ice follows the structure's own scattering factors: the two
-    # are summed into one volume, so modelling the protein with one set and
-    # the ice around it with another is a choice worth making deliberately.
     icemaker = resolve_icemaker(
         ice_model,
         config.pixel_size,
         config.micrograph_size,
         ice_nz,
         ice_cache_dir=config.ice_cache_dir,
-        parameterization=(config.ice_scattering_factors or config.scattering_factors),
+        parameterization=config.ice_scattering_factors,
     )
     if icemaker is not None:
         icemaker = icemaker.to(device)

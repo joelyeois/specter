@@ -405,26 +405,27 @@ def test_seed_is_configurable(config_cls: type) -> None:
     assert config_cls.seed is None
 
 
-def test_ice_scattering_factors_default_to_following_the_structure() -> None:
+def test_ice_does_not_follow_the_structure_scattering_factors() -> None:
     """
-    Unset, the ice is modelled the same way as the structure it surrounds.
+    Ice is a bulk material, so it is parameterized independently.
 
-    The two potentials are summed into one volume, so a shtyrov protein sitting
-    in kirkland ice is a choice worth making deliberately rather than
-    inheriting from two independent defaults.
+    Shtyrov fits bonded species of biomolecules over 0.011-0.62 1/A. A mean
+    inner potential is a k=0 quantity, so reading one off those fits
+    extrapolates below their own data -- measurably: ice comes out 13% under
+    the holography value that way, against 8% over for Kirkland, which is
+    per-element and valid at k=0. The structure and the ice therefore get
+    different defaults on purpose, and changing one must not move the other.
     """
     config = ParticleStackConfig(pdb_source="1abc")
-    assert config.ice_scattering_factors is None
+    assert config.scattering_factors == "shtyrov"
+    assert config.ice_scattering_factors == "kirkland"
 
     for factors in ("shtyrov", "kirkland", "lobato"):
         config.scattering_factors = factors  # type: ignore[assignment]
-        resolved = config.ice_scattering_factors or config.scattering_factors
-        assert resolved == factors
+        assert config.ice_scattering_factors == "kirkland"
 
-    # An explicit value still wins, so deliberately differing stays possible.
-    config.scattering_factors = "shtyrov"  # type: ignore[assignment]
-    config.ice_scattering_factors = "kirkland"  # type: ignore[assignment]
-    assert (config.ice_scattering_factors or config.scattering_factors) == "kirkland"
+    # Same on the micrograph side -- one vocabulary across commands.
+    assert MicrographConfig(pdb_source="1abc").ice_scattering_factors == "kirkland"
 
 
 # --- validation -----------------------------------------------------------

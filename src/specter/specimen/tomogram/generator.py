@@ -1520,9 +1520,13 @@ class TomogramSpecimenGenerator:
         here)."""
         carbon_film_spec = self.carbon_film_spec
         assert carbon_film_spec is not None
+        # Bulk carbon keeps CarbonFilmGenerator's own kirkland default rather
+        # than inheriting this specimen's parameterization: Shtyrov is fitted
+        # for biomolecules, and its "C(CCC)" proxy puts amorphous carbon 43%
+        # above the holography value per unit density, where Kirkland, Lobato
+        # and Peng agree with each other to 0.5%.
         carbon_gen = CarbonFilmGenerator(
             voxel_size=voxel_size,
-            parameterization=self.parameterization,
             seed=self.seed,
             device=volume.device,
         )
@@ -1645,9 +1649,10 @@ class TomogramSpecimenGenerator:
 
         accepted_radii = radii[accepted_idx]
 
+        # Gold likewise keeps BeadGenerator's kirkland default -- it is a bulk
+        # metal, and the Shtyrov tables have no elemental gold at all.
         bead_gen = BeadGenerator(
             voxel_size=voxel_size,
-            parameterization=self.parameterization,
             roughness=self.bead_roughness,
         )
         instance_ids = torch.arange(

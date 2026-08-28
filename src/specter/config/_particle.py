@@ -150,9 +150,12 @@ class ParticleStackConfig:
     rotate_mode: Literal["real", "fourier"] = "real"
 
     # --- Advanced: ice ---
-    # None follows scattering_factors -- see run_particle_stack. Set it only to
-    # deliberately model the ice differently from the structure.
-    ice_scattering_factors: Literal["kirkland", "lobato", "shtyrov"] | None = None
+    # Ice is a bulk material, not a biomolecule, so it does NOT follow
+    # scattering_factors: Shtyrov fits bonded species of biomolecules over
+    # 0.011-0.62 1/A, and a mean inner potential is a k=0 quantity that
+    # extrapolates below that range. Kirkland/Lobato/Peng are per-element and
+    # valid at k=0, and agree there -- see ice._kernels.build_water_kernel.
+    ice_scattering_factors: Literal["kirkland", "lobato", "shtyrov"] = "kirkland"
     ice_relax_steps: int = 0
 
     # --- Advanced: crowding ---
@@ -311,9 +314,10 @@ PARTICLE_STACK_HELP: dict[str, str] = {
     "rotate_mode": "Volume rotation method: 'real' (trilinear interpolation) or "
     "'fourier' (no boundary artifacts).",
     "ice_scattering_factors": "Atomic scattering-factor parameterization for "
-    "the ice specifically. Unset, it follows scattering_factors, so the "
-    "ice and the structure it surrounds are modelled the same way; set it "
-    "only to deliberately differ.",
+    "the ice specifically. Defaults to kirkland rather than following "
+    "scattering_factors: ice is a bulk material, outside the biomolecular "
+    "domain Shtyrov is fitted for, and Kirkland reproduces ice's measured "
+    "mean inner potential closely.",
     "ice_relax_steps": "Local MLBOP seam-relaxation steps, only used when "
     "ice_model='gd' tiles multiple cached blocks.",
     "crowd_chunk_size": "Crowding duplicate volumes rotated per batch. Lowering "

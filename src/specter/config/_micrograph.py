@@ -32,10 +32,12 @@ class MicrographConfig:
     pixel_size: float = 1.0  # Å
     micrograph_size: int = 4096
     scattering_factors: Literal["shtyrov", "kirkland", "lobato"] = "shtyrov"
-    # None follows scattering_factors -- see run_micrograph, and
-    # ParticleStackConfig's own field for why the two are worth keeping
-    # separable. Set it only to model the ice differently from the structure.
-    ice_scattering_factors: Literal["kirkland", "lobato", "shtyrov"] | None = None
+    # Ice is a bulk material, not a biomolecule, so it does NOT follow
+    # scattering_factors: Shtyrov fits bonded species of biomolecules over
+    # 0.011-0.62 1/A, and a mean inner potential is a k=0 quantity that
+    # extrapolates below that range. Kirkland/Lobato/Peng are per-element and
+    # valid at k=0, and agree there -- see ice._kernels.build_water_kernel.
+    ice_scattering_factors: Literal["kirkland", "lobato", "shtyrov"] = "kirkland"
     # Only takes effect for scattering_factors="shtyrov" (the only one that
     # types atoms) and only when a Monomer Library is available.
     readd_hydrogens: bool | Literal["auto"] = "auto"
@@ -148,9 +150,9 @@ MICROGRAPH_HELP: dict[str, str] = {
     "scattering_factors": "Atomic scattering-factor parameterization used to "
     "build the structure's scattering potential.",
     "ice_scattering_factors": "Atomic scattering-factor parameterization for "
-    "the ice specifically. Unset, it follows scattering_factors, so the ice "
-    "and the structure it surrounds are modelled the same way; set it only to "
-    "deliberately differ.",
+    "the ice specifically. Defaults to kirkland rather than following "
+    "scattering_factors: ice is a bulk material, outside the biomolecular "
+    "domain Shtyrov is fitted for.",
     "readd_hydrogens": "Whether to replace a structure's own hydrogens with "
     "the monomer library's ideal geometry: 'auto' (default) keeps hydrogens "
     "the file already carries and adds them only when it has none, true "

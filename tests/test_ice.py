@@ -358,12 +358,18 @@ def test_randomicemaker_mlbop_energy():
 
 
 def test_water_kernel_reproduces_the_measured_ice_mean_inner_potential():
-    """Amorphous ice has a measured MIP, so the kernel is checkable.
+    """Ice has a measured MIP, so the kernel is checkable against it.
 
-    Reported values span roughly 3.5-4.9 V (4.15 V, Angert et al. 1996). An
-    oxygen-only kernel -- what specter rendered before -- misses the two
-    hydrogens and lands near 2 V, half the real value, because hydrogen's
-    ELECTRON scattering factor is disproportionately large at low k.
+    Liquid water is 4.48 +/- 0.19 V (Yesibolati et al., Phys. Rev. Lett. 124,
+    065502 (2020), off-axis electron holography). Amorphous ice here is 0.94x
+    that number density, giving ~4.21 V. An oxygen-only kernel -- what specter
+    rendered before -- misses the two hydrogens and lands near 2 V, half the
+    real value, because hydrogen's ELECTRON scattering factor is
+    disproportionately large at low k.
+
+    The band is deliberately wide: holography MIPs for the same material
+    disagree by a volt or so between studies, so this pins the kernel against
+    a measurement rather than against a preferred parameterization.
     """
     from specter.ice._helpers import ndensity_of_amorphous_ice
     from specter.ice._kernels import build_water_kernel
@@ -371,7 +377,11 @@ def test_water_kernel_reproduces_the_measured_ice_mean_inner_potential():
     for parameterization in ("shtyrov", "kirkland", "lobato"):
         kernel = build_water_kernel(1.0, parameterization)
         mip = ndensity_of_amorphous_ice * kernel.sum().item()
-        assert 3.5 < mip < 4.9, f"{parameterization} ice MIP is {mip:.2f} V"
+        assert 3.5 < mip < 5.0, f"{parameterization} ice MIP is {mip:.2f} V"
+
+    # The shipped default is the one that should land closest to 4.21 V.
+    default = ndensity_of_amorphous_ice * build_water_kernel(1.0).sum().item()
+    assert abs(default - 4.21) < 0.5, f"default ice MIP is {default:.2f} V"
 
 
 def test_water_kernel_shell_moves_hydrogen_without_creating_it():
@@ -410,3 +420,36 @@ def test_water_kernel_shell_moves_hydrogen_without_creating_it():
     assert water.sum().item() == pytest.approx(
         (oxygen.sum() + 2 * hydrogen.sum()).item(), rel=1e-5
     )
+
+
+def test_bulk_materials_use_kirkland_not_shtyrov():
+    """Ice, carbon and gold are bulk materials, outside Shtyrov's domain.
+
+    Shtyrov fits bonded species of BIOMOLECULES, tabulated over 0.011-0.62
+    1/A. A mean inner potential is a k=0 quantity, so reading one off those
+    fits extrapolates below their own data. Measured against holography:
+
+    - carbon: 9.09 V at 1.75 g/cm^3 (Wanner et al., Ultramicroscopy 106
+      (2006) 341), i.e. 5.19 V per g/cm^3. Kirkland/Lobato/Peng agree to
+      0.5% here; the Shtyrov "C(CCC)" proxy sits ~40% above all three.
+    - gold: ~25 V for fcc Au, with a few volts of spread between studies.
+
+    Asserted per unit density for carbon, since its MIP scales with the
+    density the film is deposited at.
+    """
+    from specter.specimen._carbon import CarbonFilmGenerator
+    from specter.specimen._grid import BeadGenerator, _number_density_per_a3
+
+    carbon = CarbonFilmGenerator(voxel_size=2.0)
+    gold = BeadGenerator(voxel_size=2.0, roughness=0.0)
+
+    # Both must default to a per-element parameterization, never shtyrov.
+    per_density = carbon.mean_inner_potential / (
+        carbon.placed_density / _number_density_per_a3(1.0, 12.011)
+    )
+    assert 4.5 < per_density < 6.5, f"carbon is {per_density:.2f} V per g/cm^3"
+    assert 22.0 < gold.mean_inner_potential < 33.0
+
+    # ... and the shtyrov proxy is exactly what that guards against.
+    shtyrov_carbon = CarbonFilmGenerator(voxel_size=2.0, parameterization="shtyrov")
+    assert shtyrov_carbon.mean_inner_potential > carbon.mean_inner_potential

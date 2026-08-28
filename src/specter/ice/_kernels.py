@@ -59,7 +59,7 @@ def _smear_onto_shell(kernel: torch.Tensor, dx: float, radius: float) -> torch.T
     return torch.fft.fftshift(torch.fft.ifftn(spectrum * shell).real)
 
 
-def build_water_kernel(dx: float, parameterization: str = "shtyrov") -> torch.Tensor:
+def build_water_kernel(dx: float, parameterization: str = "kirkland") -> torch.Tensor:
     """
     Potential kernel for one whole water molecule, as a single site.
 
@@ -71,16 +71,26 @@ def build_water_kernel(dx: float, parameterization: str = "shtyrov") -> torch.Te
     factor is disproportionately large at low k (Mott-Bethe: f_e goes as
     (Z - f_x)/k^2, so a diffuse one-electron atom is far from negligible),
     and two of them make up 43% of a water molecule at k=0, falling to ~26%
-    at 1.5 A. Measured against amorphous ice's mean inner potential:
+    at 1.5 A. Measured against ice's mean inner potential -- liquid water is
+    4.48 +/- 0.19 V (Yesibolati et al. 2020, off-axis electron holography;
+    see References), and amorphous ice here is 0.94x its number density, so
+    the expected value is about 4.21 V:
 
     ==========================  ========  ==========================
-    model                       MIP       vs. measured 4.15 V
+    model                       MIP       vs. 4.21 V
     ==========================  ========  ==========================
-    oxygen only (before)        2.08 V    -50%
-    this kernel                 3.67 V    -12%
+    oxygen only (before)        2.08 V    -51%
+    this kernel, shtyrov        3.67 V    -13%
+    this kernel, kirkland       4.55 V     +8%
     ==========================  ========  ==========================
 
-    (Angert et al. 1996; reported values span roughly 3.5-4.9 V.)
+    `parameterization` defaults to ``'kirkland'`` rather than to
+    `PotentialBuilder`'s ``'shtyrov'``: Shtyrov fits bonded species of
+    BIOMOLECULES, over a tabulated range of 0.011-0.62 1/A. Bulk ice is
+    outside that domain, and a mean inner potential is a k=0 quantity, so
+    evaluating it extrapolates the fit below its own data -- visibly so for
+    ``H(C)``, whose tabulated values are negative below ~0.2 1/A. Kirkland,
+    Lobato and Peng are per-element, valid at k=0, and agree there.
 
     The hydrogens are placed on a **spherical shell** at
     `WATER_OH_DISTANCE`, not at the oxygen's own position. Both choices give
@@ -112,6 +122,12 @@ def build_water_kernel(dx: float, parameterization: str = "shtyrov") -> torch.Te
     torch.Tensor
         Potential kernel for one water molecule, same shape and grid as
         :func:`specter.potential.build_atomic_potential_kernel` returns.
+
+    References
+    ----------
+    .. [1] Yesibolati et al. "Mean Inner Potential of Liquid Water."
+           Phys. Rev. Lett. 124, 065502 (2020).
+           https://doi.org/10.1103/PhysRevLett.124.065502
     """
     oxygen = build_atomic_potential_kernel(
         dx,

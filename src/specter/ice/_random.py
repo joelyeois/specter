@@ -39,10 +39,11 @@ class RandomIcemaker(L.LightningModule):
     parameterization : str, optional
         Atomic scattering-factor parameterization for the ice kernel:
         ``'kirkland'``, ``'lobato'``, or ``'shtyrov'``. Default
-        ``'shtyrov'``, matching `PotentialBuilder`'s own default, so ice and
-        the structure it surrounds are modelled the same way unless a caller
-        deliberately differs. Hydrogen has no Shtyrov species and takes the
-        per-element Peng fallback either way -- see `build_water_kernel`.
+        ``'kirkland'``: Shtyrov fits bonded species of BIOMOLECULES over
+        0.011-0.62 1/A, so bulk ice is out of its domain and its k=0 limit
+        (which is what a mean inner potential is) extrapolates below the
+        fitted range. Kirkland, Lobato and Peng are per-element and valid at
+        k=0, and agree with each other there; see `build_water_kernel`.
     progressbars : bool, optional
         Whether to show progress bars. Default is True.
     """
@@ -54,7 +55,7 @@ class RandomIcemaker(L.LightningModule):
         dx: float,
         n: int,
         nz: int | None = None,
-        parameterization: str = "shtyrov",
+        parameterization: str = "kirkland",
         progressbars: bool = True,
     ):
         super().__init__()

@@ -286,11 +286,7 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
     # disk, cheap enough that every DDP rank can construct it independently
     # (no rank-0-builds-then-broadcasts dance needed, unlike V above).
     ice_nz = compute_nz(config.n_pixels, config.ice_thickness, pixel_size)
-    # Unset, the ice follows the structure's own parameterization: the two are
-    # summed into one volume, so modelling the protein with one set of
-    # scattering factors and the ice around it with another is a choice worth
-    # making deliberately rather than inheriting from a default.
-    ice_parameterization = config.ice_scattering_factors or config.scattering_factors
+    ice_parameterization = config.ice_scattering_factors
     icemaker = resolve_icemaker(
         ice_model,
         pixel_size,

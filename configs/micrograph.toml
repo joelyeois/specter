@@ -69,9 +69,9 @@ coincidence_radius = 0.0       # pixels; 0 = plain Poisson, no coincidence loss;
 # FFT per slice regardless of what it holds, so a profile costs what its
 # thickest column costs over the whole field.
 ice_model = "gd"                 # gd | random | none
-# ice_scattering_factors = "shtyrov"  # shtyrov | kirkland | lobato; unset, the ice follows
-                                 # scattering_factors above, so structure and ice are
-                                 # modelled the same way
+ice_scattering_factors = "kirkland"  # kirkland | lobato | shtyrov. Deliberately not
+                                 # scattering_factors above: ice is a bulk material,
+                                 # outside the biomolecular domain Shtyrov is fitted for
 ice_profile = "flat"             # flat | wedge | meniscus
 # ice_thickness_range = [250.0, 900.0]  # Å, wedge only; overrides ice_thickness
 # ice_profile_angle = 0.0        # degrees, wedge ramp direction

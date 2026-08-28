@@ -196,6 +196,51 @@ def test_build_pdb_cache_concurrently_deduplicates_sources():
     assert set(cache) == set(sources)
 
 
+def test_build_pdb_cache_concurrently_deduplicates_accession_case(monkeypatch):
+    # Regression test: dedup used to be by raw string, so a config naming
+    # one structure two ways ("1FA2" as a target, "1fa2" as a filler) paid
+    # for a second download and a second parse/bond-typing pass. The
+    # returned dict still has to carry BOTH spellings, since callers look
+    # up by `spec.pdb_source` verbatim.
+    import specter.pdb as pdb_module
+
+    built = []
+
+    # A subclass, not a wrapper function: PDB.__init__ reaches back through
+    # the module-global `PDB` name for `PDB.fetch_pdb_file`, so whatever
+    # replaces it has to still be the class.
+    class CountingPDB(pdb_module.PDB):
+        def __init__(self, source, *args, **kwargs):
+            built.append(source)
+            super().__init__(source, *args, **kwargs)
+
+    monkeypatch.setattr(pdb_module, "PDB", CountingPDB)
+
+    cache = build_pdb_cache_concurrently(
+        pdb_sources=["1mbo", "1MBO", "1bxn"],
+        pdb_cache_dir=str(Path(__file__).parent / "test_data"),
+        max_workers=1,
+    )
+
+    assert set(cache) == {"1mbo", "1MBO", "1bxn"}
+    assert cache["1mbo"] is cache["1MBO"]
+    assert sorted(built) == ["1BXN", "1MBO"]
+
+
+def test_build_pdb_cache_concurrently_ticks_once_per_input_source():
+    # `on_result` sizes a caller's progress bar by its own source count, so
+    # aliases folded together internally still each need their own tick or
+    # the bar never reaches its total.
+    ticks = []
+    build_pdb_cache_concurrently(
+        pdb_sources=["1mbo", "1MBO", "1bxn"],
+        pdb_cache_dir=str(Path(__file__).parent / "test_data"),
+        max_workers=1,
+        on_result=ticks.append,
+    )
+    assert sorted(ticks) == ["1MBO", "1bxn", "1mbo"]
+
+
 def test_recommend_render_workers_floors_at_one():
     assert recommend_render_workers(0) == 1
     assert recommend_render_workers(-5) == 1

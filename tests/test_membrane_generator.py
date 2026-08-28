@@ -217,16 +217,25 @@ def test_max_field_voxels_coarsens_and_warns_instead_of_exploding_memory():
     several such arrays field generation allocates) for a real
     (200, 600, 600)-voxel/10A tomogram. A tiny max_field_voxels here forces
     the same coarsening path at a scale cheap enough to test quickly."""
-    gen = MembraneGenerator(
-        target_shape=(32, 32, 32),
-        voxel_size=6.0,
-        sh_axes=(50.0, 50.0, 50.0),
-        sh_amplitude=0.15,
-        n_lipids_per_leaflet=6,
-        max_field_voxels=1000,
-        seed=0,
-    )
-    with pytest.warns(UserWarning, match="coarsening the working field grid"):
+    # The budget is reported once, by generation-resolution decoupling in
+    # the constructor. `generate()` clamps the field grid to the same
+    # budget over the same extent and so lands on the same spacing, and
+    # deliberately stays quiet about it rather than describing one
+    # decision twice under two different byte figures.
+    with pytest.warns(UserWarning, match="generating the membrane on a coarser grid"):
+        gen = MembraneGenerator(
+            target_shape=(32, 32, 32),
+            voxel_size=6.0,
+            sh_axes=(50.0, 50.0, 50.0),
+            sh_amplitude=0.15,
+            n_lipids_per_leaflet=6,
+            max_field_voxels=1000,
+            seed=0,
+        )
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "error", message=".*coarsening the working field grid.*"
+        )
         volume = gen.generate()
 
     assert volume.shape == (32, 32, 32)
@@ -236,6 +245,36 @@ def test_max_field_voxels_coarsens_and_warns_instead_of_exploding_memory():
         gen.field.phi.shape[0] * gen.field.phi.shape[1] * gen.field.phi.shape[2]
     )
     assert n_field_voxels <= 1000 * 1.5  # ceil() rounding can push slightly over
+
+
+def test_field_grid_coarsening_is_reported_when_it_is_the_only_clamp():
+    """The field-grid clamp still warns on its own account.
+
+    It is silent only when the constructor already reported the same
+    budget (see the test above). Here the output canvas fits
+    max_field_voxels -- so decoupling never triggers -- while the much
+    finer field grid the bilayer asks for does not, making this clamp the
+    only one the caller would otherwise hear nothing about.
+    """
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "error", message=".*generating the membrane on a coarser grid.*"
+        )
+        # 32**3 = 32,768 output voxels fits the budget, so decoupling
+        # stays off; the bilayer wants a 2.8 A field spacing over the same
+        # 192 A extent, which does not.
+        gen = MembraneGenerator(
+            target_shape=(32, 32, 32),
+            voxel_size=6.0,
+            sh_axes=(50.0, 50.0, 50.0),
+            sh_amplitude=0.15,
+            n_lipids_per_leaflet=6,
+            max_field_voxels=40_000,
+            seed=0,
+        )
+    assert not gen._needs_upsample
+    with pytest.warns(UserWarning, match="coarsening the working field grid"):
+        gen.generate()
 
 
 def test_max_field_voxels_default_does_not_warn_at_small_scale():

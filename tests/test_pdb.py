@@ -100,6 +100,69 @@ def test_fetch_pdb_file_creates_missing_pdb_cache_dir(tmp_path, monkeypatch):
     assert Path(filepath).read_text() == fake_cif
 
 
+def test_canonical_pdb_source_folds_accession_case_only():
+    # Accession codes are case-insensitive at RCSB, so they fold to one
+    # spelling; file paths are case-sensitive on Linux and must not.
+    assert pdb_module.canonical_pdb_source("1fa2") == "1FA2"
+    assert pdb_module.canonical_pdb_source("1FA2") == "1FA2"
+    assert pdb_module.canonical_pdb_source("1Fa2") == "1FA2"
+    assert pdb_module.canonical_pdb_source("/Data/Structs/Mine.cif") == (
+        "/Data/Structs/Mine.cif"
+    )
+    # Four characters but not alphanumeric: a path, not a code.
+    assert pdb_module.canonical_pdb_source("a.cif") == "a.cif"
+
+
+def test_fetch_pdb_file_downloads_one_entry_per_accession_regardless_of_case(
+    tmp_path, monkeypatch
+):
+    # Regression test: the cache filename was built verbatim from the
+    # caller's spelling, so a config naming one structure two ways (a
+    # target as "1FA2", a filler as "1fa2") downloaded, cached and later
+    # re-parsed the same RCSB entry twice.
+    fake_cif = "data_1ABC\n#\n"
+    compressed = gzip.compress(fake_cif.encode())
+    downloads = []
+
+    def fake_get(url, *args, **kwargs):
+        if "rest/v1/core/entry" in url:
+            return _FakeResponse(
+                json_data={"rcsb_entry_container_identifiers": {"assembly_ids": []}}
+            )
+        downloads.append(url)
+        return _FakeResponse(content=compressed)
+
+    monkeypatch.setattr(pdb_module.requests, "get", fake_get)
+
+    first = PDB.fetch_pdb_file("1abc", pdb_cache_dir=str(tmp_path), verbose=False)
+    second = PDB.fetch_pdb_file("1ABC", pdb_cache_dir=str(tmp_path), verbose=False)
+
+    assert first == second
+    assert len(downloads) == 1
+    assert [p.name for p in tmp_path.iterdir()] == ["1ABC-assembly1.cif"]
+
+
+def test_fetch_pdb_file_reuses_a_differently_cased_cache_entry(tmp_path, monkeypatch):
+    # A cache populated before keys were canonicalized still holds entries
+    # under their old spelling. That is the same file, so it must be reused
+    # rather than re-downloaded into a second copy.
+    (tmp_path / "1abc-assembly1.cif").write_text("data_1ABC\n#\n")
+
+    def fake_get(url, *args, **kwargs):
+        if "rest/v1/core/entry" in url:
+            return _FakeResponse(
+                json_data={"rcsb_entry_container_identifiers": {"assembly_ids": []}}
+            )
+        raise AssertionError("must not re-download an entry already cached")
+
+    monkeypatch.setattr(pdb_module.requests, "get", fake_get)
+
+    path = PDB.fetch_pdb_file("1ABC", pdb_cache_dir=str(tmp_path), verbose=False)
+
+    assert Path(path).name == "1abc-assembly1.cif"
+    assert len(list(tmp_path.iterdir())) == 1
+
+
 def test_get_atom_species_requires_mmcif(tmp_path):
     """A legacy .pdb source has no chem-comp bond dictionary; species is None."""
     fake_pdb = tmp_path / "fake.pdb"

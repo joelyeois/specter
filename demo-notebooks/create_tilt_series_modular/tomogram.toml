@@ -38,22 +38,28 @@ filler = [
 filler_from_pei2016 = true
 scattering_factors = "shtyrov"
 
-# No explicit size range here (unlike configs/tomogram.toml's production-scale
-# entries) -- omitting it lets each instance auto-cap its own draw to a
-# fraction of [specimen]'s own target_shape box above (see
-# _cap_membrane_auto_size_ranges in specter.pipelines._tomogram).
+# Sizes are set against the THINNEST box axis, 128 x 10 = 1280 A, not the
+# 2560 A width: an organelle wider than the slab is cut open by the z walls,
+# and an open shape encloses no lumen, so the `location = "lumen"` filler
+# above would have nowhere to go. A closed interior is the normal outcome
+# at this size rather than a guaranteed one: placement stays random and z
+# clipping stays permitted. Same reasoning as configs/tomogram.toml, scaled
+# to this smaller box. Omitting these ranges entirely would fall back
+# to the automatic cap (_cap_membrane_auto_size_ranges in
+# specter.pipelines._tomogram), which cannot help here: with every axis
+# clippable it measures the widest axis, on purpose, since clipping is
+# allowed.
 [[membrane]]
 shape_backend = "spherical_harmonics"
 bilayer_thickness = 30.0
-sh_axes_range = [150.0, 1600.0]   # SEMI-axes, A -- a vesicle's diameter is
-                                    # roughly twice these.
+sh_axes_range = [120.0, 400.0]   # SEMI-axes, A -- at most 800 A across
 n_copies = 3
 
 [[membrane]]
 shape_backend = "swept_spline"
 bilayer_thickness = 30.0
-swept_total_length_range = [1500.0, 2400.0] # path contour length, A
-swept_tube_radius_range = [150.0, 400.0] # tube radius, A
+swept_total_length_range = [1000.0, 1800.0] # path contour length, A
+swept_tube_radius_range = [100.0, 200.0] # tube radius, A -- at most 400 A across
 n_copies = 3
 
 [[membrane_transmembrane_specs]]

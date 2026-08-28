@@ -588,7 +588,10 @@ def _run_single_tomogram(config: TomogramConfig) -> None:
     gen = build_tomogram_generator(config)
     volume = gen.generate()
     if gen.membrane_instances:
-        _console.print(f"  Membrane instances: {len(gen.membrane_instances)}")
+        _console.print(
+            f"  Membrane instances: {len(gen.placed_membrane_instances)}/"
+            f"{len(gen.membrane_instances)} placed"
+        )
         _console.print(f"  Transmembrane: {len(gen.transmembrane_placements)} placed")
     if gen.filament_specs:
         _console.print(

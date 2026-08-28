@@ -95,6 +95,23 @@ for both citations) instead of hand-listing PDB codes; both are additive
 and can be combined with each other and with hand-written `[[filler]]`
 entries.
 
+A `"lumen"` entry needs an organelle that actually encloses one. Membrane
+sizes are constrained by the thinnest box axis, not the widest: an
+organelle wider than the slab is cut open where it meets the z walls, and
+an open shape has no interior for the region classifier to find. A
+`[[membrane]]` population sized against the field of view rather than
+against `target_shape[0] * voxel_size` therefore leaves the lumen region
+empty or near-empty, and every species declared for it is dropped with a
+warning naming the region's free voxel count. Keeping the widest
+organelle to roughly two thirds of the slab thickness makes an enclosed
+interior the normal outcome. It is not a guarantee: placement remains
+random and clipping remains permitted, so an occasional draw still
+encloses little or nothing. Omitting the size ranges does not solve this
+on its own, since the automatic cap measures the widest axis whenever
+`clip_axes` permits clipping on all three, clipping being a legitimate
+outcome for a lamella. Set `seed` when a run has to reproduce a specimen
+whose lumen you have already checked.
+
 ## Compute & scaling flags
 
 Rendering dozens of species and packing hundreds of filler instances can

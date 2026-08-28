@@ -416,7 +416,10 @@ def build_pdb_cache_concurrently(
         `pdb_source` values (PDB IDs or local file paths) to load. Duplicates
         are only fetched once (first occurrence order preserved in the
         returned dict's construction, though dict key order isn't itself
-        load-bearing for callers).
+        load-bearing for callers). Deduplication is by
+        `pdb.canonical_pdb_source`, not by raw string, so two spellings of
+        one accession code (``1fa2`` and ``1FA2``) are fetched, parsed and
+        typed once between them.
     pdb_cache_dir : str
         Passed through to every `PDB(...)` call as `pdb_cache_dir`.
     max_workers : int
@@ -428,16 +431,24 @@ def build_pdb_cache_concurrently(
         without enough work to amortize it (see that constant's own
         comment for the numbers).
     on_result : callable, optional
-        ``on_result(pdb_source)``, called once per unique source as soon
-        as its `PDB` is available -- in COMPLETION order when the process
-        pool runs (via `as_completed`, not submission order), in
-        `unique_sources` order when serial. Meant for a caller-side
-        progress tick; exceptions from it propagate immediately.
+        ``on_result(pdb_source)``, called once per unique INPUT source as
+        soon as its `PDB` is available -- in COMPLETION order when the
+        process pool runs (via `as_completed`, not submission order), in
+        `unique_sources` order when serial. Aliases of one structure each
+        get their own call, back to back, so a caller ticking a bar sized
+        by its own source count still reaches the total. Meant for a
+        caller-side progress tick; exceptions from it propagate
+        immediately.
 
     Returns
     -------
     dict[str, PDB]
-        `pdb_source -> PDB`, one entry per unique input source.
+        `pdb_source -> PDB`, one entry per unique input source, keyed by
+        the spelling the caller passed in (callers look up by
+        `spec.pdb_source` verbatim). Aliases of one structure map to the
+        SAME `PDB` object, so downstream caches keyed on object identity
+        -- the tomogram generator's `_mask_cache`, for instance -- collapse
+        them too.
 
     Notes
     -----
@@ -454,25 +465,42 @@ def build_pdb_cache_concurrently(
     every worker process too (a standard Python multiprocessing pitfall,
     not specific to this function).
     """
-    unique_sources = list(dict.fromkeys(pdb_sources))
+    from ..pdb import canonical_pdb_source
+
+    # One unit of work per STRUCTURE, not per spelling. `aliases` maps each
+    # canonical source to the raw spellings that named it, so the results
+    # can be fanned back out below under the keys the caller will look up.
+    aliases: dict[str, dict[str, None]] = {}
+    for source in pdb_sources:
+        aliases.setdefault(canonical_pdb_source(source), {})[source] = None
+    unique_sources = list(aliases)
+
+    def _fan_out(results: dict[str, "PDB"], canonical: str, pdb: "PDB") -> None:
+        for alias in aliases[canonical]:
+            results[alias] = pdb
+            if on_result is not None:
+                on_result(alias)
+
     estimates = [
         _estimated_parse_seconds(source, pdb_cache_dir) for source in unique_sources
     ]
     if not _process_pool_is_worth_it(estimates, max_workers):
         from ..pdb import PDB
 
-        results = {}
+        results: dict[str, "PDB"] = {}
         for source in unique_sources:
-            results[source] = PDB(
+            _fan_out(
+                results,
                 source,
-                pdb_cache_dir=pdb_cache_dir,
-                verbose=False,
-                compute_atom_species=compute_atom_species,
-                readd_hydrogens=readd_hydrogens,
-                monomer_library_path=monomer_library_path,
+                PDB(
+                    source,
+                    pdb_cache_dir=pdb_cache_dir,
+                    verbose=False,
+                    compute_atom_species=compute_atom_species,
+                    readd_hydrogens=readd_hydrogens,
+                    monomer_library_path=monomer_library_path,
+                ),
             )
-            if on_result is not None:
-                on_result(source)
         return results
 
     # Submit the most expensive structures FIRST (longest-processing-time
@@ -513,8 +541,5 @@ def build_pdb_cache_concurrently(
         }
         results = {}
         for fut in as_completed(futures):
-            source = futures[fut]
-            results[source] = fut.result()
-            if on_result is not None:
-                on_result(source)
+            _fan_out(results, futures[fut], fut.result())
         return results

@@ -195,6 +195,48 @@ def test_tomogram_specimen_generator_rejects_mismatched_voxel_size():
         )
 
 
+@pytest.mark.skipif(not _SMALL_FIXTURE.exists(), reason="bundled PDB fixture missing")
+def test_placed_membrane_instances_excludes_the_ones_that_did_not_fit():
+    """`membrane_instances` is the request and is never pruned, so a caller
+    reporting from it alone claims every instance is present even when
+    collision-rejecting placement dropped some. `placed_membrane_instances`
+    is the ones actually composited, and must agree with the label volume.
+    """
+    n_requested = 12  # more than this box can hold, so some are dropped
+    instances = [
+        MembraneInstance(generator=MembraneGenerator(seed=i, **_MEMBRANE_KWARGS))
+        for i in range(n_requested)
+    ]
+    gen = TomogramSpecimenGenerator(
+        membrane_instances=instances,
+        target_shape=_TARGET_SHAPE_ZYX,
+        voxel_size=_V_SIZE,
+        protein_specs=[TomogramProteinSpec(pdb_source=str(_SMALL_FIXTURE))],
+        pdb_cache_dir=str(Path(__file__).parent / "test_data"),
+        seed=0,
+        progressbars=False,
+    )
+    with warnings.catch_warnings():
+        # Packing this many instances into this box also makes a few of
+        # them overlap once rendered, which is its own (already-covered)
+        # warning and just noise here.
+        warnings.filterwarnings("ignore", message=".*overlaps a voxel.*")
+        with pytest.warns(UserWarning, match="did not fit without colliding"):
+            gen.generate()
+
+    assert len(gen.membrane_instances) == n_requested
+    n_placed = len(gen.placed_membrane_instances)
+    assert 0 < n_placed < n_requested
+    assert gen.membrane_labels is not None
+    n_labels = len(set(torch.unique(gen.membrane_labels).tolist()) - {0})
+    assert n_placed == n_labels
+    # The survivors are the actual objects that were handed in, not copies,
+    # and every one of them ended up with a resolved position.
+    for mi in gen.placed_membrane_instances:
+        assert any(mi is requested for requested in instances)
+        assert mi.position_xyz is not None
+
+
 @pytest.mark.skipif(not _LARGE_FIXTURE.exists(), reason="bundled PDB fixture missing")
 def test_tomogram_specimen_generator_composites_two_non_overlapping_instances():
     """Two collision-checked auto-placed instances -- composited density

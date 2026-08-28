@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import sys
 import threading
 import time
+import warnings
 from contextlib import contextmanager
 from typing import Any, Iterable, Iterator, TypeVar
 
@@ -284,6 +286,69 @@ def phase_done(description: str, start: float, disable: bool = False) -> None:
         return
     elapsed = time.perf_counter() - start
     tqdm.write(f"{description}: {_format_elapsed(elapsed)}")
+
+
+@contextmanager
+def tqdm_warnings(show_location: bool = True) -> Iterator[None]:
+    """
+    Route `warnings.warn` output through `tqdm.write` for the duration of
+    the block.
+
+    Python writes a warning straight to `sys.stderr`, which is also where
+    the bars in this module draw. A warning raised while a bar is live
+    therefore lands mid-line, leaving output like
+    ``Generating membrane instances: 0%| | 0/3 [00:00<?, ?it/s]/path/to/
+    generator.py:764: UserWarning: ...`` -- the bar and the warning both
+    unreadable. `tqdm.write` takes tqdm's lock, clears every live bar,
+    writes, and redraws them, so the warning gets its own line and the
+    bars survive.
+
+    Parameters
+    ----------
+    show_location : bool, optional
+        Include the ``file:lineno`` prefix and the echoed source line, as
+        Python's own formatter does. Default True. Pass False for a
+        command-line front end, where the location is noise: these
+        warnings are raised for the user, not for whoever is debugging
+        specter, and the stack frame they name is a fixed internal call
+        site (every warning out of `TomogramSpecimenGenerator.generate`
+        reports the one `volume = gen.generate()` line) that tells the
+        reader nothing about their own input.
+
+    Notes
+    -----
+    Only the OUTPUT path is replaced. Filtering is untouched, so
+    `warnings.simplefilter`/`-W` and Python's once-per-location dedup all
+    behave exactly as they otherwise would.
+    """
+    original = warnings.showwarning
+
+    def _showwarning(
+        message: Warning | str,
+        category: type[Warning],
+        filename: str,
+        lineno: int,
+        file: Any = None,
+        line: str | None = None,
+    ) -> None:
+        # `file` is set when a caller explicitly redirects one warning
+        # somewhere else; honour that rather than hijacking it.
+        if file is not None:
+            original(message, category, filename, lineno, file, line)
+            return
+        if show_location:
+            text = warnings.formatwarning(
+                message, category, filename, lineno, line
+            ).rstrip()
+        else:
+            text = f"{category.__name__}: {message}"
+        tqdm.write(text, file=sys.stderr)
+
+    warnings.showwarning = _showwarning
+    try:
+        yield
+    finally:
+        warnings.showwarning = original
 
 
 class TqdmProgress:

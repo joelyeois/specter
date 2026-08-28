@@ -43,18 +43,36 @@ filler_from_pei2016 = true
 
 # Membranes. One [[membrane]] table per population. Omit them all for a
 # membrane-free volume; the whole box is then one cytosol region.
+# Sizes below are set against the THINNEST box axis, 300 x 5 = 1500 A, not
+# the 6000 A width: an organelle wider than the slab is cut open by the z
+# walls, and an open shape encloses no lumen, so nothing declared with
+# `location = "lumen"` above would have anywhere to go. Keeping the widest
+# organelle to roughly two thirds of the slab makes a closed interior the
+# normal outcome rather than a guaranteed one: placement stays random and
+# z clipping stays permitted, so an occasional draw still encloses little.
+# Measured over 8 seeds at this size, 7 enclose 0.05-0.85% of the box and
+# one encloses essentially nothing, and all 6 instances place every time.
+# At the [150, 1600] this used to be, 6 seeds enclosed 0.0001-0.0074% --
+# too little for a `location = "lumen"` species to fit anywhere -- and
+# only 3 to 5 of the 6 instances placed at all, the rest dropped for
+# colliding.
+# Omitting these ranges would fall back to the automatic
+# cap (_cap_membrane_auto_size_ranges in specter.pipelines._tomogram),
+# which cannot help here: with every axis clippable it measures the widest
+# axis, on purpose, since clipping is allowed.
 [[membrane]]
 shape_backend = "spherical_harmonics"
 bilayer_thickness = 30.0
-sh_axes_range = [150.0, 1600.0]   # SEMI-axes, A -- a vesicle's diameter is
-                                    # roughly twice these.
+sh_axes_range = [150.0, 500.0]      # SEMI-axes, A -- a vesicle's diameter is
+                                    # roughly twice these, so at most 1000 A
+                                    # across in a 1500 A slab.
 n_copies = 3
 
 [[membrane]]
 shape_backend = "swept_spline"
 bilayer_thickness = 30.0
 swept_total_length_range = [1500.0, 2400.0] # path contour length, A
-swept_tube_radius_range = [150.0, 400.0] # tube radius, A
+swept_tube_radius_range = [100.0, 250.0] # tube radius, A -- at most 500 A across
 n_copies = 3
 
 # Proteins embedded in the bilayer, one table per species.

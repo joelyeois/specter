@@ -48,6 +48,67 @@ warnings.simplefilter("ignore", PDBConstructionWarning)
 _monomer_library_warned = False
 
 
+def _cache_file_ignoring_case(pdb_cache_dir: str, filename: str) -> str | None:
+    """
+    Find `filename` in `pdb_cache_dir` ignoring case, or None.
+
+    Parameters
+    ----------
+    pdb_cache_dir : str
+        Directory to search. A missing directory yields None.
+    filename : str
+        The canonically-spelled filename being looked for.
+
+    Returns
+    -------
+    str or None
+        Full path to the case-insensitive match, or None if there is none.
+    """
+    try:
+        entries = os.listdir(pdb_cache_dir)
+    except OSError:
+        return None
+    wanted = filename.lower()
+    for entry in entries:
+        if entry.lower() == wanted:
+            return os.path.join(pdb_cache_dir, entry)
+    return None
+
+
+def canonical_pdb_source(pdb_source: str) -> str:
+    """
+    Normalize a `pdb_source` so the same structure has one cache key.
+
+    Parameters
+    ----------
+    pdb_source : str
+        A 4-character PDB accession code, or a path to a structure file.
+
+    Returns
+    -------
+    str
+        The accession code upper-cased, or `pdb_source` unchanged when it
+        is a file path.
+
+    Notes
+    -----
+    RCSB accession codes are case-insensitive -- ``1fa2`` and ``1FA2`` name
+    one entry and both download -- so a config spelling the same structure
+    two ways (a target as ``1FA2``, a filler as ``1fa2``) otherwise
+    downloads it twice, caches it under two filenames, and parses/types it
+    twice. Upper case is the canonical form because it is what RCSB and
+    the literature print. File paths are returned untouched: they are
+    case-sensitive on Linux, so folding their case would break them.
+
+    The accession-code test matches `PDB.__init__`'s own, deliberately --
+    see the comment there for why a 4-character alphanumeric string is
+    read as an ID rather than as a filename.
+    """
+    if len(pdb_source) == 4 and pdb_source.isalnum():
+        return pdb_source.upper()
+    return pdb_source
+
+
 def _resolve_monomer_library_path(
     monomer_library_path: str | None = None,
 ) -> str | None:
@@ -385,6 +446,12 @@ class PDB:
         str
             Path to the saved PDB file
         """
+        # Fold `1fa2` and `1FA2` onto one cache entry -- see
+        # `canonical_pdb_source`. Done here rather than at the call site so
+        # every caller gets it, including `specimen.filament._tubulin`'s
+        # direct fetches.
+        pdb_id = canonical_pdb_source(pdb_id)
+
         PDB.get_available_assemblies(pdb_id, verbose=verbose)
 
         # Decide what to fetch
@@ -411,6 +478,17 @@ class PDB:
             if verbose:
                 print(f"File already exists: {file_path}, skip fetching.")
             return file_path
+
+        # A cache written before keys were canonicalized, or by hand, may
+        # hold this entry under a different spelling of the accession code
+        # (`1fa2-assembly1.cif`). It is the same file: reuse it rather than
+        # re-downloading and leaving the cache with two copies of one
+        # structure. Only reached on a miss, so this costs one listdir.
+        cached = _cache_file_ignoring_case(pdb_cache_dir, filename)
+        if cached is not None:
+            if verbose:
+                print(f"File already exists: {cached}, skip fetching.")
+            return cached
 
         # Fetch
         if verbose:

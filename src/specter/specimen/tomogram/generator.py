@@ -175,7 +175,7 @@ from scipy import ndimage
 from ...config import ScalarOrRange
 from ...arrays import clip_insert_bounds
 from ...crowding import insert_particles_into_micrograph
-from ...pdb import DEFAULT_PDB_CACHE_DIR, PDB
+from ...pdb import DEFAULT_PDB_CACHE_DIR, PDB, canonical_pdb_source
 from ...potential import PotentialBuilder
 from ...rotations import build_affine_matrix, random_rotation_matrix, rotate_volume
 from .._carbon import CarbonFilmGenerator, CarbonFilmSpec, edge_hole_center
@@ -461,6 +461,13 @@ class TomogramSpecimenGenerator:
         `membrane_labels == i+1` is instance `i`'s own shell (first-write-
         wins where instances overlap, see `_insert_shell_label`), shape
         `target_shape`, dtype int32. Set after `generate()` runs.
+    placed_membrane_instances : list of MembraneInstance
+        The subset of `membrane_instances` actually composited into the
+        volume, set after `generate()` runs. `membrane_instances` is the
+        request and is never pruned; an instance is absent here if
+        auto-placement could not fit it without colliding, or if its own
+        working grid clipped the shape it drew. Report placed-of-requested
+        from the two lists together.
     transmembrane_placements : list of TransmembranePlacement
         From every instance's own `MembraneGenerator.place_transmembrane`,
         with `center_xyz` offset into shared-tomogram coordinates by that
@@ -610,6 +617,14 @@ class TomogramSpecimenGenerator:
 
         self.regions: dict[str, torch.Tensor] | None = None
         self.membrane_labels: torch.Tensor | None = None
+        # The subset of `membrane_instances` that actually made it into the
+        # volume. `membrane_instances` is the REQUEST and is never pruned;
+        # an instance is dropped from this list if auto-placement couldn't
+        # fit it without colliding, or if its own working grid clipped the
+        # shape it drew. Report placed-of-requested from the two together
+        # rather than reading `membrane_instances` alone, which would
+        # claim every requested instance is present.
+        self.placed_membrane_instances: list[MembraneInstance] = []
         self.transmembrane_placements: list[TransmembranePlacement] = []
         self.placements: list[TomogramPlacement] = []
         self.instance_labels: torch.Tensor | None = None
@@ -644,19 +659,6 @@ class TomogramSpecimenGenerator:
             target_shape[2] * voxel_size,
         )
 
-        # Resolve any omitted position_xyz via collision-rejecting random
-        # placement, treating each instance as a bounding sphere (see
-        # _instance_bounding_radius) -- an instance that doesn't fit
-        # without colliding is dropped (never .generate()-called at all,
-        # cheaper than generating first and rejecting after), matching
-        # this module's own "reject and move on" packing philosophy rather
-        # than retrying at new positions. Instances with an explicit
-        # position_xyz are placed as given and NOT included in this
-        # collision check (a known v1 gap -- see module docstring).
-        _membrane_phase_start = phase_start(
-            "Membranes", disable=not self.progressbars or not self.membrane_instances
-        )
-
         # Carbon film (if any) is generated first, even before membrane
         # instance positions are solved -- so membrane auto-placement here,
         # and filament placement further below (`_stamp_filaments`), can
@@ -683,6 +685,19 @@ class TomogramSpecimenGenerator:
                 volume = self._stamp_carbon_film(volume, target_shape, voxel_size)
             carbon_mask = volume > 0
             phase_done("Carbon film", _grid_phase_start, disable=not self.progressbars)
+
+        # Resolve any omitted position_xyz via collision-rejecting random
+        # placement, treating each instance as a bounding sphere (see
+        # _instance_bounding_radius) -- an instance that doesn't fit
+        # without colliding is dropped (never .generate()-called at all,
+        # cheaper than generating first and rejecting after), matching
+        # this module's own "reject and move on" packing philosophy rather
+        # than retrying at new positions. Instances with an explicit
+        # position_xyz are placed as given and NOT included in this
+        # collision check (a known v1 gap -- see module docstring).
+        _membrane_phase_start = phase_start(
+            "Membranes", disable=not self.progressbars or not self.membrane_instances
+        )
 
         to_composite: list[MembraneInstance] = []
         if self.membrane_instances:
@@ -748,6 +763,7 @@ class TomogramSpecimenGenerator:
         # classify_membrane_regions needs the full composite, not
         # per-instance pieces.
         self.transmembrane_placements = []
+        self.placed_membrane_instances = []
         instance_shell_masks: list[tuple[MembraneInstance, torch.Tensor]] = []
         membrane_progress = TqdmProgress(
             transient=True, disable=not self.progressbars or not to_composite
@@ -905,6 +921,7 @@ class TomogramSpecimenGenerator:
                     instance_threshold = 0.05 * local_peak if local_peak > 0 else 0.0
                 shell_mask = (local_volume > instance_threshold).cpu()
                 instance_shell_masks.append((mi, shell_mask))
+                self.placed_membrane_instances.append(mi)
                 mi.generator.volume = None
                 # Dropping the last reference above is not enough by
                 # itself: PyTorch's CUDA caching allocator keeps freed
@@ -957,7 +974,8 @@ class TomogramSpecimenGenerator:
                 )
         self.membrane_labels = membrane_labels
         phase_done(
-            f"Membranes ({len(instance_shell_masks)} instance(s))",
+            f"Membranes ({len(instance_shell_masks)}/"
+            f"{len(self.membrane_instances)} instance(s) placed)",
             _membrane_phase_start,
             disable=not self.progressbars or not self.membrane_instances,
         )
@@ -1094,7 +1112,10 @@ class TomogramSpecimenGenerator:
                     ),
                 )
             phase_done(
-                f"Fetched {len(unique_sources)} PDB structure(s)",
+                # Structures, not spellings: `1fa2` and `1FA2` are one
+                # entry and are fetched once (see canonical_pdb_source).
+                f"Fetched {len({canonical_pdb_source(s) for s in unique_sources})} "
+                "PDB structure(s)",
                 _fetch_phase_start,
                 disable=not self.progressbars,
             )
@@ -2436,7 +2457,8 @@ class TomogramSpecimenGenerator:
                 progress.update(
                     render_task,
                     description=(
-                        f"Placing {spec.pdb_source} ({n_instances} instances, "
+                        f"Placing {spec.pdb_source} ({n_instances} "
+                        f"instance{'' if n_instances == 1 else 's'}, "
                         f"{location}, {role})"
                     ),
                 )

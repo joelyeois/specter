@@ -1126,6 +1126,15 @@ class MembraneGenerator:
                 int(torch.ceil(extent_a[1] / field_spacing_a)),
                 int(torch.ceil(extent_a[0] / field_spacing_a)),
             )
+        # Report the clamp only when __init__'s generation-resolution
+        # decoupling did NOT already report one. When it did, this is the
+        # same decision described twice: both clamps divide the same
+        # physical extent by the same max_field_voxels budget, so the
+        # spacing landed on here is the `_gen_voxel_size` that warning
+        # already named. All the second message adds is a different,
+        # larger byte figure for the grid that was never going to be
+        # built, which reads as a second, worse problem.
+        if n_field_voxels > self.max_field_voxels and not self._needs_upsample:
             warnings.warn(
                 f"MembraneGenerator: coarsening the working field grid. Fully "
                 f"resolving the bilayer would need {n_field_voxels:,} voxels "

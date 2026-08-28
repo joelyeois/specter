@@ -252,6 +252,17 @@ per-particle quantity; `"legacy"` has no equivalent.
   CryoSPARC `.cs` file carries tetrafoil, and silently ignoring it would give
   a plausible image at the wrong transfer function. A zero-valued term is
   accepted, since it has no effect either way.
+- **`torch_ctf` never receives `alpha`, and reads `specimen_absorption`
+  differently.** `BaseImager._init_optics` passes neither to
+  `LegacyAberrationAdapter`, so under that backend amplitude contrast is absent
+  from the transfer function whatever the config sets. The two engines also
+  disagree on what `specimen_absorption=False` means: `Aberration` adds
+  \(-\arccos\alpha\) to \(\chi\), which at \(\alpha=0\) is a
+  \(-\pi/2\) rotation turning a cosine-type transfer into the sine-type one
+  a phase-contrast CTF needs, while `TransferFunction` only zeroes a *nonzero*
+  `amplitude_contrast` and so does nothing at \(\alpha=0\). The `"legacy"`
+  path is unaffected: `_init_optics` passes both to `Aberration`, and every
+  shipped config sets `alpha = 0.1`.
 - **`torch_ctf` has no native-units entry point.** A caller with
   parameters already in torch-ctf's own units, or in RELION's convention,
   can only reach `CTFParameters` by constructing it directly; there is no

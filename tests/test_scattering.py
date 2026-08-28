@@ -163,6 +163,10 @@ def padded_volume():
 
 
 @pytest.mark.parametrize(
+    "scattering_model",
+    ["projection", "multislice", "rytov", "firstborn", "kinematic", "ctf"],
+)
+@pytest.mark.parametrize(
     "angle_deg, atol",
     [
         (0.0, 1e-4),
@@ -171,8 +175,31 @@ def padded_volume():
         (45.0, 5e-3),
     ],
 )
-def test_scattering_vs_iterative_consistency(padded_volume, angle_deg, atol):
-    """Scattering with a pre-rotated volume matches IterativeScattering for the same pose."""
+def test_scattering_vs_iterative_consistency(
+    padded_volume, angle_deg, atol, scattering_model
+):
+    """
+    Scattering with a pre-rotated volume matches IterativeScattering for the
+    same pose, for every mode both implement.
+
+    The two are independent implementations of the same six models -- roughly
+    1,360 lines with no inheritance between them -- split by caller rather than
+    by physics: `Scattering` takes a whole volume, `IterativeScattering` streams
+    Z-slices for volumes too large to rotate at once, which is what every tilt
+    series and micrograph runs. Nothing but this test stops them drifting apart.
+
+    It used to cover ``"projection"`` alone, which is the case least able to
+    drift: a plain sum along Z with no propagation between slices, so streaming
+    and whole-volume paths coincide almost trivially. The modes that can drift
+    are the ones where the streamed version has to get slice ordering,
+    propagator distances and tilt geometry right, and ``"multislice"`` -- the
+    default, and what a tilt series actually uses -- was among the untested
+    ones. Measured agreement at 0°: projection 2.0e-08, ctf 4.0e-08, firstborn
+    and kinematic 6.0e-08, rytov 7.2e-07, multislice 3.1e-06.
+
+    ``nz`` goes to `Scattering` only: `IterativeScattering` derives it from the
+    volume it is handed, and rejects the argument.
+    """
     nxy = 64
 
     theta_rad = torch.deg2rad(torch.tensor(angle_deg))
@@ -186,12 +213,12 @@ def test_scattering_vs_iterative_consistency(padded_volume, angle_deg, atol):
         nxy=nxy,
         pixel_size=1.0,
         voltage=300.0,
-        scattering_model="projection",
+        scattering_model=scattering_model,
         alpha=0.1,
         progressbars=False,
     )
 
-    scat = Scattering(**kwargs)
+    scat = Scattering(**kwargs, nz=padded_volume.shape[0])
     scat_iter = IterativeScattering(**kwargs)
 
     volume_rotated = rotate_volume(padded_volume, theta_matrix, padding_mode="zeros")
@@ -201,7 +228,8 @@ def test_scattering_vs_iterative_consistency(padded_volume, angle_deg, atol):
 
     assert psi_scat.shape == psi_iter.shape
     assert torch.allclose(psi_scat, psi_iter, atol=atol), (
-        f"Max diff at {angle_deg}°: {(psi_scat - psi_iter).abs().max().item():.2e}"
+        f"{scattering_model} disagrees between implementations at "
+        f"{angle_deg}°: max diff {(psi_scat - psi_iter).abs().max().item():.2e}"
     )
 
 

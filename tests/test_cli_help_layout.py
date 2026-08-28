@@ -89,6 +89,68 @@ def test_micrograph_toml_tables_mirror_help_panels() -> None:
     ]
 
 
+def test_tomogram_toml_tables_mirror_help_panels() -> None:
+    """Same rule for `build tomogram`. Its specimen contents are arrays of
+    tables with no command-line spelling and so no panel; they sit where
+    their generation stage runs, between the Specimen and Picks panels."""
+    with open(CONFIGS_DIR / "tomogram.toml", "rb") as f:
+        tables = list(tomllib.load(f))
+    assert tables == [
+        "specimen",
+        "targets",
+        "filler",
+        "membrane",
+        "membrane_transmembrane_specs",
+        "membrane_settings",
+        "filaments",
+        "microtubules",
+        "carbon_film",
+        "beads",
+        "picks",
+        "compute",
+        "output",
+        "job",
+        "advanced",
+    ]
+    assert [title for title, _ in _TOMOGRAM_GROUPS] == [
+        "Specimen",
+        "Filler tables",
+        "Membrane",
+        "Filaments",
+        "Picks & segmentation",
+        "Compute",
+        "Output & job tracking",
+        "Advanced",
+    ]
+
+
+@pytest.mark.parametrize(
+    "filename,groups",
+    [("micrograph.toml", _MICROGRAPH_GROUPS), ("tomogram.toml", _TOMOGRAM_GROUPS)],
+)
+def test_advanced_table_holds_exactly_the_advanced_panel(
+    filename: str, groups: list
+) -> None:
+    """What [advanced] promises is that everything above it is a decision a
+    first run makes, so a field belongs in that table if and only if --help
+    puts it in the Advanced panel. Only fields the config actually sets are
+    checked: a commented-out line takes its default either way."""
+    with open(CONFIGS_DIR / filename, "rb") as f:
+        raw = tomllib.load(f)
+    advanced = {
+        name for title, names in groups if title == "Advanced" for name in names
+    }
+    for table, contents in raw.items():
+        if not isinstance(contents, dict):
+            continue  # an array of tables, e.g. [[membrane]] -- TOML-only
+        for key in contents:
+            assert (key in advanced) == (table == "advanced"), (
+                f"{filename}: {key!r} is set in [{table}] but "
+                f"{'belongs in' if key in advanced else 'is not in'} "
+                "the Advanced panel"
+            )
+
+
 def test_shown_defaults_are_not_machine_specific() -> None:
     """`pdb_cache_dir`'s real default is computed from $HOME, so rendering it
     verbatim printed one developer's absolute path into every --help and into

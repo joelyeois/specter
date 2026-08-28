@@ -5,6 +5,11 @@
 # The notebook itself only syncs tilt_series_generator_modular.toml's
 # voxel_size to this file's own voxel_size below -- everything else about the
 # specimen is edited here, not in the notebook.
+#
+# The tables below appear in the same order as the panels in
+# `specter build tomogram --help`, ending with [advanced]; the specimen's
+# contents ([[membrane]], [[filaments]], ...) have no command-line spelling
+# and sit where their generation stage runs.
 
 
 [specimen]
@@ -12,14 +17,8 @@ target_shape = [128, 256, 256]      # (Z, Y, X) voxels -- small/fast; raise for 
 voxel_size = 10.0                        # A/voxel -- notebook syncs tilt_series_generator_modular.toml's voxel_size to this
 clip_axes = [true, true, true]      # (z, y, x) -- True lets instances poke past that wall
 filler_occupancy_fraction = 1.0
-# packing_backend = "shape"      # default; "sphere" is faster but ~3x less dense
-# packing_voxel_size = 2.0       # collide on a coarser grid than the render
 # There is no `gap`: macromolecules in crowded cytoplasm contact each other,
 # so placed instances are only required not to overlap.
-# pdb_cache_dir = "~/.cache/specter/pdb"   # default; set $SPECTER_PDB_CACHE to move it,
-                                           # e.g. onto scratch. Downloads only --
-                                           # your own files are read where they are.
-# seed = 11                         # uncomment for reproducible packing
 
 [targets]
 targets = [
@@ -31,11 +30,6 @@ targets = [
     { pdb_source = "6N4V", n_copies = 15 },  # virus-like particle
 ]
 
-# Shtyrov atom typing needs the Monomer Library for its H-containing species;
-# without one ~44% of a protein falls back to per-element Peng. Unset, the
-# $CLIBD_MON variable applies. See docs/installation.md.
-# monomer_library_path = "~/monomers"
-
 [filler]
 filler = [
     { pdb_source = "1fa2", location = "lumen" },  # beta amylase, as an example lumen filler
@@ -46,7 +40,7 @@ target_parameterization = "shtyrov"
 
 # No explicit size range here (unlike configs/tomogram.toml's production-scale
 # entries) -- omitting it lets each instance auto-cap its own draw to a
-# fraction of [specimen]'s own target_shape box below (see
+# fraction of [specimen]'s own target_shape box above (see
 # _cap_membrane_auto_size_ranges in specter.pipelines._tomogram).
 [[membrane]]
 shape_backend = "spherical_harmonics"
@@ -71,7 +65,7 @@ membrane_region_density_threshold = 0.05
 membrane_min_transmembrane_spacing = 40.0
 
 # Filaments -- optional. Either hand-write [[filaments]] entries (FilamentSpec
-# kwargs) or set `actin = true` for the built-in ACTIN_SPEC preset. Uncomment to add:
+# kwargs) or set `actin = true` for the built-in ACTIN_SPEC preset.
 [[filaments]]
 code = "1J6Z"          # F-actin monomer
 step = 27.3            # axial rise per monomer, A
@@ -91,7 +85,7 @@ n_protofilaments = 13   # 13 is the canonical in-cell lattice
 # length = 6000.0       # A; omit to span the volume diagonal
 # bend_radius = 30000.0 # A; omit for a straight, thermally bent tube
 
-# Carbon support film -- optional, at most one [[carbon_film]] table. Uncomment to add:
+# Carbon support film -- optional, at most one [[carbon_film]] table.
 [[carbon_film]]
 hole_radius = 6000.0          # A (0.6 micron, Quantifoil R1.2/1.3)
 edge_fraction = [0.02, 0.05]  # fraction of the frame that ends up carbon
@@ -99,16 +93,11 @@ edge_side = "random"          # "left" | "right" | "top" | "bottom" | "random"
 
 # Gold fiducial beads -- one [[beads]] table per population. `radius` takes a
 # single number or a [low, high] pair drawn per bead; real colloidal gold is
-# not monodisperse, so a range is the more faithful default.
+# not monodisperse, so a range is the more faithful default. How irregular
+# each bead's boundary is, is bead_roughness in [advanced].
 [[beads]]
 radius = [80.0, 120.0]        # A -- i.e. 16-24 nm diameter
 n_copies = 5
-
-[bead_settings]
-# How irregular each fiducial's boundary is, as an RMS fraction of its radius.
-# One number, or a [low, high] pair drawn per bead so the population mixes
-# near-round and misshapen particles. 0.0 gives clean spheres.
-bead_roughness = [0.0, 0.2]
 
 [picks]
 write_picks = true
@@ -120,3 +109,32 @@ device = "cuda"                     # cpu | cuda | cuda:0 | 0,1,2 | auto
 accumulator_device = "auto"
 render_workers = "auto"
 render_chunk_size = 64
+
+# --------------------------------------------------------------------------
+# Advanced. Mirrors the --help panel of the same name: a commented-out line
+# means the field keeps its TomogramConfig default.
+# --------------------------------------------------------------------------
+[advanced]
+
+# --- Structure handling ---
+# pdb_cache_dir = "~/.cache/specter/pdb"   # default; set $SPECTER_PDB_CACHE to move it,
+                                           # e.g. onto scratch. Downloads only --
+                                           # your own files are read where they are.
+#
+# Shtyrov atom typing needs the Monomer Library for its H-containing species;
+# without one ~44% of a protein falls back to per-element Peng. Unset, the
+# $CLIBD_MON variable applies. See docs/installation.md.
+# monomer_library_path = "~/monomers"
+
+# --- Protein packing ---
+# packing_backend = "shape"      # default; "sphere" is faster but ~3x less dense
+# packing_voxel_size = 2.0       # collide on a coarser grid than the render
+
+# --- Gold fiducials ---
+# How irregular each fiducial's boundary is, as an RMS fraction of its radius.
+# One number, or a [low, high] pair drawn per bead so the population mixes
+# near-round and misshapen particles. 0.0 gives clean spheres.
+bead_roughness = [0.0, 0.2]
+
+# --- Reproducibility ---
+# seed = 11                      # uncomment for reproducible packing

@@ -1,75 +1,26 @@
 # Canonical default config for `specter build tomogram`.
-# Full field docs: docs/user-guide/build-tomogram.md
-# (or run `specter build tomogram --help`).
+# Any field can be overridden on the command line, e.g.:
+#   specter build tomogram --config configs/tomogram.toml --n_tomograms 4
 #
-# Every flag on the CLI overrides the matching field below.
-
-
-# =============================================================================
-# GEOMETRY & PACKING
-# =============================================================================
+# The tables below appear in the same order as the panels in
+# `specter build tomogram --help`, ending with [advanced]. Everything a first
+# run has to decide is above that table; everything below it has a default
+# that is usually right. Table names are organisation only -- the loader
+# flattens them into one namespace before validating fields.
+#
+# The specimen's contents are arrays of tables ([[membrane]], [[filaments]],
+# [[beads]], ...) with no command-line spelling, so they live only here.
+# Full field docs: docs/user-guide/build-tomogram.md.
 
 [specimen]
 target_shape = [300, 1200, 1200]    # (Z, Y, X) voxels
-voxel_size = 5.0                        # A/voxel
+voxel_size = 5.0                    # A/voxel
 clip_axes = [true, true, true]      # (z, y, x) -- True lets instances poke past that wall
 filler_occupancy_fraction = 1.0
-# packing_backend = "shape"      # default; "sphere" is faster but ~3x less dense
-# packing_voxel_size = 2.0       # collide on a coarser grid than the render
 # There is no `gap`: macromolecules in crowded cytoplasm contact each other,
 # so placed instances are only required not to overlap.
-# pdb_cache_dir = "~/.cache/specter/pdb"   # default; set $SPECTER_PDB_CACHE to move it,
-                                           # e.g. onto scratch. Downloads only --
-                                           # your own files are read where they are.
-# seed = 11                         # uncomment for reproducible packing
 
-
-# =============================================================================
-# OUTPUT
-# =============================================================================
-
-[output]
-output_dir = "tomograms"
-filename = "tomogram"
-
-# Job tracking (opt-in) -- set project or job_id to route output through
-# specter.jobs instead of output_dir/filename above: the directory becomes
-# output_dir/[project/]tomograms/J00N/, numbered, with a job.json
-# recording every parameter, the git commit and the run's status. Neither
-# is required -- leaving both unset keeps the flat behavior above exactly.
-# When chained via --tomogram_config on `specter simulate tiltseries`,
-# leaving this unset while tracking the tiltseries run cascades that
-# project here automatically -- two separate, linked jobs from one call.
-[job]
-# project = "my-project"
-# job_id = "J001"
-# Tracked runs read output_dir above as the ROOT of the numbered tree
-# rather than as the folder files land in directly. Leave output_dir
-# unset to default that root to the project root found by walking up
-# from cwd for an existing .specter marker, like git finds .git.
-
-[picks]
-write_picks = true
-annotation_version = "1.0"
-write_segmentation = true
-
-
-# =============================================================================
-# COMPUTE
-# =============================================================================
-
-[compute]
-device = "cuda"                     # cpu | cuda | cuda:0 | 0,1,2
-accumulator_device = "auto"
-render_workers = "auto"
-render_chunk_size = 64
-
-
-# =============================================================================
-# CONTENTS -- TARGET SPECIES
-# Exact-count, placed first, written to picks as ground truth.
-# =============================================================================
-
+# Target species: exact-count, placed first, written to picks as ground truth.
 [targets]
 targets = [
     { pdb_source = "7VD8", n_copies = 15 },  # apoferritin
@@ -80,13 +31,9 @@ targets = [
     { pdb_source = "6N4V", n_copies = 15 },  # virus-like particle
 ]
 
-
-# =============================================================================
-# CONTENTS -- FILLER SPECIES
-# Ratio-weighted background crowding, placed after targets, around them.
-# Hand-listed species and the bundled reference tables are additive.
-# =============================================================================
-
+# Filler species: ratio-weighted background crowding, placed after targets,
+# around them. Hand-listed species and the bundled reference tables are
+# additive.
 [filler]
 filler = [
     { pdb_source = "1fa2", location = "lumen" },  # beta amylase, as an example lumen filler
@@ -102,31 +49,11 @@ filler_from_pei2016 = true
 
 # Atomic scattering-factor parameterization for the targets/filler protein-fill
 # step specifically (applies regardless of whether any [[membrane]] is set).
+# See [advanced] for the hydrogens Shtyrov typing needs.
 target_parameterization = "shtyrov"
 
-# Shtyrov types atoms by their bonded neighbours, and 20 of its 42 species name a
-# hydrogen -- which depositions omit. Install the Monomer Library and point
-# $CLIBD_MON at it to supply them; without it ~44% of a protein falls back to
-# per-element Peng. See docs/installation.md.
-#
-# The variable is not the only way in: set monomer_library_path below to record
-# the library in this config instead. Prefer that when a run has to be
-# reproducible from its config alone -- unlike pdb_cache_dir, this choice
-# changes the rendered potential, so a config omitting it does not fully
-# describe what it produced. Unset, $CLIBD_MON still applies.
-# monomer_library_path = "~/monomers"
-#
-# The default, "auto", needs no setting: it keeps hydrogens the file already
-# carries and adds them only when it has none.
-# readd_hydrogens = "auto"     # auto | true | false
-
-
-# =============================================================================
-# CONTENTS -- MEMBRANES
-# One [[membrane]] table per population. Omit them all for a membrane-free
-# volume; the whole box is then one cytosol region.
-# =============================================================================
-
+# Membranes. One [[membrane]] table per population. Omit them all for a
+# membrane-free volume; the whole box is then one cytosol region.
 [[membrane]]
 shape_backend = "spherical_harmonics"
 bilayer_thickness = 30.0
@@ -148,14 +75,15 @@ n_copies = 40        # per membrane instance; a request, not a guarantee
 
 [membrane_settings]
 # membrane_region_density_threshold = 0.05
+# membrane_region_max_passes = 300
 membrane_min_transmembrane_spacing = 40.0
 
-
-# =============================================================================
-# CONTENTS -- FILAMENTS, MICROTUBULES, CARBON FILM, GOLD FIDUCIALS
-# All are ON here, since a real tomogram usually has all of them.
-# Delete or comment out a block to leave that feature out.
-# =============================================================================
+# --------------------------------------------------------------------------
+# Filaments, microtubules, carbon film and gold fiducials. All are ON here,
+# since a real tomogram usually has all of them. Delete or comment out a
+# block to leave that feature out. Only the --actin preset toggle has a
+# command-line spelling; the rest are TOML-only.
+# --------------------------------------------------------------------------
 
 # Filaments. Either hand-write [[filaments]] entries (FilamentSpec kwargs), as
 # below, or set `actin = true` for the built-in ACTIN_SPEC preset.
@@ -189,13 +117,80 @@ edge_side = "random"          # "left" | "right" | "top" | "bottom" | "random"
 
 # Gold fiducial beads -- one [[beads]] table per population. `radius` takes a
 # single number or a [low, high] pair drawn per bead; real colloidal gold is
-# not monodisperse, so a range is the more faithful default.
+# not monodisperse, so a range is the more faithful default. How irregular
+# each bead's boundary is, is bead_roughness in [advanced].
 [[beads]]
 radius = [80.0, 120.0]        # A -- i.e. 16-24 nm diameter
 n_copies = 20
 
-[bead_settings]
+[picks]
+write_picks = true
+annotation_version = "1.0"
+write_segmentation = true
+
+[compute]
+device = "cuda"                     # cpu | cuda | cuda:0 | 0,1,2
+accumulator_device = "auto"
+render_workers = "auto"
+render_chunk_size = 64
+
+[output]
+output_dir = "tomograms"
+filename = "tomogram"
+
+# Job tracking (opt-in) -- set project or job_id to route output through
+# specter.jobs instead of output_dir/filename above: the directory becomes
+# output_dir/[project/]tomograms/J00N/, numbered, with a job.json
+# recording every parameter, the git commit and the run's status. Neither
+# is required -- leaving both unset keeps the flat behavior above exactly.
+# When chained via --tomogram_config on `specter simulate tiltseries`,
+# leaving this unset while tracking the tiltseries run cascades that
+# project here automatically -- two separate, linked jobs from one call.
+[job]
+# project = "my-project"
+# job_id = "J001"
+# Tracked runs read output_dir above as the ROOT of the numbered tree
+# rather than as the folder files land in directly. Leave output_dir
+# unset to default that root to the project root found by walking up
+# from cwd for an existing .specter marker, like git finds .git.
+
+# --------------------------------------------------------------------------
+# Advanced. Mirrors the --help panel of the same name: a commented-out line
+# means the field keeps its TomogramConfig default.
+# --------------------------------------------------------------------------
+[advanced]
+
+# --- Structure handling ---
+# pdb_cache_dir = "~/.cache/specter/pdb"   # default; set $SPECTER_PDB_CACHE to move it,
+                                           # e.g. onto scratch. Downloads only --
+                                           # your own files are read where they are.
+#
+# Shtyrov types atoms by their bonded neighbours, and 20 of its 42 species name a
+# hydrogen -- which depositions omit. Install the Monomer Library and point
+# $CLIBD_MON at it to supply them; without it ~44% of a protein falls back to
+# per-element Peng. See docs/installation.md.
+#
+# The variable is not the only way in: set monomer_library_path below to record
+# the library in this config instead. Prefer that when a run has to be
+# reproducible from its config alone -- unlike pdb_cache_dir, this choice
+# changes the rendered potential, so a config omitting it does not fully
+# describe what it produced. Unset, $CLIBD_MON still applies.
+# monomer_library_path = "~/monomers"
+#
+# The default, "auto", needs no setting: it keeps hydrogens the file already
+# carries and adds them only when it has none.
+# readd_hydrogens = "auto"     # auto | true | false
+
+# --- Protein packing ---
+# packing_backend = "shape"      # default; "sphere" is faster but ~3x less dense
+# packing_max_retries = 1500     # trial positions per instance, "shape" only
+# packing_voxel_size = 2.0       # collide on a coarser grid than the render
+
+# --- Gold fiducials ---
 # How irregular each fiducial's boundary is, as an RMS fraction of its radius.
 # One number, or a [low, high] pair drawn per bead so the population mixes
 # near-round and misshapen particles. 0.0 gives clean spheres.
 bead_roughness = [0.0, 0.2]
+
+# --- Reproducibility ---
+# seed = 11                      # uncomment for reproducible packing

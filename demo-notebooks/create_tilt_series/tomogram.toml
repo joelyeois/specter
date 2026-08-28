@@ -1,6 +1,13 @@
 # Small/fast specimen so this notebook's specimen-building step finishes in
 # a couple of minutes. Scale target_shape/voxel_size/n_copies up for production
-# runs -- see configs/tomogram.toml for full/canonical defaults.
+# runs -- see configs/tomogram.toml for full/canonical defaults, whose table
+# order (the panels of `specter build tomogram --help`, ending in [advanced])
+# this file follows.
+
+[specimen]
+target_shape = [64, 160, 160]   # (Z, Y, X) voxels -- modest, finishes quickly
+voxel_size = 5.0                    # Å/voxel
+filler_occupancy_fraction = 0.0
 
 [targets]
 targets = [
@@ -12,24 +19,22 @@ targets = [
     { pdb_source = "1FA2", n_copies = 1 },  # beta-amylase
 ]
 
-# Shtyrov atom typing needs the Monomer Library for its H-containing species;
-# without one ~44% of a protein falls back to per-element Peng. Unset, the
-# $CLIBD_MON variable applies. See docs/installation.md.
-# monomer_library_path = "~/monomers"
+[filler]
+# generic cytosolic filler; off by default so this notebook finishes
+# quickly. Uncomment to enable:
+# filler_from_pei2016 = true
 
 [[membrane]]
 shape_backend = "spherical_harmonics"
 sh_axes = [80.0, 80.0, 80.0]
 
-[specimen]
-# generic cytosolic filler; off by default so this notebook finishes
-# quickly. Uncomment to enable:
-# filler_from_pei2016 = true
-target_shape = [64, 160, 160]   # (Z, Y, X) voxels -- modest, finishes quickly
-voxel_size = 5.0                    # Å/voxel
-filler_occupancy_fraction = 0.0
-seed = 11
-
 [output]
 output_dir = "tomograms"
 filename = "tilt_series_specimen"
+
+[advanced]
+# Shtyrov atom typing needs the Monomer Library for its H-containing species;
+# without one ~44% of a protein falls back to per-element Peng. Unset, the
+# $CLIBD_MON variable applies. See docs/installation.md.
+# monomer_library_path = "~/monomers"
+seed = 11

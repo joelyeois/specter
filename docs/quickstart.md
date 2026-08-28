@@ -120,6 +120,11 @@ placements. `configs/tomogram.toml` looks like this:
 ```toml
 # Canonical default config for `specter build tomogram`.
 
+[specimen]
+target_shape = [300, 1200, 1200]  # (Z, Y, X) voxels
+voxel_size = 5.0                       # Å/voxel
+filler_occupancy_fraction = 0.5    # bare-sphere volume fraction budget for filler, per region
+
 [targets]
 targets = [
     { pdb_source = "1bxn", n_copies = 20 },  # cytosolic RNA polymerase II complex (large)
@@ -132,11 +137,6 @@ filler = [
 
 [[membrane]]
 shape_backend = "spherical_harmonics"   # omit [[membrane]] entirely for no membranes
-
-[specimen]
-target_shape = [300, 1200, 1200]  # (Z, Y, X) voxels
-voxel_size = 5.0                       # Å/voxel
-filler_occupancy_fraction = 0.5    # bare-sphere volume fraction budget for filler, per region
 
 # ... see the full file: configs/tomogram.toml
 ```

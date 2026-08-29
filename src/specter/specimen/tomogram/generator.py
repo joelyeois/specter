@@ -211,6 +211,7 @@ from ._helpers import (
     _diagnose_zero_placements,
     _downsample_mask_maxpool,
     _insert_instance_labels,
+    _insert_local_labels,
     _insert_shell_label,
     _insert_volume_max,
     _instance_bounding_radius,
@@ -461,6 +462,15 @@ class TomogramSpecimenGenerator:
         `membrane_labels == i+1` is instance `i`'s own shell (first-write-
         wins where instances overlap, see `_insert_shell_label`), shape
         `target_shape`, dtype int32. Set after `generate()` runs.
+
+        This is the BILAYER only. Voxels where an embedded transmembrane
+        protein displaced the lipid are excluded here and carry that
+        protein's own id in `instance_labels` instead, so the two volumes
+        partition the membrane rather than double-claiming it. The
+        displacement boundary is not a second cutoff invented for
+        labelling: it is the same one
+        `MembraneGenerator.transmembrane_occupancy_fraction` already uses
+        to decide where protein density REPLACES lipid density.
     placed_membrane_instances : list of MembraneInstance
         The subset of `membrane_instances` actually composited into the
         volume, set after `generate()` runs. `membrane_instances` is the
@@ -475,11 +485,17 @@ class TomogramSpecimenGenerator:
     placements : list of TomogramPlacement
         Every placed cytosolic/lumen instance, set after `generate()` runs.
     instance_labels : torch.Tensor
-        Per-instance integer label volume for cytosol/lumen PROTEIN
-        instances AND, when `filament_specs` is non-empty, filament monomer
-        instances too (a continuation of the same instance-id counter, not
-        a separate label space -- see module docstring), shape
-        `target_shape`, dtype int32. Set after `generate()` runs.
+        Per-instance integer label volume for every PROTEIN instance:
+        transmembrane proteins first, then filament monomers (when
+        `filament_specs` is non-empty), gold beads, and the cytosol/lumen
+        fill -- all on one continuous instance-id counter, not separate
+        label spaces (see module docstring). Shape `target_shape`, dtype
+        int32. Set after `generate()` runs.
+
+        Transmembrane proteins are ordinary instances here despite being
+        embedded in a membrane: a consumer training per-instance protein
+        segmentation would otherwise find them plainly visible in the
+        density and absent from its target.
     filament_instances : list of FilamentInstance
         Every placed filament monomer, from `specimen.filament.
         place_filaments` (`position_xyz` in the same corner-relative,
@@ -686,6 +702,17 @@ class TomogramSpecimenGenerator:
             carbon_mask = volume > 0
             phase_done("Carbon film", _grid_phase_start, disable=not self.progressbars)
 
+        # Transmembrane proteins are stamped into this during the membrane
+        # loop below, so it is allocated before that loop rather than after
+        # it: they are protein instances like any other, and belong in the
+        # same id space as filaments, beads and the cytosol/lumen fill (see
+        # module docstring). They therefore take the FIRST ids, and
+        # everything placed later avoids them through `obstacle_mask`.
+        instance_labels = torch.zeros(
+            target_shape, dtype=torch.int32, device=self.accumulator_device
+        )
+        next_instance_id = 1
+
         # Resolve any omitted position_xyz via collision-rejecting random
         # placement, treating each instance as a bounding sphere (see
         # _instance_bounding_radius) -- an instance that doesn't fit
@@ -791,12 +818,51 @@ class TomogramSpecimenGenerator:
                         stacklevel=2,
                     )
                     continue
+                # The bilayer's own peak, read BEFORE place_transmembrane
+                # inserts protein density. A protein template's peak is
+                # typically several times a smoothed bilayer's, so taking
+                # this afterwards would inflate the shell threshold below
+                # and erode the very thing it is meant to outline.
+                bare_bilayer = mi.generator.volume
+                assert bare_bilayer is not None  # generate() just ran
+                bare_peak = float(bare_bilayer.max())
                 tm_placements = mi.generator.place_transmembrane(
                     min_spacing_a=self.min_transmembrane_spacing
                 )
                 offset = torch.tensor(mi.position_xyz, dtype=torch.float32)
                 for tp in tm_placements:
                     tp.center_xyz = tp.center_xyz + offset
+
+                # A membrane instance may extend past the tomogram walls
+                # (clip_axes), and `_insert_volume_max` clips the part that
+                # does -- so a protein embedded out there contributes no
+                # density and gets no instance label. Drop its ground-truth
+                # entry too, rather than shipping a pick at coordinates the
+                # volume does not cover. Same reasoning, and the same
+                # center-point granularity, as the carbon-film drop below.
+                if tm_placements:
+                    half = torch.tensor(
+                        [box[2] / 2, box[1] / 2, box[0] / 2], dtype=torch.float32
+                    )
+                    centers = torch.stack([tp.center_xyz for tp in tm_placements])
+                    outside = (centers.abs() >= half).any(dim=1)
+                    n_outside = int(outside.sum())
+                    if n_outside:
+                        warnings.warn(
+                            f"TomogramSpecimenGenerator: dropped {n_outside} "
+                            "transmembrane protein placement(s) that fell "
+                            "outside the tomogram box, on the part of a "
+                            "membrane instance clipped by the volume walls "
+                            "(no density was rendered for them, so a pick "
+                            "there would claim a particle the volume does "
+                            "not contain).",
+                            stacklevel=2,
+                        )
+                        tm_placements = [
+                            tp
+                            for tp, drop in zip(tm_placements, outside.tolist())
+                            if not drop
+                        ]
 
                 local_volume = mi.generator.volume
                 assert local_volume is not None
@@ -833,6 +899,15 @@ class TomogramSpecimenGenerator:
                             local_volume[src] = local_volume[src] * (~forbidden).to(
                                 local_volume.dtype
                             )
+                            # Same clip on the protein labels, so a
+                            # transmembrane instance whose density was just
+                            # removed doesn't keep a ground-truth label
+                            # sitting on carbon.
+                            tm_labels_clip = mi.generator.transmembrane_labels
+                            if tm_labels_clip is not None:
+                                tm_labels_clip[src] = tm_labels_clip[src] * (
+                                    ~forbidden
+                                ).to(tm_labels_clip.dtype)
 
                     # `place_transmembrane` (above) already baked these
                     # placements' own density into local_volume before this
@@ -917,9 +992,34 @@ class TomogramSpecimenGenerator:
                 if self.region_density_threshold is not None:
                     instance_threshold = self.region_density_threshold
                 else:
-                    local_peak = float(local_volume.max())
-                    instance_threshold = 0.05 * local_peak if local_peak > 0 else 0.0
-                shell_mask = (local_volume > instance_threshold).cpu()
+                    instance_threshold = 0.05 * bare_peak if bare_peak > 0 else 0.0
+                shell_mask = local_volume > instance_threshold
+                # The membrane label is the BILAYER, not the bilayer plus
+                # whatever is embedded in it. `_insert_blend` has already
+                # decided which voxels the protein displaced lipid from --
+                # reuse that decision rather than making a second, looser
+                # one here. The proteins themselves become ordinary protein
+                # instances just below, so nothing goes unlabelled: the two
+                # volumes partition the membrane between them.
+                tm_labels = mi.generator.transmembrane_labels
+                if tm_labels is not None:
+                    shell_mask = shell_mask & (tm_labels == 0)
+                    instance_labels = _insert_local_labels(
+                        instance_labels,
+                        tm_labels,
+                        id_offset=next_instance_id - 1,
+                        position_xyz=mi.position_xyz,
+                        voxel_size=voxel_size,
+                    )
+                    # Reserve from the count `place_transmembrane` actually
+                    # LABELLED (its own `placements`, ids 1..n), not from
+                    # `tm_placements` -- the carbon block above may have
+                    # pruned that list, and reserving the short count would
+                    # let the next membrane's offset collide with this
+                    # one's higher ids.
+                    next_instance_id += len(mi.generator.placements)
+                    mi.generator.transmembrane_labels = None
+                shell_mask = shell_mask.cpu()
                 instance_shell_masks.append((mi, shell_mask))
                 self.placed_membrane_instances.append(mi)
                 mi.generator.volume = None
@@ -987,11 +1087,6 @@ class TomogramSpecimenGenerator:
         # is worth avoiding explicitly rather than waiting for generate()
         # to return.
         del instance_shell_masks
-
-        instance_labels = torch.zeros(
-            target_shape, dtype=torch.int32, device=self.accumulator_device
-        )
-        next_instance_id = 1
 
         # Filaments (then gold fiducial beads, see below) render right
         # after membranes, BEFORE cytosol/lumen protein packing (see module

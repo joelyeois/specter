@@ -140,6 +140,13 @@ _UPSAMPLE_CHUNK_VOXELS = 100_000_000
 _FIELD_VRAM_BUDGET_BYTES = 6 * 1024**3
 _FIELD_RAM_BUDGET_BYTES = 12 * 1024**3
 _FIELD_VRAM_BYTES_PER_VOXEL = 37  # cupy path only
+#: Default fraction of the bilayer's own peak density above which a
+#: transmembrane protein is treated as having displaced the lipid it sits
+#: in -- see `MembraneGenerator.transmembrane_occupancy_fraction`. Named
+#: because `_insert_blend` also falls back to it for LABELLING when
+#: displacement is switched off entirely.
+_DEFAULT_TRANSMEMBRANE_OCCUPANCY_FRACTION = 0.05
+
 _FIELD_BYTES_PER_VOXEL = 134  # host RSS, scipy fallback (96 with cupy)
 
 #: Working-grid voxel ceiling for field generation: past this, `generate()`
@@ -718,7 +725,7 @@ class MembraneGenerator:
         bilayer_layer_sigma_a: float = 1.25,
         membrane_scale_range: tuple[float, float] = (0.5, 1.0),
         transmembrane_specs: list[TransmembraneSpec] | None = None,
-        transmembrane_occupancy_fraction: float = 0.05,
+        transmembrane_occupancy_fraction: float = _DEFAULT_TRANSMEMBRANE_OCCUPANCY_FRACTION,
         pdb_cache_dir: str = DEFAULT_PDB_CACHE_DIR,
         readd_hydrogens: bool | str = "auto",
         monomer_library_path: str | None = None,
@@ -1036,6 +1043,13 @@ class MembraneGenerator:
         self.field: MembraneField | None = None
         self.profile: BilayerProfile | None = None
         self.volume: torch.Tensor | None = None
+        # Which voxels each transmembrane protein displaced lipid from,
+        # 1-based and local to this membrane; 0 is lipid or empty. Set by
+        # `place_transmembrane`, and the basis for BOTH ground-truth
+        # labels: the proteins are these voxels, the bilayer is the rest of
+        # the rendered shell. None until `place_transmembrane` runs (and
+        # when there are no transmembrane specs at all).
+        self.transmembrane_labels: torch.Tensor | None = None
         self.placements: list[TransmembranePlacement] = []
         self.membrane_scale: float | None = None
         self.clipped_at_boundary: bool | None = None
@@ -1287,6 +1301,15 @@ class MembraneGenerator:
         if self.seed is not None:
             chooser.manual_seed(self.seed)
 
+        # int16, not int32: these ids are LOCAL to this membrane (1..n_sites,
+        # a few hundred at most), remapped onto the shared counter by the
+        # caller. Halves the footprint of an array that is the same shape as
+        # `self.volume`, which for a decoupled instance is already hundreds
+        # of MB (see max_field_voxels).
+        self.transmembrane_labels = torch.zeros(
+            self.volume.shape, dtype=torch.int16, device=self.volume.device
+        )
+
         placements: list[TransmembranePlacement] = []
         for i in range(sites_xyz.shape[0]):
             chosen_idx = int(torch.multinomial(weights, 1, generator=chooser).item())
@@ -1299,7 +1322,7 @@ class MembraneGenerator:
             rotated = rotate_volume(template, theta, padding_mode="zeros")[0]
 
             center_zyx = self._physical_to_voxel_index(sites_xyz[i])
-            self._insert_blend(rotated, center_zyx)
+            self._insert_blend(rotated, center_zyx, instance_id=i + 1)
 
             placements.append(
                 TransmembranePlacement(
@@ -1354,13 +1377,27 @@ class MembraneGenerator:
         return idx_zyx.round().long()
 
     def _insert_blend(
-        self, local_density: torch.Tensor, center_zyx: torch.Tensor
+        self,
+        local_density: torch.Tensor,
+        center_zyx: torch.Tensor,
+        instance_id: int | None = None,
     ) -> None:
         """
         Insert a transmembrane protein template, replacing (not adding to)
         the membrane's own density wherever the template is occupied -- see
         `transmembrane_occupancy_fraction`'s own docstring for why plain
         addition double-counts density and how this threshold is chosen.
+
+        Parameters
+        ----------
+        local_density : torch.Tensor
+            The rotated protein template.
+        center_zyx : torch.Tensor
+            Where to insert it, in voxel indices.
+        instance_id : int, optional
+            When given (and `transmembrane_labels` has been allocated),
+            stamp this id into `transmembrane_labels` wherever the protein
+            displaced lipid. Default None: density only, no labelling.
         """
         assert self.volume is not None
         assert self.profile is not None
@@ -1372,9 +1409,31 @@ class MembraneGenerator:
         dst, src = bounds
         protein = local_density[src].to(self.volume.device)
 
-        threshold = self.transmembrane_occupancy_fraction * float(
-            self.profile.psi.max()
-        )
+        peak = float(self.profile.psi.max())
+        threshold = self.transmembrane_occupancy_fraction * peak
+
+        # Ground truth for "this voxel is protein, not lipid" is the same
+        # quantity the density blend below already uses: the smoothstep
+        # weight reaches 0.5 exactly where `protein == threshold`, so that
+        # is the displacement boundary, not a second independently-tuned
+        # cutoff. `transmembrane_occupancy_fraction = 0` means the protein
+        # coexists with lipid rather than displacing it -- there is then no
+        # displacement region, but the protein still OCCUPIES voxels and
+        # still needs a label, so fall back to the default fraction for
+        # labelling alone rather than silently labelling nothing.
+        if instance_id is not None and self.transmembrane_labels is not None:
+            label_threshold = (
+                threshold
+                if threshold > 0
+                else _DEFAULT_TRANSMEMBRANE_OCCUPANCY_FRACTION * peak
+            )
+            claimed = self.transmembrane_labels[dst]
+            self.transmembrane_labels[dst] = torch.where(
+                (protein > label_threshold) & (claimed == 0),
+                torch.full_like(claimed, instance_id),
+                claimed,
+            )
+
         if threshold <= 0:
             self.volume[dst] += protein
             return

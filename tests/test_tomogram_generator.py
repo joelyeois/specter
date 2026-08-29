@@ -387,6 +387,172 @@ def test_insert_shell_label_overlap_first_write_wins():
     assert 1 in unique_ids
 
 
+def test_insert_local_labels_offsets_ids_and_keeps_the_first_writer():
+    """Local per-membrane ids are remapped onto the shared counter.
+
+    Each membrane numbers its own transmembrane proteins 1..n, so they only
+    become globally unique once shifted by the counter's value at the time
+    that membrane's block was reserved. Under-reserving (e.g. counting a
+    carbon-pruned list rather than everything that was labelled) would let
+    the next membrane's ids land on top of this one's, and first-write-wins
+    would silently drop them.
+    """
+    from specter.specimen.tomogram._helpers import _insert_local_labels
+
+    labels = torch.zeros((8, 8, 8), dtype=torch.int32)
+    local = torch.zeros((4, 4, 4), dtype=torch.int16)
+    local[0, 0, 0] = 1
+    local[3, 3, 3] = 2
+
+    labels = _insert_local_labels(
+        labels, local, id_offset=10, position_xyz=(0.0, 0.0, 0.0), voxel_size=1.0
+    )
+    assert set(torch.unique(labels).tolist()) - {0} == {11, 12}
+
+    # A second insert at the same place must not overwrite the first.
+    other = torch.zeros((4, 4, 4), dtype=torch.int16)
+    other[0, 0, 0] = 1
+    labels = _insert_local_labels(
+        labels, other, id_offset=20, position_xyz=(0.0, 0.0, 0.0), voxel_size=1.0
+    )
+    assert set(torch.unique(labels).tolist()) - {0} == {11, 12}
+
+
+@pytest.mark.skipif(not _SMALL_FIXTURE.exists(), reason="bundled PDB fixture missing")
+def test_transmembrane_proteins_are_labelled_as_proteins_not_as_membrane():
+    """The two label volumes partition the membrane between them.
+
+    A transmembrane protein used to be labelled twice over: its density was
+    thresholded into its host membrane's shell id, and it got no id of its
+    own anywhere, so per-instance protein segmentation trained on
+    `instance_labels` could not see it at all. It is now an ordinary
+    protein instance, and `membrane_labels` is the bilayer it displaced.
+    """
+    transmembrane_specs = [
+        TransmembraneSpec(pdb_source=str(_SMALL_FIXTURE), frequency=4)
+    ]
+    mgen = MembraneGenerator(
+        transmembrane_specs=transmembrane_specs, seed=0, **_MEMBRANE_KWARGS
+    )
+    gen = TomogramSpecimenGenerator(
+        membrane_instances=[MembraneInstance(generator=mgen)],
+        target_shape=_TARGET_SHAPE_ZYX,
+        voxel_size=_V_SIZE,
+        protein_specs=[TomogramProteinSpec(pdb_source=str(_SMALL_FIXTURE))],
+        occupancy_fraction=0.05,
+        pdb_cache_dir=str(Path(__file__).parent / "test_data"),
+        seed=0,
+        progressbars=False,
+    )
+    gen.generate()
+
+    assert len(gen.transmembrane_placements) > 0
+    membrane = gen.membrane_labels
+    protein = gen.instance_labels
+    assert membrane is not None and protein is not None
+
+    # Every transmembrane protein holds ids at the FRONT of the shared
+    # counter, so they exist in instance_labels rather than nowhere.
+    n_tm = len(gen.transmembrane_placements)
+    tm_ids = set(range(1, n_tm + 1))
+    present = set(torch.unique(protein).tolist()) - {0}
+    assert tm_ids & present, (sorted(present)[:10], n_tm)
+
+    # No voxel is claimed as both bilayer and transmembrane protein.
+    tm_voxels = torch.zeros_like(protein, dtype=torch.bool)
+    for i in tm_ids:
+        tm_voxels |= protein == i
+    assert int((tm_voxels & (membrane > 0)).sum()) == 0
+
+    # ...and the proteins really do sit inside a membrane, so the exclusion
+    # above is a genuine carve-out rather than the two simply being far
+    # apart. Every transmembrane voxel should border the shell.
+    assert int(tm_voxels.sum()) > 0
+    dilated = torch.nn.functional.max_pool3d(
+        (membrane > 0).float()[None, None], kernel_size=5, stride=1, padding=2
+    )[0, 0]
+    assert int((tm_voxels & (dilated > 0)).sum()) > 0
+
+
+@pytest.mark.skipif(not _SMALL_FIXTURE.exists(), reason="bundled PDB fixture missing")
+def test_transmembrane_picks_outside_the_box_are_dropped():
+    """Every transmembrane pick names a particle the volume actually holds.
+
+    `clip_axes` lets a membrane extend past the walls, and the part outside
+    is clipped away when the instance is composited -- so a protein
+    embedded out there has no density and no instance label. Shipping a
+    pick for it would claim a particle at coordinates the tomogram does not
+    cover. Measured on the shipped config before this was handled: 52 of
+    240 transmembrane picks pointed outside the box.
+    """
+    # A 140 A-wide organelle in a tomogram only 24*8 = 192 A deep, with z
+    # clipping allowed so the placement solve accepts it rather than
+    # rejecting it for not fitting -- which is exactly the configuration
+    # that puts part of its surface outside the box.
+    shallow_shape = (24, 64, 64)
+    mgen = MembraneGenerator(
+        transmembrane_specs=[
+            TransmembraneSpec(pdb_source=str(_SMALL_FIXTURE), frequency=30)
+        ],
+        seed=0,
+        **_MEMBRANE_KWARGS,
+    )
+    gen = TomogramSpecimenGenerator(
+        membrane_instances=[MembraneInstance(generator=mgen)],
+        target_shape=shallow_shape,
+        voxel_size=_V_SIZE,
+        protein_specs=[TomogramProteinSpec(pdb_source=str(_SMALL_FIXTURE))],
+        occupancy_fraction=0.05,
+        clip_axes=(True, True, True),
+        pdb_cache_dir=str(Path(__file__).parent / "test_data"),
+        seed=0,
+        progressbars=False,
+    )
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        gen.generate()
+
+    n_labelled = sum(
+        len(mi.generator.placements) for mi in gen.placed_membrane_instances
+    )
+    assert n_labelled > 0
+    # Some really were outside, so the assertion below isn't vacuous.
+    assert len(gen.transmembrane_placements) < n_labelled
+
+    half = torch.tensor(
+        [
+            shallow_shape[2] * _V_SIZE / 2,
+            shallow_shape[1] * _V_SIZE / 2,
+            shallow_shape[0] * _V_SIZE / 2,
+        ]
+    )
+    for tp in gen.transmembrane_placements:
+        assert bool((tp.center_xyz.abs() < half).all()), tp.center_xyz
+
+
+@pytest.mark.skipif(not _SMALL_FIXTURE.exists(), reason="bundled PDB fixture missing")
+def test_membrane_without_transmembrane_specs_labels_the_whole_shell():
+    """The carve-out is driven by actual placements, not by the mere
+    presence of the labelling path: with no transmembrane species the
+    shell label is the full thresholded bilayer, as before."""
+    mgen = MembraneGenerator(seed=0, **_MEMBRANE_KWARGS)
+    gen = TomogramSpecimenGenerator(
+        membrane_instances=[MembraneInstance(generator=mgen)],
+        target_shape=_TARGET_SHAPE_ZYX,
+        voxel_size=_V_SIZE,
+        protein_specs=[TomogramProteinSpec(pdb_source=str(_SMALL_FIXTURE))],
+        occupancy_fraction=0.05,
+        pdb_cache_dir=str(Path(__file__).parent / "test_data"),
+        seed=0,
+        progressbars=False,
+    )
+    gen.generate()
+    assert gen.transmembrane_placements == []
+    assert mgen.transmembrane_labels is None
+    assert gen.membrane_labels is not None
+    assert int((gen.membrane_labels > 0).sum()) > 0
+
+
 @pytest.mark.skipif(not _SMALL_FIXTURE.exists(), reason="bundled PDB fixture missing")
 def test_tomogram_specimen_generator_transmembrane_reflects_position_offset():
     """Composited transmembrane placements equal the same MembraneGenerator

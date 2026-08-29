@@ -284,6 +284,52 @@ def test_max_field_voxels_default_does_not_warn_at_small_scale():
         gen.generate()  # would raise if the coarsening warning fired
 
 
+def test_transmembrane_labels_mark_exactly_the_displaced_lipid():
+    """`transmembrane_labels` is the same decision the density blend makes.
+
+    `_insert_blend` replaces lipid with protein wherever the template's own
+    density exceeds `transmembrane_occupancy_fraction * psi.max()`, which is
+    where its smoothstep weight reaches 0.5. The label has to use that same
+    boundary, not a second cutoff of its own, or the ground truth and the
+    density disagree about where the protein is.
+    """
+    from specter.specimen.membrane import TransmembraneSpec
+
+    fixture = Path(__file__).parent / "test_data" / "1mbo.cif"
+    if not fixture.exists():
+        pytest.skip("bundled PDB fixture missing")
+
+    gen = MembraneGenerator(
+        transmembrane_specs=[TransmembraneSpec(pdb_source=str(fixture), frequency=3)],
+        seed=0,
+        **_SMALL_KWARGS,
+    )
+    gen.generate()
+    placements = gen.place_transmembrane(min_spacing_a=20.0)
+
+    assert len(placements) > 0
+    labels = gen.transmembrane_labels
+    assert labels is not None
+    assert labels.shape == gen.volume.shape
+    assert labels.dtype == torch.int16
+
+    ids = set(torch.unique(labels).tolist()) - {0}
+    assert ids, "no voxel was labelled for any placement"
+    # Local, 1-based, and never more than the number of placements.
+    assert ids <= set(range(1, len(placements) + 1))
+
+    # Labelled voxels carry real density -- the label tracks the protein,
+    # not the template's zero-padded bounding box.
+    assert float(gen.volume[labels > 0].min()) > 0.0
+
+
+def test_transmembrane_labels_stay_none_without_specs():
+    gen = MembraneGenerator(seed=0, **_SMALL_KWARGS)
+    gen.generate()
+    assert gen.place_transmembrane() == []
+    assert gen.transmembrane_labels is None
+
+
 def test_shape_backend_rejects_unknown_value():
     with pytest.raises(ValueError, match="shape_backend"):
         MembraneGenerator(

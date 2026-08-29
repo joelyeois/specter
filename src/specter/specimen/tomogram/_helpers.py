@@ -486,3 +486,55 @@ def _insert_shell_label(
     overlap = bool(((chunk > 0) & (labels[dst] > 0)).any())
     labels[dst] = torch.where(labels[dst] > 0, labels[dst], chunk)
     return labels, overlap
+
+
+def _insert_local_labels(
+    labels: torch.Tensor,
+    local_labels: torch.Tensor,
+    id_offset: int,
+    position_xyz: tuple[float, float, float],
+    voxel_size: float,
+) -> torch.Tensor:
+    """Stamp a per-instance label volume rendered in one membrane
+    instance's own local frame into the shared `labels` volume, shifted by
+    `position_xyz` and with every id shifted by `id_offset`.
+
+    The local ids are 1-based and local to their membrane
+    (`MembraneGenerator.transmembrane_labels`), so `id_offset` is the
+    shared counter's value before this instance's block was reserved.
+    Same center-relative convention as `_insert_shell_label`, and
+    FIRST-write-wins for the same reason: two membrane instances are only
+    collision-checked as bounding spheres, so their rendered shapes -- and
+    the proteins embedded in them -- can still overlap, and which one wins
+    has to be deterministic rather than depend on iteration order.
+
+    Parameters
+    ----------
+    labels : torch.Tensor
+        Shared integer label volume, modified and returned.
+    local_labels : torch.Tensor
+        Integer labels in the membrane instance's own frame; 0 is empty.
+    id_offset : int
+        Added to every nonzero local id.
+    position_xyz : tuple of float
+        The membrane instance's own physical offset from the shared
+        volume's center.
+    voxel_size : float
+        Angstroms per voxel.
+
+    Returns
+    -------
+    torch.Tensor
+        The updated `labels`.
+    """
+    center_zyx = _position_to_center_index(
+        position_xyz, tuple(labels.shape), voxel_size
+    )
+    bounds = clip_insert_bounds(center_zyx, local_labels.shape, labels.shape)
+    if bounds is None:
+        return labels
+    dst, src = bounds
+    chunk = local_labels[src].to(device=labels.device, dtype=labels.dtype)
+    chunk = torch.where(chunk > 0, chunk + id_offset, chunk)
+    labels[dst] = torch.where(labels[dst] > 0, labels[dst], chunk)
+    return labels

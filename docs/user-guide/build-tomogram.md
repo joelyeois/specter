@@ -255,6 +255,18 @@ Alongside `{filename}.mrc`, by default you get:
   membrane surface has no single natural "position" the way a protein
   does, so it isn't represented in the picks files.
 
+`protein_labels` holds every protein instance on one id counter,
+transmembrane proteins included; `membrane_labels` holds the bilayer they
+are embedded in. The two partition the membrane rather than double-claiming
+it: a voxel where a transmembrane protein displaced the lipid carries that
+protein's id and is absent from the bilayer label, using the same
+displacement boundary the density model itself applies (see
+`MembraneGenerator.transmembrane_occupancy_fraction`). Nothing is claimed by
+both, so a per-class target can be built by union and a single-label atlas
+by whatever priority you prefer. Neither reduction is written for you: the
+volumes are kept separate because an exclusive atlas cannot be turned back
+into overlapping masks, while the reverse is trivial.
+
 ## Multiple tomograms
 
 `--n_tomograms` generates several independent tomograms in one run. Beyond

@@ -150,26 +150,11 @@ def run_build_tomogram(config: TomogramConfig, n_tomograms: int = 1) -> None:
 
     validate_config(config)
 
-    has_species_source = bool(
-        config.targets
-        or config.filler
-        or config.filler_from_pei2016
-        or config.filler_from_cryoetsim
-        or config.membrane
-        or config.filaments
-        or config.actin
-        or config.microtubules
-        or config.carbon_film
-        or config.beads
-    )
-    if not has_species_source:
+    if not config.has_any_species:
+        fields = ", ".join(f"config.{name}" for name in config.SPECIES_SOURCE_FIELDS)
         raise ValueError(
-            "run_build_tomogram: config.targets, config.filler, "
-            "config.filler_from_pei2016, config.filler_from_cryoetsim, "
-            "config.membrane, config.filaments, config.actin, "
-            "config.microtubules, config.carbon_film, and config.beads can't "
-            "all be empty/False -- at least one "
-            "species source is required."
+            f"run_build_tomogram: {fields} can't all be empty/False -- at "
+            "least one species source is required."
         )
     if len(config.carbon_film) > 1:
         raise ValueError(

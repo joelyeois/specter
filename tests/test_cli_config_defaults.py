@@ -101,3 +101,62 @@ def test_particles_without_config_or_pdb_source_exits_cleanly(tmp_path) -> None:
     combined = (result.stdout + result.stderr).replace("\n", " ")
     assert "--pdb_source" in combined
     assert "Traceback" not in combined
+
+
+def test_species_source_fields_are_all_real_fields() -> None:
+    """`SPECIES_SOURCE_FIELDS` is the shared source of truth for a condition
+    checked in two places -- `run_build_tomogram`'s guard and the CLI's
+    pre-check. A renamed field would otherwise make both silently stop
+    seeing that source, and a tomogram naming only it would be reported as
+    empty."""
+    names = {f.name for f in dataclasses.fields(TomogramConfig)}
+    for name in TomogramConfig.SPECIES_SOURCE_FIELDS:
+        assert name in names, f"{name} is not a TomogramConfig field"
+
+
+def test_has_any_species_tracks_each_source_individually() -> None:
+    """Any one source on its own is enough -- it is a disjunction, which is
+    why `config_from_defaults` cannot express it (each field has a default)."""
+    assert not TomogramConfig().has_any_species
+    for name in TomogramConfig.SPECIES_SOURCE_FIELDS:
+        config = TomogramConfig()
+        setattr(config, name, True if name in {"actin"} else [{"pdb_source": "1abc"}])
+        assert config.has_any_species, f"{name} alone should satisfy the guard"
+
+
+def test_tomogram_without_config_or_species_exits_cleanly(tmp_path) -> None:
+    """A tomogram with nothing in it is a usage mistake, not a crash. This
+    used to escape as `run_build_tomogram`'s ValueError: 32 lines, 26 of them
+    click internals, naming config fields that have no CLI spelling."""
+    result = proc.run(
+        [sys.executable, "-m", "specter.cli._cli", "build", "tomogram"],
+        capture_output=True,
+        encoding="utf-8",
+        cwd=str(tmp_path),
+        env={"COLUMNS": "200", "PATH": "/usr/bin:/bin"},
+    )
+    assert result.returncode == 2
+    combined = (result.stdout + result.stderr).replace("\n", " ")
+    assert "Traceback" not in combined
+    # Names both escape hatches: a config, and a flag that works on its own.
+    assert "--config" in combined
+    assert "--filler_from_pei2016" in combined
+    assert EXAMPLE_CONFIGS_URL in combined
+
+
+def test_tiltseries_without_a_volume_exits_cleanly(tmp_path) -> None:
+    """Same shape of defect as the tomogram one above: a specimen volume or a
+    tomogram config to build one, neither of which is a field with no
+    default, so nothing caught it before `run_tilt_series` raised."""
+    result = proc.run(
+        [sys.executable, "-m", "specter.cli._cli", "simulate", "tiltseries"],
+        capture_output=True,
+        encoding="utf-8",
+        cwd=str(tmp_path),
+        env={"COLUMNS": "200", "PATH": "/usr/bin:/bin"},
+    )
+    assert result.returncode == 2
+    combined = (result.stdout + result.stderr).replace("\n", " ")
+    assert "Traceback" not in combined
+    assert "--volume_path" in combined
+    assert "--tomogram_config" in combined

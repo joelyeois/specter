@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import types
-from typing import Any, Literal, Union, get_args, get_origin, get_type_hints
+from typing import Any, Literal, NoReturn, Union, get_args, get_origin, get_type_hints
 
 import rich_click as click
 from click.core import ParameterSource
@@ -192,6 +192,43 @@ CONFIG_OPTION_HELP = (
     "without it every setting takes its built-in default, so only settings "
     f"that have none must be passed as flags. Worked examples: {EXAMPLE_CONFIGS_URL}"
 )
+
+
+def prerequisite_usage_error(message: str) -> NoReturn:
+    """
+    Report an unmet config prerequisite as a CLI usage error.
+
+    For preconditions :func:`config_from_defaults` structurally cannot
+    catch. That function reports a field whose dataclass declares no
+    default, which covers a single required setting like `pdb_source`.
+    It cannot express a DISJUNCTION -- "at least one of these ten", or
+    "this field or that argument" -- because every field involved does
+    have a default, individually.
+
+    Those preconditions are checked in `pipelines/`, which correctly
+    raises `ValueError`: for a Python API caller a traceback is the right
+    answer, and it points at the line that failed. Reaching a CLI user
+    that way is not: `specter build tomogram` printed 32 lines, 26 of
+    them click and rich_click internals, and named `config.targets` and
+    the rest -- identifiers with no CLI spelling, since seven of those
+    ten sources are TOML-only and have no flag at all. This raises
+    `click.UsageError` instead, so the CLI path gets the same bordered
+    panel and exit code 2 as every other command, and the pipeline keeps
+    its own guard for direct callers.
+
+    Parameters
+    ----------
+    message : str
+        What is missing and how to supply it, in CLI vocabulary: flags
+        and config file names, not config field names. The worked-configs
+        URL is appended.
+
+    Raises
+    ------
+    click.UsageError
+        Always.
+    """
+    raise click.UsageError(f"{message} Worked example configs: {EXAMPLE_CONFIGS_URL}")
 
 
 def config_from_defaults(config_cls: type, overrides: dict[str, Any]) -> Any:

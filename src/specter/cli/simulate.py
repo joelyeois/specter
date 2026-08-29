@@ -21,6 +21,7 @@ from ._click_options import (
     collect_overrides,
     CONFIG_OPTION_HELP,
     config_from_defaults,
+    prerequisite_usage_error,
 )
 
 CONTEXT_SETTINGS = {"help_option_names": ["-h", "--help"]}
@@ -382,6 +383,19 @@ def _tiltseries_callback(
         if tomogram_config is not None
         else None
     )
+
+    # As in build.py: a disjunction (a volume on disk OR one built inline)
+    # that config_from_defaults cannot express, checked here so it reaches
+    # a CLI user as a usage error instead of run_tilt_series' ValueError
+    # arriving as a traceback.
+    if tomogram_cfg is None and not cfg.volume_path:
+        prerequisite_usage_error(
+            "A tilt series needs a specimen volume, and none was given. "
+            "Either pass --volume_path pointing at an .mrc from a previous "
+            "`specter build tomogram`, or pass --tomogram_config a tomogram "
+            "TOML to build one as part of this run."
+        )
+
     run_tilt_series(cfg, tomogram_config=tomogram_cfg)
 
 

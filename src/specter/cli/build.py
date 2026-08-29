@@ -18,6 +18,7 @@ from ._click_options import (
     collect_overrides,
     CONFIG_OPTION_HELP,
     config_from_defaults,
+    prerequisite_usage_error,
 )
 
 CONTEXT_SETTINGS = {"help_option_names": ["-h", "--help"]}
@@ -108,6 +109,22 @@ def _tomogram_callback(
         else config_from_defaults(TomogramConfig, overrides)
     )
     apply_overrides(cfg, overrides)
+
+    # Checked here as well as in run_build_tomogram so a CLI user gets a
+    # usage error rather than that function's ValueError as a traceback.
+    # Seven of the ten species sources are TOML-only, so this cannot be
+    # phrased as "pass --x" the way a single missing field can.
+    if not cfg.has_any_species:
+        prerequisite_usage_error(
+            "A tomogram needs at least one species source, and every one of "
+            "them defaults to empty. Quickest runnable start: --config "
+            "configs/tomogram.toml. Or with a single flag: "
+            "--filler_from_pei2016 True for cytosolic crowding, --actin True "
+            "for filaments. Targets, membranes, microtubules, carbon film "
+            "and gold beads are TOML-only -- [[targets]], [[membrane]], "
+            "[[microtubules]], [[carbon_film]], [[beads]]."
+        )
+
     run_build_tomogram(cfg, n_tomograms=n_tomograms)
 
 

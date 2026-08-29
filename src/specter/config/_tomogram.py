@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 
 from ._paths import default_pdb_cache_dir
 from ._scalar_range import ScalarOrRange
@@ -322,6 +322,30 @@ class TomogramConfig:
     # tiltseries job's volume_path pointing into this job's directory.
     project: str | None = None
     job_id: str | None = None
+
+    #: Every field that can put something in the volume. A tomogram needs
+    #: at least one of them, which is a DISJUNCTION and so cannot be
+    #: expressed as "this field has no default" -- each one has a default
+    #: individually. Kept here as the single source of truth so the
+    #: pipeline's guard and the CLI's pre-check cannot drift apart; the
+    #: two report the same condition to different audiences.
+    SPECIES_SOURCE_FIELDS: ClassVar[tuple[str, ...]] = (
+        "targets",
+        "filler",
+        "filler_from_pei2016",
+        "filler_from_cryoetsim",
+        "membrane",
+        "filaments",
+        "actin",
+        "microtubules",
+        "carbon_film",
+        "beads",
+    )
+
+    @property
+    def has_any_species(self) -> bool:
+        """Whether anything at all would be placed in the volume."""
+        return any(getattr(self, name) for name in self.SPECIES_SOURCE_FIELDS)
 
 
 TOMOGRAM_HELP: dict[str, str] = {

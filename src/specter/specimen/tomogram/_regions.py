@@ -78,10 +78,31 @@ def classify_membrane_regions(
         boundary_labels.update(int(v) for v in labeled[:, :, 0].ravel() if v > 0)
         boundary_labels.update(int(v) for v in labeled[:, :, -1].ravel() if v > 0)
 
-    labeled_t = torch.from_numpy(labeled).to(density.device)
+    # Resolved as a lookup on the CPU-side label array, NOT as
+    # `torch.isin(labeled_t, boundary_label_t)` on the device.
+    #
+    # `torch.isin` has no sorted fast path at these sizes and materializes
+    # `elements.unsqueeze(-1) == test_elements` -- a bool tensor of shape
+    # (n_voxels, n_boundary_labels). Measured at 65.1 bytes per voxel for
+    # 63 boundary labels, so a 300x1200x1200 tomogram asked CUDA for
+    # 25.35 GiB to answer a per-voxel membership test, and OOM'd. The
+    # factor is the label COUNT, which the membrane geometry decides, so
+    # this fired on some random draws and not others -- `configs/
+    # tomogram.toml` unseeded reproduced it, seed 11 did not. (Above
+    # roughly 128 test values torch.isin switches to a sort-based path and
+    # the blowup disappears, which is why only moderate label counts hurt.)
+    #
+    # Labels from `ndimage.label` are dense integers 0..num_features, so a
+    # boolean lookup indexed by label answers it in one gather. Doing that
+    # in numpy also drops the int32 label volume's device transfer, which
+    # existed only to feed the isin: 0.40 GiB of device memory total here,
+    # against 25.35 + 1.73 GiB before.
     if boundary_labels:
-        boundary_label_t = torch.tensor(sorted(boundary_labels), device=density.device)
-        cytosol_mask = non_shell & torch.isin(labeled_t, boundary_label_t)
+        is_boundary = np.zeros(num_features + 1, dtype=bool)
+        is_boundary[np.fromiter(boundary_labels, dtype=np.int64)] = True
+        cytosol_mask = non_shell & torch.from_numpy(is_boundary[labeled]).to(
+            density.device
+        )
     else:
         cytosol_mask = torch.zeros_like(non_shell)
     lumen_mask = non_shell & ~cytosol_mask

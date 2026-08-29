@@ -76,3 +76,49 @@ def test_classify_membrane_regions_default_threshold_scales_with_peak():
     masks = classify_membrane_regions(density)
     assert bool(masks["lumen"][20, 20, 20])
     assert bool(masks["cytosol"][0, 0, 0])
+
+
+def test_many_boundary_components_classify_correctly():
+    """The boundary-label membership test used to be `torch.isin`, which has
+    no sorted fast path at these sizes and materializes an
+    (n_voxels, n_boundary_labels) bool tensor. Measured at 65.1 bytes per
+    voxel for 63 labels, so a 300x1200x1200 tomogram asked CUDA for
+    25.35 GiB and OOM'd -- and since the factor is the label COUNT, which
+    the membrane geometry decides, it fired on some random draws and not
+    others.
+
+    This builds many disjoint boundary-touching components on purpose, the
+    shape that drove that count up, plus one genuinely enclosed cavity that
+    must still come back as lumen rather than being swept in with them."""
+    n = 24
+    density = torch.zeros((n, n, n))
+
+    # A grid of shell pillars, carving the exterior into many separate
+    # components that each touch a boundary face.
+    density[:, ::4, ::4] = 1.0
+
+    # One sealed box, well away from the pillars, whose interior is
+    # reachable from nowhere outside.
+    density[4:10, 14:20, 14:20] = 1.0
+    density[5:9, 15:19, 15:19] = 0.0
+
+    masks = classify_membrane_regions(density, density_threshold=0.5)
+
+    total = masks["shell"].sum() + masks["lumen"].sum() + masks["cytosol"].sum()
+    assert int(total) == density.numel()
+
+    # The sealed interior is lumen, and nothing on a boundary face is.
+    assert bool(masks["lumen"][6, 16, 16])
+    for face in (
+        masks["lumen"][0],
+        masks["lumen"][-1],
+        masks["lumen"][:, 0],
+        masks["lumen"][:, -1],
+        masks["lumen"][..., 0],
+        masks["lumen"][..., -1],
+    ):
+        assert not bool(face.any())
+
+    # The many exterior components are all cytosol, not lumen.
+    assert bool(masks["cytosol"][0, 1, 1])
+    assert bool(masks["cytosol"][-1, -2, -2])

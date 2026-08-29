@@ -115,7 +115,7 @@ edge_side = "random"          # "left" | "right" | "top" | "bottom" | "random"
 # each bead's boundary is, is bead_roughness in [advanced].
 # [[beads]]
 # radius = [80.0, 120.0]        # A -- i.e. 16-24 nm diameter
-# n_copies = 0
+# n_copies = 20
 
 [picks]
 write_picks = true            # one copick-style .ndjson per species

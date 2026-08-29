@@ -527,16 +527,21 @@ class MembraneGenerator:
         value, at fixed amplitude, so the bilayer's integrated potential
         scales with it as lipid-volume conservation requires.
 
-        Default 30.0, the midpoint of `polnet`'s `MB_THICK_RG` range
-        (25.0, 35.0). Note that this sits BELOW the published 36-39 Å
-        range for fluid phosphatidylcholine, which the reference lipid
-        template itself reproduces at 40 Å
+        Default 38.0, inside the published 36-39 Å range for fluid
+        phosphatidylcholine. This was 30.0 until 2026-08-30, the midpoint
+        of `polnet`'s `MB_THICK_RG` range (25.0, 35.0) -- a range that
+        sits entirely below the experimental one, and which another
+        simulator's default has no standing to override. A 30 Å bilayer
+        also renders about 25% less integrated potential than a 38 Å one,
+        since the integral scales with thickness.
+
+        The reference lipid template's own geometry gives 40 Å
         (:func:`~specter.specimen.membrane._profile.
-        native_bilayer_thickness_a`). Passing 38.0 renders a bilayer at
-        its measured thickness and about 27% more integrated potential;
-        the default is kept at 30.0 only because the shipped configs set
-        it explicitly and changing it would silently alter every existing
-        membrane.
+        native_bilayer_thickness_a`), so the default compresses it by
+        0.95. That the template sits ~1 Å above the experimental range at
+        all is a property of its hand-picked z-offsets, and is the part
+        of this model still waiting on real coordinates -- not something
+        to correct by squeezing harder at render time.
     bilayer_layer_sigma_a : float, optional
         ADDITIONAL Gaussian broadening applied along z, Å. Default 0.0.
 
@@ -734,7 +739,7 @@ class MembraneGenerator:
         swept_curvature_step_fraction: float = 0.15,
         n_lipids_per_leaflet: int = 200,
         parameterization: str = "shtyrov",
-        bilayer_thickness: float = 30.0,
+        bilayer_thickness: float = 38.0,
         bilayer_layer_sigma_a: float = 0.0,
         membrane_scale_range: tuple[float, float] = (1.0, 1.0),
         transmembrane_specs: list[TransmembraneSpec] | None = None,

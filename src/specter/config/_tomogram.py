@@ -108,7 +108,7 @@ class TomogramConfig:
     # tomogram is then one cytosol region. Keys are passed as **kwargs
     # straight into specter.specimen.membrane.MembraneGenerator -- e.g.
     # {"shape_backend": "spherical_harmonics", "sh_axes": [300.0, 300.0,
-    # 300.0], "sh_amplitude": 0.15, "bilayer_thickness": 30.0} -- PLUS
+    # 300.0], "sh_amplitude": 0.15, "bilayer_thickness": 38.0} -- PLUS
     # three keys not real MembraneGenerator kwargs, popped before that call:
     #   - "n_copies" (int, default 1): expands this one entry into that
     #     many independent instances sharing the same template, each its

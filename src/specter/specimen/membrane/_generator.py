@@ -550,11 +550,10 @@ class MembraneGenerator:
     membrane_scale_range : tuple of float, optional
         ``(low, high)``: a single random multiplicative scale, drawn
         uniformly from this range once per `generate()` call (seeded from
-        `seed`, reproducible), applied to the calibrated bilayer peak
-        amplitude BEFORE `build_analytic_bilayer_profile` -- an
+        `seed`, reproducible), multiplied into `self.profile`'s psi -- an
         augmentation knob for varying membrane contrast/intensity across
-        many generated instances. Applied to the amplitude that feeds
-        `self.profile`, not as a separate post-hoc multiply on
+        many generated instances. Applied to the profile rather than as a
+        separate post-hoc multiply on
         `self.volume` -- that keeps `_insert_blend`'s occupancy threshold
         (itself derived from `self.profile.psi.max()`) automatically
         consistent with whatever scale was drawn, with no extra

@@ -98,10 +98,10 @@ n_monomers = [20, 60]
 # Microtubules. Real 13-protofilament tubes (lumen, A-lattice seam, tubulin
 # dimer wall)
 [[microtubules]]
-n_copies = 2
+n_copies = 5
 n_protofilaments = 13   # 13 is the canonical in-cell lattice
-# length = 6000.0       # A; omit to span the volume diagonal
-# bend_radius = 30000.0 # A; omit for a straight, thermally bent tube
+length = 6000.0       # A; omit to span the volume diagonal
+bend_radius = 30000.0 # A; omit for a straight, thermally bent tube
 
 # Carbon support film -- at most one [[carbon_film]] table.
 [[carbon_film]]
@@ -113,9 +113,9 @@ edge_side = "random"          # "left" | "right" | "top" | "bottom" | "random"
 # single number or a [low, high] pair drawn per bead; real colloidal gold is
 # not monodisperse, so a range is the more faithful default. How irregular
 # each bead's boundary is, is bead_roughness in [advanced].
-[[beads]]
-radius = [80.0, 120.0]        # A -- i.e. 16-24 nm diameter
-n_copies = 20
+# [[beads]]
+# radius = [80.0, 120.0]        # A -- i.e. 16-24 nm diameter
+# n_copies = 0
 
 [picks]
 write_picks = true            # one copick-style .ndjson per species

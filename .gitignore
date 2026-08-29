@@ -58,3 +58,8 @@ site/
 
 # CLI QA sweep run artifacts (the harness itself is tracked, see tools/cli-qa/README.md)
 tools/cli-qa/results/
+
+# Parsed-structure cache. Written wherever a pdb_cache_dir points, which for
+# the tests is the tracked fixtures folder -- the entries are derived from the
+# .cif files beside them and regenerate on demand (see PDB's parsed cache).
+tests/test_data/parsed/

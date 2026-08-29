@@ -3,10 +3,14 @@ Tests for PDB parsing, in particular bonded-species atom typing.
 """
 
 import gzip
+import os
+import shutil
+import time
 import warnings
 from pathlib import Path
 
 import pytest
+import torch
 
 import specter.pdb as pdb_module
 from specter.config import default_pdb_cache_dir
@@ -161,6 +165,108 @@ def test_fetch_pdb_file_reuses_a_differently_cased_cache_entry(tmp_path, monkeyp
 
     assert Path(path).name == "1abc-assembly1.cif"
     assert len(list(tmp_path.iterdir())) == 1
+
+
+def test_fetch_pdb_file_does_not_call_the_network_when_quiet(tmp_path, monkeypatch):
+    # Regression test: get_available_assemblies returns None and only ever
+    # prints, but ran on every fetch -- before the cache check, and with its
+    # result discarded when verbose=False. That HTTPS round trip was the
+    # entire cost of a "cache hit" for an already-downloaded structure.
+    (tmp_path / "1ABC-assembly1.cif").write_text("data_1ABC\n#\n")
+
+    def fake_get(url, *args, **kwargs):
+        raise AssertionError(f"no request should be made, got {url}")
+
+    monkeypatch.setattr(pdb_module.requests, "get", fake_get)
+    path = PDB.fetch_pdb_file("1ABC", pdb_cache_dir=str(tmp_path), verbose=False)
+    assert Path(path).name == "1ABC-assembly1.cif"
+
+
+@pytest.mark.skipif(not _FIXTURE.exists(), reason="bundled PDB fixture missing")
+def test_parsed_cache_returns_an_identical_structure(tmp_path):
+    """A cached parse must be indistinguishable from a fresh one.
+
+    Re-parsing dominates the cost of loading an already-downloaded
+    structure (16.3 s for a 220k-atom assembly against 0.09 s to read the
+    arrays back), but a cache that returned anything different would
+    silently render the wrong molecule.
+    """
+    shutil.copy(_FIXTURE, tmp_path / "1mbo.cif")
+    src = str(tmp_path / "1mbo.cif")
+
+    cold = PDB(
+        src, pdb_cache_dir=str(tmp_path), verbose=False, compute_atom_species=True
+    )
+    assert cold._parse_was_cached is False
+    warm = PDB(
+        src, pdb_cache_dir=str(tmp_path), verbose=False, compute_atom_species=True
+    )
+    assert warm._parse_was_cached is True
+
+    assert torch.equal(cold.atomic_numbers, warm.atomic_numbers)
+    assert torch.equal(cold.coordinates, warm.coordinates)
+    assert cold.atom_species == warm.atom_species
+    assert cold.max_diameter == warm.max_diameter
+
+
+@pytest.mark.skipif(not _FIXTURE.exists(), reason="bundled PDB fixture missing")
+@pytest.mark.parametrize(
+    "differing",
+    [
+        {"compute_atom_species": False},
+        {"compute_atom_species": True, "readd_hydrogens": False},
+        {"compute_atom_species": True, "readd_hydrogens": True},
+    ],
+)
+def test_parsed_cache_misses_when_a_parse_flag_differs(tmp_path, differing):
+    """Every flag that changes the parse is part of the key.
+
+    A stale hit here would be the worst kind of failure: a structure that
+    loads fast, looks plausible, and is wrong.
+    """
+    shutil.copy(_FIXTURE, tmp_path / "1mbo.cif")
+    src = str(tmp_path / "1mbo.cif")
+    PDB(src, pdb_cache_dir=str(tmp_path), verbose=False, compute_atom_species=True)
+
+    other = PDB(src, pdb_cache_dir=str(tmp_path), verbose=False, **differing)
+    assert other._parse_was_cached is False
+
+
+@pytest.mark.skipif(not _FIXTURE.exists(), reason="bundled PDB fixture missing")
+def test_parsed_cache_misses_when_the_source_file_changes(tmp_path):
+    """Editing a structure in place must not keep serving the old parse."""
+    shutil.copy(_FIXTURE, tmp_path / "1mbo.cif")
+    src = str(tmp_path / "1mbo.cif")
+    PDB(src, pdb_cache_dir=str(tmp_path), verbose=False)
+    assert PDB(src, pdb_cache_dir=str(tmp_path), verbose=False)._parse_was_cached
+
+    os.utime(src, (time.time() + 10, time.time() + 10))
+    assert (
+        PDB(src, pdb_cache_dir=str(tmp_path), verbose=False)._parse_was_cached is False
+    )
+
+
+@pytest.mark.skipif(not _FIXTURE.exists(), reason="bundled PDB fixture missing")
+def test_parsed_cache_still_applies_origin_and_survives_corruption(tmp_path):
+    """`origin` is applied after the cache, so it must still take effect on a
+    hit -- it is deliberately not part of the key, since re-centering costs
+    nothing. And a truncated entry (a killed writer, a full disk) must fall
+    back to parsing rather than raising."""
+    shutil.copy(_FIXTURE, tmp_path / "1mbo.cif")
+    src = str(tmp_path / "1mbo.cif")
+    base = PDB(src, pdb_cache_dir=str(tmp_path), verbose=False)
+    shifted = PDB(
+        src, pdb_cache_dir=str(tmp_path), verbose=False, origin=(5.0, 6.0, 7.0)
+    )
+    assert shifted._parse_was_cached
+    assert not torch.allclose(base.coordinates, shifted.coordinates)
+
+    entries = list((tmp_path / "parsed").glob("*.pt"))
+    assert entries
+    entries[0].write_bytes(b"not a torch file")
+    recovered = PDB(src, pdb_cache_dir=str(tmp_path), verbose=False)
+    assert recovered._parse_was_cached is False
+    assert torch.equal(recovered.atomic_numbers, base.atomic_numbers)
 
 
 def test_get_atom_species_requires_mmcif(tmp_path):

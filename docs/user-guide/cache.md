@@ -86,15 +86,25 @@ than an error:
 Nothing to clean -- /home/user/.cache/specter/pdb does not exist.
 ```
 
-This is always safe to run, because the cache holds **only** downloads.
-`pdb_source` accepts either a 4-character PDB/mmCIF accession code or a
-path to a local structure file, and `specter` handles the two
-differently: it fetches an accession code and writes it into the cache,
-while it reads a local path directly from where it sits and never copies
-it in. Everything the cache holds can therefore get re-fetched from RCSB
-on demand, so clearing it never discards anything irreplaceable: the same
-guarantee `uv cache clean` and `pip cache purge` make about their own
-caches.
+This is always safe to run, because everything the cache holds can be
+produced again. It holds two kinds of thing. Downloads: `pdb_source`
+accepts either a 4-character PDB/mmCIF accession code or a path to a local
+structure file, and `specter` handles the two differently, fetching an
+accession code and writing it into the cache while reading a local path
+directly from where it sits and never copying it in. And parsed
+structures, under `parsed/`: turning a structure file into atom positions,
+elements and bonded-species types is the dominant cost of using one that
+is already downloaded, so the result is kept and reused. Parsing a
+220,000-atom assembly takes 16.7 seconds against 0.09 seconds to read the
+arrays back.
+
+A parsed entry is keyed on its source file's path, size and modification
+time, along with every setting that changes the result, so editing a
+structure in place produces a fresh parse rather than the previous one.
+Clearing the cache therefore discards nothing irreplaceable -- downloads
+get re-fetched from RCSB, parses get recomputed from files that are still
+where they were -- which is the same guarantee `uv cache clean` and
+`pip cache purge` make about their own caches.
 
 ## Referencing a structure
 

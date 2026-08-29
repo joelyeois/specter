@@ -1186,14 +1186,19 @@ class TomogramSpecimenGenerator:
         # __main__-guard caveat that comes with using processes here.
         unique_sources = sorted({s.pdb_source for s in self.protein_specs})
         if unique_sources:
+            # "Loading", not "Fetching": on the common path nothing is
+            # downloaded at all, and the time goes on parsing -- 9.7 s of
+            # Biopython plus 7.0 s of gemmi typing for a 220k-atom assembly,
+            # against ~0 s for a cache hit on the .cif. Calling it a fetch
+            # sent readers looking for a network problem that wasn't there.
             _fetch_phase_start = phase_start(
-                "Fetching PDB structures", disable=not self.progressbars
+                "Loading PDB structures", disable=not self.progressbars
             )
             with TqdmProgress(
                 transient=True, disable=not self.progressbars
             ) as progress:
                 fetch_task = progress.add_task(
-                    "Fetching PDB structures", total=len(unique_sources)
+                    "Loading PDB structures", total=len(unique_sources)
                 )
                 pdb_cache = build_pdb_cache_concurrently(
                     pdb_sources=unique_sources,
@@ -1203,13 +1208,13 @@ class TomogramSpecimenGenerator:
                     readd_hydrogens=self.readd_hydrogens,
                     monomer_library_path=self.monomer_library_path,
                     on_result=lambda source: progress.update(
-                        fetch_task, advance=1, description=f"Fetched {source}"
+                        fetch_task, advance=1, description=f"Loaded {source}"
                     ),
                 )
             phase_done(
                 # Structures, not spellings: `1fa2` and `1FA2` are one
                 # entry and are fetched once (see canonical_pdb_source).
-                f"Fetched {len({canonical_pdb_source(s) for s in unique_sources})} "
+                f"Loaded {len({canonical_pdb_source(s) for s in unique_sources})} "
                 "PDB structure(s)",
                 _fetch_phase_start,
                 disable=not self.progressbars,

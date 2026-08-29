@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import gzip
+import hashlib
 import io
 import os
 import sys
@@ -107,6 +108,128 @@ def canonical_pdb_source(pdb_source: str) -> str:
     if len(pdb_source) == 4 and pdb_source.isalnum():
         return pdb_source.upper()
     return pdb_source
+
+
+#: Bumped whenever anything that shapes a parsed structure changes -- the
+#: gemmi typing rules, the Biopython atom walk, the hydrogen handling. It is
+#: part of every parsed-cache key, so an entry written by older code misses
+#: instead of silently returning a structure the current code would not
+#: produce. Raise it when editing `_build_typed_model`,
+#: `get_atoms_and_coordinates` or `get_atom_species`.
+_PARSED_CACHE_VERSION = 1
+
+
+def _parsed_cache_path(
+    pdb_cache_dir: str,
+    filepath: str,
+    compute_atom_species: bool,
+    readd_hydrogens: bool | str,
+    monomer_library_path: str | None,
+) -> str | None:
+    """
+    Where the parsed form of `filepath` would be cached, or None.
+
+    Parsing a structure is a pure function of the file's bytes and the three
+    flags that steer it, so its result can be reused across runs -- which is
+    worth a great deal: re-parsing a 220k-atom assembly costs 16.7 s against
+    0.04 s to load the arrays back.
+
+    The key covers the source file's identity (path, size, mtime) as well as
+    the flags, so editing or replacing a structure in place misses rather
+    than returning the previous parse.
+
+    Parameters
+    ----------
+    pdb_cache_dir : str
+        Root of the structure cache; entries live in its `parsed/` subfolder.
+    filepath : str
+        The structure file that would be parsed.
+    compute_atom_species : bool
+        Whether bonded-species typing runs (changes the result).
+    readd_hydrogens : bool or str
+        Hydrogen handling (changes the atom list).
+    monomer_library_path : str, optional
+        Already-resolved library directory, or None.
+
+    Returns
+    -------
+    str or None
+        Full path to the cache entry, or None when the source file cannot be
+        stat-ed (in which case parsing simply proceeds uncached).
+    """
+    try:
+        st = os.stat(filepath)
+    except OSError:
+        return None
+    key = "\0".join(
+        [
+            str(_PARSED_CACHE_VERSION),
+            os.path.realpath(filepath),
+            str(st.st_size),
+            str(st.st_mtime_ns),
+            str(bool(compute_atom_species)),
+            str(readd_hydrogens),
+            monomer_library_path or "",
+        ]
+    )
+    digest = hashlib.sha256(key.encode()).hexdigest()
+    return os.path.join(pdb_cache_dir, "parsed", f"{digest}.pt")
+
+
+def _load_parsed_structure(
+    path: str | None,
+) -> tuple[torch.Tensor, torch.Tensor, list[str | None] | None] | None:
+    """
+    Read a cached parse, or None if there isn't a usable one.
+
+    Any failure -- missing file, truncated write, a torch version that
+    can't read it -- returns None so the caller re-parses. A cache is an
+    optimisation; it must never be the reason a structure fails to load.
+    """
+    if path is None or not os.path.exists(path):
+        return None
+    try:
+        blob = torch.load(path, weights_only=False)
+        return (
+            blob["atomic_numbers"],
+            blob["coordinates"],
+            blob["atom_species"],
+        )
+    except Exception:
+        return None
+
+
+def _store_parsed_structure(
+    path: str | None,
+    atomic_numbers: torch.Tensor,
+    coordinates: torch.Tensor,
+    atom_species: list[str | None] | None,
+) -> None:
+    """
+    Write a parse to the cache, best-effort.
+
+    Written to a temporary file and moved into place, because
+    `specimen._parallel_render` parses across several PROCESSES and two of
+    them can reach the same entry at once -- `os.replace` is atomic, so a
+    reader never sees a half-written file. A failure here (read-only cache,
+    full disk) is swallowed: the caller already has the parse it needs.
+    """
+    if path is None:
+        return
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp = f"{path}.{os.getpid()}.tmp"
+        torch.save(
+            {
+                "atomic_numbers": atomic_numbers,
+                "coordinates": coordinates,
+                "atom_species": atom_species,
+            },
+            tmp,
+        )
+        os.replace(tmp, path)
+    except Exception:
+        pass
 
 
 def _resolve_monomer_library_path(
@@ -336,6 +459,71 @@ class PDB:
 
         # bonded-neighbor species descriptors (e.g. for Shtyrov potentials)
         self.atom_species: list[str | None] | None = None
+
+        # Parsing is by far the dominant cost of loading a structure that is
+        # already downloaded (16.7 s for a 220k-atom assembly, roughly 60% of
+        # it Biopython and 40% gemmi typing), and it is a pure function of the
+        # file plus the flags below -- so reuse it across runs. `origin` and
+        # `max_diameter` are re-derived from the cached coordinates further
+        # down, and so are deliberately NOT part of the key.
+        resolved_library = _resolve_monomer_library_path(monomer_library_path)
+        parsed_path = _parsed_cache_path(
+            pdb_cache_dir,
+            self.filepath,
+            compute_atom_species,
+            readd_hydrogens,
+            resolved_library,
+        )
+        cached = _load_parsed_structure(parsed_path)
+        if cached is not None:
+            self.atomic_numbers, self.coordinates, self.atom_species = cached
+            if compute_atom_species and resolved_library is None:
+                # Raised inside _build_typed_model on the parsing path, so a
+                # cache hit would otherwise silently stop reporting an
+                # environment problem that still applies.
+                _warn_missing_monomer_library()
+            self._parse_was_cached = True
+        else:
+            self._parse_was_cached = False
+            self._parse_structure(
+                compute_atom_species=compute_atom_species,
+                readd_hydrogens=readd_hydrogens,
+                monomer_library_path=monomer_library_path,
+                verbose=verbose,
+            )
+            _store_parsed_structure(
+                parsed_path,
+                self.atomic_numbers,
+                self.coordinates,
+                self.atom_species,
+            )
+
+        # center coordinates
+        if origin is None:
+            self.coordinates = PDB.center_coordinates(self.coordinates)
+        else:
+            self.coordinates = self.coordinates - torch.tensor(
+                origin, dtype=self.coordinates.dtype
+            )
+
+        # estimate max diameter
+        self.max_diameter = PDB.estimate_max_diameter(self.coordinates)
+        """float: Maximum diameter of the structure based on convex hull."""
+
+    def _parse_structure(
+        self,
+        compute_atom_species: bool,
+        readd_hydrogens: bool | str,
+        monomer_library_path: str | None,
+        verbose: bool,
+    ) -> None:
+        """
+        Populate `atomic_numbers`/`coordinates`/`atom_species` from the file.
+
+        Split out of `__init__` so the parsed-cache path above can skip it
+        wholesale. Sets exactly the three attributes the cache stores, in
+        their pre-centering form.
+        """
         used_library = False
         if compute_atom_species:
             znum, pos, species, used_library = PDB._build_typed_model(
@@ -389,18 +577,6 @@ class PDB:
                     )
                 )
 
-        # center coordinates
-        if origin is None:
-            self.coordinates = PDB.center_coordinates(self.coordinates)
-        else:
-            self.coordinates = self.coordinates - torch.tensor(
-                origin, dtype=self.coordinates.dtype
-            )
-
-        # estimate max diameter
-        self.max_diameter = PDB.estimate_max_diameter(self.coordinates)
-        """float: Maximum diameter of the structure based on convex hull."""
-
     @property
     def structure(self) -> "Structure":
         """
@@ -452,7 +628,14 @@ class PDB:
         # direct fetches.
         pdb_id = canonical_pdb_source(pdb_id)
 
-        PDB.get_available_assemblies(pdb_id, verbose=verbose)
+        # Guarded on `verbose` because that is the ONLY thing it does: it
+        # returns None and its sole effect is a print. Unguarded it spent a
+        # ~0.6 s HTTPS round trip per structure -- on every call, before the
+        # cache check below, and discarded -- which was the entire cost of a
+        # "cache hit" for the 26 already-downloaded structures a tomogram
+        # loads.
+        if verbose:
+            PDB.get_available_assemblies(pdb_id, verbose=verbose)
 
         # Decide what to fetch
         if assembly is True:

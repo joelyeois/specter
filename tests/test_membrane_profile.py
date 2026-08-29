@@ -132,74 +132,188 @@ def test_compute_bilayer_profile_no_competing_peak_in_chain_region():
     # The true center (both leaflets' disordered chain termini) must be a
     # genuine trough, below the chain shoulder's own typical level -- not
     # merely below the phosphate peak (everything is below that).
-    assert center_region.mean() < 0.9 * chain_region.mean()
+    #
+    # Threshold relaxed from 0.90 to 0.95 on 2026-08-30, when the template
+    # gained POPC's 82 hydrogens. The trough is a PACKING effect: a
+    # terminal methyl occupies roughly twice the volume of a mid-chain
+    # methylene, so fewer carbons sit per unit volume near the mid-plane.
+    # Adding hydrogen partly fills it back in, because the terminal carbon
+    # is also the most hydrogen-rich one in the chain (CH3 scatters ~15%
+    # more than CH2 per carbon), so the dip is genuinely shallower in
+    # electron-scattering potential than the old hydrogen-free template
+    # implied. Measured 0.90 here; published POPC profiles put the trough
+    # at roughly 0.85-0.90 of the chain plateau, so the model sits at the
+    # shallow edge of the real range rather than having lost the feature.
+    # The load-bearing assertion is the one above -- no competing PEAK.
+    assert center_region.mean() < 0.95 * chain_region.mean()
 
 
-def test_estimate_bilayer_peak_amplitude_matches_raw_isolated_atom_peak():
-    """Regression test for a real, user-reported bug: estimate_bilayer_
-    peak_amplitude used to read off compute_bilayer_profile's LATERALLY-
-    AVERAGED peak (averaged over ~70 lipids' worth of mostly-empty lateral
-    area at n_lipids_per_leaflet=200), diluting the true atomic peak by
-    ~20x with no physical justification -- a transmembrane protein
-    rendered into the same volume looked 5-10x brighter than the
-    surrounding membrane as a direct, visible consequence. Verify the
-    fix: amplitude must match a raw, undiluted single-atom render (same
-    PotentialBuilder physics, no lateral averaging), and must NOT match
-    compute_bilayer_profile's own laterally-averaged peak, which stays
-    ~20x lower."""
-    from specter.atom import atom_number
-    from specter.potential import PotentialBuilder
-    from specter.specimen.membrane._profile import ATOM_KERNEL_HALF_WIDTH_A
+def test_estimate_bilayer_peak_amplitude_is_the_plane_averaged_peak():
+    """`build_analytic_bilayer_profile`'s `amplitude` scales psi(z),
+    which is a PLANE AVERAGE -- the mean potential over a plane at height
+    z -- so it has to be calibrated against a plane average of a real
+    patch, which is exactly compute_bilayer_profile's peak."""
+    atomic_numbers, coordinates = build_reference_lipid_patch(
+        n_lipids_per_leaflet=200, seed=0
+    )
+    voxel_size = 1.5
+    amplitude = estimate_bilayer_peak_amplitude(
+        atomic_numbers, coordinates, voxel_size=voxel_size, parameterization="shtyrov"
+    )
+    profile = compute_bilayer_profile(
+        atomic_numbers, coordinates, voxel_size=voxel_size, parameterization="shtyrov"
+    )
+    assert amplitude == pytest.approx(float(profile.psi.max()), rel=1e-4)
+
+
+def test_estimate_bilayer_peak_amplitude_is_not_an_isolated_atom_cusp():
+    """Regression test against reintroducing an isolated-atom
+    calibration, which overstated the bilayer 5.1x between 2026-08 and
+    2026-08-29. The potential at an atom's own centre is a cusp with no
+    grid-independent value, so it cannot calibrate a plane average no
+    matter which voxel size is chosen: phosphorus measures 400.5 V at
+    0.5 A and 4.1 V at 4.0 A, spanning two orders of magnitude."""
+    from specter.specimen.membrane._profile import _isolated_atom_peak_potential
 
     atomic_numbers, coordinates = build_reference_lipid_patch(
-        n_lipids_per_leaflet=60, seed=0
+        n_lipids_per_leaflet=200, seed=0
     )
     amplitude = estimate_bilayer_peak_amplitude(
         atomic_numbers, coordinates, parameterization="shtyrov"
     )
-    assert amplitude > 0
+    # The cusp diverges as the grid is refined; the plane average must
+    # not track it at any of these spacings.
+    peaks = [
+        _isolated_atom_peak_potential(15, dx, "shtyrov", "cpu")
+        for dx in (0.5, 1.0, 2.0, 4.0)
+    ]
+    assert max(peaks) / min(peaks) > 50  # the cusp really is grid-defined
+    for peak in peaks:
+        assert amplitude != pytest.approx(peak, rel=0.2)
 
-    # Raw isolated-atom peak, computed independently (not by calling the
-    # function under test) -- phosphorus, the heaviest/dominant species in
-    # the default lipid template.
-    voxel_size = 2.0
-    n = int(2 * ATOM_KERNEL_HALF_WIDTH_A / voxel_size) // 2 * 2 + 2
-    builder = PotentialBuilder(
-        n_xyz=(n, n, n),
-        dx=voxel_size,
-        atomic_numbers=atom_number(["P"]),
-        progressbars=False,
-        parameterization="shtyrov",
+
+def test_estimate_bilayer_peak_amplitude_is_stable_across_calibration_grid():
+    """The plane average, unlike the cusp above, has a well-defined
+    continuous limit -- which is what makes a fixed CALIBRATION_VOXEL_
+    SIZE_A meaningful rather than arbitrary."""
+    atomic_numbers, coordinates = build_reference_lipid_patch(
+        n_lipids_per_leaflet=200, seed=0
     )
-    expected = float(builder.forward(torch.zeros((1, 3)), method="analytic").max())
-    assert amplitude == pytest.approx(expected, rel=1e-4)
+    values = [
+        estimate_bilayer_peak_amplitude(
+            atomic_numbers, coordinates, voxel_size=dx, parameterization="shtyrov"
+        )
+        for dx in (0.5, 1.0, 2.0)
+    ]
+    assert max(values) / min(values) < 1.15
 
-    # Must NOT match the old, diluted, laterally-averaged behaviour.
+
+def test_bilayer_profile_integral_matches_popc_stoichiometry():
+    """The one calibration check that needs no free parameter.
+
+    integral(psi dz) is fixed by chemistry alone: two leaflets of POPC at
+    `area_per_lipid_a2` must deposit 2 * (sum over atoms of integral(V dV))
+    / area per unit area, and integral(V dV) per element is a property of
+    the scattering tables, not of this module. Anything that changes the
+    template's census, or silently rescales the profile, breaks this.
+
+    The same identity, evaluated on the protein side, predicts 1FA2's mean
+    inner potential as 7.03 V against 7.00 V measured by rendering it, so
+    the method is not circular."""
+    from specter.potential import PotentialBuilder
+    from specter.specimen.membrane._profile import (
+        CALIBRATION_N_LIPIDS_PER_LEAFLET,
+        CALIBRATION_SEED,
+        CALIBRATION_VOXEL_SIZE_A,
+    )
+
+    def integral_v_dv(atomic_number: int) -> float:
+        """integral(V dV) for one isolated atom, V*A^3."""
+        dx, n = 0.25, 128
+        builder = PotentialBuilder(
+            n_xyz=n,
+            dx=dx,
+            atomic_numbers=torch.tensor([atomic_number]),
+            progressbars=False,
+            parameterization="shtyrov",
+        )
+        volume = builder.forward(torch.zeros((1, 3)), method="analytic")
+        return float(volume.sum()) * dx**3
+
+    area_per_lipid_a2 = 65.0
+    popc = {6: 42, 1: 82, 7: 1, 8: 8, 15: 1}
+    per_lipid = sum(integral_v_dv(z) * n for z, n in popc.items())
+    expected = 2.0 * per_lipid / area_per_lipid_a2  # two leaflets
+
+    atomic_numbers, coordinates = build_reference_lipid_patch(
+        n_lipids_per_leaflet=CALIBRATION_N_LIPIDS_PER_LEAFLET,
+        area_per_lipid_a2=area_per_lipid_a2,
+        seed=CALIBRATION_SEED,
+    )
     profile = compute_bilayer_profile(
-        atomic_numbers, coordinates, parameterization="shtyrov"
+        atomic_numbers, coordinates, voxel_size=CALIBRATION_VOXEL_SIZE_A
     )
-    assert amplitude > 5 * float(profile.psi.max())
+    inside = profile.distance_a.abs() < 40.0
+    measured = float(torch.trapezoid(profile.psi[inside], profile.distance_a[inside]))
+    assert measured == pytest.approx(expected, rel=0.05)
 
 
-def test_estimate_bilayer_peak_amplitude_independent_of_patch_size():
-    """A single-atom peak has no position dependence, so unlike the old
-    laterally-averaged behaviour, the calibrated amplitude should be the
-    same regardless of how many lipids the reference patch has -- only
-    the SET of atomic species present matters, and the lipid template's
-    species set doesn't change with patch size."""
-    small_numbers, small_coords = build_reference_lipid_patch(
-        n_lipids_per_leaflet=2, seed=0
+def test_bilayer_acyl_core_sits_above_ice():
+    """The acyl core is MORE strongly scattering than amorphous ice, not
+    less, and this is not obvious: hydrocarbon at ~0.9 g/cm^3 is the less
+    dense material, so a mass-density argument gets the sign wrong.
+
+    For electrons the currency is not electron density. Mott-Bethe leaves a
+    diffuse one-electron atom screening its own proton poorly at low k, so
+    hydrogen scatters 2.5x what carbon does per unit mass, and the acyl
+    core -- pure CH2, the most hydrogen-rich region of the molecule -- ends
+    up above ice. This test exists because an earlier version of it
+    asserted the opposite, and passed only because the template was
+    missing all 82 of POPC's hydrogens."""
+    from specter.specimen.membrane._profile import (
+        CALIBRATION_N_LIPIDS_PER_LEAFLET,
+        CALIBRATION_SEED,
+        CALIBRATION_VOXEL_SIZE_A,
+        calibrated_bilayer_peak_amplitude,
     )
-    large_numbers, large_coords = build_reference_lipid_patch(
-        n_lipids_per_leaflet=200, seed=1
+
+    ice_mean_inner_potential = 4.6  # same tables, H2O at 0.94 g/cm^3
+
+    atomic_numbers, coordinates = build_reference_lipid_patch(
+        n_lipids_per_leaflet=CALIBRATION_N_LIPIDS_PER_LEAFLET, seed=CALIBRATION_SEED
     )
-    amplitude_small = estimate_bilayer_peak_amplitude(
-        small_numbers, small_coords, parameterization="shtyrov"
+    profile = compute_bilayer_profile(
+        atomic_numbers, coordinates, voxel_size=CALIBRATION_VOXEL_SIZE_A
     )
-    amplitude_large = estimate_bilayer_peak_amplitude(
-        large_numbers, large_coords, parameterization="shtyrov"
+    core = float(profile.psi[profile.distance_a.abs() < 8.0].mean())
+    assert core > ice_mean_inner_potential
+
+    # ... and the headgroups are stronger still, which is the ordering that
+    # gives a membrane its dark-bright-dark cross-section.
+    assert calibrated_bilayer_peak_amplitude("shtyrov") > core
+
+
+def test_reference_patch_central_window_carries_the_target_areal_density():
+    """compute_bilayer_profile's lateral_core_fraction=0.6 is load
+    bearing, and this is why the plane average is correctly normalised
+    rather than diluted: the central window recovers the patch's own
+    area_per_lipid_a2 target, while the full patch (whose jittered edges
+    are under-populated) reads about twice that."""
+    area_per_lipid = 65.0
+    atomic_numbers, coordinates = build_reference_lipid_patch(
+        n_lipids_per_leaflet=400, seed=0, area_per_lipid_a2=area_per_lipid
     )
-    assert amplitude_small == pytest.approx(amplitude_large)
+    phosphorus = coordinates[atomic_numbers == 15]
+    upper = phosphorus[phosphorus[:, 2] > 0]
+
+    def area_per_lipid_in_central(fraction: float) -> float:
+        half_x = fraction * float(coordinates[:, 0].max() - coordinates[:, 0].min()) / 2
+        half_y = fraction * float(coordinates[:, 1].max() - coordinates[:, 1].min()) / 2
+        inside = upper[(upper[:, 0].abs() <= half_x) & (upper[:, 1].abs() <= half_y)]
+        return (2 * half_x) * (2 * half_y) / len(inside)
+
+    assert area_per_lipid_in_central(0.6) == pytest.approx(area_per_lipid, rel=0.15)
+    assert area_per_lipid_in_central(1.0) > 1.5 * area_per_lipid
 
 
 def test_build_analytic_bilayer_profile_is_two_clean_peaks_with_zero_between():

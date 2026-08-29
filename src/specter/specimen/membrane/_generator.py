@@ -53,9 +53,7 @@ from ._placement import (
 )
 from ._profile import (
     BilayerProfile,
-    build_analytic_bilayer_profile,
-    build_reference_lipid_patch,
-    estimate_bilayer_peak_amplitude,
+    build_measured_bilayer_profile,
 )
 from ._raster import rasterize_membrane_density
 
@@ -523,22 +521,32 @@ class MembraneGenerator:
         Default "shtyrov".
     bilayer_thickness : float, optional
         Phosphate-to-phosphate (outer-leaflet-peak to inner-leaflet-peak)
-        spacing, Å, for the analytic two-Gaussian-peak bilayer
-        profile (:func:`~specter.specimen.membrane._profile.
-        build_analytic_bilayer_profile` -- matches real cryo-EM bilayer
-        micrographs' two-line "railroad track" appearance directly, rather
-        than emerging from a simulated atomic point cloud, which proved
-        fragile: see that function's own docstring for the concrete bugs
-        this replaced). Default 30.0 -- midpoint of `polnet`'s own
-        `MB_THICK_RG` default range (25.0, 35.0) (an earlier default of
-        38.0, taken from the old atomic model's own headgroup z-offsets
-        rather than cross-checked against polnet specifically, sat above
-        polnet's entire range and visibly read as too widely spaced).
+        spacing, Å. The measured profile
+        (:func:`~specter.specimen.membrane._profile.
+        build_measured_bilayer_profile`) is rescaled along z to this
+        value, at fixed amplitude, so the bilayer's integrated potential
+        scales with it as lipid-volume conservation requires.
+
+        Default 30.0, the midpoint of `polnet`'s `MB_THICK_RG` range
+        (25.0, 35.0). Note that this sits BELOW the published 36-39 Å
+        range for fluid phosphatidylcholine, which the reference lipid
+        template itself reproduces at 40 Å
+        (:func:`~specter.specimen.membrane._profile.
+        native_bilayer_thickness_a`). Passing 38.0 renders a bilayer at
+        its measured thickness and about 27% more integrated potential;
+        the default is kept at 30.0 only because the shipped configs set
+        it explicitly and changing it would silently alter every existing
+        membrane.
     bilayer_layer_sigma_a : float, optional
-        Gaussian width of each leaflet peak, Å -- matches `polnet`'s
-        own `MB_LAYER_S_RG` parameter. Default 1.25, the midpoint of
-        polnet's own default range (0.5, 2.0) (an earlier default of 2.0
-        sat at that range's blurriest end, not a representative value).
+        ADDITIONAL Gaussian broadening applied along z, Å. Default 0.0.
+
+        This was the leaflet peak width of the analytic two-Gaussian
+        profile, defaulting to 1.25. `generate()` no longer uses that
+        profile, and the measured one carries whatever width its atomic
+        model implies, so there is no width left here to set -- only
+        extra blur to add on top, which the rasterizer's own anti-
+        aliasing already handles for the render grid. Raise it only to
+        deliberately smear a bilayer.
     membrane_scale_range : tuple of float, optional
         ``(low, high)``: a single random multiplicative scale, drawn
         uniformly from this range once per `generate()` call (seeded from
@@ -551,8 +559,14 @@ class MembraneGenerator:
         (itself derived from `self.profile.psi.max()`) automatically
         consistent with whatever scale was drawn, with no extra
         bookkeeping. The drawn value is recorded in `self.membrane_scale`.
-        Default ``(0.5, 1.0)``; pass ``(1.0, 1.0)`` for no randomization
-        (always scales by exactly 1).
+        Default ``(1.0, 1.0)``: the calibrated amplitude is used as-is,
+        since it is a measured physical quantity and dimming it by an
+        arbitrary factor would put the bilayer off the volts scale the
+        rest of the volume is on. This defaulted to ``(0.5, 1.0)`` until
+        2026-08-29, which attenuated every membrane by 0.75x on average
+        while `estimate_bilayer_peak_amplitude` was independently
+        overstating the bilayer 5.1x. Widen it only to augment contrast
+        deliberately across a generated set.
     transmembrane_specs : list of TransmembraneSpec, optional
         Transmembrane protein species to attempt placing. Default None (no
         transmembrane proteins).
@@ -722,8 +736,8 @@ class MembraneGenerator:
         n_lipids_per_leaflet: int = 200,
         parameterization: str = "shtyrov",
         bilayer_thickness: float = 30.0,
-        bilayer_layer_sigma_a: float = 1.25,
-        membrane_scale_range: tuple[float, float] = (0.5, 1.0),
+        bilayer_layer_sigma_a: float = 0.0,
+        membrane_scale_range: tuple[float, float] = (1.0, 1.0),
         transmembrane_specs: list[TransmembraneSpec] | None = None,
         transmembrane_occupancy_fraction: float = _DEFAULT_TRANSMEMBRANE_OCCUPANCY_FRACTION,
         pdb_cache_dir: str = DEFAULT_PDB_CACHE_DIR,
@@ -1073,22 +1087,13 @@ class MembraneGenerator:
         torch.Tensor
             Density volume, shape ``target_shape``.
         """
-        atomic_numbers, coordinates = build_reference_lipid_patch(
-            n_lipids_per_leaflet=self.n_lipids_per_leaflet,
-            seed=self.seed,
-            device=self.device,
-        )
-        peak_amplitude = estimate_bilayer_peak_amplitude(
-            atomic_numbers, coordinates, parameterization=self.parameterization
-        )
-
         # Random per-instance contrast augmentation: drawn from
-        # membrane_scale_range and folded into the amplitude BEFORE
-        # build_analytic_bilayer_profile, not applied as a separate
-        # post-hoc multiply on self.volume -- that keeps
-        # _insert_blend's occupancy threshold (itself derived from
-        # self.profile.psi.max()) automatically consistent with
-        # whatever scale gets drawn here, with no extra bookkeeping.
+        # membrane_scale_range and folded into psi BEFORE the volume is
+        # rendered, not applied as a separate post-hoc multiply on
+        # self.volume -- that keeps _insert_blend's occupancy threshold
+        # (itself derived from self.profile.psi.max()) automatically
+        # consistent with whatever scale gets drawn here, with no extra
+        # bookkeeping.
         scale_generator = torch.Generator(device="cpu")
         if self.seed is not None:
             scale_generator.manual_seed(self.seed)
@@ -1096,21 +1101,48 @@ class MembraneGenerator:
         self.membrane_scale = float(
             torch.empty(1).uniform_(low, high, generator=scale_generator).item()
         )
-        peak_amplitude *= self.membrane_scale
 
-        self.profile = build_analytic_bilayer_profile(
+        # The MEASURED psi(z), not the analytic two-Gaussian form: the
+        # latter stands on vacuum and so discards the acyl core, which
+        # costs 4.8x of the bilayer's integrated potential and shows up
+        # as weak membranes in projection. See
+        # build_measured_bilayer_profile's docstring.
+        self.profile = build_measured_bilayer_profile(
             thickness_a=self.bilayer_thickness,
-            layer_sigma_a=self.bilayer_layer_sigma_a,
-            amplitude=peak_amplitude,
+            extra_sigma_a=self.bilayer_layer_sigma_a,
+            parameterization=self.parameterization,
             device=self.device,
         )
+        if self.membrane_scale != 1.0:
+            self.profile = BilayerProfile(
+                distance_a=self.profile.distance_a,
+                psi=self.profile.psi * self.membrane_scale,
+            )
 
         # The field's working spacing must stay fine enough to resolve the
         # bilayer's own extent (curvature capping, leaflet offset) --
         # derived from the profile's actual rendered table rather than a
         # hardcoded thickness, so this stays correct if the profile's
         # template is retuned later.
-        half_extent_a = float(self.profile.distance_a.abs().max())
+        #
+        # Measured from where psi is actually non-negligible, NOT from the
+        # table's full z-range. The measured profile carries a decaying
+        # tail out to +-32 A that the analytic two-Gaussian form did not,
+        # and taking the raw range let that tail COARSEN the field grid
+        # (spacing is capped at half_extent/8 below), which broke
+        # sample_surface_sites' Newton projection outright: transmembrane
+        # placement silently found zero sites. The 1% cutoff is the
+        # gentlest one that drops only the numerically irrelevant tail --
+        # it gives +-20 A here, tighter than the +-22.5 A the analytic
+        # profile reported, so the grid ends up finer than before rather
+        # than merely restored.
+        psi_abs = self.profile.psi.abs()
+        support = self.profile.distance_a[psi_abs > 0.01 * float(psi_abs.max())]
+        half_extent_a = float(
+            support.abs().max()
+            if support.numel()
+            else self.profile.distance_a.abs().max()
+        )
         # Keyed to _gen_voxel_size (the resolution generate() actually renders
         # at), not the fine self.voxel_size the output ends up at post-
         # upsample -- resolving the field finer than the raster it feeds

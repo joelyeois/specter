@@ -15,6 +15,8 @@ Saves PNGs directly into docs/assets/images/.
 
 from __future__ import annotations
 
+import os
+
 import matplotlib
 import numpy as np
 import torch
@@ -38,7 +40,9 @@ from specter.specimen.packing import estimate_protein_box_size
 from specter.specimen.tomogram import TomogramSpecimenGenerator
 
 OUT_DIR = "docs/assets/images"
-PDB_CACHE = "~/.cache/specter/pdb"
+# Expanded: passed through unexpanded, a literal "~" directory gets
+# created wherever the script is run from, duplicating the cache.
+PDB_CACHE = os.path.expanduser("~/.cache/specter/pdb")
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 SEED = 7
 

@@ -3,15 +3,20 @@ Generate the figures for docs/concepts/cryoet-specimen/bilayer.md, which
 explains how a membrane's shape becomes scattering potential
 (``specter.specimen.membrane._profile``, ``._raster``, ``._placement``).
 
-Calls the shipped `build_analytic_bilayer_profile`/
-`estimate_bilayer_peak_amplitude`/`rasterize_membrane_density` and a real
-`MembraneGenerator` run rather than reimplementing any of them.
+Calls the shipped `build_measured_bilayer_profile`/
+`compute_bilayer_profile`/`rasterize_membrane_density` and a real
+`MembraneGenerator` run rather than reimplementing any of them. The one
+exception is `_superseded_two_gaussian`, the profile specter rendered with
+until 2026-08-31: it is reconstructed here, not imported, because the
+left-hand panel exists to show what replacing it bought.
 
 Run with: uv run python docs-figures/cryoet_specimen_bilayer.py
 Saves PNGs directly into docs/assets/images/.
 """
 
 from __future__ import annotations
+
+import os
 
 import matplotlib
 import numpy as np
@@ -23,79 +28,99 @@ import matplotlib.pyplot as plt
 from _render import TEAL
 from specter.specimen.membrane import MembraneGenerator, TransmembraneSpec
 from specter.specimen.membrane._profile import (
-    build_analytic_bilayer_profile,
+    CALIBRATION_N_LIPIDS_PER_LEAFLET,
+    build_measured_bilayer_profile,
     build_reference_lipid_patch,
     compute_bilayer_profile,
-    estimate_bilayer_peak_amplitude,
+    native_bilayer_thickness_a,
 )
 from specter.specimen.membrane._raster import rasterize_membrane_density
 
 OUT_DIR = "docs/assets/images"
-PDB_CACHE = "~/.cache/specter/pdb"
+# Expanded: passed through unexpanded, a literal "~" directory gets
+# created wherever the script is run from, duplicating the cache.
+PDB_CACHE = os.path.expanduser("~/.cache/specter/pdb")
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 SEED = 5
 ORANGE = "#d98218"
 PURPLE = "#6b4fa0"
 
 
+def _superseded_two_gaussian(
+    thickness_a: float = 30.0, layer_sigma_a: float = 1.25, amplitude: float = 20.2
+) -> tuple[np.ndarray, np.ndarray]:
+    """The profile specter shipped until 2026-08-31: two Gaussians on
+    vacuum, scaled by an amplitude fitted from an isolated atom's peak.
+
+    Reconstructed here rather than imported because it was deleted --
+    modelling a bilayer as two peaks with nothing between them describes
+    how one LOOKS under CTF, not what it is, and discarding the acyl core
+    cost 4.8x of the integrated potential. Kept only so the figure can
+    show that difference.
+    """
+    d = np.linspace(-40.0, 40.0, 481)
+    half = thickness_a / 2.0
+    peaks = np.exp(-0.5 * ((d - half) / layer_sigma_a) ** 2) + np.exp(
+        -0.5 * ((d + half) / layer_sigma_a) ** 2
+    )
+    return d, amplitude * peaks
+
+
 def figure_profile() -> None:
-    """How psi(d) is built. Left: the schematic atomic lipid patch's own
-    laterally-averaged profile against the two-Gaussian analytic profile
-    the generator actually ships -- same twin-peak structure, but the
-    analytic one cannot grow a competing hump between the leaflets.
-    Right: the two knobs that shape it."""
-    atomic_numbers, coordinates = build_reference_lipid_patch(seed=SEED, device=DEVICE)
-    atomic = compute_bilayer_profile(atomic_numbers, coordinates, device=DEVICE)
-    amplitude = estimate_bilayer_peak_amplitude(atomic_numbers, coordinates)
-    analytic = build_analytic_bilayer_profile(amplitude=amplitude)
+    """How psi(d) is built. Left: the measured profile the generator
+    renders, against the two-Gaussian form it replaced -- the difference
+    is the acyl core, which is most of the integrated potential. Right:
+    what bilayer_thickness does to it."""
+    atomic_numbers, coordinates = build_reference_lipid_patch(
+        n_lipids_per_leaflet=CALIBRATION_N_LIPIDS_PER_LEAFLET, seed=SEED, device=DEVICE
+    )
+    measured = compute_bilayer_profile(atomic_numbers, coordinates, device=DEVICE)
+    m_d = measured.distance_a.cpu().numpy()
+    m_psi = measured.psi.cpu().numpy()
+    old_d, old_psi = _superseded_two_gaussian()
 
     fig, axes = plt.subplots(1, 2, figsize=(9.8, 3.9))
+
     ax = axes[0]
-    atomic_psi = atomic.psi.cpu().numpy()
+    ax.plot(m_d, m_psi, color=ORANGE, linewidth=2, label="measured psi(d) (shipped)")
+    ax.fill_between(m_d, 0, m_psi, color=ORANGE, alpha=0.12)
     ax.plot(
-        atomic.distance_a.cpu().numpy(),
-        atomic_psi / atomic_psi.max(),
-        color=ORANGE,
-        label="atomic lipid patch (shape only)",
+        old_d, old_psi, color=TEAL, linewidth=1.4, label="two-Gaussian (superseded)"
     )
-    analytic_psi = analytic.psi.numpy()
-    ax.plot(
-        analytic.distance_a.numpy(),
-        analytic_psi / analytic_psi.max(),
-        color=TEAL,
-        linewidth=2,
-        label="analytic two-Gaussian (shipped)",
-    )
+    ax.axhline(4.6, ls="--", lw=1.0, color="#888")
+    ax.text(-38, 4.9, "amorphous ice, 4.6 V", fontsize=8, color="#666")
+    integral = float(np.trapezoid(m_psi[np.abs(m_d) < 40], m_d[np.abs(m_d) < 40]))
     ax.set_xlabel("signed distance from mid-plane, d (A)")
-    ax.set_ylabel("psi(d), normalised")
-    ax.set_xlim(-30, 30)
-    ax.legend(fontsize=8.5)
-    ax.set_title(f"peak calibrated to {amplitude:.1f} V", fontsize=11)
+    ax.set_ylabel("psi(d), volts")
+    ax.set_xlim(-40, 40)
+    ax.set_ylim(0, max(m_psi.max(), old_psi.max()) * 1.08)
+    ax.legend(fontsize=8.5, loc="upper right")
+    ax.set_title(
+        f"integral psi dz = {integral:.0f} V*A, against 53 before", fontsize=10
+    )
 
     ax = axes[1]
-    for thickness, style in [(25.0, ":"), (30.0, "-"), (35.0, "--")]:
-        profile = build_analytic_bilayer_profile(thickness_a=thickness)
+    native = native_bilayer_thickness_a()
+    for thickness, style in [(30.0, ":"), (38.0, "-"), (46.0, "--")]:
+        profile = build_measured_bilayer_profile(thickness_a=thickness)
+        psi = profile.psi.cpu().numpy()
+        dist = profile.distance_a.cpu().numpy()
         ax.plot(
-            profile.distance_a.numpy(),
-            profile.psi.numpy(),
+            dist,
+            psi,
             style,
             color=TEAL,
-            label=f"thickness_a = {thickness:g}",
-        )
-    for sigma, style in [(0.5, ":"), (2.0, "--")]:
-        profile = build_analytic_bilayer_profile(layer_sigma_a=sigma)
-        ax.plot(
-            profile.distance_a.numpy(),
-            profile.psi.numpy(),
-            style,
-            color=PURPLE,
-            label=f"layer_sigma_a = {sigma:g}",
+            linewidth=1.8 if thickness == 38.0 else 1.2,
+            label=f"bilayer_thickness = {thickness:g}",
         )
     ax.set_xlabel("signed distance from mid-plane, d (A)")
-    ax.set_ylabel("psi(d), uncalibrated")
-    ax.set_xlim(-30, 30)
+    ax.set_ylabel("psi(d), volts")
+    ax.set_xlim(-40, 40)
     ax.legend(fontsize=8)
-    ax.set_title("bilayer_thickness and layer_sigma", fontsize=11)
+    ax.set_title(
+        f"rescaled in z at fixed amplitude (template: {native:.0f} A)", fontsize=10
+    )
+
     plt.tight_layout()
     path = f"{OUT_DIR}/cryoet-bilayer-profile.png"
     plt.savefig(path, dpi=180)

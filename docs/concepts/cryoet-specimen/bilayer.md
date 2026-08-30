@@ -22,51 +22,84 @@ lookup on the signed distance field. The generator does the
 atomic-resolution work once and reuses it everywhere through that
 lookup.
 
-\(\psi(d)\) itself is two Gaussians, one per leaflet:
+\(\psi(d)\) is measured, not parameterised. `build_reference_lipid_patch`
+builds a schematic atomic bilayer patch, `PotentialBuilder` renders it,
+and `compute_bilayer_profile` averages that render laterally over the
+central 60% of the patch, which is the region carrying the intended
+areal density of one lipid per 65 Å². The result is a profile in volts,
+on the same scale as any `PotentialBuilder`-rendered protein template, so
+a membrane and an inserted transmembrane protein are directly
+commensurate in the same volume.
 
-\[
-\psi(d) = A\left[
-  e^{-\frac{(d - t/2)^2}{2\sigma^2}} + e^{-\frac{(d + t/2)^2}{2\sigma^2}}
-\right]
-\]
-
-with \(t\) = `bilayer_thickness` (phosphate-to-phosphate) and \(\sigma\) =
-`bilayer_layer_sigma_a`. This is polnet's shell-then-blur construction
-reduced to 1D: since \(\psi\) is always evaluated against a signed
-distance anyway, a Gaussian at each leaflet's offset *is* the
-cross-section of a thin shell blurred by \(\sigma\).
-
-![Left, the atomic lipid patch's own profile against the shipped analytic profile. Right, the effect of bilayer_thickness and layer_sigma_a.](../../assets/images/cryoet-bilayer-profile.png){ width="900" style="display:block;margin:1.2em auto;" }
+![Left, the measured profile against the two-Gaussian form it replaced. Right, the effect of bilayer_thickness.](../../assets/images/cryoet-bilayer-profile.png){ width="900" style="display:block;margin:1.2em auto;" }
 ///caption
-Left, the atomic lipid patch's own profile against the shipped analytic profile. Right, the effect of bilayer_thickness and layer_sigma_a.
+Left, the measured profile against the two-Gaussian form it replaced. Right, the effect of bilayer_thickness.
 ///
 
-The alternative, deriving the profile's *shape* by building a schematic
-atomic lipid patch, jittering it and rendering it, is still in the
-codebase (`compute_bilayer_profile`, the orange curve above), and it is
-not what ships. It is more physically motivated, and more fragile:
-keeping the acyl-chain region featureless relative to the phosphate
-peaks means fighting per-cluster jitter scales against emergent
-Gaussian-sum interference, with no guarantee a different lipid count or
-seed doesn't reintroduce a competing hump between the leaflets. Because
-\(\sigma\) is far smaller than the leaflet separation, the two-Gaussian
-construction cannot do that, by construction, not by tuning.
+The profile is a slab with headgroup peaks on it, not two isolated lines.
+Headgroups reach 8.5 V and the acyl core sits near 5.4 V, both above
+amorphous ice at roughly 4.6 V, so a bilayer scatters more strongly than
+its surroundings across its whole thickness.
 
-## Amplitude: calibrating against real atoms
+That the core exceeds ice is not obvious, and reasoning from mass density
+gets the sign wrong: hydrocarbon at 0.9 g/cm³ is the less dense material.
+For electrons the relevant currency is not electron density. Mott-Bethe
+leaves a diffuse one-electron atom screening its own proton poorly at low
+\(k\), so hydrogen scatters about 2.5× what carbon does per unit mass,
+and the acyl core is the most hydrogen-rich region of the molecule. The
+same effect governs the [amorphous ice](../ice.md) kernel.
 
-The *shape* is analytic; the *scale* is not. `amplitude` comes from
-rendering each unique atomic species in the reference lipid template as a
-**single isolated atom** and taking the tallest raw peak, most often the
-phosphate phosphorus. That puts the bilayer in the same units as a
-`PotentialBuilder`-rendered protein template, so a membrane and an
-inserted transmembrane protein sit on a physically consistent scale in the
-same volume.
+`bilayer_thickness` rescales the measured profile along \(z\) at fixed
+amplitude, so the integrated potential scales with thickness. That is the
+physical relationship rather than a convention: lipid volume is
+conserved, so a bilayer of thickness \(t\) built from lipids of volume
+\(V\) occupies \(2V/t\) per lipid and deposits \(t \cdot (\text{scattering
+per lipid}) / V\) per unit area. Normalising the integral instead would
+make a thinner membrane denser.
 
-Calibrating instead from the *laterally averaged* peak of the full
-rendered lipid patch would be wrong: measured directly, that dilutes the
-true single-atom peak by ~20× (97.5 → 4.8 V), with no physical
-justification, since a real bilayer's phosphate atoms do not scatter more
-weakly than the same atom in a protein.
+### The two-Gaussian profile this replaced
+
+Until 2026-08-31 \(\psi(d)\) was two Gaussians standing on vacuum, one per
+leaflet, scaled by a fitted amplitude. It is worth knowing why, because
+the construction is superficially reasonable and reproduces the
+"railroad track" appearance of a real bilayer micrograph directly.
+
+That appearance is an *imaging* signature. Two dark lines arise because
+the headgroups are locally denser and because CTF phase contrast enhances
+the gradient, not because the space between them is empty. Building the
+appearance into the specimen therefore counts it twice, since the
+simulator then images that specimen, and it deletes the acyl core the
+bilayer actually holds.
+
+The cost is invisible where it was looked for and dominant where it was
+not. In a single slice the headgroup peaks dominate and the two profiles
+look comparable. In a projection, which integrates through the membrane,
+the analytic form carries 53 V·Å against the measured profile's 254 — a
+4.8× shortfall in projected membrane contrast.
+
+## Amplitude: why there is no longer one
+
+There is no amplitude scalar. \(\psi(d)\) is used as measured, in volts,
+and nothing rescales it to a peak.
+
+One was fitted until 2026-08-30, by rendering each unique species in the
+lipid template as a **single isolated atom** and taking the tallest raw
+peak, most often the phosphate phosphorus. The reasoning was that
+averaging the full patch laterally diluted that peak roughly 20-fold and
+so could not be the right reference.
+
+Both halves of that were wrong. The dilution was measured over the whole
+patch, including its under-populated jittered edges, which
+`compute_bilayer_profile` never averages over. And an atom's own centre
+is a cusp: phosphorus measures 400.5 V at 0.5 Å sampling, 26.9 V at 2.0 Å
+and 4.1 V at 4.0 Å, so it has no grid-independent value and cannot
+calibrate anything at any voxel size. The fitted amplitude overstated the
+bilayer 5.1×.
+
+The rule that failure illustrates still governs anything compared against
+this profile: \(\psi(d)\) is a plane average, the mean potential over a
+plane at height \(d\), and a plane average is commensurate only with
+another plane average.
 
 A general principle recurs here: **the smoothness real cryo-ET membranes
 show comes from the microscope's resolution limits, applied to the ground
@@ -74,11 +107,34 @@ truth after the generator builds it** (CTF, multislice, detector MTF; see
 [Forward simulation](../forward-simulation.md)), not from pre-averaging
 the ground truth itself.
 
-`membrane_scale_range` then draws a per-instance contrast multiplier and
-folds it into the amplitude *before* the generator builds the profile,
-rather than applying it as a post-hoc multiply on the rendered volume.
-This keeps the compositing occupancy threshold, itself derived from the
-profile's peak, consistent with whatever scale was drawn.
+### What anchors the scale
+
+One identity, with no free parameter. Integrated across the bilayer,
+\(\psi\) is fixed by chemistry alone:
+
+\[
+\int \psi(z)\,dz = \frac{2 \times (\text{scattering per lipid})}
+                        {\text{area per lipid}}
+\]
+
+The lipid template carries the exact stoichiometry of POPC,
+C\(_{42}\)H\(_{82}\)NO\(_8\)P, and the scattering integral per element is
+a property of the scattering tables. Together they predict 254.5 V·Å;
+the rendered patch measures 254.0. The same identity applied to a protein
+predicts apoferritin's mean inner potential as 7.03 V against 7.00 V
+measured by rendering it, so the check is not circular.
+
+Hydrogen is load-bearing in that census. POPC's 82 hydrogens are a
+quarter of the molecule's total scattering, and a template omitting them
+carries only 59% of a real lipid.
+
+`membrane_scale_range` draws a per-instance contrast multiplier and
+applies it to the profile before the generator renders, rather than as a
+post-hoc multiply on the volume. This keeps the compositing occupancy
+threshold, itself derived from the profile's peak, consistent with
+whatever scale was drawn. It defaults to `(1.0, 1.0)`: the profile is a
+measured quantity, and dimming it by an arbitrary factor puts the bilayer
+off the scale the rest of the volume is on.
 
 ## Anti-aliased rasterization
 
@@ -144,23 +200,37 @@ what it found.
 
 | Parameter | Meaning | Default |
 |---|---|---|
-| `bilayer_thickness` | Phosphate-to-phosphate leaflet spacing \(t\), Å | 30.0 |
-| `bilayer_layer_sigma_a` | Per-leaflet Gaussian width \(\sigma\), Å | 1.25 |
-| `membrane_scale_range` | Per-instance contrast multiplier, drawn uniformly | (0.5, 1.0) |
+| `bilayer_thickness` | Phosphate-to-phosphate leaflet spacing \(t\), Å | 38.0 |
+| `bilayer_layer_sigma_a` | Additional Gaussian broadening along \(z\), Å | 0.0 |
+| `membrane_scale_range` | Per-instance contrast multiplier, drawn uniformly | (1.0, 1.0) |
 | `min_transmembrane_spacing` | Minimum centre-to-centre site spacing, Å | 40.0 |
 | `transmembrane_occupancy_fraction` | Surface occupancy target for site sampling | 0.05 |
 | `frequency` (per spec) | Relative weight among transmembrane species | 1 |
 | `tm_span_mask` (per spec) | Atom mask selecting the membrane-spanning region | None (full z-extent) |
 
-Defaults for \(t\) and \(\sigma\) are polnet's own midpoints (its
-`MB_THICK_RG` 25–35 Å and `MB_LAYER_S_RG` 0.5–2.0 Å).
+\(t\) defaults to 38.0 Å, inside the published 36–39 Å range for fluid
+phosphatidylcholine. It was 30.0 until 2026-08-30, the midpoint of
+polnet's `MB_THICK_RG` (25–35 Å) — a range sitting entirely below the
+experimental one. The reference template's own spacing is 40 Å, so the
+default rescales it by 0.95.
+
+`bilayer_layer_sigma_a` is *additional* broadening, and defaults to none.
+It set the leaflet peak width of the analytic profile; the measured
+profile carries whatever width its atomic model implies, and the
+rasteriser anti-aliases to the render grid separately, so there is no
+width left to set here — only blur to add.
 
 ## Limitations
 
-- **The reference lipid template is schematic.** Per-leaflet atom
-  z-offsets from bilayer structural biology plus jitter, not a relaxed or
-  MD-equilibrated structure. It only sets the calibration amplitude now,
-  but swapping in a real coordinate set is still on the list.
+- **The reference lipid template is schematic**, and it now sets the
+  entire profile rather than just a scale factor. Its census is exact POPC
+  stoichiometry, so the integrated potential is anchored to chemistry, but
+  the per-leaflet atom z-offsets are hand-picked from bilayer structural
+  biology plus jitter, not a relaxed or MD-equilibrated structure. The
+  distribution of that integral along \(z\) is therefore modelled, and
+  the template's own 40 Å phosphate spacing sits just above the published
+  36–39 Å range. Sourcing \(\psi(z)\) from an MD snapshot or from
+  published component density profiles is the open item.
 - **No leaflet asymmetry.** \(\psi(d)\) is symmetric about the mid-plane;
   real membranes are not.
 - **No lipid composition.** One profile per membrane instance, with no

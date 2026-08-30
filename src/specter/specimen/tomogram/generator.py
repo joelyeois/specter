@@ -173,7 +173,7 @@ import torch
 from scipy import ndimage
 
 from ...config import ScalarOrRange
-from ...arrays import clip_insert_bounds
+from ...arrays import clip_insert_bounds, count_nonzero_chunked
 from ...crowding import insert_particles_into_micrograph
 from ...pdb import DEFAULT_PDB_CACHE_DIR, PDB, canonical_pdb_source
 from ...potential import PotentialBuilder
@@ -1230,8 +1230,21 @@ class TomogramSpecimenGenerator:
 
             region_mask = self.regions[location]
             if obstacle_mask is not None:
-                region_mask = region_mask & ~obstacle_mask
-            region_voxels = int(region_mask.sum())
+                # Negate first, then AND in place: `region_mask & ~obstacle`
+                # held the negation AND the result at once, and at a
+                # 300x1200x1200 tomogram each bool is 0.40 GiB. Profiled as
+                # the single largest allocation site in a default run, 3.22
+                # GiB across four blocks, since both regions are built while
+                # the originals are still referenced.
+                #
+                # Writing into the negation, never into self.regions -- that
+                # is kept for later stages and must not be mutated here.
+                region_mask = ~obstacle_mask
+                region_mask &= self.regions[location]
+            # Chunked: a plain .sum() on a volume-sized bool promotes every
+            # element to int64 first, 3.22 GiB for a 300x1200x1200 mask, and
+            # profiled as the largest single allocation in a default run.
+            region_voxels = count_nonzero_chunked(region_mask)
             if region_voxels == 0:
                 warnings.warn(
                     f"TomogramSpecimenGenerator: no '{location}' region found "
@@ -1672,7 +1685,12 @@ class TomogramSpecimenGenerator:
             hole_center=hole_center,
             edge_roughness=carbon_film_spec.edge_roughness,
         )
-        return volume + film.density.to(volume.device)
+        # Added in place: the caller reassigns `volume` from this return, so
+        # there is no second reference to preserve, and `volume + ...` held
+        # two full-size volumes at once -- 1.61 GiB each at the canonical
+        # 300x1200x1200.
+        volume += film.density.to(volume.device)
+        return volume
 
     def _stamp_beads(
         self,

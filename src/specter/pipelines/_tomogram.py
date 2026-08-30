@@ -31,6 +31,7 @@ import time
 
 import torch
 
+from specter.arrays import count_nonzero_chunked
 from specter.config import TomogramConfig, validate_config
 from specter.specimen import (
     ACTIN_SPEC,
@@ -605,7 +606,12 @@ def _run_single_tomogram(config: TomogramConfig) -> None:
             f"  {location.capitalize()}: {n_target} target(s), {n_filler} filler placed"
         )
     assert gen.instance_labels is not None
-    occupancy_fraction = float((gen.instance_labels > 0).float().mean())
+    # Chunked, and never materialized as float: `(labels > 0).float().mean()`
+    # built a 0.40 GiB bool and a 1.61 GiB float32 copy of the whole volume
+    # just to average it.
+    occupancy_fraction = count_nonzero_chunked(gen.instance_labels) / float(
+        gen.instance_labels.numel()
+    )
     _console.print(f"  Occupancy: {occupancy_fraction:.1%} of volume")
 
     _section("Saving")

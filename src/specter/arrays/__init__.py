@@ -17,6 +17,7 @@ from ._grids import (
     radial_kgrid_3d,
     real_to_kgrid_3d,
 )
+from ._reduce import count_nonzero_chunked
 from ._nps import compute_nps_1d, compute_nps_2d, compute_nps_3d
 from ._padding import (
     centered_pad,
@@ -44,6 +45,7 @@ __all__ = [
     "center_crop",
     "clip_insert_bounds",
     "coarse_occupancy_mask",
+    "count_nonzero_chunked",
     "compute_nps_1d",
     "compute_nps_2d",
     "compute_nps_3d",

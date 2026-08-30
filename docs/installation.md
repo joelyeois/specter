@@ -13,8 +13,10 @@ cd specter
 
 uv sync
 source .venv/bin/activate
-uv pip install -e .
 ```
+
+`uv sync` installs SPECTER itself alongside its dependencies, in editable
+mode, so no separate `uv pip install -e .` step is needed.
 
 !!! success "Verify installation"
     After installation, verify that the CLI is available:
@@ -33,6 +35,7 @@ uv pip install -e .
         ╭─ Commands ───────────────────────────────────────────────────────────────────╮
         │ build        Build specimen volumes and reusable assets                      │
         │ cache        Inspect and clear the cache of downloaded PDB/mmCIF structures. │
+        │ ghostbuster  Reconstruct 3D volumes from experimental images                 │
         │ jobs         Inspect and compare tracked SPECTER jobs.                       │
         │ reconstruct  Reconstruct 3D volumes from experimental images                 │
         │ simulate     Simulate cryo-EM/cryo-ET data                                   │

@@ -61,9 +61,8 @@ from images.
 ```bash
 git clone https://github.com/joelyeois/specter.git
 cd specter
-uv sync
+uv sync                      # installs SPECTER itself, plus its dependencies
 source .venv/bin/activate
-uv pip install -e .          # the package itself, not just its dependencies
 uv run --with jupyter jupyter lab
 ```
 
@@ -128,13 +127,21 @@ name rather than ignored.
 ```toml
 # Canonical default config for `specter simulate particles`.
 # Any field can be overridden on the command line, e.g.:
-#   specter simulate particles --config particle.toml --n_particles 3000
+#   specter simulate particles --config configs/particle.toml --n_particles 3000
 
-[potential]
+# Where the particles come from. Left unset, the run synthesizes them and
+# everything below applies as written; given a file, the poses and
+# per-particle CTF come from it instead.
+[data]
+# cs_path = "path/to/particles.cs"      # a CryoSPARC .cs file
+# star_path = "path/to/particles.star"  # ... or a RELION .star file (mutually exclusive)
+
+[specimen]
 pdb_source = "6bdf"
 assembly = true
 n_pixels = 256
 pixel_size = 1.0              # Å
+ice_thickness = 0.0           # Å, 0 = minimum (particle box size)
 
 [microscope]
 voltage = 300.0                # kV
@@ -172,6 +179,7 @@ and reconstruction by `specter reconstruct particle`, also spelled
 | `specter build ice` | A replacement `IceBank` library at a pixel size the bundled cache doesn't cover. |
 | `specter reconstruct particle` (alias: `specter ghostbuster particle`) | Reconstruct a 3D map from a particle stack, jointly refining pose, translation, and defocus. |
 | `specter jobs list/show/diff` | Inspect and compare parameters and provenance across past runs. |
+| `specter cache dir/info/clean` | Locate, inspect, or clear the cache of downloaded PDB/mmCIF structures. |
 
 Every subcommand takes an optional `--config path/to.toml`; any field in that
 TOML can also be set directly on the command line, and any field left unset
@@ -203,7 +211,7 @@ src/specter/        # main package: physics simulator + Ghostbuster reconstructi
   pipelines/         # end-to-end functions behind each CLI subcommand
 demo-notebooks/      # interactive, always-working usage examples
 configs/             # worked example TOML configs (not shipped in the wheel)
-docs/                # Concepts, user guide, and API reference (Read the Docs)
+docs/                # Concepts, user guide, and API reference (published to GitHub Pages)
 tests/               # pytest suite
 ```
 
@@ -234,10 +242,11 @@ roughly the same proportion, across nearly all 50 classes; see the
 [worked example](https://joelyeois.github.io/specter/user-guide/particle-stack/#example-matching-empiar-11377).
 
 **Which structures can I simulate?**
-Any PDB/mmCIF entry, referenced by its 4-character PDB code — SPECTER
-fetches and caches it automatically. Scattering-factor typing is most
-accurate on structures with resolvable hydrogens; see the
-[Monomer Library note](#installation) above.
+Any PDB/mmCIF structure. `--pdb_source` takes either a 4-character PDB
+accession code, which SPECTER fetches and caches automatically, or the path
+to a local `.pdb`/`.cif` file, which is read where it lies and never copied
+into the cache. Scattering-factor typing is most accurate on structures with
+resolvable hydrogens; see the [Monomer Library note](#installation) above.
 
 ---
 

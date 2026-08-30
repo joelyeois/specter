@@ -1,13 +1,13 @@
+import math
+
 import pytest
 import torch
 
 from specter.specimen.membrane._profile import (
     _LEAFLET_TEMPLATE,
     BilayerProfile,
-    build_analytic_bilayer_profile,
     build_reference_lipid_patch,
     compute_bilayer_profile,
-    estimate_bilayer_peak_amplitude,
 )
 
 
@@ -148,66 +148,6 @@ def test_compute_bilayer_profile_no_competing_peak_in_chain_region():
     assert center_region.mean() < 0.95 * chain_region.mean()
 
 
-def test_estimate_bilayer_peak_amplitude_is_the_plane_averaged_peak():
-    """`build_analytic_bilayer_profile`'s `amplitude` scales psi(z),
-    which is a PLANE AVERAGE -- the mean potential over a plane at height
-    z -- so it has to be calibrated against a plane average of a real
-    patch, which is exactly compute_bilayer_profile's peak."""
-    atomic_numbers, coordinates = build_reference_lipid_patch(
-        n_lipids_per_leaflet=200, seed=0
-    )
-    voxel_size = 1.5
-    amplitude = estimate_bilayer_peak_amplitude(
-        atomic_numbers, coordinates, voxel_size=voxel_size, parameterization="shtyrov"
-    )
-    profile = compute_bilayer_profile(
-        atomic_numbers, coordinates, voxel_size=voxel_size, parameterization="shtyrov"
-    )
-    assert amplitude == pytest.approx(float(profile.psi.max()), rel=1e-4)
-
-
-def test_estimate_bilayer_peak_amplitude_is_not_an_isolated_atom_cusp():
-    """Regression test against reintroducing an isolated-atom
-    calibration, which overstated the bilayer 5.1x between 2026-08 and
-    2026-08-29. The potential at an atom's own centre is a cusp with no
-    grid-independent value, so it cannot calibrate a plane average no
-    matter which voxel size is chosen: phosphorus measures 400.5 V at
-    0.5 A and 4.1 V at 4.0 A, spanning two orders of magnitude."""
-    from specter.specimen.membrane._profile import _isolated_atom_peak_potential
-
-    atomic_numbers, coordinates = build_reference_lipid_patch(
-        n_lipids_per_leaflet=200, seed=0
-    )
-    amplitude = estimate_bilayer_peak_amplitude(
-        atomic_numbers, coordinates, parameterization="shtyrov"
-    )
-    # The cusp diverges as the grid is refined; the plane average must
-    # not track it at any of these spacings.
-    peaks = [
-        _isolated_atom_peak_potential(15, dx, "shtyrov", "cpu")
-        for dx in (0.5, 1.0, 2.0, 4.0)
-    ]
-    assert max(peaks) / min(peaks) > 50  # the cusp really is grid-defined
-    for peak in peaks:
-        assert amplitude != pytest.approx(peak, rel=0.2)
-
-
-def test_estimate_bilayer_peak_amplitude_is_stable_across_calibration_grid():
-    """The plane average, unlike the cusp above, has a well-defined
-    continuous limit -- which is what makes a fixed CALIBRATION_VOXEL_
-    SIZE_A meaningful rather than arbitrary."""
-    atomic_numbers, coordinates = build_reference_lipid_patch(
-        n_lipids_per_leaflet=200, seed=0
-    )
-    values = [
-        estimate_bilayer_peak_amplitude(
-            atomic_numbers, coordinates, voxel_size=dx, parameterization="shtyrov"
-        )
-        for dx in (0.5, 1.0, 2.0)
-    ]
-    assert max(values) / min(values) < 1.15
-
-
 def test_bilayer_profile_integral_matches_popc_stoichiometry():
     """The one calibration check that needs no free parameter.
 
@@ -274,7 +214,6 @@ def test_bilayer_acyl_core_sits_above_ice():
         CALIBRATION_N_LIPIDS_PER_LEAFLET,
         CALIBRATION_SEED,
         CALIBRATION_VOXEL_SIZE_A,
-        calibrated_bilayer_peak_amplitude,
     )
 
     ice_mean_inner_potential = 4.6  # same tables, H2O at 0.94 g/cm^3
@@ -290,7 +229,7 @@ def test_bilayer_acyl_core_sits_above_ice():
 
     # ... and the headgroups are stronger still, which is the ordering that
     # gives a membrane its dark-bright-dark cross-section.
-    assert calibrated_bilayer_peak_amplitude("shtyrov") > core
+    assert float(profile.psi.max()) > core
 
 
 def test_reference_patch_central_window_carries_the_target_areal_density():
@@ -316,32 +255,48 @@ def test_reference_patch_central_window_carries_the_target_areal_density():
     assert area_per_lipid_in_central(1.0) > 1.5 * area_per_lipid
 
 
-def test_build_analytic_bilayer_profile_is_two_clean_peaks_with_zero_between():
-    """This is the actual shape MembraneGenerator renders with by default
-    (see _generator.py) -- a real cryo-EM bilayer micrograph reads as two
-    sharp, well-separated lines with genuinely empty space between and
-    outside them (the "railroad track" look), which this analytic
-    two-Gaussian-peak construction gives by construction (peaks
-    geometrically separated by `thickness_a`, each individually narrow
-    relative to that separation), unlike compute_bilayer_profile's
-    simulated-atom-cloud approach, which needed real bug-fixing effort to
-    even approximately achieve this and still doesn't reach a
-    near-zero baseline (see the chain-region test above)."""
-    profile = build_analytic_bilayer_profile(
-        thickness_a=38.0, layer_sigma_a=2.0, amplitude=5.0
+def test_plane_average_is_not_an_isolated_atom_cusp():
+    """Regression guard against recalibrating psi(z) from a single atom's
+    peak potential, which overstated the bilayer 5.1x until 2026-08-30.
+
+    An atom's own centre is a cusp: it has no grid-independent value, so it
+    cannot be commensurate with a plane average at ANY voxel size. Asserted
+    by measuring both -- phosphorus alone spans two orders of magnitude
+    across the same spacings over which the plane average barely moves.
+
+    The old code kept two functions alive to express this. They are gone;
+    the property is a fact about the physics, so it is checked here."""
+    from specter.potential import PotentialBuilder
+
+    def isolated_peak(atomic_number: int, voxel_size: float) -> float:
+        n = int(math.ceil(5.0 / voxel_size)) // 2 * 2 + 2
+        builder = PotentialBuilder(
+            n_xyz=(n, n, n),
+            dx=voxel_size,
+            atomic_numbers=torch.tensor([atomic_number]),
+            progressbars=False,
+            parameterization="shtyrov",
+        )
+        return float(builder.forward(torch.zeros((1, 3)), method="analytic").max())
+
+    spacings = (0.5, 1.0, 2.0, 4.0)
+    cusp = [isolated_peak(15, dx) for dx in spacings]
+    assert max(cusp) / min(cusp) > 50, "phosphorus peak should be grid-defined"
+
+    atomic_numbers, coordinates = build_reference_lipid_patch(
+        n_lipids_per_leaflet=200, seed=0
     )
+    plane = [
+        float(
+            compute_bilayer_profile(
+                atomic_numbers, coordinates, voxel_size=dx
+            ).psi.max()
+        )
+        for dx in spacings[:-1]  # 4 A undersamples the 1.25 A headgroup peak
+    ]
+    assert max(plane) / min(plane) < 1.15, "plane average should be near-flat"
 
-    outer_peak = profile(torch.tensor([19.0])).item()
-    inner_peak = profile(torch.tensor([-19.0])).item()
-    center = profile(torch.tensor([0.0])).item()
-    far_outside = profile(torch.tensor([100.0])).item()
-
-    # Slightly loose tolerance: the query points fall between the lookup
-    # table's discrete grid samples, and linear interpolation of a concave
-    # (near-peak) function always undershoots the true continuous maximum
-    # a little.
-    assert outer_peak == pytest.approx(5.0, abs=0.05)
-    assert inner_peak == pytest.approx(5.0, abs=0.05)
-    # Genuinely near-zero in between and outside, not just "lower".
-    assert center < 0.01 * 5.0
-    assert far_outside < 0.01 * 5.0
+    # And the two must not be confusable at any of these spacings.
+    for value in plane:
+        for peak in cusp:
+            assert value != pytest.approx(peak, rel=0.2)

@@ -506,16 +506,10 @@ class MembraneGenerator:
     n_lipids_per_leaflet : int, optional
         Reference lipid patch size, passed to
         :func:`~specter.specimen.membrane._profile.build_reference_lipid_patch`.
-        `estimate_bilayer_peak_amplitude` (the only thing this patch feeds
-        into -- not the profile's shape, see `bilayer_thickness`/
-        `bilayer_layer_sigma_a`) only reads off the patch's set of unique
-        atomic species, not its size or layout, so in practice any value
-        that includes at least one of every species in the lipid template
-        gives the same calibrated amplitude -- this parameter has no
-        material effect on `generate()`'s output at its default template.
-        Kept for backward compatibility and in case a future custom lipid
-        template makes species presence itself patch-size-dependent.
-        Default 200.
+        Has NO effect on `generate()`'s output: the profile is measured on
+        its own fixed reference patch (`CALIBRATION_N_LIPIDS_PER_LEAFLET`)
+        precisely so it cannot drift with a caller's choice here. Kept for
+        callers building a patch of their own to inspect. Default 200.
     parameterization : str, optional
         PotentialBuilder parameterization for the lipid reference patch.
         Default "shtyrov".
@@ -568,8 +562,8 @@ class MembraneGenerator:
         arbitrary factor would put the bilayer off the volts scale the
         rest of the volume is on. This defaulted to ``(0.5, 1.0)`` until
         2026-08-29, which attenuated every membrane by 0.75x on average
-        while `estimate_bilayer_peak_amplitude` was independently
-        overstating the bilayer 5.1x. Widen it only to augment contrast
+        while the amplitude calibration was independently overstating the
+        bilayer 5.1x. Widen it only to augment contrast
         deliberately across a generated set.
     transmembrane_specs : list of TransmembraneSpec, optional
         Transmembrane protein species to attempt placing. Default None (no

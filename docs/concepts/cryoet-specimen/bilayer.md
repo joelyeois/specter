@@ -128,13 +128,14 @@ Hydrogen is load-bearing in that census. POPC's 82 hydrogens are a
 quarter of the molecule's total scattering, and a template omitting them
 carries only 59% of a real lipid.
 
-`membrane_scale_range` draws a per-instance contrast multiplier and
-applies it to the profile before the generator renders, rather than as a
-post-hoc multiply on the volume. This keeps the compositing occupancy
-threshold, itself derived from the profile's peak, consistent with
-whatever scale was drawn. It defaults to `(1.0, 1.0)`: the profile is a
-measured quantity, and dimming it by an arbitrary factor puts the bilayer
-off the scale the rest of the volume is on.
+There is deliberately no knob to scale a membrane's contrast up or down.
+A `membrane_scale_range` existed until 2026-08-31, drawing a per-instance
+multiplier from `(0.5, 1.0)`, and it was part of how the calibration error
+above stayed hidden: a bilayer 5.1x too bright, dimmed 0.75x on average,
+reads as merely wrong rather than obviously wrong. Contrast that varies
+between real membranes comes from defocus, ice thickness and lipid
+composition, which are modelled in their own right; an arbitrary
+multiplier on one species' potential is not a model of any of them.
 
 ## Anti-aliased rasterization
 
@@ -202,7 +203,6 @@ what it found.
 |---|---|---|
 | `bilayer_thickness` | Phosphate-to-phosphate leaflet spacing \(t\), Å | 38.0 |
 | `bilayer_layer_sigma_a` | Additional Gaussian broadening along \(z\), Å | 0.0 |
-| `membrane_scale_range` | Per-instance contrast multiplier, drawn uniformly | (1.0, 1.0) |
 | `min_transmembrane_spacing` | Minimum centre-to-centre site spacing, Å | 40.0 |
 | `transmembrane_occupancy_fraction` | Surface occupancy target for site sampling | 0.05 |
 | `frequency` (per spec) | Relative weight among transmembrane species | 1 |

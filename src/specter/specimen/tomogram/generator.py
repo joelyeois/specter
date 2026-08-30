@@ -978,11 +978,11 @@ class TomogramSpecimenGenerator:
                 # (MembraneGenerator's max_field_voxels) lets a single
                 # instance's own volume reach tens of GB. Using THIS
                 # instance's own peak instead when region_density_threshold
-                # is auto (None) -- membrane_scale already randomizes
-                # contrast per instance (see MembraneGenerator's own
-                # docstring), so a per-instance peak is arguably more
-                # correct for per-instance shell LABELING anyway (a dim
-                # instance's true shell isn't mislabeled as background just
+                # is auto (None) -- a per-instance peak is also the more
+                # correct reference for per-instance shell LABELING, since
+                # an instance whose own peak is lower (a smaller organelle
+                # resolved on a coarser working grid, say) should not have
+                # its true shell mislabeled as background just
                 # because a brighter sibling set a higher global bar).
                 # When region_density_threshold is explicitly set, it's
                 # already an absolute density value (not a fraction, see

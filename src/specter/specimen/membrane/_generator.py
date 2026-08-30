@@ -546,25 +546,6 @@ class MembraneGenerator:
         extra blur to add on top, which the rasterizer's own anti-
         aliasing already handles for the render grid. Raise it only to
         deliberately smear a bilayer.
-    membrane_scale_range : tuple of float, optional
-        ``(low, high)``: a single random multiplicative scale, drawn
-        uniformly from this range once per `generate()` call (seeded from
-        `seed`, reproducible), multiplied into `self.profile`'s psi -- an
-        augmentation knob for varying membrane contrast/intensity across
-        many generated instances. Applied to the profile rather than as a
-        separate post-hoc multiply on
-        `self.volume` -- that keeps `_insert_blend`'s occupancy threshold
-        (itself derived from `self.profile.psi.max()`) automatically
-        consistent with whatever scale was drawn, with no extra
-        bookkeeping. The drawn value is recorded in `self.membrane_scale`.
-        Default ``(1.0, 1.0)``: the calibrated amplitude is used as-is,
-        since it is a measured physical quantity and dimming it by an
-        arbitrary factor would put the bilayer off the volts scale the
-        rest of the volume is on. This defaulted to ``(0.5, 1.0)`` until
-        2026-08-29, which attenuated every membrane by 0.75x on average
-        while the amplitude calibration was independently overstating the
-        bilayer 5.1x. Widen it only to augment contrast
-        deliberately across a generated set.
     transmembrane_specs : list of TransmembraneSpec, optional
         Transmembrane protein species to attempt placing. Default None (no
         transmembrane proteins).
@@ -735,7 +716,6 @@ class MembraneGenerator:
         parameterization: str = "shtyrov",
         bilayer_thickness: float = 38.0,
         bilayer_layer_sigma_a: float = 0.0,
-        membrane_scale_range: tuple[float, float] = (1.0, 1.0),
         transmembrane_specs: list[TransmembraneSpec] | None = None,
         transmembrane_occupancy_fraction: float = _DEFAULT_TRANSMEMBRANE_OCCUPANCY_FRACTION,
         pdb_cache_dir: str = DEFAULT_PDB_CACHE_DIR,
@@ -753,18 +733,12 @@ class MembraneGenerator:
                 "shape_backend must be 'spherical_harmonics' or "
                 f"'swept_spline', got {shape_backend!r}"
             )
-        low, high = membrane_scale_range
-        if low > high or low < 0:
-            raise ValueError(
-                "membrane_scale_range must be (low, high) with "
-                f"0 <= low <= high, got {membrane_scale_range!r}"
-            )
 
         voxel_size = float(voxel_size)
 
         # Resolve any None size parameter from its own *_range_a default,
         # via a torch.Generator seeded independently from `seed` -- same
-        # pattern membrane_scale_range's own draw uses below, and a
+        # pattern the shape draws below use, and a
         # separate Generator object from whatever RNG the low-level shape
         # backend function uses internally (so this draw doesn't consume
         # that stream). Resolved unconditionally, regardless of
@@ -1038,7 +1012,6 @@ class MembraneGenerator:
         self.parameterization = parameterization
         self.bilayer_thickness = bilayer_thickness
         self.bilayer_layer_sigma_a = bilayer_layer_sigma_a
-        self.membrane_scale_range = membrane_scale_range
         self.transmembrane_specs = transmembrane_specs or []
         self.transmembrane_occupancy_fraction = transmembrane_occupancy_fraction
         self.pdb_cache_dir = pdb_cache_dir
@@ -1063,7 +1036,6 @@ class MembraneGenerator:
         # when there are no transmembrane specs at all).
         self.transmembrane_labels: torch.Tensor | None = None
         self.placements: list[TransmembranePlacement] = []
-        self.membrane_scale: float | None = None
         self.clipped_at_boundary: bool | None = None
         self._origin_xyz: torch.Tensor | None = None
 
@@ -1085,21 +1057,6 @@ class MembraneGenerator:
         torch.Tensor
             Density volume, shape ``target_shape``.
         """
-        # Random per-instance contrast augmentation: drawn from
-        # membrane_scale_range and folded into psi BEFORE the volume is
-        # rendered, not applied as a separate post-hoc multiply on
-        # self.volume -- that keeps _insert_blend's occupancy threshold
-        # (itself derived from self.profile.psi.max()) automatically
-        # consistent with whatever scale gets drawn here, with no extra
-        # bookkeeping.
-        scale_generator = torch.Generator(device="cpu")
-        if self.seed is not None:
-            scale_generator.manual_seed(self.seed)
-        low, high = self.membrane_scale_range
-        self.membrane_scale = float(
-            torch.empty(1).uniform_(low, high, generator=scale_generator).item()
-        )
-
         # The MEASURED psi(z), not the analytic two-Gaussian form: the
         # latter stands on vacuum and so discards the acyl core, which
         # costs 4.8x of the bilayer's integrated potential and shows up
@@ -1111,11 +1068,6 @@ class MembraneGenerator:
             parameterization=self.parameterization,
             device=self.device,
         )
-        if self.membrane_scale != 1.0:
-            self.profile = BilayerProfile(
-                distance_a=self.profile.distance_a,
-                psi=self.profile.psi * self.membrane_scale,
-            )
 
         # The field's working spacing must stay fine enough to resolve the
         # bilayer's own extent (curvature capping, leaflet offset) --

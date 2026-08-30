@@ -32,28 +32,6 @@ def test_generate_produces_correct_shape_with_membrane_density():
     assert gen.profile is not None
 
 
-def test_membrane_scale_range_is_reproducible_and_scales_linearly():
-    gen_a = MembraneGenerator(seed=3, membrane_scale_range=(0.5, 1.0), **_SMALL_KWARGS)
-    volume_a = gen_a.generate()
-    gen_b = MembraneGenerator(seed=3, membrane_scale_range=(0.5, 1.0), **_SMALL_KWARGS)
-    volume_b = gen_b.generate()
-
-    assert 0.5 <= gen_a.membrane_scale <= 1.0
-    assert gen_a.membrane_scale == gen_b.membrane_scale
-    assert torch.equal(volume_a, volume_b)
-
-    gen_unscaled = MembraneGenerator(
-        seed=3, membrane_scale_range=(1.0, 1.0), **_SMALL_KWARGS
-    )
-    volume_unscaled = gen_unscaled.generate()
-    assert torch.allclose(volume_a, gen_a.membrane_scale * volume_unscaled, atol=1e-4)
-
-
-def test_membrane_scale_range_rejects_low_greater_than_high():
-    with pytest.raises(ValueError, match="membrane_scale_range"):
-        MembraneGenerator(membrane_scale_range=(1.0, 0.5), **_SMALL_KWARGS)
-
-
 def test_place_transmembrane_before_generate_raises():
     gen = MembraneGenerator(seed=0, **_SMALL_KWARGS)
     with pytest.raises(RuntimeError):

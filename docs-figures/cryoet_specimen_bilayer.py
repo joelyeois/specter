@@ -136,7 +136,6 @@ def _vesicle(transmembrane: bool = False) -> MembraneGenerator:
         voxel_size=4.0,
         shape_backend="spherical_harmonics",
         sh_axes_range=(200.0, 240.0),
-        membrane_scale_range=(1.0, 1.0),
         bilayer_thickness=30.0,
         transmembrane_specs=specs,
         pdb_cache_dir=PDB_CACHE,

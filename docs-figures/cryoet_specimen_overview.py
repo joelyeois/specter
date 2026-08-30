@@ -64,7 +64,6 @@ def _membrane_instances() -> list[MembraneInstance]:
                 voxel_size=VOXEL_SIZE,
                 shape_backend="spherical_harmonics",
                 sh_axes_range=(220.0, 300.0),
-                membrane_scale_range=(1.0, 1.0),
                 bilayer_thickness=30.0,
                 transmembrane_specs=[
                     TransmembraneSpec(pdb_source="1C3W", frequency=25)

@@ -263,16 +263,16 @@ def cap_curvature(
     if iterations <= 0:
         return phi
     step = step_fraction * spacing_a**2
-    # Cloned once and then relaxed IN PLACE. `out = out + ...` allocated a
-    # fresh field every iteration, and at a 300x1200x1200 tomogram each is
-    # 1.61 GiB -- profiled at 1.12 GiB live here, three iterations' worth
-    # overlapping. The clone is what keeps `phi` itself untouched, which the
-    # old form got for free by never writing to it.
-    out = phi.clone()
+    # Left allocating per iteration on purpose. Relaxing in place is ~1.6x
+    # faster (0.160 s against 0.256 s, 8 iterations on a 300x600x600 field)
+    # but measures a HIGHER peak, 1.62 GiB against 1.21, whichever way the
+    # first iteration is handled -- clone up front or allocate on the first
+    # pass. This function is a small slice of a run's wall clock and its
+    # fields are volume-sized, so the memory is worth more than the speed.
+    out = phi
     for _ in range(iterations):
         laplacian = _laplacian3d(out) / spacing_a**2
-        laplacian *= step
-        out += laplacian
+        out = out + step * laplacian
     return out
 
 

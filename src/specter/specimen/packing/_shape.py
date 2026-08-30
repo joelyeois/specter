@@ -275,7 +275,15 @@ def _rotation_cache(
     chunk = max(
         1, min(n_orientations, int(_ROTATE_CHUNK_VOXELS // max(vol.numel(), 1)))
     )
-    parts = []
+    # Written straight into the retained cache, NOT collected into a list and
+    # concatenated. `torch.cat` has to hold its inputs and its output at the
+    # same time, so it doubles the peak at exactly the moment the cache is
+    # largest: profiled on a 219k-atom structure at 1 A voxels, the chunks
+    # held 7.53 GiB and the concatenated copy another 7.53, which was 95% of
+    # the whole run's 15.84 GiB peak. Filling a preallocated buffer keeps the
+    # peak at one copy.
+    rot: torch.Tensor | None = None
+    filled = 0
     for i in range(0, n_orientations, chunk):
         piece = rotate_volume(vol, theta[i : i + chunk], padding_mode="zeros") > 0.5
         if pool_factor > 1:
@@ -290,9 +298,22 @@ def _rotation_cache(
                 )[:, 0]
                 > 0
             )
-        parts.append(piece)
-    rot = torch.cat(parts) if len(parts) > 1 else parts[0]
-    del parts
+        if rot is None and piece.shape[0] == n_orientations:
+            # One chunk covers every orientation: keep it as-is rather than
+            # allocating a second buffer to copy it into.
+            rot = piece
+            filled = n_orientations
+            continue
+        if rot is None:
+            rot = torch.empty(
+                (n_orientations, *piece.shape[1:]),
+                dtype=piece.dtype,
+                device=piece.device,
+            )
+        rot[filled : filled + piece.shape[0]] = piece
+        filled += piece.shape[0]
+        del piece
+    assert rot is not None and filled == n_orientations
 
     # Trim bounds from any-reductions rather than `np.nonzero`, which
     # materializes an index array per True voxel. Worth ~2x on the trim step

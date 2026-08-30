@@ -116,7 +116,7 @@ between the two rows because the tracked layout supplies its own
 `tomograms/tomograms/J001`.
 
 One consequence of this is easy to get backwards from the table alone:
-**the canonical example configs under `configs/`** (`particle.toml`, `micrograph.toml`, `tilt_series.toml`,
+**the canonical example configs under `configs/`** (`particle.toml`, `micrograph.toml`, `tiltseries.toml`,
 `tomogram.toml`) **set `output_dir` explicitly** (`output_dir = "particles"`,
 and so on), so those fields stay set for those configs even when you add
 `--project` on the command line. Running

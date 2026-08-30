@@ -32,7 +32,7 @@ detector_model = "none"
 [compute]
 device = "cuda:0"  # adjust to an available device on your machine, e.g. "cuda:0" or "cpu"
 
-# Advanced, as in configs/tilt_series.toml: everything above is a decision
+# Advanced, as in configs/tiltseries.toml: everything above is a decision
 # this run makes, everything here has a default that is usually right.
 [advanced]
 coincidence_radius = 0

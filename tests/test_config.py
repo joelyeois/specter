@@ -522,7 +522,7 @@ def test_validate_accepts_every_shipped_config() -> None:
     for name, cls in (
         ("particle.toml", ParticleStackConfig),
         ("micrograph.toml", MicrographConfig),
-        ("tilt_series.toml", TiltSeriesConfig),
+        ("tiltseries.toml", TiltSeriesConfig),
         ("tomogram.toml", TomogramConfig),
     ):
         config = load_config(str(REPO_ROOT / "configs" / name), cls)

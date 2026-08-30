@@ -14,20 +14,20 @@ Every run loads a TOML config first, then applies any flags given on the
 command line as overrides:
 
 ```bash
-specter simulate tiltseries --config configs/tilt_series.toml \
+specter simulate tiltseries --config configs/tiltseries.toml \
     --volume_path tomograms/tomogram.mrc
 ```
 
 ```bash
 specter simulate tiltseries \
-    --config configs/tilt_series.toml \
+    --config configs/tiltseries.toml \
     --volume_path tomograms/tomogram.mrc \
     --device cuda:0 \
     --n_tilts 41 \
     --min_tilt_angle -60 --max_tilt_angle 60
 ```
 
-`configs/tilt_series.toml` is the canonical starting point. Copy it and
+`configs/tiltseries.toml` is the canonical starting point. Copy it and
 edit for your own runs; the
 [command reference](../api/cli/simulate.md#specter-simulate-tiltseries) documents
 every field. `volume_path` has no default and is the one
@@ -109,7 +109,7 @@ builds that specimen first (identical to `specter build tomogram --config
 result straight in as this run's volume, with no path to copy by hand:
 
 ```bash
-specter simulate tiltseries --config configs/tilt_series.toml \
+specter simulate tiltseries --config configs/tiltseries.toml \
     --tomogram_config configs/tomogram.toml \
     --device cuda:0
 ```
@@ -138,7 +138,7 @@ multiple tomograms, or building once and imaging it several ways:
 specter build tomogram --config configs/tomogram.toml \
     --output_dir tomograms --filename tomogram
 
-specter simulate tiltseries --config configs/tilt_series.toml \
+specter simulate tiltseries --config configs/tiltseries.toml \
     --volume_path tomograms/tomogram.mrc \
     --device cuda:0
 ```
@@ -170,7 +170,7 @@ wrapper around it.
 
 ## See also
 
-- [`configs/tilt_series.toml`](https://github.com/joelyeois/specter/tree/main/configs):
+- [`configs/tiltseries.toml`](https://github.com/joelyeois/specter/tree/main/configs):
   the canonical, commented example config.
 - [Build a tomogram specimen](build-tomogram.md): builds the
   `volume_path` this page images.

@@ -309,7 +309,7 @@ configs/                      # TOML config files consumed by the `specter` CLI 
                               # by a test (see Testing).
   particle.toml                # canonical defaults for `specter simulate particles`
   micrograph.toml              # canonical defaults for `specter simulate micrograph`
-  tilt_series.toml             # canonical defaults for `specter simulate tiltseries`
+  tiltseries.toml               # canonical defaults for `specter simulate tiltseries`
   tomogram.toml                 # canonical defaults for `specter build tomogram`
   ice.toml                      # canonical defaults for `specter build ice`
   reconstruct.toml              # canonical defaults for `specter reconstruct particle` -- the one config with

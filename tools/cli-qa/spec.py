@@ -417,7 +417,7 @@ TILTSERIES = CommandSpec(
     ],
     timeout=1800.0,
     config_cls=TiltSeriesConfig,
-    config_path="configs/tilt_series.toml",
+    config_path="configs/tiltseries.toml",
 )
 
 _TOMOGRAM_BASELINE = [

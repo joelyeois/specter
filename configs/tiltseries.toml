@@ -1,6 +1,6 @@
 # Canonical default config for `specter simulate tiltseries`.
 # Any field can be overridden on the command line, e.g.:
-#   specter simulate tiltseries --config configs/tilt_series.toml --n_tilts 41
+#   specter simulate tiltseries --config configs/tiltseries.toml --n_tilts 41
 
 # Full field docs: docs/user-guide/tilt-series.md.
 

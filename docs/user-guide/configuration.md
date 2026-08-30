@@ -50,7 +50,7 @@ Six commands each have their own config dataclass and canonical TOML:
 |---|---|---|
 | `specter simulate particles` | `ParticleStackConfig` | `configs/particle.toml` |
 | `specter simulate micrograph` | `MicrographConfig` | `configs/micrograph.toml` |
-| `specter simulate tiltseries` | `TiltSeriesConfig` | `configs/tilt_series.toml` |
+| `specter simulate tiltseries` | `TiltSeriesConfig` | `configs/tiltseries.toml` |
 | `specter build tomogram` | `TomogramConfig` | `configs/tomogram.toml` |
 | `specter build ice` | `IceCacheConfig` | `configs/ice.toml` |
 | `specter reconstruct particle` | `ReconstructionConfig` | `configs/reconstruct.toml` |

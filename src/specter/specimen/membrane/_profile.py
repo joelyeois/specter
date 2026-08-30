@@ -20,18 +20,20 @@ relaxed or MD-equilibrated structure. Good enough to get the profile's
 shape and physical length scale right; swap in a real coordinate set later
 if higher fidelity is needed.
 
-Amplitude calibration IS read off the laterally-averaged multi-lipid
-render, because ``psi(d)`` is itself a plane average and must be
-calibrated against one. Between 2026-08 and 2026-08-29 it was instead
-read off a single isolated atom's peak potential, on the reasoning that
-the plane average diluted the true peak ~20x. That reasoning was wrong
-twice over: the dilution it measured came from averaging over the whole
-patch including its under-populated jittered edges, which
-``compute_bilayer_profile`` never does (``lateral_core_fraction`` 0.6
-recovers 64.9 A^2 per lipid against the 65.0 target), and an atom's own
-centre is a cusp with no grid-independent value, so it cannot calibrate
-anything. See ``estimate_bilayer_peak_amplitude`` for the measured
-numbers.
+There is no amplitude scalar in the live path: ``psi(d)`` is used as
+measured, in volts, and nothing rescales it to a peak. Until 2026-08-29
+an amplitude WAS fitted, and read off a single isolated atom's peak
+potential, on the reasoning that a plane average diluted the true peak
+~20x. That reasoning was wrong twice over: the dilution it measured came
+from averaging over the whole patch including its under-populated
+jittered edges, which ``compute_bilayer_profile`` never does
+(``lateral_core_fraction`` 0.6 recovers 64.9 A^2 per lipid against the
+65.0 target), and an atom's own centre is a cusp with no grid-independent
+value, so it could not have calibrated anything at any voxel size. The
+rule it violated still applies to any scalar taken from here: a plane
+average is commensurate only with another plane average. See
+``estimate_bilayer_peak_amplitude``, which survives as a diagnostic
+stating exactly that, for the measured numbers.
 
 The profile the rasterizer renders is the measured one
 (``build_measured_bilayer_profile``), not the analytic two-Gaussian form
@@ -67,14 +69,25 @@ from ...potential import PotentialBuilder
 # importing, so this module's dependencies stay limited to atom/potential.
 ATOM_KERNEL_HALF_WIDTH_A = 2.5
 
-# Grid spacing the bilayer profile is CALIBRATED on, A. Deliberately fine
-# and deliberately independent of the voxel size a membrane is rendered
-# at: the profile is a continuous physical quantity in volts, and the
-# render grid's resolution loss is applied once, later, by
-# rasterize_membrane_density's anti-aliasing. Fine enough to resolve the
-# bilayer_layer_sigma_a=1.25 A headgroup peak, past which the laterally
-# averaged peak is converged to within a few percent (5.47 V at 0.5 A,
-# 5.29 at 1.0, 5.03 at 2.0); coarser grids undersample it (3.85 at 3.0).
+# Grid spacing the reference lipid patch is rendered on to produce psi(z),
+# A. Deliberately independent of the voxel size a membrane is rendered at:
+# psi is a continuous physical quantity in volts, and the render grid's
+# resolution loss belongs downstream, applied once by
+# rasterize_membrane_density's anti-aliasing.
+#
+# This constant is scaffolding for a SYNTHESIZED profile. psi(z) is
+# obtained by rendering a schematic atomic model and averaging laterally,
+# and any grid-based estimate has a spacing. Source psi(z) from an MD
+# snapshot or from published component density profiles instead (see the
+# module docstring's open item) and this constant has nothing left to do.
+#
+# The value is loose, because what the rasterizer consumes is the whole
+# curve and its integral barely moves. Measured over 0.25-2.0 A, integral
+# (psi dz) spans 240.4-242.1 V*A -- 0.7%, with no trend. The PEAK over the
+# same range spans 7.70-8.59 V and is non-monotonic (8.59, 8.35, 8.39,
+# 8.25, 7.70, 7.88): that is grid-alignment scatter on a narrow feature,
+# not a convergence sequence, so do not read a converged peak off it or
+# tune this constant to make the peak look stable.
 CALIBRATION_VOXEL_SIZE_A = 1.0
 
 # Lipids per leaflet in the patch the amplitude is CALIBRATED on. Larger
@@ -398,20 +411,27 @@ def estimate_bilayer_peak_amplitude(
     device: str | torch.device = "cpu",
 ) -> float:
     """
-    Peak scattering potential to calibrate
-    :func:`build_analytic_bilayer_profile`'s `amplitude` against real
-    atomic scattering physics -- the same units as ``PotentialBuilder``-
-    rendered protein templates, so a membrane and an inserted
-    transmembrane protein sit on a physically consistent scale in the same
-    rendered volume.
+    Laterally-averaged headgroup peak of the reference lipid patch, V.
 
-    Renders the reference lipid patch via :func:`compute_bilayer_profile`
-    and returns its LATERALLY-AVERAGED headgroup peak. That is the
-    quantity ``build_analytic_bilayer_profile`` needs: ``psi(z)`` is a
-    plane average, the mean potential over a plane at height `z`, so it
-    must be calibrated against a plane average of a real patch.
+    A DIAGNOSTIC, not the calibration. `generate()` renders
+    :func:`build_measured_bilayer_profile`'s whole psi(z) and never scales
+    it by a peak, so nothing in `src/` consumes this: it survives because
+    it states the rule below, and because
+    ``test_estimate_bilayer_peak_amplitude_is_not_an_isolated_atom_cusp``
+    is what stands between a future reader and reintroducing a 5.1x error
+    that a since-deleted docstring argued for persuasively.
 
-    Do not calibrate this against an isolated atom's peak potential. The
+    Prefer :func:`build_measured_bilayer_profile` for anything that needs
+    the bilayer's density. Reach for this only to report or compare a
+    single scalar, and note that the peak carries a few percent of
+    grid-alignment scatter (see :data:`CALIBRATION_VOXEL_SIZE_A`) that the
+    profile's integral does not.
+
+    The rule it states: a plane average must be calibrated against a plane
+    average. ``psi(z)`` is the mean potential over a plane at height `z`,
+    so a peak taken from one is the commensurate quantity.
+
+    Do not calibrate against an isolated atom's peak potential. The
     potential at an atom's own centre is a cusp with no grid-independent
     value: the phosphate phosphorus measures 400.5 V at ``voxel_size``
     0.5 A, 26.9 V at 2.0 A and 4.1 V at 4.0 A, diverging as the grid is
@@ -579,19 +599,28 @@ def build_measured_bilayer_profile(
 @lru_cache(maxsize=None)
 def calibrated_bilayer_peak_amplitude(parameterization: str = "shtyrov") -> float:
     """
-    The bilayer's headgroup peak potential, V -- a physical constant of
-    the lipid model, measured once per process.
+    The bilayer's headgroup peak potential, V, measured once per process.
 
-    Wraps :func:`estimate_bilayer_peak_amplitude` on a fixed reference
-    patch (:data:`CALIBRATION_N_LIPIDS_PER_LEAFLET` lipids per leaflet,
+    A DIAGNOSTIC, like the :func:`estimate_bilayer_peak_amplitude` it
+    wraps, and with no callers in `src/` -- `generate()` renders
+    :func:`build_measured_bilayer_profile`'s whole psi(z) rather than
+    scaling anything by a peak. Kept as the one-line way to ask what the
+    bilayer's headgroup level is, and used by the tests that pin the
+    physical ordering (headgroups above the acyl core, which is itself
+    above ice).
+
+    Measures on a fixed reference patch
+    (:data:`CALIBRATION_N_LIPIDS_PER_LEAFLET` lipids per leaflet,
     :data:`CALIBRATION_SEED`, :data:`CALIBRATION_VOXEL_SIZE_A`) rather
-    than on whatever patch a caller happens to hold. Callers size their
-    own patch for profile shape; the amplitude must not inherit that
-    choice, since a patch too small to fill its own central averaging
-    window reads low (see `CALIBRATION_N_LIPIDS_PER_LEAFLET`).
+    than on whatever patch a caller happens to hold, so the number does
+    not inherit a caller's patch-size choice: a patch too small to fill
+    its own central averaging window reads low (see
+    `CALIBRATION_N_LIPIDS_PER_LEAFLET`).
 
-    Cached because it is a constant: measuring it costs ~1.5 s, which
-    would otherwise be paid once per membrane instance in a volume.
+    Cached because measuring costs ~1.5 s. Being a peak, it carries a few
+    percent of grid-alignment scatter the profile's integral does not --
+    see :data:`CALIBRATION_VOXEL_SIZE_A`. Do not build a contrast
+    calculation on it; integrate the profile instead.
 
     Parameters
     ----------

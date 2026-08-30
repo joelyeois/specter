@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from importlib import resources
-from typing import Sequence
+from typing import Any, Sequence
 
 import torch
 
@@ -406,21 +406,42 @@ def build_potential_volume_analytic_scatter(
         coords, grid_shape, dx, rcut
     )
 
-    # Continuous physical offset from each atom to each of its window
-    # voxels' centers, per axis (kept separate for the erf voxel-average —
-    # not squared/summed to r2 the way a point-sample formula would).
-    rel_vox = offsets_vox[None] - frac_offset[:, None, None, None, :]  # (N,w,w,w,3)
-    rel_ang = rel_vox * dx  # (N,w,w,w,3)
+    # Evaluated PER AXIS, not on the full window. The 3D voxel average is a
+    # product of three 1D averages (see Notes), and each factor depends only
+    # on its own axis's offset -- so evaluating them on the (N,w,w,w) window
+    # recomputes every value w**2 times. Three (N,w,5) tables carry the same
+    # information: 121x fewer erf evaluations at w=11, 9x at the w=3 of a
+    # 5 A render, and it is the erf that dominates here.
+    #
+    # This is a rewrite of the same expression, not an approximation. It
+    # agrees with the previous form to 2.4e-7 relative, against 1.9e-7 for
+    # that form compared with itself across runs -- `_scatter_window_values`
+    # accumulates with atomics, so neither is bitwise reproducible anyway.
+    #
+    # Measured on 7VD8 at dx=1.0 (36,713 atoms, w=11): 0.111 s and 9.32 GiB
+    # peak before, 0.046 s and 3.76 GiB after. Do not "simplify" this back
+    # into one broadcast over (N,w,w,w,3,5).
+    a5 = a_coefs[:, None, :]  # (N,1,5)
+    k = (2 * torch.pi / torch.sqrt(b_coefs))[:, None, :]  # (N,1,5)
 
-    b5 = b_coefs[:, None, None, None, None, :]  # (N,1,1,1,1,5)
-    a5 = a_coefs[:, None, None, None, :]  # (N,1,1,1,5)
-    k = 2 * torch.pi / torch.sqrt(b5)
-    x0 = rel_ang.unsqueeze(-1)  # (N,w,w,w,3,1) to broadcast against the 5 terms
-    voxel_avg_per_axis = (torch.erf(k * (x0 + h)) - torch.erf(k * (x0 - h))) / (
-        4 * h
-    )  # (N,w,w,w,3,5)
-    voxel_avg = voxel_avg_per_axis.prod(dim=-2)  # (N,w,w,w,5): product over x,y,z
-    vals = c1 * (a5 * voxel_avg).sum(-1)  # (N,w,w,w)
+    per_axis = []
+    for axis in range(3):
+        # The offsets along `axis`, read off the shared window rather than
+        # rebuilt, so this cannot drift from _local_window_geometry.
+        index: list[Any] = [0, 0, 0]
+        index[axis] = slice(None)
+        offsets_1d = offsets_vox[tuple(index) + (axis,)]  # (w,)
+        rel_ang = (offsets_1d[None, :] - frac_offset[:, axis, None]) * dx  # (N,w)
+        x0 = rel_ang[:, :, None]  # (N,w,1), to broadcast against the 5 terms
+        per_axis.append(
+            (torch.erf(k * (x0 + h)) - torch.erf(k * (x0 - h))) / (4 * h)
+        )  # (N,w,5)
+
+    # Fold the per-term weights into one axis's table, then contract all
+    # three against the shared term index in a single pass. The output is
+    # (N, w, w, w) indexed in the same axis order as `offsets_vox`.
+    weighted = per_axis[0] * a5  # (N,w,5)
+    vals = c1 * torch.einsum("nik,njk,nlk->nijl", weighted, per_axis[1], per_axis[2])
 
     return _scatter_window_values(vals, center_idx, offsets_vox, grid_shape)
 

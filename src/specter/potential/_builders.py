@@ -221,6 +221,18 @@ def build_potential_volume_fftconvolve_2d(
     return potential_volume, sR
 
 
+#: Peak bytes of transient per-atom state the analytic scatter builder aims
+#: to hold at once, which sets its atom chunk. Everything it allocates is
+#: n_atoms x w**3 wide, so a byte budget adapts to the window while a fixed
+#: atom count would not: at the w=3 of a 5 A render the implied chunk is
+#: ~550k atoms, past any real structure, so the loop runs once.
+_ANALYTIC_SCATTER_CHUNK_BYTES = 512 * 2**20
+
+#: Transient bytes per (atom, window voxel): the (N,w,w,w,3) int64 scatter
+#: indices dominate at 24, plus the float32 values and the flattened index.
+_ANALYTIC_SCATTER_BYTES_PER_VOXEL = 36
+
+
 def _local_window_geometry(
     coords: torch.Tensor,
     grid_shape: tuple[int, int, int],
@@ -280,6 +292,7 @@ def _scatter_window_values(
     center_idx: torch.Tensor,
     offsets_vox: torch.Tensor,
     grid_shape: tuple[int, int, int],
+    out: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """
     Scatter-add per-atom, per-window-voxel values into a full volume,
@@ -295,11 +308,16 @@ def _scatter_window_values(
         Window offsets shared by every atom, shape (w, w, w, 3).
     grid_shape : tuple of int
         Output volume shape (nz, ny, nx).
+    out : torch.Tensor, optional
+        Volume to accumulate INTO, shape `grid_shape`. Default None
+        allocates a fresh one. Passing it is what lets a caller feed atoms
+        in chunks: the result is a sum over atoms, so the volume a chunk
+        adds into is the same volume every other chunk adds into.
 
     Returns
     -------
     potential_volume : torch.Tensor
-        Volume, shape `grid_shape`.
+        Volume, shape `grid_shape`. The same tensor as `out` when given.
     """
     nz, ny, nx = grid_shape
     device = vals.device
@@ -320,9 +338,12 @@ def _scatter_window_values(
         + abs_idx[..., 2].clamp(0, nx - 1)
     )
 
-    potential_volume = torch.zeros(nz * ny * nx, device=device, dtype=dtype)
-    potential_volume = potential_volume.scatter_add(0, flat_idx[valid], vals[valid])
-    return potential_volume.view(nz, ny, nx)
+    if out is None:
+        flat = torch.zeros(nz * ny * nx, device=device, dtype=dtype)
+    else:
+        flat = out.view(-1)
+    flat.scatter_add_(0, flat_idx[valid], vals[valid])
+    return flat.view(nz, ny, nx)
 
 
 def build_potential_volume_analytic_scatter(
@@ -406,6 +427,58 @@ def build_potential_volume_analytic_scatter(
         coords, grid_shape, dx, rcut
     )
 
+    # Atoms are processed in chunks, because everything below is sized
+    # n_atoms x w**3 and w grows as the voxel size shrinks: a 219k-atom
+    # ribosome at 1 A voxels reaches w=9, and holding every atom's window at
+    # once cost ~4.4 GiB of scatter indices alone. The volume is a SUM over
+    # atoms, so a chunk that scatters into the shared accumulator below is
+    # exact, not an approximation -- only the float summation order changes,
+    # and scatter_add_ is already order-nondeterministic on CUDA.
+    #
+    # The chunk is derived from a byte budget rather than fixed, so it adapts
+    # to w instead of needing a knob: at the w=3 of a 5 A render it exceeds
+    # any real structure and the loop runs once, adding nothing.
+    bytes_per_atom = max(
+        1, offsets_vox.shape[0] ** 3 * _ANALYTIC_SCATTER_BYTES_PER_VOXEL
+    )
+    chunk = max(1, _ANALYTIC_SCATTER_CHUNK_BYTES // bytes_per_atom)
+
+    volume = torch.zeros(grid_shape, device=coords.device, dtype=coords.dtype)
+    for lo in range(0, coords.shape[0], chunk):
+        hi = min(lo + chunk, coords.shape[0])
+        _accumulate_analytic_window(
+            volume,
+            a_coefs[lo:hi],
+            b_coefs[lo:hi],
+            center_idx[lo:hi],
+            frac_offset[lo:hi],
+            offsets_vox,
+            grid_shape,
+            dx,
+            h,
+            c1,
+        )
+    return volume
+
+
+def _accumulate_analytic_window(
+    volume: torch.Tensor,
+    a_coefs: torch.Tensor,
+    b_coefs: torch.Tensor,
+    center_idx: torch.Tensor,
+    frac_offset: torch.Tensor,
+    offsets_vox: torch.Tensor,
+    grid_shape: tuple[int, int, int],
+    dx: float,
+    h: float,
+    c1: float,
+) -> None:
+    """
+    Add one chunk of atoms' windowed potential into `volume`, in place.
+
+    Split out of :func:`build_potential_volume_analytic_scatter` only so the
+    chunk loop there reads as a loop; see its Notes for the physics.
+    """
     # Evaluated PER AXIS, not on the full window. The 3D voxel average is a
     # product of three 1D averages (see Notes), and each factor depends only
     # on its own axis's offset -- so evaluating them on the (N,w,w,w) window
@@ -443,7 +516,7 @@ def build_potential_volume_analytic_scatter(
     weighted = per_axis[0] * a5  # (N,w,5)
     vals = c1 * torch.einsum("nik,njk,nlk->nijl", weighted, per_axis[1], per_axis[2])
 
-    return _scatter_window_values(vals, center_idx, offsets_vox, grid_shape)
+    _scatter_window_values(vals, center_idx, offsets_vox, grid_shape, out=volume)
 
 
 def _gaussian_voxel_average_3d(

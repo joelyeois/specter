@@ -768,6 +768,14 @@ class TomogramSpecimenGenerator:
         _membrane_phase_start = phase_start(
             "Membranes", disable=not self.progressbars or not self.membrane_instances
         )
+        # Sub-phases, so this reports like the species phases below rather
+        # than as one opaque total. At the 2 A production grid this phase is
+        # over half the run and used to print a single line, which made
+        # "what is slow here" a profiling exercise instead of a glance at
+        # the output.
+        _membrane_place_start = phase_start(
+            "  Placement", disable=not self.progressbars or not self.membrane_instances
+        )
 
         to_composite: list[MembraneInstance] = []
         if self.membrane_instances:
@@ -835,6 +843,15 @@ class TomogramSpecimenGenerator:
         self.transmembrane_placements = []
         self.placed_membrane_instances = []
         instance_shell_masks: list[tuple[MembraneInstance, torch.Tensor]] = []
+        phase_done(
+            "  Placement",
+            _membrane_place_start,
+            disable=not self.progressbars or not self.membrane_instances,
+        )
+        _membrane_build_start = phase_start(
+            "  Generation & compositing",
+            disable=not self.progressbars or not to_composite,
+        )
         membrane_progress = TqdmProgress(
             transient=True, disable=not self.progressbars or not to_composite
         )
@@ -1085,16 +1102,35 @@ class TomogramSpecimenGenerator:
                     gc.collect()
                     torch.cuda.empty_cache()
 
+        phase_done(
+            "  Generation & compositing",
+            _membrane_build_start,
+            disable=not self.progressbars or not to_composite,
+        )
+
         # classify_membrane_regions' own threshold: needs the FULL
         # composite's peak (unlike instance_shell_masks' per-instance
         # thresholds above), so can only be resolved after every instance
         # is merged into volume.
+        _membrane_regions_start = phase_start(
+            "  Region classification",
+            disable=not self.progressbars or not self.membrane_instances,
+        )
         threshold = self.region_density_threshold
         if threshold is None:
             peak = float(volume.max())
             threshold = 0.05 * peak if peak > 0 else 0.0
         self.regions = classify_membrane_regions(volume, threshold)
+        phase_done(
+            "  Region classification",
+            _membrane_regions_start,
+            disable=not self.progressbars or not self.membrane_instances,
+        )
 
+        _membrane_label_start = phase_start(
+            "  Shell labelling",
+            disable=not self.progressbars or not self.membrane_instances,
+        )
         membrane_labels = torch.zeros(
             target_shape, dtype=torch.int32, device=self.accumulator_device
         )
@@ -1116,6 +1152,11 @@ class TomogramSpecimenGenerator:
                     stacklevel=2,
                 )
         self.membrane_labels = membrane_labels
+        phase_done(
+            "  Shell labelling",
+            _membrane_label_start,
+            disable=not self.progressbars or not self.membrane_instances,
+        )
         phase_done(
             f"Membranes ({len(instance_shell_masks)}/"
             f"{len(self.membrane_instances)} instance(s) placed)",

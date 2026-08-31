@@ -159,3 +159,105 @@ def test_label_volumes_escalate_to_float32_past_the_uint16_ceiling(tmp_path):
     with mrcfile.new(str(path), overwrite=True) as mrc:
         mrc.set_data(labels.numpy().astype("float32"))
     assert int(np.asarray(mrcfile.open(str(path)).data).max()) == 70000
+
+
+def _full_volume_reference(
+    density: torch.Tensor, density_threshold: float | None = None
+) -> dict[str, torch.Tensor]:
+    """
+    Label the WHOLE volume, the way this module did before the shell's
+    bounding box was used to bound the work.
+
+    Kept verbatim as the oracle for
+    `test_shell_bbox_labelling_matches_full_volume_labelling`: the point of
+    that test is that restricting `ndimage.label` to the shell's bounding
+    box is an exact optimization, so it needs the unrestricted answer to
+    compare against, not a second expression of the restricted one.
+    """
+    import numpy as np
+    from scipy import ndimage
+
+    if density_threshold is None:
+        peak = float(density.max())
+        density_threshold = 0.05 * peak if peak > 0 else 0.0
+    shell_mask = density > density_threshold
+    non_shell = ~shell_mask
+    structure = np.ones((3, 3, 3), dtype=np.int8)
+    labeled, num_features = ndimage.label(non_shell.cpu().numpy(), structure=structure)
+    boundary_labels: set[int] = set()
+    if num_features > 0:
+        for face in (
+            labeled[0, :, :],
+            labeled[-1, :, :],
+            labeled[:, 0, :],
+            labeled[:, -1, :],
+            labeled[:, :, 0],
+            labeled[:, :, -1],
+        ):
+            boundary_labels.update(int(v) for v in face.ravel() if v > 0)
+    if boundary_labels:
+        is_boundary = np.zeros(num_features + 1, dtype=bool)
+        is_boundary[np.fromiter(boundary_labels, dtype=np.int64)] = True
+        cytosol = non_shell & torch.from_numpy(is_boundary[labeled])
+    else:
+        cytosol = torch.zeros_like(non_shell)
+    return {"shell": shell_mask, "lumen": non_shell & ~cytosol, "cytosol": cytosol}
+
+
+def _shell(
+    shape: tuple[int, int, int],
+    center: tuple[float, float, float],
+    r_inner: float,
+    r_outer: float,
+    value: float = 7.7,
+) -> torch.Tensor:
+    zz, yy, xx = torch.meshgrid(
+        *(torch.arange(s, dtype=torch.float32) for s in shape), indexing="ij"
+    )
+    r = ((zz - center[0]) ** 2 + (yy - center[1]) ** 2 + (xx - center[2]) ** 2).sqrt()
+    volume = torch.zeros(shape)
+    volume[(r > r_inner) & (r < r_outer)] = value
+    return volume
+
+
+def test_shell_bbox_labelling_matches_full_volume_labelling() -> None:
+    """Bounding the connected-component labelling to the shell's own bbox
+    is exact, including for the geometries where it could plausibly not be.
+
+    `generator.py` stamps the carbon film into the volume BEFORE the
+    membrane phase, so the density handed to `classify_membrane_regions` is
+    carbon plus membranes and its shell is not membrane-only -- which is
+    why the box is taken from the shell mask rather than from any
+    membrane's geometry, and why the carbon-slab cases below are here."""
+    shape = (48, 64, 64)
+    cases = {
+        "single vesicle": _shell(shape, (24, 32, 32), 14, 18),
+        "no membrane at all": torch.zeros(shape),
+        "two disjoint vesicles": (
+            _shell(shape, (24, 18, 18), 8, 11) + _shell(shape, (24, 46, 46), 8, 11)
+        ),
+        "nested vesicles": (
+            _shell(shape, (24, 32, 32), 19, 22) + _shell(shape, (24, 32, 32), 7, 10)
+        ),
+        "clipped at a face": _shell(shape, (0, 32, 32), 14, 18),
+        "shell everywhere": torch.full(shape, 9.0),
+    }
+    # A hole punched through the shell, so the lumen escapes to the cytosol
+    # and there is no enclosed region left at all.
+    leaky = _shell(shape, (24, 32, 32), 14, 18)
+    leaky[:, 30:35, 30:35] = 0.0
+    cases["leaky shell"] = leaky
+    # Carbon-like slab spanning the full cross-section: shell material that
+    # no membrane put there, which must still bound the box correctly.
+    slab = torch.zeros(shape)
+    slab[4:8, :, :] = 12.0
+    cases["carbon slab only"] = slab
+    cases["carbon slab and vesicle"] = slab + _shell(shape, (28, 32, 32), 11, 14)
+
+    for name, density in cases.items():
+        got = classify_membrane_regions(density)
+        want = _full_volume_reference(density)
+        for key in ("shell", "lumen", "cytosol"):
+            assert torch.equal(got[key], want[key]), f"{name}: {key} differs"
+        partition = got["shell"].int() + got["lumen"].int() + got["cytosol"].int()
+        assert torch.equal(partition, torch.ones(shape, dtype=torch.int32)), name

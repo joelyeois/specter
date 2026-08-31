@@ -1418,11 +1418,36 @@ def resolve_icemaker(
 
 
 #: Scattering potential of a voxel entirely filled with biological
-#: material, V. Protein's mean inner potential, measured on 1FA2 at
-#: 7.00 V by rendering and predicted at 7.03 V from its composition and
-#: partial specific volume. Used as the reference for how much of a voxel
-#: is already occupied, so it must be an ABSOLUTE physical quantity: the
-#: whole point is that it does not depend on what else is in the volume.
+#: material, V. Protein's mean inner potential. The reference for how much
+#: of a voxel is already occupied, so it has to be an ABSOLUTE quantity:
+#: the whole point is that it does not depend on what else is in the
+#: volume.
+#:
+#: Measured as integral(V dV) / (molecular volume) over four structures
+#: spanning 19 kDa to 3 MDa -- 6.81 V for 1A6M, 7.00 for 1FA2, 7.07 for
+#: 7VD8, 6.84 for 6QZP -- so 7.0 is protein generally, not one structure.
+#:
+#: Its weakest input is the molecular volume, taken as mass x 1.2122 A^3/Da
+#: from the standard protein partial specific volume vbar = 0.73 cm3/g
+#: (density 1.37 g/cm3). The constant scales inversely with that: vbar 0.70
+#: gives 7.30 V, 0.76 gives 6.73. Two caveats on it, neither resolved:
+#:
+#:   - vbar is THERMODYNAMIC, the volume a solution gains per gram of
+#:     protein, which folds in effects on surrounding water. What this
+#:     model wants is geometric -- space unavailable to water. They are
+#:     close but not the same quantity, and it is not obvious which way a
+#:     better answer moves: van der Waals volume alone is smaller, since
+#:     proteins pack to roughly 75%, and would raise the constant.
+#:   - There is no external anchor. The ice side has one (CLAUDE.md cites
+#:     Yesibolati et al. 2020 for liquid water at 4.48 +/- 0.19 V); the
+#:     protein side does not. Published holography values sit around 7-8 V,
+#:     which is why 7.0 is comfortable, but that range is not cited here
+#:     from a checked source. Closing that gap would firm this up.
+#:
+#: The error it can cause is bounded and small: the constant only infers a
+#: volume FRACTION, so 4% off means a voxel read as 50% full is really 48%.
+#: Against the rule this replaced, where one gold bead moved 13.87% of all
+#: voxels between full ice and none, that is a good trade.
 FULL_OCCUPANCY_POTENTIAL_V = 7.0
 
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 import torch
 
 from specter.specimen.tomogram._regions import classify_membrane_regions
@@ -261,3 +262,47 @@ def test_shell_bbox_labelling_matches_full_volume_labelling() -> None:
             assert torch.equal(got[key], want[key]), f"{name}: {key} differs"
         partition = got["shell"].int() + got["lumen"].int() + got["cytosol"].int()
         assert torch.equal(partition, torch.ones(shape, dtype=torch.int32)), name
+
+
+def test_streaming_mrc_writer_matches_mrcfile_set_data(tmp_path) -> None:
+    """`_write_volume_mrc` writes the same file mrcfile's `set_data` would.
+
+    It exists to avoid `set_data`'s `update_header_stats`, which fills the
+    header's rms field with `ndarray.std()` over the whole volume and
+    allocates a full-size temporary to do it -- 27 GB, and half the wall
+    clock, on a 2 A production tomogram. So the bytes and all four header
+    statistics have to come back unchanged.
+
+    The large-mean case is the one with teeth: deriving rms from a running
+    `E[x^2] - mean^2` in a single pass cancels catastrophically when the
+    values sit far from zero, which is why the implementation takes a
+    second pass over the slabs instead.
+    """
+    import mrcfile
+    import numpy as np
+
+    from specter.pipelines._tomogram import _write_volume_mrc
+
+    rng = np.random.default_rng(0)
+    cases = {
+        "potential-like": rng.gamma(2.0, 1.5, size=(24, 32, 32)).astype("float32"),
+        "all zeros": np.zeros((12, 20, 20), dtype="float32"),
+        "large mean": rng.normal(500.0, 0.5, size=(16, 24, 24)).astype("float32"),
+        "uint16 labels": rng.integers(0, 5000, size=(14, 24, 24)).astype("uint16"),
+    }
+    for name, array in cases.items():
+        new_path = str(tmp_path / f"{name}-new.mrc")
+        ref_path = str(tmp_path / f"{name}-ref.mrc")
+        _write_volume_mrc(new_path, array, 3.25)
+        with mrcfile.new(ref_path, overwrite=True) as mrc:
+            mrc.set_data(array.copy())
+            mrc.voxel_size = 3.25
+
+        with mrcfile.open(new_path) as new, mrcfile.open(ref_path) as ref:
+            assert np.array_equal(np.asarray(new.data), np.asarray(ref.data)), name
+            assert float(new.voxel_size.x) == float(ref.voxel_size.x), name
+            for field in ("dmin", "dmax", "dmean", "rms"):
+                got, want = float(new.header[field]), float(ref.header[field])
+                assert got == pytest.approx(want, rel=1e-6, abs=1e-6), (
+                    f"{name}: header {field} {got!r} != {want!r}"
+                )

@@ -28,8 +28,12 @@ from __future__ import annotations
 import dataclasses
 import os
 import time
+from typing import TYPE_CHECKING
 
 import torch
+
+if TYPE_CHECKING:
+    import numpy as np
 
 from specter.arrays import count_nonzero_chunked
 from specter.config import TomogramConfig, validate_config
@@ -120,6 +124,81 @@ def tomogram_output_path(config: TomogramConfig) -> str:
     else:
         output_dir = _deterministic_tracked_path(config, "tomograms")
     return os.path.join(output_dir, config.filename + ".mrc")
+
+
+#: Z-slices per slab in :func:`_write_volume_mrc`. Sized so one slab of a
+#: 3000x3000 float32 tomogram is ~0.6 GB, small enough that the temporaries
+#: the statistics pass builds stay off the memory profile entirely.
+_MRC_WRITE_SLAB_Z = 16
+
+
+def _write_volume_mrc(
+    path: str,
+    array: "np.ndarray",
+    voxel_size: float,
+) -> None:
+    """
+    Write a volume to MRC without letting mrcfile reduce it whole.
+
+    ``mrc.set_data(...)`` calls mrcfile's ``update_header_stats``, which
+    fills the header's ``dmin``/``dmax``/``dmean``/``rms`` fields by
+    running ``ndarray.std()`` over the entire volume. numpy's variance
+    materializes a full-size temporary to do it, so at the 2 A production
+    grid (750x3000x3000, 27 GB) that one header field was profiled at
+    262 s -- half the run's wall clock -- and its temporary is a
+    substantial share of the peak RSS. The write itself is ~31 s.
+
+    Memory-mapping the file and filling it a slab at a time writes the same
+    bytes and accumulates the same four statistics, with nothing
+    volume-sized allocated on top of the array already in hand.
+
+    Parameters
+    ----------
+    path : str
+        Destination file. Overwritten if it exists.
+    array : numpy.ndarray
+        Volume to write, shape ``(Z, Y, X)``, already in its final dtype.
+    voxel_size : float
+        Isotropic voxel size in Angstrom, written to the header.
+    """
+    import mrcfile
+    import numpy as np
+
+    nz = array.shape[0]
+    total = float(array.size)
+    vmin = np.inf
+    vmax = -np.inf
+    accum = 0.0
+    with mrcfile.new_mmap(
+        path,
+        shape=array.shape,
+        mrc_mode=mrcfile.utils.mode_from_dtype(array.dtype),
+        overwrite=True,
+    ) as mrc:
+        for z0 in range(0, nz, _MRC_WRITE_SLAB_Z):
+            slab = array[z0 : z0 + _MRC_WRITE_SLAB_Z]
+            mrc.data[z0 : z0 + _MRC_WRITE_SLAB_Z] = slab
+            vmin = min(vmin, float(slab.min()))
+            vmax = max(vmax, float(slab.max()))
+            accum += float(slab.sum(dtype=np.float64))
+        mean = accum / total
+
+        # Second pass for the RMS, deliberately, rather than deriving it
+        # from a running sum of squares in the same pass: `rms` is the
+        # deviation from the mean, and E[x^2] - mean^2 cancels
+        # catastrophically for a volume whose values sit far from zero,
+        # which a scattering potential in volts does.
+        sq = 0.0
+        for z0 in range(0, nz, _MRC_WRITE_SLAB_Z):
+            slab = array[z0 : z0 + _MRC_WRITE_SLAB_Z]
+            d = slab.astype(np.float64, copy=False) - mean
+            sq += float(np.dot(d.reshape(-1), d.reshape(-1)))
+
+        mrc.header.dmin = np.float32(vmin)
+        mrc.header.dmax = np.float32(vmax)
+        mrc.header.dmean = np.float32(mean)
+        mrc.header.rms = np.float32(np.sqrt(sq / total))
+        mrc.voxel_size = voxel_size
 
 
 def run_build_tomogram(config: TomogramConfig, n_tomograms: int = 1) -> None:
@@ -626,7 +705,6 @@ def _run_single_tomogram(config: TomogramConfig) -> None:
     _console.print(f"  Occupancy: {occupancy_fraction:.1%} of volume")
 
     _section("Saving")
-    import mrcfile
 
     # run_build_tomogram always hands this function an already-resolved,
     # untracked config, so this is the plain-string leaf directory rather
@@ -635,9 +713,11 @@ def _run_single_tomogram(config: TomogramConfig) -> None:
     output_dir = resolve_output_dir(config, "tomograms")
     os.makedirs(output_dir, exist_ok=True)
     mrc_path = tomogram_output_path(config)
-    with mrcfile.new(mrc_path, overwrite=True) as mrc:
-        mrc.set_data(volume.cpu().numpy().astype("float32"))
-        mrc.voxel_size = config.voxel_size
+    _write_volume_mrc(
+        mrc_path,
+        volume.cpu().numpy().astype("float32", copy=False),
+        config.voxel_size,
+    )
     _console.print(f"  [green]✓[/green] {mrc_path}")
 
     if config.write_picks:
@@ -681,9 +761,9 @@ def _run_single_tomogram(config: TomogramConfig) -> None:
                 )
                 dtype = "float32"
             path = os.path.join(output_dir, config.filename + suffix)
-            with mrcfile.new(path, overwrite=True) as mrc:
-                mrc.set_data(labels.cpu().numpy().astype(dtype))
-                mrc.voxel_size = config.voxel_size
+            _write_volume_mrc(
+                path, labels.cpu().numpy().astype(dtype), config.voxel_size
+            )
             _console.print(f"  [green]✓[/green] {path}")
 
         assert gen.instance_labels is not None

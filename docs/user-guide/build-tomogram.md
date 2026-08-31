@@ -162,14 +162,14 @@ Same field of view rendered at voxel_size = 10, 5, and 2 Å/voxel: a sum Z proje
 
 | `voxel_size` (Å/voxel) | Shape (Z, Y, X voxels) | Wall time | GPU peak | RAM peak |
 |---|---|---|---|---|
-| 10 | 150 × 600 × 600 | 59 s | 2.73 GB | 11.86 GB |
-| 5  | 300 × 1200 × 1200 | 58 s | 9.97 GB | 5.46 GB |
-| 2  | 750 × 3000 × 3000 (~6.75B voxels) | 578 s (9m 38s) | 9.29 GB | 153.17 GB |
+| 10 | 150 × 600 × 600 | 61 s | 2.73 GB | 11.42 GB |
+| 5  | 300 × 1200 × 1200 | 63 s | 9.97 GB | 5.81 GB |
+| 2  | 750 × 3000 × 3000 (~6.75B voxels) | 322 s (5m 22s) | 9.29 GB | 143.67 GB |
 
 10 Å and 5 Å come out level with each other, because at that scale a run is
 dominated by per-run species fetch/render/packing overhead rather than by
-the canvas. The step change at 2 Å is unambiguous: wall time is 10× the
-5 Å figure, and RAM jumps to **153 GB**.
+the canvas. The step change at 2 Å is unambiguous: wall time is 5× the
+5 Å figure, and RAM jumps to **144 GB**.
 That RAM spike is `accumulator_device="auto"` doing exactly what [Compute &
 scaling flags](#compute-scaling-flags) above says it does: at ~6.75
 billion voxels the density volume alone is ~27 GB, comfortably past half
@@ -180,12 +180,20 @@ consumer (the canvas) has moved off the GPU entirely, leaving only
 per-instance rendering buffers and the membrane distance transform behind.
 
 Where the 2 Å run's time goes is worth knowing before optimizing against
-it, since the phases are not in the order intuition suggests. Building the
-specimen is the small part: the membrane phase is 11 s, all 21 structures
-load in 14 s, and packing plus rendering ~22,900 instances is 2m 48s.
-Half the run is a single `numpy` variance over the finished volume, which
-`mrcfile` computes to fill the MRC header's RMS field when the volume is
-handed to it. Writing the 27 GB to disk is only ~31 s of that.
+it. Building the specimen is most of it: the membrane phase is 11 s, all
+21 structures load in 14 s, and packing plus rendering ~22,900 instances
+is 2m 48s. Writing the finished 27 GB volume is the rest.
+
+That balance is recent. Handing a volume to `mrcfile.set_data` makes it
+fill the MRC header's `rms` field with a `numpy` variance over every
+voxel, which allocates a full-size temporary to do it -- profiled at 262 s
+and half the run's wall clock, against ~31 s for writing the bytes.
+Accumulating the header statistics slab-wise instead removed both the pass
+and the temporary. Interleaved back-to-back runs put the difference at
+1063 s against 345 s, and the timing became repeatable in the process: the
+two runs without the whole-volume variance agree to 2 s, while the two
+with it differ by 188 s, since the cost of a 27 GB temporary depends on
+what else is resident at the time.
 Take the exact numbers with a grain
 of salt (one run on one machine, not a statistically averaged sweep), but
 the *shape* (flat at coarse resolution, a sharp RAM/time step once the

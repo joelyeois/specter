@@ -9,6 +9,7 @@ import pytest
 from specter.config import (
     PDB_CACHE_ENV_VAR,
     REPO_ROOT,
+    IceCacheConfig,
     MicrographConfig,
     ParticleStackConfig,
     TiltSeriesConfig,
@@ -691,3 +692,49 @@ def test_klim_reaches_the_scattering_bandlimit() -> None:
     assert limited.klim == 0.66
     # 0.66 of Nyquist keeps strictly fewer frequencies than no limit at all.
     assert limited.kmask.sum() < limited.kmask.numel()
+
+
+@pytest.mark.parametrize(
+    "cls,body,field",
+    [
+        (
+            ParticleStackConfig,
+            '[specimen]\npdb_source = "6bdf"\nassembly = "false"\n',
+            "assembly",
+        ),
+        (TomogramConfig, '[picks]\nwrite_picks = "false"\n', "write_picks"),
+        (IceCacheConfig, '[output]\noverwrite = "false"\n', "overwrite"),
+    ],
+)
+def test_quoted_boolean_is_rejected(tmp_path, cls, body, field) -> None:
+    """A quoted boolean must not silently mean its opposite.
+
+    TOML writes booleans unquoted, but quoting them is a YAML/JSON habit,
+    and `"false"` loads as a non-empty STRING -- which is truthy. Every
+    config had a field where that inverted the meaning silently:
+    `assembly` renders the biological assembly instead of the asymmetric
+    unit, and `overwrite` would let a run destroy an existing ice library.
+    Silently wrong is worse than loudly broken, which is why this is
+    checked rather than left to convention."""
+    path = tmp_path / "c.toml"
+    path.write_text(body)
+    with pytest.raises(ValueError, match="must be true or false"):
+        validate_config(load_config(str(path), cls))
+
+
+def test_type_check_accepts_every_legitimate_spelling(tmp_path) -> None:
+    """The check reads each field's DECLARED union, so deliberately wide
+    ones keep working. `ScalarOrRange` is `str | float | int | list[float]`
+    and accepts "5000,15000" on purpose, since a CLI flag can only carry a
+    string. An int also satisfies a float field, so `voltage = 300` needs
+    no decimal point."""
+    path = tmp_path / "c.toml"
+    for body in (
+        '[specimen]\npdb_source = "6bdf"\nassembly = false\n',
+        '[specimen]\npdb_source = "6bdf"\n[microscope]\nvoltage = 300\n',
+        '[specimen]\npdb_source = "6bdf"\n[sampling]\ndefocus = [5000.0, 15000.0]\n',
+        '[specimen]\npdb_source = "6bdf"\n[sampling]\ndefocus = "5000,15000"\n',
+        '[specimen]\npdb_source = "6bdf"\n[microscope]\ndose = 20\n',
+    ):
+        path.write_text(body)
+        validate_config(load_config(str(path), ParticleStackConfig))

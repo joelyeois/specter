@@ -167,6 +167,80 @@ def _require_valid_cryosparc_ref(config: Any) -> None:
             _fail("cryosparc_ref", ref, "no such file")
 
 
+def _require_valid_types(config: Any) -> None:
+    """
+    Every field actually holds a value of the type it declares.
+
+    TOML is typed, but nothing checked that its types matched the
+    dataclass's. The dangerous case was booleans: ``assembly = "false"``
+    loads the STRING ``'false'``, which is truthy, so the field silently
+    means the opposite of what was written. That reached every config --
+    `assembly`, `save_exitwaves`, `write_picks`, `overwrite` -- and it is
+    the worst failure class, silently wrong rather than loudly broken. An
+    `overwrite = "false"` would have let a run overwrite an existing ice
+    library.
+
+    Checked against each field's DECLARED union rather than a guessed
+    type, because some unions are deliberately wide: `ScalarOrRange` is
+    ``str | float | int | list[float]`` and accepts ``"5000,15000"`` on
+    purpose, since a CLI flag can only ever carry a string.
+
+    Two adjustments to plain `isinstance`:
+
+    - ``bool`` is a subclass of ``int`` in Python, so a bool would satisfy
+      an ``int`` field. Rejected unless ``bool`` is actually declared.
+    - An ``int`` satisfies a ``float`` field, so TOML's ``voltage = 300``
+      is accepted for ``float``. Requiring ``300.0`` would be pedantry.
+
+    ``Literal`` fields are skipped; `_require_valid_literals` checks the
+    value itself, which is stricter than checking its type.
+    """
+    hints = get_type_hints(type(config))
+    for f in fields(config):
+        hint = hints.get(f.name)
+        if hint is None:
+            continue
+        args = (
+            [a for a in get_args(hint) if a is not type(None)]
+            if get_origin(hint) in (Union, types.UnionType)
+            else [hint]
+        )
+        if any(get_origin(a) is Literal for a in args):
+            continue  # _require_valid_literals is stricter
+
+        value = getattr(config, f.name, None)
+        if value is None:
+            continue
+
+        allowed = tuple(get_origin(a) or a for a in args)
+        bool_ok = bool in allowed
+        if isinstance(value, bool) and not bool_ok:
+            _fail(f.name, value, f"must be {_type_names(allowed)}, not a boolean")
+        if isinstance(value, int) and not isinstance(value, bool) and float in allowed:
+            continue  # an int is an acceptable float
+        if not isinstance(value, allowed):
+            _fail(f.name, value, f"must be {_type_names(allowed)}")
+
+
+def _type_names(allowed: tuple[type, ...]) -> str:
+    """Human-readable ``a, b or c`` for a tuple of types."""
+    names = [
+        {
+            "str": "a string",
+            "int": "an integer",
+            "float": "a number",
+            "bool": "true or false",
+            "list": "a list",
+        }.get(t.__name__, t.__name__)
+        for t in allowed
+    ]
+    seen: list[str] = []
+    for n in names:
+        if n not in seen:
+            seen.append(n)
+    return seen[0] if len(seen) == 1 else ", ".join(seen[:-1]) + " or " + seen[-1]
+
+
 def _require_valid_literals(config: Any) -> None:
     """
     Every ``Literal``-typed field actually holds one of its allowed values.
@@ -240,6 +314,7 @@ def validate_config(config: Any) -> None:
     ValueError
         Naming the offending field, its value, and what was required.
     """
+    _require_valid_types(config)
     _require_valid_literals(config)
 
     # Shared across the imaging configs.

@@ -115,6 +115,28 @@ def insert_particles_into_micrograph(
     return micrograph
 
 
+def _local_z_density_probs(
+    z_pts: torch.Tensor,
+    z_bot: torch.Tensor,
+    z_top: torch.Tensor,
+    sigma_frac: float = 0.05,
+    peak_amplitude: float = 1.0,
+    baseline: float = 0.1,
+) -> torch.Tensor:
+    """Keep-probability at each point's own z, per :func:`filter_by_local_z_density`.
+
+    Factored out so a caller that needs the *mask* itself -- not just the
+    filtered points -- can draw one and apply it consistently to several
+    parallel arrays (e.g. coordinates and their committed rotations).
+    """
+    thickness = (z_top - z_bot).clamp(min=1e-6)
+    sigma = (sigma_frac * thickness).clamp(min=1e-6)
+    g1 = torch.exp(-0.5 * ((z_pts - z_bot) / sigma) ** 2)
+    g2 = torch.exp(-0.5 * ((z_pts - z_top) / sigma) ** 2)
+    probs = baseline + peak_amplitude * (g1 + g2)
+    return (probs / probs.max()).clamp(0.0, 1.0)
+
+
 def filter_by_local_z_density(
     pts: torch.Tensor,
     z_bot: torch.Tensor,
@@ -169,17 +191,10 @@ def filter_by_local_z_density(
     if len(pts) == 0:
         return pts, torch.zeros(curve_points)
 
-    thickness = (z_top - z_bot).clamp(min=1e-6)
-    sigma = (sigma_frac * thickness).clamp(min=1e-6)
-    z_pts = pts[:, 2]
-
-    g1 = torch.exp(-0.5 * ((z_pts - z_bot) / sigma) ** 2)
-    g2 = torch.exp(-0.5 * ((z_pts - z_top) / sigma) ** 2)
-
-    probs = baseline + peak_amplitude * (g1 + g2)
-    probs = (probs / probs.max()).clamp(0.0, 1.0)
-
-    mask = torch.rand(len(z_pts)) < probs
+    probs = _local_z_density_probs(
+        pts[:, 2], z_bot, z_top, sigma_frac, peak_amplitude, baseline
+    )
+    mask = torch.rand(len(probs)) < probs
     pts_filtered = pts[mask]
 
     # Curve along z, reported at the mean surfaces: with a profile there is no
@@ -332,12 +347,18 @@ class CrowdWithDuplicates(L.LightningModule):
         fraction) on the same box -- see `pack_shapes_3d`'s own docstring
         for the measured numbers. Requires ``atom_coordinates``.
 
-        Not yet ``ice_profile``-aware: placement is unconstrained by the
-        local slab or ``water_air_interface`` when this backend is
-        selected (candidates may land outside a laterally-varying ice
-        profile). Wiring that in is separate, follow-up work -- see
-        `pack_shapes_3d`'s ``region_mask`` parameter, which is exactly the
-        hook a per-column slab mask would use.
+        ``ice_profile``-aware: the outside-ice region (per-column, from
+        ``ice_profile.surfaces``) is pre-seeded into `pack_shapes_3d`'s own
+        ``occupancy`` grid -- the same hook obstacles like membranes use --
+        so a candidate that would land outside the local slab is a
+        *rejected attempt* RSA retries within its budget, not an accepted
+        instance thrown away afterward. ``water_air_interface`` then thins
+        the resulting (already-jammed, already-confined) pack toward the
+        local surfaces with the same two-Gaussian keep-probability
+        `filter_by_local_z_density` uses, rather than biasing candidate
+        placement itself: RSA saturates density everywhere it's allowed to
+        land, so restricting *where* it draws from further wins nothing
+        once occupancy already confines it.
     atom_coordinates : torch.Tensor, optional
         Atomic coordinates of the template molecule, shape (N, 3), in the
         molecule's own frame -- `specter.pdb.PDB.coordinates` is already
@@ -547,11 +568,31 @@ class CrowdWithDuplicates(L.LightningModule):
         orientations the packer actually tested for collisions, so
         redrawing them at render time would render geometry that does not
         match what was packed (see that method's own comment).
+
+        Under an `ice_profile`, the outside-ice region is pre-seeded into
+        `pack_shapes_3d`'s own `occupancy` grid (the same hook obstacles
+        like membranes use), rather than filtering accepted coordinates
+        afterward: pre-seeding makes a candidate that lands in vacuum a
+        rejected *attempt*, which RSA retries within its budget, instead of
+        an accepted instance that just gets discarded -- so the attempt
+        budget converges on placements that actually land, rather than
+        being spent partly on ones that don't.
         """
         from .specimen.packing import build_species_mask, pack_shapes_3d
 
         grid_shape = (self.nz_out, self.nxy_out, self.nxy_out)
         mask = build_species_mask(self.atom_coordinates, self.dx, gap=self.gap)
+
+        occupancy = None
+        if self.ice_profile is not None:
+            z_bot_field, z_top_field = self.ice_profile.surfaces(self.nxy_out, self.dx)
+            z_axis = (
+                torch.arange(self.nz_out, dtype=torch.float32) - (self.nz_out - 1) / 2
+            ) * self.dx
+            interior = (z_axis[:, None, None] >= z_bot_field[None]) & (
+                z_axis[:, None, None] <= z_top_field[None]
+            )
+            occupancy = ~interior
 
         n_candidates = self.n_candidates
         if n_candidates is None:
@@ -565,12 +606,37 @@ class CrowdWithDuplicates(L.LightningModule):
             species_idx,
             grid_shape,
             self.dx,
+            occupancy=occupancy,
             n_orientations=self.n_orientations,
             max_retries=self.packing_max_retries,
             stall_patience=self.packing_stall_patience,
             seed=self.packing_seed,
             device=str(self.device),
         )
+
+        if self.ice_profile is not None:
+            z_bot, z_top = self.ice_profile.surfaces_at(
+                coords[:, :2], self.nxy_out, self.dx
+            )
+        elif self.water_air_interface:
+            ones = torch.ones(len(coords))
+            z_bot = -self.max_distance_z / 2 * ones
+            z_top = self.max_distance_z / 2 * ones
+
+        if self.water_air_interface and len(coords) > 0:
+            # Thin the jammed pack toward the local surfaces rather than
+            # biasing where candidates are drawn from: RSA already
+            # saturates density everywhere it's allowed to land, so nothing
+            # is gained by restricting placement itself. Reusing the same
+            # two-Gaussian keep-probability as `filter_by_local_z_density`
+            # here has a much bigger accepted pool to thin than
+            # poisson_disk's own raw candidates -- that's what makes the
+            # bias actually show up (see that function's docstring for why
+            # it can't, on a sparse pool).
+            probs = _local_z_density_probs(coords[:, 2], z_bot, z_top)
+            keep = torch.rand(len(coords)) < probs
+            coords, rotation_matrices = coords[keep], rotation_matrices[keep]
+
         self.coords = coords
         self._shape_rotations = rotation_matrices
 

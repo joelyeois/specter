@@ -418,3 +418,71 @@ def test_extracted_dimer_is_in_the_microtubule_frame(tmp_path):
     assert float(extent[2]) == pytest.approx(2 * MONOMER_RISE, abs=25.0)
     assert float(extent[2]) > float(extent[0])
     assert float(extent[2]) > float(extent[1])
+
+
+def test_one_instance_id_per_filament_not_per_monomer():
+    """A filament is one object in the segmentation, like a microtubule.
+
+    Microtubules already shared an id across their dimers, so a tube reads
+    as one object rather than ~950 loose pieces. Actin did not: 20
+    filaments appeared as 765 separate instances, and a picker evaluated
+    against that ground truth was being asked to find monomers."""
+    import torch
+
+    from specter.specimen.filament import FilamentSpec, place_filaments
+    from specter.specimen.tomogram.generator import TomogramSpecimenGenerator
+
+    rng = torch.Generator()
+    rng.manual_seed(11)
+    spec = FilamentSpec(
+        code="1J6Z",
+        step=27.3,
+        flex_deg=12.0,
+        twist_deg=166.15,
+        n_copies=20,
+        n_monomers=(20, 60),
+    )
+    instances = place_filaments([spec], (300, 1200, 1200), 5.0, rng)
+    ids, after = TomogramSpecimenGenerator._one_id_per_filament(None, instances, 100)
+
+    assert len(instances) > 100, "expected many monomers, else the test proves nothing"
+    assert len(set(ids.tolist())) == spec.n_copies
+    assert int(ids.min()) == 100 and after == 100 + spec.n_copies
+    # Ids are contiguous, and every monomer of one filament shares one.
+    assert sorted(set(ids.tolist())) == list(range(100, 100 + spec.n_copies))
+
+
+def test_filament_ids_do_not_collide_across_species():
+    """Both placers number filaments with `range(spec.n_copies)`, so every
+    spec contributes a filament 0. Grouping on that key alone would merge
+    them -- which is what `_stamp_microtubules` used to do, and every
+    microtubule spec resolves to the same cached dimer `code`, so nothing
+    else separated them."""
+    import torch
+
+    from specter.specimen.filament import FilamentSpec, place_filaments
+    from specter.specimen.tomogram.generator import TomogramSpecimenGenerator
+
+    rng = torch.Generator()
+    rng.manual_seed(0)
+    specs = [
+        FilamentSpec(
+            code="1J6Z",
+            step=27.3,
+            flex_deg=12.0,
+            twist_deg=166.15,
+            n_copies=3,
+            n_monomers=(5, 5),
+        ),
+        FilamentSpec(
+            code="1TUB",
+            step=85.0,
+            flex_deg=3.0,
+            twist_deg=0.0,
+            n_copies=3,
+            n_monomers=(5, 5),
+        ),
+    ]
+    instances = place_filaments(specs, (300, 1200, 1200), 5.0, rng)
+    ids, _ = TomogramSpecimenGenerator._one_id_per_filament(None, instances, 1)
+    assert len(set(ids.tolist())) == 6, "two specs x 3 filaments must give 6 ids"

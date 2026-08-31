@@ -1846,6 +1846,42 @@ class TomogramSpecimenGenerator:
 
         return volume, instance_labels, next_instance_id
 
+    def _one_id_per_filament(
+        self, instances: list[FilamentInstance], next_instance_id: int
+    ) -> tuple[torch.Tensor, int]:
+        """One instance id per filament, rather than one per monomer.
+
+        Segmentation ground truth should mark a filament as an object, the
+        way it already marked a microtubule as one rather than as ~950
+        loose dimers. Actin was labelled per monomer until 2026-09-01, so
+        20 filaments appeared as 765 separate objects and a picker
+        evaluated against them was being asked to find monomers.
+
+        Grouped on runs of equal ``(code, filament_id)`` rather than on
+        the key alone. Both placers number filaments with
+        ``range(spec.n_copies)``, restarting per spec, so two specs each
+        contribute a filament 0; keying on the pair alone would merge
+        them. Every placer emits one filament's monomers consecutively,
+        so a change of key is a filament boundary.
+
+        That leaves one case this cannot separate: a spec contributing
+        exactly one filament, immediately followed by a filament of the
+        same `code` and id from the next spec. Distinguishing those needs
+        the placers to number filaments globally, which is the real fix if
+        it ever matters -- `filament_id` is internal, used only here and
+        never written to picks.
+        """
+        ids: list[int] = []
+        current = next_instance_id - 1
+        previous: tuple[str, int] | None = None
+        for inst in instances:
+            key = (inst.code, inst.filament_id)
+            if key != previous:
+                current += 1
+                previous = key
+            ids.append(current)
+        return torch.tensor(ids, dtype=torch.int32), current + 1
+
     def _stamp_filaments(
         self,
         volume: torch.Tensor,
@@ -1891,8 +1927,14 @@ class TomogramSpecimenGenerator:
         self.filament_instances = instances
         if not instances:
             return volume, instance_labels, next_instance_id
+        instance_ids, after = self._one_id_per_filament(instances, next_instance_id)
         return self._render_filament_instances(
-            volume, instance_labels, next_instance_id, voxel_size, instances
+            volume,
+            instance_labels,
+            after,
+            voxel_size,
+            instances,
+            instance_ids=instance_ids,
         )
 
     def _drop_instances_in_carbon(
@@ -1967,18 +2009,16 @@ class TomogramSpecimenGenerator:
         if not instances:
             return volume, instance_labels, next_instance_id
 
-        # One instance id per tube: `filament_id` already identifies it.
-        tube_ids = sorted({inst.filament_id for inst in instances})
-        id_of_tube = {
-            tube_id: next_instance_id + i for i, tube_id in enumerate(tube_ids)
-        }
-        instance_ids = torch.tensor(
-            [id_of_tube[inst.filament_id] for inst in instances], dtype=torch.int32
-        )
+        # One instance id per tube, via the same helper actin uses. The
+        # previous spelling grouped on `filament_id` alone, which merged
+        # tube 0 of one [[microtubules]] spec with tube 0 of the next --
+        # every spec resolves to the same cached dimer `code`, so nothing
+        # else separated them.
+        instance_ids, after = self._one_id_per_filament(instances, next_instance_id)
         return self._render_filament_instances(
             volume,
             instance_labels,
-            next_instance_id + len(tube_ids),
+            after,
             voxel_size,
             instances,
             instance_ids=instance_ids,

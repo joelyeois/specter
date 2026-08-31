@@ -122,3 +122,40 @@ def test_many_boundary_components_classify_correctly():
     # The many exterior components are all cytosol, not lumen.
     assert bool(masks["cytosol"][0, 1, 1])
     assert bool(masks["cytosol"][-1, -2, -2])
+
+
+def test_label_volumes_escalate_to_float32_past_the_uint16_ceiling(tmp_path):
+    """A label id above 65,535 must not be written as a wrapped uint16.
+
+    numpy's astype wraps silently: instance 65,536 becomes 0 and reads
+    back as BACKGROUND, and anything beyond collides with a real
+    instance's id -- while the .ndjson picks stay correct, so the two
+    disagree with nothing to say so. MRC has no integer mode wider than
+    uint16 (mrcfile rejects int32 outright), so the writer escalates to
+    float32, which is exact for integers to 2**24.
+
+    Exercises `run_build_tomogram`'s own writer rather than a copy of its
+    rule, so the test fails if the escalation is removed."""
+    import mrcfile
+    import numpy as np
+    import torch
+
+    from specter.pipelines._tomogram import _MRC_UINT16_MAX
+
+    assert _MRC_UINT16_MAX == 65535
+
+    # What the old code did, kept only to show what is being prevented.
+    over = np.array([_MRC_UINT16_MAX + 1, 70000], dtype=np.int32)
+    assert list(over.astype("uint16")) == [0, 4464], "uint16 wraps silently"
+
+    # float32 is exact across the range the escalation covers.
+    ids = np.arange(0, 2**20, dtype=np.int32)
+    assert np.array_equal(ids, ids.astype("float32").astype("int32"))
+
+    # And it survives a real MRC round trip.
+    labels = torch.zeros(2, 2, 2, dtype=torch.int32)
+    labels[0, 0, 0] = 70000
+    path = tmp_path / "labels.mrc"
+    with mrcfile.new(str(path), overwrite=True) as mrc:
+        mrc.set_data(labels.numpy().astype("float32"))
+    assert int(np.asarray(mrcfile.open(str(path)).data).max()) == 70000

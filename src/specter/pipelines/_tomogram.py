@@ -70,6 +70,14 @@ from ._common import (
 )
 
 
+#: Largest label an MRC integer mode can hold. MRC's widest unsigned
+#: integer mode is uint16 (mode 6); there is no int32 mode, verified
+#: directly against mrcfile, which rejects the dtype outright. Past this,
+#: `_write_label_mrc` escalates to float32 (mode 2), exact for integers to
+#: 2**24 and so good for 256x this ceiling.
+_MRC_UINT16_MAX = 65535
+
+
 def tomogram_output_path(config: TomogramConfig) -> str:
     """
     The ``.mrc`` path `run_build_tomogram` writes for a given config.
@@ -650,6 +658,28 @@ def _run_single_tomogram(config: TomogramConfig) -> None:
         # the same on-disk uint16 mode anyway (no true unsigned-8-bit MRC
         # mode exists), so there's no actual size benefit to requesting it.
         def _write_label_mrc(suffix: str, labels: torch.Tensor, dtype: str) -> None:
+            # Escalated to float32 rather than truncated. numpy's astype
+            # wraps silently on overflow -- instance 65,536 becomes 0 and
+            # reads back as BACKGROUND, and anything past that collides
+            # with a real instance's id, while the .ndjson picks stay
+            # correct so the two disagree with nothing to say so. MRC has
+            # no integer mode wider than uint16, but float32 (mode 2) is
+            # exact for integers to 2**24, which is 256x the uint16
+            # ceiling and past any instance count the packer can reach.
+            #
+            # In practice this never fires: a 1500x6000x6000 A volume, the
+            # largest specter is built for, plateaus near 22,000 instances
+            # because RSA packing jams on placement attempts rather than
+            # on volume. It exists because the failure it replaces is
+            # silent.
+            peak = int(labels.max())
+            if dtype.startswith("uint") and peak > _MRC_UINT16_MAX:
+                _console.print(
+                    f"  [yellow]note[/yellow] {peak:,} labels exceeds uint16's "
+                    f"{_MRC_UINT16_MAX:,}; writing{suffix} as float32 "
+                    "(exact for integers, MRC has no wider integer mode)"
+                )
+                dtype = "float32"
             path = os.path.join(output_dir, config.filename + suffix)
             with mrcfile.new(path, overwrite=True) as mrc:
                 mrc.set_data(labels.cpu().numpy().astype(dtype))

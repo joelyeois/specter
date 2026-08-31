@@ -134,6 +134,7 @@ def run_micrograph(config: MicrographConfig) -> None:
         pdb.atomic_numbers,
         parameterization=config.scattering_factors,
         atom_species=pdb.atom_species,
+        b_factors=pdb.b_factors if config.use_deposited_bfactors else None,
     ).to("cpu")
     with torch.no_grad():
         V = pb(pdb.coordinates).clone()

@@ -191,6 +191,38 @@ def _require_valid_literals(config: Any) -> None:
             _fail(f.name, value, f"must be one of {', '.join(map(repr, allowed))}")
 
 
+def _require_bfactor_backend(config: Any) -> None:
+    """
+    Reject `use_deposited_bfactors` on a backend that cannot apply it.
+
+    `PotentialBuilder` raises for these combinations too, but only once a
+    structure has been fetched, parsed and typed -- minutes into a tomogram
+    run. The condition is knowable from the config alone, so check it here.
+    """
+    if not getattr(config, "use_deposited_bfactors", False):
+        return
+
+    if getattr(config, "scattering_factors", "shtyrov") != "shtyrov":
+        _fail(
+            "use_deposited_bfactors",
+            True,
+            "requires scattering_factors='shtyrov' -- Kirkland's and Lobato's "
+            "Lorentzian terms convolve with a Gaussian to a Voigt profile, "
+            "which has no closed form to voxel-average",
+        )
+
+    # Only ParticleStackConfig exposes the voxelization method; everything
+    # else always renders 'analytic'.
+    if getattr(config, "potential_method", "analytic") != "analytic":
+        _fail(
+            "use_deposited_bfactors",
+            True,
+            "requires potential_method='analytic' -- '2d'/'3d' convolve one "
+            "precomputed kernel per element group, so a per-atom Gaussian "
+            "width has nowhere to go",
+        )
+
+
 def validate_config(config: Any) -> None:
     """
     Reject physically impossible values before any work is done.
@@ -297,6 +329,7 @@ def validate_config(config: Any) -> None:
         "fsc_mask",
     )
     _require_valid_cryosparc_ref(config)
+    _require_bfactor_backend(config)
 
     # Grammar first, and here rather than in the pipeline: a device string is
     # otherwise parsed several stages into a run, so a typo surfaced either as

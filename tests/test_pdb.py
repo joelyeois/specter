@@ -206,7 +206,43 @@ def test_parsed_cache_returns_an_identical_structure(tmp_path):
     assert torch.equal(cold.atomic_numbers, warm.atomic_numbers)
     assert torch.equal(cold.coordinates, warm.coordinates)
     assert cold.atom_species == warm.atom_species
+    assert torch.equal(cold.b_factors, warm.b_factors)
     assert cold.max_diameter == warm.max_diameter
+
+
+@pytest.mark.skipif(not _FIXTURE.exists(), reason="bundled PDB fixture missing")
+@pytest.mark.parametrize("compute_atom_species", [False, True])
+def test_b_factors_align_with_the_atoms_they_describe(compute_atom_species):
+    """Both parse paths must return one B-factor per atom, same order.
+
+    The Biopython walk and the gemmi typed model build the atom list
+    independently, and `PotentialBuilder(b_factors=...)` indexes it
+    positionally -- a length that matched but an order that did not would
+    damp the wrong atoms with no error anywhere.
+    """
+    pdb = PDB(str(_FIXTURE), verbose=False, compute_atom_species=compute_atom_species)
+
+    assert pdb.b_factors.shape == (pdb.atomic_numbers.shape[0],)
+    assert torch.isfinite(pdb.b_factors).all()
+    assert (pdb.b_factors >= 0).all()
+    # 1mbo is a real deposition, so its column varies rather than sitting at
+    # one refined-flat value -- which is the whole reason a per-atom B is
+    # worth carrying at all.
+    assert pdb.b_factors.std() > 0
+
+
+@pytest.mark.skipif(not _FIXTURE.exists(), reason="bundled PDB fixture missing")
+def test_both_parse_paths_agree_on_b_factors():
+    """Typing a structure must not change the B-factors it reports.
+
+    Without a monomer library the two paths describe the same atom list, so
+    any disagreement is a misalignment between them.
+    """
+    plain = PDB(str(_FIXTURE), verbose=False)
+    typed = PDB(str(_FIXTURE), verbose=False, compute_atom_species=True)
+
+    assert typed.b_factors.shape == plain.b_factors.shape
+    torch.testing.assert_close(typed.b_factors, plain.b_factors)
 
 
 @pytest.mark.skipif(not _FIXTURE.exists(), reason="bundled PDB fixture missing")
@@ -472,7 +508,7 @@ def test_metal_links_dropped_with_library():
     """
     from specter.pdb import PDB as _PDB
 
-    _, _, species, used = _PDB._build_typed_model(
+    _, _, species, _, used = _PDB._build_typed_model(
         str(_FIXTURE), _monomer_library(), False
     )
     assert used, "library did not load"
@@ -502,7 +538,7 @@ def test_readd_hydrogens_false_keeps_deposited_coordinates():
     assert deposited, "fixture no longer carries hydrogens"
 
     def h_coords(readd):
-        znum, pos, _, used = PDB._build_typed_model(
+        znum, pos, _, _, used = PDB._build_typed_model(
             str(_H_FIXTURE), _monomer_library(), False, readd_hydrogens=readd
         )
         assert used
@@ -537,7 +573,7 @@ def test_readd_hydrogens_false_types_without_adding_density():
         table = set(json.loads(Path(fpath).read_text()))
 
     def coverage(mon, readd):
-        znum, _, species, _ = PDB._build_typed_model(
+        znum, _, species, _, _ = PDB._build_typed_model(
             str(_FIXTURE), mon, False, readd_hydrogens=readd
         )
         hit = sum(1 for s in species if s in table)
@@ -557,7 +593,7 @@ def test_readd_hydrogens_auto_follows_the_file():
     mon = _monomer_library()
 
     def counts(cif, mode):
-        znum, _, _, _ = PDB._build_typed_model(
+        znum, _, _, _, _ = PDB._build_typed_model(
             str(cif), mon, False, readd_hydrogens=mode
         )
         return len(znum), sum(1 for z in znum if z == 1)

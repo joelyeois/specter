@@ -67,6 +67,12 @@ filename = "particles"
 # carries and adds them only when it has none
 # readd_hydrogens = "auto"     # auto | true | false
 
+# Damp each atom by its structure's own deposited B-factor instead of
+# rendering the model statically. Only a PER-ATOM B adds anything an
+# envelope cannot -- a uniform one is the same exp(-B k^2/4) as bfactor
+# below, so setting both double-counts. Needs scattering_factors = "shtyrov".
+# use_deposited_bfactors = false
+
 # --- Potential building ---
 scattering_factors = "shtyrov"   # shtyrov | kirkland | lobato
 potential_method = "analytic"    # analytic | 2d | 3d -- applies to the structure's own

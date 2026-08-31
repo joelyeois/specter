@@ -46,6 +46,11 @@ class MicrographConfig:
     # the library changes the rendered potential, so a run should be
     # reproducible from its own config -- see ParticleStackConfig's own note.
     monomer_library_path: str | None = None
+    # Off by default: a deposited B-factor is refinement output, not a
+    # measured mean-square displacement, and applying a structure's own
+    # column silently makes the rendered specimen depend on who deposited
+    # it. Requires scattering_factors="shtyrov"; anything else raises.
+    use_deposited_bfactors: bool = False
 
     # --- Microscope / physics ---
     voltage: float = 300.0  # kV
@@ -161,6 +166,13 @@ MICROGRAPH_HELP: dict[str, str] = {
     "structure's bond topology and hydrogens so Shtyrov species resolve. "
     "Unset falls back to $CLIBD_MON. Without one, around 44% of a "
     "hydrogen-free protein falls back to per-element Peng factors.",
+    "use_deposited_bfactors": "Damp each atom by the B-factor its structure "
+    "deposits, instead of rendering the model statically. Only a PER-ATOM "
+    "B adds anything an envelope cannot: a uniform one is the same "
+    "exp(-B k^2/4) as --bfactor, so setting both double-counts. A deposited "
+    "column is refinement output rather than a measured displacement, and "
+    "cryo-EM entries often carry a constant or zero one. Requires "
+    "scattering_factors='shtyrov'.",
     "voltage": "Electron beam accelerating voltage in kV.",
     "dose": "Total dose per micrograph in e-/Angstrom^2: a single value (e.g. 20) for a "
     "constant dose per micrograph, or 'low,high' (e.g. 20,60) to sample uniformly per micrograph "

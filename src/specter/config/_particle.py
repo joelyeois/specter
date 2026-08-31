@@ -139,6 +139,12 @@ class ParticleStackConfig:
     # recorded config rather than from an environment nobody wrote down --
     # the same reason pdb_cache_dir is a field despite $SPECTER_PDB_CACHE.
     monomer_library_path: str | None = None
+    # Off by default: a deposited B-factor is refinement output, not a
+    # measured mean-square displacement, and applying a structure's own
+    # column silently makes the rendered specimen depend on who deposited
+    # it. Requires scattering_factors="shtyrov" and
+    # potential_method="analytic"; anything else raises.
+    use_deposited_bfactors: bool = False
 
     # --- Advanced: scattering ---
     ews_curvature_sign: Literal["negative", "positive"] = "positive"
@@ -309,6 +315,13 @@ PARTICLE_STACK_HELP: dict[str, str] = {
     "structure's bond topology and hydrogens so Shtyrov species resolve. "
     "Unset falls back to $CLIBD_MON. Without one, around 44% of a "
     "hydrogen-free protein falls back to per-element Peng factors.",
+    "use_deposited_bfactors": "Damp each atom by the B-factor its structure "
+    "deposits, instead of rendering the model statically. Only a PER-ATOM "
+    "B adds anything an envelope cannot: a uniform one is the same "
+    "exp(-B k^2/4) as --bfactor, so setting both double-counts. A deposited "
+    "column is refinement output rather than a measured displacement, and "
+    "cryo-EM entries often carry a constant or zero one. Requires "
+    "scattering_factors='shtyrov' and potential_method='analytic'.",
     "ews_curvature_sign": "Ewald sphere curvature sign, matching CryoSPARC's "
     "convention.",
     "klim": "Bandlimit for Kirkland's FFT anti-aliasing, as a fraction of Nyquist. Kirkland recommends 0.66 (2/3), which prevents aliasing but discards real spatial frequency content above it. Unset (the default) keeps the full Nyquist range and accepts the aliasing.",

@@ -279,6 +279,40 @@ every element or species present in the structure. Light-element
 structures (H, C, N, O) need only ~2-2.5 Å; heavier or more diffuse
 elements such as K or Na need ~5 Å.
 
+## Debye-Waller damping from deposited B-factors
+
+Every formula above describes a static atom. A structure file also carries
+an isotropic B-factor per atom, and `PotentialBuilder(b_factors=...)`
+applies it. In Fourier space a Debye-Waller factor multiplies an atom's
+scattering amplitude by \(\exp(-Bk^2/4)\), which for a sum of Gaussians is a
+widening of each term, \(b_i \rightarrow b_i + B\). The closed form is
+therefore unchanged and the damping costs nothing to apply.
+
+Damping is off by default; the `use_deposited_bfactors` config field enables
+it. Two properties govern whether it is worth enabling.
+
+The first is that it duplicates an imaging term unless it varies per atom.
+`Aberration(bfactor=...)` multiplies the whole transfer function by the same
+\(\exp(-Bk^2/4)\), so a single B applied to every atom is the envelope
+SPECTER already provides, and applying both counts the same damping twice.
+What no envelope can express is spatial variation: a flexible loop damped
+more than a rigid core. That is the case a per-atom column covers.
+
+The second is that a deposited B-factor is not a measured mean-square
+displacement. It absorbs real disorder, model error and refinement
+convention together, and cryo-EM entries are frequently deposited with a
+constant or zero column. Rendering a structure's own column makes the
+specimen depend on how that structure was refined, which is why the
+default renders the static model.
+
+The two other backends refuse a `b_factors` argument rather than dropping
+it. Kirkland's and Lobato's parameterizations carry Lorentzian terms, whose
+convolution with a Gaussian is a Voigt profile with no closed form to
+voxel-average. The `"2d"` and `"3d"` methods convolve one precomputed
+kernel per element group, which admits no per-atom width. `recommended_rcut` widens its tabled radius by \(3\sqrt{B/8\pi^2}\),
+the 3-sigma width of the B-factor's own Gaussian, since the tables were
+derived for static atoms and the damped tail reaches further.
+
 ## Worked example: reproducing Kirkland's textbook figures
 
 SPECTER validates the atomic potential and imaging code against the

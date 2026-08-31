@@ -1186,3 +1186,33 @@ def test_generator_and_pipeline_share_one_set_of_default_ranges() -> None:
             f"MembraneGenerator.{name}'s default is no longer the shared constant"
         )
     assert tomogram_pipeline.DEFAULT_SH_AXES_RANGE_A is DEFAULT_SH_AXES_RANGE_A
+
+
+def test_render_transmembrane_template_honours_use_deposited_bfactors():
+    """
+    The membrane path builds its own `PotentialBuilder`, so it needs its own
+    check that the flag arrives -- see the tomogram generator's counterpart.
+    """
+    from specter.specimen.membrane._generator import render_transmembrane_template
+
+    pdb_path = Path(__file__).parent / "test_data" / "1mbo.cif"
+    if not pdb_path.exists():
+        pytest.skip("bundled PDB fixture missing")
+
+    spec = TransmembraneSpec(str(pdb_path))
+    kwargs = dict(
+        spec=spec,
+        voxel_size=2.0,
+        pdb_cache_dir=str(pdb_path.parent),
+        device="cpu",
+    )
+    static = render_transmembrane_template(**kwargs)
+    damped = render_transmembrane_template(**kwargs, use_deposited_bfactors=True)
+
+    # A B-factor redistributes potential without removing any (exp(-B k^2/4)
+    # is 1 at k=0) while strictly reducing its power at every other frequency.
+    # Power rather than the peak: a peak sits in one voxel, so it moves with
+    # sub-voxel alignment (0.92 here against 0.90 for the same structure
+    # unrotated in the tomogram path), while the power ratio is 0.777 in both.
+    assert damped.sum().item() == pytest.approx(static.sum().item(), rel=5e-3)
+    assert damped.pow(2).sum() < 0.9 * static.pow(2).sum()

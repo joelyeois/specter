@@ -127,6 +127,9 @@ PARTICLES = CommandSpec(
         Flag("pixel_size", "4.0"),
         Flag("scattering_factors", "kirkland"),
         Flag("scattering_factors", "lobato"),
+        # A per-atom Debye-Waller damping; only shtyrov + analytic accept it,
+        # so it must run WITHOUT the kirkland/lobato perturbations above.
+        Flag("use_deposited_bfactors", "true"),
         Flag("potential_method", "2d"),
         Flag("potential_method", "3d"),
         Flag(
@@ -270,6 +273,9 @@ MICROGRAPH = CommandSpec(
         Flag("micrograph_size", "160"),
         Flag("scattering_factors", "kirkland"),
         Flag("scattering_factors", "lobato"),
+        # A per-atom Debye-Waller damping; only shtyrov + analytic accept it,
+        # so it must run WITHOUT the kirkland/lobato perturbations above.
+        Flag("use_deposited_bfactors", "true"),
         Flag("voltage", "200.0"),
         Flag("dose", "40.0"),
         Flag(
@@ -449,6 +455,9 @@ TOMOGRAM = CommandSpec(
         Flag("membrane_region_max_passes", "2"),
         Flag("membrane_min_transmembrane_spacing", "80.0"),
         Flag("scattering_factors", "kirkland"),
+        # A per-atom Debye-Waller damping; only shtyrov + analytic accept it,
+        # so it must run WITHOUT the kirkland/lobato perturbations above.
+        Flag("use_deposited_bfactors", "true"),
         Flag("actin", "true"),
         Flag("bead_roughness", "0.3"),
         Flag("write_picks", "false", expect="artifacts"),

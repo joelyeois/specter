@@ -169,6 +169,7 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
             atom_species=config.atom_species or pdb.atom_species,
             shtyrov_params_path=config.shtyrov_params_path,
             rcut=config.rcut,
+            b_factors=pdb.b_factors if config.use_deposited_bfactors else None,
             periodic=config.periodic,
         ).to("cpu")
         with torch.no_grad():

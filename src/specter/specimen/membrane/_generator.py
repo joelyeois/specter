@@ -260,6 +260,7 @@ def render_transmembrane_template(
     device: str | torch.device,
     readd_hydrogens: bool | str = "auto",
     monomer_library_path: str | None = None,
+    use_deposited_bfactors: bool = False,
 ) -> torch.Tensor:
     """
     Build one transmembrane species' potential template from its PDB source.
@@ -290,6 +291,12 @@ def render_transmembrane_template(
     monomer_library_path : str, optional
         Forwarded to `PDB`; see `specter.pdb.PDB`. Unset falls back to
         `$CLIBD_MON`.
+    use_deposited_bfactors : bool, optional
+        Damp each atom by the B-factor its structure deposits, rather than
+        rendering the model statically. Requires
+        `spec.parameterization == "shtyrov"`; see `PotentialBuilder`'s own
+        `b_factors` for why the other backends refuse it, and why a
+        deposited column is not a measured displacement. Default False.
 
     Returns
     -------
@@ -319,6 +326,7 @@ def render_transmembrane_template(
         # align_principal_axis_to_z/align_transmembrane_depth only rotate and
         # translate, so species stay in step with coordinates.
         atom_species=pdb.atom_species,
+        b_factors=pdb.b_factors if use_deposited_bfactors else None,
     ).to(device)
     # "analytic" (PotentialBuilder's own documented default), not "3d" --
     # confirmed empirically the two methods integrate to the same total
@@ -721,6 +729,7 @@ class MembraneGenerator:
         pdb_cache_dir: str = DEFAULT_PDB_CACHE_DIR,
         readd_hydrogens: bool | str = "auto",
         monomer_library_path: str | None = None,
+        use_deposited_bfactors: bool = False,
         max_field_voxels: int = _MAX_FIELD_VOXELS,
         max_output_voxels: int = 4_000_000_000,
         device: str | torch.device = "cpu",
@@ -1016,6 +1025,7 @@ class MembraneGenerator:
         self.transmembrane_occupancy_fraction = transmembrane_occupancy_fraction
         self.pdb_cache_dir = pdb_cache_dir
         self.readd_hydrogens = readd_hydrogens
+        self.use_deposited_bfactors = use_deposited_bfactors
         self.monomer_library_path = monomer_library_path
         self.max_field_voxels = max_field_voxels
         self.device = torch.device(device)
@@ -1349,6 +1359,7 @@ class MembraneGenerator:
             build_device,
             readd_hydrogens=self.readd_hydrogens,
             monomer_library_path=self.monomer_library_path,
+            use_deposited_bfactors=self.use_deposited_bfactors,
         ).to(self.device)
 
     def _physical_to_voxel_index(self, site_xyz: torch.Tensor) -> torch.Tensor:

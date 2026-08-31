@@ -115,8 +115,10 @@ def canonical_pdb_source(pdb_source: str) -> str:
 #: part of every parsed-cache key, so an entry written by older code misses
 #: instead of silently returning a structure the current code would not
 #: produce. Raise it when editing `_build_typed_model`,
-#: `get_atoms_and_coordinates` or `get_atom_species`.
-_PARSED_CACHE_VERSION = 1
+#: `get_atoms_and_coordinates` or `get_atom_species` -- and note the
+#: entry carries every field `PDB` reads off a structure, so adding one (as
+#: `b_factors` did at version 2) is itself a reason to raise it.
+_PARSED_CACHE_VERSION = 2
 
 
 def _parsed_cache_path(
@@ -178,7 +180,7 @@ def _parsed_cache_path(
 
 def _load_parsed_structure(
     path: str | None,
-) -> tuple[torch.Tensor, torch.Tensor, list[str | None] | None] | None:
+) -> tuple[torch.Tensor, torch.Tensor, list[str | None] | None, torch.Tensor] | None:
     """
     Read a cached parse, or None if there isn't a usable one.
 
@@ -194,6 +196,7 @@ def _load_parsed_structure(
             blob["atomic_numbers"],
             blob["coordinates"],
             blob["atom_species"],
+            blob["b_factors"],
         )
     except Exception:
         return None
@@ -204,6 +207,7 @@ def _store_parsed_structure(
     atomic_numbers: torch.Tensor,
     coordinates: torch.Tensor,
     atom_species: list[str | None] | None,
+    b_factors: torch.Tensor,
 ) -> None:
     """
     Write a parse to the cache, best-effort.
@@ -224,6 +228,7 @@ def _store_parsed_structure(
                 "atomic_numbers": atomic_numbers,
                 "coordinates": coordinates,
                 "atom_species": atom_species,
+                "b_factors": b_factors,
             },
             tmp,
         )
@@ -419,6 +424,13 @@ class PDB:
         atom_species : list of str or None, optional
             Bonded-neighbor species descriptor per atom (e.g. `"O(HH)"`,
             `"C(HHHC)"`), only set when `compute_atom_species=True`.
+        b_factors : torch.Tensor
+            Deposited isotropic B-factor per atom in Å², shape (N,), aligned
+            with `atomic_numbers`/`coordinates`. Always read; whether anything
+            renders with it is the caller's choice (see
+            `PotentialBuilder(b_factors=...)`). Hydrogens a monomer library
+            adds carry whatever B gemmi assigns them, which is 0 for an atom
+            built from ideal geometry.
         """
 
         # Determine whether pdb_source is a PDB ID or file path. The ID check
@@ -460,6 +472,9 @@ class PDB:
         # bonded-neighbor species descriptors (e.g. for Shtyrov potentials)
         self.atom_species: list[str | None] | None = None
 
+        # deposited isotropic B-factors, Å², set by every path below
+        self.b_factors: torch.Tensor
+
         # Parsing is by far the dominant cost of loading a structure that is
         # already downloaded (16.7 s for a 220k-atom assembly, roughly 60% of
         # it Biopython and 40% gemmi typing), and it is a pure function of the
@@ -476,7 +491,12 @@ class PDB:
         )
         cached = _load_parsed_structure(parsed_path)
         if cached is not None:
-            self.atomic_numbers, self.coordinates, self.atom_species = cached
+            (
+                self.atomic_numbers,
+                self.coordinates,
+                self.atom_species,
+                self.b_factors,
+            ) = cached
             if compute_atom_species and resolved_library is None:
                 # Raised inside _build_typed_model on the parsing path, so a
                 # cache hit would otherwise silently stop reporting an
@@ -496,6 +516,7 @@ class PDB:
                 self.atomic_numbers,
                 self.coordinates,
                 self.atom_species,
+                self.b_factors,
             )
 
         # center coordinates
@@ -518,15 +539,16 @@ class PDB:
         verbose: bool,
     ) -> None:
         """
-        Populate `atomic_numbers`/`coordinates`/`atom_species` from the file.
+        Populate `atomic_numbers`/`coordinates`/`atom_species`/`b_factors`
+        from the file.
 
         Split out of `__init__` so the parsed-cache path above can skip it
-        wholesale. Sets exactly the three attributes the cache stores, in
+        wholesale. Sets exactly the four attributes the cache stores, in
         their pre-centering form.
         """
         used_library = False
         if compute_atom_species:
-            znum, pos, species, used_library = PDB._build_typed_model(
+            znum, pos, species, bfac, used_library = PDB._build_typed_model(
                 self.filepath,
                 monomer_library_path,
                 verbose=verbose,
@@ -543,12 +565,15 @@ class PDB:
                 # species resolvable at all; see `monomer_library_path`.
                 self.atomic_numbers = torch.tensor(znum, dtype=torch.long)
                 self.coordinates = torch.tensor(pos, dtype=torch.float32)
+                self.b_factors = torch.tensor(bfac, dtype=torch.float32)
 
         if not used_library:
-            # get atomic elements and coordinates
-            self.atomic_numbers, self.coordinates = PDB.get_atoms_and_coordinates(
-                self.structure, verbose=verbose
-            )
+            # get atomic elements, coordinates and B-factors
+            (
+                self.atomic_numbers,
+                self.coordinates,
+                self.b_factors,
+            ) = PDB.get_atoms_and_coordinates(self.structure, verbose=verbose)
 
         if compute_atom_species and not used_library:
             # Without a library the two parsers should still agree atom for
@@ -763,9 +788,13 @@ class PDB:
     def get_atoms_and_coordinates(
         structure: Structure | str,
         verbose: bool = True,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
-        Extract atomic elements and coordinates from PDB structure.
+        Extract atomic elements, coordinates and B-factors from PDB structure.
+
+        All three come from one walk of the same atom list, so they are
+        aligned by construction -- which is what `PotentialBuilder` relies on,
+        since it indexes `b_factors` positionally against `atomic_numbers`.
 
         Parameters
         ----------
@@ -782,6 +811,8 @@ class PDB:
             Atomic numbers for each atom, shape (N,).
         coords : torch.Tensor
             Atomic coordinates (x, y, z) for each atom, shape (N, 3).
+        b_factors : torch.Tensor
+            Deposited isotropic B-factor for each atom in Å², shape (N,).
 
         Notes
         -----
@@ -795,6 +826,7 @@ class PDB:
         # Extract atomic data
         coords_list = []
         element_symbols = []
+        b_factor_list = []
         for atom in track(
             structure.get_atoms(),
             description="Extracting atom coordinates and element",
@@ -805,10 +837,12 @@ class PDB:
 
             coord = atom.get_coord()
             coords_list.append(coord)
+            b_factor_list.append(atom.get_bfactor())
         coords = torch.as_tensor(np.array(coords_list))
         elements = atom_number(element_symbols)
+        b_factors = torch.tensor(b_factor_list, dtype=torch.float32)
 
-        return elements, coords
+        return elements, coords, b_factors
 
     @staticmethod
     def _build_typed_model(
@@ -816,13 +850,14 @@ class PDB:
         monomer_library_path: str | None = None,
         verbose: bool = True,
         readd_hydrogens: bool | str = "auto",
-    ) -> tuple[list[int], list[list[float]], list[str | None], bool]:
+    ) -> tuple[list[int], list[list[float]], list[str | None], list[float], bool]:
         """
         Build the topology-completed model and type every atom in one pass.
 
-        Returns each atom's element, position and bonded-neighbor species
-        descriptor from the *same* gemmi model, so the three stay aligned by
-        construction. :meth:`get_atom_species` returns only the descriptors.
+        Returns each atom's element, position, bonded-neighbor species
+        descriptor and B-factor from the *same* gemmi model, so the four stay
+        aligned by construction. :meth:`get_atom_species` returns only the
+        descriptors.
 
         Mirrors the atom-typing approach used by `sffit
         <https://github.com/as2875/sffit>`_ to fit bonded-species electron
@@ -860,6 +895,11 @@ class PDB:
             One entry per atom, in the same file/chain/residue/atom order
             as `get_atoms_and_coordinates`. `None` where no neighbors could
             be determined (e.g. isolated ions, or unresolved components).
+        b_factors : list of float
+            Isotropic B-factor per atom, Å². Atoms the monomer library adds
+            carry gemmi's own value for them (0 for one built from ideal
+            geometry), since the file supplies no B for an atom it does not
+            contain.
         """
         if not filepath.lower().endswith("cif"):
             warnings.warn(
@@ -869,11 +909,14 @@ class PDB:
                 stacklevel=2,
             )
             structure = PDB.get_pdb_structure(filepath)
-            znum_t, pos_t = PDB.get_atoms_and_coordinates(structure, verbose=False)
+            znum_t, pos_t, bfac_t = PDB.get_atoms_and_coordinates(
+                structure, verbose=False
+            )
             return (
                 znum_t.tolist(),
                 pos_t.tolist(),
                 [None] * int(znum_t.shape[0]),
+                bfac_t.tolist(),
                 False,
             )
 
@@ -1012,6 +1055,7 @@ class PDB:
         species: list[str | None] = []
         atomic_numbers: list[int] = []
         positions: list[list[float]] = []
+        b_factors: list[float] = []
         n_matched = 0
         seen: set[_AtomKey] = set()
         for cra in st[0].all():
@@ -1040,6 +1084,7 @@ class PDB:
             seen.add(key)
             atomic_numbers.append(cra.atom.element.atomic_number)
             positions.append([cra.atom.pos.x, cra.atom.pos.y, cra.atom.pos.z])
+            b_factors.append(cra.atom.b_iso)
             neighbors = neighbor_keys.get(key)
             if not neighbors:
                 species.append(None)
@@ -1062,7 +1107,7 @@ class PDB:
         if verbose:
             print(f"[get_atom_species] {n_matched}/{len(species)} atoms typed")
 
-        return atomic_numbers, positions, species, used_library
+        return atomic_numbers, positions, species, b_factors, used_library
 
     @staticmethod
     def get_atom_species(
@@ -1082,7 +1127,7 @@ class PDB:
             One entry per atom, in the same order as the model this was
             derived from. ``None`` where no neighbors could be determined.
         """
-        _, _, species, _ = PDB._build_typed_model(
+        _, _, species, _, _ = PDB._build_typed_model(
             filepath, monomer_library_path, verbose
         )
         return species

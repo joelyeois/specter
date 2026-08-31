@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from importlib import resources
 from typing import Any, Sequence
 
@@ -353,6 +354,7 @@ def build_potential_volume_analytic_scatter(
     grid_shape: tuple[int, int, int],
     dx: float,
     rcut: float = 5.0,
+    b_factors: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """
     Build a potential volume by analytically evaluating each atom's
@@ -409,7 +411,22 @@ def build_potential_volume_analytic_scatter(
         5.0 Å, matching sffit's own `--rcut` convention (its default of 10 Å
         resolves to a 5 Å radius) — verified to hold every bundled Shtyrov
         species and Peng/gemmi element to well under 0.05% of peak value at
-        this radius.
+        this radius. Must be widened when `b_factors` is given, since a
+        B-factor broadens every tail; `recommended_rcut(b_factor_max=...)`
+        does this.
+    b_factors : torch.Tensor, optional
+        Per-atom isotropic B-factor in Å², shape (N,). Default None (no
+        Debye-Waller damping — the deposited model is rendered as the static
+        structure it is). Adding it is exact and free here: a Debye-Waller
+        factor multiplies each Gaussian term's Fourier amplitude by
+        `exp(-B k^2 / 4)`, which is a widening of that term alone,
+        `b_i -> b_i + B`, so the closed form below is unchanged. This is the
+        only place in `specter` where a B-factor enters the *specimen*.
+        Applying a single uniform B this way would duplicate
+        `Aberration(bfactor=...)`, which multiplies the whole transfer
+        function by the same `exp(-B k^2 / 4)`; what a per-atom B expresses
+        that no envelope can is spatial variation, a floppy loop damped more
+        than a rigid core.
 
     Returns
     -------
@@ -420,6 +437,13 @@ def build_potential_volume_analytic_scatter(
     e = 14.4  # electron charge, [V·Å]
     c1 = 2 * torch.pi * e * a0
 
+    if b_factors is not None:
+        if b_factors.shape[0] != coords.shape[0]:
+            raise ValueError(
+                f"b_factors has {b_factors.shape[0]} entries for "
+                f"{coords.shape[0]} atoms"
+            )
+        b_coefs = b_coefs + b_factors.to(b_coefs).unsqueeze(-1)
     b_coefs = b_coefs.clamp(min=MIN_GAUSSIAN_B)
     h = dx / 2  # half voxel width, for the voxel-average integration bounds
 
@@ -798,6 +822,7 @@ def recommended_rcut(
     atomic_numbers: torch.Tensor,
     parameterization: str = "shtyrov",
     atom_species: Sequence[str | None] | None = None,
+    b_factor_max: float = 0.0,
 ) -> float:
     """
     Recommend a `method="analytic"` `rcut` (Å) for the given structure.
@@ -822,6 +847,18 @@ def recommended_rcut(
         Per-atom bonded-species descriptors, same length/order as
         `atomic_numbers`. Only used when `parameterization='shtyrov'`.
         Default is None (every atom uses its plain per-element Peng value).
+    b_factor_max : float, optional
+        Largest per-atom B-factor (Å²) the render will apply, 0.0 (default)
+        when it applies none. The tables above were derived at B=0, and a
+        B-factor widens every Gaussian term (`b_i -> b_i + B`), so the tabled
+        radius alone would silently truncate the broadened tail. The padding
+        is the 3-sigma width of the B-factor's own Gaussian,
+        `3*sqrt(B/(8*pi^2))`, added to (not combined in quadrature with) the
+        tabled radius: quadrature is the tighter-looking choice and it fails,
+        falling short for 7 species at B=20 and 45 at B=80, while the
+        additive form clears the same 99.5%-of-integrated-potential criterion
+        the tables use by at least 0.72 Å for every bundled Shtyrov species
+        and common Peng element at B in {10, 20, 40, 80}.
 
     Returns
     -------
@@ -829,20 +866,21 @@ def recommended_rcut(
         Recommended `rcut`, in Å.
     """
     unique_z = torch.unique(atomic_numbers).tolist()
+    pad = 3.0 * math.sqrt(max(b_factor_max, 0.0) / (8.0 * math.pi**2))
     if parameterization == "kirkland":
-        return max(_KIRKLAND_MIN_RCUT[z] for z in unique_z)
+        return max(_KIRKLAND_MIN_RCUT[z] for z in unique_z) + pad
     if parameterization == "lobato":
-        return max(_LOBATO_MIN_RCUT[z] for z in unique_z)
+        return max(_LOBATO_MIN_RCUT[z] for z in unique_z) + pad
     if parameterization == "shtyrov":
         if atom_species is None:
-            return max(_PENG_MIN_RCUT[z] for z in unique_z)
+            return max(_PENG_MIN_RCUT[z] for z in unique_z) + pad
         needed = []
         for z, species in zip(atomic_numbers.tolist(), atom_species):
             if species is not None and species in _SHTYROV_MIN_RCUT:
                 needed.append(_SHTYROV_MIN_RCUT[species])
             else:
                 needed.append(_PENG_MIN_RCUT[z])
-        return max(needed)
+        return max(needed) + pad
     raise ValueError(
         f"Unknown parameterization '{parameterization}'. "
         "Choose 'kirkland', 'lobato', or 'shtyrov'."

@@ -406,6 +406,12 @@ class TomogramSpecimenGenerator:
         that types atoms, and only when a Monomer Library is available via
         `$CLIBD_MON`. Default "auto": keep the hydrogens a structure carries,
         add them only when it has none.
+    use_deposited_bfactors : bool, optional
+        Damp each atom by the B-factor its structure deposits, rather than
+        rendering the model statically. Requires
+        `parameterization="shtyrov"`; see `PotentialBuilder`'s own
+        `b_factors` for why the other backends refuse it, and why a
+        deposited column is not a measured displacement. Default False.
     seed : int, optional
         Random seed.
     device : str or torch.device, optional
@@ -540,6 +546,7 @@ class TomogramSpecimenGenerator:
         bulk_parameterization: str = "kirkland",
         readd_hydrogens: bool | str = "auto",
         monomer_library_path: str | None = None,
+        use_deposited_bfactors: bool = False,
         seed: int | None = None,
         device: str | torch.device = "cpu",
         chunk_size: int | None = None,
@@ -604,6 +611,7 @@ class TomogramSpecimenGenerator:
         self.bulk_parameterization = bulk_parameterization
         self.readd_hydrogens = readd_hydrogens
         self.monomer_library_path = monomer_library_path
+        self.use_deposited_bfactors = use_deposited_bfactors
         self.seed = seed
         self.device = device
         self.chunk_size = chunk_size
@@ -2081,6 +2089,7 @@ class TomogramSpecimenGenerator:
                 parameterization=self.parameterization,
                 # Rotation-only, so species stay aligned with coordinates.
                 atom_species=pdb.atom_species,
+                b_factors=(pdb.b_factors if self.use_deposited_bfactors else None),
             ).to(self.device)
             coordinates = (
                 align_principal_axis_to_z(pdb.coordinates)
@@ -2504,6 +2513,7 @@ class TomogramSpecimenGenerator:
             progressbars=False,
             parameterization=self.parameterization,
             atom_species=pdb.atom_species,
+            b_factors=pdb.b_factors if self.use_deposited_bfactors else None,
         ).to(device)
         return builder.forward(pdb.coordinates, method="analytic").to(self.device)
 

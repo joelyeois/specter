@@ -148,7 +148,30 @@ class PotentialBuilder(L.LightningModule):
         (see `recommended_rcut`) — e.g. ~2-2.5 Å for a light-element-only
         (H/C/N/O) structure, up to ~5-6 Å if heavier or more diffuse
         elements (e.g. K, Na, or heavier alkali metals) are present. Pass
-        an explicit value to override the auto-selection.
+        an explicit value to override the auto-selection. When `b_factors`
+        is given the auto-selection widens accordingly; an explicit value is
+        used verbatim and is the caller's responsibility.
+    b_factors : torch.Tensor, optional
+        Per-atom isotropic B-factor in Å², shape (N,), same atom order as
+        `atomic_numbers` — e.g. `specter.pdb.PDB.b_factors`. Default None,
+        which renders the structure statically, as every `specter` path did
+        before this argument existed.
+
+        Supported only by `forward(method="analytic")` with
+        `parameterization="shtyrov"` (which covers the per-element Peng
+        fallback). Every other combination raises rather than silently
+        dropping the damping: Kirkland and Lobato carry Lorentzian terms, for
+        which a Gaussian convolution has no closed form (a Voigt profile), and
+        the '2d'/'3d' methods share one precomputed kernel per element group,
+        which a per-atom width breaks by construction.
+
+        Note that a deposited B-factor is not a physical mean-square
+        displacement: it absorbs real disorder, model error and refinement
+        convention, and cryo-EM depositions frequently carry a constant or
+        zero column. It is also not independent of the imaging chain — a
+        *uniform* B here is the same `exp(-B k^2 / 4)` multiply as
+        `Aberration(bfactor=...)`, so applying both double-counts. What only a
+        per-atom B can express is spatial variation of disorder.
     periodic : bool, optional
         If True, wrap out-of-bounds voxel indices with periodic boundary
         conditions during soft voxelization. Use when coordinates were
@@ -175,6 +198,7 @@ class PotentialBuilder(L.LightningModule):
         atom_species: Sequence[str | None] | None = None,
         shtyrov_params_path: str | None = None,
         rcut: float | None = None,
+        b_factors: torch.Tensor | None = None,
         periodic: bool = False,
     ):
         super().__init__()
@@ -199,10 +223,28 @@ class PotentialBuilder(L.LightningModule):
         self._peng_fallback_reported = False
         self.atom_species = atom_species
         self.shtyrov_params_path = shtyrov_params_path
+        if b_factors is not None:
+            b_factors = torch.as_tensor(b_factors, dtype=torch.float32).flatten()
+            if b_factors.shape[0] != atomic_numbers.shape[0]:
+                raise ValueError(
+                    f"b_factors has {b_factors.shape[0]} entries for "
+                    f"{atomic_numbers.shape[0]} atoms"
+                )
+            if torch.any(b_factors < 0):
+                raise ValueError("b_factors must be non-negative")
+        self.b_factors = b_factors
         self.rcut = (
             rcut
             if rcut is not None
-            else recommended_rcut(atomic_numbers, parameterization, atom_species)
+            else recommended_rcut(
+                atomic_numbers,
+                parameterization,
+                atom_species,
+                # A B-factor broadens every tail, so the tabled radius alone
+                # would truncate it -- silently, since a too-small window is
+                # still a perfectly plausible-looking volume.
+                b_factor_max=0.0 if b_factors is None else float(b_factors.max()),
+            )
         )
         self.periodic = periodic
         # Cache for method="analytic"'s per-atom (a, b) coefficients — built
@@ -653,6 +695,10 @@ class PotentialBuilder(L.LightningModule):
         precomputation entirely — dramatically faster than '3d' for typical
         atom counts (benchmarked ~26-90x on CPU, ~18-28x on GPU for a
         ~1600-atom structure) and fully differentiable w.r.t. `coordinates`.
+
+        A builder constructed with `b_factors` accepts only
+        `method='analytic'` and `parameterization='shtyrov'`, and raises
+        `NotImplementedError` otherwise — see the constructor's `b_factors`.
         """
         if method == "analytic":
             if self.periodic:
@@ -667,15 +713,23 @@ class PotentialBuilder(L.LightningModule):
                 coordinates = coordinates.unsqueeze(0)
             B = coordinates.shape[0]
 
-            if self.parameterization == "kirkland":
+            if self.parameterization in ("kirkland", "lobato"):
+                if self.b_factors is not None:
+                    raise NotImplementedError(
+                        f"b_factors is not supported with "
+                        f"parameterization='{self.parameterization}': its "
+                        "Lorentzian terms convolve with a Gaussian to a Voigt "
+                        "profile, which has no closed form to voxel-average. "
+                        "Use parameterization='shtyrov' (pure Gaussians, where "
+                        "a B-factor is exactly b_i -> b_i + B), or drop "
+                        "b_factors."
+                    )
                 atomic_numbers = self.atomic_numbers.to(self.device)
                 analytic_fn = functools.partial(
-                    build_potential_volume_analytic_scatter_kirkland, atomic_numbers
-                )
-            elif self.parameterization == "lobato":
-                atomic_numbers = self.atomic_numbers.to(self.device)
-                analytic_fn = functools.partial(
-                    build_potential_volume_analytic_scatter_lobato, atomic_numbers
+                    build_potential_volume_analytic_scatter_kirkland
+                    if self.parameterization == "kirkland"
+                    else build_potential_volume_analytic_scatter_lobato,
+                    atomic_numbers,
                 )
             elif self.parameterization == "shtyrov":
                 if self.atom_species is not None:
@@ -686,6 +740,11 @@ class PotentialBuilder(L.LightningModule):
                     build_potential_volume_analytic_scatter,
                     a_coefs=a_coefs,
                     b_coefs=b_coefs,
+                    b_factors=(
+                        None
+                        if self.b_factors is None
+                        else self.b_factors.to(self.device)
+                    ),
                 )
             else:
                 raise ValueError(
@@ -707,6 +766,14 @@ class PotentialBuilder(L.LightningModule):
             if B == 1:
                 potential_volume = potential_volume.squeeze(0)
             return potential_volume
+
+        if self.b_factors is not None:
+            raise NotImplementedError(
+                f"b_factors is not supported with method='{method}': it "
+                "convolves one precomputed kernel per element group, so a "
+                "per-atom Gaussian width has nowhere to go. Use "
+                "method='analytic'."
+            )
 
         if conv_backend is None:
             conv_backend = self.conv_backend

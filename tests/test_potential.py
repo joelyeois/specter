@@ -1205,3 +1205,214 @@ def test_peng_fallback_detail_still_available_at_debug(caplog):
     assert detail[0].levelno == logging.DEBUG
     assert "2 atom(s)" in detail[0].getMessage()
     assert "'C'" in detail[0].getMessage() and "'N'" in detail[0].getMessage()
+
+
+# ---------------------------------------------------------------------------
+# Per-atom B-factors (PotentialBuilder(b_factors=...))
+# ---------------------------------------------------------------------------
+
+
+def _oxygen_builder(n=24, dx=1.0, b_factors=None, **kwargs):
+    """A one-oxygen Shtyrov builder, optionally B-factor damped."""
+    return PotentialBuilder(
+        n,
+        dx,
+        torch.tensor([8], dtype=torch.long),
+        parameterization="shtyrov",
+        atom_species=["O(HH)"],
+        progressbars=False,
+        b_factors=b_factors,
+        **kwargs,
+    )
+
+
+@pytest.mark.parametrize("bfactor", [10.0, 30.0, 80.0])
+def test_bfactor_conserves_the_integrated_potential(bfactor):
+    """
+    A Debye-Waller factor redistributes potential, it does not remove any.
+
+    `exp(-B k^2 / 4)` is 1 at k=0, so the k=0 component -- the integral over
+    all space -- is untouched no matter how large B is. The analytic total
+    `c1 * sum(a_i)` is therefore the same target the B=0 path is checked
+    against in `test_potential_builder_analytic_robust_to_subvoxel_position`.
+
+    This is also the end-to-end check on `recommended_rcut`'s B-factor
+    padding: the tabled radii were derived at B=0, and a window left too
+    narrow for the broadened tail shows up here as a deficit in the total
+    rather than as anything visible in the volume.
+    """
+    n, dx = 40, 1.0
+    b = torch.tensor([bfactor])
+    pb = _oxygen_builder(n=n, dx=dx, b_factors=b)
+
+    a_coefs, _ = pb._get_analytic_atom_coefficients()
+    c1 = 2 * torch.pi * 14.4 * 0.529
+    expected_total = (c1 * a_coefs[0].sum()).item()
+
+    volume = pb.forward(torch.tensor([[0.0, 0.0, 0.0]]), method="analytic")
+    total = (volume.sum() * dx**3).item()
+
+    assert total == pytest.approx(expected_total, rel=5e-3), (
+        f"B={bfactor} lost {100 * (1 - total / expected_total):.2f}% of the "
+        "integrated potential -- the local window is too narrow for the "
+        "broadened tail"
+    )
+
+
+def test_bfactor_widens_the_auto_selected_rcut():
+    """The auto `rcut` must grow with B, or the tail above is truncated."""
+    static = _oxygen_builder()
+    damped = _oxygen_builder(b_factors=torch.tensor([40.0]))
+
+    assert damped.rcut > static.rcut
+    # 3 sigma of the B-factor's own Gaussian, sqrt(B / (8 pi^2)).
+    assert damped.rcut == pytest.approx(
+        static.rcut + 3.0 * (40.0 / (8 * torch.pi**2)) ** 0.5, rel=1e-6
+    )
+
+
+def test_bfactor_matches_numerical_quadrature():
+    """
+    Check the damped voxel average against brute-force integration.
+
+    `b_i -> b_i + B` is exact rather than approximate, so the closed form
+    must agree with a direct numerical average of the Gaussian sum over one
+    voxel's volume -- an independent reference, not a rearrangement of the
+    same expression.
+    """
+    dx, B = 1.0, 25.0
+    pb = _oxygen_builder(n=16, dx=dx, b_factors=torch.tensor([B]))
+    a_coefs, b_coefs = pb._get_analytic_atom_coefficients()
+    a, b = a_coefs[0].double(), b_coefs[0].double() + B
+    c1 = 2 * torch.pi * 14.4 * 0.529
+
+    volume = pb.forward(torch.tensor([[0.0, 0.0, 0.0]]), method="analytic")
+
+    # Midpoint quadrature over the voxel at the atom's own position and over
+    # one a voxel away, where the profile is steepest. Second-order, so the
+    # residual is the quadrature's own: it falls 1.6e-4 -> 4.0e-5 -> 1.0e-5
+    # as m goes 41 -> 81 -> 161, converging on the closed form.
+    m = 121
+    u = (torch.arange(m, dtype=torch.float64) + 0.5) / m * dx - dx / 2
+    for offset, index in (((0.0, 0.0, 0.0), (8, 8, 8)), ((1.0, 0.0, 0.0), (8, 8, 9))):
+        off = torch.tensor(offset, dtype=torch.float64)
+        grid = torch.stack(torch.meshgrid(u, u, u, indexing="ij"), dim=-1) + off
+        r2 = grid.pow(2).sum(-1).reshape(-1, 1)
+        v = (a * (4 * torch.pi / b) ** 1.5 * torch.exp(-4 * torch.pi**2 * r2 / b)).sum(
+            -1
+        )
+        expected = c1 * v.mean().item()
+        assert volume[index].item() == pytest.approx(expected, rel=1e-4)
+
+
+def test_uniform_bfactor_reproduces_the_fourier_envelope():
+    """
+    A uniform B here is the same multiply as `Aberration(bfactor=...)`.
+
+    This is why the argument is per-atom and why applying both double-counts:
+    a Debye-Waller factor multiplies each Gaussian's Fourier amplitude by
+    `exp(-B k^2 / 4)`, exactly what `aberrations._envelopes.b_envelope`
+    applies to the whole transfer function.
+
+    Checked at a fine voxel size on purpose. The identity is continuous, and
+    the discrepancy is sampling of the sharp static potential rather than
+    anything about B: on this structure it falls 14% -> 5.2% -> 1.8% as dx
+    goes 1.0 -> 0.5 -> 0.35 A.
+    """
+    n, dx, B = 48, 0.35, 20.0
+    coords = torch.tensor([[0.0, 0.0, 0.0], [2.4, -1.1, 0.7], [-1.9, 2.2, -0.4]])
+    znum = torch.tensor([8, 6, 7], dtype=torch.long)
+    species = ["O(HH)", "C(HHHC)", "N(HHC)"]
+    kwargs = dict(
+        n_xyz=n,
+        dx=dx,
+        atomic_numbers=znum,
+        parameterization="shtyrov",
+        atom_species=species,
+        progressbars=False,
+    )
+    b_factors = torch.full((3,), B)
+    # One rcut for both, so only the B-factor differs between the volumes.
+    rcut = PotentialBuilder(**kwargs, b_factors=b_factors).rcut
+
+    static = PotentialBuilder(**kwargs, rcut=rcut).forward(coords, method="analytic")
+    damped = PotentialBuilder(**kwargs, rcut=rcut, b_factors=b_factors).forward(
+        coords, method="analytic"
+    )
+
+    k = torch.fft.fftfreq(n, d=dx)
+    k2 = k[:, None, None] ** 2 + k[None, :, None] ** 2 + k[None, None, :] ** 2
+    enveloped = torch.fft.ifftn(torch.fft.fftn(static) * torch.exp(-B * k2 / 4)).real
+
+    rel = (damped - enveloped).abs().max() / damped.abs().max()
+    assert rel < 0.03, f"uniform B differs from the k-space envelope by {rel:.3f}"
+
+
+def test_per_atom_bfactor_damps_atoms_independently():
+    """
+    The one thing an envelope cannot express: spatial variation.
+
+    Two chemically identical atoms given different B-factors must render
+    differently -- a floppy loop blurred more than a rigid core. A uniform
+    envelope applied to the whole volume can only scale both alike.
+    """
+    n, dx = 32, 1.0
+    coords = torch.tensor([[-6.0, 0.0, 0.0], [6.0, 0.0, 0.0]])
+    pb = PotentialBuilder(
+        n,
+        dx,
+        torch.tensor([8, 8], dtype=torch.long),
+        parameterization="shtyrov",
+        atom_species=["O(HH)", "O(HH)"],
+        progressbars=False,
+        b_factors=torch.tensor([0.0, 60.0]),
+    )
+    volume = pb.forward(coords, method="analytic")
+
+    half = n // 2
+    sharp, blurred = volume[:, :, :half], volume[:, :, half:]
+    # Same atom, same total, very different peak.
+    assert sharp.sum().item() == pytest.approx(blurred.sum().item(), rel=5e-3)
+    assert sharp.max() > 3 * blurred.max()
+
+
+@pytest.mark.parametrize(
+    "kwargs, forward_kwargs",
+    [
+        ({"parameterization": "kirkland"}, {"method": "analytic"}),
+        ({"parameterization": "lobato"}, {"method": "analytic"}),
+        ({"parameterization": "shtyrov"}, {"method": "3d"}),
+        ({"parameterization": "shtyrov"}, {"method": "2d"}),
+    ],
+)
+def test_bfactor_is_refused_rather_than_dropped(kwargs, forward_kwargs):
+    """
+    Backends that cannot apply a per-atom B must raise, not ignore it.
+
+    Kirkland and Lobato carry Lorentzian terms, whose convolution with a
+    Gaussian is a Voigt profile with no closed form to voxel-average; the
+    '2d'/'3d' methods share one precomputed kernel per element group, which a
+    per-atom width breaks by construction. Silently dropping the damping
+    would return a perfectly plausible volume at the wrong resolution.
+    """
+    pb = PotentialBuilder(
+        16,
+        1.0,
+        torch.tensor([6, 8], dtype=torch.long),
+        progressbars=False,
+        b_factors=torch.tensor([10.0, 20.0]),
+        **kwargs,
+    )
+    with pytest.raises(NotImplementedError, match="b_factors"):
+        pb.forward(torch.zeros(2, 3), **forward_kwargs)
+
+
+def test_bfactor_rejects_a_mismatched_or_negative_column():
+    """A B-factor list is indexed positionally against the atoms."""
+    znum = torch.tensor([6, 8], dtype=torch.long)
+    with pytest.raises(ValueError, match="entries for"):
+        PotentialBuilder(16, 1.0, znum, progressbars=False, b_factors=torch.zeros(5))
+    with pytest.raises(ValueError, match="non-negative"):
+        PotentialBuilder(
+            16, 1.0, znum, progressbars=False, b_factors=torch.tensor([-1.0, 0.0])
+        )

@@ -1202,3 +1202,41 @@ def test_shtyrov_tomogram_still_renders_its_gold_fiducials():
     assert len(gen.bead_instances) > 0
     # Gold is dense: the beads must have deposited real potential, not zeros.
     assert float(volume.max()) > 0.0
+
+
+@pytest.mark.skipif(not _SMALL_FIXTURE.exists(), reason="bundled PDB fixture missing")
+def test_use_deposited_bfactors_reaches_the_species_templates():
+    """
+    The flag has to survive a long chain to matter.
+
+    `use_deposited_bfactors` is set on a config, forwarded through
+    `TomogramSpecimenGenerator`, and only read where a `PotentialBuilder` is
+    finally constructed per species -- so a break anywhere between config and
+    builder leaves the flag accepted, recorded, and doing nothing.
+
+    A B-factor only redistributes potential (`exp(-B k^2/4)` is 1 at k=0), so
+    the damped template must hold the same total at strictly lower power.
+    """
+    kwargs = dict(
+        membrane_instances=[],
+        target_shape=_TARGET_SHAPE_ZYX,
+        voxel_size=2.0,
+        protein_specs=[TomogramProteinSpec(pdb_source=str(_SMALL_FIXTURE))],
+        pdb_cache_dir=str(Path(__file__).parent / "test_data"),
+        seed=0,
+    )
+    from specter.pdb import PDB
+
+    pdb = PDB(str(_SMALL_FIXTURE), verbose=False, compute_atom_species=True)
+    assert pdb.b_factors.std() > 0, "fixture has no B-factor variation to apply"
+
+    static = TomogramSpecimenGenerator(**kwargs)._build_species_template(
+        pdb, 2.0, torch.device("cpu")
+    )
+    damped = TomogramSpecimenGenerator(
+        **kwargs, use_deposited_bfactors=True
+    )._build_species_template(pdb, 2.0, torch.device("cpu"))
+
+    assert damped.shape == static.shape
+    assert damped.sum().item() == pytest.approx(static.sum().item(), rel=5e-3)
+    assert damped.pow(2).sum() < 0.9 * static.pow(2).sum()

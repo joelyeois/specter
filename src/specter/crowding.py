@@ -317,6 +317,65 @@ class CrowdWithDuplicates(L.LightningModule):
     particle_radius : float, optional
         Half-height in Å used for that fit test. Defaults to
         ``min_distance / 2``. Ignored when ``ice_profile`` is None.
+    packing_backend : {'poisson_disk', 'shape'}, optional
+        Placement algorithm. ``'poisson_disk'`` (default) is the original
+        Bridson-sampled, bounding-sphere-exclusion placement above.
+        ``'shape'`` instead packs via
+        :func:`~specter.specimen.packing.pack_shapes_3d` -- the same
+        Random-Sequential-Addition packer `TomogramSpecimenGenerator` uses,
+        colliding the real rotated molecular footprint against a running
+        occupancy grid instead of a bounding-sphere distance. Measured on
+        specter's own benchmarks, bounding-sphere exclusion cannot exceed
+        the density a molecule's envelope occupies within its own bounding
+        sphere (~0.178 for a typical protein), while shape-aware RSA
+        reaches physiological crowding densities (~0.2-0.25 volume
+        fraction) on the same box -- see `pack_shapes_3d`'s own docstring
+        for the measured numbers. Requires ``atom_coordinates``.
+
+        Not yet ``ice_profile``-aware: placement is unconstrained by the
+        local slab or ``water_air_interface`` when this backend is
+        selected (candidates may land outside a laterally-varying ice
+        profile). Wiring that in is separate, follow-up work -- see
+        `pack_shapes_3d`'s ``region_mask`` parameter, which is exactly the
+        hook a per-column slab mask would use.
+    atom_coordinates : torch.Tensor, optional
+        Atomic coordinates of the template molecule, shape (N, 3), in the
+        molecule's own frame -- `specter.pdb.PDB.coordinates` is already
+        centered the way this needs. Required (and used only) when
+        ``packing_backend='shape'``, to rasterize the real footprint via
+        `~specter.specimen.packing.build_species_mask` rather than
+        colliding `V` itself (a rendered potential, not a binary shape).
+    gap : float, optional
+        Extra clearance baked into the shape-backend footprint mask, Å --
+        forwarded to `build_species_mask`. Default 0.0. Ignored for
+        ``packing_backend='poisson_disk'``, which uses `min_distance`
+        instead.
+    n_orientations : int, optional
+        Size of the shape backend's per-species rotation cache, forwarded
+        to `pack_shapes_3d`. Default 256. Ignored for ``'poisson_disk'``.
+    packing_max_retries : int, optional
+        Shape backend's attempts-per-instance ceiling, forwarded to
+        `pack_shapes_3d` as ``max_retries``. This is the knob that sets
+        achieved density -- see that function's own docstring for the
+        measured density-vs-wall-time table. Default 1500. Ignored for
+        ``'poisson_disk'``.
+    packing_stall_patience : int, optional
+        Shape backend's early-stop threshold, forwarded to `pack_shapes_3d`
+        as ``stall_patience``. Default 5000. Ignored for
+        ``'poisson_disk'``.
+    packing_seed : int, optional
+        Shape backend's RNG seed, forwarded to `pack_shapes_3d` as
+        ``seed``. Distinct from ``seed`` above, which controls the
+        poisson-disk backend's *starting point* strategy instead of an RNG
+        seed. Default None. Ignored for ``'poisson_disk'``.
+    n_candidates : int, optional
+        Shape backend's candidate pool size (how many placement attempts
+        RSA gets to work with before ``max_retries``/``stall_patience``
+        cut it off). Default None: estimated as ``20 *
+        grid_volume / footprint_volume``, clamped to [500, 200_000] --
+        a rough oversampling factor, not a target count (RSA saturates
+        well before exhausting the pool at realistic density). Ignored for
+        ``'poisson_disk'``, which has its own ``n_points``.
 
     Attributes
     ----------
@@ -348,8 +407,30 @@ class CrowdWithDuplicates(L.LightningModule):
         water_air_interface: bool = False,
         ice_profile: "IceProfile | None" = None,
         particle_radius: float | None = None,
+        packing_backend: Literal["poisson_disk", "shape"] = "poisson_disk",
+        atom_coordinates: torch.Tensor | None = None,
+        gap: float = 0.0,
+        n_orientations: int = 256,
+        packing_max_retries: int = 1500,
+        packing_stall_patience: int = 5000,
+        packing_seed: int | None = None,
+        n_candidates: int | None = None,
     ):
         super().__init__()
+        if packing_backend == "shape" and atom_coordinates is None:
+            raise ValueError(
+                "packing_backend='shape' requires atom_coordinates (the "
+                "template's real atomic coordinates, used to rasterize its "
+                "footprint) -- pass the PDB's own PDB.coordinates."
+            )
+        self.packing_backend = packing_backend
+        self.atom_coordinates = atom_coordinates
+        self.gap = gap
+        self.n_orientations = n_orientations
+        self.packing_max_retries = packing_max_retries
+        self.packing_stall_patience = packing_stall_patience
+        self.packing_seed = packing_seed
+        self.n_candidates = n_candidates
 
         self.register_buffer("V", V)
         self.dx = dx
@@ -397,12 +478,17 @@ class CrowdWithDuplicates(L.LightningModule):
 
     def generate_coordinates(self) -> None:
         """
-        Generate coordinates of duplicates using Poisson-disk sampling.
+        Generate coordinates of duplicates.
 
-        For '2d' sampling, points are sampled in xy plane and z is set to 0.
-        For '3d' sampling, points are sampled in full 3D volume.
-        Coordinates are stored in `self.coords`.
+        Dispatches on `packing_backend`. For ``'shape'``, see
+        `_generate_coordinates_shape`. For ``'poisson_disk'`` (default):
+        '2d' sampling places points in the xy plane and sets z to 0; '3d'
+        sampling places points in the full 3D volume. Coordinates are
+        stored in `self.coords`.
         """
+        if self.packing_backend == "shape":
+            self._generate_coordinates_shape()
+            return
         if self.poisson_disc_method == "2d":
             coords = poisson_disk_neighbors(
                 self.min_distance,
@@ -445,15 +531,71 @@ class CrowdWithDuplicates(L.LightningModule):
             )
         self.coords = coords
 
+    def _generate_coordinates_shape(self) -> None:
+        """
+        Generate coordinates (and orientations) via shape-aware RSA.
+
+        Colliding the real rotated molecular footprint against a running
+        occupancy grid instead of `min_distance`-apart bounding spheres --
+        see `packing_backend`'s own docstring for why this reaches
+        substantially higher density. A single species, duplicated: the
+        candidate pool is one uniform `species_idx` (this class places one
+        template, unlike `TomogramSpecimenGenerator`'s multi-species case).
+
+        The accepted rotations are stored on `self._shape_rotations` for
+        `generate_affine_matrices` to reuse directly -- they are the
+        orientations the packer actually tested for collisions, so
+        redrawing them at render time would render geometry that does not
+        match what was packed (see that method's own comment).
+        """
+        from .specimen.packing import build_species_mask, pack_shapes_3d
+
+        grid_shape = (self.nz_out, self.nxy_out, self.nxy_out)
+        mask = build_species_mask(self.atom_coordinates, self.dx, gap=self.gap)
+
+        n_candidates = self.n_candidates
+        if n_candidates is None:
+            grid_volume = self.nz_out * self.nxy_out * self.nxy_out
+            mask_volume = max(int(mask.sum().item()), 1)
+            n_candidates = int(min(max(20 * grid_volume / mask_volume, 500), 200_000))
+        species_idx = torch.zeros(n_candidates, dtype=torch.long)
+
+        coords, rotation_matrices, _accepted_idx, _occupancy = pack_shapes_3d(
+            [mask],
+            species_idx,
+            grid_shape,
+            self.dx,
+            n_orientations=self.n_orientations,
+            max_retries=self.packing_max_retries,
+            stall_patience=self.packing_stall_patience,
+            seed=self.packing_seed,
+            device=str(self.device),
+        )
+        self.coords = coords
+        self._shape_rotations = rotation_matrices
+
     def generate_affine_matrices(self) -> None:
         """
-        Generate random rotation matrices and corresponding affine matrices
-        for each duplicate volume.
+        Generate rotation matrices and corresponding affine matrices for
+        each duplicate volume.
+
+        For ``packing_backend='shape'``, reuses the orientations
+        `_generate_coordinates_shape` already committed to during
+        collision testing rather than drawing fresh ones -- redrawing
+        would render a volume whose geometry doesn't match what the
+        packer actually tested for overlaps (see
+        `TomogramSpecimenGenerator._render_species_pool`'s identical
+        comment). For ``'poisson_disk'``, orientation has no bearing on
+        the (spherical) collision test, so rotations are drawn randomly
+        here as before.
 
         Rotations are stored in `self.theta`.
         """
         self.N = len(self.coords)
-        R = rotations.random_rotation_matrix(self.N)
+        if self.packing_backend == "shape":
+            R = self._shape_rotations
+        else:
+            R = rotations.random_rotation_matrix(self.N)
         # in case only one position was found, ensures R is (1,3,3)
         if len(R.shape) == 2:
             R = R.unsqueeze(0)

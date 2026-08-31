@@ -95,6 +95,13 @@ class MicrographConfig:
     crowd_min_distance: float | None = None  # Å
     crowd_max_distance_z: float | None = None  # Å
     water_air_interface: bool = True
+    packing_backend: Literal["poisson_disk", "shape"] = "poisson_disk"
+    packing_gap: float = 0.0  # Å, shape backend only
+    n_orientations: int = 256  # shape backend only
+    packing_max_retries: int = 1500  # shape backend only -- sets achieved density
+    packing_stall_patience: int = 5000  # shape backend only
+    packing_seed: int | None = None  # shape backend only
+    n_candidates: int | None = None  # shape backend only; None = auto-estimated
     potential_scale: ScalarOrRange = 1.0  # unitless
     # Fraction of Nyquist, not 1/A: Scattering masks k <= klim * k_nyquist.
     # Kirkland recommends 0.66 (2/3) to prevent multislice FFT aliasing, but
@@ -236,6 +243,25 @@ MICROGRAPH_HELP: dict[str, str] = {
     "crowd_max_distance_z": "Maximum z-distance between crowded particles in Angstrom.",
     "water_air_interface": "Model a water-air interface when placing ice/"
     "crowding (bimodal density along z instead of uniform).",
+    "packing_backend": "Crowding placement algorithm: 'poisson_disk' "
+    "(default) is bounding-sphere-exclusion Poisson-disk sampling; 'shape' "
+    "collides the real rotated molecular footprint against a running "
+    "occupancy grid (the same packer TomogramSpecimenGenerator uses), "
+    "reaching substantially higher crowding density. Not yet aware of a "
+    "non-flat ice_profile -- placement is unconstrained by the local slab "
+    "when 'shape' is selected.",
+    "packing_gap": "Extra clearance baked into the shape backend's footprint "
+    "mask, Angstrom. packing_backend='shape' only.",
+    "n_orientations": "Size of the shape backend's per-instance rotation "
+    "cache. packing_backend='shape' only.",
+    "packing_max_retries": "Shape backend's attempts-per-instance ceiling -- "
+    "the knob that sets achieved density. packing_backend='shape' only.",
+    "packing_stall_patience": "Shape backend's early-stop threshold "
+    "(consecutive failed attempts before abandoning). packing_backend="
+    "'shape' only.",
+    "packing_seed": "Shape backend's RNG seed. packing_backend='shape' only.",
+    "n_candidates": "Shape backend's candidate pool size. Unset: estimated "
+    "from grid and footprint volume. packing_backend='shape' only.",
     "potential_scale": "Potential scale factor (unitless, values < 1 "
     "approximate thicker ice): a single value for constant scale, or "
     "'low,high' ([low, high] in TOML) to sample uniformly per micrograph.",

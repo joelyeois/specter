@@ -105,6 +105,27 @@ class MicrographGenerator(BaseImager):
         Maximum Z range for crowding placement in Å.
     water_air_interface : bool, optional
         Simulate water-air interface in crowding and ice. Default True.
+    packing_backend : {'poisson_disk', 'shape'}, optional
+        Forwarded to ``MicrographSpecimenGenerator``/``CrowdWithDuplicates``.
+        ``'shape'`` reaches substantially higher crowding density than the
+        default bounding-sphere Poisson-disk placement -- see
+        ``CrowdWithDuplicates``'s own docstring. Requires
+        ``atom_coordinates``. Default ``'poisson_disk'``.
+    atom_coordinates : torch.Tensor, optional
+        The template's real atomic coordinates -- ``PDB.coordinates`` --
+        required (and used only) when ``packing_backend='shape'``.
+    packing_gap : float, optional
+        Forwarded as ``CrowdWithDuplicates``'s ``gap``. Shape backend only.
+    n_orientations : int, optional
+        Forwarded to ``CrowdWithDuplicates``. Shape backend only.
+    packing_max_retries : int, optional
+        Forwarded to ``CrowdWithDuplicates``. Shape backend only.
+    packing_stall_patience : int, optional
+        Forwarded to ``CrowdWithDuplicates``. Shape backend only.
+    packing_seed : int, optional
+        Forwarded to ``CrowdWithDuplicates``. Shape backend only.
+    n_candidates : int, optional
+        Forwarded to ``CrowdWithDuplicates``. Shape backend only.
     scattering_model : str, optional
         Scattering model passed to ``IterativeScattering``. Default 'multislice'.
     noise_model : str, optional
@@ -181,6 +202,14 @@ class MicrographGenerator(BaseImager):
         icemaker: IceBank | RandomIcemaker | None = None,
         ice_relax_steps: int = 0,
         crowd_min_distance: float | None = None,
+        packing_backend: str = "poisson_disk",
+        atom_coordinates: torch.Tensor | None = None,
+        packing_gap: float = 0.0,
+        n_orientations: int = 256,
+        packing_max_retries: int = 1500,
+        packing_stall_patience: int = 5000,
+        packing_seed: int | None = None,
+        n_candidates: int | None = None,
         crowd_max_distance_z: float | None = None,
         water_air_interface: bool = True,
         scattering_model: str = "multislice",
@@ -341,6 +370,14 @@ class MicrographGenerator(BaseImager):
                 scattering_potential=scattering_potential,
                 crowd_min_distance=crowd_min_distance,
                 crowd_max_distance_z=crowd_max_distance_z,
+                packing_backend=packing_backend,
+                atom_coordinates=atom_coordinates,
+                packing_gap=packing_gap,
+                n_orientations=n_orientations,
+                packing_max_retries=packing_max_retries,
+                packing_stall_patience=packing_stall_patience,
+                packing_seed=packing_seed,
+                n_candidates=n_candidates,
                 ice_model=ice_model,
                 ice_thickness=ice_thickness,
                 ice_profile=ice_profile,

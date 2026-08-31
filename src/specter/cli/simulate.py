@@ -259,6 +259,13 @@ _MICROGRAPH_GROUPS: list[tuple[str, list[str]]] = [
             "crowd_max_distance_z",
             "crowd_chunk_size",
             "water_air_interface",
+            "packing_backend",
+            "packing_gap",
+            "n_orientations",
+            "packing_max_retries",
+            "packing_stall_patience",
+            "packing_seed",
+            "n_candidates",
             # Numerics
             "potential_scale",
             "pad_fft",

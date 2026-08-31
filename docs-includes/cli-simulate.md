@@ -250,6 +250,13 @@ specter simulate micrograph [OPTIONS]
 | `--crowd_max_distance_z` | `FLOAT` | _none_ | Maximum z-distance between crowded particles in Angstrom. |
 | `--crowd_chunk_size` | `INTEGER` | `1` | Crowding duplicate volumes rotated per batch. Lowering it to 1 costs no wall time: at micrograph scale wall time is flat in this while peak memory grows linearly with it, so raising it above the default buys nothing. |
 | `--water_air_interface` | `True` \| `False` | `True` | Model a water-air interface when placing ice/crowding (bimodal density along z instead of uniform). |
+| `--packing_backend` | `poisson_disk` \| `shape` | `poisson_disk` | Crowding placement algorithm: 'poisson_disk' (default) is bounding-sphere-exclusion Poisson-disk sampling; 'shape' collides the real rotated molecular footprint against a running occupancy grid (the same packer TomogramSpecimenGenerator uses), reaching substantially higher crowding density. Not yet aware of a non-flat ice_profile -- placement is unconstrained by the local slab when 'shape' is selected. |
+| `--packing_gap` | `FLOAT` | `0.0` | Extra clearance baked into the shape backend's footprint mask, Angstrom. packing_backend='shape' only. |
+| `--n_orientations` | `INTEGER` | `256` | Size of the shape backend's per-instance rotation cache. packing_backend='shape' only. |
+| `--packing_max_retries` | `INTEGER` | `1500` | Shape backend's attempts-per-instance ceiling -- the knob that sets achieved density. packing_backend='shape' only. |
+| `--packing_stall_patience` | `INTEGER` | `5000` | Shape backend's early-stop threshold (consecutive failed attempts before abandoning). packing_backend='shape' only. |
+| `--packing_seed` | `INTEGER` | _none_ | Shape backend's RNG seed. packing_backend='shape' only. |
+| `--n_candidates` | `INTEGER` | _none_ | Shape backend's candidate pool size. Unset: estimated from grid and footprint volume. packing_backend='shape' only. |
 | `--potential_scale` | `TEXT` | `1.0` | Potential scale factor (unitless, values &lt; 1 approximate thicker ice): a single value for constant scale, or 'low,high' ([low, high] in TOML) to sample uniformly per micrograph. |
 | `--pad_fft` | `True` \| `False` | `False` | Pad the volume for FFT to avoid edge artifacts. |
 | `--save_exitwaves` | `True` \| `False` | `False` | Save exit wave magnitude and phase as separate .mrcs files. |

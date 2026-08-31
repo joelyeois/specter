@@ -94,6 +94,18 @@ crowd_chunk_size = 1             # duplicate volumes rotated per batch; rotating
                                  # once is what a micrograph cannot afford, and 1 is also the
                                  # fastest measured -- peak memory grows linearly with it
 water_air_interface = true
+packing_backend = "poisson_disk"  # poisson_disk | shape -- 'shape' collides the real rotated
+                                 # footprint instead of a bounding-sphere distance, reaching
+                                 # far higher crowding density (measured: 8.6x more instances,
+                                 # 8.6x occupied volume fraction, same crowd_min_distance/box).
+                                 # Not yet ice_profile-aware -- placement ignores the local
+                                 # slab under a non-flat profile when this is selected.
+# packing_gap = 0.0               # Å, shape backend only
+# n_orientations = 256            # shape backend only
+# packing_max_retries = 1500      # shape backend only -- sets achieved density
+# packing_stall_patience = 5000   # shape backend only
+# packing_seed = 1                # shape backend only
+# n_candidates = 5000             # shape backend only; unset = auto-estimated
 
 # --- Numerics ---
 potential_scale = 1.0            # unitless; single value, or [low, high] (< 1 approximates thicker ice)

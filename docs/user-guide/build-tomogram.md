@@ -162,15 +162,14 @@ Same field of view rendered at voxel_size = 10, 5, and 2 Å/voxel: a sum Z proje
 
 | `voxel_size` (Å/voxel) | Shape (Z, Y, X voxels) | Wall time | GPU peak | RAM peak |
 |---|---|---|---|---|
-| 10 | 150 × 600 × 600 | 218 s | 3.70 GB | 12.61 GB |
-| 5  | 300 × 1200 × 1200 | 124 s | 11.62 GB | 6.13 GB |
-| 2  | 750 × 3000 × 3000 (~6.75B voxels) | 502 s (8m 22s) | 9.29 GB | 154.07 GB |
+| 10 | 150 × 600 × 600 | 59 s | 2.73 GB | 11.86 GB |
+| 5  | 300 × 1200 × 1200 | 58 s | 9.97 GB | 5.46 GB |
+| 2  | 750 × 3000 × 3000 (~6.75B voxels) | 578 s (9m 38s) | 9.29 GB | 153.17 GB |
 
-The numbers don't move in a clean monotonic line at 10→5 Å: wall time and
-RAM both bounce around within roughly a factor of 2, since at this scale
-species fetch/render/packing overhead (fixed per-run, not per-voxel)
-dominates over the canvas itself. The step change at 2 Å is unambiguous:
-wall time quadruples versus 5 Å, and RAM jumps to **154 GB**.
+10 Å and 5 Å come out level with each other, because at that scale a run is
+dominated by per-run species fetch/render/packing overhead rather than by
+the canvas. The step change at 2 Å is unambiguous: wall time is 10× the
+5 Å figure, and RAM jumps to **153 GB**.
 That RAM spike is `accumulator_device="auto"` doing exactly what [Compute &
 scaling flags](#compute-scaling-flags) above says it does: at ~6.75
 billion voxels the density volume alone is ~27 GB, comfortably past half
@@ -179,18 +178,26 @@ RAM instead of failing with a CUDA OOM. That's also why **GPU peak barely
 grows** from 5 Å to 2 Å despite a 15× bigger canvas: the single biggest
 consumer (the canvas) has moved off the GPU entirely, leaving only
 per-instance rendering buffers and the membrane distance transform behind.
+
+Where the 2 Å run's time goes is worth knowing before optimizing against
+it, since the phases are not in the order intuition suggests. Building the
+specimen is the small part: the membrane phase is 11 s, all 21 structures
+load in 14 s, and packing plus rendering ~22,900 instances is 2m 48s.
+Half the run is a single `numpy` variance over the finished volume, which
+`mrcfile` computes to fill the MRC header's RMS field when the volume is
+handed to it. Writing the 27 GB to disk is only ~31 s of that.
 Take the exact numbers with a grain
 of salt (one run on one machine, not a statistically averaged sweep), but
-the *shape* (noisy at coarse resolution, a sharp RAM/time step once the
+the *shape* (flat at coarse resolution, a sharp RAM/time step once the
 canvas stops fitting in VRAM) is the useful, likely-to-generalize part.
 
 Shape-based collision is close to free at this scale. Running the 5 Å
-configuration back to back on both backends, wall time is 117 s under
-`"shape"` against 116 s under `"sphere"`, for 19,426 placed instances
-against 8,128. Filler packing accounts for 28 s and 25 s of those totals
-respectively, and rendering for ~27 s in both, since rendering is
-dominated by per-species template construction and barely moves with
-instance count.
+configuration back to back on both backends, wall time is 63 s under
+`"shape"` against 58 s under `"sphere"`, for 19,249 placed instances
+against 8,128 -- and 37.7% occupancy against 14.0%. Filler packing
+accounts for 25 s and 23 s of those totals respectively, and rendering for
+5 s and 3 s, since rendering is dominated by per-species template
+construction and barely moves with instance count.
 
 It was not always close. The shape backend's collision loop first cost
 104 s on this configuration, four times the sphere backend's. Nearly all

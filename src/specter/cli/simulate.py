@@ -12,15 +12,13 @@ from specter.config import (
     ParticleStackConfig,
     TiltSeriesConfig,
     TomogramConfig,
-    apply_overrides,
-    load_config,
 )
 
 from ._click_options import (
     build_config_options,
     collect_overrides,
     CONFIG_OPTION_HELP,
-    config_from_defaults,
+    load_validated_config,
     prerequisite_usage_error,
 )
 
@@ -281,12 +279,7 @@ def _particles_callback(config: str | None, **_overrides_raw: object) -> None:
     assert ctx is not None
     overrides = collect_overrides(ctx, exclude={"config"})
 
-    cfg = (
-        load_config(config, ParticleStackConfig)
-        if config is not None
-        else config_from_defaults(ParticleStackConfig, overrides)
-    )
-    apply_overrides(cfg, overrides)
+    cfg = load_validated_config(ParticleStackConfig, config, overrides)
     run_particle_stack(cfg)
 
 
@@ -325,12 +318,7 @@ def _micrograph_callback(config: str | None, **_overrides_raw: object) -> None:
     assert ctx is not None
     overrides = collect_overrides(ctx, exclude={"config"})
 
-    cfg = (
-        load_config(config, MicrographConfig)
-        if config is not None
-        else config_from_defaults(MicrographConfig, overrides)
-    )
-    apply_overrides(cfg, overrides)
+    cfg = load_validated_config(MicrographConfig, config, overrides)
     run_micrograph(cfg)
 
 
@@ -373,15 +361,13 @@ def _tiltseries_callback(
     assert ctx is not None
     overrides = collect_overrides(ctx, exclude={"config", "tomogram_config"})
 
-    cfg = (
-        load_config(config, TiltSeriesConfig)
-        if config is not None
-        else config_from_defaults(TiltSeriesConfig, overrides)
-    )
-    apply_overrides(cfg, overrides)
+    cfg = load_validated_config(TiltSeriesConfig, config, overrides)
 
+    # Through the same helper as --config: a bad --tomogram_config is a
+    # usage error too, and it builds a real specimen, so it deserves the
+    # same validation rather than only the same error handling.
     tomogram_cfg = (
-        load_config(tomogram_config, TomogramConfig)
+        load_validated_config(TomogramConfig, tomogram_config, {})
         if tomogram_config is not None
         else None
     )

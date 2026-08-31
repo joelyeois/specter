@@ -7,6 +7,8 @@ import types
 from typing import Any, Literal, NoReturn, Union, get_args, get_origin, get_type_hints
 
 import rich_click as click
+
+from specter.config import apply_overrides, load_config, validate_config
 from click.core import ParameterSource
 
 
@@ -280,6 +282,70 @@ def config_from_defaults(config_cls: type, overrides: dict[str, Any]) -> Any:
             f"{EXAMPLE_CONFIGS_URL}"
         )
     return config_cls(**{name: overrides[name] for name in required})
+
+
+def load_validated_config(
+    config_cls: type, config_path: str | None, overrides: dict[str, Any]
+) -> Any:
+    """
+    Build a config for a CLI run, reporting anything wrong with it as a
+    usage error.
+
+    Everything a config can be wrong about reaches the user through a
+    `click.UsageError` here, rather than as a traceback out of the
+    pipeline. The messages were already good; they were just arriving
+    badly. A bad value in a TOML file used to print 38 lines ending in
+    ``ValueError: noise_model='bogus' is invalid: must be one of
+    'poisson', 'none'``, while the identical mistake as a flag printed 8
+    lines in a bordered panel, because click builds a `Choice` from each
+    field's `Literal` and catches it at parse time. A typo in a config
+    file is the likelier of the two.
+
+    Three failure modes are covered: a value the field does not allow
+    (`ValueError` from `validate_config`), a key the dataclass does not
+    have or TOML that will not parse (`ValueError`, `tomllib` raising
+    `TOMLDecodeError`, a subclass), and a `--config` path that does not
+    exist (`FileNotFoundError`).
+
+    `validate_config` runs here as well as at the top of every pipeline.
+    It is a pure check that rejects impossible values before any work
+    happens, so running it twice costs nothing, and the pipeline keeps
+    its own call for direct Python callers -- where a traceback is the
+    right answer, since it points at the line that failed.
+
+    Parameters
+    ----------
+    config_cls : type
+        The config dataclass for this command.
+    config_path : str or None
+        ``--config``, or None to build from dataclass defaults.
+    overrides : dict
+        Field name -> value for flags the caller actually passed, from
+        :func:`collect_overrides`.
+
+    Returns
+    -------
+    object
+        A validated instance of `config_cls`.
+
+    Raises
+    ------
+    click.UsageError
+        For any of the above.
+    """
+    try:
+        config = (
+            load_config(config_path, config_cls)
+            if config_path is not None
+            else config_from_defaults(config_cls, overrides)
+        )
+        apply_overrides(config, overrides)
+        validate_config(config)
+    except click.UsageError:
+        raise  # config_from_defaults already raises these, phrased for the CLI
+    except (ValueError, FileNotFoundError) as exc:
+        raise click.UsageError(str(exc)) from exc
+    return config
 
 
 def collect_overrides(ctx: click.Context, exclude: set[str]) -> dict[str, Any]:

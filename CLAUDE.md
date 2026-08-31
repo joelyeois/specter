@@ -373,7 +373,8 @@ ice-data/                     # Two 32 MB legacy MDSimDump inputs, notebook-only
 
 ## Reproducibility
 
-- Use `specter.seed(n)` (re-exported from `random_seed.py`) to set a global seed before any simulation for reproducible outputs.
+- Use `specter.seed(n)` (re-exported from `random_seed.py`) to set a global seed before any simulation. It controls every draw specter makes, but **it does not make a run bit-reproducible**, and the gap is larger than float noise suggests. The forward model is non-deterministic at ~2e-5 relative, from GPU reduction and FFT ordering, and Poisson sampling then DISCRETIZES that: most pixels round to the same integer count, a few cross a boundary and jump. Measured on a seeded `specter simulate tiltseries`, two identical runs differ on 0.1% of pixels by up to 74 counts; the same config at `noise_model="none"` differs on 98.8% of pixels but only at 2.1e-5 relative. `specter build tomogram` is likewise not bit-reproducible at a fixed seed, because its species are rendered in parallel and accumulated in a non-deterministic order (29% of voxels differ, at 6e-6 V on a 24 V volume). Both are inherent unless `torch.use_deterministic_algorithms(True)` is forced, which costs performance and is not set. What a seed DOES guarantee is that the specimen -- which species, how many, placed where -- is identical, and every one of those is exact: labels, picks and region volumes come back byte-identical run to run.
+- **When A/B-ing a change for reproducibility, always run a baseline-vs-baseline control.** Two runs of the SAME code differ by the amounts above, so a comparison without that control reports the noise as a regression. This is not hypothetical: it made a 29%-of-voxels "difference" look like a real change until the control showed identical numbers.
 
 ## Key Dependencies
 

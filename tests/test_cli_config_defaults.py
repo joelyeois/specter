@@ -160,3 +160,70 @@ def test_tiltseries_without_a_volume_exits_cleanly(tmp_path) -> None:
     assert "Traceback" not in combined
     assert "--volume_path" in combined
     assert "--tomogram_config" in combined
+
+
+@pytest.mark.parametrize(
+    "body,needle",
+    [
+        # A value the field's Literal does not allow.
+        ('[models]\nnoise_model = "bogus"\n', "must be one of"),
+        # A key the dataclass does not have. Appended INSIDE [specimen], not
+        # under a repeated header -- a duplicate table is a different error.
+        ("not_a_field = 3\n", "not_a_field"),
+        # TOML that will not parse at all: tomllib raises TOMLDecodeError,
+        # which is a ValueError subclass, so the same handler covers it.
+        ("[unclosed\n", ""),
+    ],
+)
+def test_bad_config_file_is_a_usage_error(tmp_path, body, needle) -> None:
+    """A config a user got wrong must not arrive as a traceback.
+
+    The same mistake as a FLAG was always caught cleanly, because click
+    builds a Choice from each field's Literal and rejects it at parse time.
+    Through a TOML file it reached `validate_config` and escaped as a
+    ValueError: 38 lines of stack around a message that was already
+    perfectly good. A typo in a config file is the likelier of the two."""
+    config = tmp_path / "bad.toml"
+    config.write_text('[specimen]\npdb_source = "6bdf"\n' + body)
+    result = proc.run(
+        [
+            sys.executable,
+            "-m",
+            "specter.cli._cli",
+            "simulate",
+            "particles",
+            "--config",
+            str(config),
+        ],
+        capture_output=True,
+        encoding="utf-8",
+        cwd=str(tmp_path),
+        env={"COLUMNS": "200", "PATH": "/usr/bin:/bin"},
+    )
+    assert result.returncode == 2
+    combined = (result.stdout + result.stderr).replace("\n", " ")
+    assert "Traceback" not in combined
+    assert needle in combined
+
+
+def test_missing_config_file_is_a_usage_error(tmp_path) -> None:
+    """--config naming a file that does not exist is a usage mistake, and
+    used to surface as a bare FileNotFoundError traceback."""
+    result = proc.run(
+        [
+            sys.executable,
+            "-m",
+            "specter.cli._cli",
+            "simulate",
+            "particles",
+            "--config",
+            str(tmp_path / "nope.toml"),
+        ],
+        capture_output=True,
+        encoding="utf-8",
+        cwd=str(tmp_path),
+        env={"COLUMNS": "200", "PATH": "/usr/bin:/bin"},
+    )
+    assert result.returncode == 2
+    combined = (result.stdout + result.stderr).replace("\n", " ")
+    assert "Traceback" not in combined

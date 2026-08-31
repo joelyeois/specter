@@ -9,15 +9,13 @@ from specter.config import (
     TOMOGRAM_HELP,
     IceCacheConfig,
     TomogramConfig,
-    apply_overrides,
-    load_config,
 )
 
 from ._click_options import (
     build_config_options,
     collect_overrides,
     CONFIG_OPTION_HELP,
-    config_from_defaults,
+    load_validated_config,
     prerequisite_usage_error,
 )
 
@@ -104,12 +102,7 @@ def _tomogram_callback(
     assert ctx is not None
     overrides = collect_overrides(ctx, exclude={"config", "n_tomograms"})
 
-    cfg = (
-        load_config(config, TomogramConfig)
-        if config is not None
-        else config_from_defaults(TomogramConfig, overrides)
-    )
-    apply_overrides(cfg, overrides)
+    cfg = load_validated_config(TomogramConfig, config, overrides)
 
     # Checked here as well as in run_build_tomogram so a CLI user gets a
     # usage error rather than that function's ValueError as a traceback.
@@ -187,12 +180,7 @@ def _ice_callback(config: str | None, **_overrides_raw: object) -> None:
     assert ctx is not None
     overrides = collect_overrides(ctx, exclude={"config"})
 
-    cfg = (
-        load_config(config, IceCacheConfig)
-        if config is not None
-        else config_from_defaults(IceCacheConfig, overrides)
-    )
-    apply_overrides(cfg, overrides)
+    cfg = load_validated_config(IceCacheConfig, config, overrides)
     run_build_ice_cache(cfg)
 
 

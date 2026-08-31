@@ -7,15 +7,13 @@ import rich_click as click
 from specter.config import (
     RECONSTRUCTION_HELP,
     ReconstructionConfig,
-    apply_overrides,
-    load_config,
 )
 
 from ._click_options import (
     build_config_options,
     collect_overrides,
     CONFIG_OPTION_HELP,
-    config_from_defaults,
+    load_validated_config,
 )
 
 CONTEXT_SETTINGS = {"help_option_names": ["-h", "--help"]}
@@ -62,12 +60,7 @@ def _particle_callback(config: str | None, **_overrides_raw: object) -> None:
     assert ctx is not None
     overrides = collect_overrides(ctx, exclude={"config"})
 
-    cfg = (
-        load_config(config, ReconstructionConfig)
-        if config is not None
-        else config_from_defaults(ReconstructionConfig, overrides)
-    )
-    apply_overrides(cfg, overrides)
+    cfg = load_validated_config(ReconstructionConfig, config, overrides)
     run_reconstruction(cfg)
 
 

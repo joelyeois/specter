@@ -166,6 +166,7 @@ import math
 import time
 import warnings
 from pathlib import Path
+from collections.abc import Iterator
 from typing import Literal
 
 import numpy as np
@@ -231,6 +232,40 @@ from ._specs import (
 from ...progress import TqdmProgress, phase_done, phase_start, status
 
 _INSTANCE_LABEL_REL_THRESHOLD = 0.01
+
+
+def _filament_runs(
+    instances: list[FilamentInstance],
+) -> Iterator[list[FilamentInstance]]:
+    """Split placed monomers into one list per filament, in order.
+
+    The single definition of where one filament ends and the next begins,
+    shared by instance labelling and pick export so the two ground truths
+    cannot disagree about what an object is.
+
+    A boundary is a change of ``(code, filament_id)`` between CONSECUTIVE
+    instances, not a change of the key alone. Both placers number
+    filaments with ``range(spec.n_copies)``, restarting per spec, so every
+    spec contributes a filament 0; each emits one filament's monomers
+    consecutively, which is what makes runs the right unit.
+
+    One case this cannot separate: a spec contributing exactly one
+    filament, followed immediately by a same-`code` filament 0 from the
+    next spec. Separating those needs the placers to number filaments
+    globally, which is the real fix if it ever matters -- `filament_id` is
+    internal and never written to picks.
+    """
+    run: list[FilamentInstance] = []
+    previous: tuple[str, int] | None = None
+    for inst in instances:
+        key = (inst.code, inst.filament_id)
+        if previous is not None and key != previous:
+            yield run
+            run = []
+        previous = key
+        run.append(inst)
+    if run:
+        yield run
 
 
 class TomogramSpecimenGenerator:
@@ -1872,15 +1907,11 @@ class TomogramSpecimenGenerator:
         never written to picks.
         """
         ids: list[int] = []
-        current = next_instance_id - 1
-        previous: tuple[str, int] | None = None
-        for inst in instances:
-            key = (inst.code, inst.filament_id)
-            if key != previous:
-                current += 1
-                previous = key
-            ids.append(current)
-        return torch.tensor(ids, dtype=torch.int32), current + 1
+        current = next_instance_id
+        for run in _filament_runs(instances):
+            ids.extend([current] * len(run))
+            current += 1
+        return torch.tensor(ids, dtype=torch.int32), current
 
     def _stamp_filaments(
         self,
@@ -2380,6 +2411,46 @@ class TomogramSpecimenGenerator:
                             )
                         f.write(json.dumps(row) + "\n")
                 written[key] = path
+
+                # One `path` per filament as well, so the picks agree with
+                # the label volume about what an object is: both now say a
+                # filament, where the labels said one object and these
+                # points said several dozen.
+                #
+                # Written in ADDITION to the oriented points rather than
+                # instead of them. A path carries no orientations, and the
+                # per-monomer rotation matrices above are what subtomogram
+                # averaging of F-actin needs; nothing in the volume can
+                # recover them. Microtubules ship only a path and so have
+                # no per-dimer poses at all.
+                path_file = output_dir / f"{key}-{annotation_version}_path.ndjson"
+                with open(path_file, "w") as f:
+                    for run in _filament_runs(insts):
+                        points = torch.stack([i.position_xyz for i in run])
+                        centre = points.mean(dim=0)
+                        f.write(
+                            json.dumps(
+                                {
+                                    "type": "path",
+                                    "location": {
+                                        "x": float(centre[0]),
+                                        "y": float(centre[1]),
+                                        "z": float(centre[2]),
+                                    },
+                                    "path": [
+                                        {
+                                            "x": float(p[0]),
+                                            "y": float(p[1]),
+                                            "z": float(p[2]),
+                                        }
+                                        for p in points
+                                    ],
+                                    "n_monomers": len(run),
+                                }
+                            )
+                            + "\n"
+                        )
+                written[f"{key}-path"] = path_file
 
         if include_microtubules and self.microtubule_instances:
             by_tube_code: dict[str, list[MicrotubuleInstance]] = {}

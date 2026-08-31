@@ -486,3 +486,66 @@ def test_filament_ids_do_not_collide_across_species():
     instances = place_filaments(specs, (300, 1200, 1200), 5.0, rng)
     ids, _ = TomogramSpecimenGenerator._one_id_per_filament(None, instances, 1)
     assert len(set(ids.tolist())) == 6, "two specs x 3 filaments must give 6 ids"
+
+
+def test_filaments_export_one_path_per_filament_alongside_oriented_points():
+    """Picks and labels must agree on what an object is.
+
+    The label volume gives a filament one id. Its picks gave one entry per
+    MONOMER, so the two ground truths disagreed: 20 objects against 765
+    points. A `path` per filament is written as well, matching both the
+    label volume and how microtubules were already exported.
+
+    Written IN ADDITION to the oriented points, not instead: a path has no
+    orientations, and the per-monomer rotation matrices are what
+    subtomogram averaging of F-actin needs. Nothing in the density volume
+    can recover them."""
+
+    import torch
+
+    from specter.specimen.filament import FilamentSpec, place_filaments
+    from specter.specimen.tomogram.generator import _filament_runs
+
+    rng = torch.Generator()
+    rng.manual_seed(11)
+    spec = FilamentSpec(
+        code="1J6Z",
+        step=27.3,
+        flex_deg=12.0,
+        twist_deg=166.15,
+        n_copies=7,
+        n_monomers=(20, 40),
+    )
+    instances = place_filaments([spec], (300, 1200, 1200), 5.0, rng)
+    runs = list(_filament_runs(instances))
+
+    assert len(runs) == spec.n_copies
+    assert sum(len(r) for r in runs) == len(instances), "every monomer in exactly one"
+    # Each run is one filament: same code and filament_id throughout.
+    for run in runs:
+        assert len({(i.code, i.filament_id) for i in run}) == 1
+    # And the runs are distinct filaments, not one repeated.
+    assert len({(r[0].code, r[0].filament_id) for r in runs}) == spec.n_copies
+
+
+def test_filament_runs_handles_a_single_monomer_filament():
+    """A filament of one monomer is still one run, not a boundary case that
+    swallows its neighbour."""
+    import torch
+
+    from specter.specimen.filament import FilamentSpec, place_filaments
+    from specter.specimen.tomogram.generator import _filament_runs
+
+    rng = torch.Generator()
+    rng.manual_seed(2)
+    spec = FilamentSpec(
+        code="1J6Z",
+        step=27.3,
+        flex_deg=12.0,
+        twist_deg=166.15,
+        n_copies=4,
+        n_monomers=(1, 1),
+    )
+    instances = place_filaments([spec], (300, 1200, 1200), 5.0, rng)
+    runs = list(_filament_runs(instances))
+    assert len(runs) == 4 and all(len(r) == 1 for r in runs)

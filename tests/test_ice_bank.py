@@ -541,21 +541,21 @@ def test_bundled_data_is_declared_as_package_data():
         assert required in globs, f"{required} missing from package-data"
 
 
-def _blend_reference(V, icemaker, threshold=0.05):
+def _blend_reference(V, icemaker):
     """
-    The pre-optimisation blend expression, verbatim.
+    The whole-volume blend expression, verbatim.
 
-    `V + ice * ice_blend_mask(V, threshold).to(V.dtype)` holds five tensors the
-    size of the whole canvas at once -- V, ice, a float32 mask, the product and
-    the sum. At `micrograph_size` that is 5 x 33.6 GB, and it was most of why a
-    4096-pixel micrograph peaked at 237 GB of RSS. The shipped version masks and
-    multiplies one z-slab at a time and accumulates in place.
+    `V + ice * ice_occupancy_weight(V)` holds five tensors the size of the
+    whole canvas at once -- V, ice, the weight, the product and the sum. At
+    `micrograph_size` that is 5 x 33.6 GB, and it was most of why a
+    4096-pixel micrograph peaked at 237 GB of RSS. The shipped version
+    weights and multiplies one z-slab at a time and accumulates in place;
+    this asserts the two agree.
     """
-    from specter.ice._bank import ice_blend_mask
+    from specter.ice._bank import ice_occupancy_weight
 
     ice = icemaker.generate_ice(batchsize=V.shape[0]).to(V.device)
-    mask = ice_blend_mask(V, threshold).to(V.dtype)
-    return V + ice * mask
+    return V + ice * ice_occupancy_weight(V)
 
 
 @pytest.mark.parametrize("inplace", [False, True])

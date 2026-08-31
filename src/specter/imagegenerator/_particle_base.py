@@ -5,7 +5,7 @@ import torch.nn.functional as F
 
 from specter import logger
 
-from ..ice import IceBank, ice_blend_mask
+from ..ice import IceBank, ice_occupancy_weight
 from ._base import BaseImager
 
 __all__ = ["ParticleGeneratorBase"]
@@ -63,11 +63,15 @@ class ParticleGeneratorBase(BaseImager):
                 mode="reflect",
             )
 
-        mask = ice_blend_mask(V)
-        ice.mul_(mask)
+        # Per-voxel fraction of space still free for water, not a binary
+        # eligibility mask -- see ice_occupancy_weight for why the old
+        # `V < 0.05 * V.max()` rule coupled every voxel's ice to whatever
+        # the densest thing in the volume happened to be.
+        weight = ice_occupancy_weight(V)
+        ice.mul_(weight)
         V = V.add_(ice)
         if hasattr(self, "icemask"):
-            self.icemask = mask.to(V.dtype).detach().cpu()
+            self.icemask = weight.detach().cpu()
         return V
 
     def process_volume(self, V: torch.Tensor, idx: torch.Tensor | int) -> torch.Tensor:

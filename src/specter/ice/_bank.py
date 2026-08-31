@@ -1417,47 +1417,90 @@ def resolve_icemaker(
     )
 
 
-def ice_blend_mask(V: torch.Tensor, threshold: float = 0.05) -> torch.Tensor:
-    """
-    Boolean mask of voxels eligible to receive ice.
+#: Scattering potential of a voxel entirely filled with biological
+#: material, V. Protein's mean inner potential, measured on 1FA2 at
+#: 7.00 V by rendering and predicted at 7.03 V from its composition and
+#: partial specific volume. Used as the reference for how much of a voxel
+#: is already occupied, so it must be an ABSOLUTE physical quantity: the
+#: whole point is that it does not depend on what else is in the volume.
+FULL_OCCUPANCY_POTENTIAL_V = 7.0
 
-    Shared masking rule for every ice-blending entry point in specter (this
-    module's :func:`blend_ice_into_volume` and
-    :meth:`~specter.imagegenerator._particle_base.ParticleGeneratorBase.solvate`):
-    a voxel is eligible when its value is below ``threshold * V.max()``.
+
+def ice_occupancy_weight(
+    V: torch.Tensor, full_potential: float = FULL_OCCUPANCY_POTENTIAL_V
+) -> torch.Tensor:
+    """
+    Per-voxel fraction of volume still available to water.
+
+    Water cannot occupy space already filled by something else, so a
+    voxel receives ice in proportion to how much of it is empty. Reading
+    that fraction off the potential itself needs a reference for "full",
+    which is `full_potential`.
+
+    This replaced a rule that gated on ``V < 0.05 * V.max()`` on
+    2026-08-31. That threshold was RELATIVE to the volume's own contents,
+    so a component with nothing to do with the solvent moved it: measured
+    on a 1000x4000x4000 A specimen, adding a population of gold fiducials
+    took ``V.max()`` from 17.85 to 35.18 V, and with it the fraction of
+    occupied voxels receiving ice on top of themselves from 12.9% to
+    28.8%. Two contrast regimes from one config, decided by whether a
+    bead happened to be present. It was also binary, so a voxel just
+    under the cut took ice at full strength and its neighbour just over
+    took none.
+
+    Weighting against an absolute reference fixes both. Gold and carbon
+    sit far above `full_potential`, clamp to zero weight and exclude
+    water completely, which is correct and now automatic rather than a
+    consequence of where they put the maximum. A partial-volume voxel at
+    a protein's edge gets partial ice, which is what physically belongs
+    there.
 
     Parameters
     ----------
     V : torch.Tensor
-        Scattering-potential volume.
-    threshold : float, optional
-        Fraction of ``V.max()`` below which a voxel is treated as ice-free.
-        Default 0.05.
+        Scattering-potential volume, in volts.
+    full_potential : float, optional
+        Potential of a fully-occupied voxel, V. Default
+        :data:`FULL_OCCUPANCY_POTENTIAL_V`.
 
     Returns
     -------
     torch.Tensor
-        Boolean mask, same shape as ``V``.
+        Weights in [0, 1], same shape as `V`. 1 where the voxel is empty,
+        0 where it is full.
+
+    Notes
+    -----
+    One reference is used for every material, because the blend sees a
+    single summed volume and cannot tell which material a voxel holds.
+    Protein is the right choice since it dominates a cellular specimen by
+    volume. Material less dense than protein is therefore under-excluded:
+    a bilayer's acyl core at 5.4 V retains about 23% of its water. That
+    is a bounded error in one direction, unlike a threshold that moved
+    with the contents of the volume.
     """
-    return V.detach() < threshold * V.max()
+    if full_potential <= 0:
+        raise ValueError(f"full_potential must be positive, got {full_potential}")
+    weight = V.detach() / full_potential
+    return (1.0 - weight).clamp_(0.0, 1.0)
 
 
 def blend_ice_into_volume(
     V: torch.Tensor,
     icemaker: "IceBank | RandomIcemaker",
     pixel_size: float,
-    threshold: float = 0.05,
+    full_potential: float = FULL_OCCUPANCY_POTENTIAL_V,
     relax_steps: int = 0,
     profile: "IceProfile | None" = None,
     inplace: bool = False,
 ) -> torch.Tensor:
     """
-    Add ice into a scattering-potential volume, masked to voxels with little
-    existing potential.
+    Add ice into a scattering-potential volume, weighted by how much room
+    is left in each voxel.
 
-    Same masking rule used across specter's ice integration points: a voxel
-    is considered ice-free (and thus eligible to receive ice) when its value
-    is below ``threshold * V.max()``.
+    Same rule used across specter's ice integration points: a voxel takes
+    ice in proportion to the fraction of it not already occupied, per
+    :func:`ice_occupancy_weight`.
 
     Parameters
     ----------
@@ -1471,9 +1514,10 @@ def blend_ice_into_volume(
         must already match ``V``).
     pixel_size : float
         Voxel size in Å, forwarded to ``IceBank.generate_big_ice``.
-    threshold : float, optional
-        Fraction of ``V.max()`` below which a voxel is treated as ice-free.
-        Default 0.05.
+    full_potential : float, optional
+        Potential of a fully-occupied voxel, V, forwarded to
+        :func:`ice_occupancy_weight`. Default
+        :data:`FULL_OCCUPANCY_POTENTIAL_V`.
     relax_steps : int, optional
         Forwarded to :meth:`IceBank.generate_big_ice` (ignored for
         ``RandomIcemaker``, which has no tile seams to relax). Default 0,
@@ -1529,23 +1573,23 @@ def blend_ice_into_volume(
                 nz, nxy, pixel_size, z_slice=sl, device=ice.device
             )[None]
     # Blended a z-slab at a time, in place into `ice`, then accumulated into
-    # `V`. The obvious spelling, `V + ice * ice_blend_mask(V, threshold).to(
-    # V.dtype)`, holds FIVE tensors the size of the whole canvas at once -- V,
-    # ice, a float32 mask, the product, and the sum -- which at
+    # `V`. The obvious spelling, `V + ice * ice_occupancy_weight(V)`, holds
+    # FIVE tensors the size of the whole canvas at once -- V, ice, the
+    # weight, the product, and the sum -- which at
     # micrograph_size is 5 x 33.6 GB and is most of why a 4096-pixel micrograph
     # peaked at 237 GB of RSS. Slabbing bounds the mask and the product to one
     # slab each, and the two accumulations are in-place, so the peak is V plus
     # ice plus a slab.
     #
-    # `V.max()` is taken once up front: it is a reduction over the whole
-    # volume, so computing it per slab would both cost N passes and change the
-    # threshold from a global one to a per-slab one.
-    cutoff = threshold * V.max()
+    # No global reduction here any more. The old rule needed `V.max()` up
+    # front, which made the whole volume's contents an input to every
+    # voxel's ice; the occupancy weight is per-voxel and absolute, so a
+    # slab needs nothing but itself.
     out = V if inplace else V.clone()
     chunk = max(1, 2**24 // (nxy * nxy))
     for start in range(0, nz, chunk):
         sl = slice(start, min(start + chunk, nz))
         ice_slab = ice[:, sl]
-        ice_slab.mul_(out[:, sl].detach() < cutoff)
+        ice_slab.mul_(ice_occupancy_weight(out[:, sl], full_potential))
         out[:, sl].add_(ice_slab)
     return out

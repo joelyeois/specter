@@ -266,28 +266,23 @@ def _tiny_bank() -> IceBank:
 
 
 def _empty_volume(nz: int, nxy: int) -> torch.Tensor:
-    """
-    A specimen volume with one marker voxel.
-
-    :func:`~specter.ice.ice_blend_mask` gates on ``V < threshold * V.max()``,
-    so an all-zero volume has ``V.max() == 0``, the mask is False everywhere,
-    and no ice is blended at all. Every production path crowds particles in
-    first, so ``V.max()`` is positive by the time ice is added; these tests
-    need one non-zero voxel to stand in for that.
-    """
-    V = torch.zeros(1, nz, nxy, nxy)
-    # Centre, so it sits inside the ice for any profile and never lands in a
-    # region a test is asserting to be vacuum.
-    V[0, nz // 2, nxy // 2, nxy // 2] = 1.0
-    return V
+    """A specimen volume with nothing in it."""
+    return torch.zeros(1, nz, nxy, nxy)
 
 
-def test_all_zero_volume_receives_no_ice():
-    """Documents the ice_blend_mask edge case _empty_volume works around."""
+def test_all_zero_volume_is_filled_with_ice():
+    """An empty specimen is vitreous ice, not vacuum.
+
+    It used to come back empty. The blend gated on ``V < 0.05 * V.max()``,
+    so a volume of zeros put the threshold at zero, nothing compared below
+    it, and no ice was added anywhere -- an artifact of the rule being
+    relative to the volume's own contents. Tests carried a marker voxel
+    solely to work around it. `ice_occupancy_weight` is absolute, so empty
+    space now takes ice at full weight."""
     torch.manual_seed(0)
     V = torch.zeros(1, 24, 32, 32)
     out = blend_ice_into_volume(V, _tiny_bank(), 4.0)
-    assert float(out.abs().max()) == 0.0
+    assert float(out.abs().max()) > 0.0
 
 
 def test_blend_without_profile_fills_the_box():

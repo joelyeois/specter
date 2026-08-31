@@ -167,3 +167,70 @@ def test_shape_backend_reuses_committed_rotations_for_render() -> None:
     assert torch.equal(crowd.theta[:, :3, :3], committed_rotations), (
         "generate_affine_matrices must reuse the packer's committed rotations"
     )
+
+
+def test_water_air_interface_knobs_are_threaded_for_poisson_disk() -> None:
+    """
+    `sigma_frac`/`peak_amplitude`/`baseline` are constructor knobs, not just
+    `filter_by_local_z_density`'s own hardcoded defaults -- a caller raising
+    `baseline` should keep a visibly larger bulk fraction than one that
+    doesn't, at the same seed and raw candidate pool.
+    """
+    geom = dict(
+        dx=2.0,
+        min_distance=6.0,
+        nxy_out=128,
+        nz_out=128,
+        water_air_interface=True,
+        progressbars=False,
+    )
+    V = torch.rand(16, 16, 16)
+
+    specter.seed(0)
+    tight = CrowdWithDuplicates(V, sigma_frac=0.02, baseline=0.0, **geom)
+    tight.generate_coordinates()
+
+    specter.seed(0)
+    loose = CrowdWithDuplicates(V, sigma_frac=0.02, baseline=1.0, **geom)
+    loose.generate_coordinates()
+
+    assert len(loose.coords) > len(tight.coords), (
+        f"baseline=1.0 kept {len(loose.coords)}, baseline=0.0 kept "
+        f"{len(tight.coords)} -- expected the higher bulk baseline to keep "
+        "strictly more, at the same seed and raw candidate pool"
+    )
+
+
+def test_water_air_interface_knobs_are_threaded_for_shape_backend() -> None:
+    """
+    Same wiring check as the poisson_disk test above, for
+    `_generate_coordinates_shape`'s own thinning step.
+    """
+    atoms = _blob()
+    geom = dict(
+        dx=4.0,
+        min_distance=30.0,
+        nxy_out=96,
+        nz_out=64,
+        packing_backend="shape",
+        atom_coordinates=atoms,
+        packing_max_retries=300,
+        packing_stall_patience=2000,
+        water_air_interface=True,
+        progressbars=False,
+    )
+    V = torch.rand(16, 16, 16)
+
+    specter.seed(0)
+    tight = CrowdWithDuplicates(V, sigma_frac=0.02, baseline=0.0, **geom)
+    tight.generate_coordinates()
+
+    specter.seed(0)
+    loose = CrowdWithDuplicates(V, sigma_frac=0.02, baseline=1.0, **geom)
+    loose.generate_coordinates()
+
+    assert len(loose.coords) > len(tight.coords), (
+        f"baseline=1.0 kept {len(loose.coords)}, baseline=0.0 kept "
+        f"{len(tight.coords)} -- expected the higher bulk baseline to keep "
+        "strictly more, at the same seed and raw jammed pool"
+    )

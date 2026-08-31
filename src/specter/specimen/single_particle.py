@@ -92,6 +92,15 @@ class MicrographSpecimenGenerator(L.LightningModule):
         relaxation). Ignored for ``RandomIcemaker``.
     water_air_interface : bool, optional
         Whether to account for water-air interface in crowding and ice.
+    sigma_frac : float, optional
+        Forwarded to ``CrowdWithDuplicates``. Only used when
+        ``water_air_interface=True``.
+    peak_amplitude : float, optional
+        Forwarded to ``CrowdWithDuplicates``. Only used when
+        ``water_air_interface=True``.
+    baseline : float, optional
+        Forwarded to ``CrowdWithDuplicates``. Only used when
+        ``water_air_interface=True``.
     progressbars : bool, optional
         Whether to show progress bars.
     chunk_size : int, optional
@@ -107,8 +116,9 @@ class MicrographSpecimenGenerator(L.LightningModule):
         A benchmark of this class's own placement, 8.6x more instances and
         8.6x the occupied volume fraction at the same ``crowd_min_distance``
         and box. See ``CrowdWithDuplicates``'s own docstring for the
-        mechanism and its current limitation (not yet ``ice_profile``-aware).
-        Requires ``atom_coordinates``. Default ``'poisson_disk'``.
+        mechanism, including how it handles ``ice_profile`` confinement and
+        ``water_air_interface`` adsorption. Requires ``atom_coordinates``.
+        Default ``'poisson_disk'``.
     atom_coordinates : torch.Tensor, optional
         The template's real atomic coordinates -- ``PDB.coordinates`` --
         required (and used only) when ``packing_backend='shape'``.
@@ -142,6 +152,9 @@ class MicrographSpecimenGenerator(L.LightningModule):
         ice_relax_steps: int = 0,
         ice_parameterization: str = "kirkland",
         water_air_interface: bool = True,
+        sigma_frac: float = 0.05,
+        peak_amplitude: float = 1.0,
+        baseline: float = 0.1,
         progressbars: bool = True,
         chunk_size: int = 1,
         move_to_cpu: bool = True,
@@ -200,6 +213,9 @@ class MicrographSpecimenGenerator(L.LightningModule):
                 progressbars=progressbars,
                 chunk_size=chunk_size,
                 water_air_interface=water_air_interface,
+                sigma_frac=sigma_frac,
+                peak_amplitude=peak_amplitude,
+                baseline=baseline,
                 move_to_cpu=move_to_cpu,
                 ice_profile=ice_profile,
             )

@@ -321,6 +321,22 @@ class CrowdWithDuplicates(L.LightningModule):
     water_air_interface : bool, optional
         If True, applies a bimodal distribution along z-coordinates. Mimics the
         particle adsorption in cryo-EM ice-water interface.
+    sigma_frac : float, optional
+        Gaussian width as a fraction of the local ice thickness (or of
+        ``max_distance_z`` when ``ice_profile`` is None), forwarded to
+        :func:`~specter.crowding.filter_by_local_z_density`. Smaller pulls
+        adsorbed particles into a tighter shell against each surface; larger
+        spreads them further into the bulk. Only used when
+        ``water_air_interface=True``. Default 0.05.
+    peak_amplitude : float, optional
+        Amplitude of the two Gaussians centered on each surface, forwarded to
+        :func:`~specter.crowding.filter_by_local_z_density`. Only used when
+        ``water_air_interface=True``. Default 1.0.
+    baseline : float, optional
+        Minimum keep-probability in the bulk, away from either surface,
+        forwarded to :func:`~specter.crowding.filter_by_local_z_density` --
+        the fraction of particles left floating free in solution rather than
+        adsorbed. Only used when ``water_air_interface=True``. Default 0.1.
     ice_profile : IceProfile, optional
         Laterally varying ice geometry. When given, '3d' placement is gated on
         each candidate's own column: a placement whose particle would poke out
@@ -426,6 +442,9 @@ class CrowdWithDuplicates(L.LightningModule):
         move_to_cpu: bool = False,
         progressbars: bool = True,
         water_air_interface: bool = False,
+        sigma_frac: float = 0.05,
+        peak_amplitude: float = 1.0,
+        baseline: float = 0.1,
         ice_profile: "IceProfile | None" = None,
         particle_radius: float | None = None,
         packing_backend: Literal["poisson_disk", "shape"] = "poisson_disk",
@@ -475,6 +494,9 @@ class CrowdWithDuplicates(L.LightningModule):
         self.move_to_cpu = move_to_cpu
         self.progressbars = progressbars
         self.water_air_interface = water_air_interface
+        self.sigma_frac = sigma_frac
+        self.peak_amplitude = peak_amplitude
+        self.baseline = baseline
         self.ice_profile = ice_profile
         # min_distance is the caller's own estimate of how much room one
         # particle needs -- `MicrographSpecimenGenerator`'s callers pass
@@ -540,11 +562,20 @@ class CrowdWithDuplicates(L.LightningModule):
                 coords, z_bot, z_top = coords[fits], z_bot[fits], z_top[fits]
                 if self.water_air_interface:
                     coords, self.z_distribution = filter_by_local_z_density(
-                        coords, z_bot, z_top
+                        coords,
+                        z_bot,
+                        z_top,
+                        sigma_frac=self.sigma_frac,
+                        peak_amplitude=self.peak_amplitude,
+                        baseline=self.baseline,
                     )
             elif self.water_air_interface:
                 coords, self.z_distribution = filter_by_z_density(
-                    coords, self.max_distance_z
+                    coords,
+                    self.max_distance_z,
+                    sigma_frac=self.sigma_frac,
+                    peak_amplitude=self.peak_amplitude,
+                    baseline=self.baseline,
                 )
         else:
             raise ValueError(
@@ -633,7 +664,14 @@ class CrowdWithDuplicates(L.LightningModule):
             # poisson_disk's own raw candidates -- that's what makes the
             # bias actually show up (see that function's docstring for why
             # it can't, on a sparse pool).
-            probs = _local_z_density_probs(coords[:, 2], z_bot, z_top)
+            probs = _local_z_density_probs(
+                coords[:, 2],
+                z_bot,
+                z_top,
+                self.sigma_frac,
+                self.peak_amplitude,
+                self.baseline,
+            )
             keep = torch.rand(len(coords)) < probs
             coords, rotation_matrices = coords[keep], rotation_matrices[keep]
 

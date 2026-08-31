@@ -95,6 +95,9 @@ class MicrographConfig:
     crowd_min_distance: float | None = None  # Å
     crowd_max_distance_z: float | None = None  # Å
     water_air_interface: bool = True
+    sigma_frac: float = 0.05  # unitless, fraction of local ice thickness
+    peak_amplitude: float = 1.0  # unitless, keep-probability at each surface
+    baseline: float = 0.1  # unitless, minimum keep-probability in the bulk
     packing_backend: Literal["poisson_disk", "shape"] = "poisson_disk"
     packing_gap: float = 0.0  # Å, shape backend only
     n_orientations: int = 256  # shape backend only
@@ -243,13 +246,24 @@ MICROGRAPH_HELP: dict[str, str] = {
     "crowd_max_distance_z": "Maximum z-distance between crowded particles in Angstrom.",
     "water_air_interface": "Model a water-air interface when placing ice/"
     "crowding (bimodal density along z instead of uniform).",
+    "sigma_frac": "Gaussian width as a fraction of the local ice thickness, "
+    "for the water_air_interface bias. Smaller pulls adsorbed particles "
+    "into a tighter shell against each surface. water_air_interface=True "
+    "only.",
+    "peak_amplitude": "Amplitude of the two Gaussians centered on each ice "
+    "surface, for the water_air_interface bias. water_air_interface=True "
+    "only.",
+    "baseline": "Minimum keep-probability in the bulk, away from either ice "
+    "surface, for the water_air_interface bias -- the fraction of particles "
+    "left floating free in solution rather than adsorbed. "
+    "water_air_interface=True only.",
     "packing_backend": "Crowding placement algorithm: 'poisson_disk' "
     "(default) is bounding-sphere-exclusion Poisson-disk sampling; 'shape' "
     "collides the real rotated molecular footprint against a running "
     "occupancy grid (the same packer TomogramSpecimenGenerator uses), "
-    "reaching substantially higher crowding density. Not yet aware of a "
-    "non-flat ice_profile -- placement is unconstrained by the local slab "
-    "when 'shape' is selected.",
+    "reaching substantially higher crowding density. Both backends confine "
+    "placement to a non-flat ice_profile's local slab and apply "
+    "water_air_interface the same way.",
     "packing_gap": "Extra clearance baked into the shape backend's footprint "
     "mask, Angstrom. packing_backend='shape' only.",
     "n_orientations": "Size of the shape backend's per-instance rotation "

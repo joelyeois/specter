@@ -105,6 +105,15 @@ class MicrographGenerator(BaseImager):
         Maximum Z range for crowding placement in Å.
     water_air_interface : bool, optional
         Simulate water-air interface in crowding and ice. Default True.
+    sigma_frac : float, optional
+        Forwarded to ``CrowdWithDuplicates``. Only used when
+        ``water_air_interface=True``.
+    peak_amplitude : float, optional
+        Forwarded to ``CrowdWithDuplicates``. Only used when
+        ``water_air_interface=True``.
+    baseline : float, optional
+        Forwarded to ``CrowdWithDuplicates``. Only used when
+        ``water_air_interface=True``.
     packing_backend : {'poisson_disk', 'shape'}, optional
         Forwarded to ``MicrographSpecimenGenerator``/``CrowdWithDuplicates``.
         ``'shape'`` reaches substantially higher crowding density than the
@@ -212,6 +221,9 @@ class MicrographGenerator(BaseImager):
         n_candidates: int | None = None,
         crowd_max_distance_z: float | None = None,
         water_air_interface: bool = True,
+        sigma_frac: float = 0.05,
+        peak_amplitude: float = 1.0,
+        baseline: float = 0.1,
         scattering_model: str = "multislice",
         noise_model: str | None = "poisson",
         klim: float | None = None,
@@ -385,6 +397,9 @@ class MicrographGenerator(BaseImager):
                 icemaker=icemaker,
                 ice_relax_steps=ice_relax_steps,
                 water_air_interface=water_air_interface,
+                sigma_frac=sigma_frac,
+                peak_amplitude=peak_amplitude,
+                baseline=baseline,
                 progressbars=progressbars,
                 chunk_size=chunk_size,
                 move_to_cpu=move_to_cpu,

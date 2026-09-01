@@ -541,33 +541,39 @@ def test_bundled_data_is_declared_as_package_data():
         assert required in globs, f"{required} missing from package-data"
 
 
-def _blend_reference(V, icemaker):
+def _blend_reference(V, icemaker, pixel_size):
     """
     The whole-volume blend expression, verbatim.
 
-    `V + ice * ice_occupancy_weight(V)` holds five tensors the size of the
-    whole canvas at once -- V, ice, the weight, the product and the sum. At
-    `micrograph_size` that is 5 x 33.6 GB, and it was most of why a
+    `V + ice * (1 - potential_occupancy(V))` holds five tensors the size of
+    the whole canvas at once -- V, ice, the weight, the product and the sum.
+    At `micrograph_size` that is 5 x 33.6 GB, and it was most of why a
     4096-pixel micrograph peaked at 237 GB of RSS. The shipped version
     weights and multiplies one z-slab at a time and accumulates in place;
     this asserts the two agree.
     """
-    from specter.ice._bank import ice_occupancy_weight
+    from specter.potential import potential_occupancy
 
     ice = icemaker.generate_ice(batchsize=V.shape[0]).to(V.device)
-    return V + ice * ice_occupancy_weight(V)
+    return V + ice * (1.0 - potential_occupancy(V, pixel_size)).clamp(0.0, 1.0)
 
 
 @pytest.mark.parametrize("inplace", [False, True])
 @pytest.mark.parametrize("nz,n", [(16, 24), (17, 24), (33, 16)])
 def test_blend_ice_slabwise_matches_whole_volume_expression(nz, n, inplace):
     """
-    Slab-wise in-place blending reproduces the whole-volume expression exactly.
+    Slab-wise in-place blending reproduces the whole-volume expression.
 
-    Same arithmetic per voxel, so this asserts equality rather than closeness.
-    Non-dividing `nz` is covered because the slab loop's last chunk is short,
-    and the eligibility threshold is global (`threshold * V.max()`) -- computing
-    it per slab instead would be a real physics change that this would catch.
+    This is now also the test of the blur's HALO. The occupancy estimator
+    coarse-grains over 2 A, so it reads past whatever slab it is handed;
+    the shipped loop widens each slab by the kernel's reach and discards
+    the margin. Drop that and every chunk boundary becomes an edge the
+    blur sees, which prints into the ice as a seam -- and shows up here as
+    a mismatch against the unchunked expression.
+
+    Non-dividing `nz` is covered because the slab loop's last chunk is
+    short, and because the first and last slabs are the ones whose halo is
+    truncated by the volume itself.
     """
     from specter.ice import RandomIcemaker
     from specter.ice._bank import blend_ice_into_volume
@@ -578,13 +584,15 @@ def test_blend_ice_slabwise_matches_whole_volume_expression(nz, n, inplace):
     V0 = torch.rand(1, nz, n, n) * 3.0
 
     torch.manual_seed(7)
-    want = _blend_reference(V0.clone(), maker)
+    want = _blend_reference(V0.clone(), maker, 2.0)
 
     torch.manual_seed(7)
     V = V0.clone()
     got = blend_ice_into_volume(V, maker, 2.0, inplace=inplace)
 
-    assert torch.equal(got, want)
+    # Not bit-exact: a separable conv over a slab-plus-halo and over the
+    # whole volume are the same function but not the same kernel launch.
+    torch.testing.assert_close(got, want, rtol=1e-6, atol=1e-6)
     if inplace:
         assert got.data_ptr() == V.data_ptr(), "inplace must write through to V"
     else:

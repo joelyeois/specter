@@ -277,7 +277,7 @@ def test_all_zero_volume_is_filled_with_ice():
     so a volume of zeros put the threshold at zero, nothing compared below
     it, and no ice was added anywhere -- an artifact of the rule being
     relative to the volume's own contents. Tests carried a marker voxel
-    solely to work around it. `ice_occupancy_weight` is absolute, so empty
+    solely to work around it. The occupancy estimator is absolute, so empty
     space now takes ice at full weight."""
     torch.manual_seed(0)
     V = torch.zeros(1, 24, 32, 32)

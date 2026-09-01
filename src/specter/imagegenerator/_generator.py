@@ -541,6 +541,7 @@ class ImageGenerator(ParticleGeneratorBase):
         rotate_mode: Literal["real", "fourier"] = "real",
         aberration_backend: Literal["legacy", "torch_ctf"] = "legacy",
         lpp_params: dict[str, float] | None = None,
+        occupancy: torch.Tensor | None = None,
     ):
         nxy = scattering_potential.shape[-1]
         self.pad_fft = pad_fft
@@ -594,6 +595,15 @@ class ImageGenerator(ParticleGeneratorBase):
         self.register_buffer("V", scattering_potential)
         self.register_buffer("quaternions", quaternions)
         self.register_buffer("translations", translations)
+        if occupancy is not None and occupancy.shape != scattering_potential.shape:
+            raise ValueError(
+                f"occupancy shape {tuple(occupancy.shape)} must match "
+                f"scattering_potential's {tuple(scattering_potential.shape)}"
+            )
+        # A buffer, so it follows the volume across devices and through a
+        # checkpoint. Rotated by the same affine as V in `rotate` -- the two
+        # describe the same specimen and must not drift apart.
+        self.register_buffer("occupancy", occupancy)
         if self.verbose:
             logger.info("Initializing ImageGenerator modules")
 
@@ -649,6 +659,16 @@ class ImageGenerator(ParticleGeneratorBase):
         nz, ny, nx = self.V.shape
         self.rotator = VolumeRotator(nz, ny, nx, origin="relion", mode=rotate_mode)
 
+    def _affine(self, Q: torch.Tensor, T: torch.Tensor) -> torch.Tensor:
+        """Affine matrix for a batch of quaternions and translations."""
+        if len(Q.shape) < 2:
+            Q = Q.unsqueeze(0)
+        if len(T.shape) < 2:
+            T = T.unsqueeze(0)
+        R = roma.unitquat_to_rotmat(Q)
+        T = rotations.translations_angstrom_to_torch(T, self.nxy, self.pixel_size)
+        return rotations.build_affine_matrix(R, T)
+
     def rotate(self, Q: torch.Tensor, T: torch.Tensor) -> torch.Tensor:
         """
         Rotate volume using affine transformation.
@@ -665,15 +685,33 @@ class ImageGenerator(ParticleGeneratorBase):
         V : torch.Tensor
             Rotated volume.
         """
-        if len(Q.shape) < 2:
-            Q = Q.unsqueeze(0)
-        if len(T.shape) < 2:
-            T = T.unsqueeze(0)
-        R = roma.unitquat_to_rotmat(Q)
-        T = rotations.translations_angstrom_to_torch(T, self.nxy, self.pixel_size)
-        theta = rotations.build_affine_matrix(R, T)
-        V = self.rotator(self.V, theta)
-        return V
+        return self.rotator(self.V, self._affine(Q, T))
+
+    def rotate_occupancy(self, Q: torch.Tensor, T: torch.Tensor) -> torch.Tensor | None:
+        """
+        Rotate the occupancy field by the same affine as :meth:`rotate`.
+
+        Occupancy describes the same specimen as ``V``, so it has to follow
+        the identical transform. Interpolating it can push a value a hair
+        outside [0, 1], which is clamped back: a fraction of a voxel is not
+        a quantity that can exceed one.
+
+        Parameters
+        ----------
+        Q : torch.Tensor
+            Rotation quaternions.
+        T : torch.Tensor
+            Translations.
+
+        Returns
+        -------
+        torch.Tensor or None
+            Rotated occupancy, or None when the generator was built without
+            one.
+        """
+        if self.occupancy is None:
+            return None
+        return self.rotator(self.occupancy, self._affine(Q, T)).clamp_(0.0, 1.0)
 
     def forward(self, idx: int | torch.Tensor) -> torch.Tensor:
         """
@@ -714,4 +752,17 @@ class ImageGenerator(ParticleGeneratorBase):
             self.pad_fft,
             xy_pad_mode="constant",
         )
-        return self.process_volume(V, idx)
+        # Padded identically, and "constant" is right for both: beyond the
+        # particle box there is no protein, so nothing occupies those voxels
+        # and ice takes them at full strength.
+        occupancy = self.rotate_occupancy(self.quaternions[idx], self.translations[idx])
+        if occupancy is not None:
+            occupancy = pad_volume(
+                occupancy,
+                self.nxy,
+                self.nz,
+                self.ice_thickness,
+                self.pad_fft,
+                xy_pad_mode="constant",
+            )
+        return self.process_volume(V, idx, occupancy=occupancy)

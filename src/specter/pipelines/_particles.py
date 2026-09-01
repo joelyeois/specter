@@ -32,7 +32,7 @@ from specter.memory import (
     recommend_batchsize,
 )
 from specter.pdb import PDB
-from specter.potential import PotentialBuilder
+from specter.potential import PotentialBuilder, atomic_occupancy
 from specter.progress import track
 
 from ._common import (
@@ -174,8 +174,31 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
         ).to("cpu")
         with torch.no_grad():
             V = pb(pdb.coordinates, method=config.potential_method).clone()
+            # Built from the same coordinates on the same grid, so it lines up
+            # with V voxel for voxel. This is what decides where ice may go;
+            # see specter.potential._occupancy for why the potential cannot.
+            #
+            # Rasterized on the compute device and moved back beside V. It ends
+            # on CPU because it is a registered buffer like V, and so has to be
+            # there for the same rank-0 broadcast; but the rasterization itself
+            # is ~30x faster on a GPU (2.54 s -> 0.08 s for a 151k-atom
+            # structure at 512^3), and the field is one volume, so the round
+            # trip costs a single copy.
+            occupancy_device = (
+                f"cuda:{device_target[0]}"
+                if mode == "multi" and isinstance(device_target, list)
+                else str(device_target)
+            )
+            occupancy = atomic_occupancy(
+                pdb.coordinates,
+                pdb.atomic_numbers,
+                config.n_pixels,
+                pixel_size,
+                device=occupancy_device,
+            ).to("cpu")
     else:
         V = torch.zeros(config.n_pixels, config.n_pixels, config.n_pixels)
+        occupancy = torch.zeros_like(V)
 
     # --- Sampling poses, defocus, and translations ---
     if is_main:
@@ -330,6 +353,7 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
         crowd_n_points=config.crowd_n_points,
         crowd_seed=config.crowd_seed,
         crowd_move_to_cpu=config.crowd_move_to_cpu,
+        occupancy=occupancy,
         water_air_interface=config.water_air_interface,
         pad_fft=config.pad_fft,
         rotate_mode=config.rotate_mode,

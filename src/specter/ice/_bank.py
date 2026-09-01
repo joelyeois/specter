@@ -25,7 +25,13 @@ from ..arrays import (
 from ..ice_data import ICE_CACHE_DIRNAME, bundled_ice_data
 from ..progress import track
 from ._energy import MLBOP
-from ..potential import potential_from_deltas
+from ..potential import (
+    FULL_OCCUPANCY_POTENTIAL_V,
+    WATER_COARSE_GRAIN_SIGMA_A,
+    occupancy_blur_halo_voxels,
+    potential_from_deltas,
+    potential_occupancy,
+)
 from ._kernels import build_water_kernel
 from ._random import RandomIcemaker
 
@@ -1417,99 +1423,6 @@ def resolve_icemaker(
     )
 
 
-#: Scattering potential of a voxel entirely filled with biological
-#: material, V. Protein's mean inner potential. The reference for how much
-#: of a voxel is already occupied, so it has to be an ABSOLUTE quantity:
-#: the whole point is that it does not depend on what else is in the
-#: volume.
-#:
-#: Measured as integral(V dV) / (molecular volume) over four structures
-#: spanning 19 kDa to 3 MDa -- 6.81 V for 1A6M, 7.00 for 1FA2, 7.07 for
-#: 7VD8, 6.84 for 6QZP -- so 7.0 is protein generally, not one structure.
-#:
-#: Its weakest input is the molecular volume, taken as mass x 1.2122 A^3/Da
-#: from the standard protein partial specific volume vbar = 0.73 cm3/g
-#: (density 1.37 g/cm3). The constant scales inversely with that: vbar 0.70
-#: gives 7.30 V, 0.76 gives 6.73. Two caveats on it, neither resolved:
-#:
-#:   - vbar is THERMODYNAMIC, the volume a solution gains per gram of
-#:     protein, which folds in effects on surrounding water. What this
-#:     model wants is geometric -- space unavailable to water. They are
-#:     close but not the same quantity, and it is not obvious which way a
-#:     better answer moves: van der Waals volume alone is smaller, since
-#:     proteins pack to roughly 75%, and would raise the constant.
-#:   - There is no external anchor. The ice side has one (CLAUDE.md cites
-#:     Yesibolati et al. 2020 for liquid water at 4.48 +/- 0.19 V); the
-#:     protein side does not. Published holography values sit around 7-8 V,
-#:     which is why 7.0 is comfortable, but that range is not cited here
-#:     from a checked source. Closing that gap would firm this up.
-#:
-#: The error it can cause is bounded and small: the constant only infers a
-#: volume FRACTION, so 4% off means a voxel read as 50% full is really 48%.
-#: Against the rule this replaced, where one gold bead moved 13.87% of all
-#: voxels between full ice and none, that is a good trade.
-FULL_OCCUPANCY_POTENTIAL_V = 7.0
-
-
-def ice_occupancy_weight(
-    V: torch.Tensor, full_potential: float = FULL_OCCUPANCY_POTENTIAL_V
-) -> torch.Tensor:
-    """
-    Per-voxel fraction of volume still available to water.
-
-    Water cannot occupy space already filled by something else, so a
-    voxel receives ice in proportion to how much of it is empty. Reading
-    that fraction off the potential itself needs a reference for "full",
-    which is `full_potential`.
-
-    This replaced a rule that gated on ``V < 0.05 * V.max()`` on
-    2026-08-31. That threshold was RELATIVE to the volume's own contents,
-    so a component with nothing to do with the solvent moved it: measured
-    on a 1000x4000x4000 A specimen, adding a population of gold fiducials
-    took ``V.max()`` from 17.85 to 35.18 V, and with it the fraction of
-    occupied voxels receiving ice on top of themselves from 12.9% to
-    28.8%. Two contrast regimes from one config, decided by whether a
-    bead happened to be present. It was also binary, so a voxel just
-    under the cut took ice at full strength and its neighbour just over
-    took none.
-
-    Weighting against an absolute reference fixes both. Gold and carbon
-    sit far above `full_potential`, clamp to zero weight and exclude
-    water completely, which is correct and now automatic rather than a
-    consequence of where they put the maximum. A partial-volume voxel at
-    a protein's edge gets partial ice, which is what physically belongs
-    there.
-
-    Parameters
-    ----------
-    V : torch.Tensor
-        Scattering-potential volume, in volts.
-    full_potential : float, optional
-        Potential of a fully-occupied voxel, V. Default
-        :data:`FULL_OCCUPANCY_POTENTIAL_V`.
-
-    Returns
-    -------
-    torch.Tensor
-        Weights in [0, 1], same shape as `V`. 1 where the voxel is empty,
-        0 where it is full.
-
-    Notes
-    -----
-    One reference is used for every material, because the blend sees a
-    single summed volume and cannot tell which material a voxel holds.
-    Protein is the right choice since it dominates a cellular specimen by
-    volume. Material less dense than protein is therefore under-excluded:
-    a bilayer's acyl core at 5.4 V retains about 23% of its water. That
-    is a bounded error in one direction, unlike a threshold that moved
-    with the contents of the volume.
-    """
-    if full_potential <= 0:
-        raise ValueError(f"full_potential must be positive, got {full_potential}")
-    weight = V.detach() / full_potential
-    return (1.0 - weight).clamp_(0.0, 1.0)
-
-
 def blend_ice_into_volume(
     V: torch.Tensor,
     icemaker: "IceBank | RandomIcemaker",
@@ -1518,6 +1431,8 @@ def blend_ice_into_volume(
     relax_steps: int = 0,
     profile: "IceProfile | None" = None,
     inplace: bool = False,
+    occupancy: torch.Tensor | None = None,
+    sigma_a: float = WATER_COARSE_GRAIN_SIGMA_A,
 ) -> torch.Tensor:
     """
     Add ice into a scattering-potential volume, weighted by how much room
@@ -1525,7 +1440,7 @@ def blend_ice_into_volume(
 
     Same rule used across specter's ice integration points: a voxel takes
     ice in proportion to the fraction of it not already occupied, per
-    :func:`ice_occupancy_weight`.
+    :func:`~specter.potential.potential_occupancy`.
 
     Parameters
     ----------
@@ -1541,8 +1456,8 @@ def blend_ice_into_volume(
         Voxel size in Å, forwarded to ``IceBank.generate_big_ice``.
     full_potential : float, optional
         Potential of a fully-occupied voxel, V, forwarded to
-        :func:`ice_occupancy_weight`. Default
-        :data:`FULL_OCCUPANCY_POTENTIAL_V`.
+        :func:`~specter.potential.potential_occupancy`. Default
+        :data:`~specter.potential.FULL_OCCUPANCY_POTENTIAL_V`.
     relax_steps : int, optional
         Forwarded to :meth:`IceBank.generate_big_ice` (ignored for
         ``RandomIcemaker``, which has no tile seams to relax). Default 0,
@@ -1561,6 +1476,22 @@ def blend_ice_into_volume(
         the caller no pre-ice volume, so only pass this when nothing else holds
         a reference to ``V`` (``MicrographSpecimenGenerator`` keeps one for
         ``save_clean_exitwaves``). Default False.
+    occupancy : torch.Tensor, optional
+        Fraction of each voxel the specimen already fills, in [0, 1],
+        broadcastable to ``V``'s shape -- typically from
+        :func:`~specter.potential.atomic_occupancy`. When given, the ice
+        weight is ``1 - occupancy`` and the potential is not consulted at
+        all, which is the accurate route: occupancy is geometry, so it is
+        immune to ``potential_scale``, the parameterization and any
+        B-factor, none of which change how much room a molecule takes up.
+        Default None, which falls back to inferring the weight from ``V``
+        via :func:`~specter.potential.potential_occupancy`, and prefer
+        passing this wherever the caller knows the specimen's geometry.
+    sigma_a : float, optional
+        Coarse-graining length in Angstrom for that fallback, forwarded to
+        :func:`~specter.potential.potential_occupancy`. Ignored when
+        ``occupancy`` is given. Default
+        :data:`~specter.potential.WATER_COARSE_GRAIN_SIGMA_A`.
 
     Returns
     -------
@@ -1598,7 +1529,7 @@ def blend_ice_into_volume(
                 nz, nxy, pixel_size, z_slice=sl, device=ice.device
             )[None]
     # Blended a z-slab at a time, in place into `ice`, then accumulated into
-    # `V`. The obvious spelling, `V + ice * ice_occupancy_weight(V)`, holds
+    # `V`. The obvious spelling, `V + ice * (1 - potential_occupancy(V))`, holds
     # FIVE tensors the size of the whole canvas at once -- V, ice, the
     # weight, the product, and the sum -- which at
     # micrograph_size is 5 x 33.6 GB and is most of why a 4096-pixel micrograph
@@ -1610,11 +1541,37 @@ def blend_ice_into_volume(
     # front, which made the whole volume's contents an input to every
     # voxel's ice; the occupancy weight is per-voxel and absolute, so a
     # slab needs nothing but itself.
+    if occupancy is not None:
+        occupancy = occupancy.to(device=V.device, dtype=V.dtype)
+        if occupancy.ndim == 3:
+            occupancy = occupancy.unsqueeze(0)
+        if occupancy.shape[-3:] != V.shape[-3:]:
+            raise ValueError(
+                f"occupancy spatial shape {tuple(occupancy.shape[-3:])} does not "
+                f"match V's {tuple(V.shape[-3:])}"
+            )
+
     out = V if inplace else V.clone()
     chunk = max(1, 2**24 // (nxy * nxy))
+    # The blur reads past its slab, so each one is widened and the margin
+    # discarded. Without the halo every chunk boundary would be an edge the
+    # blur sees, and the seam would print into the ice.
+    halo = occupancy_blur_halo_voxels(pixel_size, sigma_a)
     for start in range(0, nz, chunk):
-        sl = slice(start, min(start + chunk, nz))
+        end = min(start + chunk, nz)
+        sl = slice(start, end)
         ice_slab = ice[:, sl]
-        ice_slab.mul_(ice_occupancy_weight(out[:, sl], full_potential))
+        if occupancy is None:
+            lo, hi = max(0, start - halo), min(nz, end + halo)
+            occ_slab = potential_occupancy(
+                out[:, lo:hi],
+                pixel_size,
+                sigma_a=sigma_a,
+                full_potential=full_potential,
+            )[:, start - lo : start - lo + (end - start)]
+            weight = (1.0 - occ_slab).clamp_(0.0, 1.0)
+        else:
+            weight = (1.0 - occupancy[:, sl]).clamp_(0.0, 1.0)
+        ice_slab.mul_(weight)
         out[:, sl].add_(ice_slab)
     return out

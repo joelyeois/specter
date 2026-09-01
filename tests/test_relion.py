@@ -4,6 +4,7 @@ import pandas as pd
 import pytest
 import roma
 import starfile
+import numpy as np
 import torch
 
 from specter.imagegenerator import ImageGenerator
@@ -279,3 +280,112 @@ def test_extract_parameters_from_starfile_two_block_optics(tmp_path) -> None:
     assert ctf_params["cs"][0].item() == pytest.approx(2.7 * 1e7)
     assert torch.equal(indices, torch.arange(n))
     assert halfset_labels is None
+
+
+#: The shapes a per-file scalar arrives in. `extract_parameters_from_csfile`
+#: returns 0-dim TENSORS, which is what made the repr bug easy to hit, but a
+#: caller reading its own metadata just as reasonably has a python int, a
+#: numpy scalar, or a length-1 array.
+_WRAPS = {
+    "float": lambda v: v,
+    "int": lambda v: int(v) if float(v).is_integer() else v,
+    "np_0d": lambda v: np.array(v),
+    "np_scalar": lambda v: np.float64(v),
+    "np_len1": lambda v: np.array([v]),
+    "torch_0d": lambda v: torch.tensor(v),
+    "torch_int": lambda v: torch.tensor(int(v))
+    if float(v).is_integer()
+    else torch.tensor(v),
+}
+
+
+class TestScalarsAreWrittenAsNumbers:
+    """
+    A 0-dim tensor must not reach the file as its repr.
+
+    `extract_parameters_from_csfile` returns voltage, pixel size and alpha as
+    0-dim tensors, so passing them straight back into a writer is the natural
+    thing to do. Written through unconverted they reach `starfile` as objects
+    and land as ``tensor(300.)`` instead of ``300.000000`` -- an unreadable
+    file, in the three columns that drive the CTF, from code that raised
+    nothing.
+    """
+
+    @staticmethod
+    def _ctf(n):
+        return {
+            k: torch.full((n,), v)
+            for k, v in dict(
+                dfu=12000.0,
+                dfv=11500.0,
+                dfang=30.0,
+                cs=2.7e7,
+                phaseshift=0.0,
+                tiltx=0.0,
+                tilty=0.0,
+                trefoil1=0.0,
+                trefoil2=0.0,
+                tetrafoil1=0.0,
+                tetrafoil2=0.0,
+                tetrafoil3=0.0,
+                tetrafoil4=0.0,
+            ).items()
+        }
+
+    @pytest.mark.parametrize("wrap_name", list(_WRAPS))
+    def test_particle_starfile_scalar_columns_are_numeric(self, tmp_path, wrap_name):
+        import starfile
+
+        from specter.io import create_particle_starfile
+
+        n = 3
+        wrap = _WRAPS[wrap_name]
+        create_particle_starfile(
+            torch.randn(n, 16, 16),
+            rotations=torch.tensor([[1.0, 0.0, 0.0, 0.0]]).repeat(n, 1),
+            translations=torch.zeros(n, 2),
+            ctf_params=self._ctf(n),
+            dx=wrap(1.06),
+            voltage=wrap(300.0),
+            alpha=wrap(0.1),
+            filename="p",
+            output_dir=str(tmp_path),
+        )
+        df = starfile.read(str(tmp_path / "p.star"))
+        df = df["particles"] if isinstance(df, dict) else df
+        for col, want in (
+            ("rlnVoltage", 300.0),
+            ("rlnImagePixelSize", 1.06),
+            ("rlnAmplitudeContrast", 0.1),
+            ("rlnSphericalAberration", 2.7),
+        ):
+            assert len(df[col]) == n
+            assert df[col].dtype.kind == "f", f"{col} is {df[col].dtype}, not numeric"
+            assert float(df[col].iloc[0]) == pytest.approx(want, rel=1e-5)
+
+    @pytest.mark.parametrize("wrap_name", list(_WRAPS))
+    def test_micrograph_starfile_scalar_columns_are_numeric(self, tmp_path, wrap_name):
+        import starfile
+
+        from specter.io import create_micrograph_starfile
+
+        n = 2
+        wrap = _WRAPS[wrap_name]
+        create_micrograph_starfile(
+            n,
+            voltage=wrap(300.0),
+            pixel_size=wrap(1.06),
+            alpha=wrap(0.1),
+            ctf_params=self._ctf(n),
+            filename="m",
+            output_dir=str(tmp_path),
+        )
+        df = starfile.read(str(tmp_path / "m.star"))
+        df = df["micrographs"] if isinstance(df, dict) else df
+        for col, want in (
+            ("rlnVoltage", 300.0),
+            ("rlnImagePixelSize", 1.06),
+            ("rlnAmplitudeContrast", 0.1),
+        ):
+            assert df[col].dtype.kind == "f", f"{col} is {df[col].dtype}, not numeric"
+            assert float(df[col].iloc[0]) == pytest.approx(want, rel=1e-5)

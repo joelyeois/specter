@@ -288,6 +288,42 @@ def extract_parameters_from_starfile(
     )
 
 
+def _scalar_col(
+    value: "torch.Tensor | np.ndarray | float | int | None", n: int
+) -> torch.Tensor | None:
+    """
+    Broadcast a per-file constant to one float column of length `n`.
+
+    Every scalar a caller hands a STAR writer goes through here, for two
+    reasons that only show up in the written file.
+
+    A 0-dim tensor written through unconverted reaches `starfile` as an
+    object and lands as its repr -- ``tensor(300.)`` instead of
+    ``300.000000`` -- giving a file RELION and CryoSPARC cannot read, in the
+    columns that drive the CTF. That is exactly what
+    :func:`extract_parameters_from_csfile` returns for voltage, pixel size
+    and alpha, so feeding its output straight back into a writer was the
+    easy way to hit it.
+
+    And the column's dtype should not depend on the incidental type of the
+    argument: ``voltage=300`` would otherwise write an integer column and
+    ``voltage=300.0`` a float one. float32 is enough for what is written --
+    `starfile` emits six decimals, which round-trips a pixel size like
+    1.0621 exactly.
+
+    A value already of length `n` passes through; any other length raises,
+    which is the intended behaviour for something documented as a constant.
+
+    ``None`` is returned unchanged rather than raising, since these arguments
+    are optional and a caller may legitimately have nothing to record. It
+    still writes an empty column, which this function deliberately does not
+    change.
+    """
+    if value is None:
+        return None
+    return torch.as_tensor(value, dtype=torch.float32).expand(n)
+
+
 def create_particle_starfile(
     particles: torch.Tensor,
     rotations: torch.Tensor | np.ndarray | None = None,
@@ -399,11 +435,22 @@ def create_particle_starfile(
         dfang = ctf_params[:, 3]
         pshift = ctf_params[:, 5]
 
+    # Broadcast to length n rather than written through as-is. A 0-dim tensor
+    # reaches `starfile` as an object and is written as its repr --
+    # `tensor(300.)` in place of `300.000000` -- producing a file RELION and
+    # CryoSPARC cannot read, in the three columns that drive the CTF. That is
+    # exactly what `extract_parameters_from_csfile` hands back for voltage,
+    # pixel size and alpha, so the round trip through this function was the
+    # easy way to hit it.
     d = {
-        "rlnVoltage": voltage,
-        "rlnSphericalAberration": cs_A / 1e7,
-        "rlnAmplitudeContrast": alpha,
-        "rlnImagePixelSize": dx,
+        "rlnVoltage": _scalar_col(voltage, n),
+        # Å -> mm before broadcasting, not after, so this goes through the
+        # same helper as every other scalar column rather than being the one
+        # exception to it. `cs_A` always comes from `ctf_params` and is a
+        # tensor, so the division is safe ahead of the None check.
+        "rlnSphericalAberration": _scalar_col(cs_A / 1e7, n),
+        "rlnAmplitudeContrast": _scalar_col(alpha, n),
+        "rlnImagePixelSize": _scalar_col(dx, n),
         "rlnImageName": [str(i) + "@" + filename + ".mrcs" for i in range(1, n + 1)],
         "rlnDefocusU": dfu,
         "rlnDefocusV": dfv,
@@ -418,13 +465,13 @@ def create_particle_starfile(
         d["rlnAnglePsi"] = euler[:, 2]
 
     if dose_per_angstrom is not None:
-        d["specterDosePerAngstrom"] = torch.as_tensor(dose_per_angstrom).expand(n)
+        d["specterDosePerAngstrom"] = _scalar_col(dose_per_angstrom, n)
     if coincidence_radius is not None:
-        d["specterCoincidenceRadius"] = torch.as_tensor(coincidence_radius).expand(n)
+        d["specterCoincidenceRadius"] = _scalar_col(coincidence_radius, n)
     if potential_scale is not None:
-        d["specterPotentialScale"] = torch.as_tensor(potential_scale).expand(n)
+        d["specterPotentialScale"] = _scalar_col(potential_scale, n)
     if bfactor is not None:
-        d["specterBfactor"] = torch.as_tensor(bfactor).expand(n)
+        d["specterBfactor"] = _scalar_col(bfactor, n)
 
     particles_df = pd.DataFrame(data=d)
 
@@ -542,23 +589,29 @@ def create_micrograph_starfile(
 
     d = {
         "rlnMicrographName": [str(i + 1) + "@" + filename + ".mrcs" for i in range(n)],
-        "rlnVoltage": voltage,
-        "rlnSphericalAberration": torch.as_tensor(cs_A) / 1e7,
-        "rlnAmplitudeContrast": alpha,
-        "rlnImagePixelSize": pixel_size,
+        # Broadcast, not written through -- see create_particle_starfile for
+        # what a 0-dim tensor does to these columns.
+        "rlnVoltage": _scalar_col(voltage, n),
+        # Å -> mm before broadcasting, not after, so this goes through the
+        # same helper as every other scalar column rather than being the one
+        # exception to it. `cs_A` always comes from `ctf_params` and is a
+        # tensor, so the division is safe ahead of the None check.
+        "rlnSphericalAberration": _scalar_col(cs_A / 1e7, n),
+        "rlnAmplitudeContrast": _scalar_col(alpha, n),
+        "rlnImagePixelSize": _scalar_col(pixel_size, n),
         "rlnDefocusU": dfu,
         "rlnDefocusV": dfv,
         "rlnDefocusAngle": dfang,
     }
 
     if dose_per_angstrom is not None:
-        d["specterDosePerAngstrom"] = torch.as_tensor(dose_per_angstrom).expand(n)
+        d["specterDosePerAngstrom"] = _scalar_col(dose_per_angstrom, n)
     if coincidence_radius is not None:
-        d["specterCoincidenceRadius"] = torch.as_tensor(coincidence_radius).expand(n)
+        d["specterCoincidenceRadius"] = _scalar_col(coincidence_radius, n)
     if potential_scale is not None:
-        d["specterPotentialScale"] = torch.as_tensor(potential_scale).expand(n)
+        d["specterPotentialScale"] = _scalar_col(potential_scale, n)
     if bfactor is not None:
-        d["specterBfactor"] = torch.as_tensor(bfactor).expand(n)
+        d["specterBfactor"] = _scalar_col(bfactor, n)
     if tilt_angles is not None:
         d["specterTiltAngle"] = torch.as_tensor(tilt_angles)
 

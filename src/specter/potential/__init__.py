@@ -16,12 +16,8 @@ from ._builders import (
 )
 from ._gemmi_builder import GemmiPotentialBuilder
 from ._occupancy import (
-    DEFAULT_VDW_RADIUS_A,
     FULL_OCCUPANCY_POTENTIAL_V,
-    SOLVENT_EXCLUDED_RADIUS_SCALE,
-    VDW_RADII_A,
     WATER_COARSE_GRAIN_SIGMA_A,
-    atomic_occupancy,
     occupancy_blur_halo_voxels,
     potential_occupancy,
 )
@@ -29,14 +25,10 @@ from ._potential_builder import PotentialBuilder
 
 __all__ = [
     "apply_amplitude_contrast",
-    "DEFAULT_VDW_RADIUS_A",
     "FULL_OCCUPANCY_POTENTIAL_V",
     "GemmiPotentialBuilder",
     "PotentialBuilder",
-    "SOLVENT_EXCLUDED_RADIUS_SCALE",
-    "VDW_RADII_A",
     "WATER_COARSE_GRAIN_SIGMA_A",
-    "atomic_occupancy",
     "occupancy_blur_halo_voxels",
     "potential_occupancy",
     "build_atomic_potential_kernel",

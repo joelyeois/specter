@@ -6,7 +6,11 @@ import torch.nn.functional as F
 from specter import logger
 
 from ..ice import IceBank
-from ..potential import potential_occupancy
+from ..potential import (
+    FULL_OCCUPANCY_POTENTIAL_V,
+    occupancy_blur_halo_voxels,
+    potential_occupancy,
+)
 from ._base import BaseImager
 
 __all__ = ["ParticleGeneratorBase"]
@@ -29,7 +33,7 @@ class ParticleGeneratorBase(BaseImager):
     translations: torch.Tensor
 
     def solvate(
-        self, V: torch.Tensor, occupancy: torch.Tensor | None = None
+        self, V: torch.Tensor, potential_scale: torch.Tensor | float = 1.0
     ) -> torch.Tensor:
         """
         Embed the volume in amorphous ice.
@@ -41,16 +45,34 @@ class ParticleGeneratorBase(BaseImager):
         Parameters
         ----------
         V : torch.Tensor
-            Volume potential of shape (B, Z, Y, X).
-        occupancy : torch.Tensor, optional
-            Fraction of each voxel the specimen already fills, same shape as
-            ``V``. When given, the ice weight is ``1 - occupancy``; otherwise
-            it is inferred from ``V`` itself. Default None.
+            Volume potential of shape (B, Z, Y, X), already multiplied by
+            `potential_scale`.
+        potential_scale : torch.Tensor or float, optional
+            The scale ``V`` has already been multiplied by, broadcastable to
+            ``(B, 1, 1, 1)``. Divided back out when reading occupancy, so a
+            contrast knob cannot change how much water the specimen
+            displaces. Default 1.0.
 
         Returns
         -------
         V : torch.Tensor
-            Volume with ice blended in via icemask.
+            ``V`` with ice blended in, modified in place.
+
+        Notes
+        -----
+        Blended a z-slab at a time, for the same reason
+        :func:`~specter.ice.blend_ice_into_volume` is. The whole-volume
+        spelling holds V, the ice, the occupancy, the weight and two
+        clamp/subtract temporaries at once -- six canvases, which at
+        ``nxy=512`` with ``pad_fft`` is 12 GB and is what made this OOM.
+        Slabbing bounds everything but V and the ice to one slab each.
+
+        Occupancy is read from the SCALED volume with the scale divided
+        back out, rather than being computed before the scale and carried
+        down. Both give the identical field -- the blur is linear, so
+        ``blur(s * V) / s == blur(V)`` -- but carrying it costs a whole
+        extra canvas, and the point is only ever to keep `potential_scale`
+        out of the water budget.
         """
         if isinstance(self.icemaker, IceBank):
             ice = self.icemaker.generate_big_ice(
@@ -70,26 +92,47 @@ class ParticleGeneratorBase(BaseImager):
                 mode="reflect",
             )
 
-        # Per-voxel fraction of space still free for water, not a binary
-        # eligibility mask. `process_volume` normally hands the field down
-        # already built; this fallback covers a direct caller of `solvate`.
-        # It reads V, which has been scaled by `potential_scale` by then --
-        # which is exactly why `process_volume` builds its own beforehand
-        # rather than leaving it to here.
-        if occupancy is None:
-            occupancy = potential_occupancy(V, self.pixel_size)
-        weight = (1.0 - occupancy).clamp(0.0, 1.0)
-        ice.mul_(weight)
-        V = V.add_(ice)
-        if hasattr(self, "icemask"):
-            self.icemask = weight.detach().cpu()
+        scale = torch.as_tensor(
+            potential_scale, dtype=V.dtype, device=V.device
+        ).reshape(-1, 1, 1, 1)
+        # A voxel reading `full` volts of specimen is full; having divided
+        # the scale out, that reference moves with it.
+        full = FULL_OCCUPANCY_POTENTIAL_V * scale
+
+        nz = V.shape[1]
+        nxy = V.shape[-1]
+        chunk = max(1, 2**24 // (nxy * nxy))
+        # The blur reads past its slab -- see blend_ice_into_volume.
+        halo = occupancy_blur_halo_voxels(self.pixel_size)
+        for start in range(0, nz, chunk):
+            end = min(start + chunk, nz)
+            lo, hi = max(0, start - halo), min(nz, end + halo)
+            # The halo overlaps the PREVIOUS slab, which has already had its
+            # ice added. Reading that directly would see inflated potential,
+            # infer a fuller voxel, and starve every chunk boundary of ice.
+            # `ice` holds exactly what was added, so subtracting it back
+            # recovers the pristine potential for one slab-sized copy.
+            src = V[:, lo:hi].clone()
+            if lo < start:
+                src[:, : start - lo] -= ice[:, lo:start]
+            # `full` carries the per-image scale, and it has to be divided in
+            # HERE rather than after: potential_occupancy clamps to [0, 1]
+            # against whatever reference it is given, so dividing afterwards
+            # would clamp against the wrong one.
+            occ = potential_occupancy(src, self.pixel_size, full_potential=full)[
+                :, start - lo : start - lo + (end - start)
+            ]
+            del src
+            # In place, and reusing `occ`: `(1 - occ).clamp(0, 1)` would
+            # allocate two more slabs to produce a value consumed once.
+            ice[:, start:end].mul_(occ.neg_().add_(1.0))
+            V[:, start:end].add_(ice[:, start:end])
         return V
 
     def process_volume(
         self,
         V: torch.Tensor,
         idx: torch.Tensor | int,
-        occupancy: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """
         Run the particle imaging pipeline on a prepared volume.
@@ -100,10 +143,6 @@ class ParticleGeneratorBase(BaseImager):
             Rotated and padded volume of shape (B, Z, Y, X).
         idx : torch.Tensor or int
             Batch indices used to select per-image parameters.
-        occupancy : torch.Tensor, optional
-            Fraction of each voxel the specimen already fills, same shape and
-            pose as ``V``, forwarded to :meth:`solvate`. Default None, which
-            infers the ice weight from the potential instead.
 
         Returns
         -------
@@ -120,30 +159,12 @@ class ParticleGeneratorBase(BaseImager):
                         self.volumes = volumes.detach().cpu()
                     V[i] += volumes
 
-        # Built here, BEFORE the scale, and from the volume as it now stands
-        # -- crowding duplicates included. Two reasons it cannot wait until
-        # `solvate`:
-        #
-        #   - `potential_scale` is an optical knob. Reading occupancy off a
-        #     scaled V would let it silently change how much water the
-        #     specimen displaces, which is not something a contrast factor
-        #     gets to do.
-        #   - a caller-supplied `occupancy` describes the TARGET particle
-        #     only. Crowding duplicates are summed in above and are invisible
-        #     to it, so without this they would take ice at full strength
-        #     straight through their middles. Combining by maximum keeps the
-        #     sharp geometric field wherever it exists and covers the rest.
-        if getattr(self, "icemaker", None) is not None:
-            with torch.no_grad():
-                inferred = potential_occupancy(V, self.pixel_size)
-                occupancy = (
-                    inferred
-                    if occupancy is None
-                    else torch.maximum(occupancy, inferred)
-                )
-
         scale = self.potential_scale[idx].reshape(-1, 1, 1, 1)
-        V = V * scale
+        # Skipped when every scale is 1 (the default): `V * scale` is a
+        # second whole canvas, and the caller's own reference keeps the
+        # first one alive alongside it. Same guard MicrographGenerator uses.
+        if not bool(torch.all(scale == 1.0)):
+            V = V * scale
 
         if getattr(self, "save_clean_exitwaves", False):
             self.clean_exitwaves = self.scattering(V)
@@ -152,7 +173,7 @@ class ParticleGeneratorBase(BaseImager):
             if self.verbose:
                 logger.info(f"Adding ice to volume using {self.ice_model} model")
             with torch.no_grad():
-                V = self.solvate(V, occupancy=occupancy)
+                V = self.solvate(V, potential_scale=scale)
 
         if self.verbose:
             logger.info(f"Applying scattering using {self.scattering_model} model")

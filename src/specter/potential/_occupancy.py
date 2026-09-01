@@ -2,13 +2,11 @@
 Occupancy: the fraction of each voxel that a specimen already fills.
 
 Water cannot occupy space something else is in, so blending amorphous ice
-into a specimen needs to know how much of each voxel is still free. That
-is a *geometric* quantity, and this module computes it from atoms.
+into a specimen needs to know how much of each voxel is still free.
 
-It exists because the alternative -- reading occupancy back out of the
-scattering potential, as :func:`potential_occupancy` does -- cannot be
-as sharp, and unblurred it does not work at all at the voxel sizes
-specter runs at. A potential is cusped: it
+It is read off the potential, but only after coarse-graining to the water
+probe's own length scale. Unblurred it does not work at all at the voxel
+sizes specter runs at, because a potential is cusped: it
 peaks at nuclei and dips between them, *including between two bonded atoms
 1.5 A apart*, where no water fits. Clamping ``1 - V/V_full`` therefore
 finds the boundary of every ATOM rather than the boundary of the MOLECULE,
@@ -19,10 +17,19 @@ depends on the render grid, since finer voxels make sharper cusps: the
 excluded volume that rule recovers runs from 0.36 of the molecule's own
 volume at 0.75 A/voxel to 0.87 at 4 A.
 
-Occupancy has neither problem. It does not read the potential, so it is
-also unaffected by anything scaling it -- ``potential_scale``, the
-parameterization, a B-factor -- none of which change how much room a
-molecule takes up.
+A geometric field built from van der Waals radii was tried and removed on
+2026-09-01 (see 8599e49 to recover it). It is sharper -- 0.006 of full ice
+inside a molecule against the blur's 0.211 -- but it changes nothing any
+specter output can see, because a Gaussian blur CONSERVES the integral of
+V and therefore the total displaced water. It only moves where the
+displacement sits, taking too little from the interior and putting the
+same amount into a halo outside. Every shipped artifact either integrates
+along a ray (single-particle images, tilt series -- and the blur is
+isotropic, so the conservation holds at any tilt) or carries no ice at all
+(``specter build tomogram``'s volume and labels). Measured on a ribosome
+column: 2170.8 V*A of ice under the blur, 2171.3 under geometry, 0.02%
+apart. It becomes worth having the moment a ground-truth volume ships WITH
+ice in it, and not before.
 """
 
 from __future__ import annotations
@@ -30,12 +37,8 @@ from __future__ import annotations
 import torch
 
 __all__ = [
-    "VDW_RADII_A",
-    "DEFAULT_VDW_RADIUS_A",
-    "SOLVENT_EXCLUDED_RADIUS_SCALE",
     "FULL_OCCUPANCY_POTENTIAL_V",
     "WATER_COARSE_GRAIN_SIGMA_A",
-    "atomic_occupancy",
     "occupancy_blur_halo_voxels",
     "potential_occupancy",
 ]
@@ -92,231 +95,6 @@ FULL_OCCUPANCY_POTENTIAL_V = 7.0
 #: the cusps, so this is not an extra approximation, it is what gives a
 #: FINE grid the coarse-graining a coarse one gets for free.
 WATER_COARSE_GRAIN_SIGMA_A = 2.0
-
-#: Van der Waals radii in Angstrom, by atomic number (Bondi 1964, with the
-#: later 1.20 A for hydrogen). Only the elements a biomolecular structure
-#: normally carries are listed; anything else falls back to
-#: :data:`DEFAULT_VDW_RADIUS_A`.
-VDW_RADII_A: dict[int, float] = {
-    1: 1.20,  # H
-    6: 1.70,  # C
-    7: 1.55,  # N
-    8: 1.52,  # O
-    9: 1.47,  # F
-    11: 2.27,  # Na
-    12: 1.73,  # Mg
-    15: 1.80,  # P
-    16: 1.80,  # S
-    17: 1.75,  # Cl
-    19: 2.75,  # K
-    20: 2.31,  # Ca
-    25: 2.05,  # Mn
-    26: 2.04,  # Fe
-    27: 2.00,  # Co
-    28: 1.97,  # Ni
-    29: 1.96,  # Cu
-    30: 2.01,  # Zn
-    34: 1.90,  # Se
-    35: 1.85,  # Br
-    53: 1.98,  # I
-}
-
-#: Radius used for an element not in :data:`VDW_RADII_A`. Carbon's, since
-#: an unlisted element in a biomolecular structure is more often a light
-#: heteroatom than a metal.
-DEFAULT_VDW_RADIUS_A = 1.70
-
-#: Multiplier on every van der Waals radius, turning the union of bare vdW
-#: balls into the *solvent-excluded* volume.
-#:
-#: Water is excluded from more than the atoms themselves: it is also kept
-#: out of interstitial crevices too small to hold a molecule. The bare
-#: union recovers only 0.66-0.69 of a protein's solvent-excluded volume,
-#: so radii are inflated to make up the rest.
-#:
-#: The target is ``mass x 1.2122 A^3/Da``, deliberately the same quantity
-#: :data:`~specter.ice.FULL_OCCUPANCY_POTENTIAL_V` is calibrated against,
-#: so the two agree on how much volume a protein occupies and the average
-#: protein-to-ice contrast is unchanged by adopting this field. What
-#: changes is *where* the exclusion sits.
-#:
-#: MEASURED, not derived. The factor cannot be reasoned out from the bare
-#: union's shortfall: a union of overlapping balls does not grow as
-#: ``r**3``, because the shells added by inflation overlap each other, so
-#: the ``(1/0.685)**(1/3) = 1.136`` that argument gives lands at 0.85 of
-#: target rather than 1.0. Measured across three structures spanning 19
-#: kDa to 3 MDa and voxel sizes from 0.75 to 2.0 A, this value gives:
-#:
-#:     1A6M  0.997 - 1.061      1FA2  0.979 - 1.036      7VD8  0.923 - 0.997
-#:
-#: Two residual errors, both roughly +/-7% and neither worth chasing
-#: further. Across structures, larger assemblies read slightly low.
-#: Across voxel size, coarser grids read low because the partial-volume
-#: ramp spans a whole voxel and erodes the concave seams between
-#: overlapping spheres, which inflation creates more of. Both sit inside
-#: the calibration target's own uncertainty: that target rests on the
-#: standard partial specific volume ``vbar = 0.73 cm3/g``, and 0.70 to
-#: 0.76 moves it by about the same +/-8%.
-#:
-#: For scale, the potential-derived rule this replaces recovered 0.36 to
-#: 0.87 of the same quantity over the same voxel sizes -- a 140% spread
-#: against 7%.
-#:
-#: Inflating radii rather than applying a morphological closing is
-#: deliberate. A closing is the more faithful description, filling
-#: crevices without moving the outer surface, but on a voxel grid its
-#: probe quantises to whole voxels: a nominal 1.4 A probe silently became
-#: 1.5 and 2.0 A at those voxel sizes and swung the total by 10%.
-#: Inflation slightly over-extends the outer surface instead, which is the
-#: more defensible error of the two, since a protein surface does carry a
-#: water depletion layer.
-#:
-#: Calibrated on heavy-atom models. A structure with hydrogens re-added
-#: sits marginally higher, since most H fall inside a bonded heavy atom's
-#: sphere but not all of them do.
-SOLVENT_EXCLUDED_RADIUS_SCALE = 1.30
-
-
-def atomic_occupancy(
-    coordinates: torch.Tensor,
-    atomic_numbers: torch.Tensor,
-    n_xyz: int | tuple[int, int, int],
-    dx: float,
-    radius_scale: float = SOLVENT_EXCLUDED_RADIUS_SCALE,
-    device: torch.device | str | None = None,
-    chunk_size: int = 65536,
-) -> torch.Tensor:
-    """
-    Fraction of each voxel filled by the specimen.
-
-    Rasterizes the union of per-atom van der Waals balls, scaled by
-    `radius_scale` to the solvent-excluded volume, with partial-volume
-    coverage across the boundary rather than a binary mask.
-
-    The grid matches :class:`~specter.potential.PotentialBuilder`'s: voxel
-    centres at ``(i - n/2 + 0.5) * dx``, with coordinates centred on the
-    box, so the result can be used voxel-for-voxel against a potential
-    built from the same coordinates.
-
-    Parameters
-    ----------
-    coordinates : torch.Tensor
-        Atom positions in Angstrom, shape (N, 3) as (x, y, z).
-    atomic_numbers : torch.Tensor
-        Atomic numbers, shape (N,), same order as `coordinates`.
-    n_xyz : int or tuple of int
-        Grid size as ``(nx, ny, nz)``. An int means a cubic grid.
-    dx : float
-        Voxel size in Angstrom.
-    radius_scale : float, optional
-        Multiplier on every van der Waals radius. Default
-        :data:`SOLVENT_EXCLUDED_RADIUS_SCALE`. Pass ``1.0`` for the bare
-        van der Waals union, which is 0.685 of the solvent-excluded volume.
-    device : torch.device or str, optional
-        Device to build on. Default None, meaning `coordinates`' own.
-    chunk_size : int, optional
-        Atoms processed per batch. Bounds peak memory to roughly
-        ``chunk_size * (2k+1)**3`` elements, where ``k`` covers the largest
-        radius. Default 65536.
-
-    Returns
-    -------
-    torch.Tensor
-        Occupancy in [0, 1], shape ``(nz, ny, nx)`` to match a potential
-        volume's ``(Z, Y, X)`` axis order. 1 where the specimen fills the
-        voxel, 0 where it is empty.
-
-    Notes
-    -----
-    Atoms are combined through the union's signed distance function,
-    ``min_i(|r - p_i| - R_i)``, with the partial-volume ramp applied once
-    to that. Ramping each atom separately and taking the maximum is the
-    same function, since clamping is monotonic and the max of a monotonic
-    transform is that transform of the max; this spelling is written the
-    way it is only because the union is what the field means.
-    """
-    if coordinates.ndim != 2 or coordinates.shape[1] != 3:
-        raise ValueError(
-            f"coordinates must have shape (N, 3), got {tuple(coordinates.shape)}"
-        )
-    if len(coordinates) != len(atomic_numbers):
-        raise ValueError(
-            f"coordinates and atomic_numbers must be the same length, got "
-            f"{len(coordinates)} and {len(atomic_numbers)}"
-        )
-    if dx <= 0:
-        raise ValueError(f"dx must be positive, got {dx}")
-    if radius_scale <= 0:
-        raise ValueError(f"radius_scale must be positive, got {radius_scale}")
-
-    if isinstance(n_xyz, int):
-        nx = ny = nz = n_xyz
-    else:
-        nx, ny, nz = (int(v) for v in n_xyz)
-
-    device = torch.device(device) if device is not None else coordinates.device
-    coords = coordinates.to(device=device, dtype=torch.float32)
-    radii = (
-        torch.tensor(
-            [
-                VDW_RADII_A.get(int(z), DEFAULT_VDW_RADIUS_A)
-                for z in atomic_numbers.tolist()
-            ],
-            dtype=torch.float32,
-            device=device,
-        )
-        * radius_scale
-    )
-
-    # Accumulates the union's signed distance, so it starts "far outside".
-    # Finite rather than inf: an untouched voxel still has to survive the
-    # arithmetic below and come out as empty.
-    far = 1.0e30
-    sdf = torch.full((nz * ny * nx,), far, dtype=torch.float32, device=device)
-
-    # One stencil sized for the largest radius serves every atom: a smaller
-    # ball simply evaluates to zero over the outer shell of the window.
-    k = int(torch.ceil(radii.max() / dx + 0.5).item())
-    off = torch.arange(-k, k + 1, device=device, dtype=torch.float32)
-    oz, oy, ox = torch.meshgrid(off, off, off, indexing="ij")
-    oz, oy, ox = oz.reshape(-1), oy.reshape(-1), ox.reshape(-1)
-
-    # Voxel centre i sits at (i - n/2 + 0.5) * dx, so a position p maps to
-    # the fractional index p/dx + n/2 - 0.5.
-    half = torch.tensor([nx, ny, nz], device=device, dtype=torch.float32) / 2 - 0.5
-
-    for start in range(0, len(coords), chunk_size):
-        p = coords[start : start + chunk_size]
-        r = radii[start : start + chunk_size, None]
-        fidx = p / dx + half  # (M, 3) fractional (x, y, z) index
-        base = torch.round(fidx).to(torch.int64)
-
-        ix = base[:, 0, None] + ox.to(torch.int64)
-        iy = base[:, 1, None] + oy.to(torch.int64)
-        iz = base[:, 2, None] + oz.to(torch.int64)
-
-        # Distance from the atom to each candidate voxel's centre, minus the
-        # atom's radius: this atom's own signed distance.
-        d = (
-            torch.sqrt(
-                (ix.to(torch.float32) - fidx[:, 0, None]) ** 2
-                + (iy.to(torch.float32) - fidx[:, 1, None]) ** 2
-                + (iz.to(torch.float32) - fidx[:, 2, None]) ** 2
-            )
-            * dx
-        )
-        signed = d - r
-
-        inside = (ix >= 0) & (ix < nx) & (iy >= 0) & (iy < ny) & (iz >= 0) & (iz < nz)
-        # Out-of-box candidates must not win the minimum.
-        signed = torch.where(inside, signed, torch.full_like(signed, far))
-        flat = ((iz * ny + iy) * nx + ix).clamp_(0, nz * ny * nx - 1)
-        sdf.scatter_reduce_(0, flat.reshape(-1), signed.reshape(-1), reduce="amin")
-
-    # One partial-volume ramp over the union's surface: full a half-voxel
-    # inside, empty a half-voxel outside, linear across.
-    occ = (0.5 - sdf / dx).clamp_(0.0, 1.0)
-    return occ.reshape(nz, ny, nx)
 
 
 def occupancy_blur_halo_voxels(
@@ -375,16 +153,15 @@ def potential_occupancy(
     V: torch.Tensor,
     pixel_size: float,
     sigma_a: float = WATER_COARSE_GRAIN_SIGMA_A,
-    full_potential: float = FULL_OCCUPANCY_POTENTIAL_V,
+    full_potential: float | torch.Tensor = FULL_OCCUPANCY_POTENTIAL_V,
 ) -> torch.Tensor:
     """
     Fraction of each voxel already filled, read off the potential.
 
-    The counterpart to :func:`atomic_occupancy` for a volume whose geometry
-    is not known -- a supplied map, a bulk material, crowding duplicates
-    summed in after the fact. Coarse-grains `V` to the water probe's own
-    length scale first, then reads the volume fraction against
-    `full_potential`.
+    Coarse-grains `V` to the water probe's own length scale, then reads
+    the volume fraction against `full_potential`. The one estimator, used
+    for every specimen: a rendered structure, a bulk material, crowding
+    duplicates, or a map supplied with no provenance at all.
 
     Parameters
     ----------
@@ -397,9 +174,14 @@ def potential_occupancy(
     sigma_a : float, optional
         Coarse-graining length in Angstrom. Default
         :data:`WATER_COARSE_GRAIN_SIGMA_A`.
-    full_potential : float, optional
+    full_potential : float or torch.Tensor, optional
         Potential of a fully-occupied voxel, V. Default
         :data:`FULL_OCCUPANCY_POTENTIAL_V`, protein's mean inner potential.
+        A tensor broadcastable to `V` is accepted so a caller holding a
+        per-image scale can fold it in here. It must be folded in BEFORE
+        the clamp, which is why this is a parameter rather than something
+        to divide out of the result: dividing afterwards would clamp
+        against the wrong reference and cap occupancy far below 1.
 
     Returns
     -------
@@ -419,14 +201,17 @@ def potential_occupancy(
     the volume it sees is a single sum and `full_potential` is protein's.
     Gold and carbon sit far above it and correctly exclude water outright;
     a bilayer's acyl core at 5.4 V reads as 23% empty and keeps that much
-    of its water. Where a generator knows its own geometry, prefer
-    :func:`atomic_occupancy` or an analytic field.
+    of its water. That is the one error a geometric field would fix, and
+    this module's docstring records why one was tried and removed anyway.
     """
     if pixel_size <= 0:
         raise ValueError(f"pixel_size must be positive, got {pixel_size}")
     if sigma_a < 0:
         raise ValueError(f"sigma_a must be non-negative, got {sigma_a}")
-    if full_potential <= 0:
+    if isinstance(full_potential, torch.Tensor):
+        if bool((full_potential <= 0).any()):
+            raise ValueError("full_potential must be positive")
+    elif full_potential <= 0:
         raise ValueError(f"full_potential must be positive, got {full_potential}")
 
     field = V.detach()

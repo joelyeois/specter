@@ -1431,7 +1431,6 @@ def blend_ice_into_volume(
     relax_steps: int = 0,
     profile: "IceProfile | None" = None,
     inplace: bool = False,
-    occupancy: torch.Tensor | None = None,
     sigma_a: float = WATER_COARSE_GRAIN_SIGMA_A,
 ) -> torch.Tensor:
     """
@@ -1476,17 +1475,6 @@ def blend_ice_into_volume(
         the caller no pre-ice volume, so only pass this when nothing else holds
         a reference to ``V`` (``MicrographSpecimenGenerator`` keeps one for
         ``save_clean_exitwaves``). Default False.
-    occupancy : torch.Tensor, optional
-        Fraction of each voxel the specimen already fills, in [0, 1],
-        broadcastable to ``V``'s shape -- typically from
-        :func:`~specter.potential.atomic_occupancy`. When given, the ice
-        weight is ``1 - occupancy`` and the potential is not consulted at
-        all, which is the accurate route: occupancy is geometry, so it is
-        immune to ``potential_scale``, the parameterization and any
-        B-factor, none of which change how much room a molecule takes up.
-        Default None, which falls back to inferring the weight from ``V``
-        via :func:`~specter.potential.potential_occupancy`, and prefer
-        passing this wherever the caller knows the specimen's geometry.
     sigma_a : float, optional
         Coarse-graining length in Angstrom for that fallback, forwarded to
         :func:`~specter.potential.potential_occupancy`. Ignored when
@@ -1541,16 +1529,6 @@ def blend_ice_into_volume(
     # front, which made the whole volume's contents an input to every
     # voxel's ice; the occupancy weight is per-voxel and absolute, so a
     # slab needs nothing but itself.
-    if occupancy is not None:
-        occupancy = occupancy.to(device=V.device, dtype=V.dtype)
-        if occupancy.ndim == 3:
-            occupancy = occupancy.unsqueeze(0)
-        if occupancy.shape[-3:] != V.shape[-3:]:
-            raise ValueError(
-                f"occupancy spatial shape {tuple(occupancy.shape[-3:])} does not "
-                f"match V's {tuple(V.shape[-3:])}"
-            )
-
     out = V if inplace else V.clone()
     chunk = max(1, 2**24 // (nxy * nxy))
     # The blur reads past its slab, so each one is widened and the margin
@@ -1561,17 +1539,24 @@ def blend_ice_into_volume(
         end = min(start + chunk, nz)
         sl = slice(start, end)
         ice_slab = ice[:, sl]
-        if occupancy is None:
-            lo, hi = max(0, start - halo), min(nz, end + halo)
-            occ_slab = potential_occupancy(
-                out[:, lo:hi],
-                pixel_size,
-                sigma_a=sigma_a,
-                full_potential=full_potential,
-            )[:, start - lo : start - lo + (end - start)]
-            weight = (1.0 - occ_slab).clamp_(0.0, 1.0)
-        else:
-            weight = (1.0 - occupancy[:, sl]).clamp_(0.0, 1.0)
-        ice_slab.mul_(weight)
+        # The halo of this slab overlaps the PREVIOUS one, which has
+        # already had its ice added -- reading it directly would see
+        # inflated potential, infer a fuller voxel, and starve every
+        # chunk boundary of ice. `ice` holds exactly what was added, so
+        # subtracting it back recovers the pristine potential. Costs one
+        # slab-sized copy, not a second canvas.
+        lo, hi = max(0, start - halo), min(nz, end + halo)
+        src = out[:, lo:hi].clone()
+        if lo < start:
+            src[:, : start - lo] -= ice[:, lo:start]
+        occ = potential_occupancy(
+            src,
+            pixel_size,
+            sigma_a=sigma_a,
+            full_potential=full_potential,
+        )[:, start - lo : start - lo + (end - start)]
+        del src
+        # In place: `(1 - occ).clamp(0, 1)` would allocate two more slabs.
+        ice_slab.mul_(occ.neg_().add_(1.0).clamp_(0.0, 1.0))
         out[:, sl].add_(ice_slab)
     return out

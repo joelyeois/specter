@@ -26,7 +26,7 @@ noise_model = "poisson"
 detector_model = "none"
 
 [compute]
-device = "cuda:1"  # adjust to an available device on your machine, e.g. "cuda:0" or "cpu"
+device = "cuda:0"  # adjust to an available device on your machine, e.g. "cuda:0" or "cpu"
 batchsize = "auto" # or an int to pin it; "auto" fits the batch to free memory.
 
 # Advanced: everything above is a decision this run makes, everything here
@@ -37,6 +37,6 @@ batchsize = "auto" # or an int to pin it; "auto" fits the batch to free memory.
 # $CLIBD_MON variable applies. See docs/installation.md.
 # monomer_library_path = "~/monomers"
 bfactor = 0.0        # Å²
-coincidence_radius = 1.8  # pixels
+coincidence_radius = 0  # pixels
 ice_model = "gd"
 # ice_cache_dir = "../../ice-data/ice_cache"  # defaults to the bundled cache

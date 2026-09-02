@@ -12,7 +12,7 @@ import glob
 import math
 import os
 import time
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Iterator, Optional
 
 import lightning as L
 import numpy as np
@@ -554,14 +554,66 @@ class IceBank(L.LightningModule):
     # Tiling for volumes larger than a single cached config
     # ------------------------------------------------------------------
 
+    def _iter_tiles(
+        self,
+        tile_grid_shape: tuple[int, int, int],
+        tile_extent: float,
+        seam_margin: float,
+        halo_margin: float,
+        generator: torch.Generator | None,
+    ) -> Iterator[tuple[torch.Tensor, torch.Tensor, torch.Tensor]]:
+        """
+        Draw the tiles of a grid one at a time.
+
+        Yields
+        ------
+        positions : torch.Tensor
+            One tile's molecules in the assembled frame, ``(N, 3)`` Å, on the
+            bank's device.
+        mobile, halo : torch.Tensor
+            Bool masks over those molecules, see :meth:`_place_tiles`.
+        """
+        nx, ny, nz_tiles = tile_grid_shape
+        half = tile_extent / 2
+        tile_indices = [
+            (ix, iy, iz)
+            for ix in range(nx)
+            for iy in range(ny)
+            for iz in range(nz_tiles)
+        ]
+        # A tile is a few hundred small ops (offsets, masks, the crop's own
+        # bookkeeping) around one real gather; on a many-core host the small
+        # ops dominated at the default thread pool -- see cpu_threads.
+        with limited_cpu_threads():
+            for ix, iy, iz in track(
+                tile_indices,
+                description="Placing ice tiles",
+                disable=not self.progressbars or len(tile_indices) == 1,
+                transient=True,
+            ):
+                crop = self._extract_crop(
+                    (tile_extent, tile_extent, tile_extent), generator=generator
+                )
+                offset = torch.tensor(
+                    [
+                        (ix - (nx - 1) / 2) * tile_extent,
+                        (iy - (ny - 1) / 2) * tile_extent,
+                        (iz - (nz_tiles - 1) / 2) * tile_extent,
+                    ],
+                    device=crop.device,
+                    dtype=crop.dtype,
+                )
+                dist_to_face = crop.abs()
+                mobile = (dist_to_face > (half - seam_margin)).any(dim=1)
+                halo = (dist_to_face > (half - seam_margin - halo_margin)).any(dim=1)
+                yield crop + offset, mobile, halo
+
     def _place_tiles(
         self,
         tile_grid_shape: tuple[int, int, int],
         tile_extent: float,
         seam_margin: float,
         generator: torch.Generator | None = None,
-        splat_volume: torch.Tensor | None = None,
-        splat_voxel_size: float | None = None,
         halo_margin: float = 0.0,
         to_host: bool = False,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, tuple[float, float, float]]:
@@ -571,22 +623,6 @@ class IceBank(L.LightningModule):
 
         Parameters
         ----------
-        splat_volume : torch.Tensor, optional
-            If given, each tile's placed atoms are also splatted directly
-            into this preallocated ``(nz, n, n)`` grid as soon as they're
-            drawn (via :func:`soft_voxelize_coordinates_into`), instead of
-            only being accumulated into the returned ``positions`` tensor.
-            Splatting one tile (~10^5-10^6 atoms) at a time keeps peak
-            memory bounded by a single tile's atom count rather than the
-            full assembled volume's -- for a request spanning many tiles
-            that difference is the whole point (see ``IceBank.generate_
-            big_ice``'s docstring). Only valid to use when the caller
-            won't subsequently move any positions (i.e. ``relax_steps ==
-            0``): seam relaxation moves atoms after placement, which would
-            leave the splat stale.
-        splat_voxel_size : float, optional
-            Voxel size (Å) for ``splat_volume``. Required if
-            ``splat_volume`` is given.
         to_host : bool, optional
             Move each tile's atoms to the host as they are drawn, so the
             device never holds the whole assembled set (3 GB at a
@@ -623,136 +659,18 @@ class IceBank(L.LightningModule):
             extent; the caller trims down afterward.
         """
         nx, ny, nz_tiles = tile_grid_shape
-        half = tile_extent / 2
-        assert (
-            self.box_x is not None and self.box_y is not None and self.box_z is not None
-        ), (
-            "box_x/box_y/box_z must be set (by generate_big_ice_deltas) before _place_tiles"
-        )
-        all_parts: list[torch.Tensor] = []
-        mobile_parts: list[torch.Tensor] = []
-        halo_parts: list[torch.Tensor] = []
-        tile_indices = [
-            (ix, iy, iz)
-            for ix in range(nx)
-            for iy in range(ny)
-            for iz in range(nz_tiles)
-        ]
-        # A tile is a few hundred small ops (offsets, masks, the crop's own
-        # bookkeeping) around one real gather; on a many-core host the small
-        # ops dominated at the default thread pool -- see cpu_threads.
-        with limited_cpu_threads():
-            self._place_tile_loop(
-                tile_indices,
-                nx,
-                ny,
-                nz_tiles,
-                tile_extent,
-                half,
-                seam_margin,
-                halo_margin,
-                generator,
-                splat_volume,
-                splat_voxel_size,
-                all_parts,
-                mobile_parts,
-                halo_parts,
-                to_host,
-            )
-        positions = torch.cat(all_parts, dim=0)
-        mobile_mask = torch.cat(mobile_parts, dim=0)
-        halo_mask = torch.cat(halo_parts, dim=0)
+        parts: list[tuple[torch.Tensor, torch.Tensor, torch.Tensor]] = []
+        for pos, mobile, halo in self._iter_tiles(
+            tile_grid_shape, tile_extent, seam_margin, halo_margin, generator
+        ):
+            if to_host:
+                pos, mobile, halo = pos.cpu(), mobile.cpu(), halo.cpu()
+            parts.append((pos, mobile, halo))
+        positions = torch.cat([p for p, _, _ in parts], dim=0)
+        mobile_mask = torch.cat([m for _, m, _ in parts], dim=0)
+        halo_mask = torch.cat([h for _, _, h in parts], dim=0)
         assembled_box = (nx * tile_extent, ny * tile_extent, nz_tiles * tile_extent)
         return positions, mobile_mask, halo_mask, assembled_box
-
-    def _place_tile_loop(
-        self,
-        tile_indices: list[tuple[int, int, int]],
-        nx: int,
-        ny: int,
-        nz_tiles: int,
-        tile_extent: float,
-        half: float,
-        seam_margin: float,
-        halo_margin: float,
-        generator: torch.Generator | None,
-        splat_volume: torch.Tensor | None,
-        splat_voxel_size: float | None,
-        all_parts: list[torch.Tensor],
-        mobile_parts: list[torch.Tensor],
-        halo_parts: list[torch.Tensor],
-        to_host: bool = False,
-    ) -> None:
-        """The per-tile loop of :meth:`_place_tiles`; appends into the lists."""
-        assert (
-            self.box_x is not None and self.box_y is not None and self.box_z is not None
-        )
-        for ix, iy, iz in track(
-            tile_indices,
-            description="Placing ice tiles",
-            disable=not self.progressbars or len(tile_indices) == 1,
-            transient=True,
-        ):
-            crop = self._extract_crop(
-                (tile_extent, tile_extent, tile_extent), generator=generator
-            )
-            offset = torch.tensor(
-                [
-                    (ix - (nx - 1) / 2) * tile_extent,
-                    (iy - (ny - 1) / 2) * tile_extent,
-                    (iz - (nz_tiles - 1) / 2) * tile_extent,
-                ],
-                device=crop.device,
-                dtype=crop.dtype,
-            )
-            dist_to_face = crop.abs()
-            mobile = (dist_to_face > (half - seam_margin)).any(dim=1)
-            halo = (dist_to_face > (half - seam_margin - halo_margin)).any(dim=1)
-            mobile_parts.append(mobile.cpu() if to_host else mobile)
-            halo_parts.append(halo.cpu() if to_host else halo)
-            crop_global = crop + offset
-            all_parts.append(crop_global.cpu() if to_host else crop_global)
-            if splat_volume is not None:
-                assert splat_voxel_size is not None
-                # periodic=True wraps only atoms landing outside splat_volume's own
-                # extent (the true outer boundary of the requested output, since
-                # splat_volume is sized to the final (nz, n, n) request, not the
-                # possibly-larger tile grid) -- see generate_ice_deltas for why this
-                # matters (a splat-grid fencepost bug, not an actual periodicity
-                # claim). Interior tile-to-tile seams are untouched: an atom near
-                # one tile's own face still lands at an in-bounds index of the
-                # shared buffer, so this doesn't change anything there.
-                #
-                # But this only holds if crop_global itself never strays far past
-                # splat_volume's own extent -- and a tile's own footprint
-                # (tile_extent) routinely does, by design: every edge tile's
-                # assembled-box placement overhangs the true requested box (see
-                # assembled_box's own docstring above), and a "big request" that
-                # only needs a single tile (assembled_box == tile_extent >
-                # requested box) overhangs on every axis. _scatter_splat's
-                # periodic=True is an *unconditional* index % grid_shape, which
-                # doesn't distinguish "just past by a fencepost voxel" from
-                # "hundreds of Å outside" -- the latter previously got
-                # wrapped back in from arbitrary far positions instead of being
-                # dropped, silently inflating ice density by up to
-                # (tile_extent / requested box)^3 (measured ~5.6x for a 256 A
-                # tile filling a 160 A request -- see
-                # dev/ice/analytic_tile_insertion_benchmark.py). Explicitly
-                # dropping atoms beyond the true requested half-extent first --
-                # the same bound generate_big_ice_deltas's own `keep` filter
-                # uses after relaxation, just applied per-tile before splatting
-                # instead -- leaves only genuine sub-voxel fencepost overflow for
-                # periodic=True to wrap, restoring the original intent without
-                # reintroducing the low-face density bug periodic=True was added
-                # to fix.
-                keep = (
-                    (crop_global[:, 0].abs() <= self.box_x / 2)
-                    & (crop_global[:, 1].abs() <= self.box_y / 2)
-                    & (crop_global[:, 2].abs() <= self.box_z / 2)
-                )
-                soft_voxelize_coordinates_into(
-                    splat_volume, crop_global[keep], splat_voxel_size, periodic=True
-                )
 
     def _relax_seams(
         self,
@@ -920,6 +838,15 @@ class IceBank(L.LightningModule):
                 mlbop_target,
                 device,
             )
+        # Trim to the requested box BEFORE anything splats these with
+        # periodic=True: that flag is an unconditional `index % grid_shape`,
+        # and a tile's footprint routinely overhangs the requested box (every
+        # edge tile does, and a single tile larger than the request overhangs
+        # on all sides), so without the trim far-outside molecules would wrap
+        # back in and inflate the density by up to (tile / box)^3 -- measured
+        # 5.6x for a 256 A tile filling a 160 A request. What the wrap is for
+        # is the sub-voxel fencepost overflow at the true faces, which the
+        # trim leaves in place.
         keep = (
             (positions[:, 0].abs() <= box[0] / 2)
             & (positions[:, 1].abs() <= box[1] / 2)
@@ -996,77 +923,45 @@ class IceBank(L.LightningModule):
         """
         if device is None:
             device = self.device
-        tile_extent, (nx_tiles, ny_tiles, nz_tiles), box = self._tile_grid(
-            n, dx, nz, tile_extent
-        )
+        tile_extent, _grid, _box = self._tile_grid(n, dx, nz, tile_extent)
         nz = nz if nz is not None else n
 
-        results = []
-        # relax_steps == 0 means positions never move after placement, so
-        # each tile can be splatted into the output the moment it's drawn --
-        # peak memory then scales with one tile's atom count, not the whole
-        # assembled volume's (see _place_tiles). Seam relaxation moves atoms
-        # after the fact, so that path still needs the full assembled
-        # `positions` before voxelizing. The whole batch is allocated up
-        # front and splatted into item by item: a per-item list stacked at
-        # the end holds the batch twice at the moment of the stack.
-        batch_vox = (
-            torch.zeros(batchsize, nz, n, n, device=device)
-            if relax_steps == 0
-            else None
-        )
+        # The whole batch is allocated up front and splatted into item by
+        # item: a per-item list stacked at the end would hold the batch twice
+        # at the moment of the stack. The molecules of one item are drawn in
+        # full first (a tenth of the canvas's bytes) and splatted in chunks,
+        # the same two steps the host-volume blend takes.
+        batch_vox = torch.zeros(batchsize, nz, n, n, device=device)
         for b in track(
             range(batchsize),
             description="Generating tiled ice volumes",
             disable=not self.progressbars or batchsize == 1,
             transient=True,
         ):
-            vox = batch_vox[b] if batch_vox is not None else None
-            # Only widen mobile_mask into a halo when relaxation will actually
-            # run -- otherwise halo_mask is dead weight (relax_steps == 0
-            # never looks at it).
-            halo_margin = 2.0 * MLBOP().r_cut if relax_steps > 0 else 0.0
-            positions, mobile_mask, halo_mask, assembled_box = self._place_tiles(
-                (nx_tiles, ny_tiles, nz_tiles),
-                tile_extent,
-                seam_margin,
+            positions = self.big_ice_positions(
+                n,
+                dx,
+                nz,
+                tile_extent=tile_extent,
+                seam_margin=seam_margin,
+                relax_steps=relax_steps,
+                relax_lr=relax_lr,
+                mlbop_target=mlbop_target,
+                device=device,
                 generator=generator,
-                splat_volume=vox,
-                splat_voxel_size=self.dx if vox is not None else None,
-                halo_margin=halo_margin,
             )
-            if relax_steps > 0 and mobile_mask.any():
-                positions = self._relax_seams(
-                    positions,
-                    mobile_mask,
-                    halo_mask,
-                    assembled_box,
-                    relax_steps,
-                    relax_lr,
-                    mlbop_target,
-                    device,
+            self.positions = positions
+            # periodic=True: see generate_ice_deltas -- the outer-boundary
+            # fencepost fix, applied to the keep-trimmed, already-relaxed
+            # molecule set, so only genuine sub-voxel overflow wraps.
+            for a0 in range(0, len(positions), _SLAB_SPLAT_ATOMS):
+                soft_voxelize_coordinates_into(
+                    batch_vox[b],
+                    positions[a0 : a0 + _SLAB_SPLAT_ATOMS],
+                    dx,
+                    periodic=True,
                 )
-            keep = (
-                (positions[:, 0].abs() <= box[0] / 2)
-                & (positions[:, 1].abs() <= box[1] / 2)
-                & (positions[:, 2].abs() <= box[2] / 2)
-            )
-            self.positions = positions[keep]
-            if vox is None:
-                # periodic=True: see generate_ice_deltas -- same outer-boundary
-                # fencepost fix, applied here to the final keep-trimmed, already-
-                # relaxed atom set.
-                results.append(
-                    soft_voxelize_coordinates(
-                        self.positions,
-                        grid_shape=(nz, n, n),
-                        voxel_size=dx,
-                        periodic=True,
-                    )
-                )
-        self.current_icedeltas = (
-            batch_vox if batch_vox is not None else torch.stack(results)
-        )
+        self.current_icedeltas = batch_vox
         return self.current_icedeltas
 
     def generate_big_ice(

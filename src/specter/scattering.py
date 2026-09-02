@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
 
 
 import torch
@@ -158,8 +158,11 @@ class Scattering(L.LightningModule):
         Parameters
         ----------
         V : torch.Tensor
-            Complex-valued 3D potential volume with shape (B, Z, Y, X) where
-            B is batch size, Z is number of slices.
+            3D potential volume with shape (B, Z, Y, X) where B is batch
+            size, Z is number of slices. Either real-valued, in which case
+            amplitude contrast (``self.alpha``) is applied to each slice
+            chunk as it is consumed, or already complex (absorptive), in
+            which case it is used as given.
 
         Returns
         -------
@@ -172,10 +175,15 @@ class Scattering(L.LightningModule):
         1. Transmission: ψ * exp(iσV)
         2. Propagation: FFT[ψ] * F * FFT⁻¹
         where F is the Fresnel propagator and σ is the interaction parameter.
+
+        A real ``V`` is complexified one chunk at a time rather than whole:
+        ``V * (sqrt(1 - alpha^2) + 1j * alpha)`` is elementwise, so the
+        result is bitwise identical, but the whole-volume form holds a
+        complex64 copy of the entire padded volume for the duration of the
+        loop -- 4 GB for a 512-pixel box with ``pad_fft`` -- for a value
+        each slice consumes once.
         """
         F = self.F_real + 1j * self.F_imag
-        if self.ews_curvature_sign == "negative":
-            V = torch.flip(V, dims=(1,))
 
         # Fold the bandlimit into the propagator once, rather than once per
         # slice. Bitwise-exact only because kmask is binary (0.0/1.0, see
@@ -191,8 +199,18 @@ class Scattering(L.LightningModule):
         # evaluated a chunk at a time and consumed via unbind. This is purely a
         # performance restructuring -- output and gradients are bitwise
         # identical to the per-slice form. See _MULTISLICE_SLICE_CHUNK.
+        #
+        # A negative Ewald-sphere sign traverses the slices in reverse. That is
+        # done by walking the chunks backwards and flipping each one as it is
+        # consumed, not by `torch.flip(V, dims=(1,))` up front: the whole-volume
+        # flip is a full copy of the padded volume (6 GB for three 512-pixel
+        # boxes), for a slice order the loop can produce for free.
+        chunks: Sequence[torch.Tensor] = V.split(_MULTISLICE_SLICE_CHUNK, dim=1)
+        reverse = self.ews_curvature_sign == "negative"
+        if reverse:
+            chunks = chunks[::-1]
         for chunk in track(
-            V.split(_MULTISLICE_SLICE_CHUNK, dim=1),
+            chunks,
             description="Multislicing",
             transient=True,
             disable=not (self.progressbars),
@@ -200,9 +218,12 @@ class Scattering(L.LightningModule):
             # transmission functions for the whole chunk, in one kernel.
             # .to() here rather than per slice keeps a volume that lives off
             # the compute device streaming in bounded-size blocks.
-            t_chunk = torch.exp(
-                1j * self.sigma * self.pixel_size * chunk.to(self.device)
-            )
+            chunk = chunk.to(self.device)
+            if reverse:
+                chunk = chunk.flip(1)
+            if not chunk.is_complex():
+                chunk = apply_amplitude_contrast(chunk, alpha=self.alpha)
+            t_chunk = torch.exp(1j * self.sigma * self.pixel_size * chunk)
 
             for t in t_chunk.unbind(1):
                 # multiply with incident wave (unit incident wave on the first slice)
@@ -403,7 +424,8 @@ class Scattering(L.LightningModule):
             Batch of 2D exitwaves / projected potentials.
         """
         if self.scattering_model == "multislice":
-            V = apply_amplitude_contrast(V, alpha=self.alpha)
+            # amplitude contrast is applied per chunk inside multislice --
+            # see its docstring for why not here.
             return self.multislice(V)
         elif self.scattering_model == "rytov":
             V = apply_amplitude_contrast(V, alpha=self.alpha)

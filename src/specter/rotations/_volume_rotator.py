@@ -8,6 +8,8 @@ import torch.nn.functional as F
 
 from ..fft import fft3, ifft3
 from ._volume import (
+    _relion_rotation_grid,
+    affine_sampling_grid,
     apply_fourier_translation,
     fourier_origin_displacement,
     split_affine_translation,
@@ -178,7 +180,7 @@ def _windowed_grid_sample(
 
 class VolumeRotator(L.LightningModule):
     """
-    3D volume rotator with cached base grid and RELION / PyTorch center conventions.
+    3D volume rotator with RELION / PyTorch center conventions.
     """
 
     def __init__(
@@ -193,10 +195,14 @@ class VolumeRotator(L.LightningModule):
         init_base_grid=True,
     ):
         """
-        Initialize a 3D VolumeRotator with cached base grid and rotation center.
+        Initialize a 3D VolumeRotator with a cached rotation center.
 
         This class supports rotating 3D volumes in either real space or Fourier space.
-        The base grid and rotation center are cached as buffers for efficiency.
+        The rotation center is cached as a buffer; the sampling grid itself is
+        built per call by :func:`~specter.rotations.affine_sampling_grid` --
+        one broadcast write, so there is no persistent identity grid (which
+        was ``(nz, ny, nx, 3)`` float32, 1.6 GB at 512^3, and a buffer that
+        then had to be excluded from checkpoints).
 
         Parameters
         ----------
@@ -219,6 +225,10 @@ class VolumeRotator(L.LightningModule):
             - "real": rotate in real space.
             - "fourier": rotate in Fourier space.
             Default is "real".
+        init_base_grid : bool, optional
+            Ignored. Kept so existing callers that passed
+            ``init_base_grid=False`` (to avoid the old cached identity grid)
+            keep working; there is no cached grid any more.
 
         Raises
         ------
@@ -227,8 +237,6 @@ class VolumeRotator(L.LightningModule):
 
         Attributes
         ----------
-        base_grid : torch.Tensor (buffer)
-            Identity sampling grid for the volume, used to construct per-batch grids.
         center : torch.Tensor (buffer)
             The voxel coordinates of the rotation center.
         """
@@ -298,22 +306,9 @@ class VolumeRotator(L.LightningModule):
             )
         self.register_buffer("center_dc", center_dc.view(1, 1, 3), persistent=False)
 
-        if init_base_grid:
-            self._build_base_grid()
-
     # ------------------------------------------------------------------
     # Core grid construction
     # ------------------------------------------------------------------
-    def _build_base_grid(self) -> None:
-        """
-        Build base grid.
-        """
-        eye = torch.eye(3, 4).unsqueeze(0)  # (1, 3, 4)
-        base_grid = F.affine_grid(
-            eye, [1, 1, self.nz, self.ny, self.nx], align_corners=self.align_corners
-        )
-        self.register_buffer("base_grid", base_grid, persistent=False)
-
     def _isotropic_scale(
         self, device: str | torch.device, dtype: torch.dtype
     ) -> torch.Tensor:
@@ -373,25 +368,31 @@ class VolumeRotator(L.LightningModule):
         self, theta: torch.Tensor, origin: str | None = None
     ) -> torch.Tensor:
         """
-        Build a sampling grid from cached base grid and affine parameters.
+        Build a sampling grid from the affine parameters.
 
         theta: (B, 3, 4)
         Returns: (B, Z, Y, X, 3)
+
+        The chain `_rotate_normalized_grid` applies to an identity grid
+        (recentre, rescale, rotate, unscale, uncentre, translate) is affine
+        in that grid, so it is collapsed into one (B, 3, 4) matrix and
+        evaluated by :func:`~specter.rotations.affine_sampling_grid` in a
+        single broadcast write, instead of six full-size elementwise passes
+        over a cached identity grid.
         """
-        B = theta.shape[0]
+        if (origin or self.origin) == "relion":
+            return _relion_rotation_grid(
+                theta, self.nz, self.ny, self.nx, self.align_corners
+            )
+        # PyTorch centre: ((g * s) @ R.T) / s + t  ==  g @ A + t
+        scale = self._isotropic_scale(theta.device, theta.dtype).view(3)
         R = theta[..., :3]  # (B, 3, 3)
         t = theta[..., 3]  # (B, 3)
-
-        if not hasattr(self, "base_grid"):
-            self._build_base_grid()
-        grid = self.base_grid.expand(B, -1, -1, -1, -1)
-        grid = grid.view(B, -1, 3)
-
-        scale = self._isotropic_scale(theta.device, theta.dtype)
-        grid = self._rotate_normalized_grid(grid, R, t, scale, origin=origin)
-
-        grid = grid.view(B, self.nz, self.ny, self.nx, 3)
-        return grid
+        A = scale.view(1, 3, 1) * R.transpose(1, 2) * (1.0 / scale).view(1, 1, 3)
+        composed = torch.cat([A.transpose(1, 2), t.unsqueeze(-1)], dim=-1)
+        return affine_sampling_grid(
+            composed, self.nz, self.ny, self.nx, self.align_corners
+        )
 
     # ------------------------------------------------------------------
     # Real-space rotation

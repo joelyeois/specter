@@ -23,36 +23,49 @@ re-measurement.
 
 Peak-memory model
 -----------------
-Peak allocation is linear in the batch size, with the per-particle slope set
-by the FFT-padded volume and a batch-independent workspace set by the
-unpadded template volume::
+Peak allocation is linear in the batch size. The per-particle slope has a
+part set by the FFT-padded volume (the padded canvas itself and the ice
+convolution's working copies) and a part set by the unpadded template
+volume (the template rotation's sampling grid, three floats per voxel, and
+its output); a batch-independent workspace is set by the template again::
 
-    peak ~= A * B * (nz * pad_nxy**2 * 4)   # B padded volumes in flight
-          + W * (nxy**3 * 4)                # template, rotator, ice crops
+    peak ~= A * B * (nz * pad_nxy**2 * 4)   # padded canvas + ice FFT copies
+          + G * B * (nxy**3 * 4)            # rotation grid + rotated template
+          + W * (nxy**3 * 4)                # template, ice source, k-grids
           + C                               # CUDA context, model buffers
 
-Constants were fit to measured `torch.cuda.max_memory_allocated` for real
-`run_particle_stack` runs on an NVIDIA L40 (multislice + IceBank ice +
-`pad_fft=True`, the default path), sweeping `n_pixels` over 128/192/256/384
-and `batchsize` over 1/2/4/8:
+Constants were fit to measured `torch.cuda.max_memory_allocated` on an
+NVIDIA L40 (6bdf at 1.0 A, multislice + IceBank ice + `pad_fft=True`, the
+default path; `dev/perf-notebook-512/memsweep_stages.py`), sweeping
+`n_pixels` over 128/256/384/512 and `batchsize` over 1/2/3/4/8. The peak is
+the solvation stage at every point:
 
 ===========  ====  ============  =============
 n_pixels      B  measured GiB  predicted GiB
 ===========  ====  ============  =============
-128             1          0.49           0.55
-128             8          1.20           1.49
-256             1          1.71           2.10
-256             4          4.89           5.32
-384             1          5.78           6.32
-384             2          9.23           9.95
+128             1          0.38           0.41
+128             8          0.72           0.76
+256             1          0.86           0.98
+256             4          1.91           2.18
+256             8          3.19           3.78
+384             1          2.39           2.52
+384             4          5.88           6.57
+512             1          5.48           5.53
+512             3         11.12          11.93
 ===========  ====  ============  =============
 
-The fit deliberately overestimates everywhere (8-22% margin over the sweep),
+The fit deliberately overestimates everywhere (1-18% margin over the sweep),
 since the cost of guessing low is a slower run while the cost of guessing
 high is an OOM crash. Cheaper configurations -- `pad_fft=False`,
 `ice_model="none"`, non-multislice scattering -- all measured *below* the
 prediction too, so one conservative constant covers the whole matrix rather
 than needing a per-model table.
+
+These are the 2026-09-02 numbers, after the forward pass stopped holding a
+separate crowd accumulator, a complex copy of the whole padded volume, a
+persistent rotation grid and a reflect-padded ice canvas (see
+`dev/perf-notebook-512/REPORT.md`); the previous fit (4.3 padded copies per
+particle, 11.2 template copies) over-predicted the new code by 1.4-2.4x.
 """
 
 from __future__ import annotations
@@ -71,15 +84,21 @@ __all__ = [
     "resolve_batchsize",
 ]
 
-#: Working copies of the FFT-padded per-particle volume held at peak. Fit
-#: slope of peak-vs-batchsize; 4.09-4.23 measured, rounded up.
-_PADDED_COPIES_PER_PARTICLE = 4.3
+#: Working copies of the FFT-padded per-particle volume held at peak: the
+#: canvas itself plus the ice's rFFT working copies, which are of the unpadded
+#: box (one quarter of the canvas each).
+_PADDED_COPIES_PER_PARTICLE = 0.6
 
-#: Batch-independent workspace, in copies of the *unpadded* template volume
-#: (`nxy**3`): the built potential, the rotator's working buffer and the ice
-#: crops drawn from the bank. Fit from the peak-vs-batchsize intercept across
+#: Per-particle workspace in copies of the *unpadded* template volume
+#: (`nxy**3`): the template rotation's (nz, ny, nx, 3) sampling grid and its
+#: rotated output, built for the whole batch at once.
+_TEMPLATE_COPIES_PER_PARTICLE = 4.0
+
+#: Batch-independent workspace, in copies of the *unpadded* template volume:
+#: the built potential, the crowd's alias of it, the ice source positions and
+#: the aberration k-grids. Fit from the peak-vs-batchsize intercept across
 #: box sizes.
-_TEMPLATE_COPIES = 11.2
+_TEMPLATE_COPIES = 4.0
 
 #: Everything that scales with neither: CUDA context, model buffers, k-grids.
 _FIXED_OVERHEAD_BYTES = 350_000_000
@@ -156,6 +175,7 @@ def estimate_peak_bytes(batchsize: int, nxy: int, nz: int, pad_nxy: int) -> int:
     template_volume = nxy**3 * _BYTES_PER_ELEMENT
     return int(
         _PADDED_COPIES_PER_PARTICLE * batchsize * padded_volume
+        + _TEMPLATE_COPIES_PER_PARTICLE * batchsize * template_volume
         + _TEMPLATE_COPIES * template_volume
         + _FIXED_OVERHEAD_BYTES
     )
@@ -249,7 +269,10 @@ def recommend_batchsize(
     )
     budget = free_bytes * fraction
 
-    per_particle = _PADDED_COPIES_PER_PARTICLE * nz * pad_nxy**2 * _BYTES_PER_ELEMENT
+    per_particle = (
+        _PADDED_COPIES_PER_PARTICLE * nz * pad_nxy**2
+        + _TEMPLATE_COPIES_PER_PARTICLE * nxy**3
+    ) * _BYTES_PER_ELEMENT
     overhead = estimate_peak_bytes(0, nxy, nz, pad_nxy)
     batchsize = int(math.floor((budget - overhead) / per_particle))
 

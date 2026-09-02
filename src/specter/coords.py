@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import Literal
 
-import numpy as np
 import torch
 
 
@@ -136,33 +135,13 @@ def poisson_disk_neighbors_3d(
     -----
     - The coordinate system is centered at (0,0,0), with ranges:
       x ∈ [-W/2, W/2], y ∈ [-H/2, H/2], z ∈ [-D/2, D/2].
-    - The function uses a grid-accelerated version of Bridson's Poisson-disk sampling
-      algorithm for efficient neighbor checking.
+    - The function uses Bridson's Poisson-disk sampling; the neighbour test is
+      one vectorised distance check against every accepted point.
     """
     D, H, W = box
     z_min, z_max = -D / 2, D / 2
     y_min, y_max = -H / 2, H / 2
     x_min, x_max = -W / 2, W / 2
-
-    # Grid acceleration
-    cell_size = min_distance / np.sqrt(3)
-    grid_shape = tuple(torch.ceil(torch.tensor([D, H, W]) / cell_size).int().tolist())
-    grid = -torch.ones(grid_shape, dtype=torch.long)
-    # Two points within min_distance can land up to ceil(min_distance / cell_size)
-    # cells apart along a single axis (e.g. each just inside opposite ends of
-    # adjacent-but-one cells), so the neighbor scan below must reach that far --
-    # checking only the immediate 1-cell ring (as earlier versions of this
-    # function did) silently admits points closer than min_distance.
-    neighbor_reach = int(np.ceil(min_distance / cell_size))
-
-    def point_to_grid(
-        p: torch.Tensor,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        # p = (x, y, z)
-        zi = ((p[2] - z_min) / cell_size).long().clamp(0, grid_shape[0] - 1)
-        yi = ((p[1] - y_min) / cell_size).long().clamp(0, grid_shape[1] - 1)
-        xi = ((p[0] - x_min) / cell_size).long().clamp(0, grid_shape[2] - 1)
-        return zi, yi, xi
 
     # initialize first point
     if seed == "origin":
@@ -178,9 +157,13 @@ def poisson_disk_neighbors_3d(
 
     pts = [first_point]
     active = [0]
-
-    zi, yi, xi = point_to_grid(first_point)
-    grid[zi, yi, xi] = 0
+    # Accepted points as one (N, 3) tensor, for the vectorised distance test
+    # below. Grown by concatenation, which is O(N^2) in total but for the
+    # point counts a Poisson-disk fill produces (tens to a few thousand) that
+    # is far below the cost of the Python-level grid scan it replaces: the
+    # earlier cell-grid neighbour search did up to 125 ``.item()`` reads per
+    # candidate, ~30k for the ~8 points a single-particle box holds, 0.18 s.
+    pts_t = first_point.unsqueeze(0)
 
     while active and len(pts) < n_points:
         idx = int(torch.randint(len(active), (1,)).item())
@@ -211,39 +194,16 @@ def poisson_disk_neighbors_3d(
             active.pop(idx)
             continue
 
-        # grid neighbor check
-        accepted = []
-        for c in candidates:
-            zi, yi, xi = point_to_grid(c)
-            neighbor_found = False
-            for dz_i in range(-neighbor_reach, neighbor_reach + 1):
-                for dy_i in range(-neighbor_reach, neighbor_reach + 1):
-                    for dx_i in range(-neighbor_reach, neighbor_reach + 1):
-                        nz, ny, nx = zi + dz_i, yi + dy_i, xi + dx_i
-                        if (
-                            0 <= nz < grid_shape[0]
-                            and 0 <= ny < grid_shape[1]
-                            and 0 <= nx < grid_shape[2]
-                        ):
-                            pid = int(grid[nz, ny, nx].item())
-                            if pid != -1:
-                                dist = torch.norm(c - pts[pid])
-                                if dist < min_distance:
-                                    neighbor_found = True
-                                    break
-                    if neighbor_found:
-                        break
-                if neighbor_found:
-                    break
-            if not neighbor_found:
-                accepted.append(c)
-
-        if accepted:
-            new_pt = accepted[0]
+        # A candidate is accepted if no accepted point lies within
+        # min_distance of it; the first such candidate (in draw order) is
+        # taken, exactly as the per-candidate grid scan did.
+        nearest = torch.cdist(candidates, pts_t).min(dim=1).values
+        ok = torch.nonzero(~(nearest < min_distance)).flatten()
+        if len(ok) > 0:
+            new_pt = candidates[ok[0]]
             pts.append(new_pt)
+            pts_t = torch.cat([pts_t, new_pt.unsqueeze(0)], dim=0)
             active.append(len(pts) - 1)
-            zi, yi, xi = point_to_grid(new_pt)
-            grid[zi, yi, xi] = len(pts) - 1
         else:
             active.pop(idx)
 

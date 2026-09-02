@@ -29,6 +29,7 @@ from ._random import (
 )
 from ._rotation import rotate_coordinates, translate_coordinates
 from ._volume import (
+    affine_sampling_grid,
     apply_fourier_translation,
     build_affine_matrix,
     fourier_origin_displacement,
@@ -60,4 +61,5 @@ __all__ = [
     "translations_angstrom_to_torch",
     "build_affine_matrix",
     "VolumeRotator",
+    "affine_sampling_grid",
 ]

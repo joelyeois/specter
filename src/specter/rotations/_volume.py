@@ -8,6 +8,61 @@ import torch.nn.functional as F
 from ..fft import fft3, ifft3
 
 
+def affine_sampling_grid(
+    theta: torch.Tensor,
+    nz: int,
+    ny: int,
+    nx: int,
+    align_corners: bool = False,
+) -> torch.Tensor:
+    """
+    Sampling grid for ``grid_sample``, equal to
+    ``F.affine_grid(theta, [B, 1, nz, ny, nx], align_corners)``.
+
+    Parameters
+    ----------
+    theta : torch.Tensor
+        Affine matrices, shape (B, 3, 4), mapping output (x, y, z) in
+        normalized coordinates to input coordinates.
+    nz, ny, nx : int
+        Output volume dimensions.
+    align_corners : bool, optional
+        As for ``affine_grid``. Default False.
+
+    Returns
+    -------
+    torch.Tensor
+        Shape (B, nz, ny, nx, 3), last axis (x, y, z).
+
+    Notes
+    -----
+    ``affine_grid`` materialises the identity grid, stacks a ones column
+    onto it and runs a ``bmm`` over every voxel: at 512^3 that is 43 ms and
+    ~1.5 GB of temporaries for a grid whose ``grid_sample`` then costs 7 ms.
+    The grid is affine in three 1-D coordinate vectors, so it is built here
+    as a sum of three broadcast outer products and written exactly once
+    (2.9 ms at 512^3, no temporaries). Values agree with ``affine_grid`` to
+    float rounding (4e-7 in normalized units at 512^3, and 7e-16 against a
+    float64 reference; ``affine_grid`` itself sits at 9e-8 from that
+    reference).
+    """
+    B = theta.shape[0]
+    device, dtype = theta.device, theta.dtype
+
+    def axis(n: int) -> torch.Tensor:
+        if align_corners:
+            return torch.linspace(-1.0, 1.0, n, device=device, dtype=dtype)
+        return (torch.arange(n, device=device, dtype=dtype) * 2.0 + 1.0) / n - 1.0
+
+    A = theta[:, :, :3]  # out = A @ (x, y, z) + b
+    b = theta[:, :, 3]
+    x, y, z = axis(nx), axis(ny), axis(nz)
+    gx = x.view(1, 1, 1, nx, 1) * A[:, :, 0].view(B, 1, 1, 1, 3)
+    gy = y.view(1, 1, ny, 1, 1) * A[:, :, 1].view(B, 1, 1, 1, 3)
+    gz = z.view(1, nz, 1, 1, 1) * A[:, :, 2].view(B, 1, 1, 1, 3) + b.view(B, 1, 1, 1, 3)
+    return (gx + gy) + gz
+
+
 def _relion_rotation_grid(
     theta: torch.Tensor,
     nz: int,
@@ -92,9 +147,7 @@ def _relion_rotation_grid(
     # translate the grid
     offset = center.squeeze(1) + theta[..., -1] - center.bmm(A).squeeze(1)
     composed = torch.cat([A.transpose(1, 2), offset.unsqueeze(-1)], dim=-1)
-    return F.affine_grid(
-        composed, [theta.size(0), 1, nz, ny, nx], align_corners=align_corners
-    )
+    return affine_sampling_grid(composed, nz, ny, nx, align_corners)
 
 
 def rotate_volume(
@@ -138,7 +191,7 @@ def rotate_volume(
     if origin == "relion":
         grid = _relion_rotation_grid(theta, nz, ny, nx, align_corners)
     elif origin == "center":
-        grid = F.affine_grid(theta, [B, 1, nz, ny, nx], align_corners=align_corners)
+        grid = affine_sampling_grid(theta, nz, ny, nx, align_corners)
 
     # transform the volume
     V = V.unsqueeze(0).unsqueeze(1)  # (1 x 1 x Z x Y x X)

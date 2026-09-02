@@ -891,6 +891,7 @@ def potential_from_deltas(
     deltas: torch.Tensor,
     kernel: torch.Tensor,
     backend: str = "fftconvolve",
+    out: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """
     Convolve soft-voxelized atom deltas with an atomic potential kernel.
@@ -910,37 +911,83 @@ def potential_from_deltas(
     backend : str, optional
         ``'fftconvolve'`` (default) transforms the whole volume; ``'conv3d'``
         convolves directly, at a cost that scales with the kernel rather than
-        the volume, which wins for the small kernels used here. The two agree
-        exactly -- :func:`specter.fft.spatial_convolve3d_same` reproduces
+        the volume. ``'auto'`` picks between them by kernel size (see
+        :func:`_deltas_backend`). The two agree to float rounding --
+        :func:`specter.fft.spatial_convolve3d_same` reproduces
         ``fftconvolve``'s centered-crop convention, including for
         even-sized kernels.
+
+    out : torch.Tensor, optional
+        Tensor to write the result into, the same shape as `deltas`. May be
+        `deltas` itself: a caller that has no further use for the deltas
+        (``IceBank.generate_big_ice``) then pays for no second canvas, which
+        at a 512-pixel box is the 0.5 GB that stood between the FFT's own
+        working copies and the forward pass's peak. Safe because each
+        item's input is read in full before its output is written.
 
     Returns
     -------
     torch.Tensor
-        Potential contribution, same shape as `deltas`.
+        Potential contribution, same shape as `deltas` (`out` when given).
     """
     squeeze_back = deltas.dim() == 3
     if squeeze_back:
         deltas = deltas[None]
+        if out is not None:
+            out = out[None]
+
+    if backend == "auto":
+        backend = _deltas_backend(deltas, kernel)
 
     if backend == "fftconvolve":
-        out = torch.stack(
-            [fftconvolve(deltas[b], kernel, mode="same") for b in range(len(deltas))]
-        )
+        if out is None:
+            out = torch.empty_like(deltas)
+        for b in range(len(deltas)):
+            out[b] = fftconvolve(deltas[b], kernel, mode="same")
     elif backend == "conv3d":
         # Deliberately not F.conv3d(padding="same"): for an even-sized kernel
         # that pads asymmetrically relative to fftconvolve's centered crop,
         # shifting the potential half a voxel off the coordinates it was built
         # from. Even kernels are not exotic -- they occur for 20 of the 36
         # pixel sizes between 0.5 and 4.0 A, including 1.0-1.7 A.
-        out = spatial_convolve3d_same(deltas, kernel)
+        result = spatial_convolve3d_same(deltas, kernel)
+        if out is None:
+            out = result
+        else:
+            out.copy_(result)
     else:
         raise ValueError(
             f"Unknown backend '{backend}'. Choose 'fftconvolve' or 'conv3d'."
         )
 
     return out[0] if squeeze_back else out
+
+
+#: Direct conv3d stops winning once the kernel has more than 4^3 taps: on an
+#: L40 at 512^3, the water kernel is 4^3 at 1.5 A/voxel (conv3d 32 ms, FFT 32 ms),
+#: 5^3 at 1.0 A (61 vs 32 ms), 8^3 at 0.73 A (215 vs 32 ms) and 10^3 at 0.5 A
+#: (422 vs 32 ms); at 3^3 (>= 2 A) conv3d is 2x faster. Direct convolution's
+#: cost scales with the kernel, the FFT's does not.
+_DELTAS_FFT_MIN_KERNEL_TAPS = 65
+
+#: Above this many voxels per volume the FFT's complex working copies are what
+#: an IceBank micrograph-scale request cannot afford (see
+#: :func:`specter.fft.spatial_convolve3d_same`), so conv3d is used regardless
+#: of kernel size. 2**28 float32 is 1 GB; a 512^3 box is 2**27.
+_DELTAS_FFT_MAX_VOXELS = 2**28
+
+
+def _deltas_backend(deltas: torch.Tensor, kernel: torch.Tensor) -> str:
+    """Backend for :func:`potential_from_deltas`'s ``'auto'``: FFT for kernels
+    past `_DELTAS_FFT_MIN_KERNEL_TAPS` on volumes up to
+    `_DELTAS_FFT_MAX_VOXELS`, direct conv3d otherwise."""
+    per_volume = deltas[0].numel()
+    if (
+        kernel.numel() >= _DELTAS_FFT_MIN_KERNEL_TAPS
+        and per_volume <= _DELTAS_FFT_MAX_VOXELS
+    ):
+        return "fftconvolve"
+    return "conv3d"
 
 
 def build_atomic_potential_kernel(

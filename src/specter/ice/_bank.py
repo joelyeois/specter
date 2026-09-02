@@ -419,7 +419,12 @@ class IceBank(L.LightningModule):
 
         local = candidates @ R
         in_crop = (local.abs() <= half_extent).all(dim=1)
-        return local[in_crop].cpu()
+        # Left on the device the gather ran on. Every consumer either splats
+        # it into a device-resident grid, filters it, or feeds it to MLBOP on
+        # `positions.device`; a `.cpu()` here cost a synchronising 6 MB
+        # pageable copy per tile and then ran the tile's mask/offset/cat
+        # arithmetic on the host, for nothing.
+        return local[in_crop]
 
     # ------------------------------------------------------------------
     # Generation
@@ -535,7 +540,7 @@ class IceBank(L.LightningModule):
         assert self.current_icedeltas is not None
         kernel = self._get_kernel(dx)
         return potential_from_deltas(
-            self.current_icedeltas.to(device), kernel.to(device), backend="conv3d"
+            self.current_icedeltas.to(device), kernel.to(device), backend="auto"
         )
 
     # ------------------------------------------------------------------
@@ -626,15 +631,17 @@ class IceBank(L.LightningModule):
             disable=not self.progressbars or len(tile_indices) == 1,
             transient=True,
         ):
+            crop = self._extract_crop(
+                (tile_extent, tile_extent, tile_extent), generator=generator
+            )
             offset = torch.tensor(
                 [
                     (ix - (nx - 1) / 2) * tile_extent,
                     (iy - (ny - 1) / 2) * tile_extent,
                     (iz - (nz_tiles - 1) / 2) * tile_extent,
-                ]
-            )
-            crop = self._extract_crop(
-                (tile_extent, tile_extent, tile_extent), generator=generator
+                ],
+                device=crop.device,
+                dtype=crop.dtype,
             )
             dist_to_face = crop.abs()
             mobile_parts.append((dist_to_face > (half - seam_margin)).any(dim=1))
@@ -838,23 +845,26 @@ class IceBank(L.LightningModule):
         nz_tiles = max(1, math.ceil(self.box_z / tile_extent))
 
         results = []
-        for _ in track(
+        # relax_steps == 0 means positions never move after placement, so
+        # each tile can be splatted into the output the moment it's drawn --
+        # peak memory then scales with one tile's atom count, not the whole
+        # assembled volume's (see _place_tiles). Seam relaxation moves atoms
+        # after the fact, so that path still needs the full assembled
+        # `positions` before voxelizing. The whole batch is allocated up
+        # front and splatted into item by item: a per-item list stacked at
+        # the end holds the batch twice at the moment of the stack.
+        batch_vox = (
+            torch.zeros(batchsize, self.nz, self.n, self.n, device=device)
+            if relax_steps == 0
+            else None
+        )
+        for b in track(
             range(batchsize),
             description="Generating tiled ice volumes",
             disable=not self.progressbars or batchsize == 1,
             transient=True,
         ):
-            # relax_steps == 0 means positions never move after placement,
-            # so each tile can be splatted into the output the moment it's
-            # drawn -- peak memory then scales with one tile's atom count,
-            # not the whole assembled volume's (see _place_tiles). Seam
-            # relaxation moves atoms after the fact, so that path still
-            # needs the full assembled `positions` before voxelizing.
-            vox = (
-                torch.zeros(self.nz, self.n, self.n, device=device)
-                if relax_steps == 0
-                else None
-            )
+            vox = batch_vox[b] if batch_vox is not None else None
             # Only widen mobile_mask into a halo when relaxation will actually
             # run -- otherwise halo_mask is dead weight (relax_steps == 0
             # never looks at it).
@@ -889,14 +899,17 @@ class IceBank(L.LightningModule):
                 # periodic=True: see generate_ice_deltas -- same outer-boundary
                 # fencepost fix, applied here to the final keep-trimmed, already-
                 # relaxed atom set.
-                vox = soft_voxelize_coordinates(
-                    self.positions,
-                    grid_shape=(self.nz, self.n, self.n),
-                    voxel_size=self.dx,
-                    periodic=True,
+                results.append(
+                    soft_voxelize_coordinates(
+                        self.positions,
+                        grid_shape=(self.nz, self.n, self.n),
+                        voxel_size=self.dx,
+                        periodic=True,
+                    )
                 )
-            results.append(vox)
-        self.current_icedeltas = torch.stack(results)
+        self.current_icedeltas = (
+            batch_vox if batch_vox is not None else torch.stack(results)
+        )
         return self.current_icedeltas
 
     def generate_big_ice(
@@ -955,7 +968,16 @@ class IceBank(L.LightningModule):
         # them on the instance afterwards keeps a whole extra canvas alive for
         # an attribute nothing reads once the convolution is done.
         self.current_icedeltas = None
-        potential = potential_from_deltas(deltas, kernel.to(device), backend="conv3d")
+        # "auto": the water kernel is 8^3 at 0.73 A/voxel, where cuDNN's direct
+        # conv3d on a 512^3 box is 7x slower than the FFT (215 vs 32 ms); the
+        # 3^3 kernel of a >= 2 A tomogram voxel still goes direct, as does any
+        # volume too large for the FFT's complex working copies.
+        # `out=deltas`: the deltas are consumed here and nothing reads them
+        # afterwards, so the potential overwrites them instead of taking a
+        # second canvas.
+        potential = potential_from_deltas(
+            deltas, kernel.to(device), backend="auto", out=deltas
+        )
         del deltas
         return potential
 

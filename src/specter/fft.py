@@ -463,7 +463,17 @@ def _freq_domain_conv(
     sp1 = fft(in1, fshape, dim=axes)
     sp2 = fft(in2, fshape, dim=axes)
 
-    ret = ifft(sp1 * sp2, fshape, dim=axes)
+    if torch.is_grad_enabled() and (in1.requires_grad or in2.requires_grad):
+        ret = ifft(sp1 * sp2, fshape, dim=axes)
+    else:
+        # The product is a third spectrum-sized complex array held while both
+        # inputs' spectra are still alive; for a 512^3 ice volume each is
+        # 0.6 GB, and the transient sum was the peak of the whole particle
+        # forward pass. Multiply into sp1 and release sp2 before the inverse.
+        sp1.mul_(sp2)
+        del sp2
+        ret = ifft(sp1, fshape, dim=axes)
+        del sp1
 
     if calc_fast_len:
         fslice = tuple([slice(sz) for sz in shape])

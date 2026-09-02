@@ -42,12 +42,17 @@ def test_estimate_peak_grows_linearly_with_batchsize() -> None:
 
 
 def test_estimate_peak_tracks_the_padded_box_not_num_pixels() -> None:
-    """Turning off pad_fft quarters the per-particle term (pad_nxy^2), which
-    is the whole reason a user can't guess this number from n_pixels."""
+    """Turning off pad_fft quarters the canvas part of the per-particle term
+    (pad_nxy^2), which is the whole reason a user can't guess this number
+    from n_pixels. The rotation-grid part of the per-particle term is set by
+    the unpadded template and does not move with pad_fft."""
     padded = estimate_peak_bytes(4, _NXY, _NXY, 2 * _NXY)
     unpadded = estimate_peak_bytes(4, _NXY, _NXY, _NXY)
     overhead = estimate_peak_bytes(0, _NXY, _NXY, _NXY)
-    assert (padded - overhead) == pytest.approx(4 * (unpadded - overhead), rel=1e-6)
+    grid_term = 4 * memory._TEMPLATE_COPIES_PER_PARTICLE * _NXY**3 * 4
+    assert (padded - overhead - grid_term) == pytest.approx(
+        4 * (unpadded - overhead - grid_term), rel=1e-6
+    )
 
 
 def test_estimate_peak_matches_measured_l40_sweep() -> None:
@@ -58,15 +63,23 @@ def test_estimate_peak_matches_measured_l40_sweep() -> None:
     Measured with torch.cuda.max_memory_allocated on an NVIDIA L40, default
     multislice + IceBank + pad_fft path -- see src/specter/memory.py.
     """
+    gib = 2**30
     measured_bytes = {
-        # (nxy, batchsize): measured peak
-        (128, 1): 525_785_088,
-        (128, 8): 1_292_624_896,
-        (256, 1): 1_841_214_976,
-        (256, 4): 5_246_796_800,
-        (384, 1): 6_200_550_912,
-        (384, 2): 9_906_527_232,
-        (512, 3): 32_573_034_496,
+        # (nxy, batchsize): measured peak, 2026-09-02 sweep
+        # (dev/perf-notebook-512/memsweep_results.txt)
+        (128, 1): int(0.38 * gib),
+        (128, 4): int(0.54 * gib),
+        (128, 8): int(0.72 * gib),
+        (256, 1): int(0.86 * gib),
+        (256, 2): int(1.26 * gib),
+        (256, 4): int(1.91 * gib),
+        (256, 8): int(3.19 * gib),
+        (384, 1): int(2.39 * gib),
+        (384, 2): int(3.49 * gib),
+        (384, 4): int(5.88 * gib),
+        (512, 1): int(5.48 * gib),
+        (512, 2): int(8.02 * gib),
+        (512, 3): int(11.12 * gib),
     }
     for (nxy, b), measured in measured_bytes.items():
         predicted = estimate_peak_bytes(b, nxy, nxy, 2 * nxy)

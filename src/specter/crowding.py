@@ -750,20 +750,34 @@ class CrowdWithDuplicates(L.LightningModule):
         )
         return micro
 
-    def forward(self) -> torch.Tensor:
+    def forward(self, into: torch.Tensor | None = None) -> torch.Tensor:
         """
         Full pipeline: generate coordinates, random rotations, rotate volumes,
         and insert them into a micrograph.
 
+        Parameters
+        ----------
+        into : torch.Tensor, optional
+            An existing ``(nz_out, nxy_out, nxy_out)`` canvas to accumulate the
+            duplicates into, in place. When given, no separate accumulator is
+            allocated and the duplicates are stamped straight onto it, which
+            is what a caller that would otherwise do ``V += crowd()`` wants:
+            at a 512-pixel box with ``pad_fft`` the accumulator is a second
+            2 GB canvas held only to be added once. The rotated chunks follow
+            ``into``'s device, so ``move_to_cpu`` has no effect on this path.
+
         Returns
         -------
         torch.Tensor
-            The final micrograph containing all duplicates, shape (nz_out, nxy_out, nxy_out).
-            All-zeros if no candidate positions were generated.
+            The micrograph containing all duplicates, shape (nz_out, nxy_out,
+            nxy_out) -- ``into`` itself when given. All-zeros (or ``into``
+            unchanged) if no candidate positions were generated.
         """
         self.generate_coordinates()
         self.generate_affine_matrices()
         if len(self.coords) == 0:
+            if into is not None:
+                return into
             return torch.zeros(
                 self.nz_out, self.nxy_out, self.nxy_out, device=self.device
             )
@@ -773,10 +787,16 @@ class CrowdWithDuplicates(L.LightningModule):
         # are sent -- at micrograph scale it is far larger than any chunk (a
         # 500 x 4096 x 4096 canvas is 33 GB) and is what `move_to_cpu` exists
         # to keep off the device.
-        accumulator_device = torch.device("cpu") if self.move_to_cpu else self.device
-        micrograph = torch.zeros(
-            self.nz_out, self.nxy_out, self.nxy_out, device=accumulator_device
-        )
+        if into is not None:
+            accumulator_device = into.device
+            micrograph = into
+        else:
+            accumulator_device = (
+                torch.device("cpu") if self.move_to_cpu else self.device
+            )
+            micrograph = torch.zeros(
+                self.nz_out, self.nxy_out, self.nxy_out, device=accumulator_device
+            )
         for start in track(
             range(0, self.N, self.chunk_size),
             description="Rotating duplicates and insert into micrograph",

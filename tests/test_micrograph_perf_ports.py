@@ -127,3 +127,24 @@ def test_host_volume_blend_matches_whole_canvas_blend():
     out = blend_ice_into_volume(V0.clone(), bank, dx, inplace=True)
     assert out.device.type == "cpu"
     assert float((out - V0).mean()) == pytest.approx(float(ice.mean()), rel=0.05)
+
+
+@pytest.mark.parametrize("chunk", [3, 7, 64])
+def test_ice_slab_blender_matches_whole_volume_blend(chunk):
+    """Slab by slab, in any slab size, equals the one-shot rule
+    ``V + ice * clamp(1 - occupancy(V), 0, 1)``."""
+    torch.manual_seed(0)
+    nz, n = 40, 24
+    V = torch.zeros(1, nz, n, n)
+    V[0, 10:20, 5:15, 5:15] = 9.0
+    ice = torch.rand(1, nz, n, n) * 4
+    whole = V + ice * (1 - potential_occupancy(V, 1.0)).clamp(0, 1)
+
+    from specter.ice._blend import IceSlabBlender
+
+    out = V.clone()
+    blender = IceSlabBlender(1.0)
+    for start in range(0, nz, chunk):
+        end = min(start + chunk, nz)
+        blender.add(out, ice[:, start:end].clone(), start, end)
+    assert torch.allclose(out, whole, rtol=1e-5, atol=1e-6)

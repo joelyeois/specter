@@ -5,10 +5,9 @@ import torch
 from specter import logger
 
 from ..ice import IceBank
+from ..ice._blend import IceSlabBlender
 from ..potential import (
     FULL_OCCUPANCY_POTENTIAL_V,
-    occupancy_blur_halo_voxels,
-    potential_occupancy,
 )
 from ._base import BaseImager
 
@@ -111,11 +110,8 @@ class ParticleGeneratorBase(BaseImager):
         materialised: each slab gathers its padded rows and columns from the
         unpadded ice by index (``_reflect_index``), so the ice costs one
         unpadded canvas rather than a padded one (0.5 GB against 2 GB at
-        ``nxy=512``). The blur's halo reaches into the previous slab, which
-        has already had its ice added; the weighted ice that slab received
-        is kept (``prev_tail``) and subtracted back so the occupancy is read
-        off the pristine potential, exactly as when the padded canvas held
-        it.
+        ``nxy=512``). The occupancy weighting and the slab-boundary
+        bookkeeping are :class:`~specter.ice._blend.IceSlabBlender`'s.
 
         Occupancy is read from the SCALED volume with the scale divided
         back out, rather than being computed before the scale and carried
@@ -148,8 +144,6 @@ class ParticleGeneratorBase(BaseImager):
         nz = V.shape[1]
         nxy = V.shape[-1]
         chunk = _solvate_chunk_slices(nxy)
-        # The blur reads past its slab -- see blend_ice_into_volume.
-        halo = occupancy_blur_halo_voxels(self.pixel_size)
         # One batch item at a time: the slab temporaries (the pristine copy,
         # the blur's transposed passes, the weighted ice) would otherwise all
         # scale with the batch, and at three 512-pixel boxes that was 7 GB
@@ -159,50 +153,19 @@ class ParticleGeneratorBase(BaseImager):
             Vb = V[b : b + 1]
             ice_b = ice[b : b + 1]
             full_b = full[b : b + 1] if full.shape[0] > 1 else full
-            prev_tail: torch.Tensor | None = None
+            # `full` carries the per-image scale, and it has to be divided in
+            # HERE rather than after: potential_occupancy clamps to [0, 1]
+            # against whatever reference it is given, so dividing afterwards
+            # would clamp against the wrong one.
+            blender = IceSlabBlender(self.pixel_size, full_potential=full_b)
             for start in range(0, nz, chunk):
                 end = min(start + chunk, nz)
-                lo, hi = max(0, start - halo), min(nz, end + halo)
-                # The halo overlaps the PREVIOUS slab, which has already had
-                # its ice added. Reading that directly would see inflated
-                # potential, infer a fuller voxel, and starve every chunk
-                # boundary of ice. `prev_tail` holds exactly what was added
-                # there, so subtracting it back recovers the pristine
-                # potential for one slab-sized copy.
-                src = Vb[:, lo:hi].clone()
-                if lo < start:
-                    assert prev_tail is not None
-                    src[:, : start - lo] -= prev_tail[:, -(start - lo) :]
-                # `full` carries the per-image scale, and it has to be divided
-                # in HERE rather than after: potential_occupancy clamps to
-                # [0, 1] against whatever reference it is given, so dividing
-                # afterwards would clamp against the wrong one.
-                occ = potential_occupancy(src, self.pixel_size, full_potential=full_b)[
-                    :, start - lo : start - lo + (end - start)
-                ]
-                del src
                 slab = ice_b[:, start:end]
                 if ridx is not None:
                     slab = slab.index_select(-2, ridx).index_select(-1, ridx)
                 else:
                     slab = slab.clone()
-                # In place, and reusing `occ`: `(1 - occ).clamp(0, 1)` would
-                # allocate two more slabs to produce a value consumed once.
-                slab.mul_(occ.neg_().add_(1.0))
-                Vb[:, start:end].add_(slab)
-                # Running tail of the last `halo` weighted slices, across as
-                # many previous slabs as the halo spans: the slab can be
-                # narrower than the halo on a very large canvas (the slab
-                # budget is fixed in voxels), so the previous slab alone
-                # would not cover it.
-                if halo > 0:
-                    tail = (
-                        slab
-                        if prev_tail is None
-                        else torch.cat([prev_tail, slab], dim=1)
-                    )
-                    prev_tail = tail[:, -halo:].clone()
-                    del tail
+                blender.add(Vb, slab, start, end)
                 del slab
         return V
 

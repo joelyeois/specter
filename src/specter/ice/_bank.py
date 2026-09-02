@@ -33,10 +33,9 @@ from ._energy import MLBOP
 from ..potential import (
     FULL_OCCUPANCY_POTENTIAL_V,
     WATER_COARSE_GRAIN_SIGMA_A,
-    occupancy_blur_halo_voxels,
     potential_from_deltas,
-    potential_occupancy,
 )
+from ._blend import IceSlabBlender
 from ._kernels import build_water_kernel
 from ._random import RandomIcemaker
 
@@ -1756,34 +1755,10 @@ def blend_ice_into_volume(
     # slab needs nothing but itself.
     out = V if inplace else V.clone()
     chunk = max(1, 2**24 // (nxy * nxy))
-    # The blur reads past its slab, so each one is widened and the margin
-    # discarded. Without the halo every chunk boundary would be an edge the
-    # blur sees, and the seam would print into the ice.
-    halo = occupancy_blur_halo_voxels(pixel_size, sigma_a)
+    blender = IceSlabBlender(pixel_size, full_potential=full_potential, sigma_a=sigma_a)
     for start in range(0, nz, chunk):
         end = min(start + chunk, nz)
-        sl = slice(start, end)
-        ice_slab = ice[:, sl]
-        # The halo of this slab overlaps the PREVIOUS one, which has
-        # already had its ice added -- reading it directly would see
-        # inflated potential, infer a fuller voxel, and starve every
-        # chunk boundary of ice. `ice` holds exactly what was added, so
-        # subtracting it back recovers the pristine potential. Costs one
-        # slab-sized copy, not a second canvas.
-        lo, hi = max(0, start - halo), min(nz, end + halo)
-        src = out[:, lo:hi].clone()
-        if lo < start:
-            src[:, : start - lo] -= ice[:, lo:start]
-        occ = potential_occupancy(
-            src,
-            pixel_size,
-            sigma_a=sigma_a,
-            full_potential=full_potential,
-        )[:, start - lo : start - lo + (end - start)]
-        del src
-        # In place: `(1 - occ).clamp(0, 1)` would allocate two more slabs.
-        ice_slab.mul_(occ.neg_().add_(1.0).clamp_(0.0, 1.0))
-        out[:, sl].add_(ice_slab)
+        blender.add(out, ice[:, start:end], start, end)
     return out
 
 
@@ -1840,8 +1815,8 @@ def _blend_ice_slabwise(
     dx = pixel_size
     kernel = bank._get_kernel(dx).to(device)
     kr = kernel.shape[0] // 2
-    halo_blur = occupancy_blur_halo_voxels(dx, sigma_a)
-    halo = max(kr, halo_blur) + 1
+    blender = IceSlabBlender(dx, full_potential=full_potential, sigma_a=sigma_a)
+    halo = max(kr, blender.halo) + 1
     chunk = max(1, min(slab_voxels // (n * n), nz))
 
     # Every molecule of the canvas, bucketed by slab and parked on the host:
@@ -1885,7 +1860,6 @@ def _blend_ice_slabwise(
             parts.append(torch.cat([xyz[m, :2], z_local[:, None]], dim=1))
         return torch.cat(parts, dim=0)
 
-    prev_tail: torch.Tensor | None = None
     for z0 in range(0, nz, chunk):
         z1 = min(z0 + chunk, nz)
         lo, hi = z0 - halo, z1 + halo
@@ -1910,21 +1884,6 @@ def _blend_ice_slabwise(
         if profile is not None:
             ice *= profile.window(nz, n, dx, z_slice=slice(z0, z1), device=device)[None]
 
-        vlo, vhi = max(0, z0 - halo_blur), min(nz, z1 + halo_blur)
-        src = V[:, vlo:vhi].to(device)
-        if vlo < z0:
-            assert prev_tail is not None
-            src[:, : z0 - vlo] -= prev_tail[:, -(z0 - vlo) :]
-        occ = potential_occupancy(
-            src, dx, sigma_a=sigma_a, full_potential=full_potential
-        )[:, z0 - vlo : z0 - vlo + (z1 - z0)]
-        core = src[:, z0 - vlo : z0 - vlo + (z1 - z0)]
-        ice.mul_(occ.neg_().add_(1.0).clamp_(0.0, 1.0))
-        V[:, z0:z1] = (core + ice).to(V.device)
-        del src, core, occ
-        if halo_blur > 0:
-            tail = ice if prev_tail is None else torch.cat([prev_tail, ice], dim=1)
-            prev_tail = tail[:, -halo_blur:].clone()
-            del tail
+        blender.add(V, ice, z0, z1)
         del ice
     return V

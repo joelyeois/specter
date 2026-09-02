@@ -611,66 +611,6 @@ def fourier_shell_correlation(
     return k, fsc
 
 
-def halfmap_fsc_weight_2d(
-    halfmap1: torch.Tensor,
-    halfmap2: torch.Tensor,
-    pixelsize: float,
-    clamp_negative: bool = True,
-) -> torch.Tensor:
-    """
-    Compute FSC from two masked half-maps and map it onto a 2D rfft2 frequency
-    grid for use as a loss weight in the Reconstructor Fourier-space loss.
-
-    The returned tensor has shape (H, W//2+1), matching torch.fft.rfft2 output,
-    and can be multiplied directly against squared residuals::
-
-        loss = mean(weight * |img_f - out_f|^2) / (H * W)
-
-    High-FSC (well-resolved) shells get weight ≈ 1; low-FSC (noisy) shells
-    get weight ≈ 0, naturally suppressing noise without clamping or epsilon tricks.
-
-    Parameters
-    ----------
-    halfmap1, halfmap2 : torch.Tensor
-        Masked half-map volumes, shape (N, N, N).  Apply solvent masking before
-        passing (e.g. use the masked half-maps from a cryoSPARC refinement job).
-    pixelsize : float
-        Pixel size in Å.
-    clamp_negative : bool, optional
-        If True (default), clamp FSC values below 0 to 0 before mapping.
-        Negative FSC occurs at high resolution due to noise and should not
-        contribute negatively to the loss.
-
-    Returns
-    -------
-    weight_2d : torch.Tensor
-        FSC mapped to shape (H, W//2+1).
-    """
-    H, W = halfmap1.shape[-2], halfmap1.shape[-1]
-    device = halfmap1.device
-
-    k, fsc = fourier_shell_correlation(halfmap1, halfmap2, pixelsize=pixelsize)
-
-    if clamp_negative:
-        fsc = fsc.clamp(min=0.0)
-
-    # 2D physical-frequency grid for rfft2 half-plane layout
-    kx = torch.fft.fftfreq(H, d=pixelsize, device=device)  # (H,)
-    ky = torch.fft.rfftfreq(W, d=pixelsize, device=device)  # (W//2+1,)
-    KX, KY = torch.meshgrid(kx, ky, indexing="ij")
-    k_mag = torch.sqrt(KX**2 + KY**2)  # (H, W//2+1)
-
-    # Linear interpolation of 1D FSC onto the 2D grid
-    k_flat = k_mag.reshape(-1).clamp(k[0], k[-1])
-    idx = (torch.searchsorted(k.contiguous(), k_flat.contiguous()) - 1).clamp(
-        0, len(k) - 2
-    )
-    t = (k_flat - k[idx]) / (k[idx + 1] - k[idx]).clamp(min=1e-10)
-    weight_flat = fsc[idx] + t * (fsc[idx + 1] - fsc[idx])
-
-    return weight_flat.reshape(H, W // 2 + 1)
-
-
 def _apply_conv_mode(
     ret: torch.Tensor,
     s1: Sequence[int],

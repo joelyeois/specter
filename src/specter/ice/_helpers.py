@@ -187,7 +187,7 @@ def torch_peak_local_max(
         num_peaks = int(flat_mask.sum(dim=1).min().item())  # take min available peaks
 
     # Top-k per batch
-    topk_vals, topk_idx = flat_image_masked.topk(num_peaks, dim=1)
+    _, topk_idx = flat_image_masked.topk(num_peaks, dim=1)
 
     # Convert flat indices back to 3D coords
     z = topk_idx // (H * W)

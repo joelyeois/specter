@@ -736,51 +736,6 @@ class CrowdWithDuplicates(L.LightningModule):
             R = R.unsqueeze(0)
         self.theta = rotations.build_affine_matrix(R)
 
-    def rotate_volumes(self) -> None:
-        """
-        Rotate the original volume according to the affine matrices `self.theta`.
-
-        Rotated in batches of `chunk_size`; the results are stored in
-        `self.volumes`. Note this materializes all `N` rotated volumes at once,
-        so `forward` uses its own streaming loop instead -- this stays for
-        callers that want the stack itself.
-        """
-        if self.move_to_cpu:
-            self.volumes = torch.empty((self.N,) + self.V.shape)
-        else:
-            self.volumes = torch.empty((self.N,) + self.V.shape, device=self.device)
-
-        for start in track(
-            range(0, self.N, self.chunk_size),
-            description="Rotating duplicates",
-            transient=True,
-            disable=not self.progressbars,
-        ):
-            end = min(start + self.chunk_size, self.N)
-            rotated = rotations.rotate_volume(
-                self.V,
-                self.theta[start:end].to(self.V.device),
-                padding_mode="zeros",
-            )
-            self.volumes[start:end] = rotated.cpu() if self.move_to_cpu else rotated
-
-    def insert_volumes(self) -> torch.Tensor:
-        """
-        Insert the rotated volumes (`self.volumes`) into a 3D micrograph according to `self.coords`.
-
-        Returns
-        -------
-        torch.Tensor
-            Micrograph of shape (nz_out, nxy_out, nxy_out) containing all duplicates.
-        """
-        micro = insert_particles_into_micrograph(
-            self.volumes,
-            self.coords,
-            pixel_size=self.dx,
-            micro_shape=(self.nz_out, self.nxy_out, self.nxy_out),
-        )
-        return micro
-
     def forward(self, into: torch.Tensor | None = None) -> torch.Tensor:
         """
         Full pipeline: generate coordinates, random rotations, rotate volumes,

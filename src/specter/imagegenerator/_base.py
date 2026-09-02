@@ -373,23 +373,3 @@ class BaseImager(L.LightningModule):
     def predict_step(self, batch: Any, batch_idx: int) -> torch.Tensor:
         """Standard Lightning predict step."""
         return self(batch)
-
-    def predict_epoch_end(self, outputs: list[torch.Tensor]) -> torch.Tensor | None:
-        """
-        Gather predictions from all GPUs at epoch end.
-
-        Parameters
-        ----------
-        outputs : list[torch.Tensor]
-            Per-batch predictions from this GPU.
-
-        Returns
-        -------
-        preds : torch.Tensor or None
-            Concatenated predictions from all ranks; None on non-zero ranks.
-        """
-        preds = torch.cat(outputs, dim=0)
-        preds_all = self.trainer.strategy.all_gather(preds)
-        if self.trainer.is_global_zero:
-            return preds_all.cpu()
-        return None

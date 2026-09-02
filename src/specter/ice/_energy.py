@@ -115,7 +115,6 @@ class NeighborListCache:
         self.j: torch.Tensor | None = None
         self.shift: torch.Tensor | None = None
         self.rebuilds = 0
-        self.evaluations = 0
 
     def pairs(
         self, positions: torch.Tensor, box_t: torch.Tensor, r_cut: float
@@ -142,7 +141,6 @@ class NeighborListCache:
             same units as `positions`, shape ``(n_pairs, 3)``.
         """
         pos = positions.detach()
-        self.evaluations += 1
         if self.reference is not None and self.i is not None:
             moved = float((pos - self.reference).abs().max())
             if moved <= self.skin / 2:

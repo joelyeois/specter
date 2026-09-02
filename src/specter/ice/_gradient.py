@@ -131,10 +131,9 @@ class GradientSKIcemaker(L.LightningModule):
         self.register_buffer("f_target", f_kernel, persistent=False)
 
         self.dk: float = 1 / self.n / self.dx
-        self.f_target_radial: torch.Tensor = radial_profile_3d(f_kernel.cpu())
 
         # Physical |k|-magnitude bins -- NOT radial_profile_3d's voxel-index
-        # bins (used just above for f_target_radial), which only coincide
+        # bins, which only coincide
         # with these when nz == n. For anisotropic grids (nz != n), a voxel
         # step along z spans a different physical k-spacing (1/(nz*dx)) than
         # a voxel step along x/y (1/(n*dx)=dk), so voxel-index distance and
@@ -979,53 +978,3 @@ class GradientSKIcemaker(L.LightningModule):
         with torch.no_grad():
             result = model.compute_energy(self.positions, box_size=box, pbc=pbc)
         return {k: v.item() for k, v in result.items()}
-
-    @staticmethod
-    def assemble_tiles(
-        tile_positions: list[torch.Tensor],
-        tile_box: tuple[float, float, float],
-        nx: int,
-        ny: int,
-        nz: int,
-    ) -> torch.Tensor:
-        """
-        Assemble ``nx × ny × nz`` independently-optimised tiles into one volume.
-
-        Each tile is a unique set of atom positions (independently optimised),
-        so there is no periodicity artifact.
-
-        Parameters
-        ----------
-        tile_positions : list of torch.Tensor
-            Exactly ``nx * ny * nz`` position tensors, each shape ``(N, 3)``,
-            centered at the origin in tile-box coordinates. Order is x-fastest
-            (C order).
-        tile_box : (Lx, Ly, Lz)
-            Physical size of one tile in Å.
-        nx, ny, nz : int
-            Number of tiles along each axis.
-
-        Returns
-        -------
-        positions : torch.Tensor
-            All assembled positions, shape ``(nx*ny*nz*N, 3)``, in a box
-            centered at the origin with extent ``(nx*Lx, ny*Ly, nz*Lz)`` Å.
-        """
-        n_tiles = nx * ny * nz
-        assert len(tile_positions) == n_tiles, (
-            f"Expected {n_tiles} tiles, got {len(tile_positions)}"
-        )
-        Lx, Ly, Lz = tile_box
-        assembled: list[torch.Tensor] = []
-        for idx, (ix, iy, iz) in enumerate(
-            (ix, iy, iz) for iz in range(nz) for iy in range(ny) for ix in range(nx)
-        ):
-            offset = torch.tensor(
-                [
-                    (ix - (nx - 1) / 2.0) * Lx,
-                    (iy - (ny - 1) / 2.0) * Ly,
-                    (iz - (nz - 1) / 2.0) * Lz,
-                ]
-            )
-            assembled.append(tile_positions[idx] + offset)
-        return torch.cat(assembled, dim=0)

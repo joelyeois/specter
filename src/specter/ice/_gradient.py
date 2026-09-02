@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 import lightning as L
 import torch
@@ -18,6 +18,49 @@ from ._kernels import (
     interpolate_target_kernel,
     load_mdsim_f_radial_avg,
 )
+
+
+class _PlateauStop:
+    """
+    :meth:`GradientSKIcemaker.optimize`'s early-stopping rule.
+
+    Stop once the relative change in loss, ``abs(prev - cur) / abs(prev)``,
+    has stayed below `tol` for `patience` consecutive steps. Halfway through
+    such a streak `on_stall` is called once (L-BFGS clears its history
+    there), so a stalled line search restarts rather than being read as
+    convergence; a run that has really converged plateaus through the
+    restart and still stops at `patience`.
+
+    Parameters
+    ----------
+    tol : float or None
+        Relative tolerance; None disables the rule.
+    patience : int
+        Consecutive sub-tolerance steps that stop the run.
+    on_stall : callable, optional
+        Called at ``patience // 2`` consecutive sub-tolerance steps.
+    """
+
+    def __init__(
+        self, tol: float | None, patience: int, on_stall: Callable[[], Any] | None
+    ) -> None:
+        self.tol = tol
+        self.patience = patience
+        self.on_stall = on_stall
+        self.prev: float | None = None
+        self.count = 0
+
+    def update(self, loss_val: float) -> bool:
+        """Feed one step's loss; True once the streak has reached `patience`."""
+        if self.tol is None:
+            return False
+        if self.prev is not None:
+            rel_change = abs(self.prev - loss_val) / (abs(self.prev) + 1e-12)
+            self.count = self.count + 1 if rel_change < self.tol else 0
+            if self.count == max(1, self.patience // 2) and self.on_stall is not None:
+                self.on_stall()
+        self.prev = loss_val
+        return self.count >= self.patience
 
 
 def _wrap_coords(x: torch.Tensor, L: float) -> torch.Tensor:
@@ -379,6 +422,79 @@ class GradientSKIcemaker(L.LightningModule):
             _pbar.close()
             _manager.release(_pbar_pos)
 
+    def _run_steps(
+        self,
+        pos: torch.Tensor,
+        n_steps: int,
+        take_step: Callable[[], float],
+        desc: str,
+        record_every: int,
+        history: dict[str, Any],
+        raw_sk_loss: Callable[[], float],
+        last_f_amp: list[torch.Tensor],
+        stop: "_PlateauStop",
+    ) -> bool:
+        """
+        The outer loop shared by :meth:`optimize`'s optimisers.
+
+        Parameters
+        ----------
+        pos : torch.Tensor
+            The positions being optimised; wrapped into the cell after
+            every step.
+        n_steps : int
+            Step ceiling.
+        take_step : callable
+            Runs one optimiser step and returns the loss it started from.
+        desc : str
+            Progress-bar label.
+        record_every : int
+            Record `history` every this many steps (and at an early stop).
+        history : dict
+            Lists appended to: ``step``, ``loss``, ``sk_loss``,
+            ``radial_profile``.
+        raw_sk_loss : callable
+            The penalty-free S(k) loss at the current positions.
+        last_f_amp : list of torch.Tensor
+            One-element box `take_step` leaves the latest ``|F(k)|`` in.
+        stop : _PlateauStop
+            The early-stopping rule.
+
+        Returns
+        -------
+        bool
+            Whether the rule stopped the run before `n_steps`.
+        """
+
+        def record(step: int, loss_val: float) -> None:
+            with torch.no_grad():
+                rad = radial_profile_3d(last_f_amp[0].cpu())
+            history["step"].append(step)
+            history["loss"].append(loss_val)
+            history["sk_loss"].append(raw_sk_loss())
+            history["radial_profile"].append(rad)
+
+        manager = ProgressManager()
+        pbar, pbar_pos = manager.get_pbar(
+            range(n_steps), desc=desc, disable=not self.progressbars, transient=True
+        )
+        try:
+            for step in pbar:
+                loss_val = take_step()
+                self._wrap_positions_(pos)
+                plateaued = stop.update(loss_val)
+                pbar.set_postfix(loss=f"{loss_val:.6f}")
+                if step % record_every == 0:
+                    record(step, loss_val)
+                if plateaued:
+                    if history["step"] and history["step"][-1] != step:
+                        record(step, loss_val)
+                    return True
+        finally:
+            pbar.close()
+            manager.release(pbar_pos)
+        return False
+
     def optimize(
         self,
         n_steps: int = 250,
@@ -552,9 +668,6 @@ class GradientSKIcemaker(L.LightningModule):
             "sk_loss": [],
             "radial_profile": [],
         }
-        stopped_early = False
-        prev_loss: Optional[float] = None
-        plateau_count = 0
 
         def _raw_sk_loss() -> float:
             with torch.no_grad():
@@ -562,137 +675,73 @@ class GradientSKIcemaker(L.LightningModule):
                 return sk_loss.item()
 
         neighbor_cache = NeighborListCache()
+        last_f_amp: list[torch.Tensor] = [torch.empty(0)]
 
+        def loss_and_backward() -> torch.Tensor:
+            loss, f_amp = self._sk_loss(
+                pos,
+                rep_strength=rep_strength,
+                mlbop_strength=mlbop_strength,
+                mlbop_target=mlbop_target,
+                neighbor_cache=neighbor_cache,
+                deterministic=False,
+            )
+            loss.backward()
+            last_f_amp[0] = f_amp.detach()
+            return loss
+
+        on_stall: Callable[[], Any] | None
         if optimizer == "lbfgs":
             if prerelax_steps > 0 and mlbop_strength > 0.0:
                 self._prerelax(pos, prerelax_steps, neighbor_cache)
-            opt = torch.optim.LBFGS(
+            lbfgs = torch.optim.LBFGS(
                 [pos],
                 lr=lr,
                 max_iter=max_iter,
                 history_size=history_size,
                 line_search_fn="strong_wolfe",
             )
-            last_f_amp: list[torch.Tensor] = [torch.empty(0)]
 
             def closure() -> torch.Tensor:
-                opt.zero_grad()
-                loss, f_amp = self._sk_loss(
-                    pos,
-                    rep_strength=rep_strength,
-                    mlbop_strength=mlbop_strength,
-                    mlbop_target=mlbop_target,
-                    neighbor_cache=neighbor_cache,
-                    deterministic=False,
-                )
-                loss.backward()
-                last_f_amp[0] = f_amp.detach()
-                return loss
+                lbfgs.zero_grad()
+                return loss_and_backward()
 
-            _manager = ProgressManager()
-            _pbar, _pbar_pos = _manager.get_pbar(
-                range(n_steps),
-                desc="L-BFGS for ice coordinates",
-                disable=not self.progressbars,
-                transient=True,
-            )
-            try:
-                for step in _pbar:
-                    loss = opt.step(closure)
-                    self._wrap_positions_(pos)
-                    loss_val = (
-                        loss.item() if isinstance(loss, torch.Tensor) else float(loss)
-                    )
-                    if tol is not None and prev_loss is not None:
-                        rel_change = abs(prev_loss - loss_val) / (
-                            abs(prev_loss) + 1e-12
-                        )
-                        plateau_count = plateau_count + 1 if rel_change < tol else 0
-                        if plateau_count == max(1, patience // 2):
-                            # A stalled line search, not convergence, is the
-                            # usual reason for a run of unchanged losses at
-                            # this point: L-BFGS keeps proposing the same
-                            # direction, the strong-Wolfe search keeps
-                            # returning t = 0. Dropping the curvature history
-                            # restarts from steepest descent, which resolves
-                            # a stall in a few steps; a run that really has
-                            # converged plateaus through the restart and
-                            # still stops at ``patience``.
-                            opt.state.clear()
-                    prev_loss = loss_val
-                    _pbar.set_postfix(loss=f"{loss_val:.6f}")
-                    if step % record_every == 0:
-                        with torch.no_grad():
-                            rad = radial_profile_3d(last_f_amp[0].cpu())
-                        history["step"].append(step)
-                        history["loss"].append(loss_val)
-                        history["sk_loss"].append(_raw_sk_loss())
-                        history["radial_profile"].append(rad)
-                    if tol is not None and plateau_count >= patience:
-                        stopped_early = True
-                        if history["step"] and history["step"][-1] != step:
-                            with torch.no_grad():
-                                rad = radial_profile_3d(last_f_amp[0].cpu())
-                            history["step"].append(step)
-                            history["loss"].append(loss_val)
-                            history["sk_loss"].append(_raw_sk_loss())
-                            history["radial_profile"].append(rad)
-                        break
-            finally:
-                _pbar.close()
-                _manager.release(_pbar_pos)
+            def take_step() -> float:
+                loss = lbfgs.step(closure)
+                return loss.item() if isinstance(loss, torch.Tensor) else float(loss)
 
+            desc = "L-BFGS for ice coordinates"
+            # A stalled line search, not convergence, is the usual reason
+            # for a run of unchanged losses: L-BFGS keeps proposing the same
+            # direction, the strong-Wolfe search keeps returning t = 0.
+            # Dropping the curvature history restarts from steepest descent,
+            # which resolves a stall in a few steps; a run that really has
+            # converged plateaus through the restart and still stops at
+            # ``patience``.
+            on_stall = lbfgs.state.clear
         else:  # adam
-            opt_adam = torch.optim.Adam([pos], lr=lr)
-            _manager = ProgressManager()
-            _pbar, _pbar_pos = _manager.get_pbar(
-                range(n_steps),
-                desc="Adam",
-                disable=not self.progressbars,
-                transient=True,
-            )
-            try:
-                for step in _pbar:
-                    opt_adam.zero_grad()
-                    loss, f_amp = self._sk_loss(
-                        pos,
-                        rep_strength=rep_strength,
-                        mlbop_strength=mlbop_strength,
-                        mlbop_target=mlbop_target,
-                        neighbor_cache=neighbor_cache,
-                        deterministic=False,
-                    )
-                    loss.backward()
-                    opt_adam.step()
-                    self._wrap_positions_(pos)
-                    loss_val = loss.item()
-                    if tol is not None and prev_loss is not None:
-                        rel_change = abs(prev_loss - loss_val) / (
-                            abs(prev_loss) + 1e-12
-                        )
-                        plateau_count = plateau_count + 1 if rel_change < tol else 0
-                    prev_loss = loss_val
-                    _pbar.set_postfix(loss=f"{loss_val:.6f}")
-                    if step % record_every == 0:
-                        with torch.no_grad():
-                            rad = radial_profile_3d(f_amp.detach().cpu())
-                        history["step"].append(step)
-                        history["loss"].append(loss_val)
-                        history["sk_loss"].append(_raw_sk_loss())
-                        history["radial_profile"].append(rad)
-                    if tol is not None and plateau_count >= patience:
-                        stopped_early = True
-                        if history["step"] and history["step"][-1] != step:
-                            with torch.no_grad():
-                                rad = radial_profile_3d(f_amp.detach().cpu())
-                            history["step"].append(step)
-                            history["loss"].append(loss_val)
-                            history["sk_loss"].append(_raw_sk_loss())
-                            history["radial_profile"].append(rad)
-                        break
-            finally:
-                _pbar.close()
-                _manager.release(_pbar_pos)
+            adam = torch.optim.Adam([pos], lr=lr)
+
+            def take_step() -> float:
+                adam.zero_grad()
+                loss = loss_and_backward()
+                adam.step()
+                return loss.item()
+
+            desc = "Adam"
+            on_stall = None
+
+        stopped_early = self._run_steps(
+            pos,
+            n_steps,
+            take_step,
+            desc,
+            record_every,
+            history,
+            _raw_sk_loss,
+            last_f_amp,
+            _PlateauStop(tol, patience, on_stall),
+        )
 
         history["stopped_early"] = stopped_early
         self.positions = pos.detach().float().cpu()

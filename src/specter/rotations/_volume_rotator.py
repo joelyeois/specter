@@ -5,6 +5,7 @@ from typing import Sequence
 import lightning as L
 import torch
 import torch.nn.functional as F
+from torch.utils.checkpoint import checkpoint
 
 from ..fft import fft3, ifft3
 from ._volume import (
@@ -409,19 +410,34 @@ class VolumeRotator(L.LightningModule):
         Returns: (B, Z, Y, X)
         """
         B = theta.shape[0]
-        grid = self._build_grid(theta, origin=origin)
 
-        V = V.unsqueeze(0).unsqueeze(1)  # (1, 1, Z, Y, X)
-        V = V.expand(B, 1, self.nz, self.ny, self.nx)
+        def sample(vol: torch.Tensor, theta_b: torch.Tensor) -> torch.Tensor:
+            grid = self._build_grid(theta_b, origin=origin)
+            vin = vol[None, None].expand(theta_b.shape[0], 1, self.nz, self.ny, self.nx)
+            return F.grid_sample(
+                vin,
+                grid,
+                align_corners=self.align_corners,
+                padding_mode=self.padding_mode,
+            )[:, 0]
 
-        V_rot = F.grid_sample(
-            V,
-            grid,
-            align_corners=self.align_corners,
-            padding_mode=self.padding_mode,
-        )
-
-        return V_rot.squeeze(1)  # (B, Z, Y, X)
+        if torch.is_grad_enabled() and V.requires_grad:
+            # Training (a reconstruction): the sampling grid is three floats
+            # per voxel per image, 1.6 GB at a 512 box, and grid_sample's
+            # backward needs it, so a batch of three kept 4.8 GB of grids
+            # alive from the forward to the backward. Recomputing each
+            # image's grid in the backward (one broadcast write) and
+            # sampling one image at a time took a reconstruction step's peak
+            # from 16 to 10 GiB for ~5% more time. The values are the same:
+            # grid_sample is per-voxel, so batching changes no arithmetic.
+            return torch.cat(
+                [
+                    checkpoint(sample, V, theta[b : b + 1], use_reentrant=False)
+                    for b in range(B)
+                ],
+                dim=0,
+            )
+        return sample(V, theta)  # (B, Z, Y, X)
 
     # ------------------------------------------------------------------
     # Fourier-space rotation

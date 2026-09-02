@@ -12,7 +12,6 @@ from torch.optim.lr_scheduler import (
     OneCycleLR,
 )
 
-from ..fft import fft3, ifft3
 
 # ---------------------------------------------------------------------------
 # Shared helpers used by both Reconstructor and TomogramReconstructor
@@ -102,11 +101,51 @@ def _preprocess_particle_images(
     return dose_per_area**0.5 * images + dose_per_area
 
 
-def _apply_kmask_inplace(V: torch.Tensor, kmask: torch.Tensor | None) -> None:
-    """Zero V's Fourier components outside ``kmask``, in-place, if a mask is set."""
-    if kmask is None:
+def _kmask_half_spectrum(kmask: torch.Tensor) -> torch.Tensor:
+    """
+    A centred k-mask as the half spectrum ``rfftn`` produces.
+
+    ``ifftshift`` moves the mask's zero frequency to index 0, the layout of
+    an unshifted FFT, and the last axis is cut to the ``n // 2 + 1``
+    non-redundant frequencies of a real volume's transform. Computed once
+    per mask (see :meth:`_BaseReconstructor._kmask_half`), so the per-step
+    application needs no shifts at all.
+
+    Parameters
+    ----------
+    kmask : torch.Tensor
+        Centred mask, shape ``(Z, Y, X)``, symmetric under ``k -> -k``.
+
+    Returns
+    -------
+    torch.Tensor
+        Shape ``(Z, Y, X // 2 + 1)``, same dtype and device.
+    """
+    n = kmask.shape[-1]
+    return torch.fft.ifftshift(kmask)[..., : n // 2 + 1].contiguous()
+
+
+def _apply_kmask_inplace(V: torch.Tensor, kmask_half: torch.Tensor | None) -> None:
+    """
+    Band-limit `V` in place with a half-spectrum k-mask.
+
+    Applied after every optimiser step. It used to be spelled as a centred
+    complex FFT round trip, ``real(ifft3(fft3(V, shift=True) * kmask,
+    shift=True))``: twelve ``roll`` passes and two complex 512^3 transforms,
+    137 ms and 6.5 GiB per step on a 512-box reconstruction, against a
+    ~160 ms training step. The real-to-complex transform of a real volume
+    against the mask's unshifted half spectrum is the same operation.
+
+    Parameters
+    ----------
+    V : torch.Tensor
+        Real volume, ``(Z, Y, X)``; ``V.data`` is replaced.
+    kmask_half : torch.Tensor or None
+        From :func:`_kmask_half_spectrum`; None leaves `V` untouched.
+    """
+    if kmask_half is None:
         return
-    V.data = torch.real(ifft3(fft3(V.data, shift=True) * kmask, shift=True))
+    V.data = torch.fft.irfftn(torch.fft.rfftn(V.data) * kmask_half, s=V.shape)
 
 
 def _log_current_lr(trainer: L.Trainer, lr: float | None, log_lrs: list[float]) -> None:

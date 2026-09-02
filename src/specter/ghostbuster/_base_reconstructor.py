@@ -8,7 +8,12 @@ import lightning as L
 import torch
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 
-from ._helpers import _apply_kmask_inplace, _build_epoch_metrics, _log_current_lr
+from ._helpers import (
+    _apply_kmask_inplace,
+    _build_epoch_metrics,
+    _kmask_half_spectrum,
+    _log_current_lr,
+)
 
 # ---------------------------------------------------------------------------
 # Shared LightningModule scaffolding for Reconstructor and TomogramReconstructor
@@ -59,7 +64,20 @@ class _BaseReconstructor(L.LightningModule):
 
     def on_train_batch_end(self, outputs: Any, batch: Any, batch_idx: int) -> None:
         """Apply the Fourier-space k-mask to V after each gradient update."""
-        _apply_kmask_inplace(self.V, self.kmask)
+        _apply_kmask_inplace(self.V, self._kmask_half())
+
+    def _kmask_half(self) -> torch.Tensor | None:
+        """``self.kmask`` as an unshifted half spectrum, built once per mask
+        tensor and device (see :func:`_kmask_half_spectrum`)."""
+        kmask = self.kmask
+        if kmask is None:
+            return None
+        key = (kmask.data_ptr(), kmask.device, tuple(kmask.shape))
+        cached = getattr(self, "_kmask_half_cache", None)
+        if cached is None or cached[0] != key:
+            cached = (key, _kmask_half_spectrum(kmask))
+            self._kmask_half_cache = cached
+        return cached[1]
 
     def num_training_steps_per_epoch(self) -> int:
         """

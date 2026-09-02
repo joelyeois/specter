@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, Sequence, cast
 
 import lightning as L
+from lightning.pytorch.callbacks import TQDMProgressBar
 import torch
 
 # ---------------------------------------------------------------------------
@@ -87,6 +88,11 @@ def build_trainer(
     """
     device_list = [device] if isinstance(device, int) else list(device)
     multi_gpu = use_gpu and len(device_list) > 1
+    # The progress bar reads the logged loss with `.item()` on every
+    # refresh, a device sync; at the default refresh of every step that
+    # serialised the CPU's kernel launches behind the GPU. Every tenth step
+    # is the same bar to a human.
+    callbacks = [TQDMProgressBar(refresh_rate=10), *(callbacks or [])]
     return L.Trainer(
         accelerator="gpu" if use_gpu else "cpu",
         devices=device_list if use_gpu else 1,
@@ -95,5 +101,5 @@ def build_trainer(
         precision=cast(Any, precision if use_gpu else "32"),
         logger=False,
         enable_checkpointing=False,
-        callbacks=callbacks or [],
+        callbacks=callbacks,
     )

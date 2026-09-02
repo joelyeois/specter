@@ -202,6 +202,11 @@ class BaseImager(L.LightningModule):
         _to_buffer(dose_per_angstrom, "dose_per_angstrom")
         _to_buffer(coincidence_radius, "coincidence_radius")
         _to_buffer(potential_scale, "potential_scale")
+        # Decided once, on the host: `forward` used to test the buffer's
+        # batch every step (`bool(torch.all(scale == 1))`), a device sync
+        # per step that, in a training loop, exposed the CPU's kernel-launch
+        # time instead of overlapping it with the GPU.
+        self._potential_scale_is_unity = bool(torch.all(self.potential_scale == 1.0))
         if bfactor is not None:
             if "bfactor" in self._ctf_param_names:
                 self._buffers.pop("bfactor")

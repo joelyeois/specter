@@ -249,7 +249,7 @@ class ParticleGeneratorBase(BaseImager):
         # Skipped when every scale is 1 (the default): `V * scale` is a
         # second whole canvas, and the caller's own reference keeps the
         # first one alive alongside it. Same guard MicrographGenerator uses.
-        if not bool(torch.all(scale == 1.0)):
+        if not self._potential_scale_is_unity:
             V = V * scale
 
         if getattr(self, "save_clean_exitwaves", False):

@@ -503,7 +503,7 @@ class MicrographGenerator(BaseImager):
         scale = self.potential_scale[idx].reshape(-1, 1, 1, 1).to(V.device)
         # Skipped when every scale is 1 (the default), since `V * scale` is a
         # second full copy of a volume that may be tens of GB.
-        if not bool(torch.all(scale == 1.0)):
+        if not self._potential_scale_is_unity:
             V = V * scale
 
         if (

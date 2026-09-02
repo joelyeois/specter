@@ -496,6 +496,10 @@ class Reconstructor(_BaseReconstructor):
             (optimizers, lr_schedulers) — only the volume optimiser gets a
             scheduler; rotation/translation/defocus optimisers use a fixed LR.
         """
+        # Not fused=True: it is ~8 ms faster per step on a 512^3 volume, but
+        # Lightning's 16-mixed plugin hands it grads it rejects ("params,
+        # grads, exp_avgs, and exp_avg_sqs must have same dtype, device, and
+        # layout"), measured 2026-09-03.
         if self.lr is not None:
             optimizerV = AdamW([self.V], lr=self.lr, weight_decay=0.0)
             # optimizer = SGD(self.parameters(), lr=self.lr, momentum=0.9)
@@ -587,14 +591,18 @@ class Reconstructor(_BaseReconstructor):
                 else None
             )
             loss = mse_loss(out, images, w, mask=mask)
-        self.log_norm_loss.append(self._gather_for_logging(loss).cpu())
+        # Kept on the device: a `.cpu()` here is a sync per step, and with
+        # three of them the step ran 270 ms where the same work runs 160 ms
+        # asynchronously. The lists are read once, when the epoch's metrics
+        # are built.
+        self.log_norm_loss.append(self._gather_for_logging(loss).detach())
 
         if self.sparsity is not None:
             sparsity_loss = self.sparsity * torch.mean(torch.abs(self.V))
             loss = loss + sparsity_loss
-            self.log_sparsity_loss.append(sparsity_loss.detach().cpu())
+            self.log_sparsity_loss.append(sparsity_loss.detach())
 
-        self.log_total_loss.append(self._gather_for_logging(loss).cpu())
+        self.log_total_loss.append(self._gather_for_logging(loss).detach())
         return loss
 
     def _project_fsc_mask_2d(

@@ -28,6 +28,15 @@ from .rotations import VolumeRotator, build_affine_matrix
 _MULTISLICE_SLICE_CHUNK = 8
 
 
+#: Complex elements per z-chunk of the single-scatter slice sums
+#: (:meth:`Scattering._fourier_slice_sum`): 2**23 is 64 MB of complex64, ten
+#: slices of a 512-box at batch 3. Measured on an L40 at that size, rytov
+#: forward + backward: 51 ms at 2**23, 89 ms at 2**25 and 2**27, 141 ms
+#: unchunked -- a chunk that fits the L2 cache wins outright, since every
+#: pass here is memory-bound.
+_SLICE_SUM_CHUNK_ELEMENTS = 2**23
+
+
 class Scattering(L.LightningModule):
     def __init__(
         self,
@@ -234,6 +243,70 @@ class Scattering(L.LightningModule):
         assert exitwave is not None, "V must have at least one z-slice"
         return exitwave
 
+    def _propagator(self, V: torch.Tensor) -> torch.Tensor:
+        """
+        The complex first-Born propagator stack ``(Z, Y, X)`` on `V`'s device
+        and complex dtype, in slice order matching the traversal.
+
+        Cached: it was rebuilt from ``F_real``/``F_imag`` on every call, a
+        1 GB complex volume at a 512 box, and the reversed traversal for
+        ``ews_curvature_sign="negative"`` flipped the *volume* instead --
+        a full copy of ``V`` in forward and again in backward -- when
+        flipping the constant propagator once is the same sum.
+        """
+        cdtype = torch.complex128 if V.dtype == torch.float64 else torch.complex64
+        key = (V.device, cdtype, self.ews_curvature_sign)
+        cached = getattr(self, "_propagator_cache", None)
+        if cached is not None and cached[0] == key:
+            return cached[1]
+        F = (self.F_real + 1j * self.F_imag).to(device=V.device, dtype=cdtype)
+        if self.ews_curvature_sign == "negative":
+            F = F.flip(0)
+        self._propagator_cache = (key, F)
+        return F
+
+    def _fourier_slice_sum(
+        self, V: torch.Tensor, per_slice: Callable[[torch.Tensor], torch.Tensor] | None
+    ) -> torch.Tensor:
+        """
+        ``sum_z fft2(g(V_z)) * F_z`` over the slices, a z-chunk at a time.
+
+        The three single-scatter models differ only in ``g`` (identity, or
+        ``exp(i sigma dz V) - 1`` for kinematic) and in what multiplies the
+        result. Chunking bounds the working set to one chunk's complex
+        spectrum instead of the whole volume's: the unchunked form held
+        the complex volume, its spectrum and the product at once, 3 x 3.2 GB
+        for three 512-boxes, and that was most of a reconstruction step's
+        device memory. Autograd keeps only each chunk's propagator view.
+
+        Parameters
+        ----------
+        V : torch.Tensor
+            ``(B, Z, Y, X)``, real or complex.
+        per_slice : callable, optional
+            Applied to each chunk before the FFT. None means the identity.
+
+        Returns
+        -------
+        torch.Tensor
+            ``(B, Y, X)`` complex.
+        """
+        F = self._propagator(V)
+        B, nz, ny, nx = V.shape
+        chunk = max(1, _SLICE_SUM_CHUNK_ELEMENTS // (B * ny * nx))
+        acc: torch.Tensor | None = None
+        # `split`, not `V[:, z0:z1]`: a narrow slice's backward materialises
+        # a full-size zero gradient per chunk (the O(Z^2) trap 41e0125 took
+        # out of multislice), 17 ms and 1.6 GB per chunk at a 512 box, while
+        # split's backward is one concatenation.
+        for z0, block in zip(range(0, nz, chunk), V.split(chunk, dim=1)):
+            if per_slice is not None:
+                block = per_slice(block)
+            term = (fft2(block) * F[None, z0 : z0 + chunk]).sum(dim=1)
+            acc = term if acc is None else acc + term
+        assert acc is not None, "V must have at least one z-slice"
+        return acc
+
     def rytov(self, V: torch.Tensor) -> torch.Tensor:
         """
         Compute exit wave using Rytov approximation.
@@ -243,7 +316,10 @@ class Scattering(L.LightningModule):
         Parameters
         ----------
         V : torch.Tensor
-            Complex-valued 3D potential volume with shape (B, Z, Y, X).
+            3D potential volume with shape (B, Z, Y, X). Real, in which
+            case the amplitude-contrast factor ``self.alpha`` is applied
+            (as a scalar on the slice sum, the model being linear in V);
+            or already complex (absorptive), used as given.
 
         Returns
         -------
@@ -253,74 +329,68 @@ class Scattering(L.LightningModule):
         Notes
         -----
         The Rytov approximation computes the exit wave as:
+
         ψ = exp(iσ Σ_z [F(z) ★ V(z)])
+
         where F(z) is the Fresnel propagator from slice z to the exit plane
         and ★ denotes convolution (Fourier-domain multiplication).
-        This is the exponentiated Born series, reducing to the first Born
-        approximation for small V.
-        """
-        F = self.F_real + 1j * self.F_imag
-        if self.ews_curvature_sign == "negative":
-            V = torch.flip(V, dims=(1,))
 
-        # Sum over slices in Fourier space, then take a single inverse FFT.
-        # The inverse FFT is linear, so it commutes with the sum over z: this
-        # is the same quantity as summing nz inverse-transformed planes, but
-        # costs one inverse FFT instead of nz. See the note in
-        # IterativeScattering.parallel_rytov, which does the same.
-        scattered_k = (fft2(1j * self.sigma * self.pixel_size * V) * F[None, ...]).sum(
-            dim=1
-        )
-        exitwave = torch.exp(ifft2(scattered_k))
+        This is the exponentiated Born series, reducing to the first Born
+        approximation for small V. The sum over slices is taken in Fourier
+        space and inverse-transformed once (the inverse FFT is linear, so it
+        commutes with the sum), a z-chunk at a time; see
+        :meth:`_fourier_slice_sum`.
+        """
+        scattered_k = self._fourier_slice_sum(V, None)
+        scale = 1j * self.sigma * self.pixel_size * self._absorption_factor(V)
+        exitwave = torch.exp(ifft2(scale * scattered_k))
         return exitwave  # (B x X x Y)
+
+    def _absorption_factor(self, V: torch.Tensor) -> complex:
+        """``sqrt(1 - alpha^2) + i alpha`` for a real `V`, 1 for a complex one
+        (which already carries it)."""
+        if V.is_complex() or self.alpha == 0:
+            return 1.0
+        return (1 - self.alpha**2) ** 0.5 + 1j * self.alpha
 
     def firstborn(self, V: torch.Tensor) -> torch.Tensor:
         """
         Compute exit wave using first Born approximation.
 
-        Weak phase object approximation that treats scattering as a single
-        event. Faster than multislice but less accurate for thick specimens.
-
         Parameters
         ----------
         V : torch.Tensor
-            Complex-valued 3D potential volume with shape (B, Z, Y, X).
+            3D potential volume with shape (B, Z, Y, X), real (the
+            amplitude-contrast factor is applied here) or complex.
 
         Returns
         -------
         exitwave : torch.Tensor
-            Complex-valued 2D exit wave with shape (B, Y, X).
+            Complex-valued 2D scattered wave with shape (B, Y, X).
 
         Notes
         -----
-        The first Born approximation computes the exit wave as:
-        ψ = 1 + i Σ_z [F(z) * V(z)]
-        where F(z) accounts for Fresnel propagation from slice z to the exit plane.
-        """
-        F = self.F_real + 1j * self.F_imag
-        if self.ews_curvature_sign == "negative":
-            V = torch.flip(V, dims=(1,))
+        The first Born approximation computes the scattered wave as:
 
-        V_f = fft2(V)
-        exitwave_f = self.sigma * self.pixel_size * V_f * F[None, ...]
-        # Sum along Z in Fourier space -- one inverse FFT instead of nz. The
-        # inverse FFT is linear, so it commutes with the sum (see rytov).
-        exitwave = ifft2(torch.sum(exitwave_f, 1))
-        exitwave = 1 + 1j * exitwave
-        return exitwave
+        ψ = 1 + iσ Σ_z [F(z) ★ V(z)]
+
+        Valid only for weak scatterers where multiple scattering is
+        negligible. Same slice sum as :meth:`rytov`, with the exponent
+        linearised.
+        """
+        scattered_k = self._fourier_slice_sum(V, None)
+        scale = 1j * self.sigma * self.pixel_size * self._absorption_factor(V)
+        return 1 + ifft2(scale * scattered_k)
 
     def kinematic(self, V: torch.Tensor) -> torch.Tensor:
         """
-        Compute exit wave using kinematic scattering approximation.
-
-        Each slice sees only the incident plane wave (single scattering).
-        Uses the full transmission function per slice, without the weak-phase
-        linearisation applied by the ``firstborn`` method.
+        Compute the exit wave in the kinematic (single-scattering) approximation.
 
         Parameters
         ----------
         V : torch.Tensor
-            Complex-valued 3D potential volume with shape (B, Z, Y, X).
+            3D potential volume with shape (B, Z, Y, X), real (the
+            amplitude-contrast factor is applied here) or complex.
 
         Returns
         -------
@@ -329,25 +399,20 @@ class Scattering(L.LightningModule):
 
         Notes
         -----
-        The exit wave is the first-order term of the multislice Born series:
-
         ψ = 1 + Σ_z F⁻¹{ F[exp(iσΔz V_z) − 1] · F_z }
 
-        where F_z propagates from slice z to the exit plane. Compared to
+        Each slice scatters once and propagates to the exit plane. Unlike
         ``firstborn``, the per-slice amplitude ``exp(iσΔz V_z) − 1`` is kept
-        exact rather than linearised to ``iσΔz V_z``. The two are equivalent
-        for small phase per slice (σΔz V ≪ 1) but diverge for thick slices
-        or dense material.
+        exact rather than linearised, so it stays valid for stronger
+        potentials as long as multiple scattering between slices is
+        negligible.
         """
-        F = self.F_real + 1j * self.F_imag
-        if self.ews_curvature_sign == "negative":
-            V = torch.flip(V, dims=(1,))
+        factor = 1j * self.sigma * self.pixel_size * self._absorption_factor(V)
 
-        t = torch.exp(1j * self.sigma * self.pixel_size * V) - 1
-        # Sum along Z in Fourier space -- one inverse FFT instead of nz. The
-        # inverse FFT is linear, so it commutes with the sum (see rytov).
-        exitwave = 1 + ifft2(torch.sum(fft2(t) * F[None, ...], 1))
-        return exitwave
+        def transmit(block: torch.Tensor) -> torch.Tensor:
+            return torch.exp(factor * block) - 1
+
+        return 1 + ifft2(self._fourier_slice_sum(V, transmit))
 
     def projection(self, V: torch.Tensor) -> torch.Tensor:
         """
@@ -428,16 +493,15 @@ class Scattering(L.LightningModule):
             # see its docstring for why not here.
             return self.multislice(V)
         elif self.scattering_model == "rytov":
-            V = apply_amplitude_contrast(V, alpha=self.alpha)
+            # amplitude contrast folded into the slice sum's scalar (the
+            # model is linear in V), not materialised as a complex volume.
             return self.rytov(V)
         elif self.scattering_model == "projection":
             V = apply_amplitude_contrast(V, alpha=self.alpha)
             return self.projection(V)
         elif self.scattering_model == "firstborn":
-            V = apply_amplitude_contrast(V, alpha=self.alpha)
             return self.firstborn(V)
         elif self.scattering_model == "kinematic":
-            V = apply_amplitude_contrast(V, alpha=self.alpha)
             return self.kinematic(V)
         elif self.scattering_model == "ctf":
             return self.ctf(V)

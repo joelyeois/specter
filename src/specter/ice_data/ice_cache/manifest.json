@@ -1,5 +1,5 @@
 {
-  "generated": "2026-08-17T15:58:01+00:00",
+  "generated": "2026-09-02T14:54:47+00:00",
   "specter_version": "0.1.0",
   "configs": [
     {
@@ -9,18 +9,23 @@
       "dx": 1.0,
       "box_L": 256.0,
       "n_atoms": 527178,
-      "n_steps": 600,
-      "n_steps_actual": 600,
-      "wall_time": 1297.0621061883867,
-      "stopped_early": false,
-      "sk_loss": 0.001474840915761888,
-      "E_per_atom": -0.10499059408903122,
+      "n_steps": 250,
+      "n_steps_actual": 146,
+      "wall_time": 336.98138865455985,
+      "stopped_early": true,
+      "sk_loss": 0.005719106178730726,
+      "E_per_atom": -0.22825710475444794,
       "recipe": {
         "rep_strength": 0.0,
         "mlbop_strength": 0.5,
         "mlbop_target": -0.413,
-        "tol": 0.0001,
+        "tol": 0.001,
         "patience": 10
+      },
+      "optimizer": {
+        "history_size": 100,
+        "max_iter": 25,
+        "prerelax_steps": 30
       }
     },
     {
@@ -30,18 +35,23 @@
       "dx": 1.0,
       "box_L": 256.0,
       "n_atoms": 527178,
-      "n_steps": 600,
-      "n_steps_actual": 600,
-      "wall_time": 1326.2259522788227,
-      "stopped_early": false,
-      "sk_loss": 0.00046277823275886476,
-      "E_per_atom": -0.1191098541021347,
+      "n_steps": 250,
+      "n_steps_actual": 111,
+      "wall_time": 284.22818054258823,
+      "stopped_early": true,
+      "sk_loss": 0.0042850663885474205,
+      "E_per_atom": -0.22106648981571198,
       "recipe": {
         "rep_strength": 0.0,
         "mlbop_strength": 0.5,
         "mlbop_target": -0.413,
-        "tol": 0.0001,
+        "tol": 0.001,
         "patience": 10
+      },
+      "optimizer": {
+        "history_size": 100,
+        "max_iter": 25,
+        "prerelax_steps": 30
       }
     },
     {
@@ -51,18 +61,23 @@
       "dx": 1.0,
       "box_L": 256.0,
       "n_atoms": 527178,
-      "n_steps": 600,
-      "n_steps_actual": 600,
-      "wall_time": 1309.0760528109968,
-      "stopped_early": false,
-      "sk_loss": 0.0034642096143215895,
-      "E_per_atom": -0.11817879974842072,
+      "n_steps": 250,
+      "n_steps_actual": 174,
+      "wall_time": 436.3149764984846,
+      "stopped_early": true,
+      "sk_loss": 0.0027534072287380695,
+      "E_per_atom": -0.2326744645833969,
       "recipe": {
         "rep_strength": 0.0,
         "mlbop_strength": 0.5,
         "mlbop_target": -0.413,
-        "tol": 0.0001,
+        "tol": 0.001,
         "patience": 10
+      },
+      "optimizer": {
+        "history_size": 100,
+        "max_iter": 25,
+        "prerelax_steps": 30
       }
     },
     {
@@ -72,18 +87,23 @@
       "dx": 1.0,
       "box_L": 256.0,
       "n_atoms": 527178,
-      "n_steps": 600,
-      "n_steps_actual": 542,
-      "wall_time": 1198.637136708945,
+      "n_steps": 250,
+      "n_steps_actual": 197,
+      "wall_time": 447.66057473793626,
       "stopped_early": true,
-      "sk_loss": 0.0032135723158717155,
-      "E_per_atom": -0.11266680806875229,
+      "sk_loss": 0.004667419940233231,
+      "E_per_atom": -0.2481820434331894,
       "recipe": {
         "rep_strength": 0.0,
         "mlbop_strength": 0.5,
         "mlbop_target": -0.413,
-        "tol": 0.0001,
+        "tol": 0.001,
         "patience": 10
+      },
+      "optimizer": {
+        "history_size": 100,
+        "max_iter": 25,
+        "prerelax_steps": 30
       }
     },
     {
@@ -93,18 +113,23 @@
       "dx": 1.0,
       "box_L": 256.0,
       "n_atoms": 527178,
-      "n_steps": 600,
-      "n_steps_actual": 566,
-      "wall_time": 1220.0698535256088,
+      "n_steps": 250,
+      "n_steps_actual": 79,
+      "wall_time": 202.16978607699275,
       "stopped_early": true,
-      "sk_loss": 0.011934036388993263,
-      "E_per_atom": -0.1164141595363617,
+      "sk_loss": 0.01905563846230507,
+      "E_per_atom": -0.1992177665233612,
       "recipe": {
         "rep_strength": 0.0,
         "mlbop_strength": 0.5,
         "mlbop_target": -0.413,
-        "tol": 0.0001,
+        "tol": 0.001,
         "patience": 10
+      },
+      "optimizer": {
+        "history_size": 100,
+        "max_iter": 25,
+        "prerelax_steps": 30
       }
     },
     {
@@ -114,18 +139,23 @@
       "dx": 1.0,
       "box_L": 256.0,
       "n_atoms": 527178,
-      "n_steps": 600,
-      "n_steps_actual": 600,
-      "wall_time": 1332.602027785033,
-      "stopped_early": false,
-      "sk_loss": 0.003402106696739793,
-      "E_per_atom": -0.11613079905509949,
+      "n_steps": 250,
+      "n_steps_actual": 145,
+      "wall_time": 354.62193581834435,
+      "stopped_early": true,
+      "sk_loss": 0.0007028860272839665,
+      "E_per_atom": -0.22715958952903748,
       "recipe": {
         "rep_strength": 0.0,
         "mlbop_strength": 0.5,
         "mlbop_target": -0.413,
-        "tol": 0.0001,
+        "tol": 0.001,
         "patience": 10
+      },
+      "optimizer": {
+        "history_size": 100,
+        "max_iter": 25,
+        "prerelax_steps": 30
       }
     },
     {
@@ -135,18 +165,23 @@
       "dx": 1.0,
       "box_L": 256.0,
       "n_atoms": 527178,
-      "n_steps": 600,
-      "n_steps_actual": 600,
-      "wall_time": 1308.9198178872466,
-      "stopped_early": false,
-      "sk_loss": 0.0007021197816357017,
-      "E_per_atom": -0.11563704162836075,
+      "n_steps": 250,
+      "n_steps_actual": 156,
+      "wall_time": 344.604045573622,
+      "stopped_early": true,
+      "sk_loss": 0.0004872970748692751,
+      "E_per_atom": -0.22841838002204895,
       "recipe": {
         "rep_strength": 0.0,
         "mlbop_strength": 0.5,
         "mlbop_target": -0.413,
-        "tol": 0.0001,
+        "tol": 0.001,
         "patience": 10
+      },
+      "optimizer": {
+        "history_size": 100,
+        "max_iter": 25,
+        "prerelax_steps": 30
       }
     },
     {
@@ -156,18 +191,23 @@
       "dx": 1.0,
       "box_L": 256.0,
       "n_atoms": 527178,
-      "n_steps": 600,
-      "n_steps_actual": 369,
-      "wall_time": 807.4644482210279,
+      "n_steps": 250,
+      "n_steps_actual": 156,
+      "wall_time": 367.62265848368406,
       "stopped_early": true,
-      "sk_loss": 0.001309188548475504,
-      "E_per_atom": -0.06289758533239365,
+      "sk_loss": 0.006977390497922897,
+      "E_per_atom": -0.2294466346502304,
       "recipe": {
         "rep_strength": 0.0,
         "mlbop_strength": 0.5,
         "mlbop_target": -0.413,
-        "tol": 0.0001,
+        "tol": 0.001,
         "patience": 10
+      },
+      "optimizer": {
+        "history_size": 100,
+        "max_iter": 25,
+        "prerelax_steps": 30
       }
     },
     {
@@ -177,18 +217,23 @@
       "dx": 1.0,
       "box_L": 256.0,
       "n_atoms": 527178,
-      "n_steps": 600,
-      "n_steps_actual": 600,
-      "wall_time": 1309.5391314178705,
+      "n_steps": 250,
+      "n_steps_actual": 250,
+      "wall_time": 572.365665756166,
       "stopped_early": false,
-      "sk_loss": 0.011915440671145916,
-      "E_per_atom": -0.1150093525648117,
+      "sk_loss": 0.0012733314651995897,
+      "E_per_atom": -0.27027735114097595,
       "recipe": {
         "rep_strength": 0.0,
         "mlbop_strength": 0.5,
         "mlbop_target": -0.413,
-        "tol": 0.0001,
+        "tol": 0.001,
         "patience": 10
+      },
+      "optimizer": {
+        "history_size": 100,
+        "max_iter": 25,
+        "prerelax_steps": 30
       }
     },
     {
@@ -198,18 +243,23 @@
       "dx": 1.0,
       "box_L": 256.0,
       "n_atoms": 527178,
-      "n_steps": 600,
-      "n_steps_actual": 600,
-      "wall_time": 1300.3135869428515,
-      "stopped_early": false,
-      "sk_loss": 0.0030961039010435343,
-      "E_per_atom": -0.11653190851211548,
+      "n_steps": 250,
+      "n_steps_actual": 157,
+      "wall_time": 358.0286822281778,
+      "stopped_early": true,
+      "sk_loss": 0.0014075463404878974,
+      "E_per_atom": -0.22409404814243317,
       "recipe": {
         "rep_strength": 0.0,
         "mlbop_strength": 0.5,
         "mlbop_target": -0.413,
-        "tol": 0.0001,
+        "tol": 0.001,
         "patience": 10
+      },
+      "optimizer": {
+        "history_size": 100,
+        "max_iter": 25,
+        "prerelax_steps": 30
       }
     },
     {
@@ -219,18 +269,23 @@
       "dx": 1.0,
       "box_L": 256.0,
       "n_atoms": 527178,
-      "n_steps": 600,
-      "n_steps_actual": 528,
-      "wall_time": 1149.514530211687,
+      "n_steps": 250,
+      "n_steps_actual": 75,
+      "wall_time": 195.57539170980453,
       "stopped_early": true,
-      "sk_loss": 0.016435494646430016,
-      "E_per_atom": -0.11655507981777191,
+      "sk_loss": 0.0055334498174488544,
+      "E_per_atom": -0.1944749802350998,
       "recipe": {
         "rep_strength": 0.0,
         "mlbop_strength": 0.5,
         "mlbop_target": -0.413,
-        "tol": 0.0001,
+        "tol": 0.001,
         "patience": 10
+      },
+      "optimizer": {
+        "history_size": 100,
+        "max_iter": 25,
+        "prerelax_steps": 30
       }
     },
     {
@@ -240,18 +295,23 @@
       "dx": 1.0,
       "box_L": 256.0,
       "n_atoms": 527178,
-      "n_steps": 600,
-      "n_steps_actual": 392,
-      "wall_time": 858.3870437145233,
-      "stopped_early": true,
-      "sk_loss": 0.0004281945584807545,
-      "E_per_atom": -0.06973878294229507,
+      "n_steps": 250,
+      "n_steps_actual": 250,
+      "wall_time": 564.1148760542274,
+      "stopped_early": false,
+      "sk_loss": 0.008054591715335846,
+      "E_per_atom": -0.26212772727012634,
       "recipe": {
         "rep_strength": 0.0,
         "mlbop_strength": 0.5,
         "mlbop_target": -0.413,
-        "tol": 0.0001,
+        "tol": 0.001,
         "patience": 10
+      },
+      "optimizer": {
+        "history_size": 100,
+        "max_iter": 25,
+        "prerelax_steps": 30
       }
     },
     {
@@ -261,18 +321,23 @@
       "dx": 1.0,
       "box_L": 256.0,
       "n_atoms": 527178,
-      "n_steps": 600,
-      "n_steps_actual": 476,
-      "wall_time": 1037.3070016168058,
-      "stopped_early": true,
-      "sk_loss": 0.0024323780089616776,
-      "E_per_atom": -0.09776968508958817,
+      "n_steps": 250,
+      "n_steps_actual": 250,
+      "wall_time": 571.1895284876227,
+      "stopped_early": false,
+      "sk_loss": 0.0036874269135296345,
+      "E_per_atom": -0.2675064206123352,
       "recipe": {
         "rep_strength": 0.0,
         "mlbop_strength": 0.5,
         "mlbop_target": -0.413,
-        "tol": 0.0001,
+        "tol": 0.001,
         "patience": 10
+      },
+      "optimizer": {
+        "history_size": 100,
+        "max_iter": 25,
+        "prerelax_steps": 30
       }
     },
     {
@@ -282,18 +347,23 @@
       "dx": 1.0,
       "box_L": 256.0,
       "n_atoms": 527178,
-      "n_steps": 600,
-      "n_steps_actual": 571,
-      "wall_time": 1250.1261206232011,
+      "n_steps": 250,
+      "n_steps_actual": 110,
+      "wall_time": 259.7418974302709,
       "stopped_early": true,
-      "sk_loss": 0.005687916651368141,
-      "E_per_atom": -0.10718965530395508,
+      "sk_loss": 0.003423224901780486,
+      "E_per_atom": -0.21725180745124817,
       "recipe": {
         "rep_strength": 0.0,
         "mlbop_strength": 0.5,
         "mlbop_target": -0.413,
-        "tol": 0.0001,
+        "tol": 0.001,
         "patience": 10
+      },
+      "optimizer": {
+        "history_size": 100,
+        "max_iter": 25,
+        "prerelax_steps": 30
       }
     },
     {
@@ -303,18 +373,23 @@
       "dx": 1.0,
       "box_L": 256.0,
       "n_atoms": 527178,
-      "n_steps": 600,
-      "n_steps_actual": 600,
-      "wall_time": 1319.4122094772756,
-      "stopped_early": false,
-      "sk_loss": 0.0005002855905331671,
-      "E_per_atom": -0.10626430064439774,
+      "n_steps": 250,
+      "n_steps_actual": 190,
+      "wall_time": 416.9184254743159,
+      "stopped_early": true,
+      "sk_loss": 0.02208069898188114,
+      "E_per_atom": -0.2346072494983673,
       "recipe": {
         "rep_strength": 0.0,
         "mlbop_strength": 0.5,
         "mlbop_target": -0.413,
-        "tol": 0.0001,
+        "tol": 0.001,
         "patience": 10
+      },
+      "optimizer": {
+        "history_size": 100,
+        "max_iter": 25,
+        "prerelax_steps": 30
       }
     },
     {
@@ -324,18 +399,23 @@
       "dx": 1.0,
       "box_L": 256.0,
       "n_atoms": 527178,
-      "n_steps": 600,
-      "n_steps_actual": 600,
-      "wall_time": 1315.7318538278341,
-      "stopped_early": false,
-      "sk_loss": 0.008376795798540115,
-      "E_per_atom": -0.11260867118835449,
+      "n_steps": 250,
+      "n_steps_actual": 87,
+      "wall_time": 213.9430774077773,
+      "stopped_early": true,
+      "sk_loss": 0.00022172431636136025,
+      "E_per_atom": -0.1959020495414734,
       "recipe": {
         "rep_strength": 0.0,
         "mlbop_strength": 0.5,
         "mlbop_target": -0.413,
-        "tol": 0.0001,
+        "tol": 0.001,
         "patience": 10
+      },
+      "optimizer": {
+        "history_size": 100,
+        "max_iter": 25,
+        "prerelax_steps": 30
       }
     },
     {
@@ -345,18 +425,23 @@
       "dx": 1.0,
       "box_L": 256.0,
       "n_atoms": 527178,
-      "n_steps": 600,
-      "n_steps_actual": 600,
-      "wall_time": 1326.0521200224757,
-      "stopped_early": false,
-      "sk_loss": 0.0005130984354764223,
-      "E_per_atom": -0.11572577059268951,
+      "n_steps": 250,
+      "n_steps_actual": 76,
+      "wall_time": 187.6080477759242,
+      "stopped_early": true,
+      "sk_loss": 0.0009745617280714214,
+      "E_per_atom": -0.19283027946949005,
       "recipe": {
         "rep_strength": 0.0,
         "mlbop_strength": 0.5,
         "mlbop_target": -0.413,
-        "tol": 0.0001,
+        "tol": 0.001,
         "patience": 10
+      },
+      "optimizer": {
+        "history_size": 100,
+        "max_iter": 25,
+        "prerelax_steps": 30
       }
     },
     {
@@ -366,18 +451,23 @@
       "dx": 1.0,
       "box_L": 256.0,
       "n_atoms": 527178,
-      "n_steps": 600,
-      "n_steps_actual": 438,
-      "wall_time": 966.5209025517106,
+      "n_steps": 250,
+      "n_steps_actual": 167,
+      "wall_time": 373.45277256146073,
       "stopped_early": true,
-      "sk_loss": 0.008690391667187214,
-      "E_per_atom": -0.0813487097620964,
+      "sk_loss": 0.0005076788365840912,
+      "E_per_atom": -0.22715455293655396,
       "recipe": {
         "rep_strength": 0.0,
         "mlbop_strength": 0.5,
         "mlbop_target": -0.413,
-        "tol": 0.0001,
+        "tol": 0.001,
         "patience": 10
+      },
+      "optimizer": {
+        "history_size": 100,
+        "max_iter": 25,
+        "prerelax_steps": 30
       }
     },
     {
@@ -387,18 +477,23 @@
       "dx": 1.0,
       "box_L": 256.0,
       "n_atoms": 527178,
-      "n_steps": 600,
-      "n_steps_actual": 452,
-      "wall_time": 984.9033721797168,
-      "stopped_early": true,
-      "sk_loss": 0.020628873258829117,
-      "E_per_atom": -0.06898675113916397,
+      "n_steps": 250,
+      "n_steps_actual": 250,
+      "wall_time": 572.8232027702034,
+      "stopped_early": false,
+      "sk_loss": 0.00858659390360117,
+      "E_per_atom": -0.2601012885570526,
       "recipe": {
         "rep_strength": 0.0,
         "mlbop_strength": 0.5,
         "mlbop_target": -0.413,
-        "tol": 0.0001,
+        "tol": 0.001,
         "patience": 10
+      },
+      "optimizer": {
+        "history_size": 100,
+        "max_iter": 25,
+        "prerelax_steps": 30
       }
     },
     {
@@ -408,18 +503,23 @@
       "dx": 1.0,
       "box_L": 256.0,
       "n_atoms": 527178,
-      "n_steps": 600,
-      "n_steps_actual": 600,
-      "wall_time": 1304.6322012990713,
-      "stopped_early": false,
-      "sk_loss": 0.0007636299706064165,
-      "E_per_atom": -0.10880693793296814,
+      "n_steps": 250,
+      "n_steps_actual": 92,
+      "wall_time": 218.7895555831492,
+      "stopped_early": true,
+      "sk_loss": 0.0011275887954980135,
+      "E_per_atom": -0.19753000140190125,
       "recipe": {
         "rep_strength": 0.0,
         "mlbop_strength": 0.5,
         "mlbop_target": -0.413,
-        "tol": 0.0001,
+        "tol": 0.001,
         "patience": 10
+      },
+      "optimizer": {
+        "history_size": 100,
+        "max_iter": 25,
+        "prerelax_steps": 30
       }
     }
   ]

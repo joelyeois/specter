@@ -19,6 +19,58 @@ def _hollow_sphere_density(
     return torch.exp(-((r - shell_radius) ** 2) / (2 * sigma**2))
 
 
+def test_cc3d_labelling_matches_scipy_partition():
+    """The classifier labels the non-shell space with cc3d; scipy.ndimage.label
+    at full 26-connectivity must give the same partition (one scipy label per
+    cc3d label and vice versa), and the same region masks through the classifier."""
+    import numpy as np
+    from scipy import ndimage
+
+    torch.manual_seed(0)
+    n = 48
+    zz, yy, xx = torch.meshgrid(
+        torch.arange(n), torch.arange(n), torch.arange(n), indexing="ij"
+    )
+    density = torch.zeros(n, n, n)
+    # three hollow spheres: two closed, one cut open by the volume wall
+    for c, r in (((16, 16, 16), 9.0), ((32, 30, 28), 10.0), ((44, 24, 24), 8.0)):
+        d = torch.sqrt((zz - c[0]) ** 2 + (yy - c[1]) ** 2 + (xx - c[2]) ** 2).float()
+        density += torch.exp(-((d - r) ** 2) / (2 * 1.2**2))
+    # a little noise-like speckle so components have ragged edges
+    density += 0.02 * torch.rand(n, n, n)
+
+    masks = classify_membrane_regions(density)
+    non_shell = (~masks["shell"]).numpy()
+    scipy_labels, n_scipy = ndimage.label(non_shell, structure=np.ones((3, 3, 3)))
+    import cc3d
+
+    cc_labels, n_cc = cc3d.connected_components(
+        non_shell, connectivity=26, return_N=True
+    )
+    assert n_scipy == n_cc
+    pairs = np.unique(np.stack([scipy_labels.ravel(), cc_labels.ravel()], 1), axis=0)
+    assert len(pairs) == n_scipy + 1  # a bijection between the two label sets
+
+    # and the classifier's own answer, rebuilt with scipy's labels
+    boundary = set()
+    for face in (
+        scipy_labels[0],
+        scipy_labels[-1],
+        scipy_labels[:, 0],
+        scipy_labels[:, -1],
+        scipy_labels[:, :, 0],
+        scipy_labels[:, :, -1],
+    ):
+        boundary.update(int(v) for v in np.unique(face) if v > 0)
+    is_boundary = np.zeros(n_scipy + 1, dtype=bool)
+    is_boundary[list(boundary)] = True
+    cytosol_ref = non_shell & is_boundary[scipy_labels]
+    assert np.array_equal(masks["cytosol"].numpy(), cytosol_ref)
+    assert np.array_equal(masks["lumen"].numpy(), non_shell & ~cytosol_ref)
+    assert bool(masks["lumen"][16, 16, 16]) and bool(masks["lumen"][32, 30, 28])
+    assert bool(masks["cytosol"][0, 0, 0])
+
+
 def test_classify_membrane_regions_partitions_full_volume():
     density = _hollow_sphere_density()
     masks = classify_membrane_regions(density)

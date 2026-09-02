@@ -418,3 +418,40 @@ def test_build_pdb_cache_concurrently_submits_expensive_sources_first(monkeypatc
     costs = [_estimated_parse_seconds(s, default_pdb_cache_dir()) for s in submitted]
     assert costs == sorted(costs, reverse=True)
     assert submitted != sources, "submission order should not still be alphabetical"
+
+
+def test_estimated_parse_seconds_is_small_when_the_parse_is_cached(tmp_path):
+    """A source whose parse is already in the parsed-structure cache loads in a
+    fraction of a second regardless of its file size, and the pool decision
+    must see that: the shipped tomogram config (26 cached sources) was
+    spawning a process pool whose start-up was the entire loading phase."""
+    from specter.pdb import _parsed_cache_path
+    from specter.specimen._parallel_render import (
+        _PARSED_CACHE_LOAD_S,
+        _estimated_parse_seconds,
+    )
+
+    big = tmp_path / "cccc-assembly1.cif"
+    big.write_bytes(b"x" * 20_000_000)
+    flags = dict(
+        compute_atom_species=True, readd_hydrogens="auto", monomer_library_path=None
+    )
+
+    uncached = _estimated_parse_seconds("cccc", str(tmp_path), **flags)
+    assert uncached > 10.0
+
+    # write the parsed-cache entry this exact parse would produce
+    parsed = _parsed_cache_path(str(tmp_path), str(big), True, "auto", None)
+    assert parsed is not None
+    import os
+
+    os.makedirs(os.path.dirname(parsed), exist_ok=True)
+    open(parsed, "wb").write(b"\0")
+    assert (
+        _estimated_parse_seconds("cccc", str(tmp_path), **flags) == _PARSED_CACHE_LOAD_S
+    )
+    # ...and only for the same flags: a different parse is a different entry
+    assert (
+        _estimated_parse_seconds("cccc", str(tmp_path), compute_atom_species=False)
+        > 10.0
+    )

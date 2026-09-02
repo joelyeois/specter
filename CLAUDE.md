@@ -389,6 +389,7 @@ ice-data/                     # Two 32 MB legacy MDSimDump inputs, notebook-only
 | `roma` | Quaternion/rotation math (`rotations/`) |
 | `vesin-torch` | Pairwise neighbor search for the MLBOP ice energy (`ice/_energy.py`), replaces the old ASE-based path |
 | `cupy-cuda12x` | GPU exact Euclidean distance transform for the `spherical_harmonics` membrane backend (`specimen/membrane/_field.py`); core dep on Linux/Windows, absent on macOS where scipy's CPU path takes over |
+| `connected-components-3d` (`cc3d`) | 26-connected labelling of the non-shell space in `specimen/tomogram/_regions.py` (which empty space touches the volume faces = cytosol, the rest = lumen); same partition as `scipy.ndimage.label`, 3.7-5x faster, and the largest single phase of a 2 A `build tomogram` (2m39s -> 43 s). LGPL-3.0, used unmodified as a runtime dependency |
 | `click`, `rich-click` | The `specter` CLI (`cli/` package) |
 | `ruff`, `mypy` | Code quality |
 

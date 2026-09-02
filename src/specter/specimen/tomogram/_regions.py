@@ -9,12 +9,20 @@ the region its biology dictates (see module docstring of
 `MembraneField.phi`'s sign only distinguishes lipid-solid from not-lipid-
 solid; it says nothing about which side of a closed shell a given "not
 lipid solid" point is on. Recovering that requires real topology: this
-module labels the shell's connected complement via
-:func:`scipy.ndimage.label` (full 26-connectivity, so voxelization/
+module labels the shell's connected complement with
+:func:`cc3d.connected_components` (full 26-connectivity, so voxelization/
 thresholding noise doesn't fracture a single open region into spurious
 pieces) and calls whichever labeled component(s) touch the volume's own
 boundary faces "cytosol" -- by construction, that's the one region that
-must be reachable from outside the volume. Everything else non-shell is
+must be reachable from outside the volume.
+
+`cc3d` (``connected-components-3d``) rather than :func:`scipy.ndimage.label`:
+the two return the same partition, but scipy's labeller is generic over
+N dimensions and structuring elements, while cc3d is a fixed-connectivity
+3-D decision-tree scan. Measured on this classifier's own input, a
+300x900x900 shell mask, 3.28 s against 0.62 s, and in a real build at 2 A
+(a 750x3000x3000 box) 2m 39s against 43 s -- the single largest phase of
+that build. Both are single-threaded; neither uses the GPU. Everything else non-shell is
 enclosed, and thus "lumen". This is deliberately membrane-shape-agnostic:
 it works for a single vesicle, several disjoint vesicles, a sheet, or no
 membrane at all (in which case shell/lumen are empty and cytosol is
@@ -24,9 +32,9 @@ the membrane generator's own internal shape-construction state.
 
 from __future__ import annotations
 
+import cc3d
 import numpy as np
 import torch
-from scipy import ndimage
 
 
 def _shell_bounding_box(
@@ -121,10 +129,10 @@ def classify_membrane_regions(
     # box, trading the speedup away rather than the correctness -- a full-
     # volume shell degenerates to exactly the previous behaviour.
     #
-    # Worth it because `ndimage.label` is single-threaded union-find over
-    # 26-connectivity and its int32 output is 4 bytes/voxel: at the 2 A
-    # production grid (750x3000x3000) it was 12.8 min and a 27 GB label
-    # array, against a 500-cube vesicle occupying 1.9% of that box.
+    # Worth it because the labeller is single-threaded union-find over
+    # 26-connectivity and its output is 4 bytes/voxel: at the 2 A production
+    # grid (750x3000x3000) scipy's took 12.8 min and a 27 GB label array,
+    # against a 500-cube vesicle occupying 1.9% of that box.
     bbox = _shell_bounding_box(shell_mask)
     if bbox is None:
         # No shell anywhere: every voxel is reachable from outside.
@@ -136,9 +144,15 @@ def classify_membrane_regions(
     z0, z1, y0, y1, x0, x1 = bbox
     non_shell_sub = non_shell[z0:z1, y0:y1, x0:x1]
 
-    structure = np.ones((3, 3, 3), dtype=np.int8)  # full 26-connectivity
-    labeled, num_features = ndimage.label(
-        non_shell_sub.cpu().numpy(), structure=structure
+    # Labels are dense 1..N with 0 for the (shell) background, exactly as
+    # ndimage.label's were, so the boundary lookup below is unchanged. uint32
+    # rather than the default uint64: half the label array (13.5 GB at 2 A)
+    # and no box this classifier sees has 4 billion components.
+    labeled, num_features = cc3d.connected_components(
+        np.ascontiguousarray(non_shell_sub.cpu().numpy()),
+        connectivity=26,
+        out_dtype=np.uint32,
+        return_N=True,
     )
 
     boundary_labels: set[int] = set()
@@ -164,8 +178,8 @@ def classify_membrane_regions(
     # roughly 128 test values torch.isin switches to a sort-based path and
     # the blowup disappears, which is why only moderate label counts hurt.)
     #
-    # Labels from `ndimage.label` are dense integers 0..num_features, so a
-    # boolean lookup indexed by label answers it in one gather. Doing that
+    # Labels are dense integers 0..num_features, so a boolean lookup indexed
+    # by label answers it in one gather. Doing that
     # in numpy also drops the int32 label volume's device transfer, which
     # existed only to feed the isin: 0.40 GiB of device memory total here,
     # against 25.35 + 1.73 GiB before.

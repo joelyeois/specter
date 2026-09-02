@@ -1385,15 +1385,23 @@ class TomogramSpecimenGenerator:
             # silently re-copy the whole field GPU<->CPU every single pass.
             # Confirmed directly: this was responsible for 414 of 480s (86%)
             # in a real profiled run, not the RSA algorithm itself.
-            exclusion_field = (
-                torch.from_numpy(
-                    ndimage.distance_transform_edt(region_mask_field.cpu().numpy())
-                ).float()
-                * field_voxel_size
-            )
+            #
+            # Only the sphere backend reads it (its packer and its
+            # zero-placement diagnostic); the shape backend collides against
+            # `occupancy` below and never looks at a distance field. At the
+            # 200M-voxel field cap this transform is 4.3 s per region, so it
+            # is not built for a backend that would throw it away.
+            region_exclusion_field: torch.Tensor | None = None
+            if self.packing_backend != "shape":
+                region_exclusion_field = (
+                    torch.from_numpy(
+                        ndimage.distance_transform_edt(region_mask_field.cpu().numpy())
+                    ).float()
+                    * field_voxel_size
+                )
 
             # packing_backend="shape" works from one running occupancy grid
-            # instead of exclusion_field/region_mask_field: True means "an
+            # instead of region_exclusion_field/region_mask_field: True means "an
             # instance may not go here", so it starts as the complement of
             # the region (which already has obstacles removed above) and
             # accumulates every instance placed below.
@@ -1454,7 +1462,7 @@ class TomogramSpecimenGenerator:
                             gap=self.gap,
                             seed=self.seed,
                             device="cpu",  # see self.device's own docstring
-                            exclusion_distance_field=exclusion_field,
+                            exclusion_distance_field=region_exclusion_field,
                             field_voxel_size=field_voxel_size,
                             sampling_mask=region_mask_field,
                             max_passes=self.region_max_passes,
@@ -1505,15 +1513,16 @@ class TomogramSpecimenGenerator:
                 if coords.numel() and self.packing_backend != "shape":
                     _rebuild_start = time.perf_counter()
                     placed_radii = exact_radii[accepted_idx]
-                    # Also kept on CPU -- see exclusion_field's own comment
+                    # Also kept on CPU -- see region_exclusion_field's own comment
                     # above for why moving this to self.device would be a
                     # silent, severe per-pass performance regression, not
                     # just a style choice.
                     exact_exclusion_field = _build_sphere_exclusion_field(
                         coords, placed_radii, field_shape, field_voxel_size
                     )
-                    exclusion_field = torch.minimum(
-                        exclusion_field, exact_exclusion_field
+                    assert region_exclusion_field is not None  # sphere backend
+                    region_exclusion_field = torch.minimum(
+                        region_exclusion_field, exact_exclusion_field
                     )
                     phase_done(
                         f"  Exclusion field rebuild ({location})",
@@ -1524,7 +1533,7 @@ class TomogramSpecimenGenerator:
             # Ratio-weighted ("filler") species, drawn to fill
             # occupancy_fraction of this region -- avoiding the exact-count
             # placements above (if any), the filament mask, and the
-            # membrane shell, all folded into exclusion_field/region_mask
+            # membrane shell, all folded into region_exclusion_field/region_mask
             # by this point.
             if ratio_specs:
                 ratio_pdbs = [pdbs_by_source[s.pdb_source] for s in ratio_specs]
@@ -1595,7 +1604,7 @@ class TomogramSpecimenGenerator:
                             gap=self.gap,
                             seed=self.seed,
                             device="cpu",  # see self.device's own docstring
-                            exclusion_distance_field=exclusion_field,
+                            exclusion_distance_field=region_exclusion_field,
                             field_voxel_size=field_voxel_size,
                             sampling_mask=region_mask_field,
                             max_passes=self.region_max_passes,
@@ -1637,7 +1646,7 @@ class TomogramSpecimenGenerator:
                     # A non-empty region that still fits nothing is silent
                     # otherwise: no picks file appears for the species and
                     # nothing says why. The naive diagnostic here used to be
-                    # exclusion_field[region_mask_field].max() -- clearance
+                    # region_exclusion_field[region_mask_field].max() -- clearance
                     # from the shell alone, ignoring the box wall -- which
                     # can dramatically overstate the room available (found
                     # directly: reported ~166 A "available" for a case with
@@ -1649,9 +1658,10 @@ class TomogramSpecimenGenerator:
                     # reported is one a caller can actually act on.
                     largest = float(species_radii.max())
                     needed = largest + self.gap
+                    assert region_exclusion_field is not None  # sphere backend
                     viable_voxels, best_clearance = _diagnose_zero_placements(
                         region_mask_field,
-                        exclusion_field,
+                        region_exclusion_field,
                         field_voxel_size,
                         box,
                         largest,
@@ -2639,6 +2649,30 @@ class TomogramSpecimenGenerator:
         # `..packing._shape._rotation_cache`.
         masks = [self._species_mask(pdb, pack_voxel / factor) for pdb in pdbs]
         region_mask = ~occupancy
+        if not bool(region_mask.any()):
+            # The region passed generate()'s own `region_voxels == 0` check at
+            # render resolution and still has no free voxel HERE: coarsening
+            # marks a packing voxel occupied if any fine voxel in it is, so a
+            # compartment only a few fine voxels wide anywhere -- a small
+            # vesicle lumen at 2 A, on the auto 4 A packing grid -- can lose
+            # every voxel it had. Same outcome as the fine-grid case, and for
+            # the same reason: nothing fits, so nothing is placed. Raising
+            # here is what used to end a 2 A build in its last stage.
+            warnings.warn(
+                "TomogramSpecimenGenerator: the region has no free voxel on "
+                f"the {pack_voxel:.1f} A packing grid (it has some at the "
+                f"{pack_voxel / factor:.1f} A render grid, but a compartment "
+                "thinner than a packing voxel is swallowed by coarsening) -- "
+                "placing nothing in it. A smaller packing_voxel_size keeps "
+                "such compartments, at a higher packing cost.",
+                stacklevel=2,
+            )
+            return (
+                torch.empty((0, 3)),
+                torch.empty((0, 3, 3)),
+                torch.empty((0,), dtype=torch.long),
+                occupancy,
+            )
         return pack_shapes_3d(
             masks,
             species_idx,

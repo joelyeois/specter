@@ -8,6 +8,7 @@ dependencies = [
     "biopython>=1.85",
     "biotite>=1.4.0",
     "click>=8.4.2",
+    "connected-components-3d>=4.1.0",
     "cryosparc-tools>=5.0",
     # GPU distance transforms for the spherical_harmonics membrane backend
     # (specter.specimen.membrane) -- ~3x faster field generation end-to-end,

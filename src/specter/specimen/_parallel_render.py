@@ -80,6 +80,14 @@ _POOL_SPAWN_OVERHEAD_S = 8.0
 # cost, so guessing high is the safe direction.
 _UNKNOWN_SOURCE_MB = 5.0
 
+# What a source costs when its PARSE is cached (`pdb._parsed_cache_path`):
+# loading the arrays back, 0.04-0.09 s for a 220k-atom assembly, taken
+# generously. The size-based estimate above predates that cache and still
+# predicts seconds per structure for it, which made the shipped tomogram
+# config spawn a pool for 26 sources that load in ~3 s serially -- the
+# pool's start-up was the entire 12-14 s of the phase.
+_PARSED_CACHE_LOAD_S = 0.15
+
 # The pool has to win by this much before it is worth taking, rather than merely
 # breaking even. The estimator is good enough to rank and to size (r = 0.974)
 # but individual structures land within about a factor of three of it, so a
@@ -289,9 +297,20 @@ def build_templates_concurrently(
         return results
 
 
-def _estimated_parse_seconds(pdb_source: str, pdb_cache_dir: str) -> float:
+def _estimated_parse_seconds(
+    pdb_source: str,
+    pdb_cache_dir: str,
+    compute_atom_species: bool = False,
+    readd_hydrogens: bool | str = "auto",
+    monomer_library_path: str | None = None,
+) -> float:
     """
-    Predict how long `PDB(pdb_source)` will take, from the file's size on disk.
+    Predict how long `PDB(pdb_source)` will take.
+
+    From the file's size on disk when it will actually be parsed, or
+    `_PARSED_CACHE_LOAD_S` when the parse is already cached for these flags
+    (see `pdb._parsed_cache_path`; the flags are part of its key, which is
+    why they are taken here).
 
     Used for two decisions, neither of which needs better than order-of-
     magnitude accuracy: whether a process pool will pay for its spawn cost at
@@ -303,6 +322,8 @@ def _estimated_parse_seconds(pdb_source: str, pdb_cache_dir: str) -> float:
         A 4-character accession code or a path to a structure file.
     pdb_cache_dir : str
         Where downloaded structures are cached, checked for an accession code.
+    compute_atom_species, readd_hydrogens, monomer_library_path
+        The parse flags `PDB` will be given; they select the parsed-cache entry.
 
     Returns
     -------
@@ -312,6 +333,8 @@ def _estimated_parse_seconds(pdb_source: str, pdb_cache_dir: str) -> float:
         real cost is a network download whose size can't be known first.
     """
     import os
+
+    from ..pdb import _parsed_cache_path, _resolve_monomer_library_path
 
     candidates = [pdb_source]
     if pdb_cache_dir:
@@ -327,6 +350,15 @@ def _estimated_parse_seconds(pdb_source: str, pdb_cache_dir: str) -> float:
     for path in candidates:
         try:
             if os.path.isfile(path):
+                try:
+                    resolved = _resolve_monomer_library_path(monomer_library_path)
+                except Exception:
+                    resolved = None
+                parsed = _parsed_cache_path(
+                    pdb_cache_dir, path, compute_atom_species, readd_hydrogens, resolved
+                )
+                if parsed is not None and os.path.isfile(parsed):
+                    return _PARSED_CACHE_LOAD_S
                 megabytes = os.path.getsize(path) / 1e6
                 break
         except OSError:
@@ -482,7 +514,14 @@ def build_pdb_cache_concurrently(
                 on_result(alias)
 
     estimates = [
-        _estimated_parse_seconds(source, pdb_cache_dir) for source in unique_sources
+        _estimated_parse_seconds(
+            source,
+            pdb_cache_dir,
+            compute_atom_species,
+            readd_hydrogens,
+            monomer_library_path,
+        )
+        for source in unique_sources
     ]
     if not _process_pool_is_worth_it(estimates, max_workers):
         from ..pdb import PDB

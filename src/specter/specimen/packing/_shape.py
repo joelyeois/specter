@@ -48,6 +48,18 @@ _DENSE_REGION_FRACTION = 0.30
 # See `_rotation_cache`'s `probes`.
 _N_PROBE = 32
 
+# Second-stage probe, applied only to the attempts the first probe lets
+# through: a few hundred footprint voxels gathered in one vectorised pass
+# cost far less than the full footprint AND (~25 us) those attempts would
+# otherwise all reach. Like the first probe it is exact: an occupied probe
+# voxel is a real clash, and a miss falls through to the full test.
+_N_PROBE2 = 384
+
+# Draws per batch. Random draws are batched rather than taken one scalar at a
+# time, and the batch is also the unit over which every occupancy-independent
+# test, and the probes against the grid as it stands, are evaluated at once.
+_BATCH = 8192
+
 # Rotation-cache chunking budget, in template voxels per batch. Caps the
 # transient (batch, D, H, W) float32 `rotate_volume` allocates; see its use.
 _ROTATE_CHUNK_VOXELS = 64_000_000
@@ -543,18 +555,26 @@ def pack_shapes_3d(
     out_row: list[int] = []
 
     # RSA at a realistic density rejects ~99.8% of attempts, so essentially
-    # all of this loop's cost is the reject path, and that cost is dominated
-    # by per-attempt Python/numpy overhead rather than the collision test
-    # (profiled 60% vs 31%). Hence: random draws are batched rather than
-    # taken one scalar at a time, every bound is a plain Python int rather
-    # than a numpy array, a single-voxel pre-test skips the slice+AND for
-    # the ~31% of attempts whose center voxel is already occupied, and a
-    # sparse probe of `_N_PROBE` footprint voxels rejects the rest before
-    # the full AND runs. Together these took a 600-retry benchmark pack
-    # from 72 s to 5 s with volume fraction unchanged.
+    # all of this loop's cost is the reject path. Each batch of `_BATCH`
+    # draws is therefore screened at once:
+    #
+    # * the tests that need no grid (footprint bounds, wall clipping) are
+    #   vectorised outright;
+    # * the tests that read the grid (centre voxel, first and second probes)
+    #   are vectorised against the grid AS IT STANDS when the batch is drawn.
+    #   Occupancy only ever grows, so an attempt they reject would be
+    #   rejected at its own moment too -- exact. An attempt they pass may
+    #   still be doomed by an acceptance earlier in the batch, so survivors
+    #   are re-tested one at a time against the live grid, exactly as before.
+    #
+    # Per-attempt bookkeeping (which candidate row an attempt belongs to,
+    # the stall counter) is done arithmetically over runs of rejections. The
+    # RNG is consumed in the same order as a one-attempt-at-a-time loop, so
+    # placements are bitwise identical to that form (pinned in
+    # tests/test_pack_shapes_reference.py).
     clip_z, clip_y, clip_x = clip_axes
-    all_clip = clip_z and clip_y and clip_x
-    _BATCH = 8192
+    occ_flat = occ.reshape(-1)
+    plane = ny * nx
 
     for s in order:
         rows = np.flatnonzero(species_idx_np == s)
@@ -563,104 +583,195 @@ def pack_shapes_3d(
         cache, geom, centre_solid, probes, R = _rotation_cache(
             species_masks[int(s)], n_orientations, device, seed, pool_factor
         )
-        # Probe indices -> flat offsets, which needs the grid's own strides
-        # and so cannot be precomputed inside the cache.
-        occ_flat = occ.reshape(-1)
-        probe_off = [
-            (pr[:, 0] * ny * nx + pr[:, 1] * nx + pr[:, 2]) if pr.size else pr
-            for pr in probes
-        ]
         R_np = R.cpu().numpy()
         n_cache = len(cache)
+        g = np.asarray(geom, dtype=np.int64)  # (n_cache, 6): fz fy fx hz hy hx
+        fz_a, fy_a, fx_a, hz_a, hy_a, hx_a = (g[:, i] for i in range(6))
+        cs_a = np.asarray(centre_solid, dtype=bool)
 
-        # Batched draws, refilled as consumed.
-        buf_i = _BATCH
-        oris = zs = ys = xs = picks = None
+        # Probe voxels padded to (n_cache, P) with a validity mask, as flat
+        # offsets (for footprints wholly inside the grid) and as (i, j, k)
+        # (for overhanging ones, where only the in-bounds voxels are probed).
+        off_pad = np.zeros((n_cache, _N_PROBE), dtype=np.int64)
+        off_ok = np.zeros((n_cache, _N_PROBE), dtype=bool)
+        p1 = np.zeros((3, n_cache, _N_PROBE), dtype=np.int64)
+        for oi, pr in enumerate(probes):
+            m = pr.shape[0] if pr.size else 0
+            if m:
+                off_pad[oi, :m] = pr[:, 0] * plane + pr[:, 1] * nx + pr[:, 2]
+                off_ok[oi, :m] = True
+                p1[:, oi, :m] = pr.T
+        rng2 = np.random.default_rng(0 if seed is None else seed)
+        p2 = np.zeros((3, n_cache, _N_PROBE2), dtype=np.int64)
+        p2_ok = np.zeros((n_cache, _N_PROBE2), dtype=bool)
+        for oi, fp in enumerate(cache):
+            idx = np.array(np.nonzero(fp)).T
+            if idx.shape[0] > _N_PROBE2:
+                idx = idx[rng2.choice(idx.shape[0], _N_PROBE2, replace=False)]
+            m = idx.shape[0]
+            if m:
+                p2[:, oi, :m] = idx.T
+                p2_ok[oi, :m] = True
+
+        def _probe_hits(
+            sel: np.ndarray,
+            o: np.ndarray,
+            lz: np.ndarray,
+            ly: np.ndarray,
+            lx: np.ndarray,
+            pijk: np.ndarray,
+            pok: np.ndarray,
+        ) -> np.ndarray:
+            """Which of the attempts `sel` have an occupied, in-bounds probe voxel."""
+            oc = o[sel]
+            pz = lz[sel][:, None] + pijk[0][oc]
+            py = ly[sel][:, None] + pijk[1][oc]
+            px = lx[sel][:, None] + pijk[2][oc]
+            valid = (
+                pok[oc]
+                & (pz >= 0)
+                & (pz < nz)
+                & (py >= 0)
+                & (py < ny)
+                & (px >= 0)
+                & (px < nx)
+            )
+            flat = np.where(valid, pz * plane + py * nx + px, 0)
+            return (occ_flat[flat] & valid).any(axis=1)
+
+        n_rows = rows.size
+        row_i = 0  # candidate row the next attempt belongs to
+        used = 0  # attempts spent on that row so far
         stall = 0
-        for row in rows:
-            if stall >= stall_patience:
-                break
-            for _ in range(max_retries):
-                if stall >= stall_patience:
+        done = False
+
+        while not done:
+            # ---- draw a batch: the same calls, in the same order, as a
+            # one-attempt-at-a-time loop refilling an exhausted buffer ----
+            oris = rng.integers(0, n_cache, _BATCH)
+            if allowed is None:
+                zs = rng.integers(0, nz, _BATCH)
+                ys = rng.integers(0, ny, _BATCH)
+                xs = rng.integers(0, nx, _BATCH)
+            else:
+                picks = allowed[rng.integers(0, allowed.shape[0], _BATCH)]
+                zs, ys, xs = picks[:, 0], picks[:, 1], picks[:, 2]
+
+            # ---- vectorised exact rejections ----
+            rej = cs_a[oris] & occ[zs, ys, xs]
+            lz = zs - hz_a[oris]
+            ly = ys - hy_a[oris]
+            lx = xs - hx_a[oris]
+            ez = lz + fz_a[oris]
+            ey = ly + fy_a[oris]
+            ex = lx + fx_a[oris]
+            loz = np.maximum(lz, 0)
+            loy = np.maximum(ly, 0)
+            lox = np.maximum(lx, 0)
+            hiz = np.minimum(ez, nz)
+            hiy = np.minimum(ey, ny)
+            hix = np.minimum(ex, nx)
+            rej |= (hiz <= loz) | (hiy <= loy) | (hix <= lox)
+            if not clip_z:
+                rej |= (loz != lz) | (hiz != ez)
+            if not clip_y:
+                rej |= (loy != ly) | (hiy != ey)
+            if not clip_x:
+                rej |= (lox != lx) | (hix != ex)
+            inside = (
+                (loz == lz)
+                & (loy == ly)
+                & (lox == lx)
+                & (hiz == ez)
+                & (hiy == ey)
+                & (hix == ex)
+            )
+            sel = np.flatnonzero(inside & ~rej)
+            if sel.size:
+                base = lz[sel] * plane + ly[sel] * nx + lx[sel]
+                hit = (
+                    occ_flat[base[:, None] + off_pad[oris[sel]]] & off_ok[oris[sel]]
+                ).any(axis=1)
+                rej[sel[hit]] = True
+            sel = np.flatnonzero(~inside & ~rej)
+            if sel.size:
+                rej[sel[_probe_hits(sel, oris, lz, ly, lx, p1, off_ok)]] = True
+            sel = np.flatnonzero(~rej)
+            if sel.size:
+                rej[sel[_probe_hits(sel, oris, lz, ly, lx, p2, p2_ok)]] = True
+            survivors = np.flatnonzero(~rej)
+
+            # ---- walk the batch in draw order: runs of rejections are
+            # absorbed arithmetically, each survivor is attempted exactly ----
+            pos = 0
+            si = 0
+            while pos < _BATCH:
+                nxt = int(survivors[si]) if si < survivors.size else _BATCH
+                k = nxt - pos
+                if k > 0:
+                    # k consecutive rejections: each is an attempt that
+                    # bumps the stall counter and consumes one retry of the
+                    # current row, rows advancing as their retries run out.
+                    n_exec = min(k, stall_patience - stall)
+                    stall += n_exec
+                    while n_exec > 0:
+                        take = min(n_exec, max_retries - used)
+                        used += take
+                        n_exec -= take
+                        if used == max_retries:
+                            row_i += 1
+                            used = 0
+                            if row_i >= n_rows:
+                                break
+                    if stall >= stall_patience or row_i >= n_rows:
+                        done = True
+                        break
+                    pos = nxt
+                if nxt >= _BATCH:
                     break
+
+                # the survivor at buffer index `nxt`, against the live grid
                 stall += 1
-                if buf_i >= _BATCH:
-                    oris = rng.integers(0, n_cache, _BATCH)
-                    if allowed is None:
-                        zs = rng.integers(0, nz, _BATCH)
-                        ys = rng.integers(0, ny, _BATCH)
-                        xs = rng.integers(0, nx, _BATCH)
-                    else:
-                        picks = allowed[rng.integers(0, allowed.shape[0], _BATCH)]
-                    buf_i = 0
-                # buf_i starts at _BATCH, so the refill above always runs
-                # before this first indexes oris/zs/ys/xs/picks -- these are
-                # never None here.
-                assert oris is not None
-                oi = int(oris[buf_i])
-                if allowed is None:
-                    assert zs is not None and ys is not None and xs is not None
-                    cz = int(zs[buf_i])
-                    cy = int(ys[buf_i])
-                    cx = int(xs[buf_i])
+                oi = int(oris[nxt])
+                cz, cy, cx = int(zs[nxt]), int(ys[nxt]), int(xs[nxt])
+                accepted = False
+                if not (cs_a[oi] and occ[cz, cy, cx]):
+                    fz, fy, fx, hz, hy, hx = geom[oi]
+                    lz1, ly1, lx1 = cz - hz, cy - hy, cx - hx
+                    ez1, ey1, ex1 = lz1 + fz, ly1 + fy, lx1 + fx
+                    loz1 = 0 if lz1 < 0 else lz1
+                    loy1 = 0 if ly1 < 0 else ly1
+                    lox1 = 0 if lx1 < 0 else lx1
+                    hiz1 = nz if ez1 > nz else ez1
+                    hiy1 = ny if ey1 > ny else ey1
+                    hix1 = nx if ex1 > nx else ex1
+                    fp = cache[oi]
+                    sub = fp[
+                        loz1 - lz1 : hiz1 - lz1,
+                        loy1 - ly1 : hiy1 - ly1,
+                        lox1 - lx1 : hix1 - lx1,
+                    ]
+                    dst = (slice(loz1, hiz1), slice(loy1, hiy1), slice(lox1, hix1))
+                    if not np.any(occ[dst] & sub):
+                        occ[dst] |= sub
+                        out_pos.append((cz, cy, cx))
+                        out_rot.append(R_np[oi])
+                        out_row.append(int(rows[row_i]))
+                        accepted = True
+                if accepted:
+                    stall = 0
+                    row_i += 1
+                    used = 0
                 else:
-                    assert picks is not None
-                    p = picks[buf_i]
-                    cz, cy, cx = int(p[0]), int(p[1]), int(p[2])
-                buf_i += 1
-
-                # Exact early reject: only valid when this orientation's own
-                # center voxel is solid (see _rotation_cache's centre_solid)
-                if centre_solid[oi] and occ[cz, cy, cx]:
-                    continue
-
-                fz, fy, fx, hz, hy, hx = geom[oi]
-                lz, ly, lx = cz - hz, cy - hy, cx - hx
-                ez, ey, ex = lz + fz, ly + fy, lx + fx
-                loz = 0 if lz < 0 else lz
-                loy = 0 if ly < 0 else ly
-                lox = 0 if lx < 0 else lx
-                hiz = nz if ez > nz else ez
-                hiy = ny if ey > ny else ey
-                hix = nx if ex > nx else ex
-                if hiz <= loz or hiy <= loy or hix <= lox:
-                    continue
-                if not all_clip:
-                    if not clip_z and (loz != lz or hiz != ez):
-                        continue
-                    if not clip_y and (loy != ly or hiy != ey):
-                        continue
-                    if not clip_x and (lox != lx or hix != ex):
-                        continue
-
-                # Sparse probe first, valid only when the footprint sits
-                # wholly inside the grid (a clipped one's flat offsets no
-                # longer line up). An occupied probe voxel is a real clash,
-                # so this rejects exactly, and at realistic density it fires
-                # on nearly every doomed attempt.
-                if (
-                    loz == lz
-                    and loy == ly
-                    and lox == lx
-                    and hiz == ez
-                    and hiy == ey
-                    and hix == ex
-                ):
-                    off = probe_off[oi]
-                    if off.size and occ_flat[lz * ny * nx + ly * nx + lx + off].any():
-                        continue
-
-                fp = cache[oi]
-                sub = fp[loz - lz : hiz - lz, loy - ly : hiy - ly, lox - lx : hix - lx]
-                dst = (slice(loz, hiz), slice(loy, hiy), slice(lox, hix))
-                if np.any(occ[dst] & sub):
-                    continue
-                occ[dst] |= sub
-                out_pos.append((cz, cy, cx))
-                out_rot.append(R_np[oi])
-                out_row.append(int(row))
-                stall = 0
-                break
+                    used += 1
+                    if used == max_retries:
+                        row_i += 1
+                        used = 0
+                pos = nxt + 1
+                si += 1
+                if row_i >= n_rows or stall >= stall_patience:
+                    done = True
+                    break
 
     if not out_pos:
         return (

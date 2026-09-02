@@ -190,7 +190,19 @@ class ParticleGeneratorBase(BaseImager):
                 # allocate two more slabs to produce a value consumed once.
                 slab.mul_(occ.neg_().add_(1.0))
                 Vb[:, start:end].add_(slab)
-                prev_tail = slab[:, -halo:].clone() if halo > 0 else None
+                # Running tail of the last `halo` weighted slices, across as
+                # many previous slabs as the halo spans: the slab can be
+                # narrower than the halo on a very large canvas (the slab
+                # budget is fixed in voxels), so the previous slab alone
+                # would not cover it.
+                if halo > 0:
+                    tail = (
+                        slab
+                        if prev_tail is None
+                        else torch.cat([prev_tail, slab], dim=1)
+                    )
+                    prev_tail = tail[:, -halo:].clone()
+                    del tail
                 del slab
         return V
 

@@ -304,6 +304,28 @@ def test_solvate_without_padded_ice_canvas_matches_padded_reference(pad_fft):
     assert not torch.equal(got, V0)  # ice was actually added
 
 
+def test_solvate_halo_spanning_several_slabs_matches_padded_reference(monkeypatch):
+    """On a very large canvas the fixed slab budget makes the slab narrower
+    than the blur halo, so the halo reaches back across several slabs.
+    Force that (slab 2 slices, halo 8 at 1.5 A) and compare with the padded
+    reference, which reads the halo off the whole canvas."""
+    import specter.imagegenerator._particle_base as pbm
+
+    monkeypatch.setattr(pbm, "_SOLVATE_MAX_SLICES", 2)
+    model = _tiny_generator(pad_fft=True)
+    from specter.potential import occupancy_blur_halo_voxels
+
+    assert occupancy_blur_halo_voxels(model.pixel_size) > pbm._solvate_chunk_slices(
+        model.pad_nxy
+    )
+    V0 = torch.rand(2, model.nz, model.pad_nxy, model.pad_nxy) * 3.0
+    specter.seed(4)
+    got = model.solvate(V0.clone())
+    specter.seed(4)
+    want = _solvate_reference(model, V0.clone())
+    assert torch.allclose(got, want, atol=1e-6, rtol=0)
+
+
 def test_solvate_slab_count_is_capped():
     from specter.imagegenerator._particle_base import (
         _SOLVATE_MAX_SLICES,

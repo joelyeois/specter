@@ -211,7 +211,7 @@ class MicrographGenerator(BaseImager):
         icemaker: IceBank | RandomIcemaker | None = None,
         ice_relax_steps: int = 0,
         crowd_min_distance: float | None = None,
-        packing_backend: str = "poisson_disk",
+        packing_backend: Literal["poisson_disk", "shape"] = "poisson_disk",
         atom_coordinates: torch.Tensor | None = None,
         packing_gap: float = 0.0,
         n_orientations: int = 256,

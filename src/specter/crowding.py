@@ -638,6 +638,11 @@ class CrowdWithDuplicates(L.LightningModule):
         from .specimen.packing import build_species_mask, pack_shapes_3d
 
         grid_shape = (self.nz_out, self.nxy_out, self.nxy_out)
+        if self.atom_coordinates is None:
+            raise ValueError(
+                "packing_backend='shape' needs atom_coordinates (the template's "
+                "real atomic coordinates) to build its collision footprint."
+            )
         mask = build_species_mask(self.atom_coordinates, self.dx, gap=self.gap)
 
         occupancy = None

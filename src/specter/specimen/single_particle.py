@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Literal
+
 import torch
 import lightning as L
 
@@ -159,7 +161,7 @@ class MicrographSpecimenGenerator(L.LightningModule):
         chunk_size: int = 1,
         move_to_cpu: bool = True,
         save_clean_exitwaves: bool = False,
-        packing_backend: str = "poisson_disk",
+        packing_backend: Literal["poisson_disk", "shape"] = "poisson_disk",
         atom_coordinates: torch.Tensor | None = None,
         packing_gap: float = 0.0,
         n_orientations: int = 256,

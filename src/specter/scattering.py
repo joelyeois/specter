@@ -37,6 +37,32 @@ _MULTISLICE_SLICE_CHUNK = 8
 _SLICE_SUM_CHUNK_ELEMENTS = 2**23
 
 
+def absorption_factor(V: torch.Tensor, alpha: float) -> complex:
+    """
+    The complex scalar :func:`~specter.potential.apply_amplitude_contrast`
+    multiplies a real potential by, ``sqrt(1 - alpha^2) + i alpha``, or 1
+    for a `V` that is already complex (and so carries it).
+
+    For a model that is linear in V, or applies the factor inside an
+    elementwise function, this is the scalar to fold in rather than
+    materialising the complex volume.
+
+    Parameters
+    ----------
+    V : torch.Tensor
+        The potential the factor would apply to.
+    alpha : float
+        Amplitude-contrast ratio.
+
+    Returns
+    -------
+    complex
+    """
+    if V.is_complex() or alpha == 0:
+        return 1.0
+    return (1 - alpha**2) ** 0.5 + 1j * alpha
+
+
 class Scattering(L.LightningModule):
     def __init__(
         self,
@@ -347,11 +373,8 @@ class Scattering(L.LightningModule):
         return exitwave  # (B x X x Y)
 
     def _absorption_factor(self, V: torch.Tensor) -> complex:
-        """``sqrt(1 - alpha^2) + i alpha`` for a real `V`, 1 for a complex one
-        (which already carries it)."""
-        if V.is_complex() or self.alpha == 0:
-            return 1.0
-        return (1 - self.alpha**2) ** 0.5 + 1j * self.alpha
+        """See :func:`absorption_factor`."""
+        return absorption_factor(V, self.alpha)
 
     def firstborn(self, V: torch.Tensor) -> torch.Tensor:
         """
@@ -1134,13 +1157,18 @@ class IterativeScattering(L.LightningModule):
         for i, nz_new, slice_sample in self._iter_slices(
             V, theta_matrix, slice_batchsize, "Rytov (Iterative)"
         ):
-            slice_complex = apply_amplitude_contrast(slice_sample, alpha=self.alpha)
-            # Propagate transmission of slice i to exit plane
-            # Distance is nz_new - i
+            # Propagate transmission of slice i to exit plane; the distance
+            # is nz_new - i. The absorption factor and i*sigma*dz are one
+            # complex scalar on the (B, Y, X) result, not a complex copy of
+            # the slice.
             F_i = self._get_propagator(float(nz_new - i))
-            exitwave = exitwave * torch.exp(
-                ifft2(fft2(1j * self.sigma * self.pixel_size * slice_complex) * F_i)
+            c = (
+                1j
+                * self.sigma
+                * self.pixel_size
+                * absorption_factor(slice_sample, self.alpha)
             )
+            exitwave = exitwave * torch.exp(c * ifft2(fft2(slice_sample) * F_i))
 
         return exitwave
 
@@ -1324,11 +1352,11 @@ class IterativeScattering(L.LightningModule):
         for i, nz_new, slice_sample in self._iter_slices(
             V, theta_matrix, slice_batchsize, "First Born (Iterative)"
         ):
-            slice_complex = apply_amplitude_contrast(slice_sample, alpha=self.alpha)
             F_i = self._get_propagator(float(nz_new - i))
-            total_scattered += ifft2(fft2(slice_complex) * F_i)
+            total_scattered += ifft2(fft2(slice_sample) * F_i)
+            a = absorption_factor(slice_sample, self.alpha)
 
-        exitwave = 1 + 1j * self.sigma * self.pixel_size * total_scattered
+        exitwave = 1 + 1j * self.sigma * self.pixel_size * a * total_scattered
         return exitwave
 
     def kinematic(
@@ -1350,8 +1378,13 @@ class IterativeScattering(L.LightningModule):
         for i, nz_new, slice_sample in self._iter_slices(
             V, theta_matrix, slice_batchsize, "Kinematic (Iterative)"
         ):
-            slice_complex = apply_amplitude_contrast(slice_sample, alpha=self.alpha)
-            t = torch.exp(1j * self.sigma * self.pixel_size * slice_complex) - 1
+            c = (
+                1j
+                * self.sigma
+                * self.pixel_size
+                * absorption_factor(slice_sample, self.alpha)
+            )
+            t = torch.exp(c * slice_sample) - 1
             F_i = self._get_propagator(float(nz_new - i))
             total_scattered += ifft2(fft2(t) * F_i)
 

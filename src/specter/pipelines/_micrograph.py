@@ -128,6 +128,10 @@ def run_micrograph(config: MicrographConfig) -> None:
 
     cs_angstrom = config.cs * 1e7
 
+    # Built on the compute device and moved to the host: the template is
+    # one particle box (a few hundred MB at most), the analytic renderer is
+    # a loop of small ops per atom, and on the CPU that loop cost 18 s on a
+    # 128-core host against under 2 s on the device.
     pb = PotentialBuilder(
         config.n_pixels,
         config.pixel_size,
@@ -135,9 +139,9 @@ def run_micrograph(config: MicrographConfig) -> None:
         parameterization=config.scattering_factors,
         atom_species=pdb.atom_species,
         b_factors=pdb.b_factors if config.use_deposited_bfactors else None,
-    ).to("cpu")
+    ).to(device)
     with torch.no_grad():
-        V = pb(pdb.coordinates).clone()
+        V = pb(pdb.coordinates.to(device)).clone().cpu()
 
     n = config.n_micrographs
 

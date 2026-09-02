@@ -4,6 +4,8 @@ from typing import Literal
 
 import torch
 
+from .cpu_threads import limited_cpu_threads
+
 
 def poisson_disk_neighbors(
     min_distance: float,
@@ -53,47 +55,49 @@ def poisson_disk_neighbors(
     pts = [first_point]
     active = [0]
 
-    while active and len(pts) < n_points:
-        idx = int(torch.randint(len(active), (1,)).item())
-        center_point = pts[active[idx]]
+    # Every op in this loop is on a few hundred elements; see cpu_threads.
+    with limited_cpu_threads(1):
+        while active and len(pts) < n_points:
+            idx = int(torch.randint(len(active), (1,)).item())
+            center_point = pts[active[idx]]
 
-        # generate k candidates in annulus [min_distance, 2*min_distance]
-        theta = torch.rand(k) * 2 * torch.pi
-        radius = min_distance + min_distance * torch.rand(k)
-        candidates = center_point.unsqueeze(0) + torch.stack(
-            (radius * torch.cos(theta), radius * torch.sin(theta)), dim=1
-        )
+            # generate k candidates in annulus [min_distance, 2*min_distance]
+            theta = torch.rand(k) * 2 * torch.pi
+            radius = min_distance + min_distance * torch.rand(k)
+            candidates = center_point.unsqueeze(0) + torch.stack(
+                (radius * torch.cos(theta), radius * torch.sin(theta)), dim=1
+            )
 
-        # reject candidates outside the centered box
-        mask = (
-            (candidates[:, 0] >= y_min)
-            & (candidates[:, 0] < y_max)
-            & (candidates[:, 1] >= x_min)
-            & (candidates[:, 1] < x_max)
-        )
-        candidates = candidates[mask]
+            # reject candidates outside the centered box
+            mask = (
+                (candidates[:, 0] >= y_min)
+                & (candidates[:, 0] < y_max)
+                & (candidates[:, 1] >= x_min)
+                & (candidates[:, 1] < x_max)
+            )
+            candidates = candidates[mask]
 
-        if candidates.shape[0] == 0:
-            active.pop(idx)
-            continue
+            if candidates.shape[0] == 0:
+                active.pop(idx)
+                continue
 
-        # distance check against all existing points
-        pts_tensor = torch.stack(pts)
-        diff = candidates[:, None, :] - pts_tensor[None, :, :]
-        dist2 = (diff**2).sum(dim=2)
-        min_dist2, _ = dist2.min(dim=1)
-        candidates = candidates[min_dist2 >= min_distance**2]
+            # distance check against all existing points
+            pts_tensor = torch.stack(pts)
+            diff = candidates[:, None, :] - pts_tensor[None, :, :]
+            dist2 = (diff**2).sum(dim=2)
+            min_dist2, _ = dist2.min(dim=1)
+            candidates = candidates[min_dist2 >= min_distance**2]
 
-        if candidates.shape[0] > 0:
-            pts.append(candidates[0])
-            active.append(len(pts) - 1)
+            if candidates.shape[0] > 0:
+                pts.append(candidates[0])
+                active.append(len(pts) - 1)
+            else:
+                active.pop(idx)
+
+        if n_points == torch.inf:
+            return torch.stack(pts)
         else:
-            active.pop(idx)
-
-    if n_points == torch.inf:
-        return torch.stack(pts)
-    else:
-        return torch.stack(pts[: int(n_points)])
+            return torch.stack(pts[: int(n_points)])
 
 
 def poisson_disk_neighbors_3d(
@@ -165,55 +169,57 @@ def poisson_disk_neighbors_3d(
     # candidate, ~30k for the ~8 points a single-particle box holds, 0.18 s.
     pts_t = first_point.unsqueeze(0)
 
-    while active and len(pts) < n_points:
-        idx = int(torch.randint(len(active), (1,)).item())
-        center_point = pts[active[idx]]
+    # Every op in this loop is on a few hundred elements; see cpu_threads.
+    with limited_cpu_threads(1):
+        while active and len(pts) < n_points:
+            idx = int(torch.randint(len(active), (1,)).item())
+            center_point = pts[active[idx]]
 
-        # generate k candidates in spherical shell
-        phi = torch.acos(2 * torch.rand(k) - 1)
-        theta = 2 * torch.pi * torch.rand(k)
-        r = min_distance * (1 + torch.rand(k))
+            # generate k candidates in spherical shell
+            phi = torch.acos(2 * torch.rand(k) - 1)
+            theta = 2 * torch.pi * torch.rand(k)
+            r = min_distance * (1 + torch.rand(k))
 
-        dx = r * torch.sin(phi) * torch.cos(theta)
-        dy = r * torch.sin(phi) * torch.sin(theta)
-        dz = r * torch.cos(phi)
-        candidates = center_point.unsqueeze(0) + torch.stack([dx, dy, dz], dim=1)
+            dx = r * torch.sin(phi) * torch.cos(theta)
+            dy = r * torch.sin(phi) * torch.sin(theta)
+            dz = r * torch.cos(phi)
+            candidates = center_point.unsqueeze(0) + torch.stack([dx, dy, dz], dim=1)
 
-        # filter candidates in tensor bounds (z,y,x)
-        mask = (
-            (candidates[:, 0] >= x_min)
-            & (candidates[:, 0] < x_max)
-            & (candidates[:, 1] >= y_min)
-            & (candidates[:, 1] < y_max)
-            & (candidates[:, 2] >= z_min)
-            & (candidates[:, 2] < z_max)
-        )
-        candidates = candidates[mask]
+            # filter candidates in tensor bounds (z,y,x)
+            mask = (
+                (candidates[:, 0] >= x_min)
+                & (candidates[:, 0] < x_max)
+                & (candidates[:, 1] >= y_min)
+                & (candidates[:, 1] < y_max)
+                & (candidates[:, 2] >= z_min)
+                & (candidates[:, 2] < z_max)
+            )
+            candidates = candidates[mask]
 
-        if candidates.shape[0] == 0:
-            active.pop(idx)
-            continue
+            if candidates.shape[0] == 0:
+                active.pop(idx)
+                continue
 
-        # A candidate is accepted if no accepted point lies within
-        # min_distance of it; the first such candidate (in draw order) is
-        # taken, exactly as the per-candidate grid scan did.
-        nearest = torch.cdist(candidates, pts_t).min(dim=1).values
-        ok = torch.nonzero(~(nearest < min_distance)).flatten()
-        if len(ok) > 0:
-            new_pt = candidates[ok[0]]
-            pts.append(new_pt)
-            pts_t = torch.cat([pts_t, new_pt.unsqueeze(0)], dim=0)
-            active.append(len(pts) - 1)
-        else:
-            active.pop(idx)
+            # A candidate is accepted if no accepted point lies within
+            # min_distance of it; the first such candidate (in draw order) is
+            # taken, exactly as the per-candidate grid scan did.
+            nearest = torch.cdist(candidates, pts_t).min(dim=1).values
+            ok = torch.nonzero(~(nearest < min_distance)).flatten()
+            if len(ok) > 0:
+                new_pt = candidates[ok[0]]
+                pts.append(new_pt)
+                pts_t = torch.cat([pts_t, new_pt.unsqueeze(0)], dim=0)
+                active.append(len(pts) - 1)
+            else:
+                active.pop(idx)
 
-    if seed == "origin":
-        if len(pts) == 1:
-            return torch.empty((0, 3))
-        pts = pts[1:]  # don't include origin
-        return torch.stack(pts if n_points == torch.inf else pts[: int(n_points)])
-    elif seed == "random":
-        return torch.stack(pts if n_points == torch.inf else pts[: int(n_points)])
+        if seed == "origin":
+            if len(pts) == 1:
+                return torch.empty((0, 3))
+            pts = pts[1:]  # don't include origin
+            return torch.stack(pts if n_points == torch.inf else pts[: int(n_points)])
+        elif seed == "random":
+            return torch.stack(pts if n_points == torch.inf else pts[: int(n_points)])
 
 
 def radial_distribution_function(

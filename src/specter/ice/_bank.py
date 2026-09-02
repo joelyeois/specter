@@ -15,14 +15,19 @@ import time
 from typing import TYPE_CHECKING, Optional
 
 import lightning as L
+import numpy as np
 import matplotlib.figure
 import torch
+
+import torch.nn.functional as F
 
 from ..arrays import (
     soft_voxelize_coordinates,
     soft_voxelize_coordinates_into,
 )
 from ..ice_data import ICE_CACHE_DIRNAME, bundled_ice_data
+from ..cpu_threads import limited_cpu_threads
+from ..fft import spatial_convolve3d_same
 from ..progress import track
 from ._energy import MLBOP
 from ..potential import (
@@ -559,6 +564,7 @@ class IceBank(L.LightningModule):
         splat_volume: torch.Tensor | None = None,
         splat_voxel_size: float | None = None,
         halo_margin: float = 0.0,
+        to_host: bool = False,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, tuple[float, float, float]]:
         """
         Draw one independently rotated/translated crop of size
@@ -582,6 +588,11 @@ class IceBank(L.LightningModule):
         splat_voxel_size : float, optional
             Voxel size (Å) for ``splat_volume``. Required if
             ``splat_volume`` is given.
+        to_host : bool, optional
+            Move each tile's atoms to the host as they are drawn, so the
+            device never holds the whole assembled set (3 GB at a
+            4096-pixel micrograph, plus as much again for the final
+            concatenation). Default False.
         halo_margin : float, optional
             Extra distance (Å) beyond ``seam_margin``, used to additionally
             flag frozen atoms close enough to a face that a mobile atom
@@ -628,6 +639,55 @@ class IceBank(L.LightningModule):
             for iy in range(ny)
             for iz in range(nz_tiles)
         ]
+        # A tile is a few hundred small ops (offsets, masks, the crop's own
+        # bookkeeping) around one real gather; on a many-core host the small
+        # ops dominated at the default thread pool -- see cpu_threads.
+        with limited_cpu_threads():
+            self._place_tile_loop(
+                tile_indices,
+                nx,
+                ny,
+                nz_tiles,
+                tile_extent,
+                half,
+                seam_margin,
+                halo_margin,
+                generator,
+                splat_volume,
+                splat_voxel_size,
+                all_parts,
+                mobile_parts,
+                halo_parts,
+                to_host,
+            )
+        positions = torch.cat(all_parts, dim=0)
+        mobile_mask = torch.cat(mobile_parts, dim=0)
+        halo_mask = torch.cat(halo_parts, dim=0)
+        assembled_box = (nx * tile_extent, ny * tile_extent, nz_tiles * tile_extent)
+        return positions, mobile_mask, halo_mask, assembled_box
+
+    def _place_tile_loop(
+        self,
+        tile_indices: list[tuple[int, int, int]],
+        nx: int,
+        ny: int,
+        nz_tiles: int,
+        tile_extent: float,
+        half: float,
+        seam_margin: float,
+        halo_margin: float,
+        generator: torch.Generator | None,
+        splat_volume: torch.Tensor | None,
+        splat_voxel_size: float | None,
+        all_parts: list[torch.Tensor],
+        mobile_parts: list[torch.Tensor],
+        halo_parts: list[torch.Tensor],
+        to_host: bool = False,
+    ) -> None:
+        """The per-tile loop of :meth:`_place_tiles`; appends into the lists."""
+        assert (
+            self.box_x is not None and self.box_y is not None and self.box_z is not None
+        )
         for ix, iy, iz in track(
             tile_indices,
             description="Placing ice tiles",
@@ -647,12 +707,12 @@ class IceBank(L.LightningModule):
                 dtype=crop.dtype,
             )
             dist_to_face = crop.abs()
-            mobile_parts.append((dist_to_face > (half - seam_margin)).any(dim=1))
-            halo_parts.append(
-                (dist_to_face > (half - seam_margin - halo_margin)).any(dim=1)
-            )
+            mobile = (dist_to_face > (half - seam_margin)).any(dim=1)
+            halo = (dist_to_face > (half - seam_margin - halo_margin)).any(dim=1)
+            mobile_parts.append(mobile.cpu() if to_host else mobile)
+            halo_parts.append(halo.cpu() if to_host else halo)
             crop_global = crop + offset
-            all_parts.append(crop_global)
+            all_parts.append(crop_global.cpu() if to_host else crop_global)
             if splat_volume is not None:
                 assert splat_voxel_size is not None
                 # periodic=True wraps only atoms landing outside splat_volume's own
@@ -694,11 +754,6 @@ class IceBank(L.LightningModule):
                 soft_voxelize_coordinates_into(
                     splat_volume, crop_global[keep], splat_voxel_size, periodic=True
                 )
-        positions = torch.cat(all_parts, dim=0)
-        mobile_mask = torch.cat(mobile_parts, dim=0)
-        halo_mask = torch.cat(halo_parts, dim=0)
-        assembled_box = (nx * tile_extent, ny * tile_extent, nz_tiles * tile_extent)
-        return positions, mobile_mask, halo_mask, assembled_box
 
     def _relax_seams(
         self,
@@ -766,6 +821,112 @@ class IceBank(L.LightningModule):
         return torch.cat(
             [positions[far_mask], frozen.cpu(), mobile.detach().cpu()], dim=0
         )
+
+    def _tile_grid(
+        self, n: int, dx: float, nz: int | None, tile_extent: float | None
+    ) -> tuple[float, tuple[int, int, int], tuple[float, float, float]]:
+        """
+        Set the requested box on ``self`` and size the tile grid covering it.
+
+        Parameters
+        ----------
+        n, dx, nz
+            As for :meth:`generate_big_ice_deltas`.
+        tile_extent : float or None
+            Tile side in Å; None means the smallest cached config's box.
+
+        Returns
+        -------
+        tile_extent : float
+        grid : tuple of int
+            Tiles along x, y and z.
+        box : tuple of float
+            The requested box in Å, ``(x, y, z)``.
+        """
+        nz = nz if nz is not None else n
+        self.n, self.dx, self.nz = n, dx, nz
+        box = (n * dx, n * dx, nz * dx)
+        self.box_x, self.box_y, self.box_z = box
+        if tile_extent is None:
+            tile_extent = min(c["box_L"] for c in self._configs)
+        grid = (
+            max(1, math.ceil(box[0] / tile_extent)),
+            max(1, math.ceil(box[1] / tile_extent)),
+            max(1, math.ceil(box[2] / tile_extent)),
+        )
+        return tile_extent, grid, box
+
+    def big_ice_positions(
+        self,
+        n: int,
+        dx: float,
+        nz: int | None = None,
+        tile_extent: float | None = None,
+        seam_margin: float = 6.0,
+        relax_steps: int = 0,
+        relax_lr: float = 0.01,
+        mlbop_target: float | None = -0.413,
+        device: torch.device | str | None = None,
+        generator: torch.Generator | None = None,
+        to_host: bool = False,
+    ) -> torch.Tensor:
+        """
+        The molecules of a tiled canvas, without voxelising them.
+
+        The same draws, tiling, seam relaxation and trimming as
+        :meth:`generate_big_ice_deltas`, returning the coordinates instead
+        of a canvas. What :func:`blend_ice_into_volume` builds its ice from
+        a z-slab at a time when the volume lives on the host: the positions
+        of a micrograph-sized canvas are under a gigabyte, the canvas itself
+        tens.
+
+        Parameters
+        ----------
+        n, dx, nz, tile_extent, seam_margin, relax_steps, relax_lr,
+        mlbop_target, device, generator
+            As for :meth:`generate_big_ice_deltas`.
+
+        to_host : bool, optional
+            Collect the tiles on the host as they are drawn and return the
+            result there, so the device never holds the whole set; see
+            :meth:`_place_tiles`. Default False.
+
+        Returns
+        -------
+        torch.Tensor
+            Shape ``(N, 3)``, x/y/z in Å centred on the canvas, on `device`
+            (the bank's own device by default), or on the host with
+            `to_host`.
+        """
+        if device is None:
+            device = self.device
+        tile_extent, grid, box = self._tile_grid(n, dx, nz, tile_extent)
+        halo_margin = 2.0 * MLBOP().r_cut if relax_steps > 0 else 0.0
+        positions, mobile_mask, halo_mask, assembled_box = self._place_tiles(
+            grid,
+            tile_extent,
+            seam_margin,
+            generator=generator,
+            halo_margin=halo_margin,
+            to_host=to_host,
+        )
+        if relax_steps > 0 and mobile_mask.any():
+            positions = self._relax_seams(
+                positions,
+                mobile_mask,
+                halo_mask,
+                assembled_box,
+                relax_steps,
+                relax_lr,
+                mlbop_target,
+                device,
+            )
+        keep = (
+            (positions[:, 0].abs() <= box[0] / 2)
+            & (positions[:, 1].abs() <= box[1] / 2)
+            & (positions[:, 2].abs() <= box[2] / 2)
+        )
+        return positions[keep] if to_host else positions[keep].to(device)
 
     def generate_big_ice_deltas(
         self,
@@ -836,16 +997,10 @@ class IceBank(L.LightningModule):
         """
         if device is None:
             device = self.device
-        self.n, self.dx, self.nz = n, dx, nz if nz is not None else n
-        self.box_x = self.n * self.dx
-        self.box_y = self.n * self.dx
-        self.box_z = self.nz * self.dx
-
-        if tile_extent is None:
-            tile_extent = min(c["box_L"] for c in self._configs)
-        nx_tiles = max(1, math.ceil(self.box_x / tile_extent))
-        ny_tiles = max(1, math.ceil(self.box_y / tile_extent))
-        nz_tiles = max(1, math.ceil(self.box_z / tile_extent))
+        tile_extent, (nx_tiles, ny_tiles, nz_tiles), box = self._tile_grid(
+            n, dx, nz, tile_extent
+        )
+        nz = nz if nz is not None else n
 
         results = []
         # relax_steps == 0 means positions never move after placement, so
@@ -857,7 +1012,7 @@ class IceBank(L.LightningModule):
         # front and splatted into item by item: a per-item list stacked at
         # the end holds the batch twice at the moment of the stack.
         batch_vox = (
-            torch.zeros(batchsize, self.nz, self.n, self.n, device=device)
+            torch.zeros(batchsize, nz, n, n, device=device)
             if relax_steps == 0
             else None
         )
@@ -893,9 +1048,9 @@ class IceBank(L.LightningModule):
                     device,
                 )
             keep = (
-                (positions[:, 0].abs() <= self.box_x / 2)
-                & (positions[:, 1].abs() <= self.box_y / 2)
-                & (positions[:, 2].abs() <= self.box_z / 2)
+                (positions[:, 0].abs() <= box[0] / 2)
+                & (positions[:, 1].abs() <= box[1] / 2)
+                & (positions[:, 2].abs() <= box[2] / 2)
             )
             self.positions = positions[keep]
             if vox is None:
@@ -905,8 +1060,8 @@ class IceBank(L.LightningModule):
                 results.append(
                     soft_voxelize_coordinates(
                         self.positions,
-                        grid_shape=(self.nz, self.n, self.n),
-                        voxel_size=self.dx,
+                        grid_shape=(nz, n, n),
+                        voxel_size=dx,
                         periodic=True,
                     )
                 )
@@ -1532,6 +1687,32 @@ def blend_ice_into_volume(
         ``V`` itself when ``inplace``, a new tensor otherwise.
     """
     batchsize, nz, nxy, _ = V.shape
+    if (
+        isinstance(icemaker, IceBank)
+        and V.device.type == "cpu"
+        and icemaker.device.type != "cpu"
+    ):
+        # The volume is on the host because it does not fit the device (a
+        # micrograph canvas), and the bank has a device. Building the ice
+        # where V lives would put tile placement, the splat, the kernel
+        # convolution and the occupancy blur all on the CPU over a canvas
+        # of tens of GB: 11 of the 13 minutes of a 2048-pixel micrograph,
+        # and a second host canvas for the ice. Instead the molecules are
+        # drawn once and every voxel step runs on the device a z-slab at a
+        # time, adding each finished slab into V. Same result to float
+        # noise; peak device memory is a few slabs, host memory is V.
+        out = V if inplace else V.clone()
+        for b in range(batchsize):
+            _blend_ice_slabwise(
+                out[b : b + 1],
+                icemaker,
+                pixel_size,
+                full_potential=full_potential,
+                relax_steps=relax_steps,
+                profile=profile,
+                sigma_a=sigma_a,
+            )
+        return out
     if isinstance(icemaker, IceBank):
         # Built on V's OWN device, not the icemaker's. The ice volume is the
         # same shape as V, so at micrograph scale it is gigabytes -- a
@@ -1604,3 +1785,146 @@ def blend_ice_into_volume(
         ice_slab.mul_(occ.neg_().add_(1.0).clamp_(0.0, 1.0))
         out[:, sl].add_(ice_slab)
     return out
+
+
+#: Molecules splatted per call inside `_blend_ice_slabwise`; bounds the
+#: splat's transient index set to ~130 MB.
+_SLAB_SPLAT_ATOMS = 2**22
+
+
+def _blend_ice_slabwise(
+    V: torch.Tensor,
+    bank: IceBank,
+    pixel_size: float,
+    full_potential: float = FULL_OCCUPANCY_POTENTIAL_V,
+    relax_steps: int = 0,
+    profile: "IceProfile | None" = None,
+    sigma_a: float = WATER_COARSE_GRAIN_SIGMA_A,
+    slab_voxels: int = 2**27,
+) -> torch.Tensor:
+    """
+    :func:`blend_ice_into_volume` for one host-resident volume, slab by slab
+    on the bank's device.
+
+    Each slab's molecules (those within a halo of it, with the canvas ends
+    wrapped so the convolution is periodic in z as in
+    :meth:`IceBank.generate_big_ice`) are splatted onto a slab canvas,
+    convolved with the water kernel (circular in xy, real context in z),
+    weighted by the occupancy of the pristine potential and added into V.
+    The halo covers both the kernel's reach and the occupancy blur's; the
+    ice already added to the previous slab is subtracted back before the
+    blur reads it, as the whole-canvas path does.
+
+    Parameters
+    ----------
+    V : torch.Tensor
+        Shape ``(1, nz, n, n)``, on the host; modified in place.
+    bank : IceBank
+        On the compute device.
+    pixel_size : float
+        Voxel size in Å.
+    full_potential, relax_steps, profile, sigma_a
+        As for :func:`blend_ice_into_volume`.
+    slab_voxels : int, optional
+        Voxels per slab core; the working canvases are a few times this.
+        Default ``2**27`` (0.5 GB of float32).
+
+    Returns
+    -------
+    torch.Tensor
+        `V`.
+    """
+    assert V.shape[0] == 1
+    _, nz, n, _ = V.shape
+    device = bank.device
+    dx = pixel_size
+    kernel = bank._get_kernel(dx).to(device)
+    kr = kernel.shape[0] // 2
+    halo_blur = occupancy_blur_halo_voxels(dx, sigma_a)
+    halo = max(kr, halo_blur) + 1
+    chunk = max(1, min(slab_voxels // (n * n), nz))
+
+    # Every molecule of the canvas, bucketed by slab and parked on the host:
+    # a micrograph canvas holds ~3e8 of them (3 GB of float32), and a slab
+    # needs only its own few buckets, so the device holds slab canvases and
+    # nothing else. Bucketing is a radix sort on small integer keys (3 s
+    # for 3e8 on the host, against 37 s for a full sort of the z values),
+    # and the exact z window is applied on the device per slab.
+    pos = bank.big_ice_positions(
+        n, dx, nz, relax_steps=relax_steps, device=device, to_host=True
+    )
+    zv = pos[:, 2] / dx + nz // 2  # voxel z index, as the splat computes it
+    n_buckets = -(-nz // chunk)
+    key = (zv / chunk).floor().clamp_(0, n_buckets - 1).to(torch.int16).numpy()
+    order = torch.from_numpy(np.argsort(key, kind="stable"))
+    pos = pos.index_select(0, order)
+    del zv, order
+    offsets = np.concatenate([[0], np.cumsum(np.bincount(key, minlength=n_buckets))])
+    del key
+
+    def slab_atoms(lo: int, hi: int) -> torch.Tensor:
+        """Molecules with voxel z in [lo - 1, hi + 1), the canvas ends
+        wrapped (the whole-canvas convolution is periodic in z), on `device`
+        in slab-local coordinates: the splat maps coord/dx + depth//2 to the
+        index, which must come out as zv - lo."""
+        depth = hi - lo
+        parts = []
+        for shift in (0, nz, -nz):
+            # Molecules with z + shift in [lo - 1, hi + 1) have z in
+            # [lo - 1 - shift, hi + 1 - shift); the buckets covering that.
+            b0 = max(0, math.floor((lo - 1 - shift) / chunk))
+            b1 = min(n_buckets, math.ceil((hi + 1 - shift) / chunk))
+            if b1 <= b0:
+                continue
+            xyz = pos[offsets[b0] : offsets[b1]].to(device)
+            z = xyz[:, 2] / dx + nz // 2 + shift
+            m = (z >= lo - 1) & (z < hi + 1)
+            if not bool(m.any()):
+                continue
+            z_local = (z[m] - lo - depth // 2) * dx
+            parts.append(torch.cat([xyz[m, :2], z_local[:, None]], dim=1))
+        return torch.cat(parts, dim=0)
+
+    prev_tail: torch.Tensor | None = None
+    for z0 in range(0, nz, chunk):
+        z1 = min(z0 + chunk, nz)
+        lo, hi = z0 - halo, z1 + halo
+        depth = hi - lo
+        coords = slab_atoms(lo, hi)
+        deltas = torch.zeros(depth, n, n, device=device)
+        # In atom chunks: the splat's per-corner index set is ~30 bytes per
+        # molecule, and a 4096-pixel slab holds tens of millions of them.
+        for a0 in range(0, len(coords), _SLAB_SPLAT_ATOMS):
+            soft_voxelize_coordinates_into(
+                deltas, coords[a0 : a0 + _SLAB_SPLAT_ATOMS], dx, periodic=True
+            )
+        del coords
+        padded = F.pad(deltas[None, None], (kr, kr, kr, kr, 0, 0), mode="circular")[
+            :, 0
+        ]
+        del deltas
+        ice = spatial_convolve3d_same(padded, kernel)[
+            :, halo : halo + (z1 - z0), kr:-kr, kr:-kr
+        ]
+        del padded
+        if profile is not None:
+            ice *= profile.window(nz, n, dx, z_slice=slice(z0, z1), device=device)[None]
+
+        vlo, vhi = max(0, z0 - halo_blur), min(nz, z1 + halo_blur)
+        src = V[:, vlo:vhi].to(device)
+        if vlo < z0:
+            assert prev_tail is not None
+            src[:, : z0 - vlo] -= prev_tail[:, -(z0 - vlo) :]
+        occ = potential_occupancy(
+            src, dx, sigma_a=sigma_a, full_potential=full_potential
+        )[:, z0 - vlo : z0 - vlo + (z1 - z0)]
+        core = src[:, z0 - vlo : z0 - vlo + (z1 - z0)]
+        ice.mul_(occ.neg_().add_(1.0).clamp_(0.0, 1.0))
+        V[:, z0:z1] = (core + ice).to(V.device)
+        del src, core, occ
+        if halo_blur > 0:
+            tail = ice if prev_tail is None else torch.cat([prev_tail, ice], dim=1)
+            prev_tail = tail[:, -halo_blur:].clone()
+            del tail
+        del ice
+    return V

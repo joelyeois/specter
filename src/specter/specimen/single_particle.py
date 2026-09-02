@@ -247,19 +247,24 @@ class MicrographSpecimenGenerator(L.LightningModule):
         # Assemble on CPU when move_to_cpu is set — avoids holding two copies of the
         # full micrograph volume in VRAM simultaneously (crowd accumulator + V).
         assembly_device = torch.device("cpu") if self.move_to_cpu else device
-        V = torch.zeros(1, self.nz, self.nxy, self.nxy, device=assembly_device)
+        shape = (1, self.nz, self.nxy, self.nxy)
+        V: torch.Tensor | None = None
 
         # 1. Add crowd
         if self.crowd is not None:
             with torch.no_grad():
                 V_crowd = self.crowd()
                 if not isinstance(V_crowd, float):
-                    # Adopted, not added into the zeros above. `crowd()` already
-                    # returns a full canvas, so `V = V + V_crowd` allocated a
-                    # third one to hold a sum whose other operand was all zeros
-                    # -- 33.6 GB each at micrograph_size.
-                    V = V_crowd.to(assembly_device).reshape(V.shape)
+                    # Adopted: `crowd()` already returns a full canvas. It used
+                    # to be added into a zeroed canvas allocated up front, and
+                    # even after that sum was dropped the zeros were still
+                    # allocated and then replaced -- two touched canvases,
+                    # 33.6 GB each at micrograph_size, and the whole of the
+                    # difference between 67 and 34 GB of host memory.
+                    V = V_crowd.to(assembly_device).reshape(shape)
                     del V_crowd
+        if V is None:
+            V = torch.zeros(shape, device=assembly_device)
 
         # Hold the pre-ice volume for the clean exit wave. This DOES cost a
         # whole canvas: the blend below writes in place precisely to avoid

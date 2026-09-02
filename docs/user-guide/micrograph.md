@@ -134,6 +134,19 @@ This affects specimen construction only. `Scattering`'s own multislice
 chunking, which is unrelated and is not a `MicrographConfig` field, bounds
 memory during wave propagation.
 
+The specimen canvas itself is assembled in host memory, since at
+`micrograph_size` it is tens of gigabytes (500 × 4096 × 4096 voxels is
+33.5 GB in float32) and usually does not fit a device alongside the
+propagation. Every voxel operation on it still runs on the device: crowding
+duplicates are rotated there and stamped into the host canvas one at a
+time, and the ice is built and blended a z-slab at a time (the molecules
+of the whole canvas are drawn once and kept on the host; each slab is
+splatted, convolved and occupancy-weighted on the device and added back).
+Peak device memory during assembly is therefore a few slab canvases, and
+peak host memory is the canvas plus the multislice's streaming buffer. The
+multislice uploads the canvas if it fits and otherwise streams it a slice
+chunk at a time, which changes cost, not the result.
+
 ## Single-device only
 
 `specter simulate micrograph` does not accept a comma-separated device list

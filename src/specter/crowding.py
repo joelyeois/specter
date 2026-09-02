@@ -7,6 +7,7 @@ import torch
 
 from .arrays import clip_insert_bounds
 from .coords import poisson_disk_neighbors, poisson_disk_neighbors_3d
+from .cpu_threads import limited_cpu_threads
 from .progress import track
 
 from . import rotations
@@ -98,7 +99,34 @@ def insert_particles_into_micrograph(
     cy_center = Y // 2
     cx_center = X // 2
 
-    for i in range(N):
+    # Per particle: three `.item()`s, a bounds clip and one slice add. Under
+    # the default thread pool of a many-core host the small ops dominate;
+    # see cpu_threads.
+    with limited_cpu_threads():
+        _insert_all(
+            volumes,
+            positions_int,
+            (cz_center, cy_center, cx_center),
+            (Zp, Yp, Xp),
+            (Z, Y, X),
+            micrograph,
+        )
+    return micrograph
+
+
+def _insert_all(
+    volumes: torch.Tensor,
+    positions_int: torch.Tensor,
+    center: tuple[int, int, int],
+    part_shape: tuple[int, int, int],
+    micro_shape: tuple[int, int, int],
+    micrograph: torch.Tensor,
+) -> None:
+    """The insertion loop of :func:`insert_particles_into_micrograph`."""
+    cz_center, cy_center, cx_center = center
+    Zp, Yp, Xp = part_shape
+    Z, Y, X = micro_shape
+    for i in range(len(positions_int)):
         # Convert centered coords to array indices
         cx_index = cx_center + int(positions_int[i, 0].item())
         cy_index = cy_center + int(positions_int[i, 1].item())
@@ -111,8 +139,6 @@ def insert_particles_into_micrograph(
             continue
         dst, src = bounds
         micrograph[dst] += volumes[i][src]
-
-    return micrograph
 
 
 def _local_z_density_probs(

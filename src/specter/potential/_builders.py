@@ -1039,18 +1039,32 @@ def _potential_from_deltas_periodic(
         # every output voxel sees its true periodic neighbourhood. Asymmetric
         # padding (centre before, remainder after) keeps the centre voxel on
         # its own delta for odd and even kernels alike, matching the FFT
-        # branch, at the cost of one padded copy.
-        pads: list[int] = []
-        for ksize, c in zip(reversed(kernel.shape), reversed(centre)):
-            pads += [c, ksize - 1 - c]
-        padded = torch.nn.functional.pad(deltas[:, None], pads, mode="circular")[:, 0]
-        result = spatial_convolve3d_same(padded, kernel)
-        sl = tuple(slice(c, c + n) for c, n in zip(centre, shape))
-        result = result[(slice(None),) + sl]
+        # branch. Done a z-chunk at a time: this backend is chosen for
+        # volumes too large for the FFT's working copies, and a circular pad
+        # of the whole canvas would be a second copy of exactly that size
+        # (33.6 GB at micrograph_size). Each chunk's z context is gathered
+        # by index, wrapping at the ends, and only its xy faces are padded.
         if out is None:
-            out = result
-        else:
-            out.copy_(result)
+            out = torch.empty_like(deltas)
+        kz, ky, kx = kernel.shape
+        cz, cy, cx = centre
+        nz = shape[0]
+        chunk_z = max(1, _DELTAS_FFT_MAX_VOXELS // (shape[1] * shape[2]))
+        # Circular padding of a 5-d input wants all three spatial pads; z
+        # gets none, its context having been gathered by index.
+        pads_xy = [cx, kx - 1 - cx, cy, ky - 1 - cy, 0, 0]
+        for z0 in range(0, nz, chunk_z):
+            z1 = min(z0 + chunk_z, nz)
+            zidx = torch.arange(z0 - cz, z1 + (kz - 1 - cz), device=deltas.device) % nz
+            block = deltas.index_select(1, zidx)
+            block = torch.nn.functional.pad(block[:, None], pads_xy, mode="circular")[
+                :, 0
+            ]
+            conv = spatial_convolve3d_same(block, kernel)
+            out[:, z0:z1] = conv[
+                :, cz : cz + (z1 - z0), cy : cy + shape[1], cx : cx + shape[2]
+            ]
+            del block, conv
     else:
         raise ValueError(
             f"Unknown backend '{backend}'. Choose 'fftconvolve' or 'conv3d'."

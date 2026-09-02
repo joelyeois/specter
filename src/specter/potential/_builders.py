@@ -41,6 +41,25 @@ def compute_supersampling_parameters(
     and wide enough to cover the 'size' of an atom (default 5Å). Can be downsampled
     later using integer stride.
 
+    The fine grid is always EVEN and the pooled kernel it downsamples to is
+    always ODD, and both are load-bearing. An even fine grid under the
+    symmetric ("torch") convention has no sample at r = 0, where the
+    Kirkland and Lobato potentials diverge; every pooled voxel is a finite
+    average of fine samples, the nearest at (sqrt(3)/2) fine steps from the
+    origin. An odd pooled kernel has a centre voxel, and that voxel is
+    centred on r = 0 exactly when the fine grid is even: the pooled voxel
+    ``j`` is centred at ``(j + 1/2 - n_pooled/2) * dx``, zero for the
+    middle ``j`` of an odd ``n_pooled``. An even pooled kernel has no such
+    voxel; its origin sits between two voxels, and every potential built
+    by convolving with it lands half a voxel off the coordinates it was
+    built from. That was the case for 20 of the 36 pixel sizes between 0.5
+    and 4.0 Å until 2026-09-02 (1.0 Å happened to pool to 5^3 and was
+    exact; 0.731 Å pooled to 8^3 and 1.5 Å to 4^3), and it is what put
+    an ice canvas's face plane at half density (see
+    :func:`potential_from_deltas`). Keeping the fine grid even with an odd
+    pooled size needs an even supersampling factor, so an odd one is
+    doubled.
+
     Parameters
     ----------
     dx : float
@@ -53,39 +72,31 @@ def compute_supersampling_parameters(
     Returns
     -------
     n_atom : int
-        Number of pixels along each axis in the supersampled grid.
+        Number of pixels along each axis in the supersampled grid. Even, and
+        an odd multiple of ``ssf``.
     ss_dx : float
         Pixel size of the supersampled grid.
     ssf : int
-        Supersampling factor
+        Supersampling factor. Even.
     """
     if dx <= 0 or width_atom <= 0 or dx_atom <= 0:
         raise ValueError("dx, width_atom, and dx_atom must be > 0.")
     if dx <= dx_atom:
-        ssf = 1
-        ss_dx = dx
-        n_atom = int(width_atom / dx)
-        n_atom = max(n_atom, 3)
-        # make even
-        n_atom = n_atom + (n_atom % 2)
-        return n_atom, ss_dx, ssf
-
-    # Number of pixels at atom sampling
-    n_atom = int(torch.ceil(torch.as_tensor(width_atom / dx_atom)))
-
-    # Step 1: make divisible by ssf
-    ssf = int(torch.round(torch.as_tensor(dx / dx_atom)))
-    ss_dx = dx / ssf
-
-    # Ensure pooled kernel has at least 3 pixels per axis.
-    n_atom = max(n_atom, 3 * ssf)
-
-    # Step 2: adjust n_atom to satisfy both evenness and divisibility
-    # find the smallest even number divisible by ssf and >= n_atom
-    while (n_atom % ssf != 0) or (n_atom % 2 != 0):
-        n_atom += 1
-
-    return n_atom, ss_dx, ssf
+        # Already at or below the atom sampling: the finest useful grid is
+        # two fine samples per voxel, which is what keeps the fine grid even
+        # under an odd pooled size.
+        ssf = 2
+        ss_dx = dx / ssf
+        n_pooled = max(int(width_atom / dx), 3)
+    else:
+        ssf = int(torch.round(torch.as_tensor(dx / dx_atom)))
+        if ssf % 2 == 1:
+            ssf *= 2
+        ss_dx = dx / ssf
+        n_pooled = max(int(torch.ceil(torch.as_tensor(width_atom / dx))), 3)
+    if n_pooled % 2 == 0:
+        n_pooled += 1
+    return n_pooled * ssf, ss_dx, ssf
 
 
 def build_potential_volume_fftconvolve_3d(
@@ -892,6 +903,7 @@ def potential_from_deltas(
     kernel: torch.Tensor,
     backend: str = "fftconvolve",
     out: torch.Tensor | None = None,
+    boundary: str = "linear",
 ) -> torch.Tensor:
     """
     Convolve soft-voxelized atom deltas with an atomic potential kernel.
@@ -924,6 +936,18 @@ def potential_from_deltas(
         at a 512-pixel box is the 0.5 GB that stood between the FFT's own
         working copies and the forward pass's peak. Safe because each
         item's input is read in full before its output is written.
+    boundary : str, optional
+        ``'linear'`` (default): the kernel is truncated at the volume's
+        faces, as for an isolated molecule in a box. ``'periodic'``: the
+        convolution wraps, so what a face-adjacent delta spreads past one
+        face re-enters at the opposite one. The right choice for a canvas
+        that is a piece of bulk, such as ice: under ``'linear'`` the face
+        plane of an ice canvas carried half its potential (the other half
+        of every face molecule's kernel fell outside) and the next plane
+        lost the kernel's tail, a deficit that solvate's reflect padding
+        then mirrored into a dark line on every slice at the box boundary.
+        Within one kernel radius of a face the wrapped neighbours are
+        unrelated ice, the same status as an unrelaxed tile seam.
 
     Returns
     -------
@@ -936,8 +960,17 @@ def potential_from_deltas(
         if out is not None:
             out = out[None]
 
+    if boundary not in ("linear", "periodic"):
+        raise ValueError(
+            f"Unknown boundary '{boundary}'. Choose 'linear' or 'periodic'."
+        )
     if backend == "auto":
         backend = _deltas_backend(deltas, kernel)
+
+    if boundary == "periodic":
+        return _potential_from_deltas_periodic(
+            deltas, kernel, backend, out, squeeze_back
+        )
 
     if backend == "fftconvolve":
         if out is None:
@@ -947,9 +980,9 @@ def potential_from_deltas(
     elif backend == "conv3d":
         # Deliberately not F.conv3d(padding="same"): for an even-sized kernel
         # that pads asymmetrically relative to fftconvolve's centered crop,
-        # shifting the potential half a voxel off the coordinates it was built
-        # from. Even kernels are not exotic -- they occur for 20 of the 36
-        # pixel sizes between 0.5 and 4.0 A, including 1.0-1.7 A.
+        # so the two backends would disagree by a voxel. specter's own
+        # kernels are odd (see compute_supersampling_parameters), but a
+        # caller's kernel need not be.
         result = spatial_convolve3d_same(deltas, kernel)
         if out is None:
             out = result
@@ -960,6 +993,68 @@ def potential_from_deltas(
             f"Unknown backend '{backend}'. Choose 'fftconvolve' or 'conv3d'."
         )
 
+    return out[0] if squeeze_back else out
+
+
+def _potential_from_deltas_periodic(
+    deltas: torch.Tensor,
+    kernel: torch.Tensor,
+    backend: str,
+    out: torch.Tensor | None,
+    squeeze_back: bool,
+) -> torch.Tensor:
+    """
+    :func:`potential_from_deltas` with ``boundary='periodic'``.
+
+    The kernel's centre voxel is placed at index 0 of the canvas, so the
+    potential lands on the delta that produced it. For an even-sized
+    kernel there is no centre voxel and the potential sits half a voxel
+    off, as it does under the linear convention; see
+    :func:`compute_supersampling_parameters`, which makes every kernel
+    odd for that reason.
+    """
+    shape = deltas.shape[-3:]
+    if any(k > n for k, n in zip(kernel.shape, shape)):
+        raise ValueError(
+            f"kernel {tuple(kernel.shape)} is larger than the volume "
+            f"{tuple(shape)} along some axis; a periodic convolution would "
+            "wrap the kernel onto itself"
+        )
+    centre = tuple(k // 2 for k in kernel.shape)
+    if backend == "fftconvolve":
+        if out is None:
+            out = torch.empty_like(deltas)
+        # The kernel on the canvas grid, rolled so its centre voxel is at
+        # the origin: one small canvas-sized buffer, transformed once.
+        k = torch.zeros(shape, dtype=deltas.dtype, device=deltas.device)
+        kz, ky, kx = kernel.shape
+        k[:kz, :ky, :kx] = kernel.to(deltas.dtype)
+        k = torch.roll(k, shifts=tuple(-c for c in centre), dims=(0, 1, 2))
+        k_hat = torch.fft.rfftn(k)
+        del k
+        for b in range(len(deltas)):
+            out[b] = torch.fft.irfftn(torch.fft.rfftn(deltas[b]) * k_hat, s=shape)
+    elif backend == "conv3d":
+        # Wrap the deltas by the kernel's reach, then convolve linearly:
+        # every output voxel sees its true periodic neighbourhood. Asymmetric
+        # padding (centre before, remainder after) keeps the centre voxel on
+        # its own delta for odd and even kernels alike, matching the FFT
+        # branch, at the cost of one padded copy.
+        pads: list[int] = []
+        for ksize, c in zip(reversed(kernel.shape), reversed(centre)):
+            pads += [c, ksize - 1 - c]
+        padded = torch.nn.functional.pad(deltas[:, None], pads, mode="circular")[:, 0]
+        result = spatial_convolve3d_same(padded, kernel)
+        sl = tuple(slice(c, c + n) for c, n in zip(centre, shape))
+        result = result[(slice(None),) + sl]
+        if out is None:
+            out = result
+        else:
+            out.copy_(result)
+    else:
+        raise ValueError(
+            f"Unknown backend '{backend}'. Choose 'fftconvolve' or 'conv3d'."
+        )
     return out[0] if squeeze_back else out
 
 

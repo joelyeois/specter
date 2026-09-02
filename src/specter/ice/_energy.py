@@ -83,6 +83,80 @@ ML_BOP_PARAMS: dict[str, float] = {
 }
 
 
+class NeighborListCache:
+    """
+    A Verlet-skin neighbour list, reused across nearby evaluations.
+
+    The list is built with cutoff ``r_cut + skin`` and kept, together with
+    the positions it was built from, until any atom has moved further than
+    ``skin / 2`` from those positions -- the standard molecular-dynamics
+    guarantee that no pair can have crossed ``r_cut`` unnoticed. Each
+    evaluation recomputes the pair vectors from the CURRENT positions and the
+    cached ``(i, j, cell shift)``, so distances stay differentiable with
+    respect to the positions and pairs that have drifted past ``r_cut``
+    simply carry ``f_C = 0``.
+
+    Worth having wherever the same system is evaluated repeatedly at nearby
+    positions: an L-BFGS line search evaluates the ice loss several times per
+    step, and vesin's cell-list search was 48 ms of every one of those
+    evaluations. In a full 600-step ice optimisation the list was rebuilt on
+    7% of the evaluations.
+
+    Parameters
+    ----------
+    skin : float, optional
+        Extra cutoff radius in Angstrom. Default 1.0.
+    """
+
+    def __init__(self, skin: float = 1.0) -> None:
+        self.skin = skin
+        self.reference: torch.Tensor | None = None
+        self.i: torch.Tensor | None = None
+        self.j: torch.Tensor | None = None
+        self.shift: torch.Tensor | None = None
+        self.rebuilds = 0
+        self.evaluations = 0
+
+    def pairs(
+        self, positions: torch.Tensor, box_t: torch.Tensor, r_cut: float
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        ``(i, j, shift)`` for `positions`, rebuilt only when needed.
+
+        Parameters
+        ----------
+        positions : torch.Tensor
+            Current positions, shape ``(N, 3)``; may require grad (only the
+            detached values are used to decide on a rebuild).
+        box_t : torch.Tensor
+            Cell matrix, shape ``(3, 3)``.
+        r_cut : float
+            The potential's own cutoff; the list is built at ``r_cut + skin``.
+
+        Returns
+        -------
+        i, j : torch.Tensor
+            Long, shape ``(n_pairs,)``.
+        shift : torch.Tensor
+            Periodic shift to add to ``positions[j] - positions[i]``, in the
+            same units as `positions`, shape ``(n_pairs, 3)``.
+        """
+        pos = positions.detach()
+        self.evaluations += 1
+        if self.reference is not None and self.i is not None:
+            moved = float((pos - self.reference).abs().max())
+            if moved <= self.skin / 2:
+                assert self.j is not None and self.shift is not None
+                return self.i, self.j, self.shift
+        nl = vesin_torch.NeighborList(cutoff=r_cut + self.skin, full_list=True)
+        i, j, S = nl.compute(pos, box_t, periodic=True, quantities="ijS")
+        self.i, self.j = i, j
+        self.shift = S.to(pos.dtype) @ box_t
+        self.reference = pos.clone()
+        self.rebuilds += 1
+        return i, j, self.shift
+
+
 class MLBOP:
     """
     Evaluates ML-BOP potential energy for a set of coarse-grained water bead
@@ -146,7 +220,7 @@ class MLBOP:
         vec_t: torch.Tensor,
     ) -> dict[str, torch.Tensor]:
         """
-        Batched three-body sum given an already-resolved neighbor pair list.
+        Three-body sum given an already-resolved neighbor pair list.
 
         Shared core used by :meth:`compute_energy`, kept as its own method
         since it's a substantial, independently-testable piece of physics
@@ -158,7 +232,8 @@ class MLBOP:
         n_atoms : int
             Number of atoms.
         i_idx_t, j_idx_t : torch.Tensor
-            Long tensors of neighbor pair indices, shape ``(n_pairs,)``.
+            Long tensors of neighbor pair indices, shape ``(n_pairs,)``, a
+            FULL list (both (i, j) and (j, i) present).
         rij_t : torch.Tensor
             Pair distances, shape ``(n_pairs,)``.
         vec_t : torch.Tensor
@@ -170,86 +245,77 @@ class MLBOP:
         dict[str, torch.Tensor]
             0-d tensors: ``E_total``, ``E_per_atom``, ``rij_mean``,
             ``rij_var``, ``theta_mean``, ``theta_var``.
+
+        Notes
+        -----
+        xi_ij = sum_{k != j} f_C(r_ik) g(theta_jik) runs over every ordered
+        pair (i, j) and every other neighbour k of the same atom i, so it is
+        evaluated over an explicit triplet list: pair p = (i, j) paired with
+        every pair q = (i, k) of the same atom, q != p, which is exactly
+        sum_i m_i^2 entries. An earlier form scattered the pairs into a dense
+        ``(n_atoms, max_m, max_m)`` block and reduced the whole block, i.e.
+        ``n_atoms * max_m**2`` entries sized by the single most-crowded atom:
+        211M for 21.6M real triplets on a random 527k-atom start (53M for
+        10.8M once the structure tightens), with a 9 GiB transient and a
+        peak that moved with the trajectory. The triplet form gives the same
+        energy and gradient (to 1e-17 in float64) at ~4x less memory.
+
+        Gathers use ``index_select`` rather than advanced indexing on
+        purpose: the backward of ``x[idx]`` is a sorted ``index_put_``, that
+        of ``index_select`` an atomic ``index_add_``, and the difference was
+        ~28 ms per loss evaluation in the ice optimiser.
         """
         device = rij_t.device
         dtype = rij_t.dtype
 
-        # Group the flat pair list by central atom i, then scatter into a
-        # dense (n_atoms, max_neighbors) padded layout. This lets the whole
-        # three-body sum -- naively a Python loop over i with a (m_i x m_i)
-        # matrix per atom -- become a single batched (n_atoms x
-        # max_neighbors x max_neighbors) einsum with no Python-level loop
-        # at all. Padding cost is linear in n_atoms for any physically
-        # reasonable configuration, since the ~3.55 Å cutoff bounds how
-        # many neighbors a single bead can have.
+        # Group the pair list by central atom i (stable, so the order within
+        # an atom's group is the input order).
         order = torch.argsort(i_idx_t, stable=True)
-        i_sorted = i_idx_t[order]
-        j_sorted = j_idx_t[order]
-        rij_sorted = rij_t[order]
-        vec_sorted = vec_t[order]
+        i_s = i_idx_t[order]
+        j_s = j_idx_t[order]
+        r_s = rij_t.index_select(0, order)
+        v_s = vec_t.index_select(0, order)
+        n_pairs = i_s.numel()
 
-        counts = torch.bincount(i_sorted, minlength=n_atoms)
-        max_m = int(counts.max().item())
-        group_start = torch.zeros(n_atoms, dtype=torch.long, device=device)
-        group_start[1:] = torch.cumsum(counts, dim=0)[:-1]
-        col = torch.arange(len(i_idx_t), device=device) - group_start.repeat_interleave(
-            counts
+        counts = torch.bincount(i_s, minlength=n_atoms)
+        starts = torch.zeros(n_atoms, dtype=torch.long, device=device)
+        starts[1:] = torch.cumsum(counts, dim=0)[:-1]
+
+        fc = self.f_C(r_s)
+        valid = fc > 0.0
+
+        # Triplets: for pair p = (i, j), every pair q = (i, k) in i's group.
+        m_p = counts[i_s]  # neighbours of p's own atom
+        trip_p = torch.repeat_interleave(torch.arange(n_pairs, device=device), m_p)
+        offs = torch.zeros(n_pairs, dtype=torch.long, device=device)
+        offs[1:] = torch.cumsum(m_p, dim=0)[:-1]
+        local = torch.arange(trip_p.numel(), device=device) - offs[trip_p]
+        trip_q = starts[i_s[trip_p]] + local
+        keep = (trip_q != trip_p) & valid[trip_p] & valid[trip_q]
+        trip_p = trip_p[keep]
+        trip_q = trip_q[keep]
+
+        # cos(theta_jik) for every (j, k) pair of neighbours of i
+        dot = (v_s.index_select(0, trip_p) * v_s.index_select(0, trip_q)).sum(-1)
+        cos_theta = dot / (r_s.index_select(0, trip_p) * r_s.index_select(0, trip_q))
+        # xi_ij = sum_k f_C(r_ik) g(theta_jik): the weight depends on k only
+        contrib = fc.index_select(0, trip_q) * self.g(cos_theta)
+        xi = torch.zeros(n_pairs, dtype=dtype, device=device).index_add_(
+            0, trip_p, contrib
         )
 
-        pad_j = torch.full((n_atoms, max_m), -1, dtype=torch.long, device=device)
-        pad_rij = torch.zeros((n_atoms, max_m), dtype=dtype, device=device)
-        pad_vec = torch.zeros((n_atoms, max_m, 3), dtype=dtype, device=device)
-        mask = torch.zeros((n_atoms, max_m), dtype=torch.bool, device=device)
-
-        pad_j[i_sorted, col] = j_sorted
-        pad_rij[i_sorted, col] = rij_sorted
-        pad_vec[i_sorted, col] = vec_sorted
-        mask[i_sorted, col] = True
-
-        fc = torch.zeros_like(pad_rij)
-        fc[mask] = self.f_C(pad_rij[mask])
-        valid = mask & (fc > 0.0)
-
-        fR = torch.zeros_like(pad_rij)
-        fA = torch.zeros_like(pad_rij)
-        fR[valid] = self.f_R(pad_rij[valid])
-        fA[valid] = self.f_A(pad_rij[valid])
-
-        # cos(theta_jik) and g(theta_jik) for every (j, k) neighbor pair of
-        # every atom at once (axis 1 = j, axis 2 = k).
-        dot = torch.einsum("imc,inc->imn", pad_vec, pad_vec)
-        rr = pad_rij.unsqueeze(2) * pad_rij.unsqueeze(1)
-        safe_rr = torch.where(rr != 0, rr, torch.ones_like(rr))
-        cos_theta = dot / safe_rr
-        g_vals = self.g(cos_theta)
-
-        eye = torch.eye(max_m, dtype=torch.bool, device=device).unsqueeze(0)
-        pair_valid = valid.unsqueeze(2) & valid.unsqueeze(1) & ~eye
-
-        # fc broadcast over k (axis 2), matching xi_ij = sum_k f_C(r_ik) *
-        # g(theta_jik) -- the weight depends only on k, not on j.
-        contrib = torch.where(
-            pair_valid, fc.unsqueeze(1) * g_vals, torch.zeros_like(g_vals)
+        b = (1.0 + (self.beta**self.n) * (xi**self.n)) ** (-1.0 / (2.0 * self.n))
+        V = torch.where(
+            valid, fc * (self.f_R(r_s) + b * self.f_A(r_s)), torch.zeros_like(fc)
         )
-        xi = contrib.sum(dim=2)
-
-        b = torch.zeros_like(pad_rij)
-        b[valid] = (1.0 + (self.beta**self.n) * (xi[valid] ** self.n)) ** (
-            -1.0 / (2.0 * self.n)
-        )
-
-        V = torch.where(valid, fc * (fR + b * fA), torch.zeros_like(fc))
         # Each ij bond counted from both i's and j's perspective (with
         # potentially different b_ij vs b_ji), matching the standard
         # Tersoff 1/2 normalization.
         E_total = 0.5 * V.sum()
 
-        atom_idx = torch.arange(n_atoms, device=device).unsqueeze(1)
-        unique_bond = valid & (
-            pad_j > atom_idx
-        )  # each unique bond counted once (i < j)
-        rij_arr = pad_rij[unique_bond]
-        cos_theta_arr = cos_theta[pair_valid]  # every cos(theta) used in a xi_ij sum
+        unique_bond = valid & (j_s > i_s)  # each unique bond counted once (i < j)
+        rij_arr = r_s[unique_bond]
+        cos_theta_arr = cos_theta  # every cos(theta) used in a xi_ij sum
 
         nan = torch.full((), float("nan"), dtype=dtype, device=device)
         return {
@@ -268,6 +334,8 @@ class MLBOP:
         positions: torch.Tensor,
         box_size: tuple[float, float, float] | float | torch.Tensor,
         pbc: bool = True,
+        neighbor_cache: NeighborListCache | None = None,
+        compute_dtype: torch.dtype | None = None,
     ) -> dict[str, torch.Tensor]:
         """
         Compute total, per-atom ML-BOP energy and O-O structural statistics.
@@ -294,6 +362,17 @@ class MLBOP:
             cell matrix, rows as lattice vectors (ASE's convention).
         pbc : bool, optional
             Whether to apply periodic boundary conditions. Default True.
+        neighbor_cache : NeighborListCache, optional
+            Reuse a Verlet-skin neighbour list across calls at nearby
+            positions instead of searching afresh each time (periodic
+            systems only). See :class:`NeighborListCache`. Default None.
+        compute_dtype : torch.dtype, optional
+            Evaluate the pair and three-body kernels in this dtype. The pair
+            vectors are formed in `positions`' own dtype first, so float64
+            positions keep a resolution float32 coordinates cannot express
+            (an ulp at 128 A is 1.5e-5 A) while the sum itself runs at
+            float32 speed. Default None: the kernels run in `positions`'
+            dtype.
 
         Returns
         -------
@@ -331,10 +410,24 @@ class MLBOP:
                 box_size = (float(box_size),) * 3
             box_t = torch.diag(torch.as_tensor(box_size, dtype=dtype, device=device))
 
-        nl = vesin_torch.NeighborList(cutoff=self.r_cut, full_list=True)
-        i_idx_t, j_idx_t, rij_t, vec_t = nl.compute(
-            positions, box_t, periodic=pbc, quantities="ijdD"
-        )
+        if neighbor_cache is not None:
+            if not pbc:
+                raise ValueError("neighbor_cache requires pbc=True")
+            i_idx_t, j_idx_t, shift = neighbor_cache.pairs(positions, box_t, self.r_cut)
+            vec_t = (
+                positions.index_select(0, j_idx_t)
+                - positions.index_select(0, i_idx_t)
+                + shift
+            )
+            rij_t = vec_t.norm(dim=1)
+        else:
+            nl = vesin_torch.NeighborList(cutoff=self.r_cut, full_list=True)
+            i_idx_t, j_idx_t, rij_t, vec_t = nl.compute(
+                positions, box_t, periodic=pbc, quantities="ijdD"
+            )
+        if compute_dtype is not None and vec_t.dtype != compute_dtype:
+            vec_t = vec_t.to(compute_dtype)
+            rij_t = vec_t.norm(dim=1)
         if i_idx_t.numel() == 0:
             return nan_result
 

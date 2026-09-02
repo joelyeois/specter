@@ -127,7 +127,7 @@ specter build ice [OPTIONS]
 
 | Flag | Type | Default | Description |
 | --- | --- | --- | --- |
-| `--n_steps` | `INTEGER` | `600` | L-BFGS step ceiling per configuration. An upper bound only -- a run whose loss plateaus stops early. |
+| `--n_steps` | `INTEGER` | `250` | L-BFGS step ceiling per configuration. An upper bound only -- a run whose loss plateaus stops early. |
 
 **Compute**{ #specter-build-ice-compute }
 

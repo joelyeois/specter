@@ -25,7 +25,7 @@ seed_start = 0     # i-th config uses seed_start + i, and is named after its see
 # library mixing recipes would have IceBank drawing from several phases of ice
 # interchangeably.
 [optimisation]
-n_steps = 600
+n_steps = 250
 
 [compute]
 device = "cuda"    # cpu | cuda | cuda:0 | 0,1,2,3 -- naming several GPUs shards the

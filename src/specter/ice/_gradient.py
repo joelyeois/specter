@@ -9,7 +9,7 @@ import torch.nn.functional as F
 from ..arrays import radial_profile_3d, soft_voxelize_coordinates
 from ..fft import fft3, fftconvolve
 from ..progress import ProgressManager, track
-from ._energy import MLBOP
+from ._energy import MLBOP, NeighborListCache
 from ._helpers import ndensity_of_amorphous_ice
 from ._kernels import build_water_kernel
 from ._kernels import (
@@ -206,6 +206,8 @@ class GradientSKIcemaker(L.LightningModule):
         rep_strength: float = 0.0,
         mlbop_strength: float = 0.0,
         mlbop_target: float | None = None,
+        neighbor_cache: NeighborListCache | None = None,
+        deterministic: bool = True,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Radial-profile MSE between |FFT(voxelized positions)| and the target,
@@ -245,6 +247,17 @@ class GradientSKIcemaker(L.LightningModule):
             optimizer toward that lower-energy, more ordered packing instead
             of matching the target amorphous phase. Ignored (falls back to
             direct minimization) if ``None`` (default).
+        neighbor_cache : NeighborListCache, optional
+            Verlet-skin neighbour list shared across calls at nearby
+            positions, for the ML-BOP term; see
+            :class:`~specter.ice._energy.NeighborListCache`. Default None
+            (search afresh).
+        deterministic : bool, optional
+            Whether the voxel splat accumulates in a fixed order; see
+            :func:`~specter.arrays.soft_voxelize_coordinates`. The radial
+            bin ``scatter_add_`` below is atomic either way, so this loss is
+            never bit-reproducible on CUDA; ``False`` skips a sort the
+            optimiser gains nothing from. Default True.
 
         Returns
         -------
@@ -259,6 +272,7 @@ class GradientSKIcemaker(L.LightningModule):
             voxel_size=self.dx,
             device=self.device,
             periodic=True,
+            deterministic=deterministic,
         )
         f_amp = torch.abs(fft3(vox, shift=True)).clamp(min=1e-8)
         bin_sum = torch.zeros(self._n_rbins, device=self.device)
@@ -280,7 +294,13 @@ class GradientSKIcemaker(L.LightningModule):
         if mlbop_strength > 0.0:
             model = MLBOP(device=pos.device)
             box = (self.box_x, self.box_y, self.box_z)
-            mlbop_result = model.compute_energy(pos, box_size=box, pbc=True)
+            mlbop_result = model.compute_energy(
+                pos,
+                box_size=box,
+                pbc=True,
+                neighbor_cache=neighbor_cache,
+                compute_dtype=torch.float32,
+            )
             e_per_atom = mlbop_result["E_per_atom"]
             if mlbop_target is None:
                 mlbop_penalty = e_per_atom
@@ -294,37 +314,128 @@ class GradientSKIcemaker(L.LightningModule):
     # Optimisation
     # ------------------------------------------------------------------
 
+    def _wrap_positions_(self, pos: torch.Tensor) -> None:
+        """Wrap `pos` (N, 3) into the periodic cell, in place, without grad."""
+        with torch.no_grad():
+            pos.data[:, 0] = _wrap_coords(pos.data[:, 0], self.box_x)
+            pos.data[:, 1] = _wrap_coords(pos.data[:, 1], self.box_y)
+            pos.data[:, 2] = _wrap_coords(pos.data[:, 2], self.box_z)
+
+    def _prerelax(
+        self, pos: torch.Tensor, steps: int, neighbor_cache: NeighborListCache
+    ) -> None:
+        """
+        Relax `pos` in place against the ML-BOP energy alone.
+
+        The starting point for :meth:`optimize`; see its ``prerelax_steps``.
+        Minimises ``E_per_atom`` directly rather than toward
+        ``mlbop_target``: this is overlap removal, and thirty steps from a
+        random start stop far short of the target anyway.
+
+        Parameters
+        ----------
+        pos : torch.Tensor
+            Positions (N, 3) with ``requires_grad=True``, updated in place.
+        steps : int
+            L-BFGS outer steps.
+        neighbor_cache : NeighborListCache
+            Shared with the main optimisation that follows.
+        """
+        model = MLBOP(device=pos.device)
+        box = (self.box_x, self.box_y, self.box_z)
+        opt = torch.optim.LBFGS(
+            [pos],
+            lr=1.0,
+            max_iter=10,
+            history_size=20,
+            line_search_fn="strong_wolfe",
+        )
+
+        def closure() -> torch.Tensor:
+            opt.zero_grad()
+            energy = model.compute_energy(
+                pos,
+                box_size=box,
+                pbc=True,
+                neighbor_cache=neighbor_cache,
+                compute_dtype=torch.float32,
+            )["E_per_atom"]
+            energy.backward()
+            return energy
+
+        _manager = ProgressManager()
+        _pbar, _pbar_pos = _manager.get_pbar(
+            range(steps),
+            desc="ML-BOP pre-relaxation",
+            disable=not self.progressbars,
+            transient=True,
+        )
+        try:
+            for _ in _pbar:
+                energy = opt.step(closure)
+                self._wrap_positions_(pos)
+                e_val = energy.item() if isinstance(energy, torch.Tensor) else energy
+                _pbar.set_postfix(E_per_atom=f"{float(e_val):.4f}")
+        finally:
+            _pbar.close()
+            _manager.release(_pbar_pos)
+
     def optimize(
         self,
-        n_steps: int = 400,
+        n_steps: int = 250,
         lr: float = 1.0,
         optimizer: str = "lbfgs",
         record_every: int = 5,
         rep_strength: float = 0.0,
         mlbop_strength: float = 0.5,
         mlbop_target: float | None = -0.413,
-        tol: Optional[float] = 1e-4,
+        tol: Optional[float] = 1e-3,
         patience: int = 10,
+        history_size: int = 100,
+        max_iter: int = 25,
+        prerelax_steps: int = 30,
+        param_dtype: torch.dtype = torch.float64,
     ) -> dict:
         """
         Pure gradient descent on the S(k) loss — no Langevin noise.
 
-        L-BFGS (default) converges in ~50 steps vs ~500 for Adam on this smooth
-        radial-profile loss; the strong-Wolfe line search adapts step sizes
-        automatically so the ``lr`` parameter rarely needs tuning.
+        L-BFGS (default) converges in far fewer steps than Adam on this
+        smooth radial-profile loss; the strong-Wolfe line search adapts step
+        sizes automatically so the ``lr`` parameter rarely needs tuning.
+
+        The L-BFGS settings were chosen on loss against *closure count* (one
+        closure is one loss + gradient evaluation, the unit of cost) at the
+        bundled library's geometry (n=256, dx=1.0, ~527k atoms), on a
+        6000-closure budget from seed 0:
+
+        ================================================  =====  =====  =====  =======
+        settings                                          @1000  @1500  @6000  E/atom
+        ================================================  =====  =====  =====  =======
+        history 20, max_iter 10, no pre-relaxation        0.266  0.139  0.053  -0.087
+        history 20, max_iter 50                           0.269  0.132  0.046  -0.111
+        history 100, max_iter 25, 30-step pre-relaxation  0.047  0.040  0.022  -0.203
+        history 100, max_iter 50, 30-step pre-relaxation  0.048  0.048  0.022  -0.205
+        ================================================  =====  =====  =====  =======
+
+        The first row (the settings until 2026-09-02) needed 4-6k closures to
+        reach a loss of 0.04-0.06; the defaults reach it in 1000-1500 and go
+        on to a loss, and an ML-BOP energy against the -0.413 target, the old
+        settings never got to. Each row is the same objective, recipe and
+        target: the changes are to the search, not to what is searched for.
+        The table was measured with float32 positions; ``param_dtype``
+        (float64 by default, see below) removes the stall that made the
+        last row's tail so slow, reaching its 6000-closure loss in ~1600.
 
         Parameters
         ----------
         n_steps : int
             Optimizer outer iterations. For L-BFGS each outer step may call
-            the closure up to 10 times for line search. Default is 400 --
-            the old default of 50 is nowhere near enough once
-            ``mlbop_strength`` is active: at n=256, dx=1.0 (~527k atoms),
-            sk_loss is still ~0.58 (vs ~0.0002-0.0008 by step 200-400) after
-            only 50 steps. ``tol``/``patience`` still apply on top of this
-            ceiling, so smaller/easier configs typically stop well short of
-            it. Pass a smaller value explicitly to trade convergence quality
-            for speed.
+            the closure up to ``max_iter`` times, plus line-search
+            evaluations. Default is 250, about 6000 closures at
+            ``max_iter=25``, the budget in the table above; the loss was
+            0.024 at 3000 closures and 0.022 at 6000, so a smaller value
+            gives most of the result. ``tol``/``patience`` still apply on
+            top of this ceiling.
         lr : float
             Step size. Keep at 1.0 for L-BFGS; use ~0.01 for Adam.
         optimizer : str
@@ -365,17 +476,59 @@ class GradientSKIcemaker(L.LightningModule):
             Relative loss-improvement tolerance for early stopping: once the
             fractional change in loss, ``abs(prev - cur) / abs(prev)``, stays
             below ``tol`` for ``patience`` consecutive steps, optimisation
-            stops before reaching ``n_steps``. This tracks the combined
+            stops before reaching ``n_steps``. Halfway through such a streak
+            the L-BFGS history is cleared (``'lbfgs'`` only), so a stalled
+            line search restarts from steepest descent rather than being
+            read as convergence; a run that has really converged plateaus
+            through the restart and still stops at ``patience``. This tracks the combined
             differentiable loss (S(k) MSE + whichever penalty is enabled)
             already computed every step. Set to ``None`` to disable and
-            always run the full ``n_steps``. Default is 1e-4 — tuned against
-            the S(k) loss curve on the bundled LDA-80K target (n=400,
-            dx=0.25): 1e-6 never sustains for ``patience`` steps within a few
-            hundred iterations, since the loss keeps making ~1e-5-scale
-            wiggles long after it's practically converged.
+            always run the full ``n_steps``. Default is 1e-3, a deliberate
+            trade of the tail of the curve for time at the bundled geometry:
+            once S(k) is matched the loss is the energy term alone, and
+            under 1e-4 a config ran 96-250 steps (4-9 min) to reach E/atom
+            -0.20 to -0.28, most of which was the last few hundredths of an
+            eV. The old 1e-4 was tuned on the S(k) loss curve at n=400,
+            dx=0.25, where 1e-6 never sustained for ``patience`` steps
+            because of ~1e-5-scale wiggles.
         patience : int, optional
             Consecutive below-``tol`` steps required to trigger early
             stopping. Default is 10.
+        history_size : int, optional
+            L-BFGS curvature pairs kept (``'lbfgs'`` only). Default 100: a
+            1.6 M-dimensional problem gains from more than the 20 the
+            optimiser used to keep, and 100 vectors are 600 MB at the
+            bundled geometry, small next to the loss's own working set.
+        max_iter : int, optional
+            L-BFGS inner iterations per outer step (``'lbfgs'`` only).
+            Default 25; 50 measured no better.
+        prerelax_steps : int, optional
+            L-BFGS steps on the ML-BOP energy alone, from the initial
+            positions, before the full loss is optimised (``'lbfgs'`` only,
+            and only when ``mlbop_strength > 0``). A uniform-random start
+            has overlapping molecules and a loss of ~5e4, and the full loss
+            spends its first several hundred closures on nothing else; the
+            energy term alone resolves them without the FFT, in ~300 cheap
+            closures. The objective is unchanged, only the starting point.
+            Default 30; 0 disables. A jittered lattice at the right density
+            is not an alternative: the optimiser never leaves its
+            crystalline S(k) (loss stuck at 3e4 at n=128).
+        param_dtype : torch.dtype, optional
+            Dtype of the positions being optimised. Default float64, and
+            this is load-bearing at the bundled geometry: once S(k) is
+            matched (a few hundred evaluations in, MSE ~1e-4) the whole
+            remaining loss is the energy term, and the descent step it
+            calls for moves each atom by ~1e-6 A, below the float32 ulp of
+            a coordinate at 64-128 A (7.6e-6 to 1.5e-5 A). In float32 the
+            line search then returns zero-length steps and the loss freezes
+            at ~0.050 with E/atom near -0.10 (which is where every
+            float32-optimised library ended up); in float64 it continues
+            at 1-4% per step to 0.024 / -0.19 by step 60. The FFT, splat
+            and three-body kernels still run in float32: only the voxel
+            fractions and pair vectors are formed in float64 first, so the
+            cost is elementwise work on N x 3 values and the L-BFGS
+            history (100 x 1.6 M float64, 1.3 GB at n=256). The result is
+            stored back in float32.
 
         Returns
         -------
@@ -389,7 +542,11 @@ class GradientSKIcemaker(L.LightningModule):
         """
         assert self.positions is not None, "Call init_random() first"
 
-        pos = self.positions.to(self.device).clone().requires_grad_(True)
+        pos = (
+            self.positions.to(self.device, dtype=param_dtype)
+            .clone()
+            .requires_grad_(True)
+        )
         history: dict[str, Any] = {
             "step": [],
             "loss": [],
@@ -405,12 +562,16 @@ class GradientSKIcemaker(L.LightningModule):
                 sk_loss, _ = self._sk_loss(pos, rep_strength=0.0, mlbop_strength=0.0)
                 return sk_loss.item()
 
+        neighbor_cache = NeighborListCache()
+
         if optimizer == "lbfgs":
+            if prerelax_steps > 0 and mlbop_strength > 0.0:
+                self._prerelax(pos, prerelax_steps, neighbor_cache)
             opt = torch.optim.LBFGS(
                 [pos],
                 lr=lr,
-                max_iter=10,
-                history_size=20,
+                max_iter=max_iter,
+                history_size=history_size,
                 line_search_fn="strong_wolfe",
             )
             last_f_amp: list[torch.Tensor] = [torch.empty(0)]
@@ -422,6 +583,8 @@ class GradientSKIcemaker(L.LightningModule):
                     rep_strength=rep_strength,
                     mlbop_strength=mlbop_strength,
                     mlbop_target=mlbop_target,
+                    neighbor_cache=neighbor_cache,
+                    deterministic=False,
                 )
                 loss.backward()
                 last_f_amp[0] = f_amp.detach()
@@ -437,10 +600,7 @@ class GradientSKIcemaker(L.LightningModule):
             try:
                 for step in _pbar:
                     loss = opt.step(closure)
-                    with torch.no_grad():
-                        pos.data[:, 0] = _wrap_coords(pos.data[:, 0], self.box_x)
-                        pos.data[:, 1] = _wrap_coords(pos.data[:, 1], self.box_y)
-                        pos.data[:, 2] = _wrap_coords(pos.data[:, 2], self.box_z)
+                    self._wrap_positions_(pos)
                     loss_val = (
                         loss.item() if isinstance(loss, torch.Tensor) else float(loss)
                     )
@@ -449,6 +609,17 @@ class GradientSKIcemaker(L.LightningModule):
                             abs(prev_loss) + 1e-12
                         )
                         plateau_count = plateau_count + 1 if rel_change < tol else 0
+                        if plateau_count == max(1, patience // 2):
+                            # A stalled line search, not convergence, is the
+                            # usual reason for a run of unchanged losses at
+                            # this point: L-BFGS keeps proposing the same
+                            # direction, the strong-Wolfe search keeps
+                            # returning t = 0. Dropping the curvature history
+                            # restarts from steepest descent, which resolves
+                            # a stall in a few steps; a run that really has
+                            # converged plateaus through the restart and
+                            # still stops at ``patience``.
+                            opt.state.clear()
                     prev_loss = loss_val
                     _pbar.set_postfix(loss=f"{loss_val:.6f}")
                     if step % record_every == 0:
@@ -489,13 +660,12 @@ class GradientSKIcemaker(L.LightningModule):
                         rep_strength=rep_strength,
                         mlbop_strength=mlbop_strength,
                         mlbop_target=mlbop_target,
+                        neighbor_cache=neighbor_cache,
+                        deterministic=False,
                     )
                     loss.backward()
                     opt_adam.step()
-                    with torch.no_grad():
-                        pos.data[:, 0] = _wrap_coords(pos.data[:, 0], self.box_x)
-                        pos.data[:, 1] = _wrap_coords(pos.data[:, 1], self.box_y)
-                        pos.data[:, 2] = _wrap_coords(pos.data[:, 2], self.box_z)
+                    self._wrap_positions_(pos)
                     loss_val = loss.item()
                     if tol is not None and prev_loss is not None:
                         rel_change = abs(prev_loss - loss_val) / (
@@ -526,7 +696,7 @@ class GradientSKIcemaker(L.LightningModule):
                 _manager.release(_pbar_pos)
 
         history["stopped_early"] = stopped_early
-        self.positions = pos.detach().cpu()
+        self.positions = pos.detach().float().cpu()
         return history
 
     def sample(
@@ -647,7 +817,7 @@ class GradientSKIcemaker(L.LightningModule):
         mlbop_strength: float = 0.5,
         mlbop_target: float | None = -0.413,
         init_positions: torch.Tensor | None = None,
-        tol: Optional[float] = 1e-4,
+        tol: Optional[float] = 1e-3,
         patience: int = 10,
     ) -> torch.Tensor:
         """
@@ -679,7 +849,7 @@ class GradientSKIcemaker(L.LightningModule):
             real LDA-80K MD ice.
         tol : float or None, optional
             Early-stopping tolerance forwarded to :meth:`optimize`. Default
-            is 1e-4; set to ``None`` to always run the full ``n_steps``.
+            is 1e-3; set to ``None`` to always run the full ``n_steps``.
         patience : int, optional
             Early-stopping patience forwarded to :meth:`optimize`. Default
             is 10.
@@ -723,7 +893,7 @@ class GradientSKIcemaker(L.LightningModule):
         rep_strength: float = 0.0,
         mlbop_strength: float = 0.5,
         mlbop_target: float | None = -0.413,
-        tol: Optional[float] = 1e-4,
+        tol: Optional[float] = 1e-3,
         patience: int = 10,
     ) -> torch.Tensor:
         """
@@ -755,7 +925,7 @@ class GradientSKIcemaker(L.LightningModule):
             real LDA-80K MD ice.
         tol : float or None, optional
             Early-stopping tolerance forwarded to :meth:`optimize`. Default
-            is 1e-4; set to ``None`` to always run the full ``n_steps``.
+            is 1e-3; set to ``None`` to always run the full ``n_steps``.
         patience : int, optional
             Early-stopping patience forwarded to :meth:`optimize`. Default
             is 10.

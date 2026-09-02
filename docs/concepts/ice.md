@@ -41,19 +41,32 @@ cell, via safe extrapolation in `compute_native_target`.
 
 ## The optimisation
 
-Positions start out uniformly random; L-BFGS then optimises them (the
-default; Adam is also available) against the combined loss
+Positions start out uniformly random. A short L-BFGS relaxation against
+the ML-BOP energy alone (`prerelax_steps`, 30 by default) first removes
+the overlapping molecules of that start, since the full loss would
+otherwise spend its first several hundred evaluations on nothing else.
+L-BFGS then optimises the positions (the default; Adam is also available)
+against the combined loss
 
 \[
 \mathcal{L} = \mathcal{L}_{S(k)} + w_\text{MLBOP}\,\mathcal{L}_\text{MLBOP}
 \]
 
-L-BFGS's strong-Wolfe line search adapts its own step size, so it
-converges in roughly 50 outer iterations against several hundred for
-Adam on this smooth radial-profile loss, and the `lr` parameter rarely
-needs tuning as a result. Optimisation runs until `n_steps`, or stops
+L-BFGS's strong-Wolfe line search adapts its own step size, so the `lr`
+parameter rarely needs tuning. Optimisation runs until `n_steps`, or stops
 early once the fractional change in loss stays below `tol` for `patience`
 consecutive steps.
+
+The positions are optimised in float64 while the FFT, the voxel splat and
+the three-body sum run in float32. The \(S(k)\) term is matched within a
+few hundred evaluations, after which the remaining loss is the energy term
+alone, and the descent step it calls for moves each molecule by about
+\(10^{-6}\) Å: below the float32 spacing of a coordinate at 64 to 128 Å
+(\(7.6 \times 10^{-6}\) to \(1.5 \times 10^{-5}\) Å). Float32 positions
+therefore freeze at that point with the energy near \(-0.10\) eV/atom;
+float64 positions continue to \(-0.2\) eV/atom and below. Forming the
+pair vectors and voxel fractions in float64 before casting keeps that
+resolution at float32 cost.
 
 Matching \(S(k)\) alone underconstrains the local structure: two
 configurations can share a radial Fourier profile while one has

@@ -16,7 +16,7 @@ Method
 Each cell size is timed over a short run of outer L-BFGS steps, preceded by a
 separate warmup run whose cost is discarded (first-call CUDA autotuning and
 allocator growth would otherwise land entirely in the first size measured).
-Cost per step is then multiplied out to the 600-step budget
+Cost per step is then multiplied out to the 250-step budget
 `build_one_ice_config` uses.
 
 Each size therefore runs a COMPLETE configuration under the production recipe,
@@ -57,12 +57,12 @@ from specter.ice import GradientSKIcemaker
 CELL_SIZES: tuple[int, ...] = (64, 96, 128, 192, 256)
 
 #: Step budget `build_one_ice_config` uses, for extrapolating a full run.
-PRODUCTION_STEPS = 600
+PRODUCTION_STEPS = 250
 
 #: Step ceiling per cell size, matching `build_one_ice_config`'s production
 #: budget. Not a speed knob: a short run both overstates cost per step and
 #: understates peak memory (see `time_one_cell`), which is exactly the pair of
-#: errors that makes a reader mis-size a GPU. Expect ~40 min for a full sweep.
+#: errors that makes a reader mis-size a GPU. Expect ~20 min for a full sweep.
 DEFAULT_STEPS = PRODUCTION_STEPS
 
 
@@ -168,7 +168,7 @@ def main() -> None:
     print(f"Device: {args.device} ({name}), dx={args.dx} A, {args.steps} timed steps\n")
     header = (
         f"{'n':>5}{'cell (A)':>10}{'atoms':>10}{'steps':>8}"
-        f"{'s/step':>9}{'alloc GiB':>11}{'reserved GiB':>14}{'600 steps':>12}"
+        f"{'s/step':>9}{'alloc GiB':>11}{'reserved GiB':>14}{'250 steps':>12}"
     )
     print(header)
     print("-" * len(header))

@@ -63,7 +63,14 @@ def _linear_interp_offsets_and_weights(
     per_dim_weight = torch.where(
         offsets.bool(), frac.unsqueeze(-2), one_minus_frac.unsqueeze(-2)
     )  # (..., 2**D, D)
-    weights = per_dim_weight.prod(dim=-1)
+    # An explicit product over the D axes rather than `.prod(dim=-1)`. The
+    # values are the same, but prod's backward is a cumprod scan: on the ice
+    # optimiser's 527k x 8 corner weights that scan was 22 ms per call, two
+    # calls per loss evaluation, 36% of the whole closure. D-1 multiplies
+    # backpropagate as D-1 multiplies.
+    weights = per_dim_weight[..., 0]
+    for axis in range(1, d):
+        weights = weights * per_dim_weight[..., axis]
     return offsets, weights
 
 
@@ -72,6 +79,7 @@ def _scatter_splat(
     indices: torch.Tensor,
     weights: torch.Tensor,
     periodic: bool = False,
+    deterministic: bool = True,
 ) -> None:
     """
     In-place accumulate `weights` into `volume` at `indices`.
@@ -86,6 +94,14 @@ def _scatter_splat(
         Weight per index, shape (...) matching `indices.shape[:-1]`.
     periodic : bool, optional
         If True, wrap out-of-bounds indices instead of discarding them.
+    deterministic : bool, optional
+        If True (default), accumulate through ``index_put_(accumulate=True)``,
+        which CUDA implements by sorting the indices so the summation order,
+        and therefore the result, is fixed. If False, accumulate with
+        ``index_add_``, whose atomic adds run in whichever order the hardware
+        schedules: a few ms instead of the sort, at the cost of float-order
+        noise between runs. Only worth turning off inside a loop that is
+        already non-deterministic, such as the ice optimiser's loss.
     """
     grid_shape = torch.tensor(volume.shape, device=volume.device)
     if periodic:
@@ -95,8 +111,14 @@ def _scatter_splat(
         indices = indices[in_bounds]
         weights = weights[in_bounds]
 
-    idx_tuple = tuple(indices[..., i].reshape(-1) for i in range(indices.shape[-1]))
-    volume.index_put_(idx_tuple, weights.reshape(-1), accumulate=True)
+    weights = weights.to(volume.dtype)
+    if deterministic:
+        idx_tuple = tuple(indices[..., i].reshape(-1) for i in range(indices.shape[-1]))
+        volume.index_put_(idx_tuple, weights.reshape(-1), accumulate=True)
+        return
+    strides = torch.tensor(volume.stride(), device=volume.device)
+    flat = (indices * strides).sum(dim=-1).reshape(-1)
+    volume.view(-1).index_add_(0, flat, weights.reshape(-1))
 
 
 def soft_voxelize_coordinates_into(
@@ -104,6 +126,7 @@ def soft_voxelize_coordinates_into(
     coords: torch.Tensor,
     voxel_size: float | Sequence[float] | torch.Tensor,
     periodic: bool = False,
+    deterministic: bool = True,
 ) -> None:
     """
     Accumulate `coords` into a preallocated `volume` via trilinear
@@ -130,6 +153,8 @@ def soft_voxelize_coordinates_into(
     periodic : bool, optional
         If True, wrap out-of-bounds splat indices with periodic boundary
         conditions instead of discarding them. Default is False.
+    deterministic : bool, optional
+        See :func:`_scatter_splat`. Default True.
     """
     device = volume.device
     coords = coords.to(device)
@@ -153,7 +178,9 @@ def soft_voxelize_coordinates_into(
     offsets, weights = _linear_interp_offsets_and_weights(frac)  # (8,3), (N,8)
     indices = coords_floor.unsqueeze(-2) + offsets  # (N,8,3)
 
-    _scatter_splat(volume, indices, weights, periodic=periodic)
+    _scatter_splat(
+        volume, indices, weights, periodic=periodic, deterministic=deterministic
+    )
 
 
 def soft_voxelize_coordinates(
@@ -162,6 +189,7 @@ def soft_voxelize_coordinates(
     voxel_size: float | Sequence[float],
     device: str | torch.device | None = None,
     periodic: bool = False,
+    deterministic: bool = True,
 ) -> torch.Tensor:
     """
     Differentiable 3D soft voxelization using trilinear splatting.
@@ -183,6 +211,8 @@ def soft_voxelize_coordinates(
     periodic : bool, optional
         If True, wrap out-of-bounds splat indices with periodic boundary
         conditions instead of discarding them. Default is False.
+    deterministic : bool, optional
+        See :func:`_scatter_splat`. Default True.
 
     Returns
     -------
@@ -208,7 +238,11 @@ def soft_voxelize_coordinates(
     volume = torch.zeros(B, nz, ny, nx, device=device)
     for b in range(B):
         soft_voxelize_coordinates_into(
-            volume[b], coords[b], voxel_size_t, periodic=periodic
+            volume[b],
+            coords[b],
+            voxel_size_t,
+            periodic=periodic,
+            deterministic=deterministic,
         )
 
     if was_unbatched:

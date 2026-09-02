@@ -540,7 +540,10 @@ class IceBank(L.LightningModule):
         assert self.current_icedeltas is not None
         kernel = self._get_kernel(dx)
         return potential_from_deltas(
-            self.current_icedeltas.to(device), kernel.to(device), backend="auto"
+            self.current_icedeltas.to(device),
+            kernel.to(device),
+            backend="auto",
+            boundary="periodic",
         )
 
     # ------------------------------------------------------------------
@@ -975,8 +978,11 @@ class IceBank(L.LightningModule):
         # `out=deltas`: the deltas are consumed here and nothing reads them
         # afterwards, so the potential overwrites them instead of taking a
         # second canvas.
+        # `boundary="periodic"`: the canvas is a piece of bulk ice, not a
+        # molecule in a box, so a face molecule's kernel wraps rather than
+        # being cut off -- see potential_from_deltas for what the cut cost.
         potential = potential_from_deltas(
-            deltas, kernel.to(device), backend="auto", out=deltas
+            deltas, kernel.to(device), backend="auto", out=deltas, boundary="periodic"
         )
         del deltas
         return potential
@@ -1156,7 +1162,7 @@ def build_one_ice_config(
     save_path: str,
     n: int = 256,
     dx: float = 1.0,
-    n_steps: int = 600,
+    n_steps: int = 250,
     seed: int = 0,
     device: str | torch.device = "cuda",
     progressbars: bool = True,
@@ -1169,7 +1175,7 @@ def build_one_ice_config(
     ice``, which differ only in how they schedule these calls. A fresh
     :class:`GradientSKIcemaker` run under the standard MLBOP recipe
     (``rep_strength=0, mlbop_strength=0.5, mlbop_target=-0.413``,
-    ``tol=1e-4``/``patience=10``). That recipe is deliberately not
+    ``tol=1e-3``/``patience=10``). That recipe is deliberately not
     parameterised: ``mlbop_target=-0.413`` is a measured property of real
     LDA-80K MD ice rather than a preference, and configs generated under
     different recipes are different phases of ice that
@@ -1189,7 +1195,9 @@ def build_one_ice_config(
         Voxel size in Å. Default 1.0.
     n_steps : int, optional
         L-BFGS step ceiling (an upper bound -- ``tol``/``patience`` still
-        stop a plateaued run early). Default 600.
+        stop a plateaued run early). Default 250, about 6000 loss
+        evaluations at :meth:`GradientSKIcemaker.optimize`'s default
+        ``max_iter``; see that docstring for how the budget was chosen.
     seed : int, optional
         Global torch seed set before initialisation, making this config
         reproducible. Default 0.
@@ -1222,12 +1230,13 @@ def build_one_ice_config(
     # with and the values recorded in the saved metadata below cannot drift
     # apart.
     rep_strength, mlbop_strength, mlbop_target = 0.0, 0.5, -0.413
-    tol, patience = 1e-4, 10
+    tol, patience = 1e-3, 10
 
     started = time.perf_counter()
     torch.manual_seed(seed)
     gd = GradientSKIcemaker(n=n, dx=dx, device=device, progressbars=progressbars)
     gd.init_random()
+    history_size, max_iter, prerelax_steps = 100, 25, 30
     history = gd.optimize(
         n_steps=n_steps,
         record_every=n_steps,
@@ -1236,6 +1245,9 @@ def build_one_ice_config(
         mlbop_target=mlbop_target,
         tol=tol,
         patience=patience,
+        history_size=history_size,
+        max_iter=max_iter,
+        prerelax_steps=prerelax_steps,
     )
     energy = gd.mlbop_energy()
     assert gd.positions is not None
@@ -1274,6 +1286,15 @@ def build_one_ice_config(
         # without either format having to guess about the other.
         "coord_encoding": FIXED_POINT_ENCODING,
         "n_steps": n_steps,
+        # The search settings, so a library's convergence level is on
+        # record: two libraries built with different optimiser settings on
+        # the same recipe are converged to different degrees, and IceBank
+        # should not draw from both (regenerate a library whole).
+        "optimizer": {
+            "history_size": history_size,
+            "max_iter": max_iter,
+            "prerelax_steps": prerelax_steps,
+        },
         # Number of outer L-BFGS steps actually taken, and the seconds they
         # took. Recorded under the same keys the bundled ice_data/ice_cache
         # uses, so cost per step stays derivable per config -- that ratio,
@@ -1310,7 +1331,7 @@ def build_ice_cache(
     num_configs: int,
     n: int = 256,
     dx: float = 1.0,
-    n_steps: int = 600,
+    n_steps: int = 250,
     device: str | torch.device = "cuda",
     seed_start: int = 0,
     progressbars: bool = True,
@@ -1333,12 +1354,13 @@ def build_ice_cache(
     already has so an interrupted run resumes, and records a manifest of
     the convergence quality actually achieved.
 
-    ``n_steps=600`` (vs. the class-level default of 400): S(k) gains taper
-    by ~200-300 steps at this scale, but ``E_per_atom`` keeps improving out
-    past 600 for ~527k-atom systems -- since these configs are permanent,
-    shared assets, the extra convergence is worth the one-time cost. ``tol``/
-    ``patience`` still apply on top, so a config that plateaus early stops
-    early rather than burning the full budget.
+    ``n_steps=250`` is about 6000 loss evaluations at
+    :meth:`GradientSKIcemaker.optimize`'s default ``max_iter``, the budget
+    its settings were chosen on (loss 0.024 at 3000 evaluations, 0.022 at
+    6000, at n=256). Since these configs are permanent, shared assets, the
+    tail of that curve is worth the one-time cost. ``tol``/``patience``
+    still apply on top, so a config that plateaus early stops early rather
+    than burning the full budget.
 
     Parameters
     ----------
@@ -1353,7 +1375,7 @@ def build_ice_cache(
         Voxel size in Å. Default 1.0.
     n_steps : int, optional
         L-BFGS step ceiling per config (upper bound -- see ``tol``).
-        Default 600.
+        Default 250.
     device : str or torch.device, optional
         Computation device. Default ``"cuda"``.
     seed_start : int, optional

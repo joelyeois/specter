@@ -103,8 +103,8 @@ def _report_config(metadata: dict, device: str, elapsed: float) -> None:
       4e-4 to 0.02 under the current fixed-point encoding.
     - `E_per_atom` is not a distance from `mlbop_target` either: that
       target is one weighted term in a combined loss, not a value the
-      optimisation is expected to reach. Bundled configs sit near -0.11
-      eV/atom against a -0.413 target.
+      optimisation is expected to reach. Bundled configs sit between
+      -0.19 and -0.27 eV/atom against a -0.413 target.
 
     `stopped_early` is the one reliable signal here, and it answers a
     narrow question: whether the loss plateaued within the step budget or
@@ -164,6 +164,7 @@ def _write_manifest(config: IceCacheConfig, path: str) -> list[dict]:
                 "sk_loss": data.get("sk_loss"),
                 "E_per_atom": data.get("energy", {}).get("E_per_atom"),
                 "recipe": data.get("recipe"),
+                "optimizer": data.get("optimizer"),
             }
         )
 
@@ -290,7 +291,7 @@ def run_build_ice_cache(config: IceCacheConfig) -> None:
         _console.print(
             f"S(k) loss across the library: {min(losses):.4g} - {max(losses):.4g} "
             f"(median {sorted(losses)[len(losses) // 2]:.4g}). For reference, the "
-            "bundled ice_data/ice_cache spans 0.0004 - 0.021 at n=256, dx=1.0."
+            "bundled ice_data/ice_cache spans 0.0002 - 0.022 at n=256, dx=1.0."
         )
 
     if config.diagnostics:

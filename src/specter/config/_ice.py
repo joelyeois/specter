@@ -46,7 +46,9 @@ class IceCacheConfig:
     # --- Optimisation ---
     # L-BFGS step ceiling per config. An upper bound only: the run stops early
     # once the loss plateaus (GradientSKIcemaker.optimize's tol/patience).
-    n_steps: int = 600
+    # 250 steps is ~6000 loss evaluations at optimize's default max_iter, the
+    # budget its settings were chosen on; see its docstring.
+    n_steps: int = 250
 
     # --- Compute ---
     # "cpu" | "cuda" | "cuda:0" | a bare GPU index | a comma-separated list of

@@ -64,36 +64,37 @@ Generating a configuration is expensive, and how expensive depends steeply on
 the cell size. Measured on one NVIDIA L40 at `dx = 1.0` over complete runs
 (`docs-figures/ice_cache_timing.py`):
 
-| `--n` | cell | water beads | s/step | peak allocated | **peak reserved** | 600 steps |
+| `--n` | cell | water beads | s/step | peak allocated | **peak reserved** | 250 steps |
 |------:|-----:|------------:|-------:|---------------:|------------------:|----------:|
-| 64  | 64 Å  | 8,237   | 0.153 | 0.17 GiB  | 0.21 GiB      | 2 min  |
-| 96  | 96 Å  | 27,800  | 0.181 | 0.45 GiB  | 0.54 GiB      | 2 min  |
-| 128 | 128 Å | 65,897  | 0.277 | 1.06 GiB  | 1.18 GiB      | 3 min  |
-| 192 | 192 Å | 222,403 | 0.810 | 8.66 GiB  | 11.92 GiB     | 8 min  |
-| 256 | 256 Å | 527,178 | 2.183 | 16.82 GiB | **40.17 GiB** | 22 min |
+| 64  | 64 Å  | 8,237   | 0.394 | 0.10 GiB | 0.15 GiB     | 2 min |
+| 96  | 96 Å  | 27,800  | 0.338 | 0.33 GiB | 0.39 GiB     | 1 min |
+| 128 | 128 Å | 65,897  | 0.401 | 0.78 GiB | 0.90 GiB     | 2 min |
+| 192 | 192 Å | 222,403 | 0.774 | 2.56 GiB | 3.15 GiB     | 3 min |
+| 256 | 256 Å | 527,178 | 2.158 | 6.01 GiB | **7.03 GiB** | 9 min |
 
 **Size a GPU against the reserved column.** Reserved is what the process
-holds from the driver and what a new allocation fails against; at
-$n = 256$ it is 2.4× the allocated figure. Memory is also the steeper of the
-two costs: going from $n = 128$ to $n = 256$ multiplies time by 7.9 but
-reserved memory by 34. Bead count grows as $n^3$, and the ML-BOP three-body
-term over those beads grows faster still, since local coordination tightens
-as the structure converges.
+holds from the driver and what a new allocation fails against. Bead count
+grows as $n^3$, and the ML-BOP three-body term over those beads grows with
+the number of neighbour triplets, so both time and memory rise steeply with
+cell size. A step is one outer L-BFGS iteration, about 25 loss evaluations
+under the default `max_iter`, which is why even the smallest cell costs
+0.3 s per step.
 
-That last point makes *when* you measure matter. Peak memory rises through a
-run while cost per step falls, so a short sample understates memory and
-overstates time at once. These figures come from complete runs for that
-reason. The right-hand column extrapolates a full `--n_steps 600` budget and
-is an upper bound, since a run stops as soon as its loss plateaus.
+Both quantities drift through a run, in opposite directions: cost per step
+falls as the optimiser accumulates curvature history, and peak memory rises
+as local coordination tightens. These figures come from complete runs for
+that reason. The right-hand column extrapolates a full `--n_steps 250`
+budget and is an upper bound, since a run stops as soon as its loss
+plateaus (three of the five sizes above did).
 
 Absolute times are hardware-specific; re-run the script above rather than
 trusting these numbers on different silicon. The scaling with `n` is the part
 that transfers.
 
-For a real-world reference point, the 20-configuration bundled library cost
-**6.65 GPU-hours** at `n = 256`, a median of 1300 s per configuration at
-2.19 s/step. That per-step figure matches the table above and the independent
-benchmark, so it is the number to scale from when budgeting a run.
+For a real-world reference point, the 20-configuration bundled library was
+generated at `n = 256` in a single run on three L40s, at 2.2 s/step; the
+`manifest.json` beside it records every configuration's step count, wall
+time, S(k) loss and ML-BOP energy.
 
 ### Managing the cost
 
@@ -103,9 +104,7 @@ Three properties of the command exist to make a multi-hour run practical:
   process per GPU, each taking a disjoint slice, so four GPUs finish a library
   roughly four times faster. `--device auto` uses every visible GPU. Size the
   pool against the reserved column: one configuration per GPU at a time, so
-  `n = 256` needs roughly 40 GiB free on **each** device in the pool, which in
-  practice means a 48 GiB-class card per worker and no room for a second
-  configuration alongside it.
+  `n = 256` needs roughly 8 GiB free on **each** device in the pool.
 - **Runs resume.** A configuration whose file already exists is skipped, so
   re-running the same command after an interruption generates only what is
   missing. Pass `--overwrite True` to regenerate regardless.
@@ -132,12 +131,12 @@ that can be quoted in isolation:
   back**, so it includes the cost of storing them (see
   [Coordinate storage](#coordinate-storage)) and is a property of the file
   rather than of convergence alone. At $n = 256$, $dx = 1.0$ the bundled
-  library spans $4\times10^{-4}$ to $0.02$, median $3\times10^{-3}$.
+  library spans $2\times10^{-4}$ to $0.02$, median $4\times10^{-3}$.
 - The ML-BOP energy per atom is a structural diagnostic, not a distance
   from the $-0.413$ eV/atom figure in each configuration's `recipe`: that
   value is one weighted term in the combined loss, and the optimisation
-  isn't expected to reach it. Bundled configurations settle
-  near $-0.10$ eV/atom.
+  isn't expected to reach it. Bundled configurations settle between
+  $-0.19$ and $-0.27$ eV/atom, median $-0.23$.
 
 `stopped_early` is directly interpretable: it says whether the
 loss plateaued within the step budget or the budget ran out first, and so
@@ -170,17 +169,24 @@ The rendered difference is well below shot noise at any realistic dose: the
 float16 encoding perturbs the projected phase by 2.9 mrad against a
 158 mrad noise floor at 40 e⁻/Å². This was never a visible image-quality
 problem. Rather, raw `float16` discarded most of the $S(k)$ fidelity each
-configuration spends ~20 minutes earning, in the one quantity the generator
+configuration spends minutes earning, in the one quantity the generator
 exists to reproduce, at no saving in file size.
 
 `IceBank` reads both encodings, keyed on a `coord_encoding` field, so a
 library written before this change keeps loading. Such configurations cannot
 be upgraded in place: SPECTER discards float32 coordinates at write time,
-so only regeneration recovers the difference. The bundled
-library was accordingly regenerated from the same seeds under the same
-recipe, which left its energy distribution and convergence behaviour
-statistically unchanged (median $-0.113$ vs $-0.108$ eV/atom, 9 of 20 vs 10
-of 20 plateauing) while improving stored $S(k)$ fidelity by roughly 250x.
+so only regeneration recovers the difference.
+
+The bundled library was last regenerated on 2026-09-02, from the same seeds
+under the same recipe, after the optimiser began carrying its positions in
+float64 (see [Amorphous ice](../concepts/ice.md#the-optimisation)). Every
+earlier library had stalled near $-0.10$ eV/atom at the float32 resolution
+of the coordinates; the current one reaches a median of $-0.23$ eV/atom in
+a median of 156 steps, 16 of 20 configurations plateauing before the
+250-step ceiling, for 2.0 GPU-hours in total. A library is one convergence
+level: `manifest.json` records the optimiser settings under `optimizer`,
+and configurations generated under different settings should not share a
+directory.
 
 `--diagnostics True` also saves energy and $S(k)$ figures for the
 whole library, equivalent to calling `IceBank.plot_diagnostics`.

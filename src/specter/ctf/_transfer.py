@@ -75,9 +75,13 @@ class TransferFunction(nn.Module):
         Relative objective-lens current instability, used by the Cc
         envelope. Default 0.01e-6.
     dose_envelope : bool, optional
-        Whether to apply the Grant & Grigorieff (2015) cumulative-dose
+        Whether to apply the Grant & Grigorieff (2015) radiation-damage
         envelope, using ``ctf_params.dose`` (see :class:`CTFParameters`).
         Default False.
+    dose_weighted : bool, optional
+        Whether the image stands for an exposure-filtered movie sum (True,
+        default) or a plain sum of frames (False). See
+        :func:`specter.aberrations.dose_envelope`.
     """
 
     def __init__(
@@ -93,6 +97,7 @@ class TransferFunction(nn.Module):
         deltaV_V: float = 0.06e-6,
         deltaI_I: float = 0.01e-6,
         dose_envelope: bool = False,
+        dose_weighted: bool = True,
     ) -> None:
         super().__init__()
         if aberration_model not in ("nonlinear", "linear"):
@@ -107,6 +112,7 @@ class TransferFunction(nn.Module):
         self.deltaV_V = deltaV_V
         self.deltaI_I = deltaI_I
         self.dose_envelope = dose_envelope
+        self.dose_weighted = dose_weighted
 
         _, _, KX, KY = kgrid_2d(n_pixels, pixel_size)
         k2 = (KX**2 + KY**2).unsqueeze(0)
@@ -328,7 +334,9 @@ class TransferFunction(nn.Module):
 
         if self.dose_envelope and ctf_params.dose is not None:
             dose = ctf_params.dose.gather(idx).view(-1, 1, 1)
-            transfer = transfer * dose_envelope(self.k, dose)
+            transfer = transfer * dose_envelope(
+                self.k, dose, weighted=self.dose_weighted, voltage=kwargs["voltage"]
+            )
 
         return transfer
 

@@ -72,21 +72,152 @@ def test_static_envelopes_match_their_closed_forms():
 
 def test_dose_envelope_dc_is_one():
     k = torch.tensor([0.0])
-    result = dose_envelope(k, dose=torch.tensor(50.0))
-    assert torch.allclose(result, torch.ones_like(result))
+    for weighted in (True, False):
+        result = dose_envelope(k, dose=torch.tensor(50.0), weighted=weighted)
+        assert torch.allclose(result, torch.ones_like(result))
+        result = dose_envelope(
+            k, dose=torch.tensor(3.0), pre_exposure=60.0, weighted=weighted
+        )
+        assert torch.allclose(result, torch.ones_like(result))
 
 
-def test_dose_envelope_below_threshold_is_one():
-    k = torch.tensor([0.1, 0.2, 0.3])
-    result = dose_envelope(k, dose=torch.tensor(1.0))
-    assert torch.allclose(result, torch.ones_like(result))
+def test_dose_envelope_matches_grant_grigorieff_2015_integrals():
+    """Pin the two closed forms at 40 e/A^2 against a numerical quadrature.
+
+    Ne = a k^b + c is the exposure at which the diffracted *intensity* has
+    fallen to 1/e (Grant & Grigorieff 2015, eLife 4:e06980), so a frame at
+    exposure N carries exp(-N / 2Ne) of its amplitude. The envelope of an
+    image is that decay averaged over the exposure it spans: for a plain sum
+    the mean of exp(-N/2Ne); for an exposure-filtered sum with weights
+    q = exp(-N/2Ne) and noise-preserving normalisation, sqrt of the mean of
+    exp(-N/Ne). Neither is exp evaluated at the final dose, which is what the
+    function computed before 2026-09-03 (exp(-(D - c) / (a k^b)): 4e-8 at
+    3.7 A, where the physics says 0.24-0.35).
+    """
+    k = torch.tensor([0.1, 0.149, 0.27])  # 10, 6.7 and 3.7 A
+    ne = 0.245 * k**-1.665 + 2.81
+    dose = 40.0
+    n = torch.linspace(0.0, dose, 20001)[:, None]
+    plain_ref = torch.exp(-n / (2 * ne)).mean(0)
+    weighted_ref = torch.sqrt(torch.exp(-n / ne).mean(0))
+    plain = dose_envelope(k, torch.tensor(dose), weighted=False)
+    weighted = dose_envelope(k, torch.tensor(dose), weighted=True)
+    assert torch.allclose(plain, plain_ref, rtol=1e-3)
+    assert torch.allclose(weighted, weighted_ref, rtol=1e-3)
+    # The values quoted in the docstring, so a silent parameter change shows.
+    assert torch.allclose(plain, torch.tensor([0.535, 0.389, 0.245]), atol=2e-3)
+    assert torch.allclose(weighted, torch.tensor([0.577, 0.462, 0.353]), atol=2e-3)
+    # Optimal weighting recovers more signal than a plain sum, everywhere.
+    assert torch.all(weighted > plain)
 
 
-def test_dose_envelope_decreases_with_frequency_above_threshold():
+def test_dose_envelope_pre_exposure_short_interval_limit():
+    """A short exposure after a pre-exposure N0 tends to exp(-N0 / 2Ne)."""
+    k = torch.tensor([0.05, 0.1, 0.2, 0.3])
+    ne = 0.245 * k**-1.665 + 2.81
+    pre = 30.0
+    expected = torch.exp(-pre / (2 * ne))
+    for weighted in (True, False):
+        short = dose_envelope(
+            k, dose=torch.tensor(1e-3), pre_exposure=pre, weighted=weighted
+        )
+        assert torch.allclose(short, expected, rtol=1e-3)
+        zero = dose_envelope(
+            k, dose=torch.tensor(0.0), pre_exposure=pre, weighted=weighted
+        )
+        assert torch.allclose(zero, expected, rtol=1e-6)
+    # A tilt series is a plain sum over [N0, N0 + D]: the mean of the decay.
+    n = torch.linspace(pre, pre + 3.0, 20001)[:, None]
+    ref = torch.exp(-n / (2 * ne)).mean(0)
+    tilt = dose_envelope(k, dose=torch.tensor(3.0), pre_exposure=pre, weighted=False)
+    assert torch.allclose(tilt, ref, rtol=1e-3)
+
+
+def test_critical_exposure_scales_with_beta_squared():
+    """300 kV is the fit itself; 200 kV gives the conventional 0.80; 100 kV 0.50."""
+    from specter.aberrations._envelopes import critical_exposure
+
+    k = torch.tensor([0.05, 0.1, 0.2, 0.3])
+    ne300 = critical_exposure(k)
+    assert torch.allclose(critical_exposure(k, voltage=300.0), ne300)
+    assert torch.allclose(
+        critical_exposure(k, voltage=200.0) / ne300,
+        torch.full_like(k, 0.802),
+        atol=2e-3,
+    )
+    assert torch.allclose(
+        critical_exposure(k, voltage=100.0) / ne300,
+        torch.full_like(k, 0.498),
+        atol=2e-3,
+    )
+    # A per-image voltage tensor broadcasts as (B, 1, 1) against a 2-D grid.
+    grid = k.view(1, -1).expand(4, -1)
+    per_image = critical_exposure(grid, voltage=torch.tensor([300.0, 100.0]))
+    assert per_image.shape == (2, 4, 4)
+    assert torch.allclose(per_image[0], ne300.expand(4, -1))
+    assert torch.allclose(
+        per_image[1] / per_image[0], torch.full((4, 4), 0.498), atol=2e-3
+    )
+    # The envelope uses the scaled Ne, so 100 kV damages more than 300 kV.
+    e100 = dose_envelope(k, torch.tensor(40.0), voltage=100.0)
+    e300 = dose_envelope(k, torch.tensor(40.0), voltage=300.0)
+    ne100 = critical_exposure(k, voltage=100.0)
+    ref = torch.sqrt(ne100 * (1 - torch.exp(-40.0 / ne100)) / 40.0)
+    assert torch.allclose(e100, ref, rtol=1e-5)
+    assert torch.all(e100 < e300)
+
+
+def test_dose_envelope_decreases_with_frequency_and_dose():
     k = torch.tensor([0.05, 0.1, 0.2, 0.3])
     result = dose_envelope(k, dose=torch.tensor(50.0))
     assert torch.all(result[:-1] >= result[1:])
     assert result[-1] < result[0]
+    # Damage starts at zero exposure: there is no threshold below which the
+    # envelope is exactly 1.
+    small = dose_envelope(k, dose=torch.tensor(1.0))
+    assert torch.all(small < 1.0)
+    assert torch.all(small > result)
+
+
+def test_aberration_dose_envelope_uses_pre_exposure_and_weighting():
+    """The transfer function applies the weighted form by default, and the
+    plain interval form when `dose_weighted=False` with a pre_exposure key."""
+    ctf_params = {
+        "dfu": torch.tensor([5000.0]),
+        "dose": torch.tensor([3.0]),
+        "pre_exposure": torch.tensor([30.0]),
+    }
+    weighted = Aberration(
+        16,
+        pixel_size=1.0,
+        voltage=300.0,
+        aberration_model="nonlinear",
+        dose_envelope=True,
+    )
+    tilt = Aberration(
+        16,
+        pixel_size=1.0,
+        voltage=300.0,
+        aberration_model="nonlinear",
+        dose_envelope=True,
+        dose_weighted=False,
+    )
+    plain = Aberration(16, pixel_size=1.0, voltage=300.0, aberration_model="nonlinear")
+    base = torch.abs(plain.transfer_function({"dfu": ctf_params["dfu"]}))
+    for ab, w in ((weighted, True), (tilt, False)):
+        expected = base * dose_envelope(
+            ab.k, ctf_params["dose"].view(-1, 1, 1), pre_exposure=30.0, weighted=w
+        )
+        got = torch.abs(ab.transfer_function(ctf_params))
+        assert torch.allclose(got, expected, atol=1e-6)
+    # Without a pre_exposure key the exposure starts at zero.
+    got = torch.abs(
+        weighted.transfer_function(
+            {"dfu": ctf_params["dfu"], "dose": ctf_params["dose"]}
+        )
+    )
+    expected = base * dose_envelope(weighted.k, ctf_params["dose"].view(-1, 1, 1))
+    assert torch.allclose(got, expected, atol=1e-6)
 
 
 def test_aberration_bfactor_matches_inline_formula():

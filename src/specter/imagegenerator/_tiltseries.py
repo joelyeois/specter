@@ -192,9 +192,17 @@ class TiltSeriesGenerator(MicrographGenerator):
         Relative objective-lens current instability, used by the Cc
         envelope. Default 0.01e-6.
     dose_envelope : bool, optional
-        Whether to apply the Grant & Grigorieff (2015) cumulative-dose
-        envelope, using ``dose_per_angstrom``. Default False.
+        Whether to apply the Grant & Grigorieff (2015) radiation-damage
+        envelope. Each tilt is a plain short exposure of ``dose_per_angstrom``
+        taken after the pre-exposure accumulated by the tilts before it, and
+        the envelope is evaluated over exactly that interval (see
+        :func:`specter.aberrations.dose_envelope`). Tilts are assumed to be
+        acquired in index order: pass ``dose_per_angstrom`` and the tilt
+        geometry in acquisition order for a dose-symmetric scheme. Default
+        False.
     """
+
+    _dose_weighted = False  # a tilt is a plain sum, not an exposure-filtered one
 
     # ------------------------------------------------------------------ #
     # Initialisation                                                       #
@@ -492,6 +500,15 @@ class TiltSeriesGenerator(MicrographGenerator):
             )
         else:
             raise ValueError("Either 'angles' or 'quaternions' must be provided.")
+
+        # Exposure already delivered when each tilt starts: the summed dose of
+        # the tilts before it, in index (= acquisition) order. Read by
+        # _ctf_batch into ctf_params["pre_exposure"] for the dose envelope.
+        n_tilts = len(self.quaternions)
+        per_tilt = self.dose_per_angstrom.flatten().expand(n_tilts).to(torch.float32)
+        self.register_buffer(
+            "pre_exposure", torch.cumsum(per_tilt, 0) - per_tilt, persistent=False
+        )
 
     # ------------------------------------------------------------------ #
     # Forward methods                                                      #

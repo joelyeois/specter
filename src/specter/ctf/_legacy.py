@@ -190,6 +190,15 @@ def ctf_params_dict_to_parameters(
         odd_zernike["Z31s"] = -prefactor * torch.as_tensor(tilty)
 
     dose = ctf_params.get("dose")
+    if _nonzero(ctf_params.get("pre_exposure", 0.0)):
+        # CTFParameters carries a single dose; a tilt's pre-exposure has no
+        # field to land in, and dropping it would silently under-damage
+        # every tilt but the first. Refuse, matching the tetrafoil policy.
+        raise NotImplementedError(
+            "aberration_backend='torch_ctf' has no pre_exposure field: the "
+            "dose envelope of a tilt series is only available with the "
+            "'legacy' backend."
+        )
 
     return CTFParameters(
         defocus=defocus_um,
@@ -260,6 +269,7 @@ class LegacyAberrationAdapter(nn.Module):
         deltaV_V: float = 0.06e-6,
         deltaI_I: float = 0.01e-6,
         dose_envelope: bool = False,
+        dose_weighted: bool = True,
         lpp_params: dict[str, float] | None = None,
     ) -> None:
         super().__init__()
@@ -279,6 +289,7 @@ class LegacyAberrationAdapter(nn.Module):
             deltaV_V=deltaV_V,
             deltaI_I=deltaI_I,
             dose_envelope=dose_envelope,
+            dose_weighted=dose_weighted,
         )
 
     def forward(

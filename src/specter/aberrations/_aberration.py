@@ -88,9 +88,14 @@ class Aberration(L.LightningModule):
         Relative objective-lens current instability, used by the Cc
         envelope. Default 0.01e-6.
     dose_envelope: bool, optional
-        Whether to apply the Grant & Grigorieff (2015) cumulative-dose
-        envelope, using the per-image ``dose`` key in ``ctf_params``.
-        Default False.
+        Whether to apply the Grant & Grigorieff (2015) radiation-damage
+        envelope, using the per-image ``dose`` (and optional
+        ``pre_exposure``) keys in ``ctf_params``. Default False.
+    dose_weighted: bool, optional
+        Whether the simulated image stands for an exposure-filtered
+        (dose-weighted) movie sum (True, default: single-particle data) or
+        a plain sum of frames (False: one tilt of a tilt series). See
+        :func:`specter.aberrations.dose_envelope`.
     bfactor: float or torch.Tensor, optional
         Isotropic B-factor envelope in Å² applied in the microscope transfer
         function, damping high-resolution signal. Scalar (applied to all
@@ -131,6 +136,7 @@ class Aberration(L.LightningModule):
         deltaV_V: float = 0.06e-6,
         deltaI_I: float = 0.01e-6,
         dose_envelope: bool = False,
+        dose_weighted: bool = True,
         bfactor: float | torch.Tensor | None = None,
         progressbars: bool = True,
         **kwargs: Any,
@@ -187,6 +193,7 @@ class Aberration(L.LightningModule):
         self.deltaV_V = deltaV_V
         self.deltaI_I = deltaI_I
         self.dose_envelope = dose_envelope
+        self.dose_weighted = dose_weighted
 
         if bfactor is None:
             self.bfactor: torch.Tensor | None = None
@@ -221,8 +228,10 @@ class Aberration(L.LightningModule):
             - 'trefoil1'/'trefoil2' : Trefoil aberration
             - 'tetrafoil1'/'tetrafoil2'/'tetrafoil3'/'tetrafoil4' : Tetrafoil
             - 'bfactor' : Isotropic B-factor envelope in Å²
-            - 'dose' : Cumulative electron dose (fluence) in e⁻/Å², used by
-              the dose envelope when ``dose_envelope=True``
+            - 'dose' : Electron dose (fluence) accumulated in this image, in
+              e⁻/Å², used by the dose envelope when ``dose_envelope=True``
+            - 'pre_exposure' : Exposure already received before this image
+              started, in e⁻/Å² (a tilt's earlier tilts). Defaults to 0.
 
         Returns
         -------
@@ -323,7 +332,14 @@ class Aberration(L.LightningModule):
 
         if self.dose_envelope and "dose" in ctf_params:
             dose = ctf_params["dose"].view(-1, 1, 1)
-            transfer = transfer * env.dose_envelope(self.k, dose)
+            pre = ctf_params.get("pre_exposure", self.zero).view(-1, 1, 1)
+            transfer = transfer * env.dose_envelope(
+                self.k,
+                dose,
+                pre_exposure=pre,
+                weighted=self.dose_weighted,
+                voltage=self.voltage,
+            )
 
         return transfer
 

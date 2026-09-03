@@ -184,9 +184,30 @@ E_{C_c} = \exp\!\Big[-\tfrac12\big(\pi\lambda\, \Delta f\, k^2\big)^2\Big]
 where \(\alpha_c\) is the convergence semi-angle, \(\bar d\) the mean
 defocus, and \(\Delta f = C_c\sqrt{(\Delta E/U)^2 + (\Delta V/V)^2 + (2\Delta I/I)^2}\)
 the effective focus spread from energy spread and HT/lens instabilities.
-The dose envelope instead follows Grant & Grigorieff's empirically fitted
-critical-dose curve and is exactly 1 below their fitted \(c=2.81\)
-e⁻/Å² threshold.
+The dose envelope follows Grant & Grigorieff's empirically fitted critical
+exposure \(N_e(k) = a k^b + c\), the exposure after which the diffracted
+intensity at frequency \(k\) has fallen to \(1/e\). A frame recorded at
+cumulative exposure \(N\) therefore carries \(\exp(-N/2N_e)\) of its
+undamaged amplitude, and the envelope of an image is that decay averaged
+over the exposure interval the image spans, not its value at the end of
+it. A single-particle image stands for an exposure-filtered movie sum,
+whose signal envelope at equal noise is
+
+\[
+E_\text{dose}(k) = \sqrt{\frac{1}{D}\int_{N_0}^{N_0+D} e^{-N/N_e(k)}\,dN}
+= \sqrt{\frac{N_e}{D}\left(e^{-N_0/N_e} - e^{-(N_0+D)/N_e}\right)},
+\]
+
+with \(D\) the dose of the image and \(N_0 = 0\). A tilt of a tilt series
+is a plain short exposure after the pre-exposure \(N_0\) of the earlier
+tilts, and takes the unweighted mean \(\frac{1}{D}\int e^{-N/2N_e}\,dN\)
+over its own interval instead. At 40 e⁻/Å² the weighted form is 0.58,
+0.46 and 0.35 at 10, 6.7 and 3.7 Å. Damage starts at zero exposure; the
+constant \(c\) is part of the fit, not an onset dose. The fit was measured
+at 300 kV. Damage per electron follows the inelastic cross section, which
+scales as \(1/\beta^2\), so \(N_e\) is multiplied by
+\(\beta^2(V)/\beta^2(300\,\text{kV})\) at other voltages: 0.80 at 200 kV,
+the factor RELION and MotionCor2 also apply, and 0.50 at 100 kV.
 
 ![Left: the four envelopes in isolation, plus their product (B x Cs x Cc). Right: the same isotropic CTF curve from above, with and without the combined B/Cs/Cc envelope applied.](../assets/images/aberrations-envelopes.png){ width="900" style="display:block;margin:1.2em auto;" }
 ///caption

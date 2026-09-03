@@ -98,8 +98,11 @@ class BaseImager(L.LightningModule):
         Relative objective-lens current instability, used by the Cc
         envelope. Default 0.01e-6.
     dose_envelope : bool, optional
-        Whether to apply the Grant & Grigorieff (2015) cumulative-dose
-        envelope, using ``dose_per_angstrom``. Default False.
+        Whether to apply the Grant & Grigorieff (2015) radiation-damage
+        envelope, using ``dose_per_angstrom`` as the exposure accumulated
+        in each image. Single-particle images stand for exposure-filtered
+        movie sums; see :func:`specter.aberrations.dose_envelope`. Default
+        False.
     aberration_backend : {"legacy", "torch_ctf"}, optional
         Which engine computes the CTF/aberration transfer function.
         ``"legacy"`` (default) uses ``aberrations.Aberration`` unchanged --
@@ -213,12 +216,20 @@ class BaseImager(L.LightningModule):
                 self._ctf_param_names.remove("bfactor")
             _to_buffer(bfactor, "bfactor")
 
+    # Whether each image stands for an exposure-filtered (dose-weighted) movie
+    # sum. True for single-particle images and micrographs; TiltSeriesGenerator
+    # overrides it, since a tilt is a plain short exposure after a pre-exposure.
+    # See specter.aberrations.dose_envelope.
+    _dose_weighted: bool = True
+
     def _ctf_batch(self, idx: torch.Tensor | int) -> dict[str, torch.Tensor]:
         """Collect per-image transfer-function parameters for a batch."""
         ctf_batch = {k: getattr(self, k)[idx] for k in self._ctf_param_names}
         if getattr(self, "bfactor", None) is not None:
             ctf_batch["bfactor"] = self.bfactor[idx]
         ctf_batch["dose"] = self.dose_per_angstrom[idx]
+        if getattr(self, "pre_exposure", None) is not None:
+            ctf_batch["pre_exposure"] = self.pre_exposure[idx]
         return ctf_batch
 
     def ctf_params_dict(self) -> dict[str, torch.Tensor]:
@@ -336,8 +347,9 @@ class BaseImager(L.LightningModule):
                 deltaV_V=self.deltaV_V,
                 deltaI_I=self.deltaI_I,
                 dose_envelope=self.dose_envelope,
+                dose_weighted=self._dose_weighted,
                 lpp_params=self.lpp_params,
-            )
+            )  # _dose_weighted: class attribute, False on TiltSeriesGenerator
         else:
             self.aberration = Aberration(
                 self.pad_nxy,
@@ -358,6 +370,7 @@ class BaseImager(L.LightningModule):
                 deltaV_V=self.deltaV_V,
                 deltaI_I=self.deltaI_I,
                 dose_envelope=self.dose_envelope,
+                dose_weighted=self._dose_weighted,
                 progressbars=self.progressbars,
             )
         self.detector = Detector(

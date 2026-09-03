@@ -3,10 +3,46 @@ from __future__ import annotations
 import json
 import subprocess as proc
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 import mrcfile
 import numpy as np
+import pytest
+from click.testing import CliRunner
+
+from specter.cli._cli import cli
+
+# Building a tomogram costs far more the first time in a process than every
+# time after: 17.9 s cold against 0.21 s to repeat it and 4.05 s at a voxel
+# size not seen yet, on a 24x32x32 box that is already as small as the
+# assertions allow. Almost all of that is one-off warmup -- lazy imports and
+# the per-species potential kernels -- which a process shares internally and
+# a subprocess throws away. Running the CLI in-process lets the whole module
+# amortise one warmup instead of paying it per test: 6m16s -> 1m11s serially,
+# and 2626 s -> 1467 s of CPU. The two --help tests below stay in a real
+# subprocess, so `python -m specter.cli._cli` is still pinned as an entry
+# point; they are cheap because they never build anything.
+
+
+@dataclass
+class _CliResult:
+    """The subset of ``subprocess.CompletedProcess`` these tests use."""
+
+    returncode: int
+    stdout: str
+    stderr: str
+
+
+def _invoke_cli(*args: str) -> _CliResult:
+    result = CliRunner().invoke(cli, list(args), catch_exceptions=True)
+    stderr = result.stderr if result.stderr_bytes is not None else ""
+    if result.exception is not None and result.exit_code != 0:
+        # Surface the traceback the way a subprocess would have, so a failure
+        # still reports what went wrong through `assert ..., result.stderr`.
+        stderr += f"\n{result.exception!r}"
+    return _CliResult(result.exit_code, result.stdout, stderr)
+
 
 _SMALL_FIXTURE = Path(__file__).parent / "test_data" / "1mbo.cif"
 _LARGE_FIXTURE = Path(__file__).parent / "test_data" / "1bxn-assembly1.cif"
@@ -33,18 +69,8 @@ filename = "test_tomogram"
     )
 
 
-def _run_build_cli(config_path: Path, *extra_args: str) -> proc.CompletedProcess:
-    args = [
-        sys.executable,
-        "-m",
-        "specter.cli._cli",
-        "build",
-        "tomogram",
-        "--config",
-        str(config_path),
-        *extra_args,
-    ]
-    return proc.run(args, capture_output=True, encoding="utf-8")
+def _run_build_cli(config_path: Path, *extra_args: str) -> _CliResult:
+    return _invoke_cli("build", "tomogram", "--config", str(config_path), *extra_args)
 
 
 def test_cli_build_tomogram_smoke(tmp_path: Path) -> None:
@@ -367,9 +393,12 @@ filename = "test_tomogram"
 """
     )
 
-    result = _run_build_cli(config_path)
+    # The shortfall is a warnings.warn, caught here rather than read out of
+    # stderr: in-process, pytest owns showwarning, so the text never reaches
+    # the stream CliRunner captures.
+    with pytest.warns(UserWarning, match="only 0/3 exact-count instances fit"):
+        result = _run_build_cli(config_path)
     assert result.returncode == 0, result.stderr
-    assert "only 0/3 exact-count instances fit" in result.stderr
     assert (tmp_path / "test_tomogram.mrc").exists()
     assert list(tmp_path.glob("*.ndjson")) == []
 
@@ -386,14 +415,11 @@ def test_cli_build_tomogram_write_picks_override(tmp_path: Path) -> None:
     assert list(tmp_path.glob("*.ndjson")) == []
 
 
-def _run_ice_cli(output_dir: Path, *extra_args: str) -> proc.CompletedProcess:
+def _run_ice_cli(output_dir: Path, *extra_args: str) -> _CliResult:
     """Generate a tiny ice library. n=8/n_steps=3 is far too small to converge
     -- these tests check the CLI's scheduling, resume and bookkeeping, not the
     physics (tests/test_ice_bank.py covers that)."""
-    args = [
-        sys.executable,
-        "-m",
-        "specter.cli._cli",
+    return _invoke_cli(
         "build",
         "ice",
         "--n",
@@ -407,8 +433,7 @@ def _run_ice_cli(output_dir: Path, *extra_args: str) -> proc.CompletedProcess:
         "--output_dir",
         str(output_dir),
         *extra_args,
-    ]
-    return proc.run(args, capture_output=True, encoding="utf-8")
+    )
 
 
 def test_cli_build_ice_smoke(tmp_path: Path) -> None:

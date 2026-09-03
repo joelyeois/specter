@@ -8,6 +8,7 @@
 /tomograms/
 /ice/
 /reconstructions/
+/match/
 # Pre-2026-08-24 layout. Nothing writes here any more, but existing
 # checkouts still have one and it should stay out of `git status`.
 /specter-data/

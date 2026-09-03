@@ -396,6 +396,9 @@ def validate_config(config: Any) -> None:
         "cs_path",
         "star_path",
         "shtyrov_params_path",
+        # MatchConfig: the refinement file and the optional image stack.
+        "metadata_path",
+        "images_path",
         # ReconstructionConfig. Every one of these is read at Ghostbuster
         # construction time, so a typo'd path otherwise surfaces minutes in.
         "cs_file",

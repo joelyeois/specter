@@ -7,6 +7,7 @@ from dataclasses import fields
 from typing import TypeVar, overload
 
 from ._ice import IceCacheConfig
+from ._match import MatchConfig
 from ._micrograph import MicrographConfig
 from ._particle import ParticleStackConfig
 from ._reconstruction import ReconstructionConfig
@@ -30,6 +31,7 @@ ConfigT = TypeVar(
     TomogramConfig,
     IceCacheConfig,
     ReconstructionConfig,
+    MatchConfig,
 )
 
 
@@ -49,6 +51,8 @@ def load_config(path: str, config_cls: type[IceCacheConfig]) -> IceCacheConfig: 
 def load_config(
     path: str, config_cls: type[ReconstructionConfig]
 ) -> ReconstructionConfig: ...
+@overload
+def load_config(path: str, config_cls: type[MatchConfig]) -> MatchConfig: ...
 def load_config(
     path: str,
     config_cls: type[ParticleStackConfig]
@@ -56,7 +60,8 @@ def load_config(
     | type[TiltSeriesConfig]
     | type[TomogramConfig]
     | type[IceCacheConfig]
-    | type[ReconstructionConfig] = ParticleStackConfig,
+    | type[ReconstructionConfig]
+    | type[MatchConfig] = ParticleStackConfig,
 ) -> (
     ParticleStackConfig
     | MicrographConfig
@@ -64,6 +69,7 @@ def load_config(
     | TomogramConfig
     | IceCacheConfig
     | ReconstructionConfig
+    | MatchConfig
 ):
     """
     Load a config dataclass from a TOML file.

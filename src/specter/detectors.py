@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 import torch
 from scipy.interpolate import interp1d as scipy_interp1d
 from torchinterp1d import interp1d
@@ -490,3 +492,132 @@ def dqe0_for_detector(detector_model: str | None) -> float:
     if detector_model is None:
         return 1.0
     return DQE0.get(detector_model, 1.0)
+
+
+# ---------------------------------------------------------------------------
+# Coincidence loss: the detector constants, and the conversion from a dataset's
+# dose rate to the ``coincidence_radius`` a *simulation* should be given.
+#
+# ``Detector.apply_coincidence`` loses an electron that lands within an
+# exclusion radius r of one already counted in the same frame, so its mean
+# loss depends on one number, the occupancy per exclusion cell per frame,
+#
+#     lambda = (electrons per physical pixel per frame) * pi * r**2 .
+#
+# r is a property of the camera unit and its counting configuration, measured
+# once against beam-only frames (see ``Detector.apply_coincidence``'s notes),
+# and the per-frame flux is the dataset's dose rate divided by the detector's
+# HARDWARE frame rate -- the rate at which counting happens, not the fraction
+# grouping a user chose for motion correction. A simulation usually runs at a
+# binned pixel with far fewer frames than the camera recorded; holding lambda
+# fixed across that change preserves the mean loss and its contrast
+# dependence, which is what `coincidence_radius_for_simulation` does. It does
+# not preserve the *spatial* extent of the exclusion, which only a detector
+# stage run at the physical pixel would.
+# ---------------------------------------------------------------------------
+
+#: Exclusion radius in PHYSICAL pixels, per calibrated detector model. Only
+#: entries with a traceable measurement are listed; a model absent here has no
+#: calibration, and callers should say so rather than borrow a neighbour's.
+EXCLUSION_RADIUS_PX: dict[str, float] = {
+    # Fitted against 14 beam-only EER acquisitions spanning 0.15-31 e/px/s with
+    # DQE(0)=0.92 modelled explicitly (manuscript/coincidence-loss-exp.ipynb).
+    "falcon4i_300kv": 2.0,
+    # Campbell et al. 2015 (eLife 4:e06380): ~12 e/physical px/s incident
+    # recorded as ~9 counts/px/s, a 25% loss at 400 fps, inverted through
+    # Detector.apply_coincidence with dqe0=1 (the published loss is relative
+    # to the low-rate linear extrapolation, so DQE(0) sits on top of it).
+    "k2_300kv": 2.54,
+}
+
+#: Frame rate at which each detector counts, in Hz. Coincidence happens per
+#: hardware frame, so this -- not the number of fractions saved -- sets the
+#: per-frame flux. A hybrid-pixel counter (DECTRIS SINGLA, ~4500 Hz with
+#: sub-microsecond dead time) has no coincidence loss at cryo-EM rates, which
+#: ``"perfect"`` stands in for.
+HARDWARE_FRAME_RATE_HZ: dict[str, float] = {
+    "falcon4i_300kv": 320.0,
+    "falcon4i_200kv": 320.0,
+    "k2_300kv": 400.0,
+    "k3_300kv": 1500.0,
+    "k3_200kv": 1500.0,
+}
+
+#: Dose rate a detector is typically operated at, in e/physical px/s. Used
+#: only as a stated fallback when a dataset's own dose rate is unknown.
+TYPICAL_DOSE_RATE_E_PX_S: dict[str, float] = {
+    "falcon4i_300kv": 4.0,
+    "falcon4i_200kv": 4.0,
+    "k2_300kv": 8.0,
+    "k3_300kv": 15.0,
+    "k3_200kv": 15.0,
+}
+
+
+def coincidence_occupancy(
+    exclusion_radius_px: float, dose_rate_e_px_s: float, frame_rate_hz: float
+) -> float:
+    """
+    Electrons per exclusion cell per hardware frame, ``lambda``.
+
+    Parameters
+    ----------
+    exclusion_radius_px : float
+        Exclusion radius in physical pixels (see `EXCLUSION_RADIUS_PX`).
+    dose_rate_e_px_s : float
+        Incident dose rate in electrons per physical pixel per second.
+    frame_rate_hz : float
+        Hardware counting frame rate in Hz (see `HARDWARE_FRAME_RATE_HZ`).
+
+    Returns
+    -------
+    float
+        ``dose_rate / frame_rate * pi * r**2``. The mean coincidence loss of
+        `Detector.apply_coincidence` is a function of this number alone.
+    """
+    if frame_rate_hz <= 0:
+        raise ValueError("frame_rate_hz must be positive")
+    return dose_rate_e_px_s / frame_rate_hz * math.pi * exclusion_radius_px**2
+
+
+def coincidence_radius_for_simulation(
+    occupancy: float, dose_e_per_A2: float, sim_pixel_size: float, sim_n_frames: int
+) -> float:
+    """
+    The ``coincidence_radius`` (in simulation pixels) that reproduces a given
+    per-cell occupancy when the simulation uses its own pixel size and frame
+    count.
+
+    Parameters
+    ----------
+    occupancy : float
+        Electrons per exclusion cell per frame on the real detector, from
+        `coincidence_occupancy`.
+    dose_e_per_A2 : float
+        Total dose of the simulated image in e/Å².
+    sim_pixel_size : float
+        Pixel size of the simulated image in Å.
+    sim_n_frames : int
+        Number of frames the simulation splits the dose into
+        (``ImageGenerator(n_frames=...)``).
+
+    Returns
+    -------
+    float
+        Radius in simulation pixels such that
+        ``(dose * px**2 / n_frames) * pi * r**2 == occupancy``. Zero
+        occupancy returns 0.0, which `Detector.apply_coincidence` reads as
+        plain Poisson.
+
+    Examples
+    --------
+    EMPIAR-11377 (Falcon 4, 1293 EER fractions of a 5.2 s exposure at
+    4.1 e/px/s) simulated at 1.462 Å with 40 frames: occupancy 0.21, radius
+    0.18 px.
+    """
+    if occupancy <= 0:
+        return 0.0
+    e_per_sim_pixel_frame = dose_e_per_A2 * sim_pixel_size**2 / sim_n_frames
+    if e_per_sim_pixel_frame <= 0:
+        raise ValueError("dose, pixel size and frame count must be positive")
+    return math.sqrt(occupancy / (math.pi * e_per_sim_pixel_frame))

@@ -9,6 +9,7 @@ from specter.progress import tqdm_warnings
 
 from .build import build_build_group
 from .cache import build_cache_group
+from .match import build_match_group
 from .reconstruct import build_reconstruct_group
 from .simulate import CONTEXT_SETTINGS, build_simulate_group
 
@@ -26,6 +27,7 @@ cli.add_command(build_reconstruct_group())
 # command. See build_reconstruct_group for why it is an alias inside `specter`
 # rather than a `ghostbuster` console script of its own.
 cli.add_command(build_reconstruct_group(name="ghostbuster"))
+cli.add_command(build_match_group())
 cli.add_command(build_jobs_group())
 cli.add_command(build_cache_group())
 

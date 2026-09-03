@@ -1,104 +1,115 @@
-# Generate a CryoSPARC dataset twin
+# Match an experimental dataset
 
-`specter simulate particles --cs_path <file>.cs` drives generation from a
-real dataset instead of randomly sampling poses and CTF parameters.
-`--cs_path` reads pixel size, voltage, amplitude contrast, per-particle
-pose, and per-particle CTF straight from the `.cs` file, so the simulated
-stack shares every imaging parameter with the real one it was built from,
-particle for particle. `--star_path <file>.star` does the same from a
-RELION `.star` file (both the single-block layout `specter` itself writes
-and the RELION 3.1+ two-block `optics`/`particles` layout). The two flags
-are mutually exclusive.
+`specter match particles` derives a simulation config that matches a real
+particle set, and reports how close the match is. It takes the refined
+particle set, its images and the atomic model, and writes a `matched.toml`
+that `specter simulate particles` runs as is. The only settings it asks for
+are the four an acquisition record carries and no particle file does.
 
-This is the mechanism behind [Generate a particle
-stack](particle-stack.md#example-matching-empiar-11377)'s small
-five-particle example. This page covers the same workflow at full dataset
-scale, and how to check the result against the real data it twins.
+## What you provide
 
-## What a `.cs`/`.star` file supplies, and what it doesn't
+| input | flag | where it comes from |
+|---|---|---|
+| refined particle set | `--metadata_path` | a CryoSPARC passthrough `.cs` or a RELION `.star` |
+| particle images | `--images_path` (optional) | the stack the metadata refers to, in its order; unset reads the paths the file itself points at |
+| atomic model | `--pdb_source` | PDB accession or local file, with the assembly that matches the particle |
+| detector | `--detector_model` | methods section, EMDB record |
+| total dose per movie, e⁻/Å² | `--dose` | methods section, EMDB record, import settings |
+| dose rate, e⁻/physical px/s | `--dose_rate` | methods section; unset falls back to the detector's typical rate and the report says so |
+| energy filter | `--energy_filter` | methods section; recorded in the report |
 
-A `.cs`/`.star` file carries imaging parameters, not structural identity:
-pose, CTF, pixel size, voltage, and amplitude contrast come from the file,
-but it doesn't record which structure was imaged. `pdb_source` still has
-to be set explicitly, to whatever PDB/mmCIF accession or local file
-matches the dataset. Get `pdb_source` wrong, and every other parameter
-still loads correctly: only the rendered particle looks wrong.
-
-`--n_particles`, combined with either path flag, takes the *first*
-`n_particles` rows of the file rather than a random subset. That's why a
-small worked example (five rows, as in the particle-stack guide) and a
-full-dataset twin (every row) are the same flag with a different value.
-Omit `--n_particles` to use every particle the file contains.
-
-## Running the full workflow
+The particle set must be aligned to the atomic model: its poses have to
+reproduce the experimental views when the model is rendered at them. A
+refinement that started from an ab initio volume is in that volume's own
+orientation, not the model's. Run an Align 3D of the refined map against a
+map rendered from the model, re-extract the particles from the aligned job,
+and pass that particle set. The command checks this first and stops if it
+fails, because nothing downstream is meaningful otherwise.
 
 ```bash
-specter simulate particles \
+specter match particles \
+    --metadata_path J205_passthrough_particles.cs \
+    --images_path exp_2000.mrcs \
     --pdb_source 8b0x \
-    --n_pixels 512 \
-    --cs_path /path/to/your/dataset_passthrough.cs \
-    --dose 40 \
-    --ice_model gd \
-    --coincidence_radius 0.8 \
-    --potential_scale 0.5 \
-    --detector_model none \
+    --detector_model falcon4i_300kv \
+    --dose 40 --dose_rate 4.1 --energy_filter true \
     --device cuda:0
 ```
 
-This is the same command as the five-particle example in [Generate a
-particle stack](particle-stack.md#example-matching-empiar-11377), with
-`--n_particles 5` removed so SPECTER renders every row in the file. A
-dataset of any real size benefits from `--device` accepting a
-comma-separated GPU list (see [Multi-GPU](particle-stack.md#multi-gpu)) and
-from job tracking (`--project`, see [Manage jobs](jobs.md)) to record a
-multi-thousand-particle run's parameters and provenance alongside its
-output.
+## What it does
 
-The `.cs`/`.star` file doesn't supply `coincidence_radius` or
-`potential_scale`. Set them to whatever matches the detector and specimen
-thickness of the dataset you're twinning; both default to values with no
-effect (`0.0` and `1.0`) if left unset.
+1. **Pose alignment.** A noiseless, ice-free render at the refinement's
+   poses is correlated with the experimental images pair by pair and
+   compared with a random pairing. Pass or fail, with the fix named.
+2. **Acquisition card to physics.** Detector MTF and DQE(0) by name; the
+   coincidence radius from the detector's exclusion radius and hardware
+   frame rate together with the dose rate, converted to the simulation's
+   pixel size and frame count at constant occupancy; the radiation-damage
+   envelope from the dose and voltage. Nothing in this step is fitted.
+3. **Probes.** Ice thickness and neighbour spacing are the two quantities
+   the images have to supply. Each candidate is rendered at a hundred
+   particles and scored on the background variance outside the particle
+   against the experiment.
+4. **Comparison at matched poses.** Two seeds at the chosen settings against
+   the experiment: the signal-to-noise ratio of each stack per frequency
+   band, the twin test, and the screens for fixed patterns and background
+   mismatch. A clearly positive residual envelope is applied as a B-factor
+   and the comparison rerun once.
+5. **Output.** `matched.toml`, `match_report.md`, `match_report.png`, and
+   with `--write_stack N` a stack of `N` particles simulated from the
+   matched config.
 
-## Validating the twin
+About five minutes on one GPU at a 256 px box; the full stack is extra.
 
-Because every imaging parameter matches, a twin dataset should reproduce
-the real one rather than resemble a plausible one. Two checks, in
-increasing order of rigor:
+## Reading the report
 
-**Visual comparison.** Render the same particles the real stack contains
-and compare side by side. [Generate a particle
-stack](particle-stack.md#example-matching-empiar-11377)'s five-particle
-figure is this check at the smallest useful scale.
+The figure shows five experimental particles above their simulated twins
+and the mean image of each stack, the overlaid radial power spectra with
+their ratio, the per-band SNR ratio, and the twin-test histograms. The
+table lists every derived value with its provenance: metadata, detector
+table, probe, measured, or fallback.
 
-**Pooled 2D classification.** Mix a twin dataset with the real particles it
-matches into a single stack, and run one CryoSPARC 2D Classification job
-over the pool. If the physics is right, CryoSPARC has no basis to separate
-simulated particles from real ones. It sorts both into the same classes, in
-roughly the same proportion per class, and the per-class real/simulated
-split reads as noise around 50/50 rather than as two populations. This is
-a stronger check than visual comparison because it doesn't rely on a human
-judging similarity: a systematic physics error (a wrong envelope, a
-miscalibrated noise model) tends to show up as classes that are
-disproportionately one source or the other, even when individual particles
-still look convincing.
+The number to read first is the **matched-pose SNR ratio**, simulated over
+experimental, per band. Near 1 in every band means the simulation carries
+the experiment's signal and noise at every scale. A ratio that is flat and
+modest is a contrast or dose question; a ratio that grows with frequency is
+an envelope. If a broad excess remains after every derivable parameter is
+set, the report says so: that residual is not a parameter of the forward
+model, and no knob should be turned to hide it. On the datasets tried so
+far it tracked the absence of an energy filter.
 
-[Generate a particle stack](particle-stack.md#example-matching-empiar-11377)
-shows this check run at 2,000 real + 2,000 simulated EMPIAR-11377 particles,
-with the pooled class-count figure and the underlying per-particle
-class-assignment CSV both committed to the repo. Reproduce or adapt it with
-[`docs-figures/particle_stack_empiar_11377.py`](https://github.com/joelyeois/specter/blob/main/docs-figures/particle_stack_empiar_11377.py),
-which builds the twin stack, and requires access to a real CryoSPARC
-instance for the classification job itself.
+The overlaid **power spectra** are there because they are the view most
+people know, not because they decide anything. A stack can have half the
+experiment's low-frequency power and still be indistinguishable in a mixed
+2D classification, or twice it and separate cleanly.
 
-## See also
+## What it does not do
 
-- [Generate a particle stack](particle-stack.md): the general
-  `specter simulate particles` guide, including the small worked example
-  this page's workflow extends to full scale.
-- [Manage jobs](jobs.md): tracking a full-dataset run's parameters and
-  provenance.
-- `specter.io.extract_parameters_from_csfile` /
-  `extract_parameters_from_starfile` (Python API): the functions behind
-  `--cs_path`/`--star_path`, including a `halfset` argument for extracting
-  only a CryoSPARC/RELION gold-standard half-set. Not currently exposed as
-  a CLI flag.
+It does not run a classification. The report is designed to replace the
+loop of simulating thousands of particles and classifying them in
+CryoSPARC while parameters are being chosen; a mixed 2D classification
+remains the right final validation, run once, with two seeds, reading the
+count of classes near the input ratio alongside chi-squared.
+
+It does not fit a B-factor, a potential scale or a coincidence radius to
+the classification. Each of those was, in earlier hand tuning, standing in
+for something the model lacked, and the report names the lack instead.
+
+It cannot reproduce specimen packing that is not random. A close-packed
+monolayer of virus particles has neighbours at fixed angles, and the
+simulator places neighbours at random; the neighbour-spacing probe will
+report the mismatch it cannot close.
+
+## Limitations
+
+- The refinement file supplies the box and pixel size; every probe
+  simulates at that box. Above about 512 px, Fourier-crop the stack first
+  and pass it as `--images_path`.
+- Only detectors with a calibrated exclusion radius get a coincidence
+  term; the others get zero and a warning. Only detectors with a bundled
+  MTF get one.
+- Ice thickness and neighbour spacing are chosen from the candidate lists
+  in the config (`ice_candidates`, `crowd_candidates`), not fitted
+  continuously.
+- One spacing and one thickness serve the whole stack; the simulator has no
+  per-micrograph variation.

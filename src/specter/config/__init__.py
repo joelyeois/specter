@@ -9,6 +9,7 @@ from ._loader import (
     apply_overrides,
     load_config,
 )
+from ._match import MATCH_HELP, MatchConfig
 from ._micrograph import MICROGRAPH_HELP, MicrographConfig
 from ._particle import PARTICLE_STACK_HELP, ParticleStackConfig
 from ._paths import (
@@ -33,6 +34,8 @@ from ._validation import validate_config
 
 __all__ = [
     "ICE_CACHE_HELP",
+    "MATCH_HELP",
+    "MatchConfig",
     "MICROGRAPH_HELP",
     "PARTICLE_STACK_HELP",
     "PDB_CACHE_ENV_VAR",

@@ -1,4 +1,5 @@
 from ._ice import run_build_ice_cache
+from ._match import run_match
 from ._micrograph import run_micrograph
 from ._particles import run_particle_stack
 from ._reconstruct import run_reconstruction
@@ -11,6 +12,7 @@ from ._tomogram import (
 
 __all__ = [
     "run_build_ice_cache",
+    "run_match",
     "run_micrograph",
     "run_particle_stack",
     "run_reconstruction",

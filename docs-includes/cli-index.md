@@ -11,6 +11,8 @@
 | [`specter build ice`](build.md#specter-build-ice) | Generate a library of amorphous-ice configurations for `IceBank` to draw from, as an alternative to the one bundled with specter. |
 | [`specter reconstruct`](reconstruct.md#specter-reconstruct) | Reconstruct 3D volumes from experimental images |
 | [`specter reconstruct particle`](reconstruct.md#specter-reconstruct-particle) | Reconstruct a 3D volume from an experimental single-particle stack, by fitting the same physics-based forward model `specter simulate particles` generates with. |
+| [`specter match`](match.md#specter-match) | Derive simulation settings that match an experimental dataset |
+| [`specter match particles`](match.md#specter-match-particles) | Derive a simulation config that matches a real particle set. |
 | [`specter jobs`](jobs.md#specter-jobs) | Inspect and compare tracked SPECTER jobs. |
 | [`specter jobs list`](jobs.md#specter-jobs-list) | List all jobs. |
 | [`specter jobs show`](jobs.md#specter-jobs-show) | Show full details for a job. |

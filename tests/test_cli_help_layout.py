@@ -15,6 +15,7 @@ import rich_click as click
 
 from specter.cli._click_options import build_config_options
 from specter.cli.build import _ICE_GROUPS, _TOMOGRAM_GROUPS
+from specter.cli.match import _MATCH_PARTICLE_GROUPS
 from specter.cli.reconstruct import _RECONSTRUCT_PARTICLE_GROUPS
 from specter.cli.simulate import (
     _MICROGRAPH_GROUPS,
@@ -23,6 +24,7 @@ from specter.cli.simulate import (
 )
 from specter.config import (
     IceCacheConfig,
+    MatchConfig,
     MicrographConfig,
     ParticleStackConfig,
     ReconstructionConfig,
@@ -40,6 +42,7 @@ GROUPED_CONFIGS = [
     (TomogramConfig, _TOMOGRAM_GROUPS),
     (IceCacheConfig, _ICE_GROUPS),
     (ReconstructionConfig, _RECONSTRUCT_PARTICLE_GROUPS),
+    (MatchConfig, _MATCH_PARTICLE_GROUPS),
 ]
 
 

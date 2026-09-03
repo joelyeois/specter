@@ -66,7 +66,7 @@ nav:
           - Generate a particle stack: user-guide/particle-stack.md
           - Generate a micrograph: user-guide/micrograph.md
           - Generate a tilt series: user-guide/tilt-series.md
-          - Generate a CryoSPARC dataset twin: user-guide/dataset-twin.md
+          - Match an experimental dataset: user-guide/dataset-twin.md
       - Build:
           - Build a tomogram specimen: user-guide/build-tomogram.md
           - Using the ice cache: user-guide/ice-cache.md
@@ -112,6 +112,7 @@ nav:
       - specter simulate: api/cli/simulate.md
       - specter build: api/cli/build.md
       - specter reconstruct: api/cli/reconstruct.md
+      - specter match: api/cli/match.md
       - specter jobs: api/cli/jobs.md
       - specter cache: api/cli/cache.md
   - API:
@@ -125,6 +126,7 @@ nav:
       - specter.imagegenerator: api/imagegenerator.md
       - specter.io: api/io.md
       - specter.jobs: api/jobs.md
+      - specter.match: api/match.md
       - specter.pipelines: api/pipelines.md
       - specter.potential: api/potential.md
       - specter.rotations: api/rotations.md

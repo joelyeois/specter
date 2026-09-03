@@ -35,7 +35,14 @@ def _particles_callback(config: str | None, **_overrides_raw: object) -> None:
     assert ctx is not None
     overrides = collect_overrides(ctx, exclude={"config"})
     cfg = load_validated_config(MatchConfig, config, overrides)
-    run_match(cfg)
+    report = run_match(cfg)
+    if not report.pose.passed:
+        # A shell chain (`specter match ... && specter simulate ...`) must not
+        # go on to simulate from the INCOMPLETE matched.toml this run wrote.
+        raise click.ClickException(
+            "pose-alignment check failed; matched.toml is marked incomplete. "
+            + report.warnings[0]
+        )
 
 
 def _build_particles_command() -> click.RichCommand:

@@ -9,6 +9,7 @@ config. `specter.pipelines.run_match` drives them.
 from __future__ import annotations
 
 from ._images import load_experimental_images
+from ._metadata import recorded_box, rescale_metadata
 from ._metrics import (
     BAND_LABELS,
     BANDS,
@@ -42,7 +43,9 @@ __all__ = [
     "matched_index_correlation",
     "matched_pose_snr",
     "radial_power_spectra",
+    "recorded_box",
     "render_report",
+    "rescale_metadata",
     "twin_test",
     "water_ring_excess",
 ]

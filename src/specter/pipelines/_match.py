@@ -65,6 +65,7 @@ from specter.match import (
     twin_test,
     water_ring_excess,
 )
+from specter.match._metadata import recorded_box, rescale_metadata
 from specter.match._report import DerivedValue
 from specter.pdb import PDB
 
@@ -173,6 +174,23 @@ def run_match(config: MatchConfig) -> MatchReport:
         if exp.shape[-1] != exp.shape[-2]:
             raise ValueError(f"experimental images are not square: {tuple(exp.shape)}")
         box = int(exp.shape[-1])
+        # Images binned after extraction leave the metadata describing a box
+        # they no longer have; rendering into the recorded pixel size would
+        # then put the structure in a box too small by the same factor. Write
+        # a rescaled copy and point every probe at it.
+        recorded = recorded_box(config.metadata_path)
+        pixel_note = ""
+        if recorded is not None and recorded != box:
+            ext = os.path.splitext(config.metadata_path)[1]
+            rescaled = os.path.join(out_dir, f"metadata_rescaled{ext}")
+            new_pixel = rescale_metadata(config.metadata_path, box, rescaled)
+            pixel_note = f"rescaled from {pixel_size:.4f} Å at {recorded} px"
+            pixel_size = new_pixel
+            meta = {next(iter(meta)): rescaled}
+            _console.print(
+                f"[yellow]Images are {box} px but the metadata records {recorded} px: "
+                f"using a rescaled copy at {pixel_size:.4f} Å ({rescaled}).[/yellow]"
+            )
         _console.print(
             f"{n_available} particles at {pixel_size:.4f} Å, {box} px box, {voltage:.0f} kV"
         )
@@ -253,7 +271,7 @@ def run_match(config: MatchConfig) -> MatchReport:
         detector_model = "none" if det == "unknown" else det
         report.derived.append(DerivedValue("voltage", voltage, "metadata"))
         report.derived.append(
-            DerivedValue("pixel_size", round(pixel_size, 4), "metadata")
+            DerivedValue("pixel_size", round(pixel_size, 4), "metadata", pixel_note)
         )
         report.derived.append(
             DerivedValue("dose", config.dose, "metadata", "e-/Å² per movie")

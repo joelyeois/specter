@@ -153,16 +153,27 @@ def test_toml_writer_round_trips_through_tomllib() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _write_csfile_with_random_poses(path: Path, n: int, pixel_size: float) -> None:
+def _write_csfile_with_random_poses(
+    path: Path, n: int, pixel_size: float, box: int | None = None, shift: float = 0.0
+) -> None:
     g = np.random.default_rng(0)
     rotvec = g.normal(size=(n, 3)).astype(np.float32)
     rotvec *= (np.pi * g.uniform(0.2, 1.0, size=(n, 1))).astype(
         np.float32
     ) / np.linalg.norm(rotvec, axis=1, keepdims=True)
+    blob = (
+        {
+            "blob/shape": np.full((n, 2), box, dtype=np.uint32),
+            "blob/psize_A": np.full(n, pixel_size, dtype=np.float32),
+        }
+        if box is not None
+        else {}
+    )
     Dataset(
         {
+            **blob,
             "uid": np.arange(n, dtype=np.uint64),
-            "alignments3D/shift": np.zeros((n, 2), dtype=np.float32),
+            "alignments3D/shift": np.full((n, 2), shift, dtype=np.float32),
             "alignments3D/psize_A": np.full(n, pixel_size, dtype=np.float32),
             "alignments3D/pose": rotvec,
             "alignments3D/split": np.zeros(n, dtype=np.uint32),
@@ -240,3 +251,23 @@ def test_run_match_on_a_synthetic_experiment(tmp_path: Path) -> None:
     matched = load_config(str(out / "matched.toml"), ParticleStackConfig)
     assert matched.n_pixels == box and matched.cs_path == str(cs_path)
     assert matched.dose_envelope is True and matched.coincidence_radius == 0.0
+
+
+def test_rescale_metadata_follows_a_fourier_cropped_stack(tmp_path: Path) -> None:
+    """A .cs extracted at 360 px / 0.5695 A describes 200 px images at 1.0251 A;
+    pixel-unit shifts scale the other way so shifts in Angstrom are unchanged."""
+    from specter.match import recorded_box, rescale_metadata
+
+    src = tmp_path / "orig.cs"
+    n = 4
+    _write_csfile_with_random_poses(src, n, 0.5695, box=360, shift=18.0)
+    assert recorded_box(str(src)) == 360
+    out = tmp_path / "rescaled.cs"
+    new_px = rescale_metadata(str(src), 200, str(out))
+    assert new_px == pytest.approx(0.5695 * 360 / 200, rel=1e-5)
+    r = Dataset.load(str(out))
+    assert recorded_box(str(out)) == 200
+    assert float(r["alignments3D/psize_A"][0]) == pytest.approx(new_px, rel=1e-5)
+    assert float(r["alignments3D/shift"][0][0]) == pytest.approx(10.0, rel=1e-5)
+    # Angstrom shift is invariant: 18 px * 0.5695 == 10 px * 1.0251
+    assert 18.0 * 0.5695 == pytest.approx(10.0 * new_px, rel=1e-5)

@@ -258,9 +258,10 @@ def defocus_midplane_shift(nz: int, pixel_size: float) -> float:
     defocus at ``z = 0``. Equivalently, the entry face at ``+nz *
     pixel_size / 2`` is the high-defocus end, which is why this shift is
     *subtracted* to reach the midplane. Measured, not assumed: a scatterer
-    placed 192 A below the midplane produces an image matching the same
-    scatterer at the midplane imaged at ``dfu - 192`` to within an RMS of
-    8e-4, against 1.6 for the unshifted comparison. Pinned by
+    placed 96 A below the midplane produces an image matching the same
+    scatterer at the midplane imaged at ``dfu - 96`` to within an RMS of
+    5.9e-4, against 1.6 for the unshifted comparison and 3.1 for the
+    opposite sign. Pinned by
     ``tests/test_aberrations_functions.py::test_defocus_increases_with_z``.
 
     That relation is what a per-particle defocus column in a STAR/`.cs`

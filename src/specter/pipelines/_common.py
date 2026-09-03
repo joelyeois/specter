@@ -396,6 +396,55 @@ def _generate_single(
     return images_t, exitwaves_t, clean_exitwaves_t
 
 
+def _reassemble_rank_files(
+    output_dir: str, n: int, world_size: int
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """
+    Concatenate every DDP rank's saved predictions back into one ordered stack.
+
+    Each rank writes ``predictions_<rank>.pt`` and ``batch_indices_<rank>.pt``;
+    the indices say which of the `n` requested particles that rank produced,
+    so sorting by them undoes DDP's interleaved sharding.
+
+    A short or missing rank file is an error rather than a smaller stack.
+    Returning what happened to be on disk is how a two-GPU run of 2000
+    particles came back with 1000 images and metadata for 2000, which the
+    STAR writer then rejected with an opaque `Tensor.expand` failure after
+    the ``.mrcs`` was already written.
+
+    Returns
+    -------
+    images, sort_order : torch.Tensor
+        Images in the caller's original order, and the permutation that put
+        them there -- the exit-wave stacks are sharded identically and are
+        reordered with the same `sort_order`.
+    """
+    prediction_files = sorted(glob.glob(os.path.join(output_dir, "predictions_*.pt")))
+    index_files = sorted(glob.glob(os.path.join(output_dir, "batch_indices_*.pt")))
+    if len(prediction_files) != world_size or len(index_files) != world_size:
+        raise RuntimeError(
+            f"multi-GPU reassembly expected {world_size} rank file(s) in "
+            f"{output_dir}, found {len(prediction_files)} prediction and "
+            f"{len(index_files)} index file(s). A rank failed before saving "
+            "its share of the images."
+        )
+
+    all_preds = torch.cat([torch.load(f) for f in prediction_files], dim=0)
+    all_indices = torch.cat([torch.load(f) for f in index_files], dim=0)
+    sort_order = torch.argsort(all_indices)
+    if not torch.equal(all_indices[sort_order], torch.arange(n)):
+        raise RuntimeError(
+            f"multi-GPU reassembly recovered {all_indices.numel()} particle "
+            f"index(es) for a run of {n}; the ranks did not between them "
+            "produce each particle exactly once."
+        )
+    images = all_preds[sort_order]
+
+    for f in prediction_files + index_files:
+        os.remove(f)
+    return images, sort_order
+
+
 def _generate_multi(
     model: Any,
     n: int,
@@ -488,21 +537,20 @@ def _generate_multi(
     print(f"Running multi-GPU generation on GPUs: {gpu_ids}")
     trainer.predict(model, dataloaders=dataloader, return_predictions=False)
 
+    # Every rank saves its own predictions_<rank>.pt from inside
+    # `write_on_epoch_end`, and nothing in Lightning synchronises the ranks
+    # afterwards. Without this barrier rank 0 globs the directory while a
+    # slower rank is still writing its (multi-gigabyte) tensor, reassembles
+    # only the shares that happen to be on disk, and deletes them -- so a
+    # two-GPU run of 2000 particles silently produced a 1000-image stack.
+    trainer.strategy.barrier("predictions_written")
+
     # Only rank 0 reassembles; worker ranks exit cleanly
     if trainer.global_rank != 0:
         return None, None, None
 
     # Reassemble images in original order
-    prediction_files = sorted(glob.glob(os.path.join(output_dir, "predictions_*.pt")))
-    index_files = sorted(glob.glob(os.path.join(output_dir, "batch_indices_*.pt")))
-
-    all_preds = torch.cat([torch.load(f) for f in prediction_files], dim=0)
-    all_indices = torch.cat([torch.load(f) for f in index_files], dim=0)
-    sort_order = torch.argsort(all_indices)
-    images = all_preds[sort_order]
-
-    for f in prediction_files + index_files:
-        os.remove(f)
+    images, sort_order = _reassemble_rank_files(output_dir, n, trainer.world_size)
 
     # Reassemble exit waves if collected
     exitwaves = None

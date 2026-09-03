@@ -288,6 +288,72 @@ def extract_parameters_from_starfile(
     )
 
 
+def _check_per_particle_lengths(
+    n: int,
+    per_particle: dict[str, object],
+    broadcast: dict[str, object],
+) -> None:
+    """
+    Fail before anything is written if a column's length does not fit `n` images.
+
+    ``per_particle`` arguments (poses, shifts, the CTF table) carry one entry
+    per particle and must be exactly `n` long. A sequence of some other length
+    means the caller's images and its metadata describe different particle
+    sets, and pairing them by position would silently mislabel every row:
+    image `i` written with particle `j`'s defocus and pose.
+
+    ``broadcast`` arguments are per-file constants that :func:`_scalar_col`
+    expands, so length 1 is as valid a spelling as a bare float.
+
+    This is not hypothetical. A multi-GPU ``specter simulate particles``
+    driven from a ``cs_path`` reassembled only rank 0's share of the images
+    while keeping the metadata for the whole set, and the mismatch surfaced
+    as a ``RuntimeError`` from ``Tensor.expand`` inside a CTF column --
+    after the ``.mrcs`` had already been written, leaving a half-length
+    stack on disk with no STAR file beside it. The check therefore runs
+    before the first write, so a rejected call leaves nothing behind.
+    """
+    bad: dict[str, int] = {}
+
+    def note(name: str, value: object, allow_scalar_length: bool) -> None:
+        length = _length_or_none(value)
+        if length is None or length == n:
+            return
+        if allow_scalar_length and length == 1:
+            return
+        bad[name] = length
+
+    for name, value in per_particle.items():
+        if isinstance(value, dict):
+            for key, entry in value.items():
+                note(f"{name}[{key!r}]", entry, allow_scalar_length=False)
+        elif value is not None:
+            note(name, value, allow_scalar_length=False)
+    for name, value in broadcast.items():
+        if value is not None:
+            note(name, value, allow_scalar_length=True)
+
+    if bad:
+        detail = ", ".join(f"{k} has {v}" for k, v in sorted(bad.items()))
+        raise ValueError(
+            f"per-particle metadata does not match the {n} image(s) given: {detail}. "
+            "Pass metadata for exactly the particles being written -- a positional "
+            "pairing of different-length sequences would give every image the wrong "
+            "pose and CTF."
+        )
+
+
+def _length_or_none(value: object) -> int | None:
+    """Length of a per-particle sequence, or None for a scalar/unsized value."""
+    shape = getattr(value, "shape", None)
+    if shape is not None:
+        return int(shape[0]) if len(shape) else None
+    try:
+        return len(value)  # type: ignore[arg-type]
+    except TypeError:
+        return None
+
+
 def _scalar_col(
     value: "torch.Tensor | np.ndarray | float | int | None", n: int
 ) -> torch.Tensor | None:
@@ -387,6 +453,27 @@ def create_particle_starfile(
     reads all of these directly from the model that generated ``particles``.
     """
 
+    # Before the .mrcs is written, so a mismatch cannot leave a stack on
+    # disk that no STAR file describes.
+    n = len(particles)
+    _check_per_particle_lengths(
+        n,
+        per_particle={
+            "rotations": rotations,
+            "translations": translations,
+            "ctf_params": ctf_params,
+        },
+        broadcast={
+            "voltage": voltage,
+            "dx": dx,
+            "alpha": alpha,
+            "dose_per_angstrom": dose_per_angstrom,
+            "coincidence_radius": coincidence_radius,
+            "potential_scale": potential_scale,
+            "bfactor": bfactor,
+        },
+    )
+
     if output_dir:
         os.makedirs(output_dir, exist_ok=True)
 
@@ -414,7 +501,6 @@ def create_particle_starfile(
         euler = roma.rotmat_to_euler("ZYZ", R, degrees=True).numpy()
 
     # create associated starfile
-    n = len(particles)
     translations = (
         torch.zeros(n, 2) if translations is None else torch.as_tensor(translations)
     )

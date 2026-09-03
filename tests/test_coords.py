@@ -4,6 +4,9 @@ Tests for specter.coords.
 
 from __future__ import annotations
 
+import math
+
+import pytest
 import torch
 
 from specter.coords import (
@@ -59,6 +62,33 @@ def test_poisson_disk_samplers_respect_a_non_cubic_box():
         # Each axis is filled out to its own bound, so the bound above is not
         # satisfied merely by points huddling near the origin.
         assert float(pts3[:, column].abs().max()) > 0.4 * extent
+
+
+def test_radial_distribution_function_normalisation_is_parameter_free():
+    """A particle sees N-1 others, whatever the density or bin width.
+
+    Integrating rho*g(r)*4*pi*r^2 dr over every separation present counts the
+    neighbours of one particle, so it must come back as N-1 with nothing
+    fitted. r_max has to reach the box diagonal or the far pairs fall outside
+    the last bin and the count comes up short. This is what pins the factor
+    of 2 between unordered pair counting and the ordered-pair definition:
+    without it the integral returns (N-1)/2 and an ideal gas plateaus at 0.5.
+    """
+    torch.manual_seed(0)
+    n_points, side = 4000, 100.0
+    coords = (torch.rand(n_points, 3) - 0.5) * side
+    volume, dr = side**3, 0.5
+    r, g_r = radial_distribution_function(
+        coords, volume=volume, dr=dr, r_max=side * math.sqrt(3.0)
+    )
+    number_density = n_points / volume
+    neighbours = float((g_r * number_density * 4 * math.pi * r**2 * dr).sum())
+    assert neighbours == pytest.approx(n_points - 1, rel=1e-3)
+
+    # And the ideal-gas plateau itself, at separations short enough that the
+    # box surface has not yet eaten much of the shell.
+    _, g_short = radial_distribution_function(coords, volume=volume, dr=1.0)
+    assert torch.allclose(g_short[1:4], torch.ones(3), atol=0.05)
 
 
 def test_radial_distribution_function_modes_agree():

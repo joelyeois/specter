@@ -351,5 +351,10 @@ def radial_distribution_function(
 
     r = bins[:-1] + dr / 2
     shell_volume = 4 * torch.pi * r**2 * dr
-    g_r = hist / (number_density * N * shell_volume)
+    # Every branch above histograms each pair once: pdist and the chunked
+    # upper-triangle enumerate unordered pairs, and the sampled branch
+    # rescales its draws by N(N-1)/2 to match. The definition above sums over
+    # ordered pairs (i, j != i), which counts each twice, hence the 2. Without
+    # it an ideal gas plateaus at 0.5 rather than 1.
+    g_r = 2.0 * hist / (number_density * N * shell_volume)
     return r, g_r

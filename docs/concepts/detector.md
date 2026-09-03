@@ -101,9 +101,13 @@ Left: detected/incident electron ratio vs. incident dose, at the Falcon 4i-calib
 Two consequences of the same mechanism. On the left, detected efficiency
 drops fast with incident dose rate: more electrons arriving in the same
 frame means more of them land in an already-occupied cell. SPECTER
-calibrates `coincidence_radius = 2.394` px against real Falcon 4i
-beam-only micrographs spanning 0.15-31.29 e⁻/px/s, reproducing the
-measured detected-electron yield to ~2% RMSE. On the right, the exclusion
+calibrates `coincidence_radius = 2.0` px against real Falcon 4i
+beam-only micrographs spanning 0.15-31.29 e⁻/px/s, with the counting
+efficiency DQE(0) = 0.92 modelled explicitly, reproducing the measured
+detected-electron yield to ~3% RMSE. An earlier value of 2.394 px was fitted
+without DQE(0) and absorbed that loss into the radius. The radius belongs to
+the camera unit and its counting configuration, so it is a prior for other
+cameras of the same model, not a constant. On the right, the exclusion
 mechanism itself imprints a low-spatial-frequency dip in the noise power
 spectrum relative to plain Poisson: an electron's presence excludes its
 own neighborhood for an instant, which suppresses variance at scales

@@ -9,6 +9,7 @@ from specter.detectors import (
     dqe0_for_detector,
     falcon4i_200kv,
     falcon4i_300kv,
+    k2_300kv,
     k3_200kv,
     k3_300kv,
     perfect_detector,
@@ -62,7 +63,8 @@ class BaseImager(L.LightningModule):
     alpha : float, optional
         Amplitude contrast ratio. Default 0.0.
     detector_model : str, optional
-        Detector MTF model ('k3_300kv', 'k3_200kv', 'perfect', None).
+        Detector MTF model ('k3_300kv', 'k3_200kv', 'k2_300kv',
+        'falcon4i_300kv', 'falcon4i_200kv', 'perfect', None).
     anisomag : torch.Tensor, optional
         Anisotropic magnification matrices, shape (n, 2, 2).
     ctf_params : dict[str, torch.Tensor], optional
@@ -270,6 +272,9 @@ class BaseImager(L.LightningModule):
             self.register_buffer("detector_mtf", mtf)
         elif self.detector_model == "falcon4i_200kv":
             mtf = cast(torch.Tensor, falcon4i_200kv(self.nxy, self.pixel_size))
+            self.register_buffer("detector_mtf", mtf)
+        elif self.detector_model == "k2_300kv":
+            mtf = cast(torch.Tensor, k2_300kv(self.nxy, self.pixel_size))
             self.register_buffer("detector_mtf", mtf)
         else:
             self.detector_mtf = None

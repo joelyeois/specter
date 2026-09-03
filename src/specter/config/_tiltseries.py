@@ -76,7 +76,9 @@ class TiltSeriesConfig:
     klim: float | None = None  # fraction of Nyquist
     bfactor: float | None = None  # A^2
     pad_fft: bool = False
-    detector_model: Literal["none", "perfect", "k3_300kv", "k3_200kv"] = "none"
+    detector_model: Literal["none", "perfect", "k3_300kv", "k3_200kv", "k2_300kv"] = (
+        "none"
+    )
 
     # --- Post-processing ---
     normalize_tilt_series: bool = False

@@ -114,7 +114,9 @@ class MicrographConfig:
     bfactor: float | None = None  # A^2
     pad_fft: bool = False
     crowd_chunk_size: int = 1  # duplicates rotated per batch; see crowding.py
-    detector_model: Literal["none", "perfect", "k3_300kv", "k3_200kv"] = "none"
+    detector_model: Literal["none", "perfect", "k3_300kv", "k3_200kv", "k2_300kv"] = (
+        "none"
+    )
 
     # --- Post-processing ---
     normalize_micrographs: bool = False

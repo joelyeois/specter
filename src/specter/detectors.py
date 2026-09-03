@@ -290,6 +290,82 @@ def perfect_detector(
     return torch.sinc(omega / 2)
 
 
+def k2_300kv(
+    n: int, dx: float, device: str | torch.device = "cpu", return1d: bool = False
+) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
+    """
+    Return the MTF of a Gatan K2 Summit detector at 300 kV (counting mode).
+
+    Uses Gatan's published MTF, tabulated on the same 33-point frequency grid
+    as the K3 tables (``_K3_FREQ``, in cycles per physical pixel), so the
+    same interpolation applies. The K2's physical pixel is 5 um; supply
+    ``dx`` as the *physical* pixel size of the recorded image (super-
+    resolution data binned back to physical pixels).
+
+    Parameters
+    ----------
+    n : int
+        Number of pixels along each axis of the output MTF.
+    dx : float
+        Pixel size of the simulated image (same units as spatial frequency).
+    device : str or torch.device, optional
+        Device to create tensors on ('cpu' or 'cuda'). Default is 'cpu'.
+    return1d : bool, optional
+        If True, return 1D MTF sampled at radial frequencies. Default is False.
+
+    Returns
+    -------
+    mtf : torch.Tensor
+        - If return1d=False: 2D NxN MTF array.
+        - If return1d=True: Tuple (k_data, mtf_values) for 1D MTF.
+
+    References
+    ----------
+    https://www.gatan.com/sites/default/files/images/mtf_k2_300kV_FL2.star
+    """
+    return _k3_mtf(
+        n,
+        dx,
+        device,
+        return1d,
+        [
+            1.0,
+            0.997368491,
+            0.993644245,
+            0.988880821,
+            0.983130447,
+            0.976444248,
+            0.968872256,
+            0.9604634,
+            0.951265515,
+            0.941325335,
+            0.9306885,
+            0.919399548,
+            0.907501921,
+            0.895037963,
+            0.882048921,
+            0.868574941,
+            0.854655074,
+            0.840327272,
+            0.825628389,
+            0.810594182,
+            0.795259309,
+            0.779657329,
+            0.763820706,
+            0.747780804,
+            0.731567889,
+            0.71521113,
+            0.698738598,
+            0.682177265,
+            0.665553006,
+            0.648890599,
+            0.632213721,
+            0.615544954,
+            0.598905781,
+        ],
+    )
+
+
 def falcon4i_300kv(
     n: int, dx: float, device: str | torch.device = "cpu", return1d: bool = False
 ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
@@ -382,6 +458,9 @@ def falcon4i_200kv(
 DQE0: dict[str, float] = {
     "falcon4i_300kv": 0.92,
     "falcon4i_200kv": 0.91,
+    # K2 Summit counting mode at 300 kV, low dose rate: McMullan, Faruqi,
+    # Clare & Henderson, Ultramicroscopy 147, 156-163 (2014).
+    "k2_300kv": 0.80,
     "perfect": 1.0,
 }
 

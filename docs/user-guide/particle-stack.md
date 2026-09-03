@@ -42,7 +42,7 @@ TOML/CLI field reference.
 - **Models**: `scattering_model` (`multislice` is the accurate default;
   `firstborn`/`projection` trade accuracy for speed), `noise_model`,
   `detector_model` (`none` skips detector effects; `k3_300kv`/`k3_200kv`/
-  `falcon4i_*` apply a real detector's MTF/noise).
+  `k2_300kv`/`falcon4i_*` apply a real detector's MTF/noise).
 - **Post-processing**: `normalize_particles`, and `save_exitwaves` /
   `save_clean_exitwaves` if you want the pre-detector signal too (see
   below).

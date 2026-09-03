@@ -127,7 +127,7 @@ class TiltSeriesGenerator(MicrographGenerator):
     chunk_size : int, optional
         Chunk size for ``MicrographSpecimenGenerator`` (unused here but passed to parent).
     detector_model : str, optional
-        Detector MTF model ('k3_300kv', 'k3_200kv', 'perfect', None).
+        Detector MTF model ('k3_300kv', 'k3_200kv', 'k2_300kv', 'perfect', None).
     progressbars : bool, optional
         Show progress bars. Default True.
     verbose : bool, optional

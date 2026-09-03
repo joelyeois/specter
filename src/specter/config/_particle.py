@@ -55,7 +55,13 @@ class ParticleStackConfig:
         "multislice"
     )
     detector_model: Literal[
-        "none", "perfect", "k3_300kv", "k3_200kv", "falcon4i_300kv", "falcon4i_200kv"
+        "none",
+        "perfect",
+        "k3_300kv",
+        "k3_200kv",
+        "k2_300kv",
+        "falcon4i_300kv",
+        "falcon4i_200kv",
     ] = "none"
 
     # --- Post-processing (basic) ---

@@ -153,7 +153,7 @@ class MicrographGenerator(BaseImager):
         Move the assembled volume to CPU after generation to save GPU memory.
         Default True.
     detector_model : str, optional
-        Detector MTF model ('k3_300kv', 'k3_200kv', 'perfect', None).
+        Detector MTF model ('k3_300kv', 'k3_200kv', 'k2_300kv', 'perfect', None).
     slice_batchsize : int, optional
         Number of Z slices propagated together in ``IterativeScattering``.
         Default 1.

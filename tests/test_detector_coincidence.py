@@ -166,7 +166,14 @@ def test_larger_radius_loses_more_electrons() -> None:
 
 @pytest.mark.parametrize(
     "preset",
-    ["k3_200kv", "k3_300kv", "falcon4i_200kv", "falcon4i_300kv", "perfect_detector"],
+    [
+        "k3_200kv",
+        "k3_300kv",
+        "k2_300kv",
+        "falcon4i_200kv",
+        "falcon4i_300kv",
+        "perfect_detector",
+    ],
 )
 def test_mtf_is_normalised_at_dc(preset: str) -> None:
     """

@@ -149,6 +149,58 @@ def test_toml_writer_round_trips_through_tomllib() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Probe binning and the per-process potential cache
+# ---------------------------------------------------------------------------
+
+
+def test_probe_bin_is_capped_by_pixel_and_box() -> None:
+    from specter.pipelines._match import _probe_bin
+
+    assert _probe_bin(2, 360, 0.5695) == 2
+    assert _probe_bin(2, 200, 1.025) == 2
+    assert _probe_bin(2, 48, 2.5) == 1  # 24 px would be under the 32 px floor
+    assert _probe_bin(4, 512, 1.5) == 3  # 6 A pixel is past the 5 A ceiling
+    assert _probe_bin(1, 512, 1.0) == 1
+    assert _probe_bin(0, 512, 1.0) == 1
+
+
+def test_bin_images_crops_and_keeps_each_image_std() -> None:
+    from specter.pipelines._match import _bin_images
+
+    images = torch.randn(5, 64, 64, generator=torch.Generator().manual_seed(3))
+    images[2] *= 3.0
+    cropped, px = _bin_images(images, 1.5, 32)
+    assert cropped.shape == (5, 32, 32)
+    assert px == pytest.approx(3.0)
+    torch.testing.assert_close(
+        cropped.std(dim=(-2, -1)), images.std(dim=(-2, -1)), rtol=1e-4, atol=1e-5
+    )
+    same, px = _bin_images(images, 1.5, 64)
+    assert same is images and px == 1.5
+
+
+def test_particle_pipeline_reuses_the_potential_within_a_process() -> None:
+    """Ten probes of one structure at one pixel size parse and render it once."""
+    from specter.pipelines import _particles
+
+    cfg = ParticleStackConfig(pdb_source="6bdf", n_pixels=32, pixel_size=3.0)
+    _particles._POTENTIAL_CACHE.clear()
+    pdb_a, v_a = _particles._structure_and_potential(cfg, 3.0, build=True)
+    pdb_b, v_b = _particles._structure_and_potential(cfg, 3.0, build=True)
+    assert pdb_b is pdb_a
+    assert v_b is not v_a  # a copy, so a caller padding it cannot touch the cache
+    torch.testing.assert_close(v_b, v_a)
+    assert len(_particles._POTENTIAL_CACHE) == 1
+    # A different pixel size is a different potential.
+    _particles._structure_and_potential(cfg, 2.5, build=True)
+    assert len(_particles._POTENTIAL_CACHE) == 2
+    # A non-main DDP rank never builds and never fills the cache.
+    _, zeros = _particles._structure_and_potential(cfg, 4.0, build=False)
+    assert zeros.abs().sum() == 0 and len(_particles._POTENTIAL_CACHE) == 2
+    _particles._POTENTIAL_CACHE.clear()
+
+
+# ---------------------------------------------------------------------------
 # End to end on a synthetic experiment specter made itself
 # ---------------------------------------------------------------------------
 
@@ -237,16 +289,21 @@ def test_run_match_on_a_synthetic_experiment(tmp_path: Path) -> None:
         ice_candidates=[0.0],
         crowd_candidates=[0.0, 1.0],
         device="cpu",
+        probe_workers=2,  # the spawned-worker path: warm-up, per-job logs, results by file
+        write_stack=4,  # and the in-process path for the final stack
         seed=7,
         output_dir=str(tmp_path / "out"),
     )
     report = run_match(cfg)
     assert report.pose.passed, vars(report.pose)
+    out = tmp_path / "out"
+    assert (out / "probes" / "pose_check.log").exists()
+    with mrcfile.open(out / "matched_particles.mrcs") as m:
+        assert m.data.shape == (4, box, box)
     derived = {d.name: d.value for d in report.derived}
     assert derived["crowd_min_distance"] == 0
     assert derived["detector_model"] == "none"
     assert any("unknown" in w for w in report.warnings)
-    out = tmp_path / "out"
     assert (out / "match_report.md").exists() and (out / "match_report.png").exists()
     matched = load_config(str(out / "matched.toml"), ParticleStackConfig)
     assert matched.n_pixels == box and matched.cs_path == str(cs_path)

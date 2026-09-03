@@ -48,15 +48,17 @@ specter match particles [OPTIONS]
 
 | Flag | Type | Default | Description |
 | --- | --- | --- | --- |
-| `--n_probe` | `INTEGER` | `100` | Particles per probe simulation (ice thickness and neighbour spacing candidates). |
+| `--n_probe` | `INTEGER` | `64` | Particles per probe simulation (ice thickness and neighbour spacing candidates). |
 | `--n_battery` | `INTEGER` | `200` | Particles per seed in the final two-seed comparison that the report is computed from. |
+| `--probe_bin` | `INTEGER` | `2` | Fourier-crop factor for the probe simulations and the images they are scored against; the final two-seed comparison always runs at the native box. Capped so the probe pixel stays at or below 5 Angstrom and the box at or above 32 px. 1 probes at the native box. |
 | `--write_stack` | `INTEGER` | `0` | After the report, simulate this many particles with the matched config (e.g. for a mixed 2D classification). 0 skips it. |
 
 **Compute**{ #specter-match-particles-compute }
 
 | Flag | Type | Default | Description |
 | --- | --- | --- | --- |
-| `--device` | `TEXT` | `cuda` | Device to use: cpu \| cuda \| cuda:0. |
+| `--device` | `TEXT` | `cuda` | Device(s) to use: cpu \| cuda \| cuda:0 \| 0,1. Several devices share the probe simulations between them. |
+| `--probe_workers` | `INTEGER` | `0` | Worker processes that run probe simulations concurrently, dealt round-robin over the device(s). 0 is one per device, which on a single device runs every simulation in-process, one after another; processes sharing one GPU are time-sliced and gain nothing. |
 | `--seed` | `INTEGER` | _none_ | RNG seed for the probe and battery simulations. |
 
 **Output & job tracking**{ #specter-match-particles-output-job-tracking }

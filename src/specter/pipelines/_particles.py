@@ -48,6 +48,84 @@ from ._common import (
 )
 
 
+#: (structure, potential) pairs already built in this process, keyed on every
+#: config field that changes them. `specter match particles` calls
+#: `run_particle_stack` ten times per run on the same structure at the same
+#: pixel size, and the parse-plus-build was 40-50 s of a five-minute run; a
+#: normal CLI invocation builds once per process, so it never hits this.
+_POTENTIAL_CACHE: dict[tuple, tuple[PDB, torch.Tensor]] = {}
+_POTENTIAL_CACHE_MAX = 4
+
+
+def _potential_cache_key(config: ParticleStackConfig, pixel_size: float) -> tuple:
+    source = config.pdb_source
+    if os.path.exists(source):
+        source = os.path.realpath(source)
+    species = tuple(config.atom_species) if config.atom_species is not None else None
+    return (
+        source,
+        config.assembly,
+        config.pdb_cache_dir,
+        str(config.readd_hydrogens),
+        config.monomer_library_path,
+        config.n_pixels,
+        round(float(pixel_size), 6),
+        config.scattering_factors,
+        config.conv_backend,
+        species,
+        config.shtyrov_params_path,
+        config.rcut,
+        config.use_deposited_bfactors,
+        config.periodic,
+        config.potential_method,
+    )
+
+
+def _structure_and_potential(
+    config: ParticleStackConfig, pixel_size: float, build: bool
+) -> tuple[PDB, torch.Tensor]:
+    """Parse the structure and build its potential, reusing a same-process result."""
+    key = _potential_cache_key(config, pixel_size)
+    if build and key in _POTENTIAL_CACHE:
+        pdb, V = _POTENTIAL_CACHE[key]
+        return pdb, V.clone()  # callers pad and move it; keep the cached copy pristine
+    # Shtyrov fits scattering factors per bonded species, so derive the
+    # bond topology from the structure unless the config supplies its own
+    # atom_species list. Other parameterizations are per-element and would
+    # only pay the extra gemmi pass for nothing.
+    _derive_atom_species = (
+        config.scattering_factors == "shtyrov" and config.atom_species is None
+    )
+    pdb = PDB(
+        config.pdb_source,
+        assembly=config.assembly,
+        pdb_cache_dir=config.pdb_cache_dir,
+        compute_atom_species=_derive_atom_species,
+        readd_hydrogens=config.readd_hydrogens,
+        monomer_library_path=config.monomer_library_path,
+    )
+    if not build:
+        return pdb, torch.zeros(config.n_pixels, config.n_pixels, config.n_pixels)
+    pb = PotentialBuilder(
+        config.n_pixels,
+        pixel_size,
+        pdb.atomic_numbers,
+        parameterization=config.scattering_factors,
+        conv_backend=config.conv_backend,
+        atom_species=config.atom_species or pdb.atom_species,
+        shtyrov_params_path=config.shtyrov_params_path,
+        rcut=config.rcut,
+        b_factors=pdb.b_factors if config.use_deposited_bfactors else None,
+        periodic=config.periodic,
+    ).to("cpu")
+    with torch.no_grad():
+        V = pb(pdb.coordinates, method=config.potential_method).clone()
+    if len(_POTENTIAL_CACHE) >= _POTENTIAL_CACHE_MAX:
+        _POTENTIAL_CACHE.pop(next(iter(_POTENTIAL_CACHE)))
+    _POTENTIAL_CACHE[key] = (pdb, V)
+    return pdb, V
+
+
 def run_particle_stack(config: ParticleStackConfig) -> None:
     """
     Build a scattering potential, sample poses/CTF/dose, simulate a cryo-EM
@@ -113,18 +191,6 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
     # bond topology from the structure unless the config supplies its own
     # atom_species list. Other parameterizations are per-element and would
     # only pay the extra gemmi pass for nothing.
-    _derive_atom_species = (
-        config.scattering_factors == "shtyrov" and config.atom_species is None
-    )
-    pdb = PDB(
-        config.pdb_source,
-        assembly=config.assembly,
-        pdb_cache_dir=config.pdb_cache_dir,
-        compute_atom_species=_derive_atom_species,
-        readd_hydrogens=config.readd_hydrogens,
-        monomer_library_path=config.monomer_library_path,
-    )
-
     # pixel_size/voltage/alpha come from the dataset when cs_path/star_path is
     # set -- extract once, up front, since PotentialBuilder below needs the
     # resolved pixel_size (matches ImageGeneratorFromCoordinates' notebook
@@ -159,23 +225,7 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
     # the predict loop starts, which broadcasts rank 0's real buffer values
     # (V is a registered buffer) to every rank -- so building it per-rank would
     # just be wasted, redundant compute.
-    if is_main:
-        pb = PotentialBuilder(
-            config.n_pixels,
-            pixel_size,
-            pdb.atomic_numbers,
-            parameterization=config.scattering_factors,
-            conv_backend=config.conv_backend,
-            atom_species=config.atom_species or pdb.atom_species,
-            shtyrov_params_path=config.shtyrov_params_path,
-            rcut=config.rcut,
-            b_factors=pdb.b_factors if config.use_deposited_bfactors else None,
-            periodic=config.periodic,
-        ).to("cpu")
-        with torch.no_grad():
-            V = pb(pdb.coordinates, method=config.potential_method).clone()
-    else:
-        V = torch.zeros(config.n_pixels, config.n_pixels, config.n_pixels)
+    pdb, V = _structure_and_potential(config, pixel_size, build=is_main)
 
     # --- Sampling poses, defocus, and translations ---
     if is_main:

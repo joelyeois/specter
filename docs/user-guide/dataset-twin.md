@@ -47,11 +47,14 @@ specter match particles \
    pixel size and frame count at constant occupancy; the radiation-damage
    envelope from the dose and voltage. Nothing in this step is fitted.
 3. **Probes.** Ice thickness and neighbour spacing are the two quantities
-   the images have to supply. Each candidate is rendered at a hundred
-   particles and scored on the background variance outside the particle
-   against the experiment.
-4. **Comparison at matched poses.** Two seeds at the chosen settings against
-   the experiment: the signal-to-noise ratio of each stack per frequency
+   the images have to supply. Each candidate is rendered at 64 particles
+   and scored on the background variance outside the particle against the
+   experiment. The probes and the pose check run at a box Fourier-cropped
+   by two, against the images cropped the same way, since what they measure
+   lies below 10 Å; the candidates render concurrently in worker
+   processes.
+4. **Comparison at matched poses.** Two seeds at the chosen settings, at
+   the native box, against the experiment: the signal-to-noise ratio of each stack per frequency
    band, the twin test, and the screens for fixed patterns and background
    mismatch. A clearly positive residual envelope is applied as a B-factor
    and the comparison rerun once.
@@ -59,7 +62,9 @@ specter match particles \
    with `--write_stack N` a stack of `N` particles simulated from the
    matched config.
 
-About five minutes on one GPU at a 256 px box; the full stack is extra.
+Under three minutes on one GPU at a 256 px box, and under two with four
+GPUs named in `--device`; the two-seed comparison at the native box is most
+of it. The full stack is extra.
 
 ## Reading the report
 
@@ -102,9 +107,15 @@ report the mismatch it cannot close.
 
 ## Limitations
 
-- The refinement file supplies the box and pixel size; every probe
-  simulates at that box. Above about 512 px, Fourier-crop the stack first
-  and pass it as `--images_path`.
+- The refinement file supplies the box and pixel size. The probes run at a
+  box Fourier-cropped by `probe_bin` (default 2, capped so the probe pixel
+  stays at or below 5 Å), but the final two-seed comparison simulates at
+  the native box. Above about 512 px, Fourier-crop the stack first and pass
+  it as `--images_path`.
+- Probe simulations are dealt round-robin over the devices named by
+  `device`, one worker process per device by default (`probe_workers`).
+  Naming several devices (`--device 0,1,2,3`) is what shortens a run;
+  extra processes on one GPU are time-sliced and gain nothing.
 - Only detectors with a calibrated exclusion radius get a coincidence
   term; the others get zero and a warning. Only detectors with a bundled
   MTF get one.

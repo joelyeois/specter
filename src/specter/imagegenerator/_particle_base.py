@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import contextlib
+
 import torch
 
 from specter import logger
 
+from ..cpu_threads import limited_cpu_threads
 from ..ice import IceBank
 from ..ice._blend import IceSlabBlender
 from ..potential import (
@@ -189,6 +192,19 @@ class ParticleGeneratorBase(BaseImager):
         images : torch.Tensor
             Simulated detector images.
         """
+        # With the volume on the device, every CPU tensor op left in the
+        # batch is a small one (tile placement, crop extraction, per-frame
+        # detector bookkeeping), and each pays torch's per-op sync cost in
+        # proportion to the pool. Capping once here also spares the scoped
+        # caps inside (crowd insertion, ice tiling, Poisson-disk sampling)
+        # their ~12 ms pool resize each, which at 64 x 2 resizes per batch
+        # was a third of a 256 px batch. A CPU run keeps the full pool for
+        # its multislice and blur, and caps only the crowd loop below.
+        cap = limited_cpu_threads() if V.is_cuda else contextlib.nullcontext()
+        with cap:
+            return self._process_volume(V, idx)
+
+    def _process_volume(self, V: torch.Tensor, idx: torch.Tensor | int) -> torch.Tensor:
         if hasattr(self, "crowd"):
             if self.verbose:
                 logger.info("Adding crowding molecules to volume")
@@ -204,7 +220,13 @@ class ParticleGeneratorBase(BaseImager):
             # an alias made before the move would be split again by it.
             if self.crowd.V is not self.V:
                 self.crowd.V = self.V
-            with torch.no_grad():
+            # One thread cap for the whole batch. Each duplicate insertion
+            # caps the pool itself, but resizing a 128-thread pool costs
+            # ~12 ms each way, and per chunk that was 21 s of a 28 s
+            # 64-particle run at 128 px (3.5x the simulation). Under this
+            # outer cap the inner ones find the pool already small and do
+            # nothing.
+            with torch.no_grad(), limited_cpu_threads():
                 for i in range(len(V)):
                     self.crowd(into=V[i])
 

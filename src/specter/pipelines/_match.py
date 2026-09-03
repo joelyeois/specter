@@ -20,21 +20,28 @@ Stages
 3. Probes: ice thickness and neighbour spacing are the two quantities the
    images have to supply. Each candidate is rendered at ``n_probe`` particles
    and scored on the background variance outside the particle against the
-   experiment.
-4. Battery: two seeds at the chosen settings, compared with the experiment
-   at matched poses. A clearly positive residual envelope is applied as a
-   B-factor and the battery is rerun once.
+   experiment. Probes (and the pose check) run at a box Fourier-cropped by
+   ``probe_bin``, against the images cropped the same way, since what they
+   measure lives below 10 Å; candidates render concurrently in
+   ``probe_workers`` processes.
+4. Battery: two seeds at the chosen settings, at the native box, compared
+   with the experiment at matched poses. A clearly positive residual
+   envelope is applied as a B-factor and the battery is rerun once.
 5. Output: ``matched.toml`` for `specter simulate particles`, a Markdown and
    PNG report, and optionally a full stack.
 """
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
+import io
 import logging
 import math
+import multiprocessing as mp
 import os
 import time
+from concurrent.futures import ProcessPoolExecutor
 from typing import Any
 
 import mrcfile
@@ -42,7 +49,9 @@ import numpy as np
 import torch
 
 import specter
+from specter.arrays import fourier_crop
 from specter.config import MatchConfig, ParticleStackConfig, validate_config
+from specter.cpu_threads import SMALL_OP_THREADS
 from specter.detectors import (
     EXCLUSION_RADIUS_PX,
     HARDWARE_FRAME_RATE_HZ,
@@ -69,11 +78,24 @@ from specter.match._metadata import recorded_box, rescale_metadata
 from specter.match._report import DerivedValue
 from specter.pdb import PDB
 
-from ._common import _console, _format_elapsed, _section, _tracked_output_dir
+from ._common import (
+    _console,
+    _format_elapsed,
+    _parse_device_pool,
+    _section,
+    _tracked_output_dir,
+)
 from ._particles import run_particle_stack
 
 #: Detectors that count without coincidence loss at cryo-EM rates.
 _NO_COINCIDENCE = {"perfect"}
+
+#: Coarsest pixel a probe may be binned to, in Angstrom. The pose check
+#: correlates 60-15 Å and the probes score background variance in wide
+#: annuli; past a 10 Å Nyquist both lose what they measure.
+_MAX_PROBE_PIXEL_A = 5.0
+#: Smallest box a probe may be binned to.
+_MIN_PROBE_BOX = 32
 
 
 def _metadata_kwargs(config: MatchConfig) -> dict[str, str]:
@@ -91,27 +113,163 @@ def _read_stack(path: str) -> torch.Tensor:
         return torch.as_tensor(np.asarray(m.data, dtype=np.float32).copy())
 
 
-def _simulate(
-    config: MatchConfig,
+def _job(
     base: dict[str, Any],
-    probe_dir: str,
+    out_dir: str,
     name: str,
     n: int,
     seed: int,
     **overrides: Any,
-) -> torch.Tensor:
-    """Render ``n`` particles through `run_particle_stack` and return them."""
+) -> dict[str, Any]:
+    """The `ParticleStackConfig` kwargs for one simulation of ``n`` particles."""
     kwargs = dict(base)
     kwargs.update(overrides)
-    cfg = ParticleStackConfig(
-        n_particles=n,
-        seed=seed,
-        output_dir=probe_dir,
-        filename=name,
-        **kwargs,
-    )
-    run_particle_stack(cfg)
-    return _read_stack(os.path.join(probe_dir, f"{name}.mrcs"))
+    kwargs.update(n_particles=n, seed=seed, output_dir=out_dir, filename=name)
+    return kwargs
+
+
+def _simulate_job(
+    kwargs: dict[str, Any], log_path: str | None = None, threads: int | None = None
+) -> str:
+    """
+    Render one stack through `run_particle_stack` and return its path.
+
+    Runs in the calling process or in a probe worker. A worker sends the
+    simulation's own console output to ``log_path``, so concurrent probes do
+    not interleave on the terminal, and mirrors the parent's CPU thread cap.
+    """
+    if threads is not None:
+        torch.set_num_threads(threads)
+    cfg = ParticleStackConfig(**kwargs)
+    if log_path is None:
+        run_particle_stack(cfg)
+    else:
+        with (
+            open(log_path, "w") as fh,
+            contextlib.redirect_stdout(fh),
+            contextlib.redirect_stderr(fh),
+        ):
+            specter.set_verbosity(logging.INFO)
+            run_particle_stack(cfg)
+    return os.path.join(kwargs["output_dir"], f"{kwargs['filename']}.mrcs")
+
+
+def _warm_job(kwargs: dict[str, Any], threads: int) -> None:
+    """Parse the structure and build its potential into a worker's cache."""
+    from ._particles import _structure_and_potential
+
+    torch.set_num_threads(threads)
+    cfg = ParticleStackConfig(**kwargs)
+    if cfg.cs_path is not None:
+        pixel_size = float(
+            extract_parameters_from_csfile(cfg.cs_path, n_particles=1)[1]
+        )
+    elif cfg.star_path is not None:
+        pixel_size = float(
+            extract_parameters_from_starfile(cfg.star_path, n_particles=1)[1]
+        )
+    else:
+        pixel_size = cfg.pixel_size
+    with contextlib.redirect_stdout(io.StringIO()):
+        _structure_and_potential(cfg, pixel_size, build=True)
+
+
+class _ProbeRunner:
+    """
+    Run probe simulations, concurrently across worker processes when asked.
+
+    Processes rather than threads, because `specter.seed` and torch's RNG
+    are process-global and two probes in one process would share a stream.
+    Every worker keeps `run_particle_stack`'s per-process potential cache,
+    so a structure is parsed and rendered once per worker rather than once
+    per probe. Jobs are dealt round-robin over the devices ``device`` names.
+    """
+
+    def __init__(self, device: str, workers: int) -> None:
+        self.devices = _parse_device_pool(device)
+        self.workers = len(self.devices) if workers <= 0 else int(workers)
+        self._pool: ProcessPoolExecutor | None = None
+        # Workers share the host: each gets its slice of the parent's thread
+        # pool, so four cold potential builds do not run 4 x 128 threads.
+        self.threads = max(SMALL_OP_THREADS, torch.get_num_threads() // self.workers)
+        if self.workers > 1:
+            self._pool = ProcessPoolExecutor(
+                max_workers=self.workers, mp_context=mp.get_context("spawn")
+            )
+
+    def warm(self, kwargs: dict[str, Any]) -> None:
+        """
+        Build the structure's potential in every worker, concurrently.
+
+        A worker's first job otherwise pays the parse and build while the
+        others wait on it in the same stage; warmed up front, they overlap.
+        """
+        if self._pool is None:
+            return
+        futures = [
+            self._pool.submit(_warm_job, dict(kwargs), self.threads)
+            for _ in range(self.workers)
+        ]
+        for f in futures:
+            f.result()
+
+    def __enter__(self) -> _ProbeRunner:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        if self._pool is not None:
+            self._pool.shutdown(wait=True)
+            self._pool = None
+
+    def run(self, jobs: list[dict[str, Any]]) -> list[torch.Tensor]:
+        """Render every job and return the stacks in the same order."""
+        for i, job in enumerate(jobs):
+            job["device"] = self.devices[i % len(self.devices)]
+        if self._pool is None:
+            paths = [_simulate_job(job) for job in jobs]
+        else:
+            futures = [
+                self._pool.submit(
+                    _simulate_job,
+                    job,
+                    os.path.join(job["output_dir"], f"{job['filename']}.log"),
+                    self.threads,
+                )
+                for job in jobs
+            ]
+            paths = [f.result() for f in futures]
+        return [_read_stack(p) for p in paths]
+
+
+def _probe_bin(requested: int, box: int, pixel_size: float) -> int:
+    """The Fourier-crop factor the probes use: the request, capped by the limits above."""
+    b = max(1, int(requested))
+    while b > 1 and (pixel_size * b > _MAX_PROBE_PIXEL_A or box // b < _MIN_PROBE_BOX):
+        b -= 1
+    return b
+
+
+def _bin_images(
+    images: torch.Tensor, pixel_size: float, box_p: int
+) -> tuple[torch.Tensor, float]:
+    """
+    Fourier-crop a stack to ``box_p`` px, keeping each image's own standard deviation.
+
+    The experiment's normalisation is whatever its refinement applied, and the
+    probes are scored against it as is; cropping removes the noise power above
+    the new Nyquist, so each image is rescaled back to the deviation it had.
+    """
+    box = int(images.shape[-1])
+    if box_p == box:
+        return images, pixel_size
+    std = images.std(dim=(-2, -1), keepdim=True)
+    cropped, new_px = fourier_crop(images, pixel_size, pixel_size * box / box_p)
+    if int(cropped.shape[-1]) != box_p:
+        raise RuntimeError(
+            f"Fourier crop to {box_p} px produced {tuple(cropped.shape)}"
+        )
+    cropped = cropped * (std / cropped.std(dim=(-2, -1), keepdim=True).clamp_min(1e-8))
+    return cropped.contiguous(), pixel_size * box / box_p
 
 
 def _profile_distance(sim: torch.Tensor, exp: torch.Tensor, first_bin: int) -> float:
@@ -143,7 +301,10 @@ def run_match(config: MatchConfig) -> MatchReport:
     t_start = time.perf_counter()
     seed = config.seed if config.seed is not None else 0
 
-    with _tracked_output_dir(config, "match") as out_dir:
+    with (
+        _tracked_output_dir(config, "match") as out_dir,
+        _ProbeRunner(config.device, config.probe_workers) as runner,
+    ):
         os.makedirs(out_dir, exist_ok=True)
         probe_dir = os.path.join(out_dir, "probes")
         os.makedirs(probe_dir, exist_ok=True)
@@ -196,9 +357,29 @@ def run_match(config: MatchConfig) -> MatchReport:
         )
         if box > 512:
             _console.print(
-                "[yellow]Box is larger than 512 px; every probe simulates at this size. "
-                "A Fourier-cropped stack passed as --images_path is faster.[/yellow]"
+                "[yellow]Box is larger than 512 px; the final two-seed comparison simulates "
+                "at this size. A Fourier-cropped stack passed as --images_path is faster.[/yellow]"
             )
+
+        # Probes measure the pose alignment (60-15 Å) and the background
+        # variance (wide annuli): nothing above 10 Å. They render at a
+        # Fourier-cropped box against the images cropped the same way, with a
+        # metadata copy rescaled to that box; the battery keeps the native box.
+        bin_ = _probe_bin(config.probe_bin, box, pixel_size)
+        box_p = box // bin_ if bin_ > 1 else box
+        box_p -= box_p % 2
+        exp_p, pixel_size_p = _bin_images(exp, pixel_size, box_p)
+        probe_geometry: dict[str, Any] = {"n_pixels": box_p}
+        if box_p != box:
+            ext = os.path.splitext(config.metadata_path)[1]
+            probe_meta = os.path.join(out_dir, f"metadata_probe{ext}")
+            key, path = next(iter(meta.items()))
+            rescale_metadata(path, box_p, probe_meta, current_box=box)
+            probe_geometry[key] = probe_meta
+        _console.print(
+            f"probes: {config.n_probe} particles at {box_p} px / {pixel_size_p:.3f} Å "
+            f"({bin_}x binned), {runner.workers} worker(s) on {', '.join(runner.devices)}"
+        )
 
         pdb = PDB(
             config.pdb_source,
@@ -232,21 +413,28 @@ def run_match(config: MatchConfig) -> MatchReport:
             **meta,
         )
 
+        runner.warm(_job(base, probe_dir, "warm", 1, seed, **probe_geometry))
+
         # ---------------------------------------------------------------- 2
         _section("Checking that the poses are aligned to the model")
-        pose_stack = _simulate(
-            config,
-            base,
-            probe_dir,
-            "pose_check",
-            config.n_probe,
-            seed,
-            noise_model="none",
-            ice_model="none",
-            crowd_min_distance=0,
-            dose_envelope=False,
+        exp_probe = exp_p[: config.n_probe]
+        (pose_stack,) = runner.run(
+            [
+                _job(
+                    base,
+                    probe_dir,
+                    "pose_check",
+                    config.n_probe,
+                    seed,
+                    **probe_geometry,
+                    noise_model="none",
+                    ice_model="none",
+                    crowd_min_distance=0,
+                    dose_envelope=False,
+                )
+            ]
         )
-        pose = matched_index_correlation(pose_stack, exp[: config.n_probe], pixel_size)
+        pose = matched_index_correlation(pose_stack, exp_probe, pixel_size_p)
         report = MatchReport(pose=pose, pixel_size=pixel_size)
         _console.print(
             f"matched {pose.matched:.3f} vs shuffled {pose.shuffled:.3f}, "
@@ -261,7 +449,7 @@ def run_match(config: MatchConfig) -> MatchReport:
                 "Align 3D of the map against the model and re-extract the particles from it), "
                 "or pdb_source is not the structure in the images. No parameter was derived."
             )
-            render_report(report, pose_stack, exp[: config.n_probe], out_dir)
+            render_report(report, pose_stack, exp_probe, out_dir)
             _write_matched_toml(out_dir, base, report, complete=False)
             return report
 
@@ -276,6 +464,7 @@ def run_match(config: MatchConfig) -> MatchReport:
         report.derived.append(
             DerivedValue("dose", config.dose, "metadata", "e-/Å² per movie")
         )
+        occ: float | None = None  # coincidence occupancy, when a detector is calibrated
         if det == "unknown":
             report.warnings.append(
                 "detector_model is unknown: no MTF, DQE(0) or coincidence loss applied. "
@@ -357,27 +546,45 @@ def run_match(config: MatchConfig) -> MatchReport:
         elif config.energy_filter is None:
             report.warnings.append("energy_filter not stated; recorded as unknown.")
         base.update(detector_model=detector_model, coincidence_radius=cr)
+        # The same occupancy expressed in the probes' coarser pixel.
+        cr_p = (
+            coincidence_radius_for_simulation(
+                occ, config.dose, pixel_size_p, config.n_frames
+            )
+            if occ is not None
+            else 0.0
+        )
+        probe_base: dict[str, Any] = {
+            **base,
+            **probe_geometry,
+            "coincidence_radius": cr_p,
+        }
 
         # ---------------------------------------------------------------- 4
         _section("Probing ice thickness and neighbour spacing against the images")
-        exp_probe = exp[: config.n_probe]
-        radius_px = 0.5 * diameter / pixel_size
+        radius_px = 0.5 * diameter / pixel_size_p
         first_bin = int(math.ceil(radius_px / 20.0))  # annuli are 20 px wide
-        scores: list[tuple[float, float]] = []
-        for ice in config.ice_candidates:
-            stack = _simulate(
-                config,
-                base,
-                probe_dir,
-                f"probe_ice{ice:g}",
-                config.n_probe,
-                seed,
-                ice_thickness=ice,
-            )
-            scores.append((float(ice), _profile_distance(stack, exp_probe, first_bin)))
+        stacks = runner.run(
+            [
+                _job(
+                    probe_base,
+                    probe_dir,
+                    f"probe_ice{ice:g}",
+                    config.n_probe,
+                    seed,
+                    ice_thickness=ice,
+                )
+                for ice in config.ice_candidates
+            ]
+        )
+        scores: list[tuple[float, float]] = [
+            (float(ice), _profile_distance(stack, exp_probe, first_bin))
+            for ice, stack in zip(config.ice_candidates, stacks, strict=True)
+        ]
         report.probe_scores["ice_thickness"] = scores
         ice_best = min(scores, key=lambda t: t[1])[0]
         base.update(ice_thickness=ice_best)
+        probe_base.update(ice_thickness=ice_best)
         report.derived.append(
             DerivedValue(
                 "ice_thickness",
@@ -387,19 +594,23 @@ def run_match(config: MatchConfig) -> MatchReport:
             )
         )
 
-        scores = []
-        for mult in config.crowd_candidates:
-            spacing = 0 if mult == 0 else mult * diameter
-            stack = _simulate(
-                config,
-                base,
-                probe_dir,
-                f"probe_crowd{mult:g}",
-                config.n_probe,
-                seed,
-                crowd_min_distance=spacing,
-            )
-            scores.append((float(mult), _profile_distance(stack, exp_probe, first_bin)))
+        stacks = runner.run(
+            [
+                _job(
+                    probe_base,
+                    probe_dir,
+                    f"probe_crowd{mult:g}",
+                    config.n_probe,
+                    seed,
+                    crowd_min_distance=0 if mult == 0 else mult * diameter,
+                )
+                for mult in config.crowd_candidates
+            ]
+        )
+        scores = [
+            (float(mult), _profile_distance(stack, exp_probe, first_bin))
+            for mult, stack in zip(config.crowd_candidates, stacks, strict=True)
+        ]
         report.probe_scores["crowd_multiple"] = scores
         crowd_best = min(scores, key=lambda t: t[1])[0]
         crowd_min_distance = 0 if crowd_best == 0 else crowd_best * diameter
@@ -418,12 +629,29 @@ def run_match(config: MatchConfig) -> MatchReport:
         # ---------------------------------------------------------------- 5
         _section("Comparing two seeds with the experiment at matched poses")
         exp_b = exp[: config.n_battery]
-        sim_a = _simulate(
-            config, base, probe_dir, "battery_seed0", config.n_battery, seed
-        )
-        sim_b = _simulate(
-            config, base, probe_dir, "battery_seed1", config.n_battery, seed + 1
-        )
+
+        def battery(suffix: str) -> tuple[torch.Tensor, torch.Tensor]:
+            a, b = runner.run(
+                [
+                    _job(
+                        base,
+                        probe_dir,
+                        f"battery_seed0{suffix}",
+                        config.n_battery,
+                        seed,
+                    ),
+                    _job(
+                        base,
+                        probe_dir,
+                        f"battery_seed1{suffix}",
+                        config.n_battery,
+                        seed + 1,
+                    ),
+                ]
+            )
+            return a, b
+
+        sim_a, sim_b = battery("")
         snr = matched_pose_snr(sim_a, sim_b, exp_b, pixel_size)
         bfactor: float | None = None
         if math.isfinite(snr.residual_bfactor) and snr.residual_bfactor > 20.0:
@@ -432,12 +660,7 @@ def run_match(config: MatchConfig) -> MatchReport:
             _console.print(
                 f"residual envelope B = {bfactor:.0f} Å²; applying it and re-rendering"
             )
-            sim_a = _simulate(
-                config, base, probe_dir, "battery_seed0_b", config.n_battery, seed
-            )
-            sim_b = _simulate(
-                config, base, probe_dir, "battery_seed1_b", config.n_battery, seed + 1
-            )
+            sim_a, sim_b = battery("_b")
             snr = matched_pose_snr(sim_a, sim_b, exp_b, pixel_size)
         report.derived.append(
             DerivedValue(
@@ -489,8 +712,16 @@ def run_match(config: MatchConfig) -> MatchReport:
             _section(
                 f"Simulating {config.write_stack} particles with the matched config"
             )
-            _simulate(
-                config, base, out_dir, "matched_particles", config.write_stack, seed + 2
+            # In-process, so its progress shows on the terminal.
+            _simulate_job(
+                _job(
+                    base,
+                    out_dir,
+                    "matched_particles",
+                    config.write_stack,
+                    seed + 2,
+                    device=runner.devices[0],
+                )
             )
 
         _log_to_job(out_dir, report)

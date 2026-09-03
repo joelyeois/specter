@@ -37,13 +37,15 @@ def recorded_box(metadata_path: str) -> int | None:
     return None
 
 
-def rescale_metadata(metadata_path: str, new_box: int, out_path: str) -> float:
+def rescale_metadata(
+    metadata_path: str, new_box: int, out_path: str, current_box: int | None = None
+) -> float:
     """
     Write a copy of ``metadata_path`` whose pixel size describes images
     Fourier-cropped (or padded) to ``new_box`` pixels.
 
     The physical field of view is unchanged, so the pixel size scales by
-    ``recorded_box / new_box`` and every shift expressed in pixels scales the
+    ``current_box / new_box`` and every shift expressed in pixels scales the
     other way; shifts in Ångström are untouched.
 
     Parameters
@@ -54,13 +56,17 @@ def rescale_metadata(metadata_path: str, new_box: int, out_path: str) -> float:
         Box size of the images actually in hand.
     out_path : str
         Where to write the rescaled copy (same format as the input).
+    current_box : int, optional
+        The box the file's pixel size currently describes. Unset reads it
+        from the file (`recorded_box`), which a passthrough without image
+        references cannot supply.
 
     Returns
     -------
     float
         The new pixel size in Å.
     """
-    box = recorded_box(metadata_path)
+    box = current_box if current_box is not None else recorded_box(metadata_path)
     if box is None:
         raise ValueError(f"{metadata_path} records no box size; cannot rescale it")
     factor = box / new_box

@@ -374,6 +374,43 @@ def test_process_volume_keeps_no_cpu_copy_of_the_crowd_canvas():
     assert not hasattr(model, "volumes")
 
 
+def test_process_volume_caps_cpu_threads_once_per_batch(monkeypatch):
+    """Resizing a 128-thread pool costs ~12 ms each way, and the per-chunk cap
+    inside `insert_particles_into_micrograph` paid it 778 times for 64 particles
+    (21 s of a 28 s run). `process_volume` caps once for the whole batch, so the
+    inner caps find the pool already small: the full pool is restored exactly once."""
+    from specter.cpu_threads import SMALL_OP_THREADS
+
+    model = _tiny_generator(pad_fft=True, ice_model=None)
+    model.crowd = CrowdWithDuplicates(
+        model.V,
+        model.pixel_size,
+        20.0,
+        nxy_out=model.pad_nxy,
+        nz_out=model.nz,
+        progressbars=False,
+    )
+    original = torch.get_num_threads()
+    real_set = torch.set_num_threads
+    calls: list[int] = []
+
+    def counting_set(n: int) -> None:
+        calls.append(n)
+        real_set(n)
+
+    real_set(max(original, 2 * SMALL_OP_THREADS))
+    monkeypatch.setattr(torch, "set_num_threads", counting_set)
+    try:
+        with torch.no_grad():
+            model(torch.tensor([0, 1]))
+    finally:
+        monkeypatch.undo()
+        real_set(original)
+    assert model.crowd.N > 1
+    restores = [n for n in calls if n > SMALL_OP_THREADS]
+    assert restores == [max(original, 2 * SMALL_OP_THREADS)], calls
+
+
 # ---------------------------------------------------------------------------
 # poisson-disk
 # ---------------------------------------------------------------------------

@@ -20,8 +20,8 @@ from .simulate import CONTEXT_SETTINGS
 _MATCH_PARTICLE_GROUPS: list[tuple[str, list[str]]] = [
     ("Inputs", ["metadata_path", "images_path", "pdb_source", "assembly"]),
     ("Acquisition", ["detector_model", "dose", "dose_rate", "energy_filter"]),
-    ("Probing", ["n_probe", "n_battery", "write_stack"]),
-    ("Compute", ["device", "seed"]),
+    ("Probing", ["n_probe", "n_battery", "probe_bin", "write_stack"]),
+    ("Compute", ["device", "probe_workers", "seed"]),
     ("Output & job tracking", ["output_dir", "project", "job_id"]),
     ("Advanced", ["pdb_cache_dir", "monomer_library_path", "n_frames"]),
 ]

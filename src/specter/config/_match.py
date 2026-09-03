@@ -55,8 +55,13 @@ class MatchConfig:
     energy_filter: bool | None = None  # None = not stated
 
     # --- Probing ---
-    n_probe: int = 100  # particles per probe simulation
+    n_probe: int = 64  # particles per probe simulation
     n_battery: int = 200  # particles per seed in the final comparison
+    # Probes (pose check, ice, neighbours) render at the box Fourier-cropped
+    # by this factor, against the experimental images cropped the same way;
+    # the final two-seed comparison always runs at the native box. Capped so
+    # the probe pixel stays at or below 5 A and the box at or above 32 px.
+    probe_bin: int = 2
     # Candidate grids, config-only (a flag cannot carry a list). Ice thickness
     # in Angstrom (0 = the box minimum); neighbour spacing as a multiple of the
     # structure's maximum diameter (0 = no neighbours).
@@ -70,6 +75,13 @@ class MatchConfig:
 
     # --- Compute ---
     device: str = "cuda"
+    # Probe simulations run concurrently in this many worker processes,
+    # round-robin over the devices `device` names. 0 is one per device: two
+    # processes sharing one GPU are time-sliced and finish later than the
+    # same two runs back to back (91 s against 62 s for the two-seed
+    # comparison on EMPIAR-11377), so a single device runs everything
+    # in-process, one after another.
+    probe_workers: int = 0
     seed: int | None = None
 
     # --- Output & job tracking ---
@@ -110,9 +122,18 @@ MATCH_HELP: dict[str, str] = {
     "spacing candidates).",
     "n_battery": "Particles per seed in the final two-seed comparison that "
     "the report is computed from.",
+    "probe_bin": "Fourier-crop factor for the probe simulations and the "
+    "images they are scored against; the final two-seed comparison always "
+    "runs at the native box. Capped so the probe pixel stays at or below "
+    "5 Angstrom and the box at or above 32 px. 1 probes at the native box.",
     "write_stack": "After the report, simulate this many particles with the "
     "matched config (e.g. for a mixed 2D classification). 0 skips it.",
-    "device": "Device to use: cpu | cuda | cuda:0.",
+    "device": "Device(s) to use: cpu | cuda | cuda:0 | 0,1. Several devices "
+    "share the probe simulations between them.",
+    "probe_workers": "Worker processes that run probe simulations "
+    "concurrently, dealt round-robin over the device(s). 0 is one per device, "
+    "which on a single device runs every simulation in-process, one after "
+    "another; processes sharing one GPU are time-sliced and gain nothing.",
     "seed": "RNG seed for the probe and battery simulations.",
     "output_dir": "Directory to write matched.toml and the report under when "
     "untracked; the root of the numbered job tree when --project or --job_id "

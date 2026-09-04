@@ -1304,3 +1304,85 @@ def test_sibling_generators_agree_on_their_shared_ice_defaults(
     )
     # ... and that default is the bulk-material one, not PotentialBuilder's.
     assert from_coords.icemaker.parameterization == "kirkland"
+
+
+@pytest.mark.parametrize("ice_thickness", [0.0, 200.0, 2000.0])
+def test_crowding_slab_does_not_follow_ice_thickness(
+    small_volume, ctf_params, ice_thickness
+):
+    """
+    `ice_thickness` sizes the canvas and the ice, not the neighbour slab.
+
+    It is a contrast knob: raising it lowers contrast and deepens the solvent
+    background. Letting it also deepen `crowd_max_distance_z` would make one
+    field change both the imaging conditions and the specimen, and it stacked
+    ever more neighbours above each other as the ice grew -- 6 duplicates at
+    0 A against 46 at 2000 A, measured through `run_particle_stack` at
+    128 px / 2 A. The slab is the template's own depth instead, which is what
+    `nz * pixel_size` already evaluated to whenever the ice fitted the box, so
+    only the growth is gone. `MicrographGenerator` and
+    `MicrographSpecimenGenerator` do scale with `nz`, deliberately.
+    """
+    gen = ImageGenerator(
+        scattering_potential=small_volume,
+        pixel_size=2.0,
+        quaternions=torch.tensor([[1.0, 0.0, 0.0, 0.0]]),
+        translations=torch.tensor([[0.0, 0.0]]),
+        ctf_params=ctf_params,
+        voltage=300.0,
+        dose_per_angstrom=2.0,
+        ice_model=None,
+        ice_thickness=ice_thickness,
+        crowd_min_distance=60.0,
+        verbose=False,
+        progressbars=False,
+    )
+    assert gen.crowd.max_distance_z == small_volume.shape[0] * 2.0
+    # The canvas itself still grows, or the knob would do nothing at all.
+    assert gen.nz == max(small_volume.shape[0], int(ice_thickness // 2.0))
+
+
+def test_crowding_slab_from_coordinates_does_not_follow_ice_thickness(
+    small_coords, ctf_params
+):
+    """The coordinate-driven generator shares the rule; its template is nxy deep."""
+    coords, atomic_numbers = small_coords
+    slabs = []
+    for ice_thickness in (0.0, 2000.0):
+        gen = ImageGeneratorFromCoordinates(
+            coordinates=coords,
+            atomic_numbers=atomic_numbers,
+            nxy=32,
+            pixel_size=2.0,
+            quaternions=torch.tensor([[1.0, 0.0, 0.0, 0.0]]),
+            translations=torch.tensor([[0.0, 0.0]]),
+            ctf_params=ctf_params,
+            voltage=300.0,
+            dose_per_angstrom=2.0,
+            ice_model=None,
+            ice_thickness=ice_thickness,
+            crowd_min_distance=60.0,
+            verbose=False,
+        )
+        slabs.append(gen.crowd.max_distance_z)
+    assert slabs == [32 * 2.0, 32 * 2.0]
+
+
+def test_crowding_slab_is_still_settable(small_volume, ctf_params):
+    """An explicit `crowd_max_distance_z` overrides the template-depth default."""
+    gen = ImageGenerator(
+        scattering_potential=small_volume,
+        pixel_size=2.0,
+        quaternions=torch.tensor([[1.0, 0.0, 0.0, 0.0]]),
+        translations=torch.tensor([[0.0, 0.0]]),
+        ctf_params=ctf_params,
+        voltage=300.0,
+        dose_per_angstrom=2.0,
+        ice_model=None,
+        ice_thickness=2000.0,
+        crowd_min_distance=60.0,
+        crowd_max_distance_z=500.0,
+        verbose=False,
+        progressbars=False,
+    )
+    assert gen.crowd.max_distance_z == 500.0

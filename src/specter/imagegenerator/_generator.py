@@ -101,7 +101,17 @@ class ImageGeneratorFromCoordinates(ParticleGeneratorBase):
     crowd_min_distance : float, optional
         Crowding minimum distance.
     crowd_max_distance_z : float, optional
-        Crowding maximum Z distance.
+        Depth in Å of the slab crowding duplicates are placed in. Defaults to
+        the template's own depth plus one ``crowd_min_distance``
+        (:class:`~specter.crowding.CrowdWithDuplicates`' own fallback), which
+        deliberately does **not** follow ``ice_thickness``: raising that on a
+        particle stack is reaching for lower contrast and more solvent
+        background, not for a denser specimen, so the two stay separate knobs.
+        At 2000 Å of ice the neighbours occupy the middle of the column and
+        the rest is water. `MicrographGenerator` and
+        `MicrographSpecimenGenerator` scale with ``nz`` instead, and should: a
+        micrograph is a specimen, a particle stack is a controlled
+        image-formation experiment.
     crowd_chunk_size : int or None, optional
         Number of crowding volumes rotated per GPU batch. Default 1 (memory-safe).
         Set to ``None`` to rotate all at once (faster but O(N × volume) GPU RAM).
@@ -218,10 +228,14 @@ class ImageGeneratorFromCoordinates(ParticleGeneratorBase):
             lpp_params=lpp_params,
         )
         self.ice_model = ice_model
+        # The TEMPLATE's depth, not `self.nz * pixel_size`: the neighbour slab
+        # must not follow `ice_thickness`. See the constructor docstring. The
+        # two agree until the ice is deeper than the box, which is what makes
+        # this a no-op for every run that was not growing its crowding.
         self.crowd_max_distance_z = (
             crowd_max_distance_z
             if crowd_max_distance_z is not None
-            else self.nz * pixel_size
+            else self.nxy * pixel_size
         )
         self.scattering_model = scattering_model
         self.klim = klim
@@ -434,7 +448,17 @@ class ImageGenerator(ParticleGeneratorBase):
     crowd_min_distance : float, optional
         Crowding minimum distance.
     crowd_max_distance_z : float, optional
-        Crowding maximum Z distance.
+        Depth in Å of the slab crowding duplicates are placed in. Defaults to
+        the template's own depth plus one ``crowd_min_distance``
+        (:class:`~specter.crowding.CrowdWithDuplicates`' own fallback), which
+        deliberately does **not** follow ``ice_thickness``: raising that on a
+        particle stack is reaching for lower contrast and more solvent
+        background, not for a denser specimen, so the two stay separate knobs.
+        At 2000 Å of ice the neighbours occupy the middle of the column and
+        the rest is water. `MicrographGenerator` and
+        `MicrographSpecimenGenerator` scale with ``nz`` instead, and should: a
+        micrograph is a specimen, a particle stack is a controlled
+        image-formation experiment.
     crowd_max_distance_xy : float, optional
         Crowding maximum XY distance. Defaults to ``nxy_out * dx + min_distance``.
     crowd_chunk_size : int or None, optional
@@ -581,10 +605,14 @@ class ImageGenerator(ParticleGeneratorBase):
 
         self.ice_parameterization = ice_parameterization
         self.ice_model = ice_model
+        # The TEMPLATE's depth, not `self.nz * pixel_size`: the neighbour slab
+        # must not follow `ice_thickness`. See the constructor docstring. The
+        # two agree until the ice is deeper than the box, which is what makes
+        # this a no-op for every run that was not growing its crowding.
         self.crowd_max_distance_z = (
             crowd_max_distance_z
             if crowd_max_distance_z is not None
-            else self.nz * pixel_size
+            else volume_nz * pixel_size
         )
         self.scattering_model = scattering_model
         self.klim = klim

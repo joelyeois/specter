@@ -114,7 +114,12 @@ ice_relax_steps = 0              # local MLBOP seam-relaxation steps, only used 
 
 # --- Crowding ---
 # crowd_min_distance = 100.0      # Å, uncomment to crowd particles; defaults to pdb.max_diameter
-# crowd_max_distance_z = 50.0     # Å
+# crowd_max_distance_z = 50.0     # Å, depth of the slab neighbours are placed in.
+                                  # Defaults to the particle box's own depth and
+                                  # deliberately does NOT follow ice_thickness --
+                                  # raising that is a contrast knob, not a
+                                  # specimen-density one, so at 2000 Å of ice the
+                                  # neighbours stay in the middle and the rest is water.
 # crowd_max_distance_xy = 200.0   # Å
 crowd_chunk_size = 1              # duplicate volumes rotated per batch; 1 is both the cheapest
                                   # and the fastest, and peak memory grows linearly with it

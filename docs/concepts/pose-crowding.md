@@ -70,7 +70,18 @@ from each other, across a whole micrograph; see
 sampling density; `crowd_max_distance_z` and an implicit XY bound
 derived from the volume size cap it. `n_points=inf` by default, so
 sampling continues until the box is full rather than stopping at a fixed
-count. `crowd_chunk_size` limits how many duplicate volumes
+count.
+
+Left unset, `crowd_max_distance_z` is the particle box's own depth, and
+it does not follow `ice_thickness`. The two are separate knobs on
+purpose: raising `ice_thickness` lowers contrast and deepens the solvent
+background, and letting it also deepen the neighbour slab would make a
+single field change both the imaging conditions and the specimen. In a
+thick-ice box the neighbours therefore occupy the middle of the column
+and the remainder is water. Set `crowd_max_distance_z` explicitly to
+crowd a deeper slab. `MicrographGenerator` scales its own neighbour slab
+with the volume depth instead, since a micrograph is a specimen rather
+than a controlled single-particle experiment. `crowd_chunk_size` limits how many duplicate volumes
 `CrowdWithDuplicates` rotates per batch, trading GPU memory for speed;
 the default of 1 is the memory-safe choice, and `None` rotates every
 duplicate at once.

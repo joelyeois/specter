@@ -4,7 +4,7 @@ For the underlying physics, see [Ice structure](../concepts/ice.md).
 
 `GradientSKIcemaker` generates amorphous ice by optimising water positions
 against the structure factor $S(k)$ and ML-BOP energy of real low-density
-amorphous ice. That optimisation costs roughly 20 minutes for a
+amorphous ice. That optimisation costs roughly 10 minutes for a
 production-scale cell (see [Cost](#cost)), far too much to repeat per
 simulation. `IceBank` therefore separates the two: it optimises and stores
 each configuration once, and a simulation draws a randomly rotated,
@@ -34,7 +34,9 @@ constrain it:
   sampling: 0.5 Å$^{-1}$ for the bundled `dx = 1.0`. Voxelizing it more
   finely than that will run, but the structure it reports above 0.5
   Å$^{-1}$ was never constrained by the optimisation. Generate at the `dx`
-  you intend to simulate at if the fine structure matters to your result.
+  you intend to simulate at if the fine structure matters to your result;
+  [Cost of a finer voxel size](#cost-of-a-finer-voxel-size) is what that
+  costs.
 
 A third reason is wanting more independent configurations than the
 20 bundled ones, for a large dataset where crop reuse would otherwise become
@@ -62,15 +64,15 @@ it. The [command reference](../api/cli/build.md#specter-build-ice) lists them al
 
 Generating a configuration is expensive, and how expensive depends steeply on
 the cell size. Measured on one NVIDIA L40 at `dx = 1.0` over complete runs
-(`docs-figures/ice_cache_timing.py`):
+(`docs-figures/ice_cache_timing.py --sweep cell`):
 
 | `--n` | cell | water beads | s/step | peak allocated | **peak reserved** | 250 steps |
 |------:|-----:|------------:|-------:|---------------:|------------------:|----------:|
-| 64  | 64 Å  | 8,237   | 0.394 | 0.10 GiB | 0.15 GiB     | 2 min |
-| 96  | 96 Å  | 27,800  | 0.338 | 0.33 GiB | 0.39 GiB     | 1 min |
-| 128 | 128 Å | 65,897  | 0.401 | 0.78 GiB | 0.90 GiB     | 2 min |
-| 192 | 192 Å | 222,403 | 0.774 | 2.56 GiB | 3.15 GiB     | 3 min |
-| 256 | 256 Å | 527,178 | 2.158 | 6.01 GiB | **7.03 GiB** | 9 min |
+| 64  | 64 Å  | 8,237   | 0.361 | 0.10 GiB | 0.15 GiB     | 2 min |
+| 96  | 96 Å  | 27,800  | 0.339 | 0.33 GiB | 0.39 GiB     | 1 min |
+| 128 | 128 Å | 65,897  | 0.416 | 0.77 GiB | 0.91 GiB     | 2 min |
+| 192 | 192 Å | 222,403 | 0.826 | 2.56 GiB | 3.16 GiB     | 3 min |
+| 256 | 256 Å | 527,178 | 2.289 | 6.01 GiB | **7.53 GiB** | 10 min |
 
 **Size a GPU against the reserved column.** Reserved is what the process
 holds from the driver and what a new allocation fails against. Bead count
@@ -85,11 +87,52 @@ falls as the optimiser accumulates curvature history, and peak memory rises
 as local coordination tightens. These figures come from complete runs for
 that reason. The right-hand column extrapolates a full `--n_steps 250`
 budget and is an upper bound, since a run stops as soon as its loss
-plateaus (three of the five sizes above did).
+plateaus (four of the five sizes above did).
+
+Reserved memory is also less repeatable than time. The `n = 256` geometry
+was measured twice, in two separate sweeps: per-step cost agreed to 1.5%
+(2.289 s against 2.323), but reserved peaked at 7.53 GiB in one and 9.80 GiB
+in the other, because the caching allocator's high-water mark depends on what
+the process allocated before. Budget headroom above the table rather than
+matching it exactly.
 
 Absolute times are hardware-specific; re-run the script above rather than
 trusting these numbers on different silicon. The scaling with `n` is the part
 that transfers.
+
+### Cost of a finer voxel size
+
+`--dx` sets the grid the $S(k)$ loss is evaluated on, and every loss
+evaluation transforms that whole grid. Holding `--n` at 256 and varying `--dx`
+therefore changes the physical cell, and with it the bead count, while the
+transform stays the same size
+(`docs-figures/ice_cache_timing.py --sweep dx`):
+
+| `--dx` | cell | water beads | s/step | peak allocated | **peak reserved** | 250 steps |
+|-------:|-----:|------------:|-------:|---------------:|------------------:|----------:|
+| 0.25 Å | 64 Å  | 8,237   | 0.688 | 0.93 GiB | 1.13 GiB | 3 min |
+| 0.50 Å | 128 Å | 65,897  | 0.695 | 1.34 GiB | 1.56 GiB | 3 min |
+| 1.00 Å | 256 Å | 527,178 | 2.323 | 6.95 GiB | 9.80 GiB | 10 min |
+
+The first two rows cost the same despite an eightfold difference in bead
+count: at `n = 256` the grid transform dominates, and the beads are not what
+a step is spent on until there are enough of them. Only the 1.0 Å row, with
+64x the beads of the first, is bead-bound.
+
+What the grid costs on its own is visible by reading the two tables against
+each other, at matched cell size and bead count. A 64 Å cell of 8,237 beads
+costs 0.361 s/step on a 64³ grid and 0.688 s/step on a 256³ one: 64x the
+voxels for 1.9x the time. A 128 Å cell of 65,897 beads costs 0.416 s/step
+against 0.695 s/step, 8x the voxels for 1.7x. So generating at a finer `dx`
+than the cell needs roughly doubles cost per step at these sizes, and raises
+memory in proportion to the grid, rather than scaling with the voxel count
+outright.
+
+A cell small enough to be cheap at 0.25 Å is also too small to serve a
+request without tiling, which is the trade to weigh: the 64 Å cell in the
+first row is a quarter of the bundled library's 256 Å in each dimension.
+Reaching 256 Å at `dx = 0.25` means `--n 1024`, a 64x larger transform than
+any row here.
 
 For a real-world reference point, the 20-configuration bundled library was
 generated at `n = 256` in a single run on three L40s, at 2.2 s/step; the

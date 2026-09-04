@@ -36,7 +36,7 @@ Algorithm
    directly -- evaluating ``scipy.special.sph_harm_y_all`` at every voxel's
    own direction (one voxel = one distinct, essentially never-repeated
    direction) does not reuse anything between voxels and was measured to
-   dominate `generate()`'s cost, ~70s at a realistic ~10M-voxel working grid.
+   dominate `generate()`'s cost, 60s at a realistic ~10M-voxel working grid.
    Since the perturbation itself only contains information up to degree
    `sh_max_degree`, it is fully resolved by a MUCH smaller number of angular
    samples (see ``_angular_grid_resolution``); every voxel's own value is
@@ -44,9 +44,9 @@ Algorithm
    (``_interpolate_angular_grid``, via ``torch.nn.functional.grid_sample``,
    with a manual phi-periodic pad since ``grid_sample`` has no circular
    mode). Measured directly: interpolation error is ~0.17% of the
-   perturbation's own RMS scale at the default resolution -- an order of
+   perturbation's own peak at the default resolution -- an order of
    magnitude below the ``distance_transform_edt`` discretization noise step
-   3 already introduces -- while cutting wall time by 30-150x (more at
+   3 already introduces -- while cutting wall time by 31-173x (more at
    larger voxel counts, since the angular synthesis cost is now fixed
    regardless of how many voxels read from it).
 3. For every working-grid point, transform into a unit-sphere frame scaled by
@@ -127,10 +127,10 @@ def _real_spherical_harmonic(
     single ``scipy.special.sph_harm_y_all`` call for the whole degree/order
     grid, ~5x faster than one ``sph_harm_y`` call per ``(l, m)`` pair) still
     costs O(voxel count), which dominates `generate()` at realistic working-
-    grid sizes (~70s measured at ~10M voxels). ``generate_membrane_field_
+    grid sizes (60s measured at ~10M voxels). ``generate_membrane_field_
     spherical_harmonics`` instead evaluates the harmonic sum on a small
     angular grid once and interpolates (see ``_synthesize_angular_grid``/
-    ``_interpolate_angular_grid``), a further 30-150x faster. This function
+    ``_interpolate_angular_grid``), a further 31-173x faster. This function
     and ``_real_spherical_harmonics_grid`` remain the ground truth those are
     tested against.
 
@@ -421,9 +421,9 @@ def generate_membrane_field_spherical_harmonics(
     ``_angular_grid_resolution(sh_max_degree)`` angular grid and bilinearly
     interpolated at every working-grid voxel (see this module's own
     Algorithm docstring) rather than evaluated directly per voxel -- ~0.17%
-    interpolation error relative to the perturbation's own RMS scale at the
+    interpolation error relative to the perturbation's own peak at the
     default resolution, well below the ``distance_transform_edt``
-    discretization noise already present, for a measured 30-150x wall-time
+    discretization noise already present, for a measured 31-173x wall-time
     reduction depending on working-grid size.
 
     The same Eikonal/grid-resolution caveat applies to

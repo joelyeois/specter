@@ -24,6 +24,9 @@ docs/concepts/membrane-shape/spherical-harmonics.md).
 
 from __future__ import annotations
 
+import argparse
+import time
+
 import numpy as np
 import torch
 
@@ -40,6 +43,7 @@ from specter.specimen.membrane._field_spherical_harmonics import (
     _angular_grid_resolution,
     _interpolate_angular_grid,
     _real_spherical_harmonic,
+    _real_spherical_harmonics_grid,
     _sample_sh_coefficients,
     _synthesize_angular_grid,
 )
@@ -490,7 +494,74 @@ def figure_axes_sweep() -> None:
     print(f"saved {path}")
 
 
+def benchmark_synthesis(n_points: int = 10_000_000) -> None:
+    """Time direct per-voxel harmonic evaluation against the angular-grid
+    interpolation the backend actually uses.
+
+    Backs the "~70s at a 10M-voxel grid" and "30-150x reduction in wall time"
+    claims in the "Fast harmonic synthesis" section of the page. Both paths
+    run on the CPU over the same directions, because the direct one is a
+    `scipy.special.sph_harm_y_all` call with no GPU form -- timing the
+    interpolated path on a GPU instead would report the device difference on
+    top of the algorithmic one.
+
+    Directions are drawn uniformly on the sphere rather than read off a
+    working grid: what the direct path costs depends only on how many
+    distinct directions it is handed, and a voxel grid's are distinct.
+    """
+    rng = np.random.default_rng(SEED)
+    theta = np.arccos(rng.uniform(-1.0, 1.0, size=n_points))
+    phi = rng.uniform(0.0, 2.0 * np.pi, size=n_points)
+    coefficients = _sample_sh_coefficients(
+        SH_MAX_DEGREE, SH_SPECTRUM_POWER, np.random.default_rng(SEED)
+    )
+
+    start = time.perf_counter()
+    real_sh = _real_spherical_harmonics_grid(SH_MAX_DEGREE, theta, phi)
+    direct = np.zeros(n_points, dtype=np.float64)
+    for degree, order, coeff in coefficients:
+        direct += coeff * real_sh[(degree, order)]
+    direct_s = time.perf_counter() - start
+    del real_sh
+
+    n_theta, n_phi = _angular_grid_resolution(SH_MAX_DEGREE)
+    start = time.perf_counter()
+    coarse = _synthesize_angular_grid(coefficients, SH_MAX_DEGREE, n_theta, n_phi)
+    interpolated = _interpolate_angular_grid(coarse, theta, phi, device="cpu")
+    interp_s = time.perf_counter() - start
+
+    # Two error metrics, not one. The documented ~0.17% is the peak-relative
+    # max (max|residual| / max|perturbation|); the RMS-relative figure is
+    # roughly a third of it. Quoting either number against the other's
+    # definition misstates the accuracy by ~3x, so both are printed with
+    # their denominators named.
+    residual = np.asarray(interpolated) - direct
+    max_rel = float(np.abs(residual).max()) / float(np.abs(direct).max())
+    rms_rel = float(np.sqrt(np.mean(residual**2))) / float(np.sqrt(np.mean(direct**2)))
+    print(f"{n_points:,} directions, sh_max_degree={SH_MAX_DEGREE}")
+    print(f"  direct per-point evaluation   {direct_s:8.2f} s")
+    print(
+        f"  angular grid + interpolation  {interp_s:8.2f} s  ({n_theta}x{n_phi} grid)"
+    )
+    print(f"  speedup                       {direct_s / interp_s:8.1f}x")
+    print(f"  error, max / perturbation max {max_rel:8.4%}")
+    print(f"  error, rms / perturbation rms {rms_rel:8.4%}")
+
+
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--timing",
+        action="store_true",
+        help="Measure harmonic synthesis cost instead of drawing the figures.",
+    )
+    parser.add_argument("--n_points", type=int, default=10_000_000)
+    args = parser.parse_args()
+
+    if args.timing:
+        benchmark_synthesis(args.n_points)
+        raise SystemExit(0)
+
     ref = _reference_instance()
     figure_hero(ref)
     figure_basis_gallery()

@@ -162,14 +162,14 @@ Same field of view rendered at voxel_size = 10, 5, and 2 Å/voxel: a sum Z proje
 
 | `voxel_size` (Å/voxel) | Shape (Z, Y, X voxels) | Wall time | GPU peak | RAM peak |
 |---|---|---|---|---|
-| 10 | 150 × 600 × 600 | 61 s | 2.73 GB | 11.42 GB |
-| 5  | 300 × 1200 × 1200 | 63 s | 9.97 GB | 5.81 GB |
-| 2  | 750 × 3000 × 3000 (~6.75B voxels) | 322 s (5m 22s) | 9.29 GB | 143.67 GB |
+| 10 | 150 × 600 × 600 | 33 s | 2.73 GB | 10.21 GB |
+| 5  | 300 × 1200 × 1200 | 31 s | 9.97 GB | 5.83 GB |
+| 2  | 750 × 3000 × 3000 (~6.75B voxels) | 303 s (5m 03s) | 9.29 GB | 143.28 GB |
 
 10 Å and 5 Å come out level with each other, because at that scale a run is
 dominated by per-run species fetch/render/packing overhead rather than by
-the canvas. The step change at 2 Å is unambiguous: wall time is 5× the
-5 Å figure, and RAM jumps to **144 GB**.
+the canvas. The step change at 2 Å is unambiguous: wall time is 10× the
+5 Å figure, and RAM jumps to **143 GB**.
 That RAM spike is `accumulator_device="auto"` doing exactly what [Compute &
 scaling flags](#compute-scaling-flags) above says it does: at ~6.75
 billion voxels the density volume alone is ~27 GB, comfortably past half
@@ -180,9 +180,12 @@ consumer (the canvas) has moved off the GPU entirely, leaving only
 per-instance rendering buffers and the membrane distance transform behind.
 
 Where the 2 Å run's time goes is worth knowing before optimizing against
-it. Building the specimen is most of it: the membrane phase is 11 s, all
-21 structures load in 14 s, and packing plus rendering ~22,900 instances
-is 2m 48s. Writing the finished 27 GB volume is the rest.
+it. The membrane phase is 13 s, and the cytosol species phase, which packs
+and renders 22,910 instances, is 2m 35s: 5 s to pack the targets, 13 s to
+pack the filler, and 1m 16s to render it. Writing the finished 27 GB volume
+is the remaining ~2m. All 21 structures load in **0 s**, because the parsed
+structures are already cached on disk; a cold cache adds the download and a
+one-time parse (see [Structure cache](cache.md)).
 
 That balance is recent. Handing a volume to `mrcfile.set_data` makes it
 fill the MRC header's `rms` field with a `numpy` variance over every
@@ -199,21 +202,18 @@ of salt (one run on one machine, not a statistically averaged sweep), but
 the *shape* (flat at coarse resolution, a sharp RAM/time step once the
 canvas stops fitting in VRAM) is the useful, likely-to-generalize part.
 
-Shape-based collision is close to free at this scale. Running the 5 Å
-configuration back to back on both backends, wall time is 63 s under
-`"shape"` against 58 s under `"sphere"`, for 19,249 placed instances
-against 8,128 -- and 37.7% occupancy against 14.0%. Filler packing
-accounts for 25 s and 23 s of those totals respectively, and rendering for
-5 s and 3 s, since rendering is dominated by per-species template
-construction and barely moves with instance count.
+Colliding real molecular footprints is cheap at this scale. At 5 Å the
+packer places 19,249 filler instances to 37.7% occupancy in 6 s, and
+rendering them takes 7 s, of a 31 s run. Rendering is dominated by
+per-species template construction and barely moves with instance count.
 
-It was not always close. The shape backend's collision loop first cost
-104 s on this configuration, four times the sphere backend's. Nearly all
-of that was the reject path: at realistic density RSA rejects ~99.8% of
-attempts, and each rejection tested a candidate's entire footprint. The
-loop now rejects on a sparse sample of footprint voxels first, which is
-exact rather than approximate, and only a candidate that survives it pays
-for the full comparison.
+That is not the obvious outcome, because at realistic density RSA rejects
+~99.8% of attempts, and a rejection that tests a candidate's entire
+footprint against the grid makes the reject path the whole cost. The
+packer instead rejects on a sparse sample of footprint voxels first, which
+is exact rather than approximate: a sampled voxel is a footprint voxel, so
+finding it occupied is a genuine clash. Only a candidate that survives the
+sample pays for the full comparison.
 
 At 2 Å the collision grid would reach ~6.75 billion voxels, past the budget
 `packing_voxel_size` enforces, so packing runs on a 4 Å grid while
@@ -236,8 +236,8 @@ configure. If you want a crisper membrane, use a coarser `voxel_size` or a
 smaller field of view.
 
 **Hardware**: single NVIDIA L40 (46 GB VRAM, one idle card selected via
-`SPECTER_BENCHMARK_DEVICE` (`cuda:1` for this run), with other cards on the
-host under unrelated load, `accumulator_device="auto"`,
+`SPECTER_BENCHMARK_DEVICE` (`cuda:3` for this run), with the host otherwise
+close to idle (load average 3 of 128 threads at the start of the sweep), `accumulator_device="auto"`,
 `render_workers="auto"`, `render_chunk_size=64`), with CuPy 14.1 (a core
 dependency, see [Installation](../installation.md)), on a host with an AMD EPYC 7763 64-Core Processor (128
 threads) and 503 GB system RAM. Wall time is the `run_build_tomogram()`

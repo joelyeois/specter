@@ -39,6 +39,20 @@ so PDB fetch (network) is cached on disk before any measured run -- without
 it, whichever resolution happened to run first would unfairly absorb the
 one-time download cost.
 
+Each worker's stdout is kept, not discarded: `TomogramSpecimenGenerator`
+already prints a `phase_done` line per stage (membrane, structure fetch,
+packing, rendering, region labelling) and the pipeline prints placed-instance
+counts and achieved occupancy. Those lines are what the "where the 2 A run's
+time goes" paragraph in build-tomogram.md quotes, so they are parsed back out
+here rather than re-measured by hand under a profiler.
+
+Everything here runs the DEFAULT `packing_backend="shape"`, and there is
+deliberately no mode for running the comparison against `"sphere"`: that
+backend is on its way out, and a benchmark is a poor place to keep a
+deprecated code path alive. The packing figures this replaces quoted a
+shape-vs-sphere pair on two different docs pages, measured at different
+times, which is why neither agreed with the other.
+
 Run with: uv run python docs-figures/build_tomogram_benchmark.py
 Saves docs/assets/images/tomogram-benchmark-projections.png and prints a
 markdown results table (hand-copied into build-tomogram.md, not included
@@ -138,9 +152,58 @@ def _run_worker(voxel_size: float, out_mrc: Path, result_json: Path) -> None:
     )
 
 
-def _run_timed(voxel_size: float, tag: str) -> dict:
+# A `phase_done` line, e.g. "  Filler packing (cytosol): 1m 11s". Written by
+# specter.progress._format_elapsed, which drops empty leading units and has
+# whole-second resolution, so hours and minutes are both optional.
+_PHASE_RE = re.compile(r"^(?P<label>.+?): (?:(\d+)h )?(?:(\d+)m )?(\d+)s\s*$")
+
+
+def _parse_log(stdout: str) -> dict:
+    """Pull the phase timings, placed-instance counts and achieved occupancy
+    back out of a worker's own progress output.
+
+    The generator and pipeline already print all three (`phase_done`, the
+    per-region "N target(s), M filler placed" summary, and "Occupancy: X% of
+    volume"), so a run reports its own breakdown. Re-deriving it under a
+    profiler instead would both cost another run and measure a different,
+    instrumented one."""
+    phases: list[tuple[str, int]] = []
+    placements: dict[str, tuple[int, int]] = {}
+    occupancy: float | None = None
+
+    for raw in stdout.splitlines():
+        line = raw.rstrip()
+        placed = re.match(
+            r"^\s*(Cytosol|Lumen): (\d+) target\(s\), (\d+) filler placed", line
+        )
+        if placed:
+            placements[placed.group(1).lower()] = (
+                int(placed.group(2)),
+                int(placed.group(3)),
+            )
+            continue
+        occ = re.match(r"^\s*Occupancy: ([\d.]+)% of volume", line)
+        if occ:
+            occupancy = float(occ.group(1)) / 100.0
+            continue
+        phase = _PHASE_RE.match(line)
+        if phase:
+            h, m, s = (int(g or 0) for g in phase.groups()[1:])
+            phases.append((phase.group("label").rstrip(), h * 3600 + m * 60 + s))
+
+    n_placed = sum(t + f for t, f in placements.values())
+    return {
+        "phases": phases,
+        "placements": placements,
+        "n_placed": n_placed,
+        "occupancy": occupancy,
+    }
+
+
+def _run_timed(voxel_size: float, tag: str, read_projection: bool = True) -> dict:
     """Spawns `_run_worker` as its own `/usr/bin/time -v`-wrapped
-    subprocess and returns its result dict, plus parsed peak RSS."""
+    subprocess and returns its result dict, plus parsed peak RSS and the
+    phase breakdown parsed from the worker's own progress output."""
     out_mrc = SCRATCH_DIR / f"tomogram_{tag}.mrc"
     result_json = SCRATCH_DIR / f"result_{tag}.json"
     cmd = [
@@ -168,12 +231,20 @@ def _run_timed(voxel_size: float, tag: str) -> dict:
 
     result = json.loads(result_json.read_text())
     result["peak_rss_kb"] = peak_rss_kb
+    # Kept on disk: the phase lines are the evidence behind the prose in
+    # build-tomogram.md, and a run at voxel_size=2 is too expensive to repeat
+    # because a parser here missed a line.
+    log_path = SCRATCH_DIR / f"log_{tag}.txt"
+    log_path.write_text(proc.stdout)
+    result["log_path"] = str(log_path)
+    result.update(_parse_log(proc.stdout))
 
-    import mrcfile
-    import numpy as np
+    if read_projection:
+        import mrcfile
+        import numpy as np
 
-    with mrcfile.open(out_mrc, permissive=True) as mrc:
-        result["projection"] = np.asarray(mrc.data).sum(axis=0)  # sum Z projection
+        with mrcfile.open(out_mrc, permissive=True) as mrc:
+            result["projection"] = np.asarray(mrc.data).sum(axis=0)  # sum Z projection
     out_mrc.unlink()  # each volume is tens of GB at voxel_size=2 -- don't keep more
     result_json.unlink()  # than one resident on disk at a time (disk quota)
     return result
@@ -184,7 +255,7 @@ def main() -> None:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
 
     print(f"warming up (PDB cache, CUDA context) at voxel_size={V_SIZES[0]} ...")
-    _run_timed(V_SIZES[0], tag="warmup")
+    _run_timed(V_SIZES[0], tag="warmup", read_projection=False)
 
     results = []
     for voxel_size in V_SIZES:
@@ -211,6 +282,28 @@ def main() -> None:
             f"| {r['voxel_size']:g} | {shape_str} | {r['elapsed_s']:.0f} s | "
             f"{(r['gpu_peak_bytes'] + r.get('cupy_pool_bytes', 0)) / 1e9:.2f} GB | "
             f"{r['peak_rss_kb'] / 1e6:.2f} GB |"
+        )
+
+    for r in results:
+        _print_breakdown(r)
+
+
+def _print_breakdown(result: dict) -> None:
+    """Where one run's time went, from its own progress output."""
+    print(
+        f"\nvoxel_size={result['voxel_size']:g} phase breakdown "
+        f"({result['elapsed_s']:.0f} s total, log: {result['log_path']}):"
+    )
+    for label, seconds in result["phases"]:
+        print(f"  {label:<48} {seconds:>6} s")
+    if result["occupancy"] is not None:
+        placed = ", ".join(
+            f"{loc} {t} target / {f} filler"
+            for loc, (t, f) in result["placements"].items()
+        )
+        print(
+            f"  {result['n_placed']:,} instances placed ({placed}), "
+            f"occupancy {result['occupancy']:.1%}"
         )
 
 
@@ -244,7 +337,7 @@ def _figure_projections(results: list[dict]) -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--worker", action="store_true")
-    parser.add_argument("--voxel_size", type=float)
+    parser.add_argument("--voxel_size", type=float, default=5.0)
     parser.add_argument("--out_mrc", type=Path)
     parser.add_argument("--result_json", type=Path)
     args = parser.parse_args()

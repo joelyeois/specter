@@ -122,7 +122,7 @@ zero at the surface.
 ## Fast harmonic synthesis
 
 Evaluating the harmonic sum at every voxel's own direction is expensive
-(~70s at a 10M-voxel grid). Since the perturbation is
+(60 s at a 10M-voxel grid). Since the perturbation is
 [band-limited](https://en.wikipedia.org/wiki/Bandlimiting) to degree
 \(L\), SPECTER instead synthesizes it once on a small \((n_\theta, n_\phi)\)
 grid and [bilinearly interpolates](https://en.wikipedia.org/wiki/Bilinear_interpolation)
@@ -133,9 +133,12 @@ per voxel.
 A small coarse synthesis grid next to the bilinearly interpolated field it stands in for.
 ///
 
-Interpolation error is ~0.17% of the perturbation's RMS, well below the
-distance-transform's own discretization noise, for a 30-150x reduction in
-wall time.
+Interpolation error is ~0.17% of the perturbation's peak (0.07-0.11% of its
+RMS, across coefficient draws), well below the distance-transform's own
+discretization noise. The angular grid costs the same regardless of how many
+voxels read from it, so the saving grows with the working grid: 31x at 1M
+voxels, 81x at 3M, ~180x at 10M. Measured by
+`docs-figures/membrane_shape_spherical_harmonics.py --timing`.
 
 ## Parameters
 

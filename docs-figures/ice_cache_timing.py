@@ -21,38 +21,28 @@ Usage
 
 Method
 ------
-Each cell size is timed over a short run of outer L-BFGS steps, preceded by a
-separate warmup run whose cost is discarded (first-call CUDA autotuning and
-allocator growth would otherwise land entirely in the first size measured).
-Cost per step is then multiplied out to the 250-step budget
-`build_one_ice_config` uses.
+Each geometry generates `REPEATS` COMPLETE configurations under the production
+recipe, one per seed, and reports the mean wall time and the range across
+them. Wall time to completion is the quantity, not a cost per step: a run
+stops when its loss plateaus, so how many steps it takes is part of what a
+configuration costs, and it varies with the random initialisation. Reporting
+seconds per step and multiplying out to the 250-step ceiling would quote a
+budget almost no run actually spends.
 
-Each size therefore runs a COMPLETE configuration under the production recipe,
-rather than sampling its opening steps. Both reported quantities drift with
-optimisation progress, in opposite directions, so a short sample gets both
-wrong at once:
+Running to completion is also what makes the memory figure trustworthy. Peak
+memory RISES as the structure converges: the ML-BOP three-body term scales
+with neighbour triplets, and local coordination tightens as the structure
+approaches real amorphous ice. A 40-step sample at n=256 once reported
+10.8 GiB where the converged run peaked near 40 GiB, and that underestimate
+is what led a 20-config run on a 44 GiB card to run out of memory at config
+17, several hours in. (Both of those figures are from the pre-float64
+optimiser, whose peak was several times the current one's. The direction of
+the error is the part that still applies.)
 
-- **Per-step cost falls** as L-BFGS accumulates curvature history. Measured at
-  n=256: 2.88 s/step over 8 steps, 2.209 over 40, 2.180 over 120. Early steps
-  spend more of their budget in the strong-Wolfe line search, which may call
-  the closure up to 10 times per outer step. An 8-step sample overstates cost
-  by ~30%, and the effect is weakest at small cell sizes (n=128: 0.301 over 8
-  steps vs 0.279 over 120), i.e. it misleads most exactly where cost matters.
-- **Peak memory rises**, and by much more. The ML-BOP three-body term scales
-  with neighbour triplets, and local coordination tightens as the structure
-  approaches real amorphous ice, so allocation grows as the run converges. A
-  40-step sample at n=256 reported 10.8 GiB where a converged run peaked near
-  40 GiB. That underestimate is not academic: it is what led a 20-config run
-  on a 44 GiB card to run out of memory at config 17, several hours in.
-
-Both sets of figures in that list were measured under the pre-float64
-optimiser, whose peak was several times the current one's; they are kept
-because the direction of each error is what matters, and it has not changed.
-The absolute numbers to use are the ones this script prints.
-
-Sizing a GPU should use the reserved column, not allocated: reserved is what
-the process actually holds from the driver, and what a new allocation fails
-against once the caching allocator has fragmented over a long run.
+Reserved is reported rather than allocated, and as the worst repeat rather
+than the mean: it is what the process holds from the driver, what a new
+allocation fails against once the caching allocator has fragmented, and what
+decides whether a run fits on a given card at all.
 """
 
 from __future__ import annotations
@@ -79,8 +69,15 @@ DX_VALUES: tuple[float, ...] = (0.25, 0.5, 1.0)
 #: changes.
 DX_SWEEP_N = 256
 
-#: Step budget `build_one_ice_config` uses, for extrapolating a full run.
+#: Step budget `build_one_ice_config` uses.
 PRODUCTION_STEPS = 250
+
+#: Configurations generated per geometry, each from its own seed. Where a run
+#: stops is set by when its loss plateaus, which depends on the random
+#: initialisation, so a single run reports one draw from a spread rather than
+#: what a configuration costs. Three is enough to place the mean and show the
+#: spread without turning the sweep into an hour per table.
+REPEATS = 3
 
 #: Early-stopping tolerance, matching `build_one_ice_config`'s own recipe.
 #: NOT a knob: at 1e-4 (what this script used before) a config runs well past
@@ -96,26 +93,24 @@ PRODUCTION_TOL = 1e-3
 DEFAULT_STEPS = PRODUCTION_STEPS
 
 
-def time_one_cell(
-    n: int, dx: float, steps: int, device: str
-) -> tuple[int, int, float, float, float]:
+def time_one_cell(n: int, dx: float, steps: int, device: str, seed: int) -> dict:
     """
-    Run one full configuration at a given cell size, timing it and recording
+    Generate one complete configuration, timing it end to end and recording
     its peak memory.
 
-    Runs to convergence under the production recipe rather than sampling a
-    fixed number of steps, because BOTH quantities this reports depend on how
-    far the optimisation has progressed:
+    What this reports is the wall time of a whole config, which is what
+    ``specter build ice`` actually charges a user, not a cost per step
+    multiplied out to a nominal budget. The two differ, and not by a constant:
+    a run stops when its loss plateaus, so the step count is part of the cost
+    and varies with the random initialisation. `main` therefore repeats each
+    geometry over several seeds and averages.
 
-    - Cost per step falls as L-BFGS accumulates curvature history (see the
-      module docstring).
-    - Peak memory RISES as the structure converges. The ML-BOP three-body
-      term's cost scales with neighbour triplets, and local coordination
-      tightens as the configuration approaches real amorphous ice, so a
-      near-converged config allocates several times what an early-stage one
-      does. Sampling the first few dozen steps understates the peak by
-      roughly 4x at n=256, which is enough to send a reader looking for a
-      GPU that then runs out of memory partway through a real run.
+    Peak memory RISES as the structure converges: the ML-BOP three-body term
+    scales with neighbour triplets, and local coordination tightens as the
+    configuration approaches real amorphous ice. Sampling the opening steps
+    understates the peak several-fold, which is enough to send a reader
+    looking for a GPU that then runs out of memory partway through a real
+    run. Running to completion is what makes the memory figure trustworthy.
 
     Parameters
     ----------
@@ -128,23 +123,20 @@ def time_one_cell(
         plateaued run finishes sooner.
     device : str
         CUDA device to run on, e.g. ``"cuda:1"``.
+    seed : int
+        Seed for the random initialisation, so repeats of one geometry differ
+        the way separate configs in a real library do.
 
     Returns
     -------
-    n_atoms : int
-        Water beads in the cell.
-    n_steps_actual : int
-        Steps actually taken before the loss plateaued (or ``steps``).
-    per_step_s : float
-        Seconds per outer L-BFGS step.
-    peak_alloc_gb : float
-        Peak CUDA memory allocated (live tensors), in GiB.
-    peak_reserved_gb : float
-        Peak CUDA memory reserved from the driver, in GiB. This is the number
-        to size a GPU against: it is what the process actually holds, and
-        what an allocation fails against.
+    dict
+        ``n_atoms`` (water beads in the cell), ``n_steps`` (steps taken before
+        the loss plateaued, or `steps`), ``wall_s`` (seconds for the whole
+        configuration), ``alloc_gb`` and ``reserved_gb`` (peak CUDA memory).
+        Size a GPU against ``reserved_gb``: it is what the process holds from
+        the driver, and what a new allocation fails against.
     """
-    torch.manual_seed(0)
+    torch.manual_seed(seed)
     gd = GradientSKIcemaker(n=n, dx=dx, device=device, progressbars=False)
     gd.init_random()
 
@@ -163,21 +155,17 @@ def time_one_cell(
     torch.cuda.synchronize(device)
     elapsed = time.perf_counter() - t0
 
-    n_steps_actual = history["step"][-1] + 1 if history["stopped_early"] else steps
-    peak_alloc_gb = torch.cuda.max_memory_allocated(device) / 1024**3
-    peak_reserved_gb = torch.cuda.max_memory_reserved(device) / 1024**3
     assert gd.positions is not None
-    n_atoms = int(gd.positions.shape[0])
-
+    result = {
+        "n_atoms": int(gd.positions.shape[0]),
+        "n_steps": history["step"][-1] + 1 if history["stopped_early"] else steps,
+        "wall_s": elapsed,
+        "alloc_gb": torch.cuda.max_memory_allocated(device) / 1024**3,
+        "reserved_gb": torch.cuda.max_memory_reserved(device) / 1024**3,
+    }
     del gd
     torch.cuda.empty_cache()
-    return (
-        n_atoms,
-        n_steps_actual,
-        elapsed / n_steps_actual,
-        peak_alloc_gb,
-        peak_reserved_gb,
-    )
+    return result
 
 
 def main() -> None:
@@ -202,8 +190,16 @@ def main() -> None:
         "--steps",
         type=int,
         default=DEFAULT_STEPS,
-        help="Step ceiling per size. Lowering it overstates cost per step AND "
+        help="Step ceiling per size. Lowering it truncates the run AND "
         "understates peak memory -- see the module docstring.",
+    )
+    parser.add_argument(
+        "--repeats",
+        type=int,
+        default=REPEATS,
+        help="Configurations generated per geometry, each from a different "
+        "seed. Where a run stops is init-dependent, so one run is a draw "
+        "from a spread rather than the cost of a config.",
     )
     args = parser.parse_args()
 
@@ -215,25 +211,42 @@ def main() -> None:
     name = torch.cuda.get_device_name(args.device)
     print(
         f"Device: {args.device} ({name}), sweep={args.sweep}, "
-        f"{args.steps} step ceiling, tol={PRODUCTION_TOL:g}\n"
+        f"{args.steps} step ceiling, tol={PRODUCTION_TOL:g}, "
+        f"{args.repeats} repeat(s) per geometry\n"
     )
     header = (
-        f"{'n':>5}{'dx (A)':>8}{'cell (A)':>10}{'atoms':>10}{'steps':>8}"
-        f"{'s/step':>9}{'alloc GiB':>11}{'reserved GiB':>14}{'250 steps':>12}"
+        f"{'n':>5}{'dx (A)':>8}{'cell (A)':>10}{'atoms':>10}"
+        f"{'steps':>14}{'wall time':>14}{'range':>16}{'reserved GiB':>14}"
     )
     print(header)
     print("-" * len(header))
 
     for n, dx in geometries:
-        n_atoms, n_actual, per_step, alloc_gb, reserved_gb = time_one_cell(
-            n, dx, args.steps, args.device
-        )
-        full = per_step * PRODUCTION_STEPS
-        full_str = f"{full / 60:.0f} min" if full < 3600 else f"{full / 3600:.1f} h"
+        runs = [
+            time_one_cell(n, dx, args.steps, args.device, seed)
+            for seed in range(args.repeats)
+        ]
+        walls = [r["wall_s"] for r in runs]
+        steps_taken = [r["n_steps"] for r in runs]
+        mean_wall = sum(walls) / len(walls)
+        # Reserved is reported as the WORST repeat, not the mean: it is used
+        # to decide whether a run fits on a card, and a mean would recommend
+        # a GPU that one config in three overflows.
+        reserved = max(r["reserved_gb"] for r in runs)
         print(
-            f"{n:>5}{dx:>8.2f}{n * dx:>10.0f}{n_atoms:>10,}{n_actual:>8}"
-            f"{per_step:>9.3f}{alloc_gb:>11.2f}{reserved_gb:>14.2f}{full_str:>12}"
+            f"{n:>5}{dx:>8.2f}{n * dx:>10.0f}{runs[0]['n_atoms']:>10,}"
+            f"{sum(steps_taken) / len(steps_taken):>14.0f}"
+            f"{_format_duration(mean_wall):>14}"
+            f"{_format_duration(min(walls)) + '-' + _format_duration(max(walls)):>16}"
+            f"{reserved:>14.2f}"
         )
+
+
+def _format_duration(seconds: float) -> str:
+    """Wall time as the docs quote it: seconds under a minute, else m:ss."""
+    if seconds < 60:
+        return f"{seconds:.0f}s"
+    return f"{int(seconds) // 60}m{int(seconds) % 60:02d}s"
 
 
 if __name__ == "__main__":

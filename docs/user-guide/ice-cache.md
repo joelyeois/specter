@@ -4,7 +4,7 @@ For the underlying physics, see [Ice structure](../concepts/ice.md).
 
 `GradientSKIcemaker` generates amorphous ice by optimising water positions
 against the structure factor $S(k)$ and ML-BOP energy of real low-density
-amorphous ice. That optimisation costs roughly 10 minutes for a
+amorphous ice. That optimisation costs six to seven minutes for a
 production-scale cell (see [Cost](#cost)), far too much to repeat per
 simulation. `IceBank` therefore separates the two: it optimises and stores
 each configuration once, and a simulation draws a randomly rotated,
@@ -63,38 +63,36 @@ it. The [command reference](../api/cli/build.md#specter-build-ice) lists them al
 ## Cost
 
 Generating a configuration is expensive, and how expensive depends steeply on
-the cell size. Measured on one NVIDIA L40 at `dx = 1.0` over complete runs
-(`docs-figures/ice_cache_timing.py --sweep cell`):
+the cell size. Each row below is three complete configurations on one NVIDIA
+L40 at `dx = 1.0`, one per seed, reporting the mean wall time and the range
+across them (`docs-figures/ice_cache_timing.py --sweep cell`):
 
-| `--n` | cell | water beads | s/step | peak allocated | **peak reserved** | 250 steps |
-|------:|-----:|------------:|-------:|---------------:|------------------:|----------:|
-| 64  | 64 Å  | 8,237   | 0.361 | 0.10 GiB | 0.15 GiB     | 2 min |
-| 96  | 96 Å  | 27,800  | 0.339 | 0.33 GiB | 0.39 GiB     | 1 min |
-| 128 | 128 Å | 65,897  | 0.416 | 0.77 GiB | 0.91 GiB     | 2 min |
-| 192 | 192 Å | 222,403 | 0.826 | 2.56 GiB | 3.16 GiB     | 3 min |
-| 256 | 256 Å | 527,178 | 2.289 | 6.01 GiB | **7.53 GiB** | 10 min |
+| `--n` | cell | water beads | steps | wall time | range | **peak reserved** |
+|------:|-----:|------------:|------:|----------:|------:|------------------:|
+| 64  | 64 Å  | 8,237   | 196 | 1m 19s | 1m 17s – 1m 21s | 0.15 GiB |
+| 96  | 96 Å  | 27,800  | 212 | 1m 13s | 1m 07s – 1m 26s | 0.39 GiB |
+| 128 | 128 Å | 65,897  | 210 | 1m 26s | 1m 23s – 1m 32s | 0.91 GiB |
+| 192 | 192 Å | 222,403 | 206 | 2m 44s | 2m 16s – 3m 09s | 3.16 GiB |
+| 256 | 256 Å | 527,178 | 180 | 6m 43s | 6m 16s – 7m 04s | **7.54 GiB** |
 
 **Size a GPU against the reserved column.** Reserved is what the process
-holds from the driver and what a new allocation fails against. Bead count
+holds from the driver and what a new allocation fails against, and the figure
+quoted is the worst of the three repeats rather than their mean. Bead count
 grows as $n^3$, and the ML-BOP three-body term over those beads grows with
 the number of neighbour triplets, so both time and memory rise steeply with
-cell size. A step is one outer L-BFGS iteration, about 25 loss evaluations
-under the default `max_iter`, which is why even the smallest cell costs
-0.3 s per step.
+cell size.
 
-Both quantities drift through a run, in opposite directions: cost per step
-falls as the optimiser accumulates curvature history, and peak memory rises
-as local coordination tightens. These figures come from complete runs for
-that reason. The right-hand column extrapolates a full `--n_steps 250`
-budget and is an upper bound, since a run stops as soon as its loss
-plateaus (four of the five sizes above did).
+**Budget the mean, expect the range.** A run stops when its loss plateaus, so
+how many steps it takes is part of what it costs, and that depends on the
+random initialisation. The three repeats above understate the spread if
+anything: the 20-configuration bundled library, all at `n = 256`, took
+between 75 and 250 steps and between 3m 08s and 9m 33s per configuration,
+averaging 6m 04s. Its `manifest.json` records every configuration's step
+count, wall time, S(k) loss and ML-BOP energy.
 
-Reserved memory is also less repeatable than time. The `n = 256` geometry
-was measured twice, in two separate sweeps: per-step cost agreed to 1.5%
-(2.289 s against 2.323), but reserved peaked at 7.53 GiB in one and 9.80 GiB
-in the other, because the caching allocator's high-water mark depends on what
-the process allocated before. Budget headroom above the table rather than
-matching it exactly.
+The two sweeps on this page share the `n = 256`, `dx = 1.0` geometry, which
+makes them a check on each other: 6m 43s against 6m 46s mean, and 7.54
+against 7.53 GiB reserved.
 
 Absolute times are hardware-specific; re-run the script above rather than
 trusting these numbers on different silicon. The scaling with `n` is the part
@@ -108,23 +106,25 @@ therefore changes the physical cell, and with it the bead count, while the
 transform stays the same size
 (`docs-figures/ice_cache_timing.py --sweep dx`):
 
-| `--dx` | cell | water beads | s/step | peak allocated | **peak reserved** | 250 steps |
-|-------:|-----:|------------:|-------:|---------------:|------------------:|----------:|
-| 0.25 Å | 64 Å  | 8,237   | 0.688 | 0.93 GiB | 1.13 GiB | 3 min |
-| 0.50 Å | 128 Å | 65,897  | 0.695 | 1.34 GiB | 1.56 GiB | 3 min |
-| 1.00 Å | 256 Å | 527,178 | 2.323 | 6.95 GiB | 9.80 GiB | 10 min |
+| `--dx` | cell | water beads | steps | wall time | range | **peak reserved** |
+|-------:|-----:|------------:|------:|----------:|------:|------------------:|
+| 0.25 Å | 64 Å  | 8,237   | 250 | 2m 44s | 2m 39s – 2m 55s | 1.13 GiB |
+| 0.50 Å | 128 Å | 65,897  | 224 | 2m 33s | 2m 19s – 2m 54s | 1.57 GiB |
+| 1.00 Å | 256 Å | 527,178 | 181 | 6m 46s | 5m 23s – 9m 18s | 7.53 GiB |
 
-The first two rows cost the same despite an eightfold difference in bead
-count: at `n = 256` the grid transform dominates, and the beads are not what
-a step is spent on until there are enough of them. Only the 1.0 Å row, with
-64x the beads of the first, is bead-bound.
+The first two rows cost about the same despite an eightfold difference in
+bead count: at `n = 256` the grid transform dominates, and the beads are not
+what a step is spent on until there are enough of them. Only the 1.0 Å row,
+with 64x the beads of the first, is bead-bound. The 0.25 Å row is also the
+one geometry here that never plateaus — all three repeats used the whole
+250-step budget, because a 0.25 Å grid constrains $S(k)$ out to 2 Å$^{-1}$
+and there is still structure to improve at the ceiling.
 
-What the grid costs on its own is visible by reading the two tables against
-each other, at matched cell size and bead count. A 64 Å cell of 8,237 beads
-costs 0.361 s/step on a 64³ grid and 0.688 s/step on a 256³ one: 64x the
-voxels for 1.9x the time. A 128 Å cell of 65,897 beads costs 0.416 s/step
-against 0.695 s/step, 8x the voxels for 1.7x. So generating at a finer `dx`
-than the cell needs roughly doubles cost per step at these sizes, and raises
+What the finer grid costs is visible by reading the two tables against each
+other, at matched cell size and bead count. A 64 Å cell of 8,237 beads takes
+1m 19s to generate on a 64³ grid and 2m 44s on a 256³ one; a 128 Å cell of
+65,897 beads takes 1m 26s against 2m 33s. So generating at a finer `dx` than
+the cell needs roughly doubles the wall time at these sizes, and raises
 memory in proportion to the grid, rather than scaling with the voxel count
 outright.
 
@@ -133,11 +133,6 @@ request without tiling, which is the trade to weigh: the 64 Å cell in the
 first row is a quarter of the bundled library's 256 Å in each dimension.
 Reaching 256 Å at `dx = 0.25` means `--n 1024`, a 64x larger transform than
 any row here.
-
-For a real-world reference point, the 20-configuration bundled library was
-generated at `n = 256` in a single run on three L40s, at 2.2 s/step; the
-`manifest.json` beside it records every configuration's step count, wall
-time, S(k) loss and ML-BOP energy.
 
 ### Managing the cost
 
@@ -157,8 +152,8 @@ Three properties of the command exist to make a multi-hour run practical:
   eight.
 
 Every configuration records its own `wall_time` and `n_steps_actual`, both
-collected into `manifest.json`, so cost per step stays recoverable from a
-finished library without re-measuring it.
+collected into `manifest.json`, so what a finished library actually cost
+stays recoverable without re-measuring it.
 
 The output directory is never the bundled `specter/ice_data/ice_cache`, which
 ships with the package and must not be modified.

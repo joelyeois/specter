@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import pytest
+import roma
 import torch
 
 import specter
-from specter.crowding import CrowdWithDuplicates
+from specter import rotations
+from specter.crowding import CrowdWithDuplicates, rotation_safe_crop
 
 # Small enough to stay quick, large enough that the Poisson-disk sampling
 # places several duplicates -- with fewer than two there is nothing for
@@ -234,3 +236,140 @@ def test_water_air_interface_knobs_are_threaded_for_shape_backend() -> None:
         f"{len(tight.coords)} -- expected the higher bulk baseline to keep "
         "strictly more, at the same seed and raw jammed pool"
     )
+
+
+# ---------------------------------------------------------------------------
+# rotation_safe_crop
+# ---------------------------------------------------------------------------
+
+
+def _centred_blob(n: int, radius: float) -> torch.Tensor:
+    """A centred spherical blob of `radius` voxels in an ``(n, n, n)`` box."""
+    g = torch.arange(n, dtype=torch.float32) - (n - 1) / 2
+    r2 = g.view(-1, 1, 1) ** 2 + g.view(1, -1, 1) ** 2 + g.view(1, 1, -1) ** 2
+    return torch.where(r2 <= radius**2, 1.0 + r2, torch.zeros(()))
+
+
+def test_rotation_safe_crop_keeps_every_voxel_a_rotation_can_reach() -> None:
+    """
+    The crop must contain the whole sphere the density sweeps out.
+
+    Rotation preserves distance from the centre, so the guarantee is
+    geometric: a crop whose half-width covers the furthest occupied voxel
+    cannot lose density to any rotation. Checked directly rather than by
+    trusting the radius arithmetic -- every occupied voxel of the original
+    has to survive the crop.
+    """
+    V = _centred_blob(64, 12.0)
+    crop = rotation_safe_crop(V)
+    assert crop.shape[0] < V.shape[0], "a blob in a big box should crop"
+    assert float(crop.abs().sum()) == float(V.abs().sum())
+    lo, side = (V.shape[0] - crop.shape[0]) // 2, crop.shape[0]
+    assert torch.equal(crop, V[lo : lo + side, lo : lo + side, lo : lo + side])
+
+
+def test_rotation_safe_crop_loses_no_density_under_rotation() -> None:
+    """
+    The sharp invariant: rotating the crop must reproduce rotating the whole
+    box, over its own extent, and must not have thrown density away.
+
+    The half-width has to clear the furthest occupied voxel *plus the
+    interpolation's reach* -- ``rotate_volume`` is trilinear, so a voxel at
+    radius R lands density out to R + sqrt(3). Cropping at R alone passes
+    every geometric check and still clips that outer shell; it cost 20% of
+    this blob before the margin was added, which is why the test rotates
+    rather than measuring the crop.
+    """
+    V = _centred_blob(64, 12.0)
+    crop = rotation_safe_crop(V)
+    lo, side = (V.shape[0] - crop.shape[0]) // 2, crop.shape[0]
+
+    specter.seed(3)
+    quats = rotations.random_quaternion(8)
+    theta = rotations.build_affine_matrix(
+        roma.unitquat_to_rotmat(quats), torch.zeros(8, 3)
+    )
+    whole = rotations.rotate_volume(V, theta, padding_mode="zeros")
+    part = rotations.rotate_volume(crop, theta, padding_mode="zeros")
+
+    beyond = whole.clone()
+    beyond[..., lo : lo + side, lo : lo + side, lo : lo + side] = 0.0
+    assert float(beyond.abs().max()) == 0.0, (
+        "rotating the whole box put density outside the crop, so the crop "
+        "would have thrown it away"
+    )
+
+    inside = whole[..., lo : lo + side, lo : lo + side, lo : lo + side]
+    rel = (part - inside).abs().max().item() / inside.abs().max().item()
+    assert rel < 1e-4, f"cropping changed the rotated template by {rel:.2e}"
+
+
+@pytest.mark.parametrize("n", [64, 65])
+def test_rotation_safe_crop_keeps_each_axis_parity(n: int) -> None:
+    """
+    A crop that flipped an axis's parity would move the duplicate half a voxel.
+
+    ``grid_sample`` rotates about ``(n - 1) / 2`` while
+    `clip_insert_bounds` positions index ``n // 2``; the two coincide for an
+    odd axis and sit half a voxel apart for an even one. Cropping keeps that
+    offset only if the parity is kept, so this is a correctness rule, not a
+    tidiness one.
+    """
+    crop = rotation_safe_crop(_centred_blob(n, 9.0))
+    assert crop.shape[0] % 2 == n % 2
+    assert crop.shape[0] < n
+
+
+def test_rotation_safe_crop_declines_when_there_is_nothing_to_crop() -> None:
+    """Density reaching the faces, or none at all, returns the input itself."""
+    full = _centred_blob(32, 40.0)  # radius past the box: occupied to every face
+    assert rotation_safe_crop(full) is full
+    empty = torch.zeros(16, 16, 16)
+    assert rotation_safe_crop(empty) is empty
+
+
+def test_cropping_the_template_does_not_move_the_duplicates() -> None:
+    """
+    Cropping is a speed change, not a placement change.
+
+    `CrowdWithDuplicates` rotates one template once per duplicate, and the
+    box a template is rendered in is sized for the IMAGE, not the molecule:
+    6bdf at 384 px fills a 103-voxel radius, so the full box resamples 6.3x
+    the voxels the content needs. Cropping first is exact in principle --
+    what lies outside is zero and rotates to zero -- and the residual here is
+    the interpolation grid's own rounding, since normalised sample
+    coordinates divide by a different half-width. Bounded well under the
+    ~2e-5 the forward model already varies by between runs.
+    """
+    specter.seed(0)
+    V = _centred_blob(48, 11.0)
+    crowd = CrowdWithDuplicates(V, chunk_size=1, progressbars=False, **_GEOM)
+    specter.seed(0)
+    cropped = crowd()
+
+    crowd_full = CrowdWithDuplicates(V, chunk_size=1, progressbars=False, **_GEOM)
+    crowd_full._rotation_template = lambda: crowd_full.V  # type: ignore[method-assign]
+    specter.seed(0)
+    whole = crowd_full()
+
+    assert crowd._rotation_template().shape[0] < V.shape[0], "expected a crop"
+    rel = (cropped - whole).abs().max().item() / whole.abs().max().item()
+    assert rel < 1e-4, f"cropping moved density by {rel:.2e} relative"
+
+
+def test_rotation_template_is_cached_and_follows_a_swapped_buffer() -> None:
+    """
+    The crop is computed once per template, and re-computed when `V` changes.
+
+    `ImageGenerator._process_volume` aliases its own volume buffer onto the
+    crowd's after a device move, so a cache keyed on anything but the
+    buffer's identity would keep serving a crop of the old tensor.
+    """
+    crowd = CrowdWithDuplicates(_centred_blob(48, 11.0), progressbars=False, **_GEOM)
+    first = crowd._rotation_template()
+    assert crowd._rotation_template() is first
+
+    crowd.V = _centred_blob(48, 20.0)
+    second = crowd._rotation_template()
+    assert second is not first
+    assert second.shape[0] > first.shape[0]

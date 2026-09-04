@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from typing import TYPE_CHECKING, Literal
 
 import lightning as L
@@ -21,6 +22,7 @@ __all__ = [
     "insert_particles_into_micrograph",
     "filter_by_z_density",
     "filter_by_local_z_density",
+    "rotation_safe_crop",
     "CrowdWithDuplicates",
 ]
 
@@ -294,6 +296,99 @@ def filter_by_z_density(
         baseline=baseline,
         curve_points=curve_points,
     )
+
+
+#: Voxels per z-chunk of the radius grid :func:`rotation_safe_crop` builds.
+#: 2**24 float32 is 64 MB, bounding a one-off measurement whose input can be
+#: a whole micrograph-scale template.
+_CROP_RADIUS_CHUNK_VOXELS = 2**24
+
+
+def rotation_safe_crop(volume: torch.Tensor) -> torch.Tensor:
+    """
+    The smallest centred crop no rotation about the centre can move density
+    out of.
+
+    A rendered template is mostly empty: a molecule occupies a sphere, and
+    the box around it has to be large enough for the *image*, not for the
+    molecule. 6bdf at 384 px / 1 Å fills a 103-voxel radius, so rotating the
+    whole box resamples 6.3x more voxels than the content needs, and stamps
+    6.3x more zeros into the canvas. Cropping first is exact rather than an
+    approximation: rotation preserves distance from the centre, so every
+    voxel that could carry density into the crop started inside it, and
+    everything outside was zero and rotates to zero.
+
+    Parameters
+    ----------
+    volume : torch.Tensor
+        Template of shape ``(Z, Y, X)``.
+
+    Returns
+    -------
+    torch.Tensor
+        A contiguous centred crop, or `volume` itself when no axis can be
+        cropped (density reaching the faces, or an all-zero template).
+
+    Notes
+    -----
+    Each axis keeps its own parity, so the crop's centre stays where the
+    original's was under both conventions that read one: ``grid_sample``
+    places the geometric centre at ``(n - 1) / 2``, while
+    :func:`~specter.arrays.clip_insert_bounds` positions index ``n // 2``.
+    The two differ by half a voxel for an even axis, and a crop that changed
+    parity would shift the duplicate by that half voxel.
+
+    The radius is the true furthest occupied voxel, not the corner of the
+    density's bounding box. The bounding box is three cheap reductions and
+    needs no radius grid, but it over-estimates by the corner-to-sphere
+    ratio -- 254 voxels against 207 for 6bdf -- and at the box sizes a
+    particle stack actually runs at that is the difference between a useful
+    crop and none at all (at 256 px, 254 rounds up to the box itself). The
+    grid is materialised a z-chunk at a time and the answer cached by
+    `CrowdWithDuplicates`, so it is paid once per template, not once per
+    duplicate.
+    """
+    nz, ny, nx = volume.shape[-3:]
+    axis_grid = [
+        torch.arange(n, device=volume.device, dtype=torch.float32) - (n - 1) / 2
+        for n in (nz, ny, nx)
+    ]
+    plane_r2 = axis_grid[1][:, None] ** 2 + axis_grid[2][None, :] ** 2
+    furthest_r2 = -1.0
+    chunk = max(1, _CROP_RADIUS_CHUNK_VOXELS // (ny * nx))
+    for z0 in range(0, nz, chunk):
+        occupied = volume[..., z0 : z0 + chunk, :, :] != 0
+        if not bool(occupied.any()):
+            continue
+        r2 = plane_r2 + (axis_grid[0][z0 : z0 + chunk] ** 2)[:, None, None]
+        furthest_r2 = max(
+            furthest_r2, float(torch.where(occupied, r2, r2.new_zeros(())).amax())
+        )
+    if furthest_r2 < 0:
+        return volume
+    # Plus the interpolation's own reach. `rotate_volume` resamples
+    # trilinearly, so an output voxel takes from the eight source voxels
+    # around its preimage: an occupied voxel at radius R can therefore put
+    # density at radius R + sqrt(3), one voxel diagonal further out.
+    # Cropping at R alone clips that shell, which is not a rounding
+    # difference -- it cost 20% of a blob's density in the test that pins
+    # this.
+    radius = math.sqrt(furthest_r2) + math.sqrt(3.0)
+
+    sides = []
+    for n in (nz, ny, nx):
+        side = math.ceil(2 * radius + 1)
+        side += (n - side) % 2  # keep the axis's parity, so the centre holds
+        sides.append(min(n, side))
+    if sides == [nz, ny, nx]:
+        return volume
+    starts = [(n - s) // 2 for n, s in zip((nz, ny, nx), sides)]
+    return volume[
+        ...,
+        starts[0] : starts[0] + sides[0],
+        starts[1] : starts[1] + sides[1],
+        starts[2] : starts[2] + sides[2],
+    ].contiguous()
 
 
 class CrowdWithDuplicates(L.LightningModule):
@@ -736,6 +831,23 @@ class CrowdWithDuplicates(L.LightningModule):
             R = R.unsqueeze(0)
         self.theta = rotations.build_affine_matrix(R)
 
+    def _rotation_template(self) -> torch.Tensor:
+        """
+        `V` cropped to the part a rotation can move, see
+        :func:`rotation_safe_crop`.
+
+        Cached, since one template is rotated once per duplicate and the
+        whole stack shares it. The key is the buffer's identity, so a caller
+        that swaps `V` (``ImageGenerator._process_volume`` aliases its own
+        onto the crowd's) or moves it to another device re-crops.
+        """
+        key = (self.V.data_ptr(), tuple(self.V.shape), self.V.dtype)
+        cached = getattr(self, "_rotation_template_cache", None)
+        if cached is None or cached[0] != key:
+            cached = (key, rotation_safe_crop(self.V))
+            self._rotation_template_cache = cached
+        return cached[1]
+
     def forward(self, into: torch.Tensor | None = None) -> torch.Tensor:
         """
         Full pipeline: generate coordinates, random rotations, rotate volumes,
@@ -790,9 +902,10 @@ class CrowdWithDuplicates(L.LightningModule):
             disable=not self.progressbars,
         ):
             end = min(start + self.chunk_size, self.N)
+            template = self._rotation_template()
             volumes = rotations.rotate_volume(
-                self.V,
-                self.theta[start:end].to(self.V.device),
+                template,
+                self.theta[start:end].to(template.device),
                 padding_mode="zeros",
             )
             micrograph = insert_particles_into_micrograph(

@@ -999,6 +999,77 @@ def test_potential_from_deltas_rejects_unknown_backend():
         )
 
 
+@pytest.mark.parametrize("backend", ["fftconvolve", "conv3d"])
+@pytest.mark.parametrize("chunk_slices", [3, 7, 40])
+@pytest.mark.parametrize("ksize", [3, 5, 9])
+def test_periodic_deltas_chunking_matches_whole_canvas(
+    monkeypatch, backend, chunk_slices, ksize
+):
+    """
+    ``boundary='periodic'`` must not depend on how the canvas is chunked, and
+    must survive ``out=deltas``.
+
+    Over `_DELTAS_FFT_MAX_VOXELS` the periodic path convolves a z-chunk at a
+    time, each chunk taking a halo of real neighbouring context that wraps at
+    the faces. ``IceBank.generate_big_ice`` passes ``out=deltas`` to avoid a
+    second canvas, so that halo reads slices the *previous* chunk has already
+    overwritten with potential -- and, once a chunk is shorter than the
+    kernel's forward reach, slices the FIRST chunks overwrote. Both were
+    convolved a second time, at values two orders of magnitude above real
+    ice. In the shipped configuration this corrupted 4 slices of a 2000-slice
+    solvate (384 px, 1 Å); with a short chunk it is far more. The reference
+    is the whole-canvas rolled-kernel transform, which no chunking touches.
+
+    Odd kernels only: specter's own are always odd
+    (``compute_supersampling_parameters``), and for an even kernel the two
+    branches sit a voxel apart -- a pre-existing convention gap, unrelated
+    to chunking.
+    """
+    from specter.potential import _builders
+
+    torch.manual_seed(0)
+    nz, ny, nx = 60, 12, 12
+    deltas = torch.rand(2, nz, ny, nx)
+    kernel = torch.rand(ksize, ksize, ksize)
+
+    monkeypatch.setattr(_builders, "_DELTAS_FFT_MAX_VOXELS", 10**12)
+    reference = potential_from_deltas(
+        deltas.clone(), kernel, backend="fftconvolve", boundary="periodic"
+    )
+
+    monkeypatch.setattr(_builders, "_DELTAS_FFT_MAX_VOXELS", ny * nx * chunk_slices)
+    for out_is_deltas in (False, True):
+        work = deltas.clone()
+        got = potential_from_deltas(
+            work,
+            kernel,
+            backend=backend,
+            boundary="periodic",
+            out=work if out_is_deltas else None,
+        )
+        torch.testing.assert_close(got, reference, atol=1e-4, rtol=1e-4)
+
+
+def test_periodic_deltas_auto_backend_keeps_fft_on_a_large_canvas():
+    """
+    A canvas past `_DELTAS_FFT_MAX_VOXELS` must not drop the FFT under
+    ``boundary='periodic'``: that path chunks, so the cap sizes the chunk
+    rather than deciding the backend. Falling back to a direct convolution
+    over the whole canvas cost 2x on the ice a thick-ice particle stack
+    builds (2000 x 384 x 384 with the 5^3 water kernel: 168 ms vs 84).
+    ``'linear'`` has no such loop and still falls back.
+    """
+    from specter.potential._builders import _DELTAS_FFT_MAX_VOXELS, _deltas_backend
+
+    kernel = torch.ones(5, 5, 5)
+    big = torch.empty(0).new_empty((1, _DELTAS_FFT_MAX_VOXELS * 2, 1, 1))
+
+    assert _deltas_backend(big, kernel, "periodic") == "fftconvolve"
+    assert _deltas_backend(big, kernel, "linear") == "conv3d"
+    # A kernel small enough to convolve directly still goes direct either way.
+    assert _deltas_backend(big, torch.ones(3, 3, 3), "periodic") == "conv3d"
+
+
 @pytest.mark.parametrize("dx", [1.0, 1.5])
 def test_2d_and_3d_methods_agree_on_density_position(dx):
     """

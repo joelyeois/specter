@@ -12,6 +12,10 @@ for the measurements behind them):
   `process_volume` no longer keeps a CPU copy of the crowd canvas.
 * `poisson_disk_neighbors_3d`'s neighbour test is one distance check.
 * `potential_from_deltas(backend="auto")` picks FFT for large kernels.
+
+The 2026-09-04 thick-ice pass is pinned next to what it changed instead:
+`rotation_safe_crop` in tests/test_crowding.py, and the periodic
+convolution's chunking in tests/test_potential.py.
 """
 
 from __future__ import annotations

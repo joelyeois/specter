@@ -934,8 +934,11 @@ def potential_from_deltas(
         `deltas` itself: a caller that has no further use for the deltas
         (``IceBank.generate_big_ice``) then pays for no second canvas, which
         at a 512-pixel box is the 0.5 GB that stood between the FFT's own
-        working copies and the forward pass's peak. Safe because each
-        item's input is read in full before its output is written.
+        working copies and the forward pass's peak. Whole-canvas, this is
+        safe because each item's input is read in full before its output is
+        written; the periodic path's z-chunked loop, whose halo reaches into
+        a neighbouring chunk's output, stashes the ``kz - 1`` slices it
+        would otherwise re-convolve.
     boundary : str, optional
         ``'linear'`` (default): the kernel is truncated at the volume's
         faces, as for an isolated molecule in a box. ``'periodic'``: the
@@ -965,7 +968,7 @@ def potential_from_deltas(
             f"Unknown boundary '{boundary}'. Choose 'linear' or 'periodic'."
         )
     if backend == "auto":
-        backend = _deltas_backend(deltas, kernel)
+        backend = _deltas_backend(deltas, kernel, boundary)
 
     if boundary == "periodic":
         return _potential_from_deltas_periodic(
@@ -1020,12 +1023,20 @@ def _potential_from_deltas_periodic(
             f"{tuple(shape)} along some axis; a periodic convolution would "
             "wrap the kernel onto itself"
         )
+    if backend not in ("fftconvolve", "conv3d"):
+        raise ValueError(
+            f"Unknown backend '{backend}'. Choose 'fftconvolve' or 'conv3d'."
+        )
     centre = tuple(k // 2 for k in kernel.shape)
-    if backend == "fftconvolve":
-        if out is None:
-            out = torch.empty_like(deltas)
+    if out is None:
+        out = torch.empty_like(deltas)
+
+    if backend == "fftconvolve" and deltas[0].numel() <= _DELTAS_FFT_MAX_VOXELS:
         # The kernel on the canvas grid, rolled so its centre voxel is at
-        # the origin: one small canvas-sized buffer, transformed once.
+        # the origin: one small canvas-sized buffer, transformed once. No
+        # halo and no padding, so this is the cheapest form whenever the
+        # FFT's complex working copies fit; past that the chunked loop
+        # below takes over.
         k = torch.zeros(shape, dtype=deltas.dtype, device=deltas.device)
         kz, ky, kx = kernel.shape
         k[:kz, :ky, :kx] = kernel.to(deltas.dtype)
@@ -1034,41 +1045,87 @@ def _potential_from_deltas_periodic(
         del k
         for b in range(len(deltas)):
             out[b] = torch.fft.irfftn(torch.fft.rfftn(deltas[b]) * k_hat, s=shape)
-    elif backend == "conv3d":
-        # Wrap the deltas by the kernel's reach, then convolve linearly:
-        # every output voxel sees its true periodic neighbourhood. Asymmetric
-        # padding (centre before, remainder after) keeps the centre voxel on
-        # its own delta for odd and even kernels alike, matching the FFT
-        # branch. Done a z-chunk at a time: this backend is chosen for
-        # volumes too large for the FFT's working copies, and a circular pad
-        # of the whole canvas would be a second copy of exactly that size
-        # (33.6 GB at micrograph_size). Each chunk's z context is gathered
-        # by index, wrapping at the ends, and only its xy faces are padded.
-        if out is None:
-            out = torch.empty_like(deltas)
-        kz, ky, kx = kernel.shape
-        cz, cy, cx = centre
-        nz = shape[0]
-        chunk_z = max(1, _DELTAS_FFT_MAX_VOXELS // (shape[1] * shape[2]))
-        # Circular padding of a 5-d input wants all three spatial pads; z
-        # gets none, its context having been gathered by index.
-        pads_xy = [cx, kx - 1 - cx, cy, ky - 1 - cy, 0, 0]
-        for z0 in range(0, nz, chunk_z):
-            z1 = min(z0 + chunk_z, nz)
-            zidx = torch.arange(z0 - cz, z1 + (kz - 1 - cz), device=deltas.device) % nz
-            block = deltas.index_select(1, zidx)
-            block = torch.nn.functional.pad(block[:, None], pads_xy, mode="circular")[
-                :, 0
-            ]
+        return out[0] if squeeze_back else out
+
+    # Wrap the deltas by the kernel's reach, then convolve linearly: every
+    # output voxel sees its true periodic neighbourhood. Asymmetric padding
+    # (centre before, remainder after) keeps the centre voxel on its own
+    # delta for odd and even kernels alike, matching the whole-canvas branch.
+    # Done a z-chunk at a time, since a circular pad of the whole canvas
+    # would be a second copy of exactly its size (33.6 GB at
+    # micrograph_size). Each chunk's z context is gathered by index,
+    # wrapping at the ends, and only its xy faces are padded.
+    #
+    # The chunk convolves by whichever backend was chosen: the volume cap
+    # bounds the CHUNK, not the choice, so a canvas too large to transform
+    # whole is still transformed a chunk at a time rather than falling back
+    # to a direct convolution over the whole thing. At 2000 x 384 x 384 with
+    # the 5^3 water kernel that is 84 ms against conv3d's 168, at a lower
+    # peak.
+    #
+    # The budget names a WORKING SET, so the two backends divide it
+    # differently: conv3d's is about the block itself, while an FFT
+    # convolution holds both operands' fast-length complex transforms at
+    # once, ~4x. Handing the FFT the whole budget as a block is what turned
+    # a 2000-slice solvate's peak from 9.3 to 12.6 GiB while saving only
+    # 0.6 s; at a quarter of it the same run is faster still and back under
+    # the conv3d peak.
+    kz, ky, kx = kernel.shape
+    cz, cy, cx = centre
+    nz = shape[0]
+    budget = (
+        _DELTAS_FFT_MAX_VOXELS if backend == "conv3d" else _DELTAS_FFT_MAX_VOXELS // 4
+    )
+    chunk_z = max(1, budget // (shape[1] * shape[2]))
+    # Circular padding of a 5-d input wants all three spatial pads; z gets
+    # none, its context having been gathered by index.
+    pads_xy = [cx, kx - 1 - cx, cy, ky - 1 - cy, 0, 0]
+    # `out` may BE `deltas` (IceBank.generate_big_ice writes the potential
+    # over the deltas rather than taking a second canvas). Whole-canvas, that
+    # is safe -- each item is read in full before it is written -- but a
+    # chunk's halo reaches BACKWARDS into the previous chunk's output, and
+    # the last chunk's wrap reaches back into the first's. Both then convolve
+    # an already-convolved slice a second time. So the pristine deltas the
+    # halo needs are stashed: `head` for the final wrap, and a rolling `tail`
+    # for the chunk boundaries. That is kz - 1 slices, whatever the canvas.
+    aliased = out.data_ptr() == deltas.data_ptr()
+    n_head, n_tail = kz - 1 - cz, cz
+    head = deltas[:, :n_head].clone() if aliased and n_head else None
+    tail = None
+    for z0 in range(0, nz, chunk_z):
+        z1 = min(z0 + chunk_z, nz)
+        zidx = torch.arange(z0 - cz, z1 + (kz - 1 - cz), device=deltas.device) % nz
+        block = deltas.index_select(1, zidx)
+        if aliased:
+            if tail is not None:
+                # The stash fills the halo from its END: the earliest halo
+                # slices of the first few chunks are the wrap from the far
+                # face, which nothing has written yet.
+                block[:, n_tail - tail.shape[1] : n_tail] = tail
+            # ... and symmetrically, once the forward halo runs off the far
+            # face it wraps onto slices the first chunks already wrote. That
+            # can start before the final chunk, whenever the chunk is short.
+            n_wrap = max(0, z1 + n_head - nz)
+            if head is not None and n_wrap:
+                block[:, block.shape[1] - n_wrap :] = head[:, :n_wrap]
+            # The last `cz` pristine slices written so far, taken before
+            # `out[:, z0:z1]` overwrites them. Carried across chunks rather
+            # than read off this one, since a chunk can be shorter than the
+            # halo and the reach is then several chunks back.
+            core = block[:, cz : cz + (z1 - z0)]
+            tail = core if tail is None else torch.cat([tail, core], dim=1)
+            tail = tail[:, -n_tail:].clone() if n_tail else tail[:, :0]
+        block = torch.nn.functional.pad(block[:, None], pads_xy, mode="circular")[:, 0]
+        if backend == "conv3d":
             conv = spatial_convolve3d_same(block, kernel)
-            out[:, z0:z1] = conv[
-                :, cz : cz + (z1 - z0), cy : cy + shape[1], cx : cx + shape[2]
-            ]
-            del block, conv
-    else:
-        raise ValueError(
-            f"Unknown backend '{backend}'. Choose 'fftconvolve' or 'conv3d'."
-        )
+        else:
+            conv = torch.stack(
+                [fftconvolve(block[b], kernel, mode="same") for b in range(len(block))]
+            )
+        out[:, z0:z1] = conv[
+            :, cz : cz + (z1 - z0), cy : cy + shape[1], cx : cx + shape[2]
+        ]
+        del block, conv
     return out[0] if squeeze_back else out
 
 
@@ -1079,24 +1136,31 @@ def _potential_from_deltas_periodic(
 #: cost scales with the kernel, the FFT's does not.
 _DELTAS_FFT_MIN_KERNEL_TAPS = 65
 
-#: Above this many voxels per volume the FFT's complex working copies are what
-#: an IceBank micrograph-scale request cannot afford (see
-#: :func:`specter.fft.spatial_convolve3d_same`), so conv3d is used regardless
-#: of kernel size. 2**28 float32 is 1 GB; a 512^3 box is 2**27.
+#: Voxels per volume the FFT's complex working copies can be afforded for at
+#: once (see :func:`specter.fft.spatial_convolve3d_same`) -- what an IceBank
+#: micrograph-scale request cannot. 2**28 float32 is 1 GB; a 512^3 box is
+#: 2**27. Past it, ``boundary='periodic'`` transforms a z-chunk of this size
+#: at a time rather than the whole canvas; ``'linear'`` has no such loop and
+#: falls back to conv3d instead.
 _DELTAS_FFT_MAX_VOXELS = 2**28
 
 
-def _deltas_backend(deltas: torch.Tensor, kernel: torch.Tensor) -> str:
+def _deltas_backend(
+    deltas: torch.Tensor, kernel: torch.Tensor, boundary: str = "linear"
+) -> str:
     """Backend for :func:`potential_from_deltas`'s ``'auto'``: FFT for kernels
-    past `_DELTAS_FFT_MIN_KERNEL_TAPS` on volumes up to
-    `_DELTAS_FFT_MAX_VOXELS`, direct conv3d otherwise."""
-    per_volume = deltas[0].numel()
-    if (
-        kernel.numel() >= _DELTAS_FFT_MIN_KERNEL_TAPS
-        and per_volume <= _DELTAS_FFT_MAX_VOXELS
-    ):
-        return "fftconvolve"
-    return "conv3d"
+    past `_DELTAS_FFT_MIN_KERNEL_TAPS`, direct conv3d otherwise.
+
+    A volume over `_DELTAS_FFT_MAX_VOXELS` forces conv3d only under
+    ``boundary='linear'``. The periodic path chunks in z, so the cap sizes
+    its chunk instead of deciding the backend -- at 2000 x 384 x 384 with the
+    5^3 water kernel, chunked FFT is 84 ms against conv3d's 168.
+    """
+    if kernel.numel() < _DELTAS_FFT_MIN_KERNEL_TAPS:
+        return "conv3d"
+    if boundary == "linear" and deltas[0].numel() > _DELTAS_FFT_MAX_VOXELS:
+        return "conv3d"
+    return "fftconvolve"
 
 
 def build_atomic_potential_kernel(

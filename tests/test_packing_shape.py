@@ -282,7 +282,6 @@ def test_generator_coarse_packing_survives_both_placement_stages():
             TomogramProteinSpec(pdb_source=str(fixture), location="cytosol"),
         ],
         occupancy_fraction=0.05,
-        packing_backend="shape",
         packing_voxel_size=12.0,  # factor 3
         clip_axes=(True, True, True),
         seed=0,

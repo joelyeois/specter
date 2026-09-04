@@ -917,7 +917,7 @@ def test_diagnose_zero_placements_reports_box_constraint_not_just_clearance():
     disc near the box center where it's also large but the region is
     entirely masked out -- simpler: split the box into two halves along x.
     """
-    from specter.specimen.tomogram.generator import _diagnose_zero_placements
+    from specter.specimen.tomogram._helpers import _diagnose_zero_placements
 
     field_voxel_size = 10.0
     shape = (10, 10, 10)  # 100x100x100 A box
@@ -996,7 +996,7 @@ def test_diagnose_zero_placements_honors_clip_axes():
     Same box as above; a 60 A-radius sphere is box-invalid on every axis
     when clip_axes is all False (case 1 above), but valid once every axis
     is marked clippable."""
-    from specter.specimen.tomogram.generator import _diagnose_zero_placements
+    from specter.specimen.tomogram._helpers import _diagnose_zero_placements
 
     shape = (10, 10, 10)
     box = (100.0, 100.0, 100.0)
@@ -1014,57 +1014,6 @@ def test_diagnose_zero_placements_honors_clip_axes():
     )
     assert viable == shape[0] * shape[1] * shape[2]
     assert best == 200.0
-
-
-def test_membrane_tomogram_zero_placement_warning_distinguishes_unlucky_from_impossible():
-    """End-to-end regression test for the fix: a genuinely too-tight-for-
-    the-box species must be reported as impossible (not "ample room
-    available"), and a genuinely-possible-but-unlucky one must be reported
-    as unlucky (not "impossible"). Both scenarios were verified by hand
-    against the real geometry before writing this test.
-    """
-    from specter.specimen.membrane import MembraneGenerator
-    from specter.specimen.tomogram import MembraneInstance
-
-    # Impossible case: 4 membranes competing for a small 240 A box: only
-    # some fit, and the surviving membrane's shell leaves no position that
-    # is both far enough from the shell AND fully inside the box for the
-    # ~67 A-radius filler species.
-    small_shape_zyx = (30, 30, 30)
-    kwargs = dict(
-        _MEMBRANE_KWARGS, target_shape=small_shape_zyx, sh_axes=(70.0, 70.0, 70.0)
-    )
-    instances = [
-        MembraneInstance(generator=MembraneGenerator(seed=i, **kwargs))
-        for i in range(4)
-    ]
-    gen = TomogramSpecimenGenerator(
-        membrane_instances=instances,
-        target_shape=small_shape_zyx,
-        voxel_size=_V_SIZE,
-        protein_specs=[
-            TomogramProteinSpec(pdb_source=str(_LARGE_FIXTURE), location="cytosol")
-        ],
-        occupancy_fraction=0.05,
-        # _diagnose_zero_placements is sphere-backend machinery: it reasons
-        # about a bounding radius against an exclusion distance field, which
-        # the shape backend has neither of. Pin the backend rather than let
-        # this follow the default.
-        packing_backend="sphere",
-        pdb_cache_dir=str(Path(__file__).parent / "test_data"),
-        seed=0,
-    )
-    with warnings.catch_warnings(record=True) as w:
-        warnings.simplefilter("always")
-        gen.generate()
-    zero_warnings = [x for x in w if "placed 0 filler instances" in str(x.message)]
-    assert len(zero_warnings) == 1
-    message = str(zero_warnings[0].message)
-    assert "no position exists" in message
-    assert "unlucky" not in message
-    # The old bug: reporting exclusion_field.max() (166 A here) as if it
-    # were achievable, which it never book-keeps against the box wall.
-    assert "166" not in message
 
 
 def test_all_beads_go_in_one_pick_file(tmp_path):

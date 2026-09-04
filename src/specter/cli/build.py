@@ -75,7 +75,6 @@ _TOMOGRAM_GROUPS: list[tuple[str, list[str]]] = [
             "readd_hydrogens",
             "monomer_library_path",
             "use_deposited_bfactors",
-            "packing_backend",
             "packing_max_retries",
             "packing_voxel_size",
             "bead_roughness",

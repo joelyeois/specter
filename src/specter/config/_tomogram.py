@@ -82,11 +82,6 @@ class TomogramConfig:
     # sparser filler layer, or if a small region (e.g. a tight vesicle
     # lumen) makes the candidate pool this implies impractically large.
     filler_occupancy_fraction: float = 0.5
-    # Collision geometry for protein packing: "sphere" collides one
-    # circumscribing sphere per instance, "shape" collides the real rotated
-    # footprint against a running occupancy grid (what CryoTomoSim does).
-    # See TomogramSpecimenGenerator's own packing_backend docstring.
-    packing_backend: str = "shape"
     packing_max_retries: int = 1500
     # None = auto (coarsen only when the packing grid gets too large).
     packing_voxel_size: float | None = None
@@ -381,17 +376,12 @@ TOMOGRAM_HELP: dict[str, str] = {
     "filler_from_cryoetsim: exclude species below this mass, kDa.",
     "target_shape": "Output specimen volume shape in voxels (Z, Y, X).",
     "voxel_size": "Voxel size in Angstrom.",
-    "packing_backend": "Protein collision geometry: 'shape' (default, the "
-    "real rotated footprint against an occupancy grid) or 'sphere' (one "
-    "circumscribing sphere per instance). 'shape' reaches several times the "
-    "density; 'sphere' saturates around 0.03-0.09 volume fraction, but is "
-    "faster.",
-    "packing_voxel_size": "Run packing_backend='shape' collision on a "
+    "packing_voxel_size": "Run protein collision on a "
     "coarser grid than the render, an integer multiple of voxel_size. "
     "Unset = automatic, which only coarsens once the packing grid would be "
     "too large to hold; ordinary boxes are unaffected.",
-    "packing_max_retries": "Trial positions per instance for "
-    "packing_backend='shape'. Sets a packing stage's attempt ceiling; "
+    "packing_max_retries": "Trial positions per instance. Sets a packing "
+    "stage's attempt ceiling; "
     "pairs with the packer's own stall_patience, which cuts that budget "
     "short once a species saturates.",
     "filler_occupancy_fraction": "Target packing density for filler "

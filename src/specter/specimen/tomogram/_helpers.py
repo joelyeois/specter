@@ -187,7 +187,7 @@ def _build_sphere_exclusion_field(
 # describes the machine, not the specimen.
 _MAX_EXCLUSION_FIELD_VOXELS = 200_000_000
 
-# Voxel budget for packing_backend="shape"'s own occupancy grid, above which
+# Voxel budget for protein packing's own occupancy grid, above which
 # `packing_voxel_size=None` coarsens the collision grid automatically. One
 # byte per voxel, so this is a ~1 GB host allocation.
 #

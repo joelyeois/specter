@@ -43,7 +43,7 @@ from specter.specimen.tomogram import (
     TomogramSpecimenGenerator,
     TomogramProteinSpec,
 )
-from specter.specimen.tomogram.generator import _build_sphere_exclusion_field
+from specter.specimen.tomogram._helpers import _build_sphere_exclusion_field
 
 OUT_DIR = "docs/assets/images"
 # Expanded: passed through unexpanded, a literal "~" directory gets

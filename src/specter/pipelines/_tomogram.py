@@ -586,7 +586,6 @@ def build_tomogram_generator(config: TomogramConfig) -> TomogramSpecimenGenerato
         bead_specs=bead_specs,
         bead_roughness=config.bead_roughness,
         occupancy_fraction=config.filler_occupancy_fraction,
-        packing_backend=config.packing_backend,  # type: ignore[arg-type]
         packing_max_retries=config.packing_max_retries,
         packing_voxel_size=config.packing_voxel_size,
         clip_axes=tuple(config.clip_axes),  # type: ignore[arg-type]

@@ -133,7 +133,6 @@ render_chunk_size = 64
 # monomer_library_path = "~/monomers"
 
 # --- Protein packing ---
-# packing_backend = "shape"      # default; "sphere" is faster but ~3x less dense
 # packing_voxel_size = 2.0       # collide on a coarser grid than the render
 
 # --- Gold fiducials ---

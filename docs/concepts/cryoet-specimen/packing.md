@@ -74,35 +74,35 @@ get 25. Ratios only compare *within* a region: the packer fills two
 locations independently, so a cytosol ratio and a lumen ratio have no
 relationship.
 
-## Two collision geometries
+## What the packer collides
 
-Placement is Random Sequential Addition either way. The two backends
-differ in the body they collide, and that choice changes achievable
-density more than any other single choice in the generator.
+Placement is Random Sequential Addition, and the body it collides is the
+molecule's own shape. The packer rasterizes each species into a binary
+footprint, rotates it, and tests it against a running occupancy grid,
+rejecting a placement if any voxel of the rotated molecule meets a voxel
+already taken. The collision body is therefore the molecule, resolved to
+the packing voxel size.
 
-`packing_backend="shape"`, the default, rasterizes each species into a
-binary footprint, rotates it, and tests it against a running occupancy
-grid. It rejects a placement if any voxel of the rotated molecule meets a
-voxel already taken, so the collision body is the molecule's own shape,
-resolved to the packing voxel size.
+The alternative is to collide one circumscribing sphere per instance, of
+radius `PDB.max_diameter / 2`. That is the right geometry for the two
+things in a tomogram that are spheres or have no footprint yet — gold
+fiducials, and membrane instances placed by bounding radius before the
+generator builds their bilayer — and both are still placed that way. For
+proteins it is a poor fit. Measured over 180 cached species, a molecule's
+6.8 Å envelope fills only ~0.178 of its own bounding sphere, so an
+elongated or concave molecule reserves several times the room it occupies.
 
-`packing_backend="sphere"` collides one circumscribing sphere per
-instance, of radius `PDB.max_diameter / 2`. It is faster, and it is the
-right geometry for the two things in a tomogram that are spheres or have
-no footprint yet: gold fiducials, and membrane instances placed by
-bounding radius before the generator builds their bilayer. For proteins
-it is a poor fit. Measured over 180 cached species, a molecule's 6.8 Å
-envelope fills only ~0.178 of its own bounding sphere, so an elongated or
-concave molecule reserves several times the room it occupies.
+Bounding spheres were selectable for proteins too, through a
+`packing_backend` field, until the density they reach turned out not to be
+a specimen. That field is gone: a config still setting it is rejected as an
+unknown field rather than silently ignored.
 
-That difference in achieved density is why the backend choice matters:
-
-![Achieved macromolecule volume fraction against requested occupancy_fraction, for the shape and sphere backends, with the physiological crowding band and CryoTomoSim's own density marked.](../../assets/images/cryoet-packing-backends.png){ width="620" style="display:block;margin:1.2em auto;" }
+![Achieved macromolecule volume fraction against requested occupancy_fraction, for bounding-sphere and footprint collision, with the physiological crowding band and CryoTomoSim's own density marked.](../../assets/images/cryoet-packing-backends.png){ width="620" style="display:block;margin:1.2em auto;" }
 ///caption
-Achieved macromolecule volume fraction against requested occupancy_fraction, for the shape and sphere backends, with the physiological crowding band and CryoTomoSim's own density marked.
+Achieved macromolecule volume fraction against requested occupancy_fraction, for bounding-sphere and footprint collision, with the physiological crowding band and CryoTomoSim's own density marked.
 ///
 
-| | sphere | shape |
+| | bounding spheres | footprints |
 |---|---|---|
 | Macromolecule volume fraction | 0.031 | **0.197** |
 | As concentration | 41 mg/mL | **266 mg/mL** |
@@ -111,34 +111,27 @@ Achieved macromolecule volume fraction against requested occupancy_fraction, for
 The table measures the 121-species CRYOETSIM filler set at 6.8 Å; the
 figure sweeps six species at 5 Å. Absolute values move with the species
 mix and the voxel size, so read the separation between the curves rather
-than either number in isolation.
+than either number in isolation. Both are drawn from candidate pools sized
+separately for each geometry: `occupancy_fraction` is a budget in whatever
+is being collided, and a bounding sphere is ~5.6x a molecule's envelope, so
+one setting does not mean the same thing on both. Comparing them at a
+single value would measure pool sizes rather than geometry.
 
-One trap when reproducing this. `occupancy_fraction` sizes the candidate
-pool in whatever the backend collides: real footprint volume under
-`"shape"`, bounding-sphere volume under `"sphere"`. A bounding sphere is
-~5.6x a molecule's envelope, so the same setting hands the sphere backend
-a much smaller pool in real terms. Comparing the two at one value measures
-pool sizes rather than geometry, and makes whichever backend got the
-smaller pool look worse than it is. The curves above are drawn from pools
-sized separately for each.
-
-Crowded cytoplasm is 200–320 mg/mL, so the sphere backend cannot reach a
-physiological specimen at any setting: `occupancy_fraction` is a
-sphere-volume budget, and RSA jams long before the real volume fraction
-gets there. For reference, [CryoTomoSim](https://github.com/carsonpurnell/cryotomosim_CTS)'s
+Crowded cytoplasm is 200–320 mg/mL, which bounding spheres cannot reach at
+any setting: RSA jams long before the real volume fraction gets there. For
+reference, [CryoTomoSim](https://github.com/carsonpurnell/cryotomosim_CTS)'s
 own output weighs 0.240 by the same measure, and it also collides real
 shapes rather than spheres.
 
-That density is close to free. Running one 5 Å configuration back to back
-on both backends, wall time is 117 s under `"shape"` against 116 s under
-`"sphere"`, of which collision accounts for 28 s and 25 s. Shape collision
-did cost four times the sphere backend's at first: at realistic density
-RSA rejects ~99.8% of attempts, and each rejection compared a candidate's
-whole footprint against the grid. It now rejects on a sparse sample of
-footprint voxels first, which is exact rather than approximate, since a
-sampled voxel is a footprint voxel and finding it occupied is a genuine
-clash. Only a candidate that survives the sample pays for the full
-comparison.
+Footprint collision costs little for that density. On the 5 Å production
+configuration the packer places 19,249 filler instances to 37.7% occupancy
+in 6 s, and rendering them takes 7 s, of a 31 s run. The reason it is not
+more is the reject path: at realistic density RSA rejects ~99.8% of
+attempts, and testing a candidate's whole footprint on each rejection would
+be the entire cost. The packer rejects on a sparse sample of footprint
+voxels first, which is exact rather than approximate, since a sampled voxel
+is a footprint voxel and finding it occupied is a genuine clash. Only a
+candidate that survives the sample pays for the full comparison.
 
 ### Packing coarser than you render
 
@@ -161,17 +154,19 @@ reaches volume fraction 0.264 versus 0.269 with no overlapping voxels,
 0.348, but that density comes from under-sized collision geometry, not
 better packing.
 
-## RSA sphere packing
+## Sphere packing, for beads and membranes
 
-The sphere backend's placement is Random Sequential Addition, fully
-vectorized across candidates. It places spheres
-**largest-radius-first, in stages**: one
-stage per unique radius, carrying accepted spheres forward. Within a
-stage, every remaining candidate gets one trial position per pass. The
-packer generates and conflict-checks positions simultaneously through a
-`vesin` neighbour list, and resolves candidates that conflict within the
-same pass with a one-shot "local minimum priority wins" independent-set
-selection, rather than a Python loop over pairs.
+Gold fiducials and membrane instances have no footprint to collide — a
+bead is a sphere, and a membrane instance is placed before its bilayer
+exists — so both are packed by bounding radius instead. That packer is
+also Random Sequential Addition, fully vectorized across candidates. It
+places spheres **largest-radius-first, in stages**: one stage per unique
+radius, carrying accepted spheres forward. Within a stage, every remaining
+candidate gets one trial position per pass. The packer generates and
+conflict-checks positions simultaneously through a `vesin` neighbour list,
+and resolves candidates that conflict within the same pass with a one-shot
+"local minimum priority wins" independent-set selection, rather than a
+Python loop over pairs.
 
 That last point buys the speed: resolving many candidates' accept/reject
 decisions per pass, rather than one at a time, runs ~90× faster than a
@@ -192,9 +187,8 @@ above; that is geometry, not a scheduling failure.
 ### Where the ceiling is
 
 RSA has a hard jamming limit well below random close packing, and
-`occupancy_fraction` is therefore a **budget, not a promise**. The
-measurements in this section are bare-sphere occupancy under
-`packing_backend="sphere"`:
+`occupancy_fraction` is therefore a **budget, not a promise**. Bare
+spheres show the limit in its simplest form:
 
 ![Achieved bare-sphere occupancy against requested occupancy_fraction, for a monodisperse and a polydisperse pool.](../../assets/images/cryoet-packing-rsa-limit.png){ width="620" style="display:block;margin:1.2em auto;" }
 ///caption
@@ -203,16 +197,14 @@ Achieved bare-sphere occupancy against requested occupancy_fraction, for a monod
 
 Requested and achieved track each other up to ~0.2 and then part company.
 A monodisperse pool saturates near 0.28; a polydisperse one reaches ~0.41,
-because small spheres fit into gaps the large ones leave. Under the sphere
-backend, raising `filler_occupancy_fraction` past ~0.5 does nothing but
-grow the candidate pool.
+because small spheres fit into gaps the large ones leave.
 
-The shape backend jams too, and polydispersity raises its ceiling the same
+Footprint packing jams too, and polydispersity raises its ceiling the same
 way, measured in macromolecule volume fraction on real molecules:
 
-![Achieved macromolecule volume fraction against requested occupancy_fraction under the shape backend, for a single species and a five-species mix.](../../assets/images/cryoet-packing-shape-jamming.png){ width="600" style="display:block;margin:1.2em auto;" }
+![Achieved macromolecule volume fraction against requested occupancy_fraction, for a single species and a five-species mix.](../../assets/images/cryoet-packing-shape-jamming.png){ width="600" style="display:block;margin:1.2em auto;" }
 ///caption
-Achieved macromolecule volume fraction against requested occupancy_fraction under the shape backend, for a single species and a five-species mix.
+Achieved macromolecule volume fraction against requested occupancy_fraction, for a single species and a five-species mix.
 ///
 
 A single species saturates near 0.185 and stays there. A five-species mix
@@ -233,7 +225,7 @@ lower ceiling, reached in seconds, is the actual target.
 
 ## One field for obstacles and regions
 
-The shape backend needs no distance field. Membranes, filaments, carbon
+Footprint packing needs no distance field. Membranes, filaments, carbon
 and placed instances are already volumes, so the packer stamps them
 straight into the one boolean grid it collides against. You restrict a
 region by seeding that grid as occupied everywhere outside it:
@@ -243,12 +235,12 @@ region by seeding that grid as occupied everywhere outside it:
 Three panels of one z-slice: the region complement alone, then with a membrane and filament stamped in, then with every packed protein added.
 ///
 
-The backend rejects a candidate if its rotated footprint meets any set
+The packer rejects a candidate if its rotated footprint meets any set
 voxel, so obstacle avoidance, region restriction and instance-instance
 collision collapse into one test instead of three mechanisms.
 
-The sphere backend cannot do that, since it has no footprint to test. It
-uses a distance field instead: both "stay out of the membrane" and "stay
+Beads and membrane instances cannot do that, having no footprint to test.
+They use a distance field instead: both "stay out of the membrane" and "stay
 inside the lumen" share the same input, a field giving the physical
 distance to the nearest **forbidden** voxel. It rejects a candidate
 unless the field, sampled at its centre, exceeds `radius + gap`, meaning
@@ -326,30 +318,25 @@ your own list breaks nothing downstream.
 | `location` | `cytosol` or `lumen`, per species | `cytosol` |
 | `n_copies` | Exact instance count (target mode) | — |
 | `ratio` | Relative abundance among filler species in the same region | 1.0 |
-| `occupancy_fraction` | Candidate-pool volume budget, per region, measured in whatever the backend collides | 0.2 (`1.0` in the shipped TOML) |
-| `packing_backend` | `shape` (real footprints) or `sphere` (bounding spheres) | `shape` |
+| `occupancy_fraction` | Candidate-pool volume budget, per region, in real footprint volume | 0.2 (`1.0` in the shipped TOML) |
 | `packing_voxel_size` | Collide on a coarser grid than the render | auto |
-| `packing_max_retries` | Trial positions per instance, shape backend | 1500 |
+| `packing_max_retries` | Trial positions per instance | 1500 |
 | `clip_axes` | Per axis (z, y, x): may an instance's body poke past that wall? | all `False` |
 | `region_max_passes` | Pass/stall budget for a tight region | 300 |
 | `region_density_threshold` | Shell threshold for classification | 5% of peak |
 
 ## Limitations
 
-- **Voxel-quantized collision.** The shape backend collides footprints
-  rasterized on the packing grid, so the packer resolves a molecule only
-  to that voxel size. Under `packing_backend="sphere"` the collision body is
-  instead each species' bounding sphere, which reserves far more room than
-  an elongated or concave molecule occupies and caps achievable density
-  around a third of crowded cytoplasm.
+- **Voxel-quantized collision.** Footprints are rasterized on the packing
+  grid, so the packer resolves a molecule only to that voxel size.
 - **No spatial structure within a region.** Placement is uniform
   throughout a region; there is no clustering, no gradient, no
   surface affinity. (The single-particle path's
   `MicrographSpecimenGenerator` does offer an air-water-interface
   adsorption bias; this generator has no equivalent. Its realism comes
   from region gating against real membrane geometry instead.)
-- **Coarse-field bleed** (sphere backend). For very large boxes the
-  packer builds the exclusion field on a coarsened grid, and trilinear
+- **Coarse-field bleed** (beads and membrane instances). For very large
+  boxes their exclusion field is built on a coarsened grid, and trilinear
   sampling near a boundary lets a candidate's distance run a couple of Å
   past the exact value.
 - **Contact, not interpenetration.** Instances may touch but never

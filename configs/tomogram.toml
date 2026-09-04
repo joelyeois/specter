@@ -165,7 +165,6 @@ bulk_scattering_factors = "kirkland"  # the carbon film and gold beads. No ice
                                       # `simulate tiltseries` blends the ice in
 
 # --- Protein packing ---
-# packing_backend = "shape"      # default; "sphere" is faster but ~3x less dense
 # packing_max_retries = 1500     # trial positions per instance, "shape" only
 # packing_voxel_size = 2.0       # collide on a coarser grid than the render
 

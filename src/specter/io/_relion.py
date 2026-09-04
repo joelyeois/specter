@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 import mrcfile
 import numpy as np
@@ -11,8 +11,15 @@ import starfile
 import torch
 from rich.console import Console
 
-from ..imagegenerator import ParticleGeneratorBase
 from ._common import _select_particles
+
+if TYPE_CHECKING:
+    # Annotation-only. Importing `..imagegenerator` eagerly would pull the whole
+    # forward-model stack (and with it `lightning`, `torchmetrics`, `matplotlib`)
+    # into every `import specter.io`, which otherwise needs only starfile/pandas/
+    # mrcfile/roma: ~11 s against ~4 s. `from __future__ import annotations` above
+    # makes the signature below a string, so nothing needs the class at runtime.
+    from ..imagegenerator import ParticleGeneratorBase
 
 _console = Console()
 

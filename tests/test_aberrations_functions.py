@@ -220,13 +220,12 @@ def test_defocus_increases_with_z():
         c = nxy // 2
         V[0, k - 2 : k + 3, c - 4 : c + 5, c - 4 : c + 5] = 50.0
         model = MicrographGenerator(
-            None,
+            V,
             nxy,
             px,
             {"cs": torch.tensor([2.7e7]), "dfu": torch.tensor([defocus])},
             300.0,
             torch.tensor([100.0]),
-            volume=V,
             verbose=False,
             progressbars=False,
             propagation=Propagation(scattering_model="multislice", alpha=0.1),

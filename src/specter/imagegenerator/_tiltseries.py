@@ -105,8 +105,6 @@ class TiltSeriesGenerator(MicrographGenerator):
         ice, so reflecting would fabricate density that isn't physically present).
         Validated at 16-32px -- identical result across that whole range (already
         converged), independent of volume size or multislice step count. Default 16.
-    chunk_size : int, optional
-        Chunk size for ``MicrographSpecimenGenerator`` (unused here but passed to parent).
     progressbars : bool, optional
         Show progress bars. Default True.
     verbose : bool, optional
@@ -173,7 +171,6 @@ class TiltSeriesGenerator(MicrographGenerator):
         ice: Ice = Ice(),
         icemaker: IceBank | RandomIcemaker | None = None,
         fft_pad_margin: int = 16,
-        chunk_size: int = 1,
         progressbars: bool = True,
         verbose: bool = True,
         slice_batchsize: int = 1,
@@ -300,13 +297,12 @@ class TiltSeriesGenerator(MicrographGenerator):
                 )
 
         super().__init__(
-            scattering_potential=None,
+            specimen=volume,
             micrograph_size=micrograph_size,
             pixel_size=pixel_size,
             ctf_params=ctf_params,
             voltage=voltage,
             dose_per_angstrom=dose_per_angstrom,
-            volume=volume,
             anisomag=anisomag,
             # NOT pad_fft: MicrographGenerator/BaseImager's own pad_fft mechanism
             # (pad_nxy -> whole-volume XY padding, aberration built at pad_nxy) is
@@ -321,7 +317,6 @@ class TiltSeriesGenerator(MicrographGenerator):
             optics=optics,
             envelopes=envelopes,
             camera=camera,
-            chunk_size=chunk_size,
             progressbars=progressbars,
             verbose=verbose,
             slice_batchsize=slice_batchsize,

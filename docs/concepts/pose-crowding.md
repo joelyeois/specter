@@ -56,8 +56,8 @@ ice, so every later stage in the chain sees the final, padded extent.
 
 ## Crowding
 
-`CrowdWithDuplicates`, attached to a generator when `crowd_min_distance`
-is set, adds rigid-transformed copies of the *same* template volume
+`CrowdWithDuplicates`, attached to a generator whose `Crowding` settings
+group sets `min_distance`, adds rigid-transformed copies of the *same* template volume
 around the primary instance, each independently rotated and placed by
 Poisson-disk sampling (2D, in the image plane only, or 3D, throughout the
 volume). This models local particle crowding within one particle's box,
@@ -66,22 +66,23 @@ assembly, which places independent particle species, usually different
 from each other, across a whole micrograph; see
 [Pipeline overview](pipeline-overview.md#how-the-generator-classes-use-it).
 
-`crowd_min_distance` (the Poisson-disk minimum separation) controls
-sampling density; `crowd_max_distance_z` and an implicit XY bound
-derived from the volume size cap it. `n_points=inf` by default, so
+`Crowding.min_distance` (the Poisson-disk minimum separation) controls
+sampling density; `max_distance_z` and an implicit XY bound derived from
+the volume size cap it. In a TOML config the same fields carry a `crowd_`
+prefix (`crowd_min_distance`, `crowd_max_distance_z`). `n_points=inf` by default, so
 sampling continues until the box is full rather than stopping at a fixed
 count.
 
-Left unset, `crowd_max_distance_z` is the particle box's own depth, and
+Left unset, `max_distance_z` is the particle box's own depth, and
 it does not follow `ice_thickness`. The two are separate knobs on
 purpose: raising `ice_thickness` lowers contrast and deepens the solvent
 background, and letting it also deepen the neighbour slab would make a
 single field change both the imaging conditions and the specimen. In a
 thick-ice box the neighbours therefore occupy the middle of the column
-and the remainder is water. Set `crowd_max_distance_z` explicitly to
-crowd a deeper slab. `MicrographGenerator` scales its own neighbour slab
+and the remainder is water. Set `max_distance_z` explicitly to crowd a
+deeper slab. `MicrographSpecimenGenerator` scales its own neighbour slab
 with the volume depth instead, since a micrograph is a specimen rather
-than a controlled single-particle experiment. `crowd_chunk_size` limits how many duplicate volumes
+than a controlled single-particle experiment. `chunk_size` limits how many duplicate volumes
 `CrowdWithDuplicates` rotates per batch, trading GPU memory for speed;
 the default of 1 is the memory-safe choice, and `None` rotates every
 duplicate at once.

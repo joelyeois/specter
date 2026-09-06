@@ -21,6 +21,8 @@ image formation, and which of them a class accepts says what it models:
 - `TiltGeometry`: the tilt axis and edge tapers a tilt series is imaged
   with, shared by `TiltSeriesGenerator` and `TomogramReconstructor`.
 - `Ice`: the amorphous ice a specimen is embedded in, forward-only.
+- `Crowding` and `Packing`: how duplicates of a particle template are
+  placed around it, and which collision test decides where they fit.
 
 Per-image data (poses, CTF parameters, dose, coincidence radius, potential
 scale) stays as direct tensor arguments, and the two scalars that define
@@ -54,9 +56,11 @@ AberrationBackend = Literal["legacy", "torch_ctf"]
 __all__ = [
     "AberrationBackend",
     "Camera",
+    "Crowding",
     "Envelopes",
     "Ice",
     "Optics",
+    "Packing",
     "Propagation",
     "TiltGeometry",
     "bundle_from_config",
@@ -289,6 +293,97 @@ class Ice:
             raise ValueError(f"thickness={self.thickness} must be non-negative")
         if self.relax_steps < 0:
             raise ValueError(f"relax_steps={self.relax_steps} must be non-negative")
+
+
+@dataclass(frozen=True)
+class Crowding:
+    """
+    How duplicates of a particle template are packed around it.
+
+    Parameters
+    ----------
+    min_distance : float, optional
+        Minimum centre-to-centre distance between duplicates, in Angstrom.
+        Default None: no crowding at all.
+    max_distance_z : float, optional
+        Depth of the slab duplicates are placed in, in Angstrom. Default
+        None: the template's own depth for a particle stack (a contrast knob
+        like ice thickness must not deepen the neighbour slab), the whole
+        box for a micrograph specimen.
+    max_distance_xy : float, optional
+        Lateral extent duplicates are placed over, in Angstrom. Default
+        None: the box.
+    method : {"2d", "3d"}
+        Poisson-disk sampling dimensionality. Default ``"3d"``.
+    n_points : int, optional
+        Cap on the number of duplicates. Default None, fill the volume.
+    seed : {"origin", "random"}
+        Where the Poisson-disk sampling starts. Default ``"origin"``.
+    chunk_size : int
+        Duplicates rotated per batch. Default 1, both the cheapest and the
+        fastest setting.
+    water_air_interface : bool
+        Bias the duplicates' z distribution toward the ice surfaces, as
+        particles adsorb there during vitrification. Default False.
+    sigma_frac, peak_amplitude, baseline : float
+        The shape of that bias, see
+        :func:`specter.crowding.filter_by_z_density`.
+    """
+
+    min_distance: float | None = None
+    max_distance_z: float | None = None
+    max_distance_xy: float | None = None
+    method: Literal["2d", "3d"] = "3d"
+    n_points: int | None = None
+    seed: Literal["origin", "random"] = "origin"
+    chunk_size: int = 1
+    water_air_interface: bool = False
+    sigma_frac: float = 0.05
+    peak_amplitude: float = 1.0
+    baseline: float = 0.1
+
+    def __post_init__(self) -> None:
+        if self.min_distance is not None and self.min_distance <= 0:
+            raise ValueError(f"min_distance={self.min_distance} must be positive")
+        if self.chunk_size < 1:
+            raise ValueError(f"chunk_size={self.chunk_size} must be at least 1")
+
+
+@dataclass(frozen=True)
+class Packing:
+    """
+    The collision test a `Crowding` placement uses.
+
+    Parameters
+    ----------
+    backend : {"poisson_disk", "shape"}
+        ``"poisson_disk"`` (default) rejects on bounding spheres;
+        ``"shape"`` collides the template's real rotated footprint and packs
+        several times denser, see :func:`specter.specimen.packing.pack_shapes_3d`.
+    gap : float
+        Extra clearance between footprints in Angstrom (shape backend).
+        Default 0.
+    n_orientations : int
+        Rotations cached per template (shape backend). Default 256.
+    max_retries : int
+        Rejected attempts before the packing stops; sets the density reached
+        (shape backend). Default 1500.
+    stall_patience : int
+        Consecutive rejections tolerated before giving up (shape backend).
+        Default 5000.
+    seed : int, optional
+        RNG seed for the packing (shape backend). Default None.
+    n_candidates : int, optional
+        Candidate positions drawn (shape backend). Default None, estimated.
+    """
+
+    backend: Literal["poisson_disk", "shape"] = "poisson_disk"
+    gap: float = 0.0
+    n_orientations: int = 256
+    max_retries: int = 1500
+    stall_patience: int = 5000
+    seed: int | None = None
+    n_candidates: int | None = None
 
 
 _B = TypeVar("_B")

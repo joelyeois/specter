@@ -69,12 +69,13 @@ differently but hand it to the same downstream chain.
   [Conventions](conventions.md#applying-a-pose-real-space-or-fourier-space)).
   Cheaper per call than the coordinate path, at the cost of losing
   per-atom gradients.
-- **`MicrographGenerator`** does not use the particle-level crowding
-  described above. Instead it assembles a full field of view via
-  `MicrographSpecimenGenerator`, which Poisson-disk places many
-  *independent* particle instances (not duplicates of one template) across
-  the micrograph, then runs `IterativeScattering` slice-by-slice over the
-  whole assembled volume.
+- **`MicrographGenerator`** images a whole field of view rather than one
+  box. Its specimen is either a pre-built volume or a
+  `MicrographSpecimenGenerator`, which places duplicates of one template
+  across the micrograph with the same `Crowding` machinery (plus a
+  `Packing` collision backend and its own `Ice`), and can rebuild the
+  specimen for every micrograph. It then runs `IterativeScattering`
+  slice-by-slice over the whole assembled volume.
 - **`TiltSeriesGenerator`** runs the same scattering → aberration →
   detector chain once per tilt angle, using `IterativeScattering` to
   resample Z-slices from the volume under each tilt's affine pose rather

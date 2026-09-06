@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-from typing import Literal
-
 import torch
 import lightning as L
 
+from ..arrays import compute_nz
 from ..crowding import CrowdWithDuplicates
 from ..ice import (
     IceBank,
@@ -14,7 +13,7 @@ from ..ice import (
     resolve_icemaker,
 )
 from ..progress import status
-from ..settings import Ice
+from ..settings import Crowding, Ice, Packing
 
 
 class MicrographSpecimenGenerator(L.LightningModule):
@@ -52,149 +51,130 @@ class MicrographSpecimenGenerator(L.LightningModule):
 
     Parameters
     ----------
+    template : torch.Tensor, optional
+        The particle potential to embed, shape (Z, Y, X). None gives an
+        empty (ice-only) specimen, for which ``nz`` is required.
     pixel_size : float
         Voxel size in Å.
-    nz : int
-        Number of slices in Z.
     nxy : int
-        Number of pixels in X and Y.
-    scattering_potential : torch.Tensor, optional
-        A template potential (e.g., proteins) to embed. Shape (Z, Y, X).
-    crowd_min_distance : float, optional
-        Minimum distance between crowding molecules in Å.
-    crowd_max_distance_z : float, optional
-        Range in Z where crowding molecules are placed.
+        Number of voxels in X and Y.
+    nz : int, optional
+        Number of slices in Z. Defaults to the depth the ice asks for: the
+        thickest column of ``ice.profile``, else ``ice.thickness`` (at least
+        the template's own depth), else the template's depth.
+    crowding : Crowding, optional
+        How duplicates of the template are packed into the volume. Default
+        ``Crowding()``, which places none.
+    packing : Packing, optional
+        The collision backend for those duplicates. The ``"shape"`` backend
+        needs ``atom_coordinates``. Default ``Packing()``, Poisson-disk.
+    atom_coordinates : torch.Tensor, optional
+        The template's real atomic coordinates (``PDB.coordinates``),
+        required by ``packing.backend="shape"``.
     ice : Ice, optional
         The amorphous ice: model, thickness (or a laterally varying
-        ``profile``, in which case the caller sizes ``nz`` from
-        :meth:`~specter.ice.IceProfile.required_nz` and particle placement
-        is gated on each column's own slab), library, seam relaxation and
-        scattering factors. Default ``Ice()``, no ice.
+        ``profile``, in which case particle placement is gated on each
+        column's own slab), library, seam relaxation and scattering factors.
+        Default ``Ice()``, no ice.
     icemaker : IceBank or RandomIcemaker, optional
         A pre-built icemaker instance to reuse across generators. When
         supplied, ``ice.model`` and ``ice.cache_dir`` are ignored.
-    water_air_interface : bool, optional
-        Whether to account for water-air interface in crowding and ice.
-    sigma_frac : float, optional
-        Forwarded to ``CrowdWithDuplicates``. Only used when
-        ``water_air_interface=True``.
-    peak_amplitude : float, optional
-        Forwarded to ``CrowdWithDuplicates``. Only used when
-        ``water_air_interface=True``.
-    baseline : float, optional
-        Forwarded to ``CrowdWithDuplicates``. Only used when
-        ``water_air_interface=True``.
+    move_to_cpu : bool, optional
+        Assemble the volume on the host rather than the compute device: a
+        micrograph canvas is tens of GB at 4096 px, and the imager streams
+        it slice by slice when it does not fit. Default True.
     progressbars : bool, optional
         Whether to show progress bars.
-    chunk_size : int, optional
-        Crowding duplicate volumes rotated per batch, forwarded to
-        ``CrowdWithDuplicates``. Default 1; see that class for why raising it
-        trades memory for nothing.
-    packing_backend : {'poisson_disk', 'shape'}, optional
-        Forwarded to ``CrowdWithDuplicates``. ``'shape'`` collides the
-        template's real rotated footprint (via
-        ``~specter.specimen.packing.pack_shapes_3d``) instead of
-        bounding-sphere-exclusion Poisson-disk sampling, reaching
-        substantially higher crowding density -- measured on a 512x512x256
-        A benchmark of this class's own placement, 8.6x more instances and
-        8.6x the occupied volume fraction at the same ``crowd_min_distance``
-        and box. See ``CrowdWithDuplicates``'s own docstring for the
-        mechanism, including how it handles ``ice_profile`` confinement and
-        ``water_air_interface`` adsorption. Requires ``atom_coordinates``.
-        Default ``'poisson_disk'``.
-    atom_coordinates : torch.Tensor, optional
-        The template's real atomic coordinates -- ``PDB.coordinates`` --
-        required (and used only) when ``packing_backend='shape'``.
-    packing_gap : float, optional
-        Forwarded to ``CrowdWithDuplicates`` as ``gap``. Shape backend only.
-    n_orientations : int, optional
-        Forwarded to ``CrowdWithDuplicates``. Shape backend only.
-    packing_max_retries : int, optional
-        Forwarded to ``CrowdWithDuplicates``. Shape backend only.
-    packing_stall_patience : int, optional
-        Forwarded to ``CrowdWithDuplicates``. Shape backend only.
-    packing_seed : int, optional
-        Forwarded to ``CrowdWithDuplicates``. Shape backend only.
-    n_candidates : int, optional
-        Forwarded to ``CrowdWithDuplicates``. Shape backend only.
+    save_clean_exitwaves : bool, optional
+        Keep the pre-ice volume as ``clean_V`` (a whole extra canvas), for
+        an imager that wants the ice-free exit wave. Default False.
     """
 
     def __init__(
         self,
+        template: torch.Tensor | None,
         pixel_size: float,
-        nz: int,
         nxy: int,
-        scattering_potential: torch.Tensor | None = None,
-        crowd_min_distance: float | None = None,
-        crowd_max_distance_z: float | None = None,
+        nz: int | None = None,
+        crowding: Crowding = Crowding(),
+        packing: Packing = Packing(),
+        atom_coordinates: torch.Tensor | None = None,
         ice: Ice = Ice(),
         icemaker: IceBank | RandomIcemaker | None = None,
-        water_air_interface: bool = True,
-        sigma_frac: float = 0.05,
-        peak_amplitude: float = 1.0,
-        baseline: float = 0.1,
-        progressbars: bool = True,
-        chunk_size: int = 1,
         move_to_cpu: bool = True,
+        progressbars: bool = True,
         save_clean_exitwaves: bool = False,
-        packing_backend: Literal["poisson_disk", "shape"] = "poisson_disk",
-        atom_coordinates: torch.Tensor | None = None,
-        packing_gap: float = 0.0,
-        n_orientations: int = 256,
-        packing_max_retries: int = 1500,
-        packing_stall_patience: int = 5000,
-        packing_seed: int | None = None,
-        n_candidates: int | None = None,
     ):
         super().__init__()
         self.pixel_size = pixel_size
-        self.nz = nz
         self.nxy = nxy
-        self.scattering_potential = scattering_potential
-        self.crowd_min_distance = crowd_min_distance
-        self.crowd_max_distance_z = crowd_max_distance_z
+        self.template = template
+        self.crowding = crowding
+        self.packing = packing
+        self.atom_coordinates = atom_coordinates
         self.ice = ice
         self.ice_model = ice.model
-        self.ice_thickness = ice.thickness
         self.ice_profile: IceProfile | None = ice.profile
         self.ice_relax_steps = ice.relax_steps
-        self.water_air_interface = water_air_interface
         self.progressbars = progressbars
-        self.chunk_size = chunk_size
         self.move_to_cpu = move_to_cpu
         self.save_clean_exitwaves = save_clean_exitwaves
-        self.packing_backend = packing_backend
-        self.atom_coordinates = atom_coordinates
+
+        if nz is None:
+            if template is None:
+                raise ValueError("nz is required when there is no template.")
+            base_nz = int(template.shape[0])
+            nz = (
+                ice.profile.required_nz(nxy, pixel_size, base_nz)
+                if ice.profile is not None
+                else compute_nz(base_nz, ice.thickness, pixel_size)
+            )
+        self.nz = int(nz)
+        # The ice's own thickness, not the box depth: the two differ when a
+        # profile leaves part of the box empty.
+        self.ice_thickness = (
+            float(ice.profile.thickness(nxy, pixel_size).mean())
+            if ice.profile is not None
+            else self.nz * pixel_size
+        )
 
         self.crowd: CrowdWithDuplicates | None
-        if self.crowd_min_distance is not None and scattering_potential is not None:
-            crowd_max_distance_z_angstrom = (
-                crowd_max_distance_z
-                if crowd_max_distance_z is not None
-                else nz * pixel_size
-            )
+        if crowding.min_distance is not None and template is not None:
             self.crowd = CrowdWithDuplicates(
-                scattering_potential,
+                template,
                 pixel_size,
-                self.crowd_min_distance,
+                crowding.min_distance,
                 nxy_out=nxy,
-                nz_out=nz,
-                packing_backend=packing_backend,
+                nz_out=self.nz,
+                packing_backend=packing.backend,
                 atom_coordinates=atom_coordinates,
-                gap=packing_gap,
-                n_orientations=n_orientations,
-                packing_max_retries=packing_max_retries,
-                packing_stall_patience=packing_stall_patience,
-                packing_seed=packing_seed,
-                n_candidates=n_candidates,
-                max_distance_z=crowd_max_distance_z_angstrom,
-                max_distance_xy=nxy * pixel_size,
+                gap=packing.gap,
+                n_orientations=packing.n_orientations,
+                packing_max_retries=packing.max_retries,
+                packing_stall_patience=packing.stall_patience,
+                packing_seed=packing.seed,
+                n_candidates=packing.n_candidates,
+                max_distance_z=(
+                    crowding.max_distance_z
+                    if crowding.max_distance_z is not None
+                    else self.nz * pixel_size
+                ),
+                max_distance_xy=(
+                    crowding.max_distance_xy
+                    if crowding.max_distance_xy is not None
+                    else nxy * pixel_size
+                ),
+                method=crowding.method,
+                n_points=(
+                    crowding.n_points if crowding.n_points is not None else torch.inf
+                ),
+                seed=crowding.seed,
                 progressbars=progressbars,
-                chunk_size=chunk_size,
-                water_air_interface=water_air_interface,
-                sigma_frac=sigma_frac,
-                peak_amplitude=peak_amplitude,
-                baseline=baseline,
+                chunk_size=crowding.chunk_size,
+                water_air_interface=crowding.water_air_interface,
+                sigma_frac=crowding.sigma_frac,
+                peak_amplitude=crowding.peak_amplitude,
+                baseline=crowding.baseline,
                 move_to_cpu=move_to_cpu,
                 ice_profile=self.ice_profile,
             )
@@ -205,7 +185,7 @@ class MicrographSpecimenGenerator(L.LightningModule):
             self.ice_model,
             pixel_size,
             nxy=nxy,
-            nz=nz,
+            nz=self.nz,
             ice_cache_dir=ice.cache_dir,
             icemaker=icemaker,
             parameterization=ice.parameterization,
@@ -234,12 +214,9 @@ class MicrographSpecimenGenerator(L.LightningModule):
             with torch.no_grad():
                 V_crowd = self.crowd()
                 if not isinstance(V_crowd, float):
-                    # Adopted: `crowd()` already returns a full canvas. It used
-                    # to be added into a zeroed canvas allocated up front, and
-                    # even after that sum was dropped the zeros were still
-                    # allocated and then replaced -- two touched canvases,
-                    # 33.6 GB each at micrograph_size, and the whole of the
-                    # difference between 67 and 34 GB of host memory.
+                    # `crowd()` already returns a full canvas; adopting it
+                    # rather than adding it into a zeroed one saves a whole
+                    # touched canvas (33.6 GB at micrograph_size).
                     V = V_crowd.to(assembly_device).reshape(shape)
                     del V_crowd
         if V is None:

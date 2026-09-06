@@ -1,16 +1,15 @@
 from __future__ import annotations
 
 import warnings
-from typing import Any, Literal
+from typing import Any
 
 import torch
 
 from specter import logger
 
-from ._base import BaseImager, compute_nz, pad_volume
+from ._base import BaseImager, pad_volume
 from ..ice import (
     IceBank,
-    IceProfile,
     RandomIcemaker,
     blend_ice_into_volume,
     resolve_icemaker,
@@ -23,18 +22,26 @@ from ..specimen import MicrographSpecimenGenerator
 
 class MicrographGenerator(BaseImager):
     """
-    Generates large micrographs by processing a full specimen volume.
+    Images a full specimen volume as a micrograph.
 
-    The volume is either supplied directly (``volume``) or assembled internally
-    via ``MicrographSpecimenGenerator`` from a ``scattering_potential`` template with
-    optional crowding and ice.  Scattering is performed slice-by-slice using
+    The specimen is either a pre-assembled volume or a
+    `MicrographSpecimenGenerator`, which builds one from a particle template
+    with crowding and ice and can rebuild it for every micrograph
+    (`regenerate_specimen`). Scattering is performed slice-by-slice using
     ``IterativeScattering``.
 
     Parameters
     ----------
-    scattering_potential : torch.Tensor or None
-        Template potential (Z, Y, X) used by ``MicrographSpecimenGenerator`` to build
-        the specimen volume.  Must be ``None`` when ``volume`` is provided.
+    specimen : MicrographSpecimenGenerator or torch.Tensor
+        What is imaged. A `MicrographSpecimenGenerator` carries its own
+        crowding, packing and ice, and ``ice``/``icemaker`` below must then be
+        left unset. A tensor is a pre-assembled volume of shape (1, Z, Y, X)
+        -- e.g. the output of
+        :func:`~specter.pipelines.build_tomogram_generator`/`specter build
+        tomogram` -- imaged as is, except that ``ice``/``icemaker`` blend ice
+        into it once, at construction, wherever it has little existing
+        scattering potential (the same masking rule as ``ImageGenerator``'s
+        ``solvate()``).
     micrograph_size : int or tuple[int, int]
         Output image size in pixels (must be square).
     pixel_size : float
@@ -47,6 +54,8 @@ class MicrographGenerator(BaseImager):
     dose_per_angstrom : float or torch.Tensor
         Total electron dose (fluence) per micrograph in e⁻/Å². Scalar, or a
         1-D tensor of length n giving a separate dose for each micrograph.
+    anisomag : torch.Tensor, optional
+        Anisotropic magnification matrices, shape (n, 2, 2).
     propagation : Propagation, optional
         How the exit wave is computed. Default ``Propagation()``.
     optics : Optics, optional
@@ -55,74 +64,13 @@ class MicrographGenerator(BaseImager):
         Coherence and radiation-damage envelopes. Default ``Envelopes()``.
     camera : Camera, optional
         The detector chain. Default ``Camera()``.
-    volume : torch.Tensor, optional
-        Pre-assembled specimen volume of shape (1, Z, Y, X) -- e.g. the
-        output of
-        :func:`~specter.pipelines.build_tomogram_generator`/`specter build
-        tomogram`.  When provided,
-        ``scattering_potential`` and crowding parameters are ignored, but
-        ``ice_model``/``icemaker`` are still honored: if either is set, ice
-        is generated to match ``volume``'s own size and voxel size and blended
-        in wherever ``volume`` has little existing scattering potential (same
-        masking rule as ``ImageGenerator``'s ``solvate()``), once, at
-        construction time. ``ice_thickness`` is ignored in this path since
-        the volume's Z extent is fixed by ``volume`` itself.
-    anisomag : torch.Tensor, optional
-        Anisotropic magnification matrices, shape (n, 2, 2).
     ice : Ice, optional
-        The amorphous ice: model, thickness (or a laterally varying
-        ``profile``), library, seam relaxation and scattering factors.
-        Used by ``MicrographSpecimenGenerator`` when ``scattering_potential``
-        is given, or blended into ``volume`` at construction when ``volume``
-        is given (``thickness`` is then ignored, since the volume's Z extent
-        is fixed; a ``profile`` still confines the ice). Default ``Ice()``,
-        no ice.
+        Ice blended into a tensor ``specimen`` at construction. ``thickness``
+        is ignored, since the volume's Z extent is fixed; a ``profile`` still
+        confines the ice. Default ``Ice()``, no ice.
     icemaker : IceBank or RandomIcemaker, optional
-        A pre-built icemaker instance to reuse across generator instances.
-        When supplied, ``ice.model`` and ``ice.cache_dir`` are ignored.
-    crowd_min_distance : float, optional
-        Minimum inter-particle distance in Å for crowding.
-    crowd_max_distance_z : float, optional
-        Maximum Z range for crowding placement in Å.
-    water_air_interface : bool, optional
-        Simulate water-air interface in crowding and ice. Default True.
-    sigma_frac : float, optional
-        Forwarded to ``CrowdWithDuplicates``. Only used when
-        ``water_air_interface=True``.
-    peak_amplitude : float, optional
-        Forwarded to ``CrowdWithDuplicates``. Only used when
-        ``water_air_interface=True``.
-    baseline : float, optional
-        Forwarded to ``CrowdWithDuplicates``. Only used when
-        ``water_air_interface=True``.
-    packing_backend : {'poisson_disk', 'shape'}, optional
-        Forwarded to ``MicrographSpecimenGenerator``/``CrowdWithDuplicates``.
-        ``'shape'`` reaches substantially higher crowding density than the
-        default bounding-sphere Poisson-disk placement -- see
-        ``CrowdWithDuplicates``'s own docstring. Requires
-        ``atom_coordinates``. Default ``'poisson_disk'``.
-    atom_coordinates : torch.Tensor, optional
-        The template's real atomic coordinates -- ``PDB.coordinates`` --
-        required (and used only) when ``packing_backend='shape'``.
-    packing_gap : float, optional
-        Forwarded as ``CrowdWithDuplicates``'s ``gap``. Shape backend only.
-    n_orientations : int, optional
-        Forwarded to ``CrowdWithDuplicates``. Shape backend only.
-    packing_max_retries : int, optional
-        Forwarded to ``CrowdWithDuplicates``. Shape backend only.
-    packing_stall_patience : int, optional
-        Forwarded to ``CrowdWithDuplicates``. Shape backend only.
-    packing_seed : int, optional
-        Forwarded to ``CrowdWithDuplicates``. Shape backend only.
-    n_candidates : int, optional
-        Forwarded to ``CrowdWithDuplicates``. Shape backend only.
-    chunk_size : int, optional
-        Crowding duplicate volumes rotated per batch, forwarded to
-        ``MicrographSpecimenGenerator``. Default 1, which is both the cheapest
-        and the fastest setting -- see ``CrowdWithDuplicates``.
-    move_to_cpu : bool, optional
-        Move the assembled volume to CPU after generation to save GPU memory.
-        Default True.
+        A pre-built icemaker for that blend. When supplied, ``ice.model`` and
+        ``ice.cache_dir`` are ignored.
     slice_batchsize : int, optional
         Number of Z slices propagated together in ``IterativeScattering``.
         Default 1.
@@ -135,8 +83,9 @@ class MicrographGenerator(BaseImager):
     potential_scale : float or torch.Tensor, optional
         Multiplier applied to the potential before scattering. Default 1.0.
     save_clean_exitwaves : bool, optional
-        Save exit waves computed without ice (requires ``scattering_potential``
-        path). Default False.
+        Also compute the exit wave of the ice-free specimen
+        (``clean_exitwaves``). Needs a `MicrographSpecimenGenerator` built
+        with ``save_clean_exitwaves=True``. Default False.
     bfactor : float or torch.Tensor or None, optional
         Isotropic B-factor envelope in Å² applied in the microscope transfer
         function. None or 0.0 means no envelope. Default None.
@@ -144,13 +93,12 @@ class MicrographGenerator(BaseImager):
 
     def __init__(
         self,
-        scattering_potential: torch.Tensor | None,
+        specimen: MicrographSpecimenGenerator | torch.Tensor,
         micrograph_size: int | tuple[int, int],
         pixel_size: float,
         ctf_params: dict[str, Any] | None,
         voltage: float,
         dose_per_angstrom: float | torch.Tensor,
-        volume: torch.Tensor | None = None,
         anisomag: torch.Tensor | None = None,
         propagation: Propagation = Propagation(),
         optics: Optics | None = Optics(),
@@ -158,22 +106,6 @@ class MicrographGenerator(BaseImager):
         camera: Camera = Camera(),
         ice: Ice = Ice(),
         icemaker: IceBank | RandomIcemaker | None = None,
-        crowd_min_distance: float | None = None,
-        packing_backend: Literal["poisson_disk", "shape"] = "poisson_disk",
-        atom_coordinates: torch.Tensor | None = None,
-        packing_gap: float = 0.0,
-        n_orientations: int = 256,
-        packing_max_retries: int = 1500,
-        packing_stall_patience: int = 5000,
-        packing_seed: int | None = None,
-        n_candidates: int | None = None,
-        crowd_max_distance_z: float | None = None,
-        water_air_interface: bool = True,
-        sigma_frac: float = 0.05,
-        peak_amplitude: float = 1.0,
-        baseline: float = 0.1,
-        chunk_size: int = 1,
-        move_to_cpu: bool = True,
         slice_batchsize: int = 1,
         progressbars: bool = True,
         verbose: bool = True,
@@ -196,32 +128,51 @@ class MicrographGenerator(BaseImager):
         self.pad_fft = propagation.pad_fft
         self.pad_nxy = nxy + (nxy // 2) * 2 if self.pad_fft else nxy
 
-        self.ice = ice
-        ice_model = ice.model
-        ice_thickness = ice.thickness
-        ice_profile: IceProfile | None = ice.profile
-        self.ice_profile = ice_profile
-
-        if volume is not None:
+        volume: torch.Tensor | None
+        specimen_gen: MicrographSpecimenGenerator | None = None
+        if isinstance(specimen, MicrographSpecimenGenerator):
+            if ice.model is not None or icemaker is not None:
+                raise ValueError(
+                    "A MicrographSpecimenGenerator carries its own ice; pass "
+                    "`ice`/`icemaker` to it rather than to MicrographGenerator."
+                )
+            if specimen.nxy != nxy or specimen.pixel_size != pixel_size:
+                raise ValueError(
+                    f"The specimen is {specimen.nxy} px at {specimen.pixel_size} A "
+                    f"but the micrograph is {nxy} px at {pixel_size} A."
+                )
+            volume = None
+            specimen_gen = specimen
+            self.nz = specimen.nz
+            self.ice = specimen.ice
+            self.ice_model = specimen.ice_model
+            self.ice_profile = specimen.ice_profile
+            self.ice_thickness = specimen.ice_thickness
+            self.move_to_cpu = specimen.move_to_cpu
+        elif isinstance(specimen, torch.Tensor):
+            if specimen.ndim != 4:
+                raise ValueError(
+                    "specimen must be a (1, Z, Y, X) volume; wrap a particle "
+                    "template in MicrographSpecimenGenerator to build one."
+                )
+            volume = specimen
             self.nz = volume.shape[1]
-        elif scattering_potential is not None:
-            base_nz = scattering_potential.shape[0]
-            self.nz = (
-                ice_profile.required_nz(nxy, pixel_size, base_nz)
-                if ice_profile is not None
-                else compute_nz(base_nz, ice_thickness, pixel_size)
+            self.ice = ice
+            self.ice_model = ice.model
+            self.ice_profile = ice.profile
+            # Ice thickness, not box depth: the two are the same only when
+            # the ice fills the box, which a profile breaks.
+            self.ice_thickness = (
+                float(ice.profile.thickness(nxy, pixel_size).mean())
+                if ice.profile is not None
+                else self.nz * pixel_size
             )
+            self.move_to_cpu = False
         else:
-            raise ValueError(
-                "Either 'volume' or 'scattering_potential' must be provided."
+            raise TypeError(
+                "specimen must be a MicrographSpecimenGenerator or a volume "
+                f"tensor, not {type(specimen).__name__}."
             )
-        # Ice thickness, not box depth: the two are the same only when the ice
-        # fills the box, which a profile breaks.
-        self.ice_thickness = (
-            float(ice_profile.thickness(nxy, pixel_size).mean())
-            if ice_profile is not None
-            else self.nz * pixel_size
-        )
 
         super().__init__(
             pixel_size=pixel_size,
@@ -243,19 +194,15 @@ class MicrographGenerator(BaseImager):
             bfactor=bfactor,
         )
 
-        self.chunk_size = chunk_size
-        self.move_to_cpu = move_to_cpu
-        self.water_air_interface = water_air_interface
-        self.ice_model = ice_model
-        self.crowd_max_distance_z = (
-            crowd_max_distance_z if crowd_max_distance_z is not None else self.nz
-        )
+        # A submodule can only be attached after Module.__init__.
+        if specimen_gen is not None:
+            self.specimen_gen = specimen_gen
 
         self._apply_defocus_shift(
             shift_required=self.scattering_model not in ["projection", "ctf"],
             shift=(
-                ice_profile.entry_face_shift(self.nxy, pixel_size)
-                if ice_profile is not None
+                self.ice_profile.entry_face_shift(self.nxy, pixel_size)
+                if self.ice_profile is not None
                 else None
             ),
         )
@@ -277,7 +224,7 @@ class MicrographGenerator(BaseImager):
 
         if volume is not None:
             volume_icemaker = resolve_icemaker(
-                ice_model,
+                ice.model,
                 pixel_size,
                 nxy=volume.shape[-1],
                 nz=volume.shape[-3],
@@ -287,7 +234,7 @@ class MicrographGenerator(BaseImager):
             )
             if volume_icemaker is not None:
                 if self.verbose:
-                    logger.info(f"Adding ice to volume using {ice_model} model")
+                    logger.info(f"Adding ice to volume using {ice.model} model")
                 with (
                     torch.no_grad(),
                     status("Tiling ice volume", disable=not self.progressbars),
@@ -297,36 +244,9 @@ class MicrographGenerator(BaseImager):
                         volume_icemaker,
                         pixel_size,
                         relax_steps=ice.relax_steps,
-                        profile=ice_profile,
+                        profile=ice.profile,
                     )
             self.register_buffer("volume", volume)
-        else:
-            self.specimen_gen = MicrographSpecimenGenerator(
-                pixel_size=pixel_size,
-                nz=self.nz,
-                nxy=self.nxy,
-                scattering_potential=scattering_potential,
-                crowd_min_distance=crowd_min_distance,
-                crowd_max_distance_z=crowd_max_distance_z,
-                packing_backend=packing_backend,
-                atom_coordinates=atom_coordinates,
-                packing_gap=packing_gap,
-                n_orientations=n_orientations,
-                packing_max_retries=packing_max_retries,
-                packing_stall_patience=packing_stall_patience,
-                packing_seed=packing_seed,
-                n_candidates=n_candidates,
-                ice=ice,
-                icemaker=icemaker,
-                water_air_interface=water_air_interface,
-                sigma_frac=sigma_frac,
-                peak_amplitude=peak_amplitude,
-                baseline=baseline,
-                progressbars=progressbars,
-                chunk_size=chunk_size,
-                move_to_cpu=move_to_cpu,
-                save_clean_exitwaves=save_clean_exitwaves,
-            )
 
     def _generate_volume(self) -> None:
         if self.verbose:
@@ -353,7 +273,7 @@ class MicrographGenerator(BaseImager):
         if not hasattr(self, "specimen_gen"):
             raise RuntimeError(
                 "regenerate_specimen() requires the model to have been constructed "
-                "with a scattering_potential, not a pre-built volume."
+                "with a MicrographSpecimenGenerator, not a pre-built volume."
             )
         self._generate_volume()
 

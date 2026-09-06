@@ -34,7 +34,14 @@ from specter.memory import (
 from specter.pdb import PDB
 from specter.potential import PotentialBuilder
 from specter.devices import parse_device, resolve_available_device
-from specter.settings import Camera, Envelopes, Ice, Propagation, bundle_from_config
+from specter.settings import (
+    Camera,
+    Crowding,
+    Envelopes,
+    Ice,
+    Propagation,
+    bundle_from_config,
+)
 from specter.progress import console, format_elapsed, section, track
 
 from ._common import (
@@ -370,15 +377,14 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
             Ice, config, prefix="ice_", parameterization=ice_parameterization
         ),
         icemaker=icemaker,
-        crowd_min_distance=crowd_min_distance,
-        crowd_max_distance_z=config.crowd_max_distance_z,
-        crowd_max_distance_xy=config.crowd_max_distance_xy,
-        crowd_chunk_size=config.crowd_chunk_size,
-        crowd_method=config.crowd_method,
-        crowd_n_points=config.crowd_n_points,
-        crowd_seed=config.crowd_seed,
+        crowding=bundle_from_config(
+            Crowding,
+            config,
+            prefix="crowd_",
+            min_distance=crowd_min_distance,
+            water_air_interface=config.water_air_interface,
+        ),
         crowd_move_to_cpu=config.crowd_move_to_cpu,
-        water_air_interface=config.water_air_interface,
         verbose=False,
         coincidence_radius=coincidence_radius,
         potential_scale=potential_scale,

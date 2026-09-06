@@ -22,7 +22,8 @@ from specter.imagegenerator import (
     MicrographGenerator,
     TiltSeriesGenerator,
 )
-from specter.settings import Camera, Envelopes, Ice, Propagation, TiltGeometry
+from specter.settings import Camera, Crowding, Envelopes, Ice, Propagation, TiltGeometry
+from specter.specimen import MicrographSpecimenGenerator
 
 # These fixtures predate `coincidence_radius` being rescaled to mean a true
 # effective exclusion radius (exclusion area pi*r^2, rather than the old
@@ -68,12 +69,12 @@ def test_image_generator_regression(small_volume, ctf_params, save_or_compare):
         voltage=300.0,
         dose_per_angstrom=2.0,
         coincidence_radius=_CR,
-        crowd_min_distance=60.0,
         verbose=False,
         progressbars=False,
         propagation=Propagation(scattering_model="multislice", alpha=0.1),
         camera=Camera(noise_model="poisson", n_frames=10, detector_model="k3_300kv"),
         ice=Ice(model="random"),
+        crowding=Crowding(min_distance=60.0),
     )
     torch.manual_seed(0)
     images = gen(torch.tensor([0]))
@@ -97,11 +98,11 @@ def test_image_generator_from_coordinates_regression(
         voltage=300.0,
         dose_per_angstrom=2.0,
         coincidence_radius=_CR,
-        crowd_min_distance=40.0,
         verbose=False,
         propagation=Propagation(scattering_model="multislice", alpha=0.1),
         camera=Camera(noise_model="poisson", n_frames=10),
         ice=Ice(model="random"),
+        crowding=Crowding(min_distance=40.0),
     )
     torch.manual_seed(0)
     images = gen(torch.tensor([0]))
@@ -112,19 +113,24 @@ def test_micrograph_generator_regression(small_volume, ctf_params, save_or_compa
     """MicrographGenerator: projection scattering, random ice, coincidence."""
     torch.manual_seed(0)
     gen = MicrographGenerator(
-        scattering_potential=small_volume,
+        MicrographSpecimenGenerator(
+            small_volume,
+            2.0,
+            32,
+            crowding=Crowding(min_distance=60.0, water_air_interface=True),
+            ice=Ice(model="random"),
+            progressbars=False,
+        ),
         micrograph_size=32,
         pixel_size=2.0,
         ctf_params=ctf_params,
         voltage=300.0,
         dose_per_angstrom=2.0,
         coincidence_radius=_CR,
-        crowd_min_distance=60.0,
         verbose=False,
         progressbars=False,
         propagation=Propagation(scattering_model="projection", alpha=0.1),
         camera=Camera(noise_model="poisson", n_frames=10),
-        ice=Ice(model="random"),
     )
     torch.manual_seed(0)
     images = gen(torch.tensor([0]))
@@ -138,13 +144,14 @@ def test_micrograph_generator_accepts_prebuilt_icemaker(small_volume, ctf_params
     icemaker = RandomIcemaker(dx=2.0, n=32, nz=32, progressbars=False)
 
     gen = MicrographGenerator(
-        scattering_potential=small_volume,
+        MicrographSpecimenGenerator(
+            small_volume, 2.0, 32, icemaker=icemaker, progressbars=False
+        ),
         micrograph_size=32,
         pixel_size=2.0,
         ctf_params=ctf_params,
         voltage=300.0,
         dose_per_angstrom=2.0,
-        icemaker=icemaker,
         coincidence_radius=_CR,
         verbose=False,
         progressbars=False,
@@ -165,8 +172,7 @@ def test_micrograph_generator_blends_ice_into_prebuilt_volume(
     original_volume = small_volume_4d.clone()
 
     gen = MicrographGenerator(
-        scattering_potential=None,
-        volume=small_volume_4d.clone(),
+        small_volume_4d.clone(),
         micrograph_size=32,
         pixel_size=2.0,
         ctf_params=ctf_params,
@@ -195,8 +201,7 @@ def test_micrograph_generator_volume_without_ice_model_is_unchanged(
     """volume= with no ice_model/icemaker is registered as-is (no ice added)."""
     original_volume = small_volume_4d.clone()
     gen = MicrographGenerator(
-        scattering_potential=None,
-        volume=small_volume_4d.clone(),
+        small_volume_4d.clone(),
         micrograph_size=32,
         pixel_size=2.0,
         ctf_params=ctf_params,
@@ -510,7 +515,7 @@ def test_image_generator_from_coordinates_plumbs_envelope_params(
 def test_micrograph_generator_plumbs_envelope_params(small_volume, ctf_params):
     """MicrographGenerator forwards Cs/Cc/dose envelope params to its Aberration submodule."""
     gen = MicrographGenerator(
-        scattering_potential=small_volume,
+        MicrographSpecimenGenerator(small_volume, 2.0, 32, progressbars=False),
         micrograph_size=32,
         pixel_size=2.0,
         ctf_params=ctf_params,
@@ -635,15 +640,14 @@ def test_micrograph_generator_potential_scale_changes_output(small_volume, ctf_p
     volume in MicrographGenerator.forward(), silently a no-op.
     """
     kwargs = dict(
-        scattering_potential=None,
-        volume=small_volume.unsqueeze(0),
+        specimen=small_volume.unsqueeze(0),
         micrograph_size=32,
         pixel_size=2.0,
         ctf_params=ctf_params,
         voltage=300.0,
         dose_per_angstrom=2.0,
-        noise_model=None,
-        scattering_model="projection",
+        propagation=Propagation(scattering_model="projection"),
+        camera=Camera(noise_model=None),
         verbose=False,
         progressbars=False,
     )
@@ -1069,18 +1073,23 @@ def test_micrograph_volume_falls_back_to_host_when_it_does_not_fit(
     also exercise on CPU-only machines.
     """
     gen = MicrographGenerator(
-        scattering_potential=small_volume,
+        MicrographSpecimenGenerator(
+            small_volume,
+            2.0,
+            32,
+            crowding=Crowding(min_distance=60.0, water_air_interface=True),
+            ice=Ice(model="random"),
+            progressbars=False,
+        ),
         micrograph_size=32,
         pixel_size=2.0,
         ctf_params=ctf_params,
         voltage=300.0,
         dose_per_angstrom=2.0,
-        crowd_min_distance=60.0,
         verbose=False,
         progressbars=False,
         propagation=Propagation(scattering_model="projection", alpha=0.1),
         camera=Camera(noise_model="none"),
-        ice=Ice(model="random"),
     )
 
     calls = {"n": 0}
@@ -1135,19 +1144,24 @@ def test_micrograph_unit_potential_scale_skips_the_extra_volume_copy(
     def _run(scale):
         torch.manual_seed(0)
         gen = MicrographGenerator(
-            scattering_potential=small_volume,
+            MicrographSpecimenGenerator(
+                small_volume,
+                2.0,
+                32,
+                crowding=Crowding(min_distance=60.0, water_air_interface=True),
+                ice=Ice(model="random"),
+                progressbars=False,
+            ),
             micrograph_size=32,
             pixel_size=2.0,
             ctf_params=ctf_params,
             voltage=300.0,
             dose_per_angstrom=2.0,
-            crowd_min_distance=60.0,
             potential_scale=scale,
             verbose=False,
             progressbars=False,
             propagation=Propagation(scattering_model="projection", alpha=0.1),
             camera=Camera(noise_model="none"),
-            ice=Ice(model="random"),
         )
         torch.manual_seed(0)
         return gen(torch.tensor([0]))
@@ -1306,10 +1320,10 @@ def test_crowding_slab_does_not_follow_ice_thickness(
         ctf_params=ctf_params,
         voltage=300.0,
         dose_per_angstrom=2.0,
-        crowd_min_distance=60.0,
         verbose=False,
         progressbars=False,
         ice=Ice(model=None, thickness=ice_thickness),
+        crowding=Crowding(min_distance=60.0),
     )
     assert gen.crowd.max_distance_z == small_volume.shape[0] * 2.0
     # The canvas itself still grows, or the knob would do nothing at all.
@@ -1333,9 +1347,9 @@ def test_crowding_slab_from_coordinates_does_not_follow_ice_thickness(
             ctf_params=ctf_params,
             voltage=300.0,
             dose_per_angstrom=2.0,
-            crowd_min_distance=60.0,
             verbose=False,
             ice=Ice(model=None, thickness=ice_thickness),
+            crowding=Crowding(min_distance=60.0),
         )
         slabs.append(gen.crowd.max_distance_z)
     assert slabs == [32 * 2.0, 32 * 2.0]
@@ -1351,10 +1365,9 @@ def test_crowding_slab_is_still_settable(small_volume, ctf_params):
         ctf_params=ctf_params,
         voltage=300.0,
         dose_per_angstrom=2.0,
-        crowd_min_distance=60.0,
-        crowd_max_distance_z=500.0,
         verbose=False,
         progressbars=False,
         ice=Ice(model=None, thickness=2000.0),
+        crowding=Crowding(min_distance=60.0, max_distance_z=500.0),
     )
     assert gen.crowd.max_distance_z == 500.0

@@ -7,12 +7,14 @@ import torch
 from specter import logger
 
 from ..cpu_threads import limited_cpu_threads
+from ..crowding import CrowdWithDuplicates
 from ..ice import IceBank
 from ..ice._blend import IceSlabBlender
 from ..potential import (
     FULL_OCCUPANCY_POTENTIAL_V,
 )
 from ..scattering import Scattering
+from ..settings import Crowding
 from ._base import BaseImager
 
 __all__ = ["ParticleGeneratorBase"]
@@ -73,6 +75,42 @@ class ParticleGeneratorBase(BaseImager):
 
     quaternions: torch.Tensor
     translations: torch.Tensor
+
+    def _build_crowd(
+        self,
+        template: torch.Tensor,
+        crowding: Crowding,
+        progressbars: bool,
+        move_to_cpu: bool = False,
+    ) -> CrowdWithDuplicates:
+        """
+        Build the crowding stage for a template from a `Crowding` bundle.
+
+        ``nxy_out`` is the padded box when ``pad_fft`` is on, and
+        ``max_distance_z`` is the already-resolved
+        ``self.crowd_max_distance_z`` (the template's own depth by default).
+        """
+        if crowding.min_distance is None:
+            raise ValueError("crowding.min_distance is required to build a crowd.")
+        return CrowdWithDuplicates(
+            template,
+            self.pixel_size,
+            crowding.min_distance,
+            nxy_out=self.pad_nxy if self.pad_fft else self.nxy,
+            nz_out=self.nz,
+            max_distance_z=self.crowd_max_distance_z,
+            max_distance_xy=crowding.max_distance_xy,
+            method=crowding.method,
+            n_points=crowding.n_points if crowding.n_points is not None else torch.inf,
+            seed=crowding.seed,
+            move_to_cpu=move_to_cpu,
+            progressbars=progressbars,
+            chunk_size=crowding.chunk_size,
+            water_air_interface=crowding.water_air_interface,
+            sigma_frac=crowding.sigma_frac,
+            peak_amplitude=crowding.peak_amplitude,
+            baseline=crowding.baseline,
+        )
 
     def _build_scattering(self) -> Scattering:
         """The whole-volume propagator, from ``self.propagation``."""

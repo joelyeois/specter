@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any
 
 import roma
 import torch
@@ -9,11 +9,10 @@ import torch.nn as nn
 from specter import logger
 
 from .. import rotations
-from ..crowding import CrowdWithDuplicates
 from ..ice import IceBank, RandomIcemaker, resolve_icemaker
 from ..potential import PotentialBuilder
 from ..rotations import VolumeRotator, translate_coordinates
-from ..settings import Camera, Envelopes, Ice, Optics, Propagation
+from ..settings import Camera, Crowding, Envelopes, Ice, Optics, Propagation
 from ._base import compute_nz, pad_volume
 from ._micrograph import MicrographGenerator
 from ._particle_base import ParticleGeneratorBase
@@ -77,23 +76,16 @@ class ImageGeneratorFromCoordinates(ParticleGeneratorBase):
         A pre-built icemaker instance to reuse across generators. When
         supplied, ``ice.model`` and ``ice.cache_dir`` are ignored;
         ``ice.thickness`` still sizes the column.
-    crowd_min_distance : float, optional
-        Crowding minimum distance.
-    crowd_max_distance_z : float, optional
-        Depth in Å of the slab crowding duplicates are placed in. Defaults to
-        the template's own depth plus one ``crowd_min_distance``
-        (:class:`~specter.crowding.CrowdWithDuplicates`' own fallback), which
-        deliberately does **not** follow ``ice_thickness``: raising that on a
-        particle stack is reaching for lower contrast and more solvent
-        background, not for a denser specimen, so the two stay separate knobs.
-        At 2000 Å of ice the neighbours occupy the middle of the column and
-        the rest is water. `MicrographGenerator` and
-        `MicrographSpecimenGenerator` scale with ``nz`` instead, and should: a
-        micrograph is a specimen, a particle stack is a controlled
-        image-formation experiment.
-    crowd_chunk_size : int or None, optional
-        Number of crowding volumes rotated per GPU batch. Default 1 (memory-safe).
-        Set to ``None`` to rotate all at once (faster but O(N × volume) GPU RAM).
+    crowding : Crowding, optional
+        How duplicates of the particle are packed around it. Default
+        ``Crowding()``, none. ``max_distance_z`` defaults to the template's
+        own depth, which deliberately does **not** follow ``ice.thickness``:
+        raising that on a particle stack is reaching for lower contrast and
+        more solvent background, not for a denser specimen, so the two stay
+        separate knobs. At 2000 Å of ice the neighbours occupy the middle
+        of the column and the rest is water. `MicrographSpecimenGenerator`
+        scales with ``nz`` instead, and should: a micrograph is a specimen,
+        a particle stack is a controlled image-formation experiment.
     conv_backend : str, optional
         Backend for convolution in potential building. Default 'fftconvolve'.
     periodic_potential : bool, optional
@@ -124,9 +116,7 @@ class ImageGeneratorFromCoordinates(ParticleGeneratorBase):
         camera: Camera = Camera(),
         ice: Ice = Ice(),
         icemaker: IceBank | RandomIcemaker | None = None,
-        crowd_min_distance: float | None = None,
-        crowd_max_distance_z: float | None = None,
-        crowd_chunk_size: int = 1,
+        crowding: Crowding = Crowding(),
         conv_backend: ConvBackend = "fftconvolve",
         verbose: bool = True,
         coincidence_radius: float | torch.Tensor = 0.0,
@@ -166,12 +156,13 @@ class ImageGeneratorFromCoordinates(ParticleGeneratorBase):
         # must not follow `ice.thickness`. See the constructor docstring. The
         # two agree until the ice is deeper than the box, which is what makes
         # this a no-op for every run that was not growing its crowding.
+        self.crowding = crowding
         self.crowd_max_distance_z = (
-            crowd_max_distance_z
-            if crowd_max_distance_z is not None
+            crowding.max_distance_z
+            if crowding.max_distance_z is not None
             else self.nxy * pixel_size
         )
-        self.crowd_min_distance = crowd_min_distance
+        self.crowd_min_distance = crowding.min_distance
 
         self.coordinates = nn.Parameter(coordinates)
         self.register_buffer("quaternions", quaternions)
@@ -201,19 +192,7 @@ class ImageGeneratorFromCoordinates(ParticleGeneratorBase):
         )
 
         if self.crowd_min_distance is not None:
-            self.crowd = CrowdWithDuplicates(
-                self.V,
-                pixel_size,
-                self.crowd_min_distance,
-                nxy_out=self.pad_nxy if self.pad_fft else self.nxy,
-                nz_out=self.nz,
-                max_distance_z=self.crowd_max_distance_z,
-                max_distance_xy=None,
-                method="3d",
-                n_points=torch.inf,
-                seed="origin",
-                chunk_size=crowd_chunk_size,
-            )
+            self.crowd = self._build_crowd(self.V, crowding, progressbars=True)
 
         self.ice_parameterization = ice.parameterization
         self.icemaker: IceBank | RandomIcemaker | None = resolve_icemaker(
@@ -349,41 +328,18 @@ class ImageGenerator(ParticleGeneratorBase):
         A pre-built icemaker instance to reuse across generators. When
         supplied, ``ice.model`` and ``ice.cache_dir`` are ignored;
         ``ice.thickness`` still sizes the column.
-    crowd_min_distance : float, optional
-        Crowding minimum distance.
-    crowd_max_distance_z : float, optional
-        Depth in Å of the slab crowding duplicates are placed in. Defaults to
-        the template's own depth plus one ``crowd_min_distance``
-        (:class:`~specter.crowding.CrowdWithDuplicates`' own fallback), which
-        deliberately does **not** follow ``ice_thickness``: raising that on a
-        particle stack is reaching for lower contrast and more solvent
-        background, not for a denser specimen, so the two stay separate knobs.
-        At 2000 Å of ice the neighbours occupy the middle of the column and
-        the rest is water. `MicrographGenerator` and
-        `MicrographSpecimenGenerator` scale with ``nz`` instead, and should: a
-        micrograph is a specimen, a particle stack is a controlled
-        image-formation experiment.
-    crowd_max_distance_xy : float, optional
-        Crowding maximum XY distance. Defaults to ``nxy_out * dx + min_distance``.
-    crowd_chunk_size : int or None, optional
-        Number of crowding volumes rotated per GPU batch. ``1`` (default) avoids
-        the O(N × nz × ny × nx × 3) peak allocation that causes OOM for large
-        volumes with many crowding particles. Set to ``None`` to rotate all at
-        once (faster but requires N × volume_size RAM).
-    crowd_method : {"2d", "3d"}, optional
-        Poisson-disk sampling dimensionality for crowding placement. Default
-        ``"3d"``.
-    crowd_n_points : int, optional
-        Cap on the number of crowding duplicates. ``None`` (default) fills the
-        volume (no cap).
-    crowd_seed : {"origin", "random"}, optional
-        Crowding placement seed strategy. Default ``"origin"``.
+    crowding : Crowding, optional
+        How duplicates of the particle are packed around it. Default
+        ``Crowding()``, none. ``max_distance_z`` defaults to the template's
+        own depth, which deliberately does **not** follow ``ice.thickness``:
+        raising that on a particle stack is reaching for lower contrast and
+        more solvent background, not for a denser specimen, so the two stay
+        separate knobs. At 2000 Å of ice the neighbours occupy the middle
+        of the column and the rest is water. `MicrographSpecimenGenerator`
+        scales with ``nz`` instead, and should: a micrograph is a specimen,
+        a particle stack is a controlled image-formation experiment.
     crowd_move_to_cpu : bool, optional
-        Move crowding intermediates to CPU between steps, trading speed for
-        lower GPU memory. Default False.
-    water_air_interface : bool, optional
-        Apply a bimodal density distribution along z when placing crowding
-        duplicates, mimicking particle adsorption at the ice-water interface.
+        Assemble the crowd on the host, trading speed for device memory.
         Default False.
     progressbars : bool, optional
         Whether to show progress bars. Default True.
@@ -408,15 +364,8 @@ class ImageGenerator(ParticleGeneratorBase):
         camera: Camera = Camera(),
         ice: Ice = Ice(),
         icemaker: IceBank | RandomIcemaker | None = None,
-        crowd_min_distance: float | None = None,
-        crowd_max_distance_z: float | None = None,
-        crowd_max_distance_xy: float | None = None,
-        crowd_chunk_size: int = 1,
-        crowd_method: Literal["2d", "3d"] = "3d",
-        crowd_n_points: int | None = None,
-        crowd_seed: Literal["origin", "random"] = "origin",
+        crowding: Crowding = Crowding(),
         crowd_move_to_cpu: bool = False,
-        water_air_interface: bool = False,
         progressbars: bool = True,
         verbose: bool = True,
         coincidence_radius: float | torch.Tensor = 0.0,
@@ -459,12 +408,13 @@ class ImageGenerator(ParticleGeneratorBase):
         # must not follow `ice.thickness`. See the constructor docstring. The
         # two agree until the ice is deeper than the box, which is what makes
         # this a no-op for every run that was not growing its crowding.
+        self.crowding = crowding
         self.crowd_max_distance_z = (
-            crowd_max_distance_z
-            if crowd_max_distance_z is not None
+            crowding.max_distance_z
+            if crowding.max_distance_z is not None
             else volume_nz * pixel_size
         )
-        self.crowd_min_distance = crowd_min_distance
+        self.crowd_min_distance = crowding.min_distance
 
         self.register_buffer("V", scattering_potential)
         self.register_buffer("quaternions", quaternions)
@@ -476,21 +426,11 @@ class ImageGenerator(ParticleGeneratorBase):
         self.scattering = self._build_scattering()
 
         if self.crowd_min_distance is not None:
-            self.crowd = CrowdWithDuplicates(
+            self.crowd = self._build_crowd(
                 self.V,
-                pixel_size,
-                self.crowd_min_distance,
-                nxy_out=self.pad_nxy if self.pad_fft else self.nxy,
-                nz_out=self.nz,
-                max_distance_z=self.crowd_max_distance_z,
-                max_distance_xy=crowd_max_distance_xy,
-                method=crowd_method,
-                n_points=crowd_n_points if crowd_n_points is not None else torch.inf,
-                seed=crowd_seed,
-                move_to_cpu=crowd_move_to_cpu,
+                crowding,
                 progressbars=self.progressbars,
-                chunk_size=crowd_chunk_size,
-                water_air_interface=water_air_interface,
+                move_to_cpu=crowd_move_to_cpu,
             )
 
         self.icemaker: IceBank | RandomIcemaker | None = resolve_icemaker(

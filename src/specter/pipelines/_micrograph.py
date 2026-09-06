@@ -27,11 +27,20 @@ from specter.arrays import compute_nz
 from specter.config import MicrographConfig, parse_scalar_or_range, validate_config
 from specter.ice import IceProfile, resolve_icemaker
 from specter.imagegenerator import MicrographGenerator
+from specter.specimen import MicrographSpecimenGenerator
 from specter.io import create_micrograph_starfile
 from specter.pdb import PDB
 from specter.potential import PotentialBuilder
 from specter.devices import resolve_available_device
-from specter.settings import Camera, Envelopes, Ice, Propagation, bundle_from_config
+from specter.settings import (
+    Camera,
+    Crowding,
+    Envelopes,
+    Ice,
+    Packing,
+    Propagation,
+    bundle_from_config,
+)
 from specter.progress import console, format_elapsed, section, track
 
 from ._common import (
@@ -192,19 +201,31 @@ def run_micrograph(config: MicrographConfig) -> None:
     if icemaker is not None:
         icemaker = icemaker.to(device)
 
-    # Build once -- __init__ generates the first specimen.
+    # Build once -- the first forward pass generates the first specimen.
     section("Building specimen and image generator")
     cc_angstrom = config.cc * 1e7 if config.cc is not None else None
-    model = MicrographGenerator(
+    specimen = MicrographSpecimenGenerator(
         V,
-        config.micrograph_size,
         config.pixel_size,
-        ctf_params,
-        config.voltage,
-        dose,
-        propagation=bundle_from_config(Propagation, config),
-        envelopes=bundle_from_config(Envelopes, config, cc=cc_angstrom),
-        camera=bundle_from_config(Camera, config, n_frames=n_frames),
+        config.micrograph_size,
+        crowding=bundle_from_config(
+            Crowding,
+            config,
+            prefix="crowd_",
+            min_distance=crowd_min_distance,
+            water_air_interface=config.water_air_interface,
+            sigma_frac=config.sigma_frac,
+            peak_amplitude=config.peak_amplitude,
+            baseline=config.baseline,
+        ),
+        packing=bundle_from_config(
+            Packing,
+            config,
+            prefix="packing_",
+            n_orientations=config.n_orientations,
+            n_candidates=config.n_candidates,
+        ),
+        atom_coordinates=pdb.coordinates,
         ice=bundle_from_config(
             Ice,
             config,
@@ -213,23 +234,20 @@ def run_micrograph(config: MicrographConfig) -> None:
             parameterization=config.bulk_scattering_factors,
         ),
         icemaker=icemaker,
+        progressbars=False,
+        save_clean_exitwaves=config.save_clean_exitwaves,
+    )
+    model = MicrographGenerator(
+        specimen,
+        config.micrograph_size,
+        config.pixel_size,
+        ctf_params,
+        config.voltage,
+        dose,
+        propagation=bundle_from_config(Propagation, config),
+        envelopes=bundle_from_config(Envelopes, config, cc=cc_angstrom),
+        camera=bundle_from_config(Camera, config, n_frames=n_frames),
         bfactor=config.bfactor,
-        crowd_min_distance=crowd_min_distance,
-        crowd_max_distance_z=config.crowd_max_distance_z,
-        water_air_interface=config.water_air_interface,
-        sigma_frac=config.sigma_frac,
-        peak_amplitude=config.peak_amplitude,
-        baseline=config.baseline,
-        packing_backend=config.packing_backend,
-        atom_coordinates=pdb.coordinates,
-        packing_gap=config.packing_gap,
-        n_orientations=config.n_orientations,
-        packing_max_retries=config.packing_max_retries,
-        packing_stall_patience=config.packing_stall_patience,
-        packing_seed=config.packing_seed,
-        n_candidates=config.n_candidates,
-        chunk_size=config.crowd_chunk_size,
-        move_to_cpu=True,
         verbose=False,
         progressbars=False,
         coincidence_radius=coincidence_radius,
@@ -239,7 +257,7 @@ def run_micrograph(config: MicrographConfig) -> None:
 
     # --- Generating images ---
     # Regenerate a fresh specimen (ice/crowding) for every micrograph after
-    # the first (already built in __init__ above), then apply the i-th CTF.
+    # the first, then apply the i-th CTF.
     section(f"Generating {n} micrograph(s) on {device}")
     images: list[torch.Tensor] = []
     exitwaves: list[torch.Tensor] | None = [] if config.save_exitwaves else None

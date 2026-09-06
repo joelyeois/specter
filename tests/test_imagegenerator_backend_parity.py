@@ -15,6 +15,7 @@ from specter.imagegenerator import (
     TiltSeriesGenerator,
 )
 from specter.settings import Camera, Ice, Optics, Propagation, TiltGeometry
+from specter.specimen import MicrographSpecimenGenerator
 
 
 @pytest.fixture
@@ -199,7 +200,9 @@ def test_micrograph_generator_matches_across_backends(
     def build(backend):
         torch.manual_seed(0)
         gen = MicrographGenerator(
-            scattering_potential=small_volume,
+            MicrographSpecimenGenerator(
+                small_volume, 2.0, 32, ice=Ice(model=None), progressbars=False
+            ),
             micrograph_size=32,
             pixel_size=2.0,
             ctf_params=realistic_ctf_params,
@@ -210,7 +213,6 @@ def test_micrograph_generator_matches_across_backends(
             propagation=Propagation(scattering_model="projection", alpha=0.1),
             optics=Optics(aberration_backend=backend),
             camera=Camera(noise_model=None),
-            ice=Ice(model=None),
         )
         torch.manual_seed(0)
         return gen(torch.tensor([0]))

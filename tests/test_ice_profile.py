@@ -14,7 +14,8 @@ from specter.crowding import filter_by_local_z_density, filter_by_z_density
 from specter.ice import IceBank, IceProfile, blend_ice_into_volume
 from specter.imagegenerator import MicrographGenerator
 from specter.pipelines._micrograph import build_ice_profile
-from specter.settings import Camera, Ice
+from specter.settings import Camera, Crowding, Ice
+from specter.specimen import MicrographSpecimenGenerator
 
 
 # ----------------------------------------------------------------------
@@ -407,17 +408,22 @@ def test_micrograph_generator_wires_the_profile_through():
     prof = IceProfile(mode="wedge", thickness_range=(40.0, 160.0))
     template = _blob_template()
     model = MicrographGenerator(
-        template,
+        MicrographSpecimenGenerator(
+            template,
+            px,
+            nxy,
+            crowding=Crowding(min_distance=40.0, water_air_interface=True),
+            ice=Ice(model="random", profile=prof),
+            progressbars=False,
+        ),
         nxy,
         px,
         {"cs": torch.tensor([2.7e7]), "dfu": torch.tensor([10000.0])},
         300.0,
         torch.tensor([30.0]),
-        crowd_min_distance=40.0,
         verbose=False,
         progressbars=False,
         camera=Camera(noise_model="poisson"),
-        ice=Ice(model="random", profile=prof),
     )
 
     # Box sized by the thickest column, not by the mean.
@@ -449,17 +455,22 @@ def test_micrograph_generator_without_profile_is_unchanged():
     torch.manual_seed(0)
     px, nxy = 4.0, 64
     model = MicrographGenerator(
-        _blob_template(),
+        MicrographSpecimenGenerator(
+            _blob_template(),
+            px,
+            nxy,
+            crowding=Crowding(min_distance=40.0, water_air_interface=True),
+            ice=Ice(model="random", thickness=160.0),
+            progressbars=False,
+        ),
         nxy,
         px,
         {"cs": torch.tensor([2.7e7]), "dfu": torch.tensor([10000.0])},
         300.0,
         torch.tensor([30.0]),
-        crowd_min_distance=40.0,
         verbose=False,
         progressbars=False,
         camera=Camera(noise_model="poisson"),
-        ice=Ice(model="random", thickness=160.0),
     )
     assert model.nz == compute_nz(16, 160.0, px)
     assert model.ice_thickness == pytest.approx(model.nz * px)

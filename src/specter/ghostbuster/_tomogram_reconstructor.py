@@ -5,6 +5,8 @@ same forward model as `TiltSeriesGenerator`, one tilt per training step.
 
 from __future__ import annotations
 
+from specter import logger
+
 import json
 from pathlib import Path
 from typing import Any
@@ -451,7 +453,7 @@ class TomogramReconstructor(_BaseReconstructor):
         (self._run_dir / "params.json").write_text(
             json.dumps(meta, indent=2, default=str)
         )
-        print(f"Run directory: {self._run_dir}")
+        logger.info(f"Run directory: {self._run_dir}")
 
     def on_train_epoch_end(self) -> None:
         """Save per-epoch volume as MRC.
@@ -479,4 +481,4 @@ class TomogramReconstructor(_BaseReconstructor):
             return
         volume_path = self._run_dir / "volume.mrc"
         self._save_volume(self._volume_cpu(), volume_path)
-        print(f"Saved final volume → {volume_path}")
+        logger.info(f"Saved final volume → {volume_path}")

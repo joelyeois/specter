@@ -6,6 +6,8 @@ shifts and defocus.
 
 from __future__ import annotations
 
+from specter import logger
+
 import os
 from pathlib import Path
 from typing import Any
@@ -230,11 +232,11 @@ class Reconstructor(_BaseReconstructor):
         # Always use manual optimization to handle masking and multiple optimizers consistently
         self.automatic_optimization = False
         if all(l_rate is None for l_rate in [lr, lr_R, lr_T, lr_D]):
-            print("Non-optimization mode.")
+            logger.info("Non-optimization mode.")
         elif sum(l_rate is None for l_rate in [lr, lr_R, lr_T, lr_D]) == 3:
-            print("Single parameter optimization mode.")
+            logger.info("Single parameter optimization mode.")
         else:
-            print("Multi-parameter optimization mode.")
+            logger.info("Multi-parameter optimization mode.")
 
         self.sparsity = sparsity
         self.lr = lr
@@ -657,7 +659,7 @@ class Reconstructor(_BaseReconstructor):
         self._extra_params.update(dict(self.hparams))
         if saved_arrays:
             self._extra_params["saved_arrays"] = saved_arrays
-        print(f"Run directory: {self._run_dir}")
+        logger.info(f"Run directory: {self._run_dir}")
 
     def on_fit_end(self) -> None:
         """Save the final reconstructed volume, FSC figure, and training metrics.
@@ -680,7 +682,7 @@ class Reconstructor(_BaseReconstructor):
         v = self._volume_cpu()
         volume_path = self._run_dir / f"volume{suffix}.mrc"
         self._save_volume(v, volume_path)
-        print(f"Saved final volume → {volume_path}")
+        logger.info(f"Saved final volume → {volume_path}")
 
         if self.fsc_ref is not None:
             self._save_fsc_figure(
@@ -835,7 +837,7 @@ class Reconstructor(_BaseReconstructor):
                 else None
             )
         except Exception as exc:
-            print(f"[ghostbuster] map-to-model resolution skipped: {exc}")
+            logger.warning(f"map-to-model resolution skipped: {exc}")
             return
 
         self._epoch_resolutions.append(record)
@@ -922,7 +924,7 @@ class Reconstructor(_BaseReconstructor):
                     "computed_by_halfset": self._halfset_label,
                 }
             )
-            print(
+            logger.info(
                 f"Epoch {epoch} gold-standard resolution: {resolution}"
                 + (f"  (masked {masked})" if masked is not None else "")
             )
@@ -930,7 +932,7 @@ class Reconstructor(_BaseReconstructor):
             # A diagnostic must never take the run down with it -- the same
             # rule save_fsc_figure follows. Drop the claim so the empty record
             # isn't mistaken for a computed one.
-            print(f"[ghostbuster] per-epoch half-map FSC skipped: {exc}")
+            logger.warning(f"per-epoch half-map FSC skipped: {exc}")
             figure_path.unlink(missing_ok=True)
 
     def _save_plot3d(self, v: torch.Tensor, suffix: str, epoch: int) -> None:

@@ -5,6 +5,8 @@ a CryoSPARC particle set to a trained `Reconstructor`.
 
 from __future__ import annotations
 
+from ..progress import console
+
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, Literal, Sequence
@@ -251,7 +253,7 @@ class Ghostbuster(_GhostbusterBase):
         """Extract poses, CTF parameters, and particle indices from a .cs file."""
         from ..io import extract_parameters_from_csfile
 
-        print(f"Loading particle parameters from {Path(cs_file).name} ...")
+        console.print(f"Loading particle parameters from {Path(cs_file).name} ...")
         (
             voltage,
             pixel_size,
@@ -271,7 +273,7 @@ class Ghostbuster(_GhostbusterBase):
         pixel_size_val = float(
             pixel_size.item() if hasattr(pixel_size, "item") else pixel_size
         )
-        print(
+        console.print(
             f"  {n_loaded} particles  |  {voltage_val:.0f} kV  |  {pixel_size_val:.3f} Å/px"
         )
         return (
@@ -291,11 +293,13 @@ class Ghostbuster(_GhostbusterBase):
         mrc_file: str | Path, indices: torch.Tensor
     ) -> torch.Tensor:
         """Load the particle stack .mrc/.mrcs file, indexed to the extracted particles."""
-        print(f"Loading particle stack from {Path(mrc_file).name} ...")
+        console.print(f"Loading particle stack from {Path(mrc_file).name} ...")
         with mrcfile.mmap(str(mrc_file)) as mrc:
             images = torch.as_tensor((mrc.data[indices]).copy())
         h, w = images.shape[-2], images.shape[-1]
-        print(f"  {len(images)} images  |  box {h}×{w}  |  dtype {images.dtype}")
+        console.print(
+            f"  {len(images)} images  |  box {h}×{w}  |  dtype {images.dtype}"
+        )
         return images
 
     def _build_reconstructor_and_loader(
@@ -380,7 +384,7 @@ class Ghostbuster(_GhostbusterBase):
         Reconstructor
             The trained model. Access the volume via ``model.V.detach()``.
         """
-        print(
+        console.print(
             f"Starting reconstruction: {len(self._images)} particles  |  "
             f"box {self._images.shape[-1]}³  |  "
             f"{self.propagation.scattering_model}  |  {self.epochs} epochs  |  "
@@ -424,7 +428,9 @@ class Ghostbuster(_GhostbusterBase):
             The trained model after one epoch.
         """
         n_particles = len(self._images)
-        print(f"Test run: {n_particles} particles  |  {bin_factor}× binned  |  1 epoch")
+        console.print(
+            f"Test run: {n_particles} particles  |  {bin_factor}× binned  |  1 epoch"
+        )
         images_binned, voxel_size_binned = self._bin_images(bin_factor)
         model, loader = self._build_reconstructor_and_loader(
             images_binned, voxel_size_binned, self.batchsize

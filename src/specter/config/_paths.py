@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from specter.progress import console
+
 import os
 import sys
 from pathlib import Path
@@ -130,7 +132,7 @@ def ensure_project_root(
             )
 
     marker.touch()
-    print(f"Initialised specter project at {root}")
+    console.print(f"Initialised specter project at {root}")
     return root
 
 

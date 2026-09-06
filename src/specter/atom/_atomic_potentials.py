@@ -6,6 +6,8 @@ Fourier-space potentials each parameterisation gives.
 
 from __future__ import annotations
 
+from specter import logger
+
 import json
 from functools import lru_cache
 from importlib import resources
@@ -205,7 +207,7 @@ def load_shtyrov_parameters(filepath: str) -> torch.Tensor:
     https://doi.org/10.1073/pnas.2528758123
     """
     # parse .cif file
-    print("Parsing MMCIF file.")
+    logger.debug("Parsing MMCIF file.")
     cif_dict = MMCIF2Dict(filepath)
 
     # parse scat_id as integer tensor
@@ -238,7 +240,7 @@ def load_shtyrov_parameters(filepath: str) -> torch.Tensor:
     # fill according to scat_id
     params[ids, :, 0] = a
     params[ids, :, 1] = b
-    print(f"Number of unique 'atoms': {len(ids)}")
+    logger.debug(f"Number of unique 'atoms': {len(ids)}")
     return params
 
 

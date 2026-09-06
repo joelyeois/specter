@@ -5,6 +5,8 @@ multislice pass per tilt with the geometry padding each tilt needs.
 
 from __future__ import annotations
 
+from specter import logger
+
 from dataclasses import replace
 from typing import Any, Sequence
 
@@ -205,9 +207,7 @@ class TiltSeriesGenerator(MicrographGenerator):
             # on (and, for the reflect-padded XY margin, naturally extends) the
             # ice-filled volume.
             if verbose:
-                print(
-                    f"[TiltSeriesGenerator] Adding ice to volume using {ice.model} model"
-                )
+                logger.info(f"Adding ice to volume using {ice.model} model")
             with torch.no_grad(), status("Tiling ice volume", disable=not progressbars):
                 volume = blend_ice_into_volume(
                     volume, volume_icemaker, pixel_size, relax_steps=ice.relax_steps
@@ -265,7 +265,7 @@ class TiltSeriesGenerator(MicrographGenerator):
                     volume, target_nxy, available_nxy
                 )
                 msg = (
-                    "[TiltSeriesGenerator] Volume XY too small for requested tilt coverage"
+                    "Volume XY too small for requested tilt coverage"
                     + (" and taper" if taper_width > 0 else "")
                     + f"; padded (reflect) from {available_nxy} to {volume.shape[-1]} px in XY.\n"
                     f"  micrograph_size={desired_nxy}, requested_max_tilt={self.max_tilt_angle_deg:.2f} deg, "
@@ -274,10 +274,10 @@ class TiltSeriesGenerator(MicrographGenerator):
                 )
                 if taper_width > 0:
                     msg += f", target_nxy (with taper)>={target_nxy}"
-                print(msg + ".")
+                logger.info(msg + ".")
             else:
-                print(
-                    "[TiltSeriesGenerator] Input volume XY may be too small for requested tilt "
+                logger.info(
+                    "Input volume XY may be too small for requested tilt "
                     "coverage; proceeding anyway (pad_volume=False).\n"
                     f"  micrograph_size={desired_nxy}, volume_shape={tuple(volume.shape)}, "
                     f"requested_max_tilt={self.max_tilt_angle_deg:.2f} deg,\n"
@@ -291,13 +291,12 @@ class TiltSeriesGenerator(MicrographGenerator):
                 volume, taper_xy=int(taper_width), taper_z=int(z_taper_width)
             )
             if taper_width > 0:
-                print(
-                    f"[TiltSeriesGenerator] Applied cosine-taper over {taper_width} px "
-                    f"at the XY edges."
+                logger.info(
+                    f"Applied cosine-taper over {taper_width} px at the XY edges."
                 )
             if z_taper_width > 0:
-                print(
-                    f"[TiltSeriesGenerator] Applied cosine-taper over {z_taper_width} px "
+                logger.info(
+                    f"Applied cosine-taper over {z_taper_width} px "
                     f"at the Z edges (top/bottom)."
                 )
 

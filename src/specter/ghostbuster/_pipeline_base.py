@@ -5,6 +5,8 @@ driving a Lightning `Trainer` over a reconstructor, and the binned quick run.
 
 from __future__ import annotations
 
+from ..progress import console
+
 from typing import Any, Sequence, TypeVar
 
 import lightning as L
@@ -65,7 +67,7 @@ class _GhostbusterBase:
     def _report_test_run(model: L.LightningModule, summary: str) -> None:
         """Print the closing line of a `test_run` with the volume's range."""
         v = model.V.detach()
-        print(
+        console.print(
             f"Test run passed — {summary}  |  "
             f"V min={v.min():.4f}  max={v.max():.4f}  mean={v.mean():.4f}"
         )

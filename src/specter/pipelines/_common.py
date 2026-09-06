@@ -406,7 +406,7 @@ def _generate_multi(
         callbacks=[_Writer(output_dir, collect_exitwaves, collect_clean_exitwaves)],
     )
 
-    print(f"Running multi-GPU generation on GPUs: {gpu_ids}")
+    console.print(f"Running multi-GPU generation on GPUs: {gpu_ids}")
     trainer.predict(model, dataloaders=dataloader, return_predictions=False)
 
     # Every rank saves its own predictions_<rank>.pt from inside

@@ -42,6 +42,7 @@ The environment is self-contained. No additional GPU or cluster setup is require
 - **Linter/formatter**: `ruff` (configured in `pyproject.toml`). Run before committing.
 - **Static typing**: `mypy` for type checking.
 - **Pre-commit hooks**: enforce ruff automatically on commit.
+- **Output channels**: library code (`imagegenerator/`, `ghostbuster/`'s reconstructors, `pdb.py`, `specimen/`, ...) reports through `specter.logger` (`logger.info` for progress, `logger.warning` for something the caller should know about), never `print`; it is silent until `specter.set_verbosity` raises the level, which the pipelines do. User-driving code -- `cli/`, `pipelines/`, and the `Ghostbuster`/`TomogramGhostbuster` drivers -- prints through `specter.progress.console` (rich), which also owns the progress bars and section headers. `warnings.warn` is reserved for "your inputs may be wrong" (a fallback that changed the result, a missing library), since it carries the caller's location and can be filtered by category.
 
 Example docstring format:
 

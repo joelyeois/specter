@@ -5,6 +5,8 @@ a tilt series and its geometry to a trained `TomogramReconstructor`.
 
 from __future__ import annotations
 
+from ..progress import console
+
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -122,7 +124,7 @@ class TomogramGhostbuster(_GhostbusterBase):
     ) -> None:
         images = self._load_tilt_series(tilt_series, flip_contrast)
         n_tilts, H, W = images.shape
-        print(
+        console.print(
             f"  {n_tilts} tilts  |  {H}×{W} px  |  {voxel_size:.3f} Å/px  |  "
             f"{voltage:.0f} kV"
         )
@@ -166,7 +168,7 @@ class TomogramGhostbuster(_GhostbusterBase):
     ) -> torch.Tensor:
         """Load a tilt series from a tensor or an .mrc file path, optionally flipping contrast."""
         if isinstance(tilt_series, (str, Path)):
-            print(f"Loading tilt series from {Path(tilt_series).name} ...")
+            console.print(f"Loading tilt series from {Path(tilt_series).name} ...")
             with mrcfile.open(str(tilt_series)) as mrc:
                 images = torch.as_tensor(mrc.data.copy()).float()
         else:
@@ -288,7 +290,7 @@ class TomogramGhostbuster(_GhostbusterBase):
         """
         n_tilts = len(self._images)
         nz, nxy = self._volume_init.shape[0], self._volume_init.shape[-1]
-        print(
+        console.print(
             f"Starting reconstruction: {n_tilts} tilts  |  "
             f"volume {nz}×{nxy}×{nxy}  |  {self.propagation.scattering_model}  |  "
             f"{self.epochs} epochs  |  batch {self.batchsize}  |  "
@@ -329,7 +331,7 @@ class TomogramGhostbuster(_GhostbusterBase):
         TomogramReconstructor
             Trained model after one epoch.
         """
-        print(
+        console.print(
             f"Test run: {len(self._images)} tilts  |  {bin_factor}× binned  |  1 epoch"
         )
         images_binned, voxel_size_binned = self._bin_images(bin_factor)

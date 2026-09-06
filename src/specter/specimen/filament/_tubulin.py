@@ -27,6 +27,8 @@ once per source.
 
 from __future__ import annotations
 
+from specter import logger
+
 import math
 import os
 
@@ -326,7 +328,7 @@ def extract_mt_dimer(
     out.make_mmcif_document().write_file(out_path)
 
     if verbose:
-        print(
+        logger.info(
             f"{source}: dimer {alpha_name}(alpha)+{beta_name}(beta) from a "
             f"{len(columns)}-protofilament patch; fitted radius "
             f"{radius:.1f} A, axis "

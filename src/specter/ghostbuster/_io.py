@@ -5,6 +5,8 @@ FSC figures.
 
 from __future__ import annotations
 
+from specter import logger
+
 from pathlib import Path
 
 import mrcfile
@@ -57,7 +59,7 @@ def save_plot3d_preview(path: Path, v: torch.Tensor, title: str) -> None:
         fig.savefig(path, bbox_inches="tight")
         plt.close(fig)
     except Exception as exc:
-        print(f"[ghostbuster] plot3d preview skipped: {exc}")
+        logger.warning(f"plot3d preview skipped: {exc}")
 
 
 def save_halfmap_fsc_figure(
@@ -106,7 +108,7 @@ def save_halfmap_fsc_figure(
         plt.close(fig)
         return resolutions[0]
     except Exception as exc:
-        print(f"[ghostbuster] half-map FSC plot skipped: {exc}")
+        logger.warning(f"half-map FSC plot skipped: {exc}")
         return None
 
 
@@ -179,4 +181,4 @@ def save_fsc_figure(
         fig.savefig(path, bbox_inches="tight")
         plt.close(fig)
     except Exception as exc:
-        print(f"[ghostbuster] FSC plot skipped: {exc}")
+        logger.warning(f"FSC plot skipped: {exc}")

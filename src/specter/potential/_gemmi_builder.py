@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from specter import logger
+
 import multiprocessing as mp
 from typing import Any, Sequence
 
@@ -215,7 +217,7 @@ class GemmiPotentialBuilder:
                 cra.atom.b_iso = self.b_factor
 
         if self.b_factor is None:
-            print(
+            logger.warning(
                 "Using default B-factor in mmcif file. Set b_factor to 0 if not intended."
             )
 

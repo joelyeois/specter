@@ -7,6 +7,8 @@ handling and metrics logging.
 
 from __future__ import annotations
 
+from specter import logger
+
 import json
 from pathlib import Path
 from typing import Any, cast
@@ -316,5 +318,5 @@ class _BaseReconstructor(L.LightningModule):
         suffix = self._metrics_path_suffix()
         metrics_path = self._run_dir / f"metrics{suffix}.json"
         metrics_path.write_text(json.dumps(meta, indent=2))
-        print(f"Saved metrics → {metrics_path}")
+        logger.info(f"Saved metrics → {metrics_path}")
         return meta

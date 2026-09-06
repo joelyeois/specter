@@ -5,6 +5,8 @@ coordinates and, for Shtyrov factors, bonded-species types.
 
 from __future__ import annotations
 
+from specter import logger
+
 import gzip
 import hashlib
 import io
@@ -670,15 +672,15 @@ class PDB:
         # Decide what to fetch
         if assembly is True:
             if verbose:
-                print(f"{pdb_id}: Fetching default Biological Assembly 1")
+                logger.info(f"{pdb_id}: Fetching default Biological Assembly 1")
             filename = f"{pdb_id}-assembly{1}.{ext}"
         elif assembly is False:
             if verbose:
-                print(f"{pdb_id}: Fetching default PDBx/mmCIF file.")
+                logger.info(f"{pdb_id}: Fetching default PDBx/mmCIF file.")
             filename = f"{pdb_id}.{ext}"
         elif isinstance(assembly, int):
             if verbose:
-                print(f"{pdb_id}: Fetching Biological Assembly {assembly}")
+                logger.info(f"{pdb_id}: Fetching Biological Assembly {assembly}")
             filename = f"{pdb_id}-assembly{assembly}.{ext}"
         else:
             raise ValueError("assembly must be True, False, or int")
@@ -689,7 +691,7 @@ class PDB:
         # Return existing file if available
         if os.path.exists(file_path):
             if verbose:
-                print(f"File already exists: {file_path}, skip fetching.")
+                logger.info(f"File already exists: {file_path}, skip fetching.")
             return file_path
 
         # A cache written before keys were canonicalized, or by hand, may
@@ -700,12 +702,12 @@ class PDB:
         cached = _cache_file_ignoring_case(pdb_cache_dir, filename)
         if cached is not None:
             if verbose:
-                print(f"File already exists: {cached}, skip fetching.")
+                logger.info(f"File already exists: {cached}, skip fetching.")
             return cached
 
         # Fetch
         if verbose:
-            print("File does not exist, fetching.")
+            logger.info("File does not exist, fetching.")
         url = "https://files.rcsb.org/download/" + filename + ".gz"
         r = requests.get(url)
         r.raise_for_status()
@@ -723,7 +725,7 @@ class PDB:
             f.write(cif_content)
 
         if verbose:
-            print(f"Downloaded to: {file_path}")
+            logger.info(f"Downloaded to: {file_path}")
         return file_path
 
     @staticmethod
@@ -752,10 +754,10 @@ class PDB:
                 "assembly_ids", []
             )
             if verbose:
-                print("Assemblies available: " + ", ".join(assemblies))
+                logger.warning("Assemblies available: " + ", ".join(assemblies))
         except Exception as e:
             if verbose:
-                print(f"Error fetching assemblies for {pdb_id}: {e}")
+                logger.warning(f"Error fetching assemblies for {pdb_id}: {e}")
             return
 
     @staticmethod
@@ -1110,7 +1112,7 @@ class PDB:
             n_matched += 1
 
         if verbose:
-            print(f"[get_atom_species] {n_matched}/{len(species)} atoms typed")
+            logger.info(f"{n_matched}/{len(species)} atoms typed")
 
         return atomic_numbers, positions, species, b_factors, used_library
 

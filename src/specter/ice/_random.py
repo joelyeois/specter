@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from typing import Optional
 
 import lightning as L
 import torch
@@ -80,8 +79,8 @@ class RandomIcemaker(L.LightningModule):
         )
 
         self.progressbars = progressbars
-        self.positions: Optional[torch.Tensor] = None
-        self.current_icedeltas: Optional[torch.Tensor] = None
+        self.positions: torch.Tensor | None = None
+        self.current_icedeltas: torch.Tensor | None = None
 
     # ------------------------------------------------------------------
     # Coordinate generation

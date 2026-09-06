@@ -498,7 +498,7 @@ def _centered(
 def fourier_shell_correlation(
     volume1: torch.Tensor,
     volume2: torch.Tensor,
-    pixelsize: float = 1.0,
+    pixel_size: float = 1.0,
     res_cutoff: float | None = None,
     randomise_phases_beyond: float | None = None,
     return_real: bool = True,
@@ -510,7 +510,7 @@ def fourier_shell_correlation(
     ----------
     volume1, volume2 : torch.Tensor
         Real-space 3D volumes of shape (N, N, N).
-    pixelsize : float, optional
+    pixel_size : float, optional
         Pixel size in Å (or consistent units). Default is 1.
     res_cutoff : float | None, optional
         High-resolution cutoff. Frequencies beyond 1/res_cutoff are zeroed.
@@ -527,7 +527,7 @@ def fourier_shell_correlation(
         Spatial frequency axis (units: 1/pixelsize). Shells run out to the
         *corners* of the Fourier cube, so the axis extends past Nyquist by a
         factor of sqrt(3); those trailing shells are sampled from the corner
-        directions alone. Pass ``k_max=1/(2*pixelsize)`` to `plots.fsc_resolution`
+        directions alone. Pass ``k_max=1/(2*pixel_size)`` to `plots.fsc_resolution`
         to keep a crossing in that aliased tail out of a reported resolution.
     fsc : torch.Tensor
         FSC curve, one value per Fourier shell.
@@ -563,7 +563,7 @@ def fourier_shell_correlation(
     # Apply resolution cutoff and/or phase randomisation if requested.
     # k-grid is fftshifted to match the shifted FFT output (DC at center).
     if res_cutoff is not None or randomise_phases_beyond is not None:
-        kx = torch.fft.fftshift(torch.fft.fftfreq(n, pixelsize, device=device))
+        kx = torch.fft.fftshift(torch.fft.fftfreq(n, pixel_size, device=device))
         kxx, kyy, kzz = torch.meshgrid(kx, kx, kx, indexing="ij")
         k_mag = torch.sqrt(kxx**2 + kyy**2 + kzz**2)
 
@@ -604,8 +604,8 @@ def fourier_shell_correlation(
     denom = torch.sqrt(norm1_r * norm2_r).clamp(min=1e-10)
     fsc = num / denom
 
-    # Frequency axis: shell index × frequency spacing (1 / (N * pixelsize))
-    dk = 1.0 / (n * float(pixelsize))
+    # Frequency axis: shell index × frequency spacing (1 / (N * pixel_size))
+    dk = 1.0 / (n * float(pixel_size))
     k = torch.arange(len(fsc), device=device) * dk
 
     return k, fsc

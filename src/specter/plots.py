@@ -502,7 +502,7 @@ def resolution_between(
     if mask is not None:
         m = mask.detach().cpu().float()
         a, b = a * m, b * m
-    k, fsc = fourier_shell_correlation(a, b, pixelsize=voxel_size)
+    k, fsc = fourier_shell_correlation(a, b, pixel_size=voxel_size)
     return fsc_resolution(k, fsc, threshold, k_max=1.0 / (2.0 * voxel_size))
 
 
@@ -574,7 +574,7 @@ def plot_map_to_model_fsc(
         volume_f = volume.float()
         ref_f = reference.float()
 
-        k, fsc = fourier_shell_correlation(volume_f, ref_f, pixelsize=voxel_size)
+        k, fsc = fourier_shell_correlation(volume_f, ref_f, pixel_size=voxel_size)
         ax.plot(
             k.cpu(),
             fsc.cpu(),
@@ -587,7 +587,7 @@ def plot_map_to_model_fsc(
         if mask is not None:
             m = mask.float()
             k_m, fsc_m = fourier_shell_correlation(
-                volume_f * m, ref_f * m, pixelsize=voxel_size
+                volume_f * m, ref_f * m, pixel_size=voxel_size
             )
             ax.plot(
                 k_m.cpu(),
@@ -720,7 +720,9 @@ def plot_halfmap_fsc(
         volume_a_f = volume_a.float()
         volume_b_f = volume_b.float()
 
-        k, fsc = fourier_shell_correlation(volume_a_f, volume_b_f, pixelsize=voxel_size)
+        k, fsc = fourier_shell_correlation(
+            volume_a_f, volume_b_f, pixel_size=voxel_size
+        )
         resolution = _res_at_half(k, fsc)
         resolutions.append(resolution)
         ax.plot(
@@ -735,7 +737,7 @@ def plot_halfmap_fsc(
         if mask is not None:
             m = mask.float()
             k_m, fsc_m = fourier_shell_correlation(
-                volume_a_f * m, volume_b_f * m, pixelsize=voxel_size
+                volume_a_f * m, volume_b_f * m, pixel_size=voxel_size
             )
             ax.plot(
                 k_m.cpu(),

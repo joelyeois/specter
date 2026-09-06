@@ -16,22 +16,22 @@ from specter.fft import (
 def test_fsc_of_a_volume_with_itself_is_one():
     torch.manual_seed(0)
     volume = torch.randn(16, 16, 16)
-    k, fsc = fourier_shell_correlation(volume, volume, pixelsize=1.0)
+    k, fsc = fourier_shell_correlation(volume, volume, pixel_size=1.0)
 
     assert k.shape == fsc.shape
     assert torch.allclose(fsc, torch.ones_like(fsc), atol=1e-5)
 
 
 def test_fsc_frequency_axis_is_physical():
-    """Shell spacing is 1/(N * pixelsize), and shells run past Nyquist out to
+    """Shell spacing is 1/(N * pixel_size), and shells run past Nyquist out to
     the corners of the Fourier cube (sqrt(3) * Nyquist)."""
-    n, pixelsize = 16, 2.0
+    n, pixel_size = 16, 2.0
     volume = torch.randn(n, n, n)
-    k, _ = fourier_shell_correlation(volume, volume, pixelsize=pixelsize)
+    k, _ = fourier_shell_correlation(volume, volume, pixel_size=pixel_size)
 
     assert k[0] == 0.0
-    assert k[1] == pytest.approx(1.0 / (n * pixelsize))
-    nyquist = 1.0 / (2.0 * pixelsize)
+    assert k[1] == pytest.approx(1.0 / (n * pixel_size))
+    nyquist = 1.0 / (2.0 * pixel_size)
     assert k[-1] == pytest.approx(3.0**0.5 * nyquist, rel=0.05)
 
 
@@ -41,13 +41,13 @@ def test_fsc_rejects_non_cubic_volumes():
     return a silently wrong k axis."""
     a = torch.randn(8, 12, 16)
     with pytest.raises(ValueError, match="cubic"):
-        fourier_shell_correlation(a, a, pixelsize=1.0)
+        fourier_shell_correlation(a, a, pixel_size=1.0)
 
 
 def test_fsc_rejects_mismatched_shapes():
     with pytest.raises(ValueError, match="same shape"):
         fourier_shell_correlation(
-            torch.randn(8, 8, 8), torch.randn(16, 16, 16), pixelsize=1.0
+            torch.randn(8, 8, 8), torch.randn(16, 16, 16), pixel_size=1.0
         )
 
 

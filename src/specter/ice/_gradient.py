@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Callable, Optional
+from typing import Any, Callable
 
 import lightning as L
 import torch
@@ -133,7 +133,7 @@ class GradientSKIcemaker(L.LightningModule):
         self,
         n: int = 200,
         dx: float = 0.5,
-        nz: Optional[int] = None,
+        nz: int | None = None,
         min_distance: float = 2.0,
         device: str | torch.device = "cpu",
         parameterization: str = "kirkland",
@@ -219,7 +219,7 @@ class GradientSKIcemaker(L.LightningModule):
             "_rep_kernel_rfft", torch.fft.rfftn(rep_kernel), persistent=False
         )
 
-        self.positions: Optional[torch.Tensor] = None
+        self.positions: torch.Tensor | None = None
 
         if torch.device(device).type != "cpu":
             self.to(device)
@@ -504,7 +504,7 @@ class GradientSKIcemaker(L.LightningModule):
         rep_strength: float = 0.0,
         mlbop_strength: float = 0.5,
         mlbop_target: float | None = -0.413,
-        tol: Optional[float] = 1e-3,
+        tol: float | None = 1e-3,
         patience: int = 10,
         history_size: int = 100,
         max_iter: int = 25,
@@ -865,7 +865,7 @@ class GradientSKIcemaker(L.LightningModule):
         mlbop_strength: float = 0.5,
         mlbop_target: float | None = -0.413,
         init_positions: torch.Tensor | None = None,
-        tol: Optional[float] = 1e-3,
+        tol: float | None = 1e-3,
         patience: int = 10,
     ) -> torch.Tensor:
         """
@@ -941,7 +941,7 @@ class GradientSKIcemaker(L.LightningModule):
         rep_strength: float = 0.0,
         mlbop_strength: float = 0.5,
         mlbop_target: float | None = -0.413,
-        tol: Optional[float] = 1e-3,
+        tol: float | None = 1e-3,
         patience: int = 10,
     ) -> torch.Tensor:
         """

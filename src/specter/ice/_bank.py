@@ -12,7 +12,7 @@ import glob
 import math
 import os
 import time
-from typing import TYPE_CHECKING, Iterator, Optional
+from typing import TYPE_CHECKING, Iterator
 
 import lightning as L
 import numpy as np
@@ -265,21 +265,21 @@ class IceBank(L.LightningModule):
         self._source_pos_cache: dict[int, tuple[torch.device, torch.Tensor]] = {}
         self.progressbars = progressbars
 
-        self.positions: Optional[torch.Tensor] = None
+        self.positions: torch.Tensor | None = None
         """torch.Tensor or None: The most recently extracted crop's
         coordinates (N, 3), in the crop's own local frame, centered at the
         origin. Non-periodic -- unlike the other icemaker classes' outputs, a
         crop is a finite chunk of a larger periodic source, not periodic on
         its own."""
-        self.current_icedeltas: Optional[torch.Tensor] = None
+        self.current_icedeltas: torch.Tensor | None = None
         """torch.Tensor or None: The most recently generated batch's
         soft-voxelized deltas."""
-        self.n: Optional[int] = None
-        self.dx: Optional[float] = None
-        self.nz: Optional[int] = None
-        self.box_x: Optional[float] = None
-        self.box_y: Optional[float] = None
-        self.box_z: Optional[float] = None
+        self.n: int | None = None
+        self.dx: float | None = None
+        self.nz: int | None = None
+        self.box_x: float | None = None
+        self.box_y: float | None = None
+        self.box_z: float | None = None
 
         if torch.device(device).type != "cpu":
             self.to(device)

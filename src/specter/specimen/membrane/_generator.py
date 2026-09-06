@@ -349,6 +349,254 @@ class TransmembranePlacement:
     rotation_matrix: torch.Tensor
 
 
+def _resolve_shape_parameters(
+    seed: int | None,
+    sh_axes: tuple[float, float, float] | None,
+    sh_axes_range: tuple[float, float],
+    swept_tube_radius: float | None,
+    swept_tube_radius_range: tuple[float, float],
+    swept_total_length: float | None,
+    swept_total_length_range: tuple[float, float],
+    swept_flexibility: float | None,
+    swept_flexibility_range: tuple[float, float],
+    swept_radius_variation: float | None,
+    swept_radius_variation_range: tuple[float, float],
+    swept_step_length_angstrom: float | None,
+) -> tuple[tuple[float, float, float], float, float, float, float, float]:
+    """
+    Draw every size parameter left as None from its own range.
+
+    The draws come from a generator seeded independently from ``seed``,
+    separate from whatever RNG the shape backend uses internally, so they
+    never consume that stream. Every parameter is resolved regardless of
+    the active backend, so each is a plain concrete value afterwards rather
+    than a backend-conditional Optional at every later read site.
+    """
+    meta_rng = torch.Generator(device="cpu")
+    if seed is not None:
+        meta_rng.manual_seed(seed)
+
+    if sh_axes is None:
+        lo, hi = _resolve_range("sh_axes_range", sh_axes_range, min_low=1e-6)
+        sh_axes = (
+            _draw_uniform(meta_rng, lo, hi),
+            _draw_uniform(meta_rng, lo, hi),
+            _draw_uniform(meta_rng, lo, hi),
+        )
+    else:
+        # Normalize to a tuple even when given one already -- a caller
+        # passing a plain list (e.g. every TOML-sourced config value,
+        # since TOML arrays decode to Python lists) would otherwise make
+        # the clamp check below's `clamped != sh_axes` compare a tuple
+        # against a list and spuriously fire even when nothing needed
+        # clamping (tuple != list in Python regardless of contents).
+        sh_axes = (float(sh_axes[0]), float(sh_axes[1]), float(sh_axes[2]))
+    if swept_tube_radius is None:
+        lo, hi = _resolve_range(
+            "swept_tube_radius_range", swept_tube_radius_range, min_low=1e-6
+        )
+        swept_tube_radius = _draw_uniform(meta_rng, lo, hi)
+    if swept_total_length is None:
+        lo, hi = _resolve_range(
+            "swept_total_length_range", swept_total_length_range, min_low=1e-6
+        )
+        swept_total_length = _draw_uniform(meta_rng, lo, hi)
+    if swept_flexibility is None:
+        lo, hi = _resolve_range(
+            "swept_flexibility_range", swept_flexibility_range, min_low=1e-6
+        )
+        if hi > 1.0:
+            raise ValueError(
+                "swept_flexibility_range must have high <= 1, got "
+                f"{swept_flexibility_range!r}"
+            )
+        swept_flexibility = _draw_uniform(meta_rng, lo, hi)
+    if swept_radius_variation is None:
+        lo, hi = _resolve_range(
+            "swept_radius_variation_range",
+            swept_radius_variation_range,
+            min_low=0.0,
+        )
+        swept_radius_variation = _draw_uniform(meta_rng, lo, hi)
+    if swept_step_length_angstrom is None:
+        # Half the (now-resolved) tube radius -- always comfortably
+        # under the 2*tube_radius_angstrom beading threshold regardless of
+        # which value got drawn, unlike a fixed absolute default tuned
+        # for one specific radius (see generate_membrane_field_swept_
+        # spline's own beading-risk docstring).
+        swept_step_length_angstrom = 0.5 * swept_tube_radius
+
+    # target_shape: auto-size from the now-resolved organelle size
+    # when omitted, so a casual caller never has to compute a working
+    # grid by hand; clamp the organelle size to fit when an explicit
+    # target_shape IS given, so a too-large drawn/explicit size can
+    # never silently clip (MembraneField.clipped_at_boundary/each shape
+    # backend's own boundary warning are the last-resort safety net,
+    # not the primary defense).
+    return (
+        sh_axes,
+        swept_tube_radius,
+        swept_total_length,
+        swept_flexibility,
+        swept_radius_variation,
+        swept_step_length_angstrom,
+    )
+
+
+def _fit_shape_to_box(
+    target_shape: tuple[int, int, int] | None,
+    voxel_size: float,
+    shape_backend: ShapeBackend,
+    sh_axes: tuple[float, float, float],
+    swept_total_length: float,
+    swept_tube_radius: float,
+    swept_step_length_angstrom: float,
+    max_output_voxels: int,
+) -> tuple[tuple[int, int, int], tuple[float, float, float], float, float, float]:
+    """
+    Reconcile the organelle's size with its box.
+
+    With no ``target_shape`` the box is sized to the organelle, scaled down
+    if that would exceed ``max_output_voxels``. With one, the organelle is
+    clamped (spherical harmonics) or scaled (swept spline) to what the box
+    can hold without clipping. Returns the box and the possibly adjusted
+    size parameters.
+    """
+    if target_shape is None:
+        safe_half_extent_angstrom = (
+            membrane_bounding_radius(
+                shape_backend,
+                sh_axes=sh_axes,
+                swept_total_length=swept_total_length,
+                swept_tube_radius=swept_tube_radius,
+            )
+            / _SIZE_MARGIN_FRACTION
+        )
+        n = max(1, math.ceil(2.0 * safe_half_extent_angstrom / voxel_size))
+        # This OUTPUT canvas (what becomes self.volume) is a SEPARATE
+        # concern from the internal working field max_field_voxels
+        # already protects (generate()'s own field_spacing_angstrom
+        # coarsening) -- and, since generation-resolution decoupling
+        # was added (see max_field_voxels' own docstring), a large n
+        # here is now normally absorbed by generating at a coarser
+        # grid and upsampling, WITHOUT shrinking the organelle at all.
+        # max_output_voxels below is the last-resort fallback for when
+        # even the upsampled FINAL array (materialized via chunked
+        # point-sampling, not one giant call -- see
+        # _chunked_upsample_density) still wouldn't fit -- SHRINKS the
+        # organelle's own physical size to fit, the same mechanism the
+        # explicit-target_shape branch below already uses.
+        if n**3 > max_output_voxels:
+            n_capped = max(1, round(max_output_voxels ** (1.0 / 3.0)))
+            scale = n_capped / n
+            if shape_backend == "spherical_harmonics":
+                new_sh_axes_angstrom = (
+                    sh_axes[0] * scale,
+                    sh_axes[1] * scale,
+                    sh_axes[2] * scale,
+                )
+                warnings.warn(
+                    f"MembraneGenerator: sh_axes {sh_axes} at "
+                    f"voxel_size={voxel_size:.2f} A implies a {n}^3 output canvas, "
+                    f"exceeding max_output_voxels ({max_output_voxels:,}) -- "
+                    f"scaled down by {scale:.2f}x (to "
+                    f"{tuple(round(a, 1) for a in new_sh_axes_angstrom)}) to avoid "
+                    "an OOM materializing the final array. Raise "
+                    "max_output_voxels if you have the memory to spare, "
+                    "increase voxel_size, or set sh_axes explicitly to get "
+                    "the originally requested size.",
+                    stacklevel=2,
+                )
+                sh_axes = new_sh_axes_angstrom
+            else:
+                new_total_length_angstrom = swept_total_length * scale
+                new_tube_radius_angstrom = swept_tube_radius * scale
+                warnings.warn(
+                    "MembraneGenerator: swept_total_length/"
+                    f"swept_tube_radius ({swept_total_length:.1f} A/"
+                    f"{swept_tube_radius:.1f} A) at voxel_size={voxel_size:.2f} A "
+                    f"imply a {n}^3 output canvas, exceeding "
+                    f"max_output_voxels ({max_output_voxels:,}) -- scaled "
+                    f"both down by {scale:.2f}x (to {new_total_length_angstrom:.1f} "
+                    f"A/{new_tube_radius_angstrom:.1f} A) to avoid an OOM "
+                    "materializing the final array. Raise max_output_voxels "
+                    "if you have the memory to spare, or increase voxel_size, "
+                    "to get the originally requested size.",
+                    stacklevel=2,
+                )
+                swept_total_length = new_total_length_angstrom
+                swept_tube_radius = new_tube_radius_angstrom
+                if swept_step_length_angstrom > swept_tube_radius:
+                    swept_step_length_angstrom = 0.5 * swept_tube_radius
+            n = n_capped
+        target_shape = (n, n, n)
+    else:
+        tz, ty, tx = target_shape
+        box_extent_angstrom = (tx * voxel_size, ty * voxel_size, tz * voxel_size)
+        safe_half_extent_angstrom = (
+            _SIZE_MARGIN_FRACTION * min(box_extent_angstrom) / 2.0
+        )
+        if safe_half_extent_angstrom < _MIN_SAFE_HALF_EXTENT_A:
+            raise ValueError(
+                f"MembraneGenerator: target_shape={target_shape!r} at "
+                f"voxel_size={voxel_size:.2f} A/voxel gives a box too small (safe "
+                f"half-extent {safe_half_extent_angstrom:.1f} A) to hold any "
+                f"reasonably-sized {shape_backend!r} organelle -- increase "
+                "target_shape or voxel_size."
+            )
+        if shape_backend == "spherical_harmonics":
+            clamped = (
+                min(sh_axes[0], safe_half_extent_angstrom),
+                min(sh_axes[1], safe_half_extent_angstrom),
+                min(sh_axes[2], safe_half_extent_angstrom),
+            )
+            if clamped != sh_axes:
+                warnings.warn(
+                    f"MembraneGenerator: sh_axes {sh_axes} exceeds what "
+                    f"target_shape={target_shape!r}/voxel_size={voxel_size:.2f} "
+                    f"can safely hold -- clamped to "
+                    f"{tuple(round(c, 1) for c in clamped)} to avoid clipping. "
+                    "Increase target_shape/voxel_size, or set sh_axes "
+                    "explicitly to a smaller value, to get the originally "
+                    "requested size.",
+                    stacklevel=2,
+                )
+                sh_axes = clamped
+        else:
+            reach = membrane_bounding_radius(
+                shape_backend,
+                swept_total_length=swept_total_length,
+                swept_tube_radius=swept_tube_radius,
+            )
+            if reach > safe_half_extent_angstrom:
+                scale = safe_half_extent_angstrom / reach
+                new_total_length_angstrom = swept_total_length * scale
+                new_tube_radius_angstrom = swept_tube_radius * scale
+                warnings.warn(
+                    "MembraneGenerator: swept_total_length/"
+                    f"swept_tube_radius ({swept_total_length:.1f} A/"
+                    f"{swept_tube_radius:.1f} A) exceed what "
+                    f"target_shape={target_shape!r}/voxel_size={voxel_size:.2f} "
+                    f"can safely hold -- scaled both down by {scale:.2f}x (to "
+                    f"{new_total_length_angstrom:.1f} A/{new_tube_radius_angstrom:.1f} A) to "
+                    "avoid clipping. Increase target_shape/voxel_size to get "
+                    "the originally requested size.",
+                    stacklevel=2,
+                )
+                swept_total_length = new_total_length_angstrom
+                swept_tube_radius = new_tube_radius_angstrom
+                if swept_step_length_angstrom > swept_tube_radius:
+                    swept_step_length_angstrom = 0.5 * swept_tube_radius
+
+    return (
+        target_shape,
+        sh_axes,
+        swept_total_length,
+        swept_tube_radius,
+        swept_step_length_angstrom,
+    )
+
+
 class MembraneGenerator:
     """
     Generate an organic membrane specimen volume with transmembrane inserts.
@@ -739,203 +987,43 @@ class MembraneGenerator:
 
         voxel_size = float(voxel_size)
 
-        # Resolve any None size parameter from its own *_range_a default,
-        # via a torch.Generator seeded independently from `seed` -- same
-        # pattern the shape draws below use, and a
-        # separate Generator object from whatever RNG the low-level shape
-        # backend function uses internally (so this draw doesn't consume
-        # that stream). Resolved unconditionally, regardless of
-        # shape_backend, rather than only for the active backend: cheap,
-        # and keeps every one of these attributes a plain concrete value
-        # afterward instead of a backend-conditional Optional leaking into
-        # every later read site (including target_shape auto-sizing
-        # immediately below, which needs concrete values to work with).
-        meta_rng = torch.Generator(device="cpu")
-        if seed is not None:
-            meta_rng.manual_seed(seed)
-
-        if sh_axes is None:
-            lo, hi = _resolve_range("sh_axes_range", sh_axes_range, min_low=1e-6)
-            sh_axes = (
-                _draw_uniform(meta_rng, lo, hi),
-                _draw_uniform(meta_rng, lo, hi),
-                _draw_uniform(meta_rng, lo, hi),
-            )
-        else:
-            # Normalize to a tuple even when given one already -- a caller
-            # passing a plain list (e.g. every TOML-sourced config value,
-            # since TOML arrays decode to Python lists) would otherwise make
-            # the clamp check below's `clamped != sh_axes` compare a tuple
-            # against a list and spuriously fire even when nothing needed
-            # clamping (tuple != list in Python regardless of contents).
-            sh_axes = (float(sh_axes[0]), float(sh_axes[1]), float(sh_axes[2]))
-        if swept_tube_radius is None:
-            lo, hi = _resolve_range(
-                "swept_tube_radius_range", swept_tube_radius_range, min_low=1e-6
-            )
-            swept_tube_radius = _draw_uniform(meta_rng, lo, hi)
-        if swept_total_length is None:
-            lo, hi = _resolve_range(
-                "swept_total_length_range", swept_total_length_range, min_low=1e-6
-            )
-            swept_total_length = _draw_uniform(meta_rng, lo, hi)
-        if swept_flexibility is None:
-            lo, hi = _resolve_range(
-                "swept_flexibility_range", swept_flexibility_range, min_low=1e-6
-            )
-            if hi > 1.0:
-                raise ValueError(
-                    "swept_flexibility_range must have high <= 1, got "
-                    f"{swept_flexibility_range!r}"
-                )
-            swept_flexibility = _draw_uniform(meta_rng, lo, hi)
-        if swept_radius_variation is None:
-            lo, hi = _resolve_range(
-                "swept_radius_variation_range",
-                swept_radius_variation_range,
-                min_low=0.0,
-            )
-            swept_radius_variation = _draw_uniform(meta_rng, lo, hi)
-        if swept_step_length_angstrom is None:
-            # Half the (now-resolved) tube radius -- always comfortably
-            # under the 2*tube_radius_angstrom beading threshold regardless of
-            # which value got drawn, unlike a fixed absolute default tuned
-            # for one specific radius (see generate_membrane_field_swept_
-            # spline's own beading-risk docstring).
-            swept_step_length_angstrom = 0.5 * swept_tube_radius
-
-        # target_shape: auto-size from the now-resolved organelle size
-        # when omitted, so a casual caller never has to compute a working
-        # grid by hand; clamp the organelle size to fit when an explicit
-        # target_shape IS given, so a too-large drawn/explicit size can
-        # never silently clip (MembraneField.clipped_at_boundary/each shape
-        # backend's own boundary warning are the last-resort safety net,
-        # not the primary defense).
-        if target_shape is None:
-            safe_half_extent_angstrom = (
-                membrane_bounding_radius(
-                    shape_backend,
-                    sh_axes=sh_axes,
-                    swept_total_length=swept_total_length,
-                    swept_tube_radius=swept_tube_radius,
-                )
-                / _SIZE_MARGIN_FRACTION
-            )
-            n = max(1, math.ceil(2.0 * safe_half_extent_angstrom / voxel_size))
-            # This OUTPUT canvas (what becomes self.volume) is a SEPARATE
-            # concern from the internal working field max_field_voxels
-            # already protects (generate()'s own field_spacing_angstrom
-            # coarsening) -- and, since generation-resolution decoupling
-            # was added (see max_field_voxels' own docstring), a large n
-            # here is now normally absorbed by generating at a coarser
-            # grid and upsampling, WITHOUT shrinking the organelle at all.
-            # max_output_voxels below is the last-resort fallback for when
-            # even the upsampled FINAL array (materialized via chunked
-            # point-sampling, not one giant call -- see
-            # _chunked_upsample_density) still wouldn't fit -- SHRINKS the
-            # organelle's own physical size to fit, the same mechanism the
-            # explicit-target_shape branch below already uses.
-            if n**3 > max_output_voxels:
-                n_capped = max(1, round(max_output_voxels ** (1.0 / 3.0)))
-                scale = n_capped / n
-                if shape_backend == "spherical_harmonics":
-                    new_sh_axes_angstrom = (
-                        sh_axes[0] * scale,
-                        sh_axes[1] * scale,
-                        sh_axes[2] * scale,
-                    )
-                    warnings.warn(
-                        f"MembraneGenerator: sh_axes {sh_axes} at "
-                        f"voxel_size={voxel_size:.2f} A implies a {n}^3 output canvas, "
-                        f"exceeding max_output_voxels ({max_output_voxels:,}) -- "
-                        f"scaled down by {scale:.2f}x (to "
-                        f"{tuple(round(a, 1) for a in new_sh_axes_angstrom)}) to avoid "
-                        "an OOM materializing the final array. Raise "
-                        "max_output_voxels if you have the memory to spare, "
-                        "increase voxel_size, or set sh_axes explicitly to get "
-                        "the originally requested size.",
-                        stacklevel=2,
-                    )
-                    sh_axes = new_sh_axes_angstrom
-                else:
-                    new_total_length_angstrom = swept_total_length * scale
-                    new_tube_radius_angstrom = swept_tube_radius * scale
-                    warnings.warn(
-                        "MembraneGenerator: swept_total_length/"
-                        f"swept_tube_radius ({swept_total_length:.1f} A/"
-                        f"{swept_tube_radius:.1f} A) at voxel_size={voxel_size:.2f} A "
-                        f"imply a {n}^3 output canvas, exceeding "
-                        f"max_output_voxels ({max_output_voxels:,}) -- scaled "
-                        f"both down by {scale:.2f}x (to {new_total_length_angstrom:.1f} "
-                        f"A/{new_tube_radius_angstrom:.1f} A) to avoid an OOM "
-                        "materializing the final array. Raise max_output_voxels "
-                        "if you have the memory to spare, or increase voxel_size, "
-                        "to get the originally requested size.",
-                        stacklevel=2,
-                    )
-                    swept_total_length = new_total_length_angstrom
-                    swept_tube_radius = new_tube_radius_angstrom
-                    if swept_step_length_angstrom > swept_tube_radius:
-                        swept_step_length_angstrom = 0.5 * swept_tube_radius
-                n = n_capped
-            target_shape = (n, n, n)
-        else:
-            tz, ty, tx = target_shape
-            box_extent_angstrom = (tx * voxel_size, ty * voxel_size, tz * voxel_size)
-            safe_half_extent_angstrom = (
-                _SIZE_MARGIN_FRACTION * min(box_extent_angstrom) / 2.0
-            )
-            if safe_half_extent_angstrom < _MIN_SAFE_HALF_EXTENT_A:
-                raise ValueError(
-                    f"MembraneGenerator: target_shape={target_shape!r} at "
-                    f"voxel_size={voxel_size:.2f} A/voxel gives a box too small (safe "
-                    f"half-extent {safe_half_extent_angstrom:.1f} A) to hold any "
-                    f"reasonably-sized {shape_backend!r} organelle -- increase "
-                    "target_shape or voxel_size."
-                )
-            if shape_backend == "spherical_harmonics":
-                clamped = (
-                    min(sh_axes[0], safe_half_extent_angstrom),
-                    min(sh_axes[1], safe_half_extent_angstrom),
-                    min(sh_axes[2], safe_half_extent_angstrom),
-                )
-                if clamped != sh_axes:
-                    warnings.warn(
-                        f"MembraneGenerator: sh_axes {sh_axes} exceeds what "
-                        f"target_shape={target_shape!r}/voxel_size={voxel_size:.2f} "
-                        f"can safely hold -- clamped to "
-                        f"{tuple(round(c, 1) for c in clamped)} to avoid clipping. "
-                        "Increase target_shape/voxel_size, or set sh_axes "
-                        "explicitly to a smaller value, to get the originally "
-                        "requested size.",
-                        stacklevel=2,
-                    )
-                    sh_axes = clamped
-            else:
-                reach = membrane_bounding_radius(
-                    shape_backend,
-                    swept_total_length=swept_total_length,
-                    swept_tube_radius=swept_tube_radius,
-                )
-                if reach > safe_half_extent_angstrom:
-                    scale = safe_half_extent_angstrom / reach
-                    new_total_length_angstrom = swept_total_length * scale
-                    new_tube_radius_angstrom = swept_tube_radius * scale
-                    warnings.warn(
-                        "MembraneGenerator: swept_total_length/"
-                        f"swept_tube_radius ({swept_total_length:.1f} A/"
-                        f"{swept_tube_radius:.1f} A) exceed what "
-                        f"target_shape={target_shape!r}/voxel_size={voxel_size:.2f} "
-                        f"can safely hold -- scaled both down by {scale:.2f}x (to "
-                        f"{new_total_length_angstrom:.1f} A/{new_tube_radius_angstrom:.1f} A) to "
-                        "avoid clipping. Increase target_shape/voxel_size to get "
-                        "the originally requested size.",
-                        stacklevel=2,
-                    )
-                    swept_total_length = new_total_length_angstrom
-                    swept_tube_radius = new_tube_radius_angstrom
-                    if swept_step_length_angstrom > swept_tube_radius:
-                        swept_step_length_angstrom = 0.5 * swept_tube_radius
+        (
+            sh_axes,
+            swept_tube_radius,
+            swept_total_length,
+            swept_flexibility,
+            swept_radius_variation,
+            swept_step_length_angstrom,
+        ) = _resolve_shape_parameters(
+            seed,
+            sh_axes,
+            sh_axes_range,
+            swept_tube_radius,
+            swept_tube_radius_range,
+            swept_total_length,
+            swept_total_length_range,
+            swept_flexibility,
+            swept_flexibility_range,
+            swept_radius_variation,
+            swept_radius_variation_range,
+            swept_step_length_angstrom,
+        )
+        (
+            target_shape,
+            sh_axes,
+            swept_total_length,
+            swept_tube_radius,
+            swept_step_length_angstrom,
+        ) = _fit_shape_to_box(
+            target_shape,
+            voxel_size,
+            shape_backend,
+            sh_axes,
+            swept_total_length,
+            swept_tube_radius,
+            swept_step_length_angstrom,
+            max_output_voxels,
+        )
 
         tz, ty, tx = target_shape
         self.target_shape: tuple[int, int, int] = (int(tz), int(ty), int(tx))

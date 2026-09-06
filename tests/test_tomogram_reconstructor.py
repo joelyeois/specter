@@ -20,6 +20,7 @@ import torch.utils.data
 from specter.arrays import ball3d
 from specter.fft import fft3
 from specter.ghostbuster import TomogramReconstructor
+from specter.settings import Propagation
 
 SCHEDULERS = [
     "LambdaLR",
@@ -110,7 +111,10 @@ def _fit_one_epoch(
 def test_forward_multislice_runs_and_is_finite(tr_kwargs: dict) -> None:
     """The multislice path (exercising _compute_nz_tilt + defocus z-offset
     correction) runs end-to-end and produces a finite image at high tilt."""
-    model = TomogramReconstructor(**tr_kwargs, scattering_model="multislice")
+    model = TomogramReconstructor(
+        **tr_kwargs,
+        propagation=Propagation(scattering_model="multislice"),
+    )
     img = model.forward(0)  # -20 degree tilt
     assert img.shape == (8, 8)
     assert torch.isfinite(img).all()
@@ -123,7 +127,10 @@ def test_forward_multislice_runs_and_is_finite(tr_kwargs: dict) -> None:
 
 def test_fov_mask_none_at_zero_tilt(tr_kwargs: dict) -> None:
     """At (near-)zero tilt the full image is real FOV, so the mask is None."""
-    model = TomogramReconstructor(**tr_kwargs, scattering_model="projection")
+    model = TomogramReconstructor(
+        **tr_kwargs,
+        propagation=Propagation(scattering_model="projection"),
+    )
     assert model._fov_mask(1) is None  # tilt_idx 1 == 0 degrees
 
 
@@ -131,7 +138,9 @@ def test_fov_mask_zeros_border_at_high_tilt(tr_kwargs: dict) -> None:
     """At high tilt (tilt_axis='x') the Y-border of the mask is zeroed and the
     center remains real FOV."""
     model = TomogramReconstructor(
-        **tr_kwargs, scattering_model="projection", tilt_axis="x"
+        **tr_kwargs,
+        tilt_axis="x",
+        propagation=Propagation(scattering_model="projection"),
     )
     mask = model._fov_mask(0)  # -20 degree tilt
     assert mask is not None
@@ -152,7 +161,10 @@ def test_configure_optimizers_all_schedulers(tr_kwargs: dict, scheduler: str) ->
     torch.manual_seed(0)
     images = torch.randn(3, 8, 8)
     model = TomogramReconstructor(
-        **tr_kwargs, scattering_model="projection", lr=0.1, scheduler=scheduler
+        **tr_kwargs,
+        lr=0.1,
+        scheduler=scheduler,
+        propagation=Propagation(scattering_model="projection"),
     )
     V_init = model.V.data.clone()
     _fit_one_epoch(model, images, batch_size=3)
@@ -162,7 +174,11 @@ def test_configure_optimizers_all_schedulers(tr_kwargs: dict, scheduler: str) ->
 
 def test_configure_optimizers_returns_empty_when_lr_none(tr_kwargs: dict) -> None:
     """lr=None disables volume optimisation: no optimizers, no schedulers."""
-    model = TomogramReconstructor(**tr_kwargs, scattering_model="projection", lr=None)
+    model = TomogramReconstructor(
+        **tr_kwargs,
+        lr=None,
+        propagation=Propagation(scattering_model="projection"),
+    )
     opts, schedulers = model.configure_optimizers()
     assert opts == []
     assert schedulers == []
@@ -171,7 +187,10 @@ def test_configure_optimizers_returns_empty_when_lr_none(tr_kwargs: dict) -> Non
 def test_configure_optimizers_unknown_scheduler_raises(tr_kwargs: dict) -> None:
     """An unrecognised scheduler string raises ValueError from configure_optimizers."""
     model = TomogramReconstructor(
-        **tr_kwargs, scattering_model="projection", lr=0.1, scheduler="BogusScheduler"
+        **tr_kwargs,
+        lr=0.1,
+        scheduler="BogusScheduler",
+        propagation=Propagation(scattering_model="projection"),
     )
     with pytest.raises(ValueError, match="Unknown scheduler"):
         model.configure_optimizers()
@@ -189,7 +208,10 @@ def test_kmask_zeros_high_frequencies(tr_kwargs: dict) -> None:
     kwargs = dict(tr_kwargs)
     kwargs["V"] = torch.randn(n, n, n)
     model = TomogramReconstructor(
-        **kwargs, scattering_model="projection", lr=0.1, kmask=ball3d(n, n // 2)
+        **kwargs,
+        lr=0.1,
+        kmask=ball3d(n, n // 2),
+        propagation=Propagation(scattering_model="projection"),
     )
     model.on_train_batch_end(None, None, 0)
     spectrum = fft3(model.V.data, shift=True)
@@ -209,10 +231,10 @@ def test_run_dir_writes_expected_artifacts(tmp_path: Path, tr_kwargs: dict) -> N
     n = tr_kwargs["V"].shape[-1]
     model = TomogramReconstructor(
         **tr_kwargs,
-        scattering_model="projection",
         lr=0.1,
         kmask=ball3d(n, n),
         run_dir=tmp_path,
+        propagation=Propagation(scattering_model="projection"),
     )
     _fit_one_epoch(model, images, batch_size=3, max_epochs=2)
 

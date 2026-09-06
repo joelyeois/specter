@@ -27,6 +27,7 @@ from pathlib import Path
 
 import pytest
 import torch
+from specter.settings import Propagation
 
 NXY = NZ = 16
 N_PARTICLES = 4
@@ -69,15 +70,17 @@ def _build_model(problem, lr_R):
         {k: v.clone() for k, v in problem["ctf"].items()},
         VOLTAGE,
         DOSE,
-        alpha=0.0,
         scale=problem["scale"].clone(),
-        scattering_model="rytov",
         lr=0.1,
         lr_R=lr_R,
         symmetry=None,
         sparsity=0,
-        rotate_mode="real",
-        ews_curvature_sign="negative",
+        propagation=Propagation(
+            alpha=0.0,
+            scattering_model="rytov",
+            rotate_mode="real",
+            ews_curvature_sign="negative",
+        ),
     )
 
 

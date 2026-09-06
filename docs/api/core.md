@@ -74,6 +74,10 @@ Standalone top-level modules, outside any subpackage.
 
 ::: specter.constants
 
+## specter.settings
+
+::: specter.settings
+
 ## specter.options
 
 ::: specter.options

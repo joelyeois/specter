@@ -27,6 +27,7 @@ from specter.io import create_micrograph_starfile
 from specter.specimen import load_specimen_volume
 
 from specter.devices import parse_device, resolve_available_device
+from specter.settings import Camera, Envelopes, Propagation, bundle_from_config
 from specter.progress import console, format_elapsed, section
 from ._common import (
     _reserve_next_job_id,
@@ -182,8 +183,6 @@ def run_tilt_series(
     }
 
     ice_model = None if config.ice_model == "none" else config.ice_model
-    noise_model = None if config.noise_model == "none" else config.noise_model
-    detector_model = None if config.detector_model == "none" else config.detector_model
 
     model = TiltSeriesGenerator(
         volume.unsqueeze(0),  # add batch dim: (1, Z, Y, X)
@@ -193,26 +192,16 @@ def run_tilt_series(
         config.voltage,
         config.dose_per_tilt,
         angles=angles,
+        propagation=bundle_from_config(Propagation, config),
+        envelopes=bundle_from_config(Envelopes, config, cc=cc_angstrom),
+        camera=bundle_from_config(Camera, config),
         ice_model=ice_model,
         ice_cache_dir=config.ice_cache_dir,
         ice_relax_steps=config.ice_relax_steps,
         ice_parameterization=config.bulk_scattering_factors,
-        scattering_model=config.scattering_model,
-        noise_model=noise_model,
-        alpha=config.alpha,
-        pad_fft=config.pad_fft,
-        klim=config.klim,
         bfactor=config.bfactor,
         tilt_axis=config.tilt_axis,
         coincidence_radius=config.coincidence_radius,
-        n_frames=config.n_frames,
-        convergence_angle=config.convergence_angle,
-        cc=cc_angstrom,
-        energy_spread=config.energy_spread,
-        deltaV_V=config.deltaV_V,
-        deltaI_I=config.deltaI_I,
-        dose_envelope=config.dose_envelope,
-        detector_model=detector_model,
     ).to(device_target)
 
     # --- Generating ---

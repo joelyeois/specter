@@ -34,6 +34,7 @@ from specter.memory import (
 from specter.pdb import PDB
 from specter.potential import PotentialBuilder
 from specter.devices import parse_device, resolve_available_device
+from specter.settings import Camera, Envelopes, Propagation, bundle_from_config
 from specter.progress import console, format_elapsed, section, track
 
 from ._common import (
@@ -314,9 +315,7 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
     coincidence_radius = _uniform_sample(config.coincidence_radius, n)
     potential_scale = _uniform_sample(config.potential_scale, n)
 
-    noise_model = None if config.noise_model == "none" else config.noise_model
     ice_model = None if config.ice_model == "none" else config.ice_model
-    detector_model = None if config.detector_model == "none" else config.detector_model
     crowd_min_distance = (
         None
         if config.crowd_min_distance == 0
@@ -362,15 +361,15 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
         voltage,
         dose,
         anisomag=anisomag,
+        # alpha is data when it comes from a .cs/.star file, so it overrides
+        # the config's; cc is in mm in the config and Angstrom here.
+        propagation=bundle_from_config(Propagation, config, alpha=alpha),
+        envelopes=bundle_from_config(Envelopes, config, cc=cc_angstrom),
+        camera=bundle_from_config(Camera, config, n_frames=n_frames),
         icemaker=icemaker,
         ice_thickness=config.ice_thickness,
         ice_relax_steps=config.ice_relax_steps,
         ice_parameterization=ice_parameterization,
-        scattering_model=config.scattering_model,
-        noise_model=noise_model,
-        klim=config.klim,
-        ews_curvature_sign=config.ews_curvature_sign,
-        alpha=alpha,
         crowd_min_distance=crowd_min_distance,
         crowd_max_distance_z=config.crowd_max_distance_z,
         crowd_max_distance_xy=config.crowd_max_distance_xy,
@@ -380,19 +379,9 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
         crowd_seed=config.crowd_seed,
         crowd_move_to_cpu=config.crowd_move_to_cpu,
         water_air_interface=config.water_air_interface,
-        pad_fft=config.pad_fft,
-        rotate_mode=config.rotate_mode,
-        detector_model=detector_model,
         verbose=False,
         coincidence_radius=coincidence_radius,
-        n_frames=n_frames,
         potential_scale=potential_scale,
-        convergence_angle=config.convergence_angle,
-        cc=cc_angstrom,
-        energy_spread=config.energy_spread,
-        deltaV_V=config.deltaV_V,
-        deltaI_I=config.deltaI_I,
-        dose_envelope=config.dose_envelope,
         bfactor=config.bfactor,
     )
 

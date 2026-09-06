@@ -25,6 +25,7 @@ from specter.arrays import ball3d
 from specter.fft import fft3
 from specter.ghostbuster import Reconstructor
 from specter.symmetries import apply_symmetry, get_rotation_matrices
+from specter.settings import Propagation
 
 SCATTERING_MODELS = ["multislice", "firstborn", "projection", "ctf", "rytov"]
 SCHEDULERS = [
@@ -89,7 +90,6 @@ def gb_kwargs(
         ctf_params=full_ctf_params,
         voltage=300.0,
         dose_per_angstrom=2.0,
-        alpha=0.1,
     )
 
 
@@ -104,7 +104,10 @@ def test_ghostbuster_forward_regression(
 ) -> None:
     """Reconstructor.forward with full CTF params regresses for each scattering model."""
     torch.manual_seed(0)
-    gb = Reconstructor(**gb_kwargs, scattering_model=scattering_model)
+    gb = Reconstructor(
+        **gb_kwargs,
+        propagation=Propagation(alpha=0.1, scattering_model=scattering_model),
+    )
     torch.manual_seed(0)
     images = gb.forward(torch.tensor([0]))
     save_or_compare(f"ghostbuster_forward_{scattering_model}", images.cpu())
@@ -122,7 +125,11 @@ def test_anisomag_forward_regression(
 ) -> None:
     """Reconstructor.forward with anisotropic magnification and full CTF params."""
     torch.manual_seed(0)
-    gb = Reconstructor(**gb_kwargs, anisomag=anisomag, scattering_model="projection")
+    gb = Reconstructor(
+        **gb_kwargs,
+        anisomag=anisomag,
+        propagation=Propagation(alpha=0.1, scattering_model="projection"),
+    )
     torch.manual_seed(0)
     images = gb.forward(torch.tensor([0]))
     save_or_compare("ghostbuster_anisomag_projection", images.cpu())
@@ -130,9 +137,15 @@ def test_anisomag_forward_regression(
 
 def test_anisomag_changes_output(gb_kwargs: dict, anisomag: torch.Tensor) -> None:
     """Applying anisomag via Reconstructor produces a different image than no anisomag."""
-    gb_iso = Reconstructor(**gb_kwargs, anisomag=None, scattering_model="projection")
+    gb_iso = Reconstructor(
+        **gb_kwargs,
+        anisomag=None,
+        propagation=Propagation(alpha=0.1, scattering_model="projection"),
+    )
     gb_aniso = Reconstructor(
-        **gb_kwargs, anisomag=anisomag, scattering_model="projection"
+        **gb_kwargs,
+        anisomag=anisomag,
+        propagation=Propagation(alpha=0.1, scattering_model="projection"),
     )
     img_iso = gb_iso.forward(torch.tensor([0]))
     img_aniso = gb_aniso.forward(torch.tensor([0]))
@@ -155,8 +168,7 @@ def test_tilt_changes_output(tiny_volume: torch.Tensor) -> None:
         translations=torch.tensor([[0.0, 0.0]]),
         voltage=300.0,
         dose_per_angstrom=2.0,
-        alpha=0.0,
-        scattering_model="projection",
+        propagation=Propagation(alpha=0.0, scattering_model="projection"),
     )
     no_tilt = {"dfu": torch.tensor([5000.0]), "cs": torch.tensor([2.7])}
     with_tilt = {
@@ -179,8 +191,7 @@ def test_trefoil_changes_output(tiny_volume: torch.Tensor) -> None:
         translations=torch.tensor([[0.0, 0.0]]),
         voltage=300.0,
         dose_per_angstrom=2.0,
-        alpha=0.0,
-        scattering_model="projection",
+        propagation=Propagation(alpha=0.0, scattering_model="projection"),
     )
     no_trefoil = {"dfu": torch.tensor([5000.0]), "cs": torch.tensor([2.7])}
     with_trefoil = {
@@ -203,8 +214,7 @@ def test_tetrafoil_changes_output(tiny_volume: torch.Tensor) -> None:
         translations=torch.tensor([[0.0, 0.0]]),
         voltage=300.0,
         dose_per_angstrom=2.0,
-        alpha=0.0,
-        scattering_model="projection",
+        propagation=Propagation(alpha=0.0, scattering_model="projection"),
     )
     no_tetrafoil = {"dfu": torch.tensor([5000.0]), "cs": torch.tensor([2.7])}
     with_tetrafoil = {
@@ -232,8 +242,7 @@ def test_bfactor_damps_ghostbuster_output(tiny_volume: torch.Tensor) -> None:
         translations=torch.tensor([[0.0, 0.0]]),
         voltage=300.0,
         dose_per_angstrom=2.0,
-        alpha=0.0,
-        scattering_model="projection",
+        propagation=Propagation(alpha=0.0, scattering_model="projection"),
     )
     params_no_b = {"dfu": torch.tensor([5000.0]), "cs": torch.tensor([2.7])}
     params_b = {
@@ -256,8 +265,7 @@ def test_bfactor_kwarg_matches_ctf_params_bfactor(tiny_volume: torch.Tensor) -> 
         translations=torch.tensor([[0.0, 0.0]]),
         voltage=300.0,
         dose_per_angstrom=2.0,
-        alpha=0.0,
-        scattering_model="projection",
+        propagation=Propagation(alpha=0.0, scattering_model="projection"),
     )
     params = {"dfu": torch.tensor([5000.0]), "cs": torch.tensor([2.7])}
     img_via_ctf_params = Reconstructor(
@@ -278,8 +286,7 @@ def test_bfactor_kwarg_overrides_ctf_params_bfactor(tiny_volume: torch.Tensor) -
         translations=torch.tensor([[0.0, 0.0]]),
         voltage=300.0,
         dose_per_angstrom=2.0,
-        alpha=0.0,
-        scattering_model="projection",
+        propagation=Propagation(alpha=0.0, scattering_model="projection"),
     )
     params = {
         "dfu": torch.tensor([5000.0]),
@@ -322,9 +329,9 @@ def test_reconstructor_training_updates_volume(
         ctf_params=ctf,
         voltage=300.0,
         dose_per_angstrom=2.0,
-        scattering_model="projection",
         lr=0.1,
         symmetry="C2",
+        propagation=Propagation(scattering_model="projection"),
     )
 
     opt = torch.optim.AdamW([model.V], lr=0.1)
@@ -357,7 +364,7 @@ def test_scale_scales_mse_loss_linearly(gb_kwargs: dict) -> None:
         quaternions=base["quaternions"].repeat(n_particles, 1),
         translations=base["translations"].repeat(n_particles, 1),
         ctf_params={k: v.repeat(n_particles) for k, v in base["ctf_params"].items()},
-        scattering_model="projection",
+        propagation=Propagation(scattering_model="projection"),
     )
 
     gb_unit = Reconstructor(**base, scale=torch.ones(n_particles))
@@ -380,7 +387,7 @@ def test_small_scale_reduces_gradient_contribution(gb_kwargs: dict) -> None:
         quaternions=base["quaternions"].repeat(n_particles, 1),
         translations=base["translations"].repeat(n_particles, 1),
         ctf_params={k: v.repeat(n_particles) for k, v in base["ctf_params"].items()},
-        scattering_model="projection",
+        propagation=Propagation(scattering_model="projection"),
         lr=0.1,
     )
     idx = torch.arange(n_particles)
@@ -440,9 +447,9 @@ def test_configure_optimizers_all_schedulers(
         ctf_params=ctf,
         voltage=300.0,
         dose_per_angstrom=2.0,
-        scattering_model="projection",
         lr=0.1,
         scheduler=scheduler,
+        propagation=Propagation(scattering_model="projection"),
     )
     V_init = model.V.data.clone()
 
@@ -464,9 +471,9 @@ def test_configure_optimizers_unknown_scheduler_raises(
         ctf_params=full_ctf_params,
         voltage=300.0,
         dose_per_angstrom=2.0,
-        scattering_model="projection",
         lr=0.1,
         scheduler="BogusScheduler",
+        propagation=Propagation(scattering_model="projection"),
     )
     with pytest.raises(ValueError, match="Unknown scheduler"):
         model.configure_optimizers()
@@ -491,9 +498,9 @@ def test_kmask_zeros_high_frequencies(
         ctf_params=full_ctf_params,
         voltage=300.0,
         dose_per_angstrom=2.0,
-        scattering_model="projection",
         lr=0.1,
         kmask=ball3d(n, n // 2),
+        propagation=Propagation(scattering_model="projection"),
     )
     model.on_train_batch_end(None, None, 0)
     spectrum = fft3(model.V.data, shift=True)
@@ -527,7 +534,6 @@ def test_run_dir_writes_expected_artifacts(
         ctf_params=ctf,
         voltage=300.0,
         dose_per_angstrom=2.0,
-        scattering_model="projection",
         lr=0.1,
         symmetry="C2",
         kmask=ball3d(n, n),
@@ -535,6 +541,7 @@ def test_run_dir_writes_expected_artifacts(
         cryosparc_ref=cryosparc_ref,
         run_dir=tmp_path,
         halfset_label="A",
+        propagation=Propagation(scattering_model="projection"),
     )
     _fit_one_epoch(model, images, max_epochs=2)
 
@@ -571,10 +578,10 @@ def test_symmetrize_applies_configured_symmetry(
         ctf_params=full_ctf_params,
         voltage=300.0,
         dose_per_angstrom=2.0,
-        scattering_model="projection",
         symmetry="C2",
         symmetry_mode="real",
         symmetry_batchsize=4,
+        propagation=Propagation(scattering_model="projection"),
     )
     v_before = model.V.data.clone()
     model.symmetrize()
@@ -599,10 +606,10 @@ def test_on_train_epoch_end_applies_symmetry(
         ctf_params=full_ctf_params,
         voltage=300.0,
         dose_per_angstrom=2.0,
-        scattering_model="projection",
         symmetry="C2",
         symmetry_mode="real",
         symmetry_batchsize=4,
+        propagation=Propagation(scattering_model="projection"),
     )
     v_before = model.V.data.clone()
     model.on_train_epoch_end()
@@ -632,9 +639,9 @@ def test_fsc_ref_and_mask_accept_tensor(
         ctf_params=full_ctf_params,
         voltage=300.0,
         dose_per_angstrom=2.0,
-        scattering_model="projection",
         fsc_ref=ref,
         fsc_mask=mask,
+        propagation=Propagation(scattering_model="projection"),
     )
     assert torch.equal(model.fsc_ref, ref)
     assert torch.equal(model.fsc_mask, mask)
@@ -664,9 +671,9 @@ def test_fsc_ref_and_cryosparc_ref_load_from_file(
         ctf_params=full_ctf_params,
         voltage=300.0,
         dose_per_angstrom=2.0,
-        scattering_model="projection",
         fsc_ref=ref_path,
         cryosparc_ref=cs_path,
+        propagation=Propagation(scattering_model="projection"),
     )
     assert torch.allclose(model.fsc_ref, torch.as_tensor(ref))
     assert torch.allclose(model.cryosparc_ref, torch.as_tensor(cs_ref))
@@ -692,9 +699,9 @@ def test_use_2d_mask_weights_loss(
         ctf_params=full_ctf_params,
         voltage=300.0,
         dose_per_angstrom=2.0,
-        scattering_model="projection",
         fsc_mask=mask,
         use_2d_mask=True,
+        propagation=Propagation(scattering_model="projection"),
     )
     out = model.forward(torch.tensor([0]))
     images = torch.randn_like(out)
@@ -714,8 +721,8 @@ def test_use_2d_mask_requires_tensor_mask(
         ctf_params=full_ctf_params,
         voltage=300.0,
         dose_per_angstrom=2.0,
-        scattering_model="projection",
         use_2d_mask=True,
+        propagation=Propagation(scattering_model="projection"),
     )
     out = model.forward(torch.tensor([0]))
     images = torch.randn_like(out)
@@ -746,7 +753,7 @@ def test_compute_loss_ncc_branch_differs_from_mse(
         ctf_params=ctf,
         voltage=300.0,
         dose_per_angstrom=2.0,
-        scattering_model="projection",
+        propagation=Propagation(scattering_model="projection"),
     )
     loss_mse = Reconstructor(**base)._compute_loss(out, images, idx)
     loss_ncc = Reconstructor(**base, use_ncc=True)._compute_loss(out, images, idx)
@@ -772,8 +779,8 @@ def test_compute_loss_learn_noise_model_updates_sigma2(
         ctf_params=ctf,
         voltage=300.0,
         dose_per_angstrom=2.0,
-        scattering_model="projection",
         learn_noise_model=True,
+        propagation=Propagation(scattering_model="projection"),
     )
     sigma2_before = model.sigma2_k.clone()
     loss = model._compute_loss(out, images, idx)
@@ -800,7 +807,7 @@ def test_compute_loss_nps_weight_branch_differs_from_mse(
         ctf_params=ctf,
         voltage=300.0,
         dose_per_angstrom=2.0,
-        scattering_model="projection",
+        propagation=Propagation(scattering_model="projection"),
     )
     loss_mse = Reconstructor(**base)._compute_loss(out, images, idx)
     loss_nps = Reconstructor(**base, nps_weight=nps)._compute_loss(out, images, idx)
@@ -828,8 +835,7 @@ def _binding_kwargs(tiny_volume: torch.Tensor, ctf: dict) -> dict:
         ctf_params=ctf,
         voltage=300.0,
         dose_per_angstrom=2.0,
-        alpha=0.1,
-        scattering_model="multislice",
+        propagation=Propagation(alpha=0.1, scattering_model="multislice"),
         lr=1e-2,
         lr_R=1e-3,
         lr_T=1e-3,

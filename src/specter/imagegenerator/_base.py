@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Literal, cast
+from typing import Any, cast
 
 import lightning as L
 import torch
@@ -23,7 +23,7 @@ from ..aberrations import (
 from ..arrays import compute_nz, pad_volume
 from ..ctf import LegacyAberrationAdapter
 from ..microscope import Detector
-from specter.options import DetectorModel, NoiseModel
+from ..settings import Camera, Envelopes, Optics, Propagation
 
 __all__ = [
     "BaseImager",
@@ -59,17 +59,21 @@ class BaseImager(L.LightningModule):
         Number of Z slices in the simulation volume.
     pad_nxy : int, optional
         XY size after FFT padding. Defaults to ``nxy``.
-    noise_model : str, optional
-        Noise model ('poisson', 'gaussian', None). Default 'poisson'.
-    alpha : float, optional
-        Amplitude contrast ratio. Default 0.0.
-    detector_model : str, optional
-        Detector MTF model ('k3_300kv', 'k3_200kv', 'k2_300kv',
-        'falcon4i_300kv', 'falcon4i_200kv', 'perfect', None).
+    propagation : Propagation, optional
+        How the exit wave is computed. Default ``Propagation()``.
+    optics : Optics, optional
+        The aberration stage. ``None`` skips it: the detector sees the bare
+        exit wave, and ``ctf_params`` may be omitted. Default ``Optics()``.
+    envelopes : Envelopes, optional
+        Coherence and radiation-damage envelopes. Default ``Envelopes()``,
+        every envelope off.
+    camera : Camera, optional
+        The detector chain. Default ``Camera()``: no MTF, Poisson noise.
     anisomag : torch.Tensor, optional
         Anisotropic magnification matrices, shape (n, 2, 2).
     ctf_params : dict[str, torch.Tensor], optional
-        CTF parameters; each value is a 1-D tensor of length n.
+        Per-image CTF parameters; each value is a 1-D tensor of length n.
+        Required unless ``optics`` is ``None``.
     progressbars : bool, optional
         Whether to show progress bars. Default True.
     verbose : bool, optional
@@ -77,53 +81,12 @@ class BaseImager(L.LightningModule):
     coincidence_radius : float or torch.Tensor, optional
         Coincidence radius in pixels. Scalar or 1-D tensor of length n.
         Default 0.0.
-    n_frames : int, optional
-        Number of detector frames to simulate. Default None (single frame).
     potential_scale : float or torch.Tensor, optional
         Multiplier applied to the scattering potential before propagation.
         Scalar or 1-D tensor of length n. Default 1.0.
     bfactor : float or torch.Tensor or None, optional
         Isotropic B-factor envelope in Å² applied in the microscope transfer
         function. None or 0.0 means no envelope. Default None.
-    convergence_angle : float, optional
-        Beam convergence semi-angle in milliradians, used for the Cs
-        (spatial coherence) envelope. Default None (envelope disabled).
-    cc : float, optional
-        Chromatic aberration coefficient in Å, used for the Cc
-        (temporal coherence) envelope. Default None (envelope disabled).
-    energy_spread : float, optional
-        FWHM of the beam energy spread in eV, used by the Cc envelope.
-        Default 0.7.
-    deltaV_V : float, optional
-        Relative high-voltage instability, used by the Cc envelope.
-        Default 0.06e-6.
-    deltaI_I : float, optional
-        Relative objective-lens current instability, used by the Cc
-        envelope. Default 0.01e-6.
-    dose_envelope : bool, optional
-        Whether to apply the Grant & Grigorieff (2015) radiation-damage
-        envelope, using ``dose_per_angstrom`` as the exposure accumulated
-        in each image. Single-particle images stand for exposure-filtered
-        movie sums; see :func:`specter.aberrations.dose_envelope`. Default
-        False.
-    aberration_backend : {"legacy", "torch_ctf"}, optional
-        Which engine computes the CTF/aberration transfer function.
-        ``"legacy"`` (default) uses ``aberrations.Aberration`` unchanged --
-        no behaviour change for any existing caller. ``"torch_ctf"`` uses
-        ``ctf.LegacyAberrationAdapter`` (torch-ctf-backed, verified
-        bit-identical to ``"legacy"`` term-by-term and against real
-        multi-particle CryoSPARC .cs data -- see
-        tests/test_ctf_legacy_adapter.py). Opt-in only; not yet the
-        default.
-    lpp_params : dict[str, float], optional
-        Laser-phase-plate config, in ``ctf.CTFParameters``-native units
-        (see ``ctf.LegacyAberrationAdapter``). Requires
-        ``aberration_backend="torch_ctf"`` -- ``aberrations.Aberration``
-        has no LPP model, so this raises at construction time if set with
-        the default ``"legacy"`` backend rather than silently having no
-        effect. A single shared laser-instrument config, never
-        per-particle, so it's a constructor argument here rather than a
-        ``ctf_params`` dict key.
     """
 
     def __init__(
@@ -134,51 +97,46 @@ class BaseImager(L.LightningModule):
         nxy: int,
         nz: int,
         pad_nxy: int | None = None,
-        noise_model: NoiseModel | None = "poisson",
-        alpha: float = 0.0,
-        detector_model: DetectorModel | None = None,
+        propagation: Propagation = Propagation(),
+        optics: Optics | None = Optics(),
+        envelopes: Envelopes = Envelopes(),
+        camera: Camera = Camera(),
         anisomag: torch.Tensor | None = None,
         ctf_params: dict[str, torch.Tensor] | None = None,
         progressbars: bool = True,
         verbose: bool = True,
         coincidence_radius: float | torch.Tensor = 0.0,
-        n_frames: int | None = None,
         potential_scale: float | torch.Tensor = 1.0,
         bfactor: float | torch.Tensor | None = None,
-        convergence_angle: float | None = None,
-        cc: float | None = None,
-        energy_spread: float = 0.7,
-        deltaV_V: float = 0.06e-6,
-        deltaI_I: float = 0.01e-6,
-        dose_envelope: bool = False,
-        aberration_backend: Literal["legacy", "torch_ctf"] = "legacy",
-        lpp_params: dict[str, float] | None = None,
     ):
         super().__init__()
-        if lpp_params is not None and aberration_backend != "torch_ctf":
+        # The settings are frozen dataclasses, so a shared default instance
+        # is safe. `optics=None` is meaningful (no aberration stage), which is
+        # why its default is an instance rather than None.
+        self.propagation = propagation
+        self.optics = optics
+        self.envelopes = envelopes
+        self.camera = camera
+        if self.optics is not None and ctf_params is None:
             raise ValueError(
-                "lpp_params requires aberration_backend='torch_ctf' -- "
-                "aberrations.Aberration has no laser-phase-plate model."
+                "ctf_params is required when optics is given; pass optics=None "
+                "to skip the aberration stage."
             )
         self.pixel_size = pixel_size
         self.voltage = voltage
-        self.noise_model = noise_model
-        self.alpha = alpha
-        self.aberration_backend = aberration_backend
-        self.lpp_params = lpp_params
         self.progressbars = progressbars
         self.verbose = verbose
         self.nxy = nxy
         self.nz = nz
         self.pad_nxy = pad_nxy if pad_nxy is not None else nxy
-        self.detector_model = detector_model
-        self.n_frames = n_frames
-        self.convergence_angle = convergence_angle
-        self.cc = cc
-        self.energy_spread = energy_spread
-        self.deltaV_V = deltaV_V
-        self.deltaI_I = deltaI_I
-        self.dose_envelope = dose_envelope
+        # Read often enough downstream to be worth mirroring as attributes.
+        self.scattering_model = self.propagation.scattering_model
+        self.alpha = self.propagation.alpha
+        self.klim = self.propagation.klim
+        self.ews_curvature_sign = self.propagation.ews_curvature_sign
+        self.noise_model = self.camera.noise_model
+        self.detector_model = self.camera.detector_model
+        self.n_frames = self.camera.n_frames
         self._init_detector_mtf()
 
         if anisomag is None:
@@ -321,10 +279,12 @@ class BaseImager(L.LightningModule):
 
     def _init_optics(self) -> None:
         """Instantiate the aberration engine and ``Detector`` from the
-        stored parameters. Which class ``self.aberration`` is depends on
-        ``self.aberration_backend`` -- both have the exact same call
+        stored settings. Which class ``self.aberration`` is depends on
+        ``optics.aberration_backend`` -- both have the exact same call
         signature (``self.aberration(exitwave, ctf_batch_dict)``), so no
-        other code needs to know or care which one is in use.
+        other code needs to know or care which one is in use. With
+        ``optics=None`` there is no aberration stage and
+        ``self.aberration`` is ``None``.
 
         ``self.aberration_model`` is derived from ``self.scattering_model``
         rather than user-configurable: ``"linear"`` for
@@ -336,8 +296,11 @@ class BaseImager(L.LightningModule):
         :func:`~specter.aberrations.aberration_model_for_scattering`.
         """
         self.aberration_model = aberration_model_for_scattering(self.scattering_model)
-        self.aberration: Aberration | LegacyAberrationAdapter
-        if self.aberration_backend == "torch_ctf":
+        env = self.envelopes
+        self.aberration: Aberration | LegacyAberrationAdapter | None
+        if self.optics is None:
+            self.aberration = None
+        elif self.optics.aberration_backend == "torch_ctf":
             self.aberration = LegacyAberrationAdapter(
                 self.pad_nxy,
                 self.pixel_size,
@@ -347,14 +310,14 @@ class BaseImager(L.LightningModule):
                 # on scattering_model, not a fixed value.
                 specimen_absorption=self.scattering_model != "ctf",
                 bfactor=getattr(self, "bfactor", None),
-                convergence_angle=self.convergence_angle,
-                cc=self.cc,
-                energy_spread=self.energy_spread,
-                deltaV_V=self.deltaV_V,
-                deltaI_I=self.deltaI_I,
-                dose_envelope=self.dose_envelope,
+                convergence_angle=env.convergence_angle,
+                cc=env.cc,
+                energy_spread=env.energy_spread,
+                deltaV_V=env.deltaV_V,
+                deltaI_I=env.deltaI_I,
+                dose_envelope=env.dose_envelope,
                 dose_weighted=self._dose_weighted,
-                lpp_params=self.lpp_params,
+                lpp_params=self.optics.lpp_params,
             )  # _dose_weighted: class attribute, False on TiltSeriesGenerator
         else:
             self.aberration = Aberration(
@@ -370,12 +333,12 @@ class BaseImager(L.LightningModule):
                 # so it's the only case where amplitude contrast needs to be
                 # folded into the transfer function itself.
                 specimen_absorption=self.scattering_model != "ctf",
-                convergence_angle=self.convergence_angle,
-                cc=self.cc,
-                energy_spread=self.energy_spread,
-                deltaV_V=self.deltaV_V,
-                deltaI_I=self.deltaI_I,
-                dose_envelope=self.dose_envelope,
+                convergence_angle=env.convergence_angle,
+                cc=env.cc,
+                energy_spread=env.energy_spread,
+                deltaV_V=env.deltaV_V,
+                deltaI_I=env.deltaI_I,
+                dose_envelope=env.dose_envelope,
                 dose_weighted=self._dose_weighted,
                 progressbars=self.progressbars,
             )
@@ -388,6 +351,14 @@ class BaseImager(L.LightningModule):
             n_frames=self.n_frames,
             progressbars=self.progressbars,
         )
+
+    def _aberrate(
+        self, exitwave: torch.Tensor, ctf_batch: dict[str, torch.Tensor]
+    ) -> torch.Tensor:
+        """The aberration stage, or the exit wave itself when there is none."""
+        if self.aberration is None:
+            return exitwave
+        return self.aberration(exitwave, ctf_batch)
 
     def predict_step(self, batch: Any, batch_idx: int) -> torch.Tensor:
         """Standard Lightning predict step."""

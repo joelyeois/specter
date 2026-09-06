@@ -12,6 +12,7 @@ import roma
 import torch
 
 from specter.ghostbuster import Reconstructor, TomogramReconstructor
+from specter.settings import Optics, Propagation
 
 _LPP_PARAMS = dict(
     NA=0.1,
@@ -48,7 +49,7 @@ def realistic_ctf_params() -> dict[str, torch.Tensor]:
 # ---------------------------------------------------------------------------
 
 
-def _build_reconstructor(tiny_volume, ctf_params, aberration_backend, **extra):
+def _build_reconstructor(tiny_volume, ctf_params, aberration_backend, lpp_params=None):
     torch.manual_seed(0)
     model = Reconstructor(
         V=tiny_volume,
@@ -58,10 +59,8 @@ def _build_reconstructor(tiny_volume, ctf_params, aberration_backend, **extra):
         ctf_params=ctf_params,
         voltage=300.0,
         dose_per_angstrom=2.0,
-        alpha=0.1,
-        scattering_model="projection",
-        aberration_backend=aberration_backend,
-        **extra,
+        propagation=Propagation(alpha=0.1, scattering_model="projection"),
+        optics=Optics(aberration_backend=aberration_backend, lpp_params=lpp_params),
     )
     torch.manual_seed(0)
     return model.forward(torch.tensor([0]))
@@ -106,8 +105,8 @@ def test_reconstructor_lpp_params_with_legacy_backend_raises(tiny_volume):
             ctf_params={"dfu": torch.tensor([5000.0]), "cs": torch.tensor([2.7])},
             voltage=300.0,
             dose_per_angstrom=2.0,
-            scattering_model="projection",
-            lpp_params=_LPP_PARAMS,
+            propagation=Propagation(scattering_model="projection"),
+            optics=Optics(lpp_params=_LPP_PARAMS),
         )
 
 
@@ -127,7 +126,7 @@ def tilt_quaternions() -> torch.Tensor:
 
 
 def _build_tomogram_reconstructor(
-    tiny_volume, tilt_quaternions, ctf_params, aberration_backend, **extra
+    tiny_volume, tilt_quaternions, ctf_params, aberration_backend, lpp_params=None
 ):
     torch.manual_seed(0)
     model = TomogramReconstructor(
@@ -137,9 +136,8 @@ def _build_tomogram_reconstructor(
         translations=torch.zeros(3, 2),
         ctf_params=ctf_params,
         voltage=300.0,
-        scattering_model="projection",
-        aberration_backend=aberration_backend,
-        **extra,
+        propagation=Propagation(scattering_model="projection"),
+        optics=Optics(aberration_backend=aberration_backend, lpp_params=lpp_params),
     )
     torch.manual_seed(0)
     return model.forward(0)
@@ -174,6 +172,6 @@ def test_tomogram_reconstructor_lpp_params_with_legacy_backend_raises(
             translations=torch.zeros(3, 2),
             ctf_params={"dfu": torch.full((3,), 5000.0), "cs": torch.full((3,), 2.7)},
             voltage=300.0,
-            scattering_model="projection",
-            lpp_params=_LPP_PARAMS,
+            propagation=Propagation(scattering_model="projection"),
+            optics=Optics(lpp_params=_LPP_PARAMS),
         )

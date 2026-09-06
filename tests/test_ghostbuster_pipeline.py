@@ -25,6 +25,7 @@ from specter.ghostbuster import (
     TomogramReconstructor,
 )
 from specter.io import _cryosparc
+from specter.settings import Propagation
 
 # ---------------------------------------------------------------------------
 # Fake CryoSPARC dataset (mirrors tests/test_cryosparc.py's _FakeDataset)
@@ -93,7 +94,7 @@ def test_ghostbuster_loads_and_preprocesses_images(mrc_file: Path) -> None:
         cs_file="fake.cs",
         mrc_file=str(mrc_file),
         dose_per_angstrom=dose_per_angstrom,
-        scattering_model="projection",
+        propagation=Propagation(scattering_model="projection"),
     )
 
     assert gb._images.shape == (N_PARTICLES, BOX, BOX)
@@ -120,8 +121,8 @@ def test_ghostbuster_halfset_label_mapping(
         cs_file="fake.cs",
         mrc_file=str(mrc_file),
         dose_per_angstrom=2.0,
-        scattering_model="projection",
         halfset=halfset,
+        propagation=Propagation(scattering_model="projection"),
     )
     assert gb.halfset_label == expected_label
 
@@ -132,9 +133,9 @@ def test_ghostbuster_test_run_executes(mrc_file: Path) -> None:
         cs_file="fake.cs",
         mrc_file=str(mrc_file),
         dose_per_angstrom=2.0,
-        scattering_model="projection",
         lr=0.1,
         batchsize=2,
+        propagation=Propagation(scattering_model="projection"),
     )
     model = gb.test_run(bin_factor=2)
     assert isinstance(model, Reconstructor)
@@ -147,10 +148,10 @@ def test_ghostbuster_run_executes(mrc_file: Path) -> None:
         cs_file="fake.cs",
         mrc_file=str(mrc_file),
         dose_per_angstrom=2.0,
-        scattering_model="projection",
         lr=0.1,
         epochs=1,
         batchsize=2,
+        propagation=Propagation(scattering_model="projection"),
     )
     model = gb.run()
     assert isinstance(model, Reconstructor)
@@ -185,10 +186,10 @@ def test_tomogram_ghostbuster_angles_path(
         voltage=300.0,
         ctf_params=tomo_ctf_params,
         angles=[-20.0, 0.0, 20.0],
-        scattering_model="projection",
         lr=0.1,
         epochs=1,
         batchsize=3,
+        propagation=Propagation(scattering_model="projection"),
     )
     assert tgb._quaternions.shape == (3, 4)
     model = tgb.run()
@@ -208,8 +209,8 @@ def test_tomogram_ghostbuster_quaternions_path(
         voltage=300.0,
         ctf_params=tomo_ctf_params,
         quaternions=quats,
-        scattering_model="projection",
         lr=0.1,
+        propagation=Propagation(scattering_model="projection"),
     )
     model = tgb.test_run(bin_factor=2)
     assert isinstance(model, TomogramReconstructor)

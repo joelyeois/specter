@@ -13,20 +13,12 @@ from ..crowding import CrowdWithDuplicates
 from ..ice import IceBank, RandomIcemaker, resolve_icemaker
 from ..potential import PotentialBuilder
 from ..rotations import VolumeRotator, translate_coordinates
-from ..scattering import Scattering
+from ..settings import Camera, Envelopes, Optics, Propagation
 from ._base import compute_nz, pad_volume
 from ._micrograph import MicrographGenerator
 from ._particle_base import ParticleGeneratorBase
 from ._tiltseries import TiltSeriesGenerator
-from specter.options import (
-    ConvBackend,
-    DetectorModel,
-    EwaldSphereSign,
-    IceModel,
-    NoiseModel,
-    ScatteringFactors,
-    ScatteringModel,
-)
+from specter.options import ConvBackend, IceModel, ScatteringFactors
 
 
 __all__ = [
@@ -60,8 +52,8 @@ class ImageGeneratorFromCoordinates(ParticleGeneratorBase):
         Rotation quaternions for each batch item. Shape (B, 4).
     translations : torch.Tensor
         Translations (x, y) in Å for each batch item. Shape (B, 2).
-    ctf_params : dict
-        CTF parameters.
+    ctf_params : dict or None
+        Per-image CTF parameters. Required unless ``optics`` is ``None``.
     voltage : float
         Electron beam accelerating voltage in kV.
     dose_per_angstrom : float or torch.Tensor
@@ -69,6 +61,14 @@ class ImageGeneratorFromCoordinates(ParticleGeneratorBase):
         tensor of length n giving a separate dose for each image.
     anisomag : torch.Tensor, optional
         Anisotropic magnification matrices.
+    propagation : Propagation, optional
+        How the exit wave is computed. Default ``Propagation()``.
+    optics : Optics, optional
+        The aberration stage; ``None`` skips it. Default ``Optics()``.
+    envelopes : Envelopes, optional
+        Coherence and radiation-damage envelopes. Default ``Envelopes()``.
+    camera : Camera, optional
+        The detector chain. Default ``Camera()``.
     ice_model : str, optional
         Ice generation algorithm: ``'gd'`` (samples from the pre-generated
         :class:`~specter.ice.IceBank` cache) or ``'random'`` (instant, cheap
@@ -96,17 +96,6 @@ class ImageGeneratorFromCoordinates(ParticleGeneratorBase):
         Default 'shtyrov', matching this class's own potential-building
         default so the structure and the ice around it are modelled the same
         way. Ignored when ``icemaker`` is provided.
-    scattering_model : str, optional
-        Scattering model ('multislice', 'projection', 'ctf'). Default 'multislice'.
-    noise_model : str, optional
-        Noise model. Default 'poisson'.
-    klim : float, optional
-        Reciprocal space limit.
-    ews_curvature_sign : str, optional
-        Ewald sphere curvature sign matching CryoSPARC's convention.
-        ``'negative'`` (default) or ``'positive'``.
-    alpha : float, optional
-        Amplitude contrast ratio.
     crowd_min_distance : float, optional
         Crowding minimum distance.
     crowd_max_distance_z : float, optional
@@ -124,12 +113,8 @@ class ImageGeneratorFromCoordinates(ParticleGeneratorBase):
     crowd_chunk_size : int or None, optional
         Number of crowding volumes rotated per GPU batch. Default 1 (memory-safe).
         Set to ``None`` to rotate all at once (faster but O(N × volume) GPU RAM).
-    pad_fft : bool, optional
-        Whether to pad for FFT.
     conv_backend : str, optional
         Backend for convolution in potential building. Default 'fftconvolve'.
-    detector_model : str, optional
-        Detector model name.
     periodic_potential : bool, optional
         If True, use periodic boundary conditions when voxelizing coordinates
         into the potential. Required when coordinates come from a periodic ice
@@ -138,24 +123,6 @@ class ImageGeneratorFromCoordinates(ParticleGeneratorBase):
     bfactor : float or torch.Tensor or None, optional
         Isotropic B-factor envelope in Å² applied in the microscope transfer
         function. None or 0.0 means no envelope. Default None.
-    convergence_angle : float, optional
-        Beam convergence semi-angle in milliradians, used for the Cs
-        (spatial coherence) envelope. Default None (envelope disabled).
-    cc : float, optional
-        Chromatic aberration coefficient in Å, used for the Cc
-        (temporal coherence) envelope. Default None (envelope disabled).
-    energy_spread : float, optional
-        FWHM of the beam energy spread in eV, used by the Cc envelope.
-        Default 0.7.
-    deltaV_V : float, optional
-        Relative high-voltage instability, used by the Cc envelope.
-        Default 0.06e-6.
-    deltaI_I : float, optional
-        Relative objective-lens current instability, used by the Cc
-        envelope. Default 0.01e-6.
-    dose_envelope : bool, optional
-        Whether to apply the Grant & Grigorieff (2015) cumulative-dose
-        envelope, using ``dose_per_angstrom``. Default False.
     """
 
     def __init__(
@@ -166,48 +133,36 @@ class ImageGeneratorFromCoordinates(ParticleGeneratorBase):
         pixel_size: float,
         quaternions: torch.Tensor,
         translations: torch.Tensor,
-        ctf_params: dict[str, Any],
+        ctf_params: dict[str, Any] | None,
         voltage: float,
         dose_per_angstrom: float | torch.Tensor,
         anisomag: torch.Tensor | None = None,
+        propagation: Propagation = Propagation(),
+        optics: Optics | None = Optics(),
+        envelopes: Envelopes = Envelopes(),
+        camera: Camera = Camera(),
         ice_model: IceModel | None = None,
         ice_thickness: float | None = None,
         ice_cache_dir: str | None = None,
         icemaker: IceBank | RandomIcemaker | None = None,
         ice_relax_steps: int = 0,
         ice_parameterization: ScatteringFactors = "kirkland",
-        scattering_model: ScatteringModel = "multislice",
-        noise_model: NoiseModel | None = "poisson",
-        klim: float | None = None,
-        ews_curvature_sign: EwaldSphereSign = "negative",
-        alpha: float = 0.0,
         crowd_min_distance: float | None = None,
         crowd_max_distance_z: float | None = None,
         crowd_chunk_size: int = 1,
-        pad_fft: bool = False,
         conv_backend: ConvBackend = "fftconvolve",
-        detector_model: DetectorModel | None = None,
         verbose: bool = True,
         coincidence_radius: float | torch.Tensor = 0.0,
-        n_frames: int | None = None,
         mean_squared_displacement_per_dose: float = 0.0,
         periodic_potential: bool = False,
         bfactor: float | torch.Tensor | None = None,
-        convergence_angle: float | None = None,
-        cc: float | None = None,
-        energy_spread: float = 0.7,
-        deltaV_V: float = 0.06e-6,
-        deltaI_I: float = 0.01e-6,
-        dose_envelope: bool = False,
-        aberration_backend: Literal["legacy", "torch_ctf"] = "legacy",
-        lpp_params: dict[str, float] | None = None,
     ):
-        self.pad_fft = pad_fft
+        self.pad_fft = propagation.pad_fft
         self.ice_thickness = ice_thickness
         self.ice_relax_steps = ice_relax_steps
         self.nxy = nxy
 
-        self.pad_nxy = nxy + (nxy // 2) * 2 if pad_fft else nxy
+        self.pad_nxy = nxy + (nxy // 2) * 2 if self.pad_fft else nxy
         self.nz = compute_nz(self.nxy, ice_thickness, pixel_size)
 
         super().__init__(
@@ -217,24 +172,16 @@ class ImageGeneratorFromCoordinates(ParticleGeneratorBase):
             nxy=self.nxy,
             nz=self.nz,
             pad_nxy=self.pad_nxy,
-            noise_model=noise_model,
-            alpha=alpha,
-            detector_model=detector_model,
+            propagation=propagation,
+            optics=optics,
+            envelopes=envelopes,
+            camera=camera,
             anisomag=anisomag,
             ctf_params=ctf_params,
             progressbars=False,
             verbose=verbose,
             coincidence_radius=coincidence_radius,
-            n_frames=n_frames,
             bfactor=bfactor,
-            convergence_angle=convergence_angle,
-            cc=cc,
-            energy_spread=energy_spread,
-            deltaV_V=deltaV_V,
-            deltaI_I=deltaI_I,
-            dose_envelope=dose_envelope,
-            aberration_backend=aberration_backend,
-            lpp_params=lpp_params,
         )
         self.ice_model = ice_model
         # The TEMPLATE's depth, not `self.nz * pixel_size`: the neighbour slab
@@ -246,9 +193,6 @@ class ImageGeneratorFromCoordinates(ParticleGeneratorBase):
             if crowd_max_distance_z is not None
             else self.nxy * pixel_size
         )
-        self.scattering_model = scattering_model
-        self.klim = klim
-        self.ews_curvature_sign = ews_curvature_sign
         self.crowd_min_distance = crowd_min_distance
 
         self.coordinates = nn.Parameter(coordinates)
@@ -256,8 +200,10 @@ class ImageGeneratorFromCoordinates(ParticleGeneratorBase):
         self.register_buffer("translations", translations)
         self.atomic_numbers = atomic_numbers
         self.mean_squared_displacement_per_dose = mean_squared_displacement_per_dose
-        if mean_squared_displacement_per_dose != 0:
-            print(f"Perturbing coordinates by: {mean_squared_displacement_per_dose}.")
+        if mean_squared_displacement_per_dose != 0 and self.verbose:
+            logger.info(
+                f"Perturbing coordinates by: {mean_squared_displacement_per_dose}."
+            )
 
         self.potentialbuilder = PotentialBuilder(
             self.nxy,
@@ -266,23 +212,11 @@ class ImageGeneratorFromCoordinates(ParticleGeneratorBase):
             conv_backend=conv_backend,
             periodic=periodic_potential,
         )
-        self.atomic_numbers = atomic_numbers
 
         self.V = self.potentialbuilder(self.coordinates.detach())
 
         self._init_optics()
-
-        self.scattering = Scattering(
-            self.pad_nxy,
-            self.pixel_size,
-            self.voltage,
-            scattering_model=self.scattering_model,
-            klim=self.klim,
-            ews_curvature_sign=self.ews_curvature_sign,
-            nz=self.nz,
-            alpha=self.alpha,
-            progressbars=self.progressbars,
-        )
+        self.scattering = self._build_scattering()
 
         self._apply_defocus_shift(
             shift_required=self.scattering_model not in ["projection", "ctf"]
@@ -293,7 +227,7 @@ class ImageGeneratorFromCoordinates(ParticleGeneratorBase):
                 self.V,
                 pixel_size,
                 self.crowd_min_distance,
-                nxy_out=self.pad_nxy if pad_fft else self.nxy,
+                nxy_out=self.pad_nxy if self.pad_fft else self.nxy,
                 nz_out=self.nz,
                 max_distance_z=self.crowd_max_distance_z,
                 max_distance_xy=None,
@@ -412,8 +346,8 @@ class ImageGenerator(ParticleGeneratorBase):
         Rotation quaternions. Shape (B, 4).
     translations : torch.Tensor
         Translations (x, y) in Å. Shape (B, 2).
-    ctf_params : dict
-        CTF parameters.
+    ctf_params : dict or None
+        Per-image CTF parameters. Required unless ``optics`` is ``None``.
     voltage : float
         Electron beam accelerating voltage in kV.
     dose_per_angstrom : float or torch.Tensor
@@ -421,6 +355,14 @@ class ImageGenerator(ParticleGeneratorBase):
         tensor of length n giving a separate dose for each image.
     anisomag : torch.Tensor, optional
         Anisotropic magnification matrices.
+    propagation : Propagation, optional
+        How the exit wave is computed. Default ``Propagation()``.
+    optics : Optics, optional
+        The aberration stage; ``None`` skips it. Default ``Optics()``.
+    envelopes : Envelopes, optional
+        Coherence and radiation-damage envelopes. Default ``Envelopes()``.
+    camera : Camera, optional
+        The detector chain. Default ``Camera()``.
     ice_model : str, optional
         Ice generation algorithm: ``'gd'`` (samples from the pre-generated
         :class:`~specter.ice.IceBank` cache) or ``'random'`` (instant, cheap
@@ -443,17 +385,6 @@ class ImageGenerator(ParticleGeneratorBase):
         ``ice_model='gd'`` (or an ``IceBank`` ``icemaker``): number of local
         MLBOP relaxation steps used to heal tile seams. Default 0 (no
         relaxation). Ignored for ``RandomIcemaker``.
-    scattering_model : str, optional
-        Scattering model. Default 'multislice'.
-    noise_model : str, optional
-        Noise model. Default 'poisson'.
-    klim : float, optional
-        Reciprocal space limit.
-    ews_curvature_sign : str, optional
-        Ewald sphere curvature sign matching CryoSPARC's convention.
-        ``'negative'`` (default) or ``'positive'``.
-    alpha : float, optional
-        Amplitude contrast ratio.
     crowd_min_distance : float, optional
         Crowding minimum distance.
     crowd_max_distance_z : float, optional
@@ -490,41 +421,15 @@ class ImageGenerator(ParticleGeneratorBase):
         Apply a bimodal density distribution along z when placing crowding
         duplicates, mimicking particle adsorption at the ice-water interface.
         Default False.
-    pad_fft : bool, optional
-        Whether to pad for FFT.
     progressbars : bool, optional
         Whether to show progress bars. Default True.
     ice_parameterization : str, optional
         Atomic potential parameterization used to build the ice kernel:
         ``'kirkland'``, ``'lobato'``, or ``'shtyrov'``. Default ``'shtyrov'``,
         matching :class:`~specter.potential.PotentialBuilder`'s own default.
-    detector_model : str, optional
-        Detector model name.
     bfactor : float or torch.Tensor or None, optional
         Isotropic B-factor envelope in Å² applied in the microscope transfer
         function. None or 0.0 means no envelope. Default None.
-    convergence_angle : float, optional
-        Beam convergence semi-angle in milliradians, used for the Cs
-        (spatial coherence) envelope. Default None (envelope disabled).
-    cc : float, optional
-        Chromatic aberration coefficient in Å, used for the Cc
-        (temporal coherence) envelope. Default None (envelope disabled).
-    energy_spread : float, optional
-        FWHM of the beam energy spread in eV, used by the Cc envelope.
-        Default 0.7.
-    deltaV_V : float, optional
-        Relative high-voltage instability, used by the Cc envelope.
-        Default 0.06e-6.
-    deltaI_I : float, optional
-        Relative objective-lens current instability, used by the Cc
-        envelope. Default 0.01e-6.
-    dose_envelope : bool, optional
-        Whether to apply the Grant & Grigorieff (2015) cumulative-dose
-        envelope, using ``dose_per_angstrom``. Default False.
-    rotate_mode : {"real", "fourier"}, optional
-        Volume rotation method. ``"real"`` uses trilinear interpolation;
-        ``"fourier"`` rotates in Fourier space (no boundary artifacts).
-        Default ``"real"``.
     """
 
     def __init__(
@@ -533,20 +438,19 @@ class ImageGenerator(ParticleGeneratorBase):
         pixel_size: float,
         quaternions: torch.Tensor,
         translations: torch.Tensor,
-        ctf_params: dict[str, Any],
+        ctf_params: dict[str, Any] | None,
         voltage: float,
         dose_per_angstrom: float | torch.Tensor,
         anisomag: torch.Tensor | None = None,
+        propagation: Propagation = Propagation(),
+        optics: Optics | None = Optics(),
+        envelopes: Envelopes = Envelopes(),
+        camera: Camera = Camera(),
         ice_model: IceModel | None = None,
         ice_thickness: float | None = None,
         ice_cache_dir: str | None = None,
         icemaker: IceBank | RandomIcemaker | None = None,
         ice_relax_steps: int = 0,
-        scattering_model: ScatteringModel = "multislice",
-        noise_model: NoiseModel | None = "poisson",
-        klim: float | None = None,
-        ews_curvature_sign: EwaldSphereSign = "negative",
-        alpha: float = 0.0,
         crowd_min_distance: float | None = None,
         crowd_max_distance_z: float | None = None,
         crowd_max_distance_xy: float | None = None,
@@ -556,30 +460,18 @@ class ImageGenerator(ParticleGeneratorBase):
         crowd_seed: Literal["origin", "random"] = "origin",
         crowd_move_to_cpu: bool = False,
         water_air_interface: bool = False,
-        pad_fft: bool = False,
         progressbars: bool = True,
         verbose: bool = True,
         ice_parameterization: ScatteringFactors = "kirkland",
-        detector_model: DetectorModel | None = None,
         coincidence_radius: float | torch.Tensor = 0.0,
-        n_frames: int | None = None,
         potential_scale: float | torch.Tensor = 1.0,
         bfactor: float | torch.Tensor | None = None,
-        convergence_angle: float | None = None,
-        cc: float | None = None,
-        energy_spread: float = 0.7,
-        deltaV_V: float = 0.06e-6,
-        deltaI_I: float = 0.01e-6,
-        dose_envelope: bool = False,
-        rotate_mode: Literal["real", "fourier"] = "real",
-        aberration_backend: Literal["legacy", "torch_ctf"] = "legacy",
-        lpp_params: dict[str, float] | None = None,
     ):
         nxy = scattering_potential.shape[-1]
-        self.pad_fft = pad_fft
+        self.pad_fft = propagation.pad_fft
         self.ice_thickness = ice_thickness
         self.ice_relax_steps = ice_relax_steps
-        self.pad_nxy = nxy + (nxy // 2) * 2 if pad_fft else nxy
+        self.pad_nxy = nxy + (nxy // 2) * 2 if self.pad_fft else nxy
 
         volume_nz = scattering_potential.shape[0]
         self.nz = compute_nz(volume_nz, ice_thickness, pixel_size)
@@ -591,25 +483,17 @@ class ImageGenerator(ParticleGeneratorBase):
             nxy=nxy,
             nz=self.nz,
             pad_nxy=self.pad_nxy,
-            noise_model=noise_model,
-            alpha=alpha,
-            detector_model=detector_model,
+            propagation=propagation,
+            optics=optics,
+            envelopes=envelopes,
+            camera=camera,
             anisomag=anisomag,
             ctf_params=ctf_params,
             progressbars=progressbars,
             verbose=verbose,
             coincidence_radius=coincidence_radius,
-            n_frames=n_frames,
             potential_scale=potential_scale,
             bfactor=bfactor,
-            convergence_angle=convergence_angle,
-            cc=cc,
-            energy_spread=energy_spread,
-            deltaV_V=deltaV_V,
-            deltaI_I=deltaI_I,
-            dose_envelope=dose_envelope,
-            aberration_backend=aberration_backend,
-            lpp_params=lpp_params,
         )
 
         self.ice_parameterization = ice_parameterization
@@ -623,9 +507,6 @@ class ImageGenerator(ParticleGeneratorBase):
             if crowd_max_distance_z is not None
             else volume_nz * pixel_size
         )
-        self.scattering_model = scattering_model
-        self.klim = klim
-        self.ews_curvature_sign = ews_curvature_sign
         self.crowd_min_distance = crowd_min_distance
 
         self.register_buffer("V", scattering_potential)
@@ -635,25 +516,14 @@ class ImageGenerator(ParticleGeneratorBase):
             logger.info("Initializing ImageGenerator modules")
 
         self._init_optics()
-
-        self.scattering = Scattering(
-            self.pad_nxy,
-            self.pixel_size,
-            self.voltage,
-            scattering_model=self.scattering_model,
-            klim=self.klim,
-            ews_curvature_sign=self.ews_curvature_sign,
-            nz=self.nz,
-            alpha=self.alpha,
-            progressbars=self.progressbars,
-        )
+        self.scattering = self._build_scattering()
 
         if self.crowd_min_distance is not None:
             self.crowd = CrowdWithDuplicates(
                 self.V,
                 pixel_size,
                 self.crowd_min_distance,
-                nxy_out=self.pad_nxy if pad_fft else self.nxy,
+                nxy_out=self.pad_nxy if self.pad_fft else self.nxy,
                 nz_out=self.nz,
                 max_distance_z=self.crowd_max_distance_z,
                 max_distance_xy=crowd_max_distance_xy,
@@ -684,7 +554,9 @@ class ImageGenerator(ParticleGeneratorBase):
         )
 
         nz, ny, nx = self.V.shape
-        self.rotator = VolumeRotator(nz, ny, nx, origin="relion", mode=rotate_mode)
+        self.rotator = VolumeRotator(
+            nz, ny, nx, origin="relion", mode=self.propagation.rotate_mode
+        )
 
     def rotate(self, Q: torch.Tensor, T: torch.Tensor) -> torch.Tensor:
         """

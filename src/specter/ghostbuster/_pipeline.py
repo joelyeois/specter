@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Literal, Sequence
 
@@ -7,10 +8,11 @@ import mrcfile
 import torch
 import torch.utils.data
 
+from ..settings import Optics, Propagation
 from ._helpers import _preprocess_particle_images
 from ._reconstructor import Reconstructor
 from ._run_helpers import build_trainer, resolve_device
-from specter.options import EwaldSphereSign, RotateMode, ScatteringModel, Scheduler
+from specter.options import RotateMode, Scheduler
 
 
 class Ghostbuster:
@@ -79,18 +81,13 @@ class Ghostbuster:
         Number of training epochs.
     batchsize : int
         Dataloader batch size.
-    scattering_model : str
-        Wave propagation model (``"multislice"``, ``"rytov"``, ``"firstborn"``,
-        ``"projection"``).
-    aberration_backend : {"legacy", "torch_ctf"}, optional
-        Which engine computes the CTF/aberration transfer function.
-        ``"legacy"`` (default) uses ``aberrations.Aberration``; ``"torch_ctf"``
-        uses ``ctf.LegacyAberrationAdapter`` (verified parity, see
-        ``ImageGenerator``'s docstring). Opt-in only; not yet the default.
-    lpp_params : dict[str, float], optional
-        Laser-phase-plate config, in ``ctf.CTFParameters``-native units.
-        Requires ``aberration_backend="torch_ctf"``; raises at construction
-        time otherwise.
+    propagation : Propagation, optional
+        How the forward model computes the exit wave. Default
+        ``Propagation(scattering_model="rytov")``. Its ``alpha`` is replaced
+        by the amplitude contrast recorded in the ``.cs`` file, since that is
+        data rather than a modelling choice.
+    optics : Optics, optional
+        The aberration engine and phase plate. Default ``Optics()``.
     symmetry : str, optional
         Point-group symmetry to enforce (e.g. ``"C3"``, ``"I1"``).
     symmetry_batchsize : int, optional
@@ -99,13 +96,6 @@ class Ghostbuster:
         Domain in which symmetry is applied.
     sparsity : float, optional
         L1 regularisation weight on V.
-    rotate_mode : {"real", "fourier"}
-        Domain in which rotations are applied.
-    ews_curvature_sign : str
-        Ewald sphere curvature sign matching CryoSPARC's convention.
-        ``'negative'`` (default) or ``'positive'``.
-    klim : float, optional
-        Hard frequency cutoff passed to ``ImageGenerator``.
     nps_weight : torch.Tensor, optional
         Per-frequency noise power spectrum weight for the loss.
     learn_noise_model : bool
@@ -156,16 +146,12 @@ class Ghostbuster:
         lr_decay: float = 0.1,
         epochs: int = 5,
         batchsize: int = 3,
-        scattering_model: ScatteringModel = "rytov",
-        aberration_backend: Literal["legacy", "torch_ctf"] = "legacy",
-        lpp_params: dict[str, float] | None = None,
+        propagation: Propagation = Propagation(scattering_model="rytov"),
+        optics: Optics = Optics(),
         symmetry: str | None = None,
         symmetry_batchsize: int | None = None,
         symmetry_mode: RotateMode = "fourier",
         sparsity: float | None = None,
-        rotate_mode: Literal["real", "fourier"] = "real",
-        ews_curvature_sign: EwaldSphereSign = "negative",
-        klim: float | None = None,
         nps_weight: torch.Tensor | None = None,
         learn_noise_model: bool = False,
         use_ncc: bool = False,
@@ -221,16 +207,13 @@ class Ghostbuster:
         self.lr_decay = lr_decay
         self.epochs = epochs
         self.batchsize = batchsize
-        self.scattering_model = scattering_model
-        self.aberration_backend = aberration_backend
-        self.lpp_params = lpp_params
+        # The amplitude contrast is data, read from the .cs file above.
+        self.propagation = replace(propagation, alpha=self._alpha)
+        self.optics = optics
         self.symmetry = symmetry
         self.symmetry_batchsize = symmetry_batchsize
         self.symmetry_mode = symmetry_mode
         self.sparsity = sparsity
-        self.rotate_mode = rotate_mode
-        self.ews_curvature_sign = ews_curvature_sign
-        self.klim = klim
         self.nps_weight = nps_weight
         self.learn_noise_model = learn_noise_model
         self.use_ncc = use_ncc
@@ -314,7 +297,6 @@ class Ghostbuster:
         self,
         images: torch.Tensor,
         voxel_size: float,
-        scattering_model: ScatteringModel,
         batchsize: int,
     ) -> tuple["Reconstructor", torch.utils.data.DataLoader]:
         from ..arrays import ball3d
@@ -338,13 +320,11 @@ class Ghostbuster:
             self._voltage,
             self.dose_per_angstrom,
             anisomag=self._anisomag,
-            alpha=self._alpha,
             scale=self._scale,
             defocus_offset=torch.tensor(self.defocus_offset),
             bfactor=self.bfactor,
-            scattering_model=scattering_model,
-            aberration_backend=self.aberration_backend,
-            lpp_params=self.lpp_params,
+            propagation=self.propagation,
+            optics=self.optics,
             lr=self.lr,
             lr_R=self.lr_R,
             lr_T=self.lr_T,
@@ -352,13 +332,10 @@ class Ghostbuster:
             scheduler=self.scheduler,
             lr_decay=self.lr_decay,
             kmask=kmask,
-            klim=self.klim,
             nps_weight=self.nps_weight,
             learn_noise_model=self.learn_noise_model,
             use_ncc=self.use_ncc,
             sparsity=self.sparsity,
-            rotate_mode=self.rotate_mode,
-            ews_curvature_sign=self.ews_curvature_sign,
             symmetry=self.symmetry,
             symmetry_batchsize=self.symmetry_batchsize,
             symmetry_mode=self.symmetry_mode,
@@ -403,14 +380,11 @@ class Ghostbuster:
         _device_str = f"GPU {device}" if use_gpu else "CPU"
         print(
             f"Starting reconstruction: {len(self._images)} particles  |  box {_box}³  |  "
-            f"{self.scattering_model}  |  {self.epochs} epochs  |  "
+            f"{self.propagation.scattering_model}  |  {self.epochs} epochs  |  "
             f"batch {self.batchsize}  |  {_device_str}"
         )
         model, loader = self._build_reconstructor_and_loader(
-            self._images,
-            self._voxel_size,
-            self.scattering_model,
-            self.batchsize,
+            self._images, self._voxel_size, self.batchsize
         )
 
         trainer = build_trainer(use_gpu, device, self.epochs, self.precision, callbacks)
@@ -457,10 +431,7 @@ class Ghostbuster:
         voxel_size_binned = self._voxel_size * bin_factor
 
         model, loader = self._build_reconstructor_and_loader(
-            images_binned,
-            voxel_size_binned,
-            self.scattering_model,
-            self.batchsize,
+            images_binned, voxel_size_binned, self.batchsize
         )
 
         use_gpu, device = resolve_device(device)

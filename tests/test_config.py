@@ -671,14 +671,18 @@ def test_envelope_knobs_are_reachable_from_every_simulate_config(
 
     import specter.config as config_mod
     import specter.imagegenerator as gen_mod
+    from specter.settings import Propagation
 
     cfg = getattr(config_mod, config_cls)
     gen = getattr(gen_mod, generator_name)
     fields = {f.name for f in dataclasses.fields(cfg)}
     params = set(inspect.signature(gen.__init__).parameters)
+    propagation_fields = {f.name for f in dataclasses.fields(Propagation)}
 
+    assert "bfactor" in params, f"{generator_name} no longer accepts bfactor"
+    assert "propagation" in params, f"{generator_name} no longer takes a Propagation"
+    assert "klim" in propagation_fields
     for knob in ("bfactor", "klim"):
-        assert knob in params, f"{generator_name} no longer accepts {knob}"
         assert knob in fields, f"{config_cls} cannot set {knob}"
 
 

@@ -30,6 +30,7 @@ import torch
 
 import specter.imagegenerator._generator as generator_module
 from specter.imagegenerator import ImageGenerator
+from specter.settings import Camera, Propagation
 
 PACKAGE = Path(generator_module.__file__).parent
 
@@ -101,11 +102,10 @@ def test_image_generator_actually_pads_with_constant() -> None:
             voltage=300.0,
             dose_per_angstrom=20.0,
             ice_model=None,
-            noise_model=None,
-            scattering_model="multislice",
-            pad_fft=True,
             verbose=False,
             progressbars=False,
+            propagation=Propagation(scattering_model="multislice", pad_fft=True),
+            camera=Camera(noise_model=None),
         )
         with torch.no_grad():
             gen(torch.tensor([0]))

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import json
 import os
 import subprocess
@@ -121,6 +122,10 @@ def _serialize_value(v: Any) -> Any:
         pass
     if isinstance(v, dict):
         return {k: _serialize_value(val) for k, val in v.items()}
+    if dataclasses.is_dataclass(v) and not isinstance(v, type):
+        # A settings group (specter.settings): record its fields, so job.json
+        # reads like the flat config the group was built from.
+        return _serialize_value(dataclasses.asdict(v))
     return {"__type__": type(v).__name__, "repr": str(v)[:200]}
 
 

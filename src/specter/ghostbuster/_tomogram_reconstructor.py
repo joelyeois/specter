@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 import roma
 import torch
@@ -23,7 +23,8 @@ from ..scattering import IterativeScattering
 from ._base_reconstructor import _BaseReconstructor
 from ._helpers import _build_lr_scheduler
 from ._io import save_volume_mrc
-from specter.options import ScatteringModel, Scheduler, TiltAxis
+from ..settings import Optics, Propagation
+from specter.options import Scheduler, TiltAxis
 
 
 class TomogramReconstructor(_BaseReconstructor):
@@ -70,21 +71,15 @@ class TomogramReconstructor(_BaseReconstructor):
         If ``True``, the MSE loss at each tilt is restricted to the central
         strip corresponding to real (non-padded) volume, eliminating gradient
         contributions from reflected boundary content.  Default ``True``.
-    scattering_model : str
-        Wave propagation model.  Default ``"multislice"``.
-    aberration_backend : {"legacy", "torch_ctf"}, optional
-        Which engine computes the CTF/aberration transfer function.
-        ``"legacy"`` (default) uses ``aberrations.Aberration``; ``"torch_ctf"``
-        uses ``ctf.LegacyAberrationAdapter`` (verified parity, see
-        ``ImageGenerator``'s docstring). Opt-in only; not yet the default.
-    lpp_params : dict[str, float], optional
-        Laser-phase-plate config, in ``ctf.CTFParameters``-native units.
-        Requires ``aberration_backend="torch_ctf"``; raises at construction
-        time otherwise, since ``aberrations.Aberration`` has no LPP model.
-    klim : float, optional
-        Hard reciprocal-space frequency cutoff.
-    alpha : float
-        Amplitude contrast ratio.  Default ``0.0``.
+    propagation : Propagation, optional
+        How the forward model computes the exit wave (model, amplitude
+        contrast, bandlimit). The same object the `TiltSeriesGenerator` that
+        produced the data was built with, when it was simulated. Default
+        ``Propagation()``.
+    optics : Optics, optional
+        The aberration engine and phase plate. Default ``Optics()``. No
+        `Envelopes` or `Camera`: the inverse does not model what the data
+        cannot determine.
     scheduler : str
         LR scheduler for the volume optimiser.  Default ``"LambdaLR"``.
     lr_decay : float
@@ -121,11 +116,8 @@ class TomogramReconstructor(_BaseReconstructor):
         taper_width: int = 0,
         z_taper_width: int = 0,
         use_fov_mask: bool = True,
-        scattering_model: ScatteringModel = "multislice",
-        aberration_backend: Literal["legacy", "torch_ctf"] = "legacy",
-        lpp_params: dict[str, float] | None = None,
-        klim: float | None = None,
-        alpha: float = 0.0,
+        propagation: Propagation = Propagation(),
+        optics: Optics = Optics(),
         scheduler: Scheduler = "LambdaLR",
         lr_decay: float = 0.1,
         kmask: torch.Tensor | None = None,
@@ -134,11 +126,7 @@ class TomogramReconstructor(_BaseReconstructor):
         run_dir: str | Path | None = None,
     ) -> None:
         super().__init__()
-        if lpp_params is not None and aberration_backend != "torch_ctf":
-            raise ValueError(
-                "lpp_params requires aberration_backend='torch_ctf' -- "
-                "aberrations.Aberration has no laser-phase-plate model."
-            )
+        scattering_model = propagation.scattering_model
         self.save_hyperparameters(
             ignore=["V", "quaternions", "translations", "ctf_params", "kmask"]
         )
@@ -223,26 +211,27 @@ class TomogramReconstructor(_BaseReconstructor):
         self.register_buffer("kmask", kmask)
 
         # Physics modules
+        self.propagation = propagation
+        self.optics = optics
         self.iterative_scattering = IterativeScattering(
             self.nxy,
             voxel_size,
             voltage,
             scattering_model=scattering_model,
-            klim=klim,
-            alpha=alpha,
+            klim=propagation.klim,
+            alpha=propagation.alpha,
         )
-        self.aberration_backend = aberration_backend
         # Derived from scattering_model, not user-configurable independently
         # -- see aberrations.aberration_model_for_scattering.
         aberration_model = aberration_model_for_scattering(scattering_model)
         self.aberration: Aberration | LegacyAberrationAdapter
-        if aberration_backend == "torch_ctf":
+        if optics.aberration_backend == "torch_ctf":
             self.aberration = LegacyAberrationAdapter(
                 self.nxy,
                 voxel_size,
                 voltage,
                 aberration_model=aberration_model,
-                lpp_params=lpp_params,
+                lpp_params=optics.lpp_params,
             )
         else:
             self.aberration = Aberration(
@@ -250,7 +239,7 @@ class TomogramReconstructor(_BaseReconstructor):
                 voxel_size,
                 voltage,
                 aberration_model=aberration_model,
-                alpha=alpha if aberration_model == "linear" else None,
+                alpha=propagation.alpha if aberration_model == "linear" else None,
                 # Same derivation as `BaseImager._init_optics`. Left at the
                 # default the amplitude-contrast term is applied on one side of
                 # the forward/inverse pair and not the other.

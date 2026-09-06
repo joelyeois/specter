@@ -13,6 +13,7 @@ from specter.io import (
     create_particle_starfile_from_model,
     extract_parameters_from_starfile,
 )
+from specter.settings import Camera, Propagation
 
 # Effective coincidence exclusion radius; see tests/test_generators.py::_CR.
 _CR = 1.8 / math.sqrt(2 * math.pi)
@@ -70,14 +71,13 @@ def test_create_particle_starfile_from_model_matches_model_params(tmp_path) -> N
         ctf_params=ctf_params,
         voltage=300.0,
         dose_per_angstrom=2.0,
-        noise_model=None,
-        scattering_model="multislice",
-        alpha=0.1,
         coincidence_radius=_CR,
         potential_scale=0.75,
         bfactor=42.0,
         verbose=False,
         progressbars=False,
+        propagation=Propagation(scattering_model="multislice", alpha=0.1),
+        camera=Camera(noise_model=None),
     )
     particles = model(torch.tensor([0]))
 

@@ -14,6 +14,7 @@ from specter.crowding import filter_by_local_z_density, filter_by_z_density
 from specter.ice import IceBank, IceProfile, blend_ice_into_volume
 from specter.imagegenerator import MicrographGenerator
 from specter.pipelines._micrograph import build_ice_profile
+from specter.settings import Camera
 
 
 # ----------------------------------------------------------------------
@@ -415,9 +416,9 @@ def test_micrograph_generator_wires_the_profile_through():
         ice_model="random",
         ice_profile=prof,
         crowd_min_distance=40.0,
-        noise_model="poisson",
         verbose=False,
         progressbars=False,
+        camera=Camera(noise_model="poisson"),
     )
 
     # Box sized by the thickest column, not by the mean.
@@ -458,9 +459,9 @@ def test_micrograph_generator_without_profile_is_unchanged():
         ice_model="random",
         ice_thickness=160.0,
         crowd_min_distance=40.0,
-        noise_model="poisson",
         verbose=False,
         progressbars=False,
+        camera=Camera(noise_model="poisson"),
     )
     assert model.nz == compute_nz(16, 160.0, px)
     assert model.ice_thickness == pytest.approx(model.nz * px)

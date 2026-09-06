@@ -180,10 +180,16 @@ def test_every_config_field_is_forwarded_or_deliberately_held_back() -> None:
     field that fell into one would be accepted by the CLI and then ignored.
     """
     from specter.pipelines._reconstruct import _NON_GHOSTBUSTER_FIELDS
+    from specter.settings import Propagation
 
     config = ReconstructionConfig(cs_file="a.cs", mrc_file="b.mrc", dose_per_angstrom=1)
     all_fields = {f.name for f in fields(config)}
-    assert all_fields == set(_ghostbuster_kwargs(config)) | _NON_GHOSTBUSTER_FIELDS
+    kwargs = _ghostbuster_kwargs(config)
+    # The Propagation fields are forwarded as one `propagation` argument.
+    propagation_fields = {f.name for f in fields(Propagation)} & all_fields
+    assert propagation_fields <= _NON_GHOSTBUSTER_FIELDS
+    assert isinstance(kwargs["propagation"], Propagation)
+    assert all_fields == (set(kwargs) - {"propagation"}) | _NON_GHOSTBUSTER_FIELDS
 
 
 # ---------------------------------------------------------------------------

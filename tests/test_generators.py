@@ -22,6 +22,7 @@ from specter.imagegenerator import (
     MicrographGenerator,
     TiltSeriesGenerator,
 )
+from specter.settings import Camera, Envelopes, Propagation
 
 # These fixtures predate `coincidence_radius` being rescaled to mean a true
 # effective exclusion radius (exclusion area pi*r^2, rather than the old
@@ -66,16 +67,13 @@ def test_image_generator_regression(small_volume, ctf_params, save_or_compare):
         ctf_params=ctf_params,
         voltage=300.0,
         dose_per_angstrom=2.0,
-        noise_model="poisson",
-        scattering_model="multislice",
         ice_model="random",
-        alpha=0.1,
         coincidence_radius=_CR,
-        n_frames=10,
-        detector_model="k3_300kv",
         crowd_min_distance=60.0,
         verbose=False,
         progressbars=False,
+        propagation=Propagation(scattering_model="multislice", alpha=0.1),
+        camera=Camera(noise_model="poisson", n_frames=10, detector_model="k3_300kv"),
     )
     torch.manual_seed(0)
     images = gen(torch.tensor([0]))
@@ -98,14 +96,12 @@ def test_image_generator_from_coordinates_regression(
         ctf_params=ctf_params,
         voltage=300.0,
         dose_per_angstrom=2.0,
-        noise_model="poisson",
-        scattering_model="multislice",
         ice_model="random",
-        alpha=0.1,
         coincidence_radius=_CR,
-        n_frames=10,
         crowd_min_distance=40.0,
         verbose=False,
+        propagation=Propagation(scattering_model="multislice", alpha=0.1),
+        camera=Camera(noise_model="poisson", n_frames=10),
     )
     torch.manual_seed(0)
     images = gen(torch.tensor([0]))
@@ -122,15 +118,13 @@ def test_micrograph_generator_regression(small_volume, ctf_params, save_or_compa
         ctf_params=ctf_params,
         voltage=300.0,
         dose_per_angstrom=2.0,
-        noise_model="poisson",
-        scattering_model="projection",
         ice_model="random",
-        alpha=0.1,
         coincidence_radius=_CR,
-        n_frames=10,
         crowd_min_distance=60.0,
         verbose=False,
         progressbars=False,
+        propagation=Propagation(scattering_model="projection", alpha=0.1),
+        camera=Camera(noise_model="poisson", n_frames=10),
     )
     torch.manual_seed(0)
     images = gen(torch.tensor([0]))
@@ -150,14 +144,12 @@ def test_micrograph_generator_accepts_prebuilt_icemaker(small_volume, ctf_params
         ctf_params=ctf_params,
         voltage=300.0,
         dose_per_angstrom=2.0,
-        noise_model="poisson",
-        scattering_model="projection",
         icemaker=icemaker,
-        alpha=0.1,
         coincidence_radius=_CR,
-        n_frames=10,
         verbose=False,
         progressbars=False,
+        propagation=Propagation(scattering_model="projection", alpha=0.1),
+        camera=Camera(noise_model="poisson", n_frames=10),
     )
     assert gen.specimen_gen.icemaker is icemaker
     images = gen(torch.tensor([0]))
@@ -231,14 +223,12 @@ def test_tilt_series_generator_regression(ctf_params, save_or_compare):
         voltage=300.0,
         dose_per_angstrom=2.0,
         angles=angles,
-        noise_model="poisson",
-        scattering_model="projection",
-        alpha=0.1,
         coincidence_radius=_CR,
-        n_frames=10,
         tilt_axis="y",
         verbose=False,
         progressbars=False,
+        propagation=Propagation(scattering_model="projection", alpha=0.1),
+        camera=Camera(noise_model="poisson", n_frames=10),
     )
     torch.manual_seed(0)
     tilt_series, _, _ = gen.generate_tilt_series(torch.tensor([0]))
@@ -386,16 +376,20 @@ def test_image_generator_ctf_scattering_model_gets_amp_contrast_by_default(
         ctf_params=ctf_params,
         voltage=300.0,
         dose_per_angstrom=2.0,
-        scattering_model="ctf",
-        noise_model=None,
+        camera=Camera(noise_model=None),
         ice_model=None,
-        detector_model=None,
         progressbars=False,
     )
-    model_alpha_0 = ImageGenerator(alpha=0.0, **kwargs)
+    model_alpha_0 = ImageGenerator(
+        **kwargs,
+        propagation=Propagation(scattering_model="ctf", alpha=0.0),
+    )
     assert model_alpha_0.aberration.specimen_absorption is False
     img_alpha_0 = model_alpha_0(torch.tensor([0]))
-    img_alpha_1 = ImageGenerator(alpha=0.1, **kwargs)(torch.tensor([0]))
+    img_alpha_1 = ImageGenerator(
+        **kwargs,
+        propagation=Propagation(scattering_model="ctf", alpha=0.1),
+    )(torch.tensor([0]))
     assert not torch.allclose(img_alpha_0, img_alpha_1)
 
 
@@ -413,12 +407,10 @@ def test_image_generator_multislice_scattering_model_keeps_specimen_absorption()
         ctf_params={"dfu": torch.tensor([5000.0]), "cs": torch.tensor([2.7])},
         voltage=300.0,
         dose_per_angstrom=2.0,
-        scattering_model="multislice",
-        noise_model=None,
         ice_model=None,
-        detector_model=None,
-        alpha=0.1,
         progressbars=False,
+        propagation=Propagation(scattering_model="multislice", alpha=0.1),
+        camera=Camera(noise_model=None, detector_model=None),
     )
     assert model.aberration_model == "nonlinear"
     assert model.aberration.specimen_absorption is True
@@ -460,16 +452,18 @@ def test_image_generator_plumbs_envelope_params(small_volume, ctf_params):
         ctf_params=ctf_params,
         voltage=300.0,
         dose_per_angstrom=2.0,
-        noise_model=None,
-        scattering_model="projection",
-        convergence_angle=0.02,
-        cc=2.7e7,
-        energy_spread=0.8,
-        deltaV_V=0.05e-6,
-        deltaI_I=0.02e-6,
-        dose_envelope=True,
         verbose=False,
         progressbars=False,
+        propagation=Propagation(scattering_model="projection"),
+        envelopes=Envelopes(
+            convergence_angle=0.02,
+            cc=2.7e7,
+            energy_spread=0.8,
+            deltaV_V=0.05e-6,
+            deltaI_I=0.02e-6,
+            dose_envelope=True,
+        ),
+        camera=Camera(noise_model=None),
     )
     assert gen.aberration.convergence_angle == 0.02
     assert gen.aberration.cc == 2.7e7
@@ -494,15 +488,17 @@ def test_image_generator_from_coordinates_plumbs_envelope_params(
         ctf_params=ctf_params,
         voltage=300.0,
         dose_per_angstrom=2.0,
-        noise_model=None,
-        scattering_model="projection",
-        convergence_angle=0.02,
-        cc=2.7e7,
-        energy_spread=0.8,
-        deltaV_V=0.05e-6,
-        deltaI_I=0.02e-6,
-        dose_envelope=True,
         verbose=False,
+        propagation=Propagation(scattering_model="projection"),
+        envelopes=Envelopes(
+            convergence_angle=0.02,
+            cc=2.7e7,
+            energy_spread=0.8,
+            deltaV_V=0.05e-6,
+            deltaI_I=0.02e-6,
+            dose_envelope=True,
+        ),
+        camera=Camera(noise_model=None),
     )
     assert gen.aberration.convergence_angle == 0.02
     assert gen.aberration.cc == 2.7e7
@@ -521,16 +517,18 @@ def test_micrograph_generator_plumbs_envelope_params(small_volume, ctf_params):
         ctf_params=ctf_params,
         voltage=300.0,
         dose_per_angstrom=2.0,
-        noise_model=None,
-        scattering_model="projection",
-        convergence_angle=0.02,
-        cc=2.7e7,
-        energy_spread=0.8,
-        deltaV_V=0.05e-6,
-        deltaI_I=0.02e-6,
-        dose_envelope=True,
         verbose=False,
         progressbars=False,
+        propagation=Propagation(scattering_model="projection"),
+        envelopes=Envelopes(
+            convergence_angle=0.02,
+            cc=2.7e7,
+            energy_spread=0.8,
+            deltaV_V=0.05e-6,
+            deltaI_I=0.02e-6,
+            dose_envelope=True,
+        ),
+        camera=Camera(noise_model=None),
     )
     assert gen.aberration.convergence_angle == 0.02
     assert gen.aberration.cc == 2.7e7
@@ -554,16 +552,18 @@ def test_tilt_series_generator_plumbs_envelope_params(ctf_params):
         voltage=300.0,
         dose_per_angstrom=2.0,
         angles=angles,
-        noise_model=None,
-        scattering_model="projection",
-        convergence_angle=0.02,
-        cc=2.7e7,
-        energy_spread=0.8,
-        deltaV_V=0.05e-6,
-        deltaI_I=0.02e-6,
-        dose_envelope=True,
         verbose=False,
         progressbars=False,
+        propagation=Propagation(scattering_model="projection"),
+        envelopes=Envelopes(
+            convergence_angle=0.02,
+            cc=2.7e7,
+            energy_spread=0.8,
+            deltaV_V=0.05e-6,
+            deltaI_I=0.02e-6,
+            dose_envelope=True,
+        ),
+        camera=Camera(noise_model=None),
     )
     assert gen.aberration.convergence_angle == 0.02
     assert gen.aberration.cc == 2.7e7
@@ -583,15 +583,20 @@ def test_image_generator_dose_envelope_changes_output(small_volume, ctf_params):
         ctf_params=ctf_params,
         voltage=300.0,
         dose_per_angstrom=40.0,
-        noise_model=None,
-        scattering_model="projection",
-        alpha=0.1,
+        camera=Camera(noise_model=None),
+        propagation=Propagation(scattering_model="projection", alpha=0.1),
         verbose=False,
         progressbars=False,
     )
 
-    gen_off = ImageGenerator(**kwargs, dose_envelope=False)
-    gen_on = ImageGenerator(**kwargs, dose_envelope=True)
+    gen_off = ImageGenerator(
+        **kwargs,
+        envelopes=Envelopes(dose_envelope=False),
+    )
+    gen_on = ImageGenerator(
+        **kwargs,
+        envelopes=Envelopes(dose_envelope=True),
+    )
 
     image_off = gen_off(torch.tensor([0]))
     image_on = gen_on(torch.tensor([0]))
@@ -609,9 +614,8 @@ def test_image_generator_bfactor_none_and_zero_match(small_volume, ctf_params):
         ctf_params=ctf_params,
         voltage=300.0,
         dose_per_angstrom=2.0,
-        noise_model=None,
-        scattering_model="projection",
-        alpha=0.1,
+        camera=Camera(noise_model=None),
+        propagation=Propagation(scattering_model="projection", alpha=0.1),
         verbose=False,
         progressbars=False,
     )
@@ -701,11 +705,10 @@ def test_ctf_params_dict_undoes_multislice_defocus_shift(small_volume, ctf_param
         ctf_params=ctf_params,
         voltage=300.0,
         dose_per_angstrom=2.0,
-        noise_model=None,
-        scattering_model="multislice",
-        alpha=0.1,
         verbose=False,
         progressbars=False,
+        propagation=Propagation(scattering_model="multislice", alpha=0.1),
+        camera=Camera(noise_model=None),
     )
 
     expected_shift = gen.nz * gen.pixel_size / 2
@@ -796,7 +799,11 @@ def test_tilt_series_generator_pad_fft_multislice_shapes_match(ctf_params):
     )
 
     for angle in (0.0, 45.0):
-        gen = TiltSeriesGenerator(**kwargs, angles=torch.tensor([angle]), pad_fft=True)
+        gen = TiltSeriesGenerator(
+            **kwargs,
+            angles=torch.tensor([angle]),
+            propagation=Propagation(pad_fft=True),
+        )
         assert gen.iterative_scattering.nxy == gen.nxy == gen.pad_nxy
 
         tilt_series, exitwaves, clean_images = gen.generate_tilt_series(
@@ -829,8 +836,16 @@ def test_tilt_series_generator_pad_fft_changes_output_under_tilt(ctf_params):
         progressbars=False,
     )
 
-    gen_base = TiltSeriesGenerator(**kwargs, angles=torch.tensor([45.0]), pad_fft=False)
-    gen_pad = TiltSeriesGenerator(**kwargs, angles=torch.tensor([45.0]), pad_fft=True)
+    gen_base = TiltSeriesGenerator(
+        **kwargs,
+        angles=torch.tensor([45.0]),
+        propagation=Propagation(pad_fft=False),
+    )
+    gen_pad = TiltSeriesGenerator(
+        **kwargs,
+        angles=torch.tensor([45.0]),
+        propagation=Propagation(pad_fft=True),
+    )
     _, exitwaves_base, _ = gen_base.generate_tilt_series(torch.tensor([0]))
     _, exitwaves_pad, _ = gen_pad.generate_tilt_series(torch.tensor([0]))
     assert not torch.allclose(exitwaves_base, exitwaves_pad)
@@ -873,9 +888,9 @@ def test_tilt_series_generator_auto_places_volume_that_fits(ctf_params):
         voltage=300.0,
         dose_per_angstrom=2.0,
         angles=torch.tensor([30.0]),
-        scattering_model="multislice",
         verbose=False,
         progressbars=False,
+        propagation=Propagation(scattering_model="multislice"),
     ).to("cuda")
     # .to("cuda") alone must not have moved it -- only generate_tilt_series decides.
     assert gen.volume.device.type == "cpu"
@@ -965,10 +980,10 @@ def test_from_coordinates_translation_is_in_angstrom(
         ctf_params=ctf_params,
         voltage=300.0,
         dose_per_angstrom=2.0,
-        noise_model=None,
-        scattering_model="projection",
         ice_model=None,
         verbose=False,
+        propagation=Propagation(scattering_model="projection"),
+        camera=Camera(noise_model=None),
     )
 
     identity = torch.tensor([[1.0, 0.0, 0.0, 0.0]])
@@ -1018,8 +1033,8 @@ def test_from_coordinates_and_volume_paths_agree(small_coords, ctf_params):
         ctf_params=ctf_params,
         voltage=300.0,
         dose_per_angstrom=2.0,
-        noise_model=None,
-        scattering_model="projection",
+        camera=Camera(noise_model=None),
+        propagation=Propagation(scattering_model="projection"),
         ice_model=None,
         verbose=False,
     )
@@ -1062,13 +1077,12 @@ def test_micrograph_volume_falls_back_to_host_when_it_does_not_fit(
         ctf_params=ctf_params,
         voltage=300.0,
         dose_per_angstrom=2.0,
-        noise_model="none",
-        scattering_model="projection",
         ice_model="random",
-        alpha=0.1,
         crowd_min_distance=60.0,
         verbose=False,
         progressbars=False,
+        propagation=Propagation(scattering_model="projection", alpha=0.1),
+        camera=Camera(noise_model="none"),
     )
 
     calls = {"n": 0}
@@ -1129,14 +1143,13 @@ def test_micrograph_unit_potential_scale_skips_the_extra_volume_copy(
             ctf_params=ctf_params,
             voltage=300.0,
             dose_per_angstrom=2.0,
-            noise_model="none",
-            scattering_model="projection",
             ice_model="random",
-            alpha=0.1,
             crowd_min_distance=60.0,
             potential_scale=scale,
             verbose=False,
             progressbars=False,
+            propagation=Propagation(scattering_model="projection", alpha=0.1),
+            camera=Camera(noise_model="none"),
         )
         torch.manual_seed(0)
         return gen(torch.tensor([0]))
@@ -1165,10 +1178,9 @@ def _plain_generator(volume, ctf_params):
         ctf_params=ctf_params,
         voltage=300.0,
         dose_per_angstrom=2.0,
-        scattering_model="multislice",
-        alpha=0.1,
         verbose=False,
         progressbars=False,
+        propagation=Propagation(scattering_model="multislice", alpha=0.1),
     )
 
 

@@ -17,14 +17,9 @@ from ..ice import (
 )
 from ..progress import status
 from ..scattering import IterativeScattering
+from ..settings import Camera, Envelopes, Optics, Propagation
 from ..specimen import MicrographSpecimenGenerator
-from specter.options import (
-    DetectorModel,
-    IceModel,
-    NoiseModel,
-    ScatteringFactors,
-    ScatteringModel,
-)
+from specter.options import IceModel, ScatteringFactors
 
 
 class MicrographGenerator(BaseImager):
@@ -45,13 +40,22 @@ class MicrographGenerator(BaseImager):
         Output image size in pixels (must be square).
     pixel_size : float
         Pixel size in Å.
-    ctf_params : dict[str, torch.Tensor]
-        CTF parameters; each value is a 1-D tensor of length n.
+    ctf_params : dict[str, torch.Tensor] or None
+        Per-micrograph CTF parameters; each value is a 1-D tensor of length
+        n. Required unless ``optics`` is ``None``.
     voltage : float
         Electron beam accelerating voltage in kV.
     dose_per_angstrom : float or torch.Tensor
         Total electron dose (fluence) per micrograph in e⁻/Å². Scalar, or a
         1-D tensor of length n giving a separate dose for each micrograph.
+    propagation : Propagation, optional
+        How the exit wave is computed. Default ``Propagation()``.
+    optics : Optics, optional
+        The aberration stage; ``None`` skips it. Default ``Optics()``.
+    envelopes : Envelopes, optional
+        Coherence and radiation-damage envelopes. Default ``Envelopes()``.
+    camera : Camera, optional
+        The detector chain. Default ``Camera()``.
     volume : torch.Tensor, optional
         Pre-assembled specimen volume of shape (1, Z, Y, X) -- e.g. the
         output of
@@ -142,16 +146,6 @@ class MicrographGenerator(BaseImager):
         Forwarded to ``CrowdWithDuplicates``. Shape backend only.
     n_candidates : int, optional
         Forwarded to ``CrowdWithDuplicates``. Shape backend only.
-    scattering_model : str, optional
-        Scattering model passed to ``IterativeScattering``. Default 'multislice'.
-    noise_model : str, optional
-        Noise model. Default 'poisson'.
-    klim : float, optional
-        Reciprocal-space frequency limit.
-    alpha : float, optional
-        Amplitude contrast ratio. Default 0.0.
-    pad_fft : bool, optional
-        Whether to XY-pad the volume for FFT antialiasing. Default False.
     chunk_size : int, optional
         Crowding duplicate volumes rotated per batch, forwarded to
         ``MicrographSpecimenGenerator``. Default 1, which is both the cheapest
@@ -159,8 +153,6 @@ class MicrographGenerator(BaseImager):
     move_to_cpu : bool, optional
         Move the assembled volume to CPU after generation to save GPU memory.
         Default True.
-    detector_model : str, optional
-        Detector MTF model ('k3_300kv', 'k3_200kv', 'k2_300kv', 'perfect', None).
     slice_batchsize : int, optional
         Number of Z slices propagated together in ``IterativeScattering``.
         Default 1.
@@ -170,8 +162,6 @@ class MicrographGenerator(BaseImager):
         Emit debug-level log messages. Default True.
     coincidence_radius : float or torch.Tensor, optional
         Coincidence radius in pixels. Default 0.0.
-    n_frames : int, optional
-        Number of detector frames to simulate. Default None.
     potential_scale : float or torch.Tensor, optional
         Multiplier applied to the potential before scattering. Default 1.0.
     save_clean_exitwaves : bool, optional
@@ -180,24 +170,6 @@ class MicrographGenerator(BaseImager):
     bfactor : float or torch.Tensor or None, optional
         Isotropic B-factor envelope in Å² applied in the microscope transfer
         function. None or 0.0 means no envelope. Default None.
-    convergence_angle : float, optional
-        Beam convergence semi-angle in milliradians, used for the Cs
-        (spatial coherence) envelope. Default None (envelope disabled).
-    cc : float, optional
-        Chromatic aberration coefficient in Å, used for the Cc
-        (temporal coherence) envelope. Default None (envelope disabled).
-    energy_spread : float, optional
-        FWHM of the beam energy spread in eV, used by the Cc envelope.
-        Default 0.7.
-    deltaV_V : float, optional
-        Relative high-voltage instability, used by the Cc envelope.
-        Default 0.06e-6.
-    deltaI_I : float, optional
-        Relative objective-lens current instability, used by the Cc
-        envelope. Default 0.01e-6.
-    dose_envelope : bool, optional
-        Whether to apply the Grant & Grigorieff (2015) cumulative-dose
-        envelope, using ``dose_per_angstrom``. Default False.
     """
 
     def __init__(
@@ -205,11 +177,15 @@ class MicrographGenerator(BaseImager):
         scattering_potential: torch.Tensor | None,
         micrograph_size: int | tuple[int, int],
         pixel_size: float,
-        ctf_params: dict[str, Any],
+        ctf_params: dict[str, Any] | None,
         voltage: float,
         dose_per_angstrom: float | torch.Tensor,
         volume: torch.Tensor | None = None,
         anisomag: torch.Tensor | None = None,
+        propagation: Propagation = Propagation(),
+        optics: Optics | None = Optics(),
+        envelopes: Envelopes = Envelopes(),
+        camera: Camera = Camera(),
         ice_model: IceModel | None = None,
         ice_thickness: float | None = None,
         ice_profile: IceProfile | None = None,
@@ -231,30 +207,15 @@ class MicrographGenerator(BaseImager):
         sigma_frac: float = 0.05,
         peak_amplitude: float = 1.0,
         baseline: float = 0.1,
-        scattering_model: ScatteringModel = "multislice",
-        noise_model: NoiseModel | None = "poisson",
-        klim: float | None = None,
-        alpha: float = 0.0,
-        pad_fft: bool = False,
         chunk_size: int = 1,
         move_to_cpu: bool = True,
-        detector_model: DetectorModel | None = None,
         slice_batchsize: int = 1,
         progressbars: bool = True,
         verbose: bool = True,
         coincidence_radius: float | torch.Tensor = 0.0,
-        n_frames: int | None = None,
         potential_scale: float | torch.Tensor = 1.0,
         save_clean_exitwaves: bool = False,
         bfactor: float | torch.Tensor | None = None,
-        convergence_angle: float | None = None,
-        cc: float | None = None,
-        energy_spread: float = 0.7,
-        deltaV_V: float = 0.06e-6,
-        deltaI_I: float = 0.01e-6,
-        dose_envelope: bool = False,
-        aberration_backend: Literal["legacy", "torch_ctf"] = "legacy",
-        lpp_params: dict[str, float] | None = None,
         **kwargs: Any,
     ):
         if isinstance(micrograph_size, int):
@@ -267,8 +228,8 @@ class MicrographGenerator(BaseImager):
         else:
             raise ValueError("micrograph_size must have same dimensions in x and y.")
 
-        self.pad_fft = pad_fft
-        self.pad_nxy = nxy + (nxy // 2) * 2 if pad_fft else nxy
+        self.pad_fft = propagation.pad_fft
+        self.pad_nxy = nxy + (nxy // 2) * 2 if self.pad_fft else nxy
 
         self.ice_profile = ice_profile
 
@@ -300,40 +261,29 @@ class MicrographGenerator(BaseImager):
             nxy=nxy,
             nz=self.nz,
             pad_nxy=self.pad_nxy,
-            noise_model=noise_model,
-            alpha=alpha,
-            detector_model=detector_model,
+            propagation=propagation,
+            optics=optics,
+            envelopes=envelopes,
+            camera=camera,
             anisomag=anisomag,
             ctf_params=ctf_params,
             progressbars=progressbars,
             verbose=verbose,
             coincidence_radius=coincidence_radius,
-            n_frames=n_frames,
             potential_scale=potential_scale,
             bfactor=bfactor,
-            convergence_angle=convergence_angle,
-            cc=cc,
-            energy_spread=energy_spread,
-            deltaV_V=deltaV_V,
-            deltaI_I=deltaI_I,
-            dose_envelope=dose_envelope,
-            aberration_backend=aberration_backend,
-            lpp_params=lpp_params,
         )
 
         self.chunk_size = chunk_size
         self.move_to_cpu = move_to_cpu
         self.water_air_interface = water_air_interface
         self.ice_model = ice_model
-        self.scattering_model = scattering_model
-        self.klim = klim
-        self.alpha = alpha
         self.crowd_max_distance_z = (
             crowd_max_distance_z if crowd_max_distance_z is not None else self.nz
         )
 
         self._apply_defocus_shift(
-            shift_required=scattering_model not in ["projection", "ctf"],
+            shift_required=self.scattering_model not in ["projection", "ctf"],
             shift=(
                 ice_profile.entry_face_shift(self.nxy, pixel_size)
                 if ice_profile is not None
@@ -532,7 +482,7 @@ class MicrographGenerator(BaseImager):
             V, pose=0, slice_batchsize=self.slice_batchsize
         )
 
-        self.detector_waves = self.aberration(self.exitwaves, self._ctf_batch(idx))
+        self.detector_waves = self._aberrate(self.exitwaves, self._ctf_batch(idx))
 
         dose_batch = self.dose_per_angstrom[idx]
         cr_batch = self.coincidence_radius[idx]

@@ -24,6 +24,7 @@ import torch
 from specter.arrays import ball3d
 from specter.ghostbuster import Reconstructor
 from specter.imagegenerator import ImageGenerator
+from specter.settings import Camera, Propagation
 
 SCATTERING_MODELS = ["multislice", "projection", "firstborn", "rytov"]
 
@@ -63,11 +64,12 @@ def _simulator(inputs: dict, scattering_model: str) -> ImageGenerator:
         inputs["voltage"],
         inputs["dose_per_angstrom"],
         ice_model=None,
-        noise_model=None,
-        scattering_model=scattering_model,
-        alpha=inputs["alpha"],
         verbose=False,
         progressbars=False,
+        propagation=Propagation(
+            scattering_model=scattering_model, alpha=inputs["alpha"]
+        ),
+        camera=Camera(noise_model=None),
     )
 
 
@@ -81,9 +83,10 @@ def _inverse(inputs: dict, scattering_model: str, **kwargs) -> Reconstructor:
         ctf_params=inputs["ctf_params"],
         voltage=inputs["voltage"],
         dose_per_angstrom=inputs["dose_per_angstrom"],
-        alpha=inputs["alpha"],
-        scattering_model=scattering_model,
         **kwargs,
+        propagation=Propagation(
+            alpha=inputs["alpha"], scattering_model=scattering_model
+        ),
     )
 
 
@@ -245,12 +248,11 @@ def test_tilt_forward_matches_between_simulator_and_inverse(
         voltage=300.0,
         dose_per_angstrom=2.0,
         angles=torch.tensor([0.0]),
-        noise_model=None,
-        scattering_model=scattering_model,
-        alpha=0.1,
         tilt_axis="y",
         verbose=False,
         progressbars=False,
+        propagation=Propagation(scattering_model=scattering_model, alpha=0.1),
+        camera=Camera(noise_model=None),
     )
     torch.manual_seed(0)
     _, _, clean = generator.generate_tilt_series(torch.tensor([0]))
@@ -262,8 +264,7 @@ def test_tilt_forward_matches_between_simulator_and_inverse(
         translations=torch.zeros(1, 2),
         ctf_params={k: v.clone() for k, v in ctf_params.items()},
         voltage=300.0,
-        scattering_model=scattering_model,
-        alpha=0.1,
+        propagation=Propagation(scattering_model=scattering_model, alpha=0.1),
     )
 
     assert inverse._defocus_shift_angstrom == generator._defocus_shift_angstrom, (
@@ -323,12 +324,11 @@ def test_simulated_tilt_series_reconstructs_back_to_its_volume() -> None:
         voltage=300.0,
         dose_per_angstrom=2.0,
         angles=angles,
-        noise_model=None,
-        scattering_model="multislice",
-        alpha=0.1,
         tilt_axis="y",
         verbose=False,
         progressbars=False,
+        propagation=Propagation(scattering_model="multislice", alpha=0.1),
+        camera=Camera(noise_model=None),
     )
     torch.manual_seed(0)
     _, _, observed = generator.generate_tilt_series(torch.tensor([0]))
@@ -340,9 +340,8 @@ def test_simulated_tilt_series_reconstructs_back_to_its_volume() -> None:
         translations=torch.zeros(n_tilts, 2),
         ctf_params={k: v.expand(n_tilts).clone() for k, v in ctf_params.items()},
         voltage=300.0,
-        scattering_model="multislice",
-        alpha=0.1,
         lr=5e-2,
+        propagation=Propagation(scattering_model="multislice", alpha=0.1),
     )
     optimizer = torch.optim.AdamW([reconstructor.V], lr=5e-2)
 

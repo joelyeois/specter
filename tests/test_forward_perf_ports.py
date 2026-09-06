@@ -39,6 +39,7 @@ from specter.potential._occupancy import _gaussian_blur3d
 from specter.rotations import VolumeRotator, affine_sampling_grid
 from specter.rotations._volume import _relion_rotation_grid
 from specter.scattering import Scattering
+from specter.settings import Camera, Propagation
 
 
 def _random_theta(B: int, dtype: torch.dtype) -> torch.Tensor:
@@ -251,10 +252,10 @@ def _tiny_generator(pad_fft: bool, ice_model: str | None = "random") -> ImageGen
         30.0,
         ice_model=ice_model,
         ice_thickness=0,
-        noise_model=None,
-        pad_fft=pad_fft,
         progressbars=False,
         verbose=False,
+        propagation=Propagation(pad_fft=pad_fft),
+        camera=Camera(noise_model=None),
     )
 
 

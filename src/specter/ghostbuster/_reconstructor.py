@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 import mrcfile
 import roma
@@ -34,7 +34,8 @@ from ._losses import (
     nps_weighted_loss,
     update_sigma2,
 )
-from specter.options import EwaldSphereSign, RotateMode, ScatteringModel, Scheduler
+from ..settings import Camera, Optics, Propagation
+from specter.options import RotateMode, Scheduler
 
 
 class Reconstructor(_BaseReconstructor):
@@ -93,19 +94,16 @@ class Reconstructor(_BaseReconstructor):
         L1 regularisation weight on V. None disables sparsity.
     symmetry : str, optional
         Symmetry group to enforce (e.g. "C3", "D2"). None disables symmetry.
-    scattering_model : str
-        Scattering model passed to ImageGenerator. Default is "multislice".
-    aberration_backend : {"legacy", "torch_ctf"}, optional
-        Which engine computes the CTF/aberration transfer function inside
-        the underlying ``ImageGenerator``. ``"legacy"`` (default) uses
-        ``aberrations.Aberration``; ``"torch_ctf"`` uses
-        ``ctf.LegacyAberrationAdapter`` (verified parity, see
-        ``ImageGenerator``'s own docstring). Opt-in only; not yet the
-        default.
-    lpp_params : dict[str, float], optional
-        Laser-phase-plate config, in ``ctf.CTFParameters``-native units.
-        Requires ``aberration_backend="torch_ctf"``; raises at
-        construction time otherwise (via ``ImageGenerator``).
+    propagation : Propagation, optional
+        How the forward model computes the exit wave, including the
+        amplitude contrast ratio. The same object the simulator that
+        produced the data was built with, when it was simulated. Default
+        ``Propagation()``.
+    optics : Optics, optional
+        The aberration engine and phase plate. Default ``Optics()``.
+        `Envelopes` and `Camera` are deliberately not accepted: neither can
+        be determined from a dataset, so their high-frequency loss is
+        absorbed into the reconstructed volume rather than assumed.
     run_dir : str or Path, optional
         Directory to write per-epoch volumes, final volume, and metadata into.
         ``None`` disables all file output.
@@ -127,13 +125,10 @@ class Reconstructor(_BaseReconstructor):
         voltage: float,
         dose_per_angstrom: float,
         anisomag: torch.Tensor | None = None,
-        alpha: float = 0.0,
         defocus_offset: torch.Tensor = torch.tensor(0.0),
         bfactor: float | torch.Tensor | None = None,
-        scattering_model: ScatteringModel = "multislice",
-        aberration_backend: Literal["legacy", "torch_ctf"] = "legacy",
-        lpp_params: dict[str, float] | None = None,
-        klim: float | None = None,
+        propagation: Propagation = Propagation(),
+        optics: Optics = Optics(),
         sparsity: float | None = None,
         lr: float | None = None,
         lr_R: float | None = None,
@@ -147,12 +142,10 @@ class Reconstructor(_BaseReconstructor):
         learn_noise_model: bool = False,
         noise_ema_momentum: float = 0.9,
         use_ncc: bool = False,
-        ews_curvature_sign: EwaldSphereSign = "negative",
         fsc_ref: torch.Tensor | str | Path | None = None,
         fsc_mask: torch.Tensor | float | str | Path | None = None,
         cryosparc_ref: torch.Tensor | str | Path | None = None,
         use_2d_mask: bool = False,
-        rotate_mode: Literal["real", "fourier"] = "real",
         symmetry: str | None = None,
         symmetry_batchsize: int | None = None,
         symmetry_mode: RotateMode = "fourier",
@@ -206,20 +199,17 @@ class Reconstructor(_BaseReconstructor):
         # model parameters
         self.dose_per_angstrom = dose_per_angstrom
         self.voxel_size = voxel_size
-        self.alpha = alpha
         self.voltage = voltage
-        self.rotate_mode = rotate_mode
         self._register_volume(V, lr)
         self._register_ctf_params(ctf_params, defocus_offset, lr_D)
         self._register_pose_params(quaternions, translations, lr_R, lr_T)
         self._register_anisomag_and_scale(anisomag, scale, quaternions.shape[0])
 
         # imaging models
-        self.ews_curvature_sign = ews_curvature_sign
-        self.scattering_model = scattering_model
-        self.aberration_backend = aberration_backend
-        self.lpp_params = lpp_params
-        self._build_imagegenerator(klim, bfactor)
+        self.propagation = propagation
+        self.optics = optics
+        self.scattering_model = propagation.scattering_model
+        self._build_imagegenerator(bfactor)
         self._bind_refined_parameters()
 
     def _setup_optimization_state(
@@ -388,10 +378,13 @@ class Reconstructor(_BaseReconstructor):
             scale = torch.ones(n_particles)
         self.register_buffer("scale", scale)
 
-    def _build_imagegenerator(
-        self, klim: float | None, bfactor: float | torch.Tensor | None
-    ) -> None:
-        """Construct the underlying ImageGenerator from the registered parameters."""
+    def _build_imagegenerator(self, bfactor: float | torch.Tensor | None) -> None:
+        """Construct the underlying ImageGenerator from the registered parameters.
+
+        The forward model is noiseless and envelope-free: the inverse takes
+        no `Envelopes` and no `Camera`, so the generator gets their defaults
+        with the noise switched off.
+        """
         self.imagegenerator = ImageGenerator(
             self.V,
             self.voxel_size,
@@ -401,16 +394,11 @@ class Reconstructor(_BaseReconstructor):
             self.voltage,
             self.dose_per_angstrom,
             anisomag=self.anisomag,
+            propagation=self.propagation,
+            optics=self.optics,
+            camera=Camera(noise_model=None),
             ice_model=None,
-            scattering_model=self.scattering_model,
-            noise_model=None,
-            klim=klim,
-            ews_curvature_sign=self.ews_curvature_sign,
-            alpha=self.alpha,
-            rotate_mode=self.rotate_mode,
             bfactor=bfactor,
-            aberration_backend=self.aberration_backend,
-            lpp_params=self.lpp_params,
         )
 
     def _bind_refined_parameters(self) -> None:

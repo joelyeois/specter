@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Any, Literal, Sequence
+from dataclasses import replace
+from typing import Any, Sequence
 
 import roma
 import torch
@@ -9,16 +10,10 @@ from ..progress import status, track
 from .. import rotations
 from .. import tilt as tilt_geometry
 from ..ice import IceBank, RandomIcemaker, blend_ice_into_volume, resolve_icemaker
+from ..settings import Camera, Envelopes, Optics, Propagation
 from ._micrograph import MicrographGenerator
 from ..scattering import IterativeScattering
-from specter.options import (
-    DetectorModel,
-    IceModel,
-    NoiseModel,
-    ScatteringFactors,
-    ScatteringModel,
-    TiltAxis,
-)
+from specter.options import IceModel, ScatteringFactors, TiltAxis
 
 
 class TiltSeriesGenerator(MicrographGenerator):
@@ -59,13 +54,33 @@ class TiltSeriesGenerator(MicrographGenerator):
         Output image size in pixels (must be square).
     pixel_size : float
         Pixel size in Å.
-    ctf_params : dict[str, torch.Tensor]
-        CTF parameters; each value is a 1-D tensor of length n.
+    ctf_params : dict[str, torch.Tensor] or None
+        Per-tilt CTF parameters; each value is a 1-D tensor of length n.
+        Required unless ``optics`` is ``None``.
     voltage : float
         Electron beam accelerating voltage in kV.
     dose_per_angstrom : float or torch.Tensor
         Total electron dose (fluence) per tilt image in e⁻/Å². Scalar, or a
         1-D tensor of length n giving a separate dose for each tilt.
+    propagation : Propagation, optional
+        How the exit wave is computed. ``pad_fft`` here gives the multislice
+        recursion FFT headroom of ``fft_pad_margin`` pixels: at zero headroom
+        each step's circular convolution wraps slightly at the same frame
+        boundary, and over hundreds of tilted steps that compounds into a
+        visible artifact along all four edges (validated against
+        ``scattering_model="projection"``, which cannot exhibit it, at toy
+        and production scale). Default ``Propagation()``.
+    optics : Optics, optional
+        The aberration stage; ``None`` skips it. Default ``Optics()``.
+    envelopes : Envelopes, optional
+        Coherence and radiation-damage envelopes. With ``dose_envelope``,
+        each tilt is a plain short exposure of ``dose_per_angstrom`` taken
+        after the pre-exposure accumulated by the tilts before it, and the
+        envelope is evaluated over exactly that interval (see
+        :func:`specter.aberrations.dose_envelope`); tilts are assumed to be
+        in acquisition order. Default ``Envelopes()``.
+    camera : Camera, optional
+        The detector chain. Default ``Camera()``.
     quaternions : torch.Tensor, optional
         Explicit rotation quaternions of shape (N_tilts, 4). Mutually
         exclusive with ``angles``.
@@ -101,40 +116,15 @@ class TiltSeriesGenerator(MicrographGenerator):
         seam relaxation cost adds up, and the un-relaxed seams have not been
         a problem in practice for this class's usage. Set higher for
         production-quality seams. Ignored for ``RandomIcemaker``.
-    scattering_model : str, optional
-        Scattering model passed to ``IterativeScattering``. Default 'multislice'.
-    noise_model : str, optional
-        Noise model. Default 'poisson'.
-    klim : float, optional
-        Reciprocal-space frequency limit.
-    alpha : float, optional
-        Amplitude contrast ratio. Default 0.0.
-    pad_fft : bool, optional
-        Give multislice's per-slice FFT-based Fresnel propagation extra canvas
-        headroom for the whole tilt recursion, rather than propagating at exactly
-        the output size with zero headroom. At zero headroom, each step's circular
-        convolution wraps slightly at the same fixed frame boundary every step;
-        under tilt (hundreds to 1000+ multislice steps), that small per-step
-        wraparound compounds coherently into a real, visible artifact along all
-        four frame edges. Confirmed fixed by padding once, running the *entire*
-        recursion at the padded size, and cropping back to the true output size
-        only once at the end (validated against ``scattering_model="projection"``,
-        which cannot exhibit this artifact by construction, at both toy and
-        production scale -- nz=368, ~1000+ multislice steps). Has no effect on
-        ``scattering_model`` other than ``"multislice"``. Default False -- this is
-        a real, confirmed fix, but flipping the *default* on requires re-validating
-        against the full real-data survey, which has not been redone with this
-        implementation.
     fft_pad_margin : int, optional
-        Padding added on each side of the propagation canvas when ``pad_fft=True``.
+        Padding added on each side of the propagation canvas when
+        ``propagation.pad_fft`` is set.
         Always zero-filled (a tilted slice's flanks are real vacuum, not continuing
         ice, so reflecting would fabricate density that isn't physically present).
         Validated at 16-32px -- identical result across that whole range (already
         converged), independent of volume size or multislice step count. Default 16.
     chunk_size : int, optional
         Chunk size for ``MicrographSpecimenGenerator`` (unused here but passed to parent).
-    detector_model : str, optional
-        Detector MTF model ('k3_300kv', 'k3_200kv', 'k2_300kv', 'perfect', None).
     progressbars : bool, optional
         Show progress bars. Default True.
     verbose : bool, optional
@@ -178,35 +168,9 @@ class TiltSeriesGenerator(MicrographGenerator):
         Axis around which the sample tilts ('x' or 'y'). Default 'x'.
     coincidence_radius : float or torch.Tensor, optional
         Coincidence radius in pixels. Default 0.0.
-    n_frames : int, optional
-        Number of detector frames to simulate. Default None.
     bfactor : float or torch.Tensor or None, optional
         Isotropic B-factor envelope in Å² applied in the microscope transfer
         function. None or 0.0 means no envelope. Default None.
-    convergence_angle : float, optional
-        Beam convergence semi-angle in milliradians, used for the Cs
-        (spatial coherence) envelope. Default None (envelope disabled).
-    cc : float, optional
-        Chromatic aberration coefficient in Å, used for the Cc
-        (temporal coherence) envelope. Default None (envelope disabled).
-    energy_spread : float, optional
-        FWHM of the beam energy spread in eV, used by the Cc envelope.
-        Default 0.7.
-    deltaV_V : float, optional
-        Relative high-voltage instability, used by the Cc envelope.
-        Default 0.06e-6.
-    deltaI_I : float, optional
-        Relative objective-lens current instability, used by the Cc
-        envelope. Default 0.01e-6.
-    dose_envelope : bool, optional
-        Whether to apply the Grant & Grigorieff (2015) radiation-damage
-        envelope. Each tilt is a plain short exposure of ``dose_per_angstrom``
-        taken after the pre-exposure accumulated by the tilts before it, and
-        the envelope is evaluated over exactly that interval (see
-        :func:`specter.aberrations.dose_envelope`). Tilts are assumed to be
-        acquired in index order: pass ``dose_per_angstrom`` and the tilt
-        geometry in acquisition order for a dose-symmetric scheme. Default
-        False.
     """
 
     _dose_weighted = False  # a tilt is a plain sum, not an exposure-filtered one
@@ -220,26 +184,24 @@ class TiltSeriesGenerator(MicrographGenerator):
         volume: torch.Tensor,
         micrograph_size: int | tuple[int, int],
         pixel_size: float,
-        ctf_params: dict[str, Any],
+        ctf_params: dict[str, Any] | None,
         voltage: float,
         dose_per_angstrom: float | torch.Tensor,
         quaternions: torch.Tensor | None = None,
         translations: torch.Tensor | None = None,
         angles: torch.Tensor | Sequence[float] | None = None,
         anisomag: torch.Tensor | None = None,
+        propagation: Propagation = Propagation(),
+        optics: Optics | None = Optics(),
+        envelopes: Envelopes = Envelopes(),
+        camera: Camera = Camera(),
         ice_model: IceModel | None = None,
         ice_cache_dir: str | None = None,
         icemaker: IceBank | RandomIcemaker | None = None,
         ice_relax_steps: int = 0,
         ice_parameterization: ScatteringFactors = "kirkland",
-        scattering_model: ScatteringModel = "multislice",
-        noise_model: NoiseModel | None = "poisson",
-        klim: float | None = None,
-        alpha: float = 0.0,
-        pad_fft: bool = False,
         fft_pad_margin: int = 16,
         chunk_size: int = 1,
-        detector_model: DetectorModel | None = None,
         progressbars: bool = True,
         verbose: bool = True,
         slice_batchsize: int = 1,
@@ -249,16 +211,7 @@ class TiltSeriesGenerator(MicrographGenerator):
         z_taper_width: int = 0,
         tilt_axis: TiltAxis = "x",
         coincidence_radius: float | torch.Tensor = 0.0,
-        n_frames: int | None = None,
         bfactor: float | torch.Tensor | None = None,
-        convergence_angle: float | None = None,
-        cc: float | None = None,
-        energy_spread: float = 0.7,
-        deltaV_V: float = 0.06e-6,
-        deltaI_I: float = 0.01e-6,
-        dose_envelope: bool = False,
-        aberration_backend: Literal["legacy", "torch_ctf"] = "legacy",
-        lpp_params: dict[str, float] | None = None,
         **kwargs: Any,
     ):
         if volume is None:
@@ -383,38 +336,28 @@ class TiltSeriesGenerator(MicrographGenerator):
             dose_per_angstrom=dose_per_angstrom,
             volume=volume,
             anisomag=anisomag,
-            scattering_model=scattering_model,
-            noise_model=noise_model,
-            klim=klim,
-            alpha=alpha,
             # NOT pad_fft: MicrographGenerator/BaseImager's own pad_fft mechanism
             # (pad_nxy -> whole-volume XY padding, aberration built at pad_nxy) is
             # specific to MicrographGenerator.forward(), which TiltSeriesGenerator
             # never calls (generate_tilt_series uses self.iterative_scattering
             # directly). Forwarding pad_fft here would inflate self.pad_nxy and build
             # self.aberration at that size, mismatching the exitwave that
-            # self.iterative_scattering now always returns at self.nxy. This class's
+            # self.iterative_scattering always returns at self.nxy. This class's
             # own pad_fft controls IterativeScattering's internal multislice-canvas
             # padding only (see below), entirely independent of the parent's.
-            pad_fft=False,
+            propagation=replace(propagation, pad_fft=False),
+            optics=optics,
+            envelopes=envelopes,
+            camera=camera,
             chunk_size=chunk_size,
-            detector_model=detector_model,
             progressbars=progressbars,
             verbose=verbose,
             slice_batchsize=slice_batchsize,
             coincidence_radius=coincidence_radius,
-            n_frames=n_frames,
             bfactor=bfactor,
-            convergence_angle=convergence_angle,
-            cc=cc,
-            energy_spread=energy_spread,
-            deltaV_V=deltaV_V,
-            deltaI_I=deltaI_I,
-            dose_envelope=dose_envelope,
-            aberration_backend=aberration_backend,
-            lpp_params=lpp_params,
             **kwargs,
         )
+        self.propagation = propagation
         # MicrographGenerator.__init__ (just above) registered self.volume as a
         # buffer, which would otherwise be dragged onto the compute device by
         # any later `.to(device)` call on this module (e.g. the CLI pipelines'
@@ -454,12 +397,12 @@ class TiltSeriesGenerator(MicrographGenerator):
             self.nxy,
             pixel_size,
             voltage,
-            scattering_model=scattering_model,
-            klim=klim,
-            alpha=alpha,
+            scattering_model=self.scattering_model,
+            klim=self.klim,
+            alpha=self.alpha,
             progressbars=progressbars,
             roi_padding_mode="zeros",
-            pad_fft=pad_fft,
+            pad_fft=propagation.pad_fft,
             fft_pad_margin=fft_pad_margin,
         )
 
@@ -581,7 +524,7 @@ class TiltSeriesGenerator(MicrographGenerator):
                     self.pixel_size,
                 )
 
-            detector_waves = self.aberration(exitwave, ctf_batch)
+            detector_waves = self._aberrate(exitwave, ctf_batch)
 
             dose_batch = self.dose_per_angstrom[idx]
             cr_batch = self.coincidence_radius[idx]

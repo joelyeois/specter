@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Literal, Sequence
+from typing import Any, Sequence
 
 import mrcfile
 import roma
@@ -11,7 +11,8 @@ import torch.utils.data
 
 from ._run_helpers import build_trainer, resolve_device
 from ._tomogram_reconstructor import TomogramReconstructor
-from specter.options import ScatteringModel, Scheduler, TiltAxis
+from ..settings import Optics, Propagation
+from specter.options import Scheduler, TiltAxis
 
 
 class TomogramGhostbuster:
@@ -68,21 +69,11 @@ class TomogramGhostbuster:
         Training epochs.  Default 5.
     batchsize : int
         Tilt images per optimisation step.  Default 1 (one tilt per step).
-    scattering_model : str
-        Wave propagation model.  Default ``"multislice"``.
-    aberration_backend : {"legacy", "torch_ctf"}, optional
-        Which engine computes the CTF/aberration transfer function.
-        ``"legacy"`` (default) uses ``aberrations.Aberration``; ``"torch_ctf"``
-        uses ``ctf.LegacyAberrationAdapter`` (verified parity, see
-        ``ImageGenerator``'s docstring). Opt-in only; not yet the default.
-    lpp_params : dict[str, float], optional
-        Laser-phase-plate config, in ``ctf.CTFParameters``-native units.
-        Requires ``aberration_backend="torch_ctf"``; raises at construction
-        time otherwise, since ``aberrations.Aberration`` has no LPP model.
-    klim : float, optional
-        Hard frequency cutoff.
-    alpha : float
-        Amplitude contrast ratio.  Default ``0.0``.
+    propagation : Propagation, optional
+        How the forward model computes the exit wave (model, amplitude
+        contrast, bandlimit). Default ``Propagation()``.
+    optics : Optics, optional
+        The aberration engine and phase plate. Default ``Optics()``.
     taper_width : int
         XY cosine taper on V before each forward pass.  Default 0.
     z_taper_width : int
@@ -118,11 +109,8 @@ class TomogramGhostbuster:
         sparsity: float | None = None,
         epochs: int = 5,
         batchsize: int = 1,
-        scattering_model: ScatteringModel = "multislice",
-        aberration_backend: Literal["legacy", "torch_ctf"] = "legacy",
-        lpp_params: dict[str, float] | None = None,
-        klim: float | None = None,
-        alpha: float = 0.0,
+        propagation: Propagation = Propagation(),
+        optics: Optics = Optics(),
         taper_width: int = 0,
         z_taper_width: int = 0,
         use_fov_mask: bool = True,
@@ -162,11 +150,8 @@ class TomogramGhostbuster:
         self.sparsity = sparsity
         self.epochs = epochs
         self.batchsize = batchsize
-        self.scattering_model = scattering_model
-        self.aberration_backend = aberration_backend
-        self.lpp_params = lpp_params
-        self.klim = klim
-        self.alpha = alpha
+        self.propagation = propagation
+        self.optics = optics
         self.taper_width = taper_width
         self.z_taper_width = z_taper_width
         self.use_fov_mask = use_fov_mask
@@ -246,7 +231,6 @@ class TomogramGhostbuster:
         images: torch.Tensor,
         volume_init: torch.Tensor,
         voxel_size: float,
-        scattering_model: ScatteringModel,
         batchsize: int,
     ) -> tuple["TomogramReconstructor", torch.utils.data.DataLoader]:
         n_tilts = images.shape[0]
@@ -271,11 +255,8 @@ class TomogramGhostbuster:
             taper_width=self.taper_width,
             z_taper_width=self.z_taper_width,
             use_fov_mask=self.use_fov_mask,
-            scattering_model=scattering_model,
-            aberration_backend=self.aberration_backend,
-            lpp_params=self.lpp_params,
-            klim=self.klim,
-            alpha=self.alpha,
+            propagation=self.propagation,
+            optics=self.optics,
             scheduler=self.scheduler,
             slice_batchsize=self.slice_batchsize,
             run_dir=self.run_dir,
@@ -315,15 +296,11 @@ class TomogramGhostbuster:
         _device_str = f"GPU {device}" if use_gpu else "CPU"
         print(
             f"Starting reconstruction: {n_tilts} tilts  |  "
-            f"volume {nz}×{nxy}×{nxy}  |  {self.scattering_model}  |  "
+            f"volume {nz}×{nxy}×{nxy}  |  {self.propagation.scattering_model}  |  "
             f"{self.epochs} epochs  |  batch {self.batchsize}  |  {_device_str}"
         )
         model, loader = self._build_reconstructor_and_loader(
-            self._images,
-            self._volume_init,
-            self._voxel_size,
-            self.scattering_model,
-            self.batchsize,
+            self._images, self._volume_init, self._voxel_size, self.batchsize
         )
         trainer = build_trainer(use_gpu, device, self.epochs, self.precision, callbacks)
         trainer.fit(model, loader)
@@ -379,11 +356,7 @@ class TomogramGhostbuster:
         )
 
         model, loader = self._build_reconstructor_and_loader(
-            images_binned,
-            V_b,
-            voxel_size_binned,
-            self.scattering_model,
-            self.batchsize,
+            images_binned, V_b, voxel_size_binned, self.batchsize
         )
         use_gpu, device = resolve_device(device)
         trainer = build_trainer(use_gpu, device, 1, "32", callbacks)

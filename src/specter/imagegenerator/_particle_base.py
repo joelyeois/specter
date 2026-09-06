@@ -12,6 +12,7 @@ from ..ice._blend import IceSlabBlender
 from ..potential import (
     FULL_OCCUPANCY_POTENTIAL_V,
 )
+from ..scattering import Scattering
 from ._base import BaseImager
 
 __all__ = ["ParticleGeneratorBase"]
@@ -72,6 +73,20 @@ class ParticleGeneratorBase(BaseImager):
 
     quaternions: torch.Tensor
     translations: torch.Tensor
+
+    def _build_scattering(self) -> Scattering:
+        """The whole-volume propagator, from ``self.propagation``."""
+        return Scattering(
+            self.pad_nxy,
+            self.pixel_size,
+            self.voltage,
+            scattering_model=self.scattering_model,
+            klim=self.klim,
+            ews_curvature_sign=self.ews_curvature_sign,
+            nz=self.nz,
+            alpha=self.alpha,
+            progressbars=self.progressbars,
+        )
 
     def solvate(
         self, V: torch.Tensor, potential_scale: torch.Tensor | float = 1.0
@@ -252,7 +267,7 @@ class ParticleGeneratorBase(BaseImager):
 
         if self.verbose:
             logger.info(f"Applying aberrations using {self.aberration_model} model")
-        self.detector_waves = self.aberration(self.exitwaves, self._ctf_batch(idx))
+        self.detector_waves = self._aberrate(self.exitwaves, self._ctf_batch(idx))
 
         if self.verbose:
             logger.info(f"Applying detector and noise using {self.noise_model} model")

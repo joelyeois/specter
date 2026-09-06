@@ -59,6 +59,7 @@ from specter.config import (
 )
 
 from ..devices import parse_device, resolve_available_device
+from ..settings import Propagation, bundle_from_config
 from specter.progress import console, format_elapsed, section
 from ._common import (
     resolve_output_dir,
@@ -74,6 +75,11 @@ _NON_GHOSTBUSTER_FIELDS = frozenset(
         "project",
         "job_id",
         "output_dir",
+        # Propagation fields; collapsed into one `propagation` argument below.
+        "scattering_model",
+        "ews_curvature_sign",
+        "klim",
+        "rotate_mode",
     }
 )
 
@@ -106,6 +112,8 @@ def _ghostbuster_kwargs(config: ReconstructionConfig) -> dict[str, Any]:
     kwargs["cryosparc_ref"] = cryosparc_ref_for_halfset(
         config.cryosparc_ref, config.halfset
     )
+    # alpha is read from the .cs file by Ghostbuster; the config carries none.
+    kwargs["propagation"] = bundle_from_config(Propagation, config)
     return kwargs
 
 

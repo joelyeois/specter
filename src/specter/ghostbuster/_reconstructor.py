@@ -397,7 +397,6 @@ class Reconstructor(_BaseReconstructor):
             propagation=self.propagation,
             optics=self.optics,
             camera=Camera(noise_model=None),
-            ice_model=None,
             bfactor=bfactor,
         )
 

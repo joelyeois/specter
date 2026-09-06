@@ -12,7 +12,7 @@ from specter.aberrations._functions import (
     tetrafoil,
     trefoil,
 )
-from specter.settings import Camera, Propagation
+from specter.settings import Camera, Ice, Propagation
 
 # Representative 300 kV imaging parameters, in specter's Angstrom-based units.
 WAVELENGTH = 0.0197
@@ -227,11 +227,11 @@ def test_defocus_increases_with_z():
             300.0,
             torch.tensor([100.0]),
             volume=V,
-            ice_model=None,
             verbose=False,
             progressbars=False,
             propagation=Propagation(scattering_model="multislice", alpha=0.1),
             camera=Camera(noise_model=None),
+            ice=Ice(model=None),
         )
         with torch.no_grad():
             return model(torch.tensor([0]))[0].detach()

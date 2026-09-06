@@ -30,6 +30,7 @@ from specter.devices import parse_device, resolve_available_device
 from specter.settings import (
     Camera,
     Envelopes,
+    Ice,
     Propagation,
     TiltGeometry,
     bundle_from_config,
@@ -188,8 +189,6 @@ def run_tilt_series(
         "dfu": torch.tensor([config.defocus]),
     }
 
-    ice_model = None if config.ice_model == "none" else config.ice_model
-
     model = TiltSeriesGenerator(
         volume.unsqueeze(0),  # add batch dim: (1, Z, Y, X)
         micrograph_size,
@@ -201,10 +200,9 @@ def run_tilt_series(
         propagation=bundle_from_config(Propagation, config),
         envelopes=bundle_from_config(Envelopes, config, cc=cc_angstrom),
         camera=bundle_from_config(Camera, config),
-        ice_model=ice_model,
-        ice_cache_dir=config.ice_cache_dir,
-        ice_relax_steps=config.ice_relax_steps,
-        ice_parameterization=config.bulk_scattering_factors,
+        ice=bundle_from_config(
+            Ice, config, prefix="ice_", parameterization=config.bulk_scattering_factors
+        ),
         bfactor=config.bfactor,
         tilt=bundle_from_config(TiltGeometry, config),
         coincidence_radius=config.coincidence_radius,
@@ -254,7 +252,7 @@ def run_tilt_series(
         )
 
         if config.save_exitwaves:
-            ew_prefix = "exitwave" if ice_model is not None else "clean_exitwave"
+            ew_prefix = "exitwave" if model.ice.model is not None else "clean_exitwave"
             section(f"Saving {ew_prefix.replace('_', ' ')}")
             _save_exitwave_pair(
                 exitwaves,

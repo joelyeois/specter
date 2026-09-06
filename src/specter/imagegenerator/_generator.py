@@ -13,12 +13,12 @@ from ..crowding import CrowdWithDuplicates
 from ..ice import IceBank, RandomIcemaker, resolve_icemaker
 from ..potential import PotentialBuilder
 from ..rotations import VolumeRotator, translate_coordinates
-from ..settings import Camera, Envelopes, Optics, Propagation
+from ..settings import Camera, Envelopes, Ice, Optics, Propagation
 from ._base import compute_nz, pad_volume
 from ._micrograph import MicrographGenerator
 from ._particle_base import ParticleGeneratorBase
 from ._tiltseries import TiltSeriesGenerator
-from specter.options import ConvBackend, IceModel, ScatteringFactors
+from specter.options import ConvBackend
 
 
 __all__ = [
@@ -69,33 +69,14 @@ class ImageGeneratorFromCoordinates(ParticleGeneratorBase):
         Coherence and radiation-damage envelopes. Default ``Envelopes()``.
     camera : Camera, optional
         The detector chain. Default ``Camera()``.
-    ice_model : str, optional
-        Ice generation algorithm: ``'gd'`` (samples from the pre-generated
-        :class:`~specter.ice.IceBank` cache) or ``'random'`` (instant, cheap
-        :class:`~specter.ice.RandomIcemaker` placement -- no realism, useful
-        as a fast baseline/smoke test). Ignored when ``icemaker`` is provided.
-    ice_thickness : float, optional
-        Thickness of ice in Å.
-    ice_cache_dir : str, optional
-        Directory of cached ice configs for ``ice_model='gd'`` (see
-        :func:`specter.ice.build_ice_cache`). Defaults to the bundled
-        ``ice_data/ice_cache``. Ignored for other ``ice_model`` values or
-        when ``icemaker`` is provided.
+    ice : Ice, optional
+        The amorphous ice the particle is embedded in: model, thickness,
+        library, seam relaxation and scattering factors. Default ``Ice()``,
+        no ice.
     icemaker : IceBank or RandomIcemaker, optional
-        A pre-built icemaker instance to reuse across multiple
-        ``ImageGenerator`` instances. When supplied, ``ice_model`` and
-        ``ice_cache_dir`` are both ignored. ``ice_thickness`` is still
-        respected for computing ``nz``.
-    ice_relax_steps : int, optional
-        Forwarded to :meth:`~specter.ice.IceBank.generate_big_ice` when
-        ``ice_model='gd'`` (or an ``IceBank`` ``icemaker``): number of local
-        MLBOP relaxation steps used to heal tile seams. Default 0 (no
-        relaxation). Ignored for ``RandomIcemaker``.
-    ice_parameterization : str, optional
-        Atomic scattering-factor parameterization for the ice kernel.
-        Default 'shtyrov', matching this class's own potential-building
-        default so the structure and the ice around it are modelled the same
-        way. Ignored when ``icemaker`` is provided.
+        A pre-built icemaker instance to reuse across generators. When
+        supplied, ``ice.model`` and ``ice.cache_dir`` are ignored;
+        ``ice.thickness`` still sizes the column.
     crowd_min_distance : float, optional
         Crowding minimum distance.
     crowd_max_distance_z : float, optional
@@ -141,12 +122,8 @@ class ImageGeneratorFromCoordinates(ParticleGeneratorBase):
         optics: Optics | None = Optics(),
         envelopes: Envelopes = Envelopes(),
         camera: Camera = Camera(),
-        ice_model: IceModel | None = None,
-        ice_thickness: float | None = None,
-        ice_cache_dir: str | None = None,
+        ice: Ice = Ice(),
         icemaker: IceBank | RandomIcemaker | None = None,
-        ice_relax_steps: int = 0,
-        ice_parameterization: ScatteringFactors = "kirkland",
         crowd_min_distance: float | None = None,
         crowd_max_distance_z: float | None = None,
         crowd_chunk_size: int = 1,
@@ -158,12 +135,13 @@ class ImageGeneratorFromCoordinates(ParticleGeneratorBase):
         bfactor: float | torch.Tensor | None = None,
     ):
         self.pad_fft = propagation.pad_fft
-        self.ice_thickness = ice_thickness
-        self.ice_relax_steps = ice_relax_steps
+        self.ice = ice
+        self.ice_thickness = ice.thickness
+        self.ice_relax_steps = ice.relax_steps
         self.nxy = nxy
 
         self.pad_nxy = nxy + (nxy // 2) * 2 if self.pad_fft else nxy
-        self.nz = compute_nz(self.nxy, ice_thickness, pixel_size)
+        self.nz = compute_nz(self.nxy, ice.thickness, pixel_size)
 
         super().__init__(
             pixel_size=pixel_size,
@@ -183,9 +161,9 @@ class ImageGeneratorFromCoordinates(ParticleGeneratorBase):
             coincidence_radius=coincidence_radius,
             bfactor=bfactor,
         )
-        self.ice_model = ice_model
+        self.ice_model = ice.model
         # The TEMPLATE's depth, not `self.nz * pixel_size`: the neighbour slab
-        # must not follow `ice_thickness`. See the constructor docstring. The
+        # must not follow `ice.thickness`. See the constructor docstring. The
         # two agree until the ice is deeper than the box, which is what makes
         # this a no-op for every run that was not growing its crowding.
         self.crowd_max_distance_z = (
@@ -237,13 +215,13 @@ class ImageGeneratorFromCoordinates(ParticleGeneratorBase):
                 chunk_size=crowd_chunk_size,
             )
 
-        self.ice_parameterization = ice_parameterization
+        self.ice_parameterization = ice.parameterization
         self.icemaker: IceBank | RandomIcemaker | None = resolve_icemaker(
             self.ice_model,
             pixel_size,
             self.nxy,
             self.nz,
-            ice_cache_dir=ice_cache_dir,
+            ice_cache_dir=ice.cache_dir,
             icemaker=icemaker,
             parameterization=self.ice_parameterization,
         )
@@ -363,28 +341,14 @@ class ImageGenerator(ParticleGeneratorBase):
         Coherence and radiation-damage envelopes. Default ``Envelopes()``.
     camera : Camera, optional
         The detector chain. Default ``Camera()``.
-    ice_model : str, optional
-        Ice generation algorithm: ``'gd'`` (samples from the pre-generated
-        :class:`~specter.ice.IceBank` cache) or ``'random'`` (instant, cheap
-        :class:`~specter.ice.RandomIcemaker` placement -- no realism, useful
-        as a fast baseline/smoke test). Ignored when ``icemaker`` is provided.
-    ice_thickness : float, optional
-        Ice thickness in Å.
-    ice_cache_dir : str, optional
-        Directory of cached ice configs for ``ice_model='gd'`` (see
-        :func:`specter.ice.build_ice_cache`). Defaults to the bundled
-        ``ice_data/ice_cache``. Ignored for other ``ice_model`` values or
-        when ``icemaker`` is provided.
+    ice : Ice, optional
+        The amorphous ice the particle is embedded in: model, thickness,
+        library, seam relaxation and scattering factors. Default ``Ice()``,
+        no ice.
     icemaker : IceBank or RandomIcemaker, optional
-        A pre-built icemaker instance to reuse across multiple
-        ``ImageGeneratorFromCoordinates`` instances. When supplied,
-        ``ice_model`` and ``ice_cache_dir`` are both ignored. ``ice_thickness``
-        is still respected for computing ``nz``.
-    ice_relax_steps : int, optional
-        Forwarded to :meth:`~specter.ice.IceBank.generate_big_ice` when
-        ``ice_model='gd'`` (or an ``IceBank`` ``icemaker``): number of local
-        MLBOP relaxation steps used to heal tile seams. Default 0 (no
-        relaxation). Ignored for ``RandomIcemaker``.
+        A pre-built icemaker instance to reuse across generators. When
+        supplied, ``ice.model`` and ``ice.cache_dir`` are ignored;
+        ``ice.thickness`` still sizes the column.
     crowd_min_distance : float, optional
         Crowding minimum distance.
     crowd_max_distance_z : float, optional
@@ -423,10 +387,6 @@ class ImageGenerator(ParticleGeneratorBase):
         Default False.
     progressbars : bool, optional
         Whether to show progress bars. Default True.
-    ice_parameterization : str, optional
-        Atomic potential parameterization used to build the ice kernel:
-        ``'kirkland'``, ``'lobato'``, or ``'shtyrov'``. Default ``'shtyrov'``,
-        matching :class:`~specter.potential.PotentialBuilder`'s own default.
     bfactor : float or torch.Tensor or None, optional
         Isotropic B-factor envelope in Å² applied in the microscope transfer
         function. None or 0.0 means no envelope. Default None.
@@ -446,11 +406,8 @@ class ImageGenerator(ParticleGeneratorBase):
         optics: Optics | None = Optics(),
         envelopes: Envelopes = Envelopes(),
         camera: Camera = Camera(),
-        ice_model: IceModel | None = None,
-        ice_thickness: float | None = None,
-        ice_cache_dir: str | None = None,
+        ice: Ice = Ice(),
         icemaker: IceBank | RandomIcemaker | None = None,
-        ice_relax_steps: int = 0,
         crowd_min_distance: float | None = None,
         crowd_max_distance_z: float | None = None,
         crowd_max_distance_xy: float | None = None,
@@ -462,19 +419,19 @@ class ImageGenerator(ParticleGeneratorBase):
         water_air_interface: bool = False,
         progressbars: bool = True,
         verbose: bool = True,
-        ice_parameterization: ScatteringFactors = "kirkland",
         coincidence_radius: float | torch.Tensor = 0.0,
         potential_scale: float | torch.Tensor = 1.0,
         bfactor: float | torch.Tensor | None = None,
     ):
         nxy = scattering_potential.shape[-1]
         self.pad_fft = propagation.pad_fft
-        self.ice_thickness = ice_thickness
-        self.ice_relax_steps = ice_relax_steps
+        self.ice = ice
+        self.ice_thickness = ice.thickness
+        self.ice_relax_steps = ice.relax_steps
         self.pad_nxy = nxy + (nxy // 2) * 2 if self.pad_fft else nxy
 
         volume_nz = scattering_potential.shape[0]
-        self.nz = compute_nz(volume_nz, ice_thickness, pixel_size)
+        self.nz = compute_nz(volume_nz, ice.thickness, pixel_size)
 
         super().__init__(
             pixel_size=pixel_size,
@@ -496,10 +453,10 @@ class ImageGenerator(ParticleGeneratorBase):
             bfactor=bfactor,
         )
 
-        self.ice_parameterization = ice_parameterization
-        self.ice_model = ice_model
+        self.ice_parameterization = ice.parameterization
+        self.ice_model = ice.model
         # The TEMPLATE's depth, not `self.nz * pixel_size`: the neighbour slab
-        # must not follow `ice_thickness`. See the constructor docstring. The
+        # must not follow `ice.thickness`. See the constructor docstring. The
         # two agree until the ice is deeper than the box, which is what makes
         # this a no-op for every run that was not growing its crowding.
         self.crowd_max_distance_z = (
@@ -541,7 +498,7 @@ class ImageGenerator(ParticleGeneratorBase):
             pixel_size,
             self.nxy,
             self.nz,
-            ice_cache_dir=ice_cache_dir,
+            ice_cache_dir=ice.cache_dir,
             icemaker=icemaker,
             parameterization=self.ice_parameterization,
             progressbars=self.progressbars,

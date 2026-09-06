@@ -17,9 +17,8 @@ from ..ice import (
 )
 from ..progress import status
 from ..scattering import IterativeScattering
-from ..settings import Camera, Envelopes, Optics, Propagation
+from ..settings import Camera, Envelopes, Ice, Optics, Propagation
 from ..specimen import MicrographSpecimenGenerator
-from specter.options import IceModel, ScatteringFactors
 
 
 class MicrographGenerator(BaseImager):
@@ -70,46 +69,17 @@ class MicrographGenerator(BaseImager):
         the volume's Z extent is fixed by ``volume`` itself.
     anisomag : torch.Tensor, optional
         Anisotropic magnification matrices, shape (n, 2, 2).
-    ice_model : str, optional
-        Ice generation algorithm: ``'gd'`` (samples from the pre-generated
-        :class:`~specter.ice.IceBank` cache) or ``'random'`` (instant, cheap
-        :class:`~specter.ice.RandomIcemaker` placement). Used by
-        ``MicrographSpecimenGenerator`` when ``scattering_potential`` is given, or
-        blended directly into ``volume`` when ``volume`` is given (see above).
-        Ignored when ``icemaker`` is provided.
-    ice_thickness : float, optional
-        Ice thickness in Å passed to ``MicrographSpecimenGenerator``. Ignored when
-        ``volume`` is given, or when ``ice_profile`` is given.
-    ice_profile : IceProfile, optional
-        Laterally varying ice thickness -- a wedge, a meniscus, or a tilted
-        slab -- replacing the uniform slab ``ice_thickness`` describes. Sets
-        ``nz`` from its thickest column via
-        :meth:`~specter.ice.IceProfile.required_nz`, confines the ice to the
-        profile, gates particle placement on each column's own slab, and
-        references defocus to the specimen's entry face rather than the box's
-        (see :meth:`~specter.ice.IceProfile.entry_face_shift`).
-
-        Note that multislice runs one full-plane FFT per slice whether or not
-        the slice holds anything, so a profile costs what its *thickest*
-        column costs over the whole field. Honored on the ``volume`` path too,
-        where it confines the blended-in ice but cannot change ``volume``'s own
-        Z extent. Default None.
-    ice_cache_dir : str, optional
-        Directory of cached ice configs for ``ice_model='gd'`` (see
-        :func:`specter.ice.build_ice_cache`). Defaults to the bundled
-        ``ice_data/ice_cache``. Ignored for other ``ice_model`` values or
-        when ``icemaker`` is provided.
+    ice : Ice, optional
+        The amorphous ice: model, thickness (or a laterally varying
+        ``profile``), library, seam relaxation and scattering factors.
+        Used by ``MicrographSpecimenGenerator`` when ``scattering_potential``
+        is given, or blended into ``volume`` at construction when ``volume``
+        is given (``thickness`` is then ignored, since the volume's Z extent
+        is fixed; a ``profile`` still confines the ice). Default ``Ice()``,
+        no ice.
     icemaker : IceBank or RandomIcemaker, optional
-        A pre-built icemaker instance to reuse across multiple generator
-        instances. When supplied, ``ice_model`` and ``ice_cache_dir`` are
-        both ignored. Honored both when ``scattering_potential`` is given
-        (forwarded to ``MicrographSpecimenGenerator``) and when ``volume`` is given
-        (blended directly into ``volume``, see above).
-    ice_relax_steps : int, optional
-        Forwarded to :meth:`~specter.ice.IceBank.generate_big_ice` when
-        ``ice_model='gd'`` (or an ``IceBank`` ``icemaker``): number of local
-        MLBOP relaxation steps used to heal tile seams. Default 0 (no
-        relaxation). Ignored for ``RandomIcemaker``.
+        A pre-built icemaker instance to reuse across generator instances.
+        When supplied, ``ice.model`` and ``ice.cache_dir`` are ignored.
     crowd_min_distance : float, optional
         Minimum inter-particle distance in Å for crowding.
     crowd_max_distance_z : float, optional
@@ -186,13 +156,8 @@ class MicrographGenerator(BaseImager):
         optics: Optics | None = Optics(),
         envelopes: Envelopes = Envelopes(),
         camera: Camera = Camera(),
-        ice_model: IceModel | None = None,
-        ice_thickness: float | None = None,
-        ice_profile: IceProfile | None = None,
-        ice_cache_dir: str | None = None,
-        ice_parameterization: ScatteringFactors = "kirkland",
+        ice: Ice = Ice(),
         icemaker: IceBank | RandomIcemaker | None = None,
-        ice_relax_steps: int = 0,
         crowd_min_distance: float | None = None,
         packing_backend: Literal["poisson_disk", "shape"] = "poisson_disk",
         atom_coordinates: torch.Tensor | None = None,
@@ -231,6 +196,10 @@ class MicrographGenerator(BaseImager):
         self.pad_fft = propagation.pad_fft
         self.pad_nxy = nxy + (nxy // 2) * 2 if self.pad_fft else nxy
 
+        self.ice = ice
+        ice_model = ice.model
+        ice_thickness = ice.thickness
+        ice_profile: IceProfile | None = ice.profile
         self.ice_profile = ice_profile
 
         if volume is not None:
@@ -312,9 +281,9 @@ class MicrographGenerator(BaseImager):
                 pixel_size,
                 nxy=volume.shape[-1],
                 nz=volume.shape[-3],
-                ice_cache_dir=ice_cache_dir,
+                ice_cache_dir=ice.cache_dir,
                 icemaker=icemaker,
-                parameterization=ice_parameterization,
+                parameterization=ice.parameterization,
             )
             if volume_icemaker is not None:
                 if self.verbose:
@@ -327,7 +296,7 @@ class MicrographGenerator(BaseImager):
                         volume,
                         volume_icemaker,
                         pixel_size,
-                        relax_steps=ice_relax_steps,
+                        relax_steps=ice.relax_steps,
                         profile=ice_profile,
                     )
             self.register_buffer("volume", volume)
@@ -347,12 +316,8 @@ class MicrographGenerator(BaseImager):
                 packing_stall_patience=packing_stall_patience,
                 packing_seed=packing_seed,
                 n_candidates=n_candidates,
-                ice_model=ice_model,
-                ice_thickness=ice_thickness,
-                ice_profile=ice_profile,
-                ice_cache_dir=ice_cache_dir,
+                ice=ice,
                 icemaker=icemaker,
-                ice_relax_steps=ice_relax_steps,
                 water_air_interface=water_air_interface,
                 sigma_frac=sigma_frac,
                 peak_amplitude=peak_amplitude,

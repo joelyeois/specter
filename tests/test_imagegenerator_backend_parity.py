@@ -14,7 +14,7 @@ from specter.imagegenerator import (
     MicrographGenerator,
     TiltSeriesGenerator,
 )
-from specter.settings import Camera, Optics, Propagation, TiltGeometry
+from specter.settings import Camera, Ice, Optics, Propagation, TiltGeometry
 
 
 @pytest.fixture
@@ -47,12 +47,12 @@ def _build(small_volume, ctf_params, aberration_backend, seed=0):
         ctf_params=ctf_params,
         voltage=300.0,
         dose_per_angstrom=2.0,
-        ice_model=None,
         verbose=False,
         progressbars=False,
         propagation=Propagation(scattering_model="multislice", alpha=0.1),
         optics=Optics(aberration_backend=aberration_backend),
         camera=Camera(noise_model=None),
+        ice=Ice(model=None),
     )
     torch.manual_seed(seed)
     return gen(torch.tensor([0, 1]))
@@ -114,12 +114,12 @@ def test_ctf_scattering_model_selects_linear_aberration_model_both_backends(
             ctf_params=ctf_params,
             voltage=300.0,
             dose_per_angstrom=2.0,
-            ice_model=None,
             verbose=False,
             progressbars=False,
             propagation=Propagation(scattering_model="ctf", alpha=0.0),
             optics=Optics(aberration_backend=backend),
             camera=Camera(noise_model=None),
+            ice=Ice(model=None),
         )
         assert gen.aberration_model == "linear"
         torch.manual_seed(0)
@@ -171,12 +171,12 @@ def test_real_csfile_particles_match_across_backends_end_to_end(small_volume):
             ctf_params=ctf_params,
             voltage=float(voltage_kv),
             dose_per_angstrom=2.0,
-            ice_model=None,
             verbose=False,
             progressbars=False,
             propagation=Propagation(scattering_model="multislice", alpha=float(alpha)),
             optics=Optics(aberration_backend=backend),
             camera=Camera(noise_model=None),
+            ice=Ice(model=None),
         )
         torch.manual_seed(0)
         return gen(torch.arange(5))
@@ -205,12 +205,12 @@ def test_micrograph_generator_matches_across_backends(
             ctf_params=realistic_ctf_params,
             voltage=300.0,
             dose_per_angstrom=2.0,
-            ice_model=None,
             verbose=False,
             progressbars=False,
             propagation=Propagation(scattering_model="projection", alpha=0.1),
             optics=Optics(aberration_backend=backend),
             camera=Camera(noise_model=None),
+            ice=Ice(model=None),
         )
         torch.manual_seed(0)
         return gen(torch.tensor([0]))
@@ -240,13 +240,13 @@ def test_tilt_series_generator_matches_across_backends(realistic_ctf_params):
             voltage=300.0,
             dose_per_angstrom=2.0,
             angles=angles,
-            ice_model=None,
             verbose=False,
             progressbars=False,
             propagation=Propagation(scattering_model="projection", alpha=0.1),
             optics=Optics(aberration_backend=backend),
             camera=Camera(noise_model=None),
             tilt=TiltGeometry(tilt_axis="y"),
+            ice=Ice(model=None),
         )
         torch.manual_seed(0)
         tilt_series, _, _ = gen.generate_tilt_series(torch.tensor([0]))
@@ -289,12 +289,12 @@ def test_lpp_params_end_to_end_through_image_generator(small_volume):
             ctf_params=ctf_params,
             voltage=300.0,
             dose_per_angstrom=2.0,
-            ice_model=None,
             verbose=False,
             progressbars=False,
             propagation=Propagation(scattering_model="multislice", alpha=0.1),
             optics=Optics(aberration_backend="torch_ctf", lpp_params=lpp_params),
             camera=Camera(noise_model=None),
+            ice=Ice(model=None),
         )
         torch.manual_seed(0)
         return gen(torch.tensor([0]))
@@ -319,10 +319,10 @@ def test_lpp_params_with_legacy_backend_raises(small_volume):
             ctf_params={"dfu": torch.tensor([5000.0]), "cs": torch.tensor([2.7e7])},
             voltage=300.0,
             dose_per_angstrom=2.0,
-            ice_model=None,
             verbose=False,
             progressbars=False,
             propagation=Propagation(scattering_model="multislice", alpha=0.1),
             optics=Optics(lpp_params=_LPP_PARAMS),
             camera=Camera(noise_model=None),
+            ice=Ice(model=None),
         )

@@ -22,7 +22,7 @@ from specter.imagegenerator import (
     MicrographGenerator,
     TiltSeriesGenerator,
 )
-from specter.settings import Camera, Envelopes, Propagation, TiltGeometry
+from specter.settings import Camera, Envelopes, Ice, Propagation, TiltGeometry
 
 # These fixtures predate `coincidence_radius` being rescaled to mean a true
 # effective exclusion radius (exclusion area pi*r^2, rather than the old
@@ -67,13 +67,13 @@ def test_image_generator_regression(small_volume, ctf_params, save_or_compare):
         ctf_params=ctf_params,
         voltage=300.0,
         dose_per_angstrom=2.0,
-        ice_model="random",
         coincidence_radius=_CR,
         crowd_min_distance=60.0,
         verbose=False,
         progressbars=False,
         propagation=Propagation(scattering_model="multislice", alpha=0.1),
         camera=Camera(noise_model="poisson", n_frames=10, detector_model="k3_300kv"),
+        ice=Ice(model="random"),
     )
     torch.manual_seed(0)
     images = gen(torch.tensor([0]))
@@ -96,12 +96,12 @@ def test_image_generator_from_coordinates_regression(
         ctf_params=ctf_params,
         voltage=300.0,
         dose_per_angstrom=2.0,
-        ice_model="random",
         coincidence_radius=_CR,
         crowd_min_distance=40.0,
         verbose=False,
         propagation=Propagation(scattering_model="multislice", alpha=0.1),
         camera=Camera(noise_model="poisson", n_frames=10),
+        ice=Ice(model="random"),
     )
     torch.manual_seed(0)
     images = gen(torch.tensor([0]))
@@ -118,13 +118,13 @@ def test_micrograph_generator_regression(small_volume, ctf_params, save_or_compa
         ctf_params=ctf_params,
         voltage=300.0,
         dose_per_angstrom=2.0,
-        ice_model="random",
         coincidence_radius=_CR,
         crowd_min_distance=60.0,
         verbose=False,
         progressbars=False,
         propagation=Propagation(scattering_model="projection", alpha=0.1),
         camera=Camera(noise_model="poisson", n_frames=10),
+        ice=Ice(model="random"),
     )
     torch.manual_seed(0)
     images = gen(torch.tensor([0]))
@@ -172,9 +172,9 @@ def test_micrograph_generator_blends_ice_into_prebuilt_volume(
         ctf_params=ctf_params,
         voltage=300.0,
         dose_per_angstrom=2.0,
-        ice_model="random",
         verbose=False,
         progressbars=False,
+        ice=Ice(model="random"),
     )
 
     # Same shape as the input volume -- ice fills the existing volume, doesn't grow it.
@@ -251,10 +251,10 @@ def test_tilt_series_generator_blends_ice_into_volume(ctf_params):
         voltage=300.0,
         dose_per_angstrom=2.0,
         angles=torch.tensor([0.0]),
-        ice_model="random",
         verbose=False,
         progressbars=False,
         tilt=TiltGeometry(tilt_axis="y"),
+        ice=Ice(model="random"),
     )
 
     # No tilt-coverage padding triggered at this geometry (available_nxy already
@@ -377,7 +377,6 @@ def test_image_generator_ctf_scattering_model_gets_amp_contrast_by_default(
         voltage=300.0,
         dose_per_angstrom=2.0,
         camera=Camera(noise_model=None),
-        ice_model=None,
         progressbars=False,
     )
     model_alpha_0 = ImageGenerator(
@@ -407,10 +406,10 @@ def test_image_generator_multislice_scattering_model_keeps_specimen_absorption()
         ctf_params={"dfu": torch.tensor([5000.0]), "cs": torch.tensor([2.7])},
         voltage=300.0,
         dose_per_angstrom=2.0,
-        ice_model=None,
         progressbars=False,
         propagation=Propagation(scattering_model="multislice", alpha=0.1),
         camera=Camera(noise_model=None, detector_model=None),
+        ice=Ice(model=None),
     )
     assert model.aberration_model == "nonlinear"
     assert model.aberration.specimen_absorption is True
@@ -980,10 +979,10 @@ def test_from_coordinates_translation_is_in_angstrom(
         ctf_params=ctf_params,
         voltage=300.0,
         dose_per_angstrom=2.0,
-        ice_model=None,
         verbose=False,
         propagation=Propagation(scattering_model="projection"),
         camera=Camera(noise_model=None),
+        ice=Ice(model=None),
     )
 
     identity = torch.tensor([[1.0, 0.0, 0.0, 0.0]])
@@ -1035,7 +1034,6 @@ def test_from_coordinates_and_volume_paths_agree(small_coords, ctf_params):
         dose_per_angstrom=2.0,
         camera=Camera(noise_model=None),
         propagation=Propagation(scattering_model="projection"),
-        ice_model=None,
         verbose=False,
     )
 
@@ -1077,12 +1075,12 @@ def test_micrograph_volume_falls_back_to_host_when_it_does_not_fit(
         ctf_params=ctf_params,
         voltage=300.0,
         dose_per_angstrom=2.0,
-        ice_model="random",
         crowd_min_distance=60.0,
         verbose=False,
         progressbars=False,
         propagation=Propagation(scattering_model="projection", alpha=0.1),
         camera=Camera(noise_model="none"),
+        ice=Ice(model="random"),
     )
 
     calls = {"n": 0}
@@ -1143,13 +1141,13 @@ def test_micrograph_unit_potential_scale_skips_the_extra_volume_copy(
             ctf_params=ctf_params,
             voltage=300.0,
             dose_per_angstrom=2.0,
-            ice_model="random",
             crowd_min_distance=60.0,
             potential_scale=scale,
             verbose=False,
             progressbars=False,
             propagation=Propagation(scattering_model="projection", alpha=0.1),
             camera=Camera(noise_model="none"),
+            ice=Ice(model="random"),
         )
         torch.manual_seed(0)
         return gen(torch.tensor([0]))
@@ -1226,8 +1224,7 @@ def test_both_generators_forward_ice_parameterization(
         ctf_params=ctf_params,
         voltage=300.0,
         dose_per_angstrom=2.0,
-        ice_model="random",
-        ice_parameterization="lobato",
+        ice=Ice(model="random", parameterization="lobato"),
         verbose=False,
     )
     from_coords = ImageGeneratorFromCoordinates(
@@ -1265,7 +1262,7 @@ def test_sibling_generators_agree_on_their_shared_ice_defaults(
         ctf_params=ctf_params,
         voltage=300.0,
         dose_per_angstrom=2.0,
-        ice_model="random",
+        ice=Ice(model="random"),
         verbose=False,
     )
     from_coords = ImageGeneratorFromCoordinates(
@@ -1309,11 +1306,10 @@ def test_crowding_slab_does_not_follow_ice_thickness(
         ctf_params=ctf_params,
         voltage=300.0,
         dose_per_angstrom=2.0,
-        ice_model=None,
-        ice_thickness=ice_thickness,
         crowd_min_distance=60.0,
         verbose=False,
         progressbars=False,
+        ice=Ice(model=None, thickness=ice_thickness),
     )
     assert gen.crowd.max_distance_z == small_volume.shape[0] * 2.0
     # The canvas itself still grows, or the knob would do nothing at all.
@@ -1337,10 +1333,9 @@ def test_crowding_slab_from_coordinates_does_not_follow_ice_thickness(
             ctf_params=ctf_params,
             voltage=300.0,
             dose_per_angstrom=2.0,
-            ice_model=None,
-            ice_thickness=ice_thickness,
             crowd_min_distance=60.0,
             verbose=False,
+            ice=Ice(model=None, thickness=ice_thickness),
         )
         slabs.append(gen.crowd.max_distance_z)
     assert slabs == [32 * 2.0, 32 * 2.0]
@@ -1356,11 +1351,10 @@ def test_crowding_slab_is_still_settable(small_volume, ctf_params):
         ctf_params=ctf_params,
         voltage=300.0,
         dose_per_angstrom=2.0,
-        ice_model=None,
-        ice_thickness=2000.0,
         crowd_min_distance=60.0,
         crowd_max_distance_z=500.0,
         verbose=False,
         progressbars=False,
+        ice=Ice(model=None, thickness=2000.0),
     )
     assert gen.crowd.max_distance_z == 500.0

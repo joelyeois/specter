@@ -14,7 +14,7 @@ from ..ice import (
     resolve_icemaker,
 )
 from ..progress import status
-from specter.options import IceModel, ScatteringFactors
+from ..settings import Ice
 
 
 class MicrographSpecimenGenerator(L.LightningModule):
@@ -64,35 +64,15 @@ class MicrographSpecimenGenerator(L.LightningModule):
         Minimum distance between crowding molecules in Å.
     crowd_max_distance_z : float, optional
         Range in Z where crowding molecules are placed.
-    ice_model : str, optional
-        Ice generation algorithm: ``'gd'`` (samples from the pre-generated
-        :class:`~specter.ice.IceBank` cache) or ``'random'`` (instant, cheap
-        :class:`~specter.ice.RandomIcemaker` placement -- no realism, useful
-        as a fast baseline/smoke test). Ignored when ``icemaker`` is provided.
-    ice_cache_dir : str, optional
-        Directory of cached ice configs for ``ice_model='gd'`` (see
-        :func:`specter.ice.build_ice_cache`). Defaults to the bundled
-        ``ice_data/ice_cache``. Ignored for other ``ice_model`` values or
-        when ``icemaker`` is provided.
+    ice : Ice, optional
+        The amorphous ice: model, thickness (or a laterally varying
+        ``profile``, in which case the caller sizes ``nz`` from
+        :meth:`~specter.ice.IceProfile.required_nz` and particle placement
+        is gated on each column's own slab), library, seam relaxation and
+        scattering factors. Default ``Ice()``, no ice.
     icemaker : IceBank or RandomIcemaker, optional
-        A pre-built icemaker instance to reuse across multiple
-        ``MicrographSpecimenGenerator`` instances. When supplied, ``ice_model`` and
-        ``ice_cache_dir`` are both ignored.
-    ice_thickness : float, optional
-        Thickness of the ice layer in Å. Ignored when ``ice_profile`` is given,
-        which carries its own thickness.
-    ice_profile : IceProfile, optional
-        Laterally varying ice thickness (wedge, meniscus, tilted slab). Ice is
-        confined to the profile instead of filling the box, and particle
-        placement is gated on each column's own slab. The caller is
-        responsible for having sized ``nz`` from
-        :meth:`~specter.ice.IceProfile.required_nz`. Default None: a uniform
-        slab filling the box.
-    ice_relax_steps : int, optional
-        Forwarded to :meth:`~specter.ice.IceBank.generate_big_ice` when
-        ``ice_model='gd'`` (or an ``IceBank`` ``icemaker``): number of local
-        MLBOP relaxation steps used to heal tile seams. Default 0 (no
-        relaxation). Ignored for ``RandomIcemaker``.
+        A pre-built icemaker instance to reuse across generators. When
+        supplied, ``ice.model`` and ``ice.cache_dir`` are ignored.
     water_air_interface : bool, optional
         Whether to account for water-air interface in crowding and ice.
     sigma_frac : float, optional
@@ -147,13 +127,8 @@ class MicrographSpecimenGenerator(L.LightningModule):
         scattering_potential: torch.Tensor | None = None,
         crowd_min_distance: float | None = None,
         crowd_max_distance_z: float | None = None,
-        ice_model: IceModel | None = None,
-        ice_thickness: float | None = None,
-        ice_profile: IceProfile | None = None,
-        ice_cache_dir: str | None = None,
+        ice: Ice = Ice(),
         icemaker: IceBank | RandomIcemaker | None = None,
-        ice_relax_steps: int = 0,
-        ice_parameterization: ScatteringFactors = "kirkland",
         water_air_interface: bool = True,
         sigma_frac: float = 0.05,
         peak_amplitude: float = 1.0,
@@ -178,10 +153,11 @@ class MicrographSpecimenGenerator(L.LightningModule):
         self.scattering_potential = scattering_potential
         self.crowd_min_distance = crowd_min_distance
         self.crowd_max_distance_z = crowd_max_distance_z
-        self.ice_model = ice_model
-        self.ice_thickness = ice_thickness
-        self.ice_profile = ice_profile
-        self.ice_relax_steps = ice_relax_steps
+        self.ice = ice
+        self.ice_model = ice.model
+        self.ice_thickness = ice.thickness
+        self.ice_profile: IceProfile | None = ice.profile
+        self.ice_relax_steps = ice.relax_steps
         self.water_air_interface = water_air_interface
         self.progressbars = progressbars
         self.chunk_size = chunk_size
@@ -220,7 +196,7 @@ class MicrographSpecimenGenerator(L.LightningModule):
                 peak_amplitude=peak_amplitude,
                 baseline=baseline,
                 move_to_cpu=move_to_cpu,
-                ice_profile=ice_profile,
+                ice_profile=self.ice_profile,
             )
         else:
             self.crowd = None
@@ -230,9 +206,9 @@ class MicrographSpecimenGenerator(L.LightningModule):
             pixel_size,
             nxy=nxy,
             nz=nz,
-            ice_cache_dir=ice_cache_dir,
+            ice_cache_dir=ice.cache_dir,
             icemaker=icemaker,
-            parameterization=ice_parameterization,
+            parameterization=ice.parameterization,
         )
         if icemaker is not None:
             self.ice_model = icemaker.method

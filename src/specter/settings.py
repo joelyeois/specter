@@ -20,6 +20,7 @@ image formation, and which of them a class accepts says what it models:
 - `Camera`: the detector chain, likewise forward-only.
 - `TiltGeometry`: the tilt axis and edge tapers a tilt series is imaged
   with, shared by `TiltSeriesGenerator` and `TomogramReconstructor`.
+- `Ice`: the amorphous ice a specimen is embedded in, forward-only.
 
 Per-image data (poses, CTF parameters, dose, coincidence radius, potential
 scale) stays as direct tensor arguments, and the two scalars that define
@@ -40,8 +41,10 @@ from typing import Any, Literal, TypeVar
 from specter.options import (
     DetectorModel,
     EwaldSphereSign,
+    IceModel,
     NoiseModel,
     RotateMode,
+    ScatteringFactors,
     ScatteringModel,
     TiltAxis,
 )
@@ -52,6 +55,7 @@ __all__ = [
     "AberrationBackend",
     "Camera",
     "Envelopes",
+    "Ice",
     "Optics",
     "Propagation",
     "TiltGeometry",
@@ -240,10 +244,59 @@ class TiltGeometry:
             raise ValueError("taper_width and z_taper_width must be non-negative")
 
 
+@dataclass(frozen=True)
+class Ice:
+    """
+    The amorphous-ice model a specimen is embedded in.
+
+    Parameters
+    ----------
+    model : IceModel, optional
+        ``"gd"`` draws from the bundled `IceBank` library of optimised ice,
+        ``"random"`` places molecules at random (instant, no structure).
+        Default None (or ``"none"``): no ice.
+    thickness : float, optional
+        Ice thickness in Angstrom. For a particle stack this sizes the
+        column the particle sits in (None: the particle box's own depth);
+        for a micrograph it sizes the specimen slab. A tilt series takes
+        its thickness from the volume it is given and ignores this.
+    profile : IceProfile, optional
+        Laterally varying thickness (wedge, meniscus, tilted slab) for a
+        micrograph, replacing the uniform ``thickness``. Default None.
+    cache_dir : str, optional
+        `IceBank` library directory for ``model="gd"``. Default None, the
+        bundled ``ice_data/ice_cache``.
+    relax_steps : int
+        Local MLBOP relaxation steps healing the seams between tiled
+        `IceBank` crops. Default 0.
+    parameterization : ScatteringFactors
+        Atomic scattering factors for the water kernel. Default
+        ``"kirkland"``; ice is a bulk material, outside the Shtyrov fits'
+        domain (see ``bulk_scattering_factors`` in the configs).
+    """
+
+    model: IceModel | None = None
+    thickness: float | None = None
+    profile: Any = None
+    cache_dir: str | None = None
+    relax_steps: int = 0
+    parameterization: ScatteringFactors = "kirkland"
+
+    def __post_init__(self) -> None:
+        if self.model == "none":
+            object.__setattr__(self, "model", None)
+        if self.thickness is not None and self.thickness < 0:
+            raise ValueError(f"thickness={self.thickness} must be non-negative")
+        if self.relax_steps < 0:
+            raise ValueError(f"relax_steps={self.relax_steps} must be non-negative")
+
+
 _B = TypeVar("_B")
 
 
-def bundle_from_config(bundle_cls: type[_B], config: Any, **overrides: Any) -> _B:
+def bundle_from_config(
+    bundle_cls: type[_B], config: Any, *, prefix: str = "", **overrides: Any
+) -> _B:
     """
     Build a settings group from a flat config's fields of the same names.
 
@@ -254,6 +307,9 @@ def bundle_from_config(bundle_cls: type[_B], config: Any, **overrides: Any) -> _
     config : object
         A config dataclass. Fields the config does not have keep the group's
         own default.
+    prefix : str, optional
+        Prepended to each field name to find it on the config: `Ice`'s
+        ``thickness`` is a config's ``ice_thickness``. Default "".
     **overrides
         Values that take precedence over the config's, for a field whose
         config spelling differs (a unit conversion, a ``"none"`` sentinel, or
@@ -264,9 +320,9 @@ def bundle_from_config(bundle_cls: type[_B], config: Any, **overrides: Any) -> _
     bundle_cls
     """
     values = {
-        f.name: getattr(config, f.name)
+        f.name: getattr(config, prefix + f.name)
         for f in dataclasses.fields(bundle_cls)  # type: ignore[arg-type]
-        if hasattr(config, f.name)
+        if hasattr(config, prefix + f.name)
     }
     values.update(overrides)
     return bundle_cls(**values)

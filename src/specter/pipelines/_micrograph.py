@@ -31,7 +31,7 @@ from specter.io import create_micrograph_starfile
 from specter.pdb import PDB
 from specter.potential import PotentialBuilder
 from specter.devices import resolve_available_device
-from specter.settings import Camera, Envelopes, Propagation, bundle_from_config
+from specter.settings import Camera, Envelopes, Ice, Propagation, bundle_from_config
 from specter.progress import console, format_elapsed, section, track
 
 from ._common import (
@@ -205,9 +205,14 @@ def run_micrograph(config: MicrographConfig) -> None:
         propagation=bundle_from_config(Propagation, config),
         envelopes=bundle_from_config(Envelopes, config, cc=cc_angstrom),
         camera=bundle_from_config(Camera, config, n_frames=n_frames),
+        ice=bundle_from_config(
+            Ice,
+            config,
+            prefix="ice_",
+            profile=ice_profile,
+            parameterization=config.bulk_scattering_factors,
+        ),
         icemaker=icemaker,
-        ice_thickness=config.ice_thickness,
-        ice_profile=ice_profile,
         bfactor=config.bfactor,
         crowd_min_distance=crowd_min_distance,
         crowd_max_distance_z=config.crowd_max_distance_z,

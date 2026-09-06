@@ -23,7 +23,7 @@ from specter.imagegenerator import ImageGenerator
 from specter.microscope import Detector
 from specter.rotations import VolumeRotator
 from specter.scattering import Scattering
-from specter.settings import Camera, Propagation
+from specter.settings import Camera, Ice, Propagation
 
 
 def test_modular_pipeline_matches_image_generator():
@@ -49,13 +49,13 @@ def test_modular_pipeline_matches_image_generator():
         ctf_params,
         voltage,
         dose,
-        ice_model=None,
         verbose=False,
         progressbars=False,
         propagation=Propagation(
             scattering_model="multislice", ews_curvature_sign="positive", pad_fft=True
         ),
         camera=Camera(noise_model=None),
+        ice=Ice(model=None),
     )
     with torch.no_grad():
         expected = model(torch.arange(2))

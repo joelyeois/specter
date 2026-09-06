@@ -24,7 +24,7 @@ import torch
 from specter.arrays import ball3d
 from specter.ghostbuster import Reconstructor
 from specter.imagegenerator import ImageGenerator
-from specter.settings import Camera, Propagation, TiltGeometry
+from specter.settings import Camera, Ice, Propagation, TiltGeometry
 
 SCATTERING_MODELS = ["multislice", "projection", "firstborn", "rytov"]
 
@@ -63,13 +63,13 @@ def _simulator(inputs: dict, scattering_model: str) -> ImageGenerator:
         inputs["ctf_params"],
         inputs["voltage"],
         inputs["dose_per_angstrom"],
-        ice_model=None,
         verbose=False,
         progressbars=False,
         propagation=Propagation(
             scattering_model=scattering_model, alpha=inputs["alpha"]
         ),
         camera=Camera(noise_model=None),
+        ice=Ice(model=None),
     )
 
 

@@ -10,10 +10,9 @@ from ..progress import status, track
 from .. import rotations
 from .. import tilt as tilt_geometry
 from ..ice import IceBank, RandomIcemaker, blend_ice_into_volume, resolve_icemaker
-from ..settings import Camera, Envelopes, Optics, Propagation, TiltGeometry
+from ..settings import Camera, Envelopes, Ice, Optics, Propagation, TiltGeometry
 from ._micrograph import MicrographGenerator
 from ..scattering import IterativeScattering
-from specter.options import IceModel, ScatteringFactors
 
 
 class TiltSeriesGenerator(MicrographGenerator):
@@ -92,30 +91,13 @@ class TiltSeriesGenerator(MicrographGenerator):
         Tilt angles in degrees. Mutually exclusive with ``quaternions``.
     anisomag : torch.Tensor, optional
         Anisotropic magnification matrices, shape (n, 2, 2).
-    ice_model : str, optional
-        Ice generation algorithm used to blend ice into ``volume`` (see
-        ``volume`` above): ``'gd'`` (samples from the pre-generated
-        :class:`~specter.ice.IceBank` cache) or ``'random'`` (instant,
-        cheap :class:`~specter.ice.RandomIcemaker` placement). ``None``
-        (default) or ``'none'`` adds no ice. Ignored when ``icemaker`` is
-        provided.
-    ice_cache_dir : str, optional
-        Directory of cached ice configs for ``ice_model='gd'`` (see
-        :func:`specter.ice.build_ice_cache`). Defaults to the bundled
-        ``ice_data/ice_cache``. Ignored for other ``ice_model`` values or
-        when ``icemaker`` is provided.
+    ice : Ice, optional
+        The amorphous ice blended into ``volume`` at construction (see
+        ``volume`` above). ``thickness`` is ignored: the volume's Z extent is
+        the specimen's thickness. Default ``Ice()``, no ice.
     icemaker : IceBank or RandomIcemaker, optional
         A pre-built icemaker instance to blend into ``volume`` directly. When
-        supplied, ``ice_model`` and ``ice_cache_dir`` are both ignored.
-    ice_relax_steps : int, optional
-        Forwarded to :meth:`~specter.ice.IceBank.generate_big_ice` when
-        ``ice_model='gd'`` (or an ``IceBank`` ``icemaker``): number of local
-        MLBOP relaxation steps used to heal tile seams. Default 0 (no
-        relaxation, matching ``IceBank.generate_big_ice``'s own default) --
-        tilt series volumes are typically large/tiled often enough that
-        seam relaxation cost adds up, and the un-relaxed seams have not been
-        a problem in practice for this class's usage. Set higher for
-        production-quality seams. Ignored for ``RandomIcemaker``.
+        supplied, ``ice.model`` and ``ice.cache_dir`` are ignored.
     fft_pad_margin : int, optional
         Padding added on each side of the propagation canvas when
         ``propagation.pad_fft`` is set.
@@ -188,11 +170,8 @@ class TiltSeriesGenerator(MicrographGenerator):
         optics: Optics | None = Optics(),
         envelopes: Envelopes = Envelopes(),
         camera: Camera = Camera(),
-        ice_model: IceModel | None = None,
-        ice_cache_dir: str | None = None,
+        ice: Ice = Ice(),
         icemaker: IceBank | RandomIcemaker | None = None,
-        ice_relax_steps: int = 0,
-        ice_parameterization: ScatteringFactors = "kirkland",
         fft_pad_margin: int = 16,
         chunk_size: int = 1,
         progressbars: bool = True,
@@ -208,14 +187,15 @@ class TiltSeriesGenerator(MicrographGenerator):
         if volume is None:
             raise ValueError("'volume' must be provided for TiltSeriesGenerator.")
 
+        self.ice = ice
         volume_icemaker = resolve_icemaker(
-            ice_model,
+            ice.model,
             pixel_size,
             nxy=volume.shape[-1],
             nz=volume.shape[-3],
-            ice_cache_dir=ice_cache_dir,
+            ice_cache_dir=ice.cache_dir,
             icemaker=icemaker,
-            parameterization=ice_parameterization,
+            parameterization=ice.parameterization,
         )
         if volume_icemaker is not None:
             # Blend ice into the raw input volume before any of this class's own
@@ -224,11 +204,11 @@ class TiltSeriesGenerator(MicrographGenerator):
             # ice-filled volume.
             if verbose:
                 print(
-                    f"[TiltSeriesGenerator] Adding ice to volume using {ice_model} model"
+                    f"[TiltSeriesGenerator] Adding ice to volume using {ice.model} model"
                 )
             with torch.no_grad(), status("Tiling ice volume", disable=not progressbars):
                 volume = blend_ice_into_volume(
-                    volume, volume_icemaker, pixel_size, relax_steps=ice_relax_steps
+                    volume, volume_icemaker, pixel_size, relax_steps=ice.relax_steps
                 )
 
         if isinstance(micrograph_size, int):

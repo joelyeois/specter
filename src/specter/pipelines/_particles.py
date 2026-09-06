@@ -34,7 +34,7 @@ from specter.memory import (
 from specter.pdb import PDB
 from specter.potential import PotentialBuilder
 from specter.devices import parse_device, resolve_available_device
-from specter.settings import Camera, Envelopes, Propagation, bundle_from_config
+from specter.settings import Camera, Envelopes, Ice, Propagation, bundle_from_config
 from specter.progress import console, format_elapsed, section, track
 
 from ._common import (
@@ -366,10 +366,10 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
         propagation=bundle_from_config(Propagation, config, alpha=alpha),
         envelopes=bundle_from_config(Envelopes, config, cc=cc_angstrom),
         camera=bundle_from_config(Camera, config, n_frames=n_frames),
+        ice=bundle_from_config(
+            Ice, config, prefix="ice_", parameterization=ice_parameterization
+        ),
         icemaker=icemaker,
-        ice_thickness=config.ice_thickness,
-        ice_relax_steps=config.ice_relax_steps,
-        ice_parameterization=ice_parameterization,
         crowd_min_distance=crowd_min_distance,
         crowd_max_distance_z=config.crowd_max_distance_z,
         crowd_max_distance_xy=config.crowd_max_distance_xy,

@@ -4,35 +4,10 @@ import torch
 
 from specter.constants import energy_to_wavelength
 from specter.io import _cryosparc, extract_parameters_from_csfile
+from conftest import fake_cryosparc_dataset
 
 
-class _FakeDataset(dict):
-    @classmethod
-    def load(cls, csfile_path: str) -> "_FakeDataset":
-        n = 6
-        dtype = np.float32
-        rng = np.random.default_rng(0)
-        return cls(
-            {
-                "alignments3D/shift": rng.normal(size=(n, 2)).astype(dtype),
-                "alignments3D/psize_A": np.full(n, 1.5, dtype=dtype),
-                "ctf/cs_mm": np.full(n, 2.7, dtype=dtype),
-                "ctf/df_angle_rad": rng.normal(size=n).astype(dtype),
-                "ctf/df1_A": (rng.normal(size=n) + 10000).astype(dtype),
-                "ctf/df2_A": (rng.normal(size=n) + 10000).astype(dtype),
-                "ctf/amp_contrast": np.full(n, 0.1, dtype=dtype),
-                "ctf/accel_kv": np.full(n, 300.0, dtype=dtype),
-                "alignments3D/pose": rng.normal(size=(n, 3)).astype(dtype),
-                "alignments3D/split": np.array([0, 1, 0, 1, 0, 1]),
-                "ctf/tilt_A": np.zeros((n, 2), dtype=dtype),
-                "ctf/phase_shift_rad": np.zeros(n, dtype=dtype),
-                "ctf/shift_A": np.zeros((n, 2), dtype=dtype),
-                "ctf/trefoil_A": np.zeros((n, 2), dtype=dtype),
-                "ctf/tetra_A": np.zeros((n, 4), dtype=dtype),
-                "alignments3D/alpha": np.ones(n, dtype=dtype),
-                "ctf/anisomag": np.zeros((n, 4), dtype=dtype),
-            }
-        )
+_FakeDataset = fake_cryosparc_dataset(6)
 
 
 @pytest.fixture(autouse=True)

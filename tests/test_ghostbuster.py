@@ -15,7 +15,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import lightning as L
 import mrcfile
 import pytest
 import torch
@@ -26,6 +25,7 @@ from specter.fft import fft3
 from specter.ghostbuster import Reconstructor
 from specter.symmetries import apply_symmetry, get_rotation_matrices
 from specter.settings import Propagation
+from conftest import fit_one_epoch
 
 SCATTERING_MODELS = ["multislice", "firstborn", "projection", "ctf", "rytov"]
 SCHEDULERS = [
@@ -409,25 +409,6 @@ def test_small_scale_reduces_gradient_contribution(gb_kwargs: dict) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _fit_one_epoch(
-    model: Reconstructor, images: torch.Tensor, max_epochs: int = 1
-) -> None:
-    idx = torch.arange(len(images))
-    loader = torch.utils.data.DataLoader(
-        torch.utils.data.TensorDataset(images, idx), batch_size=len(images)
-    )
-    trainer = L.Trainer(
-        accelerator="cpu",
-        max_epochs=max_epochs,
-        precision="32",
-        logger=False,
-        enable_checkpointing=False,
-        enable_progress_bar=False,
-        enable_model_summary=False,
-    )
-    trainer.fit(model, loader)
-
-
 @pytest.mark.parametrize("scheduler", SCHEDULERS)
 def test_configure_optimizers_all_schedulers(
     tiny_volume: torch.Tensor,
@@ -453,7 +434,7 @@ def test_configure_optimizers_all_schedulers(
     )
     V_init = model.V.data.clone()
 
-    _fit_one_epoch(model, images)
+    fit_one_epoch(model, images)
 
     assert not torch.equal(model.V.data, V_init)
     assert len(model.log_lrs) == 1
@@ -543,7 +524,7 @@ def test_run_dir_writes_expected_artifacts(
         halfset_label="A",
         propagation=Propagation(scattering_model="projection"),
     )
-    _fit_one_epoch(model, images, max_epochs=2)
+    fit_one_epoch(model, images, max_epochs=2)
 
     # No params_A.json/metrics_A.json of their own: a caller (here, the
     # pipeline layer) folds results_summary() into one job.json instead, so
@@ -934,3 +915,31 @@ def test_binding_leaves_the_constructed_defocus_unchanged(
 
     assert torch.allclose(gb.imagegenerator.dfu.detach(), dfu)
     assert torch.allclose(gb.imagegenerator.dfv.detach(), dfv)
+
+
+# ---------------------------------------------------------------------------
+# k-space mask
+# ---------------------------------------------------------------------------
+
+
+def test_kmask_half_spectrum_matches_the_shifted_round_trip():
+    """The per-step band limit equals the old centred complex round trip."""
+    from specter.arrays import ball3d
+    from specter.fft import fft3, ifft3
+    from specter.ghostbuster._helpers import _apply_kmask_inplace, _kmask_half_spectrum
+
+    torch.manual_seed(0)
+    n = 24
+    kmask = ball3d(n, n // 3)
+    V = torch.randn(n, n, n)
+    old = torch.real(ifft3(fft3(V, shift=True) * kmask, shift=True))
+    new = V.clone()
+    _apply_kmask_inplace(new, _kmask_half_spectrum(kmask))
+    assert torch.allclose(new, old, rtol=1e-5, atol=1e-6)
+    # And it is a band limit: the masked-out shell is empty afterwards.
+    spectrum = fft3(new, shift=True)
+    assert torch.allclose(
+        spectrum[kmask == 0],
+        torch.zeros(int((kmask == 0).sum()), dtype=spectrum.dtype),
+        atol=1e-4,
+    )

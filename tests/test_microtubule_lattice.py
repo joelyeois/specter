@@ -24,10 +24,7 @@ from specter.specimen.filament import (
     solve_tube_lattice,
     thermal_flex_deg,
 )
-
-
-def _seeded(seed: int) -> torch.Generator:
-    return torch.Generator().manual_seed(seed)
+from conftest import seeded
 
 
 # --------------------------------------------------------------------------
@@ -109,7 +106,7 @@ def test_thermal_flex_matches_worm_like_chain():
 # Frames
 # --------------------------------------------------------------------------
 def test_parallel_transport_frames_are_orthonormal_and_follow_the_tangent():
-    positions = torch.cumsum(torch.randn(40, 3, generator=_seeded(0)) * 5.0, dim=0)
+    positions = torch.cumsum(torch.randn(40, 3, generator=seeded(0)) * 5.0, dim=0)
     frames = parallel_transport_frames(positions)
     assert frames.shape == (40, 3, 3)
 
@@ -167,7 +164,7 @@ def test_tube_instances_stay_on_the_wall_around_a_bend():
         60,
         torch.zeros(3),
         torch.tensor([1.0, 0.0, 0.0]),
-        generator=_seeded(1),
+        generator=seeded(1),
     )
     instances = build_tube_instances("x.cif", 0, axis, lattice)
     frames = parallel_transport_frames(axis)
@@ -224,7 +221,7 @@ def test_protofilament_registers_reproduce_the_stagger():
 def test_place_microtubules_counts_and_bookkeeping():
     spec = MicrotubuleSpec(code="x.cif", n_copies=2, length=2000.0)
     instances, tubes = place_microtubules(
-        [spec], (128, 256, 256), 8.0, generator=_seeded(2)
+        [spec], (128, 256, 256), 8.0, generator=seeded(2)
     )
     n_rings = round(2000.0 / DIMER_REPEAT)
     assert len(tubes) == 2
@@ -238,7 +235,7 @@ def test_slab_confinement_keeps_long_tubes_in_plane():
     """A 4000 A tube cannot be steeply tilted in 800 A of ice."""
     spec = MicrotubuleSpec(code="x.cif", n_copies=12, length=4000.0)
     shape = (100, 512, 512)  # 800 A thick at 8 A/voxel
-    _, tubes = place_microtubules([spec], shape, 8.0, generator=_seeded(3))
+    _, tubes = place_microtubules([spec], shape, 8.0, generator=seeded(3))
 
     for tube in tubes:
         span_z = float(tube.axis_xyz[:, 2].max() - tube.axis_xyz[:, 2].min())
@@ -247,7 +244,7 @@ def test_slab_confinement_keeps_long_tubes_in_plane():
     unconfined = MicrotubuleSpec(
         code="x.cif", n_copies=12, length=4000.0, confine_to_slab=False
     )
-    _, wild = place_microtubules([unconfined], shape, 8.0, generator=_seeded(3))
+    _, wild = place_microtubules([unconfined], shape, 8.0, generator=seeded(3))
     assert max(
         float(t.axis_xyz[:, 2].max() - t.axis_xyz[:, 2].min()) for t in wild
     ) > max(float(t.axis_xyz[:, 2].max() - t.axis_xyz[:, 2].min()) for t in tubes)
@@ -258,7 +255,7 @@ def test_thermal_tube_is_nearly_straight():
     600 nm field -- transverse wander of order half a diameter."""
     spec = MicrotubuleSpec(code="x.cif", length=6000.0, confine_to_slab=False)
     axis = microtubule_axis_path(
-        spec, 74, torch.zeros(3), torch.tensor([1.0, 0.0, 0.0]), generator=_seeded(4)
+        spec, 74, torch.zeros(3), torch.tensor([1.0, 0.0, 0.0]), generator=seeded(4)
     )
     chord = axis[-1] - axis[0]
     contour = float((axis[1:] - axis[:-1]).norm(dim=-1).sum())
@@ -275,7 +272,7 @@ def test_arc_bend_is_smooth_unlike_a_wiggly_walk():
     """`bend_radius` curves; a bigger flex angle would only kink."""
     spec = MicrotubuleSpec(code="x.cif", bend_radius=1.0e4)
     axis = microtubule_axis_path(
-        spec, 74, torch.zeros(3), torch.tensor([1.0, 0.0, 0.0]), generator=_seeded(5)
+        spec, 74, torch.zeros(3), torch.tensor([1.0, 0.0, 0.0]), generator=seeded(5)
     )
     tangents = axis[1:] - axis[:-1]
     tangents = tangents / tangents.norm(dim=-1, keepdim=True)

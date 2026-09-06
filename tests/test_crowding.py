@@ -7,6 +7,7 @@ import torch
 import specter
 from specter import rotations
 from specter.crowding import CrowdWithDuplicates, rotation_safe_crop
+from conftest import blob
 
 # Small enough to stay quick, large enough that the Poisson-disk sampling
 # places several duplicates -- with fewer than two there is nothing for
@@ -61,21 +62,6 @@ def test_a_seeded_run_is_reproducible_on_gpu() -> None:
     two seeded runs must agree exactly.
     """
     assert torch.equal(_crowd(1, "cuda:0"), _crowd(1, "cuda:0"))
-
-
-def _blob(n_atoms: int = 300, radius: float = 20.0, seed: int = 0) -> torch.Tensor:
-    """A compact random point cloud standing in for a small globular protein.
-
-    Same convention as `test_packing_shape.py`'s own helper, kept local
-    rather than imported since it's a one-line synthetic fixture, not
-    shared test infrastructure.
-    """
-    g = torch.Generator().manual_seed(seed)
-    v = torch.randn(n_atoms, 3, generator=g)
-    v = v / v.norm(dim=1, keepdim=True)
-    r = radius * torch.rand(n_atoms, 1, generator=g) ** (1 / 3)
-    coords = v * r
-    return coords - coords.mean(0)
 
 
 def test_shape_backend_requires_atom_coordinates() -> None:
@@ -145,7 +131,7 @@ def test_shape_backend_reuses_committed_rotations_for_render() -> None:
     draw a fresh one, or the rendered volume would depict geometry that was
     never actually collision-tested (see that method's own docstring).
     """
-    atoms = _blob()
+    atoms = blob(300)
     dx = 4.0
     V = torch.rand(16, 16, 16)
     crowd = CrowdWithDuplicates(
@@ -208,7 +194,7 @@ def test_water_air_interface_knobs_are_threaded_for_shape_backend() -> None:
     Same wiring check as the poisson_disk test above, for
     `_generate_coordinates_shape`'s own thinning step.
     """
-    atoms = _blob()
+    atoms = blob(300)
     geom = dict(
         dx=4.0,
         min_distance=30.0,
@@ -373,3 +359,24 @@ def test_rotation_template_is_cached_and_follows_a_swapped_buffer() -> None:
     second = crowd._rotation_template()
     assert second is not first
     assert second.shape[0] > first.shape[0]
+
+
+# ---------------------------------------------------------------------------
+# stamping onto an existing canvas
+# ---------------------------------------------------------------------------
+
+
+def test_crowd_forward_into_matches_accumulate_then_add():
+    torch.manual_seed(0)
+    V = torch.rand(12, 12, 12)
+    crowd = CrowdWithDuplicates(V, 2.0, 10.0, nxy_out=24, nz_out=12, progressbars=False)
+    canvas = torch.rand(12, 24, 24)
+
+    specter.seed(11)
+    want = canvas + crowd()
+    specter.seed(11)
+    got = canvas.clone()
+    ret = crowd(into=got)
+    assert ret is got
+    assert crowd.N > 1
+    assert torch.allclose(got, want, atol=1e-6, rtol=0)

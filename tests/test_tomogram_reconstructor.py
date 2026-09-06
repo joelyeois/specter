@@ -11,7 +11,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import lightning as L
 import pytest
 import roma
 import torch
@@ -21,6 +20,7 @@ from specter.arrays import ball3d
 from specter.fft import fft3
 from specter.ghostbuster import TomogramReconstructor
 from specter.settings import Propagation, TiltGeometry
+from conftest import fit_one_epoch
 
 SCHEDULERS = [
     "LambdaLR",
@@ -79,28 +79,6 @@ def tr_kwargs(
         ctf_params=tilt_ctf_params,
         voltage=300.0,
     )
-
-
-def _fit_one_epoch(
-    model: TomogramReconstructor,
-    images: torch.Tensor,
-    batch_size: int = 1,
-    max_epochs: int = 1,
-) -> None:
-    idx = torch.arange(len(images))
-    loader = torch.utils.data.DataLoader(
-        torch.utils.data.TensorDataset(images, idx), batch_size=batch_size
-    )
-    trainer = L.Trainer(
-        accelerator="cpu",
-        max_epochs=max_epochs,
-        precision="32",
-        logger=False,
-        enable_checkpointing=False,
-        enable_progress_bar=False,
-        enable_model_summary=False,
-    )
-    trainer.fit(model, loader)
 
 
 # ---------------------------------------------------------------------------
@@ -167,7 +145,7 @@ def test_configure_optimizers_all_schedulers(tr_kwargs: dict, scheduler: str) ->
         propagation=Propagation(scattering_model="projection"),
     )
     V_init = model.V.data.clone()
-    _fit_one_epoch(model, images, batch_size=3)
+    fit_one_epoch(model, images, batch_size=3)
     assert not torch.equal(model.V.data, V_init)
     assert len(model.log_lrs) == 1
 
@@ -236,7 +214,7 @@ def test_run_dir_writes_expected_artifacts(tmp_path: Path, tr_kwargs: dict) -> N
         run_dir=tmp_path,
         propagation=Propagation(scattering_model="projection"),
     )
-    _fit_one_epoch(model, images, batch_size=3, max_epochs=2)
+    fit_one_epoch(model, images, batch_size=3, max_epochs=2)
 
     assert (tmp_path / "params.json").exists()
     assert (tmp_path / "metrics.json").exists()

@@ -1,9 +1,7 @@
 """
-Pin the 2026-09 ice-optimiser speedups to what they replaced.
-
-Every change here is meant to be exact (same physics, different
-bookkeeping) or a float-order reshuffle, so each test compares the shipped
-code against the implementation it displaced:
+Tests for the ice optimiser's energy and neighbour bookkeeping, each pinned
+against the simpler formulation it is equivalent to (same physics, a
+float-order reshuffle at most):
 
 * the triplet-list three-body sum against the padded dense block it
   replaced, in float64 (energy, statistics and gradient);

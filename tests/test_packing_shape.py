@@ -23,16 +23,7 @@ from specter.specimen.packing import (
     coarsen_mask,
     pack_shapes_3d,
 )
-
-
-def _blob(n_atoms: int = 400, radius: float = 20.0, seed: int = 0) -> torch.Tensor:
-    """A compact random point cloud standing in for a small globular protein."""
-    g = torch.Generator().manual_seed(seed)
-    v = torch.randn(n_atoms, 3, generator=g)
-    v = v / v.norm(dim=1, keepdim=True)
-    r = radius * torch.rand(n_atoms, 1, generator=g) ** (1 / 3)
-    coords = v * r
-    return coords - coords.mean(0)
+from conftest import blob
 
 
 def _rod(n_atoms: int = 400, half_len: float = 45.0, seed: int = 1) -> torch.Tensor:
@@ -45,7 +36,7 @@ def _rod(n_atoms: int = 400, half_len: float = 45.0, seed: int = 1) -> torch.Ten
 
 
 def test_build_species_mask_encloses_atoms_and_is_odd_sized():
-    coords = _blob()
+    coords = blob()
     voxel = 4.0
     mask = build_species_mask(coords, voxel, gap=0.0)
 
@@ -62,7 +53,7 @@ def test_build_species_mask_encloses_atoms_and_is_odd_sized():
 
 def test_build_species_mask_gap_is_quantized_to_voxel_size():
     """Documented behaviour, not an accident -- see build_species_mask's `gap`."""
-    coords = _blob()
+    coords = blob()
     voxel = 6.8
     # 1.9 + 0.0 and 1.9 + 2.0 are both under one 6.8 A voxel, so identical.
     m0 = build_species_mask(coords, voxel, gap=0.0)
@@ -76,7 +67,7 @@ def test_build_species_mask_gap_is_quantized_to_voxel_size():
 
 
 def test_pack_shapes_3d_places_nothing_overlapping():
-    masks = [build_species_mask(_blob(), 4.0, gap=0.0)]
+    masks = [build_species_mask(blob(), 4.0, gap=0.0)]
     species = torch.zeros(60, dtype=torch.long)
     grid = (30, 60, 60)
 
@@ -102,7 +93,7 @@ def test_pack_shapes_3d_output_reproduces_its_own_occupancy_grid():
     draws the geometry that was collision-tested.
     """
     voxel = 4.0
-    masks = [build_species_mask(_blob(), voxel, gap=0.0)]
+    masks = [build_species_mask(blob(), voxel, gap=0.0)]
     species = torch.zeros(50, dtype=torch.long)
     grid = (30, 60, 60)
 
@@ -139,7 +130,7 @@ def test_pack_shapes_3d_output_reproduces_its_own_occupancy_grid():
 
 def test_pack_shapes_3d_respects_a_seeded_occupancy_grid():
     voxel = 4.0
-    masks = [build_species_mask(_blob(), voxel, gap=0.0)]
+    masks = [build_species_mask(blob(), voxel, gap=0.0)]
     grid = (30, 60, 60)
     blocked = torch.zeros(grid, dtype=torch.bool)
     blocked[:, :30, :] = True  # forbid half the box
@@ -201,7 +192,7 @@ def test_coarsen_mask_contains_the_fine_mask():
     The containment property that makes coarse-grid packing safe for a
     fine render: every fine voxel must fall inside a set coarse voxel.
     """
-    coords = _blob(n_atoms=2000, radius=30.0)
+    coords = blob(n_atoms=2000, radius=30.0)
     fine = build_species_mask(coords, 1.0, gap=0.0)
     coarse = coarsen_mask(fine, 2)
 
@@ -219,7 +210,7 @@ def test_coarsen_mask_contains_the_fine_mask():
 
 
 def test_coarsen_mask_is_a_noop_below_factor_two():
-    m = build_species_mask(_blob(), 2.0, gap=0.0)
+    m = build_species_mask(blob(), 2.0, gap=0.0)
     assert coarsen_mask(m, 1) is m
 
 
@@ -228,7 +219,7 @@ def test_pack_shapes_3d_accepts_a_coarser_grid_than_the_render():
     Packing on a coarse grid must still return positions in ANGSTROM on the
     shared physical box, so a caller can render them at any resolution.
     """
-    coords = _blob(n_atoms=2000, radius=30.0)
+    coords = blob(n_atoms=2000, radius=30.0)
     fine_voxel, factor = 1.0, 4
     fine = build_species_mask(coords, fine_voxel, gap=0.0)
     coarse = coarsen_mask(fine, factor)
@@ -331,7 +322,7 @@ def test_coarse_packing_leaves_no_overlap_at_render_resolution():
     `test_rotation_cache_pools_after_rotating`.
     """
     fine_voxel, factor = 1.0, 4
-    coords_atoms = _blob(n_atoms=3000, radius=14.0)
+    coords_atoms = blob(n_atoms=3000, radius=14.0)
     fine = build_species_mask(coords_atoms, fine_voxel, gap=0.0)
 
     fine_grid = (96, 192, 192)
@@ -376,7 +367,7 @@ def test_rotation_cache_pools_after_rotating():
     from specter.specimen.packing._shape import _rotation_cache
 
     factor, n_or = 4, 24
-    fine = build_species_mask(_blob(n_atoms=3000, radius=14.0), 1.0, gap=0.0)
+    fine = build_species_mask(blob(n_atoms=3000, radius=14.0), 1.0, gap=0.0)
     cache, _, _, _, R = _rotation_cache(fine, n_or, "cpu", 0, pool_factor=factor)
 
     def pool(x):

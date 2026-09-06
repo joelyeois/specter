@@ -26,43 +26,14 @@ from specter.ghostbuster import (
 )
 from specter.io import _cryosparc
 from specter.settings import Propagation
-
-# ---------------------------------------------------------------------------
-# Fake CryoSPARC dataset (mirrors tests/test_cryosparc.py's _FakeDataset)
-# ---------------------------------------------------------------------------
+from conftest import fake_cryosparc_dataset
 
 N_PARTICLES = 4
 BOX = 8
 PIXEL_SIZE = 1.5
 
 
-class _FakeDataset(dict):
-    @classmethod
-    def load(cls, csfile_path: str) -> "_FakeDataset":
-        n = N_PARTICLES
-        dtype = np.float32
-        rng = np.random.default_rng(0)
-        return cls(
-            {
-                "alignments3D/shift": rng.normal(size=(n, 2)).astype(dtype),
-                "alignments3D/psize_A": np.full(n, PIXEL_SIZE, dtype=dtype),
-                "ctf/cs_mm": np.full(n, 2.7, dtype=dtype),
-                "ctf/df_angle_rad": rng.normal(size=n).astype(dtype),
-                "ctf/df1_A": (rng.normal(size=n) + 10000).astype(dtype),
-                "ctf/df2_A": (rng.normal(size=n) + 10000).astype(dtype),
-                "ctf/amp_contrast": np.full(n, 0.1, dtype=dtype),
-                "ctf/accel_kv": np.full(n, 300.0, dtype=dtype),
-                "alignments3D/pose": rng.normal(size=(n, 3)).astype(dtype),
-                "alignments3D/split": np.array([0, 1, 0, 1][:n]),
-                "ctf/tilt_A": np.zeros((n, 2), dtype=dtype),
-                "ctf/phase_shift_rad": np.zeros(n, dtype=dtype),
-                "ctf/shift_A": np.zeros((n, 2), dtype=dtype),
-                "ctf/trefoil_A": np.zeros((n, 2), dtype=dtype),
-                "ctf/tetra_A": np.zeros((n, 4), dtype=dtype),
-                "alignments3D/alpha": np.ones(n, dtype=dtype),
-                "ctf/anisomag": np.zeros((n, 4), dtype=dtype),
-            }
-        )
+_FakeDataset = fake_cryosparc_dataset(N_PARTICLES, PIXEL_SIZE)
 
 
 @pytest.fixture(autouse=True)

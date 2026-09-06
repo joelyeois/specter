@@ -9,6 +9,7 @@ from specter.scattering import (
     IterativeScattering,
     Scattering,
 )
+from specter.fft import fft2, ifft2
 
 
 def test_apply_amplitude_contrast():
@@ -579,3 +580,135 @@ def test_iterative_scattering_bandlimit_masks_are_binary(klim, pad_fft):
     assert torch.equal(mask, (mask > 0).to(mask.dtype)), (
         "bandlimit mask must be binary for the propagator hoist to stay exact"
     )
+
+
+# ---------------------------------------------------------------------------
+# memory formulations, pinned to the whole-volume spellings
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("alpha", [0.0, 0.07])
+def test_multislice_forward_complexifies_per_chunk_bitwise(alpha):
+    """forward(real V) == multislice(apply_amplitude_contrast(V)) exactly:
+    the complexification is elementwise, so doing it per chunk changes
+    nothing but the peak memory."""
+    n, nz = 16, 13  # nz not a multiple of the chunk size
+    scat = Scattering(
+        nxy=n,
+        pixel_size=1.0,
+        voltage=300.0,
+        scattering_model="multislice",
+        alpha=alpha,
+        nz=nz,
+        progressbars=False,
+    )
+    torch.manual_seed(0)
+    V = torch.rand(2, nz, n, n) * 4.0
+    got = scat(V)
+    want = scat.multislice(apply_amplitude_contrast(V, alpha=alpha))
+    assert torch.equal(got, want)
+
+
+def test_multislice_gradient_through_real_volume_matches_complex_path():
+    n, nz = 16, 8
+    scat = Scattering(
+        nxy=n,
+        pixel_size=1.0,
+        voltage=300.0,
+        scattering_model="multislice",
+        alpha=0.07,
+        nz=nz,
+        progressbars=False,
+    )
+    torch.manual_seed(0)
+    V = torch.rand(1, nz, n, n) * 4.0
+
+    v1 = V.clone().requires_grad_(True)
+    scat(v1).real.sum().backward()
+    v2 = V.clone().requires_grad_(True)
+    scat.multislice(apply_amplitude_contrast(v2, alpha=0.07)).real.sum().backward()
+    assert torch.equal(v1.grad, v2.grad)
+
+
+def _reference(model: Scattering, name: str, V: torch.Tensor) -> torch.Tensor:
+    """The pre-rewrite implementations, applied to a real V as `forward` did."""
+    F = model.F_real + 1j * model.F_imag
+    V = apply_amplitude_contrast(V, alpha=model.alpha)
+    if model.ews_curvature_sign == "negative":
+        V = torch.flip(V, dims=(1,))
+    c = model.sigma * model.pixel_size
+    if name == "rytov":
+        scattered_k = (fft2(1j * c * V) * F[None]).sum(dim=1)
+        return torch.exp(ifft2(scattered_k))
+    if name == "firstborn":
+        return 1 + 1j * ifft2(torch.sum(c * fft2(V) * F[None], 1))
+    t = torch.exp(1j * c * V) - 1
+    return 1 + ifft2(torch.sum(fft2(t) * F[None], 1))
+
+
+@pytest.mark.parametrize("name", ["rytov", "firstborn", "kinematic"])
+@pytest.mark.parametrize("sign", ["negative", "positive"])
+@pytest.mark.parametrize("alpha", [0.0, 0.1])
+def test_single_scatter_models_match_their_old_spelling(name, sign, alpha):
+    from specter.scattering import _kernels as sc
+
+    torch.manual_seed(0)
+    n, nz, B = 16, 11, 2
+    model = Scattering(
+        n,
+        1.0,
+        300.0,
+        scattering_model=name,
+        nz=nz,
+        alpha=alpha,
+        ews_curvature_sign=sign,
+        progressbars=False,
+    ).double()
+    V = (torch.rand(B, nz, n, n, dtype=torch.float64) * 5).requires_grad_(True)
+
+    ref = _reference(model, name, V)
+    (g_ref,) = torch.autograd.grad(ref.abs().sum(), V)
+
+    # Force several chunks so the accumulation path is exercised.
+    old = sc._SLICE_SUM_CHUNK_ELEMENTS
+    sc._SLICE_SUM_CHUNK_ELEMENTS = B * n * n * 3
+    try:
+        new = model(V)
+        (g_new,) = torch.autograd.grad(new.abs().sum(), V)
+    finally:
+        sc._SLICE_SUM_CHUNK_ELEMENTS = old
+
+    assert torch.allclose(new, ref, rtol=1e-10, atol=1e-12)
+    assert torch.allclose(g_new, g_ref, rtol=1e-8, atol=1e-12)
+
+
+def test_single_scatter_models_accept_a_complex_volume():
+    """A caller that has already applied the absorption factor gets the same
+    answer as one that hands over the real volume."""
+    torch.manual_seed(1)
+    n, nz = 12, 7
+    model = Scattering(
+        n, 1.0, 300.0, scattering_model="rytov", nz=nz, alpha=0.1, progressbars=False
+    ).double()
+    V = torch.rand(1, nz, n, n, dtype=torch.float64)
+    from_real = model.rytov(V)
+    from_complex = model.rytov(apply_amplitude_contrast(V, alpha=0.1))
+    assert torch.allclose(from_real, from_complex, rtol=1e-10, atol=1e-12)
+
+
+def test_propagator_is_cached_and_flipped_once():
+    model = Scattering(
+        8,
+        1.0,
+        300.0,
+        scattering_model="rytov",
+        nz=5,
+        ews_curvature_sign="negative",
+        progressbars=False,
+    )
+    V = torch.rand(1, 5, 8, 8)
+    F1 = model._propagator(V)
+    F2 = model._propagator(V)
+    assert F1 is F2
+    expected = (model.F_real + 1j * model.F_imag).flip(0)
+    assert torch.equal(F1, expected)

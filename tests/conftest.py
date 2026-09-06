@@ -10,10 +10,17 @@ golden-fixture helper several test modules share.
 thread cap is in place before torch is first imported.
 """
 
+from __future__ import annotations
+
 import os
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
+
+if TYPE_CHECKING:
+    import lightning as L
+    import torch
 
 FIXTURE_DIR = Path(__file__).parent / "test_data"
 
@@ -133,3 +140,103 @@ def save_or_compare():
             pytest.skip(f"Fixture '{name}.pt' generated — re-run to verify.")
 
     return _save_or_compare
+
+
+# ---------------------------------------------------------------------------
+# Plain helpers shared by several test modules (`from conftest import ...`)
+# ---------------------------------------------------------------------------
+
+
+def seeded(seed: int) -> torch.Generator:
+    """A CPU generator seeded with ``seed``."""
+    import torch
+
+    return torch.Generator().manual_seed(seed)
+
+
+def blob(n_atoms: int = 400, radius: float = 20.0, seed: int = 0) -> torch.Tensor:
+    """A compact random point cloud standing in for a small globular protein."""
+    import torch
+
+    g = seeded(seed)
+    v = torch.randn(n_atoms, 3, generator=g)
+    v = v / v.norm(dim=1, keepdim=True)
+    r = radius * torch.rand(n_atoms, 1, generator=g) ** (1 / 3)
+    coords = v * r
+    return coords - coords.mean(0)
+
+
+def monomer_library() -> str | None:
+    """The Monomer Library directory, from ``$CLIBD_MON`` or the sffit
+    checkout, or None when neither is present (tests needing one skip)."""
+    env = os.environ.get("CLIBD_MON")
+    if env and Path(env).is_dir():
+        return env
+    bundled = Path.home() / "sffit" / "monomers"
+    return str(bundled) if bundled.is_dir() else None
+
+
+def fit_one_epoch(
+    model: L.LightningModule,
+    images: torch.Tensor,
+    batch_size: int | None = None,
+    max_epochs: int = 1,
+) -> None:
+    """Train ``model`` on ``images`` (indexed in order) on the CPU, quietly."""
+    import lightning as L
+    import torch
+
+    idx = torch.arange(len(images))
+    loader = torch.utils.data.DataLoader(
+        torch.utils.data.TensorDataset(images, idx),
+        batch_size=len(images) if batch_size is None else batch_size,
+    )
+    trainer = L.Trainer(
+        accelerator="cpu",
+        max_epochs=max_epochs,
+        precision="32",
+        logger=False,
+        enable_checkpointing=False,
+        enable_progress_bar=False,
+        enable_model_summary=False,
+    )
+    trainer.fit(model, loader)
+
+
+def fake_cryosparc_dataset(n: int, pixel_size: float = 1.5) -> type:
+    """
+    A stand-in for ``cryosparc.dataset.Dataset`` whose ``load`` returns ``n``
+    synthetic particles at ``pixel_size`` with every column
+    `extract_parameters_from_csfile` reads. Patch it over
+    ``specter.io._cryosparc.Dataset``.
+    """
+    import numpy as np
+
+    class FakeDataset(dict):
+        @classmethod
+        def load(cls, csfile_path: str) -> "FakeDataset":
+            dtype = np.float32
+            rng = np.random.default_rng(0)
+            return cls(
+                {
+                    "alignments3D/shift": rng.normal(size=(n, 2)).astype(dtype),
+                    "alignments3D/psize_A": np.full(n, pixel_size, dtype=dtype),
+                    "ctf/cs_mm": np.full(n, 2.7, dtype=dtype),
+                    "ctf/df_angle_rad": rng.normal(size=n).astype(dtype),
+                    "ctf/df1_A": (rng.normal(size=n) + 10000).astype(dtype),
+                    "ctf/df2_A": (rng.normal(size=n) + 10000).astype(dtype),
+                    "ctf/amp_contrast": np.full(n, 0.1, dtype=dtype),
+                    "ctf/accel_kv": np.full(n, 300.0, dtype=dtype),
+                    "alignments3D/pose": rng.normal(size=(n, 3)).astype(dtype),
+                    "alignments3D/split": np.array([0, 1] * ((n + 1) // 2))[:n],
+                    "ctf/tilt_A": np.zeros((n, 2), dtype=dtype),
+                    "ctf/phase_shift_rad": np.zeros(n, dtype=dtype),
+                    "ctf/shift_A": np.zeros((n, 2), dtype=dtype),
+                    "ctf/trefoil_A": np.zeros((n, 2), dtype=dtype),
+                    "ctf/tetra_A": np.zeros((n, 4), dtype=dtype),
+                    "alignments3D/alpha": np.ones(n, dtype=dtype),
+                    "ctf/anisomag": np.zeros((n, 4), dtype=dtype),
+                }
+            )
+
+    return FakeDataset

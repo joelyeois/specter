@@ -122,3 +122,22 @@ def test_radial_distribution_function_modes_agree():
     )
     near = r < 12.0
     assert torch.allclose(sampled[near], exact[near], atol=0.1)
+
+
+# ---------------------------------------------------------------------------
+# 3-D Poisson disk
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("seed", ["origin", "random"])
+def test_poisson_disk_3d_respects_min_distance_and_is_deterministic(seed):
+    torch.manual_seed(5)
+    pts = poisson_disk_neighbors_3d(10.0, box=(60.0, 80.0, 70.0), seed=seed)
+    assert len(pts) > 20
+    d = torch.cdist(pts, pts)
+    d.fill_diagonal_(float("inf"))
+    assert d.min() >= 10.0
+    assert (pts.abs() <= torch.tensor([35.0, 40.0, 30.0])).all()
+    torch.manual_seed(5)
+    again = poisson_disk_neighbors_3d(10.0, box=(60.0, 80.0, 70.0), seed=seed)
+    assert torch.equal(pts, again)

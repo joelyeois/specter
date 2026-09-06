@@ -34,6 +34,7 @@ from specter.specimen._parallel_render import (
     resolve_render_devices,
     resolve_render_workers,
 )
+from conftest import monomer_library
 
 
 def test_resolve_render_devices_defaults_to_single_device():
@@ -273,25 +274,16 @@ def test_resolve_render_devices_resolves_auto():
 # packed into the task tuple. $CLIBD_MON reaches them through the inherited
 # environment, the flag through the tuple -- both are checked here, on the
 # serial and pooled branches, since they build their PDBs by different code.
-def _monomer_library() -> str | None:
-    import os
-    from pathlib import Path
-
-    env = os.environ.get("CLIBD_MON")
-    if env and Path(env).is_dir():
-        return env
-    bundled = Path.home() / "sffit" / "monomers"
-    return str(bundled) if bundled.is_dir() else None
 
 
-@pytest.mark.skipif(_monomer_library() is None, reason="no monomer library available")
+@pytest.mark.skipif(monomer_library() is None, reason="no monomer library available")
 @pytest.mark.parametrize("max_workers", [1, 2], ids=["serial", "process-pool"])
 def test_build_pdb_cache_forwards_readd_hydrogens(monkeypatch, max_workers):
     from pathlib import Path
 
     from specter.specimen._parallel_render import build_pdb_cache_concurrently
 
-    monkeypatch.setenv("CLIBD_MON", _monomer_library())
+    monkeypatch.setenv("CLIBD_MON", monomer_library())
     cif = str(Path(__file__).parent / "test_data" / "1mbo.cif")
 
     def n_hydrogens(readd):

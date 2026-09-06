@@ -15,6 +15,7 @@ import torch
 import specter.pdb as pdb_module
 from specter.config import default_pdb_cache_dir
 from specter.pdb import PDB
+from conftest import monomer_library
 
 # Two tiers of fixture. The structures the suite cannot run without are
 # tracked in tests/test_data/. These larger ones only add coverage for
@@ -431,20 +432,12 @@ def test_atom_species_aligns_for_awkward_structures(name):
 # the table and falls back to per-element Peng. Typing then covers ~56% of a
 # protein's atoms instead of ~99%. These tests need a real library, so they are
 # skipped wherever one is not configured.
-def _monomer_library() -> str | None:
-    from os import environ
-
-    env = environ.get("CLIBD_MON")
-    if env and Path(env).is_dir():
-        return env
-    bundled = Path.home() / "sffit" / "monomers"
-    return str(bundled) if bundled.is_dir() else None
 
 
-@pytest.mark.skipif(_monomer_library() is None, reason="no monomer library available")
+@pytest.mark.skipif(monomer_library() is None, reason="no monomer library available")
 def test_monomer_library_adds_hydrogens_and_stays_aligned():
     """With a library, all three arrays come from the H-completed model."""
-    monlib = _monomer_library()
+    monlib = monomer_library()
 
     plain = PDB(str(_FIXTURE), verbose=False, compute_atom_species=True)
     assert (plain.atomic_numbers == 1).sum().item() == 0, (
@@ -466,7 +459,7 @@ def test_monomer_library_adds_hydrogens_and_stays_aligned():
     assert completed.atomic_numbers.shape[0] > plain.atomic_numbers.shape[0]
 
 
-@pytest.mark.skipif(_monomer_library() is None, reason="no monomer library available")
+@pytest.mark.skipif(monomer_library() is None, reason="no monomer library available")
 def test_ambiguous_hydrogens_are_not_rendered():
     """Zero-occupancy H (rotatable -OH, His tautomers) must not reach the model.
 
@@ -476,7 +469,7 @@ def test_ambiguous_hydrogens_are_not_rendered():
     """
     import gemmi
 
-    monlib = _monomer_library()
+    monlib = monomer_library()
     st = gemmi.read_structure(str(_FIXTURE))
     st.setup_entities()
     lib = gemmi.read_monomer_lib(monlib, st[0].get_all_residue_names())
@@ -497,7 +490,7 @@ def test_ambiguous_hydrogens_are_not_rendered():
     )
 
 
-@pytest.mark.skipif(_monomer_library() is None, reason="no monomer library available")
+@pytest.mark.skipif(monomer_library() is None, reason="no monomer library available")
 def test_metal_links_dropped_with_library():
     """With a library, the heme iron types as Fe(NNNN) -- an entry in the table.
 
@@ -509,7 +502,7 @@ def test_metal_links_dropped_with_library():
     from specter.pdb import PDB as _PDB
 
     _, _, species, _, used = _PDB._build_typed_model(
-        str(_FIXTURE), _monomer_library(), False
+        str(_FIXTURE), monomer_library(), False
     )
     assert used, "library did not load"
     iron = [s for s in species if s is not None and s.startswith("Fe(")]
@@ -522,7 +515,7 @@ def test_metal_links_dropped_with_library():
 _H_FIXTURE = Path(default_pdb_cache_dir()) / "7a4m.cif"
 
 
-@pytest.mark.skipif(_monomer_library() is None, reason="no monomer library available")
+@pytest.mark.skipif(monomer_library() is None, reason="no monomer library available")
 @pytest.mark.skipif(not _H_FIXTURE.exists(), reason="7a4m not in the local PDB cache")
 def test_readd_hydrogens_false_keeps_deposited_coordinates():
     """readd_hydrogens=False leaves a file's own hydrogens where they were."""
@@ -539,7 +532,7 @@ def test_readd_hydrogens_false_keeps_deposited_coordinates():
 
     def h_coords(readd):
         znum, pos, _, _, used = PDB._build_typed_model(
-            str(_H_FIXTURE), _monomer_library(), False, readd_hydrogens=readd
+            str(_H_FIXTURE), monomer_library(), False, readd_hydrogens=readd
         )
         assert used
         return {
@@ -557,7 +550,7 @@ def test_readd_hydrogens_false_keeps_deposited_coordinates():
     assert len(ideal & deposited) / len(ideal) < 0.5
 
 
-@pytest.mark.skipif(_monomer_library() is None, reason="no monomer library available")
+@pytest.mark.skipif(monomer_library() is None, reason="no monomer library available")
 def test_readd_hydrogens_false_types_without_adding_density():
     """On a hydrogen-free structure, readd_hydrogens=False types but adds no atoms.
 
@@ -580,17 +573,17 @@ def test_readd_hydrogens_false_types_without_adding_density():
         return len(znum), sum(1 for z in znum if z == 1), hit / len(znum)
 
     n_plain, h_plain, cov_plain = coverage(None, True)
-    n_typed, h_typed, cov_typed = coverage(_monomer_library(), False)
+    n_typed, h_typed, cov_typed = coverage(monomer_library(), False)
 
     assert (n_typed, h_typed) == (n_plain, h_plain), "density changed"
     assert cov_typed > cov_plain + 0.3, (cov_plain, cov_typed)
 
 
-@pytest.mark.skipif(_monomer_library() is None, reason="no monomer library available")
+@pytest.mark.skipif(monomer_library() is None, reason="no monomer library available")
 @pytest.mark.skipif(not _H_FIXTURE.exists(), reason="7a4m not in the local PDB cache")
 def test_readd_hydrogens_auto_follows_the_file():
     """ "auto" keeps deposited hydrogens, and adds them only when there are none."""
-    mon = _monomer_library()
+    mon = monomer_library()
 
     def counts(cif, mode):
         znum, _, _, _, _ = PDB._build_typed_model(

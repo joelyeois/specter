@@ -18,6 +18,8 @@ from specter.ice._bank import (
 from specter.ice import ice_config_filename
 from specter.rotations import random_rotation_matrix_from_generator
 from specter.ice._helpers import ndensity_of_amorphous_ice
+import math
+from specter.potential import potential_occupancy
 
 
 def _make_cache_config(tmp_path, name, n, dx, seed=0, n_steps=5):
@@ -596,3 +598,94 @@ def test_blend_ice_slabwise_matches_whole_volume_expression(nz, n, inplace):
         assert got.data_ptr() == V.data_ptr(), "inplace must write through to V"
     else:
         assert torch.equal(V, V0), "inplace=False must leave the input untouched"
+
+
+# ---------------------------------------------------------------------------
+# device placement and slab-wise blending
+# ---------------------------------------------------------------------------
+
+
+def test_ice_bank_crop_stays_on_bank_device():
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    bank = IceBank().to(device)
+    torch.manual_seed(0)
+    ice = bank.generate_ice(n=24, dx=1.0, nz=24)
+    assert ice.device.type == device
+    assert bank.positions is not None and bank.positions.device.type == device
+    assert math.isfinite(bank.mlbop_energy()["E_per_atom"])
+
+
+@pytest.mark.skipif(
+    not torch.cuda.is_available(), reason="needs a device for the host-canvas path"
+)
+def test_host_volume_blend_matches_whole_canvas_blend():
+    """
+    A host-resident volume blended slab by slab on the device equals the
+    whole-canvas blend of the same draws, to float noise, including at the
+    z ends where the slab path wraps its context.
+    """
+    dev = torch.device("cuda")
+    n, nz, dx = 96, 70, 1.0
+    bank = IceBank(device=dev, progressbars=False)
+    V0 = torch.zeros(1, nz, n, n)
+    g = torch.Generator().manual_seed(1)
+    for _ in range(8):
+        c = (torch.rand(3, generator=g) * torch.tensor([nz, n, n])).long()
+        zs, ys, xs = [slice(max(0, int(ci) - 8), int(ci) + 8) for ci in c]
+        V0[0, zs, ys, xs] += 10.0
+
+    # Reference: the whole-canvas path, forced by putting V on the device.
+    gen = torch.Generator().manual_seed(7)
+    ice = bank.generate_big_ice(
+        n=n, dx=dx, nz=nz, batchsize=1, device=dev, generator=gen
+    )
+    ref = V0.to(dev) + ice * (1 - potential_occupancy(V0.to(dev), dx)).clamp(0, 1)
+
+    # Slab path: V on the host, bank on the device, same draws, and a slab
+    # small enough that the volume spans several.
+    from specter.ice import _bank as bank_mod
+
+    torch.manual_seed(0)
+    new = V0.clone()
+    gen2 = torch.Generator().manual_seed(7)
+    real = bank.big_ice_positions
+
+    def seeded_positions(*a, **kw):
+        kw["generator"] = gen2
+        return real(*a, **kw)
+
+    bank.big_ice_positions = seeded_positions  # type: ignore[method-assign]
+    bank_mod._blend_ice_slabwise(new, bank, dx, slab_voxels=n * n * 16)
+    assert new.device.type == "cpu"
+    diff = new.to(dev) - ref
+    assert float(diff.abs().max()) < 1e-3 * float(ice.abs().max())
+    # Plane means agree at both z ends (the wrapped context).
+    pm = (new.to(dev) - ref).mean(dim=(0, 2, 3))
+    assert float(pm.abs().max()) < 1e-4 * float(ice.mean())
+
+    # And the public entry point routes a host V to this path.
+    bank.big_ice_positions = real  # type: ignore[method-assign]
+    out = blend_ice_into_volume(V0.clone(), bank, dx, inplace=True)
+    assert out.device.type == "cpu"
+    assert float((out - V0).mean()) == pytest.approx(float(ice.mean()), rel=0.05)
+
+
+@pytest.mark.parametrize("chunk", [3, 7, 64])
+def test_ice_slab_blender_matches_whole_volume_blend(chunk):
+    """Slab by slab, in any slab size, equals the one-shot rule
+    ``V + ice * clamp(1 - occupancy(V), 0, 1)``."""
+    torch.manual_seed(0)
+    nz, n = 40, 24
+    V = torch.zeros(1, nz, n, n)
+    V[0, 10:20, 5:15, 5:15] = 9.0
+    ice = torch.rand(1, nz, n, n) * 4
+    whole = V + ice * (1 - potential_occupancy(V, 1.0)).clamp(0, 1)
+
+    from specter.ice._blend import IceSlabBlender
+
+    out = V.clone()
+    blender = IceSlabBlender(1.0)
+    for start in range(0, nz, chunk):
+        end = min(start + chunk, nz)
+        blender.add(out, ice[:, start:end].clone(), start, end)
+    assert torch.allclose(out, whole, rtol=1e-5, atol=1e-6)

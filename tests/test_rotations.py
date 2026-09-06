@@ -16,6 +16,10 @@ from specter.rotations import (
     split_affine_translation,
     translations_angstrom_to_torch,
 )
+from specter import rotations
+from specter.rotations import affine_sampling_grid
+import torch.nn.functional as F
+from specter.rotations._volume import _relion_rotation_grid
 
 
 # ---------------------------------------------------------------------------
@@ -562,3 +566,154 @@ def test_rotate_volume_identity_affine_is_a_no_op() -> None:
 
     assert out.shape == (1, 16, 20, 24)
     assert torch.allclose(out[0], volume, atol=1e-5)
+
+
+# ---------------------------------------------------------------------------
+# rotation grids, pinned to the reference formulations
+# ---------------------------------------------------------------------------
+
+
+def _random_theta(B: int, dtype: torch.dtype) -> torch.Tensor:
+    torch.manual_seed(0)
+    R = rotations.random_rotation_matrix(B).to(dtype)
+    t = (torch.rand(B, 3, dtype=dtype) - 0.5) * 0.4
+    return rotations.build_affine_matrix(R, t)
+
+
+@pytest.mark.parametrize("align_corners", [False, True])
+@pytest.mark.parametrize("shape", [(9, 12, 7), (16, 16, 16)])
+def test_affine_sampling_grid_matches_affine_grid(align_corners, shape):
+    """The broadcast grid is F.affine_grid to float64 rounding, on
+    non-cubic shapes and both align_corners conventions."""
+    nz, ny, nx = shape
+    theta = _random_theta(3, torch.float64)
+    want = F.affine_grid(theta, [3, 1, nz, ny, nx], align_corners=align_corners)
+    got = affine_sampling_grid(theta, nz, ny, nx, align_corners)
+    assert got.shape == want.shape
+    assert torch.allclose(got, want, atol=1e-13, rtol=0)
+
+
+def _six_pass_reference(
+    theta: torch.Tensor, nz: int, ny: int, nx: int, origin: str
+) -> torch.Tensor:
+    """The chain VolumeRotator used to apply to a cached identity grid:
+    recentre, rescale, rotate, unscale, uncentre, translate -- evaluated
+    entirely in float64 (the rotator's own `center_dc` buffer is float32,
+    which is one of the roundings the collapsed form removes)."""
+    B = theta.shape[0]
+    eye = torch.eye(3, 4, dtype=torch.float64).unsqueeze(0)
+    g = F.affine_grid(eye, [1, 1, nz, ny, nx], align_corners=False)
+    g = g.expand(B, -1, -1, -1, -1).reshape(B, -1, 3)
+    R, t = theta[..., :3], theta[..., 3]
+    s = torch.tensor(
+        [(nx - 1) / 2, (ny - 1) / 2, (nz - 1) / 2], dtype=torch.float64
+    ).view(1, 1, 3)
+    if origin == "relion":
+        c = torch.tensor(
+            [
+                2 * (nx // 2 + 0.5) / nx - 1,
+                2 * (ny // 2 + 0.5) / ny - 1,
+                2 * (nz // 2 + 0.5) / nz - 1,
+            ],
+            dtype=torch.float64,
+        ).view(1, 1, 3)
+        g = ((g - c) * s) @ R.transpose(1, 2) / s + c + t.unsqueeze(1)
+    else:
+        g = (g * s) @ R.transpose(1, 2) / s + t.unsqueeze(1)
+    return g.view(B, nz, ny, nx, 3)
+
+
+@pytest.mark.parametrize("origin", ["relion", "center"])
+def test_volume_rotator_grid_matches_six_pass_reference(origin):
+    """VolumeRotator._build_grid is the collapsed form of the recentre /
+    rescale / rotate / unscale / uncentre / translate chain it replaced."""
+    nz, ny, nx = 10, 14, 12
+    rot = VolumeRotator(nz, ny, nx, origin=origin).double()
+    theta = _random_theta(2, torch.float64)
+    got = rot._build_grid(theta)
+    want = _six_pass_reference(theta, nz, ny, nx, origin)
+    assert torch.allclose(got, want, atol=1e-13, rtol=0)
+
+
+def test_volume_rotator_has_no_persistent_identity_grid():
+    """A cached (nz, ny, nx, 3) identity grid would be 1.6 GB at 512^3."""
+    rot = VolumeRotator(8, 8, 8)
+    assert "base_grid" not in dict(rot.named_buffers())
+
+
+def test_rotate_volume_relion_grid_matches_float64_reference():
+    """_relion_rotation_grid, through affine_sampling_grid, against the
+    six-pass chain evaluated in float64."""
+    nz, ny, nx = 11, 9, 13
+    theta = _random_theta(2, torch.float64)
+    got = _relion_rotation_grid(theta, nz, ny, nx, False)
+    want = _six_pass_reference(theta, nz, ny, nx, "relion")
+    assert torch.allclose(got, want, atol=1e-13, rtol=0)
+
+
+def test_rotation_grid_gradients_flow_to_pose():
+    """Pose refinement in Ghostbuster differentiates through the grid."""
+    q = rotations.random_quaternion(1).double().requires_grad_(True)
+    t = torch.zeros(1, 3, dtype=torch.float64, requires_grad=True)
+    import roma
+
+    theta = rotations.build_affine_matrix(roma.unitquat_to_rotmat(q), t)
+    V = torch.rand(8, 8, 8, dtype=torch.float64)
+    out = rotations.rotate_volume(V, theta)
+    (out * torch.rand_like(out)).sum().backward()
+    assert q.grad is not None and torch.isfinite(q.grad).all()
+    assert t.grad is not None and torch.isfinite(t.grad).all()
+
+
+def test_rotate_volume_under_grad_matches_forward_only_and_batched_gradient():
+    """
+    With the volume requiring grad, `rotate_volume` samples one image at a
+    time with a recomputed grid; the values equal the batched forward-only
+    call exactly, and the gradient equals the batched kernel's to float
+    accumulation order.
+    """
+    import torch.nn.functional as F
+
+    from specter import rotations
+    from specter.rotations._volume import _relion_rotation_grid
+
+    torch.manual_seed(0)
+    n = 20
+    V = torch.randn(n, n, n)
+    R = rotations.random_rotation_matrix(3)
+    theta = rotations.build_affine_matrix(R)
+    with torch.no_grad():
+        plain = rotations.rotate_volume(V, theta)
+    Vg = V.clone().requires_grad_(True)
+    out = rotations.rotate_volume(Vg, theta)
+    assert torch.equal(out, plain)
+    (g_new,) = torch.autograd.grad((out**2).sum(), Vg)
+
+    Vb = V.clone().requires_grad_(True)
+    grid = _relion_rotation_grid(theta, n, n, n, False)
+    ref = F.grid_sample(
+        Vb[None, None].expand(3, 1, n, n, n),
+        grid,
+        align_corners=False,
+        padding_mode="border",
+    )[:, 0]
+    (g_ref,) = torch.autograd.grad((ref**2).sum(), Vb)
+    assert torch.allclose(g_new, g_ref, rtol=1e-5, atol=1e-6)
+
+
+def test_volume_rotator_under_grad_matches_forward_only():
+    from specter import rotations
+    from specter.rotations import VolumeRotator
+
+    torch.manual_seed(0)
+    n = 20
+    rot = VolumeRotator(n, n, n, origin="relion", mode="real")
+    V = torch.randn(n, n, n)
+    theta = rotations.build_affine_matrix(rotations.random_rotation_matrix(3))
+    with torch.no_grad():
+        plain = rot(V, theta)
+    Vg = V.clone().requires_grad_(True)
+    out = rot(Vg, theta)
+    assert torch.equal(out, plain)
+    (g,) = torch.autograd.grad((out**2).sum(), Vg)
+    assert torch.isfinite(g).all() and float(g.abs().sum()) > 0

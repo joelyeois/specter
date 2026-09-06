@@ -25,6 +25,9 @@ from specter.potential import (
     potential_from_deltas,
     recommended_rcut,
 )
+from specter.fft import fftconvolve, spatial_convolve3d_same
+from specter.potential._builders import _deltas_backend
+from specter.ice._kernels import build_water_kernel
 
 
 # A small cluster of 5 carbon atoms (Z=6) spread over ~6 Å.
@@ -1487,3 +1490,51 @@ def test_bfactor_rejects_a_mismatched_or_negative_column():
         PotentialBuilder(
             16, 1.0, znum, progressbars=False, b_factors=torch.tensor([-1.0, 0.0])
         )
+
+
+# ---------------------------------------------------------------------------
+# potential_from_deltas backends
+# ---------------------------------------------------------------------------
+
+
+def test_potential_from_deltas_auto_backend_selection():
+    small = torch.zeros(1, 16, 16, 16)
+    assert _deltas_backend(small, torch.zeros(3, 3, 3)) == "conv3d"
+    assert _deltas_backend(small, torch.zeros(4, 4, 4)) == "conv3d"
+    assert _deltas_backend(small, torch.zeros(5, 5, 5)) == "fftconvolve"
+    # a volume too large for the FFT's complex copies (stride-0 expand, no memory)
+    huge = torch.zeros(1).expand(1, 700, 700, 700)
+    assert _deltas_backend(huge, torch.zeros(8, 8, 8)) == "conv3d"
+
+
+@pytest.mark.parametrize("k", [3, 8])
+def test_potential_from_deltas_backends_agree(k):
+    torch.manual_seed(0)
+    deltas = (torch.rand(2, 20, 18, 22) < 0.05).float()
+    kernel = torch.rand(k, k, k)
+    a = potential_from_deltas(deltas, kernel, backend="conv3d")
+    b = potential_from_deltas(deltas, kernel, backend="fftconvolve")
+    c = potential_from_deltas(deltas, kernel, backend="auto")
+    assert torch.allclose(a, b, atol=1e-4, rtol=0)
+    assert torch.equal(c, a if k == 3 else b)
+    assert torch.allclose(a[0], fftconvolve(deltas[0], kernel, mode="same"), atol=1e-4)
+    assert torch.equal(a, spatial_convolve3d_same(deltas, kernel))
+
+
+@pytest.mark.parametrize("dx", [0.731, 1.0])
+def test_periodic_conv3d_chunking_matches_fft(dx):
+    """The chunked circular-pad conv3d path equals the FFT path, with the
+    chunk forced small enough that a volume spans several chunks."""
+    from specter.potential import _builders
+
+    k = build_water_kernel(dx)
+    g = torch.Generator().manual_seed(0)
+    d = torch.rand(1, 40, 24, 20, generator=g)
+    a = potential_from_deltas(d, k, backend="fftconvolve", boundary="periodic")
+    old = _builders._DELTAS_FFT_MAX_VOXELS
+    _builders._DELTAS_FFT_MAX_VOXELS = 24 * 20 * 7
+    try:
+        b = potential_from_deltas(d, k, backend="conv3d", boundary="periodic")
+    finally:
+        _builders._DELTAS_FFT_MAX_VOXELS = old
+    assert torch.allclose(a, b, rtol=1e-4, atol=1e-4 * float(a.abs().max()))

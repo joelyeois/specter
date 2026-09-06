@@ -192,26 +192,9 @@ class TiltSeriesGenerator(MicrographGenerator):
             raise ValueError("'volume' must be provided for TiltSeriesGenerator.")
 
         self.ice = ice
-        volume_icemaker = resolve_icemaker(
-            ice.model,
-            pixel_size,
-            nxy=volume.shape[-1],
-            nz=volume.shape[-3],
-            ice_cache_dir=ice.cache_dir,
-            icemaker=icemaker,
-            parameterization=ice.parameterization,
+        volume = self._blend_ice(
+            volume, ice, icemaker, pixel_size, verbose, progressbars
         )
-        if volume_icemaker is not None:
-            # Blend ice into the raw input volume before any of this class's own
-            # tilt-coverage/taper padding below, so that padding still operates
-            # on (and, for the reflect-padded XY margin, naturally extends) the
-            # ice-filled volume.
-            if verbose:
-                logger.info(f"Adding ice to volume using {ice.model} model")
-            with torch.no_grad(), status("Tiling ice volume", disable=not progressbars):
-                volume = blend_ice_into_volume(
-                    volume, volume_icemaker, pixel_size, relax_steps=ice.relax_steps
-                )
 
         if isinstance(micrograph_size, int):
             desired_nxy = micrograph_size
@@ -229,76 +212,16 @@ class TiltSeriesGenerator(MicrographGenerator):
         taper_width = tilt.taper_width
         z_taper_width = tilt.z_taper_width
 
-        max_tilt_angle_deg = tilt_geometry.infer_max_tilt_from_inputs(
-            angles=angles, quaternions=quaternions
+        volume = self._fit_volume_to_tilt(
+            volume,
+            desired_nxy,
+            angles,
+            quaternions,
+            edge_margin,
+            taper_width,
+            z_taper_width,
+            pad_volume,
         )
-
-        nz_input = int(volume.shape[-3])
-        available_nxy = int(min(volume.shape[-2], volume.shape[-1]))
-        required_nxy = tilt_geometry.estimate_required_nxy(
-            desired_nxy=desired_nxy,
-            nz=nz_input,
-            max_tilt_angle_deg=max_tilt_angle_deg,
-        )
-        # required_nxy is the exact geometric minimum -- zero interpolation slack for
-        # crop-edge output pixels (see edge_margin's docstring). Inflate it before
-        # taper_width (a separate, purely cosmetic apron) gets added on top.
-        required_nxy_padded = required_nxy + 2 * int(edge_margin)
-        target_nxy = required_nxy_padded + 2 * taper_width
-        self.recommended_nxy_for_max_tilt = required_nxy
-        self.edge_margin = int(edge_margin)
-        self.max_tilt_angle_deg = float(max_tilt_angle_deg)
-        self.max_allowed_tilt_deg_for_volume = (
-            tilt_geometry.estimate_max_allowed_tilt_deg(
-                desired_nxy=desired_nxy, nz=nz_input, available_nxy=available_nxy
-            )
-        )
-        self.max_allowed_nxy = tilt_geometry.estimate_max_allowed_nxy(
-            available_nxy=available_nxy,
-            nz=nz_input,
-            max_tilt_angle_deg=max_tilt_angle_deg,
-        )
-
-        if available_nxy < target_nxy:
-            if pad_volume:
-                volume = tilt_geometry.pad_volume_xy_for_tilt(
-                    volume, target_nxy, available_nxy
-                )
-                msg = (
-                    "Volume XY too small for requested tilt coverage"
-                    + (" and taper" if taper_width > 0 else "")
-                    + f"; padded (reflect) from {available_nxy} to {volume.shape[-1]} px in XY.\n"
-                    f"  micrograph_size={desired_nxy}, requested_max_tilt={self.max_tilt_angle_deg:.2f} deg, "
-                    f"required_volume_nxy>={required_nxy}, edge_margin={edge_margin} "
-                    f"(-> required_nxy_padded>={required_nxy_padded})"
-                )
-                if taper_width > 0:
-                    msg += f", target_nxy (with taper)>={target_nxy}"
-                logger.info(msg + ".")
-            else:
-                logger.info(
-                    "Input volume XY may be too small for requested tilt "
-                    "coverage; proceeding anyway (pad_volume=False).\n"
-                    f"  micrograph_size={desired_nxy}, volume_shape={tuple(volume.shape)}, "
-                    f"requested_max_tilt={self.max_tilt_angle_deg:.2f} deg,\n"
-                    f"  required_volume_nxy>={required_nxy}, current_volume_nxy={available_nxy}, \n"
-                    f"  max_allowed_tilt_with_current_volume\u2248{self.max_allowed_tilt_deg_for_volume:.2f} deg,\n"
-                    f"  max_allowed_nxy\u2248{self.max_allowed_nxy}."
-                )
-
-        if taper_width > 0 or z_taper_width > 0:
-            volume = tilt_geometry.apply_volume_cosine_taper(
-                volume, taper_xy=int(taper_width), taper_z=int(z_taper_width)
-            )
-            if taper_width > 0:
-                logger.info(
-                    f"Applied cosine-taper over {taper_width} px at the XY edges."
-                )
-            if z_taper_width > 0:
-                logger.info(
-                    f"Applied cosine-taper over {z_taper_width} px "
-                    f"at the Z edges (top/bottom)."
-                )
 
         super().__init__(
             specimen=volume,
@@ -433,6 +356,128 @@ class TiltSeriesGenerator(MicrographGenerator):
     # ------------------------------------------------------------------ #
     # Forward methods                                                      #
     # ------------------------------------------------------------------ #
+
+    @staticmethod
+    def _blend_ice(
+        volume: torch.Tensor,
+        ice: Ice,
+        icemaker: IceBank | RandomIcemaker | None,
+        pixel_size: float,
+        verbose: bool,
+        progressbars: bool,
+    ) -> torch.Tensor:
+        """
+        Blend ice into the raw input volume before any tilt-coverage or
+        taper padding, so the padding operates on (and, for the
+        reflect-padded XY margin, extends) the ice-filled volume.
+        """
+        volume_icemaker = resolve_icemaker(
+            ice.model,
+            pixel_size,
+            nxy=volume.shape[-1],
+            nz=volume.shape[-3],
+            ice_cache_dir=ice.cache_dir,
+            icemaker=icemaker,
+            parameterization=ice.parameterization,
+        )
+        if volume_icemaker is not None:
+            if verbose:
+                logger.info(f"Adding ice to volume using {ice.model} model")
+            with torch.no_grad(), status("Tiling ice volume", disable=not progressbars):
+                volume = blend_ice_into_volume(
+                    volume, volume_icemaker, pixel_size, relax_steps=ice.relax_steps
+                )
+
+        return volume
+
+    def _fit_volume_to_tilt(
+        self,
+        volume: torch.Tensor,
+        desired_nxy: int,
+        angles: torch.Tensor | Sequence[float] | None,
+        quaternions: torch.Tensor | None,
+        edge_margin: int,
+        taper_width: int,
+        z_taper_width: int,
+        pad_volume: bool,
+    ) -> torch.Tensor:
+        """
+        Size the volume for the tilt range: record the XY the range needs
+        (`recommended_nxy_for_max_tilt`, `max_allowed_*`), reflect-pad the
+        volume to it when asked, and apply the edge tapers.
+        """
+        max_tilt_angle_deg = tilt_geometry.infer_max_tilt_from_inputs(
+            angles=angles, quaternions=quaternions
+        )
+
+        nz_input = int(volume.shape[-3])
+        available_nxy = int(min(volume.shape[-2], volume.shape[-1]))
+        required_nxy = tilt_geometry.estimate_required_nxy(
+            desired_nxy=desired_nxy,
+            nz=nz_input,
+            max_tilt_angle_deg=max_tilt_angle_deg,
+        )
+        # required_nxy is the exact geometric minimum -- zero interpolation slack for
+        # crop-edge output pixels (see edge_margin's docstring). Inflate it before
+        # taper_width (a separate, purely cosmetic apron) gets added on top.
+        required_nxy_padded = required_nxy + 2 * int(edge_margin)
+        target_nxy = required_nxy_padded + 2 * taper_width
+        self.recommended_nxy_for_max_tilt = required_nxy
+        self.edge_margin = int(edge_margin)
+        self.max_tilt_angle_deg = float(max_tilt_angle_deg)
+        self.max_allowed_tilt_deg_for_volume = (
+            tilt_geometry.estimate_max_allowed_tilt_deg(
+                desired_nxy=desired_nxy, nz=nz_input, available_nxy=available_nxy
+            )
+        )
+        self.max_allowed_nxy = tilt_geometry.estimate_max_allowed_nxy(
+            available_nxy=available_nxy,
+            nz=nz_input,
+            max_tilt_angle_deg=max_tilt_angle_deg,
+        )
+
+        if available_nxy < target_nxy:
+            if pad_volume:
+                volume = tilt_geometry.pad_volume_xy_for_tilt(
+                    volume, target_nxy, available_nxy
+                )
+                msg = (
+                    "Volume XY too small for requested tilt coverage"
+                    + (" and taper" if taper_width > 0 else "")
+                    + f"; padded (reflect) from {available_nxy} to {volume.shape[-1]} px in XY.\n"
+                    f"  micrograph_size={desired_nxy}, requested_max_tilt={self.max_tilt_angle_deg:.2f} deg, "
+                    f"required_volume_nxy>={required_nxy}, edge_margin={edge_margin} "
+                    f"(-> required_nxy_padded>={required_nxy_padded})"
+                )
+                if taper_width > 0:
+                    msg += f", target_nxy (with taper)>={target_nxy}"
+                logger.info(msg + ".")
+            else:
+                logger.info(
+                    "Input volume XY may be too small for requested tilt "
+                    "coverage; proceeding anyway (pad_volume=False).\n"
+                    f"  micrograph_size={desired_nxy}, volume_shape={tuple(volume.shape)}, "
+                    f"requested_max_tilt={self.max_tilt_angle_deg:.2f} deg,\n"
+                    f"  required_volume_nxy>={required_nxy}, current_volume_nxy={available_nxy}, \n"
+                    f"  max_allowed_tilt_with_current_volume\u2248{self.max_allowed_tilt_deg_for_volume:.2f} deg,\n"
+                    f"  max_allowed_nxy\u2248{self.max_allowed_nxy}."
+                )
+
+        if taper_width > 0 or z_taper_width > 0:
+            volume = tilt_geometry.apply_volume_cosine_taper(
+                volume, taper_xy=int(taper_width), taper_z=int(z_taper_width)
+            )
+            if taper_width > 0:
+                logger.info(
+                    f"Applied cosine-taper over {taper_width} px at the XY edges."
+                )
+            if z_taper_width > 0:
+                logger.info(
+                    f"Applied cosine-taper over {z_taper_width} px "
+                    f"at the Z edges (top/bottom)."
+                )
+
+        return volume
 
     def generate_tilt_series(
         self, idx: int | torch.Tensor

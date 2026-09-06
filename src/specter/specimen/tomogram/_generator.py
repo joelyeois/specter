@@ -2177,6 +2177,46 @@ class TomogramSpecimenGenerator:
         )
         point_type = "orientedPoint" if oriented else "point"
 
+        self._export_protein_picks(
+            written,
+            output_dir,
+            annotation_version,
+            point_type,
+            oriented,
+            extent_xyz,
+            include_filler,
+        )
+        if include_transmembrane and self.transmembrane_placements:
+            self._export_transmembrane_picks(
+                written,
+                output_dir,
+                annotation_version,
+                point_type,
+                oriented,
+                extent_xyz,
+            )
+        if include_filaments and self.filament_instances:
+            self._export_filament_picks(
+                written, output_dir, annotation_version, point_type, oriented
+            )
+        if include_microtubules and self.microtubule_instances:
+            self._export_microtubule_paths(written, output_dir, annotation_version)
+        if include_beads and self.bead_instances:
+            self._export_bead_picks(written, output_dir, annotation_version, extent_xyz)
+
+        return written
+
+    def _export_protein_picks(
+        self,
+        written: dict[str, Path],
+        output_dir: Path,
+        annotation_version: str,
+        point_type: str,
+        oriented: bool,
+        extent_xyz: torch.Tensor,
+        include_filler: bool,
+    ) -> None:
+        """One file per ``(species, location)`` of the cytosol/lumen placements."""
         target_keys = {
             (placed.species_id, placed.location)
             for placed in self.placements
@@ -2213,145 +2253,164 @@ class TomogramSpecimenGenerator:
                     f.write(json.dumps(row) + "\n")
             written[key] = path
 
-        if include_transmembrane and self.transmembrane_placements:
-            by_species: dict[str, list[TransmembranePlacement]] = {}
-            for tp in self.transmembrane_placements:
-                by_species.setdefault(Path(tp.species_id).stem, []).append(tp)
-            for species, tps in by_species.items():
-                key = f"{species}-transmembrane"
-                path = (
-                    output_dir
-                    / f"{key}-{annotation_version}_{point_type.lower()}.ndjson"
-                )
-                with open(path, "w") as f:
-                    for tp in tps:
-                        corner_xyz = tp.center_xyz + extent_xyz / 2
-                        x, y, z = (float(v) for v in corner_xyz)
-                        row = {"type": point_type, "location": {"x": x, "y": y, "z": z}}
-                        if oriented:
-                            row["xyz_rotation_matrix"] = (
-                                tp.rotation_matrix.numpy().tolist()
-                            )
-                        f.write(json.dumps(row) + "\n")
-                written[key] = path
-
-        if include_filaments and self.filament_instances:
-            by_filament_code: dict[str, list[FilamentInstance]] = {}
-            for inst in self.filament_instances:
-                by_filament_code.setdefault(inst.code, []).append(inst)
-            for code, insts in by_filament_code.items():
-                key = f"{Path(code).stem}-filament"
-                path = (
-                    output_dir
-                    / f"{key}-{annotation_version}_{point_type.lower()}.ndjson"
-                )
-                with open(path, "w") as f:
-                    for inst in insts:
-                        x, y, z = (float(v) for v in inst.position_xyz)
-                        row = {"type": point_type, "location": {"x": x, "y": y, "z": z}}
-                        if oriented:
-                            row["xyz_rotation_matrix"] = (
-                                inst.rotation_matrix.numpy().tolist()
-                            )
-                        f.write(json.dumps(row) + "\n")
-                written[key] = path
-
-                # One `path` per filament as well, so the picks agree with
-                # the label volume about what an object is: both now say a
-                # filament, where the labels said one object and these
-                # points said several dozen.
-                #
-                # Written in ADDITION to the oriented points rather than
-                # instead of them. A path carries no orientations, and the
-                # per-monomer rotation matrices above are what subtomogram
-                # averaging of F-actin needs; nothing in the volume can
-                # recover them. Microtubules ship only a path and so have
-                # no per-dimer poses at all.
-                path_file = output_dir / f"{key}-{annotation_version}_path.ndjson"
-                with open(path_file, "w") as f:
-                    for run in _filament_runs(insts):
-                        points = torch.stack([i.position_xyz for i in run])
-                        centre = points.mean(dim=0)
-                        f.write(
-                            json.dumps(
-                                {
-                                    "type": "path",
-                                    "location": {
-                                        "x": float(centre[0]),
-                                        "y": float(centre[1]),
-                                        "z": float(centre[2]),
-                                    },
-                                    "path": [
-                                        {
-                                            "x": float(p[0]),
-                                            "y": float(p[1]),
-                                            "z": float(p[2]),
-                                        }
-                                        for p in points
-                                    ],
-                                    "n_monomers": len(run),
-                                }
-                            )
-                            + "\n"
-                        )
-                written[f"{key}-path"] = path_file
-
-        if include_microtubules and self.microtubule_instances:
-            by_tube_code: dict[str, list[MicrotubuleInstance]] = {}
-            for tube in self.microtubule_instances:
-                by_tube_code.setdefault(tube.code, []).append(tube)
-            for code, tubes in by_tube_code.items():
-                key = f"{Path(code).stem}-microtubule"
-                path = output_dir / f"{key}-{annotation_version}_path.ndjson"
-                with open(path, "w") as f:
-                    for tube in tubes:
-                        axis = tube.axis_xyz
-                        centre = axis.mean(dim=0)
-                        f.write(
-                            json.dumps(
-                                {
-                                    "type": "path",
-                                    "location": {
-                                        "x": float(centre[0]),
-                                        "y": float(centre[1]),
-                                        "z": float(centre[2]),
-                                    },
-                                    "path": [
-                                        {
-                                            "x": float(p[0]),
-                                            "y": float(p[1]),
-                                            "z": float(p[2]),
-                                        }
-                                        for p in axis
-                                    ],
-                                    "radius": tube.lattice.radius,
-                                    "n_protofilaments": (tube.lattice.n_protofilaments),
-                                }
-                            )
-                            + "\n"
-                        )
-                written[key] = path
-
-        if include_beads and self.bead_instances:
-            # Every fiducial goes in one file regardless of radius or
-            # population: nothing downstream distinguishes bead sizes, and
-            # under a [low, high] radius each instance has a unique size,
-            # so grouping by radius would write one file per bead.
-            key = "gold-bead"
-            path = output_dir / f"{key}-{annotation_version}_point.ndjson"
+    def _export_transmembrane_picks(
+        self,
+        written: dict[str, Path],
+        output_dir: Path,
+        annotation_version: str,
+        point_type: str,
+        oriented: bool,
+        extent_xyz: torch.Tensor,
+    ) -> None:
+        """One file per transmembrane species, oriented."""
+        by_species: dict[str, list[TransmembranePlacement]] = {}
+        for tp in self.transmembrane_placements:
+            by_species.setdefault(Path(tp.species_id).stem, []).append(tp)
+        for species, tps in by_species.items():
+            key = f"{species}-transmembrane"
+            path = (
+                output_dir / f"{key}-{annotation_version}_{point_type.lower()}.ndjson"
+            )
             with open(path, "w") as f:
-                for bead in self.bead_instances:
-                    corner_xyz = bead.position_xyz + extent_xyz / 2
+                for tp in tps:
+                    corner_xyz = tp.center_xyz + extent_xyz / 2
                     x, y, z = (float(v) for v in corner_xyz)
+                    row = {"type": point_type, "location": {"x": x, "y": y, "z": z}}
+                    if oriented:
+                        row["xyz_rotation_matrix"] = tp.rotation_matrix.numpy().tolist()
+                    f.write(json.dumps(row) + "\n")
+            written[key] = path
+
+    def _export_filament_picks(
+        self,
+        written: dict[str, Path],
+        output_dir: Path,
+        annotation_version: str,
+        point_type: str,
+        oriented: bool,
+    ) -> None:
+        """Per filament species: the monomer picks and, beside them, one path per filament."""
+        by_filament_code: dict[str, list[FilamentInstance]] = {}
+        for inst in self.filament_instances:
+            by_filament_code.setdefault(inst.code, []).append(inst)
+        for code, insts in by_filament_code.items():
+            key = f"{Path(code).stem}-filament"
+            path = (
+                output_dir / f"{key}-{annotation_version}_{point_type.lower()}.ndjson"
+            )
+            with open(path, "w") as f:
+                for inst in insts:
+                    x, y, z = (float(v) for v in inst.position_xyz)
+                    row = {"type": point_type, "location": {"x": x, "y": y, "z": z}}
+                    if oriented:
+                        row["xyz_rotation_matrix"] = (
+                            inst.rotation_matrix.numpy().tolist()
+                        )
+                    f.write(json.dumps(row) + "\n")
+            written[key] = path
+
+            # One `path` per filament as well, so the picks agree with
+            # the label volume about what an object is: both now say a
+            # filament, where the labels said one object and these
+            # points said several dozen.
+            #
+            # Written in ADDITION to the oriented points rather than
+            # instead of them. A path carries no orientations, and the
+            # per-monomer rotation matrices above are what subtomogram
+            # averaging of F-actin needs; nothing in the volume can
+            # recover them. Microtubules ship only a path and so have
+            # no per-dimer poses at all.
+            path_file = output_dir / f"{key}-{annotation_version}_path.ndjson"
+            with open(path_file, "w") as f:
+                for run in _filament_runs(insts):
+                    points = torch.stack([i.position_xyz for i in run])
+                    centre = points.mean(dim=0)
                     f.write(
                         json.dumps(
-                            {"type": "point", "location": {"x": x, "y": y, "z": z}}
+                            {
+                                "type": "path",
+                                "location": {
+                                    "x": float(centre[0]),
+                                    "y": float(centre[1]),
+                                    "z": float(centre[2]),
+                                },
+                                "path": [
+                                    {
+                                        "x": float(p[0]),
+                                        "y": float(p[1]),
+                                        "z": float(p[2]),
+                                    }
+                                    for p in points
+                                ],
+                                "n_monomers": len(run),
+                            }
+                        )
+                        + "\n"
+                    )
+            written[f"{key}-path"] = path_file
+
+    def _export_microtubule_paths(
+        self, written: dict[str, Path], output_dir: Path, annotation_version: str
+    ) -> None:
+        """One path per microtubule, per species."""
+        by_tube_code: dict[str, list[MicrotubuleInstance]] = {}
+        for tube in self.microtubule_instances:
+            by_tube_code.setdefault(tube.code, []).append(tube)
+        for code, tubes in by_tube_code.items():
+            key = f"{Path(code).stem}-microtubule"
+            path = output_dir / f"{key}-{annotation_version}_path.ndjson"
+            with open(path, "w") as f:
+                for tube in tubes:
+                    axis = tube.axis_xyz
+                    centre = axis.mean(dim=0)
+                    f.write(
+                        json.dumps(
+                            {
+                                "type": "path",
+                                "location": {
+                                    "x": float(centre[0]),
+                                    "y": float(centre[1]),
+                                    "z": float(centre[2]),
+                                },
+                                "path": [
+                                    {
+                                        "x": float(p[0]),
+                                        "y": float(p[1]),
+                                        "z": float(p[2]),
+                                    }
+                                    for p in axis
+                                ],
+                                "radius": tube.lattice.radius,
+                                "n_protofilaments": (tube.lattice.n_protofilaments),
+                            }
                         )
                         + "\n"
                     )
             written[key] = path
 
-        return written
+    def _export_bead_picks(
+        self,
+        written: dict[str, Path],
+        output_dir: Path,
+        annotation_version: str,
+        extent_xyz: torch.Tensor,
+    ) -> None:
+        """Every gold fiducial, as plain points, in one file."""
+        # Every fiducial goes in one file regardless of radius or
+        # population: nothing downstream distinguishes bead sizes, and
+        # under a [low, high] radius each instance has a unique size,
+        # so grouping by radius would write one file per bead.
+        key = "gold-bead"
+        path = output_dir / f"{key}-{annotation_version}_point.ndjson"
+        with open(path, "w") as f:
+            for bead in self.bead_instances:
+                corner_xyz = bead.position_xyz + extent_xyz / 2
+                x, y, z = (float(v) for v in corner_xyz)
+                f.write(
+                    json.dumps({"type": "point", "location": {"x": x, "y": y, "z": z}})
+                    + "\n"
+                )
+        written[key] = path
 
     def _packing_grid(
         self, target_shape: tuple[int, int, int], voxel_size: float

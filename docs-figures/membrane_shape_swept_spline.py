@@ -307,10 +307,9 @@ def figure_radius_variation() -> None:
 
     radius_variation_sigma_points uses the default (2.0), deliberately not
     a larger, intuitively "smoother" value -- see
-    generate_membrane_field_swept_spline's own docstring and
-    dev/swept_spline_radius_variation_sweep.py for why a larger sigma
-    collapses to a misleading monotonic taper at this module's typical
-    path lengths."""
+    generate_membrane_field_swept_spline's own docstring for why a larger
+    sigma collapses to a misleading monotonic taper at this module's
+    typical path lengths."""
     configs = [("radius_variation=0 (constant)", 0.0), ("radius_variation=0.3", 0.3)]
     fig, axes = plt.subplots(
         1,

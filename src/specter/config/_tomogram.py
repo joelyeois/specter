@@ -29,8 +29,7 @@ class TomogramConfig:
     per species.
 
     Any combination of membrane/filaments/targets/filler is valid as long
-    as at least one is non-empty -- there is no longer a separate non-
-    membrane "sphere-packing" mode/generator to choose between.
+    as at least one is non-empty.
     """
 
     # --- Specimen ---

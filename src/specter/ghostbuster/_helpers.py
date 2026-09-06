@@ -129,12 +129,13 @@ def _apply_kmask_inplace(V: torch.Tensor, kmask_half: torch.Tensor | None) -> No
     """
     Band-limit `V` in place with a half-spectrum k-mask.
 
-    Applied after every optimiser step. It used to be spelled as a centred
-    complex FFT round trip, ``real(ifft3(fft3(V, shift=True) * kmask,
-    shift=True))``: twelve ``roll`` passes and two complex 512^3 transforms,
+    Applied after every optimiser step. A centred complex FFT round trip,
+    ``real(ifft3(fft3(V, shift=True) * kmask, shift=True))``, computes the
+    same thing at twelve ``roll`` passes and two complex 512^3 transforms:
     137 ms and 6.5 GiB per step on a 512-box reconstruction, against a
     ~160 ms training step. The real-to-complex transform of a real volume
-    against the mask's unshifted half spectrum is the same operation.
+    against the mask's unshifted half spectrum is the same operation
+    without them.
 
     Parameters
     ----------

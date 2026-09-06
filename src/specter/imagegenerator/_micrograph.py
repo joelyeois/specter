@@ -444,9 +444,9 @@ class MicrographGenerator(BaseImager):
         ``move_to_cpu=True``, so the volume starts on the host. Uploading it is
         worth doing when it fits -- the scattering then reads it without a
         per-slice host transfer -- but at ``micrograph_size`` it often does not:
-        the default config's 500 x 4096 x 4096 canvas is 33.5 GB, and the
-        upload used to be unconditional, which OOM'd the very device
-        ``move_to_cpu`` had just moved the volume off.
+        the default config's 500 x 4096 x 4096 canvas is 33.5 GB, so an
+        unconditional upload OOMs the very device ``move_to_cpu`` just
+        moved the volume off.
 
         `IterativeScattering.multislice` accepts an off-device volume and
         streams it a slice at a time, so falling back costs per-slice

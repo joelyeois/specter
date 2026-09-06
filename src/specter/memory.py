@@ -36,7 +36,7 @@ its output); a batch-independent workspace is set by the template again::
 
 Constants were fit to measured `torch.cuda.max_memory_allocated` on an
 NVIDIA L40 (6bdf at 1.0 A, multislice + IceBank ice + `pad_fft=True`, the
-default path; `dev/perf-notebook-512/memsweep_stages.py`), sweeping
+default path), sweeping
 `n_pixels` over 128/256/384/512 and `batchsize` over 1/2/3/4/8. The peak is
 the solvation stage at every point:
 
@@ -59,13 +59,9 @@ since the cost of guessing low is a slower run while the cost of guessing
 high is an OOM crash. Cheaper configurations -- `pad_fft=False`,
 `ice_model="none"`, non-multislice scattering -- all measured *below* the
 prediction too, so one conservative constant covers the whole matrix rather
-than needing a per-model table.
-
-These are the 2026-09-02 numbers, after the forward pass stopped holding a
-separate crowd accumulator, a complex copy of the whole padded volume, a
-persistent rotation grid and a reflect-padded ice canvas (see
-`dev/perf-notebook-512/REPORT.md`); the previous fit (4.3 padded copies per
-particle, 11.2 template copies) over-predicted the new code by 1.4-2.4x.
+than needing a per-model table. Re-fit the constants after any change to
+what the forward pass holds at peak; a fit against an older, heavier
+forward pass over-predicts by 1.4-2.4x.
 """
 
 from __future__ import annotations
@@ -126,8 +122,8 @@ _CPU_SAFETY_FRACTION = 0.5
 #:
 #: Batching amortizes per-call overhead, but only until a single pass already
 #: saturates the device; past that a larger batch costs memory linearly and
-#: buys nothing. Measured on an L40 (dev/perf-bench/bench_batchsize_
-#: throughput.py, best of 3), per-particle speed against batch size:
+#: buys nothing. Measured on an L40 (best of 3), per-particle speed against
+#: batch size:
 #:
 #:   batch:              1     2     4     8    16    32    64
 #:   box  64 (1.05M/ptl)  1.00  1.40  1.76  1.93  1.84  1.91  1.62

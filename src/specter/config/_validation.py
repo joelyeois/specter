@@ -23,12 +23,13 @@ from ._scalar_range import parse_scalar_or_range
 # ---------------------------------------------------------------------------
 # Validation
 #
-# Physically impossible values used to travel all the way into the simulation
-# before failing -- a zero pixel_size surfaced as "ZeroDivisionError: float
-# division by zero", a negative n_pixels as "Trying to create tensor with
-# negative dimension", each ~10 s and six frames deep, naming nothing the user
-# typed. Worse, a negative dose or an amplitude contrast ratio of 1.5 ran to
-# completion and produced a plausible-looking, meaningless stack.
+# Without these checks a physically impossible value travels all the way into
+# the simulation before failing -- a zero pixel_size surfaces as
+# "ZeroDivisionError: float division by zero", a negative n_pixels as "Trying
+# to create tensor with negative dimension", each ~10 s and six frames deep,
+# naming nothing the user typed. Worse, a negative dose or an amplitude
+# contrast ratio of 1.5 runs to completion and produces a plausible-looking,
+# meaningless stack.
 #
 # These checks run off the config alone, before a structure is fetched or a
 # voxel is written.
@@ -247,7 +248,7 @@ def _require_valid_literals(config: Any) -> None:
 
     Click validates the CLI flags, but a TOML file bypasses that entirely --
     nothing enforces a `Literal` at runtime, so `scattering_model = "banana"`
-    in a config file used to sail through to the simulator.
+    in a config file would otherwise sail through to the simulator.
     """
     hints = get_type_hints(type(config))
     for f in fields(config):

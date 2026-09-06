@@ -32,8 +32,7 @@ from ._click_options import (
 # the same panel in each: "Specimen" (not "Structure & Potential") for what is
 # being imaged, with `ice_thickness` among it as a property of the sample
 # rather than a tuning knob, and `noise_model` beside the other two model
-# choices. All three disagreed with `simulate micrograph`/`tiltseries` until
-# 2026-08-28.
+# choices.
 _PARTICLE_STACK_GROUPS: list[tuple[str, list[str]]] = [
     # First, because it is the first question: unset, the run synthesizes its
     # own particles, and everything below applies as written. Given a file,

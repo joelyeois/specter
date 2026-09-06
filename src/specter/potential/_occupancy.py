@@ -17,10 +17,9 @@ depends on the render grid, since finer voxels make sharper cusps: the
 excluded volume that rule recovers runs from 0.36 of the molecule's own
 volume at 0.75 A/voxel to 0.87 at 4 A.
 
-A geometric field built from van der Waals radii was tried and removed on
-2026-09-01 (see 8599e49 to recover it). It is sharper -- 0.006 of full ice
-inside a molecule against the blur's 0.211 -- but it changes nothing any
-specter output can see, because a Gaussian blur CONSERVES the integral of
+A geometric field built from van der Waals radii is sharper -- 0.006 of
+full ice inside a molecule against the blur's 0.211 -- but it changes
+nothing any specter output can see, because a Gaussian blur CONSERVES the integral of
 V and therefore the total displaced water. It only moves where the
 displacement sits, taking too little from the interior and putting the
 same amount into a halo outside. Every shipped artifact either integrates

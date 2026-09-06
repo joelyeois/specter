@@ -86,8 +86,7 @@ def test_icebank_raises_for_oversized_request(tmp_path):
 
 def test_icebank_mlbop_energy_matches_source_quality(tmp_path):
     """A crop's local structure should be inherited from its source, not
-    degraded by the extraction itself -- same story validated at production
-    scale in dev/ice/seam_relax_256_*.py (crop vs source E_per_atom differ
+    degraded by the extraction itself (crop vs source E_per_atom differ
     only by a gentle edge-truncation effect)."""
     torch.manual_seed(42)
     gd = GradientSKIcemaker(n=32, dx=1.0, progressbars=False)
@@ -264,9 +263,8 @@ def test_icebank_generate_big_ice_deltas_request_smaller_than_tile_matches_densi
     for a 24 A request) used to have its single tile's full-box atom set
     wrapped almost entirely into the small destination grid via an
     unconditional periodic index wrap in _place_tiles, inflating density
-    by roughly (tile / request)^3 -- ~(64/24)^3 ~= 19x was observed before
-    the fix, for a smaller-scale repro of the ~5.6x measured at production
-    scale in dev/ice/analytic_tile_insertion_benchmark.py. Splatted mass
+    by roughly (tile / request)^3 -- ~(64/24)^3 ~= 19x here, ~5.6x at
+    production scale. Splatted mass
     (deltas.sum()) approximates atom count for a trilinear splat, so this
     checks it against the expected bulk-water atom count directly."""
     torch.manual_seed(5)
@@ -288,9 +286,8 @@ def test_icebank_generate_big_ice_deltas_request_smaller_than_tile_matches_densi
 
 def test_icebank_generate_big_ice_relaxation_improves_energy(tmp_path):
     """The core value proposition: naive tile concatenation (relax_steps=0)
-    should be measurably worse than the same tiling with seam relaxation
-    -- same story as dev/ice/seam_relax_256_assemble.py's naive-vs-relaxed
-    comparison, just at a much smaller/faster scale for a unit test."""
+    should be measurably worse than the same tiling with seam relaxation,
+    at a small, fast scale."""
     _make_cache_config(tmp_path, "config_000.pt", n=32, dx=1.0, n_steps=10)
     cache = IceBank(str(tmp_path), progressbars=False)
 

@@ -11,9 +11,8 @@ by how many protofilaments have to fit around the circumference) and the
 a whole number of dimers.
 
 Constants below are measured off deposited microtubule reconstructions
-rather than taken from a textbook; see ``dev/microtubule_frame_probe.py``,
-which reports for 3JAL (13-protofilament GMPCPP-microtubule + EB3) and
-6DPU (14-protofilament kinesin-microtubule):
+rather than taken from a textbook -- 3JAL (13-protofilament
+GMPCPP-microtubule + EB3) and 6DPU (14-protofilament kinesin-microtubule):
 
 ===================  ==============  ==============  =====================
 quantity             3JAL (13 pf)    6DPU (14 pf)    behaviour across N

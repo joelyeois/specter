@@ -621,9 +621,8 @@ class PotentialBuilder(L.LightningModule):
         `atom_species` bonded typing was given — every atom uses its plain,
         unbonded per-element scattering factor (no species table lookup).
 
-        Vectorized per unique element (see `_get_analytic_atom_coefficients`
-        for why: same per-atom-Python-loop cost this method used to pay,
-        fixed the same way) rather than per atom.
+        Vectorized per unique element rather than per atom (see
+        `_get_analytic_atom_coefficients` for why).
 
         Returns
         -------

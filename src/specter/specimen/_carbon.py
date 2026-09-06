@@ -1,52 +1,35 @@
 """
-Carbon support film generation -- a from-scratch replication of CryoTomoSim
-(CTS)'s ``gen_carbon.m``/``carbonshape`` alpha-shape geometry, replacing the
-earlier (deleted) analytic-boundary approach that used to live here.
+Carbon support film generation: a from-scratch replication of CryoTomoSim
+(CTS)'s ``gen_carbon.m``/``carbonshape`` alpha-shape geometry.
 
-That earlier approach (independent per-point angular jitter on a circle,
-linearly interpolated -- see git history for its own module docstring)
-looked artificially smooth in practice: flat top/bottom faces (no z
-roughness at all -- the noise was confined to the rim), a spatially
-constant density (a binary occupancy mask times a scalar mean inner
-potential, so no shot noise/granularity), and a rim that was a pure
-function of angle, so every z-slice shared the exact same boundary (no
-islands, overhangs, or bays -- topologically a perfect disk). It was a
-deliberate, reasoned departure from an even earlier point-cloud/alpha-shape
-implementation, for real concerns (see that removed docstring): a
-fixed-point-count cloud degrades to sparse speckle as `target_shape`/
-`voxel_size` grow, and a handful of smooth analytic modes can't reach genuine
-per-pixel jaggedness. This implementation restores the alpha-shape
-approach but fixes both: point count now scales with a real physical seed
-*density* (`_SEED_VOLUME_PER_POINT`, atoms/A^3-like, not a fixed count), so
-it doesn't thin out at larger volumes/finer grids, and roughness comes from
-displacing real 3D points before tetrahedralizing (correlated at the seed
-spacing, genuinely 3D, can pinch off islands and form overhangs) rather
-than from independent per-angle noise.
+A roughened rim needs genuinely 3D noise. An analytic boundary (per-angle
+jitter on a circle, linearly interpolated) looks artificially smooth: flat
+top and bottom faces, a spatially constant density, and a rim that is a
+pure function of angle, so every z-slice shares the same boundary and the
+hole is topologically a perfect disk with no islands, overhangs or bays.
+The alpha-shape approach gets all of those from displacing real 3D seed
+points before tetrahedralizing (correlated at the seed spacing, able to
+pinch off islands and form overhangs). Its own failure mode, a fixed point
+count thinning to sparse speckle as `target_shape`/`voxel_size` grow, is
+avoided by scaling the point count with a physical seed *density*
+(`_SEED_VOLUME_PER_POINT`) rather than a fixed count.
 
-Faithfully ported from a literal, unabridged translation of CTS's MATLAB
-source, validated cell-by-cell against github.com/carsonpurnell/
-cryotomosim_CTS. Deposition calibration is described below. Two things
-are deliberately *not* carried over from that from-scratch reference,
-both by design decisions specific to production use:
+Ported from a literal translation of CTS's MATLAB source, validated
+cell-by-cell against github.com/carsonpurnell/cryotomosim_CTS. Two things
+are deliberately *not* carried over:
 
-- Hole placement here is a caller-supplied `hole_center` (typically from
+- Hole placement is a caller-supplied `hole_center` (typically from
   `edge_hole_center`, a deterministic solve for a specific edge_fraction/
-  edge_side), not CTS's own semi-random offset formula -- which its own
+  edge_side), not CTS's own semi-random offset formula, which its own
   MATLAB comment flags as "mostly working, needs better central point
-  rng". `edge_hole_center` is strictly better-engineered (controllable,
-  reproducible coverage) and predates this module; nothing in this
-  rewrite's motivation (rim roughness, deposition physics -- see below)
-  concerned hole placement, so it's kept as-is rather than replaced with
-  CTS's own weaker mechanism.
+  rng".
 - Deposition uses a MIP-calibrated flat weight (`_deposit_splat`), not
-  real per-atom scattering physics (prototyped separately and measured
-  at ~40x more expensive at equal atom count): the film is a support
-  artifact that nothing downstream resolves
-  atomically, so the extra cost buys nothing here. `_deposit_splat`'s
-  weight is calibrated so the *bulk* result is physically correct anyway
-  (matches the real-physics path's mean inner potential (MIP) to within
-  measurement noise -- see that function's docstring), just without
-  per-atom radial structure.
+  real per-atom scattering physics (~40x more expensive at equal atom
+  count): the film is a support artifact that nothing downstream resolves
+  atomically, so the extra cost buys nothing. `_deposit_splat`'s weight is
+  calibrated so the *bulk* result matches the real-physics path's mean
+  inner potential to within measurement noise (see that function's
+  docstring), just without per-atom radial structure.
 
 References
 ----------
@@ -466,9 +449,8 @@ class CarbonFilmGenerator:
     """
     Generates a carbon support film -- a roughly planar slab, with a
     circular hole cut out and a genuinely 3D, randomly-roughened rim -- via
-    alpha-shape geometry at a MIP-calibrated flat deposition. See module
-    docstring for the full derivation and what changed from the earlier
-    (deleted) implementation.
+    alpha-shape geometry at a MIP-calibrated flat deposition. See the
+    module docstring for the derivation.
 
     Parameters
     ----------

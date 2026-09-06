@@ -1,8 +1,7 @@
 """
 Public membrane specimen generator.
 
-Ties together the four membrane submodules built this session into one
-class: organic shape (``_field``), calibrated bilayer potential
+Ties the four membrane submodules together into one class: organic shape (``_field``), calibrated bilayer potential
 (``_profile``), anti-aliased rasterization onto an output grid
 (``_raster``), and normal-aligned transmembrane protein insertion
 (``_placement``).
@@ -530,12 +529,10 @@ class MembraneGenerator:
         scales with it as lipid-volume conservation requires.
 
         Default 38.0, inside the published 36-39 Å range for fluid
-        phosphatidylcholine. This was 30.0 until 2026-08-30, the midpoint
-        of `polnet`'s `MB_THICK_RG` range (25.0, 35.0) -- a range that
-        sits entirely below the experimental one, and which another
-        simulator's default has no standing to override. A 30 Å bilayer
-        also renders about 25% less integrated potential than a 38 Å one,
-        since the integral scales with thickness.
+        phosphatidylcholine. `polnet`'s `MB_THICK_RG` range (25.0, 35.0)
+        sits entirely below the experimental one and is not followed: a
+        30 Å bilayer renders about 25% less integrated potential than a
+        38 Å one, since the integral scales with thickness.
 
         The reference lipid template's own geometry gives 40 Å
         (:func:`~specter.specimen.membrane._profile.
@@ -547,12 +544,10 @@ class MembraneGenerator:
     bilayer_layer_sigma_a : float, optional
         ADDITIONAL Gaussian broadening applied along z, Å. Default 0.0.
 
-        This was the leaflet peak width of the analytic two-Gaussian
-        profile, defaulting to 1.25. `generate()` no longer uses that
-        profile, and the measured one carries whatever width its atomic
-        model implies, so there is no width left here to set -- only
-        extra blur to add on top, which the rasterizer's own anti-
-        aliasing already handles for the render grid. Raise it only to
+        The measured profile carries whatever leaflet width its atomic
+        model implies, so there is no width to set here -- only extra
+        blur to add on top, which the rasterizer's own anti-aliasing
+        already handles for the render grid. Raise it only to
         deliberately smear a bilayer.
     transmembrane_specs : list of TransmembraneSpec, optional
         Transmembrane protein species to attempt placing. Default None (no
@@ -651,9 +646,7 @@ class MembraneGenerator:
         above), regardless of how cheaply generation itself is made via
         the coarse-then-upsample mechanism. When `target_shape` is
         auto-sized (omitted), exceeding this SHRINKS the organelle's own
-        physical size to fit (same mechanism, and same warning style, as
-        `max_field_voxels` used to apply directly before generation-
-        resolution decoupling existed) -- this only fires for genuinely
+        physical size to fit, with a warning -- this only fires for genuinely
         extreme requests, since `max_field_voxels`-based decoupling above
         already handles the common case of "fits fine once materialized,
         just too expensive to generate directly" without shrinking

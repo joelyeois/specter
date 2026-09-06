@@ -4,10 +4,9 @@ Gold fiducial bead generation -- a from-scratch port of CryoTomoSim (CTS)'s
 
 Generic, self-contained physics (no CTS-specific placement logic). Used by
 ``specimen.tomogram.TomogramSpecimenGenerator`` (the generator behind
-`specter build tomogram`) -- see its own module docstring. Originally
-shared with ``specimen.cryotomosim``'s now-deleted CTS-replica generator;
-kept as its own module rather than folded into ``tomogram/generator.py``
-directly, since nothing about this physics is tomogram-generator-specific.
+`specter build tomogram`) -- see its own module docstring. Its own module
+rather than part of ``tomogram/generator.py``, since nothing about this
+physics is tomogram-generator-specific.
 
 ``BeadGenerator`` is a bulk-material model -- there is no atomic/molecular
 structure to hand ``specter.potential.PotentialBuilder``, so intensity has
@@ -356,9 +355,9 @@ class BeadGenerator:
 
     Notes
     -----
-    Two earlier options were removed rather than kept as knobs.
+    Two alternatives are deliberately not options.
 
-    ``fill='gas'`` reproduced CTS's own model: atoms scattered uniformly
+    A ``fill='gas'`` would reproduce CTS's own model: atoms scattered uniformly
     at the bulk number density and binned into voxels. It is a Poisson
     gas, so per-voxel occupancy carries shot noise a crystalline solid
     does not have -- ~10% of the projected signal at a 5 Å voxel
@@ -366,11 +365,11 @@ class BeadGenerator:
     collapses each atom's whole potential integral into one voxel. There
     was no voxel size at which it was more accurate.
 
-    ``shape='sphere'``/``'wulff'`` offered an exact sphere (CTS's
+    A ``shape='sphere'``/``'wulff'`` would offer an exact sphere (CTS's
     idealisation, not a shape gold forms) and fcc gold's equilibrium
     truncated octahedron. The latter is the right model for an *annealed
     single crystal*, but commercial cryo-ET fiducials are citrate-reduced
-    colloidal gold: multiply-twinned and irregular. It also gave a
+    colloidal gold: multiply-twinned and irregular. It also gives a
     population no shape variety, only pose variety -- every bead the same
     solid seen from a different angle.
     """

@@ -127,9 +127,9 @@ def matched_index_correlation(
     for a random pairing. Poses aligned to the model put the matched value
     well above the shuffled one; poses from a refinement that was never
     aligned to the model (no Align 3D step against it) put the two at the
-    same level. This is the check that the EMPIAR-11377 sweep of
-    2026-09-01/02 lacked: sixty classifications could not see that every
-    simulated view was rotated 142 degrees from its experimental one.
+    same level. No rotationally averaged statistic can see this: on
+    EMPIAR-11377, sixty classifications missed that every simulated view
+    was rotated 142 degrees from its experimental one.
 
     Parameters
     ----------
@@ -173,8 +173,8 @@ def edge_band_means(
     box edge inward: 0-2, 2-4, 4-8, 8-16 px.
 
     A deterministic pattern shared by every simulated particle -- the
-    Fresnel ring an ice slab truncated at the field of view produced until
-    2026-09-02 -- shows up here as a mean well away from zero, while every
+    Fresnel ring an ice slab truncated at the field of view produces --
+    shows up here as a mean well away from zero, while every
     variance-based statistic reports nothing. The experiment sits at a few
     thousandths.
     """
@@ -269,9 +269,9 @@ def annulus_std_profile(
     averaged over particles.
 
     Outside the particle this measures background structure: neighbours,
-    ice, thickness gradients. It is what set the ice thickness and neighbour
-    spacing in the 2026-09-03 verification, and what exposed a close-packed
-    CCMV monolayer the simulator cannot reproduce.
+    ice, thickness gradients. It is what sets the ice thickness and
+    neighbour spacing, and what exposes a close-packed monolayer (CCMV)
+    the simulator cannot reproduce.
     """
     n = stack.shape[-1]
     yy, xx = np.mgrid[:n, :n]

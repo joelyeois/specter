@@ -466,7 +466,7 @@ class PDB:
         # Biopython parses lazily via the `structure` property: when a monomer
         # library completes the model below, its atom list supersedes
         # Biopython's entirely and parsing the file twice would be pure waste
-        # (20 s of the 30 s a 532k-atom assembly used to take).
+        # (20 s of the 30 s a 532k-atom assembly takes).
         self._structure: "Structure | None" = None
 
         # bonded-neighbor species descriptors (e.g. for Shtyrov potentials)

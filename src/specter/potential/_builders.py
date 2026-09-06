@@ -52,10 +52,10 @@ def compute_supersampling_parameters(
     middle ``j`` of an odd ``n_pooled``. An even pooled kernel has no such
     voxel; its origin sits between two voxels, and every potential built
     by convolving with it lands half a voxel off the coordinates it was
-    built from. That was the case for 20 of the 36 pixel sizes between 0.5
-    and 4.0 Å until 2026-09-02 (1.0 Å happened to pool to 5^3 and was
-    exact; 0.731 Å pooled to 8^3 and 1.5 Å to 4^3), and it is what put
-    an ice canvas's face plane at half density (see
+    built from. Letting the pooled size fall out of the fine-grid rounding
+    makes it even for 20 of the 36 pixel sizes between 0.5 and 4.0 Å
+    (0.731 Å pools to 8^3 and 1.5 Å to 4^3; 1.0 Å happens to give 5^3),
+    which puts an ice canvas's face plane at half density (see
     :func:`potential_from_deltas`). Keeping the fine grid even with an odd
     pooled size needs an even supersampling factor, so an odd one is
     doubled.
@@ -794,7 +794,7 @@ _LOBATO_MIN_RCUT = [
 
 # Peng (gemmi c4322) fallback table. gemmi has no c4322 entry for Z=99-103
 # (the heaviest synthetic actinides/transactinides), so those rows use a
-# safe fallback of 5.0 (matching the old fixed default) rather than an
+# safe fallback of 5.0 rather than an
 # extrapolated number -- these elements essentially never appear in cryo-EM
 # structures.
 _PENG_MIN_RCUT = [

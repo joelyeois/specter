@@ -11,13 +11,8 @@ two independently offset surfaces, they cannot self-intersect on concave
 geometry as long as the local curvature radius stays above ``t/2``
 everywhere, which the curvature-capping step guarantees.
 
-Currently consumed by ``_field_swept_spline.py`` (a correlated random walk
-of spherical sources, fed through the same ``blend_field``/``cap_curvature``
-machinery) -- the module's own top-level field generator that used to live
-here, ``generate_membrane_field`` (isotropically-scattered sources, i.e. a
-"metaball" blend), was deleted along with the deprecated
-``shape_backend="metaball"`` it backed; see git history if either is ever
-needed as a reference again.
+Consumed by ``_field_swept_spline.py``, which feeds a correlated random
+walk of spherical sources through ``blend_field``/``cap_curvature``.
 
 All lengths are physical (Å); the working grid's voxel spacing is a
 parameter independent of any downstream output voxel size, so shape fidelity
@@ -277,7 +272,7 @@ def cap_curvature(
 
 
 def _warn_if_clipped_at_boundary(phi: torch.Tensor) -> bool:
-    """Warn (as before) and return whether the solid interior touches
+    """Warn and return whether the solid interior touches
     phi's own boundary, so callers can act on it programmatically instead
     of only seeing the warning (see MembraneField.clipped_at_boundary)."""
     boundary = torch.cat(
@@ -295,9 +290,8 @@ def _warn_if_clipped_at_boundary(phi: torch.Tensor) -> bool:
         warnings.warn(
             "the membrane's solid interior (phi < 0) touches shape_zyx's "
             "boundary -- the organic shape is being clipped by the working "
-            "grid rather than tapering to zero inside it (a real, "
-            "previously observed failure mode: it produces an unphysical "
-            "flat cut where the box face truncates the shape). Increase "
+            "grid rather than tapering to zero inside it, which produces an "
+            "unphysical flat cut where the box face truncates the shape. Increase "
             "shape_zyx, or reduce the shape's own size parameters, so its "
             "full extent fits within the grid.",
             stacklevel=2,

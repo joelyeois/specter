@@ -5,9 +5,9 @@ The one rule every ice integration point shares: a voxel takes ice in
 proportion to the fraction of it not already occupied, read off the
 potential by :func:`~specter.potential.potential_occupancy`. Doing that a
 slab at a time bounds memory, and it has one subtlety, which is why the
-bookkeeping lives here rather than at each call site (it used to be
-written three times, in ``ParticleGeneratorBase.solvate``,
-:func:`~specter.ice.blend_ice_into_volume` and its host-volume branch).
+bookkeeping lives here rather than at each of its call sites
+(``ParticleGeneratorBase.solvate``, :func:`~specter.ice.blend_ice_into_volume`
+and its host-volume branch).
 
 The occupancy blur reads a halo of slices beyond its slab. On the low side
 that halo overlaps the previous slab, which has already had its ice added:

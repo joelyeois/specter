@@ -8,20 +8,13 @@ depending on species-size diversity, well below random-close-packing).
 This is the backend behind `specter build tomogram`
 (`specimen.tomogram.TomogramSpecimenGenerator`).
 
-Benchmarked in ``dev/packing_algorithms.py`` against several other
-candidates (naive/voxel-grid RSA, Lubachevsky-Stillinger, a CellPACK-style
-incremental distance field, an SDF-scored variant, a periodic force-biased
-relaxation reaching substantially higher density but with no
-obstacle-avoidance mechanism, and Tetris-style contact-correlation
-packing) -- see that file for the full comparison; this RSA
-implementation is the one winner promoted here (began as
-``pack_rsa_batched`` there). The force-biased and Tetris-style approaches
-were themselves promoted into this package at one point
-(``pack_hard_spheres_3d_dense``, `specimen.packing.tetris`) but never
-gained a real caller beyond their own generators, which were themselves
-superseded by `TomogramSpecimenGenerator`; both were removed rather than
-carried along unused -- see git history if either is ever needed as a
-reference again.
+Chosen over naive/voxel-grid RSA, Lubachevsky-Stillinger, a CellPACK-style
+incremental distance field, an SDF-scored variant, Tetris-style
+contact-correlation packing, and a periodic force-biased relaxation. The
+last reaches substantially higher density but has no obstacle-avoidance
+mechanism, and its per-iteration Python-loop cost runs into hours on the
+candidate pools a production-scale tomogram (hundreds of voxels per axis)
+draws; RSA's ceiling, reached in seconds, is the target here.
 """
 
 from __future__ import annotations

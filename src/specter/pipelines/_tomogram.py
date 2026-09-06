@@ -516,7 +516,7 @@ def build_tomogram_generator(config: TomogramConfig) -> TomogramSpecimenGenerato
         # auto-sizes a small working grid from the organelle's own size when
         # omitted (see its own docstring), instead of every instance
         # rendering on a working grid the size of the WHOLE tomogram
-        # canvas, the old behaviour. A [[membrane]] entry can still request
+        # canvas. A [[membrane]] entry can still request
         # a specific target_shape explicitly (e.g. to match a scale
         # requirement of its own), popped here rather than left for
         # MembraneGenerator's **kwargs since it needs a tuple() cast like

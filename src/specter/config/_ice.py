@@ -54,10 +54,8 @@ class IceCacheConfig:
     # "cpu" | "cuda" | "cuda:0" | a bare GPU index | a comma-separated list of
     # GPU indices ("0,1,2,3"). Multiple devices shard whole configs across one
     # worker process per device, so N GPUs build a library roughly N times
-    # faster -- but they have to be named. There is no "auto": it used to mean
-    # "every visible GPU" here and nowhere else, which made the same word a
-    # crash on `specter simulate particles` and a silent cuda:0 on `specter
-    # reconstruct particle`. See `specter.devices.parse_device`.
+    # faster -- but they have to be named. There is no "auto"; see
+    # `specter.devices.parse_device`.
     device: str = "cuda"
 
     # --- Output ---

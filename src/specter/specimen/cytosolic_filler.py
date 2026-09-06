@@ -32,8 +32,8 @@ only for the *ratio* between species -- see build_filler_pool_specs.
 
 The paper's table has 21 rows; only 20 are listed here. Its 2AWB entry
 (bacterial 70S ribosome) was obsoleted by the PDB on 2014-12-10 and merged
-into 4V4Q -- confirmed live against RCSB (2026-07-24: 2AWB 404s, the other
-20 all 200 OK). Dropped rather than repointed to 4V4Q, since it would have
+into 4V4Q (2AWB 404s at RCSB; the other 20 resolve). Dropped rather than
+repointed to 4V4Q, since it would have
 just duplicated a ribosome-class target's size range anyway.
 
 This is one reasonable, published reference set for "generic crowded

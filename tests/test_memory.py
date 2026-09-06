@@ -65,8 +65,8 @@ def test_estimate_peak_matches_measured_l40_sweep() -> None:
     """
     gib = 2**30
     measured_bytes = {
-        # (nxy, batchsize): measured peak, 2026-09-02 sweep
-        # (dev/perf-notebook-512/memsweep_results.txt)
+        # (nxy, batchsize): measured peak on an L40, the sweep memory.py's
+        # constants were fit to
         (128, 1): int(0.38 * gib),
         (128, 4): int(0.54 * gib),
         (128, 8): int(0.72 * gib),

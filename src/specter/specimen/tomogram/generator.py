@@ -1,161 +1,59 @@
 """
-TomogramSpecimenGenerator: assembles a full specimen tomogram from an
-optional organic membrane -- transmembrane proteins on the bilayer, plus
-densely packed cytosolic and vesicle-lumen protein populations, region-
-gated against the membrane's own geometry so a "lumen" species can only
-land inside an enclosed compartment and a "cytosol" species can only land
-outside one -- plus optional scattered filament species (e.g. F-actin),
-an optional carbon support film, and optional gold fiducial beads.
+TomogramSpecimenGenerator: the specimen generator behind `specter build
+tomogram`. Assembles a tomogram from any combination of organic membranes
+(with transmembrane proteins on the bilayer), scattered filaments (F-actin,
+microtubules), a carbon support film, gold fiducial beads, and densely
+packed cytosolic and vesicle-lumen protein populations. Any combination is
+valid as long as at least one is non-empty; with no membranes the whole
+volume is one cytosol region (see `._regions`).
 
-This is the ONE specimen generator behind `specter build tomogram`:
-`membrane_instances` may be empty (no membranes at all -- the whole volume
-is then one cytosol region, since `classify_membrane_regions` already
-treats "no membrane" that way by design, see `._regions`'s own docstring),
-`protein_specs` may be empty (membranes/filaments with no packed protein
-population), and `filament_specs` may be empty -- any combination is
-valid as long as at least one of the three is non-empty. There is no
-longer a separate non-membrane sphere-packing generator/mode: a species in
-`protein_specs` can be placed either at an exact count
-(`TomogramProteinSpec.n_copies`, ground-truth "target" semantics) or
-ratio-weighted up to `occupancy_fraction` of its region
-(`TomogramProteinSpec.ratio`, "filler"/crowding semantics), matching what
-the now-deleted `SpherePackingSpecimenGenerator`'s two-stage target/filler
-split used to provide, now region-gated too.
+Generation order is carbon film, membranes, filaments, beads, then protein
+fill; each stage avoids what the earlier ones placed. Protein species are
+region-gated against the composited membranes, so a "lumen" species can
+only land inside an enclosed compartment and a "cytosol" species only
+outside one, and are placed either at an exact count
+(`TomogramProteinSpec.n_copies`, ground-truth "target" semantics, placed
+first within each region) or ratio-weighted up to `occupancy_fraction` of
+the region (`TomogramProteinSpec.ratio`, "filler" semantics).
 
-Generation order is membranes, then filaments, then protein fill (exact-
-count species per region before ratio-weighted ones) -- see `generate()`'s
-own body. Placed filament voxels (`instance_labels > 0` right after
-`_stamp_filaments`) are folded into the exclusion field/sampling mask used
-by the protein-fill stage, so packed spheres are kept clear of already-
-placed filaments the same way they're already kept clear of the membrane
-shell -- both are bounding-sphere-vs-distance-field approximations, not an
-exact voxel-overlap guarantee (a placed protein's true, non-spherical
-rendered shape can still graze a filament or the shell very close to the
-boundary; consistent with the approximate, "reject and move on" philosophy
-already used everywhere else in this generator).
+Placement is Random Sequential Addition (``specimen.packing``) with an
+exclusion field, and the collision tests are bounding-sphere-against-
+distance-field approximations rather than exact voxel-overlap guarantees:
+a placed protein's true rendered shape can still graze a filament, the
+membrane shell or the carbon film close to the boundary. Anything that
+does not fit is dropped rather than retried ("reject and move on"). Two
+consequences of that:
 
-Composes three independently-developed pieces rather than reimplementing
-any of them: ``specimen.membrane.MembraneGenerator`` (organic shape +
-transmembrane placement, unmodified), :func:`.classify_membrane_regions`
-(shell/lumen/cytosol masks via connected-components flood-fill, this
-subpackage), and ``specimen.packing.pack_hard_spheres_3d``'s
-`exclusion_distance_field` (obstacle- and region-aware RSA, this session).
-Deliberately built on the RSA backend, not the periodic force-biased
-relaxation that used to live alongside it as `pack_hard_spheres_3d_dense`
-(since deleted -- see git history if it's ever needed as a reference
-again): a production-scale tomogram (hundreds of voxels per axis) draws
-candidate pools far too large for that backend's per-iteration Python-loop
-cost to stay practical (verified to run into the hours at that scale) --
-RSA's own ~28-41% ceiling, reached in seconds, was the actual target here,
-not the force-biased backend's higher-but-impractical one.
+- The carbon film is painted into the canvas first and everything after
+  it avoids it, but membrane placement only avoids it as a bounding
+  sphere, so whatever part of an instance's rendered density would land on
+  carbon is zeroed as it is merged into the canvas (the `to_composite`
+  loop), keeping the volume and the instance's shell label consistent.
+  Filament placement has no obstacle-avoiding random walk, so a monomer
+  landing inside the film is dropped after the fact (`_stamp_filaments`).
+- Filaments are not region-gated (they have no fixed geometry to gate
+  against) and do not avoid the membrane shell or each other; they are
+  rendered before protein packing purely so the packer can avoid them.
 
-A clean-room second approach relative to CTS (CryoTomoSim), not a port of
-its placement/membrane algorithms -- those used to live in a separate
-generator (``cryotomosim.py``, ``_cts_membrane.py``, ``_cts_placement.py``),
-deleted once this generator reached feature parity with it (carbon
-film/gold beads were the last two gaps -- see git history for that
-generator if the CTS algorithm itself is ever needed as a reference
-again). This generator DOES still reuse ``.._carbon``
-(``CarbonFilmGenerator``) and ``.._grid`` (``BeadGenerator``) for the
-carbon film/gold bead physics below -- those modules are generic
-bulk-material potential code with no CTS-specific placement logic of their
-own (see each module's own docstring), so they outlived the deleted
-generator rather than going with it.
-``_cts_membrane.py`` did NOT similarly outlive it: its only other consumer
-was ``specimen.membrane``'s own deprecated ``shape_backend="alpha_shape"``,
-removed in the same cleanup -- see git history if either is ever needed as
-a reference again.
+Membranes: each :class:`MembraneInstance` has its own `MembraneGenerator`
+(potentially a different `shape_backend`), renders in its own centered
+local frame on a working grid auto-sized to the organelle, and is
+max-merged into the shared canvas at a `position_xyz` resolved by
+`pack_hard_spheres_3d` (treating the instance as a bounding sphere against
+other instances, the box walls and the carbon film). Shell/lumen/cytosol
+regions are classified once on the composite; `classify_membrane_regions`'s
+connected-components approach handles several disjoint compartments
+without special-casing. An instance whose `clipped_at_boundary` is set
+after generation (its local grid was too small for what was drawn) is
+dropped with a warning; the bounding-sphere check is necessarily
+approximate for `swept_spline`'s wandering shape.
 
-Carbon film (``carbon_film_spec``) is painted directly into the shared canvas
-before anything else is placed, then everything placed afterward avoids
-it -- membrane placement and filaments here, and (via
-``classify_membrane_regions`` reading carbon's own high density as
-"shell", the same bucket a real membrane bilayer occupies) beads and
-cytosol/lumen protein fill below. Membrane placement itself only avoids
-carbon via a bounding-sphere-vs-distance-field approximation (the same
-kind used everywhere else in this module), so an irregular organelle's
-true rendered shape can still graze it; whatever part of an instance's
-own rendered density would land on carbon regardless gets clipped
-(zeroed) right before it's merged into the shared canvas, as a safety
-net, so both the composited volume and that instance's own ground-truth
-shell label consistently exclude it (see the `to_composite` loop below).
-Filament placement itself has no obstacle-avoiding random
-walk (a bigger algorithmic change than clipping density post-hoc), so a
-monomer instance landing inside the film is simply dropped after the
-fact (see ``_stamp_filaments``) rather than steered around it -- the one
-remaining case unhandled here.
-
-Gold fiducial beads (``bead_specs``) are scattered via the same RSA
-backend (``pack_hard_spheres_3d``) used for membrane instances and protein
-packing -- unlike the deleted CTS-derived generator's own bead placement,
-which stayed on a slower sequential particle placer with a standing TODO
-noting beads are "literally already spheres" and a natural RSA candidate.
-Beads are placed right after filaments (see
-``_stamp_beads``), avoiding the membrane shell and any already-placed
-filaments, and are themselves then avoided by the cytosol/lumen protein-
-fill stage that follows (folded into the same ``instance_labels``-derived
-obstacle mask filaments already use) -- a real accuracy improvement over
-the CTS port's fully independent, unaware-of-anything-placed-after-it bead
-placement.
-
-Supports MULTIPLE independently-configured membrane instances
-(:class:`MembraneInstance`, each with its own `MembraneGenerator` --
-potentially a different `shape_backend` per instance) composited into
-one shared tomogram volume:
-generate each instance in its own centered local frame (unmodified
-`MembraneGenerator`, no changes needed there), max-merge the resulting
-density volumes into the shared canvas, then classify shell/lumen/cytosol
-regions ONCE on the composite -- `classify_membrane_regions`'s connected-
-components approach already handles multiple disjoint compartments (several
-separate vesicles, whether from one instance or several) without any
-special-casing.
-
-Each instance renders on its OWN local working grid -- typically much
-smaller than the shared canvas (`MembraneGenerator`'s own `target_shape`
-auto-sizes from the organelle's size when omitted; see that class's own
-docstring) -- then `clip_insert_bounds`-based compositing crops/places it
-into the shared canvas at `position_xyz`, the same mechanism already used
-for transmembrane protein templates. This was always how the compositing
-math worked (`_insert_volume_max`/`_insert_shell_label` never required a
-same-shape `local`); it just wasn't exercised until `MembraneGenerator`
-gained auto-sizing, since giving every instance a hand-picked box the size
-of the whole tomogram was the only practical option before that.
-
-Every instance's `position_xyz` is resolved by `generate()` via
-`pack_hard_spheres_3d` (the same RSA backend used for cytosol/lumen
-protein packing below), treating each instance as a bounding sphere -- an
-instance that doesn't fit without colliding (with another membrane
-instance, the box walls, or the carbon film) is dropped rather than
-retried at a new position, matching this module's "reject and move on"
-philosophy elsewhere. There is no manual-placement override; every
-instance goes through the same collision check. An instance whose
-own `clipped_at_boundary` ends up `True` after `generate()` (its local grid
-was too small for what actually got drawn) is also dropped, with its own
-warning -- caught even though the bounding-sphere check above already tries
-to avoid this, since that check is necessarily approximate for
-`swept_spline`'s wandering-path shape.
-
-Per-instance voxel labels exist for TWO separate categories:
-`membrane_labels` (which membrane instance a shell voxel belongs to, new)
-and `instance_labels` (which cytosol/lumen PROTEIN instance a voxel
-belongs to, as before). Transmembrane placements still get no per-instance
-voxel labels (their density is correctly present in the volume via
-`MembraneGenerator.place_transmembrane` itself, unmodified here) -- a
-documented gap, not an oversight.
-
-Optionally also scatters filament species (e.g. F-actin, microtubules)
-through the tomogram via ``specimen.filament.place_filaments`` --
-specter-native random-walk placement, with no region-gating (filaments are
-dropped anywhere in the volume regardless of cytosol/lumen/membrane-shell
-classification) and no collision avoidance against the membrane shell or
-against each other.
-Rendered right after membranes, BEFORE cytosol/lumen protein packing (see
-module docstring) -- unlike the membrane shell, filaments themselves have
-no fixed geometry to region-gate against, so this is purely an ordering
-choice, not a region restriction -- and stamped as the first entries in
-the shared `instance_labels` volume (protein instances continue the same
-instance-id counter afterward) so filament monomers are visible in the
-segmentation ground truth alongside cytosol/lumen protein instances.
+Labels: `membrane_labels` records which membrane instance a shell voxel
+belongs to; `instance_labels` records which filament monomer (stamped
+first) or cytosol/lumen protein instance (continuing the same id counter)
+a voxel belongs to. Transmembrane placements get no per-instance voxel
+labels; their density is present in the volume via
+`MembraneGenerator.place_transmembrane`.
 """
 
 from __future__ import annotations
@@ -634,7 +532,7 @@ class TomogramSpecimenGenerator:
         # on one device). Set to "cpu" to decouple them from `device`: all
         # per-particle/per-instance COMPUTE (PotentialBuilder rendering,
         # rotate_volume, MembraneGenerator field generation) still runs on
-        # `device` (GPU, for speed) exactly as before, but each small
+        # `device` (GPU, for speed), but each small
         # rotated/rasterized result is moved to `accumulator_device` right
         # before being stamped into the big canvas -- letting the canvas
         # itself be sized by system RAM instead of GPU VRAM (e.g. a
@@ -739,15 +637,13 @@ class TomogramSpecimenGenerator:
         # this module's own "reject and move on" packing philosophy rather
         # than retrying at new positions. Instances with an explicit
         # position_xyz are placed as given and NOT included in this
-        # collision check (a known v1 gap -- see module docstring).
+        # collision check.
         _membrane_phase_start = phase_start(
             "Membranes", disable=not self.progressbars or not self.membrane_instances
         )
         # Sub-phases, so this reports like the species phases below rather
-        # than as one opaque total. At the 2 A production grid this phase is
-        # over half the run and used to print a single line, which made
-        # "what is slow here" a profiling exercise instead of a glance at
-        # the output.
+        # than as one opaque total: at the 2 A production grid this phase is
+        # over half the run.
         _membrane_place_start = phase_start(
             "  Placement", disable=not self.progressbars or not self.membrane_instances
         )
@@ -1231,16 +1127,13 @@ class TomogramSpecimenGenerator:
         pdb_cache: dict[str, PDB] = {}
 
         # Pre-load every unique cytosol/lumen pdb_source ONCE, up front,
-        # concurrently across self.render_workers -- measured directly on a
-        # 161-species production-scale run that PDB fetch+parse (not
-        # rendering) was the single largest bottleneck (~45% of total wall
-        # time) precisely because this loop used to run fully serially, one
-        # species at a time, entirely outside render_workers' reach. Uses
+        # concurrently across self.render_workers: done serially, PDB
+        # fetch+parse (not rendering) is the single largest cost of a
+        # 161-species production-scale run, ~45% of total wall time. Uses
         # PROCESSES, not threads (build_pdb_cache_concurrently, not
-        # build_templates_concurrently) -- also measured directly:
-        # thread-pooling this specific step gave ZERO wall-clock benefit
-        # despite dispatching correctly, because Biopython's structure
-        # parser doesn't release the GIL for most of its work. See
+        # build_templates_concurrently): thread-pooling this step measured
+        # ZERO wall-clock benefit, because Biopython's structure parser
+        # doesn't release the GIL for most of its work. See
         # build_pdb_cache_concurrently's own docstring for the spawn/
         # __main__-guard caveat that comes with using processes here.
         unique_sources = sorted({s.pdb_source for s in self.protein_specs})
@@ -1346,11 +1239,9 @@ class TomogramSpecimenGenerator:
             exact_specs = [s for s in specs_here if s.n_copies is not None]
             ratio_specs = [s for s in specs_here if s.n_copies is None]
 
-            # Exact-count ("target") species placed FIRST within this
-            # region -- same two-stage exact-then-exclusion-field pattern
-            # the now-deleted SpherePackingSpecimenGenerator used for its
-            # own target/filler split (see module docstring), now
-            # region-gated instead of whole-box.
+            # Exact-count ("target") species are placed FIRST within this
+            # region; the ratio-weighted ones then fill what is left via
+            # the exclusion field.
             if exact_specs:
                 exact_pdbs = [pdbs_by_source[s.pdb_source] for s in exact_specs]
                 exact_radii = torch.cat(
@@ -1716,9 +1607,9 @@ class TomogramSpecimenGenerator:
 
         Segmentation ground truth should mark a filament as an object, the
         way it already marked a microtubule as one rather than as ~950
-        loose dimers. Actin was labelled per monomer until 2026-09-01, so
-        20 filaments appeared as 765 separate objects and a picker
-        evaluated against them was being asked to find monomers.
+        loose dimers. Labelled per monomer, 20 actin filaments appear as
+        765 separate objects, and a picker evaluated against them is being
+        asked to find monomers.
 
         Grouped on runs of equal ``(code, filament_id)`` rather than on
         the key alone. Both placers number filaments with
@@ -2069,13 +1960,9 @@ class TomogramSpecimenGenerator:
         "location": {"x", "y", "z"}[, "xyz_rotation_matrix"]}``.
 
         `TomogramPlacement.role == "filler"` placements (species declared
-        via `ratio`, not `n_copies`) are INCLUDED by default here --
-        `protein_specs` predates the exact-count/ratio split (every
-        declared cytosol/lumen species used to be exported
-        unconditionally), so defaulting to True preserves that behavior
-        for existing `ratio`-only configs. Pass
-        `include_filler=False` to export only `n_copies`-declared species
-        once you're using the new distinction deliberately. A
+        via `ratio`, not `n_copies`) are INCLUDED by default, so a
+        `ratio`-only config exports every species it declares. Pass
+        `include_filler=False` to export only `n_copies`-declared species. A
         `(species_id, location)` pair placed as BOTH a target and filler
         (declared twice, once with `n_copies` and once with just `ratio`)
         keeps its filler instances in a separate ``-filler``-suffixed file,
@@ -2433,8 +2320,7 @@ class TomogramSpecimenGenerator:
             # compartment only a few fine voxels wide anywhere -- a small
             # vesicle lumen at 2 A, on the auto 4 A packing grid -- can lose
             # every voxel it had. Same outcome as the fine-grid case, and for
-            # the same reason: nothing fits, so nothing is placed. Raising
-            # here is what used to end a 2 A build in its last stage.
+            # the same reason: nothing fits, so nothing is placed.
             warnings.warn(
                 "TomogramSpecimenGenerator: the region has no free voxel on "
                 f"the {pack_voxel:.1f} A packing grid (it has some at the "
@@ -2502,7 +2388,7 @@ class TomogramSpecimenGenerator:
         # Build every active species' potential template up front (optionally
         # concurrently across self.render_workers threads/self.render_devices
         # -- see TomogramSpecimenGenerator's own render_workers docstring),
-        # then run the rotate/insert loop below exactly as before. That loop
+        # then run the rotate/insert loop below. That loop
         # mutates volume/instance_labels/next_instance_id in place across
         # iterations and is comparatively cheap (batched GPU tensor ops), so
         # it stays sequential -- only the per-species PDB fetch/parse +

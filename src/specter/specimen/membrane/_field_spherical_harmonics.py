@@ -189,9 +189,9 @@ def _real_spherical_harmonics_grid(
     exactly like ``_real_spherical_harmonic``, the real-SH combination for a
     NEGATIVE order ``m`` is built from the POSITIVE-order complex value
     ``Y_l^{|m|}`` (see ``_real_from_complex``), not from ``Y_l^{-|m|}``
-    itself -- those differ by an extra ``(-1)^m`` (a real, previously caught
-    bug here: using the array's own negative-order column instead gave every
-    negative-order real harmonic the wrong sign). So only the trivially
+    itself -- those differ by an extra ``(-1)^m``, so using the array's own
+    negative-order column instead gives every negative-order real harmonic
+    the wrong sign. So only the trivially
     ascending non-negative columns (index ``== order``) are ever indexed.
 
     Parameters
@@ -393,8 +393,8 @@ def generate_membrane_field_spherical_harmonics(
         coefficient set in ``_sample_sh_coefficients``, so this parameter
         alone controls the perturbation's scale independent of
         `sh_max_degree`/`sh_spectrum_power`. Default 0.15, chosen from a
-        direct visual sweep (0.10/0.15/0.25/0.40, see ``dev/
-        sh_membrane_examples.py``): 0.10 was barely distinguishable from a
+        direct visual sweep (0.10/0.15/0.25/0.40): 0.10 was barely
+        distinguishable from a
         sphere, 0.40 produced visible concave dimples (still a valid,
         non-degenerate star-convex surface -- `R_prime`'s positive floor
         holds even there -- but an unusually irregular-looking organelle);
@@ -448,11 +448,11 @@ def generate_membrane_field_spherical_harmonics(
     # normalized coordinates are three 1-D tensors that broadcast, rather than a
     # materialized (nz*ny*nx, 3) point cloud.
     #
-    # It used to run on the CPU over that dense point cloud, which made it ~14 s
-    # per instance -- the single largest cost in `specter build tomogram`'s
-    # membrane phase -- and allocated 2.4 GB for the normalized points alone at
-    # the ~464^3 working grid `max_field_voxels` clamps to. On device it is
-    # ~0.1 s (see tests/test_membrane_generator.py for the equivalence check).
+    # On the CPU over a materialized point cloud this is ~14 s per instance,
+    # the single largest cost in `specter build tomogram`'s membrane phase,
+    # and 2.4 GB for the normalized points alone at the ~464^3 working grid
+    # `max_field_voxels` clamps to. On device with broadcast 1-D tensors it
+    # is ~0.1 s (tests/test_membrane_generator.py checks the equivalence).
     #
     # float64 is deliberate, and free: this is memory-bound, so float64 measured
     # the same wall time as float32 on an L40. It is not free in accuracy terms

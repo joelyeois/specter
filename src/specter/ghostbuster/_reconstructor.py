@@ -499,11 +499,9 @@ class Reconstructor(_BaseReconstructor):
         # Not fused=True: it is ~8 ms faster per step on a 512^3 volume, but
         # Lightning's 16-mixed plugin hands it grads it rejects ("params,
         # grads, exp_avgs, and exp_avg_sqs must have same dtype, device, and
-        # layout"), measured 2026-09-03.
+        # layout").
         if self.lr is not None:
             optimizerV = AdamW([self.V], lr=self.lr, weight_decay=0.0)
-            # optimizer = SGD(self.parameters(), lr=self.lr, momentum=0.9)
-            # optimizer = NAdam(self.parameters(), lr=self.lr)
         if self.lr_R is not None:
             optimizerR = AdamW([self.rotations], lr=self.lr_R)
             # optimizerR = Adam([self.rotations], lr=self.lr_R)

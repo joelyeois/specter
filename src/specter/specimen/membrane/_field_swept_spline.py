@@ -7,10 +7,8 @@ star-convex "radius function of direction" family
 that backend structurally cannot represent (a tube that curls back near
 itself is crossed more than once by some rays from any single center).
 
-Reuses ``_field.py``'s shared smooth-min blend machinery (``SphereSource``/
-``blend_field``/``cap_curvature`` -- the only other consumer of these was a
-deprecated ``shape_backend="metaball"`` backend, isotropically-SCATTERED
-sources rather than a swept path, since deleted): a swept tube's signed
+Reuses ``_field.py``'s smooth-min blend machinery (``SphereSource``/
+``blend_field``/``cap_curvature``): a swept tube's signed
 field IS a smooth-min union of many small sphere SDFs whose centers walk
 along a smooth path -- exactly what ``blend_field`` computes given any
 list of sources, regardless of how they were sampled. The only new piece
@@ -64,8 +62,7 @@ into a smooth continuous tube (rather than a visible string of beads) if
 default tuned for a handful of sparse, independent blobs would under-blend
 a dense chain, so this module computes its own default instead. Warns if
 ``step_length_a`` exceeds the (mean, see "Radius variation" below) tube
-radius, a real, previously observed failure mode (visible beading), not a
-hypothetical one.
+radius, which produces visible beading.
 
 Radius variation
 -----------------
@@ -204,8 +201,8 @@ def generate_membrane_field_swept_spline(
         Tube radius, Å. Default 25.0.
     flexibility : float, optional
         In ``(0, 1]`` -- see ``_sample_wandering_path``. Default 0.15,
-        picked from a direct visual sweep (0.05/0.15/0.35, see ``dev/
-        swept_spline_sweep.py``): 0.05 was nearly a straight rod, 0.35
+        picked from a direct visual sweep (0.05/0.15/0.35): 0.05 was
+        nearly a straight rod, 0.35
         produced a sharp, almost folded-back bend (a good "very flexible"
         stress case, not a good default); 0.15 gave a gently organic,
         clearly non-straight tube with no beading at this module's other
@@ -214,11 +211,11 @@ def generate_membrane_field_swept_spline(
         RMS fractional variation in tube radius along the path
         (dimensionless, relative to `tube_radius_a`) -- see module
         docstring's "Radius variation" section. Default 0.0 (constant
-        radius, this function's behaviour before this parameter existed).
+        radius).
     radius_variation_sigma_points : float, optional
         ``scipy.ndimage.gaussian_filter1d`` sigma for the radius noise, in
-        PATH POINTS. Default 2.0, picked from a direct visual sweep (1/2/3,
-        see ``dev/swept_spline_radius_variation_sweep.py``) -- NOT the
+        PATH POINTS. Default 2.0, picked from a direct visual sweep (1/2/3)
+        -- NOT the
         larger value (4.0) that seemed intuitive going in: at this
         function's own default path length (~34 points), sigma=4 leaves
         too few effectively-independent points for more than one broad
@@ -296,8 +293,7 @@ def generate_membrane_field_swept_spline(
             f"({step_length_a:.1f} A) exceeds the mean tube radius "
             f"({radii.mean():.1f} A) -- consecutive sphere sources are spaced "
             "too far apart relative to their own radius to fuse into a smooth "
-            "tube ON AVERAGE (a real, previously observed failure mode: "
-            "visible beading/segmentation along the path rather than a "
+            "tube ON AVERAGE (visible beading along the path rather than a "
             "continuous surface). Decrease step_length_a, or increase "
             "tube_radius_a. (With radius_variation > 0, occasional local "
             "narrowing below step_length_a is expected -- it produces sparse, "

@@ -464,8 +464,7 @@ class CrowdWithDuplicates(L.LightningModule):
         of the local slab is rejected, and ``water_air_interface`` adsorbs to
         the local surfaces via
         :func:`~specter.crowding.filter_by_local_z_density` rather than to a
-        single global pair. Default None (a slab filling ``max_distance_z``,
-        as before).
+        single global pair. Default None (a slab filling ``max_distance_z``).
     particle_radius : float, optional
         Half-height in Å used for that fit test. Defaults to
         ``min_distance / 2``. Ignored when ``ice_profile`` is None.
@@ -817,7 +816,7 @@ class CrowdWithDuplicates(L.LightningModule):
         `TomogramSpecimenGenerator._render_species_pool`'s identical
         comment). For ``'poisson_disk'``, orientation has no bearing on
         the (spherical) collision test, so rotations are drawn randomly
-        here as before.
+        here.
 
         Rotations are stored in `self.theta`.
         """

@@ -207,8 +207,7 @@ class IceBank(L.LightningModule):
       :meth:`generate_big_ice`/:meth:`generate_big_ice_deltas` -- tiles
       multiple independently rotated crops together and heals the tile
       boundaries with a short local MLBOP relaxation (naive concatenation
-      alone leaves severe damage at the seams -- see
-      ``dev/ice/seam_relax_256_*.py`` for the validation behind this).
+      alone leaves severe damage at the seams).
 
     Parameters
     ----------
@@ -324,9 +323,8 @@ class IceBank(L.LightningModule):
         a loop (as :meth:`_place_tiles` does): ~4x faster per call in
         practice, and cheap in memory (a single ~527k-atom config is a few
         MB, and the transient candidate tensor per call is ~150-350 MB,
-        trivial next to a modern GPU's total memory) -- see
-        ``dev/ice/`` benchmarking behind this. Invalidated and rebuilt if
-        ``self.device`` changes between calls.
+        trivial next to a modern GPU's total memory). Invalidated and
+        rebuilt if ``self.device`` changes between calls.
         """
         key = id(config)
         cached = self._source_pos_cache.get(key)
@@ -402,12 +400,10 @@ class IceBank(L.LightningModule):
         # 1 + floor(reach/box_L), which is always >= 1 (never just the
         # unwrapped primary cell, even for small reach: a center and atom
         # near opposite box edges still need the neighboring image to see
-        # each other). See dev/ice/rotated_tiling_composition_check.py for
-        # the original bug this fixes, and the notebook run that showed a
-        # sharp, reach/box_L-dependent gap in atom count is not fixed by
-        # this: m = ceil(reach/box_L - 0.5) silently gives m=0 (no
-        # wraparound at all) whenever reach <= box_L/2, which is wrong
-        # for any center near a box edge.
+        # each other). The tempting m = ceil(reach/box_L - 0.5) silently
+        # gives m=0 (no wraparound at all) whenever reach <= box_L/2, which
+        # is wrong for any center near a box edge and shows up as a sharp,
+        # reach/box_L-dependent gap in atom count.
         m = 1 + math.floor(reach / box_L)
         shifts = (
             torch.arange(-m, m + 1, dtype=source_pos.dtype, device=source_pos.device)
@@ -490,9 +486,8 @@ class IceBank(L.LightningModule):
             # all of it. Wrapping the overflow that would otherwise drop past index n
             # back onto index 0 restores voxel 0's missing "neighbor below"
             # contribution -- measured to bring low-face density from ~0.49-0.50x
-            # interior up to ~0.92-0.94x, matching the high-face level (see
-            # dev/ice/ for the face-statistics comparison behind this). Cheap: same
-            # index-tensor op as the mask it replaces, no extra cost.
+            # interior up to ~0.92-0.94x, matching the high-face level. Cheap:
+            # the same index-tensor op as a mask, no extra cost.
             vox = soft_voxelize_coordinates(
                 self.positions,
                 grid_shape=(self.nz, self.n, self.n),
@@ -685,10 +680,9 @@ class IceBank(L.LightningModule):
     ) -> torch.Tensor:
         """
         Short local MLBOP-only relaxation of atoms near tile seams, holding
-        every other atom fixed. See ``dev/ice/seam_relax_256_assemble.py``
-        for the validation behind this: naive tiling alone leaves E/atom
-        flipped from favorable to unfavorable at the seams, and this
-        recovers most of it within a few seconds.
+        every other atom fixed. Naive tiling alone leaves E/atom flipped
+        from favorable to unfavorable at the seams; this recovers most of it
+        within a few seconds.
 
         Only ``halo_mask`` atoms (mobile atoms plus the surrounding frozen
         band from ``_place_tiles``) are ever fed into the energy model.
@@ -897,8 +891,8 @@ class IceBank(L.LightningModule):
             config to support them.
         seam_margin : float, optional
             Distance (Å) from a tile's own face within which an atom is
-            treated as a seam candidate for relaxation. Default 6.0 (matches
-            the validated setting from this session's 256^3/128^3 tests).
+            treated as a seam candidate for relaxation. Default 6.0
+            (validated at 256^3 and 128^3).
         relax_steps : int, optional
             Adam steps for the seam relaxation. Default 0 (skip relaxation
             entirely -- naive tiling only, matching every higher-level
@@ -1644,10 +1638,9 @@ def blend_ice_into_volume(
     # slab each, and the two accumulations are in-place, so the peak is V plus
     # ice plus a slab.
     #
-    # No global reduction here any more. The old rule needed `V.max()` up
-    # front, which made the whole volume's contents an input to every
-    # voxel's ice; the occupancy weight is per-voxel and absolute, so a
-    # slab needs nothing but itself.
+    # No global reduction: the occupancy weight is per-voxel and absolute,
+    # so a slab needs nothing but itself. (A rule relative to `V.max()`
+    # would make the whole volume's contents an input to every voxel's ice.)
     out = V if inplace else V.clone()
     chunk = max(1, 2**24 // (nxy * nxy))
     blender = IceSlabBlender(pixel_size, full_potential=full_potential, sigma_a=sigma_a)

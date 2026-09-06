@@ -120,13 +120,13 @@ class GradientSKIcemaker(L.LightningModule):
         than matching absolute box size -- interpolating a fine-``dx``
         target across a coarser training grid is a lossy comparison (the
         simulated side is aliased by coarse voxelization, the target isn't),
-        which was validated this way: coarse-``dx`` training against the old
-        fixed fine-grid default got stuck (S(k) loss O(1)-O(1e3)); against a
-        natively-computed target at the same ``dx`` it converges cleanly
+        which matters: coarse-``dx`` training against a fixed fine-grid
+        target gets stuck (S(k) loss O(1)-O(1e3)); against a natively-
+        computed target at the same ``dx`` it converges cleanly
         (O(1e-5)-O(1e-7)), across dx=0.5/1.0/2.0 and box sizes from 16 Å up
         to 256 Å (beyond the ~127 Å real MD cell, via safe box-size
         extrapolation -- see :func:`compute_native_target`). Pass an
-        explicit path to opt back into the old fixed-target behavior.
+        explicit path to use a fixed target instead.
     """
 
     def __init__(
@@ -532,10 +532,10 @@ class GradientSKIcemaker(L.LightningModule):
         history 100, max_iter 50, 30-step pre-relaxation  0.048  0.048  0.022  -0.205
         ================================================  =====  =====  =====  =======
 
-        The first row (the settings until 2026-09-02) needed 4-6k closures to
-        reach a loss of 0.04-0.06; the defaults reach it in 1000-1500 and go
-        on to a loss, and an ML-BOP energy against the -0.413 target, the old
-        settings never got to. Each row is the same objective, recipe and
+        The first row needs 4-6k closures to reach a loss of 0.04-0.06; the
+        defaults (third row) reach it in 1000-1500 and go on to a loss, and
+        an ML-BOP energy against the -0.413 target, the first row never
+        reaches. Each row is the same objective, recipe and
         target: the changes are to the search, not to what is searched for.
         The table was measured with float32 positions; ``param_dtype``
         (float64 by default, see below) removes the stall that made the
@@ -603,16 +603,16 @@ class GradientSKIcemaker(L.LightningModule):
             once S(k) is matched the loss is the energy term alone, and
             under 1e-4 a config ran 96-250 steps (4-9 min) to reach E/atom
             -0.20 to -0.28, most of which was the last few hundredths of an
-            eV. The old 1e-4 was tuned on the S(k) loss curve at n=400,
-            dx=0.25, where 1e-6 never sustained for ``patience`` steps
-            because of ~1e-5-scale wiggles.
+            eV. (1e-4 is right for the S(k) loss curve at n=400, dx=0.25,
+            where 1e-6 never sustains for ``patience`` steps because of
+            ~1e-5-scale wiggles.)
         patience : int, optional
             Consecutive below-``tol`` steps required to trigger early
             stopping. Default is 10.
         history_size : int, optional
             L-BFGS curvature pairs kept (``'lbfgs'`` only). Default 100: a
-            1.6 M-dimensional problem gains from more than the 20 the
-            optimiser used to keep, and 100 vectors are 600 MB at the
+            1.6 M-dimensional problem gains from more than torch's default
+            of 20, and 100 vectors are 600 MB at the
             bundled geometry, small next to the loss's own working set.
         max_iter : int, optional
             L-BFGS inner iterations per outer step (``'lbfgs'`` only).

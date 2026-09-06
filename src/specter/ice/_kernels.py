@@ -1,19 +1,11 @@
 """
 Shared, stateless physics-kernel construction for ice generation.
 
-These functions used to be duplicated (with minor variations) across the
-individual icemaker classes — see the individual docstrings below for what
-each one replaces. Keeping them here as pure functions means every algorithm
-class builds these kernels the same way, by construction, instead of by
-convention.
-
-The same argument applied one level up moved the atomic potential kernel
-itself out of this module:
-:func:`specter.potential.build_atomic_potential_kernel` is now the single
-implementation shared by the icemakers, the gold-bead generator, and
-:class:`specter.potential.PotentialBuilder`. It is re-exported here so
-``from specter.ice._kernels import build_atomic_potential_kernel`` keeps
-working.
+Pure functions, so every icemaker class builds these kernels the same way
+by construction rather than by convention. The atomic potential kernel
+itself, :func:`specter.potential.build_atomic_potential_kernel`, is the
+single implementation shared by the icemakers, the gold-bead generator and
+:class:`specter.potential.PotentialBuilder`, and is re-exported here.
 """
 
 from __future__ import annotations

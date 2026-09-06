@@ -54,24 +54,22 @@ V = TypeVar("V")
 # chain, torch/lightning included, in every worker, and that startup is a fixed
 # cost the parsing has to earn back.
 #
-# This used to be a threshold on the NUMBER of unique sources (25), which is the
-# wrong criterion: the cost being amortized is total parse WORK, and that varies
-# ~40x across the structures a single tomogram config loads (2REC, 1,818 atoms,
-# 0.67s; 6N4V, 236,760 atoms, 26s). A count threshold is wrong in both
-# directions -- it pooled 25 tiny structures that would have been faster serial,
-# and ran 24 large ones serially at a measured 2.8x loss. `configs/tomogram.toml`
-# sat one source above it.
+# A threshold on the NUMBER of unique sources is the wrong criterion: the cost
+# being amortized is total parse WORK, and that varies ~40x across the
+# structures a single tomogram config loads (2REC, 1,818 atoms, 0.67s; 6N4V,
+# 236,760 atoms, 26s). A count threshold fails in both directions -- it pools
+# 25 tiny structures that are faster serial, and runs 24 large ones serially
+# at a measured 2.8x loss.
 #
 # Parse cost tracks the structure file's size on disk closely enough to decide
-# on (dev/perf-bench/calibrate_pdb_cost.py, 27 structures spanning 0.26-25.6 MB:
-# r = 0.974), and that size is one os.stat away, known before any parsing.
+# on (27 structures spanning 0.26-25.6 MB: r = 0.974), and that size is one
+# os.stat away, known before any parsing.
 _PDB_PARSE_FIXED_S = 0.45
 _PDB_PARSE_S_PER_MB = 0.65
 
 # Measured spawn cost of the pool itself, as the residual between each pool run
 # and its own perfect-scheduling floor, max(longest task, total work / workers)
-# -- 6-8s across N = 2..24 (dev/perf-bench/bench_pool_crossover.py), not the
-# ~13-15s previously assumed. Taking the top of that range keeps the estimate
+# -- 6-8s across N = 2..24. Taking the top of that range keeps the estimate
 # conservative, i.e. biased toward staying serial.
 _POOL_SPAWN_OVERHEAD_S = 8.0
 
@@ -96,8 +94,7 @@ _PARSED_CACHE_LOAD_S = 0.15
 _POOL_REQUIRED_MARGIN = 0.75
 
 # Measured sweet spot for build_templates_concurrently's THREAD pool
-# specifically (dev/sweep_render_configs.py, full production-scale sweep,
-# see [[project_render_workers_sweep_results]]): workers=8 was the fastest
+# specifically (full production-scale sweep): workers=8 was the fastest
 # of {1,4,8,16,32,64} at N=161 species, and device choice (single-GPU,
 # multi-GPU, CPU-only) barely mattered at that worker count (all within
 # 2.5% of each other) -- so this is a single hardware-agnostic number, not
@@ -158,8 +155,7 @@ def parse_device_pool(device: str) -> tuple[str, list[str] | None]:
     Lets config/CLI callers set one field instead of two separate
     `device`/`render_devices` values. A scalar (`"cpu"`, `"cuda"`,
     `"cuda:0"`, or a bare GPU index like `"0"`) means "everything on this
-    one device" -- unchanged from the pre-merge `device`-only behaviour.
-    A comma-separated list of GPU indices (`"0,1,2"`) pools those GPUs for
+    one device". A comma-separated list of GPU indices (`"0,1,2"`) pools those GPUs for
     per-species rendering, with the first as the primary device for
     everything else (membrane/filament generation, rotation, accumulator
     sizing). Shares `specter.devices.parse_device` with every other

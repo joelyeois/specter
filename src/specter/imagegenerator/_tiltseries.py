@@ -112,8 +112,7 @@ class TiltSeriesGenerator(MicrographGenerator):
         recursion at the padded size, and cropping back to the true output size
         only once at the end (validated against ``scattering_model="projection"``,
         which cannot exhibit this artifact by construction, at both toy and
-        production scale -- nz=368, ~1000+ multislice steps, see
-        ``dev/tilt series/verify_recursion_pad*.py``). Has no effect on
+        production scale -- nz=368, ~1000+ multislice steps). Has no effect on
         ``scattering_model`` other than ``"multislice"``. Default False -- this is
         a real, confirmed fix, but flipping the *default* on requires re-validating
         against the full real-data survey, which has not been redone with this
@@ -149,8 +148,8 @@ class TiltSeriesGenerator(MicrographGenerator):
         (confirmed by rotating ``tilt_axis`` and watching the line rotate with it).
         A small default margin removes that slack deficit; empirically, ~8px cut the
         radial-power-spectrum shape-correlation gap between 0deg and a 45deg tilt
-        roughly in half on a 192px/92-slice test volume (see dev/tilt series/ for the
-        sweep). This is intentionally independent of ``taper_width``: tapering the
+        roughly in half on a 192px/92-slice test volume. This is intentionally
+        independent of ``taper_width``: tapering the
         *extra* margin beyond the geometric minimum has no effect on the output
         (those pixels are provably never sampled), so it cannot substitute for this.
         Default 8.
@@ -420,8 +419,8 @@ class TiltSeriesGenerator(MicrographGenerator):
         # fetch runs directly against it), falling back to leaving it on CPU
         # and streaming small windowed blocks per Z-chunk instead (slower per
         # step, but with a GPU memory footprint set by the query geometry, not
-        # by the volume's size -- see dev/tilt series/windowed_streaming_*.py)
-        # if it doesn't fit. No flag needed: this is automatic and safe at any
+        # by the volume's size) if it doesn't fit. No flag needed: this is
+        # automatic and safe at any
         # volume size, so there's nothing for a caller to get wrong.
         volume_value = self.volume
         del self._buffers["volume"]
@@ -434,16 +433,15 @@ class TiltSeriesGenerator(MicrographGenerator):
         # -- see IterativeScattering.multislice for the mechanism. Validated this
         # gives an artifact-free result matching scattering_model="projection" (which
         # cannot exhibit this artifact by construction) at both toy and production
-        # scale (nz=368, ~1000+ multislice steps, see dev/tilt series/). Always uses
-        # zeros for the padded region (not reflection): a tilted slice's flanks are
-        # real vacuum there, not continuing ice, so reflecting would fabricate density
-        # that isn't physically present.
+        # scale (nz=368, ~1000+ multislice steps). Always uses zeros for the padded
+        # region (not reflection): a tilted slice's flanks are real vacuum there,
+        # not continuing ice, so reflecting would fabricate density that isn't
+        # physically present.
         #
-        # Unlike the old implementation, this does not inflate self.nxy/the volume-ROI
-        # sampling size at all -- self.iterative_scattering.nxy is always the true
-        # output size, so the exitwave it returns is already self.nxy-sized whenever
-        # pad_fft=True, and self.aberration (built at self.nxy by the parent's
-        # _init_optics()) never needs to be rebuilt.
+        # The padding is internal to multislice: self.iterative_scattering.nxy is
+        # always the true output size, so the exitwave it returns is already
+        # self.nxy-sized whenever pad_fft=True, and self.aberration (built at
+        # self.nxy by the parent's _init_optics()) never needs to be rebuilt.
         self.iterative_scattering = IterativeScattering(
             self.nxy,
             pixel_size,

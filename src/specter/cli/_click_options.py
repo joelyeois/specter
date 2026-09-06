@@ -304,13 +304,12 @@ def load_validated_config(
 
     Everything a config can be wrong about reaches the user through a
     `click.UsageError` here, rather than as a traceback out of the
-    pipeline. The messages were already good; they were just arriving
-    badly. A bad value in a TOML file used to print 38 lines ending in
-    ``ValueError: noise_model='bogus' is invalid: must be one of
-    'poisson', 'none'``, while the identical mistake as a flag printed 8
-    lines in a bordered panel, because click builds a `Choice` from each
-    field's `Literal` and catches it at parse time. A typo in a config
-    file is the likelier of the two.
+    pipeline. Without this, a bad value in a TOML file prints 38 lines of
+    traceback ending in ``ValueError: noise_model='bogus' is invalid: must
+    be one of 'poisson', 'none'``, while the identical mistake as a flag
+    prints 8 lines in a bordered panel, because click builds a `Choice`
+    from each field's `Literal` and catches it at parse time. A typo in a
+    config file is the likelier of the two.
 
     Three failure modes are covered: a value the field does not allow
     (`ValueError` from `validate_config`), a key the dataclass does not

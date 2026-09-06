@@ -21,25 +21,23 @@ shape and physical length scale right; swap in a real coordinate set later
 if higher fidelity is needed.
 
 There is no amplitude scalar anywhere here: ``psi(d)`` is used as
-measured, in volts, and nothing rescales it to a peak. Two superseded
-constructions were deleted on 2026-08-31, and both are worth knowing
-about because each looks reasonable.
+measured, in volts, and nothing rescales it to a peak. Two constructions
+that look reasonable are wrong, and are worth knowing about.
 
-An amplitude was once fitted from a single isolated atom's peak
-potential, on the reasoning that a plane average diluted the true peak
-~20x. That was wrong twice over: the dilution it measured came from
-averaging over the whole patch including its under-populated jittered
-edges, which :func:`compute_bilayer_profile` never does
-(``lateral_core_fraction`` 0.6 recovers 64.9 A^2 per lipid against the
-65.0 target), and an atom's own centre is a cusp with no grid-independent
-value, so it could not have calibrated anything at any voxel size. The
-rule it broke still governs any scalar taken from this module: a plane
+An amplitude fitted from a single isolated atom's peak potential, on the
+reasoning that a plane average dilutes the true peak ~20x, is wrong twice
+over: that dilution comes from averaging over the whole patch including
+its under-populated jittered edges, which :func:`compute_bilayer_profile`
+never does (``lateral_core_fraction`` 0.6 recovers 64.9 A^2 per lipid
+against the 65.0 target), and an atom's own centre is a cusp with no
+grid-independent value, so it cannot calibrate anything at any voxel
+size. The rule governing any scalar taken from this module: a plane
 average is commensurate only with another plane average.
 
-That amplitude then scaled an analytic two-Gaussian profile. Two
+An analytic two-Gaussian profile is wrong for a different reason. Two
 Gaussians standing on vacuum model a bilayer's *appearance* in a
 micrograph rather than its density, and deleting the acyl core that way
-cost 4.8x of the integrated potential -- invisible in a slice, dominant
+costs 4.8x of the integrated potential -- invisible in a slice, dominant
 in a projection. The smoothing that makes real cryo-ET membranes look
 continuous comes from the microscope's own resolution limits (CTF,
 multislice, detector MTF), applied to membrane and protein alike AFTER
@@ -128,9 +126,9 @@ CALIBRATION_SEED = 0
 # each individually under-blended into its neighbors), instead of a single
 # broad, smoothly-declining shoulder -- the opposite of a real bilayer
 # electron-density profile's two-peaks-with-a-clearly-weaker-middle shape.
-# jitter_scale raised to 2.2-3.0 here (each cluster's std now clearly wider
-# than the 2A inter-cluster spacing) fixes this: verified the rendered
-# profile no longer has any competing peak in the +-4 to +-14A shoulder
+# jitter_scale of 2.2-3.0 here (each cluster's std clearly wider than the
+# 2A inter-cluster spacing) fixes this: the rendered profile has no
+# competing peak in the +-4 to +-14A shoulder
 # region (see test_compute_bilayer_profile_no_competing_peak_in_chain_
 # region in tests/test_membrane_profile.py). The terminal methyls are
 # pushed to the mid-plane itself (0.5A, was 1.0A) with even higher
@@ -142,9 +140,9 @@ CALIBRATION_SEED = 0
 # C42 H82 N O8 P -- 1-palmitoyl-2-oleoyl-sn-glycero-3-phosphocholine, the
 # standard fluid-phase model lipid, and the one this module's own
 # area_per_lipid_a2=65.0 and the phosphate-phosphate spacing tests were
-# already calibrated against. Until 2026-08-30 the template carried 31 C
-# and NO hydrogens, 59% of POPC's electron-scattering power, which
-# understated the whole bilayer 1.74x.
+# already calibrated against. A template of the 31 carbons alone, with no
+# hydrogens, carries 59% of POPC's electron-scattering power and
+# understates the whole bilayer 1.74x.
 #
 # Hydrogen is not negligible for electrons even though it is nearly so for
 # X-rays. Mott-Bethe makes a diffuse one-electron atom screen its own
@@ -430,11 +428,10 @@ def build_measured_bilayer_profile(
     The bilayer profile the rasterizer renders: psi(z) measured from the
     reference lipid patch, rescaled in z to the requested thickness.
 
-    The profile every membrane renders with. An analytic two-Gaussian
-    form stood here until 2026-08-31; see the module docstring for why
-    modelling a bilayer as two peaks on vacuum discards most of its
-    integrated potential (53 V*A against this one's 254) and why that is
-    invisible in a slice but dominant in a projection.
+    The profile every membrane renders with. See the module docstring for
+    why an analytic two-Gaussian form (two peaks on vacuum) discards most
+    of a bilayer's integrated potential (53 V*A against this one's 254)
+    and why that is invisible in a slice but dominant in a projection.
 
     Rescaling is a pure z-stretch at fixed amplitude, so the integral
     scales with thickness. That is the physical relationship: lipid

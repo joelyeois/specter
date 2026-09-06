@@ -11,11 +11,11 @@ Critically, this anti-aliases before resampling: when the requested output
 voxel size is coarser than the field's own working spacing, the fine-grid
 density is first low-pass filtered (a Gaussian matched to the output voxel
 footprint) and only then interpolated onto the output grid. Naively
-point-sampling the fine density directly (skip the filter) reproduces a
-concrete, previously observed failure mode -- the bilayer's real, physical
-peak-to-peak leaflet separation is fixed, but sparse point-sampling of its
-few-Å-wide features aliases into what looks like a growing or
-distorted gap as voxel size increases, with no physical meaning. Filtering
+point-sampling the fine density directly (skipping the filter) aliases:
+the bilayer's real, physical peak-to-peak leaflet separation is fixed, but
+sparse point-sampling of its few-Å-wide features turns into what looks
+like a growing or distorted gap as voxel size increases, with no physical
+meaning. Filtering
 first makes coarser voxel sizes correctly show the two leaflets blurring
 together, which is the real, expected behavior as resolution drops.
 """

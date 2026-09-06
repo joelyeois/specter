@@ -4,15 +4,11 @@ One grammar for the ``device`` setting, parsed in one place.
 Every command takes a ``device`` string, and each dispatch style wants a
 different shape back: Lightning DDP wants a mode plus a target, a process pool
 wants one device string per worker, ``Ghostbuster.run`` wants GPU indices, and
-the tomogram renderer wants a primary device plus an optional pool. Each of
-those grew its own parser, and re-parsing is where they drifted: two of the
-three accepted ``"auto"`` and the third did not, so the same word meant "every
-visible GPU" on ``specter build ice``, a crash on ``specter simulate
-particles``, and -- through a fall-through that mapped any unrecognised string
-to index 0 -- a silent ``cuda:0`` on ``specter reconstruct particle``.
-
-So: parse once, here, into `DeviceSpec`; convert per dispatch style at the call
-site. A conversion cannot drift on grammar because it does not parse anything.
+the tomogram renderer wants a primary device plus an optional pool. Parsing
+is done once, here, into `DeviceSpec`, and converted per dispatch style at
+the call site: a conversion cannot drift on grammar because it does not parse
+anything, whereas one parser per consumer lets the same word mean different
+things on different commands.
 """
 
 from __future__ import annotations
@@ -78,10 +74,8 @@ def parse_device(device_str: str) -> DeviceSpec:
     apart is what lets a config be validated at load time, before any device
     exists.
 
-    There is deliberately no ``"auto"``. It used to mean "every visible GPU",
-    but only on the two pool parsers, and one of those resolved it via
-    `recommend_render_devices` rather than by counting GPUs -- so it was neither
-    universal nor single-meaning. A caller wanting every GPU names them.
+    There is no ``"auto"``: a caller wanting every GPU names them, so the
+    word cannot come to mean different things on different commands.
 
     Parameters
     ----------
@@ -95,8 +89,7 @@ def parse_device(device_str: str) -> DeviceSpec:
     Raises
     ------
     ValueError
-        If any entry is not a device. Previously an unrecognised value silently
-        became GPU 0 on the reconstruction path.
+        If any entry is not a device.
 
     Examples
     --------

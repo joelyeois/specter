@@ -565,7 +565,8 @@ def pack_shapes_3d(
     #   Occupancy only ever grows, so an attempt they reject would be
     #   rejected at its own moment too -- exact. An attempt they pass may
     #   still be doomed by an acceptance earlier in the batch, so survivors
-    #   are re-tested one at a time against the live grid, exactly as before.
+    #   are re-tested one at a time against the live grid, as a serial loop
+    #   would.
     #
     # Per-attempt bookkeeping (which candidate row an attempt belongs to,
     # the stall counter) is done arithmetically over runs of rejections. The

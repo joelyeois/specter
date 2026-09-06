@@ -347,12 +347,11 @@ def test_process_pool_is_worth_it_matches_measured_crossover():
     """
     The serial-vs-pool decision reproduces the measured crossover.
 
-    Reference points from dev/perf-bench/bench_pool_crossover.py, real
-    structures, 8 workers: a net LOSS at an estimated ~24 s of serial work
-    (measured 0.96x), a clear win by ~42 s (measured 1.49x) and ~90 s (2.81x).
-    Pinning both sides matters -- the previous count-based rule got the 90 s
-    case wrong in one direction and would have got a pile of tiny structures
-    wrong in the other.
+    Reference points measured on real structures with 8 workers: a net LOSS
+    at an estimated ~24 s of serial work (measured 0.96x), a clear win by
+    ~42 s (measured 1.49x) and ~90 s (2.81x). Pinning both sides matters --
+    a count-based rule gets the 90 s case wrong in one direction and a pile
+    of tiny structures wrong in the other.
     """
     from specter.specimen._parallel_render import _process_pool_is_worth_it
 

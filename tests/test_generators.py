@@ -721,11 +721,10 @@ def test_tilt_series_generator_edge_margin_pads_beyond_geometric_minimum(ctf_par
     computed by _estimate_required_nxy) leaves zero slack, so output pixels at the
     edge of the crop have a per-slice sampling footprint that lands exactly on the
     padded-volume boundary at the deepest Z, with no room for interpolation. That
-    produced a real artifact -- a bright line through the origin in the FFT, aligned
-    with the tilt axis (see dev/tilt series/diag_line_source.png). edge_margin fixes
-    it by always padding beyond the geometric minimum, independent of taper_width
-    (which only fades pixels beyond required_nxy that are provably never sampled --
-    verified to have zero effect on output, see dev/tilt series/ investigation).
+    produces a real artifact -- a bright line through the origin in the FFT, aligned
+    with the tilt axis. edge_margin fixes it by always padding beyond the geometric
+    minimum, independent of taper_width (which only fades pixels beyond
+    required_nxy that are provably never sampled, and has zero effect on output).
     """
     volume = torch.zeros(1, 16, 48, 48)
     volume[0, 5:11, 20:28, 20:28] = 50.0
@@ -765,8 +764,7 @@ def test_tilt_series_generator_pad_fft_multislice_shapes_match(ctf_params):
     resulting per-step wraparound compounds coherently into a real, visible artifact
     along all four frame edges (confirmed via direct comparison against
     scattering_model="projection", which cannot exhibit this artifact by
-    construction, at both toy and production scale -- see
-    dev/tilt series/verify_recursion_pad*.py).
+    construction, at both toy and production scale).
 
     pad_fft=True fixes this inside IterativeScattering.multislice: pad once before
     the whole nz_new-step recursion, run the entire recursion at the padded canvas,

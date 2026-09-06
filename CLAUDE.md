@@ -202,43 +202,82 @@ Pose/shift/defocus refinement (`lr_R`/`lr_T`/`lr_defocus` on `Reconstructor`/`To
 
 ```
 src/specter/                  # Main source package
-  atom/                       # Atomic properties and potential functions
-    atom.py                   # Atom symbols, numbers, masses
-    atomic_potentials.py      # Kirkland, Lobato, Shtyrov parameterizations
-  atom_data/                  # Scattering parameter tables — do not modify
   aberrations/                # Aberration phase model
     _functions.py             # Low-level, stateless phase functions (cs, defocus, beamtilt, trefoil, tetrafoil, phaseshift)
     _aberration.py            # Aberration(L.LightningModule) — composes the functions above into a transfer function
     _envelopes.py             # B-factor/Cc/spatial-coherence/dose envelope functions (pure functions of k-grid + params)
+  arrays/                     # Array utilities, one module per concern: _grids (k-space/real grids, ball3d), _padding
+                              # (fourier_crop, centered_pad, compute_nz, clip_insert_bounds, center_crop), _voxelize (soft
+                              # voxelization), _tiling (block tiling), _profiles (radial averages), _reduce
+                              # (count_nonzero_chunked), _nps (noise power spectra)
+  atom/                       # Atomic properties and potential functions
+    atom.py                   # Atom symbols, numbers, masses
+    atomic_potentials.py      # Kirkland, Lobato, Shtyrov parameterizations
+  atom_data/                  # Scattering parameter tables — do not modify
+  cli/                        # `specter` CLI — see "CLI & pipelines" below. _cli.py is the entry point; _click_options.py
+                              # is the dataclass→click adapter (build_config_options, build_config_command,
+                              # load_cli_config); one module per command group (simulate, build, reconstruct, match, cache)
+  config/                     # One dataclass per command (ParticleStackConfig, MicrographConfig, TiltSeriesConfig,
+                              # TomogramConfig, IceCacheConfig, ReconstructionConfig, MatchConfig), each beside its
+                              # *_HELP dict; _loader (load_config/apply_overrides), _validation (validate_config),
+                              # _scalar_range (the scalar-or-[low, high] field convention), _paths (project root,
+                              # default output dirs, PDB cache dir)
   ctf/                        # torch-ctf-backed CTF — opt-in second backend, verified parity with aberrations/
-    _parameters.py             # CTFParameters, ParamField
-    _transfer.py                # TransferFunction
-    _legacy.py                   # LegacyAberrationAdapter — bridges the legacy ctf_params dict to CTFParameters
-    _units.py                    # zernike_rho_max and other native-unit helpers
-  imagegenerator/             # Image simulation classes
-    _base.py                  # BaseImager base class
-    _generator.py             # ImageGenerator, ImageGeneratorFromCoordinates
-    _micrograph.py            # MicrographGenerator
-    _tiltseries.py            # TiltSeriesGenerator
+    _parameters.py            # CTFParameters, ParamField
+    _transfer.py              # TransferFunction
+    _legacy.py                # LegacyAberrationAdapter — bridges the legacy ctf_params dict to CTFParameters
+    _units.py                 # zernike_rho_max and other native-unit helpers
+  ghostbuster/                # 3D reconstruction (PyTorch Lightning) — see "Inverse problem" above. _base_reconstructor
+                              # (shared LightningModule scaffolding), _losses (NCC/MSE/noise-weighted losses), _io
+                              # (volume + FSC figure output), _run_helpers (Trainer construction), _helpers (LR
+                              # schedulers, k-masks, image preprocessing)
   ice/                        # Amorphous ice generation
     _random.py                # RandomIcemaker
     _gradient.py              # GradientSKIcemaker
     _bank.py                  # IceBank (cache) + build_one_ice_config()/build_ice_cache()
+    _blend.py                 # IceSlabBlender — blends an ice field into a specimen volume one z-slab at a time
+    _profile.py               # IceProfile — laterally varying ice thickness across a micrograph (hole, rim, tilt)
     _energy.py                # MLBOP coarse-grained water potential (structural diagnostic; neighbor search via vesin-torch, not ASE)
     _kernels.py               # Shared physics-kernel construction (atomic potential, S(k) target)
     _mdsim.py                 # MDSimDump/ExtXYZDump (legacy MD trajectory ingestion)
     _helpers.py               # Helper functions (water molecules, FFT, etc.)
+  ice_data/                   # Bundled IceBank library + S(k)/MD targets — do not modify (see Off-Limits Files)
+  imagegenerator/             # Image simulation classes
+    _base.py                  # BaseImager base class
+    _particle_base.py         # ParticleGeneratorBase — solvate/process_volume shared by the two particle generators
+    _generator.py             # ImageGenerator, ImageGeneratorFromCoordinates
+    _micrograph.py            # MicrographGenerator
+    _tiltseries.py            # TiltSeriesGenerator
+  io/                         # Particle/micrograph metadata I/O (package)
+    _cryosparc.py             # extract_parameters_from_csfile() — reads CryoSPARC .cs files
+    _relion.py                # RELION .star read/write: extract_parameters_from_starfile(), create_particle_starfile[_from_model](), create_micrograph_starfile()
+    _common.py                # _select_particles() — shared per-particle mask/truncate helper for both backends
   jobs/                       # Job management and persistence; jobs/_cli.py's build_jobs_group() is wired
                               # into cli/_cli.py as `specter jobs`
     _job.py                   # Job class
     _database.py              # JobDatabase storage
     _cli.py                   # CLI interface
-  cli/                        # `specter` CLI (specter simulate ..., specter build ...) — see "CLI & pipelines" below
-  pipelines/                  # run_particle_stack/run_micrograph/run_tilt_series/run_build_tomogram/run_build_ice_cache/run_reconstruction — see "CLI & pipelines" below
+  match/                      # `specter match particles`: _images (load the experimental stack), _metadata (rescale a
+                              # refinement to Fourier-cropped images), _metrics (matched-pose SNR and friends), _report
+                              # (figure + Markdown), _toml (matched.toml writer)
+  pipelines/                  # run_particle_stack/run_micrograph/run_tilt_series/run_build_tomogram/run_build_ice_cache/run_reconstruction/run_match — see "CLI & pipelines" below
+  potential/                  # Scattering potential construction
+    _potential_builder.py     # PotentialBuilder — atoms → 3D potential volume
+    _builders.py              # Rasterization backends (voxel/analytic/FFT) + compute_supersampling_parameters
+    _gemmi_builder.py         # GemmiPotentialBuilder — potentials via gemmi's density calculator
+    _occupancy.py             # potential_occupancy() and FULL_OCCUPANCY_POTENTIAL_V — how much ice a voxel takes
+    _absorption.py            # apply_amplitude_contrast() — the imaginary part of the potential, shared by the scattering models
+  rotations/                  # Quaternion-based 3D rotations (built on the `roma` library)
+    _rotation.py              # roma-wrapped translate_coordinates, rotate_coordinates; rotation_aligning
+    _random.py                # roma-wrapped random_quaternion/random_rotvec/random_rotation_matrix, rotations_angular_difference
+    _volume.py                # rotate_volume, rotate_volume_fourier, affine matrix helpers
+    _volume_rotator.py        # VolumeRotator (LightningModule) for sampling rotated slices
   specimen/                   # Volume assembly (package) — under heavy active development, structure below is
                               # partial/illustrative only; read the package directly rather than trusting this list.
     single_particle.py        # MicrographSpecimenGenerator — populates a volume with template potentials + crowding + ice
+    from_volume.py            # load_specimen_volume() — a pre-built specimen volume from disk, for TiltSeriesConfig's volume_path
     cytosolic_filler.py       # PEI2016_CROWDING_TABLE + CRYOETSIM_PARTICLE_TABLE + build_filler_pool_specs() — generic cytosolic background reference tables
+    _parallel_render.py       # Concurrent per-species rendering/PDB parsing (render_workers/render_devices resolution)
     filament/                 # single-strand filaments (_path/_placement/_generator: F-actin,
                               # PROTOFILAMENT_SPEC) AND real microtubules (_lattice: surface-lattice
                               # geometry with constants measured off deposited MT reconstructions;
@@ -248,44 +287,38 @@ src/specter/                  # Main source package
                               # +Z = protofilament axis / +X = radially outward; _frames:
                               # parallel-transport frames, required so a bent tube's protofilaments
                               # don't shear apart). No supertwist -- deliberate, see _lattice's docstring.
-    tomogram/, membrane/, packing/  # newer subpackages (tomogram/specimen assembly,
-                              # organic membranes, shape/sphere packing algorithms); also from_volume.py at the
-                              # top level — still in flux, deliberately not detailed here
+    membrane/                 # Organic membranes: _field (signed-field geometry), _field_spherical_harmonics and
+                              # _field_swept_spline (the two shape backends), _profile (calibrated bilayer psi(z)),
+                              # _raster (field + profile → density), _placement (transmembrane sites/orientations),
+                              # _extent (bounding radius), _generator (MembraneGenerator, TransmembraneSpec)
+    packing/                  # algorithms.py (pack_hard_spheres_3d, species pools), _shape.py (pack_shapes_3d, the
+                              # default voxel-occupancy packer)
+    tomogram/                 # generator.py (TomogramSpecimenGenerator, behind `specter build tomogram`), _specs
+                              # (its input dataclasses), _regions (shell/lumen/cytosol classification), _helpers
     _grid.py                  # BeadGenerator — gold fiducial bead physics, for specimen.tomogram.TomogramSpecimenGenerator
                               # (`specter build tomogram`); also the shared bulk-material density/potential helpers _carbon.py uses
-    _carbon.py                 # CarbonFilmGenerator/GridSpec — carbon support film: alpha-shape rim geometry (from-scratch
+    _carbon.py                # CarbonFilmGenerator/GridSpec — carbon support film: alpha-shape rim geometry (from-scratch
                               # CTS gen_carbon.m port) + MIP-calibrated flat deposition
-    _carbon_delaunay.py        # Torch-free Delaunay/circumsphere worker for _carbon.py's blocked (spawn-context) alpha-complex build
-  potential.py                # Scattering potential builder
-  scattering.py               # Wave propagation (multislice, rytov, firstborn, projection)
-  microscope.py               # Aberration and detector models
-  detectors.py                # Detector MTF and noise models
-  aretomo3.py                 # AreTomo3 .aln tilt-geometry → quaternions, for TiltSeriesGenerator
+    _carbon_delaunay.py       # Torch-free Delaunay/circumsphere worker for _carbon.py's blocked (spawn-context) alpha-complex build
+  symmetries/                 # get_rotation_matrices/apply_symmetry; _matrices.py generates T/O/I1/I2 by closure from exact generators
+  tilt/                       # _geometry (tilt-coverage padding, per-tilt nz/defocus), _aretomo3 (AreTomo3 .aln/.xf → quaternions)
   constants.py                # Physical constants (rest_mass_energy, hc, energy_to_wavelength; CODATA via scipy.constants)
-  memory.py                   # Peak-memory model + recommend_batchsize/resolve_batchsize for batchsize="auto"
-  rotations/                  # Quaternion-based 3D rotations (built on the `roma` library)
-    _rotation.py               # roma-wrapped translate_coordinates, rotate_coordinates
-    _random.py                 # roma-wrapped random_quaternion/random_rotvec/random_rotation_matrix, rotations_angular_difference
-    _volume.py                 # rotate_volume, rotate_volume_fourier, affine matrix helpers
-    _volume_rotator.py         # VolumeRotator (LightningModule) for sampling rotated slices
+  coords.py                   # Coordinate utilities (Poisson-disk neighbours, RDF)
+  cpu_threads.py              # limited_cpu_threads() — scoped cap on torch's intra-op pool around small-op loops
   crowding.py                 # Molecular crowding simulation
-  ghostbuster/                # 3D reconstruction (PyTorch Lightning) — see "Inverse problem" above
-  arrays.py                   # Array utilities (soft voxelization, tiling, crops, fourier_crop)
-  coords.py                   # Coordinate utilities (RDF, etc.)
-  fft.py                      # FFT wrappers
+  detectors.py                # Detector MTF and noise models
+  devices.py                  # parse_device()/DeviceSpec — the one grammar for every `device` setting
+  fft.py                      # FFT wrappers, convolutions, fourier_shell_correlation
   filters.py                  # Frequency-domain filters
   image.py                    # Image-level utilities
+  memory.py                   # Peak-memory model + recommend_batchsize/resolve_batchsize for batchsize="auto"
+  microscope.py               # Detector model
   pdb.py                      # PDB/mmCIF parsing helpers
-  io/                          # Particle/micrograph metadata I/O (package)
-    _cryosparc.py               # extract_parameters_from_csfile() — reads CryoSPARC .cs files
-    _relion.py                   # RELION .star read/write: extract_parameters_from_starfile(), create_particle_starfile[_from_model](), create_micrograph_starfile()
-    _common.py                   # _select_particles() — shared per-particle mask/truncate helper for both backends
-  config.py                   # ParticleStackConfig/MicrographConfig/TiltSeriesConfig/TomogramConfig/IceCacheConfig/ReconstructionConfig dataclasses + load_config()/apply_overrides() for TOML-driven runs (shared by cli/ and direct Python callers)
   plots.py                    # Plotting helpers
-  progress.py                 # Progress bar management (ProgressManager)
-  random_seed.py              # Global seed control (exported as specter.seed)
-  symmetries.py               # Symmetry operations
+  progress.py                 # Progress bars, the shared rich console, section()/phase() headers, format_elapsed()
   qscore.py                   # Per-atom Q-score (map-model fit; Pintilie et al. 2020)
+  random_seed.py              # Global seed control (exported as specter.seed)
+  scattering.py               # Wave propagation (multislice, rytov, firstborn, projection)
 tests/                        # pytest test suite
   test_data/                  # Golden-output fixtures (.pt files) for regression tests
 demo-notebooks/               # User-facing, always kept working

@@ -9,14 +9,7 @@ from specter.config import (
     ReconstructionConfig,
 )
 
-from ._click_options import (
-    build_config_options,
-    collect_overrides,
-    CONFIG_OPTION_HELP,
-    load_validated_config,
-)
-
-CONTEXT_SETTINGS = {"help_option_names": ["-h", "--help"]}
+from ._click_options import CONTEXT_SETTINGS, build_config_command, load_cli_config
 
 # (panel title, field names) -- basic-first-advanced-last, the same convention
 # as cli/simulate.py's _PARTICLE_STACK_GROUPS and cli/build.py's
@@ -56,47 +49,7 @@ def _particle_callback(config: str | None, **_overrides_raw: object) -> None:
     """Handle `specter reconstruct particle`."""
     from specter.pipelines import run_reconstruction
 
-    ctx = click.get_current_context()
-    assert ctx is not None
-    overrides = collect_overrides(ctx, exclude={"config"})
-
-    cfg = load_validated_config(ReconstructionConfig, config, overrides)
-    run_reconstruction(cfg)
-
-
-def _reconstruct_particle_command() -> click.RichCommand:
-    params: list[click.Parameter] = [
-        click.RichOption(
-            ["--config"],
-            type=str,
-            default=None,
-            show_default=False,
-            help=CONFIG_OPTION_HELP,
-            panel="Config",
-        ),
-        *build_config_options(
-            ReconstructionConfig,
-            field_help=RECONSTRUCTION_HELP,
-            field_groups=_RECONSTRUCT_PARTICLE_GROUPS,
-        ),
-    ]
-    return click.RichCommand(
-        name="particle",
-        params=params,
-        callback=_particle_callback,
-        context_settings=CONTEXT_SETTINGS,
-        help="Reconstruct a 3D volume from an experimental single-particle "
-        "stack, by fitting the same physics-based forward model `specter "
-        "simulate particles` generates with. Takes a CryoSPARC .cs file for "
-        "the poses and CTF parameters plus the .mrc/.mrcs stack it indexes, "
-        "and writes the reconstructed volume, per-epoch volumes and FSC "
-        "curves into a run directory. Start with --test_run, which fits one "
-        "epoch on binned images and exercises every path and parameter for a "
-        "fraction of the cost. Pose, translation and defocus refinement "
-        "(--lr_R/--lr_T/--lr_D) are wired in but unverified against ground "
-        "truth. A TOML config (--config) is loaded first when given, otherwise every setting takes its built-in default -- every "
-        "flag below is optional and, if given, overrides one field of it.",
-    )
+    run_reconstruction(load_cli_config(ReconstructionConfig, config))
 
 
 def build_reconstruct_group(name: str = "reconstruct") -> click.RichGroup:
@@ -130,5 +83,24 @@ def build_reconstruct_group(name: str = "reconstruct") -> click.RichGroup:
         help="Reconstruct 3D volumes from experimental images",
         context_settings=CONTEXT_SETTINGS,
     )
-    group.add_command(_reconstruct_particle_command())
+    group.add_command(
+        build_config_command(
+            "particle",
+            ReconstructionConfig,
+            RECONSTRUCTION_HELP,
+            _RECONSTRUCT_PARTICLE_GROUPS,
+            _particle_callback,
+            help="Reconstruct a 3D volume from an experimental single-particle "
+            "stack, by fitting the same physics-based forward model `specter "
+            "simulate particles` generates with. Takes a CryoSPARC .cs file for "
+            "the poses and CTF parameters plus the .mrc/.mrcs stack it indexes, "
+            "and writes the reconstructed volume, per-epoch volumes and FSC "
+            "curves into a run directory. Start with --test_run, which fits one "
+            "epoch on binned images and exercises every path and parameter for a "
+            "fraction of the cost. Pose, translation and defocus refinement "
+            "(--lr_R/--lr_T/--lr_D) are wired in but unverified against ground "
+            "truth. A TOML config (--config) is loaded first when given, otherwise every setting takes its built-in default -- every "
+            "flag below is optional and, if given, overrides one field of it.",
+        )
+    )
     return group

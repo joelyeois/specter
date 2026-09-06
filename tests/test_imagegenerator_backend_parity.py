@@ -17,13 +17,6 @@ from specter.imagegenerator import (
 
 
 @pytest.fixture
-def small_volume():
-    volume = torch.zeros(32, 32, 32)
-    volume[12:20, 12:20, 12:20] = 50.0
-    return volume
-
-
-@pytest.fixture
 def realistic_ctf_params():
     """Every CTF term nonzero at once -- same values used by the
     ImageGenerator parity test above, single particle (matches how

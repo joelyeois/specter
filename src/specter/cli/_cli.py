@@ -7,11 +7,12 @@ import rich_click as click
 from specter.jobs._cli import build_jobs_group
 from specter.progress import tqdm_warnings
 
+from ._click_options import CONTEXT_SETTINGS
 from .build import build_build_group
 from .cache import build_cache_group
 from .match import build_match_group
 from .reconstruct import build_reconstruct_group
-from .simulate import CONTEXT_SETTINGS, build_simulate_group
+from .simulate import build_simulate_group
 
 
 @click.group(cls=click.RichGroup, context_settings=CONTEXT_SETTINGS)

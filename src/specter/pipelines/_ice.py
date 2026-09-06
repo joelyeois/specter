@@ -37,7 +37,8 @@ import torch
 from specter.config import IceCacheConfig, validate_config
 from specter.ice import build_one_ice_config, ice_config_filename
 
-from ._common import _console, _format_elapsed, _parse_device_pool, _section
+from specter.progress import console, format_elapsed, section
+from ._common import _parse_device_pool
 
 
 def _build_shard(
@@ -116,11 +117,11 @@ def _report_config(metadata: dict, device: str, elapsed: float) -> None:
         if metadata["stopped_early"]
         else f"used the full {steps}"
     )
-    _console.print(
+    console.print(
         f"  {ice_config_filename(metadata['seed'])} on {device}: "
         f"S(k) loss {metadata['sk_loss']:.4g}, "
         f"E/atom {metadata['energy']['E_per_atom']:+.4f} eV, "
-        f"{budget} steps in {_format_elapsed(elapsed)} "
+        f"{budget} steps in {format_elapsed(elapsed)} "
         f"({elapsed / max(steps, 1):.2f} s/step)"
     )
 
@@ -212,7 +213,7 @@ def run_build_ice_cache(config: IceCacheConfig) -> None:
         Python.
     """
     validate_config(config)
-    _section("Ice cache")
+    section("Ice cache")
     os.makedirs(config.output_dir, exist_ok=True)
 
     seeds = [config.seed_start + i for i in range(config.num_configs)]
@@ -226,19 +227,19 @@ def run_build_ice_cache(config: IceCacheConfig) -> None:
     ]
     devices = _parse_device_pool(config.device)
 
-    _console.print(
+    console.print(
         f"Library: {config.num_configs} configs at n={config.n}, dx={config.dx} A "
         f"(cell {config.n * config.dx:.0f} A), seeds "
         f"{seeds[0]}-{seeds[-1]}" + f"\nOutput:  {config.output_dir}"
     )
     if len(pending) < len(seeds):
-        _console.print(
+        console.print(
             f"Skipping {len(seeds) - len(pending)} config(s) already present "
             "(pass --overwrite to regenerate them)."
         )
 
     if pending:
-        _console.print(
+        console.print(
             f"Generating {len(pending)} config(s) on {', '.join(devices)} -- "
             "expect tens of minutes each at production scale."
         )
@@ -275,12 +276,12 @@ def run_build_ice_cache(config: IceCacheConfig) -> None:
                     "config that did finish was saved -- re-run the same "
                     "command to generate only the missing ones."
                 )
-        _console.print(f"Generated in {_format_elapsed(time.time() - started)}.")
+        console.print(f"Generated in {format_elapsed(time.time() - started)}.")
     else:
-        _console.print("Nothing to generate; every requested config already exists.")
+        console.print("Nothing to generate; every requested config already exists.")
 
     entries = _write_manifest(config, os.path.join(config.output_dir, "manifest.json"))
-    _console.print(f"Library now holds {len(entries)} config(s); wrote manifest.json.")
+    console.print(f"Library now holds {len(entries)} config(s); wrote manifest.json.")
 
     # Reported as a spread rather than as a verdict: there is no calibrated
     # threshold separating a good sk_loss from a bad one at this scale (see
@@ -288,7 +289,7 @@ def run_build_ice_cache(config: IceCacheConfig) -> None:
     # something a reader can act on; an absolute cutoff would not be.
     losses = [e["sk_loss"] for e in entries if e["sk_loss"] is not None]
     if len(losses) > 1:
-        _console.print(
+        console.print(
             f"S(k) loss across the library: {min(losses):.4g} - {max(losses):.4g} "
             f"(median {sorted(losses)[len(losses) // 2]:.4g}). For reference, the "
             "bundled ice_data/ice_cache spans 0.0002 - 0.022 at n=256, dx=1.0."
@@ -300,4 +301,4 @@ def run_build_ice_cache(config: IceCacheConfig) -> None:
         save_path = os.path.join(config.output_dir, "diagnostics")
         bank = IceBank(config.output_dir, device=devices[0], progressbars=False)
         bank.plot_diagnostics(save_path=save_path, show=False)
-        _console.print(f"Saved diagnostics to {save_path}_energy.png / _sk.png.")
+        console.print(f"Saved diagnostics to {save_path}_energy.png / _sk.png.")

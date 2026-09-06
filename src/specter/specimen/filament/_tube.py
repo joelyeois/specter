@@ -26,7 +26,7 @@ import torch
 from ._frames import parallel_transport_frames
 from ._generator import FilamentInstance
 from ._lattice import MicrotubuleSpec, TubeLattice, thermal_flex_deg
-from ._path import generate_filament_path
+from ._path import _random_unit_vector, generate_filament_path
 from ._tubulin import extract_mt_dimer
 
 
@@ -55,11 +55,6 @@ class MicrotubuleInstance:
     code: str
     axis_xyz: torch.Tensor
     lattice: TubeLattice
-
-
-def _random_unit_vector(generator: torch.Generator | None) -> torch.Tensor:
-    v = torch.randn(3, generator=generator)
-    return v / v.norm().clamp_min(1e-8)
 
 
 def _sample_direction(

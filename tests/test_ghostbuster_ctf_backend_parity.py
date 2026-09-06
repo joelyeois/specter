@@ -27,13 +27,6 @@ _LPP_PARAMS = dict(
 
 
 @pytest.fixture
-def small_volume() -> torch.Tensor:
-    volume = torch.zeros(16, 16, 16)
-    volume[4:12, 4:12, 4:12] = 50.0
-    return volume
-
-
-@pytest.fixture
 def realistic_ctf_params() -> dict[str, torch.Tensor]:
     """Every CTF term nonzero at once, matching
     test_imagegenerator_backend_parity.py's fixture of the same name."""
@@ -55,10 +48,10 @@ def realistic_ctf_params() -> dict[str, torch.Tensor]:
 # ---------------------------------------------------------------------------
 
 
-def _build_reconstructor(small_volume, ctf_params, aberration_backend, **extra):
+def _build_reconstructor(tiny_volume, ctf_params, aberration_backend, **extra):
     torch.manual_seed(0)
     model = Reconstructor(
-        V=small_volume,
+        V=tiny_volume,
         voxel_size=2.0,
         quaternions=torch.tensor([[1.0, 0.0, 0.0, 0.0]]),
         translations=torch.tensor([[0.0, 0.0]]),
@@ -74,39 +67,39 @@ def _build_reconstructor(small_volume, ctf_params, aberration_backend, **extra):
     return model.forward(torch.tensor([0]))
 
 
-def test_reconstructor_matches_across_backends(small_volume, realistic_ctf_params):
+def test_reconstructor_matches_across_backends(tiny_volume, realistic_ctf_params):
     """Every CTF term nonzero at once, through Reconstructor's actual forward
     pass (ImageGenerator built internally) -- not just the isolated
     ImageGenerator parity already covered elsewhere."""
-    legacy = _build_reconstructor(small_volume, realistic_ctf_params, "legacy")
-    torch_ctf = _build_reconstructor(small_volume, realistic_ctf_params, "torch_ctf")
+    legacy = _build_reconstructor(tiny_volume, realistic_ctf_params, "legacy")
+    torch_ctf = _build_reconstructor(tiny_volume, realistic_ctf_params, "torch_ctf")
 
     assert legacy.shape == torch_ctf.shape
     assert torch.allclose(legacy, torch_ctf, atol=1e-3)
 
 
-def test_reconstructor_lpp_params_changes_output(small_volume):
+def test_reconstructor_lpp_params_changes_output(tiny_volume):
     """lpp_params reaches the rendered image through Reconstructor, same as
     it does through a bare ImageGenerator."""
     ctf_params = {"dfu": torch.tensor([5000.0]), "cs": torch.tensor([2.7])}
 
     without_lpp = _build_reconstructor(
-        small_volume, ctf_params, "torch_ctf", lpp_params=None
+        tiny_volume, ctf_params, "torch_ctf", lpp_params=None
     )
     with_lpp = _build_reconstructor(
-        small_volume, ctf_params, "torch_ctf", lpp_params=_LPP_PARAMS
+        tiny_volume, ctf_params, "torch_ctf", lpp_params=_LPP_PARAMS
     )
 
     assert without_lpp.shape == with_lpp.shape
     assert not torch.allclose(without_lpp, with_lpp)
 
 
-def test_reconstructor_lpp_params_with_legacy_backend_raises(small_volume):
+def test_reconstructor_lpp_params_with_legacy_backend_raises(tiny_volume):
     """lpp_params with the default aberration_backend='legacy' must raise at
     construction time, same as it does for a bare ImageGenerator."""
     with pytest.raises(ValueError, match="lpp_params"):
         Reconstructor(
-            V=small_volume,
+            V=tiny_volume,
             voxel_size=2.0,
             quaternions=torch.tensor([[1.0, 0.0, 0.0, 0.0]]),
             translations=torch.tensor([[0.0, 0.0]]),
@@ -134,11 +127,11 @@ def tilt_quaternions() -> torch.Tensor:
 
 
 def _build_tomogram_reconstructor(
-    small_volume, tilt_quaternions, ctf_params, aberration_backend, **extra
+    tiny_volume, tilt_quaternions, ctf_params, aberration_backend, **extra
 ):
     torch.manual_seed(0)
     model = TomogramReconstructor(
-        V=small_volume,
+        V=tiny_volume,
         voxel_size=2.0,
         quaternions=tilt_quaternions,
         translations=torch.zeros(3, 2),
@@ -152,7 +145,7 @@ def _build_tomogram_reconstructor(
     return model.forward(0)
 
 
-def test_tomogram_reconstructor_matches_across_backends(small_volume, tilt_quaternions):
+def test_tomogram_reconstructor_matches_across_backends(tiny_volume, tilt_quaternions):
     ctf_params = {
         "dfu": torch.full((3,), 5000.0),
         "cs": torch.full((3,), 2.7),
@@ -160,10 +153,10 @@ def test_tomogram_reconstructor_matches_across_backends(small_volume, tilt_quate
     }
 
     legacy = _build_tomogram_reconstructor(
-        small_volume, tilt_quaternions, ctf_params, "legacy"
+        tiny_volume, tilt_quaternions, ctf_params, "legacy"
     )
     torch_ctf = _build_tomogram_reconstructor(
-        small_volume, tilt_quaternions, ctf_params, "torch_ctf"
+        tiny_volume, tilt_quaternions, ctf_params, "torch_ctf"
     )
 
     assert legacy.shape == torch_ctf.shape
@@ -171,11 +164,11 @@ def test_tomogram_reconstructor_matches_across_backends(small_volume, tilt_quate
 
 
 def test_tomogram_reconstructor_lpp_params_with_legacy_backend_raises(
-    small_volume, tilt_quaternions
+    tiny_volume, tilt_quaternions
 ):
     with pytest.raises(ValueError, match="lpp_params"):
         TomogramReconstructor(
-            V=small_volume,
+            V=tiny_volume,
             voxel_size=2.0,
             quaternions=tilt_quaternions,
             translations=torch.zeros(3, 2),

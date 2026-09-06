@@ -450,13 +450,12 @@ class MicrographGenerator(BaseImager):
 
         `IterativeScattering.multislice` accepts an off-device volume and
         streams it a slice at a time, so falling back costs per-slice
-        transfers rather than the run. Mirrors
-        `TiltSeriesGenerator._ensure_volume_placed`, which resolves the same
-        question for the same reason; the warning is a `warnings.warn` rather
-        than that class's `verbose`-gated print because
-        `pipelines/_micrograph.py` constructs this generator with
-        ``verbose=False``, so a print would never reach a CLI user whose run
-        had silently taken the slow path.
+        transfers rather than the run. `TiltSeriesGenerator` inherits this
+        and streams windowed blocks per z-chunk instead (see its ``volume``
+        docstring). The warning is a `warnings.warn` rather than a
+        `verbose`-gated print because the pipelines construct these
+        generators with ``verbose=False``, so a print would never reach a
+        CLI user whose run had silently taken the slow path.
 
         A no-op once the volume has settled on a device.
         """
@@ -470,7 +469,7 @@ class MicrographGenerator(BaseImager):
                 self._warned_volume_on_host = True
                 gb = self.volume.numel() * self.volume.element_size() / 1e9
                 warnings.warn(
-                    f"MicrographGenerator: the specimen volume ({gb:.1f} GB) "
+                    f"{type(self).__name__}: the specimen volume ({gb:.1f} GB) "
                     f"does not fit on {self.device}; keeping it in host memory "
                     "and streaming it slice by slice instead. The result is "
                     "unchanged and GPU memory stays bounded regardless of "

@@ -26,6 +26,8 @@ import math
 import roma
 import torch
 
+from ...rotations import rotation_aligning
+
 
 def filament_tangents(positions_xyz: torch.Tensor) -> torch.Tensor:
     """
@@ -51,35 +53,6 @@ def filament_tangents(positions_xyz: torch.Tensor) -> torch.Tensor:
     diffs = positions_xyz[1:] - positions_xyz[:-1]
     tangents = diffs / diffs.norm(dim=-1, keepdim=True).clamp_min(1e-8)
     return torch.cat([tangents, tangents[-1:]], dim=0)
-
-
-def _rotation_aligning(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
-    """Rotation matrix R such that ``R @ a`` (both normalized) equals ``b``.
-
-    Same small "align two vectors" construction as
-    ``membrane._placement._rotation_aligning`` -- kept as a local copy
-    rather than a cross-module import, matching this codebase's established
-    per-generator zero-cross-coupling convention.
-    """
-    a = a / a.norm().clamp_min(1e-8)
-    b = b / b.norm().clamp_min(1e-8)
-
-    cos_angle = torch.clamp((a * b).sum(), -1.0, 1.0)
-    axis = torch.linalg.cross(a, b)
-    axis_norm = axis.norm()
-
-    if float(axis_norm) < 1e-6:
-        if float(cos_angle) > 0:
-            return torch.eye(3)
-        perp = torch.linalg.cross(a, torch.tensor([1.0, 0.0, 0.0]))
-        if float(perp.norm()) < 1e-6:
-            perp = torch.linalg.cross(a, torch.tensor([0.0, 1.0, 0.0]))
-        perp = perp / perp.norm()
-        return roma.rotvec_to_rotmat((perp * math.pi).unsqueeze(0))[0]
-
-    axis = axis / axis_norm
-    angle = torch.arccos(cos_angle)
-    return roma.rotvec_to_rotmat((axis * angle).unsqueeze(0))[0]
 
 
 def filament_orientations(
@@ -115,7 +88,7 @@ def filament_orientations(
     n = positions_xyz.shape[0]
     rotations = torch.empty((n, 3, 3))
     for i in range(n):
-        r_align = _rotation_aligning(z_hat, tangents[i])
+        r_align = rotation_aligning(z_hat, tangents[i])
         r_spin = roma.rotvec_to_rotmat((z_hat * (i * twist_rad)).unsqueeze(0))[0]
         rotations[i] = r_align @ r_spin
     return rotations

@@ -23,9 +23,9 @@ from rich.console import Console
 
 from specter.config import default_pdb_cache_dir
 
-console = Console()
+from ._click_options import CONTEXT_SETTINGS
 
-CONTEXT_SETTINGS = {"help_option_names": ["-h", "--help"]}
+console = Console()
 
 
 def _cache_contents(cache_dir: Path) -> tuple[int, int]:

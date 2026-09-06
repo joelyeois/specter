@@ -4,13 +4,24 @@ from __future__ import annotations
 
 import dataclasses
 import types
-from typing import Any, Literal, NoReturn, Union, get_args, get_origin, get_type_hints
+from typing import (
+    Any,
+    Iterable,
+    Literal,
+    NoReturn,
+    Sequence,
+    Union,
+    get_args,
+    get_origin,
+    get_type_hints,
+)
 
 import rich_click as click
 
 from specter.config import apply_overrides, load_config, validate_config
 from click.core import ParameterSource
 
+CONTEXT_SETTINGS = {"help_option_names": ["-h", "--help"]}
 
 #: Field name -> the string ``--help`` shows in place of the real default.
 #: For a default computed from the environment, the real value is a machine
@@ -346,6 +357,90 @@ def load_validated_config(
     except (ValueError, FileNotFoundError) as exc:
         raise click.UsageError(str(exc)) from exc
     return config
+
+
+def load_cli_config(
+    config_cls: type, config_path: str | None, exclude: Iterable[str] = ()
+) -> Any:
+    """
+    Build the running command's config from ``--config`` plus the flags it was given.
+
+    Parameters
+    ----------
+    config_cls : type
+        The config dataclass for this command.
+    config_path : str or None
+        The ``--config`` value.
+    exclude : iterable of str, optional
+        Parameters of the command that are not config fields (``"config"``
+        itself is always excluded).
+
+    Returns
+    -------
+    object
+        A validated instance of ``config_cls``.
+    """
+    ctx = click.get_current_context()
+    assert ctx is not None
+    overrides = collect_overrides(ctx, exclude={"config", *exclude})
+    return load_validated_config(config_cls, config_path, overrides)
+
+
+def build_config_command(
+    name: str,
+    config_cls: type,
+    field_help: dict[str, str],
+    field_groups: list[tuple[str, list[str]]],
+    callback: Any,
+    help: str,
+    extra_params: Sequence[click.Parameter] = (),
+) -> click.RichCommand:
+    """
+    Build a config-driven command: ``--config``, then one flag per config field.
+
+    Parameters
+    ----------
+    name : str
+        The subcommand name.
+    config_cls : type
+        The config dataclass whose fields become flags.
+    field_help : dict[str, str]
+        Per-field help text, see :func:`build_config_options`.
+    field_groups : list of (str, list of str)
+        Panel layout, see :func:`build_config_options`.
+    callback : callable
+        The command callback; receives ``config`` plus every flag by name.
+    help : str
+        The command's help text.
+    extra_params : sequence of click.Parameter, optional
+        Parameters that are not config fields, placed after ``--config``.
+
+    Returns
+    -------
+    click.RichCommand
+    """
+    config_option = click.RichOption(
+        ["--config"],
+        type=str,
+        default=None,
+        show_default=False,
+        help=CONFIG_OPTION_HELP,
+        panel="Config",
+    )
+    params: list[click.Parameter] = [
+        config_option,
+        *extra_params,
+        *build_config_options(
+            config_cls, field_help=field_help, field_groups=field_groups
+        ),
+    ]
+    return click.RichCommand(
+        name=name,
+        params=params,
+        callback=callback,
+        context_settings=CONTEXT_SETTINGS,
+        help=help,
+    )
 
 
 def collect_overrides(ctx: click.Context, exclude: set[str]) -> dict[str, Any]:

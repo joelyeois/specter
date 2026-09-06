@@ -13,19 +13,12 @@ from tqdm.auto import tqdm
 
 T = TypeVar("T")
 
-# Independent Console instance from pipelines/_common.py's own `_console`
-# (this module sits below `pipelines/` in the dependency graph, so it
-# can't import that one) -- rich.console.Console is safe to instantiate
-# more than once; both write to the same stdout/terminal regardless.
-_section_console = Console()
+#: The one rich console for specter's CLI output; `pipelines/` prints to it too.
+console = Console()
 
 
-def _format_elapsed(seconds: float) -> str:
-    """Format an elapsed-time duration as e.g. "1h 2m 3s", dropping empty
-    leading units. Independent copy of pipelines/_common.py's own helper
-    of the same name (this module sits below `pipelines/` in the
-    dependency graph, and it's a two-line function -- not worth an import
-    the wrong way just to avoid duplicating it)."""
+def format_elapsed(seconds: float) -> str:
+    """Format an elapsed-time duration as e.g. "1h 2m 3s", dropping empty leading units."""
     h, rem = divmod(int(seconds), 3600)
     m, s = divmod(rem, 60)
     if h > 0:
@@ -204,10 +197,9 @@ def phase(description: str, disable: bool = False) -> Iterator[None]:
     -- "{description}: {elapsed}" -- via ``tqdm.write`` (safe to
     interleave with any other active ``track``/``status``/``TqdmProgress``
     bars without corrupting their display, unlike a plain ``print``) when
-    it exits. Same visual convention as `pipelines._common._section`
-    (a full-width titled rule), so CLI output reads consistently across
-    `specter simulate`/`specter build` regardless of which layer is
-    driving a given phase.
+    it exits. The header is `section`'s full-width titled rule, so CLI
+    output reads consistently across `specter simulate`/`specter build`
+    regardless of which layer is driving a given phase.
 
     Meant to wrap a whole pipeline phase that itself contains one or more
     transient ``status``/``TqdmProgress`` bars for live per-item feedback
@@ -257,10 +249,13 @@ def phase_start(description: str, disable: bool = False) -> float:
         -- pass this straight through to `phase_done`.
     """
     if not disable:
-        _section_console.print(
-            Rule(f"[bold yellow]{description}[/bold yellow]", style="yellow")
-        )
+        section(description)
     return time.perf_counter()
+
+
+def section(title: str) -> None:
+    """Print a full-width titled rule as a section separator."""
+    console.print(Rule(f"[bold yellow]{title}[/bold yellow]", style="yellow"))
 
 
 def phase_done(description: str, start: float, disable: bool = False) -> None:
@@ -285,7 +280,7 @@ def phase_done(description: str, start: float, disable: bool = False) -> None:
     if disable:
         return
     elapsed = time.perf_counter() - start
-    tqdm.write(f"{description}: {_format_elapsed(elapsed)}")
+    tqdm.write(f"{description}: {format_elapsed(elapsed)}")
 
 
 @contextmanager

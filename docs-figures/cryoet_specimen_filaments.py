@@ -28,13 +28,10 @@ from _render import TEAL
 from specter.crowding import insert_particles_into_micrograph
 from specter.pdb import PDB
 from specter.potential import PotentialBuilder
-from specter.rotations import build_affine_matrix, rotate_volume
+from specter.rotations import build_affine_matrix, rotate_volume, rotation_aligning
 from specter.specimen.filament import ACTIN_SPEC, PROTOFILAMENT_SPEC, FilamentSpec
 from specter.specimen.filament._path import generate_filament_path
-from specter.specimen.filament._placement import (
-    _rotation_aligning,
-    filament_orientations,
-)
+from specter.specimen.filament._placement import filament_orientations
 from specter.specimen.membrane._placement import align_principal_axis_to_z
 from specter.specimen.packing import estimate_protein_box_size
 from specter.specimen.tomogram import TomogramSpecimenGenerator
@@ -59,7 +56,7 @@ def _lay_along_x(positions_xyz: torch.Tensor) -> torch.Tensor:
     `place_filaments` itself starts every filament in a uniformly random
     direction, which would put a path anywhere in the box."""
     end_to_end = positions_xyz[-1] - positions_xyz[0]
-    rotation = _rotation_aligning(end_to_end, torch.tensor([1.0, 0.0, 0.0]))
+    rotation = rotation_aligning(end_to_end, torch.tensor([1.0, 0.0, 0.0]))
     rotated = positions_xyz @ rotation.T
     return rotated - rotated.mean(dim=0)
 

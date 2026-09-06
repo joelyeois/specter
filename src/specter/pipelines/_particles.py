@@ -33,16 +33,13 @@ from specter.memory import (
 )
 from specter.pdb import PDB
 from specter.potential import PotentialBuilder
-from specter.progress import track
+from specter.progress import console, format_elapsed, section, track
 
 from ._common import (
-    _console,
-    _format_elapsed,
     _generate_multi,
     _generate_single,
     _parse_device,
     _save_exitwave_pair,
-    _section,
     _tracked_output_dir,
     _uniform_sample,
 )
@@ -182,11 +179,11 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
         generated_seed = int(torch.randint(0, 2**31 - 1, (1,)).item())
         specter.seed(generated_seed)
         if is_main:
-            _console.print(f"[dim]No seed given -- using seed={generated_seed}[/dim]")
+            console.print(f"[dim]No seed given -- using seed={generated_seed}[/dim]")
 
     # --- Building 3D scattering potential ---
     if is_main:
-        _section("Building 3D scattering potential")
+        section("Building 3D scattering potential")
     # Shtyrov fits scattering factors per bonded species, so derive the
     # bond topology from the structure unless the config supplies its own
     # atom_species list. Other parameterizations are per-element and would
@@ -229,7 +226,7 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
 
     # --- Sampling poses, defocus, and translations ---
     if is_main:
-        _section("Sampling poses, defocus, and translations")
+        section("Sampling poses, defocus, and translations")
 
     if dataset_particles is not None:
         # Poses/CTF/translations/anisomag come straight from the dataset --
@@ -423,7 +420,7 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
                 / 1024**3
             )
             free_gib = available_memory_bytes(sizing_device) / 1024**3
-            _console.print(
+            console.print(
                 f"  batchsize='auto' -> {batchsize} particle(s) per pass "
                 f"(~{peak_gib:.1f} GiB estimated peak, {free_gib:.1f} GiB free "
                 f"on {sizing_device})"
@@ -446,7 +443,7 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
         if mode == "multi":
             assert isinstance(device_target, list)
             if is_main:
-                _section(f"Initializing multi-GPU on devices {device_target}")
+                section(f"Initializing multi-GPU on devices {device_target}")
             images, exitwaves, clean_exitwaves = _generate_multi(
                 model,
                 n,
@@ -460,7 +457,7 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
                 return  # worker rank -- rank 0 handles saving
         else:
             if is_main:
-                _section(f"Generating images on {device_target}")
+                section(f"Generating images on {device_target}")
             model = model.to(device_target)
             images, exitwaves, clean_exitwaves = _generate_single(
                 model,
@@ -473,7 +470,7 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
 
         # --- Post-processing ---
         if is_main:
-            _section("Post-processing")
+            section("Post-processing")
         if config.normalize_particles:
             particles, _means, _stds = normalize_particles(images)
             particles = -particles
@@ -481,7 +478,7 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
             particles = images
 
         if is_main:
-            _section("Saving .mrcs + .star")
+            section("Saving .mrcs + .star")
         create_particle_starfile(
             particles,
             rotations=quats,
@@ -499,7 +496,7 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
 
         if is_main:
             if exitwaves is not None:
-                _section("Saving exit waves")
+                section("Saving exit waves")
                 _save_exitwave_pair(
                     exitwaves,
                     "exitwave",
@@ -510,7 +507,7 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
                 )
 
             if clean_exitwaves is not None:
-                _section("Saving clean exit waves")
+                section("Saving clean exit waves")
                 _save_exitwave_pair(
                     clean_exitwaves,
                     "clean_exitwave",
@@ -531,4 +528,4 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
         _output_dir_cm.__exit__(None, None, None)
 
     elapsed = time.perf_counter() - t_start
-    _console.print(f"\n[bold]Total time:[/bold] {_format_elapsed(elapsed)}")
+    console.print(f"\n[bold]Total time:[/bold] {format_elapsed(elapsed)}")

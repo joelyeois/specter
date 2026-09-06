@@ -63,11 +63,9 @@ from specter.specimen._parallel_render import (
     resolve_render_workers,
 )
 
+from specter.progress import console, format_elapsed, section
 from ._common import (
-    _console,
     _deterministic_tracked_path,
-    _format_elapsed,
-    _section,
     _tracked_output_dir,
     resolve_available_device,
     resolve_output_dir,
@@ -254,7 +252,7 @@ def run_build_tomogram(config: TomogramConfig, n_tomograms: int = 1) -> None:
     with _tracked_output_dir(config, "tomograms") as base_output_dir:
         for i in range(n_tomograms):
             if n_tomograms > 1:
-                _section(f"Tomogram {i + 1}/{n_tomograms}")
+                section(f"Tomogram {i + 1}/{n_tomograms}")
             # Tracking (if any) is resolved once, above, into base_output_dir --
             # run_config always gets a plain, already-resolved output_dir and
             # cleared tracking fields, so _run_single_tomogram/tomogram_output_path
@@ -638,14 +636,14 @@ def _report_devices(
     if gen.accumulator_device != compute:
         why = " (auto)" if accumulator_device == "auto" else ""
         line += f", accumulator on {gen.accumulator_device}{why}"
-    _console.print(line)
+    console.print(line)
 
 
 def _run_single_tomogram(config: TomogramConfig) -> None:
     """Build and save exactly one tomogram from an already-resolved config."""
     t_start = time.perf_counter()
 
-    _section("Building specimen volume")
+    section("Building specimen volume")
     # Printed right after the header, before any actual work -- target_shape/
     # voxel_size are already fully resolved from config at this point, so
     # there's no reason to make a caller wait for generation to finish
@@ -654,7 +652,7 @@ def _run_single_tomogram(config: TomogramConfig) -> None:
     # of the run to find out.
     target_shape = tuple(config.target_shape)
     size_angstrom = tuple(s * config.voxel_size for s in target_shape)
-    _console.print(
+    console.print(
         f"[bold]Volume:[/bold] {target_shape} voxels (Z, Y, X) @ "
         f"{config.voxel_size:.2f} A/voxel = {size_angstrom[0]:.0f} x "
         f"{size_angstrom[1]:.0f} x {size_angstrom[2]:.0f} A"
@@ -663,26 +661,26 @@ def _run_single_tomogram(config: TomogramConfig) -> None:
     gen = build_tomogram_generator(config)
     volume = gen.generate()
     if gen.membrane_instances:
-        _console.print(
+        console.print(
             f"  Membrane instances: {len(gen.placed_membrane_instances)}/"
             f"{len(gen.membrane_instances)} placed"
         )
-        _console.print(f"  Transmembrane: {len(gen.transmembrane_placements)} placed")
+        console.print(f"  Transmembrane: {len(gen.transmembrane_placements)} placed")
     if gen.filament_specs:
-        _console.print(
+        console.print(
             f"  Filaments: {len(gen.filament_instances)} "
             f"monomer instance(s) placed ({len(gen.filament_specs)} species)"
         )
     if gen.microtubule_specs:
-        _console.print(
+        console.print(
             f"  Microtubules: {len(gen.microtubule_instances)} tube(s), "
             f"{len(gen.microtubule_dimer_instances)} dimer instance(s) placed"
         )
     if gen.carbon_film_spec is not None:
-        _console.print("  Carbon film: generated")
+        console.print("  Carbon film: generated")
     if gen.bead_specs:
         n_requested = sum(spec.count for spec in gen.bead_specs)
-        _console.print(
+        console.print(
             f"  Gold fiducial beads: {len(gen.bead_instances)}/{n_requested} placed"
         )
     for location in ("cytosol", "lumen"):
@@ -691,7 +689,7 @@ def _run_single_tomogram(config: TomogramConfig) -> None:
             continue
         n_target = sum(1 for p in placed_here if p.role == "target")
         n_filler = len(placed_here) - n_target
-        _console.print(
+        console.print(
             f"  {location.capitalize()}: {n_target} target(s), {n_filler} filler placed"
         )
     assert gen.instance_labels is not None
@@ -701,9 +699,9 @@ def _run_single_tomogram(config: TomogramConfig) -> None:
     occupancy_fraction = count_nonzero_chunked(gen.instance_labels) / float(
         gen.instance_labels.numel()
     )
-    _console.print(f"  Occupancy: {occupancy_fraction:.1%} of volume")
+    console.print(f"  Occupancy: {occupancy_fraction:.1%} of volume")
 
-    _section("Saving")
+    section("Saving")
 
     # run_build_tomogram always hands this function an already-resolved,
     # untracked config, so this is the plain-string leaf directory rather
@@ -717,14 +715,14 @@ def _run_single_tomogram(config: TomogramConfig) -> None:
         volume.cpu().numpy().astype("float32", copy=False),
         config.voxel_size,
     )
-    _console.print(f"  [green]✓[/green] {mrc_path}")
+    console.print(f"  [green]✓[/green] {mrc_path}")
 
     if config.write_picks:
         written = gen.export_picks(
             output_dir, annotation_version=config.annotation_version
         )
         for path in written.values():
-            _console.print(f"  [green]✓[/green] {path}")
+            console.print(f"  [green]✓[/green] {path}")
 
     if config.write_segmentation:
         # The segmentation mask, not a coordinate file, is the intended
@@ -753,7 +751,7 @@ def _run_single_tomogram(config: TomogramConfig) -> None:
             # silent.
             peak = int(labels.max())
             if dtype.startswith("uint") and peak > _MRC_UINT16_MAX:
-                _console.print(
+                console.print(
                     f"  [yellow]note[/yellow] {peak:,} labels exceeds uint16's "
                     f"{_MRC_UINT16_MAX:,}; writing{suffix} as float32 "
                     "(exact for integers, MRC has no wider integer mode)"
@@ -763,7 +761,7 @@ def _run_single_tomogram(config: TomogramConfig) -> None:
             _write_volume_mrc(
                 path, labels.cpu().numpy().astype(dtype), config.voxel_size
             )
-            _console.print(f"  [green]✓[/green] {path}")
+            console.print(f"  [green]✓[/green] {path}")
 
         assert gen.instance_labels is not None
         _write_label_mrc("_protein_labels.mrc", gen.instance_labels, "uint16")
@@ -779,4 +777,4 @@ def _run_single_tomogram(config: TomogramConfig) -> None:
             _write_label_mrc("_regions.mrc", regions_volume, "uint16")
 
     elapsed = time.perf_counter() - t_start
-    _console.print(f"\n[bold]Total time:[/bold] {_format_elapsed(elapsed)}")
+    console.print(f"\n[bold]Total time:[/bold] {format_elapsed(elapsed)}")

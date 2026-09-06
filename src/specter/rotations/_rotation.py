@@ -1,8 +1,57 @@
 from __future__ import annotations
 
+import math
+
 import roma
 import torch
 import torch.nn.functional as F
+
+
+def rotation_aligning(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+    """
+    Rotation matrix ``R`` such that ``R @ a`` is parallel to ``b``.
+
+    The rotation is about ``a x b`` by the angle between the two vectors.
+    Antiparallel inputs rotate 180 degrees about an axis perpendicular to
+    ``a``; parallel inputs return the identity.
+
+    Parameters
+    ----------
+    a : torch.Tensor
+        Shape (3,). Need not be normalised.
+    b : torch.Tensor
+        Shape (3,). Need not be normalised.
+
+    Returns
+    -------
+    torch.Tensor
+        Shape (3, 3), on ``a``'s device and dtype.
+    """
+    device = a.device
+    dtype = a.dtype
+    a = a / a.norm().clamp_min(1e-8)
+    b = b / b.norm().clamp_min(1e-8)
+
+    cos_angle = torch.clamp((a * b).sum(), -1.0, 1.0)
+    axis = torch.linalg.cross(a, b)
+    axis_norm = axis.norm()
+
+    if float(axis_norm) < 1e-6:
+        if float(cos_angle) > 0:
+            return torch.eye(3, device=device, dtype=dtype)
+        perp = torch.linalg.cross(
+            a, torch.tensor([1.0, 0.0, 0.0], device=device, dtype=dtype)
+        )
+        if float(perp.norm()) < 1e-6:
+            perp = torch.linalg.cross(
+                a, torch.tensor([0.0, 1.0, 0.0], device=device, dtype=dtype)
+            )
+        perp = perp / perp.norm()
+        return roma.rotvec_to_rotmat(perp * math.pi)
+
+    axis = axis / axis_norm
+    angle = torch.arccos(cos_angle)
+    return roma.rotvec_to_rotmat(axis * angle)
 
 
 def rotate_coordinates(vectors: torch.Tensor, quat: torch.Tensor) -> torch.Tensor:

@@ -514,30 +514,6 @@ class TiltSeriesGenerator(MicrographGenerator):
     # Forward methods                                                      #
     # ------------------------------------------------------------------ #
 
-    def _ensure_volume_placed(self) -> None:
-        """
-        Try moving ``self.volume`` onto the compute device once; fall back to
-        leaving it on CPU (streaming small windowed blocks per Z-chunk via
-        ``VolumeRotator.sample_rotated_slices``' ``device`` param instead --
-        see this class's docstring for ``volume``) if it doesn't fit. A no-op on
-        every call after the first, once ``self.volume`` is settled on some
-        device.
-        """
-        if self.volume.device == self.device:
-            return
-        try:
-            self.volume = self.volume.to(self.device)
-        except torch.cuda.OutOfMemoryError:
-            torch.cuda.empty_cache()
-            if self.verbose:
-                gb = self.volume.numel() * self.volume.element_size() / 1e9
-                print(
-                    f"[TiltSeriesGenerator] volume ({gb:.1f} GB) does not fit on "
-                    f"{self.device}; keeping it on CPU and streaming windowed "
-                    "per-chunk fetches instead (slower per step, bounded GPU "
-                    "memory regardless of volume size)."
-                )
-
     def generate_tilt_series(
         self, idx: int | torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:

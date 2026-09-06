@@ -153,7 +153,7 @@ def _run_worker(voxel_size: float, out_mrc: Path, result_json: Path) -> None:
 
 
 # A `phase_done` line, e.g. "  Filler packing (cytosol): 1m 11s". Written by
-# specter.progress._format_elapsed, which drops empty leading units and has
+# specter.progress.format_elapsed, which drops empty leading units and has
 # whole-second resolution, so hours and minutes are both optional.
 _PHASE_RE = re.compile(r"^(?P<label>.+?): (?:(\d+)h )?(?:(\d+)m )?(\d+)s\s*$")
 

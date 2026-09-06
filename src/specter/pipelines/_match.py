@@ -78,11 +78,9 @@ from specter.match._metadata import recorded_box, rescale_metadata
 from specter.match._report import DerivedValue
 from specter.pdb import PDB
 
+from specter.progress import console, format_elapsed, section
 from ._common import (
-    _console,
-    _format_elapsed,
     _parse_device_pool,
-    _section,
     _tracked_output_dir,
 )
 from ._particles import run_particle_stack
@@ -310,7 +308,7 @@ def run_match(config: MatchConfig) -> MatchReport:
         os.makedirs(probe_dir, exist_ok=True)
 
         # ---------------------------------------------------------------- 1
-        _section("Reading the refinement and its images")
+        section("Reading the refinement and its images")
         n_needed = max(config.n_probe, config.n_battery)
         meta = _metadata_kwargs(config)
         if "cs_path" in meta:
@@ -348,15 +346,15 @@ def run_match(config: MatchConfig) -> MatchReport:
             pixel_note = f"rescaled from {pixel_size:.4f} Å at {recorded} px"
             pixel_size = new_pixel
             meta = {next(iter(meta)): rescaled}
-            _console.print(
+            console.print(
                 f"[yellow]Images are {box} px but the metadata records {recorded} px: "
                 f"using a rescaled copy at {pixel_size:.4f} Å ({rescaled}).[/yellow]"
             )
-        _console.print(
+        console.print(
             f"{n_available} particles at {pixel_size:.4f} Å, {box} px box, {voltage:.0f} kV"
         )
         if box > 512:
-            _console.print(
+            console.print(
                 "[yellow]Box is larger than 512 px; the final two-seed comparison simulates "
                 "at this size. A Fourier-cropped stack passed as --images_path is faster.[/yellow]"
             )
@@ -376,7 +374,7 @@ def run_match(config: MatchConfig) -> MatchReport:
             key, path = next(iter(meta.items()))
             rescale_metadata(path, box_p, probe_meta, current_box=box)
             probe_geometry[key] = probe_meta
-        _console.print(
+        console.print(
             f"probes: {config.n_probe} particles at {box_p} px / {pixel_size_p:.3f} Å "
             f"({bin_}x binned), {runner.workers} worker(s) on {', '.join(runner.devices)}"
         )
@@ -416,7 +414,7 @@ def run_match(config: MatchConfig) -> MatchReport:
         runner.warm(_job(base, probe_dir, "warm", 1, seed, **probe_geometry))
 
         # ---------------------------------------------------------------- 2
-        _section("Checking that the poses are aligned to the model")
+        section("Checking that the poses are aligned to the model")
         exp_probe = exp_p[: config.n_probe]
         (pose_stack,) = runner.run(
             [
@@ -436,7 +434,7 @@ def run_match(config: MatchConfig) -> MatchReport:
         )
         pose = matched_index_correlation(pose_stack, exp_probe, pixel_size_p)
         report = MatchReport(pose=pose, pixel_size=pixel_size)
-        _console.print(
+        console.print(
             f"matched {pose.matched:.3f} vs shuffled {pose.shuffled:.3f}, "
             f"{pose.fraction_above:.0%} of pairs above, z = {pose.z_score:.1f}: "
             f"{'PASS' if pose.passed else 'FAIL'}"
@@ -454,7 +452,7 @@ def run_match(config: MatchConfig) -> MatchReport:
             return report
 
         # ---------------------------------------------------------------- 3
-        _section("Deriving detector and envelope settings from the acquisition card")
+        section("Deriving detector and envelope settings from the acquisition card")
         det = config.detector_model
         detector_model = "none" if det == "unknown" else det
         report.derived.append(DerivedValue("voltage", voltage, "metadata"))
@@ -561,7 +559,7 @@ def run_match(config: MatchConfig) -> MatchReport:
         }
 
         # ---------------------------------------------------------------- 4
-        _section("Probing ice thickness and neighbour spacing against the images")
+        section("Probing ice thickness and neighbour spacing against the images")
         radius_px = 0.5 * diameter / pixel_size_p
         first_bin = int(math.ceil(radius_px / 20.0))  # annuli are 20 px wide
         stacks = runner.run(
@@ -627,7 +625,7 @@ def run_match(config: MatchConfig) -> MatchReport:
         )
 
         # ---------------------------------------------------------------- 5
-        _section("Comparing two seeds with the experiment at matched poses")
+        section("Comparing two seeds with the experiment at matched poses")
         exp_b = exp[: config.n_battery]
 
         def battery(suffix: str) -> tuple[torch.Tensor, torch.Tensor]:
@@ -657,7 +655,7 @@ def run_match(config: MatchConfig) -> MatchReport:
         if math.isfinite(snr.residual_bfactor) and snr.residual_bfactor > 20.0:
             bfactor = round(snr.residual_bfactor, 0)
             base.update(bfactor=bfactor)
-            _console.print(
+            console.print(
                 f"residual envelope B = {bfactor:.0f} Å²; applying it and re-rendering"
             )
             sim_a, sim_b = battery("_b")
@@ -693,23 +691,23 @@ def run_match(config: MatchConfig) -> MatchReport:
                 "than 6.7 Å after every derivable parameter is set. This is not a parameter; "
                 "on the datasets tried so far it tracks the absence of an energy filter."
             )
-        _console.print(
+        console.print(
             "SNR ratio sim/exp per band: "
             + ", ".join(f"{r:.2f}" for r in snr.ratio)
             + f" | twin d = {report.twin.cohen_d:.2f}"
         )
 
         # ---------------------------------------------------------------- 6
-        _section("Writing matched.toml and the report")
+        section("Writing matched.toml and the report")
         toml_path = _write_matched_toml(out_dir, base, report, complete=True)
         md_path, png_path = render_report(report, sim_a, exp_b, out_dir)
-        _console.print(
+        console.print(
             f"[green]✓[/green] {toml_path}\n[green]✓[/green] {md_path}\n[green]✓[/green] {png_path}"
         )
-        _console.print(f"[bold]{report.verdict}[/bold]")
+        console.print(f"[bold]{report.verdict}[/bold]")
 
         if config.write_stack > 0:
-            _section(
+            section(
                 f"Simulating {config.write_stack} particles with the matched config"
             )
             # In-process, so its progress shows on the terminal.
@@ -725,8 +723,8 @@ def run_match(config: MatchConfig) -> MatchReport:
             )
 
         _log_to_job(out_dir, report)
-        _console.print(
-            f"[dim]Done in {_format_elapsed(time.perf_counter() - t_start)}[/dim]"
+        console.print(
+            f"[dim]Done in {format_elapsed(time.perf_counter() - t_start)}[/dim]"
         )
         return report
 

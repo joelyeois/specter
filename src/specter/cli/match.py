@@ -6,13 +6,7 @@ import rich_click as click
 
 from specter.config import MATCH_HELP, MatchConfig
 
-from ._click_options import (
-    CONFIG_OPTION_HELP,
-    build_config_options,
-    collect_overrides,
-    load_validated_config,
-)
-from .simulate import CONTEXT_SETTINGS
+from ._click_options import CONTEXT_SETTINGS, build_config_command, load_cli_config
 
 # (panel title, field names) for `specter match particles`, basic first.
 # What a run is about (the refinement, its images, the structure), then the
@@ -31,11 +25,7 @@ def _particles_callback(config: str | None, **_overrides_raw: object) -> None:
     """Handle `specter match particles`."""
     from specter.pipelines import run_match
 
-    ctx = click.get_current_context()
-    assert ctx is not None
-    overrides = collect_overrides(ctx, exclude={"config"})
-    cfg = load_validated_config(MatchConfig, config, overrides)
-    report = run_match(cfg)
+    report = run_match(load_cli_config(MatchConfig, config))
     if not report.pose.passed:
         # A shell chain (`specter match ... && specter simulate ...`) must not
         # go on to simulate from the INCOMPLETE matched.toml this run wrote.
@@ -45,35 +35,6 @@ def _particles_callback(config: str | None, **_overrides_raw: object) -> None:
         )
 
 
-def _build_particles_command() -> click.RichCommand:
-    params: list[click.Parameter] = [
-        click.RichOption(
-            ["--config"],
-            type=str,
-            default=None,
-            show_default=False,
-            help=CONFIG_OPTION_HELP,
-            panel="Config",
-        ),
-        *build_config_options(
-            MatchConfig, field_help=MATCH_HELP, field_groups=_MATCH_PARTICLE_GROUPS
-        ),
-    ]
-    return click.RichCommand(
-        name="particles",
-        params=params,
-        callback=_particles_callback,
-        context_settings=CONTEXT_SETTINGS,
-        help="Derive a simulation config that matches a real particle set. Takes a "
-        "refined particle set (.cs or .star), its images and the atomic model, "
-        "checks that the poses reproduce the experimental views, sets the "
-        "detector, coincidence and damage terms from the acquisition card, probes "
-        "ice thickness and neighbour spacing against the images, and writes a "
-        "matched.toml for `specter simulate particles` together with a report of "
-        "how close the match is and what, if anything, no parameter can close.",
-    )
-
-
 def build_match_group() -> click.RichGroup:
     """Build the `match` command group and its subcommands."""
     group = click.RichGroup(
@@ -81,5 +42,20 @@ def build_match_group() -> click.RichGroup:
         help="Derive simulation settings that match an experimental dataset",
         context_settings=CONTEXT_SETTINGS,
     )
-    group.add_command(_build_particles_command())
+    group.add_command(
+        build_config_command(
+            "particles",
+            MatchConfig,
+            MATCH_HELP,
+            _MATCH_PARTICLE_GROUPS,
+            _particles_callback,
+            help="Derive a simulation config that matches a real particle set. Takes a "
+            "refined particle set (.cs or .star), its images and the atomic model, "
+            "checks that the poses reproduce the experimental views, sets the "
+            "detector, coincidence and damage terms from the acquisition card, probes "
+            "ice thickness and neighbour spacing against the images, and writes a "
+            "matched.toml for `specter simulate particles` together with a report of "
+            "how close the match is and what, if anything, no parameter can close.",
+        )
+    )
     return group

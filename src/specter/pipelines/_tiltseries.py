@@ -26,13 +26,11 @@ from specter.imagegenerator import TiltSeriesGenerator
 from specter.io import create_micrograph_starfile
 from specter.specimen import load_specimen_volume
 
+from specter.progress import console, format_elapsed, section
 from ._common import (
-    _console,
-    _format_elapsed,
     _parse_device,
     _reserve_next_job_id,
     _save_exitwave_pair,
-    _section,
     _tracked_output_dir,
     resolve_output_dir,
 )
@@ -118,7 +116,7 @@ def run_tilt_series(
                 tomogram_config, job_id=job_id, output_dir=root
             )
 
-        _section("Building specimen volume (tomogram_config)")
+        section("Building specimen volume (tomogram_config)")
         run_build_tomogram(tomogram_config)
         config = dataclasses.replace(
             config, volume_path=tomogram_output_path(tomogram_config)
@@ -150,15 +148,15 @@ def run_tilt_series(
     else:
         generated_seed = int(torch.randint(0, 2**31 - 1, (1,)).item())
         specter.seed(generated_seed)
-        _console.print(f"[dim]No seed given -- using seed={generated_seed}[/dim]")
+        console.print(f"[dim]No seed given -- using seed={generated_seed}[/dim]")
 
     # --- Loading specimen volume ---
-    _section(f"Loading specimen volume from {config.volume_path}")
+    section(f"Loading specimen volume from {config.volume_path}")
     volume = load_specimen_volume(config.volume_path)
-    _console.print(f"  Volume shape: {tuple(volume.shape)}  (Z, Y, X)")
+    console.print(f"  Volume shape: {tuple(volume.shape)}  (Z, Y, X)")
 
     # --- Building TiltSeriesGenerator ---
-    _section("Building TiltSeriesGenerator")
+    section("Building TiltSeriesGenerator")
     dx = config.voxel_size
     micrograph_size = (
         config.micrograph_size
@@ -168,7 +166,7 @@ def run_tilt_series(
     angles = torch.linspace(
         config.min_tilt_angle, config.max_tilt_angle, config.n_tilts
     )
-    _console.print(
+    console.print(
         f"  Tilt angles: {config.n_tilts} steps from {config.min_tilt_angle}° "
         f"to {config.max_tilt_angle}°"
     )
@@ -216,7 +214,7 @@ def run_tilt_series(
     ).to(device_target)
 
     # --- Generating ---
-    _section(f"Generating tilt series on {device_target}")
+    section(f"Generating tilt series on {device_target}")
     with torch.no_grad():
         images, exitwaves, _clean = model.generate_tilt_series(torch.tensor([0]))
     images = images[0].cpu()  # (n_tilts, H, W)
@@ -224,13 +222,13 @@ def run_tilt_series(
 
     # --- Post-processing ---
     if config.normalize_tilt_series:
-        _section("Normalizing")
+        section("Normalizing")
         mean = images.mean(dim=(-2, -1), keepdim=True)
         std = images.std(dim=(-2, -1), keepdim=True)
         images = (images - mean) / std.clamp(min=1e-8)
 
     # --- Saving ---
-    _section("Saving")
+    section("Saving")
     import mrcfile
 
     with _tracked_output_dir(config, "tiltseries") as output_dir:
@@ -239,7 +237,7 @@ def run_tilt_series(
         mrcs_path = os.path.join(output_dir, config.filename + ".mrcs")
         with mrcfile.new(mrcs_path, overwrite=True) as mrc:
             mrc.set_data(images.numpy().astype("float32"))
-        _console.print(f"  [green]✓[/green] {mrcs_path}")
+        console.print(f"  [green]✓[/green] {mrcs_path}")
 
         ctf_params_broadcast = {
             "cs": torch.full((config.n_tilts,), cs_angstrom),
@@ -260,7 +258,7 @@ def run_tilt_series(
 
         if config.save_exitwaves:
             ew_prefix = "exitwave" if ice_model is not None else "clean_exitwave"
-            _section(f"Saving {ew_prefix.replace('_', ' ')}")
+            section(f"Saving {ew_prefix.replace('_', ' ')}")
             _save_exitwave_pair(
                 exitwaves,
                 ew_prefix,
@@ -271,4 +269,4 @@ def run_tilt_series(
             )
 
     elapsed = time.perf_counter() - t_start
-    _console.print(f"\n[bold]Total time:[/bold] {_format_elapsed(elapsed)}")
+    console.print(f"\n[bold]Total time:[/bold] {format_elapsed(elapsed)}")

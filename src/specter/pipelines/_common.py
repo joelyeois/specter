@@ -15,10 +15,9 @@ from contextlib import contextmanager
 from typing import Any, Iterator, Sequence
 
 import torch
-from rich.console import Console
-from rich.rule import Rule
 
 from specter.devices import parse_device
+from specter.progress import console
 from specter.config import (
     ScalarOrRange,
     default_output_dir,
@@ -26,8 +25,6 @@ from specter.config import (
     find_specter_project_root,
     parse_scalar_or_range,
 )
-
-_console = Console()
 
 
 def is_tracked(config: Any) -> bool:
@@ -236,11 +233,6 @@ def _uniform_sample(value: ScalarOrRange, n: int) -> torch.Tensor:
     """Sample `n` values uniformly from a `parse_scalar_or_range` scalar or [low, high] pair."""
     low, high = parse_scalar_or_range(value)
     return torch.rand(n) * (high - low) + low
-
-
-def _section(msg: str) -> None:
-    """Print a full-width titled rule as a section separator."""
-    _console.print(Rule(f"[bold yellow]{msg}[/bold yellow]", style="yellow"))
 
 
 def _crop_center(t: torch.Tensor, nxy: int) -> torch.Tensor:
@@ -595,18 +587,7 @@ def _save_exitwave_pair(
     phase_path = os.path.join(output_dir, f"{filename}_{suffix}_phase.mrcs")
     with mrcfile.new(mag_path, overwrite=True) as mrc:
         mrc.set_data(ew.abs().numpy().astype("float32"))
-    _console.print(f"  [green]✓[/green] {mag_path}")
+    console.print(f"  [green]✓[/green] {mag_path}")
     with mrcfile.new(phase_path, overwrite=True) as mrc:
         mrc.set_data(ew.angle().numpy().astype("float32"))
-    _console.print(f"  [green]✓[/green] {phase_path}")
-
-
-def _format_elapsed(seconds: float) -> str:
-    """Format an elapsed-time duration as e.g. "1h 2m 3s", dropping empty leading units."""
-    h, rem = divmod(int(seconds), 3600)
-    m, s = divmod(rem, 60)
-    if h > 0:
-        return f"{h}h {m}m {s}s"
-    if m > 0:
-        return f"{m}m {s}s"
-    return f"{s}s"
+    console.print(f"  [green]✓[/green] {phase_path}")

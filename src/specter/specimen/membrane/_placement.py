@@ -30,9 +30,9 @@ from __future__ import annotations
 
 import math
 
-import roma
 import torch
 
+from ...rotations import rotation_aligning
 from ._field import MembraneField
 
 
@@ -173,44 +173,13 @@ def orientation_for_normal(
     return _orientation_for_normal_and_angle(normal_xyz, theta)
 
 
-def _rotation_aligning(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
-    """Rotation matrix R such that ``R @ a`` (both normalized) equals ``b``."""
-    device = a.device
-    dtype = a.dtype
-    a = a / a.norm().clamp_min(1e-8)
-    b = b / b.norm().clamp_min(1e-8)
-
-    cos_angle = torch.clamp((a * b).sum(), -1.0, 1.0)
-    axis = torch.linalg.cross(a, b)
-    axis_norm = axis.norm()
-
-    if float(axis_norm) < 1e-6:
-        if float(cos_angle) > 0:
-            return torch.eye(3, device=device, dtype=dtype)
-        # a and b are antiparallel -- rotate 180 degrees about any axis
-        # perpendicular to a.
-        perp = torch.linalg.cross(
-            a, torch.tensor([1.0, 0.0, 0.0], device=device, dtype=dtype)
-        )
-        if float(perp.norm()) < 1e-6:
-            perp = torch.linalg.cross(
-                a, torch.tensor([0.0, 1.0, 0.0], device=device, dtype=dtype)
-            )
-        perp = perp / perp.norm()
-        return roma.rotvec_to_rotmat(perp * math.pi)
-
-    axis = axis / axis_norm
-    angle = torch.arccos(cos_angle)
-    return roma.rotvec_to_rotmat(axis * angle)
-
-
 def _orientation_for_normal_and_angle(
     normal_xyz: torch.Tensor, theta: float
 ) -> torch.Tensor:
     device = normal_xyz.device
     dtype = normal_xyz.dtype
     z_hat = torch.tensor([0.0, 0.0, 1.0], device=device, dtype=dtype)
-    r_align = _rotation_aligning(z_hat, normal_xyz)
+    r_align = rotation_aligning(z_hat, normal_xyz)
 
     cos_t, sin_t = math.cos(theta), math.sin(theta)
     r_spin = torch.tensor(
@@ -262,7 +231,7 @@ def align_principal_axis_to_z(coordinates: torch.Tensor) -> torch.Tensor:
     z_hat = torch.tensor(
         [0.0, 0.0, 1.0], device=coordinates.device, dtype=coordinates.dtype
     )
-    rotation = _rotation_aligning(principal_axis, z_hat)
+    rotation = rotation_aligning(principal_axis, z_hat)
     return centered @ rotation.T
 
 

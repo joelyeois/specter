@@ -30,13 +30,10 @@ from specter.imagegenerator import MicrographGenerator
 from specter.io import create_micrograph_starfile
 from specter.pdb import PDB
 from specter.potential import PotentialBuilder
-from specter.progress import track
+from specter.progress import console, format_elapsed, section, track
 
 from ._common import (
-    _console,
-    _format_elapsed,
     _save_exitwave_pair,
-    _section,
     _tracked_output_dir,
     _uniform_sample,
     resolve_available_device,
@@ -108,10 +105,10 @@ def run_micrograph(config: MicrographConfig) -> None:
     else:
         generated_seed = int(torch.randint(0, 2**31 - 1, (1,)).item())
         specter.seed(generated_seed)
-        _console.print(f"[dim]No seed given -- using seed={generated_seed}[/dim]")
+        console.print(f"[dim]No seed given -- using seed={generated_seed}[/dim]")
 
     # --- Building 3D scattering potential ---
-    _section("Building 3D scattering potential")
+    section("Building 3D scattering potential")
     # Shtyrov fits scattering factors per bonded species, so derive the bond
     # topology from the structure -- without atom_species every atom silently
     # falls back to per-element Peng. The other parameterizations are
@@ -157,7 +154,7 @@ def run_micrograph(config: MicrographConfig) -> None:
     )
 
     # --- Sampling per-micrograph parameters ---
-    _section("Sampling defocus, dose, and coincidence radius")
+    section("Sampling defocus, dose, and coincidence radius")
     defocus_A = _uniform_sample(config.defocus, n)
     dose = _uniform_sample(config.dose, n)
     coincidence_radius = _uniform_sample(config.coincidence_radius, n)
@@ -197,7 +194,7 @@ def run_micrograph(config: MicrographConfig) -> None:
         icemaker = icemaker.to(device)
 
     # Build once -- __init__ generates the first specimen.
-    _section("Building specimen and image generator")
+    section("Building specimen and image generator")
     cc_angstrom = config.cc * 1e7 if config.cc is not None else None
     model = MicrographGenerator(
         V,
@@ -249,7 +246,7 @@ def run_micrograph(config: MicrographConfig) -> None:
     # --- Generating images ---
     # Regenerate a fresh specimen (ice/crowding) for every micrograph after
     # the first (already built in __init__ above), then apply the i-th CTF.
-    _section(f"Generating {n} micrograph(s) on {device}")
+    section(f"Generating {n} micrograph(s) on {device}")
     images: list[torch.Tensor] = []
     exitwaves: list[torch.Tensor] | None = [] if config.save_exitwaves else None
     clean_exitwaves: list[torch.Tensor] | None = (
@@ -274,14 +271,14 @@ def run_micrograph(config: MicrographConfig) -> None:
     )
 
     # --- Post-processing ---
-    _section("Post-processing")
+    section("Post-processing")
     if config.normalize_micrographs:
         mean = images_t.mean(dim=(-2, -1), keepdim=True)
         std = images_t.std(dim=(-2, -1), keepdim=True)
         images_t = (images_t - mean) / std.clamp(min=1e-8)
 
     # --- Saving ---
-    _section("Saving .mrcs + .star")
+    section("Saving .mrcs + .star")
     import mrcfile
 
     with _tracked_output_dir(config, "micrographs") as output_dir:
@@ -289,7 +286,7 @@ def run_micrograph(config: MicrographConfig) -> None:
         mrcs_path = os.path.join(output_dir, config.filename + ".mrcs")
         with mrcfile.new(mrcs_path, overwrite=True) as mrc:
             mrc.set_data(images_t.numpy().astype("float32"))
-        _console.print(f"  [green]✓[/green] {mrcs_path}")
+        console.print(f"  [green]✓[/green] {mrcs_path}")
 
         create_micrograph_starfile(
             n,
@@ -305,7 +302,7 @@ def run_micrograph(config: MicrographConfig) -> None:
         )
 
         if exitwaves_t is not None:
-            _section("Saving exit waves")
+            section("Saving exit waves")
             _save_exitwave_pair(
                 exitwaves_t,
                 "exitwave",
@@ -316,7 +313,7 @@ def run_micrograph(config: MicrographConfig) -> None:
             )
 
         if clean_exitwaves_t is not None:
-            _section("Saving clean exit waves")
+            section("Saving clean exit waves")
             _save_exitwave_pair(
                 clean_exitwaves_t,
                 "clean_exitwave",
@@ -327,4 +324,4 @@ def run_micrograph(config: MicrographConfig) -> None:
             )
 
     elapsed = time.perf_counter() - t_start
-    _console.print(f"\n[bold]Total time:[/bold] {_format_elapsed(elapsed)}")
+    console.print(f"\n[bold]Total time:[/bold] {format_elapsed(elapsed)}")

@@ -60,11 +60,9 @@ from specter.config import (
 )
 
 from ..devices import parse_device
+from specter.progress import console, format_elapsed, section
 from ._common import (
-    _console,
-    _format_elapsed,
     _parse_device_pool,
-    _section,
     resolve_available_device,
     resolve_output_dir,
 )
@@ -171,8 +169,8 @@ def run_reconstruction(config: ReconstructionConfig) -> None:
     validate_config(config)
     start = time.time()
 
-    _section("Reconstruction")
-    _console.print(
+    section("Reconstruction")
+    console.print(
         f"  {Path(config.cs_file).name} + {Path(config.mrc_file).name}  |  "
         f"halfset {config.halfset}  |  {config.scattering_model}  |  "
         f"{config.epochs} epochs"
@@ -219,8 +217,8 @@ def run_reconstruction(config: ReconstructionConfig) -> None:
                 job.log({"results": summary})
             run_dir = job.dir
 
-    _section("Done")
-    _console.print(f"  {run_dir}  |  {_format_elapsed(time.time() - start)}")
+    section("Done")
+    console.print(f"  {run_dir}  |  {format_elapsed(time.time() - start)}")
 
 
 def _fit(

@@ -6,7 +6,7 @@ only what roma doesn't provide: coordinate/volume transforms and the
 3D volume.
 
 Split across:
-    _rotation.py        - translate_coordinates, rotate_coordinates (thin roma wrapper)
+    _rotation.py        - translate_coordinates, rotate_coordinates (thin roma wrappers), rotation_aligning
     _random.py           - random quaternion/rotvec/matrix generators, rotations_angular_difference (thin roma wrappers)
     _volume.py           - rotate_volume, rotate_volume_fourier, affine matrix helpers
     _volume_rotator.py   - VolumeRotator (LightningModule) and its private helpers
@@ -42,7 +42,7 @@ from ._random import (
     random_rotvec,
     rotations_angular_difference,
 )
-from ._rotation import rotate_coordinates, translate_coordinates
+from ._rotation import rotate_coordinates, rotation_aligning, translate_coordinates
 from ._volume import (
     affine_sampling_grid,
     apply_fourier_translation,
@@ -121,6 +121,7 @@ def __dir__() -> list[str]:
 __all__ = [
     "translate_coordinates",
     "rotate_coordinates",
+    "rotation_aligning",
     "random_quaternion",
     "random_rotvec",
     "random_rotation_matrix",

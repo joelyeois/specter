@@ -10,7 +10,6 @@ the corresponding .pt file and re-run.
 from __future__ import annotations
 
 import math
-from pathlib import Path
 
 import pytest
 import roma
@@ -24,45 +23,12 @@ from specter.imagegenerator import (
     TiltSeriesGenerator,
 )
 
-FIXTURE_DIR = Path(__file__).parent / "test_data"
-
 # These fixtures predate `coincidence_radius` being rescaled to mean a true
 # effective exclusion radius (exclusion area pi*r^2, rather than the old
 # grid-cell-indexing convention with area r^2/2). Expressing the old 1.8 via
 # the exact conversion keeps the suppression grid bit-identical, so the
 # fixtures still verify the physics rather than just the new parameterization.
 _CR = 1.8 / math.sqrt(2 * math.pi)
-
-
-def _save_or_compare(name: str, tensor: torch.Tensor) -> None:
-    """Save tensor as a fixture on first run; compare on subsequent runs."""
-    path = FIXTURE_DIR / f"{name}.pt"
-    if path.exists():
-        expected = torch.load(path, weights_only=True)
-        assert torch.allclose(tensor.float(), expected.float(), atol=1e-4), (
-            f"Regression failure for '{name}'. "
-            "Delete the fixture file and re-run to regenerate."
-        )
-    else:
-        FIXTURE_DIR.mkdir(parents=True, exist_ok=True)
-        torch.save(tensor.cpu(), path)
-        pytest.skip(f"Fixture '{name}.pt' generated — re-run to verify.")
-
-
-@pytest.fixture
-def small_volume():
-    """3D cubic volume (32, 32, 32) with a simple phantom."""
-    volume = torch.zeros(32, 32, 32)
-    volume[12:20, 12:20, 12:20] = 50.0
-    return volume
-
-
-@pytest.fixture
-def small_volume_4d():
-    """4D cubic volume (1, 32, 32, 32) as returned by MicrographSpecimenGenerator."""
-    volume = torch.zeros(1, 32, 32, 32)
-    volume[0, 12:20, 12:20, 12:20] = 50.0
-    return volume
 
 
 @pytest.fixture
@@ -89,7 +55,7 @@ def ctf_params():
     }
 
 
-def test_image_generator_regression(small_volume, ctf_params):
+def test_image_generator_regression(small_volume, ctf_params, save_or_compare):
     """ImageGenerator: multislice scattering, random ice, coincidence loss, k3 detector."""
     torch.manual_seed(0)
     gen = ImageGenerator(
@@ -113,10 +79,12 @@ def test_image_generator_regression(small_volume, ctf_params):
     )
     torch.manual_seed(0)
     images = gen(torch.tensor([0]))
-    _save_or_compare("image_generator", images.cpu())
+    save_or_compare("image_generator", images.cpu())
 
 
-def test_image_generator_from_coordinates_regression(small_coords, ctf_params):
+def test_image_generator_from_coordinates_regression(
+    small_coords, ctf_params, save_or_compare
+):
     """ImageGeneratorFromCoordinates: voxelize coords, multislice, random ice, coincidence."""
     coords, atomic_numbers = small_coords
     torch.manual_seed(0)
@@ -141,10 +109,10 @@ def test_image_generator_from_coordinates_regression(small_coords, ctf_params):
     )
     torch.manual_seed(0)
     images = gen(torch.tensor([0]))
-    _save_or_compare("image_generator_from_coordinates", images.cpu())
+    save_or_compare("image_generator_from_coordinates", images.cpu())
 
 
-def test_micrograph_generator_regression(small_volume, ctf_params):
+def test_micrograph_generator_regression(small_volume, ctf_params, save_or_compare):
     """MicrographGenerator: projection scattering, random ice, coincidence."""
     torch.manual_seed(0)
     gen = MicrographGenerator(
@@ -166,7 +134,7 @@ def test_micrograph_generator_regression(small_volume, ctf_params):
     )
     torch.manual_seed(0)
     images = gen(torch.tensor([0]))
-    _save_or_compare("micrograph_generator", images.cpu())
+    save_or_compare("micrograph_generator", images.cpu())
 
 
 def test_micrograph_generator_accepts_prebuilt_icemaker(small_volume, ctf_params):
@@ -248,7 +216,7 @@ def test_micrograph_generator_volume_without_ice_model_is_unchanged(
     assert torch.equal(gen.volume, original_volume)
 
 
-def test_tilt_series_generator_regression(ctf_params):
+def test_tilt_series_generator_regression(ctf_params, save_or_compare):
     """TiltSeriesGenerator: 3-angle tilt series, coincidence loss, tilt_axis='y'."""
     volume = torch.zeros(1, 16, 48, 48)
     volume[0, 5:11, 20:28, 20:28] = 50.0
@@ -274,7 +242,7 @@ def test_tilt_series_generator_regression(ctf_params):
     )
     torch.manual_seed(0)
     tilt_series, _, _ = gen.generate_tilt_series(torch.tensor([0]))
-    _save_or_compare("tilt_series_generator", tilt_series.cpu())
+    save_or_compare("tilt_series_generator", tilt_series.cpu())
 
 
 def test_tilt_series_generator_blends_ice_into_volume(ctf_params):

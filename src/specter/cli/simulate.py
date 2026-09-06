@@ -15,14 +15,12 @@ from specter.config import (
 )
 
 from ._click_options import (
-    build_config_options,
-    collect_overrides,
-    CONFIG_OPTION_HELP,
+    CONTEXT_SETTINGS,
+    build_config_command,
+    load_cli_config,
     load_validated_config,
     prerequisite_usage_error,
 )
-
-CONTEXT_SETTINGS = {"help_option_names": ["-h", "--help"]}
 
 # (panel title, field names) -- basic-themed panels first, in the order most
 # runs actually tune them, then a single catch-all "Advanced" panel for
@@ -285,80 +283,14 @@ def _particles_callback(config: str | None, **_overrides_raw: object) -> None:
     """Handle `specter simulate particles`."""
     from specter.pipelines import run_particle_stack
 
-    ctx = click.get_current_context()
-    assert ctx is not None
-    overrides = collect_overrides(ctx, exclude={"config"})
-
-    cfg = load_validated_config(ParticleStackConfig, config, overrides)
-    run_particle_stack(cfg)
-
-
-def _build_particles_command() -> click.RichCommand:
-    params: list[click.Parameter] = [
-        click.RichOption(
-            ["--config"],
-            type=str,
-            default=None,
-            show_default=False,
-            help=CONFIG_OPTION_HELP,
-            panel="Config",
-        ),
-        *build_config_options(
-            ParticleStackConfig,
-            field_help=PARTICLE_STACK_HELP,
-            field_groups=_PARTICLE_STACK_GROUPS,
-        ),
-    ]
-    return click.RichCommand(
-        name="particles",
-        params=params,
-        callback=_particles_callback,
-        context_settings=CONTEXT_SETTINGS,
-        help="Simulate a cryo-EM particle stack and save it as .mrcs + .star. "
-        "A TOML config (--config) is loaded first when given, otherwise every setting takes its built-in default -- every flag below "
-        "is optional and, if given, overrides one field of it.",
-    )
+    run_particle_stack(load_cli_config(ParticleStackConfig, config))
 
 
 def _micrograph_callback(config: str | None, **_overrides_raw: object) -> None:
     """Handle `specter simulate micrograph`."""
     from specter.pipelines import run_micrograph
 
-    ctx = click.get_current_context()
-    assert ctx is not None
-    overrides = collect_overrides(ctx, exclude={"config"})
-
-    cfg = load_validated_config(MicrographConfig, config, overrides)
-    run_micrograph(cfg)
-
-
-def _build_micrograph_command() -> click.RichCommand:
-    params: list[click.Parameter] = [
-        click.RichOption(
-            ["--config"],
-            type=str,
-            default=None,
-            show_default=False,
-            help=CONFIG_OPTION_HELP,
-            panel="Config",
-        ),
-        *build_config_options(
-            MicrographConfig,
-            field_help=MICROGRAPH_HELP,
-            field_groups=_MICROGRAPH_GROUPS,
-        ),
-    ]
-    return click.RichCommand(
-        name="micrograph",
-        params=params,
-        callback=_micrograph_callback,
-        context_settings=CONTEXT_SETTINGS,
-        help="Simulate one or more cryo-EM micrographs and save them as .mrcs + "
-        ".star. A TOML config (--config) is loaded first when given, otherwise every setting takes its built-in default -- every flag "
-        "below is optional and, if given, overrides one field of it. Each "
-        "micrograph gets an independently regenerated ice/crowding specimen; "
-        "single-device only.",
-    )
+    run_micrograph(load_cli_config(MicrographConfig, config))
 
 
 def _tiltseries_callback(
@@ -367,11 +299,7 @@ def _tiltseries_callback(
     """Handle `specter simulate tiltseries`."""
     from specter.pipelines import run_tilt_series
 
-    ctx = click.get_current_context()
-    assert ctx is not None
-    overrides = collect_overrides(ctx, exclude={"config", "tomogram_config"})
-
-    cfg = load_validated_config(TiltSeriesConfig, config, overrides)
+    cfg = load_cli_config(TiltSeriesConfig, config, exclude={"tomogram_config"})
 
     # Through the same helper as --config: a bad --tomogram_config is a
     # usage error too, and it builds a real specimen, so it deserves the
@@ -397,53 +325,6 @@ def _tiltseries_callback(
     run_tilt_series(cfg, tomogram_config=tomogram_cfg)
 
 
-def _build_tiltseries_command() -> click.RichCommand:
-    params: list[click.Parameter] = [
-        click.RichOption(
-            ["--config"],
-            type=str,
-            default=None,
-            show_default=False,
-            help=CONFIG_OPTION_HELP,
-            panel="Config",
-        ),
-        click.RichOption(
-            ["--tomogram_config"],
-            type=str,
-            default=None,
-            help="Optional TOML config for `specter build tomogram` "
-            "(TomogramConfig). If given, that specimen volume is built "
-            "first and its output used as this run's specimen -- chains "
-            "`specter build tomogram` + `specter simulate tiltseries` in "
-            "one command. Mutually exclusive with --volume_path/--config's "
-            "volume_path. Always builds exactly one tomogram -- "
-            "`--n_tomograms` isn't a TomogramConfig field and isn't "
-            "settable here; for several tomograms, run `specter build "
-            "tomogram --n_tomograms N` yourself and call `simulate "
-            "tiltseries --volume_path ...` once per output volume instead.",
-            panel="Config",
-        ),
-        *build_config_options(
-            TiltSeriesConfig,
-            field_help=TILT_SERIES_HELP,
-            field_groups=_TILT_SERIES_GROUPS,
-        ),
-    ]
-    return click.RichCommand(
-        name="tiltseries",
-        params=params,
-        callback=_tiltseries_callback,
-        context_settings=CONTEXT_SETTINGS,
-        help="Simulate a cryo-ET tilt series from a pre-built specimen volume "
-        "(--volume_path) and save it as .mrcs + .star. A TOML config "
-        "(--config) is loaded first when given, otherwise every setting takes "
-        "its built-in default -- every flag below is optional and, if given, "
-        "overrides one field of it. Pass --tomogram_config "
-        "instead of --volume_path to build the specimen volume first "
-        "(`specter build tomogram`) and image it in the same command.",
-    )
-
-
 def build_simulate_group() -> click.RichGroup:
     """Build the `simulate` command group and its subcommands."""
     group = click.RichGroup(
@@ -451,7 +332,64 @@ def build_simulate_group() -> click.RichGroup:
         help="Simulate cryo-EM/cryo-ET data",
         context_settings=CONTEXT_SETTINGS,
     )
-    group.add_command(_build_particles_command())
-    group.add_command(_build_micrograph_command())
-    group.add_command(_build_tiltseries_command())
+    group.add_command(
+        build_config_command(
+            "particles",
+            ParticleStackConfig,
+            PARTICLE_STACK_HELP,
+            _PARTICLE_STACK_GROUPS,
+            _particles_callback,
+            help="Simulate a cryo-EM particle stack and save it as .mrcs + .star. "
+            "A TOML config (--config) is loaded first when given, otherwise every setting takes its built-in default -- every flag below "
+            "is optional and, if given, overrides one field of it.",
+        )
+    )
+    group.add_command(
+        build_config_command(
+            "micrograph",
+            MicrographConfig,
+            MICROGRAPH_HELP,
+            _MICROGRAPH_GROUPS,
+            _micrograph_callback,
+            help="Simulate one or more cryo-EM micrographs and save them as .mrcs + "
+            ".star. A TOML config (--config) is loaded first when given, otherwise every setting takes its built-in default -- every flag "
+            "below is optional and, if given, overrides one field of it. Each "
+            "micrograph gets an independently regenerated ice/crowding specimen; "
+            "single-device only.",
+        )
+    )
+    group.add_command(
+        build_config_command(
+            "tiltseries",
+            TiltSeriesConfig,
+            TILT_SERIES_HELP,
+            _TILT_SERIES_GROUPS,
+            _tiltseries_callback,
+            help="Simulate a cryo-ET tilt series from a pre-built specimen volume "
+            "(--volume_path) and save it as .mrcs + .star. A TOML config "
+            "(--config) is loaded first when given, otherwise every setting takes "
+            "its built-in default -- every flag below is optional and, if given, "
+            "overrides one field of it. Pass --tomogram_config "
+            "instead of --volume_path to build the specimen volume first "
+            "(`specter build tomogram`) and image it in the same command.",
+            extra_params=[
+                click.RichOption(
+                    ["--tomogram_config"],
+                    type=str,
+                    default=None,
+                    help="Optional TOML config for `specter build tomogram` "
+                    "(TomogramConfig). If given, that specimen volume is built "
+                    "first and its output used as this run's specimen -- chains "
+                    "`specter build tomogram` + `specter simulate tiltseries` in "
+                    "one command. Mutually exclusive with --volume_path/--config's "
+                    "volume_path. Always builds exactly one tomogram -- "
+                    "`--n_tomograms` isn't a TomogramConfig field and isn't "
+                    "settable here; for several tomograms, run `specter build "
+                    "tomogram --n_tomograms N` yourself and call `simulate "
+                    "tiltseries --volume_path ...` once per output volume instead.",
+                    panel="Config",
+                )
+            ],
+        )
+    )
     return group

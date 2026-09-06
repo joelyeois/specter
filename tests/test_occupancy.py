@@ -75,7 +75,7 @@ class TestPotentialOccupancy:
     def test_rejects_a_nonpositive_pixel_size(self):
         from specter.potential import potential_occupancy
 
-        with pytest.raises(ValueError, match="pixel_size"):
+        with pytest.raises(ValueError, match="voxel_size"):
             potential_occupancy(torch.zeros(4, 4, 4), 0.0)
 
     def test_bounded_in_unit_interval(self):

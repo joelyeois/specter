@@ -562,9 +562,6 @@ def plot_map_to_model_fsc(
 
     nyquist = 1.0 / (2.0 * voxel_size)
 
-    def _res_at_half(k_arr: torch.Tensor, fsc_arr: torch.Tensor) -> str:
-        return fsc_resolution(k_arr, fsc_arr, MAP_TO_MODEL_FSC_THRESHOLD, k_max=nyquist)
-
     palette = _deep_palette(max(n_volumes, 1))
 
     fig, ax = plt.subplots(figsize=(7, 4.5), dpi=150)
@@ -581,7 +578,7 @@ def plot_map_to_model_fsc(
             color=color,
             ls="-",
             lw=1.8,
-            label=f"{label} ({_res_at_half(k, fsc)})",
+            label=f"{label} ({fsc_resolution(k, fsc, MAP_TO_MODEL_FSC_THRESHOLD, k_max=nyquist)})",
         )
 
         if mask is not None:
@@ -595,7 +592,7 @@ def plot_map_to_model_fsc(
                 color=color,
                 ls="--",
                 lw=1.8,
-                label=f"{label} masked ({_res_at_half(k_m, fsc_m)})",
+                label=f"{label} masked ({fsc_resolution(k_m, fsc_m, MAP_TO_MODEL_FSC_THRESHOLD, k_max=nyquist)})",
             )
 
     # FSC = 0.5 criterion line
@@ -705,9 +702,6 @@ def plot_halfmap_fsc(
 
     nyquist = 1.0 / (2.0 * voxel_size)
 
-    def _res_at_half(k_arr: torch.Tensor, fsc_arr: torch.Tensor) -> str:
-        return fsc_resolution(k_arr, fsc_arr, HALFMAP_FSC_THRESHOLD, k_max=nyquist)
-
     palette = _deep_palette(max(n_volumes, 1))
 
     fig, ax = plt.subplots(figsize=(7, 4.5), dpi=150)
@@ -723,7 +717,7 @@ def plot_halfmap_fsc(
         k, fsc = fourier_shell_correlation(
             volume_a_f, volume_b_f, pixel_size=voxel_size
         )
-        resolution = _res_at_half(k, fsc)
+        resolution = fsc_resolution(k, fsc, HALFMAP_FSC_THRESHOLD, k_max=nyquist)
         resolutions.append(resolution)
         ax.plot(
             k.cpu(),
@@ -745,7 +739,7 @@ def plot_halfmap_fsc(
                 color=color,
                 ls="--",
                 lw=1.8,
-                label=f"{label} masked ({_res_at_half(k_m, fsc_m)})",
+                label=f"{label} masked ({fsc_resolution(k_m, fsc_m, HALFMAP_FSC_THRESHOLD, k_max=nyquist)})",
             )
 
     # FSC = 0.143 criterion line

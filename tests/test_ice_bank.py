@@ -14,9 +14,9 @@ from specter.ice._bank import (
     build_one_ice_config,
     decode_positions,
     encode_positions,
-    random_rotation_matrix,
 )
 from specter.ice import ice_config_filename
+from specter.rotations import random_rotation_matrix_from_generator
 from specter.ice._helpers import ndensity_of_amorphous_ice
 
 
@@ -34,9 +34,11 @@ def _make_cache_config(tmp_path, name, n, dx, seed=0, n_steps=5):
     return path
 
 
-def test_random_rotation_matrix_is_proper_rotation():
-    torch.manual_seed(0)
-    R = random_rotation_matrix()
+def test_random_rotation_matrix_from_generator_is_proper_and_reproducible():
+    g = torch.Generator().manual_seed(0)
+    R = random_rotation_matrix_from_generator(g)
+    g2 = torch.Generator().manual_seed(0)
+    assert torch.equal(R, random_rotation_matrix_from_generator(g2))
     assert R.shape == (3, 3)
     assert torch.allclose(R @ R.T, torch.eye(3), atol=1e-5)
     assert torch.det(R).item() == pytest.approx(1.0, abs=1e-5)

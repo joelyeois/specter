@@ -35,6 +35,8 @@ from __future__ import annotations
 
 import torch
 
+from ..filters import gaussian_blur3d
+
 __all__ = [
     "FULL_OCCUPANCY_POTENTIAL_V",
     "WATER_COARSE_GRAIN_SIGMA_ANGSTROM",
@@ -126,44 +128,6 @@ def occupancy_blur_halo_voxels(
     return max(1, int(round(3 * sigma_vox)))
 
 
-def _gaussian_blur3d(V: torch.Tensor, sigma_vox: float) -> torch.Tensor:
-    """
-    Separable Gaussian blur over the last three axes, edges replicated.
-
-    Each pass is a ``conv1d`` along the tensor's LAST (contiguous) axis, the
-    other two axes being brought there by a transpose and a copy. A cuDNN
-    ``conv3d`` with a ``(1, 1, 2r+1)``-shaped kernel computes the same thing
-    but runs ~2x slower on the slabs `blend_ice_into_volume` and
-    `ParticleGeneratorBase.solvate` hand it (0.36 vs 0.64 ms per 1024^2
-    slice on an L40), and the blur is the largest single cost of solvation
-    at a 512-pixel box. The two agree to float rounding (~2e-6 on a 7 V
-    field), since only the summation order differs.
-    """
-    r = max(1, int(round(3 * sigma_vox)))
-    x = torch.arange(-r, r + 1, device=V.device, dtype=V.dtype)
-    kernel = torch.exp(-0.5 * (x / sigma_vox) ** 2)
-    weight = (kernel / kernel.sum()).view(1, 1, -1)
-
-    lead = V.shape[:-3]
-    Z, Y, X = V.shape[-3:]
-    nd = V.ndim
-    pad = torch.nn.functional.pad
-    conv1d = torch.nn.functional.conv1d
-
-    # x axis, already contiguous
-    t = conv1d(pad(V.reshape(-1, 1, X), (r, r), mode="replicate"), weight)
-    out = t.reshape(*lead, Z, Y, X)
-    # y axis
-    t = out.transpose(-1, -2).contiguous().reshape(-1, 1, Y)
-    t = conv1d(pad(t, (r, r), mode="replicate"), weight)
-    out = t.reshape(*lead, Z, X, Y).transpose(-1, -2)
-    # z axis
-    t = out.permute(*range(nd - 3), nd - 2, nd - 1, nd - 3).contiguous()
-    t = conv1d(pad(t.reshape(-1, 1, Z), (r, r), mode="replicate"), weight)
-    out = t.reshape(*lead, Y, X, Z).permute(*range(nd - 3), nd - 1, nd - 3, nd - 2)
-    return out.contiguous()
-
-
 def potential_occupancy(
     V: torch.Tensor,
     pixel_size: float,
@@ -232,5 +196,5 @@ def potential_occupancy(
     field = V.detach()
     sigma_vox = sigma_angstrom / pixel_size
     if sigma_vox >= 0.25:
-        field = _gaussian_blur3d(field, sigma_vox)
+        field = gaussian_blur3d(field, sigma_vox)
     return (field / full_potential).clamp_(0.0, 1.0)

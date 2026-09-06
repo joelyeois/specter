@@ -23,25 +23,10 @@ together, which is the real, expected behavior as resolution drops.
 from __future__ import annotations
 
 import torch
-import torch.nn.functional as F
 
+from ...filters import gaussian_blur3d
 from ._field import MembraneField, _grid_points_xyz
 from ._profile import BilayerProfile
-
-
-def _gaussian_blur3d(volume: torch.Tensor, sigma_vox: float) -> torch.Tensor:
-    if sigma_vox <= 0:
-        return volume
-    radius = max(1, int(3 * sigma_vox))
-    x = torch.arange(-radius, radius + 1, dtype=volume.dtype, device=volume.device)
-    kernel1d = torch.exp(-(x**2) / (2 * sigma_vox**2))
-    kernel1d = kernel1d / kernel1d.sum()
-    out = volume[None, None]
-    for shape in ((-1, 1, 1), (1, -1, 1), (1, 1, -1)):
-        kernel = kernel1d.reshape(1, 1, *shape)
-        pad = tuple(radius if s == -1 else 0 for s in shape)
-        out = F.conv3d(out, kernel, padding=pad)
-    return out[0, 0]
 
 
 def rasterize_membrane_density(
@@ -97,7 +82,8 @@ def rasterize_membrane_density(
         )
     if antialias_sigma_angstrom > 0:
         sigma_vox = antialias_sigma_angstrom / field.spacing_angstrom
-        density_fine = _gaussian_blur3d(density_fine, sigma_vox)
+        # Zeros past the faces: the density ends inside the box.
+        density_fine = gaussian_blur3d(density_fine, sigma_vox, pad_mode="constant")
 
     filtered_field = MembraneField(
         phi=density_fine,

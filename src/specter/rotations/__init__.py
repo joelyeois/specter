@@ -39,6 +39,7 @@ from typing import TYPE_CHECKING, Any
 from ._random import (
     random_quaternion,
     random_rotation_matrix,
+    random_rotation_matrix_from_generator,
     random_rotvec,
     rotations_angular_difference,
 )
@@ -125,6 +126,7 @@ __all__ = [
     "random_quaternion",
     "random_rotvec",
     "random_rotation_matrix",
+    "random_rotation_matrix_from_generator",
     "rotations_angular_difference",
     "rotate_volume",
     "rotate_volume_fourier",

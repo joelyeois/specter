@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import torch
+import torch.nn.functional as F
 import numpy as np
 from skimage.filters import butterworth
 
@@ -162,3 +163,61 @@ def chimera_gaussian_sigma_to_bfactor(
     """
     bfactor = 8 * torch.pi**2 * sigma**2
     return bfactor
+
+
+def gaussian_blur3d(
+    V: torch.Tensor, sigma_vox: float, pad_mode: str = "replicate"
+) -> torch.Tensor:
+    """
+    Separable Gaussian blur over the last three axes.
+
+    The kernel is truncated at ``round(3 * sigma_vox)`` voxels each side.
+    Each pass is a ``conv1d`` along the tensor's LAST (contiguous) axis, the
+    other two axes being brought there by a transpose and a copy. A cuDNN
+    ``conv3d`` with a ``(1, 1, 2r+1)``-shaped kernel computes the same thing
+    but runs ~2x slower on the slabs `blend_ice_into_volume` and
+    `ParticleGeneratorBase.solvate` hand it (0.36 vs 0.64 ms per 1024^2
+    slice on an L40), and the blur is the largest single cost of solvation
+    at a 512-pixel box. The two agree to float rounding (~2e-6 on a 7 V
+    field), since only the summation order differs.
+
+    Parameters
+    ----------
+    V : torch.Tensor
+        Shape ``(..., Z, Y, X)``.
+    sigma_vox : float
+        Gaussian width in voxels. Non-positive returns ``V`` unchanged.
+    pad_mode : str, optional
+        How the faces are extended, any mode ``torch.nn.functional.pad``
+        accepts for a 3-D tensor. ``"replicate"`` (default) suits a field
+        that continues past the box, such as a specimen's occupancy;
+        ``"constant"`` (zeros) suits a density that ends inside it.
+
+    Returns
+    -------
+    torch.Tensor
+        Same shape and dtype as ``V``.
+    """
+    if sigma_vox <= 0:
+        return V
+    r = max(1, int(round(3 * sigma_vox)))
+    x = torch.arange(-r, r + 1, device=V.device, dtype=V.dtype)
+    kernel = torch.exp(-0.5 * (x / sigma_vox) ** 2)
+    weight = (kernel / kernel.sum()).view(1, 1, -1)
+
+    lead = V.shape[:-3]
+    Z, Y, X = V.shape[-3:]
+    nd = V.ndim
+
+    # x axis, already contiguous
+    t = F.conv1d(F.pad(V.reshape(-1, 1, X), (r, r), mode=pad_mode), weight)
+    out = t.reshape(*lead, Z, Y, X)
+    # y axis
+    t = out.transpose(-1, -2).contiguous().reshape(-1, 1, Y)
+    t = F.conv1d(F.pad(t, (r, r), mode=pad_mode), weight)
+    out = t.reshape(*lead, Z, X, Y).transpose(-1, -2)
+    # z axis
+    t = out.permute(*range(nd - 3), nd - 2, nd - 1, nd - 3).contiguous()
+    t = F.conv1d(F.pad(t.reshape(-1, 1, Z), (r, r), mode=pad_mode), weight)
+    out = t.reshape(*lead, Y, X, Z).permute(*range(nd - 3), nd - 1, nd - 3, nd - 2)
+    return out.contiguous()

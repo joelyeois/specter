@@ -29,6 +29,7 @@ from ..ice_data import ICE_CACHE_DIRNAME, bundled_ice_data
 from ..cpu_threads import limited_cpu_threads
 from ..fft import spatial_convolve3d_same
 from ..progress import track
+from ..rotations import random_rotation_matrix_from_generator
 from ._energy import MLBOP
 from ..potential import (
     FULL_OCCUPANCY_POTENTIAL_V,
@@ -137,41 +138,6 @@ def default_ice_cache_dir() -> str:
         Absolute path to the bundled ``ice_cache`` directory.
     """
     return str(bundled_ice_data(ICE_CACHE_DIRNAME))
-
-
-def random_rotation_matrix(generator: torch.Generator | None = None) -> torch.Tensor:
-    """
-    Draw a uniformly random 3D rotation matrix.
-
-    QR decomposition of a random Gaussian matrix (Mezzadri, 2007), sign- and
-    determinant-corrected for a proper rotation (no reflection).
-
-    Deliberately *not* :func:`specter.rotations.random_rotation_matrix`
-    (roma-based): roma's ``random_rotmat``/``random_unitquat`` only forwards
-    the given ``generator`` to one of its three underlying random draws (the
-    other two always fall back to the global RNG -- confirmed empirically,
-    not documented), so it cannot give the fully generator-reproducible
-    output :meth:`IceBank._extract_crop` needs. This QR-based path's only
-    random draw is the single ``torch.randn(..., generator=generator)``
-    below, so it is.
-
-    Parameters
-    ----------
-    generator : torch.Generator, optional
-        RNG to draw from. Default is the global RNG.
-
-    Returns
-    -------
-    torch.Tensor
-        Shape (3, 3), ``det(R) == 1``.
-    """
-    A = torch.randn(3, 3, generator=generator)
-    Q, R = torch.linalg.qr(A)
-    d = torch.sign(torch.diagonal(R))
-    Q = Q * d
-    if torch.det(Q) < 0:
-        Q[:, 0] *= -1
-    return Q
 
 
 class IceBank(L.LightningModule):
@@ -379,7 +345,7 @@ class IceBank(L.LightningModule):
         # n_periodic_images), the real cost for small crops out of a large
         # source -- see _get_source_pos) runs on self.device.
         center_cpu = (torch.rand(3, generator=generator) - 0.5) * box_L
-        R_cpu = random_rotation_matrix(generator=generator)
+        R_cpu = random_rotation_matrix_from_generator(generator)
 
         source_pos = self._get_source_pos(config)
         half_extent = torch.tensor(

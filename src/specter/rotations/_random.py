@@ -90,6 +90,43 @@ def random_rotation_matrix(
     return rotmats
 
 
+def random_rotation_matrix_from_generator(
+    generator: torch.Generator | None = None,
+) -> torch.Tensor:
+    """
+    Draw one uniformly random 3D rotation matrix from a given generator.
+
+    QR decomposition of a random Gaussian matrix (Mezzadri, 2007), sign- and
+    determinant-corrected for a proper rotation (no reflection).
+
+    A second draw beside :func:`random_rotation_matrix` on purpose: the
+    roma-based one takes no generator, and roma's ``random_rotmat``/``random_unitquat`` only forwards
+    the given ``generator`` to one of its three underlying random draws (the
+    other two always fall back to the global RNG -- confirmed empirically,
+    not documented), so it cannot give the fully generator-reproducible
+    output :meth:`IceBank._extract_crop` needs. This QR-based path's only
+    random draw is the single ``torch.randn(..., generator=generator)``
+    below, so it is.
+
+    Parameters
+    ----------
+    generator : torch.Generator, optional
+        RNG to draw from. Default is the global RNG.
+
+    Returns
+    -------
+    torch.Tensor
+        Shape (3, 3), ``det(R) == 1``.
+    """
+    A = torch.randn(3, 3, generator=generator)
+    Q, R = torch.linalg.qr(A)
+    d = torch.sign(torch.diagonal(R))
+    Q = Q * d
+    if torch.det(Q) < 0:
+        Q[:, 0] *= -1
+    return Q
+
+
 def rotations_angular_difference(
     r1: torch.Tensor,
     r2: torch.Tensor,

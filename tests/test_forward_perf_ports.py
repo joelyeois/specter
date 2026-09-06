@@ -5,7 +5,7 @@ against the simpler formulation it is equivalent to:
 * `affine_sampling_grid` replaces `F.affine_grid` in every rotation grid.
 * `VolumeRotator` no longer carries a persistent identity grid.
 * `Scattering.multislice` complexifies per chunk instead of whole-volume.
-* `_gaussian_blur3d` runs as conv1d passes instead of cudnn conv3d.
+* `gaussian_blur3d` runs as conv1d passes instead of cudnn conv3d.
 * `solvate` reflect-indexes the ice per slab instead of padding a canvas.
 * `CrowdWithDuplicates.forward(into=...)` stamps onto an existing canvas, and
   `process_volume` no longer keeps a CPU copy of the crowd canvas.
@@ -35,7 +35,7 @@ from specter.imagegenerator import ImageGenerator
 from specter.imagegenerator._particle_base import _reflect_index
 from specter.potential import apply_amplitude_contrast
 from specter.potential._builders import _deltas_backend, potential_from_deltas
-from specter.potential._occupancy import _gaussian_blur3d
+from specter.filters import gaussian_blur3d
 from specter.rotations import VolumeRotator, affine_sampling_grid
 from specter.rotations._volume import _relion_rotation_grid
 from specter.scattering import Scattering
@@ -214,7 +214,7 @@ def _blur_reference(V: torch.Tensor, sigma_vox: float) -> torch.Tensor:
 def test_gaussian_blur3d_matches_conv3d_reference(shape):
     torch.manual_seed(0)
     V = torch.rand(*shape, dtype=torch.float64) * 7
-    got = _gaussian_blur3d(V, 2.0 / 0.731)
+    got = gaussian_blur3d(V, 2.0 / 0.731)
     want = _blur_reference(V, 2.0 / 0.731)
     assert got.shape == V.shape
     assert torch.allclose(got, want, atol=1e-12, rtol=0)

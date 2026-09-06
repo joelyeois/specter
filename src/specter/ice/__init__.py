@@ -6,7 +6,6 @@ from ._bank import (
     default_ice_cache_dir,
     FULL_OCCUPANCY_POTENTIAL_V,
     ice_config_filename,
-    random_rotation_matrix,
     resolve_icemaker,
 )
 from ._energy import MLBOP
@@ -40,7 +39,6 @@ __all__ = [
     "default_ice_cache_dir",
     "FULL_OCCUPANCY_POTENTIAL_V",
     "ice_config_filename",
-    "random_rotation_matrix",
     "resolve_icemaker",
     "MLBOP",
     "avogadro",

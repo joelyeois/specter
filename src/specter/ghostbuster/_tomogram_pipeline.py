@@ -1,3 +1,8 @@
+"""
+`TomogramGhostbuster`: the end-to-end cryo-ET reconstruction pipeline, from
+a tilt series and its geometry to a trained `TomogramReconstructor`.
+"""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -9,13 +14,13 @@ import torch
 import torch.nn as nn
 import torch.utils.data
 
-from ._run_helpers import build_trainer, resolve_device
+from ._pipeline_base import _GhostbusterBase
 from ._tomogram_reconstructor import TomogramReconstructor
 from ..settings import Optics, Propagation, TiltGeometry
 from specter.options import Scheduler, TiltAxis
 
 
-class TomogramGhostbuster:
+class TomogramGhostbuster(_GhostbusterBase):
     """
     End-to-end tomogram reconstruction pipeline for cryo-ET tilt series.
 
@@ -283,19 +288,16 @@ class TomogramGhostbuster:
         """
         n_tilts = len(self._images)
         nz, nxy = self._volume_init.shape[0], self._volume_init.shape[-1]
-        use_gpu, device = resolve_device(device)
-        _device_str = f"GPU {device}" if use_gpu else "CPU"
         print(
             f"Starting reconstruction: {n_tilts} tilts  |  "
             f"volume {nz}×{nxy}×{nxy}  |  {self.propagation.scattering_model}  |  "
-            f"{self.epochs} epochs  |  batch {self.batchsize}  |  {_device_str}"
+            f"{self.epochs} epochs  |  batch {self.batchsize}  |  "
+            f"{self._device_label(device)}"
         )
         model, loader = self._build_reconstructor_and_loader(
             self._images, self._volume_init, self._voxel_size, self.batchsize
         )
-        trainer = build_trainer(use_gpu, device, self.epochs, self.precision, callbacks)
-        trainer.fit(model, loader)
-        return model
+        return self._fit(model, loader, device, self.epochs, self.precision, callbacks)
 
     def test_run(
         self,
@@ -330,11 +332,9 @@ class TomogramGhostbuster:
         print(
             f"Test run: {len(self._images)} tilts  |  {bin_factor}× binned  |  1 epoch"
         )
-        pool = nn.AvgPool2d(bin_factor, stride=bin_factor)
-        images_binned = pool(self._images.unsqueeze(1)).squeeze(1) * bin_factor**2
-        voxel_size_binned = self._voxel_size * bin_factor
+        images_binned, voxel_size_binned = self._bin_images(bin_factor)
 
-        # Bin the initial volume in XY and Z with adaptive pooling
+        # Bin the initial volume in XY and Z as well.
         V_b = (
             nn.functional.avg_pool3d(
                 self._volume_init.unsqueeze(0).unsqueeze(0),
@@ -349,13 +349,10 @@ class TomogramGhostbuster:
         model, loader = self._build_reconstructor_and_loader(
             images_binned, V_b, voxel_size_binned, self.batchsize
         )
-        use_gpu, device = resolve_device(device)
-        trainer = build_trainer(use_gpu, device, 1, "32", callbacks)
-        trainer.fit(model, loader)
-        v = model.V.detach()
-        print(
-            f"Test run passed — {bin_factor}× binned, {len(self._images)} tilts, "
-            f"volume {tuple(v.shape)}  |  "
-            f"V min={v.min():.4f}  max={v.max():.4f}  mean={v.mean():.4f}"
+        model = self._fit(model, loader, device, 1, "32", callbacks)
+        self._report_test_run(
+            model,
+            f"{bin_factor}× binned, {len(self._images)} tilts, "
+            f"volume {tuple(model.V.shape)}",
         )
         return model

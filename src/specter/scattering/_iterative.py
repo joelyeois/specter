@@ -5,6 +5,8 @@ a pose, without ever rotating the whole volume.
 
 from __future__ import annotations
 
+import functools
+
 from collections.abc import Callable, Iterator
 
 import lightning as L
@@ -495,16 +497,10 @@ class IterativeScattering(L.LightningModule):
             y_start, x_start = self._roi_start(V, roi_size=roi_size)
             indices = self._slice_processing_order(nz_new, device=V.device)
 
-            # Gradient-checkpointed loop.
-            # Constants captured in the closure; only (exitwave, V) are
-            # passed as explicit differentiable inputs so that
-            # use_reentrant=False can track them properly.
-            _alpha = self.alpha
-            _sigma = self.sigma
-            _pixel_size = self.pixel_size
-            _Fk = Fk
-            _roi_size = roi_size
-
+            # Gradient-checkpointed loop: each chunk's slices are re-fetched
+            # and re-transmitted in the backward pass, so only the exit wave
+            # at chunk boundaries is kept. The constants ride along as bound
+            # keyword arguments; (exitwave, V) are the differentiable inputs.
             pbar = track(
                 range(0, nz_new, checkpoint_chunks),
                 description="Multislice (Checkpointed)",
@@ -513,56 +509,120 @@ class IterativeScattering(L.LightningModule):
             )
             for chunk_start in pbar:
                 chunk_end = min(chunk_start + checkpoint_chunks, nz_new)
-                _ci = indices[chunk_start:chunk_end]
-                _cnz = nz_new
-                _cid = is_identity
-                _crot = rotator
-                _ctheta = theta_matrix
-                _cy, _cx = y_start, x_start
-
-                def _make_chunk(
-                    ci: torch.Tensor,
-                    cnz: int,
-                    cid: bool,
-                    crot: VolumeRotator | None,
-                    ctheta: torch.Tensor,
-                    cy: int,
-                    cx: int,
-                    roi: int | None,
-                ) -> Callable[[torch.Tensor, torch.Tensor], torch.Tensor]:
-                    def _chunk(exitwave: torch.Tensor, V: torch.Tensor) -> torch.Tensor:
-                        ew = exitwave
-                        dev = ew.device
-                        for j in range(len(ci)):
-                            s = self._fetch_volume_slices(
-                                V,
-                                ci[j : j + 1],
-                                cid,
-                                crot,
-                                ctheta,
-                                cnz,
-                                cy,
-                                cx,
-                                dev,
-                                roi_size=roi,
-                            )[:, 0]
-                            sc = apply_amplitude_contrast(s, alpha=_alpha)
-                            t = torch.exp(1j * _sigma * _pixel_size * sc)
-                            ew = ifft2(fft2(t * ew) * _Fk)
-                        return ew
-
-                    return _chunk
-
-                chunk_fn = _make_chunk(
-                    _ci, _cnz, _cid, _crot, _ctheta, _cy, _cx, _roi_size
+                chunk_fn = functools.partial(
+                    self._multislice_chunk,
+                    indices=indices[chunk_start:chunk_end],
+                    nz_new=nz_new,
+                    is_identity=is_identity,
+                    rotator=rotator,
+                    theta_matrix=theta_matrix,
+                    y_start=y_start,
+                    x_start=x_start,
+                    roi_size=roi_size,
+                    Fk=Fk,
                 )
-                exitwave = _gradient_checkpoint(
-                    chunk_fn, exitwave, V, use_reentrant=False
-                )
+                exitwave = self._checkpointed(chunk_fn, exitwave, V, checkpoint=True)
 
         if self.pad_fft:
             exitwave = center_crop(exitwave, self.nxy, dim=(-2, -1))
         return exitwave
+
+    @staticmethod
+    def _checkpointed(
+        fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor],
+        state: torch.Tensor,
+        V: torch.Tensor,
+        checkpoint: bool,
+    ) -> torch.Tensor:
+        """
+        Advance ``state`` through one chunk, ``fn(state, V)``, optionally
+        under non-reentrant gradient checkpointing so the chunk's
+        intermediates are recomputed in the backward pass rather than kept.
+        """
+        if checkpoint:
+            return _gradient_checkpoint(fn, state, V, use_reentrant=False)
+        return fn(state, V)
+
+    def _multislice_chunk(
+        self,
+        exitwave: torch.Tensor,
+        V: torch.Tensor,
+        *,
+        indices: torch.Tensor,
+        nz_new: int,
+        is_identity: bool,
+        rotator: VolumeRotator | None,
+        theta_matrix: torch.Tensor,
+        y_start: int,
+        x_start: int,
+        roi_size: int | None,
+        Fk: torch.Tensor,
+    ) -> torch.Tensor:
+        """Transmit and propagate ``exitwave`` through the slices ``indices``."""
+        dev = exitwave.device
+        for j in range(len(indices)):
+            s = self._fetch_volume_slices(
+                V,
+                indices[j : j + 1],
+                is_identity,
+                rotator,
+                theta_matrix,
+                nz_new,
+                y_start,
+                x_start,
+                dev,
+                roi_size=roi_size,
+            )[:, 0]
+            sc = apply_amplitude_contrast(s, alpha=self.alpha)
+            t = torch.exp(1j * self.sigma * self.pixel_size * sc)
+            exitwave = ifft2(fft2(t * exitwave) * Fk)
+        return exitwave
+
+    def _rytov_chunk(
+        self,
+        phase_sum: torch.Tensor,
+        V: torch.Tensor,
+        *,
+        indices: torch.Tensor,
+        distances: torch.Tensor,
+        nz_new: int,
+        is_identity: bool,
+        rotator: VolumeRotator | None,
+        theta_matrix: torch.Tensor,
+        y_start: int,
+        x_start: int,
+    ) -> torch.Tensor:
+        """
+        Add the slices ``indices``' single-scatter phase, each propagated
+        by its own Fresnel distance, to the running ``phase_sum``.
+
+        The sum over slices is taken in Fourier space, where the inverse
+        FFT is linear and commutes with it, and inverted once. Summing
+        before the IFFT is mathematically identical to summing after it,
+        but avoids ever backpropagating a broadcast-expanded gradient (from
+        the slice-dim sum) through an FFT: MKL's FFT backward raises
+        "Inconsistent configuration parameters" on such inputs.
+        """
+        dev = phase_sum.device
+        slices = self._fetch_volume_slices(
+            V,
+            indices,
+            is_identity,
+            rotator,
+            theta_matrix,
+            nz_new,
+            y_start,
+            x_start,
+            dev,
+        )
+        slices_c = apply_amplitude_contrast(slices, alpha=self.alpha)
+        # (K, nxy, nxy) Fresnel kernels for this chunk, cheap to rebuild.
+        d = distances.to(dev)
+        F_chunk = fresnel_propagator(
+            self.k2[None, ...], self.wavelength, self.pixel_size * d[:, None, None]
+        )
+        scattered = fft2(1j * self.sigma * self.pixel_size * slices_c) * F_chunk[None]
+        return phase_sum + ifft2(scattered.sum(dim=1))
 
     def projection(
         self, V: torch.Tensor, theta_matrix: torch.Tensor, slice_batchsize: int = 1
@@ -735,12 +795,6 @@ class IterativeScattering(L.LightningModule):
             B, self.nxy, self.nxy, device=device, dtype=torch.complex64
         )
 
-        _alpha = self.alpha
-        _sigma = self.sigma
-        _pixel_size = self.pixel_size
-        _wavelength = self.wavelength
-        _k2 = self.k2
-
         chunk_size = checkpoint_chunks if checkpoint_chunks is not None else nz_new
 
         pbar = track(
@@ -751,60 +805,20 @@ class IterativeScattering(L.LightningModule):
         )
         for chunk_start in pbar:
             chunk_end = min(chunk_start + chunk_size, nz_new)
-            _ci = indices[chunk_start:chunk_end]  # volume slice indices
-            _dist = distances[chunk_start:chunk_end]  # Fresnel distances
-
-            _cid = is_identity
-            _crot = rotator
-            _ctheta = theta_matrix
-            _cy, _cx = y_start, x_start
-            _cnz = nz_new
-
-            def _make_chunk(
-                ci: torch.Tensor,
-                dist: torch.Tensor,
-                cid: bool,
-                crot: VolumeRotator | None,
-                ctheta: torch.Tensor,
-                cy: int,
-                cx: int,
-                cnz: int,
-            ) -> Callable[[torch.Tensor, torch.Tensor], torch.Tensor]:
-                def _chunk(phase_sum: torch.Tensor, V: torch.Tensor) -> torch.Tensor:
-                    dev = phase_sum.device
-                    slices = self._fetch_volume_slices(
-                        V, ci, cid, crot, ctheta, cnz, cy, cx, dev
-                    )
-                    # (B, K, nxy, nxy) real → complex potential
-                    slices_c = apply_amplitude_contrast(slices, alpha=_alpha)
-                    # Fresnel kernels for this chunk — recomputed each time
-                    # (cheap, no learnable params)
-                    d = dist.to(dev)
-                    F_chunk = fresnel_propagator(
-                        _k2[None, ...], _wavelength, _pixel_size * d[:, None, None]
-                    )  # (K, nxy, nxy)
-                    # Batched FFT → Fresnel multiply → sum over slices (still in
-                    # Fourier space, where IFFT is linear and commutes with the
-                    # sum) → single IFFT. Summing before the IFFT is
-                    # mathematically identical to summing after it, but avoids
-                    # ever backpropagating a broadcast-expanded gradient (from
-                    # the slice-dim sum) through an FFT: MKL's FFT backward
-                    # raises "Inconsistent configuration parameters" on such
-                    # inputs.
-                    scattered = fft2(
-                        1j * _sigma * _pixel_size * slices_c
-                    ) * F_chunk.unsqueeze(0)
-                    return phase_sum + ifft2(scattered.sum(dim=1))
-
-                return _chunk
-
-            chunk_fn = _make_chunk(_ci, _dist, _cid, _crot, _ctheta, _cy, _cx, _cnz)
-            if checkpoint_chunks is not None:
-                phase_sum = _gradient_checkpoint(
-                    chunk_fn, phase_sum, V, use_reentrant=False
-                )
-            else:
-                phase_sum = chunk_fn(phase_sum, V)
+            chunk_fn = functools.partial(
+                self._rytov_chunk,
+                indices=indices[chunk_start:chunk_end],
+                distances=distances[chunk_start:chunk_end],
+                nz_new=nz_new,
+                is_identity=is_identity,
+                rotator=rotator,
+                theta_matrix=theta_matrix,
+                y_start=y_start,
+                x_start=x_start,
+            )
+            phase_sum = self._checkpointed(
+                chunk_fn, phase_sum, V, checkpoint=checkpoint_chunks is not None
+            )
 
         return torch.exp(phase_sum)
 

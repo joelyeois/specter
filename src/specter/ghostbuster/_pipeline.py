@@ -1,3 +1,8 @@
+"""
+`Ghostbuster`: the end-to-end single-particle reconstruction pipeline, from
+a CryoSPARC particle set to a trained `Reconstructor`.
+"""
+
 from __future__ import annotations
 
 from dataclasses import replace
@@ -11,11 +16,11 @@ import torch.utils.data
 from ..settings import Optics, Propagation
 from ._helpers import _preprocess_particle_images
 from ._reconstructor import Reconstructor
-from ._run_helpers import build_trainer, resolve_device
+from ._pipeline_base import _GhostbusterBase
 from specter.options import RotateMode, Scheduler
 
 
-class Ghostbuster:
+class Ghostbuster(_GhostbusterBase):
     """
     End-to-end reconstruction pipeline for cryo-EM/cryo-ET.
 
@@ -375,21 +380,16 @@ class Ghostbuster:
         Reconstructor
             The trained model. Access the volume via ``model.V.detach()``.
         """
-        _box = self._images.shape[-1]
-        use_gpu, device = resolve_device(device)
-        _device_str = f"GPU {device}" if use_gpu else "CPU"
         print(
-            f"Starting reconstruction: {len(self._images)} particles  |  box {_box}³  |  "
+            f"Starting reconstruction: {len(self._images)} particles  |  "
+            f"box {self._images.shape[-1]}³  |  "
             f"{self.propagation.scattering_model}  |  {self.epochs} epochs  |  "
-            f"batch {self.batchsize}  |  {_device_str}"
+            f"batch {self.batchsize}  |  {self._device_label(device)}"
         )
         model, loader = self._build_reconstructor_and_loader(
             self._images, self._voxel_size, self.batchsize
         )
-
-        trainer = build_trainer(use_gpu, device, self.epochs, self.precision, callbacks)
-        trainer.fit(model, loader)
-        return model
+        return self._fit(model, loader, device, self.epochs, self.precision, callbacks)
 
     def test_run(
         self,
@@ -425,23 +425,14 @@ class Ghostbuster:
         """
         n_particles = len(self._images)
         print(f"Test run: {n_particles} particles  |  {bin_factor}× binned  |  1 epoch")
-
-        pool = torch.nn.AvgPool2d(bin_factor, stride=bin_factor)
-        images_binned = pool(self._images.unsqueeze(1)).squeeze(1) * bin_factor**2
-        voxel_size_binned = self._voxel_size * bin_factor
-
+        images_binned, voxel_size_binned = self._bin_images(bin_factor)
         model, loader = self._build_reconstructor_and_loader(
             images_binned, voxel_size_binned, self.batchsize
         )
-
-        use_gpu, device = resolve_device(device)
-        trainer = build_trainer(use_gpu, device, 1, "32", callbacks)
-        trainer.fit(model, loader)
-
-        v = model.V.detach()
-        print(
-            f"Test run passed — {bin_factor}× binned, {n_particles} particles, "
-            f"box {images_binned.shape[-1]}³  |  "
-            f"V min={v.min():.4f}  max={v.max():.4f}  mean={v.mean():.4f}"
+        model = self._fit(model, loader, device, 1, "32", callbacks)
+        self._report_test_run(
+            model,
+            f"{bin_factor}× binned, {n_particles} particles, "
+            f"box {images_binned.shape[-1]}³",
         )
         return model

@@ -61,7 +61,6 @@ from __future__ import annotations
 import gc
 import json
 import math
-import time
 import warnings
 from pathlib import Path
 from collections.abc import Iterator
@@ -123,7 +122,7 @@ from ._specs import (
     TomogramPlacement,
     TomogramProteinSpec,
 )
-from ...progress import TqdmProgress, phase_done, phase_start, status
+from ...progress import TqdmProgress, phase, phase_done, phase_start, status
 from specter.options import ScatteringFactors
 
 _INSTANCE_LABEL_REL_THRESHOLD = 0.01
@@ -609,15 +608,12 @@ class TomogramSpecimenGenerator:
         )
         carbon_mask: torch.Tensor | None = None
         if self.carbon_film_spec is not None:
-            _grid_phase_start = phase_start(
-                "Carbon film", disable=not self.progressbars
-            )
-            with status(
-                "Generating carbon support film", disable=not self.progressbars
+            with (
+                phase("Carbon film", disable=not self.progressbars),
+                status("Generating carbon support film", disable=not self.progressbars),
             ):
                 volume = self._stamp_carbon_film(volume, target_shape, voxel_size)
             carbon_mask = volume > 0
-            phase_done("Carbon film", _grid_phase_start, disable=not self.progressbars)
 
         # Transmembrane proteins are stamped into this during the membrane
         # loop below, so it is allocated before that loop rather than after
@@ -639,6 +635,9 @@ class TomogramSpecimenGenerator:
         # than retrying at new positions. Instances with an explicit
         # position_xyz are placed as given and NOT included in this
         # collision check.
+        # The phases below stay on phase_start/phase_done rather than
+        # `with phase(...)`: their completion line reports a count (instances
+        # placed, structures loaded) that only exists once the block has run.
         _membrane_phase_start = phase_start(
             "Membranes", disable=not self.progressbars or not self.membrane_instances
         )
@@ -1257,11 +1256,17 @@ class TomogramSpecimenGenerator:
                         for i, s in enumerate(exact_specs)
                     ]
                 )
-                _exact_pack_start = time.perf_counter()
-                with status(
-                    f"Packing {int(exact_radii.numel())} target instance(s) "
-                    f"({location})",
-                    disable=not self.progressbars,
+                with (
+                    phase(
+                        f"  Target packing ({location})",
+                        disable=not self.progressbars,
+                        header=False,
+                    ),
+                    status(
+                        f"Packing {int(exact_radii.numel())} target instance(s) "
+                        f"({location})",
+                        disable=not self.progressbars,
+                    ),
                 ):
                     coords, exact_rotations, accepted_idx, occupancy = (
                         self._pack_shapes(
@@ -1273,11 +1278,6 @@ class TomogramSpecimenGenerator:
                             occupancy,
                         )
                     )
-                phase_done(
-                    f"  Target packing ({location})",
-                    _exact_pack_start,
-                    disable=not self.progressbars,
-                )
                 n_requested = int(exact_radii.numel())
                 n_placed = int(accepted_idx.numel())
                 if n_placed < n_requested:
@@ -1291,25 +1291,26 @@ class TomogramSpecimenGenerator:
                     )
                 accepted_species_idx = exact_species_map[accepted_idx]
 
-                _exact_render_start = time.perf_counter()
-                volume, instance_labels, next_instance_id = self._render_species_pool(
-                    exact_specs,
-                    exact_pdbs,
-                    coords,
-                    accepted_species_idx,
-                    volume,
-                    instance_labels,
-                    next_instance_id,
-                    location,
-                    voxel_size,
-                    role="target",
-                    rotations=exact_rotations,
-                )
-                phase_done(
+                with phase(
                     f"  Target rendering ({location})",
-                    _exact_render_start,
                     disable=not self.progressbars,
-                )
+                    header=False,
+                ):
+                    volume, instance_labels, next_instance_id = (
+                        self._render_species_pool(
+                            exact_specs,
+                            exact_pdbs,
+                            coords,
+                            accepted_species_idx,
+                            volume,
+                            instance_labels,
+                            next_instance_id,
+                            location,
+                            voxel_size,
+                            role="target",
+                            rotations=exact_rotations,
+                        )
+                    )
 
             # Ratio-weighted ("filler") species, drawn to fill
             # occupancy_fraction of this region -- avoiding the exact-count
@@ -1344,10 +1345,16 @@ class TomogramSpecimenGenerator:
                     species_volumes=pool_volumes,
                 )
 
-                _filler_pack_start = time.perf_counter()
-                with status(
-                    f"Packing filler instances ({location})",
-                    disable=not self.progressbars,
+                with (
+                    phase(
+                        f"  Filler packing ({location})",
+                        disable=not self.progressbars,
+                        header=False,
+                    ),
+                    status(
+                        f"Packing filler instances ({location})",
+                        disable=not self.progressbars,
+                    ),
                 ):
                     coords, filler_rotations, accepted_idx, occupancy = (
                         self._pack_shapes(
@@ -1359,11 +1366,6 @@ class TomogramSpecimenGenerator:
                             occupancy,
                         )
                     )
-                phase_done(
-                    f"  Filler packing ({location})",
-                    _filler_pack_start,
-                    disable=not self.progressbars,
-                )
                 if accepted_idx.numel() == 0:
                     warnings.warn(
                         f"TomogramSpecimenGenerator: placed 0 filler "
@@ -1376,25 +1378,26 @@ class TomogramSpecimenGenerator:
                     )
                 accepted_species_idx = pool_species_idx[accepted_idx]
 
-                _filler_render_start = time.perf_counter()
-                volume, instance_labels, next_instance_id = self._render_species_pool(
-                    ratio_specs,
-                    ratio_pdbs,
-                    coords,
-                    accepted_species_idx,
-                    volume,
-                    instance_labels,
-                    next_instance_id,
-                    location,
-                    voxel_size,
-                    role="filler",
-                    rotations=filler_rotations,
-                )
-                phase_done(
+                with phase(
                     f"  Filler rendering ({location})",
-                    _filler_render_start,
                     disable=not self.progressbars,
-                )
+                    header=False,
+                ):
+                    volume, instance_labels, next_instance_id = (
+                        self._render_species_pool(
+                            ratio_specs,
+                            ratio_pdbs,
+                            coords,
+                            accepted_species_idx,
+                            volume,
+                            instance_labels,
+                            next_instance_id,
+                            location,
+                            voxel_size,
+                            role="filler",
+                            rotations=filler_rotations,
+                        )
+                    )
 
             phase_done(
                 f"{location.capitalize()} species",

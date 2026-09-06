@@ -189,7 +189,9 @@ def status(description: str, disable: bool = False) -> Iterator[None]:
 
 
 @contextmanager
-def phase(description: str, disable: bool = False) -> Iterator[None]:
+def phase(
+    description: str, disable: bool = False, header: bool = True
+) -> Iterator[None]:
     """
     Context manager that prints a titled section-header rule for a named
     pipeline phase (e.g. "generating membranes", "fetching PDB
@@ -215,11 +217,14 @@ def phase(description: str, disable: bool = False) -> Iterator[None]:
     disable : bool, optional
         If True, no output is shown (the block still runs and is still
         timed internally, just not printed).
+    header : bool, optional
+        Print the section-header rule on entry. ``False`` prints only the
+        completion summary, for a sub-phase inside a headed one.
     """
     if disable:
         yield
         return
-    start = phase_start(description)
+    start = phase_start(description, disable=not header)
     try:
         yield
     finally:

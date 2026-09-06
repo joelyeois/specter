@@ -22,7 +22,7 @@ from specter.imagegenerator import (
     MicrographGenerator,
     TiltSeriesGenerator,
 )
-from specter.settings import Camera, Envelopes, Propagation
+from specter.settings import Camera, Envelopes, Propagation, TiltGeometry
 
 # These fixtures predate `coincidence_radius` being rescaled to mean a true
 # effective exclusion radius (exclusion area pi*r^2, rather than the old
@@ -224,11 +224,11 @@ def test_tilt_series_generator_regression(ctf_params, save_or_compare):
         dose_per_angstrom=2.0,
         angles=angles,
         coincidence_radius=_CR,
-        tilt_axis="y",
         verbose=False,
         progressbars=False,
         propagation=Propagation(scattering_model="projection", alpha=0.1),
         camera=Camera(noise_model="poisson", n_frames=10),
+        tilt=TiltGeometry(tilt_axis="y"),
     )
     torch.manual_seed(0)
     tilt_series, _, _ = gen.generate_tilt_series(torch.tensor([0]))
@@ -252,9 +252,9 @@ def test_tilt_series_generator_blends_ice_into_volume(ctf_params):
         dose_per_angstrom=2.0,
         angles=torch.tensor([0.0]),
         ice_model="random",
-        tilt_axis="y",
         verbose=False,
         progressbars=False,
+        tilt=TiltGeometry(tilt_axis="y"),
     )
 
     # No tilt-coverage padding triggered at this geometry (available_nxy already

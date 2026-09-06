@@ -10,10 +10,10 @@ from ..progress import status, track
 from .. import rotations
 from .. import tilt as tilt_geometry
 from ..ice import IceBank, RandomIcemaker, blend_ice_into_volume, resolve_icemaker
-from ..settings import Camera, Envelopes, Optics, Propagation
+from ..settings import Camera, Envelopes, Optics, Propagation, TiltGeometry
 from ._micrograph import MicrographGenerator
 from ..scattering import IterativeScattering
-from specter.options import IceModel, ScatteringFactors, TiltAxis
+from specter.options import IceModel, ScatteringFactors
 
 
 class TiltSeriesGenerator(MicrographGenerator):
@@ -151,21 +151,14 @@ class TiltSeriesGenerator(MicrographGenerator):
         *extra* margin beyond the geometric minimum has no effect on the output
         (those pixels are provably never sampled), so it cannot substitute for this.
         Default 8.
-    taper_width : int, optional
-        Extra reflect-padded apron pixels on each XY side beyond tilt-coverage
-        padding (already inclusive of ``edge_margin``), with a cosine taper applied.
-        Note: since this fades pixels strictly beyond the geometrically-required
-        coverage (now ``edge_margin``-inflated), those pixels are never read by the
-        interpolation that produces the output -- this taper has no measurable
-        effect on the result and exists only to avoid a literal hard edge at the
-        outermost boundary of the padded array itself. Default 0.
-    z_taper_width : int, optional
-        Cosine taper width in Z pixels at the top and bottom of the volume. Fades
-        the sample's own outermost slices, so it trades a little signal for a
-        smoother ice/vacuum transition: tilting mixes X and Z, which turns a hard
-        Z edge into an in-plane discontinuity the propagator sees. Default 0.
-    tilt_axis : str, optional
-        Axis around which the sample tilts ('x' or 'y'). Default 'x'.
+    tilt : TiltGeometry, optional
+        Tilt axis and the XY/Z cosine tapers applied to the volume before
+        imaging. The XY taper fades pixels beyond the geometrically required
+        coverage (already inclusive of ``edge_margin``), which the output
+        never samples, so it only avoids a hard edge at the padded array's
+        own boundary; the Z taper fades the sample's outermost slices, which
+        tilting turns into an in-plane discontinuity the propagator sees.
+        Default ``TiltGeometry()``.
     coincidence_radius : float or torch.Tensor, optional
         Coincidence radius in pixels. Default 0.0.
     bfactor : float or torch.Tensor or None, optional
@@ -207,9 +200,7 @@ class TiltSeriesGenerator(MicrographGenerator):
         slice_batchsize: int = 1,
         pad_volume: bool = True,
         edge_margin: int = 8,
-        taper_width: int = 0,
-        z_taper_width: int = 0,
-        tilt_axis: TiltAxis = "x",
+        tilt: TiltGeometry = TiltGeometry(),
         coincidence_radius: float | torch.Tensor = 0.0,
         bfactor: float | torch.Tensor | None = None,
         **kwargs: Any,
@@ -251,9 +242,10 @@ class TiltSeriesGenerator(MicrographGenerator):
         else:
             raise ValueError("micrograph_size must have same dimensions in x and y.")
 
-        self.tilt_axis = tilt_axis.lower()
-        if self.tilt_axis not in ["x", "y"]:
-            raise ValueError(f"Unsupported tilt_axis: {tilt_axis}. Use 'x' or 'y'.")
+        self.tilt = tilt
+        self.tilt_axis = tilt.tilt_axis
+        taper_width = tilt.taper_width
+        z_taper_width = tilt.z_taper_width
 
         max_tilt_angle_deg = tilt_geometry.infer_max_tilt_from_inputs(
             angles=angles, quaternions=quaternions

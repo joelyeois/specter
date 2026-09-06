@@ -18,6 +18,8 @@ image formation, and which of them a class accepts says what it models:
   reconstruction does not accept them: the high-frequency loss they cause
   is absorbed into the reconstructed volume.
 - `Camera`: the detector chain, likewise forward-only.
+- `TiltGeometry`: the tilt axis and edge tapers a tilt series is imaged
+  with, shared by `TiltSeriesGenerator` and `TomogramReconstructor`.
 
 Per-image data (poses, CTF parameters, dose, coincidence radius, potential
 scale) stays as direct tensor arguments, and the two scalars that define
@@ -41,6 +43,7 @@ from specter.options import (
     NoiseModel,
     RotateMode,
     ScatteringModel,
+    TiltAxis,
 )
 
 AberrationBackend = Literal["legacy", "torch_ctf"]
@@ -51,6 +54,7 @@ __all__ = [
     "Envelopes",
     "Optics",
     "Propagation",
+    "TiltGeometry",
     "bundle_from_config",
 ]
 
@@ -203,6 +207,37 @@ class Camera:
             object.__setattr__(self, "noise_model", None)
         if self.n_frames is not None and self.n_frames < 1:
             raise ValueError(f"n_frames={self.n_frames} must be at least 1")
+
+
+@dataclass(frozen=True)
+class TiltGeometry:
+    """
+    The tilt-series conventions the forward and inverse tilt models share.
+
+    Parameters
+    ----------
+    tilt_axis : TiltAxis
+        Axis the specimen tilts about, ``"x"`` or ``"y"``. Decides which
+        image dimension shrinks at high tilt. Default ``"x"``.
+    taper_width : int
+        Cosine taper in pixels at the XY edges of the volume. Default 0.
+    z_taper_width : int
+        Cosine taper in pixels at the top and bottom of the volume, so a
+        hard Z edge does not become an in-plane discontinuity once tilted.
+        Default 0.
+    """
+
+    tilt_axis: TiltAxis = "x"
+    taper_width: int = 0
+    z_taper_width: int = 0
+
+    def __post_init__(self) -> None:
+        axis = str(self.tilt_axis).lower()
+        if axis not in ("x", "y"):
+            raise ValueError(f"tilt_axis={self.tilt_axis!r} must be 'x' or 'y'")
+        object.__setattr__(self, "tilt_axis", axis)
+        if self.taper_width < 0 or self.z_taper_width < 0:
+            raise ValueError("taper_width and z_taper_width must be non-negative")
 
 
 _B = TypeVar("_B")

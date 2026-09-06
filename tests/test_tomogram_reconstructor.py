@@ -20,7 +20,7 @@ import torch.utils.data
 from specter.arrays import ball3d
 from specter.fft import fft3
 from specter.ghostbuster import TomogramReconstructor
-from specter.settings import Propagation
+from specter.settings import Propagation, TiltGeometry
 
 SCHEDULERS = [
     "LambdaLR",
@@ -139,8 +139,8 @@ def test_fov_mask_zeros_border_at_high_tilt(tr_kwargs: dict) -> None:
     center remains real FOV."""
     model = TomogramReconstructor(
         **tr_kwargs,
-        tilt_axis="x",
         propagation=Propagation(scattering_model="projection"),
+        tilt=TiltGeometry(tilt_axis="x"),
     )
     mask = model._fov_mask(0)  # -20 degree tilt
     assert mask is not None

@@ -23,8 +23,8 @@ from ..scattering import IterativeScattering
 from ._base_reconstructor import _BaseReconstructor
 from ._helpers import _build_lr_scheduler
 from ._io import save_volume_mrc
-from ..settings import Optics, Propagation
-from specter.options import Scheduler, TiltAxis
+from ..settings import Optics, Propagation, TiltGeometry
+from specter.options import Scheduler
 
 
 class TomogramReconstructor(_BaseReconstructor):
@@ -55,18 +55,15 @@ class TomogramReconstructor(_BaseReconstructor):
         Per-tilt CTF parameters; each value has leading dimension ``N_tilts``.
     voltage : float
         Electron beam accelerating voltage in kV.
-    tilt_axis : str
-        Axis around which the sample tilts (``"x"`` or ``"y"``).  Determines
-        which image dimension shrinks at high tilt for FOV masking.  Default ``"x"``.
+    tilt : TiltGeometry, optional
+        Tilt axis and edge tapers -- the same object the `TiltSeriesGenerator`
+        that produced the data was built with. The axis decides which image
+        dimension shrinks at high tilt for FOV masking; the tapers are applied
+        to V before each forward pass. Default ``TiltGeometry()``.
     lr : float, optional
         Learning rate for volume V.  ``None`` freezes V.
     sparsity : float, optional
         L1 regularisation weight on V.
-    taper_width : int
-        Cosine taper applied to V in XY before each forward pass, smoothing
-        the volume-to-vacuum boundary to suppress edge diffraction.  Default 0.
-    z_taper_width : int
-        Cosine taper in Z.  Default 0.
     use_fov_mask : bool
         If ``True``, the MSE loss at each tilt is restricted to the central
         strip corresponding to real (non-padded) volume, eliminating gradient
@@ -110,11 +107,9 @@ class TomogramReconstructor(_BaseReconstructor):
         translations: torch.Tensor,
         ctf_params: dict[str, torch.Tensor],
         voltage: float,
-        tilt_axis: TiltAxis = "x",
+        tilt: TiltGeometry = TiltGeometry(),
         lr: float | None = None,
         sparsity: float | None = None,
-        taper_width: int = 0,
-        z_taper_width: int = 0,
         use_fov_mask: bool = True,
         propagation: Propagation = Propagation(),
         optics: Optics = Optics(),
@@ -137,15 +132,16 @@ class TomogramReconstructor(_BaseReconstructor):
         self.nxy = V.shape[-1]
         self.nz = V.shape[0]
         self.voxel_size = voxel_size
-        self.tilt_axis = tilt_axis.lower()
+        self.tilt = tilt
+        self.tilt_axis = tilt.tilt_axis
 
         # Optimisation settings
         self.lr = lr
         self.lr_decay = lr_decay
         self.scheduler = scheduler
         self.sparsity = sparsity
-        self.taper_width = taper_width
-        self.z_taper_width = z_taper_width
+        self.taper_width = tilt.taper_width
+        self.z_taper_width = tilt.z_taper_width
         self.use_fov_mask = use_fov_mask
         self.slice_batchsize = slice_batchsize
         self.checkpoint_chunks = checkpoint_chunks

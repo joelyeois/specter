@@ -14,7 +14,7 @@ from specter.imagegenerator import (
     MicrographGenerator,
     TiltSeriesGenerator,
 )
-from specter.settings import Camera, Optics, Propagation
+from specter.settings import Camera, Optics, Propagation, TiltGeometry
 
 
 @pytest.fixture
@@ -241,12 +241,12 @@ def test_tilt_series_generator_matches_across_backends(realistic_ctf_params):
             dose_per_angstrom=2.0,
             angles=angles,
             ice_model=None,
-            tilt_axis="y",
             verbose=False,
             progressbars=False,
             propagation=Propagation(scattering_model="projection", alpha=0.1),
             optics=Optics(aberration_backend=backend),
             camera=Camera(noise_model=None),
+            tilt=TiltGeometry(tilt_axis="y"),
         )
         torch.manual_seed(0)
         tilt_series, _, _ = gen.generate_tilt_series(torch.tensor([0]))

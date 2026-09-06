@@ -24,7 +24,7 @@ import torch
 from specter.arrays import ball3d
 from specter.ghostbuster import Reconstructor
 from specter.imagegenerator import ImageGenerator
-from specter.settings import Camera, Propagation
+from specter.settings import Camera, Propagation, TiltGeometry
 
 SCATTERING_MODELS = ["multislice", "projection", "firstborn", "rytov"]
 
@@ -248,11 +248,11 @@ def test_tilt_forward_matches_between_simulator_and_inverse(
         voltage=300.0,
         dose_per_angstrom=2.0,
         angles=torch.tensor([0.0]),
-        tilt_axis="y",
         verbose=False,
         progressbars=False,
         propagation=Propagation(scattering_model=scattering_model, alpha=0.1),
         camera=Camera(noise_model=None),
+        tilt=TiltGeometry(tilt_axis="y"),
     )
     torch.manual_seed(0)
     _, _, clean = generator.generate_tilt_series(torch.tensor([0]))
@@ -324,11 +324,11 @@ def test_simulated_tilt_series_reconstructs_back_to_its_volume() -> None:
         voltage=300.0,
         dose_per_angstrom=2.0,
         angles=angles,
-        tilt_axis="y",
         verbose=False,
         progressbars=False,
         propagation=Propagation(scattering_model="multislice", alpha=0.1),
         camera=Camera(noise_model=None),
+        tilt=TiltGeometry(tilt_axis="y"),
     )
     torch.manual_seed(0)
     _, _, observed = generator.generate_tilt_series(torch.tensor([0]))

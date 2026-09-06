@@ -27,7 +27,13 @@ from specter.io import create_micrograph_starfile
 from specter.specimen import load_specimen_volume
 
 from specter.devices import parse_device, resolve_available_device
-from specter.settings import Camera, Envelopes, Propagation, bundle_from_config
+from specter.settings import (
+    Camera,
+    Envelopes,
+    Propagation,
+    TiltGeometry,
+    bundle_from_config,
+)
 from specter.progress import console, format_elapsed, section
 from ._common import (
     _reserve_next_job_id,
@@ -200,7 +206,7 @@ def run_tilt_series(
         ice_relax_steps=config.ice_relax_steps,
         ice_parameterization=config.bulk_scattering_factors,
         bfactor=config.bfactor,
-        tilt_axis=config.tilt_axis,
+        tilt=bundle_from_config(TiltGeometry, config),
         coincidence_radius=config.coincidence_radius,
     ).to(device_target)
 

@@ -11,7 +11,7 @@ import torch.utils.data
 
 from ._run_helpers import build_trainer, resolve_device
 from ._tomogram_reconstructor import TomogramReconstructor
-from ..settings import Optics, Propagation
+from ..settings import Optics, Propagation, TiltGeometry
 from specter.options import Scheduler, TiltAxis
 
 
@@ -51,8 +51,9 @@ class TomogramGhostbuster:
     translations : torch.Tensor, optional
         Per-tilt in-plane translations in Å ``(N_tilts, 2)``.  Defaults to
         zero.
-    tilt_axis : str
-        Tilt rotation axis (``"x"`` or ``"y"``).  Default ``"x"``.
+    tilt : TiltGeometry, optional
+        Tilt axis and edge tapers, see `TomogramReconstructor`. Default
+        ``TiltGeometry()``.
     nz : int, optional
         Z depth of the reconstructed volume in voxels.  Defaults to the image
         width (square volume).
@@ -74,10 +75,6 @@ class TomogramGhostbuster:
         contrast, bandlimit). Default ``Propagation()``.
     optics : Optics, optional
         The aberration engine and phase plate. Default ``Optics()``.
-    taper_width : int
-        XY cosine taper on V before each forward pass.  Default 0.
-    z_taper_width : int
-        Z cosine taper on V.  Default 0.
     use_fov_mask : bool
         Mask MSE loss to the real-FOV region per tilt.  Default ``True``.
     scheduler : str
@@ -101,7 +98,7 @@ class TomogramGhostbuster:
         angles: Sequence[float] | torch.Tensor | None = None,
         quaternions: torch.Tensor | None = None,
         translations: torch.Tensor | None = None,
-        tilt_axis: TiltAxis = "x",
+        tilt: TiltGeometry = TiltGeometry(),
         nz: int | None = None,
         V_init: torch.Tensor | None = None,
         flip_contrast: bool = True,
@@ -111,8 +108,6 @@ class TomogramGhostbuster:
         batchsize: int = 1,
         propagation: Propagation = Propagation(),
         optics: Optics = Optics(),
-        taper_width: int = 0,
-        z_taper_width: int = 0,
         use_fov_mask: bool = True,
         scheduler: Scheduler = "LambdaLR",
         slice_batchsize: int = 1,
@@ -127,7 +122,7 @@ class TomogramGhostbuster:
             f"{voltage:.0f} kV"
         )
 
-        quats = self._resolve_tilt_quaternions(angles, quaternions, tilt_axis)
+        quats = self._resolve_tilt_quaternions(angles, quaternions, tilt.tilt_axis)
         trans = (
             torch.zeros(n_tilts, 2, dtype=torch.float32)
             if translations is None
@@ -152,10 +147,8 @@ class TomogramGhostbuster:
         self.batchsize = batchsize
         self.propagation = propagation
         self.optics = optics
-        self.taper_width = taper_width
-        self.z_taper_width = z_taper_width
+        self.tilt = tilt
         self.use_fov_mask = use_fov_mask
-        self.tilt_axis = tilt_axis
         self.scheduler = scheduler
         self.slice_batchsize = slice_batchsize
         self.num_workers = num_workers
@@ -249,11 +242,9 @@ class TomogramGhostbuster:
             self._translations,
             self._ctf_params,
             self._voltage,
-            tilt_axis=self.tilt_axis,
+            tilt=self.tilt,
             lr=self.lr,
             sparsity=self.sparsity,
-            taper_width=self.taper_width,
-            z_taper_width=self.z_taper_width,
             use_fov_mask=self.use_fov_mask,
             propagation=self.propagation,
             optics=self.optics,

@@ -7,6 +7,8 @@ from `specter.cli`, from plain Python, or from a notebook, with identical behavi
 
 from __future__ import annotations
 
+from typing import Any
+
 import logging
 import os
 import sys
@@ -18,7 +20,7 @@ import specter
 from specter import rotations
 from specter.arrays import compute_nz
 from specter.config import ParticleStackConfig, validate_config
-from specter.ice import resolve_icemaker
+from specter.ice import IceBank, RandomIcemaker, resolve_icemaker
 from specter.image import normalize_particles
 from specter.imagegenerator import ImageGenerator
 from specter.io import (
@@ -165,6 +167,182 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
     # LOCAL_RANK is absent in the original process and set (0, 1, ...) in DDP workers
     is_main = "LOCAL_RANK" not in os.environ
 
+    _seed_run(config, is_main)
+
+    # --- Building 3D scattering potential ---
+    if is_main:
+        section("Building 3D scattering potential")
+    # Shtyrov fits scattering factors per bonded species, so derive the
+    # bond topology from the structure unless the config supplies its own
+    # atom_species list. Other parameterizations are per-element and would
+    # only pay the extra gemmi pass for nothing.
+    # pixel_size/voltage/alpha come from the dataset when cs_path/star_path is
+    # set -- extract once, up front, since PotentialBuilder below needs the
+    # resolved pixel_size (matches ImageGeneratorFromCoordinates' notebook
+    # counterpart). Both extractors return the same 10-tuple, so everything
+    # downstream is agnostic to which file format it came from.
+    dataset_particles, pixel_size, voltage, alpha = _resolve_imaging_parameters(config)
+
+    # Convert cs from mm -> Å (1 mm = 1e7 Å); unused when
+    # cs_path/star_path is set, since Cs then comes per-particle from the file.
+    cs_angstrom = config.cs * 1e7
+
+    # Only the main process (always global rank 0 for this single-node launcher)
+    # builds V for real. Other DDP ranks hold a zero placeholder of the same
+    # shape: Lightning's trainer.predict() calls _sync_module_states() before
+    # the predict loop starts, which broadcasts rank 0's real buffer values
+    # (V is a registered buffer) to every rank -- so building it per-rank would
+    # just be wasted, redundant compute.
+    pdb, V = _structure_and_potential(config, pixel_size, build=is_main)
+
+    # --- Sampling poses, defocus, and translations ---
+    if is_main:
+        section("Sampling poses, defocus, and translations")
+
+    n, quats, translations, ctf_params, anisomag = _sample_poses_and_ctf(
+        config, dataset_particles, cs_angstrom
+    )
+
+    dose = _uniform_sample(config.dose, n)
+    coincidence_radius = _uniform_sample(config.coincidence_radius, n)
+    potential_scale = _uniform_sample(config.potential_scale, n)
+
+    crowd_min_distance = (
+        None
+        if config.crowd_min_distance == 0
+        else config.crowd_min_distance
+        if config.crowd_min_distance is not None
+        else pdb.max_diameter
+    )
+    n_frames = (
+        config.n_frames if config.n_frames is not None else int(dose.mean().item())
+    )
+    cc_angstrom = config.cc * 1e7 if config.cc is not None else None
+
+    # --- Ice ---
+    # resolve_icemaker derives (n, nz) for a fresh RandomIcemaker itself, so it
+    # always matches the particle volume V it gets blended into -- IceBank
+    # (cache_dir=...) just loads small pre-generated coordinate files from
+    # disk, cheap enough that every DDP rank can construct it independently
+    # (no rank-0-builds-then-broadcasts dance needed, unlike V above).
+    ice_parameterization = config.bulk_scattering_factors
+    icemaker = _build_icemaker(config, pixel_size, mode, device_target)
+
+    model = ImageGenerator(
+        V,
+        pixel_size,
+        quats,
+        translations,
+        ctf_params,
+        voltage,
+        dose,
+        anisomag=anisomag,
+        # alpha is data when it comes from a .cs/.star file, so it overrides
+        # the config's; cc is in mm in the config and Angstrom here.
+        propagation=bundle_from_config(Propagation, config, alpha=alpha),
+        envelopes=bundle_from_config(Envelopes, config, cc=cc_angstrom),
+        camera=bundle_from_config(Camera, config, n_frames=n_frames),
+        ice=bundle_from_config(
+            Ice, config, prefix="ice_", parameterization=ice_parameterization
+        ),
+        icemaker=icemaker,
+        crowding=bundle_from_config(
+            Crowding,
+            config,
+            prefix="crowd_",
+            min_distance=crowd_min_distance,
+            water_air_interface=config.water_air_interface,
+        ),
+        crowd_move_to_cpu=config.crowd_move_to_cpu,
+        verbose=False,
+        coincidence_radius=coincidence_radius,
+        potential_scale=potential_scale,
+        bfactor=config.bfactor,
+    )
+
+    if config.save_clean_exitwaves:
+        model.save_clean_exitwaves = True  # type: ignore[assignment]
+
+    # --- Batch size ---
+    # "auto" sizes the batch to the memory actually free on the target device
+    # right now, from the box geometry the model was just built with -- see
+    # specter.memory for the measured peak-memory model behind it.
+    batchsize = _resolve_batchsize(config, model, mode, device_target, n, is_main)
+
+    # --- Generating images ---
+    # Resolved once, here, before any DDP dispatch -- both this process and
+    # any DDP workers _generate_multi spawns below independently reach this
+    # same point (see run_particle_stack's own is_main handling), so
+    # _tracked_output_dir's is_main split matters here: only is_main opens
+    # a real Job (mkdir/job.json/status), workers just compute the same
+    # path as a deterministic string join. Kept open (manually, not via
+    # `with`, so the ~80 lines below don't need re-indenting under one
+    # block) until the run finishes or fails.
+    _output_dir_cm = _tracked_output_dir(config, "particles", is_main=is_main)
+    output_dir = _output_dir_cm.__enter__()
+    try:
+        if mode == "multi":
+            assert isinstance(device_target, list)
+            if is_main:
+                section(f"Initializing multi-GPU on devices {device_target}")
+            images, exitwaves, clean_exitwaves = _generate_multi(
+                model,
+                n,
+                batchsize,
+                device_target,
+                output_dir,
+                collect_exitwaves=config.save_exitwaves,
+                collect_clean_exitwaves=config.save_clean_exitwaves,
+            )
+            if images is None:
+                return  # worker rank -- rank 0 handles saving
+        else:
+            if is_main:
+                section(f"Generating images on {device_target}")
+            model = model.to(device_target)
+            images, exitwaves, clean_exitwaves = _generate_single(
+                model,
+                n,
+                batchsize,
+                track,
+                collect_exitwaves=config.save_exitwaves,
+                collect_clean_exitwaves=config.save_clean_exitwaves,
+            )
+
+        _save_stack(
+            config,
+            output_dir,
+            images,
+            exitwaves,
+            clean_exitwaves,
+            quats,
+            translations,
+            ctf_params,
+            pixel_size,
+            voltage,
+            alpha,
+            dose,
+            coincidence_radius,
+            potential_scale,
+            is_main,
+        )
+    except BaseException:
+        # Only meaningful for is_main (a worker's context manager never
+        # opened a real Job, so this just re-raises cleanly for it) --
+        # marks the job "failed" instead of leaving it stuck at "running".
+        _output_dir_cm.__exit__(*sys.exc_info())
+        raise
+    else:
+        # Not reached by a worker rank's early `return` above, so this
+        # (and the Job it may close) only ever runs for is_main.
+        _output_dir_cm.__exit__(None, None, None)
+
+    elapsed = time.perf_counter() - t_start
+    console.print(f"\n[bold]Total time:[/bold] {format_elapsed(elapsed)}")
+
+
+def _seed_run(config: ParticleStackConfig, is_main: bool) -> None:
+    """Seed every draw from ``config.seed``, or from a fresh seed that is printed."""
     if config.seed is not None:
         # Stochastic stages (ice crop selection, Poisson noise) draw from the
         # global RNG stream inside each forward pass, so the batch boundaries
@@ -191,18 +369,16 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
         if is_main:
             console.print(f"[dim]No seed given -- using seed={generated_seed}[/dim]")
 
-    # --- Building 3D scattering potential ---
-    if is_main:
-        section("Building 3D scattering potential")
-    # Shtyrov fits scattering factors per bonded species, so derive the
-    # bond topology from the structure unless the config supplies its own
-    # atom_species list. Other parameterizations are per-element and would
-    # only pay the extra gemmi pass for nothing.
-    # pixel_size/voltage/alpha come from the dataset when cs_path/star_path is
-    # set -- extract once, up front, since PotentialBuilder below needs the
-    # resolved pixel_size (matches ImageGeneratorFromCoordinates' notebook
-    # counterpart). Both extractors return the same 10-tuple, so everything
-    # downstream is agnostic to which file format it came from.
+
+def _resolve_imaging_parameters(
+    config: ParticleStackConfig,
+) -> tuple[Any, float, float, float]:
+    """
+    The dataset's particles when ``cs_path``/``star_path`` is set (else None),
+    and the pixel size, voltage and amplitude contrast the run images at,
+    which come from that dataset when there is one and from the config
+    otherwise.
+    """
     dataset_particles = None
     if config.cs_path is not None:
         dataset_particles = extract_parameters_from_csfile(
@@ -222,22 +398,19 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
         voltage = config.voltage
         alpha = config.alpha
 
-    # Convert cs from mm -> Å (1 mm = 1e7 Å); unused when
-    # cs_path/star_path is set, since Cs then comes per-particle from the file.
-    cs_angstrom = config.cs * 1e7
+    return dataset_particles, pixel_size, voltage, alpha
 
-    # Only the main process (always global rank 0 for this single-node launcher)
-    # builds V for real. Other DDP ranks hold a zero placeholder of the same
-    # shape: Lightning's trainer.predict() calls _sync_module_states() before
-    # the predict loop starts, which broadcasts rank 0's real buffer values
-    # (V is a registered buffer) to every rank -- so building it per-rank would
-    # just be wasted, redundant compute.
-    pdb, V = _structure_and_potential(config, pixel_size, build=is_main)
 
-    # --- Sampling poses, defocus, and translations ---
-    if is_main:
-        section("Sampling poses, defocus, and translations")
-
+def _sample_poses_and_ctf(
+    config: ParticleStackConfig, dataset_particles: Any, cs_angstrom: float
+) -> tuple[
+    int, torch.Tensor, torch.Tensor, dict[str, torch.Tensor], torch.Tensor | None
+]:
+    """
+    Poses, translations, CTF terms and anisotropic magnification for every
+    particle: taken from the dataset when there is one, sampled from the
+    config's ranges otherwise.
+    """
     if dataset_particles is not None:
         # Poses/CTF/translations/anisomag come straight from the dataset --
         # dose, coincidence radius, and potential scale aren't recorded in
@@ -318,38 +491,25 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
         rlnOriginYAngst = 2 * (torch.rand(n) - 0.5) * config.shift
         translations = torch.stack([rlnOriginXAngst, rlnOriginYAngst], dim=-1)
 
-    dose = _uniform_sample(config.dose, n)
-    coincidence_radius = _uniform_sample(config.coincidence_radius, n)
-    potential_scale = _uniform_sample(config.potential_scale, n)
+    return n, quats, translations, ctf_params, anisomag
 
+
+def _build_icemaker(
+    config: ParticleStackConfig,
+    pixel_size: float,
+    mode: str,
+    device_target: Any,
+) -> IceBank | RandomIcemaker | None:
+    """The icemaker for the run, on the device the images are made on."""
     ice_model = None if config.ice_model == "none" else config.ice_model
-    crowd_min_distance = (
-        None
-        if config.crowd_min_distance == 0
-        else config.crowd_min_distance
-        if config.crowd_min_distance is not None
-        else pdb.max_diameter
-    )
-    n_frames = (
-        config.n_frames if config.n_frames is not None else int(dose.mean().item())
-    )
-    cc_angstrom = config.cc * 1e7 if config.cc is not None else None
-
-    # --- Ice ---
-    # resolve_icemaker derives (n, nz) for a fresh RandomIcemaker itself, so it
-    # always matches the particle volume V it gets blended into -- IceBank
-    # (cache_dir=...) just loads small pre-generated coordinate files from
-    # disk, cheap enough that every DDP rank can construct it independently
-    # (no rank-0-builds-then-broadcasts dance needed, unlike V above).
     ice_nz = compute_nz(config.n_pixels, config.ice_thickness, pixel_size)
-    ice_parameterization = config.bulk_scattering_factors
     icemaker = resolve_icemaker(
         ice_model,
         pixel_size,
         config.n_pixels,
         ice_nz,
         ice_cache_dir=config.ice_cache_dir,
-        parameterization=ice_parameterization,
+        parameterization=config.bulk_scattering_factors,
     )
 
     if icemaker is not None:
@@ -359,45 +519,22 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
         if icemaker_device != "cpu":
             icemaker = icemaker.to(icemaker_device)
 
-    model = ImageGenerator(
-        V,
-        pixel_size,
-        quats,
-        translations,
-        ctf_params,
-        voltage,
-        dose,
-        anisomag=anisomag,
-        # alpha is data when it comes from a .cs/.star file, so it overrides
-        # the config's; cc is in mm in the config and Angstrom here.
-        propagation=bundle_from_config(Propagation, config, alpha=alpha),
-        envelopes=bundle_from_config(Envelopes, config, cc=cc_angstrom),
-        camera=bundle_from_config(Camera, config, n_frames=n_frames),
-        ice=bundle_from_config(
-            Ice, config, prefix="ice_", parameterization=ice_parameterization
-        ),
-        icemaker=icemaker,
-        crowding=bundle_from_config(
-            Crowding,
-            config,
-            prefix="crowd_",
-            min_distance=crowd_min_distance,
-            water_air_interface=config.water_air_interface,
-        ),
-        crowd_move_to_cpu=config.crowd_move_to_cpu,
-        verbose=False,
-        coincidence_radius=coincidence_radius,
-        potential_scale=potential_scale,
-        bfactor=config.bfactor,
-    )
+    return icemaker
 
-    if config.save_clean_exitwaves:
-        model.save_clean_exitwaves = True  # type: ignore[assignment]
 
-    # --- Batch size ---
-    # "auto" sizes the batch to the memory actually free on the target device
-    # right now, from the box geometry the model was just built with -- see
-    # specter.memory for the measured peak-memory model behind it.
+def _resolve_batchsize(
+    config: ParticleStackConfig,
+    model: ImageGenerator,
+    mode: str,
+    device_target: Any,
+    n: int,
+    is_main: bool,
+) -> int:
+    """
+    The particles per forward pass: ``config.batchsize``, or for ``"auto"``
+    what fits the memory free on the target device right now, from the box
+    geometry the model was just built with (see `specter.memory`).
+    """
     if config.batchsize == "auto":
         if mode == "multi":
             assert isinstance(device_target, list)
@@ -425,104 +562,72 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
     else:
         batchsize = int(config.batchsize)
 
-    # --- Generating images ---
-    # Resolved once, here, before any DDP dispatch -- both this process and
-    # any DDP workers _generate_multi spawns below independently reach this
-    # same point (see run_particle_stack's own is_main handling), so
-    # _tracked_output_dir's is_main split matters here: only is_main opens
-    # a real Job (mkdir/job.json/status), workers just compute the same
-    # path as a deterministic string join. Kept open (manually, not via
-    # `with`, so the ~80 lines below don't need re-indenting under one
-    # block) until the run finishes or fails.
-    _output_dir_cm = _tracked_output_dir(config, "particles", is_main=is_main)
-    output_dir = _output_dir_cm.__enter__()
-    try:
-        if mode == "multi":
-            assert isinstance(device_target, list)
-            if is_main:
-                section(f"Initializing multi-GPU on devices {device_target}")
-            images, exitwaves, clean_exitwaves = _generate_multi(
-                model,
-                n,
-                batchsize,
-                device_target,
-                output_dir,
-                collect_exitwaves=config.save_exitwaves,
-                collect_clean_exitwaves=config.save_clean_exitwaves,
-            )
-            if images is None:
-                return  # worker rank -- rank 0 handles saving
-        else:
-            if is_main:
-                section(f"Generating images on {device_target}")
-            model = model.to(device_target)
-            images, exitwaves, clean_exitwaves = _generate_single(
-                model,
-                n,
-                batchsize,
-                track,
-                collect_exitwaves=config.save_exitwaves,
-                collect_clean_exitwaves=config.save_clean_exitwaves,
-            )
+    return batchsize
 
-        # --- Post-processing ---
-        if is_main:
-            section("Post-processing")
-        if config.normalize_particles:
-            particles, _means, _stds = normalize_particles(images)
-            particles = -particles
-        else:
-            particles = images
 
-        if is_main:
-            section("Saving .mrcs + .star")
-        create_particle_starfile(
-            particles,
-            rotations=quats,
-            translations=translations,
-            ctf_params=ctf_params,
-            dx=pixel_size,
-            voltage=voltage,
-            alpha=alpha,
-            filename=config.filename,
-            output_dir=output_dir,
-            dose_per_angstrom=dose,
-            coincidence_radius=coincidence_radius,
-            potential_scale=potential_scale,
-        )
-
-        if is_main:
-            if exitwaves is not None:
-                section("Saving exit waves")
-                _save_exitwave_pair(
-                    exitwaves,
-                    "exitwave",
-                    output_dir,
-                    config.filename,
-                    config.pad_fft,
-                    config.n_pixels,
-                )
-
-            if clean_exitwaves is not None:
-                section("Saving clean exit waves")
-                _save_exitwave_pair(
-                    clean_exitwaves,
-                    "clean_exitwave",
-                    output_dir,
-                    config.filename,
-                    config.pad_fft,
-                    config.n_pixels,
-                )
-    except BaseException:
-        # Only meaningful for is_main (a worker's context manager never
-        # opened a real Job, so this just re-raises cleanly for it) --
-        # marks the job "failed" instead of leaving it stuck at "running".
-        _output_dir_cm.__exit__(*sys.exc_info())
-        raise
+def _save_stack(
+    config: ParticleStackConfig,
+    output_dir: str,
+    images: torch.Tensor,
+    exitwaves: torch.Tensor | None,
+    clean_exitwaves: torch.Tensor | None,
+    quats: torch.Tensor,
+    translations: torch.Tensor,
+    ctf_params: dict[str, torch.Tensor],
+    pixel_size: float,
+    voltage: float,
+    alpha: float,
+    dose: torch.Tensor,
+    coincidence_radius: torch.Tensor,
+    potential_scale: torch.Tensor,
+    is_main: bool,
+) -> None:
+    """Normalise the images if asked, then write the ``.mrcs``/``.star`` pair and any exit waves."""
+    # --- Post-processing ---
+    if is_main:
+        section("Post-processing")
+    if config.normalize_particles:
+        particles, _means, _stds = normalize_particles(images)
+        particles = -particles
     else:
-        # Not reached by a worker rank's early `return` above, so this
-        # (and the Job it may close) only ever runs for is_main.
-        _output_dir_cm.__exit__(None, None, None)
+        particles = images
 
-    elapsed = time.perf_counter() - t_start
-    console.print(f"\n[bold]Total time:[/bold] {format_elapsed(elapsed)}")
+    if is_main:
+        section("Saving .mrcs + .star")
+    create_particle_starfile(
+        particles,
+        rotations=quats,
+        translations=translations,
+        ctf_params=ctf_params,
+        dx=pixel_size,
+        voltage=voltage,
+        alpha=alpha,
+        filename=config.filename,
+        output_dir=output_dir,
+        dose_per_angstrom=dose,
+        coincidence_radius=coincidence_radius,
+        potential_scale=potential_scale,
+    )
+
+    if is_main:
+        if exitwaves is not None:
+            section("Saving exit waves")
+            _save_exitwave_pair(
+                exitwaves,
+                "exitwave",
+                output_dir,
+                config.filename,
+                config.pad_fft,
+                config.n_pixels,
+            )
+
+        if clean_exitwaves is not None:
+            section("Saving clean exit waves")
+            _save_exitwave_pair(
+                clean_exitwaves,
+                "clean_exitwave",
+                output_dir,
+                config.filename,
+                config.pad_fft,
+                config.n_pixels,
+            )

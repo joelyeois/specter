@@ -308,77 +308,13 @@ def run_match(config: MatchConfig) -> MatchReport:
         os.makedirs(probe_dir, exist_ok=True)
 
         # ---------------------------------------------------------------- 1
-        section("Reading the refinement and its images")
-        n_needed = max(config.n_probe, config.n_battery)
-        meta = _metadata_kwargs(config)
-        if "cs_path" in meta:
-            params = extract_parameters_from_csfile(
-                config.metadata_path, n_particles=n_needed
-            )
-        else:
-            params = extract_parameters_from_starfile(
-                config.metadata_path, n_particles=n_needed
-            )
-        voltage = float(params[0])
-        pixel_size = float(params[1])
-        n_available = int(params[3].shape[0])
-        if n_available < n_needed:
-            raise ValueError(
-                f"{config.metadata_path} has {n_available} particles; n_probe and n_battery "
-                f"need {n_needed}. Lower them or use a larger set."
-            )
-        exp = load_experimental_images(
-            config.metadata_path, n=n_needed, images_path=config.images_path
+        # ---------------------------------------------------------------- 1
+        meta, voltage, pixel_size, pixel_note, exp, box, n_available = _read_refinement(
+            config, out_dir
         )
-        if exp.shape[-1] != exp.shape[-2]:
-            raise ValueError(f"experimental images are not square: {tuple(exp.shape)}")
-        box = int(exp.shape[-1])
-        # Images binned after extraction leave the metadata describing a box
-        # they no longer have; rendering into the recorded pixel size would
-        # then put the structure in a box too small by the same factor. Write
-        # a rescaled copy and point every probe at it.
-        recorded = recorded_box(config.metadata_path)
-        pixel_note = ""
-        if recorded is not None and recorded != box:
-            ext = os.path.splitext(config.metadata_path)[1]
-            rescaled = os.path.join(out_dir, f"metadata_rescaled{ext}")
-            new_pixel = rescale_metadata(config.metadata_path, box, rescaled)
-            pixel_note = f"rescaled from {pixel_size:.4f} Å at {recorded} px"
-            pixel_size = new_pixel
-            meta = {next(iter(meta)): rescaled}
-            console.print(
-                f"[yellow]Images are {box} px but the metadata records {recorded} px: "
-                f"using a rescaled copy at {pixel_size:.4f} Å ({rescaled}).[/yellow]"
-            )
-        console.print(
-            f"{n_available} particles at {pixel_size:.4f} Å, {box} px box, {voltage:.0f} kV"
+        exp_p, pixel_size_p, probe_geometry = _probe_setup(
+            config, out_dir, runner, meta, exp, pixel_size, box
         )
-        if box > 512:
-            console.print(
-                "[yellow]Box is larger than 512 px; the final two-seed comparison simulates "
-                "at this size. A Fourier-cropped stack passed as --images_path is faster.[/yellow]"
-            )
-
-        # Probes measure the pose alignment (60-15 Å) and the background
-        # variance (wide annuli): nothing above 10 Å. They render at a
-        # Fourier-cropped box against the images cropped the same way, with a
-        # metadata copy rescaled to that box; the battery keeps the native box.
-        bin_ = _probe_bin(config.probe_bin, box, pixel_size)
-        box_p = box // bin_ if bin_ > 1 else box
-        box_p -= box_p % 2
-        exp_p, pixel_size_p = _bin_images(exp, pixel_size, box_p)
-        probe_geometry: dict[str, Any] = {"n_pixels": box_p}
-        if box_p != box:
-            ext = os.path.splitext(config.metadata_path)[1]
-            probe_meta = os.path.join(out_dir, f"metadata_probe{ext}")
-            key, path = next(iter(meta.items()))
-            rescale_metadata(path, box_p, probe_meta, current_box=box)
-            probe_geometry[key] = probe_meta
-        console.print(
-            f"probes: {config.n_probe} particles at {box_p} px / {pixel_size_p:.3f} Å "
-            f"({bin_}x binned), {runner.workers} worker(s) on {', '.join(runner.devices)}"
-        )
-
         pdb = PDB(
             config.pdb_source,
             assembly=config.assembly,
@@ -386,315 +322,56 @@ def run_match(config: MatchConfig) -> MatchReport:
             compute_atom_species=False,
         )
         diameter = float(pdb.max_diameter)
-
-        base: dict[str, Any] = dict(
-            pdb_source=config.pdb_source,
-            assembly=config.assembly,
-            n_pixels=box,
-            dose=config.dose,
-            n_frames=config.n_frames,
-            scattering_model="multislice",
-            noise_model="poisson",
-            ice_model="gd",
-            ice_thickness=0.0,
-            crowd_min_distance=diameter,
-            detector_model="none",
-            coincidence_radius=0.0,
-            dose_envelope=True,
-            potential_scale=1.0,
-            pad_fft=True,
-            device=config.device,
-            batchsize=4,
-            normalize_particles=True,
-            pdb_cache_dir=config.pdb_cache_dir,
-            monomer_library_path=config.monomer_library_path,
-            **meta,
-        )
-
+        base = _base_settings(config, meta, box, diameter)
         runner.warm(_job(base, probe_dir, "warm", 1, seed, **probe_geometry))
 
         # ---------------------------------------------------------------- 2
-        section("Checking that the poses are aligned to the model")
         exp_probe = exp_p[: config.n_probe]
-        (pose_stack,) = runner.run(
-            [
-                _job(
-                    base,
-                    probe_dir,
-                    "pose_check",
-                    config.n_probe,
-                    seed,
-                    **probe_geometry,
-                    noise_model="none",
-                    ice_model="none",
-                    crowd_min_distance=0,
-                    dose_envelope=False,
-                )
-            ]
+        report, pose_stack = _check_pose_alignment(
+            config,
+            runner,
+            base,
+            probe_dir,
+            probe_geometry,
+            exp_probe,
+            pixel_size_p,
+            pixel_size,
+            seed,
         )
-        pose = matched_index_correlation(pose_stack, exp_probe, pixel_size_p)
-        report = MatchReport(pose=pose, pixel_size=pixel_size)
-        console.print(
-            f"matched {pose.matched:.3f} vs shuffled {pose.shuffled:.3f}, "
-            f"{pose.fraction_above:.0%} of pairs above, z = {pose.z_score:.1f}: "
-            f"{'PASS' if pose.passed else 'FAIL'}"
-        )
-        if not pose.passed:
-            report.warnings.append(
-                "The refinement's poses do not reproduce the experimental views: simulated "
-                "particle i does not correlate with experimental particle i above a random "
-                "pairing. Either the refinement was not aligned to the atomic model (run an "
-                "Align 3D of the map against the model and re-extract the particles from it), "
-                "or pdb_source is not the structure in the images. No parameter was derived."
-            )
+        if not report.pose.passed:
             render_report(report, pose_stack, exp_probe, out_dir)
             _write_matched_toml(out_dir, base, report, complete=False)
             return report
 
         # ---------------------------------------------------------------- 3
-        section("Deriving detector and envelope settings from the acquisition card")
-        det = config.detector_model
-        detector_model = "none" if det == "unknown" else det
-        report.derived.append(DerivedValue("voltage", voltage, "metadata"))
-        report.derived.append(
-            DerivedValue("pixel_size", round(pixel_size, 4), "metadata", pixel_note)
+        probe_base = _derive_detector_settings(
+            config,
+            report,
+            base,
+            voltage,
+            pixel_size,
+            pixel_size_p,
+            pixel_note,
+            probe_geometry,
         )
-        report.derived.append(
-            DerivedValue("dose", config.dose, "metadata", "e-/Å² per movie")
-        )
-        occ: float | None = None  # coincidence occupancy, when a detector is calibrated
-        if det == "unknown":
-            report.warnings.append(
-                "detector_model is unknown: no MTF, DQE(0) or coincidence loss applied. "
-                "The simulation will carry more high-frequency signal than the data."
-            )
-            report.derived.append(
-                DerivedValue("detector_model", "none", "fallback", "unknown detector")
-            )
-            cr = 0.0
-        else:
-            report.derived.append(
-                DerivedValue(
-                    "detector_model",
-                    det,
-                    "detector table",
-                    f"DQE(0) = {dqe0_for_detector(det):.2f}",
-                )
-            )
-            if det in _NO_COINCIDENCE:
-                cr = 0.0
-                report.derived.append(
-                    DerivedValue(
-                        "coincidence_radius",
-                        0.0,
-                        "detector table",
-                        "no coincidence loss",
-                    )
-                )
-            elif det not in EXCLUSION_RADIUS_PX or det not in HARDWARE_FRAME_RATE_HZ:
-                cr = 0.0
-                report.warnings.append(
-                    f"No coincidence calibration for {det}: coincidence_radius set to 0. A "
-                    "beam-only dose-rate series would supply it."
-                )
-                report.derived.append(
-                    DerivedValue(
-                        "coincidence_radius", 0.0, "fallback", "uncalibrated detector"
-                    )
-                )
-            else:
-                rate = config.dose_rate
-                source = "metadata"
-                if rate is None:
-                    rate = TYPICAL_DOSE_RATE_E_PX_S[det]
-                    source = "fallback"
-                    report.warnings.append(
-                        f"dose_rate not given: using {det}'s typical {rate:g} e/px/s. At physical "
-                        "rates the effect of this value on the images is small."
-                    )
-                occ = coincidence_occupancy(
-                    EXCLUSION_RADIUS_PX[det], rate, HARDWARE_FRAME_RATE_HZ[det]
-                )
-                cr = coincidence_radius_for_simulation(
-                    occ, config.dose, pixel_size, config.n_frames
-                )
-                report.derived.append(
-                    DerivedValue(
-                        "coincidence_radius",
-                        round(cr, 3),
-                        source,
-                        f"r = {EXCLUSION_RADIUS_PX[det]} physical px, {rate:g} e/px/s at "
-                        f"{HARDWARE_FRAME_RATE_HZ[det]:.0f} Hz: occupancy {occ:.3f} per cell per frame",
-                    )
-                )
-        report.derived.append(
-            DerivedValue(
-                "dose_envelope",
-                True,
-                "fixed",
-                "Grant & Grigorieff 2015, exposure-averaged",
-            )
-        )
-        if config.energy_filter is False:
-            report.warnings.append(
-                "No energy filter: on every unfiltered dataset tried so far the experiment carried "
-                "a broad signal-to-noise deficit no forward-model parameter reproduces (an inelastic "
-                "background). Expect a residual in the SNR ratio below."
-            )
-        elif config.energy_filter is None:
-            report.warnings.append("energy_filter not stated; recorded as unknown.")
-        base.update(detector_model=detector_model, coincidence_radius=cr)
-        # The same occupancy expressed in the probes' coarser pixel.
-        cr_p = (
-            coincidence_radius_for_simulation(
-                occ, config.dose, pixel_size_p, config.n_frames
-            )
-            if occ is not None
-            else 0.0
-        )
-        probe_base: dict[str, Any] = {
-            **base,
-            **probe_geometry,
-            "coincidence_radius": cr_p,
-        }
 
         # ---------------------------------------------------------------- 4
-        section("Probing ice thickness and neighbour spacing against the images")
-        radius_px = 0.5 * diameter / pixel_size_p
-        first_bin = int(math.ceil(radius_px / 20.0))  # annuli are 20 px wide
-        stacks = runner.run(
-            [
-                _job(
-                    probe_base,
-                    probe_dir,
-                    f"probe_ice{ice:g}",
-                    config.n_probe,
-                    seed,
-                    ice_thickness=ice,
-                )
-                for ice in config.ice_candidates
-            ]
-        )
-        scores: list[tuple[float, float]] = [
-            (float(ice), _profile_distance(stack, exp_probe, first_bin))
-            for ice, stack in zip(config.ice_candidates, stacks, strict=True)
-        ]
-        report.probe_scores["ice_thickness"] = scores
-        ice_best = min(scores, key=lambda t: t[1])[0]
-        base.update(ice_thickness=ice_best)
-        probe_base.update(ice_thickness=ice_best)
-        report.derived.append(
-            DerivedValue(
-                "ice_thickness",
-                ice_best,
-                "probe",
-                "background variance outside the particle",
-            )
-        )
-
-        stacks = runner.run(
-            [
-                _job(
-                    probe_base,
-                    probe_dir,
-                    f"probe_crowd{mult:g}",
-                    config.n_probe,
-                    seed,
-                    crowd_min_distance=0 if mult == 0 else mult * diameter,
-                )
-                for mult in config.crowd_candidates
-            ]
-        )
-        scores = [
-            (float(mult), _profile_distance(stack, exp_probe, first_bin))
-            for mult, stack in zip(config.crowd_candidates, stacks, strict=True)
-        ]
-        report.probe_scores["crowd_multiple"] = scores
-        crowd_best = min(scores, key=lambda t: t[1])[0]
-        crowd_min_distance = 0 if crowd_best == 0 else crowd_best * diameter
-        base.update(crowd_min_distance=crowd_min_distance)
-        report.derived.append(
-            DerivedValue(
-                "crowd_min_distance",
-                round(crowd_min_distance, 1),
-                "probe",
-                f"{crowd_best:g} x the structure's {diameter:.0f} Å diameter"
-                if crowd_best
-                else "no neighbours",
-            )
+        _probe_ice_and_crowding(
+            config,
+            runner,
+            base,
+            probe_base,
+            report,
+            probe_dir,
+            exp_probe,
+            diameter,
+            pixel_size_p,
+            seed,
         )
 
         # ---------------------------------------------------------------- 5
-        section("Comparing two seeds with the experiment at matched poses")
-        exp_b = exp[: config.n_battery]
-
-        def battery(suffix: str) -> tuple[torch.Tensor, torch.Tensor]:
-            a, b = runner.run(
-                [
-                    _job(
-                        base,
-                        probe_dir,
-                        f"battery_seed0{suffix}",
-                        config.n_battery,
-                        seed,
-                    ),
-                    _job(
-                        base,
-                        probe_dir,
-                        f"battery_seed1{suffix}",
-                        config.n_battery,
-                        seed + 1,
-                    ),
-                ]
-            )
-            return a, b
-
-        sim_a, sim_b = battery("")
-        snr = matched_pose_snr(sim_a, sim_b, exp_b, pixel_size)
-        bfactor: float | None = None
-        if math.isfinite(snr.residual_bfactor) and snr.residual_bfactor > 20.0:
-            bfactor = round(snr.residual_bfactor, 0)
-            base.update(bfactor=bfactor)
-            console.print(
-                f"residual envelope B = {bfactor:.0f} Å²; applying it and re-rendering"
-            )
-            sim_a, sim_b = battery("_b")
-            snr = matched_pose_snr(sim_a, sim_b, exp_b, pixel_size)
-        report.derived.append(
-            DerivedValue(
-                "bfactor",
-                bfactor if bfactor is not None else 0.0,
-                "measured" if bfactor else "fixed",
-                "Guinier slope of the matched-pose signal ratio, 10-4 Å",
-            )
-        )
-        report.snr = snr
-        report.twin = twin_test(sim_a, sim_b, exp_b)
-        report.band_ratio = band_power_ratio(sim_a, exp_b, pixel_size)
-        report.edge_sim, report.edge_exp = (
-            edge_band_means(sim_a),
-            edge_band_means(exp_b),
-        )
-        report.annulus_sim, report.annulus_exp = (
-            annulus_std_profile(sim_a),
-            annulus_std_profile(exp_b),
-        )
-        report.ring_sim, report.ring_exp = (
-            water_ring_excess(sim_a, pixel_size),
-            water_ring_excess(exp_b, pixel_size),
-        )
-        report.n_battery = config.n_battery
-        excess = [r for r in snr.ratio[:3] if math.isfinite(r)]
-        if excess and max(excess) > 3.0:
-            report.warnings.append(
-                f"The simulation is {max(excess):.0f}x cleaner than the experiment in a band coarser "
-                "than 6.7 Å after every derivable parameter is set. This is not a parameter; "
-                "on the datasets tried so far it tracks the absence of an energy filter."
-            )
-        console.print(
-            "SNR ratio sim/exp per band: "
-            + ", ".join(f"{r:.2f}" for r in snr.ratio)
-            + f" | twin d = {report.twin.cohen_d:.2f}"
+        sim_a, exp_b = _compare_two_seeds(
+            config, runner, base, report, probe_dir, exp, pixel_size, seed
         )
 
         # ---------------------------------------------------------------- 6
@@ -727,6 +404,488 @@ def run_match(config: MatchConfig) -> MatchReport:
             f"[dim]Done in {format_elapsed(time.perf_counter() - t_start)}[/dim]"
         )
         return report
+
+
+def _read_refinement(
+    config: MatchConfig, out_dir: str
+) -> tuple[dict[str, str], float, float, str, torch.Tensor, int, int]:
+    """
+    Read the refinement's parameters and images: the metadata kwargs to
+    hand every probe (rescaled to the images' box when the metadata
+    records another), voltage, pixel size, a note on any rescaling, the
+    images, their box and how many particles the set holds.
+    """
+    section("Reading the refinement and its images")
+    n_needed = max(config.n_probe, config.n_battery)
+    meta = _metadata_kwargs(config)
+    if "cs_path" in meta:
+        params = extract_parameters_from_csfile(
+            config.metadata_path, n_particles=n_needed
+        )
+    else:
+        params = extract_parameters_from_starfile(
+            config.metadata_path, n_particles=n_needed
+        )
+    voltage = float(params[0])
+    pixel_size = float(params[1])
+    n_available = int(params[3].shape[0])
+    if n_available < n_needed:
+        raise ValueError(
+            f"{config.metadata_path} has {n_available} particles; n_probe and n_battery "
+            f"need {n_needed}. Lower them or use a larger set."
+        )
+    exp = load_experimental_images(
+        config.metadata_path, n=n_needed, images_path=config.images_path
+    )
+    if exp.shape[-1] != exp.shape[-2]:
+        raise ValueError(f"experimental images are not square: {tuple(exp.shape)}")
+    box = int(exp.shape[-1])
+    # Images binned after extraction leave the metadata describing a box
+    # they no longer have; rendering into the recorded pixel size would
+    # then put the structure in a box too small by the same factor. Write
+    # a rescaled copy and point every probe at it.
+    recorded = recorded_box(config.metadata_path)
+    pixel_note = ""
+    if recorded is not None and recorded != box:
+        ext = os.path.splitext(config.metadata_path)[1]
+        rescaled = os.path.join(out_dir, f"metadata_rescaled{ext}")
+        new_pixel = rescale_metadata(config.metadata_path, box, rescaled)
+        pixel_note = f"rescaled from {pixel_size:.4f} Å at {recorded} px"
+        pixel_size = new_pixel
+        meta = {next(iter(meta)): rescaled}
+        console.print(
+            f"[yellow]Images are {box} px but the metadata records {recorded} px: "
+            f"using a rescaled copy at {pixel_size:.4f} Å ({rescaled}).[/yellow]"
+        )
+    console.print(
+        f"{n_available} particles at {pixel_size:.4f} Å, {box} px box, {voltage:.0f} kV"
+    )
+    if box > 512:
+        console.print(
+            "[yellow]Box is larger than 512 px; the final two-seed comparison simulates "
+            "at this size. A Fourier-cropped stack passed as --images_path is faster.[/yellow]"
+        )
+
+    return meta, voltage, pixel_size, pixel_note, exp, box, n_available
+
+
+def _probe_setup(
+    config: MatchConfig,
+    out_dir: str,
+    runner: _ProbeRunner,
+    meta: dict[str, str],
+    exp: torch.Tensor,
+    pixel_size: float,
+    box: int,
+) -> tuple[torch.Tensor, float, dict[str, Any]]:
+    """
+    The Fourier-cropped images the probes are scored against, their pixel
+    size, and the geometry kwargs (box, rescaled metadata) a probe job takes.
+    """
+    # Probes measure the pose alignment (60-15 Å) and the background
+    # variance (wide annuli): nothing above 10 Å. They render at a
+    # Fourier-cropped box against the images cropped the same way, with a
+    # metadata copy rescaled to that box; the battery keeps the native box.
+    bin_ = _probe_bin(config.probe_bin, box, pixel_size)
+    box_p = box // bin_ if bin_ > 1 else box
+    box_p -= box_p % 2
+    exp_p, pixel_size_p = _bin_images(exp, pixel_size, box_p)
+    probe_geometry: dict[str, Any] = {"n_pixels": box_p}
+    if box_p != box:
+        ext = os.path.splitext(config.metadata_path)[1]
+        probe_meta = os.path.join(out_dir, f"metadata_probe{ext}")
+        key, path = next(iter(meta.items()))
+        rescale_metadata(path, box_p, probe_meta, current_box=box)
+        probe_geometry[key] = probe_meta
+    console.print(
+        f"probes: {config.n_probe} particles at {box_p} px / {pixel_size_p:.3f} Å "
+        f"({bin_}x binned), {runner.workers} worker(s) on {', '.join(runner.devices)}"
+    )
+
+    return exp_p, pixel_size_p, probe_geometry
+
+
+def _base_settings(
+    config: MatchConfig, meta: dict[str, str], box: int, diameter: float
+) -> dict[str, Any]:
+    """The `ParticleStackConfig` fields every probe and the final stack start from."""
+    base: dict[str, Any] = dict(
+        pdb_source=config.pdb_source,
+        assembly=config.assembly,
+        n_pixels=box,
+        dose=config.dose,
+        n_frames=config.n_frames,
+        scattering_model="multislice",
+        noise_model="poisson",
+        ice_model="gd",
+        ice_thickness=0.0,
+        crowd_min_distance=diameter,
+        detector_model="none",
+        coincidence_radius=0.0,
+        dose_envelope=True,
+        potential_scale=1.0,
+        pad_fft=True,
+        device=config.device,
+        batchsize=4,
+        normalize_particles=True,
+        pdb_cache_dir=config.pdb_cache_dir,
+        monomer_library_path=config.monomer_library_path,
+        **meta,
+    )
+
+    return base
+
+
+def _check_pose_alignment(
+    config: MatchConfig,
+    runner: _ProbeRunner,
+    base: dict[str, Any],
+    probe_dir: str,
+    probe_geometry: dict[str, Any],
+    exp_probe: torch.Tensor,
+    pixel_size_p: float,
+    pixel_size: float,
+    seed: int,
+) -> tuple[MatchReport, torch.Tensor]:
+    """
+    Render the probe particles noiselessly at the refinement's poses and
+    correlate them pair by pair with the experimental images against a
+    shuffled pairing. The report carries the verdict; a failure adds the
+    warning that stops the run.
+    """
+    section("Checking that the poses are aligned to the model")
+    (pose_stack,) = runner.run(
+        [
+            _job(
+                base,
+                probe_dir,
+                "pose_check",
+                config.n_probe,
+                seed,
+                **probe_geometry,
+                noise_model="none",
+                ice_model="none",
+                crowd_min_distance=0,
+                dose_envelope=False,
+            )
+        ]
+    )
+    pose = matched_index_correlation(pose_stack, exp_probe, pixel_size_p)
+    report = MatchReport(pose=pose, pixel_size=pixel_size)
+    console.print(
+        f"matched {pose.matched:.3f} vs shuffled {pose.shuffled:.3f}, "
+        f"{pose.fraction_above:.0%} of pairs above, z = {pose.z_score:.1f}: "
+        f"{'PASS' if pose.passed else 'FAIL'}"
+    )
+    if not pose.passed:
+        report.warnings.append(
+            "The refinement's poses do not reproduce the experimental views: simulated "
+            "particle i does not correlate with experimental particle i above a random "
+            "pairing. Either the refinement was not aligned to the atomic model (run an "
+            "Align 3D of the map against the model and re-extract the particles from it), "
+            "or pdb_source is not the structure in the images. No parameter was derived."
+        )
+
+    return report, pose_stack
+
+
+def _derive_detector_settings(
+    config: MatchConfig,
+    report: MatchReport,
+    base: dict[str, Any],
+    voltage: float,
+    pixel_size: float,
+    pixel_size_p: float,
+    pixel_note: str,
+    probe_geometry: dict[str, Any],
+) -> dict[str, Any]:
+    """
+    Detector MTF/DQE(0), coincidence radius and dose envelope from the
+    acquisition card alone, recorded in the report and written into ``base``.
+    Returns the probe jobs' settings, with the coincidence radius expressed
+    in the probes' coarser pixel.
+    """
+    section("Deriving detector and envelope settings from the acquisition card")
+    det = config.detector_model
+    detector_model = "none" if det == "unknown" else det
+    report.derived.append(DerivedValue("voltage", voltage, "metadata"))
+    report.derived.append(
+        DerivedValue("pixel_size", round(pixel_size, 4), "metadata", pixel_note)
+    )
+    report.derived.append(
+        DerivedValue("dose", config.dose, "metadata", "e-/Å² per movie")
+    )
+    occ: float | None = None  # coincidence occupancy, when a detector is calibrated
+    if det == "unknown":
+        report.warnings.append(
+            "detector_model is unknown: no MTF, DQE(0) or coincidence loss applied. "
+            "The simulation will carry more high-frequency signal than the data."
+        )
+        report.derived.append(
+            DerivedValue("detector_model", "none", "fallback", "unknown detector")
+        )
+        cr = 0.0
+    else:
+        report.derived.append(
+            DerivedValue(
+                "detector_model",
+                det,
+                "detector table",
+                f"DQE(0) = {dqe0_for_detector(det):.2f}",
+            )
+        )
+        if det in _NO_COINCIDENCE:
+            cr = 0.0
+            report.derived.append(
+                DerivedValue(
+                    "coincidence_radius",
+                    0.0,
+                    "detector table",
+                    "no coincidence loss",
+                )
+            )
+        elif det not in EXCLUSION_RADIUS_PX or det not in HARDWARE_FRAME_RATE_HZ:
+            cr = 0.0
+            report.warnings.append(
+                f"No coincidence calibration for {det}: coincidence_radius set to 0. A "
+                "beam-only dose-rate series would supply it."
+            )
+            report.derived.append(
+                DerivedValue(
+                    "coincidence_radius", 0.0, "fallback", "uncalibrated detector"
+                )
+            )
+        else:
+            rate = config.dose_rate
+            source = "metadata"
+            if rate is None:
+                rate = TYPICAL_DOSE_RATE_E_PX_S[det]
+                source = "fallback"
+                report.warnings.append(
+                    f"dose_rate not given: using {det}'s typical {rate:g} e/px/s. At physical "
+                    "rates the effect of this value on the images is small."
+                )
+            occ = coincidence_occupancy(
+                EXCLUSION_RADIUS_PX[det], rate, HARDWARE_FRAME_RATE_HZ[det]
+            )
+            cr = coincidence_radius_for_simulation(
+                occ, config.dose, pixel_size, config.n_frames
+            )
+            report.derived.append(
+                DerivedValue(
+                    "coincidence_radius",
+                    round(cr, 3),
+                    source,
+                    f"r = {EXCLUSION_RADIUS_PX[det]} physical px, {rate:g} e/px/s at "
+                    f"{HARDWARE_FRAME_RATE_HZ[det]:.0f} Hz: occupancy {occ:.3f} per cell per frame",
+                )
+            )
+    report.derived.append(
+        DerivedValue(
+            "dose_envelope",
+            True,
+            "fixed",
+            "Grant & Grigorieff 2015, exposure-averaged",
+        )
+    )
+    if config.energy_filter is False:
+        report.warnings.append(
+            "No energy filter: on every unfiltered dataset tried so far the experiment carried "
+            "a broad signal-to-noise deficit no forward-model parameter reproduces (an inelastic "
+            "background). Expect a residual in the SNR ratio below."
+        )
+    elif config.energy_filter is None:
+        report.warnings.append("energy_filter not stated; recorded as unknown.")
+    base.update(detector_model=detector_model, coincidence_radius=cr)
+    # The same occupancy expressed in the probes' coarser pixel.
+    cr_p = (
+        coincidence_radius_for_simulation(
+            occ, config.dose, pixel_size_p, config.n_frames
+        )
+        if occ is not None
+        else 0.0
+    )
+    probe_base: dict[str, Any] = {
+        **base,
+        **probe_geometry,
+        "coincidence_radius": cr_p,
+    }
+
+    return probe_base
+
+
+def _probe_ice_and_crowding(
+    config: MatchConfig,
+    runner: _ProbeRunner,
+    base: dict[str, Any],
+    probe_base: dict[str, Any],
+    report: MatchReport,
+    probe_dir: str,
+    exp_probe: torch.Tensor,
+    diameter: float,
+    pixel_size_p: float,
+    seed: int,
+) -> None:
+    """
+    Score small probe stacks on the background variance outside the
+    particle to pick the ice thickness and the neighbour spacing, writing
+    both into ``base`` and the report.
+    """
+    section("Probing ice thickness and neighbour spacing against the images")
+    radius_px = 0.5 * diameter / pixel_size_p
+    first_bin = int(math.ceil(radius_px / 20.0))  # annuli are 20 px wide
+    stacks = runner.run(
+        [
+            _job(
+                probe_base,
+                probe_dir,
+                f"probe_ice{ice:g}",
+                config.n_probe,
+                seed,
+                ice_thickness=ice,
+            )
+            for ice in config.ice_candidates
+        ]
+    )
+    scores: list[tuple[float, float]] = [
+        (float(ice), _profile_distance(stack, exp_probe, first_bin))
+        for ice, stack in zip(config.ice_candidates, stacks, strict=True)
+    ]
+    report.probe_scores["ice_thickness"] = scores
+    ice_best = min(scores, key=lambda t: t[1])[0]
+    base.update(ice_thickness=ice_best)
+    probe_base.update(ice_thickness=ice_best)
+    report.derived.append(
+        DerivedValue(
+            "ice_thickness",
+            ice_best,
+            "probe",
+            "background variance outside the particle",
+        )
+    )
+
+    stacks = runner.run(
+        [
+            _job(
+                probe_base,
+                probe_dir,
+                f"probe_crowd{mult:g}",
+                config.n_probe,
+                seed,
+                crowd_min_distance=0 if mult == 0 else mult * diameter,
+            )
+            for mult in config.crowd_candidates
+        ]
+    )
+    scores = [
+        (float(mult), _profile_distance(stack, exp_probe, first_bin))
+        for mult, stack in zip(config.crowd_candidates, stacks, strict=True)
+    ]
+    report.probe_scores["crowd_multiple"] = scores
+    crowd_best = min(scores, key=lambda t: t[1])[0]
+    crowd_min_distance = 0 if crowd_best == 0 else crowd_best * diameter
+    base.update(crowd_min_distance=crowd_min_distance)
+    report.derived.append(
+        DerivedValue(
+            "crowd_min_distance",
+            round(crowd_min_distance, 1),
+            "probe",
+            f"{crowd_best:g} x the structure's {diameter:.0f} Å diameter"
+            if crowd_best
+            else "no neighbours",
+        )
+    )
+
+
+def _compare_two_seeds(
+    config: MatchConfig,
+    runner: _ProbeRunner,
+    base: dict[str, Any],
+    report: MatchReport,
+    probe_dir: str,
+    exp: torch.Tensor,
+    pixel_size: float,
+    seed: int,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """
+    Simulate the battery twice at matched poses, fit a residual B-factor if
+    one is called for, and fill the report's SNR, twin and band statistics.
+    Returns the first simulated stack and the experimental images it is
+    compared with.
+    """
+    section("Comparing two seeds with the experiment at matched poses")
+    exp_b = exp[: config.n_battery]
+
+    def battery(suffix: str) -> tuple[torch.Tensor, torch.Tensor]:
+        a, b = runner.run(
+            [
+                _job(
+                    base,
+                    probe_dir,
+                    f"battery_seed0{suffix}",
+                    config.n_battery,
+                    seed,
+                ),
+                _job(
+                    base,
+                    probe_dir,
+                    f"battery_seed1{suffix}",
+                    config.n_battery,
+                    seed + 1,
+                ),
+            ]
+        )
+        return a, b
+
+    sim_a, sim_b = battery("")
+    snr = matched_pose_snr(sim_a, sim_b, exp_b, pixel_size)
+    bfactor: float | None = None
+    if math.isfinite(snr.residual_bfactor) and snr.residual_bfactor > 20.0:
+        bfactor = round(snr.residual_bfactor, 0)
+        base.update(bfactor=bfactor)
+        console.print(
+            f"residual envelope B = {bfactor:.0f} Å²; applying it and re-rendering"
+        )
+        sim_a, sim_b = battery("_b")
+        snr = matched_pose_snr(sim_a, sim_b, exp_b, pixel_size)
+    report.derived.append(
+        DerivedValue(
+            "bfactor",
+            bfactor if bfactor is not None else 0.0,
+            "measured" if bfactor else "fixed",
+            "Guinier slope of the matched-pose signal ratio, 10-4 Å",
+        )
+    )
+    report.snr = snr
+    report.twin = twin_test(sim_a, sim_b, exp_b)
+    report.band_ratio = band_power_ratio(sim_a, exp_b, pixel_size)
+    report.edge_sim, report.edge_exp = (
+        edge_band_means(sim_a),
+        edge_band_means(exp_b),
+    )
+    report.annulus_sim, report.annulus_exp = (
+        annulus_std_profile(sim_a),
+        annulus_std_profile(exp_b),
+    )
+    report.ring_sim, report.ring_exp = (
+        water_ring_excess(sim_a, pixel_size),
+        water_ring_excess(exp_b, pixel_size),
+    )
+    report.n_battery = config.n_battery
+    excess = [r for r in snr.ratio[:3] if math.isfinite(r)]
+    if excess and max(excess) > 3.0:
+        report.warnings.append(
+            f"The simulation is {max(excess):.0f}x cleaner than the experiment in a band coarser "
+            "than 6.7 Å after every derivable parameter is set. This is not a parameter; "
+            "on the datasets tried so far it tracks the absence of an energy filter."
+        )
+    console.print(
+        "SNR ratio sim/exp per band: "
+        + ", ".join(f"{r:.2f}" for r in snr.ratio)
+        + f" | twin d = {report.twin.cohen_d:.2f}"
+    )
+
+    return sim_a, exp_b
 
 
 def _write_matched_toml(

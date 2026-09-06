@@ -30,13 +30,13 @@ from specter.imagegenerator import MicrographGenerator
 from specter.io import create_micrograph_starfile
 from specter.pdb import PDB
 from specter.potential import PotentialBuilder
+from specter.devices import resolve_available_device
 from specter.progress import console, format_elapsed, section, track
 
 from ._common import (
     _save_exitwave_pair,
     _tracked_output_dir,
     _uniform_sample,
-    resolve_available_device,
 )
 
 

@@ -164,7 +164,7 @@ def test_bare_cuda_falls_back_to_cpu_only_when_there_is_none(
     """
     import torch
 
-    from specter.pipelines._common import resolve_available_device
+    from specter.devices import resolve_available_device
 
     monkeypatch.setattr(torch.cuda, "is_available", lambda: cuda_present)
 
@@ -187,7 +187,7 @@ def test_an_explicit_device_index_is_never_silently_moved(monkeypatch, device) -
     import torch
     import warnings
 
-    from specter.pipelines._common import resolve_available_device
+    from specter.devices import resolve_available_device
 
     monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
     with warnings.catch_warnings():
@@ -200,7 +200,7 @@ def test_cpu_is_left_alone_with_no_warning(monkeypatch) -> None:
     import torch
     import warnings
 
-    from specter.pipelines._common import resolve_available_device
+    from specter.devices import resolve_available_device
 
     for present in (True, False):
         monkeypatch.setattr(torch.cuda, "is_available", lambda: present)

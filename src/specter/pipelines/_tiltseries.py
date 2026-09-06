@@ -26,9 +26,9 @@ from specter.imagegenerator import TiltSeriesGenerator
 from specter.io import create_micrograph_starfile
 from specter.specimen import load_specimen_volume
 
+from specter.devices import parse_device, resolve_available_device
 from specter.progress import console, format_elapsed, section
 from ._common import (
-    _parse_device,
     _reserve_next_job_id,
     _save_exitwave_pair,
     _tracked_output_dir,
@@ -133,7 +133,9 @@ def run_tilt_series(
     validate_config(config)
 
     specter.set_verbosity(logging.INFO)
-    mode, device_target = _parse_device(config.device)
+    mode, device_target = parse_device(
+        resolve_available_device(config.device)
+    ).ddp_dispatch()
     if mode == "multi":
         raise ValueError(
             "run_tilt_series: multi-GPU device strings (e.g. '0,1,2') aren't "

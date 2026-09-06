@@ -78,9 +78,9 @@ from specter.match._metadata import recorded_box, rescale_metadata
 from specter.match._report import DerivedValue
 from specter.pdb import PDB
 
+from specter.devices import parse_device, resolve_available_device
 from specter.progress import console, format_elapsed, section
 from ._common import (
-    _parse_device_pool,
     _tracked_output_dir,
 )
 from ._particles import run_particle_stack
@@ -184,7 +184,7 @@ class _ProbeRunner:
     """
 
     def __init__(self, device: str, workers: int) -> None:
-        self.devices = _parse_device_pool(device)
+        self.devices = list(parse_device(resolve_available_device(device)).devices)
         self.workers = len(self.devices) if workers <= 0 else int(workers)
         self._pool: ProcessPoolExecutor | None = None
         # Workers share the host: each gets its slice of the parent's thread

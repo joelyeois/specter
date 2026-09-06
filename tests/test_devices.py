@@ -62,21 +62,23 @@ def test_indices_are_empty_unless_every_entry_names_a_gpu() -> None:
     assert parse_device("cpu,0").indices == ()
 
 
-@pytest.mark.parametrize("spelling", INVALID)
-def test_every_consumer_rejects_the_same_strings(spelling: str) -> None:
-    """The four dispatch styles must not disagree on what a device is."""
-    from specter.pipelines._common import _parse_device, _parse_device_pool
-    from specter.pipelines._reconstruct import _reconstruct_device
-    from specter.specimen._parallel_render import parse_device_pool
+def test_ddp_dispatch() -> None:
+    """DDP wants bare GPU ids; anything else runs single-device."""
+    assert parse_device("cpu").ddp_dispatch() == ("single", "cpu")
+    assert parse_device("cuda").ddp_dispatch() == ("single", "cuda")
+    assert parse_device("cuda:0").ddp_dispatch() == ("single", "cuda:0")
+    assert parse_device("0").ddp_dispatch() == ("single", "cuda:0")
+    assert parse_device("0,1,2").ddp_dispatch() == ("multi", [0, 1, 2])
+    assert parse_device("cpu,cpu").ddp_dispatch() == ("single", "cpu")
 
-    for consumer in (
-        _parse_device,
-        _parse_device_pool,
-        _reconstruct_device,
-        parse_device_pool,
-    ):
-        with pytest.raises(ValueError):
-            consumer(spelling)
+
+def test_primary_and_pool() -> None:
+    assert parse_device("cuda:1").primary_and_pool() == ("cuda:1", None)
+    assert parse_device("0,1,2").primary_and_pool() == (
+        "cuda:0",
+        ["cuda:0", "cuda:1", "cuda:2"],
+    )
+    assert parse_device("cpu,cpu").primary_and_pool() == ("cpu", ["cpu", "cpu"])
 
 
 @pytest.mark.parametrize(
@@ -89,11 +91,9 @@ def test_every_consumer_rejects_the_same_strings(spelling: str) -> None:
         ("1,2", [1, 2]),
     ],
 )
-def test_reconstruct_device_keeps_its_existing_answers(spelling, expected) -> None:
-    """Only the silent-fallback path changes; every valid input is unaffected."""
-    from specter.pipelines._reconstruct import _reconstruct_device
-
-    assert _reconstruct_device(spelling) == expected
+def test_lightning_target(spelling, expected) -> None:
+    """What Ghostbuster.run takes: an index, a list of them, or "cpu"."""
+    assert parse_device(spelling).lightning_target() == expected
 
 
 def test_config_rejects_a_bad_device_at_load() -> None:

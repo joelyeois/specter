@@ -11,9 +11,8 @@ turn that class into a command:
   the same name, so the mapping is mechanical and stays that way.
 - **Device parsing.** The rest of the CLI spells devices as strings
   (`"cuda:1"`, `"0,1"`); `Ghostbuster.run` wants a GPU index, a list of them,
-  or `"cpu"`. `_parse_device` already draws exactly that distinction for the
-  simulation pipelines, so this reuses it rather than inventing a second
-  spelling.
+  or `"cpu"`. `DeviceSpec.lightning_target` draws exactly that distinction
+  from the one shared grammar, so there is no second spelling.
 - **A run directory.** Every run is numbered and tracked through
   `specter.jobs` -- there is no untracked mode, the way neither RELION nor
   CryoSPARC has one. The directory is `output_dir/[project/]reconstructions/J00N/`
@@ -59,11 +58,9 @@ from specter.config import (
     validate_config,
 )
 
-from ..devices import parse_device
+from ..devices import parse_device, resolve_available_device
 from specter.progress import console, format_elapsed, section
 from ._common import (
-    _parse_device_pool,
-    resolve_available_device,
     resolve_output_dir,
 )
 
@@ -110,38 +107,6 @@ def _ghostbuster_kwargs(config: ReconstructionConfig) -> dict[str, Any]:
         config.cryosparc_ref, config.halfset
     )
     return kwargs
-
-
-def _reconstruct_device(device_str: str) -> int | list[int] | str:
-    """
-    Translate a config `device` string into what `Ghostbuster.run` expects.
-
-    Parameters
-    ----------
-    device_str : str
-        ``"cpu"``, ``"cuda"``, ``"cuda:N"``, a bare GPU index, or a
-        comma-separated list of GPU indices.
-
-    Returns
-    -------
-    int or list of int or str
-        A GPU index, a list of them for multi-GPU DDP, or ``"cpu"``.
-
-    Examples
-    --------
-    "cpu"    -> "cpu"
-    "cuda"   -> 0
-    "cuda:1" -> 1
-    "0,1"    -> [0, 1]
-    """
-    spec = parse_device(resolve_available_device(device_str))
-    if spec.primary == "cpu":
-        return "cpu"
-    if spec.is_multi and spec.indices:
-        return list(spec.indices)
-    # A bare "cuda" names the backend without pinning a device; Ghostbuster
-    # takes an index, and 0 is the device torch itself defaults to.
-    return spec.indices[0] if spec.indices else 0
 
 
 def run_reconstruction(config: ReconstructionConfig) -> None:
@@ -201,7 +166,9 @@ def run_reconstruction(config: ReconstructionConfig) -> None:
                 {f: getattr(config, f) for f in ("test_run", "bin_factor", "device")}
             )
             kwargs = _ghostbuster_kwargs(config)
-            device = _reconstruct_device(config.device)
+            device = parse_device(
+                resolve_available_device(config.device)
+            ).lightning_target()
             model = _fit(job.create(Ghostbuster, **kwargs), config, device)
             if model is not None:
                 summary = model.results_summary()
@@ -268,7 +235,7 @@ def _run_single_halfset(
     from specter.ghostbuster import Ghostbuster
     from specter.jobs._job import _serialize_value
 
-    device = _reconstruct_device(config.device)
+    device = parse_device(resolve_available_device(config.device)).lightning_target()
     kwargs = _ghostbuster_kwargs(config)
     model = _fit(Ghostbuster(run_dir=run_dir, **kwargs), config, device)
     assert config.halfset in ("A", "B")
@@ -373,7 +340,7 @@ def _run_both_halfsets(
     RuntimeError
         If either halfset reconstruction fails.
     """
-    devices = _parse_device_pool(config.device)
+    devices = list(parse_device(resolve_available_device(config.device)).devices)
     ctx = multiprocessing.get_context("spawn")
     result_queue: multiprocessing.Queue[tuple[str, dict[str, Any]]] = ctx.Queue()
     halfsets: tuple[Literal["A"], Literal["B"]] = ("A", "B")

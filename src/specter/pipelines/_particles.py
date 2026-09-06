@@ -33,12 +33,12 @@ from specter.memory import (
 )
 from specter.pdb import PDB
 from specter.potential import PotentialBuilder
+from specter.devices import parse_device, resolve_available_device
 from specter.progress import console, format_elapsed, section, track
 
 from ._common import (
     _generate_multi,
     _generate_single,
-    _parse_device,
     _save_exitwave_pair,
     _tracked_output_dir,
     _uniform_sample,
@@ -149,7 +149,9 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
 
     specter.set_verbosity(logging.INFO)
 
-    mode, device_target = _parse_device(config.device)
+    mode, device_target = parse_device(
+        resolve_available_device(config.device)
+    ).ddp_dispatch()
     t_start = time.perf_counter()
 
     # LOCAL_RANK is absent in the original process and set (0, 1, ...) in DDP workers

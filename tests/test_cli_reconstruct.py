@@ -30,7 +30,6 @@ from specter.ghostbuster import Ghostbuster
 from specter.io import _cryosparc
 from specter.pipelines._reconstruct import (
     _ghostbuster_kwargs,
-    _reconstruct_device,
     run_reconstruction,
 )
 
@@ -278,20 +277,6 @@ def test_cryosparc_ref_rejects_malformed_and_meaningless_pairs(
     config.halfset = "all"
     with pytest.raises(ValueError, match='halfset="all"'):
         validate_config(config)
-
-
-@pytest.mark.parametrize(
-    ("device_str", "expected"),
-    [
-        ("cpu", "cpu"),
-        ("cuda", 0),
-        ("cuda:1", 1),
-        ("2", 2),
-        ("0,1", [0, 1]),
-    ],
-)
-def test_reconstruct_device(device_str: str, expected: int | list[int] | str) -> None:
-    assert _reconstruct_device(device_str) == expected
 
 
 def test_job_id_without_project_pins_under_implicit_default_project(

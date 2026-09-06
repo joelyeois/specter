@@ -58,16 +58,15 @@ from specter.specimen import (
 )
 from specter.specimen._parallel_render import (
     build_templates_concurrently,
-    parse_device_pool,
     resolve_render_devices,
     resolve_render_workers,
 )
 
+from specter.devices import parse_device, resolve_available_device
 from specter.progress import console, format_elapsed, section
 from ._common import (
     _deterministic_tracked_path,
     _tracked_output_dir,
-    resolve_available_device,
     resolve_output_dir,
 )
 
@@ -431,7 +430,9 @@ def build_tomogram_generator(config: TomogramConfig) -> TomogramSpecimenGenerato
     TomogramSpecimenGenerator
         Not yet `.generate()`-called.
     """
-    device, render_devices = parse_device_pool(resolve_available_device(config.device))
+    device, render_devices = parse_device(
+        resolve_available_device(config.device)
+    ).primary_and_pool()
 
     protein_specs = _protein_specs_from_dicts(
         config.targets

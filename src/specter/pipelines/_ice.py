@@ -38,7 +38,7 @@ from specter.config import IceCacheConfig, validate_config
 from specter.ice import build_one_ice_config, ice_config_filename
 
 from specter.progress import console, format_elapsed, section
-from ._common import _parse_device_pool
+from specter.devices import parse_device, resolve_available_device
 
 
 def _build_shard(
@@ -225,7 +225,7 @@ def run_build_ice_cache(config: IceCacheConfig) -> None:
             os.path.join(config.output_dir, ice_config_filename(seed))
         )
     ]
-    devices = _parse_device_pool(config.device)
+    devices = list(parse_device(resolve_available_device(config.device)).devices)
 
     console.print(
         f"Library: {config.n_configs} configs at n={config.n}, dx={config.dx} A "

@@ -41,7 +41,6 @@ from typing import TYPE_CHECKING, Literal, TypeVar
 
 import torch
 
-from ..devices import parse_device
 
 if TYPE_CHECKING:
     from ..pdb import PDB
@@ -145,40 +144,6 @@ def recommend_render_devices() -> list[str] | None:
     if n_gpus == 0:
         return None
     return [f"cuda:{i}" for i in range(n_gpus)]
-
-
-def parse_device_pool(device: str) -> tuple[str, list[str] | None]:
-    """
-    Parse a single `device` config/CLI value into a primary device and an
-    optional multi-device pool for concurrent per-species rendering.
-
-    Lets config/CLI callers set one field instead of two separate
-    `device`/`render_devices` values. A scalar (`"cpu"`, `"cuda"`,
-    `"cuda:0"`, or a bare GPU index like `"0"`) means "everything on this
-    one device". A comma-separated list of GPU indices (`"0,1,2"`) pools those GPUs for
-    per-species rendering, with the first as the primary device for
-    everything else (membrane/filament generation, rotation, accumulator
-    sizing). Shares `specter.devices.parse_device` with every other
-    consumer of a `device` setting, so the accepted spellings cannot drift
-    from theirs.
-
-    Parameters
-    ----------
-    device : str
-
-    Returns
-    -------
-    primary : str
-        Device for everything outside per-species rendering.
-    pool : list[str] or None
-        Pass straight through as `resolve_render_devices`'s own
-        `render_devices` argument. None means no pooling: render on
-        `primary` alone.
-    """
-    spec = parse_device(device)
-    if spec.is_multi:
-        return spec.primary, list(spec.devices)
-    return spec.primary, None
 
 
 def resolve_render_workers(

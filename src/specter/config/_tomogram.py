@@ -249,10 +249,9 @@ class TomogramConfig:
     # --- Compute ---
     # "cpu" | "cuda" | "cuda:0" | a bare GPU index ("0") | a comma-separated
     # list of GPU indices ("0,1,2") to pool multiple GPUs for concurrent
-    # per-species rendering (see render_workers below) | "auto" to pool
-    # every visible CUDA GPU. A pooled value's first entry becomes the
-    # primary device for everything else (see
-    # specter.specimen._parallel_render.parse_device_pool).
+    # per-species rendering (see render_workers below). A pooled value's
+    # first entry becomes the primary device for everything else (see
+    # specter.devices.DeviceSpec.primary_and_pool).
     device: str = "cuda"  # falls back to CPU when none is available
     # Device for the shared canvas tensors (volume/instance_labels/
     # membrane_labels), decoupled from `device` above (which stays the

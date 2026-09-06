@@ -30,6 +30,7 @@ import lightning as L
 
 from .fft import fft2, ifft2
 from .progress import track
+from specter.options import AberrationModel, NoiseModel
 
 
 class Detector(L.LightningModule):
@@ -81,8 +82,8 @@ class Detector(L.LightningModule):
     def __init__(
         self,
         pixel_size: float,
-        aberration_model: str = "nonlinear",
-        noise_model: str | None = None,
+        aberration_model: AberrationModel = "nonlinear",
+        noise_model: NoiseModel | None = None,
         mtf: torch.Tensor | None = None,
         dqe0: float = 1.0,
         n_frames: int | None = None,

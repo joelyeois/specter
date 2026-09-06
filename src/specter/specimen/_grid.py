@@ -73,6 +73,7 @@ from .membrane._field_spherical_harmonics import (
     _sample_sh_coefficients,
     _synthesize_angular_grid,
 )
+from specter.options import ScatteringFactors
 
 AVOGADRO = 6.02214076e23  # 1/mol
 
@@ -134,7 +135,7 @@ def _mean_inner_potential(
     voxel_size: float,
     number_density: float,
     atomic_number: int,
-    parameterization: str,
+    parameterization: ScatteringFactors,
     shtyrov_species: str | None = None,
 ) -> float:
     """
@@ -377,7 +378,7 @@ class BeadGenerator:
     def __init__(
         self,
         voxel_size: float,
-        parameterization: str = "kirkland",
+        parameterization: ScatteringFactors = "kirkland",
         roughness: ScalarOrRange = 0.12,
     ):
         self.roughness_range = parse_scalar_or_range(roughness)

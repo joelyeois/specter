@@ -17,6 +17,7 @@ Notes
 from __future__ import annotations
 
 import torch
+from specter.options import AberrationModel, ScatteringModel
 
 
 def cs(k: torch.Tensor, wavelength: float, cs: torch.Tensor) -> torch.Tensor:
@@ -195,7 +196,7 @@ def phaseshift(
     phaseshift: torch.Tensor,
     k: torch.Tensor,
     n_pixels: int,
-    aberration_model: str,
+    aberration_model: AberrationModel,
     alpha: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """
@@ -282,7 +283,9 @@ def defocus_midplane_shift(nz: int, pixel_size: float) -> float:
     return (nz * pixel_size) / 2
 
 
-def aberration_model_for_scattering(scattering_model: str) -> str:
+def aberration_model_for_scattering(
+    scattering_model: ScatteringModel,
+) -> AberrationModel:
     """
     The ``aberration_model`` implied by a given ``scattering_model``.
 

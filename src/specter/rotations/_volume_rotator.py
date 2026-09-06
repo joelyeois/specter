@@ -15,6 +15,7 @@ from ._volume import (
     fourier_origin_displacement,
     split_affine_translation,
 )
+from specter.options import GridOrigin, GridSamplePadding, RotateMode
 
 
 def _normalize_slice_indices(
@@ -96,7 +97,7 @@ def _windowed_grid_sample(
     ny: int,
     nx: int,
     align_corners: bool,
-    padding_mode: str,
+    padding_mode: GridSamplePadding,
     device: torch.device,
     margin: int,
 ) -> torch.Tensor:
@@ -187,10 +188,10 @@ class VolumeRotator(L.LightningModule):
         nz: int,
         ny: int,
         nx: int,
-        origin: str = "relion",
+        origin: GridOrigin = "relion",
         align_corners: bool = False,
-        padding_mode: str = "border",
-        mode: str = "real",
+        padding_mode: GridSamplePadding = "border",
+        mode: RotateMode = "real",
     ):
         """
         Initialize a 3D VolumeRotator with a cached rotation center.
@@ -319,7 +320,7 @@ class VolumeRotator(L.LightningModule):
         R: torch.Tensor,
         t: torch.Tensor,
         scale: torch.Tensor,
-        origin: str | None = None,
+        origin: GridOrigin | None = None,
     ) -> torch.Tensor:
         """
         Apply the isotropic rotate-and-translate transform to normalized
@@ -493,7 +494,7 @@ class VolumeRotator(L.LightningModule):
         slice_indices: torch.Tensor | Sequence[int] | int,
         roi_center: tuple[int, int] | None = None,
         roi_size: tuple[int, int] | None = None,
-        padding_mode: str | None = None,
+        padding_mode: GridSamplePadding | None = None,
         device: str | torch.device | None = None,
         window_margin: int = 2,
     ) -> torch.Tensor:

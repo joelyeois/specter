@@ -9,6 +9,7 @@ from . import _envelopes as env
 from . import _functions as fn
 from ..constants import energy_to_wavelength
 from ..fft import fft2, ifft2
+from specter.options import AberrationModel
 
 # Keys read out of the per-batch `ctf_params` dict passed to `forward()` --
 # see `Aberration.transfer_function`. Never constructor arguments -- `bfactor`
@@ -48,7 +49,7 @@ class Aberration(L.LightningModule):
         Pixel size in Å.
     voltage: float
         Accelerating voltage of the electron beam in kV. Typical values are 100/120/200/300 kV.
-    aberration_model: str, optional
+    aberration_model: AberrationModel, optional
         Specifies aberration model to use. Options include 'nonlinear' and 'linear'.
         Default is 'nonlinear'.
     alpha: float, optional
@@ -127,7 +128,7 @@ class Aberration(L.LightningModule):
         n_pixels: int,
         pixel_size: float,
         voltage: float,
-        aberration_model: str = "nonlinear",
+        aberration_model: AberrationModel = "nonlinear",
         alpha: float | None = None,
         specimen_absorption: bool = True,
         convergence_angle: float | None = None,

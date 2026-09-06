@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 from importlib import resources
-from typing import Any, Sequence
+from typing import Any, Literal, Sequence
 
 import torch
 
@@ -29,6 +29,12 @@ from ..atom import (
 )
 from ..fft import fftconvolve, spatial_convolve2d_same, spatial_convolve3d_same
 from ..progress import track
+from specter.options import (
+    ConvBackend,
+    ConvBoundary,
+    KernelParameterization,
+    ScatteringFactors,
+)
 
 
 def compute_supersampling_parameters(
@@ -831,7 +837,7 @@ _SHTYROV_MIN_RCUT = {
 
 def recommended_rcut(
     atomic_numbers: torch.Tensor,
-    parameterization: str = "shtyrov",
+    parameterization: ScatteringFactors = "shtyrov",
     atom_species: Sequence[str | None] | None = None,
     b_factor_max: float = 0.0,
 ) -> float:
@@ -901,9 +907,9 @@ def recommended_rcut(
 def potential_from_deltas(
     deltas: torch.Tensor,
     kernel: torch.Tensor,
-    backend: str = "fftconvolve",
+    backend: ConvBackend = "fftconvolve",
     out: torch.Tensor | None = None,
-    boundary: str = "linear",
+    boundary: ConvBoundary = "linear",
 ) -> torch.Tensor:
     """
     Convolve soft-voxelized atom deltas with an atomic potential kernel.
@@ -1002,7 +1008,7 @@ def potential_from_deltas(
 def _potential_from_deltas_periodic(
     deltas: torch.Tensor,
     kernel: torch.Tensor,
-    backend: str,
+    backend: ConvBackend,
     out: torch.Tensor | None,
     squeeze_back: bool,
 ) -> torch.Tensor:
@@ -1146,8 +1152,8 @@ _DELTAS_FFT_MAX_VOXELS = 2**28
 
 
 def _deltas_backend(
-    deltas: torch.Tensor, kernel: torch.Tensor, boundary: str = "linear"
-) -> str:
+    deltas: torch.Tensor, kernel: torch.Tensor, boundary: ConvBoundary = "linear"
+) -> Literal["fftconvolve", "conv3d"]:
     """Backend for :func:`potential_from_deltas`'s ``'auto'``: FFT for kernels
     past `_DELTAS_FFT_MIN_KERNEL_TAPS`, direct conv3d otherwise.
 
@@ -1165,7 +1171,7 @@ def _deltas_backend(
 
 def build_atomic_potential_kernel(
     dx: float,
-    parameterization: str = "kirkland",
+    parameterization: KernelParameterization = "kirkland",
     atomic_number: int = 8,
     shtyrov_species: str | None = None,
     species_table: dict | None = None,

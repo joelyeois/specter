@@ -19,6 +19,7 @@ to start from the same number.
 from __future__ import annotations
 
 from collections.abc import Sequence
+from specter.options import ShapeBackend
 
 #: `MembraneGenerator`'s default size-draw ranges, in Angstrom. Named here
 #: rather than left as bare signature defaults because a second reader needs
@@ -36,7 +37,7 @@ DEFAULT_SWEPT_TUBE_RADIUS_RANGE_ANGSTROM = (150.0, 400.0)
 
 
 def membrane_bounding_radius(
-    shape_backend: str,
+    shape_backend: ShapeBackend,
     *,
     sh_axes: Sequence[float] | None = None,
     swept_total_length: float | None = None,

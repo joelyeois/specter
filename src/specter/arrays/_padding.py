@@ -9,6 +9,7 @@ import torch.nn.functional as F
 
 from ..fft import fft2, ifft2
 from ._profiles import radial_profile_2d, radial_profile_3d
+from specter.options import PadMode
 
 
 def fourier_crop(
@@ -221,7 +222,7 @@ def pad_volume(
     nz: int,
     ice_thickness: float | None,
     pad_fft: bool,
-    xy_pad_mode: str = "constant",
+    xy_pad_mode: PadMode = "constant",
 ) -> torch.Tensor:
     """
     Pad a potential volume in Z and/or XY.

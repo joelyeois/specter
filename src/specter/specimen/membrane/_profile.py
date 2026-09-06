@@ -61,6 +61,7 @@ import torch
 
 from ...atom import atom_number
 from ...potential import PotentialBuilder
+from specter.options import ScatteringFactors
 
 # Same value as specimen/packing/algorithms.py's own independent copy of
 # this constant -- each specimen generator keeps its own rather than
@@ -316,7 +317,7 @@ def compute_bilayer_profile(
     atomic_numbers: torch.Tensor,
     coordinates: torch.Tensor,
     voxel_size: float = 2.0,
-    parameterization: str = "shtyrov",
+    parameterization: ScatteringFactors = "shtyrov",
     lateral_core_fraction: float = 0.6,
     device: str | torch.device = "cpu",
 ) -> BilayerProfile:
@@ -380,7 +381,9 @@ def compute_bilayer_profile(
 
 
 @lru_cache(maxsize=None)
-def _measured_bilayer_profile(parameterization: str = "shtyrov") -> BilayerProfile:
+def _measured_bilayer_profile(
+    parameterization: ScatteringFactors = "shtyrov",
+) -> BilayerProfile:
     """
     The bilayer's psi(z), measured once per process from the reference
     lipid patch. Cached; see :func:`build_measured_bilayer_profile`.
@@ -422,7 +425,7 @@ def native_bilayer_thickness_angstrom(parameterization: str = "shtyrov") -> floa
 def build_measured_bilayer_profile(
     thickness_angstrom: float = 30.0,
     extra_sigma_angstrom: float = 0.0,
-    parameterization: str = "shtyrov",
+    parameterization: ScatteringFactors = "shtyrov",
     device: str | torch.device = "cpu",
 ) -> BilayerProfile:
     """

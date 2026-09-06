@@ -55,6 +55,7 @@ from ._profile import (
     build_measured_bilayer_profile,
 )
 from ._raster import rasterize_membrane_density
+from specter.options import ScatteringFactors, ShapeBackend
 
 # target_shape auto-sizing/clamping (spherical_harmonics/swept_spline
 # only -- see MembraneGenerator.__init__): an organelle's own half-extent
@@ -248,7 +249,7 @@ class TransmembraneSpec:
     pdb_source: str
     frequency: int = 1
     tm_span_mask: torch.Tensor | None = None
-    parameterization: str = "shtyrov"
+    parameterization: ScatteringFactors = "shtyrov"
     template: torch.Tensor | None = None
 
 
@@ -689,7 +690,7 @@ class MembraneGenerator:
         self,
         target_shape: tuple[int, int, int] | None = None,
         voxel_size: float = 5.0,
-        shape_backend: str = "spherical_harmonics",
+        shape_backend: ShapeBackend = "spherical_harmonics",
         sh_max_degree: int = 8,
         sh_axes: tuple[float, float, float] | None = None,
         sh_axes_range: tuple[float, float] = DEFAULT_SH_AXES_RANGE_ANGSTROM,
@@ -714,7 +715,7 @@ class MembraneGenerator:
         swept_curvature_iterations: int = 15,
         swept_curvature_step_fraction: float = 0.15,
         n_lipids_per_leaflet: int = 200,
-        parameterization: str = "shtyrov",
+        parameterization: ScatteringFactors = "shtyrov",
         bilayer_thickness: float = 38.0,
         bilayer_layer_sigma_angstrom: float = 0.0,
         transmembrane_specs: list[TransmembraneSpec] | None = None,

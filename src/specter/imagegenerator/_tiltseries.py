@@ -11,6 +11,14 @@ from .. import tilt as tilt_geometry
 from ..ice import IceBank, RandomIcemaker, blend_ice_into_volume, resolve_icemaker
 from ._micrograph import MicrographGenerator
 from ..scattering import IterativeScattering
+from specter.options import (
+    DetectorModel,
+    IceModel,
+    NoiseModel,
+    ScatteringFactors,
+    ScatteringModel,
+    TiltAxis,
+)
 
 
 class TiltSeriesGenerator(MicrographGenerator):
@@ -219,19 +227,19 @@ class TiltSeriesGenerator(MicrographGenerator):
         translations: torch.Tensor | None = None,
         angles: torch.Tensor | Sequence[float] | None = None,
         anisomag: torch.Tensor | None = None,
-        ice_model: str | None = None,
+        ice_model: IceModel | None = None,
         ice_cache_dir: str | None = None,
         icemaker: IceBank | RandomIcemaker | None = None,
         ice_relax_steps: int = 0,
-        ice_parameterization: str = "kirkland",
-        scattering_model: str = "multislice",
-        noise_model: str | None = "poisson",
+        ice_parameterization: ScatteringFactors = "kirkland",
+        scattering_model: ScatteringModel = "multislice",
+        noise_model: NoiseModel | None = "poisson",
         klim: float | None = None,
         alpha: float = 0.0,
         pad_fft: bool = False,
         fft_pad_margin: int = 16,
         chunk_size: int = 1,
-        detector_model: str | None = None,
+        detector_model: DetectorModel | None = None,
         progressbars: bool = True,
         verbose: bool = True,
         slice_batchsize: int = 1,
@@ -239,7 +247,7 @@ class TiltSeriesGenerator(MicrographGenerator):
         edge_margin: int = 8,
         taper_width: int = 0,
         z_taper_width: int = 0,
-        tilt_axis: str = "x",
+        tilt_axis: TiltAxis = "x",
         coincidence_radius: float | torch.Tensor = 0.0,
         n_frames: int | None = None,
         bfactor: float | torch.Tensor | None = None,

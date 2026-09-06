@@ -7,6 +7,15 @@ from typing import Literal
 
 from ._paths import default_pdb_cache_dir
 from ._scalar_range import ScalarOrRange
+from specter.options import (
+    ConvBackend,
+    EwaldSphereSign,
+    IceModel,
+    NoiseModel,
+    PotentialMethod,
+    RotateMode,
+    ScatteringFactors,
+)
 
 
 @dataclass
@@ -113,9 +122,9 @@ class ParticleStackConfig:
     deltaI_I: float = 0.01e-6  # unitless (ΔI/I)
     dose_envelope: bool = False
     bfactor: float | None = None  # Å²
-    noise_model: Literal["poisson", "none"] = "poisson"
+    noise_model: NoiseModel = "poisson"
     coincidence_radius: ScalarOrRange = 0.0  # pixels
-    ice_model: Literal["gd", "random", "none"] = "gd"
+    ice_model: IceModel = "gd"
     ice_thickness: float = 0.0  # Å, 0 = minimum (particle box size)
     ice_cache_dir: str | None = None  # defaults to the bundled ice_data/ice_cache
     crowd_min_distance: float | None = None  # Å
@@ -124,10 +133,10 @@ class ParticleStackConfig:
     pad_fft: bool = True
 
     # --- Advanced: potential building ---
-    scattering_factors: Literal["shtyrov", "kirkland", "lobato"] = "shtyrov"
-    potential_method: Literal["analytic", "2d", "3d"] = "analytic"
+    scattering_factors: ScatteringFactors = "shtyrov"
+    potential_method: PotentialMethod = "analytic"
     rcut: float | None = None  # Å, auto-detected per-structure if unset
-    conv_backend: str = "fftconvolve"
+    conv_backend: ConvBackend = "fftconvolve"
     periodic: bool = False
     # per-atom bonded species for Shtyrov typing; auto-detected from PDB bonds if
     # unset. Sized to the structure's atom count -- config-only, not a CLI flag.
@@ -153,13 +162,13 @@ class ParticleStackConfig:
     use_deposited_bfactors: bool = False
 
     # --- Advanced: scattering ---
-    ews_curvature_sign: Literal["negative", "positive"] = "positive"
+    ews_curvature_sign: EwaldSphereSign = "positive"
     # Fraction of Nyquist, not 1/A: Scattering masks k <= klim * k_nyquist.
     # Kirkland recommends 0.66 (2/3) to prevent multislice FFT aliasing, but
     # that costs real spatial resolution, so the default keeps the full range
     # and accepts the aliasing. Exposed so a caller can make the other choice.
     klim: float | None = None  # fraction of Nyquist
-    rotate_mode: Literal["real", "fourier"] = "real"
+    rotate_mode: RotateMode = "real"
 
     # --- Advanced: ice ---
     # Everything specter renders that is NOT a biomolecule: the ice.
@@ -168,7 +177,7 @@ class ParticleStackConfig:
     # its domain and a mean inner potential (a k=0 quantity) extrapolates below
     # the fitted range. Kirkland/Lobato/Peng are per-element, valid at k=0, and
     # agree there. See ice._kernels.build_water_kernel for the measurements.
-    bulk_scattering_factors: Literal["kirkland", "lobato", "shtyrov"] = "kirkland"
+    bulk_scattering_factors: ScatteringFactors = "kirkland"
     ice_relax_steps: int = 0
 
     # --- Advanced: crowding ---

@@ -23,6 +23,7 @@ from ..aberrations import (
 from ..arrays import compute_nz, pad_volume
 from ..ctf import LegacyAberrationAdapter
 from ..microscope import Detector
+from specter.options import DetectorModel, NoiseModel
 
 __all__ = [
     "BaseImager",
@@ -133,9 +134,9 @@ class BaseImager(L.LightningModule):
         nxy: int,
         nz: int,
         pad_nxy: int | None = None,
-        noise_model: str | None = "poisson",
+        noise_model: NoiseModel | None = "poisson",
         alpha: float = 0.0,
-        detector_model: str | None = None,
+        detector_model: DetectorModel | None = None,
         anisomag: torch.Tensor | None = None,
         ctf_params: dict[str, torch.Tensor] | None = None,
         progressbars: bool = True,

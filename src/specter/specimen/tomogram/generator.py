@@ -124,6 +124,7 @@ from ._specs import (
     TomogramProteinSpec,
 )
 from ...progress import TqdmProgress, phase_done, phase_start, status
+from specter.options import ScatteringFactors
 
 _INSTANCE_LABEL_REL_THRESHOLD = 0.01
 
@@ -451,8 +452,8 @@ class TomogramSpecimenGenerator:
         region_max_passes: int = 300,
         min_transmembrane_spacing: float = 40.0,
         pdb_cache_dir: str = DEFAULT_PDB_CACHE_DIR,
-        parameterization: str = "shtyrov",
-        bulk_parameterization: str = "kirkland",
+        parameterization: ScatteringFactors = "shtyrov",
+        bulk_parameterization: ScatteringFactors = "kirkland",
         readd_hydrogens: bool | str = "auto",
         monomer_library_path: str | None = None,
         use_deposited_bfactors: bool = False,

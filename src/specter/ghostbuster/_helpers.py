@@ -11,6 +11,7 @@ from torch.optim.lr_scheduler import (
     LRScheduler,
     OneCycleLR,
 )
+from specter.options import Scheduler
 
 
 # ---------------------------------------------------------------------------
@@ -19,7 +20,7 @@ from torch.optim.lr_scheduler import (
 
 
 def _build_lr_scheduler(
-    scheduler: str,
+    scheduler: Scheduler,
     optimizer: torch.optim.Optimizer,
     lr: float,
     lr_lambda: Callable[[int], float],

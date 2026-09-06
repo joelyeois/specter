@@ -11,6 +11,7 @@ import torch.utils.data
 
 from ._run_helpers import build_trainer, resolve_device
 from ._tomogram_reconstructor import TomogramReconstructor
+from specter.options import ScatteringModel, Scheduler, TiltAxis
 
 
 class TomogramGhostbuster:
@@ -109,7 +110,7 @@ class TomogramGhostbuster:
         angles: Sequence[float] | torch.Tensor | None = None,
         quaternions: torch.Tensor | None = None,
         translations: torch.Tensor | None = None,
-        tilt_axis: str = "x",
+        tilt_axis: TiltAxis = "x",
         nz: int | None = None,
         V_init: torch.Tensor | None = None,
         flip_contrast: bool = True,
@@ -117,7 +118,7 @@ class TomogramGhostbuster:
         sparsity: float | None = None,
         epochs: int = 5,
         batchsize: int = 1,
-        scattering_model: str = "multislice",
+        scattering_model: ScatteringModel = "multislice",
         aberration_backend: Literal["legacy", "torch_ctf"] = "legacy",
         lpp_params: dict[str, float] | None = None,
         klim: float | None = None,
@@ -125,12 +126,7 @@ class TomogramGhostbuster:
         taper_width: int = 0,
         z_taper_width: int = 0,
         use_fov_mask: bool = True,
-        scheduler: Literal[
-            "LambdaLR",
-            "OneCycleLR",
-            "CosineAnnealingWarmRestarts",
-            "MultiplicativeLR",
-        ] = "LambdaLR",
+        scheduler: Scheduler = "LambdaLR",
         slice_batchsize: int = 1,
         num_workers: int = 0,
         precision: str = "16-mixed",
@@ -201,7 +197,7 @@ class TomogramGhostbuster:
     def _resolve_tilt_quaternions(
         angles: Sequence[float] | torch.Tensor | None,
         quaternions: torch.Tensor | None,
-        tilt_axis: str,
+        tilt_axis: TiltAxis,
     ) -> torch.Tensor:
         """Resolve per-tilt rotation quaternions from either angles or explicit quaternions."""
         if angles is not None and quaternions is not None:
@@ -250,7 +246,7 @@ class TomogramGhostbuster:
         images: torch.Tensor,
         volume_init: torch.Tensor,
         voxel_size: float,
-        scattering_model: str,
+        scattering_model: ScatteringModel,
         batchsize: int,
     ) -> tuple["TomogramReconstructor", torch.utils.data.DataLoader]:
         n_tilts = images.shape[0]

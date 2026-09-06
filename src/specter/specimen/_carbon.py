@@ -51,6 +51,7 @@ import torch
 
 from ._carbon_delaunay import block_job, circumspheres
 from ._grid import _mean_inner_potential, _number_density_per_a3
+from specter.options import CarbonEdgeSide, ScatteringFactors
 
 CARBON_DENSITY_G_CM3 = 2.0
 CARBON_MOLAR_MASS = 12.011
@@ -471,7 +472,7 @@ class CarbonFilmGenerator:
     def __init__(
         self,
         voxel_size: float,
-        parameterization: str = "kirkland",
+        parameterization: ScatteringFactors = "kirkland",
         seed: int | None = None,
         device: torch.device | str | None = None,
     ):
@@ -589,7 +590,7 @@ def edge_hole_center(
     voxel_size: float,
     hole_radius: float,
     edge_fraction: float = 0.1,
-    side: str = "random",
+    side: CarbonEdgeSide = "random",
     rng: np.random.Generator | None = None,
 ) -> tuple[float, float]:
     """
@@ -712,7 +713,7 @@ class CarbonFilmSpec:
     thickness: float = 150.0
     hole_radius: float = QUANTIFOIL_R1_2_HOLE_RADIUS
     edge_fraction: float | tuple[float, float] = (0.02, 0.05)
-    edge_side: str = "random"
+    edge_side: CarbonEdgeSide = "random"
     edge_roughness: float = 60.0
 
     def __post_init__(self) -> None:

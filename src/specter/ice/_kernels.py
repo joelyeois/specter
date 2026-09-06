@@ -22,6 +22,7 @@ from ..arrays import (
 from ..fft import fft3
 from ..ice_data import bundled_ice_data
 from ..potential import build_atomic_potential_kernel
+from specter.options import KernelParameterization
 
 __all__ = ["build_atomic_potential_kernel", "build_water_kernel"]
 
@@ -51,7 +52,9 @@ def _smear_onto_shell(kernel: torch.Tensor, dx: float, radius: float) -> torch.T
     return torch.fft.fftshift(torch.fft.ifftn(spectrum * shell).real)
 
 
-def build_water_kernel(dx: float, parameterization: str = "kirkland") -> torch.Tensor:
+def build_water_kernel(
+    dx: float, parameterization: KernelParameterization = "kirkland"
+) -> torch.Tensor:
     """
     Potential kernel for one whole water molecule, as a single site.
 

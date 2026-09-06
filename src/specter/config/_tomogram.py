@@ -7,6 +7,7 @@ from typing import Any, ClassVar, Literal
 
 from ._paths import default_pdb_cache_dir
 from ._scalar_range import ScalarOrRange
+from specter.options import ScatteringFactors
 
 
 @dataclass
@@ -148,14 +149,14 @@ class TomogramConfig:
     # fallback PotentialBuilder uses (see TomogramSpecimenGenerator._stamp_beads). Spelled the same as
     # ParticleStackConfig.scattering_factors -- one config vocabulary across
     # commands, distinct from the internal `parameterization=` kwarg it feeds.
-    scattering_factors: str = "shtyrov"
+    scattering_factors: ScatteringFactors = "shtyrov"
     # Everything specter renders that is NOT a biomolecule: the carbon film and gold beads.
     # Kept separate from `scattering_factors` on purpose -- Shtyrov fits bonded
     # species of biomolecules over 0.011-0.62 1/A, so bulk materials are out of
     # its domain and a mean inner potential (a k=0 quantity) extrapolates below
     # the fitted range. Kirkland/Lobato/Peng are per-element, valid at k=0, and
     # agree there. See ice._kernels.build_water_kernel for the measurements.
-    bulk_scattering_factors: Literal["kirkland", "lobato", "shtyrov"] = "kirkland"
+    bulk_scattering_factors: ScatteringFactors = "kirkland"
     # Forwarded to every PDB built for this tomogram. Only takes effect for
     # scattering_factors="shtyrov" (the only one that types atoms) and
     # only when a Monomer Library is available via $CLIBD_MON.

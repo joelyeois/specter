@@ -7,6 +7,7 @@ from typing import Literal
 
 from ._paths import default_pdb_cache_dir
 from ._scalar_range import ScalarOrRange
+from specter.options import IceModel, NoiseModel, ScatteringFactors
 
 
 @dataclass
@@ -31,14 +32,14 @@ class MicrographConfig:
     n_pixels: int = 256
     pixel_size: float = 1.0  # Å
     micrograph_size: int = 4096
-    scattering_factors: Literal["shtyrov", "kirkland", "lobato"] = "shtyrov"
+    scattering_factors: ScatteringFactors = "shtyrov"
     # Everything specter renders that is NOT a biomolecule: the ice.
     # Kept separate from `scattering_factors` on purpose -- Shtyrov fits bonded
     # species of biomolecules over 0.011-0.62 1/A, so bulk materials are out of
     # its domain and a mean inner potential (a k=0 quantity) extrapolates below
     # the fitted range. Kirkland/Lobato/Peng are per-element, valid at k=0, and
     # agree there. See ice._kernels.build_water_kernel for the measurements.
-    bulk_scattering_factors: Literal["kirkland", "lobato", "shtyrov"] = "kirkland"
+    bulk_scattering_factors: ScatteringFactors = "kirkland"
     # Only takes effect for scattering_factors="shtyrov" (the only one that
     # types atoms) and only when a Monomer Library is available.
     readd_hydrogens: bool | Literal["auto"] = "auto"
@@ -77,9 +78,9 @@ class MicrographConfig:
     scattering_model: Literal["multislice", "firstborn", "projection", "ctf"] = (
         "multislice"
     )
-    noise_model: Literal["poisson", "none"] = "poisson"
+    noise_model: NoiseModel = "poisson"
     coincidence_radius: ScalarOrRange = 0.0  # pixels; 0 = plain Poisson
-    ice_model: Literal["gd", "random", "none"] = "gd"
+    ice_model: IceModel = "gd"
     ice_thickness: float = 500.0  # Å, 0 = minimum (particle box size)
     # --- Ice profile (specter.ice.IceProfile) ---
     # "flat" reproduces a bare `ice_thickness` slab exactly and is the default,

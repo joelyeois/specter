@@ -36,6 +36,7 @@ from ._builders import (
     potential_from_deltas,
     recommended_rcut,
 )
+from specter.options import ConvBackend, PotentialMethod, ScatteringFactors
 
 logger = logging.getLogger(__name__)
 
@@ -193,8 +194,8 @@ class PotentialBuilder(L.LightningModule):
         dx: float,
         atomic_numbers: torch.Tensor,
         progressbars: bool = True,
-        parameterization: str = "shtyrov",
-        conv_backend: str = "fftconvolve",
+        parameterization: ScatteringFactors = "shtyrov",
+        conv_backend: ConvBackend = "fftconvolve",
         atom_species: Sequence[str | None] | None = None,
         shtyrov_params_path: str | None = None,
         rcut: float | None = None,
@@ -652,8 +653,8 @@ class PotentialBuilder(L.LightningModule):
     def forward(
         self,
         coordinates: torch.Tensor,
-        method: str = "analytic",
-        conv_backend: str | None = None,
+        method: PotentialMethod = "analytic",
+        conv_backend: ConvBackend | None = None,
     ) -> torch.Tensor:
         """
         Build potential volume(s) from atomic coordinates.

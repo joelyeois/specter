@@ -34,6 +34,7 @@ from ._losses import (
     nps_weighted_loss,
     update_sigma2,
 )
+from specter.options import EwaldSphereSign, RotateMode, ScatteringModel, Scheduler
 
 
 class Reconstructor(_BaseReconstructor):
@@ -129,7 +130,7 @@ class Reconstructor(_BaseReconstructor):
         alpha: float = 0.0,
         defocus_offset: torch.Tensor = torch.tensor(0.0),
         bfactor: float | torch.Tensor | None = None,
-        scattering_model: str = "multislice",
+        scattering_model: ScatteringModel = "multislice",
         aberration_backend: Literal["legacy", "torch_ctf"] = "legacy",
         lpp_params: dict[str, float] | None = None,
         klim: float | None = None,
@@ -139,19 +140,14 @@ class Reconstructor(_BaseReconstructor):
         lr_T: float | None = None,
         lr_D: float | None = None,
         lr_decay: float = 0.1,
-        scheduler: Literal[
-            "LambdaLR",
-            "OneCycleLR",
-            "CosineAnnealingWarmRestarts",
-            "MultiplicativeLR",
-        ] = "LambdaLR",
+        scheduler: Scheduler = "LambdaLR",
         kmask: torch.Tensor | None = None,
         nps_weight: torch.Tensor | None = None,
         scale: torch.Tensor | None = None,
         learn_noise_model: bool = False,
         noise_ema_momentum: float = 0.9,
         use_ncc: bool = False,
-        ews_curvature_sign: str = "negative",
+        ews_curvature_sign: EwaldSphereSign = "negative",
         fsc_ref: torch.Tensor | str | Path | None = None,
         fsc_mask: torch.Tensor | float | str | Path | None = None,
         cryosparc_ref: torch.Tensor | str | Path | None = None,
@@ -159,7 +155,7 @@ class Reconstructor(_BaseReconstructor):
         rotate_mode: Literal["real", "fourier"] = "real",
         symmetry: str | None = None,
         symmetry_batchsize: int | None = None,
-        symmetry_mode: Literal["real", "fourier"] = "fourier",
+        symmetry_mode: RotateMode = "fourier",
         use_cpu_for_symmetry: bool = False,
         tag: str = "untagged",
         run_dir: str | Path | None = None,
@@ -234,7 +230,7 @@ class Reconstructor(_BaseReconstructor):
         lr_D: float | None,
         sparsity: float | None,
         lr_decay: float,
-        scheduler: str,
+        scheduler: Scheduler,
     ) -> None:
         """Configure manual-optimisation mode, per-parameter LRs, and loss logs."""
         # Always use manual optimization to handle masking and multiple optimizers consistently
@@ -262,7 +258,7 @@ class Reconstructor(_BaseReconstructor):
         self,
         symmetry: str | None,
         symmetry_batchsize: int | None,
-        symmetry_mode: Literal["real", "fourier"],
+        symmetry_mode: RotateMode,
         use_cpu_for_symmetry: bool,
     ) -> None:
         """Store symmetry settings and register the symmetry rotation matrices."""

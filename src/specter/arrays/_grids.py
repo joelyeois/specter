@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Sequence
 
 import torch
+from specter.options import GridConvention
 
 
 def kgrid_1d(n: int, dx: float, device: str | torch.device = "cpu") -> torch.Tensor:
@@ -207,7 +208,7 @@ def grid_1d(
 def grid_2d(
     n_xy: int | Sequence[int],
     d_xy: float | Sequence[float],
-    convention: str = "relion",
+    convention: GridConvention = "relion",
     device: str | torch.device = "cpu",
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """Constructs the xy coordinate arrays and meshgrids. Meshgrid indexing yields
@@ -257,7 +258,7 @@ def grid_2d(
 def grid_3d(
     n_xyz: int | Sequence[int],
     d_xyz: float | Sequence[float],
-    convention: str = "relion",
+    convention: GridConvention = "relion",
     device: str | torch.device = "cpu",
 ) -> tuple[
     torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor
@@ -310,7 +311,7 @@ def grid_3d(
 def radial_grid_2d(
     n_xy: int | Sequence[int],
     d_xy: float | Sequence[float],
-    convention: str = "relion",
+    convention: GridConvention = "relion",
     device: str | torch.device = "cpu",
 ) -> torch.Tensor:
     """
@@ -339,7 +340,7 @@ def radial_grid_2d(
 def radial_grid_3d(
     n_xyz: int | Sequence[int],
     d_xyz: float | Sequence[float],
-    convention: str = "relion",
+    convention: GridConvention = "relion",
     device: str | torch.device = "cpu",
 ) -> torch.Tensor:
     """

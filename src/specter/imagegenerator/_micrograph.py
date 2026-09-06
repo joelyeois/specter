@@ -18,6 +18,13 @@ from ..ice import (
 from ..progress import status
 from ..scattering import IterativeScattering
 from ..specimen import MicrographSpecimenGenerator
+from specter.options import (
+    DetectorModel,
+    IceModel,
+    NoiseModel,
+    ScatteringFactors,
+    ScatteringModel,
+)
 
 
 class MicrographGenerator(BaseImager):
@@ -203,11 +210,11 @@ class MicrographGenerator(BaseImager):
         dose_per_angstrom: float | torch.Tensor,
         volume: torch.Tensor | None = None,
         anisomag: torch.Tensor | None = None,
-        ice_model: str | None = None,
+        ice_model: IceModel | None = None,
         ice_thickness: float | None = None,
         ice_profile: IceProfile | None = None,
         ice_cache_dir: str | None = None,
-        ice_parameterization: str = "kirkland",
+        ice_parameterization: ScatteringFactors = "kirkland",
         icemaker: IceBank | RandomIcemaker | None = None,
         ice_relax_steps: int = 0,
         crowd_min_distance: float | None = None,
@@ -224,14 +231,14 @@ class MicrographGenerator(BaseImager):
         sigma_frac: float = 0.05,
         peak_amplitude: float = 1.0,
         baseline: float = 0.1,
-        scattering_model: str = "multislice",
-        noise_model: str | None = "poisson",
+        scattering_model: ScatteringModel = "multislice",
+        noise_model: NoiseModel | None = "poisson",
         klim: float | None = None,
         alpha: float = 0.0,
         pad_fft: bool = False,
         chunk_size: int = 1,
         move_to_cpu: bool = True,
-        detector_model: str | None = None,
+        detector_model: DetectorModel | None = None,
         slice_batchsize: int = 1,
         progressbars: bool = True,
         verbose: bool = True,

@@ -5,6 +5,7 @@ from typing import Sequence
 import torch
 import torch.nn.functional as F
 from scipy.fft import next_fast_len
+from specter.options import ConvMode
 
 
 def fft2(
@@ -180,7 +181,7 @@ def ifftn(
 def fftconvolve(
     in1: torch.Tensor,
     in2: torch.Tensor,
-    mode: str = "full",
+    mode: ConvMode = "full",
     axes: int | Sequence[int] | None = None,
 ) -> torch.Tensor:
     """From scipy fftconvolve.
@@ -615,7 +616,7 @@ def _apply_conv_mode(
     ret: torch.Tensor,
     s1: Sequence[int],
     s2: Sequence[int],
-    mode: str,
+    mode: ConvMode,
     axes: list[int],
 ) -> torch.Tensor:
     """From scipy.signal._signaltools

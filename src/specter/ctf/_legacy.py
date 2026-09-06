@@ -52,6 +52,7 @@ from ..constants import energy_to_wavelength
 from ._parameters import CTFParameters
 from ._transfer import TransferFunction
 from ._units import zernike_rho_max
+from specter.options import AberrationModel
 
 
 #: Keys `aberrations.Aberration` accepts that this adapter has no mapping for.
@@ -260,7 +261,7 @@ class LegacyAberrationAdapter(nn.Module):
         n_pixels: int,
         pixel_size: float,
         voltage: float,
-        aberration_model: str = "nonlinear",
+        aberration_model: AberrationModel = "nonlinear",
         specimen_absorption: bool = True,
         bfactor: float | torch.Tensor | None = None,
         convergence_angle: float | None = None,

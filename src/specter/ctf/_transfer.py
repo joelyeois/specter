@@ -20,6 +20,7 @@ from ..arrays import kgrid_2d
 from ..constants import energy_to_wavelength
 from ..fft import fft2, ifft2
 from ._parameters import CTFParameters
+from specter.options import AberrationModel
 
 
 class TransferFunction(nn.Module):
@@ -88,7 +89,7 @@ class TransferFunction(nn.Module):
         self,
         n_pixels: int,
         pixel_size: float,
-        aberration_model: str = "nonlinear",
+        aberration_model: AberrationModel = "nonlinear",
         specimen_absorption: bool = True,
         bfactor: float | torch.Tensor | None = None,
         convergence_angle: float | None = None,

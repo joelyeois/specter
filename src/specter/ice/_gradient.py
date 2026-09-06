@@ -18,6 +18,7 @@ from ._kernels import (
     interpolate_target_kernel,
     load_mdsim_f_radial_avg,
 )
+from specter.options import IceOptimizer, ScatteringFactors
 
 
 class _PlateauStop:
@@ -136,7 +137,7 @@ class GradientSKIcemaker(L.LightningModule):
         nz: int | None = None,
         min_distance: float = 2.0,
         device: str | torch.device = "cpu",
-        parameterization: str = "kirkland",
+        parameterization: ScatteringFactors = "kirkland",
         progressbars: bool = True,
         mdsim_target_path: str | None = None,
     ) -> None:
@@ -499,7 +500,7 @@ class GradientSKIcemaker(L.LightningModule):
         self,
         n_steps: int = 250,
         lr: float = 1.0,
-        optimizer: str = "lbfgs",
+        optimizer: IceOptimizer = "lbfgs",
         record_every: int = 5,
         rep_strength: float = 0.0,
         mlbop_strength: float = 0.5,

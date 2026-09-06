@@ -43,7 +43,7 @@ specter build tomogram [OPTIONS]
 | `--filler_from_cryoetsim` | `True` \| `False` | `False` | Additive to filler: also pull filler species (location='cytosol') from the bundled CRYOETSIM_PARTICLE_TABLE (CryoETSim dataset reference, Stojanovska et al. 2025). |
 | `--filler_table_max_mw_kda` | `FLOAT` | _none_ | Only used with filler_from_pei2016/filler_from_cryoetsim: exclude species above this mass, kDa. |
 | `--filler_table_min_mw_kda` | `FLOAT` | _none_ | Only used with filler_from_pei2016/filler_from_cryoetsim: exclude species below this mass, kDa. |
-| `--scattering_factors` | `TEXT` | `shtyrov` | Atomic scattering-factor parameterization for everything rendered from atoms: targets, filler, filaments, microtubules, carbon film, bilayer and transmembrane proteins. A [[membrane]] table naming its own 'parameterization' overrides this for that population. Gold fiducials fall back to Peng under 'shtyrov', which has no elemental gold. |
+| `--scattering_factors` | `kirkland` \| `lobato` \| `shtyrov` | `shtyrov` | Atomic scattering-factor parameterization for everything rendered from atoms: targets, filler, filaments, microtubules, carbon film, bilayer and transmembrane proteins. A [[membrane]] table naming its own 'parameterization' overrides this for that population. Gold fiducials fall back to Peng under 'shtyrov', which has no elemental gold. |
 | `--bulk_scattering_factors` | `kirkland` \| `lobato` \| `shtyrov` | `kirkland` | Atomic scattering-factor parameterization for the carbon film and gold beads -- everything rendered that is not a biomolecule. Deliberately separate from scattering_factors: Shtyrov is fitted for biomolecules, and these materials are outside that domain. |
 
 **Membrane**{ #specter-build-tomogram-membrane }

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Literal
+from specter.options import IceModel, NoiseModel, ScatteringFactors, TiltAxis
 
 
 @dataclass
@@ -51,15 +52,15 @@ class TiltSeriesConfig:
     min_tilt_angle: float = -45.0  # degrees
     max_tilt_angle: float = 45.0  # degrees
     n_tilts: int = 61
-    tilt_axis: Literal["x", "y"] = "y"
+    tilt_axis: TiltAxis = "y"
 
     # --- Models ---
     scattering_model: Literal["multislice", "firstborn", "projection", "ctf"] = (
         "multislice"
     )
-    noise_model: Literal["poisson", "none"] = "poisson"
+    noise_model: NoiseModel = "poisson"
     coincidence_radius: float = 0.0  # pixels; 0 = plain Poisson
-    ice_model: Literal["gd", "random", "none"] = "gd"
+    ice_model: IceModel = "gd"
     ice_cache_dir: str | None = None  # defaults to the bundled ice_data/ice_cache
     ice_relax_steps: int = 0  # local MLBOP seam-relaxation steps for ice_model="gd"
     # Everything specter renders that is NOT a biomolecule: the ice.
@@ -68,7 +69,7 @@ class TiltSeriesConfig:
     # its domain and a mean inner potential (a k=0 quantity) extrapolates below
     # the fitted range. Kirkland/Lobato/Peng are per-element, valid at k=0, and
     # agree there. See ice._kernels.build_water_kernel for the measurements.
-    bulk_scattering_factors: Literal["kirkland", "lobato", "shtyrov"] = "kirkland"
+    bulk_scattering_factors: ScatteringFactors = "kirkland"
     # Fraction of Nyquist, not 1/A: Scattering masks k <= klim * k_nyquist.
     # Kirkland recommends 0.66 (2/3) to prevent multislice FFT aliasing, but
     # that costs real spatial resolution, so the default keeps the full range

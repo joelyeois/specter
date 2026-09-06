@@ -9,6 +9,7 @@ from ..fft import fftconvolve
 from ._energy import MLBOP
 from ._helpers import ndensity_of_amorphous_ice
 from ._kernels import build_water_kernel
+from specter.options import IceModel, ScatteringFactors
 
 
 class RandomIcemaker(L.LightningModule):
@@ -47,14 +48,14 @@ class RandomIcemaker(L.LightningModule):
         Whether to show progress bars. Default is True.
     """
 
-    method: str = "random"
+    method: IceModel = "random"
 
     def __init__(
         self,
         dx: float,
         n: int,
         nz: int | None = None,
-        parameterization: str = "kirkland",
+        parameterization: ScatteringFactors = "kirkland",
         progressbars: bool = True,
     ):
         super().__init__()

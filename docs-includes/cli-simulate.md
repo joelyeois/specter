@@ -117,10 +117,10 @@ specter simulate particles [OPTIONS]
 | `--crowd_max_distance_z` | `FLOAT` | _none_ | Maximum z-distance between crowded particles in Angstrom. |
 | `--potential_scale` | `TEXT` | `1.0` | Potential scale factor (unitless, values &lt; 1 approximate thicker ice): a single value for constant scale, or 'low,high' ([low, high] in TOML) to sample uniformly per particle. |
 | `--pad_fft` | `True` \| `False` | `True` | Pad the volume for FFT to avoid edge artifacts. |
-| `--scattering_factors` | `shtyrov` \| `kirkland` \| `lobato` | `shtyrov` | Atomic scattering-factor parameterization used to build the structure's scattering potential. |
+| `--scattering_factors` | `kirkland` \| `lobato` \| `shtyrov` | `shtyrov` | Atomic scattering-factor parameterization used to build the structure's scattering potential. |
 | `--potential_method` | `analytic` \| `2d` \| `3d` | `analytic` | Voxelization method for the structure's own potential: 'analytic' (per-atom closed-form, no splat/FFT), '2d' (soft XY, hard Z), or '3d' (trilinear). Ice is built by its own path and is unaffected by this. |
 | `--rcut` | `FLOAT` | _none_ | Cutoff radius in Angstrom for the atomic potential kernel. Auto-detected per-structure if unset. |
-| `--conv_backend` | `TEXT` | `fftconvolve` | Convolution backend for potential building. Unused for potential_method='analytic'. |
+| `--conv_backend` | `fftconvolve` \| `conv3d` \| `auto` | `fftconvolve` | Convolution backend for potential building. Unused for potential_method='analytic'. |
 | `--periodic` | `True` \| `False` | `False` | Wrap atom density across the box faces when voxelizing. Keep false for a particle -- a protein is a finite object, so wrapping smears its edge density onto the opposite face. Requires potential_method='3d'; 'analytic' and '2d' raise. |
 | `--shtyrov_params_path` | `TEXT` | _none_ | Override the bundled Shtyrov parameter table. |
 | `--ews_curvature_sign` | `negative` \| `positive` | `positive` | Ewald sphere curvature sign, matching CryoSPARC's convention. |
@@ -222,7 +222,7 @@ specter simulate micrograph [OPTIONS]
 | Flag | Type | Default | Description |
 | --- | --- | --- | --- |
 | `--pdb_cache_dir` | `TEXT` | `$SPECTER_PDB_CACHE, else ~/.cache/specter/pdb` | Where downloaded PDB/mmCIF structures are cached. An input cache shared by every run, not an output location -- job tracking does not redirect it. |
-| `--scattering_factors` | `shtyrov` \| `kirkland` \| `lobato` | `shtyrov` | Atomic scattering-factor parameterization used to build the structure's scattering potential. |
+| `--scattering_factors` | `kirkland` \| `lobato` \| `shtyrov` | `shtyrov` | Atomic scattering-factor parameterization used to build the structure's scattering potential. |
 | `--readd_hydrogens` | `True` \| `False` | `auto` | Whether to replace a structure's own hydrogens with the monomer library's ideal geometry: 'auto' (default) keeps hydrogens the file already carries and adds them only when it has none, true always re-adds, false never adds hydrogen density (they still inform atom typing). Only meaningful when a monomer library is available. |
 | `--monomer_library_path` | `TEXT` | _none_ | Path to a Monomer Library (https://github.com/MonomerLibrary/monomers), which completes a structure's bond topology and hydrogens so Shtyrov species resolve. Unset falls back to $CLIBD_MON. Without one, around 44% of a hydrogen-free protein falls back to per-element Peng factors. |
 | `--use_deposited_bfactors` | `True` \| `False` | `False` | Damp each atom by the B-factor its structure deposits, instead of rendering the model statically. Only a PER-ATOM B adds anything an envelope cannot: a uniform one is the same exp(-B k^2/4) as --bfactor, so setting both double-counts. A deposited column is refinement output rather than a measured displacement, and cryo-EM entries often carry a constant or zero one. Requires scattering_factors='shtyrov'. |

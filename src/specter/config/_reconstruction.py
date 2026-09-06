@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Literal
+from specter.options import EwaldSphereSign, RotateMode, Scheduler
 
 
 @dataclass
@@ -48,17 +49,12 @@ class ReconstructionConfig:
     # Volume learning rate. None freezes the volume, which is what refining
     # poses alone means.
     lr: float | None = 0.1
-    scheduler: Literal[
-        "LambdaLR",
-        "OneCycleLR",
-        "CosineAnnealingWarmRestarts",
-        "MultiplicativeLR",
-    ] = "LambdaLR"
+    scheduler: Scheduler = "LambdaLR"
     lr_decay: float = 0.1
 
     # --- Symmetry ---
     symmetry: str | None = None
-    symmetry_mode: Literal["real", "fourier"] = "fourier"
+    symmetry_mode: RotateMode = "fourier"
     symmetry_batchsize: int | None = None
 
     # --- Sanity check ---
@@ -132,12 +128,12 @@ class ReconstructionConfig:
     scattering_model: Literal["multislice", "rytov", "firstborn", "projection"] = (
         "rytov"
     )
-    ews_curvature_sign: Literal["negative", "positive"] = "negative"
+    ews_curvature_sign: EwaldSphereSign = "negative"
     bfactor: float | None = None
     # Hard frequency cutoff (1/A) applied to the simulated images.
     klim: float | None = None
     sparsity: float | None = None
-    rotate_mode: Literal["real", "fourier"] = "real"
+    rotate_mode: RotateMode = "real"
     learn_noise_model: bool = False
     use_ncc: bool = False
 

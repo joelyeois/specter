@@ -10,6 +10,7 @@ import torch.utils.data
 from ._helpers import _preprocess_particle_images
 from ._reconstructor import Reconstructor
 from ._run_helpers import build_trainer, resolve_device
+from specter.options import EwaldSphereSign, RotateMode, ScatteringModel, Scheduler
 
 
 class Ghostbuster:
@@ -151,24 +152,19 @@ class Ghostbuster:
         lr_D: float | None = None,
         defocus_offset: float = 0.0,
         bfactor: float | None = None,
-        scheduler: Literal[
-            "LambdaLR",
-            "OneCycleLR",
-            "CosineAnnealingWarmRestarts",
-            "MultiplicativeLR",
-        ] = "LambdaLR",
+        scheduler: Scheduler = "LambdaLR",
         lr_decay: float = 0.1,
         epochs: int = 5,
         batchsize: int = 3,
-        scattering_model: str = "rytov",
+        scattering_model: ScatteringModel = "rytov",
         aberration_backend: Literal["legacy", "torch_ctf"] = "legacy",
         lpp_params: dict[str, float] | None = None,
         symmetry: str | None = None,
         symmetry_batchsize: int | None = None,
-        symmetry_mode: Literal["real", "fourier"] = "fourier",
+        symmetry_mode: RotateMode = "fourier",
         sparsity: float | None = None,
         rotate_mode: Literal["real", "fourier"] = "real",
-        ews_curvature_sign: str = "negative",
+        ews_curvature_sign: EwaldSphereSign = "negative",
         klim: float | None = None,
         nps_weight: torch.Tensor | None = None,
         learn_noise_model: bool = False,
@@ -318,7 +314,7 @@ class Ghostbuster:
         self,
         images: torch.Tensor,
         voxel_size: float,
-        scattering_model: str,
+        scattering_model: ScatteringModel,
         batchsize: int,
     ) -> tuple["Reconstructor", torch.utils.data.DataLoader]:
         from ..arrays import ball3d

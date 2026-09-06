@@ -23,6 +23,7 @@ from ..scattering import IterativeScattering
 from ._base_reconstructor import _BaseReconstructor
 from ._helpers import _build_lr_scheduler
 from ._io import save_volume_mrc
+from specter.options import ScatteringModel, Scheduler, TiltAxis
 
 
 class TomogramReconstructor(_BaseReconstructor):
@@ -114,23 +115,18 @@ class TomogramReconstructor(_BaseReconstructor):
         translations: torch.Tensor,
         ctf_params: dict[str, torch.Tensor],
         voltage: float,
-        tilt_axis: str = "x",
+        tilt_axis: TiltAxis = "x",
         lr: float | None = None,
         sparsity: float | None = None,
         taper_width: int = 0,
         z_taper_width: int = 0,
         use_fov_mask: bool = True,
-        scattering_model: str = "multislice",
+        scattering_model: ScatteringModel = "multislice",
         aberration_backend: Literal["legacy", "torch_ctf"] = "legacy",
         lpp_params: dict[str, float] | None = None,
         klim: float | None = None,
         alpha: float = 0.0,
-        scheduler: Literal[
-            "LambdaLR",
-            "OneCycleLR",
-            "CosineAnnealingWarmRestarts",
-            "MultiplicativeLR",
-        ] = "LambdaLR",
+        scheduler: Scheduler = "LambdaLR",
         lr_decay: float = 0.1,
         kmask: torch.Tensor | None = None,
         slice_batchsize: int = 1,

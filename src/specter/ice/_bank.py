@@ -38,6 +38,7 @@ from ..potential import (
 from ._blend import IceSlabBlender
 from ._kernels import build_water_kernel
 from ._random import RandomIcemaker
+from specter.options import IceModel, ScatteringFactors
 
 if TYPE_CHECKING:
     from ._profile import IceProfile
@@ -231,7 +232,7 @@ class IceBank(L.LightningModule):
         True.
     """
 
-    method: str = "gd"
+    method: IceModel = "gd"
     """str: Always ``"gd"`` -- every cached config was generated via
     :class:`GradientSKIcemaker`. Kept for compatibility with code that reads
     ``icemaker.method`` (e.g. to log/report which ice model an
@@ -241,7 +242,7 @@ class IceBank(L.LightningModule):
         self,
         cache_dir: str | None = None,
         device: str | torch.device = "cpu",
-        parameterization: str = "kirkland",
+        parameterization: ScatteringFactors = "kirkland",
         progressbars: bool = True,
     ) -> None:
         super().__init__()
@@ -1441,13 +1442,13 @@ def build_ice_cache(
 
 
 def resolve_icemaker(
-    ice_model: str | None,
+    ice_model: IceModel | None,
     pixel_size: float,
     nxy: int,
     nz: int,
     ice_cache_dir: str | None = None,
     icemaker: "IceBank | RandomIcemaker | None" = None,
-    parameterization: str = "kirkland",
+    parameterization: ScatteringFactors = "kirkland",
     progressbars: bool = True,
 ) -> "IceBank | RandomIcemaker | None":
     """

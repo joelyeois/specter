@@ -14,6 +14,7 @@ from ..ice import (
     resolve_icemaker,
 )
 from ..progress import status
+from specter.options import IceModel, ScatteringFactors
 
 
 class MicrographSpecimenGenerator(L.LightningModule):
@@ -146,13 +147,13 @@ class MicrographSpecimenGenerator(L.LightningModule):
         scattering_potential: torch.Tensor | None = None,
         crowd_min_distance: float | None = None,
         crowd_max_distance_z: float | None = None,
-        ice_model: str | None = None,
+        ice_model: IceModel | None = None,
         ice_thickness: float | None = None,
         ice_profile: IceProfile | None = None,
         ice_cache_dir: str | None = None,
         icemaker: IceBank | RandomIcemaker | None = None,
         ice_relax_steps: int = 0,
-        ice_parameterization: str = "kirkland",
+        ice_parameterization: ScatteringFactors = "kirkland",
         water_air_interface: bool = True,
         sigma_frac: float = 0.05,
         peak_amplitude: float = 1.0,

@@ -13,6 +13,7 @@ from .constants import energy_to_wavelength, interaction_parameter
 from .potential import apply_amplitude_contrast
 from .fft import fft2, ifft2
 from .rotations import VolumeRotator, build_affine_matrix
+from specter.options import EwaldSphereSign, GridSamplePadding, ScatteringModel
 
 
 # Number of z-slices whose transmission functions are evaluated per batched
@@ -69,9 +70,9 @@ class Scattering(L.LightningModule):
         nxy: int,
         pixel_size: float,
         voltage: float,
-        scattering_model: str = "multislice",
+        scattering_model: ScatteringModel = "multislice",
         klim: float | None = None,
-        ews_curvature_sign: str = "negative",
+        ews_curvature_sign: EwaldSphereSign = "negative",
         nz: int | None = None,
         alpha: float = 0.0,
         progressbars: bool = True,
@@ -544,12 +545,12 @@ class IterativeScattering(L.LightningModule):
         nxy: int,
         pixel_size: float,
         voltage: float,
-        scattering_model: str = "multislice",
+        scattering_model: ScatteringModel = "multislice",
         klim: float | None = None,
-        ews_curvature_sign: str = "negative",
+        ews_curvature_sign: EwaldSphereSign = "negative",
         alpha: float = 0.0,
         progressbars: bool = True,
-        roi_padding_mode: str = "zeros",
+        roi_padding_mode: GridSamplePadding = "zeros",
         pad_fft: bool = False,
         fft_pad_margin: int = 16,
     ):

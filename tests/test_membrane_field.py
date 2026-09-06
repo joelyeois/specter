@@ -19,16 +19,18 @@ def test_single_source_field_matches_sphere_sdf():
 
 
 def test_field_sample_and_gradient_on_sphere_surface():
-    spacing_a = 2.0
+    spacing_angstrom = 2.0
     n = 80
-    origin_xyz = torch.full((3,), -0.5 * n * spacing_a)
+    origin_xyz = torch.full((3,), -0.5 * n * spacing_angstrom)
     field = MembraneField(
         phi=blend_field(
             [SphereSource(center_xyz=torch.zeros(3), radius=50.0)],
-            _dense_grid_points(spacing_a=spacing_a, n=n, origin_xyz=origin_xyz),
+            _dense_grid_points(
+                spacing_angstrom=spacing_angstrom, n=n, origin_xyz=origin_xyz
+            ),
             k=0.0,
         ),
-        spacing_a=spacing_a,
+        spacing_angstrom=spacing_angstrom,
         origin_xyz=origin_xyz,
     )
 
@@ -64,7 +66,7 @@ def test_smooth_min_blend_is_softer_than_hard_min_at_merge_point():
 def test_cap_curvature_reduces_high_frequency_variance():
     torch.manual_seed(0)
     noisy = torch.randn(20, 20, 20)
-    relaxed = cap_curvature(noisy, spacing_a=5.0, iterations=25)
+    relaxed = cap_curvature(noisy, spacing_angstrom=5.0, iterations=25)
 
     def _laplacian_energy(volume: torch.Tensor) -> float:
         d = volume[1:-1, 1:-1, 1:-1]
@@ -85,13 +87,13 @@ def test_cap_curvature_reduces_high_frequency_variance():
 def test_cap_curvature_zero_iterations_is_identity():
     torch.manual_seed(0)
     phi = torch.randn(8, 8, 8)
-    assert torch.equal(cap_curvature(phi, spacing_a=5.0, iterations=0), phi)
+    assert torch.equal(cap_curvature(phi, spacing_angstrom=5.0, iterations=0), phi)
 
 
 def _dense_grid_points(
-    spacing_a: float, n: int, origin_xyz: torch.Tensor
+    spacing_angstrom: float, n: int, origin_xyz: torch.Tensor
 ) -> torch.Tensor:
     idx = torch.arange(n, dtype=torch.float32)
-    coords = origin_xyz[0] + idx * spacing_a
+    coords = origin_xyz[0] + idx * spacing_angstrom
     zz, yy, xx = torch.meshgrid(coords, coords, coords, indexing="ij")
     return torch.stack([xx, yy, zz], dim=-1)

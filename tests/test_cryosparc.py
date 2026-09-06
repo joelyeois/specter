@@ -46,7 +46,7 @@ def test_extract_parameters_all_particles() -> None:
         pixel_size,
         alpha,
         rotations,
-        translations_A,
+        translations_angstrom,
         ctf_params,
         scale,
         anisomag,
@@ -55,7 +55,7 @@ def test_extract_parameters_all_particles() -> None:
     ) = extract_parameters_from_csfile("fake.cs", halfset="all")
 
     assert rotations.shape == (6, 4)
-    assert translations_A.shape == (6, 2)
+    assert translations_angstrom.shape == (6, 2)
     assert ctf_params["cs"].shape == (6,)
     assert torch.equal(indices, torch.arange(6))
     assert torch.equal(halfset_labels, torch.tensor([0, 1, 0, 1, 0, 1]))
@@ -93,7 +93,7 @@ def test_extract_parameters_n_particles_all() -> None:
 
 
 class _TrefoilTetrafoilDataset(_FakeDataset):
-    """Same fixture as _FakeDataset, but with non-zero trefoil_A/tetra_A so
+    """Same fixture as _FakeDataset, but with non-zero trefoil_angstrom/tetra_A so
     the CryoSPARC -> specter unit conversion can be checked numerically."""
 
     @classmethod
@@ -111,7 +111,7 @@ class _TrefoilTetrafoilDataset(_FakeDataset):
 def test_trefoil_scaling_matches_cryosparc_formula(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """chi_trefoil = (2*pi/3) * wavelength^2 * trefoil_A -- derived from
+    """chi_trefoil = (2*pi/3) * wavelength^2 * trefoil_angstrom -- derived from
     CryoSPARC's own newctf.py (params_to_coeffs_odd/gen_basis_odd), not the
     old hardcoded /1000 scale factor."""
     monkeypatch.setattr(_cryosparc, "Dataset", _TrefoilTetrafoilDataset)
@@ -135,9 +135,9 @@ def test_tetrafoil_extraction_matches_cryosparc_formula(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """chi_tetrafoil coefficients derived from CryoSPARC's own newctf.py
-    (params_to_coeffs_even/gen_basis_even): tetra_A[0]/[1] are the n=4 m=+-2
+    (params_to_coeffs_even/gen_basis_even): tetra_angstrom[0]/[1] are the n=4 m=+-2
     secondary-astigmatism terms (prefactor 2*pi*wavelength^3, sign-flipped
-    on index 0), tetra_A[2]/[3] are the true n=4 m=+-4 tetrafoil terms
+    on index 0), tetra_angstrom[2]/[3] are the true n=4 m=+-4 tetrafoil terms
     (prefactor pi/2*wavelength^3, sign-flipped on index 3)."""
     monkeypatch.setattr(_cryosparc, "Dataset", _TrefoilTetrafoilDataset)
     (_, _, _, _, _, ctf_params, _, _, _, _) = extract_parameters_from_csfile(
@@ -145,11 +145,11 @@ def test_tetrafoil_extraction_matches_cryosparc_formula(
     )
 
     wavelength = energy_to_wavelength(torch.tensor(300.0))
-    tetra_A = torch.tensor([100.0, -200.0, 50.0, -75.0])
-    expected1 = -2 * torch.pi * wavelength**3 * tetra_A[0]
-    expected2 = 2 * torch.pi * wavelength**3 * tetra_A[1]
-    expected3 = (torch.pi / 2) * wavelength**3 * tetra_A[2]
-    expected4 = -(torch.pi / 2) * wavelength**3 * tetra_A[3]
+    tetra_angstrom = torch.tensor([100.0, -200.0, 50.0, -75.0])
+    expected1 = -2 * torch.pi * wavelength**3 * tetra_angstrom[0]
+    expected2 = 2 * torch.pi * wavelength**3 * tetra_angstrom[1]
+    expected3 = (torch.pi / 2) * wavelength**3 * tetra_angstrom[2]
+    expected4 = -(torch.pi / 2) * wavelength**3 * tetra_angstrom[3]
 
     assert torch.allclose(
         ctf_params["tetrafoil1"], torch.full((6,), expected1.item()), atol=1e-6

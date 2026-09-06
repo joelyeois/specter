@@ -42,7 +42,7 @@ Raw random walk next to the recentered, path-order-smoothed version used for sph
 
 ## Sweeping a tube
 
-Each path point becomes a sphere of radius `tube_radius_a`. SPECTER
+Each path point becomes a sphere of radius `tube_radius_angstrom`. SPECTER
 combines the spheres with a polynomial [smooth-min](#references), the
 same construction [metaballs](https://en.wikipedia.org/wiki/Metaballs)
 use, applied to a chain instead of scattered blobs:
@@ -53,13 +53,13 @@ h = \mathrm{clamp}\!\left(\tfrac12 + \tfrac{b-a}{2k},\ 0,\ 1\right), \qquad
 \]
 
 where \(a, b\) are two spheres' signed distances and \(k\) is
-`blend_sharpness_a`. Because this is an analytic blend of exact sphere
+`blend_sharpness_angstrom`. Because this is an analytic blend of exact sphere
 SDFs, the result already satisfies the Eikonal property
 (\(|\nabla\phi| \approx 1\)), so SPECTER needs no separate
 distance-transform step here, unlike the EDT-derived backends.
 
-Spacing consecutive spheres (`step_length_a`) too far apart relative to
-`tube_radius_a` produces visible beading instead of a continuous tube:
+Spacing consecutive spheres (`step_length_angstrom`) too far apart relative to
+`tube_radius_angstrom` produces visible beading instead of a continuous tube:
 
 ![Longitudinal slice through a straight chain of spheres: smooth fusion vs. visible beading.](../../assets/images/membrane-swept-beading.png){ width="700" style="display:block;margin:1.2em auto;" }
 ///caption
@@ -68,7 +68,7 @@ Longitudinal slice through a straight chain of spheres: smooth fusion vs. visibl
 
 ## Varying the radius
 
-`tube_radius_a` does not have to be constant. `radius_variation` draws a
+`tube_radius_angstrom` does not have to be constant. `radius_variation` draws a
 per-sphere radius instead: SPECTER takes Gaussian noise, one value per
 path point, smooths it along path order
 (`radius_variation_sigma_points`), and applies it multiplicatively, the
@@ -85,7 +85,7 @@ The radius noise is not a second persistent random walk like the path
 direction: direction lives on a bounded sphere, so a persistent walk
 there wanders in place, but radius is unbounded, and an actual random
 walk in radius would drift over a long path. Smoothed noise stays
-anchored to `tube_radius_a` regardless of path length.
+anchored to `tube_radius_angstrom` regardless of path length.
 
 ![Same random path, constant vs. varying radius.](../../assets/images/membrane-swept-radius-variation.png){ width="800" style="display:block;margin:1.2em auto;" }
 ///caption
@@ -97,12 +97,12 @@ the radius draw, so the underlying wander is identical; only the caliber
 differs.
 
 This changes what the beading check means, too: with `radius_variation >
-0`, the local radius will occasionally dip below `step_length_a` wherever
+0`, the local radius will occasionally dip below `step_length_angstrom` wherever
 the noise is low. That's intentional: since the noise is smooth and
 non-periodic, those dips land at irregular, uncorrelated points along the
 tube, reading as sparse varicosities rather than the mechanical,
 repeating beading pattern the check exists to catch. The check therefore compares
-`step_length_a` against the *mean* drawn radius, not the local minimum, so
+`step_length_angstrom` against the *mean* drawn radius, not the local minimum, so
 it only fires when beading would be the norm rather than the occasional
 exception.
 
@@ -134,12 +134,12 @@ adjacent convex bulge is pulled inward; both reduce local curvature.
 | Parameter | Meaning | Default |
 |---|---|---|
 | `flexibility` | Direction-correlation \(f\) of the random walk | 0.15 |
-| `total_length_a` | Path contour length, Å | 500.0 |
-| `step_length_a` | Spacing between sphere centers, Å | 15.0 |
-| `tube_radius_a` | Tube radius, Å | 25.0 |
+| `total_length_angstrom` | Path contour length, Å | 500.0 |
+| `step_length_angstrom` | Spacing between sphere centers, Å | 15.0 |
+| `tube_radius_angstrom` | Tube radius, Å | 25.0 |
 | `radius_variation` | RMS fractional radius variation \(a\) | 0.0 |
 | `radius_variation_sigma_points` | Path-order smoothing for the radius noise, points | 2.0 |
-| `blend_sharpness_a` | Smooth-min blend radius \(k\), Å | `0.5 * tube_radius_a` |
+| `blend_sharpness_angstrom` | Smooth-min blend radius \(k\), Å | `0.5 * tube_radius_angstrom` |
 | `curvature_iterations` | Number of Laplacian relaxation steps | 15 |
 
 ![Flexibility swept from a nearly straight rod to a tightly wandering, near-self-touching walk.](../../assets/images/membrane-swept-flexibility-sweep.png){ width="900" style="display:block;margin:1.2em auto;" }
@@ -156,8 +156,8 @@ defaults.
 
 - **No branching.** The path is a single line; it cannot represent
   Y-junctions or networked tubule topology.
-- **Beading if mis-tuned.** `step_length_a` must stay well under
-  `2 * tube_radius_a`; the generator warns when it does not.
+- **Beading if mis-tuned.** `step_length_angstrom` must stay well under
+  `2 * tube_radius_angstrom`; the generator warns when it does not.
 - **`cap_curvature` is an approximate proxy**, not exact mean curvature
   flow. An extreme enough bend can still leave a thin margin between
   leaflets even after relaxation.

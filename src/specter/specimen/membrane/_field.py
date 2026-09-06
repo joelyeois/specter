@@ -62,7 +62,7 @@ class MembraneField:
     phi : torch.Tensor
         Signed field, shape ``(Z, Y, X)``. Negative inside the membrane
         solid, positive outside, zero at the mid-surface.
-    spacing_a : float
+    spacing_angstrom : float
         Isotropic voxel spacing of ``phi``, Å.
     origin_xyz : torch.Tensor
         Physical ``(x, y, z)`` location of grid index ``(0, 0, 0)``, Å.
@@ -77,7 +77,7 @@ class MembraneField:
     """
 
     phi: torch.Tensor
-    spacing_a: float
+    spacing_angstrom: float
     origin_xyz: torch.Tensor
     clipped_at_boundary: bool = False
 
@@ -107,7 +107,7 @@ class MembraneField:
         return sampled.reshape(points_xyz.shape[:-1])
 
     def gradient(
-        self, points_xyz: torch.Tensor, eps_a: float | None = None
+        self, points_xyz: torch.Tensor, eps_angstrom: float | None = None
     ) -> torch.Tensor:
         """
         Unit outward normal at arbitrary physical points via finite differences.
@@ -116,8 +116,8 @@ class MembraneField:
         ----------
         points_xyz : torch.Tensor
             Physical ``(x, y, z)`` points, shape ``(..., 3)``, Å.
-        eps_a : float, optional
-            Finite-difference step, Å. Default ``0.5 * spacing_a``.
+        eps_angstrom : float, optional
+            Finite-difference step, Å. Default ``0.5 * spacing_angstrom``.
 
         Returns
         -------
@@ -125,7 +125,7 @@ class MembraneField:
             Unit vectors pointing from negative (inside) to positive
             (outside) ``phi``, shape ``(..., 3)``.
         """
-        eps = eps_a if eps_a is not None else 0.5 * self.spacing_a
+        eps = eps_angstrom if eps_angstrom is not None else 0.5 * self.spacing_angstrom
         device = points_xyz.device
         dtype = points_xyz.dtype
         offsets = torch.eye(3, device=device, dtype=dtype) * eps
@@ -142,9 +142,9 @@ class MembraneField:
         device = self.phi.device
         origin = self.origin_xyz.to(device=device, dtype=points_xyz.dtype)
         nz, ny, nx = self.phi.shape
-        idx_x = (points_xyz[:, 0] - origin[0]) / self.spacing_a
-        idx_y = (points_xyz[:, 1] - origin[1]) / self.spacing_a
-        idx_z = (points_xyz[:, 2] - origin[2]) / self.spacing_a
+        idx_x = (points_xyz[:, 0] - origin[0]) / self.spacing_angstrom
+        idx_y = (points_xyz[:, 1] - origin[1]) / self.spacing_angstrom
+        idx_z = (points_xyz[:, 2] - origin[2]) / self.spacing_angstrom
         norm_x = 2.0 * (idx_x + 0.5) / nx - 1.0
         norm_y = 2.0 * (idx_y + 0.5) / ny - 1.0
         norm_z = 2.0 * (idx_z + 0.5) / nz - 1.0
@@ -197,7 +197,7 @@ def blend_field(
 
 def _grid_points_xyz(
     shape_zyx: tuple[int, int, int],
-    spacing_a: float,
+    spacing_angstrom: float,
     origin_xyz: torch.Tensor,
     device: str | torch.device,
     dtype: torch.dtype = torch.float32,
@@ -208,9 +208,9 @@ def _grid_points_xyz(
     ix = torch.arange(nx, device=device, dtype=dtype)
     zz, yy, xx = torch.meshgrid(iz, iy, ix, indexing="ij")
     origin = origin_xyz.to(device=device, dtype=dtype)
-    x = origin[0] + xx * spacing_a
-    y = origin[1] + yy * spacing_a
-    z = origin[2] + zz * spacing_a
+    x = origin[0] + xx * spacing_angstrom
+    y = origin[1] + yy * spacing_angstrom
+    z = origin[2] + zz * spacing_angstrom
     return torch.stack([x, y, z], dim=-1)
 
 
@@ -225,7 +225,7 @@ def _laplacian3d(volume: torch.Tensor) -> torch.Tensor:
 
 def cap_curvature(
     phi: torch.Tensor,
-    spacing_a: float,
+    spacing_angstrom: float,
     iterations: int,
     step_fraction: float = 0.15,
 ) -> torch.Tensor:
@@ -242,7 +242,7 @@ def cap_curvature(
     ----------
     phi : torch.Tensor
         Signed field, shape ``(Z, Y, X)``.
-    spacing_a : float
+    spacing_angstrom : float
         Voxel spacing of ``phi``, Å.
     iterations : int
         Number of relaxation steps.
@@ -257,7 +257,7 @@ def cap_curvature(
     """
     if iterations <= 0:
         return phi
-    step = step_fraction * spacing_a**2
+    step = step_fraction * spacing_angstrom**2
     # Left allocating per iteration on purpose. Relaxing in place is ~1.6x
     # faster (0.160 s against 0.256 s, 8 iterations on a 300x600x600 field)
     # but measures a HIGHER peak, 1.62 GiB against 1.21, whichever way the
@@ -266,7 +266,7 @@ def cap_curvature(
     # fields are volume-sized, so the memory is worth more than the speed.
     out = phi
     for _ in range(iterations):
-        laplacian = _laplacian3d(out) / spacing_a**2
+        laplacian = _laplacian3d(out) / spacing_angstrom**2
         out = out + step * laplacian
     return out
 
@@ -300,7 +300,7 @@ def _warn_if_clipped_at_boundary(phi: torch.Tensor) -> bool:
 
 
 def _signed_distance_transform(
-    inside: np.ndarray, spacing_a: float, device: str | torch.device
+    inside: np.ndarray, spacing_angstrom: float, device: str | torch.device
 ) -> torch.Tensor:
     """
     Physical-Å signed distance field from a boolean solid mask,
@@ -343,7 +343,7 @@ def _signed_distance_transform(
     ----------
     inside : np.ndarray
         Boolean solid-interior mask.
-    spacing_a : float
+    spacing_angstrom : float
         Working grid voxel spacing, Å -- passed to
         ``distance_transform_edt``'s `sampling` kwarg so the result is
         physical Å, not voxel units.
@@ -358,17 +358,17 @@ def _signed_distance_transform(
         `device`.
     """
     if torch.device(device).type == "cuda":
-        gpu_phi = _try_gpu_signed_distance_transform(inside, spacing_a, device)
+        gpu_phi = _try_gpu_signed_distance_transform(inside, spacing_angstrom, device)
         if gpu_phi is not None:
             return gpu_phi
 
-    dist_out = ndimage.distance_transform_edt(~inside, sampling=spacing_a)
-    dist_in = ndimage.distance_transform_edt(inside, sampling=spacing_a)
+    dist_out = ndimage.distance_transform_edt(~inside, sampling=spacing_angstrom)
+    dist_in = ndimage.distance_transform_edt(inside, sampling=spacing_angstrom)
     return torch.as_tensor(dist_out - dist_in, dtype=torch.float32, device=device)
 
 
 def _try_gpu_signed_distance_transform(
-    inside: np.ndarray, spacing_a: float, device: str | torch.device
+    inside: np.ndarray, spacing_angstrom: float, device: str | torch.device
 ) -> torch.Tensor | None:
     """
     GPU half of :func:`_signed_distance_transform`. Never raises -- returns
@@ -414,8 +414,12 @@ def _try_gpu_signed_distance_transform(
     try:
         with cupy.cuda.Device(device_index):
             inside_gpu = cupy.asarray(inside)
-            dist_out = cundimage.distance_transform_edt(~inside_gpu, sampling=spacing_a)
-            dist_in = cundimage.distance_transform_edt(inside_gpu, sampling=spacing_a)
+            dist_out = cundimage.distance_transform_edt(
+                ~inside_gpu, sampling=spacing_angstrom
+            )
+            dist_in = cundimage.distance_transform_edt(
+                inside_gpu, sampling=spacing_angstrom
+            )
             phi_gpu = (dist_out - dist_in).astype(cupy.float32)
         return torch.from_dlpack(phi_gpu)
     except Exception as exc:

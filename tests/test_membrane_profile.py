@@ -40,11 +40,11 @@ def test_build_reference_lipid_patch_different_seeds_differ():
 
 
 def test_bilayer_profile_interpolation_matches_table_and_extrapolates_flat():
-    distance_a = torch.tensor([-10.0, 0.0, 10.0, 20.0])
+    distance_angstrom = torch.tensor([-10.0, 0.0, 10.0, 20.0])
     psi = torch.tensor([1.0, 5.0, 2.0, 0.5])
-    profile = BilayerProfile(distance_a=distance_a, psi=psi)
+    profile = BilayerProfile(distance_angstrom=distance_angstrom, psi=psi)
 
-    assert torch.allclose(profile(distance_a), psi, atol=1e-5)
+    assert torch.allclose(profile(distance_angstrom), psi, atol=1e-5)
 
     midpoint = profile(torch.tensor([5.0]))
     assert torch.isclose(midpoint[0], torch.tensor(3.5), atol=1e-4)
@@ -57,7 +57,7 @@ def test_bilayer_profile_interpolation_matches_table_and_extrapolates_flat():
 
 def test_compute_bilayer_profile_has_headgroup_peak_and_decays_outside():
     atomic_numbers, coordinates = build_reference_lipid_patch(
-        n_lipids_per_leaflet=6, area_per_lipid_a2=65.0, jitter_a=2.0, seed=0
+        n_lipids_per_leaflet=6, area_per_lipid_a2=65.0, jitter_angstrom=2.0, seed=0
     )
     profile = compute_bilayer_profile(
         atomic_numbers,
@@ -66,7 +66,7 @@ def test_compute_bilayer_profile_has_headgroup_peak_and_decays_outside():
         parameterization="shtyrov",
     )
 
-    assert profile.psi.shape == profile.distance_a.shape
+    assert profile.psi.shape == profile.distance_angstrom.shape
     assert profile.psi.numel() > 0
 
     baseline = profile(torch.tensor([60.0, -60.0])).mean()
@@ -90,7 +90,7 @@ def test_compute_bilayer_profile_phosphate_peak_dominates_glycerol_shoulder():
     # to be a real signal rather than per-leaflet sampling noise (a 6-lipid
     # patch does not reliably resolve this ordering).
     atomic_numbers, coordinates = build_reference_lipid_patch(
-        n_lipids_per_leaflet=120, area_per_lipid_a2=65.0, jitter_a=2.5, seed=0
+        n_lipids_per_leaflet=120, area_per_lipid_a2=65.0, jitter_angstrom=2.5, seed=0
     )
     profile = compute_bilayer_profile(
         atomic_numbers, coordinates, voxel_size=1.0, parameterization="shtyrov"
@@ -115,7 +115,7 @@ def test_compute_bilayer_profile_no_competing_peak_in_chain_region():
     actually uses (the voxel_size=1.0 test above only ever exercised a finer
     resolution than production use)."""
     atomic_numbers, coordinates = build_reference_lipid_patch(
-        n_lipids_per_leaflet=200, area_per_lipid_a2=65.0, jitter_a=2.5, seed=0
+        n_lipids_per_leaflet=200, area_per_lipid_a2=65.0, jitter_angstrom=2.5, seed=0
     )
     profile = compute_bilayer_profile(
         atomic_numbers, coordinates, voxel_size=2.0, parameterization="shtyrov"
@@ -164,7 +164,7 @@ def test_bilayer_profile_integral_matches_popc_stoichiometry():
     from specter.specimen.membrane._profile import (
         CALIBRATION_N_LIPIDS_PER_LEAFLET,
         CALIBRATION_SEED,
-        CALIBRATION_VOXEL_SIZE_A,
+        CALIBRATION_VOXEL_SIZE_ANGSTROM,
     )
 
     def integral_v_dv(atomic_number: int) -> float:
@@ -191,10 +191,12 @@ def test_bilayer_profile_integral_matches_popc_stoichiometry():
         seed=CALIBRATION_SEED,
     )
     profile = compute_bilayer_profile(
-        atomic_numbers, coordinates, voxel_size=CALIBRATION_VOXEL_SIZE_A
+        atomic_numbers, coordinates, voxel_size=CALIBRATION_VOXEL_SIZE_ANGSTROM
     )
-    inside = profile.distance_a.abs() < 40.0
-    measured = float(torch.trapezoid(profile.psi[inside], profile.distance_a[inside]))
+    inside = profile.distance_angstrom.abs() < 40.0
+    measured = float(
+        torch.trapezoid(profile.psi[inside], profile.distance_angstrom[inside])
+    )
     assert measured == pytest.approx(expected, rel=0.05)
 
 
@@ -213,7 +215,7 @@ def test_bilayer_acyl_core_sits_above_ice():
     from specter.specimen.membrane._profile import (
         CALIBRATION_N_LIPIDS_PER_LEAFLET,
         CALIBRATION_SEED,
-        CALIBRATION_VOXEL_SIZE_A,
+        CALIBRATION_VOXEL_SIZE_ANGSTROM,
     )
 
     ice_mean_inner_potential = 4.6  # same tables, H2O at 0.94 g/cm^3
@@ -222,9 +224,9 @@ def test_bilayer_acyl_core_sits_above_ice():
         n_lipids_per_leaflet=CALIBRATION_N_LIPIDS_PER_LEAFLET, seed=CALIBRATION_SEED
     )
     profile = compute_bilayer_profile(
-        atomic_numbers, coordinates, voxel_size=CALIBRATION_VOXEL_SIZE_A
+        atomic_numbers, coordinates, voxel_size=CALIBRATION_VOXEL_SIZE_ANGSTROM
     )
-    core = float(profile.psi[profile.distance_a.abs() < 8.0].mean())
+    core = float(profile.psi[profile.distance_angstrom.abs() < 8.0].mean())
     assert core > ice_mean_inner_potential
 
     # ... and the headgroups are stronger still, which is the ordering that

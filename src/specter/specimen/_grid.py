@@ -80,7 +80,7 @@ AVOGADRO = 6.02214076e23  # 1/mol
 # gives 4/a**3 = 0.0591 atoms/Å³, matching to 0.2% the number
 # density `_number_density_per_a3` derives independently from bulk mass
 # density -- two unrelated routes to the same material.
-GOLD_FCC_A = 4.0782
+GOLD_FCC_ANGSTROM = 4.0782
 
 # RMS thermal displacement per Cartesian direction, Å, from
 # B ~ 0.6 Å² for Au near room temperature (u = sqrt(B/(8 pi^2))).
@@ -426,18 +426,20 @@ class BeadGenerator:
         `rot`, so every bead's lattice -- and therefore its fringe
         direction -- points somewhere different.
         """
-        reach = half_extent + GOLD_FCC_A
+        reach = half_extent + GOLD_FCC_ANGSTROM
         # Rotation preserves norm, so the lab-frame ball of radius `reach`
         # is the crystal-frame ball of radius `reach`: the cell range only
         # has to cover that ball, with no sqrt(3) allowance for the
         # circumscribing cube (which would generate ~10x the atoms and
         # throw all of them away).
-        m = int(np.ceil(reach / GOLD_FCC_A)) + 1
+        m = int(np.ceil(reach / GOLD_FCC_ANGSTROM)) + 1
         r = torch.arange(-m, m + 1, dtype=torch.float32)
         cells = torch.stack(torch.meshgrid(r, r, r, indexing="ij"), dim=-1).reshape(
             -1, 3
         )
-        atoms = (cells[:, None, :] + _FCC_BASIS[None, :, :]).reshape(-1, 3) * GOLD_FCC_A
+        atoms = (cells[:, None, :] + _FCC_BASIS[None, :, :]).reshape(
+            -1, 3
+        ) * GOLD_FCC_ANGSTROM
         atoms = atoms + torch.randn(atoms.shape, generator=generator) * GOLD_U_RMS
         atoms = atoms @ rot.T  # crystal frame -> lab frame
         return atoms[atoms.norm(dim=-1) <= reach]

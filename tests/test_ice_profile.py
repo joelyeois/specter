@@ -426,9 +426,13 @@ def test_micrograph_generator_wires_the_profile_through():
     # ice_thickness reports the ice, not the box depth.
     assert model.ice_thickness == pytest.approx(100.0)
     # Defocus references the specimen's entry face, not the box's.
-    assert model._defocus_shift_A == pytest.approx(prof.entry_face_shift(nxy, px))
-    assert model._defocus_shift_A == pytest.approx(50.0)
-    assert model._defocus_shift_A != pytest.approx(defocus_midplane_shift(model.nz, px))
+    assert model._defocus_shift_angstrom == pytest.approx(
+        prof.entry_face_shift(nxy, px)
+    )
+    assert model._defocus_shift_angstrom == pytest.approx(50.0)
+    assert model._defocus_shift_angstrom != pytest.approx(
+        defocus_midplane_shift(model.nz, px)
+    )
 
     image = model(torch.tensor([0]))
     assert image.shape == (1, nxy, nxy)
@@ -460,7 +464,9 @@ def test_micrograph_generator_without_profile_is_unchanged():
     )
     assert model.nz == compute_nz(16, 160.0, px)
     assert model.ice_thickness == pytest.approx(model.nz * px)
-    assert model._defocus_shift_A == pytest.approx(defocus_midplane_shift(model.nz, px))
+    assert model._defocus_shift_angstrom == pytest.approx(
+        defocus_midplane_shift(model.nz, px)
+    )
 
 
 def test_profile_window_conserves_mean_density_against_no_profile():

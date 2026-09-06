@@ -154,7 +154,7 @@ def test_real_csfile_particles_match_across_backends_end_to_end(small_volume):
         pixel_size,
         alpha,
         rotations,
-        translations_A,
+        translations_angstrom,
         ctf_params,
         scale,
         anisomag,

@@ -202,7 +202,7 @@ what it found.
 | Parameter | Meaning | Default |
 |---|---|---|
 | `bilayer_thickness` | Phosphate-to-phosphate leaflet spacing \(t\), Å | 38.0 |
-| `bilayer_layer_sigma_a` | Additional Gaussian broadening along \(z\), Å | 0.0 |
+| `bilayer_layer_sigma_angstrom` | Additional Gaussian broadening along \(z\), Å | 0.0 |
 | `min_transmembrane_spacing` | Minimum centre-to-centre site spacing, Å | 40.0 |
 | `transmembrane_occupancy_fraction` | Surface occupancy target for site sampling | 0.05 |
 | `frequency` (per spec) | Relative weight among transmembrane species | 1 |
@@ -214,7 +214,7 @@ polnet's `MB_THICK_RG` (25–35 Å) — a range sitting entirely below the
 experimental one. The reference template's own spacing is 40 Å, so the
 default rescales it by 0.95.
 
-`bilayer_layer_sigma_a` is *additional* broadening, and defaults to none.
+`bilayer_layer_sigma_angstrom` is *additional* broadening, and defaults to none.
 It set the leaflet peak width of the analytic profile; the measured
 profile carries whatever width its atomic model implies, and the
 rasteriser anti-aliases to the render grid separately, so there is no

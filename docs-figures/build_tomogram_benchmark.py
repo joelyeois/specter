@@ -8,7 +8,7 @@ membrane, target species 1bxn x20) plus filler_from_pei2016 (20 species,
 matching configs/tomogram.toml's own filler approach) so the benchmarked
 workload is the same one already shown elsewhere in the docs, just resolved
 at different voxel sizes. target_shape is scaled inversely with voxel_size to
-hold the physical field of view fixed at PHYSICAL_FOV_A below --
+hold the physical field of view fixed at PHYSICAL_FOV_ANGSTROM below --
 (1500, 6000, 6000) A, matching configs/tomogram.toml's own production-scale
 demo box (Z stretched from 1000 to 1500 A). At voxel_size=2 this is ~6.75
 billion voxels -- the regime render_chunk_size/accumulator_device="auto" exist
@@ -80,13 +80,13 @@ SCRATCH_DIR = Path("/scratch/loh/joel/tomogram_benchmark_scratch")
 # whichever is free rather than hardcoding a card someone else may be using.
 DEVICE = os.environ.get("SPECTER_BENCHMARK_DEVICE", "cuda:3")
 
-PHYSICAL_FOV_A = (1500.0, 6000.0, 6000.0)  # (Z, Y, X) A -- production scale
+PHYSICAL_FOV_ANGSTROM = (1500.0, 6000.0, 6000.0)  # (Z, Y, X) A -- production scale
 
 V_SIZES = [10.0, 5.0, 2.0]
 
 
 def target_shape_for(voxel_size: float) -> tuple[int, int, int]:
-    return tuple(round(fov / voxel_size) for fov in PHYSICAL_FOV_A)  # type: ignore[return-value]
+    return tuple(round(fov / voxel_size) for fov in PHYSICAL_FOV_ANGSTROM)  # type: ignore[return-value]
 
 
 def _run_worker(voxel_size: float, out_mrc: Path, result_json: Path) -> None:
@@ -321,7 +321,7 @@ def _figure_projections(results: list[dict]) -> None:
             fontsize=10,
         )
         ax.axis("off")
-    fov_str = " x ".join(f"{a:g}" for a in PHYSICAL_FOV_A)
+    fov_str = " x ".join(f"{a:g}" for a in PHYSICAL_FOV_ANGSTROM)
     fig.suptitle(
         f"Same field of view ({fov_str} Å), three voxel sizes",
         fontsize=11,

@@ -210,15 +210,17 @@ class TomogramReconstructor(_BaseReconstructor):
         # nz * voxel_size / 2 Angstrom out, which is 750 A on a 300-slice
         # tomogram at 5 A/voxel. Skipped for the models with no Z extent to
         # offset from, matching `_apply_defocus_shift`'s own `shift_required`.
-        self._defocus_shift_A = (
+        self._defocus_shift_angstrom = (
             0.0
             if scattering_model in ("projection", "ctf")
             else defocus_midplane_shift(self.nz, voxel_size)
         )
-        if self._defocus_shift_A:
+        if self._defocus_shift_angstrom:
             for name in ("dfu", "dfv"):
                 if hasattr(self, name):
-                    setattr(self, name, getattr(self, name) - self._defocus_shift_A)
+                    setattr(
+                        self, name, getattr(self, name) - self._defocus_shift_angstrom
+                    )
                     self.ctf_params[name] = getattr(self, name)
 
         # Fourier-space mask applied after each gradient step

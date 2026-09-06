@@ -247,7 +247,7 @@ class BaseImager(L.LightningModule):
         method always returns the original, externally-meaningful values.
         """
         params = {k: getattr(self, k) for k in self._ctf_param_names}
-        shift = getattr(self, "_defocus_shift_A", 0.0)
+        shift = getattr(self, "_defocus_shift_angstrom", 0.0)
         if shift:
             if "dfu" in params:
                 params["dfu"] = params["dfu"] + shift
@@ -311,7 +311,7 @@ class BaseImager(L.LightningModule):
             shift = 0.0
         elif shift is None:
             shift = defocus_midplane_shift(self.nz, self.pixel_size)
-        self._defocus_shift_A = shift
+        self._defocus_shift_angstrom = shift
         if shift:
             if hasattr(self, "dfu"):
                 setattr(self, "dfu", getattr(self, "dfu") - shift)

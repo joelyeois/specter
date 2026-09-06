@@ -44,9 +44,9 @@ from specter.specimen import (
     FilamentSpec,
     MicrotubuleSpec,
     CarbonFilmSpec,
-    DEFAULT_SH_AXES_RANGE_A,
-    DEFAULT_SWEPT_TOTAL_LENGTH_RANGE_A,
-    DEFAULT_SWEPT_TUBE_RADIUS_RANGE_A,
+    DEFAULT_SH_AXES_RANGE_ANGSTROM,
+    DEFAULT_SWEPT_TOTAL_LENGTH_RANGE_ANGSTROM,
+    DEFAULT_SWEPT_TUBE_RADIUS_RANGE_ANGSTROM,
     MembraneGenerator,
     MembraneInstance,
     TomogramSpecimenGenerator,
@@ -357,24 +357,28 @@ def _cap_membrane_auto_size_ranges(
     if target_shape is not None:
         return instance_kwargs
     shape_backend = instance_kwargs.get("shape_backend", "spherical_harmonics")
-    box_extent_a = tuple(
+    box_extent_angstrom = tuple(
         s * config.voxel_size for s in config.target_shape
     )  # (Z, Y, X)
-    non_clippable_extents_a = [
+    non_clippable_extents_angstrom = [
         extent
-        for extent, clippable in zip(box_extent_a, config.clip_axes)
+        for extent, clippable in zip(box_extent_angstrom, config.clip_axes)
         if not clippable
     ]
-    limiting_extent_a = (
-        min(non_clippable_extents_a) if non_clippable_extents_a else max(box_extent_a)
+    limiting_extent_angstrom = (
+        min(non_clippable_extents_angstrom)
+        if non_clippable_extents_angstrom
+        else max(box_extent_angstrom)
     )
-    max_reach_a = 0.5 * _MEMBRANE_AUTO_SIZE_BOX_FRACTION * limiting_extent_a
+    max_reach_angstrom = (
+        0.5 * _MEMBRANE_AUTO_SIZE_BOX_FRACTION * limiting_extent_angstrom
+    )
 
     if shape_backend == "spherical_harmonics":
         if "sh_axes" in instance_kwargs or "sh_axes_range" in instance_kwargs:
             return instance_kwargs
-        lo, hi = DEFAULT_SH_AXES_RANGE_A
-        capped_hi = min(hi, max_reach_a)
+        lo, hi = DEFAULT_SH_AXES_RANGE_ANGSTROM
+        capped_hi = min(hi, max_reach_angstrom)
         instance_kwargs = dict(instance_kwargs)
         instance_kwargs["sh_axes_range"] = (min(lo, capped_hi), capped_hi)
     elif shape_backend == "swept_spline":
@@ -388,11 +392,11 @@ def _cap_membrane_auto_size_ranges(
             )
         ):
             return instance_kwargs
-        total_lo, total_hi = DEFAULT_SWEPT_TOTAL_LENGTH_RANGE_A
-        tube_lo, tube_hi = DEFAULT_SWEPT_TUBE_RADIUS_RANGE_A
-        worst_case_reach_a = 0.5 * total_hi + tube_hi
-        if worst_case_reach_a > max_reach_a:
-            scale = max_reach_a / worst_case_reach_a
+        total_lo, total_hi = DEFAULT_SWEPT_TOTAL_LENGTH_RANGE_ANGSTROM
+        tube_lo, tube_hi = DEFAULT_SWEPT_TUBE_RADIUS_RANGE_ANGSTROM
+        worst_case_reach_angstrom = 0.5 * total_hi + tube_hi
+        if worst_case_reach_angstrom > max_reach_angstrom:
+            scale = max_reach_angstrom / worst_case_reach_angstrom
             instance_kwargs = dict(instance_kwargs)
             instance_kwargs["swept_total_length_range"] = (
                 total_lo * scale,

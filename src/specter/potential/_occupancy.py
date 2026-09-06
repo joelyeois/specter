@@ -37,7 +37,7 @@ import torch
 
 __all__ = [
     "FULL_OCCUPANCY_POTENTIAL_V",
-    "WATER_COARSE_GRAIN_SIGMA_A",
+    "WATER_COARSE_GRAIN_SIGMA_ANGSTROM",
     "occupancy_blur_halo_voxels",
     "potential_occupancy",
 ]
@@ -93,11 +93,11 @@ FULL_OCCUPANCY_POTENTIAL_V = 7.0
 #: identical beyond it: a coarse voxel's own average has already removed
 #: the cusps, so this is not an extra approximation, it is what gives a
 #: FINE grid the coarse-graining a coarse one gets for free.
-WATER_COARSE_GRAIN_SIGMA_A = 2.0
+WATER_COARSE_GRAIN_SIGMA_ANGSTROM = 2.0
 
 
 def occupancy_blur_halo_voxels(
-    pixel_size: float, sigma_a: float = WATER_COARSE_GRAIN_SIGMA_A
+    pixel_size: float, sigma_angstrom: float = WATER_COARSE_GRAIN_SIGMA_ANGSTROM
 ) -> int:
     """
     Voxels of context :func:`potential_occupancy` reads beyond its input.
@@ -111,16 +111,16 @@ def occupancy_blur_halo_voxels(
     ----------
     pixel_size : float
         Voxel size in Angstrom.
-    sigma_a : float, optional
+    sigma_angstrom : float, optional
         Coarse-graining length in Angstrom. Default
-        :data:`WATER_COARSE_GRAIN_SIGMA_A`.
+        :data:`WATER_COARSE_GRAIN_SIGMA_ANGSTROM`.
 
     Returns
     -------
     int
         Halo width in voxels. Zero when the blur is skipped as sub-voxel.
     """
-    sigma_vox = sigma_a / pixel_size
+    sigma_vox = sigma_angstrom / pixel_size
     if sigma_vox < 0.25:
         return 0
     return max(1, int(round(3 * sigma_vox)))
@@ -167,7 +167,7 @@ def _gaussian_blur3d(V: torch.Tensor, sigma_vox: float) -> torch.Tensor:
 def potential_occupancy(
     V: torch.Tensor,
     pixel_size: float,
-    sigma_a: float = WATER_COARSE_GRAIN_SIGMA_A,
+    sigma_angstrom: float = WATER_COARSE_GRAIN_SIGMA_ANGSTROM,
     full_potential: float | torch.Tensor = FULL_OCCUPANCY_POTENTIAL_V,
 ) -> torch.Tensor:
     """
@@ -184,11 +184,11 @@ def potential_occupancy(
         Scattering potential in volts, shape ``(..., Z, Y, X)``.
     pixel_size : float
         Voxel size in Angstrom. Required, and not merely for units:
-        `sigma_a` is physical, so this is what makes the result independent
+        `sigma_angstrom` is physical, so this is what makes the result independent
         of the render grid.
-    sigma_a : float, optional
+    sigma_angstrom : float, optional
         Coarse-graining length in Angstrom. Default
-        :data:`WATER_COARSE_GRAIN_SIGMA_A`.
+        :data:`WATER_COARSE_GRAIN_SIGMA_ANGSTROM`.
     full_potential : float or torch.Tensor, optional
         Potential of a fully-occupied voxel, V. Default
         :data:`FULL_OCCUPANCY_POTENTIAL_V`, protein's mean inner potential.
@@ -205,7 +205,7 @@ def potential_occupancy(
 
     Notes
     -----
-    Skips the convolution when ``sigma_a`` is under a quarter of a voxel.
+    Skips the convolution when ``sigma_angstrom`` is under a quarter of a voxel.
     That is a cost guard, not a correctness one -- the kernel degenerates
     to the identity there anyway (side weights ``exp(-12.5) ~ 4e-6`` at
     10 A voxels) -- and it is correct to skip: a voxel average over 10 A
@@ -221,8 +221,8 @@ def potential_occupancy(
     """
     if pixel_size <= 0:
         raise ValueError(f"pixel_size must be positive, got {pixel_size}")
-    if sigma_a < 0:
-        raise ValueError(f"sigma_a must be non-negative, got {sigma_a}")
+    if sigma_angstrom < 0:
+        raise ValueError(f"sigma_angstrom must be non-negative, got {sigma_angstrom}")
     if isinstance(full_potential, torch.Tensor):
         if bool((full_potential <= 0).any()):
             raise ValueError("full_potential must be positive")
@@ -230,7 +230,7 @@ def potential_occupancy(
         raise ValueError(f"full_potential must be positive, got {full_potential}")
 
     field = V.detach()
-    sigma_vox = sigma_a / pixel_size
+    sigma_vox = sigma_angstrom / pixel_size
     if sigma_vox >= 0.25:
         field = _gaussian_blur3d(field, sigma_vox)
     return (field / full_potential).clamp_(0.0, 1.0)

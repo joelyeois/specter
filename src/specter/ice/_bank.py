@@ -32,7 +32,7 @@ from ..progress import track
 from ._energy import MLBOP
 from ..potential import (
     FULL_OCCUPANCY_POTENTIAL_V,
-    WATER_COARSE_GRAIN_SIGMA_A,
+    WATER_COARSE_GRAIN_SIGMA_ANGSTROM,
     potential_from_deltas,
 )
 from ._blend import IceSlabBlender
@@ -1518,7 +1518,7 @@ def blend_ice_into_volume(
     relax_steps: int = 0,
     profile: "IceProfile | None" = None,
     inplace: bool = False,
-    sigma_a: float = WATER_COARSE_GRAIN_SIGMA_A,
+    sigma_angstrom: float = WATER_COARSE_GRAIN_SIGMA_ANGSTROM,
 ) -> torch.Tensor:
     """
     Add ice into a scattering-potential volume, weighted by how much room
@@ -1562,11 +1562,11 @@ def blend_ice_into_volume(
         the caller no pre-ice volume, so only pass this when nothing else holds
         a reference to ``V`` (``MicrographSpecimenGenerator`` keeps one for
         ``save_clean_exitwaves``). Default False.
-    sigma_a : float, optional
+    sigma_angstrom : float, optional
         Coarse-graining length in Angstrom for that fallback, forwarded to
         :func:`~specter.potential.potential_occupancy`. Ignored when
         ``occupancy`` is given. Default
-        :data:`~specter.potential.WATER_COARSE_GRAIN_SIGMA_A`.
+        :data:`~specter.potential.WATER_COARSE_GRAIN_SIGMA_ANGSTROM`.
 
     Returns
     -------
@@ -1598,7 +1598,7 @@ def blend_ice_into_volume(
                 full_potential=full_potential,
                 relax_steps=relax_steps,
                 profile=profile,
-                sigma_a=sigma_a,
+                sigma_angstrom=sigma_angstrom,
             )
         return out
     if isinstance(icemaker, IceBank):
@@ -1643,7 +1643,9 @@ def blend_ice_into_volume(
     # would make the whole volume's contents an input to every voxel's ice.)
     out = V if inplace else V.clone()
     chunk = max(1, 2**24 // (nxy * nxy))
-    blender = IceSlabBlender(pixel_size, full_potential=full_potential, sigma_a=sigma_a)
+    blender = IceSlabBlender(
+        pixel_size, full_potential=full_potential, sigma_angstrom=sigma_angstrom
+    )
     for start in range(0, nz, chunk):
         end = min(start + chunk, nz)
         blender.add(out, ice[:, start:end], start, end)
@@ -1662,7 +1664,7 @@ def _blend_ice_slabwise(
     full_potential: float = FULL_OCCUPANCY_POTENTIAL_V,
     relax_steps: int = 0,
     profile: "IceProfile | None" = None,
-    sigma_a: float = WATER_COARSE_GRAIN_SIGMA_A,
+    sigma_angstrom: float = WATER_COARSE_GRAIN_SIGMA_ANGSTROM,
     slab_voxels: int = 2**27,
 ) -> torch.Tensor:
     """
@@ -1686,7 +1688,7 @@ def _blend_ice_slabwise(
         On the compute device.
     pixel_size : float
         Voxel size in Å.
-    full_potential, relax_steps, profile, sigma_a
+    full_potential, relax_steps, profile, sigma_angstrom
         As for :func:`blend_ice_into_volume`.
     slab_voxels : int, optional
         Voxels per slab core; the working canvases are a few times this.
@@ -1703,7 +1705,9 @@ def _blend_ice_slabwise(
     dx = pixel_size
     kernel = bank._get_kernel(dx).to(device)
     kr = kernel.shape[0] // 2
-    blender = IceSlabBlender(dx, full_potential=full_potential, sigma_a=sigma_a)
+    blender = IceSlabBlender(
+        dx, full_potential=full_potential, sigma_angstrom=sigma_angstrom
+    )
     halo = max(kr, blender.halo) + 1
     chunk = max(1, min(slab_voxels // (n * n), nz))
 

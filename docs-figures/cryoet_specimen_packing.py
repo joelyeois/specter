@@ -219,9 +219,9 @@ def figure_backends() -> None:
     physiological band and CryoTomoSim's own output can sit on the same
     axis."""
     codes = ["1S3X", "1TUB", "1A1S", "1MBO", "1C3W", "1FA2"]
-    voxel, box_a = 5.0, (400.0, 400.0, 400.0)
-    grid = tuple(int(round(b / voxel)) for b in box_a)
-    box_volume = float(np.prod(box_a))
+    voxel, box_angstrom = 5.0, (400.0, 400.0, 400.0)
+    grid = tuple(int(round(b / voxel)) for b in box_angstrom)
+    box_volume = float(np.prod(box_angstrom))
     da_per_a3 = 1.35e-24 / 1.66054e-24
     mass_per_z = {6: 12.011, 7: 14.007, 8: 15.999, 15: 30.974, 16: 32.06}
     implicit_h = {6: 1.3, 7: 1.1, 8: 0.2, 16: 0.6}
@@ -254,7 +254,7 @@ def figure_backends() -> None:
         pool_r, pool_s = draw_species_pool(
             radii_t, ratios, fraction, box_volume, seed=SEED
         )
-        _, accepted = pack_hard_spheres_3d(pool_r, box_a, gap=0.0, seed=SEED)
+        _, accepted = pack_hard_spheres_3d(pool_r, box_angstrom, gap=0.0, seed=SEED)
         sphere.append(volume_fraction(pool_s[accepted]))
 
         _, pool_s2 = draw_species_pool(
@@ -301,9 +301,9 @@ def figure_shape_jamming() -> None:
     ceiling -- the same mechanism the sphere curve shows, measured in
     macromolecule volume fraction on real molecules rather than in
     bare-sphere occupancy on synthetic radii."""
-    voxel, box_a = 4.0, (280.0, 280.0, 280.0)
-    grid = tuple(int(round(b / voxel)) for b in box_a)
-    box_volume = float(np.prod(box_a))
+    voxel, box_angstrom = 4.0, (280.0, 280.0, 280.0)
+    grid = tuple(int(round(b / voxel)) for b in box_angstrom)
+    box_volume = float(np.prod(box_angstrom))
     da_per_a3 = 1.35e-24 / 1.66054e-24
     mass_per_z = {6: 12.011, 7: 14.007, 8: 15.999, 15: 30.974, 16: 32.06}
     implicit_h = {6: 1.3, 7: 1.1, 8: 0.2, 16: 0.6}

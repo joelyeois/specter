@@ -36,9 +36,9 @@ from .._parallel_render import (
 )
 from ..packing import estimate_protein_box_size
 from ._extent import (
-    DEFAULT_SH_AXES_RANGE_A,
-    DEFAULT_SWEPT_TOTAL_LENGTH_RANGE_A,
-    DEFAULT_SWEPT_TUBE_RADIUS_RANGE_A,
+    DEFAULT_SH_AXES_RANGE_ANGSTROM,
+    DEFAULT_SWEPT_TOTAL_LENGTH_RANGE_ANGSTROM,
+    DEFAULT_SWEPT_TUBE_RADIUS_RANGE_ANGSTROM,
     membrane_bounding_radius,
 )
 from ._field import MembraneField, _grid_points_xyz
@@ -199,7 +199,7 @@ def _chunked_upsample_density(
         `coarse_volume`.
     """
     coarse_field = MembraneField(
-        phi=coarse_volume, spacing_a=gen_voxel_size, origin_xyz=origin_xyz
+        phi=coarse_volume, spacing_angstrom=gen_voxel_size, origin_xyz=origin_xyz
     )
     nz, ny, nx = target_shape
     chunk_z = max(1, _UPSAMPLE_CHUNK_VOXELS // max(1, ny * nx))
@@ -442,7 +442,7 @@ class MembraneGenerator:
         measurably slow generation, for organelle sizes well past what
         fits in a typical local tomogram crop anyway. `"swept_spline"`
         backend only.
-    swept_step_length_a : float, optional
+    swept_step_length_angstrom : float, optional
         Distance between consecutive blended sphere source centers along
         the path, Å -- must stay well under `2 * swept_tube_radius` or
         the tube shows visible beading (warned about proactively). Default
@@ -492,7 +492,7 @@ class MembraneGenerator:
         direct visual sweep. Only affects the field when
         `swept_radius_variation > 0`. `"swept_spline"` backend only.
         Default 2.0.
-    swept_blend_sharpness_a : float, optional
+    swept_blend_sharpness_angstrom : float, optional
         Smooth-min blend radius, Å. Default (`None`) is
         `0.5 * swept_tube_radius` -- a default tuned for a handful of
         sparse, independent blobs would under-blend a dense chain of
@@ -536,12 +536,12 @@ class MembraneGenerator:
 
         The reference lipid template's own geometry gives 40 Å
         (:func:`~specter.specimen.membrane._profile.
-        native_bilayer_thickness_a`), so the default compresses it by
+        native_bilayer_thickness_angstrom`), so the default compresses it by
         0.95. That the template sits ~1 Å above the experimental range at
         all is a property of its hand-picked z-offsets, and is the part
         of this model still waiting on real coordinates -- not something
         to correct by squeezing harder at render time.
-    bilayer_layer_sigma_a : float, optional
+    bilayer_layer_sigma_angstrom : float, optional
         ADDITIONAL Gaussian broadening applied along z, Å. Default 0.0.
 
         The measured profile carries whatever leaflet width its atomic
@@ -692,31 +692,31 @@ class MembraneGenerator:
         shape_backend: str = "spherical_harmonics",
         sh_max_degree: int = 8,
         sh_axes: tuple[float, float, float] | None = None,
-        sh_axes_range: tuple[float, float] = DEFAULT_SH_AXES_RANGE_A,
+        sh_axes_range: tuple[float, float] = DEFAULT_SH_AXES_RANGE_ANGSTROM,
         sh_amplitude: float = 0.15,
         sh_spectrum_power: float = 2.0,
         swept_total_length: float | None = None,
         swept_total_length_range: tuple[
             float, float
-        ] = DEFAULT_SWEPT_TOTAL_LENGTH_RANGE_A,
-        swept_step_length_a: float | None = None,
+        ] = DEFAULT_SWEPT_TOTAL_LENGTH_RANGE_ANGSTROM,
+        swept_step_length_angstrom: float | None = None,
         swept_tube_radius: float | None = None,
         swept_tube_radius_range: tuple[
             float, float
-        ] = DEFAULT_SWEPT_TUBE_RADIUS_RANGE_A,
+        ] = DEFAULT_SWEPT_TUBE_RADIUS_RANGE_ANGSTROM,
         swept_flexibility: float | None = None,
         swept_flexibility_range: tuple[float, float] = (0.08, 0.25),
         swept_radius_variation: float | None = None,
         swept_radius_variation_range: tuple[float, float] = (0.1, 0.3),
         swept_radius_variation_sigma_points: float = 2.0,
-        swept_blend_sharpness_a: float | None = None,
+        swept_blend_sharpness_angstrom: float | None = None,
         swept_path_smoothing_sigma_points: float = 1.5,
         swept_curvature_iterations: int = 15,
         swept_curvature_step_fraction: float = 0.15,
         n_lipids_per_leaflet: int = 200,
         parameterization: str = "shtyrov",
         bilayer_thickness: float = 38.0,
-        bilayer_layer_sigma_a: float = 0.0,
+        bilayer_layer_sigma_angstrom: float = 0.0,
         transmembrane_specs: list[TransmembraneSpec] | None = None,
         transmembrane_occupancy_fraction: float = _DEFAULT_TRANSMEMBRANE_OCCUPANCY_FRACTION,
         pdb_cache_dir: str = DEFAULT_PDB_CACHE_DIR,
@@ -795,13 +795,13 @@ class MembraneGenerator:
                 min_low=0.0,
             )
             swept_radius_variation = _draw_uniform(meta_rng, lo, hi)
-        if swept_step_length_a is None:
+        if swept_step_length_angstrom is None:
             # Half the (now-resolved) tube radius -- always comfortably
-            # under the 2*tube_radius_a beading threshold regardless of
+            # under the 2*tube_radius_angstrom beading threshold regardless of
             # which value got drawn, unlike a fixed absolute default tuned
             # for one specific radius (see generate_membrane_field_swept_
             # spline's own beading-risk docstring).
-            swept_step_length_a = 0.5 * swept_tube_radius
+            swept_step_length_angstrom = 0.5 * swept_tube_radius
 
         # target_shape: auto-size from the now-resolved organelle size
         # when omitted, so a casual caller never has to compute a working
@@ -811,7 +811,7 @@ class MembraneGenerator:
         # backend's own boundary warning are the last-resort safety net,
         # not the primary defense).
         if target_shape is None:
-            safe_half_extent_a = (
+            safe_half_extent_angstrom = (
                 membrane_bounding_radius(
                     shape_backend,
                     sh_axes=sh_axes,
@@ -820,10 +820,10 @@ class MembraneGenerator:
                 )
                 / _SIZE_MARGIN_FRACTION
             )
-            n = max(1, math.ceil(2.0 * safe_half_extent_a / voxel_size))
+            n = max(1, math.ceil(2.0 * safe_half_extent_angstrom / voxel_size))
             # This OUTPUT canvas (what becomes self.volume) is a SEPARATE
             # concern from the internal working field max_field_voxels
-            # already protects (generate()'s own field_spacing_a
+            # already protects (generate()'s own field_spacing_angstrom
             # coarsening) -- and, since generation-resolution decoupling
             # was added (see max_field_voxels' own docstring), a large n
             # here is now normally absorbed by generating at a coarser
@@ -838,7 +838,7 @@ class MembraneGenerator:
                 n_capped = max(1, round(max_output_voxels ** (1.0 / 3.0)))
                 scale = n_capped / n
                 if shape_backend == "spherical_harmonics":
-                    new_sh_axes_a = (
+                    new_sh_axes_angstrom = (
                         sh_axes[0] * scale,
                         sh_axes[1] * scale,
                         sh_axes[2] * scale,
@@ -848,53 +848,55 @@ class MembraneGenerator:
                         f"voxel_size={voxel_size:.2f} A implies a {n}^3 output canvas, "
                         f"exceeding max_output_voxels ({max_output_voxels:,}) -- "
                         f"scaled down by {scale:.2f}x (to "
-                        f"{tuple(round(a, 1) for a in new_sh_axes_a)}) to avoid "
+                        f"{tuple(round(a, 1) for a in new_sh_axes_angstrom)}) to avoid "
                         "an OOM materializing the final array. Raise "
                         "max_output_voxels if you have the memory to spare, "
                         "increase voxel_size, or set sh_axes explicitly to get "
                         "the originally requested size.",
                         stacklevel=2,
                     )
-                    sh_axes = new_sh_axes_a
+                    sh_axes = new_sh_axes_angstrom
                 else:
-                    new_total_length_a = swept_total_length * scale
-                    new_tube_radius_a = swept_tube_radius * scale
+                    new_total_length_angstrom = swept_total_length * scale
+                    new_tube_radius_angstrom = swept_tube_radius * scale
                     warnings.warn(
                         "MembraneGenerator: swept_total_length/"
                         f"swept_tube_radius ({swept_total_length:.1f} A/"
                         f"{swept_tube_radius:.1f} A) at voxel_size={voxel_size:.2f} A "
                         f"imply a {n}^3 output canvas, exceeding "
                         f"max_output_voxels ({max_output_voxels:,}) -- scaled "
-                        f"both down by {scale:.2f}x (to {new_total_length_a:.1f} "
-                        f"A/{new_tube_radius_a:.1f} A) to avoid an OOM "
+                        f"both down by {scale:.2f}x (to {new_total_length_angstrom:.1f} "
+                        f"A/{new_tube_radius_angstrom:.1f} A) to avoid an OOM "
                         "materializing the final array. Raise max_output_voxels "
                         "if you have the memory to spare, or increase voxel_size, "
                         "to get the originally requested size.",
                         stacklevel=2,
                     )
-                    swept_total_length = new_total_length_a
-                    swept_tube_radius = new_tube_radius_a
-                    if swept_step_length_a > swept_tube_radius:
-                        swept_step_length_a = 0.5 * swept_tube_radius
+                    swept_total_length = new_total_length_angstrom
+                    swept_tube_radius = new_tube_radius_angstrom
+                    if swept_step_length_angstrom > swept_tube_radius:
+                        swept_step_length_angstrom = 0.5 * swept_tube_radius
                 n = n_capped
             target_shape = (n, n, n)
         else:
             tz, ty, tx = target_shape
-            box_extent_a = (tx * voxel_size, ty * voxel_size, tz * voxel_size)
-            safe_half_extent_a = _SIZE_MARGIN_FRACTION * min(box_extent_a) / 2.0
-            if safe_half_extent_a < _MIN_SAFE_HALF_EXTENT_A:
+            box_extent_angstrom = (tx * voxel_size, ty * voxel_size, tz * voxel_size)
+            safe_half_extent_angstrom = (
+                _SIZE_MARGIN_FRACTION * min(box_extent_angstrom) / 2.0
+            )
+            if safe_half_extent_angstrom < _MIN_SAFE_HALF_EXTENT_A:
                 raise ValueError(
                     f"MembraneGenerator: target_shape={target_shape!r} at "
                     f"voxel_size={voxel_size:.2f} A/voxel gives a box too small (safe "
-                    f"half-extent {safe_half_extent_a:.1f} A) to hold any "
+                    f"half-extent {safe_half_extent_angstrom:.1f} A) to hold any "
                     f"reasonably-sized {shape_backend!r} organelle -- increase "
                     "target_shape or voxel_size."
                 )
             if shape_backend == "spherical_harmonics":
                 clamped = (
-                    min(sh_axes[0], safe_half_extent_a),
-                    min(sh_axes[1], safe_half_extent_a),
-                    min(sh_axes[2], safe_half_extent_a),
+                    min(sh_axes[0], safe_half_extent_angstrom),
+                    min(sh_axes[1], safe_half_extent_angstrom),
+                    min(sh_axes[2], safe_half_extent_angstrom),
                 )
                 if clamped != sh_axes:
                     warnings.warn(
@@ -914,25 +916,25 @@ class MembraneGenerator:
                     swept_total_length=swept_total_length,
                     swept_tube_radius=swept_tube_radius,
                 )
-                if reach > safe_half_extent_a:
-                    scale = safe_half_extent_a / reach
-                    new_total_length_a = swept_total_length * scale
-                    new_tube_radius_a = swept_tube_radius * scale
+                if reach > safe_half_extent_angstrom:
+                    scale = safe_half_extent_angstrom / reach
+                    new_total_length_angstrom = swept_total_length * scale
+                    new_tube_radius_angstrom = swept_tube_radius * scale
                     warnings.warn(
                         "MembraneGenerator: swept_total_length/"
                         f"swept_tube_radius ({swept_total_length:.1f} A/"
                         f"{swept_tube_radius:.1f} A) exceed what "
                         f"target_shape={target_shape!r}/voxel_size={voxel_size:.2f} "
                         f"can safely hold -- scaled both down by {scale:.2f}x (to "
-                        f"{new_total_length_a:.1f} A/{new_tube_radius_a:.1f} A) to "
+                        f"{new_total_length_angstrom:.1f} A/{new_tube_radius_angstrom:.1f} A) to "
                         "avoid clipping. Increase target_shape/voxel_size to get "
                         "the originally requested size.",
                         stacklevel=2,
                     )
-                    swept_total_length = new_total_length_a
-                    swept_tube_radius = new_tube_radius_a
-                    if swept_step_length_a > swept_tube_radius:
-                        swept_step_length_a = 0.5 * swept_tube_radius
+                    swept_total_length = new_total_length_angstrom
+                    swept_tube_radius = new_tube_radius_angstrom
+                    if swept_step_length_angstrom > swept_tube_radius:
+                        swept_step_length_angstrom = 0.5 * swept_tube_radius
 
         tz, ty, tx = target_shape
         self.target_shape: tuple[int, int, int] = (int(tz), int(ty), int(tx))
@@ -998,7 +1000,7 @@ class MembraneGenerator:
         self.sh_spectrum_power = sh_spectrum_power
         self.swept_total_length = swept_total_length
         self.swept_total_length_range = swept_total_length_range
-        self.swept_step_length_a = swept_step_length_a
+        self.swept_step_length_angstrom = swept_step_length_angstrom
         self.swept_tube_radius = swept_tube_radius
         self.swept_tube_radius_range = swept_tube_radius_range
         self.swept_flexibility = swept_flexibility
@@ -1006,14 +1008,14 @@ class MembraneGenerator:
         self.swept_radius_variation = swept_radius_variation
         self.swept_radius_variation_range = swept_radius_variation_range
         self.swept_radius_variation_sigma_points = swept_radius_variation_sigma_points
-        self.swept_blend_sharpness_a = swept_blend_sharpness_a
+        self.swept_blend_sharpness_angstrom = swept_blend_sharpness_angstrom
         self.swept_path_smoothing_sigma_points = swept_path_smoothing_sigma_points
         self.swept_curvature_iterations = swept_curvature_iterations
         self.swept_curvature_step_fraction = swept_curvature_step_fraction
         self.n_lipids_per_leaflet = n_lipids_per_leaflet
         self.parameterization = parameterization
         self.bilayer_thickness = bilayer_thickness
-        self.bilayer_layer_sigma_a = bilayer_layer_sigma_a
+        self.bilayer_layer_sigma_angstrom = bilayer_layer_sigma_angstrom
         self.transmembrane_specs = transmembrane_specs or []
         self.transmembrane_occupancy_fraction = transmembrane_occupancy_fraction
         self.pdb_cache_dir = pdb_cache_dir
@@ -1066,8 +1068,8 @@ class MembraneGenerator:
         # as weak membranes in projection. See
         # build_measured_bilayer_profile's docstring.
         self.profile = build_measured_bilayer_profile(
-            thickness_a=self.bilayer_thickness,
-            extra_sigma_a=self.bilayer_layer_sigma_a,
+            thickness_angstrom=self.bilayer_thickness,
+            extra_sigma_angstrom=self.bilayer_layer_sigma_angstrom,
             parameterization=self.parameterization,
             device=self.device,
         )
@@ -1090,11 +1092,11 @@ class MembraneGenerator:
         # profile reported, so the grid ends up finer than before rather
         # than merely restored.
         psi_abs = self.profile.psi.abs()
-        support = self.profile.distance_a[psi_abs > 0.01 * float(psi_abs.max())]
-        half_extent_a = float(
+        support = self.profile.distance_angstrom[psi_abs > 0.01 * float(psi_abs.max())]
+        half_extent_angstrom = float(
             support.abs().max()
             if support.numel()
-            else self.profile.distance_a.abs().max()
+            else self.profile.distance_angstrom.abs().max()
         )
         # Keyed to _gen_voxel_size (the resolution generate() actually renders
         # at), not the fine self.voxel_size the output ends up at post-
@@ -1103,27 +1105,31 @@ class MembraneGenerator:
         # already coarsening that raster (see max_field_voxels' own
         # docstring). Equal to self.voxel_size whenever decoupling didn't
         # trigger, matching the pre-decoupling behaviour exactly.
-        field_spacing_a = min(self._gen_voxel_size, half_extent_a / 8)
+        field_spacing_angstrom = min(self._gen_voxel_size, half_extent_angstrom / 8)
 
         nz, ny, nx = self.target_shape
-        extent_a = torch.tensor([nx, ny, nz], dtype=torch.float32) * self.voxel_size
-        self._origin_xyz = -0.5 * extent_a
+        extent_angstrom = (
+            torch.tensor([nx, ny, nz], dtype=torch.float32) * self.voxel_size
+        )
+        self._origin_xyz = -0.5 * extent_angstrom
 
         field_shape_zyx = (
-            int(torch.ceil(extent_a[2] / field_spacing_a)),
-            int(torch.ceil(extent_a[1] / field_spacing_a)),
-            int(torch.ceil(extent_a[0] / field_spacing_a)),
+            int(torch.ceil(extent_angstrom[2] / field_spacing_angstrom)),
+            int(torch.ceil(extent_angstrom[1] / field_spacing_angstrom)),
+            int(torch.ceil(extent_angstrom[0] / field_spacing_angstrom)),
         )
         n_field_voxels = field_shape_zyx[0] * field_shape_zyx[1] * field_shape_zyx[2]
         if n_field_voxels > self.max_field_voxels:
             # coarsen just enough to fit max_field_voxels (voxel count
             # scales as 1/spacing^3) -- see max_field_voxels' own
             # docstring for why this is needed and what it trades away.
-            field_spacing_a *= (n_field_voxels / self.max_field_voxels) ** (1.0 / 3.0)
+            field_spacing_angstrom *= (n_field_voxels / self.max_field_voxels) ** (
+                1.0 / 3.0
+            )
             field_shape_zyx = (
-                int(torch.ceil(extent_a[2] / field_spacing_a)),
-                int(torch.ceil(extent_a[1] / field_spacing_a)),
-                int(torch.ceil(extent_a[0] / field_spacing_a)),
+                int(torch.ceil(extent_angstrom[2] / field_spacing_angstrom)),
+                int(torch.ceil(extent_angstrom[1] / field_spacing_angstrom)),
+                int(torch.ceil(extent_angstrom[0] / field_spacing_angstrom)),
             )
         # Report the clamp only when __init__'s generation-resolution
         # decoupling did NOT already report one. When it did, this is the
@@ -1141,7 +1147,7 @@ class MembraneGenerator:
                 f"{n_field_voxels * _FIELD_BYTES_PER_VOXEL / 1024**3:.1f} GB), "
                 f"past the "
                 f"{self.max_field_voxels * _FIELD_BYTES_PER_VOXEL / 1024**3:.1f}"
-                f" GB budget -- using field_spacing_a={field_spacing_a:.2f} A "
+                f" GB budget -- using field_spacing_angstrom={field_spacing_angstrom:.2f} A "
                 f"({field_shape_zyx[2]}x{field_shape_zyx[1]}x{field_shape_zyx[0]}"
                 " voxels) instead. The membrane's physical size and position "
                 "are preserved exactly; only its bilayer sub-structure is "
@@ -1151,7 +1157,7 @@ class MembraneGenerator:
         if self.shape_backend == "spherical_harmonics":
             self.field = generate_membrane_field_spherical_harmonics(
                 shape_zyx=field_shape_zyx,
-                spacing_a=field_spacing_a,
+                spacing_angstrom=field_spacing_angstrom,
                 sh_max_degree=self.sh_max_degree,
                 sh_axes=self.sh_axes,
                 sh_amplitude=self.sh_amplitude,
@@ -1162,14 +1168,14 @@ class MembraneGenerator:
         else:
             self.field = generate_membrane_field_swept_spline(
                 shape_zyx=field_shape_zyx,
-                spacing_a=field_spacing_a,
-                total_length_a=self.swept_total_length,
-                step_length_a=self.swept_step_length_a,
-                tube_radius_a=self.swept_tube_radius,
+                spacing_angstrom=field_spacing_angstrom,
+                total_length_angstrom=self.swept_total_length,
+                step_length_angstrom=self.swept_step_length_angstrom,
+                tube_radius_angstrom=self.swept_tube_radius,
                 flexibility=self.swept_flexibility,
                 radius_variation=self.swept_radius_variation,
                 radius_variation_sigma_points=self.swept_radius_variation_sigma_points,
-                blend_sharpness_a=self.swept_blend_sharpness_a,
+                blend_sharpness_angstrom=self.swept_blend_sharpness_angstrom,
                 path_smoothing_sigma_points=self.swept_path_smoothing_sigma_points,
                 curvature_iterations=self.swept_curvature_iterations,
                 curvature_step_fraction=self.swept_curvature_step_fraction,
@@ -1183,7 +1189,7 @@ class MembraneGenerator:
             self.field,
             self.profile,
             target_shape=self._gen_shape_zyx,
-            target_spacing_a=self._gen_voxel_size,
+            target_spacing_angstrom=self._gen_voxel_size,
             target_origin_xyz=self._origin_xyz,
         )
         if self._needs_upsample:
@@ -1202,7 +1208,7 @@ class MembraneGenerator:
         return self.volume
 
     def place_transmembrane(
-        self, min_spacing_a: float = 40.0, max_attempts: int | None = None
+        self, min_spacing_angstrom: float = 40.0, max_attempts: int | None = None
     ) -> list[TransmembranePlacement]:
         """
         Sample surface sites and insert transmembrane protein templates.
@@ -1215,7 +1221,7 @@ class MembraneGenerator:
 
         Parameters
         ----------
-        min_spacing_a : float, optional
+        min_spacing_angstrom : float, optional
             Minimum center-to-center spacing between placed sites,
             Å. Default 40.0.
         max_attempts : int, optional
@@ -1236,7 +1242,7 @@ class MembraneGenerator:
         sites_xyz, normals_xyz = sample_surface_sites(
             self.field,
             n_sites=n_sites,
-            min_spacing_a=min_spacing_a,
+            min_spacing_angstrom=min_spacing_angstrom,
             max_attempts=max_attempts,
             seed=self.seed,
         )
@@ -1249,7 +1255,7 @@ class MembraneGenerator:
                 "Newton-projection surface search exhausted max_attempts before "
                 "reaching the target count. Common causes: the membrane's surface "
                 "area is too small for this many well-spaced sites at this "
-                "min_spacing_a (try reducing min_spacing_a or n_sites/frequency), "
+                "min_spacing_angstrom (try reducing min_spacing_angstrom or n_sites/frequency), "
                 "or -- shape_backend='spherical_harmonics' specifically -- the "
                 "working field grid is too coarse relative to sh_axes for "
                 "reliable surface projection (see "

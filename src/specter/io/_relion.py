@@ -74,7 +74,7 @@ def _load_starfile_parameters(
     Returns
     -------
     tuple
-        ``(voltage_kv, pixel_size, alpha, rotations, translations_A, ctf_params,
+        ``(voltage_kv, pixel_size, alpha, rotations, translations_angstrom, ctf_params,
         scale, anisomag, split)`` for every particle in the file. ``anisomag``
         is always ``None`` (anisotropic magnification is not currently parsed
         from STAR files). ``split`` is ``None`` if the file has no
@@ -116,17 +116,19 @@ def _load_starfile_parameters(
     pixel_size = scalar_col("rlnImagePixelSize")
     alpha = scalar_col("rlnAmplitudeContrast")
 
-    cs_A = col("rlnSphericalAberration") * 1e7
-    dfu_A = col("rlnDefocusU")
-    dfv_A = col("rlnDefocusV") if "rlnDefocusV" in particles.columns else dfu_A
+    cs_angstrom = col("rlnSphericalAberration") * 1e7
+    dfu_angstrom = col("rlnDefocusU")
+    dfv_angstrom = (
+        col("rlnDefocusV") if "rlnDefocusV" in particles.columns else dfu_angstrom
+    )
     dfang_deg = col("rlnDefocusAngle")
     # RELION stores phase shift in degrees, unlike specter's internal radians
     phaseshift_rad = col("rlnPhaseShift") * torch.pi / 180
 
     ctf_params = {
-        "cs": cs_A,
-        "dfu": dfu_A,
-        "dfv": dfv_A,
+        "cs": cs_angstrom,
+        "dfu": dfu_angstrom,
+        "dfv": dfv_angstrom,
         "dfang": dfang_deg,
         "phaseshift": phaseshift_rad,
     }
@@ -152,14 +154,14 @@ def _load_starfile_parameters(
 
     # extract translations
     if {"rlnOriginXAngst", "rlnOriginYAngst"} <= set(particles.columns):
-        translations_A = torch.stack(
+        translations_angstrom = torch.stack(
             [col("rlnOriginXAngst"), col("rlnOriginYAngst")], dim=-1
         )
     elif {"rlnOriginX", "rlnOriginY"} <= set(particles.columns):
         translations_px = torch.stack([col("rlnOriginX"), col("rlnOriginY")], dim=-1)
-        translations_A = translations_px * pixel_size
+        translations_angstrom = translations_px * pixel_size
     else:
-        translations_A = torch.zeros(n, 2)
+        translations_angstrom = torch.zeros(n, 2)
 
     # extract per-particle CTF scale factor
     scale = col("rlnCtfScalefactor", default=1.0)
@@ -179,7 +181,7 @@ def _load_starfile_parameters(
         pixel_size,
         alpha,
         rotations,
-        translations_A,
+        translations_angstrom,
         ctf_params,
         scale,
         anisomag,
@@ -224,7 +226,7 @@ def extract_parameters_from_starfile(
         Amplitude contrast ratio.
     rotations : torch.Tensor
         Quaternions with shape (N, 4) or rotation vectors.
-    translations_A : torch.Tensor
+    translations_angstrom : torch.Tensor
         xy-translations in Å with shape (N, 2).
     ctf_params : dict[str, torch.Tensor]
         CTF parameters keyed by name (``cs``, ``dfu``, ``dfv``, ``dfang``,
@@ -246,7 +248,7 @@ def extract_parameters_from_starfile(
         pixel_size,
         alpha,
         rotations,
-        translations_A,
+        translations_angstrom,
         ctf_params,
         scale,
         anisomag,
@@ -268,15 +270,17 @@ def extract_parameters_from_starfile(
         indices = torch.squeeze(torch.nonzero(mask))
         halfset_labels = None
 
-    indices, rotations, translations_A, ctf_params, scale, anisomag = _select_particles(
-        mask,
-        indices,
-        rotations,
-        translations_A,
-        ctf_params,
-        scale,
-        anisomag,
-        n_particles,
+    indices, rotations, translations_angstrom, ctf_params, scale, anisomag = (
+        _select_particles(
+            mask,
+            indices,
+            rotations,
+            translations_angstrom,
+            ctf_params,
+            scale,
+            anisomag,
+            n_particles,
+        )
     )
     if halfset_labels is not None and n_particles is not None:
         halfset_labels = halfset_labels[:n_particles]
@@ -286,7 +290,7 @@ def extract_parameters_from_starfile(
         pixel_size,
         alpha,
         rotations,
-        translations_A,
+        translations_angstrom,
         ctf_params,
         scale,
         anisomag,
@@ -516,13 +520,13 @@ def create_particle_starfile(
     if ctf_params is None or isinstance(ctf_params, dict):
         zeros = torch.zeros(n)
         ctf_params = ctf_params or {}
-        cs_A = ctf_params.get("cs", zeros)
+        cs_angstrom = ctf_params.get("cs", zeros)
         dfu = ctf_params.get("dfu", zeros)
         dfv = ctf_params.get("dfv", dfu)
         dfang = ctf_params.get("dfang", zeros)
         pshift = ctf_params.get("phaseshift", zeros)
     else:
-        cs_A = ctf_params[:, 0]
+        cs_angstrom = ctf_params[:, 0]
         dfu = ctf_params[:, 1]
         dfv = ctf_params[:, 2]
         dfang = ctf_params[:, 3]
@@ -539,9 +543,9 @@ def create_particle_starfile(
         "rlnVoltage": _scalar_col(voltage, n),
         # Å -> mm before broadcasting, not after, so this goes through the
         # same helper as every other scalar column rather than being the one
-        # exception to it. `cs_A` always comes from `ctf_params` and is a
+        # exception to it. `cs_angstrom` always comes from `ctf_params` and is a
         # tensor, so the division is safe ahead of the None check.
-        "rlnSphericalAberration": _scalar_col(cs_A / 1e7, n),
+        "rlnSphericalAberration": _scalar_col(cs_angstrom / 1e7, n),
         "rlnAmplitudeContrast": _scalar_col(alpha, n),
         "rlnImagePixelSize": _scalar_col(dx, n),
         "rlnImageName": [str(i) + "@" + filename + ".mrcs" for i in range(1, n + 1)],
@@ -675,7 +679,7 @@ def create_micrograph_starfile(
         os.makedirs(output_dir, exist_ok=True)
 
     zeros = torch.zeros(n)
-    cs_A = ctf_params.get("cs", zeros)
+    cs_angstrom = ctf_params.get("cs", zeros)
     dfu = ctf_params.get("dfu", zeros)
     dfv = ctf_params.get("dfv", dfu)
     dfang = ctf_params.get("dfang", zeros)
@@ -687,9 +691,9 @@ def create_micrograph_starfile(
         "rlnVoltage": _scalar_col(voltage, n),
         # Å -> mm before broadcasting, not after, so this goes through the
         # same helper as every other scalar column rather than being the one
-        # exception to it. `cs_A` always comes from `ctf_params` and is a
+        # exception to it. `cs_angstrom` always comes from `ctf_params` and is a
         # tensor, so the division is safe ahead of the None check.
-        "rlnSphericalAberration": _scalar_col(cs_A / 1e7, n),
+        "rlnSphericalAberration": _scalar_col(cs_angstrom / 1e7, n),
         "rlnAmplitudeContrast": _scalar_col(alpha, n),
         "rlnImagePixelSize": _scalar_col(pixel_size, n),
         "rlnDefocusU": dfu,

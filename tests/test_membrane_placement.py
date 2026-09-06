@@ -11,16 +11,18 @@ from specter.specimen.membrane._placement import (
 
 
 def _sphere_field(
-    radius: float = 100.0, spacing_a: float = 4.0, device: str | torch.device = "cpu"
+    radius: float = 100.0,
+    spacing_angstrom: float = 4.0,
+    device: str | torch.device = "cpu",
 ) -> MembraneField:
     extent = 4 * radius
-    n = int(extent / spacing_a)
-    origin = torch.full((3,), -0.5 * n * spacing_a, device=device)
+    n = int(extent / spacing_angstrom)
+    origin = torch.full((3,), -0.5 * n * spacing_angstrom, device=device)
     idx = torch.arange(n, dtype=torch.float32, device=device)
     zz, yy, xx = torch.meshgrid(
-        origin[2] + idx * spacing_a,
-        origin[1] + idx * spacing_a,
-        origin[0] + idx * spacing_a,
+        origin[2] + idx * spacing_angstrom,
+        origin[1] + idx * spacing_angstrom,
+        origin[0] + idx * spacing_angstrom,
         indexing="ij",
     )
     points_xyz = torch.stack([xx, yy, zz], dim=-1)
@@ -29,7 +31,7 @@ def _sphere_field(
         points_xyz,
         k=0.0,
     )
-    return MembraneField(phi=phi, spacing_a=spacing_a, origin_xyz=origin)
+    return MembraneField(phi=phi, spacing_angstrom=spacing_angstrom, origin_xyz=origin)
 
 
 def test_sample_surface_sites_on_cuda_device():
@@ -39,19 +41,21 @@ def test_sample_surface_sites_on_cuda_device():
     # used -- invisible in the CPU-only test suite.
     if not torch.cuda.is_available():
         pytest.skip("CUDA not available")
-    field = _sphere_field(radius=100.0, spacing_a=4.0, device="cuda")
-    sites, normals = sample_surface_sites(field, n_sites=3, min_spacing_a=30.0, seed=0)
+    field = _sphere_field(radius=100.0, spacing_angstrom=4.0, device="cuda")
+    sites, normals = sample_surface_sites(
+        field, n_sites=3, min_spacing_angstrom=30.0, seed=0
+    )
     assert sites.device.type == "cuda"
     assert normals.device.type == "cuda"
     assert sites.shape[0] >= 1
 
 
 def test_sample_surface_sites_on_sphere_are_on_surface_with_min_spacing():
-    field = _sphere_field(radius=100.0, spacing_a=4.0)
-    min_spacing_a = 40.0
+    field = _sphere_field(radius=100.0, spacing_angstrom=4.0)
+    min_spacing_angstrom = 40.0
 
     sites, normals = sample_surface_sites(
-        field, n_sites=10, min_spacing_a=min_spacing_a, seed=0
+        field, n_sites=10, min_spacing_angstrom=min_spacing_angstrom, seed=0
     )
 
     assert sites.shape[0] >= 5
@@ -63,7 +67,7 @@ def test_sample_surface_sites_on_sphere_are_on_surface_with_min_spacing():
     if sites.shape[0] > 1:
         dists = torch.cdist(sites, sites)
         dists.fill_diagonal_(float("inf"))
-        assert (dists.min(dim=-1).values >= min_spacing_a - 1e-3).all()
+        assert (dists.min(dim=-1).values >= min_spacing_angstrom - 1e-3).all()
 
     normal_norms = torch.linalg.norm(normals, dim=-1)
     assert torch.allclose(normal_norms, torch.ones_like(normal_norms), atol=1e-3)
@@ -75,8 +79,12 @@ def test_sample_surface_sites_on_sphere_are_on_surface_with_min_spacing():
 
 def test_sample_surface_sites_seed_reproducible():
     field = _sphere_field()
-    sites_a, _ = sample_surface_sites(field, n_sites=5, min_spacing_a=30.0, seed=1)
-    sites_b, _ = sample_surface_sites(field, n_sites=5, min_spacing_a=30.0, seed=1)
+    sites_a, _ = sample_surface_sites(
+        field, n_sites=5, min_spacing_angstrom=30.0, seed=1
+    )
+    sites_b, _ = sample_surface_sites(
+        field, n_sites=5, min_spacing_angstrom=30.0, seed=1
+    )
     assert torch.equal(sites_a, sites_b)
 
 

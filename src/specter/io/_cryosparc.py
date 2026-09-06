@@ -32,7 +32,7 @@ def _load_csfile_parameters(
     Returns
     -------
     tuple
-        ``(voltage_kv, pixel_size, alpha, rotations, translations_A, ctf_params,
+        ``(voltage_kv, pixel_size, alpha, rotations, translations_angstrom, ctf_params,
         scale, anisomag, split)`` for every particle in the dataset.
     """
     dataset = Dataset.load(csfile_path)
@@ -40,7 +40,7 @@ def _load_csfile_parameters(
     # extract translations
     translations_px = torch.as_tensor(dataset["alignments3D/shift"])
     pixel_size = torch.as_tensor(dataset["alignments3D/psize_A"])
-    translations_A = translations_px * pixel_size[..., None]
+    translations_angstrom = translations_px * pixel_size[..., None]
     if torch.allclose(pixel_size[0], pixel_size.mean()):
         pixel_size = pixel_size[0]
     else:
@@ -50,13 +50,13 @@ def _load_csfile_parameters(
 
     # extract spherical aberration
     cs_mm = torch.as_tensor(dataset["ctf/cs_mm"])
-    cs_A = cs_mm * 1e7
+    cs_angstrom = cs_mm * 1e7
 
     # extract defocus
     dfang_rad = torch.as_tensor(dataset["ctf/df_angle_rad"])
     dfang_deg = dfang_rad / torch.pi * 180
-    dfu_A = torch.as_tensor(dataset["ctf/df1_A"])
-    dfv_A = torch.as_tensor(dataset["ctf/df2_A"])
+    dfu_angstrom = torch.as_tensor(dataset["ctf/df1_A"])
+    dfv_angstrom = torch.as_tensor(dataset["ctf/df2_A"])
 
     # extract amplitude contrast
     alpha = torch.as_tensor(dataset["ctf/amp_contrast"])
@@ -75,7 +75,7 @@ def _load_csfile_parameters(
         _console.print(
             "[yellow]Warning:[/yellow] voltage is not the same for all particles."
         )
-    wavelength_A = energy_to_wavelength(voltage_kv)
+    wavelength_angstrom = energy_to_wavelength(voltage_kv)
 
     # extract rotations
     pose = torch.as_tensor(dataset["alignments3D/pose"], dtype=torch.float32)
@@ -88,25 +88,29 @@ def _load_csfile_parameters(
     split = torch.as_tensor(dataset["alignments3D/split"].astype(int))
 
     # extract beamtilt
-    beamtiltx_rad = torch.arcsin(torch.as_tensor(dataset["ctf/tilt_A"][:, 0] / cs_A))
-    beamtilty_rad = torch.arcsin(torch.as_tensor(dataset["ctf/tilt_A"][:, 1] / cs_A))
+    beamtiltx_rad = torch.arcsin(
+        torch.as_tensor(dataset["ctf/tilt_A"][:, 0] / cs_angstrom)
+    )
+    beamtilty_rad = torch.arcsin(
+        torch.as_tensor(dataset["ctf/tilt_A"][:, 1] / cs_angstrom)
+    )
 
     # extract phaseshift
     phaseshift_rad = torch.as_tensor(dataset["ctf/phase_shift_rad"])
 
     # extract ctf shift, and add to translations
-    beamshift_A = torch.as_tensor(dataset["ctf/shift_A"])
-    translations_A -= beamshift_A
+    beamshift_angstrom = torch.as_tensor(dataset["ctf/shift_A"])
+    translations_angstrom -= beamshift_angstrom
 
     # extract trefoil. CryoSPARC's ctf/trefoil_A is a raw Å-scale
     # coefficient; specter's trefoil1/trefoil2 (see
     # aberrations._functions.trefoil) are the direct k^3-domain phase
     # coefficients in Å³, related by chi_trefoil =
-    # (2*pi/3)*wavelength^2*trefoil_A -- see newctf.py's
+    # (2*pi/3)*wavelength^2*trefoil_angstrom -- see newctf.py's
     # params_to_coeffs_odd/gen_basis_odd for the CryoSPARC-side derivation.
-    trefoil_A = torch.as_tensor(dataset["ctf/trefoil_A"])
-    trefoil1 = (2 * torch.pi / 3) * wavelength_A**2 * trefoil_A[:, 0]
-    trefoil2 = (2 * torch.pi / 3) * wavelength_A**2 * trefoil_A[:, 1]
+    trefoil_angstrom = torch.as_tensor(dataset["ctf/trefoil_A"])
+    trefoil1 = (2 * torch.pi / 3) * wavelength_angstrom**2 * trefoil_angstrom[:, 0]
+    trefoil2 = (2 * torch.pi / 3) * wavelength_angstrom**2 * trefoil_angstrom[:, 1]
 
     # extract tetrafoil. CryoSPARC's ctf/tetra_A holds 4 raw Å-scale
     # coefficients spanning secondary astigmatism (n=4, m=+-2) and true
@@ -115,11 +119,11 @@ def _load_csfile_parameters(
     # coefficients in Å⁴. See newctf.py's
     # params_to_coeffs_even/gen_basis_even for the CryoSPARC-side
     # derivation of these prefactors (including the sign/index mapping).
-    tetra_A = torch.as_tensor(dataset["ctf/tetra_A"])
-    tetrafoil1 = -2 * torch.pi * wavelength_A**3 * tetra_A[:, 0]
-    tetrafoil2 = 2 * torch.pi * wavelength_A**3 * tetra_A[:, 1]
-    tetrafoil3 = (torch.pi / 2) * wavelength_A**3 * tetra_A[:, 2]
-    tetrafoil4 = -(torch.pi / 2) * wavelength_A**3 * tetra_A[:, 3]
+    tetra_angstrom = torch.as_tensor(dataset["ctf/tetra_A"])
+    tetrafoil1 = -2 * torch.pi * wavelength_angstrom**3 * tetra_angstrom[:, 0]
+    tetrafoil2 = 2 * torch.pi * wavelength_angstrom**3 * tetra_angstrom[:, 1]
+    tetrafoil3 = (torch.pi / 2) * wavelength_angstrom**3 * tetra_angstrom[:, 2]
+    tetrafoil4 = -(torch.pi / 2) * wavelength_angstrom**3 * tetra_angstrom[:, 3]
 
     # extract per-particle scale factors
     scale = torch.as_tensor(dataset["alignments3D/alpha"])
@@ -137,7 +141,7 @@ def _load_csfile_parameters(
         anisomag = torch.inverse(anisomag.mT)
 
         # correct for anisotropic shift
-        corrected_shifts = translations_A.unsqueeze(
+        corrected_shifts = translations_angstrom.unsqueeze(
             -1
         )  # Add a dimension to make it (B, 2, 1)
 
@@ -146,12 +150,12 @@ def _load_csfile_parameters(
 
         # Remove the last dimension to get (B, 2)
         corrected_shifts = corrected_shifts.squeeze(-1)
-        translations_A = corrected_shifts
+        translations_angstrom = corrected_shifts
 
     ctf_params = {
-        "cs": cs_A,
-        "dfu": dfu_A,
-        "dfv": dfv_A,
+        "cs": cs_angstrom,
+        "dfu": dfu_angstrom,
+        "dfv": dfv_angstrom,
         "dfang": dfang_deg,
         "tiltx": beamtiltx_rad,
         "tilty": beamtilty_rad,
@@ -169,7 +173,7 @@ def _load_csfile_parameters(
         pixel_size,
         alpha,
         rotations,
-        translations_A,
+        translations_angstrom,
         ctf_params,
         scale,
         anisomag,
@@ -209,7 +213,7 @@ def extract_parameters_from_csfile(
         Amplitude contrast ratio.
     rotations : torch.Tensor
         Quaternions with shape (N, 4) or rotation vectors.
-    translations_A : torch.Tensor
+    translations_angstrom : torch.Tensor
         xy-translations in Å with shape (N, 2).
     ctf_params : torch.Tensor
         CTF parameters with shape (N, 7). Parameters are (Cs, dfu, dfv, dfang, tiltx, tilty, phaseshift).
@@ -229,7 +233,7 @@ def extract_parameters_from_csfile(
         pixel_size,
         alpha,
         rotations,
-        translations_A,
+        translations_angstrom,
         ctf_params,
         scale,
         anisomag,
@@ -245,15 +249,17 @@ def extract_parameters_from_csfile(
         indices = torch.squeeze(torch.nonzero(mask))
         halfset_labels = None
 
-    indices, rotations, translations_A, ctf_params, scale, anisomag = _select_particles(
-        mask,
-        indices,
-        rotations,
-        translations_A,
-        ctf_params,
-        scale,
-        anisomag,
-        n_particles,
+    indices, rotations, translations_angstrom, ctf_params, scale, anisomag = (
+        _select_particles(
+            mask,
+            indices,
+            rotations,
+            translations_angstrom,
+            ctf_params,
+            scale,
+            anisomag,
+            n_particles,
+        )
     )
     if halfset_labels is not None and n_particles is not None:
         halfset_labels = halfset_labels[:n_particles]
@@ -263,7 +269,7 @@ def extract_parameters_from_csfile(
         pixel_size,
         alpha,
         rotations,
-        translations_A,
+        translations_angstrom,
         ctf_params,
         scale,
         anisomag,

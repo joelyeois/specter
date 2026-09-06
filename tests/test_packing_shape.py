@@ -233,8 +233,8 @@ def test_pack_shapes_3d_accepts_a_coarser_grid_than_the_render():
     fine = build_species_mask(coords, fine_voxel, gap=0.0)
     coarse = coarsen_mask(fine, factor)
 
-    box_a = (160.0, 320.0, 320.0)
-    coarse_grid = tuple(int(round(b / (fine_voxel * factor))) for b in box_a)
+    box_angstrom = (160.0, 320.0, 320.0)
+    coarse_grid = tuple(int(round(b / (fine_voxel * factor))) for b in box_angstrom)
 
     pos, rot, accepted, _ = pack_shapes_3d(
         [coarse],
@@ -247,7 +247,7 @@ def test_pack_shapes_3d_accepts_a_coarser_grid_than_the_render():
     )
     assert accepted.numel() > 0
     # Positions are physical and box-centered, independent of packing grid.
-    half = torch.tensor([box_a[2] / 2, box_a[1] / 2, box_a[0] / 2])
+    half = torch.tensor([box_angstrom[2] / 2, box_angstrom[1] / 2, box_angstrom[0] / 2])
     assert bool((pos.abs() <= half).all()), "positions must stay inside the box"
     assert rot.shape == (accepted.numel(), 3, 3)
 

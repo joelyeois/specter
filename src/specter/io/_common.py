@@ -7,7 +7,7 @@ def _select_particles(
     mask: torch.Tensor,
     indices: torch.Tensor,
     rotations: torch.Tensor,
-    translations_A: torch.Tensor,
+    translations_angstrom: torch.Tensor,
     ctf_params: dict[str, torch.Tensor],
     scale: torch.Tensor,
     anisomag: torch.Tensor | None,
@@ -25,10 +25,10 @@ def _select_particles(
     Returns
     -------
     tuple
-        ``(indices, rotations, translations_A, ctf_params, scale, anisomag)``.
+        ``(indices, rotations, translations_angstrom, ctf_params, scale, anisomag)``.
     """
     rotations = rotations[mask]
-    translations_A = translations_A[mask]
+    translations_angstrom = translations_angstrom[mask]
     ctf_params = {k: v[mask] for k, v in ctf_params.items()}
     scale = scale[mask]
     anisomag = None if anisomag is None else anisomag[mask]
@@ -36,9 +36,9 @@ def _select_particles(
     if n_particles is not None:
         indices = indices[:n_particles]
         rotations = rotations[:n_particles]
-        translations_A = translations_A[:n_particles]
+        translations_angstrom = translations_angstrom[:n_particles]
         ctf_params = {k: v[:n_particles] for k, v in ctf_params.items()}
         scale = scale[:n_particles]
         anisomag = None if anisomag is None else anisomag[:n_particles]
 
-    return indices, rotations, translations_A, ctf_params, scale, anisomag
+    return indices, rotations, translations_angstrom, ctf_params, scale, anisomag

@@ -87,10 +87,10 @@ def _xcorr_max(a: torch.Tensor, b: torch.Tensor, max_shift: int) -> torch.Tensor
 
 
 def _bandpass(
-    a: torch.Tensor, pixel_size: float, low_A: float, high_A: float
+    a: torch.Tensor, pixel_size: float, low_angstrom: float, high_angstrom: float
 ) -> torch.Tensor:
     k = _kgrid(a.shape[-1], pixel_size)
-    mask = ((k >= 1 / low_A) & (k < 1 / high_A)).to(a.dtype)
+    mask = ((k >= 1 / low_angstrom) & (k < 1 / high_angstrom)).to(a.dtype)
     out = torch.fft.ifft2(torch.fft.fft2(a) * mask).real
     return _zscore(out)
 
@@ -114,7 +114,7 @@ def matched_index_correlation(
     sim: torch.Tensor,
     exp: torch.Tensor,
     pixel_size: float,
-    band_A: tuple[float, float] = (60.0, 15.0),
+    band_angstrom: tuple[float, float] = (60.0, 15.0),
     max_shift: int = 12,
     seed: int = 0,
 ) -> PoseAlignmentResult:
@@ -123,7 +123,7 @@ def matched_index_correlation(
     particle ``i``.
 
     The peak cross-correlation of each matched pair, band-passed to
-    ``band_A`` and allowed a small shift, is compared with the same statistic
+    ``band_angstrom`` and allowed a small shift, is compared with the same statistic
     for a random pairing. Poses aligned to the model put the matched value
     well above the shuffled one; poses from a refinement that was never
     aligned to the model (no Align 3D step against it) put the two at the
@@ -137,7 +137,7 @@ def matched_index_correlation(
         Stacks of shape (N, n, n) sharing particle index.
     pixel_size : float
         Pixel size in Å.
-    band_A : (float, float), optional
+    band_angstrom : (float, float), optional
         Band-pass in Å, (low-resolution edge, high-resolution edge). The
         default 60-15 Å carries view-dependent structure for any particle
         and little noise.
@@ -151,8 +151,8 @@ def matched_index_correlation(
     PoseAlignmentResult
     """
     n = sim.shape[0]
-    s = _bandpass(sim.float(), pixel_size, *band_A)
-    e = _bandpass(exp.float(), pixel_size, *band_A)
+    s = _bandpass(sim.float(), pixel_size, *band_angstrom)
+    e = _bandpass(exp.float(), pixel_size, *band_angstrom)
     perm = torch.randperm(n, generator=torch.Generator().manual_seed(seed))
     m = _xcorr_max(s, e, max_shift)
     mp = _xcorr_max(s, e[perm], max_shift)

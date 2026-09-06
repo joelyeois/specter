@@ -40,12 +40,12 @@ OUT_DIR = "docs/assets/images"
 # defaults, plus a fixed seed chosen for a clearly wandering (non-straight),
 # non-self-touching path.
 SHAPE_ZYX = (170, 170, 170)
-SPACING_A = 3.5
-TOTAL_LENGTH_A = 500.0
-STEP_LENGTH_A = 15.0
-TUBE_RADIUS_A = 25.0
+SPACING_ANGSTROM = 3.5
+TOTAL_LENGTH_ANGSTROM = 500.0
+STEP_LENGTH_ANGSTROM = 15.0
+TUBE_RADIUS_ANGSTROM = 25.0
 FLEXIBILITY = 0.15
-BLEND_SHARPNESS_A = 0.5 * TUBE_RADIUS_A
+BLEND_SHARPNESS_ANGSTROM = 0.5 * TUBE_RADIUS_ANGSTROM
 PATH_SIGMA_POINTS = 1.5
 CURVATURE_ITERATIONS = 15
 CURVATURE_STEP_FRACTION = 0.15
@@ -56,8 +56,8 @@ def _reference_instance() -> dict:
     """Reproduce generate_membrane_field_swept_spline's own steps, keeping
     the raw and processed path arrays the public function doesn't expose."""
     rng = np.random.default_rng(SEED)
-    n_points = max(2, round(TOTAL_LENGTH_A / STEP_LENGTH_A) + 1)
-    raw = _sample_wandering_path(n_points, STEP_LENGTH_A, FLEXIBILITY, rng)
+    n_points = max(2, round(TOTAL_LENGTH_ANGSTROM / STEP_LENGTH_ANGSTROM) + 1)
+    raw = _sample_wandering_path(n_points, STEP_LENGTH_ANGSTROM, FLEXIBILITY, rng)
 
     bbox_mid = 0.5 * (raw.min(axis=0) + raw.max(axis=0))
     centered = raw - bbox_mid
@@ -67,19 +67,19 @@ def _reference_instance() -> dict:
 
     positions_t = torch.as_tensor(smoothed, dtype=torch.float32)
     sources = [
-        SphereSource(center_xyz=positions_t[i], radius=TUBE_RADIUS_A)
+        SphereSource(center_xyz=positions_t[i], radius=TUBE_RADIUS_ANGSTROM)
         for i in range(n_points)
     ]
 
-    extent_a = (
+    extent_angstrom = (
         torch.tensor([SHAPE_ZYX[2], SHAPE_ZYX[1], SHAPE_ZYX[0]], dtype=torch.float32)
-        * SPACING_A
+        * SPACING_ANGSTROM
     )
-    origin_xyz = -0.5 * extent_a
-    points_xyz = _grid_points_xyz(SHAPE_ZYX, SPACING_A, origin_xyz, device="cpu")
-    phi_raw = blend_field(sources, points_xyz, BLEND_SHARPNESS_A)
+    origin_xyz = -0.5 * extent_angstrom
+    points_xyz = _grid_points_xyz(SHAPE_ZYX, SPACING_ANGSTROM, origin_xyz, device="cpu")
+    phi_raw = blend_field(sources, points_xyz, BLEND_SHARPNESS_ANGSTROM)
     phi_capped = cap_curvature(
-        phi_raw, SPACING_A, CURVATURE_ITERATIONS, CURVATURE_STEP_FRACTION
+        phi_raw, SPACING_ANGSTROM, CURVATURE_ITERATIONS, CURVATURE_STEP_FRACTION
     )
 
     return dict(
@@ -98,7 +98,7 @@ def figure_hero(ref: dict) -> None:
     is needed."""
     fig = plt.figure(figsize=(5, 5))
     ax = fig.add_subplot(111, projection="3d")
-    isosurface_axes(ax, ref["phi_capped"], SPACING_A, TEAL)
+    isosurface_axes(ax, ref["phi_capped"], SPACING_ANGSTROM, TEAL)
     ax.view_init(elev=15, azim=25)
     plt.tight_layout(pad=0)
     path = f"{OUT_DIR}/membrane-swept-hero.png"
@@ -129,47 +129,49 @@ def figure_path(ref: dict) -> None:
     print(f"saved {path}")
 
 
-def _straight_chain_phi(step_length_a: float, n_points: int = 8) -> np.ndarray:
+def _straight_chain_phi(step_length_angstrom: float, n_points: int = 8) -> np.ndarray:
     """Sphere centers evenly spaced along a straight line -- isolates the
     smooth-min union / beading behavior from the random walk's own shape."""
     centers = torch.zeros((n_points, 3), dtype=torch.float32)
-    centers[:, 0] = torch.arange(n_points, dtype=torch.float32) * step_length_a
+    centers[:, 0] = torch.arange(n_points, dtype=torch.float32) * step_length_angstrom
     sources = [
-        SphereSource(center_xyz=centers[i], radius=TUBE_RADIUS_A)
+        SphereSource(center_xyz=centers[i], radius=TUBE_RADIUS_ANGSTROM)
         for i in range(n_points)
     ]
     shape_zyx = (40, 60, 220)
-    spacing_a = 2.0
-    extent_a = (
+    spacing_angstrom = 2.0
+    extent_angstrom = (
         torch.tensor([shape_zyx[2], shape_zyx[1], shape_zyx[0]], dtype=torch.float32)
-        * spacing_a
+        * spacing_angstrom
     )
-    origin_xyz = torch.tensor([-20.0, -0.5 * extent_a[1], -0.5 * extent_a[2]])
-    points_xyz = _grid_points_xyz(shape_zyx, spacing_a, origin_xyz, device="cpu")
-    phi = blend_field(sources, points_xyz, BLEND_SHARPNESS_A)
-    return phi.numpy(), spacing_a, origin_xyz.numpy()
+    origin_xyz = torch.tensor(
+        [-20.0, -0.5 * extent_angstrom[1], -0.5 * extent_angstrom[2]]
+    )
+    points_xyz = _grid_points_xyz(shape_zyx, spacing_angstrom, origin_xyz, device="cpu")
+    phi = blend_field(sources, points_xyz, BLEND_SHARPNESS_ANGSTROM)
+    return phi.numpy(), spacing_angstrom, origin_xyz.numpy()
 
 
 def figure_beading(ref: dict) -> None:
     """Longitudinal slice through a straight chain of sphere sources,
-    smooth-min blended -- step_length_a well under tube_radius_a fuses into
-    a continuous tube; step_length_a exceeding it visibly beads, the real
-    failure mode generate_membrane_field_swept_spline's own step_length_a
+    smooth-min blended -- step_length_angstrom well under tube_radius_angstrom fuses into
+    a continuous tube; step_length_angstrom exceeding it visibly beads, the real
+    failure mode generate_membrane_field_swept_spline's own step_length_angstrom
     check warns about."""
     fig, axes = plt.subplots(2, 1, figsize=(8.5, 4.4))
-    for ax, step_length_a, title in [
+    for ax, step_length_angstrom, title in [
         (
             axes[0],
             15.0,
-            f"step_length_a=15 (< tube_radius_a={TUBE_RADIUS_A:.0f}): smooth",
+            f"step_length_angstrom=15 (< tube_radius_angstrom={TUBE_RADIUS_ANGSTROM:.0f}): smooth",
         ),
         (
             axes[1],
             45.0,
-            f"step_length_a=45 (> tube_radius_a={TUBE_RADIUS_A:.0f}): beaded",
+            f"step_length_angstrom=45 (> tube_radius_angstrom={TUBE_RADIUS_ANGSTROM:.0f}): beaded",
         ),
     ]:
-        phi, spacing_a, origin_xyz = _straight_chain_phi(step_length_a)
+        phi, spacing_angstrom, origin_xyz = _straight_chain_phi(step_length_angstrom)
         z_mid = phi.shape[0] // 2
         sl = phi[z_mid] < 0
         ax.imshow(sl, cmap="gray_r", origin="lower", aspect="equal")
@@ -190,11 +192,11 @@ def figure_flexibility_sweep() -> None:
     for ax, flexibility in zip(axes, configs):
         gen = MembraneGenerator(
             target_shape=SHAPE_ZYX,
-            voxel_size=SPACING_A,
+            voxel_size=SPACING_ANGSTROM,
             shape_backend="swept_spline",
-            swept_total_length=TOTAL_LENGTH_A,
-            swept_step_length_a=STEP_LENGTH_A,
-            swept_tube_radius=TUBE_RADIUS_A,
+            swept_total_length=TOTAL_LENGTH_ANGSTROM,
+            swept_step_length_angstrom=STEP_LENGTH_ANGSTROM,
+            swept_tube_radius=TUBE_RADIUS_ANGSTROM,
             swept_flexibility=flexibility,
             n_lipids_per_leaflet=1,
             seed=SEED,
@@ -214,7 +216,7 @@ def figure_flexibility_sweep() -> None:
 
 def figure_curvature_capping() -> None:
     """A synthetic tight semicircular bend (path radius of curvature only
-    modestly larger than tube_radius_a) -- deliberately NOT the random-walk
+    modestly larger than tube_radius_angstrom) -- deliberately NOT the random-walk
     reference instance, so the bend's sharpness and orientation (all in one
     plane, chosen to align with a plotted slice) are fully controlled.
 
@@ -226,41 +228,41 @@ def figure_curvature_capping() -> None:
     adjacent convex outer bulge -- both directions reduce local curvature,
     consistent with mean-curvature-flow-like smoothing, not just a
     plausible-looking difference."""
-    arc_radius_a = 1.3 * TUBE_RADIUS_A
+    arc_radius_angstrom = 1.3 * TUBE_RADIUS_ANGSTROM
     n_points = 24
     theta = np.linspace(0.0, np.pi, n_points)
     positions = np.stack(
         [
-            arc_radius_a * np.cos(theta),
-            arc_radius_a * np.sin(theta),
+            arc_radius_angstrom * np.cos(theta),
+            arc_radius_angstrom * np.sin(theta),
             np.zeros_like(theta),
         ],
         axis=-1,
     )
     positions_t = torch.as_tensor(positions, dtype=torch.float32)
     sources = [
-        SphereSource(center_xyz=positions_t[i], radius=TUBE_RADIUS_A)
+        SphereSource(center_xyz=positions_t[i], radius=TUBE_RADIUS_ANGSTROM)
         for i in range(n_points)
     ]
 
     shape_zyx = (24, 130, 130)
-    spacing_a = 1.5
-    extent_a = (
+    spacing_angstrom = 1.5
+    extent_angstrom = (
         torch.tensor([shape_zyx[2], shape_zyx[1], shape_zyx[0]], dtype=torch.float32)
-        * spacing_a
+        * spacing_angstrom
     )
-    origin_xyz = -0.5 * extent_a
-    points_xyz = _grid_points_xyz(shape_zyx, spacing_a, origin_xyz, device="cpu")
-    phi_raw = blend_field(sources, points_xyz, BLEND_SHARPNESS_A).numpy()
+    origin_xyz = -0.5 * extent_angstrom
+    points_xyz = _grid_points_xyz(shape_zyx, spacing_angstrom, origin_xyz, device="cpu")
+    phi_raw = blend_field(sources, points_xyz, BLEND_SHARPNESS_ANGSTROM).numpy()
     phi_capped = cap_curvature(
         torch.as_tensor(phi_raw),
-        spacing_a,
+        spacing_angstrom,
         CURVATURE_ITERATIONS,
         CURVATURE_STEP_FRACTION,
     ).numpy()
 
     z_mid = shape_zyx[0] // 2
-    half = 0.5 * shape_zyx[1] * spacing_a
+    half = 0.5 * shape_zyx[1] * spacing_angstrom
     extent = [-half, half, -half, half]
 
     fig, ax = plt.subplots(figsize=(5.2, 5.2))
@@ -320,18 +322,18 @@ def figure_radius_variation() -> None:
     for ax, (label, rv) in zip(axes, configs):
         gen = MembraneGenerator(
             target_shape=SHAPE_ZYX,
-            voxel_size=SPACING_A,
+            voxel_size=SPACING_ANGSTROM,
             shape_backend="swept_spline",
-            swept_total_length=TOTAL_LENGTH_A,
-            swept_step_length_a=STEP_LENGTH_A,
-            swept_tube_radius=TUBE_RADIUS_A,
+            swept_total_length=TOTAL_LENGTH_ANGSTROM,
+            swept_step_length_angstrom=STEP_LENGTH_ANGSTROM,
+            swept_tube_radius=TUBE_RADIUS_ANGSTROM,
             swept_flexibility=FLEXIBILITY,
             swept_radius_variation=rv,
             n_lipids_per_leaflet=1,
             seed=SEED,
         )
         gen.generate()
-        isosurface_axes(ax, gen.field.phi.numpy(), SPACING_A, TEAL)
+        isosurface_axes(ax, gen.field.phi.numpy(), SPACING_ANGSTROM, TEAL)
         ax.set_title(label, fontsize=11)
         ax.view_init(elev=15, azim=25)
     plt.tight_layout()

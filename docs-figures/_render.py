@@ -35,10 +35,10 @@ def shade_mesh(
 
 
 def isosurface_axes(
-    ax, phi_field: np.ndarray, spacing_a: float, base_color: np.ndarray
+    ax, phi_field: np.ndarray, spacing_angstrom: float, base_color: np.ndarray
 ):
     verts, faces, normals, _ = marching_cubes(
-        phi_field, level=0.0, spacing=(spacing_a,) * 3
+        phi_field, level=0.0, spacing=(spacing_angstrom,) * 3
     )
     mesh = shade_mesh(verts, faces, normals, base_color)
     ax.add_collection3d(mesh)

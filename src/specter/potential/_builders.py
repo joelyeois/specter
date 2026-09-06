@@ -539,8 +539,8 @@ def _accumulate_analytic_window(
         index: list[Any] = [0, 0, 0]
         index[axis] = slice(None)
         offsets_1d = offsets_vox[tuple(index) + (axis,)]  # (w,)
-        rel_ang = (offsets_1d[None, :] - frac_offset[:, axis, None]) * dx  # (N,w)
-        x0 = rel_ang[:, :, None]  # (N,w,1), to broadcast against the 5 terms
+        rel_angstrom = (offsets_1d[None, :] - frac_offset[:, axis, None]) * dx  # (N,w)
+        x0 = rel_angstrom[:, :, None]  # (N,w,1), to broadcast against the 5 terms
         per_axis.append(
             (torch.erf(k * (x0 + h)) - torch.erf(k * (x0 - h))) / (4 * h)
         )  # (N,w,5)
@@ -648,8 +648,8 @@ def build_potential_volume_analytic_scatter_kirkland(
         coords, grid_shape, dx, rcut
     )
     rel_vox = offsets_vox[None] - frac_offset[:, None, None, None, :]  # (N,w,w,w,3)
-    rel_ang = rel_vox * dx  # (N,w,w,w,3)
-    p = rel_ang.norm(dim=-1)  # (N,w,w,w)
+    rel_angstrom = rel_vox * dx  # (N,w,w,w,3)
+    p = rel_angstrom.norm(dim=-1)  # (N,w,w,w)
 
     # Yukawa terms (3 per atom): shell-average at radial distance p.
     lam_yuk = 2 * torch.pi * torch.sqrt(b_yuk)  # (N,3)
@@ -660,7 +660,7 @@ def build_potential_volume_analytic_scatter_kirkland(
 
     # Gaussian terms (3 per atom): exact erf voxel average, per axis.
     d_gauss_b = d_gauss[:, None, None, None, :]  # (N,1,1,1,3)
-    x0 = rel_ang.unsqueeze(-1)  # (N,w,w,w,3,1) to broadcast against the 3 terms
+    x0 = rel_angstrom.unsqueeze(-1)  # (N,w,w,w,3,1) to broadcast against the 3 terms
     gauss_avg = _gaussian_voxel_average_3d(x0, h, d_gauss_b.unsqueeze(-2))
     gauss_term = c2_gauss * (c_gauss[:, None, None, None, :] * gauss_avg).sum(-1)
 
@@ -724,8 +724,8 @@ def build_potential_volume_analytic_scatter_lobato(
         coords, grid_shape, dx, rcut
     )
     rel_vox = offsets_vox[None] - frac_offset[:, None, None, None, :]  # (N,w,w,w,3)
-    rel_ang = rel_vox * dx
-    p = rel_ang.norm(dim=-1).unsqueeze(-1)  # (N,w,w,w,1)
+    rel_angstrom = rel_vox * dx
+    p = rel_angstrom.norm(dim=-1).unsqueeze(-1)  # (N,w,w,w,1)
 
     lam = (2 * torch.pi / torch.sqrt(b))[:, None, None, None, :]  # (N,1,1,1,5)
     yukawa_avg = yukawa_shell_average(p, R, lam)  # (N,w,w,w,5)

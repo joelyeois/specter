@@ -51,10 +51,10 @@ def _project_to_surface(
 def sample_surface_sites(
     field: MembraneField,
     n_sites: int,
-    min_spacing_a: float,
+    min_spacing_angstrom: float,
     max_attempts: int | None = None,
     projection_iterations: int = 8,
-    phi_tolerance_a: float = 1.0,
+    phi_tolerance_angstrom: float = 1.0,
     seed: int | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """
@@ -64,7 +64,7 @@ def sample_surface_sites(
     Newton-projects each onto the zero level set (gradient descent on
     ``phi``, which converges quickly since ``|grad(phi)| ~= 1`` near the
     surface), then greedily accepts candidates that land close enough to the
-    surface and are not within ``min_spacing_a`` of any already-accepted
+    surface and are not within ``min_spacing_angstrom`` of any already-accepted
     site (self-avoiding-walk style, not a true blue-noise Poisson-disc
     sampler).
 
@@ -73,13 +73,13 @@ def sample_surface_sites(
     field : MembraneField
     n_sites : int
         Target number of sites.
-    min_spacing_a : float
+    min_spacing_angstrom : float
         Minimum center-to-center spacing between accepted sites, Å.
     max_attempts : int, optional
         Maximum candidate draws before giving up. Default ``20 * n_sites``.
     projection_iterations : int, optional
         Newton projection steps per candidate. Default 8.
-    phi_tolerance_a : float, optional
+    phi_tolerance_angstrom : float, optional
         Maximum ``|phi|`` after projection for a candidate to be accepted as
         genuinely on the surface. Default 1.0.
     seed : int, optional
@@ -104,7 +104,8 @@ def sample_surface_sites(
     device = field.phi.device
     nz, ny, nx = field.phi.shape
     extent = (
-        torch.tensor([nx, ny, nz], dtype=torch.float32, device=device) * field.spacing_a
+        torch.tensor([nx, ny, nz], dtype=torch.float32, device=device)
+        * field.spacing_angstrom
     )
     origin = field.origin_xyz.to(device)
 
@@ -119,7 +120,7 @@ def sample_surface_sites(
         )
         projected = _project_to_surface(field, candidates, projection_iterations)
         phi_residual = field.sample(projected).abs()
-        valid_mask = phi_residual < phi_tolerance_a
+        valid_mask = phi_residual < phi_tolerance_angstrom
 
         for i in range(batch):
             attempts += 1
@@ -131,7 +132,7 @@ def sample_surface_sites(
             if accepted_sites:
                 existing = torch.stack(accepted_sites)
                 dists = torch.linalg.norm(existing - candidate_site, dim=-1)
-                if bool((dists < min_spacing_a).any()):
+                if bool((dists < min_spacing_angstrom).any()):
                     continue
             normal = field.gradient(candidate_site.unsqueeze(0))[0]
             accepted_sites.append(candidate_site)

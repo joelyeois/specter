@@ -255,10 +255,10 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
         # and TomogramSpecimenGenerator apply to random_rotation_matrix.
         quats = rotations.random_quaternion(n).reshape(n, 4)
 
-        defocus_A = _uniform_sample(config.defocus, n)
+        defocus_angstrom = _uniform_sample(config.defocus, n)
         astigmatism_magnitude = _uniform_sample(config.astigmatism, n)
         dfang = _uniform_sample(config.astigmatism_angle, n)
-        dfv = defocus_A - astigmatism_magnitude
+        dfv = defocus_angstrom - astigmatism_magnitude
         phaseshift = _uniform_sample(config.phaseshift, n)
         tiltx = _uniform_sample(config.tiltx, n)
         tilty = _uniform_sample(config.tilty, n)
@@ -270,7 +270,7 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
         tetrafoil4 = _uniform_sample(config.tetrafoil4, n)
         ctf_params = {
             "cs": torch.tensor([cs_angstrom] * n),
-            "dfu": defocus_A,
+            "dfu": defocus_angstrom,
             "dfv": dfv,
             "dfang": dfang,
             "phaseshift": phaseshift,

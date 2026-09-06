@@ -155,7 +155,7 @@ def run_micrograph(config: MicrographConfig) -> None:
 
     # --- Sampling per-micrograph parameters ---
     section("Sampling defocus, dose, and coincidence radius")
-    defocus_A = _uniform_sample(config.defocus, n)
+    defocus_angstrom = _uniform_sample(config.defocus, n)
     dose = _uniform_sample(config.dose, n)
     coincidence_radius = _uniform_sample(config.coincidence_radius, n)
     potential_scale = _uniform_sample(config.potential_scale, n)
@@ -165,7 +165,7 @@ def run_micrograph(config: MicrographConfig) -> None:
     )
     ctf_params = {
         "cs": torch.tensor([cs_angstrom] * n),
-        "dfu": defocus_A,
+        "dfu": defocus_angstrom,
     }
 
     # --- Ice ---

@@ -32,7 +32,7 @@ from specter.specimen.membrane._profile import (
     build_measured_bilayer_profile,
     build_reference_lipid_patch,
     compute_bilayer_profile,
-    native_bilayer_thickness_a,
+    native_bilayer_thickness_angstrom,
 )
 from specter.specimen.membrane._raster import rasterize_membrane_density
 
@@ -47,7 +47,9 @@ PURPLE = "#6b4fa0"
 
 
 def _superseded_two_gaussian(
-    thickness_a: float = 30.0, layer_sigma_a: float = 1.25, amplitude: float = 20.2
+    thickness_angstrom: float = 30.0,
+    layer_sigma_angstrom: float = 1.25,
+    amplitude: float = 20.2,
 ) -> tuple[np.ndarray, np.ndarray]:
     """The profile specter shipped until 2026-08-31: two Gaussians on
     vacuum, scaled by an amplitude fitted from an isolated atom's peak.
@@ -59,9 +61,9 @@ def _superseded_two_gaussian(
     show that difference.
     """
     d = np.linspace(-40.0, 40.0, 481)
-    half = thickness_a / 2.0
-    peaks = np.exp(-0.5 * ((d - half) / layer_sigma_a) ** 2) + np.exp(
-        -0.5 * ((d + half) / layer_sigma_a) ** 2
+    half = thickness_angstrom / 2.0
+    peaks = np.exp(-0.5 * ((d - half) / layer_sigma_angstrom) ** 2) + np.exp(
+        -0.5 * ((d + half) / layer_sigma_angstrom) ** 2
     )
     return d, amplitude * peaks
 
@@ -75,7 +77,7 @@ def figure_profile() -> None:
         n_lipids_per_leaflet=CALIBRATION_N_LIPIDS_PER_LEAFLET, seed=SEED, device=DEVICE
     )
     measured = compute_bilayer_profile(atomic_numbers, coordinates, device=DEVICE)
-    m_d = measured.distance_a.cpu().numpy()
+    m_d = measured.distance_angstrom.cpu().numpy()
     m_psi = measured.psi.cpu().numpy()
     old_d, old_psi = _superseded_two_gaussian()
 
@@ -100,11 +102,11 @@ def figure_profile() -> None:
     )
 
     ax = axes[1]
-    native = native_bilayer_thickness_a()
+    native = native_bilayer_thickness_angstrom()
     for thickness, style in [(30.0, ":"), (38.0, "-"), (46.0, "--")]:
-        profile = build_measured_bilayer_profile(thickness_a=thickness)
+        profile = build_measured_bilayer_profile(thickness_angstrom=thickness)
         psi = profile.psi.cpu().numpy()
-        dist = profile.distance_a.cpu().numpy()
+        dist = profile.distance_angstrom.cpu().numpy()
         ax.plot(
             dist,
             psi,
@@ -156,15 +158,15 @@ def figure_antialias() -> None:
     one broad peak as resolution drops."""
     gen = _vesicle()
     field, profile = gen.field, gen.profile
-    extent_a = 700.0
+    extent_angstrom = 700.0
 
     fig, axes = plt.subplots(2, 3, figsize=(11.0, 5.2), sharex=True, sharey=True)
     for col, voxel_size in enumerate([4.0, 8.0, 12.0]):
-        n = int(round(extent_a / voxel_size)) // 2 * 2
+        n = int(round(extent_angstrom / voxel_size)) // 2 * 2
         shape = (n, n, n)
         for row, antialias in enumerate([0.0, None]):
             volume = rasterize_membrane_density(
-                field, profile, shape, voxel_size, antialias_sigma_a=antialias
+                field, profile, shape, voxel_size, antialias_sigma_angstrom=antialias
             ).cpu()
             line = volume[n // 2, n // 2].numpy()
             x = (np.arange(n) - n / 2 + 0.5) * voxel_size
@@ -194,7 +196,7 @@ def figure_transmembrane() -> None:
     rendered result -- every protein's own axis follows the local normal,
     so none of them lie flat against the bilayer."""
     gen = _vesicle(transmembrane=True)
-    placements = gen.place_transmembrane(min_spacing_a=40.0)
+    placements = gen.place_transmembrane(min_spacing_angstrom=40.0)
     sites = torch.stack([p.center_xyz for p in placements]).cpu().numpy()
     normals = gen.field.gradient(torch.stack([p.center_xyz for p in placements]))
     normals = normals.cpu().numpy()

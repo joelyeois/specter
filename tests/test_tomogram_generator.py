@@ -587,7 +587,7 @@ def test_tomogram_specimen_generator_transmembrane_reflects_position_offset():
     )
     mgen_local.generate()
     local_placements = mgen_local.place_transmembrane(
-        min_spacing_a=gen.min_transmembrane_spacing
+        min_spacing_angstrom=gen.min_transmembrane_spacing
     )
     assert len(local_placements) == len(gen.transmembrane_placements)
 

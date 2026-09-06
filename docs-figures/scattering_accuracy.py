@@ -159,13 +159,13 @@ def _accuracy_sweep(
     intensity (energy conservation -- should stay 1.0, since the exit wave
     is unit-modulus before absorption), per model, as a function of slab
     thickness."""
-    thickness_A = []
+    thickness_angstrom = []
     errors: dict[str, list[float]] = {m: [] for m in APPROX_MODELS}
     means: dict[str, list[float]] = {m: [] for m in APPROX_MODELS}
 
     for nz in THICKNESS_STEPS_NZ:
         V_slice = V[:, :nz].contiguous()
-        thickness_A.append(nz * PIXEL_SIZE)
+        thickness_angstrom.append(nz * PIXEL_SIZE)
 
         ref_scat = Scattering(
             NXY, PIXEL_SIZE, VOLTAGE, scattering_model="multislice", progressbars=False
@@ -188,11 +188,11 @@ def _accuracy_sweep(
             errors[model].append(rel_err)
             means[model].append(intensity.mean().item())
 
-    return thickness_A, errors, means
+    return thickness_angstrom, errors, means
 
 
 def figure_accuracy_vs_thickness(
-    thickness_A: list[float], errors: dict[str, list[float]]
+    thickness_angstrom: list[float], errors: dict[str, list[float]]
 ) -> None:
     palette = dict(zip(APPROX_MODELS, _deep_palette(len(APPROX_MODELS))))
 
@@ -201,7 +201,7 @@ def figure_accuracy_vs_thickness(
         for model in APPROX_MODELS:
             emphasized = model in highlight
             ax.semilogy(
-                thickness_A,
+                thickness_angstrom,
                 errors[model],
                 color=palette[model],
                 linewidth=2.2 if emphasized else 1.2,
@@ -234,7 +234,7 @@ def figure_accuracy_vs_thickness(
 
 
 def figure_mean_intensity_vs_thickness(
-    thickness_A: list[float], means: dict[str, list[float]]
+    thickness_angstrom: list[float], means: dict[str, list[float]]
 ) -> None:
     """Mean exit-wave intensity vs. thickness, per model. A properly
     normalized exit wave conserves total intensity (mean |psi|^2 == 1,
@@ -248,7 +248,7 @@ def figure_mean_intensity_vs_thickness(
     ax.axhline(1.0, color="black", linewidth=1.0, label="multislice (reference)")
     for model in APPROX_MODELS:
         ax.plot(
-            thickness_A,
+            thickness_angstrom,
             means[model],
             color=palette[model],
             marker="o",
@@ -335,12 +335,12 @@ def figure_pattern_correlation_vs_thickness(V: torch.Tensor) -> None:
     `_rytov_theta`'s Re/Im decomposition in the docs page."""
     palette = dict(zip(APPROX_MODELS, _deep_palette(len(APPROX_MODELS))))
     models = ["rytov", "firstborn", "kinematic"]
-    thickness_A = []
+    thickness_angstrom = []
     correlations: dict[str, list[float]] = {m: [] for m in models}
 
     for nz in THICKNESS_STEPS_NZ:
         V_slice = V[:, :nz].contiguous()
-        thickness_A.append(nz * PIXEL_SIZE)
+        thickness_angstrom.append(nz * PIXEL_SIZE)
         ref_scat = Scattering(
             NXY, PIXEL_SIZE, VOLTAGE, scattering_model="multislice", progressbars=False
         ).to(DEVICE)
@@ -365,7 +365,7 @@ def figure_pattern_correlation_vs_thickness(V: torch.Tensor) -> None:
     ax.axhline(0.0, color="gray", linewidth=0.8)
     for model in models:
         ax.plot(
-            thickness_A,
+            thickness_angstrom,
             correlations[model],
             color=palette[model],
             marker="o",
@@ -395,21 +395,31 @@ def figure_theta_real_imag_split(V: torch.Tensor) -> None:
     Re(Theta)^2 term with no counterpart in the true |exp(i*Theta)|^2 =
     exp(-2*Im(Theta))."""
     palette = _deep_palette(2)
-    thickness_A = []
+    thickness_angstrom = []
     std_re, std_im = [], []
     for nz in THICKNESS_STEPS_NZ:
         V_slice = V[:, :nz].contiguous()
-        thickness_A.append(nz * PIXEL_SIZE)
+        thickness_angstrom.append(nz * PIXEL_SIZE)
         theta = _rytov_theta(V_slice, nz)
         std_re.append(theta.real.std().item())
         std_im.append(theta.imag.std().item())
 
     fig, ax = plt.subplots(figsize=(6.5, 4.5), dpi=200)
     ax.plot(
-        thickness_A, std_re, color=palette[0], marker="o", markersize=4, label="Re(Θ)"
+        thickness_angstrom,
+        std_re,
+        color=palette[0],
+        marker="o",
+        markersize=4,
+        label="Re(Θ)",
     )
     ax.plot(
-        thickness_A, std_im, color=palette[1], marker="o", markersize=4, label="Im(Θ)"
+        thickness_angstrom,
+        std_im,
+        color=palette[1],
+        marker="o",
+        markersize=4,
+        label="Im(Θ)",
     )
     ax.set_xlabel("Specimen thickness (Å)")
     ax.set_ylabel("Standard deviation")
@@ -427,9 +437,9 @@ def main() -> None:
     V = _ice_slab()
     figure_multislice_trace(V)
     figure_klim_bandlimit(V)
-    thickness_A, errors, means = _accuracy_sweep(V)
-    figure_accuracy_vs_thickness(thickness_A, errors)
-    figure_mean_intensity_vs_thickness(thickness_A, means)
+    thickness_angstrom, errors, means = _accuracy_sweep(V)
+    figure_accuracy_vs_thickness(thickness_angstrom, errors)
+    figure_mean_intensity_vs_thickness(thickness_angstrom, means)
     figure_mode_intensity_maps(V)
     figure_pattern_correlation_vs_thickness(V)
     figure_theta_real_imag_split(V)

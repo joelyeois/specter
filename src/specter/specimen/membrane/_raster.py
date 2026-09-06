@@ -48,9 +48,9 @@ def rasterize_membrane_density(
     field: MembraneField,
     profile: BilayerProfile,
     target_shape: tuple[int, int, int],
-    target_spacing_a: float,
+    target_spacing_angstrom: float,
     target_origin_xyz: torch.Tensor | None = None,
-    antialias_sigma_a: float | None = None,
+    antialias_sigma_angstrom: float | None = None,
 ) -> torch.Tensor:
     """
     Rasterize ``psi(field.phi)`` onto an output grid, anti-aliased.
@@ -67,15 +67,15 @@ def rasterize_membrane_density(
         :func:`~specter.specimen.membrane._profile.compute_bilayer_profile`).
     target_shape : tuple of int
         Output grid shape.
-    target_spacing_a : float
+    target_spacing_angstrom : float
         Output voxel size, Å.
     target_origin_xyz : torch.Tensor, optional
         Physical ``(x, y, z)`` location of output grid index ``(0, 0, 0)``,
         Å. Default centers the output grid on the physical origin,
         matching ``field``'s own centered-origin convention.
-    antialias_sigma_a : float, optional
+    antialias_sigma_angstrom : float, optional
         Gaussian blur sigma applied to the fine density before resampling,
-        Å. Default ``0.5 * target_spacing_a`` whenever the output is
+        Å. Default ``0.5 * target_spacing_angstrom`` whenever the output is
         coarser than ``field``'s own working spacing (a conservative
         approximation of a box filter matched to the output voxel
         footprint -- see module docstring), 0 otherwise (no anti-aliasing
@@ -89,16 +89,20 @@ def rasterize_membrane_density(
     """
     density_fine = profile(field.phi)
 
-    if antialias_sigma_a is None:
-        antialias_sigma_a = (
-            0.5 * target_spacing_a if target_spacing_a > field.spacing_a else 0.0
+    if antialias_sigma_angstrom is None:
+        antialias_sigma_angstrom = (
+            0.5 * target_spacing_angstrom
+            if target_spacing_angstrom > field.spacing_angstrom
+            else 0.0
         )
-    if antialias_sigma_a > 0:
-        sigma_vox = antialias_sigma_a / field.spacing_a
+    if antialias_sigma_angstrom > 0:
+        sigma_vox = antialias_sigma_angstrom / field.spacing_angstrom
         density_fine = _gaussian_blur3d(density_fine, sigma_vox)
 
     filtered_field = MembraneField(
-        phi=density_fine, spacing_a=field.spacing_a, origin_xyz=field.origin_xyz
+        phi=density_fine,
+        spacing_angstrom=field.spacing_angstrom,
+        origin_xyz=field.origin_xyz,
     )
 
     if target_origin_xyz is None:
@@ -107,12 +111,12 @@ def rasterize_membrane_density(
                 [target_shape[2], target_shape[1], target_shape[0]],
                 dtype=torch.float32,
             )
-            * target_spacing_a
+            * target_spacing_angstrom
         )
         target_origin_xyz = -0.5 * extent
 
     points_xyz = _grid_points_xyz(
-        target_shape, target_spacing_a, target_origin_xyz, field.phi.device
+        target_shape, target_spacing_angstrom, target_origin_xyz, field.phi.device
     )
     return filtered_field.sample(points_xyz)
 

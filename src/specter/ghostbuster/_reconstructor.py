@@ -448,7 +448,7 @@ class Reconstructor(_BaseReconstructor):
         gen.quaternions = self.rotations
         gen.translations = self.translations
 
-        shift = getattr(gen, "_defocus_shift_A", 0.0) or 0.0
+        shift = getattr(gen, "_defocus_shift_angstrom", 0.0) or 0.0
         for name in getattr(self, "_defocus_names", []):
             base = getattr(self, f"_{name}_base")
             setattr(gen, name, base + self.defocus_offset - shift)

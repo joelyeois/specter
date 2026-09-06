@@ -28,11 +28,11 @@ import torch.nn.functional as F
 # is evaluated over a +/-2.5 A box around it, so a molecule's bounding box
 # needs at least this much margin beyond its outermost atom or that atom's
 # kernel gets truncated by convolution. Same value as
-# specimen/membrane/_profile.py's ATOM_KERNEL_HALF_WIDTH_A -- kept as an
+# specimen/membrane/_profile.py's ATOM_KERNEL_HALF_WIDTH_ANGSTROM -- kept as an
 # independent local constant (not imported) to keep this module's
 # dependencies limited, matching this codebase's established
 # per-generator zero-cross-coupling convention.
-ATOM_KERNEL_HALF_WIDTH_A = 2.5
+ATOM_KERNEL_HALF_WIDTH_ANGSTROM = 2.5
 
 
 def estimate_protein_box_size(max_diameter: float, voxel_size: float) -> int:
@@ -50,8 +50,8 @@ def estimate_protein_box_size(max_diameter: float, voxel_size: float) -> int:
     int
         Even grid size in voxels.
     """
-    margin_a = 2 * ATOM_KERNEL_HALF_WIDTH_A
-    n = int(np.ceil((max_diameter + 2 * margin_a) / voxel_size))
+    margin_angstrom = 2 * ATOM_KERNEL_HALF_WIDTH_ANGSTROM
+    n = int(np.ceil((max_diameter + 2 * margin_angstrom) / voxel_size))
     n += n % 2
     return n
 

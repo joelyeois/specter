@@ -65,7 +65,7 @@ from ...potential import PotentialBuilder
 # Same value as specimen/packing/algorithms.py's own independent copy of
 # this constant -- each specimen generator keeps its own rather than
 # importing, so this module's dependencies stay limited to atom/potential.
-ATOM_KERNEL_HALF_WIDTH_A = 2.5
+ATOM_KERNEL_HALF_WIDTH_ANGSTROM = 2.5
 
 # Grid spacing the reference lipid patch is rendered on to produce psi(z),
 # A. Deliberately independent of the voxel size a membrane is rendered at:
@@ -86,7 +86,7 @@ ATOM_KERNEL_HALF_WIDTH_A = 2.5
 # 8.25, 7.70, 7.88): that is grid-alignment scatter on a narrow feature,
 # not a convergence sequence, so do not read a converged peak off it or
 # tune this constant to make the peak look stable.
-CALIBRATION_VOXEL_SIZE_A = 1.0
+CALIBRATION_VOXEL_SIZE_ANGSTROM = 1.0
 
 # Lipids per leaflet in the reference patch psi(z) is measured from. Fixed
 # independently of a caller's own n_lipids_per_leaflet, which sizes a patch
@@ -102,8 +102,8 @@ CALIBRATION_N_LIPIDS_PER_LEAFLET = 400
 # rather than drifting with the lipid jitter draw.
 CALIBRATION_SEED = 0
 
-# Schematic single-leaflet lipid atom template: (element, z_offset_a, count,
-# jitter_scale). z_offset_a is distance from the mid-plane for this leaflet
+# Schematic single-leaflet lipid atom template: (element, z_offset_angstrom, count,
+# jitter_scale). z_offset_angstrom is distance from the mid-plane for this leaflet
 # (mirrored for the opposite leaflet); jitter_scale multiplies the base
 # per-atom jitter for that group. Not a relaxed structure -- see module
 # docstring.
@@ -196,7 +196,7 @@ _LEAFLET_TEMPLATE: list[tuple[str, float, int, float]] = [
 def build_reference_lipid_patch(
     n_lipids_per_leaflet: int = 200,
     area_per_lipid_a2: float = 65.0,
-    jitter_a: float = 2.5,
+    jitter_angstrom: float = 2.5,
     seed: int | None = None,
     device: str | torch.device = "cpu",
 ) -> tuple[torch.Tensor, torch.Tensor]:
@@ -216,7 +216,7 @@ def build_reference_lipid_patch(
     area_per_lipid_a2 : float, optional
         Lateral area per lipid, Å², used to size the patch. Default
         65.0 (a typical fluid-phase PC value).
-    jitter_a : float, optional
+    jitter_angstrom : float, optional
         Standard deviation of per-atom positional jitter, Å, standing
         in for conformational/thermal disorder. Default 2.5.
     seed : int, optional
@@ -236,7 +236,7 @@ def build_reference_lipid_patch(
     if seed is not None:
         generator.manual_seed(seed)
 
-    side_a = math.sqrt(n_lipids_per_leaflet * area_per_lipid_a2)
+    side_angstrom = math.sqrt(n_lipids_per_leaflet * area_per_lipid_a2)
 
     elements: list[str] = []
     xs: list[float] = []
@@ -244,10 +244,10 @@ def build_reference_lipid_patch(
     zs: list[float] = []
     for leaflet_sign in (1.0, -1.0):
         for _ in range(n_lipids_per_leaflet):
-            lipid_xy = (torch.rand(2, generator=generator) - 0.5) * side_a
+            lipid_xy = (torch.rand(2, generator=generator) - 0.5) * side_angstrom
             for element, z_offset, count, jitter_scale in _LEAFLET_TEMPLATE:
                 jitter = torch.randn((count, 3), generator=generator) * (
-                    jitter_a * jitter_scale
+                    jitter_angstrom * jitter_scale
                 )
                 elements.extend([element] * count)
                 xs.extend((lipid_xy[0] + jitter[:, 0]).tolist())
@@ -284,13 +284,13 @@ class BilayerProfile:
 
     Parameters
     ----------
-    distance_a : torch.Tensor
+    distance_angstrom : torch.Tensor
         Sorted ascending signed distances, shape ``(N,)``, Å.
     psi : torch.Tensor
         Laterally-averaged potential at each distance, shape ``(N,)``.
     """
 
-    distance_a: torch.Tensor
+    distance_angstrom: torch.Tensor
     psi: torch.Tensor
 
     def __call__(self, d: torch.Tensor) -> torch.Tensor:
@@ -308,7 +308,7 @@ class BilayerProfile:
             Interpolated potential, same shape as ``d``. Values beyond the
             table's range are clamped to the nearest tabulated value.
         """
-        flat = _interp1d(d.reshape(-1), self.distance_a, self.psi)
+        flat = _interp1d(d.reshape(-1), self.distance_angstrom, self.psi)
         return flat.reshape(d.shape)
 
 
@@ -347,9 +347,10 @@ def compute_bilayer_profile(
     """
     coordinates = coordinates.to(device)
     extent = (coordinates.max(dim=0).values - coordinates.min(dim=0).values).tolist()
-    margin_a = 2 * ATOM_KERNEL_HALF_WIDTH_A
+    margin_angstrom = 2 * ATOM_KERNEL_HALF_WIDTH_ANGSTROM
     n_xyz = tuple(
-        int(math.ceil((e + 2 * margin_a) / voxel_size)) // 2 * 2 + 2 for e in extent
+        int(math.ceil((e + 2 * margin_angstrom) / voxel_size)) // 2 * 2 + 2
+        for e in extent
     )
 
     builder = PotentialBuilder(
@@ -373,9 +374,9 @@ def compute_bilayer_profile(
 
     core = volume[:, y_mask][:, :, x_mask]
     psi = core.mean(dim=(1, 2))
-    distance_a = z_idx.to(dtype=psi.dtype) * voxel_size
+    distance_angstrom = z_idx.to(dtype=psi.dtype) * voxel_size
 
-    return BilayerProfile(distance_a=distance_a, psi=psi)
+    return BilayerProfile(distance_angstrom=distance_angstrom, psi=psi)
 
 
 @lru_cache(maxsize=None)
@@ -391,17 +392,17 @@ def _measured_bilayer_profile(parameterization: str = "shtyrov") -> BilayerProfi
     return compute_bilayer_profile(
         atomic_numbers,
         coordinates,
-        voxel_size=CALIBRATION_VOXEL_SIZE_A,
+        voxel_size=CALIBRATION_VOXEL_SIZE_ANGSTROM,
         parameterization=parameterization,
     )
 
 
-def native_bilayer_thickness_a(parameterization: str = "shtyrov") -> float:
+def native_bilayer_thickness_angstrom(parameterization: str = "shtyrov") -> float:
     """
     Phosphate-to-phosphate spacing of the measured profile, A.
 
     Peak-to-peak of :func:`_measured_bilayer_profile`, which is what
-    `thickness_a` means everywhere in this module. About 40 A for the
+    `thickness_angstrom` means everywhere in this module. About 40 A for the
     default POPC template, against a published fluid-PC range of 36-39 A.
 
     Parameters
@@ -414,13 +415,13 @@ def native_bilayer_thickness_a(parameterization: str = "shtyrov") -> float:
     float
     """
     profile = _measured_bilayer_profile(parameterization)
-    upper = profile.distance_a > 0
-    return 2.0 * float(profile.distance_a[upper][profile.psi[upper].argmax()])
+    upper = profile.distance_angstrom > 0
+    return 2.0 * float(profile.distance_angstrom[upper][profile.psi[upper].argmax()])
 
 
 def build_measured_bilayer_profile(
-    thickness_a: float = 30.0,
-    extra_sigma_a: float = 0.0,
+    thickness_angstrom: float = 30.0,
+    extra_sigma_angstrom: float = 0.0,
     parameterization: str = "shtyrov",
     device: str | torch.device = "cpu",
 ) -> BilayerProfile:
@@ -443,11 +444,11 @@ def build_measured_bilayer_profile(
 
     Parameters
     ----------
-    thickness_a : float, optional
+    thickness_angstrom : float, optional
         Phosphate-to-phosphate spacing to rescale to, A. Default 30.0,
         matching `MembraneGenerator`. See
-        :func:`native_bilayer_thickness_a` for the template's own value.
-    extra_sigma_a : float, optional
+        :func:`native_bilayer_thickness_angstrom` for the template's own value.
+    extra_sigma_angstrom : float, optional
         Additional Gaussian broadening applied along z, A. Default 0.0:
         the measured profile already carries the width its atomic model
         implies, and the rasterizer anti-aliases to the render grid
@@ -462,13 +463,13 @@ def build_measured_bilayer_profile(
     BilayerProfile
     """
     profile = _measured_bilayer_profile(parameterization)
-    scale = thickness_a / native_bilayer_thickness_a(parameterization)
-    distance_a = profile.distance_a * scale
+    scale = thickness_angstrom / native_bilayer_thickness_angstrom(parameterization)
+    distance_angstrom = profile.distance_angstrom * scale
     psi = profile.psi.clone()
 
-    if extra_sigma_a > 0.0:
-        spacing = float(distance_a[1] - distance_a[0])
-        sigma_samples = extra_sigma_a / spacing
+    if extra_sigma_angstrom > 0.0:
+        spacing = float(distance_angstrom[1] - distance_angstrom[0])
+        sigma_samples = extra_sigma_angstrom / spacing
         half = max(1, int(math.ceil(3.0 * sigma_samples)))
         offsets = torch.arange(-half, half + 1, dtype=psi.dtype, device=psi.device)
         kernel = torch.exp(-0.5 * (offsets / sigma_samples) ** 2)
@@ -477,13 +478,15 @@ def build_measured_bilayer_profile(
             psi.view(1, 1, -1), kernel.view(1, 1, -1), padding=half
         ).view(-1)
 
-    return BilayerProfile(distance_a=distance_a.to(device), psi=psi.to(device))
+    return BilayerProfile(
+        distance_angstrom=distance_angstrom.to(device), psi=psi.to(device)
+    )
 
 
 __all__ = [
     "build_reference_lipid_patch",
     "compute_bilayer_profile",
     "build_measured_bilayer_profile",
-    "native_bilayer_thickness_a",
+    "native_bilayer_thickness_angstrom",
     "BilayerProfile",
 ]

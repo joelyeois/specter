@@ -356,7 +356,7 @@ def _sample_sh_coefficients(
 
 def generate_membrane_field_spherical_harmonics(
     shape_zyx: tuple[int, int, int],
-    spacing_a: float,
+    spacing_angstrom: float,
     sh_max_degree: int = 8,
     sh_axes: tuple[float, float, float] = (300.0, 300.0, 300.0),
     sh_amplitude: float = 0.15,
@@ -375,7 +375,7 @@ def generate_membrane_field_spherical_harmonics(
         Working grid shape, ``(Z, Y, X)``. Should cover the intended
         membrane instance's bounding box with margin, matching the other
         backends' own convention.
-    spacing_a : float
+    spacing_angstrom : float
         Working grid voxel spacing, Å. Independent of any downstream
         output voxel size.
     sh_max_degree : int, optional
@@ -437,11 +437,11 @@ def generate_membrane_field_spherical_harmonics(
     if sh_max_degree < 2:
         raise ValueError(f"sh_max_degree must be >= 2, got {sh_max_degree}")
 
-    extent_a = (
+    extent_angstrom = (
         torch.tensor([shape_zyx[2], shape_zyx[1], shape_zyx[0]], dtype=torch.float32)
-        * spacing_a
+        * spacing_angstrom
     )
-    origin_xyz = -0.5 * extent_a
+    origin_xyz = -0.5 * extent_angstrom
 
     # The per-voxel geometry below runs on `device` and is separable: x depends
     # only on the column index, y only on the row, z only on the slice, so the
@@ -475,12 +475,12 @@ def generate_membrane_field_spherical_harmonics(
 
     def _axis(n: int, i: int) -> torch.Tensor:
         idx = torch.arange(n, device=device_t, dtype=torch.float32)
-        return (origin[i] + idx * spacing_a).to(torch.float64) / axes[i]
+        return (origin[i] + idx * spacing_angstrom).to(torch.float64) / axes[i]
 
     px = _axis(nx, 0).view(1, 1, nx)
     py = _axis(ny, 1).view(1, ny, 1)
     pz = _axis(nz, 2).view(nz, 1, 1)
-    phi_ang = torch.atan2(py, px)
+    phi_rad = torch.atan2(py, px)
 
     rng = np.random.default_rng(seed)
     coefficients = _sample_sh_coefficients(sh_max_degree, sh_spectrum_power, rng)
@@ -515,7 +515,7 @@ def generate_membrane_field_spherical_harmonics(
         # theta/phi_ang are tensors, so the interpolation returns one too.
         perturbation = cast(
             torch.Tensor,
-            _interpolate_angular_grid(coarse_padded, theta, phi_ang, device=device_t),
+            _interpolate_angular_grid(coarse_padded, theta, phi_rad, device=device_t),
         ).view(z1 - z0, ny, nx)
 
         r_surface = (1.0 + sh_amplitude * perturbation).clamp(min=0.05)
@@ -524,22 +524,22 @@ def generate_membrane_field_spherical_harmonics(
         inside[z0:z1] = (r_prime < r_surface).cpu().numpy()
         del r_prime, r_safe, theta, perturbation, r_surface
 
-    del px, py, pz, phi_ang
+    del px, py, pz, phi_rad
 
     # See _signed_distance_transform's own docstring for why this is
     # GPU-accelerated (optionally) rather than always scipy.
-    phi = _signed_distance_transform(inside, spacing_a, device)
+    phi = _signed_distance_transform(inside, spacing_angstrom, device)
 
-    voxels_per_radius = min(sh_axes) / spacing_a
+    voxels_per_radius = min(sh_axes) / spacing_angstrom
     if voxels_per_radius < _MIN_RELIABLE_VOXELS_PER_RADIUS:
         warnings.warn(
             f"generate_membrane_field_spherical_harmonics: min(sh_axes) "
             f"({min(sh_axes):.1f} A) is only {voxels_per_radius:.1f} "
-            f"working-grid voxels at spacing_a={spacing_a:.2f} A -- below the "
+            f"working-grid voxels at spacing_angstrom={spacing_angstrom:.2f} A -- below the "
             f"{_MIN_RELIABLE_VOXELS_PER_RADIUS:.0f} voxels/radius verified reliable "
             "for sample_surface_sites' Newton-projection surface sampling. "
             "Transmembrane placement may silently find zero sites at this "
-            "resolution. Increase sh_axes, or decrease spacing_a (e.g. a "
+            "resolution. Increase sh_axes, or decrease spacing_angstrom (e.g. a "
             "smaller voxel_size on the owning MembraneGenerator), to raise this "
             "ratio.",
             stacklevel=2,
@@ -566,7 +566,7 @@ def generate_membrane_field_spherical_harmonics(
 
     return MembraneField(
         phi=phi,
-        spacing_a=spacing_a,
+        spacing_angstrom=spacing_angstrom,
         origin_xyz=origin_xyz.to(device),
         clipped_at_boundary=clipped,
     )

@@ -266,7 +266,7 @@ def test_tilt_forward_matches_between_simulator_and_inverse(
         alpha=0.1,
     )
 
-    assert inverse._defocus_shift_A == generator._defocus_shift_A, (
+    assert inverse._defocus_shift_angstrom == generator._defocus_shift_angstrom, (
         "simulator and inverse disagree on the midplane defocus shift"
     )
 

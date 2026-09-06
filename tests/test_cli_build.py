@@ -177,7 +177,7 @@ def _write_membrane_test_config(
     # leaves ~300x that margin while still fitting the box with room to
     # spare, and (measured) also places transmembrane sites reliably, so
     # both smoke tests can share one geometry.
-    sh_radius_a = 110.0
+    sh_radius_angstrom = 110.0
     transmembrane_block = (
         f"""
 [[membrane_transmembrane_specs]]
@@ -199,7 +199,7 @@ location = "lumen"
     path.write_text(
         f"""
 [[membrane]]
-sh_axes = [{sh_radius_a}, {sh_radius_a}, {sh_radius_a}]
+sh_axes = [{sh_radius_angstrom}, {sh_radius_angstrom}, {sh_radius_angstrom}]
 sh_amplitude = 0.15
 n_lipids_per_leaflet = 6
 {transmembrane_block}

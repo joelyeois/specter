@@ -30,9 +30,9 @@ from collections.abc import Sequence
 #:
 #: The lower bounds are biology-motivated organelle sizes and are never
 #: shrunk by a cap; only the upper bound is clamped to fit the box.
-DEFAULT_SH_AXES_RANGE_A = (150.0, 450.0)
-DEFAULT_SWEPT_TOTAL_LENGTH_RANGE_A = (1500.0, 2500.0)
-DEFAULT_SWEPT_TUBE_RADIUS_RANGE_A = (150.0, 400.0)
+DEFAULT_SH_AXES_RANGE_ANGSTROM = (150.0, 450.0)
+DEFAULT_SWEPT_TOTAL_LENGTH_RANGE_ANGSTROM = (1500.0, 2500.0)
+DEFAULT_SWEPT_TUBE_RADIUS_RANGE_ANGSTROM = (150.0, 400.0)
 
 
 def membrane_bounding_radius(

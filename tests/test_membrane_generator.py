@@ -101,7 +101,7 @@ def test_place_transmembrane_with_prebuilt_template_inserts_and_records_placemen
     baseline = gen.generate().clone()
     baseline_sum = baseline.sum()
 
-    placements = gen.place_transmembrane(min_spacing_a=20.0)
+    placements = gen.place_transmembrane(min_spacing_angstrom=20.0)
 
     assert len(placements) >= 1
     for placement in placements:
@@ -126,11 +126,11 @@ def test_place_transmembrane_species_selection_seed_reproducible():
 
     gen_a = MembraneGenerator(transmembrane_specs=specs, seed=7, **_SMALL_KWARGS)
     gen_a.generate()
-    placements_a = gen_a.place_transmembrane(min_spacing_a=15.0)
+    placements_a = gen_a.place_transmembrane(min_spacing_angstrom=15.0)
 
     gen_b = MembraneGenerator(transmembrane_specs=specs, seed=7, **_SMALL_KWARGS)
     gen_b.generate()
-    placements_b = gen_b.place_transmembrane(min_spacing_a=15.0)
+    placements_b = gen_b.place_transmembrane(min_spacing_angstrom=15.0)
 
     assert [p.species_id for p in placements_a] == [p.species_id for p in placements_b]
     for pa, pb in zip(placements_a, placements_b):
@@ -283,7 +283,7 @@ def test_transmembrane_labels_mark_exactly_the_displaced_lipid():
         **_SMALL_KWARGS,
     )
     gen.generate()
-    placements = gen.place_transmembrane(min_spacing_a=20.0)
+    placements = gen.place_transmembrane(min_spacing_angstrom=20.0)
 
     assert len(placements) > 0
     labels = gen.transmembrane_labels
@@ -357,7 +357,7 @@ def test_spherical_harmonics_backend_supports_transmembrane_placement():
         **_SH_KWARGS,
     )
     gen.generate()
-    placements = gen.place_transmembrane(min_spacing_a=15.0)
+    placements = gen.place_transmembrane(min_spacing_angstrom=15.0)
     assert len(placements) > 0
 
 
@@ -386,7 +386,7 @@ _SWEPT_SPLINE_KWARGS = dict(
     voxel_size=4.0,
     shape_backend="swept_spline",
     swept_total_length=300.0,
-    swept_step_length_a=15.0,
+    swept_step_length_angstrom=15.0,
     swept_tube_radius=25.0,
     n_lipids_per_leaflet=6,
 )
@@ -424,7 +424,7 @@ def test_swept_spline_backend_supports_transmembrane_placement():
         **_SWEPT_SPLINE_KWARGS,
     )
     gen.generate()
-    placements = gen.place_transmembrane(min_spacing_a=15.0)
+    placements = gen.place_transmembrane(min_spacing_angstrom=15.0)
     assert len(placements) > 0
 
 
@@ -438,21 +438,26 @@ def test_spherical_harmonics_zero_amplitude_isotropic_matches_sphere_sdf():
         generate_membrane_field_spherical_harmonics,
     )
 
-    spacing_a = 4.0
-    radius_a = 60.0
+    spacing_angstrom = 4.0
+    radius_angstrom = 60.0
     field = generate_membrane_field_spherical_harmonics(
         shape_zyx=(80, 80, 80),
-        spacing_a=spacing_a,
-        sh_axes=(radius_a, radius_a, radius_a),
+        spacing_angstrom=spacing_angstrom,
+        sh_axes=(radius_angstrom, radius_angstrom, radius_angstrom),
         sh_amplitude=0.0,
         seed=0,
     )
     points = torch.tensor(
-        [[0.0, 0.0, 0.0], [radius_a, 0.0, 0.0], [0.0, 0.0, -radius_a], [30.0, 0.0, 0.0]]
+        [
+            [0.0, 0.0, 0.0],
+            [radius_angstrom, 0.0, 0.0],
+            [0.0, 0.0, -radius_angstrom],
+            [30.0, 0.0, 0.0],
+        ]
     )
-    expected = torch.linalg.norm(points, dim=-1) - radius_a
+    expected = torch.linalg.norm(points, dim=-1) - radius_angstrom
     sampled = field.sample(points)
-    assert torch.allclose(sampled, expected, atol=1.5 * spacing_a)
+    assert torch.allclose(sampled, expected, atol=1.5 * spacing_angstrom)
 
 
 def test_spherical_harmonics_zero_amplitude_anisotropic_matches_ellipsoid_surface():
@@ -463,11 +468,11 @@ def test_spherical_harmonics_zero_amplitude_anisotropic_matches_ellipsoid_surfac
         generate_membrane_field_spherical_harmonics,
     )
 
-    spacing_a = 4.0
+    spacing_angstrom = 4.0
     axes = (70.0, 60.0, 60.0)
     field = generate_membrane_field_spherical_harmonics(
         shape_zyx=(60, 40, 40),
-        spacing_a=spacing_a,
+        spacing_angstrom=spacing_angstrom,
         sh_axes=axes,
         sh_amplitude=0.0,
         seed=0,
@@ -476,7 +481,7 @@ def test_spherical_harmonics_zero_amplitude_anisotropic_matches_ellipsoid_surfac
         [[axes[0], 0.0, 0.0], [0.0, axes[1], 0.0], [0.0, 0.0, axes[2]]]
     )
     sampled = field.sample(surface_points)
-    assert torch.allclose(sampled, torch.zeros(3), atol=1.5 * spacing_a)
+    assert torch.allclose(sampled, torch.zeros(3), atol=1.5 * spacing_angstrom)
 
 
 def test_real_spherical_harmonic_matches_known_l2_m0_and_is_orthonormal():
@@ -588,7 +593,7 @@ def test_coarse_angular_grid_interpolation_matches_direct_evaluation():
 def test_swept_spline_near_straight_path_matches_capsule_sdf():
     """A near-straight path (flexibility ~ 0) sampled well away from either
     end should match a capsule/stadium SDF: perpendicular distance from the
-    (recentered) centerline minus tube_radius_a. Reconstructs the exact same
+    (recentered) centerline minus tube_radius_angstrom. Reconstructs the exact same
     recentered/smoothed source positions generate_membrane_field_swept_spline
     builds internally (same seed, same _sample_wandering_path call) to find
     a point unambiguously nearest a single interior source, away from the
@@ -603,14 +608,14 @@ def test_swept_spline_near_straight_path_matches_capsule_sdf():
     )
 
     seed = 5
-    step_length_a = 15.0
-    total_length_a = 300.0
-    tube_radius_a = 25.0
+    step_length_angstrom = 15.0
+    total_length_angstrom = 300.0
+    tube_radius_angstrom = 25.0
     flexibility = 1e-4
-    n_points = max(2, round(total_length_a / step_length_a) + 1)
+    n_points = max(2, round(total_length_angstrom / step_length_angstrom) + 1)
 
     rng = np.random.default_rng(seed)
-    positions = _sample_wandering_path(n_points, step_length_a, flexibility, rng)
+    positions = _sample_wandering_path(n_points, step_length_angstrom, flexibility, rng)
     bbox_mid = 0.5 * (positions.min(axis=0) + positions.max(axis=0))
     positions = positions - bbox_mid
     positions = scipy_ndimage.gaussian_filter1d(
@@ -627,14 +632,14 @@ def test_swept_spline_near_straight_path_matches_capsule_sdf():
     perp /= np.linalg.norm(perp)
 
     offset = 12.0
-    query_point = positions[mid] + perp * (tube_radius_a + offset)
+    query_point = positions[mid] + perp * (tube_radius_angstrom + offset)
 
     field = generate_membrane_field_swept_spline(
         shape_zyx=(90, 90, 90),
-        spacing_a=4.0,
-        total_length_a=total_length_a,
-        step_length_a=step_length_a,
-        tube_radius_a=tube_radius_a,
+        spacing_angstrom=4.0,
+        total_length_angstrom=total_length_angstrom,
+        step_length_angstrom=step_length_angstrom,
+        tube_radius_angstrom=tube_radius_angstrom,
         flexibility=flexibility,
         seed=seed,
     )
@@ -650,10 +655,10 @@ def test_swept_spline_warns_on_beading_risk():
     with pytest.warns(UserWarning, match="beading"):
         generate_membrane_field_swept_spline(
             shape_zyx=(60, 60, 60),
-            spacing_a=4.0,
-            total_length_a=200.0,
-            step_length_a=40.0,
-            tube_radius_a=20.0,
+            spacing_angstrom=4.0,
+            total_length_angstrom=200.0,
+            step_length_angstrom=40.0,
+            tube_radius_angstrom=20.0,
             seed=0,
         )
 
@@ -668,9 +673,9 @@ def test_swept_spline_radius_variation_zero_matches_constant_radius():
 
     kwargs = dict(
         shape_zyx=(70, 70, 70),
-        spacing_a=4.0,
-        total_length_a=300.0,
-        step_length_a=15.0,
+        spacing_angstrom=4.0,
+        total_length_angstrom=300.0,
+        step_length_angstrom=15.0,
         seed=7,
     )
     field_default = generate_membrane_field_swept_spline(**kwargs)
@@ -687,9 +692,9 @@ def test_swept_spline_radius_variation_changes_field_and_is_reproducible():
 
     kwargs = dict(
         shape_zyx=(70, 70, 70),
-        spacing_a=4.0,
-        total_length_a=300.0,
-        step_length_a=15.0,
+        spacing_angstrom=4.0,
+        total_length_angstrom=300.0,
+        step_length_angstrom=15.0,
         radius_variation=0.35,
         seed=7,
     )
@@ -709,9 +714,9 @@ def test_swept_spline_radius_variation_mean_preserved_at_small_n_points():
     noise was) -- dividing by std alone (not centering first) amplified
     that offset, collapsing every drawn radius to the _MIN_RADIUS_FRACTION
     floor for some seeds instead of the intended mild variation around
-    tube_radius_a. Reproduces the exact failing case found via
+    tube_radius_angstrom. Reproduces the exact failing case found via
     MembraneGenerator's swept-spline defaults (18 points, seed 3): mean
-    drawn radius must land close to tube_radius_a, not near the floor."""
+    drawn radius must land close to tube_radius_angstrom, not near the floor."""
     import numpy as np
     from scipy import ndimage
 
@@ -720,28 +725,28 @@ def test_swept_spline_radius_variation_mean_preserved_at_small_n_points():
         _sample_wandering_path,
     )
 
-    total_length_a, step_length_a, tube_radius_a = (
+    total_length_angstrom, step_length_angstrom, tube_radius_angstrom = (
         262.2857142857143,
         15.0,
         21.857142857142858,
     )
     radius_variation, sigma_points, flexibility, seed = 0.1943228840827942, 2.0, 0.15, 3
 
-    n_points = max(2, round(total_length_a / step_length_a) + 1)
+    n_points = max(2, round(total_length_angstrom / step_length_angstrom) + 1)
     rng = np.random.default_rng(seed)
-    _sample_wandering_path(n_points, step_length_a, flexibility, rng)
+    _sample_wandering_path(n_points, step_length_angstrom, flexibility, rng)
     noise = rng.normal(size=n_points)
     noise = ndimage.gaussian_filter1d(noise, sigma=sigma_points, mode="nearest")
     noise = noise - noise.mean()
     noise_std = float(noise.std())
     if noise_std > 0.0:
         noise = noise / noise_std
-    radii = tube_radius_a * np.clip(
+    radii = tube_radius_angstrom * np.clip(
         1.0 + radius_variation * noise, _MIN_RADIUS_FRACTION, None
     )
 
-    assert abs(radii.mean() - tube_radius_a) < 0.1 * tube_radius_a
-    floor = _MIN_RADIUS_FRACTION * tube_radius_a
+    assert abs(radii.mean() - tube_radius_angstrom) < 0.1 * tube_radius_angstrom
+    floor = _MIN_RADIUS_FRACTION * tube_radius_angstrom
     assert not np.allclose(radii, floor, atol=0.5)
 
 
@@ -753,18 +758,18 @@ def test_swept_spline_radius_variation_rejects_negative():
     with pytest.raises(ValueError, match="radius_variation"):
         generate_membrane_field_swept_spline(
             shape_zyx=(60, 60, 60),
-            spacing_a=4.0,
-            total_length_a=200.0,
-            step_length_a=15.0,
+            spacing_angstrom=4.0,
+            total_length_angstrom=200.0,
+            step_length_angstrom=15.0,
             radius_variation=-0.1,
             seed=0,
         )
 
 
 def test_swept_spline_beading_warning_uses_mean_radius_not_local_minimum():
-    """With radius_variation > 0, step_length_a should only warn when it
+    """With radius_variation > 0, step_length_angstrom should only warn when it
     exceeds the MEAN drawn radius -- occasional local narrowing below
-    step_length_a is the intended source of sparse, irregular
+    step_length_angstrom is the intended source of sparse, irregular
     constrictions (see module docstring's "Radius variation" section) and
     must not itself trigger the beading warning."""
     from specter.specimen.membrane._field_swept_spline import (
@@ -775,10 +780,10 @@ def test_swept_spline_beading_warning_uses_mean_radius_not_local_minimum():
         warnings.simplefilter("error")
         generate_membrane_field_swept_spline(
             shape_zyx=(90, 90, 90),
-            spacing_a=4.0,
-            total_length_a=200.0,
-            step_length_a=15.0,
-            tube_radius_a=25.0,
+            spacing_angstrom=4.0,
+            total_length_angstrom=200.0,
+            step_length_angstrom=15.0,
+            tube_radius_angstrom=25.0,
             radius_variation=0.35,
             radius_variation_sigma_points=2.0,
             seed=0,
@@ -787,10 +792,10 @@ def test_swept_spline_beading_warning_uses_mean_radius_not_local_minimum():
     with pytest.warns(UserWarning, match="beading"):
         generate_membrane_field_swept_spline(
             shape_zyx=(110, 110, 110),
-            spacing_a=4.0,
-            total_length_a=400.0,
-            step_length_a=45.0,
-            tube_radius_a=20.0,
+            spacing_angstrom=4.0,
+            total_length_angstrom=400.0,
+            step_length_angstrom=45.0,
+            tube_radius_angstrom=20.0,
             radius_variation=0.35,
             seed=0,
         )
@@ -822,7 +827,7 @@ def test_place_transmembrane_warns_on_partial_or_zero_placement():
         warnings.simplefilter("ignore")  # let generate()'s own warning through quietly
         gen.generate()
     with pytest.warns(UserWarning, match="requested transmembrane sites were found"):
-        placements = gen.place_transmembrane(min_spacing_a=15.0)
+        placements = gen.place_transmembrane(min_spacing_angstrom=15.0)
     assert len(placements) < 8
 
 
@@ -835,11 +840,11 @@ def _synthetic_inside_mask(shape=(30, 30, 30), radius=8.0) -> np.ndarray:
 
 def test_signed_distance_transform_cpu_matches_scipy_directly():
     inside = _synthetic_inside_mask()
-    spacing_a = 3.0
-    phi = _signed_distance_transform(inside, spacing_a, device="cpu")
+    spacing_angstrom = 3.0
+    phi = _signed_distance_transform(inside, spacing_angstrom, device="cpu")
 
-    dist_out = ndimage.distance_transform_edt(~inside, sampling=spacing_a)
-    dist_in = ndimage.distance_transform_edt(inside, sampling=spacing_a)
+    dist_out = ndimage.distance_transform_edt(~inside, sampling=spacing_angstrom)
+    dist_in = ndimage.distance_transform_edt(inside, sampling=spacing_angstrom)
     expected = torch.as_tensor(dist_out - dist_in, dtype=torch.float32)
 
     assert phi.device.type == "cpu"
@@ -852,9 +857,9 @@ def test_signed_distance_transform_gpu_matches_cpu_when_cupy_available():
     pytest.importorskip("cupy", reason="cupy not installed (macOS, or partial env)")
 
     inside = _synthetic_inside_mask()
-    spacing_a = 3.0
-    phi_gpu = _signed_distance_transform(inside, spacing_a, device="cuda")
-    phi_cpu = _signed_distance_transform(inside, spacing_a, device="cpu")
+    spacing_angstrom = 3.0
+    phi_gpu = _signed_distance_transform(inside, spacing_angstrom, device="cuda")
+    phi_cpu = _signed_distance_transform(inside, spacing_angstrom, device="cpu")
 
     assert phi_gpu.device.type == "cuda"
     assert torch.allclose(phi_gpu.cpu(), phi_cpu, atol=1e-4)
@@ -883,12 +888,12 @@ def test_signed_distance_transform_falls_back_to_cpu_without_cupy(monkeypatch):
     monkeypatch.setattr(builtins, "__import__", fake_import)
 
     inside = _synthetic_inside_mask()
-    spacing_a = 3.0
+    spacing_angstrom = 3.0
     with pytest.warns(UserWarning, match="'cupy' isn't importable"):
-        phi = _signed_distance_transform(inside, spacing_a, device="cuda")
+        phi = _signed_distance_transform(inside, spacing_angstrom, device="cuda")
 
-    dist_out = ndimage.distance_transform_edt(~inside, sampling=spacing_a)
-    dist_in = ndimage.distance_transform_edt(inside, sampling=spacing_a)
+    dist_out = ndimage.distance_transform_edt(~inside, sampling=spacing_angstrom)
+    dist_in = ndimage.distance_transform_edt(inside, sampling=spacing_angstrom)
     expected = torch.as_tensor(dist_out - dist_in, dtype=torch.float32)
 
     assert phi.device.type == "cuda"
@@ -942,12 +947,12 @@ def test_signed_distance_transform_falls_back_when_gpu_transform_raises(monkeypa
     monkeypatch.setattr(cundimage, "distance_transform_edt", boom)
 
     inside = _synthetic_inside_mask()
-    spacing_a = 3.0
+    spacing_angstrom = 3.0
     with pytest.warns(UserWarning, match="GPU distance transform.*failed"):
-        phi = _signed_distance_transform(inside, spacing_a, device="cuda")
+        phi = _signed_distance_transform(inside, spacing_angstrom, device="cuda")
 
-    dist_out = ndimage.distance_transform_edt(~inside, sampling=spacing_a)
-    dist_in = ndimage.distance_transform_edt(inside, sampling=spacing_a)
+    dist_out = ndimage.distance_transform_edt(~inside, sampling=spacing_angstrom)
+    dist_in = ndimage.distance_transform_edt(inside, sampling=spacing_angstrom)
     expected = torch.as_tensor(dist_out - dist_in, dtype=torch.float32)
 
     assert phi.device.type == "cuda"
@@ -956,7 +961,7 @@ def test_signed_distance_transform_falls_back_when_gpu_transform_raises(monkeypa
 
 def _sh_solid_mask_cpu_float64(
     shape_zyx,
-    spacing_a,
+    spacing_angstrom,
     origin_xyz,
     sh_axes,
     sh_amplitude,
@@ -982,20 +987,20 @@ def _sh_solid_mask_cpu_float64(
         _synthesize_angular_grid,
     )
 
-    points = _grid_points_xyz(shape_zyx, spacing_a, origin_xyz, device="cpu")
+    points = _grid_points_xyz(shape_zyx, spacing_angstrom, origin_xyz, device="cpu")
     query = points.reshape(-1, 3).numpy()
     axes = np.asarray(sh_axes, dtype=np.float64)
     p_prime = query / axes
     r_prime = np.linalg.norm(p_prime, axis=-1)
     r_safe = np.clip(r_prime, 1e-12, None)
     theta = np.arccos(np.clip(p_prime[:, 2] / r_safe, -1.0, 1.0))
-    phi_ang = np.arctan2(p_prime[:, 1], p_prime[:, 0])
+    phi_rad = np.arctan2(p_prime[:, 1], p_prime[:, 0])
 
     rng = np.random.default_rng(seed)
     coefficients = _sample_sh_coefficients(sh_max_degree, sh_spectrum_power, rng)
     n_theta, n_phi = _angular_grid_resolution(sh_max_degree)
     coarse = _synthesize_angular_grid(coefficients, sh_max_degree, n_theta, n_phi)
-    pert = _interpolate_angular_grid(coarse, theta, phi_ang, device="cpu")
+    pert = _interpolate_angular_grid(coarse, theta, phi_rad, device="cpu")
     r_surface = np.clip(1.0 + sh_amplitude * pert, 0.05, None)
     return torch.as_tensor((r_prime < r_surface).reshape(shape_zyx))
 
@@ -1035,7 +1040,7 @@ def test_sh_field_solid_mask_matches_cpu_float64_reference(seed: int) -> None:
     )
     field = generate_membrane_field_spherical_harmonics(
         shape_zyx=shape,
-        spacing_a=spacing,
+        spacing_angstrom=spacing,
         sh_axes=axes,
         sh_amplitude=0.15,
         sh_max_degree=6,
@@ -1170,22 +1175,25 @@ def test_generator_and_pipeline_share_one_set_of_default_ranges() -> None:
 
     import specter.pipelines._tomogram as tomogram_pipeline
     from specter.specimen import (
-        DEFAULT_SH_AXES_RANGE_A,
-        DEFAULT_SWEPT_TOTAL_LENGTH_RANGE_A,
-        DEFAULT_SWEPT_TUBE_RADIUS_RANGE_A,
+        DEFAULT_SH_AXES_RANGE_ANGSTROM,
+        DEFAULT_SWEPT_TOTAL_LENGTH_RANGE_ANGSTROM,
+        DEFAULT_SWEPT_TUBE_RADIUS_RANGE_ANGSTROM,
         MembraneGenerator,
     )
 
     params = inspect.signature(MembraneGenerator.__init__).parameters
     for name, constant in (
-        ("sh_axes_range", DEFAULT_SH_AXES_RANGE_A),
-        ("swept_total_length_range", DEFAULT_SWEPT_TOTAL_LENGTH_RANGE_A),
-        ("swept_tube_radius_range", DEFAULT_SWEPT_TUBE_RADIUS_RANGE_A),
+        ("sh_axes_range", DEFAULT_SH_AXES_RANGE_ANGSTROM),
+        ("swept_total_length_range", DEFAULT_SWEPT_TOTAL_LENGTH_RANGE_ANGSTROM),
+        ("swept_tube_radius_range", DEFAULT_SWEPT_TUBE_RADIUS_RANGE_ANGSTROM),
     ):
         assert params[name].default is constant, (
             f"MembraneGenerator.{name}'s default is no longer the shared constant"
         )
-    assert tomogram_pipeline.DEFAULT_SH_AXES_RANGE_A is DEFAULT_SH_AXES_RANGE_A
+    assert (
+        tomogram_pipeline.DEFAULT_SH_AXES_RANGE_ANGSTROM
+        is DEFAULT_SH_AXES_RANGE_ANGSTROM
+    )
 
 
 def test_render_transmembrane_template_honours_use_deposited_bfactors():

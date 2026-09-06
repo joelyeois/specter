@@ -191,7 +191,7 @@ class MicrographSpecimenGenerator(L.LightningModule):
 
         self.crowd: CrowdWithDuplicates | None
         if self.crowd_min_distance is not None and scattering_potential is not None:
-            crowd_max_distance_z_ang = (
+            crowd_max_distance_z_angstrom = (
                 crowd_max_distance_z
                 if crowd_max_distance_z is not None
                 else nz * pixel_size
@@ -210,7 +210,7 @@ class MicrographSpecimenGenerator(L.LightningModule):
                 packing_stall_patience=packing_stall_patience,
                 packing_seed=packing_seed,
                 n_candidates=n_candidates,
-                max_distance_z=crowd_max_distance_z_ang,
+                max_distance_z=crowd_max_distance_z_angstrom,
                 max_distance_xy=nxy * pixel_size,
                 progressbars=progressbars,
                 chunk_size=chunk_size,

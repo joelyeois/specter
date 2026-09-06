@@ -62,14 +62,14 @@ def _new_transfer(
 
 def test_defocus_astigmatism_cs_matches_old_aberration():
     dfu, dfv, dfang = 20000.0, 18000.0, 35.0  # Angstrom, Angstrom, degrees
-    cs_ang = 2.7e7  # Angstrom
+    cs_angstrom = 2.7e7  # Angstrom
 
     old = _old_transfer(
         {
             "dfu": torch.tensor(dfu),
             "dfv": torch.tensor(dfv),
             "dfang": torch.tensor(dfang),
-            "cs": torch.tensor(cs_ang),
+            "cs": torch.tensor(cs_angstrom),
         }
     )
 
@@ -77,7 +77,7 @@ def test_defocus_astigmatism_cs_matches_old_aberration():
         defocus=(dfu + dfv) / 2 / 1e4,
         astigmatism=(dfu - dfv) / 2 / 1e4,
         astigmatism_angle=dfang,
-        spherical_aberration=cs_ang / 1e7,
+        spherical_aberration=cs_angstrom / 1e7,
         voltage=VOLTAGE,
     )
     new = _new_transfer(params)
@@ -87,10 +87,10 @@ def test_defocus_astigmatism_cs_matches_old_aberration():
 
 def test_isotropic_defocus_matches_old_aberration():
     """No astigmatism -- sanity check independent of the astigmatism-angle mapping."""
-    df_ang = 15000.0
-    old = _old_transfer({"dfu": torch.tensor(df_ang), "cs": torch.tensor(2.7e7)})
+    df_angstrom = 15000.0
+    old = _old_transfer({"dfu": torch.tensor(df_angstrom), "cs": torch.tensor(2.7e7)})
     params = CTFParameters(
-        defocus=df_ang / 1e4, spherical_aberration=2.7e7 / 1e7, voltage=VOLTAGE
+        defocus=df_angstrom / 1e4, spherical_aberration=2.7e7 / 1e7, voltage=VOLTAGE
     )
     new = _new_transfer(params)
     assert torch.allclose(old, new, atol=1e-4)
@@ -98,10 +98,10 @@ def test_isotropic_defocus_matches_old_aberration():
 
 def test_cs_only_matches_old_aberration():
     """Cs in isolation, no defocus at all."""
-    cs_ang = 3.1e7
-    old = _old_transfer({"dfu": torch.tensor(0.0), "cs": torch.tensor(cs_ang)})
+    cs_angstrom = 3.1e7
+    old = _old_transfer({"dfu": torch.tensor(0.0), "cs": torch.tensor(cs_angstrom)})
     params = CTFParameters(
-        defocus=0.0, spherical_aberration=cs_ang / 1e7, voltage=VOLTAGE
+        defocus=0.0, spherical_aberration=cs_angstrom / 1e7, voltage=VOLTAGE
     )
     new = _new_transfer(params)
     assert torch.allclose(old, new, atol=1e-4)
@@ -191,22 +191,22 @@ def test_trefoil_sweep_matches_old_aberration(trefoil1, trefoil2):
 
 def test_beamtilt_matches_old_aberration_via_zernike_conversion():
     tiltx, tilty = 2e-5, -1.5e-5  # radians, small enough to avoid phase wraparound
-    cs_ang = 2.7e7
+    cs_angstrom = 2.7e7
 
     old = _old_transfer(
         {
             "dfu": torch.tensor(0.0),
-            "cs": torch.tensor(cs_ang),
+            "cs": torch.tensor(cs_angstrom),
             "tiltx": torch.tensor(tiltx),
             "tilty": torch.tensor(tilty),
         }
     )
 
     rho_max = zernike_rho_max((N_PIXELS, N_PIXELS), PIXEL_SIZE)
-    prefactor = 2 * torch.pi * WAVELENGTH**2 * cs_ang * rho_max**3
+    prefactor = 2 * torch.pi * WAVELENGTH**2 * cs_angstrom * rho_max**3
     params = CTFParameters(
         defocus=0.0,
-        spherical_aberration=cs_ang / 1e7,
+        spherical_aberration=cs_angstrom / 1e7,
         voltage=VOLTAGE,
         odd_zernike={"Z31c": -prefactor * tiltx, "Z31s": -prefactor * tilty},
     )
@@ -221,19 +221,19 @@ def test_beam_tilt_mrad_convenience_arg_does_not_match_specter_convention():
     *not* reproduce specter's physical-k beamtilt formula. Manual
     odd_zernike (see test above) is required for parity."""
     tiltx, tilty = 2e-5, -1.5e-5
-    cs_ang = 2.7e7
+    cs_angstrom = 2.7e7
 
     old = _old_transfer(
         {
             "dfu": torch.tensor(0.0),
-            "cs": torch.tensor(cs_ang),
+            "cs": torch.tensor(cs_angstrom),
             "tiltx": torch.tensor(tiltx),
             "tilty": torch.tensor(tilty),
         }
     )
     params = CTFParameters(
         defocus=0.0,
-        spherical_aberration=cs_ang / 1e7,
+        spherical_aberration=cs_angstrom / 1e7,
         voltage=VOLTAGE,
         beam_tilt_mrad=[tiltx * 1e3, tilty * 1e3],
     )
@@ -247,20 +247,20 @@ def test_beam_tilt_mrad_convenience_arg_does_not_match_specter_convention():
     [(2e-5, -1.5e-5), (-1e-5, 3e-5), (5e-6, 0.0), (0.0, -4e-5), (-3e-5, -3e-5)],
 )
 def test_beamtilt_sweep_matches_old_aberration(tiltx, tilty):
-    cs_ang = 2.7e7
+    cs_angstrom = 2.7e7
     old = _old_transfer(
         {
             "dfu": torch.tensor(0.0),
-            "cs": torch.tensor(cs_ang),
+            "cs": torch.tensor(cs_angstrom),
             "tiltx": torch.tensor(tiltx),
             "tilty": torch.tensor(tilty),
         }
     )
     rho_max = zernike_rho_max((N_PIXELS, N_PIXELS), PIXEL_SIZE)
-    prefactor = 2 * torch.pi * WAVELENGTH**2 * cs_ang * rho_max**3
+    prefactor = 2 * torch.pi * WAVELENGTH**2 * cs_angstrom * rho_max**3
     params = CTFParameters(
         defocus=0.0,
-        spherical_aberration=cs_ang / 1e7,
+        spherical_aberration=cs_angstrom / 1e7,
         voltage=VOLTAGE,
         odd_zernike={"Z31c": -prefactor * tiltx, "Z31s": -prefactor * tilty},
     )
@@ -714,18 +714,18 @@ def test_multi_particle_batch_matches_old_aberration():
     dfu = torch.tensor([12000.0, 15000.0, 9000.0, 20000.0])
     dfv = torch.tensor([11000.0, 15000.0, 8500.0, 17000.0])
     dfang = torch.tensor([10.0, 0.0, 45.0, -20.0])
-    cs_ang = 2.7e7
+    cs_angstrom = 2.7e7
 
     old = Aberration(N_PIXELS, PIXEL_SIZE, VOLTAGE, aberration_model="nonlinear")
     old_t = old.transfer_function(
-        {"dfu": dfu, "dfv": dfv, "dfang": dfang, "cs": torch.full((4,), cs_ang)}
+        {"dfu": dfu, "dfv": dfv, "dfang": dfang, "cs": torch.full((4,), cs_angstrom)}
     )
 
     params = CTFParameters(
         defocus=(dfu + dfv) / 2 / 1e4,
         astigmatism=(dfu - dfv) / 2 / 1e4,
         astigmatism_angle=dfang,
-        spherical_aberration=cs_ang / 1e7,
+        spherical_aberration=cs_angstrom / 1e7,
         voltage=VOLTAGE,
     )
     new_tf = TransferFunction(N_PIXELS, PIXEL_SIZE, aberration_model="nonlinear")
@@ -818,9 +818,9 @@ def test_forward_end_to_end_matches_old_aberration_ctf_model():
 def test_cs_envelope_matches_old_aberration():
     """Spatial-coherence (beam convergence) envelope -- needs the
     defocus/Cs micrometers/mm -> Angstrom conversion at the call site."""
-    dfu, cs_ang = 15000.0, 2.7e7
+    dfu, cs_angstrom = 15000.0, 2.7e7
     old = _old_transfer(
-        {"dfu": torch.tensor(dfu), "cs": torch.tensor(cs_ang)},
+        {"dfu": torch.tensor(dfu), "cs": torch.tensor(cs_angstrom)},
     )
     old_full = Aberration(
         N_PIXELS,
@@ -830,11 +830,11 @@ def test_cs_envelope_matches_old_aberration():
         convergence_angle=1.0,
     )
     old_t = old_full.transfer_function(
-        {"dfu": torch.tensor(dfu), "cs": torch.tensor(cs_ang)}
+        {"dfu": torch.tensor(dfu), "cs": torch.tensor(cs_angstrom)}
     ).squeeze()
 
     params = CTFParameters(
-        defocus=dfu / 1e4, spherical_aberration=cs_ang / 1e7, voltage=VOLTAGE
+        defocus=dfu / 1e4, spherical_aberration=cs_angstrom / 1e7, voltage=VOLTAGE
     )
     new_tf = TransferFunction(
         N_PIXELS, PIXEL_SIZE, aberration_model="nonlinear", convergence_angle=1.0
@@ -848,16 +848,16 @@ def test_cs_envelope_matches_old_aberration():
 
 def test_cc_envelope_matches_old_aberration():
     """Temporal-coherence (chromatic aberration) envelope."""
-    dfu, cs_ang = 15000.0, 2.7e7
+    dfu, cs_angstrom = 15000.0, 2.7e7
     old = Aberration(
         N_PIXELS, PIXEL_SIZE, VOLTAGE, aberration_model="nonlinear", cc=1.4e7
     )
     old_t = old.transfer_function(
-        {"dfu": torch.tensor(dfu), "cs": torch.tensor(cs_ang)}
+        {"dfu": torch.tensor(dfu), "cs": torch.tensor(cs_angstrom)}
     ).squeeze()
 
     params = CTFParameters(
-        defocus=dfu / 1e4, spherical_aberration=cs_ang / 1e7, voltage=VOLTAGE
+        defocus=dfu / 1e4, spherical_aberration=cs_angstrom / 1e7, voltage=VOLTAGE
     )
     new_tf = TransferFunction(
         N_PIXELS, PIXEL_SIZE, aberration_model="nonlinear", cc=1.4e7
@@ -872,20 +872,23 @@ def test_dose_envelope_matches_old_aberration():
     CTFParameters (matching old Aberration reading it from the same
     per-image ctf_params dict as everything else), not as a
     TransferFunction constructor convenience like bfactor."""
-    dfu, cs_ang = 15000.0, 2.7e7
+    dfu, cs_angstrom = 15000.0, 2.7e7
     old = Aberration(
         N_PIXELS, PIXEL_SIZE, VOLTAGE, aberration_model="nonlinear", dose_envelope=True
     )
     old_t = old.transfer_function(
         {
             "dfu": torch.tensor(dfu),
-            "cs": torch.tensor(cs_ang),
+            "cs": torch.tensor(cs_angstrom),
             "dose": torch.tensor(40.0),
         }
     ).squeeze()
 
     params = CTFParameters(
-        defocus=dfu / 1e4, spherical_aberration=cs_ang / 1e7, voltage=VOLTAGE, dose=40.0
+        defocus=dfu / 1e4,
+        spherical_aberration=cs_angstrom / 1e7,
+        voltage=VOLTAGE,
+        dose=40.0,
     )
     new_tf = TransferFunction(
         N_PIXELS, PIXEL_SIZE, aberration_model="nonlinear", dose_envelope=True
@@ -1108,7 +1111,7 @@ def test_first_five_particles_of_real_csfile_match_old_aberration():
         pixel_size,
         alpha,
         rotations,
-        translations_A,
+        translations_angstrom,
         ctf_params,
         scale,
         anisomag,
@@ -1124,18 +1127,18 @@ def test_first_five_particles_of_real_csfile_match_old_aberration():
     old_t = old.transfer_function(ctf_params)
 
     dfu, dfv, dfang = ctf_params["dfu"], ctf_params["dfv"], ctf_params["dfang"]
-    cs_A = ctf_params["cs"]
+    cs_angstrom = ctf_params["cs"]
     tiltx, tilty = ctf_params["tiltx"], ctf_params["tilty"]
     trefoil1, trefoil2 = ctf_params["trefoil1"], ctf_params["trefoil2"]
 
     rho_max = zernike_rho_max((n_pixels, n_pixels), px)
-    prefactor = 2 * math.pi * old.wavelength**2 * cs_A * rho_max**3
+    prefactor = 2 * math.pi * old.wavelength**2 * cs_angstrom * rho_max**3
 
     params = CTFParameters(
         defocus=(dfu + dfv) / 2 / 1e4,
         astigmatism=(dfu - dfv) / 2 / 1e4,
         astigmatism_angle=dfang,
-        spherical_aberration=cs_A / 1e7,
+        spherical_aberration=cs_angstrom / 1e7,
         voltage=voltage,
         phase_shift=torch.rad2deg(ctf_params["phaseshift"]),
         amplitude_contrast=float(alpha),

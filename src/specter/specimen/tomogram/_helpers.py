@@ -313,7 +313,7 @@ def _diagnose_zero_placements(
         all at once -- the true count `pack_hard_spheres_3d` was sampling
         from. Can be 0 even when `region_mask_field` and the raw clearance
         check both look generous.
-    best_clearance_a : float
+    best_clearance_angstrom : float
         The largest clearance among voxels that are at least IN the region
         and box-valid for this radius (ignoring the clearance requirement
         itself) -- 0.0 if no such voxel exists at all. Lets the warning
@@ -354,13 +354,13 @@ def _diagnose_zero_placements(
     )
 
     box_valid_region = region_mask_field & within_box
-    best_clearance_a = (
+    best_clearance_angstrom = (
         float(exclusion_field[box_valid_region].max())
         if bool(box_valid_region.any())
         else 0.0
     )
     viable = box_valid_region & (exclusion_field >= radius + gap)
-    return int(viable.sum()), best_clearance_a
+    return int(viable.sum()), best_clearance_angstrom
 
 
 # Bytes/voxel for each accumulator tensor (volume: float32, instance_labels

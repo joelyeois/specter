@@ -223,7 +223,7 @@ def test_real_csfile_particles_match_old_aberration_end_to_end():
         pixel_size,
         alpha,
         rotations,
-        translations_A,
+        translations_angstrom,
         ctf_params,
         scale,
         anisomag,

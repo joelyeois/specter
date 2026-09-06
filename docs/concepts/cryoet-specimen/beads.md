@@ -161,7 +161,7 @@ takes the same per-element fallback a structure atom does when its species
 misses the table. In a tomogram the beads follow `bulk_scattering_factors`
 rather than `scattering_factors`, alongside the carbon film.
 
-Fixed by the material rather than exposed: `GOLD_FCC_A` (4.0782 Å),
+Fixed by the material rather than exposed: `GOLD_FCC_ANGSTROM` (4.0782 Å),
 `GOLD_U_RMS` (0.087 Å), `GOLD_DENSITY_G_CM3` (19.3), and the roughness
 band limit and spectrum.
 

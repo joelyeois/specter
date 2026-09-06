@@ -34,7 +34,7 @@ from specter.specimen._grid import (
 OUT_DIR = "docs/assets/images"
 
 GOLD = np.array([0.72, 0.53, 0.04])
-RADIUS_A = 100.0
+RADIUS_ANGSTROM = 100.0
 SEED = 3
 
 
@@ -49,7 +49,7 @@ def _shape_field(roughness: float, seed: int, n: int = 96) -> tuple[np.ndarray, 
     the boundary -- the same `contains` test the atom fill and the
     segmentation mask both use, just evaluated as a continuous field so
     marching cubes can pull a surface out of it."""
-    shape = _BeadShape(RADIUS_A, roughness, _generator(seed))
+    shape = _BeadShape(RADIUS_ANGSTROM, roughness, _generator(seed))
     spacing = 2.2 * shape.half_extent / (n - 1)
     idx = (torch.arange(n, dtype=torch.float32) - (n - 1) / 2) * spacing
     zz, yy, xx = torch.meshgrid(idx, idx, idx, indexing="ij")
@@ -105,7 +105,7 @@ def figure_lattice() -> None:
     fig, axes = plt.subplots(1, 2, figsize=(9.0, 4.4))
     for ax, voxel_size in zip(axes, [1.0, 5.0]):
         gen = BeadGenerator(voxel_size=voxel_size)
-        bead = gen.generate(RADIUS_A, _generator(SEED))
+        bead = gen.generate(RADIUS_ANGSTROM, _generator(SEED))
         mid = bead.density.shape[0] // 2
         sl = bead.density[mid].numpy()
         im = ax.imshow(sl, cmap="gray_r", origin="lower")
@@ -138,12 +138,12 @@ def figure_volume_match() -> None:
         gen = BeadGenerator(voxel_size=voxel_size, roughness=roughness)
         per_seed = []
         for seed in range(4):
-            bead = gen.generate(RADIUS_A, _generator(seed))
+            bead = gen.generate(RADIUS_ANGSTROM, _generator(seed))
             per_seed.append(float(bead.density.sum()) * voxel_size**3)
         totals.append(per_seed)
     totals_arr = np.array(totals)
     gen = BeadGenerator(voxel_size=voxel_size)
-    nominal = (4 / 3) * np.pi * RADIUS_A**3 * gen.mean_inner_potential
+    nominal = (4 / 3) * np.pi * RADIUS_ANGSTROM**3 * gen.mean_inner_potential
 
     fig, axes = plt.subplots(1, 2, figsize=(9.5, 3.8))
     ax = axes[0]
@@ -158,7 +158,7 @@ def figure_volume_match() -> None:
     ax = axes[1]
     number_density = _number_density_per_a3(GOLD_DENSITY_G_CM3, GOLD_MOLAR_MASS)
     fcc_density = 4 / 4.0782**3
-    reference_bead = gen.generate(RADIUS_A, _generator(SEED))
+    reference_bead = gen.generate(RADIUS_ANGSTROM, _generator(SEED))
     bars = {
         "bulk mass\ndensity route": gen.mean_inner_potential,
         "fcc lattice\nnumber density": fcc_density

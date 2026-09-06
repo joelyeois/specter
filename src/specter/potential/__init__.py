@@ -17,7 +17,7 @@ from ._builders import (
 from ._gemmi_builder import GemmiPotentialBuilder
 from ._occupancy import (
     FULL_OCCUPANCY_POTENTIAL_V,
-    WATER_COARSE_GRAIN_SIGMA_A,
+    WATER_COARSE_GRAIN_SIGMA_ANGSTROM,
     occupancy_blur_halo_voxels,
     potential_occupancy,
 )
@@ -28,7 +28,7 @@ __all__ = [
     "FULL_OCCUPANCY_POTENTIAL_V",
     "GemmiPotentialBuilder",
     "PotentialBuilder",
-    "WATER_COARSE_GRAIN_SIGMA_A",
+    "WATER_COARSE_GRAIN_SIGMA_ANGSTROM",
     "occupancy_blur_halo_voxels",
     "potential_occupancy",
     "build_atomic_potential_kernel",

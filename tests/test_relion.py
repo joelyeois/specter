@@ -129,7 +129,7 @@ def test_extract_parameters_from_starfile_single_block(tmp_path) -> None:
         pixel_size,
         alpha,
         rotations,
-        translations_A,
+        translations_angstrom,
         ctf_params,
         scale,
         anisomag,
@@ -161,7 +161,7 @@ def test_extract_parameters_from_starfile_single_block(tmp_path) -> None:
     expected_translations = torch.tensor(
         df[["rlnOriginXAngst", "rlnOriginYAngst"]].to_numpy(), dtype=torch.float32
     )
-    assert torch.allclose(translations_A, expected_translations)
+    assert torch.allclose(translations_angstrom, expected_translations)
 
     euler_deg = torch.tensor(
         df[["rlnAngleRot", "rlnAngleTilt", "rlnAnglePsi"]].to_numpy(),
@@ -264,7 +264,7 @@ def test_extract_parameters_from_starfile_two_block_optics(tmp_path) -> None:
         pixel_size,
         alpha,
         rotations,
-        translations_A,
+        translations_angstrom,
         ctf_params,
         scale,
         anisomag,

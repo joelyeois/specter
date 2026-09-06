@@ -25,7 +25,7 @@ import torch
 
 from ..potential import (
     FULL_OCCUPANCY_POTENTIAL_V,
-    WATER_COARSE_GRAIN_SIGMA_A,
+    WATER_COARSE_GRAIN_SIGMA_ANGSTROM,
     occupancy_blur_halo_voxels,
     potential_occupancy,
 )
@@ -44,9 +44,9 @@ class IceSlabBlender:
         :func:`~specter.potential.potential_occupancy`. A tensor
         broadcastable to ``(B, 1, 1, 1)`` carries a per-image scale.
         Default :data:`~specter.potential.FULL_OCCUPANCY_POTENTIAL_V`.
-    sigma_a : float, optional
+    sigma_angstrom : float, optional
         Coarse-graining length in Å of the occupancy blur. Default
-        :data:`~specter.potential.WATER_COARSE_GRAIN_SIGMA_A`.
+        :data:`~specter.potential.WATER_COARSE_GRAIN_SIGMA_ANGSTROM`.
 
     Notes
     -----
@@ -59,12 +59,12 @@ class IceSlabBlender:
         self,
         pixel_size: float,
         full_potential: float | torch.Tensor = FULL_OCCUPANCY_POTENTIAL_V,
-        sigma_a: float = WATER_COARSE_GRAIN_SIGMA_A,
+        sigma_angstrom: float = WATER_COARSE_GRAIN_SIGMA_ANGSTROM,
     ) -> None:
         self.pixel_size = pixel_size
         self.full_potential = full_potential
-        self.sigma_a = sigma_a
-        self.halo = occupancy_blur_halo_voxels(pixel_size, sigma_a)
+        self.sigma_angstrom = sigma_angstrom
+        self.halo = occupancy_blur_halo_voxels(pixel_size, sigma_angstrom)
         self._tail: torch.Tensor | None = None
 
     def add(self, V: torch.Tensor, ice: torch.Tensor, start: int, end: int) -> None:
@@ -94,7 +94,7 @@ class IceSlabBlender:
         occ = potential_occupancy(
             src,
             self.pixel_size,
-            sigma_a=self.sigma_a,
+            sigma_angstrom=self.sigma_angstrom,
             full_potential=self.full_potential,
         )[:, core]
         # In place, and reusing `occ`: `(1 - occ).clamp(0, 1)` would

@@ -758,7 +758,7 @@ class TomogramSpecimenGenerator:
                 assert bare_bilayer is not None  # generate() just ran
                 bare_peak = float(bare_bilayer.max())
                 tm_placements = mi.generator.place_transmembrane(
-                    min_spacing_a=self.min_transmembrane_spacing
+                    min_spacing_angstrom=self.min_transmembrane_spacing
                 )
                 offset = torch.tensor(mi.position_xyz, dtype=torch.float32)
                 for tp in tm_placements:

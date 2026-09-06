@@ -26,7 +26,7 @@ grid op) -- plausibly a concern for a dense tube needing dozens-to-hundreds
 of sources, but measured directly rather than assumed: ~1.3s for 121
 sources on a 150^3 grid, and ~3.9s for a realistic ~9.8M-voxel (214^3)
 working grid at this module's own default source count (~34, from
-`total_length_a=500`/`step_length_a=15`) -- comparable to the other fast
+`total_length_angstrom=500`/`step_length_angstrom=15`) -- comparable to the other fast
 backend, not a bottleneck in practice at these scales.
 
 ``cap_curvature`` IS still applied: an analytic smooth-min blend can still
@@ -55,24 +55,24 @@ re-normalized. The resulting point sequence is:
    near in space but far apart along the path, corrupting exactly the
    self-approaching topology this backend exists to produce.
 
-Beading risk: same-radius spheres spaced ``step_length_a`` apart only fuse
+Beading risk: same-radius spheres spaced ``step_length_angstrom`` apart only fuse
 into a smooth continuous tube (rather than a visible string of beads) if
-``step_length_a`` stays well under ``2 * tube_radius_a`` and
-``blend_sharpness_a`` is on the order of ``tube_radius_a`` itself -- a
+``step_length_angstrom`` stays well under ``2 * tube_radius_angstrom`` and
+``blend_sharpness_angstrom`` is on the order of ``tube_radius_angstrom`` itself -- a
 default tuned for a handful of sparse, independent blobs would under-blend
 a dense chain, so this module computes its own default instead. Warns if
-``step_length_a`` exceeds the (mean, see "Radius variation" below) tube
+``step_length_angstrom`` exceeds the (mean, see "Radius variation" below) tube
 radius, which produces visible beading.
 
 Radius variation
 -----------------
 ``radius_variation`` (default 0, off) draws a per-source radius instead of
-reusing ``tube_radius_a`` for every sphere: i.i.d. Gaussian noise, one value
+reusing ``tube_radius_angstrom`` for every sphere: i.i.d. Gaussian noise, one value
 per path point, smoothed with ``gaussian_filter1d`` along path order (the
 SAME tool and reasoning as the path-smoothing step above, reused for a
 second, independent field) at ``radius_variation_sigma_points``, then
 rescaled to unit RMS and applied multiplicatively --
-``tube_radius_a * clip(1 + radius_variation * noise, _MIN_RADIUS_FRACTION,
+``tube_radius_angstrom * clip(1 + radius_variation * noise, _MIN_RADIUS_FRACTION,
 None)`` -- the same amplitude-normalized-perturbation pattern
 ``_field_spherical_harmonics.py`` uses for its own random radius function,
 not a fresh scheme.
@@ -82,15 +82,15 @@ itself): direction lives on a bounded manifold (the unit sphere), so a
 persistent walk there just wanders in place indefinitely, but radius is
 unbounded -- an actual random walk in radius would drift to implausible
 values over a long path. Smoothed Gaussian noise stays anchored to
-``tube_radius_a`` regardless of path length.
+``tube_radius_angstrom`` regardless of path length.
 
 This also changes what the beading check (above) should mean: with
 non-zero ``radius_variation``, the LOCAL radius will occasionally dip below
-``step_length_a`` wherever the (smooth, non-periodic) noise is low, which
+``step_length_angstrom`` wherever the (smooth, non-periodic) noise is low, which
 is intentional -- it produces sparse, irregularly-spaced constrictions
 along the tube, not the mechanically-repeating beading pattern the check
 exists to catch. Warning on every such local dip would suppress this
-effect entirely, so the check instead compares ``step_length_a`` against
+effect entirely, so the check instead compares ``step_length_angstrom`` against
 the MEAN drawn radius: it fires only when beading would be the norm along
 the whole tube, not the occasional exception.
 """
@@ -116,7 +116,7 @@ from ._field import (
 # aggressive draw from collapsing a source's radius toward zero (which would
 # pinch the tube toward disconnection). Mirrors _field_spherical_harmonics.py's
 # own floor on its radius perturbation (0.05), but expressed relative to THIS
-# module's radius scale (tube_radius_a, default 25 A) rather than that
+# module's radius scale (tube_radius_angstrom, default 25 A) rather than that
 # module's unit-sphere convention -- the two floors are not directly
 # comparable numbers.
 _MIN_RADIUS_FRACTION = 0.25
@@ -124,7 +124,7 @@ _MIN_RADIUS_FRACTION = 0.25
 
 def _sample_wandering_path(
     n_points: int,
-    step_length_a: float,
+    step_length_angstrom: float,
     flexibility: float,
     rng: np.random.Generator,
 ) -> np.ndarray:
@@ -135,7 +135,7 @@ def _sample_wandering_path(
     ----------
     n_points : int
         Number of path points (``>= 2``).
-    step_length_a : float
+    step_length_angstrom : float
         Distance between consecutive points, Å.
     flexibility : float
         In ``(0, 1]``. At each step, the new direction is
@@ -158,20 +158,20 @@ def _sample_wandering_path(
         random_unit /= np.linalg.norm(random_unit)
         direction = (1.0 - flexibility) * direction + flexibility * random_unit
         direction /= np.linalg.norm(direction)
-        positions[i] = positions[i - 1] + step_length_a * direction
+        positions[i] = positions[i - 1] + step_length_angstrom * direction
     return positions
 
 
 def generate_membrane_field_swept_spline(
     shape_zyx: tuple[int, int, int],
-    spacing_a: float,
-    total_length_a: float = 500.0,
-    step_length_a: float = 15.0,
-    tube_radius_a: float = 25.0,
+    spacing_angstrom: float,
+    total_length_angstrom: float = 500.0,
+    step_length_angstrom: float = 15.0,
+    tube_radius_angstrom: float = 25.0,
     flexibility: float = 0.15,
     radius_variation: float = 0.0,
     radius_variation_sigma_points: float = 2.0,
-    blend_sharpness_a: float | None = None,
+    blend_sharpness_angstrom: float | None = None,
     path_smoothing_sigma_points: float = 1.5,
     curvature_iterations: int = 15,
     curvature_step_fraction: float = 0.15,
@@ -187,17 +187,17 @@ def generate_membrane_field_swept_spline(
     ----------
     shape_zyx : tuple of int
         Working grid shape, ``(Z, Y, X)``.
-    spacing_a : float
+    spacing_angstrom : float
         Working grid voxel spacing, Å.
-    total_length_a : float, optional
+    total_length_angstrom : float, optional
         Approximate path CONTOUR length (not bounding-box extent -- a
         wandering path's bounding box is typically much smaller than its
         contour length), Å. Default 500.0.
-    step_length_a : float, optional
+    step_length_angstrom : float, optional
         Distance between consecutive blended sphere source centers along
-        the path, Å. Must stay well under ``2 * tube_radius_a`` (see
+        the path, Å. Must stay well under ``2 * tube_radius_angstrom`` (see
         module docstring's beading-risk warning). Default 15.0.
-    tube_radius_a : float, optional
+    tube_radius_angstrom : float, optional
         Tube radius, Å. Default 25.0.
     flexibility : float, optional
         In ``(0, 1]`` -- see ``_sample_wandering_path``. Default 0.15,
@@ -209,7 +209,7 @@ def generate_membrane_field_swept_spline(
         defaults.
     radius_variation : float, optional
         RMS fractional variation in tube radius along the path
-        (dimensionless, relative to `tube_radius_a`) -- see module
+        (dimensionless, relative to `tube_radius_angstrom`) -- see module
         docstring's "Radius variation" section. Default 0.0 (constant
         radius).
     radius_variation_sigma_points : float, optional
@@ -226,10 +226,10 @@ def generate_membrane_field_swept_spline(
         this parameter exists to produce. sigma=1-2 reliably gives multiple
         organic-looking swells instead. Only affects the field when
         `radius_variation > 0`.
-    blend_sharpness_a : float, optional
+    blend_sharpness_angstrom : float, optional
         Smooth-min blend radius, Å (see
         :func:`~specter.specimen.membrane._field.blend_field`). Default
-        ``0.5 * tube_radius_a`` -- a default tuned for a handful of sparse,
+        ``0.5 * tube_radius_angstrom`` -- a default tuned for a handful of sparse,
         independent blobs would under-blend a dense chain of sources into
         visible beading, so this module computes its own instead.
     path_smoothing_sigma_points : float, optional
@@ -258,9 +258,9 @@ def generate_membrane_field_swept_spline(
     if radius_variation < 0.0:
         raise ValueError(f"radius_variation must be >= 0, got {radius_variation}")
 
-    n_points = max(2, round(total_length_a / step_length_a) + 1)
+    n_points = max(2, round(total_length_angstrom / step_length_angstrom) + 1)
     rng = np.random.default_rng(seed)
-    positions = _sample_wandering_path(n_points, step_length_a, flexibility, rng)
+    positions = _sample_wandering_path(n_points, step_length_angstrom, flexibility, rng)
 
     if radius_variation > 0.0:
         noise = rng.normal(size=n_points)
@@ -281,22 +281,22 @@ def generate_membrane_field_swept_spline(
         noise_std = float(noise.std())
         if noise_std > 0.0:
             noise = noise / noise_std
-        radii = tube_radius_a * np.clip(
+        radii = tube_radius_angstrom * np.clip(
             1.0 + radius_variation * noise, _MIN_RADIUS_FRACTION, None
         )
     else:
-        radii = np.full(n_points, tube_radius_a)
+        radii = np.full(n_points, tube_radius_angstrom)
 
-    if step_length_a > float(radii.mean()):
+    if step_length_angstrom > float(radii.mean()):
         warnings.warn(
-            f"generate_membrane_field_swept_spline: step_length_a "
-            f"({step_length_a:.1f} A) exceeds the mean tube radius "
+            f"generate_membrane_field_swept_spline: step_length_angstrom "
+            f"({step_length_angstrom:.1f} A) exceeds the mean tube radius "
             f"({radii.mean():.1f} A) -- consecutive sphere sources are spaced "
             "too far apart relative to their own radius to fuse into a smooth "
             "tube ON AVERAGE (visible beading along the path rather than a "
-            "continuous surface). Decrease step_length_a, or increase "
-            "tube_radius_a. (With radius_variation > 0, occasional local "
-            "narrowing below step_length_a is expected -- it produces sparse, "
+            "continuous surface). Decrease step_length_angstrom, or increase "
+            "tube_radius_angstrom. (With radius_variation > 0, occasional local "
+            "narrowing below step_length_angstrom is expected -- it produces sparse, "
             "irregular constrictions rather than this failure mode -- so this "
             "check only fires when beading would be the norm, not the "
             "exception.)",
@@ -309,8 +309,8 @@ def generate_membrane_field_swept_spline(
         positions, sigma=path_smoothing_sigma_points, axis=0, mode="nearest"
     )
 
-    if blend_sharpness_a is None:
-        blend_sharpness_a = 0.5 * tube_radius_a
+    if blend_sharpness_angstrom is None:
+        blend_sharpness_angstrom = 0.5 * tube_radius_angstrom
 
     positions_t = torch.as_tensor(positions, dtype=torch.float32, device=device)
     sources = [
@@ -318,21 +318,23 @@ def generate_membrane_field_swept_spline(
         for i in range(n_points)
     ]
 
-    extent_a = (
+    extent_angstrom = (
         torch.tensor([shape_zyx[2], shape_zyx[1], shape_zyx[0]], dtype=torch.float32)
-        * spacing_a
+        * spacing_angstrom
     )
-    origin_xyz = -0.5 * extent_a
+    origin_xyz = -0.5 * extent_angstrom
 
-    points_xyz = _grid_points_xyz(shape_zyx, spacing_a, origin_xyz, device)
-    phi = blend_field(sources, points_xyz, blend_sharpness_a)
-    phi = cap_curvature(phi, spacing_a, curvature_iterations, curvature_step_fraction)
+    points_xyz = _grid_points_xyz(shape_zyx, spacing_angstrom, origin_xyz, device)
+    phi = blend_field(sources, points_xyz, blend_sharpness_angstrom)
+    phi = cap_curvature(
+        phi, spacing_angstrom, curvature_iterations, curvature_step_fraction
+    )
 
     clipped = _warn_if_clipped_at_boundary(phi)
 
     return MembraneField(
         phi=phi,
-        spacing_a=spacing_a,
+        spacing_angstrom=spacing_angstrom,
         origin_xyz=origin_xyz.to(device),
         clipped_at_boundary=clipped,
     )

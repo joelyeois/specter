@@ -1,3 +1,10 @@
+"""
+`_BaseReconstructor`: the Lightning scaffolding `Reconstructor` and
+`TomogramReconstructor` share -- optimiser and scheduler construction, the
+manual optimisation step, k-space masking after each update, run-directory
+handling and metrics logging.
+"""
+
 from __future__ import annotations
 
 import json

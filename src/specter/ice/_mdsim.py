@@ -1,3 +1,8 @@
+"""
+Readers for legacy molecular-dynamics water dumps (`MDSimDump`,
+`ExtXYZDump`), the inputs the ice targets were derived from.
+"""
+
 from __future__ import annotations
 
 import warnings

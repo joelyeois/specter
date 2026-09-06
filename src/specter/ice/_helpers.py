@@ -1,3 +1,8 @@
+"""
+Small helpers for the ice generators: water-molecule geometry, the volume
+of a slab of ice, and a few array utilities.
+"""
+
 from __future__ import annotations
 
 from typing import Any, Sequence

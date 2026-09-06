@@ -1,3 +1,10 @@
+"""
+Molecular crowding: `CrowdWithDuplicates` places rotated copies of one
+template around a particle or across a micrograph, with the placement
+filters (ice-surface adsorption, local ice thickness) and the insertion
+kernel it uses.
+"""
+
 from __future__ import annotations
 
 import math

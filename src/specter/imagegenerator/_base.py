@@ -1,3 +1,8 @@
+"""
+`BaseImager`: the Lightning base every simulator shares -- settings
+bundles, per-image parameters, the optics stage and the detector.
+"""
+
 from __future__ import annotations
 
 from typing import Any, cast

@@ -1,3 +1,9 @@
+"""
+`Aberration`: the microscope's transfer function, composed from the phase
+terms in `_functions` and the envelopes in `_envelopes`, applied to an exit
+wave in Fourier space.
+"""
+
 from __future__ import annotations
 
 from typing import Any

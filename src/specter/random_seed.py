@@ -1,3 +1,7 @@
+"""
+Global seed control, exported as `specter.seed`.
+"""
+
 import random
 
 import numpy as np

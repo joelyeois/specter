@@ -1,3 +1,8 @@
+"""
+`PDB`: fetches, caches and parses a structure into atomic numbers,
+coordinates and, for Shtyrov factors, bonded-species types.
+"""
+
 from __future__ import annotations
 
 import gzip

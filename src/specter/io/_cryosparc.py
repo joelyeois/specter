@@ -1,3 +1,8 @@
+"""
+Reads imaging parameters, poses and CTF terms from a CryoSPARC ``.cs``
+file.
+"""
+
 from __future__ import annotations
 
 from typing import Literal

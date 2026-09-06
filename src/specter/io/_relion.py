@@ -1,3 +1,8 @@
+"""
+RELION ``.star`` input and output: reads a refinement's parameters and
+writes particle and micrograph star files for simulated data.
+"""
+
 from __future__ import annotations
 
 import os

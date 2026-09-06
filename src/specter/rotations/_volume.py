@@ -1,3 +1,8 @@
+"""
+Rotating volumes: real-space affine resampling, Fourier-space rotation and
+translation, and the affine-matrix helpers they share.
+"""
+
 from __future__ import annotations
 
 from typing import Literal

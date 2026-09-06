@@ -1,3 +1,8 @@
+"""
+`RandomIcemaker`: fast, low-fidelity amorphous ice from uniformly random
+water positions, for quick tests.
+"""
+
 from __future__ import annotations
 
 

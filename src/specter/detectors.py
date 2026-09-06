@@ -1,3 +1,8 @@
+"""
+Direct electron detector models: the bundled MTF curves (K2, K3, Falcon 4i,
+perfect), their DQE(0), and the coincidence-loss geometry per camera.
+"""
+
 from __future__ import annotations
 
 import math

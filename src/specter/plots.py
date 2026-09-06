@@ -1,3 +1,8 @@
+"""
+Plotting helpers: volumes, slices, particle stacks, radial distributions
+and FSC curves with their resolution readouts.
+"""
+
 from __future__ import annotations
 
 import re

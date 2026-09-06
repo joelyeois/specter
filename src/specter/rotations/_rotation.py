@@ -1,3 +1,8 @@
+"""
+Rotating and translating coordinates with quaternions, and the rotation
+aligning one direction with another.
+"""
+
 from __future__ import annotations
 
 import math

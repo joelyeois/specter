@@ -1,3 +1,9 @@
+"""
+`VolumeRotator`: samples rotated slices or whole rotated volumes from a
+cached grid, with a checkpointed backward for volumes that require
+gradients.
+"""
+
 from __future__ import annotations
 
 from typing import Sequence

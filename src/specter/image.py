@@ -1,3 +1,7 @@
+"""
+Image-level utilities for particle stacks.
+"""
+
 from __future__ import annotations
 
 import torch

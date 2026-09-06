@@ -1,3 +1,8 @@
+"""
+Helpers for the reconstructors: learning-rate schedulers, k-space masks,
+particle-image preprocessing and per-epoch metrics.
+"""
+
 from __future__ import annotations
 
 from typing import Any, Callable

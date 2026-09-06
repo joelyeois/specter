@@ -1,3 +1,8 @@
+"""
+`GradientSKIcemaker`: amorphous ice by gradient optimisation of water
+positions against a structure-factor target and the MLBOP energy.
+"""
+
 from __future__ import annotations
 
 from typing import Any, Callable

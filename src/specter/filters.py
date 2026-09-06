@@ -1,3 +1,8 @@
+"""
+Frequency-domain and real-space filters: Butterworth, cosine taper,
+B-factor and a separable Gaussian blur.
+"""
+
 from __future__ import annotations
 
 import torch

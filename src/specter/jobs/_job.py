@@ -1,3 +1,7 @@
+"""
+`Job`: a numbered, tracked run directory with its `job.json` record.
+"""
+
 from __future__ import annotations
 
 import dataclasses

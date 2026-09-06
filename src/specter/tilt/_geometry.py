@@ -1,3 +1,9 @@
+"""
+Tilt-series geometry: the XY coverage a tilt range needs, edge tapers, the
+number of slices under a pose, and the defocus shift across a tilted
+specimen.
+"""
+
 from __future__ import annotations
 
 import math

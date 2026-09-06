@@ -1,3 +1,7 @@
+"""
+The `specter jobs` command group: list, show and diff tracked job records.
+"""
+
 from __future__ import annotations
 
 import json

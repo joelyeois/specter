@@ -1,3 +1,8 @@
+"""
+`TiltSeriesGenerator`: a cryo-ET tilt series from a specimen volume, one
+multislice pass per tilt with the geometry padding each tilt needs.
+"""
+
 from __future__ import annotations
 
 from dataclasses import replace

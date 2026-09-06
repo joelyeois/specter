@@ -1,3 +1,7 @@
+"""
+Per-particle selection shared by the CryoSPARC and RELION readers.
+"""
+
 from __future__ import annotations
 
 import torch

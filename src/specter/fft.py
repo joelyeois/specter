@@ -1,3 +1,8 @@
+"""
+FFT wrappers with a consistent centring convention, FFT-based convolution,
+and the Fourier shell correlation.
+"""
+
 from __future__ import annotations
 
 from typing import Sequence

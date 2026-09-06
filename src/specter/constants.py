@@ -1,3 +1,9 @@
+"""
+Physical constants and the electron-optics quantities derived from them:
+the relativistic wavelength and the interaction parameter at a given
+accelerating voltage. CODATA values via `scipy.constants`.
+"""
+
 from __future__ import annotations
 
 

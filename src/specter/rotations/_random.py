@@ -1,3 +1,8 @@
+"""
+Random rotations (quaternions, rotation vectors, matrices) and the angular
+distance between rotations.
+"""
+
 from __future__ import annotations
 
 from typing import Literal

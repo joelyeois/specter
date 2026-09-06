@@ -1,3 +1,8 @@
+"""
+`JobDatabase`: enumerates and reads the `job.json` records under a project
+tree.
+"""
+
 from __future__ import annotations
 
 import json

@@ -1,3 +1,8 @@
+"""
+Output helpers for a reconstruction run: MRC volumes, plot3d previews and
+FSC figures.
+"""
+
 from __future__ import annotations
 
 from pathlib import Path

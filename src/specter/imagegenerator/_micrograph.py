@@ -1,3 +1,8 @@
+"""
+`MicrographGenerator`: images a whole specimen volume, or a
+`MicrographSpecimenGenerator`'s output, as a micrograph.
+"""
+
 from __future__ import annotations
 
 import warnings

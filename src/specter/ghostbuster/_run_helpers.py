@@ -1,3 +1,8 @@
+"""
+Device resolution and Lightning `Trainer` construction for the two
+Ghostbuster pipelines.
+"""
+
 from __future__ import annotations
 
 from typing import Any, Sequence, cast

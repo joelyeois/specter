@@ -1,3 +1,8 @@
+"""
+Terminal output shared across the package: the rich console, progress bars,
+status spinners, section headers and timed phases.
+"""
+
 from __future__ import annotations
 
 import sys

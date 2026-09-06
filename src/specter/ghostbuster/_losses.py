@@ -1,3 +1,8 @@
+"""
+Image-domain losses for reconstruction: normalised cross-correlation, MSE,
+and the noise-weighted variants with their running noise estimate.
+"""
+
 from __future__ import annotations
 
 import torch

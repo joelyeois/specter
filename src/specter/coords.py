@@ -1,3 +1,8 @@
+"""
+Coordinate sampling and statistics: Poisson-disk neighbour placement in 2-D
+and 3-D, and the radial distribution function.
+"""
+
 from __future__ import annotations
 
 from typing import Literal

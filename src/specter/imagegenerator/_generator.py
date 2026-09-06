@@ -1,3 +1,8 @@
+"""
+`ImageGenerator` and `ImageGeneratorFromCoordinates`: single-particle image
+simulation from a pre-built potential or from atomic coordinates.
+"""
+
 from __future__ import annotations
 
 from typing import Any

@@ -1,3 +1,9 @@
+"""
+`Reconstructor`: reconstructs a 3-D volume from single-particle images with
+the same forward model as `ImageGenerator`, optionally refining poses,
+shifts and defocus.
+"""
+
 from __future__ import annotations
 
 import os

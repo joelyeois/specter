@@ -1,3 +1,8 @@
+"""
+`ParticleGeneratorBase`: what the two single-particle generators share --
+crowding, solvation with ice, and the per-batch volume pipeline.
+"""
+
 from __future__ import annotations
 
 import contextlib

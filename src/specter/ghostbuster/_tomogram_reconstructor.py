@@ -1,3 +1,8 @@
+"""
+`TomogramReconstructor`: reconstructs a volume from a tilt series with the
+same forward model as `TiltSeriesGenerator`, one tilt per training step.
+"""
+
 from __future__ import annotations
 
 import json

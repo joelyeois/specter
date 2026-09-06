@@ -406,7 +406,7 @@ _ALIGNMENT_FIXTURES = ["3DY4-assembly1.cif", "7a4m.cif"]
 @pytest.mark.parametrize("name", _ALIGNMENT_FIXTURES)
 def test_atom_species_aligns_for_awkward_structures(name):
     """atom_species stays index-aligned with atomic_numbers, element for element."""
-    from specter.atom.atom import atom_symbol
+    from specter.atom import atom_symbol
 
     path = Path(default_pdb_cache_dir()) / name
     if not path.exists():

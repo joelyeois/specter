@@ -41,7 +41,7 @@ simulation](forward-simulation.md).
 !!! info "Source"
     Both pipelines share `specter.potential.PotentialBuilder` and
     `specter.ice`. Single-particle specimen assembly lives in
-    `specter.imagegenerator` and `specter.specimen.single_particle`;
+    `specter.imagegenerator` and `specter.specimen`;
     cryo-ET specimen assembly lives in `specter.specimen` (`tomogram/`,
     `membrane/`, `filament/`, `packing/`, `_carbon.py`, `_grid.py`).
     This package is under active development; check it for the

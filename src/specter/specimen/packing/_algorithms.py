@@ -69,7 +69,7 @@ def draw_species_pool(
     whose combined volume reaches ``occupancy_fraction * box_volume``,
     species drawn with probability proportional to `species_ratios`
     (matching how
-    `specter.specimen.cytosolic_filler.PEI2016_CROWDING_TABLE`'s
+    `specter.specimen.PEI2016_CROWDING_TABLE`'s
     `occurrence_freq` is meant to be used as a relative-abundance weight,
     not an absolute one).
 

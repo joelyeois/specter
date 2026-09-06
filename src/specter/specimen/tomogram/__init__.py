@@ -1,5 +1,5 @@
 from ._regions import classify_membrane_regions
-from .generator import (
+from ._generator import (
     BeadPlacement,
     MembraneInstance,
     TomogramSpecimenGenerator,

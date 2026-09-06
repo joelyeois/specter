@@ -212,8 +212,8 @@ src/specter/                  # Main source package
                               # voxelization), _tiling (block tiling), _profiles (radial averages), _reduce
                               # (count_nonzero_chunked), _nps (noise power spectra)
   atom/                       # Atomic properties and potential functions
-    atom.py                   # Atom symbols, numbers, masses
-    atomic_potentials.py      # Kirkland, Lobato, Shtyrov parameterizations
+    _atom.py                  # Atom symbols, numbers, masses
+    _atomic_potentials.py     # Kirkland, Lobato, Shtyrov parameterizations
   atom_data/                  # Scattering parameter tables — do not modify
   cli/                        # `specter` CLI — see "CLI & pipelines" below. _cli.py is the entry point; _click_options.py
                               # is the dataclass→click adapter (build_config_options, build_config_command,
@@ -275,9 +275,9 @@ src/specter/                  # Main source package
     _volume_rotator.py        # VolumeRotator (LightningModule) for sampling rotated slices
   specimen/                   # Volume assembly (package) — under heavy active development, structure below is
                               # partial/illustrative only; read the package directly rather than trusting this list.
-    single_particle.py        # MicrographSpecimenGenerator — populates a volume with duplicates of one template + ice; MicrographGenerator's `specimen`
-    from_volume.py            # load_specimen_volume() — a pre-built specimen volume from disk, for TiltSeriesConfig's volume_path
-    cytosolic_filler.py       # PEI2016_CROWDING_TABLE + CRYOETSIM_PARTICLE_TABLE + build_filler_pool_specs() — generic cytosolic background reference tables
+    _single_particle.py       # MicrographSpecimenGenerator — populates a volume with duplicates of one template + ice; MicrographGenerator's `specimen`
+    _from_volume.py           # load_specimen_volume() — a pre-built specimen volume from disk, for TiltSeriesConfig's volume_path
+    _cytosolic_filler.py      # PEI2016_CROWDING_TABLE + CRYOETSIM_PARTICLE_TABLE + build_filler_pool_specs() — generic cytosolic background reference tables
     _parallel_render.py       # Concurrent per-species rendering/PDB parsing (render_workers/render_devices resolution)
     filament/                 # single-strand filaments (_path/_placement/_generator: F-actin,
                               # PROTOFILAMENT_SPEC) AND real microtubules (_lattice: surface-lattice
@@ -292,9 +292,9 @@ src/specter/                  # Main source package
                               # _field_swept_spline (the two shape backends), _profile (calibrated bilayer psi(z)),
                               # _raster (field + profile → density), _placement (transmembrane sites/orientations),
                               # _extent (bounding radius), _generator (MembraneGenerator, TransmembraneSpec)
-    packing/                  # algorithms.py (pack_hard_spheres_3d, species pools), _shape.py (pack_shapes_3d, the
+    packing/                  # _algorithms.py (pack_hard_spheres_3d, species pools), _shape.py (pack_shapes_3d, the
                               # default voxel-occupancy packer)
-    tomogram/                 # generator.py (TomogramSpecimenGenerator, behind `specter build tomogram`), _specs
+    tomogram/                 # _generator.py (TomogramSpecimenGenerator, behind `specter build tomogram`), _specs
                               # (its input dataclasses), _regions (shell/lumen/cytosol classification), _helpers
     _grid.py                  # BeadGenerator — gold fiducial bead physics, for specimen.tomogram.TomogramSpecimenGenerator
                               # (`specter build tomogram`); also the shared bulk-material density/potential helpers _carbon.py uses

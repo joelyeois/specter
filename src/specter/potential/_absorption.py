@@ -12,7 +12,7 @@ exists**. A model that instead computes the imaginary component *from atoms*
 -- the Weickenmeier-Kohl style absorptive form factors, say -- does not belong
 here: it needs atomic numbers, species and a Debye-Waller factor rather than a
 finished potential, so it belongs beside its elastic counterparts in
-`specter.atom.atomic_potentials` and is selected through `PotentialBuilder`,
+`specter.atom` and is selected through `PotentialBuilder`,
 exactly as `kirkland`/`lobato`/`shtyrov` are. The split is by input, not by
 subject matter, which is easy to get wrong when looking for "the absorption
 code".

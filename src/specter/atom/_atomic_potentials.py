@@ -1,3 +1,9 @@
+"""
+Parameterised atomic scattering potentials: the Kirkland, Lobato, Peng and
+Shtyrov (bonded-species) tables under `specter.atom_data`, and the real- and
+Fourier-space potentials each parameterisation gives.
+"""
+
 from __future__ import annotations
 
 import json

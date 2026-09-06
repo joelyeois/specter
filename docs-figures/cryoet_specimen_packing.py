@@ -3,7 +3,7 @@ Generate the figures for docs/concepts/cryoet-specimen/packing.md, which
 explains region classification and the RSA hard-sphere packing behind
 `specter build tomogram`'s protein fill (``specter.specimen.packing``,
 ``specter.specimen.tomogram._regions``,
-``specter.specimen.cytosolic_filler``).
+``specter.specimen``).
 
 Calls the shipped `pack_hard_spheres_3d`/`draw_species_pool`/
 `classify_membrane_regions` and, for the hero, a real
@@ -26,7 +26,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap
 
-from specter.specimen.cytosolic_filler import (
+from specter.specimen import (
     CRYOETSIM_PARTICLE_TABLE,
     PEI2016_CROWDING_TABLE,
 )

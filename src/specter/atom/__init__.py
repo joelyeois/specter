@@ -1,5 +1,5 @@
-from .atom import atom_mass, atom_number, atom_symbol
-from .atomic_potentials import (
+from ._atom import atom_mass, atom_number, atom_symbol
+from ._atomic_potentials import (
     MIN_GAUSSIAN_B,
     kirkland_atomic_potential_2d,
     kirkland_atomic_potential_3d,

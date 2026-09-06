@@ -15,7 +15,7 @@ Every component is optional. A run needs at least one of them; any
 combination is valid.
 
 !!! info "Source"
-    `specter.specimen.tomogram.generator`, plus the per-component modules
+    `specter.specimen.tomogram`, plus the per-component modules
     linked below. `docs-figures/cryoet_specimen_overview.py` produces the
     figures: it drives the real generator once and draws every panel from
     that one run's own outputs.
@@ -30,7 +30,7 @@ combination is valid.
 | [Filaments](filaments.md) | Random-walk polymers (F-actin, single protofilaments) | `specimen.filament` |
 | [Microtubules](microtubules.md) | Closed 13-protofilament tubes, lumen and A-lattice seam | `specimen.filament` |
 | [Gold fiducial beads](beads.md) | Real fcc gold at real bulk density | `specimen._grid` |
-| [Regions & protein packing](packing.md) | Cytosol/lumen classification, shape- and sphere-based RSA placement, crowding tables | `specimen.packing`, `specimen.tomogram._regions`, `specimen.cytosolic_filler` |
+| [Regions & protein packing](packing.md) | Cytosol/lumen classification, shape- and sphere-based RSA placement, crowding tables | `specimen.packing`, `specimen.tomogram._regions`, `specimen` (the crowding tables) |
 
 Amorphous ice is **not** one of them. A `specter build tomogram` volume is
 the specimen alone; you add ice downstream, when you image the volume.

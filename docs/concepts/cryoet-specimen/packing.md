@@ -16,7 +16,7 @@ running occupancy grid.
 
 !!! info "Source"
     `specter.specimen.tomogram._regions`, `specter.specimen.packing`,
-    `specter.specimen.cytosolic_filler`.
+    `specter.specimen`.
     `docs-figures/cryoet_specimen_packing.py` produces the figures.
 
 ## Regions from topology, not geometry

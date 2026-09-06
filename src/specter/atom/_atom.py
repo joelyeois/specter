@@ -1,3 +1,8 @@
+"""
+Element symbols, atomic numbers and atomic masses, and the conversions
+between them.
+"""
+
 from __future__ import annotations
 
 from typing import Sequence

@@ -13,7 +13,7 @@ import warnings
 
 import torch
 
-from specter.specimen.tomogram.generator import TomogramSpecimenGenerator
+from specter.specimen.tomogram import TomogramSpecimenGenerator
 
 
 class _FakePDB:

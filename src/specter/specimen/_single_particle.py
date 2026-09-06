@@ -1,3 +1,8 @@
+"""
+`MicrographSpecimenGenerator`: a micrograph specimen from duplicates of one
+particle template plus amorphous ice.
+"""
+
 from __future__ import annotations
 
 import torch

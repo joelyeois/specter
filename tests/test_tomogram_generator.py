@@ -370,7 +370,7 @@ def test_insert_shell_label_overlap_first_write_wins():
     more -- the underlying compositing function still needs covering,
     since an irregular shape extending past its own bounding-sphere
     estimate can still produce this, so this exercises it directly."""
-    from specter.specimen.tomogram.generator import _insert_shell_label
+    from specter.specimen.tomogram._generator import _insert_shell_label
 
     shape_zyx = (16, 16, 16)
     labels = torch.zeros(shape_zyx, dtype=torch.int32)

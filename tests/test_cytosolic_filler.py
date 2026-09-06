@@ -1,5 +1,5 @@
 """
-Smoke tests for specter.specimen.cytosolic_filler -- table integrity
+Smoke tests for specter.specimen -- table integrity
 (no duplicate/malformed codes) and build_filler_pool_specs's filtering,
 including cross-compatibility between its two bundled tables
 (CRYOETSIM_PARTICLE_TABLE and PEI2016_CROWDING_TABLE). No network access
@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from collections import Counter
 
-from specter.specimen.cytosolic_filler import (
+from specter.specimen import (
     CRYOETSIM_PARTICLE_TABLE,
     PEI2016_CROWDING_TABLE,
     build_filler_pool_specs,

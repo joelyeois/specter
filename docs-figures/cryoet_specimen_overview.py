@@ -25,7 +25,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 from specter.specimen._carbon import CarbonFilmSpec
-from specter.specimen.cytosolic_filler import (
+from specter.specimen import (
     PEI2016_CROWDING_TABLE,
     build_filler_pool_specs,
 )

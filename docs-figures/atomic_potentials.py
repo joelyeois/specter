@@ -37,7 +37,7 @@ import matplotlib.pyplot as plt
 import torch
 
 from specter.atom import atom_number
-from specter.atom.atomic_potentials import (
+from specter.atom import (
     kirkland_atomic_potential_2d,
     kirkland_atomic_potential_3d,
     load_kirkland_parameters,

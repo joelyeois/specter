@@ -10,7 +10,7 @@ Lobato, Shtyrov), and checks the Kirkland ones against the worked
 examples in Kirkland's *Advanced Computing in Electron Microscopy*.
 
 !!! info "Source"
-    Walks through `specter.atom.atomic_potentials` and
+    Walks through `specter.atom` and
     `specter.potential`. Figures are produced by
     `docs-figures/atomic_potentials.py`, which calls the same public
     functions as the real code path and mirrors

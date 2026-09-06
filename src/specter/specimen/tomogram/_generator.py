@@ -175,7 +175,7 @@ class TomogramSpecimenGenerator:
     purely for DENSITY -- each region (cytosol/lumen) is packed as densely
     as `occupancy_fraction` allows via RSA hard-sphere placement, uniformly
     throughout it, with no distributional shaping of any one species' own
-    spatial statistics. Contrast `specter.specimen.single_particle.
+    spatial statistics. Contrast `specter.specimen.
     MicrographSpecimenGenerator` (the single-particle-micrograph backend):
     single-species only (many duplicate copies of ONE template), but its
     placement (`~specter.crowding.CrowdWithDuplicates`) supports an

@@ -248,7 +248,7 @@ where the true reference plane sits at the scattering centroid instead.
 Potential volumes are in **volts**. A box of water at the density of
 amorphous ice returns a mean potential of 4.8 V against a literature mean
 inner potential of approximately 4.5 V. The scattering factors returned
-by the `*_fourier` functions in `atom/atomic_potentials.py` are in Å;
+by the `*_fourier` functions in `atom/_atomic_potentials.py` are in Å;
 multiplying by \(c_1 = 2\pi a_0 e = 47.9\) V·Å² converts them to the
 V·Å³ Fourier-space potential; `PotentialBuilder` applies this factor.
 Projected (2D) potentials are in V·Å.

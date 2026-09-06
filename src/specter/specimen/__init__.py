@@ -1,10 +1,10 @@
-from .single_particle import MicrographSpecimenGenerator
-from .cytosolic_filler import (
+from ._single_particle import MicrographSpecimenGenerator
+from ._cytosolic_filler import (
     CRYOETSIM_PARTICLE_TABLE,
     PEI2016_CROWDING_TABLE,
     build_filler_pool_specs,
 )
-from .from_volume import load_specimen_volume
+from ._from_volume import load_specimen_volume
 from ._grid import BeadSpec
 from ._carbon import CarbonFilmSpec
 from .filament import (

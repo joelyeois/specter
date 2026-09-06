@@ -261,7 +261,7 @@ def test_generator_coarse_packing_survives_both_placement_stages():
     second time and blew an internal shape assert -- but only when the
     factor exceeded 1, which no direct pack_shapes_3d test exercises.
     """
-    from specter.specimen.tomogram.generator import (
+    from specter.specimen.tomogram import (
         TomogramProteinSpec,
         TomogramSpecimenGenerator,
     )

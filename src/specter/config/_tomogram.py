@@ -52,8 +52,8 @@ class TomogramConfig:
     # provide as [[filler]] tables.
     filler: list[dict[str, Any]] = field(default_factory=list)
     # Additive to filler above: pull extra filler species from the
-    # bundled reference tables (specter.specimen.cytosolic_filler.
-    # PEI2016_CROWDING_TABLE and/or specter.specimen.cytosolic_filler.
+    # bundled reference tables (specter.specimen.
+    # PEI2016_CROWDING_TABLE and/or specter.specimen.
     # CRYOETSIM_PARTICLE_TABLE), rather than hand-listing every species.
     # Both can be enabled at once -- their results are concatenated. Always
     # placed at location="cytosol" (these tables have no lumen/cytosol

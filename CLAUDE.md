@@ -221,7 +221,8 @@ src/specter/                  # Main source package
                               # load_cli_config); one module per command group (simulate, build, reconstruct, match, cache)
   config/                     # One dataclass per command (ParticleStackConfig, MicrographConfig, TiltSeriesConfig,
                               # TomogramConfig, IceCacheConfig, ReconstructionConfig, MatchConfig), each beside its
-                              # *_HELP dict; _loader (load_config/apply_overrides), _validation (validate_config),
+                              # *_HELP dict derived from the fields' own `setting(...)` help and check metadata (_field);
+                              # _loader (load_config/apply_overrides), _validation (validate_config),
                               # _scalar_range (the scalar-or-[low, high] field convention), _paths (project root,
                               # default output dirs, PDB cache dir)
   ctf/                        # torch-ctf-backed CTF — opt-in second backend, verified parity with aberrations/

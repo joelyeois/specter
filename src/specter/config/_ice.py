@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+
+from ._field import help_of, setting
 
 from ._paths import default_output_dir
 
@@ -32,23 +34,63 @@ class IceCacheConfig:
     # optimisation run, so cost scales linearly -- and IceBank draws a random
     # rotation and translation from whichever config it picks, so a handful of
     # configs already gives a large space of distinct crops.
-    n_configs: int = 8
+    n_configs: int = setting(
+        8,
+        help=(
+            "Number of independent ice configurations to generate. "
+            "Each costs a full optimisation run -- tens of minutes at the default "
+            "n=256, dx=1.0."
+        ),
+        check="positive",
+    )
     # Voxels along each side of the (cubic) periodic cell; the cell measures
     # n * dx Å. Cubic only -- IceBank stores one scalar box_L per config
     # and filters candidates against it, so a non-cubic cell is unrepresentable.
-    n: int = 256
-    dx: float = 1.0  # A/voxel
+    n: int = setting(
+        256,
+        help=(
+            "Voxels along each side of the cubic periodic cell (the cell "
+            "measures n*dx Angstrom). Must be at least as large as the biggest ice "
+            "volume a simulation will request from it in any one dimension, or "
+            "IceBank has to tile several crops together to serve the request."
+        ),
+        check="positive",
+    )
+    dx: float = setting(
+        1.0,
+        help=(
+            "Voxel size in Angstrom used when optimising and when voxelizing "
+            "crops. Set this to the pixel size of the simulations the cache is for."
+        ),
+        check="positive",
+    )  # A/voxel
     # First seed; the i-th config uses seed_start + i and is saved under that
     # seed's name. Raise it past an existing library's highest seed to extend
     # that library rather than regenerate it.
-    seed_start: int = 0
+    seed_start: int = setting(
+        0,
+        help=(
+            "Seed of the first configuration; the i-th uses "
+            "seed_start+i, and each is saved under its own seed's filename. Set "
+            "this past an existing library's highest seed to extend it rather than "
+            "regenerate it."
+        ),
+        check="non_negative",
+    )
 
     # --- Optimisation ---
     # L-BFGS step ceiling per config. An upper bound only: the run stops early
     # once the loss plateaus (GradientSKIcemaker.optimize's tol/patience).
     # 250 steps is ~6000 loss evaluations at optimize's default max_iter, the
     # budget its settings were chosen on; see its docstring.
-    n_steps: int = 250
+    n_steps: int = setting(
+        250,
+        help=(
+            "L-BFGS step ceiling per configuration. An upper bound only "
+            "-- a run whose loss plateaus stops early."
+        ),
+        check="positive",
+    )
 
     # --- Compute ---
     # "cpu" | "cuda" | "cuda:0" | a bare GPU index | a comma-separated list of
@@ -56,45 +98,45 @@ class IceCacheConfig:
     # worker process per device, so N GPUs build a library roughly N times
     # faster -- but they have to be named. There is no "auto"; see
     # `specter.devices.parse_device`.
-    device: str = "cuda"
+    device: str = setting(
+        "cuda",
+        help=(
+            "cpu | cuda | cuda:0 | a bare GPU index | a comma-separated "
+            "list of GPU indices (0,1,2,3). Several devices shard whole "
+            "configurations across one worker process per device, so N GPUs "
+            "generate a library roughly N times faster -- name them explicitly, "
+            "e.g. 0,1,2,3."
+        ),
+    )
 
     # --- Output ---
-    output_dir: str = field(default_factory=lambda: default_output_dir("ice"))
+    output_dir: str = setting(
+        factory=lambda: default_output_dir("ice"),
+        help=(
+            "Directory to write config_NNN.pt files and manifest.json "
+            "to. Point a simulation config's ice_cache_dir at it to use the result. "
+            "Never the bundled ice_data/ice_cache, which ships with the repository."
+        ),
+    )
     # Regenerate configs whose file is already present, instead of skipping
     # them. Skipping is what lets an interrupted multi-hour run resume.
-    overwrite: bool = False
+    overwrite: bool = setting(
+        False,
+        help=(
+            "Regenerate configurations already present in output_dir "
+            "instead of skipping them. Skipping is what lets an interrupted run "
+            "resume where it left off."
+        ),
+    )
     # Save IceBank.plot_diagnostics' energy/S(k) figures for the finished
     # library.
-    diagnostics: bool = False
+    diagnostics: bool = setting(
+        False,
+        help=(
+            "Save energy and S(k) diagnostic figures for the "
+            "finished library to output_dir."
+        ),
+    )
 
 
-ICE_CACHE_HELP: dict[str, str] = {
-    "n_configs": "Number of independent ice configurations to generate. "
-    "Each costs a full optimisation run -- tens of minutes at the default "
-    "n=256, dx=1.0.",
-    "n": "Voxels along each side of the cubic periodic cell (the cell "
-    "measures n*dx Angstrom). Must be at least as large as the biggest ice "
-    "volume a simulation will request from it in any one dimension, or "
-    "IceBank has to tile several crops together to serve the request.",
-    "dx": "Voxel size in Angstrom used when optimising and when voxelizing "
-    "crops. Set this to the pixel size of the simulations the cache is for.",
-    "seed_start": "Seed of the first configuration; the i-th uses "
-    "seed_start+i, and each is saved under its own seed's filename. Set "
-    "this past an existing library's highest seed to extend it rather than "
-    "regenerate it.",
-    "n_steps": "L-BFGS step ceiling per configuration. An upper bound only "
-    "-- a run whose loss plateaus stops early.",
-    "device": "cpu | cuda | cuda:0 | a bare GPU index | a comma-separated "
-    "list of GPU indices (0,1,2,3). Several devices shard whole "
-    "configurations across one worker process per device, so N GPUs "
-    "generate a library roughly N times faster -- name them explicitly, "
-    "e.g. 0,1,2,3.",
-    "output_dir": "Directory to write config_NNN.pt files and manifest.json "
-    "to. Point a simulation config's ice_cache_dir at it to use the result. "
-    "Never the bundled ice_data/ice_cache, which ships with the repository.",
-    "overwrite": "Regenerate configurations already present in output_dir "
-    "instead of skipping them. Skipping is what lets an interrupted run "
-    "resume where it left off.",
-    "diagnostics": "Save energy and S(k) diagnostic figures for the "
-    "finished library to output_dir.",
-}
+ICE_CACHE_HELP: dict[str, str] = help_of(IceCacheConfig)

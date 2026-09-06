@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+
+from ._field import help_of, setting
 from typing import Any, ClassVar, Literal
 
 from ._paths import default_pdb_cache_dir
@@ -40,7 +42,16 @@ class TomogramConfig:
     # `membrane` is set, otherwise there's no "lumen" to place into). Placed
     # FIRST within its location, at this exact count, always exported to
     # picks. In TOML, provide as [[targets]] tables.
-    targets: list[dict[str, Any]] = field(default_factory=list)
+    targets: list[dict[str, Any]] = setting(
+        factory=list,
+        help=(
+            "Target protein species to pack (TOML-only, [[targets]] "
+            "tables), each {'pdb_source': <code or path>, 'n_copies': <exact "
+            "instance count>, 'location': 'cytosol'|'lumen' (optional, default "
+            "'cytosol' -- only meaningful when [[membrane]] is set)}. Placed FIRST "
+            "within its location, at this exact count, always exported to picks."
+        ),
+    )
     # One dict per filler species, e.g. {"pdb_source": "1mbo"}. Only
     # "pdb_source" is required; optional "location" (as `targets` above,
     # default "cytosol") and "ratio" (relative abundance weight among OTHER
@@ -50,7 +61,18 @@ class TomogramConfig:
     # targets there, budgeted by filler_occupancy_fraction. Excluded from
     # picks by default (see write_picks/TomogramProteinSpec.role). In TOML,
     # provide as [[filler]] tables.
-    filler: list[dict[str, Any]] = field(default_factory=list)
+    filler: list[dict[str, Any]] = setting(
+        factory=list,
+        help=(
+            "Filler protein species to pack (TOML-only, [[filler]] "
+            "tables), each {'pdb_source': <code or path>, 'location': "
+            "'cytosol'|'lumen' (optional, default 'cytosol'), 'ratio': 1.0 "
+            "(optional, relative attempt-weight among other filler species sharing "
+            "the same location)}. Placed SECOND within its location, around any "
+            "already-placed targets there. Excluded from picks by default (see "
+            "write_picks)."
+        ),
+    )
     # Additive to filler above: pull extra filler species from the
     # bundled reference tables (specter.specimen.
     # PEI2016_CROWDING_TABLE and/or specter.specimen.
@@ -58,20 +80,58 @@ class TomogramConfig:
     # Both can be enabled at once -- their results are concatenated. Always
     # placed at location="cytosol" (these tables have no lumen/cytosol
     # distinction of their own).
-    filler_from_pei2016: bool = False
-    filler_from_cryoetsim: bool = False
+    filler_from_pei2016: bool = setting(
+        False,
+        help=(
+            "Additive to filler: also pull filler species "
+            "(location='cytosol') from the bundled PEI2016_CROWDING_TABLE (Pei et "
+            "al. 2016 generic cytosolic crowding reference)."
+        ),
+    )
+    filler_from_cryoetsim: bool = setting(
+        False,
+        help=(
+            "Additive to filler: also pull filler species "
+            "(location='cytosol') from the bundled CRYOETSIM_PARTICLE_TABLE "
+            "(CryoETSim dataset reference, Stojanovska et al. 2025)."
+        ),
+    )
     # Only affects filler_from_cryoetsim (CRYOETSIM_PARTICLE_TABLE has a
     # "category" column; PEI2016_CROWDING_TABLE doesn't, so this filter
     # has no effect there). None = all 4 usable categories (macromolecules,
     # distractors, transcription_translation, nucleosomes).
-    filler_table_categories: list[str] | None = None
+    filler_table_categories: list[str] | None = setting(
+        None,
+        help=(
+            "Only used with filler_from_cryoetsim: "
+            "restrict to these CRYOETSIM_PARTICLE_TABLE categories (macromolecules, "
+            "distractors, transcription_translation, nucleosomes). None = all."
+        ),
+    )
     # Mass range applied to whichever table(s) above are enabled.
-    filler_table_max_mw_kda: float | None = None
-    filler_table_min_mw_kda: float | None = None
-    target_shape: list[int] = field(
-        default_factory=lambda: [300, 1200, 1200]
+    filler_table_max_mw_kda: float | None = setting(
+        None,
+        help=(
+            "Only used with filler_from_pei2016/"
+            "filler_from_cryoetsim: exclude species above this mass, kDa."
+        ),
+        check="non_negative",
+    )
+    filler_table_min_mw_kda: float | None = setting(
+        None,
+        help=(
+            "Only used with filler_from_pei2016/"
+            "filler_from_cryoetsim: exclude species below this mass, kDa."
+        ),
+        check="non_negative",
+    )
+    target_shape: list[int] = setting(
+        factory=lambda: [300, 1200, 1200],
+        help="Output specimen volume shape in voxels (Z, Y, X).",
     )  # (Z, Y, X) voxels
-    voxel_size: float = 5.0  # Å/voxel
+    voxel_size: float = setting(
+        5.0, help="Voxel size in Angstrom.", check="positive"
+    )  # Å/voxel
     # Target packing density for `ratio`-mode filler species, as a bare-
     # sphere fraction of EACH REGION's own volume it's placed in (the whole
     # box when `membrane` is empty, since then "cytosol" IS the whole box --
@@ -81,20 +141,63 @@ class TomogramConfig:
     # jams rather than needing this hand-tuned. Lower it for a deliberately
     # sparser filler layer, or if a small region (e.g. a tight vesicle
     # lumen) makes the candidate pool this implies impractically large.
-    filler_occupancy_fraction: float = 0.5
-    packing_max_retries: int = 1500
+    filler_occupancy_fraction: float = setting(
+        0.5,
+        help=(
+            "Target packing density for filler "
+            "species, as a bare-sphere fraction of EACH REGION's own volume it's "
+            "placed in (the whole box when [[membrane]] is empty -- 'cytosol' is "
+            "then the whole box). Deliberately high by default -- RSA self-limits "
+            "at its own physical jamming ceiling rather than erroring, so filler "
+            "packs until it jams rather than needing this hand-tuned. Lower "
+            "it for a sparser filler layer, or if a small region (e.g. a tight "
+            "vesicle lumen) makes the implied candidate pool impractically large."
+        ),
+        range=(0.0, 1.0),
+    )
+    packing_max_retries: int = setting(
+        1500,
+        help=(
+            "Trial positions per instance. Sets a packing "
+            "stage's attempt ceiling; "
+            "pairs with the packer's own stall_patience, which cuts that budget "
+            "short once a species saturates."
+        ),
+    )
     # None = auto (coarsen only when the packing grid gets too large).
-    packing_voxel_size: float | None = None
+    packing_voxel_size: float | None = setting(
+        None,
+        help=(
+            "Run protein collision on a "
+            "coarser grid than the render, an integer multiple of voxel_size. "
+            "Unset = automatic, which only coarsens once the packing grid would be "
+            "too large to hold; ordinary boxes are unaffected."
+        ),
+    )
     # (z, y, x), matching target_shape's axis order. True on an axis lets a
     # placed instance's center stay in-bounds while its body pokes past
     # that wall (truncated naturally at render time) instead of being
     # rejected outright -- e.g. for a tomogram whose xy field of view is a
     # crop of a larger cellular region.
-    clip_axes: list[bool] = field(default_factory=lambda: [False, False, False])
+    clip_axes: list[bool] = setting(
+        factory=lambda: [False, False, False],
+        help=(
+            "(z, y, x) -- True on an axis lets a placed instance's "
+            "body extend past that wall (truncated at render time) instead of "
+            "being rejected outright. TOML-only (list[bool])."
+        ),
+    )
     # Relative to the current working directory, like any other CLI path
     # argument -- see default_pdb_cache_dir for the unset case.
-    pdb_cache_dir: str = field(default_factory=default_pdb_cache_dir)
-    seed: int | None = None
+    pdb_cache_dir: str = setting(
+        factory=default_pdb_cache_dir,
+        help=(
+            "Where downloaded PDB/mmCIF structures are cached. An "
+            "input cache shared by every run, not an output location -- job tracking "
+            "does not redirect it."
+        ),
+    )
+    seed: int | None = setting(None, help="Random seed.")
 
     # --- Organic membrane (optional) ---
     # One or more dicts, [[membrane]] tables -- one membrane TEMPLATE each,
@@ -124,7 +227,20 @@ class TomogramConfig:
     # voxel_size/seed/device/pdb_cache_dir fields for every instance, not from
     # this dict (shape_backend one of "spherical_harmonics" (default) or
     # "swept_spline").
-    membrane: list[dict[str, Any]] = field(default_factory=list)
+    membrane: list[dict[str, Any]] = setting(
+        factory=list,
+        help=(
+            "One or more MembraneGenerator kwargs dicts (TOML-only, "
+            "[[membrane]] tables, one per composited TEMPLATE) -- optional, empty "
+            "by default (no membrane at all; the whole tomogram is then one "
+            "cytosol region). e.g. {'shape_backend': 'spherical_harmonics', "
+            "'n_copies': 3}. See MembraneGenerator's own docstring for the full "
+            "per-backend parameter set; plus 'n_copies' (int, default 1, expands "
+            "one entry into that many independently-seeded instances, each "
+            "collision-rejecting-random-placed) and 'target_shape' (default "
+            "omitted = auto-sized per instance)."
+        ),
+    )
     # Each {"pdb_source": <code or path>, "n_copies": 1, "parameterization":
     # "shtyrov"}. In TOML, provide as [[membrane_transmembrane_specs]] tables.
     # "n_copies" is per membrane instance, and is a request rather than a
@@ -133,10 +249,37 @@ class TomogramConfig:
     # membrane_min_transmembrane_spacing.
     # Applies across ALL membrane instances (not per-instance in v1). Only
     # meaningful when `membrane` is set (no bilayer to embed into otherwise).
-    membrane_transmembrane_specs: list[dict[str, Any]] = field(default_factory=list)
-    membrane_region_density_threshold: float | None = None
-    membrane_region_max_passes: int = 300
-    membrane_min_transmembrane_spacing: float = 40.0
+    membrane_transmembrane_specs: list[dict[str, Any]] = setting(
+        factory=list,
+        help=(
+            "Transmembrane protein species (TOML-"
+            "only, [[membrane_transmembrane_specs]] tables), each {'pdb_source': "
+            "<code or path>, 'n_copies': 1, 'parameterization': 'shtyrov'}. Only "
+            "meaningful when [[membrane]] is set, applies across all instances."
+        ),
+    )
+    membrane_region_density_threshold: float | None = setting(
+        None,
+        help=(
+            "Passed through to "
+            "TomogramSpecimenGenerator's own region_density_threshold."
+        ),
+        range=(0.0, 1.0),
+    )
+    membrane_region_max_passes: int = setting(
+        300,
+        help="Passed through to TomogramSpecimenGenerator's own region_max_passes.",
+        check="positive",
+    )
+    membrane_min_transmembrane_spacing: float = setting(
+        40.0,
+        help=(
+            "Minimum center-to-center "
+            "spacing between placed transmembrane proteins, Angstrom. Only "
+            "meaningful when [[membrane]] is set."
+        ),
+        check="non_negative",
+    )
     # The parameterization for EVERYTHING this command renders from atoms:
     # targets, filler, filaments, microtubules, the carbon film, the bilayer
     # and its transmembrane proteins. Everything placed lands in one summed
@@ -149,27 +292,71 @@ class TomogramConfig:
     # fallback PotentialBuilder uses (see TomogramSpecimenGenerator._stamp_beads). Spelled the same as
     # ParticleStackConfig.scattering_factors -- one config vocabulary across
     # commands, distinct from the internal `parameterization=` kwarg it feeds.
-    scattering_factors: ScatteringFactors = "shtyrov"
+    scattering_factors: ScatteringFactors = setting(
+        "shtyrov",
+        help=(
+            "Atomic scattering-factor parameterization for "
+            "everything rendered from atoms: targets, filler, filaments, "
+            "microtubules, carbon film, bilayer and transmembrane proteins. A "
+            "[[membrane]] table naming its own 'parameterization' overrides this for "
+            "that population. Gold fiducials fall back to Peng under 'shtyrov', "
+            "which has no elemental gold."
+        ),
+    )
     # Everything specter renders that is NOT a biomolecule: the carbon film and gold beads.
     # Kept separate from `scattering_factors` on purpose -- Shtyrov fits bonded
     # species of biomolecules over 0.011-0.62 1/A, so bulk materials are out of
     # its domain and a mean inner potential (a k=0 quantity) extrapolates below
     # the fitted range. Kirkland/Lobato/Peng are per-element, valid at k=0, and
     # agree there. See ice._kernels.build_water_kernel for the measurements.
-    bulk_scattering_factors: ScatteringFactors = "kirkland"
+    bulk_scattering_factors: ScatteringFactors = setting(
+        "kirkland",
+        help=(
+            "Atomic scattering-factor parameterization for the carbon film and gold beads -- everything rendered that is not a biomolecule. Deliberately separate from scattering_factors: Shtyrov is fitted for biomolecules, and these materials are outside that domain."
+        ),
+    )
     # Forwarded to every PDB built for this tomogram. Only takes effect for
     # scattering_factors="shtyrov" (the only one that types atoms) and
     # only when a Monomer Library is available via $CLIBD_MON.
-    readd_hydrogens: bool | Literal["auto"] = "auto"
+    readd_hydrogens: bool | Literal["auto"] = setting(
+        "auto",
+        help=(
+            "Whether to replace a structure's own hydrogens with "
+            "the monomer library's ideal geometry: 'auto' (default) keeps hydrogens "
+            "the file already carries and adds them only when it has none, true "
+            "always re-adds, false never adds hydrogen density (they still inform "
+            "atom typing). Needs a Monomer Library on $CLIBD_MON to have any effect."
+        ),
+    )
     # Unset falls back to $CLIBD_MON. A field as well as a variable because
     # the library changes the rendered potential, so a run should be
     # reproducible from its own config -- see ParticleStackConfig's own note.
-    monomer_library_path: str | None = None
+    monomer_library_path: str | None = setting(
+        None,
+        help=(
+            "Path to a Monomer Library "
+            "(https://github.com/MonomerLibrary/monomers), which completes a "
+            "structure's bond topology and hydrogens so Shtyrov species resolve. "
+            "Unset falls back to $CLIBD_MON. Without one, around 44% of a "
+            "hydrogen-free protein falls back to per-element Peng factors."
+        ),
+    )
     # Off by default: a deposited B-factor is refinement output, not a
     # measured mean-square displacement, and applying a structure's own
     # column silently makes the rendered specimen depend on who deposited
     # it. Requires scattering_factors="shtyrov"; anything else raises.
-    use_deposited_bfactors: bool = False
+    use_deposited_bfactors: bool = setting(
+        False,
+        help=(
+            "Damp each atom by the B-factor its structure "
+            "deposits, instead of rendering the model statically. Only a PER-ATOM "
+            "B adds anything an envelope cannot: a uniform one is the same "
+            "exp(-B k^2/4) as --bfactor, so setting both double-counts. A deposited "
+            "column is refinement output rather than a measured displacement, and "
+            "cryo-EM entries often carry a constant or zero one. Requires "
+            "scattering_factors='shtyrov'."
+        ),
+    )
 
     # --- Filaments (optional, additive on top of membranes if present) ---
     # One dict per filament species, mapping straight onto
@@ -181,7 +368,18 @@ class TomogramConfig:
     # avoided by targets/filler packing (placed right after membranes,
     # before protein fill -- see TomogramSpecimenGenerator's own
     # docstring). In TOML, provide as [[filaments]] tables.
-    filaments: list[dict[str, Any]] = field(default_factory=list)
+    filaments: list[dict[str, Any]] = setting(
+        factory=list,
+        help=(
+            "Filament species to scatter through the tomogram (TOML-"
+            "only, [[filaments]] tables), each mapping onto "
+            "specter.specimen.filament.FilamentSpec kwargs, e.g. {'code': '1TUB', "
+            "'step': 85.0, 'flex_deg': 3.0, 'n_copies': 4}. Placed right after "
+            "membranes, before targets/filler -- no region-gating, no collision "
+            "avoidance against the membrane shell or each other, but targets/"
+            "filler DO avoid already-placed filaments."
+        ),
+    )
     # Convenience toggle: also place the bundled ACTIN_SPEC preset (real
     # F-actin helical repeat -- step/twist from Holmes/Egelman) without
     # hand-writing a [[filaments]] entry. Additive to filaments above (both
@@ -189,7 +387,15 @@ class TomogramConfig:
     # here too -- for more instances or other single-strand species, use
     # [[filaments]] instead. Microtubules are NOT a filament species: they
     # are whole tubes, see [[microtubules]] below.
-    actin: bool = False
+    actin: bool = setting(
+        False,
+        help=(
+            "Convenience toggle: also place the bundled ACTIN_SPEC preset "
+            "(real F-actin helical repeat) without writing a [[filaments]] entry. "
+            "Additive to filaments above. For more instances or other single-strand "
+            "species, use [[filaments]]; for microtubules use [[microtubules]]."
+        ),
+    )
 
     # --- Microtubules (optional, additive on top of filaments/membranes) ---
     # One dict per microtubule species, mapping straight onto
@@ -203,7 +409,19 @@ class TomogramConfig:
     # cached on first use); `length` defaults to the volume diagonal so a
     # microtubule crosses the field. In TOML, provide as [[microtubules]]
     # tables.
-    microtubules: list[dict[str, Any]] = field(default_factory=list)
+    microtubules: list[dict[str, Any]] = setting(
+        factory=list,
+        help=(
+            "Microtubule species to scatter through the tomogram "
+            "(TOML-only, [[microtubules]] tables), each mapping onto "
+            "specter.specimen.filament.MicrotubuleSpec kwargs, e.g. {'n_copies': 2, "
+            "'n_protofilaments': 13, 'bend_radius': 30000.0}. Real 13-protofilament "
+            "tubes with a lumen and an A-lattice seam -- not the single protofilament "
+            "[[filaments]] with a tubulin dimer would give. Placed alongside "
+            "filaments: no region-gating, no collision avoidance, but targets/filler "
+            "DO avoid them."
+        ),
+    )
 
     # --- Carbon support film (optional, single film) ---
     # Zero or one [[carbon_film]] table, mapping onto
@@ -215,7 +433,17 @@ class TomogramConfig:
     # CTS-parity limitation -- see TomogramSpecimenGenerator's own
     # docstring). More than one entry raises. Empty (default): no carbon
     # film, pure ice.
-    carbon_film: list[dict[str, Any]] = field(default_factory=list)
+    carbon_film: list[dict[str, Any]] = setting(
+        factory=list,
+        help=(
+            "Zero or one [[carbon_film]] table (TOML-only) describing a carbon "
+            "support film, mapping onto specter.specimen.CarbonFilmSpec kwargs "
+            "(thickness, hole_radius, edge_fraction, edge_side, edge_roughness). "
+            "Painted into the volume before anything else is "
+            "placed; not carbon-aware for placement (see TomogramSpecimenGenerator's "
+            "own docstring). Empty (default): no carbon film."
+        ),
+    )
 
     # --- Gold fiducial beads (optional) ---
     # One dict per bead population, {"radius": <Angstrom or [low, high]>,
@@ -226,17 +454,50 @@ class TomogramConfig:
     # avoiding the membrane shell and any already-placed filaments -- NOT
     # region-gated to cytosol/lumen (see TomogramBeadSpec's own
     # docstring). In TOML, provide as [[beads]] tables.
-    beads: list[dict[str, Any]] = field(default_factory=list)
+    beads: list[dict[str, Any]] = setting(
+        factory=list,
+        help=(
+            "Gold fiducial bead populations to pack (TOML-only, [[beads]] "
+            "tables), each {'radius': <Angstrom or [low, high]>, 'n_copies': 1}. "
+            "A [low, high] radius draws a fresh size per bead, giving the population "
+            "the dispersity real colloidal gold has. Placed via the same "
+            "RSA packing as membranes/targets/filler, avoiding the membrane shell "
+            "and already-placed filaments -- not region-gated to cytosol/lumen."
+        ),
+    )
 
     # How irregular each fiducial's boundary is, as an RMS fraction of its
     # radius -- see specter.specimen._grid's BeadGenerator. Either one
     # number or a [low, high] pair drawn per bead. 0.0 gives clean
     # spheres.
-    bead_roughness: ScalarOrRange = 0.12
+    bead_roughness: ScalarOrRange = setting(
+        0.12,
+        help=(
+            "How irregular each gold fiducial's boundary is, as an "
+            "RMS fraction of its radius. One number, or a [low, high] pair drawn per "
+            "bead so a population mixes near-round and misshapen particles. 0.0 gives "
+            "clean spheres; 0.12-0.20 reads as an irregular particle."
+        ),
+        check="non_negative_ordered",
+    )
 
     # --- Ground-truth picks & segmentation ---
-    write_picks: bool = True
-    annotation_version: str = "1.0"
+    write_picks: bool = setting(
+        True,
+        help=(
+            "Write one copick-style .ndjson pick file per species "
+            "alongside the volume. Filler species (declared via 'ratio', not "
+            "'n_copies') are included by default -- see TomogramProteinSpec's own "
+            "role/export_picks docstrings for how to exclude them instead."
+        ),
+    )
+    annotation_version: str = setting(
+        "1.0",
+        help=(
+            "Version string used in pick filenames "
+            "('{species}-{version}_orientedpoint.ndjson')."
+        ),
+    )
     # Save per-instance integer label volumes as .mrc alongside the density
     # volume ({filename}_protein_labels.mrc always; membrane mode also gets
     # {filename}_membrane_labels.mrc and {filename}_regions.mrc (0=cytosol/
@@ -244,7 +505,18 @@ class TomogramConfig:
     # segmentation mask, not a coordinate file, is the intended ground truth
     # for membrane geometry (a membrane surface has no single natural
     # "position" the way a protein does).
-    write_segmentation: bool = True
+    write_segmentation: bool = setting(
+        True,
+        help=(
+            "Save per-instance integer label volumes as "
+            ".mrc alongside the density volume -- the intended ground truth for "
+            "membrane geometry specifically (not a coordinate file, since a "
+            "membrane surface has no single natural 'position' the way a protein "
+            "does). {filename}_protein_labels.mrc is always written; "
+            "{filename}_membrane_labels.mrc and {filename}_regions.mrc "
+            "(0=cytosol/1=shell/2=lumen) are added when [[membrane]] is set."
+        ),
+    )
 
     # --- Compute ---
     # "cpu" | "cuda" | "cuda:0" | a bare GPU index ("0") | a comma-separated
@@ -252,7 +524,20 @@ class TomogramConfig:
     # per-species rendering (see render_workers below). A pooled value's
     # first entry becomes the primary device for everything else (see
     # specter.devices.DeviceSpec.primary_and_pool).
-    device: str = "cuda"  # falls back to CPU when none is available
+    device: str = setting(
+        "cuda",
+        help=(
+            "cpu | cuda | cuda:0 | 0,1,2. Drives the whole "
+            "MembraneGenerator/TomogramSpecimenGenerator pipeline (shape field, "
+            "bilayer profile, rasterization, transmembrane/targets/filler "
+            "PotentialBuilder rendering) -- packing itself always runs on CPU "
+            "regardless (vesin's neighbor list is both slower and OOM-prone on "
+            "GPU at realistic particle counts). A comma-separated list of GPU "
+            "indices (or 'auto', every visible GPU) pools those GPUs for "
+            "concurrent per-species rendering (see render_workers); the first "
+            "entry becomes the primary device for everything else."
+        ),
+    )  # falls back to CPU when none is available
     # Device for the shared canvas tensors (volume/instance_labels/
     # membrane_labels), decoupled from `device` above (which stays the
     # compute device for rendering/rotation/field-generation regardless).
@@ -269,7 +554,23 @@ class TomogramConfig:
     # workstation/cluster node. Rotation/rendering speed is unaffected
     # either way; the only added cost is moving each already-small
     # rotated chunk across devices once, not the canvas itself.
-    accumulator_device: str | None = None
+    accumulator_device: str | None = setting(
+        None,
+        help=(
+            "Device for the shared canvas tensors "
+            "(volume/instance_labels/membrane_labels), decoupled from 'device' "
+            "above (which stays the compute device regardless). None (default): "
+            "same as 'device'. 'auto': estimate the canvas' own memory footprint "
+            "and fall back to 'cpu' if it would exceed half of 'device''s "
+            "currently free memory. Explicit 'cpu' always keeps 'device'='cuda' "
+            "for fast rendering/rotation while letting the canvas itself be sized "
+            "by system RAM instead of GPU VRAM -- useful for a large field of "
+            "view at fine voxel_size whose canvas alone would exceed any single "
+            "GPU's VRAM. Rotation/rendering speed is unaffected either way; only "
+            "each already-small rotated chunk crosses devices, never the canvas "
+            "itself."
+        ),
+    )
     # How many PDB species render/fetch concurrently within a single
     # tomogram: membrane_transmembrane_specs (rendered once, shared across
     # every [[membrane]] entry/n_copies copy, membrane mode only) and
@@ -281,7 +582,24 @@ class TomogramConfig:
     # recommend_render_workers -- min(n_species, 8), the measured sweet spot
     # from a full production-scale sweep (see that function's own
     # docstring); recommended over hand-picking a number.
-    render_workers: int | Literal["auto"] = 1
+    render_workers: int | Literal["auto"] = setting(
+        1,
+        help=(
+            "Number of PDB species rendered concurrently within "
+            "one tomogram (membrane_transmembrane_specs and targets/filler each "
+            "get their own concurrent build pass). Default 1 (serial, original "
+            "behaviour) -- raise for tomograms with several species, especially "
+            "with n_copies>1 [[membrane]] entries (all instances of one entry "
+            "share one render pass). Set to 'auto' (TOML/Python config only -- the "
+            "--render_workers CLI flag stays integer-only) to pick min(n_species, "
+            "8) per pool automatically, the measured sweet spot from a full "
+            "production-scale sweep -- see "
+            "specter.specimen._parallel_render.recommend_render_workers. Round-"
+            "robins across device's GPU pool when device is set to a "
+            "comma-separated list or 'auto' (see device above); device choice was "
+            "measured to barely matter at the recommended worker count."
+        ),
+    )
     # Instances rotated per GPU batch, per species, in the targets/filler
     # protein-fill stage (TomogramSpecimenGenerator's own chunk_size
     # constructor kwarg -- rotate_volume batches ALL of a species' accepted
@@ -296,7 +614,17 @@ class TomogramConfig:
     # counts get into the hundreds. Named render_chunk_size (not bare
     # chunk_size) to keep it distinct from MicrographConfig's own
     # crowd_chunk_size, a different chunking knob entirely.
-    render_chunk_size: int | None = None
+    render_chunk_size: int | None = setting(
+        None,
+        help=(
+            "Instances rotated per GPU batch, per species, when "
+            "rendering targets/filler. None (default) rotates all of a species' "
+            "accepted instances in one batched call -- fine at small scale, but a "
+            "species with hundreds of instances can then need many GB for that "
+            "one call. Set e.g. 32-64 once species counts get into the hundreds."
+        ),
+        check="positive",
+    )
 
     # --- Output ---
     # One path field, not one per layout: this is the single directory a run
@@ -304,8 +632,20 @@ class TomogramConfig:
     # numbered job tree when tracked. `None` rather than a baked-in default
     # because which default applies is not knowable until tracking is -- see
     # pipelines._common.resolve_output_dir.
-    output_dir: str | None = None
-    filename: str = "tomogram"
+    output_dir: str | None = setting(
+        None,
+        help=(
+            "Directory to save output files when untracked. Setting "
+            "--project or --job_id instead makes this the root of the numbered job "
+            "tree, so tracking organises output within the folder you chose rather "
+            "than moving it elsewhere. Unset defaults to <artifact>/ "
+            "untracked, and to the project root found by walking up from cwd for an "
+            "existing .specter marker when tracked."
+        ),
+    )
+    filename: str = setting(
+        "tomogram", help="Base name for the output volume (no extension)."
+    )
 
     # --- Job tracking (opt-in) ---
     # Setting `project` or `job_id` routes output through `specter.jobs`
@@ -319,8 +659,26 @@ class TomogramConfig:
     # chained call produces two separate, same-project jobs (one
     # "tomograms", one "tiltseries"), linked implicitly by the resulting
     # tiltseries job's volume_path pointing into this job's directory.
-    project: str | None = None
-    job_id: str | None = None
+    project: str | None = setting(
+        None,
+        help=(
+            "Optional: number and track this run through specter.jobs. "
+            "Not required for tracking -- job_id alone also triggers it. The run "
+            "lands in "
+            "<output_dir>/[<project>/]tomograms/J00N/ with a job.json recording "
+            "every parameter, the git commit and the run's status. When chained "
+            "via --tomogram_config on `specter simulate tiltseries`, leaving this "
+            "unset while tracking the tiltseries run cascades that project here "
+            "automatically."
+        ),
+    )
+    job_id: str | None = setting(
+        None,
+        help=(
+            "Pin the job directory (e.g. J001) rather than auto-assigning "
+            "the next one: resumes into it if it exists, creates it otherwise."
+        ),
+    )
 
     #: Every field that can put something in the volume. A tomogram needs
     #: at least one of them, which is a DISJUNCTION and so cannot be
@@ -347,203 +705,4 @@ class TomogramConfig:
         return any(getattr(self, name) for name in self.SPECIES_SOURCE_FIELDS)
 
 
-TOMOGRAM_HELP: dict[str, str] = {
-    "targets": "Target protein species to pack (TOML-only, [[targets]] "
-    "tables), each {'pdb_source': <code or path>, 'n_copies': <exact "
-    "instance count>, 'location': 'cytosol'|'lumen' (optional, default "
-    "'cytosol' -- only meaningful when [[membrane]] is set)}. Placed FIRST "
-    "within its location, at this exact count, always exported to picks.",
-    "filler": "Filler protein species to pack (TOML-only, [[filler]] "
-    "tables), each {'pdb_source': <code or path>, 'location': "
-    "'cytosol'|'lumen' (optional, default 'cytosol'), 'ratio': 1.0 "
-    "(optional, relative attempt-weight among other filler species sharing "
-    "the same location)}. Placed SECOND within its location, around any "
-    "already-placed targets there. Excluded from picks by default (see "
-    "write_picks).",
-    "filler_from_pei2016": "Additive to filler: also pull filler species "
-    "(location='cytosol') from the bundled PEI2016_CROWDING_TABLE (Pei et "
-    "al. 2016 generic cytosolic crowding reference).",
-    "filler_from_cryoetsim": "Additive to filler: also pull filler species "
-    "(location='cytosol') from the bundled CRYOETSIM_PARTICLE_TABLE "
-    "(CryoETSim dataset reference, Stojanovska et al. 2025).",
-    "filler_table_categories": "Only used with filler_from_cryoetsim: "
-    "restrict to these CRYOETSIM_PARTICLE_TABLE categories (macromolecules, "
-    "distractors, transcription_translation, nucleosomes). None = all.",
-    "filler_table_max_mw_kda": "Only used with filler_from_pei2016/"
-    "filler_from_cryoetsim: exclude species above this mass, kDa.",
-    "filler_table_min_mw_kda": "Only used with filler_from_pei2016/"
-    "filler_from_cryoetsim: exclude species below this mass, kDa.",
-    "target_shape": "Output specimen volume shape in voxels (Z, Y, X).",
-    "voxel_size": "Voxel size in Angstrom.",
-    "packing_voxel_size": "Run protein collision on a "
-    "coarser grid than the render, an integer multiple of voxel_size. "
-    "Unset = automatic, which only coarsens once the packing grid would be "
-    "too large to hold; ordinary boxes are unaffected.",
-    "packing_max_retries": "Trial positions per instance. Sets a packing "
-    "stage's attempt ceiling; "
-    "pairs with the packer's own stall_patience, which cuts that budget "
-    "short once a species saturates.",
-    "filler_occupancy_fraction": "Target packing density for filler "
-    "species, as a bare-sphere fraction of EACH REGION's own volume it's "
-    "placed in (the whole box when [[membrane]] is empty -- 'cytosol' is "
-    "then the whole box). Deliberately high by default -- RSA self-limits "
-    "at its own physical jamming ceiling rather than erroring, so filler "
-    "packs until it jams rather than needing this hand-tuned. Lower "
-    "it for a sparser filler layer, or if a small region (e.g. a tight "
-    "vesicle lumen) makes the implied candidate pool impractically large.",
-    "clip_axes": "(z, y, x) -- True on an axis lets a placed instance's "
-    "body extend past that wall (truncated at render time) instead of "
-    "being rejected outright. TOML-only (list[bool]).",
-    "pdb_cache_dir": "Where downloaded PDB/mmCIF structures are cached. An "
-    "input cache shared by every run, not an output location -- job tracking "
-    "does not redirect it.",
-    "seed": "Random seed.",
-    "membrane": "One or more MembraneGenerator kwargs dicts (TOML-only, "
-    "[[membrane]] tables, one per composited TEMPLATE) -- optional, empty "
-    "by default (no membrane at all; the whole tomogram is then one "
-    "cytosol region). e.g. {'shape_backend': 'spherical_harmonics', "
-    "'n_copies': 3}. See MembraneGenerator's own docstring for the full "
-    "per-backend parameter set; plus 'n_copies' (int, default 1, expands "
-    "one entry into that many independently-seeded instances, each "
-    "collision-rejecting-random-placed) and 'target_shape' (default "
-    "omitted = auto-sized per instance).",
-    "membrane_transmembrane_specs": "Transmembrane protein species (TOML-"
-    "only, [[membrane_transmembrane_specs]] tables), each {'pdb_source': "
-    "<code or path>, 'n_copies': 1, 'parameterization': 'shtyrov'}. Only "
-    "meaningful when [[membrane]] is set, applies across all instances.",
-    "membrane_region_density_threshold": "Passed through to "
-    "TomogramSpecimenGenerator's own region_density_threshold.",
-    "membrane_region_max_passes": "Passed through to "
-    "TomogramSpecimenGenerator's own region_max_passes.",
-    "membrane_min_transmembrane_spacing": "Minimum center-to-center "
-    "spacing between placed transmembrane proteins, Angstrom. Only "
-    "meaningful when [[membrane]] is set.",
-    "bulk_scattering_factors": "Atomic scattering-factor parameterization for the carbon film and gold beads -- everything rendered that is not a biomolecule. Deliberately separate from scattering_factors: Shtyrov is fitted for biomolecules, and these materials are outside that domain.",
-    "scattering_factors": "Atomic scattering-factor parameterization for "
-    "everything rendered from atoms: targets, filler, filaments, "
-    "microtubules, carbon film, bilayer and transmembrane proteins. A "
-    "[[membrane]] table naming its own 'parameterization' overrides this for "
-    "that population. Gold fiducials fall back to Peng under 'shtyrov', "
-    "which has no elemental gold.",
-    "readd_hydrogens": "Whether to replace a structure's own hydrogens with "
-    "the monomer library's ideal geometry: 'auto' (default) keeps hydrogens "
-    "the file already carries and adds them only when it has none, true "
-    "always re-adds, false never adds hydrogen density (they still inform "
-    "atom typing). Needs a Monomer Library on $CLIBD_MON to have any effect.",
-    "monomer_library_path": "Path to a Monomer Library "
-    "(https://github.com/MonomerLibrary/monomers), which completes a "
-    "structure's bond topology and hydrogens so Shtyrov species resolve. "
-    "Unset falls back to $CLIBD_MON. Without one, around 44% of a "
-    "hydrogen-free protein falls back to per-element Peng factors.",
-    "use_deposited_bfactors": "Damp each atom by the B-factor its structure "
-    "deposits, instead of rendering the model statically. Only a PER-ATOM "
-    "B adds anything an envelope cannot: a uniform one is the same "
-    "exp(-B k^2/4) as --bfactor, so setting both double-counts. A deposited "
-    "column is refinement output rather than a measured displacement, and "
-    "cryo-EM entries often carry a constant or zero one. Requires "
-    "scattering_factors='shtyrov'.",
-    "filaments": "Filament species to scatter through the tomogram (TOML-"
-    "only, [[filaments]] tables), each mapping onto "
-    "specter.specimen.filament.FilamentSpec kwargs, e.g. {'code': '1TUB', "
-    "'step': 85.0, 'flex_deg': 3.0, 'n_copies': 4}. Placed right after "
-    "membranes, before targets/filler -- no region-gating, no collision "
-    "avoidance against the membrane shell or each other, but targets/"
-    "filler DO avoid already-placed filaments.",
-    "actin": "Convenience toggle: also place the bundled ACTIN_SPEC preset "
-    "(real F-actin helical repeat) without writing a [[filaments]] entry. "
-    "Additive to filaments above. For more instances or other single-strand "
-    "species, use [[filaments]]; for microtubules use [[microtubules]].",
-    "microtubules": "Microtubule species to scatter through the tomogram "
-    "(TOML-only, [[microtubules]] tables), each mapping onto "
-    "specter.specimen.filament.MicrotubuleSpec kwargs, e.g. {'n_copies': 2, "
-    "'n_protofilaments': 13, 'bend_radius': 30000.0}. Real 13-protofilament "
-    "tubes with a lumen and an A-lattice seam -- not the single protofilament "
-    "[[filaments]] with a tubulin dimer would give. Placed alongside "
-    "filaments: no region-gating, no collision avoidance, but targets/filler "
-    "DO avoid them.",
-    "carbon_film": "Zero or one [[carbon_film]] table (TOML-only) describing a carbon "
-    "support film, mapping onto specter.specimen.CarbonFilmSpec kwargs "
-    "(thickness, hole_radius, edge_fraction, edge_side, edge_roughness). "
-    "Painted into the volume before anything else is "
-    "placed; not carbon-aware for placement (see TomogramSpecimenGenerator's "
-    "own docstring). Empty (default): no carbon film.",
-    "beads": "Gold fiducial bead populations to pack (TOML-only, [[beads]] "
-    "tables), each {'radius': <Angstrom or [low, high]>, 'n_copies': 1}. "
-    "A [low, high] radius draws a fresh size per bead, giving the population "
-    "the dispersity real colloidal gold has. Placed via the same "
-    "RSA packing as membranes/targets/filler, avoiding the membrane shell "
-    "and already-placed filaments -- not region-gated to cytosol/lumen.",
-    "bead_roughness": "How irregular each gold fiducial's boundary is, as an "
-    "RMS fraction of its radius. One number, or a [low, high] pair drawn per "
-    "bead so a population mixes near-round and misshapen particles. 0.0 gives "
-    "clean spheres; 0.12-0.20 reads as an irregular particle.",
-    "write_picks": "Write one copick-style .ndjson pick file per species "
-    "alongside the volume. Filler species (declared via 'ratio', not "
-    "'n_copies') are included by default -- see TomogramProteinSpec's own "
-    "role/export_picks docstrings for how to exclude them instead.",
-    "annotation_version": "Version string used in pick filenames "
-    "('{species}-{version}_orientedpoint.ndjson').",
-    "write_segmentation": "Save per-instance integer label volumes as "
-    ".mrc alongside the density volume -- the intended ground truth for "
-    "membrane geometry specifically (not a coordinate file, since a "
-    "membrane surface has no single natural 'position' the way a protein "
-    "does). {filename}_protein_labels.mrc is always written; "
-    "{filename}_membrane_labels.mrc and {filename}_regions.mrc "
-    "(0=cytosol/1=shell/2=lumen) are added when [[membrane]] is set.",
-    "device": "cpu | cuda | cuda:0 | 0,1,2. Drives the whole "
-    "MembraneGenerator/TomogramSpecimenGenerator pipeline (shape field, "
-    "bilayer profile, rasterization, transmembrane/targets/filler "
-    "PotentialBuilder rendering) -- packing itself always runs on CPU "
-    "regardless (vesin's neighbor list is both slower and OOM-prone on "
-    "GPU at realistic particle counts). A comma-separated list of GPU "
-    "indices (or 'auto', every visible GPU) pools those GPUs for "
-    "concurrent per-species rendering (see render_workers); the first "
-    "entry becomes the primary device for everything else.",
-    "accumulator_device": "Device for the shared canvas tensors "
-    "(volume/instance_labels/membrane_labels), decoupled from 'device' "
-    "above (which stays the compute device regardless). None (default): "
-    "same as 'device'. 'auto': estimate the canvas' own memory footprint "
-    "and fall back to 'cpu' if it would exceed half of 'device''s "
-    "currently free memory. Explicit 'cpu' always keeps 'device'='cuda' "
-    "for fast rendering/rotation while letting the canvas itself be sized "
-    "by system RAM instead of GPU VRAM -- useful for a large field of "
-    "view at fine voxel_size whose canvas alone would exceed any single "
-    "GPU's VRAM. Rotation/rendering speed is unaffected either way; only "
-    "each already-small rotated chunk crosses devices, never the canvas "
-    "itself.",
-    "render_workers": "Number of PDB species rendered concurrently within "
-    "one tomogram (membrane_transmembrane_specs and targets/filler each "
-    "get their own concurrent build pass). Default 1 (serial, original "
-    "behaviour) -- raise for tomograms with several species, especially "
-    "with n_copies>1 [[membrane]] entries (all instances of one entry "
-    "share one render pass). Set to 'auto' (TOML/Python config only -- the "
-    "--render_workers CLI flag stays integer-only) to pick min(n_species, "
-    "8) per pool automatically, the measured sweet spot from a full "
-    "production-scale sweep -- see "
-    "specter.specimen._parallel_render.recommend_render_workers. Round-"
-    "robins across device's GPU pool when device is set to a "
-    "comma-separated list or 'auto' (see device above); device choice was "
-    "measured to barely matter at the recommended worker count.",
-    "render_chunk_size": "Instances rotated per GPU batch, per species, when "
-    "rendering targets/filler. None (default) rotates all of a species' "
-    "accepted instances in one batched call -- fine at small scale, but a "
-    "species with hundreds of instances can then need many GB for that "
-    "one call. Set e.g. 32-64 once species counts get into the hundreds.",
-    "output_dir": "Directory to save output files when untracked. Setting "
-    "--project or --job_id instead makes this the root of the numbered job "
-    "tree, so tracking organises output within the folder you chose rather "
-    "than moving it elsewhere. Unset defaults to <artifact>/ "
-    "untracked, and to the project root found by walking up from cwd for an "
-    "existing .specter marker when tracked.",
-    "filename": "Base name for the output volume (no extension).",
-    "project": "Optional: number and track this run through specter.jobs. "
-    "Not required for tracking -- job_id alone also triggers it. The run "
-    "lands in "
-    "<output_dir>/[<project>/]tomograms/J00N/ with a job.json recording "
-    "every parameter, the git commit and the run's status. When chained "
-    "via --tomogram_config on `specter simulate tiltseries`, leaving this "
-    "unset while tracking the tiltseries run cascades that project here "
-    "automatically.",
-    "job_id": "Pin the job directory (e.g. J001) rather than auto-assigning "
-    "the next one: resumes into it if it exists, creates it otherwise.",
-}
+TOMOGRAM_HELP: dict[str, str] = help_of(TomogramConfig)

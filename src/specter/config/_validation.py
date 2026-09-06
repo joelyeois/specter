@@ -298,6 +298,29 @@ def _require_bfactor_backend(config: Any) -> None:
         )
 
 
+def _require_field_rules(config: Any) -> None:
+    """Apply each field's own ``check``/``range`` rule, see `setting`."""
+    for f in fields(config):
+        check = f.metadata.get("check")
+        if check == "positive":
+            _require_positive(config, f.name)
+        elif check == "non_negative":
+            _require_non_negative(config, f.name)
+        elif check == "ordered":
+            _require_ordered(config, f.name)
+        elif check == "positive_ordered":
+            _require_positive_ordered(config, f.name)
+        elif check == "non_negative_ordered":
+            _require_non_negative_ordered(config, f.name)
+        elif check == "existing_file":
+            _require_existing_file(config, f.name)
+        elif check is not None:
+            raise ValueError(f"{f.name}: unknown check {check!r}")
+        bounds = f.metadata.get("range")
+        if bounds is not None:
+            _require_range(config, f.name, *bounds)
+
+
 def validate_config(config: Any) -> None:
     """
     Reject physically impossible values before any work is done.
@@ -318,95 +341,7 @@ def validate_config(config: Any) -> None:
     _require_valid_types(config)
     _require_valid_literals(config)
 
-    # Shared across the imaging configs.
-    _require_positive(
-        config,
-        "n_pixels",
-        "pixel_size",
-        "voltage",
-        "n_particles",
-        "n_micrographs",
-        "micrograph_size",
-        "n_frames",
-        "batchsize",
-        "n_tilts",
-        "voxel_size",
-        "crowd_chunk_size",
-        "crowd_n_points",
-        "render_chunk_size",
-        "membrane_region_max_passes",
-        # IceCacheConfig. "n"/"dx" are the ice cell's own geometry -- no other
-        # config class has a field by either name.
-        "n_configs",
-        "n",
-        "dx",
-        "n_steps",
-        # ReconstructionConfig.
-        "dose_per_angstrom",
-        "n_particles",
-        "symmetry_batchsize",
-        "epochs",
-        "bin_factor",
-    )
-    _require_non_negative(
-        config,
-        "seed_start",
-        "cs",
-        "ice_thickness",
-        "ice_hole_radius",
-        "ice_rim_thickness",
-        "shift",
-        "bfactor",
-        "ice_relax_steps",
-        "energy_spread",
-        "convergence_angle",
-        "cc",
-        "deltaV_V",
-        "deltaI_I",
-        "crowd_min_distance",
-        "crowd_max_distance_z",
-        "crowd_max_distance_xy",
-        "rcut",
-        "klim",
-        "membrane_min_transmembrane_spacing",
-        "filler_table_min_mw_kda",
-        "filler_table_max_mw_kda",
-        "dose_per_tilt",
-        # ReconstructionConfig. A learning rate of exactly 0 is a legitimate
-        # way to freeze one parameter group while refining another.
-        "lr",
-        "lr_R",
-        "lr_T",
-        "lr_D",
-        "lr_decay",
-        "sparsity",
-        "num_workers",
-    )
-    _require_range(config, "alpha", 0.0, 1.0)
-    _require_range(config, "filler_occupancy_fraction", 0.0, 1.0)
-    _require_range(config, "membrane_region_density_threshold", 0.0, 1.0)
-
-    _require_positive_ordered(config, "dose", "potential_scale", "ice_thickness_range")
-    _require_non_negative_ordered(
-        config, "defocus", "coincidence_radius", "astigmatism", "bead_roughness"
-    )
-    _require_ordered(config, "astigmatism_angle", "phaseshift")
-
-    _require_existing_file(
-        config,
-        "cs_path",
-        "star_path",
-        "shtyrov_params_path",
-        # MatchConfig: the refinement file and the optional image stack.
-        "metadata_path",
-        "images_path",
-        # ReconstructionConfig. Every one of these is read at Ghostbuster
-        # construction time, so a typo'd path otherwise surfaces minutes in.
-        "cs_file",
-        "mrc_file",
-        "fsc_ref",
-        "fsc_mask",
-    )
+    _require_field_rules(config)
     _require_valid_cryosparc_ref(config)
     _require_bfactor_backend(config)
 

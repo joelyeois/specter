@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+
+from ._field import help_of, setting
 from typing import Literal
 
 from ._paths import default_pdb_cache_dir
@@ -27,17 +29,46 @@ class MatchConfig:
     """
 
     # --- Inputs (required) ---
-    metadata_path: str  # CryoSPARC .cs (passthrough) or RELION .star
-    pdb_source: str
-    dose: float  # e-/A^2 per movie
+    metadata_path: str = setting(
+        help=(
+            "Refined particle set: a CryoSPARC passthrough .cs or a "
+            "RELION .star. Supplies voltage, Cs, amplitude contrast, pixel size, "
+            "per-particle defocus and poses. The refinement must be aligned to the "
+            "atomic model (an Align 3D of its map against the model, then re-extract "
+            "the particles from it); the pose-alignment check fails otherwise."
+        ),
+        check="existing_file",
+    )  # CryoSPARC .cs (passthrough) or RELION .star
+    pdb_source: str = setting(
+        help=(
+            "Atomic model matching the particles: a local .cif/.pdb "
+            "file or a 4-character PDB accession code."
+        )
+    )
+    dose: float = setting(
+        help=(
+            "Total electron dose per movie in e-/Angstrom^2, from the methods "
+            "section or the EMDB record. Drives the radiation-damage envelope."
+        ),
+        check="positive_ordered",
+    )  # e-/A^2 per movie
 
     # --- Inputs (optional) ---
     # Particle images in the same order as `metadata_path`. Unset reads them
     # from the paths the metadata file itself points at (`blob/path` for a
     # .cs, `rlnImageName` for a .star), resolved against the file's own
     # project directory.
-    images_path: str | None = None
-    assembly: bool = True
+    images_path: str | None = setting(
+        None,
+        help=(
+            "Particle image stack (.mrcs) in the same order as "
+            "--metadata_path. Unset reads the images the metadata file points at."
+        ),
+        check="existing_file",
+    )
+    assembly: bool = setting(
+        True, help="Fetch the biological assembly of --pdb_source."
+    )
 
     # --- Acquisition card ---
     # "unknown" applies no MTF, no DQE(0) and no coincidence loss, and says so
@@ -50,102 +81,146 @@ class MatchConfig:
         "k2_300kv",
         "falcon4i_300kv",
         "falcon4i_200kv",
-    ] = "unknown"
-    dose_rate: float | None = None  # e-/physical px/s; unset -> detector's typical rate
-    energy_filter: bool | None = None  # None = not stated
+    ] = setting(
+        "unknown",
+        help=(
+            "Detector the data were recorded on. Supplies the MTF, "
+            "DQE(0), the coincidence exclusion radius and the hardware frame rate. "
+            "'unknown' applies none of them and is reported as such."
+        ),
+    )
+    dose_rate: float | None = setting(
+        None,
+        help=(
+            "Incident dose rate in electrons per physical pixel per "
+            "second, from the acquisition notes. Sets the coincidence-loss occupancy. "
+            "Unset falls back to the detector's typical operating rate, and the report "
+            "says so."
+        ),
+    )  # e-/physical px/s; unset -> detector's typical rate
+    energy_filter: bool | None = setting(
+        None,
+        help=(
+            "Whether an energy filter (slit) was used. Recorded in "
+            "the report: on today's evidence unfiltered data carry a residual the "
+            "forward model cannot express."
+        ),
+    )  # None = not stated
 
     # --- Probing ---
-    n_probe: int = 64  # particles per probe simulation
-    n_battery: int = 200  # particles per seed in the final comparison
+    n_probe: int = setting(
+        64,
+        help=(
+            "Particles per probe simulation (ice thickness and neighbour "
+            "spacing candidates)."
+        ),
+    )  # particles per probe simulation
+    n_battery: int = setting(
+        200,
+        help=(
+            "Particles per seed in the final two-seed comparison that "
+            "the report is computed from."
+        ),
+    )  # particles per seed in the final comparison
     # Probes (pose check, ice, neighbours) render at the box Fourier-cropped
     # by this factor, against the experimental images cropped the same way;
     # the final two-seed comparison always runs at the native box. Capped so
     # the probe pixel stays at or below 5 A and the box at or above 32 px.
-    probe_bin: int = 2
+    probe_bin: int = setting(
+        2,
+        help=(
+            "Fourier-crop factor for the probe simulations and the "
+            "images they are scored against; the final two-seed comparison always "
+            "runs at the native box. Capped so the probe pixel stays at or below "
+            "5 Angstrom and the box at or above 32 px. 1 probes at the native box."
+        ),
+    )
     # Candidate grids, config-only (a flag cannot carry a list). Ice thickness
     # in Angstrom (0 = the box minimum); neighbour spacing as a multiple of the
     # structure's maximum diameter (0 = no neighbours).
-    ice_candidates: list[float] = field(
-        default_factory=lambda: [0.0, 400.0, 800.0, 1200.0]
-    )
-    crowd_candidates: list[float] = field(default_factory=lambda: [0.0, 1.0, 1.3])
+    ice_candidates: list[float] = setting(factory=lambda: [0.0, 400.0, 800.0, 1200.0])
+    crowd_candidates: list[float] = setting(factory=lambda: [0.0, 1.0, 1.3])
     # Number of particles to simulate with the matched config after the
     # report, e.g. for a CryoSPARC mixed classification. 0 skips it.
-    write_stack: int = 0
+    write_stack: int = setting(
+        0,
+        help=(
+            "After the report, simulate this many particles with the "
+            "matched config (e.g. for a mixed 2D classification). 0 skips it."
+        ),
+    )
 
     # --- Compute ---
-    device: str = "cuda"
+    device: str = setting(
+        "cuda",
+        help=(
+            "Device(s) to use: cpu | cuda | cuda:0 | 0,1. Several devices "
+            "share the probe simulations between them."
+        ),
+    )
     # Probe simulations run concurrently in this many worker processes,
     # round-robin over the devices `device` names. 0 is one per device: two
     # processes sharing one GPU are time-sliced and finish later than the
     # same two runs back to back (91 s against 62 s for the two-seed
     # comparison on EMPIAR-11377), so a single device runs everything
     # in-process, one after another.
-    probe_workers: int = 0
-    seed: int | None = None
+    probe_workers: int = setting(
+        0,
+        help=(
+            "Worker processes that run probe simulations "
+            "concurrently, dealt round-robin over the device(s). 0 is one per device, "
+            "which on a single device runs every simulation in-process, one after "
+            "another; processes sharing one GPU are time-sliced and gain nothing."
+        ),
+    )
+    seed: int | None = setting(
+        None, help="RNG seed for the probe and battery simulations."
+    )
 
     # --- Output & job tracking ---
-    output_dir: str | None = None
-    project: str | None = None
-    job_id: str | None = None
+    output_dir: str | None = setting(
+        None,
+        help=(
+            "Directory to write matched.toml and the report under when "
+            "untracked; the root of the numbered job tree when --project or --job_id "
+            "is set."
+        ),
+    )
+    project: str | None = setting(
+        None,
+        help=(
+            "Optional: number and track this run through specter.jobs, "
+            "under <output_dir>/[<project>/]match/J00N/."
+        ),
+    )
+    job_id: str | None = setting(
+        None,
+        help=(
+            "Pin the job directory (e.g. J001) rather than auto-assigning the next one."
+        ),
+    )
 
     # --- Advanced ---
-    pdb_cache_dir: str = field(default_factory=default_pdb_cache_dir)
-    monomer_library_path: str | None = None
-    n_frames: int = 40  # frames the simulation splits the dose into
+    pdb_cache_dir: str = setting(
+        factory=default_pdb_cache_dir,
+        help="Where downloaded PDB/mmCIF structures are cached.",
+    )
+    monomer_library_path: str | None = setting(
+        None,
+        help=(
+            "Path to a Monomer Library, so Shtyrov species "
+            "resolve for a hydrogen-free deposition. Unset falls back to $CLIBD_MON."
+        ),
+    )
+    n_frames: int = setting(
+        40,
+        help=(
+            "Frames the simulation splits the dose into. Only the "
+            "coincidence radius depends on it, and the derived radius is converted to "
+            "this frame count."
+        ),
+        check="positive",
+    )  # frames the simulation splits the dose into
 
 
-MATCH_HELP: dict[str, str] = {
-    "metadata_path": "Refined particle set: a CryoSPARC passthrough .cs or a "
-    "RELION .star. Supplies voltage, Cs, amplitude contrast, pixel size, "
-    "per-particle defocus and poses. The refinement must be aligned to the "
-    "atomic model (an Align 3D of its map against the model, then re-extract "
-    "the particles from it); the pose-alignment check fails otherwise.",
-    "pdb_source": "Atomic model matching the particles: a local .cif/.pdb "
-    "file or a 4-character PDB accession code.",
-    "dose": "Total electron dose per movie in e-/Angstrom^2, from the methods "
-    "section or the EMDB record. Drives the radiation-damage envelope.",
-    "images_path": "Particle image stack (.mrcs) in the same order as "
-    "--metadata_path. Unset reads the images the metadata file points at.",
-    "assembly": "Fetch the biological assembly of --pdb_source.",
-    "detector_model": "Detector the data were recorded on. Supplies the MTF, "
-    "DQE(0), the coincidence exclusion radius and the hardware frame rate. "
-    "'unknown' applies none of them and is reported as such.",
-    "dose_rate": "Incident dose rate in electrons per physical pixel per "
-    "second, from the acquisition notes. Sets the coincidence-loss occupancy. "
-    "Unset falls back to the detector's typical operating rate, and the report "
-    "says so.",
-    "energy_filter": "Whether an energy filter (slit) was used. Recorded in "
-    "the report: on today's evidence unfiltered data carry a residual the "
-    "forward model cannot express.",
-    "n_probe": "Particles per probe simulation (ice thickness and neighbour "
-    "spacing candidates).",
-    "n_battery": "Particles per seed in the final two-seed comparison that "
-    "the report is computed from.",
-    "probe_bin": "Fourier-crop factor for the probe simulations and the "
-    "images they are scored against; the final two-seed comparison always "
-    "runs at the native box. Capped so the probe pixel stays at or below "
-    "5 Angstrom and the box at or above 32 px. 1 probes at the native box.",
-    "write_stack": "After the report, simulate this many particles with the "
-    "matched config (e.g. for a mixed 2D classification). 0 skips it.",
-    "device": "Device(s) to use: cpu | cuda | cuda:0 | 0,1. Several devices "
-    "share the probe simulations between them.",
-    "probe_workers": "Worker processes that run probe simulations "
-    "concurrently, dealt round-robin over the device(s). 0 is one per device, "
-    "which on a single device runs every simulation in-process, one after "
-    "another; processes sharing one GPU are time-sliced and gain nothing.",
-    "seed": "RNG seed for the probe and battery simulations.",
-    "output_dir": "Directory to write matched.toml and the report under when "
-    "untracked; the root of the numbered job tree when --project or --job_id "
-    "is set.",
-    "project": "Optional: number and track this run through specter.jobs, "
-    "under <output_dir>/[<project>/]match/J00N/.",
-    "job_id": "Pin the job directory (e.g. J001) rather than auto-assigning "
-    "the next one.",
-    "pdb_cache_dir": "Where downloaded PDB/mmCIF structures are cached.",
-    "monomer_library_path": "Path to a Monomer Library, so Shtyrov species "
-    "resolve for a hydrogen-free deposition. Unset falls back to $CLIBD_MON.",
-    "n_frames": "Frames the simulation splits the dose into. Only the "
-    "coincidence radius depends on it, and the derived radius is converted to "
-    "this frame count.",
-}
+MATCH_HELP: dict[str, str] = help_of(MatchConfig)

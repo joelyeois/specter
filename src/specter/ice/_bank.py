@@ -1409,7 +1409,7 @@ def build_ice_cache(
 
 def resolve_icemaker(
     ice_model: IceModel | None,
-    pixel_size: float,
+    voxel_size: float,
     nxy: int,
     nz: int,
     ice_cache_dir: str | None = None,
@@ -1431,7 +1431,7 @@ def resolve_icemaker(
     ice_model : str or None
         ``'gd'`` (:class:`IceBank`), ``'random'`` (:class:`RandomIcemaker`),
         ``'none'`` or ``None`` (no ice). Ignored when ``icemaker`` is given.
-    pixel_size : float
+    voxel_size : float
         Voxel size in Å, used to construct a fresh ``RandomIcemaker``.
     nxy : int
         XY size in voxels, used to construct a fresh ``RandomIcemaker``.
@@ -1466,7 +1466,7 @@ def resolve_icemaker(
         )
     if ice_model == "random":
         return RandomIcemaker(
-            dx=pixel_size,
+            dx=voxel_size,
             n=nxy,
             nz=nz,
             parameterization=parameterization,
@@ -1480,7 +1480,7 @@ def resolve_icemaker(
 def blend_ice_into_volume(
     V: torch.Tensor,
     icemaker: "IceBank | RandomIcemaker",
-    pixel_size: float,
+    voxel_size: float,
     full_potential: float = FULL_OCCUPANCY_POTENTIAL_V,
     relax_steps: int = 0,
     profile: "IceProfile | None" = None,
@@ -1505,7 +1505,7 @@ def blend_ice_into_volume(
         :class:`RandomIcemaker` is called via
         :meth:`RandomIcemaker.generate_ice` (its own fixed ``(n, dx, nz)``
         must already match ``V``).
-    pixel_size : float
+    voxel_size : float
         Voxel size in Å, forwarded to ``IceBank.generate_big_ice``.
     full_potential : float, optional
         Potential of a fully-occupied voxel, V, forwarded to
@@ -1561,7 +1561,7 @@ def blend_ice_into_volume(
             _blend_ice_slabwise(
                 out[b : b + 1],
                 icemaker,
-                pixel_size,
+                voxel_size,
                 full_potential=full_potential,
                 relax_steps=relax_steps,
                 profile=profile,
@@ -1578,7 +1578,7 @@ def blend_ice_into_volume(
         # the ice on the GPU anyway defeats that and OOMs.
         ice = icemaker.generate_big_ice(
             n=nxy,
-            dx=pixel_size,
+            dx=voxel_size,
             nz=nz,
             batchsize=batchsize,
             relax_steps=relax_steps,
@@ -1594,7 +1594,7 @@ def blend_ice_into_volume(
         for start in range(0, nz, chunk):
             sl = slice(start, min(start + chunk, nz))
             ice[:, sl] *= profile.window(
-                nz, nxy, pixel_size, z_slice=sl, device=ice.device
+                nz, nxy, voxel_size, z_slice=sl, device=ice.device
             )[None]
     # Blended a z-slab at a time, in place into `ice`, then accumulated into
     # `V`. The obvious spelling, `V + ice * (1 - potential_occupancy(V))`, holds
@@ -1611,7 +1611,7 @@ def blend_ice_into_volume(
     out = V if inplace else V.clone()
     chunk = max(1, 2**24 // (nxy * nxy))
     blender = IceSlabBlender(
-        pixel_size, full_potential=full_potential, sigma_angstrom=sigma_angstrom
+        voxel_size, full_potential=full_potential, sigma_angstrom=sigma_angstrom
     )
     for start in range(0, nz, chunk):
         end = min(start + chunk, nz)
@@ -1627,7 +1627,7 @@ _SLAB_SPLAT_ATOMS = 2**22
 def _blend_ice_slabwise(
     V: torch.Tensor,
     bank: IceBank,
-    pixel_size: float,
+    voxel_size: float,
     full_potential: float = FULL_OCCUPANCY_POTENTIAL_V,
     relax_steps: int = 0,
     profile: "IceProfile | None" = None,
@@ -1653,7 +1653,7 @@ def _blend_ice_slabwise(
         Shape ``(1, nz, n, n)``, on the host; modified in place.
     bank : IceBank
         On the compute device.
-    pixel_size : float
+    voxel_size : float
         Voxel size in Å.
     full_potential, relax_steps, profile, sigma_angstrom
         As for :func:`blend_ice_into_volume`.
@@ -1669,7 +1669,7 @@ def _blend_ice_slabwise(
     assert V.shape[0] == 1
     _, nz, n, _ = V.shape
     device = bank.device
-    dx = pixel_size
+    dx = voxel_size
     kernel = bank._get_kernel(dx).to(device)
     kr = kernel.shape[0] // 2
     blender = IceSlabBlender(

@@ -99,7 +99,7 @@ WATER_COARSE_GRAIN_SIGMA_ANGSTROM = 2.0
 
 
 def occupancy_blur_halo_voxels(
-    pixel_size: float, sigma_angstrom: float = WATER_COARSE_GRAIN_SIGMA_ANGSTROM
+    voxel_size: float, sigma_angstrom: float = WATER_COARSE_GRAIN_SIGMA_ANGSTROM
 ) -> int:
     """
     Voxels of context :func:`potential_occupancy` reads beyond its input.
@@ -111,7 +111,7 @@ def occupancy_blur_halo_voxels(
 
     Parameters
     ----------
-    pixel_size : float
+    voxel_size : float
         Voxel size in Angstrom.
     sigma_angstrom : float, optional
         Coarse-graining length in Angstrom. Default
@@ -122,7 +122,7 @@ def occupancy_blur_halo_voxels(
     int
         Halo width in voxels. Zero when the blur is skipped as sub-voxel.
     """
-    sigma_vox = sigma_angstrom / pixel_size
+    sigma_vox = sigma_angstrom / voxel_size
     if sigma_vox < 0.25:
         return 0
     return max(1, int(round(3 * sigma_vox)))
@@ -130,7 +130,7 @@ def occupancy_blur_halo_voxels(
 
 def potential_occupancy(
     V: torch.Tensor,
-    pixel_size: float,
+    voxel_size: float,
     sigma_angstrom: float = WATER_COARSE_GRAIN_SIGMA_ANGSTROM,
     full_potential: float | torch.Tensor = FULL_OCCUPANCY_POTENTIAL_V,
 ) -> torch.Tensor:
@@ -146,7 +146,7 @@ def potential_occupancy(
     ----------
     V : torch.Tensor
         Scattering potential in volts, shape ``(..., Z, Y, X)``.
-    pixel_size : float
+    voxel_size : float
         Voxel size in Angstrom. Required, and not merely for units:
         `sigma_angstrom` is physical, so this is what makes the result independent
         of the render grid.
@@ -183,8 +183,8 @@ def potential_occupancy(
     of its water. That is the one error a geometric field would fix, and
     this module's docstring records why one was tried and removed anyway.
     """
-    if pixel_size <= 0:
-        raise ValueError(f"pixel_size must be positive, got {pixel_size}")
+    if voxel_size <= 0:
+        raise ValueError(f"voxel_size must be positive, got {voxel_size}")
     if sigma_angstrom < 0:
         raise ValueError(f"sigma_angstrom must be non-negative, got {sigma_angstrom}")
     if isinstance(full_potential, torch.Tensor):
@@ -194,7 +194,7 @@ def potential_occupancy(
         raise ValueError(f"full_potential must be positive, got {full_potential}")
 
     field = V.detach()
-    sigma_vox = sigma_angstrom / pixel_size
+    sigma_vox = sigma_angstrom / voxel_size
     if sigma_vox >= 0.25:
         field = gaussian_blur3d(field, sigma_vox)
     return (field / full_potential).clamp_(0.0, 1.0)

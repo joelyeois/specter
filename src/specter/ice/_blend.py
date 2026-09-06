@@ -37,7 +37,7 @@ class IceSlabBlender:
 
     Parameters
     ----------
-    pixel_size : float
+    voxel_size : float
         Voxel size in Å.
     full_potential : float or torch.Tensor, optional
         Potential of a fully occupied voxel, forwarded to
@@ -57,14 +57,14 @@ class IceSlabBlender:
 
     def __init__(
         self,
-        pixel_size: float,
+        voxel_size: float,
         full_potential: float | torch.Tensor = FULL_OCCUPANCY_POTENTIAL_V,
         sigma_angstrom: float = WATER_COARSE_GRAIN_SIGMA_ANGSTROM,
     ) -> None:
-        self.pixel_size = pixel_size
+        self.voxel_size = voxel_size
         self.full_potential = full_potential
         self.sigma_angstrom = sigma_angstrom
-        self.halo = occupancy_blur_halo_voxels(pixel_size, sigma_angstrom)
+        self.halo = occupancy_blur_halo_voxels(voxel_size, sigma_angstrom)
         self._tail: torch.Tensor | None = None
 
     def add(self, V: torch.Tensor, ice: torch.Tensor, start: int, end: int) -> None:
@@ -93,7 +93,7 @@ class IceSlabBlender:
         core = slice(start - lo, start - lo + (end - start))
         occ = potential_occupancy(
             src,
-            self.pixel_size,
+            self.voxel_size,
             sigma_angstrom=self.sigma_angstrom,
             full_potential=self.full_potential,
         )[:, core]

@@ -479,7 +479,7 @@ def test_blend_ice_into_volume_random_icemaker_noncubic_nxy_nz():
     V = torch.zeros(1, nz, nxy, nxy)
     icemaker = RandomIcemaker(dx=1.0, n=nxy, nz=nz, progressbars=False)
 
-    result = blend_ice_into_volume(V, icemaker, pixel_size=1.0)
+    result = blend_ice_into_volume(V, icemaker, voxel_size=1.0)
     assert result.shape == (1, nz, nxy, nxy)
     assert torch.isfinite(result).all()
 

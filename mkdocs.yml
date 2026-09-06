@@ -130,6 +130,7 @@ nav:
       - specter.pipelines: api/pipelines.md
       - specter.potential: api/potential.md
       - specter.rotations: api/rotations.md
+      - specter.scattering: api/scattering.md
       - specter.specimen: api/specimen.md
       - specter.tilt: api/tilt.md
       - Core modules: api/core.md

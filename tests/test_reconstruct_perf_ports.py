@@ -39,7 +39,7 @@ def _reference(model: Scattering, name: str, V: torch.Tensor) -> torch.Tensor:
 @pytest.mark.parametrize("sign", ["negative", "positive"])
 @pytest.mark.parametrize("alpha", [0.0, 0.1])
 def test_single_scatter_models_match_their_old_spelling(name, sign, alpha):
-    from specter import scattering as sc
+    from specter.scattering import _kernels as sc
 
     torch.manual_seed(0)
     n, nz, B = 16, 11, 2

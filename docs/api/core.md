@@ -2,10 +2,6 @@
 
 Standalone top-level modules, outside any subpackage.
 
-## specter.scattering
-
-::: specter.scattering
-
 ## specter.microscope
 
 ::: specter.microscope

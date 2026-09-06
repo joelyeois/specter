@@ -37,12 +37,12 @@ def test_group_size_and_shape(sym: str, n_ops: int) -> None:
 def test_matrices_are_orthonormal(sym: str, _: int) -> None:
     matrices = get_rotation_matrices(sym, return_affine=False)
     identity = torch.eye(3).expand_as(matrices)
-    assert torch.allclose(matrices @ matrices.transpose(-1, -2), identity, atol=1e-4)
+    assert torch.allclose(matrices @ matrices.transpose(-1, -2), identity, atol=1e-6)
     det = torch.linalg.det(matrices)
-    assert torch.allclose(det, torch.ones_like(det), atol=1e-4)
+    assert torch.allclose(det, torch.ones_like(det), atol=1e-6)
 
 
-def _is_closed_under_composition(matrices: torch.Tensor, atol: float = 1e-4) -> bool:
+def _is_closed_under_composition(matrices: torch.Tensor, atol: float = 1e-6) -> bool:
     """
     Check that composing any two operations in `matrices` yields another
     operation already present in the set.

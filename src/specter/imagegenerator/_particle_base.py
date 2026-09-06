@@ -267,10 +267,9 @@ class ParticleGeneratorBase(BaseImager):
             if self.verbose:
                 logger.info("Adding crowding molecules to volume")
             # Stamped straight onto V[i]: a separate accumulator is a second
-            # padded canvas held only to be added once. (This used to also
-            # keep a CPU copy of that canvas on `self.volumes`, which nothing
-            # read and which, as a 2 GB pageable device-to-host copy per
-            # particle, was 40% of the forward pass at a 512-pixel box.)
+            # padded canvas held only to be added once, and a host copy of
+            # it is a 2 GB pageable device-to-host transfer per particle,
+            # 40% of the forward pass at a 512-pixel box.
             # `crowd` registered the template as its own buffer, so after
             # `.to(device)` there are two device copies of it (0.5 GB at
             # 512^3). Alias the crowd's onto ours here rather than at

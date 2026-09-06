@@ -836,7 +836,7 @@ class IterativeScattering(L.LightningModule):
         )
 
         # The scalar depends only on whether V is complex, so it is one
-        # value for every slice; it used to be re-read off the last one.
+        # value for every slice.
         c = self._phase_scale(V)
         for i, nz_new, slice_sample in self._iter_slices(
             V, theta_matrix, slice_batchsize, "First Born (Iterative)"

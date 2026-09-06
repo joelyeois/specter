@@ -441,13 +441,10 @@ class Detector(L.LightningModule):
         flux but percolates into a single frame-spanning cluster at the
         higher dose rates measured here.
 
-        .. warning::
-           The meaning of this parameter changed: it previously indexed the
-           suppression grid's cell side as ``r / sqrt(2)``, making the
-           effective exclusion area ``r**2 / 2`` rather than ``pi * r**2``.
-           Values from before that change must be divided by
-           ``sqrt(2 * pi) ~= 2.5066`` to preserve behaviour (the old
-           Falcon 4i calibration of 6.0 px corresponds to 2.394 px here).
+        The radius is a true exclusion radius: the suppression grid's cell
+        side is ``r * sqrt(pi / 2)``, so the effective exclusion area is
+        ``pi * r**2`` (a value that indexed the cell side as ``r / sqrt(2)``
+        would be ``sqrt(2 * pi)`` times larger).
         """
         if self.noise_model != "poisson":
             return img

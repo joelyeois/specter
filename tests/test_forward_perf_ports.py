@@ -1,7 +1,6 @@
 """
-Tests for the forward-model memory/throughput changes made 2026-09-02, each
-pinned against the formulation it replaced (see dev/perf-notebook-512/REPORT.md
-for the measurements behind them):
+Tests for the forward-model memory/throughput formulations, each pinned
+against the simpler formulation it is equivalent to:
 
 * `affine_sampling_grid` replaces `F.affine_grid` in every rotation grid.
 * `VolumeRotator` no longer carries a persistent identity grid.
@@ -110,12 +109,9 @@ def test_volume_rotator_grid_matches_six_pass_reference(origin):
 
 
 def test_volume_rotator_has_no_persistent_identity_grid():
-    """The (nz, ny, nx, 3) identity grid was 1.6 GB at 512^3 and the reason
-    `init_base_grid=False` existed; there is no cached grid any more."""
+    """A cached (nz, ny, nx, 3) identity grid would be 1.6 GB at 512^3."""
     rot = VolumeRotator(8, 8, 8)
     assert "base_grid" not in dict(rot.named_buffers())
-    # the compatibility kwarg is still accepted
-    VolumeRotator(8, 8, 8, init_base_grid=False)
 
 
 def test_rotate_volume_relion_grid_matches_float64_reference():

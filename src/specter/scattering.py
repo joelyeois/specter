@@ -598,7 +598,7 @@ class IterativeScattering(L.LightningModule):
             that small per-step wraparound compounds coherently into a real, visible
             artifact along all four frame edges (confirmed via direct comparison against
             ``scattering_model="projection"``, which cannot exhibit this artifact by
-            construction, at both toy and production scale -- see ``dev/tilt series/``).
+            construction, at both toy and production scale).
             The fix is to pad once, run the *entire* recursion at the padded size, and
             crop back to ``nxy`` only once at the end -- padding and cropping every
             individual step was also tested and made things worse, since it discards
@@ -724,7 +724,6 @@ class IterativeScattering(L.LightningModule):
             nx=X,
             origin="relion",
             padding_mode="reflection",
-            init_base_grid=False,  # sample_rotated_slices builds its own grid; base_grid would OOM for large volumes
         ).to(V.device)
 
         return nz_new, rotator
@@ -836,7 +835,7 @@ class IterativeScattering(L.LightningModule):
             # Requested window may exceed V's actual extent (e.g. a padded canvas
             # requested from a volume only sized for the unpadded ROI). Anything
             # outside V is genuine vacuum -- zero-fill it instead of silently
-            # truncating (which used to produce a shape mismatch downstream).
+            # truncating (which produces a shape mismatch downstream).
             y0, y1 = max(y_start, 0), min(y_end, Y)
             x0, x1 = max(x_start, 0), min(x_end, X)
             if y0 == y_start and y1 == y_end and x0 == x_start and x1 == x_end:

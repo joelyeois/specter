@@ -113,9 +113,7 @@ def _windowed_grid_sample(
     `device`, and runs grid_sample there. Wherever the box is clipped to
     V's true edges (rather than the query's own extent), padding_mode's
     behaviour is reproduced exactly, since the block's edge then coincides
-    with the real volume edge. See dev/tilt series/windowed_streaming_
-    prototype.py (and the geometry figure in that investigation) for the
-    derivation and validation this was lifted from.
+    with the real volume edge.
 
     Parameters
     ----------
@@ -193,7 +191,6 @@ class VolumeRotator(L.LightningModule):
         align_corners: bool = False,
         padding_mode: str = "border",
         mode: str = "real",
-        init_base_grid=True,
     ):
         """
         Initialize a 3D VolumeRotator with a cached rotation center.
@@ -226,10 +223,6 @@ class VolumeRotator(L.LightningModule):
             - "real": rotate in real space.
             - "fourier": rotate in Fourier space.
             Default is "real".
-        init_base_grid : bool, optional
-            Ignored. Kept so existing callers that passed
-            ``init_base_grid=False`` (to avoid the old cached identity grid)
-            keep working; there is no cached grid any more.
 
         Raises
         ------
@@ -539,8 +532,7 @@ class VolumeRotator(L.LightningModule):
             (ROI size x `slice_indices` extent), never by `V`'s total size --
             validated flat at ~25-30MB from a 66MB volume up to a 67GB one,
             vs. a whole-volume transfer's memory scaling linearly with `V`
-            and eventually OOMing (see dev/tilt series/windowed_streaming_
-            scaling.py). Use this whenever `V` is deliberately kept off the
+            and eventually OOMing. Use this whenever `V` is deliberately kept off the
             compute device -- e.g. `TiltSeriesGenerator` falls back to this
             automatically (see its `_ensure_volume_placed`) when its volume
             doesn't fit on the GPU alongside a `.to(device)` call.

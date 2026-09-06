@@ -148,7 +148,7 @@ def classify_membrane_regions(
     # ndimage.label's were, so the boundary lookup below is unchanged. uint32
     # rather than the default uint64: half the label array (13.5 GB at 2 A)
     # and no box this classifier sees has 4 billion components.
-    labeled, num_features = cc3d.connected_components(
+    labeled, n_features = cc3d.connected_components(
         np.ascontiguousarray(non_shell_sub.cpu().numpy()),
         connectivity=26,
         out_dtype=np.uint32,
@@ -156,7 +156,7 @@ def classify_membrane_regions(
     )
 
     boundary_labels: set[int] = set()
-    if num_features > 0:
+    if n_features > 0:
         boundary_labels.update(int(v) for v in labeled[0, :, :].ravel() if v > 0)
         boundary_labels.update(int(v) for v in labeled[-1, :, :].ravel() if v > 0)
         boundary_labels.update(int(v) for v in labeled[:, 0, :].ravel() if v > 0)
@@ -178,7 +178,7 @@ def classify_membrane_regions(
     # roughly 128 test values torch.isin switches to a sort-based path and
     # the blowup disappears, which is why only moderate label counts hurt.)
     #
-    # Labels are dense integers 0..num_features, so a boolean lookup indexed
+    # Labels are dense integers 0..n_features, so a boolean lookup indexed
     # by label answers it in one gather. Doing that
     # in numpy also drops the int32 label volume's device transfer, which
     # existed only to feed the isin: 0.40 GiB of device memory total here,
@@ -187,7 +187,7 @@ def classify_membrane_regions(
     # so start from that and overwrite only the box the labelling covered.
     cytosol_mask = torch.ones_like(non_shell)
     if boundary_labels:
-        is_boundary = np.zeros(num_features + 1, dtype=bool)
+        is_boundary = np.zeros(n_features + 1, dtype=bool)
         is_boundary[np.fromiter(boundary_labels, dtype=np.int64)] = True
         cytosol_sub = non_shell_sub & torch.from_numpy(is_boundary[labeled]).to(
             density.device

@@ -34,7 +34,7 @@ specter reconstruct particle [OPTIONS]
 | `--mrc_file` | `TEXT` | _none_ | Particle stack (.mrc/.mrcs) the .cs file indexes into. |
 | `--dose_per_angstrom` | `FLOAT` | _none_ | Total fluence per image in e-/Angstrom^2. Sets the Poisson statistics the loss is weighted by, so it must be the dataset's real value. |
 | `--halfset` | `A` \| `B` \| `all` \| `gold` | `gold` | Which gold-standard half-set to reconstruct. gold (the default) reconstructs A and B and computes the halfmap FSC between them; A or B alone reconstructs just that half, e.g. for a quick test; all uses every particle in one single-volume run, ignoring the split. |
-| `--num_particles` | `INTEGER` | _none_ | Reconstruct only the first N particles instead of the whole stack. |
+| `--n_particles` | `INTEGER` | _none_ | Reconstruct only the first N particles instead of the whole stack. |
 
 **Optimisation**{ #specter-reconstruct-particle-optimisation }
 

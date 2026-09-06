@@ -131,9 +131,9 @@ class QScore:
     ----------
     device : str
         Torch device string: ``'cpu'``, ``'cuda'``, ``'cuda:1'``, etc.
-    num_radii : int
+    n_radii : int
         Number of radial shells. Default 21 → R = 0.0, 0.1, …, 2.0 Å.
-    num_points : int
+    n_points : int
         Points sampled uniformly on each shell per atom. Default 8.
     ref_gaussian_width : float
         σ of the reference Gaussian in Å. Default 0.6.
@@ -167,8 +167,8 @@ class QScore:
     def __init__(
         self,
         device: str = "cpu",
-        num_radii: int = 21,
-        num_points: int = 8,
+        n_radii: int = 21,
+        n_points: int = 8,
         ref_gaussian_width: float = 0.6,
         k_neighbors: int = 32,
         epsilon: float = 1e-6,
@@ -176,13 +176,13 @@ class QScore:
         standard_residues_only: bool = True,
     ) -> None:
         self.device = torch.device(device)
-        self.num_radii = num_radii
-        self.num_points = num_points
+        self.n_radii = n_radii
+        self.n_points = n_points
         self.ref_gaussian_width = ref_gaussian_width
         self.k_neighbors = k_neighbors
         self.epsilon = epsilon
         self.radii = torch.linspace(
-            0.0, (num_radii - 1) / 10.0, num_radii, device=self.device
+            0.0, (n_radii - 1) / 10.0, n_radii, device=self.device
         )
 
         # Cached state populated by load_cif / load_mrc.
@@ -366,7 +366,7 @@ class QScore:
         max_tries: int = 100,
     ) -> torch.Tensor:
         N = atoms.shape[0]
-        P = self.num_points
+        P = self.n_points
 
         if R == 0.0:
             return atoms.unsqueeze(1).expand(N, P, 3).clone()
@@ -473,7 +473,7 @@ class QScore:
         ref_vals = self._reference_gaussian(grid)
 
         map_vals_list: list[torch.Tensor] = []
-        for r_idx in range(self.num_radii):
+        for r_idx in range(self.n_radii):
             R = self.radii[r_idx].item()
             pts = self._sample_shell(atoms, R, neighbor_positions)
             vals = self._interpolate_shell(grid, pts, voxel_size)
@@ -482,11 +482,11 @@ class QScore:
         map_vals = torch.stack(map_vals_list, dim=1)
 
         N = atoms.shape[0]
-        M = self.num_radii * self.num_points
+        M = self.n_radii * self.n_points
         u = map_vals.reshape(N, M)
         v = (
             ref_vals.unsqueeze(1)
-            .expand(self.num_radii, self.num_points)
+            .expand(self.n_radii, self.n_points)
             .reshape(M)
             .unsqueeze(0)
             .expand(N, M)

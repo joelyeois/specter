@@ -1371,7 +1371,7 @@ def build_one_ice_config(
 
 def build_ice_cache(
     cache_dir: str,
-    num_configs: int,
+    n_configs: int,
     n: int = 256,
     dx: float = 1.0,
     n_steps: int = 250,
@@ -1380,7 +1380,7 @@ def build_ice_cache(
     progressbars: bool = True,
 ) -> None:
     """
-    Generate ``num_configs`` independent ice coordinate configs and save
+    Generate ``n_configs`` independent ice coordinate configs and save
     them (fixed-point) to ``cache_dir`` for later use with :class:`IceBank`.
 
     One file per config, via :func:`build_one_ice_config`. This is the
@@ -1389,7 +1389,7 @@ def build_ice_cache(
     production scale (``n=256, dx=1.0``), so this is meant to be run once
     (or occasionally, to extend/refresh the library), not per-session.
 
-    This function runs all ``num_configs`` sequentially, on a single
+    This function runs all ``n_configs`` sequentially, on a single
     device, in one process, and overwrites any config already present for
     the same seed. Prefer ``specter build ice`` (equivalently
     :func:`specter.pipelines.run_build_ice_cache`) for a large generation
@@ -1410,7 +1410,7 @@ def build_ice_cache(
     cache_dir : str
         Directory to write config files to (named by
         :func:`ice_config_filename`). Created if it doesn't exist.
-    num_configs : int
+    n_configs : int
         Number of independent configs to generate.
     n : int, optional
         Number of voxels along each side (box size = ``n * dx``). Default 256.
@@ -1427,7 +1427,7 @@ def build_ice_cache(
         Whether to show progress bars during generation. Default True.
     """
     os.makedirs(cache_dir, exist_ok=True)
-    for i in range(num_configs):
+    for i in range(n_configs):
         seed = seed_start + i
         build_one_ice_config(
             os.path.join(cache_dir, ice_config_filename(seed)),

@@ -410,8 +410,8 @@ class TomogramReconstructor(_BaseReconstructor):
             optimizerV,
             self.lr,
             self.reciprocal_lr_scheduler,
-            self.num_training_steps_per_epoch,
-            self.num_training_steps,
+            self.n_training_steps_per_epoch,
+            self.n_training_steps,
         )
         return [optimizerV], [lr_scheduler]
 

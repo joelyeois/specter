@@ -32,7 +32,7 @@ class IceCacheConfig:
     # optimisation run, so cost scales linearly -- and IceBank draws a random
     # rotation and translation from whichever config it picks, so a handful of
     # configs already gives a large space of distinct crops.
-    num_configs: int = 8
+    n_configs: int = 8
     # Voxels along each side of the (cubic) periodic cell; the cell measures
     # n * dx Å. Cubic only -- IceBank stores one scalar box_L per config
     # and filters candidates against it, so a non-cubic cell is unrepresentable.
@@ -69,7 +69,7 @@ class IceCacheConfig:
 
 
 ICE_CACHE_HELP: dict[str, str] = {
-    "num_configs": "Number of independent ice configurations to generate. "
+    "n_configs": "Number of independent ice configurations to generate. "
     "Each costs a full optimisation run -- tens of minutes at the default "
     "n=256, dx=1.0.",
     "n": "Voxels along each side of the cubic periodic cell (the cell "

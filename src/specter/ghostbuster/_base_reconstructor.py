@@ -79,7 +79,7 @@ class _BaseReconstructor(L.LightningModule):
             self._kmask_half_cache = cached
         return cached[1]
 
-    def num_training_steps_per_epoch(self) -> int:
+    def n_training_steps_per_epoch(self) -> int:
         """
         Return the number of optimizer steps per training epoch.
 
@@ -94,11 +94,11 @@ class _BaseReconstructor(L.LightningModule):
         self.trainer.fit_loop.setup_data()
         assert self.trainer.train_dataloader is not None
         dataset_size = len(self.trainer.train_dataloader)
-        num_steps = dataset_size // self.trainer.accumulate_grad_batches
+        n_steps = dataset_size // self.trainer.accumulate_grad_batches
 
-        return num_steps
+        return n_steps
 
-    def num_training_steps(self) -> int:
+    def n_training_steps(self) -> int:
         """
         Return the total number of optimizer steps in the configured run.
 
@@ -114,7 +114,7 @@ class _BaseReconstructor(L.LightningModule):
         if max_epochs is None or max_epochs < 1:
             raise ValueError("OneCycleLR requires a positive trainer.max_epochs.")
 
-        return self.num_training_steps_per_epoch() * max_epochs
+        return self.n_training_steps_per_epoch() * max_epochs
 
     def _metrics_path_suffix(self) -> str:
         """Filename suffix for saved metrics. Override for e.g. halfset labelling."""

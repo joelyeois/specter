@@ -337,13 +337,13 @@ def validate_config(config: Any) -> None:
         "membrane_region_max_passes",
         # IceCacheConfig. "n"/"dx" are the ice cell's own geometry -- no other
         # config class has a field by either name.
-        "num_configs",
+        "n_configs",
         "n",
         "dx",
         "n_steps",
         # ReconstructionConfig.
         "dose_per_angstrom",
-        "num_particles",
+        "n_particles",
         "symmetry_batchsize",
         "epochs",
         "bin_factor",

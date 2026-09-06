@@ -45,7 +45,7 @@ visible.
 ## Generating a library
 
 ```bash
-specter build ice --num_configs 8 --n 256 --dx 1.0 --device 0,1,2,3
+specter build ice --n_configs 8 --n 256 --dx 1.0 --device 0,1,2,3
 ```
 
 This writes `config_000.pt` … `config_007.pt` plus a `manifest.json` into
@@ -147,7 +147,7 @@ Three properties of the command exist to make a multi-hour run practical:
   re-running the same command after an interruption generates only what is
   missing. Pass `--overwrite True` to regenerate regardless.
 - **Libraries extend.** Each configuration is named after the seed that
-  produced it, so `--seed_start 8 --num_configs 8` adds eight new
+  produced it, so `--seed_start 8 --n_configs 8` adds eight new
   configurations to an existing library rather than overwriting the first
   eight.
 

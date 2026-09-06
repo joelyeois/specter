@@ -325,7 +325,7 @@ def test_build_ice_cache_writes_loadable_configs(tmp_path):
     torch.manual_seed(0)
     build_ice_cache(
         str(tmp_path),
-        num_configs=2,
+        n_configs=2,
         n=8,
         dx=1.0,
         n_steps=3,
@@ -351,11 +351,11 @@ def test_build_ice_cache_names_configs_by_seed(tmp_path):
     position in the batch, so a second run at a higher seed_start EXTENDS a
     library instead of overwriting the first run's configs."""
     build_ice_cache(
-        str(tmp_path), num_configs=2, n=8, n_steps=2, device="cpu", progressbars=False
+        str(tmp_path), n_configs=2, n=8, n_steps=2, device="cpu", progressbars=False
     )
     build_ice_cache(
         str(tmp_path),
-        num_configs=2,
+        n_configs=2,
         n=8,
         n_steps=2,
         device="cpu",

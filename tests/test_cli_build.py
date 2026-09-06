@@ -437,7 +437,7 @@ def _run_ice_cli(output_dir: Path, *extra_args: str) -> _CliResult:
 
 
 def test_cli_build_ice_smoke(tmp_path: Path) -> None:
-    result = _run_ice_cli(tmp_path, "--num_configs", "2")
+    result = _run_ice_cli(tmp_path, "--n_configs", "2")
     assert result.returncode == 0, result.stderr
 
     assert sorted(p.name for p in tmp_path.glob("*.pt")) == [
@@ -468,15 +468,15 @@ def test_cli_build_ice_resumes_and_extends(tmp_path: Path) -> None:
     """Re-running an identical request regenerates nothing (so an interrupted
     multi-hour run resumes), and a later seed_start adds to the library
     instead of overwriting it."""
-    assert _run_ice_cli(tmp_path, "--num_configs", "2").returncode == 0
+    assert _run_ice_cli(tmp_path, "--n_configs", "2").returncode == 0
     first_mtimes = {p.name: p.stat().st_mtime_ns for p in tmp_path.glob("*.pt")}
 
-    result = _run_ice_cli(tmp_path, "--num_configs", "2")
+    result = _run_ice_cli(tmp_path, "--n_configs", "2")
     assert result.returncode == 0, result.stderr
     assert "Skipping 2 config(s)" in result.stdout
     assert {p.name: p.stat().st_mtime_ns for p in tmp_path.glob("*.pt")} == first_mtimes
 
-    result = _run_ice_cli(tmp_path, "--num_configs", "2", "--seed_start", "2")
+    result = _run_ice_cli(tmp_path, "--n_configs", "2", "--seed_start", "2")
     assert result.returncode == 0, result.stderr
     assert sorted(p.name for p in tmp_path.glob("*.pt")) == [
         "config_000.pt",
@@ -492,7 +492,7 @@ def test_cli_build_ice_shards_across_devices(tmp_path: Path) -> None:
     """A multi-device --device runs one worker process per device. Two "cpu"
     entries stand in for two GPUs: this exercises the spawn/join/exit-code
     path itself, which is what differs from the single-device path."""
-    result = _run_ice_cli(tmp_path, "--num_configs", "4", "--device", "cpu,cpu")
+    result = _run_ice_cli(tmp_path, "--n_configs", "4", "--device", "cpu,cpu")
     assert result.returncode == 0, result.stderr
     assert len(list(tmp_path.glob("*.pt"))) == 4
 
@@ -504,6 +504,6 @@ def test_cli_build_ice_help_smoke() -> None:
         encoding="utf-8",
     )
     assert result.returncode == 0
-    assert "--num_configs" in result.stdout
+    assert "--n_configs" in result.stdout
     assert "--seed_start" in result.stdout
     assert "--device" in result.stdout

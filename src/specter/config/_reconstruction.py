@@ -40,7 +40,7 @@ class ReconstructionConfig:
     halfset: Literal["A", "B", "all", "gold"] = "gold"
     # Reconstruct only the first N particles. Useful for a quick run before
     # committing to the full stack; None uses all of them.
-    num_particles: int | None = None
+    n_particles: int | None = None
 
     # --- Optimisation ---
     epochs: int = 5
@@ -153,8 +153,7 @@ RECONSTRUCTION_HELP: dict[str, str] = {
     "default) reconstructs A and B and computes the halfmap FSC between "
     "them; A or B alone reconstructs just that half, e.g. for a quick test; "
     "all uses every particle in one single-volume run, ignoring the split.",
-    "num_particles": "Reconstruct only the first N particles instead of the "
-    "whole stack.",
+    "n_particles": "Reconstruct only the first N particles instead of the whole stack.",
     "fsc_ref": "Reference volume (.mrc) for map-to-model FSC logging. Never "
     "optimised against -- reporting only.",
     "fsc_mask": "Mask volume (.mrc) applied before the FSC is computed.",

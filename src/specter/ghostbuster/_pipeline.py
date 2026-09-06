@@ -129,8 +129,8 @@ class Ghostbuster:
         Falls back to ``"32"`` automatically on CPU.
     num_workers : int
         Dataloader worker processes.
-    num_particles : int, optional
-        Use only the first ``num_particles`` particles. Defaults to all.
+    n_particles : int, optional
+        Use only the first ``n_particles`` particles. Defaults to all.
     halfset : {"A", "B", "all"}
         Gold-standard half-set to extract from the ``.cs`` file.
     run_dir : str or Path, optional
@@ -179,7 +179,7 @@ class Ghostbuster:
         use_2d_mask: bool = False,
         precision: str = "16-mixed",
         num_workers: int = 0,
-        num_particles: int | None = None,
+        n_particles: int | None = None,
         halfset: Literal["A", "B", "all"] = "all",
         run_dir: str | Path | None = None,
     ) -> None:
@@ -195,7 +195,7 @@ class Ghostbuster:
             scale,
             anisomag,
             indices,
-        ) = self._load_particle_parameters(cs_file, halfset, num_particles)
+        ) = self._load_particle_parameters(cs_file, halfset, n_particles)
         images = self._load_particle_images(mrc_file, indices)
 
         voxel_size = float(
@@ -244,7 +244,7 @@ class Ghostbuster:
         self.use_2d_mask = use_2d_mask
         self.precision = precision
         self.num_workers = num_workers
-        self.num_particles = num_particles
+        self.n_particles = n_particles
         self.dose_per_angstrom = dose_per_angstrom
         self.run_dir = Path(run_dir) if run_dir is not None else None
 
@@ -252,7 +252,7 @@ class Ghostbuster:
     def _load_particle_parameters(
         cs_file: str | Path,
         halfset: Literal["A", "B", "all"],
-        num_particles: int | None,
+        n_particles: int | None,
     ) -> tuple[
         torch.Tensor,
         torch.Tensor,
@@ -280,7 +280,7 @@ class Ghostbuster:
             indices,
             _split,
         ) = extract_parameters_from_csfile(
-            str(cs_file), halfset=halfset, n_particles=num_particles
+            str(cs_file), halfset=halfset, n_particles=n_particles
         )
         n_loaded = len(rotations)
         voltage_val = float(voltage.item() if hasattr(voltage, "item") else voltage)

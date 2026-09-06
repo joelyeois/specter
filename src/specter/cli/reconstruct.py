@@ -17,7 +17,7 @@ from ._click_options import CONTEXT_SETTINGS, build_config_command, load_cli_con
 _RECONSTRUCT_PARTICLE_GROUPS: list[tuple[str, list[str]]] = [
     (
         "Data",
-        ["cs_file", "mrc_file", "dose_per_angstrom", "halfset", "num_particles"],
+        ["cs_file", "mrc_file", "dose_per_angstrom", "halfset", "n_particles"],
     ),
     ("Optimisation", ["epochs", "batchsize", "lr", "scheduler", "lr_decay"]),
     ("Symmetry", ["symmetry", "symmetry_mode", "symmetry_batchsize"]),

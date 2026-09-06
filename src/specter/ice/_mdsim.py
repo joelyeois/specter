@@ -474,7 +474,7 @@ class MDSimDump:
     def generate_big_ice(
         self,
         target_shape: tuple[int, int, int, int],
-        num_unique: int = 8,
+        n_unique: int = 8,
         frames: int | Sequence[int] | torch.Tensor | None = None,
     ) -> torch.Tensor:
         """
@@ -484,7 +484,7 @@ class MDSimDump:
         ----------
         target_shape : tuple of int
             Output shape ``(B, nz, ny, nx)``.
-        num_unique : int, optional
+        n_unique : int, optional
             Number of unique frames to sample as tile sources. Default is 8.
         frames : int or sequence of int or Tensor or None, optional
             Which frames to draw from. ``None`` uses all equilibrated frames
@@ -495,7 +495,7 @@ class MDSimDump:
         big_ice : torch.Tensor
             Tiled ice volume of shape ``target_shape``.
         """
-        cubes = self.generate_ice(batchsize=num_unique, frames=frames)
+        cubes = self.generate_ice(batchsize=n_unique, frames=frames)
         return tile_volume_from_blocks_blended(cubes, target_shape)
 
     def __repr__(self) -> str:
@@ -966,7 +966,7 @@ class ExtXYZDump:
     def generate_big_ice(
         self,
         target_shape: tuple[int, int, int, int],
-        num_unique: int = 8,
+        n_unique: int = 8,
         frames: int | Sequence[int] | torch.Tensor | None = None,
         t_min: float | None = None,
         t_max: float | None = None,
@@ -978,7 +978,7 @@ class ExtXYZDump:
         ----------
         target_shape : tuple of int
             Output shape ``(B, nz, ny, nx)``.
-        num_unique : int, optional
+        n_unique : int, optional
             Number of unique frames to sample as tile sources. Default 8.
         frames : int or sequence of int or Tensor or None, optional
             See :meth:`get_coordinates`.
@@ -993,7 +993,7 @@ class ExtXYZDump:
             Tiled ice volume of shape ``target_shape``.
         """
         cubes = self.generate_ice(
-            batchsize=num_unique, frames=frames, t_min=t_min, t_max=t_max
+            batchsize=n_unique, frames=frames, t_min=t_min, t_max=t_max
         )
         return tile_volume_from_blocks_blended(cubes, target_shape)
 

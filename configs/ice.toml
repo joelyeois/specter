@@ -1,6 +1,6 @@
 # Canonical default config for `specter build ice`.
 # Any field can be overridden on the command line, e.g.:
-#   specter build ice --config configs/ice.toml --num_configs 16
+#   specter build ice --config configs/ice.toml --n_configs 16
 
 # Full field docs: docs/user-guide/ice-cache.md.
 
@@ -12,7 +12,7 @@
 # configurations than the bundled library holds.
 
 [library]
-num_configs = 8
+n_configs = 8
 n = 256            # voxels per side; the cubic cell measures n * dx Angstrom
 dx = 1.0           # A/voxel -- match the pixel size of the simulations this is for
 seed_start = 0     # i-th config uses seed_start + i, and is named after its seed.

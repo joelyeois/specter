@@ -81,7 +81,7 @@ _TOMOGRAM_GROUPS: list[tuple[str, list[str]]] = [
 ]
 
 _ICE_GROUPS: list[tuple[str, list[str]]] = [
-    ("Library", ["num_configs", "n", "dx", "seed_start"]),
+    ("Library", ["n_configs", "n", "dx", "seed_start"]),
     ("Optimisation", ["n_steps"]),
     ("Compute", ["device"]),
     ("Output", ["output_dir", "overwrite", "diagnostics"]),

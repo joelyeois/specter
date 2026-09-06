@@ -236,9 +236,9 @@ def _full_volume_reference(
     shell_mask = density > density_threshold
     non_shell = ~shell_mask
     structure = np.ones((3, 3, 3), dtype=np.int8)
-    labeled, num_features = ndimage.label(non_shell.cpu().numpy(), structure=structure)
+    labeled, n_features = ndimage.label(non_shell.cpu().numpy(), structure=structure)
     boundary_labels: set[int] = set()
-    if num_features > 0:
+    if n_features > 0:
         for face in (
             labeled[0, :, :],
             labeled[-1, :, :],
@@ -249,7 +249,7 @@ def _full_volume_reference(
         ):
             boundary_labels.update(int(v) for v in face.ravel() if v > 0)
     if boundary_labels:
-        is_boundary = np.zeros(num_features + 1, dtype=bool)
+        is_boundary = np.zeros(n_features + 1, dtype=bool)
         is_boundary[np.fromiter(boundary_labels, dtype=np.int64)] = True
         cytosol = non_shell & torch.from_numpy(is_boundary[labeled])
     else:

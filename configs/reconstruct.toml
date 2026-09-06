@@ -19,7 +19,7 @@ dose_per_angstrom = 40.0   # the dataset's real fluence, not a nominal one: it s
 halfset = "gold"           # "gold" reconstructs A and B and computes the halfmap FSC
                            # between them; "A" | "B" reconstructs just that half;
                            # "all" ignores the split and reconstructs one volume
-# num_particles = 10000    # reconstruct only the first N, instead of all
+# n_particles = 10000    # reconstruct only the first N, instead of all
 
 [optimisation]
 epochs = 5

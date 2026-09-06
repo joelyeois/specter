@@ -216,7 +216,7 @@ def run_build_ice_cache(config: IceCacheConfig) -> None:
     section("Ice cache")
     os.makedirs(config.output_dir, exist_ok=True)
 
-    seeds = [config.seed_start + i for i in range(config.num_configs)]
+    seeds = [config.seed_start + i for i in range(config.n_configs)]
     pending = [
         seed
         for seed in seeds
@@ -228,7 +228,7 @@ def run_build_ice_cache(config: IceCacheConfig) -> None:
     devices = _parse_device_pool(config.device)
 
     console.print(
-        f"Library: {config.num_configs} configs at n={config.n}, dx={config.dx} A "
+        f"Library: {config.n_configs} configs at n={config.n}, dx={config.dx} A "
         f"(cell {config.n * config.dx:.0f} A), seeds "
         f"{seeds[0]}-{seeds[-1]}" + f"\nOutput:  {config.output_dir}"
     )

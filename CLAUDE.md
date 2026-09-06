@@ -237,8 +237,11 @@ src/specter/                  # Main source package
   ice/                        # Amorphous ice generation
     _random.py                # RandomIcemaker
     _gradient.py              # GradientSKIcemaker
-    _bank.py                  # IceBank (cache) + build_one_ice_config()/build_ice_cache()
-    _blend.py                 # IceSlabBlender — blends an ice field into a specimen volume one z-slab at a time
+    _bank.py                  # IceBank: draws randomly rotated/translated crops from the cached library
+    _tiling.py                # _IceTiling mixin: tiles crops for a request larger than a config, relaxes the seams
+    _library.py               # the library on disk: coordinate encoding, bundled-cache path, build_one_ice_config()/build_ice_cache()
+    _blend.py                 # resolve_icemaker(), blend_ice_into_volume() (whole-canvas and host-slab paths), IceSlabBlender
+    _diagnostics.py           # plot_ice_bank_diagnostics(): per-config energy and S(k) figures for a library
     _profile.py               # IceProfile — laterally varying ice thickness across a micrograph (hole, rim, tilt)
     _energy.py                # MLBOP coarse-grained water potential (structural diagnostic; neighbor search via vesin-torch, not ASE)
     _kernels.py               # Shared physics-kernel construction (atomic potential, S(k) target)

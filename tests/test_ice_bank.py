@@ -7,14 +7,13 @@ import torch
 
 from specter.arrays import soft_voxelize_coordinates
 from specter.ice import GradientSKIcemaker, IceBank, RandomIcemaker
-from specter.ice._bank import (
+from specter.ice import (
     blend_ice_into_volume,
     build_ice_cache,
-    default_ice_cache_dir,
     build_one_ice_config,
-    decode_positions,
-    encode_positions,
+    default_ice_cache_dir,
 )
+from specter.ice._library import decode_positions, encode_positions
 from specter.ice import ice_config_filename
 from specter.rotations import random_rotation_matrix_from_generator
 from specter.ice._helpers import ndensity_of_amorphous_ice
@@ -577,7 +576,7 @@ def test_blend_ice_slabwise_matches_whole_volume_expression(nz, n, inplace):
     truncated by the volume itself.
     """
     from specter.ice import RandomIcemaker
-    from specter.ice._bank import blend_ice_into_volume
+    from specter.ice import blend_ice_into_volume
 
     torch.manual_seed(0)
     maker = RandomIcemaker(n=n, dx=2.0, nz=nz)
@@ -643,7 +642,7 @@ def test_host_volume_blend_matches_whole_canvas_blend():
 
     # Slab path: V on the host, bank on the device, same draws, and a slab
     # small enough that the volume spans several.
-    from specter.ice import _bank as bank_mod
+    from specter.ice import _blend as blend_mod
 
     torch.manual_seed(0)
     new = V0.clone()
@@ -655,7 +654,7 @@ def test_host_volume_blend_matches_whole_canvas_blend():
         return real(*a, **kw)
 
     bank.big_ice_positions = seeded_positions  # type: ignore[method-assign]
-    bank_mod._blend_ice_slabwise(new, bank, dx, slab_voxels=n * n * 16)
+    blend_mod._blend_ice_slabwise(new, bank, dx, slab_voxels=n * n * 16)
     assert new.device.type == "cpu"
     diff = new.to(dev) - ref
     assert float(diff.abs().max()) < 1e-3 * float(ice.abs().max())

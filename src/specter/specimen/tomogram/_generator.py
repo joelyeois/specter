@@ -591,6 +591,56 @@ class TomogramSpecimenGenerator:
             target_shape[2] * voxel_size,
         )
 
+        volume, carbon_mask = self._stage_carbon(target_shape, voxel_size)
+
+        # Transmembrane proteins are stamped into this during the membrane
+        # loop below, so it is allocated before that loop rather than after
+        # it: they are protein instances like any other, and belong in the
+        # same id space as filaments, beads and the cytosol/lumen fill (see
+        # module docstring). They therefore take the FIRST ids, and
+        # everything placed later avoids them through `obstacle_mask`.
+        instance_labels = torch.zeros(
+            target_shape, dtype=torch.int32, device=self.accumulator_device
+        )
+        next_instance_id = 1
+
+        volume, instance_labels, next_instance_id = self._stage_membranes(
+            volume, instance_labels, next_instance_id, carbon_mask, box, voxel_size
+        )
+        volume, instance_labels, next_instance_id, obstacle_mask = (
+            self._stage_filaments(
+                volume, instance_labels, next_instance_id, voxel_size, carbon_mask
+            )
+        )
+        volume, instance_labels, next_instance_id, obstacle_mask = self._stage_beads(
+            volume, instance_labels, next_instance_id, voxel_size, obstacle_mask
+        )
+
+        self.placements = []
+        pdb_cache = self._load_structures()
+        for location in ("cytosol", "lumen"):
+            specs_here = [s for s in self.protein_specs if s.location == location]
+            if not specs_here:
+                continue
+            volume, instance_labels, next_instance_id = self._stage_species(
+                location,
+                specs_here,
+                volume,
+                instance_labels,
+                next_instance_id,
+                obstacle_mask,
+                pdb_cache,
+                voxel_size,
+            )
+
+        self.instance_labels = instance_labels
+        return volume
+
+    def _stage_carbon(
+        self, target_shape: tuple[int, int, int], voxel_size: float
+    ) -> tuple[torch.Tensor, torch.Tensor | None]:
+        """The empty canvas, with the carbon film painted in if there is one,
+        and the film's footprint mask (None without a film)."""
         # Carbon film (if any) is generated first, even before membrane
         # instance positions are solved -- so membrane auto-placement here,
         # and filament placement further below (`_stamp_filaments`), can
@@ -614,18 +664,19 @@ class TomogramSpecimenGenerator:
             ):
                 volume = self._stamp_carbon_film(volume, target_shape, voxel_size)
             carbon_mask = volume > 0
+        return volume, carbon_mask
 
-        # Transmembrane proteins are stamped into this during the membrane
-        # loop below, so it is allocated before that loop rather than after
-        # it: they are protein instances like any other, and belong in the
-        # same id space as filaments, beads and the cytosol/lumen fill (see
-        # module docstring). They therefore take the FIRST ids, and
-        # everything placed later avoids them through `obstacle_mask`.
-        instance_labels = torch.zeros(
-            target_shape, dtype=torch.int32, device=self.accumulator_device
-        )
-        next_instance_id = 1
-
+    def _stage_membranes(
+        self,
+        volume: torch.Tensor,
+        instance_labels: torch.Tensor,
+        next_instance_id: int,
+        carbon_mask: torch.Tensor | None,
+        box: tuple[float, float, float],
+        voxel_size: float,
+    ) -> tuple[torch.Tensor, torch.Tensor, int]:
+        """Place, generate and composite the membrane instances with their
+        transmembrane proteins, then classify regions and label the shells."""
         # Resolve any omitted position_xyz via collision-rejecting random
         # placement, treating each instance as a bounding sphere (see
         # _instance_bounding_radius) -- an instance that doesn't fit
@@ -647,7 +698,78 @@ class TomogramSpecimenGenerator:
         _membrane_place_start = phase_start(
             "  Placement", disable=not self.progressbars or not self.membrane_instances
         )
+        to_composite = self._place_membrane_instances(
+            box, carbon_mask, self.target_shape, voxel_size
+        )
+        phase_done(
+            "  Placement",
+            _membrane_place_start,
+            disable=not self.progressbars or not self.membrane_instances,
+        )
+        _membrane_build_start = phase_start(
+            "  Generation & compositing",
+            disable=not self.progressbars or not to_composite,
+        )
+        volume, instance_labels, next_instance_id, instance_shell_masks = (
+            self._composite_membranes(
+                to_composite,
+                volume,
+                instance_labels,
+                next_instance_id,
+                carbon_mask,
+                box,
+                voxel_size,
+            )
+        )
+        phase_done(
+            "  Generation & compositing",
+            _membrane_build_start,
+            disable=not self.progressbars or not to_composite,
+        )
+        # classify_membrane_regions' own threshold: needs the FULL
+        # composite's peak (unlike instance_shell_masks' per-instance
+        # thresholds above), so can only be resolved after every instance
+        # is merged into volume.
+        _membrane_regions_start = phase_start(
+            "  Region classification",
+            disable=not self.progressbars or not self.membrane_instances,
+        )
+        self._classify_regions(volume)
+        phase_done(
+            "  Region classification",
+            _membrane_regions_start,
+            disable=not self.progressbars or not self.membrane_instances,
+        )
 
+        _membrane_label_start = phase_start(
+            "  Shell labelling",
+            disable=not self.progressbars or not self.membrane_instances,
+        )
+        self._label_membrane_shells(
+            instance_shell_masks, tuple(volume.shape), voxel_size
+        )
+        phase_done(
+            "  Shell labelling",
+            _membrane_label_start,
+            disable=not self.progressbars or not self.membrane_instances,
+        )
+        phase_done(
+            f"Membranes ({len(instance_shell_masks)}/"
+            f"{len(self.membrane_instances)} instance(s) placed)",
+            _membrane_phase_start,
+            disable=not self.progressbars or not self.membrane_instances,
+        )
+        return volume, instance_labels, next_instance_id
+
+    def _place_membrane_instances(
+        self,
+        box: tuple[float, float, float],
+        carbon_mask: torch.Tensor | None,
+        target_shape: tuple[int, int, int],
+        voxel_size: float,
+    ) -> list[MembraneInstance]:
+        """Resolve every membrane instance's position by collision-rejecting
+        random placement and return the ones that fit."""
         to_composite: list[MembraneInstance] = []
         if self.membrane_instances:
             radii = torch.tensor(
@@ -705,7 +827,22 @@ class TomogramSpecimenGenerator:
                 mi = self.membrane_instances[orig_idx]
                 mi.position_xyz = tuple(coords[k].tolist())
                 to_composite.append(mi)
+        return to_composite
 
+    def _composite_membranes(
+        self,
+        to_composite: list[MembraneInstance],
+        volume: torch.Tensor,
+        instance_labels: torch.Tensor,
+        next_instance_id: int,
+        carbon_mask: torch.Tensor | None,
+        box: tuple[float, float, float],
+        voxel_size: float,
+    ) -> tuple[
+        torch.Tensor, torch.Tensor, int, list[tuple[MembraneInstance, torch.Tensor]]
+    ]:
+        """Generate each placed instance, embed its transmembrane proteins,
+        max-merge it into the canvas and keep its shell mask for labelling."""
         # Generate + place transmembrane proteins per instance, each in its
         # own centered local frame, then composite densities into the
         # shared canvas (max-merge) before any region classification --
@@ -714,15 +851,6 @@ class TomogramSpecimenGenerator:
         self.transmembrane_placements = []
         self.placed_membrane_instances = []
         instance_shell_masks: list[tuple[MembraneInstance, torch.Tensor]] = []
-        phase_done(
-            "  Placement",
-            _membrane_place_start,
-            disable=not self.progressbars or not self.membrane_instances,
-        )
-        _membrane_build_start = phase_start(
-            "  Generation & compositing",
-            disable=not self.progressbars or not to_composite,
-        )
         membrane_progress = TqdmProgress(
             transient=True, disable=not self.progressbars or not to_composite
         )
@@ -972,36 +1100,27 @@ class TomogramSpecimenGenerator:
                 if torch.device(self.device).type == "cuda":
                     gc.collect()
                     torch.cuda.empty_cache()
+        return volume, instance_labels, next_instance_id, instance_shell_masks
 
-        phase_done(
-            "  Generation & compositing",
-            _membrane_build_start,
-            disable=not self.progressbars or not to_composite,
-        )
-
+    def _classify_regions(self, volume: torch.Tensor) -> None:
+        """Classify the composite into shell, lumen and cytosol (``self.regions``)."""
         # classify_membrane_regions' own threshold: needs the FULL
         # composite's peak (unlike instance_shell_masks' per-instance
         # thresholds above), so can only be resolved after every instance
         # is merged into volume.
-        _membrane_regions_start = phase_start(
-            "  Region classification",
-            disable=not self.progressbars or not self.membrane_instances,
-        )
         threshold = self.region_density_threshold
         if threshold is None:
             peak = float(volume.max())
             threshold = 0.05 * peak if peak > 0 else 0.0
         self.regions = classify_membrane_regions(volume, threshold)
-        phase_done(
-            "  Region classification",
-            _membrane_regions_start,
-            disable=not self.progressbars or not self.membrane_instances,
-        )
 
-        _membrane_label_start = phase_start(
-            "  Shell labelling",
-            disable=not self.progressbars or not self.membrane_instances,
-        )
+    def _label_membrane_shells(
+        self,
+        instance_shell_masks: list[tuple[MembraneInstance, torch.Tensor]],
+        target_shape: tuple[int, ...],
+        voxel_size: float,
+    ) -> None:
+        """Write each instance's shell mask into ``self.membrane_labels``."""
         membrane_labels = torch.zeros(
             target_shape, dtype=torch.int32, device=self.accumulator_device
         )
@@ -1023,26 +1142,17 @@ class TomogramSpecimenGenerator:
                     stacklevel=2,
                 )
         self.membrane_labels = membrane_labels
-        phase_done(
-            "  Shell labelling",
-            _membrane_label_start,
-            disable=not self.progressbars or not self.membrane_instances,
-        )
-        phase_done(
-            f"Membranes ({len(instance_shell_masks)}/"
-            f"{len(self.membrane_instances)} instance(s) placed)",
-            _membrane_phase_start,
-            disable=not self.progressbars or not self.membrane_instances,
-        )
-        # instance_shell_masks (up to several GB/instance -- see where it's
-        # built above) is never read again after the membrane_labels loop
-        # just above, but stays in scope for the rest of this (long)
-        # method otherwise -- filaments/packing below are memory-hungry
-        # enough at production scale that leaving it needlessly resident
-        # is worth avoiding explicitly rather than waiting for generate()
-        # to return.
-        del instance_shell_masks
 
+    def _stage_filaments(
+        self,
+        volume: torch.Tensor,
+        instance_labels: torch.Tensor,
+        next_instance_id: int,
+        voxel_size: float,
+        carbon_mask: torch.Tensor | None,
+    ) -> tuple[torch.Tensor, torch.Tensor, int, torch.Tensor | None]:
+        """Stamp the filaments and microtubules and return the obstacle mask the
+        later stages avoid (None when there are none)."""
         # Filaments (then gold fiducial beads, see below) render right
         # after membranes, BEFORE cytosol/lumen protein packing (see module
         # docstring) -- obstacle_mask (voxels they actually occupy, from
@@ -1101,7 +1211,17 @@ class TomogramSpecimenGenerator:
         else:
             self.filament_instances = []
             obstacle_mask = None
+        return volume, instance_labels, next_instance_id, obstacle_mask
 
+    def _stage_beads(
+        self,
+        volume: torch.Tensor,
+        instance_labels: torch.Tensor,
+        next_instance_id: int,
+        voxel_size: float,
+        obstacle_mask: torch.Tensor | None,
+    ) -> tuple[torch.Tensor, torch.Tensor, int, torch.Tensor | None]:
+        """Stamp the gold fiducial beads and fold them into the obstacle mask."""
         # Gold fiducial beads render right after filaments, still BEFORE
         # cytosol/lumen protein packing -- avoids the membrane shell and
         # any already-placed filaments (obstacle_mask), and is itself then
@@ -1122,8 +1242,10 @@ class TomogramSpecimenGenerator:
             obstacle_mask = instance_labels > 0
         else:
             self.bead_instances = []
+        return volume, instance_labels, next_instance_id, obstacle_mask
 
-        self.placements = []
+    def _load_structures(self) -> dict[str, PDB]:
+        """Load every cytosol/lumen structure once, concurrently."""
         pdb_cache: dict[str, PDB] = {}
 
         # Pre-load every unique cytosol/lumen pdb_source ONCE, up front,
@@ -1172,241 +1294,244 @@ class TomogramSpecimenGenerator:
                 disable=not self.progressbars,
             )
 
-        for location in ("cytosol", "lumen"):
-            specs_here = [s for s in self.protein_specs if s.location == location]
-            if not specs_here:
-                continue
-            _location_phase_start = phase_start(
-                f"{location.capitalize()} species", disable=not self.progressbars
-            )
+        return pdb_cache
 
-            region_mask = self.regions[location]
-            if obstacle_mask is not None:
-                # Negate first, then AND in place: `region_mask & ~obstacle`
-                # held the negation AND the result at once, and at a
-                # 300x1200x1200 tomogram each bool is 0.40 GiB. Profiled as
-                # the single largest allocation site in a default run, 3.22
-                # GiB across four blocks, since both regions are built while
-                # the originals are still referenced.
-                #
-                # Writing into the negation, never into self.regions -- that
-                # is kept for later stages and must not be mutated here.
-                region_mask = ~obstacle_mask
-                region_mask &= self.regions[location]
-            # Chunked: a plain .sum() on a volume-sized bool promotes every
-            # element to int64 first, 3.22 GiB for a 300x1200x1200 mask, and
-            # profiled as the largest single allocation in a default run.
-            region_voxels = count_nonzero_chunked(region_mask)
-            if region_voxels == 0:
+    def _stage_species(
+        self,
+        location: str,
+        specs_here: list[TomogramProteinSpec],
+        volume: torch.Tensor,
+        instance_labels: torch.Tensor,
+        next_instance_id: int,
+        obstacle_mask: torch.Tensor | None,
+        pdb_cache: dict[str, PDB],
+        voxel_size: float,
+    ) -> tuple[torch.Tensor, torch.Tensor, int]:
+        """Pack and render one region's protein species: the exact-count targets
+        first, then the ratio-weighted filler."""
+        _location_phase_start = phase_start(
+            f"{location.capitalize()} species", disable=not self.progressbars
+        )
+
+        assert self.regions is not None  # set by _stage_membranes
+        region_mask = self.regions[location]
+        if obstacle_mask is not None:
+            # Negate first, then AND in place: `region_mask & ~obstacle`
+            # held the negation AND the result at once, and at a
+            # 300x1200x1200 tomogram each bool is 0.40 GiB. Profiled as
+            # the single largest allocation site in a default run, 3.22
+            # GiB across four blocks, since both regions are built while
+            # the originals are still referenced.
+            #
+            # Writing into the negation, never into self.regions -- that
+            # is kept for later stages and must not be mutated here.
+            region_mask = ~obstacle_mask
+            region_mask &= self.regions[location]
+        # Chunked: a plain .sum() on a volume-sized bool promotes every
+        # element to int64 first, 3.22 GiB for a 300x1200x1200 mask, and
+        # profiled as the largest single allocation in a default run.
+        region_voxels = count_nonzero_chunked(region_mask)
+        if region_voxels == 0:
+            warnings.warn(
+                f"TomogramSpecimenGenerator: no '{location}' region found "
+                f"(0 voxels, after excluding already-placed filaments) -- "
+                f"{len(specs_here)} species declared for it will not be "
+                "placed. For 'lumen', this means the membrane has no "
+                "enclosed compartment.",
+                stacklevel=2,
+            )
+            return volume, instance_labels, next_instance_id
+        region_volume_a3 = region_voxels * voxel_size**3
+
+        pdbs_by_source: dict[str, PDB] = {}
+        for spec in specs_here:
+            if spec.pdb_source not in pdb_cache:
+                pdb_cache[spec.pdb_source] = PDB(
+                    spec.pdb_source,
+                    pdb_cache_dir=self.pdb_cache_dir,
+                    verbose=False,
+                    compute_atom_species=_wants_atom_species(self.parameterization),
+                    readd_hydrogens=self.readd_hydrogens,
+                    monomer_library_path=self.monomer_library_path,
+                )
+            pdbs_by_source[spec.pdb_source] = pdb_cache[spec.pdb_source]
+
+        # Protein packing works from one running occupancy grid: True
+        # means "an instance may not go here", so it starts as the
+        # complement of the region (which already has obstacles removed
+        # above) and accumulates every instance placed below. It needs no
+        # distance field -- gold beads and membrane instances, which are
+        # placed by bounding sphere, are the only things that still build
+        # one, and they build their own.
+        pack_voxel, pack_shape, pack_factor = self._packing_grid(
+            self.target_shape, voxel_size
+        )
+        occupancy = ~region_mask
+        if pack_factor > 1:
+            occupancy = _downsample_mask_maxpool(occupancy, pack_factor, pack_shape)
+
+        exact_specs = [s for s in specs_here if s.n_copies is not None]
+        ratio_specs = [s for s in specs_here if s.n_copies is None]
+
+        # Exact-count ("target") species are placed FIRST within this
+        # region; the ratio-weighted ones then fill what is left via
+        # the exclusion field.
+        if exact_specs:
+            exact_pdbs = [pdbs_by_source[s.pdb_source] for s in exact_specs]
+            exact_radii = torch.cat(
+                [
+                    torch.full((s.n_copies,), float(pdb.max_diameter) / 2.0)  # type: ignore[arg-type]
+                    for s, pdb in zip(exact_specs, exact_pdbs)
+                ]
+            )
+            exact_species_map = torch.cat(
+                [
+                    torch.full((s.n_copies,), i, dtype=torch.long)  # type: ignore[arg-type]
+                    for i, s in enumerate(exact_specs)
+                ]
+            )
+            with (
+                phase(
+                    f"  Target packing ({location})",
+                    disable=not self.progressbars,
+                    header=False,
+                ),
+                status(
+                    f"Packing {int(exact_radii.numel())} target instance(s) "
+                    f"({location})",
+                    disable=not self.progressbars,
+                ),
+            ):
+                coords, exact_rotations, accepted_idx, occupancy = self._pack_shapes(
+                    exact_pdbs,
+                    exact_species_map,
+                    pack_shape,
+                    pack_voxel,
+                    pack_factor,
+                    occupancy,
+                )
+            n_requested = int(exact_radii.numel())
+            n_placed = int(accepted_idx.numel())
+            if n_placed < n_requested:
                 warnings.warn(
-                    f"TomogramSpecimenGenerator: no '{location}' region found "
-                    f"(0 voxels, after excluding already-placed filaments) -- "
-                    f"{len(specs_here)} species declared for it will not be "
-                    "placed. For 'lumen', this means the membrane has no "
-                    "enclosed compartment.",
+                    f"TomogramSpecimenGenerator: only {n_placed}/"
+                    f"{n_requested} exact-count instances fit in the "
+                    f"'{location}' region without colliding -- it may be "
+                    "too small or too crowded for the requested "
+                    "n_copies.",
                     stacklevel=2,
                 )
-                continue
-            region_volume_a3 = region_voxels * voxel_size**3
+            accepted_species_idx = exact_species_map[accepted_idx]
 
-            pdbs_by_source: dict[str, PDB] = {}
-            for spec in specs_here:
-                if spec.pdb_source not in pdb_cache:
-                    pdb_cache[spec.pdb_source] = PDB(
-                        spec.pdb_source,
-                        pdb_cache_dir=self.pdb_cache_dir,
-                        verbose=False,
-                        compute_atom_species=_wants_atom_species(self.parameterization),
-                        readd_hydrogens=self.readd_hydrogens,
-                        monomer_library_path=self.monomer_library_path,
-                    )
-                pdbs_by_source[spec.pdb_source] = pdb_cache[spec.pdb_source]
-
-            # Protein packing works from one running occupancy grid: True
-            # means "an instance may not go here", so it starts as the
-            # complement of the region (which already has obstacles removed
-            # above) and accumulates every instance placed below. It needs no
-            # distance field -- gold beads and membrane instances, which are
-            # placed by bounding sphere, are the only things that still build
-            # one, and they build their own.
-            pack_voxel, pack_shape, pack_factor = self._packing_grid(
-                target_shape, voxel_size
-            )
-            occupancy = ~region_mask
-            if pack_factor > 1:
-                occupancy = _downsample_mask_maxpool(occupancy, pack_factor, pack_shape)
-
-            exact_specs = [s for s in specs_here if s.n_copies is not None]
-            ratio_specs = [s for s in specs_here if s.n_copies is None]
-
-            # Exact-count ("target") species are placed FIRST within this
-            # region; the ratio-weighted ones then fill what is left via
-            # the exclusion field.
-            if exact_specs:
-                exact_pdbs = [pdbs_by_source[s.pdb_source] for s in exact_specs]
-                exact_radii = torch.cat(
-                    [
-                        torch.full((s.n_copies,), float(pdb.max_diameter) / 2.0)  # type: ignore[arg-type]
-                        for s, pdb in zip(exact_specs, exact_pdbs)
-                    ]
-                )
-                exact_species_map = torch.cat(
-                    [
-                        torch.full((s.n_copies,), i, dtype=torch.long)  # type: ignore[arg-type]
-                        for i, s in enumerate(exact_specs)
-                    ]
-                )
-                with (
-                    phase(
-                        f"  Target packing ({location})",
-                        disable=not self.progressbars,
-                        header=False,
-                    ),
-                    status(
-                        f"Packing {int(exact_radii.numel())} target instance(s) "
-                        f"({location})",
-                        disable=not self.progressbars,
-                    ),
-                ):
-                    coords, exact_rotations, accepted_idx, occupancy = (
-                        self._pack_shapes(
-                            exact_pdbs,
-                            exact_species_map,
-                            pack_shape,
-                            pack_voxel,
-                            pack_factor,
-                            occupancy,
-                        )
-                    )
-                n_requested = int(exact_radii.numel())
-                n_placed = int(accepted_idx.numel())
-                if n_placed < n_requested:
-                    warnings.warn(
-                        f"TomogramSpecimenGenerator: only {n_placed}/"
-                        f"{n_requested} exact-count instances fit in the "
-                        f"'{location}' region without colliding -- it may be "
-                        "too small or too crowded for the requested "
-                        "n_copies.",
-                        stacklevel=2,
-                    )
-                accepted_species_idx = exact_species_map[accepted_idx]
-
-                with phase(
-                    f"  Target rendering ({location})",
-                    disable=not self.progressbars,
-                    header=False,
-                ):
-                    volume, instance_labels, next_instance_id = (
-                        self._render_species_pool(
-                            exact_specs,
-                            exact_pdbs,
-                            coords,
-                            accepted_species_idx,
-                            volume,
-                            instance_labels,
-                            next_instance_id,
-                            location,
-                            voxel_size,
-                            role="target",
-                            rotations=exact_rotations,
-                        )
-                    )
-
-            # Ratio-weighted ("filler") species, drawn to fill
-            # occupancy_fraction of this region -- avoiding the exact-count
-            # placements above (if any), the filament mask, and the
-            # membrane shell, all folded into region_exclusion_field/region_mask
-            # by this point.
-            if ratio_specs:
-                ratio_pdbs = [pdbs_by_source[s.pdb_source] for s in ratio_specs]
-                species_radii = torch.tensor(
-                    [float(pdb.max_diameter) / 2.0 for pdb in ratio_pdbs]
-                )
-                species_ratios = torch.tensor([s.ratio for s in ratio_specs])
-
-                # `occupancy_fraction` is a budget in real footprint volume,
-                # which is what the packer collides. `draw_species_pool`'s own
-                # default is bounding-sphere volume instead, ~5.6x larger per
-                # species; passing the measured masks here is what keeps the
-                # setting meaning the same thing as the geometry.
-                pool_volumes = torch.tensor(
-                    [
-                        float(self._species_mask(pdb, voxel_size).sum()) * voxel_size**3
-                        for pdb in ratio_pdbs
-                    ]
-                )
-
-                pool_radii, pool_species_idx = draw_species_pool(
-                    species_radii,
-                    species_ratios,
-                    self.occupancy_fraction,
-                    region_volume_a3,
-                    seed=self.seed,
-                    species_volumes=pool_volumes,
-                )
-
-                with (
-                    phase(
-                        f"  Filler packing ({location})",
-                        disable=not self.progressbars,
-                        header=False,
-                    ),
-                    status(
-                        f"Packing filler instances ({location})",
-                        disable=not self.progressbars,
-                    ),
-                ):
-                    coords, filler_rotations, accepted_idx, occupancy = (
-                        self._pack_shapes(
-                            ratio_pdbs,
-                            pool_species_idx,
-                            pack_shape,
-                            pack_voxel,
-                            pack_factor,
-                            occupancy,
-                        )
-                    )
-                if accepted_idx.numel() == 0:
-                    warnings.warn(
-                        f"TomogramSpecimenGenerator: placed 0 filler "
-                        f"instances in '{location}' -- no rotated footprint "
-                        f"fit anywhere in the region's "
-                        f"{region_voxels:,} free voxels. Enlarge the "
-                        "compartment, or declare a smaller species for "
-                        "this region.",
-                        stacklevel=2,
-                    )
-                accepted_species_idx = pool_species_idx[accepted_idx]
-
-                with phase(
-                    f"  Filler rendering ({location})",
-                    disable=not self.progressbars,
-                    header=False,
-                ):
-                    volume, instance_labels, next_instance_id = (
-                        self._render_species_pool(
-                            ratio_specs,
-                            ratio_pdbs,
-                            coords,
-                            accepted_species_idx,
-                            volume,
-                            instance_labels,
-                            next_instance_id,
-                            location,
-                            voxel_size,
-                            role="filler",
-                            rotations=filler_rotations,
-                        )
-                    )
-
-            phase_done(
-                f"{location.capitalize()} species",
-                _location_phase_start,
+            with phase(
+                f"  Target rendering ({location})",
                 disable=not self.progressbars,
+                header=False,
+            ):
+                volume, instance_labels, next_instance_id = self._render_species_pool(
+                    exact_specs,
+                    exact_pdbs,
+                    coords,
+                    accepted_species_idx,
+                    volume,
+                    instance_labels,
+                    next_instance_id,
+                    location,
+                    voxel_size,
+                    role="target",
+                    rotations=exact_rotations,
+                )
+
+        # Ratio-weighted ("filler") species, drawn to fill
+        # occupancy_fraction of this region -- avoiding the exact-count
+        # placements above (if any), the filament mask, and the
+        # membrane shell, all folded into region_exclusion_field/region_mask
+        # by this point.
+        if ratio_specs:
+            ratio_pdbs = [pdbs_by_source[s.pdb_source] for s in ratio_specs]
+            species_radii = torch.tensor(
+                [float(pdb.max_diameter) / 2.0 for pdb in ratio_pdbs]
+            )
+            species_ratios = torch.tensor([s.ratio for s in ratio_specs])
+
+            # `occupancy_fraction` is a budget in real footprint volume,
+            # which is what the packer collides. `draw_species_pool`'s own
+            # default is bounding-sphere volume instead, ~5.6x larger per
+            # species; passing the measured masks here is what keeps the
+            # setting meaning the same thing as the geometry.
+            pool_volumes = torch.tensor(
+                [
+                    float(self._species_mask(pdb, voxel_size).sum()) * voxel_size**3
+                    for pdb in ratio_pdbs
+                ]
             )
 
-        self.instance_labels = instance_labels
-        return volume
+            pool_radii, pool_species_idx = draw_species_pool(
+                species_radii,
+                species_ratios,
+                self.occupancy_fraction,
+                region_volume_a3,
+                seed=self.seed,
+                species_volumes=pool_volumes,
+            )
+
+            with (
+                phase(
+                    f"  Filler packing ({location})",
+                    disable=not self.progressbars,
+                    header=False,
+                ),
+                status(
+                    f"Packing filler instances ({location})",
+                    disable=not self.progressbars,
+                ),
+            ):
+                coords, filler_rotations, accepted_idx, occupancy = self._pack_shapes(
+                    ratio_pdbs,
+                    pool_species_idx,
+                    pack_shape,
+                    pack_voxel,
+                    pack_factor,
+                    occupancy,
+                )
+            if accepted_idx.numel() == 0:
+                warnings.warn(
+                    f"TomogramSpecimenGenerator: placed 0 filler "
+                    f"instances in '{location}' -- no rotated footprint "
+                    f"fit anywhere in the region's "
+                    f"{region_voxels:,} free voxels. Enlarge the "
+                    "compartment, or declare a smaller species for "
+                    "this region.",
+                    stacklevel=2,
+                )
+            accepted_species_idx = pool_species_idx[accepted_idx]
+
+            with phase(
+                f"  Filler rendering ({location})",
+                disable=not self.progressbars,
+                header=False,
+            ):
+                volume, instance_labels, next_instance_id = self._render_species_pool(
+                    ratio_specs,
+                    ratio_pdbs,
+                    coords,
+                    accepted_species_idx,
+                    volume,
+                    instance_labels,
+                    next_instance_id,
+                    location,
+                    voxel_size,
+                    role="filler",
+                    rotations=filler_rotations,
+                )
+
+        phase_done(
+            f"{location.capitalize()} species",
+            _location_phase_start,
+            disable=not self.progressbars,
+        )
+
+        return volume, instance_labels, next_instance_id
 
     def _stamp_carbon_film(
         self,

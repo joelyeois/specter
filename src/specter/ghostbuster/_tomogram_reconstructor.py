@@ -8,7 +8,6 @@ import roma
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.optim import AdamW
 from torch.optim.lr_scheduler import LRScheduler
 
 from .. import rotations
@@ -21,8 +20,6 @@ from ..aberrations import (
 from ..ctf import LegacyAberrationAdapter
 from ..scattering import IterativeScattering
 from ._base_reconstructor import _BaseReconstructor
-from ._helpers import _build_lr_scheduler
-from ._io import save_volume_mrc
 from ..settings import Optics, Propagation, TiltGeometry
 from specter.options import Scheduler
 
@@ -146,11 +143,7 @@ class TomogramReconstructor(_BaseReconstructor):
         self.slice_batchsize = slice_batchsize
         self.checkpoint_chunks = checkpoint_chunks
 
-        # Logging
-        self.log_total_loss: list[torch.Tensor] = []
-        self.log_norm_loss: list[torch.Tensor] = []
-        self.log_sparsity_loss: list[torch.Tensor] = []
-        self.log_lrs: list[float] = []
+        self._init_loss_logs()
 
         # Volume parameter
         if lr is None:
@@ -382,19 +375,7 @@ class TomogramReconstructor(_BaseReconstructor):
         self,
     ) -> tuple[list[torch.optim.Optimizer], list[LRScheduler]]:
         """Build AdamW optimiser and LR scheduler for V."""
-        if self.lr is None:
-            return [], []
-
-        optimizerV = AdamW([self.V], lr=self.lr, weight_decay=0.0)
-        lr_scheduler = _build_lr_scheduler(
-            self.scheduler,
-            optimizerV,
-            self.lr,
-            self.reciprocal_lr_scheduler,
-            self.n_training_steps_per_epoch,
-            self.n_training_steps,
-        )
-        return [optimizerV], [lr_scheduler]
+        return self._volume_optimizer()
 
     def training_step(
         self, batch: tuple[torch.Tensor, torch.Tensor], batch_idx: int
@@ -416,10 +397,6 @@ class TomogramReconstructor(_BaseReconstructor):
             Scalar loss for the current batch.
         """
         obs_images, tilt_indices = batch
-
-        opts = self._optimizers_list()
-        for opt in opts:
-            opt.zero_grad()
 
         # Prepare V once per step (taper + padding are deterministic transforms)
         V_prepared = self._prepare_volume()
@@ -445,19 +422,7 @@ class TomogramReconstructor(_BaseReconstructor):
         self.log_norm_loss.append(self._gather_for_logging(norm_loss).cpu())
         self.log_total_loss.append(self._gather_for_logging(loss).cpu())
 
-        self.manual_backward(loss)
-        for opt in opts:
-            opt.step()
-
-        self._step_schedulers()
-
-        self.log_dict(
-            {"train_loss": loss},
-            on_step=True,
-            on_epoch=True,
-            prog_bar=True,
-            logger=False,
-        )
+        self._optimise(loss)
         return loss
 
     # ------------------------------------------------------------------ #
@@ -470,10 +435,9 @@ class TomogramReconstructor(_BaseReconstructor):
         Rank-0-only under multi-GPU (DDP): every replica would otherwise
         race to create/write the same files.
         """
-        if self._run_dir is None or not self.trainer.is_global_zero:
+        if not self._make_run_dir():
             return
-        self._run_dir.mkdir(parents=True, exist_ok=True)
-        (self._run_dir / "epochs").mkdir(exist_ok=True)
+        assert self._run_dir is not None
 
         if self.kmask is not None:
             torch.save(self.kmask.detach().cpu(), self._run_dir / "kmask.pt")
@@ -495,9 +459,9 @@ class TomogramReconstructor(_BaseReconstructor):
         if self._run_dir is None or not self.trainer.is_global_zero:
             return
         epoch = self.current_epoch + 1
-        v = self.V.detach().cpu().float()
-        mrc_path = self._run_dir / "epochs" / f"{epoch:03d}.mrc"
-        save_volume_mrc(mrc_path, v, self.voxel_size)
+        self._save_volume(
+            self._volume_cpu(), self._run_dir / "epochs" / f"{epoch:03d}.mrc"
+        )
 
     def on_fit_end(self) -> None:
         """Save final reconstructed volume and training metrics.
@@ -508,7 +472,6 @@ class TomogramReconstructor(_BaseReconstructor):
         self._save_metrics()
         if self._run_dir is None or not self.trainer.is_global_zero:
             return
-        v = self.V.detach().cpu().float()
         volume_path = self._run_dir / "volume.mrc"
-        save_volume_mrc(volume_path, v, self.voxel_size)
+        self._save_volume(self._volume_cpu(), volume_path)
         print(f"Saved final volume → {volume_path}")

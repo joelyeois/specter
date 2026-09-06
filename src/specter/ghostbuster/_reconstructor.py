@@ -20,12 +20,10 @@ from ..plots import (
 )
 from ..symmetries import apply_symmetry, get_rotation_matrices
 from ._base_reconstructor import _BaseReconstructor
-from ._helpers import _build_lr_scheduler
 from ._io import (
     save_fsc_figure,
     save_halfmap_fsc_figure,
     save_plot3d_preview,
-    save_volume_mrc,
 )
 from ._losses import (
     mse_loss,
@@ -238,11 +236,8 @@ class Reconstructor(_BaseReconstructor):
         self.lr_T = lr_T
         self.lr_D = lr_D
         self.lr_decay = lr_decay
-        self.log_lrs: list[float] = []
-        self.log_total_loss: list[torch.Tensor] = []
-        self.log_sparsity_loss: list[torch.Tensor] = []
-        self.log_norm_loss: list[torch.Tensor] = []
         self.scheduler = scheduler
+        self._init_loss_logs()
 
     def _setup_symmetry(
         self,
@@ -479,42 +474,13 @@ class Reconstructor(_BaseReconstructor):
             (optimizers, lr_schedulers) — only the volume optimiser gets a
             scheduler; rotation/translation/defocus optimisers use a fixed LR.
         """
-        # Not fused=True: it is ~8 ms faster per step on a 512^3 volume, but
-        # Lightning's 16-mixed plugin hands it grads it rejects ("params,
-        # grads, exp_avgs, and exp_avg_sqs must have same dtype, device, and
-        # layout").
-        if self.lr is not None:
-            optimizerV = AdamW([self.V], lr=self.lr, weight_decay=0.0)
+        opts, lr_schedulers = self._volume_optimizer()
         if self.lr_R is not None:
-            optimizerR = AdamW([self.rotations], lr=self.lr_R)
-            # optimizerR = Adam([self.rotations], lr=self.lr_R)
-            # optimizer = LBFGS([self.rotations], lr=self.lr_R)
+            opts.append(AdamW([self.rotations], lr=self.lr_R))
         if self.lr_T is not None:
-            optimizerT = AdamW([self.translations], lr=self.lr_T)
+            opts.append(AdamW([self.translations], lr=self.lr_T))
         if self.lr_D is not None:
-            optimizerD = AdamW([self.defocus_offset], lr=self.lr_D)
-
-        lr_schedulers = []
-        if self.lr is not None:
-            lr_scheduler = _build_lr_scheduler(
-                self.scheduler,
-                optimizerV,
-                self.lr,
-                self.reciprocal_lr_scheduler,
-                self.n_training_steps_per_epoch,
-                self.n_training_steps,
-            )
-            lr_schedulers.append(lr_scheduler)
-
-        opts: list[torch.optim.Optimizer] = []
-        if self.lr is not None:
-            opts.append(optimizerV)
-        if self.lr_R is not None:
-            opts.append(optimizerR)
-        if self.lr_T is not None:
-            opts.append(optimizerT)
-        if self.lr_D is not None:
-            opts.append(optimizerD)
+            opts.append(AdamW([self.defocus_offset], lr=self.lr_D))
         return opts, lr_schedulers
 
     def _compute_loss(
@@ -653,24 +619,8 @@ class Reconstructor(_BaseReconstructor):
         torch.Tensor
             Scalar loss for the current batch.
         """
-        opts = self._optimizers_list()
-
         loss, _, _ = self._common_step(batch, batch_idx)
-        self.log_dict(
-            {"train_loss": loss},
-            on_step=True,
-            on_epoch=True,
-            prog_bar=True,
-            logger=False,
-        )
-
-        for opt in opts:
-            opt.zero_grad()
-        self.manual_backward(loss)
-        for opt in opts:
-            opt.step()
-
-        self._step_schedulers()
+        self._optimise(loss)
         return loss
 
     def _metrics_path_suffix(self) -> str:
@@ -687,10 +637,9 @@ class Reconstructor(_BaseReconstructor):
         (see that method's docstring for why: two halfset workers cannot
         safely share one file while training).
         """
-        if self._run_dir is None or not self.trainer.is_global_zero:
+        if not self._make_run_dir():
             return
-        self._run_dir.mkdir(parents=True, exist_ok=True)
-        (self._run_dir / "epochs").mkdir(exist_ok=True)
+        assert self._run_dir is not None
 
         saved_arrays: list[str] = []
         for name in ("nps_weight", "kmask"):
@@ -722,9 +671,9 @@ class Reconstructor(_BaseReconstructor):
         if self._run_dir is None or not self.trainer.is_global_zero:
             return
         suffix = self._metrics_path_suffix()
-        v = self.V.detach().cpu().float()
+        v = self._volume_cpu()
         volume_path = self._run_dir / f"volume{suffix}.mrc"
-        save_volume_mrc(volume_path, v, self.voxel_size)
+        self._save_volume(v, volume_path)
         print(f"Saved final volume → {volume_path}")
 
         if self.fsc_ref is not None:
@@ -753,10 +702,8 @@ class Reconstructor(_BaseReconstructor):
 
         epoch = self.current_epoch + 1
         suffix = self._metrics_path_suffix()
-        v = self.V.detach().cpu().float()
-
-        mrc_path = self._run_dir / "epochs" / f"{epoch:03d}{suffix}.mrc"
-        save_volume_mrc(mrc_path, v, self.voxel_size)
+        v = self._volume_cpu()
+        self._save_volume(v, self._run_dir / "epochs" / f"{epoch:03d}{suffix}.mrc")
 
         self._save_plot3d(v, suffix=suffix, epoch=epoch)
         if self.fsc_ref is not None:

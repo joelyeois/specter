@@ -6,14 +6,18 @@ from typing import Any, cast
 
 import lightning as L
 import torch
-from torch.optim.lr_scheduler import ReduceLROnPlateau
+from torch.optim import AdamW
+from torch.optim.lr_scheduler import LRScheduler, ReduceLROnPlateau
 
 from ._helpers import (
     _apply_kmask_inplace,
     _build_epoch_metrics,
+    _build_lr_scheduler,
     _kmask_half_spectrum,
     _log_current_lr,
 )
+from ._io import save_volume_mrc
+from specter.options import Scheduler
 
 # ---------------------------------------------------------------------------
 # Shared LightningModule scaffolding for Reconstructor and TomogramReconstructor
@@ -31,21 +35,97 @@ class _BaseReconstructor(L.LightningModule):
     base class holds that shared behaviour so each subclass only implements
     its own forward model and loss.
 
-    Subclasses must set ``self.lr_decay``, ``self.lr``, ``self.kmask``,
-    ``self.V``, ``self._run_dir``, and the ``log_total_loss``/
-    ``log_norm_loss``/``log_sparsity_loss``/``log_lrs`` lists before these
-    methods are used.
+    Subclasses must set ``self.lr_decay``, ``self.lr``, ``self.scheduler``,
+    ``self.kmask``, ``self.V``, ``self.voxel_size``, ``self._run_dir``, and
+    call `_init_loss_logs` before these methods are used.
     """
 
     lr_decay: float
     lr: float | None
+    scheduler: Scheduler
     kmask: torch.Tensor | None
     V: torch.Tensor
+    voxel_size: float
     _run_dir: Path | None
     log_lrs: list[float]
     log_total_loss: list[torch.Tensor]
     log_norm_loss: list[torch.Tensor]
     log_sparsity_loss: list[torch.Tensor]
+
+    def _init_loss_logs(self) -> None:
+        """Start the per-step loss and learning-rate histories."""
+        self.log_lrs = []
+        self.log_total_loss = []
+        self.log_norm_loss = []
+        self.log_sparsity_loss = []
+
+    def _volume_optimizer(
+        self,
+    ) -> tuple[list[torch.optim.Optimizer], list[LRScheduler]]:
+        """
+        The AdamW optimiser on ``V`` and its LR scheduler, as the lists
+        `configure_optimizers` returns; both empty when ``lr`` is None.
+
+        Not ``fused=True``: it is ~8 ms faster per step on a 512^3 volume,
+        but Lightning's 16-mixed plugin hands it grads it rejects ("params,
+        grads, exp_avgs, and exp_avg_sqs must have same dtype, device, and
+        layout").
+        """
+        if self.lr is None:
+            return [], []
+        optimizer = AdamW([self.V], lr=self.lr, weight_decay=0.0)
+        lr_scheduler = _build_lr_scheduler(
+            self.scheduler,
+            optimizer,
+            self.lr,
+            self.reciprocal_lr_scheduler,
+            self.n_training_steps_per_epoch,
+            self.n_training_steps,
+        )
+        return [optimizer], [lr_scheduler]
+
+    def _optimise(self, loss: torch.Tensor) -> None:
+        """
+        One manual optimisation step on ``loss``: zero every optimiser,
+        backpropagate, step them all, step the schedulers, and log the
+        loss to the progress bar.
+        """
+        opts = self._optimizers_list()
+        for opt in opts:
+            opt.zero_grad()
+        self.manual_backward(loss)
+        for opt in opts:
+            opt.step()
+        self._step_schedulers()
+        self.log_dict(
+            {"train_loss": loss},
+            on_step=True,
+            on_epoch=True,
+            prog_bar=True,
+            logger=False,
+        )
+
+    def _make_run_dir(self) -> bool:
+        """
+        Create ``run_dir`` and its ``epochs/`` folder if this rank writes.
+
+        Returns False when there is no run directory or this is not the
+        global-zero rank: under multi-GPU (DDP) every replica would
+        otherwise race to create and write the same files.
+        """
+        if self._run_dir is None or not self.trainer.is_global_zero:
+            return False
+        self._run_dir.mkdir(parents=True, exist_ok=True)
+        (self._run_dir / "epochs").mkdir(exist_ok=True)
+        return True
+
+    def _volume_cpu(self) -> torch.Tensor:
+        """``V`` detached, on the host, in float32, for saving and FSCs."""
+        return self.V.detach().cpu().float()
+
+    def _save_volume(self, v: torch.Tensor, path: Path) -> None:
+        """Write ``v`` as an MRC at this module's voxel size."""
+        save_volume_mrc(path, v, self.voxel_size)
 
     def reciprocal_lr_scheduler(self, *args: Any) -> float:
         """

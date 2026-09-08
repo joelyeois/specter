@@ -244,7 +244,25 @@ class Detector(L.LightningModule):
         if anisomag is not None:
             images = self.anisomagnify(images, anisomag)
 
-        # Apply detector MTF
+        # Apply detector MTF -- deliberately BEFORE the Poisson draw below, which is
+        # what makes this a COUNTING detector. `apply_coincidence` samples arrivals and
+        # deposits one count per surviving electron into one pixel, so the recorded
+        # noise is white however wide the MTF is: a Poisson point process whose points
+        # are independently displaced is still a Poisson point process. The blur lives
+        # in the ensemble mean (hence MTF < 1) and not in any single event. That is the
+        # right model for K2/K3/Falcon counting mode -- every MTF bundled in
+        # detectors.py is a counting-mode curve -- and it is the published behaviour:
+        # a counting detector's NPS is flat "due to the counting mode which assigns
+        # detected electrons to single pixels" (Ruskin, Yu & Grigorieff 2013,
+        # J. Struct. Biol. 184, 385-393).
+        #
+        # Do not "fix" this ordering. Drawing the noise first and blurring afterwards
+        # models an INTEGRATING sensor, where one electron's charge cloud really is
+        # split between neighbouring pixels, so the noise carries the kernel and NPS
+        # becomes proportional to MTF^2 (ibid., Eq. 11). That is a different camera,
+        # not a bug fix, and it is only self-consistent alongside the Landau/Swank
+        # spread of deposited charge and the removal of coincidence loss, which is a
+        # failure of the event finder and has no meaning without one.
         if self.mtf is not None:
             images = self.add_mtf(images, self.mtf)
 

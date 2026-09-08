@@ -1371,3 +1371,97 @@ def test_crowding_slab_is_still_settable(small_volume, ctf_params):
         crowding=Crowding(min_distance=60.0, max_distance_z=500.0),
     )
     assert gen.crowd.max_distance_z == 500.0
+
+
+def test_tilt_series_uses_each_tilts_own_parameters():
+    """
+    Per-tilt parameters are stored one entry per tilt and must be selected by
+    the tilt index, not by the volume batch index. Until 2026-09-08 every tilt
+    reused tilt 0's defocus, dose and coincidence radius, and the dose envelope
+    saw a pre-exposure of zero on every tilt, so a tilt series carried no
+    accumulated radiation damage at all.
+    """
+    volume = torch.zeros(1, 16, 64, 64)
+    volume[0, 5:11, 24:40, 24:40] = 30.0
+    n = 3
+    ctf = {
+        "dfu": torch.full((n,), 5000.0),
+        "dfv": torch.full((n,), 5000.0),
+        "dfang": torch.zeros(n),
+        "cs": torch.full((n,), 2.7e7),
+    }
+    dose = torch.tensor([1.0, 2.0, 4.0])
+    gen = TiltSeriesGenerator(
+        volume=volume,
+        micrograph_size=64,
+        pixel_size=2.0,
+        ctf_params=ctf,
+        voltage=300.0,
+        dose_per_angstrom=dose,
+        angles=torch.tensor([0.0, 0.0, 0.0]),
+        verbose=False,
+        progressbars=False,
+        propagation=Propagation(scattering_model="projection", alpha=0.1),
+        camera=Camera(noise_model=None),
+    )
+    with torch.no_grad():
+        images, _, _ = gen.generate_tilt_series(torch.tensor([0]))
+    means = images[0].mean(dim=(-1, -2))
+    # counts scale with each tilt's own dose: 1 : 2 : 4
+    assert torch.allclose(means / means[0], dose / dose[0], rtol=1e-3)
+
+    # the dose envelope sees the accumulated pre-exposure: the third tilt,
+    # identical in geometry and dose to the first two but taken after them,
+    # carries less high-frequency signal
+    gen_env = TiltSeriesGenerator(
+        volume=volume,
+        micrograph_size=64,
+        pixel_size=2.0,
+        ctf_params=ctf,
+        voltage=300.0,
+        dose_per_angstrom=torch.tensor([2.0, 60.0, 2.0]),
+        angles=torch.tensor([0.0, 0.0, 0.0]),
+        verbose=False,
+        progressbars=False,
+        propagation=Propagation(scattering_model="projection", alpha=0.1),
+        envelopes=Envelopes(dose_envelope=True),
+        camera=Camera(noise_model=None),
+    )
+    seen = []
+    orig = gen_env.aberration.forward
+
+    def spy(exitwave, ctf_params):
+        seen.append(float(ctf_params["pre_exposure"].flatten()[0]))
+        return orig(exitwave, ctf_params)
+
+    gen_env.aberration.forward = spy
+    with torch.no_grad():
+        images, _, _ = gen_env.generate_tilt_series(torch.tensor([0]))
+    assert seen == [0.0, 2.0, 62.0]
+    k = torch.fft.fftfreq(64, d=2.0)
+    k2 = k[:, None] ** 2 + k[None, :] ** 2
+    hp = (k2 > (1 / 30.0) ** 2).float()
+
+    def high_power(img):
+        return float((torch.fft.fft2(img - img.mean()).abs() ** 2 * hp).sum())
+
+    assert high_power(images[0, 2]) < 0.9 * high_power(images[0, 0])
+
+
+def test_generator_rejects_unknown_keywords():
+    """A misspelt or moved setting must fail loudly, not become a silent no-op."""
+    volume = torch.zeros(1, 8, 32, 32)
+    ctf = {"dfu": torch.tensor([5000.0]), "dfv": torch.tensor([5000.0])}
+    with pytest.raises(TypeError, match="unexpected keyword"):
+        TiltSeriesGenerator(
+            volume=volume,
+            micrograph_size=32,
+            pixel_size=2.0,
+            ctf_params=ctf,
+            voltage=300.0,
+            dose_per_angstrom=1.0,
+            angles=torch.tensor([0.0]),
+            verbose=False,
+            progressbars=False,
+            dose_envelope=True,
+        )

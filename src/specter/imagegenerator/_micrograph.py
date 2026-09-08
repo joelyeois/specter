@@ -203,6 +203,18 @@ class MicrographGenerator(BaseImager):
         if specimen_gen is not None:
             self.specimen_gen = specimen_gen
 
+        # Nothing below consumes ``kwargs``: a key that reaches here is a
+        # misspelling or a setting that has moved into one of the settings
+        # groups (``Propagation``, ``Camera``, ``Envelopes``, ...). Swallowing
+        # it silently turned ``dose_envelope=True`` and, earlier,
+        # ``bfactor_envelope=`` into no-ops, so it is an error.
+        if kwargs:
+            raise TypeError(
+                f"{type(self).__name__} got unexpected keyword argument(s) "
+                f"{sorted(kwargs)}; settings now live in the Propagation, Camera, "
+                "Envelopes, Optics, Ice and TiltGeometry groups"
+            )
+
         self._apply_defocus_shift(
             shift_required=self.scattering_model not in ["projection", "ctf"],
             shift=(

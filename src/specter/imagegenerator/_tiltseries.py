@@ -479,6 +479,33 @@ class TiltSeriesGenerator(MicrographGenerator):
 
         return volume
 
+    def _tilt_index(
+        self,
+        i: int,
+        idx: torch.Tensor | int,
+        batch: int,
+        tensor: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """
+        Index selecting tilt ``i`` of a per-tilt parameter tensor, broadcast
+        over the volume batch.
+
+        Per-tilt tensors carry one entry per tilt (``len == n_tilts``); a
+        scalar parameter carries one entry, which every tilt shares. Only a
+        tensor whose length is neither is a per-volume parameter and keeps
+        ``idx``. ``tensor`` defaults to the ``dfu`` buffer, so the CTF batch
+        and the dose/coincidence batches resolve the same way.
+        """
+        if tensor is None:
+            tensor = getattr(self, "dfu", self.dose_per_angstrom)
+        n = tensor.shape[0] if tensor.ndim else 1
+        device = tensor.device if tensor.ndim else None
+        if n == len(self.quaternions):
+            return torch.full((batch,), i, dtype=torch.long, device=device)
+        if n == 1:
+            return torch.zeros(batch, dtype=torch.long, device=device)
+        return idx if isinstance(idx, torch.Tensor) else torch.tensor([idx])
+
     def generate_tilt_series(
         self, idx: int | torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -530,7 +557,14 @@ class TiltSeriesGenerator(MicrographGenerator):
                 volume_scaled, theta_matrix, slice_batchsize=self.slice_batchsize
             )
 
-            ctf_batch = self._ctf_batch(idx)
+            # Per-tilt parameters (defocus, dose, pre-exposure, coincidence
+            # radius) are stored one entry per TILT, so they are selected by
+            # the tilt index, not by ``idx``, which indexes the volume batch.
+            # Until 2026-09-08 they were indexed by ``idx`` here, so every
+            # tilt silently reused tilt 0's defocus and dose and the dose
+            # envelope saw a pre-exposure of zero on every tilt.
+            tilt_idx = self._tilt_index(i, idx, B)
+            ctf_batch = self._ctf_batch(tilt_idx)
             if self.scattering_model not in ["projection", "ctf"]:
                 ctf_batch = tilt_geometry.shift_ctf_defocus_for_tilt(
                     ctf_batch,
@@ -542,8 +576,12 @@ class TiltSeriesGenerator(MicrographGenerator):
 
             detector_waves = self._aberrate(exitwave, ctf_batch)
 
-            dose_batch = self.dose_per_angstrom[idx]
-            cr_batch = self.coincidence_radius[idx]
+            dose_batch = self.dose_per_angstrom[
+                self._tilt_index(i, idx, B, self.dose_per_angstrom)
+            ]
+            cr_batch = self.coincidence_radius[
+                self._tilt_index(i, idx, B, self.coincidence_radius)
+            ]
             if self.anisomag is None:
                 image = self.detector(detector_waves, dose_batch, cr_batch, nxy=None)
             else:

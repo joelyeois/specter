@@ -674,9 +674,9 @@ def test_tilt_series_generator_potential_scale_changes_output(ctf_params):
         voltage=300.0,
         dose_per_angstrom=2.0,
         angles=angles,
-        noise_model=None,
-        scattering_model="projection",
-        tilt_axis="y",
+        camera=Camera(noise_model=None),
+        propagation=Propagation(scattering_model="projection"),
+        tilt=TiltGeometry(tilt_axis="y"),
         verbose=False,
         progressbars=False,
     )
@@ -743,9 +743,9 @@ def test_tilt_series_generator_edge_margin_pads_beyond_geometric_minimum(ctf_par
         voltage=300.0,
         dose_per_angstrom=2.0,
         angles=angles,
-        noise_model=None,
-        scattering_model="projection",
-        tilt_axis="y",
+        camera=Camera(noise_model=None),
+        propagation=Propagation(scattering_model="projection"),
+        tilt=TiltGeometry(tilt_axis="y"),
         verbose=False,
         progressbars=False,
     )
@@ -794,9 +794,8 @@ def test_tilt_series_generator_pad_fft_multislice_shapes_match(ctf_params):
         ctf_params=ctf_params,
         voltage=300.0,
         dose_per_angstrom=2.0,
-        noise_model=None,
-        scattering_model="multislice",
-        tilt_axis="y",
+        camera=Camera(noise_model=None),
+        tilt=TiltGeometry(tilt_axis="y"),
         verbose=False,
         progressbars=False,
     )
@@ -805,7 +804,7 @@ def test_tilt_series_generator_pad_fft_multislice_shapes_match(ctf_params):
         gen = TiltSeriesGenerator(
             **kwargs,
             angles=torch.tensor([angle]),
-            propagation=Propagation(pad_fft=True),
+            propagation=Propagation(scattering_model="multislice", pad_fft=True),
         )
         assert gen.iterative_scattering.nxy == gen.nxy == gen.pad_nxy
 
@@ -832,9 +831,8 @@ def test_tilt_series_generator_pad_fft_changes_output_under_tilt(ctf_params):
         ctf_params=ctf_params,
         voltage=300.0,
         dose_per_angstrom=2.0,
-        noise_model=None,
-        scattering_model="multislice",
-        tilt_axis="y",
+        camera=Camera(noise_model=None),
+        tilt=TiltGeometry(tilt_axis="y"),
         verbose=False,
         progressbars=False,
     )
@@ -842,12 +840,12 @@ def test_tilt_series_generator_pad_fft_changes_output_under_tilt(ctf_params):
     gen_base = TiltSeriesGenerator(
         **kwargs,
         angles=torch.tensor([45.0]),
-        propagation=Propagation(pad_fft=False),
+        propagation=Propagation(scattering_model="multislice", pad_fft=False),
     )
     gen_pad = TiltSeriesGenerator(
         **kwargs,
         angles=torch.tensor([45.0]),
-        propagation=Propagation(pad_fft=True),
+        propagation=Propagation(scattering_model="multislice", pad_fft=True),
     )
     _, exitwaves_base, _ = gen_base.generate_tilt_series(torch.tensor([0]))
     _, exitwaves_pad, _ = gen_pad.generate_tilt_series(torch.tensor([0]))
@@ -921,9 +919,9 @@ def test_tilt_series_generator_falls_back_to_windowed_when_volume_does_not_fit(
         voltage=300.0,
         dose_per_angstrom=2.0,
         angles=torch.tensor([30.0]),
-        scattering_model="multislice",
-        noise_model=None,
-        tilt_axis="y",
+        propagation=Propagation(scattering_model="multislice"),
+        camera=Camera(noise_model=None),
+        tilt=TiltGeometry(tilt_axis="y"),
         verbose=False,
         progressbars=False,
     )

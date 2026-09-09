@@ -50,6 +50,7 @@ import multiprocessing
 import queue
 import time
 from pathlib import Path
+from collections.abc import Sequence
 from typing import Any, Literal, cast
 
 from specter.config import (
@@ -263,12 +264,12 @@ def _run_single_halfset(
 
 
 def _collect_halfset_result(
-    proc: Any,
+    procs: Sequence[Any],
     result_queue: multiprocessing.Queue[tuple[str, dict[str, Any]]],
     poll_seconds: float = 2.0,
 ) -> tuple[str, dict[str, Any]] | None:
     """
-    Wait for ``proc`` to put its result, or for it to exit without one.
+    Take one result off the queue, or give up once every worker has exited.
 
     Polls rather than a single blocking ``get()``: a worker that crashes
     before reaching ``result_queue.put`` (an exception inside `_fit`, an
@@ -277,28 +278,36 @@ def _collect_halfset_result(
     block past that -- the caller's ``p.join()`` + exitcode check is what
     actually reports the failure, once this returns.
 
+    ``procs`` is *every* worker still owed a result, not the one whose result
+    this call expects. One queue serves both halfsets and either may finish
+    first, so a result is only ever missing once they have all exited. Waiting
+    on a single process instead dropped a live worker's summary whenever it
+    finished second: its sibling's result satisfied the first call, and the
+    second call saw the sibling already dead and gave up while halfset A was
+    still training.
+
     Parameters
     ----------
-    proc : multiprocessing.Process
-        The worker to wait on.
+    procs : sequence of multiprocessing.Process
+        The workers that may still put a result.
     result_queue : multiprocessing.Queue
-        Queue the worker puts its ``(halfset, results_summary)`` on.
+        Queue each worker puts its ``(halfset, results_summary)`` on.
     poll_seconds : float
-        How long each ``get()`` waits before checking whether ``proc`` has
-        exited. A real run is hours long, so this only bounds how quickly a
-        *crash* is noticed, not the happy path.
+        How long each ``get()`` waits before re-checking liveness. A real run
+        is hours long, so this only bounds how quickly a *crash* is noticed,
+        not the happy path.
 
     Returns
     -------
     tuple or None
-        ``(halfset, results_summary)``, or ``None`` if the worker exited
-        without ever putting one.
+        ``(halfset, results_summary)``, or ``None`` once every worker has
+        exited without one left to collect.
     """
     while True:
         try:
             return result_queue.get(timeout=poll_seconds)
         except queue.Empty:
-            if proc.is_alive():
+            if any(proc.is_alive() for proc in procs):
                 continue
             # The result may have landed in the gap between the liveness
             # check above and here; one last non-blocking look before giving up.
@@ -369,8 +378,8 @@ def _run_both_halfsets(
         ]
         for p in procs:
             p.start()
-        for p in procs:
-            result = _collect_halfset_result(p, result_queue)
+        for _ in procs:
+            result = _collect_halfset_result(procs, result_queue)
             if result is not None:
                 results[result[0]] = result[1]
         for p in procs:
@@ -385,7 +394,7 @@ def _run_both_halfsets(
                 target=_run_single_halfset, args=(half_config, run_dir, result_queue)
             )
             p.start()
-            result = _collect_halfset_result(p, result_queue)
+            result = _collect_halfset_result([p], result_queue)
             if result is not None:
                 results[result[0]] = result[1]
             p.join()

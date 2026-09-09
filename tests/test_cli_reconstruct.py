@@ -12,6 +12,7 @@ from __future__ import annotations
 import inspect
 import json
 import subprocess as proc
+import queue
 import sys
 from dataclasses import fields
 from pathlib import Path
@@ -29,6 +30,7 @@ from specter.config import (
 from specter.ghostbuster import Ghostbuster
 from specter.io import _cryosparc
 from specter.pipelines._reconstruct import (
+    _collect_halfset_result,
     _ghostbuster_kwargs,
     run_reconstruction,
 )
@@ -64,6 +66,11 @@ class _FakeDataset(dict):
                 "ctf/tetra_A": np.zeros((n, 4), dtype=dtype),
                 "alignments3D/alpha": np.ones(n, dtype=dtype),
                 "ctf/anisomag": np.zeros((n, 4), dtype=dtype),
+                # A well-formed pair: the stack is in the .cs file's row order,
+                # and blob/idx says so. Ghostbuster checks rather than assumes.
+                "uid": np.arange(n, dtype=np.uint64),
+                "blob/path": np.array(["particles.mrc"] * n),
+                "blob/idx": np.arange(n),
             }
         )
 
@@ -118,6 +125,10 @@ def real_particle_data(tmp_path: Path) -> tuple[Path, Path]:
             "ctf/tetra_A": np.zeros((n, 4), dtype=dtype),
             "alignments3D/alpha": np.ones(n, dtype=dtype),
             "ctf/anisomag": np.zeros((n, 4), dtype=dtype),
+            # A well-formed pair: the stack is in this file's row order, which is
+            # what blob/idx records.
+            "blob/path": np.array(["particles.mrc"] * n),
+            "blob/idx": np.arange(n),
         }
     )
     cs_file = tmp_path / "particles.cs"
@@ -652,3 +663,74 @@ dose_per_angstrom = 40.0
     assert result.returncode != 0
     assert "cs_file" in result.stderr
     assert "no such file" in result.stderr
+
+
+# ---------------------------------------------------------------------------
+# Gold-standard halfset result collection
+# ---------------------------------------------------------------------------
+
+
+class _Proc:
+    def __init__(self, alive: bool) -> None:
+        self._alive = alive
+
+    def is_alive(self) -> bool:
+        return self._alive
+
+
+class _EmptyThenResult:
+    """A queue that is empty on the first poll and holds ``item`` on the second."""
+
+    def __init__(self, item: tuple[str, dict[str, Any]]) -> None:
+        self._item = item
+        self._polls = 0
+
+    def get(self, timeout: float | None = None) -> tuple[str, dict[str, Any]]:
+        self._polls += 1
+        if self._polls == 1:
+            raise queue.Empty
+        return self._item
+
+    def get_nowait(self) -> tuple[str, dict[str, Any]]:
+        raise queue.Empty
+
+
+def test_collect_waits_for_a_live_worker_after_its_sibling_finished() -> None:
+    """One queue serves both halfsets, so the first result to arrive may be
+    either. Whether to keep waiting is decided by *every* worker's liveness,
+    not by one of them: a gold run whose halfset A finished second used to
+    lose its entire summary, because A's sibling had already exited and the
+    collector read that as nothing more being owed."""
+    still_training, already_done = _Proc(alive=True), _Proc(alive=False)
+    q = _EmptyThenResult(("A", {"loss": 2.0}))
+
+    # The first poll comes up empty while halfset A is still training. Asking
+    # only `already_done` would give up here and return None.
+    result = _collect_halfset_result(
+        [still_training, already_done], q, poll_seconds=0.01
+    )
+
+    assert result == ("A", {"loss": 2.0})
+
+
+def test_collect_returns_each_queued_result_once() -> None:
+    """Two workers, two results, whichever order they land in."""
+    q: queue.Queue[tuple[str, dict[str, Any]]] = queue.Queue()
+    procs = [_Proc(alive=False), _Proc(alive=False)]
+    q.put(("B", {"loss": 1.0}))
+    q.put(("A", {"loss": 2.0}))
+
+    collected = dict(
+        _collect_halfset_result(procs, q, poll_seconds=0.01) for _ in procs
+    )
+
+    assert collected == {"A": {"loss": 2.0}, "B": {"loss": 1.0}}
+
+
+def test_collect_gives_up_once_every_worker_has_exited() -> None:
+    """A worker killed before it ever puts (OOM, an exception in _fit) leaves
+    nothing to collect; return None so the caller's exitcode check reports it."""
+    q: queue.Queue[tuple[str, dict[str, Any]]] = queue.Queue()
+    procs = [_Proc(alive=False), _Proc(alive=False)]
+
+    assert _collect_halfset_result(procs, q, poll_seconds=0.01) is None

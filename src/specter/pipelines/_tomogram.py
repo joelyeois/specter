@@ -769,7 +769,13 @@ def _run_single_tomogram(config: TomogramConfig) -> None:
             console.print(f"  [green]✓[/green] {path}")
 
         assert gen.instance_labels is not None
+        # Each int32 label volume is released as soon as its uint16 host copy
+        # exists, rather than all three staying live until the function
+        # returns. At the 2 A production grid that is 27 GiB dropped per
+        # volume against the 13.5 GiB copy that replaces it, on the one host
+        # array the writer still needs.
         _write_label_mrc("_protein_labels.mrc", gen.instance_labels, "uint16")
+        gen.instance_labels = None
 
         if config.membrane:
             assert gen.membrane_labels is not None
@@ -777,9 +783,12 @@ def _run_single_tomogram(config: TomogramConfig) -> None:
 
             assert gen.regions is not None
             regions_volume = torch.zeros_like(gen.membrane_labels)
+            gen.membrane_labels = None
             regions_volume[gen.regions["shell"]] = 1
             regions_volume[gen.regions["lumen"]] = 2
+            gen.regions = None
             _write_label_mrc("_regions.mrc", regions_volume, "uint16")
+            del regions_volume
 
     elapsed = time.perf_counter() - t_start
     console.print(f"\n[bold]Total time:[/bold] {format_elapsed(elapsed)}")

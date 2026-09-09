@@ -1002,7 +1002,10 @@ class TomogramSpecimenGenerator:
                             .long()
                             .clamp(0, shape_zyx[2] - 1)
                         )
-                        in_carbon = carbon_mask.cpu()[iz, iy, ix]
+                        cm_dev = carbon_mask.device
+                        in_carbon = carbon_mask[
+                            iz.to(cm_dev), iy.to(cm_dev), ix.to(cm_dev)
+                        ].cpu()
                         n_dropped_tm = int(in_carbon.sum())
                         if n_dropped_tm:
                             warnings.warn(
@@ -1837,7 +1840,8 @@ class TomogramSpecimenGenerator:
         ix = (pos[:, 0] / voxel_size).long().clamp(0, nx - 1)
         iy = (pos[:, 1] / voxel_size).long().clamp(0, ny - 1)
         iz = (pos[:, 2] / voxel_size).long().clamp(0, nz - 1)
-        in_carbon = carbon_mask.cpu()[iz, iy, ix]
+        cm_dev = carbon_mask.device
+        in_carbon = carbon_mask[iz.to(cm_dev), iy.to(cm_dev), ix.to(cm_dev)].cpu()
         n_dropped = int(in_carbon.sum())
         if n_dropped:
             warnings.warn(
@@ -2674,14 +2678,21 @@ class TomogramSpecimenGenerator:
                         labels=instance_labels,
                     )
 
+                # One device->host transfer per array, not one per
+                # instance: a per-instance `.cpu()` is a separate copy AND
+                # an implicit sync each, ~31 us apiece, so a 21k-instance
+                # filler pool spent ~0.7 s here doing 43k of them.
+                coords_host = species_coords.detach().cpu()
+                R_host = R.detach().cpu()
+                ids_host = instance_ids.cpu().tolist()
                 for i in range(n_instances):
                     self.placements.append(
                         TomogramPlacement(
                             species_id=spec.pdb_source,
                             location=location,
-                            position_xyz=species_coords[i].detach().cpu(),
-                            rotation_matrix=R[i].detach().cpu(),
-                            instance_id=int(instance_ids[i]),
+                            position_xyz=coords_host[i],
+                            rotation_matrix=R_host[i],
+                            instance_id=ids_host[i],
                             role=role,
                         )
                     )

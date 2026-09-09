@@ -7,6 +7,8 @@ kernel it uses.
 
 from __future__ import annotations
 
+import contextlib
+
 import math
 from typing import TYPE_CHECKING, Literal
 
@@ -108,10 +110,14 @@ def insert_particles_into_micrograph(
     cy_center = Y // 2
     cx_center = X // 2
 
-    # Per particle: three `.item()`s, a bounds clip and one slice add. Under
-    # the default thread pool of a many-core host the small ops dominate;
-    # see cpu_threads.
-    with limited_cpu_threads():
+    # Per particle: a bounds clip and one slice add. Under the default
+    # thread pool of a many-core host the small CPU ops dominate; see
+    # cpu_threads. A CUDA canvas has no CPU tensor op in the loop at all,
+    # so the cap there only pays `torch.set_num_threads`' pool-resize cost
+    # (3.15 ms per down/up pair at a 64-thread pool on this host) once per
+    # call -- 337 calls for one 21.5k-instance tomogram species pool.
+    cap = contextlib.nullcontext() if micrograph.is_cuda else limited_cpu_threads()
+    with cap:
         _insert_all(
             volumes,
             positions_int,
@@ -135,11 +141,15 @@ def _insert_all(
     cz_center, cy_center, cx_center = center
     Zp, Yp, Xp = part_shape
     Z, Y, X = micro_shape
-    for i in range(len(positions_int)):
+    # One host transfer for the whole chunk rather than three `.item()`s per
+    # particle: on a CUDA tensor each of those is a separate device
+    # synchronisation, and the loop does nothing else that needs one.
+    positions_list = positions_int.cpu().tolist()
+    for i, (px_i, py_i, pz_i) in enumerate(positions_list):
         # Convert centered coords to array indices
-        cx_index = cx_center + int(positions_int[i, 0].item())
-        cy_index = cy_center + int(positions_int[i, 1].item())
-        cz_index = cz_center + int(positions_int[i, 2].item())
+        cx_index = cx_center + px_i
+        cy_index = cy_center + py_i
+        cz_index = cz_center + pz_i
 
         bounds = clip_insert_bounds(
             (cz_index, cy_index, cx_index), (Zp, Yp, Xp), (Z, Y, X)

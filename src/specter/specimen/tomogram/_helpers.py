@@ -65,10 +65,13 @@ def _insert_instance_labels(
     positions_int = (positions / pixel_size).round().long()
     cz_center, cy_center, cx_center = Z // 2, Y // 2, X // 2
 
-    for i in range(N):
-        cx_index = cx_center + int(positions_int[i, 0].item())
-        cy_index = cy_center + int(positions_int[i, 1].item())
-        cz_index = cz_center + int(positions_int[i, 2].item())
+    # One host transfer per chunk, not three device syncs per instance --
+    # same reasoning as `crowding._insert_all`'s own loop.
+    positions_list = positions_int.cpu().tolist()
+    for i, (px_i, py_i, pz_i) in enumerate(positions_list):
+        cx_index = cx_center + px_i
+        cy_index = cy_center + py_i
+        cz_index = cz_center + pz_i
         bounds = clip_insert_bounds(
             (cz_index, cy_index, cx_index), (Zp, Yp, Xp), (Z, Y, X)
         )

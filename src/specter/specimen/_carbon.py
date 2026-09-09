@@ -356,6 +356,7 @@ def _deposit_splat(
     weight: float,
     target_shape: tuple[int, int, int],
     voxel_size: float,
+    out: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """
     Trilinear splat of a MIP-calibrated flat weight (see module docstring).
@@ -387,15 +388,25 @@ def _deposit_splat(
         (nz, ny, nx) output grid size.
     voxel_size : float
         Voxel size, Å.
+    out : torch.Tensor, optional
+        Existing ``(nz, ny, nx)`` float32 volume to accumulate into, so a
+        caller depositing in chunks does not pay a full-size zero buffer
+        and a full-size add per chunk. At the 2 Å production grid that
+        buffer is 25.15 GiB, allocated once per `_SAMPLE_CHUNK` of atoms.
+        Default None: allocate and return a fresh volume, the original
+        behaviour.
 
     Returns
     -------
     torch.Tensor
-        (nz, ny, nx) volume, Volts.
+        (nz, ny, nx) volume, Volts -- `out` itself when one was given.
     """
     nz, ny, nx = target_shape
     device = coords.device
-    out = torch.zeros(nz * ny * nx, dtype=torch.float32, device=device)
+    if out is None:
+        out = torch.zeros(nz * ny * nx, dtype=torch.float32, device=device)
+    else:
+        out = out.view(-1)
 
     center = torch.tensor(
         [nx / 2.0, ny / 2.0, nz / 2.0], dtype=coords.dtype, device=device
@@ -581,7 +592,12 @@ class CarbonFilmGenerator:
         for start in range(0, n_atoms, _SAMPLE_CHUNK):
             m = min(_SAMPLE_CHUNK, n_atoms - start)
             coords = _sample_in_tets(shape, m, self.gen)
-            density += _deposit_splat(coords, weight, target_shape, self.voxel_size)
+            # Scatter straight into the accumulator. `density += _deposit_
+            # splat(...)` allocated a whole second volume per chunk and
+            # then read both back to add them -- 1.61 GiB a chunk at the
+            # 5 Å default and 25.15 GiB at the 2 Å production grid, for a
+            # deposition that is a scatter-add either way.
+            _deposit_splat(coords, weight, target_shape, self.voxel_size, out=density)
         return CarbonFilmInstance(density=density)
 
 

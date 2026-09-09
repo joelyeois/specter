@@ -39,7 +39,7 @@ dose_per_angstrom = 40.0
 ```
 
 `cs_file` supplies poses, CTF parameters, and per-particle scale; `mrc_file`
-is the particle stack it indexes into. `dose_per_angstrom` sets the Poisson
+is the particle stack it pairs with. `dose_per_angstrom` sets the Poisson
 statistics that weight the loss, so match it to the dataset's real fluence,
 not a placeholder. Reconstruction currently reads CryoSPARC `.cs` only:
 there is no RELION `.star` equivalent yet, unlike the [CryoSPARC dataset
@@ -47,11 +47,75 @@ twin](dataset-twin.md) path on the forward side (see [Generate a particle
 stack](particle-stack.md#example-matching-empiar-11377) for a worked
 `.cs`-driven example).
 
+### Pairing rows to images
+
+Row *i* of the `.cs` file is slice *i* of the stack. That is the contract,
+and it is the one that survives a dataset being copied between machines,
+where a CryoSPARC project's own layout does not.
+
+CryoSPARC does not write its stacks that way. It records where each row's
+image really is in two columns, `blob/path` and `blob/idx`, and a Restack
+Particles job writes its output in the order it reads its inputs rather than
+in the order of the rows it emits, leaving `blob/idx` a permutation. Reading
+such a stack by row pairs every pose with a different particle's image. The
+failure is silent: the images are real particles, the poses are real poses,
+the loss falls, every per-image and rotationally averaged diagnostic looks
+healthy, and the map is wrong.
+
+So the contract is checked rather than assumed. When the `.cs` file carries
+`blob/idx`, or a sibling `.cs` of the same particle group does, and it says
+the stack is not in row order, the run is refused:
+
+```
+particles.cs says its images are not in row order: row 0 is slice 370 of
+batch_0_restacked.mrc, not slice 0.
+```
+
+When there is nothing to check against, which is the ordinary state of a
+passthrough file separated from its siblings, row order is still the
+contract; it simply cannot be verified.
+
+Two ways past a refusal. Put the dataset into row order once, with
+`specter.io.write_row_ordered_csfile`:
+
+```python
+from specter.io import write_row_ordered_csfile
+
+write_row_ordered_csfile("J398/J398_passthrough_particles.cs", "j398.cs")
+```
+
+That **reorders the rows**, not the images: the stack stays where CryoSPARC
+wrote it, and `j398.cs` comes out sorted into its slice order, with each pose
+carried onto its own particle's row and `blob/idx` equal to the row number. On
+a 1000-particle set that is a 628 KB file written in under a second, against
+774 MB to rewrite the stack. It also merges the poses and the image addresses
+into one file, which a CryoSPARC particle group keeps separate.
+
+Reordering rows needs them to account for every slice of one stack, since row
+*i* can only be slice *i* if slice *i* belongs to the set at all. Passing
+`stack_out` writes a new stack in the metadata's row order instead, which
+handles a subset or several source stacks and produces a pair that reads on a
+machine the CryoSPARC project is not on:
+
+```python
+write_row_ordered_csfile(
+    "J398/J398_passthrough_particles.cs", "j398.cs", stack_out="j398.mrcs"
+)
+```
+
+Either form has to run where `blob/path` still resolves and every `.cs` of the
+particle group is present. Or skip it and read the CryoSPARC stack in place,
+unchanged:
+
+```bash
+specter reconstruct particle ... --address_by_blob_idx true
+```
+
 Before committing to a full run, exercise every code path on a fraction of
 the cost:
 
 ```bash
-specter reconstruct particle --config configs/reconstruct.toml --test_run
+specter reconstruct particle --config configs/reconstruct.toml --test_run true
 ```
 
 `--test_run` fits one epoch on `--bin_factor`-binned images (default 8) and

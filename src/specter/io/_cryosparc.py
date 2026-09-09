@@ -5,13 +5,16 @@ file.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Literal
 
+import numpy as np
 import roma
 import torch
 from cryosparc.dataset import Dataset
 from rich.console import Console
 
+from .. import logger
 from ..constants import energy_to_wavelength
 from ._common import _select_particles
 
@@ -281,3 +284,93 @@ def extract_parameters_from_csfile(
         indices,
         halfset_labels,
     )
+
+
+def _blob_columns(dataset: object) -> tuple[np.ndarray, np.ndarray] | None:
+    """``(blob/path, blob/idx)`` of a loaded dataset, or None if it carries no images."""
+    if "blob/idx" not in dataset or "blob/path" not in dataset:  # type: ignore[operator]
+        return None
+    return (
+        np.asarray(dataset["blob/path"]).astype(str),  # type: ignore[index]
+        np.asarray(dataset["blob/idx"]).astype(np.int64),  # type: ignore[index]
+    )
+
+
+def _row_order(uid: np.ndarray, other_uid: np.ndarray) -> np.ndarray | None:
+    """Index array reordering ``other_uid``'s rows onto ``uid``'s, or None if they differ.
+
+    Sibling files of one particle group carry the same particles, but nothing
+    guarantees the same row order, so they are matched on ``uid`` rather than
+    position. Returning None on any mismatch is what keeps an unrelated ``.cs``
+    sitting in the same directory from being paired in silently.
+    """
+    if len(uid) != len(other_uid):
+        return None
+    ascending = np.argsort(other_uid)
+    position = np.searchsorted(other_uid[ascending], uid)
+    if np.any(position >= len(ascending)):
+        return None
+    order = ascending[position]
+    return order if np.array_equal(other_uid[order], uid) else None
+
+
+def particle_stack_references(
+    csfile_path: str | Path,
+) -> tuple[np.ndarray, np.ndarray] | None:
+    """
+    Per-row ``(blob/path, blob/idx)`` for the particles a ``.cs`` file describes.
+
+    A CryoSPARC particle image is addressed by ``blob/path`` and ``blob/idx``,
+    never by its row number. A restack job writes its output stack in the order
+    it read its inputs, which is not the order of the rows it emits: on a
+    1000-particle restack of the CryoSPARC tutorial set, row ``i`` refers to
+    slice ``(i + 370) % 1000``. Reading the stack sequentially instead pairs
+    every pose with a different particle's image, and no rotationally averaged
+    statistic shows it -- only a matched-index correlation does
+    (:func:`specter.match.matched_index_correlation`).
+
+    Poses and blobs routinely live in different files of the same particle
+    group: a restack job puts the alignments in ``*_passthrough_particles.cs``
+    and the images in ``restacked_particles.cs``. When ``csfile_path`` carries
+    no blob columns of its own, sibling ``.cs`` files in the same directory are
+    searched for one holding the same particles, matched on ``uid``.
+
+    Parameters
+    ----------
+    csfile_path : str or Path
+        Path of the ``.cs`` file.
+
+    Returns
+    -------
+    tuple of numpy.ndarray, or None
+        ``(paths, indices)`` in the file's own row order, where ``paths`` are
+        the project-relative stack paths and ``indices`` the slice of each
+        stack. None when neither this file nor any sibling carries images.
+    """
+    csfile_path = Path(csfile_path)
+    dataset = Dataset.load(str(csfile_path))
+    blobs = _blob_columns(dataset)
+    if blobs is not None:
+        return blobs
+    if "uid" not in dataset:
+        return None
+
+    uid = np.asarray(dataset["uid"])
+    for sibling in sorted(csfile_path.parent.glob("*.cs")):
+        if sibling.resolve() == csfile_path.resolve():
+            continue
+        try:
+            other = Dataset.load(str(sibling))
+        except Exception:  # noqa: BLE001 - an unreadable neighbour is not our problem
+            continue
+        blobs = _blob_columns(other)
+        if blobs is None or "uid" not in other:
+            continue
+        order = _row_order(uid, np.asarray(other["uid"]))
+        if order is None:
+            continue
+        logger.info(
+            "particle images addressed by %s (blob/path, blob/idx)", sibling.name
+        )
+        return blobs[0][order], blobs[1][order]
+    return None

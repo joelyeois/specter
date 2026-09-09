@@ -138,3 +138,106 @@ def test_tetrafoil_extraction_matches_cryosparc_formula(
     assert torch.allclose(
         ctf_params["tetrafoil4"], torch.full((6,), expected4.item()), atol=1e-6
     )
+
+
+# ---------------------------------------------------------------------------
+# blob/path + blob/idx: how a .cs row addresses its image
+# ---------------------------------------------------------------------------
+
+
+def _stub_datasets(tables: dict[str, dict]) -> type:
+    """A `Dataset` stand-in serving one table per file name."""
+
+    class _Stub(dict):
+        @classmethod
+        def load(cls, csfile_path: str) -> "_Stub":
+            from pathlib import Path
+
+            return cls(tables[Path(csfile_path).name])
+
+    return _Stub
+
+
+def test_particle_stack_references_reads_blob_columns(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """A .cs row is addressed by blob/idx, which is not its row number: a
+    restack job writes its stack in the order it read its inputs."""
+    rotated = np.array([2, 3, 0, 1], dtype=np.int64)
+    monkeypatch.setattr(
+        _cryosparc,
+        "Dataset",
+        _stub_datasets(
+            {
+                "restacked.cs": {
+                    "uid": np.arange(4, dtype=np.uint64),
+                    "blob/path": np.array(["J1/restack/batch_0.mrc"] * 4),
+                    "blob/idx": rotated,
+                }
+            }
+        ),
+    )
+    (tmp_path / "restacked.cs").touch()
+
+    paths, indices = _cryosparc.particle_stack_references(tmp_path / "restacked.cs")
+
+    assert np.array_equal(indices, rotated)
+    assert set(paths) == {"J1/restack/batch_0.mrc"}
+
+
+def test_particle_stack_references_takes_blobs_from_a_sibling_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """A restack job splits one particle group across two files: the poses go
+    to *_passthrough_particles.cs and the images to restacked_particles.cs. The
+    sibling is matched on uid, not on row order."""
+    uid = np.array([10, 11, 12, 13], dtype=np.uint64)
+    monkeypatch.setattr(
+        _cryosparc,
+        "Dataset",
+        _stub_datasets(
+            {
+                "J_passthrough_particles.cs": {"uid": uid},
+                # same particles, reversed rows, so position cannot stand in for uid
+                "restacked_particles.cs": {
+                    "uid": uid[::-1].copy(),
+                    "blob/path": np.array(["J/restack/batch_0.mrc"] * 4),
+                    "blob/idx": np.array([70, 71, 72, 73], dtype=np.int64),
+                },
+            }
+        ),
+    )
+    for name in ("J_passthrough_particles.cs", "restacked_particles.cs"):
+        (tmp_path / name).touch()
+
+    _, indices = _cryosparc.particle_stack_references(
+        tmp_path / "J_passthrough_particles.cs"
+    )
+
+    # uid 10 is the sibling's last row (blob/idx 73), uid 13 its first (70)
+    assert np.array_equal(indices, np.array([73, 72, 71, 70]))
+
+
+def test_particle_stack_references_ignores_an_unrelated_sibling(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """A .cs file for different particles sharing the directory is not paired in;
+    silently borrowing its blob/idx would mispair every pose."""
+    monkeypatch.setattr(
+        _cryosparc,
+        "Dataset",
+        _stub_datasets(
+            {
+                "poses.cs": {"uid": np.array([10, 11, 12, 13], dtype=np.uint64)},
+                "other_particles.cs": {
+                    "uid": np.array([90, 91, 92, 93], dtype=np.uint64),
+                    "blob/path": np.array(["J/other.mrc"] * 4),
+                    "blob/idx": np.arange(4, dtype=np.int64),
+                },
+            }
+        ),
+    )
+    for name in ("poses.cs", "other_particles.cs"):
+        (tmp_path / name).touch()
+
+    assert _cryosparc.particle_stack_references(tmp_path / "poses.cs") is None

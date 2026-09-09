@@ -37,8 +37,16 @@ class ReconstructionConfig:
         ),
         check="existing_file",
     )
+    # The particle stack, paired with the .cs file by row: row i of the .cs is
+    # slice i of this stack. Checked against blob/idx rather than assumed -- a
+    # CryoSPARC restack does not write its stack in row order, and reading one as
+    # if it did pairs every pose with another particle's image, silently.
     mrc_file: str = setting(
-        help="Particle stack (.mrc/.mrcs) the .cs file indexes into.",
+        help=(
+            "Particle stack (.mrc/.mrcs) in the .cs file's row order: row i of "
+            "the .cs is slice i of the stack. Refused when the .cs file's own "
+            "blob/idx says otherwise."
+        ),
         check="existing_file",
     )
     # Total fluence per image, e-/A^2. Sets the Poisson statistics the loss is
@@ -50,6 +58,17 @@ class ReconstructionConfig:
             "real value."
         ),
         check="positive",
+    )
+    # Read a stack that is NOT in row order where the .cs file says the images
+    # are. The escape hatch for pointing straight at a CryoSPARC restack without
+    # exporting a row-ordered copy of it first.
+    address_by_blob_idx: bool = setting(
+        False,
+        help=(
+            "Read mrc_file at the .cs file's blob/idx instead of by row, for a "
+            "stack that is not in row order (a CryoSPARC restack). Otherwise such "
+            "a stack is refused rather than read wrong."
+        ),
     )
     # Which gold-standard half-set to reconstruct. "gold" (the default)
     # reconstructs A and B and computes the halfmap FSC between them; "A"/"B"

@@ -211,3 +211,141 @@ def test_tomogram_ghostbuster_requires_angles_or_quaternions(
             voltage=300.0,
             ctf_params=tomo_ctf_params,
         )
+
+
+# ---------------------------------------------------------------------------
+# Row order is the contract, and blob/idx is what checks it
+# ---------------------------------------------------------------------------
+
+
+def _dataset_with_blobs(
+    blob_idx: list[int], stack_name: str = "particles.mrcs"
+) -> type:
+    """_FakeDataset whose stack sits at ``blob_idx`` rather than in row order."""
+
+    class _WithBlobs(_FakeDataset):  # type: ignore[valid-type, misc]
+        @classmethod
+        def load(cls, csfile_path: str) -> "_WithBlobs":
+            ds = super().load(csfile_path)
+            ds["blob/path"] = np.array([f"J1/restack/{stack_name}"] * N_PARTICLES)
+            ds["blob/idx"] = np.asarray(blob_idx, dtype=np.int64)
+            return ds
+
+    return _WithBlobs
+
+
+def _preprocessed(raw: torch.Tensor) -> torch.Tensor:
+    dose_per_area = 2.0 * PIXEL_SIZE**2
+    return dose_per_area**0.5 * -raw + dose_per_area
+
+
+def test_ghostbuster_pairs_row_i_with_slice_i(mrc_file: Path) -> None:
+    """The contract: row i of the .cs is slice i of the stack. The default
+    fixture is well-formed, so nothing is reordered."""
+    gb = Ghostbuster(
+        cs_file="fake.cs",
+        mrc_file=str(mrc_file),
+        dose_per_angstrom=2.0,
+        propagation=Propagation(scattering_model="projection"),
+    )
+
+    with mrcfile.open(str(mrc_file)) as mrc:
+        raw = torch.as_tensor(mrc.data.copy())
+    assert torch.allclose(gb._images, _preprocessed(raw))
+
+
+def test_ghostbuster_refuses_a_stack_the_cs_file_says_is_not_in_row_order(
+    monkeypatch: pytest.MonkeyPatch, mrc_file: Path
+) -> None:
+    """A Restack Particles job writes its stack in the order it reads its
+    inputs, so row i is some other slice. Reading it by row pairs every pose
+    with another particle's image, and says nothing: the images are real
+    particles, the loss falls, the map is mush. blob/idx is what makes that
+    detectable, so it is checked before the stack is trusted."""
+    monkeypatch.setattr(_cryosparc, "Dataset", _dataset_with_blobs([2, 3, 0, 1]))
+
+    with pytest.raises(ValueError, match="not in row order"):
+        Ghostbuster(
+            cs_file="fake.cs",
+            mrc_file=str(mrc_file),
+            dose_per_angstrom=2.0,
+            propagation=Propagation(scattering_model="projection"),
+        )
+
+
+def test_ghostbuster_reads_such_a_stack_in_place_when_asked(
+    monkeypatch: pytest.MonkeyPatch, mrc_file: Path
+) -> None:
+    """address_by_blob_idx points straight at a restack without exporting a
+    row-ordered copy of it first."""
+    rotated = [2, 3, 0, 1]
+    monkeypatch.setattr(_cryosparc, "Dataset", _dataset_with_blobs(rotated))
+
+    gb = Ghostbuster(
+        cs_file="fake.cs",
+        mrc_file=str(mrc_file),
+        dose_per_angstrom=2.0,
+        address_by_blob_idx=True,
+        propagation=Propagation(scattering_model="projection"),
+    )
+
+    with mrcfile.open(str(mrc_file)) as mrc:
+        raw = torch.as_tensor(mrc.data.copy())
+    assert torch.allclose(gb._images, _preprocessed(raw[rotated]))
+
+
+def test_ghostbuster_trusts_row_order_when_there_is_nothing_to_check(
+    monkeypatch: pytest.MonkeyPatch, mrc_file: Path
+) -> None:
+    """A passthrough file separated from its siblings carries no blob columns,
+    which is the ordinary state of a dataset copied off the machine that made
+    it. Row order is still the contract; it just cannot be verified."""
+
+    class _NoBlobs(_FakeDataset):  # type: ignore[valid-type, misc]
+        @classmethod
+        def load(cls, csfile_path: str) -> "_NoBlobs":
+            ds = super().load(csfile_path)
+            for column in ("blob/path", "blob/idx"):
+                ds.pop(column)
+            return ds
+
+    monkeypatch.setattr(_cryosparc, "Dataset", _NoBlobs)
+
+    gb = Ghostbuster(
+        cs_file="fake.cs",
+        mrc_file=str(mrc_file),
+        dose_per_angstrom=2.0,
+        propagation=Propagation(scattering_model="projection"),
+    )
+
+    with mrcfile.open(str(mrc_file)) as mrc:
+        raw = torch.as_tensor(mrc.data.copy())
+    assert torch.allclose(gb._images, _preprocessed(raw))
+
+
+def test_ghostbuster_refuses_particles_spread_over_several_stack_files(
+    monkeypatch: pytest.MonkeyPatch, mrc_file: Path
+) -> None:
+    """Particles drawn from several stacks cannot be in one stack's row order,
+    and one mrc_file cannot address them at blob/idx either."""
+
+    class _TwoStacks(_FakeDataset):  # type: ignore[valid-type, misc]
+        @classmethod
+        def load(cls, csfile_path: str) -> "_TwoStacks":
+            ds = super().load(csfile_path)
+            ds["blob/path"] = np.array(["J1/a.mrc", "J1/a.mrc", "J1/b.mrc", "J1/b.mrc"])
+            ds["blob/idx"] = np.array([0, 1, 0, 1], dtype=np.int64)
+            return ds
+
+    monkeypatch.setattr(_cryosparc, "Dataset", _TwoStacks)
+    common = dict(
+        cs_file="fake.cs",
+        mrc_file=str(mrc_file),
+        dose_per_angstrom=2.0,
+        propagation=Propagation(scattering_model="projection"),
+    )
+
+    with pytest.raises(ValueError, match="not in row order"):
+        Ghostbuster(**common)  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="2 stack files"):
+        Ghostbuster(**common, address_by_blob_idx=True)  # type: ignore[arg-type]

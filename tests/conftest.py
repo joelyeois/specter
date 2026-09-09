@@ -207,7 +207,8 @@ def fake_cryosparc_dataset(n: int, pixel_size: float = 1.5) -> type:
     """
     A stand-in for ``cryosparc.dataset.Dataset`` whose ``load`` returns ``n``
     synthetic particles at ``pixel_size`` with every column
-    `extract_parameters_from_csfile` reads. Patch it over
+    `extract_parameters_from_csfile` reads, plus the uid/blob columns that
+    address each particle's image. Patch it over
     ``specter.io._cryosparc.Dataset``.
     """
     import numpy as np
@@ -219,6 +220,12 @@ def fake_cryosparc_dataset(n: int, pixel_size: float = 1.5) -> type:
             rng = np.random.default_rng(0)
             return cls(
                 {
+                    # A real particle .cs carries the address of each row's
+                    # image, and a uid joining it to its sibling files. Here the
+                    # stack is in row order, which is what blob/idx records.
+                    "uid": np.arange(n, dtype=np.uint64),
+                    "blob/path": np.array(["J1/particles.mrcs"] * n),
+                    "blob/idx": np.arange(n, dtype=np.int64),
                     "alignments3D/shift": rng.normal(size=(n, 2)).astype(dtype),
                     "alignments3D/psize_A": np.full(n, pixel_size, dtype=dtype),
                     "ctf/cs_mm": np.full(n, 2.7, dtype=dtype),

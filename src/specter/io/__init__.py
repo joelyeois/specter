@@ -1,4 +1,6 @@
-from ._cryosparc import extract_parameters_from_csfile
+from ._cryosparc import extract_parameters_from_csfile, particle_stack_references
+from ._images import particle_image_refs, read_particle_images, row_order_conflict
+from ._reorder import write_row_ordered_csfile
 from ._relion import (
     create_micrograph_starfile,
     create_particle_starfile,
@@ -8,6 +10,11 @@ from ._relion import (
 
 __all__ = [
     "extract_parameters_from_csfile",
+    "particle_stack_references",
+    "particle_image_refs",
+    "read_particle_images",
+    "row_order_conflict",
+    "write_row_ordered_csfile",
     "create_micrograph_starfile",
     "create_particle_starfile",
     "create_particle_starfile_from_model",

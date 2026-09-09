@@ -9,11 +9,17 @@
 # own .cs file and particle stack, or pass --cs_file/--mrc_file/
 # --dose_per_angstrom on the command line.
 
-# Poses, CTF parameters and per-particle scale come from the CryoSPARC .cs file;
-# the .mrc/.mrcs stack is indexed by it.
+# The .cs file supplies poses, CTF parameters and per-particle scale; the stack
+# supplies the images, paired with it by row -- row i of the .cs is slice i of
+# the stack. That is checked, not assumed: a CryoSPARC restack does not write
+# its stack in row order, and such a stack is refused rather than read wrong.
+# `specter export particles` writes a row-ordered pair from any CryoSPARC set.
 [data]
 cs_file = "path/to/particles.cs"
-mrc_file = "path/to/particles.mrc"
+mrc_file = "path/to/particles.mrcs"
+# address_by_blob_idx = false   # read mrc_file at the .cs file's blob/idx instead of
+                                # by row, to point straight at a CryoSPARC restack
+                                # without exporting a row-ordered copy of it first
 dose_per_angstrom = 40.0   # the dataset's real fluence, not a nominal one: it sets the
                            # Poisson statistics the loss is weighted by
 halfset = "gold"           # "gold" reconstructs A and B and computes the halfmap FSC

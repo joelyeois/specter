@@ -31,7 +31,8 @@ specter reconstruct particle [OPTIONS]
 | Flag | Type | Default | Description |
 | --- | --- | --- | --- |
 | `--cs_file` | `TEXT` | _none_ | CryoSPARC .cs file holding the particle poses, CTF parameters and per-particle scale. |
-| `--mrc_file` | `TEXT` | _none_ | Particle stack (.mrc/.mrcs) the .cs file indexes into. |
+| `--mrc_file` | `TEXT` | _none_ | Particle stack (.mrc/.mrcs) in the .cs file's row order: row i of the .cs is slice i of the stack. Refused when the .cs file's own blob/idx says otherwise. |
+| `--address_by_blob_idx` | `True` \| `False` | `False` | Read mrc_file at the .cs file's blob/idx instead of by row, for a stack that is not in row order (a CryoSPARC restack). Otherwise such a stack is refused rather than read wrong. |
 | `--dose_per_angstrom` | `FLOAT` | _none_ | Total fluence per image in e-/Angstrom^2. Sets the Poisson statistics the loss is weighted by, so it must be the dataset's real value. |
 | `--halfset` | `A` \| `B` \| `all` \| `gold` | `gold` | Which gold-standard half-set to reconstruct. gold (the default) reconstructs A and B and computes the halfmap FSC between them; A or B alone reconstructs just that half, e.g. for a quick test; all uses every particle in one single-volume run, ignoring the split. |
 | `--n_particles` | `INTEGER` | _none_ | Reconstruct only the first N particles instead of the whole stack. |

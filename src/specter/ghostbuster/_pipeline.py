@@ -143,6 +143,7 @@ class Ghostbuster(_GhostbusterBase):
         cs_file: str | Path,
         mrc_file: str | Path,
         dose_per_angstrom: float,
+        address_by_blob_idx: bool = False,
         lr: float | None = None,
         lr_R: float | None = None,
         lr_T: float | None = None,
@@ -185,7 +186,9 @@ class Ghostbuster(_GhostbusterBase):
             anisomag,
             indices,
         ) = self._load_particle_parameters(cs_file, halfset, n_particles)
-        images = self._load_particle_images(mrc_file, indices)
+        images = self._load_particle_images(
+            cs_file, indices, mrc_file, address_by_blob_idx
+        )
 
         voxel_size = float(
             pixel_size.item() if hasattr(pixel_size, "item") else pixel_size
@@ -290,12 +293,52 @@ class Ghostbuster(_GhostbusterBase):
 
     @staticmethod
     def _load_particle_images(
-        mrc_file: str | Path, indices: torch.Tensor
+        cs_file: str | Path,
+        indices: torch.Tensor,
+        mrc_file: str | Path,
+        address_by_blob_idx: bool,
     ) -> torch.Tensor:
-        """Load the particle stack .mrc/.mrcs file, indexed to the extracted particles."""
-        console.print(f"Loading particle stack from {Path(mrc_file).name} ...")
-        with mrcfile.mmap(str(mrc_file)) as mrc:
-            images = torch.as_tensor((mrc.data[indices]).copy())
+        """
+        Load each extracted particle's image from the stack.
+
+        Row ``i`` of the ``.cs`` file pairs with slice ``i`` of the stack. That
+        is the contract, because it is the one that survives the pair being
+        copied off the machine that produced it, and it is checked rather than
+        assumed: CryoSPARC's ``blob/idx`` says which slice each row's image
+        really is, and a Restack Particles job does not write its stack in row
+        order. Reading one as if it did pairs every pose with a different
+        particle's image and says nothing about it, so a stack the ``.cs``
+        contradicts is refused. ``address_by_blob_idx`` reads such a stack
+        where the ``.cs`` says the images are, instead of refusing.
+        """
+        from ..io import particle_image_refs, read_particle_images, row_order_conflict
+
+        rows = [int(i) for i in indices.flatten().tolist()]
+
+        if address_by_blob_idx:
+            refs = particle_image_refs(cs_file, stack_path=mrc_file)
+            console.print(
+                f"Loading particle stack from {Path(mrc_file).name} "
+                "at the .cs file's blob/idx ..."
+            )
+            images = read_particle_images([refs[i] for i in rows])
+        else:
+            conflict = row_order_conflict(cs_file, rows)
+            if conflict is not None:
+                row, idx, stack = conflict
+                raise ValueError(
+                    f"{Path(cs_file).name} says its images are not in row order: "
+                    f"row {row} is slice {idx} of {stack}, not slice {row}. Reading "
+                    f"{Path(mrc_file).name} by row would pair every pose with "
+                    "another particle's image. Point mrc_file at a stack written in "
+                    "this file's row order (`specter export particles` writes one), "
+                    "or pass address_by_blob_idx to read this one where the .cs "
+                    "says the images are."
+                )
+            console.print(f"Loading particle stack from {Path(mrc_file).name} ...")
+            with mrcfile.mmap(str(mrc_file)) as mrc:
+                images = torch.as_tensor(mrc.data[rows].copy())
+
         h, w = images.shape[-2], images.shape[-1]
         console.print(
             f"  {len(images)} images  |  box {h}×{w}  |  dtype {images.dtype}"

@@ -95,6 +95,32 @@ FULL_OCCUPANCY_POTENTIAL_V = 7.0
 #: identical beyond it: a coarse voxel's own average has already removed
 #: the cusps, so this is not an extra approximation, it is what gives a
 #: FINE grid the coarse-graining a coarse one gets for free.
+#:
+#: WHY 2.0, AND WHY NOT LARGER. Grid-independence does not pick it. That
+#: spread shrinks monotonically as sigma grows, so it only rules out SMALL
+#: sigma; taken alone it would argue for 5 A. What picks 2.0 is spurious
+#: water INSIDE the molecule, which is U-shaped in sigma: below it the
+#: cusps admit ice into the gaps between bonded atoms, above it
+#: over-smoothing bleeds the molecular boundary inward and the core stops
+#: reading as occupied. Measured on 1A6M over voxel sizes 0.75-4 A:
+#:
+#:     sigma (A)          0    0.5    1.0    1.4    2.0    2.8    3.5    5.0
+#:     volume spread   2.44   1.71   1.10  1.032  1.009  1.001  1.000  1.000
+#:     ice inside     0.319  0.248  0.085  0.035  0.014  0.054  0.133  0.273
+#:
+#: 2.0 A minimises the second row while the first is already flat, and the
+#: excluded volume there is 98% of its saturated value, so the exclusion is
+#: essentially complete without the boundary having moved. It also sits
+#: between water's van der Waals radius (1.4 A) and its diameter (2.8 A),
+#: which is the length scale the question is about.
+#:
+#: Provenance, so the sweep is not mistaken for a fit: the value was chosen
+#: as a water-sized length and documented, and the sweep was run afterwards
+#: and vindicates it. Its "inside" mask -- voxels a sigma=2.8 A probe reads
+#: above 0.9 -- is a fixed reference across the row but comes from the same
+#: estimator family, so a geometric distance-to-nearest-atom mask would be
+#: the cleaner test. The U-shape is not an artifact of that: were the mask
+#: circular the minimum would sit at 2.8, not 2.0.
 WATER_COARSE_GRAIN_SIGMA_ANGSTROM = 2.0
 
 

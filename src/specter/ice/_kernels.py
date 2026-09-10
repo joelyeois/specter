@@ -65,19 +65,49 @@ def build_water_kernel(
     ELECTRON scattering that is not a small omission. Hydrogen's scattering
     factor is disproportionately large at low k (Mott-Bethe: f_e goes as
     (Z - f_x)/k^2, so a diffuse one-electron atom is far from negligible),
-    and two of them make up 43% of a water molecule at k=0, falling to ~26%
-    at 1.5 A. Measured against ice's mean inner potential -- liquid water is
-    4.48 +/- 0.19 V (Yesibolati et al. 2020, off-axis electron holography;
-    see References), and amorphous ice here is 0.94x its number density, so
-    the expected value is about 4.21 V:
+    and two of them make up 43% of a water molecule at k=0 under shtyrov
+    (35% under kirkland), still ~24% at 1.5 A.
+
+    THE LITERATURE DISAGREES WITH ITSELF about ice's mean inner potential,
+    over a range of roughly 30%, and it splits into two branches:
+
+    ===============  ======  ======  ==========================================
+    MIP              branch  source  basis
+    ===============  ======  ======  ==========================================
+    4.5301 V         upper   [2]     LDA ice, isolated-atom superposition
+    4.5276 V         upper   [3]     (O + 2H) / molecular volume, 0.93 g/cm^3
+    4.21 +/- 0.18 V  --      [1]     liquid water 4.48 +/- 0.19 V, x0.94
+    3.6 V            lower   [4]     "bulk vitreous ice"
+    3.5 +/- 1.2 V    lower   [5]     measured on vitrified ice
+    ===============  ======  ======  ==========================================
+
+    The upper branch is this kernel's own construction -- one oxygen plus
+    two hydrogens, over the molecular volume in ice -- arrived at
+    independently by [2] and [3], and [3] argues explicitly that it is the
+    appropriate one for LDA ice. Against it:
 
     ==========================  ========  ==========================
-    model                       MIP       vs. 4.21 V
+    model                       MIP       vs. 4.53 V
     ==========================  ========  ==========================
-    oxygen only (before)        2.08 V    -51%
-    this kernel, shtyrov        3.67 V    -13%
-    this kernel, kirkland       4.55 V     +8%
+    oxygen only (before)        2.08 V    -54%
+    this kernel, shtyrov        3.67 V    -19%
+    this kernel, kirkland       4.55 V     +0.4%
     ==========================  ========  ==========================
+
+    Do NOT read the +8% against [1]'s density-scaled 4.21 V as an error to
+    tune away. An isolated-atom superposition cannot represent bonding and
+    is expected to sit above a measurement; [5] is the only direct
+    measurement on vitrified ice (per [1], which also notes it may carry
+    systematic error from charging, thermal expansion and
+    recrystallization), and at +/-34% it is far too imprecise to have
+    caught the missing hydrogens this kernel exists to restore.
+
+    One attribution caveat: the 4.5301 V credited to [2] is as reported by
+    [3]. It could not be found in [2]'s own main text, which states its
+    potentials come from the isolated atom superposition approximation with
+    the solvent taken from the known water number density -- the same
+    calculation, so [3] appears to have evaluated [2]'s method rather than
+    quoted a printed figure.
 
     `parameterization` defaults to ``'kirkland'`` rather than to
     `PotentialBuilder`'s ``'shtyrov'``: Shtyrov fits bonded species of
@@ -123,6 +153,24 @@ def build_water_kernel(
     .. [1] Yesibolati et al. "Mean Inner Potential of Liquid Water."
            Phys. Rev. Lett. 124, 065502 (2020).
            https://doi.org/10.1103/PhysRevLett.124.065502
+           Table I of this paper compiles the theoretical and experimental
+           water/ice values, density-corrected to a common 1 g/cm^3.
+    .. [2] Vulovic, Ravelli, van Vliet, Koster, Lazic, Lucken, Rullgard,
+           Oktem and Rieger. "Image formation modeling in cryo-electron
+           microscopy." J. Struct. Biol. 183, 19-32 (2013).
+    .. [3] Okamoto. "Resilient quantum electron microscopy."
+           Phys. Rev. A 106, 022605 (2022); arXiv:2001.05603.
+           https://doi.org/10.1103/PhysRevA.106.022605
+           Appendix: "The mean inner potential of ice is computed to be
+           4.5276 V ... the inner potential of the water molecule,
+           consisting of 2 hydrogen atoms and one oxygen atom, divided by
+           its molecular volume in ice."
+    .. [4] Shang and Sigworth. "Hydration-layer models for cryo-EM image
+           simulation." J. Struct. Biol. 180, 10-16 (2012).
+    .. [5] Harscher and Lichte. "Inelastic mean free path and mean inner
+           potential of carbon foil and vitrified ice measured with
+           electron holography." Electron Microscopy '98 (ICEM-14,
+           Cancun), pp. 553-554 (1998).
     """
     oxygen = build_atomic_potential_kernel(
         dx,

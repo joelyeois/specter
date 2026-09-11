@@ -13,12 +13,50 @@ same physical scale as ``PotentialBuilder``-rendered protein templates
 
 The lipid coordinates are a schematic idealized model: per-leaflet atom
 z-offsets from the mid-plane (phosphate headgroup peak, glycerol backbone,
-acyl chain, terminal methyls) taken from known bilayer structural biology
-(e.g. a ~40 A phosphate-to-phosphate spacing for a fluid PC bilayer), with
-small per-atom jitter standing in for conformational disorder -- not a
-relaxed or MD-equilibrated structure. Good enough to get the profile's
-shape and physical length scale right; swap in a real coordinate set later
-if higher fidelity is needed.
+acyl chain, terminal methyls), with small per-atom jitter standing in for
+conformational disorder. They come from no deposited structure and no MD
+trajectory. What IS anchored is the census, and through it the integral
+(see the identity below); what is MODELLED is where along z each group
+sits. Measured against a joint SANS/SAXS refinement of POPC at 30 C [1]:
+
+    ===========================  ===============  ==========
+    quantity                     published [1]    this model
+    ===========================  ===============  ==========
+    area per lipid A             64.3 +/- 1.3     65.0
+    hydrocarbon thickness 2*D_C  28.8 +/- 0.6     ~27
+    phosphate-phosphate D_HH     ~36              ~39-40
+    ===========================  ===============  ==========
+
+The area per lipid is right, inside 1 sigma, which matters because it is
+the denominator of the identity. THE ERROR IS LOCALISED IN THE HEADGROUP
+REGION, not the chains: D_H1, the phosphate-to-chain-interface distance,
+is 6.0 A here against the ~3.6 A the published numbers imply, so the
+phosphates sit about 2.4 A too far out. The core is also slightly thin, so
+the correction is not one rigid shift -- headgroups move in AND chains
+spread out.
+
+Not patched, deliberately. Moving an atom along z adds and removes
+nothing, so integral(psi dz) is untouched by construction and every
+projected-contrast number is unaffected; 2.4 A is sub-voxel on the 5 and
+10 A grids membranes are rendered on (1.2 voxels at 2 A). Nudging the
+offsets until D_HH lands on 36 A would swap one hand-picked table for
+another tuned to two moments, leaving the shape between them invented. The
+real fix is to take the whole z-distribution from an SDP decomposition or
+an MD trajectory: the NMRlipids / FAIRMD Lipids Databank
+(databank.nmrlipids.fi) serves POPC trajectories through an API, and
+psi(z) is a lateral average, so only a small z-table need be committed.
+
+A deposited PDB lipid is the WRONG source and has already been checked,
+so do not re-propose it. A fluid bilayer is a 2-D liquid with no lattice
+and no unique conformer, so nothing of the kind is deposited; the lipids
+that do appear are protein-bound fragments, ordered only because a protein
+immobilised them, truncated (1C3W's LI1 ranges 8-41 atoms per copy, 5A63's
+PC1 has 43 heavy atoms against POPC's 52) and hydrogen-free, which would
+reintroduce exactly the census deficit that 7946bfa fixed. Tiling one rigid
+conformer would also give gel-phase order rather than a fluid bilayer. The
+microtubule path works precisely because an MT IS a crystalline lattice of
+fully-resolved subunits; a membrane is the opposite kind of object and
+needs a statistical primitive.
 
 There is no amplitude scalar anywhere here: ``psi(d)`` is used as
 measured, in volts, and nothing rescales it to a peak. Two constructions
@@ -48,7 +86,26 @@ Calibration is anchored by one parameter-free identity: integral(psi dz)
 is fixed by chemistry alone, at 2 * (scattering per lipid) / (area per
 lipid). Measured 254.0 V*A against 254.5 predicted. The same identity on
 the protein side predicts 1FA2's mean inner potential as 7.03 V against
-7.00 V measured by rendering it.
+7.00 V measured by rendering it. Note what it does and does not constrain:
+it pins the INTEGRAL, so it is untouched by the z-geometry above, and the
+two are complementary rather than in tension -- any replacement profile
+must still pass ``test_bilayer_profile_integral_matches_popc_stoichiometry``.
+
+References
+----------
+.. [1] Kucerka, Nieh and Katsaras. "Fluid phase lipid areas and bilayer
+       thicknesses of commonly used phosphatidylcholines as a function of
+       temperature." Biochim. Biophys. Acta Biomembranes 1808, 2761-2771
+       (2011). https://doi.org/10.1016/j.bbamem.2011.07.022
+       Tables 1-3 give A, D_B and 2*D_C per lipid and temperature; D_HH
+       is in the supplementary Table S7, which the open-access accepted
+       manuscript does not carry -- the ~36 A above is secondary
+       reporting, so confirm it there before treating it as the target.
+       The paper's SDP model decomposes a bilayer into exactly the shape
+       this module's template has (chemical group, mean depth, width):
+       CholCH3, PCN and CG as Gaussians, the hydrocarbon region as an
+       error function with CH and CH3 subtracted off. That makes it a
+       drop-in replacement for `_LEAFLET_TEMPLATE` rather than a rewrite.
 """
 
 from __future__ import annotations

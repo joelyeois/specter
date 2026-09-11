@@ -21,4 +21,6 @@
 | [`specter cache dir`](cache.md#specter-cache-dir) | Print the cache directory. |
 | [`specter cache info`](cache.md#specter-cache-info) | Show the cache directory, file count and total size. |
 | [`specter cache clean`](cache.md#specter-cache-clean) | Delete every cached structure. |
+| [`specter convert`](convert.md#specter-convert) | Convert particle metadata between CryoSPARC and RELION. |
+| [`specter convert cs2star`](convert.md#specter-convert-cs2star) | Convert a CryoSPARC particle .cs file to a RELION .star file. |
 | [`specter ghostbuster`](reconstruct.md#specter-ghostbuster) | A second name for `specter reconstruct`. |

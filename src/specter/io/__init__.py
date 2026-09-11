@@ -1,3 +1,4 @@
+from ._convert import convert_csfile_to_starfile
 from ._cryosparc import extract_parameters_from_csfile, particle_stack_references
 from ._images import particle_image_refs, read_particle_images, row_order_conflict
 from ._reorder import write_row_ordered_csfile
@@ -9,6 +10,7 @@ from ._relion import (
 )
 
 __all__ = [
+    "convert_csfile_to_starfile",
     "extract_parameters_from_csfile",
     "particle_stack_references",
     "particle_image_refs",

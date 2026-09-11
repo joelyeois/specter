@@ -49,6 +49,14 @@ def build_convert_group() -> click.RichGroup:
         "readable from anywhere.",
     )
     @click.option(
+        "--image-basename",
+        is_flag=True,
+        default=False,
+        help="Write image paths as bare filenames. CryoSPARC's particle "
+        "importer takes the stack directory separately and matches on "
+        "filename, so use this when importing back into CryoSPARC.",
+    )
+    @click.option(
         "--overwrite",
         "-f",
         is_flag=True,
@@ -60,6 +68,7 @@ def build_convert_group() -> click.RichGroup:
         starfile_path: str,
         passthrough: str | None,
         image_prefix: str | None,
+        image_basename: bool,
         overwrite: bool,
     ) -> None:
         """Convert a CryoSPARC particle .cs file to a RELION .star file.
@@ -97,6 +106,7 @@ def build_convert_group() -> click.RichGroup:
             starfile_path,
             passthrough_path=passthrough,
             image_prefix=image_prefix,
+            image_basename=image_basename,
             overwrite=True,
         )
         console.print(f"  [green]✓[/green] {starfile_path}")

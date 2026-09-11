@@ -193,6 +193,7 @@ def _particles_table(
     group_ids: np.ndarray,
     cs_angstrom: np.ndarray,
     image_prefix: str | None = None,
+    image_basename: bool = False,
 ) -> pd.DataFrame:
     """Per-particle pose, CTF and image-address columns."""
     psize = np.asarray(dataset["alignments3D/psize_A"], dtype=np.float64)
@@ -204,6 +205,9 @@ def _particles_table(
     euler = _euler_degrees(np.asarray(dataset["alignments3D/pose"]))
     idx = np.asarray(dataset["blob/idx"], dtype=np.int64)
     paths = _as_str_array(dataset["blob/path"])
+    # Stripping before prefixing so the two compose into a full relocation.
+    if image_basename:
+        paths = [os.path.basename(p) for p in paths]
     if image_prefix is not None:
         # blob/path is relative to the CryoSPARC project directory, so a
         # bare conversion only resolves for a reader started there.
@@ -259,6 +263,7 @@ def convert_csfile_to_starfile(
     star_path: str,
     passthrough_path: str | None = None,
     image_prefix: str | None = None,
+    image_basename: bool = False,
     overwrite: bool = True,
 ) -> None:
     """
@@ -288,6 +293,12 @@ def convert_csfile_to_starfile(
         without this the ``.star`` only resolves for a reader started in
         that directory. Pass the project directory to get absolute paths.
         Default is None, which writes the paths through unchanged.
+    image_basename : bool, optional
+        Reduce each image path to its filename, dropping the directory.
+        CryoSPARC's particle importer takes the stack directory as its own
+        parameter and resolves images by filename within it, so the stored
+        directory is noise there. Applied before ``image_prefix``, so the
+        two compose into a full relocation. Default is False.
     overwrite : bool, optional
         Overwrite ``star_path`` if it exists. Default is True.
 
@@ -322,7 +333,9 @@ def convert_csfile_to_starfile(
 
     cs_angstrom = np.asarray(dataset["ctf/cs_mm"], dtype=np.float64) * 1e7
     optics, group_ids = _group_optics(_optics_per_particle(dataset, n))
-    particles = _particles_table(dataset, n, group_ids, cs_angstrom, image_prefix)
+    particles = _particles_table(
+        dataset, n, group_ids, cs_angstrom, image_prefix, image_basename
+    )
 
     starfile.write(
         {"optics": optics, "particles": particles}, star_path, overwrite=overwrite

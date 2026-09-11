@@ -55,4 +55,5 @@ specter convert cs2star [OPTIONS] CSFILE STARFILE_PATH
 | --- | --- | --- | --- |
 | `--passthrough`, `-p` | `FILE` | _none_ | The job's *_passthrough_particles.cs, for jobs that split the image address and the pose/CTF across two files. |
 | `--image-prefix` | `DIRECTORY` | _none_ | Prepended to each image path. CryoSPARC records them relative to the project directory, so pass that directory to get a .star readable from anywhere. |
+| `--image-basename` | flag | `False` | Write image paths as bare filenames. CryoSPARC's particle importer takes the stack directory separately and matches on filename, so use this when importing back into CryoSPARC. |
 | `--overwrite`, `-f` | flag | `False` | Overwrite the output file if it already exists. |

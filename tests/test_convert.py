@@ -443,3 +443,44 @@ def test_cli_accepts_passthrough_and_image_prefix(tmp_path, monkeypatch) -> None
         .iloc[0]
         .endswith("/data/CS-tutorial/J1/particles.mrcs")
     )
+
+
+def test_image_basename_strips_the_directory(tmp_path) -> None:
+    out = tmp_path / "out.star"
+    convert_csfile_to_starfile("fake.cs", str(out), image_basename=True)
+
+    # CryoSPARC's particle importer resolves images by filename inside a
+    # data directory given separately, so the stored directory is noise.
+    particles = starfile.read(str(out))["particles"]
+    assert particles["rlnImageName"].iloc[0] == "000001@particles.mrcs"
+
+
+def test_image_basename_composes_with_image_prefix(tmp_path) -> None:
+    out = tmp_path / "out.star"
+    convert_csfile_to_starfile(
+        "fake.cs", str(out), image_basename=True, image_prefix="/import/stacks"
+    )
+
+    # Stripping then prefixing relocates the stack wholesale, for a copy
+    # that no longer sits where CryoSPARC left it.
+    particles = starfile.read(str(out))["particles"]
+    assert particles["rlnImageName"].iloc[0] == "000001@/import/stacks/particles.mrcs"
+
+
+def test_cli_accepts_image_basename(tmp_path, monkeypatch) -> None:
+    from click.testing import CliRunner
+
+    from specter.cli._cli import cli
+
+    monkeypatch.setattr(_convert, "Dataset", fake_dataset())
+    src = tmp_path / "in.cs"
+    src.touch()
+    out = tmp_path / "cli.star"
+
+    result = CliRunner().invoke(
+        cli, ["convert", "cs2star", str(src), str(out), "--image-basename"]
+    )
+
+    assert result.exit_code == 0, result.output
+    particles = starfile.read(str(out))["particles"]
+    assert particles["rlnImageName"].iloc[0] == "000001@particles.mrcs"

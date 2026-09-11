@@ -23,8 +23,10 @@ Convert a CryoSPARC particle .cs file to a RELION .star file.
 CSFILE must carry the `alignments3D/*` columns, i.e. come from a
 refinement rather than an extraction job. Jobs that split their
 output (restack among them) keep the pose and CTF in a separate
-`*_passthrough_particles.cs`; pass that with --passthrough and the
-two are joined on particle uid.
+`*_passthrough_particles.cs`. That file is found automatically when
+it sits in the same directory, and the two are joined on particle
+uid; pass --passthrough to name it yourself, which you must do if
+the job directory holds more than one.
 
 Image paths are written as CryoSPARC stored them, relative to the
 project directory. Pass --image-prefix &lt;project dir&gt; to make them

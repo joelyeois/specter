@@ -484,3 +484,61 @@ def test_cli_accepts_image_basename(tmp_path, monkeypatch) -> None:
     assert result.exit_code == 0, result.output
     particles = starfile.read(str(out))["particles"]
     assert particles["rlnImageName"].iloc[0] == "000001@particles.mrcs"
+
+
+def test_passthrough_is_discovered_beside_the_particles_file(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setattr(_convert, "Dataset", _split_datasets())
+    src = tmp_path / "restacked_particles.cs"
+    src.touch()
+    (tmp_path / "J423_passthrough_particles.cs").touch()
+    out = tmp_path / "out.star"
+
+    # No passthrough_path given: the sibling is found by name.
+    convert_csfile_to_starfile(str(src), str(out))
+
+    particles = starfile.read(str(out))["particles"]
+    assert particles["rlnDefocusU"].iloc[0] == pytest.approx(10000.0)
+
+
+def test_ambiguous_passthrough_candidates_are_rejected(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(_convert, "Dataset", _split_datasets())
+    src = tmp_path / "restacked_particles.cs"
+    src.touch()
+    (tmp_path / "J1_passthrough_particles.cs").touch()
+    (tmp_path / "J2_passthrough_particles.cs").touch()
+
+    with pytest.raises(KeyError, match="more than one"):
+        convert_csfile_to_starfile(str(src), str(tmp_path / "o.star"))
+
+
+def test_incomplete_csfile_with_no_candidate_names_the_missing_columns(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setattr(_convert, "Dataset", _split_datasets())
+    src = tmp_path / "restacked_particles.cs"
+    src.touch()
+
+    with pytest.raises(KeyError, match="alignments3D/pose"):
+        convert_csfile_to_starfile(str(src), str(tmp_path / "o.star"))
+
+
+def test_cli_reports_a_missing_passthrough_without_a_traceback(
+    tmp_path, monkeypatch
+) -> None:
+    from click.testing import CliRunner
+
+    from specter.cli._cli import cli
+
+    monkeypatch.setattr(_convert, "Dataset", _split_datasets())
+    src = tmp_path / "restacked_particles.cs"
+    src.touch()
+
+    result = CliRunner().invoke(
+        cli, ["convert", "cs2star", str(src), str(tmp_path / "o.star")]
+    )
+
+    assert result.exit_code != 0
+    assert result.exception is None or isinstance(result.exception, SystemExit)
+    assert "alignments3D/pose" in result.output

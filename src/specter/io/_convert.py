@@ -37,6 +37,7 @@ Anisotropic magnification
 
 from __future__ import annotations
 
+import glob
 import os
 import warnings
 from typing import Any
@@ -47,6 +48,9 @@ import roma
 import starfile
 import torch
 from cryosparc.dataset import Dataset
+from rich.console import Console
+
+_console = Console()
 
 # Optics values that define a RELION optics group. Particles sharing all of
 # them are pooled into one row of the optics block.
@@ -114,6 +118,31 @@ def _merge_passthrough(dataset: Any, passthrough: Any) -> dict[str, Any]:
         if key not in merged:
             merged[key] = np.asarray(passthrough[key])[order]
     return merged
+
+
+def _find_passthrough(csfile_path: str) -> str | None:
+    """
+    The ``*_passthrough_particles.cs`` sitting beside a particles ``.cs``.
+
+    CryoSPARC writes the pair into the same job directory under a fixed
+    suffix, so the companion can be found rather than asked for. Returns
+    None when there is no candidate; raises when there are several, since
+    picking one silently could pair a file with the wrong job's poses.
+    """
+    directory = os.path.dirname(os.path.abspath(csfile_path))
+    candidates = sorted(
+        glob.glob(os.path.join(directory, "*_passthrough_particles.cs"))
+    )
+    if not candidates:
+        return None
+    if len(candidates) > 1:
+        names = ", ".join(os.path.basename(c) for c in candidates)
+        raise KeyError(
+            f"{directory} holds more than one passthrough file ({names}). "
+            "Name the one belonging to this job explicitly rather than "
+            "risking a pairing with another job's poses."
+        )
+    return candidates[0]
 
 
 def _as_str_array(values: Any) -> list[str]:
@@ -286,7 +315,10 @@ def convert_csfile_to_starfile(
         -- restack among them -- split their output, leaving the image
         address in the particles file and the pose and CTF in the
         passthrough. Give both and they are joined on ``uid``. Default is
-        None, for a ``.cs`` that already carries every column.
+        None, which converts a complete ``.cs`` from itself alone and
+        otherwise looks for a single ``*_passthrough_particles.cs`` beside
+        it, naming the one it uses. Several candidates raise rather than
+        risk pairing with another job's poses.
     image_prefix : str, optional
         Prepended to each ``blob/path``. CryoSPARC records image paths
         relative to the project directory (``J423/restack/batch_0.mrc``), so
@@ -308,24 +340,29 @@ def convert_csfile_to_starfile(
     ``_UNMAPPED_ABERRATIONS``. Every other CTF term, the pose, the half-set
     labels and the per-particle scale factor are preserved.
     """
+    required = ("alignments3D/pose", "alignments3D/shift", "alignments3D/psize_A")
+
     dataset: Any = Dataset.load(csfile_path)
+    if passthrough_path is None and any(not _has(dataset, k) for k in required):
+        # Only as a recovery, never on the happy path: a .cs that already has
+        # everything is converted from itself alone, whatever sits beside it.
+        passthrough_path = _find_passthrough(csfile_path)
+        if passthrough_path is not None:
+            _console.print(
+                f"  using passthrough [cyan]{os.path.basename(passthrough_path)}[/cyan]"
+            )
     if passthrough_path is not None:
         dataset = _merge_passthrough(dataset, Dataset.load(passthrough_path))
 
-    required = ("alignments3D/pose", "alignments3D/shift", "alignments3D/psize_A")
     missing = [key for key in required if not _has(dataset, key)]
     if not _has(dataset, "blob/idx"):
         missing.append("blob/idx")
     if missing:
-        hint = (
-            "A particle .cs file from a refinement job is expected."
-            if passthrough_path is not None
-            else "If this job wrote a *_passthrough_particles.cs alongside it, "
-            "pass that too: CryoSPARC splits the image address and the "
-            "pose/CTF across the two files."
-        )
         raise KeyError(
-            f"{csfile_path} is missing required column(s): {', '.join(missing)}. {hint}"
+            f"{csfile_path} is missing required column(s): {', '.join(missing)}. "
+            "A particle .cs file from a refinement job is expected, either "
+            "carrying these columns itself or with its "
+            "*_passthrough_particles.cs beside it."
         )
 
     n = len(np.asarray(dataset["alignments3D/psize_A"]))

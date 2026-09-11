@@ -76,8 +76,10 @@ def build_convert_group() -> click.RichGroup:
         CSFILE must carry the `alignments3D/*` columns, i.e. come from a
         refinement rather than an extraction job. Jobs that split their
         output (restack among them) keep the pose and CTF in a separate
-        `*_passthrough_particles.cs`; pass that with --passthrough and the
-        two are joined on particle uid.
+        `*_passthrough_particles.cs`. That file is found automatically when
+        it sits in the same directory, and the two are joined on particle
+        uid; pass --passthrough to name it yourself, which you must do if
+        the job directory holds more than one.
 
         Image paths are written as CryoSPARC stored them, relative to the
         project directory. Pass --image-prefix <project dir> to make them
@@ -101,14 +103,19 @@ def build_convert_group() -> click.RichGroup:
 
         from specter.io import convert_csfile_to_starfile
 
-        convert_csfile_to_starfile(
-            csfile,
-            starfile_path,
-            passthrough_path=passthrough,
-            image_prefix=image_prefix,
-            image_basename=image_basename,
-            overwrite=True,
-        )
+        try:
+            convert_csfile_to_starfile(
+                csfile,
+                starfile_path,
+                passthrough_path=passthrough,
+                image_prefix=image_prefix,
+                image_basename=image_basename,
+                overwrite=True,
+            )
+        except KeyError as exc:
+            # A .cs missing the columns this needs is the user's input being
+            # wrong, not a crash. args[0] avoids KeyError's repr quoting.
+            raise click.ClickException(str(exc.args[0])) from exc
         console.print(f"  [green]✓[/green] {starfile_path}")
 
     return convert

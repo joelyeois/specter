@@ -37,7 +37,11 @@ from __future__ import annotations
 import torch
 
 from ..constants import interaction_parameter
-from ._occupancy import FULL_OCCUPANCY_POTENTIAL_V, potential_occupancy
+from ._occupancy import (
+    FULL_OCCUPANCY_POTENTIAL_V,
+    occupancy_blur_halo_voxels,
+    potential_occupancy,
+)
 
 INELASTIC_MFP_ICE_A = 3950.0
 r"""
@@ -131,6 +135,63 @@ def absorption_potential(mfp_A: float, voltage_kv: float) -> float:
     return 1.0 / (2.0 * interaction_parameter(voltage_kv) * mfp_A)
 
 
+#: Voxels the occupancy blur is allowed to touch in one call. The blur is
+#: separable, and its first pass reshapes to ``(-1, 1, X)`` and pads, so its
+#: working set is a few multiples of the input. Whole-volume evaluation asked
+#: for 26 GiB on a batch of four 512-pixel boxes with 1642 slices of ice and
+#: brought a `specter match particles` run down; slabbing bounds it instead.
+_OCCUPANCY_MAX_VOXELS_PER_SLAB = 2**26
+
+
+def _occupancy_chunked(
+    v: torch.Tensor,
+    voxel_size: float,
+    full_potential: float,
+    max_voxels_per_slab: int,
+) -> torch.Tensor:
+    """
+    :func:`potential_occupancy`, evaluated a z-slab at a time.
+
+    Each slab is widened by :func:`occupancy_blur_halo_voxels` and the margin
+    discarded, without which every slab boundary becomes an edge the blur
+    sees. Identical to the whole-volume result wherever the halo fits, which
+    is what ``tests/test_inelastic_absorption.py`` pins.
+
+    Parameters
+    ----------
+    v : torch.Tensor
+        Real potential, shape ``(..., Z, Y, X)``.
+    voxel_size : float
+        Voxel size in Angstrom.
+    full_potential : float
+        Potential of a fully occupied voxel, V.
+    max_voxels_per_slab : int
+        Upper bound on the voxels handed to the blur at once.
+
+    Returns
+    -------
+    torch.Tensor
+        Occupancy in [0, 1], same shape as `v`.
+    """
+    nz = v.shape[-3]
+    per_slice = v.numel() // nz
+    slab = max(1, max_voxels_per_slab // max(1, per_slice))
+    if slab >= nz:
+        return potential_occupancy(v, voxel_size, full_potential=full_potential)
+
+    halo = occupancy_blur_halo_voxels(voxel_size)
+    out = torch.empty_like(v)
+    for z0 in range(0, nz, slab):
+        z1 = min(z0 + slab, nz)
+        lo, hi = max(0, z0 - halo), min(nz, z1 + halo)
+        wide = potential_occupancy(
+            v[..., lo:hi, :, :], voxel_size, full_potential=full_potential
+        )
+        out[..., z0:z1, :, :] = wide[..., z0 - lo : z0 - lo + (z1 - z0), :, :]
+        del wide
+    return out
+
+
 def inelastic_absorption_potential(
     v: torch.Tensor,
     voxel_size: float,
@@ -138,6 +199,7 @@ def inelastic_absorption_potential(
     mfp_solvent_A: float = INELASTIC_MFP_ICE_A,
     mfp_specimen_A: float | None = None,
     full_potential: float = FULL_OCCUPANCY_POTENTIAL_V,
+    max_voxels_per_slab: int = _OCCUPANCY_MAX_VOXELS_PER_SLAB,
 ) -> torch.Tensor:
     r"""
     Absorption potential from measured mean free paths, per material.
@@ -185,6 +247,12 @@ def inelastic_absorption_potential(
     full_potential : float, optional
         Potential of a fully occupied voxel, V. Default
         :data:`FULL_OCCUPANCY_POTENTIAL_V`.
+    max_voxels_per_slab : int, optional
+        Bound on the voxels the occupancy blur touches at once. The blur is
+        evaluated a z-slab at a time past this, each slab widened by
+        `occupancy_blur_halo_voxels` and the margin discarded, so the result
+        is unchanged. Default 2**26; whole-volume evaluation asked for 26 GiB
+        on a batch of four 512-pixel boxes with 1642 slices of ice.
 
     Returns
     -------
@@ -220,9 +288,11 @@ def inelastic_absorption_potential(
     """
     v_solvent = absorption_potential(mfp_solvent_A, voltage_kv)
     if mfp_specimen_A is None:
+        # No occupancy needed: the field is uniform, so the blur is skipped
+        # entirely rather than computed and then ignored.
         return torch.full_like(v, v_solvent)
     v_specimen = absorption_potential(mfp_specimen_A, voltage_kv)
-    occupancy = potential_occupancy(v, voxel_size, full_potential=full_potential)
+    occupancy = _occupancy_chunked(v, voxel_size, full_potential, max_voxels_per_slab)
     return occupancy * (v_specimen - v_solvent) + v_solvent
 
 

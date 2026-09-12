@@ -274,3 +274,24 @@ def test_generator_transmission_matches_the_mean_free_path(
     assert transmission == pytest.approx(expected, rel=0.02)
     if specimen_mfp is not None:
         assert transmission < expected
+
+
+@pytest.mark.parametrize("cap", [2**14, 2**12, 2**11])
+def test_slabbed_occupancy_matches_whole_volume(cap: int) -> None:
+    """
+    Bounding the occupancy blur's memory must not change the field.
+
+    Evaluating it whole asked for 26 GiB on a batch of four 512-pixel boxes
+    with 1642 slices of ice, which brought a `specter match particles` run
+    down. Slabbing bounds it, and is exact because each slab is widened by
+    `occupancy_blur_halo_voxels` and the margin discarded -- without which
+    every slab boundary would become an edge the blur sees.
+    """
+    torch.manual_seed(0)
+    v = torch.rand(2, 40, 24, 24) * 12.0
+    kwargs = dict(
+        voxel_size=1.0, voltage_kv=VOLTAGE, mfp_specimen_A=INELASTIC_MFP_PROTEIN_A
+    )
+    whole = inelastic_absorption_potential(v, max_voxels_per_slab=10**9, **kwargs)
+    slabbed = inelastic_absorption_potential(v, max_voxels_per_slab=cap, **kwargs)
+    assert torch.equal(slabbed, whole)

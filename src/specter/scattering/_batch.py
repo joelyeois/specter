@@ -7,6 +7,8 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 
 import lightning as L
+import math
+
 import torch
 
 from ..constants import energy_to_wavelength, interaction_parameter
@@ -34,6 +36,7 @@ class Scattering(L.LightningModule):
         ews_curvature_sign: EwaldSphereSign = "negative",
         nz: int | None = None,
         alpha: float = 0.0,
+        uniform_absorption: float = 0.0,
         progressbars: bool = True,
     ):
         """
@@ -58,6 +61,15 @@ class Scattering(L.LightningModule):
             Bandlimit parameter for Kirkland's FFT aliasing prevention.
             Setting klim=0.66 prevents aliasing but reduces spatial frequency
             content. Default is None (no bandlimiting).
+        uniform_absorption : float, optional
+            A spatially constant absorption potential in volts, applied on top
+            of whatever `V` carries. A uniform imaginary potential contributes
+            only a scalar ``exp(-sigma dz V_ab)`` to each slice's transmission,
+            so it is applied as one, never materialised: an embedding medium's
+            absorption costs nothing this way, where building the field would
+            cost a second volume and a complex copy of it -- 77 GiB on the
+            (4, 1642, 1024, 1024) potential a 512-pixel probe in thick ice
+            hands this class. Default 0.0.
         ews_curvature_sign : str, optional
             Ewald sphere curvature sign matching CryoSPARC's convention.
             ``'negative'`` (default) or ``'positive'``. Affects multislice,
@@ -87,6 +99,7 @@ class Scattering(L.LightningModule):
         self.scattering_model = scattering_model
         self.ews_curvature_sign = ews_curvature_sign
         self.alpha = alpha
+        self.uniform_absorption = uniform_absorption
         self.progressbars = progressbars
 
         k = frequency_grid(nxy, pixel_size)
@@ -205,6 +218,14 @@ class Scattering(L.LightningModule):
             if not chunk.is_complex():
                 chunk = apply_amplitude_contrast(chunk, alpha=self.alpha)
             t_chunk = torch.exp(1j * self.sigma * self.pixel_size * chunk)
+            if self.uniform_absorption:
+                # A constant imaginary potential factorises out of the
+                # exponential, so it is a scalar attenuation per slice rather
+                # than a field: exp(i sigma dz (V + i c)) = exp(i sigma dz V)
+                # exp(-sigma dz c).
+                t_chunk = t_chunk * math.exp(
+                    -self.sigma * self.pixel_size * self.uniform_absorption
+                )
 
             for t in t_chunk.unbind(1):
                 # multiply with incident wave (unit incident wave on the first slice)

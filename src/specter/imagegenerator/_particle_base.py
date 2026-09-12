@@ -315,6 +315,10 @@ class ParticleGeneratorBase(BaseImager):
         if v_ab is not None:
             V = torch.complex(V, v_ab)
             del v_ab
+        # Set here rather than in `_build_scattering`: the propagator is
+        # constructed before `icemaker` is, and whether there is a medium to
+        # absorb in is part of the answer.
+        self.scattering.uniform_absorption = self._uniform_absorption
 
         if self.verbose:
             logger.info(f"Applying scattering using {self.scattering_model} model")

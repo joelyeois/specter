@@ -28,7 +28,7 @@ from ..aberrations import (
 from ..arrays import compute_nz, pad_volume
 from ..ctf import LegacyAberrationAdapter
 from ..microscope import Detector
-from ..potential import inelastic_absorption_potential
+from ..potential import absorption_potential, inelastic_absorption_potential
 from ..settings import Camera, Envelopes, Optics, Propagation
 
 __all__ = [
@@ -284,6 +284,34 @@ class BaseImager(L.LightningModule):
             if hasattr(self, "dfv"):
                 setattr(self, "dfv", getattr(self, "dfv") - shift)
 
+    @property
+    def _uniform_absorption(self) -> float:
+        """
+        The constant part of the absorption potential, in volts.
+
+        Nonzero only when the imaginary potential is spatially uniform: the
+        mean-free-path model with no separate specimen value, where every
+        material absorbs at the medium's rate. A constant factorises out of
+        the transmission exponential, so `Scattering` applies it as a scalar
+        and nothing is allocated -- which is what makes this model usable on
+        the volumes a 512-pixel box in thick ice produces, where the field
+        alone would be 25.6 GiB.
+
+        Returns
+        -------
+        float
+            Absorption potential in volts, or 0.0.
+        """
+        if self.absorption_model != "inelastic_mfp":
+            return 0.0
+        if self.propagation.inelastic_mfp_specimen is not None:
+            return 0.0  # not uniform; built as a field instead
+        if getattr(self, "icemaker", None) is None:
+            return 0.0  # vacuum around the specimen, nothing to absorb in
+        return absorption_potential(
+            self.propagation.inelastic_mfp_solvent, self.voltage
+        )
+
     def _absorption_field(self, specimen: torch.Tensor) -> torch.Tensor | None:
         """
         The imaginary potential from material mean free paths, or None.
@@ -322,6 +350,9 @@ class BaseImager(L.LightningModule):
         this moves past single-particle boxes.
         """
         if self.absorption_model != "inelastic_mfp":
+            return None
+        if self.propagation.inelastic_mfp_specimen is None:
+            # Uniform, so it goes to `Scattering` as a scalar instead.
             return None
         has_solvent = getattr(self, "icemaker", None) is not None
         return inelastic_absorption_potential(

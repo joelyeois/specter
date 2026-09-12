@@ -70,6 +70,13 @@ PadMode = Literal["constant", "reflect", "replicate", "circular"]
 #: Aberration image-formation model: ``|CTF(psi)|^2`` or the linearised CTF.
 AberrationModel = Literal["nonlinear", "linear"]
 
+#: How the imaginary part of the potential is obtained. ``"alpha"`` scales the
+#: real potential by a fitted amplitude-contrast ratio; ``"inelastic_mfp"``
+#: derives it per material from a measured inelastic mean free path. See
+#: `potential.inelastic_absorption_potential` for why the second is preferred
+#: wherever a mean free path is known.
+AbsorptionModel = Literal["alpha", "inelastic_mfp"]
+
 #: Whether a volume is rotated in real or Fourier space.
 RotateMode = Literal["real", "fourier"]
 
@@ -98,6 +105,7 @@ Scheduler = Literal[
 
 __all__ = [
     "AberrationModel",
+    "AbsorptionModel",
     "CarbonEdgeSide",
     "ConvBackend",
     "ConvBoundary",

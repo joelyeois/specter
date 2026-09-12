@@ -41,6 +41,7 @@ from dataclasses import dataclass
 from typing import Any, Literal, TypeVar
 
 from specter.options import (
+    AbsorptionModel,
     DetectorModel,
     EwaldSphereSign,
     IceModel,
@@ -50,6 +51,7 @@ from specter.options import (
     ScatteringModel,
     TiltAxis,
 )
+from specter.potential import INELASTIC_MFP_ICE_A
 
 AberrationBackend = Literal["legacy", "torch_ctf"]
 
@@ -80,7 +82,29 @@ class Propagation:
         Amplitude contrast ratio, dimensionless in ``[0, 1]``. Applied to the
         potential before propagation for the wave models, and inside the
         transfer function for ``scattering_model="ctf"``, whose exit wave is
-        a real projection. Default 0.0.
+        a real projection. Default 0.0. Ignored, and required to be zero, when
+        ``absorption_model="inelastic_mfp"``.
+    absorption_model : AbsorptionModel
+        Where the imaginary part of the potential comes from. ``"alpha"``
+        (default) scales the real potential by `alpha`, tying absorption to
+        every atomic cusp. ``"inelastic_mfp"`` derives it per material from a
+        measured mean free path instead -- see
+        :func:`~specter.potential.inelastic_absorption_potential`, which also
+        records why a fitted `alpha` is the wrong quantity for this job.
+    inelastic_mfp_solvent : float
+        Inelastic mean free path of the embedding medium, in Angstrom. Used
+        only when ``absorption_model="inelastic_mfp"``, and only where the
+        medium is actually present: with no icemaker there is vacuum around
+        the specimen, not ice, so the solvent term is dropped. Default
+        :data:`~specter.potential.INELASTIC_MFP_ICE_A`, measured for amorphous
+        ice at 300 kV -- another voltage needs its own value.
+    inelastic_mfp_specimen : float or None
+        Inelastic mean free path of the specimen material, in Angstrom.
+        Default None gives the specimen the solvent's value, so it absorbs
+        exactly like the medium it displaces and carries bulk attenuation but
+        no absorption *contrast*. Pass
+        :data:`~specter.potential.INELASTIC_MFP_PROTEIN_A` for protein, noting
+        the uncertainty documented there.
     ews_curvature_sign : EwaldSphereSign
         Sign of the Ewald-sphere curvature, matching CryoSPARC's convention.
         Default ``"negative"``.
@@ -99,6 +123,9 @@ class Propagation:
 
     scattering_model: ScatteringModel = "multislice"
     alpha: float = 0.0
+    absorption_model: AbsorptionModel = "alpha"
+    inelastic_mfp_solvent: float = INELASTIC_MFP_ICE_A
+    inelastic_mfp_specimen: float | None = None
     ews_curvature_sign: EwaldSphereSign = "negative"
     klim: float | None = None
     pad_fft: bool = False
@@ -107,6 +134,31 @@ class Propagation:
     def __post_init__(self) -> None:
         if not 0.0 <= self.alpha <= 1.0:
             raise ValueError(f"alpha={self.alpha} must be in [0, 1]")
+        if self.absorption_model == "inelastic_mfp":
+            # The two are alternative routes to the same imaginary potential,
+            # so allowing both would absorb twice.
+            if self.alpha != 0.0:
+                raise ValueError(
+                    f"absorption_model='inelastic_mfp' with alpha={self.alpha}: "
+                    "the two are alternative routes to the imaginary potential "
+                    "and would double-count. Set alpha=0.0 (note that a "
+                    ".cs/.star file's amplitude contrast overrides the config's "
+                    "alpha, so it has to be zeroed at the source)."
+                )
+            # scattering_model="ctf" has a real projection for an exit wave and
+            # applies amplitude contrast at the lens instead (see BaseImager's
+            # specimen_absorption), so a complex potential has nowhere to go.
+            if self.scattering_model == "ctf":
+                raise ValueError(
+                    "absorption_model='inelastic_mfp' is not available with "
+                    "scattering_model='ctf', whose exit wave is a real "
+                    "projection and which applies amplitude contrast inside "
+                    "the transfer function. Use a wave model, or alpha."
+                )
+            for name in ("inelastic_mfp_solvent", "inelastic_mfp_specimen"):
+                value = getattr(self, name)
+                if value is not None and value <= 0.0:
+                    raise ValueError(f"{name}={value} must be positive")
         if self.klim is not None and not 0.0 < self.klim <= 1.0:
             raise ValueError(
                 f"klim={self.klim} must be in (0, 1] (a fraction of Nyquist)"

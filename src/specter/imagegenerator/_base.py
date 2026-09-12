@@ -28,6 +28,7 @@ from ..aberrations import (
 from ..arrays import compute_nz, pad_volume
 from ..ctf import LegacyAberrationAdapter
 from ..microscope import Detector
+from ..potential import inelastic_absorption_potential
 from ..settings import Camera, Envelopes, Optics, Propagation
 
 __all__ = [
@@ -137,6 +138,7 @@ class BaseImager(L.LightningModule):
         # Read often enough downstream to be worth mirroring as attributes.
         self.scattering_model = self.propagation.scattering_model
         self.alpha = self.propagation.alpha
+        self.absorption_model = self.propagation.absorption_model
         self.klim = self.propagation.klim
         self.ews_curvature_sign = self.propagation.ews_curvature_sign
         self.noise_model = self.camera.noise_model
@@ -281,6 +283,56 @@ class BaseImager(L.LightningModule):
                 setattr(self, "dfu", getattr(self, "dfu") - shift)
             if hasattr(self, "dfv"):
                 setattr(self, "dfv", getattr(self, "dfv") - shift)
+
+    def _absorption_field(self, specimen: torch.Tensor) -> torch.Tensor | None:
+        """
+        The imaginary potential from material mean free paths, or None.
+
+        None under ``absorption_model="alpha"``, where the imaginary part is
+        applied downstream by ``Scattering`` a slice chunk at a time from a
+        real volume. Otherwise a real-valued field to be combined with the
+        propagating potential as ``torch.complex(V, v_ab)``, after which
+        ``Scattering`` uses the potential as given and ignores its ``alpha``.
+
+        Parameters
+        ----------
+        specimen : torch.Tensor
+            The potential of the specimen **alone**, before any solvent was
+            blended in, shape ``(B, Z, Y, X)``. This must not be a solvated
+            volume: occupancy read off one is full everywhere, which would
+            hand the whole box the specimen's mean free path. It is also why
+            this is computed before ``solvate``, which writes into its input.
+
+        Returns
+        -------
+        torch.Tensor or None
+            The absorption potential in volts, or None when absorption is
+            left to ``alpha``.
+
+        Notes
+        -----
+        The solvent term is dropped when there is no icemaker: what surrounds
+        the specimen is then vacuum, not ice, and absorbing in it would remove
+        electrons nothing scattered.
+
+        The complex volume this feeds costs ~3.5x the resident memory of the
+        real one at a 512-pixel box, because it defeats
+        ``Scattering.multislice``'s per-chunk complexification. Building it
+        inside that loop instead keeps it near 2x, and is worth doing when
+        this moves past single-particle boxes.
+        """
+        if self.absorption_model != "inelastic_mfp":
+            return None
+        has_solvent = getattr(self, "icemaker", None) is not None
+        return inelastic_absorption_potential(
+            specimen,
+            self.pixel_size,
+            self.voltage,
+            mfp_solvent_A=(
+                self.propagation.inelastic_mfp_solvent if has_solvent else float("inf")
+            ),
+            mfp_specimen_A=self.propagation.inelastic_mfp_specimen,
+        )
 
     def _init_optics(self) -> None:
         """Instantiate the aberration engine and ``Detector`` from the

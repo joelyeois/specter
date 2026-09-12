@@ -398,6 +398,15 @@ def _resolve_imaging_parameters(
         voltage = config.voltage
         alpha = config.alpha
 
+    if getattr(config, "absorption_model", "alpha") == "inelastic_mfp":
+        # The dataset's amplitude contrast is not a measurement of absorption
+        # -- CTF estimation takes it as an input and never fits it -- so under
+        # this model it is dropped rather than allowed to override. Leaving it
+        # in would double-count against the mean-free-path term, which
+        # `Propagation` rejects outright. See
+        # `potential.apply_amplitude_contrast` for the evidence.
+        alpha = 0.0
+
     return dataset_particles, pixel_size, voltage, alpha
 
 

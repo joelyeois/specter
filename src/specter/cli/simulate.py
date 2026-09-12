@@ -54,6 +54,14 @@ _PARTICLE_STACK_GROUPS: list[tuple[str, list[str]]] = [
         ["defocus", "shift", "n_particles"],
     ),
     (
+        "Absorption",
+        [
+            "absorption_model",
+            "inelastic_mfp_solvent",
+            "inelastic_mfp_specimen",
+        ],
+    ),
+    (
         "Models",
         ["scattering_model", "noise_model", "detector_model"],
     ),

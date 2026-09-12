@@ -294,14 +294,27 @@ class ParticleGeneratorBase(BaseImager):
         if not self._potential_scale_is_unity:
             V = V * scale
 
+        # `clean_exitwaves` is the ice-free, absorption-free reference, so it
+        # is deliberately propagated from the real potential.
         if getattr(self, "save_clean_exitwaves", False):
             self.clean_exitwaves = self.scattering(V)
+
+        # Read the material fraction while V is still the specimen alone:
+        # `solvate` writes into its input, and occupancy off a solvated volume
+        # is full everywhere, which would give the whole box the specimen's
+        # mean free path.
+        with torch.no_grad():
+            v_ab = self._absorption_field(V)
 
         if getattr(self, "icemaker", None) is not None:
             if self.verbose:
                 logger.info(f"Adding ice to volume using {self.ice_model} model")
             with torch.no_grad():
                 V = self.solvate(V, potential_scale=scale)
+
+        if v_ab is not None:
+            V = torch.complex(V, v_ab)
+            del v_ab
 
         if self.verbose:
             logger.info(f"Applying scattering using {self.scattering_model} model")

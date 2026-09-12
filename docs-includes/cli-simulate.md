@@ -62,6 +62,14 @@ specter simulate particles [OPTIONS]
 | `--shift` | `FLOAT` | `2.0` | Max in-plane shift in Angstrom (uniform +/-shift). |
 | `--n_particles` | `INTEGER` | `20` | Number of particles to simulate. |
 
+**Absorption**{ #specter-simulate-particles-absorption }
+
+| Flag | Type | Default | Description |
+| --- | --- | --- | --- |
+| `--absorption_model` | `alpha` \| `inelastic_mfp` | `alpha` | Where the imaginary potential comes from. 'alpha' scales the real potential by the amplitude-contrast ratio, tying absorption to every atomic cusp. 'inelastic_mfp' derives it per material from a measured inelastic mean free path instead, and ignores alpha (including a .cs/.star file's, which CTF estimation takes as an input and never fits). |
+| `--inelastic_mfp_solvent` | `FLOAT` | `3950.0` | Inelastic mean free path of the ice, in Angstrom, for absorption_model='inelastic_mfp'. Default 3950 is measured for amorphous ice at 300 kV; another voltage needs its own value. |
+| `--inelastic_mfp_specimen` | `FLOAT` | _none_ | Inelastic mean free path of the specimen, in Angstrom, for absorption_model='inelastic_mfp'. Unset gives the specimen the ice's value, so it absorbs like the water it displaces and carries no absorption contrast. 2460 is the derived value for protein. |
+
 **Models**{ #specter-simulate-particles-models }
 
 | Flag | Type | Default | Description |

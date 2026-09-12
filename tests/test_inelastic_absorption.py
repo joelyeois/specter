@@ -169,3 +169,108 @@ def test_amplitude_contrast_leaves_a_complex_potential_alone() -> None:
         apply_amplitude_contrast(v, alpha=0.1),
         v * ((1 - 0.1**2) ** 0.5 + 1j * 0.1),
     )
+
+
+def test_propagation_rejects_alpha_alongside_the_mfp_model() -> None:
+    """The two routes to the imaginary potential would double-count."""
+    from specter.settings import Propagation
+
+    with pytest.raises(ValueError, match="double-count"):
+        Propagation(absorption_model="inelastic_mfp", alpha=0.1)
+
+
+def test_propagation_rejects_the_mfp_model_with_scattering_model_ctf() -> None:
+    """``"ctf"`` has a real exit wave and absorbs at the lens instead."""
+    from specter.settings import Propagation
+
+    with pytest.raises(ValueError, match="not available with"):
+        Propagation(absorption_model="inelastic_mfp", scattering_model="ctf")
+
+
+def test_pipeline_drops_a_dataset_alpha_under_the_mfp_model() -> None:
+    """
+    A ``.cs``/``.star`` amplitude contrast must not reach the mfp path.
+
+    `_resolve_imaging_parameters` normally lets the dataset's value override
+    the config's, which would trip `Propagation`'s double-count guard. It is
+    dropped instead, because CTF estimation takes amplitude contrast as an
+    input and never fits it.
+    """
+    from dataclasses import dataclass
+
+    from specter.pipelines._particles import _resolve_imaging_parameters
+
+    @dataclass
+    class _Config:
+        cs_path: None = None
+        star_path: None = None
+        pixel_size: float = 1.0
+        voltage: float = 300.0
+        alpha: float = 0.1
+        absorption_model: str = "inelastic_mfp"
+
+    _, _, _, alpha = _resolve_imaging_parameters(_Config())
+    assert alpha == 0.0
+    _, _, _, alpha = _resolve_imaging_parameters(_Config(absorption_model="alpha"))
+    assert alpha == 0.1
+
+
+@pytest.mark.parametrize(
+    "specimen_mfp", [None, INELASTIC_MFP_PROTEIN_A], ids=["ice-only", "ice+protein"]
+)
+def test_generator_transmission_matches_the_mean_free_path(
+    specimen_mfp: float | None,
+) -> None:
+    """
+    A full generator run transmits ``exp(-t/Lambda)`` through its ice.
+
+    The end-to-end version of the mean-free-path test: not the potential in
+    isolation but the image a generator produces, ice and aberrations
+    included. Pins the wiring -- that the absorption field is read off the
+    specimen before solvation and reaches `Scattering` as a complex volume.
+    """
+    import math
+
+    import specter
+    from specter.imagegenerator import ImageGenerator
+    from specter.settings import Camera, Crowding, Envelopes, Ice, Optics, Propagation
+
+    n, dx, thickness, dose = 48, 2.0, 400.0, 40.0
+    volume = torch.zeros(n, n, n)
+    volume[20:28, 20:28, 20:28] = 7.0
+    ctf_params = {
+        "dfu": torch.tensor([10000.0]),
+        "dfv": torch.tensor([10000.0]),
+        "dfang": torch.tensor([0.0]),
+        "cs": torch.tensor([2.7e7]),
+        "phaseshift": torch.tensor([0.0]),
+    }
+    specter.seed(3)
+    generator = ImageGenerator(
+        volume,
+        dx,
+        torch.tensor([[1.0, 0.0, 0.0, 0.0]]),
+        torch.zeros(1, 2),
+        ctf_params,
+        VOLTAGE,
+        dose_per_angstrom=dose,
+        propagation=Propagation(
+            absorption_model="inelastic_mfp", inelastic_mfp_specimen=specimen_mfp
+        ),
+        ice=Ice(model="gd", thickness=thickness),
+        crowding=Crowding(n_points=0),
+        camera=Camera(noise_model="none", detector_model="none"),
+        envelopes=Envelopes(),
+        optics=Optics(),
+        progressbars=False,
+    )
+    with torch.no_grad():
+        image = generator(torch.tensor([0]))
+
+    transmission = float(image.mean()) / (dose * dx**2)
+    expected = math.exp(-thickness / INELASTIC_MFP_ICE_A)
+    # The specimen is a small fraction of the box, so giving it its own
+    # (shorter) mean free path moves the mean only slightly -- and downwards.
+    assert transmission == pytest.approx(expected, rel=0.02)
+    if specimen_mfp is not None:
+        assert transmission < expected

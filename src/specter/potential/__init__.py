@@ -2,7 +2,13 @@
 
 from __future__ import annotations
 
-from ._absorption import apply_amplitude_contrast
+from ._absorption import (
+    INELASTIC_MFP_ICE_A,
+    INELASTIC_MFP_PROTEIN_A,
+    absorption_potential,
+    apply_amplitude_contrast,
+    inelastic_absorption_potential,
+)
 from ._builders import (
     build_atomic_potential_kernel,
     build_potential_volume_analytic_scatter,
@@ -24,7 +30,11 @@ from ._occupancy import (
 from ._potential_builder import PotentialBuilder
 
 __all__ = [
+    "INELASTIC_MFP_ICE_A",
+    "INELASTIC_MFP_PROTEIN_A",
+    "absorption_potential",
     "apply_amplitude_contrast",
+    "inelastic_absorption_potential",
     "FULL_OCCUPANCY_POTENTIAL_V",
     "GemmiPotentialBuilder",
     "PotentialBuilder",

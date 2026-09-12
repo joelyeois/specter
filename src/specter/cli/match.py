@@ -14,6 +14,14 @@ from ._click_options import CONTEXT_SETTINGS, build_config_command, load_cli_con
 _MATCH_PARTICLE_GROUPS: list[tuple[str, list[str]]] = [
     ("Inputs", ["metadata_path", "images_path", "pdb_source", "assembly"]),
     ("Acquisition", ["detector_model", "dose", "dose_rate", "energy_filter"]),
+    (
+        "Absorption",
+        [
+            "absorption_model",
+            "inelastic_mfp_solvent",
+            "inelastic_mfp_specimen",
+        ],
+    ),
     ("Probing", ["n_probe", "n_battery", "probe_bin", "write_stack"]),
     ("Compute", ["device", "probe_workers", "seed"]),
     ("Output & job tracking", ["output_dir", "project", "job_id"]),

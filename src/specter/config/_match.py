@@ -106,6 +106,33 @@ class MatchConfig:
             "forward model cannot express."
         ),
     )  # None = not stated
+    absorption_model: Literal["alpha", "inelastic_mfp"] = setting(
+        "alpha",
+        help=(
+            "Where the imaginary potential comes from, for every probe and for "
+            "the matched config. 'inelastic_mfp' derives it per material from a "
+            "measured mean free path and ignores the dataset's amplitude "
+            "contrast, which CTF estimation takes as an input and never fits."
+        ),
+    )
+    inelastic_mfp_solvent: float = setting(
+        3950.0,
+        help=(
+            "Inelastic mean free path of the ice, in Angstrom, for "
+            "absorption_model='inelastic_mfp'. Default 3950 is measured for "
+            "amorphous ice at 300 kV."
+        ),
+        check="positive",
+    )  # Å
+    inelastic_mfp_specimen: float | None = setting(
+        None,
+        help=(
+            "Inelastic mean free path of the specimen, in Angstrom. Unset gives "
+            "it the ice's value, so it carries bulk attenuation but no absorption "
+            "contrast. 2460 is the derived value for protein."
+        ),
+        check="positive",
+    )  # Å
 
     # --- Probing ---
     n_probe: int = setting(

@@ -530,6 +530,13 @@ def _base_settings(
         normalize_particles=True,
         pdb_cache_dir=config.pdb_cache_dir,
         monomer_library_path=config.monomer_library_path,
+        # Carried through so every probe absorbs the way the matched config
+        # will. Under "inelastic_mfp" the dataset's own amplitude contrast is
+        # dropped, which is the point: it is an input to CTF estimation, never
+        # a fitted measurement of absorption.
+        absorption_model=config.absorption_model,
+        inelastic_mfp_solvent=config.inelastic_mfp_solvent,
+        inelastic_mfp_specimen=config.inelastic_mfp_specimen,
         **meta,
     )
 

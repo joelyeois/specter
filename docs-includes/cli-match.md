@@ -44,6 +44,14 @@ specter match particles [OPTIONS]
 | `--dose_rate` | `FLOAT` | _none_ | Incident dose rate in electrons per physical pixel per second, from the acquisition notes. Sets the coincidence-loss occupancy. Unset falls back to the detector's typical operating rate, and the report says so. |
 | `--energy_filter` | `True` \| `False` | _none_ | Whether an energy filter (slit) was used. Recorded in the report: on today's evidence unfiltered data carry a residual the forward model cannot express. |
 
+**Absorption**{ #specter-match-particles-absorption }
+
+| Flag | Type | Default | Description |
+| --- | --- | --- | --- |
+| `--absorption_model` | `alpha` \| `inelastic_mfp` | `alpha` | Where the imaginary potential comes from, for every probe and for the matched config. 'inelastic_mfp' derives it per material from a measured mean free path and ignores the dataset's amplitude contrast, which CTF estimation takes as an input and never fits. |
+| `--inelastic_mfp_solvent` | `FLOAT` | `3950.0` | Inelastic mean free path of the ice, in Angstrom, for absorption_model='inelastic_mfp'. Default 3950 is measured for amorphous ice at 300 kV. |
+| `--inelastic_mfp_specimen` | `FLOAT` | _none_ | Inelastic mean free path of the specimen, in Angstrom. Unset gives it the ice's value, so it carries bulk attenuation but no absorption contrast. 2460 is the derived value for protein. |
+
 **Probing**{ #specter-match-particles-probing }
 
 | Flag | Type | Default | Description |

@@ -526,7 +526,13 @@ def _base_settings(
         potential_scale=1.0,
         pad_fft=True,
         device=config.device,
-        batchsize=4,
+        # A distinct specimen mean free path makes the absorption a field --
+        # a second volume the size of the potential, plus the complex copy of
+        # it that propagation consumes. At a 512-pixel box with FFT padding
+        # and thick ice the potential alone is 6.4 GiB per batch item, so four
+        # of them plus the absorption does not fit on a 44 GiB card. A uniform
+        # absorption is a scalar and costs nothing, so it keeps the wide batch.
+        batchsize=1 if config.inelastic_mfp_specimen is not None else 4,
         normalize_particles=True,
         pdb_cache_dir=config.pdb_cache_dir,
         monomer_library_path=config.monomer_library_path,

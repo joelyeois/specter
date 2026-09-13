@@ -52,7 +52,7 @@ specter match particles [OPTIONS]
 | `--inelastic_mfp_solvent` | `FLOAT` | `3950.0` | Inelastic mean free path of the ice, in Angstrom, for absorption_model='inelastic_mfp'. Default 3950 is measured for amorphous ice at 300 kV. |
 | `--inelastic_mfp_specimen` | `FLOAT` | _none_ | Inelastic mean free path of the specimen, in Angstrom. Unset gives it the ice's value, so it carries bulk attenuation but no absorption contrast. 2460 is the derived value for protein. |
 | `--dose_weights_path` | `TEXT` | _none_ | Path to the exposure filter's per-frame weights (.npy, (n_frames, n_bins)), e.g. CryoSPARC's refm_empirical_dw.npy. Carried into every probe and the matched config. |
-| `--dose_weights_pixel_size` | `FLOAT` | _none_ | Pixel size in Angstrom of the movie --dose_weights_path was computed on. Its radial axis ends at that Nyquist, which for a super-resolution or EER movie is not the particles'. Unset assumes they match, which overstates the noise gain when they do not. |
+| `--dose_weights_max_frequency` | `FLOAT` | _none_ | Frequency in 1/Angstrom of the last bin of --dose_weights_path. Unset derives it from the motion-correction job's own files, which is the reliable route: the pixel size alone does not determine it. |
 
 **Probing**{ #specter-match-particles-probing }
 

@@ -88,7 +88,7 @@ class Detector(L.LightningModule):
         dqe0: float = 1.0,
         n_frames: int | None = None,
         dose_weights: torch.Tensor | None = None,
-        dose_weights_pixel_size: float | None = None,
+        dose_weights_max_frequency: float | None = None,
         progressbars: bool = True,
     ):
         super().__init__()
@@ -101,7 +101,7 @@ class Detector(L.LightningModule):
         self.dqe0 = dqe0
         self.n_frames = n_frames
         self.register_buffer("dose_weights", dose_weights, persistent=False)
-        self.dose_weights_pixel_size = dose_weights_pixel_size
+        self.dose_weights_max_frequency = dose_weights_max_frequency
         self.progressbars = progressbars
 
     def image(
@@ -555,9 +555,13 @@ class Detector(L.LightningModule):
         the curve across the whole measurable band and overstates the noise
         gain threefold (6.76x against a measured 2.22x at 0.9 Nyquist).
 
-        `dose_weights_pixel_size` is that movie's pixel size and fixes the
-        mapping; without it the axis is assumed to match the image, which is
-        right only when the weights were computed at the same sampling.
+        `dose_weights_max_frequency` is the frequency its last bin sits at,
+        in 1/Angstrom, so the mapping is done in absolute frequency and a
+        stack downsampled or Fourier-cropped after motion correction still
+        gets the weights that apply at the frequencies it kept.
+        :func:`~specter.io.load_dose_weights` derives it from the job's own
+        files. Without it the axis is assumed to end at the image's Nyquist,
+        which is right only by coincidence.
 
         Parameters
         ----------
@@ -580,10 +584,14 @@ class Detector(L.LightningModule):
         kx = torch.fft.rfftfreq(shape[1], device=device)
         # Fraction of the WEIGHTS' Nyquist, which is what the radial axis
         # indexes -- not the image's, when the two differ.
-        scale = 1.0
-        if self.dose_weights_pixel_size is not None:
-            scale = self.dose_weights_pixel_size / self.pixel_size
-        r = torch.sqrt(ky[:, None] ** 2 + kx[None, :] ** 2) / 0.5 * scale
+        # Absolute frequency, in 1/Angstrom, mapped onto the weights' own
+        # axis. Keying on frequency rather than on a fraction of somebody's
+        # Nyquist is what makes a later crop or downsample harmless.
+        k = torch.sqrt(ky[:, None] ** 2 + kx[None, :] ** 2) / self.pixel_size
+        max_freq = self.dose_weights_max_frequency
+        if max_freq is None:
+            max_freq = 1.0 / (2.0 * self.pixel_size)
+        r = k / max_freq
         idx = torch.clamp((r * (n_bins - 1)).round().long(), 0, n_bins - 1)
         grids = w[:, idx.reshape(-1)].reshape(n_frames, *idx.shape)
         total = grids.sum(dim=0, keepdim=True).clamp(min=1e-12)

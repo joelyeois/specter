@@ -11,6 +11,8 @@ itself.
 from __future__ import annotations
 
 import math
+import os
+import tempfile
 
 import pytest
 import torch
@@ -354,16 +356,17 @@ def test_dose_weights_raise_the_noise_floor_without_touching_the_signal() -> Non
     assert high > low
 
 
-def test_dose_weights_axis_follows_the_movie_pixel_size() -> None:
+def test_dose_weights_axis_is_keyed_on_absolute_frequency() -> None:
     """
     The weights' radial axis ends at the MOVIE's Nyquist, not the image's.
 
-    Super-resolution and EER movies are the usual case: EMPIAR-11377's Falcon
-    4i weights span twice the Nyquist of its 0.731 A/px particles. Reading
-    them as if the axis ended at the particles' own Nyquist stretches the
-    steep half of the curve across the whole measurable band and overstates
-    the noise gain threefold -- 6.80x against a measured 2.22x at 0.9 Nyquist,
-    where the correct mapping gives 3.33x.
+    EMPIAR-11377's weights run to 1.368 1/A, twice the Nyquist of its
+    0.731 A/px particles -- not because the movie was sampled differently
+    (`hyperparams.cs` records the same 0.731) but because the weights array
+    carries twice the radial sampling of the FCC beside it. Reading the axis
+    as the particles' own Nyquist overstates the noise gain threefold: 6.80x
+    against a measured 2.22x at 0.9 Nyquist, where the right mapping gives
+    3.33x. Keying on absolute frequency is what makes a later crop harmless.
     """
     from specter.microscope import Detector
 
@@ -375,13 +378,13 @@ def test_dose_weights_axis_follows_the_movie_pixel_size() -> None:
 
     flat = torch.full((n, n), 40.0)
 
-    def top_band_gain(pixel_size_of_weights: float | None) -> float:
+    def top_band_gain(max_frequency: float | None) -> float:
         det = Detector(
             pixel_size=1.0,
             noise_model="poisson",
             n_frames=n_frames,
             dose_weights=w,
-            dose_weights_pixel_size=pixel_size_of_weights,
+            dose_weights_max_frequency=max_frequency,
             progressbars=False,
         )
         torch.manual_seed(0)
@@ -394,8 +397,43 @@ def test_dose_weights_axis_follows_the_movie_pixel_size() -> None:
             p[(r >= 0.05) & (r < 0.2)].mean()
         )
 
-    same = top_band_gain(None)
-    super_res = top_band_gain(0.5)  # weights computed at half the image's pixel
-    # Reading a super-resolution axis as if it ended at the image's Nyquist
-    # samples further up the curve, so it overstates the gain.
-    assert same > super_res
+    # The image's Nyquist is 0.5 1/A at a 1 A pixel. An axis that actually
+    # runs to twice that is sampled only half way up by this image, so reading
+    # it as if it ended at Nyquist walks further up the curve and overstates
+    # the gain.
+    assumed_nyquist = top_band_gain(None)
+    actually_twice = top_band_gain(1.0)
+    assert assumed_nyquist > actually_twice
+
+
+def test_load_dose_weights_derives_its_frequency_axis() -> None:
+    """
+    The axis is derived from the job's files, or refused.
+
+    A wrong axis raises nowhere downstream -- the weights still apply, just at
+    the wrong frequencies -- so an underivable one is an error rather than a
+    guess. The pixel size alone is not enough and must not be treated as
+    though it were: CryoSPARC records 0.731 for EMPIAR-11377's weights, the
+    particles' own pixel size, while the axis runs to twice their Nyquist.
+    """
+    import numpy as np
+
+    from specter.io import load_dose_weights
+
+    tmp = tempfile.mkdtemp()
+    path = os.path.join(tmp, "refm_empirical_dw.npy")
+    np.save(path, np.ones((4, 80), dtype=np.float32))
+
+    # Nothing beside it: refuse rather than assume.
+    with pytest.raises(ValueError, match="cannot determine which frequencies"):
+        load_dose_weights(path)
+
+    # Explicit frequency is always honoured.
+    _, freq = load_dose_weights(path, max_frequency=1.25)
+    assert freq == pytest.approx(1.25)
+
+    # With an FCC of half the bins beside it, the axis spans twice Nyquist.
+    np.save(os.path.join(tmp, "refm_fcc.npy"), np.ones((4, 40), dtype=np.float32))
+    weights, freq = load_dose_weights(path, max_frequency=2.0)
+    assert weights.shape == (4, 80)
+    assert freq == pytest.approx(2.0)

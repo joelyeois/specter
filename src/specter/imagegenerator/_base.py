@@ -430,6 +430,7 @@ class BaseImager(L.LightningModule):
                 dose_weighted=self._dose_weighted,
                 progressbars=self.progressbars,
             )
+        dose_weights = self._load_dose_weights()
         self.detector = Detector(
             self.pixel_size,
             aberration_model=self.aberration_model,
@@ -437,14 +438,19 @@ class BaseImager(L.LightningModule):
             mtf=self.detector_mtf,
             dqe0=dqe0_for_detector(self.detector_model),
             n_frames=self.n_frames,
-            dose_weights=self._load_dose_weights(),
-            dose_weights_pixel_size=self.camera.dose_weights_pixel_size,
+            dose_weights=dose_weights,
+            dose_weights_max_frequency=self._dose_weights_max_frequency,
             progressbars=self.progressbars,
         )
 
     def _load_dose_weights(self) -> torch.Tensor | None:
         """
-        The exposure filter's per-frame weights, if a path was given.
+        The exposure filter's per-frame weights, with their frequency axis.
+
+        Both come from :func:`~specter.io.load_dose_weights`, which derives
+        the axis from the motion-correction job's own files rather than
+        letting a caller assume one. The frequency is stashed for the
+        detector, since a wrong axis fails silently.
 
         Returns
         -------
@@ -457,22 +463,22 @@ class BaseImager(L.LightningModule):
             If weights are given without ``n_frames``, or the frame count
             disagrees with the file's.
         """
+        self._dose_weights_max_frequency: float | None = None
         path = self.camera.dose_weights_path
         if path is None:
             return None
         if self.n_frames is None:
             raise ValueError("dose_weights_path requires n_frames to be set.")
-        import numpy as np
+        from ..io import load_dose_weights
 
-        w = torch.as_tensor(np.load(path)).float()
-        if w.ndim != 2:
-            raise ValueError(
-                f"{path}: expected (n_frames, n_bins), got {tuple(w.shape)}"
-            )
+        w, max_freq = load_dose_weights(
+            path, max_frequency=self.camera.dose_weights_max_frequency
+        )
         if w.shape[0] != self.n_frames:
             raise ValueError(
                 f"{path} has {w.shape[0]} frames but n_frames={self.n_frames}"
             )
+        self._dose_weights_max_frequency = max_freq
         return w
 
     def _aberrate(

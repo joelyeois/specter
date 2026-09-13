@@ -133,13 +133,12 @@ class MatchConfig:
         ),
         check="existing_file",
     )
-    dose_weights_pixel_size: float | None = setting(
+    dose_weights_max_frequency: float | None = setting(
         None,
         help=(
-            "Pixel size in Angstrom of the movie --dose_weights_path was computed "
-            "on. Its radial axis ends at that Nyquist, which for a super-resolution "
-            "or EER movie is not the particles'. Unset assumes they match, which "
-            "overstates the noise gain when they do not."
+            "Frequency in 1/Angstrom of the last bin of --dose_weights_path. Unset "
+            "derives it from the motion-correction job's own files, which is the "
+            "reliable route: the pixel size alone does not determine it."
         ),
         check="positive",
     )

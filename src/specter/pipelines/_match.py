@@ -544,6 +544,7 @@ def _base_settings(
         inelastic_mfp_solvent=config.inelastic_mfp_solvent,
         inelastic_mfp_specimen=config.inelastic_mfp_specimen,
         dose_weights_path=config.dose_weights_path,
+        dose_weights_pixel_size=config.dose_weights_pixel_size,
         **meta,
     )
 

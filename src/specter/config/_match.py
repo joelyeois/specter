@@ -133,6 +133,16 @@ class MatchConfig:
         ),
         check="existing_file",
     )
+    dose_weights_pixel_size: float | None = setting(
+        None,
+        help=(
+            "Pixel size in Angstrom of the movie --dose_weights_path was computed "
+            "on. Its radial axis ends at that Nyquist, which for a super-resolution "
+            "or EER movie is not the particles'. Unset assumes they match, which "
+            "overstates the noise gain when they do not."
+        ),
+        check="positive",
+    )
     inelastic_mfp_specimen: float | None = setting(
         None,
         help=(

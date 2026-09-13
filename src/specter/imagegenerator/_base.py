@@ -438,6 +438,7 @@ class BaseImager(L.LightningModule):
             dqe0=dqe0_for_detector(self.detector_model),
             n_frames=self.n_frames,
             dose_weights=self._load_dose_weights(),
+            dose_weights_pixel_size=self.camera.dose_weights_pixel_size,
             progressbars=self.progressbars,
         )
 

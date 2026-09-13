@@ -352,3 +352,50 @@ def test_dose_weights_raise_the_noise_floor_without_touching_the_signal() -> Non
     high = band_power(b, 0.7, 0.9) / band_power(a, 0.7, 0.9)
     # The floor rises with frequency rather than scaling uniformly.
     assert high > low
+
+
+def test_dose_weights_axis_follows_the_movie_pixel_size() -> None:
+    """
+    The weights' radial axis ends at the MOVIE's Nyquist, not the image's.
+
+    Super-resolution and EER movies are the usual case: EMPIAR-11377's Falcon
+    4i weights span twice the Nyquist of its 0.731 A/px particles. Reading
+    them as if the axis ended at the particles' own Nyquist stretches the
+    steep half of the curve across the whole measurable band and overstates
+    the noise gain threefold -- 6.80x against a measured 2.22x at 0.9 Nyquist,
+    where the correct mapping gives 3.33x.
+    """
+    from specter.microscope import Detector
+
+    n_frames, n_bins, n = 8, 64, 64
+    ramp = torch.linspace(0.0, 1.0, n_bins)
+    w = torch.stack(
+        [torch.ones(n_bins) + (i - n_frames / 2) * ramp * 0.3 for i in range(n_frames)]
+    ).clamp(min=0.0)
+
+    flat = torch.full((n, n), 40.0)
+
+    def top_band_gain(pixel_size_of_weights: float | None) -> float:
+        det = Detector(
+            pixel_size=1.0,
+            noise_model="poisson",
+            n_frames=n_frames,
+            dose_weights=w,
+            dose_weights_pixel_size=pixel_size_of_weights,
+            progressbars=False,
+        )
+        torch.manual_seed(0)
+        x = det.apply_coincidence(flat.clone(), torch.tensor(40.0), 0.3)
+        p = torch.fft.rfft2(x - x.mean()).abs() ** 2
+        ky = torch.fft.fftfreq(n)
+        kx = torch.fft.rfftfreq(n)
+        r = torch.sqrt(ky[:, None] ** 2 + kx[None, :] ** 2) / 0.5
+        return float(p[(r >= 0.7) & (r < 0.9)].mean()) / float(
+            p[(r >= 0.05) & (r < 0.2)].mean()
+        )
+
+    same = top_band_gain(None)
+    super_res = top_band_gain(0.5)  # weights computed at half the image's pixel
+    # Reading a super-resolution axis as if it ended at the image's Nyquist
+    # samples further up the curve, so it overstates the gain.
+    assert same > super_res

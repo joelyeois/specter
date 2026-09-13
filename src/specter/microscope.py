@@ -88,6 +88,7 @@ class Detector(L.LightningModule):
         dqe0: float = 1.0,
         n_frames: int | None = None,
         dose_weights: torch.Tensor | None = None,
+        dose_weights_pixel_size: float | None = None,
         progressbars: bool = True,
     ):
         super().__init__()
@@ -100,6 +101,7 @@ class Detector(L.LightningModule):
         self.dqe0 = dqe0
         self.n_frames = n_frames
         self.register_buffer("dose_weights", dose_weights, persistent=False)
+        self.dose_weights_pixel_size = dose_weights_pixel_size
         self.progressbars = progressbars
 
     def image(
@@ -545,11 +547,17 @@ class Detector(L.LightningModule):
         Per-frame, per-frequency weights on this image's rfft2 grid.
 
         `dose_weights` is stored as ``(n_frames, n_bins)`` over a radial axis
-        running to the weights' own Nyquist -- the shape a motion-correction
-        job writes (CryoSPARC's ``refm_empirical_dw.npy``). It is resampled
-        onto the image's frequency grid as a fraction of Nyquist, so a stack
-        Fourier-cropped after motion correction still gets the weights that
-        applied at the frequencies it kept.
+        running to the Nyquist **of the movie it was computed on**, which is
+        not in general the Nyquist of the particles. Super-resolution and EER
+        movies are the usual case: EMPIAR-11377's Falcon 4i weights span twice
+        the Nyquist of its 0.731 A/px particles, so reading them as if the
+        axis ended at the particles' own Nyquist stretches the steep half of
+        the curve across the whole measurable band and overstates the noise
+        gain threefold (6.76x against a measured 2.22x at 0.9 Nyquist).
+
+        `dose_weights_pixel_size` is that movie's pixel size and fixes the
+        mapping; without it the axis is assumed to match the image, which is
+        right only when the weights were computed at the same sampling.
 
         Parameters
         ----------
@@ -570,8 +578,12 @@ class Detector(L.LightningModule):
         n_frames, n_bins = w.shape
         ky = torch.fft.fftfreq(shape[0], device=device)
         kx = torch.fft.rfftfreq(shape[1], device=device)
-        # Fraction of Nyquist, which is what the radial axis indexes.
-        r = torch.sqrt(ky[:, None] ** 2 + kx[None, :] ** 2) / 0.5
+        # Fraction of the WEIGHTS' Nyquist, which is what the radial axis
+        # indexes -- not the image's, when the two differ.
+        scale = 1.0
+        if self.dose_weights_pixel_size is not None:
+            scale = self.dose_weights_pixel_size / self.pixel_size
+        r = torch.sqrt(ky[:, None] ** 2 + kx[None, :] ** 2) / 0.5 * scale
         idx = torch.clamp((r * (n_bins - 1)).round().long(), 0, n_bins - 1)
         grids = w[:, idx.reshape(-1)].reshape(n_frames, *idx.shape)
         total = grids.sum(dim=0, keepdim=True).clamp(min=1e-12)

@@ -261,6 +261,11 @@ class Camera:
         real data and what `Envelopes.dose_envelope` cannot express, since it
         attenuates the signal and leaves the noise white. Requires
         ``n_frames``. Default None.
+    dose_weights_pixel_size : float or None, optional
+        Pixel size, in Angstrom, of the movie the weights were computed on.
+        Their radial axis ends at THAT Nyquist, which for a super-resolution
+        or EER movie is not the particles'. Default None assumes the two
+        match, which overstates the noise gain when they do not.
     n_frames : int, optional
         Movie frames the dose is fractionated into, which sets how
         coincidence loss saturates. Default None, a single frame.
@@ -270,6 +275,7 @@ class Camera:
     noise_model: NoiseModel | None = "poisson"
     n_frames: int | None = None
     dose_weights_path: str | None = None
+    dose_weights_pixel_size: float | None = None
 
     def __post_init__(self) -> None:
         if self.detector_model == "none":

@@ -124,6 +124,15 @@ class MatchConfig:
         ),
         check="positive",
     )  # Å
+    dose_weights_path: str | None = setting(
+        None,
+        help=(
+            "Path to the exposure filter's per-frame weights (.npy, "
+            "(n_frames, n_bins)), e.g. CryoSPARC's refm_empirical_dw.npy. Carried "
+            "into every probe and the matched config."
+        ),
+        check="existing_file",
+    )
     inelastic_mfp_specimen: float | None = setting(
         None,
         help=(

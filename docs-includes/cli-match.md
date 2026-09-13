@@ -51,6 +51,7 @@ specter match particles [OPTIONS]
 | `--absorption_model` | `alpha` \| `inelastic_mfp` | `alpha` | Where the imaginary potential comes from, for every probe and for the matched config. 'inelastic_mfp' derives it per material from a measured mean free path and ignores the dataset's amplitude contrast, which CTF estimation takes as an input and never fits. |
 | `--inelastic_mfp_solvent` | `FLOAT` | `3950.0` | Inelastic mean free path of the ice, in Angstrom, for absorption_model='inelastic_mfp'. Default 3950 is measured for amorphous ice at 300 kV. |
 | `--inelastic_mfp_specimen` | `FLOAT` | _none_ | Inelastic mean free path of the specimen, in Angstrom. Unset gives it the ice's value, so it carries bulk attenuation but no absorption contrast. 2460 is the derived value for protein. |
+| `--dose_weights_path` | `TEXT` | _none_ | Path to the exposure filter's per-frame weights (.npy, (n_frames, n_bins)), e.g. CryoSPARC's refm_empirical_dw.npy. Carried into every probe and the matched config. |
 
 **Probing**{ #specter-match-particles-probing }
 

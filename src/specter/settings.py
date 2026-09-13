@@ -251,6 +251,16 @@ class Camera:
     noise_model : NoiseModel, optional
         ``"poisson"`` (default) draws shot noise from the expected counts;
         None (or ``"none"``) returns the expected image.
+    dose_weights_path : str or None, optional
+        Path to a ``(n_frames, n_bins)`` ``.npy`` of the exposure filter's own
+        per-frame, per-frequency weights -- CryoSPARC's
+        ``refm_empirical_dw.npy``, say. The frames are then summed in Fourier
+        space under those weights instead of equally, which leaves the signal
+        untouched and multiplies the noise power by ``sum(w^2)/n_frames``.
+        That rising floor is what a signal-preserving dose weighting leaves in
+        real data and what `Envelopes.dose_envelope` cannot express, since it
+        attenuates the signal and leaves the noise white. Requires
+        ``n_frames``. Default None.
     n_frames : int, optional
         Movie frames the dose is fractionated into, which sets how
         coincidence loss saturates. Default None, a single frame.
@@ -259,6 +269,7 @@ class Camera:
     detector_model: DetectorModel | None = None
     noise_model: NoiseModel | None = "poisson"
     n_frames: int | None = None
+    dose_weights_path: str | None = None
 
     def __post_init__(self) -> None:
         if self.detector_model == "none":

@@ -295,3 +295,60 @@ def test_slabbed_occupancy_matches_whole_volume(cap: int) -> None:
     whole = inelastic_absorption_potential(v, max_voxels_per_slab=10**9, **kwargs)
     slabbed = inelastic_absorption_potential(v, max_voxels_per_slab=cap, **kwargs)
     assert torch.equal(slabbed, whole)
+
+
+def test_dose_weights_raise_the_noise_floor_without_touching_the_signal() -> None:
+    """
+    A signal-preserving exposure filter leaves a rising noise floor.
+
+    `Envelopes.dose_envelope` cannot express this: it attenuates the signal and
+    leaves the noise white, by construction. Real motion correction sums frames
+    under per-frequency weights normalised to sum to one, which leaves the
+    signal alone and multiplies the noise power by ``sum(w^2)/n_frames``.
+    Measured on EMPIAR-11377's own RBMC weights, that gain reaches ~7x by 90%
+    of Nyquist -- far larger than anything absorption does, and the term that
+    dominated a sim/experiment 2D classification until it was modelled.
+    """
+    from specter.microscope import Detector
+
+    n_frames, n_bins, n = 8, 64, 64
+    # Damage-aware weighting: frames are weighted nearly equally at low
+    # frequency, where nothing has decayed yet, and increasingly unequally
+    # toward Nyquist, where only the earliest frames still carry signal. It is
+    # that growing inequality that raises the noise floor.
+    ramp = torch.linspace(0.0, 1.0, n_bins)
+    w = torch.stack(
+        [torch.ones(n_bins) + (i - n_frames / 2) * ramp * 0.3 for i in range(n_frames)]
+    ).clamp(min=0.0)
+
+    flat = torch.full((n, n), 40.0)
+    plain = Detector(
+        pixel_size=1.0, noise_model="poisson", n_frames=n_frames, progressbars=False
+    )
+    weighted = Detector(
+        pixel_size=1.0,
+        noise_model="poisson",
+        n_frames=n_frames,
+        dose_weights=w,
+        progressbars=False,
+    )
+    torch.manual_seed(0)
+    a = plain.apply_coincidence(flat.clone(), torch.tensor(40.0), 0.3)
+    torch.manual_seed(0)
+    b = weighted.apply_coincidence(flat.clone(), torch.tensor(40.0), 0.3)
+
+    # Signal (the mean) is untouched: the weights sum to n_frames at every
+    # frequency, so the DC term is unchanged.
+    assert float(b.mean()) == pytest.approx(float(a.mean()), rel=0.02)
+
+    def band_power(x: torch.Tensor, lo: float, hi: float) -> float:
+        p = torch.fft.rfft2(x - x.mean()).abs() ** 2
+        ky = torch.fft.fftfreq(x.shape[0])
+        kx = torch.fft.rfftfreq(x.shape[1])
+        r = torch.sqrt(ky[:, None] ** 2 + kx[None, :] ** 2) / 0.5
+        return float(p[(r >= lo) & (r < hi)].mean())
+
+    low = band_power(b, 0.05, 0.15) / band_power(a, 0.05, 0.15)
+    high = band_power(b, 0.7, 0.9) / band_power(a, 0.7, 0.9)
+    # The floor rises with frequency rather than scaling uniformly.
+    assert high > low

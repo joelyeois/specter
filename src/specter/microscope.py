@@ -87,6 +87,7 @@ class Detector(L.LightningModule):
         mtf: torch.Tensor | None = None,
         dqe0: float = 1.0,
         n_frames: int | None = None,
+        dose_weights: torch.Tensor | None = None,
         progressbars: bool = True,
     ):
         super().__init__()
@@ -98,6 +99,7 @@ class Detector(L.LightningModule):
         self.register_buffer("mtf", mtf, persistent=False)
         self.dqe0 = dqe0
         self.n_frames = n_frames
+        self.register_buffer("dose_weights", dose_weights, persistent=False)
         self.progressbars = progressbars
 
     def image(
@@ -467,7 +469,7 @@ class Detector(L.LightningModule):
         if self.noise_model != "poisson":
             return img
 
-        if coincidence_radius <= 0.0:
+        if coincidence_radius <= 0.0 and self.dose_weights is None:
             return torch.poisson(torch.clamp(img, min=0.0))
 
         if self.n_frames is None:
@@ -498,18 +500,79 @@ class Detector(L.LightningModule):
             img_sum / (self.pixel_size**2 * img.shape[0] * img.shape[1])
         ).item()
 
+        weights = self._frame_weight_grids(
+            (int(img.shape[-2]), int(img.shape[-1])), img.device
+        )
+
         final_image = torch.zeros_like(img)
-        for _ in track(
+        accum_k = None
+        for i in track(
             range(n_frames),
             description="Applying coincidence loss",
             transient=True,
             disable=not (self.progressbars),
         ):
-            final_image += self.apply_detector_physics(
+            frame = self.apply_detector_physics(
                 intensity_map,
                 self.pixel_size,
                 dose_effective / n_frames,
                 coinc_radius_pixels=coincidence_radius,
             )
+            if weights is None:
+                final_image += frame
+            else:
+                # Sum the frames in Fourier space under the exposure filter's
+                # own per-frequency weights, rather than adding them equally.
+                # Every frame carries the same expected signal, so weights
+                # normalised to sum to n_frames leave the signal untouched and
+                # multiply the noise POWER by sum(w^2)/n_frames -- the rising
+                # floor a signal-preserving dose weighting leaves behind, and
+                # the one thing `dose_envelope` cannot express, since it
+                # attenuates the signal and leaves the noise white.
+                f = torch.fft.rfft2(frame)
+                accum_k = (
+                    f * weights[i] if accum_k is None else accum_k + f * weights[i]
+                )
+        if accum_k is not None:
+            final_image = torch.fft.irfft2(accum_k, s=tuple(img.shape[-2:]))
 
         return final_image
+
+    def _frame_weight_grids(
+        self, shape: tuple[int, int], device: torch.device
+    ) -> torch.Tensor | None:
+        """
+        Per-frame, per-frequency weights on this image's rfft2 grid.
+
+        `dose_weights` is stored as ``(n_frames, n_bins)`` over a radial axis
+        running to the weights' own Nyquist -- the shape a motion-correction
+        job writes (CryoSPARC's ``refm_empirical_dw.npy``). It is resampled
+        onto the image's frequency grid as a fraction of Nyquist, so a stack
+        Fourier-cropped after motion correction still gets the weights that
+        applied at the frequencies it kept.
+
+        Parameters
+        ----------
+        shape : tuple of int
+            Image shape ``(Y, X)``.
+        device : torch.device
+            Device for the returned grids.
+
+        Returns
+        -------
+        torch.Tensor or None
+            Shape ``(n_frames, Y, X // 2 + 1)``, normalised so the weights at
+            each frequency sum to ``n_frames``; None when no weights are set.
+        """
+        if self.dose_weights is None:
+            return None
+        w = self.dose_weights.to(device).float()
+        n_frames, n_bins = w.shape
+        ky = torch.fft.fftfreq(shape[0], device=device)
+        kx = torch.fft.rfftfreq(shape[1], device=device)
+        # Fraction of Nyquist, which is what the radial axis indexes.
+        r = torch.sqrt(ky[:, None] ** 2 + kx[None, :] ** 2) / 0.5
+        idx = torch.clamp((r * (n_bins - 1)).round().long(), 0, n_bins - 1)
+        grids = w[:, idx.reshape(-1)].reshape(n_frames, *idx.shape)
+        total = grids.sum(dim=0, keepdim=True).clamp(min=1e-12)
+        return grids * (n_frames / total)

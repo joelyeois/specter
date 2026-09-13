@@ -543,6 +543,7 @@ def _base_settings(
         absorption_model=config.absorption_model,
         inelastic_mfp_solvent=config.inelastic_mfp_solvent,
         inelastic_mfp_specimen=config.inelastic_mfp_specimen,
+        dose_weights_path=config.dose_weights_path,
         **meta,
     )
 

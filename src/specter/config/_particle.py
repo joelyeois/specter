@@ -102,6 +102,18 @@ class ParticleStackConfig:
         ),
         check="positive",
     )  # Å
+    dose_weights_path: str | None = setting(
+        None,
+        help=(
+            "Path to a (n_frames, n_bins) .npy of the exposure filter's own "
+            "per-frame weights, e.g. CryoSPARC's refm_empirical_dw.npy. Frames are "
+            "then summed in Fourier space under those weights instead of equally, "
+            "which leaves the signal alone and raises the noise floor toward Nyquist "
+            "the way a signal-preserving dose weighting does in real data. Requires "
+            "n_frames."
+        ),
+        check="existing_file",
+    )
     inelastic_mfp_specimen: float | None = setting(
         None,
         help=(

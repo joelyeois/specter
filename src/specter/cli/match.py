@@ -20,6 +20,7 @@ _MATCH_PARTICLE_GROUPS: list[tuple[str, list[str]]] = [
             "absorption_model",
             "inelastic_mfp_solvent",
             "inelastic_mfp_specimen",
+            "dose_weights_path",
         ],
     ),
     ("Probing", ["n_probe", "n_battery", "probe_bin", "write_stack"]),

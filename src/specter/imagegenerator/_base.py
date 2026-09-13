@@ -437,8 +437,42 @@ class BaseImager(L.LightningModule):
             mtf=self.detector_mtf,
             dqe0=dqe0_for_detector(self.detector_model),
             n_frames=self.n_frames,
+            dose_weights=self._load_dose_weights(),
             progressbars=self.progressbars,
         )
+
+    def _load_dose_weights(self) -> torch.Tensor | None:
+        """
+        The exposure filter's per-frame weights, if a path was given.
+
+        Returns
+        -------
+        torch.Tensor or None
+            Shape ``(n_frames, n_bins)``.
+
+        Raises
+        ------
+        ValueError
+            If weights are given without ``n_frames``, or the frame count
+            disagrees with the file's.
+        """
+        path = self.camera.dose_weights_path
+        if path is None:
+            return None
+        if self.n_frames is None:
+            raise ValueError("dose_weights_path requires n_frames to be set.")
+        import numpy as np
+
+        w = torch.as_tensor(np.load(path)).float()
+        if w.ndim != 2:
+            raise ValueError(
+                f"{path}: expected (n_frames, n_bins), got {tuple(w.shape)}"
+            )
+        if w.shape[0] != self.n_frames:
+            raise ValueError(
+                f"{path} has {w.shape[0]} frames but n_frames={self.n_frames}"
+            )
+        return w
 
     def _aberrate(
         self, exitwave: torch.Tensor, ctf_batch: dict[str, torch.Tensor]

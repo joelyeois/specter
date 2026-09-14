@@ -23,6 +23,8 @@ from dataclasses import dataclass
 
 import numpy as np
 import torch
+from scipy.optimize import curve_fit
+from scipy.stats import t as student_t
 
 from specter.filters import butter
 
@@ -289,6 +291,122 @@ def annulus_std_profile(
     return out
 
 
+#: Fit window for the residual envelope, in 1/Angstrom (10-4 A).
+_ENVELOPE_BAND = (0.10, 0.25)
+#: Coarse bands the window is split into before any division is done.
+_ENVELOPE_N_BANDS = 8
+#: A band's denominator must exceed this many standard errors to be used.
+_ENVELOPE_SIGMA = 3.0
+#: Two-sided significance level the fitted B must clear against its own
+#: standard error. Compared through Student's t at the fit's realised degrees
+#: of freedom, not as a fixed multiple: with eight bands and two parameters
+#: there are six, where a flat |t| > 2 is only p = 0.09 and lets one noise
+#: realisation in eleven through.
+_ENVELOPE_ALPHA = 0.05
+
+
+def _residual_envelope(
+    kk: torch.Tensor, s_es: torch.Tensor, s_ss: torch.Tensor
+) -> tuple[float, float]:
+    r"""
+    Guinier slope of the experiment/simulation amplitude ratio, as a B-factor.
+
+    The ratio is formed from band MEANS rather than averaged over per-bin
+    ratios, and the fit is reported only when it is statistically significant.
+    Both matter, and the earlier per-bin version had neither.
+
+    `s_ss` is a cross-power between two independent simulation seeds, so it is
+    an unbiased estimate of the signal that goes NEGATIVE wherever there is no
+    signal left. Dividing by it per bin, with a ``clamp(min=1e-9)`` to avoid a
+    zero denominator, turns "no correlation" into an enormous positive ratio:
+    on EMPIAR-10254 one bin at 7.64 A came out at 2.7e11, and since the fit is
+    on ``log(a)`` that single point carried ~50x the leverage of any other and
+    moved the answer from 74 to 275 A^2. Filtering on ``a > 0`` does not help --
+    it keeps the upward noise excursions and drops the downward ones, which
+    biases the slope whenever `a` is consistent with zero.
+
+    Smoothing the ratio is not a fix either: a Gaussian on ``a(k)`` spreads such
+    a spike over its neighbours and made that dataset worse (275 -> 921 A^2). A
+    median is robust to it but still left 145-187, because the fit was still
+    driven by bands carrying no signal.
+
+    Aggregating first removes the blow-up structurally, since band denominators
+    are far from zero. The fit itself is then a direct nonlinear least squares
+    of ``A * exp(-B k^2 / 4)`` to the band ratios, NOT a straight line through
+    ``log(a)``. Taking a log cannot represent a non-positive ratio, so a log fit
+    has to discard those bands -- and discarding them is the same selection bias
+    as the per-bin form's ``a > 0``, one level up: upward noise excursions are
+    kept and downward ones dropped. Measured over 200 synthetic realisations,
+    that bias runs one way and it is not small. A true B = 200 A^2 at high noise
+    came back as 176 (12% low) from the log fit against 206 from this one, and
+    the log fit reported an envelope for 9.0% of pure-noise inputs against 0.5%
+    here. Fitting the exponential directly also makes a strongly damped band a
+    datum rather than a deletion, which is what a refusal rule keyed on dropped
+    bands got wrong: it refused hardest exactly where the envelope was real and
+    strong (detection fell to 28% at B = 200).
+
+    EMPIAR-10254 fits B = 44 +- 97 A^2, |t| = 0.46, and is correctly reported as
+    no measurable envelope.
+
+    Parameters
+    ----------
+    kk : torch.Tensor
+        Radial frequency bin centres, 1/Angstrom.
+    s_es, s_ss : torch.Tensor
+        Experiment/simulation and simulation/simulation radial cross-powers.
+
+    Returns
+    -------
+    tuple of float
+        The B-factor in Angstrom^2 and its standard error, or ``(nan, nan)``
+        when too few bands survive or the slope is not significant.
+    """
+    lo, hi = _ENVELOPE_BAND
+    edges = np.linspace(lo, hi, _ENVELOPE_N_BANDS + 1)
+    ks, ratios = [], []
+    for a, b in zip(edges[:-1], edges[1:]):
+        m = (kk >= a) & (kk < b)
+        if int(m.sum()) < 2:
+            continue
+        den = float(s_ss[m].mean())
+        err = float(s_ss[m].std()) / float(int(m.sum())) ** 0.5
+        # The denominator must be real signal, not a noise excursion. The
+        # NUMERATOR is not filtered: a negative ratio is a measurement that
+        # the envelope has run out of amplitude, and dropping it would bias
+        # the fit upward.
+        if not (den > 0.0 and den > _ENVELOPE_SIGMA * err):
+            continue
+        ks.append(0.5 * (a + b))
+        ratios.append(float(s_es[m].mean()) / den)
+    n_bands = len(ks)
+    if n_bands < 4:
+        return float("nan"), float("nan")
+    k = np.asarray(ks, dtype=float)
+    a_k = np.asarray(ratios, dtype=float)
+
+    def model(kx: np.ndarray, amplitude: float, bfactor: float) -> np.ndarray:
+        return amplitude * np.exp(-bfactor * kx**2 / 4.0)
+
+    try:
+        params, cov = curve_fit(
+            model, k, a_k, p0=[max(float(a_k.max()), 1e-3), 50.0], maxfev=20000
+        )
+    except (RuntimeError, ValueError, TypeError):
+        return float("nan"), float("nan")
+    if not np.all(np.isfinite(cov)):
+        return float("nan"), float("nan")
+    bfactor = float(params[1])
+    bfactor_se = float(np.sqrt(cov[1, 1]))
+    dof = n_bands - 2
+    if not (bfactor_se > 0.0 and dof >= 1):
+        return float("nan"), float("nan")
+    crit = float(student_t.ppf(1.0 - _ENVELOPE_ALPHA / 2.0, dof))
+    if abs(bfactor) <= crit * bfactor_se:
+        # Consistent with a flat envelope: report the uncertainty, not a value.
+        return float("nan"), bfactor_se
+    return bfactor, bfactor_se
+
+
 @dataclass
 class MatchedPoseSNR:
     """Outcome of `matched_pose_snr`."""
@@ -298,6 +416,7 @@ class MatchedPoseSNR:
     ratio: list[float]
     signal_plateau: float  # exp/sim signal amplitude ratio at 33-12 Å (z-scored units)
     residual_bfactor: float  # Å², Guinier slope of the exp/sim signal ratio, 10-4 Å
+    residual_bfactor_stderr: float  # Å², 1 sigma on the above; NaN when not fitted
 
 
 def matched_pose_snr(
@@ -347,18 +466,14 @@ def matched_pose_snr(
     for band in BANDS:
         se, ss = _band_mean(snr_e, kk, band), _band_mean(snr_s, kk, band)
         ratio.append(ss / se if se > 0 else float("nan"))
-    sel = (kk >= 0.1) & (kk <= 0.25) & (a > 0)
-    if int(sel.sum()) >= 3:
-        slope, _ = np.polyfit((kk[sel] ** 2).numpy(), np.log(a[sel].numpy()), 1)
-        bfac = float(-4.0 * slope)
-    else:
-        bfac = float("nan")
+    bfac, bfac_se = _residual_envelope(kk, s_es, s_ss)
     return MatchedPoseSNR(
         snr_sim=[_band_mean(snr_s, kk, b) for b in BANDS],
         snr_exp=[_band_mean(snr_e, kk, b) for b in BANDS],
         ratio=ratio,
         signal_plateau=_band_mean(a, kk, BANDS[1]),
         residual_bfactor=bfac,
+        residual_bfactor_stderr=bfac_se,
     )
 
 

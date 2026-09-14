@@ -855,6 +855,8 @@ def _compare_two_seeds(
     sim_a, sim_b = battery("")
     snr = matched_pose_snr(sim_a, sim_b, exp_b, pixel_size)
     bfactor: float | None = None
+    # A NaN here means the envelope was not significantly different from flat,
+    # not that it is small -- `_residual_envelope` refuses rather than guessing.
     if math.isfinite(snr.residual_bfactor) and snr.residual_bfactor > 20.0:
         bfactor = round(snr.residual_bfactor, 0)
         base.update(bfactor=bfactor)

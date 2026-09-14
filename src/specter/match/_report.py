@@ -136,7 +136,19 @@ def render_markdown(report: MatchReport, toml_name: str = "matched.toml") -> str
             "| SNR sim | " + " | ".join(_f(r, 3) for r in report.snr.snr_sim) + " |",
             "| SNR exp | " + " | ".join(_f(r, 3) for r in report.snr.snr_exp) + " |",
             "",
-            f"Residual envelope (Guinier, 10-4 Å): B = {_f(report.snr.residual_bfactor, 0)} Å². "
+            "Residual envelope (Guinier, 10-4 Å): "
+            + (
+                "not significantly different from flat"
+                + (
+                    f" (1σ = {_f(report.snr.residual_bfactor_stderr, 0)} Å²)"
+                    if math.isfinite(report.snr.residual_bfactor_stderr)
+                    else ""
+                )
+                if not math.isfinite(report.snr.residual_bfactor)
+                else f"B = {_f(report.snr.residual_bfactor, 0)} ± "
+                f"{_f(report.snr.residual_bfactor_stderr, 0)} Å²"
+            )
+            + ". "
             f"Experimental signal amplitude at 33-12 Å relative to simulated: {_f(report.snr.signal_plateau)}.",
             "",
         ]

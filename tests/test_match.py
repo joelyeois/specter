@@ -108,7 +108,12 @@ def test_matched_pose_snr_recovers_a_known_noise_ratio() -> None:
     for r in res.ratio:
         if not math.isnan(r):
             assert r == pytest.approx(4.0, rel=0.35)
-    assert abs(res.residual_bfactor) < 60.0  # no envelope was applied
+    # No envelope was applied, so the estimator must not claim one. Since it
+    # gained a significance test it answers that by REFUSING (nan) rather than
+    # by returning a small number, which is the stronger statement of the two;
+    # the standard error is what carries the bound in that case.
+    assert math.isnan(res.residual_bfactor) or abs(res.residual_bfactor) < 60.0
+    assert res.residual_bfactor_stderr < 60.0
     twin = twin_test(sim1, sim2, exp)
     assert twin.cohen_d > 1.0  # the experiment is measurably noisier than a second seed
 

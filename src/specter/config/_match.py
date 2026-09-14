@@ -260,9 +260,11 @@ class MatchConfig:
     n_frames: int = setting(
         40,
         help=(
-            "Frames the simulation splits the dose into. Only the "
-            "coincidence radius depends on it, and the derived radius is converted to "
-            "this frame count."
+            "Frames the simulation splits the dose into. Plain shot noise "
+            "does not depend on it (summing n Poisson(dose/n) is Poisson(dose)), but two "
+            "things do: the coincidence radius, which is derived at the detector's "
+            "hardware frame rate and converted to this count, and the exposure filter, "
+            "which is applied frame by frame and so must have exactly this many frames."
         ),
         check="positive",
     )  # frames the simulation splits the dose into

@@ -85,4 +85,4 @@ specter match particles [OPTIONS]
 | --- | --- | --- | --- |
 | `--pdb_cache_dir` | `TEXT` | `$SPECTER_PDB_CACHE, else ~/.cache/specter/pdb` | Where downloaded PDB/mmCIF structures are cached. |
 | `--monomer_library_path` | `TEXT` | _none_ | Path to a Monomer Library, so Shtyrov species resolve for a hydrogen-free deposition. Unset falls back to $CLIBD_MON. |
-| `--n_frames` | `INTEGER` | `40` | Frames the simulation splits the dose into. Only the coincidence radius depends on it, and the derived radius is converted to this frame count. |
+| `--n_frames` | `INTEGER` | `40` | Frames the simulation splits the dose into. Plain shot noise does not depend on it (summing n Poisson(dose/n) is Poisson(dose)), but two things do: the coincidence radius, which is derived at the detector's hardware frame rate and converted to this count, and the exposure filter, which is applied frame by frame and so must have exactly this many frames. |

@@ -22,6 +22,7 @@ https://doi.org/10.3389/fphy.2024.1408430
 from __future__ import annotations
 
 import math
+import warnings
 
 import numpy as np
 import torch
@@ -105,6 +106,29 @@ class Detector(L.LightningModule):
         self.register_buffer("mtf", mtf, persistent=False)
         self.dqe0 = dqe0
         self.n_frames = n_frames
+        if dose_weights is not None:
+            # The weights' first dimension IS the motion-correction job's own
+            # fractionation, so it is data and takes precedence over a config
+            # value the same way a .cs file's pixel size, voltage and amplitude
+            # contrast do. `n_frames` otherwise defaults to 40, which is a
+            # convention rather than anything read from the movie -- EER stores
+            # ~2100 hardware frames and the grouping is a processing choice.
+            #
+            # Getting this wrong is silent, not loud: `apply_coincidence` loops
+            # over n_frames and indexes weights[i] while `_frame_weight_grids`
+            # normalises by the weights' own count, so a mismatch applies a
+            # prefix of the weights under the wrong normalisation and the
+            # filter stops preserving the signal.
+            weight_frames = int(dose_weights.shape[0])
+            if n_frames is not None and weight_frames != int(n_frames):
+                warnings.warn(
+                    f"dose_weights carries {weight_frames} frames but "
+                    f"n_frames={n_frames}; using {weight_frames}, since the "
+                    "weights record the motion-correction job's own "
+                    "fractionation. Set n_frames to match to silence this.",
+                    stacklevel=2,
+                )
+            self.n_frames = weight_frames
         self.register_buffer("dose_weights", dose_weights, persistent=False)
         self.dose_weights_max_frequency = dose_weights_max_frequency
         self.progressbars = progressbars

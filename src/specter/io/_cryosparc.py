@@ -45,10 +45,54 @@ def _load_csfile_parameters(
     """
     dataset = Dataset.load(csfile_path)
 
-    # extract translations
+    # extract translations. `alignments3D/shift` is in pixels of the grid the
+    # ALIGNMENT was done on, so it must be scaled by the alignment's own pixel
+    # size -- which is not necessarily the images'.
     translations_px = torch.as_tensor(dataset["alignments3D/shift"])
-    pixel_size = torch.as_tensor(dataset["alignments3D/psize_A"])
-    translations_angstrom = translations_px * pixel_size[..., None]
+    alignment_psize = torch.as_tensor(dataset["alignments3D/psize_A"])
+    translations_angstrom = translations_px * alignment_psize[..., None]
+
+    # The pixel size to RENDER at is the images', `blob/psize_A`. These differ
+    # whenever the refinement was run binned: a 2x-binned refinement records
+    # alignments3D/psize_A = 2 * blob/psize_A, and taking the alignment value
+    # renders the specimen at half the sampling into the same box -- a field of
+    # view twice too wide, silently. Measured on EMPIAR-11377's J205
+    # (alignments3D 1.462, images 0.731): every pair-by-pair pose correlation
+    # collapsed to the shuffled level and the background noise floor came out
+    # at 0.62 of the experiment's instead of 2.15.
+    pixel_size = alignment_psize
+    try:
+        # Both a real `Dataset` and a plain mapping raise KeyError for a
+        # missing column, so ask rather than sniffing for a `fields` method.
+        image_psize: torch.Tensor | None = torch.as_tensor(dataset["blob/psize_A"])
+    except KeyError:
+        image_psize = None
+    if image_psize is not None:
+        if not torch.allclose(image_psize, alignment_psize):
+            _console.print(
+                f"[yellow]Warning:[/yellow] {csfile_path}: the images are at "
+                f"{float(image_psize.flatten()[0]):.4f} A/px "
+                f"(blob/psize_A) but the alignment was done at "
+                f"{float(alignment_psize.flatten()[0]):.4f} A/px "
+                "(alignments3D/psize_A), i.e. a binned refinement. Rendering at "
+                "the images' pixel size; shifts are still converted with the "
+                "alignment's."
+            )
+        pixel_size = image_psize
+    else:
+        # No `blob/psize_A` means this file cannot say what its images are
+        # sampled at, and the alignment value is the only thing available --
+        # which is exactly the case that bites, because a passthrough with no
+        # blob columns is what a binned refinement emits. Say so rather than
+        # proceeding silently; the caller can check the stack's own header.
+        _console.print(
+            f"[yellow]Warning:[/yellow] {csfile_path}: no blob/psize_A, so the "
+            f"pixel size is taken from alignments3D/psize_A "
+            f"({float(alignment_psize.flatten()[0]):.4f} A/px). If the "
+            "refinement was binned this is NOT the pixel size of the images; "
+            "check it against the particle stack before rendering."
+        )
+
     if torch.allclose(pixel_size[0], pixel_size.mean()):
         pixel_size = pixel_size[0]
     else:

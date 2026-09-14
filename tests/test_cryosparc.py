@@ -241,3 +241,64 @@ def test_particle_stack_references_ignores_an_unrelated_sibling(
         (tmp_path / name).touch()
 
     assert _cryosparc.particle_stack_references(tmp_path / "poses.cs") is None
+
+
+class _BinnedRefinementDataset(_FakeDataset):
+    """
+    A binned refinement's passthrough: the images are at ``blob/psize_A`` while
+    the alignment was done on a grid twice as coarse.
+
+    This is what EMPIAR-11377's J205 looks like, and taking the alignment value
+    as the rendering pixel size puts a field of view twice too wide into the
+    same box.
+    """
+
+    @classmethod
+    def load(cls, csfile_path: str) -> "_FakeDataset":
+        d = super().load(csfile_path)
+        d["blob/psize_A"] = np.full_like(np.asarray(d["alignments3D/psize_A"]), 0.75)
+        d["alignments3D/psize_A"] = np.full_like(
+            np.asarray(d["alignments3D/psize_A"]), 1.5
+        )
+        return d
+
+
+def test_pixel_size_comes_from_the_images_not_the_alignment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A binned refinement must render at the images' pixel size."""
+    monkeypatch.setattr(_cryosparc, "Dataset", _BinnedRefinementDataset)
+    _, pixel_size, *_ = extract_parameters_from_csfile("fake.cs", halfset="all")
+    assert float(pixel_size) == pytest.approx(0.75)
+
+
+def test_shifts_still_use_the_alignment_pixel_size(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    `alignments3D/shift` is in pixels of the grid the ALIGNMENT ran on, so it
+    must be scaled by that grid's pixel size even when the images are finer.
+    Converting it with the image pixel size would halve every shift here.
+    """
+    monkeypatch.setattr(_cryosparc, "Dataset", _BinnedRefinementDataset)
+    _, _, _, _, translations, *_ = extract_parameters_from_csfile(
+        "fake.cs", halfset="all"
+    )
+    shifts_px = np.asarray(
+        _BinnedRefinementDataset.load("fake.cs")["alignments3D/shift"]
+    )
+    assert np.allclose(translations.numpy(), shifts_px * 1.5, atol=1e-5)
+
+
+def test_absent_blob_psize_falls_back_and_warns(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """
+    A passthrough with no blob columns cannot say what its images are sampled
+    at -- which is exactly what a binned refinement emits -- so the alignment
+    value is used and the fallback is announced rather than silent.
+    """
+    monkeypatch.setattr(_cryosparc, "Dataset", _FakeDataset)
+    _, pixel_size, *_ = extract_parameters_from_csfile("fake.cs", halfset="all")
+    assert float(pixel_size) == pytest.approx(1.5)
+    assert "no blob/psize_A" in capsys.readouterr().out

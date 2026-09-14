@@ -33,6 +33,11 @@ from .progress import track
 from specter.options import AberrationModel, NoiseModel
 
 
+# Bound the dense coincidence lookup to 8 MiB and, below, four cells per
+# arriving electron. Sparse frames and tiny radii retain the sorting path.
+_COINCIDENCE_MAX_DENSE_CELLS = 2**20
+
+
 class Detector(L.LightningModule):
     """
     A detector module to apply detector noise to images.
@@ -361,8 +366,8 @@ class Detector(L.LightningModule):
             return torch.zeros_like(intensity_map)[pad:-pad, pad:-pad]
 
         # repeat pixel coordinates
-        ix = ix.repeat_interleave(n_per_pixel)
-        iy = iy.repeat_interleave(n_per_pixel)
+        ix = ix.repeat_interleave(n_per_pixel, output_size=n_e)
+        iy = iy.repeat_interleave(n_per_pixel, output_size=n_e)
 
         coords = torch.stack([ix.float(), iy.float()], dim=1)
 
@@ -383,31 +388,47 @@ class Detector(L.LightningModule):
         cell_x = (shifted_coords[:, 0] / cell_size).floor().long()
         cell_y = (shifted_coords[:, 1] / cell_size).floor().long()
 
-        # 2. Robust cell_id generation
-        # Normalize to zero by subtracting the minimums found in this specific frame
-        cx_min, cy_min = cell_x.min(), cell_y.min()
-        grid_w = (cell_x.max() - cx_min) + 1
-
-        # Generate unique 1D hash for each grid cell
-        cell_id = (cell_y - cy_min) * grid_w + (cell_x - cx_min)
-
-        # 4. Coincidence suppression
+        # The random shift moves coordinates by at most half a cell, so
+        # cell indices start at -1. Bound the other end using the smallest
+        # allowed cell width; this avoids a GPU scalar read to size the lookup.
+        grid_w = math.ceil(det_w / (cell_size_nominal * 0.8)) + 2
+        grid_h = math.ceil(det_h / (cell_size_nominal * 0.8)) + 2
+        n_cells = grid_w * grid_h
         perm = torch.randperm(n_e, device=device)
-        sort_idx = torch.argsort(cell_id[perm], stable=True)
-        sorted_cell_id = cell_id[perm][sort_idx]
-
-        is_first = torch.ones(n_e, dtype=torch.bool, device=device)
-        is_first[1:] = sorted_cell_id[1:] != sorted_cell_id[:-1]
-        coords_kept = coords[perm][sort_idx][is_first]
+        if n_cells <= min(_COINCIDENCE_MAX_DENSE_CELLS, 4 * n_e):
+            cell_id = (cell_y + 1) * grid_w + (cell_x + 1)
+            permuted_cells = cell_id[perm]
+            order = torch.arange(n_e, device=device)
+            first = torch.full((n_cells,), n_e, dtype=torch.long, device=device)
+            first.scatter_reduce_(
+                0, permuted_cells, order, reduce="amin", include_self=True
+            )
+            # The minimum shuffled rank is exactly the first entry a stable
+            # sort by cell would retain. Deposit zero for rejected arrivals
+            # to avoid a dynamic boolean gather and its CUDA synchronization.
+            weights = (first[permuted_cells] == order).to(intensity_map.dtype)
+            coords_kept = coords[perm]
+        else:
+            # Memory scales with arrivals here, even when tiny radii imply
+            # billions of mostly empty cells. Keep the original stable sort.
+            cx_min, cy_min = cell_x.min(), cell_y.min()
+            occupied_grid_w = (cell_x.max() - cx_min) + 1
+            cell_id = (cell_y - cy_min) * occupied_grid_w + (cell_x - cx_min)
+            sort_idx = torch.argsort(cell_id[perm], stable=True)
+            sorted_cell_id = cell_id[perm][sort_idx]
+            is_first = torch.ones(n_e, dtype=torch.bool, device=device)
+            is_first[1:] = sorted_cell_id[1:] != sorted_cell_id[:-1]
+            coords_kept = coords[perm][sort_idx][is_first]
+            weights = torch.ones(
+                len(coords_kept), dtype=intensity_map.dtype, device=device
+            )
 
         # 5. Bin into detector pixels
         ix_f = coords_kept[:, 0].long().clamp(0, det_w - 1)
         iy_f = coords_kept[:, 1].long().clamp(0, det_h - 1)
         flat_idx = iy_f * det_w + ix_f
         pixels = torch.zeros(det_h * det_w, dtype=intensity_map.dtype, device=device)
-        pixels.scatter_add_(
-            0, flat_idx, torch.ones_like(flat_idx, dtype=intensity_map.dtype)
-        )
+        pixels.scatter_add_(0, flat_idx, weights)
 
         return pixels.reshape(det_h, det_w)[pad:-pad, pad:-pad]
 

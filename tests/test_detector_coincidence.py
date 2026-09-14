@@ -258,3 +258,63 @@ def test_named_detector_carries_its_dqe0() -> None:
     assert dqe0_for_detector("falcon4i_300kv") == 0.92
     assert dqe0_for_detector(None) == 1.0
     assert dqe0_for_detector("not_a_detector") == 1.0
+
+
+@pytest.mark.parametrize("device", ["cpu", "cuda"])
+@pytest.mark.parametrize("shape", [(29, 37), (64, 64)])
+@pytest.mark.parametrize("radius", [0.5, 2.0])
+@pytest.mark.parametrize("cell_jitter", [-10.0, 0.0, 10.0])
+def test_scatter_coincidence_matches_stable_sort(
+    monkeypatch, device, shape, radius, cell_jitter
+):
+    """Keep exactly the same arrivals, including at the cell-width bounds."""
+    if device == "cuda" and not torch.cuda.is_available():
+        pytest.skip("CUDA unavailable")
+    import specter.microscope as microscope
+
+    detector = Detector(pixel_size=1.059)
+    torch.manual_seed(19)
+    intensity = torch.rand(shape, device=device)
+    intensity /= intensity.sum()
+    # Exercise both clamped cell widths as well as the nominal one.
+    monkeypatch.setattr(
+        torch, "randn", lambda *a, **kw: torch.full(a, cell_jitter, **kw)
+    )
+    with monkeypatch.context() as ref:
+        ref.setattr(microscope, "_COINCIDENCE_MAX_DENSE_CELLS", 0)
+        torch.manual_seed(5)
+        expected = detector.apply_detector_physics(intensity, 1.059, 0.8, radius)
+        expected_next_random = torch.rand(8, device=device)
+
+    # Fail if the intended dense path silently falls back to sorting.
+    def no_sort(*args, **kwargs):
+        raise AssertionError("Expected dense coincidence selection")
+
+    monkeypatch.setattr(torch, "argsort", no_sort)
+    torch.manual_seed(5)
+    actual = detector.apply_detector_physics(intensity, 1.059, 0.8, radius)
+    assert torch.equal(actual, expected)
+    assert torch.equal(torch.rand(8, device=device), expected_next_random)
+
+
+@pytest.mark.parametrize("device", ["cpu", "cuda"])
+@pytest.mark.parametrize("radius,dose", [(1e-4, 0.8), (0.5, 0.001)])
+def test_coincidence_sparse_grid_avoids_dense_allocation(
+    monkeypatch, device, radius, dose
+):
+    """Tiny radii and sparse arrivals must use memory proportional to arrivals."""
+    if device == "cuda" and not torch.cuda.is_available():
+        pytest.skip("CUDA unavailable")
+
+    def no_dense_selection(*args, **kwargs):
+        raise AssertionError("Sparse coincidence frame allocated a dense lookup")
+
+    monkeypatch.setattr(torch.Tensor, "scatter_reduce_", no_dense_selection)
+    torch.manual_seed(5)
+    intensity = torch.full((64, 64), 1 / 64**2, device=device)
+    result = Detector(pixel_size=1.0).apply_detector_physics(
+        intensity, 1.0, dose, radius
+    )
+    assert result.shape == intensity.shape
+    assert torch.isfinite(result).all()
+    assert result.sum() > 0

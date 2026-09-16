@@ -437,3 +437,99 @@ def test_load_dose_weights_derives_its_frequency_axis() -> None:
     weights, freq = load_dose_weights(path, max_frequency=2.0)
     assert weights.shape == (4, 80)
     assert freq == pytest.approx(2.0)
+
+
+@pytest.mark.parametrize(
+    "model", ["multislice", "rytov", "firstborn", "kinematic", "projection"]
+)
+@pytest.mark.parametrize("sign", ["negative", "positive"])
+def test_uniform_absorption_matches_explicit_field_and_gradient(model, sign):
+    """The allocation-free path preserves each model's complex-potential semantics."""
+    generator = torch.Generator().manual_seed(17)
+    v = (
+        torch.rand(1, 5, 8, 8, generator=generator, dtype=torch.float64) * 7
+    ).requires_grad_()
+    vab = absorption_potential(INELASTIC_MFP_ICE_A, VOLTAGE)
+    kwargs = dict(
+        nxy=8,
+        nz=5,
+        pixel_size=2.0,
+        voltage=VOLTAGE,
+        scattering_model=model,
+        ews_curvature_sign=sign,
+        progressbars=False,
+    )
+    implicit = Scattering(**kwargs, uniform_absorption=vab).double()
+    explicit = Scattering(**kwargs).double()
+    actual = implicit(v)
+    expected = explicit(torch.complex(v, torch.full_like(v, vab)))
+    torch.testing.assert_close(actual, expected, atol=1e-8, rtol=1e-8)
+    actual_grad = torch.autograd.grad(actual.abs().square().sum(), v)[0]
+    expected_grad = torch.autograd.grad(expected.abs().square().sum(), v)[0]
+    torch.testing.assert_close(actual_grad, expected_grad, atol=1e-8, rtol=1e-8)
+
+
+@pytest.mark.parametrize(
+    "model", ["multislice", "rytov", "firstborn", "kinematic", "projection"]
+)
+def test_uniform_absorption_slab_matches_model_approximation(model):
+    nz, dx = 10, 2.0
+    vab = absorption_potential(INELASTIC_MFP_ICE_A, VOLTAGE)
+    scattering = Scattering(
+        nxy=8,
+        nz=nz,
+        pixel_size=dx,
+        voltage=VOLTAGE,
+        scattering_model=model,
+        uniform_absorption=vab,
+        progressbars=False,
+    )
+    a = scattering.sigma * dx * vab
+    amplitude = (
+        1 - nz * a
+        if model == "firstborn"
+        else 1 + nz * math.expm1(-a)
+        if model == "kinematic"
+        else math.exp(-nz * a)
+    )
+    actual = scattering(torch.zeros(1, nz, 8, 8)).abs().square().mean().item()
+    assert actual == pytest.approx(amplitude**2, rel=1e-6)
+
+
+def test_ctf_rejects_uniform_absorption():
+    with pytest.raises(ValueError, match="uniform_absorption"):
+        Scattering(8, 2.0, VOLTAGE, scattering_model="ctf", uniform_absorption=0.2)
+    scattering = Scattering(8, 2.0, VOLTAGE, scattering_model="ctf")
+    scattering.uniform_absorption = 0.2
+    with pytest.raises(ValueError, match="uniform_absorption"):
+        scattering(torch.zeros(1, 4, 8, 8))
+
+
+@pytest.mark.parametrize("kind", ["micrograph", "tiltseries", "tomogram"])
+@pytest.mark.parametrize("specimen_mfp", [None, INELASTIC_MFP_PROTEIN_A])
+def test_iterative_consumers_reject_unsupported_mfp(kind, specimen_mfp):
+    """Never silently simulate a real volume without the requested absorption."""
+    from specter.imagegenerator import MicrographGenerator, TiltSeriesGenerator
+    from specter.ghostbuster import TomogramReconstructor
+    from specter.settings import Propagation
+
+    v = torch.zeros(4, 8, 8)
+    propagation = Propagation(
+        absorption_model="inelastic_mfp", inelastic_mfp_specimen=specimen_mfp
+    )
+    with pytest.raises(
+        ValueError, match="does not support absorption_model='inelastic_mfp'"
+    ):
+        if kind == "tomogram":
+            TomogramReconstructor(
+                v,
+                2.0,
+                torch.tensor([[1.0, 0.0, 0.0, 0.0]]),
+                torch.zeros(1, 2),
+                {},
+                VOLTAGE,
+                propagation=propagation,
+            )
+        else:
+            cls = MicrographGenerator if kind == "micrograph" else TiltSeriesGenerator
+            cls(v, 8, 2.0, None, VOLTAGE, 10.0, propagation=propagation, optics=None)

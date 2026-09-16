@@ -188,6 +188,13 @@ class TiltSeriesGenerator(MicrographGenerator):
         bfactor: float | torch.Tensor | None = None,
         **kwargs: Any,
     ):
+        if propagation.absorption_model == "inelastic_mfp":
+            raise ValueError(
+                "TiltSeriesGenerator does not support absorption_model='inelastic_mfp': "
+                "its iterative volume path requires explicit material/solvent "
+                "information to construct the absorption field. Use 'alpha' "
+                "or the particle ImageGenerator with the MFP model."
+            )
         if volume is None:
             raise ValueError("'volume' must be provided for TiltSeriesGenerator.")
 

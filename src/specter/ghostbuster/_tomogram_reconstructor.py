@@ -125,6 +125,13 @@ class TomogramReconstructor(_BaseReconstructor):
         run_dir: str | Path | None = None,
     ) -> None:
         super().__init__()
+        if propagation.absorption_model == "inelastic_mfp":
+            raise ValueError(
+                "TomogramReconstructor does not support absorption_model='inelastic_mfp': "
+                "its iterative volume path requires explicit material/solvent "
+                "information to construct the absorption field. Use 'alpha' "
+                "or the particle ImageGenerator with the MFP model."
+            )
         scattering_model = propagation.scattering_model
         self.save_hyperparameters(
             ignore=["V", "quaternions", "translations", "ctf_params", "kmask"]

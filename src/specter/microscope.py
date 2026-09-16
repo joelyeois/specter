@@ -256,7 +256,45 @@ class Detector(L.LightningModule):
             Simulated images after detection.
         """
         images = self.image(aberrated_exitwave, dose)
+        return self.detect_expected_counts(
+            images, dose, coincidence_radius, anisomag, nxy
+        )
 
+    def from_intensity(
+        self,
+        intensity: torch.Tensor,
+        dose: torch.Tensor,
+        coincidence_radius: torch.Tensor,
+        anisomag: torch.Tensor | None = None,
+        nxy: int | None = None,
+    ) -> torch.Tensor:
+        """Detect an incoherent, dose-averaged intensity (vacuum intensity = 1).
+
+        Used after integrating frozen configurations. Does not take a square
+        root or invent a coherent wave. DQE, pixel area and dose enter once.
+        """
+        if intensity.is_complex() or intensity.ndim != 3:
+            raise ValueError("intensity must be real with shape (B,Y,X)")
+        if not torch.isfinite(intensity).all() or (intensity < 0).any():
+            raise ValueError("intensity must be finite and nonnegative")
+        images = intensity * (dose * self.pixel_size**2 * self.dqe0)[:, None, None]
+        return self.detect_expected_counts(
+            images, dose, coincidence_radius, anisomag, nxy
+        )
+
+    def detect_expected_counts(
+        self,
+        images: torch.Tensor,
+        dose: torch.Tensor,
+        coincidence_radius: torch.Tensor,
+        anisomag: torch.Tensor | None = None,
+        nxy: int | None = None,
+    ) -> torch.Tensor:
+        """Apply spatial detector response and sampling to expected counts.
+
+        Input counts already include dose, pixel area and detection efficiency.
+        Noise is drawn only here, after configuration integration.
+        """
         # Set default crop size
         if nxy is None:
             nxy = images.shape[2]

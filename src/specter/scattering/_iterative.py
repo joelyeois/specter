@@ -527,6 +527,99 @@ class IterativeScattering(L.LightningModule):
             exitwave = center_crop(exitwave, self.nxy, dim=(-2, -1))
         return exitwave
 
+    def multislice_absorptive(
+        self,
+        V: torch.Tensor,
+        source: torch.Tensor,
+        theta_matrix: torch.Tensor,
+        absorption_filter: Callable[[torch.Tensor], torch.Tensor] | None = None,
+        slice_batchsize: int = 1,
+        checkpoint_chunks: int | None = None,
+    ) -> torch.Tensor:
+        """Propagate paired real fields, filtering absorption in the beam frame.
+
+        ``source`` has the same shape and geometry as ``V`` and is in volts.
+        With no filter it is the imaginary potential itself. A filter maps
+        each sampled transverse source slice to an imaginary potential.
+        Geometry stays real; only the transmission slice becomes complex.
+        Both input fields retain gradients. Checkpointing recomputes chunks of
+        transmission/FFT steps; sampling is streamed in bounded slice batches.
+        """
+        if self.scattering_model != "multislice" or self.alpha != 0:
+            raise ValueError("Explicit absorption requires multislice and alpha=0")
+        if V.is_complex() or source.is_complex() or V.shape != source.shape:
+            raise ValueError(
+                "elastic and absorption fields must be real and same-shaped"
+            )
+        if V.device != source.device or V.dtype != source.dtype:
+            raise ValueError("paired fields must share device and dtype")
+        if slice_batchsize < 1 or (
+            checkpoint_chunks is not None and checkpoint_chunks < 1
+        ):
+            raise ValueError("slice and checkpoint batch sizes must be positive")
+        canvas = self.padded_nxy if self.pad_fft else self.nxy
+        roi_size = canvas if self.pad_fft else None
+        Fk = (
+            (self.F_step_padded_real + 1j * self.F_step_padded_imag) * self.kmask_padded
+            if self.pad_fft
+            else (self.F_step_real + 1j * self.F_step_imag) * self.kmask
+        )
+        wave = torch.ones(
+            V.shape[0], canvas, canvas, device=self.device, dtype=torch.complex64
+        )
+        elastic_slices = self._iter_slices(
+            V, theta_matrix, slice_batchsize, "Elastic slices", roi_size
+        )
+        halo = getattr(absorption_filter, "halo", 0)
+        source_roi = canvas + 2 * halo
+        source_slices = self._iter_slices(
+            source, theta_matrix, slice_batchsize, "Absorption slices", source_roi
+        )
+
+        def step(
+            psi: torch.Tensor, elastic: torch.Tensor, raw: torch.Tensor
+        ) -> torch.Tensor:
+            if absorption_filter is None:
+                imaginary = raw
+            else:
+                apply_filter = getattr(
+                    absorption_filter, "filter_sampled", absorption_filter
+                )
+                imaginary = apply_filter(raw)
+            if imaginary.shape != elastic.shape:
+                raise ValueError("filtered absorption must match the propagation slice")
+            transmission = torch.exp(
+                self.sigma * self.pixel_size * (1j * elastic - imaginary)
+            )
+            return ifft2(fft2(transmission * psi) * Fk)
+
+        def advance_chunk(psi, elastic_block, source_block):
+            for elastic, raw in zip(
+                elastic_block.unbind(), source_block.unbind(), strict=True
+            ):
+                psi = step(psi, elastic, raw)
+            return psi
+
+        elastic_block, source_block = [], []
+        for (i, nz, elastic), (_, _, raw) in zip(
+            elastic_slices, source_slices, strict=True
+        ):
+            if checkpoint_chunks is None:
+                wave = step(wave, elastic, raw)
+            else:
+                elastic_block.append(elastic)
+                source_block.append(raw)
+                if len(elastic_block) == checkpoint_chunks or i + 1 == nz:
+                    wave = _gradient_checkpoint(
+                        advance_chunk,
+                        wave,
+                        torch.stack(elastic_block),
+                        torch.stack(source_block),
+                        use_reentrant=False,
+                    )
+                    elastic_block, source_block = [], []
+        return center_crop(wave, self.nxy, dim=(-2, -1)) if self.pad_fft else wave
+
     @staticmethod
     def _checkpointed(
         fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor],
@@ -936,6 +1029,9 @@ class IterativeScattering(L.LightningModule):
         pose: float | torch.Tensor,
         slice_batchsize: int = 1,
         checkpoint_chunks: int | None = None,
+        *,
+        absorption_source: torch.Tensor | None = None,
+        absorption_filter: Callable[[torch.Tensor], torch.Tensor] | None = None,
     ) -> torch.Tensor:
         """
         Forward pass for iterative scattering.
@@ -971,6 +1067,18 @@ class IterativeScattering(L.LightningModule):
             theta_matrix = build_affine_matrix(R)
         else:
             theta_matrix = pose.to(V.device)
+
+        if absorption_source is not None:
+            return self.multislice_absorptive(
+                V,
+                absorption_source,
+                theta_matrix,
+                absorption_filter,
+                slice_batchsize,
+                checkpoint_chunks,
+            )
+        if absorption_filter is not None:
+            raise ValueError("absorption_filter requires absorption_source")
 
         if self.scattering_model == "ctf":
             return self.ctf(V, theta_matrix, slice_batchsize)

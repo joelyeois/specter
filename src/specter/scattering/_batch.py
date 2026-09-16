@@ -69,7 +69,10 @@ class Scattering(L.LightningModule):
             absorption costs nothing this way, where building the field would
             cost a second volume and a complex copy of it -- 77 GiB on the
             (4, 1642, 1024, 1024) potential a 512-pixel probe in thick ice
-            hands this class. Default 0.0.
+            hands this class. Rytov and projection include the same exponential
+            attenuation; first Born and kinematic retain their respective
+            approximations, matching an explicit imaginary potential. The
+            CTF-only model rejects this term. Default 0.0.
         ews_curvature_sign : str, optional
             Ewald sphere curvature sign matching CryoSPARC's convention.
             ``'negative'`` (default) or ``'positive'``. Affects multislice,
@@ -99,6 +102,10 @@ class Scattering(L.LightningModule):
         self.scattering_model = scattering_model
         self.ews_curvature_sign = ews_curvature_sign
         self.alpha = alpha
+        if scattering_model == "ctf" and uniform_absorption != 0.0:
+            raise ValueError(
+                "uniform_absorption is not supported by scattering_model='ctf'"
+            )
         self.uniform_absorption = uniform_absorption
         self.progressbars = progressbars
 
@@ -335,7 +342,10 @@ class Scattering(L.LightningModule):
         :meth:`_fourier_slice_sum`.
         """
         scattered_k = self._fourier_slice_sum(V, None)
-        exitwave = torch.exp(ifft2(self._phase_scale(V) * scattered_k))
+        exitwave = torch.exp(
+            ifft2(self._phase_scale(V) * scattered_k)
+            - self.sigma * self.pixel_size * self.uniform_absorption * V.shape[1]
+        )
         return exitwave  # (B x X x Y)
 
     def _phase_scale(self, V: torch.Tensor) -> complex:
@@ -368,7 +378,11 @@ class Scattering(L.LightningModule):
         linearised.
         """
         scattered_k = self._fourier_slice_sum(V, None)
-        return 1 + ifft2(self._phase_scale(V) * scattered_k)
+        return (
+            1
+            + ifft2(self._phase_scale(V) * scattered_k)
+            - self.sigma * self.pixel_size * self.uniform_absorption * V.shape[1]
+        )
 
     def kinematic(self, V: torch.Tensor) -> torch.Tensor:
         """
@@ -398,7 +412,13 @@ class Scattering(L.LightningModule):
         factor = self._phase_scale(V)
 
         def transmit(block: torch.Tensor) -> torch.Tensor:
-            return torch.exp(factor * block) - 1
+            return (
+                torch.exp(
+                    factor * block
+                    - self.sigma * self.pixel_size * self.uniform_absorption
+                )
+                - 1
+            )
 
         return 1 + ifft2(self._fourier_slice_sum(V, transmit))
 
@@ -426,7 +446,10 @@ class Scattering(L.LightningModule):
         This is valid only for thin specimens where propagation effects are negligible.
         """
         V_sum = torch.sum(V, 1)
-        exitwave = torch.exp(1j * self.sigma * self.pixel_size * V_sum)
+        exitwave = torch.exp(
+            1j * self.sigma * self.pixel_size * V_sum
+            - self.sigma * self.pixel_size * self.uniform_absorption * V.shape[1]
+        )
         return exitwave
 
     def ctf(self, V: torch.Tensor) -> torch.Tensor:
@@ -452,6 +475,10 @@ class Scattering(L.LightningModule):
         The factor of 2 accounts for the phase-contrast imaging relationship.
         CTF is applied separately in the aberration module.
         """
+        if self.uniform_absorption != 0.0:
+            raise ValueError(
+                "uniform_absorption is not supported by scattering_model='ctf'"
+            )
         projection = 2 * self.sigma * self.pixel_size * torch.sum(V, 1)
         return projection
 

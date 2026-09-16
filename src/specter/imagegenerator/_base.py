@@ -5,7 +5,16 @@ bundles, per-image parameters, the optics stage and the detector.
 
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
+from collections.abc import Callable, Sequence
+
+if TYPE_CHECKING:
+    from ..inelastic import (
+        ExposureStep,
+        PotentialState,
+        PlasmonFilter,
+        FrozenPlasmonResult,
+    )
 
 import lightning as L
 import torch
@@ -488,6 +497,85 @@ class BaseImager(L.LightningModule):
         if self.aberration is None:
             return exitwave
         return self.aberration(exitwave, ctf_batch)
+
+    def simulate_frozen(
+        self,
+        specimen: Callable[[ExposureStep], PotentialState],
+        plasmon_filter: PlasmonFilter | None,
+        frame_doses: Sequence[float],
+        *,
+        idx: int = 0,
+        pose: float | torch.Tensor = 0.0,
+        poses: Sequence[float | torch.Tensor] | None = None,
+        substeps: int = 1,
+        pre_exposure: float = 0.0,
+        detector_seed: int | None = None,
+        checkpoint_chunks: int | None = None,
+    ) -> FrozenPlasmonResult:
+        """Render explicit frozen states with this imager's optics and camera.
+
+        ``specimen`` returns PotentialState fields in specimen coordinates;
+        it owns all particle/solvent assembly. Supply poses explicitly (one
+        per raw frame for a tilt sequence). Existing cached/solvated volumes
+        are not used. Frame doses are physical readouts, not substep doses.
+        Use FrozenPlasmonForward directly for per-frame CTF/tilt-defocus
+        control. This convenience method uses CTF entry ``idx`` for all frames.
+        """
+        from ..inelastic import FrozenPlasmonForward
+        from ..scattering import IterativeScattering
+
+        if self.alpha != 0 or self.scattering_model != "multislice":
+            raise ValueError("simulate_frozen requires multislice with alpha=0")
+        if self.camera.dose_weights_path is not None:
+            raise ValueError(
+                "apply external dose weights after simulating physical frames"
+            )
+        if self.envelopes.dose_envelope:
+            raise ValueError(
+                "simulate_frozen requires dose_envelope=False; use a specimen "
+                "damage model such as PotentialDoseDamage for exposure evolution"
+            )
+        scattering = IterativeScattering(
+            self.pad_nxy,
+            self.pixel_size,
+            self.voltage,
+            alpha=0,
+            klim=self.klim,
+            ews_curvature_sign=self.ews_curvature_sign,
+            progressbars=self.progressbars,
+        ).to(self.device)
+        detector = Detector(
+            self.pixel_size,
+            aberration_model="nonlinear",
+            noise_model=self.noise_model,
+            mtf=self.detector_mtf,
+            dqe0=self.detector.dqe0,
+            n_frames=1,
+            progressbars=self.progressbars,
+        ).to(self.device)
+
+        def optics(wave: torch.Tensor, step: ExposureStep) -> torch.Tensor:
+            params = self._ctf_batch(torch.tensor([idx], device=self.device))
+            params["dose"] = wave.real.new_full((len(wave),), step.dose)
+            params["pre_exposure"] = wave.real.new_full((len(wave),), step.start)
+            return self._aberrate(wave, params)
+
+        model = FrozenPlasmonForward(
+            scattering, detector, plasmon_filter, optics=optics
+        )
+        return model(
+            specimen,
+            frame_doses,
+            pose=pose,
+            poses=poses,
+            substeps=substeps,
+            pre_exposure=pre_exposure,
+            detector_seed=detector_seed,
+            checkpoint_chunks=checkpoint_chunks,
+            coincidence_radius=float(self.coincidence_radius[idx]),
+            anisomag=None if self.anisomag is None else self.anisomag[idx : idx + 1],
+            nxy=self.nxy,
+        )
 
     def predict_step(self, batch: Any, batch_idx: int) -> torch.Tensor:
         """Standard Lightning predict step."""

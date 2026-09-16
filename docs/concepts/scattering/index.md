@@ -106,3 +106,36 @@ the source of each Z-slice differs.
   formation. In *Current Approaches to Cryo-Electron Microscopy*,
   *Progress in Molecular Biology and Translational Science*. Elsevier.
   [doi:10.1016/bs.pmbts.2026.05.001](https://doi.org/10.1016/bs.pmbts.2026.05.001)
+
+
+## Mean-free-path absorption support
+
+For particle generators, `Propagation(absorption_model="inelastic_mfp")`
+uses a calibrated imaginary potential instead of `alpha`. Set `alpha=0`
+when constructing `Propagation` directly. Without `inelastic_mfp_specimen`,
+the solvent-present case uses uniform absorption; specifying a specimen MFP
+builds a material-dependent field before solvent blending. With no solvent
+and no specimen MFP, no absorption is assigned.
+
+All five wave models in `Scattering` consume `uniform_absorption` with the
+same result as an explicit constant imaginary potential. Multislice,
+projection and Rytov give exponential slab attenuation. First Born and
+kinematic retain their respective linear and single-scattering
+approximations; they do not become exact Beer–Lambert propagators for thick
+absorbing specimens. The `ctf` model rejects uniform absorption.
+
+`MicrographGenerator`, `TiltSeriesGenerator`, and `TomogramReconstructor`
+reject `absorption_model="inelastic_mfp"` explicitly. Their iterative paths
+need material information that distinguishes specimen, solvent, and vacuum;
+a pre-solvated real potential is insufficient for the existing occupancy
+estimator. These paths still support `alpha`. This restriction does not
+remove the low-level propagators' support for supplied complex potentials.
+
+A possible extension is described in [the Himes-style design sketch](himes-inelastic-design.md).
+
+### Frozen-plasmon exposure simulation
+
+The [frozen-plasmon Python API](frozen-plasmon.md) adds separate spectral
+absorption sources, explicit solvent trajectories, paired slice propagation
+and incoherent exposure integration. It requires explicit source calibration;
+the included Drude spectrum is a development approximation.

@@ -130,6 +130,13 @@ class MicrographGenerator(BaseImager):
         else:
             raise ValueError("micrograph_size must have same dimensions in x and y.")
 
+        if propagation.absorption_model == "inelastic_mfp":
+            raise ValueError(
+                "MicrographGenerator does not support absorption_model='inelastic_mfp': "
+                "its iterative volume path requires explicit material/solvent "
+                "information to construct the absorption field. Use 'alpha' "
+                "or the particle ImageGenerator with the MFP model."
+            )
         self.pad_fft = propagation.pad_fft
         self.pad_nxy = nxy + (nxy // 2) * 2 if self.pad_fft else nxy
 

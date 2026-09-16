@@ -91,6 +91,9 @@ class Propagation:
         measured mean free path instead -- see
         :func:`~specter.potential.inelastic_absorption_potential`, which also
         records why a fitted `alpha` is the wrong quantity for this job.
+        Supported by particle generators. MicrographGenerator,
+        TiltSeriesGenerator and TomogramReconstructor reject this model
+        until their iterative paths carry explicit material information.
     inelastic_mfp_solvent : float
         Inelastic mean free path of the embedding medium, in Angstrom. Used
         only when ``absorption_model="inelastic_mfp"``, and only where the

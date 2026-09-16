@@ -1,0 +1,26 @@
+# Exact model of Perry et al. (2019): 1-D signal, cyclic shift, white Gaussian noise.
+# Validates the 1/SNR -> 1/SNR^3 crossover with both the ML (EM) and the
+# bispectrum + Jennrich estimators before any cryo-EM physics is involved.
+
+[template]
+d = 41                 # signal length (paper uses d = 100; d^3 tensor keeps this small)
+corr_length = 3.0      # pixels, smoothness of the random generic signal
+mean_offset = 0.5      # non-zero mean is needed by homoJen's scale fix
+seed = 1
+
+[sweep]
+snr_values = [0.1, 0.2, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 100.0]
+n_samples = 20000
+n_repeats = 2
+snr_convention = "paper"   # SNR = ||theta||^2 / sigma^2  (||theta|| = 1)
+estimators = ["em", "jennrich"]
+em_iters = 200
+split_snr = 1.0            # regime boundary used for the slope fit
+seed = 0
+device = "cpu"
+
+[sample_complexity]
+enabled = true
+eps = 0.25
+n_min = 64
+n_max = 500000

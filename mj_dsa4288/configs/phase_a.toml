@@ -1,0 +1,34 @@
+# Phase A: faithful replication with a realistic template.
+# SPECTER only produces the clean single-view projection theta; shifts and
+# Gaussian noise are added by mj_dsa4288.mra.model. All physics is off.
+
+[template]
+source = "pdb"          # "pdb" (needs network on first run) | "synthetic"
+pdb_id = "1ubq"         # small, fast; swap for the FYP target structure
+num_pixels = 32         # keep small: EM cost is O(n d^2 log d), and d = H*W here
+pixel_size = 4.0        # Angstrom; coarse so the particle fills the box
+parameterization = "kirkland"
+voltage = 300.0
+quaternion = [1.0, 0.0, 0.0, 0.0]   # one fixed view for every particle
+# switched-off physics, listed for the record (see README):
+#   scattering_model = "projection", defocus = 0, cs = 0, alpha = 0,
+#   no envelopes, no klim, no ice, no Poisson noise, no detector, no crowding
+
+[sweep]
+snr_values = [0.03, 0.1, 0.3, 1.0, 3.0, 10.0, 30.0, 100.0]
+n_samples = 5000
+n_repeats = 2
+snr_convention = "pixel"   # Sigworth's per-pixel definition for 2-D images
+rotations = false          # set true for Sigworth's 90-degree latent rotations
+estimator = "em"
+em_iters = 150
+em_batch_size = 1024
+split_snr = 1.0
+seed = 0
+device = "cpu"             # "cuda" recommended for n > 1e4
+
+[sample_complexity]
+enabled = false
+eps = 0.25
+n_min = 64
+n_max = 200000

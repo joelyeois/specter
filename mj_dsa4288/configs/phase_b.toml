@@ -1,0 +1,64 @@
+# Phase B: add cryo-EM physics back one term at a time and re-measure the slopes.
+# Each [[experiment]] is one step of the ladder; noise is set by dose, not sigma.
+
+[template]
+pdb_id = "1ubq"
+num_pixels = 32
+pixel_size = 4.0
+parameterization = "kirkland"
+quaternion = [1.0, 0.0, 0.0, 0.0]
+
+[common]
+n_particles = 2000
+doses = [0.02, 0.05, 0.1, 0.3, 1.0, 3.0, 10.0, 30.0]   # e-/A^2 sweep -> SNR sweep
+max_shift_angstrom = 12.0                             # keep the particle inside the box
+em_iters = 100
+seed = 0
+device = "cpu"
+
+[[experiment]]
+name = "b1_ctf_fixed"
+scattering_model = "projection"
+noise_model = "poisson"
+cs = 2.7
+alpha = 0.1
+defocus_angstrom = 10000.0
+
+[[experiment]]
+name = "b2_ctf_jitter"
+scattering_model = "projection"
+noise_model = "poisson"
+cs = 2.7
+alpha = 0.1
+defocus_angstrom = 15000.0
+defocus_jitter_angstrom = 10000.0
+
+[[experiment]]
+name = "b3_multislice"
+scattering_model = "multislice"
+noise_model = "poisson"
+cs = 2.7
+alpha = 0.1
+defocus_angstrom = 10000.0
+
+[[experiment]]
+name = "b4_detector_k3"
+scattering_model = "multislice"
+noise_model = "poisson"
+detector_model = "k3_300kv"
+coincidence_radius = 1.8
+cs = 2.7
+alpha = 0.1
+defocus_angstrom = 10000.0
+
+[[experiment]]
+name = "b5_ice"
+scattering_model = "multislice"
+noise_model = "poisson"
+detector_model = "k3_300kv"
+coincidence_radius = 1.8
+ice_model = "gd"
+ice_thickness = 500.0
+cs = 2.7
+alpha = 0.1
+defocus_angstrom = 10000.0

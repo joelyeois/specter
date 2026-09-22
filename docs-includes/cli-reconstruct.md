@@ -102,6 +102,7 @@ specter reconstruct particle [OPTIONS]
 | --- | --- | --- | --- |
 | `--scattering_model` | `multislice` \| `rytov` \| `firstborn` \| `projection` | `rytov` | Wave propagation model used by the forward pass. rytov is the default here rather than multislice: the model runs once per particle per step, and rytov is the cheapest one that still carries Ewald-sphere curvature. |
 | `--ews_curvature_sign` | `negative` \| `positive` | `negative` | Sign convention for Ewald-sphere curvature. negative matches CryoSPARC. |
+| `--alpha` | `FLOAT` | _none_ | Amplitude contrast ratio for the forward model, overriding the .cs file's ctf/amp_contrast. Unset uses the .cs file's value. |
 | `--bfactor` | `FLOAT` | _none_ | Isotropic B-factor envelope in Angstrom^2 damping high-resolution signal in the forward model. |
 | `--klim` | `FLOAT` | _none_ | Hard frequency cutoff (1/Angstrom) applied to the simulated images. |
 | `--sparsity` | `FLOAT` | _none_ | L1 regularisation weight on the volume. |

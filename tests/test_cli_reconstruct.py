@@ -196,11 +196,26 @@ def test_every_config_field_is_forwarded_or_deliberately_held_back() -> None:
     config = ReconstructionConfig(cs_file="a.cs", mrc_file="b.mrc", dose_per_angstrom=1)
     all_fields = {f.name for f in fields(config)}
     kwargs = _ghostbuster_kwargs(config)
-    # The Propagation fields are forwarded as one `propagation` argument.
+    # The Propagation fields are forwarded as one `propagation` argument,
+    # except `alpha`: Ghostbuster weighs it against the .cs file's own value,
+    # so it goes to Ghostbuster directly.
     propagation_fields = {f.name for f in fields(Propagation)} & all_fields
-    assert propagation_fields <= _NON_GHOSTBUSTER_FIELDS
+    assert propagation_fields - {"alpha"} <= _NON_GHOSTBUSTER_FIELDS
+    assert "alpha" in kwargs
     assert isinstance(kwargs["propagation"], Propagation)
     assert all_fields == (set(kwargs) - {"propagation"}) | _NON_GHOSTBUSTER_FIELDS
+
+
+@pytest.mark.parametrize("alpha", [None, 0.0, 0.25])
+def test_alpha_override_reaches_ghostbuster(alpha: float | None) -> None:
+    """`--alpha` is forwarded as Ghostbuster's own override, and an unset
+    one (None) still builds a valid `Propagation` rather than handing it a
+    None it would reject."""
+    config = ReconstructionConfig(
+        cs_file="a.cs", mrc_file="b.mrc", dose_per_angstrom=1, alpha=alpha
+    )
+    kwargs = _ghostbuster_kwargs(config)
+    assert kwargs["alpha"] == alpha
 
 
 # ---------------------------------------------------------------------------

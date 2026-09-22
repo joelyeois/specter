@@ -64,6 +64,9 @@ class Ghostbuster(_GhostbusterBase):
         Path to the particle stack ``.mrc``/``.mrcs`` file.
     dose_per_angstrom : float
         Total electron dose (fluence) per image in e⁻/Å².
+    alpha : float, optional
+        Amplitude contrast ratio in ``[0, 1]``, overriding the ``.cs`` file's
+        ``ctf/amp_contrast``. Default None uses the ``.cs`` file's value.
     lr : float, optional
         Learning rate for the volume. ``None`` disables volume optimisation.
     lr_R : float, optional
@@ -92,7 +95,7 @@ class Ghostbuster(_GhostbusterBase):
         How the forward model computes the exit wave. Default
         ``Propagation(scattering_model="rytov")``. Its ``alpha`` is replaced
         by the amplitude contrast recorded in the ``.cs`` file, since that is
-        data rather than a modelling choice.
+        data rather than a modelling choice, or by `alpha` when given.
     optics : Optics, optional
         The aberration engine and phase plate. Default ``Optics()``.
     symmetry : str, optional
@@ -144,6 +147,7 @@ class Ghostbuster(_GhostbusterBase):
         mrc_file: str | Path,
         dose_per_angstrom: float,
         address_by_blob_idx: bool = False,
+        alpha: float | None = None,
         lr: float | None = None,
         lr_R: float | None = None,
         lr_T: float | None = None,
@@ -173,12 +177,15 @@ class Ghostbuster(_GhostbusterBase):
         halfset: Literal["A", "B", "all"] = "all",
         run_dir: str | Path | None = None,
     ) -> None:
+        if alpha is not None and not 0.0 <= alpha <= 1.0:
+            # Checked before the particle stack is read, not after.
+            raise ValueError(f"alpha={alpha} must be in [0, 1]")
         self.halfset_label: str | None = halfset if halfset != "all" else None
 
         (
             voltage,
             pixel_size,
-            alpha,
+            alpha_cs,
             rotations,
             translations,
             ctf_params,
@@ -204,7 +211,12 @@ class Ghostbuster(_GhostbusterBase):
         self._anisomag = anisomag
         self._voltage = float(voltage.item() if hasattr(voltage, "item") else voltage)
         self._voxel_size = voxel_size
-        self._alpha = float(alpha.item() if hasattr(alpha, "item") else alpha)
+        self._alpha = float(alpha_cs.item() if hasattr(alpha_cs, "item") else alpha_cs)
+        if alpha is not None:
+            console.print(
+                f"  amplitude contrast {alpha} (overrides the .cs file's {self._alpha:g})"
+            )
+            self._alpha = float(alpha)
 
         # training hyperparameters (stored for run() and test_run())
         self.lr = lr
@@ -217,7 +229,8 @@ class Ghostbuster(_GhostbusterBase):
         self.lr_decay = lr_decay
         self.epochs = epochs
         self.batchsize = batchsize
-        # The amplitude contrast is data, read from the .cs file above.
+        # The amplitude contrast is data, read from the .cs file above unless
+        # `alpha` overrides it.
         self.propagation = replace(propagation, alpha=self._alpha)
         self.optics = optics
         self.symmetry = symmetry

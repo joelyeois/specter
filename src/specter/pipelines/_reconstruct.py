@@ -113,8 +113,10 @@ def _ghostbuster_kwargs(config: ReconstructionConfig) -> dict[str, Any]:
     kwargs["cryosparc_ref"] = cryosparc_ref_for_halfset(
         config.cryosparc_ref, config.halfset
     )
-    # alpha is read from the .cs file by Ghostbuster; the config carries none.
-    kwargs["propagation"] = bundle_from_config(Propagation, config)
+    # Ghostbuster sets the propagation's alpha itself, from `alpha` when the
+    # config overrides it and from the .cs file otherwise, so the bundle is
+    # built without it: an unset override would be None, which it rejects.
+    kwargs["propagation"] = bundle_from_config(Propagation, config, alpha=0.0)
     return kwargs
 
 

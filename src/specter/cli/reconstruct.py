@@ -41,6 +41,7 @@ _RECONSTRUCT_PARTICLE_GROUPS: list[tuple[str, list[str]]] = [
         [
             "scattering_model",
             "ews_curvature_sign",
+            "alpha",
             "bfactor",
             "klim",
             "sparsity",

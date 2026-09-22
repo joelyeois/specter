@@ -91,6 +91,7 @@ ews_curvature_sign = "negative"   # matches CryoSPARC
 rotate_mode = "real"
 learn_noise_model = false
 use_ncc = false
+# alpha = 0.1        # amplitude contrast; unset reads the .cs file's ctf/amp_contrast
 # bfactor = 100.0    # Angstrom^2 envelope damping high-resolution signal
 # klim = 0.2         # 1/Angstrom hard cutoff
 # sparsity = 1e-4    # L1 weight on the volume

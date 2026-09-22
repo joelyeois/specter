@@ -98,6 +98,34 @@ def test_ghostbuster_halfset_label_mapping(
     assert gb.halfset_label == expected_label
 
 
+@pytest.mark.parametrize("alpha,expected", [(None, 0.1), (0.0, 0.0), (0.5, 0.5)])
+def test_ghostbuster_alpha_overrides_cs(
+    mrc_file: Path, alpha: float | None, expected: float
+) -> None:
+    """alpha, when given, replaces the .cs file's amp_contrast (0.1 here) in
+    the forward model; unset, the .cs value is used. 0.0 is a real override,
+    not a falsy "unset"."""
+    gb = Ghostbuster(
+        cs_file="fake.cs",
+        mrc_file=str(mrc_file),
+        dose_per_angstrom=2.0,
+        alpha=alpha,
+        propagation=Propagation(scattering_model="projection"),
+    )
+    assert gb.propagation.alpha == pytest.approx(expected)
+
+
+def test_ghostbuster_alpha_out_of_range_rejected(mrc_file: Path) -> None:
+    """An alpha outside [0, 1] is refused before anything is loaded."""
+    with pytest.raises(ValueError, match="alpha"):
+        Ghostbuster(
+            cs_file="fake.cs",
+            mrc_file=str(mrc_file),
+            dose_per_angstrom=2.0,
+            alpha=1.5,
+        )
+
+
 def test_ghostbuster_test_run_executes(mrc_file: Path) -> None:
     """test_run() binning + one epoch completes and returns a trained Reconstructor."""
     gb = Ghostbuster(

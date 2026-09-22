@@ -321,6 +321,17 @@ class ReconstructionConfig:
             "Sign convention for Ewald-sphere curvature. negative matches CryoSPARC."
         ),
     )
+    # Unset reads the amplitude contrast from the .cs file, which is where it
+    # belongs as data. Setting it is for experiments on the forward model
+    # itself, an alpha sweep say, without rewriting the .cs file.
+    alpha: float | None = setting(
+        None,
+        help=(
+            "Amplitude contrast ratio for the forward model, overriding the "
+            ".cs file's ctf/amp_contrast. Unset uses the .cs file's value."
+        ),
+        range=(0.0, 1.0),
+    )
     bfactor: float | None = setting(
         None,
         help=(

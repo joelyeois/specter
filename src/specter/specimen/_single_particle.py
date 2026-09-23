@@ -17,6 +17,7 @@ from ..ice import (
     blend_ice_into_volume,
     resolve_icemaker,
 )
+from ..potential import template_occupancy_reference
 from ..progress import status
 from ..settings import Crowding, Ice, Packing
 
@@ -93,6 +94,14 @@ class MicrographSpecimenGenerator(L.LightningModule):
     save_clean_exitwaves : bool, optional
         Keep the pre-ice volume as ``clean_V`` (a whole extra canvas), for
         an imager that wants the ice-free exit wave. Default False.
+    molecular_mass : float, optional
+        Mass of the template's molecule in daltons, hydrogens included
+        (:func:`~specter.potential.molecular_mass_from_atoms`). Sets how much
+        ice each copy displaces: exactly its own volume at 0.73 cm^3/g,
+        whatever scattering factors rendered it
+        (:func:`~specter.potential.template_occupancy_reference`). Default None
+        reads occupancy against the fixed
+        :data:`~specter.potential.FULL_OCCUPANCY_POTENTIAL_V`.
     """
 
     def __init__(
@@ -109,8 +118,11 @@ class MicrographSpecimenGenerator(L.LightningModule):
         move_to_cpu: bool = True,
         progressbars: bool = True,
         save_clean_exitwaves: bool = False,
+        molecular_mass: float | None = None,
     ):
         super().__init__()
+        self.molecular_mass = molecular_mass
+        self._occupancy_reference_V: float | None = None
         self.pixel_size = pixel_size
         self.nxy = nxy
         self.template = template
@@ -198,6 +210,24 @@ class MicrographSpecimenGenerator(L.LightningModule):
         if icemaker is not None:
             self.ice_model = icemaker.method
 
+    def _occupancy_reference(self) -> float:
+        """
+        The potential at which a voxel of the template reads as full, V.
+
+        Solved once, on first use, by
+        :func:`~specter.potential.template_occupancy_reference`: every copy
+        in the micrograph is the same template, so one reference serves them
+        all. With no template there is nothing to displace ice, and the fixed
+        reference is returned.
+        """
+        if self._occupancy_reference_V is None:
+            self._occupancy_reference_V = template_occupancy_reference(
+                self.template,
+                self.pixel_size,
+                self.molecular_mass if self.template is not None else None,
+            )
+        return self._occupancy_reference_V
+
     def generate(self) -> torch.Tensor:
         """
         Generate the populated 3D volume.
@@ -242,6 +272,7 @@ class MicrographSpecimenGenerator(L.LightningModule):
                         V,
                         self.icemaker,
                         self.pixel_size,
+                        full_potential=self._occupancy_reference(),
                         relax_steps=self.ice_relax_steps,
                         profile=self.ice_profile,
                         inplace=True,

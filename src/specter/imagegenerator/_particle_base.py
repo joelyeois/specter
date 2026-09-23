@@ -16,7 +16,7 @@ from ..crowding import CrowdWithDuplicates
 from ..ice import IceBank
 from ..ice._blend import IceSlabBlender
 from ..potential import (
-    FULL_OCCUPANCY_POTENTIAL_V,
+    template_occupancy_reference,
     aperture_lowpass,
 )
 from ..scattering import Scattering
@@ -81,6 +81,36 @@ class ParticleGeneratorBase(BaseImager):
 
     quaternions: torch.Tensor
     translations: torch.Tensor
+
+    #: The template's mass in daltons, set by the concrete generator; None
+    #: when only a bare volume was given, which keeps the fixed reference.
+    molecular_mass: float | None = None
+    _occupancy_reference_V: float | None = None
+
+    def _set_molecular_mass(self, molecular_mass: float | None) -> None:
+        """Record the template's mass, in daltons, hydrogens included."""
+        if molecular_mass is not None and molecular_mass <= 0:
+            raise ValueError(f"molecular_mass must be positive, got {molecular_mass}")
+        self.molecular_mass = molecular_mass
+        self._occupancy_reference_V = None
+
+    def _occupancy_reference(self) -> float:
+        """
+        The potential at which a voxel of this template reads as full, V.
+
+        Solved once, by :func:`~specter.potential.template_occupancy_reference`,
+        so the particle displaces exactly its own volume of ice whatever
+        scattering factors rendered it. Computed on first use rather than at
+        construction, so it runs on the device the template has been moved
+        to (0.04 s on a GPU against 4 s on the CPU for a 512^3 box), and so a
+        DDP rank's zero placeholder is never read before rank 0's volume has
+        been broadcast.
+        """
+        if self._occupancy_reference_V is None:
+            self._occupancy_reference_V = template_occupancy_reference(
+                self.V, self.pixel_size, self.molecular_mass
+            )
+        return self._occupancy_reference_V
 
     def _build_crowd(
         self,
@@ -201,7 +231,7 @@ class ParticleGeneratorBase(BaseImager):
         ).reshape(-1, 1, 1, 1)
         # A voxel reading `full` volts of specimen is full; having divided
         # the scale out, that reference moves with it.
-        full = FULL_OCCUPANCY_POTENTIAL_V * scale
+        full = self._occupancy_reference() * scale
 
         nz = V.shape[1]
         nxy = V.shape[-1]
@@ -305,7 +335,19 @@ class ParticleGeneratorBase(BaseImager):
         # is full everywhere, which would give the whole box the specimen's
         # mean free path.
         with torch.no_grad():
-            v_ab = self._absorption_field(V)
+            # The reference is solved only when a field will read it: a run
+            # with no specimen absorption field never needs one.
+            needs_field = (
+                self.absorption_model == "inelastic_mfp"
+                and self.propagation.inelastic_mfp_specimen is not None
+            )
+            v_ab = (
+                self._absorption_field(
+                    V, full_potential=self._occupancy_reference() * scale
+                )
+                if needs_field
+                else None
+            )
 
         if getattr(self, "icemaker", None) is not None:
             if self.verbose:

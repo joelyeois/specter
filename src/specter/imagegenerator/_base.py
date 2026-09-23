@@ -38,6 +38,7 @@ from ..arrays import compute_nz, pad_volume
 from ..ctf import LegacyAberrationAdapter
 from ..microscope import Detector
 from ..potential import (
+    FULL_OCCUPANCY_POTENTIAL_V,
     absorption_potential,
     aperture_mfp_ice,
     aperture_mfp_protein,
@@ -366,7 +367,11 @@ class BaseImager(L.LightningModule):
         )(self.objective_aperture, self.voltage)
         return 1.0 / (1.0 / inelastic + 1.0 / aperture)
 
-    def _absorption_field(self, specimen: torch.Tensor) -> torch.Tensor | None:
+    def _absorption_field(
+        self,
+        specimen: torch.Tensor,
+        full_potential: float | torch.Tensor = FULL_OCCUPANCY_POTENTIAL_V,
+    ) -> torch.Tensor | None:
         """
         The imaginary potential from material mean free paths, or None.
 
@@ -384,6 +389,10 @@ class BaseImager(L.LightningModule):
             volume: occupancy read off one is full everywhere, which would
             hand the whole box the specimen's mean free path. It is also why
             this is computed before ``solvate``, which writes into its input.
+        full_potential : float or torch.Tensor, optional
+            Occupancy reference, with any per-image potential scale folded
+            in; the particle generators pass their template's own. Default
+            :data:`~specter.potential.FULL_OCCUPANCY_POTENTIAL_V`.
 
         Returns
         -------
@@ -417,6 +426,7 @@ class BaseImager(L.LightningModule):
                 self._removal_mfp("solvent") if has_solvent else float("inf")
             ),
             mfp_specimen_A=self._removal_mfp("specimen"),
+            full_potential=full_potential,
         )
 
     def _init_optics(self) -> None:

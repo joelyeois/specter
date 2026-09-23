@@ -359,7 +359,7 @@ _OCCUPANCY_MAX_VOXELS_PER_SLAB = 2**26
 def _occupancy_chunked(
     v: torch.Tensor,
     voxel_size: float,
-    full_potential: float,
+    full_potential: float | torch.Tensor,
     max_voxels_per_slab: int,
 ) -> torch.Tensor:
     """
@@ -411,7 +411,7 @@ def inelastic_absorption_potential(
     voltage_kv: float,
     mfp_solvent_A: float = INELASTIC_MFP_ICE_A,
     mfp_specimen_A: float | None = None,
-    full_potential: float = FULL_OCCUPANCY_POTENTIAL_V,
+    full_potential: float | torch.Tensor = FULL_OCCUPANCY_POTENTIAL_V,
     max_voxels_per_slab: int = _OCCUPANCY_MAX_VOXELS_PER_SLAB,
 ) -> torch.Tensor:
     r"""

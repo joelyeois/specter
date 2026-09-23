@@ -15,7 +15,7 @@ from specter import logger
 
 from .. import rotations
 from ..ice import IceBank, RandomIcemaker, resolve_icemaker
-from ..potential import PotentialBuilder
+from ..potential import PotentialBuilder, molecular_mass_from_atoms
 from ..rotations import VolumeRotator, translate_coordinates
 from ..settings import Camera, Crowding, Envelopes, Ice, Optics, Propagation
 from ._base import compute_nz, pad_volume
@@ -188,6 +188,9 @@ class ImageGeneratorFromCoordinates(ParticleGeneratorBase):
         )
 
         self.V = self.potentialbuilder(self.coordinates.detach())
+        # The atoms say how much molecule there is, so the ice it displaces
+        # is solved from them rather than read against a fixed 7.0 V.
+        self._set_molecular_mass(molecular_mass_from_atoms(atomic_numbers))
 
         self._init_optics()
         self.scattering = self._build_scattering()
@@ -351,6 +354,16 @@ class ImageGenerator(ParticleGeneratorBase):
     bfactor : float or torch.Tensor or None, optional
         Isotropic B-factor envelope in Å² applied in the microscope transfer
         function. None or 0.0 means no envelope. Default None.
+    molecular_mass : float, optional
+        Mass of the molecule the volume holds, in daltons, hydrogens
+        included (:func:`~specter.potential.molecular_mass_from_atoms`
+        supplies it from a model). Sets how much ice the particle
+        displaces: exactly its own volume at 0.73 cm^3/g, whatever
+        scattering factors rendered it
+        (:func:`~specter.potential.full_occupancy_potential`). Default None
+        reads occupancy against the fixed
+        :data:`~specter.potential.FULL_OCCUPANCY_POTENTIAL_V`, since a bare
+        volume does not say how much molecule it holds.
     """
 
     def __init__(
@@ -376,6 +389,7 @@ class ImageGenerator(ParticleGeneratorBase):
         coincidence_radius: float | torch.Tensor = 0.0,
         potential_scale: float | torch.Tensor = 1.0,
         bfactor: float | torch.Tensor | None = None,
+        molecular_mass: float | None = None,
     ):
         nxy = scattering_potential.shape[-1]
         self.pad_fft = propagation.pad_fft
@@ -422,6 +436,7 @@ class ImageGenerator(ParticleGeneratorBase):
         self.crowd_min_distance = crowding.min_distance
 
         self.register_buffer("V", scattering_potential)
+        self._set_molecular_mass(molecular_mass)
         self.register_buffer("quaternions", quaternions)
         self.register_buffer("translations", translations)
         if self.verbose:

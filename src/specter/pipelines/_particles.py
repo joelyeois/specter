@@ -34,7 +34,7 @@ from specter.memory import (
     recommend_batchsize,
 )
 from specter.pdb import PDB
-from specter.potential import PotentialBuilder
+from specter.potential import PotentialBuilder, molecular_mass_from_atoms
 from specter.devices import parse_device, resolve_available_device
 from specter.settings import (
     Camera,
@@ -260,6 +260,7 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
         coincidence_radius=coincidence_radius,
         potential_scale=potential_scale,
         bfactor=config.bfactor,
+        molecular_mass=molecular_mass_from_atoms(pdb.atomic_numbers),
     )
 
     if config.save_clean_exitwaves:

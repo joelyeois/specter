@@ -26,7 +26,11 @@ from ._builders import (
 from ._gemmi_builder import GemmiPotentialBuilder
 from ._occupancy import (
     FULL_OCCUPANCY_POTENTIAL_V,
+    PROTEIN_VOLUME_PER_DALTON_A3,
     WATER_COARSE_GRAIN_SIGMA_ANGSTROM,
+    full_occupancy_potential,
+    molecular_mass_from_atoms,
+    template_occupancy_reference,
     occupancy_blur_halo_voxels,
     potential_occupancy,
 )
@@ -42,6 +46,10 @@ __all__ = [
     "apply_amplitude_contrast",
     "inelastic_absorption_potential",
     "FULL_OCCUPANCY_POTENTIAL_V",
+    "PROTEIN_VOLUME_PER_DALTON_A3",
+    "full_occupancy_potential",
+    "template_occupancy_reference",
+    "molecular_mass_from_atoms",
     "GemmiPotentialBuilder",
     "PotentialBuilder",
     "WATER_COARSE_GRAIN_SIGMA_ANGSTROM",

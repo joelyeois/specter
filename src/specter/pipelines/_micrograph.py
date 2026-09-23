@@ -30,7 +30,7 @@ from specter.imagegenerator import MicrographGenerator
 from specter.specimen import MicrographSpecimenGenerator
 from specter.io import create_micrograph_starfile
 from specter.pdb import PDB
-from specter.potential import PotentialBuilder
+from specter.potential import PotentialBuilder, molecular_mass_from_atoms
 from specter.devices import resolve_available_device
 from specter.settings import (
     Camera,
@@ -234,6 +234,7 @@ def run_micrograph(config: MicrographConfig) -> None:
             parameterization=config.bulk_scattering_factors,
         ),
         icemaker=icemaker,
+        molecular_mass=molecular_mass_from_atoms(pdb.atomic_numbers),
         progressbars=False,
         save_clean_exitwaves=config.save_clean_exitwaves,
     )

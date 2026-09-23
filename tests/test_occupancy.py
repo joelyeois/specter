@@ -131,3 +131,148 @@ def _RandomIce(n, nz):
     from specter.ice import RandomIcemaker
 
     return RandomIcemaker(dx=2.0, n=n, nz=nz, progressbars=False)
+
+
+class TestTemplateOccupancyReference:
+    """
+    The reference a template's own occupancy is read against. How much ice a
+    particle displaces is its volume, which scattering factors do not change;
+    under a fixed 7.0 V it followed them, 0.84x the molecule for a Shtyrov
+    render with hydrogens and 1.09x for a Kirkland one.
+    """
+
+    @staticmethod
+    def _template(n=48, dx=1.0):
+        from specter.potential import PotentialBuilder
+
+        g = torch.Generator().manual_seed(1)
+        coords = torch.randn(1500, 3, generator=g) * 5.0
+        z = torch.full((1500,), 6)
+        z[::2] = 1
+        v = PotentialBuilder(n, dx, z, parameterization="kirkland")(coords)
+        return v.detach(), z
+
+    def _displaced(self, v, dx, ref):
+        from specter.potential import potential_occupancy
+
+        return float(potential_occupancy(v, dx, full_potential=ref).sum()) * dx**3
+
+    @pytest.mark.parametrize("strength", [0.8, 1.0, 1.25])
+    def test_displaces_exactly_the_molecular_volume_at_any_strength(self, strength):
+        """
+        Rescaling the potential stands in for a different scattering table:
+        the reference moves with it and the displaced volume does not.
+        """
+        from specter.potential import full_occupancy_potential
+
+        v, _ = self._template()
+        v = v * strength
+        volume = 4000.0
+        ref = full_occupancy_potential(v, 1.0, volume)
+        assert self._displaced(v, 1.0, ref) == pytest.approx(volume, rel=1e-3)
+
+    def test_reads_below_the_mean_when_the_clamp_bites(self):
+        """
+        The clamp discards what dense voxels hold above the reference, so the
+        solution sits below the mean inner potential, which alone would
+        displace too little.
+        """
+        from specter.potential import full_occupancy_potential
+
+        v, _ = self._template()
+        volume = 4000.0
+        mean = float(v.sum()) / volume
+        ref = full_occupancy_potential(v, 1.0, volume)
+        assert ref < mean
+        assert self._displaced(v, 1.0, mean) < volume
+
+    def test_empty_space_around_the_molecule_changes_nothing(self):
+        from specter.potential import full_occupancy_potential
+
+        v, _ = self._template(n=48)
+        padded = torch.zeros(96, 96, 96)
+        padded[24:72, 24:72, 24:72] = v
+        a = full_occupancy_potential(v, 1.0, 4000.0)
+        b = full_occupancy_potential(padded, 1.0, 4000.0)
+        assert b == pytest.approx(a, rel=2e-4)
+
+    def test_hydrogen_free_models_are_charged_their_hydrogens(self):
+        from specter.atom import atom_mass
+        from specter.potential import molecular_mass_from_atoms
+
+        with_h = torch.tensor([6, 6, 1, 1, 8])
+        heavy = torch.tensor([6, 6, 8])
+        assert molecular_mass_from_atoms(with_h) == pytest.approx(
+            float(atom_mass(with_h).sum())
+        )
+        assert molecular_mass_from_atoms(heavy) == pytest.approx(
+            float(atom_mass(heavy).sum()) / 0.932
+        )
+
+    def test_generator_solves_its_reference_only_when_it_knows_the_mass(self):
+        from specter.imagegenerator import ImageGenerator
+        from specter.potential import (
+            FULL_OCCUPANCY_POTENTIAL_V,
+            PROTEIN_VOLUME_PER_DALTON_A3,
+            full_occupancy_potential,
+        )
+        from specter.settings import Camera
+
+        v, _ = self._template()
+
+        def build(mass):
+            return ImageGenerator(
+                v,
+                1.0,
+                torch.tensor([[1.0, 0.0, 0.0, 0.0]]),
+                torch.zeros(1, 2),
+                None,
+                300.0,
+                torch.tensor([40.0]),
+                optics=None,
+                camera=Camera(noise_model="none"),
+                progressbars=False,
+                verbose=False,
+                molecular_mass=mass,
+            )
+
+        assert build(None)._occupancy_reference() == FULL_OCCUPANCY_POTENTIAL_V
+        mass = 4000.0 / PROTEIN_VOLUME_PER_DALTON_A3
+        assert build(mass)._occupancy_reference() == pytest.approx(
+            full_occupancy_potential(v, 1.0, 4000.0)
+        )
+
+    def test_micrograph_specimen_blends_against_its_own_reference(self, monkeypatch):
+        """
+        A micrograph's copies are all one template, so one solved reference
+        serves them; it must be what the ice blend actually receives.
+        """
+        import specter.specimen._single_particle as sp
+        from specter.potential import (
+            FULL_OCCUPANCY_POTENTIAL_V,
+            PROTEIN_VOLUME_PER_DALTON_A3,
+            full_occupancy_potential,
+        )
+        from specter.settings import Ice
+
+        v, _ = self._template()
+        seen = []
+
+        def spy(V, icemaker, pixel_size, full_potential=None, **kwargs):
+            seen.append(full_potential)
+            return V
+
+        monkeypatch.setattr(sp, "blend_ice_into_volume", spy)
+        mass = 4000.0 / PROTEIN_VOLUME_PER_DALTON_A3
+        for m in (None, mass):
+            gen = sp.MicrographSpecimenGenerator(
+                v,
+                1.0,
+                48,
+                ice=Ice(model="random"),
+                progressbars=False,
+                molecular_mass=m,
+            )
+            gen.generate()
+        assert seen[0] == FULL_OCCUPANCY_POTENTIAL_V
+        assert seen[1] == pytest.approx(full_occupancy_potential(v, 1.0, 4000.0))

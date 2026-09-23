@@ -33,19 +33,32 @@ ice in it, and not before.
 
 from __future__ import annotations
 
+import warnings
+
 import torch
 
+from ..atom import atom_mass
 from ..filters import gaussian_blur3d
 
 __all__ = [
     "FULL_OCCUPANCY_POTENTIAL_V",
+    "PROTEIN_VOLUME_PER_DALTON_A3",
     "WATER_COARSE_GRAIN_SIGMA_ANGSTROM",
+    "full_occupancy_potential",
+    "template_occupancy_reference",
+    "molecular_mass_from_atoms",
     "occupancy_blur_halo_voxels",
     "potential_occupancy",
 ]
 
 #: Scattering potential of a voxel entirely filled with biological
-#: material, V. Protein's mean inner potential. The reference for how much
+#: material, V. Protein's mean inner potential. Now the FALLBACK: a
+#: generator that knows its template's mass solves its own reference
+#: (:func:`template_occupancy_reference`), because the rendered potential
+#: depends on the scattering table -- 5.91 V for 6BDF under Shtyrov with
+#: hydrogens, 8.01 V under Kirkland -- while the water a molecule displaces
+#: does not. This value is what a bare volume, or a tomogram's mixture of
+#: species, is read against. The reference for how much
 #: of a voxel is already occupied, so it has to be an ABSOLUTE quantity:
 #: the whole point is that it does not depend on what else is in the
 #: volume.
@@ -76,6 +89,17 @@ __all__ = [
 #: Against the rule this replaced, where one gold bead moved 13.87% of all
 #: voxels between full ice and none, that is a good trade.
 FULL_OCCUPANCY_POTENTIAL_V = 7.0
+
+#: Molecular volume per dalton of protein, A^3/Da: the partial specific
+#: volume vbar = 0.73 cm^3/g, the same basis :data:`FULL_OCCUPANCY_POTENTIAL_V`
+#: was measured on.
+PROTEIN_VOLUME_PER_DALTON_A3 = 1.2122
+
+#: Heavy-atom share of a protein's mass. A model deposited without hydrogens
+#: weighs this fraction of the molecule it describes (H is 49% of protein
+#: atoms at 1.008 Da against a 7.19 Da mean), and vbar is per gram of the
+#: whole molecule.
+_PROTEIN_HEAVY_ATOM_MASS_FRACTION = 0.932
 
 #: Coarse-graining length, Angstrom, for reading occupancy off a
 #: potential. Specified in ANGSTROM rather than voxels, which is the whole
@@ -224,3 +248,168 @@ def potential_occupancy(
     if sigma_vox >= 0.25:
         field = gaussian_blur3d(field, sigma_vox)
     return (field / full_potential).clamp_(0.0, 1.0)
+
+
+def molecular_mass_from_atoms(atomic_numbers: torch.Tensor) -> float:
+    """
+    Mass of the molecule an atomic model describes, in daltons.
+
+    The atoms' own mass, except that a model carrying no hydrogens has it
+    divided by the heavy-atom share of protein mass, 0.932: the partial
+    specific volume behind :data:`PROTEIN_VOLUME_PER_DALTON_A3` is per gram of
+    the whole molecule, so a hydrogen-free deposition would otherwise
+    displace 7% too little water.
+
+    Parameters
+    ----------
+    atomic_numbers : torch.Tensor
+        Atomic numbers of every atom in the structure, shape ``(N,)``.
+
+    Returns
+    -------
+    float
+        Molecular mass in daltons.
+    """
+    z = torch.as_tensor(atomic_numbers)
+    mass = float(atom_mass(z.cpu()).double().sum())
+    if not bool((z == 1).any()):
+        mass /= _PROTEIN_HEAVY_ATOM_MASS_FRACTION
+    return mass
+
+
+def full_occupancy_potential(
+    V: torch.Tensor,
+    voxel_size: float,
+    molecular_volume_A3: float,
+    sigma_angstrom: float = WATER_COARSE_GRAIN_SIGMA_ANGSTROM,
+    rtol: float = 1e-4,
+) -> float:
+    r"""
+    The occupancy reference at which a template displaces its own volume.
+
+    :func:`potential_occupancy` reads a voxel as full at ``full_potential``
+    volts, and a fixed reference only suits renderings whose potential sits at
+    that level. How much water a molecule pushes aside is geometry -- its mass
+    and density -- not a property of the scattering factors it was rendered
+    with, yet under the fixed 7.0 V it follows them: a Shtyrov render with
+    hydrogens (5.9 V mean) displaced 0.84 of its volume, a Kirkland one
+    (8.0 V) 1.09. This solves instead for the reference that makes the
+    displaced volume exactly the molecule's,
+
+    .. math::
+        \sum_i \min\!\left(\frac{\bar V_i}{V_{ref}},\,1\right) \Delta^3
+            = \mathcal{V}_{mol},
+
+    with :math:`\bar V` the coarse-grained potential. Without the clamp this is
+    the mean inner potential :math:`\int V / \mathcal{V}_{mol}` (the blur
+    conserves the integral); the clamp discards what dense spots such as a
+    heme iron hold above the reference, which the solution recovers by
+    reading slightly lower.
+
+    The left side decreases monotonically in :math:`V_{ref}`, so bisection
+    converges; the mean inner potential brackets it from above. Padding the
+    box with empty space changes nothing, since empty voxels contribute zero.
+
+    Parameters
+    ----------
+    V : torch.Tensor
+        The template's potential in volts, shape ``(Z, Y, X)``, the molecule
+        alone and wholly inside the box.
+    voxel_size : float
+        Voxel size in Angstrom.
+    molecular_volume_A3 : float
+        The molecule's volume in A^3: its mass
+        (:func:`molecular_mass_from_atoms`) times
+        :data:`PROTEIN_VOLUME_PER_DALTON_A3`.
+    sigma_angstrom : float, optional
+        Coarse-graining length, as :func:`potential_occupancy`'s.
+    rtol : float, optional
+        Relative tolerance on the reference. Default 1e-4.
+
+    Returns
+    -------
+    float
+        The reference potential in volts.
+    """
+    if molecular_volume_A3 <= 0:
+        raise ValueError(
+            f"molecular_volume_A3 must be positive, got {molecular_volume_A3}"
+        )
+    field = V.detach().float()
+    sigma_vox = sigma_angstrom / voxel_size
+    if sigma_vox >= 0.25:
+        field = gaussian_blur3d(field, sigma_vox)
+    # Only occupied voxels matter to the sum; empty space is most of a box.
+    field = field[field > 0].double()
+    target = molecular_volume_A3 / voxel_size**3
+    total = float(field.sum())
+    if total <= 0:
+        raise ValueError("V has no positive potential to read occupancy from")
+
+    def displaced(ref: float) -> float:
+        return float((field / ref).clamp_(max=1.0).sum())
+
+    if field.numel() < target:
+        raise ValueError(
+            "V has fewer occupied voxels than the molecular volume requires; "
+            "is the box clipping the molecule, or the mass too large?"
+        )
+    hi = total / target  # the mean inner potential: displaced(hi) <= target
+    lo = hi / 2
+    while displaced(lo) < target:
+        lo /= 2
+    while hi - lo > rtol * hi:
+        mid = 0.5 * (lo + hi)
+        if displaced(mid) > target:
+            lo = mid
+        else:
+            hi = mid
+    return 0.5 * (lo + hi)
+
+
+def template_occupancy_reference(
+    template: torch.Tensor | None, voxel_size: float, molecular_mass: float | None
+) -> float:
+    """
+    The occupancy reference a generator reads its template's ice against, V.
+
+    :func:`full_occupancy_potential` for the template when its mass is known,
+    so it displaces exactly its own volume of ice; the fixed
+    :data:`FULL_OCCUPANCY_POTENTIAL_V` when it is not, since a bare volume
+    does not say how much molecule it holds. A box that clips the molecule
+    cannot hold its volume, and falls back to the fixed reference with a
+    warning rather than failing a run the old reference would have finished.
+
+    Parameters
+    ----------
+    template : torch.Tensor or None
+        The template's potential, shape ``(Z, Y, X)``, unscaled. None (an
+        ice-only specimen) has nothing to displace ice with.
+    voxel_size : float
+        Voxel size in Angstrom.
+    molecular_mass : float or None
+        Mass of the molecule in daltons, hydrogens included
+        (:func:`molecular_mass_from_atoms`), or None.
+
+    Returns
+    -------
+    float
+        The reference potential in volts.
+    """
+    if molecular_mass is None or template is None:
+        return FULL_OCCUPANCY_POTENTIAL_V
+    if molecular_mass <= 0:
+        raise ValueError(f"molecular_mass must be positive, got {molecular_mass}")
+    try:
+        return full_occupancy_potential(
+            template, voxel_size, molecular_mass * PROTEIN_VOLUME_PER_DALTON_A3
+        )
+    except ValueError as err:
+        warnings.warn(
+            f"Could not solve this template's occupancy reference ({err}); "
+            f"falling back to the fixed {FULL_OCCUPANCY_POTENTIAL_V} V, so the ice "
+            "it displaces follows its scattering factors. Enlarge the box to hold "
+            "the whole molecule.",
+            stacklevel=3,
+        )
+        return FULL_OCCUPANCY_POTENTIAL_V

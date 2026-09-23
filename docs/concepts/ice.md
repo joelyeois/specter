@@ -108,6 +108,36 @@ on local structure than the ML-BOP penalty, and S(k) matching alone can
 still hide badly overlapping atoms behind a good Fourier-amplitude match
 when this is the only penalty active.
 
+## Solvent displacement
+
+Ice is added to a specimen in proportion to the space the specimen leaves
+free. The occupancy of each voxel is read off the specimen's potential after
+coarse-graining it over 2 Å, the length scale of a water molecule:
+
+\[
+o(\mathbf{r}) = \min\!\left(\frac{\bar V(\mathbf{r})}{V_{ref}},\,1\right),
+\qquad
+V_{ice}(\mathbf{r}) \to \bigl(1 - o(\mathbf{r})\bigr)\,V_{ice}(\mathbf{r}).
+\]
+
+The Gaussian coarse-graining conserves the integral of the potential, so the
+total volume of water displaced is set by \(V_{ref}\) alone. How much water a
+molecule displaces is a geometric property, its mass at the partial specific
+volume of protein (0.73 cm³/g), and does not depend on the scattering factors
+used to render it; the rendered potential does. For 6BDF, the protein's mean
+inner potential is 5.91 V under Shtyrov factors with hydrogens and 8.01 V
+under Kirkland factors, so a single fixed reference of 7.0 V displaces 0.84 or
+1.09 of the molecular volume respectively.
+
+When the molecule's mass is known, `potential.full_occupancy_potential`
+therefore solves for the reference at which the clamped occupancy sums to
+exactly the molecular volume. The particle and micrograph pipelines supply
+the mass from the atomic model (`potential.molecular_mass_from_atoms`, which
+adds the hydrogens a hydrogen-free deposition omits). The reference is solved
+once per template, in 0.01 to 0.04 s on a GPU. A volume supplied without a
+mass, and a tomogram, which holds many species in one volume, use the fixed
+`potential.FULL_OCCUPANCY_POTENTIAL_V` of 7.0 V instead.
+
 ## Limitations
 
 - **The target is one phase of ice at one thermodynamic state.**

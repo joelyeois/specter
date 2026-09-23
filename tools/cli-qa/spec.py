@@ -144,6 +144,11 @@ PARTICLES = CommandSpec(
         Flag("cs", "2.7"),
         Flag("alpha", "0.07"),
         Flag(
+            "objective_aperture",
+            "12.0",
+            context=["--absorption_model", "inelastic_mfp", "--alpha", "0.0"],
+        ),
+        Flag(
             "n_frames",
             "5",
             context=["--detector_model", "k3_300kv", "--coincidence_radius", "2.0"],

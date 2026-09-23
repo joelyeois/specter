@@ -37,7 +37,12 @@ from ..aberrations import (
 from ..arrays import compute_nz, pad_volume
 from ..ctf import LegacyAberrationAdapter
 from ..microscope import Detector
-from ..potential import absorption_potential, inelastic_absorption_potential
+from ..potential import (
+    absorption_potential,
+    aperture_mfp_ice,
+    aperture_mfp_protein,
+    inelastic_absorption_potential,
+)
 from ..settings import Camera, Envelopes, Optics, Propagation
 
 __all__ = [
@@ -148,6 +153,19 @@ class BaseImager(L.LightningModule):
         self.scattering_model = self.propagation.scattering_model
         self.alpha = self.propagation.alpha
         self.absorption_model = self.propagation.absorption_model
+        self.objective_aperture = (
+            None if self.optics is None else self.optics.objective_aperture
+        )
+        if (
+            self.objective_aperture is not None
+            and self.absorption_model != "inelastic_mfp"
+        ):
+            raise ValueError(
+                "Optics(objective_aperture=...) requires "
+                "Propagation(absorption_model='inelastic_mfp'): under 'alpha' the "
+                "fitted amplitude contrast already stands in for aperture loss, "
+                "and applying both would count it twice."
+            )
         self.klim = self.propagation.klim
         self.ews_curvature_sign = self.propagation.ews_curvature_sign
         self.noise_model = self.camera.noise_model
@@ -317,9 +335,36 @@ class BaseImager(L.LightningModule):
             return 0.0  # not uniform; built as a field instead
         if getattr(self, "icemaker", None) is None:
             return 0.0  # vacuum around the specimen, nothing to absorb in
-        return absorption_potential(
-            self.propagation.inelastic_mfp_solvent, self.voltage
-        )
+        return absorption_potential(self._removal_mfp("solvent"), self.voltage)
+
+    def _removal_mfp(self, material: str) -> float:
+        """
+        Mean free path for leaving the image, inelastic plus aperture, in A.
+
+        Two independent loss channels add as rates. Without an objective
+        aperture this is the configured inelastic mean free path unchanged.
+
+        Parameters
+        ----------
+        material : {"solvent", "specimen"}
+            Which material. ``"specimen"`` requires
+            ``inelastic_mfp_specimen`` to be set.
+
+        Returns
+        -------
+        float
+            Mean free path in Angstrom.
+        """
+        if material == "solvent":
+            inelastic = self.propagation.inelastic_mfp_solvent
+        else:
+            inelastic = cast(float, self.propagation.inelastic_mfp_specimen)
+        if self.objective_aperture is None:
+            return inelastic
+        aperture = (
+            aperture_mfp_ice if material == "solvent" else aperture_mfp_protein
+        )(self.objective_aperture, self.voltage)
+        return 1.0 / (1.0 / inelastic + 1.0 / aperture)
 
     def _absorption_field(self, specimen: torch.Tensor) -> torch.Tensor | None:
         """
@@ -369,9 +414,9 @@ class BaseImager(L.LightningModule):
             self.pixel_size,
             self.voltage,
             mfp_solvent_A=(
-                self.propagation.inelastic_mfp_solvent if has_solvent else float("inf")
+                self._removal_mfp("solvent") if has_solvent else float("inf")
             ),
-            mfp_specimen_A=self.propagation.inelastic_mfp_specimen,
+            mfp_specimen_A=self._removal_mfp("specimen"),
         )
 
     def _init_optics(self) -> None:

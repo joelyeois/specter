@@ -133,6 +133,18 @@ class ParticleStackConfig:
         ),
         check="positive",
     )  # Å
+    objective_aperture: float | None = setting(
+        None,
+        help=(
+            "Objective aperture semi-angle in milliradians (a 70 um aperture on a "
+            "Krios is ~12 mrad), for absorption_model='inelastic_mfp'. Electrons "
+            "scattered elastically beyond it leave the image; the loss is charged "
+            "per material from the scattering cross section, since no practical "
+            "grid carries it (2.7% of the beam through 400 Angstrom of ice at "
+            "12 mrad, 300 kV). Unset: no aperture."
+        ),
+        check="positive",
+    )  # mrad
 
     # --- Sampling (basic) ---
     defocus: ScalarOrRange = setting(

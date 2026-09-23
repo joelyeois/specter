@@ -106,6 +106,12 @@ the source of each Z-slice differs.
   formation. In *Current Approaches to Cryo-Electron Microscopy*,
   *Progress in Molecular Biology and Translational Science*. Elsevier.
   [doi:10.1016/bs.pmbts.2026.05.001](https://doi.org/10.1016/bs.pmbts.2026.05.001)
+- Yonekura, K., Braunfeld, M. B., Maki-Yonekura, S., & Agard, D. A. (2006).
+  Electron energy filtering significantly improves amplitude contrast of
+  frozen-hydrated protein at 300 kV. *Journal of Structural Biology*, 156,
+  524–536. [doi:10.1016/j.jsb.2006.07.016](https://doi.org/10.1016/j.jsb.2006.07.016)
+- Langmore, J. P., & Smith, M. F. (1992). Quantitative energy-filtered electron
+  microscopy of biological molecules in ice. *Ultramicroscopy*, 46, 349–373.
 
 
 ## Mean-free-path absorption support
@@ -132,6 +138,41 @@ estimator. These paths still support `alpha`. This restriction does not
 remove the low-level propagators' support for supplied complex potentials.
 
 A possible extension is described in [the Himes-style design sketch](himes-inelastic-design.md).
+
+### Objective aperture
+
+Electrons scattered elastically beyond the objective aperture are removed from
+the image in the same way as inelastically scattered electrons are removed by
+an energy filter. A multislice grid does not carry this scattering. At 1 Å per
+pixel the Nyquist frequency (0.5 Å⁻¹) lies inside a 12 mrad aperture
+(0.61 Å⁻¹ at 300 kV), and finer grids attenuate it: through 400 Å of amorphous
+ice the cross section below sends 2.7% of the beam beyond 12 mrad, whereas the
+propagated wave carries 0.49% at 0.5 Å per pixel and 1.9% at 0.125 Å per pixel.
+
+`Optics(objective_aperture=...)`, in milliradians, therefore charges this loss
+as an additional absorption rate for each material. The rate is the elastic
+cross section integrated beyond the aperture,
+
+\[
+\frac{1}{\Lambda_{ap}} = n\,(\sigma c_1)^2
+    \int_{k_{ap}}^{\infty} \overline{|f(k)|^2}\,2\pi k\,dk ,
+\]
+
+evaluated with Kirkland factors for water (including its intramolecular
+interference) and for the standard protein composition
+(`potential.aperture_mfp_ice`, `potential.aperture_mfp_protein`). At 300 kV and
+12 mrad, \(\Lambda_{ap}\) is 14,400 Å for ice and 10,400 Å for protein. The
+rate adds to the inelastic one, and where the aperture lies inside the grid's
+Nyquist frequency the potential is low-passed at the aperture
+(`potential.aperture_lowpass`) so that the scattering the grid does carry is
+not also counted. The aperture requires `absorption_model="inelastic_mfp"`,
+because the `alpha` model's fitted constant already represents this loss.
+
+On a 6BDF particle in 400 Å of ice at 300 kV, a 12 mrad aperture raises the
+effective amplitude contrast measured from a defocus series by 0.0075, from
+0.063 to 0.070 at the provisional protein mean free path. Yonekura et al.
+(2006) measured 6.9 ± 1.9% on energy-filtered images under the same aperture
+and voltage.
 
 ### Frozen-plasmon exposure simulation
 

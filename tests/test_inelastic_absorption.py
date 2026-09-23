@@ -533,3 +533,123 @@ def test_iterative_consumers_reject_unsupported_mfp(kind, specimen_mfp):
         else:
             cls = MicrographGenerator if kind == "micrograph" else TiltSeriesGenerator
             cls(v, 8, 2.0, None, VOLTAGE, 10.0, propagation=propagation, optics=None)
+
+
+def test_aperture_cross_section_matches_langmore_smith_total() -> None:
+    """
+    With a vanishing aperture, the aperture mean free path is the total
+    elastic one, which Langmore & Smith (1992) Eq. 1 gives independently:
+    ``sigma_el = 1.4e-6 Z^1.5 / beta^2 (1 - 0.26 Z / (137 beta))`` nm^2.
+    """
+    from specter.potential import aperture_mfp_ice
+
+    gamma = 1 + VOLTAGE / 511.0
+    beta = math.sqrt(1 - 1 / gamma**2)
+
+    def sigma_el(z: int) -> float:  # A^2
+        return 1.4e-6 * z**1.5 / beta**2 * (1 - 0.26 * z / (137 * beta)) * 100
+
+    n = 0.93 / (18.015 * 1.66054)
+    langmore_smith = 1.0 / (n * (sigma_el(8) + 2 * sigma_el(1)))
+    assert aperture_mfp_ice(0.01, VOLTAGE) == pytest.approx(langmore_smith, rel=0.1)
+
+
+def test_aperture_loss_through_ice_and_its_trends() -> None:
+    """
+    2.7% of the beam leaves a 12 mrad aperture through 400 A of ice at
+    300 kV; a wider aperture loses less, and protein (denser, heavier atoms)
+    scatters out faster than ice.
+    """
+    from specter.potential import aperture_mfp_ice, aperture_mfp_protein
+
+    loss = 1 - math.exp(-400.0 / aperture_mfp_ice(12.0, VOLTAGE))
+    assert loss == pytest.approx(0.027, abs=0.002)
+    assert aperture_mfp_ice(20.0, VOLTAGE) > aperture_mfp_ice(12.0, VOLTAGE)
+    assert aperture_mfp_protein(12.0, VOLTAGE) < aperture_mfp_ice(12.0, VOLTAGE)
+    with pytest.raises(ValueError):
+        aperture_mfp_ice(0.0, VOLTAGE)
+
+
+def test_aperture_lowpass_removes_only_what_lies_beyond_the_aperture() -> None:
+    """Coarse grids are untouched; on a fine grid only k > k_ap is removed."""
+    from specter.constants import energy_to_wavelength
+    from specter.potential import aperture_lowpass
+
+    torch.manual_seed(0)
+    coarse = torch.randn(4, 32, 32)
+    assert aperture_lowpass(coarse, 1.0, 12.0, VOLTAGE) is coarse
+
+    dx = 0.25
+    v = torch.randn(2, 70, 64, 64, dtype=torch.float64)  # 70 slices: two chunks
+    out = aperture_lowpass(v, dx, 12.0, VOLTAGE)
+    k_ap = 12e-3 / energy_to_wavelength(VOLTAGE)
+    ky = torch.fft.fftfreq(64, d=dx)
+    k = torch.sqrt(ky[:, None] ** 2 + ky[None, :] ** 2)
+    before, after = torch.fft.fft2(v), torch.fft.fft2(out)
+    assert after[..., k > k_ap * 1.01].abs().max() < 1e-9
+    inside = k < k_ap * 0.99
+    torch.testing.assert_close(after[..., inside], before[..., inside])
+
+
+def test_objective_aperture_requires_the_mfp_model() -> None:
+    """Under 'alpha' the fitted constant already stands in for aperture loss."""
+    from specter.imagegenerator import ImageGenerator
+    from specter.settings import Optics, Propagation
+
+    with pytest.raises(ValueError, match="objective_aperture"):
+        ImageGenerator(
+            torch.zeros(8, 8, 8),
+            1.0,
+            torch.tensor([[1.0, 0.0, 0.0, 0.0]]),
+            torch.zeros(1, 2),
+            {"dfu": torch.tensor([1e4]), "dfv": torch.tensor([1e4])},
+            VOLTAGE,
+            dose_per_angstrom=40.0,
+            propagation=Propagation(alpha=0.1),
+            optics=Optics(objective_aperture=12.0),
+            progressbars=False,
+        )
+
+
+def test_generator_charges_aperture_loss_through_the_ice() -> None:
+    """
+    Same seed, same ice, with and without a 12 mrad aperture: the image's
+    mean falls by exactly ``exp(-t / Lambda_ap)``. At 2 A/px the aperture lies
+    beyond Nyquist, so the low-pass is a no-op and the loss is all analytic.
+    """
+    import specter
+    from specter.imagegenerator import ImageGenerator
+    from specter.potential import aperture_mfp_ice
+    from specter.settings import Camera, Crowding, Ice, Optics, Propagation
+
+    n, dx, thickness, dose = 32, 2.0, 400.0, 40.0
+    ctf_params = {
+        "dfu": torch.tensor([10000.0]),
+        "dfv": torch.tensor([10000.0]),
+        "dfang": torch.tensor([0.0]),
+        "cs": torch.tensor([2.7e7]),
+    }
+
+    def mean_intensity(aperture: float | None) -> float:
+        specter.seed(3)
+        generator = ImageGenerator(
+            torch.zeros(n, n, n),
+            dx,
+            torch.tensor([[1.0, 0.0, 0.0, 0.0]]),
+            torch.zeros(1, 2),
+            ctf_params,
+            VOLTAGE,
+            dose_per_angstrom=dose,
+            propagation=Propagation(absorption_model="inelastic_mfp"),
+            ice=Ice(model="gd", thickness=thickness),
+            crowding=Crowding(n_points=0),
+            camera=Camera(noise_model="none", detector_model="none"),
+            optics=Optics(objective_aperture=aperture),
+            progressbars=False,
+        )
+        with torch.no_grad():
+            return float(generator(torch.tensor([0])).mean())
+
+    ratio = mean_intensity(12.0) / mean_intensity(None)
+    expected = math.exp(-thickness / aperture_mfp_ice(12.0, VOLTAGE))
+    assert ratio == pytest.approx(expected, rel=1e-3)

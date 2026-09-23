@@ -36,7 +36,8 @@ from __future__ import annotations
 
 import torch
 
-from ..constants import interaction_parameter
+from ..atom._atomic_potentials import kirkland_atomic_potential_3d_fourier
+from ..constants import energy_to_wavelength, interaction_parameter
 from ._occupancy import (
     FULL_OCCUPANCY_POTENTIAL_V,
     occupancy_blur_halo_voxels,
@@ -90,10 +91,29 @@ is 0.048 at 2460 A and 0.020 at 3170 A. Replace this with a measurement when
 one exists.
 """
 
+#: Amorphous ice for the aperture cross section: the density at which this
+#: package's water kernel gives its 4.55 V mean inner potential (see
+#: ``ice/_kernels.py``'s ``build_water_kernel``), as molecules per A^3.
+_ICE_DENSITY_G_CM3 = 0.93
+_WATER_MOLAR_MASS = 18.015
+
+#: Protein by atom fraction and density, the composition
+#: :data:`INELASTIC_MFP_PROTEIN_A` is derived for (Vulović et al., 2013).
+_PROTEIN_ATOM_FRACTIONS = {1: 0.492, 6: 0.313, 7: 0.094, 8: 0.101}
+_PROTEIN_DENSITY_G_CM3 = 1.35
+_ATOMIC_MASS = {1: 1.008, 6: 12.011, 7: 14.007, 8: 15.999}
+
+#: Water geometry for the intramolecular interference terms, Angstrom.
+_OH_BOND_A = 0.9572
+_HH_DISTANCE_A = 1.5139
+
 __all__ = [
     "INELASTIC_MFP_ICE_A",
     "INELASTIC_MFP_PROTEIN_A",
     "absorption_potential",
+    "aperture_lowpass",
+    "aperture_mfp_ice",
+    "aperture_mfp_protein",
     "apply_amplitude_contrast",
     "inelastic_absorption_potential",
 ]
@@ -133,6 +153,199 @@ def absorption_potential(mfp_A: float, voltage_kv: float) -> float:
     if mfp_A <= 0.0:
         raise ValueError(f"mfp_A={mfp_A} must be positive")
     return 1.0 / (2.0 * interaction_parameter(voltage_kv) * mfp_A)
+
+
+def _beyond_aperture_integral(f2: torch.Tensor, k: torch.Tensor, k_min: float) -> float:
+    """Integral of |f(k)|^2 2 pi k dk over k > k_min, in A^0 (f in A, k in 1/A)."""
+    keep = k > k_min
+    return float(torch.trapezoid(f2[keep] * 2 * torch.pi * k[keep], k[keep]))
+
+
+def _aperture_k(aperture_mrad: float, voltage_kv: float) -> float:
+    if aperture_mrad <= 0.0:
+        raise ValueError(f"aperture_mrad={aperture_mrad} must be positive")
+    return aperture_mrad * 1e-3 / energy_to_wavelength(voltage_kv)
+
+
+def _kirkland_f(atomic_number: int, k: torch.Tensor) -> torch.Tensor:
+    return (
+        kirkland_atomic_potential_3d_fourier(atomic_number, k.float())
+        .double()
+        .reshape(-1)
+    )
+
+
+# Kirkland's fits are accurate to 12 1/A, and the tail beyond still carries
+# 0.5% of the 12 mrad cross section for water at 300 kV, so the grid runs on
+# to 40 1/A, where the fits' Rutherford-like k^-2 decay is what the physics
+# does too; the remainder past 40 is under 0.05%.
+_K_GRID = torch.linspace(1e-4, 40.0, 400_001, dtype=torch.float64)
+
+
+def _cross_section_prefactor(voltage_kv: float) -> float:
+    # sigma turns V*A into radians; 47.878 V*A^2 turns f (A) into the
+    # Fourier-space potential (V*A^3), as `PotentialBuilder` does.
+    return (interaction_parameter(voltage_kv) * 47.878) ** 2
+
+
+def aperture_mfp_ice(aperture_mrad: float, voltage_kv: float) -> float:
+    r"""
+    Mean free path in ice for elastic scattering outside the objective aperture.
+
+    Electrons scattered elastically beyond the aperture semi-angle are
+    removed from the image as surely as inelastic ones removed by an energy
+    filter. A multislice grid cannot carry that loss: at 1 A/px its Nyquist
+    frequency (0.5 1/A) sits inside a typical aperture (12 mrad is 0.61 1/A
+    at 300 kV), and finer grids still damp it -- 400 A of ice sends 2.7% of
+    the beam beyond 12 mrad by this cross section, against 0.49% on a
+    0.5 A grid and 1.9% on a 0.125 A one. This supplies it as an absorption
+    rate instead, the cross section integrated over the scattering the grid
+    cannot hold:
+
+    .. math::
+        \frac{1}{\Lambda_{ap}} = n\,(\sigma\,c_1)^2
+            \int_{k_{ap}}^{\infty} \overline{|f_{\rm H_2O}(k)|^2}\,2\pi k\,dk
+
+    with :math:`c_1 = 47.878` V A^2, :math:`k_{ap}` the aperture's spatial
+    frequency, and the orientation-averaged molecular form factor including
+    the O-H and H-H interference terms. Atoms are summed incoherently
+    between molecules, which amorphous ice's structure factor permits beyond
+    its first peak (0.3 1/A).
+
+    The factors are Kirkland's, per element, whatever `scattering_factors`
+    the specimen is rendered with, and deliberately so. Beyond an aperture
+    the scattering is off the atomic core, where the per-element fits agree:
+    Lobato moves this mean free path by 0.2% at 12 mrad, 0.04% at 20. Shtyrov
+    cannot supply it at all -- its bonded-species fits are tabulated only to
+    0.62 1/A, so the whole integral would be extrapolation from the fit's
+    prior, and they need a bond topology a bulk composition does not have.
+    Nor does it clash with a Shtyrov-rendered specimen: that potential
+    governs what reaches the image, inside the aperture, and this term only
+    what never does.
+
+    Parameters
+    ----------
+    aperture_mrad : float
+        Objective aperture semi-angle in milliradians.
+    voltage_kv : float
+        Accelerating voltage in kV.
+
+    Returns
+    -------
+    float
+        Mean free path in Angstrom. At 300 kV and 12 mrad, ~14,400 A.
+    """
+    k_ap = _aperture_k(aperture_mrad, voltage_kv)
+    k = _K_GRID
+    f_o, f_h = _kirkland_f(8, k), _kirkland_f(1, k)
+    x_oh, x_hh = 2 * torch.pi * k * _OH_BOND_A, 2 * torch.pi * k * _HH_DISTANCE_A
+    f2 = (
+        f_o**2
+        + 2 * f_h**2
+        + 4 * f_o * f_h * torch.sin(x_oh) / x_oh
+        + 2 * f_h**2 * torch.sin(x_hh) / x_hh
+    )
+    n = _ICE_DENSITY_G_CM3 / (_WATER_MOLAR_MASS * 1.66054)
+    rate = (
+        n
+        * _cross_section_prefactor(voltage_kv)
+        * _beyond_aperture_integral(f2, k, k_ap)
+    )
+    return 1.0 / rate
+
+
+def aperture_mfp_protein(aperture_mrad: float, voltage_kv: float) -> float:
+    r"""
+    Mean free path in protein for elastic scattering outside the objective aperture.
+
+    :func:`aperture_mfp_ice`'s cross section for protein's composition (H
+    0.492, C 0.313, N 0.094, O 0.101 by atom fraction at 1.35 g/cm^3, the
+    composition :data:`INELASTIC_MFP_PROTEIN_A` is derived for), summed over
+    atoms incoherently. Bonded neighbours 1-1.5 A apart interfere near the
+    aperture, which this neglects; beyond 0.6 1/A their cross terms
+    oscillate about zero.
+
+    Parameters
+    ----------
+    aperture_mrad : float
+        Objective aperture semi-angle in milliradians.
+    voltage_kv : float
+        Accelerating voltage in kV.
+
+    Returns
+    -------
+    float
+        Mean free path in Angstrom. At 300 kV and 12 mrad, ~10,400 A.
+    """
+    k_ap = _aperture_k(aperture_mrad, voltage_kv)
+    k = _K_GRID
+    f2 = sum(
+        frac * _kirkland_f(z, k) ** 2 for z, frac in _PROTEIN_ATOM_FRACTIONS.items()
+    )
+    mean_mass = sum(
+        frac * _ATOMIC_MASS[z] for z, frac in _PROTEIN_ATOM_FRACTIONS.items()
+    )
+    n = _PROTEIN_DENSITY_G_CM3 / (mean_mass * 1.66054)
+    rate = (
+        n
+        * _cross_section_prefactor(voltage_kv)
+        * _beyond_aperture_integral(f2, k, k_ap)
+    )
+    return 1.0 / rate
+
+
+def aperture_lowpass(
+    v: torch.Tensor,
+    pixel_size: float,
+    aperture_mrad: float,
+    voltage_kv: float,
+    max_slices_per_chunk: int = 64,
+) -> torch.Tensor:
+    """
+    Remove a potential's transverse detail beyond the objective aperture.
+
+    The companion to :func:`aperture_mfp_ice`: once scattering beyond the
+    aperture is charged as an absorption rate, the part of it the grid does
+    carry must not also be propagated, or it is counted twice. Filtering each
+    z-slice in (ky, kx) removes it at first order; the transmission function's
+    own harmonics regenerate some at second order, which is negligible for a
+    weak specimen. Nothing beyond the aperture reaches an image, so no visible
+    frequency is touched. A no-op when the aperture lies outside the grid's
+    Nyquist frequency, the usual case at 1 A/px.
+
+    Parameters
+    ----------
+    v : torch.Tensor
+        Real potential in the beam frame, shape ``(..., Z, Y, X)``.
+    pixel_size : float
+        Pixel size in Angstrom.
+    aperture_mrad : float
+        Objective aperture semi-angle in milliradians.
+    voltage_kv : float
+        Accelerating voltage in kV.
+    max_slices_per_chunk : int, optional
+        Z-slices transformed at once, bounding the complex working set.
+        Default 64.
+
+    Returns
+    -------
+    torch.Tensor
+        The filtered potential, same shape and dtype as `v`. Returned as the
+        input object when the filter would do nothing.
+    """
+    k_ap = _aperture_k(aperture_mrad, voltage_kv)
+    if k_ap >= 0.5 / pixel_size:
+        return v
+    ny, nx = v.shape[-2], v.shape[-1]
+    ky = torch.fft.fftfreq(ny, d=pixel_size, device=v.device)
+    kx = torch.fft.rfftfreq(nx, d=pixel_size, device=v.device)
+    mask = (ky[:, None] ** 2 + kx[None, :] ** 2) <= k_ap**2
+    out = torch.empty_like(v)
+    for z0 in range(0, v.shape[-3], max_slices_per_chunk):
+        z1 = min(z0 + max_slices_per_chunk, v.shape[-3])
+        chunk = torch.fft.rfft2(v[..., z0:z1, :, :]) * mask
+        out[..., z0:z1, :, :] = torch.fft.irfft2(chunk, s=(ny, nx))
+    return out
 
 
 #: Voxels the occupancy blur is allowed to touch in one call. The blur is

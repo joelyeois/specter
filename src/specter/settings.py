@@ -188,12 +188,29 @@ class Optics:
         Laser-phase-plate settings in :class:`specter.ctf.CTFParameters`
         native units. Requires ``aberration_backend="torch_ctf"``. Default
         None, no phase plate.
+    objective_aperture : float, optional
+        Objective aperture semi-angle in milliradians (a 70 um aperture on a
+        Krios is ~12 mrad). Electrons scattered elastically beyond it leave
+        the image; the loss is applied as an absorption rate per material
+        from the scattering cross section
+        (:func:`~specter.potential.aperture_mfp_ice`), since no practical grid
+        carries that scattering itself, and the potential is low-passed at
+        the aperture so the grid's own share is not counted twice. Requires
+        ``Propagation(absorption_model="inelastic_mfp")``: the ``alpha``
+        model's fitted constant already stands in for this loss. Default
+        None, no aperture.
     """
 
     aberration_backend: AberrationBackend = "legacy"
     lpp_params: dict[str, float] | None = None
+    objective_aperture: float | None = None
 
     def __post_init__(self) -> None:
+        if self.objective_aperture is not None and self.objective_aperture <= 0.0:
+            raise ValueError(
+                f"objective_aperture={self.objective_aperture} must be positive "
+                "(milliradians), or None for no aperture"
+            )
         if self.lpp_params is not None and self.aberration_backend != "torch_ctf":
             raise ValueError(
                 "lpp_params requires aberration_backend='torch_ctf' -- "

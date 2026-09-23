@@ -17,6 +17,7 @@ from ..ice import IceBank
 from ..ice._blend import IceSlabBlender
 from ..potential import (
     FULL_OCCUPANCY_POTENTIAL_V,
+    aperture_lowpass,
 )
 from ..scattering import Scattering
 from ..settings import Crowding
@@ -311,6 +312,15 @@ class ParticleGeneratorBase(BaseImager):
                 logger.info(f"Adding ice to volume using {self.ice_model} model")
             with torch.no_grad():
                 V = self.solvate(V, potential_scale=scale)
+
+        # Scattering beyond the objective aperture is charged as absorption
+        # (`_removal_mfp`), so the share of it the grid carries is filtered
+        # out rather than propagated as well. A no-op at 1 A/px and coarser.
+        if self.objective_aperture is not None:
+            with torch.no_grad():
+                V = aperture_lowpass(
+                    V, self.pixel_size, self.objective_aperture, self.voltage
+                )
 
         if v_ab is not None:
             V = torch.complex(V, v_ab)

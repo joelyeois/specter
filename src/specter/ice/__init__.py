@@ -1,6 +1,12 @@
 from ..potential import FULL_OCCUPANCY_POTENTIAL_V
 from ._bank import IceBank
 from ._blend import blend_ice_into_volume, resolve_icemaker
+from ._decorrelation import (
+    DEFAULT_DECORRELATION_DOSE,
+    coherent_dose_equivalent,
+    effective_ice_realisations,
+    ice_fluctuation_scale,
+)
 from ._library import (
     build_ice_cache,
     build_one_ice_config,
@@ -25,6 +31,10 @@ from ._profile import IceProfile, IceProfileMode
 from ._random import RandomIcemaker
 
 __all__ = [
+    "DEFAULT_DECORRELATION_DOSE",
+    "coherent_dose_equivalent",
+    "effective_ice_realisations",
+    "ice_fluctuation_scale",
     "GradientSKIcemaker",
     "ExtXYZDump",
     "MDSimDump",

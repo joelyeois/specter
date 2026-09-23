@@ -281,6 +281,7 @@ class Camera:
     n_frames: int | None = None
     dose_weights_path: str | None = None
     dose_weights_max_frequency: float | None = None
+    detector_calibration_path: str | None = None
 
     def __post_init__(self) -> None:
         if self.detector_model == "none":
@@ -359,14 +360,27 @@ class Ice:
     cache_dir: str | None = None
     relax_steps: int = 0
     parameterization: ScatteringFactors = "kirkland"
+    decorrelation_dose: float | None = None
+    motion_variance: float | None = None
 
     def __post_init__(self) -> None:
         if self.model == "none":
             object.__setattr__(self, "model", None)
+        if self.motion_variance is not None:
+            if self.motion_variance < 0:
+                raise ValueError("motion_variance must be nonnegative")
+            if self.decorrelation_dose is not None:
+                raise ValueError(
+                    "choose motion_variance or decorrelation_dose, not both"
+                )
         if self.thickness is not None and self.thickness < 0:
             raise ValueError(f"thickness={self.thickness} must be non-negative")
         if self.relax_steps < 0:
             raise ValueError(f"relax_steps={self.relax_steps} must be non-negative")
+        if self.decorrelation_dose is not None and self.decorrelation_dose <= 0:
+            raise ValueError(
+                f"decorrelation_dose={self.decorrelation_dose} must be positive"
+            )
 
 
 @dataclass(frozen=True)

@@ -13,10 +13,13 @@ from specter import logger
 
 from ..cpu_threads import limited_cpu_threads
 from ..crowding import CrowdWithDuplicates
-from ..ice import IceBank
+from ..ice import IceBank, ice_fluctuation_scale
 from ..ice._blend import IceSlabBlender
 from ..potential import (
     FULL_OCCUPANCY_POTENTIAL_V,
+    apply_dose_damage,
+    occupancy_blur_halo_voxels,
+    potential_occupancy,
 )
 from ..scattering import Scattering
 from ..settings import Crowding
@@ -81,6 +84,10 @@ class ParticleGeneratorBase(BaseImager):
     quaternions: torch.Tensor
     translations: torch.Tensor
 
+    # The dose envelope acts on the specimen's potential, before solvation,
+    # so the ice added afterwards is undamaged. See potential/_damage.py.
+    _damages_potential: bool = True
+
     def _build_crowd(
         self,
         template: torch.Tensor,
@@ -131,8 +138,82 @@ class ParticleGeneratorBase(BaseImager):
             progressbars=self.progressbars,
         )
 
-    def solvate(
+    def _ice_fluctuation_scale(self) -> float:
+        """
+        How much to damp the solvent's speckle for an exposure's worth of
+        ice rearrangement, or 1.0 when the ice is treated as frozen.
+
+        Uses the batch's mean dose: the realisation count varies slowly with
+        dose, and a per-image scale would mean a per-image ice draw.
+        """
+        dose_decorrelation = self.ice.decorrelation_dose
+        if dose_decorrelation is None:
+            return 1.0
+        dose = float(torch.as_tensor(self.dose_per_angstrom).mean())
+        if dose <= 0:
+            return 1.0
+        return ice_fluctuation_scale(dose, dose_decorrelation)
+
+    def free_fraction_field(
         self, V: torch.Tensor, potential_scale: torch.Tensor | float = 1.0
+    ) -> torch.Tensor:
+        """
+        The fraction of each voxel still available to water, ``1 - occupancy``.
+
+        Computed from `V` as given, so a caller can take it from the
+        UNDAMAGED specimen and then hand it to :meth:`solvate` after the
+        specimen has been damaged. A molecule occupies the same volume
+        whatever its radiation history, and the dose envelope conserves the
+        potential's integral while spreading it, so reading occupancy after
+        damage admits ice into a solid interior (peak core occupancy
+        1.00 -> 0.81 on 1A6M at 50 e-/A^2).
+
+        Stored as float16: it is a weight in [0, 1] multiplying the ice, so
+        half precision costs ~5e-4 relative against a blur that is itself an
+        approximation, and it is half the canvas a full-precision copy of
+        the weighted ice would need.
+
+        Parameters
+        ----------
+        V : torch.Tensor
+            Specimen potential, ``(B, Z, Y, X)``, already scaled.
+        potential_scale : torch.Tensor or float, optional
+            The scale `V` carries, divided back out of the occupancy
+            reference so a contrast knob cannot change the water budget.
+
+        Returns
+        -------
+        torch.Tensor
+            ``(B, Z, Y, X)`` float16 in [0, 1], on `V`'s device.
+        """
+        scale = torch.as_tensor(
+            potential_scale, dtype=V.dtype, device=V.device
+        ).reshape(-1, 1, 1, 1)
+        full = FULL_OCCUPANCY_POTENTIAL_V * scale
+        halo = occupancy_blur_halo_voxels(self.pixel_size)
+        nz = V.shape[1]
+        chunk = _solvate_chunk_slices(V.shape[-1])
+        free = torch.empty(V.shape, dtype=torch.float16, device=V.device)
+        for b in range(V.shape[0]):
+            full_b = full[b : b + 1] if full.shape[0] > 1 else full
+            for start in range(0, nz, chunk):
+                end = min(start + chunk, nz)
+                lo, hi = max(0, start - halo), min(nz, end + halo)
+                occ = potential_occupancy(
+                    V[b : b + 1, lo:hi], self.pixel_size, full_potential=full_b
+                )[:, start - lo : start - lo + (end - start)]
+                free[b : b + 1, start:end] = (
+                    occ.neg_().add_(1.0).clamp_(0.0, 1.0).to(torch.float16)
+                )
+                del occ
+        return free
+
+    def solvate(
+        self,
+        V: torch.Tensor,
+        potential_scale: torch.Tensor | float = 1.0,
+        out: torch.Tensor | None = None,
+        free: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """
         Embed the volume in amorphous ice.
@@ -180,7 +261,14 @@ class ParticleGeneratorBase(BaseImager):
         ``blur(s * V) / s == blur(V)`` -- but carrying it costs a whole
         extra canvas, and the point is only ever to keep `potential_scale`
         out of the water budget.
+
+        With ``out`` the weighted ice is written there instead of into `V`,
+        which is then only read. That is how the damage path gets its
+        solvent: occupancy has to be read from the UNDAMAGED specimen (a
+        molecule does not shrink because it was irradiated), and the same
+        ice has to serve every damage state of one exposure.
         """
+        scale_fluctuation = self._ice_fluctuation_scale()
         if isinstance(self.icemaker, IceBank):
             ice = self.icemaker.generate_big_ice(
                 n=self.nxy,
@@ -191,6 +279,34 @@ class ParticleGeneratorBase(BaseImager):
             ).to(V.device)
         else:
             ice = self.icemaker.generate_ice(batchsize=len(V)).to(V.device)
+
+        if self.ice.motion_variance is not None:
+            from ..ice._exposure import apply_solvent_exposure
+
+            doses = torch.as_tensor(self.dose_per_angstrom).flatten()
+            if doses.numel() > 1 and not torch.allclose(
+                doses, doses[0].expand_as(doses)
+            ):
+                raise ValueError(
+                    "effective solvent exposure currently requires equal particle doses"
+                )
+            apply_solvent_exposure(
+                ice,
+                self.pixel_size,
+                float(doses[0]),
+                self.ice.motion_variance,
+                self.detector.n_frames or 1,
+                self.detector.dose_weights,
+                self._dose_weights_max_frequency,
+            )
+        elif scale_fluctuation != 1.0:
+            # Only the fluctuation decorrelates. The mean of the column is the
+            # same water every frame: it sets the inelastic absorption and how
+            # much solvent the specimen displaces, and it does not average
+            # away. Scaling the whole field would thin the ice instead, which
+            # is a different and separately observable thing.
+            mean = ice.mean(dim=(-3, -2, -1), keepdim=True)
+            ice = mean + (ice - mean) * scale_fluctuation
 
         pad = self.nxy // 2 if self.pad_fft else 0
         ridx = _reflect_index(ice.shape[-1], pad, ice.device) if pad else None
@@ -226,9 +342,11 @@ class ParticleGeneratorBase(BaseImager):
                     slab = slab.index_select(-2, ridx).index_select(-1, ridx)
                 else:
                     slab = slab.clone()
-                blender.add(Vb, slab, start, end)
+                blender.add(
+                    Vb, slab, start, end, out=None if out is None else out[b : b + 1]
+                )
                 del slab
-        return V
+        return V if out is None else out
 
     def process_volume(
         self,
@@ -295,7 +413,8 @@ class ParticleGeneratorBase(BaseImager):
             V = V * scale
 
         # `clean_exitwaves` is the ice-free, absorption-free reference, so it
-        # is deliberately propagated from the real potential.
+        # is deliberately propagated from the real potential, and from the
+        # UNDAMAGED one: it is the reference the damage is measured against.
         if getattr(self, "save_clean_exitwaves", False):
             self.clean_exitwaves = self.scattering(V)
 
@@ -306,11 +425,50 @@ class ParticleGeneratorBase(BaseImager):
         with torch.no_grad():
             v_ab = self._absorption_field(V)
 
+        # The solvent is built BEFORE the specimen is damaged, and as its own
+        # field. Both orderings matter. Occupancy decides how much water a
+        # voxel displaces, which is a question about the molecule's physical
+        # volume and not about its radiation history: reading it off a damaged
+        # potential let 19% of full-strength ice into the middle of a protein
+        # (peak core occupancy 1.00 -> 0.81 on 1A6M at 50 e/A^2), because the
+        # envelope redistributes the potential outwards while conserving its
+        # integral. Keeping the ice separate also lets one exposure's damage
+        # states share a single solvent realisation.
+        free = None
         if getattr(self, "icemaker", None) is not None:
+            with torch.no_grad():
+                free = self.free_fraction_field(V, potential_scale=scale)
+
+        # Radiation damage belongs to the specimen, not to the image: the
+        # dose envelope goes on the protein (and its crowding neighbours)
+        # alone, so the ice added back below keeps its full 3.7 A ring.
+        if self.envelopes.dose_envelope:
+            if self.verbose:
+                logger.info("Applying dose damage to the specimen potential")
+            pre = getattr(self, "pre_exposure", None)
+            with torch.no_grad():
+                V = apply_dose_damage(
+                    V,
+                    self.pixel_size,
+                    self.dose_per_angstrom[idx],
+                    pre_exposure=0.0 if pre is None else pre[idx],
+                    weighted=self._dose_weighted,
+                    voltage=self.voltage,
+                    # The exposure's real frame structure and, where the run
+                    # has them, its real per-frequency weights: the envelope
+                    # that survives a movie is the weight-average of the
+                    # frames' own damage states. See potential/_damage.py.
+                    n_frames=self.n_frames,
+                    frame_weights=self.detector.dose_weights,
+                    frame_weights_max_frequency=self._dose_weights_max_frequency,
+                )
+
+        if free is not None:
             if self.verbose:
                 logger.info(f"Adding ice to volume using {self.ice_model} model")
             with torch.no_grad():
-                V = self.solvate(V, potential_scale=scale)
+                V = self.solvate(V, potential_scale=scale, free=free)
+            del free
 
         if v_ab is not None:
             V = torch.complex(V, v_ab)

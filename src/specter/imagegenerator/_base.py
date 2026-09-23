@@ -199,6 +199,15 @@ class BaseImager(L.LightningModule):
     # See specter.aberrations.dose_envelope.
     _dose_weighted: bool = True
 
+    # Whether this imager applies the dose envelope to the specimen's
+    # potential before the solvent is added (`potential.apply_dose_damage`)
+    # rather than to the transfer function. The particle generators do: on
+    # the transfer function the envelope filters the ice as hard as the
+    # protein, and the water ring does not fade under exposure (see
+    # potential/_damage.py). Micrograph and tilt-series imagers receive a
+    # volume with the ice already in it and keep the transfer-function form.
+    _damages_potential: bool = False
+
     def _ctf_batch(self, idx: torch.Tensor | int) -> dict[str, torch.Tensor]:
         """Collect per-image transfer-function parameters for a batch."""
         ctf_batch = {k: getattr(self, k)[idx] for k in self._ctf_param_names}
@@ -233,6 +242,18 @@ class BaseImager(L.LightningModule):
     def _init_detector_mtf(self) -> None:
         """Register the detector MTF buffer based on the model name."""
         # return1d defaults to False, so these always return a single Tensor here.
+        self._calibrated_dqe0 = None
+        self.register_buffer("detector_noise_transfer", None)
+        if self.camera.detector_calibration_path is not None:
+            from ..match._detector_calibration import load_detector_calibration
+
+            mtf, noise_transfer, efficiency = load_detector_calibration(
+                self.camera.detector_calibration_path, self.nxy, self.pixel_size
+            )
+            self.register_buffer("detector_mtf", mtf)
+            self.detector_noise_transfer = noise_transfer
+            self._calibrated_dqe0 = efficiency
+            return
         if self.detector_model == "k3_300kv":
             mtf = cast(torch.Tensor, k3_300kv(self.nxy, self.pixel_size))
             self.register_buffer("detector_mtf", mtf)
@@ -412,7 +433,7 @@ class BaseImager(L.LightningModule):
                 energy_spread=env.energy_spread,
                 deltaV_V=env.deltaV_V,
                 deltaI_I=env.deltaI_I,
-                dose_envelope=env.dose_envelope,
+                dose_envelope=env.dose_envelope and not self._damages_potential,
                 dose_weighted=self._dose_weighted,
                 lpp_params=self.optics.lpp_params,
             )  # _dose_weighted: class attribute, False on TiltSeriesGenerator
@@ -435,7 +456,7 @@ class BaseImager(L.LightningModule):
                 energy_spread=env.energy_spread,
                 deltaV_V=env.deltaV_V,
                 deltaI_I=env.deltaI_I,
-                dose_envelope=env.dose_envelope,
+                dose_envelope=env.dose_envelope and not self._damages_potential,
                 dose_weighted=self._dose_weighted,
                 progressbars=self.progressbars,
             )
@@ -445,7 +466,10 @@ class BaseImager(L.LightningModule):
             aberration_model=self.aberration_model,
             noise_model=self.noise_model,
             mtf=self.detector_mtf,
-            dqe0=dqe0_for_detector(self.detector_model),
+            dqe0=self._calibrated_dqe0
+            if self._calibrated_dqe0 is not None
+            else dqe0_for_detector(self.detector_model),
+            noise_transfer=self.detector_noise_transfer,
             n_frames=self.n_frames,
             dose_weights=dose_weights,
             dose_weights_max_frequency=self._dose_weights_max_frequency,

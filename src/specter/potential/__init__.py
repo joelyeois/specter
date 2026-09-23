@@ -20,6 +20,7 @@ from ._builders import (
     potential_from_deltas,
     recommended_rcut,
 )
+from ._damage import apply_dose_damage, frame_damage_envelope
 from ._gemmi_builder import GemmiPotentialBuilder
 from ._occupancy import (
     FULL_OCCUPANCY_POTENTIAL_V,
@@ -33,6 +34,8 @@ __all__ = [
     "INELASTIC_MFP_ICE_A",
     "INELASTIC_MFP_PROTEIN_A",
     "absorption_potential",
+    "apply_dose_damage",
+    "frame_damage_envelope",
     "apply_amplitude_contrast",
     "inelastic_absorption_potential",
     "FULL_OCCUPANCY_POTENTIAL_V",

@@ -138,6 +138,9 @@ specter simulate particles [OPTIONS]
 | `--rotate_mode` | `real` \| `fourier` | `real` | Volume rotation method: 'real' (trilinear interpolation) or 'fourier' (no boundary artifacts). |
 | `--bulk_scattering_factors` | `kirkland` \| `lobato` \| `shtyrov` | `kirkland` | Atomic scattering-factor parameterization for the ice -- everything rendered that is not a biomolecule. Deliberately separate from scattering_factors: Shtyrov is fitted for biomolecules, and these materials are outside that domain. |
 | `--ice_relax_steps` | `INTEGER` | `0` | Local MLBOP seam-relaxation steps, only used when ice_model='gd' tiles multiple cached blocks. |
+| `--ice_decorrelation_dose` | `FLOAT` | _none_ | Dose in e-/A^2 over which the ice stays structurally coherent. The beam melts and re-vitrifies the solvent, so a real exposure holds several independent ice structures whose speckle adds incoherently; the water ring is correspondingly weaker than a frozen solvent would give. Measured at 1.9-2.6 e-/A^2 on two datasets' raw movies. Unset (default) treats the ice as frozen for the whole exposure. |
+| `--ice_motion_variance` | `FLOAT` | _none_ | Effective per-axis solvent displacement variance in Å² per (e-/Å²). Uses actual frame weights and frequency-dependent covariance; effective-volume approximation. |
+| `--detector_calibration_path` | `TEXT` | _none_ | NPZ detector calibration: k in 1/Å, effective_mtf, noise_transfer, dqe0. Overrides preset response; noise_transfer acts after counting. |
 | `--crowd_chunk_size` | `INTEGER` | `1` | Crowding duplicate volumes rotated per batch. Lowering it to 1 costs no wall time: wall time is flat in this while peak memory grows linearly with it, so raising it above the default buys nothing. |
 | `--crowd_max_distance_xy` | `FLOAT` | _none_ | Maximum xy-distance between crowded particles in Angstrom. |
 | `--crowd_method` | `2d` \| `3d` | `3d` | Poisson-disk sampling dimensionality for crowding particle placement. |

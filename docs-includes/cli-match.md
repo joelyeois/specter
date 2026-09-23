@@ -62,6 +62,9 @@ specter match particles [OPTIONS]
 | `--n_battery` | `INTEGER` | `200` | Particles per seed in the final two-seed comparison that the report is computed from. |
 | `--probe_bin` | `INTEGER` | `2` | Fourier-crop factor for the probe simulations and the images they are scored against; the final two-seed comparison always runs at the native box. Capped so the probe pixel stays at or below 5 Angstrom and the box at or above 32 px. 1 probes at the native box. |
 | `--write_stack` | `INTEGER` | `0` | After the report, simulate this many particles with the matched config (e.g. for a mixed 2D classification). 0 skips it. |
+| `--movie_covariance_pattern` | `TEXT` | _none_ | Experimental movie-informed mode: glob of covariance NPZs for one dataset. Only split='calibration' files are used. Estimates solvent displacement variance, uses native-resolution probes and disables automatic residual B-factor fitting. See the matching prototype notes. |
+| `--detector_calibration_path` | `TEXT` | _none_ | Independent detector MTF/noise/DQE calibration NPZ, carried into all simulations. |
+| `--ice_cache_dir` | `TEXT` | _none_ | Independent water-coordinate library used by every probe and final simulation. |
 
 **Compute**{ #specter-match-particles-compute }
 

@@ -85,6 +85,11 @@ from ._common import (
 )
 from ._particles import run_particle_stack
 
+#: Dose over which vitreous ice stays structurally coherent, in e-/A^2.
+#: A FIXED prior, never fitted against the images being matched --
+#: see the note in `_base_settings`.
+MATCH_DECORRELATION_DOSE = 4.0
+
 #: Detectors that count without coincidence loss at cryo-EM rates.
 _NO_COINCIDENCE = {"perfect"}
 
@@ -486,7 +491,11 @@ def _probe_setup(
     # variance (wide annuli): nothing above 10 Å. They render at a
     # Fourier-cropped box against the images cropped the same way, with a
     # metadata copy rescaled to that box; the battery keeps the native box.
-    bin_ = _probe_bin(config.probe_bin, box, pixel_size)
+    bin_ = (
+        1
+        if config.movie_covariance_pattern is not None
+        else _probe_bin(config.probe_bin, box, pixel_size)
+    )
     box_p = box // bin_ if bin_ > 1 else box
     box_p -= box_p % 2
     exp_p, pixel_size_p = _bin_images(exp, pixel_size, box_p)
@@ -518,7 +527,22 @@ def _base_settings(
         scattering_model="multislice",
         noise_model="poisson",
         ice_model="gd",
+        ice_cache_dir=config.ice_cache_dir,
         ice_thickness=0.0,
+        # FIXED, never fitted. The beam melts and re-vitrifies the solvent, so
+        # a real exposure holds several independent ice structures whose
+        # speckle adds incoherently; leaving the ice frozen overstates the
+        # water ring, and letting this float would give two knobs on one
+        # observable, since the ring constrains only thickness over
+        # realisation count. The value is a prior taken from outside the data
+        # being matched, the same way the detector MTF and coincidence radius
+        # are: one inelastic event per water molecule per 124 e-/A^2 (the
+        # inelastic mean free path in ice over its number density), with each
+        # event disordering its first one or two hydration shells, puts the
+        # decorrelation dose at 2-10 e-/A^2. Raw movies of two datasets give
+        # 1.9 and 2.6, which also carry beam-induced motion. See
+        # specter.ice._decorrelation.
+        ice_decorrelation_dose=MATCH_DECORRELATION_DOSE,
         crowd_min_distance=diameter,
         detector_model="none",
         coincidence_radius=0.0,
@@ -545,9 +569,23 @@ def _base_settings(
         inelastic_mfp_specimen=config.inelastic_mfp_specimen,
         dose_weights_path=config.dose_weights_path,
         dose_weights_max_frequency=config.dose_weights_max_frequency,
+        detector_calibration_path=config.detector_calibration_path,
         **meta,
     )
 
+    if config.movie_covariance_pattern is not None:
+        import glob
+        from ..match._movie_calibration import estimate_solvent_motion
+
+        files = []
+        for path in sorted(glob.glob(config.movie_covariance_pattern)):
+            with np.load(path, allow_pickle=False) as movie:
+                if str(movie["split"]) == "calibration":
+                    files.append(path)
+        calibration = estimate_solvent_motion(files)
+        base["ice_decorrelation_dose"] = None
+        base["ice_motion_variance"] = calibration["motion_variance"]
+        base["bfactor"] = 0.0
     return base
 
 
@@ -631,7 +669,18 @@ def _derive_detector_settings(
         DerivedValue("dose", config.dose, "metadata", "e-/Å² per movie")
     )
     occ: float | None = None  # coincidence occupancy, when a detector is calibrated
-    if det == "unknown":
+    if config.detector_calibration_path is not None:
+        report.derived.append(
+            DerivedValue(
+                "detector_calibration_path",
+                config.detector_calibration_path,
+                "independent calibration",
+                "signal transfer and noise transfer supplied separately",
+            )
+        )
+        detector_model = "none"
+        cr = 0.0
+    elif det == "unknown":
         report.warnings.append(
             "detector_model is unknown: no MTF, DQE(0) or coincidence loss applied. "
             "The simulation will carry more high-frequency signal than the data."
@@ -762,12 +811,46 @@ def _probe_ice_and_crowding(
             for ice in config.ice_candidates
         ]
     )
-    scores: list[tuple[float, float]] = [
-        (float(ice), _profile_distance(stack, exp_probe, first_bin))
-        for ice, stack in zip(config.ice_candidates, stacks, strict=True)
-    ]
+    if config.movie_covariance_pattern is not None:
+        from ..match._movie_calibration import solvent_background_distance
+
+        scores = [
+            (
+                float(ice),
+                solvent_background_distance(
+                    stack, exp_probe, pixel_size_p, diameter / 2
+                ),
+            )
+            for ice, stack in zip(config.ice_candidates, stacks, strict=True)
+        ]
+        report.derived.append(
+            DerivedValue(
+                "ice_motion_variance",
+                base["ice_motion_variance"],
+                "calibration movie covariance",
+                "effective per-axis Å² per (electron/Å²); not uniquely molecular diffusion",
+            )
+        )
+        report.warnings.append(
+            "Experimental movie-informed mode uses a second-moment effective solvent volume, "
+            "not explicit multislice movie integration. Thickness is conditional on detector "
+            "and specimen calibration. Automatic residual B-factor fitting is disabled."
+        )
+    else:
+        scores = [
+            (float(ice), _profile_distance(stack, exp_probe, first_bin))
+            for ice, stack in zip(config.ice_candidates, stacks, strict=True)
+        ]
     report.probe_scores["ice_thickness"] = scores
     ice_best = min(scores, key=lambda t: t[1])[0]
+    if (
+        config.movie_covariance_pattern is not None
+        and ice_best <= base["n_pixels"] * pixel_size_p
+    ):
+        report.warnings.append(
+            f"Thickness selection reaches the box-depth floor ({base['n_pixels'] * pixel_size_p:.1f} Å). "
+            "This is a boundary result, not an independently identified physical ice thickness."
+        )
     base.update(ice_thickness=ice_best)
     probe_base.update(ice_thickness=ice_best)
     report.derived.append(
@@ -775,7 +858,12 @@ def _probe_ice_and_crowding(
             "ice_thickness",
             ice_best,
             "probe",
-            "background variance outside the particle",
+            (
+                "native solvent spectrum with 3.9–3.5 Å withheld; movie-calibrated motion"
+                if config.movie_covariance_pattern is not None
+                else "background variance outside the particle, at the fixed "
+                f"decorrelation dose of {MATCH_DECORRELATION_DOSE:g} e-/A^2"
+            ),
         )
     )
 
@@ -857,7 +945,11 @@ def _compare_two_seeds(
     bfactor: float | None = None
     # A NaN here means the envelope was not significantly different from flat,
     # not that it is small -- `_residual_envelope` refuses rather than guessing.
-    if math.isfinite(snr.residual_bfactor) and snr.residual_bfactor > 20.0:
+    if (
+        config.movie_covariance_pattern is None
+        and math.isfinite(snr.residual_bfactor)
+        and snr.residual_bfactor > 20.0
+    ):
         bfactor = round(snr.residual_bfactor, 0)
         base.update(bfactor=bfactor)
         console.print(

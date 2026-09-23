@@ -474,7 +474,10 @@ def test_image_generator_plumbs_envelope_params(small_volume, ctf_params):
     assert gen.aberration.energy_spread == 0.8
     assert gen.aberration.deltaV_V == 0.05e-6
     assert gen.aberration.deltaI_I == 0.02e-6
-    assert gen.aberration.dose_envelope is True
+    # A particle generator damages the specimen potential instead, so the
+    # transfer function must NOT carry the envelope a second time.
+    assert gen._damages_potential is True
+    assert gen.aberration.dose_envelope is False
 
 
 def test_image_generator_from_coordinates_plumbs_envelope_params(
@@ -509,7 +512,8 @@ def test_image_generator_from_coordinates_plumbs_envelope_params(
     assert gen.aberration.energy_spread == 0.8
     assert gen.aberration.deltaV_V == 0.05e-6
     assert gen.aberration.deltaI_I == 0.02e-6
-    assert gen.aberration.dose_envelope is True
+    assert gen._damages_potential is True
+    assert gen.aberration.dose_envelope is False
 
 
 def test_micrograph_generator_plumbs_envelope_params(small_volume, ctf_params):

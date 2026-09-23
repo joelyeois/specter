@@ -80,7 +80,15 @@ class IceSlabBlender:
         self.halo = occupancy_blur_halo_voxels(voxel_size, sigma_angstrom)
         self._tail: torch.Tensor | None = None
 
-    def add(self, V: torch.Tensor, ice: torch.Tensor, start: int, end: int) -> None:
+    def add(
+        self,
+        V: torch.Tensor,
+        ice: torch.Tensor,
+        start: int,
+        end: int,
+        out: torch.Tensor | None = None,
+        free: torch.Tensor | None = None,
+    ) -> None:
         """
         Weight `ice` by the free fraction of ``V[:, start:end]`` and add it.
 
@@ -88,19 +96,44 @@ class IceSlabBlender:
         ----------
         V : torch.Tensor
             The volume, ``(B, Z, Y, X)``, on any device; slices before
-            `start` have already received their ice. Modified in place.
+            `start` have already received their ice. Modified in place
+            unless `out` is given, in which case it is only read.
         ice : torch.Tensor
             Unweighted ice for the slab, ``(B, end - start, Y, X)``, on the
             device the blend should run on. Weighted in place.
         start, end : int
             The slab's z range in `V`.
+        out : torch.Tensor or None, optional
+            When given, the weighted ice is written to ``out[:, start:end]``
+            and `V` is left untouched, so the caller gets the solvent as its
+            own field. `V` is then pristine at every slab by construction,
+            which is why the running tail is neither subtracted nor kept on
+            this path: it exists only to recover the pristine potential from
+            a volume that is being written into as the blend proceeds.
+        free : torch.Tensor or None, optional
+            Precomputed free fraction, ``1 - occupancy``, for the whole
+            volume. When given, this slab's weights are read from it and `V`
+            is not consulted for occupancy at all, which is what lets a
+            caller take occupancy from a volume other than the one being
+            blended into -- the undamaged specimen. May be any dtype; it is
+            cast per slab, so a compact one costs a fraction of a canvas
+            instead of the whole extra canvas `out` needs.
         """
         nz = V.shape[1]
+        if free is not None:
+            ice.mul_(free[:, start:end].to(ice.device, ice.dtype))
+            if out is not None:
+                out[:, start:end] = ice.to(out.device)
+            elif V.device == ice.device:
+                V[:, start:end].add_(ice)
+            else:
+                V[:, start:end] = (V[:, start:end] + ice.to(V.device)).to(V.device)
+            return
         lo, hi = max(0, start - self.halo), min(nz, end + self.halo)
         # A copy on the compute device: the blur must read the pristine
         # potential, and the subtraction below must not touch `V`.
         src = V[:, lo:hi].to(ice.device, copy=True)
-        if lo < start:
+        if out is None and lo < start:
             assert self._tail is not None
             src[:, : start - lo] -= self._tail[:, -(start - lo) :]
         core = slice(start - lo, start - lo + (end - start))
@@ -113,12 +146,14 @@ class IceSlabBlender:
         # In place, and reusing `occ`: `(1 - occ).clamp(0, 1)` would
         # allocate two more slabs to produce a value consumed once.
         ice.mul_(occ.neg_().add_(1.0).clamp_(0.0, 1.0))
-        if V.device == ice.device:
+        if out is not None:
+            out[:, start:end] = ice.to(out.device)
+        elif V.device == ice.device:
             V[:, start:end].add_(ice)
         else:
             V[:, start:end] = (src[:, core] + ice).to(V.device)
         del src, occ
-        if self.halo > 0:
+        if out is None and self.halo > 0:
             # Running tail of the last `halo` weighted slices, across as many
             # previous slabs as the halo spans: a slab can be narrower than
             # the halo on a very large canvas.

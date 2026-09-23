@@ -142,6 +142,24 @@ class MatchConfig:
         ),
         check="positive",
     )
+    movie_covariance_pattern: str | None = setting(
+        None,
+        help=(
+            "Experimental movie-informed mode: glob of covariance NPZs for one "
+            "dataset. Only split='calibration' files are used. Estimates solvent "
+            "displacement variance, uses native-resolution probes and disables "
+            "automatic residual B-factor fitting. See the matching prototype notes."
+        ),
+    )
+    detector_calibration_path: str | None = setting(
+        None,
+        help="Independent detector MTF/noise/DQE calibration NPZ, carried into all simulations.",
+        check="existing_file",
+    )
+    ice_cache_dir: str | None = setting(
+        None,
+        help="Independent water-coordinate library used by every probe and final simulation.",
+    )
     inelastic_mfp_specimen: float | None = setting(
         None,
         help=(

@@ -209,6 +209,55 @@ scales as \(1/\beta^2\), so \(N_e\) is multiplied by
 \(\beta^2(V)/\beta^2(300\,\text{kV})\) at other voltages: 0.80 at 200 kV,
 the factor RELION and MotionCor2 also apply, and 0.50 at 100 kV.
 
+Where the dose envelope acts, and which envelope it is, both depend on the
+imager. The particle generators apply it to the specimen's three-dimensional
+potential before the solvent is added (`specter.potential.apply_dose_damage`),
+as a radial envelope in 3D Fourier space. By the projection-slice theorem this is the same filter
+on the projected specimen as the two-dimensional envelope would be, but
+the ice blended in afterwards is left undamaged. The distinction is
+measurable: on raw EER movies of EMPIAR-11461 and EMPIAR-11377, the power
+of the 3.7 Å water ring per fraction is constant to within about 10 %
+across 40 to 50 e⁻/Å², where the protein-calibrated critical exposure
+(about 5 e⁻/Å² at 3.7 Å) would leave under 2 % of the ring amplitude by
+the final fraction. Water has no ordered structure to lose at that scale.
+An envelope on the transfer function filters the whole exit wave and so
+cannot make that distinction; `MicrographGenerator` and
+`TiltSeriesGenerator`, which receive a volume with the ice already in it,
+still apply it there (see Limitations).
+
+On that path the envelope is also the explicit frame sum
+(`specter.potential.frame_damage_envelope`) rather than either closed form.
+A movie is a sum of frames, each imaging the specimen at a different
+accumulated dose and recombined by motion correction under per-frequency
+weights, so the signal that survives is the weight-average of the frames'
+own damage states,
+
+\[
+E(k) = \frac{\sum_i w_i(k)\, q_i(k)}{\sum_i w_i(k)},
+\qquad q_i(k) = e^{-N_i / 2 N_e(k)},
+\]
+
+evaluated from the run's own frame count and, where it has them, its own
+measured weights. The two closed forms above are its limits: the unweighted
+one is \(w_i = 1\), and the exposure-filtered one is the Grant and
+Grigorieff optimal filter \(w_i \propto q_i\) with the sum renormalised to
+fixed noise. That second normalisation is a statement about how frames were
+combined and what it did to the noise, not about a specimen, so it does not
+belong on a potential while the detector is separately applying the real
+weights and the real noise gain they cause. The difference is large and
+dataset-specific: against the exposure-filtered closed form at 3.7 Å, the
+frame sum is 1.59x higher for a movie whose measured weights fall steeply
+with frequency, and 0.78x lower for one summed without an exposure filter
+at all.
+
+Rendering each frame's damage state separately and combining the
+intensities is the same result to within 0.1%: on three real specimens in
+ice, forty damage states each propagated and aberrated on their own differ
+from the single weight-averaged render by 0.06 to 0.14% of the image
+contrast. The envelope is therefore the specimen-side statement of the
+frame sum, not an approximation to it, and the nonlinearity of multislice
+is what the residual measures.
+
 ![Left: the four envelopes in isolation, plus their product (B x Cs x Cc). Right: the same isotropic CTF curve from above, with and without the combined B/Cs/Cc envelope applied.](../assets/images/aberrations-envelopes.png){ width="900" style="display:block;margin:1.2em auto;" }
 ///caption
 Left: the four envelopes in isolation, plus their product (B x Cs x Cc). Right: the same isotropic CTF curve from above, with and without the combined B/Cs/Cc envelope applied.
@@ -267,6 +316,14 @@ per-particle quantity; `"legacy"` has no equivalent.
 
 ## Limitations
 
+- **Micrographs and tilt series still damage the solvent.** Only the
+  particle generators apply the dose envelope to the specimen potential.
+  `MicrographGenerator` and `TiltSeriesGenerator` image a volume the ice
+  has already been blended into, so the envelope stays on the transfer
+  function there and attenuates the water ring as hard as the protein.
+  Moving it onto the specimen for those imagers means damaging the
+  template before placement (micrographs) or the full tomogram per tilt
+  (tilt series), neither of which is done yet.
 - **`torch_ctf` cannot express tetrafoil.** `LegacyAberrationAdapter` has no
   `tetrafoil1`-`tetrafoil4` mapping. Passing a nonzero one raises
   `NotImplementedError` naming the terms, rather than dropping them: a

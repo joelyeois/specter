@@ -95,6 +95,7 @@ class Detector(L.LightningModule):
         n_frames: int | None = None,
         dose_weights: torch.Tensor | None = None,
         dose_weights_max_frequency: float | None = None,
+        noise_transfer: torch.Tensor | None = None,
         progressbars: bool = True,
     ):
         super().__init__()
@@ -104,6 +105,7 @@ class Detector(L.LightningModule):
         self.aberration_model = aberration_model
         self.noise_model = noise_model
         self.register_buffer("mtf", mtf, persistent=False)
+        self.register_buffer("noise_transfer", noise_transfer, persistent=False)
         self.dqe0 = dqe0
         self.n_frames = n_frames
         if dose_weights is not None:
@@ -337,15 +339,16 @@ class Detector(L.LightningModule):
         if self.mtf is not None:
             images = self.add_mtf(images, self.mtf)
 
-        if self.noise_model is None:
-            return images
-        else:
-            return torch.stack(
+        if self.noise_model is not None:
+            images = torch.stack(
                 [
                     self.apply_coincidence(img, d.item(), r.item())
                     for img, d, r in zip(images, dose, coincidence_radius)
                 ]
             )
+        if self.noise_transfer is not None:
+            images = self.add_mtf(images, self.noise_transfer)
+        return images
 
     def apply_detector_physics(
         self,
@@ -597,12 +600,18 @@ class Detector(L.LightningModule):
             transient=True,
             disable=not (self.progressbars),
         ):
-            frame = self.apply_detector_physics(
-                intensity_map,
-                self.pixel_size,
-                dose_effective / n_frames,
-                coinc_radius_pixels=coincidence_radius,
-            )
+            if coincidence_radius <= 0:
+                # A weighted exposure still needs independent frame noise when
+                # no coincidence model is requested. A zero exclusion radius
+                # is not a valid grid size for the event-exclusion algorithm.
+                frame = torch.poisson(img / n_frames)
+            else:
+                frame = self.apply_detector_physics(
+                    intensity_map,
+                    self.pixel_size,
+                    dose_effective / n_frames,
+                    coinc_radius_pixels=coincidence_radius,
+                )
             if weights is None:
                 final_image += frame
             else:

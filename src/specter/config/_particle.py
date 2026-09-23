@@ -524,6 +524,27 @@ class ParticleStackConfig:
         ),
         check="non_negative",
     )
+    ice_decorrelation_dose: float | None = setting(
+        None,
+        help=(
+            "Dose in e-/A^2 over which the ice stays structurally coherent. "
+            "The beam melts and re-vitrifies the solvent, so a real exposure "
+            "holds several independent ice structures whose speckle adds "
+            "incoherently; the water ring is correspondingly weaker than a "
+            "frozen solvent would give. Measured at 1.9-2.6 e-/A^2 on two "
+            "datasets' raw movies. Unset (default) treats the ice as frozen "
+            "for the whole exposure."
+        ),
+    )
+    ice_motion_variance: float | None = setting(
+        None,
+        help="Effective per-axis solvent displacement variance in Å² per (e-/Å²). Uses actual frame weights and frequency-dependent covariance; effective-volume approximation.",
+        check="non_negative",
+    )
+    detector_calibration_path: str | None = setting(
+        None,
+        help="NPZ detector calibration: k in 1/Å, effective_mtf, noise_transfer, dqe0. Overrides preset response; noise_transfer acts after counting.",
+    )
 
     # --- Advanced: crowding ---
     crowd_chunk_size: int = setting(

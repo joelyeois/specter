@@ -155,6 +155,7 @@ class ImageGeneratorFromCoordinates(ParticleGeneratorBase):
             verbose=verbose,
             coincidence_radius=coincidence_radius,
             bfactor=bfactor,
+            n_images=quaternions.shape[0] if quaternions.ndim == 2 else 1,
         )
         self.ice_model = ice.model
         # The TEMPLATE's depth, not `self.nz * pixel_size`: the neighbour slab
@@ -419,6 +420,7 @@ class ImageGenerator(ParticleGeneratorBase):
             coincidence_radius=coincidence_radius,
             potential_scale=potential_scale,
             bfactor=bfactor,
+            n_images=quaternions.shape[0] if quaternions.ndim == 2 else 1,
         )
 
         self.ice_parameterization = ice.parameterization

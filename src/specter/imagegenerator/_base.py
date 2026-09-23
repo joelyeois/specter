@@ -108,6 +108,12 @@ class BaseImager(L.LightningModule):
     bfactor : float or torch.Tensor or None, optional
         Isotropic B-factor envelope in Å² applied in the microscope transfer
         function. None or 0.0 means no envelope. Default None.
+    n_images : int, optional
+        Number of images, which scalar per-image inputs are expanded to.
+        Taken from ``ctf_params`` when those are given; otherwise from this,
+        and failing that from the longest per-image input. Without any of
+        the three, a scalar stays length 1 and only image 0 can be
+        simulated. Default None.
     """
 
     def __init__(
@@ -129,6 +135,7 @@ class BaseImager(L.LightningModule):
         coincidence_radius: float | torch.Tensor = 0.0,
         potential_scale: float | torch.Tensor = 1.0,
         bfactor: float | torch.Tensor | None = None,
+        n_images: int | None = None,
     ):
         super().__init__()
         # The settings are frozen dataclasses, so a shared default instance
@@ -179,6 +186,7 @@ class BaseImager(L.LightningModule):
         else:
             self.register_buffer("anisomag", torch.as_tensor(anisomag))
 
+        n: int | None
         if ctf_params is not None:
             for k, v in ctf_params.items():
                 v_tensor = torch.as_tensor(v)
@@ -189,7 +197,18 @@ class BaseImager(L.LightningModule):
             n = len(next(iter(ctf_params.values())))
         else:
             self._ctf_param_names = []
-            n = None
+            # No CTF to count images by (optics=None): the caller's count,
+            # else the longest per-image input. Without this a scalar dose
+            # stayed length 1 and indexing image 1 asserted on the device.
+            n = n_images
+            if n is None:
+                lengths = [
+                    torch.as_tensor(v).numel()
+                    for v in (dose_per_angstrom, coincidence_radius, potential_scale)
+                ]
+                if bfactor is not None:
+                    lengths.append(torch.as_tensor(bfactor).numel())
+                n = max(lengths) if max(lengths) > 1 else None
 
         # Scalar inputs are expanded to length-n so forward() can index with [idx].
         def _to_buffer(val: float | torch.Tensor, name: str) -> None:

@@ -180,3 +180,55 @@ def test_process_volume_caps_cpu_threads_once_per_batch(monkeypatch):
     assert model.crowd.N > 1
     restores = [n for n in calls if n > SMALL_OP_THREADS]
     assert restores == [max(original, 2 * SMALL_OP_THREADS)], calls
+
+
+@pytest.mark.parametrize("from_coordinates", [False, True])
+def test_scalar_per_image_arguments_index_every_image_without_optics(
+    from_coordinates: bool,
+) -> None:
+    """
+    Scalar dose, coincidence radius and potential scale apply to every image.
+
+    They are expanded to one entry per image, and the image count used to
+    come only from ``ctf_params``. With ``optics=None`` there are none, so
+    the scalars stayed length 1 and any index past 0 raised a CUDA
+    device-side assert (an IndexError on the CPU).
+    """
+    from specter.imagegenerator import ImageGenerator, ImageGeneratorFromCoordinates
+    from specter.settings import Camera
+
+    n_images = 3
+    quats = torch.tensor([[1.0, 0.0, 0.0, 0.0]] * n_images)
+    common = dict(
+        quaternions=quats,
+        translations=torch.zeros(n_images, 2),
+        ctf_params=None,
+        voltage=300.0,
+        dose_per_angstrom=40.0,
+        optics=None,
+        camera=Camera(noise_model="none"),
+        coincidence_radius=0.0,
+        verbose=False,
+    )
+    if from_coordinates:
+        g = torch.Generator().manual_seed(0)
+        gen = ImageGeneratorFromCoordinates(
+            coordinates=torch.randn(20, 3, generator=g) * 3.0,
+            atomic_numbers=torch.full((20,), 6),
+            nxy=16,
+            pixel_size=1.0,
+            **common,
+        )
+    else:
+        gen = ImageGenerator(
+            torch.rand(16, 16, 16),
+            1.0,
+            progressbars=False,
+            potential_scale=1.0,
+            **common,
+        )
+    for name in ("dose_per_angstrom", "coincidence_radius", "potential_scale"):
+        assert getattr(gen, name).shape == (n_images,)
+    with torch.no_grad():
+        images = gen(torch.tensor([n_images - 1]))
+    assert images.shape[0] == 1

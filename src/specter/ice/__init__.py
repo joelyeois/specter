@@ -8,6 +8,12 @@ from ._library import (
     ice_config_filename,
 )
 from ._energy import MLBOP
+from ._exposure import (
+    apply_solvent_exposure,
+    solvent_coherence,
+    solvent_decorrelation_rate,
+    solvent_exposure_power,
+)
 from ._gradient import GradientSKIcemaker
 from ._helpers import (
     avogadro,
@@ -25,6 +31,10 @@ from ._profile import IceProfile, IceProfileMode
 from ._random import RandomIcemaker
 
 __all__ = [
+    "apply_solvent_exposure",
+    "solvent_coherence",
+    "solvent_decorrelation_rate",
+    "solvent_exposure_power",
     "GradientSKIcemaker",
     "ExtXYZDump",
     "MDSimDump",

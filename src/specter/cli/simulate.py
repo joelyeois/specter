@@ -59,6 +59,7 @@ _PARTICLE_STACK_GROUPS: list[tuple[str, list[str]]] = [
             "absorption_model",
             "inelastic_mfp_solvent",
             "inelastic_mfp_specimen",
+            "objective_aperture",
             "dose_weights_path",
             "dose_weights_max_frequency",
         ],

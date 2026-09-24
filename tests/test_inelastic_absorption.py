@@ -533,3 +533,215 @@ def test_iterative_consumers_reject_unsupported_mfp(kind, specimen_mfp):
         else:
             cls = MicrographGenerator if kind == "micrograph" else TiltSeriesGenerator
             cls(v, 8, 2.0, None, VOLTAGE, 10.0, propagation=propagation, optics=None)
+
+
+def test_aperture_cross_section_matches_langmore_smith_total() -> None:
+    """
+    With a vanishing aperture, the aperture mean free path is the total
+    elastic one, which Langmore & Smith (1992) Eq. 1 gives independently:
+    ``sigma_el = 1.4e-6 Z^1.5 / beta^2 (1 - 0.26 Z / (137 beta))`` nm^2.
+    """
+    from specter.potential import aperture_mfp_ice
+
+    gamma = 1 + VOLTAGE / 511.0
+    beta = math.sqrt(1 - 1 / gamma**2)
+
+    def sigma_el(z: int) -> float:  # A^2
+        return 1.4e-6 * z**1.5 / beta**2 * (1 - 0.26 * z / (137 * beta)) * 100
+
+    n = 0.93 / (18.015 * 1.66054)
+    langmore_smith = 1.0 / (n * (sigma_el(8) + 2 * sigma_el(1)))
+    assert aperture_mfp_ice(0.01, VOLTAGE) == pytest.approx(langmore_smith, rel=0.1)
+
+
+def test_aperture_loss_through_ice_and_its_trends() -> None:
+    """
+    2.7% of the beam leaves a 12 mrad aperture through 400 A of ice at
+    300 kV; a wider aperture loses less, and protein (denser, heavier atoms)
+    scatters out faster than ice.
+    """
+    from specter.potential import aperture_mfp_ice, aperture_mfp_protein
+
+    loss = 1 - math.exp(-400.0 / aperture_mfp_ice(12.0, VOLTAGE))
+    assert loss == pytest.approx(0.027, abs=0.002)
+    assert aperture_mfp_ice(20.0, VOLTAGE) > aperture_mfp_ice(12.0, VOLTAGE)
+    assert aperture_mfp_protein(12.0, VOLTAGE) < aperture_mfp_ice(12.0, VOLTAGE)
+    with pytest.raises(ValueError):
+        aperture_mfp_ice(0.0, VOLTAGE)
+
+
+def test_aperture_lowpass_removes_only_what_lies_beyond_the_aperture() -> None:
+    """Coarse grids are untouched; on a fine grid only k > k_ap is removed."""
+    from specter.constants import energy_to_wavelength
+    from specter.potential import aperture_lowpass
+
+    torch.manual_seed(0)
+    coarse = torch.randn(4, 32, 32)
+    assert aperture_lowpass(coarse, 1.0, 12.0, VOLTAGE) is coarse
+
+    dx = 0.25
+    v = torch.randn(2, 70, 64, 64, dtype=torch.float64)  # 70 slices: two chunks
+    out = aperture_lowpass(v, dx, 12.0, VOLTAGE)
+    k_ap = 12e-3 / energy_to_wavelength(VOLTAGE)
+    ky = torch.fft.fftfreq(64, d=dx)
+    k = torch.sqrt(ky[:, None] ** 2 + ky[None, :] ** 2)
+    before, after = torch.fft.fft2(v), torch.fft.fft2(out)
+    assert after[..., k > k_ap * 1.01].abs().max() < 1e-9
+    inside = k < k_ap * 0.99
+    torch.testing.assert_close(after[..., inside], before[..., inside])
+
+
+def test_objective_aperture_requires_the_mfp_model() -> None:
+    """Under 'alpha' the fitted constant already stands in for aperture loss."""
+    from specter.imagegenerator import ImageGenerator
+    from specter.settings import Optics, Propagation
+
+    with pytest.raises(ValueError, match="objective_aperture"):
+        ImageGenerator(
+            torch.zeros(8, 8, 8),
+            1.0,
+            torch.tensor([[1.0, 0.0, 0.0, 0.0]]),
+            torch.zeros(1, 2),
+            {"dfu": torch.tensor([1e4]), "dfv": torch.tensor([1e4])},
+            VOLTAGE,
+            dose_per_angstrom=40.0,
+            propagation=Propagation(alpha=0.1),
+            optics=Optics(objective_aperture=12.0),
+            progressbars=False,
+        )
+
+
+def test_generator_charges_aperture_loss_through_the_ice() -> None:
+    """
+    Same seed, same ice, with and without a 12 mrad aperture: the image's
+    mean falls by exactly ``exp(-t / Lambda_ap)``. At 2 A/px the aperture lies
+    beyond Nyquist, so the low-pass is a no-op and the loss is all analytic.
+    """
+    import specter
+    from specter.imagegenerator import ImageGenerator
+    from specter.potential import aperture_mfp_ice
+    from specter.settings import Camera, Crowding, Ice, Optics, Propagation
+
+    n, dx, thickness, dose = 32, 2.0, 400.0, 40.0
+    ctf_params = {
+        "dfu": torch.tensor([10000.0]),
+        "dfv": torch.tensor([10000.0]),
+        "dfang": torch.tensor([0.0]),
+        "cs": torch.tensor([2.7e7]),
+    }
+
+    def mean_intensity(aperture: float | None) -> float:
+        specter.seed(3)
+        generator = ImageGenerator(
+            torch.zeros(n, n, n),
+            dx,
+            torch.tensor([[1.0, 0.0, 0.0, 0.0]]),
+            torch.zeros(1, 2),
+            ctf_params,
+            VOLTAGE,
+            dose_per_angstrom=dose,
+            propagation=Propagation(absorption_model="inelastic_mfp"),
+            ice=Ice(model="gd", thickness=thickness),
+            crowding=Crowding(n_points=0),
+            camera=Camera(noise_model="none", detector_model="none"),
+            optics=Optics(objective_aperture=aperture),
+            progressbars=False,
+        )
+        with torch.no_grad():
+            return float(generator(torch.tensor([0])).mean())
+
+    ratio = mean_intensity(12.0) / mean_intensity(None)
+    expected = math.exp(-thickness / aperture_mfp_ice(12.0, VOLTAGE))
+    assert ratio == pytest.approx(expected, rel=1e-3)
+
+
+def test_ice_mfp_is_measured_where_measured_and_estimated_elsewhere() -> None:
+    """
+    Measured voltages return the table value silently; any other voltage is
+    estimated between (or beyond) them and says so.
+    """
+    import warnings
+
+    from specter.potential import INELASTIC_MFP_ICE_BY_KV, ice_inelastic_mfp
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        assert ice_inelastic_mfp(300.0) == INELASTIC_MFP_ICE_A
+        assert ice_inelastic_mfp(120.0) == INELASTIC_MFP_ICE_BY_KV[120.0]
+    with pytest.warns(UserWarning, match="interpolated"):
+        at_200 = ice_inelastic_mfp(200.0)
+    with pytest.warns(UserWarning, match="extrapolated"):
+        at_100 = ice_inelastic_mfp(100.0)
+    # Between the measurements at 200 kV, below the lower one at 100 kV, and
+    # rising with voltage throughout, as an inelastic mean free path does.
+    assert INELASTIC_MFP_ICE_BY_KV[120.0] < at_200 < INELASTIC_MFP_ICE_A
+    assert at_100 < INELASTIC_MFP_ICE_BY_KV[120.0]
+    assert at_200 == pytest.approx(3039.0, abs=5.0)
+
+
+def test_ice_mfp_estimate_passes_through_both_measurements() -> None:
+    """The power law reproduces its anchors as it approaches them."""
+    import warnings
+
+    from specter.potential import INELASTIC_MFP_ICE_BY_KV, ice_inelastic_mfp
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        for kv in (120.0, 300.0):
+            # Continuous through each anchor: the estimates just either side
+            # bracket the measured value, and sit within the local slope of it.
+            below, above = ice_inelastic_mfp(kv - 0.6), ice_inelastic_mfp(kv + 0.6)
+            assert below < INELASTIC_MFP_ICE_BY_KV[kv] < above
+            assert above / below == pytest.approx(1.0, abs=1e-2)
+
+
+def _mfp_generator(voltage: float, solvent_mfp: float | None):
+    from specter.imagegenerator import ImageGenerator
+    from specter.settings import Camera, Crowding, Ice, Optics, Propagation
+
+    ctf_params = {
+        "dfu": torch.tensor([10000.0]),
+        "dfv": torch.tensor([10000.0]),
+        "dfang": torch.tensor([0.0]),
+        "cs": torch.tensor([2.7e7]),
+    }
+    return ImageGenerator(
+        torch.zeros(16, 16, 16),
+        2.0,
+        torch.tensor([[1.0, 0.0, 0.0, 0.0]]),
+        torch.zeros(1, 2),
+        ctf_params,
+        voltage,
+        dose_per_angstrom=40.0,
+        propagation=Propagation(
+            absorption_model="inelastic_mfp", inelastic_mfp_solvent=solvent_mfp
+        ),
+        ice=Ice(model="gd", thickness=100.0),
+        crowding=Crowding(n_points=0),
+        camera=Camera(noise_model="none", detector_model="none"),
+        optics=Optics(),
+        progressbars=False,
+    )
+
+
+@pytest.mark.parametrize(("voltage", "expected"), [(300.0, 3950.0), (120.0, 2030.0)])
+def test_generator_takes_the_measured_ice_mfp_for_its_voltage(
+    voltage: float, expected: float
+) -> None:
+    """Left unset, the solvent mean free path is the one measured at this voltage."""
+    assert _mfp_generator(voltage, None)._removal_mfp("solvent") == expected
+
+
+def test_generator_estimates_an_unmeasured_voltage_with_a_warning() -> None:
+    """
+    200 kV has no measured ice value: the generator builds with the estimate
+    and warns at construction, and an explicit value is honoured silently.
+    """
+    import warnings
+
+    with pytest.warns(UserWarning, match="200 kV"):
+        generator = _mfp_generator(200.0, None)
+    assert generator._removal_mfp("solvent") == pytest.approx(3039.0, abs=5.0)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", UserWarning)
+        assert _mfp_generator(200.0, 3300.0)._removal_mfp("solvent") == 3300.0

@@ -41,6 +41,7 @@ from specter.settings import (
     Crowding,
     Envelopes,
     Ice,
+    Optics,
     Propagation,
     bundle_from_config,
 )
@@ -240,6 +241,7 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
         # alpha is data when it comes from a .cs/.star file, so it overrides
         # the config's; cc is in mm in the config and Angstrom here.
         propagation=bundle_from_config(Propagation, config, alpha=alpha),
+        optics=bundle_from_config(Optics, config),
         envelopes=bundle_from_config(Envelopes, config, cc=cc_angstrom),
         camera=bundle_from_config(Camera, config, n_frames=n_frames),
         ice=bundle_from_config(

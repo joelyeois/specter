@@ -16,6 +16,7 @@ from ..crowding import CrowdWithDuplicates
 from ..ice import IceBank, ice_fluctuation_scale
 from ..ice._blend import IceSlabBlender
 from ..potential import (
+    aperture_lowpass,
     FULL_OCCUPANCY_POTENTIAL_V,
     apply_dose_damage,
     occupancy_blur_halo_voxels,
@@ -469,6 +470,15 @@ class ParticleGeneratorBase(BaseImager):
             with torch.no_grad():
                 V = self.solvate(V, potential_scale=scale, free=free)
             del free
+
+        # Scattering beyond the objective aperture is charged as absorption
+        # (`_removal_mfp`), so the share of it the grid carries is filtered
+        # out rather than propagated as well. A no-op at 1 A/px and coarser.
+        if self.objective_aperture is not None:
+            with torch.no_grad():
+                V = aperture_lowpass(
+                    V, self.pixel_size, self.objective_aperture, self.voltage
+                )
 
         if v_ab is not None:
             V = torch.complex(V, v_ab)

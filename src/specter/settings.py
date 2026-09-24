@@ -51,7 +51,6 @@ from specter.options import (
     ScatteringModel,
     TiltAxis,
 )
-from specter.potential import INELASTIC_MFP_ICE_A
 
 AberrationBackend = Literal["legacy", "torch_ctf"]
 
@@ -94,20 +93,23 @@ class Propagation:
         Supported by particle generators. MicrographGenerator,
         TiltSeriesGenerator and TomogramReconstructor reject this model
         until their iterative paths carry explicit material information.
-    inelastic_mfp_solvent : float
+    inelastic_mfp_solvent : float or None
         Inelastic mean free path of the embedding medium, in Angstrom. Used
         only when ``absorption_model="inelastic_mfp"``, and only where the
         medium is actually present: with no icemaker there is vacuum around
-        the specimen, not ice, so the solvent term is dropped. Default
-        :data:`~specter.potential.INELASTIC_MFP_ICE_A`, measured for amorphous
-        ice at 300 kV -- another voltage needs its own value.
+        the specimen, not ice, so the solvent term is dropped. Default None
+        takes the value for amorphous ice at the imager's voltage from
+        :func:`~specter.potential.ice_inelastic_mfp`: measured at 300 kV
+        (3950 A) and 120 kV (2030 A), and elsewhere estimated from those two
+        with a warning (200 kV: 3040 A +/- 7 %; 100 kV: 1730 A +/- 20 %).
     inelastic_mfp_specimen : float or None
         Inelastic mean free path of the specimen material, in Angstrom.
         Default None gives the specimen the solvent's value, so it absorbs
         exactly like the medium it displaces and carries bulk attenuation but
         no absorption *contrast*. Pass
-        :data:`~specter.potential.INELASTIC_MFP_PROTEIN_A` for protein, noting
-        the uncertainty documented there.
+        :data:`~specter.potential.INELASTIC_MFP_PROTEIN_A` for protein at
+        300 kV, noting the uncertainty and the voltage caveat documented
+        there.
     ews_curvature_sign : EwaldSphereSign
         Sign of the Ewald-sphere curvature, matching CryoSPARC's convention.
         Default ``"negative"``.
@@ -127,7 +129,7 @@ class Propagation:
     scattering_model: ScatteringModel = "multislice"
     alpha: float = 0.0
     absorption_model: AbsorptionModel = "alpha"
-    inelastic_mfp_solvent: float = INELASTIC_MFP_ICE_A
+    inelastic_mfp_solvent: float | None = None
     inelastic_mfp_specimen: float | None = None
     ews_curvature_sign: EwaldSphereSign = "negative"
     klim: float | None = None
@@ -188,12 +190,29 @@ class Optics:
         Laser-phase-plate settings in :class:`specter.ctf.CTFParameters`
         native units. Requires ``aberration_backend="torch_ctf"``. Default
         None, no phase plate.
+    objective_aperture : float, optional
+        Objective aperture semi-angle in milliradians (a 70 um aperture on a
+        Krios is ~12 mrad). Electrons scattered elastically beyond it leave
+        the image; the loss is applied as an absorption rate per material
+        from the scattering cross section
+        (:func:`~specter.potential.aperture_mfp_ice`), since no practical grid
+        carries that scattering itself, and the potential is low-passed at
+        the aperture so the grid's own share is not counted twice. Requires
+        ``Propagation(absorption_model="inelastic_mfp")``: the ``alpha``
+        model's fitted constant already stands in for this loss. Default
+        None, no aperture.
     """
 
     aberration_backend: AberrationBackend = "legacy"
     lpp_params: dict[str, float] | None = None
+    objective_aperture: float | None = None
 
     def __post_init__(self) -> None:
+        if self.objective_aperture is not None and self.objective_aperture <= 0.0:
+            raise ValueError(
+                f"objective_aperture={self.objective_aperture} must be positive "
+                "(milliradians), or None for no aperture"
+            )
         if self.lpp_params is not None and self.aberration_backend != "torch_ctf":
             raise ValueError(
                 "lpp_params requires aberration_backend='torch_ctf' -- "

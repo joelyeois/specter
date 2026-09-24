@@ -106,6 +106,12 @@ the source of each Z-slice differs.
   formation. In *Current Approaches to Cryo-Electron Microscopy*,
   *Progress in Molecular Biology and Translational Science*. Elsevier.
   [doi:10.1016/bs.pmbts.2026.05.001](https://doi.org/10.1016/bs.pmbts.2026.05.001)
+- Yonekura, K., Braunfeld, M. B., Maki-Yonekura, S., & Agard, D. A. (2006).
+  Electron energy filtering significantly improves amplitude contrast of
+  frozen-hydrated protein at 300 kV. *Journal of Structural Biology*, 156,
+  524–536. [doi:10.1016/j.jsb.2006.07.016](https://doi.org/10.1016/j.jsb.2006.07.016)
+- Langmore, J. P., & Smith, M. F. (1992). Quantitative energy-filtered electron
+  microscopy of biological molecules in ice. *Ultramicroscopy*, 46, 349–373.
 
 
 ## Mean-free-path absorption support
@@ -116,6 +122,20 @@ when constructing `Propagation` directly. Without `inelastic_mfp_specimen`,
 the solvent-present case uses uniform absorption; specifying a specimen MFP
 builds a material-dependent field before solvent blending. With no solvent
 and no specimen MFP, no absorption is assigned.
+
+The solvent mean free path defaults to the value for amorphous ice at the
+generator's accelerating voltage, from `potential.ice_inelastic_mfp`. Two
+voltages are measured: 3950 Å at 300 kV (Rice et al., 2018) and 2030 Å at
+120 kV (Grimm et al., 1996). No energy-filtered measurement of ice has been
+found at 200 kV or 100 kV. At those and any other voltage the value is a power
+law in \(\beta^2\) through the two measurements, 3040 Å ± 7% at 200 kV and
+1730 Å ± 20% at 100 kV, and a warning reports it as an estimate. The standard
+cross-section formulas depart from the measured energy dependence by up to a
+factor of 1.8, but that error lies in the overall slope, which the two
+measurements fix; only the shape of the curve between them is assumed. `INELASTIC_MFP_PROTEIN_A` is a 300 kV
+value; at another voltage the same protein-to-ice ratio, 0.62, applies to the
+ice value there, with the caveat that the ratio itself has only been derived at
+300 kV.
 
 All five wave models in `Scattering` consume `uniform_absorption` with the
 same result as an explicit constant imaginary potential. Multislice,
@@ -132,6 +152,41 @@ estimator. These paths still support `alpha`. This restriction does not
 remove the low-level propagators' support for supplied complex potentials.
 
 A possible extension is described in [the Himes-style design sketch](himes-inelastic-design.md).
+
+### Objective aperture
+
+Electrons scattered elastically beyond the objective aperture are removed from
+the image in the same way as inelastically scattered electrons are removed by
+an energy filter. A multislice grid does not carry this scattering. At 1 Å per
+pixel the Nyquist frequency (0.5 Å⁻¹) lies inside a 12 mrad aperture
+(0.61 Å⁻¹ at 300 kV), and finer grids attenuate it: through 400 Å of amorphous
+ice the cross section below sends 2.7% of the beam beyond 12 mrad, whereas the
+propagated wave carries 0.49% at 0.5 Å per pixel and 1.9% at 0.125 Å per pixel.
+
+`Optics(objective_aperture=...)`, in milliradians, therefore charges this loss
+as an additional absorption rate for each material. The rate is the elastic
+cross section integrated beyond the aperture,
+
+\[
+\frac{1}{\Lambda_{ap}} = n\,(\sigma c_1)^2
+    \int_{k_{ap}}^{\infty} \overline{|f(k)|^2}\,2\pi k\,dk ,
+\]
+
+evaluated with Kirkland factors for water (including its intramolecular
+interference) and for the standard protein composition
+(`potential.aperture_mfp_ice`, `potential.aperture_mfp_protein`). At 300 kV and
+12 mrad, \(\Lambda_{ap}\) is 14,400 Å for ice and 10,400 Å for protein. The
+rate adds to the inelastic one, and where the aperture lies inside the grid's
+Nyquist frequency the potential is low-passed at the aperture
+(`potential.aperture_lowpass`) so that the scattering the grid does carry is
+not also counted. The aperture requires `absorption_model="inelastic_mfp"`,
+because the `alpha` model's fitted constant already represents this loss.
+
+On a 6BDF particle in 400 Å of ice at 300 kV, a 12 mrad aperture raises the
+effective amplitude contrast measured from a defocus series by 0.0075, from
+0.063 to 0.070 at the provisional protein mean free path. Yonekura et al.
+(2006) measured 6.9 ± 1.9% on energy-filtered images under the same aperture
+and voltage.
 
 ### Frozen-plasmon exposure simulation
 

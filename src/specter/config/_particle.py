@@ -93,12 +93,14 @@ class ParticleStackConfig:
             "fits)."
         ),
     )
-    inelastic_mfp_solvent: float = setting(
-        3950.0,
+    inelastic_mfp_solvent: float | None = setting(
+        None,
         help=(
             "Inelastic mean free path of the ice, in Angstrom, for "
-            "absorption_model='inelastic_mfp'. Default 3950 is measured for "
-            "amorphous ice at 300 kV; another voltage needs its own value."
+            "absorption_model='inelastic_mfp'. Unset takes the measured value for "
+            "the run's voltage (3950 at 300 kV, 2030 at 120 kV), and elsewhere an "
+            "estimate from those two with a warning (200 kV: 3040 +/- 7%; 100 kV: "
+            "1730 +/- 20%)."
         ),
         check="positive",
     )  # Å
@@ -129,10 +131,22 @@ class ParticleStackConfig:
             "Inelastic mean free path of the specimen, in Angstrom, for "
             "absorption_model='inelastic_mfp'. Unset gives the specimen the ice's "
             "value, so it absorbs like the water it displaces and carries no "
-            "absorption contrast. 2460 is the derived value for protein."
+            "absorption contrast. 2460 is the derived value for protein at 300 kV."
         ),
         check="positive",
     )  # Å
+    objective_aperture: float | None = setting(
+        None,
+        help=(
+            "Objective aperture semi-angle in milliradians (a 70 um aperture on a "
+            "Krios is ~12 mrad), for absorption_model='inelastic_mfp'. Electrons "
+            "scattered elastically beyond it leave the image; the loss is charged "
+            "per material from the scattering cross section, since no practical "
+            "grid carries it (2.7% of the beam through 400 Angstrom of ice at "
+            "12 mrad, 300 kV). Unset: no aperture."
+        ),
+        check="positive",
+    )  # mrad
 
     # --- Sampling (basic) ---
     defocus: ScalarOrRange = setting(

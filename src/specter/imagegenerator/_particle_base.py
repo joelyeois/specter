@@ -16,8 +16,11 @@ from ..crowding import CrowdWithDuplicates
 from ..ice import IceBank
 from ..ice._blend import IceSlabBlender
 from ..potential import (
-    template_occupancy_reference,
     aperture_lowpass,
+    apply_dose_damage,
+    occupancy_blur_halo_voxels,
+    potential_occupancy,
+    template_occupancy_reference,
 )
 from ..scattering import Scattering
 from ..settings import Crowding
@@ -81,6 +84,10 @@ class ParticleGeneratorBase(BaseImager):
 
     quaternions: torch.Tensor
     translations: torch.Tensor
+
+    # The dose envelope can act on the specimen's potential before the
+    # solvent is added (Envelopes(dose_envelope_target="specimen")).
+    _supports_specimen_damage: bool = True
 
     #: The template's mass in daltons, set by the concrete generator; None
     #: when only a bare volume was given, which keeps the fixed reference.
@@ -162,8 +169,91 @@ class ParticleGeneratorBase(BaseImager):
             progressbars=self.progressbars,
         )
 
-    def solvate(
+    def free_fraction_field(
         self, V: torch.Tensor, potential_scale: torch.Tensor | float = 1.0
+    ) -> torch.Tensor:
+        """
+        The fraction of each voxel still available to water, ``1 - occupancy``.
+
+        Computed from `V` as given, so a caller can take it from the
+        UNDAMAGED specimen and hand it to :meth:`solvate` after the specimen
+        has been damaged. A molecule occupies the same volume whatever its
+        radiation history, and the dose envelope conserves the potential's
+        integral while spreading it, so reading occupancy after damage admits
+        ice into a solid interior (peak core occupancy 1.00 -> 0.81 on 1A6M
+        at 50 e-/A^2).
+
+        Stored as float16: a weight in [0, 1] multiplying the ice, where half
+        precision costs ~5e-4 relative against a blur that is itself an
+        approximation, at half the memory of a full-precision canvas.
+
+        Parameters
+        ----------
+        V : torch.Tensor
+            Specimen potential, ``(B, Z, Y, X)``, already scaled.
+        potential_scale : torch.Tensor or float, optional
+            The scale `V` carries, divided back out of the occupancy
+            reference so a contrast knob cannot change the water budget.
+
+        Returns
+        -------
+        torch.Tensor
+            ``(B, Z, Y, X)`` float16 in [0, 1], on `V`'s device.
+        """
+        scale = torch.as_tensor(
+            potential_scale, dtype=V.dtype, device=V.device
+        ).reshape(-1, 1, 1, 1)
+        full = self._occupancy_reference() * scale
+        halo = occupancy_blur_halo_voxels(self.pixel_size)
+        nz = V.shape[1]
+        chunk = _solvate_chunk_slices(V.shape[-1])
+        free = torch.empty(V.shape, dtype=torch.float16, device=V.device)
+        for b in range(V.shape[0]):
+            full_b = full[b : b + 1] if full.shape[0] > 1 else full
+            for start in range(0, nz, chunk):
+                end = min(start + chunk, nz)
+                lo, hi = max(0, start - halo), min(nz, end + halo)
+                occ = potential_occupancy(
+                    V[b : b + 1, lo:hi], self.pixel_size, full_potential=full_b
+                )[:, start - lo : start - lo + (end - start)]
+                free[b : b + 1, start:end] = (
+                    occ.neg_().add_(1.0).clamp_(0.0, 1.0).to(torch.float16)
+                )
+                del occ
+        return free
+
+    def _apply_solvent_exposure(self, ice: torch.Tensor) -> None:
+        """
+        Filter the ice's fluctuation, in place, to what survives the exposure.
+
+        A no-op unless ``Ice(motion_variance=...)`` is set. The whole batch
+        shares one dose, since one filter serves the batch's ice canvas.
+        """
+        if self.ice.motion_variance is None:
+            return
+        from ..ice._exposure import apply_solvent_exposure
+
+        doses = torch.as_tensor(self.dose_per_angstrom).flatten()
+        if doses.numel() > 1 and not torch.allclose(doses, doses[0].expand_as(doses)):
+            raise ValueError(
+                "Ice(motion_variance=...) needs one dose for every image: the "
+                "exposure filter acts on a whole batch's ice canvas at once"
+            )
+        apply_solvent_exposure(
+            ice,
+            self.pixel_size,
+            float(doses[0]),
+            self.ice.motion_variance,
+            self.detector.n_frames or 1,
+            self.detector.dose_weights,
+            self._dose_weights_max_frequency,
+        )
+
+    def solvate(
+        self,
+        V: torch.Tensor,
+        potential_scale: torch.Tensor | float = 1.0,
+        free: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """
         Embed the volume in amorphous ice.
@@ -182,6 +272,11 @@ class ParticleGeneratorBase(BaseImager):
             ``(B, 1, 1, 1)``. Divided back out when reading occupancy, so a
             contrast knob cannot change how much water the specimen
             displaces. Default 1.0.
+        free : torch.Tensor or None, optional
+            Precomputed free fraction (:meth:`free_fraction_field`) to weight
+            the ice by, instead of reading occupancy off `V`. How the
+            specimen-damage path keeps occupancy from the undamaged
+            specimen. Default None.
 
         Returns
         -------
@@ -222,6 +317,9 @@ class ParticleGeneratorBase(BaseImager):
             ).to(V.device)
         else:
             ice = self.icemaker.generate_ice(batchsize=len(V)).to(V.device)
+        # On the pure ice canvas, before the particle's hole is cut: the
+        # hole moves with the particle and never decorrelates.
+        self._apply_solvent_exposure(ice)
 
         pad = self.nxy // 2 if self.pad_fft else 0
         ridx = _reflect_index(ice.shape[-1], pad, ice.device) if pad else None
@@ -257,7 +355,9 @@ class ParticleGeneratorBase(BaseImager):
                     slab = slab.index_select(-2, ridx).index_select(-1, ridx)
                 else:
                     slab = slab.clone()
-                blender.add(Vb, slab, start, end)
+                blender.add(
+                    Vb, slab, start, end, free=None if free is None else free[b : b + 1]
+                )
                 del slab
         return V
 
@@ -326,7 +426,8 @@ class ParticleGeneratorBase(BaseImager):
             V = V * scale
 
         # `clean_exitwaves` is the ice-free, absorption-free reference, so it
-        # is deliberately propagated from the real potential.
+        # is deliberately propagated from the real potential, and from the
+        # undamaged one: it is the reference any damage is measured against.
         if getattr(self, "save_clean_exitwaves", False):
             self.clean_exitwaves = self.scattering(V)
 
@@ -349,11 +450,44 @@ class ParticleGeneratorBase(BaseImager):
                 else None
             )
 
-        if getattr(self, "icemaker", None) is not None:
+        has_ice = getattr(self, "icemaker", None) is not None
+        free = None
+        if self._damages_potential:
+            # Occupancy first, from the UNDAMAGED specimen: how much water a
+            # voxel displaces is a question about the molecule's volume, not
+            # its radiation history, and the envelope spreads the potential
+            # outwards while conserving its integral. Then the envelope, on
+            # the specimen (and its crowding neighbours) alone, so the ice
+            # added afterwards keeps its structure.
+            if has_ice:
+                with torch.no_grad():
+                    free = self.free_fraction_field(V, potential_scale=scale)
+            if self.verbose:
+                logger.info("Applying dose damage to the specimen potential")
+            pre = getattr(self, "pre_exposure", None)
+            with torch.no_grad():
+                V = apply_dose_damage(
+                    V,
+                    self.pixel_size,
+                    self.dose_per_angstrom[idx],
+                    pre_exposure=0.0 if pre is None else pre[idx],
+                    weighted=self._dose_weighted,
+                    voltage=self.voltage,
+                    # The exposure's real frame structure and, where the run
+                    # has them, its real per-frequency weights: the envelope
+                    # that survives a movie is the weight-average of the
+                    # frames' own damage states. See potential/_damage.py.
+                    n_frames=self.n_frames,
+                    frame_weights=self.detector.dose_weights,
+                    frame_weights_max_frequency=self._dose_weights_max_frequency,
+                )
+
+        if has_ice:
             if self.verbose:
                 logger.info(f"Adding ice to volume using {self.ice_model} model")
             with torch.no_grad():
-                V = self.solvate(V, potential_scale=scale)
+                V = self.solvate(V, potential_scale=scale, free=free)
+            del free
 
         # Scattering beyond the objective aperture is charged as absorption
         # (`_removal_mfp`), so the share of it the grid carries is filtered

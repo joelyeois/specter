@@ -43,6 +43,7 @@ from typing import Any, Literal, TypeVar
 from specter.options import (
     AbsorptionModel,
     DetectorModel,
+    DoseEnvelopeTarget,
     EwaldSphereSign,
     IceModel,
     NoiseModel,
@@ -250,6 +251,14 @@ class Envelopes:
     dose_envelope : bool
         Apply the Grant & Grigorieff (2015) radiation-damage envelope over
         each image's exposure. Default False.
+    dose_envelope_target : DoseEnvelopeTarget
+        Where the envelope acts. ``"transfer_function"`` (default) filters the
+        whole image, solvent included. ``"specimen"`` damages the specimen's
+        own 3D potential before the ice is added, so the solvent keeps its
+        structure: its water ring does not fade under exposure, and it loses
+        coherence between frames instead (``Ice.motion_variance``). Supported
+        by the particle generators only; micrographs and tilt series receive
+        a volume with the ice already in it.
     """
 
     convergence_angle: float | None = None
@@ -258,6 +267,14 @@ class Envelopes:
     deltaV_V: float = 0.06e-6
     deltaI_I: float = 0.01e-6
     dose_envelope: bool = False
+    dose_envelope_target: DoseEnvelopeTarget = "transfer_function"
+
+    def __post_init__(self) -> None:
+        if self.dose_envelope_target not in ("transfer_function", "specimen"):
+            raise ValueError(
+                f"dose_envelope_target={self.dose_envelope_target!r} must be "
+                "'transfer_function' or 'specimen'"
+            )
 
 
 @dataclass(frozen=True)
@@ -370,6 +387,15 @@ class Ice:
         Atomic scattering factors for the water kernel. Default
         ``"kirkland"``; ice is a bulk material, outside the Shtyrov fits'
         domain (see ``bulk_scattering_factors`` in the configs).
+    motion_variance : float, optional
+        McMullan et al.'s sigma0^2: per-axis beam-induced displacement of the
+        water in A^2 per e-/A^2, as measured from the decorrelation of the
+        3.7 A ring (0.38 for their 300 kV exposure). When set, the ice's
+        fluctuation is filtered to what survives the summed exposure, frame
+        weights included (:func:`~specter.ice.apply_solvent_exposure`, relaxed
+        coherence model); its mean is kept. Requires the dose envelope, if
+        on, to act on the specimen, or the solvent would lose its structure
+        twice. Particle generators only. Default None: frozen ice.
     """
 
     model: IceModel | None = None
@@ -378,10 +404,15 @@ class Ice:
     cache_dir: str | None = None
     relax_steps: int = 0
     parameterization: ScatteringFactors = "kirkland"
+    motion_variance: float | None = None
 
     def __post_init__(self) -> None:
         if self.model == "none":
             object.__setattr__(self, "model", None)
+        if self.motion_variance is not None and self.motion_variance < 0:
+            raise ValueError(
+                f"motion_variance={self.motion_variance} must be non-negative"
+            )
         if self.thickness is not None and self.thickness < 0:
             raise ValueError(f"thickness={self.thickness} must be non-negative")
         if self.relax_steps < 0:

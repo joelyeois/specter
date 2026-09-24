@@ -5,6 +5,7 @@ and the Fourier shell correlation.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Sequence
 
 import torch
@@ -661,3 +662,83 @@ def _apply_conv_mode(
         return _centered(ret, shape_valid).clone()
     else:
         raise ValueError("acceptable mode flags are 'valid', 'same', or 'full'")
+
+
+def apply_radial_envelope_(
+    v: torch.Tensor,
+    pixel_size: float,
+    envelope: Callable[[torch.Tensor], torch.Tensor],
+) -> None:
+    """
+    Multiply a ``(Z, Y, X)`` volume by a radial envelope in Fourier space, in place.
+
+    The shared step of :func:`specter.potential.apply_dose_damage` (damage
+    to a specimen's potential) and :func:`specter.ice.apply_solvent_exposure`
+    (the solvent's loss of coherence over an exposure): both are isotropic
+    filters of a 3D field, so rotating the field commutes with them.
+
+    Parameters
+    ----------
+    v : torch.Tensor
+        Real volume, ``(Z, Y, X)``, filtered in place on its own device.
+    pixel_size : float
+        Voxel size in Angstrom.
+    envelope : callable
+        Maps a 1D tensor of |k| in 1/Angstrom to the factor applied there.
+        Tabulated once on a radial grid; it should be 1 at k = 0 to keep
+        the volume's mean.
+    """
+    nz, ny, nx = v.shape
+    dev = v.device
+    nkx = nx // 2 + 1
+    # The half-spectrum is as large as the volume itself, and it is the one
+    # transient this keeps. A single rfftn/irfftn pair is not that: cuFFT's
+    # 3D workspace took the peak to 5x the canvas (26.8 GiB for 5.3 GiB at
+    # 1368 x 1024^2), which is exactly the thick-ice case that matters. So
+    # the transform is done separably and chunked -- rfft2 over (Y, X) a
+    # z-slab at a time into a preallocated spectrum, fft along Z a y-chunk
+    # at a time in place, and the inverse the same way back into `v` --
+    # so no chunk's scratch exceeds ~2^26 elements.
+    slab = max(1, min(nz, (1 << 26) // max(1, ny * nkx)))
+    ychunk = max(1, min(ny, (1 << 26) // max(1, nz * nkx)))
+    spectrum = torch.empty((nz, ny, nkx), dtype=torch.complex64, device=dev)
+    for z0 in range(0, nz, slab):
+        z1 = min(nz, z0 + slab)
+        spectrum[z0:z1] = torch.fft.rfft2(v[z0:z1])
+    for y0 in range(0, ny, ychunk):
+        y1 = min(ny, y0 + ychunk)
+        spectrum[:, y0:y1] = torch.fft.fft(spectrum[:, y0:y1], dim=0)
+    kz = torch.fft.fftfreq(nz, d=pixel_size, device=dev)
+    ky = torch.fft.fftfreq(ny, d=pixel_size, device=dev)
+    kx = torch.fft.rfftfreq(nx, d=pixel_size, device=dev)
+    kyx = ky[:, None] ** 2 + kx[None, :] ** 2
+    # The envelope is a function of |k| alone, so it is tabulated once on a
+    # fine radial grid and read back by linear interpolation rather than
+    # evaluated on every voxel of every slab. That matters for the frame sum,
+    # which is a loop over frames each gathering a per-frequency weight: on a
+    # 600 x 1200^2 canvas evaluating it per slab cost 2.4x the whole forward
+    # pass. 4096 points over the corner frequency is a spacing of ~2e-4 1/A
+    # against an envelope whose scale of variation is ~1e-2.
+    k_max = float(
+        torch.sqrt(kz.abs().max() ** 2 + ky.abs().max() ** 2 + kx.abs().max() ** 2)
+    )
+    n_table = 4096
+    k_table = torch.linspace(0.0, k_max, n_table, device=dev)
+    env_table = envelope(k_table)
+    for z0 in range(0, nz, slab):
+        z1 = min(nz, z0 + slab)
+        k = torch.sqrt(kz[z0:z1, None, None] ** 2 + kyx[None])
+        pos = (k / k_max * (n_table - 1)).clamp_(0, n_table - 1)
+        lo = pos.floor()
+        frac = pos - lo
+        i0 = lo.long()
+        i1 = (i0 + 1).clamp_(max=n_table - 1)
+        spectrum[z0:z1] *= torch.lerp(env_table[i0], env_table[i1], frac)
+        del k, pos, lo, frac, i0, i1
+    for y0 in range(0, ny, ychunk):
+        y1 = min(ny, y0 + ychunk)
+        spectrum[:, y0:y1] = torch.fft.ifft(spectrum[:, y0:y1], dim=0)
+    for z0 in range(0, nz, slab):
+        z1 = min(nz, z0 + slab)
+        v[z0:z1] = torch.fft.irfft2(spectrum[z0:z1], s=(ny, nx))
+    del spectrum

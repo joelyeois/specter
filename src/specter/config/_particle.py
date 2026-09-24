@@ -336,6 +336,16 @@ class ParticleStackConfig:
     dose_envelope: bool = setting(
         False, help="Apply the Grant & Grigorieff (2015) cumulative-dose envelope."
     )
+    dose_envelope_target: Literal["transfer_function", "specimen"] = setting(
+        "transfer_function",
+        help=(
+            "Where the dose envelope acts. 'transfer_function' filters the whole "
+            "image, solvent included. 'specimen' damages the particle's own "
+            "potential before the ice is added, with occupancy read from the "
+            "undamaged particle, so the water keeps its 3.7 A ring (raw movies "
+            "show it does not fade with dose); required for ice_motion_variance."
+        ),
+    )
     bfactor: float | None = setting(
         None, help="Isotropic B-factor envelope in Angstrom^2.", check="non_negative"
     )  # Å²
@@ -535,6 +545,19 @@ class ParticleStackConfig:
         help=(
             "Local MLBOP seam-relaxation steps, only used when "
             "ice_model='gd' tiles multiple cached blocks."
+        ),
+        check="non_negative",
+    )
+    ice_motion_variance: float | None = setting(
+        None,
+        help=(
+            "Beam-induced displacement of the water, per axis, in A^2 per e-/A^2 "
+            "(McMullan et al. 2015's sigma0^2, 0.38 for their 300 kV exposure, "
+            "as measured from the 3.7 A ring). The ice fluctuation is filtered to "
+            "what survives the summed exposure, frame weights included, using a "
+            "decorrelation measured on relaxed ice trajectories; its mean is kept. "
+            "With dose_envelope on, needs dose_envelope_target='specimen'. Unset: "
+            "frozen ice."
         ),
         check="non_negative",
     )

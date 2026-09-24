@@ -120,6 +120,7 @@ specter simulate particles [OPTIONS]
 | `--deltaV_V` | `FLOAT` | `6e-08` | Relative high-voltage instability, used by the Cc envelope. |
 | `--deltaI_I` | `FLOAT` | `1e-08` | Relative objective-lens current instability, used by the Cc envelope. |
 | `--dose_envelope` | `True` \| `False` | `False` | Apply the Grant & Grigorieff (2015) cumulative-dose envelope. |
+| `--dose_envelope_target` | `transfer_function` \| `specimen` | `transfer_function` | Where the dose envelope acts. 'transfer_function' filters the whole image, solvent included. 'specimen' damages the particle's own potential before the ice is added, with occupancy read from the undamaged particle, so the water keeps its 3.7 A ring (raw movies show it does not fade with dose); required for ice_motion_variance. |
 | `--bfactor` | `FLOAT` | _none_ | Isotropic B-factor envelope in Angstrom^2. |
 | `--coincidence_radius` | `TEXT` | `0.0` | Effective coincidence exclusion radius in pixels (exclusion area = pi*r^2): a single value for constant radius, or 'low,high' ([low, high] in TOML) to sample uniformly per particle. |
 | `--ice_model` | `gd` \| `random` \| `none` | `gd` | Ice model: 'gd' (samples the pre-generated IceBank cache), 'random' (cheap, low-realism), or 'none'. |
@@ -139,6 +140,7 @@ specter simulate particles [OPTIONS]
 | `--rotate_mode` | `real` \| `fourier` | `real` | Volume rotation method: 'real' (trilinear interpolation) or 'fourier' (no boundary artifacts). |
 | `--bulk_scattering_factors` | `kirkland` \| `lobato` \| `shtyrov` | `kirkland` | Atomic scattering-factor parameterization for the ice -- everything rendered that is not a biomolecule. Deliberately separate from scattering_factors: Shtyrov is fitted for biomolecules, and these materials are outside that domain. |
 | `--ice_relax_steps` | `INTEGER` | `0` | Local MLBOP seam-relaxation steps, only used when ice_model='gd' tiles multiple cached blocks. |
+| `--ice_motion_variance` | `FLOAT` | _none_ | Beam-induced displacement of the water, per axis, in A^2 per e-/A^2 (McMullan et al. 2015's sigma0^2, 0.38 for their 300 kV exposure, as measured from the 3.7 A ring). The ice fluctuation is filtered to what survives the summed exposure, frame weights included, using a decorrelation measured on relaxed ice trajectories; its mean is kept. With dose_envelope on, needs dose_envelope_target='specimen'. Unset: frozen ice. |
 | `--crowd_chunk_size` | `INTEGER` | `1` | Crowding duplicate volumes rotated per batch. Lowering it to 1 costs no wall time: wall time is flat in this while peak memory grows linearly with it, so raising it above the default buys nothing. |
 | `--crowd_max_distance_xy` | `FLOAT` | _none_ | Maximum xy-distance between crowded particles in Angstrom. |
 | `--crowd_method` | `2d` \| `3d` | `3d` | Poisson-disk sampling dimensionality for crowding particle placement. |

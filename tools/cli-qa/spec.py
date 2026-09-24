@@ -159,6 +159,8 @@ PARTICLES = CommandSpec(
         Flag("deltaV_V", "1e-5", context=CC_ON),
         Flag("deltaI_I", "1e-5", context=CC_ON),
         Flag("dose_envelope", "true"),
+        Flag("dose_envelope_target", "specimen", context=["--dose_envelope", "true"]),
+        Flag("ice_motion_variance", "0.38", context=["--ice_model", "gd"]),
         Flag("bfactor", "100.0"),
         # --- sampling ---------------------------------------------------
         Flag("defocus", "12000.0"),

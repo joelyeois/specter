@@ -138,6 +138,74 @@ once per template, in 0.01 to 0.04 s on a GPU. A volume supplied without a
 mass, and a tomogram, which holds many species in one volume, use the fixed
 `potential.FULL_OCCUPANCY_POTENTIAL_V` of 7.0 V instead.
 
+## The solvent under exposure
+
+A movie is not a picture of one frozen solvent. Each inelastic event deposits
+tens of eV in the ice, and over a few e⁻/Å² every water molecule is hit many
+times; the network is locally disrupted and re-forms. Two consequences follow.
+Each frame still holds water with the equilibrium structure factor, which is
+why the 3.7 Å ring of raw movie fractions does not fade across 50 e⁻/Å². But
+successive frames hold different arrangements of it, so the ice's Fourier
+amplitudes lose coherence with dose. The solvent is therefore not damaged in
+the sense a protein is; it decorrelates.
+
+Write the ice's fluctuation at spatial frequency \(k\) and accumulated dose
+\(D\) as \(f_{\mathbf k}(D)\), with constant power \(P(k)\) and correlation
+\(\rho_k(|D - D'|)\) between doses. An exposure read out as \(n\) frames of
+dose \(d\), each integrating continuously over its own dose and combined with
+per-frequency weights \(a_i\) (\(\sum_i a_i = 1\)), keeps the fraction
+
+\[
+\mathcal S(k) = \sum_{i,j} a_i a_j\, c_{|i-j|}(k),
+\qquad
+c_L(k) = \frac{1}{d^2}\int_{\text{frame } i}\int_{\text{frame } i+L}
+\rho_k(|D - D'|)\,\mathrm dD\,\mathrm dD'
+\]
+
+of a frozen ice's power. With equal weights this is the continuous average
+over the whole exposure, independent of \(n\):
+\(\mathcal S = (2/D^2)\int_0^D (D-\tau)\,\rho_k(\tau)\,\mathrm d\tau\).
+`ice.apply_solvent_exposure` scales one ice realisation's Fourier amplitudes
+by \(\sqrt{\mathcal S(k)}\) before the specimen's volume is cut out of it, so
+the summed image has the right second-order statistics without the frames
+being simulated. \(\mathcal S(0) = 1\): the mean potential, which sets the
+absorption and the volume the specimen displaces, is kept.
+
+The correlation comes from one of two models (`ice.solvent_coherence`).
+McMullan et al. (2015) assume every molecule takes an independent Gaussian
+step of variance \(\sigma_0^2\) per axis per e⁻/Å², so that
+\(\rho_k(\tau) = e^{-2\pi^2\sigma_0^2 k^2 \tau}\); they measured
+\(\sigma_0^2 = 0.38\) Å² per e⁻/Å² from the 3.7 Å ring at 300 kV. The default
+model, `"relaxed"`, is measured instead. Periodic 256 Å boxes of library ice
+were evolved by such Gaussian kicks, each followed by the library's own
+\(S(k)\) and ML-BOP relaxation so that every state is water, and the
+coherence was measured without a grid, from the structure factor of all
+527,178 molecules at reciprocal-lattice vectors of the box, over lags of 1 to
+60 steps. It is compressed rather than exponential: every shell from 90 Å to
+1.4 Å fits \(
+ho = \exp[-(x/x_0(k))^{\beta(k)}]\) in accumulated kick
+variance \(x\) to within 0.012, with \(\beta \approx 1.1\). Its time scale is
+fixed so that the ring's correlation has the same area as the Gaussian
+model's for the same \(\sigma_0^2\), which is the quantity a multi-frame fit
+determines.
+
+Relaxed ice departs from independent kicks in the way liquid dynamics
+predicts, where collective density relaxes at a rate proportional to
+\(k^2/S(k)\). Ice is nearly incompressible, so its long-wavelength density
+fluctuations decorrelate far faster: the correlation area is 1/33 of the
+Gaussian model's at 20 Å and 1/12 at 10 Å. Near peaks of \(S(k)\) it
+decorrelates more slowly, and at short wavelengths the two models converge.
+Under the Gaussian model a 141-frame summed spectrum of pure ice shows a bright
+low-frequency disc with Thon rings that McMullan et al.'s Fig. 1(a) does not;
+under the relaxed model it is flat there, as theirs is.
+
+In a particle stack this is ``Ice(motion_variance=...)``
+(`ice_motion_variance` in the particle config). It needs the dose envelope,
+if one is applied, to act on the specimen
+(``Envelopes(dose_envelope_target="specimen")``, see
+[Aberrations](aberrations.md)): on the transfer function the envelope would
+fade the solvent that the exposure filter already decorrelates.
+
 ## Limitations
 
 - **The target is one phase of ice at one thermodynamic state.**
@@ -150,9 +218,29 @@ mass, and a tomogram, which holds many species in one volume, use the fixed
   target without a matching structural reference produces a configuration
   matched to an arbitrary energy rather than to a physically grounded
   phase.
+- **The relaxed coherence comes from an optimiser, not molecular dynamics.**
+  The relaxation step matches a structure factor and an energy; its
+  long-wavelength time scales are the least certain part of the model, and
+  beyond the 256 Å box (below 1/90 Å⁻¹) they are extrapolated as
+  diffusive. Scaling the measured curves linearly with \(\sigma_0^2\)
+  away from the kick they were measured at is untested.
+- **\(\sigma_0^2\) for motion-corrected particle data is not established.**
+  McMullan et al.'s 0.38 Å² per e⁻/Å² was measured on unaligned frames,
+  and particle stacks have suggested less decorrelation; from a stack alone
+  it trades off against ice thickness. The filter also acts before
+  multislice, which is exact only for the projected, linear image.
+- **Long-wavelength ice power differs between library and relaxed ice.**
+  After many kick-and-relax steps the ice carries 0.5 to 0.9 of the
+  library's density fluctuation at 10 to 90 Å. Both are outputs of the same
+  structure-matching optimisation, and neither has been checked against a
+  measured compressibility of amorphous ice.
 
 ## References
 
+- McMullan, G., Vinothkumar, K. R., & Henderson, R. (2015). Thon rings from
+  amorphous ice and implications of beam-induced Brownian motion in single
+  particle electron cryo-microscopy. *Ultramicroscopy*, 158, 26–32.
+  [doi:10.1016/j.ultramic.2015.05.017](https://doi.org/10.1016/j.ultramic.2015.05.017)
 - Chan, H., Cherukara, M. J., Narayanan, B., Loeffler, T. D., Benmore, C.,
   Gray, S. K., & Sankaranarayanan, S. K. R. S. (2019). Machine learning
   coarse grained models for water. *Nature Communications*, 10, 379.

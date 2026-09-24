@@ -77,6 +77,12 @@ AberrationModel = Literal["nonlinear", "linear"]
 #: wherever a mean free path is known.
 AbsorptionModel = Literal["alpha", "inelastic_mfp"]
 
+#: Where the radiation-damage envelope acts. ``"transfer_function"`` filters
+#: the whole image, solvent included; ``"specimen"`` damages the specimen's
+#: potential before the solvent is added, so the ice keeps its structure (see
+#: `potential.apply_dose_damage`).
+DoseEnvelopeTarget = Literal["transfer_function", "specimen"]
+
 #: Whether a volume is rotated in real or Fourier space.
 RotateMode = Literal["real", "fourier"]
 
@@ -106,6 +112,7 @@ Scheduler = Literal[
 __all__ = [
     "AberrationModel",
     "AbsorptionModel",
+    "DoseEnvelopeTarget",
     "CarbonEdgeSide",
     "ConvBackend",
     "ConvBoundary",

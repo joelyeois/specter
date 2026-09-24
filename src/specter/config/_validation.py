@@ -298,6 +298,29 @@ def _require_bfactor_backend(config: Any) -> None:
         )
 
 
+def _require_solvent_exposure_consistent(config: Any) -> None:
+    """
+    Reject solvent motion alongside a dose envelope on the transfer function.
+
+    The generator raises for this too, but only after the structure has been
+    fetched and rendered. The envelope on the transfer function fades the
+    water ring and the exposure filter decorrelates it, so together they
+    would take the solvent's structure away twice.
+    """
+    if getattr(config, "ice_motion_variance", None) is None:
+        return
+    if getattr(config, "dose_envelope", False) and (
+        getattr(config, "dose_envelope_target", "transfer_function") != "specimen"
+    ):
+        _fail(
+            "ice_motion_variance",
+            config.ice_motion_variance,
+            "with dose_envelope on, requires dose_envelope_target='specimen' -- "
+            "on the transfer function the envelope would also fade the solvent "
+            "that the exposure filter already decorrelates",
+        )
+
+
 def _require_field_rules(config: Any) -> None:
     """Apply each field's own ``check``/``range`` rule, see `setting`."""
     for f in fields(config):
@@ -344,6 +367,7 @@ def validate_config(config: Any) -> None:
     _require_field_rules(config)
     _require_valid_cryosparc_ref(config)
     _require_bfactor_backend(config)
+    _require_solvent_exposure_consistent(config)
 
     # Grammar first, and here rather than in the pipeline: a device string is
     # otherwise parsed several stages into a run, so a typo surfaced either as

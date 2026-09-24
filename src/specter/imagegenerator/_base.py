@@ -175,6 +175,33 @@ class BaseImager(L.LightningModule):
                 "fitted amplitude contrast already stands in for aperture loss, "
                 "and applying both would count it twice."
             )
+        if (
+            self.envelopes.dose_envelope_target == "specimen"
+            and not self._supports_specimen_damage
+        ):
+            raise ValueError(
+                f"{type(self).__name__} cannot apply the dose envelope to the "
+                "specimen (Envelopes(dose_envelope_target='specimen')): it is "
+                "given a volume with the solvent already in it. Use "
+                "'transfer_function'."
+            )
+        # Set by the generators before this constructor runs.
+        ice = getattr(self, "ice", None)
+        if getattr(ice, "motion_variance", None) is not None:
+            if not self._supports_specimen_damage:
+                raise ValueError(
+                    f"{type(self).__name__} does not support Ice(motion_variance=...): "
+                    "the solvent exposure filter needs the ice as its own field, "
+                    "which only the particle generators build."
+                )
+            if self.envelopes.dose_envelope and not self._damages_potential:
+                raise ValueError(
+                    "Ice(motion_variance=...) with the dose envelope on the "
+                    "transfer function would take the solvent's structure away "
+                    "twice: the envelope fades the water ring, and the exposure "
+                    "filter decorrelates it. Set "
+                    "Envelopes(dose_envelope_target='specimen')."
+                )
         # Resolved here, where the voltage is known, so a voltage with no
         # measured ice value fails at construction rather than mid-run.
         self._inelastic_mfp_solvent: float | None = None
@@ -246,6 +273,20 @@ class BaseImager(L.LightningModule):
     # overrides it, since a tilt is a plain short exposure after a pre-exposure.
     # See specter.aberrations.dose_envelope.
     _dose_weighted: bool = True
+
+    # Whether this imager can apply the dose envelope to the specimen's own
+    # potential, before the solvent is added (`potential.apply_dose_damage`).
+    # The particle generators can; micrograph and tilt-series imagers receive
+    # a volume with the ice already in it, so for them the envelope can only
+    # act on the transfer function, where it filters the ice as hard as the
+    # protein.
+    _supports_specimen_damage: bool = False
+
+    @property
+    def _damages_potential(self) -> bool:
+        """The dose envelope acts on the specimen potential, not the transfer function."""
+        env = self.envelopes
+        return env.dose_envelope and env.dose_envelope_target == "specimen"
 
     def _ctf_batch(self, idx: torch.Tensor | int) -> dict[str, torch.Tensor]:
         """Collect per-image transfer-function parameters for a batch."""
@@ -496,7 +537,9 @@ class BaseImager(L.LightningModule):
                 energy_spread=env.energy_spread,
                 deltaV_V=env.deltaV_V,
                 deltaI_I=env.deltaI_I,
-                dose_envelope=env.dose_envelope,
+                # Once, in one place: on the specimen's potential when the
+                # generator damages it there, otherwise here.
+                dose_envelope=env.dose_envelope and not self._damages_potential,
                 dose_weighted=self._dose_weighted,
                 lpp_params=self.optics.lpp_params,
             )  # _dose_weighted: class attribute, False on TiltSeriesGenerator
@@ -519,7 +562,7 @@ class BaseImager(L.LightningModule):
                 energy_spread=env.energy_spread,
                 deltaV_V=env.deltaV_V,
                 deltaI_I=env.deltaI_I,
-                dose_envelope=env.dose_envelope,
+                dose_envelope=env.dose_envelope and not self._damages_potential,
                 dose_weighted=self._dose_weighted,
                 progressbars=self.progressbars,
             )

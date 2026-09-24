@@ -209,6 +209,43 @@ scales as \(1/\beta^2\), so \(N_e\) is multiplied by
 \(\beta^2(V)/\beta^2(300\,\text{kV})\) at other voltages: 0.80 at 200 kV,
 the factor RELION and MotionCor2 also apply, and 0.50 at 100 kV.
 
+Where the envelope acts is a choice, ``Envelopes(dose_envelope_target=...)``.
+The default, `"transfer_function"`, multiplies the transfer function and so
+filters the whole exit wave, solvent included. The particle generators can
+instead apply it to the specimen's three-dimensional potential before the
+solvent is added (`"specimen"`, `potential.apply_dose_damage`), as a radial
+envelope in 3D Fourier space. By the projection-slice theorem this is the same
+filter on the projected specimen, but the ice blended in afterwards is left
+undamaged, with occupancy read from the undamaged specimen: the envelope
+conserves the potential's integral while spreading it, and a molecule does not
+displace less water for having been irradiated. The distinction is measurable.
+On raw EER movies of EMPIAR-11461 and EMPIAR-11377, the power of the 3.7 Å
+water ring per fraction is constant to within about 10 % across 40 to
+50 e⁻/Å², where the protein-calibrated critical exposure (about 5 e⁻/Å² at
+3.7 Å) would leave under 2 % of the ring amplitude by the final fraction. The
+solvent loses coherence between frames instead (see [Ice](ice.md)).
+
+On the specimen path the envelope is the explicit frame sum
+(`potential.frame_damage_envelope`) rather than either closed form. A movie
+is a sum of frames, each imaging the specimen at a different accumulated dose
+and recombined under per-frequency weights, so the signal that survives is the
+weight-average of the frames' own damage states,
+
+\[
+E(k) = \frac{\sum_i w_i(k)\, q_i(k)}{\sum_i w_i(k)},
+\qquad q_i(k) = e^{-N_i / 2 N_e(k)},
+\]
+
+evaluated from the run's own frame count and, where it has them, its measured
+weights. The two closed forms above are its limits: the unweighted one is
+\(w_i = 1\), and the exposure-filtered one is the Grant and Grigorieff
+optimal filter \(w_i \propto q_i\) renormalised to fixed noise. That
+normalisation describes how frames were combined and what it did to the noise,
+not a specimen, so it does not belong on a potential while the detector
+separately applies the real weights and their noise gain. Rendering each
+frame's damage state separately and combining the intensities gives the same
+image to within 0.06 to 0.14 % of its contrast on three real specimens in ice.
+
 ![Left: the four envelopes in isolation, plus their product (B x Cs x Cc). Right: the same isotropic CTF curve from above, with and without the combined B/Cs/Cc envelope applied.](../assets/images/aberrations-envelopes.png){ width="900" style="display:block;margin:1.2em auto;" }
 ///caption
 Left: the four envelopes in isolation, plus their product (B x Cs x Cc). Right: the same isotropic CTF curve from above, with and without the combined B/Cs/Cc envelope applied.
@@ -266,6 +303,15 @@ key, since it describes one shared instrument configuration rather than a
 per-particle quantity; `"legacy"` has no equivalent.
 
 ## Limitations
+
+- **Only the particle generators can damage the specimen alone.**
+  `MicrographGenerator` and `TiltSeriesGenerator` image a volume the ice has
+  already been blended into, so for them the envelope stays on the transfer
+  function and attenuates the water ring as hard as the protein. Moving it
+  would mean damaging each template before placement (micrographs) or the
+  tomogram per tilt (tilt series). The specimen path is also not yet the
+  default: its effect on matching real particle stacks is still being
+  validated.
 
 - **`torch_ctf` cannot express tetrafoil.** `LegacyAberrationAdapter` has no
   `tetrafoil1`-`tetrafoil4` mapping. Passing a nonzero one raises

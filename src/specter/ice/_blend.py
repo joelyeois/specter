@@ -80,7 +80,14 @@ class IceSlabBlender:
         self.halo = occupancy_blur_halo_voxels(voxel_size, sigma_angstrom)
         self._tail: torch.Tensor | None = None
 
-    def add(self, V: torch.Tensor, ice: torch.Tensor, start: int, end: int) -> None:
+    def add(
+        self,
+        V: torch.Tensor,
+        ice: torch.Tensor,
+        start: int,
+        end: int,
+        free: torch.Tensor | None = None,
+    ) -> None:
         """
         Weight `ice` by the free fraction of ``V[:, start:end]`` and add it.
 
@@ -94,8 +101,22 @@ class IceSlabBlender:
             device the blend should run on. Weighted in place.
         start, end : int
             The slab's z range in `V`.
+        free : torch.Tensor or None, optional
+            Precomputed free fraction, ``1 - occupancy``, for the whole
+            volume. When given, this slab's weights are read from it and `V`
+            is not consulted for occupancy at all, which lets a caller take
+            occupancy from a volume other than the one being blended into:
+            the undamaged specimen, when the dose envelope has since been
+            applied to it. Any dtype; cast per slab.
         """
         nz = V.shape[1]
+        if free is not None:
+            ice.mul_(free[:, start:end].to(ice.device, ice.dtype))
+            if V.device == ice.device:
+                V[:, start:end].add_(ice)
+            else:
+                V[:, start:end] = (V[:, start:end] + ice.to(V.device)).to(V.device)
+            return
         lo, hi = max(0, start - self.halo), min(nz, end + self.halo)
         # A copy on the compute device: the blur must read the pristine
         # potential, and the subtraction below must not touch `V`.

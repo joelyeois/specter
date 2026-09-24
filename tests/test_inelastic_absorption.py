@@ -505,12 +505,14 @@ def test_ctf_rejects_uniform_absorption():
         scattering(torch.zeros(1, 4, 8, 8))
 
 
-@pytest.mark.parametrize("kind", ["micrograph", "tiltseries", "tomogram"])
+@pytest.mark.parametrize(
+    "kind", ["micrograph", "tiltseries", "tomogram", "reconstructor"]
+)
 @pytest.mark.parametrize("specimen_mfp", [None, INELASTIC_MFP_PROTEIN_A])
 def test_iterative_consumers_reject_unsupported_mfp(kind, specimen_mfp):
     """Never silently simulate a real volume without the requested absorption."""
     from specter.imagegenerator import MicrographGenerator, TiltSeriesGenerator
-    from specter.ghostbuster import TomogramReconstructor
+    from specter.ghostbuster import Reconstructor, TomogramReconstructor
     from specter.settings import Propagation
 
     v = torch.zeros(4, 8, 8)
@@ -528,6 +530,17 @@ def test_iterative_consumers_reject_unsupported_mfp(kind, specimen_mfp):
                 torch.zeros(1, 2),
                 {},
                 VOLTAGE,
+                propagation=propagation,
+            )
+        elif kind == "reconstructor":
+            Reconstructor(
+                torch.zeros(8, 8, 8),
+                2.0,
+                torch.tensor([[1.0, 0.0, 0.0, 0.0]]),
+                torch.zeros(1, 2),
+                {},
+                VOLTAGE,
+                10.0,
                 propagation=propagation,
             )
         else:

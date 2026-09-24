@@ -104,7 +104,8 @@ class Reconstructor(_BaseReconstructor):
         How the forward model computes the exit wave, including the
         amplitude contrast ratio. The same object the simulator that
         produced the data was built with, when it was simulated. Default
-        ``Propagation()``.
+        ``Propagation()``. ``absorption_model="inelastic_mfp"`` is rejected;
+        absorption comes from `alpha` alone.
     optics : Optics, optional
         The aberration engine and phase plate. Default ``Optics()``.
         `Envelopes` and `Camera` are deliberately not accepted: neither can
@@ -161,6 +162,13 @@ class Reconstructor(_BaseReconstructor):
         halfset_label: str | None = None,
     ) -> None:
         super().__init__()
+        if propagation.absorption_model == "inelastic_mfp":
+            raise ValueError(
+                "Reconstructor does not support absorption_model='inelastic_mfp': "
+                "a reconstructed volume carries no ice and no material labels, so "
+                "the per-material absorption field cannot be built from it. Use "
+                "'alpha'."
+            )
 
         self.save_hyperparameters(
             ignore=[

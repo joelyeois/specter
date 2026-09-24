@@ -42,6 +42,7 @@ from ..potential import (
     absorption_potential,
     aperture_mfp_ice,
     aperture_mfp_protein,
+    ice_inelastic_mfp,
     inelastic_absorption_potential,
 )
 from ..settings import Camera, Envelopes, Optics, Propagation
@@ -173,6 +174,15 @@ class BaseImager(L.LightningModule):
                 "Propagation(absorption_model='inelastic_mfp'): under 'alpha' the "
                 "fitted amplitude contrast already stands in for aperture loss, "
                 "and applying both would count it twice."
+            )
+        # Resolved here, where the voltage is known, so a voltage with no
+        # measured ice value fails at construction rather than mid-run.
+        self._inelastic_mfp_solvent: float | None = None
+        if self.absorption_model == "inelastic_mfp":
+            self._inelastic_mfp_solvent = (
+                self.propagation.inelastic_mfp_solvent
+                if self.propagation.inelastic_mfp_solvent is not None
+                else ice_inelastic_mfp(self.voltage)
             )
         self.klim = self.propagation.klim
         self.ews_curvature_sign = self.propagation.ews_curvature_sign
@@ -376,7 +386,7 @@ class BaseImager(L.LightningModule):
             Mean free path in Angstrom.
         """
         if material == "solvent":
-            inelastic = self.propagation.inelastic_mfp_solvent
+            inelastic = cast(float, self._inelastic_mfp_solvent)
         else:
             inelastic = cast(float, self.propagation.inelastic_mfp_specimen)
         if self.objective_aperture is None:

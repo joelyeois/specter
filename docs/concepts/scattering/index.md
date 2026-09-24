@@ -123,6 +123,20 @@ the solvent-present case uses uniform absorption; specifying a specimen MFP
 builds a material-dependent field before solvent blending. With no solvent
 and no specimen MFP, no absorption is assigned.
 
+The solvent mean free path defaults to the value for amorphous ice at the
+generator's accelerating voltage, from `potential.ice_inelastic_mfp`. Two
+voltages are measured: 3950 Å at 300 kV (Rice et al., 2018) and 2030 Å at
+120 kV (Grimm et al., 1996). No energy-filtered measurement of ice has been
+found at 200 kV or 100 kV. At those and any other voltage the value is a power
+law in \(\beta^2\) through the two measurements, 3040 Å ± 7% at 200 kV and
+1730 Å ± 20% at 100 kV, and a warning reports it as an estimate. The standard
+cross-section formulas depart from the measured energy dependence by up to a
+factor of 1.8, but that error lies in the overall slope, which the two
+measurements fix; only the shape of the curve between them is assumed.
+`INELASTIC_MFP_PROTEIN_A` is a 300 kV value; at another voltage the same
+protein-to-ice ratio, 0.62, applies to the ice value there, with the caveat
+that the ratio itself has only been derived at 300 kV.
+
 All five wave models in `Scattering` consume `uniform_absorption` with the
 same result as an explicit constant imaginary potential. Multislice,
 projection and Rytov give exponential slab attenuation. First Born and

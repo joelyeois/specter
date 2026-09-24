@@ -4,12 +4,14 @@ from __future__ import annotations
 
 from ._absorption import (
     INELASTIC_MFP_ICE_A,
+    INELASTIC_MFP_ICE_BY_KV,
     INELASTIC_MFP_PROTEIN_A,
     absorption_potential,
     aperture_lowpass,
     aperture_mfp_ice,
     aperture_mfp_protein,
     apply_amplitude_contrast,
+    ice_inelastic_mfp,
     inelastic_absorption_potential,
 )
 from ._builders import (
@@ -38,12 +40,14 @@ from ._potential_builder import PotentialBuilder
 
 __all__ = [
     "INELASTIC_MFP_ICE_A",
+    "INELASTIC_MFP_ICE_BY_KV",
     "INELASTIC_MFP_PROTEIN_A",
     "absorption_potential",
     "aperture_lowpass",
     "aperture_mfp_ice",
     "aperture_mfp_protein",
     "apply_amplitude_contrast",
+    "ice_inelastic_mfp",
     "inelastic_absorption_potential",
     "FULL_OCCUPANCY_POTENTIAL_V",
     "PROTEIN_VOLUME_PER_DALTON_A3",

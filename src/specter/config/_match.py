@@ -115,12 +115,14 @@ class MatchConfig:
             "contrast, which CTF estimation takes as an input and never fits."
         ),
     )
-    inelastic_mfp_solvent: float = setting(
-        3950.0,
+    inelastic_mfp_solvent: float | None = setting(
+        None,
         help=(
             "Inelastic mean free path of the ice, in Angstrom, for "
-            "absorption_model='inelastic_mfp'. Default 3950 is measured for "
-            "amorphous ice at 300 kV."
+            "absorption_model='inelastic_mfp'. Unset takes the measured value for "
+            "the run's voltage (3950 at 300 kV, 2030 at 120 kV), and elsewhere an "
+            "estimate from those two with a warning (200 kV: 3040 +/- 7%; 100 kV: "
+            "1730 +/- 20%)."
         ),
         check="positive",
     )  # Å
@@ -147,7 +149,7 @@ class MatchConfig:
         help=(
             "Inelastic mean free path of the specimen, in Angstrom. Unset gives "
             "it the ice's value, so it carries bulk attenuation but no absorption "
-            "contrast. 2460 is the derived value for protein."
+            "contrast. 2460 is the derived value for protein at 300 kV."
         ),
         check="positive",
     )  # Å

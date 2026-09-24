@@ -653,3 +653,95 @@ def test_generator_charges_aperture_loss_through_the_ice() -> None:
     ratio = mean_intensity(12.0) / mean_intensity(None)
     expected = math.exp(-thickness / aperture_mfp_ice(12.0, VOLTAGE))
     assert ratio == pytest.approx(expected, rel=1e-3)
+
+
+def test_ice_mfp_is_measured_where_measured_and_estimated_elsewhere() -> None:
+    """
+    Measured voltages return the table value silently; any other voltage is
+    estimated between (or beyond) them and says so.
+    """
+    import warnings
+
+    from specter.potential import INELASTIC_MFP_ICE_BY_KV, ice_inelastic_mfp
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        assert ice_inelastic_mfp(300.0) == INELASTIC_MFP_ICE_A
+        assert ice_inelastic_mfp(120.0) == INELASTIC_MFP_ICE_BY_KV[120.0]
+    with pytest.warns(UserWarning, match="interpolated"):
+        at_200 = ice_inelastic_mfp(200.0)
+    with pytest.warns(UserWarning, match="extrapolated"):
+        at_100 = ice_inelastic_mfp(100.0)
+    # Between the measurements at 200 kV, below the lower one at 100 kV, and
+    # rising with voltage throughout, as an inelastic mean free path does.
+    assert INELASTIC_MFP_ICE_BY_KV[120.0] < at_200 < INELASTIC_MFP_ICE_A
+    assert at_100 < INELASTIC_MFP_ICE_BY_KV[120.0]
+    assert at_200 == pytest.approx(3039.0, abs=5.0)
+
+
+def test_ice_mfp_estimate_passes_through_both_measurements() -> None:
+    """The power law reproduces its anchors as it approaches them."""
+    import warnings
+
+    from specter.potential import INELASTIC_MFP_ICE_BY_KV, ice_inelastic_mfp
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        for kv in (120.0, 300.0):
+            # Continuous through each anchor: the estimates just either side
+            # bracket the measured value, and sit within the local slope of it.
+            below, above = ice_inelastic_mfp(kv - 0.6), ice_inelastic_mfp(kv + 0.6)
+            assert below < INELASTIC_MFP_ICE_BY_KV[kv] < above
+            assert above / below == pytest.approx(1.0, abs=1e-2)
+
+
+def _mfp_generator(voltage: float, solvent_mfp: float | None):
+    from specter.imagegenerator import ImageGenerator
+    from specter.settings import Camera, Crowding, Ice, Optics, Propagation
+
+    ctf_params = {
+        "dfu": torch.tensor([10000.0]),
+        "dfv": torch.tensor([10000.0]),
+        "dfang": torch.tensor([0.0]),
+        "cs": torch.tensor([2.7e7]),
+    }
+    return ImageGenerator(
+        torch.zeros(16, 16, 16),
+        2.0,
+        torch.tensor([[1.0, 0.0, 0.0, 0.0]]),
+        torch.zeros(1, 2),
+        ctf_params,
+        voltage,
+        dose_per_angstrom=40.0,
+        propagation=Propagation(
+            absorption_model="inelastic_mfp", inelastic_mfp_solvent=solvent_mfp
+        ),
+        ice=Ice(model="gd", thickness=100.0),
+        crowding=Crowding(n_points=0),
+        camera=Camera(noise_model="none", detector_model="none"),
+        optics=Optics(),
+        progressbars=False,
+    )
+
+
+@pytest.mark.parametrize(("voltage", "expected"), [(300.0, 3950.0), (120.0, 2030.0)])
+def test_generator_takes_the_measured_ice_mfp_for_its_voltage(
+    voltage: float, expected: float
+) -> None:
+    """Left unset, the solvent mean free path is the one measured at this voltage."""
+    assert _mfp_generator(voltage, None)._removal_mfp("solvent") == expected
+
+
+def test_generator_estimates_an_unmeasured_voltage_with_a_warning() -> None:
+    """
+    200 kV has no measured ice value: the generator builds with the estimate
+    and warns at construction, and an explicit value is honoured silently.
+    """
+    import warnings
+
+    with pytest.warns(UserWarning, match="200 kV"):
+        generator = _mfp_generator(200.0, None)
+    assert generator._removal_mfp("solvent") == pytest.approx(3039.0, abs=5.0)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", UserWarning)
+        assert _mfp_generator(200.0, 3300.0)._removal_mfp("solvent") == 3300.0

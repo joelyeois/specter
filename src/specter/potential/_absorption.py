@@ -34,6 +34,9 @@ contrast at both the specimen and the lens.
 
 from __future__ import annotations
 
+import math
+import warnings
+
 import torch
 
 from ..atom._atomic_potentials import kirkland_atomic_potential_3d_fourier
@@ -61,10 +64,116 @@ Langmore & Smith cross section), and using it would over-absorb by 13%.
 
 **Do not scale this to another voltage.** The Langmore-Smith energy dependence
 gives Lambda(300)/Lambda(120) = 1.39 where measurement gives 1.70 (partial,
-4.2 mrad) to 2.45 (total): Grimm et al. (1996) measure 232 nm and 161 nm at
+4.2 mrad) to 2.45 (total): Feja & Aebi (1999) measure 232 nm and 161 nm at
 120 kV, and Yesibolati et al. (2020) find the standard models underestimate
-lambda for water outright. Another voltage needs its own measurement.
+lambda for water outright. Another voltage needs its own measurement; the
+measured values are collected in :data:`INELASTIC_MFP_ICE_BY_KV`.
 """
+
+INELASTIC_MFP_ICE_BY_KV: dict[float, float] = {
+    300.0: INELASTIC_MFP_ICE_A,
+    120.0: 2030.0,
+}
+r"""
+Measured apparent inelastic mean free paths of amorphous ice, in Angstrom,
+keyed by accelerating voltage in kV. Read through :func:`ice_inelastic_mfp`,
+which estimates every other voltage from these.
+
+- 300 kV: :data:`INELASTIC_MFP_ICE_A`, 395 +/- 11 nm.
+- 120 kV: 203 +/- 33 nm, from the ratio of unfiltered to zero-loss intensity
+  against vesicle thickness measured from tilted views (Grimm et al., 1996,
+  *Ultramicroscopy* **63**, 169-179). Feja & Aebi (1999, *J. Microsc.* **193**,
+  15-19) bracket it with 232 nm at a 4.2 mrad acceptance and 161 nm total.
+
+No energy-filtered measurement of ice has been found at 200 kV or 100 kV. The
+200 kV figures in Rice et al. (2018) are for elastic scattering beyond the
+objective aperture, a different quantity (see :func:`aperture_mfp_ice`). Add
+an entry only with a measurement behind it; it then replaces the estimate.
+"""
+
+#: One-sigma relative uncertainty of each entry of INELASTIC_MFP_ICE_BY_KV.
+_ICE_MFP_REL_ERR: dict[float, float] = {300.0: 11.0 / 395.0, 120.0: 33.0 / 203.0}
+
+
+def _beta2(voltage_kv: float) -> float:
+    """Squared electron speed over c, relativistically."""
+    gamma = 1.0 + voltage_kv / 510.99895
+    return 1.0 - 1.0 / gamma**2
+
+
+def ice_inelastic_mfp(voltage_kv: float) -> float:
+    r"""
+    The inelastic mean free path of amorphous ice at a voltage.
+
+    A measured value from :data:`INELASTIC_MFP_ICE_BY_KV` where one exists.
+    Elsewhere, a power law in :math:`\beta^2` through the two measurements
+    nearest `voltage_kv`,
+
+    .. math::
+        \Lambda(V) = \Lambda_2 \left(\beta^2(V)/\beta^2(V_2)\right)^{p},
+        \qquad p = \frac{\ln(\Lambda_2/\Lambda_1)}
+                          {\ln(\beta^2(V_2)/\beta^2(V_1))},
+
+    interpolating between them or extrapolating beyond, with a warning that
+    gives the estimate and its uncertainty. Pinning the curve to both
+    measurements is what makes this usable where a formula is not: the
+    standard cross-section formulas miss the measured 300/120 kV ratio by up
+    to 1.8x (see :data:`INELASTIC_MFP_ICE_A`), but that error sits in the
+    overall slope, which the two measurements fix; only the curve's shape
+    between them is assumed. Power law, Bethe-type and linear-in-:math:`\beta^2`
+    shapes agree within 3 % at 200 kV and 5 % at 100 kV, so the uncertainty
+    is carried by the measurements, propagated through `p`: about 7 % at
+    200 kV and 20 % at 100 kV, plus up to 5 % from the shape. Either is
+    smaller than leaving inelastic absorption out altogether.
+
+    Parameters
+    ----------
+    voltage_kv : float
+        Accelerating voltage in kV.
+
+    Returns
+    -------
+    float
+        Mean free path in Angstrom.
+
+    Warns
+    -----
+    UserWarning
+        When `voltage_kv` has no measurement and the value is estimated.
+    """
+    for kv, mfp in INELASTIC_MFP_ICE_BY_KV.items():
+        if abs(voltage_kv - kv) < 0.5:
+            return mfp
+    kvs = sorted(INELASTIC_MFP_ICE_BY_KV)
+    below = [kv for kv in kvs if kv < voltage_kv]
+    above = [kv for kv in kvs if kv > voltage_kv]
+    if below and above:
+        v1, v2 = below[-1], above[0]
+        how = "interpolated"
+    elif above:
+        v1, v2 = above[0], above[1]
+        how = "extrapolated"
+    else:
+        v1, v2 = below[-2], below[-1]
+        how = "extrapolated"
+    l1, l2 = INELASTIC_MFP_ICE_BY_KV[v1], INELASTIC_MFP_ICE_BY_KV[v2]
+    span = math.log(_beta2(v2) / _beta2(v1))
+    p = math.log(l2 / l1) / span
+    mfp = l2 * (_beta2(voltage_kv) / _beta2(v2)) ** p
+    # d ln(Lambda) = w1 d ln(L1) + w2 d ln(L2): the weights follow from p.
+    w1 = -math.log(_beta2(voltage_kv) / _beta2(v2)) / span
+    w2 = 1.0 - w1
+    rel = math.hypot(w1 * _ICE_MFP_REL_ERR[v1], w2 * _ICE_MFP_REL_ERR[v2])
+    warnings.warn(
+        f"No measured inelastic mean free path of ice at {voltage_kv:g} kV; "
+        f"using {mfp:.0f} A +/- {100 * rel:.0f} %, {how} as a power law in "
+        f"beta^2 from the measurements at {v1:g} and {v2:g} kV. Pass "
+        "inelastic_mfp_solvent to use a measured value instead.",
+        UserWarning,
+        stacklevel=2,
+    )
+    return mfp
+
 
 INELASTIC_MFP_PROTEIN_A = 2460.0
 r"""
@@ -77,18 +186,54 @@ atom fraction at 1.35 g/cm^3, Vulović et al. 2013) and for water, with the
 ratio anchored to :data:`INELASTIC_MFP_ICE_A` so the absolute normalisation
 of ``nu`` never has to be trusted. That gives 0.62 x ice.
 
+It is a 300 kV value because the ice it is anchored to is. Both materials lose
+energy mainly to valence plasmons, so the *ratio* should move far less with
+voltage than either mean free path does; at another voltage use 0.62 x
+:func:`ice_inelastic_mfp`, noting that this ratio is itself unmeasured there.
+
 **This number carries real uncertainty and it propagates.** Excluding hydrogen
 from the ``nu`` weighting -- defensible, since ``20/Z`` was measured on
 elemental specimens and Z = 1 is far outside that calibration -- gives 0.485 x
 ice, or 1915 A. A Malis/Egerton-style estimate gives 317 nm, but that formula
 carries no density term at all, which is why it puts protein and ice nearly
 together; a mean free path is ``1/(n sigma)`` and density cannot drop out.
-The three readings span 1915-3170 A.
+Scaling instead by valence-electron density, the quantity plasmon losses
+follow to first order (0.319 e/A^3 for protein against 0.249 for ice), gives
+~3080 A. The readings span 1915-3170 A, and the better-motivated physical
+picture does not favour the shorter end.
 
 What rides on it: the amplitude contrast a particle carries against the water
 it displaces is ``(V_ab,protein - V_ab,ice) / (V_0,protein - V_0,ice)``, which
-is 0.048 at 2460 A and 0.020 at 3170 A. Replace this with a measurement when
-one exists.
+is 0.048 at 2460 A and 0.020 at 3170 A (inelastic term only, protein mean
+inner potential 7.0 V). Replace this with a measurement when one exists.
+
+**External check at 300 kV.** Yonekura et al. (2006, *J. Struct. Biol.*
+**156**, 524-536) measured the amplitude contrast of a flagellar filament in
+600-1600 A of ice with a < 10 eV energy slit and a 12 mrad objective aperture:
+6.9 +/- 1.9 %. Adding the aperture term (:func:`aperture_mfp_protein`,
+:func:`aperture_mfp_ice`) this value predicts 4.2-5.7 % (protein inner
+potential 7.89-7.0 V), within 1.4 sigma; 3170 A predicts 2.0-2.8 % and the
+valence-density estimate 2.2-3.1 %, both about 2 sigma low. Two things keep
+this from moving the value toward 1915 A (6.9-9.4 %), which fits best:
+
+- The same paper's *unfiltered* values (2.7 +/- 1.0 % protein, 5.8 +/- 1.8 %
+  carbon) exceed the aperture-only prediction (0.6-0.9 %) by 2-5 %. If that
+  excess is a bias of their first-CTF-zero method it is also in the filtered
+  values, and 6.9 % less ~2 % lands on this value; if it is unfiltered-only
+  physics, the shorter value is favoured. The paper cannot tell them apart.
+- Its carbon film (9.5 +/- 2.0 %, filtered) sits 2.5 sigma above what this
+  method predicts for carbon anchored to ice (4.6 %), and 1.3 sigma above the
+  hydrogen-excluded variant (7.0 %). That is the same direction, but carbon is
+  not a material this model renders, and the unfiltered excess applies there
+  too.
+
+The analytic ratio above understates what a full simulation gives. The
+effective amplitude contrast of 6BDF in 400 A of ice at 300 kV with the 12 mrad
+aperture, measured from a simulated defocus series at this value, is 0.070
+(docs/concepts/scattering/index.md), on top of Yonekura's 6.9 %. A simulation
+of their own measurement, filament in ice imaged at overfocus with the
+amplitude contrast read from the first zero, would still be the cleaner test
+of the two readings above.
 """
 
 #: Amorphous ice for the aperture cross section: the density at which this
@@ -109,12 +254,14 @@ _HH_DISTANCE_A = 1.5139
 
 __all__ = [
     "INELASTIC_MFP_ICE_A",
+    "INELASTIC_MFP_ICE_BY_KV",
     "INELASTIC_MFP_PROTEIN_A",
     "absorption_potential",
     "aperture_lowpass",
     "aperture_mfp_ice",
     "aperture_mfp_protein",
     "apply_amplitude_contrast",
+    "ice_inelastic_mfp",
     "inelastic_absorption_potential",
 ]
 

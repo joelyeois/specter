@@ -166,6 +166,18 @@ def blob(n_atoms: int = 400, radius: float = 20.0, seed: int = 0) -> torch.Tenso
     return coords - coords.mean(0)
 
 
+@pytest.fixture
+def no_monomer_library(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Hide ``$CLIBD_MON`` for a test whose premise is the no-library parse.
+
+    A structure parsed without an explicit ``monomer_library_path`` falls
+    back to ``$CLIBD_MON``, so on a machine that exports one (a venv ``.pth``
+    hook, a shell profile) the "plain" parse silently becomes the typed,
+    hydrogen-completed one.
+    """
+    monkeypatch.delenv("CLIBD_MON", raising=False)
+
+
 def monomer_library() -> str | None:
     """The Monomer Library directory, from ``$CLIBD_MON`` or the sffit
     checkout, or None when neither is present (tests needing one skip)."""

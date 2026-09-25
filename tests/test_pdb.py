@@ -34,7 +34,10 @@ _FIXTURE = Path(__file__).parent / "test_data" / "1mbo.cif"
 
 @pytest.fixture(scope="module")
 def species():
-    return PDB.get_atom_species(str(_FIXTURE), verbose=False)
+    # The no-library parse: see conftest.no_monomer_library.
+    with pytest.MonkeyPatch.context() as mp:
+        mp.delenv("CLIBD_MON", raising=False)
+        return PDB.get_atom_species(str(_FIXTURE), verbose=False)
 
 
 def _atom_species_by_name(structure_species, filepath, resname, resseq, atom_name):
@@ -282,7 +285,7 @@ def test_b_factors_align_with_the_atoms_they_describe(compute_atom_species):
 
 
 @pytest.mark.skipif(not _FIXTURE.exists(), reason="bundled PDB fixture missing")
-def test_both_parse_paths_agree_on_b_factors():
+def test_both_parse_paths_agree_on_b_factors(no_monomer_library):
     """Typing a structure must not change the B-factors it reports.
 
     Without a monomer library the two paths describe the same atom list, so
@@ -484,9 +487,10 @@ def test_atom_species_aligns_for_awkward_structures(name):
 
 
 @pytest.mark.skipif(monomer_library() is None, reason="no monomer library available")
-def test_monomer_library_adds_hydrogens_and_stays_aligned():
+def test_monomer_library_adds_hydrogens_and_stays_aligned(monkeypatch):
     """With a library, all three arrays come from the H-completed model."""
     monlib = monomer_library()
+    monkeypatch.delenv("CLIBD_MON", raising=False)  # so `plain` has none
 
     plain = PDB(str(_FIXTURE), verbose=False, compute_atom_species=True)
     assert (plain.atomic_numbers == 1).sum().item() == 0, (
@@ -621,8 +625,11 @@ def test_readd_hydrogens_false_types_without_adding_density():
         hit = sum(1 for s in species if s in table)
         return len(znum), sum(1 for z in znum if z == 1), hit / len(znum)
 
-    n_plain, h_plain, cov_plain = coverage(None, True)
-    n_typed, h_typed, cov_typed = coverage(monomer_library(), False)
+    mon = monomer_library()
+    with pytest.MonkeyPatch.context() as mp:
+        mp.delenv("CLIBD_MON", raising=False)  # `None` must mean no library
+        n_plain, h_plain, cov_plain = coverage(None, True)
+    n_typed, h_typed, cov_typed = coverage(mon, False)
 
     assert (n_typed, h_typed) == (n_plain, h_plain), "density changed"
     assert cov_typed > cov_plain + 0.3, (cov_plain, cov_typed)

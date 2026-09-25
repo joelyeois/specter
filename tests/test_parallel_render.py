@@ -411,7 +411,9 @@ def test_build_pdb_cache_concurrently_submits_expensive_sources_first(monkeypatc
     assert submitted != sources, "submission order should not still be alphabetical"
 
 
-def test_estimated_parse_seconds_is_small_when_the_parse_is_cached(tmp_path):
+def test_estimated_parse_seconds_is_small_when_the_parse_is_cached(
+    tmp_path, no_monomer_library
+):
     """A source whose parse is already in the parsed-structure cache loads in a
     fraction of a second regardless of its file size, and the pool decision
     must see that: the shipped tomogram config (26 cached sources) was

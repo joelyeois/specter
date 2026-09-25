@@ -518,7 +518,7 @@ class GradientSKIcemaker(L.LightningModule):
         param_dtype: torch.dtype = torch.float64,
     ) -> dict:
         """
-        Pure gradient descent on the S(k) loss — no Langevin noise.
+        Pure gradient descent on the S(k) loss.
 
         L-BFGS (default) converges in far fewer steps than Adam on this
         smooth radial-profile loss; the strong-Wolfe line search adapts step
@@ -751,93 +751,6 @@ class GradientSKIcemaker(L.LightningModule):
 
         history["stopped_early"] = stopped_early
         self.positions = pos.detach().float().cpu()
-        return history
-
-    def sample(
-        self,
-        n_steps: int = 200,
-        lr: float = 0.05,
-        noise: float = 0.02,
-        record_every: int = 50,
-        rep_strength: float = 0.0,
-        mlbop_strength: float = 0.5,
-        mlbop_target: float | None = -0.413,
-    ) -> dict:
-        """
-        Langevin sampling around a converged structure.
-
-        Combines a gradient step (keeps structure near the S(k) target) with
-        Gaussian noise injection (provides positional diversity). Call
-        :meth:`optimize` first.
-
-        Parameters
-        ----------
-        n_steps : int
-            Number of Langevin steps.
-        lr : float
-            Adam learning rate.
-        noise : float
-            Gaussian noise std per step in Å.
-        record_every : int
-            Diagnostic recording interval.
-        rep_strength : float, optional
-            Weight of the artificial pair-exclusion penalty.  Default is 0.0
-            (disabled in favor of ``mlbop_strength``).
-        mlbop_strength : float, optional
-            Weight of the ML-BOP-energy-based penalty, the default
-            alternative to ``rep_strength`` (see :meth:`_sk_loss` and
-            :meth:`optimize`).  Default is 0.5.
-        mlbop_target : float or None, optional
-            Matches ``E_per_atom`` to this value instead of minimizing it
-            unboundedly (see :meth:`_sk_loss`).  Default is -0.413, matching
-            real LDA-80K MD ice.
-
-        Returns
-        -------
-        history : dict
-            Keys: ``'step'``, ``'loss'``, ``'radial_profile'``.
-        """
-        assert self.positions is not None, "Call optimize() or init_* first"
-
-        pos = self.positions.to(self.device).clone().requires_grad_(True)
-        opt = torch.optim.Adam([pos], lr=lr)
-        history: dict[str, list] = {"step": [], "loss": [], "radial_profile": []}
-
-        _manager = ProgressManager()
-        _pbar, _pbar_pos = _manager.get_pbar(
-            range(n_steps),
-            desc="Langevin",
-            disable=not self.progressbars,
-            transient=True,
-        )
-        try:
-            for step in _pbar:
-                opt.zero_grad()
-                loss, f_amp = self._sk_loss(
-                    pos,
-                    rep_strength=rep_strength,
-                    mlbop_strength=mlbop_strength,
-                    mlbop_target=mlbop_target,
-                )
-                loss.backward()
-                opt.step()
-                with torch.no_grad():
-                    pos.data.add_(noise * torch.randn_like(pos))
-                    pos.data[:, 0] = _wrap_coords(pos.data[:, 0], self.box_x)
-                    pos.data[:, 1] = _wrap_coords(pos.data[:, 1], self.box_y)
-                    pos.data[:, 2] = _wrap_coords(pos.data[:, 2], self.box_z)
-                _pbar.set_postfix(loss=f"{loss.item():.6f}", noise=f"{noise:.4f}")
-                if step % record_every == 0:
-                    with torch.no_grad():
-                        rad = radial_profile_3d(f_amp.detach().cpu())
-                    history["step"].append(step)
-                    history["loss"].append(loss.item())
-                    history["radial_profile"].append(rad)
-        finally:
-            _pbar.close()
-            _manager.release(_pbar_pos)
-
-        self.positions = pos.detach().cpu()
         return history
 
     # ------------------------------------------------------------------

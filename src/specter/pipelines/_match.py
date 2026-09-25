@@ -505,6 +505,15 @@ def _probe_setup(
     return exp_p, pixel_size_p, probe_geometry
 
 
+#: Beam-induced displacement variance of the solvent per unit dose, in
+#: A^2 per (e/A^2) (McMullan et al. 2015). Fixed rather than fitted: it is a
+#: property of vitreous ice under a 300 kV beam, and a fit against one stack
+#: would trade it off exactly against the ice thickness, which it cannot
+#: separate from. Checked against EMPIAR-11461 at its thickness measured
+#: from electron counts.
+SOLVENT_MOTION_VARIANCE = 0.38
+
+
 def _base_settings(
     config: MatchConfig, meta: dict[str, str], box: int, diameter: float
 ) -> dict[str, Any]:
@@ -523,6 +532,10 @@ def _base_settings(
         detector_model="none",
         coincidence_radius=0.0,
         dose_envelope=True,
+        # Radiation damage acts on the specimen only; the solvent's own
+        # decorrelation under the beam is the exposure filter below.
+        dose_envelope_target="specimen",
+        ice_motion_variance=SOLVENT_MOTION_VARIANCE,
         potential_scale=1.0,
         pad_fft=True,
         device=config.device,
@@ -700,9 +713,23 @@ def _derive_detector_settings(
             "dose_envelope",
             True,
             "fixed",
-            "Grant & Grigorieff 2015, exposure-averaged",
+            "Grant & Grigorieff 2015, exposure-averaged, on the specimen only",
         )
     )
+    report.derived.append(
+        DerivedValue(
+            "ice_motion_variance",
+            SOLVENT_MOTION_VARIANCE,
+            "fixed",
+            "McMullan et al. 2015, A^2 per e/A^2",
+        )
+    )
+    if not (config.monomer_library_path or os.environ.get("CLIBD_MON")):
+        report.warnings.append(
+            "No Monomer Library (monomer_library_path or $CLIBD_MON): the model is rendered "
+            "with only the hydrogens it deposits, and atoms whose bonded species cannot be "
+            "typed fall back to per-element scattering factors."
+        )
     if config.energy_filter is False:
         report.warnings.append(
             "No energy filter: on every unfiltered dataset tried so far the experiment carried "
@@ -919,7 +946,13 @@ def _write_matched_toml(
     tables = {
         "specimen": {
             k: values.pop(k)
-            for k in ("pdb_source", "assembly", "n_pixels", "ice_thickness")
+            for k in (
+                "pdb_source",
+                "assembly",
+                "n_pixels",
+                "ice_thickness",
+                "ice_motion_variance",
+            )
             if k in values
         },
         "dataset": {
@@ -935,6 +968,7 @@ def _write_matched_toml(
                 "detector_model",
                 "coincidence_radius",
                 "dose_envelope",
+                "dose_envelope_target",
                 "bfactor",
             )
             if k in values

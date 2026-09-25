@@ -224,11 +224,18 @@ fade the solvent that the exposure filter already decorrelates.
   beyond the 256 Å box (below 1/90 Å⁻¹) they are extrapolated as
   diffusive. Scaling the measured curves linearly with \(\sigma_0^2\)
   away from the kick they were measured at is untested.
-- **\(\sigma_0^2\) for motion-corrected particle data is not established.**
-  McMullan et al.'s 0.38 Å² per e⁻/Å² was measured on unaligned frames,
-  and particle stacks have suggested less decorrelation; from a stack alone
-  it trades off against ice thickness. The filter also acts before
-  multislice, which is exact only for the projected, linear image.
+- **\(\sigma_0^2\) has been checked against two motion-corrected datasets.**
+  McMullan et al.'s 0.38 Å² per e⁻/Å² was measured on unaligned frames.
+  Motion correction aligns patches hundreds of ångströms across and does
+  not remove molecular displacements, so the same value is expected to
+  hold for motion-corrected particles. With the ice thickness measured
+  from the electron counts of the raw movies against a vacuum exposure,
+  0.38 reproduces the water ring of EMPIAR-11461 (ring strength 1.20
+  against 1.25). On EMPIAR-11377, whose thickness rests on a published
+  vacuum dose rate, the simulated ring is 1.27 against 1.20. From a
+  particle stack alone, \(\sigma_0^2\) trades off against ice thickness.
+  The filter also acts before multislice, which is exact only for the
+  projected, linear image.
 - **Long-wavelength ice power differs between library and relaxed ice.**
   After many kick-and-relax steps the ice carries 0.5 to 0.9 of the
   library's density fluctuation at 10 to 90 Å. Both are outputs of the same

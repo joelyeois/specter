@@ -45,7 +45,11 @@ specter match particles \
    coincidence radius from the detector's exclusion radius and hardware
    frame rate together with the dose rate, converted to the simulation's
    pixel size and frame count at constant occupancy; the radiation-damage
-   envelope from the dose and voltage. Nothing in this step is fitted.
+   envelope from the dose and voltage, applied to the specimen only. The
+   solvent is decorrelated instead by beam-induced motion at a fixed
+   variance of 0.38 Å² per e⁻/Å² (McMullan et al. 2015), and absorption
+   comes from measured inelastic mean free paths rather than from the
+   dataset's amplitude contrast. Nothing in this step is fitted.
 3. **Probes.** Ice thickness and neighbour spacing are the two quantities
    the images have to supply. Each candidate is rendered at 64 particles
    and scored on the background variance outside the particle against the

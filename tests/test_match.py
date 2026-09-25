@@ -313,6 +313,11 @@ def test_run_match_on_a_synthetic_experiment(tmp_path: Path) -> None:
     matched = load_config(str(out / "matched.toml"), ParticleStackConfig)
     assert matched.n_pixels == box and matched.cs_path == str(cs_path)
     assert matched.dose_envelope is True and matched.coincidence_radius == 0.0
+    # Damage on the specimen, the solvent decorrelated by the fixed motion
+    # variance, and absorption from measured mean free paths.
+    assert matched.dose_envelope_target == "specimen"
+    assert matched.ice_motion_variance == pytest.approx(0.38)
+    assert matched.absorption_model == "inelastic_mfp"
 
 
 def test_rescale_metadata_follows_a_fourier_cropped_stack(tmp_path: Path) -> None:

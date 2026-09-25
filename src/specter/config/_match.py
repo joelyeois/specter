@@ -107,7 +107,7 @@ class MatchConfig:
         ),
     )  # None = not stated
     absorption_model: Literal["alpha", "inelastic_mfp"] = setting(
-        "alpha",
+        "inelastic_mfp",
         help=(
             "Where the imaginary potential comes from, for every probe and for "
             "the matched config. 'inelastic_mfp' derives it per material from a "

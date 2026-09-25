@@ -86,7 +86,13 @@ def _potential_cache_key(config: ParticleStackConfig, pixel_size: float) -> tupl
         config.use_deposited_bfactors,
         config.periodic,
         config.potential_method,
+        _potential_device(config),
     )
+
+
+def _potential_device(config: ParticleStackConfig) -> str:
+    """The device the template potential is rendered on: the run's primary."""
+    return parse_device(resolve_available_device(config.device)).primary
 
 
 def _structure_and_potential(
@@ -125,9 +131,14 @@ def _structure_and_potential(
         rcut=config.rcut,
         b_factors=pdb.b_factors if config.use_deposited_bfactors else None,
         periodic=config.periodic,
-    ).to("cpu")
+    ).to(device := _potential_device(config))
+    # Rendered on the compute device and moved to the host, as run_micrograph
+    # does: the analytic renderer is a loop of small ops per atom, 3.3 s on
+    # the CPU against 0.2 s on the device for 6bdf at 256 px. The device
+    # build is not bit-reproducible run to run (~5e-7 of the potential's
+    # max), so neither is a seeded stack once Poisson counts round.
     with torch.no_grad():
-        V = pb(pdb.coordinates, method=config.potential_method).clone()
+        V = pb(pdb.coordinates.to(device), method=config.potential_method).clone().cpu()
     if len(_POTENTIAL_CACHE) >= _POTENTIAL_CACHE_MAX:
         _POTENTIAL_CACHE.pop(next(iter(_POTENTIAL_CACHE)))
     _POTENTIAL_CACHE[key] = (pdb, V)

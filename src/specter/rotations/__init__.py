@@ -51,6 +51,7 @@ from ._volume import (
     fourier_origin_displacement,
     rotate_volume,
     rotate_volume_fourier,
+    rotation_sampling_grid,
     split_affine_translation,
     translations_angstrom_to_torch,
 )
@@ -137,4 +138,5 @@ __all__ = [
     "build_affine_matrix",
     "VolumeRotator",
     "affine_sampling_grid",
+    "rotation_sampling_grid",
 ]

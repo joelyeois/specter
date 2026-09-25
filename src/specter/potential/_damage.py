@@ -211,17 +211,6 @@ def apply_dose_damage(
                 voltage=voltage,
             )
 
-        try:
-            apply_radial_envelope_(V[i], pixel_size, envelope)
-        except torch.OutOfMemoryError:
-            if not V.is_cuda:
-                raise
-            # A canvas the device can hold once but not twice (thick ice in
-            # a large box): the transform runs on the host instead. Slow,
-            # but the same numbers.
-            torch.cuda.empty_cache()
-            host = V[i].cpu()
-            apply_radial_envelope_(host, pixel_size, envelope)
-            V[i].copy_(host)
-            del host
+        # Falls back to the host on a CUDA out-of-memory error (see there).
+        apply_radial_envelope_(V[i], pixel_size, envelope)
     return V.squeeze(0) if squeeze else V

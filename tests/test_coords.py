@@ -64,6 +64,22 @@ def test_poisson_disk_samplers_respect_a_non_cubic_box():
         assert float(pts3[:, column].abs().max()) > 0.4 * extent
 
 
+def test_poisson_disk_2d_odd_box_is_centred():
+    """
+    The docstring promises y in [-H/2, H/2). Floor division put an odd box
+    half a pixel low, [-(H+1)/2, (H-1)/2): on a 7-pixel box every sample
+    fell in [-4, 3) and the mean sat at -0.5 instead of 0.
+    """
+    torch.manual_seed(0)
+    H = W = 7
+    pts = torch.cat(
+        [poisson_disk_neighbors(0.5, box=(H, W), seed="random") for _ in range(200)]
+    )
+    assert bool((pts >= -H / 2).all() and (pts < H / 2).all())
+    assert float(pts.min()) < -3.4 and float(pts.max()) > 3.4
+    assert float(pts.mean(dim=0).abs().max()) < 0.1
+
+
 def test_radial_distribution_function_normalisation_is_parameter_free():
     """A particle sees N-1 others, whatever the density or bin width.
 

@@ -687,7 +687,33 @@ def apply_radial_envelope_(
         Maps a 1D tensor of |k| in 1/Angstrom to the factor applied there.
         Tabulated once on a radial grid; it should be 1 at k = 0 to keep
         the volume's mean.
+
+    Notes
+    -----
+    A CUDA canvas the device can hold once but not twice (thick ice in a
+    large box) cannot also hold its half-spectrum. On a CUDA out-of-memory
+    error the transform runs on the host instead and the result is copied
+    back into `v`: slow, but the same arithmetic. Both callers take this
+    path, so neither can fail where the other falls back.
     """
+    try:
+        _apply_radial_envelope_on_device_(v, pixel_size, envelope)
+    except torch.OutOfMemoryError:
+        if not v.is_cuda:
+            raise
+        torch.cuda.empty_cache()
+        host = v.cpu()
+        _apply_radial_envelope_on_device_(host, pixel_size, envelope)
+        v.copy_(host)
+        del host
+
+
+def _apply_radial_envelope_on_device_(
+    v: torch.Tensor,
+    pixel_size: float,
+    envelope: Callable[[torch.Tensor], torch.Tensor],
+) -> None:
+    """:func:`apply_radial_envelope_` on `v`'s own device, with no fallback."""
     nz, ny, nx = v.shape
     dev = v.device
     nkx = nx // 2 + 1

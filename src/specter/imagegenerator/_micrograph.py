@@ -234,6 +234,7 @@ class MicrographGenerator(BaseImager):
         self._init_optics()
         self.slice_batchsize = slice_batchsize
         self._warned_volume_on_host = False
+        self._warned_clean_volume_on_host = False
         self.iterative_scattering = IterativeScattering(
             self.pad_nxy,
             self.pixel_size,
@@ -327,23 +328,55 @@ class MicrographGenerator(BaseImager):
         """
         if self.volume.device == self.device:
             return
+        placed = self._place_on_device(self.volume, "specimen volume")
+        if placed is not None:
+            self.volume = placed
+
+    def _place_on_device(self, V: torch.Tensor, what: str) -> torch.Tensor | None:
+        """
+        Upload `V` to the compute device, or return None if it does not fit.
+
+        The one upload path for both the specimen volume and the ice-free
+        ``clean_V``, so neither can OOM where the other streams from the
+        host. Warns once per `what` on the fallback; see
+        :meth:`_ensure_volume_placed` for why that is a `warnings.warn`.
+
+        Parameters
+        ----------
+        V : torch.Tensor
+            The volume to upload.
+        what : str
+            ``"specimen volume"`` or ``"clean specimen volume"``, naming it
+            in the warning.
+
+        Returns
+        -------
+        torch.Tensor or None
+            `V` on ``self.device``, or None when the upload ran out of memory.
+        """
         try:
-            self.volume = self.volume.to(self.device)
+            return V.to(self.device)
         except torch.cuda.OutOfMemoryError:
             torch.cuda.empty_cache()
-            if not self._warned_volume_on_host:
-                self._warned_volume_on_host = True
-                gb = self.volume.numel() * self.volume.element_size() / 1e9
+            flag = (
+                "_warned_volume_on_host"
+                if what == "specimen volume"
+                else "_warned_clean_volume_on_host"
+            )
+            if not getattr(self, flag):
+                setattr(self, flag, True)
+                gb = V.numel() * V.element_size() / 1e9
                 warnings.warn(
-                    f"{type(self).__name__}: the specimen volume ({gb:.1f} GB) "
+                    f"{type(self).__name__}: the {what} ({gb:.1f} GB) "
                     f"does not fit on {self.device}; keeping it in host memory "
                     "and streaming it slice by slice instead. The result is "
                     "unchanged and GPU memory stays bounded regardless of "
                     "micrograph_size, but each slice now costs a host-to-device "
                     "transfer. Reduce micrograph_size or ice_thickness to keep "
                     "the volume on the device.",
-                    stacklevel=2,
+                    stacklevel=3,
                 )
+            return None
 
     def forward(self, idx: int | torch.Tensor) -> torch.Tensor:
         """
@@ -363,7 +396,20 @@ class MicrographGenerator(BaseImager):
             self._generate_volume()
         batchsize = len(idx) if isinstance(idx, torch.Tensor) else 1
         self._ensure_volume_placed()
-        V = self.volume.expand(batchsize, -1, -1, -1)
+        # Every image in the batch sees the same specimen at the same pose, so
+        # with a unit potential scale the B exit waves are identical: the
+        # volume is propagated once and the exit wave expanded to B before
+        # the per-image CTF and detector (whose noise draws are unchanged).
+        # The expansion is materialised: MKL's CPU FFT rejects a stride-0
+        # batch, and the B exit waves were materialised before anyway.
+        n_propagate = 1 if self._potential_scale_is_unity else batchsize
+
+        def to_batch(exitwave: torch.Tensor) -> torch.Tensor:
+            if exitwave.shape[0] == batchsize:
+                return exitwave
+            return exitwave.expand(batchsize, -1, -1).contiguous()
+
+        V = self.volume.expand(n_propagate, -1, -1, -1)
         V = pad_volume(V, self.nxy, self.nz, None, self.pad_fft, xy_pad_mode="reflect")
         scale = self.potential_scale[idx].reshape(-1, 1, 1, 1).to(V.device)
         # Skipped when every scale is 1 (the default), since `V * scale` is a
@@ -376,20 +422,26 @@ class MicrographGenerator(BaseImager):
             and hasattr(self, "specimen_gen")
             and hasattr(self.specimen_gen, "clean_V")
         ):
-            V_clean = self.specimen_gen.clean_V.to(self.device).expand(
-                batchsize, -1, -1, -1
-            )
+            clean = self.specimen_gen.clean_V
+            if clean.device != self.device:
+                placed = self._place_on_device(clean, "clean specimen volume")
+                if placed is not None:
+                    clean = placed
+            V_clean = clean.expand(n_propagate, -1, -1, -1)
             V_clean = pad_volume(
                 V_clean, self.nxy, self.nz, None, self.pad_fft, xy_pad_mode="reflect"
             )
-            V_clean = V_clean * scale
+            if not self._potential_scale_is_unity:
+                V_clean = V_clean * scale.to(V_clean.device)
             self.clean_exitwaves = self.iterative_scattering(
                 V_clean, pose=0, slice_batchsize=self.slice_batchsize
             )
+            self.clean_exitwaves = to_batch(self.clean_exitwaves)
 
         self.exitwaves = self.iterative_scattering(
             V, pose=0, slice_batchsize=self.slice_batchsize
         )
+        self.exitwaves = to_batch(self.exitwaves)
 
         self.detector_waves = self._aberrate(self.exitwaves, self._ctf_batch(idx))
 

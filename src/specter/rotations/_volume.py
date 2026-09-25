@@ -156,6 +156,103 @@ def _relion_rotation_grid(
     return affine_sampling_grid(composed, nz, ny, nx, align_corners)
 
 
+def _translation_per_axis(t: torch.Tensor, nz: int, ny: int, nx: int) -> torch.Tensor:
+    """
+    Re-express a translation on each axis's own normalised scale.
+
+    `translations_angstrom_to_torch` normalises every component by the
+    volume's x width, and `build_affine_matrix` pre-rotates the in-plane
+    shift into the volume frame, which gives it a y and z component too.
+    ``grid_sample`` reads each component in units of that axis's own
+    half-width, so for a volume that is not a cube -- a tilt-series slab --
+    the rotated z component was shrunk by ``(nx - 1) / (nz - 1)``: the
+    in-image shift perpendicular to the tilt axis came out as ``t cos^2`` of
+    the tilt instead of ``t``. Rescaling y and z to x's scale restores a
+    lab-frame shift of ``-t`` at any rotation. A cube is returned unchanged,
+    bit for bit.
+
+    Parameters
+    ----------
+    t : torch.Tensor
+        Translations in x-normalised units, shape (B, 3), (x, y, z) order.
+    nz, ny, nx : int
+        Volume dimensions.
+
+    Returns
+    -------
+    torch.Tensor
+        Translations on each axis's own normalised scale, shape (B, 3).
+    """
+    if nx == ny == nz:
+        return t
+    f = t.new_tensor([1.0, (nx - 1) / (ny - 1), (nx - 1) / (nz - 1)])
+    return t * f
+
+
+def rotation_sampling_grid(
+    theta: torch.Tensor,
+    nz: int,
+    ny: int,
+    nx: int,
+    origin: Literal["relion", "center"] = "relion",
+    align_corners: bool = False,
+) -> torch.Tensor:
+    """
+    Sampling grid for an isotropic rotation and translation of a (Z, Y, X) volume.
+
+    The one grid construction behind both :func:`rotate_volume` and
+    :class:`~specter.rotations.VolumeRotator`, so the two cannot drift apart.
+
+    Parameters
+    ----------
+    theta : torch.Tensor
+        Batch of affine matrices, shape (B, 3, 4), as built by
+        :func:`build_affine_matrix`; the translation column is in the
+        x-normalised units of :func:`translations_angstrom_to_torch`.
+    nz, ny, nx : int
+        Volume dimensions.
+    origin : str, optional
+        "relion" rotates about ``[nz//2, ny//2, nx//2]``, "center" about
+        ``[(nz - 1) / 2, (ny - 1) / 2, (nx - 1) / 2]``. Default "relion".
+    align_corners : bool, optional
+        As for ``grid_sample``. Default False.
+
+    Returns
+    -------
+    torch.Tensor
+        Sampling grid, shape (B, nz, ny, nx, 3), last axis (x, y, z).
+
+    Notes
+    -----
+    Normalised coordinates scale differently per axis on a non-cubic box, so
+    the rotation is conjugated by the per-axis half-widths (a rotation must
+    preserve distances in voxels) and the translation is re-expressed on each
+    axis's scale (:func:`_translation_per_axis`). On a cube both are
+    identities and are skipped, so a cubic grid is exactly
+    ``affine_sampling_grid(theta)`` for "center" and
+    ``_relion_rotation_grid(theta)`` for "relion".
+    """
+    cubic = nx == ny == nz
+    if origin == "relion":
+        if not cubic:
+            t = _translation_per_axis(theta[..., 3], nz, ny, nx)
+            theta = torch.cat([theta[..., :3], t.unsqueeze(-1)], dim=-1)
+        return _relion_rotation_grid(theta, nz, ny, nx, align_corners)
+    if cubic:
+        return affine_sampling_grid(theta, nz, ny, nx, align_corners)
+    # PyTorch centre: ((g * s) @ R.T) / s + t  ==  g @ A + t
+    t = _translation_per_axis(theta[..., 3], nz, ny, nx)
+    scale = torch.tensor(
+        [(nx - 1) / 2, (ny - 1) / 2, (nz - 1) / 2],
+        device=theta.device,
+        dtype=theta.dtype,
+    )
+    R = theta[..., :3]
+    A = scale.view(1, 3, 1) * R.transpose(1, 2) * (1.0 / scale).view(1, 1, 3)
+    composed = torch.cat([A.transpose(1, 2), t.unsqueeze(-1)], dim=-1)
+    return affine_sampling_grid(composed, nz, ny, nx, align_corners)
+
+
 def rotate_volume(
     V: torch.Tensor,
     theta: torch.Tensor,
@@ -174,7 +271,12 @@ def rotate_volume(
         The volume to be rotated, must be real-valued. Shape (Z, Y, X).
     theta : torch.Tensor
         Batch of affine matrices, Bx3x4.
-        Concatenates a 3x3 rotation matrix and a 3x1 translation vector.
+        Concatenates a 3x3 rotation matrix and a 3x1 translation vector, the
+        latter in the x-normalised units of :func:`translations_angstrom_to_torch`
+        (see :func:`build_affine_matrix`). The rotation is isotropic in voxels
+        for a non-cubic volume under either `origin`; the grid is built by
+        :func:`rotation_sampling_grid`, the same construction
+        :class:`~specter.rotations.VolumeRotator` uses.
     origin : str, optional
         Convention for the index of the origin of rotation. "relion" defines the
         origin to be at [nz//2, ny//2, nx//2], whereas "center" sets it to the
@@ -194,11 +296,7 @@ def rotate_volume(
     nz, ny, nx = V.size()
 
     def sample(vol: torch.Tensor, theta_b: torch.Tensor) -> torch.Tensor:
-        # create the coordinate grid depending on origin convention.
-        if origin == "relion":
-            grid = _relion_rotation_grid(theta_b, nz, ny, nx, align_corners)
-        else:
-            grid = affine_sampling_grid(theta_b, nz, ny, nx, align_corners)
+        grid = rotation_sampling_grid(theta_b, nz, ny, nx, origin, align_corners)
         vin = vol[None, None].expand(theta_b.shape[0], 1, nz, ny, nx)
         return F.grid_sample(
             vin, grid, align_corners=align_corners, padding_mode=padding_mode
@@ -409,6 +507,9 @@ def rotate_volume_fourier(
     V_f = fft3(V, shift=True)  # Z x X x Y
 
     theta_rot, displacement = split_affine_translation(theta)
+    # The displacement is still in x-normalised units; the phase ramp reads
+    # each component on its own axis's scale, as the real-space grid does.
+    displacement = _translation_per_axis(displacement, *V.shape)
     if origin == "center":
         displacement = displacement + fourier_origin_displacement(theta, *V.shape)
 

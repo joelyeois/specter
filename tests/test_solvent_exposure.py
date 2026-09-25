@@ -184,3 +184,33 @@ def test_filter_is_well_behaved_from_fine_to_coarse_sampling(pixel_size):
     apply_solvent_exposure(x, pixel_size, 303.0, 0.38, 141, None, None)
     assert torch.isfinite(x).all()
     torch.testing.assert_close(x.mean(), original.mean(), rtol=1e-6, atol=1e-6)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA")
+def test_solvent_exposure_falls_back_to_host_on_cuda_oom() -> None:
+    """
+    A canvas the device holds once but not twice cannot also hold its
+    half-spectrum. `apply_dose_damage` always fell back to the host there;
+    `apply_solvent_exposure` raised, although it runs the same filter on the
+    same canvas one step later. Both now share the fallback, and the result
+    is the host computation's to float32 FFT rounding.
+    """
+    dev = torch.device("cuda", torch.cuda.current_device())
+    n = 160
+    torch.manual_seed(0)
+    host = torch.randn(1, n, n, n)
+    want = host.clone()
+    apply_solvent_exposure(want, 1.0, 40.0, 0.2, 40, None, None)
+
+    torch.cuda.empty_cache()
+    total = torch.cuda.get_device_properties(dev).total_memory
+    budget = torch.cuda.memory_reserved(dev) + 1.6 * host.nbytes
+    torch.cuda.set_per_process_memory_fraction(budget / total, dev)
+    try:
+        got = host.to(dev)
+        apply_solvent_exposure(got, 1.0, 40.0, 0.2, 40, None, None)
+        got = got.cpu()
+    finally:
+        torch.cuda.set_per_process_memory_fraction(1.0, dev)
+        torch.cuda.empty_cache()
+    assert torch.allclose(got, want, atol=1e-5, rtol=0)

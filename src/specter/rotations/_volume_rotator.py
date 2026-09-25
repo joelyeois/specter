@@ -15,10 +15,10 @@ from torch.utils.checkpoint import checkpoint
 
 from ..fft import fft3, ifft3
 from ._volume import (
-    _relion_rotation_grid,
-    affine_sampling_grid,
+    _translation_per_axis,
     apply_fourier_translation,
     fourier_origin_displacement,
+    rotation_sampling_grid,
     split_affine_translation,
 )
 from specter.options import GridOrigin, GridSamplePadding, RotateMode
@@ -322,25 +322,12 @@ class VolumeRotator(L.LightningModule):
 
     def _translation_per_axis(self, t: torch.Tensor) -> torch.Tensor:
         """
-        Re-express a translation on each axis's own normalised scale.
+        Re-express an x-normalised translation on each axis's own scale.
 
-        `translations_angstrom_to_torch` normalises every component by the
-        volume's x width, and `build_affine_matrix` pre-rotates the in-plane
-        shift into the volume frame, which gives it a y and z component too.
-        ``grid_sample`` reads each component in units of that axis's own
-        half-width, so for a volume that is not a cube -- a tilt-series slab
-        -- the rotated z component was shrunk by ``(nx - 1) / (nz - 1)``: the
-        in-image shift perpendicular to the tilt axis came out as ``t cos^2``
-        of the tilt instead of ``t``. Rescaling y and z to x's scale restores
-        a lab-frame shift of ``-t`` at any rotation. A cube is returned
-        unchanged, bit for bit.
+        See :func:`~specter.rotations._volume._translation_per_axis`. A cube
+        is returned unchanged, bit for bit.
         """
-        if self.nx == self.ny == self.nz:
-            return t
-        f = t.new_tensor(
-            [1.0, (self.nx - 1) / (self.ny - 1), (self.nx - 1) / (self.nz - 1)]
-        )
-        return t * f
+        return _translation_per_axis(t, self.nz, self.ny, self.nx)
 
     def _rotate_normalized_grid(
         self,
@@ -397,27 +384,24 @@ class VolumeRotator(L.LightningModule):
         theta: (B, 3, 4)
         Returns: (B, Z, Y, X, 3)
 
-        The chain `_rotate_normalized_grid` applies to an identity grid
-        (recentre, rescale, rotate, unscale, uncentre, translate) is affine
-        in that grid, so it is collapsed into one (B, 3, 4) matrix and
-        evaluated by :func:`~specter.rotations.affine_sampling_grid` in a
-        single broadcast write, instead of six full-size elementwise passes
-        over a cached identity grid.
+        Delegates to :func:`~specter.rotations.rotation_sampling_grid`, the
+        construction :func:`~specter.rotations.rotate_volume` also uses, so
+        the functional and module forms cannot drift apart. The chain
+        `_rotate_normalized_grid` applies to an identity grid (recentre,
+        rescale, rotate, unscale, uncentre, translate) is affine in that
+        grid, so it is collapsed into one (B, 3, 4) matrix and evaluated in
+        a single broadcast write.
         """
-        t = self._translation_per_axis(theta[..., 3])  # (B, 3)
-        if (origin or self.origin) == "relion":
-            if not (self.nx == self.ny == self.nz):
-                theta = torch.cat([theta[..., :3], t.unsqueeze(-1)], dim=-1)
-            return _relion_rotation_grid(
-                theta, self.nz, self.ny, self.nx, self.align_corners
-            )
-        # PyTorch centre: ((g * s) @ R.T) / s + t  ==  g @ A + t
-        scale = self._isotropic_scale(theta.device, theta.dtype).view(3)
-        R = theta[..., :3]  # (B, 3, 3)
-        A = scale.view(1, 3, 1) * R.transpose(1, 2) * (1.0 / scale).view(1, 1, 3)
-        composed = torch.cat([A.transpose(1, 2), t.unsqueeze(-1)], dim=-1)
-        return affine_sampling_grid(
-            composed, self.nz, self.ny, self.nx, self.align_corners
+        resolved = origin or self.origin
+        if resolved not in ("relion", "center"):
+            raise ValueError(f"Unknown origin: {resolved}.")
+        return rotation_sampling_grid(
+            theta,
+            self.nz,
+            self.ny,
+            self.nx,
+            "relion" if resolved == "relion" else "center",
+            self.align_corners,
         )
 
     # ------------------------------------------------------------------
@@ -479,6 +463,8 @@ class VolumeRotator(L.LightningModule):
         V_f = fft3(V, shift=True)  # complex, (Z, Y, X)
 
         theta_rot, displacement = split_affine_translation(theta)
+        # x-normalised, like `rotate_real`'s translation; see there.
+        displacement = self._translation_per_axis(displacement)
         if self.origin == "center":
             displacement = displacement + fourier_origin_displacement(
                 theta, self.nz, self.ny, self.nx

@@ -22,6 +22,7 @@ from specter.imagegenerator import (
     MicrographGenerator,
     TiltSeriesGenerator,
 )
+from specter.arrays import pad_volume
 from specter.settings import Camera, Crowding, Envelopes, Ice, Propagation, TiltGeometry
 from specter.specimen import MicrographSpecimenGenerator
 
@@ -1165,6 +1166,112 @@ def test_micrograph_unit_potential_scale_skips_the_extra_volume_copy(
         return gen(torch.tensor([0]))
 
     assert torch.allclose(_run(1.0), _run(1.0000001), rtol=1e-4, atol=1e-4)
+
+
+def _clean_micrograph_generator(volume, ctf_params, batchsize=1, **kw):
+    """A multislice micrograph generator that keeps the ice-free exit wave."""
+    params = {k: v.expand(batchsize).clone() for k, v in ctf_params.items()}
+    params["dfu"] = params["dfu"] + 100.0 * torch.arange(batchsize)
+    params["dfv"] = params["dfu"].clone()
+    return MicrographGenerator(
+        MicrographSpecimenGenerator(
+            volume,
+            2.0,
+            32,
+            crowding=Crowding(min_distance=60.0, water_air_interface=True),
+            ice=Ice(model="random"),
+            progressbars=False,
+            save_clean_exitwaves=True,
+        ),
+        micrograph_size=32,
+        pixel_size=2.0,
+        ctf_params=params,
+        voltage=300.0,
+        dose_per_angstrom=torch.full((batchsize,), 20.0),
+        verbose=False,
+        progressbars=False,
+        save_clean_exitwaves=True,
+        propagation=Propagation(scattering_model="multislice"),
+        **kw,
+    )
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA")
+def test_micrograph_clean_volume_streams_when_it_does_not_fit(
+    small_volume, ctf_params, monkeypatch
+):
+    """
+    ``clean_V`` is a whole second canvas, and its upload used to be an
+    unconditional ``.to(device)`` beside the main volume's guarded one, so a
+    run that had just fallen back to streaming the specimen then OOM'd on
+    its ice-free twin. It now goes through the same fallback.
+    """
+    torch.manual_seed(0)
+    gen = _clean_micrograph_generator(
+        small_volume, ctf_params, camera=Camera(noise_model="none")
+    ).to("cuda")
+    gen.regenerate_specimen()
+    gen(torch.tensor([0]))
+    want = gen.clean_exitwaves.cpu()
+
+    clean = gen.specimen_gen.clean_V
+    original_to = torch.Tensor.to
+
+    def fake_to(tensor_self, *args, **kw):
+        if tensor_self is clean and "cuda" in str(args[:1] + tuple(kw.values())):
+            raise torch.cuda.OutOfMemoryError("injected")
+        return original_to(tensor_self, *args, **kw)
+
+    monkeypatch.setattr(torch.Tensor, "to", fake_to)
+    with pytest.warns(UserWarning, match="clean specimen volume"):
+        gen(torch.tensor([0]))
+    assert torch.equal(gen.clean_exitwaves.cpu(), want)
+
+
+def test_micrograph_unit_scale_batch_propagates_once(small_volume, ctf_params):
+    """
+    Every image of a micrograph batch sees one specimen at one pose, so with
+    a unit potential scale the batch's exit waves are identical: the volume
+    is propagated once, and each image still gets its own CTF and noise --
+    bit-identical to propagating B copies.
+    """
+    B = 3
+    torch.manual_seed(0)
+    gen = _clean_micrograph_generator(small_volume, ctf_params, batchsize=B)
+    gen.regenerate_specimen()
+    seen = []
+    scatter = gen.iterative_scattering.forward
+
+    def record(V, *args, **kw):
+        seen.append(V.shape[0])
+        return scatter(V, *args, **kw)
+
+    gen.iterative_scattering.forward = record
+    torch.manual_seed(1)
+    with torch.no_grad():
+        images = gen(torch.arange(B))
+    assert seen == [1, 1]  # the clean and the iced exit wave, once each
+    assert gen.exitwaves.shape[0] == B and gen.clean_exitwaves.shape[0] == B
+
+    # The same batch the old way: B copies through multislice.
+    gen.iterative_scattering.forward = scatter
+    V = gen.volume.expand(B, -1, -1, -1)
+    V = pad_volume(V, gen.nxy, gen.nz, None, gen.pad_fft, xy_pad_mode="reflect")
+    with torch.no_grad():
+        exitwaves = gen.iterative_scattering(
+            V, pose=0, slice_batchsize=gen.slice_batchsize
+        )
+        waves = gen._aberrate(exitwaves, gen._ctf_batch(torch.arange(B)))
+        torch.manual_seed(1)
+        want = gen.detector(
+            waves,
+            gen.dose_per_angstrom[:B],
+            gen.coincidence_radius[:B],
+            nxy=gen.nxy,
+        )
+    assert torch.equal(gen.exitwaves, exitwaves)
+    assert torch.equal(images, want)
+    assert not torch.equal(images[0], images[1])
 
 
 # ---------------------------------------------------------------------------

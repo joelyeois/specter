@@ -722,3 +722,64 @@ def test_volume_rotator_under_grad_matches_forward_only():
     assert torch.equal(out, plain)
     (g,) = torch.autograd.grad((out**2).sum(), Vg)
     assert torch.isfinite(g).all() and float(g.abs().sum()) > 0
+
+
+def _axis_rotation(axis: str, deg: float) -> torch.Tensor:
+    """(x, y, z)-frame rotation matrix about one axis, float64."""
+    a = float(np.deg2rad(deg))
+    c, s = np.cos(a), np.sin(a)
+    m = {
+        "x": [[1, 0, 0], [0, c, -s], [0, s, c]],
+        "y": [[c, 0, s], [0, 1, 0], [-s, 0, c]],
+        "z": [[c, -s, 0], [s, c, 0], [0, 0, 1]],
+    }[axis]
+    return torch.tensor(m, dtype=torch.float64)
+
+
+@pytest.mark.parametrize("origin", ["relion", "center"])
+@pytest.mark.parametrize("shift", [False, True])
+@pytest.mark.parametrize("axis", ["x", "y", "z"])
+def test_rotate_volume_non_cubic_is_isotropic_and_matches_volume_rotator(
+    origin: str, shift: bool, axis: str
+) -> None:
+    """
+    On a non-cubic box `rotate_volume` used to skip the per-axis rescaling
+    `VolumeRotator` applies: under ``origin="center"`` it rotated in
+    normalised coordinates (an anisotropic map in voxels, 0.3-0.8 voxel
+    centroid error), and under either origin it read an x-normalised
+    translation on each axis's own scale (0.33 voxel). Both must now put an
+    off-centre blob's centroid where the analytic rotation does, and agree
+    with the module form exactly.
+    """
+    nz, ny, nx = 24, 32, 40
+    z, y, x = torch.meshgrid(
+        *(torch.arange(n, dtype=torch.float64) for n in (nz, ny, nx)), indexing="ij"
+    )
+    c_in = torch.tensor([23.0, 13.0, 10.0])
+    V = torch.exp(
+        -(
+            ((x - c_in[0]) / 2.5) ** 2
+            + ((y - c_in[1]) / 1.8) ** 2
+            + ((z - c_in[2]) / 1.5) ** 2
+        )
+        / 2
+    )
+
+    def centroid(v: torch.Tensor) -> torch.Tensor:
+        m = v.sum()
+        return torch.stack([(v * x).sum() / m, (v * y).sum() / m, (v * z).sum() / m])
+
+    if origin == "relion":
+        o = torch.tensor([nx // 2, ny // 2, nz // 2], dtype=torch.float64)
+    else:
+        o = torch.tensor([(nx - 1) / 2, (ny - 1) / 2, (nz - 1) / 2])
+    T_vox = torch.tensor([[2.0, -1.5, 1.0]]) if shift else torch.zeros(1, 3)
+    R = _axis_rotation(axis, 30.0)[None]
+    theta = build_affine_matrix(R, translations_angstrom_to_torch(T_vox, nx, 1.0))
+
+    out = rotate_volume(V, theta, origin=origin, padding_mode="zeros")[0]
+    want = R[0].T @ (centroid(V) - o) + o - T_vox[0]
+    assert (centroid(out) - want).abs().max() < 0.05
+
+    rot = VolumeRotator(nz, ny, nx, origin=origin, padding_mode="zeros").double()
+    assert torch.equal(out, rot.rotate_real(V, theta)[0])

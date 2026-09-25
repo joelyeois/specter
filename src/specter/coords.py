@@ -43,8 +43,11 @@ def poisson_disk_neighbors(
         Sampled 2D coordinates, including the seed point.
     """
     H, W = box
-    y_min, y_max = -H // 2, H // 2
-    x_min, x_max = -W // 2, W // 2
+    # True division: `-H // 2` floors, which for an odd extent put the box
+    # half a pixel off centre, [-(H + 1) / 2, (H - 1) / 2). Even extents,
+    # the only ones any caller passes by default, are unchanged.
+    y_min, y_max = -H / 2, H / 2
+    x_min, x_max = -W / 2, W / 2
 
     # initialize first point
     if seed == "origin":
@@ -59,6 +62,10 @@ def poisson_disk_neighbors(
 
     pts = [first_point]
     active = [0]
+    # Accepted points as one (N, 2) tensor, grown by one row per acceptance
+    # (as in `poisson_disk_neighbors_3d`) rather than re-stacked from `pts`
+    # on every iteration, which copied all N points per candidate batch.
+    pts_t = first_point.unsqueeze(0)
 
     # Every op in this loop is on a few hundred elements; see cpu_threads.
     with limited_cpu_threads(1):
@@ -87,14 +94,14 @@ def poisson_disk_neighbors(
                 continue
 
             # distance check against all existing points
-            pts_tensor = torch.stack(pts)
-            diff = candidates[:, None, :] - pts_tensor[None, :, :]
+            diff = candidates[:, None, :] - pts_t[None, :, :]
             dist2 = (diff**2).sum(dim=2)
             min_dist2, _ = dist2.min(dim=1)
             candidates = candidates[min_dist2 >= min_distance**2]
 
             if candidates.shape[0] > 0:
                 pts.append(candidates[0])
+                pts_t = torch.cat([pts_t, candidates[0].unsqueeze(0)], dim=0)
                 active.append(len(pts) - 1)
             else:
                 active.pop(idx)
@@ -190,7 +197,7 @@ def poisson_disk_neighbors_3d(
             dz = r * torch.cos(phi)
             candidates = center_point.unsqueeze(0) + torch.stack([dx, dy, dz], dim=1)
 
-            # filter candidates in tensor bounds (z,y,x)
+            # filter candidates in tensor bounds (columns are x, y, z)
             mask = (
                 (candidates[:, 0] >= x_min)
                 & (candidates[:, 0] < x_max)

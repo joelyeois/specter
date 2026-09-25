@@ -1,6 +1,7 @@
 """
-Frequency-domain and real-space filters: Butterworth, cosine taper,
-B-factor and a separable Gaussian blur.
+Frequency-domain and real-space filters: Butterworth, cosine taper and a
+separable Gaussian blur. The B-factor envelope is
+`specter.aberrations._envelopes.b_envelope`.
 """
 
 from __future__ import annotations
@@ -9,8 +10,6 @@ import torch
 import torch.nn.functional as F
 import numpy as np
 from skimage.filters import butterworth
-
-from .fft import fftn, ifftn
 
 
 def butter(images: torch.Tensor | np.ndarray) -> torch.Tensor | np.ndarray:
@@ -91,83 +90,6 @@ def cosine_taper_window(
     win[:taper_px] = ramp
     win[-taper_px:] = ramp.flip(0)
     return win
-
-
-def apply_bfactor(
-    volume: torch.Tensor, pixel_size: float, bfactor: float
-) -> torch.Tensor:
-    """
-    Apply B-factor blurring to a 3D scattering potential volume.
-
-    Applies temperature factor (B-factor) blurring in Fourier space using
-    the formula exp(-B/4 * k²), which simulates thermal motion effects
-    on atomic scattering amplitudes.
-
-    Parameters
-    ----------
-    volume : torch.Tensor
-        3D scattering potential volume with shape (n, n, n). Assumed to be
-        cubic and real-valued.
-    pixel_size : float
-        The pixel size in Å.
-    bfactor : float
-        B-factor (temperature factor). Higher values increase blurring.
-        If bfactor=0.0, returns the original volume unchanged.
-
-    Returns
-    -------
-    newvolume : torch.Tensor
-        B-factor blurred volume with same shape as input. Returns real-valued
-        tensor if input is real, complex tensor if input is complex.
-
-    Notes
-    -----
-    The B-factor is applied in Fourier space as:
-    F_blurred(k) = F(k) * exp(-B/4 * k²)
-    where k is the spatial frequency magnitude.
-    """
-    if bfactor == 0.0:
-        return volume
-
-    kx = torch.fft.fftfreq(volume.shape[-1], pixel_size, device=volume.device)
-    KZ, KY, KX = torch.meshgrid(kx, kx, kx, indexing="ij")
-    k2 = KZ**2 + KY**2 + KX**2
-    newvolume = ifftn(fftn(volume) * torch.exp(-bfactor / 4 * k2))
-
-    if torch.is_complex(volume):
-        return newvolume
-    return torch.real(newvolume)
-
-
-def chimera_gaussian_sigma_to_bfactor(
-    sigma: float | torch.Tensor,
-) -> float | torch.Tensor:
-    """
-    Convert ChimeraX Gaussian width to B-factor.
-
-    Converts the Gaussian standard deviation (sigma) used in ChimeraX
-    into the equivalent crystallographic B-factor.
-
-    Parameters
-    ----------
-    sigma : float or torch.Tensor
-        Gaussian width (standard deviation) in Å.
-
-    Returns
-    -------
-    bfactor : float or torch.Tensor
-        B-factor, calculated as 8π²σ².
-
-    Notes
-    -----
-    The relationship between Gaussian width and B-factor is:
-    B = 8π²σ²
-
-    This conversion is useful when matching blurring parameters between
-    ChimeraX visualization and cryo-EM simulation tools.
-    """
-    bfactor = 8 * torch.pi**2 * sigma**2
-    return bfactor
 
 
 def gaussian_blur3d(

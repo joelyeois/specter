@@ -26,6 +26,7 @@ import torch
 from scipy.optimize import curve_fit
 from scipy.stats import t as student_t
 
+from specter.aberrations._envelopes import b_envelope
 from specter.filters import butter
 
 #: Frequency bands in 1/Å, as (low, high): coarser than 33 Å, 33-12, 12-6.7,
@@ -385,7 +386,11 @@ def _residual_envelope(
     a_k = np.asarray(ratios, dtype=float)
 
     def model(kx: np.ndarray, amplitude: float, bfactor: float) -> np.ndarray:
-        return amplitude * np.exp(-bfactor * kx**2 / 4.0)
+        envelope = b_envelope(
+            torch.as_tensor(kx**2, dtype=torch.float64),
+            torch.tensor(bfactor, dtype=torch.float64),
+        )
+        return amplitude * envelope.numpy()
 
     try:
         params, cov = curve_fit(

@@ -57,17 +57,18 @@ belongs to; `instance_labels` records which protein object a voxel belongs
 to, with one id counter shared in generation order: transmembrane
 proteins, filaments (one id per filament) and microtubules (one id per
 tube), gold beads, then cytosol/lumen proteins.
+
+Code layout: `TomogramSpecimenGenerator` keeps the orchestration, carbon
+film, beads, and protein packing/rendering; the membrane stage, the
+filament/microtubule stage and pick export are mixins it inherits from
+`._membranes`, `._filaments` and `._picks`.
 """
 
 from __future__ import annotations
 
-import gc
-import json
 import math
 import os
 import warnings
-from pathlib import Path
-from collections.abc import Iterator
 from typing import Literal
 
 import numpy as np
@@ -75,11 +76,11 @@ import torch
 from scipy import ndimage
 
 from ...config import ScalarOrRange
-from ...arrays import clip_insert_bounds, count_nonzero_chunked
+from ...arrays import count_nonzero_chunked
 from ...crowding import insert_particles_into_micrograph
 from ...pdb import DEFAULT_PDB_CACHE_DIR, PDB, canonical_pdb_source
 from ...potential import PotentialBuilder
-from ...rotations import build_affine_matrix, random_rotation_matrix, rotate_volume
+from ...rotations import build_affine_matrix, random_rotation_matrix
 from .._carbon import CarbonFilmGenerator, CarbonFilmSpec, edge_hole_center
 from .._grid import BeadGenerator
 from .._parallel_render import (
@@ -93,11 +94,8 @@ from ..filament import (
     FilamentSpec,
     MicrotubuleInstance,
     MicrotubuleSpec,
-    place_filaments,
-    place_microtubules,
 )
 from ..membrane import TransmembranePlacement
-from ..membrane._placement import align_principal_axis_to_z
 from ..packing import (
     build_species_mask,
     draw_species_pool,
@@ -109,16 +107,11 @@ from ._helpers import (
     _MAX_PACKING_GRID_VOXELS,
     _downsample_mask_maxpool,
     _insert_instance_labels,
-    _insert_local_labels,
-    _insert_shell_label,
-    _insert_volume_max,
-    _instance_bounding_radius,
-    _position_to_center_index,
+    _insert_rotated_copies,
     _resolve_exclusion_field_grid,
     _wants_atom_species,
     resolve_accumulator_device,
 )
-from ._regions import classify_membrane_regions
 from ._specs import (
     BeadPlacement,
     MembraneInstance,
@@ -126,47 +119,16 @@ from ._specs import (
     TomogramPlacement,
     TomogramProteinSpec,
 )
+from ._filaments import _FilamentStageMixin
+from ._membranes import _MembraneStageMixin
+from ._picks import _PickExportMixin
 from ...progress import TqdmProgress, phase, phase_done, phase_start, status
 from specter.options import ScatteringFactors
 
-_INSTANCE_LABEL_REL_THRESHOLD = 0.01
 
-
-def _filament_runs(
-    instances: list[FilamentInstance],
-) -> Iterator[list[FilamentInstance]]:
-    """Split placed monomers into one list per filament, in order.
-
-    The single definition of where one filament ends and the next begins,
-    shared by instance labelling and pick export so the two ground truths
-    cannot disagree about what an object is.
-
-    A boundary is a change of ``(code, filament_id)`` between CONSECUTIVE
-    instances, not a change of the key alone. Both placers number
-    filaments with ``range(spec.n_copies)``, restarting per spec, so every
-    spec contributes a filament 0; each emits one filament's monomers
-    consecutively, which is what makes runs the right unit.
-
-    One case this cannot separate: a spec contributing exactly one
-    filament, followed immediately by a same-`code` filament 0 from the
-    next spec. Separating those needs the placers to number filaments
-    globally, which is the real fix if it ever matters -- `filament_id` is
-    internal and never written to picks.
-    """
-    run: list[FilamentInstance] = []
-    previous: tuple[str, int] | None = None
-    for inst in instances:
-        key = (inst.code, inst.filament_id)
-        if previous is not None and key != previous:
-            yield run
-            run = []
-        previous = key
-        run.append(inst)
-    if run:
-        yield run
-
-
-class TomogramSpecimenGenerator:
+class TomogramSpecimenGenerator(
+    _MembraneStageMixin, _FilamentStageMixin, _PickExportMixin
+):
     """
     Assemble a specimen tomogram from any combination of pre-configured
     membranes, filaments, carbon film, gold fiducials, and densely packed
@@ -678,555 +640,6 @@ class TomogramSpecimenGenerator:
             carbon_mask = volume > 0
         return volume, carbon_mask
 
-    def _stage_membranes(
-        self,
-        volume: torch.Tensor,
-        instance_labels: torch.Tensor,
-        next_instance_id: int,
-        carbon_mask: torch.Tensor | None,
-        box: tuple[float, float, float],
-        voxel_size: float,
-    ) -> tuple[torch.Tensor, torch.Tensor, int]:
-        """Place, generate and composite the membrane instances with their
-        transmembrane proteins, then classify regions and label the shells."""
-        # Resolve any omitted position_xyz via collision-rejecting random
-        # placement, treating each instance as a bounding sphere (see
-        # _instance_bounding_radius) -- an instance that doesn't fit
-        # without colliding is dropped (never .generate()-called at all,
-        # cheaper than generating first and rejecting after), matching
-        # this module's own "reject and move on" packing philosophy rather
-        # than retrying at new positions. Instances with an explicit
-        # position_xyz are placed as given and NOT included in this
-        # collision check.
-        # The phases below stay on phase_start/phase_done rather than
-        # `with phase(...)`: their completion line reports a count (instances
-        # placed, structures loaded) that only exists once the block has run.
-        _membrane_phase_start = phase_start(
-            "Membranes", disable=not self.progressbars or not self.membrane_instances
-        )
-        # Sub-phases, so this reports like the species phases below rather
-        # than as one opaque total: at the 2 A production grid this phase is
-        # over half the run.
-        _membrane_place_start = phase_start(
-            "  Placement", disable=not self.progressbars or not self.membrane_instances
-        )
-        to_composite = self._place_membrane_instances(
-            box, carbon_mask, self.target_shape, voxel_size
-        )
-        phase_done(
-            "  Placement",
-            _membrane_place_start,
-            disable=not self.progressbars or not self.membrane_instances,
-        )
-        _membrane_build_start = phase_start(
-            "  Generation & compositing",
-            disable=not self.progressbars or not to_composite,
-        )
-        volume, instance_labels, next_instance_id, instance_shell_masks = (
-            self._composite_membranes(
-                to_composite,
-                volume,
-                instance_labels,
-                next_instance_id,
-                carbon_mask,
-                box,
-                voxel_size,
-            )
-        )
-        phase_done(
-            "  Generation & compositing",
-            _membrane_build_start,
-            disable=not self.progressbars or not to_composite,
-        )
-        # classify_membrane_regions' own threshold: needs the FULL
-        # composite's peak (unlike instance_shell_masks' per-instance
-        # thresholds above), so can only be resolved after every instance
-        # is merged into volume.
-        _membrane_regions_start = phase_start(
-            "  Region classification",
-            disable=not self.progressbars or not self.membrane_instances,
-        )
-        self._classify_regions(volume)
-        phase_done(
-            "  Region classification",
-            _membrane_regions_start,
-            disable=not self.progressbars or not self.membrane_instances,
-        )
-
-        _membrane_label_start = phase_start(
-            "  Shell labelling",
-            disable=not self.progressbars or not self.membrane_instances,
-        )
-        self._label_membrane_shells(
-            instance_shell_masks, tuple(volume.shape), voxel_size
-        )
-        phase_done(
-            "  Shell labelling",
-            _membrane_label_start,
-            disable=not self.progressbars or not self.membrane_instances,
-        )
-        phase_done(
-            f"Membranes ({len(instance_shell_masks)}/"
-            f"{len(self.membrane_instances)} instance(s) placed)",
-            _membrane_phase_start,
-            disable=not self.progressbars or not self.membrane_instances,
-        )
-        return volume, instance_labels, next_instance_id
-
-    def _place_membrane_instances(
-        self,
-        box: tuple[float, float, float],
-        carbon_mask: torch.Tensor | None,
-        target_shape: tuple[int, int, int],
-        voxel_size: float,
-    ) -> list[MembraneInstance]:
-        """Resolve every membrane instance's position by collision-rejecting
-        random placement and return the ones that fit."""
-        to_composite: list[MembraneInstance] = []
-        if self.membrane_instances:
-            radii = torch.tensor(
-                [
-                    _instance_bounding_radius(mi.generator)
-                    for mi in self.membrane_instances
-                ]
-            )
-            if carbon_mask is not None:
-                field_voxel_size, field_shape, field_factor = (
-                    _resolve_exclusion_field_grid(target_shape, voxel_size)
-                )
-                allowed = (~carbon_mask).cpu()
-                allowed_field = (
-                    _downsample_mask_maxpool(allowed, field_factor, field_shape)
-                    if field_factor > 1
-                    else allowed
-                )
-                exclusion_field = (
-                    torch.from_numpy(
-                        ndimage.distance_transform_edt(allowed_field.numpy())
-                    ).float()
-                    * field_voxel_size
-                )
-            with status(
-                f"Placing {len(self.membrane_instances)} membrane instance(s)",
-                disable=not self.progressbars,
-            ):
-                coords, accepted_idx = pack_hard_spheres_3d(
-                    radii,
-                    box,
-                    gap=self.gap,
-                    seed=self.seed,
-                    device="cpu",  # see self.device's own docstring
-                    clip_axes=self.clip_axes,
-                    exclusion_distance_field=(
-                        exclusion_field if carbon_mask is not None else None
-                    ),
-                    field_voxel_size=field_voxel_size
-                    if carbon_mask is not None
-                    else None,
-                    sampling_mask=(allowed_field if carbon_mask is not None else None),
-                )
-            n_dropped = len(self.membrane_instances) - accepted_idx.numel()
-            if n_dropped:
-                warnings.warn(
-                    f"TomogramSpecimenGenerator: {n_dropped}/"
-                    f"{len(self.membrane_instances)} membrane instances did not "
-                    "fit without colliding (with each other, the box walls, or "
-                    "the carbon film, if any) and were dropped (never "
-                    "generated).",
-                    stacklevel=2,
-                )
-            for k, orig_idx in enumerate(accepted_idx.tolist()):
-                mi = self.membrane_instances[orig_idx]
-                mi.position_xyz = tuple(coords[k].tolist())
-                to_composite.append(mi)
-        return to_composite
-
-    def _composite_membranes(
-        self,
-        to_composite: list[MembraneInstance],
-        volume: torch.Tensor,
-        instance_labels: torch.Tensor,
-        next_instance_id: int,
-        carbon_mask: torch.Tensor | None,
-        box: tuple[float, float, float],
-        voxel_size: float,
-    ) -> tuple[
-        torch.Tensor, torch.Tensor, int, list[tuple[MembraneInstance, torch.Tensor]]
-    ]:
-        """Generate each placed instance, embed its transmembrane proteins,
-        max-merge it into the canvas and keep its shell mask for labelling."""
-        # Generate + place transmembrane proteins per instance, each in its
-        # own centered local frame, then composite densities into the
-        # shared canvas (max-merge) before any region classification --
-        # classify_membrane_regions needs the full composite, not
-        # per-instance pieces.
-        self.transmembrane_placements = []
-        self.placed_membrane_instances = []
-        instance_shell_masks: list[tuple[MembraneInstance, torch.Tensor]] = []
-        membrane_progress = TqdmProgress(
-            transient=True, disable=not self.progressbars or not to_composite
-        )
-        with membrane_progress as progress:
-            membrane_task = progress.add_task(
-                "Generating membrane instances", total=len(to_composite)
-            )
-            for mi in to_composite:
-                # Every mi here has a concrete position_xyz by construction:
-                # to_composite only ever collects accepted instances, whose
-                # position_xyz was just set above.
-                assert mi.position_xyz is not None
-                mi.generator.generate()
-                progress.update(membrane_task, advance=1)
-                if mi.generator.clipped_at_boundary:
-                    warnings.warn(
-                        "TomogramSpecimenGenerator: a membrane instance's own "
-                        "working grid was too small for the organelle size it "
-                        "actually drew (clipped_at_boundary=True on its "
-                        "MembraneGenerator) -- skipped rather than compositing a "
-                        "visibly truncated shape. Increase that instance's own "
-                        "target_shape/voxel_size, or omit target_shape "
-                        "entirely for auto-sizing.",
-                        stacklevel=2,
-                    )
-                    continue
-                # The bilayer's own peak, read BEFORE place_transmembrane
-                # inserts protein density. A protein template's peak is
-                # typically several times a smoothed bilayer's, so taking
-                # this afterwards would inflate the shell threshold below
-                # and erode the very thing it is meant to outline.
-                bare_bilayer = mi.generator.volume
-                assert bare_bilayer is not None  # generate() just ran
-                bare_peak = float(bare_bilayer.max())
-                tm_placements = mi.generator.place_transmembrane(
-                    min_spacing_angstrom=self.min_transmembrane_spacing
-                )
-                offset = torch.tensor(mi.position_xyz, dtype=torch.float32)
-                for tp in tm_placements:
-                    tp.center_xyz = tp.center_xyz + offset
-
-                # A membrane instance may extend past the tomogram walls
-                # (clip_axes), and `_insert_volume_max` clips the part that
-                # does -- so a protein embedded out there contributes no
-                # density and gets no instance label. Drop its ground-truth
-                # entry too, rather than shipping a pick at coordinates the
-                # volume does not cover. Same reasoning, and the same
-                # center-point granularity, as the carbon-film drop below.
-                if tm_placements:
-                    half = torch.tensor(
-                        [box[2] / 2, box[1] / 2, box[0] / 2], dtype=torch.float32
-                    )
-                    centers = torch.stack([tp.center_xyz for tp in tm_placements])
-                    outside = (centers.abs() >= half).any(dim=1)
-                    n_outside = int(outside.sum())
-                    if n_outside:
-                        warnings.warn(
-                            f"TomogramSpecimenGenerator: dropped {n_outside} "
-                            "transmembrane protein placement(s) that fell "
-                            "outside the tomogram box, on the part of a "
-                            "membrane instance clipped by the volume walls "
-                            "(no density was rendered for them, so a pick "
-                            "there would claim a particle the volume does "
-                            "not contain).",
-                            stacklevel=2,
-                        )
-                        tm_placements = [
-                            tp
-                            for tp, drop in zip(tm_placements, outside.tolist())
-                            if not drop
-                        ]
-
-                local_volume = mi.generator.volume
-                assert local_volume is not None
-                if carbon_mask is not None:
-                    # Placed instances shouldn't reach here at all in the
-                    # common case (their bounding sphere was already kept
-                    # clear of carbon by the RSA exclusion field above), so
-                    # this is normally a no-op -- it's a safety net for an
-                    # irregular organelle whose true rendered shape extends
-                    # past its own bounding-sphere approximation. Zeroes
-                    # local_volume wherever it would
-                    # land on carbon, BEFORE both compositing into `volume`
-                    # and the shell_mask/ground-truth labeling below, so
-                    # both consistently reflect the clip -- reuses the same
-                    # index math `_insert_volume_max` itself uses, rather
-                    # than duplicating it.
-                    center_zyx = _position_to_center_index(
-                        mi.position_xyz, tuple(volume.shape), voxel_size
-                    )
-                    bounds = clip_insert_bounds(
-                        center_zyx, local_volume.shape, volume.shape
-                    )
-                    if bounds is not None:
-                        dst, src = bounds
-                        forbidden = carbon_mask[dst].to(local_volume.device)
-                        if forbidden.any():
-                            warnings.warn(
-                                "TomogramSpecimenGenerator: clipped part of a "
-                                "membrane instance (an irregular shape "
-                                "exceeding its own bounding-sphere estimate) "
-                                "that overlapped the carbon film.",
-                                stacklevel=2,
-                            )
-                            local_volume[src] = local_volume[src] * (~forbidden).to(
-                                local_volume.dtype
-                            )
-                            # Same clip on the protein labels, so a
-                            # transmembrane instance whose density was just
-                            # removed doesn't keep a ground-truth label
-                            # sitting on carbon.
-                            tm_labels_clip = mi.generator.transmembrane_labels
-                            if tm_labels_clip is not None:
-                                tm_labels_clip[src] = tm_labels_clip[src] * (
-                                    ~forbidden
-                                ).to(tm_labels_clip.dtype)
-
-                    # `place_transmembrane` (above) already baked these
-                    # placements' own density into local_volume before this
-                    # point, so a placement whose center lands on carbon
-                    # just had its density zeroed by the clip above too --
-                    # this only fixes the separate ground-truth bookkeeping
-                    # list (self.transmembrane_placements, what export_picks
-                    # writes out), which would otherwise still claim a
-                    # particle sits somewhere with no actual density left.
-                    # Checked by center point, not full rendered footprint
-                    # (same granularity already used for filament monomers
-                    # in _stamp_filaments) -- a placement whose center is
-                    # just outside carbon but whose template partially
-                    # overlapped it keeps its (partially clipped) entry,
-                    # matching how e.g. bead/protein exclusion is also
-                    # voxel-level, not footprint-exact.
-                    if tm_placements:
-                        shape_zyx = tuple(volume.shape)
-                        z_c, y_c, x_c = (s // 2 for s in shape_zyx)
-                        centers = torch.stack([tp.center_xyz for tp in tm_placements])
-                        iz = (
-                            (z_c + torch.round(centers[:, 2] / voxel_size))
-                            .long()
-                            .clamp(0, shape_zyx[0] - 1)
-                        )
-                        iy = (
-                            (y_c + torch.round(centers[:, 1] / voxel_size))
-                            .long()
-                            .clamp(0, shape_zyx[1] - 1)
-                        )
-                        ix = (
-                            (x_c + torch.round(centers[:, 0] / voxel_size))
-                            .long()
-                            .clamp(0, shape_zyx[2] - 1)
-                        )
-                        cm_dev = carbon_mask.device
-                        in_carbon = carbon_mask[
-                            iz.to(cm_dev), iy.to(cm_dev), ix.to(cm_dev)
-                        ].cpu()
-                        n_dropped_tm = int(in_carbon.sum())
-                        if n_dropped_tm:
-                            warnings.warn(
-                                f"TomogramSpecimenGenerator: dropped "
-                                f"{n_dropped_tm} transmembrane protein "
-                                "placement(s) clipped by the carbon film "
-                                "(density already removed above; this drops "
-                                "their now-stale ground-truth pick entries "
-                                "too).",
-                                stacklevel=2,
-                            )
-                            tm_placements = [
-                                tp
-                                for tp, drop in zip(tm_placements, in_carbon.tolist())
-                                if not drop
-                            ]
-                self.transmembrane_placements.extend(tm_placements)
-                volume = _insert_volume_max(
-                    volume, local_volume, mi.position_xyz, voxel_size
-                )
-                # Per-instance shell mask, computed and stashed as a bool
-                # (~4x smaller than float32, and ~4-8x smaller again than
-                # keeping the full density array around) NOW, while
-                # local_volume is still cheaply available, rather than in a
-                # second pass after every instance has run. A GLOBAL
-                # threshold (shared across every instance) would need the
-                # full composite's peak, which isn't known until the loop
-                # finishes -- forcing every instance's full-resolution
-                # array to stay resident simultaneously until then.
-                # Confirmed directly: that OOMs well before this loop even
-                # finishes, now that generation-resolution decoupling
-                # (MembraneGenerator's max_field_voxels) lets a single
-                # instance's own volume reach tens of GB. Using THIS
-                # instance's own peak instead when region_density_threshold
-                # is auto (None) -- a per-instance peak is also the more
-                # correct reference for per-instance shell LABELING, since
-                # an instance whose own peak is lower (a smaller organelle
-                # resolved on a coarser working grid, say) should not have
-                # its true shell mislabeled as background just
-                # because a brighter sibling set a higher global bar).
-                # When region_density_threshold is explicitly set, it's
-                # already an absolute density value (not a fraction, see
-                # this same fallback below for self.regions), so using it
-                # directly here is identical to a shared global threshold
-                # -- no behaviour change in that case.
-                if self.region_density_threshold is not None:
-                    instance_threshold = self.region_density_threshold
-                else:
-                    instance_threshold = 0.05 * bare_peak if bare_peak > 0 else 0.0
-                shell_mask = local_volume > instance_threshold
-                # The membrane label is the BILAYER, not the bilayer plus
-                # whatever is embedded in it. `_insert_blend` has already
-                # decided which voxels the protein displaced lipid from --
-                # reuse that decision rather than making a second, looser
-                # one here. The proteins themselves become ordinary protein
-                # instances just below, so nothing goes unlabelled: the two
-                # volumes partition the membrane between them.
-                tm_labels = mi.generator.transmembrane_labels
-                if tm_labels is not None:
-                    shell_mask = shell_mask & (tm_labels == 0)
-                    instance_labels = _insert_local_labels(
-                        instance_labels,
-                        tm_labels,
-                        id_offset=next_instance_id - 1,
-                        position_xyz=mi.position_xyz,
-                        voxel_size=voxel_size,
-                    )
-                    # Reserve from the count `place_transmembrane` actually
-                    # LABELLED (its own `placements`, ids 1..n), not from
-                    # `tm_placements` -- the carbon block above may have
-                    # pruned that list, and reserving the short count would
-                    # let the next membrane's offset collide with this
-                    # one's higher ids.
-                    next_instance_id += len(mi.generator.placements)
-                    mi.generator.transmembrane_labels = None
-                shell_mask = shell_mask.cpu()
-                instance_shell_masks.append((mi, shell_mask))
-                self.placed_membrane_instances.append(mi)
-                mi.generator.volume = None
-                # Dropping the last reference above is not enough by
-                # itself: PyTorch's CUDA caching allocator keeps freed
-                # blocks in its own pool rather than returning them to the
-                # driver, and each instance's own working/output grid can
-                # be a DIFFERENT size (random per-instance organelle size),
-                # so the next instance's allocation can fail on
-                # fragmentation even though the previous instance's memory
-                # was already dereferenced -- confirmed directly: a second
-                # instance's OOM here, with the traceback showing several
-                # GiB "reserved but unallocated" at the same time as the
-                # failing allocation. gc.collect() first in case any
-                # tensor is only reachable via a reference cycle (autograd
-                # graphs can create these) that plain refcounting wouldn't
-                # free promptly.
-                del local_volume
-                if torch.device(self.device).type == "cuda":
-                    gc.collect()
-                    torch.cuda.empty_cache()
-        return volume, instance_labels, next_instance_id, instance_shell_masks
-
-    def _classify_regions(self, volume: torch.Tensor) -> None:
-        """Classify the composite into shell, lumen and cytosol (``self.regions``)."""
-        # classify_membrane_regions' own threshold: needs the FULL
-        # composite's peak (unlike instance_shell_masks' per-instance
-        # thresholds above), so can only be resolved after every instance
-        # is merged into volume.
-        threshold = self.region_density_threshold
-        if threshold is None:
-            peak = float(volume.max())
-            threshold = 0.05 * peak if peak > 0 else 0.0
-        self.regions = classify_membrane_regions(volume, threshold)
-
-    def _label_membrane_shells(
-        self,
-        instance_shell_masks: list[tuple[MembraneInstance, torch.Tensor]],
-        target_shape: tuple[int, ...],
-        voxel_size: float,
-    ) -> None:
-        """Write each instance's shell mask into ``self.membrane_labels``."""
-        membrane_labels = torch.zeros(
-            target_shape, dtype=torch.int32, device=self.accumulator_device
-        )
-        for instance_id, (mi, shell_mask) in enumerate(instance_shell_masks, start=1):
-            assert mi.position_xyz is not None  # see identical assert above
-            membrane_labels, overlap = _insert_shell_label(
-                membrane_labels, shell_mask, instance_id, mi.position_xyz, voxel_size
-            )
-            if overlap:
-                warnings.warn(
-                    f"TomogramSpecimenGenerator: membrane instance {instance_id} "
-                    "(1-indexed, in membrane_instances order) overlaps a voxel "
-                    "already claimed by an earlier instance in membrane_labels "
-                    "-- the earlier instance's label wins there (first-write-"
-                    "wins). This can happen even with collision-checked "
-                    "placement, since the RSA solve treats each instance as a "
-                    "bounding sphere while an irregular organelle's true "
-                    "rendered shape can extend past that estimate.",
-                    stacklevel=2,
-                )
-        self.membrane_labels = membrane_labels
-
-    def _stage_filaments(
-        self,
-        volume: torch.Tensor,
-        instance_labels: torch.Tensor,
-        next_instance_id: int,
-        voxel_size: float,
-        carbon_mask: torch.Tensor | None,
-    ) -> tuple[torch.Tensor, torch.Tensor, int, torch.Tensor | None]:
-        """Stamp the filaments and microtubules and return the obstacle mask the
-        later stages avoid (None when there are none)."""
-        # Filaments (then gold fiducial beads, see below) render right
-        # after membranes, BEFORE cytosol/lumen protein packing (see module
-        # docstring) -- obstacle_mask (voxels they actually occupy, from
-        # instance_labels before any protein instance touches it) is then
-        # folded into the beads' sampling mask and the protein packer's
-        # occupancy grid, alongside the membrane shell.
-        if self.filament_specs or self.microtubule_specs:
-            _filament_phase_start = phase_start(
-                "Filaments", disable=not self.progressbars
-            )
-            if self.filament_specs:
-                with status(
-                    f"Placing {len(self.filament_specs)} filament species",
-                    disable=not self.progressbars,
-                ):
-                    volume, instance_labels, next_instance_id = self._stamp_filaments(
-                        volume,
-                        instance_labels,
-                        next_instance_id,
-                        voxel_size,
-                        carbon_mask,
-                    )
-            else:
-                self.filament_instances = []
-            if self.microtubule_specs:
-                with status(
-                    f"Placing {len(self.microtubule_specs)} microtubule species",
-                    disable=not self.progressbars,
-                ):
-                    volume, instance_labels, next_instance_id = (
-                        self._stamp_microtubules(
-                            volume,
-                            instance_labels,
-                            next_instance_id,
-                            voxel_size,
-                            carbon_mask,
-                        )
-                    )
-            phase_done(
-                f"Filaments ({len(self.filament_instances)} monomer instance(s), "
-                f"{len(self.microtubule_instances)} microtubule(s))",
-                _filament_phase_start,
-                disable=not self.progressbars,
-            )
-            obstacle_mask = instance_labels > 0
-            if self.microtubule_instances:
-                # A microtubule's lumen is EMPTY but not accessible: it is
-                # sealed by the tube wall. Occupied-voxel exclusion alone
-                # would happily pack cytosolic protein inside it, which is
-                # exactly what lumenal particles are not (microtubule inner
-                # proteins are explicitly out of scope -- see `_lattice`).
-                obstacle_mask = obstacle_mask | self._microtubule_lumen_mask(
-                    voxel_size, obstacle_mask.device
-                )
-        else:
-            self.filament_instances = []
-            obstacle_mask = None
-        return volume, instance_labels, next_instance_id, obstacle_mask
-
     def _stage_beads(
         self,
         volume: torch.Tensor,
@@ -1360,14 +773,7 @@ class TomogramSpecimenGenerator:
         pdbs_by_source: dict[str, PDB] = {}
         for spec in specs_here:
             if spec.pdb_source not in pdb_cache:
-                pdb_cache[spec.pdb_source] = PDB(
-                    spec.pdb_source,
-                    pdb_cache_dir=self.pdb_cache_dir,
-                    verbose=False,
-                    compute_atom_species=_wants_atom_species(self.parameterization),
-                    readd_hydrogens=self.readd_hydrogens,
-                    monomer_library_path=self.monomer_library_path,
-                )
+                pdb_cache[spec.pdb_source] = self._load_pdb(spec.pdb_source)
             pdbs_by_source[spec.pdb_source] = pdb_cache[spec.pdb_source]
 
         # Protein packing works from one running occupancy grid: True
@@ -1742,691 +1148,6 @@ class TomogramSpecimenGenerator:
 
         return volume, instance_labels, next_instance_id
 
-    def _one_id_per_filament(
-        self, instances: list[FilamentInstance], next_instance_id: int
-    ) -> tuple[torch.Tensor, int]:
-        """One instance id per filament, rather than one per monomer.
-
-        Segmentation ground truth should mark a filament as an object, the
-        way it already marked a microtubule as one rather than as ~950
-        loose dimers. Labelled per monomer, 20 actin filaments appear as
-        765 separate objects, and a picker evaluated against them is being
-        asked to find monomers.
-
-        Grouped on runs of equal ``(code, filament_id)`` rather than on
-        the key alone. Both placers number filaments with
-        ``range(spec.n_copies)``, restarting per spec, so two specs each
-        contribute a filament 0; keying on the pair alone would merge
-        them. Every placer emits one filament's monomers consecutively,
-        so a change of key is a filament boundary.
-
-        That leaves one case this cannot separate: a spec contributing
-        exactly one filament, immediately followed by a filament of the
-        same `code` and id from the next spec. Distinguishing those needs
-        the placers to number filaments globally, which is the real fix if
-        it ever matters -- `filament_id` is internal, used only here and
-        never written to picks.
-        """
-        ids: list[int] = []
-        current = next_instance_id
-        for run in _filament_runs(instances):
-            ids.extend([current] * len(run))
-            current += 1
-        return torch.tensor(ids, dtype=torch.int32), current
-
-    def _stamp_filaments(
-        self,
-        volume: torch.Tensor,
-        instance_labels: torch.Tensor,
-        next_instance_id: int,
-        voxel_size: float,
-        carbon_mask: torch.Tensor | None,
-    ) -> tuple[torch.Tensor, torch.Tensor, int]:
-        """Place and render every `filament_specs` species, continuing
-        `instance_labels`'s own instance-id counter from the transmembrane
-        proteins. Filaments render before beads and the cytosol/lumen
-        protein fill, which then avoid them.
-
-        `place_filaments` draws positions in `[0, extent)` -- a corner-
-        relative box -- while `volume`/`instance_labels` (and
-        `insert_particles_into_micrograph`/`_insert_instance_labels`, the
-        same helpers the cytosol/lumen proteins use) are centered at
-        physical (0,0,0). Only the LOCAL `positions_centered` used for
-        rendering is shifted by `-extent/2` to bridge that; `self.
-        filament_instances` keeps each `FilamentInstance`'s original
-        corner-relative `position_xyz` untouched, since that's the
-        convention `export_picks` itself writes out directly.
-
-        `place_filaments` itself has no obstacle awareness (a genuine
-        collision-avoiding random walk is a bigger algorithmic change than
-        this needs -- see module docstring): individual monomer instances
-        that land inside `carbon_mask`, if given, are dropped here after
-        the fact instead, the same "truncated at render/insert time"
-        treatment already applied to monomers that wander outside the
-        volume entirely (see `place_filaments`'s own docstring). A dropped
-        monomer mid-path just leaves a gap in that filament, not a
-        redirected walk around the film.
-        """
-        target_shape = self.target_shape
-
-        rng = torch.Generator()
-        if self.seed is not None:
-            rng.manual_seed(self.seed)
-        instances = place_filaments(self.filament_specs, target_shape, voxel_size, rng)
-        instances = self._drop_instances_in_carbon(
-            instances, carbon_mask, voxel_size, "filament monomer"
-        )
-
-        self.filament_instances = instances
-        if not instances:
-            return volume, instance_labels, next_instance_id
-        instance_ids, after = self._one_id_per_filament(instances, next_instance_id)
-        return self._render_filament_instances(
-            volume,
-            instance_labels,
-            after,
-            voxel_size,
-            instances,
-            instance_ids=instance_ids,
-        )
-
-    def _drop_instances_in_carbon(
-        self,
-        instances: list[FilamentInstance],
-        carbon_mask: torch.Tensor | None,
-        voxel_size: float,
-        what: str,
-    ) -> list[FilamentInstance]:
-        """Drop copies whose centre lands inside the carbon film.
-
-        Shared by filament and microtubule stamping -- neither placer is
-        obstacle-aware, so this is the same "reject after the fact" pass
-        described in `_stamp_filaments`.
-        """
-        if carbon_mask is None or not instances:
-            return instances
-
-        nz, ny, nx = self.target_shape
-        pos = torch.stack([inst.position_xyz for inst in instances])  # (N,3) x,y,z
-        ix = (pos[:, 0] / voxel_size).long().clamp(0, nx - 1)
-        iy = (pos[:, 1] / voxel_size).long().clamp(0, ny - 1)
-        iz = (pos[:, 2] / voxel_size).long().clamp(0, nz - 1)
-        cm_dev = carbon_mask.device
-        in_carbon = carbon_mask[iz.to(cm_dev), iy.to(cm_dev), ix.to(cm_dev)].cpu()
-        n_dropped = int(in_carbon.sum())
-        if n_dropped:
-            warnings.warn(
-                f"TomogramSpecimenGenerator: dropped {n_dropped} {what} "
-                "instance(s) that landed inside the carbon film.",
-                stacklevel=2,
-            )
-            instances = [
-                inst for inst, drop in zip(instances, in_carbon.tolist()) if not drop
-            ]
-        return instances
-
-    def _stamp_microtubules(
-        self,
-        volume: torch.Tensor,
-        instance_labels: torch.Tensor,
-        next_instance_id: int,
-        voxel_size: float,
-        carbon_mask: torch.Tensor | None,
-    ) -> tuple[torch.Tensor, torch.Tensor, int]:
-        """Place and render every `microtubule_specs` species.
-
-        A microtubule reaches the renderer as many rigid copies of one
-        alpha-beta tubulin dimer -- the same `FilamentInstance` form
-        filaments use -- so this shares `_render_filament_instances`
-        wholesale. The one difference is instance labelling: every dimer of
-        one tube gets the SAME instance id, so segmentation ground truth
-        marks microtubules as objects rather than as ~950 loose dimers.
-        """
-        rng = torch.Generator()
-        if self.seed is not None:
-            # Offset from the filament seed so two species with the same
-            # spec don't land on identical paths.
-            rng.manual_seed(self.seed + 1)
-        instances, tubes = place_microtubules(
-            self.microtubule_specs,
-            self.target_shape,
-            voxel_size,
-            generator=rng,
-            pdb_cache_dir=self.pdb_cache_dir,
-        )
-        instances = self._drop_instances_in_carbon(
-            instances, carbon_mask, voxel_size, "microtubule dimer"
-        )
-
-        self.microtubule_instances = tubes
-        self.microtubule_dimer_instances = instances
-        if not instances:
-            return volume, instance_labels, next_instance_id
-
-        # One instance id per tube, via the same helper actin uses. The
-        # previous spelling grouped on `filament_id` alone, which merged
-        # tube 0 of one [[microtubules]] spec with tube 0 of the next --
-        # every spec resolves to the same cached dimer `code`, so nothing
-        # else separated them.
-        instance_ids, after = self._one_id_per_filament(instances, next_instance_id)
-        return self._render_filament_instances(
-            volume,
-            instance_labels,
-            after,
-            voxel_size,
-            instances,
-            instance_ids=instance_ids,
-            align_to_z=False,
-        )
-
-    def _microtubule_lumen_mask(
-        self, voxel_size: float, device: torch.device
-    ) -> torch.Tensor:
-        """Voxels enclosed by a placed microtubule's wall, lumen included.
-
-        Built by stamping a disc of the tube's own radius at every ring of
-        every axis polyline. Consecutive rings are one dimer repeat apart
-        (82 A) while the radius is ~111 A, so the stamped spheres overlap
-        and seal the tube along its whole length without needing a real
-        distance transform over the full canvas.
-        """
-        nz, ny, nx = self.target_shape
-        mask = torch.zeros((nz, ny, nx), dtype=torch.bool, device=device)
-
-        for tube in self.microtubule_instances:
-            radius_vox = tube.lattice.radius / voxel_size
-            reach = int(math.ceil(radius_vox))
-            for point in tube.axis_xyz:
-                cx, cy, cz = (float(v) / voxel_size for v in point)
-                ix0, ix1 = max(0, int(cx) - reach), min(nx, int(cx) + reach + 1)
-                iy0, iy1 = max(0, int(cy) - reach), min(ny, int(cy) + reach + 1)
-                iz0, iz1 = max(0, int(cz) - reach), min(nz, int(cz) + reach + 1)
-                if ix0 >= ix1 or iy0 >= iy1 or iz0 >= iz1:
-                    continue
-                zz, yy, xx = torch.meshgrid(
-                    torch.arange(iz0, iz1, device=device, dtype=torch.float32),
-                    torch.arange(iy0, iy1, device=device, dtype=torch.float32),
-                    torch.arange(ix0, ix1, device=device, dtype=torch.float32),
-                    indexing="ij",
-                )
-                inside = (
-                    (xx - cx) ** 2 + (yy - cy) ** 2 + (zz - cz) ** 2
-                ) <= radius_vox**2
-                mask[iz0:iz1, iy0:iy1, ix0:ix1] |= inside
-        return mask
-
-    def _render_filament_instances(
-        self,
-        volume: torch.Tensor,
-        instance_labels: torch.Tensor,
-        next_instance_id: int,
-        voxel_size: float,
-        instances: list[FilamentInstance],
-        instance_ids: torch.Tensor | None = None,
-        align_to_z: bool = True,
-    ) -> tuple[torch.Tensor, torch.Tensor, int]:
-        """Render placed monomer/dimer copies: one template per species,
-        rotated and inserted once per instance.
-
-        Parameters
-        ----------
-        instance_ids : torch.Tensor, optional
-            Per-instance segmentation ids, shape ``(len(instances),)``.
-            Default None: number them sequentially from
-            ``next_instance_id``, which is then advanced. Microtubule
-            stamping passes explicit ids so a whole tube shares one.
-        align_to_z : bool, optional
-            Pre-rotate the template's longest principal axis onto ``+Z``.
-            Default True, as filament monomers need. Microtubules pass
-            False: their dimer template is already in the microtubule frame
-            (`_tubulin.extract_mt_dimer`), where the roll about ``+Z``
-            carries the radial orientation that principal-axis alignment
-            has no way to know about and would be free to destroy.
-        """
-        extent_xyz = (
-            torch.tensor(self.target_shape[::-1], dtype=torch.float32) * voxel_size
-        )
-
-        if instance_ids is None:
-            ids = torch.arange(
-                next_instance_id,
-                next_instance_id + len(instances),
-                dtype=torch.int32,
-            )
-            next_instance_id += len(instances)
-        else:
-            ids = instance_ids.to(torch.int32)
-
-        by_code: dict[str, list[tuple[FilamentInstance, int]]] = {}
-        for inst, inst_id in zip(instances, ids.tolist()):
-            by_code.setdefault(inst.code, []).append((inst, inst_id))
-
-        pdb_cache: dict[str, PDB] = {}
-        templates: dict[str, torch.Tensor] = {}
-        for code in by_code:
-            if code not in pdb_cache:
-                pdb_cache[code] = PDB(
-                    code,
-                    pdb_cache_dir=self.pdb_cache_dir,
-                    verbose=False,
-                    compute_atom_species=_wants_atom_species(self.parameterization),
-                    readd_hydrogens=self.readd_hydrogens,
-                    monomer_library_path=self.monomer_library_path,
-                )
-            pdb = pdb_cache[code]
-            n = estimate_protein_box_size(pdb.max_diameter, voxel_size)
-            builder = PotentialBuilder(
-                n_xyz=n,
-                dx=voxel_size,
-                atomic_numbers=pdb.atomic_numbers,
-                progressbars=False,
-                parameterization=self.parameterization,
-                # Rotation-only, so species stay aligned with coordinates.
-                atom_species=pdb.atom_species,
-                b_factors=(pdb.b_factors if self.use_deposited_bfactors else None),
-            ).to(self.device)
-            coordinates = (
-                align_principal_axis_to_z(pdb.coordinates)
-                if align_to_z
-                else pdb.coordinates
-            )
-            templates[code] = builder.forward(coordinates, method="analytic").to(
-                self.device
-            )
-
-        offset = (extent_xyz / 2).to(self.device)
-        for code, entries in by_code.items():
-            template = templates[code]
-            label_threshold = _INSTANCE_LABEL_REL_THRESHOLD * float(template.max())
-
-            insts = [inst for inst, _ in entries]
-            n_instances = len(insts)
-            positions_centered = (
-                torch.stack([inst.position_xyz for inst in insts]).to(self.device)
-                - offset
-            )
-            R = torch.stack([inst.rotation_matrix for inst in insts]).to(self.device)
-            theta = build_affine_matrix(R)
-
-            instance_ids = torch.tensor(
-                [inst_id for _, inst_id in entries],
-                dtype=torch.int32,
-                device=self.device,
-            )
-
-            step = self.chunk_size or n_instances
-            for start in range(0, n_instances, step):
-                end = min(start + step, n_instances)
-                rotated = rotate_volume(
-                    template, theta[start:end], padding_mode="zeros"
-                )
-                # Moved to the ACCUMULATOR's device (not necessarily
-                # self.device) right after the compute-heavy rotation --
-                # only this small per-chunk result crosses devices, never
-                # the shared canvas itself (see accumulator_device's own
-                # docstring).
-                rotated = rotated.to(volume.device)
-                volume = insert_particles_into_micrograph(
-                    rotated,
-                    positions_centered[start:end],
-                    pixel_size=voxel_size,
-                    micrograph=volume,
-                )
-                binarized = (rotated > label_threshold).to(torch.int32) * instance_ids[
-                    start:end
-                ].to(volume.device).view(-1, 1, 1, 1)
-                instance_labels = _insert_instance_labels(
-                    binarized,
-                    positions_centered[start:end],
-                    pixel_size=voxel_size,
-                    labels=instance_labels,
-                )
-
-        return volume, instance_labels, next_instance_id
-
-    def export_picks(
-        self,
-        output_dir: str | Path,
-        annotation_version: str = "1.0",
-        oriented: bool = True,
-        include_transmembrane: bool = True,
-        include_filaments: bool = True,
-        include_microtubules: bool = True,
-        include_filler: bool = True,
-        include_beads: bool = True,
-    ) -> dict[str, Path]:
-        """
-        Write one copick/CryoET-Data-Portal-style .ndjson pick file per
-        placed cytosol/lumen species (grouped by `(location, species_id)`
-        so the same `pdb_source` declared at both locations never collides
-        in one file) plus, by default, one per transmembrane species --
-        one JSON object per line: ``{"type": "point"|"orientedPoint",
-        "location": {"x", "y", "z"}[, "xyz_rotation_matrix"]}``.
-
-        `TomogramPlacement.role == "filler"` placements (species declared
-        via `ratio`, not `n_copies`) are INCLUDED by default, so a
-        `ratio`-only config exports every species it declares. Pass
-        `include_filler=False` to export only `n_copies`-declared species. A
-        `(species_id, location)` pair placed as BOTH a target and filler
-        (declared twice, once with `n_copies` and once with just `ratio`)
-        keeps its filler instances in a separate ``-filler``-suffixed file,
-        never merged with the target file.
-
-        Transmembrane picks are oriented (a real `rotation_matrix`, unlike
-        other membrane picks here, which are plain points) since
-        `TransmembranePlacement` actually carries one.
-
-        Coordinates are converted from this generator's box-centered
-        convention (`position_xyz`/`center_xyz`, origin at the volume's
-        center, matching `MembraneGenerator`'s own convention) to the
-        corner-relative (``0..extent``) convention copick/the portal
-        actually use -- the same conversion the other two generators'
-        `export_picks` perform.
-
-        Must be called after `generate()`.
-
-        Parameters
-        ----------
-        output_dir : str or pathlib.Path
-            Directory to write the .ndjson files into.
-        annotation_version : str, optional
-            Used only in the output filename
-            (``"{name}-{version}_{type}.ndjson"``). Default "1.0".
-        oriented : bool, optional
-            If True (default), picks are written as ``"orientedPoint"``
-            with each instance's rotation matrix included; if False, as
-            plain ``"point"`` (location only).
-        include_transmembrane : bool, optional
-            If True (default), also write pick file(s) for transmembrane
-            species, suffixed ``-transmembrane``.
-        include_filaments : bool, optional
-            If True (default), also write one pick file per filament
-            species, suffixed ``-filament``. Each `FilamentInstance`'s own
-            `position_xyz` is already in the corner-relative convention
-            used here (see `_stamp_filaments`), so -- unlike
-            placements/transmembrane above -- it's written directly, with
-            no `+ extent_xyz / 2` conversion.
-        include_microtubules : bool, optional
-            If True (default), also write one pick file per microtubule
-            species, suffixed ``-microtubule``: one entry per TUBE, whose
-            ``path`` is the axis polyline, not one entry per dimer. A tube
-            is a ~950-dimer object, and a pick file listing every dimer is
-            rarely what a consumer wants; the per-dimer copies remain in
-            `microtubule_dimer_instances` for anyone who does.
-        include_filler : bool, optional
-            If True, also write pick files for `role == "filler"`
-            cytosol/lumen placements (suffixed ``-filler`` on a
-            target/filler `(species_id, location)` collision, to avoid
-            overwriting the target's own file). Default False.
-        include_beads : bool, optional
-            If True (default), also write every gold fiducial to a single
-            ``gold-bead`` pick file, regardless of radius or which
-            `bead_specs` population it came from -- nothing downstream
-            distinguishes bead sizes. Always written as plain ``"point"``
-            regardless of `oriented`: a bead has no meaningful
-            per-instance orientation for picking purposes.
-
-        Returns
-        -------
-        dict[str, pathlib.Path]
-            Mapping of a grouping key (``"{species}-{location}"`` for
-            cytosol/lumen instances, ``"{species}-transmembrane"`` for
-            transmembrane instances, ``"{species}-filament"`` for filament
-            instances) to written file path.
-        """
-        if self.instance_labels is None:
-            raise RuntimeError("call generate() before export_picks()")
-
-        output_dir = Path(output_dir)
-        output_dir.mkdir(parents=True, exist_ok=True)
-        written: dict[str, Path] = {}
-
-        target_shape = self.target_shape
-        voxel_size = self.voxel_size
-        extent_xyz = (
-            torch.tensor(
-                [target_shape[2], target_shape[1], target_shape[0]],
-                dtype=torch.float32,
-            )
-            * voxel_size
-        )
-        point_type = "orientedPoint" if oriented else "point"
-
-        self._export_protein_picks(
-            written,
-            output_dir,
-            annotation_version,
-            point_type,
-            oriented,
-            extent_xyz,
-            include_filler,
-        )
-        if include_transmembrane and self.transmembrane_placements:
-            self._export_transmembrane_picks(
-                written,
-                output_dir,
-                annotation_version,
-                point_type,
-                oriented,
-                extent_xyz,
-            )
-        if include_filaments and self.filament_instances:
-            self._export_filament_picks(
-                written, output_dir, annotation_version, point_type, oriented
-            )
-        if include_microtubules and self.microtubule_instances:
-            self._export_microtubule_paths(written, output_dir, annotation_version)
-        if include_beads and self.bead_instances:
-            self._export_bead_picks(written, output_dir, annotation_version, extent_xyz)
-
-        return written
-
-    def _export_protein_picks(
-        self,
-        written: dict[str, Path],
-        output_dir: Path,
-        annotation_version: str,
-        point_type: str,
-        oriented: bool,
-        extent_xyz: torch.Tensor,
-        include_filler: bool,
-    ) -> None:
-        """One file per ``(species, location)`` of the cytosol/lumen placements."""
-        target_keys = {
-            (placed.species_id, placed.location)
-            for placed in self.placements
-            if placed.role == "target"
-        }
-        by_key: dict[str, list[TomogramPlacement]] = {}
-        for placed in self.placements:
-            if placed.role == "filler" and not include_filler:
-                continue
-            name = Path(placed.species_id).stem
-            key = f"{name}-{placed.location}"
-            if (
-                placed.role == "filler"
-                and (placed.species_id, placed.location) in target_keys
-            ):
-                key = f"{key}-filler"
-            by_key.setdefault(key, []).append(placed)
-        for key, placed_list in by_key.items():
-            path = (
-                output_dir / f"{key}-{annotation_version}_{point_type.lower()}.ndjson"
-            )
-            with open(path, "w") as f:
-                for placed in placed_list:
-                    corner_xyz = placed.position_xyz + extent_xyz / 2
-                    x, y, z = (float(v) for v in corner_xyz)
-                    row: dict = {
-                        "type": point_type,
-                        "location": {"x": x, "y": y, "z": z},
-                    }
-                    if oriented:
-                        row["xyz_rotation_matrix"] = (
-                            placed.rotation_matrix.numpy().tolist()
-                        )
-                    f.write(json.dumps(row) + "\n")
-            written[key] = path
-
-    def _export_transmembrane_picks(
-        self,
-        written: dict[str, Path],
-        output_dir: Path,
-        annotation_version: str,
-        point_type: str,
-        oriented: bool,
-        extent_xyz: torch.Tensor,
-    ) -> None:
-        """One file per transmembrane species, oriented."""
-        by_species: dict[str, list[TransmembranePlacement]] = {}
-        for tp in self.transmembrane_placements:
-            by_species.setdefault(Path(tp.species_id).stem, []).append(tp)
-        for species, tps in by_species.items():
-            key = f"{species}-transmembrane"
-            path = (
-                output_dir / f"{key}-{annotation_version}_{point_type.lower()}.ndjson"
-            )
-            with open(path, "w") as f:
-                for tp in tps:
-                    corner_xyz = tp.center_xyz + extent_xyz / 2
-                    x, y, z = (float(v) for v in corner_xyz)
-                    row = {"type": point_type, "location": {"x": x, "y": y, "z": z}}
-                    if oriented:
-                        row["xyz_rotation_matrix"] = tp.rotation_matrix.numpy().tolist()
-                    f.write(json.dumps(row) + "\n")
-            written[key] = path
-
-    def _export_filament_picks(
-        self,
-        written: dict[str, Path],
-        output_dir: Path,
-        annotation_version: str,
-        point_type: str,
-        oriented: bool,
-    ) -> None:
-        """Per filament species: the monomer picks and, beside them, one path per filament."""
-        by_filament_code: dict[str, list[FilamentInstance]] = {}
-        for inst in self.filament_instances:
-            by_filament_code.setdefault(inst.code, []).append(inst)
-        for code, insts in by_filament_code.items():
-            key = f"{Path(code).stem}-filament"
-            path = (
-                output_dir / f"{key}-{annotation_version}_{point_type.lower()}.ndjson"
-            )
-            with open(path, "w") as f:
-                for inst in insts:
-                    x, y, z = (float(v) for v in inst.position_xyz)
-                    row = {"type": point_type, "location": {"x": x, "y": y, "z": z}}
-                    if oriented:
-                        row["xyz_rotation_matrix"] = (
-                            inst.rotation_matrix.numpy().tolist()
-                        )
-                    f.write(json.dumps(row) + "\n")
-            written[key] = path
-
-            # One `path` per filament as well, so the picks agree with
-            # the label volume about what an object is: both now say a
-            # filament, where the labels said one object and these
-            # points said several dozen.
-            #
-            # Written in ADDITION to the oriented points rather than
-            # instead of them. A path carries no orientations, and the
-            # per-monomer rotation matrices above are what subtomogram
-            # averaging of F-actin needs; nothing in the volume can
-            # recover them. Microtubules ship only a path and so have
-            # no per-dimer poses at all.
-            path_file = output_dir / f"{key}-{annotation_version}_path.ndjson"
-            with open(path_file, "w") as f:
-                for run in _filament_runs(insts):
-                    points = torch.stack([i.position_xyz for i in run])
-                    centre = points.mean(dim=0)
-                    f.write(
-                        json.dumps(
-                            {
-                                "type": "path",
-                                "location": {
-                                    "x": float(centre[0]),
-                                    "y": float(centre[1]),
-                                    "z": float(centre[2]),
-                                },
-                                "path": [
-                                    {
-                                        "x": float(p[0]),
-                                        "y": float(p[1]),
-                                        "z": float(p[2]),
-                                    }
-                                    for p in points
-                                ],
-                                "n_monomers": len(run),
-                            }
-                        )
-                        + "\n"
-                    )
-            written[f"{key}-path"] = path_file
-
-    def _export_microtubule_paths(
-        self, written: dict[str, Path], output_dir: Path, annotation_version: str
-    ) -> None:
-        """One path per microtubule, per species."""
-        by_tube_code: dict[str, list[MicrotubuleInstance]] = {}
-        for tube in self.microtubule_instances:
-            by_tube_code.setdefault(tube.code, []).append(tube)
-        for code, tubes in by_tube_code.items():
-            key = f"{Path(code).stem}-microtubule"
-            path = output_dir / f"{key}-{annotation_version}_path.ndjson"
-            with open(path, "w") as f:
-                for tube in tubes:
-                    axis = tube.axis_xyz
-                    centre = axis.mean(dim=0)
-                    f.write(
-                        json.dumps(
-                            {
-                                "type": "path",
-                                "location": {
-                                    "x": float(centre[0]),
-                                    "y": float(centre[1]),
-                                    "z": float(centre[2]),
-                                },
-                                "path": [
-                                    {
-                                        "x": float(p[0]),
-                                        "y": float(p[1]),
-                                        "z": float(p[2]),
-                                    }
-                                    for p in axis
-                                ],
-                                "radius": tube.lattice.radius,
-                                "n_protofilaments": (tube.lattice.n_protofilaments),
-                            }
-                        )
-                        + "\n"
-                    )
-            written[key] = path
-
-    def _export_bead_picks(
-        self,
-        written: dict[str, Path],
-        output_dir: Path,
-        annotation_version: str,
-        extent_xyz: torch.Tensor,
-    ) -> None:
-        """Every gold fiducial, as plain points, in one file."""
-        # Every fiducial goes in one file regardless of radius or
-        # population: nothing downstream distinguishes bead sizes, and
-        # under a [low, high] radius each instance has a unique size,
-        # so grouping by radius would write one file per bead.
-        key = "gold-bead"
-        path = output_dir / f"{key}-{annotation_version}_point.ndjson"
-        with open(path, "w") as f:
-            for bead in self.bead_instances:
-                corner_xyz = bead.position_xyz + extent_xyz / 2
-                x, y, z = (float(v) for v in corner_xyz)
-                f.write(
-                    json.dumps({"type": "point", "location": {"x": x, "y": y, "z": z}})
-                    + "\n"
-                )
-        written[key] = path
-
     def _packing_grid(
         self, target_shape: tuple[int, int, int], voxel_size: float
     ) -> tuple[float, tuple[int, int, int], int]:
@@ -2564,9 +1285,33 @@ class TomogramSpecimenGenerator:
             clip_axes=self.clip_axes,
         )
 
+    def _load_pdb(self, source: str) -> PDB:
+        """Parse one structure with this generator's PDB settings.
+
+        Shared by the protein stage's fallback load and filament/microtubule
+        rendering, so every structure is parsed with the same flags.
+        """
+        return PDB(
+            source,
+            pdb_cache_dir=self.pdb_cache_dir,
+            verbose=False,
+            compute_atom_species=_wants_atom_species(self.parameterization),
+            readd_hydrogens=self.readd_hydrogens,
+            monomer_library_path=self.monomer_library_path,
+        )
+
     def _build_species_template(
-        self, pdb: PDB, voxel_size: float, device: torch.device
+        self,
+        pdb: PDB,
+        voxel_size: float,
+        device: str | torch.device,
+        coordinates: torch.Tensor | None = None,
     ) -> torch.Tensor:
+        """Render one structure's potential template, returned on `self.device`.
+
+        `coordinates` replaces ``pdb.coordinates`` (default None: use them
+        as-is); filament rendering passes principal-axis-aligned ones.
+        """
         n = estimate_protein_box_size(pdb.max_diameter, voxel_size)
         builder = PotentialBuilder(
             n_xyz=n,
@@ -2574,10 +1319,14 @@ class TomogramSpecimenGenerator:
             atomic_numbers=pdb.atomic_numbers,
             progressbars=False,
             parameterization=self.parameterization,
+            # A replacement `coordinates` is rotation-only, so species stay
+            # aligned with coordinates.
             atom_species=pdb.atom_species,
             b_factors=pdb.b_factors if self.use_deposited_bfactors else None,
         ).to(device)
-        return builder.forward(pdb.coordinates, method="analytic").to(self.device)
+        if coordinates is None:
+            coordinates = pdb.coordinates
+        return builder.forward(coordinates, method="analytic").to(self.device)
 
     def _render_species_pool(
         self,
@@ -2640,7 +1389,6 @@ class TomogramSpecimenGenerator:
                 if not bool(mask.any()):
                     continue
                 template = templates[species_i]
-                label_threshold = _INSTANCE_LABEL_REL_THRESHOLD * float(template.max())
 
                 species_coords = coords[mask]
                 n_instances = species_coords.shape[0]
@@ -2673,31 +1421,16 @@ class TomogramSpecimenGenerator:
                 )
                 next_instance_id += n_instances
 
-                step = self.chunk_size or n_instances
-                for start in range(0, n_instances, step):
-                    end = min(start + step, n_instances)
-                    rotated = rotate_volume(
-                        template, theta[start:end], padding_mode="zeros"
-                    )
-                    # See _stamp_filaments' own identical comment: only
-                    # this small per-chunk result crosses devices, never
-                    # the shared canvas.
-                    rotated = rotated.to(volume.device)
-                    volume = insert_particles_into_micrograph(
-                        rotated,
-                        species_coords[start:end],
-                        pixel_size=voxel_size,
-                        micrograph=volume,
-                    )
-                    binarized = (rotated > label_threshold).to(
-                        torch.int32
-                    ) * instance_ids[start:end].to(volume.device).view(-1, 1, 1, 1)
-                    instance_labels = _insert_instance_labels(
-                        binarized,
-                        species_coords[start:end],
-                        pixel_size=voxel_size,
-                        labels=instance_labels,
-                    )
+                volume, instance_labels = _insert_rotated_copies(
+                    template,
+                    theta,
+                    species_coords,
+                    instance_ids,
+                    volume,
+                    instance_labels,
+                    voxel_size,
+                    self.chunk_size,
+                )
 
                 # One device->host transfer per array, not one per
                 # instance: a per-instance `.cpu()` is a separate copy AND

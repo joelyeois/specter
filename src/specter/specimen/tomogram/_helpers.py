@@ -11,6 +11,8 @@ import torch.nn.functional as F
 from scipy import ndimage
 
 from ...arrays import clip_insert_bounds
+from ...crowding import insert_particles_into_micrograph
+from ...rotations import rotate_volume
 from ..membrane import MembraneGenerator, membrane_bounding_radius
 
 
@@ -82,6 +84,79 @@ def _insert_instance_labels(
         labels[dst] = torch.where(chunk > 0, chunk, labels[dst])
 
     return labels
+
+
+_INSTANCE_LABEL_REL_THRESHOLD = 0.01
+
+
+def _insert_rotated_copies(
+    template: torch.Tensor,
+    theta: torch.Tensor,
+    positions: torch.Tensor,
+    instance_ids: torch.Tensor,
+    volume: torch.Tensor,
+    instance_labels: torch.Tensor,
+    voxel_size: float,
+    chunk_size: int | None,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """
+    Rotate one template per instance, insert the copies into `volume` and
+    their binarized footprints into `instance_labels`, a chunk at a time.
+
+    Shared by the protein stage (`_render_species_pool`) and filament/
+    microtubule rendering (`_render_filament_instances`). A voxel is
+    labelled where the rotated copy exceeds `_INSTANCE_LABEL_REL_THRESHOLD`
+    of the template's own peak.
+
+    Parameters
+    ----------
+    template : torch.Tensor
+        Potential template, shape (Z, Y, X), on the compute device.
+    theta : torch.Tensor
+        Affine matrices from `build_affine_matrix`, shape (N, 3, 4).
+    positions : torch.Tensor
+        Box-centred instance positions (x, y, z), A, shape (N, 3).
+    instance_ids : torch.Tensor
+        int32 instance ids, shape (N,).
+    volume, instance_labels : torch.Tensor
+        The shared canvas and its label volume.
+    voxel_size : float
+        Voxel size, A.
+    chunk_size : int or None
+        Instances rotated per batch; None rotates all N at once.
+
+    Returns
+    -------
+    tuple of torch.Tensor
+        The updated `volume` and `instance_labels`.
+    """
+    label_threshold = _INSTANCE_LABEL_REL_THRESHOLD * float(template.max())
+    n_instances = positions.shape[0]
+    step = chunk_size or n_instances
+    for start in range(0, n_instances, step):
+        end = min(start + step, n_instances)
+        rotated = rotate_volume(template, theta[start:end], padding_mode="zeros")
+        # Moved to the ACCUMULATOR's device (not necessarily the compute
+        # device) right after the compute-heavy rotation -- only this small
+        # per-chunk result crosses devices, never the shared canvas itself
+        # (see `TomogramSpecimenGenerator`'s accumulator_device docstring).
+        rotated = rotated.to(volume.device)
+        volume = insert_particles_into_micrograph(
+            rotated,
+            positions[start:end],
+            pixel_size=voxel_size,
+            micrograph=volume,
+        )
+        binarized = (rotated > label_threshold).to(torch.int32) * instance_ids[
+            start:end
+        ].to(volume.device).view(-1, 1, 1, 1)
+        instance_labels = _insert_instance_labels(
+            binarized,
+            positions[start:end],
+            pixel_size=voxel_size,
+            labels=instance_labels,
+        )
+    return volume, instance_labels
 
 
 def _position_to_center_index(

@@ -501,7 +501,7 @@ def test_filaments_export_one_path_per_filament_alongside_oriented_points():
     import torch
 
     from specter.specimen.filament import FilamentSpec, place_filaments
-    from specter.specimen.tomogram._generator import _filament_runs
+    from specter.specimen.tomogram._filaments import _filament_runs
 
     rng = torch.Generator()
     rng.manual_seed(11)
@@ -531,7 +531,7 @@ def test_filament_runs_handles_a_single_monomer_filament():
     import torch
 
     from specter.specimen.filament import FilamentSpec, place_filaments
-    from specter.specimen.tomogram._generator import _filament_runs
+    from specter.specimen.tomogram._filaments import _filament_runs
 
     rng = torch.Generator()
     rng.manual_seed(2)

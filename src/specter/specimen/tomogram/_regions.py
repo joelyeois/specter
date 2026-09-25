@@ -93,7 +93,7 @@ def classify_membrane_regions(
         material. Default ``0.05 * density.max()`` -- a small fraction of
         the bilayer's own peak potential, matching the relative-threshold
         convention used elsewhere for binarizing a rendered density (see
-        ``tomogram/generator.py``'s ``_INSTANCE_LABEL_REL_THRESHOLD``). If
+        ``tomogram/_helpers.py``'s ``_INSTANCE_LABEL_REL_THRESHOLD``). If
         ``density`` is all zero (no membrane present), every voxel is
         classified as cytosol.
 

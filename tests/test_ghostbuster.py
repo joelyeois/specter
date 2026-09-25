@@ -711,6 +711,106 @@ def test_use_2d_mask_requires_tensor_mask(
         model._compute_loss(out, images, torch.tensor([0]))
 
 
+def _mask_2d_model(n_particles: int, **kwargs: object) -> Reconstructor:
+    """A 16^3 Reconstructor with a soft spherical mask and random fixed poses."""
+    from specter import rotations
+
+    torch.manual_seed(0)
+    n = 16
+    r = torch.linspace(-1, 1, n)
+    zz, yy, xx = torch.meshgrid(r, r, r, indexing="ij")
+    mask = torch.clamp((0.7 - (zz**2 + yy**2 + xx**2).sqrt()) / 0.2, 0, 1)
+    ctf = {
+        "dfu": torch.full((n_particles,), 5000.0),
+        "dfv": torch.full((n_particles,), 4800.0),
+        "dfang": torch.zeros(n_particles),
+        "cs": torch.full((n_particles,), 2.7),
+    }
+    return Reconstructor(
+        V=torch.randn(n, n, n),
+        voxel_size=2.0,
+        quaternions=rotations.random_quaternion(n_particles).reshape(n_particles, 4),
+        translations=torch.randn(n_particles, 2) * 3,
+        ctf_params=ctf,
+        voltage=300.0,
+        dose_per_angstrom=2.0,
+        fsc_mask=mask,
+        use_2d_mask=True,
+        propagation=Propagation(scattering_model="projection"),
+        **kwargs,
+    )
+
+
+@pytest.mark.parametrize("batch", [1, 3, 11])
+def test_cached_2d_masks_match_per_step_projection(batch: int) -> None:
+    """With fixed poses the projected masks are cached, and every batch --
+    full or the epoch's short last one -- gets exactly the per-step values."""
+    n_particles = 11
+    model = _mask_2d_model(n_particles)
+    g = torch.Generator().manual_seed(1)
+    for _ in range(2):
+        perm = torch.randperm(n_particles, generator=g)
+        for start in range(0, n_particles, batch):
+            idx = perm[start : start + batch]
+            shape = torch.Size((len(idx), 16, 16))
+            cached = model._project_fsc_mask_2d(idx, shape)
+            assert torch.equal(cached, model._project_fsc_mask_2d_uncached(idx, shape))
+    assert model._mask_2d_cache is not None
+    assert model._mask_2d_cache.shape == (n_particles, 16, 16)
+
+
+def test_cached_2d_masks_track_the_module_device() -> None:
+    """A cache built on one device is rebuilt, not reused, after a move."""
+    model = _mask_2d_model(4)
+    idx = torch.arange(2)
+    model._project_fsc_mask_2d(idx, torch.Size((2, 16, 16)))
+    stale = torch.zeros_like(model._mask_2d_cache, device="meta")
+    model._mask_2d_cache = stale
+    rows = model._project_fsc_mask_2d(idx, torch.Size((2, 16, 16)))
+    assert model._mask_2d_cache is not stale and rows.device.type == "cpu"
+    assert torch.equal(
+        rows, model._project_fsc_mask_2d_uncached(idx, torch.Size((2, 16, 16)))
+    )
+
+
+@pytest.mark.parametrize("refined", [{"lr_R": 1e-3}, {"lr_T": 1e-3}])
+def test_2d_masks_are_not_cached_while_poses_are_refined(refined: dict) -> None:
+    """A refined pose changes every step, so its projection is recomputed."""
+    model = _mask_2d_model(4, lr=1e-3, **refined)
+    idx = torch.arange(2)
+    before = model._project_fsc_mask_2d(idx, torch.Size((2, 16, 16)))
+    assert model._mask_2d_cache is None
+    with torch.no_grad():
+        if "lr_R" in refined:
+            model.rotations.copy_(torch.tensor([[1.0, 0.0, 0.0, 0.0]]).expand(4, 4))
+        else:
+            model.translations.add_(5.0)
+    after = model._project_fsc_mask_2d(idx, torch.Size((2, 16, 16)))
+    assert not torch.equal(before, after)
+
+
+def test_2d_mask_cache_respects_its_memory_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A table larger than the budget is never built; masks project per step."""
+    import specter.ghostbuster._reconstructor as recon
+
+    monkeypatch.setattr(recon, "MASK_2D_CACHE_MAX_BYTES", 4 * 16 * 16 * 4 - 1)
+    model = _mask_2d_model(4)
+    model._project_fsc_mask_2d(torch.arange(2), torch.Size((2, 16, 16)))
+    assert model._mask_2d_cache is None
+
+
+def test_2d_mask_cache_is_not_checkpoint_state() -> None:
+    """The derived table stays out of the state dict (and so out of DDP's
+    buffer broadcast)."""
+    model = _mask_2d_model(4)
+    model._project_fsc_mask_2d(torch.arange(2), torch.Size((2, 16, 16)))
+    assert model._mask_2d_cache is not None
+    assert not any("mask_2d" in k for k in model.state_dict())
+    assert not any("mask_2d" in k for k, _ in model.named_buffers())
+
+
 # ---------------------------------------------------------------------------
 # Alternate loss models (NCC / learned noise / NPS-weighted)
 # ---------------------------------------------------------------------------

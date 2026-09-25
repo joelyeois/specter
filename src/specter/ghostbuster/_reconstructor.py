@@ -43,6 +43,12 @@ from ._losses import (
 from ..settings import Camera, Optics, Propagation
 from specter.options import RotateMode, Scheduler
 
+#: Largest table of projected 2D masks `Reconstructor` keeps on the device,
+#: in bytes. The table is ``n_particles * nxy**2`` float32 values, 1 MiB a
+#: particle at a 512 box, so this admits 2048 particles there, 8192 at 256
+#: and 32768 at 128. Above it the masks are projected per step, as before.
+MASK_2D_CACHE_MAX_BYTES = 2 * 2**30
+
 
 class Reconstructor(_BaseReconstructor):
     """
@@ -116,7 +122,11 @@ class Reconstructor(_BaseReconstructor):
         ``None`` disables all file output.
     use_2d_mask : bool
         If True, rotate ``fsc_mask`` for each particle, project it to 2D, and
-        use that projected mask to weight the image-domain MSE loss.
+        use that projected mask to weight the image-domain MSE loss. When the
+        poses are fixed (``lr_R`` and ``lr_T`` both None) every particle's
+        projection is computed once, on first use, and kept on the device, so
+        long as the table fits in :data:`MASK_2D_CACHE_MAX_BYTES`; with a pose
+        being refined it is recomputed each step from the current pose.
     halfset_label : str, optional
         Short label (e.g. ``"A"`` or ``"B"``) appended to saved filenames when
         two halfset runs share the same ``run_dir``.
@@ -281,6 +291,13 @@ class Reconstructor(_BaseReconstructor):
         self.register_buffer("kmask", kmask)
         self.register_buffer("nps_weight", nps_weight)
         self.use_2d_mask = use_2d_mask
+        #: Every particle's projected 2D mask, (N, H, W), when the poses are
+        #: fixed and the table fits -- see `_project_fsc_mask_2d`. A plain
+        #: attribute, not a buffer: derived state belongs in no checkpoint,
+        #: and DDP broadcasts every buffer (persistent or not) each step.
+        self._mask_2d_cache: torch.Tensor | None = None
+        #: The batch size `_mask_2d_cache`'s rows were projected in.
+        self._mask_2d_cache_batch = 0
 
     def _setup_noise_model(
         self,
@@ -571,7 +588,65 @@ class Reconstructor(_BaseReconstructor):
     def _project_fsc_mask_2d(
         self, idx: torch.Tensor, image_shape: torch.Size
     ) -> torch.Tensor:
-        """Rotate ``fsc_mask`` with the image generator geometry and max-project it."""
+        """
+        The batch's projected 2D masks, from the cached table when there is one.
+
+        With the poses fixed, a particle's projection never changes, and
+        rotating the whole 3D mask costs as much as another forward rotation
+        (13-17% of a rytov step at 256 and 512 boxes). So the first call
+        projects every particle once and later calls gather rows; see
+        `_build_mask_2d_cache` for why a row is bit-identical to projecting it
+        per step.
+        """
+        mask = self._checked_fsc_mask()
+        cache = self._mask_2d_cache
+        if cache is not None and cache.device != mask.device:
+            # The module moved, which `_apply` does not do for a plain
+            # attribute. Rebuilt rather than copied: the rows are what this
+            # device's rotation gives, as they would be uncached.
+            cache = self._mask_2d_cache = None
+        b = int(image_shape[0])
+        if cache is None and self._mask_2d_cacheable(image_shape):
+            cache = self._mask_2d_cache = self._build_mask_2d_cache(mask, image_shape)
+            self._mask_2d_cache_batch = b
+        if cache is None or b != self._mask_2d_cache_batch:
+            return self._project_fsc_mask_2d_uncached(idx, image_shape)
+        rows = cache[idx]
+        return rows.unsqueeze(0) if rows.ndim == 2 else rows
+
+    def _build_mask_2d_cache(
+        self, mask: torch.Tensor, image_shape: torch.Size
+    ) -> torch.Tensor:
+        """
+        Every particle's projection, each computed in a batch of ``image_shape[0]``.
+
+        On CUDA the rotation's batched matrix product picks its kernel by
+        batch size, so a projection is exact only against one made in a batch
+        of the same size (a batch of 1, or of 40, differs from one of 4 by
+        ~1e-6); within a size, which particles share the batch changes
+        nothing. So every chunk here is a full batch -- the last one overlaps
+        its predecessor instead of running short -- and the table is served
+        only to batches of that size. The epoch's short final batch is
+        projected directly, as it always was.
+        """
+        n = self.rotations.shape[0]
+        b = int(image_shape[0])
+        all_idx = torch.arange(n, device=mask.device)
+        table: torch.Tensor | None = None
+        for i in range(0, n, b):
+            start = min(i, n - b)
+            rows = self._project_fsc_mask_2d_uncached(
+                all_idx[start : start + b], image_shape
+            )
+            if table is None:
+                # The projection's own dtype, which autocast may choose.
+                table = rows.new_empty((n, *rows.shape[1:]))
+            table[start : start + b] = rows
+        assert table is not None
+        return table
+
+    def _checked_fsc_mask(self) -> torch.Tensor:
+        """``fsc_mask``, after checking it is a 3D tensor shaped like ``V``."""
         if not isinstance(self.fsc_mask, torch.Tensor):
             raise ValueError("use_2d_mask=True requires fsc_mask to be a 3D tensor.")
         if self.fsc_mask.ndim != 3:
@@ -585,7 +660,25 @@ class Reconstructor(_BaseReconstructor):
                 "use_2d_mask=True requires fsc_mask shape to match V shape; "
                 f"got {tuple(mask.shape)} and {tuple(self.V.shape[-3:])}."
             )
+        return mask
 
+    def _mask_2d_cacheable(self, image_shape: torch.Size) -> bool:
+        """Whether the projected masks are fixed and small enough to keep."""
+        if isinstance(self.rotations, nn.Parameter) or isinstance(
+            self.translations, nn.Parameter
+        ):
+            return False
+        n = self.rotations.shape[0]
+        if not 1 <= image_shape[0] <= n:
+            return False
+        n_bytes = n * image_shape[-2] * image_shape[-1] * self.fsc_mask.element_size()
+        return n_bytes <= MASK_2D_CACHE_MAX_BYTES
+
+    def _project_fsc_mask_2d_uncached(
+        self, idx: torch.Tensor, image_shape: torch.Size | tuple[int, ...]
+    ) -> torch.Tensor:
+        """Rotate ``fsc_mask`` with the image generator geometry and max-project it."""
+        mask = self._checked_fsc_mask()
         with torch.no_grad():
             Q = self.rotations[idx]
             T = self.translations[idx]
@@ -600,7 +693,7 @@ class Reconstructor(_BaseReconstructor):
             theta = rotations.build_affine_matrix(R, T)
             projected = self.imagegenerator.rotator(mask, theta).max(dim=1).values
 
-        if projected.shape != image_shape:
+        if tuple(projected.shape) != tuple(image_shape):
             raise ValueError(
                 "Projected 2D mask shape does not match image batch shape; "
                 f"got {tuple(projected.shape)} and {tuple(image_shape)}."

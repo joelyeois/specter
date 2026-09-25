@@ -339,13 +339,20 @@ class Detector(L.LightningModule):
 
         if self.noise_model is None:
             return images
-        else:
-            return torch.stack(
-                [
-                    self.apply_coincidence(img, d.item(), r.item())
-                    for img, d, r in zip(images, dose, coincidence_radius)
-                ]
+        # One host transfer per argument for the whole batch rather than two
+        # `.item()` syncs per image, and the frame-weight grids built once:
+        # every image in the batch shares their shape and device.
+        radii = coincidence_radius.tolist()
+        weights = (
+            self._frame_weight_grids(
+                (int(images.shape[-2]), int(images.shape[-1])), images.device
             )
+            if self.noise_model == "poisson"
+            else None
+        )
+        return torch.stack(
+            [self._apply_coincidence(img, r, weights) for img, r in zip(images, radii)]
+        )
 
     def apply_detector_physics(
         self,
@@ -555,6 +562,37 @@ class Detector(L.LightningModule):
         """
         if self.noise_model != "poisson":
             return img
+        weights = self._frame_weight_grids(
+            (int(img.shape[-2]), int(img.shape[-1])), img.device
+        )
+        return self._apply_coincidence(img, coincidence_radius, weights)
+
+    def _apply_coincidence(
+        self,
+        img: torch.Tensor,
+        coincidence_radius: float,
+        weights: torch.Tensor | None,
+    ) -> torch.Tensor:
+        """
+        Body of :meth:`apply_coincidence`, with the frame-weight grids given.
+
+        Parameters
+        ----------
+        img : torch.Tensor
+            Total-dose image, shape (H, W).
+        coincidence_radius : float
+            Coincidence exclusion radius in pixels.
+        weights : torch.Tensor or None
+            ``self._frame_weight_grids(img.shape, img.device)``, hoisted so a
+            batch builds it once rather than once per image.
+
+        Returns
+        -------
+        torch.Tensor
+            Simulated image after dose-fractionated noise and coincidence.
+        """
+        if self.noise_model != "poisson":
+            return img
 
         if coincidence_radius <= 0.0 and self.dose_weights is None:
             return torch.poisson(torch.clamp(img, min=0.0))
@@ -570,7 +608,12 @@ class Detector(L.LightningModule):
         # above -- otherwise any negative pixel survives the division below.
         img = torch.clamp(img, min=0.0)
         img_sum = img.sum()
-        if img_sum <= 0.0:
+        # Both scalars in one host transfer. The effective dose is divided on
+        # the device, in the image's own precision, exactly as before.
+        img_sum_host, dose_effective = torch.stack(
+            [img_sum, img_sum / (self.pixel_size**2 * img.shape[0] * img.shape[1])]
+        ).tolist()
+        if img_sum_host <= 0.0:
             # No expected electrons anywhere (e.g. an all-zero specimen
             # volume -- can happen with scattering_model="ctf", which has no
             # vacuum baseline, unlike multislice's exp(i*sigma*dz*V) == 1 at
@@ -579,17 +622,11 @@ class Detector(L.LightningModule):
             return torch.zeros_like(img)
         intensity_map = img / img_sum
 
-        # Use img_sum to derive the effective dose so that the radius>0 path
-        # agrees with torch.poisson(img) at radius=0: both correctly account
-        # for real electron absorption from alpha (imaginary potential), and
-        # B-factor attenuation is treated consistently across both paths.
-        dose_effective = (
-            img_sum / (self.pixel_size**2 * img.shape[0] * img.shape[1])
-        ).item()
-
-        weights = self._frame_weight_grids(
-            (int(img.shape[-2]), int(img.shape[-1])), img.device
-        )
+        # dose_effective above is derived from img_sum so that the radius>0
+        # path agrees with torch.poisson(img) at radius=0: both correctly
+        # account for real electron absorption from alpha (imaginary
+        # potential), and B-factor attenuation is treated consistently across
+        # both paths.
 
         final_image = torch.zeros_like(img)
         accum_k = None

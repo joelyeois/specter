@@ -465,6 +465,25 @@ class PotentialBuilder(L.LightningModule):
         self.shtyrov_groups = [("species", s) for s in matched] + [
             ("element", z) for z in fallback_elements
         ]
+        # Each atom's row in `shtyrov_groups` if its species matched, else -1,
+        # so `forward` selects a species group with one tensor comparison
+        # rather than a Python pass over every atom per group (43 groups x
+        # 374k atoms for a ribosome assembly). Derived from atom_species, so
+        # it is a non-persistent buffer: it follows `.to()` but is not
+        # checkpoint state.
+        species_row = {s: i for i, s in enumerate(matched)}
+        self.register_buffer(
+            "_species_group_ids",
+            torch.tensor(
+                [
+                    -1 if s is None else species_row.get(s, -1)
+                    for s in self.atom_species
+                ],
+                dtype=torch.long,
+                device=self.atomic_numbers.device,
+            ),
+            persistent=False,
+        )
 
         self.atomic_potentials_3d = torch.empty(
             len(self.shtyrov_groups),
@@ -806,9 +825,7 @@ class PotentialBuilder(L.LightningModule):
                     assert isinstance(key, str)
                     assert self.atom_species is not None
                     label = key
-                    mask = torch.tensor(
-                        [s == key for s in self.atom_species], device=self.device
-                    )
+                    mask = self._species_group_ids == i
                 else:
                     assert isinstance(key, int)
                     label = str(atom_symbol(key))

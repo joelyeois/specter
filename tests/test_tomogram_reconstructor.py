@@ -149,6 +149,34 @@ def test_fov_mask_zeros_border_at_high_tilt(tr_kwargs: dict) -> None:
     assert mask[4, 4] == 1.0
 
 
+def test_fov_mask_cache_matches_the_per_step_computation(tr_kwargs: dict) -> None:
+    """The cached per-tilt border widths give the mask the per-step
+    evaluation from the tilt pose gave, for every tilt."""
+    model = TomogramReconstructor(
+        **tr_kwargs,
+        propagation=Propagation(scattering_model="projection"),
+        tilt=TiltGeometry(tilt_axis="y"),
+    )
+    for idx, Q in enumerate(model.quaternions):
+        theta = roma.unitquat_to_rotvec(Q.unsqueeze(0))[0].norm()
+        real_fov = int(
+            (model.nxy * torch.cos(theta) - model.nz * torch.sin(theta))
+            .clamp(min=1)
+            .item()
+        )
+        mask = model._fov_mask(idx)
+        if real_fov >= model.nxy:
+            assert mask is None
+            continue
+        pad = (model.nxy - real_fov) // 2
+        expected = torch.ones(model.nxy, model.nxy)
+        expected[:, :pad] = 0.0
+        expected[:, model.nxy - pad :] = 0.0
+        assert mask is not None
+        assert torch.equal(mask, expected)
+    assert model._fov_pads() is model._fov_pads()
+
+
 # ---------------------------------------------------------------------------
 # Training loop
 # ---------------------------------------------------------------------------

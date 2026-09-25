@@ -320,3 +320,28 @@ def test_coincidence_sparse_grid_avoids_dense_allocation(
     assert result.shape == intensity.shape
     assert torch.isfinite(result).all()
     assert result.sum() > 0
+
+
+@pytest.mark.parametrize("weighted", [False, True])
+def test_batched_detection_matches_per_image_coincidence(weighted: bool) -> None:
+    """`detect_expected_counts` builds the frame-weight grids once per batch
+    and reads the radii in one transfer; under a seed the stack is bitwise
+    the one `apply_coincidence` gives image by image."""
+    gen = torch.Generator().manual_seed(0)
+    images = 5.0 + 5.0 * torch.rand(3, 24, 24, generator=gen)
+    dose = torch.full((3,), 10.0)
+    radius = torch.tensor([1.5, 0.5, 2.0])
+    weights = torch.rand(4, 9, generator=gen) + 0.5 if weighted else None
+    det = Detector(
+        1.0, noise_model="poisson", n_frames=4, dose_weights=weights, progressbars=False
+    )
+    torch.manual_seed(11)
+    batched = det.detect_expected_counts(images.clone(), dose, radius)
+    torch.manual_seed(11)
+    per_image = torch.stack(
+        [
+            det.apply_coincidence(img.clone(), float(d), float(r))
+            for img, d, r in zip(images, dose, radius)
+        ]
+    )
+    assert torch.equal(batched, per_image)

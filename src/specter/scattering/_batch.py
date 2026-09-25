@@ -115,8 +115,8 @@ class Scattering(L.LightningModule):
         # Fresnel transfer function for multislice: one slice step.
         if scattering_model == "multislice":
             F = fresnel_propagator(k2, self.wavelength, pixel_size)
-            self.register_buffer("F_real", F.real, persistent=False)
-            self.register_buffer("F_imag", F.imag, persistent=False)
+            self.register_buffer("_F_step_real", F.real, persistent=False)
+            self.register_buffer("_F_step_imag", F.imag, persistent=False)
 
         # Fresnel transfer function for first Born
         if scattering_model in ("firstborn", "rytov", "kinematic"):
@@ -124,20 +124,31 @@ class Scattering(L.LightningModule):
                 raise ValueError(
                     f"nz is required for scattering_model={scattering_model!r}."
                 )
-            # One propagator per slice, from that slice to the exit plane.
-            F = torch.stack(
+            # One propagator per slice, from that slice to the exit plane,
+            # built as one broadcast. Each slice's scalar is formed in Python
+            # double precision exactly as a per-slice
+            # `fresnel_propagator(k2, wavelength, pixel_size * (nz - i))`
+            # call forms it, so the stack is bitwise the per-slice one.
+            coef = torch.tensor(
                 [
-                    fresnel_propagator(k2, self.wavelength, pixel_size * (nz - i))
-                    for i in track(
-                        range(nz),
-                        description="Create first Born propagators",
-                        transient=True,
-                        disable=not (self.progressbars),
-                    )
-                ]
+                    1j * torch.pi * self.wavelength * (pixel_size * (nz - i))
+                    for i in range(nz)
+                ],
+                dtype=torch.complex64,
             )
-            self.register_buffer("F_real", F.real, persistent=False)
-            self.register_buffer("F_imag", F.imag, persistent=False)
+            F = torch.exp(coef[:, None, None] * k2)
+            # Stored once, in traversal order, as the (Z, Y, X, 2) real view
+            # of the complex stack: `_propagator` reads it back with a
+            # zero-copy `view_as_complex`. The earlier layout held separate
+            # real and imaginary buffers AND a cached complex (and, for the
+            # negative sign, flipped) copy, twice the memory -- 2 GiB where
+            # 1 GiB does at a 512 box. Real rather than complex so that
+            # `Module.double()` and friends still convert it.
+            if ews_curvature_sign == "negative":
+                F = F.flip(0)
+            self.register_buffer(
+                "_F_traversal", torch.view_as_real(F), persistent=False
+            )
 
         self.klim = klim
         kmask = bandlimit_mask(k, pixel_size, klim)
@@ -182,7 +193,7 @@ class Scattering(L.LightningModule):
         loop -- 4 GB for a 512-pixel box with ``pad_fft`` -- for a value
         each slice consumes once.
         """
-        F = self.F_real + 1j * self.F_imag
+        F = self._F_step_real + 1j * self._F_step_imag
 
         # Fold the bandlimit into the propagator once, rather than once per
         # slice. Bitwise-exact only because kmask is binary (0.0/1.0, see
@@ -243,25 +254,49 @@ class Scattering(L.LightningModule):
         assert exitwave is not None, "V must have at least one z-slice"
         return exitwave
 
+    @property
+    def F_real(self) -> torch.Tensor:
+        """Real part of the propagator (stack, for the single-scatter models).
+
+        For firstborn/rytov/kinematic it is derived from the stored stack on
+        each access, in natural slice order (entry ``i`` propagates slice
+        ``i`` to the exit plane) whatever the traversal order.
+        """
+        return self._natural_propagator().real
+
+    @property
+    def F_imag(self) -> torch.Tensor:
+        """Imaginary part of the propagator; see :attr:`F_real`."""
+        return self._natural_propagator().imag
+
+    def _natural_propagator(self) -> torch.Tensor:
+        if self.scattering_model == "multislice":
+            return torch.complex(self._F_step_real, self._F_step_imag)
+        F = torch.view_as_complex(self._F_traversal)
+        return F.flip(0) if self.ews_curvature_sign == "negative" else F
+
     def _propagator(self, V: torch.Tensor) -> torch.Tensor:
         """
         The complex first-Born propagator stack ``(Z, Y, X)`` on `V`'s device
         and complex dtype, in slice order matching the traversal.
 
-        Cached: it was rebuilt from ``F_real``/``F_imag`` on every call, a
-        1 GB complex volume at a 512 box, and the reversed traversal for
-        ``ews_curvature_sign="negative"`` flipped the *volume* instead --
-        a full copy of ``V`` in forward and again in backward -- when
-        flipping the constant propagator once is the same sum.
+        Stored flipped once at construction for ``ews_curvature_sign=
+        "negative"``, rather than flipping the *volume* -- a full copy of
+        ``V`` in forward and again in backward -- since flipping the constant
+        propagator is the same sum. On the buffer's own device and dtype this
+        is a zero-copy view of it; any other combination is converted once and
+        cached.
         """
         cdtype = torch.complex128 if V.dtype == torch.float64 else torch.complex64
-        key = (V.device, cdtype, self.ews_curvature_sign)
+        F = torch.view_as_complex(self._F_traversal)
+        if F.device == V.device and F.dtype == cdtype:
+            self._propagator_cache = None
+            return F
+        key = (V.device, cdtype)
         cached = getattr(self, "_propagator_cache", None)
         if cached is not None and cached[0] == key:
             return cached[1]
-        F = (self.F_real + 1j * self.F_imag).to(device=V.device, dtype=cdtype)
-        if self.ews_curvature_sign == "negative":
-            F = F.flip(0)
+        F = F.to(device=V.device, dtype=cdtype)
         self._propagator_cache = (key, F)
         return F
 

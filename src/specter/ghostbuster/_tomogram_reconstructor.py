@@ -302,17 +302,10 @@ class TomogramReconstructor(_BaseReconstructor):
         The shrinking dimension is X for ``tilt_axis="y"`` and Y for
         ``tilt_axis="x"``.
         """
-        Q = self.quaternions[tilt_idx]
-        rotvec = roma.unitquat_to_rotvec(Q.unsqueeze(0))[0]
-        theta = rotvec.norm()  # radians (scalar tensor)
-
-        cos_t = torch.cos(theta)
-        sin_t = torch.sin(theta)
-        real_fov = int((self.nxy * cos_t - self.nz * sin_t).clamp(min=1).item())
-        if real_fov >= self.nxy:
+        pad = self._fov_pads()[tilt_idx]
+        if pad is None:
             return None
 
-        pad = (self.nxy - real_fov) // 2
         mask = torch.ones(self.nxy, self.nxy, device=self.device, dtype=torch.float32)
         if self.tilt_axis == "x":
             # rotation around X → Y shrinks
@@ -323,6 +316,33 @@ class TomogramReconstructor(_BaseReconstructor):
             mask[:, :pad] = 0.0
             mask[:, self.nxy - pad :] = 0.0
         return mask
+
+    def _fov_pads(self) -> list[int | None]:
+        """
+        Per-tilt border width of the real-FOV mask, ``None`` where there is none.
+
+        The tilt poses are fixed buffers, so this is computed once, on first
+        use, rather than read back from the device with an ``.item()`` sync on
+        every training step. Keyed on the poses' device, since the widths are
+        evaluated there and the trigonometry may round differently on another.
+        The mask itself is rebuilt per call from the cached width: it is an
+        asynchronous fill, and caching one ``nxy**2`` mask per tilt would grow
+        device memory with the tilt count.
+        """
+        key = self.quaternions.device
+        cached = getattr(self, "_fov_pads_cache", None)
+        if cached is not None and cached[0] == key:
+            return cached[1]
+        pads: list[int | None] = []
+        for Q in self.quaternions:
+            rotvec = roma.unitquat_to_rotvec(Q.unsqueeze(0))[0]
+            theta = rotvec.norm()  # radians (scalar tensor)
+            cos_t = torch.cos(theta)
+            sin_t = torch.sin(theta)
+            real_fov = int((self.nxy * cos_t - self.nz * sin_t).clamp(min=1).item())
+            pads.append(None if real_fov >= self.nxy else (self.nxy - real_fov) // 2)
+        self._fov_pads_cache = (key, pads)
+        return pads
 
     def _forward_tilt(self, V_prepared: torch.Tensor, tilt_idx: int) -> torch.Tensor:
         """
@@ -451,8 +471,8 @@ class TomogramReconstructor(_BaseReconstructor):
         V_prepared = self._prepare_volume()
 
         total_norm_loss = torch.tensor(0.0, device=self.device)
-        for i in range(len(tilt_indices)):
-            idx = int(tilt_indices[i].item())
+        # One host transfer for the batch's tilt indices, not a sync per tilt.
+        for i, idx in enumerate(tilt_indices.tolist()):
             sim = self._forward_tilt(V_prepared, idx)
             norm_loss = self._compute_loss(sim, obs_images[i], idx)
             total_norm_loss = total_norm_loss + norm_loss
@@ -463,13 +483,16 @@ class TomogramReconstructor(_BaseReconstructor):
         if self.sparsity is not None:
             sparsity_loss = self.sparsity * torch.mean(torch.abs(self.V))
             loss = loss + sparsity_loss
-            self.log_sparsity_loss.append(sparsity_loss.detach().cpu())
+            self.log_sparsity_loss.append(sparsity_loss.detach())
 
         # Gathered/averaged across ranks under multi-GPU (DDP) for logging
         # only -- `loss` itself (fed to manual_backward below) stays the
         # local, per-rank value; DDP synchronises gradients on its own.
-        self.log_norm_loss.append(self._gather_for_logging(norm_loss).cpu())
-        self.log_total_loss.append(self._gather_for_logging(loss).cpu())
+        # Kept on the device, as in `Reconstructor`: a `.cpu()` here is a
+        # host sync per step. The lists are read once, when the metrics are
+        # built.
+        self.log_norm_loss.append(self._gather_for_logging(norm_loss).detach())
+        self.log_total_loss.append(self._gather_for_logging(loss).detach())
 
         self._optimise(loss)
         return loss

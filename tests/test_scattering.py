@@ -709,6 +709,44 @@ def test_propagator_is_cached_and_flipped_once():
     V = torch.rand(1, 5, 8, 8)
     F1 = model._propagator(V)
     F2 = model._propagator(V)
-    assert F1 is F2
+    # A zero-copy view of the one stored stack, already in traversal order.
+    assert F1.data_ptr() == F2.data_ptr() == model._F_traversal.data_ptr()
     expected = (model.F_real + 1j * model.F_imag).flip(0)
     assert torch.equal(F1, expected)
+    # Another dtype is converted once and cached.
+    Vd = V.double()
+    assert model._propagator(Vd) is model._propagator(Vd)
+    assert torch.equal(model._propagator(Vd), expected.to(torch.complex128))
+
+
+@pytest.mark.parametrize("sign", ["negative", "positive"])
+def test_propagator_stack_is_the_per_slice_stack(sign):
+    """The broadcast build is bitwise the per-slice `fresnel_propagator` stack,
+    held once, and is neither checkpoint state nor lost by `.double()`."""
+    from specter.scattering._kernels import frequency_grid, fresnel_propagator
+
+    n, nz, px = 16, 9, 1.3
+    model = Scattering(
+        n,
+        px,
+        300.0,
+        scattering_model="firstborn",
+        nz=nz,
+        ews_curvature_sign=sign,
+        progressbars=False,
+    )
+    k2 = frequency_grid(n, px) ** 2
+    per_slice = torch.stack(
+        [fresnel_propagator(k2, model.wavelength, px * (nz - i)) for i in range(nz)]
+    )
+    assert torch.equal(model.F_real, per_slice.real)
+    assert torch.equal(model.F_imag, per_slice.imag)
+    traversal = per_slice.flip(0) if sign == "negative" else per_slice
+    assert torch.equal(torch.view_as_complex(model._F_traversal), traversal)
+    assert [name for name, _ in model.named_buffers()].count("_F_traversal") == 1
+    assert "_F_traversal" not in model.state_dict()
+    model.double()
+    assert torch.equal(
+        model._propagator(torch.zeros(1, nz, n, n, dtype=torch.float64)),
+        traversal.to(torch.complex128),
+    )

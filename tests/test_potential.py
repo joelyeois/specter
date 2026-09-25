@@ -134,6 +134,31 @@ def test_potential_builder_shtyrov_species_smoke():
     assert not torch.allclose(volume, volume_kirkland)
 
 
+def test_species_group_ids_select_what_a_string_comparison_selects():
+    """`forward`'s cached per-atom species rows pick exactly the atoms a
+    per-group string comparison picks, follow `.to()`, and are not state."""
+    atomic_numbers = torch.tensor([8, 6, 8, 26, 8, 7], dtype=torch.long)
+    atom_species = ["O(HH)", "C(unmatched)", "O(HH)", None, "O(C)", "N(unmatched)"]
+    with pytest.warns(UserWarning, match="fall back to"):
+        pb = PotentialBuilder(
+            16,
+            1.0,
+            atomic_numbers,
+            parameterization="shtyrov",
+            atom_species=atom_species,
+            progressbars=False,
+        )
+    assert pb.shtyrov_groups is not None
+    for i, (kind, key) in enumerate(pb.shtyrov_groups):
+        if kind == "species":
+            expected = torch.tensor([s == key for s in atom_species])
+            assert torch.equal(pb._species_group_ids == i, expected)
+    assert "_species_group_ids" in dict(pb.named_buffers())
+    assert "_species_group_ids" not in pb.state_dict()
+    if torch.cuda.is_available():
+        assert pb.to("cuda")._species_group_ids.device.type == "cuda"
+
+
 def test_shtyrov_species_potential_matches_analytic_closed_form():
     """
     shtyrov_atomic_potential_3d_by_species must match the analytic 3D

@@ -162,8 +162,8 @@ def test_shtyrov_species_potential_matches_analytic_closed_form():
     P = table["O(HH)"].double()
     a, b = P[:, 0], P[:, 1]
 
-    a0 = 0.529  # Bohr radius, [Å]
-    e = 14.4  # electron charge, [V·Å]
+    a0 = 0.529177  # Bohr radius, [Å], CODATA
+    e = 14.399645  # electron charge, [V·Å], CODATA
     c1 = 2 * torch.pi * e * a0
 
     def independent_reference(r: float) -> float:
@@ -572,8 +572,8 @@ def test_potential_builder_analytic_robust_to_subvoxel_position():
         progressbars=False,
     )
 
-    a0 = 0.529
-    e = 14.4
+    a0 = 0.529177  # CODATA
+    e = 14.399645  # CODATA
     c1 = 2 * torch.pi * e * a0
     a_coefs, _ = pb._get_analytic_atom_coefficients()
     expected_total = (c1 * a_coefs[0].sum()).item()
@@ -1320,7 +1320,7 @@ def test_bfactor_conserves_the_integrated_potential(bfactor):
     pb = _oxygen_builder(n=n, dx=dx, b_factors=b)
 
     a_coefs, _ = pb._get_analytic_atom_coefficients()
-    c1 = 2 * torch.pi * 14.4 * 0.529
+    c1 = 2 * torch.pi * 14.399645 * 0.529177  # 2 pi e a0, CODATA
     expected_total = (c1 * a_coefs[0].sum()).item()
 
     volume = pb.forward(torch.tensor([[0.0, 0.0, 0.0]]), method="analytic")
@@ -1358,7 +1358,7 @@ def test_bfactor_matches_numerical_quadrature():
     pb = _oxygen_builder(n=16, dx=dx, b_factors=torch.tensor([B]))
     a_coefs, b_coefs = pb._get_analytic_atom_coefficients()
     a, b = a_coefs[0].double(), b_coefs[0].double() + B
-    c1 = 2 * torch.pi * 14.4 * 0.529
+    c1 = 2 * torch.pi * 14.399645 * 0.529177  # 2 pi e a0, CODATA
 
     volume = pb.forward(torch.tensor([[0.0, 0.0, 0.0]]), method="analytic")
 

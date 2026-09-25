@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import torch
 
+from ..constants import rest_mass_energy
+
 
 def b_envelope(k2: torch.Tensor, bfactor: torch.Tensor) -> torch.Tensor:
     """
@@ -155,7 +157,7 @@ def critical_exposure(
     v = torch.as_tensor(voltage, dtype=ne.dtype, device=ne.device)
     if v.ndim == 1:
         v = v.view(-1, 1, 1)
-    m0c2 = 510.998950  # keV
+    m0c2 = rest_mass_energy() / 1.0e3  # keV
     beta2 = 1.0 - 1.0 / (1.0 + v / m0c2) ** 2
     beta2_300 = 1.0 - 1.0 / (1.0 + 300.0 / m0c2) ** 2
     return ne * (beta2 / beta2_300)

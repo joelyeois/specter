@@ -17,6 +17,8 @@ import torch
 from Bio.PDB.MMCIF2Dict import MMCIF2Dict
 from torch.special import modified_bessel_k0, modified_bessel_k1
 
+from ..constants import bohr_radius, electron_charge_volt_angstrom
+
 # A handful of bundled Shtyrov bonded-species entries (e.g. 'O(C, amide)',
 # 'H(N)') have a b_i = 0 term. In the b_i*exp(-b_i*k^2/4) Fourier-space
 # parameterization that is a constant (frequency-independent) contribution,
@@ -265,8 +267,8 @@ def kirkland_atomic_potential_2d(
         2D potential, same shape as r_xy.
     """
     device = r_xy.device
-    a0 = 0.529  # Bohr radius, [Å]
-    e = 14.4  # electron charge, [V·Å]
+    a0 = bohr_radius()  # [Å]
+    e = electron_charge_volt_angstrom()  # [V·Å]
 
     c1 = 4 * (torch.pi**2) * a0 * e
     c2 = 2 * (torch.pi**2) * a0 * e
@@ -318,8 +320,8 @@ def kirkland_atomic_potential_3d(
         Atomic potential in units of V, same shape as r_xyz.
     """
     device = r_xyz.device
-    a0 = 0.529  # Bohr radius, [Å]
-    e = 14.4  # electron charge, [V·Å]
+    a0 = bohr_radius()  # [Å]
+    e = electron_charge_volt_angstrom()  # [V·Å]
     c1 = 2 * (torch.pi**2) * a0 * e
     c2 = 2 * (torch.pi ** (5 / 2)) * a0 * e
 
@@ -406,8 +408,8 @@ def lobato_atomic_potential_2d(atomic_number: int, r_xy: torch.Tensor) -> torch.
     """
     device = r_xy.device
     vac_perm = 1 / 4 / torch.pi
-    a0 = 0.529  # Bohr radius, [Å]
-    e = 14.4  # electron charge, [V·Å]
+    a0 = bohr_radius()  # [Å]
+    e = electron_charge_volt_angstrom()  # [V·Å]
     kappa = 2 * vac_perm / a0 / e
 
     # get scattering factors
@@ -451,8 +453,8 @@ def lobato_atomic_potential_3d(atomic_number: int, r_xyz: torch.Tensor) -> torch
     """
     device = r_xyz.device
     vac_perm = 1 / 4 / torch.pi
-    a0 = 0.529  # Bohr radius, [Å]
-    e = 14.4  # electron charge, [V·Å]
+    a0 = bohr_radius()  # [Å]
+    e = electron_charge_volt_angstrom()  # [V·Å]
     kappa = 2 * vac_perm / a0 / e
     c1 = torch.pi**2 / kappa
 
@@ -675,8 +677,8 @@ def shtyrov_atomic_potential_3d_by_species(
     potential : torch.Tensor
         Atomic potential in units of V, same shape as `r_xyz`.
     """
-    a0 = 0.529  # Bohr radius, [Å]
-    e = 14.4  # electron charge, [V·Å]
+    a0 = bohr_radius()  # [Å]
+    e = electron_charge_volt_angstrom()  # [V·Å]
     c1 = 2 * torch.pi * e * a0
 
     P = params[species].to(r_xyz.device)  # shape (5, 2)
@@ -723,8 +725,8 @@ def peng_atomic_potential_3d(atomic_number: int, r_xyz: torch.Tensor) -> torch.T
     factors. Acta Crystallographica Section A, 52(2), 257–276.
     https://doi.org/10.1107/S0108767395014371
     """
-    a0 = 0.529  # Bohr radius, [Å]
-    e = 14.4  # electron charge, [V·Å]
+    a0 = bohr_radius()  # [Å]
+    e = electron_charge_volt_angstrom()  # [V·Å]
     c1 = 2 * torch.pi * e * a0
 
     coef = gemmi.Element(atomic_number).c4322

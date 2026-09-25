@@ -40,7 +40,13 @@ import warnings
 import torch
 
 from ..atom._atomic_potentials import kirkland_atomic_potential_3d_fourier
-from ..constants import energy_to_wavelength, interaction_parameter
+from ..constants import (
+    bohr_radius,
+    electron_charge_volt_angstrom,
+    energy_to_wavelength,
+    interaction_parameter,
+    rest_mass_energy,
+)
 from ._occupancy import (
     FULL_OCCUPANCY_POTENTIAL_V,
     occupancy_blur_halo_voxels,
@@ -97,7 +103,7 @@ _ICE_MFP_REL_ERR: dict[float, float] = {300.0: 11.0 / 395.0, 120.0: 33.0 / 203.0
 
 def _beta2(voltage_kv: float) -> float:
     """Squared electron speed over c, relativistically."""
-    gamma = 1.0 + voltage_kv / 510.99895
+    gamma = 1.0 + voltage_kv * 1.0e3 / rest_mass_energy()
     return 1.0 - 1.0 / gamma**2
 
 
@@ -330,9 +336,10 @@ _K_GRID = torch.linspace(1e-4, 40.0, 400_001, dtype=torch.float64)
 
 
 def _cross_section_prefactor(voltage_kv: float) -> float:
-    # sigma turns V*A into radians; 47.878 V*A^2 turns f (A) into the
-    # Fourier-space potential (V*A^3), as `PotentialBuilder` does.
-    return (interaction_parameter(voltage_kv) * 47.878) ** 2
+    # sigma turns V*A into radians; 2 pi a0 e (47.8776 V*A^2) turns f (A)
+    # into the Fourier-space potential (V*A^3), as `PotentialBuilder` does.
+    c1 = 2.0 * math.pi * bohr_radius() * electron_charge_volt_angstrom()
+    return (interaction_parameter(voltage_kv) * c1) ** 2
 
 
 def aperture_mfp_ice(aperture_mrad: float, voltage_kv: float) -> float:
@@ -353,7 +360,7 @@ def aperture_mfp_ice(aperture_mrad: float, voltage_kv: float) -> float:
         \frac{1}{\Lambda_{ap}} = n\,(\sigma\,c_1)^2
             \int_{k_{ap}}^{\infty} \overline{|f_{\rm H_2O}(k)|^2}\,2\pi k\,dk
 
-    with :math:`c_1 = 47.878` V A^2, :math:`k_{ap}` the aperture's spatial
+    with :math:`c_1 = 2\pi a_0 e = 47.8776` V A^2, :math:`k_{ap}` the aperture's spatial
     frequency, and the orientation-averaged molecular form factor including
     the O-H and H-H interference terms. Atoms are summed incoherently
     between molecules, which amorphous ice's structure factor permits beyond

@@ -38,6 +38,33 @@ def hc() -> float:
     return _sc.h * _sc.c / _sc.e * 1.0e10
 
 
+def bohr_radius() -> float:
+    """
+    Bohr radius.
+
+    Returns
+    -------
+    float
+        a0 in Å, from CODATA (~0.529177 Å).
+    """
+    return _sc.physical_constants["Bohr radius"][0] * 1.0e10
+
+
+def electron_charge_volt_angstrom() -> float:
+    """
+    Elementary charge in the potential units the scattering factors use.
+
+    Returns
+    -------
+    float
+        ``e / (4 pi eps0)`` in V·Å, from CODATA e and eps0 (~14.3996 V·Å).
+        Together with `bohr_radius` it gives the Mott-Bethe prefactor
+        ``2 pi a0 e`` (~47.8776 V·Å²) that turns an electron scattering
+        factor into a potential.
+    """
+    return _sc.e / (4.0 * _sc.pi * _sc.epsilon_0) * 1.0e10
+
+
 @overload
 def energy_to_wavelength(voltage: float) -> float: ...
 @overload

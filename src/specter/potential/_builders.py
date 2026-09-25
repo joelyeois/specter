@@ -27,6 +27,7 @@ from ..atom import (
     shtyrov_atomic_potential_3d_by_species,
     yukawa_shell_average,
 )
+from ..constants import bohr_radius, electron_charge_volt_angstrom
 from ..fft import fftconvolve, spatial_convolve2d_same, spatial_convolve3d_same
 from ..progress import track
 from specter.options import (
@@ -450,8 +451,8 @@ def build_potential_volume_analytic_scatter(
     potential_volume : torch.Tensor
         Potential volume, shape `grid_shape`, in units of V.
     """
-    a0 = 0.529  # Bohr radius, [Å]
-    e = 14.4  # electron charge, [V·Å]
+    a0 = bohr_radius()  # [Å]
+    e = electron_charge_volt_angstrom()  # [V·Å]
     c1 = 2 * torch.pi * e * a0
 
     if b_factors is not None:
@@ -641,8 +642,8 @@ def build_potential_volume_analytic_scatter_kirkland(
     h = dx / 2
     R = h * (6 / torch.pi) ** (1 / 3)
 
-    a0 = 0.529  # Bohr radius, [Å]
-    e = 14.4  # electron charge, [V·Å]
+    a0 = bohr_radius()  # [Å]
+    e = electron_charge_volt_angstrom()  # [V·Å]
     c1_yukawa = 2 * (torch.pi**2) * a0 * e
     c2_gauss = 2 * (torch.pi ** (5 / 2)) * a0 * e
 
@@ -717,8 +718,8 @@ def build_potential_volume_analytic_scatter_lobato(
     R = h * (6 / torch.pi) ** (1 / 3)
 
     vac_perm = 1 / 4 / torch.pi
-    a0 = 0.529  # Bohr radius, [Å]
-    e = 14.4  # electron charge, [V·Å]
+    a0 = bohr_radius()  # [Å]
+    e = electron_charge_volt_angstrom()  # [V·Å]
     kappa = 2 * vac_perm / a0 / e
     c1 = torch.pi**2 / kappa
 

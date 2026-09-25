@@ -26,7 +26,7 @@ import torch
 from scipy.optimize import curve_fit
 from scipy.stats import t as student_t
 
-from specter.aberrations._envelopes import b_envelope
+from specter.aberrations import b_envelope
 from specter.filters import butter
 
 #: Frequency bands in 1/Å, as (low, high): coarser than 33 Å, 33-12, 12-6.7,

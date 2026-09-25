@@ -43,10 +43,11 @@ def tilt_to_quaternions(
         Per-tilt tilt angles in degrees (``TILT`` column from the ``.aln``
         file or ``tilt_angles`` key from :func:`read_aretomo3_aln`).
     rot_deg : float
-        Tilt-axis angle in degrees measured from horizontal in the image
-        plane (``ROT`` column from the ``.aln`` file — constant across all
-        tilts for a given series).  0° = horizontal (≈ SPECTER ``'x'``),
-        ±90° = vertical (≈ SPECTER ``'y'``).
+        Tilt-axis angle in degrees (``ROT`` column of the ``.aln`` file,
+        constant across a series), measured counter-clockwise from the image
+        y axis as in IMOD: AreTomo3 rotates each image by ``ROT`` to bring
+        the tilt axis onto y before reconstructing. 0° is SPECTER's ``'y'``
+        axis, 90° its ``-x``.
 
     Returns
     -------
@@ -54,22 +55,24 @@ def tilt_to_quaternions(
         Unit quaternions in ``[x, y, z, w]`` order, one per tilt.  Pass
         directly as the ``quaternions`` argument of ``TiltSeriesGenerator``.
 
+    Notes
+    -----
+    The tilt angle enters with its own sign about that axis. Verified
+    against AreTomo3 2.2.2 itself: a bead phantom projected by
+    `TiltSeriesGenerator` with these quaternions and reconstructed by
+    AreTomo3 (``-Cmd 2``) from the same ``.aln`` returns the beads at their
+    positions in SPECTER's frame, without a mirror.
+
     Examples
     --------
-    >>> result = read_aretomo3_aln("TS_001.aln", pixel_size=1.35)
-    >>> quats = tilt_to_quaternions(result["tilt_angles"], result["tilt_axis"][0].item())
-    >>> tsg = TiltSeriesGenerator(
-    ...     volume=volume,
-    ...     quaternions=quats,
-    ...     translations=result["translations"],
-    ...     ...
-    ... )
+    >>> shifts = read_aretomo3_global_shifts("TS_001_AT_GL.csv")
+    >>> quats = tilt_to_quaternions(shifts["tilt_angles"], shifts["tilt_axis"][0].item())
     """
     theta = torch.deg2rad(torch.as_tensor(tilt_angles_deg, dtype=torch.float32))  # (N,)
     phi = torch.deg2rad(torch.tensor(rot_deg, dtype=torch.float32))  # scalar
 
-    # Unit tilt axis in the image plane: (cos ROT, sin ROT, 0)
-    axis = torch.stack([phi.cos(), phi.sin(), torch.tensor(0.0)], dim=0)  # (3,)
+    # Unit tilt axis in the image plane: ROT counter-clockwise from +y.
+    axis = torch.stack([-phi.sin(), phi.cos(), torch.tensor(0.0)], dim=0)  # (3,)
 
     rotvecs = theta.unsqueeze(-1) * axis.unsqueeze(0)  # (N, 3)
     return roma.rotvec_to_unitquat(rotvecs)  # (N, 4)
@@ -101,8 +104,11 @@ def read_aretomo3_aln(
 
     Notes
     -----
-    Shifts are stored in the ``.aln`` file in full-resolution pixels and
-    converted to Å by multiplying by ``pixel_size``.  The tilt-axis angle
+    Shifts are stored in the ``.aln`` file in full-resolution pixels.
+    AreTomo3 aligns a raw image by sampling it at ``R(ROT) u + (TX, TY)``
+    (``GCorrPatchShift``), so the raw image holds its content displaced by
+    ``+(TX, TY)``. `TiltSeriesGenerator` displaces content by ``-t``, so the
+    translations are ``-(TX, TY) * pixel_size``. The tilt-axis angle
     (``ROT`` column, constant per series) is used to build the quaternions
     via :func:`tilt_to_quaternions`.
 
@@ -138,7 +144,7 @@ def read_aretomo3_aln(
     shift_pixels = torch.tensor(data[:, 3:5], dtype=torch.float32)
     tilt_angles = torch.tensor(data[:, 9], dtype=torch.float32)
 
-    translations = shift_pixels * pixel_size
+    translations = -shift_pixels * pixel_size
     quaternions = tilt_to_quaternions(tilt_angles, float(tilt_axis))
 
     return quaternions, translations
@@ -188,17 +194,16 @@ def read_aretomo3_global_shifts(
     shifts are stored in ``CAlignParam``, so no binning correction is
     needed here.
 
-    **Sign convention**: AreTomo3 ``shift_x > 0`` applies
-    ``g(x) = f(x + sx)`` (Fourier phase shift), which moves image
-    content in the −x direction.  SPECTER's ``TiltSeriesGenerator``
-    with ``tx > 0`` (Å) samples the volume at ``x + tx / pixel_size``,
-    also moving projected content in the −x direction.  The conventions
-    therefore match directly:
+    **Sign convention**: the shifts are the ones AreTomo3 *corrects* with,
+    ``g(u) = f(u + s)``, so the raw image holds its content displaced by
+    ``+s``. `TiltSeriesGenerator` displaces content by ``-t``, so
+    reproducing the raw image takes the opposite sign (see
+    :func:`read_aretomo3_aln`, which was checked against AreTomo3 itself):
 
     .. code-block:: text
 
-        tx = shift_x × pixel_size
-        ty = shift_y × pixel_size
+        tx = -shift_x × pixel_size
+        ty = -shift_y × pixel_size
 
     **CSV column layout** (written by ``CAreTomoMain::mLogGlobalShift``)::
 
@@ -231,7 +236,7 @@ def read_aretomo3_global_shifts(
     shift_pixels = torch.tensor(data[:, 6:8], dtype=torch.float32)
 
     ps = pixel_size if pixel_size is not None else csv_pixel_size
-    translations = shift_pixels * ps
+    translations = -shift_pixels * ps
 
     return {
         "translations": translations,
@@ -315,7 +320,7 @@ def read_aretomo3_xf(
     sy = -(a12 * dx + a22 * dy)
 
     shift_pixels = torch.tensor(np.stack([sx, sy], axis=-1), dtype=torch.float32)
-    translations = shift_pixels * pixel_size
+    translations = -shift_pixels * pixel_size
 
     rotation_matrices = torch.tensor(
         np.stack([a11, a12, a21, a22], axis=-1).reshape(-1, 2, 2),

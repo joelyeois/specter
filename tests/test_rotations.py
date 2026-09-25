@@ -631,7 +631,12 @@ def test_volume_rotator_grid_matches_six_pass_reference(origin):
     rot = VolumeRotator(nz, ny, nx, origin=origin).double()
     theta = _random_theta(2, torch.float64)
     got = rot._build_grid(theta)
-    want = _six_pass_reference(theta, nz, ny, nx, origin)
+    # The rotator re-expresses the translation on each axis's own scale (see
+    # `_translation_per_axis`); the chain it collapses is fed the same.
+    per_axis = torch.cat(
+        [theta[..., :3], rot._translation_per_axis(theta[..., 3]).unsqueeze(-1)], -1
+    )
+    want = _six_pass_reference(per_axis, nz, ny, nx, origin)
     assert torch.allclose(got, want, atol=1e-13, rtol=0)
 
 

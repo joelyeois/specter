@@ -163,6 +163,14 @@ alternative to `angles=`, but `TiltSeriesConfig`/the CLI does not currently
 expose it, so matching a real tilt series' geometry means calling
 `TiltSeriesGenerator` directly rather than `specter simulate tiltseries`.
 
+The readers follow AreTomo3's own conventions, which were checked by
+reconstructing a SPECTER-projected bead phantom with AreTomo3 (`-Cmd 2`)
+from the same `.aln`. `ROT` is the tilt-axis angle measured
+counter-clockwise from the image y axis, as in IMOD, so `ROT = 0`
+corresponds to `tilt_axis = "y"`. `TX`/`TY` are the shifts AreTomo3
+applies to align a raw image, so the raw image holds its content displaced
+by `+(TX, TY)`, and the returned translations are `-(TX, TY)` in Å.
+
 ## Using it from Python instead of the CLI
 
 `run_tilt_series(config)` (`specter.pipelines`) is the same function the

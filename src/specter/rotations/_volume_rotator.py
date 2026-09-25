@@ -320,6 +320,28 @@ class VolumeRotator(L.LightningModule):
             dtype=dtype,
         ).view(1, 1, 3)
 
+    def _translation_per_axis(self, t: torch.Tensor) -> torch.Tensor:
+        """
+        Re-express a translation on each axis's own normalised scale.
+
+        `translations_angstrom_to_torch` normalises every component by the
+        volume's x width, and `build_affine_matrix` pre-rotates the in-plane
+        shift into the volume frame, which gives it a y and z component too.
+        ``grid_sample`` reads each component in units of that axis's own
+        half-width, so for a volume that is not a cube -- a tilt-series slab
+        -- the rotated z component was shrunk by ``(nx - 1) / (nz - 1)``: the
+        in-image shift perpendicular to the tilt axis came out as ``t cos^2``
+        of the tilt instead of ``t``. Rescaling y and z to x's scale restores
+        a lab-frame shift of ``-t`` at any rotation. A cube is returned
+        unchanged, bit for bit.
+        """
+        if self.nx == self.ny == self.nz:
+            return t
+        f = t.new_tensor(
+            [1.0, (self.nx - 1) / (self.ny - 1), (self.nx - 1) / (self.nz - 1)]
+        )
+        return t * f
+
     def _rotate_normalized_grid(
         self,
         grid: torch.Tensor,
@@ -354,6 +376,7 @@ class VolumeRotator(L.LightningModule):
         torch.Tensor
             Rotated normalized sampling coordinates, shape (B, N, 3).
         """
+        t = self._translation_per_axis(t)
         if (origin or self.origin) == "relion":
             grid = (grid - self.center_dc) * scale
             grid = grid @ R.transpose(1, 2)
@@ -381,14 +404,16 @@ class VolumeRotator(L.LightningModule):
         single broadcast write, instead of six full-size elementwise passes
         over a cached identity grid.
         """
+        t = self._translation_per_axis(theta[..., 3])  # (B, 3)
         if (origin or self.origin) == "relion":
+            if not (self.nx == self.ny == self.nz):
+                theta = torch.cat([theta[..., :3], t.unsqueeze(-1)], dim=-1)
             return _relion_rotation_grid(
                 theta, self.nz, self.ny, self.nx, self.align_corners
             )
         # PyTorch centre: ((g * s) @ R.T) / s + t  ==  g @ A + t
         scale = self._isotropic_scale(theta.device, theta.dtype).view(3)
         R = theta[..., :3]  # (B, 3, 3)
-        t = theta[..., 3]  # (B, 3)
         A = scale.view(1, 3, 1) * R.transpose(1, 2) * (1.0 / scale).view(1, 1, 3)
         composed = torch.cat([A.transpose(1, 2), t.unsqueeze(-1)], dim=-1)
         return affine_sampling_grid(

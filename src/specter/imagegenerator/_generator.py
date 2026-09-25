@@ -125,7 +125,6 @@ class ImageGeneratorFromCoordinates(ParticleGeneratorBase):
         conv_backend: ConvBackend = "fftconvolve",
         verbose: bool = True,
         coincidence_radius: float | torch.Tensor = 0.0,
-        mean_squared_displacement_per_dose: float = 0.0,
         periodic_potential: bool = False,
         bfactor: float | torch.Tensor | None = None,
     ):
@@ -174,11 +173,6 @@ class ImageGeneratorFromCoordinates(ParticleGeneratorBase):
         self.register_buffer("quaternions", quaternions)
         self.register_buffer("translations", translations)
         self.atomic_numbers = atomic_numbers
-        self.mean_squared_displacement_per_dose = mean_squared_displacement_per_dose
-        if mean_squared_displacement_per_dose != 0 and self.verbose:
-            logger.info(
-                f"Perturbing coordinates by: {mean_squared_displacement_per_dose}."
-            )
 
         self.potentialbuilder = PotentialBuilder(
             self.nxy,
@@ -268,15 +262,6 @@ class ImageGeneratorFromCoordinates(ParticleGeneratorBase):
         images : torch.Tensor
             Simulated images.
         """
-        if self.mean_squared_displacement_per_dose != 0.0:
-            msd = (
-                self.mean_squared_displacement_per_dose * self.dose_per_angstrom.mean()
-            )
-            self.sigma_angstrom = (msd / 3) ** 0.5
-            self.coordinates.add_(
-                torch.randn_like(self.coordinates) * self.sigma_angstrom
-            )
-
         coordinates = self.rotate(self.quaternions[idx], self.translations[idx])
 
         V = self.potentialbuilder(coordinates)

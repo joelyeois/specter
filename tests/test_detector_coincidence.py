@@ -206,7 +206,9 @@ def test_mtf_conserves_total_counts() -> None:
     assert blurred.std().item() < img.std().item()
 
 
-@pytest.mark.parametrize("preset", ["falcon4i_200kv", "falcon4i_300kv"])
+@pytest.mark.parametrize(
+    "preset", ["falcon4i_200kv", "falcon4i_300kv", "perfect_detector"]
+)
 def test_falcon4i_return1d_matches_2d_radial_profile(preset: str) -> None:
     """``return1d=True``'s k_data must run from 0 (DC) up to ~Nyquist, and
     its mtf values must match the 2D MTF sampled along the same radial cut.

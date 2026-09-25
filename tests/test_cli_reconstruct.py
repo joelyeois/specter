@@ -749,3 +749,42 @@ def test_collect_gives_up_once_every_worker_has_exited() -> None:
     procs = [_Proc(alive=False), _Proc(alive=False)]
 
     assert _collect_halfset_result(procs, q, poll_seconds=0.01) is None
+
+
+@pytest.mark.parametrize(
+    ("halfset", "project", "job_id", "rejected"),
+    [
+        # gold opens its Job once and gives each halfset worker one device.
+        ("gold", "p", None, False),
+        ("gold", None, None, False),
+        # A single halfset or "all" runs under DDP, which re-executes per rank,
+        # and a reconstruction is tracked whether or not project is set.
+        ("all", None, None, True),
+        ("A", "p", None, True),
+        ("all", "p", "J003", False),
+    ],
+)
+def test_multi_gpu_job_id_pin_follows_dispatch_shape(
+    halfset: str,
+    project: str | None,
+    job_id: str | None,
+    rejected: bool,
+    tmp_path: Path,
+) -> None:
+    """Only a DDP-dispatched reconstruction needs its job_id pinned."""
+    for name in ("a.cs", "b.mrc"):
+        (tmp_path / name).touch()
+    config = ReconstructionConfig(
+        cs_file=str(tmp_path / "a.cs"),
+        mrc_file=str(tmp_path / "b.mrc"),
+        dose_per_angstrom=1,
+        halfset=halfset,  # type: ignore[arg-type]
+        device="0,1",
+        project=project,
+        job_id=job_id,
+    )
+    if rejected:
+        with pytest.raises(ValueError, match="job_id"):
+            validate_config(config)
+    else:
+        validate_config(config)

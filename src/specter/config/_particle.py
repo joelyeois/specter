@@ -11,6 +11,7 @@ from ._paths import default_pdb_cache_dir
 from ._scalar_range import ScalarOrRange
 from specter.options import (
     ConvBackend,
+    DetectorModel,
     EwaldSphereSign,
     IceModel,
     NoiseModel,
@@ -171,15 +172,7 @@ class ParticleStackConfig:
     scattering_model: Literal["multislice", "firstborn", "projection", "ctf"] = setting(
         "multislice", help="Scattering model."
     )
-    detector_model: Literal[
-        "none",
-        "perfect",
-        "k3_300kv",
-        "k3_200kv",
-        "k2_300kv",
-        "falcon4i_300kv",
-        "falcon4i_200kv",
-    ] = setting("none", help="Detector model.")
+    detector_model: DetectorModel = setting("none", help="Detector model.")
 
     # --- Post-processing (basic) ---
     normalize_particles: bool = setting(

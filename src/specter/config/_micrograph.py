@@ -9,7 +9,7 @@ from typing import Literal
 
 from ._paths import default_pdb_cache_dir
 from ._scalar_range import ScalarOrRange
-from specter.options import IceModel, NoiseModel, ScatteringFactors
+from specter.options import DetectorModel, IceModel, NoiseModel, ScatteringFactors
 
 
 @dataclass
@@ -438,9 +438,7 @@ class MicrographConfig:
         ),
         check="positive",
     )  # duplicates rotated per batch; see crowding.py
-    detector_model: Literal["none", "perfect", "k3_300kv", "k3_200kv", "k2_300kv"] = (
-        setting("none", help="Detector model.")
-    )
+    detector_model: DetectorModel = setting("none", help="Detector model.")
 
     # --- Post-processing ---
     normalize_micrographs: bool = setting(

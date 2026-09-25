@@ -6,7 +6,13 @@ from dataclasses import dataclass
 
 from ._field import help_of, setting
 from typing import Literal
-from specter.options import IceModel, NoiseModel, ScatteringFactors, TiltAxis
+from specter.options import (
+    DetectorModel,
+    IceModel,
+    NoiseModel,
+    ScatteringFactors,
+    TiltAxis,
+)
 
 
 @dataclass
@@ -206,9 +212,7 @@ class TiltSeriesConfig:
             "artifacts under tilt."
         ),
     )
-    detector_model: Literal["none", "perfect", "k3_300kv", "k3_200kv", "k2_300kv"] = (
-        setting("none", help="Detector model.")
-    )
+    detector_model: DetectorModel = setting("none", help="Detector model.")
 
     # --- Post-processing ---
     normalize_tilt_series: bool = setting(

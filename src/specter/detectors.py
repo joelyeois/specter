@@ -288,8 +288,10 @@ def perfect_detector(
     k = torch.fft.fftfreq(n, d=dx, device=device)
 
     if return1d:
+        # k is native FFT order (DC at index 0), so DC-to-Nyquist is the
+        # first half, as in _falcon4i_mtf.
         omega = k / (1 / (2 * dx))
-        return k[n // 2 :], torch.sinc(omega / 2)[n // 2 :]
+        return k[: n // 2], torch.sinc(omega / 2)[: n // 2]
 
     kx, ky = torch.meshgrid(k, k, indexing="ij")
     k_rad = torch.sqrt(kx**2 + ky**2)

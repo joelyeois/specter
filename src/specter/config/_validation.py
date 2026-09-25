@@ -16,7 +16,8 @@ from typing import (
     get_type_hints,
 )
 
-from ._reconstruction import parse_cryosparc_ref
+from ._particle import ParticleStackConfig
+from ._reconstruction import ReconstructionConfig, parse_cryosparc_ref
 from ..devices import parse_device
 from ._scalar_range import parse_scalar_or_range
 
@@ -34,6 +35,34 @@ from ._scalar_range import parse_scalar_or_range
 # These checks run off the config alone, before a structure is fetched or a
 # voxel is written.
 # ---------------------------------------------------------------------------
+
+
+def _dispatches_via_ddp(config: Any) -> bool:
+    """
+    Whether a multi-GPU ``device`` makes this config's pipeline run under
+    Lightning DDP, which re-executes it once per rank.
+
+    Particle stacks always do. A reconstruction does for a single halfset or
+    ``"all"``; ``"gold"`` instead opens its `Job` once and hands each halfset
+    worker a single device. Every other pipeline either shards independent
+    work units over a worker pool itself or is single-device.
+    """
+    if isinstance(config, ParticleStackConfig):
+        return True
+    if isinstance(config, ReconstructionConfig):
+        return config.halfset != "gold"
+    return False
+
+
+def _is_tracked(config: Any) -> bool:
+    """Whether a run writes into a numbered `Job` directory."""
+    if isinstance(config, ReconstructionConfig):
+        # Every reconstruction is tracked; project only names the segment.
+        return True
+    return (
+        getattr(config, "project", None) is not None
+        or getattr(config, "job_id", None) is not None
+    )
 
 
 def _fail(field: str, value: Any, requirement: str) -> None:
@@ -381,30 +410,22 @@ def validate_config(config: Any) -> None:
         except ValueError as exc:
             _fail("device", device, str(exc).split(". ", 1)[-1].rstrip("."))
 
-    # Multi-GPU dispatch (ParticleStackConfig only -- tiltseries/micrograph
-    # are single-device) re-executes the whole pipeline once per rank (see
+    # Lightning DDP re-executes the whole pipeline once per rank (see
     # pipelines._common._tracked_output_dir's docstring), so auto-assigning
     # a job_id would mean every rank racing to scan the directory
-    # independently. Require it pinned explicitly whenever tracking and
-    # multi-GPU combine, so every rank's independent config-parse agrees on
+    # independently. Require it pinned explicitly whenever a tracked run
+    # goes through DDP, so every rank's independent config-parse agrees on
     # the same path as a pure string join, without touching the filesystem.
-    tracked = getattr(config, "project", None) is not None or (
-        getattr(config, "job_id", None) is not None
-    )
-    if (
-        device is not None
-        and "," in str(device)
-        and tracked
-        and getattr(config, "job_id", None) is None
-    ):
-        _fail(
-            "job_id",
-            None,
-            "must be pinned explicitly when combining project tracking "
-            'with a multi-GPU device string (e.g. "0,1"): auto-assigning '
-            "a job_id needs one process to decide, but multi-GPU dispatch "
-            "re-runs this pipeline once per rank independently",
-        )
+    if device is not None and "," in str(device) and _dispatches_via_ddp(config):
+        if _is_tracked(config) and getattr(config, "job_id", None) is None:
+            _fail(
+                "job_id",
+                None,
+                "must be pinned explicitly when combining job tracking "
+                'with a multi-GPU device string (e.g. "0,1"): auto-assigning '
+                "a job_id needs one process to decide, but multi-GPU dispatch "
+                "re-runs this pipeline once per rank independently",
+            )
 
     min_tilt = getattr(config, "min_tilt_angle", None)
     max_tilt = getattr(config, "max_tilt_angle", None)

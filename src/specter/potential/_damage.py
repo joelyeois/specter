@@ -45,7 +45,7 @@ from collections.abc import Sequence
 
 import torch
 
-from ..aberrations._envelopes import critical_exposure, dose_envelope
+from ..aberrations import critical_exposure, dose_envelope
 from ..fft import apply_radial_envelope_
 
 

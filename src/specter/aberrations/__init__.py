@@ -1,5 +1,11 @@
 from ._aberration import Aberration
-from ._envelopes import b_envelope, cc_envelope, cs_envelope, dose_envelope
+from ._envelopes import (
+    b_envelope,
+    cc_envelope,
+    critical_exposure,
+    cs_envelope,
+    dose_envelope,
+)
 from ._functions import (
     aberration_model_for_scattering,
     beamtilt,
@@ -17,6 +23,7 @@ __all__ = [
     "b_envelope",
     "beamtilt",
     "cc_envelope",
+    "critical_exposure",
     "cs",
     "cs_envelope",
     "defocus",
